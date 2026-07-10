@@ -5,6 +5,7 @@ import {
   buildGenerationRequestBody,
   evaluateBlindScoreThresholds,
   extractBlindReviewAgentPayload,
+  findSharedPursuitContinuityAnchors,
   hasChapterNinePursuitHandoff,
   isUsableBlindReviewPayload,
   readProseGenerationSse,
@@ -437,6 +438,50 @@ describe('novel prose quality recovery thresholds', () => {
     expect(hasChapterNinePursuitHandoff(tail, '江澈撞开包围最薄的一角。', ['江澈', '顾遥'])).toBe(true)
     expect(hasChapterNinePursuitHandoff(tail, '陌生人撞开包围最薄的一角。', ['江澈', '顾遥'])).toBe(false)
     expect(hasChapterNinePursuitHandoff(tail, '江澈走进一间安静的房子。', ['江澈', '顾遥'])).toBe(false)
+  })
+
+  test('recognizes a direct mechanized pursuit handoff without requiring one exact crisis synonym', () => {
+    const tail = '江哲扶住老陈，药铺废墟外的惨绿色迷雾里传来履带声，装甲车碾碎青石板。'
+    const opening = '履带继续碾过青石板。惨绿色迷雾中，装甲车逼近药铺废墟，江哲仍在替老陈压住伤势。'
+
+    expect({
+      anchors: findSharedPursuitContinuityAnchors(tail, opening),
+      handoff: hasChapterNinePursuitHandoff(tail, opening, ['江哲', '老陈']),
+    }).toEqual({
+      anchors: ['履带装甲车', '药铺废墟', '惨绿迷雾', '老陈'],
+      handoff: true,
+    })
+    expect(hasChapterNinePursuitHandoff(
+      '江哲看见远处一辆装甲车。',
+      '江哲在另一座城市看见装甲车。',
+      ['江哲'],
+    )).toBe(false)
+  })
+
+  test('counts one shared radiation cannon phrase as one semantic pursuit anchor', () => {
+    const tail = '江哲记得高维辐射炮的轮廓。'
+    const opening = '江哲再次看见高维辐射炮的轮廓。'
+
+    expect({
+      anchors: findSharedPursuitContinuityAnchors(tail, opening),
+      handoff: hasChapterNinePursuitHandoff(tail, opening, ['江哲']),
+    }).toEqual({
+      anchors: ['高维辐射武器'],
+      handoff: false,
+    })
+  })
+
+  test('does not treat shared static location and character anchors as pursuit pressure', () => {
+    const tail = '江哲陪老陈守着药铺。'
+    const opening = '江哲和老陈仍然留在药铺。'
+
+    expect({
+      anchors: findSharedPursuitContinuityAnchors(tail, opening),
+      handoff: hasChapterNinePursuitHandoff(tail, opening, ['江哲']),
+    }).toEqual({
+      anchors: ['药铺废墟', '老陈'],
+      handoff: false,
+    })
   })
 
   test('removes provider secrets and full prompt fields from validation reports', () => {

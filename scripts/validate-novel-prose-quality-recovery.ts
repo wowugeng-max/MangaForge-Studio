@@ -243,11 +243,36 @@ export function extractBlindReviewAgentPayload(result: any) {
   return getNovelPayload(result)
 }
 
+const PURSUIT_CONTINUITY_ANCHOR_GROUPS = [
+  { label: '履带装甲车', terms: ['履带', '装甲车'] },
+  { label: '高维辐射武器', terms: ['高维辐射', '辐射炮'] },
+  { label: '复眼标记', terms: ['复眼'] },
+  { label: '黑甲卫队', terms: ['黑甲卫队'] },
+  { label: '药铺废墟', terms: ['药铺', '药铺废墟'] },
+  { label: '惨绿迷雾', terms: ['迷雾', '惨绿迷雾'] },
+  { label: '老陈', terms: ['老陈'] },
+] as const
+
+const PURSUIT_PRESSURE_ANCHORS = new Set<string>(['履带装甲车', '高维辐射武器'])
+
+export function findSharedPursuitContinuityAnchors(tail: string, opening: string) {
+  return PURSUIT_CONTINUITY_ANCHOR_GROUPS
+    .filter(group => (
+      group.terms.some(term => tail.includes(term))
+      && group.terms.some(term => opening.includes(term))
+    ))
+    .map(group => group.label)
+}
+
 export function hasChapterNinePursuitHandoff(tail: string, opening: string, names: string[]) {
   const tailNames = names.map(name => String(name || '').trim()).filter(name => name && tail.includes(name))
   const sharesCharacter = tailNames.some(name => opening.includes(name))
   const crisisPattern = /追捕|包围|合围|封锁|围住|退路|追兵/
-  return sharesCharacter && crisisPattern.test(tail) && crisisPattern.test(opening)
+  const explicitCrisisHandoff = crisisPattern.test(tail) && crisisPattern.test(opening)
+  const sharedAnchors = findSharedPursuitContinuityAnchors(tail, opening)
+  const concretePursuitHandoff = sharedAnchors.length >= 2
+    && sharedAnchors.some(anchor => PURSUIT_PRESSURE_ANCHORS.has(anchor))
+  return sharesCharacter && (explicitCrisisHandoff || concretePursuitHandoff)
 }
 
 const SENSITIVE_REPORT_KEY = /^(?:api[_-]?key|authorization|provider[_-]?secret|client[_-]?secret|access[_-]?token|prompt|full[_-]?prompt|task)$/i
@@ -700,6 +725,7 @@ export async function runNovelProseQualityRecoveryValidation() {
       chapter_9_handoff: {
         passed: handoffPassed,
         shared_character_candidates: characterNames.filter(name => chapter9Tail.includes(name) && chapter10Opening.includes(name)),
+        shared_continuity_anchors: findSharedPursuitContinuityAnchors(chapter9Tail, chapter10Opening),
       },
     }
     requireCondition(hardChecks.length === 0, '第 10 章仍有确定性硬失败')
