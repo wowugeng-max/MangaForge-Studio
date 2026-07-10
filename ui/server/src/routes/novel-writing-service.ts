@@ -44952,7 +44952,16 @@ export function createNovelWritingService(ctx: {
         config_snapshot: configSnapshot,
       }
     }
-    const qualityThreshold = resolveEffectiveQualityThreshold(options.quality_threshold, contextPackage)
+    const configuredQualityThreshold = [
+      options.quality_threshold,
+      options.qualityThreshold,
+      project?.reference_config?.quality_gate?.min_score,
+      project?.reference_config?.quality_gate?.minScore,
+      78,
+    ]
+      .map(value => Number(value))
+      .find(value => Number.isFinite(value) && value > 0) || 78
+    const qualityThreshold = resolveEffectiveQualityThreshold(configuredQualityThreshold, contextPackage)
     const qualityGateProject = qualityThreshold > 0
       ? {
           ...project,

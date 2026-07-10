@@ -17,7 +17,10 @@ export type ProseWordTargetEvaluation = {
   too_long: boolean
   passed: boolean
   soft_cap?: boolean
+  soft_floor?: boolean
 }
+
+const DEFAULT_WORD_TARGET_TOLERANCE_RATIO = 0.05
 
 const COMPLETE_CONTRACTION_FINISH_REASONS = new Set([
   'stop',
@@ -218,17 +221,34 @@ export function isWithinProseWordTargetSoftCap(evaluation: ProseWordTargetEvalua
   const max = Number(evaluation?.max || 0)
   const actual = Number(evaluation?.actual || 0)
   if (!evaluation?.too_long || max <= 0 || actual <= max) return false
-  const toleranceRatio = Number.isFinite(Number(options.tolerance_ratio)) ? Number(options.tolerance_ratio) : 0.01
+  const toleranceRatio = Number.isFinite(Number(options.tolerance_ratio)) ? Number(options.tolerance_ratio) : DEFAULT_WORD_TARGET_TOLERANCE_RATIO
   const minimumTolerance = Number.isFinite(Number(options.minimum_tolerance)) ? Number(options.minimum_tolerance) : 20
   const tolerance = Math.max(minimumTolerance, Math.ceil(max * toleranceRatio))
   return actual <= max + tolerance
 }
 
+export function isWithinProseWordTargetSoftFloor(evaluation: ProseWordTargetEvaluation, options: any = {}) {
+  const min = Number(evaluation?.min || 0)
+  const actual = Number(evaluation?.actual || 0)
+  if (!evaluation?.too_short || min <= 0 || actual >= min) return false
+  const toleranceRatio = Number.isFinite(Number(options.tolerance_ratio)) ? Number(options.tolerance_ratio) : DEFAULT_WORD_TARGET_TOLERANCE_RATIO
+  const minimumTolerance = Number.isFinite(Number(options.minimum_tolerance)) ? Number(options.minimum_tolerance) : 20
+  const tolerance = Math.max(minimumTolerance, Math.ceil(min * toleranceRatio))
+  return actual >= min - tolerance
+}
+
 export function applyProseWordTargetSoftCap(evaluation: ProseWordTargetEvaluation) {
-  const softCap = isWithinProseWordTargetSoftCap(evaluation)
+  const softCeiling = isWithinProseWordTargetSoftCap(evaluation)
+  const softFloor = isWithinProseWordTargetSoftFloor(evaluation)
+  const softCap = softCeiling || softFloor
   return {
     ...evaluation,
-    ...(softCap ? { too_long: false, passed: true } : {}),
+    ...(softCap ? {
+      too_short: softFloor ? false : evaluation.too_short,
+      too_long: softCeiling ? false : evaluation.too_long,
+      passed: true,
+    } : {}),
     soft_cap: softCap,
+    soft_floor: softFloor,
   }
 }

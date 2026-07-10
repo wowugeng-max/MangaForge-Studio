@@ -172,4 +172,37 @@ describe('novel writing word target utilities', () => {
       soft_cap: false,
     })
   })
+
+  test('uses a symmetric five-percent compatibility band around the configured range', () => {
+    const target = resolveChapterWordTarget({}, { chapter_no: 1 }, {})
+
+    expect(applyProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(3040), target))).toMatchObject({
+      actual: 3040,
+      too_short: false,
+      passed: true,
+      soft_cap: true,
+      soft_floor: true,
+    })
+    expect(applyProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(3039), target))).toMatchObject({
+      actual: 3039,
+      too_short: true,
+      passed: false,
+      soft_cap: false,
+      soft_floor: false,
+    })
+    expect(applyProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(5460), target))).toMatchObject({
+      actual: 5460,
+      too_long: false,
+      passed: true,
+      soft_cap: true,
+      soft_floor: false,
+    })
+    expect(applyProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(5461), target))).toMatchObject({
+      actual: 5461,
+      too_long: true,
+      passed: false,
+      soft_cap: false,
+      soft_floor: false,
+    })
+  })
 })

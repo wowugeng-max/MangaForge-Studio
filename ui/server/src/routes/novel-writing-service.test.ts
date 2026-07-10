@@ -320,6 +320,41 @@ test('does not store chapter text or story state after two failed prose revision
   expect(harness.modelCalls.revision).toBe(2)
 })
 
+test('uses the project quality threshold when the request omits one', async () => {
+  const harness = await createProsePipelineHarness({
+    reviewPayloads: [{
+      score: 77,
+      publishable: true,
+      dimensions: proseQualityScores,
+      findings: [],
+    }],
+  })
+
+  const error = await harness.service.generateChapterForGroup(
+    harness.workspace,
+    harness.project.id,
+    harness.chapter.id,
+    {
+      model_id: 217,
+      target_word_count: 1000,
+      auto_repair_quality_gate: true,
+    },
+  ).then(() => null, (caught: any) => caught)
+
+  expect(error).toMatchObject({
+    code: 'PROSE_QUALITY_GATE_BLOCKED',
+    quality_loop: {
+      decision: {
+        passed: false,
+        score: 77,
+        min_score: 78,
+      },
+    },
+  })
+  expect(harness.storeCalls).toBe(0)
+  expect(harness.storyStateCalls).toBe(0)
+})
+
 test('keeps prose recheck exceptions failed despite a generic quality approval', async () => {
   const revisedText = buildPipelineProse(
     '江澈撞断路灯，第一排追兵被飞石逼离封锁位。',
@@ -54899,7 +54934,8 @@ describe('chapter context word target source guards', () => {
     expect(preStoreStart).toBeGreaterThan(groupStart)
     expect(finalStart).toBeGreaterThan(preStoreStart)
     expect(gateBlock).toContain('const qualityGateProject =')
-    expect(gateBlock).toContain('resolveEffectiveQualityThreshold(options.quality_threshold, contextPackage)')
+    expect(gateBlock).toContain('project?.reference_config?.quality_gate?.min_score')
+    expect(gateBlock).toContain('const qualityThreshold = resolveEffectiveQualityThreshold(configuredQualityThreshold, contextPackage)')
     expect(gateBlock).toContain('getQualityGateDecision(qualityGateProject')
   })
 
