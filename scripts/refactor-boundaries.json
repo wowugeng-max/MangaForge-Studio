@@ -64,6 +64,7 @@
         "ui/server/src/routes/novel-chapter-context-routes.ts",
         "ui/server/src/routes/novel-project-bible-routes.ts",
         "ui/server/src/routes/novel-writing-delivery-risk-contracts.test.ts",
+        "ui/server/src/routes/novel-writing-service.quality-wiring.test.ts",
         "ui/server/src/routes/novel-writing-service.test.ts"
       ]
     }
