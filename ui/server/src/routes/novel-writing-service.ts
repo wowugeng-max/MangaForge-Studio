@@ -1060,6 +1060,14 @@ function buildRequiredProseCoreSections(
   const nextBatchBrief = target?.next_batch_brief || target?.nextBatchBrief || context?.next_batch_brief || context?.nextBatchBrief || {}
   const deliveryRisk = target?.delivery_risk_carry_over || target?.deliveryRiskCarryOver || context?.delivery_risk_carry_over || context?.deliveryRiskCarryOver || {}
   const millionWordRunway = target?.million_word_runway || target?.millionWordRunway || context?.million_word_runway || context?.millionWordRunway || {}
+  const nextBatchChapters = asArray(nextBatchBrief?.chapters).map((chapter: any) => ({
+    chapter_no: chapter?.chapter_no ?? chapter?.chapterNo,
+    title: chapter?.title,
+    chapter_task: chapter?.chapter_task || chapter?.chapterTask,
+    conflict: chapter?.conflict,
+    ending_hook: chapter?.ending_hook || chapter?.endingHook,
+    mainline_progress: chapter?.mainline_progress || chapter?.mainlineProgress,
+  }))
   const corePromise = {
     reader_promise: coreRadar?.reader_promise
       || coreRadar?.readerPromise
@@ -1110,14 +1118,7 @@ function buildRequiredProseCoreSections(
       batch_goal: nextBatchBrief?.batch_goal || nextBatchBrief?.batchGoal,
       current_chapter_role: nextBatchBrief?.current_chapter_role || nextBatchBrief?.currentChapterRole,
       must_deliver: asArray(nextBatchBrief?.must_deliver || nextBatchBrief?.mustDeliver),
-      chapters: asArray(nextBatchBrief?.chapters).map((chapter: any) => ({
-        chapter_no: chapter?.chapter_no ?? chapter?.chapterNo,
-        title: chapter?.title,
-        chapter_task: chapter?.chapter_task || chapter?.chapterTask,
-        conflict: chapter?.conflict,
-        ending_hook: chapter?.ending_hook || chapter?.endingHook,
-        mainline_progress: chapter?.mainline_progress || chapter?.mainlineProgress,
-      })),
+      ...(nextBatchChapters.length ? { chapters: nextBatchChapters } : {}),
     },
     request_delivery_risk: {
       quality_focus: asArray(deliveryRisk?.quality_focus || deliveryRisk?.qualityFocus),

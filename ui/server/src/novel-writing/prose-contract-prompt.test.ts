@@ -242,6 +242,23 @@ describe('prose contract prompt compiler', () => {
     expect(compiled.prompt).not.toContain('UNSAFE_NESTED_DEBUG_PAYLOAD')
   })
 
+  test('production prompt does not add an empty safe-batch chapter container', () => {
+    const contract = buildProseGenerationContract({
+      chapter_target: {
+        chapter_no: 10,
+        title: '镇门危局',
+        goal: '突破地面火力网',
+        scene_cards: [{ scene_no: 1, goal: '夺取突破口' }],
+      },
+      preflight: { ready: true, strict_ready: true, checks: [] },
+      oh_story_director: { readiness: 'ready', selected_contracts: [] },
+    })
+
+    const compiled = compileParagraphProseContext({ title: '怪谈世界' }, contract)
+
+    expect(compiled.prompt).not.toContain('"chapters":[]')
+  })
+
   test('loads no more than four director-selected risk contracts', () => {
     const contractSections = Array.from({ length: 6 }, (_, index) => ({
       key: `risk_${index + 1}`,
