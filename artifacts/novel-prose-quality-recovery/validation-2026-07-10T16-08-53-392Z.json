@@ -1,0 +1,701 @@
+{
+  "status": "passed",
+  "started_at": "2026-07-10T16:08:53.392Z",
+  "project_id": 1,
+  "model_id": 217,
+  "workspace": "/Users/ruiyaosong/MangaForge-Studio/workspace",
+  "runtime": {
+    "model_name": "gemini-3.5-flash",
+    "model_display_name": "gemini-3.5-flash",
+    "provider": "gemini",
+    "key_id": 5,
+    "proxy_url": "http://localhost:7860/v1"
+  },
+  "history_hashes": {
+    "before": [
+      {
+        "chapter_no": 1,
+        "sha256": "6b94051e6d80f707f3002d3c4b43252dbd47d44aabbe41b51b3e906c74e23aa7",
+        "chars": 3570
+      },
+      {
+        "chapter_no": 2,
+        "sha256": "fa313aa773b00998580d78835055432d935914b51bbefc2a784810240c50f886",
+        "chars": 5437
+      },
+      {
+        "chapter_no": 3,
+        "sha256": "5ec8ccc1c9e7902ad51677f6327b29fea8f2ec9237e2070068659c1e84211e8e",
+        "chars": 4729
+      },
+      {
+        "chapter_no": 4,
+        "sha256": "ffd1463c99fe27b844151f0fe878c95e56f44a5f19384f22a1c41ab6ff1bcc85",
+        "chars": 3824
+      },
+      {
+        "chapter_no": 5,
+        "sha256": "78567e2d46c1928079e4b12b0cd64fff286682167ceb9bd23cb261bc1a6ab3aa",
+        "chars": 3233
+      },
+      {
+        "chapter_no": 6,
+        "sha256": "633b7b56f473dadaf5fc452621e858d2bb74128067e79bc1157b6e2b5dad812f",
+        "chars": 4126
+      },
+      {
+        "chapter_no": 7,
+        "sha256": "15c43edfee275e2175109d26b2ef106a82bcdbf08be6c6b0f916d24b9174ff79",
+        "chars": 4125
+      },
+      {
+        "chapter_no": 8,
+        "sha256": "1697ce726634b80a37b76823d227e0cdd3d304d49a9b559187e0a91dce7c795a",
+        "chars": 4071
+      },
+      {
+        "chapter_no": 9,
+        "sha256": "aef02500f04af99d98dca31549f1dd4c433ff455baf6c03af378e976e62c9aaa",
+        "chars": 3865
+      }
+    ],
+    "after": [
+      {
+        "chapter_no": 1,
+        "sha256": "6b94051e6d80f707f3002d3c4b43252dbd47d44aabbe41b51b3e906c74e23aa7",
+        "chars": 3570
+      },
+      {
+        "chapter_no": 2,
+        "sha256": "fa313aa773b00998580d78835055432d935914b51bbefc2a784810240c50f886",
+        "chars": 5437
+      },
+      {
+        "chapter_no": 3,
+        "sha256": "5ec8ccc1c9e7902ad51677f6327b29fea8f2ec9237e2070068659c1e84211e8e",
+        "chars": 4729
+      },
+      {
+        "chapter_no": 4,
+        "sha256": "ffd1463c99fe27b844151f0fe878c95e56f44a5f19384f22a1c41ab6ff1bcc85",
+        "chars": 3824
+      },
+      {
+        "chapter_no": 5,
+        "sha256": "78567e2d46c1928079e4b12b0cd64fff286682167ceb9bd23cb261bc1a6ab3aa",
+        "chars": 3233
+      },
+      {
+        "chapter_no": 6,
+        "sha256": "633b7b56f473dadaf5fc452621e858d2bb74128067e79bc1157b6e2b5dad812f",
+        "chars": 4126
+      },
+      {
+        "chapter_no": 7,
+        "sha256": "15c43edfee275e2175109d26b2ef106a82bcdbf08be6c6b0f916d24b9174ff79",
+        "chars": 4125
+      },
+      {
+        "chapter_no": 8,
+        "sha256": "1697ce726634b80a37b76823d227e0cdd3d304d49a9b559187e0a91dce7c795a",
+        "chars": 4071
+      },
+      {
+        "chapter_no": 9,
+        "sha256": "aef02500f04af99d98dca31549f1dd4c433ff455baf6c03af378e976e62c9aaa",
+        "chars": 3865
+      }
+    ],
+    "unchanged": true
+  },
+  "backup_dir": "/private/tmp/mangaforge-prose-validation-backups/2026-07-10T16-08-53-392Z",
+  "generation": {
+    "chapter": {
+      "id": 10,
+      "chapter_no": 10,
+      "title": "镇门危局",
+      "chars": 5121
+    },
+    "prompt_diagnostics": {
+      "prompt_chars": 11198,
+      "required_chars": 8423,
+      "selected_contract_keys": [
+        "story_power",
+        "character_behavior",
+        "conflict_structure",
+        "state_tracking"
+      ],
+      "omitted_contract_keys": [
+        "platform_rubric",
+        "content_rubric",
+        "target_reader",
+        "genre_positioning",
+        "plot_special_topics",
+        "upgrade_rhythm",
+        "story_loop",
+        "emotional_arc",
+        "chapter_hook",
+        "paragraph_hook",
+        "suspense",
+        "reversal",
+        "showdown",
+        "bridge_unit",
+        "plot_framework",
+        "prose_craft",
+        "punctuation_tone",
+        "quality_audit",
+        "dialogue",
+        "plot_dynamics",
+        "continuity_heat",
+        "character_relation",
+        "asset_linkage",
+        "intent_confirmation",
+        "benchmark_recall",
+        "style_boundary",
+        "information_flow",
+        "expectation_threshold",
+        "delivery_risk",
+        "longform_structure",
+        "fact_setting_safety"
+      ],
+      "section_chars": {
+        "chapter": 238,
+        "handoff": 411,
+        "scene-causality": 2739,
+        "gate": 1018,
+        "core-promise": 3542,
+        "safety-style": 167,
+        "reference-migration-boundary": 62,
+        "output": 183,
+        "contract:story_power:compact": 681,
+        "contract:character_behavior:compact": 504,
+        "contract:conflict_structure:compact": 497,
+        "contract:state_tracking:compact": 1089
+      },
+      "downgrades": [],
+      "budget_chars": 48000,
+      "model_usage": {
+        "input_tokens": 11568,
+        "output_tokens": 13099,
+        "total_tokens": 24667
+      }
+    },
+    "quality_loop": {
+      "rounds": [
+        {
+          "round": 1,
+          "accepted": true,
+          "reason": ""
+        }
+      ],
+      "decision": {
+        "passed": true,
+        "approvable": true,
+        "score": 92,
+        "min_score": 85,
+        "hard_failures": [],
+        "advisory_failures": [
+          "typo_zhen_er_yu_long：将“震耳犹聋”修改为“震耳欲聋”。",
+          "power_system_consistency：建议将“太极暗劲”修改为更符合超人模板或纯粹物理/生物力场控制的描述，例如“精妙的力学卸劲”或“生物力场震荡”，以保持完美超人模板的纯粹性，避免混入传统武侠/国术设定。"
+        ]
+      }
+    },
+    "post_draft_director": {
+      "stage": "post_draft",
+      "readiness": "ready",
+      "acceptance": "accepted_with_carryover",
+      "primary_action": {
+        "key": "continue_next_chapter",
+        "label": "Continue next chapter",
+        "mode": "manual"
+      },
+      "blocking_summary": "Accepted with next-chapter carry-over.",
+      "required_repairs": [],
+      "deferred_repairs": [
+        {
+          "key": "delivery_risk",
+          "category": "quality_revision_required",
+          "label": "Delivery risk carry-over",
+          "detail": "Delivery risk remains for next chapter.",
+          "blocking": false
+        }
+      ],
+      "selected_contracts": [],
+      "suppressed_contracts": [],
+      "prompt_budget_plan": {
+        "full": [],
+        "compact": [],
+        "reference": [],
+        "omit": []
+      },
+      "evidence": [
+        {
+          "key": "deslop_gate",
+          "status": "ready",
+          "source": "quality.deslop_gate_diagnostics"
+        },
+        {
+          "key": "story_power",
+          "status": "ready",
+          "source": "quality.story_power_sync"
+        },
+        {
+          "key": "delivery_risk",
+          "status": "warn",
+          "source": "quality.delivery_risk_receipt_sync"
+        },
+        {
+          "key": "revision_receipts",
+          "status": "resolved",
+          "source": "receipts.revision_receipts",
+          "detail": "10 resolved revision receipts"
+        }
+      ],
+      "blocking_findings": [],
+      "carryover_findings": [
+        {
+          "key": "delivery_risk",
+          "category": "quality_revision_required",
+          "label": "Delivery risk carry-over",
+          "detail": "Delivery risk remains for next chapter.",
+          "blocking": false
+        }
+      ],
+      "resolved_findings": [
+        {
+          "key": "revision_receipt",
+          "category": "quality_revision_required",
+          "label": "Revision receipt resolved",
+          "detail": "他自以为凭借着超凡的感官与力量",
+          "blocking": false
+        },
+        {
+          "key": "revision_receipt",
+          "category": "quality_revision_required",
+          "label": "Revision receipt resolved",
+          "detail": "这股力量直接将这一方天地的空间规则剪碎、重组，化作绝对闭合的牢笼。",
+          "blocking": false
+        },
+        {
+          "key": "revision_receipt",
+          "category": "quality_revision_required",
+          "label": "Revision receipt resolved",
+          "detail": "这些痕迹由极其锋利的兵刃刻成，在青石上留下一行行极其细微的标记，绝非天然风化。",
+          "blocking": false
+        },
+        {
+          "key": "revision_receipt",
+          "category": "quality_revision_required",
+          "label": "Revision receipt resolved",
+          "detail": "他们的种种部署，分明是在将他往这条通道里“驱赶”。",
+          "blocking": false
+        },
+        {
+          "key": "revision_receipt",
+          "category": "quality_revision_required",
+          "label": "Revision receipt resolved",
+          "detail": "这股力量直接将这一方天地的空间规则剪碎、重组，化作绝对闭合的牢笼。",
+          "blocking": false
+        },
+        {
+          "key": "revision_receipt",
+          "category": "quality_revision_required",
+          "label": "Revision receipt resolved",
+          "detail": "他自以为凭借着超凡的感官与力量",
+          "blocking": false
+        },
+        {
+          "key": "revision_receipt",
+          "category": "quality_revision_required",
+          "label": "Revision receipt resolved",
+          "detail": "这股力量直接将这一方天地的空间规则剪碎、重组，化作绝对闭合的牢笼。",
+          "blocking": false
+        },
+        {
+          "key": "revision_receipt",
+          "category": "quality_revision_required",
+          "label": "Revision receipt resolved",
+          "detail": "这些痕迹由极其锋利的兵刃刻成，在青石上留下一行行极其细微的标记，绝非天然风化。",
+          "blocking": false
+        },
+        {
+          "key": "revision_receipt",
+          "category": "quality_revision_required",
+          "label": "Revision receipt resolved",
+          "detail": "他们的种种部署，分明是在将他往这条通道里“驱赶”。",
+          "blocking": false
+        },
+        {
+          "key": "revision_receipt",
+          "category": "quality_revision_required",
+          "label": "Revision receipt resolved",
+          "detail": "这股力量直接将这一方天地的空间规则剪碎、重组，化作绝对闭合的牢笼。",
+          "blocking": false
+        }
+      ]
+    }
+  },
+  "deterministic_validation": {
+    "passed": true,
+    "hard_failure_count": 0,
+    "hard_failures": [],
+    "cleanup": {
+      "risk_count": 45,
+      "categories": [
+        {
+          "type": "model_degeneration",
+          "label": "模型退化硬伤",
+          "count": 0,
+          "has_blocking": false
+        },
+        {
+          "type": "prose_meta",
+          "label": "工程词泄露",
+          "count": 0,
+          "has_blocking": false
+        },
+        {
+          "type": "prose_format",
+          "label": "正文格式硬伤",
+          "count": 0,
+          "has_blocking": false
+        },
+        {
+          "type": "filler",
+          "label": "回忆复述水字数",
+          "count": 0,
+          "has_blocking": false
+        },
+        {
+          "type": "payoff_density",
+          "label": "回报密度不足",
+          "count": 1,
+          "has_blocking": false
+        },
+        {
+          "type": "deslop",
+          "label": "去AI味硬伤",
+          "count": 36,
+          "has_blocking": false
+        },
+        {
+          "type": "punctuation_tone",
+          "label": "语气标点硬伤",
+          "count": 8,
+          "has_blocking": false
+        }
+      ]
+    },
+    "word_target": {
+      "actual": 5121,
+      "target": 4200,
+      "min": 3200,
+      "max": 5200,
+      "deficit": 0,
+      "too_short": false,
+      "too_long": false,
+      "passed": true,
+      "soft_cap": false
+    },
+    "chapter_9_handoff": {
+      "passed": true,
+      "shared_character_candidates": [
+        "江哲"
+      ],
+      "shared_continuity_anchors": [
+        "履带装甲车",
+        "高维辐射武器",
+        "复眼标记",
+        "药铺废墟",
+        "惨绿迷雾",
+        "老陈"
+      ]
+    }
+  },
+  "blind_reviews": [
+    {
+      "order": [
+        10,
+        1,
+        3,
+        2
+      ],
+      "model_name": "",
+      "usage": {
+        "input_tokens": 16651,
+        "output_tokens": 4873,
+        "total_tokens": 21524
+      },
+      "samples": [
+        {
+          "label": "A",
+          "chapter_no": 10,
+          "scores": {
+            "opening_hook": 9,
+            "causal_progress": 9,
+            "protagonist_agency": 9,
+            "conflict_payoff": 8,
+            "continuity": 9,
+            "prose_naturalness": 9,
+            "ending_hook": 9
+          },
+          "evidence": {
+            "opening_hook": "“嘎吱——嘎吱——”沉重的合金履带无情地碾碎了青石镇历经百年的石板路",
+            "causal_progress": "如果只是为了抹杀，在装甲车合围的瞬间，高维辐射炮就已经把这片废墟夷为平地了。",
+            "protagonist_agency": "他必须用最符合这个世界逻辑、却又足够暴力的方式，强行撕开一条生路。",
+            "conflict_payoff": "每一次轻点，他的脚掌都会爆发出一股极其精妙的太极暗劲，将下坠的千钧重力无声化作热能与震动",
+            "continuity": "残篇背面，吸收了黑衣人血液后浮现出的猩红复眼印记，此刻在密室微弱的白光照耀下，显得格外刺眼",
+            "prose_naturalness": "这股能量如同滚烫的岩浆流过冻土，所过之处，那些黑色符文发出了只有精神层面才能听到的尖锐哀嚎。",
+            "ending_hook": "那口枯井，根本不是什么避难所。那是主亲自为他准备的，最完美的捕获陷阱。"
+          },
+          "publishable": true,
+          "materially_below_publishable_baseline": false
+        },
+        {
+          "label": "B",
+          "chapter_no": 1,
+          "scores": {
+            "opening_hook": 9,
+            "causal_progress": 9,
+            "protagonist_agency": 10,
+            "conflict_payoff": 9,
+            "continuity": 9,
+            "prose_naturalness": 9,
+            "ending_hook": 9
+          },
+          "evidence": {
+            "opening_hook": "骨密度：极高（检测仪器超出阈值）",
+            "causal_progress": "而现在，在这个所谓的怪谈世界里，似乎不需要那么克制了。",
+            "protagonist_agency": "在小林惊恐万状的注视下，他直接转过身，双眼直直地迎向了后车窗外那片无尽的惨绿浓雾。",
+            "conflict_payoff": "那道足以将一尊邪物彻底抹杀的黑雷，在触碰到江哲黑色短发的刹那，却像是普通的水花撞上了礁石。",
+            "continuity": "作为上古超凡基因的终极觉醒者，他拥有完美的超人模板。",
+            "prose_naturalness": "惨绿色的浓雾毫无预兆地从柏油路面下渗出来，像是一头巨兽吐出的粘稠胃液",
+            "ending_hook": "距离公交车彻底崩溃，只剩下最后三分钟。"
+          },
+          "publishable": true,
+          "materially_below_publishable_baseline": false
+        },
+        {
+          "label": "C",
+          "chapter_no": 3,
+          "scores": {
+            "opening_hook": 9,
+            "causal_progress": 9,
+            "protagonist_agency": 9,
+            "conflict_payoff": 10,
+            "continuity": 10,
+            "prose_naturalness": 9,
+            "ending_hook": 9
+          },
+          "evidence": {
+            "opening_hook": "不要相信完美觉醒。我们以为的超人力量，只是外神为了降临而准备的、最完美的容器。",
+            "causal_progress": "只要他收集到足够的秩序核心，就能彻底重塑牢笼规则，将体内的完美超人基因彻底驯服",
+            "protagonist_agency": "他需要验证，自己这具完美超人的躯壳，在面对怪谈世界的规则抹杀时，究竟能支撑多久。",
+            "conflict_payoff": "局长，那我们现在该怎么办？要不要通过限时提示联系他？",
+            "continuity": "原本空白的纸张背面，那行猩红的数据竟然在微微闪烁，随后发生了改变。",
+            "prose_naturalness": "黑色符文疯狂往毛孔里钻。一股死寂的力量试图剥夺细胞中的生命活性。",
+            "ending_hook": "小心那些戴着单片眼镜的人。他们不是在通关，他们是在为你举行献祭的仪式。"
+          },
+          "publishable": true,
+          "materially_below_publishable_baseline": false
+        },
+        {
+          "label": "D",
+          "chapter_no": 2,
+          "scores": {
+            "opening_hook": 9,
+            "causal_progress": 9,
+            "protagonist_agency": 9,
+            "conflict_payoff": 9,
+            "continuity": 10,
+            "prose_naturalness": 9,
+            "ending_hook": 10
+          },
+          "evidence": {
+            "opening_hook": "车门在他们落地的瞬间骤然合拢。引擎的低吼化为某种野兽濒死时的哀鸣",
+            "causal_progress": "十年前的天选者记录，与这张上古便签上的内容完全相反。",
+            "protagonist_agency": "那就换个方式进去。江哲抬脚朝玻璃大门走去。",
+            "conflict_payoff": "触手上的骨刺狠狠扎在他的掌心，却发出了类似金属碰撞的清脆声响，火星四溅，连表皮都没能划破。",
+            "continuity": "江哲弯下腰，从前台的废墟里捡起了一张泛黄的羊皮纸。这正是售票员给他的张便签的下半部分",
+            "prose_naturalness": "灰白色的墙皮呈现出一种不正常的质感，像是在水里泡了极久的尸皮",
+            "ending_hook": "不要相信完美觉醒。我们以为的超人力量，只是外神为了降临而准备的、最完美的容器。"
+          },
+          "publishable": true,
+          "materially_below_publishable_baseline": false
+        }
+      ]
+    },
+    {
+      "order": [
+        2,
+        10,
+        1,
+        3
+      ],
+      "model_name": "",
+      "usage": {
+        "input_tokens": 16709,
+        "output_tokens": 4835,
+        "total_tokens": 21544
+      },
+      "samples": [
+        {
+          "label": "A",
+          "chapter_no": 2,
+          "scores": {
+            "opening_hook": 8,
+            "causal_progress": 8,
+            "protagonist_agency": 9,
+            "conflict_payoff": 8,
+            "continuity": 9,
+            "prose_naturalness": 8,
+            "ending_hook": 9
+          },
+          "evidence": {
+            "opening_hook": "刺耳的金属摩擦声撕裂了浓雾",
+            "causal_progress": "那就换个方式进去。江哲抬脚朝玻璃大门走去。",
+            "protagonist_agency": "江哲五指发力，钢铁般的指关节生生捏碎了触手",
+            "conflict_payoff": "一脚踩在她的头颅上。鞋底与头骨碰撞，发出一声沉闷的爆裂声",
+            "continuity": "这正是售票员给他的那张便签的下半部分",
+            "prose_naturalness": "灰白色的墙皮呈现出一种不正常的质感",
+            "ending_hook": "你体内的完美超人基因，正是我们播下的最完美的种子。"
+          },
+          "publishable": true,
+          "materially_below_publishable_baseline": false
+        },
+        {
+          "label": "B",
+          "chapter_no": 10,
+          "scores": {
+            "opening_hook": 8,
+            "causal_progress": 8,
+            "protagonist_agency": 8,
+            "conflict_payoff": 8,
+            "continuity": 9,
+            "prose_naturalness": 8,
+            "ending_hook": 9
+          },
+          "evidence": {
+            "opening_hook": "沉重的合金履带无情地碾碎了青石镇历经百年的石板路",
+            "causal_progress": "江哲的身形如同一发无声的炮弹，直直地坠入了药铺废墟中央",
+            "protagonist_agency": "他要保住老陈的命，要带走陆长风留下的线索",
+            "conflict_payoff": "江哲的双脚已经稳稳地踩在了井底的地面上。",
+            "continuity": "残篇背面，吸收了黑衣人血液后浮现出的猩红复眼印记",
+            "prose_naturalness": "这股能量如同滚烫的岩浆流过冻土",
+            "ending_hook": "去无尽回廊深处，迎接主为你准备的……最完美的枷锁。"
+          },
+          "publishable": true,
+          "materially_below_publishable_baseline": false
+        },
+        {
+          "label": "C",
+          "chapter_no": 1,
+          "scores": {
+            "opening_hook": 8,
+            "causal_progress": 9,
+            "protagonist_agency": 9,
+            "conflict_payoff": 9,
+            "continuity": 9,
+            "prose_naturalness": 8,
+            "ending_hook": 9
+          },
+          "evidence": {
+            "opening_hook": "江哲用拇指顶开已经有些生锈的体检单铁夹",
+            "causal_progress": "惨绿色的浓雾毫无预兆地从柏油路面下渗出来",
+            "protagonist_agency": "他直接转过身，双眼直直地迎向了后车窗外那片无尽的惨绿浓雾",
+            "conflict_payoff": "那道足以将一尊邪物彻底抹杀的黑雷，在触碰到江哲黑色短发的刹那",
+            "continuity": "作为上古超凡基因的终极觉醒者，他拥有完美的超人模板。",
+            "prose_naturalness": "车厢内的温度在两秒钟内降到了冰点以下。",
+            "ending_hook": "距离公交车彻底崩溃，只剩下最后三分钟。"
+          },
+          "publishable": true,
+          "materially_below_publishable_baseline": false
+        },
+        {
+          "label": "D",
+          "chapter_no": 3,
+          "scores": {
+            "opening_hook": 8,
+            "causal_progress": 9,
+            "protagonist_agency": 9,
+            "conflict_payoff": 9,
+            "continuity": 9,
+            "prose_naturalness": 8,
+            "ending_hook": 9
+          },
+          "evidence": {
+            "opening_hook": "指尖黏附着一层滑腻的死皮，高频震颤的吸吮感顺着指甲缝往里钻",
+            "causal_progress": "江哲收起秩序核心与体检单，身体缓缓下落",
+            "protagonist_agency": "只是用最蛮横、最原始的纯粹力量，硬生生往外拔那枚秩序核心",
+            "conflict_payoff": "黑色石碑终于承受不住这股恐怖的力道，在江哲面前轰然碎裂",
+            "continuity": "原本矗立在大厅中央、卡着通关线索的功德碑，此时已经变成了一地",
+            "prose_naturalness": "银灰色的光泽在皮下如水银般流淌",
+            "ending_hook": "小心那些戴着单片眼镜的人。他们不是在通关"
+          },
+          "publishable": true,
+          "materially_below_publishable_baseline": false
+        }
+      ]
+    }
+  ],
+  "thresholds": {
+    "baseline_overall": 8.928571428571429,
+    "candidate_overall": 8.571428571428571,
+    "overall_delta": -0.35714285714285765,
+    "dimension_margins": [
+      {
+        "dimension": "opening_hook",
+        "baseline_minimum": 8,
+        "candidate_average": 8.5,
+        "required_minimum": 7,
+        "margin": 1.5
+      },
+      {
+        "dimension": "causal_progress",
+        "baseline_minimum": 8,
+        "candidate_average": 8.5,
+        "required_minimum": 7,
+        "margin": 1.5
+      },
+      {
+        "dimension": "protagonist_agency",
+        "baseline_minimum": 9,
+        "candidate_average": 8.5,
+        "required_minimum": 8,
+        "margin": 0.5
+      },
+      {
+        "dimension": "conflict_payoff",
+        "baseline_minimum": 8,
+        "candidate_average": 8,
+        "required_minimum": 7,
+        "margin": 1
+      },
+      {
+        "dimension": "continuity",
+        "baseline_minimum": 9,
+        "candidate_average": 9,
+        "required_minimum": 8,
+        "margin": 1
+      },
+      {
+        "dimension": "prose_naturalness",
+        "baseline_minimum": 8,
+        "candidate_average": 8.5,
+        "required_minimum": 7,
+        "margin": 1.5
+      },
+      {
+        "dimension": "ending_hook",
+        "baseline_minimum": 9,
+        "candidate_average": 9,
+        "required_minimum": 8,
+        "margin": 1
+      }
+    ],
+    "dimension_failures": [],
+    "publishable_pass": true,
+    "passed": true
+  },
+  "completed_at": "2026-07-10T16:19:15.551Z"
+}
