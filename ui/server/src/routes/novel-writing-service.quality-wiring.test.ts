@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
+import { listNovelChapters } from '../novel'
 import {
   countProseChars,
   createNovelWritingService,
@@ -8,7 +9,11 @@ import {
   scanProseForQualityLoop,
 } from './novel-writing-service'
 import { normalizeProseForStorage } from '../novel-writing/chapter-prose-storage-patch'
-import { buildPipelineProse, createProsePipelineHarness } from './novel-writing-service.test-support'
+import {
+  buildPipelineProse,
+  createProsePipelineHarness,
+  proseQualityScores,
+} from './novel-writing-service.test-support'
 
 describe('novel writing service prose quality wiring', () => {
   const contractionWordTarget = {
@@ -365,5 +370,107 @@ describe('novel writing service prose quality wiring', () => {
     expect(reviewBlock).not.toContain('raw_keys: diagnostics.raw_keys')
     expect(reviseBlock).toContain('maxTokens: proseMaxTokensForWordTarget(wordTarget)')
     expect(reviseBlock).not.toContain('proseQualityReviewMaxTokensForAttempt')
+  })
+
+  test('uses the project quality threshold when the request omits one', async () => {
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      reviewPayloads: [{
+        score: 77,
+        publishable: true,
+        dimensions: proseQualityScores,
+        findings: [],
+      }],
+    })
+
+    const error = await harness.service.generateChapterForGroup(
+      harness.workspace,
+      harness.project.id,
+      harness.chapter.id,
+      {
+        model_id: 217,
+        target_word_count: 1000,
+        auto_repair_quality_gate: true,
+      },
+    ).then(() => null, (caught: any) => caught)
+
+    expect(error).toMatchObject({
+      code: 'PROSE_QUALITY_GATE_BLOCKED',
+      quality_loop: {
+        decision: {
+          passed: false,
+          score: 77,
+          min_score: 78,
+        },
+      },
+    })
+    expect(harness.storeCalls).toBe(0)
+    expect(harness.storyStateCalls).toBe(0)
+  })
+
+  test('keeps an accepted chapter successful when final prose memory storage fails', async () => {
+    const originalDraft = buildPipelineProse(
+      '倒数压到最后三秒，江澈停在围墙阴影里等待。',
+      '只看着追捕队继续收紧包围',
+    )
+    const finalText = normalizeProseForStorage(buildPipelineProse(
+      '江澈踏碎路面，飞石逼退第一排追兵，铁门前终于露出缺口。',
+      '借自己制造的盲区夺下通讯器，继续迫使追捕队后撤',
+    ))
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText: originalDraft,
+      reviewPayloads: [
+        {
+          score: 72,
+          dimensions: proseQualityScores,
+          findings: [{
+            key: 'agency',
+            severity: 'S2',
+            dimension: 'core_promise_agency',
+            evidence: '倒数压到最后三秒，江澈停在围墙阴影里等待。',
+            required_change: '让江澈主动破围',
+            acceptance_test: '追捕阵型因主角动作改变',
+          }],
+        },
+        {
+          score: 88,
+          publishable: true,
+          dimensions: { ...proseQualityScores, core_promise_agency: 9, payoff_hook: 9 },
+          findings: [],
+        },
+      ],
+      revisionTexts: [finalText],
+      memoryError: new Error('memory palace unavailable'),
+    })
+
+    const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+      model_id: 217,
+      target_word_count: 1000,
+      quality_threshold: 78,
+      auto_repair_quality_gate: true,
+    })
+    const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+
+    expect(result.chapter?.chapter_text).toBe(finalText)
+    expect(stored?.chapter_text).toBe(finalText)
+    expect(harness.memoryTexts).toEqual([finalText])
+    expect(harness.storeCalls).toBe(1)
+    expect(harness.storyStateCalls).toBe(1)
+    expect(harness.storyStateTexts).toEqual([finalText])
+    expect(harness.modelCalls.draft).toBe(1)
+    expect(harness.modelCalls.revision).toBe(1)
+    expect(harness.modelCalls.review).toBe(2)
+  })
+
+  test('attempts accepted prose memory after chapter storage without depending on a returned record', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const storageStart = source.indexOf('const updated = await updateNovelChapter(activeWorkspace, chapter.id, buildChapterProseStoragePatch({')
+    const memoryStore = source.indexOf('await storeChapterProseMemory(project, chapter.chapter_no, finalText)', storageStart)
+    const storyState = source.indexOf("await onStage('story_state', { status: 'running' })", storageStart)
+    const postStorageBlock = source.slice(storageStart, storyState)
+
+    expect(storageStart).toBeGreaterThanOrEqual(0)
+    expect(memoryStore).toBeGreaterThan(storageStart)
+    expect(memoryStore).toBeLessThan(storyState)
+    expect(postStorageBlock).not.toContain('if (updated)')
   })
 })
