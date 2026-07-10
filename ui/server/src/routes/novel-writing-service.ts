@@ -17,7 +17,12 @@ import {
   updateNovelProject,
   updateNovelSettingEntity,
 } from '../novel'
-import { executeNovelAgent, generateNovelChapterProse as defaultGenerateNovelChapterProse, previewNovelKnowledgeInjection } from '../llm'
+import {
+  executeNovelAgent,
+  generateNovelChapterProse as defaultGenerateNovelChapterProse,
+  previewNovelKnowledgeInjection,
+  storeNovelChapterProseMemory as defaultStoreNovelChapterProseMemory,
+} from '../llm'
 import type { NovelProductionService } from './novel-production-service'
 import type { NovelReferenceService } from './novel-reference-service'
 import { buildSettingRelationshipGraph } from './novel-setting-relationship-graph'
@@ -40255,6 +40260,7 @@ function applyDeliveryRiskCarryOverToSceneCards(sceneCards: any[], contextPackag
 
 export type NovelWritingRuntime = {
   generateChapterProse?: typeof defaultGenerateNovelChapterProse
+  storeChapterProseMemory?: typeof defaultStoreNovelChapterProseMemory
   executeAgent?: typeof executeNovelAgent
   buildChapterContext?: (input: {
     workspace: string
@@ -40280,6 +40286,7 @@ export function createNovelWritingService(ctx: {
 }) {
   const executeAgent = ctx.runtime?.executeAgent || executeNovelAgent
   const generateNovelChapterProse = ctx.runtime?.generateChapterProse || defaultGenerateNovelChapterProse
+  const storeChapterProseMemory = ctx.runtime?.storeChapterProseMemory || defaultStoreNovelChapterProseMemory
   const buildSceneCardsPrompt = (project: any, contextPackage: any) => buildSceneCardsPromptFromBuilder(project, contextPackage)
 
   const buildHeuristicSettingUsage = (chapter: any, settings: any[]) => {
@@ -45017,7 +45024,11 @@ export function createNovelWritingService(ctx: {
       maxTokens: proseMaxTokensForWordTarget(wordTarget),
       abortSignal: options.abortSignal,
       llmTimeoutMs: options.llmTimeoutMs,
-    } as any, activeWorkspace, ctx.production.getStageModelId(project, 'draft', preferredModelId))
+    } as any, {
+      activeWorkspace,
+      modelId: String(ctx.production.getStageModelId(project, 'draft', preferredModelId) || ''),
+      skipMemoryStore: true,
+    })
     const draftPromptDiagnostics = {
       ...compiledPrompt.diagnostics,
       model_usage: (draftResult as any)?.prose_prompt_diagnostics?.model_usage
@@ -46105,6 +46116,11 @@ export function createNovelWritingService(ctx: {
       postDraftDirector,
     }), { versionSource: resolveChapterProseVersionSource({ revisionEligible: true, selfCheck, editorRewrite }) })
     await onStage('store', { status: 'success', word_count: countProseChars(finalText), scene_status: 'accepted' })
+    try {
+      await storeChapterProseMemory(project, chapter.chapter_no, finalText)
+    } catch (error) {
+      console.warn('[memory-store] Failed to store accepted prose output:', String(error).slice(0, 200))
+    }
     throwIfChapterGenerationAborted()
     await onStage('story_state', { status: 'running' })
     await ctx.runtime?.hooks?.beforeStoryState?.({ chapterId: chapter.id, finalText })

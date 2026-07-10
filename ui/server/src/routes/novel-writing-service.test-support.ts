@@ -40,6 +40,7 @@ type ProsePipelineHarnessOptions = {
   reviewPayloads?: any[]
   revisionTexts?: string[]
   recheckError?: Error
+  memoryError?: Error
 }
 
 export async function createProsePipelineHarness(
@@ -111,6 +112,8 @@ export async function createProsePipelineHarness(
   const revisionTexts = [...(options.revisionTexts || [])]
   const modelCalls = { scene_cards: 0, draft: 0, review: 0, revision: 0, editor: 0, story_state: 0, other: 0 }
   const storyStateTexts: string[] = []
+  const memoryTexts: string[] = []
+  const draftOptions: any[] = []
   let storeCalls = 0
   let storyStateCalls = 0
   let qualityReviewCalls = 0
@@ -204,9 +207,14 @@ export async function createProsePipelineHarness(
     } as any,
     runtime: {
       buildChapterContext: async () => contextPackage,
-      generateChapterProse: async () => {
+      generateChapterProse: async (...args: any[]) => {
         modelCalls.draft += 1
+        draftOptions.push(args[3])
         return { parsed: { chapter_no: 10, chapter_text: draftText }, modelName: 'fake-draft', usage: { input_tokens: 100, output_tokens: 200 } } as any
+      },
+      storeChapterProseMemory: async (_project: any, _chapterNo: number, finalText: string) => {
+        memoryTexts.push(finalText)
+        if (options.memoryError) throw options.memoryError
       },
       executeAgent: executeAgent as any,
       hooks: {
@@ -229,6 +237,8 @@ export async function createProsePipelineHarness(
     service,
     modelCalls,
     storyStateTexts,
+    memoryTexts,
+    draftOptions,
     get storeCalls() { return storeCalls },
     get storyStateCalls() { return storyStateCalls },
   }

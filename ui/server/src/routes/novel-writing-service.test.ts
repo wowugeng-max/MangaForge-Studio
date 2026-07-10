@@ -317,6 +317,7 @@ test('does not store chapter text or story state after two failed prose revision
   expect(stored?.chapter_text || '').toBe('')
   expect(harness.storeCalls).toBe(0)
   expect(harness.storyStateCalls).toBe(0)
+  expect(harness.memoryTexts).toEqual([])
   expect(harness.modelCalls.revision).toBe(2)
 })
 
@@ -411,11 +412,16 @@ test('keeps prose recheck exceptions failed despite a generic quality approval',
 })
 
 test('stores one coherent final prose text after a passing independent recheck', async () => {
+  const originalDraft = buildPipelineProse(
+    '倒数压到最后三秒，江澈停在围墙阴影里等待。',
+    '只看着追捕队继续收紧包围',
+  )
   const finalText = normalizeProseForStorage(buildPipelineProse(
     '江澈踏碎路面，飞石逼退第一排追兵，铁门前终于露出缺口。',
     '借自己制造的盲区夺下通讯器，继续迫使追捕队后撤',
   ))
   const harness = await createProsePipelineHarness({
+    draftText: originalDraft,
     reviewPayloads: [
       {
         score: 72,
@@ -453,11 +459,14 @@ test('stores one coherent final prose text after a passing independent recheck',
   expect(stored?.raw_payload?.oh_story_director).toEqual(result.post_draft_director)
   expect(stored?.raw_payload?.oh_story_delivery_receipts).toEqual(result.oh_story_delivery_receipts)
   expect(harness.storyStateTexts).toEqual([finalText])
+  expect(harness.memoryTexts).toEqual([finalText])
+  expect(harness.memoryTexts).not.toContain(originalDraft)
+  expect(harness.draftOptions).toEqual([expect.objectContaining({ skipMemoryStore: true })])
   expect(result.quality_loop.decision.passed).toBe(true)
   expect(result.quality_loop.rounds).toEqual([{ round: 1, accepted: true, reason: '' }])
 })
 
-test('blocks hard prose quality failures in every prose storage production mode', async () => {
+test('blocks hard prose quality failures and memory writes in every prose storage production mode', async () => {
   for (const productionMode of ['draft_only', 'draft_review', 'draft_review_revise_store']) {
     const harness = await createProsePipelineHarness({
       reviewPayloads: [{
@@ -484,9 +493,77 @@ test('blocks hard prose quality failures in every prose storage production mode'
 
     expect(harness.storeCalls).toBe(0)
     expect(harness.storyStateCalls).toBe(0)
+    expect(harness.memoryTexts).toEqual([])
     const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
     expect(stored?.chapter_text || '').toBe('')
   }
+})
+
+test('keeps an accepted chapter successful when final prose memory storage fails', async () => {
+  const originalDraft = buildPipelineProse(
+    '倒数压到最后三秒，江澈停在围墙阴影里等待。',
+    '只看着追捕队继续收紧包围',
+  )
+  const finalText = normalizeProseForStorage(buildPipelineProse(
+    '江澈踏碎路面，飞石逼退第一排追兵，铁门前终于露出缺口。',
+    '借自己制造的盲区夺下通讯器，继续迫使追捕队后撤',
+  ))
+  const harness = await createProsePipelineHarness({
+    draftText: originalDraft,
+    reviewPayloads: [
+      {
+        score: 72,
+        dimensions: proseQualityScores,
+        findings: [{
+          key: 'agency',
+          severity: 'S2',
+          dimension: 'core_promise_agency',
+          evidence: '倒数压到最后三秒，江澈停在围墙阴影里等待。',
+          required_change: '让江澈主动破围',
+          acceptance_test: '追捕阵型因主角动作改变',
+        }],
+      },
+      {
+        score: 88,
+        publishable: true,
+        dimensions: { ...proseQualityScores, core_promise_agency: 9, payoff_hook: 9 },
+        findings: [],
+      },
+    ],
+    revisionTexts: [finalText],
+    memoryError: new Error('memory palace unavailable'),
+  })
+
+  const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+    model_id: 217,
+    target_word_count: 1000,
+    quality_threshold: 78,
+    auto_repair_quality_gate: true,
+  })
+  const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+
+  expect(result.chapter?.chapter_text).toBe(finalText)
+  expect(stored?.chapter_text).toBe(finalText)
+  expect(harness.memoryTexts).toEqual([finalText])
+  expect(harness.storeCalls).toBe(1)
+  expect(harness.storyStateCalls).toBe(1)
+  expect(harness.storyStateTexts).toEqual([finalText])
+  expect(harness.modelCalls.draft).toBe(1)
+  expect(harness.modelCalls.revision).toBe(1)
+  expect(harness.modelCalls.review).toBe(2)
+})
+
+test('attempts accepted prose memory after chapter storage without depending on a returned record', () => {
+  const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+  const storageStart = source.indexOf('const updated = await updateNovelChapter(activeWorkspace, chapter.id, buildChapterProseStoragePatch({')
+  const memoryStore = source.indexOf('await storeChapterProseMemory(project, chapter.chapter_no, finalText)', storageStart)
+  const storyState = source.indexOf("await onStage('story_state', { status: 'running' })", storageStart)
+  const postStorageBlock = source.slice(storageStart, storyState)
+
+  expect(storageStart).toBeGreaterThanOrEqual(0)
+  expect(memoryStore).toBeGreaterThan(storageStart)
+  expect(memoryStore).toBeLessThan(storyState)
+  expect(postStorageBlock).not.toContain('if (updated)')
 })
 
 test('uses the injected writing runtime for service model calls', async () => {

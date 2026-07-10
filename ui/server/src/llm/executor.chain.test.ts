@@ -1,6 +1,9 @@
 import { describe, expect, mock, test } from 'bun:test'
 
 const runtimeRequests: any[] = []
+const memoryRecallCalls: any[][] = []
+const memoryStoreCalls: any[][] = []
+const verifiedMemoryStoreCalls: any[][] = []
 
 mock.module('./provider-runtime', () => ({
   executeWithRuntimeModel: mock(async (_workspace: string, request: any) => {
@@ -108,10 +111,18 @@ mock.module('./provider-runtime', () => ({
 }))
 
 mock.module('../memory-service', () => ({
-  buildMemoryInjectionForProject: mock(async () => ({ text: '' })),
+  buildMemoryInjectionForProject: mock(async (...args: any[]) => {
+    memoryRecallCalls.push(args)
+    return { text: 'RECALLED_CHAPTER_MEMORY' }
+  }),
   initMemoryPalace: mock(async () => {}),
-  storeAgentOutputForProject: mock(async () => {}),
-  verifyAndStoreAgentOutputForProject: mock(async () => ({})),
+  storeAgentOutputForProject: mock(async (...args: any[]) => {
+    memoryStoreCalls.push(args)
+  }),
+  verifyAndStoreAgentOutputForProject: mock(async (...args: any[]) => {
+    verifiedMemoryStoreCalls.push(args)
+    return {}
+  }),
 }))
 
 mock.module('../knowledge-base', () => ({
@@ -218,6 +229,88 @@ describe('executeNovelAgentChain outline params', () => {
       selected_contract_keys: ['dialogue'],
       model_usage: { input_tokens: 3210, output_tokens: 987, total_tokens: 4197 },
     })
+  })
+
+  test('keeps prose memory recall while skipping every candidate draft memory write', async () => {
+    runtimeRequests.length = 0
+    memoryRecallCalls.length = 0
+    memoryStoreCalls.length = 0
+    verifiedMemoryStoreCalls.length = 0
+    const { generateNovelChapterProse } = await import('./executor')
+
+    await generateNovelChapterProse(
+      {
+        id: 104,
+        title: '正文记忆顺序测试',
+        genre: '都市',
+        style_tags: ['网文'],
+        reference_config: {},
+      } as any,
+      {
+        chapter_no: 10,
+        title: '暗门',
+        chapter_summary: '主角追进旧楼。',
+      },
+      {
+        paragraphTask: 'BOUNDED_PARAGRAPH_TASK_WITH_OH_STORY_RULES',
+        boundedProseContract: true,
+      } as any,
+      {
+        activeWorkspace: 'test-workspace',
+        modelId: '1',
+        skipMemoryStore: true,
+      },
+    )
+
+    const proseRequest = runtimeRequests.find((request) => {
+      const userPrompt = String(request.messages?.find((item: any) => item.role === 'user')?.content || '')
+      return userPrompt.includes('BOUNDED_PARAGRAPH_TASK_WITH_OH_STORY_RULES')
+    })
+
+    expect(memoryRecallCalls).toHaveLength(1)
+    expect(JSON.stringify(proseRequest?.messages || [])).toContain('RECALLED_CHAPTER_MEMORY')
+    expect(memoryStoreCalls).toEqual([])
+    expect(verifiedMemoryStoreCalls).toEqual([])
+  })
+
+  test('stores the supplied accepted final prose through the verified memory adapter', async () => {
+    memoryStoreCalls.length = 0
+    verifiedMemoryStoreCalls.length = 0
+    const { storeNovelChapterProseMemory } = await import('./executor')
+    const finalText = '这是全部门禁通过并已成功入库的最终正文。'
+
+    await storeNovelChapterProseMemory(
+      { id: 105, title: '最终正文记忆测试' } as any,
+      10,
+      finalText,
+    )
+
+    expect(memoryStoreCalls).toEqual([])
+    expect(verifiedMemoryStoreCalls).toEqual([
+      [105, '最终正文记忆测试', 'prose-chapter-10', finalText, 'plot'],
+    ])
+  })
+
+  test('preserves skipMemory as disabling prose recall and every memory store', async () => {
+    runtimeRequests.length = 0
+    memoryRecallCalls.length = 0
+    memoryStoreCalls.length = 0
+    verifiedMemoryStoreCalls.length = 0
+    const { generateNovelChapterProse } = await import('./executor')
+
+    await generateNovelChapterProse(
+      { id: 106, title: '跳过全部记忆测试', reference_config: {} } as any,
+      { chapter_no: 10, title: '暗门' },
+      {
+        paragraphTask: 'BOUNDED_PARAGRAPH_TASK_WITH_OH_STORY_RULES',
+        boundedProseContract: true,
+      } as any,
+      { activeWorkspace: 'test-workspace', modelId: '1', skipMemory: true },
+    )
+
+    expect(memoryRecallCalls).toEqual([])
+    expect(memoryStoreCalls).toEqual([])
+    expect(verifiedMemoryStoreCalls).toEqual([])
   })
 
   test('retries prose draft once in direct-output non-stream mode when streaming returns reasoning-only content', async () => {

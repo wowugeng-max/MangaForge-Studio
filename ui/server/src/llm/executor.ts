@@ -855,13 +855,15 @@ export async function generateNovelChapterProse(
     modelId?: string
     activeWorkspace?: string
     skipMemory?: boolean
+    skipMemoryStore?: boolean
   } | string = {},
   modelIdArg?: string | number,
 ): Promise<LLMResponse> {
   const normalizedOptions = typeof options === 'object' && options !== null
     ? options
     : { activeWorkspace: options, modelId: modelIdArg ? String(modelIdArg) : undefined }
-  const { modelId, activeWorkspace, skipMemory } = normalizedOptions
+  const { modelId, activeWorkspace, skipMemory, skipMemoryStore } = normalizedOptions
+  const skipAgentMemoryStore = Boolean(skipMemory || skipMemoryStore)
   const boundedProseContract = (context as any).boundedProseContract === true
   const boundedParagraphTask = boundedProseContract || hasBoundedParagraphTask(context as any)
   const compactPrevChapters = compactProsePreviousChapters(context.prevChapters)
@@ -955,7 +957,7 @@ export async function generateNovelChapterProse(
     'prose-agent',
     project,
     agentContext,
-    { modelId, activeWorkspace, skipMemory: false, maxTokens, temperature: 0.8, signal: (context as any).abortSignal, timeoutMs: (context as any).llmTimeoutMs },
+    { modelId, activeWorkspace, skipMemory: skipAgentMemoryStore, maxTokens, temperature: 0.8, signal: (context as any).abortSignal, timeoutMs: (context as any).llmTimeoutMs },
   )
   let finalResponse = response
   if (shouldRetryReasoningOnlyEmptyProse(response)) {
@@ -977,7 +979,7 @@ export async function generateNovelChapterProse(
       {
         modelId,
         activeWorkspace,
-        skipMemory: false,
+        skipMemory: skipAgentMemoryStore,
         maxTokens: directOutputRetryMaxTokens(maxTokens),
         temperature: 0.65,
         responseMode: 'non_stream',
@@ -998,7 +1000,7 @@ export async function generateNovelChapterProse(
   }
 
   // ── Memory Palace: verify and store ──
-  if (!skipMemory) {
+  if (!skipMemory && !skipMemoryStore) {
     try {
       const proseContent = typeof finalResponse.content === 'string' ? finalResponse.content : JSON.stringify(finalResponse.content)
       await verifyAndStoreAgentOutputForProject(
@@ -1020,6 +1022,21 @@ export async function generateNovelChapterProse(
       model_usage: finalResponse?.usage || finalResponse?.raw?.usage || null,
     },
   }
+}
+
+export async function storeNovelChapterProseMemory(
+  project: NovelProjectRecord,
+  chapterNo: number,
+  finalText: string,
+) {
+  if (!String(finalText || '').trim()) return
+  await verifyAndStoreAgentOutputForProject(
+    project.id,
+    project.title,
+    `prose-chapter-${chapterNo}`,
+    finalText,
+    'plot',
+  )
 }
 
 // ── Init Memory Palace on module load ──
