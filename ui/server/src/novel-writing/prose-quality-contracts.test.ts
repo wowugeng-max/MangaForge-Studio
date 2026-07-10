@@ -109,6 +109,82 @@ describe('prose quality contracts', () => {
     expect(selected.text).not.toContain('target_emotion')
   })
 
+  test('strict revision selection rejects an engineering appendix', () => {
+    const currentText = '江澈抬手撞开封锁线。'.repeat(180)
+    const selected = selectUsableRevisionText(currentText, {
+      final_text: [
+        `${currentText}\n\n追兵的频道突然传出熟人的声音。`,
+        '---',
+        '### revision_receipts',
+        '- agency: 已修复',
+      ].join('\n'),
+    }, { chapterNo: 10, blockingFindings: [] })
+
+    expect(selected.accepted).toBe(false)
+    expect(selected.text).toBe(currentText)
+    expect(selected.reason).toContain('工程附录')
+  })
+
+  test('strict revision selection rejects continuous non-Chinese prose', () => {
+    const currentText = '江澈撞开封锁线，追兵同时后撤。'.repeat(160)
+    const englishParagraph = 'The protagonist waits while every surrounding officer explains the entire situation before another person resolves the central conflict without any visible choice or consequence. '
+    const selected = selectUsableRevisionText(currentText, {
+      final_text: englishParagraph.repeat(35),
+    }, { chapterNo: 10, blockingFindings: [] })
+
+    expect(selected.accepted).toBe(false)
+    expect(selected.reason).toContain('非中文')
+  })
+
+  test('strict revision selection rejects another chapter boundary', () => {
+    const currentText = '江澈撞开封锁线，追兵同时后撤。'.repeat(160)
+    const selected = selectUsableRevisionText(currentText, {
+      final_text: `第十一章 新的追捕\n\n${currentText}`,
+    }, { chapterNo: 10, blockingFindings: [] })
+
+    expect(selected.accepted).toBe(false)
+    expect(selected.reason).toContain('其他章节')
+  })
+
+  test('strict revision selection rejects truncated output', () => {
+    const currentText = '江澈撞开封锁线，追兵同时后撤。'.repeat(160)
+    const selected = selectUsableRevisionText(currentText, {
+      final_text: `${currentText}\n\n\`\`\`json\n{"unfinished": true`,
+    }, { chapterNo: 10, blockingFindings: [] })
+
+    expect(selected.accepted).toBe(false)
+    expect(selected.reason).toContain('截断')
+  })
+
+  test('strict revision selection rejects a draft that leaves every blocking evidence unchanged', () => {
+    const evidence = '江澈站在包围圈里等待。'
+    const currentText = `${evidence}${'追兵没有变化。'.repeat(180)}`
+    const selected = selectUsableRevisionText(currentText, {
+      final_text: `${currentText}\n\n风又吹了一次。`,
+    }, {
+      chapterNo: 10,
+      blockingFindings: [{ key: 'agency', evidence }],
+    })
+
+    expect(selected.accepted).toBe(false)
+    expect(selected.reason).toContain('没有改变')
+  })
+
+  test('strict revision selection accepts a complete draft with changed blocking evidence', () => {
+    const evidence = '江澈站在包围圈里等待。'
+    const currentText = `${evidence}${'追兵继续收紧包围。'.repeat(180)}`
+    const revisedText = `${'江澈踏碎路面，借飞石逼退第一排追兵。'.repeat(180)}\n\n通讯器里响起熟人的声音。`
+    const selected = selectUsableRevisionText(currentText, {
+      final_text: revisedText,
+    }, {
+      chapterNo: 10,
+      blockingFindings: [{ key: 'agency', evidence }],
+    })
+
+    expect(selected.accepted).toBe(true)
+    expect(selected.text).toBe(revisedText)
+  })
+
   test('compacts recursive delivery-risk receipt noise into actionable prose tasks', () => {
     const text = compactDeliveryRiskCarryOverText(
       '修复：缺少 delivery_risk_receipts；模型自检未逐项输出 next_chapter_quality_plan_receipts；复核承接：前300字用带血腰牌直接引出阵堂旧案，中段把账册缺页变成现场阻碍。',

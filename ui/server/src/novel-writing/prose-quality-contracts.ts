@@ -41,6 +41,78 @@ function proseCharCount(value: any) {
   return String(value || '').replace(/\s+/g, '').length
 }
 
+function looksLikeNonChineseProse(value: string) {
+  const text = String(value || '')
+  if (/(?:[A-Za-z][A-Za-z'-]*\s+){23,}[A-Za-z][A-Za-z'-]*/.test(text)) return true
+  const latinChars = (text.match(/[A-Za-z]/g) || []).length
+  const chineseChars = (text.match(/[\u3400-\u9fff]/g) || []).length
+  return latinChars >= 120 && chineseChars < Math.max(40, Math.floor(latinChars * 0.25))
+}
+
+function parseChineseChapterNumber(value: string) {
+  if (/^\d+$/.test(value)) return Number(value)
+  const digits: Record<string, number> = {
+    零: 0,
+    一: 1,
+    二: 2,
+    两: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+  }
+  const units: Record<string, number> = { 十: 10, 百: 100, 千: 1000 }
+  let total = 0
+  let current = 0
+  for (const char of value) {
+    if (char in digits) {
+      current = digits[char]
+      continue
+    }
+    const unit = units[char]
+    if (!unit) return 0
+    total += (current || 1) * unit
+    current = 0
+  }
+  return total + current
+}
+
+function containsWrongChapterBoundary(value: string, chapterNo: number) {
+  const marker = /^\s*(?:#{1,6}\s*)?第\s*([0-9零一二两三四五六七八九十百千]+)\s*章(?:\s|$)/gm
+  for (const match of String(value || '').matchAll(marker)) {
+    const parsed = parseChineseChapterNumber(match[1])
+    if (parsed > 0 && parsed !== chapterNo) return true
+  }
+  return false
+}
+
+function looksTruncated(value: string, currentText = '') {
+  const text = String(value || '').trim()
+  if (!text) return true
+  const fenceCount = (text.match(/```/g) || []).length
+  if (fenceCount % 2 !== 0) return true
+  if (text.startsWith('{')) {
+    try {
+      JSON.parse(text)
+    } catch {
+      return true
+    }
+  }
+  const quotePairs: Array<[RegExp, RegExp]> = [
+    [/「/g, /」/g],
+    [/『/g, /』/g],
+    [/“/g, /”/g],
+  ]
+  if (quotePairs.some(([open, close]) => (text.match(open) || []).length !== (text.match(close) || []).length)) return true
+  if (/[，,:：；;、\\]$/.test(text)) return true
+  const currentChars = proseCharCount(currentText)
+  const candidateChars = proseCharCount(text)
+  return currentChars >= 800 && candidateChars < Math.floor(currentChars * 0.65)
+}
+
 function normalizeLaunchGateCheck(value: any, fallbackKey = 'chapter_launch_gate'): LaunchGateCheck | null {
   if (!value || typeof value !== 'object') return null
   const key = compactText(value.key || fallbackKey)
@@ -98,12 +170,48 @@ export function getChapterLaunchGateBlocker(gate: any) {
   }
 }
 
-export function selectUsableRevisionText(currentText: string, revisionLike: any = {}) {
+export function selectUsableRevisionText(
+  currentText: string,
+  revisionLike: any = {},
+  options: {
+    chapterNo?: number
+    blockingFindings?: any[]
+  } = {},
+) {
   const current = String(currentText || '')
-  const rawCandidate = String(revisionLike?.final_text || revisionLike?.finalText || '')
-  const candidate = stripProseEngineeringAppendix(rawCandidate).text
+  const rawCandidate = String(
+    revisionLike?.final_text
+      || revisionLike?.finalText
+      || revisionLike?.chapter_text
+      || revisionLike?.chapterText
+      || '',
+  )
+  const stripped = stripProseEngineeringAppendix(rawCandidate)
+  const candidate = stripped.text
+  const strict = Number(options.chapterNo || 0) > 0 || Array.isArray(options.blockingFindings)
   if (!candidate.trim()) {
     return { text: current, accepted: false, reason: '' }
+  }
+  if (strict && stripped.changed && stripped.removed_line_count > 0) {
+    return { text: current, accepted: false, reason: '修订稿包含写作工程附录' }
+  }
+  if (strict && looksLikeNonChineseProse(candidate)) {
+    return { text: current, accepted: false, reason: '修订稿包含连续非中文正文' }
+  }
+  if (strict && Number(options.chapterNo || 0) > 0 && containsWrongChapterBoundary(candidate, Number(options.chapterNo))) {
+    return { text: current, accepted: false, reason: '修订稿混入其他章节或标题边界' }
+  }
+  if (strict && looksTruncated(candidate, current)) {
+    return { text: current, accepted: false, reason: '修订稿疑似截断' }
+  }
+  const blockingFindings = Array.isArray(options.blockingFindings) ? options.blockingFindings : []
+  const findingsWithEvidence = blockingFindings.filter(item => compactText(item?.evidence))
+  const unchangedEvidence = findingsWithEvidence.filter(item => {
+    const evidence = compactText(item?.evidence)
+    return current.includes(evidence) && candidate.includes(evidence)
+  })
+  if (findingsWithEvidence.length > 0 && unchangedEvidence.length === findingsWithEvidence.length) {
+    return { text: current, accepted: false, reason: '修订稿没有改变任何 blocking finding 证据' }
   }
   const currentChars = proseCharCount(current)
   const candidateChars = proseCharCount(candidate)
