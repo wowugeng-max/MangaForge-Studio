@@ -204,6 +204,60 @@ function compactStandaloneProseProgressValue(value: any, key = '', depth = 0, se
   return output
 }
 
+function compactStandalonePromptDiagnostics(value: any) {
+  if (!value || typeof value !== 'object') return undefined
+  return compactStandaloneProseProgressValue({
+    prompt_chars: value.prompt_chars ?? value.promptChars,
+    required_chars: value.required_chars ?? value.requiredChars,
+    selected_contract_keys: value.selected_contract_keys ?? value.selectedContractKeys,
+    omitted_contract_keys: value.omitted_contract_keys ?? value.omittedContractKeys,
+    section_chars: value.section_chars ?? value.sectionChars,
+    downgrades: value.downgrades,
+    budget_chars: value.budget_chars ?? value.budgetChars,
+    model_usage: value.model_usage ?? value.modelUsage,
+  })
+}
+
+function compactStandaloneQualityLoop(value: any) {
+  if (!value || typeof value !== 'object') return undefined
+  const decision = value.decision && typeof value.decision === 'object'
+    ? {
+        passed: value.decision.passed,
+        approvable: value.decision.approvable,
+        score: value.decision.score,
+        min_score: value.decision.min_score ?? value.decision.minScore,
+        hard_failures: asArray(value.decision.hard_failures || value.decision.hardFailures).map((item: any) => ({
+          key: item?.key,
+          message: item?.message,
+          source: item?.source,
+        })),
+        advisory_failures: value.decision.advisory_failures ?? value.decision.advisoryFailures,
+      }
+    : undefined
+  return compactStandaloneProseProgressValue({
+    rounds: asArray(value.rounds).map((item: any) => ({
+      round: item?.round,
+      accepted: item?.accepted,
+      reason: item?.reason,
+    })),
+    decision,
+  })
+}
+
+export function buildStandaloneProseServiceErrorPayload(serviceError: any, pipeline: any[], configSnapshot: any) {
+  return {
+    error: String(serviceError?.message || serviceError),
+    error_code: serviceError?.code || serviceError?.error_code || 'PROSE_GENERATION_FAILED',
+    pipeline,
+    launch_gate_blocker: serviceError?.launchGateBlocker || serviceError?.launch_gate_blocker,
+    reference_report: serviceError?.referenceReport || serviceError?.reference_report,
+    safety_decision: serviceError?.safetyDecision || serviceError?.safety_decision,
+    prompt_diagnostics: compactStandalonePromptDiagnostics(serviceError?.promptDiagnostics || serviceError?.prompt_diagnostics),
+    quality_loop: compactStandaloneQualityLoop(serviceError?.qualityLoop || serviceError?.quality_loop),
+    config_snapshot: configSnapshot,
+  }
+}
+
 export function compactStandaloneProseProgressStage(stage: any = {}) {
   const sceneCards = asArray(stage?.scene_cards || stage?.sceneCards)
   const compacted = compactStandaloneProseProgressValue(stage) || {}
@@ -1520,16 +1574,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         } catch (serviceError: any) {
           standaloneProseCompleted = true
           cleanupStandaloneProseAbortListeners()
-          const errorPayload = {
-            error: String(serviceError?.message || serviceError),
-            error_code: serviceError?.code || serviceError?.error_code || 'PROSE_GENERATION_FAILED',
-            pipeline,
-            context_package: serviceError?.contextPackage || serviceError?.context_package,
-            launch_gate_blocker: serviceError?.launchGateBlocker || serviceError?.launch_gate_blocker,
-            reference_report: serviceError?.referenceReport || serviceError?.reference_report,
-            safety_decision: serviceError?.safetyDecision || serviceError?.safety_decision,
-            config_snapshot: configSnapshot,
-          }
+          const errorPayload = buildStandaloneProseServiceErrorPayload(serviceError, pipeline, configSnapshot)
           await appendNovelRun(activeWorkspace, {
             project_id: projectId,
             run_type: 'generate_prose',

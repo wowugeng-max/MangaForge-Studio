@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { applyRequestBatchPreflight, buildStandaloneProseServiceOptions, compactGenerationRequestOverride, compactStandaloneProseProgressStage, extractOhStoryDeliveryReceipts, refreshOhStoryDeliveryReceiptsAfterRevision, selectTargetProsePayload, stringifyNovelGenerationPayload } from './novel-generation-routes'
+import { applyRequestBatchPreflight, buildStandaloneProseServiceErrorPayload, buildStandaloneProseServiceOptions, compactGenerationRequestOverride, compactStandaloneProseProgressStage, extractOhStoryDeliveryReceipts, refreshOhStoryDeliveryReceiptsAfterRevision, selectTargetProsePayload, stringifyNovelGenerationPayload } from './novel-generation-routes'
 
 describe('novel generate prose route source guards', () => {
   test('serializes circular generation payloads without losing shared arrays', () => {
@@ -129,6 +129,103 @@ describe('novel generate prose route source guards', () => {
     expect(text.length).toBeLessThan(5000)
     expect(text).not.toContain(huge)
     expect(stage.quality_gate.reasons[0].length).toBeLessThan(260)
+  })
+
+  test('retains safe prose failure diagnostics without exposing candidate text or request internals', () => {
+    const candidateText = '失败候选正文不得持久化。'.repeat(100)
+    const fullPrompt = '完整正文 prompt 不得返回。'.repeat(100)
+    const rawPayload = '原始 provider payload 不得返回。'.repeat(100)
+    const serviceError = Object.assign(new Error('章节硬质量门禁未通过，正文未入库'), {
+      code: 'PROSE_QUALITY_GATE_BLOCKED',
+      prompt_diagnostics: {
+        prompt_chars: 46_820,
+        required_chars: 32_100,
+        selected_contract_keys: ['dialogue', 'continuity'],
+        omitted_contract_keys: ['quality_audit'],
+        section_chars: { core: 32_100, 'contract:dialogue:compact': 4_200 },
+        downgrades: [{ key: 'dialogue', from: 'full', to: 'compact' }],
+        budget_chars: 48_000,
+        model_usage: { input_tokens: 12_345, output_tokens: 3_210, total_tokens: 15_555 },
+        prompt: fullPrompt,
+        messages: [{ role: 'user', content: fullPrompt }],
+        debug: { raw_payload: rawPayload },
+        final_text: candidateText,
+      },
+      quality_loop: {
+        rounds: [
+          { round: 1, accepted: true, reason: '定向修订可用', chapter_text: candidateText },
+          { round: 2, accepted: true, reason: '二轮修订可用', prompt: fullPrompt },
+        ],
+        decision: {
+          passed: false,
+          approvable: false,
+          score: 72,
+          min_score: 78,
+          hard_failures: [{
+            key: 'word_target',
+            message: '有效正文字数低于硬下限',
+            source: 'deterministic',
+            final_text: candidateText,
+          }],
+          advisory_failures: ['质检评分 72 低于 78'],
+          debug: { messages: [fullPrompt] },
+        },
+        final_text: candidateText,
+        raw_payload: rawPayload,
+      },
+      contextPackage: { chapter_text: candidateText },
+      final_text: candidateText,
+      chapter_text: candidateText,
+      prompt: fullPrompt,
+      messages: [{ role: 'user', content: fullPrompt }],
+      debug: { raw_payload: rawPayload },
+      raw_payload: rawPayload,
+    })
+    const pipeline = [{ key: 'review', status: 'failed' }]
+    const configSnapshot = { model_id: 217, provider: 'openai-compatible' }
+
+    const payload = buildStandaloneProseServiceErrorPayload(serviceError, pipeline, configSnapshot)
+    const serialized = JSON.stringify(payload)
+
+    expect(payload).toMatchObject({
+      error: '章节硬质量门禁未通过，正文未入库',
+      error_code: 'PROSE_QUALITY_GATE_BLOCKED',
+      pipeline,
+      config_snapshot: configSnapshot,
+      prompt_diagnostics: {
+        prompt_chars: 46_820,
+        required_chars: 32_100,
+        selected_contract_keys: ['dialogue', 'continuity'],
+        omitted_contract_keys: ['quality_audit'],
+        section_chars: { core: 32_100, 'contract:dialogue:compact': 4_200 },
+        downgrades: [{ key: 'dialogue', from: 'full', to: 'compact' }],
+        budget_chars: 48_000,
+        model_usage: { input_tokens: 12_345, output_tokens: 3_210, total_tokens: 15_555 },
+      },
+      quality_loop: {
+        rounds: [
+          { round: 1, accepted: true, reason: '定向修订可用' },
+          { round: 2, accepted: true, reason: '二轮修订可用' },
+        ],
+        decision: {
+          passed: false,
+          approvable: false,
+          score: 72,
+          min_score: 78,
+          hard_failures: [{ key: 'word_target', message: '有效正文字数低于硬下限', source: 'deterministic' }],
+          advisory_failures: ['质检评分 72 低于 78'],
+        },
+      },
+    })
+    expect(payload.context_package).toBeUndefined()
+    expect(serialized).not.toContain(candidateText)
+    expect(serialized).not.toContain(fullPrompt)
+    expect(serialized).not.toContain(rawPayload)
+    expect(serialized).not.toContain('chapter_text')
+    expect(serialized).not.toContain('final_text')
+    expect(serialized).not.toContain('messages')
+    expect(serialized).not.toContain('debug')
+    expect(serialized).not.toContain('raw_payload')
   })
 
   test('selects camelCase prose chapter payloads from direct draft generation', () => {
@@ -529,6 +626,23 @@ describe('novel generate prose route source guards', () => {
     expect(routeBlock).not.toContain('ctx.buildChapterContextPackage(')
     expect(routeBlock).not.toContain('const result = await generateNovelChapterProse')
     expect(routeBlock.match(/ctx\.generateChapterForGroup\(/g)).toHaveLength(1)
+  })
+
+  test('delegates standalone prose failures to one safe payload for run, SSE, and JSON outputs', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
+    const catchStart = source.indexOf('} catch (serviceError: any) {', routeStart)
+    const catchEnd = source.indexOf('\n        }\n      }', catchStart)
+    const catchBlock = source.slice(catchStart, catchEnd)
+
+    expect(routeStart).toBeGreaterThanOrEqual(0)
+    expect(catchStart).toBeGreaterThan(routeStart)
+    expect(catchEnd).toBeGreaterThan(catchStart)
+    expect(catchBlock).toContain('const errorPayload = buildStandaloneProseServiceErrorPayload(serviceError, pipeline, configSnapshot)')
+    expect(catchBlock).toContain('output_ref: stringifyNovelGenerationPayload(errorPayload)')
+    expect(catchBlock).toContain("res.write(sseData({ type: 'error', ...errorPayload }))")
+    expect(catchBlock).toContain('return res.status(status).json(errorPayload)')
+    expect(catchBlock).not.toContain('context_package: serviceError?.contextPackage')
   })
 
   test('standalone prose service path aborts generation only on real client disconnects', () => {
