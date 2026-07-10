@@ -6,6 +6,7 @@ import {
   buildProseQualityDecision,
   isUsableProseQualityReviewPayload,
   normalizeProseQualityReview,
+  proseQualityReviewMaxTokensForAttempt,
   runProseQualityLoop,
 } from './prose-quality-loop'
 
@@ -103,6 +104,13 @@ describe('prose quality decisions', () => {
 })
 
 describe('bounded prose quality loop', () => {
+  test('raises only the second semantic review attempt budget', () => {
+    expect(proseQualityReviewMaxTokensForAttempt(1)).toBe(5_000)
+    expect(proseQualityReviewMaxTokensForAttempt(2)).toBe(10_000)
+    expect(proseQualityReviewMaxTokensForAttempt(99)).toBe(10_000)
+    expect(proseQualityReviewMaxTokensForAttempt(Number.POSITIVE_INFINITY)).toBe(5_000)
+  })
+
   test('rejects ambiguous low-range scores without an explicit 0-100 scale', () => {
     expect(isUsableProseQualityReviewPayload({
       score: 4.8,
@@ -277,6 +285,47 @@ describe('bounded prose quality loop', () => {
     expect(result.decision.passed).toBe(true)
   })
 
+  test('retries one unusable independent recheck before failing closed', async () => {
+    const reviewAttempts: Array<{ round: number; attempt: number | undefined }> = []
+    let recheckCalls = 0
+    const result = await runProseQualityLoop({
+      initialText: '初稿问题。'.repeat(120),
+      minScore: 78,
+      coreContract: { chapter_no: 10 },
+      scan: () => ({ hard_failures: [] }),
+      review: async ({ round, attempt }) => {
+        reviewAttempts.push({ round, attempt })
+        if (round === 0) {
+          return {
+            score: 70,
+            dimensions: sixDimensionScores,
+            findings: [{
+              key: 'agency',
+              severity: 'S2',
+              dimension: 'core_promise_agency',
+              evidence: '初稿问题。',
+              required_change: '让主角主动破局',
+              acceptance_test: '主角行动改变结果',
+            }],
+          }
+        }
+        recheckCalls += 1
+        return recheckCalls === 1
+          ? {}
+          : { score: 88, score_scale: '0-100', dimensions: sixDimensionScores, publishable: true, findings: [] }
+      },
+      revise: async () => ({ final_text: '修订正文让主角主动击穿包围并夺回线索。'.repeat(120) }),
+    })
+
+    expect(result.decision.passed).toBe(true)
+    expect(recheckCalls).toBe(2)
+    expect(reviewAttempts).toEqual([
+      { round: 0, attempt: 1 },
+      { round: 1, attempt: 1 },
+      { round: 1, attempt: 2 },
+    ])
+  })
+
   test('stops after two failed revision rounds', async () => {
     let revisionCalls = 0
     const result = await runProseQualityLoop({
@@ -307,16 +356,17 @@ describe('bounded prose quality loop', () => {
     expect(result.decision.passed).toBe(false)
   })
 
-  test('fails closed when an independent recheck throws', async () => {
+  test('fails closed without retrying or persisting callback exception text', async () => {
+    const leakSentinel = 'MODEL_CONTROLLED_BODY_SENTINEL'
     let reviewCalls = 0
-    await expect(runProseQualityLoop({
+    const error = await runProseQualityLoop({
       initialText: '初稿问题。'.repeat(120),
       minScore: 78,
       coreContract: { chapter_no: 10 },
       scan: () => ({ hard_failures: [] }),
       review: async () => {
         reviewCalls += 1
-        if (reviewCalls > 1) throw new Error('timeout')
+        if (reviewCalls > 1) throw new Error(leakSentinel)
         return {
           score: 70,
           dimensions: sixDimensionScores,
@@ -331,12 +381,24 @@ describe('bounded prose quality loop', () => {
         }
       },
       revise: async () => ({ final_text: '修订正文带来新的追捕令。'.repeat(120) }),
-    })).rejects.toMatchObject({ code: 'PROSE_QUALITY_RECHECK_UNAVAILABLE' })
+    }).then(() => null, (caught: any) => caught)
+
+    expect(error?.code).toBe('PROSE_QUALITY_RECHECK_UNAVAILABLE')
+    expect(reviewCalls).toBe(2)
+    expect(JSON.stringify(error?.cause)).not.toContain(leakSentinel)
+    expect(error?.cause).toMatchObject({
+      kind: 'callback_error',
+      field_types: {
+        name: 'string',
+        message: 'string',
+        code: 'missing',
+      },
+    })
   })
 
   test('treats an empty structured recheck as unavailable', async () => {
     let reviewCalls = 0
-    await expect(runProseQualityLoop({
+    const error = await runProseQualityLoop({
       initialText: '初稿问题。'.repeat(120),
       minScore: 78,
       coreContract: { chapter_no: 10 },
@@ -359,7 +421,92 @@ describe('bounded prose quality loop', () => {
           : {}
       },
       revise: async () => ({ final_text: '修订正文带来新的追捕令。'.repeat(120) }),
-    })).rejects.toMatchObject({ code: 'PROSE_QUALITY_RECHECK_UNAVAILABLE' })
+    }).then(() => null, (caught: any) => caught)
+
+    expect(error?.code).toBe('PROSE_QUALITY_RECHECK_UNAVAILABLE')
+    expect(reviewCalls).toBe(3)
+    expect(error?.cause?.review_attempts).toHaveLength(2)
+    expect(error?.cause?.review_attempts.every((attempt: any) => (
+      attempt.payload_type === 'object'
+      && attempt.field_types.score === 'missing'
+      && attempt.field_types.score_scale === 'missing'
+      && attempt.field_types.dimensions === 'missing'
+      && attempt.field_types.findings === 'missing'
+      && attempt.field_types.publishable === 'missing'
+      && attempt.missing_dimensions.length === 6
+    ))).toBe(true)
+  })
+
+  test('does not persist model-controlled values or arbitrary keys in invalid review diagnostics', async () => {
+    const leakSentinel = 'MODEL_CONTROLLED_PREVIEW_SENTINEL'
+    let reviewCalls = 0
+    const error = await runProseQualityLoop({
+      initialText: '初稿问题。'.repeat(120),
+      minScore: 78,
+      coreContract: { chapter_no: 10 },
+      scan: () => ({ hard_failures: [] }),
+      review: async ({ round }) => {
+        reviewCalls += 1
+        if (round === 0) {
+          return {
+            score: 70,
+            dimensions: sixDimensionScores,
+            findings: [{
+              key: 'hook',
+              severity: 'S2',
+              dimension: 'payoff_hook',
+              evidence: '初稿问题。',
+              required_change: '补章末问题',
+              acceptance_test: '末段形成翻页理由',
+            }],
+          }
+        }
+        return {
+          score: null,
+          score_scale: leakSentinel,
+          dimensions: { [leakSentinel]: 1 },
+          findings: [],
+          __quality_review_transport: {
+            finish_reason: leakSentinel,
+            usage: {
+              input_tokens: 12,
+              output_tokens: leakSentinel,
+              [leakSentinel]: leakSentinel,
+            },
+            content_length: 345,
+            raw_keys: [leakSentinel],
+          },
+          [leakSentinel]: leakSentinel,
+        }
+      },
+      revise: async () => ({ final_text: '修订正文带来新的追捕令。'.repeat(120) }),
+    }).then(() => null, (caught: any) => caught)
+
+    expect(error?.code).toBe('PROSE_QUALITY_RECHECK_UNAVAILABLE')
+    expect(reviewCalls).toBe(3)
+    expect(JSON.stringify(error?.cause)).not.toContain(leakSentinel)
+    expect(error?.cause?.review_attempts[0]).toMatchObject({
+      field_types: {
+        score: 'null',
+        score_scale: 'string',
+        dimensions: 'object',
+        findings: 'array',
+        publishable: 'missing',
+      },
+      dimension_types: {
+        continuity: 'missing',
+        core_promise_agency: 'missing',
+        conflict_causality: 'missing',
+        payoff_hook: 'missing',
+        prose_style: 'missing',
+        fact_setting_safety: 'missing',
+      },
+      transport: {
+        finish_reason: 'unknown',
+        usage: { input_tokens: 12 },
+        content_length: 345,
+      },
+    })
   })
 
   test('treats an ambiguous five-point recheck score as unavailable', async () => {

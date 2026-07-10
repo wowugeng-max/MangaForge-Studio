@@ -221,6 +221,11 @@ export function isUsableProseQualityReviewPayload(value: any) {
   )
 }
 
+export function proseQualityReviewMaxTokensForAttempt(attempt: number) {
+  const rawAttempt = Number(attempt)
+  return Number.isFinite(rawAttempt) && rawAttempt >= 2 ? 10_000 : 5_000
+}
+
 function deterministicFindings(scan: any): ProseQualityFinding[] {
   const failures = Array.isArray(scan?.hard_failures) ? scan.hard_failures : []
   return failures.slice(0, 6).map((item: any, index: number) => {
@@ -243,10 +248,17 @@ function qualityLoopError(code: string, message: string, details: any = {}) {
 }
 
 function compactQualityError(error: any) {
+  const reviewAttempts = Array.isArray(error?.review_attempts)
+    ? error.review_attempts.slice(0, 2).map(sanitizeProseQualityReviewAttemptDiagnostic)
+    : []
   return {
-    name: compactQualityText(error?.name || 'Error', 80),
-    message: compactQualityText(error?.message || error, 500),
-    code: compactQualityText(error?.code, 100) || undefined,
+    kind: normalizeProseQualityCallbackErrorKind(error),
+    field_types: {
+      name: proseQualityDiagnosticType(error?.name),
+      message: proseQualityDiagnosticType(error?.message),
+      code: proseQualityDiagnosticType(error?.code),
+    },
+    ...(reviewAttempts.length ? { review_attempts: reviewAttempts } : {}),
   }
 }
 
@@ -258,13 +270,153 @@ function summarizeQualityRounds(rounds: any[]) {
   }))
 }
 
+function proseQualityDiagnosticType(value: any) {
+  if (value === undefined) return 'missing'
+  if (value === null) return 'null'
+  if (Array.isArray(value)) return 'array'
+  if (typeof value === 'object') return 'object'
+  if (typeof value === 'string') return 'string'
+  if (typeof value === 'number') return 'number'
+  if (typeof value === 'boolean') return 'boolean'
+  return 'other'
+}
+
+function normalizeProseQualityDiagnosticType(value: any) {
+  return ['missing', 'null', 'array', 'object', 'string', 'number', 'boolean', 'other'].includes(value)
+    ? value
+    : 'other'
+}
+
+function normalizeProseQualityCallbackErrorKind(error: any) {
+  if (error?.quality_error_kind === 'invalid_payload') return 'invalid_payload'
+  const name = typeof error?.name === 'string' ? error.name.trim().toLowerCase() : ''
+  const code = typeof error?.code === 'string' ? error.code.trim().toLowerCase() : ''
+  const message = typeof error?.message === 'string' ? error.message.toLowerCase() : ''
+  if (['aborterror', 'aborted', 'abort_err'].includes(name) || ['aborted', 'abort_err'].includes(code)) return 'aborted'
+  if (['timeouterror', 'timeout'].includes(name) || ['etimedout', 'timeout'].includes(code) || /\btime(?:d)?\s*out\b/.test(message)) {
+    return 'timeout'
+  }
+  return 'callback_error'
+}
+
+function normalizeProseQualityFinishReason(value: any) {
+  const reason = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_')
+  if (['stop', 'end_turn', 'stop_sequence', 'completed'].includes(reason)) return 'stop'
+  if (['length', 'max_tokens', 'max_output_tokens'].includes(reason)) return 'length'
+  if (['content_filter', 'safety', 'recitation', 'blocklist', 'prohibited_content', 'spii', 'image_safety'].includes(reason)) {
+    return 'content_filter'
+  }
+  if (['tool_calls', 'tool_use', 'function_call', 'malformed_function_call', 'unexpected_tool_call'].includes(reason)) {
+    return 'tool_calls'
+  }
+  if (['error', 'failed'].includes(reason)) return 'error'
+  if (['cancelled', 'canceled', 'aborted'].includes(reason)) return 'cancelled'
+  return 'unknown'
+}
+
+export function sanitizeProseQualityReviewTransport(value: any) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const usageSource = value.usage && typeof value.usage === 'object' && !Array.isArray(value.usage)
+    ? value.usage
+    : null
+  const usage = Object.fromEntries(
+    ['input_tokens', 'output_tokens', 'total_tokens']
+      .filter(key => typeof usageSource?.[key] === 'number' && Number.isFinite(usageSource[key]) && usageSource[key] >= 0)
+      .map(key => [key, Math.floor(usageSource[key])]),
+  )
+  const contentLength = typeof value.content_length === 'number'
+    && Number.isFinite(value.content_length)
+    && value.content_length >= 0
+    ? Math.floor(value.content_length)
+    : null
+  return {
+    finish_reason: normalizeProseQualityFinishReason(value.finish_reason),
+    ...(Object.keys(usage).length ? { usage } : {}),
+    ...(contentLength != null ? { content_length: contentLength } : {}),
+  }
+}
+
+function sanitizeProseQualityReviewAttemptDiagnostic(value: any) {
+  const fieldTypes = value?.field_types && typeof value.field_types === 'object' && !Array.isArray(value.field_types)
+    ? value.field_types
+    : {}
+  const dimensionTypes = value?.dimension_types && typeof value.dimension_types === 'object' && !Array.isArray(value.dimension_types)
+    ? value.dimension_types
+    : {}
+  return {
+    attempt: value?.attempt === 2 ? 2 : 1,
+    payload_type: normalizeProseQualityDiagnosticType(value?.payload_type),
+    field_types: {
+      score: normalizeProseQualityDiagnosticType(fieldTypes.score),
+      score_scale: normalizeProseQualityDiagnosticType(fieldTypes.score_scale),
+      dimensions: normalizeProseQualityDiagnosticType(fieldTypes.dimensions),
+      findings: normalizeProseQualityDiagnosticType(fieldTypes.findings),
+      publishable: normalizeProseQualityDiagnosticType(fieldTypes.publishable),
+    },
+    dimension_types: Object.fromEntries(REQUIRED_QUALITY_DIMENSIONS.map(key => [
+      key,
+      normalizeProseQualityDiagnosticType(dimensionTypes[key]),
+    ])),
+    missing_dimensions: REQUIRED_QUALITY_DIMENSIONS.filter(key => Array.isArray(value?.missing_dimensions) && value.missing_dimensions.includes(key)),
+    transport: sanitizeProseQualityReviewTransport(value?.transport),
+  }
+}
+
+function diagnoseProseQualityReviewPayload(value: any, attempt: number) {
+  const objectValue = value && typeof value === 'object' && !Array.isArray(value) ? value : null
+  const dimensions = objectValue?.dimensions && typeof objectValue.dimensions === 'object' && !Array.isArray(objectValue.dimensions)
+    ? objectValue.dimensions
+    : null
+  return {
+    attempt,
+    payload_type: proseQualityDiagnosticType(value),
+    field_types: {
+      score: proseQualityDiagnosticType(objectValue?.score),
+      score_scale: proseQualityDiagnosticType(objectValue?.score_scale ?? objectValue?.scoreScale),
+      dimensions: proseQualityDiagnosticType(objectValue?.dimensions),
+      findings: proseQualityDiagnosticType(objectValue?.findings),
+      publishable: proseQualityDiagnosticType(objectValue?.publishable),
+    },
+    dimension_types: Object.fromEntries(REQUIRED_QUALITY_DIMENSIONS.map(key => [
+      key,
+      proseQualityDiagnosticType(dimensions && Object.prototype.hasOwnProperty.call(dimensions, key) ? dimensions[key] : undefined),
+    ])),
+    missing_dimensions: REQUIRED_QUALITY_DIMENSIONS.filter(key => !dimensions || !Object.prototype.hasOwnProperty.call(dimensions, key)),
+    transport: sanitizeProseQualityReviewTransport(objectValue?.__quality_review_transport),
+  }
+}
+
+async function requestUsableProseQualityReview(
+  review: (input: { text: string; scan: any; round: number; prompt: string; attempt: number }) => Promise<any>,
+  request: { text: string; scan: any; round: number; prompt: string },
+) {
+  const invalidAttempts: any[] = []
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    let payload: any
+    try {
+      payload = await review({ ...request, attempt })
+    } catch (error: any) {
+      if (invalidAttempts.length && error && typeof error === 'object') {
+        error.review_attempts = invalidAttempts
+      }
+      throw error
+    }
+    if (isUsableProseQualityReviewPayload(payload)) return payload
+    invalidAttempts.push(diagnoseProseQualityReviewPayload(payload, attempt))
+  }
+  throw Object.assign(new Error('missing six-dimension review payload'), {
+    quality_error_kind: 'invalid_payload',
+    review_attempts: invalidAttempts,
+  })
+}
+
 export async function runProseQualityLoop(input: {
   initialText: string
   minScore: number
   coreContract?: any
   maxRevisionRounds?: number
   scan: (text: string) => any | Promise<any>
-  review: (input: { text: string; scan: any; round: number; prompt: string }) => Promise<any>
+  review: (input: { text: string; scan: any; round: number; prompt: string; attempt: number }) => Promise<any>
   revise: (input: { text: string; review: any; round: number; prompt: string }) => Promise<any>
 }) {
   const maxRounds = Math.min(2, Math.max(0, Number(input.maxRevisionRounds ?? 2)))
@@ -273,7 +425,7 @@ export async function runProseQualityLoop(input: {
   let scan = await input.scan(finalText)
   let initialPayload: any
   try {
-    initialPayload = await input.review({
+    initialPayload = await requestUsableProseQualityReview(input.review, {
       text: finalText,
       scan,
       round: 0,
@@ -286,10 +438,6 @@ export async function runProseQualityLoop(input: {
   } catch (error) {
     throw qualityLoopError('PROSE_REVIEW_FAILED', '正文初审不可用', { cause: compactQualityError(error) })
   }
-  if (!isUsableProseQualityReviewPayload(initialPayload)) {
-    throw qualityLoopError('PROSE_REVIEW_FAILED', '正文初审没有返回完整六维结果')
-  }
-
   let review = normalizeProseQualityReview(initialPayload)
   let decision = buildProseQualityDecision({
     review,
@@ -338,7 +486,7 @@ export async function runProseQualityLoop(input: {
     finalText = residueNormalization?.text || selection.text
     scan = await input.scan(finalText)
     try {
-      const recheckPayload = await input.review({
+      const recheckPayload = await requestUsableProseQualityReview(input.review, {
         text: finalText,
         scan,
         round,
@@ -348,9 +496,6 @@ export async function runProseQualityLoop(input: {
           deterministicScan: scan,
         }),
       })
-      if (!isUsableProseQualityReviewPayload(recheckPayload)) {
-        throw new Error('missing six-dimension review payload')
-      }
       review = normalizeProseQualityReview(recheckPayload)
     } catch (error) {
       const message = `正文第 ${round} 轮修订后的独立复检不可用`

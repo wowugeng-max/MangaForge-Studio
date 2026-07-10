@@ -143,7 +143,9 @@ import {
 } from '../novel-writing/prose-quality-contracts'
 import {
   assertProseQualityCanStore,
+  proseQualityReviewMaxTokensForAttempt,
   runProseQualityLoop,
+  sanitizeProseQualityReviewTransport,
 } from '../novel-writing/prose-quality-loop'
 import { buildPreStoreStructuralSyncChecks } from '../novel-writing/pre-store-structural-sync-gate'
 import {
@@ -45228,13 +45230,16 @@ export function createNovelWritingService(ctx: {
         coreContract: buildFocusedQualityCoreContract(generationContract),
         maxRevisionRounds: isDraftReviewOnly || isDraftOnly ? 0 : 2,
         scan: text => scanProseForQualityLoop(text, contextPackage, wordTarget),
-        review: async ({ prompt, round }) => {
+        review: async ({ prompt, round, attempt }) => {
           throwIfChapterGenerationAborted()
-          await onStage('review', { status: 'running', phase: round > 0 ? 'quality_recheck' : 'quality_review', round })
-          const result = await executeAgent('review-agent', project, { task: prompt }, {
+          await onStage('review', { status: 'running', phase: round > 0 ? 'quality_recheck' : 'quality_review', round, attempt })
+          const reviewPrompt = attempt > 1
+            ? `${prompt}\n上一次审查没有返回可用的完整六维 JSON。本次必须完整输出 score、score_scale=\"0-100\"、六个 dimensions 和 findings，不得省略或截断。`
+            : prompt
+          const result = await executeAgent('review-agent', project, { task: reviewPrompt }, {
             activeWorkspace,
             modelId: String(ctx.production.getStageModelId(project, 'review', preferredModelId) || ''),
-            maxTokens: 5000,
+            maxTokens: proseQualityReviewMaxTokensForAttempt(attempt),
             temperature: 0.15,
             skipMemory: true,
             signal: options.abortSignal,
@@ -45246,7 +45251,16 @@ export function createNovelWritingService(ctx: {
               llm_diagnostics: buildLLMResultDiagnostics(result),
             })
           }
-          return getNovelPayload(result)
+          const payload = getNovelPayload(result)
+          const diagnostics = buildLLMResultDiagnostics(result)
+          return {
+            ...(payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {}),
+            __quality_review_transport: sanitizeProseQualityReviewTransport({
+              finish_reason: diagnostics.finish_reason,
+              usage: diagnostics.usage,
+              content_length: diagnostics.content_length,
+            }),
+          }
         },
         revise: async ({ prompt, round }) => {
           throwIfChapterGenerationAborted()
