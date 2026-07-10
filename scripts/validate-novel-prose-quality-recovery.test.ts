@@ -32,6 +32,34 @@ function createFragmentedSseResponse(chunks: string[], init: ResponseInit = {}) 
   return new Response(body, { ...init, headers })
 }
 
+function createControlledSseResponse(chunks: string[] = []) {
+  const encoder = new TextEncoder()
+  const cancellations: unknown[] = []
+  let controller!: ReadableStreamDefaultController<Uint8Array>
+  const body = new ReadableStream<Uint8Array>({
+    start(streamController) {
+      controller = streamController
+      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk))
+    },
+    cancel(reason) {
+      cancellations.push(reason)
+    },
+  })
+  const response = new Response(body, {
+    headers: { 'Content-Type': 'text/event-stream; charset=utf-8' },
+  })
+  return { body, cancellations, controller, response }
+}
+
+function serializeValidationError(error: any) {
+  return JSON.stringify({
+    message: error?.message,
+    status: error?.status,
+    error_code: error?.error_code,
+    response: sanitizeValidationValue(error?.response),
+  })
+}
+
 describe('novel prose validation SSE transport', () => {
   test('parses fragmented heartbeat, progress, and multiline done frames', async () => {
     const response = createFragmentedSseResponse([
@@ -55,28 +83,92 @@ describe('novel prose validation SSE transport', () => {
     })
   })
 
+  test('cancels and unlocks an open stream after an early done event', async () => {
+    const controlled = createControlledSseResponse([
+      'data: {"type":"done","result":{"chapter":{"id":10}}}\n\n',
+    ])
+
+    await expect(readProseGenerationSse(controlled.response)).resolves.toMatchObject({ type: 'done' })
+    expect(controlled.cancellations).toHaveLength(1)
+    expect(controlled.body.locked).toBe(false)
+  })
+
+  test('cancels and unlocks an open stream after a parser failure', async () => {
+    const controlled = createControlledSseResponse([
+      'data: {"type":"done",invalid-json}\n\n',
+    ])
+
+    await expect(readProseGenerationSse(controlled.response)).rejects.toMatchObject({
+      error_code: 'PROSE_GENERATION_STREAM_INVALID_JSON',
+    })
+    expect(controlled.cancellations).toHaveLength(1)
+    expect(controlled.body.locked).toBe(false)
+  })
+
+  test('unlocks the body when an AbortError interrupts a pending read', async () => {
+    const controlled = createControlledSseResponse()
+    const reading = readProseGenerationSse(controlled.response)
+    const abortError = new DOMException('stream aborted', 'AbortError')
+
+    controlled.controller.error(abortError)
+
+    await expect(reading).rejects.toBe(abortError)
+    expect(controlled.body.locked).toBe(false)
+  })
+
   test('throws a structured error from an SSE error event', async () => {
+    const secrets = ['sk-test-secret', 'provider-test-secret', 'access-test-secret', 'bearer-test-secret']
     const payload = {
       type: 'error',
-      error: 'quality gate failed',
+      error: 'quality gate failed with sk-test-secret',
       error_code: 'QUALITY_GATE_RETRY_REQUIRED',
-      context_package: { chapter_id: 10 },
+      context_package: {
+        chapter_id: 10,
+        provider_message: 'provider_secret=provider-test-secret access_token access-test-secret',
+        authorization: 'Bearer bearer-test-secret',
+      },
     }
-    const response = createFragmentedSseResponse([
-      'data: {"type":"error","error":"quality gate ',
-      'failed","error_code":"QUALITY_GATE_RETRY_REQUIRED",',
-      '"context_package":{"chapter_id":10}}\n\n',
+    const controlled = createControlledSseResponse([
+      `data: ${JSON.stringify(payload)}\n\n`,
     ])
 
     try {
-      await readProseGenerationSse(response)
+      await readProseGenerationSse(controlled.response)
       throw new Error('expected SSE error event to reject')
     } catch (error: any) {
       expect(error).toBeInstanceOf(Error)
-      expect(error.message).toContain('quality gate failed')
+      expect(error.status).toBe(200)
       expect(error.error_code).toBe('QUALITY_GATE_RETRY_REQUIRED')
-      expect(error.response).toEqual(payload)
+      expect(error.message).toContain('QUALITY_GATE_RETRY_REQUIRED')
+      const serialized = serializeValidationError(error)
+      for (const secret of secrets) {
+        expect(error.message).not.toContain(secret)
+        expect(serialized).not.toContain(secret)
+      }
+      expect(serialized).toContain('QUALITY_GATE_RETRY_REQUIRED')
     }
+    expect(controlled.cancellations).toHaveLength(1)
+    expect(controlled.body.locked).toBe(false)
+  })
+
+  test('does not expose malformed SSE data through parser errors', async () => {
+    const secret = 'sk-test-secret'
+    const controlled = createControlledSseResponse([
+      `data: {"type":"done","api_key":"${secret}"\n\n`,
+    ])
+
+    try {
+      await readProseGenerationSse(controlled.response)
+      throw new Error('expected malformed SSE event to reject')
+    } catch (error: any) {
+      expect(error.status).toBe(200)
+      expect(error.error_code).toBe('PROSE_GENERATION_STREAM_INVALID_JSON')
+      expect(error.message).toContain('PROSE_GENERATION_STREAM_INVALID_JSON')
+      expect(error.message).not.toContain(secret)
+      expect(serializeValidationError(error)).not.toContain(secret)
+    }
+    expect(controlled.cancellations).toHaveLength(1)
+    expect(controlled.body.locked).toBe(false)
   })
 
   test('fails clearly when the SSE stream ends without a done event', async () => {
@@ -86,6 +178,18 @@ describe('novel prose validation SSE transport', () => {
     ])
 
     await expect(readProseGenerationSse(response)).rejects.toThrow('SSE stream ended before a done event')
+    expect(response.body?.locked).toBe(false)
+  })
+
+  test('rejects a done frame that is not terminated by a blank delimiter', async () => {
+    const response = createFragmentedSseResponse([
+      'data: {"type":"done","result":{"chapter":{"id":10}}}',
+    ])
+
+    await expect(readProseGenerationSse(response)).rejects.toMatchObject({
+      error_code: 'PROSE_GENERATION_STREAM_INCOMPLETE',
+    })
+    expect(response.body?.locked).toBe(false)
   })
 
   test('requests the generation endpoint with the SSE transport contract', async () => {
@@ -115,9 +219,11 @@ describe('novel prose validation SSE transport', () => {
   })
 
   test('preserves structured details for non-success HTTP responses', async () => {
+    const secrets = ['sk-test-secret', 'provider-test-secret', 'access-test-secret']
     const fetchImpl = (async () => new Response(JSON.stringify({
-      error: 'project not found',
+      error: 'project not found: sk-test-secret',
       error_code: 'PROJECT_NOT_FOUND',
+      details: 'provider_secret=provider-test-secret access_token=access-test-secret',
     }), {
       status: 404,
       headers: { 'Content-Type': 'application/json' },
@@ -133,10 +239,39 @@ describe('novel prose validation SSE transport', () => {
       expect(error).toBeInstanceOf(Error)
       expect(error.status).toBe(404)
       expect(error.error_code).toBe('PROJECT_NOT_FOUND')
-      expect(error.response).toEqual({
-        error: 'project not found',
-        error_code: 'PROJECT_NOT_FOUND',
-      })
+      expect(error.message).toContain('HTTP 404')
+      expect(error.message).toContain('PROJECT_NOT_FOUND')
+      const serialized = serializeValidationError(error)
+      for (const secret of secrets) {
+        expect(error.message).not.toContain(secret)
+        expect(serialized).not.toContain(secret)
+      }
+      expect(serialized).toContain('PROJECT_NOT_FOUND')
+    }
+  })
+
+  test('does not expose a non-JSON HTTP error body', async () => {
+    const secrets = ['sk-test-secret', 'inline-api-secret']
+    const fetchImpl = (async () => new Response(
+      'upstream rejected sk-test-secret api_key=inline-api-secret',
+      { status: 502, headers: { 'Content-Type': 'text/plain' } },
+    )) as typeof fetch
+
+    try {
+      await requestProseGenerationSse('/novel/chapters/10/generate-prose', {
+        method: 'POST',
+        body: JSON.stringify(buildGenerationRequestBody(1, 217)),
+      }, fetchImpl)
+      throw new Error('expected non-success response to reject')
+    } catch (error: any) {
+      expect(error.status).toBe(502)
+      expect(error.error_code).toBe('PROSE_GENERATION_HTTP_ERROR')
+      expect(error.message).toContain('HTTP 502')
+      const serialized = serializeValidationError(error)
+      for (const secret of secrets) {
+        expect(error.message).not.toContain(secret)
+        expect(serialized).not.toContain(secret)
+      }
     }
   })
 })
@@ -200,13 +335,29 @@ describe('novel prose quality recovery thresholds', () => {
   })
 
   test('removes provider secrets and full prompt fields from validation reports', () => {
+    const inlineSecrets = [
+      'sk-test-secret',
+      'inline-api-secret',
+      'inline-provider-secret',
+      'inline-access-secret',
+      'inline-bearer-secret',
+    ]
     const sanitized = sanitizeValidationValue({
       model_id: 217,
       api_key: 'secret-key',
       headers: { Authorization: 'Bearer secret-key' },
       provider_secret: 'provider-secret',
       prompt: 'FULL PROMPT',
-      nested: { result: 'kept' },
+      nested: {
+        result: 'kept',
+        message: [
+          'upstream sk-test-secret',
+          'api_key=inline-api-secret',
+          'provider_secret: inline-provider-secret',
+          'access_token inline-access-secret',
+          'Bearer inline-bearer-secret',
+        ].join(' '),
+      },
     })
     const text = JSON.stringify(sanitized)
 
@@ -215,6 +366,7 @@ describe('novel prose quality recovery thresholds', () => {
     expect(text).not.toContain('secret-key')
     expect(text).not.toContain('provider-secret')
     expect(text).not.toContain('FULL PROMPT')
+    for (const secret of inlineSecrets) expect(text).not.toContain(secret)
   })
 
   test('builds the real generation request without incomplete or approval overrides', () => {

@@ -123,10 +123,20 @@ export function hasChapterNinePursuitHandoff(tail: string, opening: string, name
 }
 
 const SENSITIVE_REPORT_KEY = /^(?:api[_-]?key|authorization|provider[_-]?secret|client[_-]?secret|access[_-]?token|prompt|full[_-]?prompt|task)$/i
+const SENSITIVE_INLINE_VALUE = /(\b(?:api[_-]?key|provider[_-]?secret|client[_-]?secret|access[_-]?token)\b["']?\s*(?:(?:=|:)\s*|\s+))(?:(?:"[^"\r\n]*")|(?:'[^'\r\n]*')|[^\s,;\]\})]+)/gi
+const BEARER_TOKEN = /\bBearer\s+(?:(?:"[^"\r\n]*")|(?:'[^'\r\n]*')|[^\s,;\]\}]+)/gi
+const OPENAI_STYLE_TOKEN = /\bsk-[a-z0-9][a-z0-9._-]*/gi
+
+function sanitizeValidationString(value: string) {
+  return value
+    .replace(BEARER_TOKEN, 'Bearer [REDACTED]')
+    .replace(SENSITIVE_INLINE_VALUE, '$1[REDACTED]')
+    .replace(OPENAI_STYLE_TOKEN, '[REDACTED]')
+}
 
 export function sanitizeValidationValue(value: any, seen = new WeakSet<object>()): any {
   if (value == null || typeof value === 'number' || typeof value === 'boolean') return value
-  if (typeof value === 'string') return value.replace(/Bearer\s+[^\s"']+/gi, 'Bearer [REDACTED]')
+  if (typeof value === 'string') return sanitizeValidationString(value)
   if (typeof value !== 'object') return String(value)
   if (seen.has(value)) return '[Circular]'
   seen.add(value)
@@ -155,6 +165,11 @@ function compactText(value: any, maxChars = 500) {
 
 function normalizeUrl(value: any) {
   return String(value || '').trim().replace(/\/+$/, '')
+}
+
+function safeValidationErrorCode(value: any, fallback: string) {
+  const code = String(value || '').trim()
+  return /^[A-Z][A-Z0-9_]{0,119}$/.test(code) ? code : fallback
 }
 
 function requireCondition(condition: any, message: string, details: any = {}) {
@@ -205,36 +220,6 @@ async function backupNovelDatabase(workspace: string, backupRoot: string, stamp:
   return backupDir
 }
 
-async function requestJson(path: string, init: RequestInit = {}) {
-  const baseUrl = normalizeUrl(process.env.MANGAFORGE_API_URL || 'http://127.0.0.1:8787/api')
-  const timeoutMs = Math.max(60_000, Number(process.env.PROSE_VALIDATION_HTTP_TIMEOUT_MS || 1_800_000))
-  const headers = new Headers(init.headers)
-  headers.set('Content-Type', 'application/json')
-  headers.set('Accept', 'application/json')
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...init,
-    headers,
-    signal: init.signal || AbortSignal.timeout(timeoutMs),
-  })
-  const text = await response.text()
-  let payload: any = null
-  try {
-    payload = text ? JSON.parse(text) : null
-  } catch {
-    throw Object.assign(new Error(`HTTP ${response.status} 返回了非 JSON 响应：${text.slice(0, 500)}`), {
-      status: response.status,
-    })
-  }
-  if (!response.ok) {
-    throw Object.assign(new Error(`HTTP ${response.status}：${compactText(payload?.error || text, 600)}`), {
-      status: response.status,
-      error_code: payload?.error_code,
-      response: sanitizeValidationValue(payload),
-    })
-  }
-  return payload
-}
-
 function parseSseData(frame: string) {
   const dataLines: string[] = []
   for (const line of frame.split(/\r?\n/)) {
@@ -258,9 +243,10 @@ export async function readProseGenerationSse(response: Response) {
     } catch {
       payload = text
     }
-    throw Object.assign(new Error(`HTTP ${response.status}: ${compactText(payload?.error || text, 600)}`), {
+    const errorCode = safeValidationErrorCode(payload?.error_code, 'PROSE_GENERATION_HTTP_ERROR')
+    throw Object.assign(new Error(`HTTP ${response.status}: prose generation request failed (${errorCode})`), {
       status: response.status,
-      error_code: payload?.error_code,
+      error_code: errorCode,
       response: sanitizeValidationValue(payload),
     })
   }
@@ -275,6 +261,7 @@ export async function readProseGenerationSse(response: Response) {
   const decoder = new TextDecoder()
   let buffer = ''
   let lastPayload: any = null
+  let reachedEof = false
 
   const consumeFrame = (frame: string) => {
     const data = parseSseData(frame)
@@ -283,46 +270,60 @@ export async function readProseGenerationSse(response: Response) {
     try {
       payload = JSON.parse(data)
     } catch {
-      throw Object.assign(new Error(`SSE event returned invalid JSON: ${compactText(data, 500)}`), {
+      const errorCode = 'PROSE_GENERATION_STREAM_INVALID_JSON'
+      throw Object.assign(new Error(`Prose generation stream failed (${errorCode})`), {
         status: response.status,
-        error_code: 'PROSE_GENERATION_STREAM_INVALID_JSON',
+        error_code: errorCode,
         response: sanitizeValidationValue({ data }),
       })
     }
     lastPayload = payload
     if (payload?.type === 'error') {
-      throw Object.assign(new Error(`SSE generation failed: ${compactText(payload?.error || payload?.message, 600)}`), {
+      const errorCode = safeValidationErrorCode(payload?.error_code, 'PROSE_GENERATION_FAILED')
+      throw Object.assign(new Error(`Prose generation stream failed (${errorCode})`), {
         status: response.status,
-        error_code: payload?.error_code,
+        error_code: errorCode,
         response: sanitizeValidationValue(payload),
       })
     }
     return payload?.type === 'done' ? payload : null
   }
 
-  while (true) {
-    const chunk = await reader.read()
-    buffer += chunk.done ? decoder.decode() : decoder.decode(chunk.value, { stream: true })
-    let boundary = buffer.match(/\r?\n\r?\n/)
-    while (boundary?.index != null) {
-      const frame = buffer.slice(0, boundary.index)
-      buffer = buffer.slice(boundary.index + boundary[0].length)
-      const donePayload = consumeFrame(frame)
-      if (donePayload) return donePayload
-      boundary = buffer.match(/\r?\n\r?\n/)
+  try {
+    while (true) {
+      const chunk = await reader.read()
+      if (chunk.done) {
+        reachedEof = true
+        buffer += decoder.decode()
+      } else {
+        buffer += decoder.decode(chunk.value, { stream: true })
+      }
+      let boundary = buffer.match(/\r?\n\r?\n/)
+      while (boundary?.index != null) {
+        const frame = buffer.slice(0, boundary.index)
+        buffer = buffer.slice(boundary.index + boundary[0].length)
+        const donePayload = consumeFrame(frame)
+        if (donePayload) return donePayload
+        boundary = buffer.match(/\r?\n\r?\n/)
+      }
+      if (chunk.done) break
     }
-    if (chunk.done) break
-  }
 
-  if (buffer.trim()) {
-    const donePayload = consumeFrame(buffer)
-    if (donePayload) return donePayload
+    throw Object.assign(new Error('SSE stream ended before a done event'), {
+      status: response.status,
+      error_code: 'PROSE_GENERATION_STREAM_INCOMPLETE',
+      response: sanitizeValidationValue(lastPayload),
+    })
+  } finally {
+    if (!reachedEof) {
+      try {
+        await reader.cancel()
+      } catch {
+        // Preserve the terminal parser/read result while still releasing the lock.
+      }
+    }
+    reader.releaseLock()
   }
-  throw Object.assign(new Error('SSE stream ended before a done event'), {
-    status: response.status,
-    error_code: 'PROSE_GENERATION_STREAM_INCOMPLETE',
-    response: sanitizeValidationValue(lastPayload),
-  })
 }
 
 export async function requestProseGenerationSse(
