@@ -130,9 +130,19 @@ describe('novel writing service prose quality wiring', () => {
       '借自己制造的盲区夺下通讯器，继续迫使追捕队后撤',
     )
     const editorText = `${draftText}${'商业主编增加的冗余解释没有改变场景状态。'.repeat(30)}`
+    const editorSceneBreakdown = [{
+      scene_no: 1,
+      title: '不应保留的 editor 场景回执',
+      scene_card_receipts: {
+        goal_obstacle_change_delivered: true,
+        evidence: ['商业主编增加的冗余解释'],
+      },
+    }]
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText,
       editorText,
+      editorSceneBreakdown,
+      editorContinuityNotes: ['不应保留的 editor 连续性'],
     })
 
     const result = await harness.service.generateChapterForGroup(
@@ -151,6 +161,8 @@ describe('novel writing service prose quality wiring', () => {
     expect(countProseChars(editorText)).toBeGreaterThan(1100)
     expect(result.chapter.chapter_text).toBe(expectedStoredText)
     expect(result.chapter.chapter_text).not.toContain('商业主编增加的冗余解释')
+    expect(result.chapter.continuity_notes || []).not.toContain('不应保留的 editor 连续性')
+    expect(result.chapter.raw_payload?.generated_scene_breakdown || []).not.toEqual(editorSceneBreakdown)
     expect(result.editor_rewrite).toMatchObject({
       edited: false,
       discarded: true,
@@ -160,6 +172,35 @@ describe('novel writing service prose quality wiring', () => {
     expect(result.quality_loop.decision.passed).toBe(true)
     expect(harness.storeCalls).toBe(1)
     expect(harness.storyStateTexts).toEqual([expectedStoredText])
+  })
+
+  test('does not restore a pre-editor draft that only passed the word-target soft cap', async () => {
+    const baseText = buildPipelineProse(
+      '江澈踏碎路面，飞石逼退第一排追兵，铁门前终于露出缺口。',
+      '借自己制造的盲区夺下通讯器，继续迫使追捕队后撤',
+    )
+    const softCapDraft = `${baseText}${'补'.repeat(1110 - countProseChars(baseText))}`
+    const editorText = `${softCapDraft}${'商业主编增加的冗余解释。'.repeat(35)}`
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText: softCapDraft,
+      editorText,
+    })
+
+    await expect(harness.service.generateChapterForGroup(
+      harness.workspace,
+      harness.project.id,
+      harness.chapter.id,
+      {
+        model_id: 217,
+        target_word_count: 1000,
+        quality_threshold: 78,
+        auto_repair_quality_gate: true,
+      },
+    )).rejects.toMatchObject({ code: 'PROSE_WORD_TARGET_LONG' })
+
+    expect(countProseChars(softCapDraft)).toBe(1110)
+    expect(harness.storeCalls).toBe(0)
+    expect(harness.storyStateCalls).toBe(0)
   })
 
   test('rechecks revised prose before unattended quality gate blocks chapter advance', () => {
