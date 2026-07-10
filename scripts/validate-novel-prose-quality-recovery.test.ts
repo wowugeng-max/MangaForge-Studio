@@ -1,12 +1,17 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  blindReviewMaxTokensForAttempt,
   buildBlindScoreInputs,
   buildGenerationRequestBody,
   evaluateBlindScoreThresholds,
+  extractBlindReviewAgentPayload,
   hasChapterNinePursuitHandoff,
+  isUsableBlindReviewPayload,
   readProseGenerationSse,
+  requestUsableBlindReview,
   requestProseGenerationSse,
   sanitizeValidationValue,
+  summarizeValidationError,
 } from './validate-novel-prose-quality-recovery'
 
 const dimensions = [
@@ -18,6 +23,18 @@ const dimensions = [
   'prose_naturalness',
   'ending_hook',
 ]
+
+function completeBlindReviewPayload(score = 8) {
+  return {
+    samples: ['A', 'B', 'C', 'D'].map(label => ({
+      label,
+      scores: Object.fromEntries(dimensions.map(dimension => [dimension, score])),
+      evidence: Object.fromEntries(dimensions.map(dimension => [dimension, `${label}正文证据`])),
+      publishable: true,
+      materially_below_publishable_baseline: false,
+    })),
+  }
+}
 
 function createFragmentedSseResponse(chunks: string[], init: ResponseInit = {}) {
   const encoder = new TextEncoder()
@@ -277,6 +294,94 @@ describe('novel prose validation SSE transport', () => {
 })
 
 describe('novel prose quality recovery thresholds', () => {
+  test('requires complete evidence-backed A-D blind review payloads', () => {
+    const complete = completeBlindReviewPayload()
+    expect(isUsableBlindReviewPayload(complete)).toBe(true)
+    expect(isUsableBlindReviewPayload({ samples: complete.samples.slice(0, 3) })).toBe(false)
+    expect(isUsableBlindReviewPayload({
+      samples: complete.samples.map((sample, index) => index === 0
+        ? { ...sample, scores: { ...sample.scores, continuity: true } }
+        : sample),
+    })).toBe(false)
+    expect(isUsableBlindReviewPayload({
+      samples: complete.samples.map((sample, index) => index === 0
+        ? { ...sample, evidence: { ...sample.evidence, continuity: '' } }
+        : sample),
+    })).toBe(false)
+  })
+
+  test('retries one unusable blind review with a larger bounded output budget', async () => {
+    const attempts: number[] = []
+    const valid = { payload: completeBlindReviewPayload(), usage: { output_tokens: 7000 } }
+    const result = await requestUsableBlindReview(async attempt => {
+      attempts.push(attempt)
+      return attempt === 1 ? { payload: {} } : valid
+    })
+
+    expect(result).toBe(valid)
+    expect(attempts).toEqual([1, 2])
+    expect(blindReviewMaxTokensForAttempt(1)).toBe(5_000)
+    expect(blindReviewMaxTokensForAttempt(2)).toBe(10_000)
+    expect(blindReviewMaxTokensForAttempt(99)).toBe(10_000)
+  })
+
+  test('fails blind review closed after two invalid payloads without persisting arbitrary values', async () => {
+    const sentinel = 'MODEL_CONTROLLED_BLIND_SENTINEL'
+    const error = await requestUsableBlindReview(async attempt => ({
+      payload: {
+        samples: [{ label: sentinel, [sentinel]: sentinel }],
+        [sentinel]: sentinel,
+      },
+      attempt,
+    })).then(() => null, (caught: any) => caught)
+
+    expect(error?.code).toBe('BLIND_REVIEW_UNAVAILABLE')
+    expect(error?.attempts).toHaveLength(2)
+    expect(JSON.stringify(error)).not.toContain(sentinel)
+  })
+
+  test('does not retry a blind review callback exception', async () => {
+    const sentinel = 'MODEL_CONTROLLED_PROVIDER_ERROR_SENTINEL'
+    let calls = 0
+    const error = await requestUsableBlindReview(async () => {
+      calls += 1
+      return { payload: extractBlindReviewAgentPayload({ error: sentinel }) }
+    }).then(() => null, (caught: any) => caught)
+
+    expect(error?.code).toBe('BLIND_REVIEW_REQUEST_FAILED')
+    expect(calls).toBe(1)
+    expect(JSON.stringify(error)).not.toContain(sentinel)
+  })
+
+  test('summarizes arbitrary callback failures without persisting their code or message', () => {
+    const sentinel = 'MODEL_CONTROLLED_VALIDATION_ERROR_SENTINEL'
+    const summary = summarizeValidationError(Object.assign(new Error(sentinel), { code: sentinel }))
+
+    expect(summary).toMatchObject({
+      code: 'PROSE_VALIDATION_FAILED',
+      message: '小说正文质量验收失败',
+      kind: 'unexpected_error',
+      field_types: { code: 'string', message: 'string' },
+    })
+    expect(JSON.stringify(summary)).not.toContain(sentinel)
+    expect(summarizeValidationError(Object.assign(new Error(sentinel), {
+      code: 'BLIND_REVIEW_REQUEST_FAILED',
+    }))).toMatchObject({
+      code: 'BLIND_REVIEW_REQUEST_FAILED',
+      message: '匿名评审模型请求不可用',
+      kind: 'blind_review_request',
+    })
+    for (const prototypeKey of ['constructor', 'toString', '__proto__']) {
+      expect(summarizeValidationError(Object.assign(new Error(sentinel), {
+        code: prototypeKey,
+      }))).toMatchObject({
+        code: 'PROSE_VALIDATION_FAILED',
+        message: '小说正文质量验收失败',
+        kind: 'unexpected_error',
+      })
+    }
+  })
+
   test('accepts candidate within baseline quality tolerances', () => {
     const baseline = dimensions.map(dimension => ({ dimension, scores: [8, 8, 7, 8, 8, 8] }))
     const candidate = dimensions.map(dimension => ({ dimension, scores: [7.5, 8] }))

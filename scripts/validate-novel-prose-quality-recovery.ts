@@ -28,6 +28,31 @@ export const BLIND_REVIEW_DIMENSIONS = [
   'ending_hook',
 ] as const
 
+const BLIND_REVIEW_LABELS = ['A', 'B', 'C', 'D'] as const
+
+const VALIDATION_ERROR_SUMMARIES: Record<string, { kind: string; message: string }> = {
+  BLIND_REVIEW_UNAVAILABLE: { kind: 'blind_review_payload', message: '匿名评审没有返回完整结构' },
+  BLIND_REVIEW_REQUEST_FAILED: { kind: 'blind_review_request', message: '匿名评审模型请求不可用' },
+  BLIND_QUALITY_THRESHOLD_FAILED: { kind: 'blind_quality_threshold', message: '第 10 章没有达到前三章匿名质量基线' },
+  PROSE_WORD_TARGET_LONG: { kind: 'generation_word_target', message: '正文生成未通过字数上限' },
+  PROSE_WORD_TARGET_SHORT: { kind: 'generation_word_target', message: '正文生成未通过字数下限' },
+  PROSE_QUALITY_RECHECK_UNAVAILABLE: { kind: 'generation_quality', message: '正文独立复检不可用' },
+  PROSE_REVIEW_FAILED: { kind: 'generation_quality', message: '正文初审不可用' },
+  PROSE_QUALITY_GATE_BLOCKED: { kind: 'generation_quality', message: '正文质量门禁未通过' },
+  PROSE_CORE_PROMPT_BUDGET_EXCEEDED: { kind: 'generation_prompt', message: '正文核心提示词超过预算' },
+  PROSE_PREFLIGHT_BLOCKED: { kind: 'generation_preflight', message: '正文写前材料门禁未通过' },
+  PROSE_STRICT_PREFLIGHT_BLOCKED: { kind: 'generation_preflight', message: '正文严格写前门禁未通过' },
+  PROSE_LAUNCH_GATE_BLOCKED: { kind: 'generation_preflight', message: '正文启动门禁未通过' },
+  PROSE_OH_STORY_GATE_BLOCKED: { kind: 'generation_preflight', message: 'oh-story 导演门禁未通过' },
+  PROSE_SCENE_CARDS_BLOCKED: { kind: 'generation_preflight', message: '正文场景卡门禁未通过' },
+  PROSE_REFERENCE_SAFETY_BLOCKED: { kind: 'generation_safety', message: '正文参考安全门禁未通过' },
+  PROSE_GENERATION_STREAM_FAILED: { kind: 'generation_transport', message: '正文生成流失败' },
+  PROSE_GENERATION_STREAM_INCOMPLETE: { kind: 'generation_transport', message: '正文生成流未完整结束' },
+  PROSE_GENERATION_STREAM_INVALID_JSON: { kind: 'generation_transport', message: '正文生成流返回无效结构' },
+  PROSE_GENERATION_HTTP_ERROR: { kind: 'generation_transport', message: '正文生成 HTTP 请求失败' },
+  PROSE_VALIDATION_FAILED: { kind: 'validation', message: '小说正文质量验收失败' },
+}
+
 type BlindReviewRun = {
   order: number[]
   payload: any
@@ -113,6 +138,109 @@ export function buildBlindScoreInputs(runs: BlindReviewRun[]) {
   if (baseline.some(row => row.scores.length !== 6)) throw new Error('匿名评审没有为基线章节生成完整的六组分数')
   if (candidate.some(row => row.scores.length !== 2)) throw new Error('匿名评审没有为候选章节生成完整的两组分数')
   return { baseline, candidate, publishable_checks: publishableChecks }
+}
+
+function isFiniteBlindScore(value: any) {
+  if (typeof value === 'number') return Number.isFinite(value)
+  if (typeof value !== 'string' || !value.trim()) return false
+  return Number.isFinite(Number(value))
+}
+
+function isUsableBlindReviewSample(sample: any, label: string) {
+  if (!sample || typeof sample !== 'object' || Array.isArray(sample) || sample.label !== label) return false
+  if (typeof sample.publishable !== 'boolean' || typeof sample.materially_below_publishable_baseline !== 'boolean') return false
+  return BLIND_REVIEW_DIMENSIONS.every(dimension => {
+    const score = sample?.scores?.[dimension]
+    const evidence = sample?.evidence?.[dimension]
+    if (!isFiniteBlindScore(score) || Number(score) < 1 || Number(score) > 10) return false
+    return typeof evidence === 'string' && Boolean(evidence.trim())
+  })
+}
+
+export function isUsableBlindReviewPayload(payload: any) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !Array.isArray(payload.samples)) return false
+  if (payload.samples.length !== BLIND_REVIEW_LABELS.length) return false
+  const sampleByLabel = new Map(payload.samples.map((sample: any) => [sample?.label, sample]))
+  if (sampleByLabel.size !== BLIND_REVIEW_LABELS.length) return false
+  return BLIND_REVIEW_LABELS.every(label => isUsableBlindReviewSample(sampleByLabel.get(label), label))
+}
+
+export function blindReviewMaxTokensForAttempt(attempt: number) {
+  const rawAttempt = Number(attempt)
+  return Number.isFinite(rawAttempt) && rawAttempt >= 2 ? 10_000 : 5_000
+}
+
+function blindReviewDiagnosticType(value: any) {
+  if (value === undefined) return 'missing'
+  if (value === null) return 'null'
+  if (Array.isArray(value)) return 'array'
+  if (typeof value === 'object') return 'object'
+  if (typeof value === 'string') return 'string'
+  if (typeof value === 'number') return 'number'
+  if (typeof value === 'boolean') return 'boolean'
+  return 'other'
+}
+
+export function summarizeValidationError(error: any) {
+  const rawCode = typeof error?.code === 'string'
+    ? error.code
+    : typeof error?.error_code === 'string'
+      ? error.error_code
+      : ''
+  const known = Object.prototype.hasOwnProperty.call(VALIDATION_ERROR_SUMMARIES, rawCode)
+    ? VALIDATION_ERROR_SUMMARIES[rawCode]
+    : undefined
+  const code = known ? rawCode : 'PROSE_VALIDATION_FAILED'
+  const summary = known || VALIDATION_ERROR_SUMMARIES.PROSE_VALIDATION_FAILED
+  return {
+    code,
+    message: summary.message,
+    kind: known ? summary.kind : 'unexpected_error',
+    field_types: {
+      code: blindReviewDiagnosticType(error?.code ?? error?.error_code),
+      message: blindReviewDiagnosticType(error?.message),
+    },
+  }
+}
+
+function diagnoseBlindReviewPayload(payload: any, attempt: number) {
+  const objectPayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null
+  const samples = Array.isArray(objectPayload?.samples) ? objectPayload.samples : []
+  return {
+    attempt,
+    payload_type: blindReviewDiagnosticType(payload),
+    samples_type: blindReviewDiagnosticType(objectPayload?.samples),
+    sample_count: samples.length,
+    recognized_labels: BLIND_REVIEW_LABELS.filter(label => samples.some((sample: any) => sample?.label === label)),
+    complete_sample_count: BLIND_REVIEW_LABELS.filter(label => {
+      const sample = samples.find((item: any) => item?.label === label)
+      return isUsableBlindReviewSample(sample, label)
+    }).length,
+  }
+}
+
+export async function requestUsableBlindReview<T extends { payload: any }>(
+  request: (attempt: number) => Promise<T>,
+) {
+  const attempts = []
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const result = await request(attempt)
+    if (isUsableBlindReviewPayload(result?.payload)) return result
+    attempts.push(diagnoseBlindReviewPayload(result?.payload, attempt))
+  }
+  throw Object.assign(new Error('匿名评审没有返回完整 A-D 七维证据结果'), {
+    code: 'BLIND_REVIEW_UNAVAILABLE',
+    attempts,
+  })
+}
+
+export function extractBlindReviewAgentPayload(result: any) {
+  if (result?.error) {
+    throw Object.assign(new Error('匿名评审模型请求不可用'), {
+      code: 'BLIND_REVIEW_REQUEST_FAILED',
+    })
+  }
+  return getNovelPayload(result)
 }
 
 export function hasChapterNinePursuitHandoff(tail: string, opening: string, names: string[]) {
@@ -401,21 +529,26 @@ async function runBlindReview(input: {
     JSON.stringify(samples),
     `只输出 JSON：{"samples":[{"label":"A","scores":${JSON.stringify(Object.fromEntries(BLIND_REVIEW_DIMENSIONS.map(key => [key, 0])))} ,"evidence":${JSON.stringify(Object.fromEntries(BLIND_REVIEW_DIMENSIONS.map(key => [key, '正文短句'])))} ,"publishable":false,"materially_below_publishable_baseline":false}]}`,
   ].join('\n')
-  const result = await executeNovelAgent('review-agent', input.project, { task }, {
-    activeWorkspace: input.workspace,
-    modelId: input.modelId,
-    temperature: 0.1,
-    maxTokens: 5000,
-    skipMemory: true,
-    responseMode: 'non_stream',
-    timeoutMs: 300_000,
+  return requestUsableBlindReview(async attempt => {
+    const attemptTask = attempt > 1
+      ? `${task}\n上一次评审没有返回完整可用的 A-D JSON。本次必须输出四个样本、全部七维 1-10 分、逐维正文证据和两个 boolean；每条 evidence 只引用一处不超过 30 字的短句，禁止 Markdown。`
+      : task
+    const result = await executeNovelAgent('review-agent', input.project, { task: attemptTask }, {
+      activeWorkspace: input.workspace,
+      modelId: input.modelId,
+      temperature: 0.1,
+      maxTokens: blindReviewMaxTokensForAttempt(attempt),
+      skipMemory: true,
+      responseMode: 'non_stream',
+      timeoutMs: 300_000,
+    })
+    return {
+      order: input.order,
+      payload: extractBlindReviewAgentPayload(result),
+      usage: (result as any).usage || (result as any).raw?.usage || null,
+      model_name: (result as any).modelName || (result as any).model_name || '',
+    }
   })
-  return {
-    order: input.order,
-    payload: getNovelPayload(result),
-    usage: (result as any).usage || (result as any).raw?.usage || null,
-    model_name: (result as any).modelName || (result as any).model_name || '',
-  }
 }
 
 async function writeValidationReport(reportPath: string, report: any) {
@@ -621,10 +754,7 @@ export async function runNovelProseQualityRecoveryValidation() {
   } catch (error: any) {
     report.status = 'failed'
     report.completed_at = report.completed_at || new Date().toISOString()
-    report.error = report.error || {
-      code: compactText(error?.code || error?.error_code || 'PROSE_VALIDATION_FAILED', 120),
-      message: compactText(error?.message || error, 800),
-    }
+    report.error = report.error || summarizeValidationError(error)
     if (!reportWritten) {
       await writeValidationReport(reportPath, report)
       reportWritten = true
@@ -643,7 +773,7 @@ export async function runNovelProseQualityRecoveryValidation() {
 
 if (import.meta.main) {
   runNovelProseQualityRecoveryValidation().catch(error => {
-    console.error(compactText(error?.message || error, 800))
+    console.error(summarizeValidationError(error).message)
     process.exitCode = 1
   })
 }
