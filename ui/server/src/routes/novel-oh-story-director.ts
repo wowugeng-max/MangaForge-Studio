@@ -1,3 +1,5 @@
+import { normalizeProseContractKey, PROSE_RISK_CONTRACT_LIMIT } from '../novel-writing/prose-generation-contract'
+
 export type OhStoryDirectorStage = 'project_creation' | 'pre_draft' | 'drafting' | 'post_draft' | 'handoff'
 
 export type OhStoryDirectorReadiness =
@@ -257,39 +259,72 @@ export function selectOhStoryDirectorContracts(input: RecordLike): {
 } {
   const chapterTarget = input?.chapter_target ?? {}
   const warnings = asArray(input?.preflight?.warnings ?? [])
-  const warningText = warnings.map(issueText).join('\n')
+  const riskText = [
+    ...warnings.map(issueText),
+    issueText(chapterTarget?.goal),
+    issueText(chapterTarget?.summary),
+    issueText(chapterTarget?.conflict),
+    issueText(chapterTarget?.ending_hook || chapterTarget?.endingHook),
+  ].filter(Boolean).join('\n')
   const selected_contracts: OhStoryDirectorContractSelection[] = []
   const suppressed_contracts: OhStoryDirectorContractSelection[] = []
   const budget = cloneBudget()
 
-  const select = (key: string, detailLevel: OhStoryDirectorContractSelection['detail_level'], reason: string) => {
-    selected_contracts.push({ key, reason, detail_level: detailLevel })
-    budget[detailLevel].push(key)
-  }
-  const suppress = (key: string, reason: string) => {
-    suppressed_contracts.push({ key, reason, detail_level: 'reference' })
-    budget.omit.push(key)
-  }
+  const riskRules: Array<{
+    key: string
+    pattern: RegExp
+    priority: number
+    alwaysRelevant?: (target: RecordLike) => boolean
+  }> = [
+    { key: 'continuity_heat', pattern: /承接|连续性|上一章|状态|时间线/, priority: 110 },
+    { key: 'story_power', pattern: /核心承诺|故事力|主线|回报|目标|阻碍|戏剧单元|scene card/i, priority: 100, alwaysRelevant: target => hasText(target?.conflict) },
+    { key: 'character_behavior', pattern: /主角|角色|人设|犯错|行为|能动性/, priority: 95, alwaysRelevant: target => Boolean(target?.character_behavior_contract || target?.characterBehaviorContract) },
+    { key: 'dialogue', pattern: /对白|口吻|台词|声线/, priority: 90 },
+    { key: 'chapter_hook', pattern: /钩子|追读|章末|翻页/, priority: 85 },
+    { key: 'conflict_structure', pattern: /冲突|阻碍|升级|因果|场景变化/, priority: 80 },
+    { key: 'prose_craft', pattern: /文风|AI味|段落|句式|叙事/, priority: 75 },
+    { key: 'quality_audit', pattern: /质量|退化|截断|格式|语言/, priority: 70 },
+    { key: 'state_tracking', pattern: /设定|事实|状态|来源|安全/, priority: 65 },
+    { key: 'longform_structure', pattern: /长线|长篇|结构|卷|批次|航线|longform/i, priority: 55 },
+  ]
+  const availableKeys = unique(Object.keys(chapterTarget)
+    .filter(key => /(?:_contract|Contract)$/.test(key) && chapterTarget[key])
+    .map(normalizeProseContractKey)
+    .filter(Boolean))
+  const candidates = availableKeys
+    .map(key => {
+      const rule = riskRules.find(item => item.key === key)
+      const matched = Boolean(rule?.pattern.test(riskText) || rule?.alwaysRelevant?.(chapterTarget))
+      const longformIrrelevant = key === 'longform_structure'
+        && input?.stage !== 'project_creation'
+        && !rule?.pattern.test(riskText)
+      return {
+        key,
+        matched,
+        suppressed: longformIrrelevant,
+        priority: (rule?.priority || 20) + (matched ? 100 : 0),
+        detail_level: (matched ? 'compact' : 'reference') as OhStoryDirectorContractSelection['detail_level'],
+        reason: matched
+          ? `Current chapter risk requires ${key} guardrails`
+          : `${key} remains available as a bounded reference`,
+      }
+    })
+  const selected = candidates
+    .filter(item => !item.suppressed)
+    .sort((left, right) => right.priority - left.priority || left.key.localeCompare(right.key))
+    .slice(0, PROSE_RISK_CONTRACT_LIMIT)
+  const selectedKeys = new Set(selected.map(item => item.key))
 
-  const hasLocalStoryRisk = hasText(chapterTarget?.conflict) || /目标|阻碍|变化|反馈|戏剧单元|scene card/.test(warningText)
-  if (chapterTarget?.story_power_contract && hasLocalStoryRisk) {
-    select('story_power', 'compact', 'Local drafting risk needs story-power checks without full contract payload')
-  } else if (chapterTarget?.story_power_contract) {
-    select('story_power', 'reference', 'Story-power contract remains available as reference')
+  for (const item of selected) {
+    selected_contracts.push({ key: item.key, reason: item.reason, detail_level: item.detail_level })
+    budget[item.detail_level].push(item.key)
   }
-
-  const hasCharacterRisk = Boolean(chapterTarget?.character_behavior_contract) || /主角|角色|人设|犯错|行为/.test(warningText)
-  if (chapterTarget?.character_behavior_contract && hasCharacterRisk) {
-    select('character_behavior', 'compact', 'Local drafting risk needs character behavior guardrails')
-  }
-
-  if (chapterTarget?.longform_structure_contract) {
-    const longformRelevant = input?.stage === 'project_creation' || /长线|结构|卷|主线|longform/.test(warningText)
-    if (longformRelevant) {
-      select('longform_structure', input?.stage === 'project_creation' ? 'reference' : 'compact', 'Longform structure is relevant to the current risk')
-    } else {
-      suppress('longform_structure_contract', 'Local drafting risk does not need longform structure payload')
-    }
+  for (const item of candidates.filter(candidate => !selectedKeys.has(candidate.key))) {
+    const reason = item.suppressed
+      ? 'Local drafting risk does not need longform structure payload'
+      : 'Contract omitted by the four-risk prompt budget'
+    suppressed_contracts.push({ key: item.key, reason, detail_level: 'reference' })
+    budget.omit.push(item.key)
   }
 
   budget.full = unique(budget.full)
@@ -392,6 +427,8 @@ export function buildOhStoryDirectorForPreDraft(input: RecordLike): OhStoryDirec
   const blockers = asArray(preflight?.blockers ?? input?.blockers)
   const warnings = asArray(preflight?.warnings ?? input?.warnings)
   const preflightReady = preflight?.ready === true
+  const strictReady = preflight?.strict_ready !== false
+  const strictFailures = asArray(preflight?.checks).filter((item: any) => item?.ok === false && item?.severity !== 'low')
   const blockingIssues = [
     ...blockers.map((message: unknown) => ({ message, source: 'preflight.blockers' })),
     ...(preflightReady ? [] : warnings.map((message: unknown) => ({ message, source: 'preflight.warnings' }))),
@@ -416,6 +453,19 @@ export function buildOhStoryDirectorForPreDraft(input: RecordLike): OhStoryDirec
     const detail = issues.map(issue => issue.detail).join('\n')
     return repair(repairKeyForPreDraftCategory(category), category, repairLabelForCategory(category), detail, true)
   })
+  if (!strictReady) {
+    const strictDetail = strictFailures
+      .map((item: any) => issueText(item?.fix || item?.label || item?.key || item))
+      .filter(Boolean)
+      .join('\n') || warnings.map(issueText).filter(Boolean).join('\n') || 'Strict preflight is not ready.'
+    required_repairs.push(repair(
+      'pre_draft_strict_readiness',
+      'missing_context',
+      'Strict pre-draft checks must pass',
+      strictDetail,
+      true,
+    ))
+  }
   const deferred_repairs = Array.from(groupedAdvisories.entries()).map(([category, issues]) => {
     const detail = issues.map(issue => issue.detail).join('\n')
     return repair(repairKeyForPreDraftCategory(category), category, repairLabelForCategory(category), detail, false)
@@ -445,7 +495,15 @@ export function buildOhStoryDirectorForPreDraft(input: RecordLike): OhStoryDirec
       issues.filter(issue => issue.source === source).map(issue => issue.detail).join('\n'),
     ))
   })
-  const issueEvidenceItems = [...evidenceItems, ...advisoryEvidenceItems]
+  const strictEvidenceItems = !strictReady
+    ? [evidence(
+        'pre_draft_strict_readiness',
+        'blocked',
+        'preflight.strict_ready',
+        required_repairs.find(item => item.key === 'pre_draft_strict_readiness')?.detail,
+      )]
+    : []
+  const issueEvidenceItems = [...evidenceItems, ...strictEvidenceItems, ...advisoryEvidenceItems]
 
   return {
     stage: 'pre_draft',

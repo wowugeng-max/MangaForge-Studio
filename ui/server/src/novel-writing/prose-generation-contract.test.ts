@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   buildProseGenerationContract,
+  evaluateProsePreDraftGate,
   mergeProseGenerationRequestOverrides,
   normalizeProseContractKey,
 } from './prose-generation-contract'
@@ -57,5 +58,75 @@ describe('prose generation contract', () => {
     expect(() => {
       ;(contract.context.chapter_target as any).title = '非法修改'
     }).toThrow()
+  })
+
+  test('does not let allow_incomplete bypass a hard launch gate', () => {
+    const contract = buildProseGenerationContract({
+      chapter_target: { chapter_no: 10, scene_cards: [{ scene_no: 1 }] },
+      preflight: { ready: true, strict_ready: true },
+      chapter_launch_gate: { status: 'blocked', summary: '第九章合围没有承接动作' },
+      oh_story_director: { readiness: 'ready', required_repairs: [] },
+    })
+
+    const decision = evaluateProsePreDraftGate(contract, {
+      requireSceneCards: true,
+      allowIncomplete: true,
+    })
+
+    expect(decision).toMatchObject({
+      passed: false,
+      code: 'PROSE_LAUNCH_GATE_BLOCKED',
+    })
+    expect(decision.reasons.join('；')).toContain('合围')
+  })
+
+  test('blocks strict preflight independently from general preflight readiness', () => {
+    const contract = buildProseGenerationContract({
+      chapter_target: { chapter_no: 10, scene_cards: [{ scene_no: 1 }] },
+      preflight: {
+        ready: true,
+        strict_ready: false,
+        blockers: [],
+        warnings: ['连续性材料不足'],
+        checks: [{ key: 'continuity', ok: false, severity: 'medium', fix: '补齐第九章尾段。' }],
+      },
+      oh_story_director: { readiness: 'needs_repair', required_repairs: [] },
+    })
+
+    expect(evaluateProsePreDraftGate(contract, { allowIncomplete: true })).toMatchObject({
+      passed: false,
+      code: 'PROSE_STRICT_PREFLIGHT_BLOCKED',
+    })
+  })
+
+  test('allows scene-card generation only after every earlier hard gate passes', () => {
+    const contract = buildProseGenerationContract({
+      chapter_target: { chapter_no: 10, scene_cards: [] },
+      preflight: { ready: true, strict_ready: true },
+      oh_story_director: { readiness: 'ready', required_repairs: [] },
+    })
+
+    expect(evaluateProsePreDraftGate(contract, { requireSceneCards: false }).passed).toBe(true)
+    expect(evaluateProsePreDraftGate(contract, { requireSceneCards: true })).toMatchObject({
+      passed: false,
+      code: 'PROSE_SCENE_CARDS_BLOCKED',
+    })
+  })
+
+  test('blocks a non-ready oh-story director after preflight passes', () => {
+    const contract = buildProseGenerationContract({
+      chapter_target: { chapter_no: 10, scene_cards: [{ scene_no: 1 }] },
+      preflight: { ready: true, strict_ready: true },
+      oh_story_director: {
+        readiness: 'needs_repair',
+        required_repairs: [{ key: 'continuity', detail: '补齐第九章尾段。' }],
+      },
+    })
+
+    expect(evaluateProsePreDraftGate(contract)).toMatchObject({
+      passed: false,
+      code: 'PROSE_OH_STORY_GATE_BLOCKED',
+      reasons: ['补齐第九章尾段。'],
+    })
   })
 })

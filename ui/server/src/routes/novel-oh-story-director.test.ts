@@ -105,8 +105,41 @@ describe('oh-story director core', () => {
     expect(selection.selected_contracts.find(item => item.key === 'story_power')?.detail_level).toBe('compact')
     expect(selection.prompt_budget_plan.compact).toContain('story_power')
     expect(selection.prompt_budget_plan.reference).toEqual([])
-    expect(selection.prompt_budget_plan.omit).toContain('longform_structure_contract')
-    expect(selection.suppressed_contracts.map(item => item.key)).toContain('longform_structure_contract')
+    expect(selection.prompt_budget_plan.omit).toContain('longform_structure')
+    expect(selection.suppressed_contracts.map(item => item.key)).toContain('longform_structure')
+  })
+
+  test('selects at most four canonical risk contracts from the current chapter warnings', () => {
+    const selection = selectOhStoryDirectorContracts({
+      stage: 'drafting',
+      chapter_target: {
+        conflict: '追捕队封锁四面出口，主角必须主动破围。',
+        story_power_contract: { promise: '超人以行动碾碎怪谈规则' },
+        character_behavior_contract: { protagonist: '主动破局' },
+        dialogue_contract: { voice: '主角短句压制' },
+        chapter_hook_contract: { ending: '更高阶追捕者现身' },
+        conflict_structure_contract: { escalation: '封锁升级' },
+        prose_craft_contract: { style: '自然中文网文' },
+        quality_audit_contract: { language: '简体中文' },
+        longform_structure_contract: { direction: '继续怪谈追捕主线' },
+      },
+      preflight: {
+        warnings: ['核心承诺、主角行为、对白口吻和章末钩子必须在本章可见兑现。'],
+      },
+    })
+
+    const selectedKeys = selection.selected_contracts.map(item => item.key)
+    const allBudgetKeys = Object.values(selection.prompt_budget_plan).flat()
+
+    expect(selectedKeys).toHaveLength(4)
+    expect(selectedKeys).toEqual(expect.arrayContaining([
+      'story_power',
+      'character_behavior',
+      'dialogue',
+      'chapter_hook',
+    ]))
+    expect([...selectedKeys, ...selection.suppressed_contracts.map(item => item.key), ...allBudgetKeys]
+      .some(key => /_contract$/.test(key))).toBe(false)
   })
 
   test('returns full pre-draft director shape for missing materials and manual confirmation', () => {
@@ -182,6 +215,41 @@ describe('oh-story director core', () => {
       key: 'pre_draft_missing_source_evidence',
       status: 'warn',
       source: 'preflight.warnings',
+    }))
+  })
+
+  test('treats strict_ready false as a blocking repair even when ready is true', () => {
+    const director = buildOhStoryDirectorForPreDraft({
+      preflight: {
+        ready: true,
+        strict_ready: false,
+        blockers: [],
+        warnings: ['连续性材料不足'],
+        checks: [
+          {
+            key: 'continuity',
+            ok: false,
+            severity: 'medium',
+            label: '连续性材料',
+            fix: '补齐上一章尾段和角色当前状态。',
+          },
+        ],
+      },
+      chapter_target: {
+        story_power_contract: { quality_checks: ['目标阻碍动作反馈期待'] },
+      },
+    })
+
+    expect(director.readiness).toBe('needs_repair')
+    expect(director.primary_action.key).toBe('repair_pre_draft_materials')
+    expect(director.required_repairs).toContainEqual(expect.objectContaining({
+      key: 'pre_draft_strict_readiness',
+      blocking: true,
+    }))
+    expect(director.evidence).toContainEqual(expect.objectContaining({
+      key: 'pre_draft_strict_readiness',
+      status: 'blocked',
+      source: 'preflight.strict_ready',
     }))
   })
 
