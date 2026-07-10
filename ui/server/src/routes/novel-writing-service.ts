@@ -17,7 +17,7 @@ import {
   updateNovelProject,
   updateNovelSettingEntity,
 } from '../novel'
-import { executeNovelAgent, generateNovelChapterProse, previewNovelKnowledgeInjection } from '../llm'
+import { executeNovelAgent, generateNovelChapterProse as defaultGenerateNovelChapterProse, previewNovelKnowledgeInjection } from '../llm'
 import type { NovelProductionService } from './novel-production-service'
 import type { NovelReferenceService } from './novel-reference-service'
 import { buildSettingRelationshipGraph } from './novel-setting-relationship-graph'
@@ -131,6 +131,7 @@ import {
 import { buildProseQualityReviewRecord } from '../novel-writing/prose-quality-review-record'
 import {
   buildChapterProseStoragePatch,
+  normalizeProseForStorage,
   resolveChapterProseVersionSource,
 } from '../novel-writing/chapter-prose-storage-patch'
 import {
@@ -139,6 +140,10 @@ import {
   selectUsableRevisionText,
   shouldRunSynchronousReadabilityReview,
 } from '../novel-writing/prose-quality-contracts'
+import {
+  assertProseQualityCanStore,
+  runProseQualityLoop,
+} from '../novel-writing/prose-quality-loop'
 import { buildPreStoreStructuralSyncChecks } from '../novel-writing/pre-store-structural-sync-gate'
 import {
   buildAssetIntakeReviewRecord,
@@ -196,16 +201,12 @@ import {
   scanProseMetaLeaks,
 } from '../novel-writing/prose-meta'
 import {
-  normalizeDeterministicProseDeslopTerms,
   normalizeDeterministicProseFormat,
-  normalizeDeterministicProseLanguageFragments,
   normalizeDeterministicProsePunctuation,
-  resolveProseLanguageRiskReview,
   scanPeriodMonotonyRisks,
   scanProseFormatRisks,
   scanProseLanguageRisks,
   scanPunctuationToneRisks,
-  stripProseEngineeringAppendix,
 } from '../novel-writing/prose-format'
 import {
   scanBannedWordLeaks,
@@ -877,6 +878,106 @@ export function prepareProseGenerationContract(baseContext: any, options: any = 
     return callback(contract)
   }
   return { contextPackage, contract, runAfterGate }
+}
+
+export function scanProseForQualityLoop(text: string, contextPackage: any, wordTarget: any) {
+  const cleanup = buildDeterministicProseCleanupReport(contextPackage?.chapter_target || {}, text)
+  const word = evaluateProseWordTarget(text, wordTarget)
+  const cleanupHardTypes = new Set(['model_degeneration', 'prose_meta', 'prose_format'])
+  const cleanupHardFailures = asArray(cleanup?.categories)
+    .filter((category: any) => Number(category?.count || 0) > 0)
+    .filter((category: any) => category?.has_blocking === true || cleanupHardTypes.has(String(category?.type || '')))
+    .map((category: any) => ({
+      key: `deterministic_${category.type}`,
+      message: `${category.label}：${asArray(category.evidence).join('；')}`,
+      status: 'fail',
+      severity: 'blocking',
+    }))
+  const hardFailures = [
+    ...scanProseLanguageRisks(text),
+    ...scanProseMetaLeaks(text),
+    ...scanModelDegenerationRisks(text),
+    ...scanProseFormatRisks(text),
+    ...scanBannedWordLeaks(text),
+    ...cleanupHardFailures,
+    ...(!word.passed ? [{
+      key: 'word_target',
+      message: `正文 ${word.actual} 字，不在 ${word.min}-${word.max} 字范围`,
+      status: 'fail',
+    }] : []),
+  ]
+    .filter((item: any) => item?.status === 'fail'
+      || item?.severity === 'critical'
+      || item?.severity === 'high'
+      || item?.severity === 'blocking'
+      || item?.blocking === true
+      || item?.key === 'word_target')
+    .map((item: any) => ({
+      key: String(item?.key || item?.pattern || item?.gate || 'deterministic_prose'),
+      message: String(item?.evidence || item?.message || item?.fix || item?.label || item?.key || '确定性正文检查未通过'),
+    }))
+  const uniqueFailures = Array.from(new Map(
+    hardFailures.map(item => [`${item.key}:${item.message}`, item]),
+  ).values())
+  return { hard_failures: uniqueFailures, cleanup, word_target: word }
+}
+
+export function buildFocusedQualityCoreContract(contract: ProseGenerationContract) {
+  const target = contract?.context?.chapter_target || {}
+  const selectedKeys = asArray(contract?.director?.selected_contracts)
+    .map((item: any) => normalizeProseContractKey(item?.key || item))
+    .filter(Boolean)
+    .slice(0, 4)
+  const selectedContracts = Object.fromEntries(selectedKeys.map((key: string) => [
+    key,
+    target?.[`${key}_contract`] ?? contract?.context?.[`${key}_contract`] ?? null,
+  ]))
+  return {
+    version: 'focused_prose_quality_core_v1',
+    chapter_no: contract.chapter.chapter_no,
+    title: contract.chapter.title,
+    goal: contract.chapter.goal,
+    summary: contract.chapter.summary,
+    conflict: contract.chapter.conflict,
+    ending_hook: contract.chapter.ending_hook,
+    previous_handoff: contract.chapter.previous_handoff,
+    scene_cards: contract.chapter.scene_cards,
+    reader_promise: target?.core_contract_radar?.reader_promise
+      || target?.longform_compass?.reader_promise
+      || contract?.context?.longform_compass?.reader_promise
+      || target?.story_power_contract?.core_promise
+      || '',
+    no_drift: target?.longform_compass?.no_drift || contract?.context?.longform_compass?.no_drift || [],
+    selected_contracts: selectedContracts,
+  }
+}
+
+export function buildLegacyCompatibleSelfCheck(qualityLoop: any) {
+  const acceptedRounds = asArray(qualityLoop?.rounds).filter((item: any) => item?.selection?.accepted)
+  const acceptedRound = acceptedRounds[acceptedRounds.length - 1]
+  return {
+    final_text: qualityLoop.final_text,
+    revised: acceptedRounds.length > 0,
+    revision: acceptedRound?.revision || null,
+    review: {
+      score: qualityLoop.final_review.score,
+      passed: qualityLoop.decision.passed,
+      needs_revision: !qualityLoop.decision.passed,
+      revised: acceptedRounds.length > 0,
+      issues: qualityLoop.decision.hard_failures.map((item: any) => ({
+        severity: 'critical',
+        category: 'prose',
+        issue: item.message,
+        evidence: [item.message],
+        fix: '按六维 finding 和确定性复检结果修订正文',
+      })),
+      prose_quality_v2: {
+        review: qualityLoop.final_review,
+        deterministic_scan: qualityLoop.final_scan,
+        decision: qualityLoop.decision,
+      },
+    },
+  }
 }
 
 function proseRiskSection(key: string, value: string | string[]): ProseRiskPromptSection | null {
@@ -2646,86 +2747,6 @@ export function mergeProseRevisionArtifacts(previousRevision: any = null, nextRe
     if (meaningfulRevisionValue(selected)) merged[snakeField] = selected
   }
   return merged
-}
-
-function markAcceptedRepairCheck(check: any) {
-  if (!check || typeof check !== 'object' || Array.isArray(check)) return check
-  const normalizedStatus = String(check?.status ?? '').trim().toLowerCase()
-  if (!['fail', 'failed', 'missing', 'missed', 'false', 'no', '0'].includes(normalizedStatus)) return check
-  return {
-    ...check,
-    previous_status: check.status,
-    status: 'repair_pending_recheck',
-    repaired_by_quality_gate: true,
-  }
-}
-
-function markAcceptedRepairStructuredChecks(review: any = {}) {
-  const patch: any = {}
-  for (const [snakeField, camelField] of STRUCTURED_REVIEW_CHECK_FIELDS) {
-    const checks = asArray(review?.[snakeField] || review?.[camelField])
-    if (!checks.length) continue
-    patch[snakeField] = checks.map(markAcceptedRepairCheck)
-  }
-  const diagnostics = review?.deslop_gate_diagnostics || review?.deslopGateDiagnostics
-  if (diagnostics && typeof diagnostics === 'object' && !Array.isArray(diagnostics)) {
-    patch.deslop_gate_diagnostics = {
-      ...diagnostics,
-      gates: asArray(diagnostics?.gates).map(markAcceptedRepairCheck),
-      quality_recheck_unavailable: true,
-    }
-  }
-  return patch
-}
-
-function buildAcceptedQualityRepairFallbackReview(review: any = {}, repair: any = {}, contextPackage: any = {}, finalText = '', options: any = {}) {
-  const revision = repair?.revision || repair?.revised_revision || {}
-  const revisionDeliveryReceipts = revision?.oh_story_delivery_receipts
-    || revision?.ohStoryDeliveryReceipts
-    || repair?.oh_story_delivery_receipts
-    || repair?.ohStoryDeliveryReceipts
-    || {}
-  const deliveryRiskReceipts = [
-    ...asArray(revisionDeliveryReceipts?.delivery_risk_receipts || revisionDeliveryReceipts?.deliveryRiskReceipts),
-    ...asArray(revision?.delivery_risk_receipts || revision?.deliveryRiskReceipts),
-    ...asArray(repair?.delivery_risk_receipts || repair?.deliveryRiskReceipts),
-  ]
-  const nextChapterQualityPlan = revision?.next_chapter_quality_plan
-    || revision?.nextChapterQualityPlan
-    || revisionDeliveryReceipts?.next_chapter_quality_plan
-    || revisionDeliveryReceipts?.nextChapterQualityPlan
-    || review?.next_chapter_quality_plan
-    || review?.nextChapterQualityPlan
-    || null
-  const score = Math.max(
-    Number(review?.score || 0) || 0,
-    Number(options.quality_threshold || options.qualityThreshold || 0) || 0,
-    85,
-  )
-  return {
-    ...(review || {}),
-    ...markAcceptedRepairStructuredChecks(review),
-    passed: true,
-    score,
-    needs_revision: false,
-    issues: [],
-    repaired_issues: asArray(review?.issues),
-    direct_revision_repair_accepted: true,
-    quality_recheck_unavailable: true,
-    quality_recheck_error: options.quality_recheck_error || options.qualityRecheckError || '',
-    stale_quality_repair_review: {
-      previous_score: review?.score ?? null,
-      previous_issue_count: asArray(review?.issues).length,
-      reason: 'quality_recheck_unavailable_after_accepted_repair',
-    },
-    delivery_risk_receipts: normalizeDeliveryRiskReceipts(
-      deliveryRiskReceipts.length ? { delivery_risk_receipts: deliveryRiskReceipts } : {},
-      contextPackage,
-      finalText,
-    ),
-    next_chapter_quality_plan: nextChapterQualityPlan,
-    oh_story_delivery_receipts: revisionDeliveryReceipts,
-  }
 }
 
 function buildMissingStructuredReviewChecksPrompt(project: any, contextPackage: any, chapterText: string, review: any, missingFields: string[]) {
@@ -40207,11 +40228,33 @@ function applyDeliveryRiskCarryOverToSceneCards(sceneCards: any[], contextPackag
   })
 }
 
+export type NovelWritingRuntime = {
+  generateChapterProse?: typeof defaultGenerateNovelChapterProse
+  executeAgent?: typeof executeNovelAgent
+  buildChapterContext?: (input: {
+    workspace: string
+    project: any
+    chapter: any
+    chapters: any[]
+    worldbuilding: any[]
+    characters: any[]
+    outlines: any[]
+    reviews: any[]
+  }) => Promise<any>
+  hooks?: {
+    beforeChapterStore?: (input: { chapterId: number; finalText: string }) => void | Promise<void>
+    beforeStoryState?: (input: { chapterId: number; finalText: string }) => void | Promise<void>
+  }
+}
+
 export function createNovelWritingService(ctx: {
   getProject: (workspace: string, id: number) => Promise<any>
   production: NovelProductionService
   reference: NovelReferenceService
+  runtime?: NovelWritingRuntime
 }) {
+  const executeAgent = ctx.runtime?.executeAgent || executeNovelAgent
+  const generateNovelChapterProse = ctx.runtime?.generateChapterProse || defaultGenerateNovelChapterProse
   const buildSceneCardsPrompt = (project: any, contextPackage: any) => buildSceneCardsPromptFromBuilder(project, contextPackage)
 
   const buildHeuristicSettingUsage = (chapter: any, settings: any[]) => {
@@ -40293,7 +40336,7 @@ export function createNovelWritingService(ctx: {
   const generateSceneCardsForChapter = async (activeWorkspace: string, project: any, contextPackage: any, modelId?: number, options: any = {}) => {
     const stageModelId = ctx.production.getStageModelId(project, 'scene_cards', modelId)
     throwIfAborted(options)
-    const result = await executeNovelAgent('outline-agent', project, {
+    const result = await executeAgent('outline-agent', project, {
       task: buildSceneCardsPrompt(project, contextPackage),
       upstreamContext: contextPackage,
     }, {
@@ -41443,7 +41486,7 @@ export function createNovelWritingService(ctx: {
   const updateStoryStateMachine = async (activeWorkspace: string, project: any, chapter: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
     const stageModelId = ctx.production.getStageModelId(project, 'review', modelId)
     throwIfAborted(options)
-    const result = await executeNovelAgent('review-agent', project, {
+    const result = await executeAgent('review-agent', project, {
       task: buildStoryStatePrompt(project, contextPackage, chapterText),
     }, {
       activeWorkspace,
@@ -42726,7 +42769,7 @@ export function createNovelWritingService(ctx: {
     let modelName = ''
     for (const batchFields of batches) {
       throwIfAborted(options)
-      const result = await executeNovelAgent('review-agent', project, {
+      const result = await executeAgent('review-agent', project, {
         task: buildMissingStructuredReviewChecksPrompt(project, contextPackage, chapterText, review, batchFields),
       }, {
         activeWorkspace,
@@ -42874,185 +42917,6 @@ export function createNovelWritingService(ctx: {
     return Boolean(review?.needs_revision) || Number(review?.score || 100) < revisionThreshold || hasHighIssue || hasPerspectiveConcern || hasDeslopConcern || hasDeslopGateDiagnosticConcern || hasFactualConcern || hasProseMetaConcern || hasDialogueConcern || hasPlotDynamicsConcern || hasStoryPowerConcern || hasContinuityHeatConcern || hasCharacterRelationConcern || hasCharacterBehaviorConcern || hasAssetLinkageConcern || hasStateTrackingConcern || hasSourceReadinessConcern || hasArtifactProtocolConcern || hasWritePreparationConcern || hasNextChapterQualityPlanReceiptConcern || hasChapterHandoffConcern || hasReaderRetentionConcern || hasIntentConfirmationConcern || hasBenchmarkRecallConcern || hasStyleBoundaryConcern || hasStyleSampleConcern || hasInformationFlowConcern || hasExpectationThresholdConcern || hasTargetReaderConcern || hasGenrePositioningConcern || hasPlotSpecialTopicsConcern || hasFemaleAudienceConcern || hasUpgradeRhythmConcern || hasConflictStructureConcern || hasStoryLoopConcern || hasEmotionalArcConcern || hasChapterHookConcern || hasParagraphHookConcern || hasSuspenseConcern || hasReversalConcern || hasShowdownConcern || hasBridgeUnitConcern || hasOpeningConcern || hasProseCraftConcern || hasPunctuationToneConcern || hasQualityAuditConcern || hasNextChapterQualityPlanConcern
   }
 
-  const runProseRevisionFromExistingReview = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
-    const reviseModelId = ctx.production.getStageModelId(project, 'revise', modelId)
-    const emitReviewProgress = async (phase: string, payload: any = {}) => {
-      const callback = typeof options.onReviewProgress === 'function' ? options.onReviewProgress : null
-      if (!callback) return
-      await callback({
-        phase,
-        at: new Date().toISOString(),
-        ...payload,
-      })
-    }
-    const baseReview = options.base_review || options.baseReview || options.review || {}
-    const normalizedReview = {
-      ...baseReview,
-      quality_gate: options.quality_gate || options.qualityGate || baseReview?.quality_gate || baseReview?.qualityGate || null,
-      quality_threshold: options.quality_threshold || options.qualityThreshold || baseReview?.quality_threshold || baseReview?.qualityThreshold || null,
-      deterministic_prose_cleanup: options.deterministic_prose_cleanup || options.deterministicProseCleanup || baseReview?.deterministic_prose_cleanup || baseReview?.deterministicProseCleanup || null,
-      needs_revision: true,
-      direct_revision_repair: true,
-      repair_mode: options.quality_gate_repair
-        ? 'quality_gate_repair'
-        : options.deterministic_cleanup_repair
-          ? 'deterministic_cleanup_repair'
-          : 'existing_review',
-    }
-    const revisionMaxTokens = Math.max(8000, Math.min(18000, Number(
-      options.revisionMaxTokens
-      || options.revision_max_tokens
-      || (options.quality_gate_repair || options.deterministic_cleanup_repair ? 16000 : 10000),
-    )))
-    const revisionLlmTimeoutMs = Math.max(30000, Math.min(
-      Number(options.llmTimeoutMs || options.timeoutMs || 600000) || 600000,
-      Number(options.revisionLlmTimeoutMs || options.revision_llm_timeout_ms || (options.quality_gate_repair || options.deterministic_cleanup_repair ? 240000 : 180000)) || 180000,
-    ))
-    throwIfAborted(options)
-    await emitReviewProgress('revision_llm', {
-      status: 'running',
-      max_tokens: revisionMaxTokens,
-      repair_mode: Boolean(options.quality_gate_repair || options.deterministic_cleanup_repair),
-      direct_revision_repair: true,
-      revision_llm_timeout_ms: revisionLlmTimeoutMs,
-    })
-    let revisionResult: any
-    try {
-      revisionResult = await executeNovelAgent('prose-agent', project, {
-        task: buildProseRevisionPrompt(project, contextPackage, chapterText, normalizedReview),
-        upstreamContext: contextPackage,
-      }, {
-        activeWorkspace,
-        modelId: reviseModelId ? String(reviseModelId) : undefined,
-        maxTokens: revisionMaxTokens,
-        temperature: ctx.production.getStageTemperature(project, 'revise', 0.65),
-        skipMemory: true,
-        signal: options.abortSignal,
-        timeoutMs: revisionLlmTimeoutMs,
-      })
-    } catch (revisionError) {
-      if (isAbortError(revisionError)) throw revisionError
-      const revisionErrorMessage = String((revisionError as any)?.message || revisionError || '修订请求失败')
-      await emitReviewProgress('revision_llm', {
-        status: 'warn',
-        error: revisionErrorMessage.slice(0, 240),
-        revision_llm_timeout_ms: revisionLlmTimeoutMs,
-      })
-      return {
-        review: normalizedReview,
-        revision: { error: revisionErrorMessage, llm_diagnostics: { error: revisionErrorMessage } },
-        final_text: chapterText,
-        revised: false,
-      }
-    }
-    const revisionPayload = getNovelPayload(revisionResult)
-    const revisionPlainProseFallback = extractPlainProseFallback(revisionResult, 800)
-    const revisedChapters = Array.isArray(revisionPayload?.prose_chapters)
-      ? revisionPayload.prose_chapters
-      : Array.isArray(revisionPayload?.proseChapters)
-        ? revisionPayload.proseChapters
-        : []
-    const revisedFirst = revisedChapters.length ? revisedChapters[0] : revisionPayload
-    const revisedText = revisedFirst?.chapter_text || revisedFirst?.chapterText || revisionPayload?.chapter_text || revisionPayload?.chapterText || revisionPlainProseFallback
-    const revisionDeliveryReceipts = revisedFirst?.oh_story_delivery_receipts
-      || revisedFirst?.ohStoryDeliveryReceipts
-      || revisionPayload?.oh_story_delivery_receipts
-      || revisionPayload?.ohStoryDeliveryReceipts
-      || null
-    const revisedFirstRevisionReceipts = [
-      ...asArray(revisedFirst?.revision_receipts),
-      ...asArray(revisedFirst?.revisionReceipts),
-    ]
-    const revisionPayloadReceipts = [
-      ...asArray(revisionPayload?.revision_receipts),
-      ...asArray(revisionPayload?.revisionReceipts),
-    ]
-    const revisionReceipts = revisedFirstRevisionReceipts.length
-      ? revisedFirstRevisionReceipts
-      : revisionPayloadReceipts
-    const revisedFirstRevisionContextReceipts = [
-      ...asArray(revisedFirst?.revision_context_receipts),
-      ...asArray(revisedFirst?.revisionContextReceipts),
-    ]
-    const revisionPayloadContextReceipts = [
-      ...asArray(revisionPayload?.revision_context_receipts),
-      ...asArray(revisionPayload?.revisionContextReceipts),
-    ]
-    const revisionContextReceipts = revisedFirstRevisionContextReceipts.length
-      ? revisedFirstRevisionContextReceipts
-      : revisionPayloadContextReceipts
-    const revisedFirstDeslopRepairReceipts = [
-      ...asArray(revisedFirst?.deslop_repair_receipts),
-      ...asArray(revisedFirst?.deslopRepairReceipts),
-    ]
-    const revisionPayloadDeslopRepairReceipts = [
-      ...asArray(revisionPayload?.deslop_repair_receipts),
-      ...asArray(revisionPayload?.deslopRepairReceipts),
-    ]
-    const deslopRepairReceipts = revisedFirstDeslopRepairReceipts.length
-      ? revisedFirstDeslopRepairReceipts
-      : revisionPayloadDeslopRepairReceipts
-    const revisedFirstQualityAuditRepairReceipts = [
-      ...asArray(revisedFirst?.quality_audit_repair_receipts),
-      ...asArray(revisedFirst?.qualityAuditRepairReceipts),
-    ]
-    const revisionPayloadQualityAuditRepairReceipts = [
-      ...asArray(revisionPayload?.quality_audit_repair_receipts),
-      ...asArray(revisionPayload?.qualityAuditRepairReceipts),
-    ]
-    const qualityAuditRepairReceipts = revisedFirstQualityAuditRepairReceipts.length
-      ? revisedFirstQualityAuditRepairReceipts
-      : revisionPayloadQualityAuditRepairReceipts
-    const revisionScopeGuardPayload = revisedFirst?.revision_scope_guard
-      || revisedFirst?.revisionScopeGuard
-      || revisionPayload?.revision_scope_guard
-      || revisionPayload?.revisionScopeGuard
-      || {}
-    const revisionNextChapterQualityPlan = revisedFirst?.next_chapter_quality_plan
-      || revisedFirst?.nextChapterQualityPlan
-      || revisionPayload?.next_chapter_quality_plan
-      || revisionPayload?.nextChapterQualityPlan
-      || null
-    if (!revisedText) {
-      await emitReviewProgress('revision_llm', {
-        status: 'warn',
-        error: String(revisionResult.error || '修订未返回正文').slice(0, 240),
-        llm_diagnostics: buildLLMResultDiagnostics(revisionResult),
-      })
-      return { review: normalizedReview, revision: { error: revisionResult.error || '修订未返回正文', llm_diagnostics: buildLLMResultDiagnostics(revisionResult) }, final_text: chapterText, revised: false }
-    }
-    await emitReviewProgress('revision_llm', {
-      status: 'success',
-      modelName: (revisionResult as any).modelName,
-      word_count: countProseChars(revisedText),
-    })
-    const revisionScopeGuard = buildRevisionScopeGuardSyncReport(contextPackage?.chapter_target || {}, {
-      revised: true,
-      original_text: chapterText,
-      final_text: revisedText,
-      revision_scope_guard: revisionScopeGuardPayload,
-    })
-    return {
-      review: normalizedReview,
-      revision: {
-        scene_breakdown: revisedFirst?.scene_breakdown || revisedFirst?.sceneBreakdown || revisionPayload?.scene_breakdown || revisionPayload?.sceneBreakdown || [],
-        continuity_notes: revisedFirst?.continuity_notes || revisedFirst?.continuityNotes || revisionPayload?.continuity_notes || revisionPayload?.continuityNotes || [],
-        revision_context_receipts: revisionContextReceipts,
-        revision_receipts: revisionReceipts,
-        deslop_repair_receipts: deslopRepairReceipts,
-        quality_audit_repair_receipts: qualityAuditRepairReceipts,
-        oh_story_delivery_receipts: revisionDeliveryReceipts,
-        revision_scope_guard: revisionScopeGuard,
-        next_chapter_quality_plan: revisionNextChapterQualityPlan,
-        plain_text_fallback_used: Boolean(revisionPlainProseFallback && !revisedFirst?.chapter_text && !revisedFirst?.chapterText && !revisionPayload?.chapter_text && !revisionPayload?.chapterText),
-        modelName: (revisionResult as any).modelName,
-      },
-      revision_scope_guard: revisionScopeGuard,
-      final_text: revisedText,
-      revised: true,
-    }
-  }
-
   const runProseSelfReviewAndRevision = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
     const reviewModelId = ctx.production.getStageModelId(project, 'review', modelId)
     const reviseModelId = ctx.production.getStageModelId(project, 'revise', modelId)
@@ -43081,7 +42945,7 @@ export function createNovelWritingService(ctx: {
       repair_mode: Boolean(options.quality_gate_repair || options.deterministic_cleanup_repair),
       review_llm_timeout_ms: reviewLlmTimeoutMs,
     })
-    const reviewResult = await executeNovelAgent('review-agent', project, {
+    const reviewResult = await executeAgent('review-agent', project, {
       task: buildProseReviewPrompt(project, contextPackage, chapterText),
     }, {
       activeWorkspace,
@@ -43643,7 +43507,7 @@ export function createNovelWritingService(ctx: {
     })
     let revisionResult: any
     try {
-      revisionResult = await executeNovelAgent('prose-agent', project, {
+      revisionResult = await executeAgent('prose-agent', project, {
         task: buildProseRevisionPrompt(project, contextPackage, chapterText, normalizedReview),
         upstreamContext: contextPackage,
       }, {
@@ -43781,7 +43645,7 @@ export function createNovelWritingService(ctx: {
   const runCommercialEditorRewrite = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
     const editorModelId = ctx.production.getStageModelId(project, 'editor', modelId)
     throwIfAborted(options)
-    const editorResult = await executeNovelAgent('prose-agent', project, {
+    const editorResult = await executeAgent('prose-agent', project, {
       task: buildCommercialEditorRewritePrompt(project, contextPackage, chapterText, options),
       upstreamContext: contextPackage,
     }, {
@@ -43847,7 +43711,7 @@ export function createNovelWritingService(ctx: {
     }
     const polishModelId = ctx.production.getStageModelId(project, 'revise', modelId)
     throwIfAborted(options)
-    const polishResult = await executeNovelAgent('prose-agent', project, {
+    const polishResult = await executeAgent('prose-agent', project, {
       task: buildMemePolishPrompt(project, contextPackage, chapterText),
       upstreamContext: contextPackage,
     }, {
@@ -43915,7 +43779,7 @@ export function createNovelWritingService(ctx: {
   const runReadabilityReview = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
     const reviewModelId = ctx.production.getStageModelId(project, 'review', modelId)
     throwIfAborted(options)
-    const reviewResult = await executeNovelAgent('review-agent', project, {
+    const reviewResult = await executeAgent('review-agent', project, {
       task: buildReadabilityReviewPrompt(project, contextPackage, chapterText),
     }, {
       activeWorkspace,
@@ -43972,7 +43836,7 @@ export function createNovelWritingService(ctx: {
       const contractionAttempts: any[] = []
       for (let attempt = 1; attempt <= maxContractionAttempts; attempt += 1) {
         throwIfAborted(options)
-        const contractionResult = await executeNovelAgent('prose-agent', project, {
+        const contractionResult = await executeAgent('prose-agent', project, {
           task: buildProseWordTargetContractionPrompt(project, contextPackage, currentText, currentEvaluation, { attempt, maxAttempts: maxContractionAttempts }),
           upstreamContext: contextPackage,
         }, {
@@ -44071,7 +43935,7 @@ export function createNovelWritingService(ctx: {
 
     for (let attempt = 1; attempt <= maxExpansionAttempts; attempt += 1) {
       throwIfAborted(options)
-      const expansionResult = await executeNovelAgent('prose-agent', project, {
+      const expansionResult = await executeAgent('prose-agent', project, {
         task: buildProseWordTargetExpansionPrompt(project, contextPackage, currentText, currentEvaluation, { attempt, maxAttempts: maxExpansionAttempts }),
         upstreamContext: contextPackage,
       }, {
@@ -44171,7 +44035,7 @@ export function createNovelWritingService(ctx: {
       if (modelId) {
         try {
           throwIfAborted(options)
-          const result = await executeNovelAgent('outline-agent', project, {
+          const result = await executeAgent('outline-agent', project, {
             task: [
               '任务：为无人值守章节写作补齐本章蓝图。只输出 JSON，不写正文。',
               '输出字段：title, chapter_goal, chapter_summary, conflict, ending_hook, chapter_blueprint, emotional_arc_contract, chapter_hook_contract, paragraph_hook_contract, opening_contract, suspense_contract, reversal_contract, showdown_contract, bridge_unit_contract, plot_framework_contract, style_boundary_contract, plot_dynamics_contract, story_power_contract, mainline_definition_contract, information_flow_contract, expectation_threshold_contract, story_loop_contract, prose_craft_contract, punctuation_tone_contract, quality_audit_contract, dialogue_contract, continuity_heat_contract, character_relation_contract, character_behavior_contract, asset_linkage_contract, state_tracking_contract, intent_confirmation_contract, target_reader_contract, genre_positioning_contract, core_contract_radar, female_audience_contract, upgrade_rhythm_contract, conflict_structure_contract, must_advance(array), forbidden_repeats(array), repair_summary。',
@@ -44648,7 +44512,7 @@ export function createNovelWritingService(ctx: {
       if (modelId) {
         try {
           throwIfAborted(options)
-          const result = await executeNovelAgent('outline-agent', project, {
+          const result = await executeAgent('outline-agent', project, {
             task: [
               '任务：为无人值守章节写作补齐最小可用世界观。只输出 JSON，不写正文。',
               '输出 worldbuilding 对象，字段包含 world_summary, rules(array), factions(array), locations(array), systems(array), items(array), known_unknowns(array)。',
@@ -44697,7 +44561,7 @@ export function createNovelWritingService(ctx: {
       if (modelId) {
         try {
           throwIfAborted(options)
-          const result = await executeNovelAgent('outline-agent', project, {
+          const result = await executeAgent('outline-agent', project, {
             task: [
               '任务：为无人值守章节写作自动补齐前置材料。只输出 JSON。',
               '只补材料，不写正文。输出 characters, character_updates, forbidden_repeats, must_advance, repair_summary。',
@@ -44807,7 +44671,7 @@ export function createNovelWritingService(ctx: {
       if (modelId) {
         try {
           throwIfAborted(options)
-          const result = await executeNovelAgent('setting-agent', project, {
+          const result = await executeAgent('setting-agent', project, {
             task: [
               '任务：为无人值守章节写作补齐设定工坊。只输出 JSON。',
               '输出 settings(array)，每项包含 entity_type,name,summary,constraints_json,state_json,payload_json。',
@@ -44901,36 +44765,12 @@ export function createNovelWritingService(ctx: {
       revisionLlmTimeoutMs: options.revision_llm_timeout_ms || options.revisionLlmTimeoutMs,
       revision_llm_timeout_ms: options.revision_llm_timeout_ms || options.revisionLlmTimeoutMs,
     }
-    const reviewProgressDetail = (payload: any = {}) => {
-      const phase = String(payload.phase || '')
-      const status = String(payload.status || '')
-      const labels: Record<string, string> = {
-        self_review_llm: '模型自检',
-        structured_review_fill: '补齐结构化自检项',
-        revision_llm: '修订正文',
-      }
-      return [labels[phase] || phase, status && status !== 'running' ? status : ''].filter(Boolean).join('：')
-    }
-    const emitReviewStageProgress = async (payload: any = {}) => onStage('review', {
-      status: payload.status || 'running',
-      detail: payload.detail || reviewProgressDetail(payload),
-      ...payload,
-    })
     const requestedQualityRepairTimeoutMs = Number(options.quality_repair_llm_timeout_ms || options.qualityRepairLlmTimeoutMs || 300000)
     const baseLlmTimeoutMs = Number(llmControlOptions.llmTimeoutMs || llmControlOptions.timeoutMs || 600000)
     const qualityRepairTimeoutMs = Math.max(30000, Math.min(
       Number.isFinite(baseLlmTimeoutMs) && baseLlmTimeoutMs > 0 ? baseLlmTimeoutMs : 600000,
       Number.isFinite(requestedQualityRepairTimeoutMs) && requestedQualityRepairTimeoutMs > 0 ? requestedQualityRepairTimeoutMs : 300000,
     ))
-    const qualityRepairLlmControlOptions = {
-      ...llmControlOptions,
-      llmTimeoutMs: qualityRepairTimeoutMs,
-      timeoutMs: qualityRepairTimeoutMs,
-      reviewLlmTimeoutMs: qualityRepairTimeoutMs,
-      review_llm_timeout_ms: qualityRepairTimeoutMs,
-      revisionLlmTimeoutMs: qualityRepairTimeoutMs,
-      revision_llm_timeout_ms: qualityRepairTimeoutMs,
-    }
     const throwIfChapterGenerationAborted = () => throwIfAborted(llmControlOptions)
     throwIfAborted(options)
     const project = await ctx.getProject(activeWorkspace, projectId)
@@ -44951,9 +44791,21 @@ export function createNovelWritingService(ctx: {
       listNovelOutlines(activeWorkspace, projectId),
       listNovelReviews(activeWorkspace, projectId),
     ])
+    const buildGenerationContext = async () => ctx.runtime?.buildChapterContext
+      ? ctx.runtime.buildChapterContext({
+          workspace: activeWorkspace,
+          project,
+          chapter,
+          chapters,
+          worldbuilding,
+          characters,
+          outlines,
+          reviews,
+        })
+      : buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
     let wordTarget = resolveChapterWordTarget(project, chapter, options)
     const initialContextPackage = applyChapterWordTargetToContext(
-      await buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews),
+      await buildGenerationContext(),
       wordTarget,
     )
     let preparedGeneration = prepareProseGenerationContract(initialContextPackage, options)
@@ -44991,7 +44843,7 @@ export function createNovelWritingService(ctx: {
       reviews = await listNovelReviews(activeWorkspace, projectId)
       wordTarget = resolveChapterWordTarget(project, chapter, options)
       const repairedContextPackage = applyChapterWordTargetToContext(
-        await buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews),
+        await buildGenerationContext(),
         wordTarget,
       )
       preparedGeneration = prepareProseGenerationContract(repairedContextPackage, options)
@@ -45022,7 +44874,7 @@ export function createNovelWritingService(ctx: {
         chapters = await listNovelChapters(activeWorkspace, projectId)
         wordTarget = resolveChapterWordTarget(project, chapter, options)
         const sceneContextPackage = applyChapterWordTargetToContext(
-          await buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews),
+          await buildGenerationContext(),
           wordTarget,
         )
         preparedGeneration = prepareProseGenerationContract(sceneContextPackage, options)
@@ -45197,34 +45049,13 @@ export function createNovelWritingService(ctx: {
       throw error
     }
     if (isDraftOnly) {
-      await onStage('review', { status: 'skipped', reason: '生产模式：只生成正文初稿' })
-      await onStage('revise', { status: 'skipped', reason: '生产模式：只生成正文初稿' })
-      await onStage('safety', { status: 'skipped', reason: '生产模式：只生成正文初稿' })
-      await onStage('store', { status: 'running' })
-      const updatedDraft = await updateNovelChapter(activeWorkspace, chapter.id, buildChapterProseStoragePatch({
-        chapter,
-        generatedTitlePatch,
-        finalText,
-        finalContinuityNotes,
-        finalSceneBreakdown,
-        ohStoryDeliveryReceipts,
-      }), { versionSource: resolveChapterProseVersionSource() })
-      await onStage('store', { status: 'success', word_count: countProseChars(finalText), scene_status: 'accepted' })
-      await onStage('story_state', { status: 'skipped', reason: '初稿模式不更新状态机，避免低质草稿污染长期记忆' })
-      return {
-        chapter: updatedDraft,
-        score: null,
-        revised: false,
-        production_mode: productionMode,
-        completed_stage: 'store',
-        prompt_diagnostics: draftPromptDiagnostics,
-        story_state_update: { skipped: true },
-        config_snapshot: configSnapshot,
-      }
+      await onStage('editor', { status: 'skipped', reason: '生产模式：只生成并质检初稿' })
+      await onStage('meme_polish', { status: 'skipped', reason: '生产模式：只生成并质检初稿' })
     }
-    throwIfChapterGenerationAborted()
-    await onStage('editor', { status: 'running' })
-    try {
+    if (!isDraftOnly) {
+      throwIfChapterGenerationAborted()
+      await onStage('editor', { status: 'running' })
+      try {
       editorRewrite = await runCommercialEditorRewrite(activeWorkspace, project, contextPackage, finalText, preferredModelId, llmControlOptions)
       finalText = editorRewrite.final_text || finalText
       if (editorRewrite.edited && editorRewrite.revision) {
@@ -45285,19 +45116,125 @@ export function createNovelWritingService(ctx: {
         finalContinuityNotes = postMemeWordTargetCheck.expansion.continuity_notes?.length ? postMemeWordTargetCheck.expansion.continuity_notes : finalContinuityNotes
         await onStage('word_target', { status: 'success', expanded: postMemeWordTargetCheck.expanded, contracted: postMemeWordTargetCheck.contracted, soft_pass: postMemeWordTargetCheck.word_target_soft_pass, contraction_attempts: postMemeWordTargetCheck.contraction?.attempts, word_count: countProseChars(finalText), evaluation: postMemeWordTargetCheck.final_evaluation, phase: 'post_meme_polish' })
       }
-    } catch (error: any) {
-      await onStage('word_target', { status: 'failed', error: String(error?.message || error), word_target: error?.word_target || wordTarget, evaluation: error?.evaluation, final_evaluation: error?.final_evaluation, contraction_attempts: error?.contraction_attempts, expansion_attempts: error?.expansion_attempts, phase: 'post_meme_polish' })
-      throw error
+      } catch (error: any) {
+        await onStage('word_target', { status: 'failed', error: String(error?.message || error), word_target: error?.word_target || wordTarget, evaluation: error?.evaluation, final_evaluation: error?.final_evaluation, contraction_attempts: error?.contraction_attempts, expansion_attempts: error?.expansion_attempts, phase: 'post_meme_polish' })
+        throw error
+      }
     }
     throwIfChapterGenerationAborted()
     await onStage('review', { status: 'running' })
-    let selfCheck = await runProseSelfReviewAndRevision(activeWorkspace, project, buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches), finalText, preferredModelId, {
-      revise: !isDraftReviewOnly,
-      quality_threshold: qualityThreshold,
-      onReviewProgress: emitReviewStageProgress,
-      ...(options.auto_repair_quality_gate === true ? { fill_missing_structured_checks: false } : {}),
-      ...llmControlOptions,
-    })
+    finalText = normalizeProseForStorage(finalText)
+    let qualityLoop: Awaited<ReturnType<typeof runProseQualityLoop>>
+    const attachQualityLoopFailureDiagnostics = (error: any, qualityLoopDiagnostics?: any) => {
+      const code = String(error?.code || 'PROSE_QUALITY_GATE_BLOCKED')
+      error.prompt_diagnostics = draftPromptDiagnostics
+      error.quality_loop = error?.quality_loop || qualityLoopDiagnostics || {
+        rounds: [],
+        decision: {
+          passed: false,
+          approvable: false,
+          score: 0,
+          min_score: qualityThreshold,
+          hard_failures: [{
+            key: code.toLowerCase(),
+            message: String(error?.message || '正文质量门禁不可用').slice(0, 500),
+            source: code === 'PROSE_QUALITY_RECHECK_UNAVAILABLE' ? 'recheck' : 'llm',
+          }],
+          advisory_failures: [],
+        },
+      }
+      if (Object.prototype.hasOwnProperty.call(error, 'rounds')) delete error.rounds
+      return error
+    }
+    try {
+      qualityLoop = await runProseQualityLoop({
+        initialText: finalText,
+        minScore: qualityThreshold,
+        coreContract: buildFocusedQualityCoreContract(generationContract),
+        maxRevisionRounds: isDraftReviewOnly || isDraftOnly ? 0 : 2,
+        scan: text => scanProseForQualityLoop(text, contextPackage, wordTarget),
+        review: async ({ prompt, round }) => {
+          throwIfChapterGenerationAborted()
+          await onStage('review', { status: 'running', phase: round > 0 ? 'quality_recheck' : 'quality_review', round })
+          const result = await executeAgent('review-agent', project, { task: prompt }, {
+            activeWorkspace,
+            modelId: String(ctx.production.getStageModelId(project, 'review', preferredModelId) || ''),
+            maxTokens: 2600,
+            temperature: 0.15,
+            skipMemory: true,
+            signal: options.abortSignal,
+            timeoutMs: qualityRepairTimeoutMs,
+          })
+          if ((result as any)?.error) {
+            throw Object.assign(new Error(String((result as any).error)), {
+              code: round > 0 ? 'PROSE_QUALITY_RECHECK_UNAVAILABLE' : 'PROSE_REVIEW_FAILED',
+              llm_diagnostics: buildLLMResultDiagnostics(result),
+            })
+          }
+          return getNovelPayload(result)
+        },
+        revise: async ({ prompt, round }) => {
+          throwIfChapterGenerationAborted()
+          await onStage('revise', { status: 'running', phase: 'quality_revision', round })
+          const result = await executeAgent('prose-agent', project, { task: prompt }, {
+            activeWorkspace,
+            modelId: String(ctx.production.getStageModelId(project, 'review', preferredModelId) || ''),
+            maxTokens: proseMaxTokensForWordTarget(wordTarget),
+            temperature: 0.25,
+            skipMemory: true,
+            signal: options.abortSignal,
+            timeoutMs: qualityRepairTimeoutMs,
+          })
+          if ((result as any)?.error) {
+            throw Object.assign(new Error(String((result as any).error)), {
+              code: 'PROSE_REVISION_FAILED',
+              llm_diagnostics: buildLLMResultDiagnostics(result),
+            })
+          }
+          const payload = getNovelPayload(result)
+          const revised = asArray(payload?.prose_chapters || payload?.proseChapters)[0] || payload
+          const revisedText = revised?.chapter_text
+            || revised?.chapterText
+            || payload?.chapter_text
+            || payload?.chapterText
+            || extractPlainProseFallback(result, 800)
+          return {
+            ...payload,
+            ...revised,
+            final_text: normalizeProseForStorage(revisedText),
+          }
+        },
+      })
+    } catch (error: any) {
+      throw attachQualityLoopFailureDiagnostics(error)
+    }
+    finalText = qualityLoop.final_text
+    const qualityLoopDiagnostics = {
+      rounds: qualityLoop.rounds.map((item: any) => ({
+        round: item.round,
+        accepted: item.selection.accepted,
+        reason: item.selection.reason,
+      })),
+      decision: qualityLoop.decision,
+    }
+    const assertCurrentProseQualityCanStore = () => {
+      try {
+        return assertProseQualityCanStore(qualityLoop.decision, approvals?.quality_gate)
+      } catch (error) {
+        throw attachQualityLoopFailureDiagnostics(error, qualityLoopDiagnostics)
+      }
+    }
+    let selfCheck = buildLegacyCompatibleSelfCheck(qualityLoop)
+    ohStoryDeliveryReceipts = {
+      ...(ohStoryDeliveryReceipts || {}),
+      revision_receipts: [
+        ...asArray(ohStoryDeliveryReceipts?.revision_receipts),
+        ...qualityLoop.rounds
+          .filter((item: any) => item?.selection?.accepted)
+          .flatMap((item: any) => asArray(item?.revision?.revision_receipts || item?.revision?.revisionReceipts)),
+      ],
+    }
+    assertCurrentProseQualityCanStore()
     const initialReviewDecision = getQualityGateDecision(qualityGateProject, { ...(selfCheck?.review || {}), revised: Boolean(selfCheck.revised) })
     await onStage('review', { status: initialReviewDecision.passed ? 'success' : 'warn', score: selfCheck?.review?.score ?? null, issues: selfCheck?.review?.issues || [], quality_gate: initialReviewDecision, scene_status: 'reviewed' })
     const revisionStageStatus = selfCheck.revised ? 'success' : selfCheck?.revision?.error ? 'warn' : 'skipped'
@@ -45308,184 +45245,9 @@ export function createNovelWritingService(ctx: {
       llm_diagnostics: selfCheck?.revision?.llm_diagnostics,
       scene_status: selfCheck.revised ? 'revised' : '',
     })
-    let revisionTextSelection = selectUsableRevisionText(finalText, selfCheck)
-    finalText = revisionTextSelection.text
-    if (!revisionTextSelection.accepted && revisionTextSelection.reason) {
-      selfCheck = {
-        ...selfCheck,
-        final_text: finalText,
-        unusable_revision_text: revisionTextSelection,
-      }
-    }
     if (selfCheck.revised && selfCheck.revision) {
       finalSceneBreakdown = selectVerifiedSceneBreakdownUpdate(finalSceneBreakdown, selfCheck.revision.scene_breakdown, finalText)
       finalContinuityNotes = selfCheck.revision.continuity_notes?.length ? selfCheck.revision.continuity_notes : finalContinuityNotes
-    }
-    try {
-      throwIfChapterGenerationAborted()
-      const postReviewWordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId, llmControlOptions)
-      finalText = postReviewWordTargetCheck.final_text || finalText
-      recordWordTargetExpansionPatch(postReviewWordTargetCheck)
-      if (postReviewWordTargetCheck.expanded && postReviewWordTargetCheck.expansion) {
-        finalSceneBreakdown = selectVerifiedSceneBreakdownUpdate(finalSceneBreakdown, postReviewWordTargetCheck.expansion.scene_breakdown, finalText)
-        finalContinuityNotes = postReviewWordTargetCheck.expansion.continuity_notes?.length ? postReviewWordTargetCheck.expansion.continuity_notes : finalContinuityNotes
-        await onStage('word_target', { status: 'success', expanded: postReviewWordTargetCheck.expanded, contracted: postReviewWordTargetCheck.contracted, soft_pass: postReviewWordTargetCheck.word_target_soft_pass, contraction_attempts: postReviewWordTargetCheck.contraction?.attempts, word_count: countProseChars(finalText), evaluation: postReviewWordTargetCheck.final_evaluation, phase: 'post_review' })
-      }
-    } catch (error: any) {
-      await onStage('word_target', { status: 'failed', error: String(error?.message || error), word_target: error?.word_target || wordTarget, evaluation: error?.evaluation, final_evaluation: error?.final_evaluation, contraction_attempts: error?.contraction_attempts, expansion_attempts: error?.expansion_attempts, phase: 'post_review' })
-      throw error
-    }
-    if (!initialReviewDecision.passed && options.auto_repair_quality_gate === true && !isDraftReviewOnly) {
-      throwIfChapterGenerationAborted()
-      await onStage('review', {
-        status: 'running',
-        phase: 'quality_gate_repair',
-        previous_score: selfCheck?.review?.score ?? null,
-        quality_gate: initialReviewDecision,
-      })
-      try {
-        const qualityRepairReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)
-        const qualityGateRepair = await runProseRevisionFromExistingReview(activeWorkspace, project, qualityRepairReviewContextPackage, finalText, preferredModelId, {
-          base_review: selfCheck.review,
-          revise: true,
-          quality_gate_repair: true,
-          quality_gate: initialReviewDecision,
-          quality_threshold: qualityThreshold,
-          onReviewProgress: emitReviewStageProgress,
-          ...qualityRepairLlmControlOptions,
-          fill_missing_structured_checks: false,
-        })
-        const qualityGateRepairSelection = selectUsableRevisionText(finalText, qualityGateRepair)
-        finalText = qualityGateRepairSelection.text
-        const previousSelfCheck = selfCheck
-        selfCheck = {
-          ...qualityGateRepair,
-          initial_review: previousSelfCheck.review,
-          previous_self_check: {
-            revised: Boolean(previousSelfCheck.revised),
-            review: previousSelfCheck.review,
-            revision: previousSelfCheck.revision
-              ? {
-                  error: previousSelfCheck.revision.error,
-                  plain_text_fallback_used: previousSelfCheck.revision.plain_text_fallback_used,
-                  modelName: previousSelfCheck.revision.modelName,
-                }
-              : null,
-          },
-          quality_gate_repair: qualityGateRepair.review,
-          revised: Boolean(previousSelfCheck.revised || qualityGateRepair.revised),
-          revision: mergeProseRevisionArtifacts(previousSelfCheck.revision, qualityGateRepair.revision),
-          ...(!qualityGateRepairSelection.accepted && qualityGateRepairSelection.reason ? {
-            final_text_rejected: true,
-            rejected_final_text_reason: qualityGateRepairSelection.reason,
-          } : {}),
-        }
-        if (qualityGateRepairSelection.accepted && qualityGateRepair.revised && qualityGateRepair.revision) {
-          finalSceneBreakdown = selectVerifiedSceneBreakdownUpdate(finalSceneBreakdown, qualityGateRepair.revision.scene_breakdown, finalText)
-          finalContinuityNotes = qualityGateRepair.revision.continuity_notes?.length ? qualityGateRepair.revision.continuity_notes : finalContinuityNotes
-        }
-        const shouldRunQualityRepairRecheck = Boolean(qualityGateRepairSelection.accepted && qualityGateRepair.revised)
-        await onStage('revise', {
-          status: selfCheck.revised ? 'success' : 'warn',
-          phase: 'quality_gate_repair',
-          revised: Boolean(selfCheck.revised),
-          revision_error: selfCheck?.revision?.error || '',
-          rejected_final_text_reason: (selfCheck as any)?.rejected_final_text_reason || '',
-          scene_status: selfCheck.revised ? 'revised' : '',
-        })
-        throwIfChapterGenerationAborted()
-        if (shouldRunQualityRepairRecheck) {
-          await onStage('review', { status: 'running', phase: 'quality_recheck', previous_score: selfCheck?.review?.score ?? null })
-          try {
-            const qualityRecheck = await runProseSelfReviewAndRevision(activeWorkspace, project, qualityRepairReviewContextPackage, finalText, preferredModelId, {
-              revise: false,
-              quality_gate_repair: true,
-              quality_gate: initialReviewDecision,
-              quality_threshold: qualityThreshold,
-              onReviewProgress: emitReviewStageProgress,
-              ...qualityRepairLlmControlOptions,
-              fill_missing_structured_checks: false,
-            })
-            const qualityRecheckSelection = selectUsableRevisionText(finalText, qualityRecheck)
-            finalText = qualityRecheckSelection.text
-            const mergedQualityRecheckReview = mergeQualityRecheckReviewWithStructuredEvidence(selfCheck.review, qualityRecheck.review)
-            selfCheck = {
-              ...selfCheck,
-              review: mergedQualityRecheckReview,
-              final_text: finalText,
-              revised: Boolean(selfCheck.revised),
-              quality_recheck: mergedQualityRecheckReview,
-              quality_recheck_raw: qualityRecheck.review,
-              ...(!qualityRecheckSelection.accepted && qualityRecheckSelection.reason ? {
-                final_text_recheck_rejected: true,
-                rejected_final_text_recheck_reason: qualityRecheckSelection.reason,
-              } : {}),
-            }
-            const qualityRecheckDecision = getQualityGateDecision(qualityGateProject, { ...(selfCheck?.review || {}), revised: Boolean(selfCheck.revised) })
-            await onStage('review', {
-              status: qualityRecheckDecision.passed ? 'success' : 'warn',
-              phase: 'quality_recheck',
-              score: selfCheck?.review?.score ?? null,
-              issues: selfCheck?.review?.issues || [],
-              quality_gate: qualityRecheckDecision,
-            })
-          } catch (qualityRecheckError: any) {
-            if (isAbortError(qualityRecheckError)) throw qualityRecheckError
-            const recheckError = String(qualityRecheckError?.message || qualityRecheckError)
-            const fallbackReview = buildAcceptedQualityRepairFallbackReview(selfCheck.review, qualityGateRepair, qualityRepairReviewContextPackage, finalText, {
-              quality_threshold: qualityThreshold,
-              quality_recheck_error: recheckError,
-            })
-            selfCheck = {
-              ...selfCheck,
-              review: fallbackReview,
-              final_text: finalText,
-              revised: Boolean(selfCheck.revised),
-              quality_recheck_error: recheckError,
-              quality_recheck_failed: true,
-            }
-            const fallbackDecision = getQualityGateDecision(qualityGateProject, { ...(selfCheck?.review || {}), revised: Boolean(selfCheck.revised) })
-            await onStage('review', {
-              status: 'warn',
-              phase: 'quality_recheck_failed',
-              error: recheckError.slice(0, 240),
-              quality_gate: fallbackDecision,
-            })
-          }
-        } else {
-          const repairError = String(
-            selfCheck?.revision?.error
-            || (selfCheck as any)?.rejected_final_text_reason
-            || qualityGateRepairSelection.reason
-            || '质量门禁修订未返回可用正文',
-          )
-          selfCheck = {
-            ...selfCheck,
-            quality_gate_repair_error: repairError,
-            quality_gate_repair_failed: true,
-          }
-          await onStage('review', {
-            status: 'warn',
-            phase: 'quality_recheck_skipped',
-            error: repairError.slice(0, 240),
-            quality_gate: initialReviewDecision,
-          })
-        }
-      } catch (qualityGateRepairError: any) {
-        if (isAbortError(qualityGateRepairError)) throw qualityGateRepairError
-        const repairError = String(qualityGateRepairError?.message || qualityGateRepairError)
-        selfCheck = {
-          ...selfCheck,
-          quality_gate_repair_error: repairError,
-          quality_gate_repair_failed: true,
-        }
-        await onStage('review', {
-          status: 'warn',
-          phase: 'quality_gate_repair_failed',
-          error: repairError.slice(0, 240),
-          quality_gate: initialReviewDecision,
-        })
-      }
     }
     if (shouldRunSynchronousReadabilityReview(options, project)) {
       throwIfChapterGenerationAborted()
@@ -45524,304 +45286,13 @@ export function createNovelWritingService(ctx: {
     let revisionContextReceiptSync = buildRevisionContextReceiptSyncReport(chapter, selfCheck)
     let revisionCascadeImpactSync = buildRevisionCascadeImpactSyncReport(chapter, selfCheck)
     let revisionScopeGuardSync = buildRevisionScopeGuardSyncReport(chapter, selfCheck)
-    let cleanupRepairFormatNormalization: any = null
-    let cleanupRepairPunctuationNormalization: any = null
-    let cleanupRepairDeslopTermNormalization: any = null
-    let deterministicReviewTextChanged = false
-    const formatNormalization = normalizeDeterministicProseFormat(finalText)
-    if (formatNormalization.changed) {
-      finalText = formatNormalization.text
-      deterministicReviewTextChanged = true
-      await onStage('review', {
-        status: 'success',
-        phase: 'deterministic_format_normalize',
-        format_change_count: formatNormalization.change_count,
-        format_rules: formatNormalization.rules,
-      })
-    }
-    const punctuationNormalization = normalizeDeterministicProsePunctuation(finalText)
-    if (punctuationNormalization.changed) {
-      finalText = punctuationNormalization.text
-      deterministicReviewTextChanged = true
-      await onStage('review', {
-        status: 'success',
-        phase: 'deterministic_punctuation_normalize',
-        punctuation_change_count: punctuationNormalization.change_count,
-        punctuation_rules: punctuationNormalization.rules,
-      })
-    }
-    const languageNormalization = normalizeDeterministicProseLanguageFragments(finalText)
-    if (languageNormalization.changed) {
-      finalText = languageNormalization.text
-      deterministicReviewTextChanged = true
-      if (selfCheck?.review) {
-        selfCheck = {
-          ...selfCheck,
-          review: resolveProseLanguageRiskReview(selfCheck.review, finalText),
-        }
-      }
-      await onStage('review', {
-        status: 'success',
-        phase: 'deterministic_language_normalize',
-        language_change_count: languageNormalization.change_count,
-        language_rules: languageNormalization.rules,
-      })
-    }
-    const deslopTermNormalization = normalizeDeterministicProseDeslopTerms(finalText)
-    if (deslopTermNormalization.changed) {
-      finalText = deslopTermNormalization.text
-      deterministicReviewTextChanged = true
-      await onStage('review', {
-        status: 'success',
-        phase: 'deterministic_deslop_term_normalize',
-        deslop_term_change_count: deslopTermNormalization.change_count,
-        deslop_term_rules: deslopTermNormalization.rules,
-      })
-    }
-    const appendixStrip = stripProseEngineeringAppendix(finalText)
-    if (appendixStrip.changed) {
-      finalText = appendixStrip.text
-      deterministicReviewTextChanged = true
-      await onStage('review', {
-        status: 'success',
-        phase: 'deterministic_engineering_appendix_strip',
-        removed_line_count: appendixStrip.removed_line_count,
-      })
-    }
-    let deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)
-    const deterministicCleanupRepairMaxAttempts = 3
-    for (let cleanupRepairAttempt = 1; cleanupRepairAttempt <= deterministicCleanupRepairMaxAttempts; cleanupRepairAttempt += 1) {
-      if (!(Number(deterministicProseCleanup.risk_count || 0) > 0 && options.auto_repair_quality_gate === true && !isDraftReviewOnly)) break
-      throwIfChapterGenerationAborted()
-      const cleanupRepairTextBefore = finalText
-      const previousCleanupRiskCount = Number(deterministicProseCleanup.risk_count || 0)
-      const previousDeterministicProseCleanup = deterministicProseCleanup
-      const previousSelfCheck = selfCheck
-      const previousRevisionTextSelection = revisionTextSelection
-      const previousFinalSceneBreakdown = finalSceneBreakdown
-      const previousFinalContinuityNotes = finalContinuityNotes
-      const previousDeterministicReviewTextChanged = deterministicReviewTextChanged
-      const previousCleanupRepairFormatNormalization = cleanupRepairFormatNormalization
-      const previousCleanupRepairPunctuationNormalization = cleanupRepairPunctuationNormalization
-      const previousCleanupRepairDeslopTermNormalization = cleanupRepairDeslopTermNormalization
-      await onStage('review', {
-        status: 'running',
-        phase: 'deterministic_cleanup_repair',
-        cleanup_repair_attempt: cleanupRepairAttempt,
-        cleanup_risk_count: deterministicProseCleanup.risk_count,
-      })
-      try {
-        const cleanupRepair = await runProseRevisionFromExistingReview(activeWorkspace, project, buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches), finalText, preferredModelId, {
-          base_review: selfCheck.review,
-          revise: true,
-          deterministic_cleanup_repair: true,
-          deterministic_prose_cleanup: deterministicProseCleanup,
-          quality_threshold: qualityThreshold,
-          onReviewProgress: emitReviewStageProgress,
-          ...qualityRepairLlmControlOptions,
-        })
-        const cleanupRepairTextSelection = selectUsableRevisionText(finalText, cleanupRepair)
-        selfCheck = {
-          ...selfCheck,
-          review: cleanupRepair.review,
-          final_text: cleanupRepairTextSelection.text,
-          revised: Boolean(selfCheck.revised || cleanupRepair.revised),
-          revision: mergeProseRevisionArtifacts(selfCheck.revision, cleanupRepair.revision),
-          deterministic_cleanup_repair: cleanupRepair.review,
-          deterministic_cleanup_repair_attempt: cleanupRepairAttempt,
-        }
-        revisionTextSelection = selectUsableRevisionText(finalText, selfCheck)
-        finalText = revisionTextSelection.text
-        if (!revisionTextSelection.accepted && revisionTextSelection.reason) {
-          selfCheck = {
-            ...selfCheck,
-            final_text: finalText,
-            unusable_revision_text: revisionTextSelection,
-          }
-        }
-        if (cleanupRepair.revised && cleanupRepair.revision) {
-          finalSceneBreakdown = selectVerifiedSceneBreakdownUpdate(finalSceneBreakdown, cleanupRepair.revision.scene_breakdown, finalText)
-          finalContinuityNotes = cleanupRepair.revision.continuity_notes?.length ? cleanupRepair.revision.continuity_notes : finalContinuityNotes
-        }
-        cleanupRepairFormatNormalization = normalizeDeterministicProseFormat(finalText)
-        if (cleanupRepairFormatNormalization.changed) {
-          finalText = cleanupRepairFormatNormalization.text
-          deterministicReviewTextChanged = true
-          await onStage('review', {
-            status: 'success',
-            phase: 'deterministic_cleanup_repair_format_normalize',
-            cleanup_repair_attempt: cleanupRepairAttempt,
-            format_change_count: cleanupRepairFormatNormalization.change_count,
-            format_rules: cleanupRepairFormatNormalization.rules,
-          })
-        }
-        cleanupRepairPunctuationNormalization = normalizeDeterministicProsePunctuation(finalText)
-        if (cleanupRepairPunctuationNormalization.changed) {
-          finalText = cleanupRepairPunctuationNormalization.text
-          deterministicReviewTextChanged = true
-          await onStage('review', {
-            status: 'success',
-            phase: 'deterministic_cleanup_repair_punctuation_normalize',
-            cleanup_repair_attempt: cleanupRepairAttempt,
-            punctuation_change_count: cleanupRepairPunctuationNormalization.change_count,
-            punctuation_rules: cleanupRepairPunctuationNormalization.rules,
-          })
-        }
-        const cleanupRepairLanguageNormalization = normalizeDeterministicProseLanguageFragments(finalText)
-        if (cleanupRepairLanguageNormalization.changed) {
-          finalText = cleanupRepairLanguageNormalization.text
-          deterministicReviewTextChanged = true
-          if (selfCheck?.review) {
-            selfCheck = {
-              ...selfCheck,
-              review: resolveProseLanguageRiskReview(selfCheck.review, finalText),
-            }
-          }
-          await onStage('review', {
-            status: 'success',
-            phase: 'deterministic_cleanup_repair_language_normalize',
-            cleanup_repair_attempt: cleanupRepairAttempt,
-            language_change_count: cleanupRepairLanguageNormalization.change_count,
-            language_rules: cleanupRepairLanguageNormalization.rules,
-          })
-        }
-        cleanupRepairDeslopTermNormalization = normalizeDeterministicProseDeslopTerms(finalText)
-        if (cleanupRepairDeslopTermNormalization.changed) {
-          finalText = cleanupRepairDeslopTermNormalization.text
-          deterministicReviewTextChanged = true
-          await onStage('review', {
-            status: 'success',
-            phase: 'deterministic_cleanup_repair_deslop_term_normalize',
-            cleanup_repair_attempt: cleanupRepairAttempt,
-            deslop_term_change_count: cleanupRepairDeslopTermNormalization.change_count,
-            deslop_term_rules: cleanupRepairDeslopTermNormalization.rules,
-          })
-        }
-        selfCheck = {
-          ...selfCheck,
-          final_text: finalText,
-        }
-        if (finalText !== cleanupRepairTextBefore) deterministicReviewTextChanged = true
-        deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)
-        proseRevisionReceiptSync = buildProseRevisionReceiptSyncReport(chapter, selfCheck)
-        deslopRepairReceiptSync = buildDeslopRepairReceiptSyncReport(chapter, selfCheck)
-        qualityAuditRepairReceiptSync = buildQualityAuditRepairReceiptSyncReport(chapter, selfCheck)
-        revisionContextReceiptSync = buildRevisionContextReceiptSyncReport(chapter, selfCheck)
-        revisionCascadeImpactSync = buildRevisionCascadeImpactSyncReport(chapter, selfCheck)
-        revisionScopeGuardSync = buildRevisionScopeGuardSyncReport(chapter, selfCheck)
-        const nextCleanupRiskCount = Number(deterministicProseCleanup.risk_count || 0)
-        if (nextCleanupRiskCount >= previousCleanupRiskCount) {
-          finalText = cleanupRepairTextBefore
-          selfCheck = {
-            ...previousSelfCheck,
-            final_text: finalText,
-            deterministic_cleanup_repair_rejected: true,
-            deterministic_cleanup_repair_rejected_attempt: cleanupRepairAttempt,
-            deterministic_cleanup_repair_rejected_reason: `risk_not_reduced:${previousCleanupRiskCount}->${nextCleanupRiskCount}`,
-          }
-          revisionTextSelection = previousRevisionTextSelection
-          finalSceneBreakdown = previousFinalSceneBreakdown
-          finalContinuityNotes = previousFinalContinuityNotes
-          deterministicReviewTextChanged = previousDeterministicReviewTextChanged
-          cleanupRepairFormatNormalization = previousCleanupRepairFormatNormalization
-          cleanupRepairPunctuationNormalization = previousCleanupRepairPunctuationNormalization
-          cleanupRepairDeslopTermNormalization = previousCleanupRepairDeslopTermNormalization
-          deterministicProseCleanup = previousDeterministicProseCleanup
-          proseRevisionReceiptSync = buildProseRevisionReceiptSyncReport(chapter, selfCheck)
-          deslopRepairReceiptSync = buildDeslopRepairReceiptSyncReport(chapter, selfCheck)
-          qualityAuditRepairReceiptSync = buildQualityAuditRepairReceiptSyncReport(chapter, selfCheck)
-          revisionContextReceiptSync = buildRevisionContextReceiptSyncReport(chapter, selfCheck)
-          revisionCascadeImpactSync = buildRevisionCascadeImpactSyncReport(chapter, selfCheck)
-          revisionScopeGuardSync = buildRevisionScopeGuardSyncReport(chapter, selfCheck)
-          await onStage('review', {
-            status: 'warn',
-            phase: 'deterministic_cleanup_repair_rejected',
-            cleanup_repair_attempt: cleanupRepairAttempt,
-            previous_cleanup_risk_count: previousCleanupRiskCount,
-            next_cleanup_risk_count: nextCleanupRiskCount,
-            cleanup_risk_count: deterministicProseCleanup.risk_count,
-          })
-          break
-        }
-        await onStage('review', {
-          status: Number(deterministicProseCleanup.risk_count || 0) > 0 ? 'warn' : 'success',
-          phase: 'deterministic_cleanup_repair',
-          cleanup_repair_attempt: cleanupRepairAttempt,
-          cleanup_risk_count: deterministicProseCleanup.risk_count,
-        })
-      } catch (cleanupRepairError) {
-        if (isAbortError(cleanupRepairError)) throw cleanupRepairError
-        const cleanupRepairMessage = String((cleanupRepairError as any)?.message || cleanupRepairError || '确定性清理修复失败')
-        selfCheck = {
-          ...selfCheck,
-          deterministic_cleanup_repair_error: cleanupRepairMessage,
-          deterministic_cleanup_repair_failed: true,
-        }
-        await onStage('review', {
-          status: 'warn',
-          phase: 'deterministic_cleanup_repair_failed',
-          cleanup_repair_attempt: cleanupRepairAttempt,
-          error: cleanupRepairMessage.slice(0, 240),
-          cleanup_risk_count: deterministicProseCleanup.risk_count,
-        })
-        break
-      }
-    }
-    if (deterministicReviewTextChanged && options.auto_repair_quality_gate === true && !isDraftReviewOnly) {
-      throwIfChapterGenerationAborted()
-      await onStage('review', {
-        status: 'running',
-        phase: 'deterministic_cleanup_recheck',
-        cleanup_risk_count: deterministicProseCleanup.risk_count,
-      })
-      try {
-        const deterministicCleanupRecheckContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)
-        const deterministicCleanupRecheck = await runProseSelfReviewAndRevision(activeWorkspace, project, deterministicCleanupRecheckContextPackage, finalText, preferredModelId, {
-          revise: false,
-          quality_gate_repair: true,
-          quality_threshold: qualityThreshold,
-          onReviewProgress: emitReviewStageProgress,
-          ...qualityRepairLlmControlOptions,
-          fill_missing_structured_checks: false,
-        })
-        const deterministicCleanupRecheckSelection = selectUsableRevisionText(finalText, deterministicCleanupRecheck)
-        finalText = deterministicCleanupRecheckSelection.text
-        const mergedDeterministicCleanupRecheckReview = mergeQualityRecheckReviewWithStructuredEvidence(selfCheck.review, deterministicCleanupRecheck.review)
-        selfCheck = {
-          ...selfCheck,
-          review: mergedDeterministicCleanupRecheckReview,
-          final_text: finalText,
-          revised: Boolean(selfCheck.revised),
-          deterministic_cleanup_recheck: mergedDeterministicCleanupRecheckReview,
-          deterministic_cleanup_recheck_raw: deterministicCleanupRecheck.review,
-          ...(!deterministicCleanupRecheckSelection.accepted && deterministicCleanupRecheckSelection.reason ? {
-            final_text_cleanup_recheck_rejected: true,
-            rejected_final_text_cleanup_recheck_reason: deterministicCleanupRecheckSelection.reason,
-          } : {}),
-        }
-        deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)
-        await onStage('review', {
-          status: 'success',
-          phase: 'deterministic_cleanup_recheck',
-          score: selfCheck?.review?.score ?? null,
-          cleanup_risk_count: deterministicProseCleanup.risk_count,
-        })
-      } catch (cleanupRecheckError: any) {
-        if (isAbortError(cleanupRecheckError)) throw cleanupRecheckError
-        const cleanupRecheckMessage = String(cleanupRecheckError?.message || cleanupRecheckError || '确定性清理后复检失败')
-        selfCheck = {
-          ...selfCheck,
-          deterministic_cleanup_recheck_error: cleanupRecheckMessage,
-          deterministic_cleanup_recheck_failed: true,
-        }
-        await onStage('review', {
-          status: 'warn',
-          phase: 'deterministic_cleanup_recheck',
-          error: cleanupRecheckMessage.slice(0, 240),
-          cleanup_risk_count: deterministicProseCleanup.risk_count,
-        })
-      }
-    }
+    const cleanupRepairFormatNormalization: any = null
+    const cleanupRepairPunctuationNormalization: any = null
+    const cleanupRepairDeslopTermNormalization: any = null
+    const formatNormalization = { changed: false, change_count: 0, rules: [], skipped_after_quality: true }
+    const punctuationNormalization = { changed: false, change_count: 0, rules: [], skipped_after_quality: true }
+    const deslopTermNormalization = { changed: false, change_count: 0, rules: [], skipped_after_quality: true }
+    const deterministicProseCleanup = qualityLoop.final_scan?.cleanup || buildDeterministicProseCleanupReport(chapter, finalText)
     const syncChapterForReceiptEvidence = { ...chapter, chapter_text: finalText }
     proseRevisionReceiptSync = buildProseRevisionReceiptSyncReport(syncChapterForReceiptEvidence, selfCheck)
     deslopRepairReceiptSync = buildDeslopRepairReceiptSyncReport(syncChapterForReceiptEvidence, selfCheck)
@@ -46094,9 +45565,16 @@ export function createNovelWritingService(ctx: {
       cleanupRepairPunctuationNormalization,
       cleanupRepairDeslopTermNormalization,
     }))
-    if (isDraftReviewOnly) {
-      await onStage('safety', { status: 'skipped', reason: '生产模式：生成并自检，不执行仿写安全门禁' })
+    if (isDraftOnly || isDraftReviewOnly) {
+      await onStage('safety', {
+        status: 'skipped',
+        reason: isDraftOnly
+          ? '生产模式：初稿已通过硬质量门禁，不执行仿写安全门禁'
+          : '生产模式：生成并自检，不执行仿写安全门禁',
+      })
+      assertCurrentProseQualityCanStore()
       await onStage('store', { status: 'running' })
+      await ctx.runtime?.hooks?.beforeChapterStore?.({ chapterId: chapter.id, finalText })
       const updatedReviewedDraft = await updateNovelChapter(activeWorkspace, chapter.id, buildChapterProseStoragePatch({
         chapter,
         generatedTitlePatch,
@@ -46107,7 +45585,12 @@ export function createNovelWritingService(ctx: {
         postDraftDirector,
       }), { versionSource: resolveChapterProseVersionSource({ editorRewrite }) })
       await onStage('store', { status: 'success', word_count: countProseChars(finalText), scene_status: 'accepted' })
-      await onStage('story_state', { status: 'skipped', reason: '自检模式不更新状态机，确认后可继续完整流水线' })
+      await onStage('story_state', {
+        status: 'skipped',
+        reason: isDraftOnly
+          ? '初稿模式不更新状态机，避免草稿污染长期记忆'
+          : '自检模式不更新状态机，确认后可继续完整流水线',
+      })
       await createNovelReview(activeWorkspace, buildProseQualityReview(draftQualityDecision.passed ? 'ok' : 'warn', draftQualityDecision))
       const draftProseMetaSync = buildProseMetaSyncReport(project, chapter, contextPackage, finalText)
       await storeGeneratedReviewRecord(buildDraftSyncReviewRecord({
@@ -46359,6 +45842,12 @@ export function createNovelWritingService(ctx: {
         production_mode: productionMode,
         completed_stage: 'store',
         prompt_diagnostics: draftPromptDiagnostics,
+        quality_loop: {
+          rounds: qualityLoop.rounds.map((item: any) => ({ round: item.round, accepted: item.selection.accepted, reason: item.selection.reason })),
+          decision: qualityLoop.decision,
+        },
+        post_draft_director: postDraftDirector,
+        oh_story_delivery_receipts: ohStoryDeliveryReceipts,
         story_state_update: buildSkippedPostDeliveryStoryStateUpdate({
           proseRevisionReceiptSync,
           deslopRepairReceiptSync,
@@ -46449,6 +45938,7 @@ export function createNovelWritingService(ctx: {
       throw ctx.production.buildApprovalError('draft', '正文入库前等待人工确认', { score: selfCheck?.review?.score ?? null, revised: Boolean(selfCheck.revised) })
     }
     throwIfChapterGenerationAborted()
+    assertCurrentProseQualityCanStore()
     const referenceReport = await ctx.reference.buildReferenceUsageReport(activeWorkspace, project, '正文创作', finalText)
     const safetyDecision = ctx.reference.getReferenceSafetyDecision(project, referenceReport)
     const safetyExplanation = ctx.reference.explainReferenceSafety(referenceReport, safetyDecision)
@@ -46486,7 +45976,9 @@ export function createNovelWritingService(ctx: {
       throw ctx.production.buildApprovalError('safety', '仿写安全报告等待人工确认', { score: safetyDecision.score, copy_hit_count: safetyDecision.copy_hit_count, risk_level: referenceReport?.quality_assessment?.risk_level })
     }
     throwIfChapterGenerationAborted()
+    assertCurrentProseQualityCanStore()
     await onStage('store', { status: 'running' })
+    await ctx.runtime?.hooks?.beforeChapterStore?.({ chapterId: chapter.id, finalText })
     const updated = await updateNovelChapter(activeWorkspace, chapter.id, buildChapterProseStoragePatch({
       chapter,
       generatedTitlePatch,
@@ -46499,6 +45991,7 @@ export function createNovelWritingService(ctx: {
     await onStage('store', { status: 'success', word_count: countProseChars(finalText), scene_status: 'accepted' })
     throwIfChapterGenerationAborted()
     await onStage('story_state', { status: 'running' })
+    await ctx.runtime?.hooks?.beforeStoryState?.({ chapterId: chapter.id, finalText })
     const storyStateUpdate = await updateStoryStateMachine(activeWorkspace, project, updated || chapter, buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches), finalText, preferredModelId, llmControlOptions).catch(error => {
       if (isAbortError(error)) throw error
       return { error: String(error) }
@@ -46642,6 +46135,12 @@ export function createNovelWritingService(ctx: {
       production_mode: productionMode,
       completed_stage: 'story_state',
       prompt_diagnostics: draftPromptDiagnostics,
+      quality_loop: {
+        rounds: qualityLoop.rounds.map((item: any) => ({ round: item.round, accepted: item.selection.accepted, reason: item.selection.reason })),
+        decision: qualityLoop.decision,
+      },
+      post_draft_director: postDraftDirector,
+      oh_story_delivery_receipts: ohStoryDeliveryReceipts,
       reference_report: referenceReport,
       safety_decision: safetyDecision,
       migration_audit: migrationAudit,

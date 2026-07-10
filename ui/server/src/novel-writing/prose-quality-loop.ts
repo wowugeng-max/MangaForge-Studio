@@ -224,6 +224,22 @@ function qualityLoopError(code: string, message: string, details: any = {}) {
   return Object.assign(new Error(message), { code, ...details })
 }
 
+function compactQualityError(error: any) {
+  return {
+    name: compactQualityText(error?.name || 'Error', 80),
+    message: compactQualityText(error?.message || error, 500),
+    code: compactQualityText(error?.code, 100) || undefined,
+  }
+}
+
+function summarizeQualityRounds(rounds: any[]) {
+  return rounds.map(item => ({
+    round: Number(item?.round || 0),
+    accepted: item?.selection?.accepted === true,
+    reason: compactQualityText(item?.selection?.reason, 300),
+  }))
+}
+
 export async function runProseQualityLoop(input: {
   initialText: string
   minScore: number
@@ -250,7 +266,7 @@ export async function runProseQualityLoop(input: {
       }),
     })
   } catch (error) {
-    throw qualityLoopError('PROSE_REVIEW_FAILED', '正文初审不可用', { cause: error })
+    throw qualityLoopError('PROSE_REVIEW_FAILED', '正文初审不可用', { cause: compactQualityError(error) })
   }
   if (!isUsableProseQualityReviewPayload(initialPayload)) {
     throw qualityLoopError('PROSE_REVIEW_FAILED', '正文初审没有返回完整六维结果')
@@ -306,13 +322,28 @@ export async function runProseQualityLoop(input: {
       }
       review = normalizeProseQualityReview(recheckPayload)
     } catch (error) {
+      const message = `正文第 ${round} 轮修订后的独立复检不可用`
       throw qualityLoopError(
         'PROSE_QUALITY_RECHECK_UNAVAILABLE',
-        `正文第 ${round} 轮修订后的独立复检不可用`,
+        message,
         {
-          cause: error,
+          cause: compactQualityError(error),
           candidate_chars: finalText.replace(/\s+/g, '').length,
-          rounds,
+          quality_loop: {
+            rounds: summarizeQualityRounds(rounds),
+            decision: {
+              passed: false,
+              approvable: false,
+              score: Number(review?.score || 0),
+              min_score: Number(input.minScore || 0),
+              hard_failures: [{
+                key: 'quality_recheck_unavailable',
+                message,
+                source: 'recheck',
+              }],
+              advisory_failures: [],
+            },
+          },
         },
       )
     }

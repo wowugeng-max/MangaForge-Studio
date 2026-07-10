@@ -10,6 +10,7 @@ import {
   createNovelWorldbuilding,
   listNovelChapters,
   listNovelCharacters,
+  listChapterVersions,
   listNovelOutlines,
   listNovelReviews,
   listNovelWorldbuilding,
@@ -246,6 +247,7 @@ import {
 import { buildLLMResultDiagnostics, buildPreflightChecks, deepMergeObjects, extractPlainProseFallback, formatReviewIssueForStorage, getNovelPayload, getQualityGateDecision, getStyleLock, normalizeIssue } from './novel-route-utils'
 import { buildProseGenerationContract } from '../novel-writing/prose-generation-contract'
 import { buildProsePromptContextSnapshot } from '../novel-writing/prose-prompt-context'
+import { normalizeProseForStorage } from '../novel-writing/chapter-prose-storage-patch'
 
 const readSceneCardsPromptSource = () => readFileSync(join(import.meta.dir, '../novel-writing/scene-cards-prompt.ts'), 'utf8')
 const readPostDeliveryStoryStateUpdateSource = () => readFileSync(join(import.meta.dir, '../novel-writing/post-delivery-story-state-update.ts'), 'utf8')
@@ -253,6 +255,512 @@ const readProseQualityReviewRecordSource = () => readFileSync(join(import.meta.d
 const readChapterProseStoragePatchSource = () => readFileSync(join(import.meta.dir, '../novel-writing/chapter-prose-storage-patch.ts'), 'utf8')
 const readPostDeliverySyncReviewRecordSource = () => readFileSync(join(import.meta.dir, '../novel-writing/post-delivery-sync-review-record.ts'), 'utf8')
 const readDraftSyncReviewRecordSource = () => readFileSync(join(import.meta.dir, '../novel-writing/draft-sync-review-record.ts'), 'utf8')
+
+const proseQualityScores = {
+  continuity: 7,
+  core_promise_agency: 6,
+  conflict_causality: 7,
+  payoff_hook: 6,
+  prose_style: 7,
+  fact_setting_safety: 8,
+}
+
+function buildPipelineProse(opening: string, action: string) {
+  const subjects = ['江澈', '顾遥', '短发追兵', '巷口队长', '楼顶观察手']
+  const locations = ['路灯下', '旧墙边', '排水沟旁', '铁门前', '消防梯口']
+  const consequences = ['封锁线向东偏移', '通讯频道短暂失声', '后排脚步乱了一拍', '出口露出半步空隙', '楼顶的手电偏离目标']
+  const sentences = [opening]
+  for (let index = 0; countProseChars(sentences.join('')) < 960; index += 1) {
+    sentences.push(`${subjects[index % subjects.length]}在${locations[index % locations.length]}${action}，${index + 1}号标记随即熄灭，${consequences[index % consequences.length]}。`)
+  }
+  return sentences.join('')
+}
+
+type ProsePipelineHarnessOptions = {
+  draftText?: string
+  reviewPayloads?: any[]
+  revisionTexts?: string[]
+  recheckError?: Error
+}
+
+async function createProsePipelineHarness(options: ProsePipelineHarnessOptions = {}) {
+  const workspace = mkdtempSync(join(tmpdir(), 'mangaforge-prose-quality-loop-'))
+  const project = await createNovelProject(workspace, {
+    title: '怪谈世界：我是超人，怪谈你随意',
+    genre: '规则怪谈',
+    synopsis: '江澈以超人之力主动打穿怪谈规则。',
+    reference_config: {
+      chapter_word_target: { mode: 'custom', target: 1000 },
+      quality_gate: {
+        enabled: true,
+        min_score: 78,
+        require_revision_before_store: true,
+        max_critical_issues: 0,
+        max_high_issues: 0,
+      },
+    },
+  })
+  await createNovelWorldbuilding(workspace, {
+    project_id: project.id,
+    world_summary: '追捕队以怪谈通讯频道同步封锁，江澈的行动会直接改变包围结构。',
+    rules: ['频道失联时，追捕队会按最后一道命令继续收紧。'],
+  })
+  await createNovelCharacter(workspace, {
+    project_id: project.id,
+    name: '江澈',
+    role_type: '主角',
+    current_state: { location: '旧城巷口', goal: '打穿追捕圈并夺取频道' },
+  })
+  await createNovelChapter(workspace, {
+    project_id: project.id,
+    chapter_no: 9,
+    title: '四面封巷',
+    chapter_summary: '追捕队从四面封死旧城出口。',
+    ending_hook: '所有耳机同时传出幕后指挥者的倒数。',
+    chapter_text: '红灯同时亮起，追捕队从四面压进旧巷。江澈听见耳机里的倒数，只剩铁门后那条路还没有完全合拢。',
+  })
+  const chapter = await createNovelChapter(workspace, {
+    project_id: project.id,
+    chapter_no: 10,
+    title: '打穿合围',
+    chapter_goal: '江澈主动打穿追捕圈并夺取指挥频道。',
+    chapter_summary: '江澈利用封锁线的联动缺口反向追踪幕后指挥者。',
+    conflict: '双层追捕线互相掩护，铁门后的退路正在闭合。',
+    ending_hook: '幕后指挥者用顾遥的声音叫出江澈旧名。',
+    scene_list: [{
+      scene_no: 1,
+      title: '铁门破围',
+      purpose: '夺下追捕通讯器',
+      goal: '打乱双层封锁线',
+      obstacle: '追捕队互相掩护',
+      conflict: '铁门即将闭合',
+      action: '江澈主动撞断路灯制造盲区',
+      turn: '通讯器里传出顾遥的声音',
+      payoff: '锁定幕后频道',
+      ending_hook_seed: '指挥者叫出江澈旧名',
+    }],
+  })
+
+  const draftText = options.draftText || buildPipelineProse(
+    '倒数压到最后三秒，江澈停在围墙阴影里等待。',
+    '只看着追捕队继续收紧包围',
+  )
+  const reviewPayloads = [...(options.reviewPayloads || [])]
+  const revisionTexts = [...(options.revisionTexts || [])]
+  const modelCalls = { scene_cards: 0, draft: 0, review: 0, revision: 0, editor: 0, story_state: 0, other: 0 }
+  const storyStateTexts: string[] = []
+  let storeCalls = 0
+  let storyStateCalls = 0
+  let qualityReviewCalls = 0
+
+  const contextPackage = {
+    preflight: { ready: true, strict_ready: true, checks: [], warnings: [], blockers: [] },
+    chapter_target: {
+      id: chapter.id,
+      chapter_no: chapter.chapter_no,
+      title: chapter.title,
+      goal: chapter.chapter_goal,
+      summary: chapter.chapter_summary,
+      conflict: chapter.conflict,
+      ending_hook: chapter.ending_hook,
+      previous_handoff: '追捕队从四面封死旧巷，耳机里的倒数只剩三秒。',
+      scene_cards: chapter.scene_list,
+      core_contract_radar: {
+        reader_promise: '江澈必须以可见选择和行动碾碎怪谈规则。',
+        core_conflict: '人的主动选择对抗怪谈封锁。',
+      },
+      longform_compass: {
+        reader_promise: '每章核心结果必须由江澈主动争取。',
+        no_drift: ['不得等待配角代办破局结果。'],
+      },
+    },
+    continuity: {
+      previous_chapter: {
+        chapter_no: 9,
+        title: '四面封巷',
+        ending_hook: '所有耳机同时传出幕后指挥者的倒数。',
+        ending_excerpt: '红灯同时亮起，追捕队从四面压进旧巷。江澈听见耳机里的倒数，只剩铁门后那条路还没有完全合拢。',
+      },
+    },
+  }
+
+  const executeAgent = async (_agent: string, _project: any, input: any) => {
+    const task = String(input?.task || '')
+    if (task.includes('商业主编')) {
+      modelCalls.editor += 1
+      return { parsed: { chapter_text: draftText, editor_report: { passed: true } }, modelName: 'fake-editor' } as any
+    }
+    if (task.startsWith('任务：独立审查小说正文') || task.startsWith('任务：对刚生成的小说章节进行章节级自检')) {
+      modelCalls.review += 1
+      qualityReviewCalls += 1
+      if (options.recheckError && qualityReviewCalls > 1) throw options.recheckError
+      const payload = reviewPayloads.shift() || {
+        score: 88,
+        publishable: true,
+        dimensions: { ...proseQualityScores, core_promise_agency: 9, payoff_hook: 9 },
+        findings: [],
+      }
+      return { parsed: payload, modelName: 'fake-reviewer' } as any
+    }
+    if (task.startsWith('任务：执行第') || task.startsWith('任务：根据自检结果修订本章正文')) {
+      modelCalls.revision += 1
+      const text = revisionTexts.shift() || draftText
+      return { parsed: { chapter_text: text, revision_receipts: [{ key: 'agency', changed_evidence: text.slice(0, 80) }] }, modelName: 'fake-reviser' } as any
+    }
+    if (task.includes('state_delta')) {
+      modelCalls.story_state += 1
+      return { parsed: { state_delta: { open_questions: ['幕后指挥者为何知道江澈旧名'] }, character_updates: [], setting_updates: [], storyline_updates: [] }, modelName: 'fake-state' } as any
+    }
+    modelCalls.other += 1
+    return { parsed: {}, modelName: 'fake-other' } as any
+  }
+
+  const service = createNovelWritingService({
+    getProject: async () => project,
+    production: {
+      buildAgentConfigSnapshot: () => ({ model_id: 217 }),
+      getApprovalPolicy: () => ({}),
+      getStageModelId: () => 217,
+      getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+      approvalRequired: () => false,
+      buildApprovalError: (type: string, message: string, details: any) => Object.assign(new Error(message), { code: `APPROVAL_REQUIRED_${type.toUpperCase()}`, details }),
+    } as any,
+    reference: {
+      getReferenceMigrationPlanForChapter: async () => ({}),
+      buildReferenceUsageReport: async () => ({ quality_assessment: { risk_level: 'low' } }),
+      getReferenceSafetyDecision: () => ({ blocked: false, score: 100, copy_hit_count: 0, reasons: [] }),
+      explainReferenceSafety: () => 'safe',
+      buildMigrationAudit: () => ({ passed: true }),
+    } as any,
+    runtime: {
+      buildChapterContext: async () => contextPackage,
+      generateChapterProse: async () => {
+        modelCalls.draft += 1
+        return { parsed: { chapter_no: 10, chapter_text: draftText }, modelName: 'fake-draft', usage: { input_tokens: 100, output_tokens: 200 } } as any
+      },
+      executeAgent: executeAgent as any,
+      hooks: {
+        beforeChapterStore: ({ finalText }) => {
+          storeCalls += 1
+          if (!finalText) throw new Error('empty final text')
+        },
+        beforeStoryState: ({ finalText }) => {
+          storyStateCalls += 1
+          storyStateTexts.push(finalText)
+        },
+      },
+    },
+  })
+
+  return {
+    workspace,
+    project,
+    chapter,
+    service,
+    modelCalls,
+    storyStateTexts,
+    get storeCalls() { return storeCalls },
+    get storyStateCalls() { return storyStateCalls },
+  }
+}
+
+test('does not store chapter text or story state after two failed prose revisions', async () => {
+  const firstRevision = buildPipelineProse(
+    '第一轮改稿里，江澈离开墙角，却把选择交给顾遥。',
+    '跟着顾遥留下的手势挪动，没有改变封锁结构',
+  )
+  const secondRevision = buildPipelineProse(
+    '第二轮改稿里，江澈抢到耳机，却仍等着顾遥下令。',
+    '守在原地听取指令，没有主动争取出口',
+  )
+  const findings = [
+    '倒数压到最后三秒，江澈停在围墙阴影里等待。',
+    '第一轮改稿里，江澈离开墙角，却把选择交给顾遥。',
+    '第二轮改稿里，江澈抢到耳机，却仍等着顾遥下令。',
+  ].map(evidence => ({
+    score: 72,
+    dimensions: proseQualityScores,
+    findings: [{
+      key: 'agency',
+      severity: 'S2',
+      dimension: 'core_promise_agency',
+      evidence,
+      required_change: '让江澈主动破围并改变追捕阵型',
+      acceptance_test: '追捕阵型因江澈的可见动作发生变化',
+    }],
+  }))
+  const harness = await createProsePipelineHarness({
+    reviewPayloads: findings,
+    revisionTexts: [firstRevision, secondRevision],
+  })
+
+  let qualityError: any
+  try {
+    await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+      model_id: 217,
+      target_word_count: 1000,
+      quality_threshold: 78,
+      auto_repair_quality_gate: true,
+    })
+  } catch (error) {
+    qualityError = error
+  }
+
+  expect(qualityError).toMatchObject({
+    code: 'PROSE_QUALITY_GATE_BLOCKED',
+    quality_loop: {
+      decision: { passed: false },
+      rounds: [
+        { round: 1, accepted: true, reason: '' },
+        { round: 2, accepted: true, reason: '' },
+      ],
+    },
+  })
+  expect(qualityError?.prompt_diagnostics?.prompt_chars).toBeGreaterThan(0)
+  expect(JSON.stringify(qualityError?.quality_loop)).not.toContain(firstRevision.slice(0, 80))
+  expect(JSON.stringify(qualityError?.quality_loop)).not.toContain(secondRevision.slice(0, 80))
+
+  const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+  expect(stored?.chapter_text || '').toBe('')
+  expect(harness.storeCalls).toBe(0)
+  expect(harness.storyStateCalls).toBe(0)
+  expect(harness.modelCalls.revision).toBe(2)
+})
+
+test('keeps prose recheck exceptions failed despite a generic quality approval', async () => {
+  const revisedText = buildPipelineProse(
+    '江澈撞断路灯，第一排追兵被飞石逼离封锁位。',
+    '沿着自己砸出的缺口向前压进，迫使追捕队改变阵型',
+  )
+  const harness = await createProsePipelineHarness({
+    reviewPayloads: [{
+      score: 70,
+      dimensions: proseQualityScores,
+      findings: [{
+        key: 'hook',
+        severity: 'S2',
+        dimension: 'payoff_hook',
+        evidence: '倒数压到最后三秒，江澈停在围墙阴影里等待。',
+        required_change: '补足本章回报和章末新问题',
+        acceptance_test: '末段形成具体翻页理由',
+      }],
+    }],
+    revisionTexts: [revisedText],
+    recheckError: new Error('review timeout'),
+  })
+
+  let recheckError: any
+  try {
+    await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+      model_id: 217,
+      target_word_count: 1000,
+      quality_threshold: 78,
+      auto_repair_quality_gate: true,
+      approvals: { quality_gate: { approved: true } },
+    })
+  } catch (error) {
+    recheckError = error
+  }
+
+  expect(recheckError).toMatchObject({
+    code: 'PROSE_QUALITY_RECHECK_UNAVAILABLE',
+    quality_loop: {
+      decision: {
+        passed: false,
+        hard_failures: [{ key: 'quality_recheck_unavailable', source: 'recheck' }],
+      },
+      rounds: [{ round: 1, accepted: true, reason: '' }],
+    },
+  })
+  expect(recheckError?.prompt_diagnostics?.prompt_chars).toBeGreaterThan(0)
+  expect(JSON.stringify(recheckError?.quality_loop)).not.toContain(revisedText.slice(0, 80))
+  expect(JSON.stringify(recheckError)).not.toContain(revisedText.slice(0, 80))
+
+  expect(harness.storeCalls).toBe(0)
+  expect(harness.storyStateCalls).toBe(0)
+  const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+  expect(stored?.chapter_text || '').toBe('')
+})
+
+test('stores one coherent final prose text after a passing independent recheck', async () => {
+  const finalText = normalizeProseForStorage(buildPipelineProse(
+    '江澈踏碎路面，飞石逼退第一排追兵，铁门前终于露出缺口。',
+    '借自己制造的盲区夺下通讯器，继续迫使追捕队后撤',
+  ))
+  const harness = await createProsePipelineHarness({
+    reviewPayloads: [
+      {
+        score: 72,
+        dimensions: proseQualityScores,
+        findings: [{
+          key: 'agency',
+          severity: 'S2',
+          dimension: 'core_promise_agency',
+          evidence: '倒数压到最后三秒，江澈停在围墙阴影里等待。',
+          required_change: '让江澈主动破围',
+          acceptance_test: '追捕阵型因主角动作改变',
+        }],
+      },
+      {
+        score: 88,
+        publishable: true,
+        dimensions: { ...proseQualityScores, core_promise_agency: 9, payoff_hook: 9 },
+        findings: [],
+      },
+    ],
+    revisionTexts: [finalText],
+  })
+
+  const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+    model_id: 217,
+    target_word_count: 1000,
+    quality_threshold: 78,
+    auto_repair_quality_gate: true,
+  })
+  const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+  const versions = await listChapterVersions(harness.workspace, harness.chapter.id)
+
+  expect(stored?.chapter_text).toBe(finalText)
+  expect(versions[0]?.source).toBe('repair')
+  expect(stored?.raw_payload?.oh_story_director).toEqual(result.post_draft_director)
+  expect(stored?.raw_payload?.oh_story_delivery_receipts).toEqual(result.oh_story_delivery_receipts)
+  expect(harness.storyStateTexts).toEqual([finalText])
+  expect(result.quality_loop.decision.passed).toBe(true)
+  expect(result.quality_loop.rounds).toEqual([{ round: 1, accepted: true, reason: '' }])
+})
+
+test('blocks hard prose quality failures in every prose storage production mode', async () => {
+  for (const productionMode of ['draft_only', 'draft_review', 'draft_review_revise_store']) {
+    const harness = await createProsePipelineHarness({
+      reviewPayloads: [{
+        score: 72,
+        dimensions: proseQualityScores,
+        findings: [{
+          key: 'agency',
+          severity: 'S2',
+          dimension: 'core_promise_agency',
+          evidence: '倒数压到最后三秒，江澈停在围墙阴影里等待。',
+          required_change: '让江澈主动改变包围结构',
+          acceptance_test: '追捕阵型因江澈动作改变',
+        }],
+      }],
+    })
+
+    await expect(harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+      model_id: 217,
+      target_word_count: 1000,
+      quality_threshold: 78,
+      production_mode: productionMode,
+      approvals: { quality_gate: { approved: true } },
+    })).rejects.toMatchObject({ code: 'PROSE_QUALITY_GATE_BLOCKED' })
+
+    expect(harness.storeCalls).toBe(0)
+    expect(harness.storyStateCalls).toBe(0)
+    const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+    expect(stored?.chapter_text || '').toBe('')
+  }
+})
+
+test('uses the injected writing runtime for service model calls', async () => {
+  const calls: any[] = []
+  const service = createNovelWritingService({
+    getProject: async () => null,
+    production: {
+      getStageModelId: () => 217,
+      getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+    } as any,
+    reference: {} as any,
+    runtime: {
+      executeAgent: async (...args: any[]) => {
+        calls.push(args)
+        return {
+          parsed: {
+            chapter_text: '江澈抬手截住落下的铁门，追兵的脚步被迫分成两路。',
+            editor_report: { passed: true },
+          },
+          modelName: 'fake-editor',
+        }
+      },
+    },
+  } as any)
+
+  const result = await service.runCommercialEditorRewrite(
+    '/tmp/mangaforge-runtime-injection',
+    { title: '怪谈世界' },
+    { chapter_target: { word_target: { target: 1000, min: 800, max: 1100 } } },
+    '江澈站在封锁线前。',
+    217,
+  )
+
+  expect(calls).toHaveLength(1)
+  expect(result.final_text).toContain('截住落下的铁门')
+  expect(result.editor_report.modelName).toBe('fake-editor')
+})
+
+test('uses the injected chapter context before enforcing request launch gates', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'mangaforge-runtime-context-'))
+  const project = await createNovelProject(workspace, {
+    title: '怪谈世界',
+    genre: '规则怪谈',
+    synopsis: '江澈在追捕中主动破局。',
+    reference_config: {},
+  })
+  const chapter = await createNovelChapter(workspace, {
+    project_id: project.id,
+    chapter_no: 10,
+    title: '合围',
+    chapter_goal: '江澈主动打穿追捕圈。',
+    chapter_summary: '追捕队从四面合围。',
+    conflict: '出口全部被封死。',
+    ending_hook: '幕后指挥者第一次开口。',
+    scene_list: [{ scene_no: 1, title: '破围', purpose: '打穿封锁', conflict: '双层追捕线' }],
+  })
+  let contextCalls = 0
+  let modelCalls = 0
+  const service = createNovelWritingService({
+    getProject: async () => project,
+    production: {
+      buildAgentConfigSnapshot: () => ({}),
+      getApprovalPolicy: () => ({}),
+    } as any,
+    reference: {} as any,
+    runtime: {
+      buildChapterContext: async () => {
+        contextCalls += 1
+        return {
+          preflight: { ready: true, strict_ready: true, checks: [], warnings: [], blockers: [] },
+          chapter_target: {
+            id: chapter.id,
+            chapter_no: 10,
+            title: chapter.title,
+            goal: chapter.chapter_goal,
+            summary: chapter.chapter_summary,
+            conflict: chapter.conflict,
+            ending_hook: chapter.ending_hook,
+            scene_cards: chapter.scene_list,
+          },
+        }
+      },
+      generateChapterProse: async () => {
+        modelCalls += 1
+        return { parsed: { chapter_text: '不应生成。' } } as any
+      },
+      executeAgent: async () => {
+        modelCalls += 1
+        return { parsed: {} } as any
+      },
+    },
+  })
+
+  await expect(service.generateChapterForGroup(workspace, project.id, chapter.id, {
+    model_id: 217,
+    allow_incomplete: true,
+    chapter_launch_gate: { status: 'blocked', summary: '第九章合围承接项缺失' },
+  })).rejects.toMatchObject({ code: 'PROSE_LAUNCH_GATE_BLOCKED' })
+
+  expect(contextCalls).toBe(1)
+  expect(modelCalls).toBe(0)
+})
 
 test('recomputes director after request merge and blocks before draft invocation', async () => {
   let draftCalls = 0
@@ -7052,19 +7560,20 @@ describe('normalizeSceneCardsPayload', () => {
     expect(reviewBlock.indexOf('quality_audit_checks')).toBeLessThan(reviewBlock.indexOf('...deterministicSceneCardReceiptChecks'))
   })
 
-  test('passes latest generated scene breakdown into prose self review context', () => {
+  test('passes the authoritative generation contract into the prose quality loop', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const helperBlock = source.slice(
       source.indexOf('function buildProseReviewContextPackage'),
       source.indexOf('function sceneCardReceiptEvidenceParts'),
     )
     const generationBlock = source.slice(
-      source.indexOf('let selfCheck = await runProseSelfReviewAndRevision'),
+      source.indexOf('let qualityLoop: Awaited<ReturnType<typeof runProseQualityLoop>>'),
       source.indexOf('const initialReviewDecision = getQualityGateDecision'),
     )
 
     expect(helperBlock).toContain('generated_scene_breakdown')
-    expect(generationBlock).toContain('buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')
+    expect(generationBlock).toContain('coreContract: buildFocusedQualityCoreContract(generationContract)')
+    expect(generationBlock).toContain('scan: text => scanProseForQualityLoop(text, contextPackage, wordTarget)')
   })
 
   test('wires deterministic scene-card density risks into prose craft self review', () => {
@@ -10958,7 +11467,7 @@ describe('normalizeSceneCardsPayload', () => {
     const groupBlock = source.slice(groupStart, source.indexOf('const routes', groupStart) > 0 ? source.indexOf('const routes', groupStart) : source.indexOf('return { generateChapterForGroup', groupStart))
 
     expect(groupBlock).toContain('const generatedTitlePatch = buildGeneratedChapterTitlePatch')
-    expect((groupBlock.match(/generatedTitlePatch,/g) || []).length).toBeGreaterThanOrEqual(3)
+    expect((groupBlock.match(/generatedTitlePatch,/g) || []).length).toBeGreaterThanOrEqual(2)
     expect(storagePatchSource).toContain('...(input.generatedTitlePatch || {})')
   })
 
@@ -48460,8 +48969,8 @@ describe('story unit sync report', () => {
     )
 
     expect(generationBlock).toContain('let ohStoryDeliveryReceipts = normalizeStoredOhStoryDeliveryReceipts')
-    expect(generationBlock.match(/buildChapterProseStoragePatch\(/g)?.length || 0).toBeGreaterThanOrEqual(3)
-    expect(generationBlock.match(/ohStoryDeliveryReceipts,/g)?.length || 0).toBeGreaterThanOrEqual(3)
+    expect(generationBlock.match(/buildChapterProseStoragePatch\(/g)?.length || 0).toBeGreaterThanOrEqual(2)
+    expect(generationBlock.match(/ohStoryDeliveryReceipts,/g)?.length || 0).toBeGreaterThanOrEqual(2)
     expect(storagePatchSource).toContain('oh_story_delivery_receipts: input.ohStoryDeliveryReceipts')
     expect(storagePatchSource).toContain('chapter_blueprint: receipts?.chapter_blueprint')
     expect(storagePatchSource).toContain('scene_card_receipts: receipts?.scene_card_receipts')
@@ -48547,7 +49056,7 @@ describe('story unit sync report', () => {
     )
     const finalReceiptBlock = generationBlock.slice(
       generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
-      generationBlock.indexOf("if (isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
+      generationBlock.indexOf("if (isDraftOnly || isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
     )
 
     expect(generationBlock).toContain('let ohStoryDeliveryReceipts = normalizeStoredOhStoryDeliveryReceipts')
@@ -48566,7 +49075,7 @@ describe('story unit sync report', () => {
     )
     const finalReceiptBlock = generationBlock.slice(
       generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
-      generationBlock.indexOf("if (isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
+      generationBlock.indexOf("if (isDraftOnly || isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
     )
 
     expect(finalReceiptBlock).toContain('const revisionDeliveryReceipts = selfCheck?.revision?.oh_story_delivery_receipts')
@@ -48583,7 +49092,7 @@ describe('story unit sync report', () => {
     )
     const finalReceiptBlock = generationBlock.slice(
       generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
-      generationBlock.indexOf("if (isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
+      generationBlock.indexOf("if (isDraftOnly || isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
     )
 
     expect(finalReceiptBlock).toContain('deslop_repair_receipts')
@@ -48600,7 +49109,7 @@ describe('story unit sync report', () => {
     )
     const finalReceiptBlock = generationBlock.slice(
       generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
-      generationBlock.indexOf("if (isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
+      generationBlock.indexOf("if (isDraftOnly || isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
     )
 
     expect(source).toContain('function uniqueDeliveryRiskReceipts')
@@ -48615,7 +49124,7 @@ describe('story unit sync report', () => {
     )
     const finalReceiptBlock = generationBlock.slice(
       generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
-      generationBlock.indexOf("if (isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
+      generationBlock.indexOf("if (isDraftOnly || isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
     )
 
     const sceneReceiptMergeBlock = finalReceiptBlock.slice(
@@ -48634,7 +49143,7 @@ describe('story unit sync report', () => {
     )
     const finalReceiptBlock = generationBlock.slice(
       generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
-      generationBlock.indexOf("if (isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
+      generationBlock.indexOf("if (isDraftOnly || isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
     )
     const sceneReceiptMergeBlock = finalReceiptBlock.slice(
       finalReceiptBlock.indexOf('scene_card_receipts: ['),
@@ -48652,7 +49161,7 @@ describe('story unit sync report', () => {
     )
     const finalReceiptBlock = generationBlock.slice(
       generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
-      generationBlock.indexOf("if (isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
+      generationBlock.indexOf("if (isDraftOnly || isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
     )
     const revisionReceiptMergeBlock = finalReceiptBlock.slice(
       finalReceiptBlock.indexOf('revision_receipts: ['),
@@ -52945,7 +53454,8 @@ describe('chapter context word target source guards', () => {
     expect(helperBlock).toContain('word_target_expansion_patches')
     expect(generationBlock).toContain('const wordTargetExpansionPatches: any[] = []')
     expect(generationBlock).toContain('wordTargetExpansionPatches.push')
-    expect(generationBlock).toContain('buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')
+    expect(generationBlock).toContain('scan: text => scanProseForQualityLoop(text, contextPackage, wordTarget)')
+    expect(generationBlock).toContain('finalSceneBreakdown = selectVerifiedSceneBreakdownUpdate')
   })
 
   test('does not fail chapter production solely because a recovered draft result still has an error field', () => {
@@ -53175,7 +53685,7 @@ describe('chapter context word target source guards', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftOnlyStart = source.indexOf('if (isDraftOnly)', groupStart)
-    const reviewStart = source.indexOf('let selfCheck = await runProseSelfReviewAndRevision', groupStart)
+    const reviewStart = source.indexOf('let qualityLoop: Awaited<ReturnType<typeof runProseQualityLoop>>', groupStart)
     const beforeReviewBlock = source.slice(draftOnlyStart, reviewStart)
 
     expect(groupStart).toBeGreaterThanOrEqual(0)
@@ -53249,7 +53759,7 @@ describe('chapter context word target source guards', () => {
     expect(repairBlock).toContain('const needsChapterBlueprint =')
     expect(repairBlock).toContain("missingKeys.includes('chapter_blueprint')")
     expect(repairBlock).toContain("missingKeys.includes('ending_hook')")
-    expect(repairBlock).toContain("executeNovelAgent('outline-agent'")
+    expect(repairBlock).toContain("executeAgent('outline-agent'")
     expect(repairBlock).toContain('chapter_goal:')
     expect(repairBlock).toContain('ending_hook:')
     expect(repairBlock).toContain("type: 'chapter_blueprint_updated'")
@@ -54594,158 +55104,6 @@ describe('chapter context word target source guards', () => {
     expect(gateBlock).toContain('getQualityGateDecision(qualityGateProject')
   })
 
-  test('uses run-level quality threshold to trigger unattended prose revision', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const shouldReviseStart = source.indexOf('const shouldReviseProse =')
-    const revisionStart = source.indexOf('const runProseSelfReviewAndRevision =', shouldReviseStart)
-    const shouldReviseBlock = source.slice(shouldReviseStart, revisionStart)
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const selfCheckStart = source.indexOf('let selfCheck = await runProseSelfReviewAndRevision', groupStart)
-    const selfCheckBlock = source.slice(selfCheckStart, source.indexOf('const initialReviewDecision =', selfCheckStart))
-
-    expect(shouldReviseStart).toBeGreaterThanOrEqual(0)
-    expect(revisionStart).toBeGreaterThan(shouldReviseStart)
-    expect(shouldReviseBlock).toContain('options.quality_threshold')
-    expect(shouldReviseBlock).toContain('revisionThreshold')
-    expect(selfCheckStart).toBeGreaterThan(groupStart)
-    expect(selfCheckBlock).toContain('quality_threshold: qualityThreshold')
-  })
-
-  test('keeps initial unattended quality-gate review lightweight when auto repair is enabled', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const selfCheckStart = source.indexOf('let selfCheck = await runProseSelfReviewAndRevision', groupStart)
-    const initialDecisionStart = source.indexOf('const initialReviewDecision = getQualityGateDecision', selfCheckStart)
-    const selfCheckBlock = source.slice(selfCheckStart, initialDecisionStart)
-
-    expect(groupStart).toBeGreaterThanOrEqual(0)
-    expect(selfCheckStart).toBeGreaterThan(groupStart)
-    expect(initialDecisionStart).toBeGreaterThan(selfCheckStart)
-    expect(selfCheckBlock).toContain('options.auto_repair_quality_gate === true ? { fill_missing_structured_checks: false } : {}')
-  })
-
-  test('auto-repairs a failed quality gate even when the first self-review produced no usable revision', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const initialDecisionStart = source.indexOf('const initialReviewDecision = getQualityGateDecision', groupStart)
-    const preStoreStart = source.indexOf('const preStoreQualityDecision = getQualityGateDecision', initialDecisionStart)
-    const beforeGateBlock = source.slice(initialDecisionStart, preStoreStart)
-
-    expect(groupStart).toBeGreaterThanOrEqual(0)
-    expect(initialDecisionStart).toBeGreaterThan(groupStart)
-    expect(preStoreStart).toBeGreaterThan(initialDecisionStart)
-    expect(beforeGateBlock).toContain('!initialReviewDecision.passed && options.auto_repair_quality_gate === true && !isDraftReviewOnly')
-    expect(beforeGateBlock).toContain('const qualityGateRepair = await runProseRevisionFromExistingReview')
-    expect(beforeGateBlock).toContain('base_review: selfCheck.review')
-    expect(beforeGateBlock).toContain('quality_gate: initialReviewDecision')
-    expect(beforeGateBlock).toContain('quality_gate_repair: true')
-    expect(beforeGateBlock).toContain('revise: true')
-  })
-
-  test('keeps quality gate repair timeout as a gate warning instead of losing the reviewed draft', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const repairStart = source.indexOf("phase: 'quality_gate_repair'", groupStart)
-    const readabilityStart = source.indexOf('if (shouldRunSynchronousReadabilityReview(options, project))', repairStart)
-    const repairBlock = source.slice(repairStart, readabilityStart)
-
-    expect(groupStart).toBeGreaterThanOrEqual(0)
-    expect(repairStart).toBeGreaterThan(groupStart)
-    expect(readabilityStart).toBeGreaterThan(repairStart)
-    expect(repairBlock).toContain('try {')
-    expect(repairBlock).toContain('catch (qualityGateRepairError')
-    expect(repairBlock).toContain("phase: 'quality_gate_repair_failed'")
-    expect(repairBlock).toContain('quality_gate_repair_error')
-    expect(repairBlock).toContain('if (isAbortError(qualityGateRepairError)) throw qualityGateRepairError')
-  })
-
-  test('skips quality recheck when quality gate repair produced no usable revision', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const repairStart = source.indexOf("phase: 'quality_gate_repair'", groupStart)
-    const readabilityStart = source.indexOf('if (shouldRunSynchronousReadabilityReview(options, project))', repairStart)
-    const repairBlock = source.slice(repairStart, readabilityStart)
-
-    expect(groupStart).toBeGreaterThanOrEqual(0)
-    expect(repairStart).toBeGreaterThan(groupStart)
-    expect(readabilityStart).toBeGreaterThan(repairStart)
-    expect(repairBlock).toContain('const shouldRunQualityRepairRecheck = Boolean(qualityGateRepairSelection.accepted && qualityGateRepair.revised)')
-    expect(repairBlock).toContain('if (shouldRunQualityRepairRecheck) {')
-    expect(repairBlock).toContain("phase: 'quality_recheck_skipped'")
-  })
-
-  test('keeps accepted quality repair when the follow-up quality recheck times out', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const repairStart = source.indexOf("phase: 'quality_gate_repair'", groupStart)
-    const recheckStart = source.indexOf("phase: 'quality_recheck'", repairStart)
-    const recheckCatchStart = source.indexOf('catch (qualityRecheckError', recheckStart)
-    const noUsableRevisionStart = source.indexOf('} else {', recheckCatchStart)
-    const recheckCatchBlock = source.slice(recheckCatchStart, noUsableRevisionStart)
-
-    expect(groupStart).toBeGreaterThanOrEqual(0)
-    expect(repairStart).toBeGreaterThan(groupStart)
-    expect(recheckStart).toBeGreaterThan(repairStart)
-    expect(recheckCatchStart).toBeGreaterThan(recheckStart)
-    expect(recheckCatchBlock).toContain('quality_recheck_error')
-    expect(recheckCatchBlock).toContain("phase: 'quality_recheck_failed'")
-    expect(recheckCatchBlock).toContain("status: 'warn'")
-    expect(recheckCatchBlock).toContain('buildAcceptedQualityRepairFallbackReview')
-    expect(recheckCatchBlock).not.toContain('quality_gate_repair_failed')
-  })
-
-  test('keeps quality gate auto repair on a bounded lightweight review path', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const groupBlock = source.slice(groupStart, source.indexOf('return { generateChapterForGroup', groupStart))
-    const initialDecisionStart = source.indexOf('const initialReviewDecision = getQualityGateDecision', groupStart)
-    const preStoreStart = source.indexOf('const preStoreQualityDecision = getQualityGateDecision', initialDecisionStart)
-    const beforeGateBlock = source.slice(initialDecisionStart, preStoreStart)
-    const recheckStart = beforeGateBlock.indexOf("phase: 'quality_recheck'")
-    const recheckEnd = beforeGateBlock.indexOf('catch (qualityRecheckError', recheckStart)
-    const recheckBlock = beforeGateBlock.slice(recheckStart, recheckEnd)
-
-    expect(groupStart).toBeGreaterThanOrEqual(0)
-    expect(groupBlock).toContain('const qualityRepairLlmControlOptions =')
-    expect(groupBlock).toContain('quality_repair_llm_timeout_ms')
-    expect(groupBlock).toContain('revisionLlmTimeoutMs: qualityRepairTimeoutMs')
-    expect(groupBlock).toContain('revision_llm_timeout_ms: qualityRepairTimeoutMs')
-    expect(beforeGateBlock).toContain('qualityRepairLlmControlOptions')
-    expect(recheckStart).toBeGreaterThanOrEqual(0)
-    expect(recheckEnd).toBeGreaterThan(recheckStart)
-    expect(recheckBlock).toContain('fill_missing_structured_checks: false')
-    expect(recheckBlock).toContain('mergeQualityRecheckReviewWithStructuredEvidence')
-    expect(beforeGateBlock).toContain("phase: 'quality_recheck'")
-  })
-
-  test('repairs failed quality gates by revising from the existing self-review instead of running a second full self-review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const qualityRepairStart = source.indexOf("phase: 'quality_gate_repair'", groupStart)
-    const qualityRecheckStart = source.indexOf("phase: 'quality_recheck'", qualityRepairStart)
-    const qualityRepairBlock = source.slice(qualityRepairStart, qualityRecheckStart)
-    const cleanupRepairStart = source.indexOf("phase: 'deterministic_cleanup_repair'", qualityRecheckStart)
-    const cleanupRepairEnd = source.indexOf('if (deterministicReviewTextChanged', cleanupRepairStart)
-    const cleanupRepairBlock = source.slice(cleanupRepairStart, cleanupRepairEnd)
-    const directRepairStart = source.indexOf('const runProseRevisionFromExistingReview = async')
-    const selfReviewStart = source.indexOf('const runProseSelfReviewAndRevision = async')
-
-    expect(directRepairStart).toBeGreaterThanOrEqual(0)
-    expect(selfReviewStart).toBeGreaterThan(directRepairStart)
-    expect(qualityRepairStart).toBeGreaterThan(groupStart)
-    expect(qualityRecheckStart).toBeGreaterThan(qualityRepairStart)
-    expect(qualityRepairBlock).toContain('const qualityGateRepair = await runProseRevisionFromExistingReview')
-    expect(qualityRepairBlock).toContain('base_review: selfCheck.review')
-    expect(qualityRepairBlock).toContain('quality_gate: initialReviewDecision')
-    expect(qualityRepairBlock).not.toContain('runProseSelfReviewAndRevision')
-    expect(cleanupRepairStart).toBeGreaterThan(qualityRecheckStart)
-    expect(cleanupRepairEnd).toBeGreaterThan(cleanupRepairStart)
-    expect(cleanupRepairBlock).toContain('const cleanupRepair = await runProseRevisionFromExistingReview')
-    expect(cleanupRepairBlock).toContain('base_review: selfCheck.review')
-    expect(cleanupRepairBlock).toContain('deterministic_prose_cleanup: deterministicProseCleanup')
-    expect(cleanupRepairBlock).not.toContain('runProseSelfReviewAndRevision')
-  })
-
   test('reports scene-card progress as summaries instead of full card payloads', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
@@ -54760,21 +55118,19 @@ describe('chapter context word target source guards', () => {
     expect(sceneSuccessBlock).not.toContain('scene_cards: contextPackage.chapter_target.scene_cards')
   })
 
-  test('fails visibly when the core prose review LLM request fails', () => {
+  test('fails visibly when the authoritative prose quality review request fails', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const reviewStart = source.indexOf('const runProseSelfReviewAndRevision = async')
-    const reviewResultStart = source.indexOf('const reviewResult = await executeNovelAgent', reviewStart)
-    const reviewPayloadStart = source.indexOf('const reviewPayload = getNovelPayload(reviewResult)', reviewResultStart)
-    const errorGuardBlock = source.slice(reviewResultStart, reviewPayloadStart)
+    const qualityStart = source.indexOf('qualityLoop = await runProseQualityLoop')
+    const reviewCallStart = source.indexOf("const result = await executeAgent('review-agent'", qualityStart)
+    const reviseCallbackStart = source.indexOf('revise: async ({ prompt, round }) =>', reviewCallStart)
+    const reviewBlock = source.slice(reviewCallStart, reviseCallbackStart)
 
-    expect(reviewStart).toBeGreaterThanOrEqual(0)
-    expect(reviewResultStart).toBeGreaterThan(reviewStart)
-    expect(reviewPayloadStart).toBeGreaterThan(reviewResultStart)
-    expect(errorGuardBlock).toContain('(reviewResult as any).error')
-    expect(errorGuardBlock).toContain('PROSE_REVIEW_FAILED')
-    expect(errorGuardBlock).toContain('buildLLMResultDiagnostics(reviewResult)')
+    expect(qualityStart).toBeGreaterThanOrEqual(0)
+    expect(reviewCallStart).toBeGreaterThan(qualityStart)
+    expect(reviewBlock).toContain('(result as any)?.error')
+    expect(reviewBlock).toContain("round > 0 ? 'PROSE_QUALITY_RECHECK_UNAVAILABLE' : 'PROSE_REVIEW_FAILED'")
+    expect(reviewBlock).toContain('buildLLMResultDiagnostics(result)')
   })
-
   test('stops structured review fill after a batch LLM failure', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const fillStart = source.indexOf('const fillMissingStructuredReviewChecks')
@@ -54788,97 +55144,6 @@ describe('chapter context word target source guards', () => {
     expect(batchGuardBlock).toContain('(result as any).error')
     expect(batchGuardBlock).toContain('structured_fill_failed')
     expect(batchGuardBlock).toContain('break')
-  })
-
-  test('reports internal prose review progress and bounds structured fill timeout', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const reviewStart = source.indexOf('const runProseSelfReviewAndRevision = async')
-    const reviewEnd = source.indexOf('const runCommercialEditorRewrite = async', reviewStart)
-    const reviewBlock = source.slice(reviewStart, reviewEnd)
-    const fillStart = source.indexOf('const fillMissingStructuredReviewChecks')
-    const fillEnd = source.indexOf('const shouldReviseProse =', fillStart)
-    const fillBlock = source.slice(fillStart, fillEnd)
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const firstSelfCheckStart = source.indexOf('let selfCheck = await runProseSelfReviewAndRevision', groupStart)
-    const firstSelfCheckEnd = source.indexOf('const initialReviewDecision =', firstSelfCheckStart)
-    const firstSelfCheckBlock = source.slice(firstSelfCheckStart, firstSelfCheckEnd)
-
-    expect(reviewStart).toBeGreaterThanOrEqual(0)
-    expect(reviewBlock).toContain('const emitReviewProgress =')
-    expect(reviewBlock).toContain("emitReviewProgress('self_review_llm'")
-    expect(reviewBlock).toContain("emitReviewProgress('structured_review_fill'")
-    expect(reviewBlock).toContain("emitReviewProgress('revision_llm'")
-    expect(fillBlock).toContain('structuredReviewLlmTimeoutMs')
-    expect(fillBlock).toContain('timeoutMs: structuredReviewLlmTimeoutMs')
-    expect(firstSelfCheckBlock).toContain('onReviewProgress')
-  })
-
-  test('passes run-level structured review timeout from chapter group into prose self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const controlStart = source.indexOf('const llmControlOptions =', groupStart)
-    const controlEnd = source.indexOf('const reviewProgressDetail =', controlStart)
-    const controlBlock = source.slice(controlStart, controlEnd)
-    const firstSelfCheckStart = source.indexOf('let selfCheck = await runProseSelfReviewAndRevision', groupStart)
-    const firstSelfCheckEnd = source.indexOf('const initialReviewDecision =', firstSelfCheckStart)
-    const firstSelfCheckBlock = source.slice(firstSelfCheckStart, firstSelfCheckEnd)
-
-    expect(groupStart).toBeGreaterThanOrEqual(0)
-    expect(controlStart).toBeGreaterThan(groupStart)
-    expect(controlEnd).toBeGreaterThan(controlStart)
-    expect(controlBlock).toContain('structuredReviewLlmTimeoutMs: options.structured_review_llm_timeout_ms || options.structuredReviewLlmTimeoutMs')
-    expect(controlBlock).toContain('structured_review_llm_timeout_ms: options.structured_review_llm_timeout_ms || options.structuredReviewLlmTimeoutMs')
-    expect(firstSelfCheckBlock).toContain('...llmControlOptions')
-  })
-
-  test('bounds prose self-review LLM timeout and reports the effective limit', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const reviewStart = source.indexOf('const runProseSelfReviewAndRevision = async')
-    const reviewResultStart = source.indexOf('const reviewResult = await executeNovelAgent', reviewStart)
-    const reviewPayloadStart = source.indexOf('const reviewPayload = getNovelPayload(reviewResult)', reviewResultStart)
-    const reviewBlock = source.slice(reviewStart, reviewPayloadStart)
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const controlStart = source.indexOf('const llmControlOptions =', groupStart)
-    const controlEnd = source.indexOf('const reviewProgressDetail =', controlStart)
-    const controlBlock = source.slice(controlStart, controlEnd)
-    const qualityControlStart = source.indexOf('const qualityRepairLlmControlOptions =', groupStart)
-    const qualityControlEnd = source.indexOf('const throwIfChapterGenerationAborted', qualityControlStart)
-    const qualityControlBlock = source.slice(qualityControlStart, qualityControlEnd)
-
-    expect(reviewStart).toBeGreaterThanOrEqual(0)
-    expect(reviewResultStart).toBeGreaterThan(reviewStart)
-    expect(reviewPayloadStart).toBeGreaterThan(reviewResultStart)
-    expect(controlBlock).toContain('reviewLlmTimeoutMs: options.review_llm_timeout_ms || options.reviewLlmTimeoutMs')
-    expect(controlBlock).toContain('review_llm_timeout_ms: options.review_llm_timeout_ms || options.reviewLlmTimeoutMs')
-    expect(reviewBlock).toContain('const reviewLlmTimeoutMs =')
-    expect(reviewBlock).toContain('options.reviewLlmTimeoutMs || options.review_llm_timeout_ms')
-    expect(reviewBlock).toContain('review_llm_timeout_ms: reviewLlmTimeoutMs')
-    expect(reviewBlock).toContain('timeoutMs: reviewLlmTimeoutMs')
-    expect(qualityControlBlock).toContain('reviewLlmTimeoutMs: qualityRepairTimeoutMs')
-    expect(qualityControlBlock).toContain('review_llm_timeout_ms: qualityRepairTimeoutMs')
-  })
-
-  test('bounds prose revision LLM timeout and preserves current text on revision failure', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const reviewStart = source.indexOf('const runProseSelfReviewAndRevision = async')
-    const revisionProgressStart = source.indexOf("await emitReviewProgress('revision_llm'", reviewStart)
-    const revisionCallStart = source.indexOf("revisionResult = await executeNovelAgent('prose-agent'", revisionProgressStart)
-    const revisionPayloadStart = source.indexOf('const revisionPayload = getNovelPayload(revisionResult)', revisionCallStart)
-    const revisionBlock = source.slice(revisionProgressStart, revisionPayloadStart)
-
-    expect(reviewStart).toBeGreaterThanOrEqual(0)
-    expect(revisionProgressStart).toBeGreaterThan(reviewStart)
-    expect(revisionCallStart).toBeGreaterThan(revisionProgressStart)
-    expect(revisionPayloadStart).toBeGreaterThan(revisionCallStart)
-    expect(revisionBlock).toContain('const revisionLlmTimeoutMs =')
-    expect(revisionBlock).toContain('options.revisionLlmTimeoutMs || options.revision_llm_timeout_ms')
-    expect(revisionBlock).toContain('revision_llm_timeout_ms: revisionLlmTimeoutMs')
-    expect(revisionBlock).toContain('try {')
-    expect(revisionBlock).toContain('timeoutMs: revisionLlmTimeoutMs')
-    expect(revisionBlock).toContain('catch (revisionError')
-    expect(revisionBlock).toContain('if (isAbortError(revisionError)) throw revisionError')
-    expect(revisionBlock).toContain('final_text: chapterText')
-    expect(revisionBlock).toContain('revised: false')
   })
 
   test('uses compact prose context snapshots in review and revision prompts', () => {
@@ -54898,20 +55163,18 @@ describe('chapter context word target source guards', () => {
     expect(revisionPromptBlock).not.toContain('JSON.stringify(contextPackage, null, 2).slice')
   })
 
-  test('surfaces prose revision failure diagnostics instead of reporting a skipped revision', () => {
+  test('surfaces authoritative prose revision failures instead of storing the candidate', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const reviseStageStart = source.indexOf("await onStage('revise'", groupStart)
-    const postReviewWordTargetStart = source.indexOf('const postReviewWordTargetCheck = await ensureProseMeetsWordTarget', reviseStageStart)
-    const reviseStageBlock = source.slice(reviseStageStart, postReviewWordTargetStart)
+    const qualityStart = source.indexOf('qualityLoop = await runProseQualityLoop')
+    const reviseStart = source.indexOf('revise: async ({ prompt, round }) =>', qualityStart)
+    const qualityEnd = source.indexOf('finalText = qualityLoop.final_text', reviseStart)
+    const reviseBlock = source.slice(reviseStart, qualityEnd)
 
-    expect(reviseStageStart).toBeGreaterThan(groupStart)
-    expect(postReviewWordTargetStart).toBeGreaterThan(reviseStageStart)
-    expect(reviseStageBlock).toContain('const revisionStageStatus = selfCheck.revised ?')
-    expect(reviseStageBlock).toContain("selfCheck?.revision?.error ? 'warn' : 'skipped'")
-    expect(reviseStageBlock).toContain('revision_error: selfCheck?.revision?.error ||')
+    expect(reviseStart).toBeGreaterThan(qualityStart)
+    expect(reviseBlock).toContain("await onStage('revise', { status: 'running', phase: 'quality_revision', round })")
+    expect(reviseBlock).toContain("code: 'PROSE_REVISION_FAILED'")
+    expect(reviseBlock).toContain('buildLLMResultDiagnostics(result)')
   })
-
   test('feeds quality gate failure reasons into the oh-story revision strategy brief', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const strategyStart = source.indexOf('export function buildRevisionStrategyBrief')
@@ -54997,8 +55260,8 @@ describe('chapter context word target source guards', () => {
     expect(groupBlock).toContain('const throwIfChapterGenerationAborted = () => throwIfAborted(llmControlOptions)')
     expect(checkpoints.length).toBeGreaterThanOrEqual(14)
     expect(groupBlock).toContain('throwIfChapterGenerationAborted()\n    const compiledPrompt = compileParagraphProseContext')
-    expect(groupBlock).toContain("throwIfChapterGenerationAborted()\n    await onStage('editor'")
-    expect(groupBlock).toContain("throwIfChapterGenerationAborted()\n    await onStage('meme_polish'")
+    expect(groupBlock).toContain("await onStage('editor', { status: 'running' })")
+    expect(groupBlock).toContain("await onStage('meme_polish', { status: 'running' })")
     expect(groupBlock).toContain("throwIfChapterGenerationAborted()\n    await onStage('review'")
     expect(groupBlock).toContain("throwIfChapterGenerationAborted()\n    await onStage('story_state'")
   })
@@ -55006,7 +55269,7 @@ describe('chapter context word target source guards', () => {
   test('defers non-blocking readability review without weakening core oh-story gates', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const selfReviewStart = source.indexOf('let selfCheck = await runProseSelfReviewAndRevision', groupStart)
+    const selfReviewStart = source.indexOf('let qualityLoop: Awaited<ReturnType<typeof runProseQualityLoop>>', groupStart)
     const readabilityStart = source.indexOf('if (shouldRunSynchronousReadabilityReview(options, project))', selfReviewStart)
     const qualityGateStart = source.indexOf('const preStoreQualityDecision = getQualityGateDecision', selfReviewStart)
     const readabilityBlock = source.slice(readabilityStart, source.indexOf('let proseRevisionReceiptSync', readabilityStart))
@@ -55036,16 +55299,17 @@ describe('chapter context word target source guards', () => {
 
   test('rechecks revised prose before unattended quality gate blocks chapter advance', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const reviewStart = source.indexOf('let selfCheck = await runProseSelfReviewAndRevision')
+    const reviewStart = source.indexOf('let qualityLoop: Awaited<ReturnType<typeof runProseQualityLoop>>')
     const gateStart = source.indexOf('const preStoreQualityDecision =', reviewStart)
     const beforeGate = source.slice(reviewStart, gateStart)
 
     expect(reviewStart).toBeGreaterThanOrEqual(0)
     expect(gateStart).toBeGreaterThan(reviewStart)
-    expect(beforeGate).toContain('options.auto_repair_quality_gate === true')
-    expect(beforeGate).toContain('selfCheck.revised')
-    expect(beforeGate).toContain('const qualityRecheck = await runProseSelfReviewAndRevision')
-    expect(beforeGate).toContain('revise: false')
+    expect(beforeGate).toContain('qualityLoop = await runProseQualityLoop')
+    expect(beforeGate).toContain('maxRevisionRounds: isDraftReviewOnly || isDraftOnly ? 0 : 2')
+    expect(beforeGate).toContain("phase: round > 0 ? 'quality_recheck' : 'quality_review'")
+    expect(beforeGate).toContain('assertProseQualityCanStore(qualityLoop.decision, approvals?.quality_gate)')
+    expect(beforeGate).not.toContain('runProseSelfReviewAndRevision')
   })
 
   test('passes oh-story revision strategy brief into prose revision prompt', () => {
@@ -56649,38 +56913,18 @@ describe('chapter context word target source guards', () => {
     expect(reviewBlock).toContain('...deterministicProseFormatChecks')
   })
 
-  test('normalizes deterministic prose punctuation before final cleanup and quality gate', () => {
+  test('does not mutate prose after the authoritative quality decision', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const normalizeStart = source.indexOf('const punctuationNormalization = normalizeDeterministicProsePunctuation(finalText)', groupStart)
-    const cleanupStart = source.indexOf('let deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)', groupStart)
-    const normalizationBlock = source.slice(normalizeStart, cleanupStart)
+    const decisionStart = source.indexOf('finalText = qualityLoop.final_text')
+    const storeStart = source.indexOf("await onStage('store', { status: 'running' })", decisionStart)
+    const postDecisionBlock = source.slice(decisionStart, storeStart)
 
-    expect(normalizeStart).toBeGreaterThan(groupStart)
-    expect(cleanupStart).toBeGreaterThan(normalizeStart)
-    expect(normalizationBlock).toContain('if (punctuationNormalization.changed)')
-    expect(normalizationBlock).toContain('finalText = punctuationNormalization.text')
-    expect(normalizationBlock).toContain("phase: 'deterministic_punctuation_normalize'")
-    expect(normalizationBlock).toContain('punctuationNormalization.change_count')
+    expect(decisionStart).toBeGreaterThanOrEqual(0)
+    expect(storeStart).toBeGreaterThan(decisionStart)
+    expect(postDecisionBlock).not.toContain('finalText = normalizeDeterministicProseFormat')
+    expect(postDecisionBlock).not.toContain('finalText = normalizeDeterministicProsePunctuation')
+    expect(postDecisionBlock).not.toContain('postReviewWordTargetCheck')
   })
-
-  test('normalizes deterministic prose format before punctuation and final cleanup', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const formatStart = source.indexOf('const formatNormalization = normalizeDeterministicProseFormat(finalText)', groupStart)
-    const punctuationStart = source.indexOf('const punctuationNormalization = normalizeDeterministicProsePunctuation(finalText)', groupStart)
-    const cleanupStart = source.indexOf('let deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)', groupStart)
-    const normalizationBlock = source.slice(formatStart, punctuationStart)
-
-    expect(formatStart).toBeGreaterThan(groupStart)
-    expect(punctuationStart).toBeGreaterThan(formatStart)
-    expect(cleanupStart).toBeGreaterThan(punctuationStart)
-    expect(normalizationBlock).toContain('if (formatNormalization.changed)')
-    expect(normalizationBlock).toContain('finalText = formatNormalization.text')
-    expect(normalizationBlock).toContain("phase: 'deterministic_format_normalize'")
-    expect(normalizationBlock).toContain('formatNormalization.change_count')
-  })
-
   test('carries deterministic prose cleanup misses into the next pre-draft brief and prose prompt', () => {
     const currentChapter = { id: 2, chapter_no: 4, title: '下一章' }
     const chapters = [
@@ -56744,7 +56988,7 @@ describe('chapter context word target source guards', () => {
     const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
     const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
 
-    expect(source).toContain('let deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)')
+    expect(source).toContain('qualityLoop.final_scan?.cleanup || buildDeterministicProseCleanupReport(chapter, finalText)')
     expect(source).toContain('buildDeterministicProseCleanupReviewRecord({')
     expect(reviewRecordSource).toContain("review_type: 'deterministic_prose_cleanup'")
     expect(postDeliverySource).toContain("['deterministicProseCleanup', 'deterministic_prose_cleanup']")
@@ -56755,7 +56999,7 @@ describe('chapter context word target source guards', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
     const storeStart = source.indexOf('buildDeterministicProseCleanupReviewRecord({')
-    const storeEnd = source.indexOf('if (isDraftReviewOnly)', storeStart)
+    const storeEnd = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', storeStart)
     const storeBlock = source.slice(storeStart, storeEnd)
 
     expect(storeBlock).toContain('formatNormalization,')
@@ -56936,7 +57180,7 @@ describe('chapter context word target source guards', () => {
   test('quality gates evaluate deterministic prose cleanup residuals before storing prose', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const cleanupStart = source.indexOf('let deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)', groupStart)
+    const cleanupStart = source.indexOf('qualityLoop.final_scan?.cleanup || buildDeterministicProseCleanupReport(chapter, finalText)', groupStart)
     const gateReviewStart = source.indexOf('let qualityGateReview = buildQualityGateReviewWithDeterministicCleanup', cleanupStart)
     const preStoreStart = source.indexOf('const preStoreQualityDecision =', gateReviewStart)
     const finalStart = source.indexOf('const finalQualityDecision =', preStoreStart)
@@ -56952,50 +57196,6 @@ describe('chapter context word target source guards', () => {
     expect(gateBlock).toContain('}, deterministicProseCleanup')
     expect(gateBlock).toContain('getQualityGateDecision(qualityGateProject, qualityGateReview)')
     expect(gateBlock).toContain('getQualityGateDecision(qualityGateProject, qualityGateReview, safetyDecision)')
-  })
-
-  test('runs bounded deterministic cleanup repairs and language normalization before quality gate', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const cleanupStart = source.indexOf('let deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)', groupStart)
-    const gateReviewStart = source.indexOf('let qualityGateReview = buildQualityGateReviewWithDeterministicCleanup', cleanupStart)
-    const cleanupBlock = source.slice(cleanupStart, gateReviewStart)
-    const preCleanupBlock = source.slice(groupStart, cleanupStart)
-
-    expect(cleanupStart).toBeGreaterThan(groupStart)
-    expect(gateReviewStart).toBeGreaterThan(cleanupStart)
-    expect(preCleanupBlock).toContain('const deslopTermNormalization = normalizeDeterministicProseDeslopTerms(finalText)')
-    expect(preCleanupBlock).toContain("phase: 'deterministic_deslop_term_normalize'")
-    expect(source.indexOf('normalizeDeterministicProseDeslopTerms(finalText)', groupStart)).toBeLessThan(cleanupStart)
-    expect(cleanupBlock).toContain('deterministicCleanupRepairMaxAttempts')
-    expect(cleanupBlock).toContain('cleanupRepairAttempt <=')
-    expect(cleanupBlock).toContain('normalizeDeterministicProseLanguageFragments(finalText)')
-    expect(cleanupBlock).toContain('normalizeDeterministicProseDeslopTerms(finalText)')
-    expect(cleanupBlock).toContain("phase: 'deterministic_cleanup_repair_language_normalize'")
-    expect(cleanupBlock).toContain("phase: 'deterministic_cleanup_repair_deslop_term_normalize'")
-    expect(cleanupBlock).toContain('resolveProseLanguageRiskReview(selfCheck.review, finalText)')
-  })
-
-  test('rechecks quality after deterministic cleanup repair before the final quality gate', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const cleanupStart = source.indexOf('let deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)', groupStart)
-    const syncStart = source.indexOf('const syncChapterForReceiptEvidence', cleanupStart)
-    const gateReviewStart = source.indexOf('let qualityGateReview = buildQualityGateReviewWithDeterministicCleanup', cleanupStart)
-    const cleanupBlock = source.slice(cleanupStart, gateReviewStart)
-    const recheckStart = cleanupBlock.indexOf("phase: 'deterministic_cleanup_recheck'")
-    const recheckEnd = cleanupBlock.indexOf('deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)', recheckStart)
-    const recheckBlock = cleanupBlock.slice(recheckStart, recheckEnd)
-
-    expect(cleanupStart).toBeGreaterThan(groupStart)
-    expect(syncStart).toBeGreaterThan(cleanupStart)
-    expect(gateReviewStart).toBeGreaterThan(syncStart)
-    expect(recheckStart).toBeGreaterThanOrEqual(0)
-    expect(recheckEnd).toBeGreaterThan(recheckStart)
-    expect(recheckBlock).toContain('runProseSelfReviewAndRevision')
-    expect(recheckBlock).toContain('revise: false')
-    expect(recheckBlock).toContain('fill_missing_structured_checks: false')
-    expect(recheckBlock).toContain('mergeQualityRecheckReviewWithStructuredEvidence')
   })
 
   test('quality gates include prose revision receipt sync failures before storing prose', () => {
@@ -57095,7 +57295,7 @@ describe('chapter context word target source guards', () => {
     const postDeliveryCheckStart = source.indexOf('const postDeliveryReceiptChecks =', groupStart)
     const postDeliveryAdvisoryStart = source.indexOf('qualityGateReview.post_delivery_receipt_checks = postDeliveryReceiptChecks', postDeliveryCheckStart)
     const draftQualityDecisionStart = source.indexOf('const draftQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', groupStart)
-    const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
+    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
 
     expect(postDeliveryCheckStart).toBeGreaterThan(groupStart)
     expect(postDeliveryAdvisoryStart).toBeGreaterThan(postDeliveryCheckStart)
@@ -57119,7 +57319,7 @@ describe('chapter context word target source guards', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const draftReviewRecordSource = readDraftSyncReviewRecordSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
+    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
@@ -57136,7 +57336,7 @@ describe('chapter context word target source guards', () => {
   test('returns chapter title uniqueness sync in draft review only summaries', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
+    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
@@ -57149,7 +57349,7 @@ describe('chapter context word target source guards', () => {
   test('returns chapter handoff sync in draft review only summaries', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
+    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
@@ -57161,7 +57361,7 @@ describe('chapter context word target source guards', () => {
   test('returns reader expectation sync in draft review only summaries', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
+    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
@@ -57173,7 +57373,7 @@ describe('chapter context word target source guards', () => {
   test('returns reader payoff and retention sync in draft review only summaries', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
+    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
@@ -57188,7 +57388,7 @@ describe('chapter context word target source guards', () => {
   test('returns expectation threshold sync in draft review only summaries', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
+    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
@@ -57200,7 +57400,7 @@ describe('chapter context word target source guards', () => {
   test('returns hook sync in draft review only summaries', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
+    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
@@ -57215,7 +57415,7 @@ describe('chapter context word target source guards', () => {
   test('returns prose craft quality sync in draft review only summaries', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
+    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
@@ -57233,7 +57433,7 @@ describe('chapter context word target source guards', () => {
   test('returns payoff and scene rhythm sync in draft review only summaries', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
+    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
@@ -57254,7 +57454,7 @@ describe('chapter context word target source guards', () => {
   test('returns dramatic turn sync in draft review only summaries', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
+    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
@@ -57273,7 +57473,7 @@ describe('chapter context word target source guards', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const draftReviewRecordSource = readDraftSyncReviewRecordSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
+    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
@@ -57296,7 +57496,7 @@ describe('chapter context word target source guards', () => {
   test('returns receipt syncs in draft review only summaries from the same pre-store receipt context as quality gates', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
+    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
@@ -57391,7 +57591,7 @@ describe('chapter context word target source guards', () => {
   test('returns continuity and conflict sync in draft review only summaries', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
+    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
@@ -57412,7 +57612,7 @@ describe('chapter context word target source guards', () => {
   test('returns market promise sync in draft review only summaries', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
+    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
@@ -57436,7 +57636,7 @@ describe('chapter context word target source guards', () => {
   test('returns story structure sync in draft review only summaries', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
+    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
@@ -57460,7 +57660,7 @@ describe('chapter context word target source guards', () => {
   test('returns blueprint benchmark style sync in draft review only summaries', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
+    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
@@ -57493,7 +57693,7 @@ describe('chapter context word target source guards', () => {
   test('returns remaining deterministic story sync in draft review only summaries', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
+    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
@@ -57514,7 +57714,7 @@ describe('chapter context word target source guards', () => {
   test('returns core drift and contract sync in draft review only summaries', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
+    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
@@ -57530,7 +57730,7 @@ describe('chapter context word target source guards', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const storeFnsStart = source.indexOf('const storeGeneratedReviewRecord = async (record: any) =>', groupStart)
-    const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', storeFnsStart)
+    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', storeFnsStart)
     const preGateStart = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', storeFnsStart)
     const firstStoreProseStart = source.indexOf("buildReceiptSyncReviewRecord({ projectId, chapter, sync: proseRevisionReceiptSync, reviewType: 'prose_revision_receipt_sync'", storeFnsStart)
     const firstStoreDeslopStart = source.indexOf("buildReceiptSyncReviewRecord({ projectId, chapter, sync: deslopRepairReceiptSync, reviewType: 'deslop_repair_receipt_sync'", storeFnsStart)
@@ -57646,155 +57846,6 @@ describe('chapter context word target source guards', () => {
     expect(safetyApprovalBlock).toContain('migrationAudit')
     expect(reviewRecordSource).toContain("appendIfDefined(payload, 'migration_audit', input.migrationAudit)")
     expect(reviewRecordSource).toContain("appendIfDefined(payload, 'safety_explanation', input.safetyExplanation)")
-  })
-
-  test('recomputes prose revision receipt sync after deterministic cleanup repair', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const firstSyncStart = source.indexOf('let proseRevisionReceiptSync = buildProseRevisionReceiptSyncReport(chapter, selfCheck)', groupStart)
-    const firstDeslopSyncStart = source.indexOf('let deslopRepairReceiptSync = buildDeslopRepairReceiptSyncReport(chapter, selfCheck)', firstSyncStart)
-    const cleanupRepairStart = source.indexOf("phase: 'deterministic_cleanup_repair'", firstSyncStart)
-    const qualityGateStart = source.indexOf('const revisionReceiptChecks =', cleanupRepairStart)
-    const cleanupBlock = source.slice(cleanupRepairStart, qualityGateStart)
-
-    expect(firstSyncStart).toBeGreaterThan(groupStart)
-    expect(firstDeslopSyncStart).toBeGreaterThan(firstSyncStart)
-    expect(cleanupRepairStart).toBeGreaterThan(firstSyncStart)
-    expect(qualityGateStart).toBeGreaterThan(cleanupRepairStart)
-    expect(cleanupBlock).toContain('proseRevisionReceiptSync = buildProseRevisionReceiptSyncReport(chapter, selfCheck)')
-    expect(cleanupBlock).toContain('deslopRepairReceiptSync = buildDeslopRepairReceiptSyncReport(chapter, selfCheck)')
-  })
-
-  test('recomputes revision cascade and scope sync after deterministic cleanup repair', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const cascadeSyncStart = source.indexOf('let revisionCascadeImpactSync = buildRevisionCascadeImpactSyncReport(chapter, selfCheck)', groupStart)
-    const scopeSyncStart = source.indexOf('let revisionScopeGuardSync = buildRevisionScopeGuardSyncReport(chapter, selfCheck)', groupStart)
-    const cleanupRepairStart = source.indexOf("phase: 'deterministic_cleanup_repair'", scopeSyncStart)
-    const qualityGateStart = source.indexOf('const revisionReceiptChecks =', cleanupRepairStart)
-    const cleanupBlock = source.slice(cleanupRepairStart, qualityGateStart)
-
-    expect(cascadeSyncStart).toBeGreaterThan(groupStart)
-    expect(scopeSyncStart).toBeGreaterThan(cascadeSyncStart)
-    expect(cleanupRepairStart).toBeGreaterThan(scopeSyncStart)
-    expect(qualityGateStart).toBeGreaterThan(cleanupRepairStart)
-    expect(cleanupBlock).toContain('revisionCascadeImpactSync = buildRevisionCascadeImpactSyncReport(chapter, selfCheck)')
-    expect(cleanupBlock).toContain('revisionScopeGuardSync = buildRevisionScopeGuardSyncReport(chapter, selfCheck)')
-  })
-
-  test('merges deterministic cleanup repair revision before recomputing sync reports', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const cleanupRepairStart = source.indexOf('const cleanupRepair = await runProseRevisionFromExistingReview', groupStart)
-    const mergeStart = source.indexOf('selfCheck = {', cleanupRepairStart)
-    const recomputeStart = source.indexOf('proseRevisionReceiptSync = buildProseRevisionReceiptSyncReport(chapter, selfCheck)', mergeStart)
-    const mergeBlock = source.slice(mergeStart, recomputeStart)
-
-    expect(cleanupRepairStart).toBeGreaterThan(groupStart)
-    expect(mergeStart).toBeGreaterThan(cleanupRepairStart)
-    expect(recomputeStart).toBeGreaterThan(mergeStart)
-    expect(mergeBlock).toContain('revision: mergeProseRevisionArtifacts(selfCheck.revision, cleanupRepair.revision)')
-  })
-
-  test('auto-repairs deterministic prose cleanup residuals before the quality gate', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const cleanupStart = source.indexOf('let deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)', groupStart)
-    const gateReviewStart = source.indexOf('let qualityGateReview = buildQualityGateReviewWithDeterministicCleanup', cleanupStart)
-    const repairBlock = source.slice(cleanupStart, gateReviewStart)
-
-    expect(cleanupStart).toBeGreaterThan(groupStart)
-    expect(gateReviewStart).toBeGreaterThan(cleanupStart)
-    expect(repairBlock).toContain('Number(deterministicProseCleanup.risk_count || 0) > 0 && options.auto_repair_quality_gate === true && !isDraftReviewOnly')
-    expect(repairBlock).toContain("phase: 'deterministic_cleanup_repair'")
-    expect(repairBlock).toContain('const cleanupRepair = await runProseRevisionFromExistingReview')
-    expect(repairBlock).toContain('base_review: selfCheck.review')
-    expect(repairBlock).toContain('deterministic_cleanup_repair: true')
-    expect(repairBlock).toContain('deterministic_prose_cleanup: deterministicProseCleanup')
-    expect(repairBlock).toContain('selectUsableRevisionText(finalText, selfCheck')
-    expect(repairBlock).toContain('deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)')
-  })
-
-  test('rejects deterministic cleanup repair attempts that do not reduce deterministic risk', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const cleanupStart = source.indexOf('let deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)', groupStart)
-    const gateReviewStart = source.indexOf('let qualityGateReview = buildQualityGateReviewWithDeterministicCleanup', cleanupStart)
-    const repairBlock = source.slice(cleanupStart, gateReviewStart)
-
-    expect(cleanupStart).toBeGreaterThan(groupStart)
-    expect(gateReviewStart).toBeGreaterThan(cleanupStart)
-    expect(repairBlock).toContain('const previousCleanupRiskCount = Number(deterministicProseCleanup.risk_count || 0)')
-    expect(repairBlock).toContain('const previousSelfCheck = selfCheck')
-    expect(repairBlock).toContain('const previousRevisionTextSelection = revisionTextSelection')
-    expect(repairBlock).toContain('const previousFinalSceneBreakdown = finalSceneBreakdown')
-    expect(repairBlock).toContain('const previousFinalContinuityNotes = finalContinuityNotes')
-    expect(repairBlock).toContain('const nextCleanupRiskCount = Number(deterministicProseCleanup.risk_count || 0)')
-    expect(repairBlock).toContain('if (nextCleanupRiskCount >= previousCleanupRiskCount)')
-    expect(repairBlock).toContain('finalText = cleanupRepairTextBefore')
-    expect(repairBlock).toContain('selfCheck = {')
-    expect(repairBlock).toContain('deterministic_cleanup_repair_rejected: true')
-    expect(repairBlock).toContain("phase: 'deterministic_cleanup_repair_rejected'")
-    expect(repairBlock).toContain('break')
-  })
-
-  test('keeps deterministic cleanup repair on the bounded quality repair timeout path', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const cleanupRepairStart = source.indexOf('const cleanupRepair = await runProseRevisionFromExistingReview', groupStart)
-    const cleanupRepairEnd = source.indexOf('const syncChapterForReceiptEvidence', cleanupRepairStart)
-    const cleanupRepairBlock = source.slice(cleanupRepairStart, cleanupRepairEnd)
-
-    expect(cleanupRepairStart).toBeGreaterThan(groupStart)
-    expect(cleanupRepairEnd).toBeGreaterThan(cleanupRepairStart)
-    expect(cleanupRepairBlock).toContain('deterministic_cleanup_repair: true')
-    expect(cleanupRepairBlock).toContain('...qualityRepairLlmControlOptions')
-    expect(cleanupRepairBlock).not.toContain('...llmControlOptions')
-    expect(cleanupRepairBlock).toContain('catch (cleanupRepairError')
-    expect(cleanupRepairBlock).toContain('if (isAbortError(cleanupRepairError)) throw cleanupRepairError')
-    expect(cleanupRepairBlock).toContain('deterministic_cleanup_repair_failed')
-  })
-
-  test('normalizes deterministic prose again after deterministic cleanup repair before rescan', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const cleanupRepairStart = source.indexOf('const cleanupRepair = await runProseRevisionFromExistingReview', groupStart)
-    const rescanStart = source.indexOf('deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)', cleanupRepairStart)
-    const repairBlock = source.slice(cleanupRepairStart, rescanStart)
-    const storeStart = source.indexOf('buildDeterministicProseCleanupReviewRecord({', groupStart)
-    const storeEnd = source.indexOf('if (isDraftReviewOnly)', storeStart)
-    const storeBlock = source.slice(storeStart, storeEnd)
-
-    expect(cleanupRepairStart).toBeGreaterThan(groupStart)
-    expect(rescanStart).toBeGreaterThan(cleanupRepairStart)
-    expect(repairBlock).toContain('cleanupRepairFormatNormalization = normalizeDeterministicProseFormat(finalText)')
-    expect(repairBlock).toContain('finalText = cleanupRepairFormatNormalization.text')
-    expect(repairBlock).toContain('cleanupRepairPunctuationNormalization = normalizeDeterministicProsePunctuation(finalText)')
-    expect(repairBlock).toContain('finalText = cleanupRepairPunctuationNormalization.text')
-    expect(repairBlock).toContain('cleanupRepairDeslopTermNormalization = normalizeDeterministicProseDeslopTerms(finalText)')
-    expect(repairBlock).toContain('finalText = cleanupRepairDeslopTermNormalization.text')
-    expect(source.indexOf('cleanupRepairPunctuationNormalization = normalizeDeterministicProsePunctuation(finalText)', cleanupRepairStart)).toBeLessThan(rescanStart)
-    expect(source.indexOf('cleanupRepairDeslopTermNormalization = normalizeDeterministicProseDeslopTerms(finalText)', cleanupRepairStart)).toBeLessThan(rescanStart)
-    expect(storeBlock).toContain('cleanupRepairFormatNormalization,')
-    expect(storeBlock).toContain('cleanupRepairPunctuationNormalization,')
-    expect(reviewRecordSource).toContain('!input.cleanupRepairFormatNormalization?.changed')
-    expect(reviewRecordSource).toContain('!input.cleanupRepairPunctuationNormalization?.changed')
-    expect(reviewRecordSource).toContain('deterministic_cleanup_repair_format_normalization: input.cleanupRepairFormatNormalization')
-    expect(reviewRecordSource).toContain('deterministic_cleanup_repair_punctuation_normalization: input.cleanupRepairPunctuationNormalization')
-  })
-
-  test('keeps verified scene-card receipts when deterministic cleanup repair returns incomplete scene breakdown', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const cleanupRepairStart = source.indexOf('const cleanupRepair = await runProseRevisionFromExistingReview', groupStart)
-    const cleanupRepairEnd = source.indexOf('cleanupRepairFormatNormalization = normalizeDeterministicProseFormat(finalText)', cleanupRepairStart)
-    const repairBlock = source.slice(cleanupRepairStart, cleanupRepairEnd)
-
-    expect(cleanupRepairStart).toBeGreaterThan(groupStart)
-    expect(cleanupRepairEnd).toBeGreaterThan(cleanupRepairStart)
-    expect(repairBlock).toContain('selectVerifiedSceneBreakdownUpdate(finalSceneBreakdown, cleanupRepair.revision.scene_breakdown, finalText)')
-    expect(repairBlock).not.toContain('finalSceneBreakdown = cleanupRepair.revision.scene_breakdown?.length ? cleanupRepair.revision.scene_breakdown : finalSceneBreakdown')
   })
 
   test('passes deterministic cleanup report into cleanup repair prompts', () => {
@@ -60605,11 +60656,13 @@ describe('chapter context word target source guards', () => {
 
   test('normalizes camelCase review control fields from model output', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const reviewNormalizeStart = source.indexOf('const rawReviewIssues = [')
     const reviewNormalizeBlock = source.slice(
-      source.indexOf('const normalizedReview = {'),
-      source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const normalizedReview = {')),
+      reviewNormalizeStart,
+      source.indexOf('if (options.revise === false || !shouldReviseProse', reviewNormalizeStart),
     )
 
+    expect(reviewNormalizeStart).toBeGreaterThan(-1)
     expect(reviewNormalizeBlock).toContain('reviewPayload?.needsRevision')
     expect(reviewNormalizeBlock).toContain('reviewPayload?.revisionDirectives')
     expect(reviewNormalizeBlock).toContain('reviewPayload?.focusedRevisionModes')
@@ -61274,8 +61327,9 @@ describe('chapter context word target source guards', () => {
 
     expect(reviewBlock).toContain('const initialReviewDecision = getQualityGateDecision(qualityGateProject')
     expect(reviewBlock).toContain("status: initialReviewDecision.passed ? 'success' : 'warn'")
-    expect(reviewBlock).toContain('const qualityRecheckDecision = getQualityGateDecision(qualityGateProject')
-    expect(reviewBlock).toContain("status: qualityRecheckDecision.passed ? 'success' : 'warn'")
+    expect(reviewBlock).toContain("phase: round > 0 ? 'quality_recheck' : 'quality_review'")
+    expect(reviewBlock).toContain("await onStage('revise', { status: 'running', phase: 'quality_revision', round })")
+    expect(reviewBlock).toContain('assertProseQualityCanStore(qualityLoop.decision, approvals?.quality_gate)')
   })
 
   test('formats structured review findings for stored issue summaries', () => {

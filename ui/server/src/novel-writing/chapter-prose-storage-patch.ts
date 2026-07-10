@@ -88,6 +88,10 @@ function restoreParagraphBreaksForSingleLineProse(value: any) {
   return paragraphs.length > 1 ? paragraphs.join('\n\n') : text
 }
 
+export function normalizeProseForStorage(value: any) {
+  return restoreParagraphBreaksForSingleLineProse(value)
+}
+
 export function buildChapterProseStoragePatch(input: ChapterProseStoragePatchInput) {
   const receipts = input.ohStoryDeliveryReceipts || {}
   const rawPayload: Record<string, any> = {
@@ -111,7 +115,7 @@ export function buildChapterProseStoragePatch(input: ChapterProseStoragePatchInp
   })
   return {
     ...(input.generatedTitlePatch || {}),
-    chapter_text: restoreParagraphBreaksForSingleLineProse(input.finalText),
+    chapter_text: normalizeProseForStorage(input.finalText),
     continuity_notes: input.finalContinuityNotes,
     raw_payload: rawPayload,
     status: 'draft',

@@ -682,6 +682,22 @@ function hasUsableNextChapterQualityPlan(review: any) {
 }
 
 export function getQualityGateDecision(project: any, review: any, safetyDecision: any = null) {
+  if (review?.prose_quality_v2?.decision) {
+    const decision = review.prose_quality_v2.decision
+    const safetyReasons = safetyDecision?.blocked
+      ? [`仿写安全未通过：${(safetyDecision.reasons || []).join('；')}`]
+      : []
+    return {
+      ...decision,
+      gate: getQualityGate(project),
+      passed: decision.passed === true && safetyReasons.length === 0,
+      reasons: [
+        ...asArray(decision.hard_failures).map((item: any) => item?.message || item?.key).filter(Boolean),
+        ...asArray(decision.advisory_failures).filter(Boolean),
+        ...safetyReasons,
+      ],
+    }
+  }
   const gate = getQualityGate(project)
   const issues = Array.isArray(review?.issues) ? review.issues.map(normalizeIssue) : []
   const criticalCount = issues.filter(issue => String(issue.severity || '').toLowerCase() === 'critical').length
