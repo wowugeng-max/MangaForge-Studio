@@ -11329,6 +11329,26 @@ describe('normalizeSceneCardsPayload', () => {
 })
 
 describe('chapter prose word target', () => {
+  const contractionWordTarget = {
+    mode: 'custom',
+    target: 1000,
+    min: 800,
+    max: 1100,
+    label: '测试章',
+    rangeText: '800-1100字',
+  }
+  const createContractionService = (result: any) => createNovelWritingService({
+    getProject: async () => null,
+    production: {
+      getStageModelId: (_project: any, _stage: string, fallback?: number) => fallback || 217,
+      getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+    } as any,
+    reference: {} as any,
+    runtime: {
+      executeAgent: async () => result,
+    },
+  })
+
   test('counts prose characters without whitespace for chapter target evaluation', () => {
     expect(countProseChars('李辰 醒来\n规则响起。')).toBe(9)
   })
@@ -11363,6 +11383,7 @@ describe('chapter prose word target', () => {
     const tooLongStart = ensureBlock.indexOf('if (evaluation.too_long && options.contract !== false)')
     const contractionStart = ensureBlock.indexOf('const maxContractionAttempts', tooLongStart)
     const expansionStart = ensureBlock.indexOf('const maxExpansionAttempts')
+    const contractionBlock = ensureBlock.slice(contractionStart, expansionStart)
     const softCapStart = ensureBlock.indexOf('applyProseWordTargetSoftCap(evaluateProseWordTarget(chapterText, wordTarget))')
 
     expect(ensureStart).toBeGreaterThanOrEqual(0)
@@ -11373,9 +11394,88 @@ describe('chapter prose word target', () => {
     expect(expansionStart).toBeGreaterThan(contractionStart)
     expect(ensureBlock).toContain('options.maxContractionAttempts || options.max_contraction_attempts || 3')
     expect(ensureBlock).toContain('buildProseWordTargetContractionPrompt')
+    expect(contractionBlock).toContain('maxTokens: proseMaxTokensForWordTarget(wordTarget)')
+    expect(contractionBlock).toContain('const finishReason = normalizeProseContractionFinishReason(contractionResult)')
+    expect(contractionBlock).toContain('finish_reason: finishReason')
+    expect(contractionBlock).toContain('model_usage: (contractionResult as any).usage')
+    expect(contractionBlock).toContain('candidate_rejected: candidateRejected')
     expect(ensureBlock).toContain('!finalEvaluation.too_short')
     expect(ensureBlock).toContain('PROSE_WORD_TARGET_LONG')
     expect(ensureBlock).toContain('contraction_attempts')
+  })
+
+  test('rejects an open chapter string returned with a length finish reason during contraction', async () => {
+    const originalText = '原'.repeat(1400)
+    const candidateText = '改'.repeat(1000)
+    const service = createContractionService({
+      content: `{"prose_chapters":[{"chapter_no":1,"chapter_text":"${candidateText}`,
+      finish_reason: 'LeNgTh',
+      usage: { input_tokens: 120, output_tokens: 1000, total_tokens: 1120 },
+    })
+
+    const error = await service.ensureProseMeetsWordTarget(
+      '/tmp/mangaforge-contraction-length',
+      { id: 1, title: '测试作品' },
+      { chapter_target: { chapter_no: 1, word_target: contractionWordTarget } },
+      originalText,
+      217,
+      { maxContractionAttempts: 1 },
+    ).then(() => null, (caught: any) => caught)
+
+    expect(error?.code).toBe('PROSE_WORD_TARGET_LONG')
+    expect(error?.final_evaluation?.actual).toBe(countProseChars(originalText))
+    expect(error?.final_evaluation?.too_long).toBe(true)
+    expect(error?.contraction_attempts).toHaveLength(1)
+    const attempt = error?.contraction_attempts?.[0]
+    expect(attempt).toMatchObject({
+      finish_reason: 'length',
+      model_usage: { output_tokens: 1000 },
+      returned_text: true,
+      candidate_rejected: true,
+      recovered_from_partial_json: true,
+      partial_json_open_string_recovered: true,
+    })
+    expect(attempt?.rejection_reason).toContain('finish_reason_length')
+    expect(attempt).not.toHaveProperty('candidate_text')
+    expect(attempt).not.toHaveProperty('prompt')
+  })
+
+  test('rejects a closed chapter string recovered from a max-token truncated JSON envelope during contraction', async () => {
+    const originalText = '原'.repeat(1400)
+    const candidateText = '缩'.repeat(1000)
+    const service = createContractionService({
+      content: `{"prose_chapters":[{"chapter_no":1,"chapter_text":"${candidateText}","scene_breakdown":[`,
+      raw: {
+        stop_reason: 'MAX_TOKENS',
+        usage: { input_tokens: 120, output_tokens: 1000, total_tokens: 1120 },
+      },
+    })
+
+    const error = await service.ensureProseMeetsWordTarget(
+      '/tmp/mangaforge-contraction-max-tokens',
+      { id: 1, title: '测试作品' },
+      { chapter_target: { chapter_no: 1, word_target: contractionWordTarget } },
+      originalText,
+      217,
+      { maxContractionAttempts: 1 },
+    ).then(() => null, (caught: any) => caught)
+
+    expect(error?.code).toBe('PROSE_WORD_TARGET_LONG')
+    expect(error?.final_evaluation?.actual).toBe(countProseChars(originalText))
+    expect(error?.final_evaluation?.too_long).toBe(true)
+    expect(error?.contraction_attempts).toHaveLength(1)
+    const attempt = error?.contraction_attempts?.[0]
+    expect(attempt).toMatchObject({
+      finish_reason: 'max_tokens',
+      model_usage: { output_tokens: 1000 },
+      returned_text: true,
+      candidate_rejected: true,
+      recovered_from_partial_json: true,
+      partial_json_open_string_recovered: false,
+    })
+    expect(attempt?.rejection_reason).toContain('finish_reason_max_tokens')
+    expect(attempt).not.toHaveProperty('candidate_text')
+    expect(attempt).not.toHaveProperty('prompt')
   })
 
   test('preserves runtime camelCase chapterTarget when applying chapter word target', () => {

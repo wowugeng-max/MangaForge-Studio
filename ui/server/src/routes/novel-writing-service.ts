@@ -2809,6 +2809,27 @@ function proseParagraphsWithoutTitle(text: string) {
     .filter(Boolean)
 }
 
+function normalizeProseContractionFinishReason(result: any) {
+  const finishReason = [
+    result?.finish_reason,
+    result?.finishReason,
+    result?.stop_reason,
+    result?.stopReason,
+    result?.raw?.finish_reason,
+    result?.raw?.finishReason,
+    result?.raw?.stop_reason,
+    result?.raw?.stopReason,
+    result?.raw?.choices?.[0]?.finish_reason,
+    result?.raw?.choices?.[0]?.finishReason,
+    result?.raw?.choices?.[0]?.stop_reason,
+    result?.raw?.choices?.[0]?.stopReason,
+    result?.raw?.response?.finish_reason,
+    result?.raw?.response?.stop_reason,
+  ].find(value => String(value ?? '').trim())
+  const normalized = String(finishReason ?? '').trim().toLowerCase()
+  return normalized || null
+}
+
 export function extractProseExpansionPayload(result: any) {
   const payload = getNovelPayload(result)
   const expandedChapters = Array.isArray(payload?.prose_chapters)
@@ -43837,7 +43858,7 @@ export function createNovelWritingService(ctx: {
         }, {
           activeWorkspace,
           modelId: reviseModelId ? String(reviseModelId) : undefined,
-          maxTokens: Math.max(3200, Math.min(proseMaxTokensForWordTarget(wordTarget), Math.ceil(Number(wordTarget?.max || currentEvaluation.max || 3500) * 1.8))),
+          maxTokens: proseMaxTokensForWordTarget(wordTarget),
           temperature: Math.min(0.55, ctx.production.getStageTemperature(project, 'revise', 0.55)),
           skipMemory: true,
           signal: options.abortSignal,
@@ -43845,6 +43866,15 @@ export function createNovelWritingService(ctx: {
         })
         const extracted = extractProseExpansionPayload(contractionResult)
         const contractedText = extracted.text
+        const finishReason = normalizeProseContractionFinishReason(contractionResult)
+        const recoveredFromPartialJson = extracted.payload?.recovered_from_partial_json === true
+        const partialJsonOpenStringRecovered = extracted.payload?.partial_json_open_string_recovered === true
+        const rejectionReasons = [
+          recoveredFromPartialJson ? 'recovered_from_partial_json' : '',
+          partialJsonOpenStringRecovered ? 'partial_json_open_string_recovered' : '',
+          finishReason === 'length' || finishReason === 'max_tokens' ? `finish_reason_${finishReason}` : '',
+        ].filter(Boolean)
+        const candidateRejected = rejectionReasons.length > 0
         const finalEvaluation = applyProseWordTargetSoftCap(evaluateProseWordTarget(contractedText, wordTarget))
         const previousCount = countProseChars(currentText)
         const contractedCount = countProseChars(contractedText)
@@ -43855,8 +43885,18 @@ export function createNovelWritingService(ctx: {
           contracted_count: contractedCount,
           evaluation: finalEvaluation,
           modelName: (contractionResult as any).modelName,
+          finish_reason: finishReason,
+          model_usage: (contractionResult as any).usage
+            || (contractionResult as any).raw?.usage
+            || null,
           returned_text: Boolean(contractedText),
+          candidate_rejected: candidateRejected,
+          rejection_reason: rejectionReasons.join(',') || null,
+          recovered_from_partial_json: recoveredFromPartialJson,
+          partial_json_open_string_recovered: partialJsonOpenStringRecovered,
         })
+
+        if (candidateRejected) continue
 
         if (contractedText && contractedCount > 0 && contractedCount < previousCount && !finalEvaluation.too_short) {
           currentText = contractedText
