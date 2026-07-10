@@ -3,6 +3,70 @@ import { previewNovelKnowledgeInjection } from '../llm'
 import { listKnowledge } from '../knowledge-base'
 import { asArray, clampScore, getSafetyPolicy, parseJsonLikePayload } from './novel-route-utils'
 
+export function buildReferenceQualityAssessment(preview: any, hits: string[]) {
+  const entries = Array.isArray(preview?.entries) ? preview.entries : []
+  const activeReferences = Array.isArray(preview?.active_references) ? preview.active_references : []
+  const warnings = Array.isArray(preview?.warnings) ? preview.warnings : []
+  const assessmentApplicable = activeReferences.length > 0 || entries.length > 0 || hits.length > 0
+  if (!assessmentApplicable) {
+    return {
+      assessment_applicable: false,
+      overall_score: 100,
+      risk_level: 'low',
+      reference_coverage_score: 100,
+      injection_score: 100,
+      copy_safety_score: 100,
+      originality_score: 100,
+      avoid_coverage_score: 100,
+      dimension_coverage_score: 100,
+      injected_entry_count: 0,
+      active_reference_count: 0,
+      copy_hit_count: 0,
+      warning_count: warnings.length,
+      recommendations: [],
+    }
+  }
+  const averageAvoidCoverage = activeReferences.length
+    ? activeReferences.reduce((sum: number, ref: any) => sum + Math.min(1, (Array.isArray(ref?.avoid) ? ref.avoid.length : 0) / 4), 0) / activeReferences.length * 100
+    : 0
+  const averageDimensionCoverage = activeReferences.length
+    ? activeReferences.reduce((sum: number, ref: any) => sum + Math.min(1, (Array.isArray(ref?.dimensions) ? ref.dimensions.length : 0) / 4), 0) / activeReferences.length * 100
+    : 0
+  const referenceCoverage = activeReferences.length
+    ? clampScore((entries.length / Math.max(1, activeReferences.length * 4)) * 100)
+    : (entries.length ? 60 : 0)
+  const injectionScore = clampScore(Math.min(100, (entries.length / Math.max(1, activeReferences.length * 3 || 3)) * 100) - warnings.length * 6)
+  const copySafetyScore = clampScore(100 - hits.length * 14 - warnings.length * 5)
+  const originalityScore = clampScore(copySafetyScore * 0.65 + averageAvoidCoverage * 0.25 + averageDimensionCoverage * 0.1)
+  const overallScore = clampScore(
+    referenceCoverage * 0.2 +
+    injectionScore * 0.25 +
+    copySafetyScore * 0.3 +
+    originalityScore * 0.25,
+  )
+  return {
+    assessment_applicable: true,
+    overall_score: overallScore,
+    risk_level: overallScore >= 80 ? 'low' : overallScore >= 55 ? 'medium' : 'high',
+    reference_coverage_score: referenceCoverage,
+    injection_score: injectionScore,
+    copy_safety_score: copySafetyScore,
+    originality_score: originalityScore,
+    avoid_coverage_score: clampScore(averageAvoidCoverage),
+    dimension_coverage_score: clampScore(averageDimensionCoverage),
+    injected_entry_count: entries.length,
+    active_reference_count: activeReferences.length,
+    copy_hit_count: hits.length,
+    warning_count: warnings.length,
+    recommendations: [
+      referenceCoverage < 70 ? '补齐参考项目的可注入画像知识，避免生成时只拿到配置而拿不到蓝图。' : '',
+      injectionScore < 70 ? '生成前先做参考预览，确认当前任务能命中足够知识条目。' : '',
+      copySafetyScore < 75 ? '正文出现参考实体或证据词，建议替换专名、桥段顺序和原文表达。' : '',
+      originalityScore < 75 ? '增加避免照搬项，并把参考维度限定在结构、节奏、角色功能和文风机制。' : '',
+    ].filter(Boolean),
+  }
+}
+
 export function createNovelReferenceService() {
   const collectCopyGuardTerms = (preview: any) => {
     const terms = new Set<string>()
@@ -18,50 +82,6 @@ export function createNovelReferenceService() {
       }
     }
     return Array.from(terms).slice(0, 80)
-  }
-
-  const buildReferenceQualityAssessment = (preview: any, hits: string[]) => {
-    const entries = Array.isArray(preview?.entries) ? preview.entries : []
-    const activeReferences = Array.isArray(preview?.active_references) ? preview.active_references : []
-    const warnings = Array.isArray(preview?.warnings) ? preview.warnings : []
-    const averageAvoidCoverage = activeReferences.length
-      ? activeReferences.reduce((sum: number, ref: any) => sum + Math.min(1, (Array.isArray(ref?.avoid) ? ref.avoid.length : 0) / 4), 0) / activeReferences.length * 100
-      : 0
-    const averageDimensionCoverage = activeReferences.length
-      ? activeReferences.reduce((sum: number, ref: any) => sum + Math.min(1, (Array.isArray(ref?.dimensions) ? ref.dimensions.length : 0) / 4), 0) / activeReferences.length * 100
-      : 0
-    const referenceCoverage = activeReferences.length
-      ? clampScore((entries.length / Math.max(1, activeReferences.length * 4)) * 100)
-      : (entries.length ? 60 : 0)
-    const injectionScore = clampScore(Math.min(100, (entries.length / Math.max(1, activeReferences.length * 3 || 3)) * 100) - warnings.length * 6)
-    const copySafetyScore = clampScore(100 - hits.length * 14 - warnings.length * 5)
-    const originalityScore = clampScore(copySafetyScore * 0.65 + averageAvoidCoverage * 0.25 + averageDimensionCoverage * 0.1)
-    const overallScore = clampScore(
-      referenceCoverage * 0.2 +
-      injectionScore * 0.25 +
-      copySafetyScore * 0.3 +
-      originalityScore * 0.25,
-    )
-    return {
-      overall_score: overallScore,
-      risk_level: overallScore >= 80 ? 'low' : overallScore >= 55 ? 'medium' : 'high',
-      reference_coverage_score: referenceCoverage,
-      injection_score: injectionScore,
-      copy_safety_score: copySafetyScore,
-      originality_score: originalityScore,
-      avoid_coverage_score: clampScore(averageAvoidCoverage),
-      dimension_coverage_score: clampScore(averageDimensionCoverage),
-      injected_entry_count: entries.length,
-      active_reference_count: activeReferences.length,
-      copy_hit_count: hits.length,
-      warning_count: warnings.length,
-      recommendations: [
-        referenceCoverage < 70 ? '补齐参考项目的可注入画像知识，避免生成时只拿到配置而拿不到蓝图。' : '',
-        injectionScore < 70 ? '生成前先做参考预览，确认当前任务能命中足够知识条目。' : '',
-        copySafetyScore < 75 ? '正文出现参考实体或证据词，建议替换专名、桥段顺序和原文表达。' : '',
-        originalityScore < 75 ? '增加避免照搬项，并把参考维度限定在结构、节奏、角色功能和文风机制。' : '',
-      ].filter(Boolean),
-    }
   }
 
   const getReferenceSafetyDecision = (project: any, referenceReport: any) => {
