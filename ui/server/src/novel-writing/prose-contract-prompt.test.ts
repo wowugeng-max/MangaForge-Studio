@@ -3,6 +3,7 @@ import {
   compileProseContractPrompt,
   ProseCorePromptBudgetError,
 } from './prose-contract-prompt'
+import { selectOhStoryDirectorContracts } from '../routes/novel-oh-story-director'
 
 const requiredSections = [
   { key: 'task', text: 'CORE_TASK' },
@@ -117,5 +118,57 @@ describe('prose contract prompt compiler', () => {
     expect(result.prompt).toContain('FULL_4')
     expect(result.prompt).not.toContain('FULL_5')
     expect(result.prompt).not.toContain('FULL_6')
+  })
+
+  test('keeps a realistic contract set bounded to the four director risks', () => {
+    const contractKeys = [
+      'continuity_heat',
+      'story_power',
+      'character_behavior',
+      'dialogue',
+      'chapter_hook',
+      'conflict_structure',
+      'prose_craft',
+      'quality_audit',
+      'state_tracking',
+      'longform_structure',
+      ...Array.from({ length: 20 }, (_, index) => `project_risk_${index + 1}`),
+    ]
+    const chapterTarget = Object.fromEntries(contractKeys.map(key => [
+      `${key}_contract`,
+      { rule: key === 'project_risk_20' ? 'UNSELECTED_CONTRACT_SENTINEL' : `RULE_${key}` },
+    ]))
+    const director = selectOhStoryDirectorContracts({
+      stage: 'pre_draft',
+      preflight: {
+        warnings: ['上一章状态承接、主角能动性、核心冲突、章末钩子、对白与正文质量需要复核'],
+      },
+      chapter_target: {
+        ...chapterTarget,
+        goal: '江澈主动打穿追捕合围',
+        conflict: '追捕队封锁全部出口',
+        ending_hook: '幕后指挥者叫出江澈旧名',
+      },
+    })
+    const compiled = compileProseContractPrompt({
+      requiredSections: [
+        { key: 'handoff', text: '【上一章尾段承接】追捕队从四面合围。' },
+        { key: 'scene_cards', text: '【场景卡因果链】破灯制造盲区 -> 夺取通讯器。' },
+        { key: 'output', text: '只输出完整章节正文。' },
+      ],
+      contractSections: contractKeys.map(key => ({
+        key,
+        full: `FULL_${key}:${'细则'.repeat(900)}`,
+        compact: `COMPACT_${key}:${key === 'project_risk_20' ? 'UNSELECTED_CONTRACT_SENTINEL' : '约束'.repeat(180)}`,
+        reference: `REFERENCE_${key}`,
+      })),
+      director,
+    })
+
+    expect(compiled.diagnostics.selected_contract_keys.length).toBeLessThanOrEqual(4)
+    expect(compiled.diagnostics.prompt_chars).toBeLessThanOrEqual(48_000)
+    expect(compiled.prompt).toContain('【上一章尾段承接】')
+    expect(compiled.prompt).toContain('【场景卡因果链】')
+    expect(compiled.prompt).not.toContain('UNSELECTED_CONTRACT_SENTINEL')
   })
 })
