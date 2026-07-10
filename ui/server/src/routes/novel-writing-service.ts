@@ -61,8 +61,13 @@ import {
 import {
   applyChapterWordTargetToContext,
   applyProseWordTargetSoftCap,
+  canBridgeShortContractionToExpansion,
   countProseChars,
   evaluateProseWordTarget,
+  isExplicitlyCompleteProseContractionFinishReason,
+  isRejectedProseContractionFinishReason,
+  normalizeProseContractionFinishReason,
+  normalizeProseContractionIncompleteReason,
   proseContractionMaxTokensForAttempt,
   proseMaxTokensForWordTarget,
   resolveChapterWordTarget,
@@ -2810,27 +2815,6 @@ function proseParagraphsWithoutTitle(text: string) {
     .split(/\n\s*\n+/)
     .map(paragraph => paragraph.replace(/\s+/g, ' ').trim())
     .filter(Boolean)
-}
-
-function normalizeProseContractionFinishReason(result: any) {
-  const finishReason = [
-    result?.finish_reason,
-    result?.finishReason,
-    result?.stop_reason,
-    result?.stopReason,
-    result?.raw?.finish_reason,
-    result?.raw?.finishReason,
-    result?.raw?.stop_reason,
-    result?.raw?.stopReason,
-    result?.raw?.choices?.[0]?.finish_reason,
-    result?.raw?.choices?.[0]?.finishReason,
-    result?.raw?.choices?.[0]?.stop_reason,
-    result?.raw?.choices?.[0]?.stopReason,
-    result?.raw?.response?.finish_reason,
-    result?.raw?.response?.stop_reason,
-  ].find(value => String(value ?? '').trim())
-  const normalized = String(finishReason ?? '').trim().toLowerCase()
-  return normalized || null
 }
 
 export function extractProseExpansionPayload(result: any) {
@@ -43870,17 +43854,23 @@ export function createNovelWritingService(ctx: {
         const extracted = extractProseExpansionPayload(contractionResult)
         const contractedText = extracted.text
         const finishReason = normalizeProseContractionFinishReason(contractionResult)
+        const incompleteReason = normalizeProseContractionIncompleteReason(contractionResult)
         const recoveredFromPartialJson = extracted.payload?.recovered_from_partial_json === true
         const partialJsonOpenStringRecovered = extracted.payload?.partial_json_open_string_recovered === true
         const rejectionReasons = [
           recoveredFromPartialJson ? 'recovered_from_partial_json' : '',
           partialJsonOpenStringRecovered ? 'partial_json_open_string_recovered' : '',
-          finishReason === 'length' || finishReason === 'max_tokens' ? `finish_reason_${finishReason}` : '',
+          isRejectedProseContractionFinishReason(finishReason) ? `finish_reason_${finishReason}` : '',
+          incompleteReason ? `incomplete_reason_${incompleteReason}` : '',
         ].filter(Boolean)
         const candidateRejected = rejectionReasons.length > 0
         const finalEvaluation = applyProseWordTargetSoftCap(evaluateProseWordTarget(contractedText, wordTarget))
         const previousCount = countProseChars(currentText)
         const contractedCount = countProseChars(contractedText)
+        const bridgeToExpansion = !candidateRejected
+          && options.expand !== false
+          && isExplicitlyCompleteProseContractionFinishReason(finishReason)
+          && canBridgeShortContractionToExpansion(currentEvaluation, finalEvaluation)
 
         contractionAttempts.push({
           attempt,
@@ -43892,8 +43882,10 @@ export function createNovelWritingService(ctx: {
           model_usage: (contractionResult as any).usage
             || (contractionResult as any).raw?.usage
             || null,
+          incomplete_reason: incompleteReason,
           returned_text: Boolean(contractedText),
           candidate_rejected: candidateRejected,
+          bridge_to_expansion: bridgeToExpansion,
           rejection_reason: rejectionReasons.join(',') || null,
           recovered_from_partial_json: recoveredFromPartialJson,
           partial_json_open_string_recovered: partialJsonOpenStringRecovered,
@@ -43901,16 +43893,25 @@ export function createNovelWritingService(ctx: {
 
         if (candidateRejected) continue
 
+        const candidatePayload = {
+          scene_breakdown: extracted.scene_breakdown,
+          continuity_notes: extracted.continuity_notes,
+          contraction_report: extracted.payload?.contraction_report || extracted.payload?.contractionReport || null,
+          attempts: contractionAttempts,
+          modelName: (contractionResult as any).modelName,
+        }
+
+        if (bridgeToExpansion) {
+          currentText = contractedText
+          currentEvaluation = finalEvaluation
+          contractionResultPayload = candidatePayload
+          break
+        }
+
         if (contractedText && contractedCount > 0 && contractedCount < previousCount && !finalEvaluation.too_short) {
           currentText = contractedText
           currentEvaluation = finalEvaluation
-          contractionResultPayload = {
-            scene_breakdown: extracted.scene_breakdown,
-            continuity_notes: extracted.continuity_notes,
-            contraction_report: extracted.payload?.contraction_report || extracted.payload?.contractionReport || null,
-            attempts: contractionAttempts,
-            modelName: (contractionResult as any).modelName,
-          }
+          contractionResultPayload = candidatePayload
         }
 
         if (contractedText && contractedCount > 0 && contractedCount < previousCount && finalEvaluation.passed) {

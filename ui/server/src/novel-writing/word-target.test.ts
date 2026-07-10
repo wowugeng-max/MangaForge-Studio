@@ -5,8 +5,13 @@ import {
   applyChapterWordTargetToContext,
   applyProseWordTargetSoftCap,
   countProseChars,
+  canBridgeShortContractionToExpansion,
   evaluateProseWordTarget,
+  isExplicitlyCompleteProseContractionFinishReason,
+  isRejectedProseContractionFinishReason,
   isWithinProseWordTargetSoftCap,
+  normalizeProseContractionFinishReason,
+  normalizeProseContractionIncompleteReason,
   proseContractionMaxTokensForAttempt,
   proseMaxTokensForWordTarget,
   resolveChapterWordTarget,
@@ -112,6 +117,43 @@ describe('novel writing word target utilities', () => {
     expect(isWithinProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(5220), target))).toBe(true)
     expect(isWithinProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(5700), target))).toBe(false)
     expect(isWithinProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(3199), target))).toBe(false)
+  })
+
+  test('bridges only a mildly short complete contraction into the existing expansion gate', () => {
+    const target = resolveChapterWordTarget({}, { chapter_no: 1 }, {})
+    const overTarget = evaluateProseWordTarget('字'.repeat(6474), target)
+
+    expect(canBridgeShortContractionToExpansion(
+      overTarget,
+      evaluateProseWordTarget('字'.repeat(3012), target),
+    )).toBe(true)
+    expect(canBridgeShortContractionToExpansion(
+      overTarget,
+      evaluateProseWordTarget('字'.repeat(2879), target),
+    )).toBe(false)
+    expect(canBridgeShortContractionToExpansion(
+      overTarget,
+      evaluateProseWordTarget('字'.repeat(3200), target),
+    )).toBe(false)
+    expect(canBridgeShortContractionToExpansion(
+      evaluateProseWordTarget('字'.repeat(5000), target),
+      evaluateProseWordTarget('字'.repeat(3012), target),
+    )).toBe(false)
+  })
+
+  test('normalizes contraction completion and incomplete transport states to fixed values', () => {
+    expect(normalizeProseContractionFinishReason({ finish_reason: 'STOP' })).toBe('stop')
+    expect(normalizeProseContractionFinishReason({ raw: { stop_reason: 'MAX_TOKENS' } })).toBe('max_tokens')
+    expect(normalizeProseContractionFinishReason({ finish_reason: 'provider-controlled-value' })).toBe('unknown')
+    expect(normalizeProseContractionFinishReason({})).toBeNull()
+    expect(normalizeProseContractionIncompleteReason({
+      raw: { response: { incomplete_details: { reason: 'max_output_tokens' } } },
+    })).toBe('max_output_tokens')
+    expect(normalizeProseContractionIncompleteReason({ incomplete_details: { reason: 'provider-controlled-value' } })).toBe('unknown')
+    expect(isExplicitlyCompleteProseContractionFinishReason('stop')).toBe(true)
+    expect(isExplicitlyCompleteProseContractionFinishReason('incomplete')).toBe(false)
+    expect(isRejectedProseContractionFinishReason('content_filter')).toBe(true)
+    expect(isRejectedProseContractionFinishReason(null)).toBe(false)
   })
 
   test('normalizes a tiny over-target result into one shared passing decision', () => {

@@ -161,6 +161,103 @@ describe('novel writing service prose quality wiring', () => {
     expect(error?.contraction_attempts.every((attempt: any) => attempt.candidate_rejected === true)).toBe(true)
   })
 
+  test('routes a complete mildly short contraction through expansion instead of preserving the overlong draft', async () => {
+    const originalText = '原'.repeat(1400)
+    const contractedText = '缩'.repeat(750)
+    const expandedText = '扩'.repeat(900)
+    const results = [
+      {
+        parsed: { prose_chapters: [{ chapter_no: 1, chapter_text: contractedText }] },
+        finish_reason: 'stop',
+      },
+      {
+        parsed: { prose_chapters: [{ chapter_no: 1, chapter_text: expandedText }] },
+        finish_reason: 'stop',
+      },
+    ]
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {
+        getStageModelId: (_project: any, _stage: string, fallback?: number) => fallback || 217,
+        getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+      } as any,
+      reference: {} as any,
+      runtime: {
+        executeAgent: async () => results.shift(),
+      },
+    })
+
+    const result = await service.ensureProseMeetsWordTarget(
+      '/tmp/mangaforge-contraction-expansion-bridge',
+      { id: 1, title: '测试作品' },
+      { chapter_target: { chapter_no: 1, word_target: contractionWordTarget } },
+      originalText,
+      217,
+      { maxContractionAttempts: 1, maxExpansionAttempts: 1 },
+    )
+
+    expect(result.final_text).toBe(expandedText)
+    expect(result.final_evaluation).toMatchObject({ actual: 900, passed: true })
+    expect(result).toMatchObject({ contracted: true, expanded: true })
+    expect(result.contraction?.attempts).toHaveLength(1)
+    expect(result.contraction?.attempts[0]).toMatchObject({
+      contracted_count: 750,
+      bridge_to_expansion: true,
+      candidate_rejected: false,
+    })
+  })
+
+  test('does not bridge mildly short candidates without an explicit completion finish reason', async () => {
+    const originalText = '原'.repeat(1400)
+    const contractedText = '缩'.repeat(750)
+    const cases = [
+      { finish_reason: 'incomplete', raw: { incomplete_details: { reason: 'max_output_tokens' } } },
+      { finish_reason: 'max_output_tokens' },
+      { finish_reason: 'error' },
+      { finish_reason: 'content_filter' },
+      {},
+    ]
+
+    for (const finish of cases) {
+      const service = createContractionService({
+        parsed: { prose_chapters: [{ chapter_no: 1, chapter_text: contractedText }] },
+        ...finish,
+      })
+      const error = await service.ensureProseMeetsWordTarget(
+        '/tmp/mangaforge-contraction-expansion-finish-guard',
+        { id: 1, title: '测试作品' },
+        { chapter_target: { chapter_no: 1, word_target: contractionWordTarget } },
+        originalText,
+        217,
+        { maxContractionAttempts: 1, maxExpansionAttempts: 1 },
+      ).then(() => null, (caught: any) => caught)
+
+      expect(error?.code).toBe('PROSE_WORD_TARGET_LONG')
+      expect(error?.contraction_attempts?.[0]?.bridge_to_expansion).toBe(false)
+    }
+  })
+
+  test('does not bridge a mildly short contraction when expansion is disabled', async () => {
+    const originalText = '原'.repeat(1400)
+    const contractedText = '缩'.repeat(750)
+    const service = createContractionService({
+      parsed: { prose_chapters: [{ chapter_no: 1, chapter_text: contractedText }] },
+      finish_reason: 'stop',
+    })
+
+    const error = await service.ensureProseMeetsWordTarget(
+      '/tmp/mangaforge-contraction-expansion-disabled',
+      { id: 1, title: '测试作品' },
+      { chapter_target: { chapter_no: 1, word_target: contractionWordTarget } },
+      originalText,
+      217,
+      { maxContractionAttempts: 1, expand: false },
+    ).then(() => null, (caught: any) => caught)
+
+    expect(error?.code).toBe('PROSE_WORD_TARGET_LONG')
+    expect(error?.contraction_attempts?.[0]?.bridge_to_expansion).toBe(false)
+  })
+
   test('restores the valid pre-editor prose when optional editor output cannot meet the word target', async () => {
     const draftText = buildPipelineProse(
       '江澈踏碎路面，飞石逼退第一排追兵，铁门前终于露出缺口。',

@@ -19,6 +19,38 @@ export type ProseWordTargetEvaluation = {
   soft_cap?: boolean
 }
 
+const COMPLETE_CONTRACTION_FINISH_REASONS = new Set([
+  'stop',
+  'completed',
+  'complete',
+  'end_turn',
+  'stop_sequence',
+  'success',
+  'succeeded',
+])
+
+const REJECTED_CONTRACTION_FINISH_REASONS = new Set([
+  'length',
+  'max_tokens',
+  'max_output_tokens',
+  'incomplete',
+  'error',
+  'failed',
+  'content_filter',
+  'safety',
+  'cancelled',
+  'canceled',
+  'aborted',
+  'tool_calls',
+  'tool_use',
+  'function_call',
+])
+
+const KNOWN_CONTRACTION_FINISH_REASONS = new Set([
+  ...COMPLETE_CONTRACTION_FINISH_REASONS,
+  ...REJECTED_CONTRACTION_FINISH_REASONS,
+])
+
 function clampWordTarget(value: number) {
   if (!Number.isFinite(value) || value <= 0) return 3000
   return Math.min(12000, Math.max(1000, Math.round(value)))
@@ -121,6 +153,65 @@ export function evaluateProseWordTarget(text: string, target: ChapterWordTarget 
     too_long: tooLong,
     passed: !tooShort && !tooLong,
   }
+}
+
+export function canBridgeShortContractionToExpansion(
+  current: ProseWordTargetEvaluation,
+  candidate: ProseWordTargetEvaluation,
+) {
+  const currentCount = Number(current?.actual || 0)
+  const candidateCount = Number(candidate?.actual || 0)
+  const minimumCount = Number(candidate?.min || 0)
+  if (!current?.too_long || !candidate?.too_short || candidate?.too_long) return false
+  if (!Number.isFinite(currentCount) || !Number.isFinite(candidateCount) || !Number.isFinite(minimumCount)) return false
+  if (minimumCount <= 0 || candidateCount <= 0 || candidateCount >= currentCount) return false
+  return candidateCount >= Math.ceil(minimumCount * 0.9)
+}
+
+export function normalizeProseContractionFinishReason(result: any) {
+  const finishReason = [
+    result?.finish_reason,
+    result?.finishReason,
+    result?.stop_reason,
+    result?.stopReason,
+    result?.raw?.finish_reason,
+    result?.raw?.finishReason,
+    result?.raw?.stop_reason,
+    result?.raw?.stopReason,
+    result?.raw?.choices?.[0]?.finish_reason,
+    result?.raw?.choices?.[0]?.finishReason,
+    result?.raw?.choices?.[0]?.stop_reason,
+    result?.raw?.choices?.[0]?.stopReason,
+    result?.raw?.response?.finish_reason,
+    result?.raw?.response?.stop_reason,
+  ].find(value => String(value ?? '').trim())
+  const normalized = String(finishReason ?? '').trim().toLowerCase()
+  if (!normalized) return null
+  return KNOWN_CONTRACTION_FINISH_REASONS.has(normalized) ? normalized : 'unknown'
+}
+
+export function normalizeProseContractionIncompleteReason(result: any) {
+  const rawReason = [
+    result?.incomplete_details?.reason,
+    result?.incompleteDetails?.reason,
+    result?.raw?.incomplete_details?.reason,
+    result?.raw?.incompleteDetails?.reason,
+    result?.raw?.response?.incomplete_details?.reason,
+    result?.raw?.response?.incompleteDetails?.reason,
+  ].find(value => String(value ?? '').trim())
+  const reason = String(rawReason ?? '').trim().toLowerCase()
+  if (!reason) return null
+  if (['max_output_tokens', 'max_tokens', 'token_limit', 'length'].includes(reason)) return 'max_output_tokens'
+  if (['content_filter', 'safety'].includes(reason)) return 'content_filter'
+  return 'unknown'
+}
+
+export function isExplicitlyCompleteProseContractionFinishReason(reason: string | null) {
+  return COMPLETE_CONTRACTION_FINISH_REASONS.has(String(reason || ''))
+}
+
+export function isRejectedProseContractionFinishReason(reason: string | null) {
+  return REJECTED_CONTRACTION_FINISH_REASONS.has(String(reason || ''))
 }
 
 export function isWithinProseWordTargetSoftCap(evaluation: ProseWordTargetEvaluation, options: any = {}) {
