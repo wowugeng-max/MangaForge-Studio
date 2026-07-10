@@ -228,6 +228,7 @@ import {
   applyChapterWordTargetToContext,
   buildProseWordTargetExpansionPrompt,
   countProseChars,
+  compileParagraphProseContext,
   createNovelWritingService,
   evaluateProseWordTarget,
   extractProseExpansionPayload,
@@ -239,9 +240,11 @@ import {
   normalizeStyleSampleBank,
   normalizeSceneCardsPayload,
   proseMaxTokensForWordTarget,
+  prepareProseGenerationContract,
   resolveChapterWordTarget,
 } from './novel-writing-service'
 import { buildLLMResultDiagnostics, buildPreflightChecks, deepMergeObjects, extractPlainProseFallback, formatReviewIssueForStorage, getNovelPayload, getQualityGateDecision, getStyleLock, normalizeIssue } from './novel-route-utils'
+import { buildProseGenerationContract } from '../novel-writing/prose-generation-contract'
 import { buildProsePromptContextSnapshot } from '../novel-writing/prose-prompt-context'
 
 const readSceneCardsPromptSource = () => readFileSync(join(import.meta.dir, '../novel-writing/scene-cards-prompt.ts'), 'utf8')
@@ -250,6 +253,143 @@ const readProseQualityReviewRecordSource = () => readFileSync(join(import.meta.d
 const readChapterProseStoragePatchSource = () => readFileSync(join(import.meta.dir, '../novel-writing/chapter-prose-storage-patch.ts'), 'utf8')
 const readPostDeliverySyncReviewRecordSource = () => readFileSync(join(import.meta.dir, '../novel-writing/post-delivery-sync-review-record.ts'), 'utf8')
 const readDraftSyncReviewRecordSource = () => readFileSync(join(import.meta.dir, '../novel-writing/draft-sync-review-record.ts'), 'utf8')
+
+test('recomputes director after request merge and blocks before draft invocation', async () => {
+  let draftCalls = 0
+  const prepared = prepareProseGenerationContract(
+    {
+      chapter_target: { chapter_no: 10, scene_cards: [{ scene_no: 1 }] },
+      preflight: { ready: true, strict_ready: true, checks: [], warnings: [], blockers: [] },
+    },
+    {
+      chapter_launch_gate: { status: 'blocked', summary: '第九章追捕合围未承接' },
+      allow_incomplete: true,
+    },
+  )
+
+  await expect(prepared.runAfterGate(async () => {
+    draftCalls += 1
+    return 'drafted'
+  })).rejects.toMatchObject({ code: 'PROSE_LAUNCH_GATE_BLOCKED' })
+
+  expect(draftCalls).toBe(0)
+  expect(prepared.contract.context.chapter_target.chapter_launch_gate.status).toBe('blocked')
+  expect(prepared.contract.director.readiness).toBe('ready')
+})
+
+test('rebuilds the generation contract at every chapter-group context boundary', () => {
+  const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+  const groupStart = source.indexOf('const generateChapterForGroup = async')
+  const groupEnd = source.indexOf('\n  return {', groupStart)
+  const groupBlock = source.slice(groupStart, groupEnd)
+  const preparationCalls = groupBlock.match(/prepareProseGenerationContract\(/g) || []
+
+  expect(groupStart).toBeGreaterThanOrEqual(0)
+  expect(preparationCalls.length).toBeGreaterThanOrEqual(3)
+  expect(groupBlock).toContain('runAfterGate')
+  expect(groupBlock).toContain('generationContract')
+  expect(groupBlock).not.toContain("!contextPackage.preflight.ready && options.allow_incomplete !== true")
+  expect(groupBlock).not.toContain('launchGateBlocker && options.allow_incomplete !== true')
+  expect(groupBlock).not.toContain("!contextPackage.chapter_target.scene_cards.length && options.allow_incomplete !== true")
+})
+
+test('compiles the prose prompt from required core sections and director-selected contracts', () => {
+  const contract = buildProseGenerationContract({
+    chapter_target: {
+      chapter_no: 10,
+      title: '合围破局',
+      goal: '江澈主动打穿追捕圈',
+      summary: '承接追捕合围并取得线索',
+      conflict: '追捕队封死四面出口',
+      reader_payoff: 'CHAPTER_PAYOFF_SENTINEL：夺取追捕频道反向锁定敌人',
+      ending_hook: '幕后指挥者第一次现身',
+      previous_handoff: 'HANDOFF_SENTINEL：追兵从四面封死巷口。',
+      word_target: { target: 3200, min: 2800, max: 3800 },
+      scene_cards: [{
+        scene_no: 1,
+        title: '破围',
+        goal: 'SCENE_CAUSALITY_SENTINEL：夺下追捕队通讯器',
+        obstacle: '两层封锁线互相掩护',
+        action: 'SCENE_ACTION_SENTINEL：江澈撞进第二层封锁线',
+        turn: 'SCENE_TURN_SENTINEL：通讯器里传来熟人的声音',
+        payoff: 'SCENE_PAYOFF_SENTINEL：夺到幕后指挥频道',
+        state_delta: 'SCENE_STATE_DELTA_SENTINEL：追捕方失去统一指挥',
+        protagonist_agency_action: '江澈主动砸断路灯制造盲区',
+        event_value_change: '追捕方失去统一指挥',
+      }],
+      core_contract_radar: {
+        reader_promise: 'CORE_PROMISE_SENTINEL：超人以行动碾碎怪谈规则',
+        core_conflict: '人的选择对抗怪谈规则',
+      },
+      longform_compass: {
+        reader_promise: 'REQUEST_COMPASS_SENTINEL：每章都由江澈主动破局',
+        no_drift: ['主角不能等待配角代办结果'],
+      },
+      next_batch_brief: {
+        current_chapter_role: 'REQUEST_BATCH_ROLE_SENTINEL：本章打穿合围并拿到频道',
+      },
+      delivery_risk_carry_over: {
+        opening_actions: ['REQUEST_DELIVERY_RISK_SENTINEL：前300字承接追兵封巷'],
+      },
+      million_word_runway: {
+        mode: 'single_chapter',
+        red_lines: ['REQUEST_RUNWAY_SENTINEL：不得提前解决幕后组织'],
+      },
+      dialogue_contract: {
+        dialogue_goals: ['SELECTED_DIALOGUE_SENTINEL：逼出幕后指挥者身份'],
+      },
+      quality_audit_contract: {
+        chapter_focus: ['UNSELECTED_QUALITY_SENTINEL'],
+      },
+    },
+    preflight: { ready: true, strict_ready: true, checks: [], blockers: [], warnings: [] },
+    oh_story_director: {
+      readiness: 'ready',
+      selected_contracts: [{ key: 'dialogue_contract', detail_level: 'full', reason: '对白风险' }],
+    },
+  })
+
+  const compiled = compileParagraphProseContext({ title: '怪谈世界' }, contract)
+
+  expect(compiled.prompt.length).toBeLessThanOrEqual(48_000)
+  expect(compiled.prompt).toContain('HANDOFF_SENTINEL')
+  expect(compiled.prompt).toContain('SCENE_CAUSALITY_SENTINEL')
+  expect(compiled.prompt).toContain('SCENE_ACTION_SENTINEL')
+  expect(compiled.prompt).toContain('SCENE_TURN_SENTINEL')
+  expect(compiled.prompt).toContain('SCENE_PAYOFF_SENTINEL')
+  expect(compiled.prompt).toContain('SCENE_STATE_DELTA_SENTINEL')
+  expect(compiled.prompt).toContain('CORE_PROMISE_SENTINEL')
+  expect(compiled.prompt).toContain('CHAPTER_PAYOFF_SENTINEL')
+  expect(compiled.prompt).toContain('REQUEST_COMPASS_SENTINEL')
+  expect(compiled.prompt).toContain('REQUEST_BATCH_ROLE_SENTINEL')
+  expect(compiled.prompt).toContain('REQUEST_DELIVERY_RISK_SENTINEL')
+  expect(compiled.prompt).toContain('REQUEST_RUNWAY_SENTINEL')
+  expect(compiled.prompt).toContain('SELECTED_DIALOGUE_SENTINEL')
+  expect(compiled.prompt).not.toContain('UNSELECTED_QUALITY_SENTINEL')
+  expect(compiled.diagnostics.selected_contract_keys).toEqual(['dialogue'])
+  expect(compiled.diagnostics.omitted_contract_keys).toContain('quality_audit')
+  expect(compiled.diagnostics.prompt_chars).toBe(compiled.prompt.length)
+})
+
+test('uses the compiled generation contract for the actual draft runtime call', () => {
+  const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+  const groupStart = source.indexOf('const generateChapterForGroup = async')
+  const draftCallStart = source.indexOf('const draftResult = await generateNovelChapterProse', groupStart)
+  const draftCallEnd = source.indexOf('const resultPayload = getNovelPayload', draftCallStart)
+  const draftCallBlock = source.slice(groupStart, draftCallEnd)
+
+  expect(groupStart).toBeGreaterThanOrEqual(0)
+  expect(draftCallStart).toBeGreaterThan(groupStart)
+  expect(draftCallEnd).toBeGreaterThan(draftCallStart)
+  expect(draftCallBlock).toContain('const compiledPrompt = compileParagraphProseContext(project, generationContract, migrationPlan, chapter)')
+  expect(draftCallBlock).toContain("onStage('draft', { status: 'running', prompt_diagnostics: compiledPrompt.diagnostics })")
+  expect(draftCallBlock).toContain('paragraphTask: compiledPrompt.prompt')
+  expect(draftCallBlock).toContain('promptDiagnostics: compiledPrompt.diagnostics')
+  expect(draftCallBlock).toContain('boundedProseContract: true')
+  expect(draftCallBlock).toContain('const draftPromptDiagnostics =')
+  expect(draftCallBlock).not.toContain('paragraphTask: buildParagraphProseContext(project, contextPackage')
+  expect(source.slice(draftCallStart).match(/prompt_diagnostics: draftPromptDiagnostics/g)?.length || 0).toBeGreaterThanOrEqual(3)
+})
 
 describe('deepMergeObjects', () => {
   test('merges cyclic overrides without overflowing', () => {
@@ -53048,44 +53188,54 @@ describe('chapter context word target source guards', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const blockStart = source.indexOf("if (!contextPackage.preflight.ready && options.allow_incomplete !== true)", groupStart)
-    const beforeBlock = source.slice(groupStart, blockStart)
+    const gateStart = source.indexOf('await enforcePreparedGate(false)', groupStart)
+    const beforeGate = source.slice(groupStart, gateStart)
 
     expect(repairStart).toBeGreaterThanOrEqual(0)
     expect(groupStart).toBeGreaterThan(repairStart)
-    expect(beforeBlock).toContain('options.auto_repair_missing_material === true')
-    expect(beforeBlock).toContain('autoRepairChapterPreflightGaps(')
-    expect(beforeBlock).toContain("onStage('material_repair'")
-    expect(beforeBlock).toContain('contextPackage = applyChapterWordTargetToContext(')
+    expect(gateStart).toBeGreaterThan(groupStart)
+    expect(beforeGate).toContain('options.auto_repair_missing_material === true')
+    expect(beforeGate).toContain('autoRepairChapterPreflightGaps(')
+    expect(beforeGate).toContain("onStage('material_repair'")
+    expect(beforeGate).toContain('const repairedContextPackage = applyChapterWordTargetToContext(')
+    expect(beforeGate).toContain('preparedGeneration = prepareProseGenerationContract(repairedContextPackage, options)')
+    expect(beforeGate).not.toContain('options.allow_incomplete !== true')
   })
 
   test('blocks unattended prose generation when scene cards remain missing after auto repair', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const sceneCardsStage = source.indexOf("await onStage('scene_cards', { status: 'running' })", groupStart)
-    const draftStage = source.indexOf("await onStage('draft', { status: 'running' })", groupStart)
-    const sceneCardsBlock = source.slice(sceneCardsStage, draftStage)
+    const promptCompileStart = source.indexOf('const compiledPrompt = compileParagraphProseContext', groupStart)
+    const sceneCardsBlock = source.slice(sceneCardsStage, promptCompileStart)
 
     expect(groupStart).toBeGreaterThanOrEqual(0)
     expect(sceneCardsStage).toBeGreaterThan(groupStart)
-    expect(draftStage).toBeGreaterThan(sceneCardsStage)
-    expect(sceneCardsBlock).toContain("if (!contextPackage.chapter_target.scene_cards.length && options.allow_incomplete !== true)")
-    expect(sceneCardsBlock).toContain("status: 'failed'")
-    expect(sceneCardsBlock).toContain('PROSE_SCENE_CARDS_BLOCKED')
-    expect(sceneCardsBlock).toContain('正文生成前必须先有本章场景卡')
+    expect(promptCompileStart).toBeGreaterThan(sceneCardsStage)
+    expect(sceneCardsBlock).toContain('if (!generationContract.chapter.scene_cards.length || options.force_scene_cards === true)')
+    expect(sceneCardsBlock).toContain('preparedGeneration = prepareProseGenerationContract(sceneContextPackage, options)')
+    expect(sceneCardsBlock).toContain('await enforcePreparedGate(true)')
+    expect(sceneCardsBlock).not.toContain('options.allow_incomplete !== true')
   })
 
   test('refreshes repaired worldbuilding before unattended preflight is evaluated again', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const repairCall = source.indexOf('const repairResult = await autoRepairChapterPreflightGaps', groupStart)
-    const rebuildStart = source.indexOf('contextPackage = applyChapterWordTargetToContext(', repairCall)
+    const rebuildStart = source.indexOf('const repairedContextPackage = applyChapterWordTargetToContext(', repairCall)
+    const gateStart = source.indexOf('await enforcePreparedGate(false)', rebuildStart)
     const repairRefreshBlock = source.slice(repairCall, rebuildStart)
+    const rebuiltContractBlock = source.slice(rebuildStart, gateStart)
 
     expect(groupStart).toBeGreaterThanOrEqual(0)
     expect(repairCall).toBeGreaterThan(groupStart)
     expect(rebuildStart).toBeGreaterThan(repairCall)
     expect(repairRefreshBlock).toContain('worldbuilding = await listNovelWorldbuilding')
+    expect(repairRefreshBlock).toContain('characters = await listNovelCharacters')
+    expect(repairRefreshBlock).toContain('outlines = await listNovelOutlines')
+    expect(repairRefreshBlock).toContain('reviews = await listNovelReviews')
+    expect(rebuiltContractBlock).toContain('preparedGeneration = prepareProseGenerationContract(repairedContextPackage, options)')
+    expect(rebuiltContractBlock).toContain('generationContract = preparedGeneration.contract')
   })
 
   test('auto-repairs missing unattended chapter blueprint before prose generation', () => {
@@ -54831,19 +54981,22 @@ describe('chapter context word target source guards', () => {
     expect(helperBlock).toContain('chapter_text: endingExcerpt')
     expect(helperBlock).not.toContain('chapter_text: chapter.chapter_text')
     expect(draftCallBlock).toContain('prevChapters')
-    expect(draftCallBlock).toContain('paragraphTask: buildParagraphProseContext')
+    expect(draftCallBlock).toContain('paragraphTask: compiledPrompt.prompt')
+    expect(draftCallBlock).toContain('boundedProseContract: true')
   })
 
   test('checks abort signal between expensive chapter prose pipeline stages', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const groupBlock = source.slice(groupStart, source.indexOf('return { generateChapterForGroup', groupStart))
+    const serviceReturn = source.indexOf('\n  return {\n    buildParagraphProseContext', groupStart)
+    const groupBlock = source.slice(groupStart, serviceReturn)
     const checkpoints = groupBlock.match(/throwIfChapterGenerationAborted\(\)/g) || []
 
     expect(groupStart).toBeGreaterThanOrEqual(0)
+    expect(serviceReturn).toBeGreaterThan(groupStart)
     expect(groupBlock).toContain('const throwIfChapterGenerationAborted = () => throwIfAborted(llmControlOptions)')
     expect(checkpoints.length).toBeGreaterThanOrEqual(14)
-    expect(groupBlock).toContain("throwIfChapterGenerationAborted()\n    await onStage('draft'")
+    expect(groupBlock).toContain('throwIfChapterGenerationAborted()\n    const compiledPrompt = compileParagraphProseContext')
     expect(groupBlock).toContain("throwIfChapterGenerationAborted()\n    await onStage('editor'")
     expect(groupBlock).toContain("throwIfChapterGenerationAborted()\n    await onStage('meme_polish'")
     expect(groupBlock).toContain("throwIfChapterGenerationAborted()\n    await onStage('review'")

@@ -281,6 +281,11 @@ function hasBoundedParagraphTask(context: Record<string, any>) {
   return Boolean(String(task || '').trim())
 }
 
+function compactBoundedProseInjection(value: any, maxChars = 4000) {
+  const text = String(value || '').trim()
+  return text.length <= maxChars ? text : `${text.slice(0, maxChars)}\n…已按正文核心合同预算裁剪`
+}
+
 function llmResponseContentText(response: any) {
   if (typeof response?.content === 'string') return response.content.trim()
   if (Array.isArray(response?.content)) {
@@ -857,7 +862,8 @@ export async function generateNovelChapterProse(
     ? options
     : { activeWorkspace: options, modelId: modelIdArg ? String(modelIdArg) : undefined }
   const { modelId, activeWorkspace, skipMemory } = normalizedOptions
-  const boundedParagraphTask = hasBoundedParagraphTask(context as any)
+  const boundedProseContract = (context as any).boundedProseContract === true
+  const boundedParagraphTask = boundedProseContract || hasBoundedParagraphTask(context as any)
   const compactPrevChapters = compactProsePreviousChapters(context.prevChapters)
   const compactPromptContext = {
     ...(context as any),
@@ -899,6 +905,10 @@ export async function generateNovelChapterProse(
     knowledgeInjection = await buildKnowledgeInjectionText(project, '正文创作')
   } catch (err) {
     console.warn('[knowledge-injection] Failed for generateNovelChapterProse:', String(err).slice(0, 200))
+  }
+  if (boundedProseContract) {
+    memoryInjection = compactBoundedProseInjection(memoryInjection)
+    knowledgeInjection = compactBoundedProseInjection(knowledgeInjection)
   }
 
   // Build prose prompt
@@ -1003,7 +1013,13 @@ export async function generateNovelChapterProse(
     }
   }
 
-  return finalResponse
+  return {
+    ...finalResponse,
+    prose_prompt_diagnostics: {
+      ...((context as any).promptDiagnostics || {}),
+      model_usage: finalResponse?.usage || finalResponse?.raw?.usage || null,
+    },
+  }
 }
 
 // ── Init Memory Palace on module load ──

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { applyRequestBatchPreflight, compactGenerationRequestOverride, compactStandaloneProseProgressStage, extractOhStoryDeliveryReceipts, refreshOhStoryDeliveryReceiptsAfterRevision, selectTargetProsePayload, stringifyNovelGenerationPayload } from './novel-generation-routes'
+import { applyRequestBatchPreflight, buildStandaloneProseServiceOptions, compactGenerationRequestOverride, compactStandaloneProseProgressStage, extractOhStoryDeliveryReceipts, refreshOhStoryDeliveryReceiptsAfterRevision, selectTargetProsePayload, stringifyNovelGenerationPayload } from './novel-generation-routes'
 
 describe('novel generate prose route source guards', () => {
   test('serializes circular generation payloads without losing shared arrays', () => {
@@ -65,6 +65,41 @@ describe('novel generate prose route source guards', () => {
     })
     expect(compacted.context_package).toBeUndefined()
     expect(compacted.raw_payload).toBeUndefined()
+  })
+
+  test('passes prose constraints to the unified service without auto approving scene cards', () => {
+    const onStage = async () => {}
+    const abortSignal = new AbortController().signal
+    const options = buildStandaloneProseServiceOptions(
+      {
+        project_id: 1,
+        model_id: 217,
+        chapter_launch_gate: { status: 'blocked', summary: '缺承接' },
+        longform_compass: { reader_promise: '行动破局' },
+        longform_battle_context: { core_guard: '守住主角行动回报' },
+        next_batch_brief: { current_chapter_role: '破开合围' },
+        batch_preflight: { delivery_risk_carry_over: { items: ['接合围'] } },
+        million_word_runway: { mode: 'single_chapter' },
+        approvals: { safety: { approved: true } },
+      },
+      {
+        modelId: 217,
+        autoRepairQualityGate: false,
+        onStage,
+        abortSignal,
+      },
+    )
+
+    expect(options.chapter_launch_gate.status).toBe('blocked')
+    expect(options.longform_compass.reader_promise).toBe('行动破局')
+    expect(options.longform_battle_context.core_guard).toBe('守住主角行动回报')
+    expect(options.next_batch_brief.current_chapter_role).toBe('破开合围')
+    expect(options.batch_preflight.delivery_risk_carry_over.items[0]).toBe('接合围')
+    expect(options.million_word_runway.mode).toBe('single_chapter')
+    expect(options.approvals.safety.approved).toBe(true)
+    expect(options.approvals.scene_cards).toBeUndefined()
+    expect(options.onStage).toBe(onStage)
+    expect(options.abortSignal).toBe(abortSignal)
   })
 
   test('compacts standalone prose progress stages before storing them in the SSE pipeline', () => {
@@ -475,142 +510,36 @@ describe('novel generate prose route source guards', () => {
     })
   })
 
-  test('stores oh-story delivery receipts in chapter raw payload and run output', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const draftStart = source.indexOf('let ohStoryDeliveryReceipts = extractOhStoryDeliveryReceipts', routeStart)
-    const storeStart = source.indexOf("markStage('store'", draftStart)
-    const runStart = source.indexOf('const pipelineResult =', storeStart)
-    const storeBlock = source.slice(storeStart, runStart)
-    const runBlock = source.slice(runStart, source.indexOf('await appendNovelRun', runStart))
-
-    expect(draftStart).toBeGreaterThan(routeStart)
-    expect(storeBlock).toContain('oh_story_delivery_receipts: ohStoryDeliveryReceipts')
-    expect(storeBlock).toContain('chapter_blueprint: ohStoryDeliveryReceipts.chapter_blueprint')
-    expect(storeBlock).toContain('pre_draft_execution_receipts: ohStoryDeliveryReceipts.pre_draft_execution_receipts')
-    expect(storeBlock).toContain('scene_card_receipts: ohStoryDeliveryReceipts.scene_card_receipts')
-    expect(storeBlock).toContain('delivery_risk_receipts: ohStoryDeliveryReceipts.delivery_risk_receipts')
-    expect(storeBlock).toContain('revision_receipts: ohStoryDeliveryReceipts.revision_receipts')
-    expect(storeBlock).toContain('deslop_repair_receipts: ohStoryDeliveryReceipts.deslop_repair_receipts')
-    expect(storeBlock).toContain('quality_audit_repair_receipts: ohStoryDeliveryReceipts.quality_audit_repair_receipts')
-    expect(runBlock).toContain('oh_story_delivery_receipts: ohStoryDeliveryReceipts')
-  })
-
-  test('refreshes oh-story delivery receipts after final self-review before standalone prose storage', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const receiptDeclaration = source.indexOf('let ohStoryDeliveryReceipts = extractOhStoryDeliveryReceipts', routeStart)
-    const reviewStart = source.indexOf("markStage('review'", receiptDeclaration)
-    const storeStart = source.indexOf("markStage('store'", reviewStart)
-    const refreshStart = source.indexOf('ohStoryDeliveryReceipts = refreshOhStoryDeliveryReceiptsAfterRevision', reviewStart)
-    const refreshBlock = source.slice(refreshStart, storeStart)
-
-    expect(routeStart).toBeGreaterThanOrEqual(0)
-    expect(receiptDeclaration).toBeGreaterThan(routeStart)
-    expect(refreshStart).toBeGreaterThan(reviewStart)
-    expect(refreshStart).toBeLessThan(storeStart)
-    expect(refreshBlock).toContain('finalSceneBreakdown')
-    expect(refreshBlock).toContain('selfCheck')
-    expect(refreshBlock).toContain('finalText')
-    expect(refreshBlock).toContain('contextPackage')
-  })
-
-  test('reads camelCase prose fields after selecting direct draft output', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const draftStart = source.indexOf('const resultPayload = getNovelPayload(result)', routeStart)
-    const failureStart = source.indexOf('if (!chapterText)', draftStart)
-    const draftBlock = source.slice(draftStart, failureStart)
-
-    expect(draftBlock).toContain('targetProse?.chapterText')
-    expect(draftBlock).toContain('resultPayload?.chapterText')
-    expect(draftBlock).toContain('targetProse?.sceneBreakdown')
-    expect(draftBlock).toContain('resultPayload?.sceneBreakdown')
-    expect(draftBlock).toContain('targetProse?.continuityNotes')
-    expect(draftBlock).toContain('resultPayload?.continuityNotes')
-  })
-
-  test('declares word target before the generate-prose scene-card branch can refresh it', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const routeEnd = source.indexOf("const prevChapters = chapters", routeStart)
-    const setupBlock = source.slice(routeStart, routeEnd)
-
-    const declarationIndex = setupBlock.indexOf('let wordTarget = resolveChapterWordTarget(project, chapter, req.body || {})')
-    const contextIndex = setupBlock.indexOf('let contextPackage = applyChapterWordTargetToContext(')
-    const refreshIndex = setupBlock.indexOf('wordTarget = resolveChapterWordTarget(project, chapter, req.body || {})', contextIndex + 1)
-
-    expect(routeStart).toBeGreaterThanOrEqual(0)
-    expect(declarationIndex).toBeGreaterThanOrEqual(0)
-    expect(contextIndex).toBeGreaterThan(declarationIndex)
-    expect(refreshIndex).toBeGreaterThan(contextIndex)
-  })
-
-  test('auto-repairs standalone prose preflight gaps before returning blocked', () => {
+  test('routes standalone prose generation exclusively through the bounded chapter writing service', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
     const contextTypeStart = source.indexOf('type GenerationRoutesContext =')
     const contextTypeEnd = source.indexOf('function buildTextDiffSummary', contextTypeStart)
     const contextTypeBlock = source.slice(contextTypeStart, contextTypeEnd)
     const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const blockedStart = source.indexOf("if (!contextPackage.preflight.ready && req.body?.allow_incomplete !== true)", routeStart)
-    const beforeBlockedBlock = source.slice(routeStart, blockedStart)
-
-    expect(routeStart).toBeGreaterThanOrEqual(0)
-    expect(blockedStart).toBeGreaterThan(routeStart)
-    expect(contextTypeBlock).toContain('autoRepairChapterPreflightGaps?:')
-    expect(beforeBlockedBlock).toContain('ctx.autoRepairChapterPreflightGaps')
-    expect(beforeBlockedBlock).toContain("markStage('material_repair'")
-    expect(beforeBlockedBlock).toContain('chapters = await listNovelChapters(activeWorkspace, projectId)')
-    expect(beforeBlockedBlock).toContain('contextPackage = applyChapterWordTargetToContext(')
-  })
-
-  test('routes standalone prose generation through the bounded chapter writing service before legacy draft prompting', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const contextTypeStart = source.indexOf('type GenerationRoutesContext =')
-    const contextTypeEnd = source.indexOf('function buildTextDiffSummary', contextTypeStart)
-    const contextTypeBlock = source.slice(contextTypeStart, contextTypeEnd)
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const contextBuildStart = source.indexOf('ctx.buildChapterContextPackage(', routeStart)
-    const legacyDraftStart = source.indexOf('const result = await generateNovelChapterProse', routeStart)
-    const serviceBranchStart = source.indexOf('if (ctx.generateChapterForGroup)', routeStart)
+    const routeEnd = source.indexOf('\n  })\n}', routeStart)
+    const routeBlock = source.slice(routeStart, routeEnd)
     const serviceCallStart = source.indexOf('ctx.generateChapterForGroup(activeWorkspace, projectId, chapterId', routeStart)
 
     expect(routeStart).toBeGreaterThanOrEqual(0)
-    expect(contextBuildStart).toBeGreaterThan(routeStart)
-    expect(legacyDraftStart).toBeGreaterThan(contextBuildStart)
-    expect(contextTypeBlock).toContain('generateChapterForGroup?:')
-    expect(serviceBranchStart).toBeGreaterThan(routeStart)
-    expect(serviceBranchStart).toBeLessThan(contextBuildStart)
-    expect(serviceCallStart).toBeGreaterThan(serviceBranchStart)
-    expect(serviceCallStart).toBeLessThan(contextBuildStart)
-  })
-
-  test('standalone prose service path auto-confirms scene cards without bypassing quality or safety approvals', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const serviceBranchStart = source.indexOf('if (ctx.generateChapterForGroup)', routeStart)
-    const serviceCallStart = source.indexOf('ctx.generateChapterForGroup(activeWorkspace, projectId, chapterId', serviceBranchStart)
-    const serviceBlock = source.slice(serviceBranchStart, serviceCallStart)
-
-    expect(routeStart).toBeGreaterThanOrEqual(0)
-    expect(serviceBranchStart).toBeGreaterThan(routeStart)
-    expect(serviceBlock).toContain('standaloneProseServiceApprovals(req.body?.approvals)')
-    expect(serviceBlock).toContain('scene_cards: { approved: true')
-    expect(serviceBlock).not.toContain('quality_gate: { approved: true')
-    expect(serviceBlock).not.toContain('low_score: { approved: true')
-    expect(serviceBlock).not.toContain('safety: { approved: true')
+    expect(routeEnd).toBeGreaterThan(routeStart)
+    expect(contextTypeBlock).toContain('generateChapterForGroup:')
+    expect(contextTypeBlock).not.toContain('generateChapterForGroup?:')
+    expect(serviceCallStart).toBeGreaterThan(routeStart)
+    expect(routeBlock).not.toContain('if (ctx.generateChapterForGroup)')
+    expect(routeBlock).not.toContain('ctx.buildChapterContextPackage(')
+    expect(routeBlock).not.toContain('const result = await generateNovelChapterProse')
+    expect(routeBlock.match(/ctx\.generateChapterForGroup\(/g)).toHaveLength(1)
   })
 
   test('standalone prose service path aborts generation only on real client disconnects', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
     const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const serviceBranchStart = source.indexOf('if (ctx.generateChapterForGroup)', routeStart)
-    const serviceCallStart = source.indexOf('ctx.generateChapterForGroup(activeWorkspace, projectId, chapterId', serviceBranchStart)
+    const serviceCallStart = source.indexOf('ctx.generateChapterForGroup(activeWorkspace, projectId, chapterId', routeStart)
     const serviceCallEnd = source.indexOf('const updated = serviceResult?.chapter || null', serviceCallStart)
-    const serviceBlock = source.slice(serviceBranchStart, serviceCallEnd)
+    const serviceBlock = source.slice(routeStart, serviceCallEnd)
 
     expect(routeStart).toBeGreaterThanOrEqual(0)
-    expect(serviceBranchStart).toBeGreaterThan(routeStart)
+    expect(serviceCallStart).toBeGreaterThan(routeStart)
     expect(serviceBlock).toContain('const abortController = new AbortController()')
     expect(serviceBlock).not.toContain("req.on('close', abortStandaloneProseGeneration)")
     expect(serviceBlock).not.toContain("req.off('close', abortStandaloneProseGeneration)")
@@ -631,33 +560,17 @@ describe('novel generate prose route source guards', () => {
   test('standalone prose service path keeps a lightweight SSE heartbeat during long model calls', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
     const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const serviceBranchStart = source.indexOf('if (ctx.generateChapterForGroup)', routeStart)
-    const serviceCallStart = source.indexOf('ctx.generateChapterForGroup(activeWorkspace, projectId, chapterId', serviceBranchStart)
+    const serviceCallStart = source.indexOf('ctx.generateChapterForGroup(activeWorkspace, projectId, chapterId', routeStart)
     const serviceCallEnd = source.indexOf('const updated = serviceResult?.chapter || null', serviceCallStart)
-    const serviceBlock = source.slice(serviceBranchStart, serviceCallEnd)
+    const serviceBlock = source.slice(routeStart, serviceCallEnd)
 
     expect(routeStart).toBeGreaterThanOrEqual(0)
-    expect(serviceBranchStart).toBeGreaterThan(routeStart)
+    expect(serviceCallStart).toBeGreaterThan(routeStart)
     expect(serviceBlock).toContain('const writeStandaloneProseHeartbeat =')
     expect(serviceBlock).toContain("res.write(': mangaforge-prose-heartbeat\\n\\n')")
     expect(serviceBlock).toContain('const standaloneProseHeartbeat = setInterval')
     expect(serviceBlock).toContain('clearInterval(standaloneProseHeartbeat)')
     expect(serviceBlock).toContain('abortStandaloneProseGeneration()')
-  })
-
-  test('reuses refreshed materials after standalone preflight repair', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const blockedStart = source.indexOf("if (!contextPackage.preflight.ready && req.body?.allow_incomplete !== true)", routeStart)
-    const beforeBlockedBlock = source.slice(routeStart, blockedStart)
-
-    expect(routeStart).toBeGreaterThanOrEqual(0)
-    expect(beforeBlockedBlock).toContain('let [worldbuilding, characters, outlines, reviews]')
-    expect(beforeBlockedBlock).toContain('const repairedMaterials = await Promise.all')
-    expect(beforeBlockedBlock).toContain('worldbuilding = repairedMaterials[0]')
-    expect(beforeBlockedBlock).toContain('characters = repairedMaterials[1]')
-    expect(beforeBlockedBlock).toContain('outlines = repairedMaterials[2]')
-    expect(beforeBlockedBlock).toContain('reviews = repairedMaterials[3]')
   })
 
   test('applies word target context in the standalone scene-cards route', () => {
@@ -670,101 +583,6 @@ describe('novel generate prose route source guards', () => {
     expect(routeBlock).toContain('const wordTarget = resolveChapterWordTarget(project, chapter, req.body || {})')
     expect(routeBlock).toContain('const contextPackage = applyChapterWordTargetToContext(')
     expect(routeBlock).toContain('wordTarget,')
-  })
-
-  test('enforces chapter word target before self-review and storage', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const reviewStart = source.indexOf("markStage('review'", routeStart)
-    const storeStart = source.indexOf("markStage('store'", routeStart)
-    const beforeReviewBlock = source.slice(routeStart, reviewStart)
-
-    expect(routeStart).toBeGreaterThanOrEqual(0)
-    expect(reviewStart).toBeGreaterThan(routeStart)
-    expect(storeStart).toBeGreaterThan(reviewStart)
-    expect(beforeReviewBlock).toContain('ctx.ensureProseMeetsWordTarget(')
-  })
-
-  test('applies longform compass override from generate-prose requests', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const routeEnd = source.indexOf("const prevChapters = chapters", routeStart)
-    const setupBlock = source.slice(routeStart, routeEnd)
-
-    expect(setupBlock).toContain('applyRequestLongformCompass(')
-    expect(source).toContain('req.body?.longform_compass')
-    expect(source).toContain('const longformCompass = compactGenerationRequestOverride(req.body.longform_compass)')
-    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, longform_compass: longformCompass }')
-  })
-
-  test('applies longform battle context override from generate-prose requests', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const routeEnd = source.indexOf("const prevChapters = chapters", routeStart)
-    const setupBlock = source.slice(routeStart, routeEnd)
-
-    expect(setupBlock).toContain('applyRequestLongformBattleContext(')
-    expect(source).toContain('req.body?.longform_battle_context')
-    expect(source).toContain('const longformBattleContext = compactGenerationRequestOverride(req.body.longform_battle_context)')
-    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, longform_battle_context: longformBattleContext }')
-  })
-
-  test('applies next batch brief override from generate-prose requests', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const routeEnd = source.indexOf("const prevChapters = chapters", routeStart)
-    const setupBlock = source.slice(routeStart, routeEnd)
-
-    expect(setupBlock).toContain('applyRequestNextBatchBrief(')
-    expect(source).toContain('req.body?.next_batch_brief')
-    expect(source).toContain('const nextBatchBrief = compactGenerationRequestOverride(req.body.next_batch_brief)')
-    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, next_batch_brief: nextBatchBrief }')
-  })
-
-  test('applies chapter launch gate override from generate-prose requests', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const routeEnd = source.indexOf("const prevChapters = chapters", routeStart)
-    const setupBlock = source.slice(routeStart, routeEnd)
-
-    expect(setupBlock).toContain('applyRequestChapterLaunchGate(')
-    expect(source).toContain('req.body?.chapter_launch_gate')
-    expect(source).toContain('const chapterLaunchGate = compactGenerationRequestOverride(req.body.chapter_launch_gate)')
-    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, chapter_launch_gate: chapterLaunchGate }')
-  })
-
-  test('blocks standalone prose generation on hard chapter launch gate before draft', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const blockerStart = source.indexOf('const launchGateBlocker = getChapterLaunchGateBlocker', routeStart)
-    const sceneCardsStart = source.indexOf("markStage('scene_cards'", routeStart)
-    const draftStart = source.indexOf("markStage('draft'", routeStart)
-    const blockerBlock = source.slice(blockerStart, sceneCardsStart)
-
-    expect(blockerStart).toBeGreaterThan(routeStart)
-    expect(blockerStart).toBeLessThan(sceneCardsStart)
-    expect(blockerStart).toBeLessThan(draftStart)
-    expect(blockerBlock).toContain('standaloneChapterLaunchGateFromContext(contextPackage, chapter)')
-    expect(blockerBlock).toContain("error_code: 'PROSE_LAUNCH_GATE_BLOCKED'")
-    expect(blockerBlock).toContain('appendNovelRun')
-  })
-
-  test('applies safe batch preflight override from generate-prose requests', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const routeEnd = source.indexOf("const prevChapters = chapters", routeStart)
-    const setupBlock = source.slice(routeStart, routeEnd)
-
-    expect(setupBlock).toContain('applyRequestBatchPreflight(')
-    expect(source).toContain('req.body?.batch_preflight || req.body?.batchPreflight')
-    expect(source).toContain('const deliveryRiskCarryOver = compactGenerationRequestOverride(batchPreflight?.delivery_risk_carry_over')
-    expect(source).toContain('const chapterHandoffContract = compactGenerationRequestOverride(batchPreflight?.chapter_handoff_contract')
-    expect(source).toContain('const previousHandoff = chapterHandoffContract?.previous_handoff')
-    expect(source).toContain('const compactBatchPreflight = compactGenerationRequestOverride(batchPreflight)')
-    expect(source).toContain('batch_preflight: compactBatchPreflight')
-    expect(source).toContain('delivery_risk_carry_over: deliveryRiskCarryOver')
-    expect(source).toContain('chapter_handoff_contract: chapterHandoffContract')
-    expect(source).toContain('previous_handoff: previousHandoff')
   })
 
   test('normalizes camelCase safe batch preflight into chapter target prompt context', () => {
@@ -797,166 +615,6 @@ describe('novel generate prose route source guards', () => {
       delivery_risk_carry_over: { items: ['章末翻页问题未闭环'] },
       previous_handoff: '第7章最后一幕：阵盘亮起第二道裂纹。',
     })
-  })
-
-  test('applies million word runway override from generate-prose requests', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const routeEnd = source.indexOf("const prevChapters = chapters", routeStart)
-    const setupBlock = source.slice(routeStart, routeEnd)
-
-    expect(setupBlock).toContain('applyRequestMillionWordRunway(')
-    expect(source).toContain('req.body?.million_word_runway')
-    expect(source).toContain('const millionWordRunway = compactGenerationRequestOverride(req.body.million_word_runway)')
-    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, million_word_runway: millionWordRunway }')
-  })
-
-  test('runs commercial editor rewrite after word-target expansion and before self-review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const firstWordTarget = source.indexOf('const wordTargetCheck = await ctx.ensureProseMeetsWordTarget', routeStart)
-    const editorStart = source.indexOf('ctx.runCommercialEditorRewrite(', routeStart)
-    const reviewStart = source.indexOf("markStage('review'", routeStart)
-    const contextTypeStart = source.indexOf('type GenerationRoutesContext =')
-    const contextTypeEnd = source.indexOf('function buildTextDiffSummary', contextTypeStart)
-    const contextTypeBlock = source.slice(contextTypeStart, contextTypeEnd)
-
-    expect(routeStart).toBeGreaterThanOrEqual(0)
-    expect(firstWordTarget).toBeGreaterThan(routeStart)
-    expect(editorStart).toBeGreaterThan(firstWordTarget)
-    expect(editorStart).toBeLessThan(reviewStart)
-    expect(contextTypeBlock).toContain('runCommercialEditorRewrite:')
-  })
-
-  test('standalone prose route rejects tiny editor or self-review final_text before replacing full prose', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const editorStart = source.indexOf('editorRewrite = await ctx.runCommercialEditorRewrite', routeStart)
-    const selfReviewStart = source.indexOf('selfCheck = await ctx.runProseSelfReviewAndRevision', editorStart)
-    const editorBlock = source.slice(editorStart, selfReviewStart)
-    const selfReviewBlock = source.slice(selfReviewStart, source.indexOf('markStage(', selfReviewStart + 1))
-
-    expect(editorBlock).toContain('selectUsableRevisionText(finalText, editorRewrite)')
-    expect(editorBlock).not.toContain('finalText = editorRewrite.final_text || finalText')
-    expect(selfReviewBlock).toContain('selectUsableRevisionText(finalText, selfCheck)')
-    expect(selfReviewBlock).not.toContain('finalText = selfCheck.final_text || finalText')
-  })
-
-  test('standalone prose route blocks storage when oh-story quality gate still fails', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const qualityGateStart = source.indexOf('let qualityGateDecision = getQualityGateDecision', routeStart)
-    const storeStart = source.indexOf("markStage('store'", routeStart)
-    const qualityGateBlock = source.slice(qualityGateStart, storeStart)
-
-    expect(qualityGateStart).toBeGreaterThan(routeStart)
-    expect(qualityGateStart).toBeLessThan(storeStart)
-    expect(source).toContain('const autoRepairQualityGate = req.body?.auto_repair_quality_gate === true || req.body?.quality_gate_repair === true')
-    expect(qualityGateBlock).toContain('autoRepairQualityGate')
-    expect(qualityGateBlock).toContain('const qualityRepair = await ctx.runProseSelfReviewAndRevision')
-    expect(qualityGateBlock).toContain("error_code: 'PROSE_QUALITY_GATE_BLOCKED'")
-    expect(qualityGateBlock).toContain('quality_gate: qualityGateDecision')
-    expect(qualityGateBlock).toContain('appendNovelRun')
-  })
-
-  test('standalone prose route treats quality_gate_repair as an auto repair alias', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const reviewStart = source.indexOf("markStage('review', '执行章节自检'", routeStart)
-    const qualityGateStart = source.indexOf('let qualityGateDecision = getQualityGateDecision', reviewStart)
-    const storeStart = source.indexOf("markStage('store'", qualityGateStart)
-    const routeBlock = source.slice(routeStart, storeStart)
-    const qualityGateBlock = source.slice(qualityGateStart, storeStart)
-
-    expect(routeStart).toBeGreaterThanOrEqual(0)
-    expect(routeBlock).toContain('const autoRepairQualityGate = req.body?.auto_repair_quality_gate === true || req.body?.quality_gate_repair === true')
-    expect(routeBlock).not.toContain('req.body?.auto_repair_quality_gate === true ?')
-    expect(qualityGateBlock).toContain('if (!qualityGateDecision.passed && autoRepairQualityGate)')
-  })
-
-  test('standalone prose route rechecks the revised text after quality-gate auto repair', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const qualityGateStart = source.indexOf('let qualityGateDecision = getQualityGateDecision', routeStart)
-    const storeStart = source.indexOf("markStage('store'", routeStart)
-    const qualityGateBlock = source.slice(qualityGateStart, storeStart)
-    const repairStart = qualityGateBlock.indexOf('const qualityRepair = await ctx.runProseSelfReviewAndRevision')
-    const recheckStart = qualityGateBlock.indexOf('const qualityRepairRecheck = await ctx.runProseSelfReviewAndRevision')
-    const finalDecisionStart = qualityGateBlock.indexOf('qualityGateDecision = getQualityGateDecision', recheckStart)
-
-    expect(repairStart).toBeGreaterThanOrEqual(0)
-    expect(recheckStart).toBeGreaterThan(repairStart)
-    expect(finalDecisionStart).toBeGreaterThan(recheckStart)
-    expect(qualityGateBlock).toContain('revise: false')
-    expect(qualityGateBlock).toContain('quality_gate_repair: true')
-    expect(qualityGateBlock).toContain('quality_recheck')
-  })
-
-  test('standalone prose route normalizes deterministic language fragments before quality gate repair', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const reviewStart = source.indexOf("markStage('review', '执行章节自检'", routeStart)
-    const qualityGateStart = source.indexOf('let qualityGateDecision = getQualityGateDecision', reviewStart)
-    const block = source.slice(reviewStart, qualityGateStart)
-
-    expect(routeStart).toBeGreaterThanOrEqual(0)
-    expect(reviewStart).toBeGreaterThan(routeStart)
-    expect(qualityGateStart).toBeGreaterThan(reviewStart)
-    expect(source).toContain('normalizeDeterministicProseLanguageFragments')
-    expect(block).toContain('const languageNormalization = normalizeDeterministicProseLanguageFragments(finalText)')
-    expect(block).toContain("phase: 'deterministic_language_normalize'")
-  })
-
-  test('standalone prose route defers full structured review fill until final revised text', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const selfReviewStart = source.indexOf('selfCheck = await ctx.runProseSelfReviewAndRevision', routeStart)
-    const postReviewWordTargetStart = source.indexOf('const postReviewWordTargetCheck = await ctx.ensureProseMeetsWordTarget', selfReviewStart)
-    const qualityGateStart = source.indexOf('let qualityGateDecision = getQualityGateDecision', postReviewWordTargetStart)
-    const selfReviewBlock = source.slice(selfReviewStart, postReviewWordTargetStart)
-    const finalRecheckBlock = source.slice(postReviewWordTargetStart, qualityGateStart)
-
-    expect(selfReviewStart).toBeGreaterThan(routeStart)
-    expect(selfReviewBlock).toContain('fill_missing_structured_checks: false')
-    expect(finalRecheckBlock).toContain('const finalQualityRecheck = await ctx.runProseSelfReviewAndRevision')
-    expect(finalRecheckBlock).toContain('revise: false')
-    expect(finalRecheckBlock).toContain('quality_gate_repair: true')
-    expect(finalRecheckBlock).not.toContain('fill_missing_structured_checks: false')
-  })
-
-  test('stores runtime diagnostics when the prose draft model returns no chapter text', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const failureStart = source.indexOf("String((result as any).error || (result as any).fallbackReason || '模型未返回正文')")
-    const nextStage = source.indexOf("let selfCheck", failureStart)
-    const failureBlock = source.slice(failureStart, nextStage)
-
-    expect(failureStart).toBeGreaterThanOrEqual(0)
-    expect(failureBlock).toContain('result_error')
-    expect(failureBlock).toContain('runtime_selection')
-    expect(failureBlock).toContain('llm_diagnostics')
-  })
-
-  test('uses plain prose fallback before failing an otherwise non-json draft response', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const draftStart = source.indexOf('const resultPayload = getNovelPayload(result)', routeStart)
-    const failureStart = source.indexOf("if (!chapterText)", draftStart)
-    const draftBlock = source.slice(draftStart, failureStart)
-
-    expect(draftBlock).toContain('extractPlainProseFallback(result, 800)')
-    expect(draftBlock).toContain('|| plainProseFallback')
-  })
-
-  test('does not fail draft generation solely because a recovered result still has an error field', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
-    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
-    const draftStart = source.indexOf('const resultPayload = getNovelPayload(result)', routeStart)
-    const failureStart = source.indexOf('const resultError = String(', draftStart)
-    const failureBlock = source.slice(draftStart, failureStart)
-
-    expect(failureBlock).toContain('const chapterText =')
-    expect(failureBlock).toContain('if (!chapterText)')
-    expect(failureBlock).not.toContain('(result as any).error || !chapterText')
   })
 
   test('stores LLM diagnostics when standalone scene-card generation returns no cards', () => {

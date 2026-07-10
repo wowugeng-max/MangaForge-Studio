@@ -2,8 +2,6 @@ import type { Express } from 'express'
 import {
   appendNovelRun,
   createNovelChapter,
-  createNovelReview,
-  listChapterVersions,
   listNovelCharacters,
   listNovelChapters,
   listNovelOutlines,
@@ -13,16 +11,9 @@ import {
   updateNovelChapter,
   updateNovelRun,
 } from '../novel'
-import { generateNovelChapterProse } from '../llm'
 import { buildMaterialScore } from './novel-chapter-context-routes'
-import { asArray, buildLLMResultDiagnostics, compactPreviousChaptersForProse, extractPlainProseFallback, formatReviewIssueForStorage, getNovelPayload, getQualityGateDecision, normalizeSceneProduction, parseJsonLikePayload, safeJsonStringify } from './novel-route-utils'
-import { applyChapterWordTargetToContext, countProseChars, normalizeDeliveryRiskReceipts, proseMaxTokensForWordTarget, resolveChapterWordTarget } from './novel-writing-service'
-import { getChapterLaunchGateBlocker, selectUsableRevisionText } from '../novel-writing/prose-quality-contracts'
-import {
-  normalizeDeterministicProseLanguageFragments,
-  resolveProseLanguageRiskReview,
-  stripProseEngineeringAppendix,
-} from '../novel-writing/prose-format'
+import { asArray, buildLLMResultDiagnostics, getNovelPayload, normalizeSceneProduction, parseJsonLikePayload, safeJsonStringify } from './novel-route-utils'
+import { applyChapterWordTargetToContext, countProseChars, normalizeDeliveryRiskReceipts, resolveChapterWordTarget } from './novel-writing-service'
 import { compactProseGenerationOverride } from '../novel-writing/prose-generation-contract'
 
 export function stringifyNovelGenerationPayload(value: any) {
@@ -316,7 +307,7 @@ type GenerationRoutesContext = {
   updateChapterStages: (stages: any[], key: string, patch?: any) => any[]
   classifyGenerationFailure: (error: any) => any
   executeChapterGroupRunRecord: (workspace: string, project: any, run: any, options?: any) => Promise<any>
-  generateChapterForGroup?: (workspace: string, projectId: number, chapterId: number, options?: any) => Promise<any>
+  generateChapterForGroup: (workspace: string, projectId: number, chapterId: number, options?: any) => Promise<any>
   buildPipelineSteps: () => any[]
   updatePipelineStep: (steps: any[], key: string, patch: any) => any[]
   buildChapterContextPackage: (
@@ -329,26 +320,7 @@ type GenerationRoutesContext = {
     outlines: any[],
     reviews: any[],
   ) => Promise<any>
-  autoRepairChapterPreflightGaps?: (
-    workspace: string,
-    project: any,
-    chapter: any,
-    contextPackage: any,
-    modelId?: number,
-    options?: any,
-  ) => Promise<any>
   generateSceneCardsForChapter: (workspace: string, project: any, contextPackage: any, modelId?: number) => Promise<any>
-  getReferenceMigrationPlanForChapter: (workspace: string, project: any, chapter: any) => Promise<any>
-  buildParagraphProseContext: (project: any, contextPackage: any, migrationPlan?: any, chapterDraft?: any) => string[]
-  getStageModelId: (project: any, stage: string, preferredModelId?: number) => number | undefined
-  runCommercialEditorRewrite: (workspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options?: any) => Promise<any>
-  runProseSelfReviewAndRevision: (workspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options?: any) => Promise<any>
-  ensureProseMeetsWordTarget: (workspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options?: any) => Promise<any>
-  buildReferenceUsageReport: (workspace: string, project: any, taskType: string, generatedText?: string) => Promise<any>
-  getReferenceSafetyDecision: (project: any, referenceReport: any) => any
-  explainReferenceSafety: (referenceReport: any, safetyDecision: any) => any
-  buildMigrationAudit: (project: any, referenceReport: any, safetyExplanation: any) => any
-  updateStoryStateMachine: (workspace: string, project: any, chapter: any, contextPackage: any, chapterText: string, modelId?: number) => Promise<any>
   ensureChapterPlanningForRange?: (workspace: string, project: any, options: any) => Promise<any>
 }
 
@@ -551,17 +523,19 @@ function standaloneProseServiceErrorStatus(error: any) {
   return 500
 }
 
-function standaloneProseServiceApprovals(approvals: any = {}) {
-  const sceneCardApproval = approvals?.scene_cards && typeof approvals.scene_cards === 'object'
-    ? approvals.scene_cards
-    : {}
+export function buildStandaloneProseServiceOptions(body: any = {}, runtime: {
+  modelId?: number
+  autoRepairQualityGate: boolean
+  onStage: (key: string, payload?: any) => Promise<void>
+  abortSignal: AbortSignal
+}) {
   return {
-    ...(approvals || {}),
-    scene_cards: {
-      ...sceneCardApproval,
-      approved: true,
-      source: sceneCardApproval.source || 'standalone_generate_prose',
-    },
+    ...(body || {}),
+    ...(runtime.modelId ? { model_id: runtime.modelId } : {}),
+    auto_repair_quality_gate: runtime.autoRepairQualityGate,
+    approvals: body?.approvals || {},
+    onStage: runtime.onStage,
+    abortSignal: runtime.abortSignal,
   }
 }
 
@@ -1438,7 +1412,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const project = await ctx.getProject(activeWorkspace, projectId)
       if (!project) return res.status(404).json({ error: 'project not found' })
       const configSnapshot = ctx.buildAgentConfigSnapshot(project, modelId)
-      if (ctx.generateChapterForGroup) {
+      {
         const pipeline: any[] = []
         const markServiceStage = async (key: string, payload: any = {}) => {
           const normalizedPayload = payload && typeof payload === 'object' ? payload : { detail: payload }
@@ -1460,8 +1434,6 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
           res.setHeader('Cache-Control', 'no-cache, no-transform')
           res.setHeader('Connection', 'keep-alive')
         }
-        // Standalone prose generation auto-confirms only scene_cards: { approved: true }.
-        const serviceApprovals = standaloneProseServiceApprovals(req.body?.approvals)
         const abortController = new AbortController()
         let standaloneProseCompleted = false
         const abortStandaloneProseGeneration = () => {
@@ -1510,14 +1482,13 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         req.socket?.on('close', abortStandaloneProseGeneration)
         res.socket?.on('close', abortStandaloneProseGeneration)
         try {
-          const serviceResult = await ctx.generateChapterForGroup(activeWorkspace, projectId, chapterId, {
-            ...(req.body || {}),
-            ...(modelId ? { model_id: modelId } : {}),
-            auto_repair_quality_gate: autoRepairQualityGate,
-            approvals: serviceApprovals,
+          const serviceOptions = buildStandaloneProseServiceOptions(req.body, {
+            modelId,
+            autoRepairQualityGate,
             onStage: markServiceStage,
             abortSignal: abortController.signal,
           })
+          const serviceResult = await ctx.generateChapterForGroup(activeWorkspace, projectId, chapterId, serviceOptions)
           standaloneProseCompleted = true
           cleanupStandaloneProseAbortListeners()
           const updated = serviceResult?.chapter || null
@@ -1577,572 +1548,6 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
           return res.status(status).json(errorPayload)
         }
       }
-      let chapters = await listNovelChapters(activeWorkspace, projectId)
-      let chapter = chapters.find(item => item.id === chapterId)
-      if (!chapter) return res.status(404).json({ error: 'chapter not found' })
-      let [worldbuilding, characters, outlines, reviews] = await Promise.all([listNovelWorldbuilding(activeWorkspace, projectId), listNovelCharacters(activeWorkspace, projectId), listNovelOutlines(activeWorkspace, projectId), listNovelReviews(activeWorkspace, projectId)])
-      const pipeline: any[] = []
-      const markStage = (key: string, label: string, status: string, detail = '', extra: any = {}) => {
-        const stage = { key, label, status, detail, at: new Date().toISOString(), ...extra }
-        pipeline.push(stage)
-        if (wantsStream && !res.writableEnded) {
-          res.write(sseData({ type: 'progress', progress: label, pipeline, stage }))
-        }
-        return stage
-      }
-      if (wantsStream) {
-        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
-        res.setHeader('Cache-Control', 'no-cache, no-transform')
-        res.setHeader('Connection', 'keep-alive')
-      }
-      markStage('context', '构建续写上下文包', 'running')
-      let wordTarget = resolveChapterWordTarget(project, chapter, req.body || {})
-      let contextPackage = applyChapterWordTargetToContext(
-        await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews),
-        wordTarget,
-      )
-      contextPackage = applyRequestLongformCompass(contextPackage, req)
-      contextPackage = applyRequestLongformBattleContext(contextPackage, req)
-      contextPackage = applyRequestNextBatchBrief(contextPackage, req)
-      contextPackage = applyRequestChapterLaunchGate(contextPackage, req)
-      contextPackage = applyRequestBatchPreflight(contextPackage, req)
-      contextPackage = applyRequestMillionWordRunway(contextPackage, req)
-      markStage(
-        'context',
-        contextPackage.preflight.ready ? '续写上下文包已就绪' : '续写上下文包存在缺口',
-        contextPackage.preflight.ready ? 'success' : 'warn',
-        contextPackage.preflight.warnings.join('；'),
-        { context_package: contextPackage },
-      )
-      if (!contextPackage.preflight.ready && ctx.autoRepairChapterPreflightGaps) {
-        markStage('material_repair', '自动补齐写作前置材料', 'running', contextPackage.preflight.warnings.join('；'))
-        const repairResult = await ctx.autoRepairChapterPreflightGaps(activeWorkspace, project, chapter, contextPackage, modelId)
-        chapters = await listNovelChapters(activeWorkspace, projectId)
-        chapter = chapters.find(item => item.id === chapterId) || chapter
-        const repairedMaterials = await Promise.all([
-          listNovelWorldbuilding(activeWorkspace, projectId),
-          listNovelCharacters(activeWorkspace, projectId),
-          listNovelOutlines(activeWorkspace, projectId),
-          listNovelReviews(activeWorkspace, projectId),
-        ])
-        worldbuilding = repairedMaterials[0]
-        characters = repairedMaterials[1]
-        outlines = repairedMaterials[2]
-        reviews = repairedMaterials[3]
-        wordTarget = resolveChapterWordTarget(project, chapter, req.body || {})
-        contextPackage = applyChapterWordTargetToContext(
-          await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews),
-          wordTarget,
-        )
-        contextPackage = applyRequestLongformCompass(contextPackage, req)
-        contextPackage = applyRequestLongformBattleContext(contextPackage, req)
-        contextPackage = applyRequestNextBatchBrief(contextPackage, req)
-        contextPackage = applyRequestChapterLaunchGate(contextPackage, req)
-        contextPackage = applyRequestBatchPreflight(contextPackage, req)
-        contextPackage = applyRequestMillionWordRunway(contextPackage, req)
-        markStage(
-          'material_repair',
-          contextPackage.preflight.ready ? '前置材料已自动补齐' : '前置材料自动补齐后仍有缺口',
-          contextPackage.preflight.ready ? 'success' : 'warn',
-          contextPackage.preflight.ready ? '' : contextPackage.preflight.warnings.join('；'),
-          { repair_result: repairResult, context_package: contextPackage },
-        )
-      }
-      if (!contextPackage.preflight.ready && req.body?.allow_incomplete !== true) {
-        const errorPayload = {
-          error: '章节生成前置检查未通过',
-          error_code: 'PROSE_PREFLIGHT_BLOCKED',
-          context_package: contextPackage,
-          config_snapshot: configSnapshot,
-          preflight: contextPackage.preflight,
-          pipeline,
-        }
-        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: stringifyNovelGenerationPayload(req.body), output_ref: stringifyNovelGenerationPayload(errorPayload), error_message: '章节生成前置检查未通过' })
-        if (wantsStream) {
-          res.write(sseData({ type: 'error', ...errorPayload }))
-          res.end()
-          return
-        }
-        return res.status(412).json(errorPayload)
-      }
-      const launchGateBlocker = getChapterLaunchGateBlocker(standaloneChapterLaunchGateFromContext(contextPackage, chapter))
-      if (launchGateBlocker && req.body?.allow_incomplete !== true) {
-        const errorPayload = {
-          error: `开写门禁未通过：${launchGateBlocker.summary}`,
-          error_code: 'PROSE_LAUNCH_GATE_BLOCKED',
-          launch_gate_blocker: launchGateBlocker,
-          context_package: contextPackage,
-          config_snapshot: configSnapshot,
-          preflight: contextPackage.preflight,
-          pipeline,
-        }
-        markStage('context', '开写门禁未通过', 'failed', launchGateBlocker.summary, { launch_gate_blocker: launchGateBlocker })
-        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: stringifyNovelGenerationPayload(req.body), output_ref: stringifyNovelGenerationPayload(errorPayload), error_message: errorPayload.error })
-        if (wantsStream) {
-          res.write(sseData({ type: 'error', ...errorPayload }))
-          res.end()
-          return
-        }
-        return res.status(412).json(errorPayload)
-      }
-
-      if (!contextPackage.chapter_target.scene_cards.length || req.body?.force_scene_cards === true) {
-        markStage('scene_cards', '生成章节场景卡', 'running')
-        try {
-          const sceneResult = await ctx.generateSceneCardsForChapter(activeWorkspace, project, contextPackage, modelId)
-          if (sceneResult.sceneCards.length > 0) {
-            const updatedSceneChapter = await updateNovelChapter(activeWorkspace, chapter.id, {
-              scene_breakdown: sceneResult.sceneCards,
-              scene_list: sceneResult.sceneCards,
-              raw_payload: { ...(chapter.raw_payload || {}), scene_cards_source: 'generated' },
-            } as any, { createVersion: false })
-            if (updatedSceneChapter) chapter = updatedSceneChapter
-            chapters = await listNovelChapters(activeWorkspace, projectId)
-            wordTarget = resolveChapterWordTarget(project, chapter, req.body || {})
-            contextPackage = applyChapterWordTargetToContext(
-              await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews),
-              wordTarget,
-            )
-            contextPackage = applyRequestLongformCompass(contextPackage, req)
-            contextPackage = applyRequestLongformBattleContext(contextPackage, req)
-            contextPackage = applyRequestNextBatchBrief(contextPackage, req)
-            contextPackage = applyRequestChapterLaunchGate(contextPackage, req)
-            contextPackage = applyRequestBatchPreflight(contextPackage, req)
-            contextPackage = applyRequestMillionWordRunway(contextPackage, req)
-            markStage('scene_cards', `场景卡已生成：${sceneResult.sceneCards.length} 个`, 'success', '', { scene_cards: sceneResult.sceneCards })
-          } else {
-            markStage('scene_cards', '场景卡生成为空，继续使用章节细纲', 'warn')
-          }
-        } catch (sceneError) {
-          markStage('scene_cards', '场景卡生成失败，继续使用章节细纲', 'warn', String(sceneError).slice(0, 200))
-        }
-      }
-
-      const prevChapters = compactPreviousChaptersForProse(chapters, chapter.chapter_no)
-      markStage('migration_plan', '生成/读取参考迁移计划', 'running')
-      const migrationPlan = await ctx.getReferenceMigrationPlanForChapter(activeWorkspace, project, chapter).catch(error => ({ error: String(error) }))
-      markStage('migration_plan', (migrationPlan as any)?.error ? '参考迁移计划读取失败，继续保守生成' : '参考迁移计划已就绪', (migrationPlan as any)?.error ? 'warn' : 'success', (migrationPlan as any)?.error || '', { migration_plan: migrationPlan })
-      markStage('draft', '段落级正文生成', 'running')
-      const result = await generateNovelChapterProse(project, chapter, {
-        worldbuilding,
-        characters,
-        outline: outlines,
-        prompt: String(req.body.prompt || ''),
-        prevChapters,
-        contextPackage,
-        migrationPlan,
-        paragraphTask: ctx.buildParagraphProseContext(project, contextPackage, migrationPlan, chapter),
-        maxTokens: proseMaxTokensForWordTarget(wordTarget),
-      } as any, activeWorkspace, ctx.getStageModelId(project, 'draft', modelId))
-      const resultPayload = getNovelPayload(result)
-      let targetProse: any = null
-      try {
-        targetProse = selectTargetProsePayload(resultPayload, Number(chapter.chapter_no || 0))
-      } catch (selectionError) {
-        const errorPayload = { error: String(selectionError), error_code: 'PROSE_TARGET_MISMATCH', result, pipeline, context_package: contextPackage, config_snapshot: configSnapshot }
-        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: stringifyNovelGenerationPayload(req.body), output_ref: stringifyNovelGenerationPayload(errorPayload), error_message: String(selectionError) })
-        if (wantsStream) {
-          res.write(sseData({ type: 'error', ...errorPayload }))
-          res.end()
-          return
-        }
-        return res.status(502).json(errorPayload)
-      }
-      const plainProseFallback = extractPlainProseFallback(result, 800)
-      const chapterText = targetProse?.chapter_text || targetProse?.chapterText || resultPayload?.chapter_text || resultPayload?.chapterText || plainProseFallback
-      const sceneBreakdown = targetProse?.scene_breakdown || targetProse?.sceneBreakdown || resultPayload?.scene_breakdown || resultPayload?.sceneBreakdown || []
-      const continuityNotes = targetProse?.continuity_notes || targetProse?.continuityNotes || resultPayload?.continuity_notes || resultPayload?.continuityNotes || []
-      let ohStoryDeliveryReceipts = extractOhStoryDeliveryReceipts(targetProse, resultPayload)
-      if (!chapterText) {
-        const resultError = String((result as any).error || (result as any).fallbackReason || '模型未返回正文')
-        const runtimeDiagnostics = {
-          result_error: resultError,
-          output_source: (result as any).outputSource || '',
-          model_id: (result as any).modelId || (result as any).runtimeSelection?.model?.id,
-          model_name: (result as any).modelName || (result as any).runtimeSelection?.model?.model_name,
-          provider_id: (result as any).providerId || (result as any).runtimeSelection?.provider?.id,
-          runtime_selection: (result as any).runtimeSelection || null,
-          llm_diagnostics: buildLLMResultDiagnostics(result),
-        }
-        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: stringifyNovelGenerationPayload(req.body), output_ref: stringifyNovelGenerationPayload({ ...(resultPayload || {}), ...runtimeDiagnostics, config_snapshot: configSnapshot }), error_message: resultError })
-        const errorPayload = { error: resultError, ...runtimeDiagnostics, result, pipeline, context_package: contextPackage, config_snapshot: configSnapshot }
-        if (wantsStream) {
-          res.write(sseData({ type: 'error', ...errorPayload }))
-          res.end()
-          return
-        }
-        return res.status(502).json(errorPayload)
-      }
-      let selfCheck: any = null
-      let editorRewrite: any = null
-      let finalText = String(chapterText || '')
-      let finalSceneBreakdown = sceneBreakdown
-      let finalContinuityNotes = continuityNotes
-      const draftAppendixStrip = stripProseEngineeringAppendix(finalText)
-      if (draftAppendixStrip.changed) {
-        finalText = draftAppendixStrip.text
-      }
-      markStage('draft', '章节初稿已生成', 'success', `${countProseChars(finalText)} 字`)
-      markStage('word_target', '核对章节字数目标', 'running', `当前 ${countProseChars(finalText)} 字 / 目标 ${wordTarget.target} 字`)
-      try {
-        const wordTargetCheck = await ctx.ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, modelId)
-        finalText = wordTargetCheck.final_text || finalText
-        if (wordTargetCheck.expanded && wordTargetCheck.expansion) {
-          finalSceneBreakdown = wordTargetCheck.expansion.scene_breakdown?.length ? wordTargetCheck.expansion.scene_breakdown : finalSceneBreakdown
-          finalContinuityNotes = wordTargetCheck.expansion.continuity_notes?.length ? wordTargetCheck.expansion.continuity_notes : finalContinuityNotes
-        }
-        markStage(
-          'word_target',
-          wordTargetCheck.expanded ? '正文已按字数目标扩写' : '正文达到字数目标',
-          'success',
-          `当前 ${countProseChars(finalText)} 字 / 目标 ${wordTarget.target} 字`,
-          { word_target_check: wordTargetCheck },
-        )
-      } catch (wordTargetError: any) {
-        const errorPayload = {
-          error: String(wordTargetError?.message || wordTargetError || '章节正文低于字数下限'),
-          error_code: wordTargetError?.code || 'PROSE_WORD_TARGET_SHORT',
-          word_target: wordTargetError?.word_target || wordTarget,
-          word_target_check: {
-            evaluation: wordTargetError?.evaluation,
-            final_evaluation: wordTargetError?.final_evaluation,
-            expansion_attempts: wordTargetError?.expansion_attempts,
-          },
-          pipeline,
-          context_package: contextPackage,
-          config_snapshot: configSnapshot,
-        }
-        markStage('word_target', '章节正文低于字数下限', 'failed', errorPayload.error, { word_target_check: errorPayload.word_target_check })
-        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: stringifyNovelGenerationPayload(req.body), output_ref: stringifyNovelGenerationPayload(errorPayload), error_message: errorPayload.error })
-        if (wantsStream) {
-          res.write(sseData({ type: 'error', ...errorPayload }))
-          res.end()
-          return
-        }
-        return res.status(502).json(errorPayload)
-      }
-      markStage('editor', '商业主编改稿', 'running')
-      try {
-        editorRewrite = await ctx.runCommercialEditorRewrite(activeWorkspace, project, contextPackage, finalText, modelId)
-        const editorRevisionSelection = selectUsableRevisionText(finalText, editorRewrite)
-        finalText = editorRevisionSelection.text
-        if (!editorRevisionSelection.accepted && editorRevisionSelection.reason) {
-          editorRewrite = { ...editorRewrite, final_text_rejected: true, rejected_final_text_reason: editorRevisionSelection.reason }
-        }
-        if (editorRevisionSelection.accepted && editorRewrite.edited && editorRewrite.revision) {
-          finalSceneBreakdown = editorRewrite.revision.scene_breakdown?.length ? editorRewrite.revision.scene_breakdown : finalSceneBreakdown
-          finalContinuityNotes = editorRewrite.revision.continuity_notes?.length ? editorRewrite.revision.continuity_notes : finalContinuityNotes
-        }
-        markStage(
-          'editor',
-          editorRewrite.edited ? '商业主编改稿已应用' : '商业主编改稿无可用修订',
-          editorRewrite.edited ? 'success' : 'warn',
-          `${countProseChars(finalText)} 字`,
-          { editor_rewrite: editorRewrite },
-        )
-      } catch (editorError) {
-        editorRewrite = { error: String(editorError), edited: false }
-        markStage('editor', '商业主编改稿失败，保留当前稿', 'warn', String(editorError).slice(0, 200), { editor_rewrite: editorRewrite })
-      }
-      try {
-        const postEditorWordTargetCheck = await ctx.ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, modelId)
-        finalText = postEditorWordTargetCheck.final_text || finalText
-        if (postEditorWordTargetCheck.expanded && postEditorWordTargetCheck.expansion) {
-          finalSceneBreakdown = postEditorWordTargetCheck.expansion.scene_breakdown?.length ? postEditorWordTargetCheck.expansion.scene_breakdown : finalSceneBreakdown
-          finalContinuityNotes = postEditorWordTargetCheck.expansion.continuity_notes?.length ? postEditorWordTargetCheck.expansion.continuity_notes : finalContinuityNotes
-          markStage('word_target', '主编改稿后正文已重新补足字数', 'success', `当前 ${countProseChars(finalText)} 字 / 目标 ${wordTarget.target} 字`, { word_target_check: postEditorWordTargetCheck, phase: 'post_editor' })
-        }
-      } catch (wordTargetError: any) {
-        const errorPayload = {
-          error: String(wordTargetError?.message || wordTargetError || '章节正文低于字数下限'),
-          error_code: wordTargetError?.code || 'PROSE_WORD_TARGET_SHORT',
-          word_target: wordTargetError?.word_target || wordTarget,
-          word_target_check: {
-            evaluation: wordTargetError?.evaluation,
-            final_evaluation: wordTargetError?.final_evaluation,
-            expansion_attempts: wordTargetError?.expansion_attempts,
-            phase: 'post_editor',
-          },
-          pipeline,
-          context_package: contextPackage,
-          editor_rewrite: editorRewrite,
-          config_snapshot: configSnapshot,
-        }
-        markStage('word_target', '主编改稿后正文低于字数下限', 'failed', errorPayload.error, { word_target_check: errorPayload.word_target_check })
-        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: stringifyNovelGenerationPayload(req.body), output_ref: stringifyNovelGenerationPayload(errorPayload), error_message: errorPayload.error })
-        if (wantsStream) {
-          res.write(sseData({ type: 'error', ...errorPayload }))
-          res.end()
-          return
-        }
-        return res.status(502).json(errorPayload)
-      }
-      markStage('review', '执行章节自检', 'running')
-      try {
-        selfCheck = await ctx.runProseSelfReviewAndRevision(activeWorkspace, project, contextPackage, finalText, modelId, {
-          ...(autoRepairQualityGate ? { fill_missing_structured_checks: false } : {}),
-        })
-        const selfCheckRevisionSelection = selectUsableRevisionText(finalText, selfCheck)
-        finalText = selfCheckRevisionSelection.text
-        if (!selfCheckRevisionSelection.accepted && selfCheckRevisionSelection.reason) {
-          selfCheck = { ...selfCheck, final_text_rejected: true, rejected_final_text_reason: selfCheckRevisionSelection.reason }
-        }
-        if (selfCheckRevisionSelection.accepted && selfCheck.revised && selfCheck.revision) {
-          finalSceneBreakdown = selfCheck.revision.scene_breakdown?.length ? selfCheck.revision.scene_breakdown : finalSceneBreakdown
-          finalContinuityNotes = selfCheck.revision.continuity_notes?.length ? selfCheck.revision.continuity_notes : finalContinuityNotes
-        }
-        markStage(
-          'review',
-          selfCheck.revised && selfCheckRevisionSelection.accepted ? '自检完成，已应用修订稿' : '自检完成，初稿可用',
-          selfCheck.review?.passed === false ? 'warn' : 'success',
-          `评分 ${selfCheck.review?.score ?? '-'}`,
-          { self_check: selfCheck.review, revised: selfCheck.revised },
-        )
-      } catch (reviewError) {
-        selfCheck = { error: String(reviewError), revised: false }
-        markStage('review', '自检失败，保留初稿', 'warn', String(reviewError).slice(0, 200), { self_check: selfCheck })
-      }
-      try {
-        const postReviewWordTargetCheck = await ctx.ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, modelId)
-        finalText = postReviewWordTargetCheck.final_text || finalText
-        if (postReviewWordTargetCheck.expanded && postReviewWordTargetCheck.expansion) {
-          finalSceneBreakdown = postReviewWordTargetCheck.expansion.scene_breakdown?.length ? postReviewWordTargetCheck.expansion.scene_breakdown : finalSceneBreakdown
-          finalContinuityNotes = postReviewWordTargetCheck.expansion.continuity_notes?.length ? postReviewWordTargetCheck.expansion.continuity_notes : finalContinuityNotes
-          markStage('word_target', '自检后正文已重新补足字数', 'success', `当前 ${countProseChars(finalText)} 字 / 目标 ${wordTarget.target} 字`, { word_target_check: postReviewWordTargetCheck })
-        }
-      } catch (wordTargetError: any) {
-        const errorPayload = {
-          error: String(wordTargetError?.message || wordTargetError || '章节正文低于字数下限'),
-          error_code: wordTargetError?.code || 'PROSE_WORD_TARGET_SHORT',
-          word_target: wordTargetError?.word_target || wordTarget,
-          word_target_check: {
-            evaluation: wordTargetError?.evaluation,
-            final_evaluation: wordTargetError?.final_evaluation,
-            expansion_attempts: wordTargetError?.expansion_attempts,
-          },
-          pipeline,
-          context_package: contextPackage,
-          self_check: selfCheck,
-          config_snapshot: configSnapshot,
-        }
-        markStage('word_target', '自检后正文仍低于字数下限', 'failed', errorPayload.error, { word_target_check: errorPayload.word_target_check })
-        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: stringifyNovelGenerationPayload(req.body), output_ref: stringifyNovelGenerationPayload(errorPayload), error_message: errorPayload.error })
-        if (wantsStream) {
-          res.write(sseData({ type: 'error', ...errorPayload }))
-          res.end()
-          return
-        }
-        return res.status(502).json(errorPayload)
-      }
-      const appendixStrip = stripProseEngineeringAppendix(finalText)
-      if (appendixStrip.changed) {
-        finalText = appendixStrip.text
-        markStage('review', '确定性工程附录剥离', 'success', `${appendixStrip.removed_line_count} 行`, {
-          phase: 'deterministic_engineering_appendix_strip',
-        })
-      }
-      if (autoRepairQualityGate && !selfCheck?.error) {
-        markStage('review', '修订后正文质量复检', 'running', '', { phase: 'quality_recheck' })
-        const finalQualityRecheck = await ctx.runProseSelfReviewAndRevision(activeWorkspace, project, contextPackage, finalText, modelId, {
-          revise: false,
-          quality_gate_repair: true,
-        })
-        const finalQualityRecheckSelection = selectUsableRevisionText(finalText, finalQualityRecheck)
-        finalText = finalQualityRecheckSelection.text
-        selfCheck = {
-          ...selfCheck,
-          review: finalQualityRecheck.review,
-          final_text: finalText,
-          initial_review: selfCheck?.review || null,
-          quality_recheck: finalQualityRecheck.review,
-          revised: Boolean(selfCheck?.revised),
-          ...(!finalQualityRecheckSelection.accepted && finalQualityRecheckSelection.reason ? {
-            final_text_recheck_rejected: true,
-            rejected_final_text_recheck_reason: finalQualityRecheckSelection.reason,
-          } : {}),
-        }
-        markStage('review', '修订后正文质量复检完成', 'success', `评分 ${selfCheck.review?.score ?? '-'}`, {
-          phase: 'quality_recheck',
-          self_check: selfCheck.review,
-        })
-      }
-      const languageNormalization = normalizeDeterministicProseLanguageFragments(finalText)
-      if (languageNormalization.changed) {
-        finalText = languageNormalization.text
-        if (selfCheck?.review) {
-          selfCheck = {
-            ...selfCheck,
-            review: resolveProseLanguageRiskReview(selfCheck.review, finalText),
-          }
-        }
-        markStage('review', '确定性语言碎片清理', 'success', `${languageNormalization.change_count} 处`, {
-          phase: 'deterministic_language_normalize',
-          language_rules: languageNormalization.rules,
-        })
-      }
-      let qualityGateDecision = getQualityGateDecision(project, { ...(selfCheck?.review || {}), revised: Boolean(selfCheck?.revised) })
-      if (!qualityGateDecision.passed && autoRepairQualityGate) {
-        markStage('quality_repair', '质量门禁自动修复', 'running', qualityGateDecision.reasons.join('；'), { quality_gate: qualityGateDecision })
-        try {
-          const qualityRepair = await ctx.runProseSelfReviewAndRevision(activeWorkspace, project, contextPackage, finalText, modelId, {
-            fill_missing_structured_checks: false,
-          })
-          const qualityRepairSelection = selectUsableRevisionText(finalText, qualityRepair)
-          finalText = qualityRepairSelection.text
-          selfCheck = {
-            ...qualityRepair,
-            quality_repair_attempted: true,
-            previous_review: selfCheck?.review || null,
-            ...(!qualityRepairSelection.accepted && qualityRepairSelection.reason ? {
-              final_text_rejected: true,
-              rejected_final_text_reason: qualityRepairSelection.reason,
-            } : {}),
-          }
-          if (qualityRepairSelection.accepted && qualityRepair.revised && qualityRepair.revision) {
-            finalSceneBreakdown = qualityRepair.revision.scene_breakdown?.length ? qualityRepair.revision.scene_breakdown : finalSceneBreakdown
-            finalContinuityNotes = qualityRepair.revision.continuity_notes?.length ? qualityRepair.revision.continuity_notes : finalContinuityNotes
-          }
-          const postQualityRepairWordTargetCheck = await ctx.ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, modelId)
-          finalText = postQualityRepairWordTargetCheck.final_text || finalText
-          const qualityRepairRecheck = await ctx.runProseSelfReviewAndRevision(activeWorkspace, project, contextPackage, finalText, modelId, {
-            revise: false,
-            quality_gate_repair: true,
-          })
-          const qualityRepairRecheckSelection = selectUsableRevisionText(finalText, qualityRepairRecheck)
-          finalText = qualityRepairRecheckSelection.text
-          selfCheck = {
-            ...selfCheck,
-            review: qualityRepairRecheck.review,
-            final_text: finalText,
-            quality_recheck: qualityRepairRecheck.review,
-            revised: Boolean(selfCheck?.revised),
-            ...(!qualityRepairRecheckSelection.accepted && qualityRepairRecheckSelection.reason ? {
-              final_text_recheck_rejected: true,
-              rejected_final_text_recheck_reason: qualityRepairRecheckSelection.reason,
-            } : {}),
-          }
-          qualityGateDecision = getQualityGateDecision(project, { ...(selfCheck?.review || {}), revised: Boolean(selfCheck?.revised) })
-          markStage('review', '质量门禁修复后复检完成', qualityGateDecision.passed ? 'success' : 'warn', qualityGateDecision.reasons.join('；'), {
-            quality_gate: qualityGateDecision,
-            self_check: selfCheck?.review,
-            phase: 'quality_recheck',
-          })
-          markStage(
-            'quality_repair',
-            qualityGateDecision.passed ? '质量门禁自动修复通过' : '质量门禁自动修复后仍未通过',
-            qualityGateDecision.passed ? 'success' : 'warn',
-            qualityGateDecision.reasons.join('；'),
-            { quality_gate: qualityGateDecision, self_check: selfCheck?.review, word_target_check: postQualityRepairWordTargetCheck },
-          )
-        } catch (qualityRepairError) {
-          markStage('quality_repair', '质量门禁自动修复失败', 'warn', String(qualityRepairError).slice(0, 200), { quality_gate: qualityGateDecision })
-        }
-      }
-      ohStoryDeliveryReceipts = refreshOhStoryDeliveryReceiptsAfterRevision(ohStoryDeliveryReceipts, selfCheck, finalText, finalSceneBreakdown, contextPackage)
-
-      try {
-        const review = selfCheck?.review || {}
-        await createNovelReview(activeWorkspace, {
-          project_id: projectId,
-          review_type: 'prose_quality',
-          status: qualityGateDecision.passed ? 'ok' : 'warn',
-          summary: `章节自检评分 ${review.score ?? '-'}${selfCheck?.revised ? '，已生成修订稿' : ''}`,
-          issues: Array.isArray(review.issues) ? review.issues.map(formatReviewIssueForStorage) : [],
-          payload: stringifyNovelGenerationPayload({ chapter_id: chapter.id, context_package: contextPackage, editor_rewrite: editorRewrite, self_check: selfCheck, quality_gate: qualityGateDecision, pipeline, config_snapshot: configSnapshot }),
-        })
-      } catch (reviewStoreError) {
-        console.warn('[prose-quality] Failed to store review:', String(reviewStoreError).slice(0, 200))
-      }
-      if (!qualityGateDecision.passed && req.body?.allow_incomplete !== true) {
-        const errorPayload = {
-          error: '章节质量门禁未通过，正文未入库',
-          error_code: 'PROSE_QUALITY_GATE_BLOCKED',
-          quality_gate: qualityGateDecision,
-          context_package: contextPackage,
-          self_check: selfCheck,
-          editor_rewrite: editorRewrite,
-          pipeline,
-          config_snapshot: configSnapshot,
-        }
-        markStage('review', '章节质量门禁未通过', 'failed', qualityGateDecision.reasons.join('；'), { quality_gate: qualityGateDecision })
-        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: stringifyNovelGenerationPayload(req.body), output_ref: stringifyNovelGenerationPayload(errorPayload), error_message: errorPayload.error })
-        if (wantsStream) {
-          res.write(sseData({ type: 'error', ...errorPayload }))
-          res.end()
-          return
-        }
-        return res.status(409).json(errorPayload)
-      }
-      let referenceReport: any = null
-      let safetyDecision: any = null
-      let migrationAudit: any = null
-      try {
-        markStage('reference_report', '生成参考使用报告', 'running')
-        referenceReport = await ctx.buildReferenceUsageReport(activeWorkspace, project, '正文创作', finalText)
-        safetyDecision = ctx.getReferenceSafetyDecision(project, referenceReport)
-        const safetyExplanation = ctx.explainReferenceSafety(referenceReport, safetyDecision)
-        migrationAudit = ctx.buildMigrationAudit(project, referenceReport, safetyExplanation)
-        markStage('reference_report', safetyDecision.blocked ? '参考安全阈值未通过' : '参考使用报告已生成', safetyDecision.blocked ? 'failed' : 'success', safetyDecision.reasons?.join('；') || '', { reference_report: referenceReport, safety_decision: safetyDecision, safety_explanation: safetyExplanation, migration_audit: migrationAudit })
-      } catch (reportError) {
-        markStage('reference_report', '参考使用报告生成失败', 'warn', String(reportError).slice(0, 200))
-        console.warn('[reference-report] Failed:', String(reportError).slice(0, 200))
-      }
-      const safetyExplanation = referenceReport && safetyDecision ? ctx.explainReferenceSafety(referenceReport, safetyDecision) : null
-      if (!migrationAudit && referenceReport && safetyExplanation) migrationAudit = ctx.buildMigrationAudit(project, referenceReport, safetyExplanation)
-      if (safetyDecision?.blocked) {
-        const errorPayload = { error: '仿写安全阈值未通过，正文未入库', error_code: 'REFERENCE_SAFETY_BLOCKED', reference_report: referenceReport, safety_decision: safetyDecision, safety_explanation: safetyExplanation, migration_audit: migrationAudit, context_package: contextPackage, self_check: selfCheck, pipeline, config_snapshot: configSnapshot }
-        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: stringifyNovelGenerationPayload(req.body), output_ref: stringifyNovelGenerationPayload(errorPayload), error_message: safetyDecision.reasons?.join('；') || '仿写安全阈值未通过' })
-        if (wantsStream) {
-          res.write(sseData({ type: 'error', ...errorPayload }))
-          res.end()
-          return
-        }
-        return res.status(409).json(errorPayload)
-      }
-      markStage('store', '写入章节正文与版本', 'running')
-      const beforeText = String(chapter.chapter_text || '')
-      const updated = await updateNovelChapter(activeWorkspace, chapter.id, {
-        chapter_text: finalText,
-        continuity_notes: finalContinuityNotes,
-        raw_payload: {
-          ...(chapter.raw_payload || {}),
-          generated_scene_breakdown: finalSceneBreakdown,
-          oh_story_delivery_receipts: ohStoryDeliveryReceipts,
-          chapter_blueprint: ohStoryDeliveryReceipts.chapter_blueprint,
-          pre_draft_execution_receipts: ohStoryDeliveryReceipts.pre_draft_execution_receipts,
-          scene_card_receipts: ohStoryDeliveryReceipts.scene_card_receipts,
-          delivery_risk_receipts: ohStoryDeliveryReceipts.delivery_risk_receipts,
-          revision_receipts: ohStoryDeliveryReceipts.revision_receipts,
-          deslop_repair_receipts: ohStoryDeliveryReceipts.deslop_repair_receipts,
-          quality_audit_repair_receipts: ohStoryDeliveryReceipts.quality_audit_repair_receipts,
-        },
-        status: 'draft',
-      }, { versionSource: selfCheck?.revised ? 'repair' : editorRewrite?.edited ? 'editor_rewrite' : 'agent_execute' })
-      const versionsAfterStore = await listChapterVersions(activeWorkspace, chapter.id).catch(() => [])
-      const previousVersion = versionsAfterStore[0] || null
-      const generationDiff = buildTextDiffSummary(beforeText, finalText)
-      markStage('store', '章节已写入', 'success')
-      let storyStateUpdate: any = null
-      try {
-        markStage('story_state', '更新故事状态机', 'running')
-        storyStateUpdate = await ctx.updateStoryStateMachine(activeWorkspace, project, chapter, contextPackage, finalText, modelId)
-        markStage('story_state', '故事状态机已更新', 'success', '', { story_state_update: storyStateUpdate })
-      } catch (stateError) {
-        markStage('story_state', '故事状态机更新失败', 'warn', String(stateError).slice(0, 200))
-      }
-      const pipelineResult = { context_package: contextPackage, editor_rewrite: editorRewrite, self_check: selfCheck, oh_story_delivery_receipts: ohStoryDeliveryReceipts, pipeline, diff: generationDiff, previous_version: previousVersion, config_snapshot: configSnapshot }
-      await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'success', input_ref: stringifyNovelGenerationPayload(req.body), output_ref: stringifyNovelGenerationPayload({ outputSource: (result as any).outputSource, modelId: (result as any).modelId, modelName: (result as any).modelName, providerId: (result as any).providerId, usage: (result as any).usage, reference_report: referenceReport, safety_decision: safetyDecision, safety_explanation: safetyExplanation, migration_audit: migrationAudit, story_state_update: storyStateUpdate, ...pipelineResult }) })
-      if (!wantsStream) return res.json({ chapter: updated, result, reference_report: referenceReport, safety_decision: safetyDecision, safety_explanation: safetyExplanation, migration_audit: migrationAudit, story_state_update: storyStateUpdate, ...pipelineResult })
-      const fullText = String(finalText || '')
-      const chunkSize = Math.max(40, Math.ceil(fullText.length / 12))
-      res.write(sseData({ type: 'progress', progress: '生成完成，开始输出正文...', pipeline }))
-      for (let i = 0; i < fullText.length; i += chunkSize) {
-        const chunk = fullText.slice(i, i + chunkSize)
-        res.write(sseData({ type: 'chunk', text: chunk }))
-        await new Promise(resolve => setTimeout(resolve, 40))
-      }
-      res.write(sseData({ type: 'done', chapter: updated, result, reference_report: referenceReport, safety_decision: safetyDecision, safety_explanation: safetyExplanation, migration_audit: migrationAudit, story_state_update: storyStateUpdate, ...pipelineResult }))
-      res.end()
     } catch (error) {
       if (res.headersSent) {
         res.write(sseData({ type: 'error', error: String(error) }))

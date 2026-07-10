@@ -52,6 +52,15 @@ mock.module('./provider-runtime', () => ({
       }
     }
 
+    if (userPrompt.includes('BOUNDED_PARAGRAPH_TASK_WITH_OH_STORY_RULES')) {
+      return {
+        content: JSON.stringify({
+          prose_chapters: [{ chapter_no: 10, title: '暗门', chapter_text: '正文。' }],
+        }),
+        usage: { input_tokens: 3210, output_tokens: 987, total_tokens: 4197 },
+      }
+    }
+
     if (userPrompt.includes('请构建完整的故事大纲')) {
       return {
         content: JSON.stringify({
@@ -152,7 +161,7 @@ describe('executeNovelAgentChain outline params', () => {
     runtimeRequests.length = 0
     const { generateNovelChapterProse } = await import('./executor')
 
-    await generateNovelChapterProse(
+    const result = await generateNovelChapterProse(
       {
         id: 102,
         title: '正文瘦身测试',
@@ -181,6 +190,12 @@ describe('executeNovelAgentChain outline params', () => {
           },
         ],
         paragraphTask: 'BOUNDED_PARAGRAPH_TASK_WITH_OH_STORY_RULES',
+        boundedProseContract: true,
+        promptDiagnostics: {
+          prompt_chars: 41_000,
+          required_chars: 12_000,
+          selected_contract_keys: ['dialogue'],
+        },
       } as any,
       { activeWorkspace: 'test-workspace', skipMemory: true, modelId: '1' },
     )
@@ -197,6 +212,12 @@ describe('executeNovelAgentChain outline params', () => {
     expect(combinedPrompt).not.toContain('FULL_CHARACTER_SHOULD_NOT_DUPLICATE')
     expect(combinedPrompt).not.toContain('FULL_OUTLINE_SHOULD_NOT_DUPLICATE')
     expect(combinedPrompt).not.toContain('FULL_PREVIOUS_CHAPTER_BODY_SHOULD_NOT_DUPLICATE')
+    expect((result as any).prose_prompt_diagnostics).toMatchObject({
+      prompt_chars: 41_000,
+      required_chars: 12_000,
+      selected_contract_keys: ['dialogue'],
+      model_usage: { input_tokens: 3210, output_tokens: 987, total_tokens: 4197 },
+    })
   })
 
   test('retries prose draft once in direct-output non-stream mode when streaming returns reasoning-only content', async () => {

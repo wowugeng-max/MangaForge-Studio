@@ -1,4 +1,4 @@
-const PROSE_PROMPT_MAX_CHARS = 180000
+const AUXILIARY_PROSE_PROMPT_MAX_CHARS = 180000
 const PROSE_PROMPT_LONG_LINE_HEAD = 900
 const PROSE_PROMPT_LONG_LINE_TAIL = 700
 
@@ -96,6 +96,10 @@ export function compactProseSceneCard(card: any) {
     purpose: proseSceneCardText(card?.purpose),
     obstacle: proseSceneCardText(card?.obstacle),
     conflict: proseSceneCardText(card?.conflict),
+    action: proseSceneCardText(card?.action || card?.protagonist_action || card?.protagonistAction),
+    turn: proseSceneCardText(card?.turn || card?.turning_point || card?.turningPoint),
+    payoff: proseSceneCardText(card?.payoff || card?.reader_payoff || card?.readerPayoff),
+    state_delta: proseSceneCardText(card?.state_delta || card?.stateDelta),
     protagonist_agency_action: proseSceneCardText(card?.protagonist_agency_action || card?.protagonistAgencyAction),
     no_exit_reason: proseSceneCardText(card?.no_exit_reason || card?.noExitReason),
     event_value_change: proseSceneCardText(card?.event_value_change || card?.eventValueChange),
@@ -274,13 +278,15 @@ function clampProsePromptLine(section: any) {
 }
 
 export function buildBoundedProsePrompt(sections: any[]) {
+  // Compatibility budget for sandbox, expansion, and other auxiliary prose tasks.
+  // Production chapter drafting uses the 48K section compiler instead.
   const rawSections = sections.map((section: any) => String(section || '').trim()).filter(Boolean)
   const rawPrompt = rawSections.join('\n')
-  if (rawPrompt.length <= PROSE_PROMPT_MAX_CHARS) return rawPrompt
+  if (rawPrompt.length <= AUXILIARY_PROSE_PROMPT_MAX_CHARS) return rawPrompt
 
   const compactSections = rawSections.map(clampProsePromptLine).filter(Boolean)
   const prompt = compactSections.join('\n')
-  if (prompt.length <= PROSE_PROMPT_MAX_CHARS) return prompt
+  if (prompt.length <= AUXILIARY_PROSE_PROMPT_MAX_CHARS) return prompt
 
   const requirementIndex = compactSections.findIndex(section => section === '【段落级写作要求】')
   const tailSections = requirementIndex >= 0 ? compactSections.slice(requirementIndex) : compactSections.slice(-40)
@@ -290,7 +296,7 @@ export function buildBoundedProsePrompt(sections: any[]) {
     ? compactSections.slice(contextIndex, Math.min(contextIndex + 2, requirementIndex >= 0 ? requirementIndex : compactSections.length))
     : []
   const forcedContext = forcedContextSections.join('\n')
-  const prefixBudget = Math.max(12000, PROSE_PROMPT_MAX_CHARS - tail.length - 200)
+  const prefixBudget = Math.max(12000, AUXILIARY_PROSE_PROMPT_MAX_CHARS - tail.length - 200)
   const prefix: string[] = []
   let used = 0
   const prefixEnd = requirementIndex >= 0 ? requirementIndex : compactSections.length
@@ -307,5 +313,5 @@ export function buildBoundedProsePrompt(sections: any[]) {
     forcedContext,
     '【上下文预算裁剪】以上保留章节目标和优先执行约束；过长的辅助资产、诊断和历史状态已折叠，正文不得因此新增未给出的事实。',
     tail,
-  ].filter(Boolean).join('\n').slice(0, PROSE_PROMPT_MAX_CHARS)
+  ].filter(Boolean).join('\n').slice(0, AUXILIARY_PROSE_PROMPT_MAX_CHARS)
 }

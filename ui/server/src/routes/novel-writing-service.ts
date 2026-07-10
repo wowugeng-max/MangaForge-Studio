@@ -26,6 +26,18 @@ import { buildOhStoryStoryPowerContract } from './novel-story-power-contract'
 import { buildOhStoryMainlineDefinitionContract } from './novel-mainline-definition-contract'
 import { buildOhStoryDirectorForPostDraft, buildOhStoryDirectorForPreDraft } from './novel-oh-story-director'
 import {
+  buildProseGenerationContract,
+  evaluateProsePreDraftGate,
+  mergeProseGenerationRequestOverrides,
+  normalizeProseContractKey,
+  type ProseGenerationContract,
+} from '../novel-writing/prose-generation-contract'
+import {
+  compileProseContractPrompt,
+  type ProseRequiredPromptSection,
+  type ProseRiskPromptSection,
+} from '../novel-writing/prose-contract-prompt'
+import {
   asArray,
   applyBenchmarkRecallPreflightChecks,
   buildPreflightChecks,
@@ -836,6 +848,321 @@ function attachOhStoryDirectorToContextPackage(contextPackage: any) {
     oh_story_director: director,
     ohStoryDirector: director,
   }
+}
+
+export function prepareProseGenerationContract(baseContext: any, options: any = {}) {
+  const contextPackage = attachOhStoryDirectorToContextPackage(
+    mergeProseGenerationRequestOverrides(baseContext, options),
+  )
+  const contract = buildProseGenerationContract(contextPackage)
+  const runAfterGate = async <T>(
+    callback: (generationContract: ProseGenerationContract) => Promise<T>,
+    requireSceneCards = true,
+  ) => {
+    const gateDecision = evaluateProsePreDraftGate(contract, {
+      requireSceneCards,
+      allowIncomplete: options.allow_incomplete === true || options.allowIncomplete === true,
+    })
+    if (!gateDecision.passed) {
+      throw Object.assign(
+        new Error(gateDecision.reasons.join('；') || '章节生成写前门禁未通过'),
+        {
+          code: gateDecision.code,
+          gateDecision,
+          contextPackage,
+          generationContract: contract,
+        },
+      )
+    }
+    return callback(contract)
+  }
+  return { contextPackage, contract, runAfterGate }
+}
+
+function proseRiskSection(key: string, value: string | string[]): ProseRiskPromptSection | null {
+  const lines = (Array.isArray(value) ? value : [value])
+    .map(item => String(item || '').trim())
+    .filter(Boolean)
+  if (!lines.length) return null
+  const title = prosePromptText(lines[0] || key, 180)
+  const compactRules = lines.slice(1).map(item => prosePromptText(item, 700)).filter(Boolean)
+  return {
+    key,
+    full: lines,
+    compact: [title, ...compactRules.slice(0, 5)],
+    reference: [`${title}：仅执行本章直接相关边界；不得引入合同外事实。`],
+  }
+}
+
+function proseContractValue(context: any, key: string) {
+  return getContextContract(context, `${key}_contract`)
+}
+
+function buildRequiredProseCoreSections(
+  project: any,
+  contract: ProseGenerationContract,
+): ProseRequiredPromptSection[] {
+  const context: any = contract.context || {}
+  const target: any = mergedContextChapterTargetPreferRuntime(context)
+  const previousHandoff = contract.chapter.previous_handoff || buildPreviousChapterHandoff(context)
+  const sceneCards = asArray(contract.chapter.scene_cards).slice(0, 8).map(compactProseSceneCard)
+  const failedChecks = asArray(contract.preflight?.checks)
+    .filter((item: any) => item?.ok === false)
+    .slice(0, 8)
+    .map((item: any) => ({
+      key: item?.key,
+      severity: item?.severity,
+      label: item?.label,
+      fix: item?.fix,
+    }))
+  const launchGate = context?.chapter_launch_gate
+    || context?.chapterLaunchGate
+    || target?.chapter_launch_gate
+    || target?.chapterLaunchGate
+    || null
+  const coreRadar = target?.core_contract_radar || target?.coreContractRadar || {}
+  const chapterBlueprint = target?.chapter_blueprint || target?.chapterBlueprint || {}
+  const writingBible = context?.writing_bible || context?.writingBible || {}
+  const styleBoundary = proseContractValue(context, 'style_boundary')
+  const longformCompass = target?.longform_compass || target?.longformCompass || context?.longform_compass || context?.longformCompass || {}
+  const longformBattle = target?.longform_battle_context || target?.longformBattleContext || context?.longform_battle_context || context?.longformBattleContext || {}
+  const nextBatchBrief = target?.next_batch_brief || target?.nextBatchBrief || context?.next_batch_brief || context?.nextBatchBrief || {}
+  const deliveryRisk = target?.delivery_risk_carry_over || target?.deliveryRiskCarryOver || context?.delivery_risk_carry_over || context?.deliveryRiskCarryOver || {}
+  const millionWordRunway = target?.million_word_runway || target?.millionWordRunway || context?.million_word_runway || context?.millionWordRunway || {}
+  const corePromise = {
+    reader_promise: coreRadar?.reader_promise
+      || coreRadar?.readerPromise
+      || writingBible?.reader_promise
+      || writingBible?.readerPromise
+      || writingBible?.promise
+      || '',
+    core_conflict: coreRadar?.core_conflict
+      || coreRadar?.coreConflict
+      || writingBible?.core_conflict
+      || writingBible?.coreConflict
+      || writingBible?.mainline?.core_conflict
+      || '',
+    mainline_service: chapterBlueprint?.plot_lines?.mainline
+      || chapterBlueprint?.plotLines?.mainline
+      || target?.mainline_service
+      || target?.mainlineService
+      || contract.chapter.summary
+      || '',
+    protagonist_agency: chapterBlueprint?.writing_intent
+      || chapterBlueprint?.writingIntent
+      || target?.protagonist_agency
+      || target?.protagonistAgency
+      || '关键结果必须来自主角可见选择和行动',
+    style_boundary: styleBoundary?.hard_constraints
+      || styleBoundary?.hardConstraints
+      || context?.style_lock
+      || context?.styleLock
+      || {},
+    core_contract_radar: {
+      reader_promise: coreRadar?.reader_promise || coreRadar?.readerPromise,
+      core_conflict: coreRadar?.core_conflict || coreRadar?.coreConflict,
+      must_serve: asArray(coreRadar?.must_serve || coreRadar?.mustServe).slice(0, 8),
+      no_drift: asArray(coreRadar?.no_drift || coreRadar?.noDrift).slice(0, 8),
+    },
+    request_longform_compass: {
+      reader_promise: longformCompass?.reader_promise || longformCompass?.readerPromise,
+      core_conflict: longformCompass?.core_conflict || longformCompass?.coreConflict,
+      must_serve: asArray(longformCompass?.must_serve || longformCompass?.mustServe).slice(0, 8),
+      no_drift: asArray(longformCompass?.no_drift || longformCompass?.noDrift || longformCompass?.red_lines || longformCompass?.redLines).slice(0, 8),
+    },
+    request_longform_battle: {
+      core_guard: longformBattle?.core_guard || longformBattle?.coreGuard,
+      blocked_risks: asArray(longformBattle?.blocked_risks || longformBattle?.blockedRisks).slice(0, 6),
+      required_actions: asArray(longformBattle?.required_actions || longformBattle?.requiredActions).slice(0, 8),
+    },
+    request_batch_role: {
+      batch_goal: nextBatchBrief?.batch_goal || nextBatchBrief?.batchGoal,
+      current_chapter_role: nextBatchBrief?.current_chapter_role || nextBatchBrief?.currentChapterRole,
+      must_deliver: asArray(nextBatchBrief?.must_deliver || nextBatchBrief?.mustDeliver).slice(0, 8),
+    },
+    request_delivery_risk: {
+      quality_focus: asArray(deliveryRisk?.quality_focus || deliveryRisk?.qualityFocus).slice(0, 6),
+      opening_actions: asArray(deliveryRisk?.opening_actions || deliveryRisk?.openingActions).slice(0, 8),
+      middle_actions: asArray(deliveryRisk?.middle_actions || deliveryRisk?.middleActions).slice(0, 8),
+      ending_actions: asArray(deliveryRisk?.ending_actions || deliveryRisk?.endingActions).slice(0, 8),
+      avoid_repetition: asArray(deliveryRisk?.avoid_repetition || deliveryRisk?.avoidRepetition || deliveryRisk?.forbidden_repeats || deliveryRisk?.forbiddenRepeats).slice(0, 8),
+    },
+    request_million_word_runway: {
+      mode: millionWordRunway?.mode,
+      four_questions: asArray(millionWordRunway?.four_questions || millionWordRunway?.fourQuestions).slice(0, 8),
+      reader_fuel: asArray(millionWordRunway?.reader_fuel || millionWordRunway?.readerFuel).slice(0, 8),
+      red_lines: asArray(millionWordRunway?.red_lines || millionWordRunway?.redLines).slice(0, 8),
+    },
+  }
+  const directorSnapshot = {
+    readiness: contract.director?.readiness,
+    primary_action: contract.director?.primary_action || contract.director?.primaryAction,
+    required_repairs: asArray(contract.director?.required_repairs || contract.director?.requiredRepairs).slice(0, 6),
+    selected_contracts: asArray(contract.director?.selected_contracts || contract.director?.selectedContracts).slice(0, 4),
+  }
+
+  return [
+    {
+      key: 'task',
+      text: [
+        '任务：只生成当前目标章节的完整简体中文小说正文。',
+        '正文优先于回执；不得输出分析、任务说明、工程字段或其他章节。',
+      ],
+    },
+    {
+      key: 'chapter',
+      text: [
+        `作品：${prosePromptText(project?.title || '', 240)}`,
+        `章节：第${contract.chapter.chapter_no}章《${prosePromptText(contract.chapter.title || '无标题', 160)}》`,
+        `目标：${prosePromptText(contract.chapter.goal || contract.chapter.summary, 900)}`,
+        `冲突：${prosePromptText(contract.chapter.conflict, 900)}`,
+        `读者回报：${prosePromptText(target?.reader_payoff || target?.readerPayoff || target?.core_payoff || target?.corePayoff, 900)}`,
+        `章末钩子：${prosePromptText(contract.chapter.ending_hook, 900)}`,
+        `字数：${prosePromptJson(contract.chapter.word_target || {}, 1200)}`,
+      ],
+    },
+    {
+      key: 'handoff',
+      text: previousHandoff
+        ? ['【上一章尾段承接】', prosePromptText(previousHandoff, 4200)]
+        : [],
+    },
+    {
+      key: 'scene-causality',
+      text: ['【场景卡因果链】', prosePromptJson({ scene_cards: sceneCards }, 12_000)],
+    },
+    {
+      key: 'gate',
+      text: [
+        '【开写门禁通过快照】',
+        prosePromptJson({
+          preflight: {
+            ready: contract.preflight?.ready,
+            strict_ready: contract.preflight?.strict_ready,
+            failed_checks: failedChecks,
+          },
+          director: directorSnapshot,
+          chapter_launch_gate: launchGate,
+        }, 5000),
+      ],
+    },
+    {
+      key: 'core-promise',
+      text: ['【不可变核心承诺】', prosePromptJson(corePromise, 5000)],
+    },
+    {
+      key: 'safety-style',
+      text: [
+        '不得新增上下文没有授权的事实；真实职业、法律、医疗、技术和地理事实不确定时改成架空或待验证线索。',
+        '不得出现 prompt、合同、回执、字段名、读者分析、“上一章/本章”等写作工程语言。',
+        '不得复制参考样章原句、专名或桥段；只迁移抽象节奏和功能。',
+        '正文按动作、对话、情绪反应与后续动作推进；关键场景必须有目标、阻碍、选择、代价和状态变化。',
+      ],
+    },
+    {
+      key: 'output',
+      text: [
+        `输出 JSON：{"prose_chapters":[{"chapter_no":${contract.chapter.chapter_no},"title":"章节标题","chapter_text":"完整正文","scene_breakdown":[],"continuity_notes":[]}]}。`,
+        'prose_chapters 只能有一项；chapter_text 不含 Markdown 标题、解释或附录。',
+      ],
+    },
+  ]
+}
+
+function buildProseRiskContractSections(context: any): ProseRiskPromptSection[] {
+  const target = mergedContextChapterTargetPreferRuntime(context)
+  const sections = new Map<string, ProseRiskPromptSection>()
+  const add = (key: string, lines: string | string[]) => {
+    const section = proseRiskSection(key, lines)
+    if (section) sections.set(normalizeProseContractKey(key), section)
+  }
+  const contract = (key: string) => proseContractValue(context, key)
+
+  add('platform_rubric', buildPlatformRubricPromptSection(target?.platform_rubric || target?.platformRubric))
+  add('content_rubric', buildContentRubricPromptSection(target?.content_rubric || target?.contentRubric))
+  add('target_reader', buildTargetReaderPromptSection(contract('target_reader')))
+  add('genre_positioning', buildGenrePositioningPromptSection(contract('genre_positioning')))
+  add('plot_special_topics', buildPlotSpecialTopicsPromptSection(contract('plot_special_topics')))
+  add('female_audience', buildFemaleAudiencePromptSection(contract('female_audience')))
+  add('upgrade_rhythm', buildUpgradeRhythmPromptSection(contract('upgrade_rhythm')))
+  add('conflict_structure', buildConflictStructurePromptSection(contract('conflict_structure')))
+  add('story_loop', buildStoryLoopPromptSection(contract('story_loop')))
+  add('emotional_arc', buildEmotionalArcPromptSection(contract('emotional_arc')))
+  add('chapter_hook', buildChapterHookPromptSection(contract('chapter_hook')))
+  add('paragraph_hook', buildParagraphHookPromptSection(contract('paragraph_hook')))
+  add('suspense', buildSuspensePromptSection(contract('suspense')))
+  add('reversal', buildReversalPromptSection(contract('reversal')))
+  add('showdown', buildShowdownPromptSection(contract('showdown')))
+  add('bridge_unit', buildBridgeUnitPromptSection(contract('bridge_unit')))
+  add('plot_framework', buildPlotFrameworkPromptSection(contract('plot_framework')))
+  add('opening', buildOpeningPromptSection(contract('opening')))
+  add('prose_craft', buildProseCraftPromptSection(contract('prose_craft')))
+  add('punctuation_tone', buildPunctuationTonePromptSection(contract('punctuation_tone')))
+  add('quality_audit', buildQualityAuditPromptSection(contract('quality_audit')))
+  add('dialogue', buildDialoguePromptSection(contract('dialogue')))
+  add('plot_dynamics', buildPlotDynamicsPromptSection(contract('plot_dynamics')))
+  add('story_power', buildStoryPowerPromptSection(contract('story_power')))
+  add('continuity_heat', buildContinuityHeatPromptSection(contract('continuity_heat')))
+  add('character_relation', buildCharacterRelationPromptSection(contract('character_relation')))
+  add('character_behavior', buildCharacterBehaviorPromptSection(contract('character_behavior')))
+  add('asset_linkage', buildAssetLinkagePromptSection(
+    contract('asset_linkage'),
+    asArray(contract('asset_linkage')?.relationship_graph_risks || contract('asset_linkage')?.relationshipGraphRisks),
+  ))
+  add('state_tracking', buildStateTrackingPromptSection(contract('state_tracking')))
+  add('intent_confirmation', buildIntentConfirmationPromptSection(contract('intent_confirmation')))
+  add('benchmark_recall', buildBenchmarkRecallPromptSection(target?.benchmark_recall_brief || target?.benchmarkRecallBrief))
+  add('style_boundary', buildStyleBoundaryPromptSection(contract('style_boundary')))
+  add('information_flow', buildInformationFlowPromptSection(contract('information_flow')))
+  add('expectation_threshold', buildExpectationThresholdPromptSection(contract('expectation_threshold')))
+  add('delivery_risk', buildDeliveryRiskCarryOverPromptSection(target?.delivery_risk_carry_over || target?.deliveryRiskCarryOver))
+  add('longform_structure', [
+    ...buildLongformCompassPromptSection(target?.longform_compass || target?.longformCompass || context?.longform_compass || context?.longformCompass),
+    ...buildLongformBattleContextPromptSection(target?.longform_battle_context || target?.longformBattleContext || context?.longform_battle_context || context?.longformBattleContext),
+  ])
+  add('longform_battle', buildLongformBattleContextPromptSection(target?.longform_battle_context || target?.longformBattleContext || context?.longform_battle_context || context?.longformBattleContext))
+  add('governance_recheck', buildGovernanceRecheckPromptSection(target?.governance_recheck_memory || target?.governanceRecheckMemory))
+  add('fact_setting_safety', [
+    '【事实与设定安全边界】',
+    prosePromptJson({
+      setting_context: context?.setting_context || context?.settingContext || {},
+      continuity: context?.continuity || {},
+    }, 3200),
+  ])
+
+  const rawSources = [target, context, context?.pre_draft_brief, context?.preDraftBrief]
+  for (const source of rawSources) {
+    for (const [field, value] of Object.entries(source || {})) {
+      if (!/(?:_contract|Contract)$/.test(field) || !value) continue
+      const key = normalizeProseContractKey(field)
+      if (sections.has(key)) continue
+      add(key, [`【${key}】`, prosePromptJson(value, 3200)])
+    }
+  }
+  return Array.from(sections.values())
+}
+
+export function compileParagraphProseContext(
+  project: any,
+  generationContractOrContext: ProseGenerationContract | any,
+  migrationPlan: any = null,
+  _chapterDraft: any = null,
+) {
+  const contract = generationContractOrContext?.version === 'prose_generation_contract_v1'
+    ? generationContractOrContext as ProseGenerationContract
+    : buildProseGenerationContract(attachOhStoryDirectorToContextPackage(generationContractOrContext || {}))
+  const requiredSections = buildRequiredProseCoreSections(project, contract)
+  if (migrationPlan?.generation_prompt_addendum) {
+    requiredSections.splice(requiredSections.length - 1, 0, {
+      key: 'reference-migration-boundary',
+      text: prosePromptText(migrationPlan.generation_prompt_addendum, 700),
+    })
+  }
+  return compileProseContractPrompt({
+    requiredSections,
+    contractSections: buildProseRiskContractSections(contract.context),
+    director: contract.director,
+  })
 }
 
 export function appendMissingContractReviewCheck(
@@ -44625,15 +44952,32 @@ export function createNovelWritingService(ctx: {
       listNovelReviews(activeWorkspace, projectId),
     ])
     let wordTarget = resolveChapterWordTarget(project, chapter, options)
-    let contextPackage = applyChapterWordTargetToContext(
+    const initialContextPackage = applyChapterWordTargetToContext(
       await buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews),
       wordTarget,
     )
+    let preparedGeneration = prepareProseGenerationContract(initialContextPackage, options)
+    let contextPackage = preparedGeneration.contextPackage
+    let generationContract = preparedGeneration.contract
+    const enforcePreparedGate = async (requireSceneCards: boolean) => {
+      try {
+        await preparedGeneration.runAfterGate(async () => undefined, requireSceneCards)
+      } catch (error: any) {
+        await onStage(requireSceneCards ? 'scene_cards' : 'context', {
+          status: 'failed',
+          code: error?.code,
+          reasons: error?.gateDecision?.reasons || [],
+          gate_decision: error?.gateDecision,
+        })
+        throw error
+      }
+    }
     await onStage('context', {
-      status: contextPackage.preflight.ready ? 'success' : 'failed',
-      score: contextPackage.preflight.ready ? 100 : 0,
+      status: contextPackage.preflight.ready && contextPackage.preflight.strict_ready !== false ? 'success' : 'failed',
+      score: contextPackage.preflight.ready && contextPackage.preflight.strict_ready !== false ? 100 : 0,
       warnings: contextPackage.preflight.warnings || [],
       blockers: contextPackage.preflight.blockers || [],
+      director_readiness: generationContract.director?.readiness,
     })
     const preflightNeedsMaterialRepair = !contextPackage.preflight.ready || contextPackage.preflight.strict_ready === false
     if (preflightNeedsMaterialRepair && options.auto_repair_missing_material === true) {
@@ -44643,11 +44987,16 @@ export function createNovelWritingService(ctx: {
       chapter = chapters.find(item => item.id === chapterId) || chapter
       worldbuilding = await listNovelWorldbuilding(activeWorkspace, projectId)
       characters = await listNovelCharacters(activeWorkspace, projectId)
+      outlines = await listNovelOutlines(activeWorkspace, projectId)
       reviews = await listNovelReviews(activeWorkspace, projectId)
-      contextPackage = applyChapterWordTargetToContext(
+      wordTarget = resolveChapterWordTarget(project, chapter, options)
+      const repairedContextPackage = applyChapterWordTargetToContext(
         await buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews),
         wordTarget,
       )
+      preparedGeneration = prepareProseGenerationContract(repairedContextPackage, options)
+      contextPackage = preparedGeneration.contextPackage
+      generationContract = preparedGeneration.contract
       await onStage('material_repair', {
         status: contextPackage.preflight.ready && contextPackage.preflight.strict_ready !== false ? 'success' : 'warn',
         repaired: repairResult.repaired,
@@ -44656,27 +45005,14 @@ export function createNovelWritingService(ctx: {
         remaining_blockers: contextPackage.preflight.blockers || [],
       })
     }
-    if (!contextPackage.preflight.ready && options.allow_incomplete !== true) {
-      throw Object.assign(new Error('章节生成前置检查未通过'), { code: 'PROSE_PREFLIGHT_BLOCKED', contextPackage })
-    }
-    const launchGateBlocker = getChapterLaunchGateBlocker(chapterLaunchGateFromContext(contextPackage, null, chapter))
-    if (launchGateBlocker && options.allow_incomplete !== true) {
-      await onStage('context', {
-        status: 'failed',
-        code: 'PROSE_LAUNCH_GATE_BLOCKED',
-        blocker: launchGateBlocker,
-      })
-      throw Object.assign(new Error(`开写门禁未通过：${launchGateBlocker.summary}`), {
-        code: 'PROSE_LAUNCH_GATE_BLOCKED',
-        contextPackage,
-        launchGateBlocker,
-      })
-    }
+    await enforcePreparedGate(false)
     throwIfChapterGenerationAborted()
     await onStage('scene_cards', { status: 'running' })
-    if (!contextPackage.chapter_target.scene_cards.length || options.force_scene_cards === true) {
+    let generatedSceneCardsThisRun = false
+    if (!generationContract.chapter.scene_cards.length || options.force_scene_cards === true) {
       const sceneResult = await generateSceneCardsForChapter(activeWorkspace, project, contextPackage, preferredModelId, llmControlOptions)
       if (sceneResult.sceneCards.length > 0) {
+        generatedSceneCardsThisRun = true
         const updatedSceneChapter = await updateNovelChapter(activeWorkspace, chapter.id, {
           scene_breakdown: sceneResult.sceneCards,
           scene_list: sceneResult.sceneCards,
@@ -44685,34 +45021,27 @@ export function createNovelWritingService(ctx: {
         if (updatedSceneChapter) chapter = updatedSceneChapter
         chapters = await listNovelChapters(activeWorkspace, projectId)
         wordTarget = resolveChapterWordTarget(project, chapter, options)
-        contextPackage = applyChapterWordTargetToContext(
+        const sceneContextPackage = applyChapterWordTargetToContext(
           await buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews),
           wordTarget,
         )
+        preparedGeneration = prepareProseGenerationContract(sceneContextPackage, options)
+        contextPackage = preparedGeneration.contextPackage
+        generationContract = preparedGeneration.contract
       }
     }
+    await enforcePreparedGate(true)
     await onStage('scene_cards', {
       status: 'success',
-      count: contextPackage.chapter_target.scene_cards.length,
-      scene_card_titles: contextPackage.chapter_target.scene_cards
+      count: generationContract.chapter.scene_cards.length,
+      scene_card_titles: generationContract.chapter.scene_cards
         .slice(0, 6)
         .map((card: any) => String(card?.title || card?.scene_title || card?.sceneTitle || `场景${card?.scene_no || card?.sceneNo || ''}`).trim())
         .filter(Boolean),
     })
-    if (!contextPackage.chapter_target.scene_cards.length && options.allow_incomplete !== true) {
-      await onStage('scene_cards', {
-        status: 'failed',
-        count: 0,
-        error: '正文生成前必须先有本章场景卡',
-      })
-      throw Object.assign(new Error('正文生成前必须先有本章场景卡'), {
-        code: 'PROSE_SCENE_CARDS_BLOCKED',
-        contextPackage,
-      })
-    }
-    if (ctx.production.approvalRequired(approvalPolicy, 'scene_cards', approvals, { count: contextPackage.chapter_target.scene_cards.length })) {
-      await onStage('scene_cards', { status: 'needs_confirmation', count: contextPackage.chapter_target.scene_cards.length })
-      throw ctx.production.buildApprovalError('scene_cards', '场景卡等待人工确认', { count: contextPackage.chapter_target.scene_cards.length })
+    if (generatedSceneCardsThisRun && ctx.production.approvalRequired(approvalPolicy, 'scene_cards', approvals, { count: generationContract.chapter.scene_cards.length })) {
+      await onStage('scene_cards', { status: 'needs_confirmation', count: generationContract.chapter.scene_cards.length })
+      throw ctx.production.buildApprovalError('scene_cards', '新生成的场景卡等待人工确认', { count: generationContract.chapter.scene_cards.length })
     }
     if (isSceneCardsOnly) {
       await onStage('migration_plan', { status: 'skipped', reason: '生产模式：只生成场景卡' })
@@ -44755,7 +45084,8 @@ export function createNovelWritingService(ctx: {
     const migrationPlan = await ctx.reference.getReferenceMigrationPlanForChapter(activeWorkspace, project, chapter).catch(error => ({ error: String(error) }))
     await onStage('migration_plan', { status: (migrationPlan as any)?.error ? 'warn' : 'success', active_reference_count: (migrationPlan as any)?.chapter_specific_plan?.active_reference_count || 0 })
     throwIfChapterGenerationAborted()
-    await onStage('draft', { status: 'running' })
+    const compiledPrompt = compileParagraphProseContext(project, generationContract, migrationPlan, chapter)
+    await onStage('draft', { status: 'running', prompt_diagnostics: compiledPrompt.diagnostics })
     const draftResult = await generateNovelChapterProse(project, chapter, {
       worldbuilding,
       characters,
@@ -44764,11 +45094,20 @@ export function createNovelWritingService(ctx: {
       prevChapters,
       contextPackage,
       migrationPlan,
-      paragraphTask: buildParagraphProseContext(project, contextPackage, migrationPlan, chapter),
+      paragraphTask: compiledPrompt.prompt,
+      promptDiagnostics: compiledPrompt.diagnostics,
+      boundedProseContract: true,
       maxTokens: proseMaxTokensForWordTarget(wordTarget),
       abortSignal: options.abortSignal,
       llmTimeoutMs: options.llmTimeoutMs,
     } as any, activeWorkspace, ctx.production.getStageModelId(project, 'draft', preferredModelId))
+    const draftPromptDiagnostics = {
+      ...compiledPrompt.diagnostics,
+      model_usage: (draftResult as any)?.prose_prompt_diagnostics?.model_usage
+        || (draftResult as any)?.usage
+        || (draftResult as any)?.raw?.usage
+        || null,
+    }
     const resultPayload = getNovelPayload(draftResult)
     const draftProseChapters = Array.isArray(resultPayload?.prose_chapters)
       ? resultPayload.prose_chapters
@@ -44793,7 +45132,7 @@ export function createNovelWritingService(ctx: {
       })
       throw new Error(String((draftResult as any).error || (draftResult as any).fallbackReason || '模型未返回正文'))
     }
-    await onStage('draft', { status: 'success', word_count: countProseChars(chapterText), modelName: (draftResult as any).modelName, scene_status: 'generated', plain_text_fallback_used: Boolean(plainProseFallback && !targetProse?.chapter_text && !targetProse?.chapterText && !resultPayload?.chapter_text && !resultPayload?.chapterText) })
+    await onStage('draft', { status: 'success', word_count: countProseChars(chapterText), modelName: (draftResult as any).modelName, scene_status: 'generated', prompt_diagnostics: draftPromptDiagnostics, plain_text_fallback_used: Boolean(plainProseFallback && !targetProse?.chapter_text && !targetProse?.chapterText && !resultPayload?.chapter_text && !resultPayload?.chapterText) })
     let finalText = String(chapterText || '')
     let finalSceneBreakdown = targetProse?.scene_breakdown || targetProse?.sceneBreakdown || resultPayload?.scene_breakdown || resultPayload?.sceneBreakdown || []
     let ohStoryDeliveryReceipts = normalizeStoredOhStoryDeliveryReceipts({
@@ -44878,6 +45217,7 @@ export function createNovelWritingService(ctx: {
         revised: false,
         production_mode: productionMode,
         completed_stage: 'store',
+        prompt_diagnostics: draftPromptDiagnostics,
         story_state_update: { skipped: true },
         config_snapshot: configSnapshot,
       }
@@ -46018,6 +46358,7 @@ export function createNovelWritingService(ctx: {
         revised: false,
         production_mode: productionMode,
         completed_stage: 'store',
+        prompt_diagnostics: draftPromptDiagnostics,
         story_state_update: buildSkippedPostDeliveryStoryStateUpdate({
           proseRevisionReceiptSync,
           deslopRepairReceiptSync,
@@ -46300,6 +46641,7 @@ export function createNovelWritingService(ctx: {
       readability_review: readabilityReview,
       production_mode: productionMode,
       completed_stage: 'story_state',
+      prompt_diagnostics: draftPromptDiagnostics,
       reference_report: referenceReport,
       safety_decision: safetyDecision,
       migration_audit: migrationAudit,
