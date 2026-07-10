@@ -32,6 +32,35 @@ describe('prose generation contract', () => {
     expect(merged.chapter_target.million_word_runway.mode).toBe('single_chapter')
   })
 
+  test('preserves complete required request constraints until the total prompt budget compiler', () => {
+    const handoffTail = 'REQUIRED_REQUEST_HANDOFF_TAIL'
+    const arrayTail = 'REQUIRED_REQUEST_ARRAY_ITEM_13'
+    const depthTail = 'REQUIRED_REQUEST_DEPTH_TAIL'
+    let nested: any = { value: depthTail }
+    for (let depth = 0; depth < 6; depth += 1) nested = { next: nested }
+
+    const merged = mergeProseGenerationRequestOverrides(
+      { chapter_target: { chapter_no: 10, title: '合围' } },
+      {
+        longformCompass: {
+          mustServe: Array.from({ length: 13 }, (_, index) => index === 12 ? arrayTail : `长线义务${index + 1}`),
+          nested,
+        },
+        batchPreflight: {
+          chapterHandoffContract: {
+            previousHandoff: `${'承接'.repeat(451)}${handoffTail}`,
+          },
+        },
+      },
+    )
+    const contract = buildProseGenerationContract(merged)
+
+    expect(merged.chapter_target.previous_handoff).toContain(handoffTail)
+    expect(merged.chapter_target.longform_compass.mustServe).toHaveLength(13)
+    expect(merged.chapter_target.longform_compass.mustServe[12]).toBe(arrayTail)
+    expect(JSON.stringify(contract.context.longform_compass)).toContain(depthTail)
+  })
+
   test('normalizes aliases and removes only a terminal contract suffix', () => {
     expect(normalizeProseContractKey('quality_audit_contract')).toBe('quality_audit')
     expect(normalizeProseContractKey('characterBehaviorContract')).toBe('character_behavior')

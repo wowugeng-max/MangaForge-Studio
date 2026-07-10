@@ -105,6 +105,38 @@ export function compactProseGenerationOverride(
   return output
 }
 
+function sanitizeRequiredProseGenerationOverride(
+  value: any,
+  key = '',
+  seen = new WeakSet<object>(),
+): any {
+  if (REQUEST_OVERRIDE_DROP_KEYS.has(key)) return undefined
+  if (value === null || value === undefined) return value
+  const valueType = typeof value
+  if (valueType === 'string') return value.trim()
+  if (valueType === 'number' || valueType === 'boolean') return value
+  if (valueType === 'bigint') return String(value)
+  if (valueType !== 'object') return String(value)
+  if (seen.has(value)) return '[Circular]'
+
+  seen.add(value)
+  if (Array.isArray(value)) {
+    const items = value
+      .map(item => sanitizeRequiredProseGenerationOverride(item, '', seen))
+      .filter(item => item !== undefined)
+    seen.delete(value)
+    return items
+  }
+
+  const output: Record<string, any> = {}
+  for (const [childKey, childValue] of Object.entries(value)) {
+    const sanitized = sanitizeRequiredProseGenerationOverride(childValue, childKey, seen)
+    if (sanitized !== undefined) output[childKey] = sanitized
+  }
+  seen.delete(value)
+  return output
+}
+
 function firstField(source: any, snake: string, camel: string) {
   return source?.[snake] ?? source?.[camel]
 }
@@ -118,17 +150,17 @@ export function mergeProseGenerationRequestOverrides(contextPackage: any, reques
   for (const [snake, camel] of REQUEST_OVERRIDE_FIELDS) {
     const raw = firstField(request, snake, camel)
     if (raw == null) continue
-    const value = compactProseGenerationOverride(raw)
+    const value = sanitizeRequiredProseGenerationOverride(raw)
     merged[snake] = value
     merged.chapter_target[snake] = value
   }
 
   const batchPreflight = merged.batch_preflight || merged.chapter_target.batch_preflight
   if (batchPreflight) {
-    const deliveryRiskCarryOver = compactProseGenerationOverride(
+    const deliveryRiskCarryOver = sanitizeRequiredProseGenerationOverride(
       firstField(batchPreflight, 'delivery_risk_carry_over', 'deliveryRiskCarryOver'),
     )
-    const chapterHandoffContract = compactProseGenerationOverride(
+    const chapterHandoffContract = sanitizeRequiredProseGenerationOverride(
       firstField(batchPreflight, 'chapter_handoff_contract', 'chapterHandoffContract'),
     )
     const previousHandoff = firstField(chapterHandoffContract, 'previous_handoff', 'previousHandoff')
