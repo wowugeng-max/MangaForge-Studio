@@ -235,6 +235,116 @@ async function requestJson(path: string, init: RequestInit = {}) {
   return payload
 }
 
+function parseSseData(frame: string) {
+  const dataLines: string[] = []
+  for (const line of frame.split(/\r?\n/)) {
+    if (!line || line.startsWith(':')) continue
+    const separator = line.indexOf(':')
+    const field = separator === -1 ? line : line.slice(0, separator)
+    if (field !== 'data') continue
+    let value = separator === -1 ? '' : line.slice(separator + 1)
+    if (value.startsWith(' ')) value = value.slice(1)
+    dataLines.push(value)
+  }
+  return dataLines.length ? dataLines.join('\n') : null
+}
+
+export async function readProseGenerationSse(response: Response) {
+  if (!response.ok) {
+    const text = await response.text()
+    let payload: any = null
+    try {
+      payload = text ? JSON.parse(text) : null
+    } catch {
+      payload = text
+    }
+    throw Object.assign(new Error(`HTTP ${response.status}: ${compactText(payload?.error || text, 600)}`), {
+      status: response.status,
+      error_code: payload?.error_code,
+      response: sanitizeValidationValue(payload),
+    })
+  }
+  if (!response.body) {
+    throw Object.assign(new Error('SSE response did not include a readable body'), {
+      status: response.status,
+      error_code: 'PROSE_GENERATION_STREAM_MISSING',
+    })
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let lastPayload: any = null
+
+  const consumeFrame = (frame: string) => {
+    const data = parseSseData(frame)
+    if (data == null) return null
+    let payload: any
+    try {
+      payload = JSON.parse(data)
+    } catch {
+      throw Object.assign(new Error(`SSE event returned invalid JSON: ${compactText(data, 500)}`), {
+        status: response.status,
+        error_code: 'PROSE_GENERATION_STREAM_INVALID_JSON',
+        response: sanitizeValidationValue({ data }),
+      })
+    }
+    lastPayload = payload
+    if (payload?.type === 'error') {
+      throw Object.assign(new Error(`SSE generation failed: ${compactText(payload?.error || payload?.message, 600)}`), {
+        status: response.status,
+        error_code: payload?.error_code,
+        response: sanitizeValidationValue(payload),
+      })
+    }
+    return payload?.type === 'done' ? payload : null
+  }
+
+  while (true) {
+    const chunk = await reader.read()
+    buffer += chunk.done ? decoder.decode() : decoder.decode(chunk.value, { stream: true })
+    let boundary = buffer.match(/\r?\n\r?\n/)
+    while (boundary?.index != null) {
+      const frame = buffer.slice(0, boundary.index)
+      buffer = buffer.slice(boundary.index + boundary[0].length)
+      const donePayload = consumeFrame(frame)
+      if (donePayload) return donePayload
+      boundary = buffer.match(/\r?\n\r?\n/)
+    }
+    if (chunk.done) break
+  }
+
+  if (buffer.trim()) {
+    const donePayload = consumeFrame(buffer)
+    if (donePayload) return donePayload
+  }
+  throw Object.assign(new Error('SSE stream ended before a done event'), {
+    status: response.status,
+    error_code: 'PROSE_GENERATION_STREAM_INCOMPLETE',
+    response: sanitizeValidationValue(lastPayload),
+  })
+}
+
+export async function requestProseGenerationSse(
+  path: string,
+  init: RequestInit = {},
+  fetchImpl: typeof fetch = fetch,
+) {
+  const baseUrl = normalizeUrl(process.env.MANGAFORGE_API_URL || 'http://127.0.0.1:8787/api')
+  const timeoutMs = Math.max(60_000, Number(process.env.PROSE_VALIDATION_HTTP_TIMEOUT_MS || 1_800_000))
+  const headers = new Headers(init.headers)
+  headers.set('Content-Type', 'application/json')
+  headers.set('Accept', 'text/event-stream')
+  const url = new URL(`${baseUrl}${path}`)
+  url.searchParams.set('stream', '1')
+  const response = await fetchImpl(url.toString(), {
+    ...init,
+    headers,
+    signal: init.signal || AbortSignal.timeout(timeoutMs),
+  })
+  return readProseGenerationSse(response)
+}
+
 function compactDeterministicCheck(item: any) {
   return {
     key: compactText(item?.key || item?.pattern || item?.gate || 'deterministic_prose', 120),
@@ -385,7 +495,7 @@ export async function runNovelProseQualityRecoveryValidation() {
     const backupDir = await backupNovelDatabase(workspace, backupRoot, stamp)
     report.backup_dir = backupDir
 
-    const generatedResponse = await requestJson(`/novel/chapters/${chapter10.id}/generate-prose`, {
+    const generatedResponse = await requestProseGenerationSse(`/novel/chapters/${chapter10.id}/generate-prose`, {
       method: 'POST',
       body: JSON.stringify(buildGenerationRequestBody(projectId, Number(modelId))),
     })

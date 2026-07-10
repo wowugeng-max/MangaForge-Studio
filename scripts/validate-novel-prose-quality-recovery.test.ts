@@ -4,6 +4,8 @@ import {
   buildGenerationRequestBody,
   evaluateBlindScoreThresholds,
   hasChapterNinePursuitHandoff,
+  readProseGenerationSse,
+  requestProseGenerationSse,
   sanitizeValidationValue,
 } from './validate-novel-prose-quality-recovery'
 
@@ -16,6 +18,128 @@ const dimensions = [
   'prose_naturalness',
   'ending_hook',
 ]
+
+function createFragmentedSseResponse(chunks: string[], init: ResponseInit = {}) {
+  const encoder = new TextEncoder()
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk))
+      controller.close()
+    },
+  })
+  const headers = new Headers(init.headers)
+  headers.set('Content-Type', 'text/event-stream; charset=utf-8')
+  return new Response(body, { ...init, headers })
+}
+
+describe('novel prose validation SSE transport', () => {
+  test('parses fragmented heartbeat, progress, and multiline done frames', async () => {
+    const response = createFragmentedSseResponse([
+      ': heart',
+      'beat\r\n\r',
+      '\nevent: message\r\n',
+      'data: {"type":"pro',
+      'gress","progress":"drafting"}\r\n\r\n',
+      'data: {"type":"done",\r\n',
+      'data: "result":{"chapter":{"id":10},',
+      '"quality_loop":{"decision":{"passed":true}}}}\n',
+      '\n',
+    ])
+
+    await expect(readProseGenerationSse(response)).resolves.toEqual({
+      type: 'done',
+      result: {
+        chapter: { id: 10 },
+        quality_loop: { decision: { passed: true } },
+      },
+    })
+  })
+
+  test('throws a structured error from an SSE error event', async () => {
+    const payload = {
+      type: 'error',
+      error: 'quality gate failed',
+      error_code: 'QUALITY_GATE_RETRY_REQUIRED',
+      context_package: { chapter_id: 10 },
+    }
+    const response = createFragmentedSseResponse([
+      'data: {"type":"error","error":"quality gate ',
+      'failed","error_code":"QUALITY_GATE_RETRY_REQUIRED",',
+      '"context_package":{"chapter_id":10}}\n\n',
+    ])
+
+    try {
+      await readProseGenerationSse(response)
+      throw new Error('expected SSE error event to reject')
+    } catch (error: any) {
+      expect(error).toBeInstanceOf(Error)
+      expect(error.message).toContain('quality gate failed')
+      expect(error.error_code).toBe('QUALITY_GATE_RETRY_REQUIRED')
+      expect(error.response).toEqual(payload)
+    }
+  })
+
+  test('fails clearly when the SSE stream ends without a done event', async () => {
+    const response = createFragmentedSseResponse([
+      ': heartbeat\n\n',
+      'data: {"type":"progress","progress":"drafting"}\n\n',
+    ])
+
+    await expect(readProseGenerationSse(response)).rejects.toThrow('SSE stream ended before a done event')
+  })
+
+  test('requests the generation endpoint with the SSE transport contract', async () => {
+    const calls: Array<{ input: string | URL | Request, init?: RequestInit }> = []
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ input, init })
+      return createFragmentedSseResponse([
+        'data: {"type":"done","result":{"chapter":{"id":10}}}\n\n',
+      ])
+    }) as typeof fetch
+    const body = buildGenerationRequestBody(1, 217)
+
+    const result = await requestProseGenerationSse('/novel/chapters/10/generate-prose', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }, fetchImpl)
+
+    expect(calls).toHaveLength(1)
+    const requestUrl = new URL(String(calls[0].input))
+    const headers = new Headers(calls[0].init?.headers)
+    expect(requestUrl.pathname).toBe('/api/novel/chapters/10/generate-prose')
+    expect(requestUrl.searchParams.get('stream')).toBe('1')
+    expect(headers.get('Accept')).toBe('text/event-stream')
+    expect(headers.get('Content-Type')).toBe('application/json')
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual(body)
+    expect(result).toEqual({ type: 'done', result: { chapter: { id: 10 } } })
+  })
+
+  test('preserves structured details for non-success HTTP responses', async () => {
+    const fetchImpl = (async () => new Response(JSON.stringify({
+      error: 'project not found',
+      error_code: 'PROJECT_NOT_FOUND',
+    }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch
+
+    try {
+      await requestProseGenerationSse('/novel/chapters/10/generate-prose', {
+        method: 'POST',
+        body: JSON.stringify(buildGenerationRequestBody(1, 217)),
+      }, fetchImpl)
+      throw new Error('expected non-success response to reject')
+    } catch (error: any) {
+      expect(error).toBeInstanceOf(Error)
+      expect(error.status).toBe(404)
+      expect(error.error_code).toBe('PROJECT_NOT_FOUND')
+      expect(error.response).toEqual({
+        error: 'project not found',
+        error_code: 'PROJECT_NOT_FOUND',
+      })
+    }
+  })
+})
 
 describe('novel prose quality recovery thresholds', () => {
   test('accepts candidate within baseline quality tolerances', () => {
