@@ -45088,6 +45088,9 @@ export function createNovelWritingService(ctx: {
       await onStage('meme_polish', { status: 'skipped', reason: '生产模式：只生成并质检初稿' })
     }
     if (!isDraftOnly) {
+      const preEditorText = finalText
+      const preEditorSceneBreakdown = finalSceneBreakdown
+      const preEditorContinuityNotes = finalContinuityNotes
       throwIfChapterGenerationAborted()
       await onStage('editor', { status: 'running' })
       try {
@@ -45119,8 +45122,44 @@ export function createNovelWritingService(ctx: {
         await onStage('word_target', { status: 'success', expanded: postEditorWordTargetCheck.expanded, contracted: postEditorWordTargetCheck.contracted, soft_pass: postEditorWordTargetCheck.word_target_soft_pass, contraction_attempts: postEditorWordTargetCheck.contraction?.attempts, word_count: countProseChars(finalText), evaluation: postEditorWordTargetCheck.final_evaluation, phase: 'post_editor' })
       }
     } catch (error: any) {
-      await onStage('word_target', { status: 'failed', error: String(error?.message || error), word_target: error?.word_target || wordTarget, evaluation: error?.evaluation, final_evaluation: error?.final_evaluation, contraction_attempts: error?.contraction_attempts, expansion_attempts: error?.expansion_attempts, phase: 'post_editor' })
-      throw error
+      const preEditorEvaluation = evaluateProseWordTarget(preEditorText, wordTarget)
+      if (error?.code === 'PROSE_WORD_TARGET_LONG' && preEditorEvaluation.passed) {
+        finalText = preEditorText
+        finalSceneBreakdown = preEditorSceneBreakdown
+        finalContinuityNotes = preEditorContinuityNotes
+        const {
+          final_text: _discardedEditorText,
+          revision: _discardedEditorRevision,
+          ...editorDiagnostics
+        } = editorRewrite || {}
+        editorRewrite = {
+          ...editorDiagnostics,
+          edited: false,
+          discarded: true,
+          discard_reason: 'post_editor_word_target_failed',
+          word_target_failure: {
+            code: error.code,
+            evaluation: error?.evaluation,
+            final_evaluation: error?.final_evaluation,
+            contraction_attempts: error?.contraction_attempts,
+            restored_evaluation: preEditorEvaluation,
+          },
+        }
+        await onStage('word_target', {
+          status: 'warn',
+          phase: 'post_editor',
+          error: String(error?.message || error),
+          fallback: 'pre_editor',
+          word_target: error?.word_target || wordTarget,
+          evaluation: error?.evaluation,
+          final_evaluation: error?.final_evaluation,
+          restored_evaluation: preEditorEvaluation,
+          contraction_attempts: error?.contraction_attempts,
+        })
+      } else {
+        await onStage('word_target', { status: 'failed', error: String(error?.message || error), word_target: error?.word_target || wordTarget, evaluation: error?.evaluation, final_evaluation: error?.final_evaluation, contraction_attempts: error?.contraction_attempts, expansion_attempts: error?.expansion_attempts, phase: 'post_editor' })
+        throw error
+      }
     }
     throwIfChapterGenerationAborted()
     await onStage('meme_polish', { status: 'running' })

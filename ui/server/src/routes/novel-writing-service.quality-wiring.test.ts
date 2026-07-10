@@ -7,6 +7,8 @@ import {
   resolveChapterWordTarget,
   scanProseForQualityLoop,
 } from './novel-writing-service'
+import { normalizeProseForStorage } from '../novel-writing/chapter-prose-storage-patch'
+import { buildPipelineProse, createProsePipelineHarness } from './novel-writing-service.test-support'
 
 describe('novel writing service prose quality wiring', () => {
   const contractionWordTarget = {
@@ -120,6 +122,44 @@ describe('novel writing service prose quality wiring', () => {
     expect(attempt?.rejection_reason).toContain('finish_reason_max_tokens')
     expect(attempt).not.toHaveProperty('candidate_text')
     expect(attempt).not.toHaveProperty('prompt')
+  })
+
+  test('restores the valid pre-editor prose when optional editor output cannot meet the word target', async () => {
+    const draftText = buildPipelineProse(
+      '江澈踏碎路面，飞石逼退第一排追兵，铁门前终于露出缺口。',
+      '借自己制造的盲区夺下通讯器，继续迫使追捕队后撤',
+    )
+    const editorText = `${draftText}${'商业主编增加的冗余解释没有改变场景状态。'.repeat(30)}`
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText,
+      editorText,
+    })
+
+    const result = await harness.service.generateChapterForGroup(
+      harness.workspace,
+      harness.project.id,
+      harness.chapter.id,
+      {
+        model_id: 217,
+        target_word_count: 1000,
+        quality_threshold: 78,
+        auto_repair_quality_gate: true,
+      },
+    )
+
+    const expectedStoredText = normalizeProseForStorage(draftText)
+    expect(countProseChars(editorText)).toBeGreaterThan(1100)
+    expect(result.chapter.chapter_text).toBe(expectedStoredText)
+    expect(result.chapter.chapter_text).not.toContain('商业主编增加的冗余解释')
+    expect(result.editor_rewrite).toMatchObject({
+      edited: false,
+      discarded: true,
+      discard_reason: 'post_editor_word_target_failed',
+    })
+    expect(JSON.stringify(result.editor_rewrite)).not.toContain('商业主编增加的冗余解释')
+    expect(result.quality_loop.decision.passed).toBe(true)
+    expect(harness.storeCalls).toBe(1)
+    expect(harness.storyStateTexts).toEqual([expectedStoredText])
   })
 
   test('rechecks revised prose before unattended quality gate blocks chapter advance', () => {

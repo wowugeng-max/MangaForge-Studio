@@ -34,6 +34,7 @@ export function buildPipelineProse(opening: string, action: string) {
 
 type ProsePipelineHarnessOptions = {
   draftText?: string
+  editorText?: string
   reviewPayloads?: any[]
   revisionTexts?: string[]
   recheckError?: Error
@@ -147,7 +148,7 @@ export async function createProsePipelineHarness(
     const task = String(input?.task || '')
     if (task.includes('商业主编')) {
       modelCalls.editor += 1
-      return { parsed: { chapter_text: draftText, editor_report: { passed: true } }, modelName: 'fake-editor' } as any
+      return { parsed: { chapter_text: options.editorText || draftText, editor_report: { passed: true } }, modelName: 'fake-editor' } as any
     }
     if (task.startsWith('任务：独立审查小说正文') || task.startsWith('任务：对刚生成的小说章节进行章节级自检')) {
       modelCalls.review += 1
