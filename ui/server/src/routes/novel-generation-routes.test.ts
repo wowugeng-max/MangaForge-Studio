@@ -67,6 +67,24 @@ describe('novel generate prose route source guards', () => {
     expect(compacted.raw_payload).toBeUndefined()
   })
 
+  test('resolves every chapter-group quality threshold through request project and default precedence', async () => {
+    const routes = await import('./novel-generation-routes')
+    const resolveThreshold = (routes as any).resolveChapterGroupQualityThreshold
+    const project = { reference_config: { quality_gate: { min_score: 90 } } }
+
+    expect(resolveThreshold?.({ quality_threshold: 87 }, project)).toBe(87)
+    expect(resolveThreshold?.({ qualityThreshold: 86 }, project)).toBe(86)
+    expect(resolveThreshold?.({ quality_threshold: 0 }, project)).toBe(90)
+    expect(resolveThreshold?.({}, project)).toBe(90)
+    expect(resolveThreshold?.({}, { reference_config: { quality_gate: { minScore: 91 } } })).toBe(91)
+    expect(resolveThreshold?.({}, {})).toBe(78)
+
+    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    expect(source).not.toContain('Number(req.body.quality_threshold || 78)')
+    expect(source).not.toContain('Number(req.body.quality_threshold || project.reference_config?.quality_gate?.min_score || 78)')
+    expect(source.match(/resolveChapterGroupQualityThreshold\(req\.body, project\)/g)).toHaveLength(4)
+  })
+
   test('passes prose constraints to the unified service without auto approving scene cards', () => {
     const onStage = async () => {}
     const abortSignal = new AbortController().signal

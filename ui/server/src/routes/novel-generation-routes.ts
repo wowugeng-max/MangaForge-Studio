@@ -132,6 +132,18 @@ export function compactGenerationRequestOverride(value: any, key = '', depth = 0
   return compactProseGenerationOverride(value, key, depth, seen)
 }
 
+export function resolveChapterGroupQualityThreshold(body: any = {}, project: any = {}) {
+  return [
+    body?.quality_threshold,
+    body?.qualityThreshold,
+    project?.reference_config?.quality_gate?.min_score,
+    project?.reference_config?.quality_gate?.minScore,
+    78,
+  ]
+    .map(value => Number(value))
+    .find(value => Number.isFinite(value) && value > 0) || 78
+}
+
 const STANDALONE_PROGRESS_MAX_STRING = 240
 const STANDALONE_PROGRESS_MAX_ARRAY = 6
 const STANDALONE_PROGRESS_MAX_DEPTH = 4
@@ -625,7 +637,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         policy: {
           stop_on_failure: req.body.stop_on_failure !== false,
           require_scene_confirmation: req.body.require_scene_confirmation ?? approvalPolicy.require_scene_card_approval,
-          quality_threshold: Number(req.body.quality_threshold || 78),
+          quality_threshold: resolveChapterGroupQualityThreshold(req.body, project),
           production_mode: req.body.production_mode || 'draft_review_revise_store',
         },
       }
@@ -713,7 +725,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         policy: {
           stop_on_failure: req.body.stop_on_failure !== false,
           require_scene_confirmation: req.body.require_scene_confirmation ?? approvalPolicy.require_scene_card_approval,
-          quality_threshold: Number(req.body.quality_threshold || 78),
+          quality_threshold: resolveChapterGroupQualityThreshold(req.body, project),
           min_material_score: minScore,
           production_mode: req.body.production_mode || 'draft_review_revise_store',
         },
@@ -866,7 +878,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         policy: {
           stop_on_failure: req.body.stop_on_failure !== false,
           require_scene_confirmation: req.body.require_scene_confirmation ?? approvalPolicy.require_scene_card_approval,
-          quality_threshold: Number(req.body.quality_threshold || 78),
+          quality_threshold: resolveChapterGroupQualityThreshold(req.body, project),
           min_skeleton_score: minScore,
           production_mode: req.body.production_mode || 'draft_review_revise_store',
         },
@@ -1078,7 +1090,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const modelStrategy = project.reference_config?.model_strategy || ctx.getModelStrategy(project, Number(req.body.model_id || 0) || undefined)
       const approvalPolicy = { ...(project.reference_config?.approval_policy || ctx.getApprovalPolicy(project)), allow_full_auto: true }
       const configSnapshot = ctx.buildAgentConfigSnapshot(project, Number(req.body.model_id || 0) || undefined)
-      const qualityThreshold = Number(req.body.quality_threshold || project.reference_config?.quality_gate?.min_score || 78)
+      const qualityThreshold = resolveChapterGroupQualityThreshold(req.body, project)
       const output = {
         chapter_ids: selected.map(chapter => chapter.id),
         chapters: selected.map(chapter => ({
