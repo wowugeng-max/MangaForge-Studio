@@ -3,7 +3,10 @@ import {
   compileProseContractPrompt,
   ProseCorePromptBudgetError,
 } from './prose-contract-prompt'
-import { buildProseGenerationContract } from './prose-generation-contract'
+import {
+  buildProseGenerationContract,
+  mergeProseGenerationRequestOverrides,
+} from './prose-generation-contract'
 import { selectOhStoryDirectorContracts } from '../routes/novel-oh-story-director'
 import { compileParagraphProseContext } from '../routes/novel-writing-service'
 
@@ -195,6 +198,48 @@ describe('prose contract prompt compiler', () => {
     expect(compiled.diagnostics.required_chars).toBeLessThan(48_000)
     expect(compiled.prompt).toContain(depthSentinel)
     expect(compiled.prompt).not.toContain('[MaxDepth]')
+  })
+
+  test('production safe-batch request carries chapter duties into the required prompt', () => {
+    const tailSentinel = 'PRODUCTION_SAFE_BATCH_MAINLINE_TAIL'
+    const context = mergeProseGenerationRequestOverrides(
+      {
+        chapter_target: {
+          chapter_no: 10,
+          title: '镇门危局',
+          goal: '突破地面火力网',
+          conflict: '履带装甲车封死出口',
+          ending_hook: '枯井下出现无尽回廊',
+          scene_cards: [{ scene_no: 1, goal: '夺取突破口' }],
+        },
+        preflight: { ready: true, strict_ready: true, checks: [] },
+        oh_story_director: { readiness: 'ready', selected_contracts: [] },
+      },
+      {
+        nextBatchBrief: {
+          batchGoal: '连续三章推进内门势力线',
+          chapters: [{
+            chapterNo: 10,
+            title: '镇门危局',
+            chapterTask: '主角主动突破地面火力网',
+            conflict: '履带装甲车封死出口',
+            endingHook: '枯井下出现无尽回廊',
+            mainlineProgress: `由地面追捕转入复眼遗迹主线-${tailSentinel}`,
+            chapterText: 'UNSAFE_NESTED_CHAPTER_TEXT',
+            rawPayload: { debug: 'UNSAFE_NESTED_DEBUG_PAYLOAD' },
+          }],
+        },
+      },
+    )
+    const compiled = compileParagraphProseContext(
+      { title: '怪谈世界' },
+      buildProseGenerationContract(context),
+    )
+
+    expect(compiled.prompt).toContain('主角主动突破地面火力网')
+    expect(compiled.prompt).toContain(tailSentinel)
+    expect(compiled.prompt).not.toContain('UNSAFE_NESTED_CHAPTER_TEXT')
+    expect(compiled.prompt).not.toContain('UNSAFE_NESTED_DEBUG_PAYLOAD')
   })
 
   test('loads no more than four director-selected risk contracts', () => {

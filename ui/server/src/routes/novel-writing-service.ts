@@ -1110,6 +1110,14 @@ function buildRequiredProseCoreSections(
       batch_goal: nextBatchBrief?.batch_goal || nextBatchBrief?.batchGoal,
       current_chapter_role: nextBatchBrief?.current_chapter_role || nextBatchBrief?.currentChapterRole,
       must_deliver: asArray(nextBatchBrief?.must_deliver || nextBatchBrief?.mustDeliver),
+      chapters: asArray(nextBatchBrief?.chapters).map((chapter: any) => ({
+        chapter_no: chapter?.chapter_no ?? chapter?.chapterNo,
+        title: chapter?.title,
+        chapter_task: chapter?.chapter_task || chapter?.chapterTask,
+        conflict: chapter?.conflict,
+        ending_hook: chapter?.ending_hook || chapter?.endingHook,
+        mainline_progress: chapter?.mainline_progress || chapter?.mainlineProgress,
+      })),
     },
     request_delivery_risk: {
       quality_focus: asArray(deliveryRisk?.quality_focus || deliveryRisk?.qualityFocus),

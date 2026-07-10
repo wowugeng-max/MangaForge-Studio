@@ -48,13 +48,12 @@ const REQUEST_OVERRIDE_FIELDS = [
 const REQUEST_OVERRIDE_MAX_STRING = 800
 const REQUEST_OVERRIDE_MAX_ARRAY = 12
 const REQUEST_OVERRIDE_MAX_DEPTH = 5
-const REQUEST_OVERRIDE_DROP_KEYS = new Set([
+const REQUIRED_REQUEST_OVERRIDE_DROP_KEYS = new Set([
   'context_package',
   'contextPackage',
   'raw_payload',
   'rawPayload',
   'pipeline',
-  'chapters',
   'chapter_text',
   'chapterText',
   'full_text',
@@ -64,6 +63,10 @@ const REQUEST_OVERRIDE_DROP_KEYS = new Set([
   'debug',
   'diagnostics',
 ])
+const DIAGNOSTIC_REQUEST_OVERRIDE_DROP_KEYS = new Set([
+  ...REQUIRED_REQUEST_OVERRIDE_DROP_KEYS,
+  'chapters',
+])
 
 export function compactProseGenerationOverride(
   value: any,
@@ -71,7 +74,7 @@ export function compactProseGenerationOverride(
   depth = 0,
   seen = new WeakSet<object>(),
 ): any {
-  if (REQUEST_OVERRIDE_DROP_KEYS.has(key)) return undefined
+  if (DIAGNOSTIC_REQUEST_OVERRIDE_DROP_KEYS.has(key)) return undefined
   if (value === null || value === undefined) return value
   const valueType = typeof value
   if (valueType === 'string') {
@@ -110,7 +113,7 @@ function sanitizeRequiredProseGenerationOverride(
   key = '',
   seen = new WeakSet<object>(),
 ): any {
-  if (REQUEST_OVERRIDE_DROP_KEYS.has(key)) return undefined
+  if (REQUIRED_REQUEST_OVERRIDE_DROP_KEYS.has(key)) return undefined
   if (value === null || value === undefined) return value
   const valueType = typeof value
   if (valueType === 'string') return value.trim()

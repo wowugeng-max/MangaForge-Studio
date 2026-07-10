@@ -61,6 +61,36 @@ describe('prose generation contract', () => {
     expect(JSON.stringify(contract.context.longform_compass)).toContain(depthTail)
   })
 
+  test('keeps safe-batch chapter duties while dropping nested prose payloads', () => {
+    const merged = mergeProseGenerationRequestOverrides(
+      { chapter_target: { chapter_no: 10, title: '合围' } },
+      {
+        nextBatchBrief: {
+          batchGoal: '连续三章推进内门势力线',
+          chapters: [{
+            chapterNo: 10,
+            title: '镇门危局',
+            chapterTask: '主角主动突破地面火力网',
+            conflict: '履带装甲车封死出口',
+            endingHook: '枯井下出现无尽回廊',
+            mainlineProgress: '由地面追捕转入复眼遗迹主线',
+            chapterText: '不应把完整正文带入 required 合同',
+            rawPayload: { debug: '不应带入模型上下文' },
+          }],
+        },
+      },
+    )
+
+    expect(merged.chapter_target.next_batch_brief.chapters).toEqual([{
+      chapterNo: 10,
+      title: '镇门危局',
+      chapterTask: '主角主动突破地面火力网',
+      conflict: '履带装甲车封死出口',
+      endingHook: '枯井下出现无尽回廊',
+      mainlineProgress: '由地面追捕转入复眼遗迹主线',
+    }])
+  })
+
   test('normalizes aliases and removes only a terminal contract suffix', () => {
     expect(normalizeProseContractKey('quality_audit_contract')).toBe('quality_audit')
     expect(normalizeProseContractKey('characterBehaviorContract')).toBe('character_behavior')
