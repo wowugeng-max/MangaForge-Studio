@@ -243,6 +243,7 @@ import {
   proseMaxTokensForWordTarget,
   prepareProseGenerationContract,
   resolveChapterWordTarget,
+  scanProseForQualityLoop,
 } from './novel-writing-service'
 import { buildLLMResultDiagnostics, buildPreflightChecks, deepMergeObjects, extractPlainProseFallback, formatReviewIssueForStorage, getNovelPayload, getQualityGateDecision, getStyleLock, normalizeIssue } from './novel-route-utils'
 import { buildProseGenerationContract } from '../novel-writing/prose-generation-contract'
@@ -11353,6 +11354,25 @@ describe('chapter prose word target', () => {
     expect(evaluation.too_long).toBe(true)
     expect(evaluation.actual).toBe(12389)
     expect(evaluation.max).toBe(5200)
+  })
+
+  test('applies the prose word-target soft cap inside the quality-loop scanner', () => {
+    const target = resolveChapterWordTarget({}, { chapter_no: 1 }, {})
+    const softCapScan = scanProseForQualityLoop('字'.repeat(5219), {}, target)
+    const overTargetScan = scanProseForQualityLoop('字'.repeat(5700), {}, target)
+
+    expect(softCapScan.word_target).toMatchObject({
+      actual: 5219,
+      passed: true,
+      soft_cap: true,
+    })
+    expect(softCapScan.hard_failures.some((item: any) => item.key === 'word_target')).toBe(false)
+    expect(overTargetScan.word_target).toMatchObject({
+      actual: 5700,
+      passed: false,
+      soft_cap: false,
+    })
+    expect(overTargetScan.hard_failures.some((item: any) => item.key === 'word_target')).toBe(true)
   })
 
   test('contracts over-target prose before word-target expansion attempts', () => {
