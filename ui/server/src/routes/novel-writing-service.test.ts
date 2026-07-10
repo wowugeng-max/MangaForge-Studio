@@ -11363,10 +11363,10 @@ describe('chapter prose word target', () => {
     const tooLongStart = ensureBlock.indexOf('if (evaluation.too_long && options.contract !== false)')
     const contractionStart = ensureBlock.indexOf('const maxContractionAttempts', tooLongStart)
     const expansionStart = ensureBlock.indexOf('const maxExpansionAttempts')
-    const softCapStart = ensureBlock.indexOf('isWithinProseWordTargetSoftCap(evaluation)')
+    const softCapStart = ensureBlock.indexOf('applyProseWordTargetSoftCap(evaluateProseWordTarget(chapterText, wordTarget))')
 
     expect(ensureStart).toBeGreaterThanOrEqual(0)
-    expect(softCapStart).toBeGreaterThanOrEqual(0)
+    expect(ensureBlock.match(/applyProseWordTargetSoftCap\(evaluateProseWordTarget/g)).toHaveLength(3)
     expect(softCapStart).toBeLessThan(tooLongStart)
     expect(tooLongStart).toBeGreaterThanOrEqual(0)
     expect(contractionStart).toBeGreaterThan(tooLongStart)
@@ -55103,6 +55103,7 @@ describe('chapter context word target source guards', () => {
     expect(beforeGate).toContain("phase: round > 0 ? 'quality_recheck' : 'quality_review'")
     expect(beforeGate).toContain('assertProseQualityCanStore(qualityLoop.decision, approvals?.quality_gate)')
     expect(beforeGate).not.toContain('runProseSelfReviewAndRevision')
+    expect(beforeGate).toContain('maxTokens: 5000')
   })
 
   test('passes oh-story revision strategy brief into prose revision prompt', () => {

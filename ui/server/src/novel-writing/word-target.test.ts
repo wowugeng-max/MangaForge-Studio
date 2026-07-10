@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   applyChapterWordTargetToContext,
+  applyProseWordTargetSoftCap,
   countProseChars,
   evaluateProseWordTarget,
   isWithinProseWordTargetSoftCap,
@@ -84,5 +85,22 @@ describe('novel writing word target utilities', () => {
     expect(isWithinProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(5220), target))).toBe(true)
     expect(isWithinProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(5700), target))).toBe(false)
     expect(isWithinProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(3199), target))).toBe(false)
+  })
+
+  test('normalizes a tiny over-target result into one shared passing decision', () => {
+    const target = resolveChapterWordTarget({}, { chapter_no: 1 }, {})
+
+    expect(applyProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(5219), target))).toMatchObject({
+      actual: 5219,
+      too_long: false,
+      passed: true,
+      soft_cap: true,
+    })
+    expect(applyProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(5700), target))).toMatchObject({
+      actual: 5700,
+      too_long: true,
+      passed: false,
+      soft_cap: false,
+    })
   })
 })

@@ -60,9 +60,9 @@ import {
 } from './novel-route-utils'
 import {
   applyChapterWordTargetToContext,
+  applyProseWordTargetSoftCap,
   countProseChars,
   evaluateProseWordTarget,
-  isWithinProseWordTargetSoftCap,
   proseMaxTokensForWordTarget,
   resolveChapterWordTarget,
   type ChapterWordTarget,
@@ -882,7 +882,7 @@ export function prepareProseGenerationContract(baseContext: any, options: any = 
 
 export function scanProseForQualityLoop(text: string, contextPackage: any, wordTarget: any) {
   const cleanup = buildDeterministicProseCleanupReport(contextPackage?.chapter_target || {}, text)
-  const word = evaluateProseWordTarget(text, wordTarget)
+  const word = applyProseWordTargetSoftCap(evaluateProseWordTarget(text, wordTarget))
   const cleanupHardTypes = new Set(['model_degeneration', 'prose_meta', 'prose_format'])
   const cleanupHardFailures = asArray(cleanup?.categories)
     .filter((category: any) => Number(category?.count || 0) > 0)
@@ -43810,24 +43810,19 @@ export function createNovelWritingService(ctx: {
 
   const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
     const wordTarget = contextPackage?.chapter_target?.word_target as ChapterWordTarget | null | undefined
-    let evaluation = evaluateProseWordTarget(chapterText, wordTarget)
+    let evaluation = applyProseWordTargetSoftCap(evaluateProseWordTarget(chapterText, wordTarget))
     const reviseModelId = ctx.production.getStageModelId(project, 'revise', modelId)
     let currentText = String(chapterText || '')
     let currentEvaluation = evaluation
     let contractionResultPayload: any = null
-    if (isWithinProseWordTargetSoftCap(evaluation)) {
+    if (evaluation.soft_cap) {
       return {
         final_text: chapterText,
         contracted: false,
         expanded: false,
         word_target_soft_pass: true,
         evaluation,
-        final_evaluation: {
-          ...evaluation,
-          too_long: false,
-          passed: true,
-          soft_cap: true,
-        },
+        final_evaluation: evaluation,
         expansion: null,
       }
     }
@@ -43850,7 +43845,7 @@ export function createNovelWritingService(ctx: {
         })
         const extracted = extractProseExpansionPayload(contractionResult)
         const contractedText = extracted.text
-        const finalEvaluation = evaluateProseWordTarget(contractedText, wordTarget)
+        const finalEvaluation = applyProseWordTargetSoftCap(evaluateProseWordTarget(contractedText, wordTarget))
         const previousCount = countProseChars(currentText)
         const contractedCount = countProseChars(contractedText)
 
@@ -43949,7 +43944,7 @@ export function createNovelWritingService(ctx: {
       })
       const extracted = extractProseExpansionPayload(expansionResult)
       const expandedText = extracted.text
-      const finalEvaluation = evaluateProseWordTarget(expandedText, wordTarget)
+      const finalEvaluation = applyProseWordTargetSoftCap(evaluateProseWordTarget(expandedText, wordTarget))
       const previousCount = countProseChars(currentText)
       const expandedCount = countProseChars(expandedText)
 
@@ -45159,7 +45154,7 @@ export function createNovelWritingService(ctx: {
           const result = await executeAgent('review-agent', project, { task: prompt }, {
             activeWorkspace,
             modelId: String(ctx.production.getStageModelId(project, 'review', preferredModelId) || ''),
-            maxTokens: 2600,
+            maxTokens: 5000,
             temperature: 0.15,
             skipMemory: true,
             signal: options.abortSignal,

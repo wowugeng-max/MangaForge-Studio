@@ -16,6 +16,7 @@ export type ProseWordTargetEvaluation = {
   too_short: boolean
   too_long: boolean
   passed: boolean
+  soft_cap?: boolean
 }
 
 function clampWordTarget(value: number) {
@@ -118,4 +119,13 @@ export function isWithinProseWordTargetSoftCap(evaluation: ProseWordTargetEvalua
   const minimumTolerance = Number.isFinite(Number(options.minimum_tolerance)) ? Number(options.minimum_tolerance) : 20
   const tolerance = Math.max(minimumTolerance, Math.ceil(max * toleranceRatio))
   return actual <= max + tolerance
+}
+
+export function applyProseWordTargetSoftCap(evaluation: ProseWordTargetEvaluation) {
+  const softCap = isWithinProseWordTargetSoftCap(evaluation)
+  return {
+    ...evaluation,
+    ...(softCap ? { too_long: false, passed: true } : {}),
+    soft_cap: softCap,
+  }
 }
