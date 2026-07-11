@@ -36,6 +36,39 @@ export interface ProsePreDraftGateDecision {
   details?: any
 }
 
+export type StrictPreflightReadinessStatus = 'ready' | 'not_ready' | 'missing'
+
+export interface StrictPreflightReadinessResolution {
+  status: StrictPreflightReadinessStatus
+  ready: boolean
+  fields: string[]
+  reason: string
+}
+
+const MISSING_STRICT_PREFLIGHT_REASON = 'Missing required preflight.strict_ready verification.'
+const FAILED_STRICT_PREFLIGHT_REASON = 'Strict preflight readiness verification did not pass.'
+
+export function resolveStrictPreflightReadiness(preflight: any): StrictPreflightReadinessResolution {
+  const source = preflight && typeof preflight === 'object' ? preflight : {}
+  const fields = ['strict_ready', 'strictReady'].filter(field => Object.prototype.hasOwnProperty.call(source, field))
+  if (fields.length === 0) {
+    return {
+      status: 'missing',
+      ready: false,
+      fields,
+      reason: MISSING_STRICT_PREFLIGHT_REASON,
+    }
+  }
+
+  const ready = fields.every(field => source[field] === true)
+  return {
+    status: ready ? 'ready' : 'not_ready',
+    ready,
+    fields,
+    reason: ready ? '' : FAILED_STRICT_PREFLIGHT_REASON,
+  }
+}
+
 const REQUEST_OVERRIDE_FIELDS = [
   ['longform_compass', 'longformCompass'],
   ['longform_battle_context', 'longformBattleContext'],
@@ -262,14 +295,18 @@ export function evaluateProsePreDraftGate(
       details: preflight,
     }
   }
-  if (preflight.strict_ready === false) {
+  const strictReadiness = resolveStrictPreflightReadiness(preflight)
+  if (!strictReadiness.ready) {
     const failures = (Array.isArray(preflight.checks) ? preflight.checks : [])
       .filter((item: any) => item?.ok === false && item?.severity !== 'low')
+    const details = strictReadiness.status !== 'missing' && failures.length > 0
+      ? failures
+      : [{ key: 'preflight.strict_ready', source: 'preflight.strict_ready', detail: strictReadiness.reason }]
     return {
       passed: false,
       code: 'PROSE_STRICT_PREFLIGHT_BLOCKED',
-      reasons: asReasonList(failures.length ? failures : preflight.warnings),
-      details: failures,
+      reasons: asReasonList(details),
+      details,
     }
   }
 

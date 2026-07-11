@@ -20,6 +20,99 @@ const sixDimensionScores = {
 }
 
 describe('prose quality decisions', () => {
+  test('treats a false or omitted publishable verdict as a stable LLM hard failure', () => {
+    for (const publishable of [false, undefined]) {
+      const decision = buildProseQualityDecision({
+        chapterText: '正文没有其他硬质量问题。',
+        review: normalizeProseQualityReview({
+          score: 90,
+          dimensions: sixDimensionScores,
+          ...(publishable === undefined ? {} : { publishable }),
+          findings: [],
+        }),
+        deterministicScan: { hard_failures: [] },
+        minScore: 78,
+      })
+
+      expect(decision).toMatchObject({ passed: false, approvable: false })
+      expect(decision.hard_failures).toEqual([
+        expect.objectContaining({ key: 'quality_publishable_verdict', source: 'llm' }),
+      ])
+    }
+  })
+
+  test('enforces the dimension hard floor for every required quality dimension with five passing', () => {
+    for (const dimension of Object.keys(sixDimensionScores)) {
+      const belowFloor = buildProseQualityDecision({
+        chapterText: '正文没有其他硬质量问题。',
+        review: normalizeProseQualityReview({
+          score: 90,
+          publishable: true,
+          dimensions: { ...sixDimensionScores, [dimension]: 4 },
+          findings: [],
+        }),
+        deterministicScan: { hard_failures: [] },
+        minScore: 78,
+      })
+      const atFloor = buildProseQualityDecision({
+        chapterText: '正文没有其他硬质量问题。',
+        review: normalizeProseQualityReview({
+          score: 90,
+          publishable: true,
+          dimensions: { ...sixDimensionScores, [dimension]: 5 },
+          findings: [],
+        }),
+        deterministicScan: { hard_failures: [] },
+        minScore: 78,
+      })
+
+      expect(belowFloor.hard_failures).toEqual([
+        expect.objectContaining({ key: `quality_dimension_${dimension}`, source: 'llm' }),
+      ])
+      expect(atFloor).toMatchObject({ passed: true, approvable: true, hard_failures: [] })
+    }
+  })
+
+  test('treats missing and non-finite required dimensions as hard failures', () => {
+    for (const dimension of Object.keys(sixDimensionScores)) {
+      for (const invalidScore of [undefined, Number.NaN, Number.POSITIVE_INFINITY]) {
+        const dimensions = { ...sixDimensionScores, [dimension]: invalidScore }
+        const decision = buildProseQualityDecision({
+          chapterText: '正文没有其他硬质量问题。',
+          review: normalizeProseQualityReview({
+            score: 90,
+            publishable: true,
+            dimensions,
+            findings: [],
+          }),
+          deterministicScan: { hard_failures: [] },
+          minScore: 78,
+        })
+
+        expect(decision.hard_failures).toEqual([
+          expect.objectContaining({ key: `quality_dimension_${dimension}`, source: 'llm' }),
+        ])
+      }
+    }
+  })
+
+  test('keeps a score-only miss approvable when the complete verdict has no hard failure', () => {
+    const decision = buildProseQualityDecision({
+      chapterText: '正文没有硬质量问题。',
+      review: normalizeProseQualityReview({
+        score: 76,
+        publishable: true,
+        dimensions: Object.fromEntries(Object.keys(sixDimensionScores).map(key => [key, 5])),
+        findings: [],
+      }),
+      deterministicScan: { hard_failures: [] },
+      minScore: 78,
+    })
+
+    expect(decision).toMatchObject({ passed: false, approvable: true, hard_failures: [] })
+    expect(assertProseQualityCanStore(decision, { approved: true })).toBe(true)
+  })
+
   test('keeps at most six blocking and four advisory findings', () => {
     const review = normalizeProseQualityReview({
       score: 84,
@@ -66,8 +159,11 @@ describe('prose quality decisions', () => {
 
   test('never allows generic approval to waive deterministic or S1/S2 hard failures', () => {
     const decision = buildProseQualityDecision({
+      chapterText: '江澈全程等待救援。',
       review: normalizeProseQualityReview({
         score: 92,
+        publishable: true,
+        dimensions: sixDimensionScores,
         findings: [{
           key: 'agency',
           severity: 'S2',
@@ -91,7 +187,13 @@ describe('prose quality decisions', () => {
 
   test('allows approval only for advisory or score-only failure', () => {
     const decision = buildProseQualityDecision({
-      review: normalizeProseQualityReview({ score: 76, findings: [] }),
+      chapterText: '正文没有硬质量问题。',
+      review: normalizeProseQualityReview({
+        score: 76,
+        publishable: true,
+        dimensions: sixDimensionScores,
+        findings: [],
+      }),
       deterministicScan: { hard_failures: [] },
       minScore: 78,
     })
@@ -100,6 +202,209 @@ describe('prose quality decisions', () => {
     expect(decision.approvable).toBe(true)
     expect(assertProseQualityCanStore(decision, { approved: true })).toBe(true)
     expect(() => assertProseQualityCanStore(decision)).toThrowError(/评分未获批准/)
+  })
+
+  test('downgrades unlocatable evidence to advisory instead of blocking', () => {
+    const decision = buildProseQualityDecision({
+      chapterText: '江澈推开仓门，铜锁坠在地上。',
+      review: normalizeProseQualityReview({
+        score: 90,
+        publishable: true,
+        dimensions: sixDimensionScores,
+        findings: [{
+          key: 'invented_agency_gap',
+          severity: 'S2',
+          dimension: 'core_promise_agency',
+          evidence: '江澈全程等待救援。',
+          required_change: '让江澈主动破局',
+          acceptance_test: '关键结果来自主角选择',
+        }],
+      }),
+      deterministicScan: { hard_failures: [] },
+      minScore: 78,
+    })
+
+    expect(decision).toMatchObject({ passed: true, approvable: true, hard_failures: [] })
+    expect(decision.advisory_failures.join('｜')).toContain('invented_agency_gap')
+    expect(decision.advisory_failures.join('｜')).toContain('无法在当前正文定位')
+  })
+
+  test('keeps every supported quote pair with NBSP and full-width whitespace locatable', () => {
+    const quotePairs = [
+      ['“', '”'],
+      ['‘', '’'],
+      ['「', '」'],
+      ['『', '』'],
+      ['"', '"'],
+      ["'", "'"],
+    ]
+
+    for (const [opening, closing] of quotePairs) {
+      const decision = buildProseQualityDecision({
+        chapterText: '江澈推开仓门，\u00a0\u3000铜锁坠在地上。',
+        review: normalizeProseQualityReview({
+          score: 90,
+          publishable: true,
+          dimensions: sixDimensionScores,
+          findings: [{
+            key: `causality_gap_${opening}`,
+            severity: 'S2',
+            dimension: 'conflict_causality',
+            evidence: `${opening}江澈推开仓门， 铜锁坠在地上。${closing}`,
+            required_change: '补足铜锁坠地的动作原因',
+            acceptance_test: '动作与结果形成因果链',
+          }],
+        }),
+        deterministicScan: { hard_failures: [] },
+        minScore: 78,
+      })
+
+      expect(decision.passed).toBe(false)
+      expect(decision.hard_failures).toEqual([
+        expect.objectContaining({ source: 'llm' }),
+      ])
+    }
+  })
+
+  test('keeps single-sided and mismatched quote evidence unlocatable', () => {
+    const chapterText = '江澈推开仓门，铜锁坠在地上。'
+    const evidenceCases = [
+      '“江澈推开仓门，铜锁坠在地上。',
+      '江澈推开仓门，铜锁坠在地上。”',
+      '“江澈推开仓门，铜锁坠在地上。’',
+    ]
+
+    for (const [index, evidence] of evidenceCases.entries()) {
+      const decision = buildProseQualityDecision({
+        chapterText,
+        review: normalizeProseQualityReview({
+          score: 90,
+          publishable: true,
+          dimensions: sixDimensionScores,
+          findings: [{
+            key: `invalid_quote_${index}`,
+            severity: 'S2',
+            dimension: 'conflict_causality',
+            evidence,
+            required_change: '补足铜锁坠地的动作原因',
+            acceptance_test: '动作与结果形成因果链',
+          }],
+        }),
+        deterministicScan: { hard_failures: [] },
+        minScore: 78,
+      })
+
+      expect(decision).toMatchObject({ passed: true, approvable: true, hard_failures: [] })
+      expect(decision.advisory_failures.join('｜')).toContain(`invalid_quote_${index}`)
+      expect(decision.advisory_failures.join('｜')).toContain('无法在当前正文定位')
+    }
+  })
+
+  test('downgrades evidence longer than the bounded short-evidence limit', () => {
+    const evidence = `${'甲'.repeat(500)}乙`
+    const review = normalizeProseQualityReview({
+      score: 90,
+      publishable: true,
+      dimensions: sixDimensionScores,
+      findings: [{
+        key: 'oversized_evidence',
+        severity: 'S2',
+        dimension: 'continuity',
+        evidence,
+        required_change: '修复连续性',
+        acceptance_test: '证据可定位',
+      }],
+    })
+    const decision = buildProseQualityDecision({
+      chapterText: '甲'.repeat(500),
+      review,
+      deterministicScan: { hard_failures: [] },
+      minScore: 78,
+    })
+
+    expect(review.blocking_findings).toHaveLength(0)
+    expect(review.advisory_findings).toEqual([
+      expect.objectContaining({ key: 'oversized_evidence', severity: 'S3' }),
+    ])
+    expect(decision).toMatchObject({ passed: true, approvable: true, hard_failures: [] })
+    expect(decision.advisory_failures.join('｜')).toContain('oversized_evidence')
+  })
+
+  test('deduplicates identical finding fingerprints without collapsing different evidence for the same key', () => {
+    const repeated = {
+      key: 'same_key',
+      severity: 'S2',
+      dimension: 'continuity',
+      evidence: '第一处证据。',
+      required_change: '补连续动作',
+      acceptance_test: '动作连续',
+    }
+    const decision = buildProseQualityDecision({
+      chapterText: '第一处证据。第二处证据。',
+      review: normalizeProseQualityReview({
+        score: 90,
+        publishable: true,
+        dimensions: sixDimensionScores,
+        findings: [
+          repeated,
+          { ...repeated },
+          { ...repeated, evidence: '第二处证据。' },
+        ],
+      }),
+      deterministicScan: { hard_failures: [] },
+      minScore: 78,
+    })
+
+    expect(decision.hard_failures).toHaveLength(2)
+    expect(decision.hard_failures.map(item => item.message)).toEqual([
+      expect.stringContaining('第一处证据。'),
+      expect.stringContaining('第二处证据。'),
+    ])
+  })
+
+  test('gives locatable evidence precedence over an unlocatable finding with the same key', () => {
+    const decision = buildProseQualityDecision({
+      chapterText: '第一处证据。',
+      review: normalizeProseQualityReview({
+        score: 90,
+        publishable: true,
+        dimensions: sixDimensionScores,
+        findings: [
+          {
+            key: 'shared_key',
+            severity: 'S2',
+            dimension: 'continuity',
+            evidence: '第一处证据。',
+            required_change: '补连续动作',
+            acceptance_test: '动作连续',
+          },
+          {
+            key: 'shared_key',
+            severity: 'S2',
+            dimension: 'continuity',
+            evidence: '正文中不存在的重复诊断。',
+            required_change: '补连续动作',
+            acceptance_test: '动作连续',
+          },
+          {
+            key: 'other_unlocatable',
+            severity: 'S2',
+            dimension: 'payoff_hook',
+            evidence: '正文中不存在的章末钩子。',
+            required_change: '补章末钩子',
+            acceptance_test: '形成翻页理由',
+          },
+        ],
+      }),
+      deterministicScan: { hard_failures: [] },
+      minScore: 78,
+    })
+
+    expect(decision.hard_failures).toEqual([
+      expect.objectContaining({ key: 'shared_key', source: 'llm' }),
+    ])
+    expect(decision.advisory_failures.some(item => item.startsWith('shared_key：'))).toBe(false)
+    expect(decision.advisory_failures.some(item => item.startsWith('other_unlocatable：'))).toBe(true)
   })
 })
 
@@ -228,6 +533,303 @@ describe('bounded prose quality loop', () => {
     expect(result.rounds).toHaveLength(1)
   })
 
+  test('does not revise for unlocatable evidence', async () => {
+    let revisionCalls = 0
+    const result = await runProseQualityLoop({
+      initialText: '江澈推开仓门，铜锁坠在地上。'.repeat(80),
+      minScore: 78,
+      coreContract: { chapter_no: 10 },
+      scan: () => ({ hard_failures: [] }),
+      review: async () => ({
+        score: 90,
+        publishable: true,
+        dimensions: sixDimensionScores,
+        findings: [{
+          key: 'invented_waiting',
+          severity: 'S2',
+          dimension: 'core_promise_agency',
+          evidence: '江澈全程站着等待救援。',
+          required_change: '让江澈主动破局',
+          acceptance_test: '主角行动改变结果',
+        }],
+      }),
+      revise: async () => {
+        revisionCalls += 1
+        return { final_text: '不应调用。' }
+      },
+    })
+
+    expect(revisionCalls).toBe(0)
+    expect(result.rounds).toHaveLength(0)
+    expect(result.decision).toMatchObject({ passed: true, hard_failures: [] })
+    expect(result.decision.advisory_failures.join('｜')).toContain('invented_waiting')
+  })
+
+  test('passes only locatable evidence findings into a mixed revision', async () => {
+    let revisionInput: any = null
+    let reviewCalls = 0
+    const result = await runProseQualityLoop({
+      initialText: '江澈推开仓门，铜锁坠在地上。'.repeat(80),
+      minScore: 78,
+      coreContract: { chapter_no: 10 },
+      scan: () => ({ hard_failures: [] }),
+      review: async () => {
+        reviewCalls += 1
+        return reviewCalls === 1
+          ? {
+              score: 90,
+              dimensions: sixDimensionScores,
+              findings: [
+                {
+                  key: 'locatable_causality',
+                  severity: 'S2',
+                  dimension: 'conflict_causality',
+                  evidence: '铜锁坠在地上。',
+                  required_change: '补足铜锁坠地的动作原因',
+                  acceptance_test: '动作与结果形成因果链',
+                },
+                {
+                  key: 'invented_waiting',
+                  severity: 'S2',
+                  dimension: 'core_promise_agency',
+                  evidence: '江澈全程站着等待救援。',
+                  required_change: '让江澈主动破局',
+                  acceptance_test: '主角行动改变结果',
+                },
+              ],
+            }
+          : { score: 90, dimensions: sixDimensionScores, findings: [] }
+      },
+      revise: async input => {
+        revisionInput = input
+        return { final_text: '江澈抬脚踢断锁链，仓门应声弹开。'.repeat(80) }
+      },
+    })
+
+    expect(result.rounds).toHaveLength(1)
+    expect(revisionInput.blockingFindings).toEqual([
+      expect.objectContaining({ key: 'locatable_causality' }),
+    ])
+    expect(revisionInput.prompt).toContain('locatable_causality')
+    expect(revisionInput.prompt).not.toContain('invented_waiting')
+  })
+
+  test('passes a mixed deterministic advisory and semantic obligation into revision unchanged', async () => {
+    const initialText = '江澈推开仓门，如同铁钉落地，回声穿过空仓；下一刻人物忽然站到门外。'.repeat(80)
+    const advisoryScan = {
+      hard_failures: [],
+      advisory_findings: [{
+        pattern: '如同',
+        matched_text: '如同',
+        evidence: '如同铁钉落地',
+        fix: '改成具体动作或事实描写',
+      }],
+    }
+    let revisionInput: any = null
+    let reviewCalls = 0
+    const result = await runProseQualityLoop({
+      initialText,
+      minScore: 78,
+      coreContract: { chapter_no: 10 },
+      scan: () => advisoryScan,
+      review: async () => {
+        reviewCalls += 1
+        return reviewCalls === 1
+          ? {
+              score: 90,
+              publishable: true,
+              dimensions: sixDimensionScores,
+              findings: [{
+                key: 'style_comparison_with_continuity',
+                severity: 'S2',
+                dimension: 'prose_style',
+                evidence: '如同铁钉落地',
+                required_change: '删除“如同”，并补足人物移动承接和动作因果断裂',
+                acceptance_test: '正文不再出现“如同”，且人物移动连续、动作结果有因果',
+              }],
+            }
+          : {
+              score: 90,
+              publishable: true,
+              dimensions: sixDimensionScores,
+              findings: [],
+            }
+      },
+      revise: async input => {
+        revisionInput = input
+        return { final_text: '江澈推开仓门，铁钉般的回声落进空仓。他跨过门槛走到门外。'.repeat(80) }
+      },
+    })
+
+    expect(result.rounds).toHaveLength(1)
+    expect(revisionInput.blockingFindings).toEqual([
+      expect.objectContaining({
+        key: 'style_comparison_with_continuity',
+        required_change: '删除“如同”，并补足人物移动承接和动作因果断裂',
+      }),
+    ])
+  })
+
+  test('keeps the exact action fact and scene-consequence style repair advisory out of revision', async () => {
+    const initialText = '江澈推开仓门，如同铁钉落地，回声穿过空仓。'.repeat(80)
+    const advisoryScan = {
+      hard_failures: [],
+      advisory_findings: [{
+        pattern: '如同',
+        matched_text: '如同',
+        evidence: '如同铁钉落地',
+        fix: '改成具体动作、事实或现场后果描写',
+      }],
+    }
+    let revisionCalls = 0
+    const result = await runProseQualityLoop({
+      initialText,
+      minScore: 78,
+      scan: () => advisoryScan,
+      review: async () => ({
+        score: 90,
+        publishable: true,
+        dimensions: sixDimensionScores,
+        findings: [{
+          key: 'style_comparison_replacement',
+          severity: 'S2',
+          dimension: 'prose_style',
+          evidence: '如同铁钉落地',
+          required_change: '删除如同，改成具体动作/事实/现场后果描写',
+          acceptance_test: '正文不再出现如同',
+        }],
+      }),
+      revise: async () => {
+        revisionCalls += 1
+        return { final_text: '不应调用。' }
+      },
+    })
+
+    expect(result.decision).toMatchObject({ passed: true, approvable: true, hard_failures: [] })
+    expect(result.decision.advisory_failures.join('｜')).toContain('style_comparison_replacement')
+    expect(revisionCalls).toBe(0)
+  })
+
+  test('keeps unproven mixed obligations blocking and passes each one into revision', async () => {
+    const mixedObligations = [
+      '删除如同，并让角色主动做出选择',
+      '删除如同，补足配角的行为反应',
+      '删除如同，修复空间衔接',
+    ]
+
+    for (const requiredChange of mixedObligations) {
+      const initialText = '江澈推开仓门，如同铁钉落地，回声穿过空仓。'.repeat(80)
+      const advisoryScan = {
+        hard_failures: [],
+        advisory_findings: [{
+          pattern: '如同',
+          matched_text: '如同',
+          evidence: '如同铁钉落地',
+          fix: '删除如同并改成直接描写',
+        }],
+      }
+      let revisionInput: any = null
+      let reviewCalls = 0
+      const result = await runProseQualityLoop({
+        initialText,
+        minScore: 78,
+        scan: () => advisoryScan,
+        review: async () => {
+          reviewCalls += 1
+          return reviewCalls === 1
+            ? {
+                score: 90,
+                publishable: true,
+                dimensions: sixDimensionScores,
+                findings: [{
+                  key: 'style_comparison_with_unproven_obligation',
+                  severity: 'S2',
+                  dimension: 'prose_style',
+                  evidence: '如同铁钉落地',
+                  required_change: requiredChange,
+                  acceptance_test: '正文不再出现如同',
+                }],
+              }
+            : {
+                score: 90,
+                publishable: true,
+                dimensions: sixDimensionScores,
+                findings: [],
+              }
+        },
+        revise: async input => {
+          revisionInput = input
+          return { final_text: '江澈推开仓门，铁钉落地般的回声穿过空仓。'.repeat(80) }
+        },
+      })
+
+      expect(result.rounds).toHaveLength(1)
+      expect(revisionInput.blockingFindings).toEqual([
+        expect.objectContaining({ required_change: requiredChange }),
+      ])
+    }
+  })
+
+  test('rejects trailing obligation bypasses after an advisory deletion phrase', async () => {
+    const bypasses = [
+      '删除如同的比喻同时让角色主动做出选择',
+      '删除如同这一措辞后让角色主动做出选择',
+      '删除如同还要补足空间衔接',
+    ]
+
+    for (const requiredChange of bypasses) {
+      const initialText = '江澈推开仓门，如同铁钉落地，回声穿过空仓。'.repeat(80)
+      const advisoryScan = {
+        hard_failures: [],
+        advisory_findings: [{
+          pattern: '如同',
+          matched_text: '如同',
+          evidence: '如同铁钉落地',
+          fix: '删除如同并改成直接描写',
+        }],
+      }
+      let revisionInput: any = null
+      let reviewCalls = 0
+      const result = await runProseQualityLoop({
+        initialText,
+        minScore: 78,
+        scan: () => advisoryScan,
+        review: async () => {
+          reviewCalls += 1
+          return reviewCalls === 1
+            ? {
+                score: 90,
+                publishable: true,
+                dimensions: sixDimensionScores,
+                findings: [{
+                  key: 'style_comparison_with_trailing_obligation',
+                  severity: 'S2',
+                  dimension: 'prose_style',
+                  evidence: '如同铁钉落地',
+                  required_change: requiredChange,
+                  acceptance_test: '正文不再出现如同',
+                }],
+              }
+            : {
+                score: 90,
+                publishable: true,
+                dimensions: sixDimensionScores,
+                findings: [],
+              }
+        },
+        revise: async input => {
+          revisionInput = input
+          return { final_text: '江澈推开仓门，铁钉落地般的回声穿过空仓。'.repeat(80) }
+        },
+      })
+
+      expect(result.rounds).toHaveLength(1)
+      expect(revisionInput.blockingFindings).toEqual([
+        expect.objectContaining({ required_change: requiredChange }),
+      ])
+    }
+  })
+
   test('normalizes safe repair residue before the fresh scan and independent recheck', async () => {
     const scans: string[] = []
     let reviewCalls = 0
@@ -347,7 +949,7 @@ describe('bounded prose quality loop', () => {
       }),
       revise: async ({ round }) => {
         revisionCalls += 1
-        return { final_text: `第${round}轮修订：主角仍在等待。`.repeat(120) }
+        return { final_text: `第${round}轮修订：主角等待。`.repeat(120) }
       },
     })
 

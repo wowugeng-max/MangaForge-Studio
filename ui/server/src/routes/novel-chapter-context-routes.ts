@@ -732,7 +732,8 @@ export function registerNovelChapterContextRoutes(app: Express, ctx: ChapterCont
           pre_draft_brief: brief,
         },
       } as any, { createVersion: false })
-      res.json({ ok: true, chapter: updated, brief, confirmed: true })
+      const storedBrief = updated?.raw_payload?.pre_draft_brief || null
+      res.json({ ok: true, chapter: updated, brief: storedBrief, confirmed: Boolean(storedBrief?.confirmed_at) })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

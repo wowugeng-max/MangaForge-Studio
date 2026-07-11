@@ -135,6 +135,11 @@ const PRE_DRAFT_BRIEF_PRESERVED_CONTRACT_KEYS = new Set([
   'state_tracking_contract',
   'stateTrackingContract',
 ])
+const STATE_TRACKING_SOURCE_READINESS_KEYS = new Set([
+  'source_readiness',
+  'sourceReadiness',
+])
+const STATE_TRACKING_SOURCE_READINESS_STORAGE_LIMIT = 24
 const CHAPTER_BLUEPRINT_KEYS = new Set([
   'chapter_blueprint',
   'chapterBlueprint',
@@ -166,6 +171,12 @@ const CHAPTER_BLUEPRINT_CORE_KEYS = [
   'endingContract',
 ]
 const PRE_DRAFT_BRIEF_CORE_KEYS = [
+  'confirmed_at',
+  'confirmedAt',
+  'confirmation_source',
+  'confirmationSource',
+  'updated_at',
+  'updatedAt',
   'chapter_goal',
   'chapterGoal',
   'reader_promise',
@@ -301,7 +312,7 @@ function compactChapterBlueprintForStorage(value: any) {
   return output
 }
 
-function compactPreDraftBriefValueForStorage(value: any, key = '', seen = new WeakSet<object>(), depth = 0): any {
+function compactPreDraftBriefValueForStorage(value: any, key = '', seen = new WeakSet<object>(), depth = 0, parentKey = ''): any {
   if (NESTED_STORAGE_KEYS.has(key) || LARGE_DIAGNOSTIC_KEYS.has(key)) return undefined
   if (CHAPTER_BLUEPRINT_KEYS.has(key)) return compactChapterBlueprintForStorage(value)
   if (isPreDraftBriefContractKey(key) && !PRE_DRAFT_BRIEF_PRESERVED_CONTRACT_KEYS.has(key)) {
@@ -319,10 +330,12 @@ function compactPreDraftBriefValueForStorage(value: any, key = '', seen = new We
   if (depth >= 5) return storageOmitted('storage_compaction', { max_depth: depth })
   seen.add(value)
   if (Array.isArray(value)) {
-    const limit = depth <= 1 ? 12 : 8
+    const limit = PRE_DRAFT_BRIEF_PRESERVED_CONTRACT_KEYS.has(parentKey) && STATE_TRACKING_SOURCE_READINESS_KEYS.has(key)
+      ? STATE_TRACKING_SOURCE_READINESS_STORAGE_LIMIT
+      : depth <= 1 ? 12 : 8
     const items = value
       .slice(0, limit)
-      .map(item => compactPreDraftBriefValueForStorage(item, '', seen, depth + 1))
+      .map(item => compactPreDraftBriefValueForStorage(item, '', seen, depth + 1, key))
       .filter(item => item !== undefined)
     if (value.length > limit) items.push(storageOmitted('storage_compaction', { truncated: true, original_count: value.length - limit }))
     seen.delete(value)
@@ -331,7 +344,7 @@ function compactPreDraftBriefValueForStorage(value: any, key = '', seen = new We
   const output: Record<string, any> = {}
   const entries = Object.entries(value).slice(0, depth <= 1 ? 28 : 18)
   for (const [childKey, childValue] of entries) {
-    const compacted = compactPreDraftBriefValueForStorage(childValue, childKey, seen, depth + 1)
+    const compacted = compactPreDraftBriefValueForStorage(childValue, childKey, seen, depth + 1, key)
     if (compacted !== undefined) output[childKey] = compacted
   }
   if (Object.keys(value).length > entries.length) output._truncated_keys = Object.keys(value).length - entries.length
@@ -1266,6 +1279,30 @@ export async function syncNovelChapterPlanByNumber(activeWorkspace: string, data
   return { outline, chapter }
 }
 type UpdateNovelChapterOptions = { createVersion?: boolean; versionSource?: NovelChapterVersionSource; forceVersion?: boolean }
+export type NovelChapterAcceptanceUpdate = {
+  id?: number
+  name?: string
+  entity_id?: number
+  entityId?: number
+  entity_type?: string
+  entityType?: string
+  patch?: Record<string, any>
+}
+export type NovelChapterAcceptanceInput = {
+  chapter_id: number
+  chapter_patch: Partial<NovelChapterRecord>
+  version_source?: NovelChapterVersionSource
+  project_patch?: Partial<NovelProjectRecord>
+  next_reference_config?: NovelReferenceConfig
+  worldbuilding_creates?: Partial<NovelWorldbuildingRecord>[]
+  character_creates?: Partial<NovelCharacterRecord>[]
+  setting_creates?: Partial<NovelSettingEntityRecord>[]
+  chapter_setting_usage_replacement?: Array<Partial<NovelChapterSettingUsageRecord> & { entity_name?: string; entity_type?: string }>
+  character_updates?: NovelChapterAcceptanceUpdate[]
+  setting_updates?: NovelChapterAcceptanceUpdate[]
+  usage_updates?: NovelChapterAcceptanceUpdate[]
+  reviews?: Partial<NovelReviewRecord>[]
+}
 function versionedChapterSnapshotChanged(current: NovelChapterRecord, next: NovelChapterRecord) {
   return (
     String(current.chapter_text || '') !== String(next.chapter_text || '') ||
@@ -1278,6 +1315,253 @@ export async function appendChapterVersion(activeWorkspace: string, data: Partia
 export async function listChapterVersions(activeWorkspace: string, chapterId: number) { const store = await readStore(activeWorkspace); return store.chapter_versions.filter(item => item.chapter_id === chapterId).sort((a, b) => b.version_no - a.version_no) }
 export async function rollbackChapterVersion(activeWorkspace: string, chapterId: number, versionId: number) { const store = await readStore(activeWorkspace); const idx = store.chapters.findIndex(item => item.id === chapterId); const version = store.chapter_versions.find(item => item.id === versionId && item.chapter_id === chapterId); if (idx < 0 || !version) return null; const current = store.chapters[idx]; store.chapter_versions.push(createChapterVersionRecord(store, { chapter_id: current.id, project_id: current.project_id, version_no: store.chapter_versions.filter(v => v.chapter_id === current.id).length + 1, chapter_text: current.chapter_text || '', scene_breakdown: current.scene_breakdown || [], continuity_notes: current.continuity_notes || [], source: 'rollback' })); store.chapters[idx] = { ...current, chapter_text: version.chapter_text, scene_breakdown: version.scene_breakdown || [], continuity_notes: version.continuity_notes || [], updated_at: nowIso() }; await writeStore(activeWorkspace, store); return store.chapters[idx] }
 export async function updateNovelChapter(activeWorkspace: string, chapterId: number, data: Partial<NovelChapterRecord>, options: UpdateNovelChapterOptions = {}) { const store = await readStore(activeWorkspace); const idx = store.chapters.findIndex(item => item.id === chapterId); if (idx < 0) return null; const current = store.chapters[idx]; const updated = normalizeChapterRecord(data, { ...current, id: current.id, updated_at: nowIso() }); const next = { ...current, ...updated, updated_at: nowIso() }; const shouldCreateVersion = options.createVersion !== false && (options.forceVersion || versionedChapterSnapshotChanged(current, next)); if (shouldCreateVersion) store.chapter_versions.push(createChapterVersionRecord(store, { chapter_id: current.id, project_id: current.project_id, version_no: store.chapter_versions.filter(v => v.chapter_id === current.id).length + 1, chapter_text: current.chapter_text || '', scene_breakdown: current.scene_breakdown || [], continuity_notes: current.continuity_notes || [], source: options.versionSource || 'manual_edit' })); store.chapters[idx] = next; await writeStore(activeWorkspace, store); return store.chapters[idx] }
+export async function commitNovelChapterAcceptance(activeWorkspace: string, input: NovelChapterAcceptanceInput) {
+  const store = await readStore(activeWorkspace)
+  const chapterIndex = store.chapters.findIndex(item => item.id === Number(input.chapter_id || 0))
+  if (chapterIndex < 0) throw new Error(`chapter reference not found: ${input.chapter_id}`)
+  const currentChapter = store.chapters[chapterIndex]
+  const projectIndex = store.projects.findIndex(item => item.id === currentChapter.project_id)
+  if (projectIndex < 0) throw new Error(`project reference not found: ${currentChapter.project_id}`)
+  const currentProject = store.projects[projectIndex]
+  const validateImmutablePatchReferences = (
+    patch: any,
+    references: Array<[key: string, expected: number]>,
+    label: string,
+    index?: number,
+  ) => {
+    for (const [key, expected] of references) {
+      if (Object.prototype.hasOwnProperty.call(patch || {}, key) && Number(patch[key]) !== expected) {
+        throw new Error(`${label} immutable ${key} reference invalid${index === undefined ? '' : ` at index ${index}`}`)
+      }
+    }
+  }
+  validateImmutablePatchReferences(input.chapter_patch, [
+    ['id', currentChapter.id],
+    ['project_id', currentProject.id],
+  ], 'chapter patch')
+  validateImmutablePatchReferences(input.project_patch, [['id', currentProject.id]], 'project patch')
+  const temporaryEntityIds = new Map<number, number>()
+  const validateCreateProject = (record: any, label: string, index: number) => {
+    if (record?.project_id !== undefined && Number(record.project_id) !== currentProject.id) {
+      throw new Error(`${label} project reference invalid at index ${index}`)
+    }
+  }
+  let nextWorldbuildingId = store.worldbuilding.reduce((max, item) => Math.max(max, item.id), 0) + 1
+  for (const [index, create] of (input.worldbuilding_creates || []).entries()) {
+    validateCreateProject(create, 'worldbuilding create', index)
+    const requestedId = Number(create?.id || 0)
+    if (requestedId > 0 && store.worldbuilding.some(item => item.id === requestedId)) throw new Error(`worldbuilding id conflict at index ${index}`)
+    const id = requestedId > 0 ? requestedId : nextWorldbuildingId++
+    nextWorldbuildingId = Math.max(nextWorldbuildingId, id + 1)
+    if (requestedId < 0) temporaryEntityIds.set(requestedId, id)
+    store.worldbuilding.push(normalizeWorldbuildingRecord({ ...create, project_id: currentProject.id }, { id }))
+  }
+  let nextCharacterId = store.characters.reduce((max, item) => Math.max(max, item.id), 0) + 1
+  for (const [index, create] of (input.character_creates || []).entries()) {
+    validateCreateProject(create, 'character create', index)
+    const name = String(create?.name || '').trim()
+    if (!name || store.characters.some(item => item.project_id === currentProject.id && item.name === name)) throw new Error(`character create reference conflict at index ${index}`)
+    const requestedId = Number(create?.id || 0)
+    if (requestedId > 0 && store.characters.some(item => item.id === requestedId)) throw new Error(`character id conflict at index ${index}`)
+    const id = requestedId > 0 ? requestedId : nextCharacterId++
+    nextCharacterId = Math.max(nextCharacterId, id + 1)
+    if (requestedId < 0) temporaryEntityIds.set(requestedId, id)
+    store.characters.push(normalizeCharacterRecord({ ...create, project_id: currentProject.id }, { id }))
+  }
+  let nextSettingId = store.setting_entities.reduce((max, item) => Math.max(max, item.id), 0) + 1
+  for (const [index, create] of (input.setting_creates || []).entries()) {
+    validateCreateProject(create, 'setting create', index)
+    const name = String(create?.name || '').trim()
+    const entityType = String(create?.entity_type || 'rule')
+    if (!name || store.setting_entities.some(item => item.project_id === currentProject.id && item.name === name && item.entity_type === entityType)) throw new Error(`setting create reference conflict at index ${index}`)
+    const requestedId = Number(create?.id || 0)
+    if (requestedId > 0 && store.setting_entities.some(item => item.id === requestedId)) throw new Error(`setting id conflict at index ${index}`)
+    const id = requestedId > 0 ? requestedId : nextSettingId++
+    nextSettingId = Math.max(nextSettingId, id + 1)
+    if (requestedId < 0) temporaryEntityIds.set(requestedId, id)
+    store.setting_entities.push(normalizeSettingEntityRecord({ ...create, project_id: currentProject.id }, { id }))
+  }
+
+  const resolveUniqueRecordIndex = (matches: number[], label: string, index: number) => {
+    if (matches.length === 0) throw new Error(`${label} not found at index ${index}`)
+    if (matches.length > 1) throw new Error(`${label} ambiguous at index ${index}`)
+    return matches[0]
+  }
+  const resolveSettingReference = (reference: any, label: string, index: number) => {
+    const requestedId = Number(reference?.entity_id || reference?.entityId || reference?.id || 0)
+    const id = temporaryEntityIds.get(requestedId) || requestedId
+    const name = String(reference?.entity_name || reference?.name || '').trim()
+    const entityType = String(reference?.entity_type || reference?.entityType || '').trim()
+    const hasIdReference = id > 0
+    const hasNameReference = Boolean(name)
+    if (!hasIdReference && !hasNameReference) throw new Error(`${label} not found at index ${index}`)
+    const idRecordIndex = hasIdReference
+      ? resolveUniqueRecordIndex(store.setting_entities
+          .map((item, recordIndex) => item.project_id === currentProject.id && item.id === id ? recordIndex : -1)
+          .filter(recordIndex => recordIndex >= 0), label, index)
+      : null
+    const nameRecordIndex = hasNameReference
+      ? resolveUniqueRecordIndex(store.setting_entities
+          .map((item, recordIndex) => item.project_id === currentProject.id && item.name === name && (!entityType || item.entity_type === entityType) ? recordIndex : -1)
+          .filter(recordIndex => recordIndex >= 0), label, index)
+      : null
+    if (idRecordIndex !== null && nameRecordIndex !== null && idRecordIndex !== nameRecordIndex) {
+      throw new Error(`${label} inconsistent at index ${index}`)
+    }
+    const recordIndex = (idRecordIndex ?? nameRecordIndex) as number
+    return { recordIndex, entityId: store.setting_entities[recordIndex].id }
+  }
+
+  const resolveCharacterReference = (reference: any, label: string, index: number) => {
+    const requestedId = Number(reference?.id || 0)
+    const id = temporaryEntityIds.get(requestedId) || requestedId
+    const name = String(reference?.name || '').trim()
+    const hasIdReference = id > 0
+    const hasNameReference = Boolean(name)
+    if (!hasIdReference && !hasNameReference) throw new Error(`${label} not found at index ${index}`)
+    const idRecordIndex = hasIdReference
+      ? resolveUniqueRecordIndex(store.characters
+          .map((item, recordIndex) => item.project_id === currentProject.id && item.id === id ? recordIndex : -1)
+          .filter(recordIndex => recordIndex >= 0), label, index)
+      : null
+    const nameRecordIndex = hasNameReference
+      ? resolveUniqueRecordIndex(store.characters
+          .map((item, recordIndex) => item.project_id === currentProject.id && item.name === name ? recordIndex : -1)
+          .filter(recordIndex => recordIndex >= 0), label, index)
+      : null
+    if (idRecordIndex !== null && nameRecordIndex !== null && idRecordIndex !== nameRecordIndex) {
+      throw new Error(`${label} inconsistent at index ${index}`)
+    }
+    return (idRecordIndex ?? nameRecordIndex) as number
+  }
+
+  const characterChanges = (input.character_updates || []).map((update, index) => {
+    const recordIndex = resolveCharacterReference(update, 'character update reference', index)
+    const current = store.characters[recordIndex]
+    validateImmutablePatchReferences(update.patch, [
+      ['id', current.id],
+      ['project_id', currentProject.id],
+    ], 'character update patch', index)
+    return { recordIndex, patch: update.patch || {} }
+  })
+  const settingChanges = (input.setting_updates || []).map((update, index) => {
+    const { recordIndex } = resolveSettingReference(update, 'setting update reference', index)
+    const current = store.setting_entities[recordIndex]
+    validateImmutablePatchReferences(update.patch, [
+      ['id', current.id],
+      ['project_id', currentProject.id],
+    ], 'setting update patch', index)
+    return { recordIndex, patch: update.patch || {} }
+  })
+  const replacementUsage = input.chapter_setting_usage_replacement === undefined ? null : input.chapter_setting_usage_replacement.map((usage, index) => {
+    const { entityId } = resolveSettingReference(usage, 'usage replacement entity reference', index)
+    return { ...usage, entity_id: entityId }
+  })
+  if (replacementUsage) {
+    const seenReplacementEntities = new Set<number>()
+    for (const [index, usage] of replacementUsage.entries()) {
+      if (seenReplacementEntities.has(usage.entity_id)) throw new Error(`usage replacement entity reference ambiguous at index ${index}`)
+      seenReplacementEntities.add(usage.entity_id)
+    }
+    store.chapter_setting_usage = store.chapter_setting_usage.filter(item => !(item.project_id === currentProject.id && item.chapter_id === currentChapter.id))
+    let nextUsageId = store.chapter_setting_usage.reduce((max, item) => Math.max(max, item.id), 0) + 1
+    store.chapter_setting_usage.push(...replacementUsage.map(usage => normalizeChapterSettingUsageRecord({
+      ...usage,
+      id: nextUsageId++,
+      project_id: currentProject.id,
+      chapter_id: currentChapter.id,
+    })))
+  }
+  const usageChanges = (input.usage_updates || []).map((update, index) => {
+    const id = Number(update?.id || 0)
+    const hasEntityReference = Number(update?.entity_id || update?.entityId || 0) !== 0 || Boolean(String(update?.name || '').trim())
+    if (replacementUsage && !hasEntityReference) throw new Error(`usage update reference not found at index ${index}`)
+    const idRecordIndex = id > 0
+      ? resolveUniqueRecordIndex(store.chapter_setting_usage
+          .map((item, recordIndex) => item.project_id === currentProject.id && item.chapter_id === currentChapter.id && item.id === id ? recordIndex : -1)
+          .filter(recordIndex => recordIndex >= 0), 'usage update reference', index)
+      : null
+    const entityId = hasEntityReference
+      ? resolveSettingReference(update, 'usage update reference', index).entityId
+      : 0
+    const entityRecordIndex = entityId > 0
+      ? resolveUniqueRecordIndex(store.chapter_setting_usage
+          .map((item, recordIndex) => item.project_id === currentProject.id && item.chapter_id === currentChapter.id && item.entity_id === entityId ? recordIndex : -1)
+          .filter(recordIndex => recordIndex >= 0), 'usage update reference', index)
+      : null
+    if (idRecordIndex !== null && entityRecordIndex !== null && idRecordIndex !== entityRecordIndex) {
+      throw new Error(`usage update reference inconsistent at index ${index}`)
+    }
+    const recordIndex = idRecordIndex ?? entityRecordIndex
+    if (recordIndex === null) throw new Error(`usage update reference not found at index ${index}`)
+    const current = store.chapter_setting_usage[recordIndex]
+    validateImmutablePatchReferences(update.patch, [
+      ['id', current.id],
+      ['project_id', currentProject.id],
+      ['chapter_id', currentChapter.id],
+      ['entity_id', current.entity_id],
+    ], 'usage update patch', index)
+    return { recordIndex, patch: update.patch || {} }
+  })
+  for (const [index, review] of (input.reviews || []).entries()) {
+    if (review.project_id !== undefined && Number(review.project_id) !== currentProject.id) {
+      throw new Error(`review project reference invalid at index ${index}`)
+    }
+  }
+
+  const updatedChapter = normalizeChapterRecord(input.chapter_patch || {}, { ...currentChapter, id: currentChapter.id, updated_at: nowIso() })
+  const nextChapter = { ...currentChapter, ...updatedChapter, updated_at: nowIso() }
+  if (versionedChapterSnapshotChanged(currentChapter, nextChapter)) {
+    store.chapter_versions.push(createChapterVersionRecord(store, {
+      chapter_id: currentChapter.id,
+      project_id: currentChapter.project_id,
+      version_no: store.chapter_versions.filter(version => version.chapter_id === currentChapter.id).length + 1,
+      chapter_text: currentChapter.chapter_text || '',
+      scene_breakdown: currentChapter.scene_breakdown || [],
+      continuity_notes: currentChapter.continuity_notes || [],
+      source: input.version_source || 'manual_edit',
+    }))
+  }
+  store.chapters[chapterIndex] = nextChapter
+
+  const projectPatch = {
+    ...(input.project_patch || {}),
+    ...(input.next_reference_config === undefined ? {} : { reference_config: input.next_reference_config }),
+  }
+  const normalizedProject = normalizeProjectRecord(projectPatch, { ...currentProject, id: currentProject.id, updated_at: nowIso() })
+  store.projects[projectIndex] = { ...currentProject, ...normalizedProject, updated_at: nowIso() }
+  for (const change of characterChanges) {
+    const current = store.characters[change.recordIndex]
+    const patch = change.patch.current_state === undefined ? change.patch : {
+      ...change.patch,
+      current_state: { ...(current.current_state || {}), ...(change.patch.current_state || {}) },
+    }
+    store.characters[change.recordIndex] = normalizeCharacterRecord(patch, current)
+  }
+  for (const change of settingChanges) {
+    const current = store.setting_entities[change.recordIndex]
+    const patch = change.patch.state_json === undefined ? change.patch : {
+      ...change.patch,
+      state_json: { ...(current.state_json || {}), ...(change.patch.state_json || {}) },
+    }
+    store.setting_entities[change.recordIndex] = normalizeSettingEntityRecord(patch, current)
+  }
+  for (const change of usageChanges) {
+    const current = store.chapter_setting_usage[change.recordIndex]
+    const patch = change.patch.actual_state_change === undefined ? change.patch : {
+      ...change.patch,
+      actual_state_change: { ...(current.actual_state_change || {}), ...(change.patch.actual_state_change || {}) },
+    }
+    store.chapter_setting_usage[change.recordIndex] = normalizeChapterSettingUsageRecord(patch, current)
+  }
+  let nextReviewId = store.reviews.reduce((max, item) => Math.max(max, item.id), 0) + 1
+  for (const review of input.reviews || []) {
+    store.reviews.push(normalizeReviewRecord({ ...review, id: nextReviewId++, project_id: currentProject.id }))
+  }
+
+  await writeStore(activeWorkspace, store)
+  return { chapter: store.chapters[chapterIndex], project: store.projects[projectIndex] }
+}
 export async function deleteNovelChapter(activeWorkspace: string, chapterId: number) { const store = await readStore(activeWorkspace); const chapter = store.chapters.find(item => item.id === chapterId); if (!chapter) return false; store.chapters = store.chapters.filter(item => item.id !== chapterId); store.chapter_versions = store.chapter_versions.filter(item => item.chapter_id !== chapterId); await writeStore(activeWorkspace, store); return true }
 export async function deleteNovelOutline(activeWorkspace: string, outlineId: number) { const store = await readStore(activeWorkspace); const outline = store.outlines.find(item => item.id === outlineId); if (!outline) return false; store.outlines = store.outlines.filter(item => item.id !== outlineId); store.chapters = store.chapters.map(chapter => chapter.outline_id === outlineId ? { ...chapter, outline_id: null } : chapter); await writeStore(activeWorkspace, store); return true }
 export async function deleteNovelProject(activeWorkspace: string, projectId: number) { const store = await readStore(activeWorkspace); const project = store.projects.find(item => item.id === projectId); if (!project) return false; store.projects = store.projects.filter(item => item.id !== projectId); store.worldbuilding = store.worldbuilding.filter(item => item.project_id !== projectId); store.characters = store.characters.filter(item => item.project_id !== projectId); store.outlines = store.outlines.filter(item => item.project_id !== projectId); store.chapters = store.chapters.filter(item => item.project_id !== projectId); store.chapter_versions = store.chapter_versions.filter(item => item.project_id !== projectId); store.reviews = store.reviews.filter(item => item.project_id !== projectId); store.runs = store.runs.filter(item => item.project_id !== projectId); store.setting_entities = store.setting_entities.filter(item => item.project_id !== projectId); store.chapter_setting_usage = store.chapter_setting_usage.filter(item => item.project_id !== projectId); await writeStore(activeWorkspace, store); return true }

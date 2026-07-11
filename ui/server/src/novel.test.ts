@@ -5,14 +5,24 @@ import { tmpdir } from 'os'
 import { Database } from 'bun:sqlite'
 import {
   appendNovelRun,
+  commitNovelChapterAcceptance,
   compactNovelStorage,
+  createNovelCharacter,
   createNovelChapter,
   createNovelProject,
   createNovelReview,
+  createNovelSettingEntity,
+  getNovelProject,
+  listChapterVersions,
+  listNovelChapterSettingUsage,
+  listNovelCharacters,
   listNovelChapters,
   listNovelProjects,
   listNovelReviews,
   listNovelRuns,
+  listNovelSettingEntities,
+  listNovelWorldbuilding,
+  replaceNovelChapterSettingUsage,
   upsertNovelChapterByNumber,
 } from './novel'
 
@@ -31,6 +41,40 @@ async function exists(path: string) {
   } catch {
     return false
   }
+}
+
+async function snapshotNovelAcceptanceStore(workspace: string, projectId: number, chapterId: number) {
+  return JSON.stringify({
+    project: await getNovelProject(workspace, projectId),
+    chapters: await listNovelChapters(workspace, projectId),
+    versions: await listChapterVersions(workspace, chapterId),
+    characters: await listNovelCharacters(workspace, projectId),
+    settings: await listNovelSettingEntities(workspace, projectId),
+    usage: await listNovelChapterSettingUsage(workspace, projectId, chapterId),
+    reviews: await listNovelReviews(workspace, projectId),
+  })
+}
+
+async function snapshotNovelReferenceStore(workspace: string, projectIds: number[], chapterIds: number[]) {
+  const [chapters, versions, characters, settings, usage, reviews, worldbuilding] = await Promise.all([
+    Promise.all(projectIds.map(projectId => listNovelChapters(workspace, projectId))),
+    Promise.all(chapterIds.map(chapterId => listChapterVersions(workspace, chapterId))),
+    Promise.all(projectIds.map(projectId => listNovelCharacters(workspace, projectId))),
+    Promise.all(projectIds.map(projectId => listNovelSettingEntities(workspace, projectId))),
+    Promise.all(projectIds.flatMap(projectId => chapterIds.map(chapterId => listNovelChapterSettingUsage(workspace, projectId, chapterId)))),
+    Promise.all(projectIds.map(projectId => listNovelReviews(workspace, projectId))),
+    Promise.all(projectIds.map(projectId => listNovelWorldbuilding(workspace, projectId))),
+  ])
+  return JSON.stringify({
+    projects: await listNovelProjects(workspace),
+    chapters,
+    versions,
+    characters,
+    settings,
+    usage,
+    reviews,
+    worldbuilding,
+  })
 }
 
 afterEach(async () => {
@@ -94,6 +138,449 @@ describe('novel sqlite persistence', () => {
     expect(appendRunBlock).toContain('INSERT INTO runs')
     expect(appendRunBlock).not.toContain('readStore(activeWorkspace)')
     expect(appendRunBlock).not.toContain('writeStore(activeWorkspace')
+  })
+})
+
+describe('commitNovelChapterAcceptance', () => {
+  test('atomically stores accepted prose, old version, story state, entity changes, usage, and reviews', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, {
+      title: '原子接收测试',
+      reference_config: { story_state: { open_questions: ['旧问题'] } },
+    })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 3,
+      title: '门前',
+      chapter_text: '旧正文',
+      scene_breakdown: [{ title: '旧场景' }],
+      continuity_notes: ['旧连续性'],
+    })
+    const character = await createNovelCharacter(workspace, {
+      project_id: project.id,
+      name: '李玄',
+      current_state: { injured: false },
+    } as any)
+    const setting = await createNovelSettingEntity(workspace, {
+      project_id: project.id,
+      entity_type: 'item',
+      name: '旧印章',
+      state_json: { owner: '林青禾' },
+    } as any)
+    const [usage] = await replaceNovelChapterSettingUsage(workspace, project.id, chapter.id, [{
+      entity_id: setting.id,
+      actual_state_change: { seen: false },
+    }])
+
+    const accepted = await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: {
+        chapter_text: '新正文',
+        scene_breakdown: [{ title: '新场景' }],
+        continuity_notes: ['新连续性'],
+      },
+      version_source: 'agent_execute',
+      next_reference_config: { story_state: { open_questions: ['新问题'], last_updated_chapter: 3 } },
+      character_updates: [{ id: character.id, patch: { current_state: { injured: true, last_seen_chapter: 3 } } }],
+      setting_updates: [{ entity_id: setting.id, patch: { state_json: { owner: '李玄', last_seen_chapter: 3 } } }],
+      usage_updates: [{ id: usage.id, patch: { actual_state_change: { seen: true, transferred: true } } }],
+      reviews: [{ review_type: 'prose_quality', status: 'ok', summary: '最终门禁通过' }],
+    })
+
+    const [storedCharacter] = await listNovelCharacters(workspace, project.id)
+    const [storedSetting] = await listNovelSettingEntities(workspace, project.id)
+    const [storedUsage] = await listNovelChapterSettingUsage(workspace, project.id, chapter.id)
+    const [version] = await listChapterVersions(workspace, chapter.id)
+    const [review] = await listNovelReviews(workspace, project.id)
+
+    expect(accepted.chapter.chapter_text).toBe('新正文')
+    expect(accepted.project.reference_config?.story_state).toMatchObject({ open_questions: ['新问题'], last_updated_chapter: 3 })
+    expect(storedCharacter.current_state).toEqual({ injured: true, last_seen_chapter: 3 })
+    expect(storedSetting.state_json).toEqual({ owner: '李玄', last_seen_chapter: 3 })
+    expect(storedUsage.actual_state_change).toEqual({ seen: true, transferred: true })
+    expect(version).toMatchObject({
+      version_no: 1,
+      chapter_text: '旧正文',
+      scene_breakdown: [{ title: '旧场景' }],
+      continuity_notes: ['旧连续性'],
+      source: 'agent_execute',
+    })
+    expect(review).toMatchObject({ review_type: 'prose_quality', status: 'ok', summary: '最终门禁通过' })
+  })
+
+  test('validates every referenced update before writing any business data', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, {
+      title: '原子回滚测试',
+      reference_config: { story_state: { open_questions: ['保持不变'] } },
+    })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 4,
+      title: '门后',
+      chapter_text: '保持旧正文',
+    })
+    const character = await createNovelCharacter(workspace, {
+      project_id: project.id,
+      name: '李玄',
+      current_state: { injured: false },
+    } as any)
+    const before = JSON.stringify({
+      project: await getNovelProject(workspace, project.id),
+      chapters: await listNovelChapters(workspace, project.id),
+      versions: await listChapterVersions(workspace, chapter.id),
+      characters: await listNovelCharacters(workspace, project.id),
+      settings: await listNovelSettingEntities(workspace, project.id),
+      usage: await listNovelChapterSettingUsage(workspace, project.id, chapter.id),
+      reviews: await listNovelReviews(workspace, project.id),
+    })
+
+    const error = await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { chapter_text: '绝不能落库的新正文' },
+      version_source: 'agent_execute',
+      next_reference_config: { story_state: { open_questions: ['绝不能落库'] } },
+      character_updates: [{ id: character.id, patch: { current_state: { injured: true } } }],
+      setting_updates: [{ entity_id: 999999, patch: { state_json: { invalid: true } } }],
+      reviews: [{ review_type: 'prose_quality', status: 'ok', summary: '绝不能落库' }],
+    }).then(() => null, caught => caught)
+    const after = JSON.stringify({
+      project: await getNovelProject(workspace, project.id),
+      chapters: await listNovelChapters(workspace, project.id),
+      versions: await listChapterVersions(workspace, chapter.id),
+      characters: await listNovelCharacters(workspace, project.id),
+      settings: await listNovelSettingEntities(workspace, project.id),
+      usage: await listNovelChapterSettingUsage(workspace, project.id, chapter.id),
+      reviews: await listNovelReviews(workspace, project.id),
+    })
+
+    expect(String(error)).toContain('setting')
+    expect(after).toBe(before)
+  })
+
+  test('rejects an ambiguous character update name before any write', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: 'ambiguous character update' })
+    const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章', chapter_text: '旧正文' })
+    await createNovelCharacter(workspace, { project_id: project.id, name: '同名角色', role_type: 'supporting' } as any)
+    await createNovelCharacter(workspace, { project_id: project.id, name: '同名角色', role_type: 'antagonist' } as any)
+    const before = await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)
+
+    const error = await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { chapter_text: '不得写入' },
+      character_updates: [{ name: '同名角色', patch: { current_state: { invalid: true } } }],
+    }).then(() => null, caught => caught)
+
+    expect(String(error)).toContain('ambiguous')
+    expect(await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)).toBe(before)
+  })
+
+  test('rejects inconsistent character id and name before any write', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: 'inconsistent character update' })
+    const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章', chapter_text: '旧正文' })
+    await createNovelCharacter(workspace, { project_id: project.id, name: '角色甲' } as any)
+    const characterB = await createNovelCharacter(workspace, { project_id: project.id, name: '角色乙' } as any)
+    const before = await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)
+
+    const error = await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { chapter_text: '不得写入' },
+      character_updates: [{ id: characterB.id, name: '角色甲', patch: { current_state: { invalid: true } } }],
+    }).then(() => null, caught => caught)
+
+    expect(String(error)).toContain('inconsistent')
+    expect(await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)).toBe(before)
+  })
+
+  test('keeps unique name, existing id, and staged character id updates valid', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: 'valid character references' })
+    const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章' })
+    const namedCharacter = await createNovelCharacter(workspace, { project_id: project.id, name: '唯一姓名' } as any)
+    const idCharacter = await createNovelCharacter(workspace, { project_id: project.id, name: '仅 ID 角色' } as any)
+
+    await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { chapter_text: '正文' },
+      character_creates: [{ id: -1, project_id: project.id, name: '暂存角色' }],
+      character_updates: [
+        { name: namedCharacter.name, patch: { current_state: { resolved_by: 'name' } } },
+        { id: idCharacter.id, patch: { current_state: { resolved_by: 'id' } } },
+        { id: -1, patch: { current_state: { resolved_by: 'temporary_id' } } },
+      ],
+    })
+
+    const characters = await listNovelCharacters(workspace, project.id)
+    expect(characters.find(character => character.id === namedCharacter.id)?.current_state).toEqual({ resolved_by: 'name' })
+    expect(characters.find(character => character.id === idCharacter.id)?.current_state).toEqual({ resolved_by: 'id' })
+    expect(characters.find(character => character.name === '暂存角色')?.current_state).toEqual({ resolved_by: 'temporary_id' })
+  })
+
+  test('rejects immutable acceptance reference rewrites before any write', async () => {
+    const scenarioNames = [
+      'chapter id',
+      'chapter project_id',
+      'project id',
+      'character id',
+      'character project_id',
+      'setting id',
+      'setting project_id',
+      'usage id',
+      'usage project_id',
+      'usage chapter_id',
+      'usage entity_id',
+    ]
+    const results: Array<{ name: string; rejected: boolean; unchanged: boolean }> = []
+
+    for (const name of scenarioNames) {
+      const workspace = await tempWorkspace()
+      const project = await createNovelProject(workspace, { title: `immutable ${name}` })
+      const otherProject = await createNovelProject(workspace, { title: `other ${name}` })
+      const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章', chapter_text: '旧正文' })
+      const otherChapter = await createNovelChapter(workspace, { project_id: otherProject.id, chapter_no: 1, title: '另一章' })
+      const character = await createNovelCharacter(workspace, { project_id: project.id, name: '角色甲' } as any)
+      const otherCharacter = await createNovelCharacter(workspace, { project_id: otherProject.id, name: '角色乙' } as any)
+      const setting = await createNovelSettingEntity(workspace, { project_id: project.id, entity_type: 'item', name: '设定甲' } as any)
+      const secondSetting = await createNovelSettingEntity(workspace, { project_id: project.id, entity_type: 'rule', name: '设定乙' } as any)
+      const otherSetting = await createNovelSettingEntity(workspace, { project_id: otherProject.id, entity_type: 'item', name: '设定丙' } as any)
+      const [usage, secondUsage] = await replaceNovelChapterSettingUsage(workspace, project.id, chapter.id, [
+        { entity_id: setting.id },
+        { entity_id: secondSetting.id },
+      ])
+      const before = await snapshotNovelReferenceStore(workspace, [project.id, otherProject.id], [chapter.id, otherChapter.id])
+      const input: any = {
+        chapter_id: chapter.id,
+        chapter_patch: { chapter_text: '不得写入' },
+      }
+      if (name === 'chapter id') input.chapter_patch.id = otherChapter.id
+      if (name === 'chapter project_id') input.chapter_patch.project_id = otherProject.id
+      if (name === 'project id') input.project_patch = { id: otherProject.id }
+      if (name === 'character id') input.character_updates = [{ id: character.id, patch: { id: otherCharacter.id } }]
+      if (name === 'character project_id') input.character_updates = [{ id: character.id, patch: { project_id: otherProject.id } }]
+      if (name === 'setting id') input.setting_updates = [{ entity_id: setting.id, patch: { id: otherSetting.id } }]
+      if (name === 'setting project_id') input.setting_updates = [{ entity_id: setting.id, patch: { project_id: otherProject.id } }]
+      if (name === 'usage id') input.usage_updates = [{ id: usage.id, patch: { id: secondUsage.id } }]
+      if (name === 'usage project_id') input.usage_updates = [{ id: usage.id, patch: { project_id: otherProject.id } }]
+      if (name === 'usage chapter_id') input.usage_updates = [{ id: usage.id, patch: { chapter_id: otherChapter.id } }]
+      if (name === 'usage entity_id') input.usage_updates = [{ id: usage.id, patch: { entity_id: otherSetting.id } }]
+
+      const error = await commitNovelChapterAcceptance(workspace, input).then(() => null, caught => caught)
+      results.push({
+        name,
+        rejected: String(error).includes('immutable'),
+        unchanged: await snapshotNovelReferenceStore(workspace, [project.id, otherProject.id], [chapter.id, otherChapter.id]) === before,
+      })
+    }
+
+    expect(results).toEqual(scenarioNames.map(name => ({ name, rejected: true, unchanged: true })))
+  })
+
+  test('allocates review ids without overwriting an explicit conflicting id', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: 'review id allocation' })
+    const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章' })
+    const existingReview = await createNovelReview(workspace, { project_id: project.id, review_type: 'existing', summary: '保留' })
+
+    await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { chapter_text: '正文' },
+      reviews: [{ id: existingReview.id, project_id: project.id, review_type: 'new', summary: '新增' } as any],
+    })
+
+    const reviews = await listNovelReviews(workspace, project.id)
+    expect(reviews).toHaveLength(2)
+    expect(reviews.find(review => review.id === existingReview.id)?.summary).toBe('保留')
+    expect(new Set(reviews.map(review => review.id)).size).toBe(2)
+  })
+
+  test('allocates unique ids after explicit staged create ids before the atomic write', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '暂存 ID 映射测试' })
+    const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章' })
+
+    await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { chapter_text: '正文' },
+      worldbuilding_creates: [
+        { id: 1, project_id: project.id, world_summary: '显式 ID 世界观' },
+        { project_id: project.id, world_summary: '自动 ID 世界观' },
+      ],
+    })
+
+    expect((await listNovelWorldbuilding(workspace, project.id)).map(item => item.id).sort((a, b) => a - b)).toEqual([1, 2])
+  })
+
+  test('applies usage updates to replacement records backed by staged setting ids', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '暂存 usage 更新' })
+    const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章' })
+
+    await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { chapter_text: '正文' },
+      setting_creates: [{ id: -1, project_id: project.id, entity_type: 'item', name: '临时印章' }],
+      chapter_setting_usage_replacement: [{ entity_id: -1, actual_state_change: { staged: true } }],
+      usage_updates: [{ entity_id: -1, patch: { actual_state_change: { owner: '李玄' } } }],
+    })
+
+    const [usage] = await listNovelChapterSettingUsage(workspace, project.id, chapter.id)
+    expect(usage.actual_state_change).toEqual({ staged: true, owner: '李玄' })
+  })
+
+  test('merges usage updates into replacement records instead of overwritten old usage', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '替换 usage 更新' })
+    const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章' })
+    const setting = await createNovelSettingEntity(workspace, { project_id: project.id, entity_type: 'item', name: '旧印章' } as any)
+    await replaceNovelChapterSettingUsage(workspace, project.id, chapter.id, [{ entity_id: setting.id, actual_state_change: { old: true } }])
+
+    await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { chapter_text: '正文' },
+      chapter_setting_usage_replacement: [{ entity_id: setting.id, actual_state_change: { replacement: true } }],
+      usage_updates: [{ entity_id: setting.id, patch: { actual_state_change: { prepared: true } } }],
+    })
+
+    const [usage] = await listNovelChapterSettingUsage(workspace, project.id, chapter.id)
+    expect(usage.actual_state_change).toEqual({ replacement: true, prepared: true })
+  })
+
+  test('rejects usage updates missing from the final replacement set without any write', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '无效 replacement 引用' })
+    const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章', chapter_text: '旧正文' })
+    const setting = await createNovelSettingEntity(workspace, { project_id: project.id, entity_type: 'item', name: '旧印章' } as any)
+    const before = JSON.stringify({
+      chapters: await listNovelChapters(workspace, project.id),
+      settings: await listNovelSettingEntities(workspace, project.id),
+      usage: await listNovelChapterSettingUsage(workspace, project.id, chapter.id),
+      versions: await listChapterVersions(workspace, chapter.id),
+    })
+
+    const error = await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { chapter_text: '不得写入' },
+      chapter_setting_usage_replacement: [{ entity_id: setting.id }],
+      usage_updates: [{ entity_id: 999999, patch: { actual_state_change: { invalid: true } } }],
+    }).then(() => null, caught => caught)
+    const after = JSON.stringify({
+      chapters: await listNovelChapters(workspace, project.id),
+      settings: await listNovelSettingEntities(workspace, project.id),
+      usage: await listNovelChapterSettingUsage(workspace, project.id, chapter.id),
+      versions: await listChapterVersions(workspace, chapter.id),
+    })
+
+    expect(String(error)).toContain('usage update reference')
+    expect(after).toBe(before)
+  })
+
+  test('rejects a stale usage id that points at another entity after replacement without any write', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: 'replacement stale usage id' })
+    const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章', chapter_text: '旧正文' })
+    const settingA = await createNovelSettingEntity(workspace, { project_id: project.id, entity_type: 'item', name: '印章甲' } as any)
+    const settingB = await createNovelSettingEntity(workspace, { project_id: project.id, entity_type: 'item', name: '印章乙' } as any)
+    const [oldUsageA] = await replaceNovelChapterSettingUsage(workspace, project.id, chapter.id, [
+      { entity_id: settingA.id },
+      { entity_id: settingB.id },
+    ])
+    const before = await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)
+
+    const error = await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { chapter_text: '不得写入' },
+      chapter_setting_usage_replacement: [
+        { entity_id: settingB.id },
+        { entity_id: settingA.id },
+      ],
+      usage_updates: [{ id: oldUsageA.id, entity_id: settingA.id, patch: { actual_state_change: { invalid: true } } }],
+    }).then(() => null, caught => caught)
+
+    expect(String(error)).toContain('usage update reference')
+    expect(await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)).toBe(before)
+  })
+
+  test('rejects an ambiguous setting update name before any write', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: 'ambiguous setting update' })
+    const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章', chapter_text: '旧正文' })
+    await createNovelSettingEntity(workspace, { project_id: project.id, entity_type: 'item', name: '同名设定' } as any)
+    await createNovelSettingEntity(workspace, { project_id: project.id, entity_type: 'rule', name: '同名设定' } as any)
+    const before = await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)
+
+    const error = await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { chapter_text: '不得写入' },
+      setting_updates: [{ name: '同名设定', patch: { state_json: { invalid: true } } }],
+    }).then(() => null, caught => caught)
+
+    expect(String(error)).toContain('ambiguous')
+    expect(await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)).toBe(before)
+  })
+
+  test('rejects an ambiguous usage replacement name before any write', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: 'ambiguous usage replacement' })
+    const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章', chapter_text: '旧正文' })
+    await createNovelSettingEntity(workspace, { project_id: project.id, entity_type: 'item', name: '同名设定' } as any)
+    await createNovelSettingEntity(workspace, { project_id: project.id, entity_type: 'rule', name: '同名设定' } as any)
+    const before = await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)
+
+    const error = await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { chapter_text: '不得写入' },
+      chapter_setting_usage_replacement: [{ entity_name: '同名设定' } as any],
+    }).then(() => null, caught => caught)
+
+    expect(String(error)).toContain('ambiguous')
+    expect(await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)).toBe(before)
+  })
+
+  test('rejects an ambiguous usage update name before any write', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: 'ambiguous usage update' })
+    const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章', chapter_text: '旧正文' })
+    const item = await createNovelSettingEntity(workspace, { project_id: project.id, entity_type: 'item', name: '同名设定' } as any)
+    const rule = await createNovelSettingEntity(workspace, { project_id: project.id, entity_type: 'rule', name: '同名设定' } as any)
+    await replaceNovelChapterSettingUsage(workspace, project.id, chapter.id, [{ entity_id: item.id }, { entity_id: rule.id }])
+    const before = await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)
+
+    const error = await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { chapter_text: '不得写入' },
+      usage_updates: [{ name: '同名设定', patch: { actual_state_change: { invalid: true } } }],
+    }).then(() => null, caught => caught)
+
+    expect(String(error)).toContain('ambiguous')
+    expect(await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)).toBe(before)
+  })
+
+  test('resolves explicit setting types consistently across updates and replacement usage', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: 'typed setting references' })
+    const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章' })
+    const item = await createNovelSettingEntity(workspace, { project_id: project.id, entity_type: 'item', name: '同名设定' } as any)
+    const rule = await createNovelSettingEntity(workspace, { project_id: project.id, entity_type: 'rule', name: '同名设定' } as any)
+
+    await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { chapter_text: '正文' },
+      setting_updates: [{ name: '同名设定', entity_type: 'item', patch: { state_json: { owner: '李玄' } } }],
+      chapter_setting_usage_replacement: [
+        { entity_name: '同名设定', entity_type: 'item' } as any,
+        { entity_name: '同名设定', entity_type: 'rule' } as any,
+      ],
+      usage_updates: [{ name: '同名设定', entity_type: 'rule', patch: { actual_state_change: { triggered: true } } }],
+    })
+
+    const settings = await listNovelSettingEntities(workspace, project.id)
+    const usage = await listNovelChapterSettingUsage(workspace, project.id, chapter.id)
+    expect(settings.find(setting => setting.id === item.id)?.state_json).toEqual({ owner: '李玄' })
+    expect(settings.find(setting => setting.id === rule.id)?.state_json).toEqual({})
+    expect(usage.find(record => record.entity_id === rule.id)?.actual_state_change).toEqual({ triggered: true })
+    expect(usage.find(record => record.entity_id === item.id)?.actual_state_change).toEqual({})
   })
 })
 
@@ -430,6 +917,96 @@ describe('novel diagnostic payload compaction', () => {
     expect(brief.scene_briefs[0].title).toBe('禁区入口')
     expect(brief.scene_briefs[0].purpose.length).toBeLessThan(500)
     expect(brief.character_behavior_contract).toMatchObject({ omitted: true, reason: 'storage_compaction' })
+  })
+
+  test('preserves confirmation metadata while compacting oversized pre draft briefs', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '写前确认元数据压缩测试' })
+    const confirmedAt = '2026-07-11T01:00:00.000Z'
+    const updatedAt = '2026-07-11T01:01:00.000Z'
+    const oversizedContracts = Object.fromEntries(
+      Array.from({ length: 44 }, (_, index) => [
+        `extended_${index}_contract`,
+        { rules: `第 ${index + 1} 份写前合同必须保留执行摘要。`.repeat(200) },
+      ]),
+    )
+
+    await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      raw_payload: {
+        pre_draft_brief: {
+          ...oversizedContracts,
+          confirmed_at: confirmedAt,
+          confirmation_source: 'manual_author_confirmation',
+          updated_at: updatedAt,
+        },
+      },
+    })
+
+    const [chapter] = await listNovelChapters(workspace, project.id)
+    const brief = chapter.raw_payload.pre_draft_brief
+
+    expect(brief.confirmed_at).toBe(confirmedAt)
+    expect(brief.confirmation_source).toBe('manual_author_confirmation')
+    expect(brief.updated_at).toBe(updatedAt)
+  })
+
+  test('preserves state tracking source readiness rows while compacting pre draft briefs', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '写前来源就绪压缩测试' })
+    const standardSourceRows = [
+      'chapter_blueprint',
+      'previous_chapter',
+      'context_tracking',
+      'serial_story_state',
+      'timeline_tracking',
+      'delivery_risk_carry_over',
+      'character_state',
+      'foreshadowing_history',
+      'world_constraints',
+    ].map(key => ({ key, status: 'ready', evidence: `${key} 已读取` }))
+    const customMissingRow = {
+      key: 'custom_editorial_source',
+      status: 'missing',
+      evidence: '编辑自定义来源尚未补齐',
+    }
+    const sourceRows = [...standardSourceRows, customMissingRow]
+    const hugeDiagnostic = '写前压缩仍需保留关键来源就绪行。'.repeat(30000)
+
+    await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      raw_payload: {
+        pre_draft_brief: {
+          chapter_goal: hugeDiagnostic,
+          state_tracking_contract: {
+            source_readiness: sourceRows,
+            sourceReadiness: sourceRows,
+            unrelated_rows: sourceRows,
+          },
+        },
+      },
+    })
+
+    const [chapter] = await listNovelChapters(workspace, project.id)
+    const brief = chapter.raw_payload.pre_draft_brief
+    const stateTracking = brief.state_tracking_contract
+
+    expect(stateTracking.source_readiness).toHaveLength(10)
+    expect(stateTracking.source_readiness.at(-1)).toMatchObject(customMissingRow)
+    expect(stateTracking.sourceReadiness).toHaveLength(10)
+    expect(stateTracking.sourceReadiness.at(-1)).toMatchObject(customMissingRow)
+    expect(stateTracking.unrelated_rows).toHaveLength(9)
+    expect(stateTracking.unrelated_rows.at(-1)).toMatchObject({
+      omitted: true,
+      reason: 'storage_compaction',
+      truncated: true,
+      original_count: 2,
+    })
+    expect(JSON.stringify(chapter.raw_payload)).not.toContain(hugeDiagnostic.slice(0, 2000))
   })
 })
 

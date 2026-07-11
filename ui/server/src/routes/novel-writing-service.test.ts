@@ -14,6 +14,7 @@ import {
   listNovelOutlines,
   listNovelReviews,
   listNovelWorldbuilding,
+  updateNovelChapter,
 } from '../novel'
 import {
   buildCommercialEditorRewritePrompt,
@@ -242,6 +243,9 @@ import {
   normalizeSceneCardsPayload,
   proseMaxTokensForWordTarget,
   prepareProseGenerationContract,
+  mergeFinalStateTrackingContract,
+  mergeFinalRepairPreDraftRawPayload,
+  repairBenchmarkRecallSourcePathState,
   resolveChapterWordTarget,
 } from './novel-writing-service'
 import { buildLLMResultDiagnostics, buildPreflightChecks, deepMergeObjects, extractPlainProseFallback, formatReviewIssueForStorage, getNovelPayload, getQualityGateDecision, getStyleLock, normalizeIssue } from './novel-route-utils'
@@ -560,6 +564,106 @@ test('uses the injected chapter context before enforcing request launch gates', 
   })).rejects.toMatchObject({ code: 'PROSE_LAUNCH_GATE_BLOCKED' })
 
   expect(contextCalls).toBe(1)
+  expect(modelCalls).toBe(0)
+})
+
+test('rolls back material repair before blocking a still-missing strict preflight', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'mangaforge-runtime-strict-repair-'))
+  const project = await createNovelProject(workspace, {
+    title: '怪谈世界',
+    genre: '规则怪谈',
+    synopsis: '江澈在追捕中主动破局。',
+    reference_config: {},
+  })
+  const chapter = await createNovelChapter(workspace, {
+    project_id: project.id,
+    chapter_no: 10,
+    title: '合围',
+    chapter_goal: '江澈主动打穿追捕圈。',
+    chapter_summary: '追捕队从四面合围。',
+    conflict: '出口全部被封死。',
+    ending_hook: '幕后指挥者第一次开口。',
+    scene_list: [{ scene_no: 1, title: '破围', purpose: '打穿封锁', conflict: '双层追捕线' }],
+  })
+  const stages: Array<{ stage: string; payload: any }> = []
+  let contextCalls = 0
+  let draftCalls = 0
+  let modelCalls = 0
+  const service = createNovelWritingService({
+    getProject: async () => project,
+    production: {
+      buildAgentConfigSnapshot: () => ({}),
+      getApprovalPolicy: () => ({}),
+    } as any,
+    reference: {} as any,
+    runtime: {
+      buildChapterContext: async () => {
+        contextCalls += 1
+        return {
+          preflight: {
+            ready: true,
+            checks: [{ key: 'chapter_blueprint', ok: false, severity: 'high' }],
+            warnings: ['本章蓝图缺失'],
+            blockers: [],
+          },
+          chapter_target: {
+            id: chapter.id,
+            chapter_no: chapter.chapter_no,
+            title: chapter.title,
+            goal: chapter.chapter_goal,
+            summary: chapter.chapter_summary,
+            conflict: chapter.conflict,
+            ending_hook: chapter.ending_hook,
+            scene_cards: chapter.scene_list,
+          },
+        }
+      },
+      generateChapterProse: async () => {
+        draftCalls += 1
+        return { parsed: { chapter_text: '不应生成。' } } as any
+      },
+      executeAgent: async () => {
+        modelCalls += 1
+        return { parsed: {} } as any
+      },
+    },
+  })
+
+  const snapshot = async () => JSON.stringify({
+      chapters: await listNovelChapters(workspace, project.id),
+      characters: await listNovelCharacters(workspace, project.id),
+      outlines: await listNovelOutlines(workspace, project.id),
+      reviews: await listNovelReviews(workspace, project.id),
+      worldbuilding: await listNovelWorldbuilding(workspace, project.id),
+    })
+  const before = await snapshot()
+  const snapshotsDuringRepair: string[] = []
+
+  const error = await service.generateChapterForGroup(workspace, project.id, chapter.id, {
+    auto_repair_missing_material: true,
+    onStage: async (stage: string, payload: any) => {
+      stages.push({ stage, payload })
+      if (stage === 'material_repair' && payload?.status === 'warn') snapshotsDuringRepair.push(await snapshot())
+    },
+  }).then(() => null, (caught: any) => caught)
+
+  expect(error).toBeTruthy()
+  expect(contextCalls).toBe(2)
+  expect(stages.filter(item => item.stage === 'material_repair').map(item => item.payload.status))
+    .toEqual(['running', 'warn'])
+  const materialRepairResult = stages.find(item => item.stage === 'material_repair' && item.payload.status === 'warn')
+  expect(materialRepairResult?.payload.repaired).toEqual(expect.arrayContaining([
+    expect.objectContaining({ type: 'chapter_blueprint_updated', chapter_id: chapter.id }),
+  ]))
+  const after = await snapshot()
+  expect(snapshotsDuringRepair).toEqual([before])
+  expect(after).toBe(before)
+  expect(stages.find(item => item.stage === 'context')?.payload.status).toBe('failed')
+  expect(stages.at(-1)).toMatchObject({
+    stage: 'context',
+    payload: { status: 'failed' },
+  })
+  expect(draftCalls).toBe(0)
   expect(modelCalls).toBe(0)
 })
 
@@ -7374,7 +7478,9 @@ describe('normalizeSceneCardsPayload', () => {
 
     expect(helperBlock).toContain('generated_scene_breakdown')
     expect(generationBlock).toContain('coreContract: buildFocusedQualityCoreContract(generationContract)')
-    expect(generationBlock).toContain('scan: text => scanProseForQualityLoop(text, contextPackage, wordTarget)')
+    expect(generationBlock).toContain('scan: text => scanProseForQualityLoop(text, contextPackage, wordTarget, wordTargetCompatibility ? {')
+    expect(generationBlock).toContain('word_target_compatibility_pass: true')
+    expect(generationBlock).toContain('compatibility_ceiling: wordTargetCompatibility.compatibility_ceiling')
   })
 
   test('wires deterministic scene-card density risks into prose craft self review', () => {
@@ -11380,9 +11486,9 @@ describe('chapter prose word target', () => {
     expect(tooLongStart).toBeGreaterThanOrEqual(0)
     expect(contractionStart).toBeGreaterThan(tooLongStart)
     expect(expansionStart).toBeGreaterThan(contractionStart)
-    expect(ensureBlock).toContain('options.maxContractionAttempts || options.max_contraction_attempts || 3')
+    expect(ensureBlock).toContain('options.maxContractionAttempts ?? options.max_contraction_attempts ?? 3')
     expect(ensureBlock).toContain('buildProseWordTargetContractionPrompt')
-    expect(contractionBlock).toContain('maxTokens: proseContractionMaxTokensForAttempt(wordTarget, attempt)')
+    expect(contractionBlock).toContain('maxTokens: proseContractionMaxTokensForAttempt(wordTarget, globalAttempt)')
     expect(contractionBlock).toContain('const finishReason = normalizeProseContractionFinishReason(contractionResult)')
     expect(contractionBlock).toContain('finish_reason: finishReason')
     expect(contractionBlock).toContain('model_usage: (contractionResult as any).usage')
@@ -48759,12 +48865,16 @@ describe('story unit sync report', () => {
 
   test('story state sync receives latest generated scene breakdown context', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const storeBlock = source.slice(
-      source.indexOf('const storyStateUpdate = await updateStoryStateMachine'),
-      source.indexOf("await onStage('story_state'", source.indexOf('const storyStateUpdate = await updateStoryStateMachine')),
-    )
+    const contextStart = source.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')
+    const prepareStart = source.indexOf('const preparedStoryStateUpdate = await prepareStoryStateUpdate(', contextStart)
+    const acceptanceStart = source.indexOf('const acceptance = await commitNovelChapterAcceptance(', prepareStart)
+    const prepareBlock = source.slice(prepareStart, acceptanceStart)
 
-    expect(storeBlock).toContain('buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')
+    expect(contextStart).toBeGreaterThanOrEqual(0)
+    expect(prepareStart).toBeGreaterThan(contextStart)
+    expect(acceptanceStart).toBeGreaterThan(prepareStart)
+    expect(prepareBlock).toContain('finalReviewContextPackage,')
+    expect(prepareBlock).toContain('{ ...chapter, chapter_text: finalText }')
   })
 
   test('prose generation stores oh-story delivery receipts in every chapter store branch', () => {
@@ -48788,22 +48898,13 @@ describe('story unit sync report', () => {
   test('prose generation stores post-draft oh-story director after delivery receipts and quality review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const storagePatchSource = readChapterProseStoragePatchSource()
-    const generationBlock = source.slice(
-      source.indexOf('const draftResult = await generateNovelChapterProse'),
-      source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
-    )
-    const fullGenerationBlock = source.slice(
-      source.indexOf('const draftResult = await generateNovelChapterProse'),
-      source.indexOf('const settingViolations = Array.isArray', source.indexOf('const draftResult = await generateNovelChapterProse')),
-    )
-    const draftOnlyBlock = generationBlock.slice(
-      generationBlock.indexOf('if (isDraftOnly)'),
-      generationBlock.indexOf("await onStage('editor'", generationBlock.indexOf('if (isDraftOnly)')),
-    )
-    const postReviewBlock = generationBlock.slice(
-      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
-      generationBlock.indexOf('const storyStateUpdate = await updateStoryStateMachine'),
-    )
+    const postReviewStart = source.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')
+    const acceptanceStart = source.indexOf('const acceptance = await commitNovelChapterAcceptance(', postReviewStart)
+    const acceptanceEnd = source.indexOf('const updated = acceptance.chapter', acceptanceStart)
+    const fullProductionPrepareStart = source.indexOf("await onStage('story_state', { status: 'running', phase: 'prepare' })", postReviewStart)
+    const postReviewBlock = source.slice(postReviewStart, acceptanceStart)
+    const fullProductionPreAcceptanceBlock = source.slice(fullProductionPrepareStart, acceptanceStart)
+    const acceptanceBlock = source.slice(acceptanceStart, acceptanceEnd)
 
     expect(source).toContain('buildOhStoryDirectorForPostDraft')
     expect(postReviewBlock).toContain('const postDraftDirector = buildOhStoryDirectorForPostDraft')
@@ -48815,24 +48916,17 @@ describe('story unit sync report', () => {
     expect(postReviewBlock).toContain('oh_story_delivery_receipts: ohStoryDeliveryReceipts')
     expect(postReviewBlock).toContain('oh_story_director: postDraftDirector')
     expect(postReviewBlock).toContain('ohStoryDirector: postDraftDirector')
-    expect(fullGenerationBlock.match(/postDraftDirector,/g)?.length || 0).toBeGreaterThanOrEqual(2)
     expect(storagePatchSource).toContain('rawPayload.oh_story_director = input.postDraftDirector')
     expect(storagePatchSource).toContain('rawPayload.ohStoryDirector = input.postDraftDirector')
     expect(postReviewBlock).toContain('postDraftDirectorPayload,')
-    for (const marker of [
-      "quality_gate', '章节质量门禁未通过，正文未入库'",
-      "approvalType: 'low_score'",
-      "approvalType: 'draft'",
-      "approvalType: 'reference_safety_blocked'",
-      "quality_gate', '章节质量门禁未通过，正文未入库', finalQualityDecision",
-      "approvalType: 'safety'",
-    ]) {
-      const markerIndex = fullGenerationBlock.indexOf(marker)
-      expect(markerIndex).toBeGreaterThanOrEqual(0)
-      const payloadBlock = fullGenerationBlock.slice(Math.max(0, markerIndex - 900), markerIndex + 900)
-      expect(payloadBlock).toContain('buildProseQualityReview')
-    }
-    expect(draftOnlyBlock).not.toContain('postDraftDirector')
+    expect(acceptanceBlock).toContain('chapter_patch: chapterPatch')
+    expect(acceptanceBlock).toContain('...pendingGeneratedReviews')
+    expect(acceptanceBlock).toContain("buildProseQualityReview(finalQualityDecision.passed ? 'ok' : 'warn'")
+    expect(acceptanceBlock).toContain('settingConsistencyReview,')
+    expect(acceptanceBlock.indexOf('...pendingGeneratedReviews')).toBeLessThan(acceptanceBlock.indexOf('buildProseQualityReview('))
+    expect(acceptanceBlock.indexOf('buildProseQualityReview(')).toBeLessThan(acceptanceBlock.indexOf('settingConsistencyReview,'))
+    expect(fullProductionPrepareStart).toBeGreaterThan(postReviewStart)
+    expect(fullProductionPreAcceptanceBlock).not.toContain('await createNovelReview(activeWorkspace')
   })
 
   test('prose generation preserves pre-draft execution receipts for write-preparation diagnostics', () => {
@@ -49025,9 +49119,12 @@ describe('storyline sync backfill', () => {
     const helperStart = source.indexOf('const normalizeStoryStateDeltaForStorage =')
     const helperEnd = source.indexOf('const mergeStoryState =', helperStart)
     const helperBlock = source.slice(helperStart, helperEnd)
-    const updateStart = source.indexOf('const updateStoryStateMachine =')
-    const updateEnd = source.indexOf('const buildWritingBible =', updateStart)
-    const updateBlock = source.slice(updateStart, updateEnd)
+    const prepareStart = source.indexOf('const prepareStoryStateUpdate =')
+    const prepareEnd = source.indexOf('const updateStoryStateMachine =', prepareStart)
+    const prepareBlock = source.slice(prepareStart, prepareEnd)
+    const acceptanceStart = source.indexOf('const acceptance = await commitNovelChapterAcceptance(')
+    const acceptanceEnd = source.indexOf('const updated = acceptance.chapter', acceptanceStart)
+    const acceptanceBlock = source.slice(acceptanceStart, acceptanceEnd)
 
     expect(helperStart).toBeGreaterThanOrEqual(0)
     expect(helperEnd).toBeGreaterThan(helperStart)
@@ -49036,12 +49133,15 @@ describe('storyline sync backfill', () => {
     expect(helperBlock).toContain('itemOwnership')
     expect(helperBlock).toContain('nextChapterPriorities')
     expect(helperBlock).toContain('layeredMemoryContext')
-    expect(updateBlock).toContain('payload?.stateDelta')
-    expect(updateBlock).toContain('payload?.characterUpdates')
-    expect(updateBlock).toContain('payload?.settingUpdates')
-    expect(updateBlock).toContain('payload?.storylineUpdates')
-    expect(updateBlock).toContain('payload?.discoveredAssets')
-    expect(updateBlock).toContain('payload?.ipSceneCandidates')
+    expect(prepareBlock).toContain('payload?.state_delta || payload?.stateDelta')
+    expect(prepareBlock).toContain('payload?.character_updates || payload?.characterUpdates')
+    expect(prepareBlock).toContain('payload?.setting_updates || payload?.settingUpdates')
+    expect(prepareBlock).toContain('payload?.storyline_updates || payload?.storylineUpdates')
+    expect(prepareBlock).toContain('payload?.discovered_assets || payload?.discoveredAssets')
+    expect(acceptanceBlock).toContain('next_reference_config: preparedStoryStateUpdate.next_reference_config')
+    expect(acceptanceBlock).toContain('character_updates: acceptanceCharacterUpdates')
+    expect(acceptanceBlock).toContain('setting_updates: acceptanceSettingUpdates')
+    expect(acceptanceBlock).toContain('usage_updates: acceptanceUsageUpdates')
   })
 
   test('detects missing state delta records when prose visibly changes chapter state', () => {
@@ -53261,7 +53361,9 @@ describe('chapter context word target source guards', () => {
     expect(helperBlock).toContain('word_target_expansion_patches')
     expect(generationBlock).toContain('const wordTargetExpansionPatches: any[] = []')
     expect(generationBlock).toContain('wordTargetExpansionPatches.push')
-    expect(generationBlock).toContain('scan: text => scanProseForQualityLoop(text, contextPackage, wordTarget)')
+    expect(generationBlock).toContain('scan: text => scanProseForQualityLoop(text, contextPackage, wordTarget, wordTargetCompatibility ? {')
+    expect(generationBlock).toContain('word_target_compatibility_pass: true')
+    expect(generationBlock).toContain('compatibility_ceiling: wordTargetCompatibility.compatibility_ceiling')
     expect(generationBlock).toContain('finalSceneBreakdown = selectVerifiedSceneBreakdownUpdate')
   })
 
@@ -53547,10 +53649,16 @@ describe('chapter context word target source guards', () => {
     expect(groupStart).toBeGreaterThanOrEqual(0)
     expect(repairCall).toBeGreaterThan(groupStart)
     expect(rebuildStart).toBeGreaterThan(repairCall)
-    expect(repairRefreshBlock).toContain('worldbuilding = await listNovelWorldbuilding')
-    expect(repairRefreshBlock).toContain('characters = await listNovelCharacters')
-    expect(repairRefreshBlock).toContain('outlines = await listNovelOutlines')
-    expect(repairRefreshBlock).toContain('reviews = await listNovelReviews')
+    expect(repairRefreshBlock).toContain('persist: false')
+    expect(repairRefreshBlock).toContain('worldbuilding = repairResult.worldbuilding || worldbuilding')
+    expect(repairRefreshBlock).toContain('characters = repairResult.characters || characters')
+    expect(repairRefreshBlock).toContain('settings = repairResult.settings || settings')
+    expect(repairRefreshBlock).toContain('chapterSettingUsage = repairResult.staged_usage_replacement || chapterSettingUsage')
+    expect(repairRefreshBlock).toContain('reviews = [...reviews, ...asArray(repairResult.staged_reviews)]')
+    expect(repairRefreshBlock).not.toContain('await listNovelWorldbuilding')
+    expect(repairRefreshBlock).not.toContain('await createNovel')
+    expect(repairRefreshBlock).not.toContain('await updateNovel')
+    expect(rebuiltContractBlock).toContain('ctx.runtime?.buildChapterContext ? await buildGenerationContext() : repairResult.context_package')
     expect(rebuiltContractBlock).toContain('preparedGeneration = prepareProseGenerationContract(repairedContextPackage, options)')
     expect(rebuiltContractBlock).toContain('generationContract = preparedGeneration.contract')
   })
@@ -54030,6 +54138,357 @@ describe('chapter context word target source guards', () => {
     expect(repairBlock).toContain('generated_at: repairedEmotionAndHookBrief.generated_at')
   })
 
+  test('repairs benchmark source paths across aliases without clearing unrepaired gaps', () => {
+    const repairedCamelPath = repairBenchmarkRecallSourcePathState({ chapter_no: 2 }, {
+      source_paths: [],
+      sourcePaths: ['MangaForge/manual/chapter-2/rhythm-reference'],
+      gaps: ['source_paths_missing', 'module_rhythm_conflict'],
+    }, ['source_paths_missing', 'module_rhythm_conflict'])
+
+    expect(repairedCamelPath.benchmark_recall_brief.source_paths).toEqual(['MangaForge/manual/chapter-2/rhythm-reference'])
+    expect(repairedCamelPath.benchmark_recall_gaps).toEqual(['module_rhythm_conflict'])
+
+    const unresolvedPath = repairBenchmarkRecallSourcePathState({ chapter_no: 2 }, {
+      source_paths: [],
+      sourcePaths: [],
+      gaps: ['source_paths_missing'],
+    }, ['source_paths_missing', 'module_rhythm_conflict'])
+
+    expect(unresolvedPath.benchmark_recall_brief.source_paths || []).toEqual([])
+    expect(unresolvedPath.benchmark_recall_gaps).toContain('source_paths_missing')
+    expect(unresolvedPath.benchmark_recall_gaps).toContain('module_rhythm_conflict')
+  })
+
+  test('removes only reliable source-path clauses from composite benchmark gaps', () => {
+    const repaired = repairBenchmarkRecallSourcePathState({ chapter_no: 2 }, {
+      source_paths: ['MangaForge/manual/chapter-2/rhythm-reference'],
+      gaps: [
+        'Step 2.3 source_paths_missing；module_rhythm_conflict',
+        'Step 2.3 source_paths_missing',
+        'source_paths_missing module_voice_conflict',
+      ],
+    })
+
+    expect(repaired.benchmark_recall_brief.gaps).toContain('module_rhythm_conflict')
+    expect(repaired.benchmark_recall_gaps).toContain('module_rhythm_conflict')
+    expect(repaired.benchmark_recall_brief.gaps).not.toContain('Step 2.3 source_paths_missing')
+    expect(repaired.benchmark_recall_gaps).not.toContain('Step 2.3 source_paths_missing')
+    expect(repaired.benchmark_recall_brief.gaps).toContain('source_paths_missing module_voice_conflict')
+    expect(repaired.benchmark_recall_gaps).toContain('source_paths_missing module_voice_conflict')
+  })
+
+  test('merges final repair contracts into the freshest pre-draft payload', () => {
+    const latestRawPayload = {
+      unrelated_top_level_key: 'keep latest top-level value',
+      pre_draft_brief: {
+        confirmed_at: '2026-07-11T09:30:00.000Z',
+        confirmation_source: 'manual_user_confirmation',
+        user_added_key: 'keep latest snake key',
+      },
+      preDraftBrief: {
+        camel_user_added_key: 'keep latest camel key',
+      },
+    }
+    const computedPreDraftBrief = {
+      confirmed_at: '2026-07-11T08:00:00.000Z',
+      confirmation_source: 'stale_repair_snapshot',
+      user_added_key: 'stale value',
+      benchmark_recall_brief: { source_paths: ['MangaForge/final/benchmark'], gaps: ['module_rhythm_conflict'] },
+      benchmarkRecallBrief: { sourcePaths: ['MangaForge/final/benchmark'], gaps: ['module_rhythm_conflict'] },
+      benchmark_recall_gaps: ['module_rhythm_conflict'],
+      benchmarkRecallGaps: ['module_rhythm_conflict'],
+      state_tracking_contract: { source_readiness: [{ key: 'custom', label: 'custom', status: 'missing' }] },
+      stateTrackingContract: { sourceReadiness: [{ key: 'custom', label: 'custom', status: 'missing' }] },
+      write_preparation_brief: { readiness_status: 'needs_context', source_gaps: ['custom missing'] },
+      writePreparationBrief: { readiness_status: 'needs_context', source_gaps: ['custom missing'] },
+    }
+
+    const mergedRawPayload = mergeFinalRepairPreDraftRawPayload(latestRawPayload, computedPreDraftBrief)
+    const mergedBrief = mergedRawPayload.pre_draft_brief
+
+    expect(mergedRawPayload.unrelated_top_level_key).toBe('keep latest top-level value')
+    expect(mergedBrief.confirmed_at).toBe('2026-07-11T09:30:00.000Z')
+    expect(mergedBrief.confirmation_source).toBe('manual_user_confirmation')
+    expect(mergedBrief.user_added_key).toBe('keep latest snake key')
+    expect(mergedBrief.camel_user_added_key).toBe('keep latest camel key')
+    expect(mergedBrief.benchmark_recall_brief).toMatchObject(computedPreDraftBrief.benchmark_recall_brief)
+    expect(mergedBrief.benchmarkRecallBrief).toEqual(mergedBrief.benchmark_recall_brief)
+    expect(mergedBrief.benchmark_recall_gaps).toEqual(computedPreDraftBrief.benchmark_recall_gaps)
+    expect(mergedBrief.benchmarkRecallGaps).toEqual(computedPreDraftBrief.benchmark_recall_gaps)
+    expect(mergedBrief.state_tracking_contract).toMatchObject(computedPreDraftBrief.state_tracking_contract)
+    expect(mergedBrief.stateTrackingContract).toEqual(mergedBrief.state_tracking_contract)
+    expect(mergedBrief.write_preparation_brief).toEqual(computedPreDraftBrief.write_preparation_brief)
+    expect(mergedBrief.writePreparationBrief).toEqual(computedPreDraftBrief.write_preparation_brief)
+    expect(mergedRawPayload.preDraftBrief).toEqual(mergedBrief)
+  })
+
+  test('merges final state tracking with derived dynamic fields and preserved custom policy', () => {
+    const storedContract = {
+      version: 'oh_story_state_tracking_v1',
+      source: 'stored_contract',
+      character_states: ['旧角色状态'],
+      characterStates: ['旧角色状态 camel'],
+      historical_causality: ['旧前史因果'],
+      historicalCausality: ['旧前史因果 camel'],
+      world_constraints: ['旧世界约束'],
+      worldConstraints: ['旧世界约束 camel'],
+      filter_rules: [],
+      filterRules: ['保留 camel 自定义状态筛选约束'],
+      source_requirements: [],
+      sourceRequirements: ['保留 camel 自定义来源要求'],
+      quality_checks: [],
+      qualityChecks: ['保留 camel 自定义质量检查'],
+      revision_priorities: [],
+      revisionPriorities: ['保留 camel 自定义修订优先级'],
+      custom_policy: { mode: 'manual_review' },
+      source_readiness: [
+        { key: 'chapter_blueprint', label: '本章细纲/蓝图', status: 'missing', evidence: '旧 snake 行' },
+        { key: 'serial_story_state', label: '连载故事状态', status: 'ready', evidence: '已过期标准行' },
+        { key: 'custom_archive', label: '自定义档案', status: 'ready', evidence: '人工档案已读' },
+      ],
+      sourceReadiness: [
+        { key: 'chapter_blueprint', label: '本章细纲/蓝图', status: 'warn', evidence: '旧 camel 行' },
+        { key: 'character_state', label: '角色状态', status: 'missing', evidence: '旧 camel 角色行' },
+        { key: 'custom_approval', label: '自定义审批', status: 'missing', evidence: '', fix: '等待人工审批' },
+      ],
+    }
+    const derivedContract = {
+      version: 'oh_story_state_tracking_v1',
+      source: 'oh_story_embedded_fallback',
+      character_states: ['江哲：位置：红雾回廊；认知边界：不知道幕后主使'],
+      historical_causality: ['上一章章尾：第二张规则页亮起'],
+      world_constraints: ['红雾裂缝规则：暴力破坏会扩大裂缝'],
+      source_readiness: [
+        { key: 'chapter_blueprint', label: '本章细纲/蓝图', status: 'ready', evidence: '最终蓝图已读取' },
+        { key: 'character_state', label: '角色状态', status: 'ready', evidence: '最终角色 DB 已读取' },
+        { key: 'world_constraints', label: '世界约束', status: 'ready', evidence: '最终世界观 DB 已读取' },
+      ],
+      filter_rules: ['派生默认筛选规则'],
+    }
+
+    const merged = mergeFinalStateTrackingContract(storedContract, derivedContract)
+    const sourceRows = merged.source_readiness || []
+    const sourceRowsCamel = merged.sourceReadiness || []
+
+    expect(merged.character_states).toEqual(derivedContract.character_states)
+    expect(merged.characterStates).toEqual(derivedContract.character_states)
+    expect(merged.historical_causality).toEqual(derivedContract.historical_causality)
+    expect(merged.historicalCausality).toEqual(derivedContract.historical_causality)
+    expect(merged.world_constraints).toEqual(derivedContract.world_constraints)
+    expect(merged.worldConstraints).toEqual(derivedContract.world_constraints)
+    expect(sourceRows.find((row: any) => row.key === 'chapter_blueprint')).toEqual(derivedContract.source_readiness[0])
+    expect(sourceRows.find((row: any) => row.key === 'character_state')).toEqual(derivedContract.source_readiness[1])
+    expect(sourceRows.some((row: any) => row.key === 'serial_story_state')).toBe(false)
+    expect(sourceRows.find((row: any) => row.key === 'custom_archive')?.status).toBe('ready')
+    expect(sourceRows.find((row: any) => row.key === 'custom_approval')).toMatchObject({ status: 'missing', fix: '等待人工审批' })
+    expect(sourceRowsCamel).toEqual(sourceRows)
+    expect(merged.filter_rules).toEqual(storedContract.filterRules)
+    expect(merged.filterRules).toEqual(storedContract.filterRules)
+    expect(merged.source_requirements).toEqual(storedContract.sourceRequirements)
+    expect(merged.sourceRequirements).toEqual(storedContract.sourceRequirements)
+    expect(merged.quality_checks).toEqual(storedContract.qualityChecks)
+    expect(merged.qualityChecks).toEqual(storedContract.qualityChecks)
+    expect(merged.revision_priorities).toEqual(storedContract.revisionPriorities)
+    expect(merged.revisionPriorities).toEqual(storedContract.revisionPriorities)
+    expect(merged.custom_policy).toEqual(storedContract.custom_policy)
+  })
+
+  test.each(['pending', 'not_ready', 'failed', 'error', 'needs_context', 'awaiting_editor'])(
+    'keeps %s custom source state over a conflicting ready alias',
+    status => {
+      const merged = mergeFinalStateTrackingContract({
+        source_readiness: [
+          { key: 'custom_editorial_source', label: '自定义编辑来源', status: 'ready', evidence: '旧 ready alias' },
+        ],
+        sourceReadiness: [
+          { key: 'custom_editorial_source', label: '自定义编辑来源', status, evidence: '仍未就绪' },
+        ],
+      }, {
+        source_readiness: [],
+      })
+
+      expect(merged.source_readiness.find((row: any) => row.key === 'custom_editorial_source')).toMatchObject({
+        status,
+        evidence: '仍未就绪',
+      })
+    },
+  )
+
+  test('normalizes benchmark source path gaps after a character-only repair', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'mangaforge-preflight-final-benchmark-recall-'))
+    const project = await createNovelProject(workspace, {
+      title: '红雾回廊',
+      genre: '规则怪谈',
+      synopsis: '主角沿红雾回廊追查被替换的规则。',
+      reference_config: {
+        story_state: {
+          current_time: '紧接第一章章尾',
+          active_locations: ['红雾回廊'],
+        },
+      },
+    })
+    await createNovelWorldbuilding(workspace, {
+      project_id: project.id,
+      world_summary: '红雾规则被改写后会留下金色裂纹。',
+      rules: ['暴力破坏规则载体会扩大红雾裂缝。'],
+    })
+    await createNovelSettingEntity(workspace, {
+      project_id: project.id,
+      entity_type: 'rule',
+      name: '红雾裂缝规则',
+      summary: '暴力破坏规则载体会扩大红雾裂缝。',
+      constraints_json: { trigger: '暴力破坏规则载体', cost: '红雾裂缝扩大' },
+      state_json: {},
+      payload_json: {},
+    } as any)
+    await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '规则换页',
+      chapter_summary: '金色裂纹证明规则页被人替换。',
+      ending_hook: '回廊尽头出现第二张规则页。',
+      chapter_text: '金色裂纹沿规则页一路延伸，回廊尽头随即亮起第二张规则页。',
+    })
+    const benchmarkBrief = {
+      selected_emotion_module: 'snake canonical 情绪模块',
+      rhythm_reference: '蓄势 -> 误判 -> 反证 -> 新钩子。',
+      source_paths: [],
+      sourcePaths: [],
+      gaps: ['source_paths_missing', 'module_rhythm_conflict'],
+      recall_gaps: ['来源路径缺失', 'module_rhythm_conflict'],
+      recallGaps: ['source_paths_missing', 'module_rhythm_conflict'],
+    }
+    const preDraftBrief = {
+      confirmed_at: '2026-07-11T00:00:00.000Z',
+      confirmation_source: 'test_fixture',
+      benchmark_recall_brief: benchmarkBrief,
+      benchmarkRecallBrief: {
+        ...benchmarkBrief,
+        source_paths: [],
+        sourcePaths: [],
+      },
+      benchmark_recall_gaps: ['source_paths_missing', 'module_rhythm_conflict'],
+      benchmarkRecallGaps: ['来源路径缺失', 'module_rhythm_conflict'],
+      state_tracking_contract: {
+        filter_rules: ['snake 状态筛选策略'],
+        source_requirements: [],
+        source_readiness: [
+          { key: 'custom_snake_archive', label: 'snake 自定义档案', status: 'ready', evidence: 'snake 档案已读' },
+        ],
+      },
+      stateTrackingContract: {
+        filterRules: ['camel 状态筛选策略'],
+        sourceRequirements: ['camel 自定义来源要求'],
+        qualityChecks: ['camel 自定义质量检查'],
+        revisionPriorities: ['camel 自定义修订优先级'],
+        sourceReadiness: [
+          { key: 'custom_camel_approval', label: 'camel 自定义审批', status: 'missing', evidence: '', fix: '等待 camel 审批' },
+        ],
+      },
+      writePreparationBrief: {
+        readinessStatus: 'needs_context',
+        sourceGaps: ['stale_camel_write_preparation_gap'],
+      },
+      chapter_blueprint: {
+        target_emotion: '压迫 -> 试探 -> 反证',
+        opening_hook: '第二张规则页在主角面前自行翻开。',
+        core_payoff: '主角从金色裂纹确认规则被替换。',
+        content_outline: {
+          cause: '主角追到回廊尽头。',
+          development: '第二张规则页给出冲突答案。',
+          turn: '金色裂纹证明答案同样被改写。',
+          climax: '主角反推替换规则的时间。',
+          ending: '裂纹指向回廊深处。',
+        },
+        ending_contract: {
+          final_state: '主角放弃照搬旧答案。',
+          unresolved_question: '谁替换了第二张规则页？',
+          next_chapter_pull: '裂纹指向回廊深处。',
+        },
+      },
+    }
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 2,
+      title: '第二张规则页',
+      chapter_goal: '确认第二张规则页同样被替换。',
+      chapter_summary: '主角沿金色裂纹确认第二张规则页同样被替换。',
+      conflict: '照搬旧答案会让红雾裂缝扩大。',
+      ending_hook: '裂纹指向回廊深处。',
+      scene_list: [
+        {
+          scene_no: 1,
+          title: '回廊尽头',
+          purpose: '验证第二张规则页。',
+          conflict: '旧答案会扩大红雾裂缝。',
+          reader_payoff: '确认规则页被替换。',
+          ending_hook: '裂纹指向回廊深处。',
+        },
+      ],
+      raw_payload: {
+        pre_draft_brief: preDraftBrief,
+        preDraftBrief: {
+          ...preDraftBrief,
+          benchmark_recall_brief: {
+            selected_emotion_module: 'camel outer 情绪模块不得覆盖 canonical snake',
+            sourcePaths: ['MangaForge/manual/chapter-2/rhythm-reference'],
+            gaps: ['source_paths_missing', 'camel_outer_extension_gap'],
+            camel_outer_extension: { mode: 'preserve_me' },
+          },
+          benchmark_recall_gaps: ['来源路径缺失', 'module_rhythm_conflict'],
+          benchmarkRecallGaps: ['source_paths_missing', 'module_rhythm_conflict'],
+        },
+      },
+    })
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const contextPackage = {
+      preflight: {
+        checks: [{ key: 'characters', ok: false, severity: 'high' }],
+        warnings: ['角色材料不足'],
+      },
+      chapter_target: {
+        chapter_no: 2,
+        title: chapter.title,
+        summary: chapter.chapter_summary,
+        conflict: chapter.conflict,
+        ending_hook: chapter.ending_hook,
+        scene_cards: chapter.scene_list,
+      },
+    }
+
+    const result = await service.autoRepairChapterPreflightGaps(workspace, project, chapter, contextPackage, undefined)
+    const repairedChapter = (await listNovelChapters(workspace, project.id)).find(item => item.id === chapter.id)
+
+    expect(result.repaired.map((item: any) => item.type)).toContain('character_created')
+    expect(result.repaired.map((item: any) => item.type)).not.toContain('chapter_blueprint_updated')
+    for (const storedBrief of [repairedChapter?.raw_payload?.pre_draft_brief, repairedChapter?.raw_payload?.preDraftBrief]) {
+      expect(storedBrief?.benchmark_recall_brief?.source_paths).toEqual(['MangaForge/manual/chapter-2/rhythm-reference'])
+      expect(storedBrief?.benchmark_recall_brief?.selected_emotion_module).toBe('snake canonical 情绪模块')
+      expect(storedBrief?.benchmark_recall_brief?.camel_outer_extension).toEqual({ mode: 'preserve_me' })
+      expect(storedBrief?.benchmark_recall_brief?.gaps).toEqual(expect.arrayContaining(['module_rhythm_conflict', 'camel_outer_extension_gap']))
+      expect(storedBrief?.benchmarkRecallBrief).toEqual(storedBrief?.benchmark_recall_brief)
+      expect(storedBrief?.benchmark_recall_gaps).toEqual(expect.arrayContaining(['module_rhythm_conflict', 'camel_outer_extension_gap']))
+      expect(storedBrief?.benchmarkRecallGaps).toEqual(storedBrief?.benchmark_recall_gaps)
+      expect(storedBrief?.write_preparation_brief?.source_gaps.join('｜')).not.toMatch(/source_paths_missing|来源路径.*缺/)
+      expect(storedBrief?.write_preparation_brief?.source_gaps.join('｜')).toContain('module_rhythm_conflict')
+      expect(storedBrief?.write_preparation_brief?.source_gaps.join('｜')).toContain('camel_outer_extension_gap')
+      const stateTracking = storedBrief?.state_tracking_contract
+      expect(stateTracking?.source_readiness.find((row: any) => row.key === 'custom_snake_archive')?.status).toBe('ready')
+      expect(stateTracking?.source_readiness.find((row: any) => row.key === 'custom_camel_approval')).toMatchObject({ status: 'missing', fix: '等待 camel 审批' })
+      expect(stateTracking?.filter_rules).toEqual(expect.arrayContaining(['snake 状态筛选策略', 'camel 状态筛选策略']))
+      expect(stateTracking?.source_requirements).toContain('camel 自定义来源要求')
+      expect(stateTracking?.quality_checks).toContain('camel 自定义质量检查')
+      expect(stateTracking?.revision_priorities).toContain('camel 自定义修订优先级')
+      expect(storedBrief?.stateTrackingContract).toEqual(stateTracking)
+      expect(storedBrief?.writePreparationBrief).toEqual(storedBrief?.write_preparation_brief)
+      expect(storedBrief?.writePreparationBrief?.source_gaps.join('｜')).not.toContain('stale_camel_write_preparation_gap')
+    }
+  })
+
   test('auto-repairs unattended preflight source paths, timeline readiness, and blueprint fields', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'mangaforge-preflight-repair-sources-'))
     const project = await createNovelProject(workspace, {
@@ -54076,10 +54535,13 @@ describe('chapter context word target source guards', () => {
       ],
       raw_payload: {
         pre_draft_brief: {
+          benchmark_recall_gaps: ['source_paths_missing', 'module_rhythm_conflict'],
+          benchmarkRecallGaps: ['来源路径缺失', 'module_rhythm_conflict'],
           benchmark_recall_brief: {
             selected_emotion_module: '调动：旧答案失效后的规则压力。',
             rhythm_reference: '蓄势 -> 误判 -> 反证 -> 新钩子。',
-            source_paths: [],
+            source_paths: ['MangaForge/manual/chapter-2/rhythm-reference'],
+            gaps: ['source_paths_missing', 'module_rhythm_conflict'],
           },
           state_tracking_contract: {
             version: 'oh_story_state_tracking_v1',
@@ -54139,9 +54601,16 @@ describe('chapter context word target source guards', () => {
     const timelineRow = sourceReadiness.find((item: any) => item.key === 'timeline_tracking')
     const sourcePaths = preDraft.benchmark_recall_brief?.source_paths || []
     const blueprint = preDraft.chapter_blueprint || {}
+    const persistedWritePreparationGaps = preDraft.write_preparation_brief?.source_gaps || []
 
     expect(sourcePaths.length).toBeGreaterThan(0)
     expect(sourcePaths.join('｜')).toContain('MangaForge')
+    expect(persistedWritePreparationGaps.join('｜')).not.toMatch(/source_paths_missing|来源路径.*缺/)
+    expect(persistedWritePreparationGaps.join('｜')).toContain('module_rhythm_conflict')
+    expect(preDraft.benchmark_recall_brief?.gaps || []).not.toContain('source_paths_missing')
+    expect(preDraft.benchmark_recall_brief?.gaps || []).toContain('module_rhythm_conflict')
+    expect(preDraft.benchmark_recall_gaps || []).toEqual(['module_rhythm_conflict'])
+    expect(preDraft.benchmarkRecallGaps || []).toEqual(['module_rhythm_conflict'])
     expect(timelineRow?.status).toBe('ready')
     expect(timelineRow?.evidence).toContain('当前时间')
     expect(timelineRow?.evidence).toContain('当前地点')
@@ -54149,6 +54618,7 @@ describe('chapter context word target source guards', () => {
     expect(blueprint.content_outline?.cause).toBeTruthy()
     expect(blueprint.plot_lines?.logic_line).toBeTruthy()
     expect(blueprint.ending_contract?.next_chapter_pull).toBeTruthy()
+    expect(preDraft.write_preparation_brief?.readiness_status).toBe('needs_context')
 
     const rebuiltChapters = await listNovelChapters(workspace, project.id)
     const rebuiltChapter = rebuiltChapters.find(item => item.id === chapter.id)
@@ -54165,6 +54635,7 @@ describe('chapter context word target source guards', () => {
     const remainingKeys = (rebuiltContext.preflight?.checks || [])
       .filter((item: any) => !item.ok)
       .map((item: any) => item.key)
+    const rebuiltWritePreparationGaps = rebuiltContext.chapter_target.write_preparation_brief?.source_gaps || []
 
     expect(remainingKeys).not.toContain('benchmark_recall_source_paths')
     expect(remainingKeys).not.toContain('source_readiness_timeline_tracking')
@@ -54172,14 +54643,14 @@ describe('chapter context word target source guards', () => {
     expect(rebuiltContext.oh_story_director.stage).toBe('pre_draft')
     expect(rebuiltContext.ohStoryDirector).toBe(rebuiltContext.oh_story_director)
     expect(rebuiltContext.oh_story_director.readiness).not.toBe('blocked')
+    expect(rebuiltWritePreparationGaps.join('｜')).not.toMatch(/source_paths_missing|来源路径.*缺/)
+    expect(rebuiltWritePreparationGaps.join('｜')).toContain('module_rhythm_conflict')
     if (rebuiltContext.oh_story_director.readiness === 'ready') {
       expect(rebuiltContext.oh_story_director.primary_action.key).toBe('generate_prose')
     } else {
       expect(rebuiltContext.oh_story_director.primary_action.key).toBe('repair_pre_draft_materials')
     }
     const rebuiltRepairCategories = rebuiltContext.oh_story_director.required_repairs.map((item: any) => item.category)
-    expect(rebuiltRepairCategories).not.toContain('missing_source_evidence')
-    expect(rebuiltRepairCategories).not.toContain('missing_context')
     const rebuiltRepairText = rebuiltContext.oh_story_director.required_repairs
       .map((item: any) => `${item.label || ''}\n${item.detail || ''}`)
       .join('\n')
@@ -54192,6 +54663,197 @@ describe('chapter context word target source guards', () => {
           || remainingKeys.includes('source_readiness_scene_card_goal_obstacle_change'),
       ).toBe(true)
     }
+  })
+
+  test('recomputes persisted write preparation after a worldbuilding-only repair', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'mangaforge-preflight-final-write-preparation-'))
+    const project = await createNovelProject(workspace, {
+      title: '红雾电梯',
+      genre: '规则怪谈',
+      synopsis: '江哲在红雾中追查被篡改的规则。',
+      reference_config: {
+        story_state: {
+          current_time: '紧接第一章章尾',
+          active_locations: ['红雾入口'],
+        },
+      },
+    })
+    await createNovelCharacter(workspace, {
+      project_id: project.id,
+      name: '江哲',
+      role_type: '主角',
+      current_state: {
+        location: '红雾入口',
+        knowledge_scope: '知道规则五被篡改，但不知道幕后主使。',
+      },
+    })
+    await createNovelSettingEntity(workspace, {
+      project_id: project.id,
+      entity_type: 'rule',
+      name: '红雾裂缝规则',
+      summary: '暴力硬抗会让封印裂缝扩大。',
+      constraints_json: { trigger: '暴力破坏规则载体', cost: '封印裂缝扩大' },
+      state_json: {},
+      payload_json: {},
+    } as any)
+    await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '异常入局',
+      chapter_summary: '江哲发现规则五被篡改。',
+      ending_hook: '金色符文说明规则背后有人动手脚。',
+      chapter_text: '江哲看见规则五下方的金色符文，随即踏入红雾。',
+    })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 2,
+      title: '旧法失准',
+      chapter_goal: '江哲确认旧办法不再可靠。',
+      chapter_summary: '江哲确认旧办法不再可靠，并把旧答案反推成危险证据。',
+      conflict: '暴力硬抗会让封印裂缝扩大。',
+      ending_hook: '旧答案指向更危险的证据。',
+      scene_list: [
+        {
+          scene_no: 1,
+          title: '红雾深处',
+          purpose: '江哲验证旧办法为何失效。',
+          conflict: '旧办法会扩大封印裂缝。',
+          reader_payoff: '确认规则曾被篡改，并留下新的证据。',
+          ending_hook: '旧答案指向更危险的证据。',
+        },
+      ],
+      raw_payload: {
+        pre_draft_brief: {
+          confirmed_at: '2026-07-11T00:00:00.000Z',
+          confirmation_source: 'test_fixture',
+          chapter_blueprint: {
+            target_emotion: '压迫 -> 试探 -> 反证',
+            opening_hook: '旧办法在红雾中当场失效。',
+            core_payoff: '江哲把失败反推成规则被篡改的证据。',
+            content_outline: {
+              cause: '江哲进入红雾。',
+              development: '旧办法扩大裂缝。',
+              turn: '失败痕迹与金色符文一致。',
+              climax: '江哲确认规则被篡改。',
+              ending: '旧答案指向更危险的证据。',
+            },
+            ending_contract: {
+              final_state: '江哲放弃旧办法。',
+              unresolved_question: '谁篡改了规则？',
+              next_chapter_pull: '旧答案指向更危险的证据。',
+            },
+          },
+          state_tracking_contract: {
+            version: 'oh_story_state_tracking_v1',
+            character_states: ['过期角色状态'],
+            characterStates: ['过期角色状态 camel'],
+            historical_causality: ['过期前史因果'],
+            historicalCausality: ['过期前史因果 camel'],
+            world_constraints: ['过期世界约束'],
+            worldConstraints: ['过期世界约束 camel'],
+            filter_rules: ['保留自定义状态筛选约束'],
+            source_readiness: [
+              { key: 'chapter_blueprint', label: '本章细纲/蓝图', status: 'ready', evidence: '旧法失准蓝图已确认。' },
+              { key: 'previous_chapter', label: '上一章正文/章尾钩子', status: 'ready', evidence: '第一章金色符文章尾已读取。' },
+              { key: 'context_tracking', label: '追踪/上下文', status: 'ready', evidence: '最后完成第一章，江哲已进入红雾。' },
+              { key: 'timeline_tracking', label: '追踪/时间线', status: 'ready', evidence: '紧接第一章章尾，地点为红雾入口。' },
+              { key: 'character_state', label: '角色状态', status: 'ready', evidence: '江哲位于红雾入口，知道规则五被篡改。' },
+              { key: 'foreshadowing_history', label: '伏笔/前史', status: 'ready', evidence: '金色符文指向规则被篡改。' },
+              { key: 'world_constraints', label: '世界约束', status: 'missing', evidence: '' },
+            ],
+            sourceReadiness: [
+              { key: 'character_state', label: '角色状态', status: 'missing', evidence: '过期 camel 角色行' },
+              { key: 'world_constraints', label: '世界约束', status: 'missing', evidence: '过期 camel 世界观行' },
+            ],
+          },
+          write_preparation_brief: {
+            version: 'oh_story_write_preparation_v1',
+            readiness_status: 'needs_context',
+            source_gaps: ['世界观｜状态=missing｜缺少世界观或核心规则'],
+          },
+        },
+      },
+    })
+    const chapterWithAliases = await updateNovelChapter(workspace, chapter.id, {
+      raw_payload: {
+        ...(chapter.raw_payload || {}),
+        preDraftBrief: {
+          ...(chapter.raw_payload?.pre_draft_brief || {}),
+          state_tracking_contract: {
+            version: 'oh_story_state_tracking_v1',
+            source_readiness: [
+              { key: 'world_constraints', label: '世界约束', status: 'missing', evidence: '' },
+            ],
+          },
+        },
+      },
+    } as any, { createVersion: false })
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const contextPackage = {
+      preflight: {
+        checks: [
+          { key: 'worldbuilding', ok: false, severity: 'high' },
+        ],
+        warnings: ['世界观不足'],
+      },
+      chapter_target: {
+        chapter_no: 2,
+        title: chapter.title,
+        summary: chapter.chapter_summary,
+        conflict: chapter.conflict,
+        ending_hook: chapter.ending_hook,
+        scene_cards: chapter.scene_list,
+      },
+    }
+
+    const result = await service.autoRepairChapterPreflightGaps(workspace, project, chapterWithAliases || chapter, contextPackage, undefined)
+    const repairedChapters = await listNovelChapters(workspace, project.id)
+    const repairedChapter = repairedChapters.find(item => item.id === chapter.id)
+    const repairedStateTracking = repairedChapter?.raw_payload?.pre_draft_brief?.state_tracking_contract
+    const repairedWorldConstraints = (repairedStateTracking?.source_readiness || [])
+      .find((item: any) => item.key === 'world_constraints')
+    const writePreparation = repairedChapter?.raw_payload?.pre_draft_brief?.write_preparation_brief
+
+    expect(result.repaired.map((item: any) => item.type)).toContain('worldbuilding_created')
+    expect(result.repaired.map((item: any) => item.type)).not.toContain('chapter_blueprint_updated')
+    expect((await listNovelWorldbuilding(workspace, project.id)).length).toBe(1)
+    expect(repairedWorldConstraints?.status).toBe('ready')
+    expect(repairedWorldConstraints?.evidence).toContain('红雾裂缝规则')
+    expect(repairedStateTracking?.character_states.join('｜')).toContain('江哲')
+    expect(repairedStateTracking?.character_states.join('｜')).not.toContain('过期角色状态')
+    expect(repairedStateTracking?.characterStates).toEqual(repairedStateTracking?.character_states)
+    expect(repairedStateTracking?.historical_causality.join('｜')).not.toContain('过期前史因果')
+    expect(repairedStateTracking?.historicalCausality).toEqual(repairedStateTracking?.historical_causality)
+    expect(repairedStateTracking?.world_constraints.join('｜')).toContain('红雾裂缝规则')
+    expect(repairedStateTracking?.world_constraints.join('｜')).not.toContain('过期世界约束')
+    expect(repairedStateTracking?.worldConstraints).toEqual(repairedStateTracking?.world_constraints)
+    expect(repairedStateTracking?.sourceReadiness).toEqual(repairedStateTracking?.source_readiness)
+    expect(repairedStateTracking?.filter_rules).toContain('保留自定义状态筛选约束')
+    expect(writePreparation).toBeTruthy()
+    expect(writePreparation?.source_gaps).toEqual([])
+    expect(writePreparation?.readiness_status).toBe('ready')
+
+    const rebuiltContext = await service.buildChapterContextPackage(
+      workspace,
+      project,
+      repairedChapter,
+      repairedChapters,
+      await listNovelWorldbuilding(workspace, project.id),
+      await listNovelCharacters(workspace, project.id),
+      await listNovelOutlines(workspace, project.id),
+      await listNovelReviews(workspace, project.id),
+    )
+    const rebuiltStateTracking = rebuiltContext.chapter_target.state_tracking_contract
+    const rebuiltWorldConstraints = (rebuiltStateTracking?.source_readiness || [])
+      .find((item: any) => item.key === 'world_constraints')
+    expect(rebuiltWorldConstraints?.status).toBe('ready')
+    expect(rebuiltStateTracking?.filter_rules).toContain('保留自定义状态筛选约束')
+    expect(rebuiltContext.chapter_target.write_preparation_brief?.source_gaps).toEqual([])
+    expect(rebuiltContext.chapter_target.write_preparation_brief?.readiness_status).toBe('ready')
   })
 
   test('auto-repairs unattended preflight scene cards and tracking context gaps', async () => {
@@ -55071,7 +55733,12 @@ describe('chapter context word target source guards', () => {
     expect(groupBlock).toContain("await onStage('editor', { status: 'running' })")
     expect(groupBlock).toContain("await onStage('meme_polish', { status: 'running' })")
     expect(groupBlock).toContain("throwIfChapterGenerationAborted()\n    await onStage('review'")
-    expect(groupBlock).toContain("throwIfChapterGenerationAborted()\n    await onStage('story_state'")
+    expect(groupBlock).toContain("await onStage('story_state', { status: 'running', phase: 'prepare' })")
+    expect(groupBlock).toContain('await ctx.runtime?.hooks?.beforeStoryState?.({ chapterId: chapter.id, finalText })')
+    expect(groupBlock).toContain('const preparedStoryStateUpdate = await prepareStoryStateUpdate(')
+    expect(groupBlock).toContain('preferredModelId,\n      llmControlOptions,')
+    expect(groupBlock).toContain("throwIfChapterGenerationAborted()\n    assertCurrentProseQualityCanStore()\n    const referenceReport")
+    expect(groupBlock).toContain("throwIfChapterGenerationAborted()\n    assertCurrentProseQualityCanStore()\n    await onStage('store'")
   })
 
   test('defers non-blocking readability review without weakening core oh-story gates', () => {
@@ -57088,12 +57755,16 @@ describe('chapter context word target source guards', () => {
     const postDeliveryCheckStart = source.indexOf('const postDeliveryReceiptChecks =', groupStart)
     const postDeliveryAdvisoryStart = source.indexOf('qualityGateReview.post_delivery_receipt_checks = postDeliveryReceiptChecks', postDeliveryCheckStart)
     const draftQualityDecisionStart = source.indexOf('const draftQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', groupStart)
-    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
+    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', draftQualityDecisionStart)
+    const advisoryBlock = source.slice(postDeliveryCheckStart, draftQualityDecisionStart)
 
     expect(postDeliveryCheckStart).toBeGreaterThan(groupStart)
     expect(postDeliveryAdvisoryStart).toBeGreaterThan(postDeliveryCheckStart)
     expect(draftQualityDecisionStart).toBeGreaterThan(postDeliveryAdvisoryStart)
     expect(draftReviewOnlyStart).toBeGreaterThan(draftQualityDecisionStart)
+    expect(advisoryBlock).toContain("status: 'warn'")
+    expect(advisoryBlock).toContain('qualityGateReview.post_delivery_receipt_checks = postDeliveryReceiptChecks')
+    expect(advisoryBlock).not.toContain('qualityGateReview.quality_audit_checks =')
   })
 
   test('returns quality audit repair receipt sync in story state update summaries', () => {
@@ -57519,76 +58190,54 @@ describe('chapter context word target source guards', () => {
     expect(draftBlock).toContain('coreContractSync: draftCoreContractSync')
   })
 
-  test('stores prose sync diagnostics before a quality gate can block storage', () => {
+  test('queues prose sync diagnostics until atomic acceptance and stores none when a gate blocks', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const storeFnsStart = source.indexOf('const storeGeneratedReviewRecord = async (record: any) =>', groupStart)
-    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', storeFnsStart)
     const preGateStart = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', storeFnsStart)
-    const firstStoreProseStart = source.indexOf("buildReceiptSyncReviewRecord({ projectId, chapter, sync: proseRevisionReceiptSync, reviewType: 'prose_revision_receipt_sync'", storeFnsStart)
-    const firstStoreDeslopStart = source.indexOf("buildReceiptSyncReviewRecord({ projectId, chapter, sync: deslopRepairReceiptSync, reviewType: 'deslop_repair_receipt_sync'", storeFnsStart)
-    const firstStoreQualityAuditStart = source.indexOf("buildReceiptSyncReviewRecord({ projectId, chapter, sync: qualityAuditRepairReceiptSync, reviewType: 'quality_audit_repair_receipt_sync'", storeFnsStart)
-    const firstStoreCascadeStart = source.indexOf('buildRevisionCascadeImpactSyncReviewRecord({ projectId, chapter, sync: revisionCascadeImpactSync })', storeFnsStart)
-    const firstStoreScopeStart = source.indexOf('buildRevisionScopeGuardSyncReviewRecord({ projectId, chapter, selfCheck, sync: revisionScopeGuardSync })', storeFnsStart)
-    const firstStoreCleanupStart = source.indexOf('buildDeterministicProseCleanupReviewRecord({', storeFnsStart)
+    const storeFnsBlock = source.slice(storeFnsStart, source.indexOf('let chapters = await listNovelChapters', storeFnsStart))
+    const preGateBlock = source.slice(preGateStart, source.indexOf('const referenceReport =', preGateStart))
+    const atomicCommitStart = source.indexOf('const acceptance = await commitNovelChapterAcceptance(activeWorkspace, {', preGateStart)
+    const atomicCommitBlock = source.slice(atomicCommitStart, source.indexOf('const updated = acceptance.chapter', atomicCommitStart))
 
     expect(storeFnsStart).toBeGreaterThan(groupStart)
-    expect(draftReviewOnlyStart).toBeGreaterThan(storeFnsStart)
     expect(preGateStart).toBeGreaterThan(storeFnsStart)
-    expect(firstStoreProseStart).toBeGreaterThan(storeFnsStart)
-    expect(firstStoreDeslopStart).toBeGreaterThan(storeFnsStart)
-    expect(firstStoreQualityAuditStart).toBeGreaterThan(storeFnsStart)
-    expect(firstStoreCascadeStart).toBeGreaterThan(storeFnsStart)
-    expect(firstStoreScopeStart).toBeGreaterThan(storeFnsStart)
-    expect(firstStoreCleanupStart).toBeGreaterThan(storeFnsStart)
-    expect(firstStoreProseStart).toBeLessThan(draftReviewOnlyStart)
-    expect(firstStoreDeslopStart).toBeLessThan(draftReviewOnlyStart)
-    expect(firstStoreQualityAuditStart).toBeLessThan(draftReviewOnlyStart)
-    expect(firstStoreCascadeStart).toBeLessThan(draftReviewOnlyStart)
-    expect(firstStoreScopeStart).toBeLessThan(draftReviewOnlyStart)
-    expect(firstStoreCleanupStart).toBeLessThan(draftReviewOnlyStart)
+    expect(storeFnsBlock).toContain('else pendingGeneratedReviews.push(record)')
+    expect(preGateBlock).not.toContain('createNovelReview')
+    expect(atomicCommitStart).toBeGreaterThan(preGateStart)
+    expect(atomicCommitBlock).toContain('...pendingGeneratedReviews')
   })
 
-  test('stores prose quality review before pre-store quality gate approval errors', () => {
+  test('does not store prose quality review before pre-store quality gate approval errors', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const reviewRecordSource = readProseQualityReviewRecordSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const preGateStart = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', groupStart)
-    const preGateFailStart = source.indexOf('if (!preStoreQualityDecision.passed && !approvals?.quality_gate?.approved)', preGateStart)
+    const preGateFailStart = source.indexOf('if (!preStoreQualityDecision.passed && (!preStoreQualityDecision.approvable || !approvals?.quality_gate?.approved))', preGateStart)
     const preGateThrowStart = source.indexOf("throw ctx.production.buildApprovalError('quality_gate', '章节质量门禁未通过，正文未入库', preStoreQualityDecision)", preGateFailStart)
     const preGateFailBlock = source.slice(preGateFailStart, preGateThrowStart)
 
     expect(preGateStart).toBeGreaterThan(groupStart)
     expect(preGateFailStart).toBeGreaterThan(preGateStart)
     expect(preGateThrowStart).toBeGreaterThan(preGateFailStart)
-    expect(preGateFailBlock).toContain("await createNovelReview(activeWorkspace, buildProseQualityReview('warn', preStoreQualityDecision, '质量门禁未通过'))")
-    expect(reviewRecordSource).toContain("review_type: 'prose_quality'")
-    expect(reviewRecordSource).toContain('payload.quality_gate = input.qualityGate')
-    expect(reviewRecordSource).toContain('self_check: input.selfCheck')
+    expect(preGateFailBlock).not.toContain('createNovelReview')
   })
 
-  test('stores prose quality review before final quality gate approval errors', () => {
+  test('does not store prose quality review before final quality gate approval errors', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const reviewRecordSource = readProseQualityReviewRecordSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const finalGateStart = source.indexOf('const finalQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview, safetyDecision)', groupStart)
-    const finalGateFailStart = source.indexOf('if (!finalQualityDecision.passed && !approvals?.quality_gate?.approved)', finalGateStart)
+    const finalGateFailStart = source.indexOf('if (!finalQualityDecision.passed && (!finalQualityDecision.approvable || !approvals?.quality_gate?.approved))', finalGateStart)
     const finalGateThrowStart = source.indexOf("throw ctx.production.buildApprovalError('quality_gate', '章节质量门禁未通过，正文未入库', finalQualityDecision)", finalGateFailStart)
     const finalGateFailBlock = source.slice(finalGateFailStart, finalGateThrowStart)
 
     expect(finalGateStart).toBeGreaterThan(groupStart)
     expect(finalGateFailStart).toBeGreaterThan(finalGateStart)
     expect(finalGateThrowStart).toBeGreaterThan(finalGateFailStart)
-    expect(finalGateFailBlock).toContain("await createNovelReview(activeWorkspace, buildProseQualityReview('warn', finalQualityDecision, '最终质量门禁未通过'")
-    expect(finalGateFailBlock).toContain('referenceReport')
-    expect(finalGateFailBlock).toContain('safetyDecision')
-    expect(reviewRecordSource).toContain("appendIfDefined(payload, 'reference_report', input.referenceReport)")
-    expect(reviewRecordSource).toContain("appendIfDefined(payload, 'safety_decision', input.safetyDecision)")
+    expect(finalGateFailBlock).not.toContain('createNovelReview')
   })
 
-  test('stores prose quality review before low-score and draft approval errors', () => {
+  test('does not store prose quality review before low-score and draft approval errors', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const reviewRecordSource = readProseQualityReviewRecordSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const lowScoreStart = source.indexOf("if (ctx.production.approvalRequired(approvalPolicy, 'low_score'", groupStart)
     const lowScoreThrowStart = source.indexOf("throw ctx.production.buildApprovalError('low_score'", lowScoreStart)
@@ -57599,21 +58248,15 @@ describe('chapter context word target source guards', () => {
 
     expect(lowScoreStart).toBeGreaterThan(groupStart)
     expect(lowScoreThrowStart).toBeGreaterThan(lowScoreStart)
-    expect(lowScoreBlock).toContain("await createNovelReview(activeWorkspace, buildProseQualityReview('warn', preStoreQualityDecision, '低分等待人工确认'")
-    expect(lowScoreBlock).toContain("approvalType: 'low_score'")
-    expect(reviewRecordSource).toContain("appendIfDefined(payload, 'approval_type', input.approvalType)")
-    expect(reviewRecordSource).toContain('self_check: input.selfCheck')
+    expect(lowScoreBlock).not.toContain('createNovelReview')
 
     expect(draftStart).toBeGreaterThan(lowScoreThrowStart)
     expect(draftThrowStart).toBeGreaterThan(draftStart)
-    expect(draftBlock).toContain("await createNovelReview(activeWorkspace, buildProseQualityReview('warn', preStoreQualityDecision, '正文入库等待人工确认'")
-    expect(draftBlock).toContain("approvalType: 'draft'")
-    expect(reviewRecordSource).toContain("review_type: 'prose_quality'")
+    expect(draftBlock).not.toContain('createNovelReview')
   })
 
-  test('stores prose quality review before reference safety approval errors', () => {
+  test('does not store prose quality review before reference safety approval errors', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const reviewRecordSource = readProseQualityReviewRecordSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const safetyBlockedStart = source.indexOf('if (safetyDecision.blocked)', groupStart)
     const safetyBlockedThrowStart = source.indexOf("throw Object.assign(new Error('仿写安全阈值未通过')", safetyBlockedStart)
@@ -57624,21 +58267,11 @@ describe('chapter context word target source guards', () => {
 
     expect(safetyBlockedStart).toBeGreaterThan(groupStart)
     expect(safetyBlockedThrowStart).toBeGreaterThan(safetyBlockedStart)
-    expect(safetyBlockedBlock).toContain("await createNovelReview(activeWorkspace, buildProseQualityReview('warn', finalQualityDecision, '仿写安全阈值未通过'")
-    expect(safetyBlockedBlock).toContain("approvalType: 'reference_safety_blocked'")
-    expect(safetyBlockedBlock).toContain('referenceReport')
-    expect(safetyBlockedBlock).toContain('safetyDecision')
-    expect(safetyBlockedBlock).toContain('migrationAudit')
+    expect(safetyBlockedBlock).not.toContain('createNovelReview')
 
     expect(safetyApprovalStart).toBeGreaterThan(safetyBlockedThrowStart)
     expect(safetyApprovalThrowStart).toBeGreaterThan(safetyApprovalStart)
-    expect(safetyApprovalBlock).toContain("await createNovelReview(activeWorkspace, buildProseQualityReview('warn', finalQualityDecision, '仿写安全报告等待人工确认'")
-    expect(safetyApprovalBlock).toContain("approvalType: 'safety'")
-    expect(safetyApprovalBlock).toContain('referenceReport')
-    expect(safetyApprovalBlock).toContain('safetyDecision')
-    expect(safetyApprovalBlock).toContain('migrationAudit')
-    expect(reviewRecordSource).toContain("appendIfDefined(payload, 'migration_audit', input.migrationAudit)")
-    expect(reviewRecordSource).toContain("appendIfDefined(payload, 'safety_explanation', input.safetyExplanation)")
+    expect(safetyApprovalBlock).not.toContain('createNovelReview')
   })
 
   test('passes deterministic cleanup report into cleanup repair prompts', () => {
@@ -58883,15 +59516,19 @@ describe('chapter context word target source guards', () => {
 
   test('persists the style fingerprint snapshot through the story state machine update', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const stateMachineBlock = source.slice(
-      source.indexOf('const updateStoryStateMachine = async'),
-      source.indexOf('const runProseGeneration', source.indexOf('const updateStoryStateMachine = async')),
-    )
+    const prepareStart = source.indexOf('const prepareStoryStateUpdate = async')
+    const prepareEnd = source.indexOf('const updateStoryStateMachine = async', prepareStart)
+    const prepareBlock = source.slice(prepareStart, prepareEnd)
+    const acceptanceStart = source.indexOf('const acceptance = await commitNovelChapterAcceptance(')
+    const acceptanceEnd = source.indexOf('const updated = acceptance.chapter', acceptanceStart)
+    const acceptanceBlock = source.slice(acceptanceStart, acceptanceEnd)
 
-    expect(stateMachineBlock).toContain('buildStyleFingerprintStateSnapshot(contextPackage, project, project.reference_config?.story_state || {})')
-    expect(stateMachineBlock).toContain('stateDeltaWithStyleFingerprint')
-    expect(stateMachineBlock).toContain('story_state: mergeStoryState(project.reference_config?.story_state || {}, stateDeltaWithStyleFingerprint, chapter)')
-    expect(stateMachineBlock).toContain('payload.style_fingerprint = stateDeltaWithStyleFingerprint.style_fingerprint')
+    expect(prepareBlock).toContain('buildStyleFingerprintStateSnapshot(contextPackage, project, project.reference_config?.story_state || {})')
+    expect(prepareBlock).toContain('stateDeltaWithStyleFingerprint')
+    expect(prepareBlock).toContain('story_state: mergeStoryState(project.reference_config?.story_state || {}, stateDeltaWithStyleFingerprint, chapter)')
+    expect(prepareBlock).toContain('payload.style_fingerprint = stateDeltaWithStyleFingerprint.style_fingerprint')
+    expect(prepareBlock).toContain('next_reference_config: nextReferenceConfig')
+    expect(acceptanceBlock).toContain('next_reference_config: preparedStoryStateUpdate.next_reference_config')
   })
 
   test('returns status filter receipt sync for unattended post-delivery gates', () => {
@@ -60464,6 +61101,325 @@ describe('chapter context word target source guards', () => {
     expect(reviewNormalizeBlock).toContain('reviewPayload?.findings')
     expect(reviewNormalizeBlock).toContain('...asArray(reviewPayload?.issues)')
     expect(reviewNormalizeBlock).toContain('...asArray(reviewPayload?.findings)')
+  })
+
+  const buildUsableV2NextChapterQualityPlan = () => ({
+    version: 'oh_story_next_chapter_quality_plan_v1',
+    quality_focus: ['下一章继续压住当前冲突。'],
+    opening_actions: ['前300字原地承接本章章末动作。'],
+    middle_actions: ['中段兑现一次规则反制。'],
+    ending_actions: ['章末留下可追读的新问题。'],
+    avoid_repetition: ['不要重复解释本章规则。'],
+    evidence_basis: ['本章已经写出当前冲突的可定位证据。'],
+  })
+
+  test('v2 final decision blocks a structured quality failure even when the v2 score passes', () => {
+    const decision = getQualityGateDecision(
+      {
+        reference_config: {
+          quality_gate: {
+            enabled: true,
+            min_score: 78,
+          },
+        },
+      },
+      {
+        prose_quality_v2: {
+          decision: {
+            passed: true,
+            approvable: true,
+            score: 92,
+            hard_failures: [],
+            advisory_failures: [],
+          },
+        },
+        quality_audit_checks: [
+          {
+            key: 'pre_store_structural_sync',
+            status: 'fail',
+            label: '细纲兑现未闭环',
+          },
+        ],
+        next_chapter_quality_plan: buildUsableV2NextChapterQualityPlan(),
+      },
+    )
+
+    expect(decision.passed).toBe(false)
+    expect(decision.approvable).toBe(false)
+    expect(decision.hard_failures).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'structured_quality_gate', source: 'deterministic' }),
+    ]))
+  })
+
+  test('v2 final decision blocks a structured carry-over claim that only provides a fix', () => {
+    const decision = getQualityGateDecision(
+      {
+        reference_config: {
+          quality_gate: {
+            enabled: true,
+            min_score: 78,
+          },
+        },
+      },
+      {
+        prose_quality_v2: {
+          decision: {
+            passed: true,
+            approvable: true,
+            score: 92,
+            hard_failures: [],
+            advisory_failures: [],
+          },
+        },
+        quality_audit_checks: [
+          {
+            key: 'pre_store_structural_sync',
+            status: 'fail',
+            label: '细纲兑现未闭环',
+            fix: '下一章写入追踪文档。',
+          },
+        ],
+        next_chapter_quality_plan: buildUsableV2NextChapterQualityPlan(),
+      },
+    )
+
+    expect(decision.passed).toBe(false)
+    expect(decision.hard_failures).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'structured_quality_gate', source: 'deterministic' }),
+    ]))
+  })
+
+  test('v2 final decision allows a structured carry-over with locatable prose evidence', () => {
+    const decision = getQualityGateDecision(
+      {
+        reference_config: {
+          quality_gate: {
+            enabled: true,
+            min_score: 78,
+          },
+        },
+      },
+      {
+        prose_quality_v2: {
+          decision: {
+            passed: true,
+            approvable: true,
+            score: 92,
+            hard_failures: [],
+            advisory_failures: [],
+          },
+        },
+        quality_audit_checks: [
+          {
+            key: 'pre_store_structural_sync',
+            status: 'fail',
+            label: '细纲兑现未闭环',
+            evidence: '门槛白线后退半步，当前冲突已经在正文中落地。',
+            fix: '下一章写入追踪文档。',
+          },
+        ],
+        next_chapter_quality_plan: buildUsableV2NextChapterQualityPlan(),
+      },
+    )
+
+    expect(decision.passed).toBe(true)
+    expect(decision.approvable).toBe(true)
+    expect(decision.hard_failures).toEqual([])
+  })
+
+  test('v2 final decision blocks an undelivered current-chapter delivery risk', () => {
+    const decision = getQualityGateDecision(
+      {
+        reference_config: {
+          quality_gate: {
+            enabled: true,
+            min_score: 78,
+          },
+        },
+      },
+      {
+        prose_quality_v2: {
+          decision: {
+            passed: true,
+            approvable: true,
+            score: 92,
+            hard_failures: [],
+            advisory_failures: [],
+          },
+        },
+        delivery_risk_receipts: [
+          {
+            risk_item: '当前冲突兑现',
+            delivered: false,
+            evidence: '',
+            remaining_risk: '正文未兑现当前冲突。',
+          },
+        ],
+        next_chapter_quality_plan: buildUsableV2NextChapterQualityPlan(),
+      },
+    )
+
+    expect(decision.passed).toBe(false)
+    expect(decision.approvable).toBe(false)
+    expect(decision.hard_failures).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'delivery_risk_receipt', source: 'deterministic' }),
+    ]))
+  })
+
+  test('v2 final decision allows a locatable delivery receipt with only next-chapter carry-over', () => {
+    const decision = getQualityGateDecision(
+      {
+        reference_config: {
+          quality_gate: {
+            enabled: true,
+            min_score: 78,
+          },
+        },
+      },
+      {
+        prose_quality_v2: {
+          decision: {
+            passed: true,
+            approvable: true,
+            score: 92,
+            hard_failures: [],
+            advisory_failures: [],
+          },
+        },
+        delivery_risk_receipts: [
+          {
+            risk_item: '下一章冲突强化',
+            delivered: false,
+            evidence: '门槛白线后退半步，玻璃门内外的当前冲突已经落成正文。',
+            remaining_risk: '下一章继续强化冲突并写回状态。',
+          },
+        ],
+        next_chapter_quality_plan: buildUsableV2NextChapterQualityPlan(),
+      },
+    )
+
+    expect(decision.passed).toBe(true)
+    expect(decision.approvable).toBe(true)
+    expect(decision.hard_failures).toEqual([])
+  })
+
+  test('v2 final decision blocks a missing next-chapter quality plan', () => {
+    const decision = getQualityGateDecision(
+      {
+        reference_config: {
+          quality_gate: {
+            enabled: true,
+            min_score: 78,
+          },
+        },
+      },
+      {
+        prose_quality_v2: {
+          decision: {
+            passed: true,
+            approvable: true,
+            score: 92,
+            hard_failures: [],
+            advisory_failures: [],
+          },
+        },
+      },
+    )
+
+    expect(decision.passed).toBe(false)
+    expect(decision.approvable).toBe(false)
+    expect(decision.hard_failures).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'next_chapter_quality_plan', source: 'deterministic' }),
+    ]))
+  })
+
+  test('v2 final decision is not approvable when an original v2 hard failure remains', () => {
+    const decision = getQualityGateDecision(
+      {
+        reference_config: {
+          quality_gate: {
+            enabled: true,
+            min_score: 78,
+          },
+        },
+      },
+      {
+        prose_quality_v2: {
+          decision: {
+            passed: false,
+            approvable: true,
+            score: 92,
+            hard_failures: [
+              {
+                key: 'non_chinese_leak',
+                message: '正文出现连续英文段落',
+                source: 'deterministic',
+              },
+            ],
+            advisory_failures: [],
+          },
+        },
+        next_chapter_quality_plan: buildUsableV2NextChapterQualityPlan(),
+      },
+    )
+
+    expect(decision.passed).toBe(false)
+    expect(decision.approvable).toBe(false)
+    expect(decision.hard_failures).toHaveLength(1)
+  })
+
+  test('v2 final decision preserves and deduplicates v2 hard failures while adding safety', () => {
+    const decision = getQualityGateDecision(
+      {
+        reference_config: {
+          quality_gate: {
+            enabled: true,
+            min_score: 78,
+          },
+        },
+      },
+      {
+        prose_quality_v2: {
+          decision: {
+            passed: false,
+            approvable: true,
+            score: 92,
+            hard_failures: [
+              {
+                key: 'non_chinese_leak',
+                message: '正文出现连续英文段落',
+                source: 'deterministic',
+                evidence: 'Chapter summary leaked into the prose.',
+                severity: 'S1',
+              },
+              { key: 'non_chinese_leak', message: '正文出现连续英文段落', source: 'deterministic' },
+            ],
+            advisory_failures: ['节奏仍可继续收紧'],
+          },
+        },
+        next_chapter_quality_plan: buildUsableV2NextChapterQualityPlan(),
+      },
+      {
+        blocked: true,
+        reasons: ['命中禁止仿写表达'],
+      },
+    )
+
+    expect(decision.passed).toBe(false)
+    expect(decision.approvable).toBe(false)
+    expect(decision.hard_failures.filter((item: any) => item.key === 'non_chinese_leak')).toHaveLength(1)
+    expect(decision.hard_failures.find((item: any) => item.key === 'non_chinese_leak')).toMatchObject({
+      evidence: 'Chapter summary leaked into the prose.',
+      severity: 'S1',
+    })
+    expect(decision.hard_failures).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'reference_safety', source: 'deterministic' }),
+    ]))
+    expect(decision.reasons).toEqual(expect.arrayContaining([
+      '正文出现连续英文段落',
+      '仿写安全未通过：命中禁止仿写表达',
+      '节奏仍可继续收紧',
+    ]))
   })
 
   test('blocks quality gate when oh-story contract checks fail even if the score passes', () => {

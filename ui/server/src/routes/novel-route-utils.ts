@@ -603,7 +603,7 @@ function isPostRepairCarryOverStructuredCheck(check: any, field: string) {
   return false
 }
 
-function collectFailedStructuredReviewChecks(review: any) {
+function collectFailedStructuredReviewChecks(review: any, options: { requireCarryOverEvidence?: boolean } = {}) {
   const directChecks = QUALITY_GATE_STRUCTURED_CHECK_FIELDS
     .flatMap(([snakeField, camelField]) => asArray(review?.[snakeField] || review?.[camelField])
       .map((check: any) => ({ check, field: snakeField })))
@@ -612,7 +612,21 @@ function collectFailedStructuredReviewChecks(review: any) {
     .map((check: any) => ({ check, field: 'deslop_gate_diagnostics' }))
   return [...directChecks, ...diagnosticGates]
     .filter((item: any) => String(item?.check?.status || '').toLowerCase() === 'fail')
-    .filter((item: any) => !isPostRepairCarryOverStructuredCheck(item.check, item.field))
+    .filter((item: any) => {
+      if (!isPostRepairCarryOverStructuredCheck(item.check, item.field)) return true
+      if (!options.requireCarryOverEvidence) return false
+      return !compactText(
+        item?.check?.evidence
+        || item?.check?.changed_evidence
+        || item?.check?.changedEvidence
+        || item?.check?.source_evidence
+        || item?.check?.sourceEvidence
+        || item?.check?.source_excerpt
+        || item?.check?.sourceExcerpt
+        || '',
+        240,
+      )
+    })
     .map((item: any) => structuredReviewCheckSummary(item.check, item.field))
     .filter(Boolean)
 }
@@ -681,31 +695,80 @@ function hasUsableNextChapterQualityPlan(review: any) {
   ].every(items => items.some((item: any) => compactText(item, 120)))
 }
 
+function dedupeQualityHardFailures(items: any[]) {
+  const seen = new Set<string>()
+  return asArray(items)
+    .filter((item: any) => {
+      const message = compactText(typeof item === 'string' ? item : item?.message || item?.key || '', 240)
+      if (!message) return false
+      const key = compactText(typeof item === 'object' ? item?.key : '', 80) || 'quality_gate'
+      const signature = `${key}\u0000${message}`
+      if (seen.has(signature)) return false
+      seen.add(signature)
+      return true
+    })
+}
+
 export function getQualityGateDecision(project: any, review: any, safetyDecision: any = null) {
-  if (review?.prose_quality_v2?.decision) {
-    const decision = review.prose_quality_v2.decision
-    const safetyReasons = safetyDecision?.blocked
-      ? [`仿写安全未通过：${(safetyDecision.reasons || []).join('；')}`]
-      : []
+  const gate = getQualityGate(project)
+  const v2Decision = review?.prose_quality_v2?.decision || null
+  const failedStructuredChecks = collectFailedStructuredReviewChecks(review, {
+    requireCarryOverEvidence: Boolean(v2Decision),
+  })
+  const undeliveredDeliveryRiskReceipts = collectUndeliveredDeliveryRiskReceipts(review)
+  const missingNextChapterQualityPlan = !hasUsableNextChapterQualityPlan(review)
+  const safetyReasons = safetyDecision?.blocked
+    ? [`仿写安全未通过：${(safetyDecision.reasons || []).join('；')}`]
+    : []
+  if (v2Decision) {
+    const supplementalHardFailures = [
+      ...failedStructuredChecks.map(message => ({
+        key: 'structured_quality_gate',
+        message: `结构化自检失败：${message}`,
+        source: 'deterministic',
+      })),
+      ...undeliveredDeliveryRiskReceipts.map(message => ({
+        key: 'delivery_risk_receipt',
+        message: `承接回执未兑现：${message}`,
+        source: 'deterministic',
+      })),
+      ...(missingNextChapterQualityPlan
+        ? [{
+            key: 'next_chapter_quality_plan',
+            message: '下一章质量续航计划缺失：必须输出 next_chapter_quality_plan',
+            source: 'deterministic',
+          }]
+        : []),
+      ...safetyReasons.map(message => ({
+        key: 'reference_safety',
+        message,
+        source: 'deterministic',
+      })),
+    ]
+    const hardFailures = dedupeQualityHardFailures([
+      ...asArray(v2Decision.hard_failures),
+      ...supplementalHardFailures,
+    ])
     return {
-      ...decision,
-      gate: getQualityGate(project),
-      passed: decision.passed === true && safetyReasons.length === 0,
+      ...v2Decision,
+      gate,
+      hard_failures: hardFailures,
+      passed: v2Decision.passed === true && hardFailures.length === 0,
+      approvable: v2Decision.approvable === true && hardFailures.length === 0,
       reasons: [
-        ...asArray(decision.hard_failures).map((item: any) => item?.message || item?.key).filter(Boolean),
-        ...asArray(decision.advisory_failures).filter(Boolean),
-        ...safetyReasons,
+        ...hardFailures
+          .map((item: any) => typeof item === 'string' ? item : item?.message || item?.key)
+          .filter(Boolean),
+        ...asArray(v2Decision.advisory_failures)
+          .map((item: any) => item?.message || item?.key || item)
+          .filter(Boolean),
       ],
     }
   }
-  const gate = getQualityGate(project)
   const issues = Array.isArray(review?.issues) ? review.issues.map(normalizeIssue) : []
   const criticalCount = issues.filter(issue => String(issue.severity || '').toLowerCase() === 'critical').length
   const highCount = issues.filter(issue => String(issue.severity || '').toLowerCase() === 'high').length
   const score = Number(review?.score || 0)
-  const failedStructuredChecks = collectFailedStructuredReviewChecks(review)
-  const undeliveredDeliveryRiskReceipts = collectUndeliveredDeliveryRiskReceipts(review)
-  const missingNextChapterQualityPlan = !hasUsableNextChapterQualityPlan(review)
   const reasons = [
     score && score < gate.min_score ? `质检评分 ${score} 低于入库阈值 ${gate.min_score}` : '',
     gate.require_revision_before_store && review?.needs_revision && !review?.revised ? '自检要求修订，但当前没有可用修订稿' : '',

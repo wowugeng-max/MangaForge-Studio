@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import * as proseGenerationContract from './prose-generation-contract'
 import {
   buildProseGenerationContract,
   evaluateProsePreDraftGate,
@@ -97,6 +98,17 @@ describe('prose generation contract', () => {
     expect(normalizeProseContractKey('story_power')).toBe('story_power')
   })
 
+  test('resolves snake and camel strict preflight aliases conservatively', () => {
+    const resolve = (proseGenerationContract as any).resolveStrictPreflightReadiness
+
+    expect(typeof resolve).toBe('function')
+    expect(resolve({ strictReady: true })).toMatchObject({ status: 'ready', ready: true })
+    expect(resolve({ strictReady: false })).toMatchObject({ status: 'not_ready', ready: false })
+    expect(resolve({ strictReady: 'true' })).toMatchObject({ status: 'not_ready', ready: false })
+    expect(resolve({ strict_ready: true, strictReady: false })).toMatchObject({ status: 'not_ready', ready: false })
+    expect(resolve({})).toMatchObject({ status: 'missing', ready: false })
+  })
+
   test('clones and freezes the contract without freezing the caller context', () => {
     const context = {
       chapter_target: {
@@ -152,10 +164,46 @@ describe('prose generation contract', () => {
       oh_story_director: { readiness: 'needs_repair', required_repairs: [] },
     })
 
-    expect(evaluateProsePreDraftGate(contract, { allowIncomplete: true })).toMatchObject({
+    const decision = evaluateProsePreDraftGate(contract, { allowIncomplete: true })
+
+    expect(decision).toMatchObject({
       passed: false,
       code: 'PROSE_STRICT_PREFLIGHT_BLOCKED',
     })
+    expect(decision.reasons.join('；')).toContain('补齐第九章尾段')
+    expect(JSON.stringify(decision.details)).toContain('continuity')
+  })
+
+  test('reports missing strict readiness without promoting low warnings', () => {
+    const contract = buildProseGenerationContract({
+      chapter_target: { chapter_no: 10, scene_cards: [{ scene_no: 1 }] },
+      preflight: {
+        ready: true,
+        warnings: ['可选文风样本不足'],
+        checks: [{ key: 'style_sample', ok: false, severity: 'low', fix: '可稍后补文风样本。' }],
+      },
+      oh_story_director: { readiness: 'ready', required_repairs: [] },
+    })
+
+    const decision = evaluateProsePreDraftGate(contract)
+
+    expect(decision).toMatchObject({
+      passed: false,
+      code: 'PROSE_STRICT_PREFLIGHT_BLOCKED',
+    })
+    expect(decision.reasons.join('；')).toContain('preflight.strict_ready')
+    expect(decision.reasons.join('；')).not.toContain('可选文风样本不足')
+    expect(JSON.stringify(decision.details)).toContain('preflight.strict_ready')
+  })
+
+  test('accepts camel-only strict preflight readiness', () => {
+    const contract = buildProseGenerationContract({
+      chapter_target: { chapter_no: 10, scene_cards: [{ scene_no: 1 }] },
+      preflight: { ready: true, strictReady: true },
+      oh_story_director: { readiness: 'ready', required_repairs: [] },
+    })
+
+    expect(evaluateProsePreDraftGate(contract).passed).toBe(true)
   })
 
   test('allows scene-card generation only after every earlier hard gate passes', () => {

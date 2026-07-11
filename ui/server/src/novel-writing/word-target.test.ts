@@ -15,9 +15,17 @@ import {
   proseContractionMaxTokensForAttempt,
   proseMaxTokensForWordTarget,
   resolveChapterWordTarget,
+  resolveStandardWordTargetCompatibility,
 } from './word-target'
 
 describe('novel writing word target utilities', () => {
+  test('allows only standard chapters through the finite 30% compatibility ceiling', () => {
+    const standard = resolveChapterWordTarget({}, {}, {})
+    expect(resolveStandardWordTargetCompatibility(evaluateProseWordTarget('文'.repeat(6596), standard), standard)).toMatchObject({ passed: true, ceiling: 6760 })
+    expect(resolveStandardWordTargetCompatibility(evaluateProseWordTarget('文'.repeat(6761), standard), standard).passed).toBe(false)
+    const custom = resolveChapterWordTarget({}, {}, { word_target_mode: 'custom', target_word_count: 5200 })
+    expect(resolveStandardWordTargetCompatibility(evaluateProseWordTarget('文'.repeat(6596), custom), custom).passed).toBe(false)
+  })
   test('counts prose characters without whitespace', () => {
     expect(countProseChars('李辰 醒来\n规则响起。')).toBe(9)
   })

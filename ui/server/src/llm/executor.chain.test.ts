@@ -231,6 +231,48 @@ describe('executeNovelAgentChain outline params', () => {
     })
   })
 
+  test('preserves the authoritative bounded prose prompt over project replacements', async () => {
+    runtimeRequests.length = 0
+    const { generateNovelChapterProse } = await import('./executor')
+
+    await generateNovelChapterProse(
+      {
+        id: 107,
+        title: '权威正文提示词测试',
+        genre: '都市',
+        style_tags: ['网文'],
+        reference_config: {
+          agent_prompt_config: {
+            prompts: {
+              'prose-agent': {
+                system: 'PROJECT_PROSE_SYSTEM_REPLACEMENT_SENTINEL',
+                user: 'PROJECT_PROSE_USER_REPLACEMENT_SENTINEL',
+              },
+            },
+          },
+        },
+      } as any,
+      {
+        chapter_no: 10,
+        title: '暗门',
+        chapter_summary: '主角追进旧楼，发现证据被提前转移。',
+      },
+      {
+        paragraphTask: 'BOUNDED_PARAGRAPH_TASK_WITH_OH_STORY_RULES',
+        boundedProseContract: true,
+      } as any,
+      { activeWorkspace: 'test-workspace', skipMemory: true, modelId: '1' },
+    )
+
+    const proseRequest = runtimeRequests[0]
+    const userPrompt = String(proseRequest?.messages?.find((item: any) => item.role === 'user')?.content || '')
+    const combinedPrompt = JSON.stringify(proseRequest?.messages || [])
+
+    expect(userPrompt).toContain('BOUNDED_PARAGRAPH_TASK_WITH_OH_STORY_RULES')
+    expect(combinedPrompt).not.toContain('PROJECT_PROSE_SYSTEM_REPLACEMENT_SENTINEL')
+    expect(combinedPrompt).not.toContain('PROJECT_PROSE_USER_REPLACEMENT_SENTINEL')
+  })
+
   test('keeps prose memory recall while skipping every candidate draft memory write', async () => {
     runtimeRequests.length = 0
     memoryRecallCalls.length = 0

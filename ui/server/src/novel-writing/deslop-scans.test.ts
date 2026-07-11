@@ -21,6 +21,9 @@ describe('deslop scan utilities', () => {
       '书面腔口语化',
     ]))
     expect(hits.find((item: any) => item.pattern === '不是A，而是B')?.status).toBe('fail')
+    expect(hits.find((item: any) => item.pattern === '不是A，而是B')?.matched_text).toBe('不是冷漠，而是绝望')
+    expect(hits.find((item: any) => item.pattern === '缓缓')?.matched_text).toBe('缓缓')
+    expect(hits.find((item: any) => item.pattern === '书面腔口语化' && item.fix.includes('瓦解'))?.matched_text).toBe('瓦解')
     expect(hits.map((item: any) => item.fix).join('｜')).toContain('更口语和现场')
   })
 
@@ -47,6 +50,36 @@ describe('deslop scan utilities', () => {
     ].join('\n'))
 
     expect(hits.map((item: any) => item.pattern)).not.toContain('不是A，而是B')
+  })
+
+  test('matches 如同 as a comparison term instead of across 不如 and 同意', () => {
+    const falsePositive = scanBannedWordLeaks('他觉得不如同意这个提议。')
+    const comparison = scanBannedWordLeaks('铁门倒下，如同一堵墙砸进水里。')
+
+    expect(falsePositive.map((item: any) => item.pattern)).not.toContain('如同')
+    expect(comparison.find((item: any) => item.pattern === '如同')).toMatchObject({
+      status: 'warn',
+      evidence: '铁门倒下，如同一堵墙砸进水里。',
+      matched_text: '如同',
+    })
+  })
+
+  test('exposes semantic summary text without its regex boundary separator', () => {
+    const summary = scanBannedWordLeaks('门开了。这一刻，他终于明白真相。')
+      .find((item: any) => item.pattern === '总结句式')
+    const punctuationMatches = [
+      scanBannedWordLeaks('门开了。——风撞上窗户。'),
+      scanBannedWordLeaks('水滴...落在地上。'),
+    ].flatMap(items => items)
+      .filter((item: any) => item.pattern === '禁用标点')
+      .map((item: any) => item.matched_text)
+
+    expect(summary).toMatchObject({
+      matched_text: '这一刻，他终于明白真相',
+      status: 'warn',
+    })
+    expect(summary?.matched_text).not.toMatch(/^[\s。！？!?；;，,]/)
+    expect(punctuationMatches).toEqual(expect.arrayContaining(['——', '...']))
   })
 
   test('detects weak adverb density after excluding title line', () => {

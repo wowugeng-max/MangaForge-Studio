@@ -233,8 +233,15 @@ function readySafeBatchPlanning(overrides: any = {}) {
 }
 
 function readySafeBatchWriting(overrides: any = {}) {
+  const {
+    chapterPlanningDesk: chapterPlanningDeskOverrides,
+    topStatus: topStatusOverrides,
+    ...writingOverrides
+  } = overrides
   return {
     ...baseWriting,
+    primaryActionKey: 'confirm_plan_and_write_draft',
+    ...writingOverrides,
     chapterPlanningDesk: {
       ...baseWriting.chapterPlanningDesk,
       readiness: 'ready',
@@ -245,16 +252,14 @@ function readySafeBatchWriting(overrides: any = {}) {
         { title: '反向设局', goal: '主角用阵法拿回主动权' },
       ],
       recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
-      ...(overrides.chapterPlanningDesk || {}),
+      ...(chapterPlanningDeskOverrides || {}),
     },
     topStatus: {
       ...baseWriting.topStatus,
       nextActionLabel: '确认并生成',
       primaryActionKey: 'confirm_plan_and_write_draft',
-      ...(overrides.topStatus || {}),
+      ...(topStatusOverrides || {}),
     },
-    primaryActionKey: 'confirm_plan_and_write_draft',
-    ...overrides,
   }
 }
 
@@ -2633,6 +2638,42 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.statusLabel).toBe('开写门禁')
     expect(model.mainAction.key).toBe('open_generation_diagnostics')
     expect(model.confirmations).toContain('本章开写门禁未通过')
+  })
+
+  test('keeps execution risks in the chapter contract without blocking the launch gate', () => {
+    const writing = readySafeBatchWriting({
+      chapterPlanningDesk: {
+        reasons: [],
+        recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        writePreparationBrief: {
+          readinessStatus: 'ready',
+          sourceGaps: [],
+          assetRisks: ['旧钥匙需要在现场建立触发条件和代价'],
+          deliveryRiskActions: ['前300字接住上一章围捕压力'],
+          rollingRhythmPreflight: {
+            principle: '拉期待速度 > 断期待速度',
+            nextActions: ['先铺下一目标，再兑现当前回报'],
+          },
+          blueprintFocus: ['开篇钩子：山路第一轮截杀'],
+          readerPayoffFocus: ['读者回报：现场验证旧方案失效'],
+          mustConfirm: ['旧钥匙风险动作必须进入写后回执。'],
+          executionOrder: ['按场景顺序执行并核验。'],
+        },
+      },
+    })
+    expect(writing.chapterPlanningDesk.readiness).toBe('ready')
+    expect(writing.chapterPlanningDesk.scenePlanStatus).toBe('ready')
+    expect(writing.chapterPlanningDesk.sceneCards).toHaveLength(2)
+
+    const model = buildAutoCreationDirectorModel({
+      planning: basePlanning,
+      writing,
+      activeTasks: [],
+      selectedModelId: 12,
+    })
+
+    expect(model.chapterLaunchGate.signals.find(signal => signal.key === 'write_preparation')).toBeUndefined()
+    expect(model.chapterLaunchGate.status).toBe('ready')
   })
 
   test('uses writing queue focus to repair current chapter plan before drafting', () => {

@@ -33,14 +33,28 @@ export function buildPipelineProse(opening: string, action: string) {
 }
 
 type ProsePipelineHarnessOptions = {
+  chapterWordTarget?: any
   draftText?: string
+  draftResult?: any
   editorText?: string
   editorSceneBreakdown?: any[]
   editorContinuityNotes?: string[]
+  memeText?: string
+  enableMemePolish?: boolean
   reviewPayloads?: any[]
   revisionTexts?: string[]
+  revisionResults?: any[]
   recheckError?: Error
   memoryError?: Error
+  contextPackageOverride?: any
+  storyStatePayload?: any
+  qualityGateEnabled?: boolean
+  initialSceneCards?: any[]
+  sceneCardsPayload?: any[]
+  afterCommitError?: Error
+  postCommitSyncError?: Error
+  repairedContextPackageOverride?: any
+  requireStagedContextCandidates?: boolean
 }
 
 export async function createProsePipelineHarness(
@@ -53,9 +67,9 @@ export async function createProsePipelineHarness(
     genre: '规则怪谈',
     synopsis: '江澈以超人之力主动打穿怪谈规则。',
     reference_config: {
-      chapter_word_target: { mode: 'custom', target: 1000 },
+      chapter_word_target: options.chapterWordTarget || { mode: 'custom', target: 1000 },
       quality_gate: {
-        enabled: true,
+        enabled: options.qualityGateEnabled !== false,
         min_score: 78,
         require_revision_before_store: true,
         max_critical_issues: 0,
@@ -90,7 +104,7 @@ export async function createProsePipelineHarness(
     chapter_summary: '江澈利用封锁线的联动缺口反向追踪幕后指挥者。',
     conflict: '双层追捕线互相掩护，铁门后的退路正在闭合。',
     ending_hook: '幕后指挥者用顾遥的声音叫出江澈旧名。',
-    scene_list: [{
+    scene_list: options.initialSceneCards ?? [{
       scene_no: 1,
       title: '铁门破围',
       purpose: '夺下追捕通讯器',
@@ -110,13 +124,17 @@ export async function createProsePipelineHarness(
   )
   const reviewPayloads = [...(options.reviewPayloads || [])]
   const revisionTexts = [...(options.revisionTexts || [])]
-  const modelCalls = { scene_cards: 0, draft: 0, review: 0, revision: 0, editor: 0, story_state: 0, other: 0 }
+  const revisionResults = [...(options.revisionResults || [])]
+  const modelCalls = { scene_cards: 0, draft: 0, review: 0, revision: 0, editor: 0, contraction: 0, story_state: 0, other: 0 }
   const storyStateTexts: string[] = []
   const memoryTexts: string[] = []
+  const commitOrder: string[] = []
   const draftOptions: any[] = []
   let storeCalls = 0
   let storyStateCalls = 0
   let qualityReviewCalls = 0
+  let contextCalls = 0
+  const contextInputs: any[] = []
 
   const contextPackage = {
     preflight: { ready: true, strict_ready: true, checks: [], warnings: [], blockers: [] },
@@ -138,6 +156,7 @@ export async function createProsePipelineHarness(
         reader_promise: '每章核心结果必须由江澈主动争取。',
         no_drift: ['不得等待配角代办破局结果。'],
       },
+      ...(options.enableMemePolish ? { meme_strategy: { intensity: '低', meme_bank: ['稳住'] } } : {}),
     },
     continuity: {
       previous_chapter: {
@@ -147,10 +166,38 @@ export async function createProsePipelineHarness(
         ending_excerpt: '红灯同时亮起，追捕队从四面压进旧巷。江澈听见耳机里的倒数，只剩铁门后那条路还没有完全合拢。',
       },
     },
+    ...(options.contextPackageOverride || {}),
   }
 
   const executeAgent = async (_agent: string, _project: any, input: any) => {
     const task = String(input?.task || '')
+    if (task.startsWith('任务：为当前章节生成可人工确认的场景卡')) {
+      modelCalls.scene_cards += 1
+      return {
+        parsed: {
+          scene_cards: options.sceneCardsPayload || [{
+            scene_no: 1,
+            title: '铁门破围',
+            purpose: '夺下追捕通讯器',
+            goal: '打乱双层封锁线',
+            obstacle: '追捕队互相掩护',
+            conflict: '铁门即将闭合',
+            action: '江澈主动撞断路灯制造盲区',
+            turn: '通讯器里传出顾遥的声音',
+            payoff: '锁定幕后频道',
+            ending_hook_seed: '指挥者叫出江澈旧名',
+          }],
+        },
+        modelName: 'fake-scene-cards',
+      } as any
+    }
+    if (task.startsWith('任务：将本章正文压缩')) {
+      modelCalls.contraction += 1
+      return { parsed: {}, finish_reason: 'stop', modelName: 'fake-contraction' } as any
+    }
+    if (task.startsWith('任务：克制型网感润色')) {
+      return { parsed: { chapter_text: options.memeText || draftText, meme_polish_report: { changed_plot: false } }, modelName: 'fake-meme' } as any
+    }
     if (task.includes('商业主编')) {
       modelCalls.editor += 1
       return {
@@ -177,12 +224,13 @@ export async function createProsePipelineHarness(
     }
     if (task.startsWith('任务：执行第') || task.startsWith('任务：根据自检结果修订本章正文')) {
       modelCalls.revision += 1
+      if (revisionResults.length) return revisionResults.shift()
       const text = revisionTexts.shift() || draftText
       return { parsed: { chapter_text: text, revision_receipts: [{ key: 'agency', changed_evidence: text.slice(0, 80) }] }, modelName: 'fake-reviser' } as any
     }
     if (task.includes('state_delta')) {
       modelCalls.story_state += 1
-      return { parsed: { state_delta: { open_questions: ['幕后指挥者为何知道江澈旧名'] }, character_updates: [], setting_updates: [], storyline_updates: [] }, modelName: 'fake-state' } as any
+      return { parsed: options.storyStatePayload || { state_delta: { open_questions: ['幕后指挥者为何知道江澈旧名'] }, character_updates: [], setting_updates: [], storyline_updates: [] }, modelName: 'fake-state' } as any
     }
     modelCalls.other += 1
     return { parsed: {}, modelName: 'fake-other' } as any
@@ -206,13 +254,27 @@ export async function createProsePipelineHarness(
       buildMigrationAudit: () => ({ passed: true }),
     } as any,
     runtime: {
-      buildChapterContext: async () => contextPackage,
+      buildChapterContext: async (input: any) => {
+        contextCalls += 1
+        contextInputs.push(input)
+        const hasStagedCandidates = Array.isArray(input?.settings)
+          && input.settings.some((setting: any) => Number(setting?.id || 0) < 0)
+          && Array.isArray(input?.chapterSettingUsage)
+          && input.chapterSettingUsage.some((usage: any) => Number(usage?.entity_id || 0) < 0)
+        if (contextCalls > 1 && options.requireStagedContextCandidates && !hasStagedCandidates) return contextPackage
+        return contextCalls > 1 && options.repairedContextPackageOverride
+          ? { ...contextPackage, ...options.repairedContextPackageOverride }
+          : contextPackage
+      },
       generateChapterProse: async (...args: any[]) => {
         modelCalls.draft += 1
         draftOptions.push(args[3])
-        return { parsed: { chapter_no: 10, chapter_text: draftText }, modelName: 'fake-draft', usage: { input_tokens: 100, output_tokens: 200 } } as any
+        return options.draftResult !== undefined
+          ? options.draftResult
+          : { parsed: { chapter_no: 10, chapter_text: draftText }, modelName: 'fake-draft', usage: { input_tokens: 100, output_tokens: 200 } } as any
       },
       storeChapterProseMemory: async (_project: any, _chapterNo: number, finalText: string) => {
+        commitOrder.push('memory')
         memoryTexts.push(finalText)
         if (options.memoryError) throw options.memoryError
       },
@@ -226,6 +288,13 @@ export async function createProsePipelineHarness(
           storyStateCalls += 1
           storyStateTexts.push(finalText)
         },
+        afterChapterCommit: () => {
+          commitOrder.push('commit')
+          if (options.afterCommitError) throw options.afterCommitError
+        },
+        beforePostCommitSync: () => {
+          if (options.postCommitSyncError) throw options.postCommitSyncError
+        },
       },
     },
   })
@@ -238,7 +307,9 @@ export async function createProsePipelineHarness(
     modelCalls,
     storyStateTexts,
     memoryTexts,
+    commitOrder,
     draftOptions,
+    contextInputs,
     get storeCalls() { return storeCalls },
     get storyStateCalls() { return storyStateCalls },
   }

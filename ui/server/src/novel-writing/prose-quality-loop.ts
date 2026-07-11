@@ -30,6 +30,8 @@ export interface ProseQualityDecision {
   advisory_failures: string[]
 }
 
+const MAX_PROSE_QUALITY_EVIDENCE_CHARS = 500
+
 const PROSE_QUALITY_DIMENSIONS = new Set<ProseQualityDimension>([
   'continuity',
   'core_promise_agency',
@@ -43,17 +45,48 @@ function compactQualityText(value: any, maxChars = 500) {
   return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, maxChars)
 }
 
+const PROSE_EVIDENCE_QUOTE_PAIRS = [
+  ['“', '”'],
+  ['‘', '’'],
+  ['「', '」'],
+  ['『', '』'],
+  ['"', '"'],
+  ["'", "'"],
+] as const
+
+function normalizeProseEvidenceWhitespace(value: any) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim()
+}
+
+function locatableProseEvidenceText(value: any) {
+  const normalized = normalizeProseEvidenceWhitespace(value)
+  if (!normalized) return ''
+  const pair = PROSE_EVIDENCE_QUOTE_PAIRS.find(([opening, closing]) => (
+    normalized.startsWith(opening) && normalized.endsWith(closing)
+  ))
+  if (pair) return normalizeProseEvidenceWhitespace(normalized.slice(1, -1))
+  return normalized
+}
+
+function isProseFindingEvidenceLocatable(finding: ProseQualityFinding, chapterText: string) {
+  const evidence = locatableProseEvidenceText(finding?.evidence)
+  const prose = normalizeProseEvidenceWhitespace(chapterText)
+  return Boolean(evidence && prose.includes(evidence))
+}
+
 function normalizeSeverity(value: any): ProseQualitySeverity {
   const severity = String(value || 'S3').toUpperCase()
   return severity === 'S1' || severity === 'S2' ? severity : 'S3'
 }
 
 function normalizeFinding(value: any, index: number): ProseQualityFinding | null {
-  const evidence = compactQualityText(value?.evidence)
+  const normalizedEvidence = normalizeProseEvidenceWhitespace(value?.evidence)
+  const evidence = normalizedEvidence.slice(0, MAX_PROSE_QUALITY_EVIDENCE_CHARS)
+  const evidenceTooLong = normalizedEvidence.length > MAX_PROSE_QUALITY_EVIDENCE_CHARS
   const severity = normalizeSeverity(value?.severity)
   const finding: ProseQualityFinding = {
     key: compactQualityText(value?.key || `finding_${index + 1}`, 100),
-    severity: !evidence && severity !== 'S3' ? 'S3' : severity,
+    severity: (!evidence || evidenceTooLong) && severity !== 'S3' ? 'S3' : severity,
     dimension: PROSE_QUALITY_DIMENSIONS.has(value?.dimension)
       ? value.dimension
       : 'prose_style',
@@ -64,6 +97,27 @@ function normalizeFinding(value: any, index: number): ProseQualityFinding | null
   return finding.key && finding.required_change && finding.acceptance_test ? finding : null
 }
 
+function proseQualityFindingFingerprint(finding: ProseQualityFinding) {
+  return JSON.stringify([
+    finding.key,
+    finding.severity,
+    finding.dimension,
+    finding.evidence,
+    finding.required_change,
+    finding.acceptance_test,
+  ])
+}
+
+function uniqueProseQualityFindings(findings: ProseQualityFinding[]) {
+  const seen = new Set<string>()
+  return findings.filter(finding => {
+    const fingerprint = proseQualityFindingFingerprint(finding)
+    if (seen.has(fingerprint)) return false
+    seen.add(fingerprint)
+    return true
+  })
+}
+
 export function normalizeProseQualityReview(payload: any) {
   const sourceFindings = Array.isArray(payload?.findings)
     ? payload.findings
@@ -71,9 +125,9 @@ export function normalizeProseQualityReview(payload: any) {
         ...(Array.isArray(payload?.blocking_findings) ? payload.blocking_findings : []),
         ...(Array.isArray(payload?.advisory_findings) ? payload.advisory_findings : []),
       ]
-  const findings = sourceFindings
+  const findings = uniqueProseQualityFindings(sourceFindings
     .map(normalizeFinding)
-    .filter((item: ProseQualityFinding | null): item is ProseQualityFinding => Boolean(item))
+    .filter((item: ProseQualityFinding | null): item is ProseQualityFinding => Boolean(item)))
   const rawScore = Number(payload?.score ?? 0)
   const score = Number.isFinite(rawScore) ? Math.max(0, Math.min(100, rawScore)) : 0
 
@@ -93,9 +147,11 @@ export function normalizeProseQualityReview(payload: any) {
 }
 
 export function buildProseQualityDecision(input: {
+  chapterText: string
   review: ReturnType<typeof normalizeProseQualityReview> | any
   deterministicScan: any
   minScore: number
+  classification?: ProseQualityFindingClassification
 }): ProseQualityDecision {
   const deterministic = (Array.isArray(input.deterministicScan?.hard_failures)
     ? input.deterministicScan.hard_failures
@@ -105,19 +161,31 @@ export function buildProseQualityDecision(input: {
       message: compactQualityText(item?.message || item?.evidence || item?.fix || item?.key || '确定性正文检查未通过'),
       source: 'deterministic' as const,
     }))
-  const llm = (Array.isArray(input.review?.blocking_findings)
-    ? input.review.blocking_findings
-    : [])
+  const {
+    blockingFindings,
+    deterministicAdvisoryDowngrades: downgradedFindings,
+    unlocatableFindings,
+  } = input.classification
+    || classifyProseQualityBlockingFindings(input.review, input.chapterText, input.deterministicScan)
+  const llm = blockingFindings
     .map((item: ProseQualityFinding) => ({
       key: item.key,
       message: `${item.dimension}：${item.evidence}；${item.required_change}`,
       source: 'llm' as const,
     }))
-  const hardFailures = [...deterministic, ...llm]
+  const hardFailures = [
+    ...deterministic,
+    ...proseQualityVerdictHardFailures(input.review),
+    ...llm,
+  ]
   const score = Number.isFinite(Number(input.review?.score)) ? Number(input.review.score) : 0
   const minScore = Number.isFinite(Number(input.minScore)) ? Number(input.minScore) : 0
   const advisoryFailures = [
     ...(score < minScore ? [`质检评分 ${score} 低于 ${minScore}`] : []),
+    ...deterministicAdvisoryFindings(input.deterministicScan)
+      .map((item: any) => `${compactQualityText(item?.pattern || item?.key || 'deterministic_advisory', 100)}：${compactQualityText(item?.fix || item?.message || item?.evidence)}`),
+    ...downgradedFindings.map((item: ProseQualityFinding) => `${item.key}：${item.required_change}`),
+    ...unlocatableFindings.map((item: ProseQualityFinding) => `${item.key}：证据无法在当前正文定位；${item.required_change}`),
     ...(Array.isArray(input.review?.advisory_findings)
       ? input.review.advisory_findings.map((item: ProseQualityFinding) => `${item.key}：${item.required_change}`)
       : []),
@@ -129,7 +197,7 @@ export function buildProseQualityDecision(input: {
     score,
     min_score: minScore,
     hard_failures: hardFailures,
-    advisory_failures: advisoryFailures,
+    advisory_failures: Array.from(new Set(advisoryFailures)),
   }
 }
 
@@ -159,6 +227,133 @@ const REQUIRED_QUALITY_DIMENSIONS: ProseQualityDimension[] = [
   'fact_setting_safety',
 ]
 
+const PROSE_QUALITY_DIMENSION_HARD_FLOOR = 5
+
+function proseQualityVerdictHardFailures(review: any): ProseQualityDecision['hard_failures'] {
+  const failures: ProseQualityDecision['hard_failures'] = []
+  if (review?.publishable !== true) {
+    failures.push({
+      key: 'quality_publishable_verdict',
+      message: '独立质检未明确判定正文可发布',
+      source: 'llm',
+    })
+  }
+  for (const dimension of REQUIRED_QUALITY_DIMENSIONS) {
+    const rawScore = review?.dimensions?.[dimension]
+    const score = isFiniteQualityNumericValue(rawScore) ? Number(rawScore) : Number.NaN
+    if (!Number.isFinite(score) || score < PROSE_QUALITY_DIMENSION_HARD_FLOOR) {
+      failures.push({
+        key: `quality_dimension_${dimension}`,
+        message: `${dimension} 维度分数必须为有限数且不低于 ${PROSE_QUALITY_DIMENSION_HARD_FLOOR}/10`,
+        source: 'llm',
+      })
+    }
+  }
+  return failures
+}
+
+function deterministicAdvisoryFindings(scan: any) {
+  return Array.isArray(scan?.advisory_findings) ? scan.advisory_findings : []
+}
+
+function isDeterministicAdvisoryCoveredProseStyleFinding(finding: ProseQualityFinding, scan: any) {
+  if (finding?.dimension !== 'prose_style') return false
+  const evidence = compactQualityText(finding?.evidence)
+  if (!evidence) return false
+  return deterministicAdvisoryFindings(scan).some((item: any) => {
+    const advisoryEvidence = compactQualityText(item?.evidence)
+    const advisoryPattern = compactQualityText(item?.pattern)
+    const matchedText = compactQualityText(item?.matched_text)
+    return advisoryEvidence.length > 0
+      && advisoryPattern.length > 0
+      && matchedText.length > 0
+      && advisoryEvidence.includes(evidence)
+      && evidence.includes(matchedText)
+      && isAtomicDeterministicAdvisoryStyleRepair(finding, advisoryPattern, matchedText)
+  })
+}
+
+function splitProseQualityRepairClauses(value: any) {
+  return compactQualityText(value, 1_500)
+    .split(/[，,；;。]+|(?:并且|并|且)(?=(?:删除|去掉|移除|替换|改写|改成|改为|换成|直写|直接写|保留|让|补|修复))/)
+    .map(item => item.replace(/^[\s：:]+|[\s：:]+$/g, ''))
+    .filter(Boolean)
+}
+
+function clauseReferencesDeterministicAdvisory(clause: string, advisoryPattern: string, matchedText: string) {
+  const normalized = clause.replace(/[“”‘’「」『』"']/g, '')
+  return normalized.includes(matchedText) || normalized.includes(advisoryPattern)
+}
+
+function isProvenStyleRewriteClause(clause: string) {
+  const rewrite = clause.match(/^(?:改成|改为|换成|改写成?|直写|直接写|保留)(.+)$/)?.[1] || ''
+  if (!rewrite) return false
+  return rewrite
+    .replace(/(?:更|直接|具体|现场|可见|口语化|的|声音|动作|事实|后果|焦味|证据|感官|画面|细节|句式|描写|表达|\/|、|或)/g, '')
+    .trim().length === 0
+}
+
+function isProvenDeterministicAdvisoryClause(clause: string, advisoryPattern: string, matchedText: string) {
+  if (isProvenStyleRewriteClause(clause)) return true
+  if (!clauseReferencesDeterministicAdvisory(clause, advisoryPattern, matchedText)) return false
+  const residual = clause
+    .replace(/[“”‘’「」『』"']/g, '')
+    .split(matchedText).join('')
+    .split(advisoryPattern).join('')
+    .replace(/\s+/g, '')
+  return /^(?:正文)?(?:已)?(?:删除|去掉|移除|替换|改写|不再出现|不得出现|消除|避免)(?:(?:该|这一|这一刻|的|词|词句|措辞|表达|比喻|句式|总结句式|模板|套话))*$/.test(residual)
+}
+
+function isAtomicDeterministicAdvisoryStyleRepair(
+  finding: ProseQualityFinding,
+  advisoryPattern: string,
+  matchedText: string,
+) {
+  const requiredClauses = splitProseQualityRepairClauses(finding?.required_change)
+  const acceptanceClauses = splitProseQualityRepairClauses(finding?.acceptance_test)
+  const clauses = [...requiredClauses, ...acceptanceClauses]
+  return requiredClauses.length > 0
+    && acceptanceClauses.length > 0
+    && clauses.every(clause => isProvenDeterministicAdvisoryClause(clause, advisoryPattern, matchedText))
+}
+
+interface ProseQualityFindingClassification {
+  blockingFindings: ProseQualityFinding[]
+  deterministicAdvisoryDowngrades: ProseQualityFinding[]
+  unlocatableFindings: ProseQualityFinding[]
+}
+
+function classifyProseQualityBlockingFindings(
+  review: any,
+  chapterText: string,
+  scan: any,
+): ProseQualityFindingClassification {
+  const findings = uniqueProseQualityFindings(Array.isArray(review?.blocking_findings)
+    ? review.blocking_findings
+    : [])
+  const blockingFindings: ProseQualityFinding[] = []
+  const deterministicAdvisoryDowngrades: ProseQualityFinding[] = []
+  const unlocatableFindings: ProseQualityFinding[] = []
+  for (const finding of findings) {
+    if (!isProseFindingEvidenceLocatable(finding, chapterText)) {
+      unlocatableFindings.push(finding)
+    } else if (isDeterministicAdvisoryCoveredProseStyleFinding(finding, scan)) {
+      deterministicAdvisoryDowngrades.push(finding)
+    } else {
+      blockingFindings.push(finding)
+    }
+  }
+  const locatableKeys = new Set([
+    ...blockingFindings,
+    ...deterministicAdvisoryDowngrades,
+  ].map(finding => finding.key))
+  return {
+    blockingFindings,
+    deterministicAdvisoryDowngrades,
+    unlocatableFindings: unlocatableFindings.filter(finding => !locatableKeys.has(finding.key)),
+  }
+}
+
 export function buildFocusedProseReviewPrompt(input: {
   coreContract: any
   chapterText: string
@@ -169,6 +364,7 @@ export function buildFocusedProseReviewPrompt(input: {
     `六维：${REQUIRED_QUALITY_DIMENSIONS.join('；')}。`,
     '分制合同：总体分 score 必须使用 0-100 分制，并固定输出 score_scale="0-100"；六个维度分别使用 0-10 分制。不得使用 5 分制或把维度平均值直接写入 score。',
     'S1/S2 必须引用正文中的可定位短句；没有证据只能给 S3 advisory。',
+    '确定性扫描标为 advisory 或 status=warn 的词句只保留风格诊断；同一词句已被代码判为 advisory 时，不得仅凭同一词句命中升级为 S1/S2，最多给 S3。',
     '最多 6 个 blocking findings、4 个 advisory findings。分数不能覆盖硬失败。',
     `不可变核心合同：${JSON.stringify(input.coreContract || {}, null, 2)}`,
     `确定性扫描：${JSON.stringify(input.deterministicScan || {}, null, 2)}`,
@@ -417,7 +613,13 @@ export async function runProseQualityLoop(input: {
   maxRevisionRounds?: number
   scan: (text: string) => any | Promise<any>
   review: (input: { text: string; scan: any; round: number; prompt: string; attempt: number }) => Promise<any>
-  revise: (input: { text: string; review: any; round: number; prompt: string }) => Promise<any>
+  revise: (input: {
+    text: string
+    review: any
+    blockingFindings: ProseQualityFinding[]
+    round: number
+    prompt: string
+  }) => Promise<any>
 }) {
   const maxRounds = Math.min(2, Math.max(0, Number(input.maxRevisionRounds ?? 2)))
   const rounds: any[] = []
@@ -439,22 +641,26 @@ export async function runProseQualityLoop(input: {
     throw qualityLoopError('PROSE_REVIEW_FAILED', '正文初审不可用', { cause: compactQualityError(error) })
   }
   let review = normalizeProseQualityReview(initialPayload)
+  let classification = classifyProseQualityBlockingFindings(review, finalText, scan)
   let decision = buildProseQualityDecision({
+    chapterText: finalText,
     review,
     deterministicScan: scan,
     minScore: input.minScore,
+    classification,
   })
 
   for (let round = 1; !decision.passed && round <= maxRounds; round += 1) {
     const blockingFindings = [
       ...deterministicFindings(scan),
-      ...review.blocking_findings,
+      ...classification.blockingFindings,
     ].slice(0, 6)
     if (blockingFindings.length === 0) break
 
     const revision = await input.revise({
       text: finalText,
       review,
+      blockingFindings,
       round,
       prompt: buildFocusedProseRevisionPrompt({
         coreContract: input.coreContract,
@@ -497,6 +703,7 @@ export async function runProseQualityLoop(input: {
         }),
       })
       review = normalizeProseQualityReview(recheckPayload)
+      classification = classifyProseQualityBlockingFindings(review, finalText, scan)
     } catch (error) {
       const message = `正文第 ${round} 轮修订后的独立复检不可用`
       throw qualityLoopError(
@@ -524,9 +731,11 @@ export async function runProseQualityLoop(input: {
       )
     }
     decision = buildProseQualityDecision({
+      chapterText: finalText,
       review,
       deterministicScan: scan,
       minScore: input.minScore,
+      classification,
     })
   }
 

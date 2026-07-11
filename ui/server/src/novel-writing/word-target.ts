@@ -158,6 +158,22 @@ export function evaluateProseWordTarget(text: string, target: ChapterWordTarget 
   }
 }
 
+export function resolveStandardWordTargetCompatibility(
+  evaluation: ProseWordTargetEvaluation,
+  target: ChapterWordTarget | null | undefined,
+) {
+  const ceiling = Math.floor(Number(target?.max || 0) * 1.3)
+  const passed = target?.mode === 'standard'
+    && evaluation?.too_long === true
+    && ceiling > 0
+    && Number(evaluation.actual || 0) <= ceiling
+  return {
+    passed,
+    ceiling,
+    reason: passed ? 'standard_contraction_exhausted_within_compatibility_ceiling' : null,
+  }
+}
+
 export function canBridgeShortContractionToExpansion(
   current: ProseWordTargetEvaluation,
   candidate: ProseWordTargetEvaluation,

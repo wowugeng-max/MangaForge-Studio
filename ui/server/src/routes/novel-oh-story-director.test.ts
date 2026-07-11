@@ -147,7 +147,7 @@ describe('oh-story director core', () => {
       chapter_target: {
         story_power_contract: { quality_checks: ['目标阻碍动作反馈期待'] },
       },
-      preflight: { warnings: ['场景卡 scene card 缺目标、阻碍、变化'] },
+      preflight: { strict_ready: true, warnings: ['场景卡 scene card 缺目标、阻碍、变化'] },
     })
 
     expect(repairDirector.stage).toBe('pre_draft')
@@ -195,6 +195,7 @@ describe('oh-story director core', () => {
     const director = buildOhStoryDirectorForPreDraft({
       preflight: {
         ready: true,
+        strict_ready: true,
         blockers: [],
         warnings: [
           '文风召回缺口：旧版模块可继续写作，但必须在自检中保留优先级。',
@@ -215,6 +216,25 @@ describe('oh-story director core', () => {
       key: 'pre_draft_missing_source_evidence',
       status: 'warn',
       source: 'preflight.warnings',
+    }))
+  })
+
+  test('accepts camel-only strict preflight readiness while keeping low warnings advisory', () => {
+    const director = buildOhStoryDirectorForPreDraft({
+      preflight: {
+        ready: true,
+        strictReady: true,
+        blockers: [],
+        warnings: ['文风召回来源缺失：可稍后补充样本'],
+        checks: [{ key: 'style_sample', ok: false, severity: 'low' }],
+      },
+    })
+
+    expect(director.readiness).toBe('ready')
+    expect(director.required_repairs).toHaveLength(0)
+    expect(director.deferred_repairs).toContainEqual(expect.objectContaining({
+      category: 'missing_source_evidence',
+      blocking: false,
     }))
   })
 
@@ -250,6 +270,36 @@ describe('oh-story director core', () => {
       key: 'pre_draft_strict_readiness',
       status: 'blocked',
       source: 'preflight.strict_ready',
+    }))
+    expect(director.required_repairs.find(item => item.key === 'pre_draft_strict_readiness')?.detail)
+      .toContain('补齐上一章尾段和角色当前状态')
+  })
+
+  test('reports missing strict readiness while keeping low warnings advisory', () => {
+    const director = buildOhStoryDirectorForPreDraft({
+      preflight: {
+        ready: true,
+        warnings: ['文风召回来源缺失：可稍后补充样本'],
+        checks: [{ key: 'style_sample', ok: false, severity: 'low', fix: '可稍后补文风样本。' }],
+      },
+    })
+
+    expect(director.readiness).toBe('needs_repair')
+    expect(director.required_repairs).toContainEqual(expect.objectContaining({
+      key: 'pre_draft_strict_readiness',
+      blocking: true,
+    }))
+    expect(director.evidence).toContainEqual(expect.objectContaining({
+      key: 'pre_draft_strict_readiness',
+      status: 'blocked',
+      source: 'preflight.strict_ready',
+    }))
+    const strictRepair = director.required_repairs.find(item => item.key === 'pre_draft_strict_readiness')
+    expect(strictRepair?.detail).toContain('preflight.strict_ready')
+    expect(strictRepair?.detail).not.toContain('文风召回来源缺失')
+    expect(director.deferred_repairs).toContainEqual(expect.objectContaining({
+      category: 'missing_source_evidence',
+      blocking: false,
     }))
   })
 

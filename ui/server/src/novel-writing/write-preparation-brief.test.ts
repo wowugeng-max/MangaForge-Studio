@@ -164,4 +164,37 @@ describe('write preparation brief helpers', () => {
     expect(brief.execution_order).toContain('Step 2.3 文风召回：先锁主对标，再确认副对标边界。')
     expect(brief.execution_order).toContain('滚动节奏：先补期待，再进入反证。')
   })
+
+  test('keeps execution risks advisory when all source evidence is ready', () => {
+    const brief = buildWritePreparationBriefFromParts({
+      state_source_rows: [
+        { key: 'previous_chapter', label: '上一章承接', status: 'ready', evidence: '已读取第10章终稿' },
+        { key: 'timeline_tracking', label: '追踪/时间线', status: 'ready', evidence: '时间、地点和事件顺序已确认' },
+      ],
+      benchmark_recall_preparation: {
+        source_gaps: [],
+        must_confirm: [],
+        execution_order: [],
+      },
+      asset_linkage_contract: {
+        relationship_graph_risks: ['旧钥匙需要在本章建立现场功能和代价'],
+      },
+      delivery_risk_carry_over: {
+        opening_actions: ['前300字接住上一章围捕压力'],
+        middle_actions: ['中段让旧钥匙参与规则反制'],
+      },
+      rolling_rhythm_preflight: {
+        principle: '拉期待速度 > 断期待速度',
+        next_actions: ['旧期待兑现前先铺下一层目标'],
+        execution_order: ['滚动节奏：先铺下一目标，再兑现当前回报。'],
+      },
+    })
+
+    expect(brief.source_gaps).toEqual([])
+    expect(brief.readiness_status).toBe('ready')
+    expect(brief.asset_risks).toEqual(['旧钥匙需要在本章建立现场功能和代价'])
+    expect(brief.delivery_risk_actions).toContain('开篇动作：前300字接住上一章围捕压力')
+    expect(brief.must_confirm).toContain('关系图风险：旧钥匙需要在本章建立现场功能和代价')
+    expect(brief.execution_order).toContain('滚动节奏：先铺下一目标，再兑现当前回报。')
+  })
 })

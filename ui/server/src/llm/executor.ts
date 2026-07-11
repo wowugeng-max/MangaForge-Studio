@@ -395,6 +395,7 @@ function buildAgentMessages(
   const promptOverrides = promptConfig.project_overrides_enabled === false ? {} : (promptConfig.prompts || {})
   const systemOverride = String(promptOverrides?.[agentId]?.system || promptOverrides?.global?.system || '').trim()
   const userOverride = String(promptOverrides?.[agentId]?.user || promptOverrides?.[agentId]?.prompt || '').trim()
+  const authoritativeProseTask = agentId === 'prose-agent' && context?.authoritativeProseTask === true
   const styleGuardrails = buildStyleGuardrails(project)
   const upstreamContext = context?.upstreamContext
     ? `\n\n前置 Agent 输出（作为参考上下文）：\n${JSON.stringify(context.upstreamContext, null, 2).slice(0, 4000)}`
@@ -412,7 +413,8 @@ function buildAgentMessages(
     ? knowledgeInjectionText
     : ''
 
-  const systemContent = (systemOverride || baseNovelSystemPrompt()) + styleGuardrails + memorySection + knowledgeSection + upstreamContext
+  const systemContent = (authoritativeProseTask ? baseNovelSystemPrompt() : (systemOverride || baseNovelSystemPrompt()))
+    + styleGuardrails + memorySection + knowledgeSection + upstreamContext
 
   // Extract upstream results
   const worldResult = (context?.upstreamContext as any)?.['world-agent'] || (context?.upstreamContext as any)?.worldbuilding || null
@@ -420,7 +422,7 @@ function buildAgentMessages(
   const outlineResult = (context?.upstreamContext as any)?.['outline-agent'] || null
 
   // Task-specific prompt
-  const taskPrompt = userOverride || (() => {
+  const taskPrompt = authoritativeProseTask ? context.task : userOverride || (() => {
     switch (agentId) {
       case 'market-agent':
         return buildMarketPrompt(project)
@@ -940,6 +942,7 @@ export async function generateNovelChapterProse(
         ...knowledgeContext,
         upstreamContext: proseUpstreamContext,
         task: prosePrompt,
+        authoritativeProseTask: true,
       }
     : {
         ...memoryContext,

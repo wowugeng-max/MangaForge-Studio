@@ -1,4 +1,8 @@
-import { normalizeProseContractKey, PROSE_RISK_CONTRACT_LIMIT } from '../novel-writing/prose-generation-contract'
+import {
+  normalizeProseContractKey,
+  PROSE_RISK_CONTRACT_LIMIT,
+  resolveStrictPreflightReadiness,
+} from '../novel-writing/prose-generation-contract'
 
 export type OhStoryDirectorStage = 'project_creation' | 'pre_draft' | 'drafting' | 'post_draft' | 'handoff'
 
@@ -427,7 +431,8 @@ export function buildOhStoryDirectorForPreDraft(input: RecordLike): OhStoryDirec
   const blockers = asArray(preflight?.blockers ?? input?.blockers)
   const warnings = asArray(preflight?.warnings ?? input?.warnings)
   const preflightReady = preflight?.ready === true
-  const strictReady = preflight?.strict_ready !== false
+  const strictReadiness = resolveStrictPreflightReadiness(preflight)
+  const strictReady = strictReadiness.ready
   const strictFailures = asArray(preflight?.checks).filter((item: any) => item?.ok === false && item?.severity !== 'low')
   const blockingIssues = [
     ...blockers.map((message: unknown) => ({ message, source: 'preflight.blockers' })),
@@ -454,10 +459,12 @@ export function buildOhStoryDirectorForPreDraft(input: RecordLike): OhStoryDirec
     return repair(repairKeyForPreDraftCategory(category), category, repairLabelForCategory(category), detail, true)
   })
   if (!strictReady) {
-    const strictDetail = strictFailures
-      .map((item: any) => issueText(item?.fix || item?.label || item?.key || item))
-      .filter(Boolean)
-      .join('\n') || warnings.map(issueText).filter(Boolean).join('\n') || 'Strict preflight is not ready.'
+    const strictDetail = strictReadiness.status !== 'missing'
+      ? strictFailures
+          .map((item: any) => issueText(item?.fix || item?.label || item?.key || item))
+          .filter(Boolean)
+          .join('\n') || strictReadiness.reason
+      : strictReadiness.reason
     required_repairs.push(repair(
       'pre_draft_strict_readiness',
       'missing_context',

@@ -6,6 +6,10 @@ function source(file: string) {
   return readFileSync(join(import.meta.dir, file), 'utf8')
 }
 
+function serverSource(file: string) {
+  return readFileSync(join(import.meta.dir, '../../../../server/src', file), 'utf8')
+}
+
 describe('commercial writing workspace UI shell', () => {
   test('lets the inner chapter directory rail collapse without hiding task center', () => {
     const projectWorkspace = source('../NovelProjectWorkspace.tsx')
@@ -894,7 +898,8 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = serverSource('routes/novel-writing-service.ts')
+    const promptSections = serverSource('novel-writing/prose-generation-prompt-sections.ts')
 
     expect(workspaceCenter).toContain('长篇作战承接')
     expect(workspaceCenter).toContain('今日优先')
@@ -903,14 +908,16 @@ describe('commercial writing workspace UI shell', () => {
     expect(model).toContain('longform_battle_context')
     expect(model).toContain('longformBattleLaneRequirements')
     expect(service).toContain('longform_battle_context')
-    expect(service).toContain('【长篇作战承接】')
+    expect(service).toContain('buildLongformBattleContextPromptSection')
+    expect(promptSections).toContain('【长篇作战承接】')
   })
 
   test('shows governance recheck memory in the pre-draft brief', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = serverSource('routes/novel-writing-service.ts')
+    const promptSections = serverSource('novel-writing/prose-generation-prompt-sections.ts')
 
     expect(workspaceCenter).toContain('治理复查承接')
     expect(workspaceCenter).toContain('修后证据')
@@ -919,7 +926,8 @@ describe('commercial writing workspace UI shell', () => {
     expect(model).toContain('governance_recheck_memory')
     expect(model).toContain('governanceMemoryEvidence')
     expect(service).toContain('governance_recheck_memory')
-    expect(service).toContain('【治理复查承接】')
+    expect(service).toContain('buildGovernanceRecheckPromptSection')
+    expect(promptSections).toContain('【治理复查承接】')
   })
 
   test('shows storyline sync status in the delivery strip', () => {
@@ -937,7 +945,8 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCss = source('WorkspaceCenter.css')
     const writingModel = source('writingCockpitModel.ts')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = serverSource('routes/novel-writing-service.ts')
+    const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
     expect(workspaceCenter).toContain('storyUnitSync')
     expect(workspaceCenter).toContain('novel-delivery-story-unit-tag')
@@ -945,35 +954,40 @@ describe('commercial writing workspace UI shell', () => {
     expect(workspaceCss).toContain('.novel-delivery-story-unit-tag-warn')
     expect(writingModel).toContain('story_unit_sync')
     expect(recommendationModel).toContain('storyUnitSync')
-    expect(service).toContain("review_type: 'story_unit_sync'")
+    expect(service).toContain("reviewType: 'story_unit_sync'")
+    expect(reviewRecords).toContain('review_type: input.reviewType')
   })
 
   test('shows chapter core drift status in the delivery strip', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingCockpitModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = serverSource('routes/novel-writing-service.ts')
+    const draftReviewRecords = serverSource('novel-writing/draft-sync-review-record.ts')
 
     expect(workspaceCenter).toContain('coreDrift')
     expect(workspaceCenter).toContain('novel-delivery-core-drift-tag')
     expect(workspaceCss).toContain('.novel-delivery-core-drift-tag')
     expect(workspaceCss).toContain('.novel-delivery-core-drift-tag-warn')
     expect(model).toContain('chapter_core_drift')
-    expect(service).toContain("review_type: 'chapter_core_drift'")
+    expect(service).toContain('buildChapterCoreDriftDraftReviewRecord')
+    expect(draftReviewRecords).toContain("reviewType: 'chapter_core_drift'")
   })
 
   test('shows reader payoff sync status in the delivery strip', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingCockpitModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = serverSource('routes/novel-writing-service.ts')
+    const draftReviewRecords = serverSource('novel-writing/draft-sync-review-record.ts')
 
     expect(workspaceCenter).toContain('readerPayoffSync')
     expect(workspaceCenter).toContain('novel-delivery-payoff-tag')
     expect(workspaceCss).toContain('.novel-delivery-payoff-tag')
     expect(workspaceCss).toContain('.novel-delivery-payoff-tag-warn')
     expect(model).toContain('reader_payoff_sync')
-    expect(service).toContain("review_type: 'reader_payoff_sync'")
+    expect(service).toContain('buildReaderPayoffDraftReviewRecord')
+    expect(draftReviewRecords).toContain("reviewType: 'reader_payoff_sync'")
   })
 
   test('shows reader retention sync status in the delivery strip', () => {
@@ -981,7 +995,8 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingCockpitModel.ts')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = serverSource('routes/novel-writing-service.ts')
+    const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
     expect(workspaceCenter).toContain('readerRetentionSync')
     expect(workspaceCenter).toContain('novel-delivery-retention-tag')
@@ -1001,9 +1016,10 @@ describe('commercial writing workspace UI shell', () => {
     expect(recommendationModel).toContain('readerRetentionSync')
     expect(recommendationModel).toContain('chapterAttraction')
     expect(recommendationModel).toContain('first30RetentionRecheck')
-    expect(service).toContain("review_type: 'reader_retention_sync'")
-    expect(service).toContain("review_type: 'chapter_attraction_review'")
+    expect(service).toContain("reviewType: 'reader_retention_sync'")
+    expect(service).toContain("reviewType: 'chapter_attraction_review'")
     expect(service).toContain('buildChapterAttractionReviewReport(project, chapter, contextPackage, chapterText)')
+    expect(reviewRecords).toContain('review_type: input.reviewType')
   })
 
   test('shows reader expectation ledger in draft brief and delivery strip', () => {
@@ -1011,7 +1027,8 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingCockpitModel.ts')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = serverSource('routes/novel-writing-service.ts')
+    const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
     expect(workspaceCenter).toContain('读者期待账本')
     expect(workspaceCenter).toContain('readerExpectationSync')
@@ -1024,8 +1041,9 @@ describe('commercial writing workspace UI shell', () => {
     expect(model).toContain('buildReaderExpectationSyncSummary')
     expect(recommendationModel).toContain('reader_expectation_ledger')
     expect(recommendationModel).toContain('expectationMustDeliver')
-    expect(service).toContain("review_type: 'reader_expectation_sync'")
+    expect(service).toContain("reviewType: 'reader_expectation_sync'")
     expect(service).toContain('reader_expectation_ledger')
+    expect(reviewRecords).toContain('review_type: input.reviewType')
   })
 
   test('shows quality audit carry-over sync in the delivery strip', () => {
@@ -1033,7 +1051,8 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingCockpitModel.ts')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = serverSource('routes/novel-writing-service.ts')
+    const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
     expect(workspaceCenter).toContain('qualityAuditSync')
     expect(workspaceCenter).toContain('novel-delivery-quality-sync-tag')
@@ -1043,7 +1062,8 @@ describe('commercial writing workspace UI shell', () => {
     expect(model).toContain('buildQualityAuditSyncSummary')
     expect(model).toContain('补诊断承接')
     expect(recommendationModel).toContain('qualityAuditSync')
-    expect(service).toContain("review_type: 'quality_audit_sync'")
+    expect(service).toContain("reviewType: 'quality_audit_sync'")
+    expect(reviewRecords).toContain('review_type: input.reviewType')
   })
 
   test('shows quality audit repair receipt sync in the delivery strip', () => {
@@ -1051,7 +1071,8 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingCockpitModel.ts')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = serverSource('routes/novel-writing-service.ts')
+    const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
     expect(workspaceCenter).toContain('qualityAuditRepairReceiptSync')
     expect(workspaceCenter).toContain('novel-delivery-quality-repair-receipt-tag')
@@ -1061,7 +1082,8 @@ describe('commercial writing workspace UI shell', () => {
     expect(model).toContain('buildQualityAuditRepairReceiptSyncSummary')
     expect(model).toContain('复核质量修复回执')
     expect(recommendationModel).toContain('qualityAuditRepairReceiptSync')
-    expect(service).toContain("review_type: 'quality_audit_repair_receipt_sync'")
+    expect(service).toContain("reviewType: 'quality_audit_repair_receipt_sync'")
+    expect(reviewRecords).toContain('review_type: input.reviewType')
   })
 
   test('shows reader expectation debt carry-over in the draft brief', () => {
@@ -1147,7 +1169,8 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCenterCss = source('WorkspaceCenter.css')
     const cockpitModel = source('writingCockpitModel.ts')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = serverSource('routes/novel-writing-service.ts')
+    const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
     expect(workspace).toContain('百万字航线守门')
     expect(workspace).toContain('millionWordRunway')
@@ -1168,7 +1191,8 @@ describe('commercial writing workspace UI shell', () => {
     expect(cockpitModel).toContain('buildRunwaySyncSummary')
     expect(cockpitModel).toContain('补航线')
     expect(recommendationModel).toContain('runwaySync')
-    expect(service).toContain("review_type: 'runway_sync'")
+    expect(service).toContain("reviewType: 'runway_sync'")
+    expect(reviewRecords).toContain('review_type: input.reviewType')
   })
 
   test('shows innovation sync status in the delivery strip and risk queue', () => {
@@ -1176,7 +1200,8 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingCockpitModel.ts')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = serverSource('routes/novel-writing-service.ts')
+    const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
     expect(workspaceCenter).toContain('innovationSync')
     expect(workspaceCenter).toContain('novel-delivery-innovation-tag')
@@ -1185,7 +1210,8 @@ describe('commercial writing workspace UI shell', () => {
     expect(model).toContain('innovation_sync')
     expect(model).toContain('补创新')
     expect(recommendationModel).toContain('innovationSync')
-    expect(service).toContain("review_type: 'innovation_sync'")
+    expect(service).toContain("reviewType: 'innovation_sync'")
+    expect(reviewRecords).toContain('review_type: input.reviewType')
   })
 
   test('shows aggregated delivery risk queue in the delivery strip', () => {
@@ -1416,7 +1442,8 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCss = source('WorkspaceCenter.css')
     const writingModel = source('writingCockpitModel.ts')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = serverSource('routes/novel-writing-service.ts')
+    const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
     expect(workspaceCenter).toContain('ipSceneIntake')
     expect(workspaceCenter).toContain('novel-delivery-ip-scene-tag')
@@ -1427,7 +1454,8 @@ describe('commercial writing workspace UI shell', () => {
     expect(writingModel).toContain('ip_scene_intake')
     expect(writingModel).toContain('buildIpSceneIntakeSummary')
     expect(recommendationModel).toContain('ipSceneIntake')
-    expect(service).toContain("review_type: 'ip_scene_intake'")
+    expect(service).toContain('buildIpSceneIntakeReviewRecord')
+    expect(reviewRecords).toContain("review_type: 'ip_scene_intake'")
   })
 
   test('shows signature scene sync in delivery strip and risk queue', () => {
@@ -1435,7 +1463,8 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCss = source('WorkspaceCenter.css')
     const writingModel = source('writingCockpitModel.ts')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = serverSource('routes/novel-writing-service.ts')
+    const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
     expect(workspaceCenter).toContain('signatureSceneSync')
     expect(workspaceCenter).toContain('novel-delivery-signature-scene-tag')
@@ -1444,7 +1473,8 @@ describe('commercial writing workspace UI shell', () => {
     expect(writingModel).toContain('signature_scene_sync')
     expect(writingModel).toContain('补强场面')
     expect(recommendationModel).toContain('signatureSceneSync')
-    expect(service).toContain("review_type: 'signature_scene_sync'")
+    expect(service).toContain("reviewType: 'signature_scene_sync'")
+    expect(reviewRecords).toContain('review_type: input.reviewType')
   })
 
   test('shows readability and restrained meme strategy in writing workflow', () => {
@@ -1553,7 +1583,8 @@ describe('commercial writing workspace UI shell', () => {
 
     const cockpitModel = source('writingCockpitModel.ts')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = serverSource('routes/novel-writing-service.ts')
+    const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
     expect(cockpitModel).toContain('buildChapterBenchmarkSyncSummary')
     expect(cockpitModel).toContain('chapter_benchmark_sync')
     expect(cockpitModel).toContain('buildStoryDriveSyncSummary')
@@ -1566,10 +1597,11 @@ describe('commercial writing workspace UI shell', () => {
     expect(recommendationModel).toContain('storyDriveSync')
     expect(recommendationModel).toContain('characterArcSync')
     expect(recommendationModel).toContain('styleSampleSync')
-    expect(service).toContain("review_type: 'chapter_benchmark_sync'")
-    expect(service).toContain("review_type: 'story_drive_sync'")
-    expect(service).toContain("review_type: 'character_arc_sync'")
-    expect(service).toContain("review_type: 'style_sample_sync'")
+    expect(service).toContain("reviewType: 'chapter_benchmark_sync'")
+    expect(service).toContain("reviewType: 'story_drive_sync'")
+    expect(service).toContain("reviewType: 'character_arc_sync'")
+    expect(service).toContain("reviewType: 'style_sample_sync'")
+    expect(reviewRecords).toContain('review_type: input.reviewType')
   })
 
   test('shows first30 retention curve as a story planning workflow', () => {

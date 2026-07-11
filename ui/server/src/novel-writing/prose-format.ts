@@ -36,7 +36,7 @@ export function scanProseLanguageRisks(text: string) {
   const latinWords = body.match(LATIN_PROSE_PATTERN) || []
   const latinCharCount = latinWords.join('').length
   const lowercaseLatinFragments = latinWords
-    .filter(word => /^[a-z]{2,}$/.test(word))
+    .filter(word => /^[a-z]{2,}$/.test(word) || /^(?:His|Her|Its)$/.test(word))
     .slice(0, 8)
   if (cjkCount >= 10 && lowercaseLatinFragments.length > 0) {
     return [{
@@ -295,7 +295,10 @@ export function normalizeDeterministicProseFormat(text: string) {
   }
 }
 
-export function normalizeDeterministicProseLanguageFragments(text: string) {
+export function normalizeDeterministicProseLanguageFragments(
+  text: string,
+  options: { includeSceneTemplateCleanup?: boolean } = {},
+) {
   const rules = new Set<string>()
   let changeCount = 0
   const lines = String(text || '').split(/\r?\n/)
@@ -307,10 +310,12 @@ export function normalizeDeterministicProseLanguageFragments(text: string) {
     { pattern: /([\u3400-\u9fff])\s+of\s*([\u3400-\u9fff])/gi, replacement: '$1的$2', rule: 'latin_of_to_chinese' },
     { pattern: /([\u3400-\u9fff])\s+but\s+([\u3400-\u9fff])/g, replacement: '$1，但$2', rule: 'latin_but_to_chinese' },
     { pattern: /([，,。！？!?；;：:\s])but\s+([\u3400-\u9fff])/g, replacement: '$1但$2', rule: 'latin_but_to_chinese' },
-    { pattern: /(^|[，,。！？!?；;：:\s])his\s*(?=[\u3400-\u9fff])/gi, replacement: '$1他的', rule: 'latin_pronoun_to_chinese' },
-    { pattern: /(^|[，,。！？!?；;：:\s])her\s*(?=[\u3400-\u9fff])/gi, replacement: '$1她的', rule: 'latin_pronoun_to_chinese' },
-    { pattern: /(^|[，,。！？!?；;：:\s])its\s*(?=[\u3400-\u9fff])/gi, replacement: '$1它的', rule: 'latin_pronoun_to_chinese' },
-    { pattern: /空气[中里]?弥漫(?:着|起|开)?([^。！？!?\n]{1,80})([。！？!?])/g, replacement: '$1压进喉咙$2', rule: 'ai_scene_template_grounded' },
+    { pattern: /(^|[^\p{Script=Latin}])[Hh]is(?:\s*的|\s+(?=[\u3400-\u9fff]))/gu, replacement: '$1他的', rule: 'latin_pronoun_to_chinese' },
+    { pattern: /(^|[^\p{Script=Latin}])[Hh]er(?:\s*的|\s+(?=[\u3400-\u9fff]))/gu, replacement: '$1她的', rule: 'latin_pronoun_to_chinese' },
+    { pattern: /(^|[^\p{Script=Latin}])[Ii]ts(?:\s*的|\s+(?=[\u3400-\u9fff]))/gu, replacement: '$1它的', rule: 'latin_pronoun_to_chinese' },
+    ...(options.includeSceneTemplateCleanup === false ? [] : [
+      { pattern: /空气[中里]?弥漫(?:着|起|开)?([^。！？!?\n]{1,80})([。！？!?])/g, replacement: '$1压进喉咙$2', rule: 'ai_scene_template_grounded' },
+    ]),
   ]
   const nextLines = lines.map((line, index) => {
     let next = String(line || '')
@@ -342,16 +347,15 @@ export function normalizeDeterministicProseLanguageFragments(text: string) {
 }
 
 export function normalizeProseQualityRepairResidue(text: string) {
-  const rules = new Set<string>()
-  let changeCount = 0
-  const lines = String(text || '').split(/\r?\n/)
+  const languageNormalization = normalizeDeterministicProseLanguageFragments(text, {
+    includeSceneTemplateCleanup: false,
+  })
+  const rules = new Set<string>(languageNormalization.rules)
+  let changeCount = languageNormalization.change_count
+  const lines = languageNormalization.text.split(/\r?\n/)
   const yamlFrontMatterEndIndex = getYamlFrontMatterEndIndex(lines)
   let inFence = false
   const replacements: Array<{ pattern: RegExp; replacement: string; rule: string }> = [
-    { pattern: /([\u3400-\u9fff])\s+and\s+([\u3400-\u9fff])/g, replacement: '$1和$2', rule: 'latin_and_to_chinese' },
-    { pattern: /([\u3400-\u9fff])\s+or\s+([\u3400-\u9fff])/g, replacement: '$1或$2', rule: 'latin_or_to_chinese' },
-    { pattern: /([\u3400-\u9fff])\s+of\s*([\u3400-\u9fff])/gi, replacement: '$1的$2', rule: 'latin_of_to_chinese' },
-    { pattern: /([\u3400-\u9fff])\s+but\s+([\u3400-\u9fff])/g, replacement: '$1，但$2', rule: 'latin_but_to_chinese' },
     { pattern: /微微(?=鼓胀)/g, replacement: '', rule: 'quality_repair_weak_adverb_removed' },
     { pattern: /缓缓(?=收回|收手)/g, replacement: '', rule: 'quality_repair_weak_adverb_removed' },
     { pattern: /轻轻(?=敲|敲击)/g, replacement: '', rule: 'quality_repair_weak_adverb_removed' },

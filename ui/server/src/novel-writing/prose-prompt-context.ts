@@ -246,6 +246,11 @@ export function buildProsePromptContextSnapshot(contextPackage: any) {
     oh_story_director: buildOhStoryDirectorSnapshot(contextPackage),
     preflight: compactProsePromptValue(contextPackage?.preflight || {}),
     continuity: compactProsePromptValue(contextPackage?.continuity || {}),
+    canonical_surface_index: {
+      stable_entities: asArray(
+        (contextPackage?.canonical_surface_index || contextPackage?.canonicalSurfaceIndex)?.stable_entities,
+      ).slice(0, 24).map(item => compactProsePromptValue(item)),
+    },
     setting_context: compactProsePromptValue({
       chapter_usage: asArray(settingContext.chapter_usage || settingContext.chapterUsage).slice(0, 16),
       entities: asArray(settingContext.entities).slice(0, 16).map((item: any) => ({

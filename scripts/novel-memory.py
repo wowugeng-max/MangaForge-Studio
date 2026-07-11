@@ -261,6 +261,28 @@ def delete_memory(project_id: int, memory_id: str) -> bool:
 
 # ─── Facts ───
 
+MEANINGLESS_FACT_ENTITIES = {"他", "她", "它", "而", "但", "却", "又", "并", "且"}
+
+
+def _normalize_fact(fact: Dict) -> Dict[str, str]:
+    return {
+        "entity": str(fact.get("entity") or "").strip(),
+        "attribute": str(fact.get("attribute") or "").strip(),
+        "value": str(fact.get("value") or "").strip(),
+    }
+
+
+def is_meaningful_fact(fact: Dict, content: str) -> bool:
+    normalized = _normalize_fact(fact)
+    entity = normalized["entity"]
+    return (
+        len(entity) >= 2
+        and entity not in MEANINGLESS_FACT_ENTITIES
+        and bool(normalized["attribute"])
+        and bool(normalized["value"])
+        and entity in str(content or "")
+    )
+
 def extract_facts(content: str) -> List[Dict]:
     facts = []
     for m in re.finditer(r'([\u4e00-\u9fff\w]{1,6})有([\u4e00-\u9fff\w，、]{2,30})能力', content):
@@ -283,7 +305,15 @@ def extract_facts(content: str) -> List[Dict]:
 def store_facts(project_id: int, content: str, source_memory_id: Optional[str] = None, chapter_no: Optional[int] = None) -> List[str]:
     conn = get_conn()
     try:
-        facts = extract_facts(content)
+        facts = []
+        seen = set()
+        for raw_fact in extract_facts(content):
+            fact = _normalize_fact(raw_fact)
+            key = (fact["entity"], fact["attribute"], fact["value"])
+            if not is_meaningful_fact(fact, content) or key in seen:
+                continue
+            seen.add(key)
+            facts.append(fact)
         stored_ids = []
         for fact in facts:
             fid = str(uuid.uuid4())[:12]

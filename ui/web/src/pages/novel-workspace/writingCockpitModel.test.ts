@@ -1627,6 +1627,84 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterPlanningDesk.reasons.join('｜')).not.toContain('旧诊断缺少上一章承接')
   })
 
+  test.each([
+    {
+      wrapperKey: 'context_package',
+      readiness: 'needs_repair',
+      actionKey: 'repair_pre_draft_materials',
+      expectedReadiness: 'needs_context',
+      expectedStatus: '需要修复',
+      expectedAction: 'repair_materials',
+    },
+    {
+      wrapperKey: 'contextPackage',
+      readiness: 'blocked',
+      actionKey: 'manual_confirmation_required',
+      expectedReadiness: 'blocked',
+      expectedStatus: '需要确认',
+      expectedAction: 'open_generation_diagnostics',
+    },
+  ])('planning desk honors $readiness director inside $wrapperKey response wrappers', ({
+    wrapperKey,
+    readiness,
+    actionKey,
+    expectedReadiness,
+    expectedStatus,
+    expectedAction,
+  }) => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [chapters[0], sceneCardChapter],
+      activeChapter: sceneCardChapter,
+      contextPackage: {
+        ok: true,
+        [wrapperKey]: {
+          ...contextPackage,
+          oh_story_director: {
+            readiness,
+            primary_action: { key: actionKey, label: '处理写前缺口' },
+            blocking_summary: '包装响应中的总导演要求先处理缺口',
+          },
+        },
+      },
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.readiness).toBe(expectedReadiness)
+    expect(model.chapterPlanningDesk.statusLabel).toBe(expectedStatus)
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe(expectedAction)
+    expect(model.chapterPlanningDesk.reasons).toContain('包装响应中的总导演要求先处理缺口')
+  })
+
+  test('planning desk skips empty director aliases before a wrapped camel director', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [chapters[0], sceneCardChapter],
+      activeChapter: sceneCardChapter,
+      contextPackage: {
+        ok: true,
+        oh_story_director: {},
+        context_package: {
+          ...contextPackage,
+          oh_story_director: {},
+          ohStoryDirector: {
+            readiness: 'blocked',
+            primaryAction: { key: 'manual_confirmation_required', label: '确认角色选择' },
+            blockingSummary: '包装响应中的角色选择仍待确认',
+          },
+        },
+      },
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.readiness).toBe('blocked')
+    expect(model.chapterPlanningDesk.statusLabel).toBe('需要确认')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('open_generation_diagnostics')
+    expect(model.chapterPlanningDesk.reasons).toContain('包装响应中的角色选择仍待确认')
+  })
+
   test('director ready owns the single planning desk action without repair prompts', () => {
     const model = buildWritingCockpitModel({
       project,
@@ -1654,6 +1732,264 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterPlanningDesk.recommendedPlannerAction.label).toBe('生成正文')
     expect(model.chapterPlanningDesk.shouldAutoExpandPlanner).toBe(false)
     expect(model.chapterPlanningDesk.reasons.join('｜')).not.toContain('修复')
+  })
+
+  test('director ready does not override diagnostics blockers', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [chapters[0], sceneCardChapter],
+      activeChapter: sceneCardChapter,
+      contextPackage: {
+        ...contextPackage,
+        oh_story_director: {
+          readiness: 'ready',
+          primary_action: { key: 'generate_prose', label: '生成正文' },
+        },
+      },
+      diagnostics: {
+        preflight: { ready: false, blockers: ['缺少上一章承接'] },
+      },
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.readiness).toBe('blocked')
+    expect(model.chapterPlanningDesk.statusLabel).toBe('诊断阻塞')
+    expect(model.chapterPlanningDesk.reasons).toContain('生成诊断阻塞：缺少上一章承接')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('open_generation_diagnostics')
+  })
+
+  test('director ready does not override context preflight blockers', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [chapters[0], sceneCardChapter],
+      activeChapter: sceneCardChapter,
+      contextPackage: {
+        ...contextPackage,
+        preflight: { ready: false, blockers: ['缺少章节目标'] },
+        oh_story_director: {
+          readiness: 'ready',
+          primary_action: { key: 'generate_prose', label: '生成正文' },
+        },
+      },
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.readiness).toBe('needs_context')
+    expect(model.chapterPlanningDesk.statusLabel).toBe('上下文不足')
+    expect(model.chapterPlanningDesk.reasons).toContain('上下文包预检未通过：缺少章节目标')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('open_generation_diagnostics')
+  })
+
+  test.each(['strict_ready', 'strictReady'])('director ready does not override %s=false', strictReadyKey => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [chapters[0], sceneCardChapter],
+      activeChapter: sceneCardChapter,
+      contextPackage: {
+        ...contextPackage,
+        preflight: {
+          ready: true,
+          [strictReadyKey]: false,
+          blockers: [],
+        },
+        oh_story_director: {
+          readiness: 'ready',
+          primary_action: { key: 'generate_prose', label: '生成正文' },
+        },
+      },
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.readiness).toBe('needs_context')
+    expect(model.chapterPlanningDesk.statusLabel).toBe('上下文不足')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('open_generation_diagnostics')
+  })
+
+  test('director ready does not override a present preflight without ready=true', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [chapters[0], sceneCardChapter],
+      activeChapter: sceneCardChapter,
+      contextPackage: {
+        ...contextPackage,
+        preflight: {
+          strict_ready: true,
+          blockers: [],
+        },
+        oh_story_director: {
+          readiness: 'ready',
+          primary_action: { key: 'generate_prose', label: '生成正文' },
+        },
+      },
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.contextPackageStatus).toBe('insufficient')
+    expect(model.chapterPlanningDesk.readiness).toBe('needs_context')
+    expect(model.chapterPlanningDesk.statusLabel).toBe('上下文不足')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('open_generation_diagnostics')
+  })
+
+  test('planning desk keeps legacy target-only context ready when preflight is absent', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [chapters[0], sceneCardChapter],
+      activeChapter: sceneCardChapter,
+      contextPackage: {
+        chapter_target: contextPackage.chapter_target,
+      },
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.contextPackageStatus).toBe('ready')
+    expect(model.chapterPlanningDesk.readiness).toBe('ready')
+  })
+
+  test('director ready does not override write preparation source gaps', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [chapters[0], sceneCardChapter],
+      activeChapter: sceneCardChapter,
+      contextPackage: {
+        ...contextPackage,
+        chapter_target: {
+          ...contextPackage.chapter_target,
+          write_preparation_brief: {
+            readiness_status: 'needs_context',
+            source_gaps: ['上一章正文或上一章承接｜状态=missing'],
+          },
+        },
+        oh_story_director: {
+          readiness: 'ready',
+          primary_action: { key: 'generate_prose', label: '生成正文' },
+        },
+      },
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.readiness).toBe('needs_context')
+    expect(model.chapterPlanningDesk.statusLabel).toBe('写前准备待确认')
+    expect(model.chapterPlanningDesk.reasons.join('｜')).toContain('来源缺口')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('open_generation_diagnostics')
+  })
+
+  test('planning desk preserves camel hard gaps behind empty snake wrapper aliases', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [chapters[0], sceneCardChapter],
+      activeChapter: sceneCardChapter,
+      contextPackage: {
+        ok: true,
+        context_package: {
+          ...contextPackage,
+          chapter_target: {
+            ...contextPackage.chapter_target,
+            write_preparation_brief: {
+              source_gaps: [],
+              asset_risks: [],
+              delivery_risk_actions: [],
+            },
+            writePreparationBrief: {
+              sourceGaps: ['上一章承接｜状态=missing｜缺少上一章正文承接'],
+              assetRisks: ['旧钥匙触发代价待落到现场'],
+              deliveryRiskActions: ['开篇动作：前300字接住围捕压力'],
+            },
+            state_tracking_contract: {
+              source_readiness: [],
+            },
+          },
+          pre_draft_brief: {
+            write_preparation_brief: {},
+            state_tracking_contract: {
+              source_readiness: [],
+            },
+          },
+          preDraftBrief: {
+            stateTrackingContract: {
+              sourceReadiness: [
+                {
+                  label: '世界约束',
+                  status: 'missing',
+                  evidence: '红雾裂缝规则尚未就绪',
+                },
+              ],
+            },
+          },
+          oh_story_director: {
+            readiness: 'ready',
+            primary_action: { key: 'generate_prose', label: '生成正文' },
+          },
+        },
+      },
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.readiness).toBe('needs_context')
+    expect(model.chapterPlanningDesk.statusLabel).toBe('写前准备待确认')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('open_generation_diagnostics')
+    expect(model.chapterPlanningDesk.writePreparationBrief?.sourceGaps).toContain('上一章承接｜状态=missing｜缺少上一章正文承接')
+    expect(model.chapterPlanningDesk.writePreparationBrief?.sourceGaps.join('｜')).toContain('世界约束｜状态=missing')
+    expect(model.chapterPlanningDesk.writePreparationBrief?.assetRisks).toContain('旧钥匙触发代价待落到现场')
+    expect(model.chapterPlanningDesk.writePreparationBrief?.deliveryRiskActions).toContain('开篇动作：前300字接住围捕压力')
+  })
+
+  test('director ready does not override unmapped quality continuity actions', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [chapters[0], sceneCardChapter],
+      activeChapter: sceneCardChapter,
+      contextPackage: {
+        ...contextPackage,
+        chapter_target: {
+          ...contextPackage.chapter_target,
+          delivery_risk_carry_over: {
+            opening_actions: ['前300字先接住上一章追兵压迫'],
+            middle_actions: ['中段让新证据改变盟友立场'],
+            ending_actions: ['章末留下幕后主使的新问题'],
+          },
+        },
+        oh_story_director: {
+          readiness: 'ready',
+          primary_action: { key: 'generate_prose', label: '生成正文' },
+        },
+      },
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.qualityContinuitySceneMap).toEqual([])
+    expect(model.chapterPlanningDesk.readiness).toBe('needs_scene_plan')
+    expect(model.chapterPlanningDesk.statusLabel).toBe('需补质量续航落点')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('build_scene_plan')
+  })
+
+  test('director ready does not override a missing scene plan', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters,
+      activeChapter: chapters[1],
+      contextPackage: {
+        ...contextPackage,
+        oh_story_director: {
+          readiness: 'ready',
+          primary_action: { key: 'generate_prose', label: '生成正文' },
+        },
+      },
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.scenePlanStatus).toBe('missing')
+    expect(model.chapterPlanningDesk.readiness).toBe('needs_scene_plan')
+    expect(model.chapterPlanningDesk.statusLabel).toBe('需补场景计划')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('build_scene_plan')
   })
 
   test('camelCase director action and repairs are supported', () => {
@@ -1704,12 +2040,12 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('build_scene_plan')
   })
 
-  test('planning desk surfaces relationship graph risks before drafting', () => {
+  test('planning desk keeps relationship graph risks visible without treating them as missing context', () => {
     const model = buildWritingCockpitModel({
       project,
       outlines,
-      chapters,
-      activeChapter: chapters[1],
+      chapters: [chapters[0], sceneCardChapter],
+      activeChapter: sceneCardChapter,
       contextPackage: {
         ...contextPackage,
         chapter_target: {
@@ -1725,11 +2061,47 @@ describe('buildWritingCockpitModel', () => {
       materialScore: { score: 82, can_generate: true },
     })
 
-    expect(model.chapterPlanningDesk.readiness).toBe('needs_context')
-    expect(model.chapterPlanningDesk.statusLabel).toBe('资产关系待确认')
-    expect(model.chapterPlanningDesk.reasons.join('｜')).toContain('旧钥匙')
-    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('open_story_assets')
-    expect(model.chapterPlanningDesk.recommendedPlannerAction.label).toBe('打开设定资产')
+    expect(model.chapterPlanningDesk.readiness).toBe('ready')
+    expect(model.chapterPlanningDesk.statusLabel).toBe('本章可写')
+    expect(model.chapterPlanningDesk.writePreparationBrief?.assetRisks.join('｜')).toContain('旧钥匙')
+  })
+
+  test('planning desk keeps pure execution risks advisory when sources and scene cards are ready', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [chapters[0], sceneCardChapter],
+      activeChapter: sceneCardChapter,
+      contextPackage: {
+        ...contextPackage,
+        chapter_target: {
+          ...contextPackage.chapter_target,
+          asset_linkage_contract: {
+            relationship_graph_risks: ['旧钥匙需要在现场建立触发条件和代价'],
+          },
+          write_preparation_brief: {
+            version: 'oh_story_write_preparation_v1',
+            readiness_status: 'ready',
+            source_gaps: [],
+            asset_risks: ['旧钥匙需要在现场建立触发条件和代价'],
+            delivery_risk_actions: ['开篇动作：前300字接住上一章围捕压力'],
+            rolling_rhythm_preflight: {
+              principle: '拉期待速度 > 断期待速度',
+              next_actions: ['先铺下一目标，再兑现当前回报'],
+            },
+            must_confirm: ['关系图风险：旧钥匙需要在现场建立触发条件和代价'],
+            execution_order: ['把风险动作写进正文并在写后回执核验。'],
+          },
+        },
+      },
+      materialScore: { score: 88, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.readiness).toBe('ready')
+    expect(model.chapterPlanningDesk.statusLabel).toBe('本章可写')
+    expect(model.chapterPlanningDesk.writePreparationBrief?.sourceGaps).toEqual([])
+    expect(model.chapterPlanningDesk.writePreparationBrief?.assetRisks).toContain('旧钥匙需要在现场建立触发条件和代价')
+    expect(model.chapterPlanningDesk.writePreparationBrief?.deliveryRiskActions).toContain('开篇动作：前300字接住上一章围捕压力')
   })
 
   test('planning desk surfaces write preparation brief before drafting', () => {
@@ -2076,6 +2448,58 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterPlanningDesk.reasons.join('｜')).toContain('delivery_risk_carry_over')
     expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('build_scene_plan')
     expect(model.chapterPlanningDesk.shouldAutoExpandPlanner).toBe(true)
+  })
+
+  test('planning desk still blocks unmapped delivery risk carry-over when asset risks are advisory', () => {
+    const unmappedSceneCardChapter = {
+      ...chapters[1],
+      scene_list: [
+        {
+          scene_no: 1,
+          title: '审判厅入场',
+          purpose: '主角进入审判厅',
+          conflict: '执事拒认旧账',
+          ending_hook: '第三个名字出现',
+        },
+      ],
+    }
+    const backendContextPackage = {
+      chapter_target: {
+        goal: '把上一章交稿风险拆成开篇、中段、章末三段修复',
+        conflict: '主角要用旧账反制执事',
+        ending_hook: '第三个名字出现',
+        asset_linkage_contract: {
+          relationship_graph_risks: ['旧钥匙需要在现场建立触发条件和代价'],
+        },
+        delivery_risk_carry_over: {
+          label: '待修复 3',
+          opening_actions: ['前300字先让旧账压迫重新逼近主角'],
+          middle_actions: ['中段用新证据推动目标并改变盟友立场'],
+          ending_actions: ['章末抛出第三个名字作为追读钩子'],
+        },
+      },
+      preflight: { ready: true, blockers: [] },
+      oh_story_director: {
+        readiness: 'ready',
+        primary_action: { key: 'generate_prose', label: '生成正文' },
+      },
+    }
+
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [chapters[0], unmappedSceneCardChapter],
+      activeChapter: unmappedSceneCardChapter,
+      contextPackage: backendContextPackage,
+      diagnostics: { preflight: { ready: true, blockers: [] }, material_score: { score: 88, can_generate: true } },
+      materialScore: { score: 88, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.writePreparationBrief?.assetRisks).toContain('旧钥匙需要在现场建立触发条件和代价')
+    expect(model.chapterPlanningDesk.qualityContinuitySceneMap).toEqual([])
+    expect(model.chapterPlanningDesk.readiness).toBe('needs_scene_plan')
+    expect(model.chapterPlanningDesk.statusLabel).toBe('需补质量续航落点')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('build_scene_plan')
   })
 
   test('planning desk reads quality continuity scene cards from backend context package', () => {

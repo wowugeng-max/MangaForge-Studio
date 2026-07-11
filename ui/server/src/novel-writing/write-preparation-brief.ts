@@ -359,7 +359,7 @@ export function buildWritePreparationBriefFromParts(parts: any = {}) {
     ...blueprintFocus.slice(0, 2),
     ...readerPayoffFocus.slice(0, 2).map(item => `读者回报：${item}`),
   ].flat(), 22)
-  const readinessStatus = sourceGaps.length || assetRisks.length || deliveryActions.length || rollingRhythmPreflight ? 'needs_context' : 'ready'
+  const readinessStatus = sourceGaps.length ? 'needs_context' : 'ready'
   return {
     version: 'oh_story_write_preparation_v1',
     source: 'mangaforge_pre_draft_brief',

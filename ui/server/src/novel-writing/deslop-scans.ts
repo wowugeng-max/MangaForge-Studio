@@ -130,19 +130,38 @@ function hasOhStoryNotIsComparison(text: string) {
   return false
 }
 
+function hasOhStoryLevelOneBannedTerm(text: string, term: string) {
+  const source = String(text || '')
+  if (term !== '如同') return source.includes(term)
+  let offset = 0
+  while (offset < source.length) {
+    const index = source.indexOf(term, offset)
+    if (index < 0) return false
+    if (source[index - 1] !== '不') return true
+    offset = index + term.length
+  }
+  return false
+}
+
+function semanticSingleLineBannedMatchText(value: string) {
+  return String(value || '').replace(/^[\s。！？!?；;，,]+/, '')
+}
+
 export function scanBannedWordLeaks(text: string) {
   const lines = String(text || '').split(/\r?\n/)
-  const hits: Array<{ gate: 'A'; pattern: string; status: 'fail' | 'warn'; evidence: string; fix: string; line: number }> = []
+  const hits: Array<{ gate: 'A'; pattern: string; matched_text: string; status: 'fail' | 'warn'; evidence: string; fix: string; line: number }> = []
   lines.forEach((line, index) => {
     const evidence = String(line || '').trim()
     if (!evidence) return
     for (const item of OH_STORY_BANNED_PATTERNS) {
       item.regex.lastIndex = 0
-      if (item.regex.test(evidence)) {
+      const match = item.regex.exec(evidence)
+      if (match) {
         if (item.pattern === '不是A，而是B' && !hasOhStoryNotIsComparison(evidence)) continue
         hits.push({
           gate: 'A',
           pattern: item.pattern,
+          matched_text: semanticSingleLineBannedMatchText(match[0]),
           status: item.status,
           evidence,
           fix: item.fix,
@@ -151,10 +170,11 @@ export function scanBannedWordLeaks(text: string) {
       }
     }
     for (const term of OH_STORY_LEVEL_ONE_BANNED_WORDS) {
-      if (!evidence.includes(term)) continue
+      if (!hasOhStoryLevelOneBannedTerm(evidence, term)) continue
       hits.push({
         gate: 'A',
         pattern: term,
+        matched_text: term,
         status: 'warn',
         evidence,
         fix: `替换一级禁用词“${term}”，改成更具体的动作、事实或口语化表达。`,
@@ -166,6 +186,7 @@ export function scanBannedWordLeaks(text: string) {
       hits.push({
         gate: 'A',
         pattern: '书面腔口语化',
+        matched_text: item.term,
         status: 'warn',
         evidence,
         fix: `把书面腔“${item.term}”改成更口语和现场的表达，可替换为：${item.replacement}。`,
@@ -180,10 +201,13 @@ export function scanBannedWordLeaks(text: string) {
     for (const item of OH_STORY_CROSS_LINE_BANNED_PATTERNS) {
       item.first.lastIndex = 0
       item.second.lastIndex = 0
-      if (!item.first.test(evidence) || !item.second.test(nextEvidence)) continue
+      const firstMatch = item.first.exec(evidence)
+      const secondMatch = item.second.exec(nextEvidence)
+      if (!firstMatch || !secondMatch) continue
       hits.push({
         gate: 'A',
         pattern: item.pattern,
+        matched_text: `${firstMatch[0]}\n${secondMatch[0]}`,
         status: item.status,
         evidence: `${evidence}\n${nextEvidence}`,
         fix: item.fix,
@@ -200,10 +224,14 @@ export function scanBannedWordLeaks(text: string) {
       item.first.lastIndex = 0
       item.second.lastIndex = 0
       item.third.lastIndex = 0
-      if (!item.first.test(evidence) || !item.second.test(secondEvidence) || !item.third.test(thirdEvidence)) continue
+      const firstMatch = item.first.exec(evidence)
+      const secondMatch = item.second.exec(secondEvidence)
+      const thirdMatch = item.third.exec(thirdEvidence)
+      if (!firstMatch || !secondMatch || !thirdMatch) continue
       hits.push({
         gate: 'A',
         pattern: item.pattern,
+        matched_text: `${firstMatch[0]}\n${secondMatch[0]}\n${thirdMatch[0]}`,
         status: item.status,
         evidence: `${evidence}\n${secondEvidence}\n${thirdEvidence}`,
         fix: item.fix,

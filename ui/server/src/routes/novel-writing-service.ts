@@ -1,4 +1,5 @@
 import {
+  commitNovelChapterAcceptance,
   createNovelCharacter,
   createNovelSettingEntity,
   createNovelWorldbuilding,
@@ -35,8 +36,10 @@ import {
   evaluateProsePreDraftGate,
   mergeProseGenerationRequestOverrides,
   normalizeProseContractKey,
+  resolveStrictPreflightReadiness,
   type ProseGenerationContract,
 } from '../novel-writing/prose-generation-contract'
+import { buildPreparedStoryStateHardFailures, type PreparedStoryStateUpdate } from '../novel-writing/prepared-story-state'
 import {
   compileProseContractPrompt,
   type ProseRequiredPromptSection,
@@ -77,6 +80,7 @@ import {
   proseContractionMaxTokensForAttempt,
   proseMaxTokensForWordTarget,
   resolveChapterWordTarget,
+  resolveStandardWordTargetCompatibility,
   type ChapterWordTarget,
 } from '../novel-writing/word-target'
 import {
@@ -141,6 +145,10 @@ import {
   buildSkippedPostDeliveryStoryStateUpdate,
 } from '../novel-writing/post-delivery-story-state-update'
 import { buildProseQualityReviewRecord } from '../novel-writing/prose-quality-review-record'
+import {
+  buildCanonicalSurfaceIndex,
+  scanCanonicalContinuityConflicts,
+} from '../novel-writing/canonical-continuity'
 import {
   buildChapterProseStoragePatch,
   normalizeProseForStorage,
@@ -894,9 +902,24 @@ export function prepareProseGenerationContract(baseContext: any, options: any = 
   return { contextPackage, contract, runAfterGate }
 }
 
-export function scanProseForQualityLoop(text: string, contextPackage: any, wordTarget: any) {
+export function scanProseForQualityLoop(text: string, contextPackage: any, wordTarget: any, options: any = {}) {
   const cleanup = buildDeterministicProseCleanupReport(contextPackage?.chapter_target || {}, text)
   const word = applyProseWordTargetSoftCap(evaluateProseWordTarget(text, wordTarget))
+  const fixedCompatibility = resolveStandardWordTargetCompatibility(word, wordTarget)
+  const suppliedCompatibilityCeiling = Number(options?.compatibility_ceiling || 0)
+  const compatibilityCeiling = Math.min(
+    Number.isFinite(suppliedCompatibilityCeiling) ? suppliedCompatibilityCeiling : 0,
+    fixedCompatibility.ceiling,
+  )
+  const compatibilityPass = options?.word_target_compatibility_pass === true
+    && fixedCompatibility.passed
+    && compatibilityCeiling > 0
+    && word.actual <= compatibilityCeiling
+  const bannedWordChecks = scanBannedWordLeaks(text)
+  const canonicalContinuityConflicts = scanCanonicalContinuityConflicts(
+    text,
+    contextPackage?.canonical_surface_index || contextPackage?.canonicalSurfaceIndex || { stable_entities: [] },
+  )
   const cleanupHardTypes = new Set(['model_degeneration', 'prose_meta', 'prose_format'])
   const cleanupHardFailures = asArray(cleanup?.categories)
     .filter((category: any) => Number(category?.count || 0) > 0)
@@ -912,9 +935,10 @@ export function scanProseForQualityLoop(text: string, contextPackage: any, wordT
     ...scanProseMetaLeaks(text),
     ...scanModelDegenerationRisks(text),
     ...scanProseFormatRisks(text),
-    ...scanBannedWordLeaks(text),
+    ...bannedWordChecks,
+    ...canonicalContinuityConflicts,
     ...cleanupHardFailures,
-    ...(!word.passed ? [{
+    ...(!word.passed && !compatibilityPass ? [{
       key: 'word_target',
       message: `正文 ${word.actual} 字，不在 ${word.min}-${word.max} 字范围`,
       status: 'fail',
@@ -928,12 +952,32 @@ export function scanProseForQualityLoop(text: string, contextPackage: any, wordT
       || item?.key === 'word_target')
     .map((item: any) => ({
       key: String(item?.key || item?.pattern || item?.gate || 'deterministic_prose'),
-      message: String(item?.evidence || item?.message || item?.fix || item?.label || item?.key || '确定性正文检查未通过'),
+      message: String(item?.key === 'canonical_proper_noun_conflict'
+        ? item?.message
+        : item?.evidence || item?.message || item?.fix || item?.label || item?.key || '确定性正文检查未通过'),
     }))
   const uniqueFailures = Array.from(new Map(
     hardFailures.map(item => [`${item.key}:${item.message}`, item]),
   ).values())
-  return { hard_failures: uniqueFailures, cleanup, word_target: word }
+  const advisoryFindings = bannedWordChecks
+    .filter((item: any) => item?.status === 'warn')
+    .map((item: any) => ({
+      key: String(item?.key || item?.pattern || 'deterministic_advisory'),
+      pattern: String(item?.pattern || item?.key || 'deterministic_advisory'),
+      matched_text: String(item?.matched_text || ''),
+      status: 'warn' as const,
+      evidence: String(item?.evidence || ''),
+      fix: String(item?.fix || ''),
+    }))
+  const uniqueAdvisoryFindings = Array.from(new Map(
+    advisoryFindings.map(item => [`${item.pattern}:${item.matched_text}:${item.evidence}:${item.fix}`, item]),
+  ).values())
+  return {
+    hard_failures: uniqueFailures,
+    advisory_findings: uniqueAdvisoryFindings,
+    cleanup,
+    word_target: word,
+  }
 }
 
 export function buildFocusedQualityCoreContract(contract: ProseGenerationContract) {
@@ -17391,9 +17435,7 @@ export function buildChapterHandoffDeltaSyncReport(chapter: any, contextPackage:
 
 function firstStateCompletenessEvidence(text: string, pattern: RegExp) {
   const match = String(text || '').match(pattern)
-  if (!match?.index && match?.index !== 0) return compactBriefText(text, 120)
-  const start = Math.max(0, match.index - 40)
-  return compactBriefText(String(text || '').slice(start, match.index + 120), 160)
+  return compactBriefText(match?.[0] || '')
 }
 
 function stateDeltaCompletenessObligations(chapterText: string) {
@@ -17404,30 +17446,35 @@ function stateDeltaCompletenessObligations(chapterText: string) {
       key: 'timeline',
       label: '时间线/地点增量',
       pattern: /(?:子时|戌时|三更|天亮|次日|当夜|潜入|赶到|进入|离开|禁库|审判庭|暗门|外廊)/,
+      highConfidencePattern: /[\u4e00-\u9fa5]{2,8}(?:抵达|离开)[\u4e00-\u9fa5]{2,10}(?:城|院|库|庭|港|村|山|楼|府|宫)/,
       fix: '把本章当前时间、活动地点、事件先后顺序写入 state_delta.timeline/current_time/active_locations。',
     },
     {
       key: 'character_state',
       label: '角色状态增量',
       pattern: /(?:公开作证|受伤|昏迷|身份|公众形象|得罪|暴露|失去|获得|持有|站队|倒戈|改口|被逐出)/,
+      highConfidencePattern: /[\u4e00-\u9fa5]{2,8}(?:死亡|身亡|受伤|重伤|能力(?:消失|觉醒)|被逐出)/,
       fix: '把本章角色位置、能力/伤势、持有物、关系态度、公众形象和知识边界写入 character_updates 或 state_delta。',
     },
     {
       key: 'asset_state',
       label: '资产状态增量',
       pattern: /(?:账册|旧印章|钥匙|玉牌|令牌|缺页|暗格)[^。！？!?]{0,40}(?:取出来|取出|拿到|交出|露出|半枚|碎|归属|夺回|失去|压着)/,
+      highConfidencePattern: /(?:账册|印章|钥匙|玉牌|令牌|[\u4e00-\u9fa5]{2,8}账册)(?:被[\u4e00-\u9fa5]{2,8})?(?:获得|失去|交给|交出|夺走|夺回|损毁|破碎)/,
       fix: '把本章关键物品、规则、地点、伏笔资产的归属、可见性、限制或状态变化写入 setting_updates/resource_status/item_ownership。',
     },
     {
       key: 'relationship',
       label: '关系增量',
-      pattern: /(?:从[^。！？!?]{0,24}变成|有限互信|得罪|倒戈|站队|背叛|联盟|公开作证|承受[^。！？!?]{0,12}压力)/,
+      pattern: /(?:[\u4e00-\u9fa5]{2,8}与[\u4e00-\u9fa5]{2,8}从[^。！？!?]{0,12}变成[\u4e00-\u9fa5]{2,8}|[\u4e00-\u9fa5]{2,8}与[\u4e00-\u9fa5]{2,8}(?:结盟|决裂|反目)|从[^。！？!?]{0,24}变成|有限互信|得罪|倒戈|站队|背叛|联盟|公开作证|承受[^。！？!?]{0,12}压力)/,
+      highConfidencePattern: /[\u4e00-\u9fa5]{2,8}与[\u4e00-\u9fa5]{2,8}(?:结盟|决裂|反目|从(?:盟友|敌人|陌生人|对手)变成(?:盟友|敌人|恋人|仇敌))/,
       fix: '把本章信任、敌意、亏欠、联盟、压迫、误解或阶段边界写入 relationship_graph/character_relationships/storyline_updates。',
     },
     {
       key: 'foreshadowing_or_handoff',
       label: '伏笔/章末交接增量',
       pattern: /(?:线索|真相|第二个证人|第三个人|门后|名字|下一章|未解|谁|缺页|咳声)/,
+      highConfidencePattern: /(?:章末|最后)[^。！？!?]{0,40}(?:决定|下一步|下一章|必须)[^。！？!?]{0,40}(?:谁|什么|为什么|去哪|目标|追查)/,
       fix: '把本章新增/推进/回收的线索、开放问题、下一章优先事项写入 open_questions/next_chapter_priorities/foreshadowing_status。',
     },
   ]
@@ -17437,6 +17484,10 @@ function stateDeltaCompletenessObligations(chapterText: string) {
       key: rule.key,
       label: rule.label,
       evidence: firstStateCompletenessEvidence(body, rule.pattern),
+      high_confidence_evidence: firstStateCompletenessEvidence(
+        rule.key === 'foreshadowing_or_handoff' ? compactBody.slice(-240) : compactBody,
+        rule.highConfidencePattern,
+      ),
       fix: rule.fix,
     }))
 }
@@ -17466,6 +17517,9 @@ export function buildStateDeltaCompletenessReport(chapter: any, chapterText: str
   }
   const completed = obligations.filter((item: any) => Number((recorded as any)[item.key] || 0) > 0)
   const missed = obligations.filter((item: any) => Number((recorded as any)[item.key] || 0) <= 0)
+  const blockingMissed = missed
+    .filter((item: any) => Boolean(item?.high_confidence_evidence))
+    .map((item: any) => ({ ...item, blocking: true, confidence: 'high' }))
   const status = missed.length > 0 ? 'warn' : 'ok'
   return {
     report_id: `state-delta-completeness-${chapter?.id || chapter?.chapter_no || Date.now()}`,
@@ -17481,6 +17535,8 @@ export function buildStateDeltaCompletenessReport(chapter: any, chapterText: str
     planned_count: obligations.length,
     recorded_count: Object.values(recorded).reduce((sum: number, count: any) => sum + Number(count || 0), 0),
     missed_count: missed.length,
+    blocking_missed: blockingMissed,
+    high_confidence_missed: blockingMissed,
     recorded,
     planned: obligations,
     completed,
@@ -34230,8 +34286,8 @@ function applySourceReadinessPreflightChecks(preflight: any, contextPackage: any
   return preflight
 }
 
-function buildStateTrackingContract(contextPackage: any = {}) {
-  const explicit = stateTrackingExplicitContract(contextPackage)
+function buildStateTrackingContract(contextPackage: any = {}, options: { ignoreExplicit?: boolean } = {}) {
+  const explicit = options.ignoreExplicit ? null : stateTrackingExplicitContract(contextPackage)
   if (explicit && typeof explicit === 'object' && !Array.isArray(explicit)) {
     const derived = buildStateTrackingContract({
       ...(contextPackage || {}),
@@ -34460,10 +34516,240 @@ function buildStateTrackingContract(contextPackage: any = {}) {
   }
 }
 
+const FINAL_STATE_TRACKING_STANDARD_SOURCE_KEYS = new Set([
+  'chapter_blueprint',
+  'previous_chapter',
+  'context_tracking',
+  'serial_story_state',
+  'timeline_tracking',
+  'delivery_risk_carry_over',
+  'character_state',
+  'foreshadowing_history',
+  'world_constraints',
+])
+
+function finalStateTrackingSourceKey(row: any) {
+  return compactBriefText(row?.key || row?.name)
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[\s-]+/g, '_')
+    .toLowerCase()
+}
+
+function finalStateTrackingCustomSourceRisk(row: any) {
+  const status = String(row?.status || '').toLowerCase()
+  if (['ready', 'pass', 'ok'].includes(status)) return 0
+  if (status === 'optional') return 1
+  if (['warn', 'warning'].includes(status)) return 3
+  return 4
+}
+
+function finalStateTrackingDerivedValues(contract: any, snakeKey: string, camelKey: string) {
+  return uniqueBriefStrings([
+    ...asArray(contract?.[snakeKey]),
+    ...asArray(contract?.[camelKey]),
+  ], 24)
+}
+
+function finalStateTrackingPolicyValues(contracts: any[], snakeKey: string, camelKey: string) {
+  return uniqueBriefStrings(contracts.flatMap(contract => [
+    ...asArray(contract?.[snakeKey]),
+    ...asArray(contract?.[camelKey]),
+  ]), 24)
+}
+
+export function mergeStoredStateTrackingContractAliases(...contractValues: any[]) {
+  const contracts = contractValues
+    .filter(contract => contract && typeof contract === 'object' && !Array.isArray(contract))
+  if (!contracts.length) return {}
+
+  const merged: any = {}
+  for (const contract of [...contracts].reverse()) Object.assign(merged, contract)
+
+  const dynamicAliases = [
+    ['character_states', 'characterStates'],
+    ['historical_causality', 'historicalCausality'],
+    ['world_constraints', 'worldConstraints'],
+  ]
+  for (const [snakeKey, camelKey] of dynamicAliases) {
+    const selected = contracts
+      .map(contract => finalStateTrackingDerivedValues(contract, snakeKey, camelKey))
+      .find(values => values.length > 0)
+    if (selected) {
+      merged[snakeKey] = selected
+      merged[camelKey] = selected
+    }
+  }
+
+  const standardRows: any[] = []
+  const standardKeys = new Set<string>()
+  const customRows = new Map<string, any>()
+  for (const contract of contracts) {
+    const rows = [...asArray(contract.source_readiness), ...asArray(contract.sourceReadiness)]
+    for (const row of rows) {
+      const key = finalStateTrackingSourceKey(row)
+      if (!key) continue
+      if (FINAL_STATE_TRACKING_STANDARD_SOURCE_KEYS.has(key)) {
+        if (!standardKeys.has(key)) {
+          standardRows.push(row)
+          standardKeys.add(key)
+        }
+        continue
+      }
+      const current = customRows.get(key)
+      if (!current || finalStateTrackingCustomSourceRisk(row) > finalStateTrackingCustomSourceRisk(current)) {
+        customRows.set(key, row)
+      }
+    }
+  }
+  const sourceReadiness = [...standardRows, ...customRows.values()]
+  if (sourceReadiness.length > 0) {
+    merged.source_readiness = sourceReadiness
+    merged.sourceReadiness = sourceReadiness
+  }
+
+  const policyAliases = [
+    ['filter_rules', 'filterRules'],
+    ['source_requirements', 'sourceRequirements'],
+    ['quality_checks', 'qualityChecks'],
+    ['revision_priorities', 'revisionPriorities'],
+  ]
+  for (const [snakeKey, camelKey] of policyAliases) {
+    const policy = finalStateTrackingPolicyValues(contracts, snakeKey, camelKey)
+    if (policy.length > 0) {
+      merged[snakeKey] = policy
+      merged[camelKey] = policy
+    }
+  }
+  return merged
+}
+
+export function mergeFinalStateTrackingContract(storedContract: any = {}, derivedContract: any = {}) {
+  const stored = storedContract && typeof storedContract === 'object' && !Array.isArray(storedContract) ? storedContract : {}
+  const derived = derivedContract && typeof derivedContract === 'object' && !Array.isArray(derivedContract) ? derivedContract : {}
+  const derivedRows = [
+    ...asArray(derived.source_readiness),
+    ...asArray(derived.sourceReadiness),
+  ]
+  const storedRows = [
+    ...asArray(stored.source_readiness),
+    ...asArray(stored.sourceReadiness),
+  ]
+  const standardRows: any[] = []
+  const standardKeys = new Set<string>()
+  const customRows = new Map<string, any>()
+
+  for (const row of derivedRows) {
+    const key = finalStateTrackingSourceKey(row)
+    if (!key) continue
+    if (FINAL_STATE_TRACKING_STANDARD_SOURCE_KEYS.has(key)) {
+      if (!standardKeys.has(key)) {
+        standardRows.push(row)
+        standardKeys.add(key)
+      }
+      continue
+    }
+    if (!customRows.has(key)) customRows.set(key, row)
+  }
+  for (const row of storedRows) {
+    const key = finalStateTrackingSourceKey(row)
+    if (!key || FINAL_STATE_TRACKING_STANDARD_SOURCE_KEYS.has(key)) continue
+    const current = customRows.get(key)
+    if (!current || finalStateTrackingCustomSourceRisk(row) > finalStateTrackingCustomSourceRisk(current)) {
+      customRows.set(key, row)
+    }
+  }
+
+  const sourceReadiness = [...standardRows, ...customRows.values()]
+  const merged: any = {
+    ...derived,
+    ...stored,
+    character_states: finalStateTrackingDerivedValues(derived, 'character_states', 'characterStates'),
+    historical_causality: finalStateTrackingDerivedValues(derived, 'historical_causality', 'historicalCausality'),
+    world_constraints: finalStateTrackingDerivedValues(derived, 'world_constraints', 'worldConstraints'),
+    source_readiness: sourceReadiness,
+  }
+
+  const dynamicAliases = [
+    ['character_states', 'characterStates'],
+    ['historical_causality', 'historicalCausality'],
+    ['world_constraints', 'worldConstraints'],
+  ]
+  for (const [snakeKey, camelKey] of dynamicAliases) {
+    if (Object.prototype.hasOwnProperty.call(stored, camelKey) || Object.prototype.hasOwnProperty.call(derived, camelKey)) {
+      merged[camelKey] = merged[snakeKey]
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(stored, 'sourceReadiness') || Object.prototype.hasOwnProperty.call(derived, 'sourceReadiness')) {
+    merged.sourceReadiness = sourceReadiness
+  }
+
+  const policyAliases = [
+    ['filter_rules', 'filterRules'],
+    ['source_requirements', 'sourceRequirements'],
+    ['quality_checks', 'qualityChecks'],
+    ['revision_priorities', 'revisionPriorities'],
+  ]
+  for (const [snakeKey, camelKey] of policyAliases) {
+    const storedPolicy = finalStateTrackingPolicyValues([stored], snakeKey, camelKey)
+    if (storedPolicy.length > 0) {
+      merged[snakeKey] = storedPolicy
+      merged[camelKey] = storedPolicy
+    }
+  }
+  return merged
+}
+
+const BENCHMARK_RECALL_SOURCE_PATH_MISSING_CLAUSE = /^(?:(?:Step\s*2\.3|文风召回|benchmark(?:_recall)?(?:_brief)?(?:\.source_paths)?)[：:\s]*)?(?:source_paths_missing|source paths? missing|缺少(?:文风召回)?来源路径|(?:文风召回)?来源路径(?:缺失|缺少|为空|未提供)|文风召回来源缺失)$/i
+
+function benchmarkRecallGapsWithoutSourcePathMissing(...values: any[]) {
+  const nextGaps: string[] = []
+  for (const gap of benchmarkRecallGapStrings(...values)) {
+    if (BENCHMARK_RECALL_SOURCE_PATH_MISSING_CLAUSE.test(gap)) continue
+    const clauses = gap.split(/[；;｜|\n]+/).map(item => compactBriefText(item)).filter(Boolean)
+    if (clauses.length <= 1) {
+      nextGaps.push(gap)
+      continue
+    }
+    const unresolved = clauses.filter(clause => !BENCHMARK_RECALL_SOURCE_PATH_MISSING_CLAUSE.test(clause))
+    if (unresolved.length === clauses.length) nextGaps.push(gap)
+    else nextGaps.push(...unresolved)
+  }
+  return uniqueBriefStrings(nextGaps, 12)
+}
+
+function mergeFinalBenchmarkRecallBriefAliases(preDraftBriefSnake: any = {}, preDraftBriefCamel: any = {}) {
+  const candidates = [
+    preDraftBriefCamel?.benchmarkRecallBrief,
+    preDraftBriefCamel?.benchmark_recall_brief,
+    preDraftBriefSnake?.benchmarkRecallBrief,
+    preDraftBriefSnake?.benchmark_recall_brief,
+  ].filter(value => value && typeof value === 'object' && !Array.isArray(value))
+  const merged = Object.assign({}, ...candidates)
+  const sourcePaths = uniqueBriefStrings(candidates.flatMap(brief => [
+    ...asArray(brief.source_paths),
+    ...asArray(brief.sourcePaths),
+  ]), 8)
+  const gaps = benchmarkRecallGapStrings(...candidates.flatMap(brief => [
+    brief.gaps,
+    brief.recall_gaps,
+    brief.recallGaps,
+  ]))
+  return {
+    ...merged,
+    source_paths: sourcePaths,
+    sourcePaths,
+    gaps,
+    recall_gaps: gaps,
+    recallGaps: gaps,
+  }
+}
+
 function autoRepairBenchmarkRecallBriefSourcePaths(chapter: any, brief: any = {}) {
   if (!brief || typeof brief !== 'object' || Array.isArray(brief)) return brief
-  const currentSourcePaths = asArray(brief.source_paths || brief.sourcePaths).map(assetText).filter(Boolean)
-  if (currentSourcePaths.length) return brief
+  const currentSourcePaths = uniqueBriefStrings([
+    ...asArray(brief.source_paths),
+    ...asArray(brief.sourcePaths),
+  ], 8)
 
   const chapterLabel = `chapter-${Number(chapter?.chapter_no || chapter?.chapterNo || 0) || 'unknown'}`
   const selectedEmotionModule = compactBriefText(brief.selected_emotion_module || brief.selectedEmotionModule)
@@ -34472,19 +34758,87 @@ function autoRepairBenchmarkRecallBriefSourcePaths(chapter: any, brief: any = {}
   const matchedChapter = compactBriefText(brief.matched_chapter || brief.matchedChapter)
   const matchedTechniques = asArray(brief.matched_chapter_techniques || brief.matchedChapterTechniques)
   const styleDirectives = asArray(brief.style_directives || brief.styleDirectives)
-  const sourcePaths = uniqueBriefStrings([
-    selectedEmotionModule ? `MangaForge/auto-preflight/${chapterLabel}/emotion-module` : '',
-    rhythmReference ? `MangaForge/auto-preflight/${chapterLabel}/rhythm-reference` : '',
-    styleProfileSummary || styleDirectives.length ? `MangaForge/auto-preflight/${chapterLabel}/style-profile` : '',
-    matchedChapter || matchedTechniques.length ? `MangaForge/auto-preflight/${chapterLabel}/matched-chapter-abstract` : '',
-  ], 8)
+  const sourcePaths = currentSourcePaths.length
+    ? uniqueBriefStrings(currentSourcePaths, 8)
+    : uniqueBriefStrings([
+        selectedEmotionModule ? `MangaForge/auto-preflight/${chapterLabel}/emotion-module` : '',
+        rhythmReference ? `MangaForge/auto-preflight/${chapterLabel}/rhythm-reference` : '',
+        styleProfileSummary || styleDirectives.length ? `MangaForge/auto-preflight/${chapterLabel}/style-profile` : '',
+        matchedChapter || matchedTechniques.length ? `MangaForge/auto-preflight/${chapterLabel}/matched-chapter-abstract` : '',
+      ], 8)
   if (!sourcePaths.length) return brief
+  const unresolvedGaps = benchmarkRecallGapsWithoutSourcePathMissing(brief.gaps, brief.recall_gaps, brief.recallGaps)
 
   return {
     ...brief,
     source_paths: sourcePaths,
+    ...(brief.sourcePaths !== undefined ? { sourcePaths } : {}),
+    gaps: unresolvedGaps,
+    ...(brief.recall_gaps !== undefined ? { recall_gaps: unresolvedGaps } : {}),
+    ...(brief.recallGaps !== undefined ? { recallGaps: unresolvedGaps } : {}),
     module_source_path: brief.module_source_path || brief.moduleSourcePath || (selectedEmotionModule ? `MangaForge/auto-preflight/${chapterLabel}/emotion-module` : ''),
     rhythm_source_path: brief.rhythm_source_path || brief.rhythmSourcePath || (rhythmReference ? `MangaForge/auto-preflight/${chapterLabel}/rhythm-reference` : ''),
+  }
+}
+
+export function repairBenchmarkRecallSourcePathState(chapter: any, brief: any = {}, ...gapSources: any[]) {
+  const repairedBrief = autoRepairBenchmarkRecallBriefSourcePaths(chapter, brief)
+  const repairedSourcePaths = uniqueBriefStrings([
+    ...asArray(repairedBrief?.source_paths),
+    ...asArray(repairedBrief?.sourcePaths),
+  ], 8)
+  const allGapSources = [
+    ...gapSources,
+    repairedBrief?.gaps,
+    repairedBrief?.recall_gaps,
+    repairedBrief?.recallGaps,
+  ]
+  return {
+    benchmark_recall_brief: repairedBrief,
+    benchmark_recall_gaps: repairedSourcePaths.length
+      ? benchmarkRecallGapsWithoutSourcePathMissing(...allGapSources)
+      : benchmarkRecallGapStrings(...allGapSources),
+  }
+}
+
+export function mergeFinalRepairPreDraftRawPayload(rawPayload: any = {}, finalPreDraftBrief: any = {}) {
+  const latestPreDraftBrief = {
+    ...(rawPayload?.preDraftBrief || {}),
+    ...(rawPayload?.pre_draft_brief || {}),
+  }
+  const benchmarkBrief = {
+    ...(finalPreDraftBrief?.benchmarkRecallBrief || {}),
+    ...(finalPreDraftBrief?.benchmark_recall_brief || {}),
+  }
+  const benchmarkGaps = benchmarkRecallGapStrings(
+    finalPreDraftBrief?.benchmark_recall_gaps,
+    finalPreDraftBrief?.benchmarkRecallGaps,
+  )
+  const stateTrackingContract = mergeStoredStateTrackingContractAliases(
+    finalPreDraftBrief?.state_tracking_contract,
+    finalPreDraftBrief?.stateTrackingContract,
+  )
+  const writePreparationBrief = {
+    ...(finalPreDraftBrief?.writePreparationBrief || {}),
+    ...(finalPreDraftBrief?.write_preparation_brief || {}),
+  }
+  const mergedPreDraftBrief = {
+    ...latestPreDraftBrief,
+    benchmark_recall_brief: benchmarkBrief,
+    benchmarkRecallBrief: benchmarkBrief,
+    benchmark_recall_gaps: benchmarkGaps,
+    benchmarkRecallGaps: benchmarkGaps,
+    state_tracking_contract: stateTrackingContract,
+    stateTrackingContract: stateTrackingContract,
+    write_preparation_brief: writePreparationBrief,
+    writePreparationBrief: writePreparationBrief,
+  }
+  return {
+    ...(rawPayload || {}),
+    pre_draft_brief: mergedPreDraftBrief,
+    ...(rawPayload?.preDraftBrief !== undefined
+      ? { preDraftBrief: mergedPreDraftBrief }
+      : {}),
   }
 }
 
@@ -40280,11 +40634,67 @@ export type NovelWritingRuntime = {
     characters: any[]
     outlines: any[]
     reviews: any[]
+    settings: any[]
+    chapterSettingUsage: any[]
+    projectSettingUsage: any[]
   }) => Promise<any>
   hooks?: {
     beforeChapterStore?: (input: { chapterId: number; finalText: string }) => void | Promise<void>
     beforeStoryState?: (input: { chapterId: number; finalText: string }) => void | Promise<void>
+    afterChapterCommit?: (input: { chapterId: number; finalText: string }) => void | Promise<void>
+    beforePostCommitSync?: (input: { chapterId: number; finalText: string }) => void | Promise<void>
   }
+}
+
+type ProseTransportTruncationCode = 'PROSE_DRAFT_TRUNCATED' | 'PROSE_REVISION_TRUNCATED'
+
+function hasProseTransportIncompleteDetails(result: any) {
+  return [result, result?.raw, ...asArray(result?.raw?.choices), result?.raw?.response].some(value => (
+    value
+    && typeof value === 'object'
+    && (
+      (Object.prototype.hasOwnProperty.call(value, 'incomplete_details')
+        && value.incomplete_details !== null
+        && value.incomplete_details !== undefined)
+      || (Object.prototype.hasOwnProperty.call(value, 'incompleteDetails')
+        && value.incompleteDetails !== null
+        && value.incompleteDetails !== undefined)
+    )
+  ))
+}
+
+function rejectedProseTransportFinishReason(result: any) {
+  const sources = [result, result?.raw, ...asArray(result?.raw?.choices), result?.raw?.response]
+  for (const source of sources) {
+    for (const candidate of [source?.finish_reason, source?.finishReason, source?.stop_reason, source?.stopReason]) {
+      const reason = normalizeProseContractionFinishReason({ finish_reason: candidate })
+      if (isRejectedProseContractionFinishReason(reason)) return reason
+    }
+  }
+  return null
+}
+
+function assertCompleteProseTransportResult(result: any, code: ProseTransportTruncationCode) {
+  const finishReason = rejectedProseTransportFinishReason(result)
+    || normalizeProseContractionFinishReason(result)
+  const incompleteReason = normalizeProseContractionIncompleteReason(result)
+  const incompleteDetailsPresent = hasProseTransportIncompleteDetails(result)
+  if (!isRejectedProseContractionFinishReason(finishReason) && !incompleteDetailsPresent) return
+
+  const diagnostics = buildLLMResultDiagnostics(result)
+  const phase = code === 'PROSE_DRAFT_TRUNCATED' ? '正文初稿' : '正文修订'
+  throw Object.assign(new Error(`${phase}输出被截断`), {
+    code,
+    finish_reason: finishReason,
+    incomplete_reason: incompleteReason,
+    incomplete_details_present: incompleteDetailsPresent,
+    llm_diagnostics: {
+      ...diagnostics,
+      finish_reason: finishReason || diagnostics.finish_reason,
+      incomplete_reason: incompleteReason,
+      incomplete_details_present: incompleteDetailsPresent,
+    },
+  })
 }
 
 export function createNovelWritingService(ctx: {
@@ -40293,6 +40703,7 @@ export function createNovelWritingService(ctx: {
   reference: NovelReferenceService
   runtime?: NovelWritingRuntime
 }) {
+  const trustedWordTargetContractionBudgets = new WeakSet<object>()
   const executeAgent = ctx.runtime?.executeAgent || executeNovelAgent
   const generateNovelChapterProse = ctx.runtime?.generateChapterProse || defaultGenerateNovelChapterProse
   const storeChapterProseMemory = ctx.runtime?.storeChapterProseMemory || defaultStoreNovelChapterProseMemory
@@ -41524,7 +41935,7 @@ export function createNovelWritingService(ctx: {
     last_updated_at: new Date().toISOString(),
   })
 
-  const updateStoryStateMachine = async (activeWorkspace: string, project: any, chapter: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
+  const prepareStoryStateUpdate = async (activeWorkspace: string, project: any, chapter: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}): Promise<PreparedStoryStateUpdate> => {
     const stageModelId = ctx.production.getStageModelId(project, 'review', modelId)
     throwIfAborted(options)
     const result = await executeAgent('review-agent', project, {
@@ -41539,7 +41950,9 @@ export function createNovelWritingService(ctx: {
       timeoutMs: options.llmTimeoutMs,
     })
     const payload = getNovelPayload(result)
-    const stateDelta = normalizeStoryStateDeltaForStorage(payload?.state_delta || payload?.stateDelta || {})
+    const diagnostics = buildLLMResultDiagnostics(result)
+    const rawStateDelta = payload?.state_delta || payload?.stateDelta
+    const stateDelta = normalizeStoryStateDeltaForStorage(rawStateDelta || {})
     const styleFingerprintSnapshot = buildStyleFingerprintStateSnapshot(contextPackage, project, project.reference_config?.story_state || {})
     const stateDeltaWithStyleFingerprint = styleFingerprintSnapshot
       ? { ...stateDelta, ...styleFingerprintSnapshot }
@@ -41548,18 +41961,79 @@ export function createNovelWritingService(ctx: {
       ...(project.reference_config || {}),
       story_state: mergeStoryState(project.reference_config?.story_state || {}, stateDeltaWithStyleFingerprint, chapter),
     }
-    await updateNovelProject(activeWorkspace, project.id, { reference_config: nextReferenceConfig } as any)
+    const characterUpdates = asArray(payload?.character_updates || payload?.characterUpdates)
+    const settingUpdates = asArray(payload?.setting_updates || payload?.settingUpdates)
+    const storylineUpdates = asArray(payload?.storyline_updates || payload?.storylineUpdates)
+    const [assetCharacters, assetSettings] = await Promise.all([
+      listNovelCharacters(activeWorkspace, project.id),
+      listNovelSettingEntities(activeWorkspace, project.id),
+    ])
+    const discoveredAssets = normalizeDiscoveredAssets(asArray(payload?.discovered_assets || payload?.discoveredAssets), {
+      existingCharacters: assetCharacters,
+      existingSettings: assetSettings,
+      chapter,
+    })
+    const syncReports = {
+      character_state_delta_sync: buildCharacterStateDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint, characterUpdates),
+      asset_state_delta_sync: buildAssetStateDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint, settingUpdates, discoveredAssets),
+      chapter_handoff_delta_sync: buildChapterHandoffDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint),
+      timeline_delta_sync: buildTimelineDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint, settingUpdates),
+      state_delta_completeness: buildStateDeltaCompletenessReport(chapter, chapterText, stateDeltaWithStyleFingerprint, {
+        settingUpdates,
+        characterUpdates,
+        storylineUpdates,
+        discoveredAssets,
+        foreshadowingStatus: payload?.foreshadowing_status || payload?.foreshadowingStatus || {},
+      }),
+    }
     payload.style_fingerprint = stateDeltaWithStyleFingerprint.style_fingerprint
     payload.style_fingerprint_contract = stateDeltaWithStyleFingerprint.style_fingerprint_contract
+    Object.assign(payload, syncReports)
+    const finishReason = rejectedProseTransportFinishReason(result)
+      || String(diagnostics.finish_reason || '').toLowerCase()
+    const validStateFields = [
+      'current_time', 'currentTime', 'character_positions', 'characterPositions', 'character_relationships', 'characterRelationships',
+      'relationship_graph', 'relationshipGraph', 'known_secrets', 'knownSecrets', 'secret_visibility', 'secretVisibility',
+      'item_ownership', 'itemOwnership', 'resource_status', 'resourceStatus', 'foreshadowing_status', 'foreshadowingStatus',
+      'payoff_queue', 'payoffQueue', 'active_locations', 'activeLocations', 'open_questions', 'openQuestions',
+      'next_chapter_priorities', 'nextChapterPriorities', 'timeline', 'progress_summary', 'progressSummary',
+    ]
+    const payloadDiagnostics = {
+      invalid_payload: !payload || typeof payload !== 'object' || Array.isArray(payload)
+        || !rawStateDelta || typeof rawStateDelta !== 'object' || Array.isArray(rawStateDelta)
+        || !validStateFields.some(key => Object.prototype.hasOwnProperty.call(rawStateDelta, key)),
+      transport_incomplete: Boolean(finishReason)
+        && ['length', 'incomplete', 'max_tokens', 'content_filter', 'tool', 'tool_calls'].some(reason => String(finishReason).includes(reason))
+        || hasProseTransportIncompleteDetails(result),
+    }
+    return {
+      state_delta: stateDeltaWithStyleFingerprint,
+      next_reference_config: nextReferenceConfig,
+      character_updates: characterUpdates,
+      setting_updates: settingUpdates,
+      storyline_updates: storylineUpdates,
+      sync_reports: syncReports,
+      hard_failures: buildPreparedStoryStateHardFailures(syncReports, payloadDiagnostics),
+      payload,
+    }
+  }
+
+  const updateStoryStateMachine = async (activeWorkspace: string, project: any, chapter: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
+    const prepared: PreparedStoryStateUpdate = options.prepared || await prepareStoryStateUpdate(activeWorkspace, project, chapter, contextPackage, chapterText, modelId, options)
+    if (prepared.hard_failures.length) {
+      throw Object.assign(new Error('故事状态准备阶段未通过'), { code: 'STORY_STATE_PREPARE_BLOCKED', hard_failures: prepared.hard_failures })
+    }
+    const payload = prepared.payload
+    const stateDelta = prepared.state_delta
+    const nextReferenceConfig = prepared.next_reference_config
+    await updateNovelProject(activeWorkspace, project.id, { reference_config: nextReferenceConfig } as any)
+    payload.style_fingerprint = stateDelta.style_fingerprint
+    payload.style_fingerprint_contract = stateDelta.style_fingerprint_contract
     const chapters = await listNovelChapters(activeWorkspace, project.id)
     const chapterTitleUniquenessSync = buildChapterTitleUniquenessSyncReport(chapters, chapter)
     await createNovelReview(activeWorkspace, buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: chapterTitleUniquenessSync, reviewType: 'chapter_title_uniqueness_sync', payloadKey: 'chapter_title_uniqueness_sync', formatIssue: (item: any) => `标题重复：第${item.chapter_no || '-'}章《${item.title || ''}》` }))
     payload.chapter_title_uniqueness_sync = chapterTitleUniquenessSync
-    const characterUpdates = Array.isArray(payload?.character_updates)
-      ? payload.character_updates
-      : Array.isArray(payload?.characterUpdates)
-        ? payload.characterUpdates
-        : []
+    const characterUpdates = prepared.character_updates
     if (characterUpdates.length > 0) {
       const characters = await listNovelCharacters(activeWorkspace, project.id)
       for (const update of characterUpdates) {
@@ -41582,11 +42056,7 @@ export function createNovelWritingService(ctx: {
       await createNovelReview(activeWorkspace, buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: characterStateDeltaSync, reviewType: 'character_state_delta_sync', payloadKey: 'character_state_delta_sync', formatIssue: (item: any) => `角色状态缺口：${item.name}｜${item.text}` }))
     }
     payload.character_state_delta_sync = characterStateDeltaSync
-    const settingUpdates = Array.isArray(payload?.setting_updates)
-      ? payload.setting_updates
-      : Array.isArray(payload?.settingUpdates)
-        ? payload.settingUpdates
-        : []
+    const settingUpdates = prepared.setting_updates
     if (settingUpdates.length > 0) {
       const settings = await listNovelSettingEntities(activeWorkspace, project.id)
       const usages = await listNovelChapterSettingUsage(activeWorkspace, project.id, chapter.id)
@@ -41629,11 +42099,7 @@ export function createNovelWritingService(ctx: {
     const chapterHandoffSync = buildChapterHandoffSyncReport(project, chapter, contextPackage, chapterText)
     await createNovelReview(activeWorkspace, buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: chapterHandoffSync, reviewType: 'chapter_handoff_sync', payloadKey: 'chapter_handoff_sync', issuePrefix: '章首承接缺口' }))
     payload.chapter_handoff_sync = chapterHandoffSync
-    const storylineUpdates = Array.isArray(payload?.storyline_updates)
-      ? payload.storyline_updates
-      : Array.isArray(payload?.storylineUpdates)
-        ? payload.storylineUpdates
-        : []
+    const storylineUpdates = prepared.storyline_updates
     const storylineSync = buildStorylineSyncReport(contextPackage, storylineUpdates)
     if (storylineUpdates.length > 0) {
       const settings = await listNovelSettingEntities(activeWorkspace, project.id)
@@ -41694,13 +42160,7 @@ export function createNovelWritingService(ctx: {
     const foreshadowingDeltaSync = buildForeshadowingDeltaSyncReport(chapter, contextPackage, storylineUpdates, discoveredAssets, payload?.foreshadowing_status || payload?.foreshadowingStatus || {})
     await createNovelReview(activeWorkspace, buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: foreshadowingDeltaSync, reviewType: 'foreshadowing_delta_sync', payloadKey: 'foreshadowing_delta_sync', formatIssue: (item: any) => `伏笔增量缺口：${item.name}` }))
     payload.foreshadowing_delta_sync = foreshadowingDeltaSync
-    const stateDeltaCompleteness = buildStateDeltaCompletenessReport(chapter, chapterText, stateDelta, {
-      settingUpdates,
-      characterUpdates,
-      storylineUpdates,
-      discoveredAssets,
-      foreshadowingStatus: payload?.foreshadowing_status || payload?.foreshadowingStatus || {},
-    })
+    const stateDeltaCompleteness = prepared.sync_reports.state_delta_completeness
     if (Number(stateDeltaCompleteness.planned_count || 0) > 0 || Number(stateDeltaCompleteness.missed_count || 0) > 0) {
       await createNovelReview(activeWorkspace, buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: stateDeltaCompleteness, reviewType: 'state_delta_completeness', payloadKey: 'state_delta_completeness', formatIssue: (item: any) => `${item.label}：${item.fix}` }))
     }
@@ -42011,6 +42471,7 @@ export function createNovelWritingService(ctx: {
     characters: any[],
     outlines: any[],
     reviews: any[] = [],
+    contextOptions: { settingEntities?: any[]; chapterSettingUsage?: any[]; projectSettingUsage?: any[]; persistSettingUsage?: boolean } = {},
   ) => {
     const sorted = [...chapters].sort((a, b) => a.chapter_no - b.chapter_no)
     const previousChapter = sorted.filter(ch => ch.chapter_no < chapter.chapter_no).slice(-1)[0] || null
@@ -42129,17 +42590,21 @@ export function createNovelWritingService(ctx: {
       },
       Number(chapter.chapter_no || 0),
     )
-    const [settingEntities, storedChapterSettingUsage, projectSettingUsage] = await Promise.all([
-      listNovelSettingEntities(activeWorkspace, project.id).catch(() => []),
-      listNovelChapterSettingUsage(activeWorkspace, project.id, chapter.id).catch(() => []),
-      listNovelChapterSettingUsage(activeWorkspace, project.id).catch(() => []),
+    const [storedSettingEntities, storedChapterSettingUsage, storedProjectSettingUsage] = await Promise.all([
+      contextOptions.settingEntities ? Promise.resolve(contextOptions.settingEntities) : listNovelSettingEntities(activeWorkspace, project.id).catch(() => []),
+      contextOptions.chapterSettingUsage ? Promise.resolve(contextOptions.chapterSettingUsage) : listNovelChapterSettingUsage(activeWorkspace, project.id, chapter.id).catch(() => []),
+      contextOptions.projectSettingUsage ? Promise.resolve(contextOptions.projectSettingUsage) : listNovelChapterSettingUsage(activeWorkspace, project.id).catch(() => []),
     ])
+    const settingEntities = storedSettingEntities
+    const projectSettingUsage = storedProjectSettingUsage
     let chapterSettingUsage = storedChapterSettingUsage
     let settingUsageAutoMatched = false
     if (chapterSettingUsage.length === 0 && settingEntities.length > 0) {
       const suggestedUsage = buildHeuristicSettingUsage(chapter, settingEntities)
       if (suggestedUsage.length > 0) {
-        chapterSettingUsage = await replaceNovelChapterSettingUsage(activeWorkspace, project.id, chapter.id, suggestedUsage as any).catch(() => suggestedUsage as any)
+        chapterSettingUsage = contextOptions.persistSettingUsage === false
+          ? suggestedUsage as any
+          : await replaceNovelChapterSettingUsage(activeWorkspace, project.id, chapter.id, suggestedUsage as any).catch(() => suggestedUsage as any)
         settingUsageAutoMatched = true
       }
     }
@@ -42266,6 +42731,25 @@ export function createNovelWritingService(ctx: {
     preflight.strict_ready = preflight.checks.every((item: any) => item.ok || item.severity === 'low')
     const chapterRollingPlan = chapter.raw_payload?.rollingPlan || chapter.raw_payload?.rolling_plan || null
     const signatureSceneBrief = normalizeSignatureSceneBrief(chapter.raw_payload?.signature_scene_brief || chapterRollingPlan)
+    const storyState = getStoryState(project)
+    const storyStateGlobal = storyState?.global || storyState || {}
+    const canonicalSurfaceIndex = buildCanonicalSurfaceIndex({
+      previous_chapters: sorted
+        .filter(ch => ch.chapter_no < chapter.chapter_no && (ch.chapter_text || ch.chapterText))
+        .map(ch => ({
+          chapter_no: ch.chapter_no,
+          chapter_text: ch.chapter_text || ch.chapterText,
+        })),
+      canon_facts: [
+        ...asArray(storyState?.canon_facts),
+        ...asArray(storyState?.canonFacts),
+        ...asArray(storyStateGlobal?.canon_facts),
+        ...asArray(storyStateGlobal?.canonFacts),
+        ...asArray(storyState?.facts),
+        ...asArray(storyStateGlobal?.facts),
+      ],
+      setting_entities: settingEntities,
+    })
     const basePackage = {
       project: {
         id: project.id,
@@ -42386,6 +42870,8 @@ export function createNovelWritingService(ctx: {
       setting_context: settingContext,
       relationship_graph: relationshipGraphContext,
       storyline_context: storylineContext,
+      canonical_surface_index: canonicalSurfaceIndex,
+      canonicalSurfaceIndex,
       style_lock: styleLock,
       safety_policy: safetyPolicy,
       reference: referencePreview ? {
@@ -43868,17 +44354,34 @@ export function createNovelWritingService(ctx: {
       }
     }
     if (evaluation.too_long && options.contract !== false) {
-      const maxContractionAttempts = Math.max(1, Math.min(3, Number(options.maxContractionAttempts || options.max_contraction_attempts || 3)))
+      const requestedMaxContractionAttempts = Number(options.maxContractionAttempts ?? options.max_contraction_attempts ?? 3)
+      const configuredMaxContractionAttempts = Number.isFinite(requestedMaxContractionAttempts)
+        ? Math.max(1, Math.min(3, Math.trunc(requestedMaxContractionAttempts)))
+        : 3
+      const proposedSharedBudget = options.wordTargetContractionBudget || options.word_target_contraction_budget
+      const sharedBudget = proposedSharedBudget && typeof proposedSharedBudget === 'object' && trustedWordTargetContractionBudgets.has(proposedSharedBudget)
+        ? proposedSharedBudget
+        : null
+      const rawUsed = Number(sharedBudget?.used ?? 0)
+      const used = Number.isFinite(rawUsed) ? Math.max(0, Math.min(3, Math.trunc(rawUsed))) : 0
+      if (sharedBudget) sharedBudget.used = used
+      const maxContractionAttempts = sharedBudget
+        ? Math.max(0, Math.min(configuredMaxContractionAttempts, configuredMaxContractionAttempts - used))
+        : configuredMaxContractionAttempts
       const contractionAttempts: any[] = []
       for (let attempt = 1; attempt <= maxContractionAttempts; attempt += 1) {
         throwIfAborted(options)
+        const globalAttempt = sharedBudget
+          ? Math.min(configuredMaxContractionAttempts, Number(sharedBudget.used || 0) + 1)
+          : attempt
+        if (sharedBudget) sharedBudget.used = globalAttempt
         const contractionResult = await executeAgent('prose-agent', project, {
-          task: buildProseWordTargetContractionPrompt(project, contextPackage, currentText, currentEvaluation, { attempt, maxAttempts: maxContractionAttempts }),
+          task: buildProseWordTargetContractionPrompt(project, contextPackage, currentText, currentEvaluation, { attempt: globalAttempt, maxAttempts: configuredMaxContractionAttempts }),
           upstreamContext: contextPackage,
         }, {
           activeWorkspace,
           modelId: reviseModelId ? String(reviseModelId) : undefined,
-          maxTokens: proseContractionMaxTokensForAttempt(wordTarget, attempt),
+          maxTokens: proseContractionMaxTokensForAttempt(wordTarget, globalAttempt),
           temperature: Math.min(0.55, ctx.production.getStageTemperature(project, 'revise', 0.55)),
           skipMemory: true,
           signal: options.abortSignal,
@@ -43887,14 +44390,18 @@ export function createNovelWritingService(ctx: {
         const extracted = extractProseExpansionPayload(contractionResult)
         const contractedText = extracted.text
         const finishReason = normalizeProseContractionFinishReason(contractionResult)
+        const rejectedFinishReason = rejectedProseTransportFinishReason(contractionResult)
         const incompleteReason = normalizeProseContractionIncompleteReason(contractionResult)
         const recoveredFromPartialJson = extracted.payload?.recovered_from_partial_json === true
         const partialJsonOpenStringRecovered = extracted.payload?.partial_json_open_string_recovered === true
         const rejectionReasons = [
+          !contractedText ? 'missing_chapter_text' : '',
           recoveredFromPartialJson ? 'recovered_from_partial_json' : '',
           partialJsonOpenStringRecovered ? 'partial_json_open_string_recovered' : '',
           isRejectedProseContractionFinishReason(finishReason) ? `finish_reason_${finishReason}` : '',
+          rejectedFinishReason ? `transport_finish_reason_${rejectedFinishReason}` : '',
           incompleteReason ? `incomplete_reason_${incompleteReason}` : '',
+          hasProseTransportIncompleteDetails(contractionResult) ? 'incomplete_details_present' : '',
         ].filter(Boolean)
         const candidateRejected = rejectionReasons.length > 0
         const finalEvaluation = applyProseWordTargetSoftCap(evaluateProseWordTarget(contractedText, wordTarget))
@@ -43906,7 +44413,7 @@ export function createNovelWritingService(ctx: {
           && canBridgeShortContractionToExpansion(currentEvaluation, finalEvaluation)
 
         contractionAttempts.push({
-          attempt,
+          attempt: globalAttempt,
           previous_count: previousCount,
           contracted_count: contractedCount,
           evaluation: finalEvaluation,
@@ -43963,6 +44470,21 @@ export function createNovelWritingService(ctx: {
       }
 
       if (currentEvaluation.too_long) {
+        const compatibility = resolveStandardWordTargetCompatibility(evaluation, wordTarget)
+        if (compatibility.passed) {
+          return {
+            final_text: chapterText,
+            contracted: false,
+            expanded: false,
+            word_target_compatibility_pass: true,
+            compatibility_ceiling: compatibility.ceiling,
+            compatibility_reason: compatibility.reason,
+            evaluation,
+            final_evaluation: evaluation,
+            contraction: { attempts: contractionAttempts },
+            expansion: null,
+          }
+        }
         throw Object.assign(
           new Error(`章节正文超过字数上限：当前 ${currentEvaluation.actual} 字，最多 ${currentEvaluation.max} 字`),
           {
@@ -44071,18 +44593,38 @@ export function createNovelWritingService(ctx: {
   }
 
   const autoRepairChapterPreflightGaps = async (activeWorkspace: string, project: any, chapter: any, contextPackage: any, modelId?: number, options: any = {}) => {
+    const persist = options.persist !== false
     const checks = Array.isArray(contextPackage?.preflight?.checks) ? contextPackage.preflight.checks : []
     const missingKeys = checks.filter((item: any) => !item.ok).map((item: any) => String(item.key || '')).filter(Boolean)
     const repaired: any[] = []
     const errors: string[] = []
-    if (!missingKeys.length) return { ok: true, missing_keys: missingKeys, repaired, errors }
+    const stagedChapterPatch: any = {}
+    const stagedWorldbuildingCreates: any[] = []
+    const stagedCharacterCreates: any[] = []
+    const stagedSettingCreates: any[] = []
+    let stagedUsageReplacement: any[] | null = null
+    const stagedReviews: any[] = []
+    let nextTemporaryId = -1
+    const applyStagedChapterPatch = (patch: any) => {
+      const rawPayload = patch?.raw_payload === undefined ? chapter.raw_payload : {
+        ...(chapter.raw_payload || {}),
+        ...(patch.raw_payload || {}),
+      }
+      Object.assign(stagedChapterPatch, patch, patch?.raw_payload === undefined ? {} : {
+        raw_payload: { ...(stagedChapterPatch.raw_payload || {}), ...(patch.raw_payload || {}) },
+      })
+      chapter = { ...chapter, ...patch, raw_payload: rawPayload }
+      return chapter
+    }
+    if (!missingKeys.length) return { ok: true, missing_keys: missingKeys, repaired, errors, chapter, chapter_patch: stagedChapterPatch, staged_worldbuilding_creates: stagedWorldbuildingCreates, staged_character_creates: stagedCharacterCreates, staged_setting_creates: stagedSettingCreates, staged_usage_replacement: stagedUsageReplacement, staged_reviews: stagedReviews, staged: !persist }
 
-    const [chapters, worldbuilding, characters, outlines, settings] = await Promise.all([
+    const [chapters, worldbuilding, characters, outlines, settings, reviews] = await Promise.all([
       listNovelChapters(activeWorkspace, project.id),
       listNovelWorldbuilding(activeWorkspace, project.id),
       listNovelCharacters(activeWorkspace, project.id),
       listNovelOutlines(activeWorkspace, project.id),
       listNovelSettingEntities(activeWorkspace, project.id).catch(() => []),
+      listNovelReviews(activeWorkspace, project.id),
     ])
     const needsChapterBlueprint = missingKeys.includes('chapter_blueprint')
       || missingKeys.includes('chapter_conflict')
@@ -44446,10 +44988,20 @@ export function createNovelWritingService(ctx: {
           scene_cards: repairedSceneCards,
         },
       })
+      const repairedBenchmarkRecallState = repairBenchmarkRecallSourcePathState(
+        chapter,
+        repairedEmotionAndHookBrief.benchmark_recall_brief,
+        repairedEmotionAndHookBrief.benchmark_recall_gaps,
+        repairedEmotionAndHookBrief.benchmarkRecallGaps,
+      )
+      const repairedBenchmarkRecallBrief = repairedBenchmarkRecallState.benchmark_recall_brief
+      const repairedBenchmarkRecallGaps = repairedBenchmarkRecallState.benchmark_recall_gaps
       repairedEmotionAndHookBrief = {
         ...repairedEmotionAndHookBrief,
         scene_briefs: repairedSceneCards.map(sceneBriefFromCard),
-        benchmark_recall_brief: autoRepairBenchmarkRecallBriefSourcePaths(chapter, repairedEmotionAndHookBrief.benchmark_recall_brief),
+        benchmark_recall_brief: repairedBenchmarkRecallBrief,
+        benchmark_recall_gaps: repairedBenchmarkRecallGaps,
+        benchmarkRecallGaps: repairedBenchmarkRecallGaps,
         state_tracking_contract: autoRepairStateTrackingSourceReadiness(repairedEmotionAndHookBrief.state_tracking_contract, chapter, {
           ...contextPackage,
           chapter_target: {
@@ -44515,6 +45067,8 @@ export function createNovelWritingService(ctx: {
             signature_scene_brief: repairedEmotionAndHookBrief.signature_scene_brief,
             meme_strategy: repairedEmotionAndHookBrief.meme_strategy,
             benchmark_recall_brief: repairedEmotionAndHookBrief.benchmark_recall_brief,
+            benchmark_recall_gaps: repairedEmotionAndHookBrief.benchmark_recall_gaps,
+            benchmarkRecallGaps: repairedEmotionAndHookBrief.benchmarkRecallGaps,
             style_sample_strategy: repairedEmotionAndHookBrief.style_sample_strategy,
             chapter_benchmark_strategy: repairedEmotionAndHookBrief.chapter_benchmark_strategy,
             first30_retention_brief: repairedEmotionAndHookBrief.first30_retention_brief,
@@ -44574,8 +45128,12 @@ export function createNovelWritingService(ctx: {
           unattended_blueprint_repair_summary: payload?.repair_summary || '无人值守自动补齐章节蓝图',
         },
       }
-      const updatedChapter = await updateNovelChapter(activeWorkspace, chapter.id, nextChapterPatch, { createVersion: false })
-      if (updatedChapter) chapter = updatedChapter
+      if (persist) {
+        const updatedChapter = await updateNovelChapter(activeWorkspace, chapter.id, nextChapterPatch, { createVersion: false })
+        if (updatedChapter) chapter = updatedChapter
+      } else {
+        applyStagedChapterPatch(nextChapterPatch)
+      }
       repaired.push({ type: 'chapter_blueprint_updated', chapter_id: chapter.id, chapter_goal: nextChapterPatch.chapter_goal, ending_hook: nextChapterPatch.ending_hook })
     }
 
@@ -44613,7 +45171,7 @@ export function createNovelWritingService(ctx: {
         }
       }
       const world = payload?.worldbuilding && typeof payload.worldbuilding === 'object' ? payload.worldbuilding : payload
-      const createdWorldbuilding = await createNovelWorldbuilding(activeWorkspace, {
+      const worldbuildingCreate = {
         project_id: project.id,
         world_summary: compactBriefText(world?.world_summary || world?.summary || project.synopsis || `${project.title || '本作品'}的核心世界观围绕当前主线冲突展开。`),
         rules: asArray(world?.rules).length ? asArray(world.rules) : ['核心规则必须有触发条件、代价和可被角色利用或反制的空间。'],
@@ -44623,7 +45181,11 @@ export function createNovelWritingService(ctx: {
         items: asArray(world?.items),
         known_unknowns: asArray(world?.known_unknowns),
         raw_payload: { source: 'unattended_preflight_repair', original: world },
-      } as any)
+      }
+      const createdWorldbuilding: any = persist
+        ? await createNovelWorldbuilding(activeWorkspace, worldbuildingCreate as any)
+        : { ...worldbuildingCreate, id: nextTemporaryId--, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
+      if (!persist) stagedWorldbuildingCreates.push(createdWorldbuilding)
       worldbuilding.push(createdWorldbuilding)
       repaired.push({ type: 'worldbuilding_created', id: createdWorldbuilding.id, world_summary: createdWorldbuilding.world_summary })
     }
@@ -44711,7 +45273,13 @@ export function createNovelWritingService(ctx: {
         })
       }
       for (const candidate of selectTierAwareCharacterRepairCandidates(characterCandidates, characters)) {
-        const created = await createNovelCharacter(activeWorkspace, candidate as any)
+        const created: any = persist
+          ? await createNovelCharacter(activeWorkspace, candidate as any)
+          : { ...candidate, id: nextTemporaryId--, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
+        if (!persist) {
+          stagedCharacterCreates.push(created)
+          characters.push(created)
+        }
         existingNames.add(created.name)
         repaired.push({ type: 'character_created', id: created.id, name: created.name })
       }
@@ -44725,7 +45293,7 @@ export function createNovelWritingService(ctx: {
         ...asArray(payload?.must_advance),
         chapter.chapter_goal,
       ].map((item: any) => String(item || '').trim()).filter(Boolean))].slice(0, 12)
-      await updateNovelChapter(activeWorkspace, chapter.id, {
+      const chapterContextPatch = {
         raw_payload: {
           ...(chapter.raw_payload || {}),
           forbidden_repeats: forbiddenRepeats,
@@ -44733,7 +45301,9 @@ export function createNovelWritingService(ctx: {
           unattended_preflight_repaired_at: new Date().toISOString(),
           unattended_preflight_repair_summary: payload?.repair_summary || '无人值守自动补齐章节生成材料',
         },
-      } as any, { createVersion: false })
+      }
+      if (persist) await updateNovelChapter(activeWorkspace, chapter.id, chapterContextPatch as any, { createVersion: false })
+      else applyStagedChapterPatch(chapterContextPatch)
       repaired.push({ type: 'chapter_context_updated', chapter_id: chapter.id, forbidden_repeats: forbiddenRepeats.length, must_advance: mustAdvance.length })
     }
 
@@ -44781,7 +45351,7 @@ export function createNovelWritingService(ctx: {
         const entityType = String(raw?.entity_type || raw?.type || 'rule').trim()
         const name = String(raw?.name || raw?.title || '').trim()
         if (!name || existingSettingKeys.has(`${entityType}:${name}`)) continue
-        const created = await createNovelSettingEntity(activeWorkspace, {
+        const settingCreate = {
           project_id: project.id,
           entity_type: entityType,
           name,
@@ -44791,35 +45361,177 @@ export function createNovelWritingService(ctx: {
           constraints_json: raw?.constraints_json || raw?.constraints || {},
           state_json: raw?.state_json || raw?.state || {},
           payload_json: { ...(raw?.payload_json || raw?.payload || {}), source: 'unattended_preflight_repair' },
-        } as any)
+        }
+        const created: any = persist
+          ? await createNovelSettingEntity(activeWorkspace, settingCreate as any)
+          : { ...settingCreate, id: nextTemporaryId--, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
+        if (!persist) stagedSettingCreates.push(created)
         latestSettings.push(created)
         existingSettingKeys.add(`${created.entity_type}:${created.name}`)
         repaired.push({ type: 'setting_created', id: created.id, name: created.name, entity_type: created.entity_type })
       }
     }
 
-    latestSettings = await listNovelSettingEntities(activeWorkspace, project.id).catch(() => latestSettings)
+    if (persist) latestSettings = await listNovelSettingEntities(activeWorkspace, project.id).catch(() => latestSettings)
     if (latestSettings.length > 0) {
       const usage = await listNovelChapterSettingUsage(activeWorkspace, project.id, chapter.id).catch(() => [])
       if (usage.length === 0 || missingKeys.includes('chapter_setting_usage')) {
         const suggestedUsage = buildHeuristicSettingUsage(chapter, latestSettings)
         if (suggestedUsage.length > 0) {
-          const records = await replaceNovelChapterSettingUsage(activeWorkspace, project.id, chapter.id, suggestedUsage as any)
+          const records: any[] = persist
+            ? await replaceNovelChapterSettingUsage(activeWorkspace, project.id, chapter.id, suggestedUsage as any)
+            : suggestedUsage.map((item: any) => ({ ...item, id: nextTemporaryId--, project_id: project.id, chapter_id: chapter.id }))
+          if (!persist) stagedUsageReplacement = records
           repaired.push({ type: 'chapter_setting_usage_matched', chapter_id: chapter.id, total: records.length })
         }
       }
     }
 
+    const [finalChapters, finalWorldbuilding, finalCharacters, finalOutlines, finalReviews] = persist
+      ? await Promise.all([
+          listNovelChapters(activeWorkspace, project.id),
+          listNovelWorldbuilding(activeWorkspace, project.id),
+          listNovelCharacters(activeWorkspace, project.id),
+          listNovelOutlines(activeWorkspace, project.id),
+          listNovelReviews(activeWorkspace, project.id),
+        ])
+      : [
+          chapters.map(item => item.id === chapter.id ? chapter : item),
+          worldbuilding,
+          characters,
+          outlines,
+          reviews,
+        ]
+    const finalChapter = finalChapters.find(item => item.id === chapter.id) || chapter
+    const finalPreDraftBriefSnake = finalChapter.raw_payload?.pre_draft_brief || {}
+    const finalPreDraftBriefCamel = finalChapter.raw_payload?.preDraftBrief || {}
+    const unnormalizedFinalPreDraftBriefBase = {
+      ...finalPreDraftBriefCamel,
+      ...finalPreDraftBriefSnake,
+    }
+    const storedFinalStateTrackingContract = mergeStoredStateTrackingContractAliases(
+      finalPreDraftBriefSnake.state_tracking_contract,
+      finalPreDraftBriefSnake.stateTrackingContract,
+      finalPreDraftBriefCamel.state_tracking_contract,
+      finalPreDraftBriefCamel.stateTrackingContract,
+    )
+    const finalBenchmarkRecallBriefBase = mergeFinalBenchmarkRecallBriefAliases(
+      finalPreDraftBriefSnake,
+      finalPreDraftBriefCamel,
+    )
+    const finalBenchmarkRecallState = repairBenchmarkRecallSourcePathState(
+      finalChapter,
+      finalBenchmarkRecallBriefBase,
+      finalPreDraftBriefSnake.benchmark_recall_gaps,
+      finalPreDraftBriefSnake.benchmarkRecallGaps,
+      finalPreDraftBriefCamel.benchmark_recall_gaps,
+      finalPreDraftBriefCamel.benchmarkRecallGaps,
+    )
+    const finalBenchmarkRecallBrief = finalBenchmarkRecallState.benchmark_recall_brief
+    const finalBenchmarkRecallGaps = finalBenchmarkRecallState.benchmark_recall_gaps
+    const finalPreDraftBriefBase = {
+      ...unnormalizedFinalPreDraftBriefBase,
+      benchmark_recall_brief: finalBenchmarkRecallBrief,
+      benchmarkRecallBrief: finalBenchmarkRecallBrief,
+      benchmark_recall_gaps: finalBenchmarkRecallGaps,
+      benchmarkRecallGaps: finalBenchmarkRecallGaps,
+      state_tracking_contract: storedFinalStateTrackingContract,
+      stateTrackingContract: storedFinalStateTrackingContract,
+    }
+    const finalChapterForContext = {
+      ...finalChapter,
+      raw_payload: {
+        ...(finalChapter.raw_payload || {}),
+        pre_draft_brief: finalPreDraftBriefBase,
+        ...(finalChapter.raw_payload?.preDraftBrief !== undefined
+          ? { preDraftBrief: finalPreDraftBriefBase }
+          : {}),
+      },
+    }
+    const finalChaptersForContext = finalChapters.map(item => item.id === finalChapter.id ? finalChapterForContext : item)
+    const finalContextPackage = await buildChapterContextPackage(
+      activeWorkspace,
+      project,
+      finalChapterForContext,
+      finalChaptersForContext,
+      finalWorldbuilding,
+      finalCharacters,
+      finalOutlines,
+      finalReviews,
+      persist ? {} : {
+        settingEntities: latestSettings,
+        chapterSettingUsage: stagedUsageReplacement || [],
+        projectSettingUsage: stagedUsageReplacement || [],
+        persistSettingUsage: false,
+      },
+    )
+    const derivedFinalStateTrackingContract = autoRepairStateTrackingSourceReadiness(
+      buildStateTrackingContract(finalContextPackage, { ignoreExplicit: true }),
+      finalChapter,
+      finalContextPackage,
+    )
+    const finalStateTrackingContract = mergeFinalStateTrackingContract(
+      storedFinalStateTrackingContract,
+      derivedFinalStateTrackingContract,
+    )
+    const finalWritePreparationBrief = buildWritePreparationBrief(finalContextPackage, {
+      ...(finalContextPackage?.pre_draft_brief || {}),
+      ...(finalContextPackage?.chapter_target || {}),
+      state_tracking_contract: finalStateTrackingContract,
+    })
+    const finalStoredPreDraftBrief = {
+      ...finalPreDraftBriefBase,
+      state_tracking_contract: finalStateTrackingContract,
+      ...(finalPreDraftBriefBase.stateTrackingContract !== undefined
+        ? { stateTrackingContract: finalStateTrackingContract }
+        : {}),
+      write_preparation_brief: finalWritePreparationBrief,
+      ...(finalPreDraftBriefBase.writePreparationBrief !== undefined
+        ? { writePreparationBrief: finalWritePreparationBrief }
+        : {}),
+    }
+    const latestFinalChapter = persist
+      ? (await listNovelChapters(activeWorkspace, project.id)).find(item => item.id === finalChapter.id) || finalChapter
+      : finalChapter
+    const finalChapterPatch = {
+      raw_payload: mergeFinalRepairPreDraftRawPayload(latestFinalChapter.raw_payload, finalStoredPreDraftBrief),
+    }
+    if (persist) {
+      const finalUpdatedChapter = await updateNovelChapter(activeWorkspace, latestFinalChapter.id, finalChapterPatch as any, { createVersion: false })
+      if (finalUpdatedChapter) chapter = finalUpdatedChapter
+    } else {
+      applyStagedChapterPatch(finalChapterPatch)
+    }
+
     if (repaired.length || errors.length) {
-      await createNovelReview(activeWorkspace, buildUnattendedPreflightRepairReviewRecord({
+      const repairReview = buildUnattendedPreflightRepairReviewRecord({
         projectId: project.id,
         chapter,
         missingKeys,
         repaired,
         errors,
-      }))
+      })
+      if (persist) await createNovelReview(activeWorkspace, repairReview)
+      else stagedReviews.push(repairReview)
     }
-    return { ok: errors.length === 0, missing_keys: missingKeys, repaired, errors }
+    return {
+      ok: errors.length === 0,
+      missing_keys: missingKeys,
+      repaired,
+      errors,
+      chapter,
+      chapter_patch: stagedChapterPatch,
+      worldbuilding: finalWorldbuilding,
+      characters: finalCharacters,
+      settings: latestSettings,
+      context_package: finalContextPackage,
+      staged_worldbuilding_creates: stagedWorldbuildingCreates,
+      staged_character_creates: stagedCharacterCreates,
+      staged_setting_creates: stagedSettingCreates,
+      staged_usage_replacement: stagedUsageReplacement,
+      staged_reviews: stagedReviews,
+      staged: !persist,
+    }
   }
 
   const generateChapterForGroup = async (activeWorkspace: string, projectId: number, chapterId: number, options: any = {}) => {
@@ -44836,7 +45548,9 @@ export function createNovelWritingService(ctx: {
       structured_review_llm_timeout_ms: options.structured_review_llm_timeout_ms || options.structuredReviewLlmTimeoutMs,
       revisionLlmTimeoutMs: options.revision_llm_timeout_ms || options.revisionLlmTimeoutMs,
       revision_llm_timeout_ms: options.revision_llm_timeout_ms || options.revisionLlmTimeoutMs,
+      wordTargetContractionBudget: { used: 0 },
     }
+    trustedWordTargetContractionBudgets.add(llmControlOptions.wordTargetContractionBudget)
     const requestedQualityRepairTimeoutMs = Number(options.quality_repair_llm_timeout_ms || options.qualityRepairLlmTimeoutMs || 300000)
     const baseLlmTimeoutMs = Number(llmControlOptions.llmTimeoutMs || llmControlOptions.timeoutMs || 600000)
     const qualityRepairTimeoutMs = Math.max(30000, Math.min(
@@ -44854,14 +45568,24 @@ export function createNovelWritingService(ctx: {
     const isSceneCardsOnly = productionMode === 'scene_cards_only'
     const isDraftOnly = productionMode === 'draft_only'
     const isDraftReviewOnly = productionMode === 'draft_review'
+    const isFullProduction = !isSceneCardsOnly && !isDraftOnly && !isDraftReviewOnly
+    const pendingGeneratedReviews: any[] = []
+    const storeGeneratedReviewRecord = async (record: any) => {
+      if (!record) return
+      if (isDraftOnly || isDraftReviewOnly) await createNovelReview(activeWorkspace, record)
+      else pendingGeneratedReviews.push(record)
+    }
     let chapters = await listNovelChapters(activeWorkspace, projectId)
     let chapter = chapters.find(item => item.id === chapterId)
     if (!chapter) throw new Error('chapter not found')
-    let [worldbuilding, characters, outlines, reviews] = await Promise.all([
+    let [worldbuilding, characters, outlines, reviews, settings, chapterSettingUsage, projectSettingUsage] = await Promise.all([
       listNovelWorldbuilding(activeWorkspace, projectId),
       listNovelCharacters(activeWorkspace, projectId),
       listNovelOutlines(activeWorkspace, projectId),
       listNovelReviews(activeWorkspace, projectId),
+      listNovelSettingEntities(activeWorkspace, projectId).catch(() => []),
+      listNovelChapterSettingUsage(activeWorkspace, projectId, chapterId).catch(() => []),
+      listNovelChapterSettingUsage(activeWorkspace, projectId).catch(() => []),
     ])
     const buildGenerationContext = async () => ctx.runtime?.buildChapterContext
       ? ctx.runtime.buildChapterContext({
@@ -44873,16 +45597,36 @@ export function createNovelWritingService(ctx: {
           characters,
           outlines,
           reviews,
+          settings,
+          chapterSettingUsage,
+          projectSettingUsage,
         })
-      : buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
+      : buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews, {
+          settingEntities: settings,
+          chapterSettingUsage,
+          projectSettingUsage,
+          persistSettingUsage: !isFullProduction,
+        })
     let wordTarget = resolveChapterWordTarget(project, chapter, options)
     const initialContextPackage = applyChapterWordTargetToContext(
       await buildGenerationContext(),
       wordTarget,
     )
+    let stagedContextUsageReplacement = initialContextPackage?.setting_context?.auto_matched
+      ? asArray(initialContextPackage?.setting_context?.chapter_usage)
+      : null
+    if (stagedContextUsageReplacement) {
+      chapterSettingUsage = stagedContextUsageReplacement
+      projectSettingUsage = [
+        ...projectSettingUsage.filter((usage: any) => Number(usage?.chapter_id || 0) !== chapter.id),
+        ...chapterSettingUsage,
+      ]
+    }
     let preparedGeneration = prepareProseGenerationContract(initialContextPackage, options)
     let contextPackage = preparedGeneration.contextPackage
     let generationContract = preparedGeneration.contract
+    let strictPreflightReadiness = resolveStrictPreflightReadiness(contextPackage.preflight)
+    let stagedPreflightRepair: any = null
     const enforcePreparedGate = async (requireSceneCards: boolean) => {
       try {
         await preparedGeneration.runAfterGate(async () => undefined, requireSceneCards)
@@ -44896,33 +45640,42 @@ export function createNovelWritingService(ctx: {
         throw error
       }
     }
+    const contextPreflightReady = contextPackage.preflight.ready === true && strictPreflightReadiness.ready
     await onStage('context', {
-      status: contextPackage.preflight.ready && contextPackage.preflight.strict_ready !== false ? 'success' : 'failed',
-      score: contextPackage.preflight.ready && contextPackage.preflight.strict_ready !== false ? 100 : 0,
+      status: contextPreflightReady ? 'success' : 'failed',
+      score: contextPreflightReady ? 100 : 0,
       warnings: contextPackage.preflight.warnings || [],
       blockers: contextPackage.preflight.blockers || [],
       director_readiness: generationContract.director?.readiness,
     })
-    const preflightNeedsMaterialRepair = !contextPackage.preflight.ready || contextPackage.preflight.strict_ready === false
+    const preflightNeedsMaterialRepair = contextPackage.preflight.ready !== true || !strictPreflightReadiness.ready
     if (preflightNeedsMaterialRepair && options.auto_repair_missing_material === true) {
       await onStage('material_repair', { status: 'running', warnings: contextPackage.preflight.warnings || [], blockers: contextPackage.preflight.blockers || [] })
-      const repairResult = await autoRepairChapterPreflightGaps(activeWorkspace, project, chapter, contextPackage, preferredModelId, llmControlOptions)
-      chapters = await listNovelChapters(activeWorkspace, projectId)
-      chapter = chapters.find(item => item.id === chapterId) || chapter
-      worldbuilding = await listNovelWorldbuilding(activeWorkspace, projectId)
-      characters = await listNovelCharacters(activeWorkspace, projectId)
-      outlines = await listNovelOutlines(activeWorkspace, projectId)
-      reviews = await listNovelReviews(activeWorkspace, projectId)
+      const repairResult = await autoRepairChapterPreflightGaps(activeWorkspace, project, chapter, contextPackage, preferredModelId, { ...llmControlOptions, persist: false })
+      stagedPreflightRepair = repairResult
+      chapter = repairResult.chapter || chapter
+      chapters = chapters.map(item => item.id === chapterId ? chapter : item)
+      worldbuilding = repairResult.worldbuilding || worldbuilding
+      characters = repairResult.characters || characters
+      settings = repairResult.settings || settings
+      chapterSettingUsage = repairResult.staged_usage_replacement || chapterSettingUsage
+      projectSettingUsage = [
+        ...projectSettingUsage.filter((usage: any) => Number(usage?.chapter_id || 0) !== chapter.id),
+        ...chapterSettingUsage,
+      ]
+      reviews = [...reviews, ...asArray(repairResult.staged_reviews)]
       wordTarget = resolveChapterWordTarget(project, chapter, options)
       const repairedContextPackage = applyChapterWordTargetToContext(
-        await buildGenerationContext(),
+        ctx.runtime?.buildChapterContext ? await buildGenerationContext() : repairResult.context_package,
         wordTarget,
       )
       preparedGeneration = prepareProseGenerationContract(repairedContextPackage, options)
       contextPackage = preparedGeneration.contextPackage
+      if (contextPackage?.setting_context?.auto_matched) stagedContextUsageReplacement = asArray(contextPackage.setting_context.chapter_usage)
       generationContract = preparedGeneration.contract
+      strictPreflightReadiness = resolveStrictPreflightReadiness(contextPackage.preflight)
       await onStage('material_repair', {
-        status: contextPackage.preflight.ready && contextPackage.preflight.strict_ready !== false ? 'success' : 'warn',
+        status: contextPackage.preflight.ready === true && strictPreflightReadiness.ready ? 'success' : 'warn',
         repaired: repairResult.repaired,
         errors: repairResult.errors,
         remaining_warnings: contextPackage.preflight.warnings || [],
@@ -44937,16 +45690,36 @@ export function createNovelWritingService(ctx: {
       const sceneResult = await generateSceneCardsForChapter(activeWorkspace, project, contextPackage, preferredModelId, llmControlOptions)
       if (sceneResult.sceneCards.length > 0) {
         generatedSceneCardsThisRun = true
-        const updatedSceneChapter = await updateNovelChapter(activeWorkspace, chapter.id, {
+        const sceneChapterPatch = {
           scene_breakdown: sceneResult.sceneCards,
           scene_list: sceneResult.sceneCards,
           raw_payload: { ...(chapter.raw_payload || {}), scene_cards_source: 'chapter_group' },
-        } as any, { createVersion: false })
-        if (updatedSceneChapter) chapter = updatedSceneChapter
-        chapters = await listNovelChapters(activeWorkspace, projectId)
+        }
+        if (isSceneCardsOnly) {
+          const updatedSceneChapter = await updateNovelChapter(activeWorkspace, chapter.id, sceneChapterPatch as any, { createVersion: false })
+          if (updatedSceneChapter) chapter = updatedSceneChapter
+          chapters = await listNovelChapters(activeWorkspace, projectId)
+        } else {
+          chapter = { ...chapter, ...sceneChapterPatch }
+          chapters = chapters.map(item => item.id === chapter.id ? chapter : item)
+        }
         wordTarget = resolveChapterWordTarget(project, chapter, options)
         const sceneContextPackage = applyChapterWordTargetToContext(
-          await buildGenerationContext(),
+          {
+            ...contextPackage,
+            chapter_target: {
+              ...(contextPackage?.chapter_target || {}),
+              scene_cards: sceneResult.sceneCards,
+              sceneCards: sceneResult.sceneCards,
+            },
+            ...(contextPackage?.chapterTarget ? {
+              chapterTarget: {
+                ...contextPackage.chapterTarget,
+                scene_cards: sceneResult.sceneCards,
+                sceneCards: sceneResult.sceneCards,
+              },
+            } : {}),
+          },
           wordTarget,
         )
         preparedGeneration = prepareProseGenerationContract(sceneContextPackage, options)
@@ -45038,6 +45811,7 @@ export function createNovelWritingService(ctx: {
       modelId: String(ctx.production.getStageModelId(project, 'draft', preferredModelId) || ''),
       skipMemoryStore: true,
     })
+    assertCompleteProseTransportResult(draftResult, 'PROSE_DRAFT_TRUNCATED')
     const draftPromptDiagnostics = {
       ...compiledPrompt.diagnostics,
       model_usage: (draftResult as any)?.prose_prompt_diagnostics?.model_usage
@@ -45116,19 +45890,29 @@ export function createNovelWritingService(ctx: {
     throwIfChapterGenerationAborted()
     await onStage('word_target', { status: 'running', target: wordTarget.target, min: wordTarget.min, max: wordTarget.max, actual: countProseChars(finalText) })
     const wordTargetExpansionPatches: any[] = []
+    let wordTargetCompatibility: any = null
     const recordWordTargetExpansionPatch = (wordTargetCheck: any) => {
       const patch = wordTargetCheck?.expansion?.expansion_blueprint_patch
       if (patch) wordTargetExpansionPatches.push(patch)
     }
+    const isRestorableWordTargetText = (text: string, compatibility: any) => {
+      const strictEvaluation = evaluateProseWordTarget(text, wordTarget)
+      if (strictEvaluation.passed) return true
+      return compatibility?.word_target_compatibility_pass === true
+        && wordTarget?.mode === 'standard'
+        && Number(compatibility?.compatibility_ceiling || 0) > 0
+        && strictEvaluation.actual <= Number(compatibility.compatibility_ceiling)
+    }
     try {
       const wordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId, llmControlOptions)
+      wordTargetCompatibility = wordTargetCheck.word_target_compatibility_pass ? wordTargetCheck : null
       finalText = wordTargetCheck.final_text || finalText
       recordWordTargetExpansionPatch(wordTargetCheck)
       if (wordTargetCheck.expanded && wordTargetCheck.expansion) {
         finalSceneBreakdown = selectVerifiedSceneBreakdownUpdate(finalSceneBreakdown, wordTargetCheck.expansion.scene_breakdown, finalText)
         finalContinuityNotes = wordTargetCheck.expansion.continuity_notes?.length ? wordTargetCheck.expansion.continuity_notes : finalContinuityNotes
       }
-      await onStage('word_target', { status: 'success', expanded: wordTargetCheck.expanded, contracted: wordTargetCheck.contracted, soft_pass: wordTargetCheck.word_target_soft_pass, contraction_attempts: wordTargetCheck.contraction?.attempts, word_count: countProseChars(finalText), evaluation: wordTargetCheck.final_evaluation })
+      await onStage('word_target', { status: 'success', expanded: wordTargetCheck.expanded, contracted: wordTargetCheck.contracted, soft_pass: wordTargetCheck.word_target_soft_pass, compatibility_pass: wordTargetCheck.word_target_compatibility_pass === true, compatibility_ceiling: wordTargetCheck.compatibility_ceiling, contraction_attempts: wordTargetCheck.contraction?.attempts, word_count: countProseChars(finalText), evaluation: wordTargetCheck.final_evaluation })
     } catch (error: any) {
       await onStage('word_target', { status: 'failed', error: String(error?.message || error), word_target: error?.word_target || wordTarget, evaluation: error?.evaluation, final_evaluation: error?.final_evaluation, contraction_attempts: error?.contraction_attempts, expansion_attempts: error?.expansion_attempts })
       throw error
@@ -45141,6 +45925,7 @@ export function createNovelWritingService(ctx: {
       const preEditorText = finalText
       const preEditorSceneBreakdown = finalSceneBreakdown
       const preEditorContinuityNotes = finalContinuityNotes
+      const preEditorWordTargetCompatibility = wordTargetCompatibility
       throwIfChapterGenerationAborted()
       await onStage('editor', { status: 'running' })
       try {
@@ -45164,19 +45949,23 @@ export function createNovelWritingService(ctx: {
     try {
       throwIfChapterGenerationAborted()
       const postEditorWordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId, llmControlOptions)
+      wordTargetCompatibility = postEditorWordTargetCheck.word_target_compatibility_pass ? postEditorWordTargetCheck : null
       finalText = postEditorWordTargetCheck.final_text || finalText
       recordWordTargetExpansionPatch(postEditorWordTargetCheck)
       if (postEditorWordTargetCheck.expanded && postEditorWordTargetCheck.expansion) {
         finalSceneBreakdown = selectVerifiedSceneBreakdownUpdate(finalSceneBreakdown, postEditorWordTargetCheck.expansion.scene_breakdown, finalText)
         finalContinuityNotes = postEditorWordTargetCheck.expansion.continuity_notes?.length ? postEditorWordTargetCheck.expansion.continuity_notes : finalContinuityNotes
         await onStage('word_target', { status: 'success', expanded: postEditorWordTargetCheck.expanded, contracted: postEditorWordTargetCheck.contracted, soft_pass: postEditorWordTargetCheck.word_target_soft_pass, contraction_attempts: postEditorWordTargetCheck.contraction?.attempts, word_count: countProseChars(finalText), evaluation: postEditorWordTargetCheck.final_evaluation, phase: 'post_editor' })
+      } else if (postEditorWordTargetCheck.word_target_compatibility_pass) {
+        await onStage('word_target', { status: 'success', phase: 'post_editor', compatibility_pass: true, compatibility_ceiling: postEditorWordTargetCheck.compatibility_ceiling, contraction_attempts: postEditorWordTargetCheck.contraction?.attempts, word_count: countProseChars(finalText), evaluation: postEditorWordTargetCheck.final_evaluation })
       }
     } catch (error: any) {
       const preEditorEvaluation = evaluateProseWordTarget(preEditorText, wordTarget)
-      if (error?.code === 'PROSE_WORD_TARGET_LONG' && preEditorEvaluation.passed) {
+      if (error?.code === 'PROSE_WORD_TARGET_LONG' && isRestorableWordTargetText(preEditorText, preEditorWordTargetCompatibility)) {
         finalText = preEditorText
         finalSceneBreakdown = preEditorSceneBreakdown
         finalContinuityNotes = preEditorContinuityNotes
+        wordTargetCompatibility = preEditorWordTargetCompatibility
         const {
           final_text: _discardedEditorText,
           revision: _discardedEditorRevision,
@@ -45200,6 +45989,8 @@ export function createNovelWritingService(ctx: {
           phase: 'post_editor',
           error: String(error?.message || error),
           fallback: 'pre_editor',
+          compatibility_pass: preEditorWordTargetCompatibility?.word_target_compatibility_pass === true,
+          compatibility_ceiling: preEditorWordTargetCompatibility?.compatibility_ceiling,
           word_target: error?.word_target || wordTarget,
           evaluation: error?.evaluation,
           final_evaluation: error?.final_evaluation,
@@ -45212,6 +46003,10 @@ export function createNovelWritingService(ctx: {
       }
     }
     throwIfChapterGenerationAborted()
+    const preMemeText = finalText
+    const preMemeSceneBreakdown = finalSceneBreakdown
+    const preMemeContinuityNotes = finalContinuityNotes
+    const preMemeWordTargetCompatibility = wordTargetCompatibility
     await onStage('meme_polish', { status: 'running' })
     try {
       memePolish = await runMemePolish(activeWorkspace, project, contextPackage, finalText, preferredModelId, llmControlOptions)
@@ -45233,16 +46028,41 @@ export function createNovelWritingService(ctx: {
     try {
       throwIfChapterGenerationAborted()
       const postMemeWordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId, llmControlOptions)
+      wordTargetCompatibility = postMemeWordTargetCheck.word_target_compatibility_pass ? postMemeWordTargetCheck : null
       finalText = postMemeWordTargetCheck.final_text || finalText
       recordWordTargetExpansionPatch(postMemeWordTargetCheck)
       if (postMemeWordTargetCheck.expanded && postMemeWordTargetCheck.expansion) {
         finalSceneBreakdown = selectVerifiedSceneBreakdownUpdate(finalSceneBreakdown, postMemeWordTargetCheck.expansion.scene_breakdown, finalText)
         finalContinuityNotes = postMemeWordTargetCheck.expansion.continuity_notes?.length ? postMemeWordTargetCheck.expansion.continuity_notes : finalContinuityNotes
         await onStage('word_target', { status: 'success', expanded: postMemeWordTargetCheck.expanded, contracted: postMemeWordTargetCheck.contracted, soft_pass: postMemeWordTargetCheck.word_target_soft_pass, contraction_attempts: postMemeWordTargetCheck.contraction?.attempts, word_count: countProseChars(finalText), evaluation: postMemeWordTargetCheck.final_evaluation, phase: 'post_meme_polish' })
+      } else if (postMemeWordTargetCheck.word_target_compatibility_pass) {
+        await onStage('word_target', { status: 'success', phase: 'post_meme_polish', compatibility_pass: true, compatibility_ceiling: postMemeWordTargetCheck.compatibility_ceiling, contraction_attempts: postMemeWordTargetCheck.contraction?.attempts, word_count: countProseChars(finalText), evaluation: postMemeWordTargetCheck.final_evaluation })
       }
       } catch (error: any) {
-        await onStage('word_target', { status: 'failed', error: String(error?.message || error), word_target: error?.word_target || wordTarget, evaluation: error?.evaluation, final_evaluation: error?.final_evaluation, contraction_attempts: error?.contraction_attempts, expansion_attempts: error?.expansion_attempts, phase: 'post_meme_polish' })
-        throw error
+        if (error?.code === 'PROSE_WORD_TARGET_LONG' && isRestorableWordTargetText(preMemeText, preMemeWordTargetCompatibility)) {
+          finalText = preMemeText
+          finalSceneBreakdown = preMemeSceneBreakdown
+          finalContinuityNotes = preMemeContinuityNotes
+          wordTargetCompatibility = preMemeWordTargetCompatibility
+          const { final_text: _discardedMemeText, revision: _discardedMemeRevision, ...memeDiagnostics } = memePolish || {}
+          memePolish = {
+            ...memeDiagnostics,
+            polished: false,
+            discarded: true,
+            discard_reason: 'post_meme_word_target_failed',
+            word_target_failure: {
+              code: error.code,
+              evaluation: error?.evaluation,
+              final_evaluation: error?.final_evaluation,
+              contraction_attempts: error?.contraction_attempts,
+              restored_evaluation: evaluateProseWordTarget(preMemeText, wordTarget),
+            },
+          }
+          await onStage('word_target', { status: 'warn', phase: 'post_meme_polish', error: String(error?.message || error), fallback: 'pre_meme', compatibility_pass: preMemeWordTargetCompatibility?.word_target_compatibility_pass === true, compatibility_ceiling: preMemeWordTargetCompatibility?.compatibility_ceiling, contraction_attempts: error?.contraction_attempts })
+        } else {
+          await onStage('word_target', { status: 'failed', error: String(error?.message || error), word_target: error?.word_target || wordTarget, evaluation: error?.evaluation, final_evaluation: error?.final_evaluation, contraction_attempts: error?.contraction_attempts, expansion_attempts: error?.expansion_attempts, phase: 'post_meme_polish' })
+          throw error
+        }
       }
     }
     throwIfChapterGenerationAborted()
@@ -45276,7 +46096,10 @@ export function createNovelWritingService(ctx: {
         minScore: qualityThreshold,
         coreContract: buildFocusedQualityCoreContract(generationContract),
         maxRevisionRounds: isDraftReviewOnly || isDraftOnly ? 0 : 2,
-        scan: text => scanProseForQualityLoop(text, contextPackage, wordTarget),
+        scan: text => scanProseForQualityLoop(text, contextPackage, wordTarget, wordTargetCompatibility ? {
+          word_target_compatibility_pass: true,
+          compatibility_ceiling: wordTargetCompatibility.compatibility_ceiling,
+        } : {}),
         review: async ({ prompt, round, attempt }) => {
           throwIfChapterGenerationAborted()
           await onStage('review', { status: 'running', phase: round > 0 ? 'quality_recheck' : 'quality_review', round, attempt })
@@ -45321,6 +46144,7 @@ export function createNovelWritingService(ctx: {
             signal: options.abortSignal,
             timeoutMs: qualityRepairTimeoutMs,
           })
+          assertCompleteProseTransportResult(result, 'PROSE_REVISION_TRUNCATED')
           if ((result as any)?.error) {
             throw Object.assign(new Error(String((result as any).error)), {
               code: 'PROSE_REVISION_FAILED',
@@ -45361,6 +46185,13 @@ export function createNovelWritingService(ctx: {
       }
     }
     let selfCheck = buildLegacyCompatibleSelfCheck(qualityLoop)
+    if (!(selfCheck.review as any).next_chapter_quality_plan) {
+      ;(selfCheck.review as any).next_chapter_quality_plan = buildFallbackNextChapterQualityPlan(
+        selfCheck.review,
+        contextPackage,
+        finalText,
+      )
+    }
     ohStoryDeliveryReceipts = {
       ...(ohStoryDeliveryReceipts || {}),
       revision_receipts: [
@@ -45390,7 +46221,7 @@ export function createNovelWritingService(ctx: {
       await onStage('readability_review', { status: 'running' })
       try {
         readabilityReview = await runReadabilityReview(activeWorkspace, project, contextPackage, finalText, preferredModelId, llmControlOptions)
-        await createNovelReview(activeWorkspace, buildReadabilityReviewRecord({
+        await storeGeneratedReviewRecord(buildReadabilityReviewRecord({
           projectId,
           chapter,
           readabilityReview,
@@ -45682,9 +46513,6 @@ export function createNovelWritingService(ctx: {
         configSnapshot,
       },
     })
-    const storeGeneratedReviewRecord = async (record: any) => {
-      if (record) await createNovelReview(activeWorkspace, record)
-    }
     await storeGeneratedReviewRecord(buildReceiptSyncReviewRecord({ projectId, chapter, sync: proseRevisionReceiptSync, reviewType: 'prose_revision_receipt_sync', payloadKey: 'prose_revision_receipt_sync' }))
     await storeGeneratedReviewRecord(buildReceiptSyncReviewRecord({ projectId, chapter, sync: deslopRepairReceiptSync, reviewType: 'deslop_repair_receipt_sync', payloadKey: 'deslop_repair_receipt_sync' }))
     await storeGeneratedReviewRecord(buildReceiptSyncReviewRecord({ projectId, chapter, sync: qualityAuditRepairReceiptSync, reviewType: 'quality_audit_repair_receipt_sync', payloadKey: 'quality_audit_repair_receipt_sync' }))
@@ -46057,20 +46885,42 @@ export function createNovelWritingService(ctx: {
         config_snapshot: configSnapshot,
       }
     }
+    await onStage('story_state', { status: 'running', phase: 'prepare' })
+    await ctx.runtime?.hooks?.beforeStoryState?.({ chapterId: chapter.id, finalText })
+    const preparedStoryStateUpdate = await prepareStoryStateUpdate(
+      activeWorkspace,
+      project,
+      { ...chapter, chapter_text: finalText },
+      finalReviewContextPackage,
+      finalText,
+      preferredModelId,
+      llmControlOptions,
+    )
+    if (preparedStoryStateUpdate.hard_failures.length) {
+      qualityGateReview = {
+        ...qualityGateReview,
+        quality_audit_checks: [
+          ...asArray(qualityGateReview?.quality_audit_checks || qualityGateReview?.qualityAuditChecks),
+          ...preparedStoryStateUpdate.hard_failures.map(failure => ({
+            key: failure.key,
+            label: '故事状态同步',
+            status: 'fail',
+            evidence: failure.message,
+          })),
+        ],
+      }
+    }
     const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)
-    if (!preStoreQualityDecision.passed && !approvals?.quality_gate?.approved) {
+    if (!preStoreQualityDecision.passed && (!preStoreQualityDecision.approvable || !approvals?.quality_gate?.approved)) {
       await onStage('review', { status: 'needs_confirmation', score: selfCheck?.review?.score ?? null, quality_gate: preStoreQualityDecision })
-      await createNovelReview(activeWorkspace, buildProseQualityReview('warn', preStoreQualityDecision, '质量门禁未通过'))
       throw ctx.production.buildApprovalError('quality_gate', '章节质量门禁未通过，正文未入库', preStoreQualityDecision)
     }
     if (ctx.production.approvalRequired(approvalPolicy, 'low_score', approvals, { score: selfCheck?.review?.score ?? null, issues: selfCheck?.review?.issues || [] })) {
       await onStage('review', { status: 'needs_confirmation', score: selfCheck?.review?.score ?? null, issues: selfCheck?.review?.issues || [] })
-      await createNovelReview(activeWorkspace, buildProseQualityReview('warn', preStoreQualityDecision, '低分等待人工确认', { approvalType: 'low_score' }))
       throw ctx.production.buildApprovalError('low_score', '章节质检低于阈值，等待人工确认', { score: selfCheck?.review?.score ?? null, issues: selfCheck?.review?.issues || [] })
     }
     if (ctx.production.approvalRequired(approvalPolicy, 'draft', approvals, { score: selfCheck?.review?.score ?? null, revised: Boolean(selfCheck.revised) })) {
       await onStage('draft', { status: 'needs_confirmation', score: selfCheck?.review?.score ?? null, revised: Boolean(selfCheck.revised) })
-      await createNovelReview(activeWorkspace, buildProseQualityReview('warn', preStoreQualityDecision, '正文入库等待人工确认', { approvalType: 'draft' }))
       throw ctx.production.buildApprovalError('draft', '正文入库前等待人工确认', { score: selfCheck?.review?.score ?? null, revised: Boolean(selfCheck.revised) })
     }
     throwIfChapterGenerationAborted()
@@ -46082,40 +46932,21 @@ export function createNovelWritingService(ctx: {
     await onStage('safety', { status: safetyDecision.blocked ? 'failed' : 'success', score: safetyDecision.score, copy_hit_count: safetyDecision.copy_hit_count, risk_level: referenceReport?.quality_assessment?.risk_level })
     const finalQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview, safetyDecision)
     if (safetyDecision.blocked) {
-      await createNovelReview(activeWorkspace, buildProseQualityReview('warn', finalQualityDecision, '仿写安全阈值未通过', {
-        referenceReport,
-        safetyDecision,
-        safetyExplanation,
-        migrationAudit,
-        approvalType: 'reference_safety_blocked',
-      }))
       throw Object.assign(new Error('仿写安全阈值未通过'), { code: 'REFERENCE_SAFETY_BLOCKED', referenceReport, safetyDecision, safetyExplanation, migrationAudit })
     }
-    if (!finalQualityDecision.passed && !approvals?.quality_gate?.approved) {
+    if (!finalQualityDecision.passed && (!finalQualityDecision.approvable || !approvals?.quality_gate?.approved)) {
       await onStage('safety', { status: 'needs_confirmation', score: safetyDecision.score, quality_gate: finalQualityDecision })
-      await createNovelReview(activeWorkspace, buildProseQualityReview('warn', finalQualityDecision, '最终质量门禁未通过', {
-        referenceReport,
-        safetyDecision,
-        migrationAudit,
-      }))
       throw ctx.production.buildApprovalError('quality_gate', '章节质量门禁未通过，正文未入库', finalQualityDecision)
     }
     if (ctx.production.approvalRequired(approvalPolicy, 'safety', approvals, { score: safetyDecision.score, copy_hit_count: safetyDecision.copy_hit_count, risk_level: referenceReport?.quality_assessment?.risk_level })) {
       await onStage('safety', { status: 'needs_confirmation', score: safetyDecision.score, copy_hit_count: safetyDecision.copy_hit_count, risk_level: referenceReport?.quality_assessment?.risk_level })
-      await createNovelReview(activeWorkspace, buildProseQualityReview('warn', finalQualityDecision, '仿写安全报告等待人工确认', {
-        referenceReport,
-        safetyDecision,
-        safetyExplanation,
-        migrationAudit,
-        approvalType: 'safety',
-      }))
       throw ctx.production.buildApprovalError('safety', '仿写安全报告等待人工确认', { score: safetyDecision.score, copy_hit_count: safetyDecision.copy_hit_count, risk_level: referenceReport?.quality_assessment?.risk_level })
     }
     throwIfChapterGenerationAborted()
     assertCurrentProseQualityCanStore()
     await onStage('store', { status: 'running' })
     await ctx.runtime?.hooks?.beforeChapterStore?.({ chapterId: chapter.id, finalText })
-    const updated = await updateNovelChapter(activeWorkspace, chapter.id, buildChapterProseStoragePatch({
+    const chapterPatch = buildChapterProseStoragePatch({
       chapter,
       generatedTitlePatch,
       finalText,
@@ -46123,33 +46954,124 @@ export function createNovelWritingService(ctx: {
       finalSceneBreakdown,
       ohStoryDeliveryReceipts,
       postDraftDirector,
-    }), { versionSource: resolveChapterProseVersionSource({ revisionEligible: true, selfCheck, editorRewrite }) })
-    await onStage('store', { status: 'success', word_count: countProseChars(finalText), scene_status: 'accepted' })
-    try {
-      await storeChapterProseMemory(project, chapter.chapter_no, finalText)
-    } catch (error) {
-      console.warn('[memory-store] Failed to store accepted prose output:', String(error).slice(0, 200))
-    }
-    throwIfChapterGenerationAborted()
-    await onStage('story_state', { status: 'running' })
-    await ctx.runtime?.hooks?.beforeStoryState?.({ chapterId: chapter.id, finalText })
-    const storyStateUpdate = await updateStoryStateMachine(activeWorkspace, project, updated || chapter, buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches), finalText, preferredModelId, llmControlOptions).catch(error => {
-      if (isAbortError(error)) throw error
-      return { error: String(error) }
     })
-    await onStage('story_state', { status: (storyStateUpdate as any)?.error ? 'failed' : 'success', error: (storyStateUpdate as any)?.error || '' })
-    await createNovelReview(activeWorkspace, buildProseQualityReview(finalQualityDecision.passed ? 'ok' : 'warn', finalQualityDecision, '', {
-      referenceReport,
-      safetyDecision,
-      migrationAudit,
+    const acceptanceCharacterUpdates = asArray(preparedStoryStateUpdate.character_updates).map((update: any) => ({
+      id: Number(update?.character_id || update?.characterId || update?.id || 0) || undefined,
+      name: String(update?.name || '').trim() || undefined,
+      patch: {
+        current_state: {
+          ...(update?.current_state || update?.currentState || {}),
+          last_seen_chapter: chapter.chapter_no,
+        },
+      },
     }))
+    const acceptanceSettingUpdates = [
+      ...asArray(preparedStoryStateUpdate.setting_updates).map((update: any) => ({ update, storyline: false })),
+      ...asArray(preparedStoryStateUpdate.storyline_updates).map((update: any) => ({ update, storyline: true })),
+    ].map(({ update, storyline }) => ({
+      entity_id: Number(update?.entity_id || update?.entityId || update?.id || 0) || undefined,
+      name: String(update?.name || '').trim() || undefined,
+      entity_type: String(update?.entity_type || update?.entityType || '').trim() || undefined,
+      patch: {
+        state_json: {
+          ...(update?.state_delta || update?.stateDelta || update?.actual_state_change || update?.actualStateChange || {}),
+          last_seen_chapter: chapter.chapter_no,
+          ...(storyline ? {
+            last_checked_chapter_id: chapter.id,
+            last_checked_chapter_no: chapter.chapter_no,
+          } : {}),
+        },
+      },
+    }))
+    const finalCandidateChapterUsage = asArray(
+      stagedPreflightRepair?.staged_usage_replacement
+        ?? stagedContextUsageReplacement
+        ?? chapterSettingUsage,
+    )
+    const resolveCandidateSettingId = (reference: any) => {
+      const directId = Number(reference?.entity_id || reference?.entityId || reference?.id || 0)
+      if (directId) return directId
+      const name = String(reference?.entity_name || reference?.name || '').trim()
+      const entityType = String(reference?.entity_type || reference?.entityType || '').trim()
+      if (!name) return 0
+      const matches = asArray(settings).filter((setting: any) => (
+        String(setting?.name || '').trim() === name
+        && (!entityType || String(setting?.entity_type || '').trim() === entityType)
+      ))
+      return matches.length === 1 ? Number(matches[0]?.id || 0) : 0
+    }
+    const finalCandidateUsageEntityIds = new Set(
+      finalCandidateChapterUsage
+        .map((usage: any) => resolveCandidateSettingId(usage))
+        .filter((entityId: number) => entityId !== 0),
+    )
+    const acceptanceUsageUpdates = [
+      ...asArray(preparedStoryStateUpdate.setting_updates),
+      ...asArray(preparedStoryStateUpdate.storyline_updates),
+    ].map((update: any) => ({ update, entityId: resolveCandidateSettingId(update) }))
+      .filter(({ entityId }) => finalCandidateUsageEntityIds.has(entityId))
+      .map(({ update, entityId }) => ({
+        entity_id: entityId || undefined,
+        name: String(update?.name || '').trim() || undefined,
+        entity_type: String(update?.entity_type || update?.entityType || '').trim() || undefined,
+        patch: {
+          actual_state_change: update?.actual_state_change
+            || update?.actualStateChange
+            || update?.state_delta
+            || update?.stateDelta
+            || {},
+        },
+      }))
     const settingConsistencyReview = buildSettingConsistencyReviewRecord({
       projectId,
-      chapter,
+      chapter: { ...chapter, ...chapterPatch },
       contextPackage,
       selfCheck,
     })
-    if (settingConsistencyReview) await createNovelReview(activeWorkspace, settingConsistencyReview)
+    const acceptance = await commitNovelChapterAcceptance(activeWorkspace, {
+      chapter_id: chapter.id,
+      chapter_patch: chapterPatch,
+      version_source: resolveChapterProseVersionSource({ revisionEligible: true, selfCheck, editorRewrite }),
+      next_reference_config: preparedStoryStateUpdate.next_reference_config,
+      worldbuilding_creates: asArray(stagedPreflightRepair?.staged_worldbuilding_creates),
+      character_creates: asArray(stagedPreflightRepair?.staged_character_creates),
+      setting_creates: asArray(stagedPreflightRepair?.staged_setting_creates),
+      chapter_setting_usage_replacement: stagedPreflightRepair?.staged_usage_replacement || stagedContextUsageReplacement || undefined,
+      character_updates: acceptanceCharacterUpdates,
+      setting_updates: acceptanceSettingUpdates,
+      usage_updates: acceptanceUsageUpdates,
+      reviews: [
+        ...asArray(stagedPreflightRepair?.staged_reviews),
+        ...pendingGeneratedReviews,
+        buildProseQualityReview(finalQualityDecision.passed ? 'ok' : 'warn', finalQualityDecision, '', {
+          referenceReport,
+          safetyDecision,
+          migrationAudit,
+        }),
+        settingConsistencyReview,
+      ].filter(Boolean),
+    })
+    const updated = acceptance.chapter
+    const postCommitWarnings: Array<{ stage: string; message: string }> = []
+    const runPostCommitBestEffort = async (stage: string, task: () => any | Promise<any>) => {
+      try {
+        await task()
+        return true
+      } catch (error) {
+        postCommitWarnings.push({ stage, message: String(error).slice(0, 300) })
+        return false
+      }
+    }
+    await runPostCommitBestEffort('after_commit_hook', () => ctx.runtime?.hooks?.afterChapterCommit?.({ chapterId: chapter.id, finalText }))
+    await runPostCommitBestEffort('store_stage', () => onStage('store', { status: 'success', word_count: countProseChars(finalText), scene_status: 'accepted' }))
+    await runPostCommitBestEffort('memory', async () => {
+      await storeChapterProseMemory(project, chapter.chapter_no, finalText)
+    })
+    await runPostCommitBestEffort('story_state_stage', () => onStage('story_state', { status: 'success' }))
+    let storyStateUpdateWithSync: any = preparedStoryStateUpdate.payload
+    await runPostCommitBestEffort('post_commit_sync', async () => {
+    await ctx.runtime?.hooks?.beforePostCommitSync?.({ chapterId: chapter.id, finalText })
+    const storyStateUpdate = preparedStoryStateUpdate.payload
     const story_state_update: any = storyStateUpdate || {}
     const proseMetaSync = buildProseMetaSyncReport(project, updated, contextPackage, finalText)
     const chapterBlueprintSync = buildChapterBlueprintSyncReport(project, updated, contextPackage, finalText)
@@ -46203,7 +47125,7 @@ export function createNovelWritingService(ctx: {
     const qualityAuditSync = buildQualityAuditSyncReport(project, updated, contextPackage, finalText)
     const beatCoolingSync = buildBeatCoolingSyncReport(project, updated, contextPackage, finalText)
     const readerPayoffSync = buildReaderPayoffSyncReport(project, updated, contextPackage, finalText, story_state_update)
-    const storyStateUpdateWithSync = buildPostDeliveryStoryStateUpdate(story_state_update, {
+    storyStateUpdateWithSync = buildPostDeliveryStoryStateUpdate(story_state_update, {
       proseRevisionReceiptSync,
       deslopRepairReceiptSync,
       qualityAuditRepairReceiptSync,
@@ -46266,6 +47188,7 @@ export function createNovelWritingService(ctx: {
       beatCoolingSync,
       readerPayoffSync,
     })
+    })
     return {
       chapter: updated,
       score: selfCheck?.review?.score ?? null,
@@ -46289,6 +47212,7 @@ export function createNovelWritingService(ctx: {
       requires_next_chapter_quality_plan_receipts: nextChapterQualityPlanReceiptSync.requires_receipts,
       requires_status_filter_receipts: statusFilterReceiptSync.requires_receipts,
       config_snapshot: configSnapshot,
+      post_commit_warnings: postCommitWarnings,
     }
   }
 
@@ -46297,6 +47221,7 @@ export function createNovelWritingService(ctx: {
     buildChapterContextPackage,
     autoRepairChapterPreflightGaps,
     generateSceneCardsForChapter,
+    prepareStoryStateUpdate,
     updateStoryStateMachine,
     getStoredOrBuiltWritingBible,
     runCommercialEditorRewrite,

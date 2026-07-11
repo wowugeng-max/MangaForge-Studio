@@ -1060,8 +1060,15 @@ function arrayValue(value: any): any[] {
 
 function normalizeOhStoryDirector(value?: AnyRecord | null): AnyRecord | null {
   if (!value || typeof value !== 'object') return null
-  const director = value.oh_story_director || value.ohStoryDirector
-  return director && typeof director === 'object' ? director : null
+  const director = [
+    value.context_package?.oh_story_director,
+    value.context_package?.ohStoryDirector,
+    value.contextPackage?.oh_story_director,
+    value.contextPackage?.ohStoryDirector,
+    value.oh_story_director,
+    value.ohStoryDirector,
+  ].find(candidate => candidate && typeof candidate === 'object' && Object.keys(candidate).length > 0)
+  return director || null
 }
 
 function directorPlannerAction(director?: AnyRecord | null): WritingCockpitActionKey | null {
@@ -2413,8 +2420,31 @@ function relationshipGraphRiskTexts(contextPackage?: AnyRecord | null) {
   return Array.from(new Set([...explicitRisks, ...diagnosticRisks])).slice(0, 6)
 }
 
+function contextContractCandidates(contextPackage: AnyRecord, snakeKey: string, camelKey: string): AnyRecord[] {
+  const layers = uniqueObjects([
+    contextPackage,
+    contextPackage.context_package,
+    contextPackage.contextPackage,
+  ])
+  const targets = uniqueObjects(layers.flatMap(layer => [
+    layer.chapter_target,
+    layer.chapterTarget,
+  ]))
+  const preDraftBriefs = uniqueObjects([...targets, ...layers].flatMap(source => [
+    source.pre_draft_brief,
+    source.preDraftBrief,
+  ]))
+  return uniqueObjects([...targets, ...layers, ...preDraftBriefs].flatMap(source => [
+    source[snakeKey],
+    source[camelKey],
+  ]))
+}
+
 function sourceGapTextsFromStateTracking(contract: AnyRecord = {}) {
-  return arrayValue(contract?.source_readiness || contract?.sourceReadiness)
+  return [
+    ...arrayValue(contract?.source_readiness),
+    ...arrayValue(contract?.sourceReadiness),
+  ]
     .filter(row => !['ready', 'optional', 'pass', 'ok'].includes(String(row?.status || '').toLowerCase()))
     .map(row => [firstNonEmpty(row?.label, row?.key), row?.status ? `状态=${row.status}` : '', row?.evidence]
       .filter(Boolean)
@@ -2426,25 +2456,9 @@ function sourceGapTextsFromStateTracking(contract: AnyRecord = {}) {
 function normalizeWritePreparationBrief(contextPackage?: AnyRecord | null): ChapterWritePreparationBrief | null {
   if (!contextPackage) return null
   const target = contextTarget(contextPackage)
-  const raw = target?.write_preparation_brief
-    || target?.writePreparationBrief
-    || contextPackage?.write_preparation_brief
-    || contextPackage?.writePreparationBrief
-    || contextPackage?.pre_draft_brief?.write_preparation_brief
-    || contextPackage?.pre_draft_brief?.writePreparationBrief
-    || contextPackage?.preDraftBrief?.write_preparation_brief
-    || contextPackage?.preDraftBrief?.writePreparationBrief
-    || {}
-  const hasRaw = Boolean(raw && typeof raw === 'object' && Object.keys(raw).length > 0)
-  const stateTrackingContract = target?.state_tracking_contract
-    || target?.stateTrackingContract
-    || contextPackage?.state_tracking_contract
-    || contextPackage?.stateTrackingContract
-    || contextPackage?.pre_draft_brief?.state_tracking_contract
-    || contextPackage?.pre_draft_brief?.stateTrackingContract
-    || contextPackage?.preDraftBrief?.state_tracking_contract
-    || contextPackage?.preDraftBrief?.stateTrackingContract
-    || {}
+  const rawCandidates = contextContractCandidates(contextPackage, 'write_preparation_brief', 'writePreparationBrief')
+  const hasRaw = rawCandidates.some(raw => Object.keys(raw).length > 0)
+  const stateTrackingContracts = contextContractCandidates(contextPackage, 'state_tracking_contract', 'stateTrackingContract')
   const chapterBlueprint = target?.chapter_blueprint
     || target?.chapterBlueprint
     || contextPackage?.chapter_blueprint
@@ -2462,20 +2476,32 @@ function normalizeWritePreparationBrief(contextPackage?: AnyRecord | null): Chap
   const deliveryRiskCarryOver = normalizeDeliveryRiskCarryOverPlan(contextPackage, target)
   const endingContract = chapterBlueprint?.ending_contract || chapterBlueprint?.endingContract || {}
   const sourceGaps = uniqueStrings([
-    ...stringArray(raw?.source_gaps || raw?.sourceGaps),
-    ...sourceGapTextsFromStateTracking(stateTrackingContract),
+    ...rawCandidates.flatMap(raw => [
+      ...stringArray(raw?.source_gaps),
+      ...stringArray(raw?.sourceGaps),
+    ]),
+    ...stateTrackingContracts.flatMap(sourceGapTextsFromStateTracking),
   ]).slice(0, 8)
   const assetRisks = uniqueStrings([
-    ...stringArray(raw?.asset_risks || raw?.assetRisks),
+    ...rawCandidates.flatMap(raw => [
+      ...stringArray(raw?.asset_risks),
+      ...stringArray(raw?.assetRisks),
+    ]),
     ...relationshipGraphRiskTexts(contextPackage),
   ]).slice(0, 8)
   const deliveryRiskActions = uniqueStrings([
-    ...stringArray(raw?.delivery_risk_actions || raw?.deliveryRiskActions),
+    ...rawCandidates.flatMap(raw => [
+      ...stringArray(raw?.delivery_risk_actions),
+      ...stringArray(raw?.deliveryRiskActions),
+    ]),
     ...deliveryRiskCarryOver.requiredActions,
     ...deliveryRiskCarryOver.forbiddenRepeats.map(item => `禁用重复：${item}`),
   ]).slice(0, 8)
   const blueprintFocus = uniqueStrings([
-    ...stringArray(raw?.blueprint_focus || raw?.blueprintFocus),
+    ...rawCandidates.flatMap(raw => [
+      ...stringArray(raw?.blueprint_focus),
+      ...stringArray(raw?.blueprintFocus),
+    ]),
     chapterBlueprint?.opening_hook ? `开篇钩子：${text(chapterBlueprint.opening_hook)}` : '',
     chapterBlueprint?.core_payoff ? `核心回报：${text(chapterBlueprint.core_payoff)}` : '',
     chapterBlueprint?.target_emotion ? `目标情绪：${text(chapterBlueprint.target_emotion)}` : '',
@@ -2485,7 +2511,10 @@ function normalizeWritePreparationBrief(contextPackage?: AnyRecord | null): Chap
     chapterBlueprint?.writing_intent ? `写作意图：${text(chapterBlueprint.writing_intent)}` : '',
   ]).slice(0, 8)
   const readerPayoffFocus = uniqueStrings([
-    ...stringArray(raw?.reader_payoff_focus || raw?.readerPayoffFocus),
+    ...rawCandidates.flatMap(raw => [
+      ...stringArray(raw?.reader_payoff_focus),
+      ...stringArray(raw?.readerPayoffFocus),
+    ]),
     ...stringArray([
       readerRetentionBrief?.opening_hook,
       readerRetentionBrief?.hook_signal,
@@ -2497,7 +2526,10 @@ function normalizeWritePreparationBrief(contextPackage?: AnyRecord | null): Chap
     ...stringArray(readerRetentionBrief?.must_deliver || readerRetentionBrief?.mustDeliver),
   ]).slice(0, 8)
   const mustConfirm = uniqueStrings([
-    ...stringArray(raw?.must_confirm || raw?.mustConfirm),
+    ...rawCandidates.flatMap(raw => [
+      ...stringArray(raw?.must_confirm),
+      ...stringArray(raw?.mustConfirm),
+    ]),
     ...sourceGaps.map(item => `来源就绪：${item}`),
     ...assetRisks.map(item => `关系图风险：${item}`),
     ...deliveryRiskActions,
@@ -2511,9 +2543,12 @@ function normalizeWritePreparationBrief(contextPackage?: AnyRecord | null): Chap
     || readerPayoffFocus.length
     || (hasRaw && mustConfirm.length),
   )
-  const hasDerivedContent = Boolean(hasNonAssetDerivedContent || (hasRaw && assetRisks.length))
+  const hasDerivedContent = Boolean(hasNonAssetDerivedContent || assetRisks.length)
   const executionOrder = uniqueStrings([
-    ...stringArray(raw?.execution_order || raw?.executionOrder),
+    ...rawCandidates.flatMap(raw => [
+      ...stringArray(raw?.execution_order),
+      ...stringArray(raw?.executionOrder),
+    ]),
     ...(hasRaw || hasDerivedContent
       ? [
           '先确认来源就绪：上一章承接、角色状态、伏笔/时间线和世界约束只保留会影响本章正确性的内容。',
@@ -2523,11 +2558,8 @@ function normalizeWritePreparationBrief(contextPackage?: AnyRecord | null): Chap
         ]
       : []),
   ]).slice(0, 4)
-  if (!hasRaw && !hasNonAssetDerivedContent && !executionOrder.length) return null
-  const explicitStatus = text(raw?.readiness_status || raw?.readinessStatus).toLowerCase()
-  const readinessStatus: ChapterWritePreparationBrief['readinessStatus'] = explicitStatus === 'needs_context'
-    || sourceGaps.length > 0
-    || assetRisks.length > 0
+  if (!hasRaw && !hasDerivedContent && !executionOrder.length) return null
+  const readinessStatus: ChapterWritePreparationBrief['readinessStatus'] = sourceGaps.length > 0
     ? 'needs_context'
     : 'ready'
   return {
@@ -2562,9 +2594,15 @@ function blockerTexts(value: any): string[] {
 function contextPackageStatus(contextPackage?: AnyRecord | null): ChapterContextPackageStatus {
   if (!contextPackage) return 'missing'
   const preflight = contextPreflight(contextPackage)
+  const hasPreflight = Boolean(contextPackage.preflight || contextPackage.context_package?.preflight)
   const target = contextTarget(contextPackage)
   const blockers = blockerTexts(preflight?.blockers)
-  if (preflight?.ready === false || blockers.length > 0) return 'insufficient'
+  if (
+    (hasPreflight && preflight?.ready !== true)
+    || preflight?.strict_ready === false
+    || preflight?.strictReady === false
+    || blockers.length > 0
+  ) return 'insufficient'
   const hasTarget = Boolean(
     firstNonEmpty(target?.chapter_goal, target?.chapterObjective, target?.goal, target?.summary)
     && firstNonEmpty(target?.core_conflict, target?.coreConflict, target?.conflict)
@@ -5394,17 +5432,16 @@ function buildChapterPlanningDesk(args: {
   const scenePlanStatus: ChapterScenePlanStatus = sceneCards.length > 0 ? 'ready' : 'missing'
   const diagnosticBlockers = diagnosticsBlockers(args.diagnostics)
   const preflightBlockers = blockerTexts(contextPreflight(args.contextPackage)?.blockers)
-  const relationshipGraphRisks = relationshipGraphRiskTexts(args.contextPackage)
   const writePreparationBrief = normalizeWritePreparationBrief(args.contextPackage)
   const writePreparationReasons = writePreparationReasonTexts(writePreparationBrief)
   const episodePlan = buildEpisodePlan(args)
   const director = normalizeOhStoryDirector(args.contextPackage)
   const directorActionKey = directorPlannerAction(director)
+  const directorReadiness = text(director?.readiness)
   const qualityContinuityNeedsSceneMapping = deliveryRiskCarryOverNeedsSceneMapping(episodePlan.deliveryRiskCarryOver)
     && sceneCards.length > 0
     && qualityContinuitySceneMap.length === 0
     && !writePreparationBrief?.sourceGaps.length
-    && !writePreparationBrief?.assetRisks.length
 
   if (!args.nextChapter) {
     return {
@@ -5422,16 +5459,12 @@ function buildChapterPlanningDesk(args: {
     }
   }
 
-  if (director && directorActionKey) {
-    const directorReadiness = text(director.readiness)
-    const ready = directorReadiness === 'ready'
+  if (director && directorActionKey && directorReadiness !== 'ready') {
     const blocked = directorReadiness === 'blocked'
-    const reasons = ready
-      ? directorPlanningReasons(director, '总导演判断本章写前材料可用。')
-      : directorPlanningReasons(director, blocked ? '总导演判断需要人工确认后继续。' : '总导演判断本章写前材料需要修复。')
+    const reasons = directorPlanningReasons(director, blocked ? '总导演判断需要人工确认后继续。' : '总导演判断本章写前材料需要修复。')
     return {
-      readiness: ready ? 'ready' : blocked ? 'blocked' : 'needs_context',
-      statusLabel: ready ? '可继续' : blocked ? '需要确认' : '需要修复',
+      readiness: blocked ? 'blocked' : 'needs_context',
+      statusLabel: blocked ? '需要确认' : '需要修复',
       contextPackageStatus: contextStatus,
       scenePlanStatus,
       reasons,
@@ -5439,7 +5472,7 @@ function buildChapterPlanningDesk(args: {
         key: directorActionKey,
         label: directorActionLabel(director, directorActionKey),
       },
-      shouldAutoExpandPlanner: !ready,
+      shouldAutoExpandPlanner: true,
       writePreparationBrief,
       episodePlan,
       sceneCards,
@@ -5534,22 +5567,6 @@ function buildChapterPlanningDesk(args: {
     }
   }
 
-  if (relationshipGraphRisks.length > 0) {
-    return {
-      readiness: 'needs_context',
-      statusLabel: '资产关系待确认',
-      contextPackageStatus: contextStatus,
-      scenePlanStatus,
-      reasons: relationshipGraphRisks.slice(0, 3).map(item => `关系图风险：${item}`),
-      recommendedPlannerAction: { key: 'open_story_assets', label: ACTION_LABELS.open_story_assets },
-      shouldAutoExpandPlanner: true,
-      writePreparationBrief,
-      episodePlan,
-      sceneCards,
-      qualityContinuitySceneMap,
-    }
-  }
-
   if (scenePlanStatus === 'missing') {
     return {
       readiness: 'needs_scene_plan',
@@ -5559,6 +5576,25 @@ function buildChapterPlanningDesk(args: {
       reasons: ['本章还没有可用场景卡。'],
       recommendedPlannerAction: { key: 'build_scene_plan', label: ACTION_LABELS.build_scene_plan },
       shouldAutoExpandPlanner: true,
+      writePreparationBrief,
+      episodePlan,
+      sceneCards,
+      qualityContinuitySceneMap,
+    }
+  }
+
+  if (director && directorActionKey && directorReadiness === 'ready') {
+    return {
+      readiness: 'ready',
+      statusLabel: '可继续',
+      contextPackageStatus: contextStatus,
+      scenePlanStatus,
+      reasons: directorPlanningReasons(director, '总导演判断本章写前材料可用。'),
+      recommendedPlannerAction: {
+        key: directorActionKey,
+        label: directorActionLabel(director, directorActionKey),
+      },
+      shouldAutoExpandPlanner: false,
       writePreparationBrief,
       episodePlan,
       sceneCards,

@@ -209,8 +209,8 @@ describe('prose format and punctuation utilities', () => {
     expect(scanProseLanguageRisks(result.text)).toHaveLength(0)
   })
 
-  test('normalizes English pronoun fragments glued to Chinese prose', () => {
-    const result = normalizeDeterministicProseLanguageFragments('江哲收回右手。 his五指在掌心合拢，遮住黑痕。')
+  test('normalizes unambiguous English pronoun fragments before Chinese prose', () => {
+    const result = normalizeDeterministicProseLanguageFragments('江哲收回右手。 his 五指在掌心合拢，遮住黑痕。')
 
     expect(result).toMatchObject({
       changed: true,
@@ -275,12 +275,15 @@ describe('prose format and punctuation utilities', () => {
   test('normalizes language and deslop residue observed after a final prose repair', () => {
     const result = normalizeProseQualityRepairResidue([
       '十倍反震的因果律，被他用纯肉身力量 and 一种借力卸力技巧踩碎。',
+      '在唯物薄膜的死锁下， his 双腿在这一瞬间获得了近乎液压机般的爆发力。',
       '他的手臂在气血滋养下微微鼓胀，没有一丝多余的颤音。',
       '他缓缓收回右手，在灰色卫衣的袖口上轻轻敲击。',
       '那灯光犹如实质的毒液流过墙面。',
     ].join('\n'))
 
     expect(result.text).not.toContain(' and ')
+    expect(result.text).not.toContain(' his ')
+    expect(result.text).toContain('他的双腿在这一瞬间获得了近乎液压机般的爆发力')
     expect(result.text).not.toContain('微微')
     expect(result.text).not.toContain('一丝')
     expect(result.text).not.toContain('缓缓')
@@ -294,6 +297,50 @@ describe('prose format and punctuation utilities', () => {
       '轻轻',
       '犹如',
     ]))
+  })
+
+  test('normalizes pronouns after Chinese quote, parenthesis, and book-title boundaries', () => {
+    const source = '“His 双腿发力，his的右脚踩住门槛。”（her 的手按住伤口。）《its的外壳裂开》'
+
+    expect(normalizeProseQualityRepairResidue(source).text).toBe(
+      '“他的双腿发力，他的右脚踩住门槛。”（她的手按住伤口。）《它的外壳裂开》',
+    )
+    expect(normalizeProseQualityRepairResidue(source).text).not.toContain('的的')
+  })
+
+  test('preserves uppercase abbreviations and ambiguous no-space pronoun fragments', () => {
+    const source = 'HIS 系统启动，HER 接口关闭，ITS服务正常。her受体未激活，his系统仍在线，His双腿没有改写。'
+    const result = normalizeProseQualityRepairResidue(source)
+
+    expect(result).toMatchObject({ text: source, changed: false, change_count: 0 })
+    expect(scanProseLanguageRisks(result.text)).toMatchObject([{
+      key: 'language_drift_latin_fragment',
+      status: 'fail',
+      severity: 'blocking',
+    }])
+    expect(scanProseLanguageRisks('His双腿没有改写。江哲抬手扣住门环，门外的脚步声停了。')).toHaveLength(1)
+  })
+
+  test('keeps yaml front matter and fenced blocks untouched while normalizing prose residue', () => {
+    const source = [
+      '---',
+      'note: His 双腿',
+      '---',
+      '“His 双腿发力。”',
+      '```text',
+      '（her 的手按住伤口。）',
+      '```',
+    ].join('\n')
+
+    expect(normalizeProseQualityRepairResidue(source).text).toBe([
+      '---',
+      'note: His 双腿',
+      '---',
+      '“他的双腿发力。”',
+      '```text',
+      '（her 的手按住伤口。）',
+      '```',
+    ].join('\n'))
   })
 
   test('keeps unrelated prose semantics outside the narrow quality-repair residue rules', () => {
