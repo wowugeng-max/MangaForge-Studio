@@ -246,6 +246,28 @@ describe('novel generate prose route source guards', () => {
     expect(serialized).not.toContain('raw_payload')
   })
 
+  test('persists standalone blocked invalid admission identity for workspace recovery', () => {
+    const serviceError = Object.assign(new Error('正文为空或结构无效'), {
+      admission_status: 'blocked_invalid',
+      admission_failure: { source: 'structural', code: 'invalid_prose' },
+    })
+
+    const payload = buildStandaloneProseServiceErrorPayload(
+      serviceError,
+      [{ key: 'review', status: 'failed' }],
+      { model_id: 217 },
+      { chapter_id: 102, chapter_no: 2 },
+    )
+
+    expect(payload).toMatchObject({
+      error: '正文为空或结构无效',
+      error_code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+      admission_status: 'blocked_invalid',
+      chapter_id: 102,
+      chapter_no: 2,
+    })
+  })
+
   test('selects camelCase prose chapter payloads from direct draft generation', () => {
     const selected = selectTargetProsePayload({
       proseChapters: [
@@ -656,7 +678,7 @@ describe('novel generate prose route source guards', () => {
     expect(routeStart).toBeGreaterThanOrEqual(0)
     expect(catchStart).toBeGreaterThan(routeStart)
     expect(catchEnd).toBeGreaterThan(catchStart)
-    expect(catchBlock).toContain('const errorPayload = buildStandaloneProseServiceErrorPayload(serviceError, pipeline, configSnapshot)')
+    expect(catchBlock).toContain('const errorPayload = buildStandaloneProseServiceErrorPayload(serviceError, pipeline, configSnapshot, { chapter_id: chapterId, chapter_no: standaloneChapter?.chapter_no })')
     expect(catchBlock).toContain('output_ref: stringifyNovelGenerationPayload(errorPayload)')
     expect(catchBlock).toContain("res.write(sseData({ type: 'error', ...errorPayload }))")
     expect(catchBlock).toContain('return res.status(status).json(errorPayload)')

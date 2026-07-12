@@ -294,10 +294,17 @@ function compactStandaloneQualityLoop(value: any) {
   })
 }
 
-export function buildStandaloneProseServiceErrorPayload(serviceError: any, pipeline: any[], configSnapshot: any) {
+export function buildStandaloneProseServiceErrorPayload(serviceError: any, pipeline: any[], configSnapshot: any, chapterIdentity: any = {}) {
+  const admissionStatus = String(serviceError?.admission_status || serviceError?.admissionStatus || '')
+  const blockedInvalid = admissionStatus === 'blocked_invalid'
   return {
     error: String(serviceError?.message || serviceError),
-    error_code: serviceError?.code || serviceError?.error_code || 'PROSE_GENERATION_FAILED',
+    error_code: serviceError?.code || serviceError?.error_code || (blockedInvalid ? 'PROSE_ADMISSION_BLOCKED_INVALID' : 'PROSE_GENERATION_FAILED'),
+    ...(blockedInvalid ? {
+      admission_status: 'blocked_invalid',
+      chapter_id: chapterIdentity?.chapter_id ?? chapterIdentity?.chapterId ?? serviceError?.chapter_id ?? serviceError?.chapterId ?? null,
+      chapter_no: chapterIdentity?.chapter_no ?? chapterIdentity?.chapterNo ?? serviceError?.chapter_no ?? serviceError?.chapterNo ?? null,
+    } : {}),
     pipeline,
     launch_gate_blocker: serviceError?.launchGateBlocker || serviceError?.launch_gate_blocker,
     reference_report: serviceError?.referenceReport || serviceError?.reference_report,
@@ -1534,6 +1541,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const autoRepairQualityGate = req.body?.auto_repair_quality_gate === true || req.body?.quality_gate_repair === true
       const project = await ctx.getProject(activeWorkspace, projectId)
       if (!project) return res.status(404).json({ error: 'project not found' })
+      const standaloneChapter = (await listNovelChapters(activeWorkspace, projectId)).find(item => item.id === chapterId)
       const configSnapshot = ctx.buildAgentConfigSnapshot(project, modelId)
       {
         const pipeline: any[] = []
@@ -1643,7 +1651,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         } catch (serviceError: any) {
           standaloneProseCompleted = true
           cleanupStandaloneProseAbortListeners()
-          const errorPayload = buildStandaloneProseServiceErrorPayload(serviceError, pipeline, configSnapshot)
+          const errorPayload = buildStandaloneProseServiceErrorPayload(serviceError, pipeline, configSnapshot, { chapter_id: chapterId, chapter_no: standaloneChapter?.chapter_no })
           await appendNovelRun(activeWorkspace, {
             project_id: projectId,
             run_type: 'generate_prose',

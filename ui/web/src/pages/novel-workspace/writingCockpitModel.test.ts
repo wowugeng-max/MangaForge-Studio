@@ -3116,6 +3116,36 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('open_generation_diagnostics')
   })
 
+  test('restores a no-prose blocked invalid terminal state from a standalone run record', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters,
+      activeChapter: chapters[1],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [],
+      activeRuns: [{
+        id: 901,
+        run_type: 'generate_prose',
+        status: 'failed',
+        created_at: '2026-07-13T12:00:00.000Z',
+        output_ref: JSON.stringify({
+          error: '正文为空或结构无效',
+          error_code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+          admission_status: 'blocked_invalid',
+          chapter_id: 102,
+          chapter_no: 2,
+          pipeline: [{ key: 'review', status: 'failed' }],
+        }),
+      }],
+    })
+
+    expect(model.chapterAcceptanceDesk.visible).toBe(true)
+    expect(model.chapterAcceptanceDesk.admissionStatus).toBe('blocked_invalid')
+    expect(model.chapterAcceptanceDesk.statusLabel).toBe('正文无效，未入库')
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('open_generation_diagnostics')
+  })
+
   test('does not reuse a top-level run admission from a different chapter', () => {
     const model = buildWritingCockpitModel({
       project,
