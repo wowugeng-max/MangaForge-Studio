@@ -11,6 +11,7 @@ import {
   listNovelReviews,
   listNovelSettingEntities,
   listNovelWorldbuilding,
+  mergeNovelChapterRawPayload,
   replaceNovelChapterSettingUsage,
   updateNovelChapter,
   updateNovelCharacter,
@@ -40645,6 +40646,7 @@ function applyDeliveryRiskCarryOverToSceneCards(sceneCards: any[], contextPackag
 export type NovelWritingRuntime = {
   generateChapterProse?: typeof defaultGenerateNovelChapterProse
   storeChapterProseMemory?: typeof defaultStoreNovelChapterProseMemory
+  mergeChapterRawPayload?: typeof mergeNovelChapterRawPayload
   executeAgent?: typeof executeNovelAgent
   buildChapterContext?: (input: {
     workspace: string
@@ -40769,6 +40771,7 @@ export function createNovelWritingService(ctx: {
   const executeAgent = ctx.runtime?.executeAgent || executeNovelAgent
   const generateNovelChapterProse = ctx.runtime?.generateChapterProse || defaultGenerateNovelChapterProse
   const storeChapterProseMemory = ctx.runtime?.storeChapterProseMemory || defaultStoreNovelChapterProseMemory
+  const mergeChapterRawPayload = ctx.runtime?.mergeChapterRawPayload || mergeNovelChapterRawPayload
   const buildSceneCardsPrompt = (project: any, contextPackage: any) => buildSceneCardsPromptFromBuilder(project, contextPackage)
 
   const buildHeuristicSettingUsage = (chapter: any, settings: any[]) => {
@@ -47134,24 +47137,23 @@ export function createNovelWritingService(ctx: {
           status: draftReturnedAdmissionStatus,
           post_commit_warnings: draftPostCommitWarnings,
         }
-        let persistedDraft: any = null
+        let persistedDraftRawPayload: any = null
         try {
-          persistedDraft = await updateNovelChapter(activeWorkspace, chapter.id, {
-            raw_payload: {
-              ...(updatedReviewedDraft?.raw_payload || {}),
-              prose_admission: finalDraftAdmission,
-              proseAdmission: finalDraftAdmission,
-            },
-          }, { createVersion: false })
+          persistedDraftRawPayload = await mergeChapterRawPayload(activeWorkspace, chapter.id, {
+            prose_admission: finalDraftAdmission,
+            proseAdmission: finalDraftAdmission,
+          })
         } catch (error) {
           draftPostCommitWarnings.push({ stage: 'admission_metadata', message: formatAdmissionError(error, 300) })
         }
-        updatedReviewedDraft = persistedDraft || {
+        updatedReviewedDraft = {
           ...updatedReviewedDraft,
           raw_payload: {
-            ...(updatedReviewedDraft?.raw_payload || {}),
-            prose_admission: finalDraftAdmission,
-            proseAdmission: finalDraftAdmission,
+            ...(persistedDraftRawPayload || updatedReviewedDraft?.raw_payload || {}),
+            ...(!persistedDraftRawPayload ? {
+              prose_admission: finalDraftAdmission,
+              proseAdmission: finalDraftAdmission,
+            } : {}),
           },
         }
       }
@@ -47635,24 +47637,23 @@ export function createNovelWritingService(ctx: {
         status: returnedAdmissionStatus,
         post_commit_warnings: postCommitWarnings,
       }
-      let persisted: any = null
+      let persistedRawPayload: any = null
       try {
-        persisted = await updateNovelChapter(activeWorkspace, chapter.id, {
-          raw_payload: {
-            ...(updated?.raw_payload || {}),
-            prose_admission: finalProseAdmission,
-            proseAdmission: finalProseAdmission,
-          },
-        }, { createVersion: false })
+        persistedRawPayload = await mergeChapterRawPayload(activeWorkspace, chapter.id, {
+          prose_admission: finalProseAdmission,
+          proseAdmission: finalProseAdmission,
+        })
       } catch (error) {
         postCommitWarnings.push({ stage: 'admission_metadata', message: formatAdmissionError(error, 300) })
       }
-      updated = persisted || {
+      updated = {
         ...updated,
         raw_payload: {
-          ...(updated?.raw_payload || {}),
-          prose_admission: finalProseAdmission,
-          proseAdmission: finalProseAdmission,
+          ...(persistedRawPayload || updated?.raw_payload || {}),
+          ...(!persistedRawPayload ? {
+            prose_admission: finalProseAdmission,
+            proseAdmission: finalProseAdmission,
+          } : {}),
         },
       }
     }

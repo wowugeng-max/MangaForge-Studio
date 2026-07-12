@@ -22,7 +22,9 @@ import {
   listNovelRuns,
   listNovelSettingEntities,
   listNovelWorldbuilding,
+  mergeNovelChapterRawPayload,
   replaceNovelChapterSettingUsage,
+  updateNovelChapter,
   upsertNovelChapterByNumber,
 } from './novel'
 
@@ -83,6 +85,66 @@ afterEach(async () => {
 })
 
 describe('novel sqlite persistence', () => {
+  test('merges chapter raw payload keys against the latest row without losing concurrent metadata', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '最新行键级合并' })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      raw_payload: { blueprint: '保留蓝图', acceptance_snapshot: '旧快照' },
+    })
+    const staleRawPayload = chapter.raw_payload
+    await updateNovelChapter(workspace, chapter.id, {
+      raw_payload: { ...staleRawPayload, concurrent_metadata: { owner: 'post-sync' } },
+    }, { createVersion: false })
+
+    const merged = await mergeNovelChapterRawPayload(workspace, chapter.id, {
+      prose_admission: { status: 'accepted_with_warnings' },
+      proseAdmission: { status: 'accepted_with_warnings' },
+    })
+    const reloaded = (await listNovelChapters(workspace, project.id)).find(item => item.id === chapter.id)
+
+    expect(merged).toEqual(reloaded?.raw_payload)
+    expect(reloaded?.raw_payload).toMatchObject({
+      blueprint: '保留蓝图',
+      concurrent_metadata: { owner: 'post-sync' },
+      prose_admission: { status: 'accepted_with_warnings' },
+    })
+  })
+
+  test('repeated chapter raw payload warning merges stay flat and bounded', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '幂等 warning 回写' })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      raw_payload: { blueprint: '保留蓝图' },
+    })
+    const admission = {
+      status: 'accepted_with_warnings',
+      post_commit_warnings: [{ stage: 'memory', message: '稍后补同步' }],
+    }
+
+    const first = await mergeNovelChapterRawPayload(workspace, chapter.id, {
+      prose_admission: admission,
+      proseAdmission: admission,
+      raw_payload: { recursive: 'must not persist' },
+      rawPayload: { recursive: 'must not persist' },
+    })
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await mergeNovelChapterRawPayload(workspace, chapter.id, { prose_admission: admission, proseAdmission: admission })
+    }
+    const reloaded = (await listNovelChapters(workspace, project.id)).find(item => item.id === chapter.id)
+    const serialized = JSON.stringify(reloaded?.raw_payload)
+
+    expect(reloaded?.raw_payload).toEqual(first)
+    expect(serialized.length).toBe(JSON.stringify(first).length)
+    expect(serialized).not.toContain('raw_payload')
+    expect(serialized).not.toContain('rawPayload')
+  })
+
   test('does not create the legacy json mirror during normal writes', async () => {
     const workspace = await tempWorkspace()
 

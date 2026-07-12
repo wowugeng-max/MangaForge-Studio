@@ -1315,6 +1315,40 @@ export async function appendChapterVersion(activeWorkspace: string, data: Partia
 export async function listChapterVersions(activeWorkspace: string, chapterId: number) { const store = await readStore(activeWorkspace); return store.chapter_versions.filter(item => item.chapter_id === chapterId).sort((a, b) => b.version_no - a.version_no) }
 export async function rollbackChapterVersion(activeWorkspace: string, chapterId: number, versionId: number) { const store = await readStore(activeWorkspace); const idx = store.chapters.findIndex(item => item.id === chapterId); const version = store.chapter_versions.find(item => item.id === versionId && item.chapter_id === chapterId); if (idx < 0 || !version) return null; const current = store.chapters[idx]; store.chapter_versions.push(createChapterVersionRecord(store, { chapter_id: current.id, project_id: current.project_id, version_no: store.chapter_versions.filter(v => v.chapter_id === current.id).length + 1, chapter_text: current.chapter_text || '', scene_breakdown: current.scene_breakdown || [], continuity_notes: current.continuity_notes || [], source: 'rollback' })); store.chapters[idx] = { ...current, chapter_text: version.chapter_text, scene_breakdown: version.scene_breakdown || [], continuity_notes: version.continuity_notes || [], updated_at: nowIso() }; await writeStore(activeWorkspace, store); return store.chapters[idx] }
 export async function updateNovelChapter(activeWorkspace: string, chapterId: number, data: Partial<NovelChapterRecord>, options: UpdateNovelChapterOptions = {}) { const store = await readStore(activeWorkspace); const idx = store.chapters.findIndex(item => item.id === chapterId); if (idx < 0) return null; const current = store.chapters[idx]; const updated = normalizeChapterRecord(data, { ...current, id: current.id, updated_at: nowIso() }); const next = { ...current, ...updated, updated_at: nowIso() }; const shouldCreateVersion = options.createVersion !== false && (options.forceVersion || versionedChapterSnapshotChanged(current, next)); if (shouldCreateVersion) store.chapter_versions.push(createChapterVersionRecord(store, { chapter_id: current.id, project_id: current.project_id, version_no: store.chapter_versions.filter(v => v.chapter_id === current.id).length + 1, chapter_text: current.chapter_text || '', scene_breakdown: current.scene_breakdown || [], continuity_notes: current.continuity_notes || [], source: options.versionSource || 'manual_edit' })); store.chapters[idx] = next; await writeStore(activeWorkspace, store); return store.chapters[idx] }
+export async function mergeNovelChapterRawPayload(activeWorkspace: string, chapterId: number, patch: Record<string, any>) {
+  const db = openDb(activeWorkspace)
+  let committed = false
+  try {
+    ensureSqliteSchema(db)
+    db.exec('BEGIN IMMEDIATE')
+    const row = db.query('SELECT raw_payload FROM chapters WHERE id=?').get(chapterId) as any
+    if (!row) {
+      db.exec('COMMIT')
+      committed = true
+      return null
+    }
+    const parsed = parseDbJson(row.raw_payload, {})
+    const current = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? { ...parsed } : {}
+    const sanitized = sanitizeJsonValue(patch && typeof patch === 'object' && !Array.isArray(patch) ? patch : {}) as Record<string, any>
+    for (const key of NESTED_STORAGE_KEYS) {
+      delete current[key]
+      delete sanitized[key]
+    }
+    const merged = compactRawPayloadForStorage({ ...current, ...sanitized })
+    for (const key of NESTED_STORAGE_KEYS) delete merged[key]
+    db.query('UPDATE chapters SET raw_payload=?, updated_at=? WHERE id=?').run(jsonText(merged, {}), nowIso(), chapterId)
+    db.exec('COMMIT')
+    committed = true
+    return merged
+  } catch (error) {
+    if (!committed) {
+      try { db.exec('ROLLBACK') } catch { /* transaction may already be closed */ }
+    }
+    throw error
+  } finally {
+    db.close()
+  }
+}
 export async function commitNovelChapterAcceptance(activeWorkspace: string, input: NovelChapterAcceptanceInput) {
   const store = await readStore(activeWorkspace)
   const chapterIndex = store.chapters.findIndex(item => item.id === Number(input.chapter_id || 0))

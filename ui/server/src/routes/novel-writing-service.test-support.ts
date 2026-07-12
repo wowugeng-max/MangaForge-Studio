@@ -58,6 +58,7 @@ type ProsePipelineHarnessOptions = {
   sceneCardsPayload?: any[]
   afterCommitError?: Error
   postCommitSyncError?: Error
+  admissionMetadataError?: Error
   repairedContextPackageOverride?: any
   requireStagedContextCandidates?: boolean
   referenceService?: any
@@ -294,6 +295,9 @@ export async function createProsePipelineHarness(
         memoryTexts.push(finalText)
         if (options.memoryError) throw options.memoryError
       },
+      mergeChapterRawPayload: options.admissionMetadataError
+        ? async () => { throw options.admissionMetadataError }
+        : undefined,
       executeAgent: executeAgent as any,
       hooks: {
         beforeChapterStore: ({ finalText }) => {
