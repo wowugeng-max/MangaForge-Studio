@@ -85,28 +85,78 @@ function isLabelOnly(text: string) {
   return /^(?:(?:小说|章节)?正文(?:内容)?|标题|章节|内容)[：:]?$/.test(text)
 }
 
+function payloadSegments(text: string) {
+  return text
+    .split(/[。！？!?]+/)
+    .map(item => item.trim().replace(/^[“”「」『』'"\s]+/, ''))
+    .filter(Boolean)
+}
+
+function isDominatedBy(text: string, predicate: (segment: string) => boolean) {
+  const segments = payloadSegments(text)
+  if (!segments.length) return false
+  const matching = segments.filter(predicate).length
+  return matching > 0 && matching / segments.length >= 0.6
+}
+
 function isExplanationOnly(text: string) {
-  return /^(?:下面|以下)(?:是|为).{0,80}(?:生成|创作|提供).{0,40}(?:小说|章节|正文)/.test(text)
+  return isDominatedBy(text, segment => (
+    /^(?:好的[，,]?|当然可以[，,]?)?(?:下面|以下)(?:是|为).{0,80}(?:生成|创作|提供|整理)/.test(segment)
+    || /^(?:好的[，,]?|当然可以[，,]?).{0,60}(?:生成|创作|提供|整理).{0,40}(?:小说|章节|正文|结果)/.test(segment)
+  ))
 }
 
 function isErrorPayload(text: string) {
-  return /^(?:(?:生成|写作|请求|模型|系统).{0,24}(?:失败|错误|异常|超时)|抱歉.{0,40}(?:不能|无法|不可提供|请稍后重试)|(?:模型|系统).{0,24}(?:不能|无法|不可提供)|(?:error|failed|failure)\b)/i.test(text)
+  return isDominatedBy(text, segment => (
+    /^(?:(?:生成|写作|请求|模型|系统).{0,24}(?:失败|错误|异常|超时)|抱歉.{0,40}(?:不能|无法|不可提供|请稍后重试)|(?:模型|系统).{0,24}(?:不能|无法|不可提供)|(?:error|failed|failure)\b)/i.test(segment)
+  ))
+}
+
+function isLabelDominantPayload(text: string) {
+  const entries = text
+    .split(/[\n。；;]+/)
+    .map(item => item.trim())
+    .filter(Boolean)
+  if (entries.length < 2) return false
+  const labels = entries.filter(entry => (
+    /^(?:标题|角色|人物|地点|时间|摘要|场景|大纲|类型|视角|章节|正文)[：:]/.test(entry)
+  )).length
+  return labels >= 2 && labels / entries.length >= 0.6
+}
+
+function parsesAsJsonContainer(candidate: string) {
+  try {
+    const parsed = JSON.parse(candidate)
+    return parsed !== null && typeof parsed === 'object'
+  } catch {
+    return false
+  }
 }
 
 function isJsonLikePayload(text: string) {
-  const unwrapped = text
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/, '')
-    .trim()
-  return (unwrapped.startsWith('{') && unwrapped.endsWith('}'))
-    || (unwrapped.startsWith('[') && unwrapped.endsWith(']'))
+  const trimmed = text.trim()
+  if (parsesAsJsonContainer(trimmed)) return true
+
+  for (const match of trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/gi)) {
+    if (parsesAsJsonContainer(match[1].trim())) return true
+  }
+
+  const objectStart = trimmed.indexOf('{')
+  const arrayStart = trimmed.indexOf('[')
+  const starts = [objectStart, arrayStart].filter(index => index >= 0)
+  if (!starts.length) return false
+  const start = Math.min(...starts)
+  const opening = trimmed[start]
+  const end = trimmed.lastIndexOf(opening === '{' ? '}' : ']')
+  return end > start && parsesAsJsonContainer(trimmed.slice(start, end + 1))
 }
 
 export function validateMinimalChapterProse(text: any): {
   valid: boolean
   failures: ProseAdmissionHardFailure[]
 } {
-  const normalized = String(text ?? '').replace(/\s+/g, ' ').trim()
+  const rawText = String(text ?? '').replace(/\r\n?/g, '\n').trim()
+  const normalized = rawText.replace(/\s+/g, ' ').trim()
   if (!normalized) {
     return {
       valid: false,
@@ -130,6 +180,9 @@ export function validateMinimalChapterProse(text: any): {
   }
   if (isLabelOnly(normalized)) {
     failures.push(proseShapeFailure('prose_label_only', 'Generated payload contains only a prose label.'))
+  }
+  if (isLabelDominantPayload(rawText)) {
+    failures.push(proseShapeFailure('prose_label_only', 'Generated payload is dominated by labeled metadata instead of chapter prose.'))
   }
   if (isExplanationOnly(normalized)) {
     failures.push(proseShapeFailure('prose_explanation_only', 'Generated payload contains an explanation instead of chapter prose.'))
@@ -164,6 +217,14 @@ function messageFromUnknown(error: any, failure: ProseAdmissionHardFailure) {
   return failure.message
 }
 
+function causeFromUnknown(error: any) {
+  try {
+    return error?.cause
+  } catch {
+    return undefined
+  }
+}
+
 export function markBlockedInvalidError(
   error: any,
   failure: ProseAdmissionHardFailure,
@@ -174,6 +235,8 @@ export function markBlockedInvalidError(
   const candidate = error instanceof Error
     ? error
     : new Error(messageFromUnknown(error, failure))
+  const safeMessage = messageFromUnknown(candidate, failure)
+  const cause = causeFromUnknown(candidate)
 
   try {
     return Object.assign(candidate, {
@@ -181,7 +244,9 @@ export function markBlockedInvalidError(
       admission_failure: failure,
     })
   } catch {
-    return Object.assign(new Error(candidate.message), {
+    const fallback = new Error(safeMessage)
+    if (cause !== undefined) fallback.cause = cause
+    return Object.assign(fallback, {
       admission_status: 'blocked_invalid' as const,
       admission_failure: failure,
     })

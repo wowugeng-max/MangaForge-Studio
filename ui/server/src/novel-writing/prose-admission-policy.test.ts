@@ -145,6 +145,21 @@ describe('minimal chapter prose validation', () => {
     expect(result.failures.map(item => item.code)).toContain('prose_error_payload')
   })
 
+  test('accepts complete prose when a refusal-like phrase is only opening dialogue', () => {
+    const quotedDialogue = [
+      '“抱歉，我不能让你进去。”守卫把长枪横在门前，雨水沿着枪缨滴落，映出石阶上被踩乱的泥印。',
+      '沈砚没有争辩，只从袖中取出那枚裂开的铜牌，让灯笼的微光照清背面新刻的一道暗纹。',
+      '守卫看见暗纹时脸色骤变，握枪的手却没有松开，反而朝城楼阴影里飞快瞥了一眼！',
+      '那一眼已经足够，沈砚顺着他的视线看见半扇未关的窗，以及窗后刚刚收回去的黑色衣角。',
+      '他故意退下石阶，转身走进雨幕，等城门上的铜铃响过三次，才沿排水沟折回废弃的箭道？',
+      '箭道尽头堆着尚带木屑的新箱，箱盖烙着父亲旧部的印记，也证明守卫拦住他并非为了城防。',
+    ].join('')
+    const unquotedDialogue = quotedDialogue.replace(/^“|”/, '')
+
+    expect(validateMinimalChapterProse(quotedDialogue)).toEqual({ valid: true, failures: [] })
+    expect(validateMinimalChapterProse(unquotedDialogue)).toEqual({ valid: true, failures: [] })
+  })
+
   test('rejects JSON-like payloads', () => {
     const result = validateMinimalChapterProse(JSON.stringify({
       chapter_text: '雨落在长街上。门后没有人回答！旧钟敲了三次？他终于推门而入。'.repeat(8),
@@ -153,6 +168,63 @@ describe('minimal chapter prose validation', () => {
 
     expect(result.valid).toBe(false)
     expect(result.failures.map(item => item.code)).toContain('prose_json_payload')
+  })
+
+  test('accepts bracket-framed prose that is not valid JSON', () => {
+    const prose = [
+      '[系统提示]城门将在一刻钟后关闭，沈砚扫过告示，发现落款日期竟比今天早了整整十年。',
+      '雨水浸透纸角，却没有冲淡那枚朱印，他伸手触碰时，指腹传来细微热意，像印泥刚刚干透！',
+      '街边铺户陆续落闩，只有对面的旧书店仍亮着灯，一个戴斗笠的人隔着窗纸向他招了招手。',
+      '沈砚推门进去，门轴没有发出声音，柜台上却整齐摆着父亲失踪前寄出的七封信，每封都写着明日的日期。',
+      '“你终于看见告示了？”斗笠人没有抬头，只把第八封空白信纸推到他面前，示意他亲手写下收信人？',
+      '窗外铜钟提前响起，整条街的灯火同时熄灭，沈砚握住笔，听见黑暗里有人低声念出了他的名字。[本章完]',
+    ].join('')
+
+    expect(validateMinimalChapterProse(prose)).toEqual({ valid: true, failures: [] })
+  })
+
+  test('rejects label-dominant metadata and polite assistant wrappers', () => {
+    const metadata = [
+      '标题：雨夜归人。',
+      '角色：沈砚、守卫、斗笠人。',
+      '地点：城南旧门与废弃箭道。',
+      '时间：子夜到黎明。',
+      '摘要：主角发现十年前的告示与未来日期的书信，并循着父亲旧部的印记进入暗道。',
+      '场景：雨夜城门受阻、书店会面、铜钟提前响起。',
+    ].join('\n').repeat(4)
+    const wrapper = '好的，以下是根据你的要求生成的小说正文，请查收并告诉我是否需要继续修改。'.repeat(12)
+
+    expect(validateMinimalChapterProse(metadata).failures.map(item => item.code)).toContain('prose_label_only')
+    expect(validateMinimalChapterProse(wrapper).failures.map(item => item.code)).toContain('prose_explanation_only')
+  })
+
+  test('rejects valid JSON inside a polite preface and markdown fence', () => {
+    const result = validateMinimalChapterProse([
+      '好的，结构化结果如下：',
+      '```json',
+      JSON.stringify({
+        title: '雨夜归人',
+        characters: ['沈砚', '守卫'],
+        chapter_text: '城门关闭了。守卫举起长枪！沈砚看见暗号？他转身走入雨中。'.repeat(10),
+      }),
+      '```',
+    ].join('\n'))
+
+    expect(result.valid).toBe(false)
+    expect(result.failures.map(item => item.code)).toContain('prose_json_payload')
+  })
+
+  test('does not reject metadata phrases or assistant-like wording embedded in real prose', () => {
+    const prose = [
+      '账册第一页依次写着标题、角色、地点和摘要，沈砚却知道这些整齐的栏目只是商会用来掩盖走私路线的暗号。',
+      '“好的，以下是你要的全部记录。”掌柜故意提高声音，把薄册递来，目光却停在门外那双沾泥的官靴上！',
+      '沈砚接过册子，随口问起昨夜的货船，指尖则沿着纸边摸到一道被针扎出的凹痕。',
+      '凹痕连起来恰好是城北仓库的编号，而所谓地点一栏里多出的墨点，标出了巡夜人换岗后的空隙？',
+      '他合上账册说要回去细看，掌柜却突然按住封皮，低声提醒他摘要末尾少写了一个已经死去十年的人名。',
+      '门外官靴停在台阶上，沈砚把笑意压回喉间，翻到最后一页，看见父亲的名字正从潮湿墨迹里慢慢浮现。',
+    ].join('')
+
+    expect(validateMinimalChapterProse(prose)).toEqual({ valid: true, failures: [] })
   })
 
   test('rejects long prose with fewer than four sentence terminators', () => {
@@ -199,6 +271,36 @@ describe('blocked invalid error marking', () => {
 
     expect(marked).toBeInstanceOf(Error)
     expect(marked.message).toBe('plain-object failure')
+    expect(marked.admission_status).toBe('blocked_invalid')
+    expect(marked.admission_failure).toBe(failure)
+  })
+
+  test('falls back safely for a frozen Error and preserves its cause', () => {
+    const cause = new Error('upstream transport failed')
+    const original = Object.freeze(new Error('frozen error', { cause }))
+    const marked = markBlockedInvalidError(original, failure)
+
+    expect(marked).not.toBe(original)
+    expect(marked.message).toBe('frozen error')
+    expect(marked.cause).toBe(cause)
+    expect(marked.admission_status).toBe('blocked_invalid')
+    expect(marked.admission_failure).toBe(failure)
+  })
+
+  test('does not invoke a hostile message getter while recovering from a non-extensible Error', () => {
+    const hostile = new Error('hidden')
+    Object.defineProperty(hostile, 'message', {
+      configurable: false,
+      get() {
+        throw new Error('hostile getter invoked')
+      },
+    })
+    Object.preventExtensions(hostile)
+
+    const marked = markBlockedInvalidError(hostile, failure)
+
+    expect(marked).toBeInstanceOf(Error)
+    expect(marked.message).toBe(failure.message)
     expect(marked.admission_status).toBe('blocked_invalid')
     expect(marked.admission_failure).toBe(failure)
   })

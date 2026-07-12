@@ -134,7 +134,7 @@ describe('chapter prose storage patch builders', () => {
       story_state_status: 'pending' as const,
       story_state_warning: { code: 'story_state_pending' },
     }
-    const patch = buildChapterProseStoragePatch({
+    const input = {
       chapter: {
         raw_payload: {
           existing: true,
@@ -148,11 +148,14 @@ describe('chapter prose storage patch builders', () => {
       finalSceneBreakdown: [],
       ohStoryDeliveryReceipts: {},
       proseAdmission,
-    })
+    }
+    const inputBefore = structuredClone(input)
+    const patch = buildChapterProseStoragePatch(input)
 
     expect(patch.raw_payload.existing).toBe(true)
-    expect(patch.raw_payload.prose_admission).toBe(proseAdmission)
-    expect(patch.raw_payload.proseAdmission).toBe(proseAdmission)
+    expect(patch.raw_payload.prose_admission).toEqual(proseAdmission)
+    expect(patch.raw_payload.proseAdmission).toEqual(proseAdmission)
+    expect(input).toEqual(inputBefore)
   })
 
   test('resolves version source for draft, reviewed draft, and full repair storage', () => {
