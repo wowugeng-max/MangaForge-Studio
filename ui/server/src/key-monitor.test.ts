@@ -75,6 +75,100 @@ describe('key monitor', () => {
     }
   })
 
+  test('automatic monitoring API stays disabled when enabled is omitted', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+      {
+        id: 'openai',
+        display_name: 'OpenAI',
+        service_type: 'llm',
+        api_format: 'openai_compatible',
+        auth_type: 'bearer',
+        supported_modalities: ['chat'],
+        default_base_url: 'https://gateway.example/v1',
+        is_active: true,
+      },
+    ]))
+    await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+      { id: 1, provider: 'openai', key: 'must-not-run', is_active: true, last_checked: '' },
+    ]))
+    await writeFile(join(workspace, 'models.json'), '[]')
+    const previousFetch = globalThis.fetch
+    let calls = 0
+    globalThis.fetch = (async () => {
+      calls += 1
+      return new Response('{}', { status: 200 })
+    }) as any
+
+    try {
+      const monitor = startKeyMonitor(() => workspace, { intervalMs: 1, runImmediately: true })
+      await new Promise(resolve => setTimeout(resolve, 20))
+      monitor.stop()
+      expect(monitor.started).toBe(false)
+      expect(calls).toBe(0)
+    } finally {
+      globalThis.fetch = previousFetch
+    }
+  })
+
+  test('explicitly enabled automatic monitoring probes and stop prevents later probes', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+      {
+        id: 'openai',
+        display_name: 'OpenAI',
+        service_type: 'llm',
+        api_format: 'openai_compatible',
+        auth_type: 'bearer',
+        supported_modalities: ['chat'],
+        default_base_url: 'https://gateway.example/v1',
+        is_active: true,
+      },
+    ]))
+    await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+      { id: 1, provider: 'openai', key: 'mock-only', is_active: true, last_checked: '2000-01-01T00:00:00.000Z' },
+    ]))
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([
+      {
+        id: 11,
+        api_key_id: 1,
+        provider: 'openai',
+        display_name: 'Mock GPT',
+        model_name: 'gpt-mock',
+        capabilities: { chat: true },
+        health_status: 'unknown',
+      },
+    ]))
+    const previousFetch = globalThis.fetch
+    let calls = 0
+    let monitorError: unknown
+    globalThis.fetch = (async () => {
+      calls += 1
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'OK' } }] }), { status: 200 })
+    }) as any
+
+    try {
+      const monitor = startKeyMonitor(() => workspace, {
+        enabled: true,
+        intervalMs: 1,
+        runImmediately: true,
+        onError: error => { monitorError = error },
+      })
+      await new Promise(resolve => setTimeout(resolve, 20))
+      expect(monitor.started).toBe(true)
+      expect(monitorError).toBeUndefined()
+      const stored = JSON.parse(await readFile(join(workspace, 'keys.json'), 'utf8'))
+      expect(stored[0]?.last_checked).toBeTruthy()
+      expect(calls).toBeGreaterThan(0)
+      monitor.stop()
+      const callsAfterStop = calls
+      await new Promise(resolve => setTimeout(resolve, 20))
+      expect(calls).toBe(callsAfterStop)
+    } finally {
+      globalThis.fetch = previousFetch
+    }
+  })
+
   test('checks only stale active keys and applies upstream monitoring state', async () => {
     const workspace = await tempWorkspace()
     await writeFile(join(workspace, 'providers.json'), JSON.stringify([

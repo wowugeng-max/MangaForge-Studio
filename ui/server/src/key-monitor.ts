@@ -99,7 +99,7 @@ export async function checkKeysOnce(activeWorkspace: string, options: KeyMonitor
 }
 
 export function startKeyMonitor(getWorkspace: () => string, options: KeyMonitorLoopOptions = {}) {
-  const enabled = options.enabled ?? true
+  const enabled = options.enabled ?? false
   const intervalMs = options.intervalMs ?? DEFAULT_INTERVAL_MS
   if (!enabled || intervalMs <= 0) {
     return { started: false, stop: () => {} }
