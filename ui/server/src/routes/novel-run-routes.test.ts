@@ -319,6 +319,111 @@ describe('novel run task center source guards', () => {
     expect(task.can_execute).toBe(false)
   })
 
+  test('keeps last-error terminal admission authoritative over ordinary chapter-group top-level errors', async () => {
+    const workspace = await tempWorkspace()
+    const production = createNovelProductionService()
+    const project = await createNovelProject(workspace, { title: '章节群终态来源优先级', reference_config: {} })
+    const output = {
+      error_code: 'PROSE_GENERATION_FAILED',
+      chapters: [{
+        id: 411,
+        chapter_no: 21,
+        status: 'failed',
+      }],
+      current_index: 0,
+      last_error: {
+        id: 411,
+        chapter_no: 21,
+        error_code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+      },
+    }
+    const run = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'chapter_group_generation',
+      status: 'paused',
+      step_name: 'last-error-terminal',
+      output_ref: JSON.stringify(output),
+    })
+    const { app, handlers } = createRouteHarness()
+    registerNovelRunRoutes(app as any, {
+      getWorkspace: () => workspace,
+      getProject: async (_workspace: string, id: number) => (await listNovelProjects(_workspace)).find(item => item.id === id) || null,
+      runQueueWorkers: new Map(),
+      getProductionBudgetDecision: () => ({ blocked: false, reasons: [] }),
+      buildPipelineSteps: production.buildPipelineSteps,
+      executeChapterGroupRunRecord: async () => ({ status: 'not-used', processed: 0 }),
+    })
+    const resume = handlers.get('POST /api/novel/runs/:id/resume')
+    const tasks = handlers.get('GET /api/novel/projects/:id/tasks')
+
+    const response = await callRoute(resume, {
+      params: { id: String(run.id) },
+      body: { project_id: project.id },
+    })
+    const tasksResponse = await callRoute(tasks, { params: { id: String(project.id) } })
+    const storedRun = (await listNovelRuns(workspace, project.id)).find(item => item.id === run.id)
+    const task = tasksResponse.body.tasks.find((item: any) => item.id === run.id)
+
+    expect(response.statusCode).toBe(409)
+    expect(response.body.error_code).toBe('PROSE_ADMISSION_BLOCKED_INVALID')
+    expect(storedRun?.status).toBe('paused')
+    expect(task.can_resume).toBe(false)
+    expect(task.can_execute).toBe(false)
+  })
+
+  test('ignores stale top-level terminal admission when a chapter-group current chapter is ordinary', async () => {
+    const workspace = await tempWorkspace()
+    const production = createNovelProductionService()
+    const project = await createNovelProject(workspace, { title: '章节群残留终态隔离', reference_config: {} })
+    const output = {
+      admission_status: 'blocked_invalid',
+      error_code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+      chapters: [{
+        id: 414,
+        chapter_no: 22,
+        status: 'failed',
+      }],
+      current_index: 0,
+      last_error: {
+        id: 414,
+        chapter_no: 22,
+        error_code: 'PROSE_GENERATION_FAILED',
+      },
+    }
+    const run = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'chapter_group_generation',
+      status: 'paused',
+      step_name: 'stale-top-level-terminal',
+      output_ref: JSON.stringify(output),
+    })
+    const { app, handlers } = createRouteHarness()
+    registerNovelRunRoutes(app as any, {
+      getWorkspace: () => workspace,
+      getProject: async (_workspace: string, id: number) => (await listNovelProjects(_workspace)).find(item => item.id === id) || null,
+      runQueueWorkers: new Map(),
+      getProductionBudgetDecision: () => ({ blocked: false, reasons: [] }),
+      buildPipelineSteps: production.buildPipelineSteps,
+      executeChapterGroupRunRecord: async () => ({ status: 'not-used', processed: 0 }),
+    })
+    const resume = handlers.get('POST /api/novel/runs/:id/resume')
+    const tasks = handlers.get('GET /api/novel/projects/:id/tasks')
+
+    const tasksResponse = await callRoute(tasks, { params: { id: String(project.id) } })
+    const response = await callRoute(resume, {
+      params: { id: String(run.id) },
+      body: { project_id: project.id },
+    })
+    const storedRun = (await listNovelRuns(workspace, project.id)).find(item => item.id === run.id)
+    const task = tasksResponse.body.tasks.find((item: any) => item.id === run.id)
+
+    expect(tasksResponse.statusCode).toBe(200)
+    expect(task.can_resume).toBe(true)
+    expect(task.can_execute).toBe(true)
+    expect(response.statusCode).toBe(200)
+    expect(storedRun?.status).toBe('ready')
+  })
+
   test('rejects generic resume and disables actions for a standalone blocked_invalid admission', async () => {
     const workspace = await tempWorkspace()
     const production = createNovelProductionService()

@@ -390,15 +390,34 @@ describe('chapterGroupRunActionState', () => {
       run_type: 'chapter_group_generation',
       status: 'paused',
       output_ref: JSON.stringify({
+        error_code: 'PROSE_GENERATION_FAILED',
         current_index: 0,
         chapters: [{ chapter_no: 11, status: 'failed' }],
-        last_error: { admission_status: 'blocked_invalid' },
+        last_error: { error_code: 'PROSE_ADMISSION_BLOCKED_INVALID' },
       }),
     })
 
     expect(state.terminalAdmission).toBe(true)
     expect(state.canResume).toBe(false)
     expect(state.canExecute).toBe(false)
+  })
+
+  test('ignores stale top-level terminal admission when the current chapter is ordinary', () => {
+    const state = chapterGroupRunActionState({
+      run_type: 'chapter_group_generation',
+      status: 'paused',
+      output_ref: JSON.stringify({
+        admission_status: 'blocked_invalid',
+        error_code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+        current_index: 0,
+        chapters: [{ chapter_no: 12, status: 'failed' }],
+        last_error: { error_code: 'PROSE_GENERATION_FAILED' },
+      }),
+    })
+
+    expect(state.terminalAdmission).toBe(false)
+    expect(state.canResume).toBe(true)
+    expect(state.canExecute).toBe(true)
   })
 
   test('disables resume for a standalone blocked invalid admission payload', () => {

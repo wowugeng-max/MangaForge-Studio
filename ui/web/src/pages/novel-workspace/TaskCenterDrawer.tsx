@@ -50,13 +50,18 @@ export function chapterGroupRunActionState(run: any = {}) {
   const output = parseJsonValue(run.output_ref || run.outputRef) || run.payload || {}
   const chapters = Array.isArray(output.chapters) ? output.chapters : []
   const index = Number(output.current_index ?? output.currentIndex ?? 0) || 0
-  const chapter = chapters[index] || {}
+  const current = chapters[index] || null
+  const chapter = current || {}
   const lastError = output.last_error || output.lastError || {}
   const chapterState = chapterGroupActionState({
     ...chapter,
     approval_stage: chapter.approval_stage || chapter.approvalStage || lastError.approval_stage || lastError.approvalStage,
-    error_code: chapter.error_code || chapter.errorCode || output.error_code || output.errorCode || lastError.error_code || lastError.errorCode,
-    admission_status: chapter.admission_status || chapter.admissionStatus || output.admission_status || output.admissionStatus || lastError.admission_status || lastError.admissionStatus,
+    error_code: current
+      ? chapter.error_code || chapter.errorCode || lastError.error_code || lastError.errorCode
+      : output.error_code || output.errorCode || lastError.error_code || lastError.errorCode,
+    admission_status: current
+      ? chapter.admission_status || chapter.admissionStatus || lastError.admission_status || lastError.admissionStatus
+      : output.admission_status || output.admissionStatus || lastError.admission_status || lastError.admissionStatus,
   })
   const isChapterGroup = run.run_type === 'chapter_group_generation'
   const status = String(run.status || '')

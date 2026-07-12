@@ -122,19 +122,28 @@ function findTerminalAdmissionResumeGuard(payload: any = {}) {
   const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
   const current = chapters[Number(payload.current_index || 0)] || null
   const lastError = payload.last_error || payload.lastError || {}
-  const admissionStatus = String(current?.admission_status || current?.admissionStatus || payload.admission_status || payload.admissionStatus || lastError.admission_status || lastError.admissionStatus || '')
-  const errorCode = String(current?.error_code || current?.errorCode || payload.error_code || payload.errorCode || lastError.error_code || lastError.errorCode || '')
+  const admissionStatus = String(current
+    ? current.admission_status || current.admissionStatus || lastError.admission_status || lastError.admissionStatus || ''
+    : payload.admission_status || payload.admissionStatus || lastError.admission_status || lastError.admissionStatus || '')
+  const errorCode = String(current
+    ? current.error_code || current.errorCode || lastError.error_code || lastError.errorCode || ''
+    : payload.error_code || payload.errorCode || lastError.error_code || lastError.errorCode || '')
   if (admissionStatus !== 'blocked_invalid' && errorCode !== 'PROSE_ADMISSION_BLOCKED_INVALID') return null
   return {
     error: '当前章节正文未通过有效性检查且未入库，不能直接继续；需要显式修复或重置终态。',
     error_code: 'PROSE_ADMISSION_BLOCKED_INVALID',
     admission_status: 'blocked_invalid',
-    chapter_id: current?.id || payload.chapter_id || payload.chapterId || lastError.id || null,
-    chapter_no: current?.chapter_no || current?.chapterNo || payload.chapter_no || payload.chapterNo || lastError.chapter_no || lastError.chapterNo || null,
-    recovery_plan: lastError.recovery_plan || lastError.recoveryPlan || current?.recovery_plan || current?.recoveryPlan || {
-      type: 'blocked_invalid',
-      actions: ['显式修复或重置当前章节终态', '重新提交正文生成'],
-    },
+    chapter_id: current ? current.id || lastError.id || null : payload.chapter_id || payload.chapterId || lastError.id || null,
+    chapter_no: current ? current.chapter_no || current.chapterNo || lastError.chapter_no || lastError.chapterNo || null : payload.chapter_no || payload.chapterNo || lastError.chapter_no || lastError.chapterNo || null,
+    recovery_plan: current
+      ? lastError.recovery_plan || lastError.recoveryPlan || current.recovery_plan || current.recoveryPlan || {
+        type: 'blocked_invalid',
+        actions: ['显式修复或重置当前章节终态', '重新提交正文生成'],
+      }
+      : payload.recovery_plan || payload.recoveryPlan || lastError.recovery_plan || lastError.recoveryPlan || {
+        type: 'blocked_invalid',
+        actions: ['显式修复或重置当前章节终态', '重新提交正文生成'],
+      },
   }
 }
 
