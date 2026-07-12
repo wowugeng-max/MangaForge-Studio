@@ -1412,11 +1412,7 @@ export function createNovelRunExecutionService(ctx: {
         const postDeliveryOpenCheck = Array.isArray(postDeliveryQuality.checks)
           ? postDeliveryQuality.checks.find((check: any) => String(check?.status || '') !== 'ok')
           : null
-        const strictUnattendedQualityGate = payload.unattended?.enabled === true
-          && options.allow_incomplete !== true
-          && payload.policy?.allow_incomplete !== true
-          && payload.unattended?.allow_incomplete !== true
-        const postDeliveryHasWarnings = strictUnattendedQualityGate && postDeliveryQuality.status !== 'ok'
+        const postDeliveryHasWarnings = postDeliveryQuality.status !== 'ok'
         const warningSummary = postDeliveryHasWarnings
           ? compactText(`${postDeliveryOpenCheck?.label || '交付后质检'}：${postDeliveryOpenCheck?.summary || 'Step 3 仍有未闭环项。'}`, 300)
           : ''
@@ -1431,6 +1427,8 @@ export function createNovelRunExecutionService(ctx: {
           chapter_no: item.chapter_no,
           title: item.title,
           status: 'success',
+          attempts: Number(item.attempts || 0),
+          next_run_at: '',
           admission_status: admissionStatus,
           story_state_status: storyStateStatus,
           ...warningFields,

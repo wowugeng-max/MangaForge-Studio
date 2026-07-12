@@ -150,7 +150,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
-        { id: 11, chapter_no: 1, title: '第一章', status: 'pending', stages: production.buildChapterGroupStages() },
+        { id: 11, chapter_no: 1, title: '第一章', status: 'pending', attempts: 2, next_run_at: '2020-01-01T00:00:00.000Z', stages: production.buildChapterGroupStages() },
         { id: 12, chapter_no: 2, title: '第二章', status: 'pending', stages: production.buildChapterGroupStages() },
       ],
       current_index: 0,
@@ -230,7 +230,8 @@ describe('executeChapterGroupRunRecord behavior', () => {
       quality_warnings: ['质量分 72 低于阈值 88'],
       post_commit_warnings: ['正文已入库，索引同步稍后完成'],
     })
-    expect(Number(group.chapters[0].attempts || 0)).toBe(0)
+    expect(group.chapters[0].attempts).toBe(2)
+    expect(group.chapters[0].next_run_at).toBe('')
     expect(group.chapters[0].warnings).toEqual(expect.arrayContaining([
       '质量分 72 低于阈值 88',
       '正文已入库，索引同步稍后完成',
@@ -418,6 +419,64 @@ describe('executeChapterGroupRunRecord behavior', () => {
       status: 'unknown',
       summary: '第4章未返回正文元信息复检证据。',
     })
+  })
+
+  test('queues post-delivery repair and advances when allow_incomplete is enabled', async () => {
+    const production = createNovelProductionService()
+    const harness = makeRunHarness({
+      chapters: [
+        { id: 23, chapter_no: 31, title: '第三十一章', status: 'pending', stages: production.buildChapterGroupStages() },
+        { id: 24, chapter_no: 32, title: '第三十二章', status: 'pending', stages: production.buildChapterGroupStages() },
+      ],
+      current_index: 0,
+      production_mode: 'full_auto',
+      unattended: { enabled: true, allow_incomplete: true },
+      policy: { quality_threshold: 88, allow_incomplete: true },
+    })
+    const generateCalls: number[] = []
+    const baseSync = {
+      chapter_title_uniqueness_sync: { status: 'ok' },
+      prose_meta_sync: { status: 'ok' },
+      chapter_hook_sync: { status: 'ok' },
+      chapter_blueprint_sync: { status: 'ok' },
+      foreshadowing_delta_sync: { status: 'ok' },
+      deterministic_prose_cleanup: { status: 'ok', risk_count: 0 },
+    }
+    const service = createNovelRunExecutionService({
+      getProject: async () => ({ id: 77, title: '长篇项目', reference_config: {} }),
+      production,
+      listNovelRuns: harness.listNovelRuns,
+      updateNovelRun: harness.updateNovelRun,
+      appendNovelRun: harness.appendNovelRun,
+      generateChapterForGroup: async (_workspace, _projectId, chapterId) => {
+        generateCalls.push(chapterId)
+        return {
+          admission_status: 'accepted_with_warnings',
+          score: 88,
+          revised: false,
+          story_state_update: chapterId === 23 ? { ...baseSync, prose_meta_sync: undefined } : baseSync,
+        }
+      },
+    } as any)
+
+    const result = await service.executeChapterGroupRunRecord('test-workspace', { id: 77, reference_config: {} }, harness.run, {
+      max_chapters: 2,
+      lock_owner: 'behavior-test',
+      allow_incomplete: true,
+    })
+
+    expect(result.status).toBe('success')
+    expect(result.processed).toBe(2)
+    expect(result.group.current_index).toBe(2)
+    expect(result.group.chapters.map((chapter: any) => chapter.status)).toEqual(['success', 'success'])
+    expect(generateCalls).toEqual([23, 24])
+    expect(harness.appendedRuns).toHaveLength(1)
+    expect(harness.appendedRuns[0]).toMatchObject({
+      run_type: 'longform_production_repair',
+      status: 'ready',
+    })
+    expect(JSON.parse(harness.appendedRuns[0].output_ref).tasks.map((task: any) => task.issue_type)).toEqual(['prose_meta_gap'])
+    expect(result.group.results[0].repair_queue.task_count).toBe(1)
   })
 
   test('advances unattended production when required quality-continuity receipts are missing', async () => {
@@ -1739,6 +1798,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
       production,
       listNovelRuns: harness.listNovelRuns,
       updateNovelRun: harness.updateNovelRun,
+      appendNovelRun: harness.appendNovelRun,
       generateChapterForGroup: async (_workspace, _projectId, _chapterId, options) => {
         await options.onStage('scene_cards', {
           status: 'success',
@@ -1951,6 +2011,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
       production,
       listNovelRuns: harness.listNovelRuns,
       updateNovelRun: harness.updateNovelRun,
+      appendNovelRun: harness.appendNovelRun,
       generateChapterForGroup: async (_workspace, _projectId, chapterId, options) => {
         generateCalls.push({ chapterId, options })
         await options.onStage('review', {
