@@ -204,6 +204,26 @@ describe('buildTaskRunCardModel', () => {
     expect(cards[1]?.messages).toEqual(['Story State 同步待完成。', '状态索引稍后补齐'])
     expect(actionState.canApprove).toBe(false)
   })
+
+  test('deduplicates the same warning across chapters while retaining every chapter number', () => {
+    const cards = buildChapterAdmissionWarningCards({
+      run_type: 'chapter_group_generation',
+      status: 'completed',
+      output_ref: JSON.stringify({
+        chapters: [11, 12].map(chapterNo => ({
+          chapter_no: chapterNo,
+          status: 'success',
+          admission_status: 'accepted_with_warnings',
+          story_state_status: 'pending',
+          warnings: [{ source: 'story_state', code: 'pending', message: 'Story State 同步待完成。' }],
+        })),
+      }),
+    })
+
+    expect(cards).toHaveLength(1)
+    expect(cards[0]?.messages).toEqual(['Story State 同步待完成。'])
+    expect(cards[0]?.chapterNos).toEqual([11, 12])
+  })
 })
 
 describe('buildPostBatchQualityCheckSummary', () => {

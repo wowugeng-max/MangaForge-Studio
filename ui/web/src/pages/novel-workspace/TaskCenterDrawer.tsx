@@ -89,17 +89,18 @@ export function buildChapterAdmissionWarningCards(run: any) {
       if (!message) return
       const normalizedMessage = message.normalize('NFKC').replace(/\s+/g, ' ').replace(/[。．.!！?？；;，,]+$/g, '')
       const fingerprint = `${source}:${normalizedMessage}`
-      if (seenMessages.has(fingerprint)) return
-      seenMessages.add(fingerprint)
       const current = groups.get(source) || {
         source,
         title: source === 'story_state' ? '正文已入库，故事状态待补同步' : '已入库，建议修订',
         messages: [],
         chapterNos: [],
       }
-      if (!current.messages.includes(message)) current.messages.push(message)
       const chapterNo = Number(chapter.chapter_no || chapter.chapterNo || 0)
       if (chapterNo > 0 && !current.chapterNos.includes(chapterNo)) current.chapterNos.push(chapterNo)
+      if (!seenMessages.has(fingerprint)) {
+        seenMessages.add(fingerprint)
+        current.messages.push(message)
+      }
       groups.set(source, current)
     })
   })
