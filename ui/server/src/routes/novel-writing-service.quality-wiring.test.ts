@@ -192,6 +192,49 @@ describe('novel writing service prose quality wiring', () => {
     expect(harness.memoryTexts).toHaveLength(0)
   })
 
+  test('draft-only canonical and malformed prose are blocked before every write', async () => {
+    const canonicalSurfaceIndex = buildCanonicalSurfaceIndex({
+      previous_chapters: [
+        { chapter_no: 2, chapter_text: '那是临江市第一人民医院的旧址。' },
+        { chapter_no: 3, chapter_text: '江哲踩在了临江市第一人民医院大厅的旧石板上。' },
+      ],
+    })
+    const cases = [
+      {
+        draftText: REAL_CHAPTER_11_CANONICAL_CONFLICT_PROSE,
+        contextPackageOverride: { canonical_surface_index: canonicalSurfaceIndex, canonicalSurfaceIndex },
+        expectedSource: 'canonical_continuity',
+      },
+      { draftText: '第十章：生成失败', contextPackageOverride: {}, expectedSource: 'prose_shape' },
+    ]
+    for (const item of cases) {
+      const harness = await createProsePipelineHarness(createNovelWritingService, {
+        draftText: item.draftText,
+        contextPackageOverride: item.contextPackageOverride,
+      })
+      const before = JSON.stringify({
+        chapter: (await listNovelChapters(harness.workspace, harness.project.id)).find(row => row.id === harness.chapter.id),
+        versions: await listChapterVersions(harness.workspace, harness.chapter.id),
+        reviews: await listNovelReviews(harness.workspace, harness.project.id),
+      })
+      const error = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+        model_id: 217,
+        target_word_count: 1000,
+        production_mode: 'draft_only',
+      }).then(() => null, (caught: any) => caught)
+      const after = JSON.stringify({
+        chapter: (await listNovelChapters(harness.workspace, harness.project.id)).find(row => row.id === harness.chapter.id),
+        versions: await listChapterVersions(harness.workspace, harness.chapter.id),
+        reviews: await listNovelReviews(harness.workspace, harness.project.id),
+      })
+
+      expect(error?.admission_status).toBe('blocked_invalid')
+      expect(error?.admission_failure?.source).toBe(item.expectedSource)
+      expect(after).toBe(before)
+      expect(harness.memoryTexts).toEqual([])
+    }
+  })
+
   test('keeps a real low-risk style hit advisory when the review repeats the same evidence', () => {
     const prose = '江澈推开仓门，铜锁坠在地上。如同一枚刚落下的铁钉，回声穿过空仓。他没有停步，抬手按住总闸，灯光依次亮起。'
     const scan = scanProseForQualityLoop(prose, {}, { target: 0, min: 0, max: 0 })
@@ -1280,6 +1323,51 @@ describe('novel writing service prose quality wiring', () => {
       story_state_status: 'pending',
     })
     expect(harness.storyStateCalls).toBe(0)
+    expect(result.post_commit_warnings).toEqual([])
+  })
+
+  test('draft-only acceptance omits usage mutations and rolls back injected atomic failure before Memory', async () => {
+    const finalText = buildPipelineProse('江澈撞开铁门，追兵被迫后撤。', '主动夺下通讯器并推进追击')
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText: finalText,
+      contextPackageOverride: {
+        setting_context: { auto_matched: true, chapter_usage: [{ entity_id: 999999, usage_type: 'required', required: true }] },
+      },
+    })
+    const accepted = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+      model_id: 217,
+      target_word_count: 1000,
+      production_mode: 'draft_only',
+    })
+    expect(accepted.chapter?.chapter_text).toBe(normalizeProseForStorage(finalText))
+    expect(await listNovelChapterSettingUsage(harness.workspace, harness.project.id, harness.chapter.id)).toEqual([])
+
+    const failureHarness = await createProsePipelineHarness(createNovelWritingService, { draftText: finalText })
+    const before = JSON.stringify({
+      chapter: (await listNovelChapters(failureHarness.workspace, failureHarness.project.id)).find(row => row.id === failureHarness.chapter.id),
+      versions: await listChapterVersions(failureHarness.workspace, failureHarness.chapter.id),
+      reviews: await listNovelReviews(failureHarness.workspace, failureHarness.project.id),
+      usage: await listNovelChapterSettingUsage(failureHarness.workspace, failureHarness.project.id, failureHarness.chapter.id),
+    })
+    const error = await failureHarness.service.generateChapterForGroup(failureHarness.workspace, failureHarness.project.id, failureHarness.chapter.id, {
+      model_id: 217,
+      target_word_count: 1000,
+      production_mode: 'draft_only',
+      onStage: async (stage: string, payload: any) => {
+        if (stage === 'store' && payload?.status === 'running') throw new Error('injected atomic acceptance failure')
+      },
+    }).then(() => null, (caught: any) => caught)
+    const after = JSON.stringify({
+      chapter: (await listNovelChapters(failureHarness.workspace, failureHarness.project.id)).find(row => row.id === failureHarness.chapter.id),
+      versions: await listChapterVersions(failureHarness.workspace, failureHarness.chapter.id),
+      reviews: await listNovelReviews(failureHarness.workspace, failureHarness.project.id),
+      usage: await listNovelChapterSettingUsage(failureHarness.workspace, failureHarness.project.id, failureHarness.chapter.id),
+    })
+
+    expect(error?.admission_status).toBe('blocked_invalid')
+    expect(error?.admission_failure).toMatchObject({ source: 'atomic' })
+    expect(after).toBe(before)
+    expect(failureHarness.memoryTexts).toEqual([])
   })
 
   test('records caught editor, meme, and readability failures as admission warnings', () => {
@@ -1328,7 +1416,7 @@ describe('novel writing service prose quality wiring', () => {
     expect(harness.storyStateCalls).toBe(1)
   })
 
-  test('marks an explicit reference safety block blocked_invalid before Story State or any writes', async () => {
+  test('marks an explicit reference safety block blocked_invalid before draft-only commit or any writes', async () => {
     const finalText = buildPipelineProse('江澈撞开铁门，追兵的包围线被迫后撤。', '主动夺下通讯器并推进追击')
     const harness = await createProsePipelineHarness(createNovelWritingService, { draftText: finalText })
     let storyStateCalls = 0
@@ -1388,6 +1476,7 @@ describe('novel writing service prose quality wiring', () => {
     const error = await service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
       model_id: 217,
       target_word_count: 1000,
+      production_mode: 'draft_only',
     }).then(() => null, (caught: any) => caught)
     const after = JSON.stringify({
       chapter: (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id),
@@ -1420,6 +1509,33 @@ describe('novel writing service prose quality wiring', () => {
     expect(result.quality_warnings).toContainEqual(expect.objectContaining({ source: 'quality' }))
     expect(harness.storeCalls).toBe(1)
     expect(harness.memoryTexts).toHaveLength(1)
+  })
+
+  test('stores prior complete prose when optional quality revision is unavailable', async () => {
+    const originalText = buildPipelineProse('江澈撞开铁门，追兵被迫后撤。', '主动夺下通讯器并推进追击')
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText: originalText,
+      reviewPayloads: [{
+        score: 72,
+        publishable: true,
+        dimensions: proseQualityScores,
+        findings: [{
+          key: 'agency', severity: 'S2', dimension: 'core_promise_agency', evidence: '江澈撞开铁门',
+          required_change: '补足行动代价', acceptance_test: '行动产生可见代价',
+        }],
+      }],
+      revisionResults: [{ error: 'revision provider unavailable' }],
+    })
+
+    const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+      model_id: 217,
+      target_word_count: 1000,
+    })
+
+    expect(result.chapter?.chapter_text).toBe(normalizeProseForStorage(originalText))
+    expect(result.quality_warnings).toContainEqual(expect.objectContaining({ code: 'quality_revision_unavailable', source: 'review' }))
+    expect(result.admission_status).toBe('accepted_with_warnings')
+    expect(JSON.stringify(result)).not.toContain('revision provider unavailable')
   })
 
   test('keeps an accepted chapter successful when final prose memory storage fails', async () => {

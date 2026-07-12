@@ -307,6 +307,7 @@ describe('prepareStoryStateUpdate', () => {
 
   test('marks atomic acceptance validation failure blocked_invalid and rolls back before Memory', async () => {
     const finalText = buildPipelineProse('江澈撞开铁门，追兵的包围线被迫后撤。', '主动夺下通讯器并推进追击')
+    const chapterUsage: any[] = []
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText: finalText,
       qualityGateEnabled: false,
@@ -314,16 +315,26 @@ describe('prepareStoryStateUpdate', () => {
       contextPackageOverride: {
         setting_context: {
           auto_matched: true,
-          chapter_usage: [{ entity_id: 999999, usage_type: 'required', required: true }],
+          chapter_usage: chapterUsage,
         },
       },
       storyStatePayload: {
-        state_delta: { open_questions: ['继续追击谁'] },
+        state_delta: { open_questions: ['幕后指挥者为何知道江澈旧名'] },
         character_updates: [],
         setting_updates: [],
         storyline_updates: [],
       },
     })
+    const setting = await createNovelSettingEntity(harness.workspace, {
+      project_id: harness.project.id,
+      entity_type: 'item',
+      name: '重复验收实体',
+      state_json: {},
+    } as any)
+    chapterUsage.push(
+      { entity_id: setting.id, usage_type: 'required', required: true },
+      { entity_id: setting.id, usage_type: 'allowed', allowed: true },
+    )
     const before = JSON.stringify({
       project: await getNovelProject(harness.workspace, harness.project.id),
       chapters: await listNovelChapters(harness.workspace, harness.project.id),
@@ -333,10 +344,11 @@ describe('prepareStoryStateUpdate', () => {
       reviews: await listNovelReviews(harness.workspace, harness.project.id),
     })
 
-    const error = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+    const outcome = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
       model_id: 217,
       target_word_count: 1000,
-    }).then(() => null, (caught: any) => caught)
+    }).then((result: any) => ({ result, error: null }), (error: any) => ({ result: null, error }))
+    const error = outcome.error
     const after = JSON.stringify({
       project: await getNovelProject(harness.workspace, harness.project.id),
       chapters: await listNovelChapters(harness.workspace, harness.project.id),
@@ -346,6 +358,7 @@ describe('prepareStoryStateUpdate', () => {
       reviews: await listNovelReviews(harness.workspace, harness.project.id),
     })
 
+    expect(outcome.result).toBeNull()
     expect(error?.admission_status).toBe('blocked_invalid')
     expect(error?.admission_failure).toMatchObject({ code: 'atomic_acceptance_failed', source: 'atomic' })
     expect(after).toBe(before)
@@ -594,5 +607,55 @@ describe('prepareStoryStateUpdate', () => {
     })
     expect(storedProject?.reference_config?.story_state?.last_updated_chapter).toBe(harness.chapter.chapter_no)
     expect(harness.commitOrder).toEqual(['commit', 'memory'])
+  })
+
+  test('pending Story State commits only prose, version, and safe reviews when preflight staged mutations exist', async () => {
+    const finalText = buildPipelineProse('江澈撞开铁门，追兵被迫后撤。', '主动夺下通讯器并推进追击')
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText: finalText,
+      qualityGateEnabled: false,
+      reviewPayloads: Array.from({ length: 4 }, acceptedQualityReviewPayload),
+      contextPackageOverride: {
+        preflight: {
+          ready: true,
+          strict_ready: false,
+          checks: [{ key: 'chapter_blueprint', ok: false, severity: 'high' }, { key: 'worldbuilding', ok: false, severity: 'high' }],
+          warnings: ['需要 staged repair'],
+          blockers: [],
+        },
+      },
+      repairedContextPackageOverride: { preflight: { ready: true, strict_ready: true, checks: [], warnings: [], blockers: [] } },
+      requireStagedContextCandidates: true,
+      storyStatePayload: { state_delta: {} },
+    })
+    const before = JSON.stringify({
+      project: await getNovelProject(harness.workspace, harness.project.id),
+      worldbuilding: await listNovelWorldbuilding(harness.workspace, harness.project.id),
+      characters: await listNovelCharacters(harness.workspace, harness.project.id),
+      settings: await listNovelSettingEntities(harness.workspace, harness.project.id),
+      usage: await listNovelChapterSettingUsage(harness.workspace, harness.project.id, harness.chapter.id),
+    })
+
+    const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+      model_id: 217,
+      target_word_count: 1000,
+      auto_repair_missing_material: true,
+      allow_incomplete: true,
+    })
+    const after = JSON.stringify({
+      project: await getNovelProject(harness.workspace, harness.project.id),
+      worldbuilding: await listNovelWorldbuilding(harness.workspace, harness.project.id),
+      characters: await listNovelCharacters(harness.workspace, harness.project.id),
+      settings: await listNovelSettingEntities(harness.workspace, harness.project.id),
+      usage: await listNovelChapterSettingUsage(harness.workspace, harness.project.id, harness.chapter.id),
+    })
+
+    expect(result.story_state_status).toBe('pending')
+    expect(after).toBe(before)
+    expect((await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)?.chapter_text).toBe(normalizeProseForStorage(finalText))
+    expect(await listChapterVersions(harness.workspace, harness.chapter.id)).toEqual([
+      expect.objectContaining({ source: expect.any(String) }),
+    ])
+    expect((await listNovelReviews(harness.workspace, harness.project.id)).some(review => review.review_type === 'unattended_preflight_repair')).toBe(false)
   })
 })

@@ -1000,6 +1000,34 @@ describe('bounded prose quality loop', () => {
     expect(result.quality_warning).toMatchObject({ code: 'quality_recheck_unavailable', source: 'review' })
   })
 
+  test('preserves prior complete prose when optional revision is unavailable', async () => {
+    const initialText = '江澈撞开铁门，追兵被迫后撤。他夺下通讯器，立刻切断频道。顾遥跟上来，指向楼梯。两人继续追击。'.repeat(30)
+    const result = await runProseQualityLoop({
+      initialText,
+      minScore: 78,
+      scan: () => ({ hard_failures: [], advisory_findings: [] }),
+      review: async () => ({
+        score: 72,
+        publishable: true,
+        dimensions: sixDimensionScores,
+        findings: [{
+          key: 'agency',
+          severity: 'S2',
+          dimension: 'core_promise_agency',
+          evidence: '江澈撞开铁门',
+          required_change: '补足行动代价',
+          acceptance_test: '行动产生可见代价',
+        }],
+      }),
+      revise: async () => { throw new Error('revision provider unavailable') },
+    })
+
+    expect(result.final_text).toBe(initialText)
+    expect(result.quality_warning).toMatchObject({ code: 'quality_revision_unavailable', source: 'review' })
+    expect(result.decision.advisory_failures.join('｜')).toContain('quality_revision_unavailable')
+    expect(JSON.stringify(result)).not.toContain('revision provider unavailable')
+  })
+
   test('retains fresh deterministic hard failures when revised prose recheck is unavailable', async () => {
     let reviewCalls = 0
     const revisedText = '修订正文仍有确定性冲突。'.repeat(120)

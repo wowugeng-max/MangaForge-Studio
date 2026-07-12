@@ -45711,8 +45711,7 @@ export function createNovelWritingService(ctx: {
     const pendingGeneratedReviews: any[] = []
     const storeGeneratedReviewRecord = async (record: any) => {
       if (!record) return
-      if (isDraftOnly || isDraftReviewOnly) await createNovelReview(activeWorkspace, record)
-      else pendingGeneratedReviews.push(record)
+      pendingGeneratedReviews.push(record)
     }
     let chapters = await listNovelChapters(activeWorkspace, projectId)
     let chapter = chapters.find(item => item.id === chapterId)
@@ -45744,7 +45743,7 @@ export function createNovelWritingService(ctx: {
           settingEntities: settings,
           chapterSettingUsage,
           projectSettingUsage,
-          persistSettingUsage: !isFullProduction,
+          persistSettingUsage: false,
         })
     let wordTarget = resolveChapterWordTarget(project, chapter, options)
     const initialContextPackage = applyChapterWordTargetToContext(
@@ -46364,6 +46363,7 @@ export function createNovelWritingService(ctx: {
         failure,
       )),
     )
+    if (qualityLoop.quality_warning) qualityWarningCandidates.push(qualityLoop.quality_warning)
     let selfCheck = buildLegacyCompatibleSelfCheck(qualityLoop)
     if (!(selfCheck.review as any).next_chapter_quality_plan) {
       ;(selfCheck.review as any).next_chapter_quality_plan = buildFallbackNextChapterQualityPlan(
@@ -46710,12 +46710,6 @@ export function createNovelWritingService(ctx: {
       cleanupRepairDeslopTermNormalization,
     }))
     if (isDraftOnly || isDraftReviewOnly) {
-      await onStage('safety', {
-        status: 'skipped',
-        reason: isDraftOnly
-          ? '生产模式：初稿已通过硬质量门禁，不执行仿写安全门禁'
-          : '生产模式：生成并自检，不执行仿写安全门禁',
-      })
       const draftModeHardAdmission = classifyProseAdmission({
         hard_failures: [
           ...validateMinimalChapterProse(finalText).failures,
@@ -46741,6 +46735,41 @@ export function createNovelWritingService(ctx: {
         ...asArray(draftQualityDecision?.hard_failures).map((failure: any) => proseAdmissionWarning('quality', failure?.key || 'draft_quality_gate', failure?.message || failure?.evidence || failure?.key, failure)),
         ...asArray(draftQualityDecision?.advisory_failures).map((message: any) => proseAdmissionWarning('quality', 'draft_quality_advisory', message)),
       )
+      let draftReferenceReport: any = { quality_assessment: { risk_level: 'unknown' }, unavailable: true }
+      let draftSafetyDecision: any = { blocked: false, score: null, copy_hit_count: 0, reasons: [] }
+      let draftSafetyExplanation: any = 'reference review unavailable'
+      let draftMigrationAudit: any = { passed: false, unavailable: true }
+      try {
+        draftReferenceReport = await ctx.reference.buildReferenceUsageReport(activeWorkspace, project, '正文创作', finalText)
+        draftSafetyDecision = ctx.reference.getReferenceSafetyDecision(project, draftReferenceReport)
+        draftSafetyExplanation = ctx.reference.explainReferenceSafety(draftReferenceReport, draftSafetyDecision)
+        draftMigrationAudit = ctx.reference.buildMigrationAudit(project, draftReferenceReport, draftSafetyExplanation)
+      } catch (error) {
+        qualityWarningCandidates.push(proseAdmissionWarning('review', 'reference_review_unavailable', String(error)))
+      }
+      await onStage('safety', { status: draftSafetyDecision.blocked ? 'failed' : 'success', score: draftSafetyDecision.score, copy_hit_count: draftSafetyDecision.copy_hit_count, risk_level: draftReferenceReport?.quality_assessment?.risk_level })
+      if (draftSafetyDecision.blocked) {
+        throw markBlockedInvalidError(Object.assign(new Error('仿写安全阈值未通过'), {
+          code: 'REFERENCE_SAFETY_BLOCKED',
+          referenceReport: draftReferenceReport,
+          safetyDecision: draftSafetyDecision,
+          safetyExplanation: draftSafetyExplanation,
+          migrationAudit: draftMigrationAudit,
+        }), {
+          code: 'reference_safety_blocked',
+          source: 'safety',
+          message: '仿写安全阈值明确阻止正文入库。',
+          details: { safety_decision: draftSafetyDecision },
+        })
+      }
+      const draftSafetyApprovalRequired = ctx.production.approvalRequired(approvalPolicy, 'safety', approvals, {
+        score: draftSafetyDecision.score,
+        copy_hit_count: draftSafetyDecision.copy_hit_count,
+        risk_level: draftReferenceReport?.quality_assessment?.risk_level,
+      })
+      if (draftSafetyApprovalRequired || String(draftReferenceReport?.quality_assessment?.risk_level || '').toLowerCase() !== 'low' || asArray(draftSafetyDecision?.reasons).length) {
+        qualityWarningCandidates.push(proseAdmissionWarning('review', 'safety_review', draftSafetyExplanation || '仿写安全报告需要复核。'))
+      }
       const draftModeAdmissionDecision = classifyProseAdmission({ warnings: qualityWarningCandidates })
       const draftModeStoryStateWarning = {
         skipped: true,
@@ -46753,9 +46782,7 @@ export function createNovelWritingService(ctx: {
         story_state_status: 'pending' as const,
         story_state_warning: draftModeStoryStateWarning,
       }
-      await onStage('store', { status: 'running' })
-      await ctx.runtime?.hooks?.beforeChapterStore?.({ chapterId: chapter.id, finalText })
-      const updatedReviewedDraft = await updateNovelChapter(activeWorkspace, chapter.id, buildChapterProseStoragePatch({
+      const draftModeChapterPatch = buildChapterProseStoragePatch({
         chapter,
         generatedTitlePatch,
         finalText,
@@ -46764,17 +46791,14 @@ export function createNovelWritingService(ctx: {
         ohStoryDeliveryReceipts,
         postDraftDirector,
         proseAdmission: draftModeProseAdmission,
-      }), { versionSource: resolveChapterProseVersionSource({ editorRewrite }) })
-      await onStage('store', { status: 'success', word_count: countProseChars(finalText), scene_status: 'accepted' })
-      await onStage('story_state', {
-        status: 'skipped',
-        reason: isDraftOnly
-          ? '初稿模式不更新状态机，避免草稿污染长期记忆'
-          : '自检模式不更新状态机，确认后可继续完整流水线',
       })
-      await createNovelReview(activeWorkspace, buildProseQualityReview(draftModeAdmissionDecision.status === 'accepted' ? 'ok' : 'warn', draftQualityDecision, '', {
+      let updatedReviewedDraft: any = { ...chapter, ...draftModeChapterPatch }
+      const draftModeQualityReview = buildProseQualityReview(draftModeAdmissionDecision.status === 'accepted' ? 'ok' : 'warn', draftQualityDecision, '', {
         proseAdmission: draftModeProseAdmission,
-      }))
+        referenceReport: draftReferenceReport,
+        safetyDecision: draftSafetyDecision,
+        migrationAudit: draftMigrationAudit,
+      })
       const draftProseMetaSync = buildProseMetaSyncReport(project, chapter, contextPackage, finalText)
       await storeGeneratedReviewRecord(buildDraftSyncReviewRecord({
         projectId,
@@ -47018,14 +47042,54 @@ export function createNovelWritingService(ctx: {
       await storeGeneratedReviewRecord(buildChapterCoreDriftDraftReviewRecord({ projectId, chapter, sync: draftCoreDrift }))
       const draftCoreContractSync = buildCoreContractSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)
       await storeGeneratedReviewRecord(buildCoreContractDraftReviewRecord({ projectId, chapter, sync: draftCoreContractSync }))
+      try {
+        await onStage('store', { status: 'running' })
+        await ctx.runtime?.hooks?.beforeChapterStore?.({ chapterId: chapter.id, finalText })
+        const draftAcceptance = await commitNovelChapterAcceptance(activeWorkspace, {
+          chapter_id: chapter.id,
+          chapter_patch: draftModeChapterPatch,
+          version_source: resolveChapterProseVersionSource({ editorRewrite }),
+          reviews: [
+            ...pendingGeneratedReviews,
+            draftModeQualityReview,
+          ].filter(Boolean),
+        })
+        updatedReviewedDraft = draftAcceptance.chapter
+      } catch (error) {
+        throw markBlockedInvalidError(error, {
+          code: 'atomic_acceptance_failed',
+          source: 'atomic',
+          message: '章节原子验收失败，未写入任何业务数据。',
+        })
+      }
+      const draftPostCommitWarnings: Array<{ stage: string; message: string }> = []
+      const runDraftPostCommitBestEffort = async (stage: string, task: () => any | Promise<any>) => {
+        try {
+          await task()
+        } catch (error) {
+          draftPostCommitWarnings.push({ stage, message: String(error).slice(0, 300) })
+        }
+      }
+      await runDraftPostCommitBestEffort('after_commit_hook', () => ctx.runtime?.hooks?.afterChapterCommit?.({ chapterId: chapter.id, finalText }))
+      await runDraftPostCommitBestEffort('store_stage', () => onStage('store', { status: 'success', word_count: countProseChars(finalText), scene_status: 'accepted' }))
+      await runDraftPostCommitBestEffort('story_state_stage', () => onStage('story_state', {
+        status: 'skipped',
+        reason: isDraftOnly
+          ? '初稿模式不更新状态机，避免草稿污染长期记忆'
+          : '自检模式不更新状态机，确认后可继续完整流水线',
+      }))
+      const draftReturnedAdmissionStatus = draftPostCommitWarnings.length > 0 && draftModeProseAdmission.status === 'accepted'
+        ? 'accepted_with_warnings'
+        : draftModeProseAdmission.status
       return {
         chapter: updatedReviewedDraft,
         score: selfCheck?.review?.score ?? null,
-        admission_status: draftModeProseAdmission.status,
+        admission_status: draftReturnedAdmissionStatus,
         quality_score: draftModeProseAdmission.quality_score,
         quality_warnings: draftModeProseAdmission.quality_warnings,
         story_state_status: draftModeProseAdmission.story_state_status,
         story_state_warning: draftModeStoryStateWarning,
+        post_commit_warnings: draftPostCommitWarnings,
         revised: false,
         production_mode: productionMode,
         completed_stage: 'store',
@@ -47319,13 +47383,13 @@ export function createNovelWritingService(ctx: {
           character_updates: acceptanceCharacterUpdates,
           setting_updates: acceptanceSettingUpdates,
           usage_updates: acceptanceUsageUpdates,
+          worldbuilding_creates: asArray(stagedPreflightRepair?.staged_worldbuilding_creates),
+          character_creates: asArray(stagedPreflightRepair?.staged_character_creates),
+          setting_creates: asArray(stagedPreflightRepair?.staged_setting_creates),
+          chapter_setting_usage_replacement: stagedPreflightRepair?.staged_usage_replacement || stagedContextUsageReplacement || undefined,
         } : {}),
-        worldbuilding_creates: asArray(stagedPreflightRepair?.staged_worldbuilding_creates),
-        character_creates: asArray(stagedPreflightRepair?.staged_character_creates),
-        setting_creates: asArray(stagedPreflightRepair?.staged_setting_creates),
-        chapter_setting_usage_replacement: stagedPreflightRepair?.staged_usage_replacement || stagedContextUsageReplacement || undefined,
         reviews: [
-          ...asArray(stagedPreflightRepair?.staged_reviews),
+          ...(storyStateStatus === 'synced' ? asArray(stagedPreflightRepair?.staged_reviews) : []),
           ...pendingGeneratedReviews,
           buildProseQualityReview(precommitAdmission.status === 'accepted' ? 'ok' : 'warn', finalQualityDecision, '', {
             referenceReport,

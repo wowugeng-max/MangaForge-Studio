@@ -164,6 +164,7 @@ describe('commitNovelChapterAcceptance', () => {
 
     expect(accepted.chapter.chapter_text).toBe('新正文')
     expect(accepted.project.reference_config).toEqual(project.reference_config)
+    expect(accepted.project.updated_at).toBe(project.updated_at)
     expect(await listChapterVersions(workspace, chapter.id)).toEqual([
       expect.objectContaining({ chapter_text: '旧正文', source: 'agent_execute' }),
     ])

@@ -1528,8 +1528,10 @@ export async function commitNovelChapterAcceptance(activeWorkspace: string, inpu
     ...(input.project_patch || {}),
     ...(input.next_reference_config === undefined ? {} : { reference_config: input.next_reference_config }),
   }
-  const normalizedProject = normalizeProjectRecord(projectPatch, { ...currentProject, id: currentProject.id, updated_at: nowIso() })
-  store.projects[projectIndex] = { ...currentProject, ...normalizedProject, updated_at: nowIso() }
+  if (Object.keys(projectPatch).length > 0) {
+    const normalizedProject = normalizeProjectRecord(projectPatch, { ...currentProject, id: currentProject.id, updated_at: nowIso() })
+    store.projects[projectIndex] = { ...currentProject, ...normalizedProject, updated_at: nowIso() }
+  }
   for (const change of characterChanges) {
     const current = store.characters[change.recordIndex]
     const patch = change.patch.current_state === undefined ? change.patch : {

@@ -686,18 +686,45 @@ export async function runProseQualityLoop(input: {
     ].slice(0, 6)
     if (blockingFindings.length === 0) break
 
-    const revision = await input.revise({
-      text: finalText,
-      review,
-      blockingFindings,
-      round,
-      prompt: buildFocusedProseRevisionPrompt({
-        coreContract: input.coreContract,
-        chapterText: finalText,
+    let revision: any
+    try {
+      revision = await input.revise({
+        text: finalText,
+        review,
         blockingFindings,
         round,
-      }),
-    })
+        prompt: buildFocusedProseRevisionPrompt({
+          coreContract: input.coreContract,
+          chapterText: finalText,
+          blockingFindings,
+          round,
+        }),
+      })
+    } catch (error: any) {
+      if (
+        isAbortLikeProseQualityError(error)
+        || error?.admission_status === 'blocked_invalid'
+        || ['PROSE_DRAFT_TRUNCATED', 'PROSE_REVISION_TRUNCATED'].includes(String(error?.code || ''))
+      ) throw error
+      const message = 'quality_revision_unavailable：可选正文修订不可用，已保留修订前的完整正文'
+      decision = {
+        ...decision,
+        advisory_failures: Array.from(new Set([...decision.advisory_failures, message])),
+      }
+      qualityWarning = {
+        code: 'quality_revision_unavailable',
+        source: 'review',
+        message,
+        details: { diagnostics: compactProseQualityWarningDiagnostics(error) },
+      }
+      rounds.push({
+        round,
+        revision: { unavailable: true },
+        selection: { accepted: false, reason: 'quality_revision_unavailable', text: finalText },
+        normalization: null,
+      })
+      break
+    }
     const selection = selectUsableRevisionText(finalText, revision, {
       chapterNo: Number(input.coreContract?.chapter_no || input.coreContract?.chapterNo || 0),
       blockingFindings,
