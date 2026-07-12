@@ -2959,6 +2959,136 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('create_editor_report')
   })
 
+  test('stored prose accepted with warnings stays delivered while quality and state repairs remain optional', () => {
+    const warningChapter = {
+      ...chapters[0],
+      raw_payload: {
+        ...chapters[0].raw_payload,
+        prose_admission: {
+          status: 'accepted_with_warnings',
+          quality_score: 72,
+          quality_warnings: [{ code: 'quality_score_below_target', source: 'quality', message: '评分低于建议目标' }],
+          story_state_status: 'pending',
+          post_commit_warnings: [{ stage: 'memory', message: '记忆索引稍后补同步' }],
+        },
+      },
+    }
+    const staleProject = {
+      ...project,
+      reference_config: {
+        ...project.reference_config,
+        story_state: { ...project.reference_config.story_state, last_updated_chapter: 0 },
+      },
+    }
+
+    const model = buildWritingCockpitModel({
+      project: staleProject,
+      outlines,
+      chapters: [warningChapter, chapters[1]],
+      activeChapter: warningChapter,
+      materialScore: { score: 82, can_generate: true },
+      reviews: [proseQualityReview({
+        payload: {
+          self_check: {
+            review: {
+              score: 72,
+              passed: false,
+              status: 'warn',
+              must_fix: ['强化章末钩子'],
+              optional_improvements: ['压缩解释'],
+            },
+          },
+        },
+      })],
+    })
+
+    expect(model.chapterAcceptanceDesk.statusLabel).toBe('已入库，建议修订')
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('delivered_with_warnings')
+    expect(model.chapterAcceptanceDesk.admissionStatus).toBe('accepted_with_warnings')
+    expect(model.chapterAcceptanceDesk.qualityWarnings).toEqual([
+      { code: 'quality_score_below_target', source: 'quality', message: '评分低于建议目标' },
+    ])
+    expect(model.chapterAcceptanceDesk.storyStateStatus).toBe('pending')
+    expect(model.chapterAcceptanceDesk.postCommitWarnings).toEqual([{ stage: 'memory', message: '记忆索引稍后补同步' }])
+    expect(model.chapterAcceptanceDesk.qualityScore).toBe(72)
+    expect(model.chapterAcceptanceDesk.mustFix).toContain('强化章末钩子')
+    expect(model.chapterAcceptanceDesk.storyStateSynced).toBe(false)
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('accept_chapter_and_continue')
+    expect(model.chapterAcceptanceDesk.secondaryActions.map(action => action.key)).toEqual(expect.arrayContaining(['apply_editor_revision', 'sync_story_state']))
+    expect(model.chapterAcceptanceDesk.approvalBlocker).toBeNull()
+    expect(model.chapterHandoffDesk.status).toBe('ready')
+    expect(model.primaryActionKey).toBe('accept_chapter_and_continue')
+  })
+
+  test('accepted admission metadata overrides legacy low score must-fix and failed quality gate', () => {
+    const acceptedChapter = {
+      ...chapters[0],
+      raw_payload: {
+        ...chapters[0].raw_payload,
+        proseAdmission: {
+          status: 'accepted',
+          qualityScore: 64,
+          storyStateStatus: 'synced',
+        },
+      },
+    }
+    const model = buildWritingCockpitModel({
+      project: acceptedProject,
+      outlines,
+      chapters: [acceptedChapter, chapters[1]],
+      activeChapter: acceptedChapter,
+      materialScore: { score: 82, can_generate: true },
+      reviews: [proseQualityReview({
+        payload: {
+          prose_admission: { status: 'blocked_invalid' },
+          quality_gate: { passed: false },
+          self_check: {
+            review: {
+              score: 64,
+              passed: false,
+              must_fix: ['旧门禁必须修复'],
+              needs_revision: true,
+            },
+          },
+        },
+      })],
+    })
+
+    expect(model.chapterAcceptanceDesk.admissionStatus).toBe('accepted')
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('delivered')
+    expect(model.chapterAcceptanceDesk.statusLabel).toBe('已入库')
+    expect(model.chapterAcceptanceDesk.approvalBlocker).toBeNull()
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('accept_chapter_and_continue')
+  })
+
+  test('blocked invalid admission remains an explicit terminal blocker', () => {
+    const invalidChapter = {
+      ...chapters[0],
+      raw_payload: {
+        ...chapters[0].raw_payload,
+        prose_admission: {
+          status: 'blocked_invalid',
+          quality_warnings: [{ code: 'invalid_prose', source: 'validation', message: '正文为空或结构无效' }],
+          story_state_status: 'pending',
+        },
+      },
+    }
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [invalidChapter, chapters[1]],
+      activeChapter: invalidChapter,
+      materialScore: { score: 82, can_generate: true },
+      reviews: [proseQualityReview()],
+    })
+
+    expect(model.chapterAcceptanceDesk.admissionStatus).toBe('blocked_invalid')
+    expect(model.chapterAcceptanceDesk.statusLabel).toBe('正文无效，未入库')
+    expect(model.chapterAcceptanceDesk.acceptanceReasons.join('；')).toContain('正文为空或结构无效')
+    expect(model.chapterAcceptanceDesk.approvalBlocker?.type).toBe('blocked_invalid')
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('open_generation_diagnostics')
+  })
+
   test('readability review is summarized without blocking chapter acceptance', () => {
     const model = buildWritingCockpitModel({
       project: acceptedProject,

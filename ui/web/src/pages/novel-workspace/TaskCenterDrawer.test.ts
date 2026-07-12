@@ -15,6 +15,7 @@ import {
   buildRepairClosureHighlights,
   buildRepairTaskIssueTagMeta,
   buildTaskRunCardModel,
+  buildChapterAdmissionWarningCards,
   buildSafeBatchExpansionPolicySnapshot,
   buildSafeBatchRecoveryFocusReviewState,
   chapterGroupActionState,
@@ -166,6 +167,41 @@ describe('buildTaskRunCardModel', () => {
     expect(model.directorStage?.label).toBe('正文生成')
     expect(model.blocking.key).toBe('non_blocking')
   })
+
+  test('summarizes admitted chapter warnings once per source without approval action', () => {
+    const run = {
+      id: 23,
+      run_type: 'chapter_group_generation',
+      status: 'completed',
+      output_ref: JSON.stringify({
+        chapters: [{
+          id: 903,
+          chapter_no: 23,
+          status: 'success',
+          admission_status: 'accepted_with_warnings',
+          story_state_status: 'pending',
+          quality_warnings: [
+            { source: 'quality', code: 'hook_weak', message: '章尾钩子偏弱' },
+            { source: 'quality', code: 'score_low', message: '评分低于建议目标' },
+          ],
+          warnings: [
+            { source: 'quality', code: 'hook_weak', message: '章尾钩子偏弱' },
+            { source: 'story_state', code: 'pending', message: 'Story State 同步待完成' },
+          ],
+        }],
+      }),
+    }
+
+    const cards = buildChapterAdmissionWarningCards(run)
+    const actionState = chapterGroupActionState(JSON.parse(run.output_ref).chapters[0])
+
+    expect(cards).toHaveLength(2)
+    expect(cards.map(card => card.source)).toEqual(['quality', 'story_state'])
+    expect(cards[0]?.title).toBe('已入库，建议修订')
+    expect(cards[0]?.messages).toEqual(['章尾钩子偏弱', '评分低于建议目标'])
+    expect(cards[1]?.title).toBe('正文已入库，故事状态待补同步')
+    expect(actionState.canApprove).toBe(false)
+  })
 })
 
 describe('buildPostBatchQualityCheckSummary', () => {
@@ -252,6 +288,20 @@ describe('chapterGroupActionState', () => {
     expect(state.canSkip).toBe(true)
     expect(state.blockedByApprovalBlocker).toBe(false)
   })
+
+  test('disables actions for terminal blocked invalid chapters', () => {
+    const state = chapterGroupActionState({
+      status: 'failed',
+      admission_status: 'blocked_invalid',
+      error_code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+    })
+
+    expect(state.terminalAdmission).toBe(true)
+    expect(state.canApprove).toBe(false)
+    expect(state.canRetry).toBe(false)
+    expect(state.canSkip).toBe(false)
+    expect(state.actionHint).toContain('正文无效且未入库')
+  })
 })
 
 describe('chapterGroupRunActionState', () => {
@@ -296,6 +346,21 @@ describe('chapterGroupRunActionState', () => {
     expect(state.blockedByApprovalBlocker).toBe(false)
     expect(state.canResume).toBe(true)
     expect(state.canExecute).toBe(true)
+  })
+
+  test('disables run actions for persisted blocked invalid admissions', () => {
+    const state = chapterGroupRunActionState({
+      run_type: 'chapter_group_generation',
+      status: 'paused',
+      output_ref: JSON.stringify({
+        current_index: 0,
+        chapters: [{ admission_status: 'blocked_invalid', error_code: 'PROSE_ADMISSION_BLOCKED_INVALID' }],
+      }),
+    })
+
+    expect(state.terminalAdmission).toBe(true)
+    expect(state.canResume).toBe(false)
+    expect(state.canExecute).toBe(false)
   })
 })
 

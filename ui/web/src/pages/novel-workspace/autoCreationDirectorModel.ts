@@ -984,7 +984,7 @@ function sameChapterIdentity(a: AnyRecord | null | undefined, b: AnyRecord | nul
 function acceptanceDeskBlocksDirector(acceptance: AnyRecord | null | undefined): boolean {
   if (!acceptance?.visible) return false
   const status = text(acceptance.acceptanceStatus || acceptance.status)
-  return !['ready_to_accept', 'delivered'].includes(status)
+  return !['ready_to_accept', 'delivered', 'delivered_with_warnings'].includes(status)
 }
 
 function opsAction(
@@ -15610,11 +15610,13 @@ function buildPipeline(args: {
   const qualityDone = Boolean(acceptance.visible && (
     acceptance.acceptanceStatus === 'ready_to_accept'
     || acceptance.acceptanceStatus === 'delivered'
+    || acceptance.acceptanceStatus === 'delivered_with_warnings'
   ))
   const canonDone = Boolean(acceptance.visible && acceptance.storyStateSynced)
+  const admittedWithWarnings = acceptance.acceptanceStatus === 'delivered_with_warnings'
   const handoffStatus: AutoCreationPipelineStatus = chapterHandoffVisible
     ? 'active'
-    : hasProse && (!acceptance.visible || (qualityDone && canonDone))
+    : hasProse && (!acceptance.visible || (qualityDone && (canonDone || admittedWithWarnings)))
       ? 'done'
       : 'pending'
   const handoffDetail = chapterHandoffVisible
@@ -15717,7 +15719,9 @@ function buildPipeline(args: {
       key: 'quality_gate',
       label: '质检修订',
       status: acceptance.visible
-        ? acceptance.acceptanceStatus === 'ready_to_accept' || acceptance.acceptanceStatus === 'delivered' ? 'done' : 'active'
+        ? admittedWithWarnings
+          ? 'warning'
+          : acceptance.acceptanceStatus === 'ready_to_accept' || acceptance.acceptanceStatus === 'delivered' ? 'done' : 'active'
         : 'pending',
       detail: acceptance.visible ? acceptance.statusLabel : '等待正文',
     },
@@ -15725,9 +15729,9 @@ function buildPipeline(args: {
       key: 'canon_sync',
       label: '状态回填',
       status: acceptance.visible
-        ? acceptance.storyStateSynced ? 'done' : acceptance.acceptanceStatus === 'needs_state_sync' ? 'active' : 'pending'
+        ? acceptance.storyStateSynced ? 'done' : admittedWithWarnings ? 'warning' : acceptance.acceptanceStatus === 'needs_state_sync' ? 'active' : 'pending'
         : 'pending',
-      detail: acceptance.visible ? (acceptance.storyStateSynced ? '故事状态已同步' : '等待交稿同步') : '等待正文',
+      detail: acceptance.visible ? (acceptance.storyStateSynced ? '故事状态已同步' : admittedWithWarnings ? '正文已入库，故事状态待补同步' : '等待交稿同步') : '等待正文',
     },
     {
       key: 'chapter_handoff',
@@ -16667,7 +16671,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     summary = planning.longformRhythm.summary
     confirmations.push('长篇节奏需要校准')
     mainAction = planningAction(rhythmAction(planning), planning.longformRhythm.nextActions[0] || '先处理长篇节奏风险，再进入连续章节生产。')
-  } else if (canonRunway.staleState) {
+  } else if (canonRunway.staleState && !['accepted', 'accepted_with_warnings'].includes(text(writing.chapterAcceptanceDesk?.admissionStatus))) {
     status = 'needs_governance'
     statusLabel = '长线记忆待同步'
     headline = '先同步故事状态再连续生产'

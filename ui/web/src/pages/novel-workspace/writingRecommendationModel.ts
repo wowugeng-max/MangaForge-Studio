@@ -27,7 +27,12 @@ export type NovelDeliverySummaryInput = {
     | 'needs_recheck'
     | 'needs_state_sync'
     | 'ready_to_accept'
+    | 'delivered_with_warnings'
     | 'delivered'
+  admissionStatus?: 'accepted' | 'accepted_with_warnings' | 'blocked_invalid' | ''
+  qualityWarnings?: Array<{ code: string; source: string; message: string }>
+  storyStateStatus?: 'synced' | 'pending' | ''
+  postCommitWarnings?: Array<{ stage: string; message: string }>
   statusLabel: string
   acceptanceReasons: string[]
   qualityScore: number | null
@@ -276,7 +281,7 @@ export type NovelDeliverySummaryInput = {
     evidence: string[]
   } | null
   approvalBlocker?: {
-    type: 'quality_gate' | 'low_score' | 'draft' | 'safety' | 'reference_safety_blocked'
+    type: 'quality_gate' | 'low_score' | 'draft' | 'safety' | 'reference_safety_blocked' | 'blocked_invalid'
     status: 'warn'
     label: string
     detail: string
@@ -300,11 +305,12 @@ export type NovelDeliverySummaryInput = {
     key: NovelDeliveryActionKey
     label: string
   }
+  secondaryActions?: Array<{ key: NovelDeliveryActionKey; label: string }>
 }
 
 export type NovelDeliverySummary = {
   visible: boolean
-  tone: 'check' | 'revision' | 'sync' | 'ready'
+  tone: 'check' | 'revision' | 'sync' | 'warning' | 'ready'
   statusLabel: string
   qualityLabel: string
   storyStateLabel: string
@@ -346,6 +352,7 @@ export type NovelDeliverySummary = {
   actionKey: NovelDeliveryActionKey | null
   actionLabel: string
   compactActionLabel: string
+  secondaryActions: Array<{ key: NovelDeliveryActionKey; label: string }>
 }
 
 export type NovelDraftBriefActionKey = 'metadata' | 'scene_cards' | 'build_brief' | 'confirm_brief' | 'generate'
@@ -1444,10 +1451,12 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
       actionKey: null,
       actionLabel: '',
       compactActionLabel: '',
+      secondaryActions: [],
     }
   }
 
   const tone: NovelDeliverySummary['tone'] = (() => {
+    if (desk.acceptanceStatus === 'delivered_with_warnings') return 'warning'
     if (desk.acceptanceStatus === 'needs_revision') return 'revision'
     if (desk.acceptanceStatus === 'needs_state_sync') return 'sync'
     if (desk.acceptanceStatus === 'ready_to_accept' || desk.acceptanceStatus === 'delivered') return 'ready'
@@ -1459,7 +1468,9 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
     tone,
     statusLabel: desk.statusLabel,
     qualityLabel: desk.qualityScore === null ? '质量待复检' : `质量 ${desk.qualityScore}`,
-    storyStateLabel: desk.storyStateSynced ? '故事状态已同步' : '故事状态待同步',
+    storyStateLabel: desk.acceptanceStatus === 'delivered_with_warnings' && desk.storyStateStatus === 'pending'
+      ? '正文已入库，故事状态待补同步'
+      : desk.storyStateSynced ? '故事状态已同步' : '故事状态待同步',
     reason: desk.acceptanceReasons.filter(Boolean).slice(0, 2).join('；') || '本章已有正文，请按交稿流程完成复检。',
     storylineSync: desk.storylineSync || null,
     storyUnitSync: desk.storyUnitSync || null,
@@ -1498,6 +1509,7 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
     actionKey: desk.recommendedAcceptanceAction.key,
     actionLabel: desk.recommendedAcceptanceAction.label,
     compactActionLabel: compactDeliveryActionLabel(desk.recommendedAcceptanceAction.key, desk.recommendedAcceptanceAction.label),
+    secondaryActions: desk.secondaryActions || [],
   }
 }
 

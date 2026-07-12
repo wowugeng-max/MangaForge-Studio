@@ -267,6 +267,7 @@ export type ChapterAcceptanceStatus =
   | 'needs_recheck'
   | 'needs_state_sync'
   | 'ready_to_accept'
+  | 'delivered_with_warnings'
   | 'delivered'
 
 export interface DeslopGateDiagnosticsModel {
@@ -288,6 +289,10 @@ export interface DeslopGateDiagnosticsModel {
 export interface ChapterAcceptanceDeskModel {
   visible: boolean
   acceptanceStatus: ChapterAcceptanceStatus
+  admissionStatus: 'accepted' | 'accepted_with_warnings' | 'blocked_invalid' | ''
+  qualityWarnings: Array<{ code: string; source: string; message: string }>
+  storyStateStatus: 'synced' | 'pending' | ''
+  postCommitWarnings: Array<{ stage: string; message: string }>
   statusLabel: string
   acceptanceReasons: string[]
   storylineSync: {
@@ -834,7 +839,7 @@ export interface ChapterAcceptanceDeskModel {
     evidence: string[]
   } | null
   approvalBlocker: {
-    type: 'quality_gate' | 'low_score' | 'draft' | 'safety' | 'reference_safety_blocked'
+    type: 'quality_gate' | 'low_score' | 'draft' | 'safety' | 'reference_safety_blocked' | 'blocked_invalid'
     status: 'warn'
     label: string
     detail: string
@@ -4405,6 +4410,84 @@ function extractQualityScore(quality: AnyRecord) {
   return Number.isFinite(score) ? score : null
 }
 
+function recordValue(value: any): AnyRecord {
+  if (!value) return {}
+  if (typeof value === 'object') return value
+  try {
+    const parsed = JSON.parse(String(value))
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function normalizeAdmissionCandidate(value: any): AnyRecord | null {
+  const record = recordValue(value)
+  const direct = record?.prose_admission || record?.proseAdmission
+  if (direct && typeof direct === 'object') return direct
+  const status = firstNonEmpty(record?.status, record?.admission_status, record?.admissionStatus)
+  if (!['accepted', 'accepted_with_warnings', 'blocked_invalid'].includes(status)) return null
+  return {
+    ...record,
+    status,
+    quality_score: record?.quality_score ?? record?.qualityScore ?? record?.score,
+    quality_warnings: record?.quality_warnings || record?.qualityWarnings || record?.warnings,
+    story_state_status: record?.story_state_status || record?.storyStateStatus,
+    post_commit_warnings: record?.post_commit_warnings || record?.postCommitWarnings,
+  }
+}
+
+function runAdmission(runs: AnyRecord[], chapter: AnyRecord): AnyRecord | null {
+  const chapterId = text(chapter?.id)
+  const chapterNo = Number(chapter?.chapter_no || chapter?.chapterNo || 0)
+  for (const run of [...runs].reverse()) {
+    const roots = [run?.output_ref, run?.outputRef, run?.output, run?.payload, run]
+      .map(recordValue)
+      .filter(value => Object.keys(value).length > 0)
+    for (const root of roots) {
+      const direct = normalizeAdmissionCandidate(root)
+      if (direct) return direct
+      const items = [...arrayValue(root?.chapters), ...arrayValue(root?.results)]
+      const item = items.find(candidate => (
+        chapterId && text(candidate?.id || candidate?.chapter_id || candidate?.chapterId) === chapterId
+      ) || (chapterNo > 0 && Number(candidate?.chapter_no || candidate?.chapterNo || 0) === chapterNo))
+      const nested = normalizeAdmissionCandidate(item)
+      if (nested) return nested
+    }
+  }
+  return null
+}
+
+function resolveProseAdmission(chapter: AnyRecord, qualityReviewPayload: AnyRecord, runs: AnyRecord[]) {
+  const rawPayload = chapter?.raw_payload || chapter?.rawPayload || {}
+  return normalizeAdmissionCandidate(rawPayload?.prose_admission || rawPayload?.proseAdmission)
+    || normalizeAdmissionCandidate(qualityReviewPayload?.prose_admission || qualityReviewPayload?.proseAdmission)
+    || runAdmission(runs, chapter)
+}
+
+function normalizedAdmissionWarnings(value: any): Array<{ code: string; source: string; message: string }> {
+  const seen = new Set<string>()
+  return arrayValue(value).map((item: any) => {
+    if (typeof item === 'string') return { code: 'admission_warning', source: 'quality', message: text(item) }
+    return {
+      code: firstNonEmpty(item?.code, item?.key, 'admission_warning'),
+      source: firstNonEmpty(item?.source, item?.stage, 'quality'),
+      message: firstNonEmpty(item?.message, item?.detail, item?.summary, item?.label),
+    }
+  }).filter(item => item.message && !seen.has(`${item.source}:${item.code}:${item.message}`) && Boolean(seen.add(`${item.source}:${item.code}:${item.message}`)))
+}
+
+function normalizedPostCommitWarnings(value: any): Array<{ stage: string; message: string }> {
+  const seen = new Set<string>()
+  return arrayValue(value).map((item: any) => {
+    if (typeof item === 'string') return { stage: 'post_commit', message: text(item) }
+    return {
+      stage: firstNonEmpty(item?.stage, item?.source, 'post_commit'),
+      message: firstNonEmpty(item?.message, item?.detail, item?.summary, item?.label),
+    }
+  }).filter(item => item.message && !seen.has(`${item.stage}:${item.message}`) && Boolean(seen.add(`${item.stage}:${item.message}`)))
+}
+
 function hasUsableProseQualityReview(review?: AnyRecord | null) {
   const quality = qualityPayload(review)
   return extractQualityScore(quality) !== null
@@ -4460,6 +4543,10 @@ function buildHiddenAcceptanceDesk(): ChapterAcceptanceDeskModel {
   return {
     visible: false,
     acceptanceStatus: 'hidden',
+    admissionStatus: '',
+    qualityWarnings: [],
+    storyStateStatus: '',
+    postCommitWarnings: [],
     statusLabel: '等待正文',
     acceptanceReasons: ['本章还没有正文，先完成章节计划和初稿。'],
     storylineSync: null,
@@ -4558,6 +4645,7 @@ function buildChapterAcceptanceDesk(args: {
   nextChapter: AnyRecord | null
   cockpitChapter: WritingCockpitChapter | null
   reviews: AnyRecord[]
+  activeRuns: AnyRecord[]
   storyState: AnyRecord
 }): ChapterAcceptanceDeskModel {
   if (!args.nextChapter || !hasProse(args.nextChapter)) return buildHiddenAcceptanceDesk()
@@ -4603,6 +4691,12 @@ function buildChapterAcceptanceDesk(args: {
   const latestReport = latestReportRef?.review || null
   const latestRevision = latestRevisionRef?.review || null
   const latestQualityPayload = reviewPayload(latestQuality)
+  const proseAdmission = resolveProseAdmission(args.nextChapter, latestQualityPayload, args.activeRuns)
+  const admissionStatus = firstNonEmpty(proseAdmission?.status, proseAdmission?.admission_status, proseAdmission?.admissionStatus) as ChapterAcceptanceDeskModel['admissionStatus']
+  const qualityWarnings = normalizedAdmissionWarnings(proseAdmission?.quality_warnings || proseAdmission?.qualityWarnings)
+  const storyStateStatus = firstNonEmpty(proseAdmission?.story_state_status, proseAdmission?.storyStateStatus) as ChapterAcceptanceDeskModel['storyStateStatus']
+  const postCommitWarnings = normalizedPostCommitWarnings(proseAdmission?.post_commit_warnings || proseAdmission?.postCommitWarnings)
+  const admissionFields = { admissionStatus, qualityWarnings, storyStateStatus, postCommitWarnings }
   const storylineSync = buildStorylineSyncSummary(latestStorylineSyncRef?.review || null)
   const storyUnitSync = buildStoryUnitSyncSummary(latestStoryUnitSyncRef?.review || null)
   const assetIntake = buildAssetIntakeSummary(latestAssetIntakeRef?.review || null)
@@ -4722,10 +4816,23 @@ function buildChapterAcceptanceDesk(args: {
   const governanceRecheckSync = buildGovernanceRecheckSyncSummary(latestGovernanceRecheckSyncRef?.review || null)
   const deliveryRiskConvergence = buildDeliveryRiskConvergenceSummary(latestDeliveryRiskConvergenceRef?.review || null)
   const quality = qualityPayload(latestQuality)
-  const approvalBlocker = buildApprovalBlockerSummary(reviewPayload(latestQuality))
+  const legacyApprovalBlocker = buildApprovalBlockerSummary(reviewPayload(latestQuality))
+  const admissionApprovalBlocker: ChapterAcceptanceDeskModel['approvalBlocker'] = admissionStatus === 'blocked_invalid'
+    ? {
+        type: 'blocked_invalid',
+        status: 'warn',
+        label: '正文无效，未入库',
+        detail: qualityWarnings.map(item => item.message).join('；') || '正文未通过有效性检查且未入库。',
+        scoreLabel: '终止入库',
+        reasons: qualityWarnings.map(item => item.message),
+      }
+    : null
+  const approvalBlocker = ['accepted', 'accepted_with_warnings'].includes(admissionStatus)
+    ? null
+    : admissionApprovalBlocker || legacyApprovalBlocker
   const report = reportPayload(latestReport)
   const revision = revisionPayload(latestRevision)
-  const score = extractQualityScore(quality)
+  const score = extractQualityScore(proseAdmission || {}) ?? extractQualityScore(quality)
   const qualityStatus = firstNonEmpty(quality?.status, latestQuality?.status)
   const currentReport = reportBelongsToCurrentQualityCycle({
     reportRef: latestReportRef,
@@ -4809,7 +4916,9 @@ function buildChapterAcceptanceDesk(args: {
     approvalBlocker,
     governanceRecheckSync,
   })
-  const storyStateSynced = Number(args.storyState?.last_updated_chapter || 0) >= Number(args.nextChapter?.chapter_no || 0)
+  const storyStateSynced = storyStateStatus
+    ? storyStateStatus === 'synced'
+    : Number(args.storyState?.last_updated_chapter || 0) >= Number(args.nextChapter?.chapter_no || 0)
   const latestEditorReportSummary = firstNonEmpty(report?.summary, latestReport?.summary)
   const latestRevisionSummary = firstNonEmpty(revision?.revision_summary, latestRevision?.summary)
   const revisionNeedsRecheck = Boolean(
@@ -4831,10 +4940,84 @@ function buildChapterAcceptanceDesk(args: {
     { key: 'open_version_history', label: ACTION_LABELS.open_version_history },
   ]
 
+  if (admissionStatus === 'accepted_with_warnings' && (scoreNeedsRevision || mustFix.length > 0 || qualityWarnings.length > 0)) {
+    secondaryActions.unshift({ key: 'apply_editor_revision', label: ACTION_LABELS.apply_editor_revision })
+  }
+  if (admissionStatus === 'accepted_with_warnings' && storyStateStatus === 'pending') {
+    secondaryActions.unshift({ key: 'sync_story_state', label: ACTION_LABELS.sync_story_state })
+  }
+
+  const admissionCommon = {
+    storylineSync, storyUnitSync, assetIntake, ipSceneIntake, signatureSceneSync, readabilityReview,
+    deslopGateDiagnostics, coreDrift, runwaySync, readerPayoffSync, readerExpectationSync,
+    qualityAuditSync, qualityAuditRepairReceiptSync, chapterHandoffSync, chapterHandoffDeltaSync,
+    writePreparation, intentConfirmationSync, benchmarkRecallSync, sourceReadiness, stateTracking,
+    styleBoundary, informationFlow, expectationThreshold, storyLoop, emotionalArc, chapterHook,
+    paragraphHook, suspense, assetLinkage, dialogue, plotDynamics, characterRelation, characterBehavior,
+    conflictStructure, bridgeUnit, reversal, showdown, opening, proseCraft, punctuationTone, contentRubric,
+    targetReader, genrePositioning, femaleAudience, upgradeRhythm, chapterStructure, chapterProgression,
+    informationLoad, longformContinuity, coreContractCheck, continuityHeat, revisionReceiptCheck,
+    deslopRepairCheck, proseMeta, serialRiskRepair, chapterHookQuality, readerRetentionCheck,
+    readerRetentionSync, chapterAttraction, storyDriveSync, characterArcSync, chapterBenchmarkSync,
+    styleSampleSync, first30RetentionRecheck, innovationSync, volumeBeatSync, blueprintReceipt,
+    revisionReceipt, deliveryRiskReceipt, sceneCardReceipt, qualityAudit, platformRubric, governanceRecheckSync,
+    deliveryRiskQueue, deliveryRiskConvergence, qualityScore: score, qualityStatus, mustFix,
+    optionalImprovements, latestQualityReviewId: latestQuality?.id || null,
+    latestEditorReportId: latestReport?.id || null, latestRevisionReviewId: latestRevision?.id || null,
+    latestEditorReportSummary, latestRevisionSummary, storyStateSynced, secondaryActions,
+  }
+
+  if (admissionStatus === 'accepted_with_warnings') {
+    return {
+      visible: true,
+      acceptanceStatus: 'delivered_with_warnings',
+      ...admissionFields,
+      statusLabel: '已入库，建议修订',
+      acceptanceReasons: [
+        ...qualityWarnings.map(item => item.message),
+        storyStateStatus === 'pending' ? '正文已入库，故事状态待补同步' : '',
+        ...postCommitWarnings.map(item => item.message),
+      ].filter(Boolean).slice(0, 3),
+      ...admissionCommon,
+      approvalBlocker: null,
+      recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: ACTION_LABELS.accept_chapter_and_continue },
+      shouldAutoExpandAcceptance: false,
+    }
+  }
+
+  if (admissionStatus === 'accepted') {
+    return {
+      visible: true,
+      acceptanceStatus: 'delivered',
+      ...admissionFields,
+      statusLabel: '已入库',
+      acceptanceReasons: ['正文已入库，可以继续下一章。'],
+      ...admissionCommon,
+      approvalBlocker: null,
+      recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: ACTION_LABELS.accept_chapter_and_continue },
+      shouldAutoExpandAcceptance: false,
+    }
+  }
+
+  if (admissionStatus === 'blocked_invalid') {
+    return {
+      visible: true,
+      acceptanceStatus: 'needs_revision',
+      ...admissionFields,
+      statusLabel: '正文无效，未入库',
+      acceptanceReasons: qualityWarnings.map(item => item.message).concat('正文未通过有效性检查且未入库。').slice(0, 3),
+      ...admissionCommon,
+      approvalBlocker,
+      recommendedAcceptanceAction: { key: 'open_generation_diagnostics', label: ACTION_LABELS.open_generation_diagnostics },
+      shouldAutoExpandAcceptance: true,
+    }
+  }
+
   if (!latestQuality) {
     return {
       visible: true,
       acceptanceStatus: 'needs_quality_check',
+      ...admissionFields,
       statusLabel: '需复检',
       acceptanceReasons: ['本章已有正文，但还没有当前章节的质量复检记录。'],
       storylineSync,
@@ -4933,6 +5116,7 @@ function buildChapterAcceptanceDesk(args: {
     return {
       visible: true,
       acceptanceStatus: 'needs_recheck',
+      ...admissionFields,
       statusLabel: '修订后需复检',
       acceptanceReasons: ['本章已有修订记录，修订时间晚于最新质量复检。'],
       storylineSync,
@@ -5033,6 +5217,7 @@ function buildChapterAcceptanceDesk(args: {
     return {
       visible: true,
       acceptanceStatus: 'needs_revision',
+      ...admissionFields,
       statusLabel: '需修订',
       acceptanceReasons: [
         approvalBlocker ? `${approvalBlocker.label}：${approvalBlocker.detail}` : '',
@@ -5135,6 +5320,7 @@ function buildChapterAcceptanceDesk(args: {
     return {
       visible: true,
       acceptanceStatus: 'needs_state_sync',
+      ...admissionFields,
       statusLabel: '需同步故事状态',
       acceptanceReasons: [`故事状态还没有同步到第 ${args.nextChapter.chapter_no} 章。`],
       storylineSync,
@@ -5232,6 +5418,7 @@ function buildChapterAcceptanceDesk(args: {
   return {
     visible: true,
     acceptanceStatus: 'ready_to_accept',
+    ...admissionFields,
     statusLabel: '可验收',
     acceptanceReasons: ['质量复检通过，故事状态已同步，可以进入下一章。'],
     storylineSync,
@@ -5365,7 +5552,7 @@ function buildChapterHandoffDesk(args: {
   const expectationPayload = readerExpectationSyncPayload(readerExpectationRef?.review || null)
   const expectationCarryOver = handoffTextItems(expectationPayload?.missed)
   const nextOpeningObligations = handoffTextItems(expectationPayload?.keep_alive)
-  const ready = args.acceptanceDesk.acceptanceStatus === 'ready_to_accept' || args.acceptanceDesk.acceptanceStatus === 'delivered'
+  const ready = ['ready_to_accept', 'delivered', 'delivered_with_warnings'].includes(args.acceptanceDesk.acceptanceStatus)
 
   return {
     visible: true,
@@ -5847,6 +6034,7 @@ export function buildWritingCockpitModel(input: BuildWritingCockpitModelInput): 
     nextChapter,
     cockpitChapter: cockpitNextChapter,
     reviews,
+    activeRuns,
     storyState,
   })
   const chapterHandoffDesk = buildChapterHandoffDesk({

@@ -31,12 +31,18 @@ export function chapterGroupActionState(chapter: any = {}) {
   const approvalStage = String(chapter.approval_stage || chapter.approvalStage || '')
   const errorCode = String(chapter.error_code || chapter.errorCode || '')
   const blockedByApprovalBlocker = approvalStage === 'approval_blocker' || errorCode === 'APPROVAL_BLOCKER'
+  const terminalAdmission = String(chapter.admission_status || chapter.admissionStatus || '') === 'blocked_invalid'
+    || errorCode === 'PROSE_ADMISSION_BLOCKED_INVALID'
+  const blocked = blockedByApprovalBlocker || terminalAdmission
   return {
     blockedByApprovalBlocker,
-    canApprove: chapter.status === 'needs_approval' && !blockedByApprovalBlocker,
-    canRetry: !blockedByApprovalBlocker,
-    canSkip: !blockedByApprovalBlocker,
-    actionHint: blockedByApprovalBlocker ? '先修复入库阻断并重新运行正文质检和入库门禁' : '',
+    terminalAdmission,
+    canApprove: chapter.status === 'needs_approval' && !blocked,
+    canRetry: !blocked,
+    canSkip: !blocked,
+    actionHint: terminalAdmission
+      ? '正文无效且未入库；需要显式修复后重新提交。'
+      : blockedByApprovalBlocker ? '先修复入库阻断并重新运行正文质检和入库门禁' : '',
   }
 }
 
@@ -55,10 +61,44 @@ export function chapterGroupRunActionState(run: any = {}) {
   const status = String(run.status || '')
   return {
     blockedByApprovalBlocker: chapterState.blockedByApprovalBlocker,
-    canResume: isChapterGroup && ['ready', 'paused', 'failed'].includes(status) && !chapterState.blockedByApprovalBlocker,
-    canExecute: isChapterGroup && ['ready', 'paused', 'failed', 'running'].includes(status) && !chapterState.blockedByApprovalBlocker,
-    actionHint: chapterState.blockedByApprovalBlocker ? chapterState.actionHint : '',
+    terminalAdmission: chapterState.terminalAdmission,
+    canResume: isChapterGroup && ['ready', 'paused', 'failed'].includes(status) && !chapterState.blockedByApprovalBlocker && !chapterState.terminalAdmission,
+    canExecute: isChapterGroup && ['ready', 'paused', 'failed', 'running'].includes(status) && !chapterState.blockedByApprovalBlocker && !chapterState.terminalAdmission,
+    actionHint: chapterState.actionHint,
   }
+}
+
+export function buildChapterAdmissionWarningCards(run: any) {
+  const output = parseJsonValue(run?.output_ref || run?.outputRef) || run?.payload || {}
+  const chapters = Array.isArray(output.chapters) ? output.chapters : []
+  const groups = new Map<string, { source: string; title: string; messages: string[]; chapterNos: number[] }>()
+  chapters.forEach((chapter: any) => {
+    if (String(chapter.admission_status || chapter.admissionStatus || '') !== 'accepted_with_warnings') return
+    const warningItems = [
+      ...(Array.isArray(chapter.quality_warnings || chapter.qualityWarnings) ? chapter.quality_warnings || chapter.qualityWarnings : []),
+      ...(Array.isArray(chapter.warnings) ? chapter.warnings : []),
+      ...(Array.isArray(chapter.post_commit_warnings || chapter.postCommitWarnings) ? chapter.post_commit_warnings || chapter.postCommitWarnings : []),
+    ]
+    if (String(chapter.story_state_status || chapter.storyStateStatus || '') === 'pending') {
+      warningItems.push({ source: 'story_state', message: 'Story State 同步待完成' })
+    }
+    warningItems.forEach((warning: any) => {
+      const source = String(warning?.source || warning?.stage || 'quality')
+      const message = String(warning?.message || warning?.detail || warning?.summary || warning || '').trim()
+      if (!message) return
+      const current = groups.get(source) || {
+        source,
+        title: source === 'story_state' ? '正文已入库，故事状态待补同步' : '已入库，建议修订',
+        messages: [],
+        chapterNos: [],
+      }
+      if (!current.messages.includes(message)) current.messages.push(message)
+      const chapterNo = Number(chapter.chapter_no || chapter.chapterNo || 0)
+      if (chapterNo > 0 && !current.chapterNos.includes(chapterNo)) current.chapterNos.push(chapterNo)
+      groups.set(source, current)
+    })
+  })
+  return Array.from(groups.values())
 }
 
 function runTypeLabel(type?: string) {
@@ -175,6 +215,12 @@ export type TaskRunCardModel = {
     summary: string
   }
   progress: number
+  admissionWarnings: Array<{
+    source: string
+    title: string
+    messages: string[]
+    chapterNos: number[]
+  }>
   primaryAction: {
     key: 'process_repair' | 'recheck' | 'resume' | 'execute' | 'view_failure' | 'none'
     label: string
@@ -349,6 +395,7 @@ export function buildTaskRunCardModel(run: any, options: {
   const directorStage = taskRunDirectorStage(run)
   const blocking = taskRunBlockingState(run)
   const closure = taskRunClosure(run)
+  const admissionWarnings = buildChapterAdmissionWarningCards(run)
   const explicitProgress = Number(run?.progress)
   const progress = Number.isFinite(explicitProgress)
     ? Math.max(0, Math.min(100, explicitProgress))
@@ -379,6 +426,7 @@ export function buildTaskRunCardModel(run: any, options: {
     closure,
     progress,
     primaryAction,
+    admissionWarnings,
   }
 }
 
@@ -440,6 +488,15 @@ function TaskRunCard({
           <Tag color={model.closure.failed ? 'red' : 'default'} bordered={false}>失败 {model.closure.failed}</Tag>
         </Space>
         <Text type="secondary" style={{ fontSize: 12 }}>闭环状态：{model.closure.summary}</Text>
+        {model.admissionWarnings.map(warning => (
+          <Alert
+            key={warning.source}
+            type="warning"
+            showIcon
+            message={warning.title}
+            description={`${warning.chapterNos.length ? `第${warning.chapterNos.join('、')}章：` : ''}${warning.messages.join('；')}`}
+          />
+        ))}
         {errorText && <Text type="danger" style={{ fontSize: 12 }}>{errorText}</Text>}
         {recoveryPlan && (
           <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 2, expandable: true }}>

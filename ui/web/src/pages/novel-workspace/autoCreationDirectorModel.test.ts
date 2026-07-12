@@ -17691,6 +17691,53 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.pipeline.find(step => step.key === 'quality_gate')?.status).toBe('active')
   })
 
+  test('continues after prose is delivered with warnings and keeps repair work nonblocking', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: basePlanning,
+      writing: {
+        ...baseWriting,
+        nextChapter: { ...baseWriting.nextChapter, wordCount: 3200, hasProse: true },
+        chapterAcceptanceDesk: {
+          ...baseWriting.chapterAcceptanceDesk,
+          visible: true,
+          acceptanceStatus: 'delivered_with_warnings',
+          admissionStatus: 'accepted_with_warnings',
+          statusLabel: '已入库，建议修订',
+          acceptanceReasons: ['评分低于建议目标', '正文已入库，故事状态待补同步'],
+          qualityWarnings: [{ code: 'quality_score_below_target', source: 'quality', message: '评分低于建议目标' }],
+          storyStateStatus: 'pending',
+          postCommitWarnings: [],
+          qualityScore: 72,
+          storyStateSynced: false,
+          approvalBlocker: null,
+          recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: '验收并进入下一章' },
+          secondaryActions: [
+            { key: 'apply_editor_revision', label: '生成修订稿' },
+            { key: 'sync_story_state', label: '同步故事状态' },
+          ],
+        },
+        readiness: {
+          checks: [],
+          blockers: [],
+          warnings: [{ key: 'story_state_stale', status: 'warning', label: '故事状态滞后', detail: '待补同步' }],
+        },
+        readinessChecks: [{ key: 'story_state_stale', status: 'warning', label: '故事状态滞后', detail: '待补同步' }],
+        topStatus: { ...baseWriting.topStatus, nextActionLabel: '验收并进入下一章', primaryActionKey: 'accept_chapter_and_continue' },
+        primaryActionKey: 'accept_chapter_and_continue',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+    } as any)
+
+    expect(model.status).toBe('needs_acceptance')
+    expect(model.mainAction.key).toBe('accept_chapter_and_continue')
+    expect(model.pipeline.find(step => step.key === 'chapter_execution')?.status).toBe('done')
+    expect(model.pipeline.find(step => step.key === 'quality_gate')?.status).toBe('warning')
+    expect(model.pipeline.find(step => step.key === 'canon_sync')?.status).toBe('warning')
+    expect(model.pipeline.find(step => step.key === 'chapter_handoff')?.status).toBe('done')
+    expect(model.serialWorkflow.stages.find(stage => stage.key === 'delivery_acceptance')?.status).not.toBe('blocked')
+  })
+
   test('uses post-draft oh-story director recommended continuation as the main action', () => {
     const model = buildAutoCreationDirectorModel({
       planning: basePlanning,

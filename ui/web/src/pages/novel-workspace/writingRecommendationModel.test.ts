@@ -138,6 +138,40 @@ describe('buildNovelDeliverySummary', () => {
     expect(summary.compactActionLabel).toBe('验收')
   })
 
+  test('summarizes admitted warnings with continuation primary and optional repair actions', () => {
+    const summary = buildNovelDeliverySummary({
+      visible: true,
+      acceptanceStatus: 'delivered_with_warnings',
+      admissionStatus: 'accepted_with_warnings',
+      statusLabel: '已入库，建议修订',
+      acceptanceReasons: ['评分低于建议目标', '正文已入库，故事状态待补同步'],
+      qualityScore: 72,
+      qualityWarnings: [{ code: 'quality_score_below_target', source: 'quality', message: '评分低于建议目标' }],
+      storyStateStatus: 'pending',
+      postCommitWarnings: [],
+      storyStateSynced: false,
+      deliveryRiskQueue: {
+        totalCount: 1,
+        label: '待修订 1',
+        priorityLabel: '优先修章末钩子',
+        items: ['章末钩子偏弱'],
+      },
+      recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: '验收并进入下一章' },
+      secondaryActions: [
+        { key: 'apply_editor_revision', label: '生成修订稿' },
+        { key: 'sync_story_state', label: '同步故事状态' },
+      ],
+    })
+
+    expect(summary.tone).toBe('warning')
+    expect(summary.statusLabel).toBe('已入库，建议修订')
+    expect(summary.qualityLabel).toBe('质量 72')
+    expect(summary.storyStateLabel).toBe('正文已入库，故事状态待补同步')
+    expect(summary.actionKey).toBe('accept_chapter_and_continue')
+    expect(summary.secondaryActions.map(action => action.key)).toEqual(['apply_editor_revision', 'sync_story_state'])
+    expect(summary.deliveryRiskQueue?.items).toContain('章末钩子偏弱')
+  })
+
   test('summarizes core drift without changing delivery action', () => {
     const summary = buildNovelDeliverySummary({
       visible: true,
