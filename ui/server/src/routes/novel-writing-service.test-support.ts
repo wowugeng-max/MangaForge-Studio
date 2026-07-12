@@ -48,6 +48,7 @@ type ProsePipelineHarnessOptions = {
   memoryError?: Error
   contextPackageOverride?: any
   storyStatePayload?: any
+  storyStateError?: Error
   qualityGateEnabled?: boolean
   initialSceneCards?: any[]
   sceneCardsPayload?: any[]
@@ -231,6 +232,7 @@ export async function createProsePipelineHarness(
     }
     if (task.includes('state_delta')) {
       modelCalls.story_state += 1
+      if (options.storyStateError) throw options.storyStateError
       return { parsed: options.storyStatePayload || { state_delta: { open_questions: ['幕后指挥者为何知道江澈旧名'] }, character_updates: [], setting_updates: [], storyline_updates: [] }, modelName: 'fake-state' } as any
     }
     modelCalls.other += 1

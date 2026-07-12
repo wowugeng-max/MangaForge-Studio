@@ -47289,8 +47289,9 @@ export function createNovelWritingService(ctx: {
         message: '故事状态准备失败，等待后续重试。',
         source: 'story_state',
       }]
-      preparedStoryStateUpdate = buildPendingPreparedStoryStateUpdate({ reference_config: project.reference_config, failures, error })
-      storyStateWarning = { error: formatAdmissionError(error, 500), hard_failures: failures }
+      const storyStateErrorMessage = formatAdmissionError(error, 500)
+      preparedStoryStateUpdate = buildPendingPreparedStoryStateUpdate({ reference_config: project.reference_config, failures, error: storyStateErrorMessage })
+      storyStateWarning = { error: storyStateErrorMessage, hard_failures: failures }
     }
     if (storyStateStatus === 'pending') {
       for (const failure of preparedStoryStateUpdate.hard_failures) {

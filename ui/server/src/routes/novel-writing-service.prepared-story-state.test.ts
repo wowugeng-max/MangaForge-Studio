@@ -306,6 +306,29 @@ describe('prepareStoryStateUpdate', () => {
     }
   })
 
+  test('redacts pending Story State errors in both the update payload and admission warning', async () => {
+    const secretError = 'https://state.example/sync?api_key=STATE_QUERY Bearer STATE_BEARER token=STATE_TOKEN'
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText: buildPipelineProse('江澈撞开铁门，追兵的包围线被迫后撤。', '主动夺下通讯器并推进追击'),
+      qualityGateEnabled: false,
+      reviewPayloads: Array.from({ length: 4 }, acceptedQualityReviewPayload),
+      storyStateError: new Error(secretError),
+    })
+
+    const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+      model_id: 217,
+      target_word_count: 1000,
+    })
+
+    expect(result.story_state_status).toBe('pending')
+    expect(result.story_state_update?.error).toBe(result.story_state_warning?.error)
+    expect(result.story_state_update?.error).toContain('[REDACTED_URL]')
+    for (const sentinel of ['state.example', 'STATE_QUERY', 'STATE_BEARER', 'STATE_TOKEN']) {
+      expect(result.story_state_update?.error).not.toContain(sentinel)
+      expect(result.story_state_warning?.error).not.toContain(sentinel)
+    }
+  })
+
   test('marks atomic acceptance validation failure blocked_invalid and rolls back before Memory', async () => {
     const finalText = buildPipelineProse('江澈撞开铁门，追兵的包围线被迫后撤。', '主动夺下通讯器并推进追击')
     const chapterUsage: any[] = []
