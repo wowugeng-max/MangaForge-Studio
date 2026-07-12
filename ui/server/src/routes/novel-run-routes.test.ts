@@ -250,6 +250,75 @@ describe('novel run task center source guards', () => {
     expect(storedPayload.chapters[0].status).toBe('needs_approval')
   })
 
+  test('rejects generic resume and disables actions for a persisted blocked_invalid admission', async () => {
+    const workspace = await tempWorkspace()
+    const production = createNovelProductionService()
+    const project = await createNovelProject(workspace, { title: '终态正文继续保护', reference_config: {} })
+    const output = {
+      chapters: [{
+        id: 311,
+        chapter_no: 20,
+        title: '第二十章',
+        status: 'failed',
+        admission_status: 'blocked_invalid',
+        error: '正文传输不完整，未入库',
+        error_code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+      }],
+      current_index: 0,
+      phase: '第20章正文无效且未入库，已暂停',
+      last_error: {
+        id: 311,
+        chapter_no: 20,
+        admission_status: 'blocked_invalid',
+        error: '正文传输不完整，未入库',
+        error_code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+      },
+    }
+    const run = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'chapter_group_generation',
+      status: 'paused',
+      step_name: 'blocked-invalid-resume',
+      error_message: '正文传输不完整，未入库',
+      output_ref: JSON.stringify(output),
+    })
+    let executeCalls = 0
+    const { app, handlers } = createRouteHarness()
+    registerNovelRunRoutes(app as any, {
+      getWorkspace: () => workspace,
+      getProject: async (_workspace: string, id: number) => (await listNovelProjects(_workspace)).find(item => item.id === id) || null,
+      runQueueWorkers: new Map(),
+      getProductionBudgetDecision: () => ({ blocked: false, reasons: [] }),
+      buildPipelineSteps: production.buildPipelineSteps,
+      executeChapterGroupRunRecord: async () => {
+        executeCalls += 1
+        return { status: 'success', processed: 1 }
+      },
+    })
+    const resume = handlers.get('POST /api/novel/runs/:id/resume')
+    const tasks = handlers.get('GET /api/novel/projects/:id/tasks')
+
+    const response = await callRoute(resume, {
+      params: { id: String(run.id) },
+      body: { project_id: project.id },
+    })
+    const tasksResponse = await callRoute(tasks, { params: { id: String(project.id) } })
+    const storedRun = (await listNovelRuns(workspace, project.id)).find(item => item.id === run.id)
+    const storedPayload = JSON.parse(String(storedRun?.output_ref || '{}'))
+    const task = tasksResponse.body.tasks.find((item: any) => item.id === run.id)
+
+    expect(response.statusCode).toBe(409)
+    expect(response.body).toMatchObject({
+      error_code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+      admission_status: 'blocked_invalid',
+    })
+    expect(storedRun?.status).toBe('paused')
+    expect(storedPayload).toEqual(output)
+    expect(executeCalls).toBe(0)
+    expect(task.can_resume).toBe(false)
+    expect(task.can_execute).toBe(false)
+  })
+
   test('recovers stale running chapter group runs before starting a worker', async () => {
     const workspace = await tempWorkspace()
     const production = createNovelProductionService()

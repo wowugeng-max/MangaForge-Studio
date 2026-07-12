@@ -118,6 +118,26 @@ function findApprovalBlockerResumeGuard(payload: any = {}) {
   }
 }
 
+function findTerminalAdmissionResumeGuard(payload: any = {}) {
+  const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
+  const current = chapters[Number(payload.current_index || 0)] || null
+  const lastError = payload.last_error || payload.lastError || {}
+  const admissionStatus = String(current?.admission_status || current?.admissionStatus || lastError.admission_status || lastError.admissionStatus || '')
+  const errorCode = String(current?.error_code || current?.errorCode || lastError.error_code || lastError.errorCode || '')
+  if (admissionStatus !== 'blocked_invalid' && errorCode !== 'PROSE_ADMISSION_BLOCKED_INVALID') return null
+  return {
+    error: '当前章节正文未通过有效性检查且未入库，不能直接继续；需要显式修复或重置终态。',
+    error_code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+    admission_status: 'blocked_invalid',
+    chapter_id: current?.id || lastError.id || null,
+    chapter_no: current?.chapter_no || current?.chapterNo || lastError.chapter_no || lastError.chapterNo || null,
+    recovery_plan: lastError.recovery_plan || lastError.recoveryPlan || current?.recovery_plan || current?.recoveryPlan || {
+      type: 'blocked_invalid',
+      actions: ['显式修复或重置当前章节终态', '重新提交正文生成'],
+    },
+  }
+}
+
 export function extractModelTrace(payload: any, inputPayload: any = {}) {
   const candidates = Array.isArray(payload) ? payload : [
     payload,
@@ -417,6 +437,7 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
       const normalizeRun = (run: any) => {
         const payload = parseJsonLikePayload(run.output_ref) || {}
         const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
+        const terminalAdmission = Boolean(findTerminalAdmissionResumeGuard(payload))
         const repairTasks = Array.isArray(payload.tasks) ? payload.tasks : []
         const isRepairTaskRun = isRepairTaskRunType(run.run_type)
         const done = chapters.filter((item: any) => ['success', 'skipped', 'written'].includes(item.status)).length
@@ -484,8 +505,8 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
           failed_count: chapters.filter((item: any) => item.status === 'failed').length,
           approval_count: chapters.filter((item: any) => item.status === 'needs_approval').length,
           can_pause: !isRepairTaskRun && ['running', 'ready'].includes(run.status),
-          can_resume: !isRepairTaskRun && ['paused', 'failed', 'ready'].includes(run.status),
-          can_execute: run.run_type === 'chapter_group_generation' && ['ready', 'paused', 'failed', 'running'].includes(run.status),
+          can_resume: !terminalAdmission && !isRepairTaskRun && ['paused', 'failed', 'ready'].includes(run.status),
+          can_execute: !terminalAdmission && run.run_type === 'chapter_group_generation' && ['ready', 'paused', 'failed', 'running'].includes(run.status),
           can_process_repair_tasks: isRepairTaskRun && repairTasks.length > 0 && ['ready', 'paused', 'failed', 'running'].includes(run.status),
           error: lastError,
           recovery_plan: lastError ? (payload.last_error?.recovery_plan || null) : null,
@@ -833,6 +854,8 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
       if (!run) return res.status(404).json({ error: 'run not found' })
       const payload = parseJsonLikePayload(run.output_ref) || {}
       if (run.run_type === 'chapter_group_generation') {
+        const terminalAdmissionGuard = findTerminalAdmissionResumeGuard(payload)
+        if (terminalAdmissionGuard) return res.status(409).json(terminalAdmissionGuard)
         const approvalBlockerGuard = findApprovalBlockerResumeGuard(payload)
         if (approvalBlockerGuard) return res.status(409).json(approvalBlockerGuard)
         const updated = await updateNovelRun(activeWorkspace, run.id, {
