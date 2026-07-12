@@ -204,6 +204,138 @@ describe('novel sqlite persistence', () => {
 })
 
 describe('commitNovelChapterAcceptance', () => {
+  test('preserves both chapter acceptances when they start concurrently', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '并发章节验收' })
+    const firstChapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: '第一章旧正文',
+    })
+    const secondChapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 2,
+      title: '第二章',
+      chapter_text: '第二章旧正文',
+    })
+    const existingReview = await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'existing',
+      summary: '显式 review ID 保留',
+    })
+    const db = new Database(join(workspace, 'novel.sqlite'))
+    db.query('INSERT INTO chapter_versions (id,chapter_id,project_id,version_no,chapter_text,source,created_at) VALUES (?,?,?,?,?,?,?)').run(
+      700,
+      firstChapter.id,
+      project.id,
+      99,
+      '显式 version ID 保留',
+      'manual_edit',
+      new Date().toISOString(),
+    )
+    db.close()
+
+    await Promise.all([
+      commitNovelChapterAcceptance(workspace, {
+        chapter_id: firstChapter.id,
+        chapter_patch: { chapter_text: '第一章新正文' },
+        version_source: 'agent_execute',
+        reviews: [{ id: 1, review_type: 'prose_quality', summary: '第一章验收' } as any],
+      }),
+      commitNovelChapterAcceptance(workspace, {
+        chapter_id: secondChapter.id,
+        chapter_patch: { chapter_text: '第二章新正文' },
+        version_source: 'agent_execute',
+        reviews: [{ id: 1, review_type: 'prose_quality', summary: '第二章验收' } as any],
+      }),
+    ])
+
+    const chapters = await listNovelChapters(workspace, project.id)
+    const versions = [
+      ...(await listChapterVersions(workspace, firstChapter.id)),
+      ...(await listChapterVersions(workspace, secondChapter.id)),
+    ]
+    const reviews = await listNovelReviews(workspace, project.id)
+    const acceptanceVersions = versions.filter(version => version.source === 'agent_execute')
+    const acceptanceReviews = reviews.filter(review => review.review_type === 'prose_quality')
+    expect(chapters.map(chapter => chapter.chapter_text)).toEqual(['第一章新正文', '第二章新正文'])
+    expect(acceptanceVersions.map(version => version.chapter_text).sort()).toEqual(['第一章旧正文', '第二章旧正文'])
+    expect(versions.find(version => version.id === 700)?.chapter_text).toBe('显式 version ID 保留')
+    expect(new Set(versions.map(version => version.id)).size).toBe(3)
+    expect(acceptanceReviews.map(review => review.summary).sort()).toEqual(['第一章验收', '第二章验收'])
+    expect(reviews.find(review => review.id === existingReview.id)?.summary).toBe('显式 review ID 保留')
+    expect(new Set(reviews.map(review => review.id)).size).toBe(3)
+  })
+
+  test('does not lose a run appended after acceptance starts', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '验收期间运行记录' })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: '旧正文',
+    })
+
+    const acceptance = commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { chapter_text: '新正文' },
+    })
+    const run = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'generate_prose',
+      step_name: 'chapter-1-post-sync',
+      status: 'success',
+    })
+    await acceptance
+
+    expect(await listNovelRuns(workspace, project.id)).toEqual([
+      expect.objectContaining({ id: run.id, step_name: 'chapter-1-post-sync' }),
+    ])
+  })
+
+  test('keeps a concurrently rejected acceptance free of partial writes', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '并发验收回滚' })
+    const validChapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: '第一章旧正文',
+    })
+    const invalidChapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 2,
+      title: '第二章',
+      chapter_text: '第二章旧正文',
+    })
+
+    const [validResult, invalidResult] = await Promise.allSettled([
+      commitNovelChapterAcceptance(workspace, {
+        chapter_id: validChapter.id,
+        chapter_patch: { chapter_text: '第一章新正文' },
+        reviews: [{ review_type: 'prose_quality', summary: '有效验收' }],
+      }),
+      commitNovelChapterAcceptance(workspace, {
+        chapter_id: invalidChapter.id,
+        chapter_patch: { chapter_text: '第二章不得写入' },
+        character_creates: [{ project_id: project.id, name: '' }],
+        reviews: [{ review_type: 'prose_quality', summary: '不得写入' }],
+      }),
+    ])
+
+    expect(validResult.status).toBe('fulfilled')
+    expect(invalidResult.status).toBe('rejected')
+    expect((await listNovelChapters(workspace, project.id)).map(chapter => chapter.chapter_text)).toEqual([
+      '第一章新正文',
+      '第二章旧正文',
+    ])
+    expect(await listChapterVersions(workspace, invalidChapter.id)).toEqual([])
+    expect(await listNovelCharacters(workspace, project.id)).toEqual([])
+    expect((await listNovelReviews(workspace, project.id)).map(review => review.summary)).toEqual(['有效验收'])
+  })
+
   test('atomically stores prose, a version, and reviews while omitting all Story State patches', async () => {
     const workspace = await tempWorkspace()
     const project = await createNovelProject(workspace, {
