@@ -14,9 +14,11 @@ import {
 import {
   countProseChars,
   createNovelWritingService,
+  formatAdmissionError,
   resolveChapterWordTarget,
   scanProseForQualityLoop,
 } from './novel-writing-service'
+import { createNovelReferenceService } from './novel-reference-service'
 import { normalizeProseForStorage } from '../novel-writing/chapter-prose-storage-patch'
 import { buildCanonicalSurfaceIndex } from '../novel-writing/canonical-continuity'
 import { REAL_CHAPTER_11_CANONICAL_CONFLICT_PROSE } from '../novel-writing/fixtures/real-chapter-11-canonical-conflict'
@@ -1368,6 +1370,109 @@ describe('novel writing service prose quality wiring', () => {
     expect(error?.admission_failure).toMatchObject({ source: 'atomic' })
     expect(after).toBe(before)
     expect(failureHarness.memoryTexts).toEqual([])
+  })
+
+  test('stages the real reference report until draft-only atomic acceptance succeeds', async () => {
+    const finalText = buildPipelineProse('江澈撞开铁门，追兵被迫后撤。', '主动夺下通讯器并推进追击')
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText: finalText,
+      referenceService: createNovelReferenceService(),
+    })
+
+    const error = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+      model_id: 217,
+      target_word_count: 1000,
+      production_mode: 'draft_only',
+      onStage: async (stage: string, payload: any) => {
+        if (stage === 'store' && payload?.status === 'running') throw new Error('injected atomic acceptance failure')
+      },
+    }).then(() => null, (caught: any) => caught)
+    const reviews = await listNovelReviews(harness.workspace, harness.project.id)
+
+    expect(error?.admission_failure).toMatchObject({ source: 'atomic' })
+    expect(reviews.filter(item => item.review_type === 'reference_report')).toEqual([])
+    expect(harness.memoryTexts).toEqual([])
+  })
+
+  test('rethrows cancellation from reference reporting without chapter, review, or Memory writes', async () => {
+    const finalText = buildPipelineProse('江澈撞开铁门，追兵被迫后撤。', '主动夺下通讯器并推进追击')
+    const referenceService = createNovelReferenceService()
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText: finalText,
+      referenceService: {
+        ...referenceService,
+        getReferenceMigrationPlanForChapter: async () => ({}),
+        buildReferenceUsageReport: async () => {
+          throw Object.assign(new Error('reference report aborted'), { name: 'AbortError' })
+        },
+      },
+    })
+    const beforeChapter = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+
+    const error = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+      model_id: 217,
+      target_word_count: 1000,
+      production_mode: 'draft_only',
+    }).then(() => null, (caught: any) => caught)
+    const afterChapter = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+
+    expect(error?.name).toBe('AbortError')
+    expect(afterChapter).toEqual(beforeChapter)
+    expect(await listNovelReviews(harness.workspace, harness.project.id)).toEqual([])
+    expect(harness.memoryTexts).toEqual([])
+  })
+
+  test('checks cancellation immediately before draft-only atomic acceptance', async () => {
+    const finalText = buildPipelineProse('江澈撞开铁门，追兵被迫后撤。', '主动夺下通讯器并推进追击')
+    const controller = new AbortController()
+    const harness = await createProsePipelineHarness(createNovelWritingService, { draftText: finalText })
+    const beforeChapter = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+
+    const error = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+      model_id: 217,
+      target_word_count: 1000,
+      production_mode: 'draft_only',
+      abortSignal: controller.signal,
+      onStage: async (stage: string, payload: any) => {
+        if (stage === 'store' && payload?.status === 'running') controller.abort()
+      },
+    }).then(() => null, (caught: any) => caught)
+    const afterChapter = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+
+    expect(error?.code).toBe('REQUEST_CANCELED')
+    expect(afterChapter).toEqual(beforeChapter)
+    expect(await listNovelReviews(harness.workspace, harness.project.id)).toEqual([])
+    expect(harness.memoryTexts).toEqual([])
+  })
+
+  test('redacts and bounds secret-bearing admission and post-commit errors', async () => {
+    const secretError = 'https://provider.example/path?api_key=SECRET_QUERY Bearer SECRET_BEARER token=SECRET_TOKEN ' + 'x'.repeat(1000)
+    const formatted = formatAdmissionError(new Error(secretError), 180)
+    expect(formatted.length).toBeLessThanOrEqual(180)
+    for (const sentinel of ['provider.example', 'SECRET_QUERY', 'SECRET_BEARER', 'SECRET_TOKEN']) expect(formatted).not.toContain(sentinel)
+
+    const referenceService = createNovelReferenceService()
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText: buildPipelineProse('江澈撞开铁门，追兵被迫后撤。', '主动夺下通讯器并推进追击'),
+      memoryError: new Error(secretError),
+      referenceService: {
+        ...referenceService,
+        getReferenceMigrationPlanForChapter: async () => ({}),
+        buildReferenceUsageReport: async () => { throw new Error(secretError) },
+      },
+    })
+
+    const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+      model_id: 217,
+      target_word_count: 1000,
+    })
+    const storedChapter = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+    const storedReviews = await listNovelReviews(harness.workspace, harness.project.id)
+    const observable = JSON.stringify({ result, storedChapter, storedReviews })
+
+    for (const sentinel of ['provider.example', 'SECRET_QUERY', 'SECRET_BEARER', 'SECRET_TOKEN']) expect(observable).not.toContain(sentinel)
+    expect(result.post_commit_warnings).toContainEqual(expect.objectContaining({ stage: 'memory' }))
+    expect(result.quality_warnings).toContainEqual(expect.objectContaining({ code: 'reference_review_unavailable' }))
   })
 
   test('records caught editor, meme, and readability failures as admission warnings', () => {

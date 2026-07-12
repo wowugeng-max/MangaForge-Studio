@@ -55,6 +55,7 @@ type ProsePipelineHarnessOptions = {
   postCommitSyncError?: Error
   repairedContextPackageOverride?: any
   requireStagedContextCandidates?: boolean
+  referenceService?: any
 }
 
 export async function createProsePipelineHarness(
@@ -246,7 +247,7 @@ export async function createProsePipelineHarness(
       approvalRequired: () => false,
       buildApprovalError: (type: string, message: string, details: any) => Object.assign(new Error(message), { code: `APPROVAL_REQUIRED_${type.toUpperCase()}`, details }),
     } as any,
-    reference: {
+    reference: options.referenceService || {
       getReferenceMigrationPlanForChapter: async () => ({}),
       buildReferenceUsageReport: async () => ({ quality_assessment: { risk_level: 'low' } }),
       getReferenceSafetyDecision: () => ({ blocked: false, score: 100, copy_hit_count: 0, reasons: [] }),

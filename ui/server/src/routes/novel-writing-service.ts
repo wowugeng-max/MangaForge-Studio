@@ -25,7 +25,7 @@ import {
   storeNovelChapterProseMemory as defaultStoreNovelChapterProseMemory,
 } from '../llm'
 import type { NovelProductionService } from './novel-production-service'
-import type { NovelReferenceService } from './novel-reference-service'
+import { buildReferenceUsageReviewRecord, type NovelReferenceService } from './novel-reference-service'
 import { buildSettingRelationshipGraph } from './novel-setting-relationship-graph'
 import { buildOhStoryPlotSpecialTopicsContract } from './novel-plot-special-topics'
 import { buildOhStoryStoryPowerContract } from './novel-story-power-contract'
@@ -88,6 +88,16 @@ import {
   resolveStandardWordTargetCompatibility,
   type ChapterWordTarget,
 } from '../novel-writing/word-target'
+
+export function formatAdmissionError(error: any, maxLength = 300) {
+  const boundedLength = Math.max(1, Math.min(2000, Number(maxLength) || 300))
+  return String(error?.message || error || 'unknown error')
+    .replace(/\bhttps?:\/\/[^\s,;]+/gi, '[REDACTED_URL]')
+    .replace(/([?&](?:api[_-]?key|token|access[_-]?token|auth|authorization)=)[^&\s]*/gi, '$1[REDACTED]')
+    .replace(/\b(Bearer)\s+[^\s,;]+/gi, '$1 [REDACTED]')
+    .replace(/\b(api[_-]?key|token|access[_-]?token|auth|authorization)\s*[:=]\s*["']?[^\s,"';}&]+/gi, '$1=[REDACTED]')
+    .slice(0, boundedLength)
+}
 import {
   buildCommercialEditorRewritePrompt,
   buildMemePolishPrompt as buildMemePolishPromptWithStrategy,
@@ -46106,9 +46116,10 @@ export function createNovelWritingService(ctx: {
       })
     } catch (editorError) {
       if (isAbortError(editorError)) throw editorError
-      editorRewrite = { error: String(editorError), edited: false }
-      qualityWarningCandidates.push(proseAdmissionWarning('review', 'editor_unavailable', String(editorError)))
-      await onStage('editor', { status: 'warn', error: String(editorError).slice(0, 200), reason: '商业主编改稿失败，保留当前稿' })
+      const editorErrorMessage = formatAdmissionError(editorError, 300)
+      editorRewrite = { error: editorErrorMessage, edited: false }
+      qualityWarningCandidates.push(proseAdmissionWarning('review', 'editor_unavailable', editorErrorMessage))
+      await onStage('editor', { status: 'warn', error: formatAdmissionError(editorError, 200), reason: '商业主编改稿失败，保留当前稿' })
     }
     try {
       throwIfChapterGenerationAborted()
@@ -46192,9 +46203,10 @@ export function createNovelWritingService(ctx: {
       })
     } catch (memeError) {
       if (isAbortError(memeError)) throw memeError
-      memePolish = { error: String(memeError), polished: false }
-      qualityWarningCandidates.push(proseAdmissionWarning('review', 'meme_polish_unavailable', String(memeError)))
-      await onStage('meme_polish', { status: 'warn', error: String(memeError).slice(0, 200), reason: '网感润色失败，保留当前稿' })
+      const memeErrorMessage = formatAdmissionError(memeError, 300)
+      memePolish = { error: memeErrorMessage, polished: false }
+      qualityWarningCandidates.push(proseAdmissionWarning('review', 'meme_polish_unavailable', memeErrorMessage))
+      await onStage('meme_polish', { status: 'warn', error: formatAdmissionError(memeError, 200), reason: '网感润色失败，保留当前稿' })
     }
     try {
       throwIfChapterGenerationAborted()
@@ -46411,9 +46423,10 @@ export function createNovelWritingService(ctx: {
         await onStage('readability_review', { status: 'success', score: readabilityReview.readability_score, meme_sense: readabilityReview.meme_sense })
       } catch (readabilityError) {
         if (isAbortError(readabilityError)) throw readabilityError
-        readabilityReview = { error: String(readabilityError) }
-        qualityWarningCandidates.push(proseAdmissionWarning('review', 'readability_review_unavailable', String(readabilityError)))
-        await onStage('readability_review', { status: 'warn', error: String(readabilityError).slice(0, 200), reason: '可读性复检失败，不阻塞原验收流程' })
+        const readabilityErrorMessage = formatAdmissionError(readabilityError, 300)
+        readabilityReview = { error: readabilityErrorMessage }
+        qualityWarningCandidates.push(proseAdmissionWarning('review', 'readability_review_unavailable', readabilityErrorMessage))
+        await onStage('readability_review', { status: 'warn', error: formatAdmissionError(readabilityError, 200), reason: '可读性复检失败，不阻塞原验收流程' })
       }
     } else {
       readabilityReview = {
@@ -46740,12 +46753,14 @@ export function createNovelWritingService(ctx: {
       let draftSafetyExplanation: any = 'reference review unavailable'
       let draftMigrationAudit: any = { passed: false, unavailable: true }
       try {
-        draftReferenceReport = await ctx.reference.buildReferenceUsageReport(activeWorkspace, project, '正文创作', finalText)
+        draftReferenceReport = await ctx.reference.buildReferenceUsageReport(activeWorkspace, project, '正文创作', finalText, { persist: false })
         draftSafetyDecision = ctx.reference.getReferenceSafetyDecision(project, draftReferenceReport)
         draftSafetyExplanation = ctx.reference.explainReferenceSafety(draftReferenceReport, draftSafetyDecision)
         draftMigrationAudit = ctx.reference.buildMigrationAudit(project, draftReferenceReport, draftSafetyExplanation)
+        await storeGeneratedReviewRecord(buildReferenceUsageReviewRecord(project, draftReferenceReport))
       } catch (error) {
-        qualityWarningCandidates.push(proseAdmissionWarning('review', 'reference_review_unavailable', String(error)))
+        if (isAbortError(error)) throw error
+        qualityWarningCandidates.push(proseAdmissionWarning('review', 'reference_review_unavailable', formatAdmissionError(error, 300)))
       }
       await onStage('safety', { status: draftSafetyDecision.blocked ? 'failed' : 'success', score: draftSafetyDecision.score, copy_hit_count: draftSafetyDecision.copy_hit_count, risk_level: draftReferenceReport?.quality_assessment?.risk_level })
       if (draftSafetyDecision.blocked) {
@@ -47045,6 +47060,7 @@ export function createNovelWritingService(ctx: {
       try {
         await onStage('store', { status: 'running' })
         await ctx.runtime?.hooks?.beforeChapterStore?.({ chapterId: chapter.id, finalText })
+        throwIfChapterGenerationAborted()
         const draftAcceptance = await commitNovelChapterAcceptance(activeWorkspace, {
           chapter_id: chapter.id,
           chapter_patch: draftModeChapterPatch,
@@ -47056,6 +47072,7 @@ export function createNovelWritingService(ctx: {
         })
         updatedReviewedDraft = draftAcceptance.chapter
       } catch (error) {
+        if (isAbortError(error)) throw error
         throw markBlockedInvalidError(error, {
           code: 'atomic_acceptance_failed',
           source: 'atomic',
@@ -47067,7 +47084,7 @@ export function createNovelWritingService(ctx: {
         try {
           await task()
         } catch (error) {
-          draftPostCommitWarnings.push({ stage, message: String(error).slice(0, 300) })
+          draftPostCommitWarnings.push({ stage, message: formatAdmissionError(error, 300) })
         }
       }
       await runDraftPostCommitBestEffort('after_commit_hook', () => ctx.runtime?.hooks?.afterChapterCommit?.({ chapterId: chapter.id, finalText }))
@@ -47212,12 +47229,14 @@ export function createNovelWritingService(ctx: {
     let safetyExplanation: any = 'reference review unavailable'
     let migrationAudit: any = { passed: false, unavailable: true }
     try {
-      referenceReport = await ctx.reference.buildReferenceUsageReport(activeWorkspace, project, '正文创作', finalText)
+      referenceReport = await ctx.reference.buildReferenceUsageReport(activeWorkspace, project, '正文创作', finalText, { persist: false })
       safetyDecision = ctx.reference.getReferenceSafetyDecision(project, referenceReport)
       safetyExplanation = ctx.reference.explainReferenceSafety(referenceReport, safetyDecision)
       migrationAudit = ctx.reference.buildMigrationAudit(project, referenceReport, safetyExplanation)
+      await storeGeneratedReviewRecord(buildReferenceUsageReviewRecord(project, referenceReport))
     } catch (error) {
-      qualityWarningCandidates.push(proseAdmissionWarning('review', 'reference_review_unavailable', String(error)))
+      if (isAbortError(error)) throw error
+      qualityWarningCandidates.push(proseAdmissionWarning('review', 'reference_review_unavailable', formatAdmissionError(error, 300)))
     }
     await onStage('safety', { status: safetyDecision.blocked ? 'failed' : 'success', score: safetyDecision.score, copy_hit_count: safetyDecision.copy_hit_count, risk_level: referenceReport?.quality_assessment?.risk_level })
     const finalQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview, safetyDecision)
@@ -47271,7 +47290,7 @@ export function createNovelWritingService(ctx: {
         source: 'story_state',
       }]
       preparedStoryStateUpdate = buildPendingPreparedStoryStateUpdate({ reference_config: project.reference_config, failures, error })
-      storyStateWarning = { error: String(error).slice(0, 500), hard_failures: failures }
+      storyStateWarning = { error: formatAdmissionError(error, 500), hard_failures: failures }
     }
     if (storyStateStatus === 'pending') {
       for (const failure of preparedStoryStateUpdate.hard_failures) {
@@ -47372,6 +47391,7 @@ export function createNovelWritingService(ctx: {
       contextPackage,
       selfCheck,
     })
+    throwIfChapterGenerationAborted()
     let acceptance: Awaited<ReturnType<typeof commitNovelChapterAcceptance>>
     try {
       acceptance = await commitNovelChapterAcceptance(activeWorkspace, {
@@ -47401,6 +47421,7 @@ export function createNovelWritingService(ctx: {
         ].filter(Boolean),
       })
     } catch (error) {
+      if (isAbortError(error)) throw error
       throw markBlockedInvalidError(error, {
         code: 'atomic_acceptance_failed',
         source: 'atomic',
@@ -47414,7 +47435,7 @@ export function createNovelWritingService(ctx: {
         await task()
         return true
       } catch (error) {
-        postCommitWarnings.push({ stage, message: String(error).slice(0, 300) })
+        postCommitWarnings.push({ stage, message: formatAdmissionError(error, 300) })
         return false
       }
     }

@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { createNovelWritingService } from './novel-writing-service'
+import { createNovelReferenceService } from './novel-reference-service'
 import {
   createNovelCharacter,
   createNovelChapter,
@@ -310,6 +311,7 @@ describe('prepareStoryStateUpdate', () => {
     const chapterUsage: any[] = []
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText: finalText,
+      referenceService: createNovelReferenceService(),
       qualityGateEnabled: false,
       reviewPayloads: Array.from({ length: 4 }, acceptedQualityReviewPayload),
       contextPackageOverride: {
@@ -362,6 +364,7 @@ describe('prepareStoryStateUpdate', () => {
     expect(error?.admission_status).toBe('blocked_invalid')
     expect(error?.admission_failure).toMatchObject({ code: 'atomic_acceptance_failed', source: 'atomic' })
     expect(after).toBe(before)
+    expect((await listNovelReviews(harness.workspace, harness.project.id)).filter(item => item.review_type === 'reference_report')).toEqual([])
     expect(harness.memoryTexts).toEqual([])
   })
 

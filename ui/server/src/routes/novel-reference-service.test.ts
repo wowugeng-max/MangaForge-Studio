@@ -1,8 +1,61 @@
 import { describe, expect, test } from 'bun:test'
-import { buildReferenceQualityAssessment, createNovelReferenceService } from './novel-reference-service'
+import { mkdtempSync, rmSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import { createNovelProject, listNovelReviews } from '../novel'
+import {
+  buildReferenceQualityAssessment,
+  buildReferenceUsageReviewRecord,
+  createNovelReferenceService,
+} from './novel-reference-service'
 import { createNovelProductionService } from './novel-production-service'
 
 describe('reference safety assessment', () => {
+  test('builds a stable reference_report review record without persisting it', () => {
+    const report = {
+      strength_label: '弱',
+      injected_entries: [{ id: 1 }],
+      copy_guard: { hits: ['借鉴词'] },
+      quality_assessment: { overall_score: 64, recommendations: ['补齐参考画像'] },
+      safety_decision: { blocked: true, reasons: ['显式安全阻断'] },
+    }
+
+    const record = buildReferenceUsageReviewRecord({ id: 7 }, report)
+
+    expect(record).toEqual({
+      project_id: 7,
+      review_type: 'reference_report',
+      status: 'warn',
+      summary: '参考报告：弱，注入 1 条，质量评分 64，疑似照搬 1 项',
+      issues: ['显式安全阻断', '正文出现参考实体/证据词：借鉴词', '补齐参考画像'],
+      payload: JSON.stringify(report),
+    })
+  })
+
+  test('persists reference reports by default and supports a non-persisting staged mode', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'mangaforge-reference-report-'))
+    try {
+      const project = await createNovelProject(workspace, {
+        title: '原创测试项目',
+        reference_config: {},
+      })
+      const reference = createNovelReferenceService()
+
+      const persisted = await reference.buildReferenceUsageReport(workspace, project, '正文创作', '')
+      const afterDefault = await listNovelReviews(workspace, project.id)
+      const staged = await reference.buildReferenceUsageReport(workspace, project, '正文创作', '', { persist: false })
+      const afterStaged = await listNovelReviews(workspace, project.id)
+
+      expect(afterDefault).toHaveLength(1)
+      expect(afterDefault[0]).toMatchObject({ review_type: 'reference_report', project_id: project.id })
+      expect(JSON.parse(afterDefault[0].payload)).toEqual(persisted)
+      expect(staged).toEqual(persisted)
+      expect(afterStaged).toHaveLength(1)
+    } finally {
+      rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('treats an empty reference set as not applicable instead of high risk', () => {
     const quality = buildReferenceQualityAssessment({
       entries: [],

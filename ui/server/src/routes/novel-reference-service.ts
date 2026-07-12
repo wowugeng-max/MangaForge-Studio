@@ -67,6 +67,25 @@ export function buildReferenceQualityAssessment(preview: any, hits: string[]) {
   }
 }
 
+export function buildReferenceUsageReviewRecord(project: any, report: any) {
+  const hits = asArray(report?.copy_guard?.hits)
+  const qualityAssessment = report?.quality_assessment || {}
+  const safetyDecision = report?.safety_decision || {}
+  const shouldWarn = hits.length > 0 || Number(qualityAssessment.overall_score || 0) < 70
+  return {
+    project_id: project.id,
+    review_type: 'reference_report',
+    status: shouldWarn || safetyDecision.blocked ? 'warn' : 'ok',
+    summary: `参考报告：${report?.strength_label || '-'}，注入 ${asArray(report?.injected_entries).length} 条，质量评分 ${qualityAssessment.overall_score}${hits.length ? `，疑似照搬 ${hits.length} 项` : ''}`,
+    issues: [
+      ...asArray(safetyDecision.reasons),
+      ...hits.map(term => `正文出现参考实体/证据词：${term}`),
+      ...asArray(qualityAssessment.recommendations),
+    ],
+    payload: JSON.stringify(report),
+  }
+}
+
 export function createNovelReferenceService() {
   const collectCopyGuardTerms = (preview: any) => {
     const terms = new Set<string>()
@@ -188,7 +207,13 @@ export function createNovelReferenceService() {
     },
   })
 
-  const buildReferenceUsageReport = async (activeWorkspace: string, project: any, taskType: string, generatedText = '') => {
+  const buildReferenceUsageReport = async (
+    activeWorkspace: string,
+    project: any,
+    taskType: string,
+    generatedText = '',
+    options: { persist?: boolean } = {},
+  ) => {
     const preview = await previewNovelKnowledgeInjection(project, taskType)
     const terms = collectCopyGuardTerms(preview)
     const text = String(generatedText || '')
@@ -216,24 +241,14 @@ export function createNovelReferenceService() {
       warnings: preview.warnings || [],
       quality_assessment: qualityAssessment,
     }
-    const shouldWarn = hits.length > 0 || qualityAssessment.overall_score < 70
     const safetyDecision = getReferenceSafetyDecision(project, report)
     const safetyExplanation = explainReferenceSafety(report, safetyDecision)
     ;(report as any).safety_decision = safetyDecision
     ;(report as any).safety_explanation = safetyExplanation
     ;(report as any).migration_audit = buildMigrationAudit(project, report, safetyExplanation)
-    await createNovelReview(activeWorkspace, {
-      project_id: project.id,
-      review_type: 'reference_report',
-      status: shouldWarn || safetyDecision.blocked ? 'warn' : 'ok',
-      summary: `参考报告：${preview.strength_label || '-'}，注入 ${preview.entries?.length || 0} 条，质量评分 ${qualityAssessment.overall_score}${hits.length ? `，疑似照搬 ${hits.length} 项` : ''}`,
-      issues: [
-        ...safetyDecision.reasons,
-        ...hits.map(term => `正文出现参考实体/证据词：${term}`),
-        ...qualityAssessment.recommendations,
-      ],
-      payload: JSON.stringify(report),
-    })
+    if (options.persist !== false) {
+      await createNovelReview(activeWorkspace, buildReferenceUsageReviewRecord(project, report))
+    }
     return report
   }
 
