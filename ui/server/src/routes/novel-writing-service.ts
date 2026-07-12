@@ -44338,10 +44338,45 @@ export function createNovelWritingService(ctx: {
   const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
     const wordTarget = contextPackage?.chapter_target?.word_target as ChapterWordTarget | null | undefined
     let evaluation = applyProseWordTargetSoftCap(evaluateProseWordTarget(chapterText, wordTarget))
+    const initialEvaluation = evaluation
     const reviseModelId = ctx.production.getStageModelId(project, 'revise', modelId)
     let currentText = String(chapterText || '')
     let currentEvaluation = evaluation
     let contractionResultPayload: any = null
+    let bestCompleteText = currentText
+    let bestCompleteEvaluation = currentEvaluation
+    let bestCompleteContractionPayload: any = null
+    const wordTargetDistance = (candidateEvaluation: any) => candidateEvaluation.too_long
+      ? Math.max(0, Number(candidateEvaluation.actual || 0) - Number(candidateEvaluation.max || 0))
+      : candidateEvaluation.too_short
+        ? Math.max(0, Number(candidateEvaluation.min || 0) - Number(candidateEvaluation.actual || 0))
+        : 0
+    const rememberBestCompleteCandidate = (candidateText: string, candidateEvaluation: any, payload?: any) => {
+      const candidateCount = countProseChars(candidateText)
+      if (!candidateText || candidateCount <= 0) return
+      const bestDistance = wordTargetDistance(bestCompleteEvaluation)
+      const candidateDistance = wordTargetDistance(candidateEvaluation)
+      if (candidateDistance < bestDistance || (candidateDistance === bestDistance && candidateCount > countProseChars(bestCompleteText))) {
+        bestCompleteText = candidateText
+        bestCompleteEvaluation = candidateEvaluation
+        bestCompleteContractionPayload = payload || bestCompleteContractionPayload
+      }
+    }
+    const buildWordTargetWarning = (finalEvaluation: any) => {
+      const code = finalEvaluation.too_long ? 'word_target_long' : 'word_target_short'
+      const message = finalEvaluation.too_long
+        ? `word_target_long：完整章节仍超过字数上限（当前 ${finalEvaluation.actual} 字，最多 ${finalEvaluation.max} 字）`
+        : `word_target_short：完整章节仍低于字数下限（当前 ${finalEvaluation.actual} 字，至少 ${finalEvaluation.min} 字）`
+      return {
+        code,
+        source: 'word_target',
+        message,
+        details: {
+          evaluation: initialEvaluation,
+          final_evaluation: finalEvaluation,
+        },
+      }
+    }
     if (evaluation.soft_cap) {
       return {
         final_text: chapterText,
@@ -44440,6 +44475,9 @@ export function createNovelWritingService(ctx: {
           attempts: contractionAttempts,
           modelName: (contractionResult as any).modelName,
         }
+        if (isExplicitlyCompleteProseContractionFinishReason(finishReason)) {
+          rememberBestCompleteCandidate(contractedText, finalEvaluation, candidatePayload)
+        }
 
         if (bridgeToExpansion) {
           currentText = contractedText
@@ -44485,43 +44523,43 @@ export function createNovelWritingService(ctx: {
             expansion: null,
           }
         }
-        throw Object.assign(
-          new Error(`章节正文超过字数上限：当前 ${currentEvaluation.actual} 字，最多 ${currentEvaluation.max} 字`),
-          {
-            code: 'PROSE_WORD_TARGET_LONG',
-            word_target: wordTarget,
-            evaluation,
-            final_evaluation: currentEvaluation,
-            contraction_attempts: contractionAttempts,
-            expansion_attempts: [],
-          },
-        )
+        return {
+          final_text: bestCompleteText,
+          contracted: bestCompleteText !== String(chapterText || ''),
+          expanded: false,
+          evaluation: initialEvaluation,
+          final_evaluation: bestCompleteEvaluation,
+          contraction: bestCompleteContractionPayload || { attempts: contractionAttempts },
+          expansion: null,
+          word_target_warning: buildWordTargetWarning(bestCompleteEvaluation),
+        }
       }
 
       chapterText = currentText
       evaluation = currentEvaluation
     }
     if (evaluation.too_long) {
-      throw Object.assign(
-        new Error(`章节正文超过字数上限：当前 ${evaluation.actual} 字，最多 ${evaluation.max} 字`),
-        {
-          code: 'PROSE_WORD_TARGET_LONG',
-          word_target: wordTarget,
-          evaluation,
-          final_evaluation: evaluation,
-          contraction_attempts: [],
-          expansion_attempts: [],
-        },
-      )
+      return {
+        final_text: chapterText,
+        contracted: false,
+        expanded: false,
+        evaluation: initialEvaluation,
+        final_evaluation: evaluation,
+        contraction: null,
+        expansion: null,
+        word_target_warning: buildWordTargetWarning(evaluation),
+      }
     }
     if (evaluation.passed || options.expand === false) {
-      return {
+      const result: any = {
         final_text: chapterText,
         expanded: false,
         evaluation,
         final_evaluation: evaluation,
         expansion: null,
       }
+      if (!evaluation.passed) result.word_target_warning = buildWordTargetWarning(evaluation)
+      return result
     }
 
     const maxExpansionAttempts = Math.max(1, Math.min(5, Number(options.maxExpansionAttempts || options.max_expansion_attempts || 3)))
@@ -44546,6 +44584,21 @@ export function createNovelWritingService(ctx: {
       const finalEvaluation = applyProseWordTargetSoftCap(evaluateProseWordTarget(expandedText, wordTarget))
       const previousCount = countProseChars(currentText)
       const expandedCount = countProseChars(expandedText)
+      const finishReason = normalizeProseContractionFinishReason(expansionResult)
+      const rejectedFinishReason = rejectedProseTransportFinishReason(expansionResult)
+      const incompleteReason = normalizeProseContractionIncompleteReason(expansionResult)
+      const recoveredFromPartialJson = extracted.payload?.recovered_from_partial_json === true
+      const partialJsonOpenStringRecovered = extracted.payload?.partial_json_open_string_recovered === true
+      const rejectionReasons = [
+        !expandedText ? 'missing_chapter_text' : '',
+        recoveredFromPartialJson ? 'recovered_from_partial_json' : '',
+        partialJsonOpenStringRecovered ? 'partial_json_open_string_recovered' : '',
+        !isExplicitlyCompleteProseContractionFinishReason(finishReason) ? `finish_reason_${finishReason || 'missing'}` : '',
+        rejectedFinishReason ? `transport_finish_reason_${rejectedFinishReason}` : '',
+        incompleteReason ? `incomplete_reason_${incompleteReason}` : '',
+        hasProseTransportIncompleteDetails(expansionResult) ? 'incomplete_details_present' : '',
+      ].filter(Boolean)
+      const candidateRejected = rejectionReasons.length > 0
 
       attempts.push({
         attempt,
@@ -44554,14 +44607,21 @@ export function createNovelWritingService(ctx: {
         evaluation: finalEvaluation,
         modelName: (expansionResult as any).modelName,
         returned_text: Boolean(expandedText),
+        finish_reason: finishReason,
+        candidate_rejected: candidateRejected,
+        rejection_reason: rejectionReasons.join(',') || null,
       })
 
-      if (expandedText && expandedCount > previousCount) {
+      if (!candidateRejected && expandedText && expandedCount > previousCount) {
         currentText = expandedText
         currentEvaluation = finalEvaluation
+        if (expandedCount > countProseChars(bestCompleteText)) {
+          bestCompleteText = expandedText
+          bestCompleteEvaluation = finalEvaluation
+        }
       }
 
-      if (expandedText && expandedCount > previousCount && finalEvaluation.passed) {
+      if (!candidateRejected && expandedText && expandedCount > previousCount && finalEvaluation.passed) {
         return {
           final_text: expandedText,
           contracted: Boolean(contractionResultPayload),
@@ -44580,16 +44640,18 @@ export function createNovelWritingService(ctx: {
       }
     }
 
-    throw Object.assign(
-      new Error(`章节正文低于字数下限：当前 ${evaluation.actual} 字，至少 ${evaluation.min} 字，扩写后 ${currentEvaluation.actual || 0} 字`),
-      {
-        code: 'PROSE_WORD_TARGET_SHORT',
-        word_target: wordTarget,
-        evaluation,
-        final_evaluation: currentEvaluation,
-        expansion_attempts: attempts,
+    return {
+      final_text: bestCompleteText,
+      contracted: Boolean(contractionResultPayload),
+      expanded: bestCompleteText !== String(chapterText || ''),
+      evaluation: initialEvaluation,
+      final_evaluation: bestCompleteEvaluation,
+      contraction: contractionResultPayload,
+      expansion: {
+        attempts,
       },
-    )
+      word_target_warning: buildWordTargetWarning(bestCompleteEvaluation),
+    }
   }
 
   const autoRepairChapterPreflightGaps = async (activeWorkspace: string, project: any, chapter: any, contextPackage: any, modelId?: number, options: any = {}) => {
@@ -45903,6 +45965,19 @@ export function createNovelWritingService(ctx: {
         && Number(compatibility?.compatibility_ceiling || 0) > 0
         && strictEvaluation.actual <= Number(compatibility.compatibility_ceiling)
     }
+    const wordTargetWarningAsError = (wordTargetCheck: any) => {
+      const warning = wordTargetCheck?.word_target_warning
+      if (!warning) return null
+      return Object.assign(new Error(String(warning.message || '章节正文未达到字数目标')), {
+        code: warning.code === 'word_target_short' ? 'PROSE_WORD_TARGET_SHORT' : 'PROSE_WORD_TARGET_LONG',
+        word_target: wordTarget,
+        evaluation: wordTargetCheck.evaluation,
+        final_evaluation: wordTargetCheck.final_evaluation,
+        contraction_attempts: wordTargetCheck.contraction?.attempts || [],
+        expansion_attempts: wordTargetCheck.expansion?.attempts || [],
+        word_target_warning: warning,
+      })
+    }
     try {
       const wordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId, llmControlOptions)
       wordTargetCompatibility = wordTargetCheck.word_target_compatibility_pass ? wordTargetCheck : null
@@ -45949,6 +46024,8 @@ export function createNovelWritingService(ctx: {
     try {
       throwIfChapterGenerationAborted()
       const postEditorWordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId, llmControlOptions)
+      const postEditorWordTargetWarning = wordTargetWarningAsError(postEditorWordTargetCheck)
+      if (postEditorWordTargetWarning) throw postEditorWordTargetWarning
       wordTargetCompatibility = postEditorWordTargetCheck.word_target_compatibility_pass ? postEditorWordTargetCheck : null
       finalText = postEditorWordTargetCheck.final_text || finalText
       recordWordTargetExpansionPatch(postEditorWordTargetCheck)
@@ -45961,7 +46038,7 @@ export function createNovelWritingService(ctx: {
       }
     } catch (error: any) {
       const preEditorEvaluation = evaluateProseWordTarget(preEditorText, wordTarget)
-      if (error?.code === 'PROSE_WORD_TARGET_LONG' && isRestorableWordTargetText(preEditorText, preEditorWordTargetCompatibility)) {
+      if ((error?.code === 'PROSE_WORD_TARGET_LONG' || error?.code === 'PROSE_WORD_TARGET_SHORT') && isRestorableWordTargetText(preEditorText, preEditorWordTargetCompatibility)) {
         finalText = preEditorText
         finalSceneBreakdown = preEditorSceneBreakdown
         finalContinuityNotes = preEditorContinuityNotes
@@ -46028,6 +46105,8 @@ export function createNovelWritingService(ctx: {
     try {
       throwIfChapterGenerationAborted()
       const postMemeWordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId, llmControlOptions)
+      const postMemeWordTargetWarning = wordTargetWarningAsError(postMemeWordTargetCheck)
+      if (postMemeWordTargetWarning) throw postMemeWordTargetWarning
       wordTargetCompatibility = postMemeWordTargetCheck.word_target_compatibility_pass ? postMemeWordTargetCheck : null
       finalText = postMemeWordTargetCheck.final_text || finalText
       recordWordTargetExpansionPatch(postMemeWordTargetCheck)
@@ -46039,7 +46118,7 @@ export function createNovelWritingService(ctx: {
         await onStage('word_target', { status: 'success', phase: 'post_meme_polish', compatibility_pass: true, compatibility_ceiling: postMemeWordTargetCheck.compatibility_ceiling, contraction_attempts: postMemeWordTargetCheck.contraction?.attempts, word_count: countProseChars(finalText), evaluation: postMemeWordTargetCheck.final_evaluation })
       }
       } catch (error: any) {
-        if (error?.code === 'PROSE_WORD_TARGET_LONG' && isRestorableWordTargetText(preMemeText, preMemeWordTargetCompatibility)) {
+        if ((error?.code === 'PROSE_WORD_TARGET_LONG' || error?.code === 'PROSE_WORD_TARGET_SHORT') && isRestorableWordTargetText(preMemeText, preMemeWordTargetCompatibility)) {
           finalText = preMemeText
           finalSceneBreakdown = preMemeSceneBreakdown
           finalContinuityNotes = preMemeContinuityNotes
@@ -46095,7 +46174,7 @@ export function createNovelWritingService(ctx: {
         initialText: finalText,
         minScore: qualityThreshold,
         coreContract: buildFocusedQualityCoreContract(generationContract),
-        maxRevisionRounds: isDraftReviewOnly || isDraftOnly ? 0 : 2,
+        maxRevisionRounds: isDraftReviewOnly || isDraftOnly ? 0 : 1,
         scan: text => scanProseForQualityLoop(text, contextPackage, wordTarget, wordTargetCompatibility ? {
           word_target_compatibility_pass: true,
           compatibility_ceiling: wordTargetCompatibility.compatibility_ceiling,

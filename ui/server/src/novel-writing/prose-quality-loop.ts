@@ -439,33 +439,6 @@ function deterministicFindings(scan: any): ProseQualityFinding[] {
   })
 }
 
-function qualityLoopError(code: string, message: string, details: any = {}) {
-  return Object.assign(new Error(message), { code, ...details })
-}
-
-function compactQualityError(error: any) {
-  const reviewAttempts = Array.isArray(error?.review_attempts)
-    ? error.review_attempts.slice(0, 2).map(sanitizeProseQualityReviewAttemptDiagnostic)
-    : []
-  return {
-    kind: normalizeProseQualityCallbackErrorKind(error),
-    field_types: {
-      name: proseQualityDiagnosticType(error?.name),
-      message: proseQualityDiagnosticType(error?.message),
-      code: proseQualityDiagnosticType(error?.code),
-    },
-    ...(reviewAttempts.length ? { review_attempts: reviewAttempts } : {}),
-  }
-}
-
-function summarizeQualityRounds(rounds: any[]) {
-  return rounds.map(item => ({
-    round: Number(item?.round || 0),
-    accepted: item?.selection?.accepted === true,
-    reason: compactQualityText(item?.selection?.reason, 300),
-  }))
-}
-
 function proseQualityDiagnosticType(value: any) {
   if (value === undefined) return 'missing'
   if (value === null) return 'null'
@@ -475,24 +448,6 @@ function proseQualityDiagnosticType(value: any) {
   if (typeof value === 'number') return 'number'
   if (typeof value === 'boolean') return 'boolean'
   return 'other'
-}
-
-function normalizeProseQualityDiagnosticType(value: any) {
-  return ['missing', 'null', 'array', 'object', 'string', 'number', 'boolean', 'other'].includes(value)
-    ? value
-    : 'other'
-}
-
-function normalizeProseQualityCallbackErrorKind(error: any) {
-  if (error?.quality_error_kind === 'invalid_payload') return 'invalid_payload'
-  const name = typeof error?.name === 'string' ? error.name.trim().toLowerCase() : ''
-  const code = typeof error?.code === 'string' ? error.code.trim().toLowerCase() : ''
-  const message = typeof error?.message === 'string' ? error.message.toLowerCase() : ''
-  if (['aborterror', 'aborted', 'abort_err'].includes(name) || ['aborted', 'abort_err'].includes(code)) return 'aborted'
-  if (['timeouterror', 'timeout'].includes(name) || ['etimedout', 'timeout'].includes(code) || /\btime(?:d)?\s*out\b/.test(message)) {
-    return 'timeout'
-  }
-  return 'callback_error'
 }
 
 function normalizeProseQualityFinishReason(value: any) {
@@ -529,32 +484,6 @@ export function sanitizeProseQualityReviewTransport(value: any) {
     finish_reason: normalizeProseQualityFinishReason(value.finish_reason),
     ...(Object.keys(usage).length ? { usage } : {}),
     ...(contentLength != null ? { content_length: contentLength } : {}),
-  }
-}
-
-function sanitizeProseQualityReviewAttemptDiagnostic(value: any) {
-  const fieldTypes = value?.field_types && typeof value.field_types === 'object' && !Array.isArray(value.field_types)
-    ? value.field_types
-    : {}
-  const dimensionTypes = value?.dimension_types && typeof value.dimension_types === 'object' && !Array.isArray(value.dimension_types)
-    ? value.dimension_types
-    : {}
-  return {
-    attempt: value?.attempt === 2 ? 2 : 1,
-    payload_type: normalizeProseQualityDiagnosticType(value?.payload_type),
-    field_types: {
-      score: normalizeProseQualityDiagnosticType(fieldTypes.score),
-      score_scale: normalizeProseQualityDiagnosticType(fieldTypes.score_scale),
-      dimensions: normalizeProseQualityDiagnosticType(fieldTypes.dimensions),
-      findings: normalizeProseQualityDiagnosticType(fieldTypes.findings),
-      publishable: normalizeProseQualityDiagnosticType(fieldTypes.publishable),
-    },
-    dimension_types: Object.fromEntries(REQUIRED_QUALITY_DIMENSIONS.map(key => [
-      key,
-      normalizeProseQualityDiagnosticType(dimensionTypes[key]),
-    ])),
-    missing_dimensions: REQUIRED_QUALITY_DIMENSIONS.filter(key => Array.isArray(value?.missing_dimensions) && value.missing_dimensions.includes(key)),
-    transport: sanitizeProseQualityReviewTransport(value?.transport),
   }
 }
 
@@ -621,8 +550,9 @@ export async function runProseQualityLoop(input: {
     prompt: string
   }) => Promise<any>
 }) {
-  const maxRounds = Math.min(2, Math.max(0, Number(input.maxRevisionRounds ?? 2)))
+  const maxRounds = Math.min(1, Math.max(0, Number(input.maxRevisionRounds ?? 1)))
   const rounds: any[] = []
+  let qualityWarning: any = null
   let finalText = String(input.initialText || '')
   let scan = await input.scan(finalText)
   let initialPayload: any
@@ -638,7 +568,27 @@ export async function runProseQualityLoop(input: {
       }),
     })
   } catch (error) {
-    throw qualityLoopError('PROSE_REVIEW_FAILED', '正文初审不可用', { cause: compactQualityError(error) })
+    const message = 'quality_review_unavailable：正文独立质检不可用，已保留完整正文'
+    const review = normalizeProseQualityReview(null)
+    return {
+      final_text: finalText,
+      final_scan: scan,
+      final_review: review,
+      decision: {
+        passed: false,
+        approvable: true,
+        score: 0,
+        min_score: Number.isFinite(Number(input.minScore)) ? Number(input.minScore) : 0,
+        hard_failures: [],
+        advisory_failures: [message],
+      },
+      rounds,
+      quality_warning: {
+        code: 'quality_review_unavailable',
+        source: 'review',
+        message,
+      },
+    }
   }
   let review = normalizeProseQualityReview(initialPayload)
   let classification = classifyProseQualityBlockingFindings(review, finalText, scan)
@@ -705,30 +655,24 @@ export async function runProseQualityLoop(input: {
       review = normalizeProseQualityReview(recheckPayload)
       classification = classifyProseQualityBlockingFindings(review, finalText, scan)
     } catch (error) {
-      const message = `正文第 ${round} 轮修订后的独立复检不可用`
-      throw qualityLoopError(
-        'PROSE_QUALITY_RECHECK_UNAVAILABLE',
+      const message = `quality_recheck_unavailable：正文第 ${round} 轮修订后的独立复检不可用，已保留完整修订正文`
+      decision = {
+        passed: false,
+        approvable: true,
+        score: Number(review?.score || 0),
+        min_score: Number.isFinite(Number(input.minScore)) ? Number(input.minScore) : 0,
+        hard_failures: [],
+        advisory_failures: Array.from(new Set([
+          ...decision.advisory_failures,
+          message,
+        ])),
+      }
+      qualityWarning = {
+        code: 'quality_recheck_unavailable',
+        source: 'review',
         message,
-        {
-          cause: compactQualityError(error),
-          candidate_chars: finalText.replace(/\s+/g, '').length,
-          quality_loop: {
-            rounds: summarizeQualityRounds(rounds),
-            decision: {
-              passed: false,
-              approvable: false,
-              score: Number(review?.score || 0),
-              min_score: Number(input.minScore || 0),
-              hard_failures: [{
-                key: 'quality_recheck_unavailable',
-                message,
-                source: 'recheck',
-              }],
-              advisory_failures: [],
-            },
-          },
-        },
-      )
+      }
+      break
     }
     decision = buildProseQualityDecision({
       chapterText: finalText,
@@ -745,6 +689,7 @@ export async function runProseQualityLoop(input: {
     final_review: review,
     decision,
     rounds,
+    ...(qualityWarning ? { quality_warning: qualityWarning } : {}),
   }
 }
 import { selectUsableRevisionText } from './prose-quality-contracts'

@@ -928,7 +928,7 @@ describe('bounded prose quality loop', () => {
     ])
   })
 
-  test('stops after two failed revision rounds', async () => {
+  test('stops after exactly one failed revision round', async () => {
     let revisionCalls = 0
     const result = await runProseQualityLoop({
       initialText: '主角等待。'.repeat(120),
@@ -953,15 +953,16 @@ describe('bounded prose quality loop', () => {
       },
     })
 
-    expect(revisionCalls).toBe(2)
-    expect(result.rounds).toHaveLength(2)
+    expect(revisionCalls).toBe(1)
+    expect(result.rounds).toHaveLength(1)
     expect(result.decision.passed).toBe(false)
   })
 
-  test('fails closed without retrying or persisting callback exception text', async () => {
+  test('retains revised prose when recheck callback fails without persisting exception text', async () => {
     const leakSentinel = 'MODEL_CONTROLLED_BODY_SENTINEL'
     let reviewCalls = 0
-    const error = await runProseQualityLoop({
+    const revisedText = '修订正文带来新的追捕令。'.repeat(120)
+    const result = await runProseQualityLoop({
       initialText: '初稿问题。'.repeat(120),
       minScore: 78,
       coreContract: { chapter_no: 10 },
@@ -982,25 +983,26 @@ describe('bounded prose quality loop', () => {
           }],
         }
       },
-      revise: async () => ({ final_text: '修订正文带来新的追捕令。'.repeat(120) }),
-    }).then(() => null, (caught: any) => caught)
-
-    expect(error?.code).toBe('PROSE_QUALITY_RECHECK_UNAVAILABLE')
-    expect(reviewCalls).toBe(2)
-    expect(JSON.stringify(error?.cause)).not.toContain(leakSentinel)
-    expect(error?.cause).toMatchObject({
-      kind: 'callback_error',
-      field_types: {
-        name: 'string',
-        message: 'string',
-        code: 'missing',
-      },
+      revise: async () => ({ final_text: revisedText }),
     })
+
+    expect(result.final_text).toBe(revisedText)
+    expect(result.final_review.score).toBe(70)
+    expect(reviewCalls).toBe(2)
+    expect(JSON.stringify(result)).not.toContain(leakSentinel)
+    expect(result.decision).toMatchObject({
+      passed: false,
+      approvable: true,
+      score: 70,
+      hard_failures: [],
+    })
+    expect(result.decision.advisory_failures.join('｜')).toContain('quality_recheck_unavailable')
+    expect(result.quality_warning).toMatchObject({ code: 'quality_recheck_unavailable', source: 'review' })
   })
 
   test('treats an empty structured recheck as unavailable', async () => {
     let reviewCalls = 0
-    const error = await runProseQualityLoop({
+    const result = await runProseQualityLoop({
       initialText: '初稿问题。'.repeat(120),
       minScore: 78,
       coreContract: { chapter_no: 10 },
@@ -1023,26 +1025,18 @@ describe('bounded prose quality loop', () => {
           : {}
       },
       revise: async () => ({ final_text: '修订正文带来新的追捕令。'.repeat(120) }),
-    }).then(() => null, (caught: any) => caught)
+    })
 
-    expect(error?.code).toBe('PROSE_QUALITY_RECHECK_UNAVAILABLE')
+    expect(result.final_text).toBe('修订正文带来新的追捕令。'.repeat(120))
     expect(reviewCalls).toBe(3)
-    expect(error?.cause?.review_attempts).toHaveLength(2)
-    expect(error?.cause?.review_attempts.every((attempt: any) => (
-      attempt.payload_type === 'object'
-      && attempt.field_types.score === 'missing'
-      && attempt.field_types.score_scale === 'missing'
-      && attempt.field_types.dimensions === 'missing'
-      && attempt.field_types.findings === 'missing'
-      && attempt.field_types.publishable === 'missing'
-      && attempt.missing_dimensions.length === 6
-    ))).toBe(true)
+    expect(result.decision).toMatchObject({ passed: false, approvable: true, hard_failures: [] })
+    expect(result.decision.advisory_failures.join('｜')).toContain('quality_recheck_unavailable')
   })
 
   test('does not persist model-controlled values or arbitrary keys in invalid review diagnostics', async () => {
     const leakSentinel = 'MODEL_CONTROLLED_PREVIEW_SENTINEL'
     let reviewCalls = 0
-    const error = await runProseQualityLoop({
+    const result = await runProseQualityLoop({
       initialText: '初稿问题。'.repeat(120),
       minScore: 78,
       coreContract: { chapter_no: 10 },
@@ -1082,38 +1076,16 @@ describe('bounded prose quality loop', () => {
         }
       },
       revise: async () => ({ final_text: '修订正文带来新的追捕令。'.repeat(120) }),
-    }).then(() => null, (caught: any) => caught)
-
-    expect(error?.code).toBe('PROSE_QUALITY_RECHECK_UNAVAILABLE')
-    expect(reviewCalls).toBe(3)
-    expect(JSON.stringify(error?.cause)).not.toContain(leakSentinel)
-    expect(error?.cause?.review_attempts[0]).toMatchObject({
-      field_types: {
-        score: 'null',
-        score_scale: 'string',
-        dimensions: 'object',
-        findings: 'array',
-        publishable: 'missing',
-      },
-      dimension_types: {
-        continuity: 'missing',
-        core_promise_agency: 'missing',
-        conflict_causality: 'missing',
-        payoff_hook: 'missing',
-        prose_style: 'missing',
-        fact_setting_safety: 'missing',
-      },
-      transport: {
-        finish_reason: 'unknown',
-        usage: { input_tokens: 12 },
-        content_length: 345,
-      },
     })
+
+    expect(reviewCalls).toBe(3)
+    expect(JSON.stringify(result)).not.toContain(leakSentinel)
+    expect(result.decision).toMatchObject({ passed: false, approvable: true, hard_failures: [] })
   })
 
   test('treats an ambiguous five-point recheck score as unavailable', async () => {
     let reviewCalls = 0
-    await expect(runProseQualityLoop({
+    const result = await runProseQualityLoop({
       initialText: '初稿问题。'.repeat(120),
       minScore: 85,
       coreContract: { chapter_no: 10 },
@@ -1136,17 +1108,57 @@ describe('bounded prose quality loop', () => {
           : { score: 4.8, dimensions: sixDimensionScores, publishable: true, findings: [] }
       },
       revise: async () => ({ final_text: '修订正文。'.repeat(120) }),
-    })).rejects.toMatchObject({ code: 'PROSE_QUALITY_RECHECK_UNAVAILABLE' })
+    })
+    expect(result.decision).toMatchObject({ passed: false, approvable: true, hard_failures: [] })
+    expect(result.decision.advisory_failures.join('｜')).toContain('quality_recheck_unavailable')
   })
 
-  test('rejects an unusable initial six-dimension review', async () => {
-    await expect(runProseQualityLoop({
-      initialText: '初稿。'.repeat(120),
+  test('returns an advisory fallback for an unusable initial six-dimension review', async () => {
+    const initialText = '初稿。'.repeat(120)
+    const scan = { hard_failures: [{ key: 'existing_scan_result', message: '保留扫描结果' }] }
+    const result = await runProseQualityLoop({
+      initialText,
       minScore: 78,
-      scan: () => ({ hard_failures: [] }),
+      scan: () => scan,
       review: async () => ({ score: 90, findings: [] }),
       revise: async () => ({ final_text: '不会调用。' }),
-    })).rejects.toMatchObject({ code: 'PROSE_REVIEW_FAILED' })
+    })
+
+    expect(result).toMatchObject({
+      final_text: initialText,
+      final_scan: scan,
+      final_review: {
+        score: 0,
+        publishable: false,
+        dimensions: {},
+        blocking_findings: [],
+        advisory_findings: [],
+      },
+      decision: {
+        passed: false,
+        approvable: true,
+        score: 0,
+        min_score: 78,
+        hard_failures: [],
+      },
+      rounds: [],
+      quality_warning: { code: 'quality_review_unavailable', source: 'review' },
+    })
+    expect(result.decision.advisory_failures.join('｜')).toContain('quality_review_unavailable')
+
+    const callbackFailure = await runProseQualityLoop({
+      initialText,
+      minScore: 78,
+      scan: () => scan,
+      review: async () => { throw new Error('MODEL_PROVIDER_SENTINEL') },
+      revise: async () => ({ final_text: '不会调用。' }),
+    })
+    expect(callbackFailure).toMatchObject({
+      final_text: initialText,
+      decision: { passed: false, approvable: true, hard_failures: [] },
+      quality_warning: { code: 'quality_review_unavailable', source: 'review' },
+    })
+    expect(JSON.stringify(callbackFailure)).not.toContain('MODEL_PROVIDER_SENTINEL')
   })
 
   test('builds focused review and revision prompts around prose evidence', () => {

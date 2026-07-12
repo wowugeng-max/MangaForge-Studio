@@ -406,7 +406,7 @@ describe('novel writing service prose quality wiring', () => {
     expect(semanticDecision.hard_failures).toEqual([expect.objectContaining({ key: 'causality_break', source: 'llm' })])
   })
 
-  test('rejects an open chapter string returned with a length finish reason during contraction', async () => {
+  test('never selects an open chapter string returned with a length finish reason during contraction', async () => {
     const originalText = '原'.repeat(1400)
     const candidateText = '改'.repeat(1000)
     const service = createContractionService({
@@ -415,20 +415,21 @@ describe('novel writing service prose quality wiring', () => {
       usage: { input_tokens: 120, output_tokens: 1000, total_tokens: 1120 },
     })
 
-    const error = await service.ensureProseMeetsWordTarget(
+    const result = await service.ensureProseMeetsWordTarget(
       '/tmp/mangaforge-contraction-length',
       { id: 1, title: '测试作品' },
       { chapter_target: { chapter_no: 1, word_target: contractionWordTarget } },
       originalText,
       217,
       { maxContractionAttempts: 1 },
-    ).then(() => null, (caught: any) => caught)
+    )
 
-    expect(error?.code).toBe('PROSE_WORD_TARGET_LONG')
-    expect(error?.final_evaluation?.actual).toBe(countProseChars(originalText))
-    expect(error?.final_evaluation?.too_long).toBe(true)
-    expect(error?.contraction_attempts).toHaveLength(1)
-    const attempt = error?.contraction_attempts?.[0]
+    expect(result.final_text).toBe(originalText)
+    expect(result.word_target_warning?.code).toBe('word_target_long')
+    expect(result.final_evaluation?.actual).toBe(countProseChars(originalText))
+    expect(result.final_evaluation?.too_long).toBe(true)
+    expect(result.contraction?.attempts).toHaveLength(1)
+    const attempt = result.contraction?.attempts?.[0]
     expect(attempt).toMatchObject({
       finish_reason: 'length',
       model_usage: { output_tokens: 1000 },
@@ -442,7 +443,7 @@ describe('novel writing service prose quality wiring', () => {
     expect(attempt).not.toHaveProperty('prompt')
   })
 
-  test('rejects a closed chapter string recovered from a max-token truncated JSON envelope during contraction', async () => {
+  test('never selects a closed chapter string recovered from a max-token truncated JSON envelope during contraction', async () => {
     const originalText = '原'.repeat(1400)
     const candidateText = '缩'.repeat(1000)
     const service = createContractionService({
@@ -453,20 +454,21 @@ describe('novel writing service prose quality wiring', () => {
       },
     })
 
-    const error = await service.ensureProseMeetsWordTarget(
+    const result = await service.ensureProseMeetsWordTarget(
       '/tmp/mangaforge-contraction-max-tokens',
       { id: 1, title: '测试作品' },
       { chapter_target: { chapter_no: 1, word_target: contractionWordTarget } },
       originalText,
       217,
       { maxContractionAttempts: 1 },
-    ).then(() => null, (caught: any) => caught)
+    )
 
-    expect(error?.code).toBe('PROSE_WORD_TARGET_LONG')
-    expect(error?.final_evaluation?.actual).toBe(countProseChars(originalText))
-    expect(error?.final_evaluation?.too_long).toBe(true)
-    expect(error?.contraction_attempts).toHaveLength(1)
-    const attempt = error?.contraction_attempts?.[0]
+    expect(result.final_text).toBe(originalText)
+    expect(result.word_target_warning?.code).toBe('word_target_long')
+    expect(result.final_evaluation?.actual).toBe(countProseChars(originalText))
+    expect(result.final_evaluation?.too_long).toBe(true)
+    expect(result.contraction?.attempts).toHaveLength(1)
+    const attempt = result.contraction?.attempts?.[0]
     expect(attempt).toMatchObject({
       finish_reason: 'max_tokens',
       model_usage: { output_tokens: 1000 },
@@ -502,28 +504,30 @@ describe('novel writing service prose quality wiring', () => {
       },
     })
 
-    const error = await service.ensureProseMeetsWordTarget(
+    const result = await service.ensureProseMeetsWordTarget(
       '/tmp/mangaforge-contraction-budget',
       { id: 1, title: '测试作品' },
       { chapter_target: { chapter_no: 1, word_target: contractionWordTarget } },
       originalText,
       217,
       { maxContractionAttempts: 3 },
-    ).then(() => null, (caught: any) => caught)
+    )
 
-    expect(error?.code).toBe('PROSE_WORD_TARGET_LONG')
+    expect(result.final_text).toBe(originalText)
+    expect(result.word_target_warning?.code).toBe('word_target_long')
     expect(maxTokensByAttempt).toEqual([18_000, 32_000, 48_000])
-    expect(error?.contraction_attempts).toHaveLength(3)
-    expect(error?.contraction_attempts.every((attempt: any) => attempt.candidate_rejected === true)).toBe(true)
+    expect(result.contraction?.attempts).toHaveLength(3)
+    expect(result.contraction?.attempts.every((attempt: any) => attempt.candidate_rejected === true)).toBe(true)
   })
 
   test('rejects completed contraction without chapter text using compact diagnostics', async () => {
     const originalText = '原'.repeat(1400)
     const service = createContractionService({ parsed: { prose_chapters: [{ chapter_no: 1 }] }, finish_reason: 'stop', content: 'sensitive raw body' })
-    const error = await service.ensureProseMeetsWordTarget('/tmp/missing-text', { id: 1 }, { chapter_target: { word_target: contractionWordTarget } }, originalText, 217, { maxContractionAttempts: 1 }).then(() => null, (e: any) => e)
-    expect(error?.contraction_attempts?.[0]).toMatchObject({ returned_text: false, candidate_rejected: true })
-    expect(error?.contraction_attempts?.[0]?.rejection_reason).toContain('missing_chapter_text')
-    expect(JSON.stringify(error?.contraction_attempts)).not.toContain('sensitive raw body')
+    const result = await service.ensureProseMeetsWordTarget('/tmp/missing-text', { id: 1 }, { chapter_target: { word_target: contractionWordTarget } }, originalText, 217, { maxContractionAttempts: 1 })
+    expect(result.final_text).toBe(originalText)
+    expect(result.contraction?.attempts?.[0]).toMatchObject({ returned_text: false, candidate_rejected: true })
+    expect(result.contraction?.attempts?.[0]?.rejection_reason).toContain('missing_chapter_text')
+    expect(JSON.stringify(result.contraction?.attempts)).not.toContain('sensitive raw body')
   })
 
   test('rejects deep transport truncation and empty incomplete markers even when contraction text is usable', async () => {
@@ -534,10 +538,11 @@ describe('novel writing service prose quality wiring', () => {
       { finish_reason: 'stop', parsed: { chapter_text: candidate }, raw: { choices: [{ incomplete_details: {} }] } },
       { finish_reason: 'stop', parsed: { chapter_text: candidate }, raw: { response: { incompleteDetails: {} } } },
     ]
-    for (const result of cases) {
-      const service = createContractionService(result)
-      const error = await service.ensureProseMeetsWordTarget('/tmp/deep-transport', { id: 1 }, { chapter_target: { word_target: contractionWordTarget } }, '原'.repeat(1400), 217, { maxContractionAttempts: 1 }).then(() => null, (e: any) => e)
-      expect(error?.contraction_attempts?.[0]?.candidate_rejected).toBe(true)
+    for (const candidateResult of cases) {
+      const service = createContractionService(candidateResult)
+      const result = await service.ensureProseMeetsWordTarget('/tmp/deep-transport', { id: 1 }, { chapter_target: { word_target: contractionWordTarget } }, '原'.repeat(1400), 217, { maxContractionAttempts: 1 })
+      expect(result.final_text).toBe('原'.repeat(1400))
+      expect(result.contraction?.attempts?.[0]?.candidate_rejected).toBe(true)
     }
   })
 
@@ -623,15 +628,61 @@ describe('novel writing service prose quality wiring', () => {
     expect(stages).toEqual(expect.arrayContaining([expect.objectContaining({ phase: 'post_meme_polish', fallback: 'pre_meme', compatibility_pass: true })]))
   })
 
-  test('rejects standard text above compatibility ceiling and never extends custom targets', async () => {
-    for (const [text, wordTarget] of [
-      ['原'.repeat(6761), { mode: 'standard', label: '标准章', target: 4200, min: 3200, max: 5200, rangeText: '3200-5200 字' }],
-      ['原'.repeat(6596), { mode: 'custom', label: '自定义', target: 5200, min: 4680, max: 5720, rangeText: '4680-5720 字' }],
-    ] as any[]) {
-      const service = createContractionService({ parsed: {}, finish_reason: 'stop' })
-      const error = await service.ensureProseMeetsWordTarget('/tmp/compat-reject', { id: 1 }, { chapter_target: { word_target: wordTarget } }, text, 217).then(() => null, (e: any) => e)
-      expect(error?.code).toBe('PROSE_WORD_TARGET_LONG')
-    }
+  test('returns complete standard overlong prose with a warning after unusable contractions', async () => {
+    const originalText = '原'.repeat(6761)
+    const wordTarget = { mode: 'standard', label: '标准章', target: 4200, min: 3200, max: 5200, rangeText: '3200-5200 字' }
+    const service = createContractionService({ parsed: {}, finish_reason: 'stop' })
+
+    const result = await service.ensureProseMeetsWordTarget('/tmp/compat-warning', { id: 1 }, { chapter_target: { word_target: wordTarget } }, originalText, 217)
+
+    expect(result.final_text).toBe(originalText)
+    expect(result.final_evaluation.actual).toBe(6761)
+    expect(result.word_target_warning).toMatchObject({
+      code: 'word_target_long',
+      source: 'word_target',
+      details: { evaluation: expect.any(Object), final_evaluation: expect.any(Object) },
+    })
+  })
+
+  test('returns the closest smaller complete custom contraction with a warning', async () => {
+    const originalText = '原'.repeat(6596)
+    const candidates = ['缩'.repeat(6300), '改'.repeat(6100)]
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: { getStageModelId: (_p: any, _s: string, f?: number) => f || 217, getStageTemperature: (_p: any, _s: string, f: number) => f } as any,
+      reference: {} as any,
+      runtime: { executeAgent: async () => ({ parsed: { chapter_text: candidates.shift() }, finish_reason: 'stop' }) },
+    })
+    const wordTarget = { mode: 'custom', label: '自定义', target: 5200, min: 4680, max: 5720, rangeText: '4680-5720 字' }
+
+    const result = await service.ensureProseMeetsWordTarget('/tmp/custom-warning', { id: 1 }, { chapter_target: { word_target: wordTarget } }, originalText, 217, { maxContractionAttempts: 2 })
+
+    expect(result.final_text).toBe('改'.repeat(6100))
+    expect(result.final_evaluation.actual).toBe(6100)
+    expect(result.word_target_warning).toMatchObject({ code: 'word_target_long', source: 'word_target' })
+  })
+
+  test('returns the longest complete expansion with a short warning and never selects a truncated candidate', async () => {
+    const originalText = '原'.repeat(500)
+    const results = [
+      { parsed: { chapter_text: '扩'.repeat(650) }, finish_reason: 'stop' },
+      { parsed: { chapter_text: '截'.repeat(900) }, finish_reason: 'length' },
+      { parsed: { chapter_text: '增'.repeat(700) }, finish_reason: 'stop' },
+    ]
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: { getStageModelId: (_p: any, _s: string, f?: number) => f || 217, getStageTemperature: (_p: any, _s: string, f: number) => f } as any,
+      reference: {} as any,
+      runtime: { executeAgent: async () => results.shift() },
+    })
+
+    const result = await service.ensureProseMeetsWordTarget('/tmp/short-warning', { id: 1 }, { chapter_target: { word_target: contractionWordTarget } }, originalText, 217)
+
+    expect(result.final_text).toBe('增'.repeat(700))
+    expect(result.final_text).not.toContain('截')
+    expect(result.final_evaluation.actual).toBe(700)
+    expect(result.word_target_warning).toMatchObject({ code: 'word_target_short', source: 'word_target' })
+    expect(result.expansion.attempts[1]).toMatchObject({ candidate_rejected: true })
   })
 
   test('routes a complete mildly short contraction through expansion instead of preserving the overlong draft', async () => {
@@ -696,17 +747,18 @@ describe('novel writing service prose quality wiring', () => {
         parsed: { prose_chapters: [{ chapter_no: 1, chapter_text: contractedText }] },
         ...finish,
       })
-      const error = await service.ensureProseMeetsWordTarget(
+      const result = await service.ensureProseMeetsWordTarget(
         '/tmp/mangaforge-contraction-expansion-finish-guard',
         { id: 1, title: '测试作品' },
         { chapter_target: { chapter_no: 1, word_target: contractionWordTarget } },
         originalText,
         217,
         { maxContractionAttempts: 1, maxExpansionAttempts: 1 },
-      ).then(() => null, (caught: any) => caught)
+      )
 
-      expect(error?.code).toBe('PROSE_WORD_TARGET_LONG')
-      expect(error?.contraction_attempts?.[0]?.bridge_to_expansion).toBe(false)
+      expect(result.final_text).toBe(originalText)
+      expect(result.word_target_warning?.code).toBe('word_target_long')
+      expect(result.contraction?.attempts?.[0]?.bridge_to_expansion).toBe(false)
     }
   })
 
@@ -718,17 +770,18 @@ describe('novel writing service prose quality wiring', () => {
       finish_reason: 'stop',
     })
 
-    const error = await service.ensureProseMeetsWordTarget(
+    const result = await service.ensureProseMeetsWordTarget(
       '/tmp/mangaforge-contraction-expansion-disabled',
       { id: 1, title: '测试作品' },
       { chapter_target: { chapter_no: 1, word_target: contractionWordTarget } },
       originalText,
       217,
       { maxContractionAttempts: 1, expand: false },
-    ).then(() => null, (caught: any) => caught)
+    )
 
-    expect(error?.code).toBe('PROSE_WORD_TARGET_LONG')
-    expect(error?.contraction_attempts?.[0]?.bridge_to_expansion).toBe(false)
+    expect(result.final_text).toBe(contractedText)
+    expect(result.word_target_warning?.code).toBe('word_target_short')
+    expect(result.contraction?.attempts?.[0]?.bridge_to_expansion).toBe(false)
   })
 
   test('restores the valid pre-editor prose when optional editor output cannot meet the word target', async () => {
@@ -1057,7 +1110,7 @@ describe('novel writing service prose quality wiring', () => {
     expect(reviseCallbackStart).toBeGreaterThan(reviewCallbackStart)
     expect(qualityLoopEnd).toBeGreaterThan(reviseCallbackStart)
     expect(beforeGate).toContain('qualityLoop = await runProseQualityLoop')
-    expect(beforeGate).toContain('maxRevisionRounds: isDraftReviewOnly || isDraftOnly ? 0 : 2')
+    expect(beforeGate).toContain('maxRevisionRounds: isDraftReviewOnly || isDraftOnly ? 0 : 1')
     expect(beforeGate).toContain("phase: round > 0 ? 'quality_recheck' : 'quality_review'")
     expect(beforeGate).toContain('round, attempt')
     expect(beforeGate).toContain('assertProseQualityCanStore(qualityLoop.decision, approvals?.quality_gate)')
