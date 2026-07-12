@@ -400,6 +400,23 @@ describe('chapterGroupRunActionState', () => {
     expect(state.canResume).toBe(false)
     expect(state.canExecute).toBe(false)
   })
+
+  test('disables resume for a standalone blocked invalid admission payload', () => {
+    const state = chapterGroupRunActionState({
+      run_type: 'generate_prose',
+      status: 'failed',
+      output_ref: JSON.stringify({
+        admission_status: 'blocked_invalid',
+        error_code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+        chapter_id: 412,
+        chapter_no: 21,
+      }),
+    })
+
+    expect(state.terminalAdmission).toBe(true)
+    expect(state.canResume).toBe(false)
+    expect(state.canExecute).toBe(false)
+  })
 })
 
 describe('buildRepairClosureHighlights', () => {

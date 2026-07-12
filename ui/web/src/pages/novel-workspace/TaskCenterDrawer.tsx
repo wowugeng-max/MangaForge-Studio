@@ -55,8 +55,8 @@ export function chapterGroupRunActionState(run: any = {}) {
   const chapterState = chapterGroupActionState({
     ...chapter,
     approval_stage: chapter.approval_stage || chapter.approvalStage || lastError.approval_stage || lastError.approvalStage,
-    error_code: chapter.error_code || chapter.errorCode || lastError.error_code || lastError.errorCode,
-    admission_status: chapter.admission_status || chapter.admissionStatus || lastError.admission_status || lastError.admissionStatus,
+    error_code: chapter.error_code || chapter.errorCode || output.error_code || output.errorCode || lastError.error_code || lastError.errorCode,
+    admission_status: chapter.admission_status || chapter.admissionStatus || output.admission_status || output.admissionStatus || lastError.admission_status || lastError.admissionStatus,
   })
   const isChapterGroup = run.run_type === 'chapter_group_generation'
   const status = String(run.status || '')
@@ -5751,7 +5751,7 @@ export function TaskCenterDrawer({
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
                   {normalizedTasks.slice(0, 8).map((task: any) => {
                     const runActionState = chapterGroupRunActionState(task)
-                    const canResume = Boolean(task.can_resume && (task.run_type !== 'chapter_group_generation' || runActionState.canResume) && onResumeRun)
+                    const canResume = Boolean(task.can_resume && !runActionState.terminalAdmission && (task.run_type !== 'chapter_group_generation' || runActionState.canResume) && onResumeRun)
                     const canExecute = Boolean(
                       task.can_execute && runActionState.canExecute && onExecuteChapterGroup
                       || ['release_quality_batch', 'release_similarity_batch'].includes(task.run_type) && ['queued', 'ready', 'failed'].includes(task.status) && onExecuteReleaseRepairRun,
