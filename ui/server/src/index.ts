@@ -24,7 +24,7 @@ import { registerNovelRoutes } from './routes/novel'
 import { registerKnowledgeRoutes } from './routes/knowledge'
 import { registerRecommendationRoutes } from './routes/recommendation-rules'
 import { acceptWebSocketKey, sseManager, taskMessageManager, interruptRegisteredTask, webSocketManager, webSocketClientIdFromPath } from './ws-manager'
-import { startKeyMonitor } from './key-monitor'
+import { keyMonitorEnabledFromEnv, startKeyMonitor } from './key-monitor'
 
 // 加载 .env
 // 注意：模型配置（LLM_OPENAI_ENDPOINT / LLM_LOCAL_ENDPOINT / ANTHROPIC_BASE_URL 等）
@@ -141,7 +141,7 @@ const server = app.listen(port, host, async () => {
   }
 
   keyMonitor = startKeyMonitor(getWorkspace, {
-    enabled: String(process.env.KEY_MONITOR_ENABLED || 'true').toLowerCase() !== 'false',
+    enabled: keyMonitorEnabledFromEnv(process.env.KEY_MONITOR_ENABLED),
     intervalMs: Number(process.env.KEY_MONITOR_INTERVAL_MS || 60 * 60 * 1000),
     onError: error => console.warn('Key monitor error:', String(error).slice(0, 240)),
   })

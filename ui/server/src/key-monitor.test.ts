@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { checkKeysOnce } from './key-monitor'
+import { checkKeysOnce, keyMonitorEnabledFromEnv, startKeyMonitor } from './key-monitor'
 
 let workspaces: string[] = []
 
@@ -19,12 +19,60 @@ afterEach(async () => {
 })
 
 describe('key monitor', () => {
-  test('server startup wires the background monitor with an environment opt-out', () => {
+  test('automatic key monitoring is disabled unless explicitly enabled', () => {
+    expect(keyMonitorEnabledFromEnv(undefined)).toBe(false)
+    expect(keyMonitorEnabledFromEnv('')).toBe(false)
+    expect(keyMonitorEnabledFromEnv(' ')).toBe(false)
+    expect(keyMonitorEnabledFromEnv('false')).toBe(false)
+    expect(keyMonitorEnabledFromEnv('1')).toBe(false)
+    expect(keyMonitorEnabledFromEnv('true')).toBe(true)
+    expect(keyMonitorEnabledFromEnv('TRUE')).toBe(true)
+    expect(keyMonitorEnabledFromEnv(' true ')).toBe(true)
+  })
+
+  test('server startup uses the explicit opt-in parser', () => {
     const source = readFileSync(join(import.meta.dir, 'index.ts'), 'utf8')
 
-    expect(source).toContain("import { startKeyMonitor } from './key-monitor'")
-    expect(source).toContain('KEY_MONITOR_ENABLED')
-    expect(source).toContain('startKeyMonitor(getWorkspace')
+    expect(source).toContain("import { keyMonitorEnabledFromEnv, startKeyMonitor } from './key-monitor'")
+    expect(source).toContain('enabled: keyMonitorEnabledFromEnv(process.env.KEY_MONITOR_ENABLED)')
+    expect(source).not.toContain("process.env.KEY_MONITOR_ENABLED || 'true'")
+  })
+
+  test('disabled automatic monitoring never probes immediately or on its interval', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+      {
+        id: 'openai',
+        api_format: 'openai_compatible',
+        auth_type: 'bearer',
+        default_base_url: 'https://gateway.example/v1',
+        is_active: true,
+      },
+    ]))
+    await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+      { id: 1, provider: 'openai', key: 'must-not-run', is_active: true, last_checked: '' },
+    ]))
+    await writeFile(join(workspace, 'models.json'), '[]')
+    const previousFetch = globalThis.fetch
+    let calls = 0
+    globalThis.fetch = (async () => {
+      calls += 1
+      return new Response('{}', { status: 200 })
+    }) as any
+
+    try {
+      const monitor = startKeyMonitor(() => workspace, {
+        enabled: false,
+        intervalMs: 1,
+        runImmediately: true,
+      })
+      await new Promise(resolve => setTimeout(resolve, 20))
+      monitor.stop()
+      expect(monitor.started).toBe(false)
+      expect(calls).toBe(0)
+    } finally {
+      globalThis.fetch = previousFetch
+    }
   })
 
   test('checks only stale active keys and applies upstream monitoring state', async () => {

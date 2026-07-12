@@ -39,6 +39,10 @@ export type KeyMonitorLoopOptions = KeyMonitorOptions & {
 const DEFAULT_CHECK_AGE_MS = 60 * 60 * 1000
 const DEFAULT_INTERVAL_MS = 60 * 60 * 1000
 
+export function keyMonitorEnabledFromEnv(value: string | undefined) {
+  return String(value || '').trim().toLowerCase() === 'true'
+}
+
 function wasCheckedRecently(key: APIKeyRecord, now: Date, minCheckAgeMs: number) {
   if (!key.last_checked) return false
   const lastChecked = Date.parse(String(key.last_checked))
