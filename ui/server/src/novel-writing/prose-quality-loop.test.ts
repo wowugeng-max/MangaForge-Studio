@@ -1031,6 +1031,7 @@ describe('bounded prose quality loop', () => {
     expect(reviewCalls).toBe(3)
     expect(result.decision).toMatchObject({ passed: false, approvable: true, hard_failures: [] })
     expect(result.decision.advisory_failures.join('｜')).toContain('quality_recheck_unavailable')
+    expect(result.quality_warning?.details?.diagnostics?.review_attempts).toHaveLength(2)
   })
 
   test('does not persist model-controlled values or arbitrary keys in invalid review diagnostics', async () => {
@@ -1081,6 +1082,21 @@ describe('bounded prose quality loop', () => {
     expect(reviewCalls).toBe(3)
     expect(JSON.stringify(result)).not.toContain(leakSentinel)
     expect(result.decision).toMatchObject({ passed: false, approvable: true, hard_failures: [] })
+    expect(result.quality_warning?.details?.diagnostics?.review_attempts?.[0]).toMatchObject({
+      field_types: {
+        score: 'null',
+        score_scale: 'string',
+        dimensions: 'object',
+        findings: 'array',
+        publishable: 'missing',
+      },
+      transport: {
+        finish_reason: 'unknown',
+        usage: { input_tokens: 12 },
+        content_length: 345,
+      },
+    })
+    expect(result.quality_warning?.details?.diagnostics?.review_attempts?.[0]).not.toHaveProperty(leakSentinel)
   })
 
   test('treats an ambiguous five-point recheck score as unavailable', async () => {
@@ -1145,6 +1161,10 @@ describe('bounded prose quality loop', () => {
       quality_warning: { code: 'quality_review_unavailable', source: 'review' },
     })
     expect(result.decision.advisory_failures.join('｜')).toContain('quality_review_unavailable')
+    expect(result.quality_warning?.details?.diagnostics).toMatchObject({
+      kind: 'invalid_payload',
+      review_attempts: [{ attempt: 1 }, { attempt: 2 }],
+    })
 
     const callbackFailure = await runProseQualityLoop({
       initialText,
@@ -1159,6 +1179,10 @@ describe('bounded prose quality loop', () => {
       quality_warning: { code: 'quality_review_unavailable', source: 'review' },
     })
     expect(JSON.stringify(callbackFailure)).not.toContain('MODEL_PROVIDER_SENTINEL')
+    expect(callbackFailure.quality_warning?.details?.diagnostics).toMatchObject({
+      kind: 'callback_error',
+      field_types: { name: 'string', message: 'string', code: 'missing' },
+    })
   })
 
   test('builds focused review and revision prompts around prose evidence', () => {

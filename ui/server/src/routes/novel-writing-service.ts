@@ -44433,6 +44433,7 @@ export function createNovelWritingService(ctx: {
           !contractedText ? 'missing_chapter_text' : '',
           recoveredFromPartialJson ? 'recovered_from_partial_json' : '',
           partialJsonOpenStringRecovered ? 'partial_json_open_string_recovered' : '',
+          !isExplicitlyCompleteProseContractionFinishReason(finishReason) ? `finish_reason_${finishReason || 'missing'}` : '',
           isRejectedProseContractionFinishReason(finishReason) ? `finish_reason_${finishReason}` : '',
           rejectedFinishReason ? `transport_finish_reason_${rejectedFinishReason}` : '',
           incompleteReason ? `incomplete_reason_${incompleteReason}` : '',

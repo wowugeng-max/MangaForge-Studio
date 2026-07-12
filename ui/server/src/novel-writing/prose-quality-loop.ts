@@ -450,6 +450,65 @@ function proseQualityDiagnosticType(value: any) {
   return 'other'
 }
 
+function normalizeProseQualityDiagnosticType(value: any) {
+  return ['missing', 'null', 'array', 'object', 'string', 'number', 'boolean', 'other'].includes(value)
+    ? value
+    : 'other'
+}
+
+function normalizeProseQualityCallbackErrorKind(error: any) {
+  if (error?.quality_error_kind === 'invalid_payload') return 'invalid_payload'
+  const name = typeof error?.name === 'string' ? error.name.trim().toLowerCase() : ''
+  const code = typeof error?.code === 'string' ? error.code.trim().toLowerCase() : ''
+  const message = typeof error?.message === 'string' ? error.message.toLowerCase() : ''
+  if (['aborterror', 'aborted', 'abort_err'].includes(name) || ['aborted', 'abort_err'].includes(code)) return 'aborted'
+  if (['timeouterror', 'timeout'].includes(name) || ['etimedout', 'timeout'].includes(code) || /\btime(?:d)?\s*out\b/.test(message)) {
+    return 'timeout'
+  }
+  return 'callback_error'
+}
+
+function sanitizeProseQualityReviewAttemptDiagnostic(value: any) {
+  const fieldTypes = value?.field_types && typeof value.field_types === 'object' && !Array.isArray(value.field_types)
+    ? value.field_types
+    : {}
+  const dimensionTypes = value?.dimension_types && typeof value.dimension_types === 'object' && !Array.isArray(value.dimension_types)
+    ? value.dimension_types
+    : {}
+  return {
+    attempt: value?.attempt === 2 ? 2 : 1,
+    payload_type: normalizeProseQualityDiagnosticType(value?.payload_type),
+    field_types: {
+      score: normalizeProseQualityDiagnosticType(fieldTypes.score),
+      score_scale: normalizeProseQualityDiagnosticType(fieldTypes.score_scale),
+      dimensions: normalizeProseQualityDiagnosticType(fieldTypes.dimensions),
+      findings: normalizeProseQualityDiagnosticType(fieldTypes.findings),
+      publishable: normalizeProseQualityDiagnosticType(fieldTypes.publishable),
+    },
+    dimension_types: Object.fromEntries(REQUIRED_QUALITY_DIMENSIONS.map(key => [
+      key,
+      normalizeProseQualityDiagnosticType(dimensionTypes[key]),
+    ])),
+    missing_dimensions: REQUIRED_QUALITY_DIMENSIONS.filter(key => Array.isArray(value?.missing_dimensions) && value.missing_dimensions.includes(key)),
+    transport: sanitizeProseQualityReviewTransport(value?.transport),
+  }
+}
+
+function compactProseQualityWarningDiagnostics(error: any) {
+  const reviewAttempts = Array.isArray(error?.review_attempts)
+    ? error.review_attempts.slice(0, 2).map(sanitizeProseQualityReviewAttemptDiagnostic)
+    : []
+  return {
+    kind: normalizeProseQualityCallbackErrorKind(error),
+    field_types: {
+      name: proseQualityDiagnosticType(error?.name),
+      message: proseQualityDiagnosticType(error?.message),
+      code: proseQualityDiagnosticType(error?.code),
+    },
+    ...(reviewAttempts.length ? { review_attempts: reviewAttempts } : {}),
+  }
+}
+
 function normalizeProseQualityFinishReason(value: any) {
   const reason = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_')
   if (['stop', 'end_turn', 'stop_sequence', 'completed'].includes(reason)) return 'stop'
@@ -587,6 +646,7 @@ export async function runProseQualityLoop(input: {
         code: 'quality_review_unavailable',
         source: 'review',
         message,
+        details: { diagnostics: compactProseQualityWarningDiagnostics(error) },
       },
     }
   }
@@ -671,6 +731,7 @@ export async function runProseQualityLoop(input: {
         code: 'quality_recheck_unavailable',
         source: 'review',
         message,
+        details: { diagnostics: compactProseQualityWarningDiagnostics(error) },
       }
       break
     }
