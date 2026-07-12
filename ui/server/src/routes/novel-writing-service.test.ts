@@ -256,7 +256,6 @@ import { buildPipelineProse, createProsePipelineHarness as createProsePipelineHa
 const createProsePipelineHarness = (options?: any) => createProsePipelineHarnessWithService(createNovelWritingService, options)
 const readSceneCardsPromptSource = () => readFileSync(join(import.meta.dir, '../novel-writing/scene-cards-prompt.ts'), 'utf8')
 const readPostDeliveryStoryStateUpdateSource = () => readFileSync(join(import.meta.dir, '../novel-writing/post-delivery-story-state-update.ts'), 'utf8')
-const readProseQualityReviewRecordSource = () => readFileSync(join(import.meta.dir, '../novel-writing/prose-quality-review-record.ts'), 'utf8')
 const readChapterProseStoragePatchSource = () => readFileSync(join(import.meta.dir, '../novel-writing/chapter-prose-storage-patch.ts'), 'utf8')
 const readPostDeliverySyncReviewRecordSource = () => readFileSync(join(import.meta.dir, '../novel-writing/post-delivery-sync-review-record.ts'), 'utf8')
 const readDraftSyncReviewRecordSource = () => readFileSync(join(import.meta.dir, '../novel-writing/draft-sync-review-record.ts'), 'utf8')
@@ -270,11 +269,7 @@ test('stores the best complete revision with warnings when subjective quality re
     '第二轮改稿里，江澈抢到耳机，却仍等着顾遥下令。',
     '守在原地听取指令，没有主动争取出口',
   )
-  const findings = [
-    '倒数压到最后三秒，江澈停在围墙阴影里等待。',
-    '第一轮改稿里，江澈离开墙角，却把选择交给顾遥。',
-    '第二轮改稿里，江澈抢到耳机，却仍等着顾遥下令。',
-  ].map(evidence => ({
+  const failedReview = (evidence: string) => ({
     score: 72,
     dimensions: proseQualityScores,
     findings: [{
@@ -285,9 +280,21 @@ test('stores the best complete revision with warnings when subjective quality re
       required_change: '让江澈主动破围并改变追捕阵型',
       acceptance_test: '追捕阵型因江澈的可见动作发生变化',
     }],
-  }))
+  })
+  const unexpectedThirdReview = {
+    get score(): never {
+      throw new Error('quality review exceeded the single recheck budget')
+    },
+    publishable: true,
+    dimensions: { ...proseQualityScores, core_promise_agency: 10 },
+    findings: [],
+  }
   const harness = await createProsePipelineHarness({
-    reviewPayloads: findings,
+    reviewPayloads: [
+      failedReview('倒数压到最后三秒，江澈停在围墙阴影里等待。'),
+      failedReview('第一轮改稿里，江澈离开墙角，却把选择交给顾遥。'),
+      unexpectedThirdReview,
+    ],
     revisionTexts: [firstRevision, secondRevision],
   })
 
@@ -317,6 +324,7 @@ test('stores the best complete revision with warnings when subjective quality re
   expect(harness.storeCalls).toBe(1)
   expect(harness.storyStateCalls).toBe(1)
   expect(harness.memoryTexts).toEqual([normalizeProseForStorage(firstRevision)])
+  expect(harness.modelCalls.review).toBe(2)
   expect(harness.modelCalls.revision).toBe(1)
 })
 test('stores revised prose with warnings when the independent quality recheck is unavailable', async () => {
@@ -426,20 +434,34 @@ test('stores one coherent final prose text after a passing independent recheck',
 })
 
 test('stores valid prose with warnings for subjective quality failures in every prose storage production mode', async () => {
+  const originalDraft = buildPipelineProse(
+    '倒数压到最后三秒，江澈停在围墙阴影里等待。',
+    '只看着追捕队继续收紧包围',
+  )
+  const revisedDraft = buildPipelineProse(
+    '江澈撞断路灯，飞石逼退第一排追兵，铁门前露出缺口。',
+    '沿自己制造的盲区夺下通讯器并迫使追捕队改变阵型',
+  )
+  const failedReview = (evidence: string) => ({
+    score: 72,
+    dimensions: proseQualityScores,
+    findings: [{
+      key: 'agency',
+      severity: 'S2',
+      dimension: 'core_promise_agency',
+      evidence,
+      required_change: '让江澈主动改变包围结构',
+      acceptance_test: '追捕阵型因江澈动作改变',
+    }],
+  })
   for (const productionMode of ['draft_only', 'draft_review', 'draft_review_revise_store']) {
     const harness = await createProsePipelineHarness({
-      reviewPayloads: [{
-        score: 72,
-        dimensions: proseQualityScores,
-        findings: [{
-          key: 'agency',
-          severity: 'S2',
-          dimension: 'core_promise_agency',
-          evidence: '倒数压到最后三秒，江澈停在围墙阴影里等待。',
-          required_change: '让江澈主动改变包围结构',
-          acceptance_test: '追捕阵型因江澈动作改变',
-        }],
-      }],
+      draftText: originalDraft,
+      reviewPayloads: [
+        failedReview('倒数压到最后三秒，江澈停在围墙阴影里等待。'),
+        failedReview('江澈撞断路灯，飞石逼退第一排追兵。'),
+      ],
+      revisionTexts: [revisedDraft],
     })
 
     const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
@@ -453,10 +475,21 @@ test('stores valid prose with warnings for subjective quality failures in every 
     expect(result.admission_status).toBe('accepted_with_warnings')
     expect(result.quality_warnings).toContainEqual(expect.objectContaining({ source: 'quality' }))
     expect(harness.storeCalls).toBe(1)
-    expect(harness.storyStateCalls).toBe(productionMode === 'draft_review_revise_store' ? 1 : 0)
-    expect(harness.memoryTexts).toHaveLength(productionMode === 'draft_review_revise_store' ? 1 : 0)
+    const expectedFinalText = normalizeProseForStorage(
+      productionMode === 'draft_review_revise_store' ? revisedDraft : originalDraft,
+    )
     const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
-    expect(stored?.chapter_text).toBeTruthy()
+    expect(result.chapter?.chapter_text).toBe(expectedFinalText)
+    expect(stored?.chapter_text).toBe(expectedFinalText)
+    if (productionMode === 'draft_review_revise_store') {
+      expect(harness.storyStateCalls).toBe(1)
+      expect(harness.storyStateTexts).toEqual([expectedFinalText])
+      expect(harness.memoryTexts).toEqual([expectedFinalText])
+    } else {
+      expect(harness.storyStateCalls).toBe(0)
+      expect(harness.storyStateTexts).toEqual([])
+      expect(harness.memoryTexts).toEqual([])
+    }
   }
 })
 test('uses the injected writing runtime for service model calls', async () => {
@@ -62051,15 +62084,51 @@ describe('chapter context word target source guards', () => {
     expect(decision.reasons.join('｜')).not.toContain('承接回执未兑现')
   })
 
-  test('stores prose quality review status from quality gate decisions', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const reviewRecordSource = readProseQualityReviewRecordSource()
+  test('persists a warning prose quality review when valid prose is admitted with advisory quality failures', async () => {
+    const failedReview = (evidence: string) => ({
+      score: 61,
+      publishable: false,
+      dimensions: { ...proseQualityScores, prose_style: 4 },
+      findings: [{
+        key: 'prose_style',
+        severity: 'S2',
+        dimension: 'prose_style',
+        evidence,
+        required_change: '减少模板化表达并保留具体动作',
+        acceptance_test: '正文以动作和对白推进，不使用抽象总结',
+      }],
+    })
+    const revisedText = buildPipelineProse(
+      '江澈撞断路灯，追兵的包围线被飞石逼开。',
+      '沿自己制造的缺口夺下通讯器并继续推进',
+    )
+    const harness = await createProsePipelineHarness({
+      reviewPayloads: [
+        failedReview('倒数压到最后三秒，江澈停在围墙阴影里等待。'),
+        failedReview('江澈撞断路灯，追兵的包围线被飞石逼开。'),
+      ],
+      revisionTexts: [revisedText],
+    })
 
-    expect(source).toContain('const draftQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)')
-    expect(source).toContain("buildProseQualityReview(draftModeAdmissionDecision.status === 'accepted' ? 'ok' : 'warn', draftQualityDecision")
-    expect(source).toContain("buildProseQualityReview(precommitAdmission.status === 'accepted' ? 'ok' : 'warn', finalQualityDecision")
-    expect(reviewRecordSource).toContain('status: input.status')
-    expect(reviewRecordSource).toContain('payload.quality_gate = input.qualityGate')
+    const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+      model_id: 217,
+      target_word_count: 1000,
+      quality_threshold: 78,
+    })
+    const proseQualityReview = (await listNovelReviews(harness.workspace, harness.project.id))
+      .filter(review => review.review_type === 'prose_quality')
+      .at(-1)
+    const payload = JSON.parse(String(proseQualityReview?.payload || '{}'))
+
+    expect(result.admission_status).toBe('accepted_with_warnings')
+    expect(result.quality_warnings).toContainEqual(expect.objectContaining({ source: 'quality' }))
+    expect(proseQualityReview?.status).toBe('warn')
+    expect(payload.self_check?.review).toMatchObject({
+      passed: false,
+      score: 61,
+      needs_revision: true,
+    })
+    expect(payload.self_check?.review?.issues?.length).toBeGreaterThan(0)
   })
 
   test('reports review stage status from quality gate decisions', () => {
