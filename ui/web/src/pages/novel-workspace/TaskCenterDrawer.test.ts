@@ -186,7 +186,8 @@ describe('buildTaskRunCardModel', () => {
           ],
           warnings: [
             { source: 'quality', code: 'hook_weak', message: '章尾钩子偏弱' },
-            { source: 'story_state', code: 'pending', message: 'Story State 同步待完成' },
+            { source: 'story_state', code: 'pending', message: 'Story State 同步待完成。' },
+            { source: 'story_state', code: 'index_pending', message: '状态索引稍后补齐' },
           ],
         }],
       }),
@@ -200,6 +201,7 @@ describe('buildTaskRunCardModel', () => {
     expect(cards[0]?.title).toBe('已入库，建议修订')
     expect(cards[0]?.messages).toEqual(['章尾钩子偏弱', '评分低于建议目标'])
     expect(cards[1]?.title).toBe('正文已入库，故事状态待补同步')
+    expect(cards[1]?.messages).toEqual(['Story State 同步待完成。', '状态索引稍后补齐'])
     expect(actionState.canApprove).toBe(false)
   })
 })

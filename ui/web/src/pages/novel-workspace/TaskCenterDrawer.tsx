@@ -72,6 +72,7 @@ export function buildChapterAdmissionWarningCards(run: any) {
   const output = parseJsonValue(run?.output_ref || run?.outputRef) || run?.payload || {}
   const chapters = Array.isArray(output.chapters) ? output.chapters : []
   const groups = new Map<string, { source: string; title: string; messages: string[]; chapterNos: number[] }>()
+  const seenMessages = new Set<string>()
   chapters.forEach((chapter: any) => {
     if (String(chapter.admission_status || chapter.admissionStatus || '') !== 'accepted_with_warnings') return
     const warningItems = [
@@ -86,6 +87,10 @@ export function buildChapterAdmissionWarningCards(run: any) {
       const source = String(warning?.source || warning?.stage || 'quality')
       const message = String(warning?.message || warning?.detail || warning?.summary || warning || '').trim()
       if (!message) return
+      const normalizedMessage = message.normalize('NFKC').replace(/\s+/g, ' ').replace(/[。．.!！?？；;，,]+$/g, '')
+      const fingerprint = `${source}:${normalizedMessage}`
+      if (seenMessages.has(fingerprint)) return
+      seenMessages.add(fingerprint)
       const current = groups.get(source) || {
         source,
         title: source === 'story_state' ? '正文已入库，故事状态待补同步' : '已入库，建议修订',

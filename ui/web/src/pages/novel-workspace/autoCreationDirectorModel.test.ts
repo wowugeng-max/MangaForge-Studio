@@ -17697,6 +17697,15 @@ describe('buildAutoCreationDirectorModel', () => {
       writing: {
         ...baseWriting,
         nextChapter: { ...baseWriting.nextChapter, wordCount: 3200, hasProse: true },
+        chapterHandoffDesk: {
+          visible: true,
+          status: 'ready',
+          label: '可接下一章',
+          fromChapterNo: 8,
+          toChapterNo: 9,
+          actionKey: 'accept_chapter_and_continue',
+          actionLabel: '进入下一章开写',
+        },
         chapterAcceptanceDesk: {
           ...baseWriting.chapterAcceptanceDesk,
           visible: true,

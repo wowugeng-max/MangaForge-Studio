@@ -15615,7 +15615,7 @@ function buildPipeline(args: {
   const canonDone = Boolean(acceptance.visible && acceptance.storyStateSynced)
   const admittedWithWarnings = acceptance.acceptanceStatus === 'delivered_with_warnings'
   const handoffStatus: AutoCreationPipelineStatus = chapterHandoffVisible
-    ? 'active'
+    ? admittedWithWarnings && text(chapterHandoff?.status) === 'ready' ? 'done' : 'active'
     : hasProse && (!acceptance.visible || (qualityDone && (canonDone || admittedWithWarnings)))
       ? 'done'
       : 'pending'
