@@ -133,22 +133,66 @@ function parsesAsJsonContainer(candidate: string) {
   }
 }
 
+function findJsonContainerEnd(text: string, start: number) {
+  const opening = text[start]
+  if (opening !== '{' && opening !== '[') return -1
+  const stack: string[] = [opening === '{' ? '}' : ']']
+  let inString = false
+  let escaped = false
+
+  for (let index = start + 1; index < text.length; index += 1) {
+    const char = text[index]
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (char === '\\') {
+        escaped = true
+      } else if (char === '"') {
+        inString = false
+      }
+      continue
+    }
+    if (char === '"') {
+      inString = true
+    } else if (char === '{') {
+      stack.push('}')
+    } else if (char === '[') {
+      stack.push(']')
+    } else if (char === '}' || char === ']') {
+      if (stack.at(-1) !== char) return -1
+      stack.pop()
+      if (!stack.length) return index
+    }
+  }
+  return -1
+}
+
+function isApprovedJsonPrefix(prefix: string) {
+  const unwrapped = prefix.trim().replace(/```(?:json)?\s*$/i, '').trim()
+  if (!unwrapped) return true
+  if (/^(?:\[结果\]|【结果】|结果)\s*[：:]?$/.test(unwrapped)) return true
+  return /^(?:好的[，,]?\s*)?(?:(?:以下|下面)(?:是|为)?\s*)?(?:json|结构化结果|输出结果|结果)(?:如下)?\s*[：:]?$/i.test(unwrapped)
+}
+
+function isApprovedJsonSuffix(suffix: string) {
+  const unwrapped = suffix.trim().replace(/^```\s*/, '').trim()
+  return !unwrapped || /^以上(?:是|为).{0,20}(?:结果|内容)[。.]?$/.test(unwrapped)
+}
+
 function isJsonLikePayload(text: string) {
   const trimmed = text.trim()
-  if (parsesAsJsonContainer(trimmed)) return true
-
-  for (const match of trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/gi)) {
-    if (parsesAsJsonContainer(match[1].trim())) return true
+  for (let start = 0; start < trimmed.length; start += 1) {
+    if (trimmed[start] !== '{' && trimmed[start] !== '[') continue
+    const end = findJsonContainerEnd(trimmed, start)
+    if (end < 0) continue
+    const candidate = trimmed.slice(start, end + 1)
+    if (
+      parsesAsJsonContainer(candidate)
+      && isApprovedJsonPrefix(trimmed.slice(0, start))
+      && isApprovedJsonSuffix(trimmed.slice(end + 1))
+    ) return true
   }
-
-  const objectStart = trimmed.indexOf('{')
-  const arrayStart = trimmed.indexOf('[')
-  const starts = [objectStart, arrayStart].filter(index => index >= 0)
-  if (!starts.length) return false
-  const start = Math.min(...starts)
-  const opening = trimmed[start]
-  const end = trimmed.lastIndexOf(opening === '{' ? '}' : ']')
-  return end > start && parsesAsJsonContainer(trimmed.slice(start, end + 1))
+  return false
 }
 
 export function validateMinimalChapterProse(text: any): {

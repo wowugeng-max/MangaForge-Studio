@@ -183,6 +183,31 @@ describe('minimal chapter prose validation', () => {
     expect(validateMinimalChapterProse(prose)).toEqual({ valid: true, failures: [] })
   })
 
+  test('accepts complete narrative that contains an inline valid JSON object', () => {
+    const prose = [
+      '沈砚在废弃值房里找到一块仍在发光的旧屏，屏幕中央只剩一行陌生记录：{"gate":"north","count":3}。',
+      '他不懂这些符号的来历，却认得 north 旁边那道手绘箭头，正指向父亲当年负责守卫的北门！',
+      '窗外巡夜人的脚步越来越近，他抄下记录，把屏幕塞回积灰的木柜，又用断锁伪装成多年无人开启的模样。',
+      '脚步停在门外时，柜中忽然传来第二声蜂鸣，新的数字隔着木板映出来，恰好是他今夜走过的石阶数量？',
+      '沈砚屏住呼吸，听见巡夜人低声报告北门一切正常，可那人的影子却从门缝下分成了完全相反的两个方向。',
+      '等脚步远去，他重新拉开木柜，屏幕上的对象记录已经消失，只留下一句用父亲笔迹写成的警告。',
+    ].join('')
+
+    expect(validateMinimalChapterProse(prose)).toEqual({ valid: true, failures: [] })
+  })
+
+  test('rejects payload-level object and array JSON after an approved result prefix', () => {
+    const objectPayload = `[结果] ${JSON.stringify({
+      error: '生成失败。模型没有返回正文！请稍后重试？当前请求无法完成。'.repeat(8),
+    })}`
+    const arrayPayload = `[结果]\n${JSON.stringify([{
+      chapter_text: '城门关闭了。守卫举起长枪！沈砚看见暗号？他转身走入雨中。'.repeat(10),
+    }])}`
+
+    expect(validateMinimalChapterProse(objectPayload).failures.map(item => item.code)).toContain('prose_json_payload')
+    expect(validateMinimalChapterProse(arrayPayload).failures.map(item => item.code)).toContain('prose_json_payload')
+  })
+
   test('rejects label-dominant metadata and polite assistant wrappers', () => {
     const metadata = [
       '标题：雨夜归人。',
