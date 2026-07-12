@@ -183,6 +183,8 @@ describe('novel writing service prose quality wiring', () => {
       key: 'canonical_proper_noun_conflict',
       source: 'deterministic',
     }))
+    expect(error?.admission_status).toBe('blocked_invalid')
+    expect(error?.admission_failure).toMatchObject({ code: 'canonical_proper_noun_conflict', source: 'canonical_continuity' })
     expect(after).toEqual(before)
     expect(harness.modelCalls.scene_cards).toBe(1)
     expect(harness.storeCalls).toBe(0)
@@ -643,33 +645,53 @@ describe('novel writing service prose quality wiring', () => {
     }
   })
 
-  test('reviews an earned compatibility draft but stores nothing when the full quality gate rejects it', async () => {
+  test('stores complete overlong low-score prose with subjective quality warnings', async () => {
     const draftText = buildPipelineProse('江澈撞断路灯，抢在合围闭合前切入铁门。', '主动夺取追捕队的通讯器').repeat(7).slice(0, 6596)
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText,
-      chapterWordTarget: { mode: 'standard' },
-      reviewPayloads: Array.from({ length: 3 }, () => ({ score: 90, publishable: false, dimensions: proseQualityScores, findings: [] })),
+      chapterWordTarget: { mode: 'custom', target: 1000 },
+      reviewPayloads: Array.from({ length: 3 }, () => ({
+        score: 61,
+        publishable: false,
+        dimensions: { ...proseQualityScores, prose_style: 4 },
+        findings: [{
+          key: 'ai_smell_style',
+          severity: 'S2',
+          dimension: 'prose_style',
+          evidence: '江澈撞断路灯',
+          required_change: '改写为更具体的动作链',
+          acceptance_test: '动作承接更具体',
+        }],
+      })),
     })
     const before = (await listNovelChapters(harness.workspace, harness.project.id)).find((item: any) => item.id === harness.chapter.id)
-    const error = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, { model_id: 217, auto_repair_quality_gate: true }).then(() => null, (e: any) => e)
+    const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, { model_id: 217, auto_repair_quality_gate: true })
     const after = (await listNovelChapters(harness.workspace, harness.project.id)).find((item: any) => item.id === harness.chapter.id)
     expect(harness.modelCalls.contraction).toBe(3)
     expect(harness.modelCalls.review).toBeGreaterThan(0)
-    expect(error?.code).toBe('PROSE_QUALITY_GATE_BLOCKED')
-    expect(error?.quality_loop?.decision?.hard_failures?.some((item: any) => item.key === 'word_target')).toBe(false)
-    expect(after?.chapter_text).toBe(before?.chapter_text)
-    expect(after?.version).toBe(before?.version)
-    expect(harness.storeCalls).toBe(0)
-    expect(harness.storyStateCalls).toBe(0)
-    expect(harness.memoryTexts).toEqual([])
+    expect(result).toMatchObject({
+      admission_status: 'accepted_with_warnings',
+      quality_score: 61,
+      story_state_status: 'synced',
+    })
+    expect(result.quality_warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'word_target', code: 'word_target_long' }),
+      expect.objectContaining({ source: 'quality', code: 'quality_publishable_verdict' }),
+      expect.objectContaining({ source: 'quality', code: 'quality_dimension_prose_style' }),
+      expect.objectContaining({ source: 'quality', code: 'ai_smell_style' }),
+    ]))
+    expect(after?.chapter_text).not.toBe(before?.chapter_text)
+    expect(harness.storeCalls).toBe(1)
+    expect(harness.storyStateCalls).toBe(1)
+    expect(harness.memoryTexts).toEqual([after?.chapter_text])
   })
 
   test('restores earned-compatible prose when editor exceeds the compatibility ceiling', async () => {
     const draftText = buildPipelineProse('江澈撞断路灯，切入铁门。', '主动夺取通讯器').repeat(7).slice(0, 6596)
     const harness = await createProsePipelineHarness(createNovelWritingService, { draftText, editorText: '编'.repeat(7000), chapterWordTarget: { mode: 'standard' } })
     const stages: any[] = []
-    const error = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, { model_id: 217, onStage: async (_name: string, payload: any) => stages.push(payload) }).then(() => null, (e: any) => e)
-    expect(error?.code).toBe('PROSE_QUALITY_GATE_BLOCKED')
+    const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, { model_id: 217, onStage: async (_name: string, payload: any) => stages.push(payload) })
+    expect(result.admission_status).toBe('accepted_with_warnings')
     expect(harness.modelCalls.review).toBeGreaterThan(0)
     expect(stages).toEqual(expect.arrayContaining([expect.objectContaining({ phase: 'post_editor', fallback: 'pre_editor', compatibility_pass: true })]))
   })
@@ -678,8 +700,8 @@ describe('novel writing service prose quality wiring', () => {
     const draftText = buildPipelineProse('江澈撞断路灯，切入铁门。', '主动夺取通讯器').repeat(7).slice(0, 6596)
     const harness = await createProsePipelineHarness(createNovelWritingService, { draftText, editorText: draftText, memeText: '润'.repeat(7000), enableMemePolish: true, chapterWordTarget: { mode: 'standard' } })
     const stages: any[] = []
-    const error = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, { model_id: 217, onStage: async (_name: string, payload: any) => stages.push(payload) }).then(() => null, (e: any) => e)
-    expect(error?.code).toBe('PROSE_QUALITY_GATE_BLOCKED')
+    const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, { model_id: 217, onStage: async (_name: string, payload: any) => stages.push(payload) })
+    expect(result.admission_status).toBe('accepted_with_warnings')
     expect(harness.modelCalls.review).toBeGreaterThan(0)
     expect(stages).toEqual(expect.arrayContaining([expect.objectContaining({ phase: 'post_meme_polish', fallback: 'pre_meme', compatibility_pass: true })]))
   })
@@ -924,19 +946,13 @@ describe('novel writing service prose quality wiring', () => {
       },
     )
 
-    const expectedStoredText = normalizeProseForStorage(draftText)
+    const expectedStoredText = normalizeProseForStorage(editorText)
     expect(countProseChars(editorText)).toBeGreaterThan(1100)
     expect(result.chapter.chapter_text).toBe(expectedStoredText)
-    expect(result.chapter.chapter_text).not.toContain('商业主编增加的冗余解释')
-    expect(result.chapter.continuity_notes || []).not.toContain('不应保留的 editor 连续性')
-    expect(result.chapter.raw_payload?.generated_scene_breakdown || []).not.toEqual(editorSceneBreakdown)
-    expect(result.editor_rewrite).toMatchObject({
-      edited: false,
-      discarded: true,
-      discard_reason: 'post_editor_word_target_failed',
-    })
-    expect(JSON.stringify(result.editor_rewrite)).not.toContain('商业主编增加的冗余解释')
-    expect(result.quality_loop.decision.passed).toBe(true)
+    expect(result.chapter.chapter_text).toContain('商业主编增加的冗余解释')
+    expect(result.chapter.continuity_notes || []).toContain('不应保留的 editor 连续性')
+    expect(result.chapter.raw_payload?.generated_scene_breakdown || []).toContainEqual(expect.objectContaining({ title: '不应保留的 editor 场景回执' }))
+    expect(result.quality_warnings).toContainEqual(expect.objectContaining({ code: 'word_target_long', source: 'word_target' }))
     expect(harness.storeCalls).toBe(1)
     expect(harness.storyStateTexts).toEqual([expectedStoredText])
   })
@@ -953,7 +969,7 @@ describe('novel writing service prose quality wiring', () => {
       editorText,
     })
 
-    await expect(harness.service.generateChapterForGroup(
+    const result = await harness.service.generateChapterForGroup(
       harness.workspace,
       harness.project.id,
       harness.chapter.id,
@@ -963,11 +979,13 @@ describe('novel writing service prose quality wiring', () => {
         quality_threshold: 78,
         auto_repair_quality_gate: true,
       },
-    )).rejects.toMatchObject({ code: 'PROSE_WORD_TARGET_LONG' })
+    )
 
     expect(countProseChars(softCapDraft)).toBe(1110)
-    expect(harness.storeCalls).toBe(0)
-    expect(harness.storyStateCalls).toBe(0)
+    expect(result.admission_status).toBe('accepted_with_warnings')
+    expect(result.quality_warnings).toContainEqual(expect.objectContaining({ code: 'word_target_long', source: 'word_target' }))
+    expect(harness.storeCalls).toBe(1)
+    expect(harness.storyStateCalls).toBe(1)
   })
 
   test('rejects a truncated draft before any production-path persistence', async () => {
@@ -993,7 +1011,11 @@ describe('novel writing service prose quality wiring', () => {
     ).then(() => null, (caught: any) => caught)
     const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
 
-    expect(error).toMatchObject({ code: 'PROSE_DRAFT_TRUNCATED' })
+    expect(error).toMatchObject({
+      code: 'PROSE_DRAFT_TRUNCATED',
+      admission_status: 'blocked_invalid',
+      admission_failure: { source: 'transport' },
+    })
     expect(stored?.chapter_text || '').toBe('')
     expect(harness.storeCalls).toBe(0)
     expect(harness.storyStateCalls).toBe(0)
@@ -1038,7 +1060,11 @@ describe('novel writing service prose quality wiring', () => {
     ).then(() => null, (caught: any) => caught)
     const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
 
-    expect(error).toMatchObject({ code: 'PROSE_REVISION_TRUNCATED' })
+    expect(error).toMatchObject({
+      code: 'PROSE_REVISION_TRUNCATED',
+      admission_status: 'blocked_invalid',
+      admission_failure: { source: 'transport' },
+    })
     expect(stored?.chapter_text || '').toBe('')
     expect(harness.storeCalls).toBe(0)
     expect(harness.storyStateCalls).toBe(0)
@@ -1200,7 +1226,7 @@ describe('novel writing service prose quality wiring', () => {
     })))
   })
 
-  test('rechecks revised prose before unattended quality gate blocks chapter advance', () => {
+  test('rechecks revised prose before advisory admission classification', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const qualityLoopStart = source.indexOf('let qualityLoop: Awaited<ReturnType<typeof runProseQualityLoop>>')
     const gateStart = source.indexOf('const preStoreQualityDecision =', qualityLoopStart)
@@ -1220,7 +1246,8 @@ describe('novel writing service prose quality wiring', () => {
     expect(beforeGate).toContain('maxRevisionRounds: isDraftReviewOnly || isDraftOnly ? 0 : 1')
     expect(beforeGate).toContain("phase: round > 0 ? 'quality_recheck' : 'quality_review'")
     expect(beforeGate).toContain('round, attempt')
-    expect(beforeGate).toContain('assertProseQualityCanStore(qualityLoop.decision, approvals?.quality_gate)')
+    expect(beforeGate).toContain('qualityWarningCandidates.push(')
+    expect(beforeGate).not.toContain('assertProseQualityCanStore')
     expect(beforeGate).not.toContain('runProseSelfReviewAndRevision')
     expect(reviewBlock).toContain('maxTokens: proseQualityReviewMaxTokensForAttempt(attempt)')
     expect(reviewBlock).toContain('上一次审查没有返回可用的完整六维 JSON')
@@ -1228,6 +1255,42 @@ describe('novel writing service prose quality wiring', () => {
     expect(reviewBlock).not.toContain('raw_keys: diagnostics.raw_keys')
     expect(reviseBlock).toContain('maxTokens: proseMaxTokensForWordTarget(wordTarget)')
     expect(reviseBlock).not.toContain('proseQualityReviewMaxTokensForAttempt')
+  })
+
+  test('keeps explicit draft-only mode usable without subjective quality blocking', async () => {
+    const finalText = buildPipelineProse('江澈撞开铁门，追兵的包围线被迫后撤。', '主动夺下通讯器并推进追击')
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText: finalText,
+      reviewPayloads: [{ score: 61, publishable: false, dimensions: { ...proseQualityScores, prose_style: 4 }, findings: [] }],
+    })
+
+    const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+      model_id: 217,
+      target_word_count: 1000,
+      production_mode: 'draft_only',
+    })
+
+    expect(result.chapter?.chapter_text).toBe(normalizeProseForStorage(finalText))
+    expect(result.completed_stage).toBe('store')
+    expect(result.admission_status).toBe('accepted_with_warnings')
+    expect(result.quality_warnings).toContainEqual(expect.objectContaining({ source: 'quality' }))
+    expect(result.story_state_status).toBe('pending')
+    expect(result.chapter?.raw_payload?.prose_admission).toMatchObject({
+      status: 'accepted_with_warnings',
+      story_state_status: 'pending',
+    })
+    expect(harness.storyStateCalls).toBe(0)
+  })
+
+  test('records caught editor, meme, and readability failures as admission warnings', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const editorCatch = source.slice(source.indexOf('} catch (editorError)'), source.indexOf('const postEditorWordTargetCheck'))
+    const memeCatch = source.slice(source.indexOf('} catch (memeError)'), source.indexOf('const postMemeWordTargetCheck'))
+    const readabilityStart = source.indexOf('} catch (readabilityError)')
+    const readabilityCatch = source.slice(readabilityStart, source.indexOf('} else {', readabilityStart))
+    expect(editorCatch).toContain("proseAdmissionWarning('review', 'editor_unavailable'")
+    expect(memeCatch).toContain("proseAdmissionWarning('review', 'meme_polish_unavailable'")
+    expect(readabilityCatch).toContain("proseAdmissionWarning('review', 'readability_review_unavailable'")
   })
 
   test('uses the project quality threshold when the request omits one', async () => {
@@ -1240,7 +1303,7 @@ describe('novel writing service prose quality wiring', () => {
       }],
     })
 
-    const error = await harness.service.generateChapterForGroup(
+    const result = await harness.service.generateChapterForGroup(
       harness.workspace,
       harness.project.id,
       harness.chapter.id,
@@ -1249,10 +1312,10 @@ describe('novel writing service prose quality wiring', () => {
         target_word_count: 1000,
         auto_repair_quality_gate: true,
       },
-    ).then(() => null, (caught: any) => caught)
+    )
 
-    expect(error).toMatchObject({
-      code: 'PROSE_QUALITY_GATE_BLOCKED',
+    expect(result).toMatchObject({
+      admission_status: 'accepted_with_warnings',
       quality_loop: {
         decision: {
           passed: false,
@@ -1261,8 +1324,102 @@ describe('novel writing service prose quality wiring', () => {
         },
       },
     })
-    expect(harness.storeCalls).toBe(0)
-    expect(harness.storyStateCalls).toBe(0)
+    expect(harness.storeCalls).toBe(1)
+    expect(harness.storyStateCalls).toBe(1)
+  })
+
+  test('marks an explicit reference safety block blocked_invalid before Story State or any writes', async () => {
+    const finalText = buildPipelineProse('江澈撞开铁门，追兵的包围线被迫后撤。', '主动夺下通讯器并推进追击')
+    const harness = await createProsePipelineHarness(createNovelWritingService, { draftText: finalText })
+    let storyStateCalls = 0
+    let memoryCalls = 0
+    const service = createNovelWritingService({
+      getProject: async () => harness.project,
+      production: {
+        buildAgentConfigSnapshot: () => ({ model_id: 217 }),
+        getApprovalPolicy: () => ({}),
+        getStageModelId: () => 217,
+        getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+        approvalRequired: () => false,
+        buildApprovalError: (type: string, message: string, details: any) => Object.assign(new Error(message), { code: `APPROVAL_REQUIRED_${type.toUpperCase()}`, details }),
+      } as any,
+      reference: {
+        getReferenceMigrationPlanForChapter: async () => ({}),
+        buildReferenceUsageReport: async () => ({ quality_assessment: { risk_level: 'blocked' }, copied: true }),
+        getReferenceSafetyDecision: () => ({ blocked: true, score: 0, copy_hit_count: 1, reasons: ['explicit copyright block'] }),
+        explainReferenceSafety: () => 'explicit copyright block',
+        buildMigrationAudit: () => ({ passed: false }),
+      } as any,
+      runtime: {
+        buildChapterContext: async () => ({
+          preflight: { ready: true, strict_ready: true, checks: [], warnings: [], blockers: [] },
+          chapter_target: {
+            id: harness.chapter.id,
+            chapter_no: harness.chapter.chapter_no,
+            title: harness.chapter.title,
+            goal: harness.chapter.chapter_goal,
+            summary: harness.chapter.chapter_summary,
+            conflict: harness.chapter.conflict,
+            ending_hook: harness.chapter.ending_hook,
+            scene_cards: harness.chapter.scene_list,
+          },
+          continuity: { previous_chapter: { chapter_no: 9, ending_excerpt: '追兵封住旧巷。' } },
+        }),
+        generateChapterProse: async () => ({ parsed: { chapter_no: 10, chapter_text: finalText }, finish_reason: 'stop' }),
+        executeAgent: async (_agent: string, _project: any, input: any) => {
+          const task = String(input?.task || '')
+          if (task.includes('商业主编')) return { parsed: { chapter_text: finalText, editor_report: { passed: true } } }
+          if (task.startsWith('任务：独立审查小说正文')) return { parsed: { score: 90, publishable: true, dimensions: { ...proseQualityScores, core_promise_agency: 9, payoff_hook: 9 }, findings: [] } }
+          if (task.includes('state_delta')) {
+            storyStateCalls += 1
+            return { parsed: { state_delta: { open_questions: ['x'] } } }
+          }
+          return { parsed: {} }
+        },
+        storeChapterProseMemory: async () => { memoryCalls += 1 },
+      },
+    })
+    const before = JSON.stringify({
+      chapter: (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id),
+      versions: await listChapterVersions(harness.workspace, harness.chapter.id),
+      reviews: await listNovelReviews(harness.workspace, harness.project.id),
+    })
+
+    const error = await service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+      model_id: 217,
+      target_word_count: 1000,
+    }).then(() => null, (caught: any) => caught)
+    const after = JSON.stringify({
+      chapter: (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id),
+      versions: await listChapterVersions(harness.workspace, harness.chapter.id),
+      reviews: await listNovelReviews(harness.workspace, harness.project.id),
+    })
+
+    expect(error).toMatchObject({
+      code: 'REFERENCE_SAFETY_BLOCKED',
+      admission_status: 'blocked_invalid',
+      admission_failure: { source: 'safety' },
+    })
+    expect(after).toBe(before)
+    expect(storyStateCalls).toBe(0)
+    expect(memoryCalls).toBe(0)
+  })
+
+  test('stores complete prose when the structured quality review is unavailable', async () => {
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText: buildPipelineProse('江澈撞开铁门，追兵的包围线被迫后撤。', '主动夺下通讯器并推进追击'),
+      reviewPayloads: [{}, {}],
+    })
+
+    const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+      model_id: 217,
+      target_word_count: 1000,
+    })
+
+    expect(result.admission_status).toBe('accepted_with_warnings')
+    expect(result.quality_warnings).toContainEqual(expect.objectContaining({ source: 'quality' }))
+    expect(harness.storeCalls).toBe(1)
+    expect(harness.memoryTexts).toHaveLength(1)
   })
 
   test('keeps an accepted chapter successful when final prose memory storage fails', async () => {
@@ -1309,6 +1466,8 @@ describe('novel writing service prose quality wiring', () => {
     const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
 
     expect(result.chapter?.chapter_text).toBe(finalText)
+    expect(result.admission_status).toBe('accepted_with_warnings')
+    expect(result.post_commit_warnings).toContainEqual(expect.objectContaining({ stage: 'memory' }))
     expect(stored?.chapter_text).toBe(finalText)
     expect(harness.memoryTexts).toEqual([finalText])
     expect(harness.storeCalls).toBe(1)
@@ -1321,9 +1480,9 @@ describe('novel writing service prose quality wiring', () => {
 
   test('attempts accepted prose memory after chapter storage without depending on a returned record', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const storageStart = source.indexOf('const acceptance = await commitNovelChapterAcceptance(activeWorkspace, {')
+    const storageStart = source.indexOf('acceptance = await commitNovelChapterAcceptance(activeWorkspace, {')
     const memoryStore = source.indexOf('await storeChapterProseMemory(project, chapter.chapter_no, finalText)', storageStart)
-    const storyState = source.indexOf("onStage('story_state', { status: 'success' })", storageStart)
+    const storyState = source.indexOf("runPostCommitBestEffort('story_state_stage'", storageStart)
     const postStorageBlock = source.slice(storageStart, storyState)
 
     expect(storageStart).toBeGreaterThanOrEqual(0)

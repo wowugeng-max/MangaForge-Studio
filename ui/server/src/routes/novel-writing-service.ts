@@ -39,7 +39,12 @@ import {
   resolveStrictPreflightReadiness,
   type ProseGenerationContract,
 } from '../novel-writing/prose-generation-contract'
-import { buildPreparedStoryStateHardFailures, type PreparedStoryStateUpdate } from '../novel-writing/prepared-story-state'
+import {
+  buildPendingPreparedStoryStateUpdate,
+  buildPreparedStoryStateHardFailures,
+  type PreparedStoryStateFailure,
+  type PreparedStoryStateUpdate,
+} from '../novel-writing/prepared-story-state'
 import {
   compileProseContractPrompt,
   type ProseRequiredPromptSection,
@@ -161,11 +166,17 @@ import {
   shouldRunSynchronousReadabilityReview,
 } from '../novel-writing/prose-quality-contracts'
 import {
-  assertProseQualityCanStore,
   proseQualityReviewMaxTokensForAttempt,
   runProseQualityLoop,
   sanitizeProseQualityReviewTransport,
 } from '../novel-writing/prose-quality-loop'
+import {
+  classifyProseAdmission,
+  markBlockedInvalidError,
+  validateMinimalChapterProse,
+  type ProseAdmissionHardFailure,
+  type ProseAdmissionWarning,
+} from '../novel-writing/prose-admission-policy'
 import { buildPreStoreStructuralSyncChecks } from '../novel-writing/pre-store-structural-sync-gate'
 import {
   buildAssetIntakeReviewRecord,
@@ -40683,7 +40694,7 @@ function assertCompleteProseTransportResult(result: any, code: ProseTransportTru
 
   const diagnostics = buildLLMResultDiagnostics(result)
   const phase = code === 'PROSE_DRAFT_TRUNCATED' ? '正文初稿' : '正文修订'
-  throw Object.assign(new Error(`${phase}输出被截断`), {
+  const error = Object.assign(new Error(`${phase}输出被截断`), {
     code,
     finish_reason: finishReason,
     incomplete_reason: incompleteReason,
@@ -40695,6 +40706,47 @@ function assertCompleteProseTransportResult(result: any, code: ProseTransportTru
       incomplete_details_present: incompleteDetailsPresent,
     },
   })
+  throw markBlockedInvalidError(error, {
+    code: code.toLowerCase(),
+    source: 'transport',
+    message: `${phase}输出被截断，不能作为完整章节正文入库。`,
+    details: { finish_reason: finishReason, incomplete_reason: incompleteReason },
+  })
+}
+
+function proseAdmissionWarning(
+  source: ProseAdmissionWarning['source'],
+  code: any,
+  message: any,
+  details?: any,
+): ProseAdmissionWarning {
+  const warning: ProseAdmissionWarning = {
+    source,
+    code: String(code || 'warning').trim() || 'warning',
+    message: String(message || code || 'warning').slice(0, 500),
+  }
+  if (details !== undefined) warning.details = details
+  return warning
+}
+
+function collectStructuredReviewWarnings(review: any): ProseAdmissionWarning[] {
+  const warnings: ProseAdmissionWarning[] = []
+  for (const [field, value] of Object.entries(review || {})) {
+    if (!Array.isArray(value) || !/(?:checks|findings|failures)$/i.test(field)) continue
+    for (const item of value) {
+      if (!item || typeof item !== 'object') continue
+      const status = String((item as any).status || '').toLowerCase()
+      const severity = String((item as any).severity || '').toUpperCase()
+      if (!['fail', 'warn'].includes(status) && !['S1', 'S2'].includes(severity)) continue
+      warnings.push(proseAdmissionWarning(
+        'quality',
+        (item as any).key || field,
+        (item as any).message || (item as any).evidence || (item as any).label || `${field} reported ${status || severity}`,
+        { field, item },
+      ))
+    }
+  }
+  return warnings
 }
 
 export function createNovelWritingService(ctx: {
@@ -45912,9 +45964,18 @@ export function createNovelWritingService(ctx: {
       : Array.isArray(resultPayload?.proseChapters)
         ? resultPayload.proseChapters
         : []
-    const targetProse = selectProseForChapter(resultPayload, chapter)
-      || draftProseChapters.find((item: any) => Number(item?.chapter_no ?? item?.chapterNo) === Number(chapter.chapter_no))
-      || draftProseChapters[0]
+    let targetProse: any
+    try {
+      targetProse = selectProseForChapter(resultPayload, chapter)
+        || draftProseChapters.find((item: any) => Number(item?.chapter_no ?? item?.chapterNo) === Number(chapter.chapter_no))
+        || draftProseChapters[0]
+    } catch (error) {
+      throw markBlockedInvalidError(error, {
+        code: 'prose_wrong_chapter',
+        source: 'prose_shape',
+        message: '模型返回的正文不属于目标章节。',
+      })
+    }
     const generatedTitlePatch = buildGeneratedChapterTitlePatch(
       chapter,
       contextPackage?.chapter_target?.title_uniqueness_report,
@@ -45928,7 +45989,8 @@ export function createNovelWritingService(ctx: {
         error: String((draftResult as any).error || (draftResult as any).fallbackReason || '模型未返回正文'),
         llm_diagnostics: buildLLMResultDiagnostics(draftResult),
       })
-      throw new Error(String((draftResult as any).error || (draftResult as any).fallbackReason || '模型未返回正文'))
+      const error = new Error(String((draftResult as any).error || (draftResult as any).fallbackReason || '模型未返回正文'))
+      throw markBlockedInvalidError(error, validateMinimalChapterProse('').failures[0])
     }
     await onStage('draft', { status: 'success', word_count: countProseChars(chapterText), modelName: (draftResult as any).modelName, scene_status: 'generated', prompt_diagnostics: draftPromptDiagnostics, plain_text_fallback_used: Boolean(plainProseFallback && !targetProse?.chapter_text && !targetProse?.chapterText && !resultPayload?.chapter_text && !resultPayload?.chapterText) })
     let finalText = String(chapterText || '')
@@ -45974,6 +46036,7 @@ export function createNovelWritingService(ctx: {
     let editorRewrite: any = null
     let memePolish: any = null
     let readabilityReview: any = null
+    const qualityWarningCandidates: ProseAdmissionWarning[] = []
     throwIfChapterGenerationAborted()
     await onStage('word_target', { status: 'running', target: wordTarget.target, min: wordTarget.min, max: wordTarget.max, actual: countProseChars(finalText) })
     const wordTargetExpansionPatches: any[] = []
@@ -46007,6 +46070,7 @@ export function createNovelWritingService(ctx: {
       const wordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId, llmControlOptions)
       wordTargetCompatibility = wordTargetCheck.word_target_compatibility_pass ? wordTargetCheck : null
       finalText = wordTargetCheck.final_text || finalText
+      if (wordTargetCheck.word_target_warning) qualityWarningCandidates.push(wordTargetCheck.word_target_warning)
       recordWordTargetExpansionPatch(wordTargetCheck)
       if (wordTargetCheck.expanded && wordTargetCheck.expansion) {
         finalSceneBreakdown = selectVerifiedSceneBreakdownUpdate(finalSceneBreakdown, wordTargetCheck.expansion.scene_breakdown, finalText)
@@ -46044,13 +46108,17 @@ export function createNovelWritingService(ctx: {
     } catch (editorError) {
       if (isAbortError(editorError)) throw editorError
       editorRewrite = { error: String(editorError), edited: false }
+      qualityWarningCandidates.push(proseAdmissionWarning('review', 'editor_unavailable', String(editorError)))
       await onStage('editor', { status: 'warn', error: String(editorError).slice(0, 200), reason: '商业主编改稿失败，保留当前稿' })
     }
     try {
       throwIfChapterGenerationAborted()
       const postEditorWordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId, llmControlOptions)
       const postEditorWordTargetWarning = wordTargetWarningAsError(postEditorWordTargetCheck)
-      if (postEditorWordTargetWarning) throw postEditorWordTargetWarning
+      if (postEditorWordTargetWarning) {
+        if (!validateMinimalChapterProse(postEditorWordTargetCheck.final_text || finalText).valid) throw postEditorWordTargetWarning
+        qualityWarningCandidates.push(postEditorWordTargetCheck.word_target_warning)
+      }
       wordTargetCompatibility = postEditorWordTargetCheck.word_target_compatibility_pass ? postEditorWordTargetCheck : null
       finalText = postEditorWordTargetCheck.final_text || finalText
       recordWordTargetExpansionPatch(postEditorWordTargetCheck)
@@ -46062,6 +46130,7 @@ export function createNovelWritingService(ctx: {
         await onStage('word_target', { status: 'success', phase: 'post_editor', compatibility_pass: true, compatibility_ceiling: postEditorWordTargetCheck.compatibility_ceiling, contraction_attempts: postEditorWordTargetCheck.contraction?.attempts, word_count: countProseChars(finalText), evaluation: postEditorWordTargetCheck.final_evaluation })
       }
     } catch (error: any) {
+      if (error?.word_target_warning) qualityWarningCandidates.push(error.word_target_warning)
       const preEditorEvaluation = evaluateProseWordTarget(preEditorText, wordTarget)
       if ((error?.code === 'PROSE_WORD_TARGET_LONG' || error?.code === 'PROSE_WORD_TARGET_SHORT') && isRestorableWordTargetText(preEditorText, preEditorWordTargetCompatibility)) {
         finalText = preEditorText
@@ -46125,13 +46194,17 @@ export function createNovelWritingService(ctx: {
     } catch (memeError) {
       if (isAbortError(memeError)) throw memeError
       memePolish = { error: String(memeError), polished: false }
+      qualityWarningCandidates.push(proseAdmissionWarning('review', 'meme_polish_unavailable', String(memeError)))
       await onStage('meme_polish', { status: 'warn', error: String(memeError).slice(0, 200), reason: '网感润色失败，保留当前稿' })
     }
     try {
       throwIfChapterGenerationAborted()
       const postMemeWordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId, llmControlOptions)
       const postMemeWordTargetWarning = wordTargetWarningAsError(postMemeWordTargetCheck)
-      if (postMemeWordTargetWarning) throw postMemeWordTargetWarning
+      if (postMemeWordTargetWarning) {
+        if (!validateMinimalChapterProse(postMemeWordTargetCheck.final_text || finalText).valid) throw postMemeWordTargetWarning
+        qualityWarningCandidates.push(postMemeWordTargetCheck.word_target_warning)
+      }
       wordTargetCompatibility = postMemeWordTargetCheck.word_target_compatibility_pass ? postMemeWordTargetCheck : null
       finalText = postMemeWordTargetCheck.final_text || finalText
       recordWordTargetExpansionPatch(postMemeWordTargetCheck)
@@ -46143,6 +46216,7 @@ export function createNovelWritingService(ctx: {
         await onStage('word_target', { status: 'success', phase: 'post_meme_polish', compatibility_pass: true, compatibility_ceiling: postMemeWordTargetCheck.compatibility_ceiling, contraction_attempts: postMemeWordTargetCheck.contraction?.attempts, word_count: countProseChars(finalText), evaluation: postMemeWordTargetCheck.final_evaluation })
       }
       } catch (error: any) {
+        if (error?.word_target_warning) qualityWarningCandidates.push(error.word_target_warning)
         if ((error?.code === 'PROSE_WORD_TARGET_LONG' || error?.code === 'PROSE_WORD_TARGET_SHORT') && isRestorableWordTargetText(preMemeText, preMemeWordTargetCompatibility)) {
           finalText = preMemeText
           finalSceneBreakdown = preMemeSceneBreakdown
@@ -46281,13 +46355,15 @@ export function createNovelWritingService(ctx: {
       })),
       decision: qualityLoop.decision,
     }
-    const assertCurrentProseQualityCanStore = () => {
-      try {
-        return assertProseQualityCanStore(qualityLoop.decision, approvals?.quality_gate)
-      } catch (error) {
-        throw attachQualityLoopFailureDiagnostics(error, qualityLoopDiagnostics)
-      }
-    }
+    qualityWarningCandidates.push(
+      ...asArray(qualityLoop.decision?.advisory_failures).map((message: any) => proseAdmissionWarning('quality', 'quality_advisory', message)),
+      ...asArray(qualityLoop.decision?.hard_failures).map((failure: any) => proseAdmissionWarning(
+        'quality',
+        failure?.key || 'quality_failure',
+        failure?.message || failure?.evidence || failure?.key || '质量诊断未通过',
+        failure,
+      )),
+    )
     let selfCheck = buildLegacyCompatibleSelfCheck(qualityLoop)
     if (!(selfCheck.review as any).next_chapter_quality_plan) {
       ;(selfCheck.review as any).next_chapter_quality_plan = buildFallbackNextChapterQualityPlan(
@@ -46305,7 +46381,6 @@ export function createNovelWritingService(ctx: {
           .flatMap((item: any) => asArray(item?.revision?.revision_receipts || item?.revision?.revisionReceipts)),
       ],
     }
-    assertCurrentProseQualityCanStore()
     const initialReviewDecision = getQualityGateDecision(qualityGateProject, { ...(selfCheck?.review || {}), revised: Boolean(selfCheck.revised) })
     await onStage('review', { status: initialReviewDecision.passed ? 'success' : 'warn', score: selfCheck?.review?.score ?? null, issues: selfCheck?.review?.issues || [], quality_gate: initialReviewDecision, scene_status: 'reviewed' })
     const revisionStageStatus = selfCheck.revised ? 'success' : selfCheck?.revision?.error ? 'warn' : 'skipped'
@@ -46337,6 +46412,7 @@ export function createNovelWritingService(ctx: {
       } catch (readabilityError) {
         if (isAbortError(readabilityError)) throw readabilityError
         readabilityReview = { error: String(readabilityError) }
+        qualityWarningCandidates.push(proseAdmissionWarning('review', 'readability_review_unavailable', String(readabilityError)))
         await onStage('readability_review', { status: 'warn', error: String(readabilityError).slice(0, 200), reason: '可读性复检失败，不阻塞原验收流程' })
       }
     } else {
@@ -46640,7 +46716,43 @@ export function createNovelWritingService(ctx: {
           ? '生产模式：初稿已通过硬质量门禁，不执行仿写安全门禁'
           : '生产模式：生成并自检，不执行仿写安全门禁',
       })
-      assertCurrentProseQualityCanStore()
+      const draftModeHardAdmission = classifyProseAdmission({
+        hard_failures: [
+          ...validateMinimalChapterProse(finalText).failures,
+          ...asArray(qualityLoop.decision?.hard_failures)
+            .filter((failure: any) => failure?.source === 'deterministic' && failure?.key === 'canonical_proper_noun_conflict')
+            .map((failure: any) => ({
+              code: 'canonical_proper_noun_conflict',
+              source: 'canonical_continuity' as const,
+              message: failure?.message || '正文与高置信正史专名冲突。',
+              details: failure,
+            })),
+        ],
+      })
+      if (draftModeHardAdmission.hard_failures.length) {
+        const primaryFailure = draftModeHardAdmission.hard_failures[0]
+        throw markBlockedInvalidError(Object.assign(new Error(primaryFailure.message), {
+          code: primaryFailure.source === 'canonical_continuity' ? 'PROSE_QUALITY_GATE_BLOCKED' : 'PROSE_INVALID',
+          quality_loop: qualityLoopDiagnostics,
+        }), primaryFailure)
+      }
+      qualityWarningCandidates.push(
+        ...collectStructuredReviewWarnings(qualityGateReview),
+        ...asArray(draftQualityDecision?.hard_failures).map((failure: any) => proseAdmissionWarning('quality', failure?.key || 'draft_quality_gate', failure?.message || failure?.evidence || failure?.key, failure)),
+        ...asArray(draftQualityDecision?.advisory_failures).map((message: any) => proseAdmissionWarning('quality', 'draft_quality_advisory', message)),
+      )
+      const draftModeAdmissionDecision = classifyProseAdmission({ warnings: qualityWarningCandidates })
+      const draftModeStoryStateWarning = {
+        skipped: true,
+        reason: isDraftOnly ? 'draft_only production mode' : 'draft_review production mode',
+      }
+      const draftModeProseAdmission = {
+        status: draftModeAdmissionDecision.status as 'accepted' | 'accepted_with_warnings',
+        quality_score: Number.isFinite(Number(selfCheck?.review?.score)) ? Number(selfCheck.review.score) : null,
+        quality_warnings: draftModeAdmissionDecision.warnings,
+        story_state_status: 'pending' as const,
+        story_state_warning: draftModeStoryStateWarning,
+      }
       await onStage('store', { status: 'running' })
       await ctx.runtime?.hooks?.beforeChapterStore?.({ chapterId: chapter.id, finalText })
       const updatedReviewedDraft = await updateNovelChapter(activeWorkspace, chapter.id, buildChapterProseStoragePatch({
@@ -46651,6 +46763,7 @@ export function createNovelWritingService(ctx: {
         finalSceneBreakdown,
         ohStoryDeliveryReceipts,
         postDraftDirector,
+        proseAdmission: draftModeProseAdmission,
       }), { versionSource: resolveChapterProseVersionSource({ editorRewrite }) })
       await onStage('store', { status: 'success', word_count: countProseChars(finalText), scene_status: 'accepted' })
       await onStage('story_state', {
@@ -46659,7 +46772,9 @@ export function createNovelWritingService(ctx: {
           ? '初稿模式不更新状态机，避免草稿污染长期记忆'
           : '自检模式不更新状态机，确认后可继续完整流水线',
       })
-      await createNovelReview(activeWorkspace, buildProseQualityReview(draftQualityDecision.passed ? 'ok' : 'warn', draftQualityDecision))
+      await createNovelReview(activeWorkspace, buildProseQualityReview(draftModeAdmissionDecision.status === 'accepted' ? 'ok' : 'warn', draftQualityDecision, '', {
+        proseAdmission: draftModeProseAdmission,
+      }))
       const draftProseMetaSync = buildProseMetaSyncReport(project, chapter, contextPackage, finalText)
       await storeGeneratedReviewRecord(buildDraftSyncReviewRecord({
         projectId,
@@ -46906,6 +47021,11 @@ export function createNovelWritingService(ctx: {
       return {
         chapter: updatedReviewedDraft,
         score: selfCheck?.review?.score ?? null,
+        admission_status: draftModeProseAdmission.status,
+        quality_score: draftModeProseAdmission.quality_score,
+        quality_warnings: draftModeProseAdmission.quality_warnings,
+        story_state_status: draftModeProseAdmission.story_state_status,
+        story_state_warning: draftModeStoryStateWarning,
         revised: false,
         production_mode: productionMode,
         completed_stage: 'store',
@@ -46989,65 +47109,120 @@ export function createNovelWritingService(ctx: {
         config_snapshot: configSnapshot,
       }
     }
-    await onStage('story_state', { status: 'running', phase: 'prepare' })
-    await ctx.runtime?.hooks?.beforeStoryState?.({ chapterId: chapter.id, finalText })
-    const preparedStoryStateUpdate = await prepareStoryStateUpdate(
-      activeWorkspace,
-      project,
-      { ...chapter, chapter_text: finalText },
-      finalReviewContextPackage,
-      finalText,
-      preferredModelId,
-      llmControlOptions,
-    )
-    if (preparedStoryStateUpdate.hard_failures.length) {
-      qualityGateReview = {
-        ...qualityGateReview,
-        quality_audit_checks: [
-          ...asArray(qualityGateReview?.quality_audit_checks || qualityGateReview?.qualityAuditChecks),
-          ...preparedStoryStateUpdate.hard_failures.map(failure => ({
-            key: failure.key,
-            label: '故事状态同步',
-            status: 'fail',
-            evidence: failure.message,
-          })),
-        ],
-      }
-    }
+    qualityWarningCandidates.push(...collectStructuredReviewWarnings(qualityGateReview))
     const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)
-    if (!preStoreQualityDecision.passed && (!preStoreQualityDecision.approvable || !approvals?.quality_gate?.approved)) {
-      await onStage('review', { status: 'needs_confirmation', score: selfCheck?.review?.score ?? null, quality_gate: preStoreQualityDecision })
-      throw ctx.production.buildApprovalError('quality_gate', '章节质量门禁未通过，正文未入库', preStoreQualityDecision)
-    }
+    qualityWarningCandidates.push(
+      ...asArray(preStoreQualityDecision?.hard_failures).map((failure: any) => proseAdmissionWarning('quality', failure?.key || 'quality_gate', failure?.message || failure?.evidence || failure?.key, failure)),
+      ...asArray(preStoreQualityDecision?.advisory_failures).map((message: any) => proseAdmissionWarning('quality', 'quality_gate_advisory', message)),
+      ...asArray(preStoreQualityDecision?.reasons).map((message: any) => proseAdmissionWarning('quality', 'quality_gate_reason', message)),
+    )
     if (ctx.production.approvalRequired(approvalPolicy, 'low_score', approvals, { score: selfCheck?.review?.score ?? null, issues: selfCheck?.review?.issues || [] })) {
-      await onStage('review', { status: 'needs_confirmation', score: selfCheck?.review?.score ?? null, issues: selfCheck?.review?.issues || [] })
-      throw ctx.production.buildApprovalError('low_score', '章节质检低于阈值，等待人工确认', { score: selfCheck?.review?.score ?? null, issues: selfCheck?.review?.issues || [] })
+      qualityWarningCandidates.push(proseAdmissionWarning('quality', 'low_score_approval', '章节质检低于审批阈值。'))
     }
     if (ctx.production.approvalRequired(approvalPolicy, 'draft', approvals, { score: selfCheck?.review?.score ?? null, revised: Boolean(selfCheck.revised) })) {
-      await onStage('draft', { status: 'needs_confirmation', score: selfCheck?.review?.score ?? null, revised: Boolean(selfCheck.revised) })
-      throw ctx.production.buildApprovalError('draft', '正文入库前等待人工确认', { score: selfCheck?.review?.score ?? null, revised: Boolean(selfCheck.revised) })
+      qualityWarningCandidates.push(proseAdmissionWarning('review', 'draft_approval', '正文审批策略要求人工复核。'))
     }
     throwIfChapterGenerationAborted()
-    assertCurrentProseQualityCanStore()
-    const referenceReport = await ctx.reference.buildReferenceUsageReport(activeWorkspace, project, '正文创作', finalText)
-    const safetyDecision = ctx.reference.getReferenceSafetyDecision(project, referenceReport)
-    const safetyExplanation = ctx.reference.explainReferenceSafety(referenceReport, safetyDecision)
-    const migrationAudit = ctx.reference.buildMigrationAudit(project, referenceReport, safetyExplanation)
+    const minimalValidation = validateMinimalChapterProse(finalText)
+    const canonicalFailures: ProseAdmissionHardFailure[] = asArray(qualityLoop.decision?.hard_failures)
+      .filter((failure: any) => failure?.source === 'deterministic' && failure?.key === 'canonical_proper_noun_conflict')
+      .map((failure: any) => ({
+        code: 'canonical_proper_noun_conflict',
+        source: 'canonical_continuity' as const,
+        message: failure?.message || '正文与高置信正史专名冲突。',
+        details: failure,
+      }))
+    const hardAdmission = classifyProseAdmission({
+      hard_failures: [...minimalValidation.failures, ...canonicalFailures],
+    })
+    if (hardAdmission.hard_failures.length) {
+      const primaryFailure = hardAdmission.hard_failures[0]
+      const error = Object.assign(new Error(primaryFailure.message), {
+        code: primaryFailure.source === 'canonical_continuity' ? 'PROSE_QUALITY_GATE_BLOCKED' : 'PROSE_INVALID',
+        quality_loop: qualityLoopDiagnostics,
+      })
+      throw markBlockedInvalidError(error, primaryFailure)
+    }
+    let referenceReport: any = { quality_assessment: { risk_level: 'unknown' }, unavailable: true }
+    let safetyDecision: any = { blocked: false, score: null, copy_hit_count: 0, reasons: [] }
+    let safetyExplanation: any = 'reference review unavailable'
+    let migrationAudit: any = { passed: false, unavailable: true }
+    try {
+      referenceReport = await ctx.reference.buildReferenceUsageReport(activeWorkspace, project, '正文创作', finalText)
+      safetyDecision = ctx.reference.getReferenceSafetyDecision(project, referenceReport)
+      safetyExplanation = ctx.reference.explainReferenceSafety(referenceReport, safetyDecision)
+      migrationAudit = ctx.reference.buildMigrationAudit(project, referenceReport, safetyExplanation)
+    } catch (error) {
+      qualityWarningCandidates.push(proseAdmissionWarning('review', 'reference_review_unavailable', String(error)))
+    }
     await onStage('safety', { status: safetyDecision.blocked ? 'failed' : 'success', score: safetyDecision.score, copy_hit_count: safetyDecision.copy_hit_count, risk_level: referenceReport?.quality_assessment?.risk_level })
     const finalQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview, safetyDecision)
     if (safetyDecision.blocked) {
-      throw Object.assign(new Error('仿写安全阈值未通过'), { code: 'REFERENCE_SAFETY_BLOCKED', referenceReport, safetyDecision, safetyExplanation, migrationAudit })
+      const error = Object.assign(new Error('仿写安全阈值未通过'), { code: 'REFERENCE_SAFETY_BLOCKED', referenceReport, safetyDecision, safetyExplanation, migrationAudit })
+      throw markBlockedInvalidError(error, {
+        code: 'reference_safety_blocked',
+        source: 'safety',
+        message: '仿写安全阈值明确阻止正文入库。',
+        details: { safety_decision: safetyDecision },
+      })
     }
-    if (!finalQualityDecision.passed && (!finalQualityDecision.approvable || !approvals?.quality_gate?.approved)) {
-      await onStage('safety', { status: 'needs_confirmation', score: safetyDecision.score, quality_gate: finalQualityDecision })
-      throw ctx.production.buildApprovalError('quality_gate', '章节质量门禁未通过，正文未入库', finalQualityDecision)
-    }
-    if (ctx.production.approvalRequired(approvalPolicy, 'safety', approvals, { score: safetyDecision.score, copy_hit_count: safetyDecision.copy_hit_count, risk_level: referenceReport?.quality_assessment?.risk_level })) {
-      await onStage('safety', { status: 'needs_confirmation', score: safetyDecision.score, copy_hit_count: safetyDecision.copy_hit_count, risk_level: referenceReport?.quality_assessment?.risk_level })
-      throw ctx.production.buildApprovalError('safety', '仿写安全报告等待人工确认', { score: safetyDecision.score, copy_hit_count: safetyDecision.copy_hit_count, risk_level: referenceReport?.quality_assessment?.risk_level })
+    qualityWarningCandidates.push(
+      ...asArray(finalQualityDecision?.hard_failures).map((failure: any) => proseAdmissionWarning('quality', failure?.key || 'final_quality_gate', failure?.message || failure?.evidence || failure?.key, failure)),
+      ...asArray(finalQualityDecision?.advisory_failures).map((message: any) => proseAdmissionWarning('quality', 'final_quality_advisory', message)),
+    )
+    const safetyApprovalRequired = ctx.production.approvalRequired(approvalPolicy, 'safety', approvals, { score: safetyDecision.score, copy_hit_count: safetyDecision.copy_hit_count, risk_level: referenceReport?.quality_assessment?.risk_level })
+    if (safetyApprovalRequired || String(referenceReport?.quality_assessment?.risk_level || '').toLowerCase() !== 'low' || asArray(safetyDecision?.reasons).length) {
+      qualityWarningCandidates.push(proseAdmissionWarning('review', 'safety_review', safetyExplanation || '仿写安全报告需要复核。', { reference_report: referenceReport, safety_decision: safetyDecision }))
     }
     throwIfChapterGenerationAborted()
-    assertCurrentProseQualityCanStore()
+    await onStage('story_state', { status: 'running', phase: 'prepare' })
+    let storyStateStatus: 'synced' | 'pending' = 'synced'
+    let preparedStoryStateUpdate: PreparedStoryStateUpdate
+    let storyStateWarning: any = null
+    try {
+      await ctx.runtime?.hooks?.beforeStoryState?.({ chapterId: chapter.id, finalText })
+      preparedStoryStateUpdate = await prepareStoryStateUpdate(
+        activeWorkspace,
+        project,
+        { ...chapter, chapter_text: finalText },
+        finalReviewContextPackage,
+        finalText,
+        preferredModelId,
+        llmControlOptions,
+      )
+      if (preparedStoryStateUpdate.hard_failures.length) {
+        storyStateStatus = 'pending'
+        storyStateWarning = { hard_failures: preparedStoryStateUpdate.hard_failures }
+        preparedStoryStateUpdate = buildPendingPreparedStoryStateUpdate({
+          reference_config: project.reference_config,
+          failures: preparedStoryStateUpdate.hard_failures,
+        })
+      }
+    } catch (error) {
+      if (isAbortError(error)) throw error
+      storyStateStatus = 'pending'
+      const failures: PreparedStoryStateFailure[] = [{
+        key: 'story_state_prepare_error',
+        message: '故事状态准备失败，等待后续重试。',
+        source: 'story_state',
+      }]
+      preparedStoryStateUpdate = buildPendingPreparedStoryStateUpdate({ reference_config: project.reference_config, failures, error })
+      storyStateWarning = { error: String(error).slice(0, 500), hard_failures: failures }
+    }
+    if (storyStateStatus === 'pending') {
+      for (const failure of preparedStoryStateUpdate.hard_failures) {
+        qualityWarningCandidates.push(proseAdmissionWarning('story_state', failure.key, failure.message, failure.details))
+      }
+      await onStage('story_state', { status: 'warn', phase: 'pending', warning: storyStateWarning })
+    }
+    const precommitAdmission = classifyProseAdmission({ warnings: qualityWarningCandidates })
+    const proseAdmission = {
+      status: precommitAdmission.status as 'accepted' | 'accepted_with_warnings',
+      quality_score: Number.isFinite(Number(selfCheck?.review?.score)) ? Number(selfCheck.review.score) : null,
+      quality_warnings: precommitAdmission.warnings,
+      story_state_status: storyStateStatus,
+      story_state_warning: storyStateWarning,
+    }
     await onStage('store', { status: 'running' })
     await ctx.runtime?.hooks?.beforeChapterStore?.({ chapterId: chapter.id, finalText })
     const chapterPatch = buildChapterProseStoragePatch({
@@ -47058,6 +47233,7 @@ export function createNovelWritingService(ctx: {
       finalSceneBreakdown,
       ohStoryDeliveryReceipts,
       postDraftDirector,
+      proseAdmission,
     })
     const acceptanceCharacterUpdates = asArray(preparedStoryStateUpdate.character_updates).map((update: any) => ({
       id: Number(update?.character_id || update?.characterId || update?.id || 0) || undefined,
@@ -47132,29 +47308,41 @@ export function createNovelWritingService(ctx: {
       contextPackage,
       selfCheck,
     })
-    const acceptance = await commitNovelChapterAcceptance(activeWorkspace, {
-      chapter_id: chapter.id,
-      chapter_patch: chapterPatch,
-      version_source: resolveChapterProseVersionSource({ revisionEligible: true, selfCheck, editorRewrite }),
-      next_reference_config: preparedStoryStateUpdate.next_reference_config,
-      worldbuilding_creates: asArray(stagedPreflightRepair?.staged_worldbuilding_creates),
-      character_creates: asArray(stagedPreflightRepair?.staged_character_creates),
-      setting_creates: asArray(stagedPreflightRepair?.staged_setting_creates),
-      chapter_setting_usage_replacement: stagedPreflightRepair?.staged_usage_replacement || stagedContextUsageReplacement || undefined,
-      character_updates: acceptanceCharacterUpdates,
-      setting_updates: acceptanceSettingUpdates,
-      usage_updates: acceptanceUsageUpdates,
-      reviews: [
-        ...asArray(stagedPreflightRepair?.staged_reviews),
-        ...pendingGeneratedReviews,
-        buildProseQualityReview(finalQualityDecision.passed ? 'ok' : 'warn', finalQualityDecision, '', {
-          referenceReport,
-          safetyDecision,
-          migrationAudit,
-        }),
-        settingConsistencyReview,
-      ].filter(Boolean),
-    })
+    let acceptance: Awaited<ReturnType<typeof commitNovelChapterAcceptance>>
+    try {
+      acceptance = await commitNovelChapterAcceptance(activeWorkspace, {
+        chapter_id: chapter.id,
+        chapter_patch: chapterPatch,
+        version_source: resolveChapterProseVersionSource({ revisionEligible: true, selfCheck, editorRewrite }),
+        ...(storyStateStatus === 'synced' ? {
+          next_reference_config: preparedStoryStateUpdate.next_reference_config,
+          character_updates: acceptanceCharacterUpdates,
+          setting_updates: acceptanceSettingUpdates,
+          usage_updates: acceptanceUsageUpdates,
+        } : {}),
+        worldbuilding_creates: asArray(stagedPreflightRepair?.staged_worldbuilding_creates),
+        character_creates: asArray(stagedPreflightRepair?.staged_character_creates),
+        setting_creates: asArray(stagedPreflightRepair?.staged_setting_creates),
+        chapter_setting_usage_replacement: stagedPreflightRepair?.staged_usage_replacement || stagedContextUsageReplacement || undefined,
+        reviews: [
+          ...asArray(stagedPreflightRepair?.staged_reviews),
+          ...pendingGeneratedReviews,
+          buildProseQualityReview(precommitAdmission.status === 'accepted' ? 'ok' : 'warn', finalQualityDecision, '', {
+            referenceReport,
+            safetyDecision,
+            migrationAudit,
+            proseAdmission,
+          }),
+          settingConsistencyReview,
+        ].filter(Boolean),
+      })
+    } catch (error) {
+      throw markBlockedInvalidError(error, {
+        code: 'atomic_acceptance_failed',
+        source: 'atomic',
+        message: '章节原子验收失败，未写入任何业务数据。',
+      })
+    }
     const updated = acceptance.chapter
     const postCommitWarnings: Array<{ stage: string; message: string }> = []
     const runPostCommitBestEffort = async (stage: string, task: () => any | Promise<any>) => {
@@ -47171,9 +47359,11 @@ export function createNovelWritingService(ctx: {
     await runPostCommitBestEffort('memory', async () => {
       await storeChapterProseMemory(project, chapter.chapter_no, finalText)
     })
-    await runPostCommitBestEffort('story_state_stage', () => onStage('story_state', { status: 'success' }))
+    await runPostCommitBestEffort('story_state_stage', () => onStage('story_state', storyStateStatus === 'synced'
+      ? { status: 'success' }
+      : { status: 'warn', phase: 'pending', warning: storyStateWarning }))
     let storyStateUpdateWithSync: any = preparedStoryStateUpdate.payload
-    await runPostCommitBestEffort('post_commit_sync', async () => {
+    if (storyStateStatus === 'synced') await runPostCommitBestEffort('post_commit_sync', async () => {
     await ctx.runtime?.hooks?.beforePostCommitSync?.({ chapterId: chapter.id, finalText })
     const storyStateUpdate = preparedStoryStateUpdate.payload
     const story_state_update: any = storyStateUpdate || {}
@@ -47293,9 +47483,17 @@ export function createNovelWritingService(ctx: {
       readerPayoffSync,
     })
     })
+    const returnedAdmissionStatus = postCommitWarnings.length > 0 && proseAdmission.status === 'accepted'
+      ? 'accepted_with_warnings'
+      : proseAdmission.status
     return {
       chapter: updated,
       score: selfCheck?.review?.score ?? null,
+      admission_status: returnedAdmissionStatus,
+      quality_score: proseAdmission.quality_score,
+      quality_warnings: proseAdmission.quality_warnings,
+      story_state_status: storyStateStatus,
+      story_state_warning: storyStateWarning,
       revised: Boolean(selfCheck?.revised),
       editor_rewrite: editorRewrite,
       meme_polish: memePolish,

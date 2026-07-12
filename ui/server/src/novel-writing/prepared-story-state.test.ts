@@ -1,7 +1,33 @@
 import { describe, expect, test } from 'bun:test'
-import { buildPreparedStoryStateHardFailures } from './prepared-story-state'
+import {
+  buildPendingPreparedStoryStateUpdate,
+  buildPreparedStoryStateHardFailures,
+} from './prepared-story-state'
 
 describe('prepared story state hard failures', () => {
+  test('builds a bounded pending update that preserves the prior reference config', () => {
+    const referenceConfig = { story_state: { open_questions: ['旧问题'] }, quality_gate: { min_score: 78 } }
+    const failures = [{ key: 'story_state_invalid_payload', message: '无效状态', source: 'story_state' as const }]
+    const pending = buildPendingPreparedStoryStateUpdate({
+      reference_config: referenceConfig,
+      failures,
+      error: new Error('x'.repeat(1200)),
+    })
+
+    expect(pending).toMatchObject({
+      state_delta: {},
+      next_reference_config: referenceConfig,
+      character_updates: [],
+      setting_updates: [],
+      storyline_updates: [],
+      sync_reports: {},
+      hard_failures: failures,
+      payload: { pending: true, skipped: true, hard_failures: failures },
+    })
+    expect(pending.next_reference_config).not.toBe(referenceConfig)
+    expect(pending.payload.error.length).toBeLessThanOrEqual(500)
+  })
+
   test('blocks missed current-chapter character, asset, handoff, and timeline changes', () => {
     const failures = buildPreparedStoryStateHardFailures({
       character_state_delta_sync: { missed: [{ name: '李玄', text: '计划受伤' }] },

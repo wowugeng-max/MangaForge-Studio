@@ -17,6 +17,7 @@ export type ProseQualityReviewPayloadInput = {
   safetyExplanation?: any
   migrationAudit?: any
   approvalType?: any
+  proseAdmission?: Record<string, any>
 }
 
 export type ProseQualityReviewRecordInput = {
@@ -48,6 +49,10 @@ export function buildProseQualityReviewPayload(input: ProseQualityReviewPayloadI
   appendIfDefined(payload, 'migration_audit', input.migrationAudit)
   payload.quality_gate = input.qualityGate
   appendIfDefined(payload, 'approval_type', input.approvalType)
+  if (input.proseAdmission !== undefined) {
+    payload.prose_admission = input.proseAdmission
+    payload.proseAdmission = input.proseAdmission
+  }
   Object.assign(payload, input.postDraftDirectorPayload || {})
   payload.production_mode = input.productionMode
   payload.config_snapshot = input.configSnapshot

@@ -16,6 +16,39 @@ export type PreparedStoryStateUpdate = {
   payload: Record<string, any>
 }
 
+function boundedPendingError(error: any) {
+  if (error === undefined || error === null) return ''
+  try {
+    const message = typeof error === 'string' ? error : error?.message || String(error)
+    return String(message || '').slice(0, 500)
+  } catch {
+    return 'Story State preparation failed.'
+  }
+}
+
+export function buildPendingPreparedStoryStateUpdate(input: {
+  reference_config?: Record<string, any>
+  failures: PreparedStoryStateFailure[]
+  error?: any
+}): PreparedStoryStateUpdate {
+  const hardFailures = Array.isArray(input?.failures) ? input.failures : []
+  return {
+    state_delta: {},
+    next_reference_config: { ...(input?.reference_config || {}) },
+    character_updates: [],
+    setting_updates: [],
+    storyline_updates: [],
+    sync_reports: {},
+    hard_failures: hardFailures,
+    payload: {
+      pending: true,
+      skipped: true,
+      error: boundedPendingError(input?.error),
+      hard_failures: hardFailures,
+    },
+  }
+}
+
 const CURRENT_CHAPTER_HARD_SYNC_KEYS = [
   'character_state_delta_sync',
   'asset_state_delta_sync',

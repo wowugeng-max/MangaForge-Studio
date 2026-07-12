@@ -142,6 +142,36 @@ describe('novel sqlite persistence', () => {
 })
 
 describe('commitNovelChapterAcceptance', () => {
+  test('atomically stores prose, a version, and reviews while omitting all Story State patches', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, {
+      title: '待同步状态原子接收',
+      reference_config: { story_state: { open_questions: ['保持旧状态'] } },
+    })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 2,
+      title: '旧门',
+      chapter_text: '旧正文',
+    })
+
+    const accepted = await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { chapter_text: '新正文', raw_payload: { prose_admission: { story_state_status: 'pending' } } },
+      version_source: 'agent_execute',
+      reviews: [{ review_type: 'prose_quality', status: 'warn', summary: '正文已收，状态待同步' }],
+    })
+
+    expect(accepted.chapter.chapter_text).toBe('新正文')
+    expect(accepted.project.reference_config).toEqual(project.reference_config)
+    expect(await listChapterVersions(workspace, chapter.id)).toEqual([
+      expect.objectContaining({ chapter_text: '旧正文', source: 'agent_execute' }),
+    ])
+    expect(await listNovelReviews(workspace, project.id)).toEqual([
+      expect.objectContaining({ review_type: 'prose_quality', status: 'warn' }),
+    ])
+  })
+
   test('atomically stores accepted prose, old version, story state, entity changes, usage, and reviews', async () => {
     const workspace = await tempWorkspace()
     const project = await createNovelProject(workspace, {
