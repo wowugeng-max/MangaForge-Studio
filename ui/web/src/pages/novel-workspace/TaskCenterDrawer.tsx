@@ -56,6 +56,7 @@ export function chapterGroupRunActionState(run: any = {}) {
     ...chapter,
     approval_stage: chapter.approval_stage || chapter.approvalStage || lastError.approval_stage || lastError.approvalStage,
     error_code: chapter.error_code || chapter.errorCode || lastError.error_code || lastError.errorCode,
+    admission_status: chapter.admission_status || chapter.admissionStatus || lastError.admission_status || lastError.admissionStatus,
   })
   const isChapterGroup = run.run_type === 'chapter_group_generation'
   const status = String(run.status || '')

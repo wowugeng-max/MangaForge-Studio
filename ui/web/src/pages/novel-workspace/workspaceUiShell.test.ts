@@ -1980,6 +1980,7 @@ describe('commercial writing workspace UI shell', () => {
     expect(projectWorkspace).toContain("lazy(() => import('./novel-workspace/AutoCreationDirectorWorkspace')")
     expect(projectWorkspace).toContain('buildAutoCreationDirectorModel')
     expect(projectWorkspace).toContain('runRecords')
+    expect(projectWorkspace).toContain('activeRuns: [...activeTasks, ...runRecords]')
     expect(projectWorkspace).toContain('storyState')
     expect(projectWorkspace).toContain('chapters: sortedChapters')
     expect(projectWorkspace).toContain('handleAutoCreationDirectorAction')

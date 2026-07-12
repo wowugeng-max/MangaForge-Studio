@@ -3089,6 +3089,96 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('open_generation_diagnostics')
   })
 
+  test('blocked invalid admission remains visible when the rejected chapter has no prose', () => {
+    const invalidChapter = {
+      ...chapters[1],
+      raw_payload: {
+        ...chapters[1].raw_payload,
+        prose_admission: {
+          status: 'blocked_invalid',
+          quality_warnings: [{ code: 'invalid_prose', source: 'validation', message: '正文为空或结构无效' }],
+          story_state_status: 'pending',
+        },
+      },
+    }
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [chapters[0], invalidChapter],
+      activeChapter: invalidChapter,
+      materialScore: { score: 82, can_generate: true },
+      reviews: [],
+    })
+
+    expect(model.chapterAcceptanceDesk.visible).toBe(true)
+    expect(model.chapterAcceptanceDesk.admissionStatus).toBe('blocked_invalid')
+    expect(model.chapterAcceptanceDesk.statusLabel).toBe('正文无效，未入库')
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('open_generation_diagnostics')
+  })
+
+  test('does not reuse a top-level run admission from a different chapter', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [],
+      activeRuns: [{
+        id: 801,
+        created_at: '2026-07-13T10:00:00.000Z',
+        output_ref: JSON.stringify({
+          chapter_id: 102,
+          chapter_no: 2,
+          admission_status: 'blocked_invalid',
+          quality_warnings: [{ source: 'validation', code: 'invalid_prose', message: '第二章正文无效' }],
+        }),
+      }],
+    })
+
+    expect(model.chapterAcceptanceDesk.admissionStatus).toBe('')
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('needs_quality_check')
+  })
+
+  test('uses the latest persisted run admission for the current chapter regardless of input order', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [],
+      activeRuns: [
+        {
+          id: 802,
+          created_at: '2026-07-13T11:00:00.000Z',
+          output_ref: JSON.stringify({
+            chapter_id: 101,
+            chapter_no: 1,
+            admission_status: 'accepted_with_warnings',
+            quality_score: 72,
+            story_state_status: 'pending',
+            quality_warnings: [{ source: 'quality', code: 'score_low', message: '评分低于建议目标' }],
+          }),
+        },
+        {
+          id: 801,
+          created_at: '2026-07-13T10:00:00.000Z',
+          output_ref: JSON.stringify({
+            chapter_id: 101,
+            chapter_no: 1,
+            admission_status: 'accepted',
+            story_state_status: 'synced',
+          }),
+        },
+      ],
+    })
+
+    expect(model.chapterAcceptanceDesk.admissionStatus).toBe('accepted_with_warnings')
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('delivered_with_warnings')
+    expect(model.chapterAcceptanceDesk.qualityWarnings[0]?.message).toBe('评分低于建议目标')
+  })
+
   test('readability review is summarized without blocking chapter acceptance', () => {
     const model = buildWritingCockpitModel({
       project: acceptedProject,

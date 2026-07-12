@@ -1008,7 +1008,7 @@ export default function NovelProjectWorkspace() {
     diagnostics: activeChapterDiagnosticsData,
     materialScore: activeChapterDiagnosticsData?.material_score || null,
     commercialReadiness,
-    activeRuns: activeTasks,
+    activeRuns: [...activeTasks, ...runRecords],
     reviews,
     memorySummary: activeMemorySummary,
   }), [
@@ -1020,6 +1020,7 @@ export default function NovelProjectWorkspace() {
     activeChapterDiagnosticsData,
     commercialReadiness,
     activeTasks,
+    runRecords,
     reviews,
     activeMemorySummary,
   ])

@@ -4437,20 +4437,36 @@ function normalizeAdmissionCandidate(value: any): AnyRecord | null {
   }
 }
 
-function runAdmission(runs: AnyRecord[], chapter: AnyRecord): AnyRecord | null {
+function recordBelongsToChapter(record: AnyRecord, chapter: AnyRecord) {
+  const recordId = text(record?.chapter_id ?? record?.chapterId ?? record?.chapter?.id)
+  const recordNoValue = record?.chapter_no ?? record?.chapterNo ?? record?.chapter?.chapter_no ?? record?.chapter?.chapterNo
+  const recordNo = Number(recordNoValue || 0)
   const chapterId = text(chapter?.id)
   const chapterNo = Number(chapter?.chapter_no || chapter?.chapterNo || 0)
-  for (const run of [...runs].reverse()) {
+  if (!recordId && recordNo <= 0) return false
+  if (recordId && (!chapterId || recordId !== chapterId)) return false
+  if (recordNo > 0 && (!chapterNo || recordNo !== chapterNo)) return false
+  return true
+}
+
+function runAdmissionOrder(run: AnyRecord) {
+  const timestamp = Date.parse(firstNonEmpty(run?.updated_at, run?.updatedAt, run?.completed_at, run?.completedAt, run?.created_at, run?.createdAt))
+  if (Number.isFinite(timestamp)) return timestamp
+  const id = Number(run?.id || 0)
+  return Number.isFinite(id) ? id : 0
+}
+
+function runAdmission(runs: AnyRecord[], chapter: AnyRecord): AnyRecord | null {
+  const sortedRuns = [...runs].sort((left, right) => runAdmissionOrder(right) - runAdmissionOrder(left))
+  for (const run of sortedRuns) {
     const roots = [run?.output_ref, run?.outputRef, run?.output, run?.payload, run]
       .map(recordValue)
       .filter(value => Object.keys(value).length > 0)
     for (const root of roots) {
-      const direct = normalizeAdmissionCandidate(root)
+      const direct = recordBelongsToChapter(root, chapter) ? normalizeAdmissionCandidate(root) : null
       if (direct) return direct
       const items = [...arrayValue(root?.chapters), ...arrayValue(root?.results)]
-      const item = items.find(candidate => (
-        chapterId && text(candidate?.id || candidate?.chapter_id || candidate?.chapterId) === chapterId
-      ) || (chapterNo > 0 && Number(candidate?.chapter_no || candidate?.chapterNo || 0) === chapterNo))
+      const item = items.find(candidate => recordBelongsToChapter(candidate, chapter))
       const nested = normalizeAdmissionCandidate(item)
       if (nested) return nested
     }
@@ -4648,7 +4664,7 @@ function buildChapterAcceptanceDesk(args: {
   activeRuns: AnyRecord[]
   storyState: AnyRecord
 }): ChapterAcceptanceDeskModel {
-  if (!args.nextChapter || !hasProse(args.nextChapter)) return buildHiddenAcceptanceDesk()
+  if (!args.nextChapter) return buildHiddenAcceptanceDesk()
 
   const latestQualityReviewRef = latestReviewRef(args.reviews, args.nextChapter, 'prose_quality')
   const latestQualityRef = latestQualityReviewRef
@@ -4697,6 +4713,7 @@ function buildChapterAcceptanceDesk(args: {
   const storyStateStatus = firstNonEmpty(proseAdmission?.story_state_status, proseAdmission?.storyStateStatus) as ChapterAcceptanceDeskModel['storyStateStatus']
   const postCommitWarnings = normalizedPostCommitWarnings(proseAdmission?.post_commit_warnings || proseAdmission?.postCommitWarnings)
   const admissionFields = { admissionStatus, qualityWarnings, storyStateStatus, postCommitWarnings }
+  if (!hasProse(args.nextChapter) && admissionStatus !== 'blocked_invalid') return buildHiddenAcceptanceDesk()
   const storylineSync = buildStorylineSyncSummary(latestStorylineSyncRef?.review || null)
   const storyUnitSync = buildStoryUnitSyncSummary(latestStoryUnitSyncRef?.review || null)
   const assetIntake = buildAssetIntakeSummary(latestAssetIntakeRef?.review || null)

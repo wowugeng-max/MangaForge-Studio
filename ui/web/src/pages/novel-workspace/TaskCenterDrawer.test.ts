@@ -384,6 +384,22 @@ describe('chapterGroupRunActionState', () => {
     expect(state.canResume).toBe(false)
     expect(state.canExecute).toBe(false)
   })
+
+  test('disables run actions when blocked invalid exists only in last error metadata', () => {
+    const state = chapterGroupRunActionState({
+      run_type: 'chapter_group_generation',
+      status: 'paused',
+      output_ref: JSON.stringify({
+        current_index: 0,
+        chapters: [{ chapter_no: 11, status: 'failed' }],
+        last_error: { admission_status: 'blocked_invalid' },
+      }),
+    })
+
+    expect(state.terminalAdmission).toBe(true)
+    expect(state.canResume).toBe(false)
+    expect(state.canExecute).toBe(false)
+  })
 })
 
 describe('buildRepairClosureHighlights', () => {
