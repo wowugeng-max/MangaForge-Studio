@@ -218,6 +218,7 @@ function compactRunChapterItem(item: any = {}) {
     score: item.score,
     revised: item.revised,
     attempts: item.attempts,
+    approvals: compactRunStateValue(item.approvals || {}),
     admission_status: item.admission_status || item.admissionStatus,
     story_state_status: item.story_state_status || item.storyStateStatus,
     quality_warnings: compactWarningList(item.quality_warnings || item.qualityWarnings),
@@ -230,6 +231,7 @@ function compactRunChapterItem(item: any = {}) {
     error: item.error,
     error_code: item.error_code || item.errorCode,
     recovery_plan: item.recovery_plan || item.recoveryPlan,
+    repair_fingerprint: item.repair_fingerprint || item.repairFingerprint,
     repair_run_id: item.repair_run_id || item.repairRunId,
     repair_queue: item.repair_queue || item.repairQueue,
     production_mode: item.production_mode || item.productionMode,
@@ -365,6 +367,26 @@ function findExistingApprovalBlocker(payload: any = {}) {
     recovery_plan: lastError.recovery_plan || lastError.recoveryPlan || item.recovery_plan || item.recoveryPlan || {
       type: 'approval_blocker',
       actions: ['按入库阻断原因修订正文', '重新运行正文质检和入库门禁', '确认阻断解除后再继续后续章节生成'],
+    },
+  }
+}
+
+function findExistingTerminalAdmission(payload: any = {}) {
+  const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
+  const index = Number(payload.current_index || 0)
+  const item = chapters[index] || {}
+  const lastError = payload.last_error || payload.lastError || {}
+  const admissionStatus = String(item.admission_status || item.admissionStatus || lastError.admission_status || lastError.admissionStatus || '')
+  const errorCode = String(item.error_code || item.errorCode || lastError.error_code || lastError.errorCode || '')
+  if (admissionStatus !== 'blocked_invalid' && errorCode !== 'PROSE_ADMISSION_BLOCKED_INVALID') return null
+  return {
+    item,
+    index,
+    error: item.error || lastError.error || '正文未通过有效性检查且未入库。',
+    error_code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+    recovery_plan: lastError.recovery_plan || lastError.recoveryPlan || item.recovery_plan || item.recoveryPlan || {
+      type: 'blocked_invalid',
+      actions: ['显式修复或重置当前章节终态', '重新提交正文生成'],
     },
   }
 }
@@ -591,6 +613,10 @@ function buildOhStoryPostDeliveryQuality(chapterResult: any = {}, chapter: any =
       label,
       status,
       summary,
+      missed_count: Number(value?.missed_count ?? value?.missedCount ?? 0) || 0,
+      evidence: compactRunStateValue(value?.evidence || value?.evidences || []),
+      next_actions: compactRunStateValue(value?.next_actions || value?.nextActions || []),
+      details: compactRunStateValue(value || {}),
     }
   })
   return {
@@ -971,6 +997,55 @@ function buildPostDeliveryQualityRepairTasks(chapter: any = {}, postDeliveryQual
     .slice(0, 20)
 }
 
+function buildPostDeliveryQualityRepairFingerprint(sourceRun: any, chapter: any = {}, postDeliveryQuality: any = {}) {
+  const tasks = buildPostDeliveryQualityRepairTasks(chapter, postDeliveryQuality, sourceRun?.id)
+    .map((task: any) => {
+      const check = task.post_delivery_quality?.check || {}
+      return {
+        issue_type: task.issue_type,
+        severity: task.severity,
+        message: task.message,
+        action: task.action,
+        annotation_category: task.annotation_category,
+        acceptance_criteria: task.acceptance_criteria,
+        check: {
+          key: String(check.key || ''),
+          label: compactText(check.label || '', 80),
+          status: String(check.status || 'unknown'),
+          summary: compactText(check.summary || '', 240),
+          missed_count: Number(check.missed_count ?? check.missedCount ?? 0) || 0,
+          evidence: compactRunStateValue(check.evidence || check.evidences || []),
+          next_actions: compactRunStateValue(check.next_actions || check.nextActions || []),
+          details: compactRunStateValue(check),
+        },
+      }
+    })
+    .sort((left: any, right: any) => stableStringify(left).localeCompare(stableStringify(right)))
+  const warnings = compactWarningList(chapter.warnings)
+    .map((warning: any) => typeof warning === 'string'
+      ? { source: '', code: '', message: warning, details: null }
+      : {
+          source: String(warning?.source || ''),
+          code: String(warning?.code || ''),
+          message: compactText(warning?.message || warning?.summary || warning?.error || warning?.detail || '', 240),
+          details: compactRunStateValue(warning?.details || warning?.detail || warning),
+        })
+    .sort((left: any, right: any) => stableStringify(left).localeCompare(stableStringify(right)))
+  return `post-delivery-${hashText({
+    source_run_id: Number(sourceRun?.id || 0) || null,
+    chapter_id: Number(chapter.id || chapter.chapter_id || chapter.chapterId || 0) || null,
+    chapter_no: Number(chapter.chapter_no ?? chapter.chapterNo ?? 0) || null,
+    tasks,
+    warnings,
+  })}`
+}
+
+function repairRunFingerprint(run: any = {}) {
+  const output = parseJsonLikePayload(run.output_ref) || {}
+  const input = parseJsonLikePayload(run.input_ref) || {}
+  return String(output.repair_fingerprint || output.repairFingerprint || output.report?.repair_fingerprint || input.repair_fingerprint || input.repairFingerprint || '')
+}
+
 async function appendPostDeliveryQualityRepairRun(
   appendRun: (workspace: string, data: any) => Promise<any>,
   activeWorkspace: string,
@@ -978,9 +1053,13 @@ async function appendPostDeliveryQualityRepairRun(
   sourceRun: any,
   chapter: any,
   postDeliveryQuality: any,
+  repairFingerprint: string,
+  existingRuns: any[] = [],
 ) {
   const tasks = buildPostDeliveryQualityRepairTasks(chapter, postDeliveryQuality, sourceRun?.id)
   if (!tasks.length) return null
+  const existingRun = existingRuns.find(run => run?.run_type === 'longform_production_repair' && repairRunFingerprint(run) === repairFingerprint)
+  if (existingRun) return { ...existingRun, repair_fingerprint: repairFingerprint, reused: true }
   const chapterNo = Number(chapter.chapter_no ?? chapter.chapterNo ?? 0) || null
   return appendRun(activeWorkspace, {
     project_id: projectId,
@@ -992,14 +1071,17 @@ async function appendPostDeliveryQualityRepairRun(
       source_run_id: sourceRun?.id || null,
       chapter_id: chapter.id || null,
       chapter_no: chapterNo,
+      repair_fingerprint: repairFingerprint,
     }),
     output_ref: runJson({
+      repair_fingerprint: repairFingerprint,
       report: {
         source: 'unattended_post_delivery_quality',
         status: 'needs_repair',
         summary: `第${chapterNo || '?'}章 oh-story Step 3 交付后质检未闭环，已生成 ${tasks.length} 项修复任务。`,
         chapter_id: chapter.id || null,
         chapter_no: chapterNo,
+        repair_fingerprint: repairFingerprint,
         checks: postDeliveryQuality?.checks || [],
       },
       tasks,
@@ -1219,11 +1301,39 @@ export function createNovelRunExecutionService(ctx: {
   updateNovelRun?: (workspace: string, runId: number, patch: any) => Promise<any>
   appendNovelRun?: (workspace: string, data: any) => Promise<any>
 }) {
+  const repairRunInFlight = new Map<string, Promise<any>>()
   const executeChapterGroupRunRecord = async (activeWorkspace: string, project: any, run: any, options: any = {}) => {
     const listRuns = ctx.listNovelRuns || listNovelRuns
     const updateRun = ctx.updateNovelRun || updateNovelRun
     const appendRun = ctx.appendNovelRun || appendNovelRun
     let payload = compactRunPayload(parseJsonLikePayload(run.output_ref) || {})
+    const existingTerminalAdmission = findExistingTerminalAdmission(payload)
+    if (existingTerminalAdmission) {
+      let guardedRun = run
+      if (run.status !== 'paused') {
+        payload = compactRunPayload({
+          ...payload,
+          current_index: existingTerminalAdmission.index,
+          phase: `第${existingTerminalAdmission.item.chapter_no || '?'}章正文无效且未入库，已暂停`,
+          last_error: payload.last_error || existingTerminalAdmission.item,
+          lock: null,
+        })
+        guardedRun = await updateRun(activeWorkspace, run.id, {
+          status: 'paused',
+          output_ref: runJson(payload),
+          error_message: existingTerminalAdmission.error,
+        })
+      }
+      return {
+        run: guardedRun,
+        group: payload,
+        processed: 0,
+        status: 'paused',
+        error: existingTerminalAdmission.error,
+        error_code: existingTerminalAdmission.error_code,
+        recovery_plan: existingTerminalAdmission.recovery_plan,
+      }
+    }
     const existingApprovalBlocker = findExistingApprovalBlocker(payload)
     if (existingApprovalBlocker) {
       return {
@@ -1363,6 +1473,7 @@ export function createNovelRunExecutionService(ctx: {
             status: returnedBlockedInvalid ? 'failed' : 'needs_approval',
             attempts: Number(item.attempts || 0),
             next_run_at: '',
+            approvals: item.approvals || {},
             admission_status: returnedBlockedInvalid ? 'blocked_invalid' : chapterResult.admission_status || chapterResult.admissionStatus || '',
             score: chapterResult.score ?? returnedApprovalBlocker.score ?? null,
             revised: chapterResult.revised,
@@ -1429,6 +1540,7 @@ export function createNovelRunExecutionService(ctx: {
           status: 'success',
           attempts: Number(item.attempts || 0),
           next_run_at: '',
+          approvals: item.approvals || {},
           admission_status: admissionStatus,
           story_state_status: storyStateStatus,
           ...warningFields,
@@ -1453,10 +1565,34 @@ export function createNovelRunExecutionService(ctx: {
           completed_at: new Date().toISOString(),
         }
         if (postDeliveryHasWarnings) {
-          const repairRun = await appendPostDeliveryQualityRepairRun(appendRun, activeWorkspace, project.id, run, resultItem, postDeliveryQuality).catch(error => {
+          const repairFingerprint = buildPostDeliveryQualityRepairFingerprint(run, resultItem, postDeliveryQuality)
+          const repairInFlightKey = `${activeWorkspace}:${project.id}:${repairFingerprint}`
+          resultItem = { ...resultItem, repair_fingerprint: repairFingerprint }
+          let repairPromise = repairRunInFlight.get(repairInFlightKey)
+          const reusedInFlight = Boolean(repairPromise)
+          if (!repairPromise) {
+            repairPromise = (async () => {
+              const existingRuns = await listRuns(activeWorkspace, project.id).catch(() => [])
+              return appendPostDeliveryQualityRepairRun(
+                appendRun,
+                activeWorkspace,
+                project.id,
+                run,
+                resultItem,
+                postDeliveryQuality,
+                repairFingerprint,
+                existingRuns,
+              )
+            })()
+            repairRunInFlight.set(repairInFlightKey, repairPromise)
+          }
+          const resolvedRepairRun = await repairPromise.catch(error => {
             console.warn('[novel] failed to append post-delivery quality repair run:', String(error).slice(0, 160))
             return null
+          }).finally(() => {
+            if (repairRunInFlight.get(repairInFlightKey) === repairPromise) repairRunInFlight.delete(repairInFlightKey)
           })
+          const repairRun = resolvedRepairRun && reusedInFlight ? { ...resolvedRepairRun, reused: true } : resolvedRepairRun
           if (repairRun?.id) {
             resultItem = {
               ...resultItem,
@@ -1465,6 +1601,8 @@ export function createNovelRunExecutionService(ctx: {
                 run_id: repairRun.id,
                 run_type: repairRun.run_type,
                 task_count: buildPostDeliveryQualityRepairTasks(resultItem, postDeliveryQuality, run.id).length,
+                repair_fingerprint: repairFingerprint,
+                reused: repairRun.reused === true,
               },
             }
           }
@@ -1526,6 +1664,7 @@ export function createNovelRunExecutionService(ctx: {
           stages: failedStages,
           attempts,
           next_run_at: nextRunAt,
+          approvals: item.approvals || {},
           admission_status: chapterError?.admission_status || chapterError?.admissionStatus || '',
           approval_stage: blocksForApproval ? chapterError?.approval_stage || '' : '',
           approval_context: blocksForApproval ? chapterError?.approval_context || null : null,

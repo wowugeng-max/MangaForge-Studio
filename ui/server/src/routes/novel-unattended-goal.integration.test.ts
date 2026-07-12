@@ -104,6 +104,235 @@ afterEach(async () => {
 })
 
 describe('unattended chapter goal integration', () => {
+  test('approves an ordinary legacy stage once and resumes generation with a compacted receipt', async () => {
+    const workspace = await tempWorkspace()
+    const production = createNovelProductionService()
+    const project = await createNovelProject(workspace, { title: '普通审批恢复', length_target: 'epic', reference_config: {} })
+    const run = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'chapter_group_generation',
+      status: 'paused',
+      step_name: 'ordinary-approval-round-trip',
+      error_message: '场景卡等待人工确认',
+      output_ref: JSON.stringify({
+        chapters: [{
+          id: 801,
+          chapter_no: 1,
+          title: '第一章',
+          status: 'needs_approval',
+          approval_stage: 'scene_cards',
+          approval_context: { scene_count: 3 },
+          error: '场景卡等待人工确认',
+          error_code: 'APPROVAL_REQUIRED',
+          stages: production.buildChapterGroupStages(),
+        }],
+        current_index: 0,
+        production_mode: 'full_auto',
+        last_error: {
+          id: 801,
+          chapter_no: 1,
+          approval_stage: 'scene_cards',
+          approval_context: { scene_count: 3 },
+          error: '场景卡等待人工确认',
+          error_code: 'APPROVAL_REQUIRED',
+        },
+      }),
+    })
+    const generateCalls: any[] = []
+    const execution = createNovelRunExecutionService({
+      getProject: async () => project,
+      production,
+      listNovelRuns,
+      updateNovelRun,
+      appendNovelRun,
+      generateChapterForGroup: async (_workspace, _projectId, chapterId, options) => {
+        generateCalls.push({ chapterId, approvals: options.approvals })
+        return {
+          admission_status: 'accepted',
+          score: 91,
+          revised: false,
+          story_state_update: ohStoryStep3Ok(),
+        }
+      },
+    })
+    const { app, handlers } = createRouteHarness()
+    registerNovelGenerationRoutes(app as any, generationCtx(workspace, production, {
+      executeChapterGroupRunRecord: execution.executeChapterGroupRunRecord,
+    }) as any)
+    const approve = handlers.get('POST /api/novel/projects/:id/chapter-groups/:runId/approve')
+    const execute = handlers.get('POST /api/novel/projects/:id/chapter-groups/:runId/execute')
+    const oversizedNote = '场景卡已核对'.repeat(200)
+
+    const approved = await callRoute(approve, {
+      params: { id: String(project.id), runId: String(run.id) },
+      body: { chapter_id: 801, stage: 'safety', note: oversizedNote },
+    })
+    const resumed = await callRoute(execute, {
+      params: { id: String(project.id), runId: String(run.id) },
+      body: { max_chapters: 1, lock_owner: 'approval-round-trip' },
+    })
+
+    expect(approved.statusCode).toBe(200)
+    expect(approved.body.group.chapters[0]).toMatchObject({
+      status: 'ready',
+      error: '',
+      error_code: '',
+      approval_stage: '',
+      approval_context: null,
+      approvals: {
+        scene_cards: {
+          approved: true,
+        },
+      },
+    })
+    expect(approved.body.group.chapters[0].approvals.scene_cards.note.length).toBeLessThanOrEqual(500)
+    expect(approved.body.group.last_error).toBeNull()
+    expect(resumed.statusCode).toBe(200)
+    expect(resumed.body.status).toBe('success')
+    expect(resumed.body.group.chapters[0].approvals).toMatchObject({
+      scene_cards: { approved: true },
+    })
+    expect(resumed.body.group.chapters[0].approvals.scene_cards.note).toBe(approved.body.group.chapters[0].approvals.scene_cards.note)
+    expect(generateCalls).toHaveLength(1)
+    expect(generateCalls[0]).toMatchObject({
+      chapterId: 801,
+      approvals: { scene_cards: { approved: true } },
+    })
+    expect(generateCalls[0].approvals.scene_cards.note).toBe(approved.body.group.chapters[0].approvals.scene_cards.note)
+  })
+
+  test('does not approve a stale legacy quality-gate item into regeneration', async () => {
+    const workspace = await tempWorkspace()
+    const production = createNovelProductionService()
+    const project = await createNovelProject(workspace, { title: '旧质量审批终态', length_target: 'epic', reference_config: {} })
+    const run = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'chapter_group_generation',
+      status: 'paused',
+      step_name: 'legacy-quality-approval',
+      error_message: '旧质量门禁审批项',
+      output_ref: JSON.stringify({
+        chapters: [{
+          id: 802,
+          chapter_no: 2,
+          status: 'needs_approval',
+          approval_stage: 'quality_gate',
+          error: '旧质量门禁审批项',
+          error_code: 'APPROVAL_REQUIRED',
+          stages: production.buildChapterGroupStages(),
+        }],
+        current_index: 0,
+        last_error: { id: 802, chapter_no: 2, approval_stage: 'quality_gate', error_code: 'APPROVAL_REQUIRED' },
+      }),
+    })
+    const { app, handlers } = createRouteHarness()
+    registerNovelGenerationRoutes(app as any, generationCtx(workspace, production) as any)
+    const approve = handlers.get('POST /api/novel/projects/:id/chapter-groups/:runId/approve')
+
+    const response = await callRoute(approve, {
+      params: { id: String(project.id), runId: String(run.id) },
+      body: { chapter_id: 802, stage: 'safety' },
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.body).toMatchObject({ error_code: 'APPROVAL_REQUIRED', approval_stage: 'quality_gate' })
+    const stored = (await listNovelRuns(workspace, project.id)).find(item => item.id === run.id)
+    const group = JSON.parse(String(stored?.output_ref || '{}'))
+    expect(group.chapters[0]).toMatchObject({ status: 'needs_approval', approval_stage: 'quality_gate', error_code: 'APPROVAL_REQUIRED' })
+  })
+
+  test('refuses every ordinary re-entry path for a persisted blocked_invalid chapter', async () => {
+    const workspace = await tempWorkspace()
+    const production = createNovelProductionService()
+    const project = await createNovelProject(workspace, { title: '终态入库阻断', length_target: 'epic', reference_config: {} })
+    const blockedOutput = (chapterId: number, chapterNo: number) => JSON.stringify({
+      chapters: [{
+        id: chapterId,
+        chapter_no: chapterNo,
+        title: `第${chapterNo}章`,
+        status: 'failed',
+        admission_status: 'blocked_invalid',
+        attempts: 0,
+        next_run_at: '',
+        error: '正文传输不完整，未入库',
+        error_code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+        stages: production.buildChapterGroupStages(),
+      }],
+      current_index: 0,
+      last_error: {
+        id: chapterId,
+        chapter_no: chapterNo,
+        admission_status: 'blocked_invalid',
+        error: '正文传输不完整，未入库',
+        error_code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+      },
+    })
+    const createBlockedRun = (chapterId: number, chapterNo: number, status = 'paused') => appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'chapter_group_generation',
+      status,
+      step_name: `blocked-invalid-${chapterNo}`,
+      error_message: '正文传输不完整，未入库',
+      output_ref: blockedOutput(chapterId, chapterNo),
+    })
+    const approveRun = await createBlockedRun(811, 11)
+    const retryRun = await createBlockedRun(812, 12)
+    const skipRun = await createBlockedRun(813, 13)
+    const executeRun = await createBlockedRun(814, 14)
+    const workerRun = await createBlockedRun(815, 15, 'ready')
+    const generateCalls: number[] = []
+    const execution = createNovelRunExecutionService({
+      getProject: async () => project,
+      production,
+      listNovelRuns,
+      updateNovelRun,
+      appendNovelRun,
+      generateChapterForGroup: async (_workspace, _projectId, chapterId) => {
+        generateCalls.push(chapterId)
+        return { admission_status: 'accepted', score: 90, story_state_update: ohStoryStep3Ok() }
+      },
+    })
+    const { app, handlers } = createRouteHarness()
+    const getProject = async () => project
+    registerNovelGenerationRoutes(app as any, generationCtx(workspace, production, {
+      getProject,
+      executeChapterGroupRunRecord: execution.executeChapterGroupRunRecord,
+    }) as any)
+    const workers = new Map()
+    registerNovelRunRoutes(app as any, {
+      getWorkspace: () => workspace,
+      getProject,
+      runQueueWorkers: workers,
+      getProductionBudgetDecision: () => ({ blocked: false, reasons: [] }),
+      buildPipelineSteps: production.buildPipelineSteps,
+      executeChapterGroupRunRecord: execution.executeChapterGroupRunRecord,
+    })
+    const approve = handlers.get('POST /api/novel/projects/:id/chapter-groups/:runId/approve')
+    const retryNow = handlers.get('POST /api/novel/projects/:id/chapter-groups/:runId/retry-now')
+    const skip = handlers.get('POST /api/novel/projects/:id/chapter-groups/:runId/skip-chapter')
+    const execute = handlers.get('POST /api/novel/projects/:id/chapter-groups/:runId/execute')
+    const startWorker = handlers.get('POST /api/novel/projects/:id/run-queue/start-worker')
+
+    const approveResponse = await callRoute(approve, { params: { id: String(project.id), runId: String(approveRun.id) }, body: { chapter_id: 811, stage: 'scene_cards' } })
+    const retryResponse = await callRoute(retryNow, { params: { id: String(project.id), runId: String(retryRun.id) }, body: { chapter_id: 812 } })
+    const skipResponse = await callRoute(skip, { params: { id: String(project.id), runId: String(skipRun.id) }, body: { chapter_id: 813 } })
+    const executeResponse = await callRoute(execute, { params: { id: String(project.id), runId: String(executeRun.id) }, body: { max_chapters: 1 } })
+    const workerResponse = await callRoute(startWorker, {
+      params: { id: String(project.id) },
+      body: { max_runs: 1, max_chapters_per_run: 1 },
+    })
+    await waitUntil(() => ['idle', 'failed'].includes(workers.get(project.id)?.status))
+    const storedWorkerRun = (await listNovelRuns(workspace, project.id)).find(item => item.id === workerRun.id)
+
+    for (const response of [approveResponse, retryResponse, skipResponse, executeResponse]) {
+      expect(response.statusCode).toBe(409)
+      expect(response.body.error_code).toBe('PROSE_ADMISSION_BLOCKED_INVALID')
+    }
+    expect(workerResponse.statusCode).toBe(200)
+    expect(storedWorkerRun?.status).toBe('paused')
+    expect(generateCalls).toEqual([])
+  })
+
   test('rejects approving an unattended approval blocker as a generic manual confirmation', async () => {
     const workspace = await tempWorkspace()
     const production = createNovelProductionService()

@@ -12,7 +12,7 @@ import {
   updateNovelRun,
 } from '../novel'
 import { buildMaterialScore } from './novel-chapter-context-routes'
-import { asArray, buildLLMResultDiagnostics, getNovelPayload, normalizeSceneProduction, parseJsonLikePayload, safeJsonStringify } from './novel-route-utils'
+import { asArray, buildLLMResultDiagnostics, compactText, getNovelPayload, normalizeSceneProduction, parseJsonLikePayload, safeJsonStringify } from './novel-route-utils'
 import { applyChapterWordTargetToContext, countProseChars, normalizeDeliveryRiskReceipts, resolveChapterWordTarget } from './novel-writing-service'
 import { compactProseGenerationOverride } from '../novel-writing/prose-generation-contract'
 
@@ -55,6 +55,44 @@ function approvalBlockerRoutePayload(item: any = {}, payload: any = {}, action =
       type: 'approval_blocker',
       actions: ['按入库阻断原因修订正文', '重新运行正文质检和入库门禁', '确认阻断解除后再继续后续章节生成'],
     },
+  }
+}
+
+function isTerminalAdmissionChapter(item: any = {}, payload: any = {}) {
+  const lastError = payload?.last_error || payload?.lastError || {}
+  return String(item?.admission_status || item?.admissionStatus || lastError?.admission_status || lastError?.admissionStatus || '') === 'blocked_invalid'
+    || String(item?.error_code || item?.errorCode || lastError?.error_code || lastError?.errorCode || '') === 'PROSE_ADMISSION_BLOCKED_INVALID'
+}
+
+function terminalAdmissionRoutePayload(item: any = {}, payload: any = {}, action = '继续') {
+  return {
+    error: `当前章节正文未通过有效性检查且未入库，不能${action}；需要显式修复或重置终态。`,
+    error_code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+    admission_status: 'blocked_invalid',
+    chapter_id: item.id || null,
+    chapter_no: item.chapter_no || null,
+    recovery_plan: payload.last_error?.recovery_plan || item.recovery_plan || {
+      type: 'blocked_invalid',
+      actions: ['显式修复或重置当前章节终态', '重新提交正文生成'],
+    },
+  }
+}
+
+function isLegacyQualityGateApproval(item: any = {}, payload: any = {}, stage = '') {
+  const lastError = payload?.last_error || payload?.lastError || {}
+  const persistedStage = String(item?.approval_stage || item?.approvalStage || lastError?.approval_stage || lastError?.approvalStage || '')
+  const requestedStage = String(stage || '')
+  const errorCode = String(item?.error_code || item?.errorCode || lastError?.error_code || lastError?.errorCode || '')
+  return (persistedStage === 'quality_gate' || requestedStage === 'quality_gate') && errorCode === 'APPROVAL_REQUIRED'
+}
+
+function legacyQualityGateRoutePayload(item: any = {}, action = '继续') {
+  return {
+    error: `旧质量门禁审批项不能${action}触发自动生成；需要显式修复后重新提交。`,
+    error_code: 'APPROVAL_REQUIRED',
+    approval_stage: 'quality_gate',
+    chapter_id: item.id || null,
+    chapter_no: item.chapter_no || null,
   }
 }
 
@@ -1174,7 +1212,9 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const payload = parseJsonLikePayload(run.output_ref) || {}
       const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
       const item = chapters[Number(payload.current_index || 0)] || {}
+      if (isTerminalAdmissionChapter(item, payload)) return res.status(409).json(terminalAdmissionRoutePayload(item, payload, '直接执行'))
       if (isApprovalBlockerChapter(item, payload)) return res.status(409).json(approvalBlockerRoutePayload(item, payload, '直接执行'))
+      if (isLegacyQualityGateApproval(item, payload)) return res.status(409).json(legacyQualityGateRoutePayload(item, '直接执行'))
       const result = await ctx.executeChapterGroupRunRecord(activeWorkspace, project, run, req.body || {})
       res.json({ ok: true, ...result })
     } catch (error) {
@@ -1193,17 +1233,19 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const payload = parseJsonLikePayload(run.output_ref) || {}
       const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
       const chapterId = Number(req.body.chapter_id || 0)
-      const stage = String(req.body.stage || payload.last_error?.approval_stage || 'scene_cards')
       const index = chapterId ? chapters.findIndex((item: any) => Number(item.id) === chapterId) : Number(payload.current_index || 0)
       if (index < 0 || !chapters[index]) return res.status(404).json({ error: 'chapter in run not found' })
       const item = chapters[index]
+      const stage = String(item.approval_stage || item.approvalStage || payload.last_error?.approval_stage || payload.lastError?.approvalStage || req.body.stage || 'scene_cards')
+      if (isTerminalAdmissionChapter(item, payload)) return res.status(409).json(terminalAdmissionRoutePayload(item, payload, '用人工确认直接'))
       if (isApprovalBlockerChapter(item, payload, stage)) return res.status(409).json(approvalBlockerRoutePayload(item, payload, '用人工确认直接'))
+      if (isLegacyQualityGateApproval(item, payload, stage)) return res.status(409).json(legacyQualityGateRoutePayload(item, '用人工确认直接'))
       const approvals = {
         ...(item.approvals || {}),
         [stage]: {
           approved: true,
           approved_at: new Date().toISOString(),
-          note: String(req.body.note || ''),
+          note: compactText(req.body.note || '', 500),
         },
       }
       chapters[index] = {
@@ -1213,11 +1255,22 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         next_run_at: '',
         error: '',
         error_code: '',
+        approval_stage: '',
+        approval_context: null,
         stages: ctx.updateChapterStages(item.stages || [], stage === 'low_score' || stage === 'quality_gate' ? 'review' : stage === 'draft' ? 'draft' : stage, { status: 'success', approved: true }),
       }
+      const clearsLastError = Number(payload.last_error?.id || 0) === Number(item.id || 0)
+        || Number(payload.current_index || 0) === index
       const updated = await updateNovelRun(activeWorkspace, run.id, {
         status: 'ready',
-        output_ref: stringifyNovelGenerationPayload({ ...payload, chapters, current_index: index, phase: `第${item.chapter_no}章已确认，等待继续执行`, approved_at: new Date().toISOString() }),
+        output_ref: stringifyNovelGenerationPayload({
+          ...payload,
+          chapters,
+          current_index: index,
+          phase: `第${item.chapter_no}章已确认，等待继续执行`,
+          approved_at: new Date().toISOString(),
+          last_error: clearsLastError ? null : payload.last_error,
+        }),
         error_message: '',
       })
       res.json({ ok: true, run: updated, group: parseJsonLikePayload(updated?.output_ref) })
@@ -1240,7 +1293,9 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const index = chapterId ? chapters.findIndex((item: any) => Number(item.id) === chapterId) : Number(payload.current_index || 0)
       if (index < 0 || !chapters[index]) return res.status(404).json({ error: 'chapter in run not found' })
       const item = chapters[index]
+      if (isTerminalAdmissionChapter(item, payload)) return res.status(409).json(terminalAdmissionRoutePayload(item, payload, '直接重试'))
       if (isApprovalBlockerChapter(item, payload)) return res.status(409).json(approvalBlockerRoutePayload(item, payload, '直接重试'))
+      if (isLegacyQualityGateApproval(item, payload)) return res.status(409).json(legacyQualityGateRoutePayload(item, '直接重试'))
       chapters[index] = { ...chapters[index], status: 'ready', next_run_at: '', error: '', error_code: '' }
       const updated = await updateNovelRun(activeWorkspace, run.id, {
         status: 'ready',
@@ -1267,7 +1322,9 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const index = chapterId ? chapters.findIndex((item: any) => Number(item.id) === chapterId) : Number(payload.current_index || 0)
       if (index < 0 || !chapters[index]) return res.status(404).json({ error: 'chapter in run not found' })
       const item = chapters[index]
+      if (isTerminalAdmissionChapter(item, payload)) return res.status(409).json(terminalAdmissionRoutePayload(item, payload, '跳过章节'))
       if (isApprovalBlockerChapter(item, payload)) return res.status(409).json(approvalBlockerRoutePayload(item, payload, '跳过章节'))
+      if (isLegacyQualityGateApproval(item, payload)) return res.status(409).json(legacyQualityGateRoutePayload(item, '跳过章节'))
       const stages = (Array.isArray(item.stages) && item.stages.length ? item.stages : ctx.buildChapterGroupStages())
         .map((stage: any) => ['success', 'skipped'].includes(stage.status) ? stage : { ...stage, status: 'skipped', skipped_at: new Date().toISOString() })
       const nextIndex = Number(payload.current_index || 0) <= index ? index + 1 : Number(payload.current_index || 0)

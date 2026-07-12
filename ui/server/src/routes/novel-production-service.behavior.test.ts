@@ -479,6 +479,161 @@ describe('executeChapterGroupRunRecord behavior', () => {
     expect(result.group.results[0].repair_queue.task_count).toBe(1)
   })
 
+  test('reuses one deterministic post-delivery repair queue when source execution is replayed', async () => {
+    const production = createNovelProductionService()
+    const harness = makeRunHarness({
+      chapters: [
+        { id: 25, chapter_no: 33, title: '第三十三章', status: 'pending', stages: production.buildChapterGroupStages() },
+      ],
+      current_index: 0,
+      production_mode: 'full_auto',
+      unattended: { enabled: true, allow_incomplete: true },
+      policy: { quality_threshold: 88, allow_incomplete: true },
+      results: [],
+    })
+    const originalOutput = harness.run.output_ref
+    const generateCalls: number[] = []
+    let repairEvidence = '段落 3'
+    const listRunsWithRepairs = async () => [harness.run, ...harness.appendedRuns]
+    const service = createNovelRunExecutionService({
+      getProject: async () => ({ id: 77, title: '长篇项目', reference_config: {} }),
+      production,
+      listNovelRuns: listRunsWithRepairs,
+      updateNovelRun: harness.updateNovelRun,
+      appendNovelRun: harness.appendNovelRun,
+      generateChapterForGroup: async (_workspace, _projectId, chapterId) => {
+        generateCalls.push(chapterId)
+        return {
+          admission_status: 'accepted_with_warnings',
+          score: 87,
+          revised: false,
+          quality_warnings: [{ source: 'quality', code: 'hook_weak', message: '章尾钩子偏弱' }],
+          story_state_update: {
+            chapter_title_uniqueness_sync: { status: 'ok' },
+            prose_meta_sync: {
+              status: 'warn',
+              summary: '正文元信息复检仍有开放项。',
+              missed_count: 1,
+              evidence: [repairEvidence],
+              next_actions: [`修复 ${repairEvidence}`],
+            },
+            chapter_hook_sync: { status: 'ok' },
+            chapter_blueprint_sync: { status: 'ok' },
+            foreshadowing_delta_sync: { status: 'ok' },
+            deterministic_prose_cleanup: { status: 'ok', risk_count: 0 },
+          },
+        }
+      },
+    } as any)
+
+    const first = await service.executeChapterGroupRunRecord('test-workspace', { id: 77, reference_config: {} }, harness.run, {
+      max_chapters: 1,
+      lock_owner: 'repair-replay-first',
+      allow_incomplete: true,
+    })
+    await harness.updateNovelRun('test-workspace', harness.run.id, {
+      status: 'ready',
+      output_ref: originalOutput,
+      error_message: '',
+    })
+    const second = await service.executeChapterGroupRunRecord('test-workspace', { id: 77, reference_config: {} }, harness.run, {
+      max_chapters: 1,
+      lock_owner: 'repair-replay-second',
+      allow_incomplete: true,
+    })
+    repairEvidence = '段落 7'
+    await harness.updateNovelRun('test-workspace', harness.run.id, {
+      status: 'ready',
+      output_ref: originalOutput,
+      error_message: '',
+    })
+    const third = await service.executeChapterGroupRunRecord('test-workspace', { id: 77, reference_config: {} }, harness.run, {
+      max_chapters: 1,
+      lock_owner: 'repair-replay-changed-detail',
+      allow_incomplete: true,
+    })
+
+    expect(first.status).toBe('success')
+    expect(second.status).toBe('success')
+    expect(third.status).toBe('success')
+    expect(generateCalls).toEqual([25, 25, 25])
+    expect(harness.appendedRuns).toHaveLength(2)
+    expect(first.group.results[0].repair_fingerprint).toBeTruthy()
+    expect(second.group.results[0].repair_fingerprint).toBe(first.group.results[0].repair_fingerprint)
+    expect(second.group.results[0].repair_run_id).toBe(first.group.results[0].repair_run_id)
+    expect(third.group.results[0].repair_fingerprint).not.toBe(first.group.results[0].repair_fingerprint)
+    expect(third.group.results[0].repair_run_id).not.toBe(first.group.results[0].repair_run_id)
+    const repairPayload = JSON.parse(harness.appendedRuns[0].output_ref)
+    expect(repairPayload.repair_fingerprint).toBe(first.group.results[0].repair_fingerprint)
+    expect(repairPayload.tasks).toHaveLength(1)
+    const changedRepairPayload = JSON.parse(harness.appendedRuns[1].output_ref)
+    expect(changedRepairPayload.tasks[0].post_delivery_quality.check.evidence).toEqual(['段落 7'])
+  })
+
+  test('serializes concurrent repair creation for the same deterministic fingerprint', async () => {
+    const production = createNovelProductionService()
+    const harness = makeRunHarness({
+      chapters: [
+        { id: 26, chapter_no: 34, title: '第三十四章', status: 'pending', stages: production.buildChapterGroupStages() },
+      ],
+      current_index: 0,
+      production_mode: 'full_auto',
+      unattended: { enabled: true, allow_incomplete: true },
+      policy: { quality_threshold: 88, allow_incomplete: true },
+      results: [],
+    })
+    const initialRun = { ...harness.run }
+    const generateCalls: number[] = []
+    const service = createNovelRunExecutionService({
+      getProject: async () => ({ id: 77, title: '长篇项目', reference_config: {} }),
+      production,
+      listNovelRuns: async () => [harness.run, ...harness.appendedRuns],
+      updateNovelRun: harness.updateNovelRun,
+      appendNovelRun: async (workspace, data) => {
+        await new Promise(resolve => setTimeout(resolve, 20))
+        return harness.appendNovelRun(workspace, data)
+      },
+      generateChapterForGroup: async (_workspace, _projectId, chapterId) => {
+        generateCalls.push(chapterId)
+        return {
+          admission_status: 'accepted_with_warnings',
+          score: 86,
+          revised: false,
+          story_state_update: {
+            chapter_title_uniqueness_sync: { status: 'ok' },
+            prose_meta_sync: { status: 'warn', summary: '正文元信息复检仍有开放项。', evidence: ['段落 3'] },
+            chapter_hook_sync: { status: 'ok' },
+            chapter_blueprint_sync: { status: 'ok' },
+            foreshadowing_delta_sync: { status: 'ok' },
+            deterministic_prose_cleanup: { status: 'ok', risk_count: 0 },
+          },
+        }
+      },
+    } as any)
+
+    const [first, second] = await Promise.all([
+      service.executeChapterGroupRunRecord('test-workspace', { id: 77, reference_config: {} }, initialRun, {
+        max_chapters: 1,
+        lock_owner: 'concurrent-repair-first',
+        allow_incomplete: true,
+      }),
+      service.executeChapterGroupRunRecord('test-workspace', { id: 77, reference_config: {} }, initialRun, {
+        max_chapters: 1,
+        lock_owner: 'concurrent-repair-second',
+        allow_incomplete: true,
+      }),
+    ])
+
+    expect(first.status).toBe('success')
+    expect(second.status).toBe('success')
+    expect(generateCalls).toEqual([26, 26])
+    expect(harness.appendedRuns).toHaveLength(1)
+    expect(first.group.results[0].repair_fingerprint).toBe(second.group.results[0].repair_fingerprint)
+    expect(first.group.results[0].repair_run_id).toBe(second.group.results[0].repair_run_id)
+    expect(first.group.results[0].repair_queue.reused).toBe(false)
+    expect(second.group.results[0].repair_queue.reused).toBe(true)
+  })
+
   test('advances unattended production when required quality-continuity receipts are missing', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
@@ -1930,6 +2085,17 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
     expect(group.chapters[1].status).toBe('pending')
     expect(JSON.stringify(group)).not.toContain('QUALITY_GATE_RETRY_REQUIRED')
+
+    const resumed = await service.executeChapterGroupRunRecord('test-workspace', { id: 77, reference_config: {} }, harness.run, {
+      max_chapters: 2,
+      lock_owner: 'behavior-test-resume',
+      retry_limit: 3,
+    })
+
+    expect(resumed.status).toBe('paused')
+    expect(resumed.processed).toBe(0)
+    expect(resumed.group.current_index).toBe(0)
+    expect(generateCalls).toEqual([45])
   })
 
   test('does not advance when material repair still leaves the current chapter preflight blocked', async () => {
