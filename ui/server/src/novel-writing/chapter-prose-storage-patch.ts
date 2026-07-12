@@ -6,6 +6,13 @@ export type ChapterProseStoragePatchInput = {
   finalSceneBreakdown: any
   ohStoryDeliveryReceipts: any
   postDraftDirector?: any
+  proseAdmission?: {
+    status: 'accepted' | 'accepted_with_warnings'
+    quality_score: number | null
+    quality_warnings: any[]
+    story_state_status: 'synced' | 'pending'
+    story_state_warning?: any
+  }
 }
 
 export type ChapterProseVersionSourceInput = {
@@ -102,6 +109,10 @@ export function buildChapterProseStoragePatch(input: ChapterProseStoragePatchInp
   if (input.postDraftDirector !== undefined) {
     rawPayload.oh_story_director = input.postDraftDirector
     rawPayload.ohStoryDirector = input.postDraftDirector
+  }
+  if (input.proseAdmission !== undefined) {
+    rawPayload.prose_admission = input.proseAdmission
+    rawPayload.proseAdmission = input.proseAdmission
   }
   Object.assign(rawPayload, {
     chapter_blueprint: receipts?.chapter_blueprint,

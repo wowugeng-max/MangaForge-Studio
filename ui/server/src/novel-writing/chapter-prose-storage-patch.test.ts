@@ -126,6 +126,35 @@ describe('chapter prose storage patch builders', () => {
     expect(patch.raw_payload.ohStoryDirector).toBe(director)
   })
 
+  test('stores prose admission under snake-case and camel-case aliases without disturbing raw payload fields', () => {
+    const proseAdmission = {
+      status: 'accepted_with_warnings' as const,
+      quality_score: null,
+      quality_warnings: [{ code: 'quality_below_preference' }],
+      story_state_status: 'pending' as const,
+      story_state_warning: { code: 'story_state_pending' },
+    }
+    const patch = buildChapterProseStoragePatch({
+      chapter: {
+        raw_payload: {
+          existing: true,
+          prose_admission: { status: 'accepted' },
+          proseAdmission: { status: 'accepted' },
+        },
+      },
+      generatedTitlePatch: {},
+      finalText: '正文内容',
+      finalContinuityNotes: [],
+      finalSceneBreakdown: [],
+      ohStoryDeliveryReceipts: {},
+      proseAdmission,
+    })
+
+    expect(patch.raw_payload.existing).toBe(true)
+    expect(patch.raw_payload.prose_admission).toBe(proseAdmission)
+    expect(patch.raw_payload.proseAdmission).toBe(proseAdmission)
+  })
+
   test('resolves version source for draft, reviewed draft, and full repair storage', () => {
     expect(resolveChapterProseVersionSource({
       revisionEligible: false,
