@@ -556,6 +556,11 @@ describe('prepareStoryStateUpdate', () => {
       const storedChapter = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
 
       expect(storedChapter?.chapter_text).toBe(result.chapter?.chapter_text)
+      expect(storedChapter?.raw_payload?.prose_admission).toMatchObject({
+        status: 'accepted_with_warnings',
+        post_commit_warnings: [expect.objectContaining({ stage: failure })],
+      })
+      expect(result.chapter?.raw_payload?.prose_admission).toEqual(storedChapter?.raw_payload?.prose_admission)
       expect(harness.commitOrder).toEqual(['commit', 'memory'])
       expect(result.post_commit_warnings).toContainEqual(expect.objectContaining({ stage: failure }))
     }

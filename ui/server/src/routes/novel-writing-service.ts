@@ -44246,6 +44246,7 @@ export function createNovelWritingService(ctx: {
       signal: options.abortSignal,
       timeoutMs: options.llmTimeoutMs,
     })
+    assertCompleteProseTransportResult(editorResult, 'PROSE_REVISION_TRUNCATED')
     const payload = getNovelPayload(editorResult)
     const rewrittenChapters = Array.isArray(payload?.prose_chapters)
       ? payload.prose_chapters
@@ -44312,6 +44313,7 @@ export function createNovelWritingService(ctx: {
       signal: options.abortSignal,
       timeoutMs: options.llmTimeoutMs,
     })
+    assertCompleteProseTransportResult(polishResult, 'PROSE_REVISION_TRUNCATED')
     const payload = getNovelPayload(polishResult)
     const polishedChapters = Array.isArray(payload?.prose_chapters)
       ? payload.prose_chapters
@@ -44487,18 +44489,32 @@ export function createNovelWritingService(ctx: {
           ? Math.min(configuredMaxContractionAttempts, Number(sharedBudget.used || 0) + 1)
           : attempt
         if (sharedBudget) sharedBudget.used = globalAttempt
-        const contractionResult = await executeAgent('prose-agent', project, {
-          task: buildProseWordTargetContractionPrompt(project, contextPackage, currentText, currentEvaluation, { attempt: globalAttempt, maxAttempts: configuredMaxContractionAttempts }),
-          upstreamContext: contextPackage,
-        }, {
-          activeWorkspace,
-          modelId: reviseModelId ? String(reviseModelId) : undefined,
-          maxTokens: proseContractionMaxTokensForAttempt(wordTarget, globalAttempt),
-          temperature: Math.min(0.55, ctx.production.getStageTemperature(project, 'revise', 0.55)),
-          skipMemory: true,
-          signal: options.abortSignal,
-          timeoutMs: options.llmTimeoutMs,
-        })
+        let contractionResult: any
+        try {
+          contractionResult = await executeAgent('prose-agent', project, {
+            task: buildProseWordTargetContractionPrompt(project, contextPackage, currentText, currentEvaluation, { attempt: globalAttempt, maxAttempts: configuredMaxContractionAttempts }),
+            upstreamContext: contextPackage,
+          }, {
+            activeWorkspace,
+            modelId: reviseModelId ? String(reviseModelId) : undefined,
+            maxTokens: proseContractionMaxTokensForAttempt(wordTarget, globalAttempt),
+            temperature: Math.min(0.55, ctx.production.getStageTemperature(project, 'revise', 0.55)),
+            skipMemory: true,
+            signal: options.abortSignal,
+            timeoutMs: options.llmTimeoutMs,
+          })
+        } catch (error) {
+          if (isAbortError(error)) throw error
+          contractionAttempts.push({
+            attempt: globalAttempt,
+            previous_count: countProseChars(currentText),
+            returned_text: false,
+            candidate_rejected: true,
+            rejection_reason: 'optional_repair_unavailable',
+            error: formatAdmissionError(error, 200),
+          })
+          break
+        }
         const extracted = extractProseExpansionPayload(contractionResult)
         const contractedText = extracted.text
         const finishReason = normalizeProseContractionFinishReason(contractionResult)
@@ -44644,18 +44660,32 @@ export function createNovelWritingService(ctx: {
 
     for (let attempt = 1; attempt <= maxExpansionAttempts; attempt += 1) {
       throwIfAborted(options)
-      const expansionResult = await executeAgent('prose-agent', project, {
-        task: buildProseWordTargetExpansionPrompt(project, contextPackage, currentText, currentEvaluation, { attempt, maxAttempts: maxExpansionAttempts }),
-        upstreamContext: contextPackage,
-      }, {
-        activeWorkspace,
-        modelId: reviseModelId ? String(reviseModelId) : undefined,
-        maxTokens: proseMaxTokensForWordTarget(wordTarget),
-        temperature: ctx.production.getStageTemperature(project, 'revise', 0.65),
-        skipMemory: true,
-        signal: options.abortSignal,
-        timeoutMs: options.llmTimeoutMs,
-      })
+      let expansionResult: any
+      try {
+        expansionResult = await executeAgent('prose-agent', project, {
+          task: buildProseWordTargetExpansionPrompt(project, contextPackage, currentText, currentEvaluation, { attempt, maxAttempts: maxExpansionAttempts }),
+          upstreamContext: contextPackage,
+        }, {
+          activeWorkspace,
+          modelId: reviseModelId ? String(reviseModelId) : undefined,
+          maxTokens: proseMaxTokensForWordTarget(wordTarget),
+          temperature: ctx.production.getStageTemperature(project, 'revise', 0.65),
+          skipMemory: true,
+          signal: options.abortSignal,
+          timeoutMs: options.llmTimeoutMs,
+        })
+      } catch (error) {
+        if (isAbortError(error)) throw error
+        attempts.push({
+          attempt,
+          previous_count: countProseChars(currentText),
+          returned_text: false,
+          candidate_rejected: true,
+          rejection_reason: 'optional_repair_unavailable',
+          error: formatAdmissionError(error, 200),
+        })
+        break
+      }
       const extracted = extractProseExpansionPayload(expansionResult)
       const expandedText = extracted.text
       const finalEvaluation = applyProseWordTargetSoftCap(evaluateProseWordTarget(expandedText, wordTarget))
@@ -47098,6 +47128,33 @@ export function createNovelWritingService(ctx: {
       const draftReturnedAdmissionStatus = draftPostCommitWarnings.length > 0 && draftModeProseAdmission.status === 'accepted'
         ? 'accepted_with_warnings'
         : draftModeProseAdmission.status
+      if (draftPostCommitWarnings.length > 0) {
+        const finalDraftAdmission = {
+          ...draftModeProseAdmission,
+          status: draftReturnedAdmissionStatus,
+          post_commit_warnings: draftPostCommitWarnings,
+        }
+        let persistedDraft: any = null
+        try {
+          persistedDraft = await updateNovelChapter(activeWorkspace, chapter.id, {
+            raw_payload: {
+              ...(updatedReviewedDraft?.raw_payload || {}),
+              prose_admission: finalDraftAdmission,
+              proseAdmission: finalDraftAdmission,
+            },
+          }, { createVersion: false })
+        } catch (error) {
+          draftPostCommitWarnings.push({ stage: 'admission_metadata', message: formatAdmissionError(error, 300) })
+        }
+        updatedReviewedDraft = persistedDraft || {
+          ...updatedReviewedDraft,
+          raw_payload: {
+            ...(updatedReviewedDraft?.raw_payload || {}),
+            prose_admission: finalDraftAdmission,
+            proseAdmission: finalDraftAdmission,
+          },
+        }
+      }
       return {
         chapter: updatedReviewedDraft,
         score: selfCheck?.review?.score ?? null,
@@ -47429,7 +47486,7 @@ export function createNovelWritingService(ctx: {
         message: '章节原子验收失败，未写入任何业务数据。',
       })
     }
-    const updated = acceptance.chapter
+    let updated = acceptance.chapter
     const postCommitWarnings: Array<{ stage: string; message: string }> = []
     const runPostCommitBestEffort = async (stage: string, task: () => any | Promise<any>) => {
       try {
@@ -47572,6 +47629,33 @@ export function createNovelWritingService(ctx: {
     const returnedAdmissionStatus = postCommitWarnings.length > 0 && proseAdmission.status === 'accepted'
       ? 'accepted_with_warnings'
       : proseAdmission.status
+    if (postCommitWarnings.length > 0) {
+      const finalProseAdmission = {
+        ...proseAdmission,
+        status: returnedAdmissionStatus,
+        post_commit_warnings: postCommitWarnings,
+      }
+      let persisted: any = null
+      try {
+        persisted = await updateNovelChapter(activeWorkspace, chapter.id, {
+          raw_payload: {
+            ...(updated?.raw_payload || {}),
+            prose_admission: finalProseAdmission,
+            proseAdmission: finalProseAdmission,
+          },
+        }, { createVersion: false })
+      } catch (error) {
+        postCommitWarnings.push({ stage: 'admission_metadata', message: formatAdmissionError(error, 300) })
+      }
+      updated = persisted || {
+        ...updated,
+        raw_payload: {
+          ...(updated?.raw_payload || {}),
+          prose_admission: finalProseAdmission,
+          proseAdmission: finalProseAdmission,
+        },
+      }
+    }
     return {
       chapter: updated,
       score: selfCheck?.review?.score ?? null,

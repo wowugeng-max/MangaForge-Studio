@@ -37,14 +37,18 @@ type ProsePipelineHarnessOptions = {
   draftText?: string
   draftResult?: any
   editorText?: string
+  editorResult?: any
   editorSceneBreakdown?: any[]
   editorContinuityNotes?: string[]
   memeText?: string
+  memeResult?: any
   enableMemePolish?: boolean
   reviewPayloads?: any[]
   revisionTexts?: string[]
   revisionResults?: any[]
   recheckError?: Error
+  contractionError?: Error
+  expansionError?: Error
   memoryError?: Error
   contextPackageOverride?: any
   storyStatePayload?: any
@@ -127,7 +131,7 @@ export async function createProsePipelineHarness(
   const reviewPayloads = [...(options.reviewPayloads || [])]
   const revisionTexts = [...(options.revisionTexts || [])]
   const revisionResults = [...(options.revisionResults || [])]
-  const modelCalls = { scene_cards: 0, draft: 0, review: 0, revision: 0, editor: 0, contraction: 0, story_state: 0, other: 0 }
+  const modelCalls = { scene_cards: 0, draft: 0, review: 0, revision: 0, editor: 0, meme: 0, contraction: 0, expansion: 0, story_state: 0, other: 0 }
   const storyStateTexts: string[] = []
   const memoryTexts: string[] = []
   const commitOrder: string[] = []
@@ -195,13 +199,22 @@ export async function createProsePipelineHarness(
     }
     if (task.startsWith('任务：将本章正文压缩')) {
       modelCalls.contraction += 1
+      if (options.contractionError) throw options.contractionError
       return { parsed: {}, finish_reason: 'stop', modelName: 'fake-contraction' } as any
     }
+    if (task.startsWith('任务：将本章正文扩写')) {
+      modelCalls.expansion += 1
+      if (options.expansionError) throw options.expansionError
+      return { parsed: {}, finish_reason: 'stop', modelName: 'fake-expansion' } as any
+    }
     if (task.startsWith('任务：克制型网感润色')) {
+      modelCalls.meme += 1
+      if (options.memeResult !== undefined) return options.memeResult
       return { parsed: { chapter_text: options.memeText || draftText, meme_polish_report: { changed_plot: false } }, modelName: 'fake-meme' } as any
     }
     if (task.includes('商业主编')) {
       modelCalls.editor += 1
+      if (options.editorResult !== undefined) return options.editorResult
       return {
         parsed: {
           chapter_text: options.editorText || draftText,

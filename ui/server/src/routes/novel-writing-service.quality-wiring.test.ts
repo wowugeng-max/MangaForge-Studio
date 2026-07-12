@@ -731,6 +731,80 @@ describe('novel writing service prose quality wiring', () => {
     expect(harness.memoryTexts).toEqual([after?.chapter_text])
   })
 
+  test('stores complete overlong prose when optional contraction transport throws', async () => {
+    const draftText = buildPipelineProse('江澈撞断路灯，抢在合围闭合前切入铁门。', '主动夺取追捕队的通讯器').repeat(7).slice(0, 6596)
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText,
+      chapterWordTarget: { mode: 'custom', target: 1000 },
+      contractionError: new Error('optional contraction provider unavailable'),
+    })
+
+    const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+      model_id: 217,
+      production_mode: 'draft_only',
+    })
+    const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+
+    expect(result.admission_status).toBe('accepted_with_warnings')
+    expect(result.quality_warnings).toContainEqual(expect.objectContaining({ source: 'word_target', code: 'word_target_long' }))
+    expect(stored?.chapter_text).toBe(normalizeProseForStorage(draftText))
+    expect(harness.modelCalls.contraction).toBe(1)
+  })
+
+  test('stores complete short prose when optional expansion transport throws', async () => {
+    const draftText = buildPipelineProse('江澈撞开铁门，追兵的包围线被迫后撤。', '主动夺下通讯器并推进追击').slice(0, 960)
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText,
+      chapterWordTarget: { mode: 'custom', target: 1800 },
+      expansionError: new Error('optional expansion provider unavailable'),
+    })
+
+    const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+      model_id: 217,
+      production_mode: 'draft_only',
+    })
+    const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+
+    expect(result.admission_status).toBe('accepted_with_warnings')
+    expect(result.quality_warnings).toContainEqual(expect.objectContaining({ source: 'word_target', code: 'word_target_short' }))
+    expect(stored?.chapter_text).toBe(normalizeProseForStorage(draftText))
+    expect(harness.modelCalls.expansion).toBe(1)
+  })
+
+  test('keeps complete prose when editor returns a long-enough but transport-truncated rewrite', async () => {
+    const draftText = buildPipelineProse('江澈撞开铁门，追兵的包围线被迫后撤。', '主动夺下通讯器并推进追击')
+    const truncatedEditorText = draftText.slice(0, Math.floor(draftText.length * 0.9))
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText,
+      editorResult: { parsed: { chapter_text: truncatedEditorText, editor_report: { passed: true } }, finish_reason: 'length', modelName: 'fake-editor' },
+    })
+
+    const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, { model_id: 217, target_word_count: 1000 })
+
+    expect(result.chapter?.chapter_text).toBe(normalizeProseForStorage(draftText))
+    expect(result.admission_status).toBe('accepted_with_warnings')
+    expect(result.quality_warnings).toContainEqual(expect.objectContaining({ code: 'editor_unavailable', source: 'review' }))
+    expect(harness.modelCalls.editor).toBe(1)
+  })
+
+  test('keeps complete prose when meme polish returns a long-enough but transport-truncated rewrite', async () => {
+    const draftText = buildPipelineProse('江澈撞开铁门，追兵的包围线被迫后撤。', '主动夺下通讯器并推进追击')
+    const truncatedMemeText = draftText.slice(0, Math.floor(draftText.length * 0.95))
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText,
+      editorText: draftText,
+      enableMemePolish: true,
+      memeResult: { parsed: { chapter_text: truncatedMemeText, meme_polish_report: { changed_plot: false } }, raw: { choices: [{ finish_reason: 'length' }] }, modelName: 'fake-meme' },
+    })
+
+    const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, { model_id: 217, target_word_count: 1000 })
+
+    expect(result.chapter?.chapter_text).toBe(normalizeProseForStorage(draftText))
+    expect(result.admission_status).toBe('accepted_with_warnings')
+    expect(result.quality_warnings).toContainEqual(expect.objectContaining({ code: 'meme_polish_unavailable', source: 'review' }))
+    expect(harness.modelCalls.meme).toBe(1)
+  })
+
   test('restores earned-compatible prose when editor exceeds the compatibility ceiling', async () => {
     const draftText = buildPipelineProse('江澈撞断路灯，切入铁门。', '主动夺取通讯器').repeat(7).slice(0, 6596)
     const harness = await createProsePipelineHarness(createNovelWritingService, { draftText, editorText: '编'.repeat(7000), chapterWordTarget: { mode: 'standard' } })
@@ -1690,6 +1764,11 @@ describe('novel writing service prose quality wiring', () => {
     expect(result.admission_status).toBe('accepted_with_warnings')
     expect(result.post_commit_warnings).toContainEqual(expect.objectContaining({ stage: 'memory' }))
     expect(stored?.chapter_text).toBe(finalText)
+    expect(stored?.raw_payload?.prose_admission).toMatchObject({
+      status: 'accepted_with_warnings',
+      post_commit_warnings: [expect.objectContaining({ stage: 'memory' })],
+    })
+    expect(result.chapter?.raw_payload?.prose_admission).toEqual(stored?.raw_payload?.prose_admission)
     expect(harness.memoryTexts).toEqual([finalText])
     expect(harness.storeCalls).toBe(1)
     expect(harness.storyStateCalls).toBe(1)

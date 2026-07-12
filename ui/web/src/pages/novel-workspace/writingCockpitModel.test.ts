@@ -3000,6 +3000,16 @@ describe('buildWritingCockpitModel', () => {
           },
         },
       })],
+      activeRuns: [{
+        id: 901,
+        created_at: '2026-07-13T12:00:00.000Z',
+        output_ref: JSON.stringify({
+          chapter_id: warningChapter.id,
+          chapter_no: warningChapter.chapter_no,
+          admission_status: 'accepted',
+          story_state_status: 'synced',
+        }),
+      }],
     })
 
     expect(model.chapterAcceptanceDesk.statusLabel).toBe('已入库，建议修订')
