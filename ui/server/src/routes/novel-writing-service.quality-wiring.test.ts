@@ -412,7 +412,17 @@ describe('novel writing service prose quality wiring', () => {
     const service = createContractionService({
       content: `{"prose_chapters":[{"chapter_no":1,"chapter_text":"${candidateText}`,
       finish_reason: 'LeNgTh',
-      usage: { input_tokens: 120, output_tokens: 1000, total_tokens: 1120 },
+      modelName: 'unsafe-model\nMODEL_METADATA_SECRET',
+      usage: {
+        input_tokens: 120,
+        prompt_tokens: 121,
+        output_tokens: 1000,
+        completion_tokens: 1001,
+        total_tokens: 1120,
+        cached_tokens: 7,
+        secret_token: 'ATTEMPT_USAGE_SECRET',
+        nested: { candidate_text: candidateText },
+      },
     })
 
     const result = await service.ensureProseMeetsWordTarget(
@@ -432,7 +442,14 @@ describe('novel writing service prose quality wiring', () => {
     const attempt = result.contraction?.attempts?.[0]
     expect(attempt).toMatchObject({
       finish_reason: 'length',
-      model_usage: { output_tokens: 1000 },
+      model_usage: {
+        input_tokens: 120,
+        prompt_tokens: 121,
+        output_tokens: 1000,
+        completion_tokens: 1001,
+        total_tokens: 1120,
+        cached_tokens: 7,
+      },
       returned_text: true,
       candidate_rejected: true,
       recovered_from_partial_json: true,
@@ -441,6 +458,9 @@ describe('novel writing service prose quality wiring', () => {
     expect(attempt?.rejection_reason).toContain('finish_reason_length')
     expect(attempt).not.toHaveProperty('candidate_text')
     expect(attempt).not.toHaveProperty('prompt')
+    expect(attempt).not.toHaveProperty('modelName')
+    expect(JSON.stringify(attempt)).not.toContain('ATTEMPT_USAGE_SECRET')
+    expect(JSON.stringify(attempt)).not.toContain('MODEL_METADATA_SECRET')
   })
 
   test('never selects a closed chapter string recovered from a max-token truncated JSON envelope during contraction', async () => {
@@ -719,6 +739,57 @@ describe('novel writing service prose quality wiring', () => {
     expect(result.final_evaluation.actual).toBe(700)
     expect(result.word_target_warning).toMatchObject({ code: 'word_target_short', source: 'word_target' })
     expect(result.expansion.attempts[1]).toMatchObject({ candidate_rejected: true })
+  })
+
+  test('keeps deterministic longest-expansion ranking and the first complete candidate on ties', async () => {
+    const candidate = (char: string, count: number, label: string) => ({
+      parsed: {
+        chapter_text: char.repeat(count),
+        scene_breakdown: [{ title: `scene-${label}` }],
+        continuity_notes: [`note-${label}`],
+        expansion_blueprint_patch: { winner: label },
+      },
+      finish_reason: 'stop',
+      modelName: label === 'unsafe' ? 'bad\nEXPANSION_MODEL_SECRET' : `safe-${label}`,
+      usage: {
+        input_tokens: 10,
+        output_tokens: count,
+        total_tokens: count + 10,
+        secret: 'EXPANSION_USAGE_SECRET',
+        nested: { chapter_text: char.repeat(count) },
+      },
+    })
+    const cases = [
+      { results: [candidate('甲', 650, 'unsafe'), candidate('乙', 700, 'long')], winner: 'long', text: '乙'.repeat(700) },
+      { results: [candidate('乙', 700, 'long'), candidate('甲', 650, 'short')], winner: 'long', text: '乙'.repeat(700) },
+      { results: [candidate('丙', 700, 'first'), candidate('丁', 700, 'second')], winner: 'first', text: '丙'.repeat(700) },
+    ]
+
+    for (const testCase of cases) {
+      const results = [...testCase.results]
+      const service = createNovelWritingService({
+        getProject: async () => null,
+        production: { getStageModelId: (_p: any, _s: string, f?: number) => f || 217, getStageTemperature: (_p: any, _s: string, f: number) => f } as any,
+        reference: {} as any,
+        runtime: { executeAgent: async () => results.shift() },
+      })
+      const result = await service.ensureProseMeetsWordTarget(
+        '/tmp/expansion-ranking', { id: 1 }, { chapter_target: { word_target: contractionWordTarget } },
+        '原'.repeat(500), 217, { maxExpansionAttempts: 2 },
+      )
+
+      expect(result.final_text).toBe(testCase.text)
+      expect(result.expansion).toMatchObject({
+        scene_breakdown: [{ title: `scene-${testCase.winner}` }],
+        continuity_notes: [`note-${testCase.winner}`],
+        expansion_blueprint_patch: { winner: testCase.winner },
+        modelName: `safe-${testCase.winner}`,
+      })
+      expect(result.expansion.attempts[0].model_usage).toEqual(expect.objectContaining({ input_tokens: 10 }))
+      expect(JSON.stringify(result.expansion)).not.toContain('EXPANSION_USAGE_SECRET')
+      expect(JSON.stringify(result.expansion)).not.toContain('EXPANSION_MODEL_SECRET')
+      expect(JSON.stringify(result.expansion)).not.toContain('chapter_text')
+    }
   })
 
   test('routes a complete mildly short contraction through expansion instead of preserving the overlong draft', async () => {

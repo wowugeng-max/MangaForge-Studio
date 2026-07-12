@@ -44346,6 +44346,21 @@ export function createNovelWritingService(ctx: {
     let bestCompleteText = currentText
     let bestCompleteEvaluation = currentEvaluation
     let bestCompleteContractionPayload: any = null
+    let bestCompleteExpansionPayload: any = null
+    const sanitizeWordTargetUsage = (value: any) => {
+      const source = value && typeof value === 'object' && !Array.isArray(value) ? value : null
+      if (!source) return null
+      const usage = Object.fromEntries(
+        ['input_tokens', 'prompt_tokens', 'output_tokens', 'completion_tokens', 'total_tokens', 'cached_tokens']
+          .filter(key => typeof source[key] === 'number' && Number.isFinite(source[key]) && source[key] >= 0)
+          .map(key => [key, Math.floor(source[key])]),
+      )
+      return Object.keys(usage).length ? usage : null
+    }
+    const sanitizeWordTargetModelName = (value: any) => {
+      const modelName = String(value || '').trim()
+      return /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/.test(modelName) ? modelName : ''
+    }
     const wordTargetDistance = (candidateEvaluation: any) => candidateEvaluation.too_long
       ? Math.max(0, Number(candidateEvaluation.actual || 0) - Number(candidateEvaluation.max || 0))
       : candidateEvaluation.too_short
@@ -44453,11 +44468,9 @@ export function createNovelWritingService(ctx: {
           previous_count: previousCount,
           contracted_count: contractedCount,
           evaluation: finalEvaluation,
-          modelName: (contractionResult as any).modelName,
           finish_reason: finishReason,
-          model_usage: (contractionResult as any).usage
-            || (contractionResult as any).raw?.usage
-            || null,
+          model_usage: sanitizeWordTargetUsage((contractionResult as any).usage)
+            || sanitizeWordTargetUsage((contractionResult as any).raw?.usage),
           incomplete_reason: incompleteReason,
           returned_text: Boolean(contractedText),
           candidate_rejected: candidateRejected,
@@ -44469,12 +44482,13 @@ export function createNovelWritingService(ctx: {
 
         if (candidateRejected) continue
 
+        const candidateModelName = sanitizeWordTargetModelName((contractionResult as any).modelName)
         const candidatePayload = {
           scene_breakdown: extracted.scene_breakdown,
           continuity_notes: extracted.continuity_notes,
           contraction_report: extracted.payload?.contraction_report || extracted.payload?.contractionReport || null,
           attempts: contractionAttempts,
-          modelName: (contractionResult as any).modelName,
+          ...(candidateModelName ? { modelName: candidateModelName } : {}),
         }
         if (isExplicitlyCompleteProseContractionFinishReason(finishReason)) {
           rememberBestCompleteCandidate(contractedText, finalEvaluation, candidatePayload)
@@ -44606,7 +44620,8 @@ export function createNovelWritingService(ctx: {
         previous_count: previousCount,
         expanded_count: expandedCount,
         evaluation: finalEvaluation,
-        modelName: (expansionResult as any).modelName,
+        model_usage: sanitizeWordTargetUsage((expansionResult as any).usage)
+          || sanitizeWordTargetUsage((expansionResult as any).raw?.usage),
         returned_text: Boolean(expandedText),
         finish_reason: finishReason,
         candidate_rejected: candidateRejected,
@@ -44617,12 +44632,20 @@ export function createNovelWritingService(ctx: {
         currentText = expandedText
         currentEvaluation = finalEvaluation
         if (expandedCount > countProseChars(bestCompleteText)) {
+          const candidateModelName = sanitizeWordTargetModelName((expansionResult as any).modelName)
           bestCompleteText = expandedText
           bestCompleteEvaluation = finalEvaluation
+          bestCompleteExpansionPayload = {
+            scene_breakdown: extracted.scene_breakdown,
+            continuity_notes: extracted.continuity_notes,
+            expansion_blueprint_patch: extracted.expansion_blueprint_patch,
+            ...(candidateModelName ? { modelName: candidateModelName } : {}),
+          }
         }
       }
 
       if (!candidateRejected && expandedText && expandedCount > previousCount && finalEvaluation.passed) {
+        const candidateModelName = sanitizeWordTargetModelName((expansionResult as any).modelName)
         return {
           final_text: expandedText,
           contracted: Boolean(contractionResultPayload),
@@ -44635,7 +44658,7 @@ export function createNovelWritingService(ctx: {
             continuity_notes: extracted.continuity_notes,
             expansion_blueprint_patch: extracted.expansion_blueprint_patch,
             attempts,
-            modelName: (expansionResult as any).modelName,
+            ...(candidateModelName ? { modelName: candidateModelName } : {}),
           },
         }
       }
@@ -44649,6 +44672,7 @@ export function createNovelWritingService(ctx: {
       final_evaluation: bestCompleteEvaluation,
       contraction: contractionResultPayload,
       expansion: {
+        ...(bestCompleteExpansionPayload || {}),
         attempts,
       },
       word_target_warning: buildWordTargetWarning(bestCompleteEvaluation),

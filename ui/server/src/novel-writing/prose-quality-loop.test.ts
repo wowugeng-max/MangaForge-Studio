@@ -1000,6 +1000,81 @@ describe('bounded prose quality loop', () => {
     expect(result.quality_warning).toMatchObject({ code: 'quality_recheck_unavailable', source: 'review' })
   })
 
+  test('retains fresh deterministic hard failures when revised prose recheck is unavailable', async () => {
+    let reviewCalls = 0
+    const revisedText = '修订正文仍有确定性冲突。'.repeat(120)
+    const result = await runProseQualityLoop({
+      initialText: '初稿问题。'.repeat(120),
+      minScore: 78,
+      scan: text => ({
+        hard_failures: text === revisedText
+          ? [{ key: 'canonical_conflict', message: '修订正文仍与既有事实冲突' }]
+          : [],
+      }),
+      review: async () => {
+        reviewCalls += 1
+        if (reviewCalls > 1) return {}
+        return {
+          score: 70,
+          dimensions: sixDimensionScores,
+          findings: [{
+            key: 'hook', severity: 'S2', dimension: 'payoff_hook', evidence: '初稿问题。',
+            required_change: '补章末问题', acceptance_test: '末段形成翻页理由',
+          }],
+        }
+      },
+      revise: async () => ({ final_text: revisedText }),
+    })
+
+    expect(result.final_text).toBe(revisedText)
+    expect(result.decision).toMatchObject({
+      passed: false,
+      approvable: false,
+      hard_failures: [{ key: 'canonical_conflict', message: '修订正文仍与既有事实冲突', source: 'deterministic' }],
+    })
+    expect(result.decision.hard_failures.some(item => item.source === 'llm')).toBe(false)
+  })
+
+  test('rethrows abort-like initial review and recheck control flow', async () => {
+    for (const abortError of [
+      Object.assign(new Error('operation aborted'), { name: 'AbortError' }),
+      Object.assign(new Error('request canceled'), { code: 'ABORT_ERR' }),
+      Object.assign(new Error('request canceled'), { code: 'REQUEST_CANCELED' }),
+      Object.assign(new Error('canceled'), { code: 'ERR_CANCELED' }),
+    ]) {
+      const initialCaught = await runProseQualityLoop({
+        initialText: '初稿。'.repeat(120),
+        minScore: 78,
+        scan: () => ({ hard_failures: [] }),
+        review: async () => { throw abortError },
+        revise: async () => ({ final_text: '不会调用。' }),
+      }).then(() => null, error => error)
+      expect(initialCaught).toBe(abortError)
+    }
+
+    const recheckAbort = Object.assign(new Error('request canceled'), { code: 'REQUEST_CANCELED' })
+    let reviewCalls = 0
+    const recheckCaught = await runProseQualityLoop({
+      initialText: '初稿问题。'.repeat(120),
+      minScore: 78,
+      scan: () => ({ hard_failures: [] }),
+      review: async () => {
+        reviewCalls += 1
+        if (reviewCalls > 1) throw recheckAbort
+        return {
+          score: 70,
+          dimensions: sixDimensionScores,
+          findings: [{
+            key: 'hook', severity: 'S2', dimension: 'payoff_hook', evidence: '初稿问题。',
+            required_change: '补章末问题', acceptance_test: '末段形成翻页理由',
+          }],
+        }
+      },
+      revise: async () => ({ final_text: '修订正文。'.repeat(120) }),
+    }).then(() => null, error => error)
+    expect(recheckCaught).toBe(recheckAbort)
+  })
+
   test('treats an empty structured recheck as unavailable', async () => {
     let reviewCalls = 0
     const result = await runProseQualityLoop({
@@ -1152,10 +1227,10 @@ describe('bounded prose quality loop', () => {
       },
       decision: {
         passed: false,
-        approvable: true,
+        approvable: false,
         score: 0,
         min_score: 78,
-        hard_failures: [],
+        hard_failures: [{ key: 'existing_scan_result', message: '保留扫描结果', source: 'deterministic' }],
       },
       rounds: [],
       quality_warning: { code: 'quality_review_unavailable', source: 'review' },
@@ -1169,7 +1244,7 @@ describe('bounded prose quality loop', () => {
     const callbackFailure = await runProseQualityLoop({
       initialText,
       minScore: 78,
-      scan: () => scan,
+      scan: () => ({ hard_failures: [] }),
       review: async () => { throw new Error('MODEL_PROVIDER_SENTINEL') },
       revise: async () => ({ final_text: '不会调用。' }),
     })

@@ -509,6 +509,23 @@ function compactProseQualityWarningDiagnostics(error: any) {
   }
 }
 
+function isAbortLikeProseQualityError(error: any) {
+  const name = String(error?.name || '').trim().toLowerCase()
+  const code = String(error?.code || '').trim().toLowerCase()
+  const message = String(error?.message || '').trim().toLowerCase()
+  return name === 'aborterror'
+    || ['abort_err', 'aborted', 'err_canceled', 'err_cancelled', 'request_canceled', 'request_cancelled'].includes(code)
+    || /(?:request|operation) (?:was )?(?:canceled|cancelled|aborted)/.test(message)
+}
+
+function deterministicProseQualityHardFailures(scan: any): ProseQualityDecision['hard_failures'] {
+  return (Array.isArray(scan?.hard_failures) ? scan.hard_failures : []).map((item: any) => ({
+    key: compactQualityText(item?.key || 'deterministic_prose', 100),
+    message: compactQualityText(item?.message || item?.evidence || item?.fix || item?.key || '确定性正文检查未通过'),
+    source: 'deterministic' as const,
+  }))
+}
+
 function normalizeProseQualityFinishReason(value: any) {
   const reason = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_')
   if (['stop', 'end_turn', 'stop_sequence', 'completed'].includes(reason)) return 'stop'
@@ -627,18 +644,20 @@ export async function runProseQualityLoop(input: {
       }),
     })
   } catch (error) {
+    if (isAbortLikeProseQualityError(error)) throw error
     const message = 'quality_review_unavailable：正文独立质检不可用，已保留完整正文'
     const review = normalizeProseQualityReview(null)
+    const hardFailures = deterministicProseQualityHardFailures(scan)
     return {
       final_text: finalText,
       final_scan: scan,
       final_review: review,
       decision: {
         passed: false,
-        approvable: true,
+        approvable: hardFailures.length === 0,
         score: 0,
         min_score: Number.isFinite(Number(input.minScore)) ? Number(input.minScore) : 0,
-        hard_failures: [],
+        hard_failures: hardFailures,
         advisory_failures: [message],
       },
       rounds,
@@ -715,13 +734,15 @@ export async function runProseQualityLoop(input: {
       review = normalizeProseQualityReview(recheckPayload)
       classification = classifyProseQualityBlockingFindings(review, finalText, scan)
     } catch (error) {
+      if (isAbortLikeProseQualityError(error)) throw error
       const message = `quality_recheck_unavailable：正文第 ${round} 轮修订后的独立复检不可用，已保留完整修订正文`
+      const hardFailures = deterministicProseQualityHardFailures(scan)
       decision = {
         passed: false,
-        approvable: true,
+        approvable: hardFailures.length === 0,
         score: Number(review?.score || 0),
         min_score: Number.isFinite(Number(input.minScore)) ? Number(input.minScore) : 0,
-        hard_failures: [],
+        hard_failures: hardFailures,
         advisory_failures: Array.from(new Set([
           ...decision.advisory_failures,
           message,
