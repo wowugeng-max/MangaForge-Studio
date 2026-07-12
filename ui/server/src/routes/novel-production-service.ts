@@ -135,6 +135,55 @@ function compactRunConfigSnapshot(snapshot: any = {}) {
   return compactRunStateValue(snapshot)
 }
 
+function compactWarningList(value: any) {
+  const source = Array.isArray(value) ? value : value ? [value] : []
+  const seen = new Set<string>()
+  return source
+    .map(item => compactRunStateValue(item))
+    .filter(item => item !== undefined && item !== null && item !== '')
+    .filter(item => {
+      const fingerprint = stableStringify(item)
+      if (seen.has(fingerprint)) return false
+      seen.add(fingerprint)
+      return true
+    })
+    .slice(0, RUN_STATE_ARRAY_LIMIT)
+}
+
+function collectChapterWarnings(chapterResult: any = {}, postDeliveryQuality: any = null) {
+  const qualityWarnings = compactWarningList(chapterResult.quality_warnings || chapterResult.qualityWarnings)
+  const postCommitWarnings = compactWarningList(chapterResult.post_commit_warnings || chapterResult.postCommitWarnings)
+  const storyStateStatus = String(chapterResult.story_state_status || chapterResult.storyStateStatus || '')
+  const storyStateWarning = chapterResult.story_state_warning || chapterResult.storyStateWarning
+  const storyStateWarnings = storyStateStatus === 'pending' || storyStateWarning
+    ? compactWarningList(storyStateWarning || { source: 'story_state', status: storyStateStatus || 'pending', message: 'Story State 同步待完成。' })
+    : []
+  const postDeliveryWarnings = compactWarningList(
+    Array.isArray(postDeliveryQuality?.checks)
+      ? postDeliveryQuality.checks
+        .filter((check: any) => String(check?.status || '') !== 'ok')
+        .map((check: any) => ({
+          source: 'post_delivery_quality',
+          code: check.key || 'open_check',
+          status: check.status || 'warn',
+          message: check.summary || `${check.label || check.key || '交付后检查'}未闭环。`,
+        }))
+      : [],
+  )
+  const warnings = compactWarningList([
+    ...qualityWarnings,
+    ...postCommitWarnings,
+    ...storyStateWarnings,
+    ...postDeliveryWarnings,
+  ])
+  return {
+    quality_warnings: qualityWarnings,
+    post_commit_warnings: postCommitWarnings,
+    warnings,
+    warning_count: warnings.length,
+  }
+}
+
 function compactRunStage(stage: any = {}) {
   if (!stage || typeof stage !== 'object') return stage
   return compactRunStateValue({
@@ -169,6 +218,12 @@ function compactRunChapterItem(item: any = {}) {
     score: item.score,
     revised: item.revised,
     attempts: item.attempts,
+    admission_status: item.admission_status || item.admissionStatus,
+    story_state_status: item.story_state_status || item.storyStateStatus,
+    quality_warnings: compactWarningList(item.quality_warnings || item.qualityWarnings),
+    warnings: compactWarningList(item.warnings),
+    post_commit_warnings: compactWarningList(item.post_commit_warnings || item.postCommitWarnings),
+    warning_count: item.warning_count ?? item.warningCount ?? 0,
     next_run_at: item.next_run_at ?? item.nextRunAt ?? '',
     approval_stage: item.approval_stage || item.approvalStage,
     approval_context: item.approval_context || item.approvalContext,
@@ -222,6 +277,7 @@ function isAbortLikeError(error: any) {
 
 function buildReturnedApprovalBlocker(chapterResult: any = {}, qualityThreshold: any = 0) {
   const payload = chapterResult || {}
+  const admissionStatus = String(payload.admission_status || payload.admissionStatus || '')
   const explicitBlocker = payload.approval_blocker || payload.approvalBlocker
   if (explicitBlocker) {
     const blocker = typeof explicitBlocker === 'object' ? explicitBlocker : { detail: String(explicitBlocker) }
@@ -248,6 +304,19 @@ function buildReturnedApprovalBlocker(chapterResult: any = {}, qualityThreshold:
       source: 'safety_decision',
     }
   }
+
+  if (admissionStatus === 'blocked_invalid') {
+    return {
+      type: 'blocked_invalid',
+      label: '正文入库阻断',
+      detail: compactText(payload.error || payload.message || '正文未通过有效性检查，未入库。', 240),
+      score: payload.score ?? null,
+      reasons: Array.isArray(payload.reasons) ? payload.reasons : [],
+      source: 'admission_status',
+    }
+  }
+
+  if (admissionStatus === 'accepted' || admissionStatus === 'accepted_with_warnings') return null
 
   const qualityGate = payload.quality_gate || payload.qualityGate || payload.self_check?.quality_gate || payload.selfCheck?.qualityGate || {}
   if (qualityGate?.passed === false) {
@@ -285,12 +354,14 @@ function findExistingApprovalBlocker(payload: any = {}) {
   const lastError = payload.last_error || payload.lastError || {}
   const approvalStage = String(item.approval_stage || item.approvalStage || lastError.approval_stage || lastError.approvalStage || '')
   const errorCode = String(item.error_code || item.errorCode || lastError.error_code || lastError.errorCode || '')
-  if (approvalStage !== 'approval_blocker' && errorCode !== 'APPROVAL_BLOCKER') return null
+  const isAdmissionBlocker = approvalStage === 'approval_blocker' || errorCode === 'APPROVAL_BLOCKER'
+  const isLegacyApproval = errorCode === 'APPROVAL_REQUIRED' && Boolean(approvalStage)
+  if (!isAdmissionBlocker && !isLegacyApproval) return null
   return {
     item,
     index,
     error: item.error || lastError.error || '当前章节存在入库阻断，不能直接执行绕过。',
-    error_code: 'APPROVAL_BLOCKER_REQUIRES_REPAIR',
+    error_code: isAdmissionBlocker ? 'APPROVAL_BLOCKER_REQUIRES_REPAIR' : 'APPROVAL_REQUIRED',
     recovery_plan: lastError.recovery_plan || lastError.recoveryPlan || item.recovery_plan || item.recoveryPlan || {
       type: 'approval_blocker',
       actions: ['按入库阻断原因修订正文', '重新运行正文质检和入库门禁', '确认阻断解除后再继续后续章节生成'],
@@ -309,6 +380,8 @@ function syncCheckStatus(value: any) {
 
 function buildOhStoryPostDeliveryQuality(chapterResult: any = {}, chapter: any = {}) {
   const state = chapterResult.story_state_update || chapterResult.storyStateUpdate || {}
+  const storyStateStatus = String(chapterResult.story_state_status || chapterResult.storyStateStatus || '')
+  const storyStateWarning = chapterResult.story_state_warning || chapterResult.storyStateWarning
   const syncs: Record<string, any> = {
     title_uniqueness: state.chapter_title_uniqueness_sync || state.chapterTitleUniquenessSync,
     prose_meta: state.prose_meta_sync || state.proseMetaSync,
@@ -316,7 +389,9 @@ function buildOhStoryPostDeliveryQuality(chapterResult: any = {}, chapter: any =
     blueprint_consumption: state.chapter_blueprint_sync || state.chapterBlueprintSync,
     foreshadowing_delta: state.foreshadowing_delta_sync || state.foreshadowingDeltaSync,
     deterministic_cleanup: state.deterministic_prose_cleanup || state.deterministicProseCleanup,
-    story_state: state?.error ? { status: 'warn', summary: state.error } : { status: state?.skipped ? 'unknown' : 'ok' },
+    story_state: storyStateStatus === 'pending' || storyStateWarning || state?.error
+      ? { status: 'warn', summary: storyStateWarning?.error || storyStateWarning?.message || storyStateWarning?.summary || storyStateWarning || state.error || 'Story State 同步待完成。' }
+      : { status: state?.skipped ? 'unknown' : 'ok' },
   }
   const sourceReadinessSync = state.source_readiness_sync || state.sourceReadinessSync
   if (sourceReadinessSync) syncs.source_readiness = sourceReadinessSync
@@ -889,7 +964,7 @@ function buildPostDeliveryQualityRepairTasks(chapter: any = {}, postDeliveryQual
         acceptance_criteria: [
           `${label}复检状态为 ok。`,
           '重新运行当前章节交付后质检后，post_delivery_quality.checks 中该项不再为 warn/unknown。',
-          '确认 Step 3 全部 ok 后，再继续无人值守下一章。',
+          '正文已入库；该任务可异步修订或同步，不阻塞无人值守下一章。',
         ],
       }
     })
@@ -1261,7 +1336,7 @@ export function createNovelRunExecutionService(ctx: {
           allow_incomplete: options.allow_incomplete === true || payload.policy?.allow_incomplete === true || payload.unattended?.allow_incomplete === true,
           force_scene_cards: options.force_scene_cards === true || payload.policy?.force_scene_cards === true || payload.unattended?.force_scene_cards === true,
           auto_repair_missing_material: options.auto_repair_missing_material === true || payload.policy?.auto_repair_missing_material === true || payload.unattended?.auto_repair_missing_material === true,
-          auto_repair_quality_gate: options.auto_repair_quality_gate === true || payload.policy?.auto_repair_quality_gate === true || payload.unattended?.auto_repair_quality_gate === true,
+          auto_repair_quality_gate: false,
           approval_policy: approvalPolicy,
           approvals: item.approvals || {},
           onStage: async (stage: string, patch: any = {}) => {
@@ -1275,29 +1350,39 @@ export function createNovelRunExecutionService(ctx: {
         const qualityThreshold = options.quality_threshold || payload.policy?.quality_threshold
         const returnedApprovalBlocker = buildReturnedApprovalBlocker(chapterResult, qualityThreshold)
         if (returnedApprovalBlocker) {
+          const returnedBlockedInvalid = returnedApprovalBlocker.type === 'blocked_invalid'
           const failedStages = ctx.production.updateChapterStages(chapters[index]?.stages || [], 'review', {
-            status: 'needs_confirmation',
+            status: returnedBlockedInvalid ? 'failed' : 'needs_confirmation',
             error: `${returnedApprovalBlocker.label}：${returnedApprovalBlocker.detail}`,
-            approval_stage: 'approval_blocker',
+            approval_stage: returnedBlockedInvalid ? '' : 'approval_blocker',
           })
           const resultItem = {
             id: item.id,
             chapter_no: item.chapter_no,
             title: item.title,
-            status: 'needs_approval',
+            status: returnedBlockedInvalid ? 'failed' : 'needs_approval',
+            attempts: Number(item.attempts || 0),
+            next_run_at: '',
+            admission_status: returnedBlockedInvalid ? 'blocked_invalid' : chapterResult.admission_status || chapterResult.admissionStatus || '',
             score: chapterResult.score ?? returnedApprovalBlocker.score ?? null,
             revised: chapterResult.revised,
             stages: failedStages,
-            approval_stage: 'approval_blocker',
-            approval_context: returnedApprovalBlocker,
+            approval_stage: returnedBlockedInvalid ? '' : 'approval_blocker',
+            approval_context: returnedBlockedInvalid ? null : returnedApprovalBlocker,
             config_snapshot: chapterResult.config_snapshot || payload.config_snapshot || ctx.production.buildAgentConfigSnapshot(project, options.model_id || payload.model_strategy?.preferred_model_id),
             error: `${returnedApprovalBlocker.label}：${returnedApprovalBlocker.detail}`,
-            error_code: 'APPROVAL_BLOCKER',
-            recovery_plan: {
-              type: 'approval_blocker',
-              summary: '章节生成返回成功，但入库阻断仍未解除；已暂停后续无人值守续写。',
-              actions: ['按入库阻断原因修订正文', '重新运行正文质检和入库门禁', '确认阻断解除后再继续后续章节生成'],
-            },
+            error_code: returnedBlockedInvalid ? 'PROSE_ADMISSION_BLOCKED_INVALID' : 'APPROVAL_BLOCKER',
+            recovery_plan: returnedBlockedInvalid
+              ? {
+                  type: 'blocked_invalid',
+                  summary: '正文未通过有效性检查且未入库；当前章已终止，不会自动重试或进入人工批准。',
+                  actions: ['检查正文完整性和硬约束', '修复当前章后重新提交生成'],
+                }
+              : {
+                  type: 'approval_blocker',
+                  summary: '章节生成返回成功，但入库阻断仍未解除；已暂停后续无人值守续写。',
+                  actions: ['按入库阻断原因修订正文', '重新运行正文质检和入库门禁', '确认阻断解除后再继续后续章节生成'],
+                },
             failed_at: new Date().toISOString(),
           }
           const storedResultItem = compactRunChapterItem(resultItem)
@@ -1310,13 +1395,19 @@ export function createNovelRunExecutionService(ctx: {
             chapters,
             results,
             current_index: index,
-            phase: `第${item.chapter_no}章入库阻断未解除，已暂停`,
+            phase: returnedBlockedInvalid ? `第${item.chapter_no}章正文无效且未入库，已暂停` : `第${item.chapter_no}章入库阻断未解除，已暂停`,
             last_error: storedResultItem,
           })
           await updateRun(activeWorkspace, run.id, { status, output_ref: runJson(payload), error_message: errorMessage })
           break
         }
-        const storyStateError = compactText((chapterResult.story_state_update as any)?.error || '', 300)
+        const storyStateUpdate = chapterResult.story_state_update || chapterResult.storyStateUpdate || {}
+        const storyStateStatus = String(
+          chapterResult.story_state_status
+          || chapterResult.storyStateStatus
+          || (storyStateUpdate?.error || storyStateUpdate?.skipped ? 'pending' : 'synced'),
+        )
+        const storyStateWarning = chapterResult.story_state_warning || chapterResult.storyStateWarning || storyStateUpdate?.error || null
         const postDeliveryQuality = buildOhStoryPostDeliveryQuality(chapterResult, item)
         const postDeliveryOpenCheck = Array.isArray(postDeliveryQuality.checks)
           ? postDeliveryQuality.checks.find((check: any) => String(check?.status || '') !== 'ok')
@@ -1325,41 +1416,45 @@ export function createNovelRunExecutionService(ctx: {
           && options.allow_incomplete !== true
           && payload.policy?.allow_incomplete !== true
           && payload.unattended?.allow_incomplete !== true
-        const postDeliveryQualityError = strictUnattendedQualityGate && postDeliveryQuality.status !== 'ok'
+        const postDeliveryHasWarnings = strictUnattendedQualityGate && postDeliveryQuality.status !== 'ok'
+        const warningSummary = postDeliveryHasWarnings
           ? compactText(`${postDeliveryOpenCheck?.label || '交付后质检'}：${postDeliveryOpenCheck?.summary || 'Step 3 仍有未闭环项。'}`, 300)
           : ''
+        const warningFields = collectChapterWarnings({
+          ...chapterResult,
+          story_state_status: storyStateStatus,
+          story_state_warning: storyStateWarning,
+        }, postDeliveryQuality)
+        const admissionStatus = String(chapterResult.admission_status || chapterResult.admissionStatus || (warningFields.warning_count > 0 ? 'accepted_with_warnings' : 'accepted'))
         let resultItem = {
           id: item.id,
           chapter_no: item.chapter_no,
           title: item.title,
-          status: storyStateError ? 'story_state_failed' : postDeliveryQualityError ? 'post_delivery_quality_failed' : 'success',
+          status: 'success',
+          admission_status: admissionStatus,
+          story_state_status: storyStateStatus,
+          ...warningFields,
           score: chapterResult.score,
           revised: chapterResult.revised,
           production_mode: productionMode,
           config_snapshot: chapterResult.config_snapshot || payload.config_snapshot || null,
           scenes: advanceSceneProduction(chapters[index]?.scenes || [], 'accepted'),
-          stages: (chapterResult.story_state_update as any)?.skipped
-            ? (chapters[index]?.stages || [])
-            : ctx.production.updateChapterStages(chapters[index]?.stages || [], 'story_state', { status: (chapterResult.story_state_update as any)?.error ? 'failed' : 'success' }),
-          error: storyStateError || postDeliveryQualityError,
-          error_code: storyStateError ? 'STORY_STATE_UPDATE_FAILED' : postDeliveryQualityError ? 'POST_DELIVERY_QUALITY_WARN' : '',
+          stages: ctx.production.updateChapterStages(chapters[index]?.stages || [], 'story_state', storyStateStatus === 'pending'
+            ? { status: 'warning', warnings: compactWarningList(storyStateWarning || 'Story State 同步待完成。') }
+            : { status: 'success' }),
+          error: '',
+          error_code: '',
           post_delivery_quality: postDeliveryQuality,
-          recovery_plan: storyStateError
+          recovery_plan: warningFields.warning_count > 0
             ? {
-                type: 'story_state_update_failed',
-                summary: '章节正文已生成，但故事状态机更新失败；暂停后续无人值守续写，避免下一章读取旧状态。',
-                actions: ['修复故事状态机更新错误', '确认上一章角色状态、伏笔、时间线和资产状态已入库', '再继续后续章节生成'],
+                type: postDeliveryHasWarnings ? 'post_delivery_quality_warn' : 'admitted_with_warnings',
+                summary: `章节正文已入库；${warningSummary || '仍有异步质量修订或状态同步建议'}，不阻塞后续章节。`,
+                actions: ['保留已入库正文', '按 warnings/post_delivery_quality 异步修订或同步', '修复完成后重新运行对应检查'],
               }
-            : postDeliveryQualityError
-              ? {
-                  type: 'post_delivery_quality_warn',
-                  summary: '章节正文已生成，但 oh-story Step 3 交付后质检仍有未闭环项；暂停后续无人值守续写。',
-                  actions: ['按 post_delivery_quality.checks 修复未闭环项', '重新运行当前章节交付后质检', '确认 Step 3 全部 ok 后再继续无人值守下一章'],
-                }
             : null,
           completed_at: new Date().toISOString(),
         }
-        if (postDeliveryQualityError) {
+        if (postDeliveryHasWarnings) {
           const repairRun = await appendPostDeliveryQualityRepairRun(appendRun, activeWorkspace, project.id, run, resultItem, postDeliveryQuality).catch(error => {
             console.warn('[novel] failed to append post-delivery quality repair run:', String(error).slice(0, 160))
             return null
@@ -1380,34 +1475,6 @@ export function createNovelRunExecutionService(ctx: {
         chapters[index] = storedResultItem
         results.push(storedResultItem)
         processed += 1
-        if (storyStateError) {
-          status = 'paused'
-          errorMessage = storyStateError
-          payload = compactRunPayload({
-            ...payload,
-            chapters,
-            results,
-            current_index: index,
-            phase: `第${item.chapter_no}章状态机更新失败，已暂停`,
-            last_error: storedResultItem,
-          })
-          await updateRun(activeWorkspace, run.id, { status, output_ref: runJson(payload), error_message: errorMessage })
-          break
-        }
-        if (postDeliveryQualityError) {
-          status = 'paused'
-          errorMessage = postDeliveryQualityError
-          payload = compactRunPayload({
-            ...payload,
-            chapters,
-            results,
-            current_index: index,
-            phase: `第${item.chapter_no}章交付后质检未闭环，已暂停`,
-            last_error: storedResultItem,
-          })
-          await updateRun(activeWorkspace, run.id, { status, output_ref: runJson(payload), error_message: errorMessage })
-          break
-        }
       } catch (chapterError: any) {
         const wasCanceled = options.abortSignal?.aborted || isAbortLikeError(chapterError)
         if (wasCanceled) {
@@ -1437,15 +1504,8 @@ export function createNovelRunExecutionService(ctx: {
           break
         }
         const isApproval = chapterError?.code === 'APPROVAL_REQUIRED'
-        const autoRetryQualityGate = isApproval
-          && String(chapterError?.approval_stage || '') === 'quality_gate'
-          && payload.unattended?.enabled === true
-          && (
-            options.auto_repair_quality_gate === true
-            || payload.policy?.auto_repair_quality_gate === true
-            || payload.unattended?.auto_repair_quality_gate === true
-          )
-        const blocksForApproval = isApproval && !autoRetryQualityGate
+        const blockedInvalid = String(chapterError?.admission_status || chapterError?.admissionStatus || '') === 'blocked_invalid'
+        const blocksForApproval = isApproval && !blockedInvalid
         const failedStages = (() => {
           const current = chapters[index]?.stages || ctx.production.buildChapterGroupStages()
           const active = current.find((step: any) => ['running', 'ready', 'needs_confirmation'].includes(step.status)) || current.find((step: any) => step.status === 'pending') || current[0]
@@ -1455,12 +1515,10 @@ export function createNovelRunExecutionService(ctx: {
             approval_stage: blocksForApproval ? chapterError?.approval_stage || '' : '',
           }) : current
         })()
-        const attempts = Number(item.attempts || 0) + (blocksForApproval ? 0 : 1)
-        const canRetry = !blocksForApproval && attempts <= retryLimit
+        const attempts = Number(item.attempts || 0) + (blocksForApproval || blockedInvalid ? 0 : 1)
+        const canRetry = !blocksForApproval && !blockedInvalid && attempts <= retryLimit
         const nextRunAt = canRetry
-          ? autoRetryQualityGate
-            ? ''
-            : new Date(Date.now() + Math.min(15, attempts * 2) * 60000).toISOString()
+          ? new Date(Date.now() + Math.min(15, attempts * 2) * 60000).toISOString()
           : ''
         const resultItem = compactRunChapterItem({
           id: item.id,
@@ -1470,24 +1528,19 @@ export function createNovelRunExecutionService(ctx: {
           stages: failedStages,
           attempts,
           next_run_at: nextRunAt,
+          admission_status: chapterError?.admission_status || chapterError?.admissionStatus || '',
           approval_stage: blocksForApproval ? chapterError?.approval_stage || '' : '',
           approval_context: blocksForApproval ? chapterError?.approval_context || null : null,
           config_snapshot: payload.config_snapshot || ctx.production.buildAgentConfigSnapshot(project, options.model_id || payload.model_strategy?.preferred_model_id),
           error: String(chapterError?.message || chapterError),
-          error_code: autoRetryQualityGate ? 'QUALITY_GATE_RETRY_REQUIRED' : chapterError?.code || '',
-          recovery_plan: autoRetryQualityGate
-            ? {
-                type: 'quality_gate_retry',
-                summary: '无人值守质量门禁未通过，已转为自动重试当前章；不会进入人工审批卡点。',
-                actions: ['重新生成或修订当前章正文', '沿用质量门禁原因强化下一次提示', '达到重试上限后再暂停人工处理'],
-              }
-            : ctx.production.classifyGenerationFailure(chapterError),
+          error_code: chapterError?.code || '',
+          recovery_plan: chapterError?.recovery_plan || chapterError?.recoveryPlan || ctx.production.classifyGenerationFailure(chapterError),
           failed_at: new Date().toISOString(),
         })
         chapters[index] = resultItem
         results.push(resultItem)
         errorMessage = resultItem.error
-        if (blocksForApproval || canRetry || payload.policy?.stop_on_failure !== false) {
+        if (blocksForApproval || blockedInvalid || canRetry || payload.policy?.stop_on_failure !== false) {
           status = blocksForApproval ? 'paused' : (canRetry ? 'ready' : 'paused')
           payload = compactRunPayload({
             ...payload,
@@ -1496,9 +1549,7 @@ export function createNovelRunExecutionService(ctx: {
             current_index: index,
             phase: blocksForApproval
               ? `第${item.chapter_no}章等待人工确认`
-              : autoRetryQualityGate && canRetry
-                ? `第${item.chapter_no}章质量门禁未通过，准备自动重试`
-                : canRetry
+              : canRetry
                   ? `第${item.chapter_no}章失败，等待重试`
                   : `第${item.chapter_no}章失败，已暂停`,
             last_error: resultItem,
@@ -1507,7 +1558,7 @@ export function createNovelRunExecutionService(ctx: {
           break
         }
       }
-      payload = compactRunPayload({ ...payload, chapters, results, current_index: index + 1, phase: '自动执行章节群' })
+      payload = compactRunPayload({ ...payload, chapters, results, current_index: index + 1, phase: '自动执行章节群', last_error: null })
       await updateRun(activeWorkspace, run.id, {
         status: 'running',
         output_ref: runJson(payload),

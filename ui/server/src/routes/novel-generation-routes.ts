@@ -1118,8 +1118,8 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
           allow_incomplete: req.body.allow_incomplete === true,
           force_scene_cards: req.body.force_scene_cards !== false,
           auto_repair_missing_material: true,
-          auto_repair_quality_gate: true,
-          advance_rule: 'quality_gate_passed_then_next_chapter',
+          auto_repair_quality_gate: false,
+          advance_rule: 'prose_admitted_then_next_chapter',
         },
         policy: {
           stop_on_failure: req.body.stop_on_failure !== false,
@@ -1129,7 +1129,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
           quality_threshold: qualityThreshold,
           production_mode: 'full_auto',
           auto_repair_missing_material: true,
-          auto_repair_quality_gate: true,
+          auto_repair_quality_gate: false,
         },
         planning_preflight: planningPreflight,
       }

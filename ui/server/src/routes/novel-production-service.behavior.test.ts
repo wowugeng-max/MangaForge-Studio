@@ -95,6 +95,57 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
   })
 
+  test('does not regenerate a stale legacy quality-gate approval item', async () => {
+    const production = createNovelProductionService()
+    const harness = makeRunHarness({
+      chapters: [
+        {
+          id: 105,
+          chapter_no: 11,
+          title: '第十一章',
+          status: 'needs_approval',
+          approval_stage: 'quality_gate',
+          error_code: 'APPROVAL_REQUIRED',
+          error: '旧调用方留下的质量门禁审批项',
+          attempts: 0,
+          next_run_at: '',
+          stages: production.buildChapterGroupStages(),
+        },
+        { id: 106, chapter_no: 12, title: '第十二章', status: 'pending', stages: production.buildChapterGroupStages() },
+      ],
+      current_index: 0,
+      last_error: {
+        id: 105,
+        chapter_no: 11,
+        approval_stage: 'quality_gate',
+        error_code: 'APPROVAL_REQUIRED',
+      },
+    })
+    const generateCalls: number[] = []
+    const service = createNovelRunExecutionService({
+      getProject: async () => ({ id: 77, title: '长篇项目', reference_config: {} }),
+      production,
+      listNovelRuns: harness.listNovelRuns,
+      updateNovelRun: harness.updateNovelRun,
+      generateChapterForGroup: async (_workspace, _projectId, chapterId) => {
+        generateCalls.push(chapterId)
+        throw new Error('must not regenerate stale approval')
+      },
+    } as any)
+
+    const result = await service.executeChapterGroupRunRecord('test-workspace', { id: 77, reference_config: {} }, harness.run, {
+      max_chapters: 2,
+      lock_owner: 'behavior-test',
+    })
+
+    expect(result.status).toBe('paused')
+    expect(result.processed).toBe(0)
+    expect(result.error_code).toBe('APPROVAL_REQUIRED')
+    expect(result.group.current_index).toBe(0)
+    expect(generateCalls).toEqual([])
+    expect(harness.updates).toHaveLength(0)
+  })
+
   test('advances through multiple unattended chapters only after successful chapter generation', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
@@ -108,14 +159,15 @@ describe('executeChapterGroupRunRecord behavior', () => {
       unattended: {
         enabled: true,
         auto_repair_missing_material: true,
-        auto_repair_quality_gate: true,
+        auto_repair_quality_gate: false,
+        advance_rule: 'prose_admitted_then_next_chapter',
         force_scene_cards: true,
         allow_incomplete: false,
       },
       policy: {
         quality_threshold: 88,
         auto_repair_missing_material: true,
-        auto_repair_quality_gate: true,
+        auto_repair_quality_gate: false,
         force_scene_cards: true,
         allow_incomplete: false,
       },
@@ -130,7 +182,24 @@ describe('executeChapterGroupRunRecord behavior', () => {
         generateCalls.push({ chapterId, options })
         await options.onStage('draft', { status: 'success', scene_status: 'generated' })
         await options.onStage('review', { status: 'success', score: 91 })
-        return {
+        return chapterId === 11 ? {
+          admission_status: 'accepted_with_warnings',
+          score: 72,
+          revised: false,
+          quality_gate: { passed: false, score: 72, reasons: ['章尾钩子偏弱'] },
+          quality_warnings: ['质量分 72 低于阈值 88'],
+          post_commit_warnings: ['正文已入库，索引同步稍后完成'],
+          story_state_update: {
+            chapter_title_uniqueness_sync: { status: 'ok' },
+            prose_meta_sync: { status: 'ok' },
+            chapter_hook_sync: { status: 'ok' },
+            chapter_blueprint_sync: { status: 'ok' },
+            foreshadowing_delta_sync: { status: 'ok' },
+            deterministic_prose_cleanup: { status: 'ok', risk_count: 0 },
+          },
+          config_snapshot: { snapshot_id: `chapter-${chapterId}` },
+        } : {
+          admission_status: 'accepted',
           score: 91,
           revised: false,
           story_state_update: {
@@ -156,6 +225,17 @@ describe('executeChapterGroupRunRecord behavior', () => {
     expect(result.processed).toBe(2)
     expect(group.current_index).toBe(2)
     expect(group.chapters.map((chapter: any) => chapter.status)).toEqual(['success', 'success'])
+    expect(group.chapters[0]).toMatchObject({
+      admission_status: 'accepted_with_warnings',
+      quality_warnings: ['质量分 72 低于阈值 88'],
+      post_commit_warnings: ['正文已入库，索引同步稍后完成'],
+    })
+    expect(Number(group.chapters[0].attempts || 0)).toBe(0)
+    expect(group.chapters[0].warnings).toEqual(expect.arrayContaining([
+      '质量分 72 低于阈值 88',
+      '正文已入库，索引同步稍后完成',
+    ]))
+    expect(group.chapters[0].warning_count).toBeGreaterThanOrEqual(2)
     expect(group.results).toHaveLength(2)
     expect(group.post_batch_quality_check).toMatchObject({
       status: 'ok',
@@ -179,7 +259,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
       allow_incomplete: false,
       force_scene_cards: true,
       auto_repair_missing_material: true,
-      auto_repair_quality_gate: true,
+      auto_repair_quality_gate: false,
     })
     expect(generateCalls[0].options.approval_policy.allow_full_auto).toBe(true)
   })
@@ -254,7 +334,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     expect(source).not.toContain("payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, context_package: contextPackage")
   })
 
-  test('pauses unattended production when a chapter returns unknown post-delivery sync evidence', async () => {
+  test('advances unattended production and queues repair when a chapter returns unknown post-delivery sync evidence', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -299,22 +379,17 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
     const proseMetaCheck = result.group.results[1].post_delivery_quality.checks.find((check: any) => check.key === 'prose_meta')
 
-    expect(result.status).toBe('paused')
-    expect(result.group.current_index).toBe(1)
+    expect(result.status).toBe('success')
+    expect(result.processed).toBe(2)
+    expect(result.group.current_index).toBe(2)
     expect(result.group.chapters[1]).toMatchObject({
-      status: 'post_delivery_quality_failed',
-      error_code: 'POST_DELIVERY_QUALITY_WARN',
+      status: 'success',
     })
-    expect(result.group.last_error).toMatchObject({
-      chapter_no: 4,
-      error_code: 'POST_DELIVERY_QUALITY_WARN',
+    expect(result.group.results[1].recovery_plan).toMatchObject({
+      type: 'post_delivery_quality_warn',
+      summary: expect.stringContaining('正文已入库'),
     })
-    expect(result.group.last_error.recovery_plan.actions).toEqual(expect.arrayContaining([
-      '按 post_delivery_quality.checks 修复未闭环项',
-      '重新运行当前章节交付后质检',
-      '确认 Step 3 全部 ok 后再继续无人值守下一章',
-    ]))
-    expect(result.group.last_error.repair_run_id).toBe(harness.appendedRuns[0].id)
+    expect(result.group.results[1].repair_run_id).toBe(harness.appendedRuns[0].id)
     expect(harness.appendedRuns).toHaveLength(1)
     expect(harness.appendedRuns[0]).toMatchObject({
       project_id: 77,
@@ -336,7 +411,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
       task_status: 'open',
     })
     expect(repairQueue.tasks[0].post_delivery_quality.check.key).toBe('prose_meta')
-    expect(result.group.post_batch_quality_check).toBeUndefined()
+    expect(result.group.post_batch_quality_check.status).toBe('warn')
     expect(proseMetaCheck).toMatchObject({
       key: 'prose_meta',
       label: '正文元信息',
@@ -345,7 +420,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
   })
 
-  test('pauses unattended production when required quality-continuity receipts are missing', async () => {
+  test('advances unattended production when required quality-continuity receipts are missing', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -389,12 +464,13 @@ describe('executeChapterGroupRunRecord behavior', () => {
     const qualityContinuityCheck = result.group.results[0].post_delivery_quality.checks.find((check: any) => check.key === 'next_chapter_quality_plan_receipts')
     const repairQueue = JSON.parse(harness.appendedRuns[0].output_ref)
 
-    expect(result.status).toBe('paused')
-    expect(result.group.current_index).toBe(0)
+    expect(result.status).toBe('success')
+    expect(result.group.current_index).toBe(2)
     expect(result.group.chapters[0]).toMatchObject({
-      status: 'post_delivery_quality_failed',
-      error_code: 'POST_DELIVERY_QUALITY_WARN',
+      status: 'success',
     })
+    expect(result.group.chapters[1].status).toBe('success')
+    expect(harness.appendedRuns).toHaveLength(2)
     expect(qualityContinuityCheck).toMatchObject({
       key: 'next_chapter_quality_plan_receipts',
       label: '质量续航回执',
@@ -412,7 +488,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
   })
 
-  test('pauses unattended production when required status-filter receipts are missing', async () => {
+  test('advances unattended production when required status-filter receipts are missing', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -456,12 +532,13 @@ describe('executeChapterGroupRunRecord behavior', () => {
     const statusFilterCheck = result.group.results[0].post_delivery_quality.checks.find((check: any) => check.key === 'status_filter_receipts')
     const repairQueue = JSON.parse(harness.appendedRuns[0].output_ref)
 
-    expect(result.status).toBe('paused')
-    expect(result.group.current_index).toBe(0)
+    expect(result.status).toBe('success')
+    expect(result.group.current_index).toBe(2)
     expect(result.group.chapters[0]).toMatchObject({
-      status: 'post_delivery_quality_failed',
-      error_code: 'POST_DELIVERY_QUALITY_WARN',
+      status: 'success',
     })
+    expect(result.group.chapters[1].status).toBe('success')
+    expect(harness.appendedRuns).toHaveLength(2)
     expect(statusFilterCheck).toMatchObject({
       key: 'status_filter_receipts',
       label: '状态筛选回执',
@@ -479,7 +556,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
   })
 
-  test('pauses unattended production when write-preparation sync evidence is still open', async () => {
+  test('advances unattended production when write-preparation sync evidence is still open', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -525,12 +602,13 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
     const repairQueue = JSON.parse(harness.appendedRuns[0].output_ref)
 
-    expect(result.status).toBe('paused')
-    expect(result.group.current_index).toBe(0)
+    expect(result.status).toBe('success')
+    expect(result.group.current_index).toBe(2)
     expect(result.group.chapters[0]).toMatchObject({
-      status: 'post_delivery_quality_failed',
-      error_code: 'POST_DELIVERY_QUALITY_WARN',
+      status: 'success',
     })
+    expect(result.group.chapters[1].status).toBe('success')
+    expect(harness.appendedRuns).toHaveLength(2)
     expect(result.group.results[0].post_delivery_quality.checks.filter((check: any) => check.status === 'warn').map((check: any) => check.key)).toEqual([
       'source_readiness',
       'intent_confirmation',
@@ -551,7 +629,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     ])
   })
 
-  test('pauses unattended production when write-preparation receipt sync evidence is still open', async () => {
+  test('advances unattended production when write-preparation receipt sync evidence is still open', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -597,8 +675,10 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
     const repairQueue = JSON.parse(harness.appendedRuns[0].output_ref)
 
-    expect(result.status).toBe('paused')
-    expect(result.group.current_index).toBe(0)
+    expect(result.status).toBe('success')
+    expect(result.group.current_index).toBe(2)
+    expect(result.group.chapters.map((chapter: any) => chapter.status)).toEqual(['success', 'success'])
+    expect(harness.appendedRuns).toHaveLength(2)
     expect(result.group.results[0].post_delivery_quality.checks.filter((check: any) => check.status === 'warn').map((check: any) => check.key)).toEqual([
       'write_preparation_receipts',
     ])
@@ -613,7 +693,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
   })
 
-  test('pauses unattended production when prose craft step-3 sync evidence is still open', async () => {
+  test('advances unattended production when prose craft step-3 sync evidence is still open', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -658,12 +738,13 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
     const repairQueue = JSON.parse(harness.appendedRuns[0].output_ref)
 
-    expect(result.status).toBe('paused')
-    expect(result.group.current_index).toBe(0)
+    expect(result.status).toBe('success')
+    expect(result.group.current_index).toBe(2)
     expect(result.group.chapters[0]).toMatchObject({
-      status: 'post_delivery_quality_failed',
-      error_code: 'POST_DELIVERY_QUALITY_WARN',
+      status: 'success',
     })
+    expect(result.group.chapters[1].status).toBe('success')
+    expect(harness.appendedRuns).toHaveLength(2)
     expect(result.group.results[0].post_delivery_quality.checks.filter((check: any) => check.status === 'warn').map((check: any) => check.key)).toEqual([
       'prose_craft',
       'payoff_setup',
@@ -681,7 +762,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     ])
   })
 
-  test('pauses unattended production when story quality step-3 sync evidence is still open', async () => {
+  test('advances unattended production when story quality step-3 sync evidence is still open', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -727,12 +808,13 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
     const repairQueue = JSON.parse(harness.appendedRuns[0].output_ref)
 
-    expect(result.status).toBe('paused')
-    expect(result.group.current_index).toBe(0)
+    expect(result.status).toBe('success')
+    expect(result.group.current_index).toBe(2)
     expect(result.group.chapters[0]).toMatchObject({
-      status: 'post_delivery_quality_failed',
-      error_code: 'POST_DELIVERY_QUALITY_WARN',
+      status: 'success',
     })
+    expect(result.group.chapters[1].status).toBe('success')
+    expect(harness.appendedRuns).toHaveLength(2)
     expect(result.group.results[0].post_delivery_quality.checks.filter((check: any) => check.status === 'warn').map((check: any) => check.key)).toEqual([
       'story_loop',
       'information_flow',
@@ -753,7 +835,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     ])
   })
 
-  test('pauses unattended production when narrative technique step-3 sync evidence is still open', async () => {
+  test('advances unattended production when narrative technique step-3 sync evidence is still open', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -801,12 +883,13 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
     const repairQueue = JSON.parse(harness.appendedRuns[0].output_ref)
 
-    expect(result.status).toBe('paused')
-    expect(result.group.current_index).toBe(0)
+    expect(result.status).toBe('success')
+    expect(result.group.current_index).toBe(2)
     expect(result.group.chapters[0]).toMatchObject({
-      status: 'post_delivery_quality_failed',
-      error_code: 'POST_DELIVERY_QUALITY_WARN',
+      status: 'success',
     })
+    expect(result.group.chapters[1].status).toBe('success')
+    expect(harness.appendedRuns).toHaveLength(2)
     expect(result.group.results[0].post_delivery_quality.checks.filter((check: any) => check.status === 'warn').map((check: any) => check.key)).toEqual([
       'paragraph_hook',
       'suspense',
@@ -833,7 +916,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     ])
   })
 
-  test('pauses unattended production when long-form contract sync evidence is still open', async () => {
+  test('advances unattended production when long-form contract sync evidence is still open', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -885,12 +968,13 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
     const repairQueue = JSON.parse(harness.appendedRuns[0].output_ref)
 
-    expect(result.status).toBe('paused')
-    expect(result.group.current_index).toBe(0)
+    expect(result.status).toBe('success')
+    expect(result.group.current_index).toBe(2)
     expect(result.group.chapters[0]).toMatchObject({
-      status: 'post_delivery_quality_failed',
-      error_code: 'POST_DELIVERY_QUALITY_WARN',
+      status: 'success',
     })
+    expect(result.group.chapters[1].status).toBe('success')
+    expect(harness.appendedRuns).toHaveLength(2)
     expect(result.group.results[0].post_delivery_quality.checks.filter((check: any) => check.status === 'warn').map((check: any) => check.key)).toEqual([
       'continuity_heat',
       'conflict_structure',
@@ -929,7 +1013,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     ])
   })
 
-  test('pauses unattended production when serial quality assurance sync evidence is still open', async () => {
+  test('advances unattended production when serial quality assurance sync evidence is still open', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -980,12 +1064,13 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
     const repairQueue = JSON.parse(harness.appendedRuns[0].output_ref)
 
-    expect(result.status).toBe('paused')
-    expect(result.group.current_index).toBe(0)
+    expect(result.status).toBe('success')
+    expect(result.group.current_index).toBe(2)
     expect(result.group.chapters[0]).toMatchObject({
-      status: 'post_delivery_quality_failed',
-      error_code: 'POST_DELIVERY_QUALITY_WARN',
+      status: 'success',
     })
+    expect(result.group.chapters[1].status).toBe('success')
+    expect(harness.appendedRuns).toHaveLength(2)
     expect(result.group.results[0].post_delivery_quality.checks.filter((check: any) => check.status === 'warn').map((check: any) => check.key)).toEqual([
       'story_drive',
       'character_arc',
@@ -1021,7 +1106,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     ])
   })
 
-  test('pauses unattended production when revision-closure sync evidence is still open', async () => {
+  test('advances unattended production when revision-closure sync evidence is still open', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -1068,12 +1153,13 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
     const repairQueue = JSON.parse(harness.appendedRuns[0].output_ref)
 
-    expect(result.status).toBe('paused')
-    expect(result.group.current_index).toBe(0)
+    expect(result.status).toBe('success')
+    expect(result.group.current_index).toBe(2)
     expect(result.group.chapters[0]).toMatchObject({
-      status: 'post_delivery_quality_failed',
-      error_code: 'POST_DELIVERY_QUALITY_WARN',
+      status: 'success',
     })
+    expect(result.group.chapters[1].status).toBe('success')
+    expect(harness.appendedRuns).toHaveLength(2)
     expect(result.group.results[0].post_delivery_quality.checks.filter((check: any) => check.status === 'warn').map((check: any) => check.key)).toEqual([
       'prose_revision_receipt_sync',
       'deslop_repair_receipt_sync',
@@ -1097,7 +1183,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     ])
   })
 
-  test('pauses unattended production when chapter handoff sync evidence is still open', async () => {
+  test('advances unattended production when chapter handoff sync evidence is still open', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -1140,12 +1226,13 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
     const repairQueue = JSON.parse(harness.appendedRuns[0].output_ref)
 
-    expect(result.status).toBe('paused')
-    expect(result.group.current_index).toBe(0)
+    expect(result.status).toBe('success')
+    expect(result.group.current_index).toBe(2)
     expect(result.group.chapters[0]).toMatchObject({
-      status: 'post_delivery_quality_failed',
-      error_code: 'POST_DELIVERY_QUALITY_WARN',
+      status: 'success',
     })
+    expect(result.group.chapters[1].status).toBe('success')
+    expect(harness.appendedRuns).toHaveLength(2)
     expect(result.group.results[0].post_delivery_quality.checks.filter((check: any) => check.status === 'warn').map((check: any) => check.key)).toEqual([
       'chapter_handoff',
     ])
@@ -1156,7 +1243,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
   })
 
-  test('pauses unattended production when state tracking sync evidence is still open', async () => {
+  test('advances unattended production when state tracking sync evidence is still open', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -1199,12 +1286,13 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
     const repairQueue = JSON.parse(harness.appendedRuns[0].output_ref)
 
-    expect(result.status).toBe('paused')
-    expect(result.group.current_index).toBe(0)
+    expect(result.status).toBe('success')
+    expect(result.group.current_index).toBe(2)
     expect(result.group.chapters[0]).toMatchObject({
-      status: 'post_delivery_quality_failed',
-      error_code: 'POST_DELIVERY_QUALITY_WARN',
+      status: 'success',
     })
+    expect(result.group.chapters[1].status).toBe('success')
+    expect(harness.appendedRuns).toHaveLength(2)
     expect(result.group.results[0].post_delivery_quality.checks.filter((check: any) => check.status === 'warn').map((check: any) => check.key)).toEqual([
       'state_tracking',
     ])
@@ -1215,7 +1303,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
   })
 
-  test('pauses unattended production when punctuation tone sync evidence is still open', async () => {
+  test('advances unattended production when punctuation tone sync evidence is still open', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -1258,12 +1346,13 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
     const repairQueue = JSON.parse(harness.appendedRuns[0].output_ref)
 
-    expect(result.status).toBe('paused')
-    expect(result.group.current_index).toBe(0)
+    expect(result.status).toBe('success')
+    expect(result.group.current_index).toBe(2)
     expect(result.group.chapters[0]).toMatchObject({
-      status: 'post_delivery_quality_failed',
-      error_code: 'POST_DELIVERY_QUALITY_WARN',
+      status: 'success',
     })
+    expect(result.group.chapters[1].status).toBe('success')
+    expect(harness.appendedRuns).toHaveLength(2)
     expect(result.group.results[0].post_delivery_quality.checks.filter((check: any) => check.status === 'warn').map((check: any) => check.key)).toEqual([
       'punctuation_tone',
     ])
@@ -1274,7 +1363,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
   })
 
-  test('pauses unattended production when asset linkage sync evidence is still open', async () => {
+  test('advances unattended production when asset linkage sync evidence is still open', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -1317,12 +1406,13 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
     const repairQueue = JSON.parse(harness.appendedRuns[0].output_ref)
 
-    expect(result.status).toBe('paused')
-    expect(result.group.current_index).toBe(0)
+    expect(result.status).toBe('success')
+    expect(result.group.current_index).toBe(2)
     expect(result.group.chapters[0]).toMatchObject({
-      status: 'post_delivery_quality_failed',
-      error_code: 'POST_DELIVERY_QUALITY_WARN',
+      status: 'success',
     })
+    expect(result.group.chapters[1].status).toBe('success')
+    expect(harness.appendedRuns).toHaveLength(2)
     expect(result.group.results[0].post_delivery_quality.checks.filter((check: any) => check.status === 'warn').map((check: any) => check.key)).toEqual([
       'asset_linkage',
     ])
@@ -1333,7 +1423,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
   })
 
-  test('pauses unattended production when dialogue sync evidence is still open', async () => {
+  test('advances unattended production when dialogue sync evidence is still open', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -1376,12 +1466,13 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
     const repairQueue = JSON.parse(harness.appendedRuns[0].output_ref)
 
-    expect(result.status).toBe('paused')
-    expect(result.group.current_index).toBe(0)
+    expect(result.status).toBe('success')
+    expect(result.group.current_index).toBe(2)
     expect(result.group.chapters[0]).toMatchObject({
-      status: 'post_delivery_quality_failed',
-      error_code: 'POST_DELIVERY_QUALITY_WARN',
+      status: 'success',
     })
+    expect(result.group.chapters[1].status).toBe('success')
+    expect(harness.appendedRuns).toHaveLength(2)
     expect(result.group.results[0].post_delivery_quality.checks.filter((check: any) => check.status === 'warn').map((check: any) => check.key)).toEqual([
       'dialogue',
     ])
@@ -1392,7 +1483,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
   })
 
-  test('pauses unattended production when character behavior sync evidence is still open', async () => {
+  test('advances unattended production when character behavior sync evidence is still open', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -1435,12 +1526,13 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
     const repairQueue = JSON.parse(harness.appendedRuns[0].output_ref)
 
-    expect(result.status).toBe('paused')
-    expect(result.group.current_index).toBe(0)
+    expect(result.status).toBe('success')
+    expect(result.group.current_index).toBe(2)
     expect(result.group.chapters[0]).toMatchObject({
-      status: 'post_delivery_quality_failed',
-      error_code: 'POST_DELIVERY_QUALITY_WARN',
+      status: 'success',
     })
+    expect(result.group.chapters[1].status).toBe('success')
+    expect(harness.appendedRuns).toHaveLength(2)
     expect(result.group.results[0].post_delivery_quality.checks.filter((check: any) => check.status === 'warn').map((check: any) => check.key)).toEqual([
       'character_behavior',
     ])
@@ -1451,7 +1543,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
   })
 
-  test('pauses unattended production when scene-card receipt sync evidence is still open', async () => {
+  test('advances unattended production when scene-card receipt sync evidence is still open', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -1494,12 +1586,13 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
     const repairQueue = JSON.parse(harness.appendedRuns[0].output_ref)
 
-    expect(result.status).toBe('paused')
-    expect(result.group.current_index).toBe(0)
+    expect(result.status).toBe('success')
+    expect(result.group.current_index).toBe(2)
     expect(result.group.chapters[0]).toMatchObject({
-      status: 'post_delivery_quality_failed',
-      error_code: 'POST_DELIVERY_QUALITY_WARN',
+      status: 'success',
     })
+    expect(result.group.chapters[1].status).toBe('success')
+    expect(harness.appendedRuns).toHaveLength(2)
     expect(result.group.results[0].post_delivery_quality.checks.filter((check: any) => check.status === 'warn').map((check: any) => check.key)).toEqual([
       'scene_card_receipts',
     ])
@@ -1510,7 +1603,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
   })
 
-  test('pauses unattended production when delivery-risk receipt sync evidence is still open', async () => {
+  test('advances unattended production when delivery-risk receipt sync evidence is still open', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -1553,12 +1646,13 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
     const repairQueue = JSON.parse(harness.appendedRuns[0].output_ref)
 
-    expect(result.status).toBe('paused')
-    expect(result.group.current_index).toBe(0)
+    expect(result.status).toBe('success')
+    expect(result.group.current_index).toBe(2)
     expect(result.group.chapters[0]).toMatchObject({
-      status: 'post_delivery_quality_failed',
-      error_code: 'POST_DELIVERY_QUALITY_WARN',
+      status: 'success',
     })
+    expect(result.group.chapters[1].status).toBe('success')
+    expect(harness.appendedRuns).toHaveLength(2)
     expect(result.group.results[0].post_delivery_quality.checks.filter((check: any) => check.status === 'warn').map((check: any) => check.key)).toEqual([
       'delivery_risk_receipts',
     ])
@@ -1569,7 +1663,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
   })
 
-  test('pauses unattended production when revision-context receipt sync evidence is still open', async () => {
+  test('advances unattended production when revision-context receipt sync evidence is still open', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -1612,12 +1706,13 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
     const repairQueue = JSON.parse(harness.appendedRuns[0].output_ref)
 
-    expect(result.status).toBe('paused')
-    expect(result.group.current_index).toBe(0)
+    expect(result.status).toBe('success')
+    expect(result.group.current_index).toBe(2)
     expect(result.group.chapters[0]).toMatchObject({
-      status: 'post_delivery_quality_failed',
-      error_code: 'POST_DELIVERY_QUALITY_WARN',
+      status: 'success',
     })
+    expect(result.group.chapters[1].status).toBe('success')
+    expect(harness.appendedRuns).toHaveLength(2)
     expect(result.group.results[0].post_delivery_quality.checks.filter((check: any) => check.status === 'warn').map((check: any) => check.key)).toEqual([
       'revision_context_receipts',
     ])
@@ -1719,6 +1814,64 @@ describe('executeChapterGroupRunRecord behavior', () => {
     expect(group.last_error).toBeNull()
   })
 
+  test('pauses blocked_invalid admissions without retries or advancing the next chapter', async () => {
+    const production = createNovelProductionService()
+    const harness = makeRunHarness({
+      chapters: [
+        { id: 45, chapter_no: 7, title: '第七章', status: 'pending', attempts: 1, stages: production.buildChapterGroupStages() },
+        { id: 46, chapter_no: 8, title: '第八章', status: 'pending', stages: production.buildChapterGroupStages() },
+      ],
+      current_index: 0,
+      production_mode: 'full_auto',
+      unattended: { enabled: true, auto_repair_quality_gate: false },
+      policy: { quality_threshold: 88, auto_repair_quality_gate: false },
+      results: [],
+    })
+    const generateCalls: number[] = []
+    const primaryRecovery = {
+      type: 'blocked_invalid',
+      summary: '正文未通过结构有效性检查，未入库。',
+      actions: ['检查缺失正文段落和硬约束', '人工修复后重新提交当前章'],
+    }
+    const service = createNovelRunExecutionService({
+      getProject: async () => ({ id: 77, title: '长篇项目', reference_config: {} }),
+      production,
+      listNovelRuns: harness.listNovelRuns,
+      updateNovelRun: harness.updateNovelRun,
+      generateChapterForGroup: async (_workspace, _projectId, chapterId) => {
+        generateCalls.push(chapterId)
+        throw Object.assign(new Error('正文结构无效，未入库'), {
+          code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+          admission_status: 'blocked_invalid',
+          recovery_plan: primaryRecovery,
+        })
+      },
+    } as any)
+
+    const result = await service.executeChapterGroupRunRecord('test-workspace', { id: 77, reference_config: {} }, harness.run, {
+      max_chapters: 2,
+      lock_owner: 'behavior-test',
+      retry_limit: 3,
+    })
+    const group = result.group
+
+    expect(result.status).toBe('paused')
+    expect(result.processed).toBe(0)
+    expect(group.current_index).toBe(0)
+    expect(generateCalls).toEqual([45])
+    expect(group.chapters[0]).toMatchObject({
+      status: 'failed',
+      admission_status: 'blocked_invalid',
+      attempts: 1,
+      next_run_at: '',
+      error: '正文结构无效，未入库',
+      error_code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+      recovery_plan: primaryRecovery,
+    })
+    expect(group.chapters[1].status).toBe('pending')
+    expect(JSON.stringify(group)).not.toContain('QUALITY_GATE_RETRY_REQUIRED')
+  })
+
   test('does not advance when material repair still leaves the current chapter preflight blocked', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
@@ -1774,7 +1927,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     expect(group.results).toHaveLength(1)
   })
 
-  test('continues to the next unattended chapter after quality gate repair succeeds', async () => {
+  test('does not enable quality-gate regeneration while advancing admitted chapters', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -1786,7 +1939,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
       policy: {
         quality_threshold: 89,
         auto_repair_missing_material: true,
-        auto_repair_quality_gate: true,
+        auto_repair_quality_gate: false,
         force_scene_cards: true,
         allow_incomplete: false,
       },
@@ -1806,6 +1959,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
           quality_gate_repair: chapterId === 41,
         })
         return {
+          admission_status: 'accepted',
           score: chapterId === 41 ? 91 : 90,
           revised: chapterId === 41,
           story_state_update: {},
@@ -1824,13 +1978,13 @@ describe('executeChapterGroupRunRecord behavior', () => {
     expect(result.processed).toBe(2)
     expect(group.current_index).toBe(2)
     expect(generateCalls.map(call => call.chapterId)).toEqual([41, 42])
-    expect(generateCalls.every(call => call.options.auto_repair_quality_gate === true)).toBe(true)
+    expect(generateCalls.every(call => call.options.auto_repair_quality_gate === false)).toBe(true)
     expect(generateCalls.every(call => call.options.quality_threshold === 89)).toBe(true)
     expect(group.chapters[0]).toMatchObject({ status: 'success', revised: true, score: 91 })
     expect(group.chapters[1]).toMatchObject({ status: 'success', revised: false, score: 90 })
   })
 
-  test('keeps unattended quality gate failures retryable instead of turning them into manual approval', async () => {
+  test('treats legacy APPROVAL_REQUIRED quality-gate errors as terminal and non-retryable', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -1874,19 +2028,20 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
     const group = result.group
 
-    expect(result.status).toBe('ready')
+    expect(result.status).toBe('paused')
     expect(result.processed).toBe(0)
     expect(generateCalls).toEqual([91])
     expect(group.current_index).toBe(0)
     expect(group.chapters[0]).toMatchObject({
-      status: 'ready',
-      attempts: 1,
-      error_code: 'QUALITY_GATE_RETRY_REQUIRED',
+      status: 'needs_approval',
+      attempts: 0,
+      approval_stage: 'quality_gate',
+      error_code: 'APPROVAL_REQUIRED',
     })
-    expect(group.chapters[0].approval_stage || '').toBe('')
     expect(group.chapters[0].next_run_at || '').toBe('')
     expect(group.chapters[1].status).toBe('pending')
-    expect(group.last_error.error_code).toBe('QUALITY_GATE_RETRY_REQUIRED')
+    expect(group.last_error.error_code).toBe('APPROVAL_REQUIRED')
+    expect(JSON.stringify(group)).not.toContain('QUALITY_GATE_RETRY_REQUIRED')
   })
 
   test('compacts bulky unattended stage payloads while preserving resumable group state', async () => {
@@ -1947,6 +2102,56 @@ describe('executeChapterGroupRunRecord behavior', () => {
       error: '模拟后续失败',
     })
     expect(JSON.stringify(persisted)).not.toContain(hugeText.slice(0, 2000))
+  })
+
+  test('preserves a returned blocked_invalid admission as terminal instead of approval', async () => {
+    const production = createNovelProductionService()
+    const harness = makeRunHarness({
+      chapters: [
+        { id: 97, chapter_no: 27, title: '第二十七章', status: 'pending', attempts: 0, stages: production.buildChapterGroupStages() },
+        { id: 98, chapter_no: 28, title: '第二十八章', status: 'pending', stages: production.buildChapterGroupStages() },
+      ],
+      current_index: 0,
+      production_mode: 'full_auto',
+      unattended: { enabled: true, auto_repair_quality_gate: false },
+      policy: { quality_threshold: 88, auto_repair_quality_gate: false },
+      results: [],
+    })
+    const generateCalls: number[] = []
+    const service = createNovelRunExecutionService({
+      getProject: async () => ({ id: 77, title: '长篇项目', reference_config: {} }),
+      production,
+      listNovelRuns: harness.listNovelRuns,
+      updateNovelRun: harness.updateNovelRun,
+      generateChapterForGroup: async (_workspace, _projectId, chapterId) => {
+        generateCalls.push(chapterId)
+        return {
+          admission_status: 'blocked_invalid',
+          error: '正文传输不完整，未入库',
+          score: 0,
+        }
+      },
+    } as any)
+
+    const result = await service.executeChapterGroupRunRecord('test-workspace', { id: 77, reference_config: {} }, harness.run, {
+      max_chapters: 2,
+      lock_owner: 'behavior-test',
+      retry_limit: 3,
+    })
+
+    expect(result.status).toBe('paused')
+    expect(result.processed).toBe(0)
+    expect(result.group.current_index).toBe(0)
+    expect(generateCalls).toEqual([97])
+    expect(result.group.chapters[0]).toMatchObject({
+      status: 'failed',
+      admission_status: 'blocked_invalid',
+      attempts: 0,
+      next_run_at: '',
+      error_code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+    })
+    expect(result.group.chapters[0].approval_stage || '').toBe('')
+    expect(result.group.chapters[1].status).toBe('pending')
   })
 
   test('pauses unattended continuation when a returned chapter result still has an approval blocker', async () => {
@@ -2017,7 +2222,7 @@ describe('executeChapterGroupRunRecord behavior', () => {
     expect(group.last_error.error_code).toBe('APPROVAL_BLOCKER')
   })
 
-  test('pauses unattended continuation when story state update fails after a chapter is written', async () => {
+  test('advances when Story State is pending and persists warning evidence through compact output', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -2041,16 +2246,34 @@ describe('executeChapterGroupRunRecord behavior', () => {
       production,
       listNovelRuns: harness.listNovelRuns,
       updateNovelRun: harness.updateNovelRun,
+      appendNovelRun: harness.appendNovelRun,
       generateChapterForGroup: async (_workspace, _projectId, chapterId, options) => {
         generateCalls.push(chapterId)
         await options.onStage('draft', { status: 'success', scene_status: 'generated' })
         await options.onStage('review', { status: 'success', score: 92 })
-        await options.onStage('story_state', { status: 'failed', error: '状态机写入失败' })
-        return {
+        if (chapterId === 61) await options.onStage('story_state', { status: 'pending', warning: '状态机异步同步排队中' })
+        return chapterId === 61 ? {
+          admission_status: 'accepted_with_warnings',
           score: 92,
           revised: false,
-          story_state_update: { error: '状态机写入失败' },
-          config_snapshot: { snapshot_id: `story-state-failed-${chapterId}` },
+          story_state_status: 'pending',
+          story_state_warning: '状态机异步同步排队中',
+          story_state_update: { skipped: true },
+          config_snapshot: { snapshot_id: `story-state-pending-${chapterId}` },
+        } : {
+          admission_status: 'accepted',
+          score: 92,
+          revised: false,
+          story_state_status: 'success',
+          story_state_update: {
+            chapter_title_uniqueness_sync: { status: 'ok' },
+            prose_meta_sync: { status: 'ok' },
+            chapter_hook_sync: { status: 'ok' },
+            chapter_blueprint_sync: { status: 'ok' },
+            foreshadowing_delta_sync: { status: 'ok' },
+            deterministic_prose_cleanup: { status: 'ok', risk_count: 0 },
+          },
+          config_snapshot: { snapshot_id: `story-state-success-${chapterId}` },
         }
       },
     } as any)
@@ -2061,21 +2284,24 @@ describe('executeChapterGroupRunRecord behavior', () => {
     })
     const group = result.group
 
-    expect(result.status).toBe('paused')
-    expect(result.processed).toBe(1)
-    expect(group.current_index).toBe(0)
-    expect(generateCalls).toEqual([61])
+    expect(result.status).toBe('success')
+    expect(result.processed).toBe(2)
+    expect(group.current_index).toBe(2)
+    expect(generateCalls).toEqual([61, 62])
     expect(group.chapters[0]).toMatchObject({
-      status: 'story_state_failed',
-      error_code: 'STORY_STATE_UPDATE_FAILED',
-      error: '状态机写入失败',
+      status: 'success',
+      admission_status: 'accepted_with_warnings',
+      story_state_status: 'pending',
     })
-    expect(group.chapters[1].status).toBe('pending')
-    expect(group.results).toHaveLength(1)
-    expect(group.last_error.error_code).toBe('STORY_STATE_UPDATE_FAILED')
+    expect(group.chapters[0].warnings).toContain('状态机异步同步排队中')
+    expect(group.chapters[0].warning_count).toBeGreaterThanOrEqual(1)
+    expect(group.chapters[0].stages.find((stage: any) => stage.key === 'story_state').status).not.toBe('failed')
+    expect(group.chapters[1].status).toBe('success')
+    expect(group.results).toHaveLength(2)
+    expect(group.last_error).toBeNull()
   })
 
-  test('pauses at the current chapter when quality gate requires approval instead of advancing', async () => {
+  test('pauses at the current chapter for an explicit legacy safety approval blocker', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -2101,10 +2327,10 @@ describe('executeChapterGroupRunRecord behavior', () => {
       updateNovelRun: harness.updateNovelRun,
       generateChapterForGroup: async (_workspace, _projectId, chapterId) => {
         generateCalls.push(chapterId)
-        throw Object.assign(new Error('章节质量门禁未通过，正文未入库'), {
+        throw Object.assign(new Error('仿写安全需要人工确认，正文未入库'), {
           code: 'APPROVAL_REQUIRED',
-          approval_stage: 'quality_gate',
-          approval_context: { score: 72, min_score: 90 },
+          approval_stage: 'safety',
+          approval_context: { risk_level: 'high', copy_hit_count: 1 },
         })
       },
     } as any)
@@ -2122,11 +2348,11 @@ describe('executeChapterGroupRunRecord behavior', () => {
     expect(group.chapters[0]).toMatchObject({
       status: 'needs_approval',
       attempts: 0,
-      approval_stage: 'quality_gate',
+      approval_stage: 'safety',
       error_code: 'APPROVAL_REQUIRED',
     })
     expect(group.chapters[1].status).toBe('pending')
     expect(group.results).toHaveLength(1)
-    expect(group.last_error.approval_stage).toBe('quality_gate')
+    expect(group.last_error.approval_stage).toBe('safety')
   })
 })

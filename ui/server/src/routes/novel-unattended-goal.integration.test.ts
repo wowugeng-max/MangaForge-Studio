@@ -646,12 +646,13 @@ describe('unattended chapter goal integration', () => {
         start_chapter: 1,
         target_chapter: 2,
         auto_repair_missing_material: true,
-        auto_repair_quality_gate: true,
+        auto_repair_quality_gate: false,
+        advance_rule: 'prose_admitted_then_next_chapter',
       },
       policy: {
         quality_threshold: 86,
         auto_repair_missing_material: true,
-        auto_repair_quality_gate: true,
+        auto_repair_quality_gate: false,
       },
     })
     expect(response.body.group.chapters.map((chapter: any) => chapter.chapter_no)).toEqual([1, 2])
