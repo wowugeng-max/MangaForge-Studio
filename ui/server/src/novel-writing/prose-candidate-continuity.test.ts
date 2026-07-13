@@ -73,6 +73,18 @@ describe('continuity-safe prose candidate selection', () => {
     expect(selectContinuitySafeProseCandidate(original, candidate, similarContext).accepted).toBe(false)
   })
 
+  test('rejects underground-market and decorative-book word-shape bypasses', () => {
+    const original = chapterScaleText(chapter10HandoffFixture.continuousCandidateOpening)
+    const candidate = chapterScaleText('陈叔走进地下商道，暗金花册压在婚礼签到台上，主持人宣布仪式开始。')
+    expect(selectContinuitySafeProseCandidate(original, candidate, context).accepted).toBe(false)
+  })
+
+  test('rejects above-ground passage and picture-book event-name bypasses', () => {
+    const original = chapterScaleText(chapter10HandoffFixture.continuousCandidateOpening)
+    const candidate = chapterScaleText('陈叔站在地上通道，暗金画册摆在发布会讲台上，灯光随即亮起。')
+    expect(selectContinuitySafeProseCandidate(original, candidate, context).accepted).toBe(false)
+  })
+
   test('does not police a weak original opening that never established two handoff anchors', () => {
     const original = chapterScaleText('沈砚向前走去。')
     const candidate = chapterScaleText(chapter10HandoffFixture.disconnectedRewriteOpening)

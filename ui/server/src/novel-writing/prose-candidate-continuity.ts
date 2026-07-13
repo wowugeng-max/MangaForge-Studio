@@ -70,48 +70,29 @@ function anchorGroups(context: any) {
   return [...equivalents, ...singles.filter(group => !equivalents.some(equivalent => equivalent.some(alias => normalized(alias) === normalized(group[0]))))].slice(0, 12)
 }
 
-function chineseNgrams(text: string, minLength = 2, maxLength = 8) {
-  const values = new Set<string>()
-  for (const run of String(text || '').match(/[\p{Script=Han}]+/gu) || []) {
-    for (let length = minLength; length <= Math.min(maxLength, run.length); length += 1) {
-      for (let index = 0; index + length <= run.length; index += 1) values.add(run.slice(index, index + length))
-    }
-  }
-  return Array.from(values).slice(0, 800)
-}
-
-function commonChineseSubsequenceLength(left: string, right: string) {
-  const rows = Array.from({ length: left.length + 1 }, () => Array(right.length + 1).fill(0))
-  for (let i = 1; i <= left.length; i += 1) for (let j = 1; j <= right.length; j += 1) {
-    rows[i][j] = left[i - 1] === right[j - 1] ? rows[i - 1][j - 1] + 1 : Math.max(rows[i - 1][j], rows[i][j - 1])
-  }
-  return rows[left.length][right.length]
-}
-
-function conservativeAnchorMatch(anchor: string, opening: string, ngrams: string[]) {
+function conservativeAnchorMatch(anchor: string, opening: string) {
   const exact = normalized(anchor)
   if (!exact) return false
-  if (normalized(opening).includes(exact)) return true
+  const normalizedOpening = normalized(opening)
+  if (normalizedOpening.includes(exact)) return true
   if (/^老[\p{Script=Han}]$/u.test(anchor)) {
     const core = anchor.slice(1)
-    if (ngrams.some(token => token.length === 2 && token.startsWith(core) && /[叔伯哥姐姨婶爷]/u.test(token[1]))) return true
+    if (new RegExp(`${core}[叔伯哥姐姨婶爷]`, 'u').test(opening)) return true
   }
   if (/^[\p{Script=Han}][叔伯哥姐姨婶爷]$/u.test(anchor)) {
     const core = anchor[0]
-    if (ngrams.includes(`老${core}`)) return true
+    if (opening.includes(`老${core}`)) return true
   }
-  if (!/^[\p{Script=Han}]{3,8}$/u.test(anchor)) return false
-  return ngrams.some(token => {
-    if (token.length < 3 || Math.abs(token.length - anchor.length) > 1) return false
-    const common = commonChineseSubsequenceLength(anchor, token)
-    return common >= 2 && common / Math.min(anchor.length, token.length) >= 0.5
-  })
+  const undergroundSpace = /地下|地底/u.test(anchor) && /通道|甬道/u.test(anchor)
+  if (undergroundSpace && /地下|地底/u.test(opening) && /通道|甬道/u.test(opening)) return true
+  const temperatureRise = /发热|升温|变烫|烫热/u.test(anchor)
+  if (temperatureRise && /发热|升温|变烫|烫热/u.test(opening)) return true
+  return false
 }
 
 function openingAnchorCount(text: string, groups: readonly (readonly string[])[]) {
   const openingText = candidateOpeningText(text)
-  const ngrams = chineseNgrams(openingText)
-  return groups.filter(group => group.some(alias => conservativeAnchorMatch(alias, openingText, ngrams))).length
+  return groups.filter(group => group.some(alias => conservativeAnchorMatch(alias, openingText))).length
 }
 
 function candidateOpeningText(text: string) {
