@@ -30,31 +30,54 @@ type ProseSentence = {
   complete: boolean
 }
 
+const PROSE_QUOTE_PAIRS: Record<string, string> = {
+  '“': '”',
+  '‘': '’',
+  '「': '」',
+  '『': '』',
+}
+
+function isSpeechAttributionContinuation(value: string) {
+  return /^(?:他|她|它|[\u3400-\u9fff]{1,8})[^。！？!?；;]{0,12}(?:说|问|道|喊|答|叫|喝|吼|嘀咕|低语|提醒|补充|解释|说着|喊道|问道|答道)(?=$|[，,:：。！？!?；;“‘「『])/.test(
+    String(value || '').trim(),
+  )
+}
+
 function splitProseSentences(value: string): ProseSentence[] {
   const text = String(value || '')
   const sentences: ProseSentence[] = []
   let buffer = ''
-  let quoteDepth = 0
+  const quoteStack: string[] = []
   let previousChar = ''
   for (const char of text) {
     buffer += char
-    if ('“「『'.includes(char)) quoteDepth += 1
-    const closesQuotedSentence = '”」』'.includes(char)
-      && quoteDepth === 1
+    if (PROSE_QUOTE_PAIRS[char]) quoteStack.push(PROSE_QUOTE_PAIRS[char])
+    const closesCurrentQuote = quoteStack.at(-1) === char
+    const closesQuotedSentence = closesCurrentQuote
+      && quoteStack.length === 1
       && /[。！？!?；;]/.test(previousChar)
-    if ('”」』'.includes(char)) quoteDepth = Math.max(0, quoteDepth - 1)
-    if ((/[。！？!?；;]/.test(char) && quoteDepth === 0) || closesQuotedSentence) {
+    if (closesCurrentQuote) quoteStack.pop()
+    if ((/[。！？!?；;]/.test(char) && quoteStack.length === 0) || closesQuotedSentence) {
       if (buffer) sentences.push({ text: buffer, complete: true })
       buffer = ''
     }
     if (!/\s/.test(char)) previousChar = char
   }
   if (buffer) sentences.push({ text: buffer, complete: false })
-  return sentences
+  return sentences.reduce<ProseSentence[]>((merged, sentence) => {
+    const previous = merged.at(-1)
+    if (previous && isDialogueParagraph(previous.text) && isSpeechAttributionContinuation(sentence.text)) {
+      previous.text += sentence.text
+      previous.complete = sentence.complete
+      return merged
+    }
+    merged.push(sentence)
+    return merged
+  }, [])
 }
 
 function isDialogueParagraph(value: string) {
-  return /^[“「『][\s\S]*[”」』]$/.test(String(value || '').trim())
+  return /^[“‘「『][\s\S]*[”’」』]$/.test(String(value || '').trim())
 }
 
 function isProtectedProseLine(value: string) {
@@ -112,7 +135,15 @@ function restoreParagraphBreaksForWallProse(value: any) {
     .split(/(\r?\n)/)
     .map(part => (/^\r?\n$/.test(part) ? part : addParagraphBreaksToWall(part)))
     .join('')
-  return normalized.replace(/\s+/g, '') === text.replace(/\s+/g, '') ? normalized : text
+  let sourceIndex = 0
+  for (const char of normalized) {
+    if (char === text[sourceIndex]) {
+      sourceIndex += 1
+      continue
+    }
+    if (char !== '\n') return text
+  }
+  return sourceIndex === text.length ? normalized : text
 }
 
 export function normalizeProseForStorage(value: any) {

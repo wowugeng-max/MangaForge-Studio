@@ -5,6 +5,18 @@ import {
   resolveChapterProseVersionSource,
 } from './chapter-prose-storage-patch'
 
+function expectOnlyNewlinesInserted(source: string, result: string) {
+  let sourceIndex = 0
+  for (const char of result) {
+    if (char === source[sourceIndex]) {
+      sourceIndex += 1
+      continue
+    }
+    expect(char).toBe('\n')
+  }
+  expect(sourceIndex).toBe(source.length)
+}
+
 describe('chapter prose storage patch builders', () => {
   test('builds the shared draft storage patch without post-draft director fields', () => {
     const patch = buildChapterProseStoragePatch({
@@ -147,7 +159,45 @@ describe('chapter prose storage patch builders', () => {
 
     expect(normalized).not.toBe(source)
     expect(normalized).toContain(attributedDialogue)
-    expect(normalized.replace(/\s+/g, '')).toBe(source.replace(/\s+/g, ''))
+    expectOnlyNewlinesInserted(source, normalized)
+  })
+
+  test('keeps dialogue attribution and continued dialogue in one indivisible turn', () => {
+    const dialogueTurn = '“别动。”他说，“门后那东西正在学你的呼吸。等它停下来，我们再进去。”'
+    const source = [
+      '安全门忽然向里凹下一块，门框上的铁锈簌簌落在积水里，荡开的波纹一圈追着一圈。',
+      dialogueTurn,
+      '江哲停住伸向门把的手，另一只手按住胸前的黑色薄片，薄片正随着门后的动静发热。',
+      '楼梯下方传来鞋底蹭过水泥地的声音，先是一双脚，随后又多出第二双和第三双。',
+      '老陈没有回头，只把短刀反握在腕后，用刀柄轻轻碰了碰江哲的手肘。',
+      '门后的呼吸声果然停了，楼梯里的脚步也在同一刻消失，整层楼骤然安静下来。',
+    ].join('')
+
+    const normalized = normalizeProseForStorage(source)
+
+    expect(normalized).not.toBe(source)
+    expect(normalized).toContain(dialogueTurn)
+    expect(normalized).not.toContain('“别动。”\n\n他说')
+    expect(normalized).not.toContain('他说，\n\n“门后')
+    expectOnlyNewlinesInserted(source, normalized)
+  })
+
+  test('never inserts a paragraph break inside Chinese single quotes', () => {
+    const quotedThought = '他记得纸条上只有一句话：‘不要回头。听见有人喊名字也别答应。一直走到灯亮起来。’'
+    const source = [
+      '走廊尽头的灯依次熄灭，黑暗像潮水一样沿着地砖朝江哲脚下漫过来。',
+      quotedThought,
+      '身后的脚步声停在三米之外，来人没有靠近，却用老陈的声音准确叫出了他的名字。',
+      '江哲盯着前方最后一盏绿灯，双手垂在身侧，步幅和呼吸都没有发生变化。',
+      '那道声音又叫了一遍，这次贴得更近，温热气息几乎已经扫到他的后颈。',
+      '绿灯终于亮起时，他一步跨进门内，反手将追来的黑影和声音一同关在外面。',
+    ].join('')
+
+    const normalized = normalizeProseForStorage(source)
+
+    expect(normalized).not.toBe(source)
+    expect(normalized).toContain(quotedThought)
+    expectOnlyNewlinesInserted(source, normalized)
   })
 
   test('places complete dialogue turns from different speakers in separate paragraphs', () => {
@@ -166,10 +216,10 @@ describe('chapter prose storage patch builders', () => {
     const normalized = normalizeProseForStorage(source)
 
     expect(normalized).toContain(`\n\n${firstDialogue}\n\n${secondDialogue}\n\n`)
-    expect(normalized.replace(/\s+/g, '')).toBe(source.replace(/\s+/g, ''))
+    expectOnlyNewlinesInserted(source, normalized)
   })
 
-  test('preserves every non-whitespace character and is idempotent', () => {
+  test('only inserts newlines into the exact source character sequence and is idempotent', () => {
     const source = [
       '走廊里的应急灯只剩最后一盏，暗红光线把两人的影子钉在布满水渍的墙面上。',
       '江哲沿着墙根找到三枚新鲜脚印，脚印只朝安全门延伸，却没有任何返回的痕迹。',
@@ -183,7 +233,7 @@ describe('chapter prose storage patch builders', () => {
     const twice = normalizeProseForStorage(once)
 
     expect(once).not.toBe(source)
-    expect(once.replace(/\s+/g, '')).toBe(source.replace(/\s+/g, ''))
+    expectOnlyNewlinesInserted(source, once)
     expect(twice).toBe(once)
   })
 
