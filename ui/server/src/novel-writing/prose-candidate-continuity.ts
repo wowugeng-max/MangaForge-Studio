@@ -7,6 +7,12 @@ function boundedAnchor(value: any) {
   return text.length >= 2 && text.length <= 24 ? text : ''
 }
 
+const TEMPERATURE_STATE_PATTERN = /发热|升温|变烫|烫热/u
+
+function isTemperatureStateAnchor(value: any) {
+  return TEMPERATURE_STATE_PATTERN.test(String(value || ''))
+}
+
 function structuredAnchorValues(context: any) {
   const target = context?.chapter_target || context?.chapterTarget || context
   const first = target?.scene_cards?.[0] || target?.sceneCards?.[0] || {}
@@ -61,16 +67,34 @@ function textualAnchorValues(context: any) {
 
 function anchorGroups(context: any) {
   const seen = new Set<string>()
-  const equivalents = aliasGroups(context)
-  const singles = [...structuredAnchorValues(context), ...textualAnchorValues(context)]
+  const structured = structuredAnchorValues(context).map(boundedAnchor).filter(Boolean)
+  const equivalents = aliasGroups(context).filter(group => !group.every(isTemperatureStateAnchor))
+  const itemAnchor = structured.findLast(anchor => !isTemperatureStateAnchor(anchor)
+    && /^[\p{Script=Han}]{3,8}$/u.test(anchor)
+    && !/地下|地底|通道|甬道/u.test(anchor)
+    && !/^老[\p{Script=Han}]$/u.test(anchor))
+  const hasTemperatureState = structured.some(isTemperatureStateAnchor)
+    || aliasGroups(context).some(group => group.some(isTemperatureStateAnchor))
+  const compoundGroups = itemAnchor && hasTemperatureState ? [[`__item_temperature__:${itemAnchor.slice(-1)}`]] : []
+  const singles = [...structured, ...textualAnchorValues(context)]
     .map(boundedAnchor)
+    .filter(anchor => !isTemperatureStateAnchor(anchor))
     .filter(anchor => anchor && !seen.has(normalized(anchor)) && seen.add(normalized(anchor)))
     .slice(0, 12)
     .map(anchor => [anchor] as const)
-  return [...equivalents, ...singles.filter(group => !equivalents.some(equivalent => equivalent.some(alias => normalized(alias) === normalized(group[0]))))].slice(0, 12)
+  return [...compoundGroups, ...equivalents, ...singles.filter(group => !equivalents.some(equivalent => equivalent.some(alias => normalized(alias) === normalized(group[0]))))].slice(0, 12)
 }
 
 function conservativeAnchorMatch(anchor: string, opening: string) {
+  if (anchor.startsWith('__item_temperature__:')) {
+    const head = anchor.split(':')[1]
+    const stateMatches = Array.from(opening.matchAll(new RegExp(TEMPERATURE_STATE_PATTERN.source, 'gu')))
+    return stateMatches.some(match => {
+      const start = Math.max(0, Number(match.index || 0) - 24)
+      const nearby = opening.slice(start, Number(match.index || 0) + match[0].length)
+      return new RegExp(`[\\p{Script=Han}]{1,7}${head}`, 'u').test(nearby)
+    })
+  }
   const exact = normalized(anchor)
   if (!exact) return false
   const normalizedOpening = normalized(opening)
@@ -85,8 +109,6 @@ function conservativeAnchorMatch(anchor: string, opening: string) {
   }
   const undergroundSpace = /地下|地底/u.test(anchor) && /通道|甬道/u.test(anchor)
   if (undergroundSpace && /地下|地底/u.test(opening) && /通道|甬道/u.test(opening)) return true
-  const temperatureRise = /发热|升温|变烫|烫热/u.test(anchor)
-  if (temperatureRise && /发热|升温|变烫|烫热/u.test(opening)) return true
   return false
 }
 

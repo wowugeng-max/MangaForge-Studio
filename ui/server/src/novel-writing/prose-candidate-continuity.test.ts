@@ -85,6 +85,18 @@ describe('continuity-safe prose candidate selection', () => {
     expect(selectContinuitySafeProseCandidate(original, candidate, context).accepted).toBe(false)
   })
 
+  test('does not let an oven temperature change stand in for the carried item state', () => {
+    const original = chapterScaleText(chapter10HandoffFixture.continuousCandidateOpening)
+    const candidate = chapterScaleText('陈叔退进地底甬道，烤箱正在升温，他催沈砚快走。')
+    expect(selectContinuitySafeProseCandidate(original, candidate, context).accepted).toBe(false)
+  })
+
+  test('does not let hot water stand in for the carried item state', () => {
+    const original = chapterScaleText(chapter10HandoffFixture.continuousCandidateOpening)
+    const candidate = chapterScaleText('陈叔退进地底甬道，锅里的水变烫了，他催沈砚快走。')
+    expect(selectContinuitySafeProseCandidate(original, candidate, context).accepted).toBe(false)
+  })
+
   test('does not police a weak original opening that never established two handoff anchors', () => {
     const original = chapterScaleText('沈砚向前走去。')
     const candidate = chapterScaleText(chapter10HandoffFixture.disconnectedRewriteOpening)
