@@ -441,6 +441,29 @@ function deterministicFindings(scan: any): ProseQualityFinding[] {
   })
 }
 
+const CRAFT_ADVISORY_REVISION_KEY_PATTERN = /^(?:paragraph_wall_text_line_|paragraph_comma_chain_density_line_|prose_static_environment$|prose_decorative_detail$|prose_stacked_description$)/
+
+function deterministicCraftAdvisoryFindings(scan: any): ProseQualityFinding[] {
+  const findings = deterministicAdvisoryFindings(scan)
+    .filter((item: any) => CRAFT_ADVISORY_REVISION_KEY_PATTERN.test(compactQualityText(item?.key || item?.pattern, 100)))
+    .map((item: any, index: number): ProseQualityFinding | null => {
+      const key = compactQualityText(item?.key || item?.pattern || `craft_advisory_${index + 1}`, 100)
+      const evidence = compactQualityText(item?.evidence, MAX_PROSE_QUALITY_EVIDENCE_CHARS)
+      const requiredChange = compactQualityText(item?.fix || item?.message, 500)
+      if (!key || !evidence || !requiredChange) return null
+      return {
+        key,
+        severity: 'S3',
+        dimension: 'prose_style',
+        evidence,
+        required_change: requiredChange,
+        acceptance_test: `重新运行确定性 craft 扫描后不再出现 ${key}；人物、事件、因果和章节承接保持不变`,
+      }
+    })
+    .filter((item: ProseQualityFinding | null): item is ProseQualityFinding => Boolean(item))
+  return uniqueProseQualityFindings(findings).slice(0, 5)
+}
+
 function proseQualityDiagnosticType(value: any) {
   if (value === undefined) return 'missing'
   if (value === null) return 'null'
@@ -681,10 +704,13 @@ export async function runProseQualityLoop(input: {
     classification,
   })
 
-  for (let round = 1; !decision.passed && round <= maxRounds; round += 1) {
+  for (let round = 1; round <= maxRounds; round += 1) {
+    const craftAdvisoryFindings = deterministicCraftAdvisoryFindings(scan)
+    if (decision.passed && craftAdvisoryFindings.length === 0) break
     const blockingFindings = [
       ...deterministicFindings(scan),
       ...classification.blockingFindings,
+      ...craftAdvisoryFindings,
     ].slice(0, 6)
     if (blockingFindings.length === 0) break
 

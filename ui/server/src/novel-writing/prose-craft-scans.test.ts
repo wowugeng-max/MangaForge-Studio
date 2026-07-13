@@ -8,6 +8,7 @@ import {
   scanParagraphCommaChainDensityRisks,
   scanParagraphFragmentationRisks,
   scanParagraphLengthUniformityRisks,
+  scanParagraphWallTextRisks,
   scanProseCameraAnchorRisks,
   scanProseDecorativeDetailRisks,
   scanProseMotionStillRisks,
@@ -61,6 +62,31 @@ describe('prose craft deterministic scans', () => {
     expect(checks[0]?.key).toBe('paragraph_comma_chain_density_line_3')
   })
 
+  test('detects a wall-text paragraph while keeping evidence bounded', () => {
+    const checks = scanParagraphWallTextRisks([
+      '第4章 地下通道',
+      '',
+      '沈砚停在门边，看见铁链贴着积水滑向老陈脚边。'.repeat(24),
+    ].join('\n'))
+
+    expect(checks[0]?.key).toBe('paragraph_wall_text_line_3')
+    expect(checks[0]?.evidence.length).toBeLessThanOrEqual(260)
+  })
+
+  test('does not flag already segmented web-fiction paragraphs as wall text', () => {
+    const checks = scanParagraphWallTextRisks([
+      '第4章 地下通道',
+      '',
+      '沈砚停在门边，看见铁链贴着积水滑向老陈脚边。'.repeat(4),
+      '',
+      '老陈抬起发抖的手，指向通道尽头那盏忽明忽暗的灯。'.repeat(4),
+      '',
+      '灯影一晃，水里的锁链突然绷直。'.repeat(4),
+    ].join('\n'))
+
+    expect(checks).toEqual([])
+  })
+
   test('detects repeated still beats', () => {
     const checks = scanProseMotionStillRisks([
       '第13章 旧账',
@@ -107,6 +133,16 @@ describe('prose craft deterministic scans', () => {
     ].join('\n'))
 
     expect(checks[0]?.key).toBe('prose_decorative_detail')
+  })
+
+  test('does not flag short atmosphere or functional props as decorative filler', () => {
+    const shortAtmosphere = scanProseStaticEnvironmentRisks('雨敲在铁门上。沈砚听见锁链跟着响了一声。')
+    const functionalProps = scanProseDecorativeDetailRisks(
+      '沈砚把八万元收据塞给老陈，又用旧钥匙打开账本夹层；银色戒指滚出来，内圈三年的刻字证明失踪者来过这里。',
+    )
+
+    expect(shortAtmosphere).toEqual([])
+    expect(functionalProps).toEqual([])
   })
 
   test('detects vague quantity weight', () => {

@@ -548,6 +548,7 @@ import {
   scanParagraphCommaChainDensityRisks,
   scanParagraphFragmentationRisks,
   scanParagraphLengthUniformityRisks,
+  scanParagraphWallTextRisks,
   scanProseCameraAnchorRisks,
   scanProseDecorativeDetailRisks,
   scanProseMotionStillRisks,
@@ -953,6 +954,13 @@ export function scanProseForQualityLoop(text: string, contextPackage: any, wordT
       status: 'fail',
       severity: 'blocking',
     }))
+  const craftAdvisoryChecks = [
+    ...scanParagraphWallTextRisks(text),
+    ...scanParagraphCommaChainDensityRisks(text),
+    ...scanProseStaticEnvironmentRisks(text),
+    ...scanProseDecorativeDetailRisks(text),
+    ...scanProseStackedDescriptionRisks(text),
+  ].slice(0, 5)
   const hardFailures = [
     ...scanProseLanguageRisks(text),
     ...scanProseMetaLeaks(text),
@@ -982,19 +990,21 @@ export function scanProseForQualityLoop(text: string, contextPackage: any, wordT
   const uniqueFailures = Array.from(new Map(
     hardFailures.map(item => [`${item.key}:${item.message}`, item]),
   ).values())
-  const advisoryFindings = bannedWordChecks
-    .filter((item: any) => item?.status === 'warn')
+  const advisoryFindings = [
+    ...craftAdvisoryChecks,
+    ...bannedWordChecks.filter((item: any) => item?.status === 'warn'),
+  ]
     .map((item: any) => ({
       key: String(item?.key || item?.pattern || 'deterministic_advisory'),
       pattern: String(item?.pattern || item?.key || 'deterministic_advisory'),
       matched_text: String(item?.matched_text || ''),
       status: 'warn' as const,
-      evidence: String(item?.evidence || ''),
-      fix: String(item?.fix || ''),
+      evidence: compactText(item?.evidence || '', 500),
+      fix: compactText(item?.fix || '', 500),
     }))
   const uniqueAdvisoryFindings = Array.from(new Map(
     advisoryFindings.map(item => [`${item.pattern}:${item.matched_text}:${item.evidence}:${item.fix}`, item]),
-  ).values())
+  ).values()).slice(0, 8)
   return {
     hard_failures: uniqueFailures,
     advisory_findings: uniqueAdvisoryFindings,

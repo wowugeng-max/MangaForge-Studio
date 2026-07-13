@@ -87,4 +87,61 @@ describe('prose stability quality loop', () => {
     expect(result.decision.hard_failures).toEqual([])
     expect(result.decision.approvable).toBe(true)
   })
+
+  test('keeps residual craft risk advisory after the only revision round', async () => {
+    let reviseCalls = 0
+    const result = await runProseQualityLoop({
+      initialText: craftRiskText,
+      minScore: 80,
+      maxRevisionRounds: 1,
+      scan: async () => ({
+        hard_failures: [],
+        advisory_findings: [{
+          key: 'prose_static_environment',
+          pattern: 'prose_static_environment',
+          status: 'warn',
+          evidence: '窗外的雨越下越密',
+          fix: '让环境进入角色动作、压力或信息变化。',
+        }],
+      }),
+      review: async () => passingReview,
+      revise: async () => {
+        reviseCalls += 1
+        return { final_text: craftRiskText.replace('窗外的雨越下越密', '雨越下越密') }
+      },
+    })
+
+    expect(reviseCalls).toBe(1)
+    expect(result.rounds).toHaveLength(1)
+    expect(result.decision).toMatchObject({ hard_failures: [], approvable: true })
+    expect(result.decision.advisory_failures.join('｜')).toContain('prose_static_environment')
+  })
+
+  test('does not spend the optional revision on score-only or unrelated advisory misses', async () => {
+    let reviseCalls = 0
+    const result = await runProseQualityLoop({
+      initialText: '沈砚踢开铁门，老陈立刻跟上。'.repeat(80),
+      minScore: 80,
+      maxRevisionRounds: 1,
+      scan: async () => ({
+        hard_failures: [],
+        advisory_findings: [{
+          key: 'unrelated_advisory',
+          pattern: 'unrelated_advisory',
+          status: 'warn',
+          evidence: '沈砚踢开铁门',
+          fix: '仅记录评分建议。',
+        }],
+      }),
+      review: async () => ({ ...passingReview, score: 79 }),
+      revise: async () => {
+        reviseCalls += 1
+        return { final_text: '不应调用。' }
+      },
+    })
+
+    expect(reviseCalls).toBe(0)
+    expect(result.rounds).toEqual([])
+    expect(result.decision.advisory_failures.join('｜')).toContain('质检评分 79 低于 80')
+  })
 })

@@ -1,7 +1,8 @@
 import { countProseChars } from './word-target'
 
-function compactBriefText(value: any, fallback = '') {
-  return String(value || fallback || '').replace(/\s+/g, ' ').trim()
+function compactBriefText(value: any, maxChars = 500) {
+  const boundedMaxChars = Math.max(1, Math.min(1_000, Number(maxChars) || 500))
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, boundedMaxChars)
 }
 
 function isLikelyChapterTitleLine(line: string) {
@@ -135,6 +136,25 @@ export function scanParagraphCommaChainDensityRisks(text: string) {
       status: 'warn',
       evidence: compactBriefText(paragraph.text, 260),
       fix: '按 oh-story 段落密度诊断修复：逗号串太长、多个完整动作或信息挤在一段里时，需要换气；按动作或信息变化拆开，插入动作、对白或短句。',
+      line: paragraph.line,
+    })
+    break
+  }
+  return hits
+}
+
+export function scanParagraphWallTextRisks(text: string) {
+  const paragraphs = proseParagraphLinesWithoutTitle(text)
+  const hits: Array<{ key: string; label: string; status: 'warn'; evidence: string; fix: string; line: number }> = []
+  for (const paragraph of paragraphs) {
+    const proseLength = countProseChars(paragraph.text)
+    if (proseLength < 260) continue
+    hits.push({
+      key: `paragraph_wall_text_line_${paragraph.line}`,
+      label: '网文长段扫描',
+      status: 'warn',
+      evidence: `第${paragraph.line}行形成 ${proseLength} 字墙文：${compactBriefText(paragraph.text, 220)}`,
+      fix: '按中文网文阅读节奏拆段：说话人变化、完整动作、信息变化、角色反应或转折出现时换段；对话尽量独立成段，不改变事件、人物状态和因果顺序。',
       line: paragraph.line,
     })
     break
