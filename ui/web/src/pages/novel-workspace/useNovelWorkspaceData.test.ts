@@ -225,6 +225,29 @@ describe('novel workspace detail working set', () => {
     expect(capturedSignal?.aborted).toBe(true)
   })
 
+  test('starts a fresh same-key request after the previous request signal is aborted', async () => {
+    let calls = 0
+    const cache = createWorkspaceDetailCache(async (_kind, id, signal) => {
+      calls += 1
+      if (calls === 1) {
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true })
+        })
+      }
+      return { id, title: '新项目详情' }
+    })
+    const staleController = new AbortController()
+    const freshController = new AbortController()
+
+    const stale = cache.load('chapter', 7, 'v1', { signal: staleController.signal })
+    staleController.abort()
+    const fresh = cache.load('chapter', 7, 'v1', { signal: freshController.signal })
+
+    expect((await fresh).record?.title).toBe('新项目详情')
+    expect((await stale).status).toBe('degraded')
+    expect(calls).toBe(2)
+  })
+
   test('keeps latest review per type for the chapter neighborhood plus latest global per type', () => {
     const reviews = [
       { id: 1, chapter_id: 3, chapter_no: 3, review_type: 'prose_quality', created_at: '2026-07-13T01:00:00Z' },

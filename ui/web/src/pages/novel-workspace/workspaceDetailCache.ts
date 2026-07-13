@@ -107,7 +107,8 @@ export function createWorkspaceDetailCache(
       return Promise.resolve(cached)
     }
     const active = inflight.get(key)
-    if (active) return active.promise
+    if (active && !active.controller.signal.aborted) return active.promise
+    if (active) inflight.delete(key)
 
     const controller = new AbortController()
     const abort = () => controller.abort()

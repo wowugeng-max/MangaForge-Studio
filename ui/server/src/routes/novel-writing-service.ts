@@ -1106,6 +1106,35 @@ function requiredProsePromptJson(value: any) {
   }
 }
 
+function requiredProseSceneCardValue(value: any): any {
+  if (value === null || value === undefined) return undefined
+  if (typeof value === 'string') {
+    const text = requiredProsePromptText(value)
+    return text || undefined
+  }
+  if (typeof value !== 'object') return value
+  if (Array.isArray(value)) {
+    const items = value.map(requiredProseSceneCardValue).filter(item => item !== undefined)
+    return items.length ? items : undefined
+  }
+  const output: Record<string, any> = {}
+  for (const [key, item] of Object.entries(value)) {
+    if (/(?:^|_)(?:diagnostic|diagnostics|audit_log|raw_payload|debug|trace)(?:$|_)/i.test(key)) continue
+    const next = requiredProseSceneCardValue(item)
+    if (next !== undefined) output[key] = next
+  }
+  return Object.keys(output).length ? output : undefined
+}
+
+function requiredProseSceneCard(card: any) {
+  const sanitized = sanitizeJsonValue(card, {
+    maxDepth: Infinity,
+    maxArrayLength: Infinity,
+    maxObjectKeys: Infinity,
+  })
+  return requiredProseSceneCardValue(sanitized) || {}
+}
+
 function proseContractValue(context: any, key: string) {
   return getContextContract(context, `${key}_contract`)
 }
@@ -1117,7 +1146,7 @@ function buildRequiredProseCoreSections(
   const context: any = contract.context || {}
   const target: any = mergedContextChapterTargetPreferRuntime(context)
   const previousHandoff = contract.chapter.previous_handoff || buildPreviousChapterHandoff(context)
-  const sceneCards = asArray(contract.chapter.scene_cards).slice(0, 8).map(compactProseSceneCard)
+  const sceneCards = asArray(contract.chapter.scene_cards).map(requiredProseSceneCard)
   const failedChecks = asArray(contract.preflight?.checks)
     .filter((item: any) => item?.ok === false)
     .map((item: any) => ({
