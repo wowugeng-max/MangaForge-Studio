@@ -54,7 +54,7 @@ export function selectContinuitySafeProseCandidate(
   const regressed = originalAnchors >= 2
     && candidateAnchors <= Math.max(0, originalAnchors - 2)
     && !transitionMatched
-    && !hasExplicitCausalBridge(candidate)
+    && !(candidateAnchors >= 1 && hasExplicitCausalBridge(candidate))
   if (!regressed) return { text: candidate, accepted: true, warning: null }
   return {
     text: original,

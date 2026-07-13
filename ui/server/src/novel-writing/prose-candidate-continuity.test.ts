@@ -32,4 +32,10 @@ describe('continuity-safe prose candidate selection', () => {
     const candidate = chapterScaleText(chapter10HandoffFixture.disconnectedRewriteOpening)
     expect(selectContinuitySafeProseCandidate(original, candidate, context).accepted).toBe(true)
   })
+
+  test('does not accept a bare time jump that explains none of the established handoff state', () => {
+    const original = chapterScaleText(chapter10HandoffFixture.continuousCandidateOpening)
+    const candidate = chapterScaleText('三小时后，剧痛从骨髓深处炸开，他在陌生白房间里醒来。')
+    expect(selectContinuitySafeProseCandidate(original, candidate, context).accepted).toBe(false)
+  })
 })
