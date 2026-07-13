@@ -522,23 +522,31 @@ function summarizeNovelRunPipelineRefs(inputRef: any, outputRef: any) {
   }
 }
 
-function backfillNovelRunPipelineSummaries(db: Database, batchSize = 64) {
-  const rows = db.query(`
+function backfillNovelRunPipelineSummaries(db: Database) {
+  const selectNextId = db.query(`
     SELECT id
     FROM runs
-    WHERE pipeline_chapter_failure_count IS NULL
-      OR pipeline_open_task_count IS NULL
-      OR pipeline_task_count IS NULL
+    WHERE id > ?
+      AND (
+        pipeline_chapter_failure_count IS NULL
+        OR pipeline_open_task_count IS NULL
+        OR pipeline_task_count IS NULL
+      )
     ORDER BY id ASC
-    LIMIT ?
-  `).all(batchSize) as Array<{ id: number }>
+    LIMIT 1
+  `)
   const selectPayload = db.query('SELECT input_ref, output_ref FROM runs WHERE id = ?')
   const updateRow = db.query(`
     UPDATE runs
     SET pipeline_chapter_failure_count = ?, pipeline_open_task_count = ?, pipeline_task_count = ?
     WHERE id = ?
   `)
-  for (const { id } of rows) {
+  let lastId = 0
+  while (true) {
+    const pending = selectNextId.get(lastId) as { id?: number } | null
+    if (!pending?.id) return
+    const id = Number(pending.id)
+    lastId = id
     const row = selectPayload.get(id) as any
     if (!row) continue
     const summary = summarizeNovelRunPipelineRefs(row.input_ref, row.output_ref)

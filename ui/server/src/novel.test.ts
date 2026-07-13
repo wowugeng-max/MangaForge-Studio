@@ -545,7 +545,7 @@ describe('novel sqlite persistence', () => {
     })
   })
 
-  test('backfills legacy null pipeline summaries in bounded batches', async () => {
+  test('streams every legacy null pipeline summary before returning from schema ensure', async () => {
     const workspace = await tempWorkspace()
     const project = await createNovelProject(workspace, { title: '运行摘要回填' })
     const db = new Database(join(workspace, 'novel.sqlite'))
@@ -569,26 +569,6 @@ describe('novel sqlite persistence', () => {
       }
     } finally {
       db.close()
-    }
-
-    await listNovelRuns(workspace, project.id)
-
-    const dbAfter = new Database(join(workspace, 'novel.sqlite'))
-    try {
-      const pending = dbAfter.query(`
-        SELECT COUNT(*) AS count FROM runs
-        WHERE pipeline_chapter_failure_count IS NULL
-          OR pipeline_open_task_count IS NULL
-          OR pipeline_task_count IS NULL
-      `).get() as any
-      const lastBeforeSecondBatch = dbAfter.query(`
-        SELECT pipeline_chapter_failure_count, pipeline_open_task_count, pipeline_task_count
-        FROM runs WHERE step_name = 'legacy-69'
-      `).get() as any
-      expect(Number(pending.count)).toBe(6)
-      expect(lastBeforeSecondBatch.pipeline_chapter_failure_count).toBeNull()
-    } finally {
-      dbAfter.close()
     }
 
     await listNovelRuns(workspace, project.id)
@@ -622,7 +602,8 @@ describe('novel sqlite persistence', () => {
     expect(backfillBlock).toContain('SELECT id')
     expect(backfillBlock).not.toContain('SELECT id, input_ref, output_ref')
     expect(backfillBlock).toContain('SELECT input_ref, output_ref FROM runs WHERE id = ?')
-    expect(backfillBlock).not.toContain('while (true)')
+    expect(backfillBlock).not.toContain('.all(')
+    expect(backfillBlock).toContain('id > ?')
   })
 })
 

@@ -500,6 +500,88 @@ describe('novel pipeline snapshot', () => {
     expect(stablePipeline(snapshotSummary)).toEqual(stablePipeline(legacySummary))
   })
 
+  test('backfills more than sixty-four legacy run summaries before the first snapshot decision', async () => {
+    const workspace = await tempWorkspace()
+    const { project, chapter } = await createAcceptedPipelineFixture(workspace, '首次全量语义回填')
+    await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'prose_quality',
+      status: 'ok',
+      created_at: '2026-07-08T00:00:00.000Z',
+      payload: JSON.stringify({ chapter_id: chapter.id, self_check: { review: { score: 88, passed: true } } }),
+    })
+    await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'editor_report',
+      status: 'ok',
+      created_at: '2026-07-08T00:01:00.000Z',
+      payload: JSON.stringify({ chapter_id: chapter.id, report: { status: 'accepted', issues: [] } }),
+    })
+    const baseInput = {
+      project: await getNovelProject(workspace, project.id),
+      chapters: await listNovelChapters(workspace, project.id),
+      outlines: await listNovelOutlines(workspace, project.id),
+      worldbuilding: await listNovelWorldbuilding(workspace, project.id),
+      characters: await listNovelCharacters(workspace, project.id),
+      reviews: await listNovelReviews(workspace, project.id),
+    }
+    const rawRuns: any[] = Array.from({ length: 68 }, (_, index) => ({
+      project_id: project.id,
+      run_type: 'chapter_group_generation',
+      step_name: `legacy-clean-${index}`,
+      status: 'completed',
+      input_ref: '',
+      output_ref: JSON.stringify({ chapters: [{ status: 'completed' }] }),
+      created_at: `2026-06-01T00:${String(index).padStart(2, '0')}:00.000Z`,
+    }))
+    rawRuns.push({
+      project_id: project.id,
+      run_type: 'chapter_group_generation',
+      step_name: 'legacy-late-embedded-failure',
+      status: 'completed',
+      input_ref: '',
+      output_ref: JSON.stringify({ chapters: [{ status: 'failed' }] }),
+      created_at: '2026-07-08T00:02:00.000Z',
+    })
+    rawRuns.push({
+      project_id: project.id,
+      run_type: 'longform_production_repair',
+      step_name: 'legacy-late-open-task',
+      status: 'completed',
+      input_ref: '',
+      output_ref: JSON.stringify({ tasks: [{ task_status: ['failed'] }] }),
+      created_at: '2026-07-08T00:03:00.000Z',
+    })
+    const db = new Database(join(workspace, 'novel.sqlite'))
+    try {
+      const insert = db.prepare(`
+        INSERT INTO runs (
+          project_id, run_type, step_name, status, input_ref, output_ref, created_at,
+          pipeline_chapter_failure_count, pipeline_open_task_count, pipeline_task_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)
+      `)
+      for (const run of rawRuns) insert.run(
+        run.project_id,
+        run.run_type,
+        run.step_name,
+        run.status,
+        run.input_ref,
+        run.output_ref,
+        run.created_at,
+      )
+    } finally {
+      db.close()
+    }
+
+    const legacySummary = buildNovelPipelineSummary({ ...baseInput, runs: rawRuns })
+    const snapshot = await getNovelPipelineSnapshot(workspace, project.id)
+    const snapshotSummary = buildNovelPipelineSummary(snapshot!)
+
+    expect(stablePipeline(snapshotSummary)).toEqual(stablePipeline(legacySummary))
+    expect(snapshot!.runs.some(run => run.status === 'failed' && run.run_type === 'chapter_group_generation')).toBe(true)
+    expect(snapshot!.runs.some(run => Number(run.pipeline_open_task_count || 0) === 1)).toBe(true)
+  })
+
   test('keeps active project chapter and winner review payloads compact without changing decisions', async () => {
     const workspace = await tempWorkspace()
     const { project, chapter } = await createAcceptedPipelineFixture(workspace, '活跃大对象')
