@@ -61,11 +61,6 @@ function hasExplicitCausalBridge(text: string) {
   return /(?:\d+|一|两|三|数)(?:分钟|小时|天|日|刻钟)后|(?:随后|之后|次日|翌日|当晚|转移到|离开.{0,20}(?:来到|到了)|从.{0,40}(?:转移|赶到|来到))/u.test(opening)
 }
 
-function hasDirectContinuationLanguage(text: string) {
-  const opening = candidateOpeningText(text)
-  return (opening.match(/再次|仍(?:然|旧)?|继续|接着|循着|还在|越来越/g) || []).length >= 2
-}
-
 export function selectContinuitySafeProseCandidate(
   originalText: string,
   candidateText: string,
@@ -87,7 +82,6 @@ export function selectContinuitySafeProseCandidate(
     && candidateAnchors <= Math.max(0, originalAnchors - 2)
     && !transitionMatched
     && !(candidateAnchors >= 2 && hasExplicitCausalBridge(candidate))
-    && !hasDirectContinuationLanguage(candidate)
   if (!regressed) return { text: candidate, accepted: true, warning: null }
   return {
     text: original,

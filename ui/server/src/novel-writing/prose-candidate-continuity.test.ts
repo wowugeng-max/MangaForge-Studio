@@ -42,7 +42,7 @@ describe('continuity-safe prose candidate selection', () => {
 
   test('accepts a synonym-preserving rewrite and a clearly bridged time transition', () => {
     const original = chapterScaleText(chapter10HandoffFixture.continuousCandidateOpening)
-    const synonym = chapterScaleText('金色旧册贴着胸口再次升温，沈砚扶住陈叔，在地底甬道循着锁链摩擦声后退。')
+    const synonym = chapterScaleText('暗金绢册贴着胸口再次升温，沈砚扶住老陈，在地下通道循着锁链摩擦声后退。')
     const bridged = chapterScaleText('三小时后，沈砚才从地下通道转移到医院。老陈守在门外，暗金绢册仍隔着衣襟发热。')
 
     expect(selectContinuitySafeProseCandidate(original, synonym, context).accepted).toBe(true)
