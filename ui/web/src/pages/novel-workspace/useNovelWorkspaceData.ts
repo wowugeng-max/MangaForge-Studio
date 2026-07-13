@@ -24,8 +24,8 @@ export type ChapterSortMode = 'chapter_no_asc' | 'chapter_no_desc' | 'word_count
 export function initialWorkspaceRequestPlan(projectId: number) {
   return [
     { key: 'chapters', url: `/novel/projects/${projectId}/chapters`, params: { view: 'workspace' } },
-    { key: 'runs', url: '/novel/runs', params: { project_id: projectId, view: 'summary' } },
-    { key: 'reviews', url: `/novel/projects/${projectId}/reviews`, params: { view: 'summary' } },
+    { key: 'runs', url: '/novel/runs', params: { project_id: projectId, view: 'summary', limit: 256 } },
+    { key: 'reviews', url: `/novel/projects/${projectId}/reviews`, params: { view: 'summary', limit: 512 } },
   ] as Array<{ key: string; url: string; params?: Record<string, any> }>
 }
 
@@ -146,13 +146,13 @@ export function useNovelWorkspaceData({
   const detailCacheRef = useRef<ReturnType<typeof createWorkspaceDetailCache> | null>(null)
   if (!projectLoadEpochRef.current) projectLoadEpochRef.current = createWorkspaceRequestEpoch()
   if (!detailCacheRef.current) {
-    detailCacheRef.current = createWorkspaceDetailCache(async (kind, id) => {
+    detailCacheRef.current = createWorkspaceDetailCache(async (kind, id, signal) => {
       const url = kind === 'chapter'
         ? `/novel/chapters/${id}`
         : kind === 'review'
           ? `/novel/reviews/${id}`
           : `/novel/runs/${id}`
-      const response = await apiClient.get(url, { params: { project_id: projectIdRef.current } })
+      const response = await apiClient.get(url, { params: { project_id: projectIdRef.current }, signal })
       return response.data
     })
   }
@@ -256,45 +256,54 @@ export function useNovelWorkspaceData({
 
   useEffect(() => {
     const epoch = ++chapterDetailEpochRef.current
+    const controller = new AbortController()
     setChapterDetailResults([])
-    if (!workspaceDetailsBelongToProject(projectId, selectedProject)) return
-    if (chapterWorkingSet.length === 0) return
+    if (!workspaceDetailsBelongToProject(projectId, selectedProject)) return () => controller.abort()
+    if (chapterWorkingSet.length === 0) return () => controller.abort()
     void detailCacheRef.current?.loadMany('chapter', chapterWorkingSet.map(record => ({
       id: Number(record.id),
       version: detailVersion('chapter', record),
-    }))).then(results => {
-      if (epoch === chapterDetailEpochRef.current) setChapterDetailResults(results)
+      estimatedBytes: Math.max(1024, Number(record?.word_count || 0) * 4 + 32 * 1024),
+    })), { signal: controller.signal }).then(results => {
+      if (!controller.signal.aborted && epoch === chapterDetailEpochRef.current) setChapterDetailResults(results)
     })
+    return () => controller.abort()
   }, [projectId, selectedProject, chapterWorkingSet])
 
   useEffect(() => {
     const epoch = ++reviewDetailEpochRef.current
+    const controller = new AbortController()
     setReviewDetailResults([])
-    if (!workspaceDetailsBelongToProject(projectId, selectedProject)) return
+    if (!workspaceDetailsBelongToProject(projectId, selectedProject)) return () => controller.abort()
     const ids = selectReviewDetailIds(reviewSummaries, chapterWorkingSet)
-    if (ids.length === 0) return
+    if (ids.length === 0) return () => controller.abort()
     const byId = new Map(reviewSummaries.map(record => [Number(record?.id || 0), record]))
     void detailCacheRef.current?.loadMany('review', ids.map(id => ({
       id,
       version: detailVersion('review', byId.get(id)),
-    }))).then(results => {
-      if (epoch === reviewDetailEpochRef.current) setReviewDetailResults(results)
+      estimatedBytes: Math.max(1024, Number(byId.get(id)?.payload_bytes || 0) * 2 + 16 * 1024),
+    })), { signal: controller.signal }).then(results => {
+      if (!controller.signal.aborted && epoch === reviewDetailEpochRef.current) setReviewDetailResults(results)
     })
+    return () => controller.abort()
   }, [projectId, selectedProject, reviewSummaries, chapterWorkingSet])
 
   useEffect(() => {
     const epoch = ++runDetailEpochRef.current
+    const controller = new AbortController()
     setRunDetailResults([])
-    if (!workspaceDetailsBelongToProject(projectId, selectedProject)) return
+    if (!workspaceDetailsBelongToProject(projectId, selectedProject)) return () => controller.abort()
     const ids = selectRunDetailIds(runSummaries)
-    if (ids.length === 0) return
+    if (ids.length === 0) return () => controller.abort()
     const byId = new Map(runSummaries.map(record => [Number(record?.id || 0), record]))
     void detailCacheRef.current?.loadMany('run', ids.map(id => ({
       id,
       version: detailVersion('run', byId.get(id)),
-    }))).then(results => {
-      if (epoch === runDetailEpochRef.current) setRunDetailResults(results)
+      estimatedBytes: Math.max(1024, (Number(byId.get(id)?.input_bytes || 0) + Number(byId.get(id)?.output_bytes || 0)) * 2 + 16 * 1024),
+    })), { signal: controller.signal }).then(results => {
+      if (!controller.signal.aborted && epoch === runDetailEpochRef.current) setRunDetailResults(results)
     })
+    return () => controller.abort()
   }, [projectId, selectedProject, runSummaries])
 
   const chapters = useMemo(

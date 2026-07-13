@@ -78,8 +78,8 @@ describe('novel workspace compact loading plan', () => {
   test('uses only opt-in workspace and summary list endpoints during the initial load', () => {
     expect(initialWorkspaceRequestPlan(17)).toEqual(expect.arrayContaining([
       { key: 'chapters', url: '/novel/projects/17/chapters', params: { view: 'workspace' } },
-      { key: 'runs', url: '/novel/runs', params: { project_id: 17, view: 'summary' } },
-      { key: 'reviews', url: '/novel/projects/17/reviews', params: { view: 'summary' } },
+      { key: 'runs', url: '/novel/runs', params: { project_id: 17, view: 'summary', limit: 256 } },
+      { key: 'reviews', url: '/novel/projects/17/reviews', params: { view: 'summary', limit: 512 } },
     ]))
     expect(JSON.stringify(initialWorkspaceRequestPlan(17))).not.toContain('view":"full')
   })
@@ -186,6 +186,45 @@ describe('novel workspace detail working set', () => {
     expect(cache.stats().cached).toBe(15)
   })
 
+  test('hydrates full details with bounded concurrency and a strict retained byte budget', async () => {
+    let active = 0
+    let maxActive = 0
+    const cache = createWorkspaceDetailCache(async (_kind, id, signal) => {
+      expect(signal).toBeInstanceOf(AbortSignal)
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      await new Promise(resolve => setTimeout(resolve, 2))
+      active -= 1
+      return { id, payload: '诊断'.repeat(120) }
+    }, { review: 20 }, { maxConcurrent: 2, maxBytes: { review: 1200 } })
+
+    const results = await cache.loadMany('review', Array.from({ length: 20 }, (_, index) => ({
+      id: index + 1,
+      estimatedBytes: 500,
+    })))
+    const stats = cache.stats()
+
+    expect(maxActive).toBeLessThanOrEqual(2)
+    expect(results.filter(result => result.status === 'ready').length).toBeLessThanOrEqual(2)
+    expect(stats.cachedBytes.review).toBeLessThanOrEqual(stats.maxBytes.review)
+  })
+
+  test('aborts in-flight detail HTTP work when the cache generation is cleared', async () => {
+    let capturedSignal: AbortSignal | undefined
+    const cache = createWorkspaceDetailCache(async (_kind, id, signal) => {
+      capturedSignal = signal
+      await new Promise(resolve => setTimeout(resolve, 5))
+      return { id }
+    })
+
+    const pending = cache.load('chapter', 7, 'v1')
+    cache.clear()
+    await pending
+
+    expect(capturedSignal).toBeInstanceOf(AbortSignal)
+    expect(capturedSignal?.aborted).toBe(true)
+  })
+
   test('keeps latest review per type for the chapter neighborhood plus latest global per type', () => {
     const reviews = [
       { id: 1, chapter_id: 3, chapter_no: 3, review_type: 'prose_quality', created_at: '2026-07-13T01:00:00Z' },
@@ -211,7 +250,8 @@ describe('novel workspace detail working set', () => {
       { id: 7, run_type: 'generate_prose', status: 'running', created_at: '2026-07-13T07:00:00Z' },
     ]
 
-    expect(selectRunDetailIds(runs)).toEqual([7, 6, 5, 4, 3, 2, 1])
+    expect(selectRunDetailIds(runs)).toEqual(expect.arrayContaining([7, 6, 5, 4, 3, 2, 1]))
+    expect(selectRunDetailIds(runs).slice(0, 3)).toEqual([7, 4, 3])
 
     const manyFailures = Array.from({ length: 40 }, (_, index) => ({
       id: 100 + index,
@@ -236,6 +276,17 @@ describe('novel workspace detail working set', () => {
     const trendSelected = selectRunDetailIds(trendRuns, 32)
     expect(trendSelected.filter(id => id >= 300 && id < 400)).toHaveLength(12)
     expect(trendSelected.filter(id => id >= 400)).toHaveLength(12)
+
+    const priorityRuns = [
+      ...trendRuns,
+      { id: 800, run_type: 'generate_prose', status: 'running', created_at: '2026-06-01T00:00:00Z' },
+      { id: 801, run_type: 'quality_benchmark', status: 'failed', created_at: '2026-06-01T00:01:00Z' },
+    ]
+    const prioritySelected = selectRunDetailIds(priorityRuns, 12)
+    expect(prioritySelected).toEqual(expect.arrayContaining([800, 801]))
+    expect(prioritySelected.slice(0, 2)).toEqual([801, 800])
+    expect(prioritySelected.some(id => id >= 300 && id < 400)).toBe(true)
+    expect(prioritySelected.some(id => id >= 400 && id < 500)).toBe(true)
   })
 
   test('deduplicates concurrent detail requests and retains summaries in degraded state on failure', async () => {

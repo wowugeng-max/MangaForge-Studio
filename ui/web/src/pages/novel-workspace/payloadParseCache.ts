@@ -21,19 +21,18 @@ let parsedBytes = 0
 
 function estimateParsedBytes(value: any, seen = new WeakSet<object>(), depth = 0): number {
   if (value === null || value === undefined) return 8
-  if (typeof value === 'string') return Math.min(value.length * 2 + 16, 512 * 1024)
+  if (typeof value === 'string') return Math.min(value.length * 2 + 16, MAX_PARSED_BYTES + 1)
   if (typeof value === 'number' || typeof value === 'boolean') return 16
-  if (typeof value !== 'object' || depth >= 12) return 32
+  if (typeof value !== 'object') return 32
+  if (depth >= 12) return MAX_PARSED_BYTES + 1
   if (seen.has(value)) return 0
   seen.add(value)
   let total = Array.isArray(value) ? 32 : 64
-  const entries = Array.isArray(value) ? value.slice(0, 200) : Object.entries(value).slice(0, 200)
-  for (const entry of entries as any[]) {
-    if (Array.isArray(value)) total += estimateParsedBytes(entry, seen, depth + 1)
-    else total += String(entry[0]).length * 2 + estimateParsedBytes(entry[1], seen, depth + 1)
-    if (total >= MAX_PARSED_BYTES) break
+  for (const key in value) {
+    if (!Object.prototype.hasOwnProperty.call(value, key)) continue
+    total += key.length * 2 + 40 + estimateParsedBytes(value[key], seen, depth + 1)
+    if (total > MAX_PARSED_BYTES) return MAX_PARSED_BYTES + 1
   }
-  seen.delete(value)
   return total
 }
 
@@ -126,7 +125,7 @@ export function parseWorkspacePayload(value: any, options: WorkspacePayloadParse
 
   const entryBytes = source.length * 2
   const parsedEntryBytes = estimateParsedBytes(parsed)
-  if (entryBytes <= MAX_SOURCE_BYTES) {
+  if (entryBytes <= MAX_SOURCE_BYTES && parsedEntryBytes <= MAX_PARSED_BYTES) {
     cache.set(key, { value: parsed, sourceBytes: entryBytes, parsedBytes: parsedEntryBytes })
     sourceBytes += entryBytes
     parsedBytes += parsedEntryBytes

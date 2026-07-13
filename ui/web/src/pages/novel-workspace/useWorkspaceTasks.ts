@@ -12,6 +12,45 @@ export type WorkspaceTaskRefreshState<T> = {
   failures: number
 }
 
+type WorkspaceTaskRequestKind = 'production' | 'knowledge'
+type WorkspaceTaskRequest = {
+  kind: WorkspaceTaskRequestKind
+  projectId: number
+  token: number
+  signal: AbortSignal
+}
+
+export function createWorkspaceTaskRequestGate() {
+  let epoch = 0
+  const active = new Map<WorkspaceTaskRequestKind, WorkspaceTaskRequest & { controller: AbortController }>()
+  return {
+    begin(kind: WorkspaceTaskRequestKind, projectId: number): WorkspaceTaskRequest | null {
+      const current = active.get(kind)
+      if (current && current.projectId === projectId && !current.signal.aborted) return null
+      current?.controller.abort()
+      const controller = new AbortController()
+      const request = { kind, projectId, token: ++epoch, signal: controller.signal, controller }
+      active.set(kind, request)
+      return request
+    },
+    isCurrent(request: WorkspaceTaskRequest | null, projectId: number) {
+      if (!request || request.projectId !== projectId || request.signal.aborted) return false
+      const current = active.get(request.kind)
+      return current?.token === request.token && current.projectId === projectId
+    },
+    finish(request: WorkspaceTaskRequest | null) {
+      if (!request) return
+      const current = active.get(request.kind)
+      if (current?.token === request.token) active.delete(request.kind)
+    },
+    invalidate() {
+      epoch += 1
+      for (const request of active.values()) request.controller.abort()
+      active.clear()
+    },
+  }
+}
+
 export function workspaceTaskRefreshStarted<T>(state: WorkspaceTaskRefreshState<T>): WorkspaceTaskRefreshState<T> {
   return { ...state, confirmed: false }
 }
@@ -130,35 +169,52 @@ export function useWorkspaceTasks({
   const [productionTasksLoading, setProductionTasksLoading] = useState(false)
   const knowledgeRefreshRef = useRef(knowledgeRefresh)
   const productionRefreshRef = useRef(productionRefresh)
+  const requestGateRef = useRef<ReturnType<typeof createWorkspaceTaskRequestGate> | null>(null)
+  if (!requestGateRef.current) requestGateRef.current = createWorkspaceTaskRequestGate()
   const knowledgeIngestJobs = knowledgeRefresh.data
   const productionTasks = productionRefresh.data
 
   const loadProductionTasks = useCallback(async () => {
     if (!projectId) return
+    const request = requestGateRef.current!.begin('production', projectId)
+    if (!request) return
     setProductionRefresh(workspaceTaskRefreshStarted)
     setProductionTasksLoading(true)
     try {
-      const res = await apiClient.get(`/novel/projects/${projectId}/tasks`)
-      setProductionRefresh(state => workspaceTaskRefreshSucceeded(state, res.data || null))
+      const res = await apiClient.get(`/novel/projects/${projectId}/tasks`, { signal: request.signal })
+      if (requestGateRef.current?.isCurrent(request, projectId)) {
+        setProductionRefresh(state => workspaceTaskRefreshSucceeded(state, res.data || null))
+      }
     } catch (error) {
-      setProductionRefresh(state => workspaceTaskRefreshFailed(state, error))
+      if (requestGateRef.current?.isCurrent(request, projectId)) {
+        setProductionRefresh(state => workspaceTaskRefreshFailed(state, error))
+      }
     } finally {
-      setProductionTasksLoading(false)
+      if (requestGateRef.current?.isCurrent(request, projectId)) setProductionTasksLoading(false)
+      requestGateRef.current?.finish(request)
     }
   }, [projectId])
 
   const loadKnowledgeIngestJobs = useCallback(async () => {
+    if (!projectId) return
+    const request = requestGateRef.current!.begin('knowledge', projectId)
+    if (!request) return
     setKnowledgeRefresh(workspaceTaskRefreshStarted)
     setKnowledgeJobsLoading(true)
     try {
-      const res = await apiClient.get('/knowledge/ingest')
-      setKnowledgeRefresh(state => workspaceTaskRefreshSucceeded(state, Array.isArray(res.data?.jobs) ? res.data.jobs : []))
+      const res = await apiClient.get('/knowledge/ingest', { signal: request.signal })
+      if (requestGateRef.current?.isCurrent(request, projectId)) {
+        setKnowledgeRefresh(state => workspaceTaskRefreshSucceeded(state, Array.isArray(res.data?.jobs) ? res.data.jobs : []))
+      }
     } catch (error) {
-      setKnowledgeRefresh(state => workspaceTaskRefreshFailed(state, error))
+      if (requestGateRef.current?.isCurrent(request, projectId)) {
+        setKnowledgeRefresh(state => workspaceTaskRefreshFailed(state, error))
+      }
     } finally {
-      setKnowledgeJobsLoading(false)
+      if (requestGateRef.current?.isCurrent(request, projectId)) setKnowledgeJobsLoading(false)
+      requestGateRef.current?.finish(request)
     }
-  }, [])
+  }, [projectId])
 
   const pauseKnowledgeIngestJob = useCallback(async (jobId: string) => {
     await apiClient.post(`/knowledge/ingest/${jobId}/pause`)
@@ -182,6 +238,23 @@ export function useWorkspaceTasks({
   useEffect(() => {
     productionRefreshRef.current = productionRefresh
   }, [productionRefresh])
+
+  useEffect(() => {
+    requestGateRef.current?.invalidate()
+    setKnowledgeRefresh({ data: [], confirmed: false, error: null, failures: 0 })
+    setProductionRefresh({ data: null, confirmed: false, error: null, failures: 0 })
+    setKnowledgeJobsLoading(false)
+    setProductionTasksLoading(false)
+    return () => requestGateRef.current?.invalidate()
+  }, [projectId])
+
+  useEffect(() => {
+    if (!taskCenterOpen) {
+      requestGateRef.current?.invalidate()
+      setKnowledgeJobsLoading(false)
+      setProductionTasksLoading(false)
+    }
+  }, [taskCenterOpen])
 
   useEffect(() => {
     if (!taskCenterOpen) return

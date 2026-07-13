@@ -92,6 +92,26 @@ describe('workspace task polling policy', () => {
     })).toBeNull()
   })
 
+  test('deduplicates same-project refreshes and aborts them when the project epoch changes', async () => {
+    const module = await loadPollingModule()
+    expect(module).not.toBeNull()
+    if (!module) return
+    const gate = module.createWorkspaceTaskRequestGate()
+    const first = gate.begin('production', 7)
+    expect(first).not.toBeNull()
+    expect(gate.begin('production', 7)).toBeNull()
+    expect(gate.isCurrent(first, 7)).toBe(true)
+
+    gate.invalidate()
+    expect(first.signal.aborted).toBe(true)
+    expect(gate.isCurrent(first, 7)).toBe(false)
+
+    const next = gate.begin('production', 8)
+    expect(next).not.toBeNull()
+    expect(gate.isCurrent(next, 7)).toBe(false)
+    expect(gate.isCurrent(next, 8)).toBe(true)
+  })
+
   test('refreshes immediately when the drawer opens and after task-center actions', () => {
     const hookSource = readFileSync(join(import.meta.dir, 'useWorkspaceTasks.ts'), 'utf8')
     const workspaceSource = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')

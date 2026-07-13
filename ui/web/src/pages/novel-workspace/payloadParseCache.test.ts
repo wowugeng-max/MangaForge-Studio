@@ -98,6 +98,23 @@ describe('workspace payload parse cache', () => {
     expect(stats.maxSourceBytes).toBeLessThanOrEqual(2 * 1024 * 1024)
   })
 
+  test('uses allocation-free conservative estimation and refuses oversized parsed object graphs', async () => {
+    const cache = await loadCacheModule()
+    expect(cache).not.toBeNull()
+    if (!cache) return
+
+    const sourceCode = readFileSync(join(import.meta.dir, 'payloadParseCache.ts'), 'utf8')
+    expect(sourceCode).not.toContain('Object.entries')
+
+    cache.clearWorkspacePayloadParseCache()
+    const wide: Record<string, string> = {}
+    for (let index = 0; index < 40_000; index += 1) wide[`field_${index}`] = '12345678'
+    const source = JSON.stringify(wide)
+    expect(source.length * 2).toBeLessThan(2 * 1024 * 1024)
+    cache.parseWorkspacePayload(source, { owner: { id: 999 }, kind: 'review', field: 'payload' })
+    expect(cache.workspacePayloadParseCacheStats().entries).toBe(0)
+  })
+
   test('routes the planning, writing, and auto director payload hotspots through the shared cache', () => {
     const source = (name: string) => readFileSync(join(import.meta.dir, name), 'utf8')
     const planning = source('planningWorkspaceModel.ts')
