@@ -265,6 +265,10 @@ export function buildProsePromptContextSnapshot(contextPackage: any) {
       conflict_structure_contract: compactStoryDrivingValue(target.conflict_structure_contract || target.conflictStructureContract),
       dialogue_contract: compactStoryDrivingValue(target.dialogue_contract || target.dialogueContract),
       style_boundary_contract: compactStoryDrivingValue(target.style_boundary_contract || target.styleBoundaryContract),
+      chapter_handoff_contract: compactStoryDrivingValue(target.chapter_handoff_contract || target.chapterHandoffContract),
+      longform_compass: compactStoryDrivingValue(target.longform_compass || target.longformCompass),
+      longform_battle_context: compactStoryDrivingValue(target.longform_battle_context || target.longformBattleContext),
+      million_word_runway: compactStoryDrivingValue(target.million_word_runway || target.millionWordRunway),
       longform_structure_contract: omittedContracts.has('longform_structure_contract')
         ? undefined
         : target.longform_structure_contract || target.longformStructureContract,
@@ -272,6 +276,7 @@ export function buildProsePromptContextSnapshot(contextPackage: any) {
   compactChapterTarget.previous_handoff = prosePromptTailText(target.previous_handoff || target.previousHandoff, 700)
   return {
     chapter_target: compactChapterTarget,
+    batch_preflight: compactStoryDrivingValue(contextPackage?.batch_preflight || contextPackage?.batchPreflight || {}),
     oh_story_director: buildOhStoryDirectorSnapshot(contextPackage),
     preflight: compactProsePromptValue(contextPackage?.preflight || {}),
     continuity: compactProsePromptValue(contextPackage?.continuity || {}),

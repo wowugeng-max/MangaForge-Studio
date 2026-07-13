@@ -44291,7 +44291,7 @@ export function createNovelWritingService(ctx: {
         revision: null,
       }
     }
-    const continuitySelection = selectContinuitySafeProseCandidate(chapterText, rewrittenText, contextPackage?.chapter_target || contextPackage?.chapterTarget || {}, { candidate_stage: 'editor' })
+    const continuitySelection = selectContinuitySafeProseCandidate(chapterText, rewrittenText, contextPackage, { candidate_stage: 'editor' })
     return {
       final_text: continuitySelection.text,
       edited: continuitySelection.accepted && rewrittenText !== chapterText,
@@ -44366,7 +44366,7 @@ export function createNovelWritingService(ctx: {
         revision: null,
       }
     }
-    const continuitySelection = selectContinuitySafeProseCandidate(chapterText, polishedText, contextPackage?.chapter_target || contextPackage?.chapterTarget || {}, { candidate_stage: 'meme_polish' })
+    const continuitySelection = selectContinuitySafeProseCandidate(chapterText, polishedText, contextPackage, { candidate_stage: 'meme_polish' })
     return {
       final_text: continuitySelection.text,
       polished: continuitySelection.accepted && polishedText !== chapterText,
@@ -46332,6 +46332,7 @@ export function createNovelWritingService(ctx: {
         initialText: finalText,
         minScore: qualityThreshold,
         coreContract: buildFocusedQualityCoreContract(generationContract),
+        continuityContext: contextPackage,
         maxRevisionRounds: isDraftReviewOnly || isDraftOnly ? 0 : 1,
         scan: text => scanProseForQualityLoop(text, contextPackage, wordTarget, wordTargetCompatibility ? {
           word_target_compatibility_pass: true,

@@ -14,5 +14,8 @@ describe('prose candidate continuity wiring', () => {
     expect(routeSource).toContain("candidate_stage: 'editor'")
     expect(routeSource).toContain("candidate_stage: 'meme_polish'")
     expect(qualityLoopSource).toContain("candidate_stage: 'quality_revision'")
+    expect(routeSource.match(/selectContinuitySafeProseCandidate\(chapterText, (?:rewrittenText|polishedText), contextPackage,/g)?.length || 0).toBe(2)
+    expect(routeSource).toContain('continuityContext: contextPackage')
+    expect(qualityLoopSource).toContain('input.continuityContext || input.coreContract')
   })
 })

@@ -149,4 +149,28 @@ describe('prose prompt context helpers', () => {
     expect(serialized).not.toContain('DROP_RECEIPT')
     expect(serialized).not.toContain('DROP_SYNC')
   })
+
+  test('keeps compact batch handoff and longform memory values', () => {
+    const snapshot = buildProsePromptContextSnapshot({
+      batch_preflight: {
+        delivery_risk_carry_over: { opening_actions: ['BATCH_RISK_SENTINEL'], diagnostics: 'DROP_BATCH_DIAGNOSTIC' },
+        chapter_handoff_contract: { previous_handoff: 'BATCH_HANDOFF_SENTINEL', receipts: ['DROP_BATCH_RECEIPT'] },
+      },
+      chapter_target: {
+        chapter_handoff_contract: { must_answer: ['CHAPTER_HANDOFF_SENTINEL'] },
+        longform_compass: { must_serve: ['LONGFORM_COMPASS_SENTINEL'] },
+        longform_battle_context: { required_actions: ['LONGFORM_BATTLE_SENTINEL'] },
+        million_word_runway: { reader_fuel: ['LONGFORM_MEMORY_SENTINEL'] },
+      },
+    })
+    const serialized = prosePromptJson(snapshot, 12000)
+    expect(serialized).toContain('BATCH_RISK_SENTINEL')
+    expect(serialized).toContain('BATCH_HANDOFF_SENTINEL')
+    expect(serialized).toContain('CHAPTER_HANDOFF_SENTINEL')
+    expect(serialized).toContain('LONGFORM_COMPASS_SENTINEL')
+    expect(serialized).toContain('LONGFORM_BATTLE_SENTINEL')
+    expect(serialized).toContain('LONGFORM_MEMORY_SENTINEL')
+    expect(serialized).not.toContain('DROP_BATCH_DIAGNOSTIC')
+    expect(serialized).not.toContain('DROP_BATCH_RECEIPT')
+  })
 })

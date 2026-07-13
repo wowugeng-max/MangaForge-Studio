@@ -181,6 +181,7 @@ export function selectUsableRevisionText(
     previousChapterTail?: string
     requiredHandoffAnchors?: string[]
     sceneCards?: any[]
+    continuityContext?: any
   } = {},
 ) {
   const current = String(currentText || '')
@@ -234,7 +235,7 @@ export function selectUsableRevisionText(
       reason: `修订稿过短：${candidateChars}/${currentChars}`,
     }
   }
-  const continuity = selectContinuitySafeProseCandidate(current, candidate, {
+  const continuity = selectContinuitySafeProseCandidate(current, candidate, options.continuityContext || {
     previous_handoff: options.previousChapterTail,
     requiredHandoffAnchors: options.requiredHandoffAnchors,
     scene_cards: options.sceneCards,

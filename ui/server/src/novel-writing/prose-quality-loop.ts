@@ -640,6 +640,7 @@ export async function runProseQualityLoop(input: {
   initialText: string
   minScore: number
   coreContract?: any
+  continuityContext?: any
   maxRevisionRounds?: number
   scan: (text: string) => any | Promise<any>
   review: (input: { text: string; scan: any; round: number; prompt: string; attempt: number }) => Promise<any>
@@ -759,9 +760,10 @@ export async function runProseQualityLoop(input: {
       candidateStage: 'quality_revision',
       previousChapterTail: input.coreContract?.previous_handoff || input.coreContract?.previousHandoff,
       sceneCards: input.coreContract?.scene_cards || input.coreContract?.sceneCards,
+      continuityContext: input.continuityContext,
     })
     const continuitySelection = usableSelection.accepted
-      ? selectContinuitySafeProseCandidate(finalText, usableSelection.text, input.coreContract, { candidate_stage: 'quality_revision' })
+      ? selectContinuitySafeProseCandidate(finalText, usableSelection.text, input.continuityContext || input.coreContract, { candidate_stage: 'quality_revision' })
       : null
     const selection = continuitySelection?.accepted === false
       ? { ...usableSelection, accepted: false, reason: 'opening_continuity_regression', text: finalText, warning: continuitySelection.warning }

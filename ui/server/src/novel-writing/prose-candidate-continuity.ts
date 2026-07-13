@@ -8,9 +8,10 @@ function boundedAnchor(value: any) {
 }
 
 function structuredAnchorValues(context: any) {
-  const first = context?.scene_cards?.[0] || context?.sceneCards?.[0] || {}
+  const target = context?.chapter_target || context?.chapterTarget || context
+  const first = target?.scene_cards?.[0] || target?.sceneCards?.[0] || {}
   return [
-    ...(Array.isArray(context?.requiredHandoffAnchors) ? context.requiredHandoffAnchors : []),
+    ...(Array.isArray(context?.requiredHandoffAnchors || target?.requiredHandoffAnchors) ? context?.requiredHandoffAnchors || target?.requiredHandoffAnchors : []),
     first.location,
     ...(Array.isArray(first.characters_present || first.charactersPresent) ? first.characters_present || first.charactersPresent : []),
     ...(Array.isArray(first.used_settings || first.usedSettings) ? first.used_settings || first.usedSettings : []),
@@ -19,10 +20,31 @@ function structuredAnchorValues(context: any) {
   ]
 }
 
+function aliasGroups(context: any) {
+  const target = context?.chapter_target || context?.chapterTarget || context
+  const first = target?.scene_cards?.[0] || target?.sceneCards?.[0] || {}
+  const canonical = context?.canonical_surface_index || context?.canonicalSurfaceIndex || {}
+  const setting = context?.setting_context || context?.settingContext || {}
+  const groupValues = [
+    ...(context?.requiredHandoffAnchorGroups || target?.requiredHandoffAnchorGroups || []),
+    ...(first?.required_handoff_anchor_groups || first?.requiredHandoffAnchorGroups || []),
+    ...(canonical?.stable_entities || canonical?.stableEntities || []),
+    ...(setting?.entities || []),
+    ...(context?.characters || []),
+  ]
+  return groupValues.map((item: any) => {
+    if (Array.isArray(item)) return item
+    return [item?.name, item?.canonical_name, item?.canonicalName, ...(item?.aliases || item?.alias_names || item?.aliasNames || [])]
+  }).map((group: any[]) => group.map(boundedAnchor).filter(Boolean).slice(0, 6))
+    .filter((group: string[]) => group.length > 1)
+    .slice(0, 12)
+}
+
 function textualAnchorValues(context: any) {
+  const target = context?.chapter_target || context?.chapterTarget || context
   const source = [
-    context?.previous_handoff || context?.previousHandoff,
-    context?.scene_cards?.[0]?.transition_from_previous || context?.sceneCards?.[0]?.transitionFromPrevious,
+    target?.previous_handoff || target?.previousHandoff,
+    target?.scene_cards?.[0]?.transition_from_previous || target?.sceneCards?.[0]?.transitionFromPrevious,
   ].filter(Boolean).join('；')
   const values: string[] = []
   const patterns = [
@@ -39,11 +61,13 @@ function textualAnchorValues(context: any) {
 
 function anchorGroups(context: any) {
   const seen = new Set<string>()
-  return [...structuredAnchorValues(context), ...textualAnchorValues(context)]
+  const equivalents = aliasGroups(context)
+  const singles = [...structuredAnchorValues(context), ...textualAnchorValues(context)]
     .map(boundedAnchor)
     .filter(anchor => anchor && !seen.has(normalized(anchor)) && seen.add(normalized(anchor)))
     .slice(0, 12)
     .map(anchor => [anchor] as const)
+  return [...equivalents, ...singles.filter(group => !equivalents.some(equivalent => equivalent.some(alias => normalized(alias) === normalized(group[0]))))].slice(0, 12)
 }
 
 function openingAnchorCount(text: string, groups: readonly (readonly string[])[]) {
@@ -73,7 +97,8 @@ export function selectContinuitySafeProseCandidate(
   const groups = anchorGroups(context)
   const originalAnchors = openingAnchorCount(original, groups)
   const candidateAnchors = openingAnchorCount(candidate, groups)
-  const transition = normalized(context?.scene_cards?.[0]?.transition_from_previous || context?.sceneCards?.[0]?.transitionFromPrevious)
+  const target = context?.chapter_target || context?.chapterTarget || context
+  const transition = normalized(target?.scene_cards?.[0]?.transition_from_previous || target?.sceneCards?.[0]?.transitionFromPrevious)
   const candidateOpening = normalized(candidateOpeningText(candidate))
   const transitionMatched = Boolean(transition)
     && candidateAnchors >= 2
