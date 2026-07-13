@@ -428,6 +428,8 @@ function isBatchProductionRun(run: any) {
 }
 
 function batchRunChapterFailures(run: any) {
+  const projectedCount = Number(run?.pipeline_chapter_failure_count)
+  if (Number.isFinite(projectedCount) && projectedCount >= 0) return projectedCount
   const payload = runPayload(run).output
   return arrayValue(payload.chapters).filter((chapter: any) => {
     const status = String(chapter?.status || '').toLowerCase()
@@ -440,11 +442,12 @@ function batchProductionHealth(runs: any[]) {
   const successful = batchRuns.filter(run => isSuccessRun(run) && batchRunChapterFailures(run) === 0)
   const failed = batchRuns.filter(run => isFailedRun(run) || batchRunChapterFailures(run) > 0)
   const active = batchRuns.filter(isActiveRun)
+  const countRuns = (items: any[]) => items.reduce((sum, run) => sum + Math.max(1, Number(run?.pipeline_run_count || 1)), 0)
   return {
-    total: batchRuns.length,
-    successful: successful.length,
-    failed: failed.length,
-    active: active.length,
+    total: countRuns(batchRuns),
+    successful: countRuns(successful),
+    failed: countRuns(failed),
+    active: countRuns(active),
   }
 }
 
@@ -473,9 +476,11 @@ function repairQueueHealth(runs: any[]) {
   let openRuns = 0
   for (const run of arrayValue(runs).filter(isRepairRun)) {
     const tasks = repairTasksFromRun(run)
-    const taskOpenCount = tasks.filter(isOpenRepairTask).length
+    const taskOpenCount = tasks.filter(isOpenRepairTask).length + Math.max(0, Number(run?.pipeline_open_task_count || 0))
     openTasks += taskOpenCount
-    if (isActiveRun(run) || isFailedRun(run) || (!tasks.length && !isSuccessRun(run))) openRuns += 1
+    if (isActiveRun(run) || isFailedRun(run) || (!tasks.length && !isSuccessRun(run))) {
+      openRuns += Math.max(1, Number(run?.pipeline_run_count || 1))
+    }
   }
   return { openRuns, openTasks, openTotal: openRuns + openTasks }
 }
