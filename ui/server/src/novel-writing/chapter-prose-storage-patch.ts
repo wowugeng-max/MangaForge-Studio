@@ -135,15 +135,16 @@ function restoreParagraphBreaksForWallProse(value: any) {
     .split(/(\r?\n)/)
     .map(part => (/^\r?\n$/.test(part) ? part : addParagraphBreaksToWall(part)))
     .join('')
+  const sourceChars = Array.from(text)
   let sourceIndex = 0
   for (const char of normalized) {
-    if (char === text[sourceIndex]) {
+    if (char === sourceChars[sourceIndex]) {
       sourceIndex += 1
       continue
     }
     if (char !== '\n') return text
   }
-  return sourceIndex === text.length ? normalized : text
+  return sourceIndex === sourceChars.length ? normalized : text
 }
 
 export function normalizeProseForStorage(value: any) {

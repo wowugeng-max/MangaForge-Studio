@@ -6,15 +6,16 @@ import {
 } from './chapter-prose-storage-patch'
 
 function expectOnlyNewlinesInserted(source: string, result: string) {
+  const sourceChars = Array.from(source)
   let sourceIndex = 0
   for (const char of result) {
-    if (char === source[sourceIndex]) {
+    if (char === sourceChars[sourceIndex]) {
       sourceIndex += 1
       continue
     }
     expect(char).toBe('\n')
   }
-  expect(sourceIndex).toBe(source.length)
+  expect(sourceIndex).toBe(sourceChars.length)
 }
 
 describe('chapter prose storage patch builders', () => {
@@ -233,6 +234,27 @@ describe('chapter prose storage patch builders', () => {
     const twice = normalizeProseForStorage(once)
 
     expect(once).not.toBe(source)
+    expectOnlyNewlinesInserted(source, once)
+    expect(twice).toBe(once)
+  })
+
+  test('restores paragraphs without rejecting emoji or CJK extension code points', () => {
+    const source = [
+      '警报灯在头顶连闪三次，控制台随即跳出一个燃烧的标记🔥，把整面玻璃映成暗红色。',
+      '江哲记得这个符号只在旧档案里出现过，旁边标着一个生僻编号𠀀，代表设施最深处的封锁层。',
+      '老陈拔掉通讯器的电池，顺手将门边的机械锁扣死，免得指挥室远程改写他们的通行权限。',
+      '通风管里传来连续敲击声，每隔五秒重复一轮，节奏和控制台上闪烁的倒计时完全一致。',
+      '江哲抄下最后三组数字，发现它们拼出的不是坐标，而是下一道安全门的开启顺序。',
+      '倒计时归零之前，两人必须穿过前方四个隔离区，否则整条地下通道都会被高温蒸汽灌满。',
+    ].join('')
+
+    const once = normalizeProseForStorage(source)
+    const twice = normalizeProseForStorage(once)
+
+    expect(once).not.toBe(source)
+    expect(once).toContain('\n\n')
+    expect(once).toContain('🔥')
+    expect(once).toContain('𠀀')
     expectOnlyNewlinesInserted(source, once)
     expect(twice).toBe(once)
   })
