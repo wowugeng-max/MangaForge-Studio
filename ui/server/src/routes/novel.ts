@@ -79,7 +79,6 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
 
   registerNovelPipelineRoutes(app, {
     getWorkspace,
-    getProject,
   })
 
   registerNovelProjectControlRoutes(app, {

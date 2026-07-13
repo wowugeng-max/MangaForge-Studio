@@ -1,23 +1,10 @@
 import type { Express } from 'express'
-import {
-  listNovelCharacters,
-  listNovelChapters,
-  listNovelOutlines,
-  listNovelReviews,
-  listNovelRuns,
-  listNovelWorldbuilding,
-} from '../novel'
+import { getNovelPipelineSnapshot, type NovelPipelineSnapshot } from '../novel'
 import { buildNovelPipelineSummary } from './novel-pipeline-service'
 
 export type NovelPipelineRoutesContext = {
   getWorkspace: () => string
-  getProject: (workspace: string, id: number) => Promise<any>
-  listChapters?: (workspace: string, projectId: number) => Promise<any[]>
-  listOutlines?: (workspace: string, projectId: number) => Promise<any[]>
-  listWorldbuilding?: (workspace: string, projectId: number) => Promise<any[]>
-  listCharacters?: (workspace: string, projectId: number) => Promise<any[]>
-  listReviews?: (workspace: string, projectId: number) => Promise<any[]>
-  listRuns?: (workspace: string, projectId: number) => Promise<any[]>
+  getPipelineSnapshot?: (workspace: string, projectId: number) => Promise<NovelPipelineSnapshot | null>
 }
 
 export function registerNovelPipelineRoutes(app: Express, ctx: NovelPipelineRoutesContext) {
@@ -25,29 +12,12 @@ export function registerNovelPipelineRoutes(app: Express, ctx: NovelPipelineRout
     try {
       const activeWorkspace = ctx.getWorkspace()
       const projectId = Number(req.params.id || 0)
-      const project = await ctx.getProject(activeWorkspace, projectId)
-      if (!project) return res.status(404).json({ error: 'project not found' })
-
-      const [chapters, outlines, worldbuilding, characters, reviews, runs] = await Promise.all([
-        (ctx.listChapters || listNovelChapters)(activeWorkspace, project.id),
-        (ctx.listOutlines || listNovelOutlines)(activeWorkspace, project.id),
-        (ctx.listWorldbuilding || listNovelWorldbuilding)(activeWorkspace, project.id),
-        (ctx.listCharacters || listNovelCharacters)(activeWorkspace, project.id),
-        (ctx.listReviews || listNovelReviews)(activeWorkspace, project.id),
-        (ctx.listRuns || listNovelRuns)(activeWorkspace, project.id),
-      ])
+      const snapshot = await (ctx.getPipelineSnapshot || getNovelPipelineSnapshot)(activeWorkspace, projectId)
+      if (!snapshot) return res.status(404).json({ error: 'project not found' })
 
       res.json({
         ok: true,
-        pipeline: buildNovelPipelineSummary({
-          project,
-          chapters,
-          outlines,
-          worldbuilding,
-          characters,
-          reviews,
-          runs,
-        }),
+        pipeline: buildNovelPipelineSummary(snapshot),
       })
     } catch (error) {
       res.status(500).json({ error: String(error) })

@@ -32,38 +32,44 @@ describe('novel pipeline routes', () => {
 
   test('returns a pipeline summary for an existing project', async () => {
     const { app, handlers } = createRouteHarness()
+    let snapshotLoads = 0
     registerNovelPipelineRoutes(app as any, {
       getWorkspace: () => '/tmp/workspace',
-      getProject: async () => ({
-        id: 1,
-        title: '剑烛大荒',
-        reference_config: {
-          writing_bible: {
-            reader_promise: '破局爽点',
-            protagonist_drive: '少年必须夺回被夺走的火种。',
-            current_volume_goal: '进入大荒门',
-            core_conflict: '旧规与新火的冲突',
-            innovation_hook: '符火审案',
-            first30_plan: '前三十章完成入门和第一次公开破局。',
-            longform_capacity: '九卷大荒门派和火种谜团支撑长篇推进。',
+      getPipelineSnapshot: async () => {
+        snapshotLoads += 1
+        return {
+          project: {
+            id: 1,
+            title: '剑烛大荒',
+            reference_config: {
+              writing_bible: {
+                reader_promise: '破局爽点',
+                protagonist_drive: '少年必须夺回被夺走的火种。',
+                current_volume_goal: '进入大荒门',
+                core_conflict: '旧规与新火的冲突',
+                innovation_hook: '符火审案',
+                first30_plan: '前三十章完成入门和第一次公开破局。',
+                longform_capacity: '九卷大荒门派和火种谜团支撑长篇推进。',
+              },
+              story_state: { last_updated_chapter: 0 },
+            },
           },
-          story_state: { last_updated_chapter: 0 },
-        },
-      }),
-      listChapters: async () => [{
-        id: 11,
-        project_id: 1,
-        chapter_no: 1,
-        title: '荒门初开',
-        chapter_goal: '破局',
-        conflict: '旧规压迫',
-        ending_hook: '血字出现',
-      }],
-      listOutlines: async () => [],
-      listWorldbuilding: async () => [{ id: 1, world_summary: '大荒门以符火和旧规约束修行者。' }],
-      listCharacters: async () => [{ id: 1, name: '丁松言', goal: '夺回火种。' }],
-      listReviews: async () => [],
-      listRuns: async () => [],
+          chapters: [{
+            id: 11,
+            project_id: 1,
+            chapter_no: 1,
+            title: '荒门初开',
+            chapter_goal: '破局',
+            conflict: '旧规压迫',
+            ending_hook: '血字出现',
+          }],
+          outlines: [],
+          worldbuilding: [{ id: 1, world_summary: '大荒门以符火和旧规约束修行者。' }],
+          characters: [{ id: 1, name: '丁松言', goal: '夺回火种。' }],
+          reviews: [],
+          runs: [],
+        }
+      },
     })
 
     const handler = handlers.get('/api/novel/projects/:id/pipeline')
@@ -75,17 +81,14 @@ describe('novel pipeline routes', () => {
     expect(res.body.pipeline.project_id).toBe(1)
     expect(res.body.pipeline.current_stage).toBe('chapter_writing')
     expect(res.body.pipeline.stages.find((stage: any) => stage.key === 'chapter_writing')?.agent_steps.length).toBeGreaterThan(0)
+    expect(snapshotLoads).toBe(1)
   })
 
   test('returns 404 for a missing project', async () => {
     const { app, handlers } = createRouteHarness()
     registerNovelPipelineRoutes(app as any, {
       getWorkspace: () => '/tmp/workspace',
-      getProject: async () => null,
-      listChapters: async () => [],
-      listOutlines: async () => [],
-      listReviews: async () => [],
-      listRuns: async () => [],
+      getPipelineSnapshot: async () => null,
     })
 
     const handler = handlers.get('/api/novel/projects/:id/pipeline')

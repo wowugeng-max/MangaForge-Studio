@@ -1330,6 +1330,166 @@ function dedupById<T extends { id: number | string }>(items: T[]): T[] {
     return true
   })
 }
+
+export type NovelPipelineSnapshot = {
+  project: NovelProjectRecord
+  chapters: NovelChapterRecord[]
+  outlines: NovelOutlineRecord[]
+  worldbuilding: NovelWorldbuildingRecord[]
+  characters: NovelCharacterRecord[]
+  reviews: NovelReviewRecord[]
+  runs: NovelRunRecord[]
+}
+
+const NOVEL_PIPELINE_REVIEW_TYPES = [
+  'prose_quality',
+  'editor_report',
+  'editor_revision',
+  'longform_production_repair_audit',
+  'book_review',
+  'quality_benchmark',
+  'delivery_risk_convergence',
+] as const
+
+const NOVEL_PIPELINE_RUN_TYPES = [
+  'chapter_group_generation',
+  'batch_generate_prose',
+  'longform_production_repair',
+  'release_repair_queue',
+  'longform_creation_diagnosis',
+  'longform_pressure_test',
+  'quality_benchmark',
+  'book_review',
+  'regression_benchmark',
+  'first30_retention_diagnosis',
+] as const
+
+export async function getNovelPipelineSnapshot(activeWorkspace: string, projectId: number): Promise<NovelPipelineSnapshot | null> {
+  await ensureLegacyNovelStoreImportedForRead(activeWorkspace)
+  const db = openDb(activeWorkspace)
+  try {
+    ensureSqliteSchema(db)
+    const projectRow = db.query(`
+      SELECT id, title, synopsis, reference_config, updated_at
+      FROM projects
+      WHERE id = ?
+      LIMIT 1
+    `).get(projectId) as any
+    if (!projectRow) return null
+
+    const chapters = (db.query(`
+      SELECT
+        id,
+        project_id,
+        chapter_no,
+        title,
+        chapter_goal,
+        chapter_summary,
+        conflict,
+        ending_hook,
+        CASE
+          WHEN length(trim(COALESCE(chapter_text, ''))) = 0 THEN ''
+          WHEN instr(chapter_text, '【占位正文】') > 0 THEN '【占位正文】'
+          ELSE '[pipeline-prose-present]'
+        END AS chapter_text,
+        CASE
+          WHEN json_valid(raw_payload) THEN json_object(
+            'scene_cards', json_extract(raw_payload, '$.scene_cards'),
+            'scenes', json_extract(raw_payload, '$.scenes'),
+            'pre_draft_brief', json_extract(raw_payload, '$.pre_draft_brief')
+          )
+          ELSE '{}'
+        END AS raw_payload,
+        updated_at
+      FROM chapters
+      WHERE project_id = ?
+      ORDER BY chapter_no ASC
+    `).all(projectId) as any[]).map(chapterFromRow)
+
+    const outlines = (db.query(`
+      SELECT
+        id,
+        project_id,
+        title,
+        CASE
+          WHEN json_valid(raw_payload) THEN json_object(
+            'chapter_no', json_extract(raw_payload, '$.chapter_no'),
+            'future100', json_object('chapter_no', json_extract(raw_payload, '$.future100.chapter_no')),
+            'skeleton', json_object('chapter_no', json_extract(raw_payload, '$.skeleton.chapter_no')),
+            'rollingPlan', json_object('chapter_no', json_extract(raw_payload, '$.rollingPlan.chapter_no'))
+          )
+          ELSE '{}'
+        END AS raw_payload
+      FROM outlines
+      WHERE project_id = ?
+    `).all(projectId) as any[]).map(outlineFromRow)
+
+    const worldbuilding = (db.query(`
+      SELECT id, project_id, world_summary, rules, systems
+      FROM worldbuilding
+      WHERE project_id = ?
+    `).all(projectId) as any[]).map(worldbuildingFromRow)
+
+    const characters = (db.query(`
+      SELECT id, project_id, name, goal, motivation, current_state
+      FROM characters
+      WHERE project_id = ?
+    `).all(projectId) as any[]).map(characterFromRow)
+
+    const reviewPlaceholders = NOVEL_PIPELINE_REVIEW_TYPES.map(() => '?').join(', ')
+    const reviews = (db.query(`
+      SELECT
+        id,
+        project_id,
+        review_type,
+        status,
+        '' AS summary,
+        '[]' AS issues,
+        CASE
+          WHEN review_type IN ('prose_quality', 'editor_report', 'editor_revision') THEN payload
+          ELSE ''
+        END AS payload,
+        created_at
+      FROM reviews
+      WHERE project_id = ? AND review_type IN (${reviewPlaceholders})
+    `).all(projectId, ...NOVEL_PIPELINE_REVIEW_TYPES) as any[]).map(reviewFromRow)
+
+    const runPlaceholders = NOVEL_PIPELINE_RUN_TYPES.map(() => '?').join(', ')
+    const runs = db.query(`
+      SELECT
+        id,
+        project_id,
+        run_type,
+        step_name,
+        status,
+        CASE
+          WHEN run_type IN ('longform_production_repair', 'release_repair_queue') THEN input_ref
+          ELSE ''
+        END AS input_ref,
+        CASE
+          WHEN run_type IN ('chapter_group_generation', 'batch_generate_prose', 'longform_production_repair', 'release_repair_queue') THEN output_ref
+          ELSE ''
+        END AS output_ref,
+        created_at
+      FROM runs
+      WHERE project_id = ? AND run_type IN (${runPlaceholders})
+      ORDER BY created_at DESC
+    `).all(projectId, ...NOVEL_PIPELINE_RUN_TYPES) as NovelRunRecord[]
+
+    return {
+      project: projectFromRow(projectRow),
+      chapters: dedupById(chapters).sort((a, b) => a.chapter_no - b.chapter_no),
+      outlines: dedupById(outlines),
+      worldbuilding: dedupById(worldbuilding),
+      characters: dedupById(characters),
+      reviews,
+      runs: runs.sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    }
+  } finally {
+    db.close()
+  }
+}
+
 export async function listNovelProjects(activeWorkspace: string) {
   await ensureLegacyNovelStoreImportedForRead(activeWorkspace)
   const db = openDb(activeWorkspace)
