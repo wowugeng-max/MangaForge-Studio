@@ -1,5 +1,6 @@
 import type { PlanningActionKey, PlanningWorkspaceModel } from './planningWorkspaceModel'
 import type { WritingCockpitActionKey, WritingCockpitModel } from './writingCockpitModel'
+import { parseWorkspacePayload, type WorkspacePayloadParseOptions } from './payloadParseCache'
 
 type AnyRecord = Record<string, any>
 
@@ -1135,14 +1136,8 @@ function rhythmAction(planning: PlanningWorkspaceModel): PlanningActionKey {
   return (signal?.actionKey || 'longform_pressure') as PlanningActionKey
 }
 
-function parsePayload(value: any) {
-  if (!value) return null
-  if (typeof value === 'object') return value
-  try {
-    return JSON.parse(String(value))
-  } catch {
-    return null
-  }
+function parsePayload(value: any, options: WorkspacePayloadParseOptions = {}) {
+  return parseWorkspacePayload(value, options)
 }
 
 function recordTime(record: AnyRecord) {
@@ -1170,7 +1165,7 @@ function payloadChapterNo(payload: AnyRecord) {
 }
 
 function reviewMatchesChapter(review: AnyRecord, chapter: AnyRecord, fallbackChapterNo: number) {
-  const payload = parsePayload(review?.payload) || {}
+  const payload = parsePayload(review?.payload, { owner: review, kind: 'review', field: 'payload' }) || {}
   const reviewChapterId = review?.chapter_id ?? review?.chapterId ?? payloadChapterId(payload)
   const reviewChapterNo = Number(review?.chapter_no ?? review?.chapterNo ?? payloadChapterNo(payload))
   const chapterId = chapter?.id ?? chapter?.chapter_id ?? null
@@ -1181,7 +1176,7 @@ function reviewMatchesChapter(review: AnyRecord, chapter: AnyRecord, fallbackCha
 }
 
 function qualityPayload(review?: AnyRecord | null) {
-  const payload = parsePayload(review?.payload) || {}
+  const payload = parsePayload(review?.payload, { owner: review, kind: 'review', field: 'payload' }) || {}
   return payload?.review || payload?.result?.review || payload?.result || payload
 }
 
@@ -1247,12 +1242,12 @@ function boolValue(value: any) {
 }
 
 function riskPayload(review: AnyRecord | null, key: string) {
-  const payload = parsePayload(review?.payload) || {}
+  const payload = parsePayload(review?.payload, { owner: review, kind: 'review', field: 'payload' }) || {}
   return payload?.[key] || payload?.result?.[key] || payload?.result || payload
 }
 
 function reviewPayload(review: AnyRecord | null) {
-  return parsePayload(review?.payload) || {}
+  return parsePayload(review?.payload, { owner: review, kind: 'review', field: 'payload' }) || {}
 }
 
 function riskCountFromStatus(payload: AnyRecord, review: AnyRecord | null) {
@@ -2193,7 +2188,7 @@ function buildResolvedDeliveryRiskIssueKeys(args: {
     .filter(run => text(run?.run_type) === 'longform_production_repair')
     .map(run => ({
       run,
-      output: parsePayload(run?.output_ref) || {},
+      output: parsePayload(run?.output_ref, { owner: run, kind: 'run', field: 'output_ref' }) || {},
     }))
     .filter(entry => isCompletedRepairRun(entry.run))
 
@@ -2367,7 +2362,7 @@ function buildResolvedDeliveryRiskEvidence(args: {
     .filter(run => text(run?.run_type) === 'longform_production_repair')
     .map(run => ({
       run,
-      output: parsePayload(run?.output_ref) || {},
+      output: parsePayload(run?.output_ref, { owner: run, kind: 'run', field: 'output_ref' }) || {},
     }))
     .filter(entry => isCompletedRepairRun(entry.run))
 
@@ -2934,7 +2929,7 @@ function isStorylineDecisionTask(task: AnyRecord, output: AnyRecord) {
 function buildStorylineDecisionGate(runRecords: AnyRecord[]): AutoCreationStorylineDecisionGate {
   const openTasks: AnyRecord[] = []
   for (const run of runRecords.filter(item => text(item?.run_type) === 'longform_production_repair')) {
-    const output = parsePayload(run?.output_ref) || {}
+    const output = parsePayload(run?.output_ref, { owner: run, kind: 'run', field: 'output_ref' }) || {}
     const tasks = [
       ...arrayValue(output?.tasks),
       ...arrayValue(output?.repairTasks),
@@ -2972,7 +2967,7 @@ function buildStorylineDecisionGate(runRecords: AnyRecord[]): AutoCreationStoryl
 function latestRepairAuditEntry(runRecords: AnyRecord[]) {
   return runRecords
     .filter(run => text(run?.run_type) === 'longform_production_repair')
-    .map(run => ({ run, output: parsePayload(run?.output_ref) || {} }))
+    .map(run => ({ run, output: parsePayload(run?.output_ref, { owner: run, kind: 'run', field: 'output_ref' }) || {} }))
     .sort((a, b) => recordTime(b.run) - recordTime(a.run))
     .map(item => ({ run: item.run, audit: item.output?.audit_summary || item.output?.auditSummary }))
     .find(item => item.audit) || null
@@ -3709,7 +3704,7 @@ function buildSerialRhythmReview(args: {
   }
   const rows = successfulItems.map(item => {
     const chapter = findChapter(args.chapters, item) || {}
-    const raw = parsePayload(chapter.raw_payload || chapter.rawPayload) || chapter.raw_payload || chapter.rawPayload || {}
+    const raw = parsePayload(chapter.raw_payload || chapter.rawPayload, { owner: chapter, kind: 'chapter', field: chapter.raw_payload ? 'raw_payload' : 'rawPayload' }) || chapter.raw_payload || chapter.rawPayload || {}
     const plan = batchPlanChapterForItem(args.nextBatchBrief, item) || {}
     return {
       chapter_no: item.chapterNo,
@@ -4056,7 +4051,7 @@ function buildVolumeSegmentReview(args: {
   const payload = riskPayload(args.review, 'volume_beat_sync')
   const gate = planning?.volumeSegmentGate || null
   const gateSignals = arrayValue(gate?.signals).filter(signal => text(signal?.status) !== 'ok')
-  const raw = parsePayload(args.chapter?.raw_payload || args.chapter?.rawPayload) || args.chapter?.raw_payload || args.chapter?.rawPayload || {}
+  const raw = parsePayload(args.chapter?.raw_payload || args.chapter?.rawPayload, { owner: args.chapter, kind: 'chapter', field: args.chapter?.raw_payload ? 'raw_payload' : 'rawPayload' }) || args.chapter?.raw_payload || args.chapter?.rawPayload || {}
   const planned = [
     firstText(planning?.topStatus?.currentVolume) ? `当前卷：${firstText(planning?.topStatus?.currentVolume)}` : '',
     firstText(planning?.topStatus?.currentStage) ? `当前阶段：${firstText(planning?.topStatus?.currentStage)}` : '',
@@ -4710,8 +4705,8 @@ function strengthenedAcceptanceBatchEvent(args: {
   storyState?: AnyRecord | null
 }) {
   if (text(args.run?.run_type) !== 'batch_generate_prose') return null
-  const input = parsePayload(args.run?.input_ref) || {}
-  const output = parsePayload(args.run?.output_ref) || {}
+  const input = parsePayload(args.run?.input_ref, { owner: args.run, kind: 'run', field: 'input_ref' }) || {}
+  const output = parsePayload(args.run?.output_ref, { owner: args.run, kind: 'run', field: 'output_ref' }) || {}
   const preflight = input?.batch_preflight || input?.batchPreflight || null
   const sources = strengthenedRepairReleaseSourcesFromPreflight(preflight)
   if (!sources.length) return null
@@ -4771,7 +4766,7 @@ function strengthenedAcceptanceBatchEvent(args: {
 
 function strengthenedAcceptanceRepairTaskEvents(runRecords: AnyRecord[]) {
   return arrayValue(runRecords).flatMap(run => {
-    const output = parsePayload(run?.output_ref) || {}
+    const output = parsePayload(run?.output_ref, { owner: run, kind: 'run', field: 'output_ref' }) || {}
     return arrayValue(output?.tasks).map(task => {
       if (text(task?.issue_type || task?.issueType) !== 'strengthened_repair_acceptance_mismatch') return null
       if (isResolvedTaskStatus(task?.task_status || task?.taskStatus)) return null
@@ -6393,7 +6388,7 @@ function expansionStructureDecisionSyncPayload(review: AnyRecord | null) {
 }
 
 function chapterExpansionStructureDecisionReceipts(chapter: AnyRecord | null) {
-  const raw = parsePayload(chapter?.raw_payload || chapter?.rawPayload) || chapter?.raw_payload || chapter?.rawPayload || {}
+  const raw = parsePayload(chapter?.raw_payload || chapter?.rawPayload, { owner: chapter, kind: 'chapter', field: chapter?.raw_payload ? 'raw_payload' : 'rawPayload' }) || chapter?.raw_payload || chapter?.rawPayload || {}
   const topLevel = [
     raw?.expansion_structure_decision_execution,
     raw?.expansionStructureDecisionExecution,
@@ -7457,8 +7452,8 @@ function latestResolvedSafeBatchExpansionStructureRepairWithTrend(runRecords: An
     .filter(run => text(run?.run_type) === 'longform_production_repair')
     .map(run => ({
       run,
-      input: parsePayload(run?.input_ref) || {},
-      output: parsePayload(run?.output_ref) || {},
+      input: parsePayload(run?.input_ref, { owner: run, kind: 'run', field: 'input_ref' }) || {},
+      output: parsePayload(run?.output_ref, { owner: run, kind: 'run', field: 'output_ref' }) || {},
     }))
     .filter(entry => text(entry.input?.source) === 'auto_creation_safe_batch_risk')
     .filter(entry => isCompletedRepairRun(entry.run))
@@ -8171,8 +8166,8 @@ function buildSafeBatchExpansionFeedback(args: {
     .filter(run => text(run?.run_type) === 'batch_generate_prose')
     .map(run => ({
       run,
-      input: parsePayload(run?.input_ref) || {},
-      output: parsePayload(run?.output_ref) || {},
+      input: parsePayload(run?.input_ref, { owner: run, kind: 'run', field: 'input_ref' }) || {},
+      output: parsePayload(run?.output_ref, { owner: run, kind: 'run', field: 'output_ref' }) || {},
     }))
     .filter(entry => isSafeBatchGenerationSource(text(entry.input?.source)))
     .map(entry => ({
@@ -8189,8 +8184,8 @@ function buildSafeBatchExpansionFeedback(args: {
     .filter(run => text(run?.run_type) === 'batch_generate_prose')
     .map(run => ({
       run,
-      input: parsePayload(run?.input_ref) || {},
-      output: parsePayload(run?.output_ref) || {},
+      input: parsePayload(run?.input_ref, { owner: run, kind: 'run', field: 'input_ref' }) || {},
+      output: parsePayload(run?.output_ref, { owner: run, kind: 'run', field: 'output_ref' }) || {},
     }))
     .filter(entry => isSafeBatchGenerationSource(text(entry.input?.source)))
     .map(entry => ({
@@ -8204,8 +8199,8 @@ function buildSafeBatchExpansionFeedback(args: {
     .filter(run => text(run?.run_type) === 'batch_generate_prose')
     .map(run => ({
       run,
-      input: parsePayload(run?.input_ref) || {},
-      output: parsePayload(run?.output_ref) || {},
+      input: parsePayload(run?.input_ref, { owner: run, kind: 'run', field: 'input_ref' }) || {},
+      output: parsePayload(run?.output_ref, { owner: run, kind: 'run', field: 'output_ref' }) || {},
     }))
     .filter(entry => isSafeBatchGenerationSource(text(entry.input?.source)))
     .map(entry => ({
@@ -8874,7 +8869,7 @@ function buildRecoveryEvidenceSourceRiskProfile(runRecords: AnyRecord[]) {
   runRecords
     .filter(run => text(run?.run_type) === 'longform_production_repair')
     .forEach(run => {
-      const output = parsePayload(run?.output_ref) || {}
+      const output = parsePayload(run?.output_ref, { owner: run, kind: 'run', field: 'output_ref' }) || {}
       const tasks = [
         ...arrayValue(output?.tasks),
         ...arrayValue(output?.repairTasks),
@@ -9440,8 +9435,8 @@ function buildResolvedBatchRiskIssueKeys(args: {
     .filter(run => text(run?.run_type) === 'longform_production_repair')
     .map(run => ({
       run,
-      input: parsePayload(run?.input_ref) || {},
-      output: parsePayload(run?.output_ref) || {},
+      input: parsePayload(run?.input_ref, { owner: run, kind: 'run', field: 'input_ref' }) || {},
+      output: parsePayload(run?.output_ref, { owner: run, kind: 'run', field: 'output_ref' }) || {},
     }))
     .filter(entry => text(entry.input?.source) === 'auto_creation_safe_batch_risk')
     .filter(entry => !batchCreatedAt || text(entry.input?.batch_created_at) === batchCreatedAt)
@@ -11069,7 +11064,7 @@ function latestLongformCreationReport(reviews: AnyRecord[]) {
   const review = reviews
     .filter(item => text(item?.review_type) === 'longform_creation_diagnosis')
     .sort((a, b) => recordTime(b) - recordTime(a))[0]
-  const payload = parsePayload(review?.payload) || {}
+  const payload = parsePayload(review?.payload, { owner: review, kind: 'review', field: 'payload' }) || {}
   const report = payload.report || payload.result?.report || payload
   return Object.keys(report || {}).length ? report : null
 }
@@ -11078,7 +11073,7 @@ function latestReviewReport(reviews: AnyRecord[], reviewType: string) {
   const review = reviews
     .filter(item => text(item?.review_type) === reviewType)
     .sort((a, b) => recordTime(b) - recordTime(a))[0]
-  const payload = parsePayload(review?.payload) || {}
+  const payload = parsePayload(review?.payload, { owner: review, kind: 'review', field: 'payload' }) || {}
   const report = payload.report || payload.result?.report || payload.result || payload
   return Object.keys(report || {}).length ? report : null
 }
@@ -12857,7 +12852,7 @@ function buildResolvedDefaultFiveChapterLaneTemplateSeed(runRecords: AnyRecord[]
     .filter(run => text(run?.run_type) === 'longform_production_repair')
     .map(run => ({
       run,
-      output: parsePayload(run?.output_ref) || {},
+      output: parsePayload(run?.output_ref, { owner: run, kind: 'run', field: 'output_ref' }) || {},
     }))
     .filter(entry => isCompletedRepairRun(entry.run))
     .sort((a, b) => recordTime(b.run) - recordTime(a.run))
@@ -12883,8 +12878,8 @@ function buildResolvedSafeBatchExpansionStructureVerificationSeed(runRecords: An
     .filter(run => text(run?.run_type) === 'longform_production_repair')
     .map(run => ({
       run,
-      input: parsePayload(run?.input_ref) || {},
-      output: parsePayload(run?.output_ref) || {},
+      input: parsePayload(run?.input_ref, { owner: run, kind: 'run', field: 'input_ref' }) || {},
+      output: parsePayload(run?.output_ref, { owner: run, kind: 'run', field: 'output_ref' }) || {},
     }))
     .filter(entry => text(entry.input?.source) === 'auto_creation_safe_batch_risk')
     .filter(entry => isCompletedRepairRun(entry.run))
@@ -13550,8 +13545,8 @@ function compactChapterNoEvidence(chapterNos: number[]) {
 function buildStyleSampleTaskBookRecoveryEvidence(runRecords: AnyRecord[]) {
   const resolvedTasks = runRecords.flatMap(run => {
     if (text(run?.run_type) !== 'longform_production_repair') return []
-    const input = parsePayload(run?.input_ref) || {}
-    const output = parsePayload(run?.output_ref) || {}
+    const input = parsePayload(run?.input_ref, { owner: run, kind: 'run', field: 'input_ref' }) || {}
+    const output = parsePayload(run?.output_ref, { owner: run, kind: 'run', field: 'output_ref' }) || {}
     const source = firstText(input?.source, output?.report?.source)
     if (source !== 'style_sample_batch_preflight') return []
     return [
@@ -14686,8 +14681,8 @@ function buildBatchReviewQueue(args: {
     .filter(run => text(run?.run_type) === 'batch_generate_prose')
     .map(run => ({
       run,
-      input: parsePayload(run?.input_ref) || {},
-      output: parsePayload(run?.output_ref) || {},
+      input: parsePayload(run?.input_ref, { owner: run, kind: 'run', field: 'input_ref' }) || {},
+      output: parsePayload(run?.output_ref, { owner: run, kind: 'run', field: 'output_ref' }) || {},
     }))
     .filter(entry => isSafeBatchGenerationSource(text(entry.input?.source)))
     .sort((a, b) => recordTime(b.run) - recordTime(a.run))

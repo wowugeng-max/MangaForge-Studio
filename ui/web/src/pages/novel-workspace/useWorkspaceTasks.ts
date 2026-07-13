@@ -3,6 +3,45 @@ import apiClient from '../../api/client'
 import type { WorkspaceActiveTask } from './TaskCenterDrawer'
 import { displayValue } from './utils'
 
+const ACTIVE_POLLING_STATUSES = new Set(['queued', 'ready', 'running', 'pending', 'in_progress', 'processing'])
+
+function hasLiveStatus(items: any[]) {
+  return items.some(item => ACTIVE_POLLING_STATUSES.has(String(item?.status || '').toLowerCase()))
+}
+
+export function workspaceHasLiveProductionTasks(productionTasks: any) {
+  const tasks = [
+    ...(Array.isArray(productionTasks?.tasks) ? productionTasks.tasks : []),
+    ...(Array.isArray(productionTasks?.active) ? productionTasks.active : []),
+  ]
+  return Number(productionTasks?.summary?.running || 0) > 0
+    || Number(productionTasks?.summary?.queued || 0) > 0
+    || hasLiveStatus(tasks)
+}
+
+export function workspaceHasLiveKnowledgeJobs(knowledgeIngestJobs: any[]) {
+  return hasLiveStatus(Array.isArray(knowledgeIngestJobs) ? knowledgeIngestJobs : [])
+}
+
+export function workspaceTaskPollingIntervalMs({
+  taskCenterOpen,
+  productionTasks,
+  knowledgeIngestJobs,
+  hasLocalActiveTask,
+}: {
+  taskCenterOpen: boolean
+  productionTasks: any
+  knowledgeIngestJobs: any[]
+  hasLocalActiveTask: boolean
+}) {
+  if (!taskCenterOpen) return null
+  return hasLocalActiveTask
+    || workspaceHasLiveProductionTasks(productionTasks)
+    || workspaceHasLiveKnowledgeJobs(knowledgeIngestJobs)
+    ? 3500
+    : null
+}
+
 export function useWorkspaceTasks({
   projectId,
   taskCenterOpen,
@@ -43,6 +82,7 @@ export function useWorkspaceTasks({
   const [productionTasks, setProductionTasks] = useState<any | null>(null)
   const [productionTasksLoading, setProductionTasksLoading] = useState(false)
   const knowledgeIngestJobsRef = useRef<any[]>([])
+  const productionTasksRef = useRef<any | null>(null)
 
   const loadProductionTasks = useCallback(async () => {
     if (!projectId) return
@@ -89,16 +129,36 @@ export function useWorkspaceTasks({
   }, [knowledgeIngestJobs])
 
   useEffect(() => {
+    productionTasksRef.current = productionTasks
+  }, [productionTasks])
+
+  useEffect(() => {
     if (!taskCenterOpen) return
     void loadProductionTasks()
     void loadKnowledgeIngestJobs()
-    const timer = setInterval(() => {
-      const hasLiveJob = knowledgeIngestJobsRef.current.some(job => ['queued', 'running'].includes(String(job.status || '')))
-      if (hasLiveJob) void loadKnowledgeIngestJobs()
-      void loadProductionTasks()
-    }, 3500)
-    return () => clearInterval(timer)
   }, [taskCenterOpen, loadKnowledgeIngestJobs, loadProductionTasks])
+
+  const hasLocalActiveTask = stepOutlineLoading
+    || stepProseLoading
+    || stepRepairLoading
+    || planning
+    || executingAgents
+    || generatingProse
+  const pollingIntervalMs = workspaceTaskPollingIntervalMs({
+    taskCenterOpen,
+    productionTasks,
+    knowledgeIngestJobs,
+    hasLocalActiveTask,
+  })
+
+  useEffect(() => {
+    if (pollingIntervalMs === null) return
+    const timer = setInterval(() => {
+      if (workspaceHasLiveKnowledgeJobs(knowledgeIngestJobsRef.current)) void loadKnowledgeIngestJobs()
+      if (hasLocalActiveTask || workspaceHasLiveProductionTasks(productionTasksRef.current)) void loadProductionTasks()
+    }, pollingIntervalMs)
+    return () => clearInterval(timer)
+  }, [hasLocalActiveTask, loadKnowledgeIngestJobs, loadProductionTasks, pollingIntervalMs])
 
   const activeTasks = useMemo<WorkspaceActiveTask[]>(() => {
     const tasks: WorkspaceActiveTask[] = []

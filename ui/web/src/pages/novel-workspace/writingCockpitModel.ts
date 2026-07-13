@@ -1,3 +1,5 @@
+import { parseWorkspacePayload } from './payloadParseCache'
+
 type AnyRecord = Record<string, any>
 
 export type WritingCockpitRole =
@@ -2718,16 +2720,13 @@ const QUALITY_PASS_THRESHOLD = 78
 type ReviewRef = { review: AnyRecord; index: number }
 
 function parseReviewPayload(review: AnyRecord): AnyRecord | null {
-  const value = review?.payload || review?.raw_payload
+  const field = review?.payload ? 'payload' : 'raw_payload'
+  const value = review?.[field]
   if (!value) return null
   if (typeof value === 'object') return value
   if (typeof value !== 'string') return null
-  try {
-    const parsed = JSON.parse(value)
-    return parsed && typeof parsed === 'object' ? parsed : null
-  } catch {
-    return null
-  }
+  const parsed = parseWorkspacePayload(value, { owner: review, kind: 'review', field })
+  return parsed && typeof parsed === 'object' ? parsed : null
 }
 
 export async function selectTargetChapterForWriting(args: {
@@ -4413,12 +4412,8 @@ function extractQualityScore(quality: AnyRecord) {
 function recordValue(value: any): AnyRecord {
   if (!value) return {}
   if (typeof value === 'object') return value
-  try {
-    const parsed = JSON.parse(String(value))
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch {
-    return {}
-  }
+  const parsed = parseWorkspacePayload(value, { kind: 'admission', field: 'payload' })
+  return parsed && typeof parsed === 'object' ? parsed : {}
 }
 
 function normalizeAdmissionCandidate(value: any): AnyRecord | null {

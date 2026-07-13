@@ -1,4 +1,5 @@
 import { wc } from './utils'
+import { parseWorkspacePayload, type WorkspacePayloadParseOptions } from './payloadParseCache'
 
 type AnyRecord = Record<string, any>
 
@@ -913,14 +914,8 @@ function latestWrittenChapterNo(chapters: AnyRecord[]) {
   }, 0)
 }
 
-function parseJsonValue(value: any) {
-  if (!value) return null
-  if (typeof value === 'object') return value
-  try {
-    return JSON.parse(String(value))
-  } catch {
-    return null
-  }
+function parseJsonValue(value: any, options: WorkspacePayloadParseOptions = {}) {
+  return parseWorkspacePayload(value, options)
 }
 
 function reviewTime(review: AnyRecord) {
@@ -1007,7 +1002,7 @@ function buildFirst30RetentionModel(chapters: AnyRecord[], reviews: AnyRecord[],
     }
   }
 
-  const payload = parseJsonValue(review.payload) || {}
+  const payload = parseJsonValue(review.payload, { owner: review, kind: 'review', field: 'payload' }) || {}
   const report = payload.report || payload.result?.report || payload
   const staleByChapterUpdate = first30ReportIsStale(review, chapters)
   const completedRepair = latestFirst30RepairAfterReport(review, productionTasks)
@@ -1102,7 +1097,9 @@ function isStorylineType(type: string) {
 
 function storylineSyncReport(review: AnyRecord) {
   if (text(review?.review_type) !== 'storyline_sync') return null
-  const payload = parseJsonValue(review?.payload) || parseJsonValue(review?.payload_json) || {}
+  const payload = parseJsonValue(review?.payload, { owner: review, kind: 'review', field: 'payload' })
+    || parseJsonValue(review?.payload_json, { owner: review, kind: 'review', field: 'payload_json' })
+    || {}
   const report = payload.storyline_sync || payload.result?.storyline_sync || payload.result || payload
   if (!report || typeof report !== 'object') return null
   return {
@@ -1288,9 +1285,9 @@ function buildStorylineBoardModel(
     .filter(entity => isStorylineType(text(entity?.entity_type)))
     .map(entity => {
       const entityType = text(entity?.entity_type)
-      const payload = parseJsonValue(entity?.payload_json) || {}
-      const constraints = parseJsonValue(entity?.constraints_json) || {}
-      const state = parseJsonValue(entity?.state_json) || {}
+      const payload = parseJsonValue(entity?.payload_json, { owner: entity, kind: 'setting', field: 'payload_json' }) || {}
+      const constraints = parseJsonValue(entity?.constraints_json, { owner: entity, kind: 'setting', field: 'constraints_json' }) || {}
+      const state = parseJsonValue(entity?.state_json, { owner: entity, kind: 'setting', field: 'state_json' }) || {}
       const startChapter = numberOrNull(entity?.first_chapter_no, payload?.start_chapter_no, payload?.start_chapter)
       const endChapter = numberOrNull(entity?.last_chapter_no, payload?.end_chapter_no, payload?.end_chapter)
       const lastAdvancedChapter = numberOrNull(state?.last_advanced_chapter, payload?.last_advanced_chapter)
@@ -1427,9 +1424,9 @@ function buildCharacterArcBoardModel(
     .filter(entity => isCharacterArcEntity(text(entity?.entity_type)))
     .map(entity => {
       const entityType = text(entity?.entity_type) as 'character_arc' | 'relationship_arc'
-      const payload = parseJsonValue(entity?.payload_json) || {}
-      const constraints = parseJsonValue(entity?.constraints_json) || {}
-      const state = parseJsonValue(entity?.state_json) || {}
+      const payload = parseJsonValue(entity?.payload_json, { owner: entity, kind: 'setting', field: 'payload_json' }) || {}
+      const constraints = parseJsonValue(entity?.constraints_json, { owner: entity, kind: 'setting', field: 'constraints_json' }) || {}
+      const state = parseJsonValue(entity?.state_json, { owner: entity, kind: 'setting', field: 'state_json' }) || {}
       const relatedNames = listText(payload?.related_characters, payload?.characters, payload?.related_names, payload?.relatedNames)
       const lastAdvancedChapter = numberOrNull(state?.last_advanced_chapter, payload?.last_advanced_chapter)
       const nextAdvanceChapter = numberOrNull(state?.next_advance_chapter, payload?.next_advance_chapter)
@@ -1624,7 +1621,9 @@ function latestReviewPayload(reviews: AnyRecord[], reviewType: string, payloadKe
   const review = reviews
     .filter(item => text(item?.review_type) === reviewType)
     .sort((a, b) => reviewTime(b) - reviewTime(a))[0]
-  const payload = parseJsonValue(review?.payload) || parseJsonValue(review?.payload_json) || {}
+  const payload = parseJsonValue(review?.payload, { owner: review, kind: 'review', field: 'payload' })
+    || parseJsonValue(review?.payload_json, { owner: review, kind: 'review', field: 'payload_json' })
+    || {}
   return payload[payloadKey] || payload.result?.[payloadKey] || payload.result || payload
 }
 
@@ -2455,7 +2454,7 @@ function buildVolumeSegmentGateModel(args: {
 }
 
 function chapterPayload(chapter: AnyRecord) {
-  return parseJsonValue(chapter?.raw_payload) || {}
+  return parseJsonValue(chapter?.raw_payload, { owner: chapter, kind: 'chapter', field: 'raw_payload' }) || {}
 }
 
 function fatigueFingerprint(value: string) {
@@ -2617,7 +2616,7 @@ function buildIpSceneIntakeCoverage(recentChapters: AnyRecord[], reviews: AnyRec
 
   for (const review of reviews) {
     if (text(review?.review_type) !== 'ip_scene_intake') continue
-    const payload = parseJsonValue(review?.payload) || {}
+    const payload = parseJsonValue(review?.payload, { owner: review, kind: 'review', field: 'payload' }) || {}
     const root = payload?.ip_scene_intake || payload?.result?.ip_scene_intake || payload?.result || payload
     const chapterNo = Number(root?.chapter_no || root?.chapterNo || payload?.chapter_no || payload?.chapterNo || review?.chapter_no || 0)
     if (!chapterNoSet.has(chapterNo)) continue
@@ -3105,7 +3104,7 @@ function openDeliveryRiskRepairTaskCount(productionTasks?: AnyRecord | null) {
       ? productionTasks.active
       : []
   return runs.reduce((sum: number, run: AnyRecord) => {
-    const payload = run?.payload || parseJsonValue(run?.output_ref) || {}
+    const payload = run?.payload || parseJsonValue(run?.output_ref, { owner: run, kind: 'run', field: 'output_ref' }) || {}
     const tasks = Array.isArray(payload?.tasks) ? payload.tasks : []
     return sum + tasks.filter((task: AnyRecord) => {
       const status = text(task?.task_status || task?.status, 'pending')
@@ -3280,7 +3279,9 @@ function latestDeliveryRiskReports(reviews: AnyRecord[]) {
   reviews.forEach(review => {
     const def = DELIVERY_RISK_REVIEW_DEFS.find(item => item.type === text(review?.review_type))
     if (!def) return
-    const payload = parseJsonValue(review?.payload) || parseJsonValue(review?.payload_json) || {}
+    const payload = parseJsonValue(review?.payload, { owner: review, kind: 'review', field: 'payload' })
+      || parseJsonValue(review?.payload_json, { owner: review, kind: 'review', field: 'payload_json' })
+      || {}
     const report = payload?.[def.payloadKey] || payload?.result?.[def.payloadKey] || payload?.result || payload
     const chapterNo = reviewChapterNo(review, payload)
     const key = `${chapterNo || 'global'}:${def.type}`
@@ -3607,7 +3608,7 @@ function buildSerialDeliveryRiskMap(reviews: AnyRecord[]) {
   reviews.forEach(review => {
     const def = SERIAL_DELIVERY_REVIEW_DEFS.find(item => item.type === text(review?.review_type))
     if (!def) return
-    const payload = parseJsonValue(review?.payload) || {}
+    const payload = parseJsonValue(review?.payload, { owner: review, kind: 'review', field: 'payload' }) || {}
     const report = payload?.[def.payloadKey] || payload?.result?.[def.payloadKey] || payload?.result || payload
     const chapterNo = reviewChapterNo(review, payload)
     if (!chapterNo) return

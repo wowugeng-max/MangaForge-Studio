@@ -5255,6 +5255,7 @@ export default function NovelProjectWorkspace() {
         ...chapterWordTargetPayload(),
       })
       await loadProjectModules()
+      await loadProductionTasks()
       message.success('章节群执行完成或已暂停')
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '章节群执行失败')
@@ -5270,6 +5271,7 @@ export default function NovelProjectWorkspace() {
         stage: chapter.approval_stage || run?.output_ref?.last_error?.approval_stage || 'scene_cards',
       })
       await loadProjectModules()
+      await loadProductionTasks()
       message.success('已确认，任务可继续执行')
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '确认失败')
@@ -5280,6 +5282,7 @@ export default function NovelProjectWorkspace() {
     try {
       await apiClient.post(`/novel/projects/${projectId}/chapter-groups/${run.id}/retry-now`, { chapter_id: chapter.id })
       await loadProjectModules()
+      await loadProductionTasks()
       message.success('已加入立即重试')
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '重试失败')
@@ -5293,6 +5296,7 @@ export default function NovelProjectWorkspace() {
         reason: '用户在任务中心跳过',
       })
       await loadProjectModules()
+      await loadProductionTasks()
       message.success(`已跳过第${chapter.chapter_no}章，可继续执行后续章节`)
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '跳过失败')
@@ -7645,12 +7649,14 @@ export default function NovelProjectWorkspace() {
         onPauseRun={async (run) => {
           await apiClient.post(`/novel/runs/${run.id}/pause`, { project_id: projectId })
           await loadProjectModules()
+          await loadProductionTasks()
           message.success('任务已暂停')
         }}
         onResumeRun={async (run) => {
           try {
             const res = await apiClient.post(`/novel/runs/${run.id}/resume`, { project_id: projectId })
             await loadProjectModules()
+            await loadProductionTasks()
             message.success(res.data?.execute_endpoint ? '章节群已标记可继续，可点击执行' : res.data?.resume_endpoint ? '任务已标记可继续，请从当前章节继续生成正文' : '任务已继续')
           } catch (error: any) {
             message.error(formatRunResumeErrorMessage(error))
