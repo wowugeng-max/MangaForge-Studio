@@ -5,6 +5,7 @@ import {
   buildProsePromptContextSnapshot,
   prosePromptJson,
 } from './prose-prompt-context'
+import { chapter10HandoffFixture } from './fixtures/chapter-10-11-handoff'
 
 describe('prose prompt context helpers', () => {
   test('builds compact context snapshots with director budget omissions', () => {
@@ -101,5 +102,26 @@ describe('prose prompt context helpers', () => {
     expect(bounded).toContain('【上下文预算裁剪】')
     expect(bounded).toContain('【段落级写作要求】')
     expect(bounded).toContain('scene_card_receipts')
+  })
+
+  test('preserves the true last sentence of a long previous handoff and the first-scene transition', () => {
+    const noisyLead = '前章过程信息。'.repeat(180)
+    const snapshot = buildProsePromptContextSnapshot({
+      chapter_target: {
+        chapter_no: 11,
+        previous_handoff: `${noisyLead}${chapter10HandoffFixture.lastSentenceSentinel}`,
+        scene_cards: [{
+          scene_no: 1,
+          title: '地下岔口',
+          transition_from_previous: '暗金绢册再次发热，沈砚先回应老陈的警告，再处理逼近的铁链声。',
+          goal: '关上应急门。',
+        }],
+      },
+    })
+
+    const serialized = prosePromptJson(snapshot, 7000)
+    expect(serialized).toContain(chapter10HandoffFixture.lastSentenceSentinel)
+    expect(serialized).toContain('transition_from_previous')
+    expect(serialized).toContain('暗金绢册再次发热')
   })
 })

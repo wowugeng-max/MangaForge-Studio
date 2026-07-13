@@ -5,6 +5,10 @@ import {
   selectUsableRevisionText,
   shouldRunSynchronousReadabilityReview,
 } from './prose-quality-contracts'
+import {
+  chapter10HandoffFixture,
+  chapterScaleText,
+} from './fixtures/chapter-10-11-handoff'
 
 describe('prose quality contracts', () => {
   test('defers auxiliary readability review unless explicitly requested', () => {
@@ -184,6 +188,27 @@ describe('prose quality contracts', () => {
     expect(selected.accepted).toBe(true)
     expect(selected.text).toBe(revisedText)
   })
+
+  for (const candidateStage of ['editor', 'meme_polish', 'quality_revision']) {
+    test(`rejects a ${candidateStage} candidate that drops the real chapter 10 handoff without a bridge`, () => {
+      const currentText = chapterScaleText(chapter10HandoffFixture.continuousCandidateOpening)
+      const disconnectedCandidate = chapterScaleText(chapter10HandoffFixture.disconnectedRewriteOpening)
+
+      const selected = selectUsableRevisionText(currentText, {
+        final_text: disconnectedCandidate,
+      }, {
+        chapterNo: 11,
+        blockingFindings: [],
+        candidateStage,
+        previousChapterTail: chapter10HandoffFixture.previousChapterTail,
+        requiredHandoffAnchors: chapter10HandoffFixture.requiredAnchors,
+      } as any)
+
+      expect(selected.accepted).toBe(false)
+      expect(selected.text).toBe(currentText)
+      expect(selected.reason).toContain('承接')
+    })
+  }
 
   test('compacts recursive delivery-risk receipt noise into actionable prose tasks', () => {
     const text = compactDeliveryRiskCarryOverText(

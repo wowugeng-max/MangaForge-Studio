@@ -37,4 +37,34 @@ describe('scene cards prompt builder', () => {
     expect(prompt).toContain('delivery_risk_carry_over')
     expect(prompt).toContain('"chapter_no": 12')
   })
+
+  test('uses a cleaned scene-causality context and requires the first card to bridge the previous handoff', () => {
+    const prompt = buildSceneCardsPrompt(
+      { title: '夜行旧册' },
+      {
+        chapter_target: {
+          chapter_no: 11,
+          title: '铁链声',
+          previous_handoff: '暗金绢册发热，老陈听见地下更深处传来铁链拖地声。',
+          delivery_risk_receipts: [{ remaining_risk: 'sync 未回执' }],
+          scene_cards: [{
+            scene_no: 1,
+            title: '旧卡',
+            prose_craft_checks_sync: { missed: true, next_actions: ['repair'] },
+          }],
+        },
+      },
+    )
+    const contextBlock = prompt
+      .split('【结构化上下文包】\n')[1]
+      .split('\n\n输出 JSON')[0]
+
+    expect(prompt).toContain('第一张场景卡')
+    expect(prompt).toContain('transition_from_previous')
+    expect(contextBlock).toContain('暗金绢册发热')
+    expect(contextBlock).not.toContain('delivery_risk_receipts')
+    expect(contextBlock).not.toContain('prose_craft_checks_sync')
+    expect(contextBlock).not.toContain('remaining_risk')
+    expect(contextBlock).not.toContain('next_actions')
+  })
 })
