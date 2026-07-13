@@ -25,8 +25,10 @@ import {
   mergeNovelChapterRawPayload,
   replaceNovelChapterSettingUsage,
   updateNovelChapter,
+  updateNovelProject,
   upsertNovelChapterByNumber,
 } from './novel'
+import { setNovelMutationTestHook } from './novel-test-support'
 
 let workspaces: string[] = []
 
@@ -42,6 +44,60 @@ async function exists(path: string) {
     return true
   } catch {
     return false
+  }
+}
+
+async function holdSqliteWriteLock(workspace: string, holdMs: number) {
+  const readyPath = join(workspace, `sqlite-lock-ready-${Date.now()}-${Math.random()}`)
+  const child = Bun.spawn({
+    cmd: [process.execPath, '-e', `
+      import { Database } from 'bun:sqlite'
+      const db = new Database(process.argv[1])
+      db.exec('PRAGMA busy_timeout = 1000; BEGIN IMMEDIATE')
+      await Bun.write(process.argv[2], 'ready')
+      await Bun.sleep(Number(process.argv[3]))
+      db.exec('COMMIT')
+      db.close()
+    `, join(workspace, 'novel.sqlite'), readyPath, String(holdMs)],
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+  const deadline = Date.now() + 2000
+  while (!(await exists(readyPath))) {
+    if (Date.now() >= deadline) throw new Error('sqlite lock holder did not become ready')
+    await new Promise(resolve => setTimeout(resolve, 5))
+  }
+  return child
+}
+
+async function spawnBarrieredChapterUpdate(workspace: string, chapterId: number, chapterText: string, label: string) {
+  const readyPath = join(workspace, `${label}-ready`)
+  const releasePath = join(workspace, `${label}-release`)
+  const novelModule = join(import.meta.dir, 'novel.ts')
+  const testSupportModule = join(import.meta.dir, 'novel-test-support.ts')
+  const child = Bun.spawn({
+    cmd: [process.execPath, '-e', `
+      import { existsSync } from 'fs'
+      import { updateNovelChapter } from ${JSON.stringify(novelModule)}
+      import { setNovelMutationTestHook } from ${JSON.stringify(testSupportModule)}
+      setNovelMutationTestHook(async event => {
+        if (event.phase !== 'before_full_store_write') return
+        await Bun.write(${JSON.stringify(readyPath)}, 'ready')
+        while (!existsSync(${JSON.stringify(releasePath)})) await Bun.sleep(5)
+      })
+      await updateNovelChapter(${JSON.stringify(workspace)}, ${chapterId}, { chapter_text: ${JSON.stringify(chapterText)} })
+    `],
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+  return { child, readyPath, releasePath }
+}
+
+async function waitForPath(path: string) {
+  const deadline = Date.now() + 3000
+  while (!(await exists(path))) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${path}`)
+    await new Promise(resolve => setTimeout(resolve, 5))
   }
 }
 
@@ -80,11 +136,177 @@ async function snapshotNovelReferenceStore(workspace: string, projectIds: number
 }
 
 afterEach(async () => {
+  setNovelMutationTestHook(null)
   await Promise.all(workspaces.map(workspace => rm(workspace, { recursive: true, force: true })))
   workspaces = []
 })
 
 describe('novel sqlite persistence', () => {
+  test('preserves two full-store mutations that overlap in separate Bun processes', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '跨进程整库更新' })
+    const firstChapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章', chapter_text: '第一章旧正文' })
+    const secondChapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 2, title: '第二章', chapter_text: '第二章旧正文' })
+    const first = await spawnBarrieredChapterUpdate(workspace, firstChapter.id, '第一章子进程新正文', 'first-update')
+    const second = await spawnBarrieredChapterUpdate(workspace, secondChapter.id, '第二章子进程新正文', 'second-update')
+    await Promise.all([waitForPath(first.readyPath), waitForPath(second.readyPath)])
+
+    await writeFile(first.releasePath, 'release')
+    expect(await first.child.exited).toBe(0)
+    await writeFile(second.releasePath, 'release')
+    expect(await second.child.exited).toBe(0)
+
+    expect((await listNovelChapters(workspace, project.id)).map(chapter => chapter.chapter_text)).toEqual([
+      '第一章子进程新正文',
+      '第二章子进程新正文',
+    ])
+  })
+
+  test('routes every novel mutation entry point through the workspace mutation lock', async () => {
+    const source = await readFile(join(import.meta.dir, 'novel.ts'), 'utf8')
+    const mutationNames = [
+      'createNovelProject', 'updateNovelProject',
+      'createNovelWorldbuilding', 'updateNovelWorldbuilding',
+      'createNovelCharacter', 'updateNovelCharacter',
+      'createNovelSettingEntity', 'updateNovelSettingEntity', 'deleteNovelSettingEntity',
+      'replaceNovelChapterSettingUsage', 'updateNovelChapterSettingUsage',
+      'createNovelOutline', 'updateNovelOutline',
+      'createNovelChapter', 'upsertNovelChapterByNumber', 'syncNovelChapterPlanByNumber',
+      'appendChapterVersion', 'rollbackChapterVersion', 'updateNovelChapter',
+      'mergeNovelChapterRawPayload', 'commitNovelChapterAcceptance',
+      'deleteNovelChapter', 'deleteNovelOutline', 'deleteNovelProject',
+      'createNovelReview', 'appendNovelRun', 'updateNovelRun', 'compactNovelStorage',
+      'createNovelProjectSeedDraft', 'deleteNovelProjectSeedDraft',
+    ]
+
+    for (const name of mutationNames) {
+      const start = source.indexOf(`export async function ${name}`)
+      const nextExport = source.indexOf('export async function ', start + 1)
+      const block = source.slice(start, nextExport < 0 ? source.length : nextExport)
+      expect(start).toBeGreaterThanOrEqual(0)
+      expect(block.includes('withNovelWorkspaceMutation(activeWorkspace') || block.includes('mutateNovelStore(activeWorkspace')).toBe(true)
+    }
+    const transactionalMutationStart = source.indexOf('async function mutateNovelStore')
+    const transactionalMutationEnd = source.indexOf('function normalizeReferenceConfig', transactionalMutationStart)
+    const transactionalMutationBlock = source.slice(transactionalMutationStart, transactionalMutationEnd)
+    expect(transactionalMutationBlock).toContain("db.exec('BEGIN IMMEDIATE')")
+    expect(transactionalMutationBlock).toContain('const store = loadStoreFromOpenDb(db)')
+    expect(transactionalMutationBlock).toContain('replaceStoreInOpenDb(db, store)')
+    expect(source).not.toContain('writeStoreUnlocked')
+    expect(source).toContain('assertNovelWorkspaceMutationHeld(activeWorkspace)')
+  })
+
+  test('fails a queued workspace mutation after the configured lock bound', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: 'workspace lock timeout' })
+    const previousTimeout = process.env.NOVEL_MUTATION_LOCK_TIMEOUT_MS
+    process.env.NOVEL_MUTATION_LOCK_TIMEOUT_MS = '50'
+    let releaseFirst!: () => void
+    const firstBlocked = new Promise<void>(resolve => { releaseFirst = resolve })
+    let markFirstEntered!: () => void
+    const firstEntered = new Promise<void>(resolve => { markFirstEntered = resolve })
+    let blockedOnce = false
+    setNovelMutationTestHook(async event => {
+      if (event.activeWorkspace !== workspace || event.phase !== 'after_mutation_lock_acquired' || blockedOnce) return
+      blockedOnce = true
+      markFirstEntered()
+      await firstBlocked
+    })
+    const firstMutation = updateNovelProject(workspace, project.id, { synopsis: '先持锁' })
+    await firstEntered
+    const startedAt = Date.now()
+    try {
+      const error = await appendNovelRun(workspace, {
+        project_id: project.id,
+        run_type: 'lock_timeout',
+        step_name: 'queued',
+        status: 'running',
+      }).then(() => null, caught => caught)
+      const elapsed = Date.now() - startedAt
+      expect(String(error)).toContain('novel workspace mutation lock timeout after 50ms')
+      expect(elapsed).toBeGreaterThanOrEqual(25)
+      expect(elapsed).toBeLessThan(1000)
+    } finally {
+      releaseFirst()
+      await firstMutation
+      if (previousTimeout === undefined) delete process.env.NOVEL_MUTATION_LOCK_TIMEOUT_MS
+      else process.env.NOVEL_MUTATION_LOCK_TIMEOUT_MS = previousTimeout
+    }
+  })
+
+  test('waits for a bounded external SQLite writer instead of failing immediately', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: 'SQLite busy wait' })
+    const previousTimeout = process.env.NOVEL_SQLITE_BUSY_TIMEOUT_MS
+    const holder = await holdSqliteWriteLock(workspace, 150)
+    process.env.NOVEL_SQLITE_BUSY_TIMEOUT_MS = '1000'
+    const startedAt = Date.now()
+    try {
+      const run = await appendNovelRun(workspace, {
+        project_id: project.id,
+        run_type: 'busy_wait',
+        step_name: 'external-lock',
+        status: 'success',
+      })
+      expect(run.id).toBeGreaterThan(0)
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(80)
+    } finally {
+      if (previousTimeout === undefined) delete process.env.NOVEL_SQLITE_BUSY_TIMEOUT_MS
+      else process.env.NOVEL_SQLITE_BUSY_TIMEOUT_MS = previousTimeout
+      await holder.exited
+    }
+  })
+
+  test('fails external SQLite lock contention after the configured bound', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: 'SQLite bounded failure' })
+    const previousTimeout = process.env.NOVEL_SQLITE_BUSY_TIMEOUT_MS
+    const holder = await holdSqliteWriteLock(workspace, 300)
+    process.env.NOVEL_SQLITE_BUSY_TIMEOUT_MS = '50'
+    const startedAt = Date.now()
+    try {
+      const error = await appendNovelRun(workspace, {
+        project_id: project.id,
+        run_type: 'busy_timeout',
+        step_name: 'external-lock',
+        status: 'running',
+      }).then(() => null, caught => caught)
+      const elapsed = Date.now() - startedAt
+      expect(String(error)).toContain('database is locked')
+      expect(elapsed).toBeGreaterThanOrEqual(25)
+      expect(elapsed).toBeLessThan(1000)
+    } finally {
+      if (previousTimeout === undefined) delete process.env.NOVEL_SQLITE_BUSY_TIMEOUT_MS
+      else process.env.NOVEL_SQLITE_BUSY_TIMEOUT_MS = previousTimeout
+      await holder.exited
+    }
+  })
+
+  test('preserves the original SQLite lock error when legacy import cannot begin', async () => {
+    const workspace = await tempWorkspace()
+    const timestamp = new Date().toISOString()
+    await listNovelProjects(workspace)
+    await writeFile(join(workspace, 'novel-store.json'), JSON.stringify({
+      projects: [{ id: 1, title: '锁定的旧项目', created_at: timestamp, updated_at: timestamp }],
+      chapters: [{ id: 1, project_id: 1, chapter_no: 1, title: '第一章', chapter_text: '旧正文', created_at: timestamp, updated_at: timestamp }],
+    }))
+    const previousTimeout = process.env.NOVEL_SQLITE_BUSY_TIMEOUT_MS
+    const holder = await holdSqliteWriteLock(workspace, 300)
+    process.env.NOVEL_SQLITE_BUSY_TIMEOUT_MS = '50'
+    try {
+      const error = await commitNovelChapterAcceptance(workspace, {
+        chapter_id: 1,
+        chapter_patch: { chapter_text: '不得写入' },
+      }).then(() => null, caught => caught)
+      expect(String(error)).toContain('database is locked')
+      expect(String(error)).not.toContain('cannot rollback')
+    } finally {
+      if (previousTimeout === undefined) delete process.env.NOVEL_SQLITE_BUSY_TIMEOUT_MS
+      else process.env.NOVEL_SQLITE_BUSY_TIMEOUT_MS = previousTimeout
+      await holder.exited
+    }
+  })
+
   test('merges chapter raw payload keys against the latest row without losing concurrent metadata', async () => {
     const workspace = await tempWorkspace()
     const project = await createNovelProject(workspace, { title: '最新行键级合并' })
@@ -204,6 +426,160 @@ describe('novel sqlite persistence', () => {
 })
 
 describe('commitNovelChapterAcceptance', () => {
+  test('serializes an older chapter update across a newer acceptance without losing either write', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '跨 mutator 并发验收' })
+    const firstChapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: '第一章旧正文',
+    })
+    const secondChapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 2,
+      title: '第二章',
+      chapter_text: '第二章旧正文',
+    })
+    let releaseOlderWrite!: () => void
+    const olderWriteBlocked = new Promise<void>(resolve => { releaseOlderWrite = resolve })
+    let markOlderSnapshotRead!: () => void
+    const olderSnapshotRead = new Promise<void>(resolve => { markOlderSnapshotRead = resolve })
+    let blockedOnce = false
+    setNovelMutationTestHook(async event => {
+      if (event.activeWorkspace !== workspace || event.phase !== 'before_full_store_write' || blockedOnce) return
+      blockedOnce = true
+      markOlderSnapshotRead()
+      await olderWriteBlocked
+    })
+
+    const olderUpdate = updateNovelChapter(workspace, firstChapter.id, { chapter_text: '第一章人工新正文' })
+    await olderSnapshotRead
+    const acceptance = commitNovelChapterAcceptance(workspace, {
+      chapter_id: secondChapter.id,
+      chapter_patch: { chapter_text: '第二章验收新正文' },
+      reviews: [{ review_type: 'prose_quality', summary: '第二章验收记录' }],
+    })
+    let acceptanceSettled = false
+    void acceptance.finally(() => { acceptanceSettled = true })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(acceptanceSettled).toBe(false)
+    releaseOlderWrite()
+    const [updated, accepted] = await Promise.all([olderUpdate, acceptance])
+
+    expect(updated?.chapter_text).toBe('第一章人工新正文')
+    expect(accepted.chapter.chapter_text).toBe('第二章验收新正文')
+    expect((await listNovelChapters(workspace, project.id)).map(chapter => chapter.chapter_text)).toEqual([
+      '第一章人工新正文',
+      '第二章验收新正文',
+    ])
+    expect((await listNovelReviews(workspace, project.id)).map(review => review.summary)).toEqual(['第二章验收记录'])
+  })
+
+  test('queues a second acceptance behind a real first-acceptance barrier', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '真实并发双验收' })
+    const firstChapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章', chapter_text: '第一章旧正文' })
+    const secondChapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 2, title: '第二章', chapter_text: '第二章旧正文' })
+    let releaseFirst!: () => void
+    const firstBlocked = new Promise<void>(resolve => { releaseFirst = resolve })
+    let markFirstEntered!: () => void
+    const firstEntered = new Promise<void>(resolve => { markFirstEntered = resolve })
+    let blockedOnce = false
+    setNovelMutationTestHook(async event => {
+      if (event.activeWorkspace !== workspace || event.phase !== 'after_mutation_lock_acquired' || event.operation !== 'acceptance' || blockedOnce) return
+      blockedOnce = true
+      markFirstEntered()
+      await firstBlocked
+    })
+
+    const firstAcceptance = commitNovelChapterAcceptance(workspace, {
+      chapter_id: firstChapter.id,
+      chapter_patch: { chapter_text: '第一章新正文' },
+      reviews: [{ review_type: 'prose_quality', summary: '第一章验收' }],
+    })
+    await firstEntered
+    let secondSettled = false
+    const secondAcceptance = commitNovelChapterAcceptance(workspace, {
+      chapter_id: secondChapter.id,
+      chapter_patch: { chapter_text: '第二章新正文' },
+      reviews: [{ review_type: 'prose_quality', summary: '第二章验收' }],
+    }).finally(() => { secondSettled = true })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(secondSettled).toBe(false)
+    releaseFirst()
+    await Promise.all([firstAcceptance, secondAcceptance])
+
+    expect((await listNovelChapters(workspace, project.id)).map(chapter => chapter.chapter_text)).toEqual(['第一章新正文', '第二章新正文'])
+    expect((await listNovelReviews(workspace, project.id)).map(review => review.summary).sort()).toEqual(['第一章验收', '第二章验收'])
+  })
+
+  test('queues appendNovelRun behind an acceptance and preserves both records', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '验收与运行记录串行' })
+    const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章', chapter_text: '旧正文' })
+    let releaseAcceptance!: () => void
+    const acceptanceBlocked = new Promise<void>(resolve => { releaseAcceptance = resolve })
+    let markAcceptanceEntered!: () => void
+    const acceptanceEntered = new Promise<void>(resolve => { markAcceptanceEntered = resolve })
+    let blockedOnce = false
+    setNovelMutationTestHook(async event => {
+      if (event.activeWorkspace !== workspace || event.phase !== 'after_mutation_lock_acquired' || event.operation !== 'acceptance' || blockedOnce) return
+      blockedOnce = true
+      markAcceptanceEntered()
+      await acceptanceBlocked
+    })
+
+    const acceptance = commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { chapter_text: '验收正文' },
+      reviews: [{ review_type: 'prose_quality', summary: '验收记录' }],
+    })
+    await acceptanceEntered
+    let appendSettled = false
+    const append = appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'generate_prose',
+      step_name: 'chapter-1-post-sync',
+      status: 'success',
+    }).finally(() => { appendSettled = true })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(appendSettled).toBe(false)
+    releaseAcceptance()
+    await Promise.all([acceptance, append])
+
+    expect((await listNovelChapters(workspace, project.id))[0]?.chapter_text).toBe('验收正文')
+    expect((await listNovelReviews(workspace, project.id))[0]?.summary).toBe('验收记录')
+    expect((await listNovelRuns(workspace, project.id))[0]?.step_name).toBe('chapter-1-post-sync')
+  })
+
+  test('imports a legacy JSON store before the first acceptance transaction', async () => {
+    const workspace = await tempWorkspace()
+    const timestamp = new Date().toISOString()
+    await writeFile(join(workspace, 'novel-store.json'), JSON.stringify({
+      projects: [{ id: 1, title: '旧 JSON 验收', reference_config: {}, status: 'draft', created_at: timestamp, updated_at: timestamp }],
+      worldbuilding: [],
+      characters: [],
+      outlines: [],
+      chapters: [{ id: 1, project_id: 1, chapter_no: 1, title: '第一章', chapter_text: '旧 JSON 正文', status: 'draft', created_at: timestamp, updated_at: timestamp }],
+      chapter_versions: [],
+      reviews: [],
+      runs: [],
+      setting_entities: [],
+      chapter_setting_usage: [],
+    }))
+
+    await commitNovelChapterAcceptance(workspace, {
+      chapter_id: 1,
+      chapter_patch: { chapter_text: '迁移后验收正文' },
+      reviews: [{ review_type: 'prose_quality', summary: '迁移验收' }],
+    })
+
+    expect((await listNovelChapters(workspace, 1))[0]?.chapter_text).toBe('迁移后验收正文')
+    expect((await listNovelReviews(workspace, 1))[0]?.summary).toBe('迁移验收')
+    expect(await exists(join(workspace, 'novel.sqlite'))).toBe(true)
+  })
+
   test('preserves both chapter acceptances when they start concurrently', async () => {
     const workspace = await tempWorkspace()
     const project = await createNovelProject(workspace, { title: '并发章节验收' })

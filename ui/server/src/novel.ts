@@ -1,6 +1,8 @@
 import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { Database } from 'bun:sqlite'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { getNovelMutationTestHook } from './novel-test-support'
 
 export type NovelReferenceConfig = {
   references?: Array<{ project_title: string; weight?: number; use_for?: string[]; dimensions?: string[]; avoid?: string[] }>
@@ -654,7 +656,80 @@ function textValue(value: any, fallback = '') { return value === undefined || va
 function normalizeStore(store: Partial<NovelStore> | null | undefined): NovelStore { return { projects: Array.isArray(store?.projects) ? store!.projects : [], worldbuilding: Array.isArray(store?.worldbuilding) ? store!.worldbuilding : [], characters: Array.isArray(store?.characters) ? store!.characters : [], outlines: Array.isArray(store?.outlines) ? store!.outlines : [], chapters: Array.isArray(store?.chapters) ? store!.chapters : [], chapter_versions: Array.isArray(store?.chapter_versions) ? store!.chapter_versions : [], reviews: Array.isArray(store?.reviews) ? store!.reviews : [], runs: Array.isArray(store?.runs) ? store!.runs : [], setting_entities: Array.isArray(store?.setting_entities) ? store!.setting_entities : [], chapter_setting_usage: Array.isArray(store?.chapter_setting_usage) ? store!.chapter_setting_usage : [] } }
 async function readJsonStore(activeWorkspace: string): Promise<NovelStore> { try { return normalizeStore(JSON.parse(await readFile(getNovelStorePath(activeWorkspace), 'utf8')) as Partial<NovelStore>) } catch { return normalizeStore(null) } }
 function dbPathFromEnv() { const raw = process.env.SQLITE_DATABASE_URL || process.env.DATABASE_URL || ''; if (!raw) return ''; if (raw.startsWith('file:')) return raw.slice(5).split('?', 1)[0]; return raw }
-function openDb(activeWorkspace: string) { return new Database(dbPathFromEnv() || getNovelDbPath(activeWorkspace)) }
+function boundedTimeout(value: any, fallback: number, minimum: number, maximum: number) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? Math.max(minimum, Math.min(maximum, Math.floor(parsed))) : fallback
+}
+function sqliteBusyTimeoutMs() { return boundedTimeout(process.env.NOVEL_SQLITE_BUSY_TIMEOUT_MS, 5000, 25, 30000) }
+function mutationLockTimeoutMs() { return boundedTimeout(process.env.NOVEL_MUTATION_LOCK_TIMEOUT_MS, 15000, 25, 60000) }
+function openDb(activeWorkspace: string) {
+  const db = new Database(dbPathFromEnv() || getNovelDbPath(activeWorkspace))
+  db.exec(`PRAGMA busy_timeout = ${sqliteBusyTimeoutMs()}`)
+  return db
+}
+type NovelMutationWaiter = {
+  resolve: (release: () => void) => void
+  reject: (error: Error) => void
+  timer: ReturnType<typeof setTimeout>
+}
+type NovelMutationLock = { locked: boolean; waiters: NovelMutationWaiter[] }
+const novelMutationLocks = new Map<string, NovelMutationLock>()
+const novelMutationContext = new AsyncLocalStorage<Set<string>>()
+function novelMutationKey(activeWorkspace: string) { return dbPathFromEnv() || getNovelDbPath(activeWorkspace) }
+function releaseNovelMutationLock(key: string, lock: NovelMutationLock) {
+  const next = lock.waiters.shift()
+  if (next) {
+    clearTimeout(next.timer)
+    next.resolve(() => releaseNovelMutationLock(key, lock))
+    return
+  }
+  lock.locked = false
+  novelMutationLocks.delete(key)
+}
+function acquireNovelMutationLock(key: string) {
+  let lock = novelMutationLocks.get(key)
+  if (!lock) {
+    lock = { locked: false, waiters: [] }
+    novelMutationLocks.set(key, lock)
+  }
+  if (!lock.locked) {
+    lock.locked = true
+    return Promise.resolve(() => releaseNovelMutationLock(key, lock!))
+  }
+  return new Promise<() => void>((resolve, reject) => {
+    const timeoutMs = mutationLockTimeoutMs()
+    const waiter: NovelMutationWaiter = {
+      resolve,
+      reject,
+      timer: setTimeout(() => {
+        const index = lock!.waiters.indexOf(waiter)
+        if (index >= 0) lock!.waiters.splice(index, 1)
+        reject(new Error(`novel workspace mutation lock timeout after ${timeoutMs}ms`))
+      }, timeoutMs),
+    }
+    lock!.waiters.push(waiter)
+  })
+}
+async function withNovelWorkspaceMutation<T>(activeWorkspace: string, mutation: () => Promise<T>, operation = 'mutation'): Promise<T> {
+  const key = novelMutationKey(activeWorkspace)
+  const activeKeys = novelMutationContext.getStore()
+  if (activeKeys?.has(key)) return mutation()
+  const release = await acquireNovelMutationLock(key)
+  const nextKeys = new Set(activeKeys || [])
+  nextKeys.add(key)
+  try {
+    const testHook = getNovelMutationTestHook()
+    if (testHook) await testHook({ activeWorkspace, phase: 'after_mutation_lock_acquired', operation })
+    return await novelMutationContext.run(nextKeys, mutation)
+  } finally {
+    release()
+  }
+}
+function assertNovelWorkspaceMutationHeld(activeWorkspace: string) {
+  if (!novelMutationContext.getStore()?.has(novelMutationKey(activeWorkspace))) {
+    throw new Error('novel store write attempted outside workspace mutation lock')
+  }
+}
 function parseDbArray(value: any) { try { return value ? JSON.parse(String(value)) : [] } catch { return [] } }
 function parseDbJson(value: any, fallback: any = null) { try { return value ? JSON.parse(String(value)) : fallback } catch { return fallback } }
 function tableExists(db: Database, name: string) { return !!db.query("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(name) }
@@ -929,24 +1004,21 @@ async function readStore(activeWorkspace: string): Promise<NovelStore> {
     const jsonStore = await readJsonStore(activeWorkspace)
     if (storeScore(jsonStore) > storeScore(dbStore)) {
       db.close()
-      await writeStore(activeWorkspace, jsonStore)
-      const migrated = openDb(activeWorkspace)
-      try { return loadStoreFromOpenDb(migrated) } finally { migrated.close() }
+      return withNovelWorkspaceMutation(activeWorkspace, async () => {
+        await importLegacyNovelStoreIfNeeded(activeWorkspace, jsonStore)
+        const migrated = openDb(activeWorkspace)
+        try { return loadStoreFromOpenDb(migrated) } finally { migrated.close() }
+      })
     }
     return dbStore
   } finally {
     try { db.close() } catch { /* already closed during migration */ }
   }
 }
-async function writeStore(activeWorkspace: string, store: NovelStore) {
+function replaceStoreInOpenDb(db: Database, store: NovelStore) {
   const normalized = normalizeStore(store)
-  const db = openDb(activeWorkspace)
-  let committed = false
-  try {
-    ensureSqliteSchema(db)
-    db.exec('BEGIN')
-    for (const table of ['chapter_setting_usage','setting_entities','runs','reviews','chapter_versions','chapters','outlines','characters','worldbuilding','projects']) db.exec(`DELETE FROM ${table}`)
-    const insert = (sql: string, params: any[]) => db.query(sql).run(...params)
+  for (const table of ['chapter_setting_usage','setting_entities','runs','reviews','chapter_versions','chapters','outlines','characters','worldbuilding','projects']) db.exec(`DELETE FROM ${table}`)
+  const insert = (sql: string, params: any[]) => db.query(sql).run(...params)
     for (const p of normalized.projects) insert('INSERT INTO projects (id,title,genre,sub_genres,synopsis,length_target,target_audience,style_tags,commercial_tags,reference_config,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [p.id,p.title,p.genre||'',jsonText(p.sub_genres),p.synopsis||'',p.length_target||'medium',p.target_audience||'',jsonText(p.style_tags),jsonText(p.commercial_tags),jsonText(p.reference_config, {}),p.status||'draft',p.created_at||nowIso(),p.updated_at||nowIso()])
     for (const w of normalized.worldbuilding) insert('INSERT INTO worldbuilding (id,project_id,world_summary,rules,factions,locations,systems,items,timeline_anchor,known_unknowns,version,raw_payload,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [w.id,w.project_id,w.world_summary||'',jsonText(w.rules),jsonText(w.factions),jsonText(w.locations),jsonText(w.systems),jsonText(w.items),textValue(w.timeline_anchor),jsonText(w.known_unknowns),w.version||1,jsonText(w.raw_payload || w, {}),w.created_at||nowIso(),w.updated_at||nowIso()])
     for (const c of normalized.characters) insert('INSERT INTO characters (id,project_id,name,role,role_type,archetype,personality,motivation,goal,conflict,abilities,backstory,relationships,relationship_graph,growth_arc,arc_hint,current_state,secret,appearance,status,version,raw_payload,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [c.id,c.project_id,c.name,c.role||'',c.role_type||c.role||'',c.archetype||'',jsonText(c.personality),c.motivation||'',c.goal||'',c.conflict||'',jsonText(c.abilities),c.backstory||'',jsonText(c.relationships),jsonText(c.relationship_graph, {}),c.growth_arc||'',c.arc_hint||'',jsonText(c.current_state, {}),c.secret||'',c.appearance||'',c.status||'active',c.version||1,jsonText(c.raw_payload || c, {}),c.created_at||c.updated_at||nowIso(),c.updated_at||nowIso()])
@@ -956,10 +1028,54 @@ async function writeStore(activeWorkspace: string, store: NovelStore) {
     for (const r of normalized.reviews) insert('INSERT INTO reviews (id,project_id,review_type,status,summary,issues,payload,created_at) VALUES (?,?,?,?,?,?,?,?)', [r.id,r.project_id,r.review_type,r.status,r.summary||'',jsonText(r.issues||[]),r.payload||'',r.created_at||nowIso()])
     for (const r of normalized.runs) insert('INSERT INTO runs (id,project_id,run_type,step_name,status,input_ref,output_ref,duration_ms,error_message,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)', [r.id,r.project_id,r.run_type,r.step_name,r.status,r.input_ref||'',r.output_ref||'',r.duration_ms||0,r.error_message||'',r.created_at||nowIso()])
     for (const s of normalized.setting_entities) insert('INSERT INTO setting_entities (id,project_id,entity_type,name,summary,status,visibility,first_chapter_no,last_chapter_no,related_character_ids,related_chapter_ids,related_entity_ids,constraints_json,state_json,payload_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [s.id,s.project_id,s.entity_type||'rule',s.name,s.summary||'',s.status||'active',s.visibility||'public',s.first_chapter_no ?? null,s.last_chapter_no ?? null,jsonText(s.related_character_ids, []),jsonText(s.related_chapter_ids, []),jsonText(s.related_entity_ids, []),jsonText(s.constraints_json, {}),jsonText(s.state_json, {}),jsonText(s.payload_json || s, {}),s.created_at||nowIso(),s.updated_at||nowIso()])
-    for (const u of normalized.chapter_setting_usage) insert('INSERT INTO chapter_setting_usage (id,project_id,chapter_id,entity_id,usage_type,required,allowed,forbidden,reveal_level,expected_state_change,actual_state_change,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [u.id,u.project_id,u.chapter_id,u.entity_id,u.usage_type||'allowed',u.required ? 1 : 0,u.allowed === false ? 0 : 1,u.forbidden ? 1 : 0,u.reveal_level||'none',jsonText(u.expected_state_change, {}),jsonText(u.actual_state_change, {}),u.created_at||nowIso(),u.updated_at||nowIso()])
+  for (const u of normalized.chapter_setting_usage) insert('INSERT INTO chapter_setting_usage (id,project_id,chapter_id,entity_id,usage_type,required,allowed,forbidden,reveal_level,expected_state_change,actual_state_change,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [u.id,u.project_id,u.chapter_id,u.entity_id,u.usage_type||'allowed',u.required ? 1 : 0,u.allowed === false ? 0 : 1,u.forbidden ? 1 : 0,u.reveal_level||'none',jsonText(u.expected_state_change, {}),jsonText(u.actual_state_change, {}),u.created_at||nowIso(),u.updated_at||nowIso()])
+}
+async function importLegacyNovelStoreIfNeeded(activeWorkspace: string, knownJsonStore?: NovelStore) {
+  assertNovelWorkspaceMutationHeld(activeWorkspace)
+  const jsonStore = knownJsonStore || await readJsonStore(activeWorkspace)
+  if (storeScore(jsonStore) === 0) return
+  const db = openDb(activeWorkspace)
+  let committed = false
+  try {
+    ensureSqliteSchema(db)
+    db.exec('BEGIN IMMEDIATE')
+    if (storeScore(loadStoreFromOpenDb(db)) === 0) replaceStoreInOpenDb(db, jsonStore)
     db.exec('COMMIT')
     committed = true
-  } catch (e) { if (!committed) db.exec('ROLLBACK'); throw e } finally { db.close() }
+  } catch (error) {
+    if (!committed) {
+      try { db.exec('ROLLBACK') } catch { /* transaction may not have started */ }
+    }
+    throw error
+  } finally {
+    db.close()
+  }
+}
+async function mutateNovelStore<T>(activeWorkspace: string, mutation: (store: NovelStore) => T): Promise<T> {
+  return withNovelWorkspaceMutation(activeWorkspace, async () => {
+    await importLegacyNovelStoreIfNeeded(activeWorkspace)
+    const testHook = getNovelMutationTestHook()
+    if (testHook) await testHook({ activeWorkspace, phase: 'before_full_store_write' })
+    const db = openDb(activeWorkspace)
+    let committed = false
+    try {
+      ensureSqliteSchema(db)
+      db.exec('BEGIN IMMEDIATE')
+      const store = loadStoreFromOpenDb(db)
+      const result = mutation(store)
+      replaceStoreInOpenDb(db, store)
+      db.exec('COMMIT')
+      committed = true
+      return result
+    } catch (error) {
+      if (!committed) {
+        try { db.exec('ROLLBACK') } catch { /* transaction may not have started */ }
+      }
+      throw error
+    } finally {
+      db.close()
+    }
+  })
 }
 function normalizeReferenceConfig(value: any): NovelReferenceConfig {
   const raw = value && typeof value === 'object' ? value : {}
@@ -1171,33 +1287,42 @@ function dedupById<T extends { id: number | string }>(items: T[]): T[] {
   })
 }
 export async function listNovelProjects(activeWorkspace: string) { const store = await readStore(activeWorkspace); return dedupById(store.projects).sort((a, b) => b.updated_at.localeCompare(a.updated_at)) }
-export async function createNovelProject(activeWorkspace: string, data: Partial<NovelProjectRecord>) { const store = await readStore(activeWorkspace); const project = normalizeProjectRecord(data, { id: store.projects.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.projects.push(project); await writeStore(activeWorkspace, store); return project }
+export async function createNovelProject(activeWorkspace: string, data: Partial<NovelProjectRecord>) { return mutateNovelStore(activeWorkspace, store => { const project = normalizeProjectRecord(data, { id: store.projects.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.projects.push(project); return project }) }
 export async function getNovelProject(activeWorkspace: string, id: number) { const store = await readStore(activeWorkspace); return store.projects.find(item => item.id === id) || null }
-export async function updateNovelProject(activeWorkspace: string, id: number, data: Partial<NovelProjectRecord>) { const store = await readStore(activeWorkspace); const idx = store.projects.findIndex(item => item.id === id); if (idx < 0) return null; const current = store.projects[idx]; const updated = normalizeProjectRecord(data, { ...current, id, updated_at: nowIso() }); store.projects[idx] = { ...current, ...updated, updated_at: nowIso() }; await writeStore(activeWorkspace, store); return store.projects[idx] }
+export async function updateNovelProject(activeWorkspace: string, id: number, data: Partial<NovelProjectRecord>) { return mutateNovelStore(activeWorkspace, store => { const idx = store.projects.findIndex(item => item.id === id); if (idx < 0) return null; const current = store.projects[idx]; const updated = normalizeProjectRecord(data, { ...current, id, updated_at: nowIso() }); store.projects[idx] = { ...current, ...updated, updated_at: nowIso() }; return store.projects[idx] }) }
 export async function listNovelWorldbuilding(activeWorkspace: string, projectId: number) { const store = await readStore(activeWorkspace); return dedupById(store.worldbuilding.filter(item => item.project_id === projectId)) }
-export async function createNovelWorldbuilding(activeWorkspace: string, data: Partial<NovelWorldbuildingRecord>) { const store = await readStore(activeWorkspace); const record = normalizeWorldbuildingRecord(data, { id: store.worldbuilding.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.worldbuilding.push(record); await writeStore(activeWorkspace, store); return record }
-export async function updateNovelWorldbuilding(activeWorkspace: string, id: number, data: Partial<NovelWorldbuildingRecord>) { const store = await readStore(activeWorkspace); const idx = store.worldbuilding.findIndex(item => item.id === id); if (idx < 0) return null; const current = store.worldbuilding[idx]; store.worldbuilding[idx] = normalizeWorldbuildingRecord(data, current); await writeStore(activeWorkspace, store); return store.worldbuilding[idx] }
+export async function createNovelWorldbuilding(activeWorkspace: string, data: Partial<NovelWorldbuildingRecord>) { return mutateNovelStore(activeWorkspace, store => { const record = normalizeWorldbuildingRecord(data, { id: store.worldbuilding.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.worldbuilding.push(record); return record }) }
+export async function updateNovelWorldbuilding(activeWorkspace: string, id: number, data: Partial<NovelWorldbuildingRecord>) { return mutateNovelStore(activeWorkspace, store => { const idx = store.worldbuilding.findIndex(item => item.id === id); if (idx < 0) return null; const current = store.worldbuilding[idx]; store.worldbuilding[idx] = normalizeWorldbuildingRecord(data, current); return store.worldbuilding[idx] }) }
 export async function listNovelCharacters(activeWorkspace: string, projectId: number) { const store = await readStore(activeWorkspace); return dedupById(store.characters.filter(item => item.project_id === projectId)) }
-export async function createNovelCharacter(activeWorkspace: string, data: Partial<NovelCharacterRecord>) { const store = await readStore(activeWorkspace); const record = normalizeCharacterRecord(data, { id: store.characters.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.characters.push(record); await writeStore(activeWorkspace, store); return record }
-export async function updateNovelCharacter(activeWorkspace: string, id: number, data: Partial<NovelCharacterRecord>) { const store = await readStore(activeWorkspace); const idx = store.characters.findIndex(item => item.id === id); if (idx < 0) return null; const current = store.characters[idx]; store.characters[idx] = normalizeCharacterRecord(data, current); await writeStore(activeWorkspace, store); return store.characters[idx] }
+export async function createNovelCharacter(activeWorkspace: string, data: Partial<NovelCharacterRecord>) { return mutateNovelStore(activeWorkspace, store => { const record = normalizeCharacterRecord(data, { id: store.characters.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.characters.push(record); return record }) }
+export async function updateNovelCharacter(activeWorkspace: string, id: number, data: Partial<NovelCharacterRecord>) { return mutateNovelStore(activeWorkspace, store => { const idx = store.characters.findIndex(item => item.id === id); if (idx < 0) return null; const current = store.characters[idx]; store.characters[idx] = normalizeCharacterRecord(data, current); return store.characters[idx] }) }
 export async function listNovelSettingEntities(activeWorkspace: string, projectId: number, entityType?: string) { const store = await readStore(activeWorkspace); return dedupById(store.setting_entities.filter(item => item.project_id === projectId && (!entityType || item.entity_type === entityType))).sort((a, b) => String(a.entity_type || '').localeCompare(String(b.entity_type || '')) || String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN')) }
-export async function createNovelSettingEntity(activeWorkspace: string, data: Partial<NovelSettingEntityRecord>) { const store = await readStore(activeWorkspace); const record = normalizeSettingEntityRecord(data, { id: store.setting_entities.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.setting_entities.push(record); await writeStore(activeWorkspace, store); return record }
-export async function updateNovelSettingEntity(activeWorkspace: string, id: number, data: Partial<NovelSettingEntityRecord>) { const store = await readStore(activeWorkspace); const idx = store.setting_entities.findIndex(item => item.id === id); if (idx < 0) return null; const current = store.setting_entities[idx]; store.setting_entities[idx] = normalizeSettingEntityRecord(data, current); await writeStore(activeWorkspace, store); return store.setting_entities[idx] }
-export async function deleteNovelSettingEntity(activeWorkspace: string, id: number) { const store = await readStore(activeWorkspace); const entity = store.setting_entities.find(item => item.id === id); if (!entity) return false; store.setting_entities = store.setting_entities.filter(item => item.id !== id); store.chapter_setting_usage = store.chapter_setting_usage.filter(item => item.entity_id !== id); await writeStore(activeWorkspace, store); return true }
+export async function createNovelSettingEntity(activeWorkspace: string, data: Partial<NovelSettingEntityRecord>) { return mutateNovelStore(activeWorkspace, store => { const record = normalizeSettingEntityRecord(data, { id: store.setting_entities.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.setting_entities.push(record); return record }) }
+export async function updateNovelSettingEntity(activeWorkspace: string, id: number, data: Partial<NovelSettingEntityRecord>) { return mutateNovelStore(activeWorkspace, store => { const idx = store.setting_entities.findIndex(item => item.id === id); if (idx < 0) return null; const current = store.setting_entities[idx]; store.setting_entities[idx] = normalizeSettingEntityRecord(data, current); return store.setting_entities[idx] }) }
+export async function deleteNovelSettingEntity(activeWorkspace: string, id: number) { return mutateNovelStore(activeWorkspace, store => { const entity = store.setting_entities.find(item => item.id === id); if (!entity) return false; store.setting_entities = store.setting_entities.filter(item => item.id !== id); store.chapter_setting_usage = store.chapter_setting_usage.filter(item => item.entity_id !== id); return true }) }
 export async function listNovelChapterSettingUsage(activeWorkspace: string, projectId: number, chapterId?: number) { const store = await readStore(activeWorkspace); return dedupById(store.chapter_setting_usage.filter(item => item.project_id === projectId && (!chapterId || item.chapter_id === chapterId))) }
-export async function replaceNovelChapterSettingUsage(activeWorkspace: string, projectId: number, chapterId: number, usage: Partial<NovelChapterSettingUsageRecord>[]) { const store = await readStore(activeWorkspace); store.chapter_setting_usage = store.chapter_setting_usage.filter(item => !(item.project_id === projectId && item.chapter_id === chapterId)); let nextId = store.chapter_setting_usage.reduce((max, item) => Math.max(max, item.id), 0) + 1; const records = usage.map(item => normalizeChapterSettingUsageRecord({ ...item, project_id: projectId, chapter_id: chapterId }, { id: nextId++ })).filter(item => item.entity_id > 0); store.chapter_setting_usage.push(...records); await writeStore(activeWorkspace, store); return records }
-export async function updateNovelChapterSettingUsage(activeWorkspace: string, id: number, data: Partial<NovelChapterSettingUsageRecord>) { const store = await readStore(activeWorkspace); const idx = store.chapter_setting_usage.findIndex(item => item.id === id); if (idx < 0) return null; const current = store.chapter_setting_usage[idx]; store.chapter_setting_usage[idx] = normalizeChapterSettingUsageRecord(data, current); await writeStore(activeWorkspace, store); return store.chapter_setting_usage[idx] }
+export async function replaceNovelChapterSettingUsage(activeWorkspace: string, projectId: number, chapterId: number, usage: Partial<NovelChapterSettingUsageRecord>[]) { return mutateNovelStore(activeWorkspace, store => { store.chapter_setting_usage = store.chapter_setting_usage.filter(item => !(item.project_id === projectId && item.chapter_id === chapterId)); let nextId = store.chapter_setting_usage.reduce((max, item) => Math.max(max, item.id), 0) + 1; const records = usage.map(item => normalizeChapterSettingUsageRecord({ ...item, project_id: projectId, chapter_id: chapterId }, { id: nextId++ })).filter(item => item.entity_id > 0); store.chapter_setting_usage.push(...records); return records }) }
+export async function updateNovelChapterSettingUsage(activeWorkspace: string, id: number, data: Partial<NovelChapterSettingUsageRecord>) { return mutateNovelStore(activeWorkspace, store => { const idx = store.chapter_setting_usage.findIndex(item => item.id === id); if (idx < 0) return null; const current = store.chapter_setting_usage[idx]; store.chapter_setting_usage[idx] = normalizeChapterSettingUsageRecord(data, current); return store.chapter_setting_usage[idx] }) }
 export async function listNovelOutlines(activeWorkspace: string, projectId: number) { const store = await readStore(activeWorkspace); return dedupById(store.outlines.filter(item => item.project_id === projectId)) }
-export async function createNovelOutline(activeWorkspace: string, data: Partial<NovelOutlineRecord>) { const store = await readStore(activeWorkspace); const record = normalizeOutlineRecord(data, { id: store.outlines.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.outlines.push(record); await writeStore(activeWorkspace, store); return record }
-export async function updateNovelOutline(activeWorkspace: string, id: number, data: Partial<NovelOutlineRecord>) { const store = await readStore(activeWorkspace); const idx = store.outlines.findIndex(item => item.id === id); if (idx < 0) return null; const current = store.outlines[idx]; store.outlines[idx] = normalizeOutlineRecord(data, current); await writeStore(activeWorkspace, store); return store.outlines[idx] }
+export async function createNovelOutline(activeWorkspace: string, data: Partial<NovelOutlineRecord>) { return mutateNovelStore(activeWorkspace, store => { const record = normalizeOutlineRecord(data, { id: store.outlines.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.outlines.push(record); return record }) }
+export async function updateNovelOutline(activeWorkspace: string, id: number, data: Partial<NovelOutlineRecord>) { return mutateNovelStore(activeWorkspace, store => { const idx = store.outlines.findIndex(item => item.id === id); if (idx < 0) return null; const current = store.outlines[idx]; store.outlines[idx] = normalizeOutlineRecord(data, current); return store.outlines[idx] }) }
 export async function listNovelChapters(activeWorkspace: string, projectId: number) { const store = await readStore(activeWorkspace); return dedupById(store.chapters.filter(item => item.project_id === projectId)).sort((a, b) => a.chapter_no - b.chapter_no) }
-export async function createNovelChapter(activeWorkspace: string, data: Partial<NovelChapterRecord>) { const store = await readStore(activeWorkspace); const record = normalizeChapterRecord(data, { id: store.chapters.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.chapters.push(record); await writeStore(activeWorkspace, store); return record }
+export async function createNovelChapter(activeWorkspace: string, data: Partial<NovelChapterRecord>) { return mutateNovelStore(activeWorkspace, store => { const record = normalizeChapterRecord(data, { id: store.chapters.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.chapters.push(record); return record }) }
 export async function upsertNovelChapterByNumber(activeWorkspace: string, data: Partial<NovelChapterRecord>) {
-  const projectId = Number(data.project_id || 0)
-  const chapterNo = Number(data.chapter_no || 0)
-  const existing = (await listNovelChapters(activeWorkspace, projectId)).find(item => Number(item.chapter_no) === chapterNo)
-  if (existing) return updateNovelChapter(activeWorkspace, existing.id, data, { createVersion: false })
-  return createNovelChapter(activeWorkspace, data)
+  return mutateNovelStore(activeWorkspace, store => {
+    const projectId = Number(data.project_id || 0)
+    const chapterNo = Number(data.chapter_no || 0)
+    const index = store.chapters.findIndex(item => item.project_id === projectId && Number(item.chapter_no) === chapterNo)
+    if (index >= 0) {
+      const current = store.chapters[index]
+      const updated = normalizeChapterRecord(data, { ...current, id: current.id, updated_at: nowIso() })
+      store.chapters[index] = { ...current, ...updated, updated_at: nowIso() }
+      return store.chapters[index]
+    }
+    const record = normalizeChapterRecord(data, { id: store.chapters.reduce((max, item) => Math.max(max, item.id), 0) + 1 })
+    store.chapters.push(record)
+    return record
+  })
 }
 function outlineChapterNo(outline: Partial<NovelOutlineRecord>) {
   const raw = outline.raw_payload || {}
@@ -1228,13 +1353,14 @@ export async function syncNovelChapterPlanByNumber(activeWorkspace: string, data
   parent_id?: number | null
   source?: string
 } = {}) {
+  return mutateNovelStore(activeWorkspace, store => {
   const projectId = Number(data.project_id || 0)
   const chapterNo = Number(data.chapter_no || 0)
   if (!projectId || !chapterNo) return null
   const cleanTitle = cleanChapterPlanTitle(chapterNo, data.title)
-  const existingChapters = await listNovelChapters(activeWorkspace, projectId)
+  const existingChapters = store.chapters.filter(item => item.project_id === projectId)
   const existingChapter = existingChapters.find(item => Number(item.chapter_no) === chapterNo)
-  const outlines = await listNovelOutlines(activeWorkspace, projectId)
+  const outlines = store.outlines.filter(item => item.project_id === projectId)
   const preferredOutlineId = Number(data.outline_id || existingChapter?.outline_id || 0)
   const existingOutline = outlines.find(outline => Number(outline.id) === preferredOutlineId && String(outline.outline_type || '') === 'chapter')
     || outlines
@@ -1259,11 +1385,17 @@ export async function syncNovelChapterPlanByNumber(activeWorkspace: string, data
       synced_from_chapter_plan_at: nowIso(),
     },
   }
-  const outline = existingOutline?.id
-    ? await updateNovelOutline(activeWorkspace, existingOutline.id, outlineData)
-    : await createNovelOutline(activeWorkspace, outlineData)
+  let outline: NovelOutlineRecord
+  if (existingOutline?.id) {
+    const outlineIndex = store.outlines.findIndex(item => item.id === existingOutline.id)
+    store.outlines[outlineIndex] = normalizeOutlineRecord(outlineData, store.outlines[outlineIndex])
+    outline = store.outlines[outlineIndex]
+  } else {
+    outline = normalizeOutlineRecord(outlineData, { id: store.outlines.reduce((max, item) => Math.max(max, item.id), 0) + 1 })
+    store.outlines.push(outline)
+  }
   if (!outline) return null
-  const chapter = await upsertNovelChapterByNumber(activeWorkspace, {
+  const chapterData = {
     ...data,
     project_id: projectId,
     outline_id: outline.id,
@@ -1275,8 +1407,20 @@ export async function syncNovelChapterPlanByNumber(activeWorkspace: string, data
       chapter_outline_id: outline.id,
       chapter_no: chapterNo,
     },
-  } as Partial<NovelChapterRecord>)
-  return { outline, chapter }
+  } as Partial<NovelChapterRecord>
+  const chapterIndex = store.chapters.findIndex(item => item.project_id === projectId && Number(item.chapter_no) === chapterNo)
+  let chapter: NovelChapterRecord
+  if (chapterIndex >= 0) {
+    const current = store.chapters[chapterIndex]
+    const updated = normalizeChapterRecord(chapterData, { ...current, id: current.id, updated_at: nowIso() })
+    store.chapters[chapterIndex] = { ...current, ...updated, updated_at: nowIso() }
+    chapter = store.chapters[chapterIndex]
+  } else {
+    chapter = normalizeChapterRecord(chapterData, { id: store.chapters.reduce((max, item) => Math.max(max, item.id), 0) + 1 })
+    store.chapters.push(chapter)
+  }
+    return { outline, chapter }
+  })
 }
 type UpdateNovelChapterOptions = { createVersion?: boolean; versionSource?: NovelChapterVersionSource; forceVersion?: boolean }
 export type NovelChapterAcceptanceUpdate = {
@@ -1311,11 +1455,12 @@ function versionedChapterSnapshotChanged(current: NovelChapterRecord, next: Nove
   )
 }
 function createChapterVersionRecord(store: NovelStore, data: Partial<NovelChapterVersionRecord>): NovelChapterVersionRecord { return { id: store.chapter_versions.reduce((max, item) => Math.max(max, item.id), 0) + 1, chapter_id: Number(data.chapter_id || 0), project_id: Number(data.project_id || 0), version_no: Number(data.version_no || 1), chapter_text: String(data.chapter_text || ''), scene_breakdown: toAnyArray(data.scene_breakdown), continuity_notes: toStringArray(data.continuity_notes), source: data.source || 'manual_edit', created_at: String(data.created_at || nowIso()) } }
-export async function appendChapterVersion(activeWorkspace: string, data: Partial<NovelChapterVersionRecord>) { const store = await readStore(activeWorkspace); const record = createChapterVersionRecord(store, data); store.chapter_versions.push(record); await writeStore(activeWorkspace, store); return record }
+export async function appendChapterVersion(activeWorkspace: string, data: Partial<NovelChapterVersionRecord>) { return mutateNovelStore(activeWorkspace, store => { const record = createChapterVersionRecord(store, data); store.chapter_versions.push(record); return record }) }
 export async function listChapterVersions(activeWorkspace: string, chapterId: number) { const store = await readStore(activeWorkspace); return store.chapter_versions.filter(item => item.chapter_id === chapterId).sort((a, b) => b.version_no - a.version_no) }
-export async function rollbackChapterVersion(activeWorkspace: string, chapterId: number, versionId: number) { const store = await readStore(activeWorkspace); const idx = store.chapters.findIndex(item => item.id === chapterId); const version = store.chapter_versions.find(item => item.id === versionId && item.chapter_id === chapterId); if (idx < 0 || !version) return null; const current = store.chapters[idx]; store.chapter_versions.push(createChapterVersionRecord(store, { chapter_id: current.id, project_id: current.project_id, version_no: store.chapter_versions.filter(v => v.chapter_id === current.id).length + 1, chapter_text: current.chapter_text || '', scene_breakdown: current.scene_breakdown || [], continuity_notes: current.continuity_notes || [], source: 'rollback' })); store.chapters[idx] = { ...current, chapter_text: version.chapter_text, scene_breakdown: version.scene_breakdown || [], continuity_notes: version.continuity_notes || [], updated_at: nowIso() }; await writeStore(activeWorkspace, store); return store.chapters[idx] }
-export async function updateNovelChapter(activeWorkspace: string, chapterId: number, data: Partial<NovelChapterRecord>, options: UpdateNovelChapterOptions = {}) { const store = await readStore(activeWorkspace); const idx = store.chapters.findIndex(item => item.id === chapterId); if (idx < 0) return null; const current = store.chapters[idx]; const updated = normalizeChapterRecord(data, { ...current, id: current.id, updated_at: nowIso() }); const next = { ...current, ...updated, updated_at: nowIso() }; const shouldCreateVersion = options.createVersion !== false && (options.forceVersion || versionedChapterSnapshotChanged(current, next)); if (shouldCreateVersion) store.chapter_versions.push(createChapterVersionRecord(store, { chapter_id: current.id, project_id: current.project_id, version_no: store.chapter_versions.filter(v => v.chapter_id === current.id).length + 1, chapter_text: current.chapter_text || '', scene_breakdown: current.scene_breakdown || [], continuity_notes: current.continuity_notes || [], source: options.versionSource || 'manual_edit' })); store.chapters[idx] = next; await writeStore(activeWorkspace, store); return store.chapters[idx] }
+export async function rollbackChapterVersion(activeWorkspace: string, chapterId: number, versionId: number) { return mutateNovelStore(activeWorkspace, store => { const idx = store.chapters.findIndex(item => item.id === chapterId); const version = store.chapter_versions.find(item => item.id === versionId && item.chapter_id === chapterId); if (idx < 0 || !version) return null; const current = store.chapters[idx]; store.chapter_versions.push(createChapterVersionRecord(store, { chapter_id: current.id, project_id: current.project_id, version_no: store.chapter_versions.filter(v => v.chapter_id === current.id).length + 1, chapter_text: current.chapter_text || '', scene_breakdown: current.scene_breakdown || [], continuity_notes: current.continuity_notes || [], source: 'rollback' })); store.chapters[idx] = { ...current, chapter_text: version.chapter_text, scene_breakdown: version.scene_breakdown || [], continuity_notes: version.continuity_notes || [], updated_at: nowIso() }; return store.chapters[idx] }) }
+export async function updateNovelChapter(activeWorkspace: string, chapterId: number, data: Partial<NovelChapterRecord>, options: UpdateNovelChapterOptions = {}) { return mutateNovelStore(activeWorkspace, store => { const idx = store.chapters.findIndex(item => item.id === chapterId); if (idx < 0) return null; const current = store.chapters[idx]; const updated = normalizeChapterRecord(data, { ...current, id: current.id, updated_at: nowIso() }); const next = { ...current, ...updated, updated_at: nowIso() }; const shouldCreateVersion = options.createVersion !== false && (options.forceVersion || versionedChapterSnapshotChanged(current, next)); if (shouldCreateVersion) store.chapter_versions.push(createChapterVersionRecord(store, { chapter_id: current.id, project_id: current.project_id, version_no: store.chapter_versions.filter(v => v.chapter_id === current.id).length + 1, chapter_text: current.chapter_text || '', scene_breakdown: current.scene_breakdown || [], continuity_notes: current.continuity_notes || [], source: options.versionSource || 'manual_edit' })); store.chapters[idx] = next; return store.chapters[idx] }) }
 export async function mergeNovelChapterRawPayload(activeWorkspace: string, chapterId: number, patch: Record<string, any>) {
+  return withNovelWorkspaceMutation(activeWorkspace, async () => {
   const db = openDb(activeWorkspace)
   let committed = false
   try {
@@ -1348,6 +1493,7 @@ export async function mergeNovelChapterRawPayload(activeWorkspace: string, chapt
   } finally {
     db.close()
   }
+  })
 }
 function changedAcceptanceRecords<T extends { id: number }>(before: T[], after: T[]) {
   const beforeById = new Map(before.map(record => [record.id, record]))
@@ -1408,6 +1554,8 @@ function persistNovelChapterAcceptanceDelta(db: Database, before: NovelStore, af
   }
 }
 export async function commitNovelChapterAcceptance(activeWorkspace: string, input: NovelChapterAcceptanceInput) {
+  return withNovelWorkspaceMutation(activeWorkspace, async () => {
+  await importLegacyNovelStoreIfNeeded(activeWorkspace)
   const db = openDb(activeWorkspace)
   let committed = false
   try {
@@ -1671,12 +1819,14 @@ export async function commitNovelChapterAcceptance(activeWorkspace: string, inpu
   } finally {
     db.close()
   }
+  }, 'acceptance')
 }
-export async function deleteNovelChapter(activeWorkspace: string, chapterId: number) { const store = await readStore(activeWorkspace); const chapter = store.chapters.find(item => item.id === chapterId); if (!chapter) return false; store.chapters = store.chapters.filter(item => item.id !== chapterId); store.chapter_versions = store.chapter_versions.filter(item => item.chapter_id !== chapterId); await writeStore(activeWorkspace, store); return true }
-export async function deleteNovelOutline(activeWorkspace: string, outlineId: number) { const store = await readStore(activeWorkspace); const outline = store.outlines.find(item => item.id === outlineId); if (!outline) return false; store.outlines = store.outlines.filter(item => item.id !== outlineId); store.chapters = store.chapters.map(chapter => chapter.outline_id === outlineId ? { ...chapter, outline_id: null } : chapter); await writeStore(activeWorkspace, store); return true }
-export async function deleteNovelProject(activeWorkspace: string, projectId: number) { const store = await readStore(activeWorkspace); const project = store.projects.find(item => item.id === projectId); if (!project) return false; store.projects = store.projects.filter(item => item.id !== projectId); store.worldbuilding = store.worldbuilding.filter(item => item.project_id !== projectId); store.characters = store.characters.filter(item => item.project_id !== projectId); store.outlines = store.outlines.filter(item => item.project_id !== projectId); store.chapters = store.chapters.filter(item => item.project_id !== projectId); store.chapter_versions = store.chapter_versions.filter(item => item.project_id !== projectId); store.reviews = store.reviews.filter(item => item.project_id !== projectId); store.runs = store.runs.filter(item => item.project_id !== projectId); store.setting_entities = store.setting_entities.filter(item => item.project_id !== projectId); store.chapter_setting_usage = store.chapter_setting_usage.filter(item => item.project_id !== projectId); await writeStore(activeWorkspace, store); return true }
+export async function deleteNovelChapter(activeWorkspace: string, chapterId: number) { return mutateNovelStore(activeWorkspace, store => { const chapter = store.chapters.find(item => item.id === chapterId); if (!chapter) return false; store.chapters = store.chapters.filter(item => item.id !== chapterId); store.chapter_versions = store.chapter_versions.filter(item => item.chapter_id !== chapterId); return true }) }
+export async function deleteNovelOutline(activeWorkspace: string, outlineId: number) { return mutateNovelStore(activeWorkspace, store => { const outline = store.outlines.find(item => item.id === outlineId); if (!outline) return false; store.outlines = store.outlines.filter(item => item.id !== outlineId); store.chapters = store.chapters.map(chapter => chapter.outline_id === outlineId ? { ...chapter, outline_id: null } : chapter); return true }) }
+export async function deleteNovelProject(activeWorkspace: string, projectId: number) { return mutateNovelStore(activeWorkspace, store => { const project = store.projects.find(item => item.id === projectId); if (!project) return false; store.projects = store.projects.filter(item => item.id !== projectId); store.worldbuilding = store.worldbuilding.filter(item => item.project_id !== projectId); store.characters = store.characters.filter(item => item.project_id !== projectId); store.outlines = store.outlines.filter(item => item.project_id !== projectId); store.chapters = store.chapters.filter(item => item.project_id !== projectId); store.chapter_versions = store.chapter_versions.filter(item => item.project_id !== projectId); store.reviews = store.reviews.filter(item => item.project_id !== projectId); store.runs = store.runs.filter(item => item.project_id !== projectId); store.setting_entities = store.setting_entities.filter(item => item.project_id !== projectId); store.chapter_setting_usage = store.chapter_setting_usage.filter(item => item.project_id !== projectId); return true }) }
 export async function listNovelReviews(activeWorkspace: string, projectId: number) { const store = await readStore(activeWorkspace); return store.reviews.filter(item => item.project_id === projectId) }
 export async function createNovelReview(activeWorkspace: string, data: Partial<NovelReviewRecord>) {
+  return withNovelWorkspaceMutation(activeWorkspace, async () => {
   const record = normalizeReviewRecord(data)
   const db = openDb(activeWorkspace)
   try {
@@ -1695,9 +1845,11 @@ export async function createNovelReview(activeWorkspace: string, data: Partial<N
   } finally {
     db.close()
   }
+  })
 }
 export async function listNovelRuns(activeWorkspace: string, projectId: number) { const store = await readStore(activeWorkspace); return store.runs.filter(item => item.project_id === projectId).sort((a, b) => b.created_at.localeCompare(a.created_at)) }
 export async function appendNovelRun(activeWorkspace: string, data: Partial<NovelRunRecord>) {
+  return withNovelWorkspaceMutation(activeWorkspace, async () => {
   const record = normalizeRunRecord(data)
   const db = openDb(activeWorkspace)
   try {
@@ -1718,9 +1870,11 @@ export async function appendNovelRun(activeWorkspace: string, data: Partial<Nove
   } finally {
     db.close()
   }
+  })
 }
-export async function updateNovelRun(activeWorkspace: string, id: number, data: Partial<NovelRunRecord>) { const store = await readStore(activeWorkspace); const idx = store.runs.findIndex(item => item.id === id); if (idx < 0) return null; store.runs[idx] = normalizeRunRecord(data, store.runs[idx]); await writeStore(activeWorkspace, store); return store.runs[idx] }
+export async function updateNovelRun(activeWorkspace: string, id: number, data: Partial<NovelRunRecord>) { return mutateNovelStore(activeWorkspace, store => { const idx = store.runs.findIndex(item => item.id === id); if (idx < 0) return null; store.runs[idx] = normalizeRunRecord(data, store.runs[idx]); return store.runs[idx] }) }
 export async function compactNovelStorage(activeWorkspace: string, options: { vacuum?: boolean; maxChars?: number } = {}) {
+  return withNovelWorkspaceMutation(activeWorkspace, async () => {
   const maxChars = Number(options.maxChars || MAX_PERSISTED_DIAGNOSTIC_CHARS)
   const shouldVacuum = options.vacuum !== false
   const db = openDb(activeWorkspace)
@@ -1797,6 +1951,7 @@ export async function compactNovelStorage(activeWorkspace: string, options: { va
   } finally {
     db.close()
   }
+  })
 }
 export async function listNovelProjectSeedDrafts(activeWorkspace: string) {
   const db = openDb(activeWorkspace)
@@ -1809,6 +1964,7 @@ export async function listNovelProjectSeedDrafts(activeWorkspace: string) {
   }
 }
 export async function createNovelProjectSeedDraft(activeWorkspace: string, data: Partial<NovelProjectSeedDraftRecord>) {
+  return withNovelWorkspaceMutation(activeWorkspace, async () => {
   const draft = normalizeProjectSeedDraftRecord(data)
   const db = openDb(activeWorkspace)
   try {
@@ -1830,8 +1986,10 @@ export async function createNovelProjectSeedDraft(activeWorkspace: string, data:
   } finally {
     db.close()
   }
+  })
 }
 export async function deleteNovelProjectSeedDraft(activeWorkspace: string, id: number) {
+  return withNovelWorkspaceMutation(activeWorkspace, async () => {
   const db = openDb(activeWorkspace)
   try {
     ensureSqliteSchema(db)
@@ -1840,4 +1998,5 @@ export async function deleteNovelProjectSeedDraft(activeWorkspace: string, id: n
   } finally {
     db.close()
   }
+  })
 }
