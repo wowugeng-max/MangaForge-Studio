@@ -21,13 +21,13 @@ export type NovelWorldbuildingRecord = { id: number; project_id: number; world_s
 export type NovelCharacterRecord = { id: number; project_id: number; name: string; role?: string; role_type?: string; archetype?: string; personality?: any; motivation?: string; goal?: string; conflict?: string; abilities?: any[]; backstory?: string; relationships?: any; relationship_graph?: any; growth_arc?: string; arc_hint?: string; current_state?: any; secret?: string; appearance?: string; status?: string; version?: number; raw_payload?: any; created_at?: string; updated_at: string }
 export type NovelOutlineRecord = { id: number; project_id: number; outline_type?: string; title: string; summary?: string; beats?: any[]; conflict_points?: string[]; turning_points?: string[]; hook?: string; target_length?: string; version?: number; parent_id?: number | null; raw_payload?: any; created_at?: string; updated_at: string }
 export type NovelChapterRecord = { id: number; project_id: number; chapter_no: number; title: string; chapter_goal?: string; chapter_summary?: string; conflict?: string; ending_hook?: string; chapter_text?: string; scene_breakdown?: any[]; scene_list?: any[]; continuity_notes?: string[]; items_in_play?: any[]; foreshadowing?: any; timeline_note?: string; status?: string; version?: number; published_at?: string | null; outline_id?: number | null; raw_payload?: any; created_at?: string; updated_at: string }
-export type NovelChapterWorkspaceRecord = Omit<NovelChapterRecord, 'scene_breakdown' | 'scene_list' | 'continuity_notes' | 'items_in_play' | 'foreshadowing' | 'raw_payload'> & { has_prose: boolean; has_scene_plan: boolean; word_count: number }
+export type NovelChapterWorkspaceRecord = Omit<NovelChapterRecord, 'chapter_text' | 'scene_breakdown' | 'scene_list' | 'continuity_notes' | 'items_in_play' | 'foreshadowing' | 'raw_payload'> & { has_prose: boolean; has_scene_plan: boolean; word_count: number }
 export type NovelChapterVersionSource = 'manual_edit' | 'agent_execute' | 'repair' | 'rollback'
 export type NovelChapterVersionRecord = { id: number; chapter_id: number; project_id: number; version_no: number; chapter_text: string; scene_breakdown: any[]; continuity_notes: string[]; source: NovelChapterVersionSource; created_at: string }
 export type NovelReviewRecord = { id: number; project_id: number; chapter_id?: number | null; chapter_no?: number | null; review_type: string; status: string; summary: string; issues: string[]; created_at: string; payload?: string }
 export type NovelReviewSummaryRecord = Omit<NovelReviewRecord, 'issues' | 'payload'> & { issue_count: number; preview: string; score: number | null; passed: boolean | null; payload_bytes: number }
 export type NovelRunRecord = { id: number; project_id: number; run_type: string; step_name: string; status: string; input_ref?: string; output_ref?: string; duration_ms?: number; error_message?: string; created_at: string; pipeline_run_count?: number; pipeline_chapter_failure_count?: number; pipeline_open_task_count?: number }
-export type NovelRunSummaryRecord = Omit<NovelRunRecord, 'input_ref' | 'output_ref'> & { chapter_id: number | null; chapter_no: number | null; input_bytes: number; output_bytes: number; admission_status: string; admission_warning_count: number; admission_warning_preview: string; story_state_pending: boolean; story_state_warning: string; post_commit_warning_count: number; post_commit_warning_preview: string }
+export type NovelRunSummaryRecord = Omit<NovelRunRecord, 'input_ref' | 'output_ref'> & { chapter_id: number | null; chapter_no: number | null; input_bytes: number; output_bytes: number; admission_status: string; admission_warning_count: number; admission_warning_preview: string; story_state_status: string; story_state_pending: boolean; story_state_warning: string; post_commit_warning_count: number; post_commit_warning_preview: string }
 export type NovelProjectSeedDraftRecord = { id: number; title: string; idea?: string; seed: any; review_model?: any; diagnostics?: any; model_id?: number | null; source?: string; created_at: string; updated_at: string }
 export type NovelSettingEntityRecord = {
   id: number
@@ -522,7 +522,7 @@ function compactQualityStringListForStorage(value: any, maxItems = 12, limit = 3
 function compactQualityReviewForStorage(review: any = {}) {
   if (!review || typeof review !== 'object') return {}
   const output: Record<string, any> = {}
-  for (const key of ['passed', 'publishable', 'score', 'needs_revision', 'needsRevision', 'revised', 'deslop_level', 'deslopLevel']) {
+  for (const key of ['passed', 'score', 'needs_revision', 'needsRevision', 'revised', 'deslop_level', 'deslopLevel']) {
     if (review[key] !== undefined && review[key] !== null) output[key] = review[key]
   }
   if (review.craft_metrics || review.craftMetrics) {
@@ -615,7 +615,6 @@ function compactProseQualityPayloadForStorage(value: any = {}) {
   const review = selfCheck.review || payload?.review || {}
   return {
     chapter_id: payload?.chapter_id ?? payload?.chapterId ?? null,
-    chapter_no: payload?.chapter_no ?? payload?.chapterNo ?? null,
     chapter_updated_at: payload?.chapter_updated_at || payload?.chapterUpdatedAt || '',
     content_hash: payload?.content_hash || payload?.contentHash || '',
     source: payload?.source || '',
@@ -1025,6 +1024,7 @@ function runSummaryFromRow(item: any): NovelRunSummaryRecord {
     admission_status: String(item.admission_status || ''),
     admission_warning_count: Number(item.admission_warning_count || 0),
     admission_warning_preview: String(item.admission_warning_preview || ''),
+    story_state_status: String(item.story_state_status || ''),
     story_state_pending: Boolean(item.story_state_pending),
     story_state_warning: String(item.story_state_warning || ''),
     post_commit_warning_count: Number(item.post_commit_warning_count || 0),
@@ -1962,7 +1962,6 @@ export async function listNovelWorkspaceChapters(activeWorkspace: string, projec
         chapter_summary,
         conflict,
         ending_hook,
-        chapter_text,
         timeline_note,
         status,
         version,
@@ -1992,12 +1991,12 @@ export async function listNovelWorkspaceChapters(activeWorkspace: string, projec
     db.close()
   }
 }
-export async function getNovelChapter(activeWorkspace: string, chapterId: number) {
+export async function getNovelChapter(activeWorkspace: string, chapterId: number, projectId: number) {
   await ensureLegacyNovelStoreImportedForRead(activeWorkspace)
   const db = openDb(activeWorkspace)
   try {
     ensureSqliteSchema(db)
-    const row = db.query('SELECT * FROM chapters WHERE id = ?').get(chapterId) as any
+    const row = db.query('SELECT * FROM chapters WHERE id = ? AND project_id = ?').get(chapterId, projectId) as any
     return row ? chapterFromRow(row) : null
   } finally {
     db.close()
@@ -2574,7 +2573,11 @@ export async function listNovelReviewSummaries(activeWorkspace: string, projectI
           json_extract(payload, '$.chapter_no'),
           json_extract(payload, '$.chapterNo'),
           json_extract(payload, '$.quality_card.chapter_no'),
-          json_extract(payload, '$.qualityCard.chapterNo')
+          json_extract(payload, '$.qualityCard.chapterNo'),
+          json_extract(payload, '$.context_package.chapter_target.chapter_no'),
+          json_extract(payload, '$.context_package.summary.chapter_no'),
+          json_extract(payload, '$.contextPackage.chapterTarget.chapterNo'),
+          json_extract(payload, '$.contextPackage.summary.chapterNo')
         ) AS INTEGER) END AS chapter_no,
         review_type,
         status,
@@ -2620,7 +2623,7 @@ export async function listNovelReviewSummaries(activeWorkspace: string, projectI
     db.close()
   }
 }
-export async function getNovelReview(activeWorkspace: string, reviewId: number) {
+export async function getNovelReview(activeWorkspace: string, reviewId: number, projectId: number) {
   await ensureLegacyNovelStoreImportedForRead(activeWorkspace)
   const db = openDb(activeWorkspace)
   try {
@@ -2638,8 +2641,8 @@ export async function getNovelReview(activeWorkspace: string, reviewId: number) 
         payload,
         created_at
       FROM reviews
-      WHERE id = ?
-    `).get(reviewId) as any
+      WHERE id = ? AND project_id = ?
+    `).get(reviewId, projectId) as any
     return row ? reviewFromRow(row) : null
   } finally {
     db.close()
@@ -2729,6 +2732,8 @@ export async function listNovelRunSummaries(activeWorkspace: string, projectId: 
           CASE WHEN json_type(output_ref, '$.qualityWarnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.qualityWarnings')) END,
           CASE WHEN json_type(output_ref, '$.prose_admission.quality_warnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.prose_admission.quality_warnings')) END,
           CASE WHEN json_type(output_ref, '$.proseAdmission.qualityWarnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.proseAdmission.qualityWarnings')) END,
+          CASE WHEN json_type(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].quality_warnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].quality_warnings')) END,
+          CASE WHEN json_type(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].qualityWarnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].qualityWarnings')) END,
           0
         ) ELSE 0 END AS admission_warning_count,
         CASE WHEN json_valid(output_ref) THEN substr(COALESCE(
@@ -2736,22 +2741,52 @@ export async function listNovelRunSummaries(activeWorkspace: string, projectId: 
           json_extract(output_ref, '$.qualityWarnings[0].message'),
           json_extract(output_ref, '$.prose_admission.quality_warnings[0].message'),
           json_extract(output_ref, '$.proseAdmission.qualityWarnings[0].message'),
+          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].quality_warnings[0].message'),
+          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].qualityWarnings[0].message'),
           CASE WHEN json_type(output_ref, '$.quality_warnings[0]') = 'text' THEN json_extract(output_ref, '$.quality_warnings[0]') END,
+          CASE WHEN json_type(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].quality_warnings[0]') = 'text' THEN json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].quality_warnings[0]') END,
           ''
         ), 1, 220) ELSE '' END AS admission_warning_preview,
-        CASE WHEN json_valid(output_ref) AND COALESCE(
-          json_extract(output_ref, '$.story_state_warning'),
-          json_extract(output_ref, '$.storyStateWarning'),
-          json_extract(output_ref, '$.prose_admission.story_state_warning'),
-          json_extract(output_ref, '$.proseAdmission.storyStateWarning')
-        ) IS NOT NULL THEN 1 ELSE 0 END AS story_state_pending,
+        CASE WHEN json_valid(output_ref) THEN COALESCE(
+          json_extract(output_ref, '$.story_state_status'),
+          json_extract(output_ref, '$.storyStateStatus'),
+          json_extract(output_ref, '$.prose_admission.story_state_status'),
+          json_extract(output_ref, '$.proseAdmission.storyStateStatus'),
+          json_extract(output_ref, '$.result.story_state_status'),
+          json_extract(output_ref, '$.result.storyStateStatus'),
+          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].story_state_status'),
+          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].storyStateStatus'),
+          ''
+        ) ELSE '' END AS story_state_status,
+        CASE WHEN json_valid(output_ref) AND (
+          COALESCE(
+            json_extract(output_ref, '$.story_state_warning'),
+            json_extract(output_ref, '$.storyStateWarning'),
+            json_extract(output_ref, '$.prose_admission.story_state_warning'),
+            json_extract(output_ref, '$.proseAdmission.storyStateWarning'),
+            json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].story_state_warning'),
+            json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].storyStateWarning')
+          ) IS NOT NULL
+          OR lower(COALESCE(
+            json_extract(output_ref, '$.story_state_status'),
+            json_extract(output_ref, '$.storyStateStatus'),
+            json_extract(output_ref, '$.prose_admission.story_state_status'),
+            json_extract(output_ref, '$.proseAdmission.storyStateStatus'),
+            json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].story_state_status'),
+            json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].storyStateStatus'),
+            ''
+          )) = 'pending'
+        ) THEN 1 ELSE 0 END AS story_state_pending,
         CASE WHEN json_valid(output_ref) THEN substr(COALESCE(
           json_extract(output_ref, '$.story_state_warning.message'),
           json_extract(output_ref, '$.storyStateWarning.message'),
           json_extract(output_ref, '$.prose_admission.story_state_warning.message'),
           json_extract(output_ref, '$.proseAdmission.storyStateWarning.message'),
+          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].story_state_warning.message'),
+          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].storyStateWarning.message'),
           CASE WHEN json_type(output_ref, '$.story_state_warning') = 'text' THEN json_extract(output_ref, '$.story_state_warning') END,
           CASE WHEN json_type(output_ref, '$.storyStateWarning') = 'text' THEN json_extract(output_ref, '$.storyStateWarning') END,
+          CASE WHEN json_type(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].story_state_warning') = 'text' THEN json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].story_state_warning') END,
           ''
         ), 1, 220) ELSE '' END AS story_state_warning,
         CASE WHEN json_valid(output_ref) THEN COALESCE(
@@ -2759,6 +2794,8 @@ export async function listNovelRunSummaries(activeWorkspace: string, projectId: 
           CASE WHEN json_type(output_ref, '$.postCommitWarnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.postCommitWarnings')) END,
           CASE WHEN json_type(output_ref, '$.prose_admission.post_commit_warnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.prose_admission.post_commit_warnings')) END,
           CASE WHEN json_type(output_ref, '$.proseAdmission.postCommitWarnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.proseAdmission.postCommitWarnings')) END,
+          CASE WHEN json_type(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].post_commit_warnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].post_commit_warnings')) END,
+          CASE WHEN json_type(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].postCommitWarnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].postCommitWarnings')) END,
           0
         ) ELSE 0 END AS post_commit_warning_count,
         CASE WHEN json_valid(output_ref) THEN substr(COALESCE(
@@ -2766,7 +2803,10 @@ export async function listNovelRunSummaries(activeWorkspace: string, projectId: 
           json_extract(output_ref, '$.postCommitWarnings[0].message'),
           json_extract(output_ref, '$.prose_admission.post_commit_warnings[0].message'),
           json_extract(output_ref, '$.proseAdmission.postCommitWarnings[0].message'),
+          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].post_commit_warnings[0].message'),
+          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].postCommitWarnings[0].message'),
           CASE WHEN json_type(output_ref, '$.post_commit_warnings[0]') = 'text' THEN json_extract(output_ref, '$.post_commit_warnings[0]') END,
+          CASE WHEN json_type(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].post_commit_warnings[0]') = 'text' THEN json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].post_commit_warnings[0]') END,
           ''
         ), 1, 220) ELSE '' END AS post_commit_warning_preview
       FROM runs
@@ -2777,12 +2817,12 @@ export async function listNovelRunSummaries(activeWorkspace: string, projectId: 
     db.close()
   }
 }
-export async function getNovelRun(activeWorkspace: string, runId: number) {
+export async function getNovelRun(activeWorkspace: string, runId: number, projectId: number) {
   await ensureLegacyNovelStoreImportedForRead(activeWorkspace)
   const db = openDb(activeWorkspace)
   try {
     ensureSqliteSchema(db)
-    return (db.query('SELECT * FROM runs WHERE id = ?').get(runId) as NovelRunRecord | null) || null
+    return (db.query('SELECT * FROM runs WHERE id = ? AND project_id = ?').get(runId, projectId) as NovelRunRecord | null) || null
   } finally {
     db.close()
   }

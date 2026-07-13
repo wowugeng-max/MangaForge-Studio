@@ -62,6 +62,15 @@ function rejectInvalidQueryView(res: any, view: string, allowedViews: string[]) 
   })
 }
 
+function requireProjectId(req: any, res: any) {
+  const projectId = Number(req.query?.project_id)
+  if (!Number.isInteger(projectId) || projectId <= 0) {
+    res.status(400).json({ error: 'project_id is required', error_code: 'PROJECT_ID_REQUIRED' })
+    return null
+  }
+  return projectId
+}
+
 async function listProjectsWithWritingAggregates(activeWorkspace: string) {
   const projects = await listNovelProjects(activeWorkspace)
   return Promise.all(projects.map(async project => {
@@ -2492,7 +2501,9 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
   })
   app.get('/api/novel/chapters/:chapterId', async (req, res) => {
     try {
-      const chapter = await getNovelChapter(getWorkspace(), Number(req.params.chapterId))
+      const projectId = requireProjectId(req, res)
+      if (projectId === null) return
+      const chapter = await getNovelChapter(getWorkspace(), Number(req.params.chapterId), projectId)
       if (!chapter) return res.status(404).json({ error: 'chapter not found' })
       res.json(chapter)
     } catch (error) { res.status(500).json({ error: String(error) }) }

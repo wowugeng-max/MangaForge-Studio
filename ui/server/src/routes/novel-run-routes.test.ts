@@ -69,6 +69,7 @@ describe('novel run task center source guards', () => {
     const workspace = await tempWorkspace()
     const production = createNovelProductionService()
     const project = await createNovelProject(workspace, { title: '任务摘要体积回归', reference_config: {} })
+    const otherProject = await createNovelProject(workspace, { title: '其他任务项目', reference_config: {} })
     const largeDiagnostic = '完整诊断上下文、提示词、模型返回与证据链。'.repeat(1800)
     const review = await createNovelReview(workspace, {
       project_id: project.id,
@@ -79,23 +80,31 @@ describe('novel run task center source guards', () => {
       payload: JSON.stringify({
         chapter_id: 711,
         chapter_no: 11,
-        self_check: { review: { score: 82, publishable: false } },
+        context_package: { chapter_target: { chapter_id: 711, chapter_no: 11, title: '第十一章' } },
+        self_check: { review: { score: 82, passed: false, publishable: false } },
         diagnostic_archive: largeDiagnostic,
       }),
     })
     const run = await appendNovelRun(workspace, {
       project_id: project.id,
-      run_type: 'chapter_generation_pipeline',
+      run_type: 'chapter_group_generation',
       step_name: 'chapter-11',
       status: 'completed',
       input_ref: JSON.stringify({ chapter_id: 711, chapter_no: 11, context_archive: largeDiagnostic }),
       output_ref: JSON.stringify({
-        chapter_id: 711,
-        chapter_no: 11,
-        admission_status: 'accepted_with_warnings',
-        quality_warnings: [{ code: 'decorative_detail', message: '静态装饰细节偏多' }],
-        story_state_warning: { code: 'story_state_pending', message: '故事状态等待补同步' },
-        post_commit_warnings: [{ stage: 'memory', message: '记忆索引等待补同步' }],
+        current_index: 1,
+        chapters: [
+          { id: 700, chapter_no: 10, status: 'success' },
+          {
+            id: 711,
+            chapter_no: 11,
+            status: 'success',
+            admission_status: 'accepted_with_warnings',
+            quality_warnings: [{ code: 'decorative_detail', message: '静态装饰细节偏多' }],
+            story_state_status: 'pending',
+            post_commit_warnings: [{ stage: 'memory', message: '记忆索引等待补同步' }],
+          },
+        ],
         diagnostic_archive: largeDiagnostic,
       }),
       duration_ms: 3210,
@@ -117,6 +126,11 @@ describe('novel run task center source guards', () => {
     const runDetailRoute = handlers.get('GET /api/novel/runs/:id')
     const fullReviews = await listNovelReviews(workspace, project.id)
     const fullRuns = await listNovelRuns(workspace, project.id)
+    const storedReviewPayload = JSON.parse(String(fullReviews[0].payload || '{}'))
+    expect(storedReviewPayload).not.toHaveProperty('chapter_no')
+    expect(storedReviewPayload.context_package.chapter_target.chapter_no).toBe(11)
+    expect(storedReviewPayload.self_check.review.passed).toBe(false)
+    expect(storedReviewPayload.self_check.review).not.toHaveProperty('publishable')
 
     const defaultReviews = await callRoute(reviewsRoute, { params: { id: String(project.id) }, query: {} })
     const defaultRuns = await callRoute(runsRoute, { query: { project_id: String(project.id) } })
@@ -146,15 +160,17 @@ describe('novel run task center source guards', () => {
     expect(summaryRuns.statusCode).toBe(200)
     expect(summaryRuns.body[0]).toMatchObject({
       id: run.id,
-      run_type: 'chapter_generation_pipeline',
+      run_type: 'chapter_group_generation',
       status: 'completed',
       chapter_id: 711,
       chapter_no: 11,
       admission_status: 'accepted_with_warnings',
       admission_warning_count: 1,
+      admission_warning_preview: '静态装饰细节偏多',
+      story_state_status: 'pending',
       story_state_pending: true,
-      story_state_warning: '故事状态等待补同步',
       post_commit_warning_count: 1,
+      post_commit_warning_preview: '记忆索引等待补同步',
     })
     expect(summaryRuns.body[0].input_bytes).toBeGreaterThan(1000)
     expect(summaryRuns.body[0].output_bytes).toBeGreaterThan(1000)
@@ -162,8 +178,22 @@ describe('novel run task center source guards', () => {
     expect(summaryRuns.body[0]).not.toHaveProperty('output_ref')
     expect(JSON.stringify(summaryRuns.body).length).toBeLessThan(JSON.stringify(defaultRuns.body).length * 0.1)
 
-    expect((await callRoute(reviewDetailRoute, { params: { reviewId: String(review.id) } })).body).toEqual(fullReviews[0])
-    expect((await callRoute(runDetailRoute, { params: { id: String(run.id) } })).body).toEqual(fullRuns[0])
+    expect((await callRoute(reviewDetailRoute, { params: { reviewId: String(review.id) }, query: { project_id: String(project.id) } })).body).toEqual(fullReviews[0])
+    expect((await callRoute(runDetailRoute, { params: { id: String(run.id) }, query: { project_id: String(project.id) } })).body).toEqual(fullRuns[0])
+
+    const missingReviewProject = await callRoute(reviewDetailRoute, { params: { reviewId: String(review.id) }, query: {} })
+    const missingRunProject = await callRoute(runDetailRoute, { params: { id: String(run.id) }, query: {} })
+    expect(missingReviewProject.statusCode).toBe(400)
+    expect(missingReviewProject.body).toMatchObject({ error_code: 'PROJECT_ID_REQUIRED' })
+    expect(missingRunProject.statusCode).toBe(400)
+    expect(missingRunProject.body).toMatchObject({ error_code: 'PROJECT_ID_REQUIRED' })
+
+    const crossProjectReview = await callRoute(reviewDetailRoute, { params: { reviewId: String(review.id) }, query: { project_id: String(otherProject.id) } })
+    const crossProjectRun = await callRoute(runDetailRoute, { params: { id: String(run.id) }, query: { project_id: String(otherProject.id) } })
+    expect(crossProjectReview.statusCode).toBe(404)
+    expect(crossProjectReview.body).toEqual({ error: 'review not found' })
+    expect(crossProjectRun.statusCode).toBe(404)
+    expect(crossProjectRun.body).toEqual({ error: 'run not found' })
 
     const invalidReviews = await callRoute(reviewsRoute, { params: { id: String(project.id) }, query: { view: '../summary' } })
     const invalidRuns = await callRoute(runsRoute, { query: { project_id: String(project.id), view: 'summary OR 1=1' } })

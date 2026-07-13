@@ -116,6 +116,7 @@ describe('novel workspace chapter query views', () => {
     const { createNovelChapter, createNovelProject, listNovelChapters } = await import('../novel')
     const { registerNovelCoreRoutes } = await import('./novel-core-routes')
     const project = await createNovelProject(workspace, { title: '章节摘要体积回归' })
+    const otherProject = await createNovelProject(workspace, { title: '其他项目' })
     const prose = '雨夜压住巷口。\n\n林澈抬手扣住门环，门后的人先开了口。'
     const largeSceneText = '动作、冲突、反馈与承接证据。'.repeat(120)
     await createNovelChapter(workspace, {
@@ -152,11 +153,11 @@ describe('novel workspace chapter query views', () => {
       project_id: project.id,
       chapter_no: 11,
       title: '门后的回声',
-      chapter_text: prose,
       has_prose: true,
       has_scene_plan: true,
       word_count: prose.replace(/\s/g, '').length,
     })
+    expect(workspaceResponse.body[0]).not.toHaveProperty('chapter_text')
     expect(workspaceResponse.body[0]).not.toHaveProperty('scene_breakdown')
     expect(workspaceResponse.body[0]).not.toHaveProperty('scene_list')
     expect(workspaceResponse.body[0]).not.toHaveProperty('continuity_notes')
@@ -165,9 +166,17 @@ describe('novel workspace chapter query views', () => {
     expect(workspaceResponse.body[0]).not.toHaveProperty('raw_payload')
     expect(JSON.stringify(workspaceResponse.body).length).toBeLessThan(JSON.stringify(defaultResponse.body).length * 0.1)
 
-    const detailResponse = await callRoute(detail, { params: { chapterId: String(fullRows[0].id) } })
+    const detailResponse = await callRoute(detail, { params: { chapterId: String(fullRows[0].id) }, query: { project_id: String(project.id) } })
     expect(detailResponse.statusCode).toBe(200)
     expect(detailResponse.body).toEqual(fullRows[0])
+
+    const missingProjectResponse = await callRoute(detail, { params: { chapterId: String(fullRows[0].id) }, query: {} })
+    expect(missingProjectResponse.statusCode).toBe(400)
+    expect(missingProjectResponse.body).toMatchObject({ error_code: 'PROJECT_ID_REQUIRED' })
+
+    const crossProjectResponse = await callRoute(detail, { params: { chapterId: String(fullRows[0].id) }, query: { project_id: String(otherProject.id) } })
+    expect(crossProjectResponse.statusCode).toBe(404)
+    expect(crossProjectResponse.body).toEqual({ error: 'chapter not found' })
 
     const invalidResponse = await callRoute(list, { params: { id: String(project.id) }, query: { view: 'workspace; DROP TABLE chapters' } })
     expect(invalidResponse.statusCode).toBe(400)

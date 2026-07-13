@@ -91,6 +91,15 @@ function rejectInvalidQueryView(res: any, view: string, allowedViews: string[]) 
   })
 }
 
+function requireProjectId(req: any, res: any) {
+  const projectId = Number(req.query?.project_id)
+  if (!Number.isInteger(projectId) || projectId <= 0) {
+    res.status(400).json({ error: 'project_id is required', error_code: 'PROJECT_ID_REQUIRED' })
+    return null
+  }
+  return projectId
+}
+
 function asAuditArray(value: any) {
   return Array.isArray(value) ? value : []
 }
@@ -416,7 +425,9 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
 
   app.get('/api/novel/reviews/:reviewId', async (req, res) => {
     try {
-      const review = await getNovelReview(ctx.getWorkspace(), Number(req.params.reviewId))
+      const projectId = requireProjectId(req, res)
+      if (projectId === null) return
+      const review = await getNovelReview(ctx.getWorkspace(), Number(req.params.reviewId), projectId)
       if (!review) return res.status(404).json({ error: 'review not found' })
       res.json(review)
     } catch (error) {
@@ -438,7 +449,9 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
 
   app.get('/api/novel/runs/:id', async (req, res) => {
     try {
-      const run = await getNovelRun(ctx.getWorkspace(), Number(req.params.id))
+      const projectId = requireProjectId(req, res)
+      if (projectId === null) return
+      const run = await getNovelRun(ctx.getWorkspace(), Number(req.params.id), projectId)
       if (!run) return res.status(404).json({ error: 'run not found' })
       res.json(run)
     } catch (error) {
