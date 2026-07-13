@@ -13,10 +13,12 @@ import {
   deleteNovelOutline,
   deleteNovelProject,
   deleteNovelProjectSeedDraft,
+  getNovelChapter,
   getNovelProject,
   listChapterVersions,
   listNovelCharacters,
   listNovelChapters,
+  listNovelWorkspaceChapters,
   listNovelOutlines,
   listNovelProjects,
   listNovelProjectSeedDrafts,
@@ -50,6 +52,14 @@ function parseOptionalBoolean(value: any) {
   if (['true', '1', 'yes', 'on'].includes(raw)) return true
   if (['false', '0', 'no', 'off'].includes(raw)) return false
   return Boolean(value)
+}
+
+function rejectInvalidQueryView(res: any, view: string, allowedViews: string[]) {
+  return res.status(400).json({
+    error: `invalid view: ${view}`,
+    error_code: 'INVALID_VIEW',
+    allowed_views: allowedViews,
+  })
 }
 
 async function listProjectsWithWritingAggregates(activeWorkspace: string) {
@@ -2472,7 +2482,20 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
   })
 
   app.get('/api/novel/projects/:id/chapters', async (req, res) => {
-    try { res.json(await listNovelChapters(getWorkspace(), Number(req.params.id))) } catch (error) { res.status(500).json({ error: String(error) }) }
+    try {
+      const view = String(req.query?.view || 'full')
+      if (!['full', 'workspace'].includes(view)) return rejectInvalidQueryView(res, view, ['full', 'workspace'])
+      res.json(view === 'workspace'
+        ? await listNovelWorkspaceChapters(getWorkspace(), Number(req.params.id))
+        : await listNovelChapters(getWorkspace(), Number(req.params.id)))
+    } catch (error) { res.status(500).json({ error: String(error) }) }
+  })
+  app.get('/api/novel/chapters/:chapterId', async (req, res) => {
+    try {
+      const chapter = await getNovelChapter(getWorkspace(), Number(req.params.chapterId))
+      if (!chapter) return res.status(404).json({ error: 'chapter not found' })
+      res.json(chapter)
+    } catch (error) { res.status(500).json({ error: String(error) }) }
   })
   app.post('/api/novel/chapters', async (req, res) => {
     try { res.json(await createNovelChapter(getWorkspace(), req.body)) } catch (error) { res.status(500).json({ error: String(error) }) }

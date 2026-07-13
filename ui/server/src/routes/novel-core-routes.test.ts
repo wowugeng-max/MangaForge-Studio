@@ -110,6 +110,72 @@ describe('novel core project deletion', () => {
   })
 })
 
+describe('novel workspace chapter query views', () => {
+  test('keeps the default full contract, exposes a compact workspace projection, and returns the exact full row from detail', async () => {
+    const workspace = await tempDir('mangaforge-novel-chapter-view-')
+    const { createNovelChapter, createNovelProject, listNovelChapters } = await import('../novel')
+    const { registerNovelCoreRoutes } = await import('./novel-core-routes')
+    const project = await createNovelProject(workspace, { title: '章节摘要体积回归' })
+    const prose = '雨夜压住巷口。\n\n林澈抬手扣住门环，门后的人先开了口。'
+    const largeSceneText = '动作、冲突、反馈与承接证据。'.repeat(120)
+    await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 11,
+      title: '门后的回声',
+      chapter_goal: '接住上一章的地下通道悬念',
+      chapter_summary: '林澈追到门后确认接头人身份',
+      conflict: '接头人不肯交出证据',
+      ending_hook: '门缝里滚出染血的铜牌',
+      chapter_text: prose,
+      scene_breakdown: Array.from({ length: 36 }, (_, index) => ({ scene_no: index + 1, detail: largeSceneText })),
+      scene_list: Array.from({ length: 36 }, (_, index) => ({ scene_no: index + 1, detail: largeSceneText })),
+      continuity_notes: Array.from({ length: 20 }, () => largeSceneText),
+      raw_payload: { diagnostic_archive: largeSceneText.repeat(10) },
+      status: 'draft',
+    })
+
+    const { app, handlers } = createRouteHarness()
+    registerNovelCoreRoutes(app as any, () => workspace)
+    const list = handlers.get('GET /api/novel/projects/:id/chapters')
+    const detail = handlers.get('GET /api/novel/chapters/:chapterId')
+
+    const defaultResponse = await callRoute(list, { params: { id: String(project.id) }, query: {} })
+    const fullRows = await listNovelChapters(workspace, project.id)
+    expect(defaultResponse.statusCode).toBe(200)
+    expect(defaultResponse.body).toEqual(fullRows)
+
+    const workspaceResponse = await callRoute(list, { params: { id: String(project.id) }, query: { view: 'workspace' } })
+    expect(workspaceResponse.statusCode).toBe(200)
+    expect(workspaceResponse.body).toHaveLength(1)
+    expect(workspaceResponse.body[0]).toMatchObject({
+      id: fullRows[0].id,
+      project_id: project.id,
+      chapter_no: 11,
+      title: '门后的回声',
+      chapter_text: prose,
+      has_prose: true,
+      has_scene_plan: true,
+      word_count: prose.replace(/\s/g, '').length,
+    })
+    expect(workspaceResponse.body[0]).not.toHaveProperty('scene_breakdown')
+    expect(workspaceResponse.body[0]).not.toHaveProperty('scene_list')
+    expect(workspaceResponse.body[0]).not.toHaveProperty('continuity_notes')
+    expect(workspaceResponse.body[0]).not.toHaveProperty('items_in_play')
+    expect(workspaceResponse.body[0]).not.toHaveProperty('foreshadowing')
+    expect(workspaceResponse.body[0]).not.toHaveProperty('raw_payload')
+    expect(JSON.stringify(workspaceResponse.body).length).toBeLessThan(JSON.stringify(defaultResponse.body).length * 0.1)
+
+    const detailResponse = await callRoute(detail, { params: { chapterId: String(fullRows[0].id) } })
+    expect(detailResponse.statusCode).toBe(200)
+    expect(detailResponse.body).toEqual(fullRows[0])
+
+    const invalidResponse = await callRoute(list, { params: { id: String(project.id) }, query: { view: 'workspace; DROP TABLE chapters' } })
+    expect(invalidResponse.statusCode).toBe(400)
+    expect(invalidResponse.body).toMatchObject({ error_code: 'INVALID_VIEW' })
+    expect(await listNovelChapters(workspace, project.id)).toEqual(fullRows)
+  })
+})
+
 describe('novel project seed prompt', () => {
   test('uses the selected length target to shape incubation decisions', async () => {
     const { buildProjectSeedPrompt } = await import('./novel-core-routes')

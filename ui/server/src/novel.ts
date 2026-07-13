@@ -21,10 +21,13 @@ export type NovelWorldbuildingRecord = { id: number; project_id: number; world_s
 export type NovelCharacterRecord = { id: number; project_id: number; name: string; role?: string; role_type?: string; archetype?: string; personality?: any; motivation?: string; goal?: string; conflict?: string; abilities?: any[]; backstory?: string; relationships?: any; relationship_graph?: any; growth_arc?: string; arc_hint?: string; current_state?: any; secret?: string; appearance?: string; status?: string; version?: number; raw_payload?: any; created_at?: string; updated_at: string }
 export type NovelOutlineRecord = { id: number; project_id: number; outline_type?: string; title: string; summary?: string; beats?: any[]; conflict_points?: string[]; turning_points?: string[]; hook?: string; target_length?: string; version?: number; parent_id?: number | null; raw_payload?: any; created_at?: string; updated_at: string }
 export type NovelChapterRecord = { id: number; project_id: number; chapter_no: number; title: string; chapter_goal?: string; chapter_summary?: string; conflict?: string; ending_hook?: string; chapter_text?: string; scene_breakdown?: any[]; scene_list?: any[]; continuity_notes?: string[]; items_in_play?: any[]; foreshadowing?: any; timeline_note?: string; status?: string; version?: number; published_at?: string | null; outline_id?: number | null; raw_payload?: any; created_at?: string; updated_at: string }
+export type NovelChapterWorkspaceRecord = Omit<NovelChapterRecord, 'scene_breakdown' | 'scene_list' | 'continuity_notes' | 'items_in_play' | 'foreshadowing' | 'raw_payload'> & { has_prose: boolean; has_scene_plan: boolean; word_count: number }
 export type NovelChapterVersionSource = 'manual_edit' | 'agent_execute' | 'repair' | 'rollback'
 export type NovelChapterVersionRecord = { id: number; chapter_id: number; project_id: number; version_no: number; chapter_text: string; scene_breakdown: any[]; continuity_notes: string[]; source: NovelChapterVersionSource; created_at: string }
 export type NovelReviewRecord = { id: number; project_id: number; chapter_id?: number | null; chapter_no?: number | null; review_type: string; status: string; summary: string; issues: string[]; created_at: string; payload?: string }
+export type NovelReviewSummaryRecord = Omit<NovelReviewRecord, 'issues' | 'payload'> & { issue_count: number; preview: string; score: number | null; passed: boolean | null; payload_bytes: number }
 export type NovelRunRecord = { id: number; project_id: number; run_type: string; step_name: string; status: string; input_ref?: string; output_ref?: string; duration_ms?: number; error_message?: string; created_at: string; pipeline_run_count?: number; pipeline_chapter_failure_count?: number; pipeline_open_task_count?: number }
+export type NovelRunSummaryRecord = Omit<NovelRunRecord, 'input_ref' | 'output_ref'> & { chapter_id: number | null; chapter_no: number | null; input_bytes: number; output_bytes: number; admission_status: string; admission_warning_count: number; admission_warning_preview: string; story_state_pending: boolean; story_state_warning: string; post_commit_warning_count: number; post_commit_warning_preview: string }
 export type NovelProjectSeedDraftRecord = { id: number; title: string; idea?: string; seed: any; review_model?: any; diagnostics?: any; model_id?: number | null; source?: string; created_at: string; updated_at: string }
 export type NovelSettingEntityRecord = {
   id: number
@@ -519,7 +522,7 @@ function compactQualityStringListForStorage(value: any, maxItems = 12, limit = 3
 function compactQualityReviewForStorage(review: any = {}) {
   if (!review || typeof review !== 'object') return {}
   const output: Record<string, any> = {}
-  for (const key of ['passed', 'score', 'needs_revision', 'needsRevision', 'revised', 'deslop_level', 'deslopLevel']) {
+  for (const key of ['passed', 'publishable', 'score', 'needs_revision', 'needsRevision', 'revised', 'deslop_level', 'deslopLevel']) {
     if (review[key] !== undefined && review[key] !== null) output[key] = review[key]
   }
   if (review.craft_metrics || review.craftMetrics) {
@@ -612,6 +615,7 @@ function compactProseQualityPayloadForStorage(value: any = {}) {
   const review = selfCheck.review || payload?.review || {}
   return {
     chapter_id: payload?.chapter_id ?? payload?.chapterId ?? null,
+    chapter_no: payload?.chapter_no ?? payload?.chapterNo ?? null,
     chapter_updated_at: payload?.chapter_updated_at || payload?.chapterUpdatedAt || '',
     content_hash: payload?.content_hash || payload?.contentHash || '',
     source: payload?.source || '',
@@ -989,6 +993,43 @@ function chapterVersionFromRow(item: any): NovelChapterVersionRecord {
 }
 function reviewFromRow(item: any): NovelReviewRecord {
   return { ...item, issues: parseDbArray(item.issues), payload: item.payload || '' }
+}
+function nullableSqliteBoolean(value: any) {
+  if (value === null || value === undefined || value === '') return null
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (['false', '0', 'no', 'failed', 'fail'].includes(normalized)) return false
+    if (['true', '1', 'yes', 'passed', 'pass', 'ok'].includes(normalized)) return true
+  }
+  return Boolean(value)
+}
+function reviewSummaryFromRow(item: any): NovelReviewSummaryRecord {
+  return {
+    ...item,
+    chapter_id: item.chapter_id === null || item.chapter_id === undefined ? null : Number(item.chapter_id) || null,
+    chapter_no: item.chapter_no === null || item.chapter_no === undefined ? null : Number(item.chapter_no) || null,
+    issue_count: Number(item.issue_count || 0),
+    preview: String(item.preview || ''),
+    score: item.score === null || item.score === undefined || item.score === '' ? null : Number(item.score),
+    passed: nullableSqliteBoolean(item.passed),
+    payload_bytes: Number(item.payload_bytes || 0),
+  }
+}
+function runSummaryFromRow(item: any): NovelRunSummaryRecord {
+  return {
+    ...item,
+    chapter_id: item.chapter_id === null || item.chapter_id === undefined ? null : Number(item.chapter_id) || null,
+    chapter_no: item.chapter_no === null || item.chapter_no === undefined ? null : Number(item.chapter_no) || null,
+    input_bytes: Number(item.input_bytes || 0),
+    output_bytes: Number(item.output_bytes || 0),
+    admission_status: String(item.admission_status || ''),
+    admission_warning_count: Number(item.admission_warning_count || 0),
+    admission_warning_preview: String(item.admission_warning_preview || ''),
+    story_state_pending: Boolean(item.story_state_pending),
+    story_state_warning: String(item.story_state_warning || ''),
+    post_commit_warning_count: Number(item.post_commit_warning_count || 0),
+    post_commit_warning_preview: String(item.post_commit_warning_preview || ''),
+  }
 }
 function settingEntityFromRow(item: any): NovelSettingEntityRecord {
   return { ...item, related_character_ids: parseDbArray(item.related_character_ids).map(Number).filter(Boolean), related_chapter_ids: parseDbArray(item.related_chapter_ids).map(Number).filter(Boolean), related_entity_ids: parseDbArray(item.related_entity_ids).map(Number).filter(Boolean), constraints_json: parseDbJson(item.constraints_json, {}), state_json: parseDbJson(item.state_json, {}), payload_json: parseDbJson(item.payload_json, {}) }
@@ -1852,6 +1893,63 @@ export async function listNovelChapters(activeWorkspace: string, projectId: numb
     db.close()
   }
 }
+export async function listNovelWorkspaceChapters(activeWorkspace: string, projectId: number): Promise<NovelChapterWorkspaceRecord[]> {
+  await ensureLegacyNovelStoreImportedForRead(activeWorkspace)
+  const db = openDb(activeWorkspace)
+  try {
+    ensureSqliteSchema(db)
+    return (db.query(`
+      SELECT
+        id,
+        project_id,
+        outline_id,
+        chapter_no,
+        title,
+        chapter_goal,
+        chapter_summary,
+        conflict,
+        ending_hook,
+        chapter_text,
+        timeline_note,
+        status,
+        version,
+        published_at,
+        created_at,
+        updated_at,
+        CASE
+          WHEN length(trim(chapter_text)) > 0 AND instr(chapter_text, '【占位正文】') = 0 THEN 1
+          ELSE 0
+        END AS has_prose,
+        CASE
+          WHEN (json_valid(scene_breakdown) AND json_array_length(scene_breakdown) > 0)
+            OR (json_valid(scene_list) AND json_array_length(scene_list) > 0)
+          THEN 1 ELSE 0
+        END AS has_scene_plan,
+        length(replace(replace(replace(replace(COALESCE(chapter_text, ''), ' ', ''), char(10), ''), char(13), ''), char(9), '')) AS word_count
+      FROM chapters
+      WHERE project_id = ?
+      ORDER BY chapter_no ASC
+    `).all(projectId) as any[]).map(item => ({
+      ...item,
+      has_prose: Boolean(item.has_prose),
+      has_scene_plan: Boolean(item.has_scene_plan),
+      word_count: Number(item.word_count || 0),
+    })) as NovelChapterWorkspaceRecord[]
+  } finally {
+    db.close()
+  }
+}
+export async function getNovelChapter(activeWorkspace: string, chapterId: number) {
+  await ensureLegacyNovelStoreImportedForRead(activeWorkspace)
+  const db = openDb(activeWorkspace)
+  try {
+    ensureSqliteSchema(db)
+    const row = db.query('SELECT * FROM chapters WHERE id = ?').get(chapterId) as any
+    return row ? chapterFromRow(row) : null
+  } finally {
+    db.close()
+  }
+}
 export async function createNovelChapter(activeWorkspace: string, data: Partial<NovelChapterRecord>) { return mutateNovelStore(activeWorkspace, store => { const record = normalizeChapterRecord(data, { id: store.chapters.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.chapters.push(record); return record }) }
 export async function upsertNovelChapterByNumber(activeWorkspace: string, data: Partial<NovelChapterRecord>) {
   return mutateNovelStore(activeWorkspace, store => {
@@ -2404,6 +2502,96 @@ export async function listNovelReviews(activeWorkspace: string, projectId: numbe
     db.close()
   }
 }
+export async function listNovelReviewSummaries(activeWorkspace: string, projectId: number): Promise<NovelReviewSummaryRecord[]> {
+  await ensureLegacyNovelStoreImportedForRead(activeWorkspace)
+  const db = openDb(activeWorkspace)
+  try {
+    ensureSqliteSchema(db)
+    return (db.query(`
+      SELECT
+        id,
+        project_id,
+        CASE WHEN json_valid(payload) THEN CAST(COALESCE(
+          json_extract(payload, '$.chapter_id'),
+          json_extract(payload, '$.chapterId'),
+          json_extract(payload, '$.quality_card.chapter_id'),
+          json_extract(payload, '$.qualityCard.chapterId')
+        ) AS INTEGER) END AS chapter_id,
+        CASE WHEN json_valid(payload) THEN CAST(COALESCE(
+          json_extract(payload, '$.chapter_no'),
+          json_extract(payload, '$.chapterNo'),
+          json_extract(payload, '$.quality_card.chapter_no'),
+          json_extract(payload, '$.qualityCard.chapterNo')
+        ) AS INTEGER) END AS chapter_no,
+        review_type,
+        status,
+        substr(COALESCE(summary, ''), 1, 240) AS summary,
+        CASE WHEN json_valid(issues) AND json_type(issues) = 'array' THEN json_array_length(issues) ELSE 0 END AS issue_count,
+        CASE
+          WHEN json_valid(issues) AND json_type(issues) = 'array' AND json_array_length(issues) > 0 THEN substr(COALESCE(
+            CASE WHEN json_type(issues, '$[0]') = 'text' THEN json_extract(issues, '$[0]') END,
+            json_extract(issues, '$[0].message'),
+            json_extract(issues, '$[0].label'),
+            json_extract(issues, '$[0].type'),
+            json_extract(issues, '$[0]')
+          ), 1, 180)
+          ELSE ''
+        END AS preview,
+        CASE WHEN json_valid(payload) THEN COALESCE(
+          json_extract(payload, '$.score'),
+          json_extract(payload, '$.review.score'),
+          json_extract(payload, '$.self_check.review.score'),
+          json_extract(payload, '$.selfCheck.review.score'),
+          json_extract(payload, '$.quality_card.score'),
+          json_extract(payload, '$.qualityCard.score'),
+          json_extract(payload, '$.report.score')
+        ) END AS score,
+        CASE WHEN json_valid(payload) THEN COALESCE(
+          json_extract(payload, '$.passed'),
+          json_extract(payload, '$.publishable'),
+          json_extract(payload, '$.review.passed'),
+          json_extract(payload, '$.review.publishable'),
+          json_extract(payload, '$.self_check.review.passed'),
+          json_extract(payload, '$.self_check.review.publishable'),
+          json_extract(payload, '$.selfCheck.review.passed'),
+          json_extract(payload, '$.selfCheck.review.publishable'),
+          json_extract(payload, '$.report.passed')
+        ) END AS passed,
+        length(CAST(COALESCE(payload, '') AS BLOB)) AS payload_bytes,
+        created_at
+      FROM reviews
+      WHERE project_id = ?
+      ORDER BY created_at DESC, id DESC
+    `).all(projectId) as any[]).map(reviewSummaryFromRow)
+  } finally {
+    db.close()
+  }
+}
+export async function getNovelReview(activeWorkspace: string, reviewId: number) {
+  await ensureLegacyNovelStoreImportedForRead(activeWorkspace)
+  const db = openDb(activeWorkspace)
+  try {
+    ensureSqliteSchema(db)
+    const row = db.query(`
+      SELECT
+        id,
+        project_id,
+        CASE WHEN json_valid(payload) THEN CAST(json_extract(payload, '$.chapter_id') AS INTEGER) END AS chapter_id,
+        CASE WHEN json_valid(payload) THEN CAST(json_extract(payload, '$.chapter_no') AS INTEGER) END AS chapter_no,
+        review_type,
+        status,
+        summary,
+        issues,
+        payload,
+        created_at
+      FROM reviews
+      WHERE id = ?
+    `).get(reviewId) as any
+    return row ? reviewFromRow(row) : null
+  } finally {
+    db.close()
+  }
+}
 export async function createNovelReview(activeWorkspace: string, data: Partial<NovelReviewRecord>) {
   return withNovelWorkspaceMutation(activeWorkspace, async () => {
   const record = normalizeReviewRecord(data)
@@ -2433,6 +2621,115 @@ export async function listNovelRuns(activeWorkspace: string, projectId: number) 
     ensureSqliteSchema(db)
     return (db.query('SELECT * FROM runs WHERE project_id = ? ORDER BY created_at DESC').all(projectId) as NovelRunRecord[])
       .sort((a, b) => b.created_at.localeCompare(a.created_at))
+  } finally {
+    db.close()
+  }
+}
+export async function listNovelRunSummaries(activeWorkspace: string, projectId: number): Promise<NovelRunSummaryRecord[]> {
+  await ensureLegacyNovelStoreImportedForRead(activeWorkspace)
+  const db = openDb(activeWorkspace)
+  try {
+    ensureSqliteSchema(db)
+    return (db.query(`
+      SELECT
+        id,
+        project_id,
+        run_type,
+        step_name,
+        status,
+        duration_ms,
+        error_message,
+        created_at,
+        CASE WHEN json_valid(output_ref) THEN CAST(COALESCE(
+          json_extract(output_ref, '$.chapter_id'),
+          json_extract(output_ref, '$.chapterId'),
+          json_extract(output_ref, '$.chapter.id'),
+          json_extract(output_ref, '$.result.chapter_id'),
+          json_extract(output_ref, '$.result.chapterId'),
+          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].id')
+        ) AS INTEGER) END AS chapter_id,
+        CASE WHEN json_valid(output_ref) THEN CAST(COALESCE(
+          json_extract(output_ref, '$.chapter_no'),
+          json_extract(output_ref, '$.chapterNo'),
+          json_extract(output_ref, '$.chapter.chapter_no'),
+          json_extract(output_ref, '$.chapter.chapterNo'),
+          json_extract(output_ref, '$.result.chapter_no'),
+          json_extract(output_ref, '$.result.chapterNo'),
+          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].chapter_no'),
+          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].chapterNo')
+        ) AS INTEGER) END AS chapter_no,
+        length(CAST(COALESCE(input_ref, '') AS BLOB)) AS input_bytes,
+        length(CAST(COALESCE(output_ref, '') AS BLOB)) AS output_bytes,
+        CASE WHEN json_valid(output_ref) THEN COALESCE(
+          json_extract(output_ref, '$.admission_status'),
+          json_extract(output_ref, '$.admissionStatus'),
+          json_extract(output_ref, '$.prose_admission.status'),
+          json_extract(output_ref, '$.proseAdmission.status'),
+          json_extract(output_ref, '$.result.admission_status'),
+          json_extract(output_ref, '$.result.admissionStatus'),
+          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].admission_status'),
+          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].admissionStatus'),
+          ''
+        ) ELSE '' END AS admission_status,
+        CASE WHEN json_valid(output_ref) THEN COALESCE(
+          CASE WHEN json_type(output_ref, '$.quality_warnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.quality_warnings')) END,
+          CASE WHEN json_type(output_ref, '$.qualityWarnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.qualityWarnings')) END,
+          CASE WHEN json_type(output_ref, '$.prose_admission.quality_warnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.prose_admission.quality_warnings')) END,
+          CASE WHEN json_type(output_ref, '$.proseAdmission.qualityWarnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.proseAdmission.qualityWarnings')) END,
+          0
+        ) ELSE 0 END AS admission_warning_count,
+        CASE WHEN json_valid(output_ref) THEN substr(COALESCE(
+          json_extract(output_ref, '$.quality_warnings[0].message'),
+          json_extract(output_ref, '$.qualityWarnings[0].message'),
+          json_extract(output_ref, '$.prose_admission.quality_warnings[0].message'),
+          json_extract(output_ref, '$.proseAdmission.qualityWarnings[0].message'),
+          CASE WHEN json_type(output_ref, '$.quality_warnings[0]') = 'text' THEN json_extract(output_ref, '$.quality_warnings[0]') END,
+          ''
+        ), 1, 220) ELSE '' END AS admission_warning_preview,
+        CASE WHEN json_valid(output_ref) AND COALESCE(
+          json_extract(output_ref, '$.story_state_warning'),
+          json_extract(output_ref, '$.storyStateWarning'),
+          json_extract(output_ref, '$.prose_admission.story_state_warning'),
+          json_extract(output_ref, '$.proseAdmission.storyStateWarning')
+        ) IS NOT NULL THEN 1 ELSE 0 END AS story_state_pending,
+        CASE WHEN json_valid(output_ref) THEN substr(COALESCE(
+          json_extract(output_ref, '$.story_state_warning.message'),
+          json_extract(output_ref, '$.storyStateWarning.message'),
+          json_extract(output_ref, '$.prose_admission.story_state_warning.message'),
+          json_extract(output_ref, '$.proseAdmission.storyStateWarning.message'),
+          CASE WHEN json_type(output_ref, '$.story_state_warning') = 'text' THEN json_extract(output_ref, '$.story_state_warning') END,
+          CASE WHEN json_type(output_ref, '$.storyStateWarning') = 'text' THEN json_extract(output_ref, '$.storyStateWarning') END,
+          ''
+        ), 1, 220) ELSE '' END AS story_state_warning,
+        CASE WHEN json_valid(output_ref) THEN COALESCE(
+          CASE WHEN json_type(output_ref, '$.post_commit_warnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.post_commit_warnings')) END,
+          CASE WHEN json_type(output_ref, '$.postCommitWarnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.postCommitWarnings')) END,
+          CASE WHEN json_type(output_ref, '$.prose_admission.post_commit_warnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.prose_admission.post_commit_warnings')) END,
+          CASE WHEN json_type(output_ref, '$.proseAdmission.postCommitWarnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.proseAdmission.postCommitWarnings')) END,
+          0
+        ) ELSE 0 END AS post_commit_warning_count,
+        CASE WHEN json_valid(output_ref) THEN substr(COALESCE(
+          json_extract(output_ref, '$.post_commit_warnings[0].message'),
+          json_extract(output_ref, '$.postCommitWarnings[0].message'),
+          json_extract(output_ref, '$.prose_admission.post_commit_warnings[0].message'),
+          json_extract(output_ref, '$.proseAdmission.postCommitWarnings[0].message'),
+          CASE WHEN json_type(output_ref, '$.post_commit_warnings[0]') = 'text' THEN json_extract(output_ref, '$.post_commit_warnings[0]') END,
+          ''
+        ), 1, 220) ELSE '' END AS post_commit_warning_preview
+      FROM runs
+      WHERE project_id = ?
+      ORDER BY created_at DESC, id DESC
+    `).all(projectId) as any[]).map(runSummaryFromRow)
+  } finally {
+    db.close()
+  }
+}
+export async function getNovelRun(activeWorkspace: string, runId: number) {
+  await ensureLegacyNovelStoreImportedForRead(activeWorkspace)
+  const db = openDb(activeWorkspace)
+  try {
+    ensureSqliteSchema(db)
+    return (db.query('SELECT * FROM runs WHERE id = ?').get(runId) as NovelRunRecord | null) || null
   } finally {
     db.close()
   }

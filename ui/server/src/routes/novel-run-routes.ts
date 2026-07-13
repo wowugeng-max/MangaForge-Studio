@@ -1,8 +1,12 @@
 import type { Express } from 'express'
 import {
   appendNovelRun,
+  getNovelReview,
+  getNovelRun,
   listNovelChapters,
+  listNovelReviewSummaries,
   listNovelReviews,
+  listNovelRunSummaries,
   listNovelRuns,
   updateNovelProject,
   updateNovelRun,
@@ -77,6 +81,14 @@ function sleep(ms: number) {
 
 function compactAuditText(value: any, limit = 160) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit)
+}
+
+function rejectInvalidQueryView(res: any, view: string, allowedViews: string[]) {
+  return res.status(400).json({
+    error: `invalid view: ${view}`,
+    error_code: 'INVALID_VIEW',
+    allowed_views: allowedViews,
+  })
 }
 
 function asAuditArray(value: any) {
@@ -392,7 +404,21 @@ function buildAgentAudit(project: any, runs: any[], reviews: any[], chapters: an
 export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
   app.get('/api/novel/projects/:id/reviews', async (req, res) => {
     try {
-      res.json(await listNovelReviews(ctx.getWorkspace(), Number(req.params.id)))
+      const view = String(req.query?.view || 'full')
+      if (!['full', 'summary'].includes(view)) return rejectInvalidQueryView(res, view, ['full', 'summary'])
+      res.json(view === 'summary'
+        ? await listNovelReviewSummaries(ctx.getWorkspace(), Number(req.params.id))
+        : await listNovelReviews(ctx.getWorkspace(), Number(req.params.id)))
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.get('/api/novel/reviews/:reviewId', async (req, res) => {
+    try {
+      const review = await getNovelReview(ctx.getWorkspace(), Number(req.params.reviewId))
+      if (!review) return res.status(404).json({ error: 'review not found' })
+      res.json(review)
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
@@ -400,7 +426,21 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
 
   app.get('/api/novel/runs', async (req, res) => {
     try {
-      res.json(await listNovelRuns(ctx.getWorkspace(), Number(req.query.project_id || 0)))
+      const view = String(req.query?.view || 'full')
+      if (!['full', 'summary'].includes(view)) return rejectInvalidQueryView(res, view, ['full', 'summary'])
+      res.json(view === 'summary'
+        ? await listNovelRunSummaries(ctx.getWorkspace(), Number(req.query.project_id || 0))
+        : await listNovelRuns(ctx.getWorkspace(), Number(req.query.project_id || 0)))
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.get('/api/novel/runs/:id', async (req, res) => {
+    try {
+      const run = await getNovelRun(ctx.getWorkspace(), Number(req.params.id))
+      if (!run) return res.status(404).json({ error: 'run not found' })
+      res.json(run)
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

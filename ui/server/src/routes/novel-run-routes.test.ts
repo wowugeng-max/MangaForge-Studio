@@ -3,7 +3,7 @@ import { readFileSync } from 'fs'
 import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { appendNovelRun, createNovelProject, listNovelProjects, listNovelRuns, updateNovelRun } from '../novel'
+import { appendNovelRun, createNovelProject, createNovelReview, listNovelProjects, listNovelReviews, listNovelRuns, updateNovelRun } from '../novel'
 import { createNovelProductionService } from './novel-production-service'
 import { extractChapterRef, extractConfigTrace, extractMaterialTrace, extractModelTrace, registerNovelRunRoutes } from './novel-run-routes'
 
@@ -65,6 +65,116 @@ afterEach(async () => {
 })
 
 describe('novel run task center source guards', () => {
+  test('keeps full review and run contracts by default while summary views stay below ten percent and detail rows are exact', async () => {
+    const workspace = await tempWorkspace()
+    const production = createNovelProductionService()
+    const project = await createNovelProject(workspace, { title: '任务摘要体积回归', reference_config: {} })
+    const largeDiagnostic = '完整诊断上下文、提示词、模型返回与证据链。'.repeat(1800)
+    const review = await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'prose_quality',
+      status: 'warn',
+      summary: '第十一章已入库，建议修订静态描写。'.repeat(20),
+      issues: Array.from({ length: 24 }, (_, index) => `问题${index + 1}：${'环境描写未推动动作。'.repeat(40)}`),
+      payload: JSON.stringify({
+        chapter_id: 711,
+        chapter_no: 11,
+        self_check: { review: { score: 82, publishable: false } },
+        diagnostic_archive: largeDiagnostic,
+      }),
+    })
+    const run = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'chapter_generation_pipeline',
+      step_name: 'chapter-11',
+      status: 'completed',
+      input_ref: JSON.stringify({ chapter_id: 711, chapter_no: 11, context_archive: largeDiagnostic }),
+      output_ref: JSON.stringify({
+        chapter_id: 711,
+        chapter_no: 11,
+        admission_status: 'accepted_with_warnings',
+        quality_warnings: [{ code: 'decorative_detail', message: '静态装饰细节偏多' }],
+        story_state_warning: { code: 'story_state_pending', message: '故事状态等待补同步' },
+        post_commit_warnings: [{ stage: 'memory', message: '记忆索引等待补同步' }],
+        diagnostic_archive: largeDiagnostic,
+      }),
+      duration_ms: 3210,
+      error_message: '',
+    })
+    const { app, handlers } = createRouteHarness()
+    registerNovelRunRoutes(app as any, {
+      getWorkspace: () => workspace,
+      getProject: async (_workspace: string, id: number) => (await listNovelProjects(_workspace)).find(item => item.id === id) || null,
+      runQueueWorkers: new Map(),
+      getProductionBudgetDecision: () => ({ blocked: false, reasons: [] }),
+      buildPipelineSteps: production.buildPipelineSteps,
+      executeChapterGroupRunRecord: async () => ({ status: 'not-used', processed: 0 }),
+    })
+
+    const reviewsRoute = handlers.get('GET /api/novel/projects/:id/reviews')
+    const reviewDetailRoute = handlers.get('GET /api/novel/reviews/:reviewId')
+    const runsRoute = handlers.get('GET /api/novel/runs')
+    const runDetailRoute = handlers.get('GET /api/novel/runs/:id')
+    const fullReviews = await listNovelReviews(workspace, project.id)
+    const fullRuns = await listNovelRuns(workspace, project.id)
+
+    const defaultReviews = await callRoute(reviewsRoute, { params: { id: String(project.id) }, query: {} })
+    const defaultRuns = await callRoute(runsRoute, { query: { project_id: String(project.id) } })
+    expect(defaultReviews.body).toEqual(fullReviews)
+    expect(defaultRuns.body).toEqual(fullRuns)
+
+    const summaryReviews = await callRoute(reviewsRoute, { params: { id: String(project.id) }, query: { view: 'summary' } })
+    expect(summaryReviews.statusCode).toBe(200)
+    expect(summaryReviews.body[0]).toMatchObject({
+      id: review.id,
+      review_type: 'prose_quality',
+      status: 'warn',
+      chapter_id: 711,
+      chapter_no: 11,
+      issue_count: 24,
+      score: 82,
+      passed: false,
+    })
+    expect(summaryReviews.body[0].summary.length).toBeLessThanOrEqual(240)
+    expect(summaryReviews.body[0].preview).toContain('问题1')
+    expect(summaryReviews.body[0].payload_bytes).toBe(Buffer.byteLength(String(fullReviews[0].payload || ''), 'utf8'))
+    expect(summaryReviews.body[0]).not.toHaveProperty('issues')
+    expect(summaryReviews.body[0]).not.toHaveProperty('payload')
+    expect(JSON.stringify(summaryReviews.body).length).toBeLessThan(JSON.stringify(defaultReviews.body).length * 0.1)
+
+    const summaryRuns = await callRoute(runsRoute, { query: { project_id: String(project.id), view: 'summary' } })
+    expect(summaryRuns.statusCode).toBe(200)
+    expect(summaryRuns.body[0]).toMatchObject({
+      id: run.id,
+      run_type: 'chapter_generation_pipeline',
+      status: 'completed',
+      chapter_id: 711,
+      chapter_no: 11,
+      admission_status: 'accepted_with_warnings',
+      admission_warning_count: 1,
+      story_state_pending: true,
+      story_state_warning: '故事状态等待补同步',
+      post_commit_warning_count: 1,
+    })
+    expect(summaryRuns.body[0].input_bytes).toBeGreaterThan(1000)
+    expect(summaryRuns.body[0].output_bytes).toBeGreaterThan(1000)
+    expect(summaryRuns.body[0]).not.toHaveProperty('input_ref')
+    expect(summaryRuns.body[0]).not.toHaveProperty('output_ref')
+    expect(JSON.stringify(summaryRuns.body).length).toBeLessThan(JSON.stringify(defaultRuns.body).length * 0.1)
+
+    expect((await callRoute(reviewDetailRoute, { params: { reviewId: String(review.id) } })).body).toEqual(fullReviews[0])
+    expect((await callRoute(runDetailRoute, { params: { id: String(run.id) } })).body).toEqual(fullRuns[0])
+
+    const invalidReviews = await callRoute(reviewsRoute, { params: { id: String(project.id) }, query: { view: '../summary' } })
+    const invalidRuns = await callRoute(runsRoute, { query: { project_id: String(project.id), view: 'summary OR 1=1' } })
+    expect(invalidReviews.statusCode).toBe(400)
+    expect(invalidReviews.body).toMatchObject({ error_code: 'INVALID_VIEW' })
+    expect(invalidRuns.statusCode).toBe(400)
+    expect(invalidRuns.body).toMatchObject({ error_code: 'INVALID_VIEW' })
+    expect(await listNovelReviews(workspace, project.id)).toEqual(fullReviews)
+    expect(await listNovelRuns(workspace, project.id)).toEqual(fullRuns)
+  })
+
   test('extracts model and config audit traces from runtime selection payloads', () => {
     const payload = {
       result: {
