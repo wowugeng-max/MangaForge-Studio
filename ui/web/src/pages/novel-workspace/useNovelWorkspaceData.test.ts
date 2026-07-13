@@ -1,5 +1,21 @@
 import { describe, expect, test } from 'bun:test'
-import { resolveActiveWorkspaceChapterId, resolveSelectedWorkspaceModelId } from './useNovelWorkspaceData'
+import {
+  initialWorkspaceRequestPlan,
+  createWorkspaceRequestEpoch,
+  resolveActiveWorkspaceChapterId,
+  resolveSelectedWorkspaceModelId,
+} from './useNovelWorkspaceData'
+import {
+  applyWorkspaceDetailResults,
+  createWorkspaceDetailCache,
+  selectChapterWorkingSet,
+  selectReviewDetailIds,
+  selectRunDetailIds,
+  workspacePayloadBytes,
+} from './workspaceDetailCache'
+import { buildPlanningWorkspaceModel } from './planningWorkspaceModel'
+import { buildWritingCockpitModel } from './writingCockpitModel'
+import { buildAutoCreationDirectorModel } from './autoCreationDirectorModel'
 
 describe('novel workspace model selector', () => {
   test('falls back when the currently selected model is no longer returned by the model list', () => {
@@ -38,5 +54,328 @@ describe('novel workspace active chapter selector', () => {
       { id: 2, chapter_no: 2, chapter_text: '' },
     ])).toBe(1)
     expect(resolveActiveWorkspaceChapterId(1, [])).toBeNull()
+  })
+})
+
+describe('novel workspace compact loading plan', () => {
+  test('rejects an older project load after a newer workspace request starts', () => {
+    const epoch = createWorkspaceRequestEpoch()
+    const projectA = epoch.begin()
+    const projectB = epoch.begin()
+
+    expect(epoch.isCurrent(projectA)).toBe(false)
+    expect(epoch.isCurrent(projectB)).toBe(true)
+    epoch.invalidate()
+    expect(epoch.isCurrent(projectB)).toBe(false)
+  })
+
+  test('uses only opt-in workspace and summary list endpoints during the initial load', () => {
+    expect(initialWorkspaceRequestPlan(17)).toEqual(expect.arrayContaining([
+      { key: 'chapters', url: '/novel/projects/17/chapters', params: { view: 'workspace' } },
+      { key: 'runs', url: '/novel/runs', params: { project_id: 17, view: 'summary' } },
+      { key: 'reviews', url: '/novel/projects/17/reviews', params: { view: 'summary' } },
+    ]))
+    expect(JSON.stringify(initialWorkspaceRequestPlan(17))).not.toContain('view":"full')
+  })
+
+  test('keeps a realistic initial workspace payload below two megabytes without diagnostic refs', () => {
+    const chapters = Array.from({ length: 120 }, (_, index) => ({
+      id: index + 1,
+      project_id: 7,
+      chapter_no: index + 1,
+      title: `第${index + 1}章`,
+      chapter_goal: '推进主线冲突',
+      chapter_summary: '本章完成一次选择和反馈',
+      conflict: '旧秩序阻拦主角行动',
+      ending_hook: '新的追踪信号出现',
+      chapter_text: index < 96 ? '正文段落。'.repeat(600) : '',
+      has_prose: index < 96,
+      has_scene_plan: true,
+      word_count: index < 96 ? 3000 : 0,
+      updated_at: '2026-07-13T00:00:00.000Z',
+    }))
+    const reviews = Array.from({ length: 1100 }, (_, index) => ({
+      id: index + 1,
+      project_id: 7,
+      chapter_id: (index % 120) + 1,
+      chapter_no: (index % 120) + 1,
+      review_type: index % 2 ? 'prose_quality' : 'editor_report',
+      status: index % 5 ? 'ok' : 'warn',
+      summary: '紧凑审查摘要',
+      issue_count: index % 4,
+      preview: index % 4 ? '建议压缩静态描写' : '',
+      score: 80,
+      passed: true,
+      payload_bytes: 48000,
+      created_at: '2026-07-13T00:00:00.000Z',
+    }))
+    const runs = Array.from({ length: 900 }, (_, index) => ({
+      id: index + 1,
+      project_id: 7,
+      run_type: index % 3 ? 'chapter_generation_pipeline' : 'chapter_group_generation',
+      step_name: `chapter-${index + 1}`,
+      status: 'completed',
+      duration_ms: 3000,
+      error_message: '',
+      created_at: '2026-07-13T00:00:00.000Z',
+      input_bytes: 52000,
+      output_bytes: 58000,
+      admission_status: 'accepted',
+      admission_warning_count: 0,
+      story_state_pending: false,
+      story_state_warning: '',
+      post_commit_warning_count: 0,
+    }))
+
+    const serverSummaryResponse = { chapters, reviews, runs }
+    const bytes = workspacePayloadBytes(serverSummaryResponse)
+    expect(bytes).toBeLessThan(2 * 1024 * 1024)
+    expect(chapters.filter(chapter => chapter.has_prose)).toHaveLength(96)
+    expect(JSON.stringify(serverSummaryResponse)).not.toContain('output_ref')
+    expect(JSON.stringify(serverSummaryResponse)).not.toContain('payload":"')
+  })
+})
+
+describe('novel workspace detail working set', () => {
+  const chapters = Array.from({ length: 7 }, (_, index) => ({
+    id: index + 1,
+    chapter_no: index + 1,
+    title: `第${index + 1}章`,
+    chapter_text: `正文${index + 1}`,
+    updated_at: `2026-07-13T00:00:0${index}.000Z`,
+  }))
+
+  test('loads active, previous, and next chapter details and changes the set on chapter switch', () => {
+    expect(selectChapterWorkingSet(chapters, 4).map(item => item.id)).toEqual([3, 4, 5])
+    expect(selectChapterWorkingSet(chapters, 6).map(item => item.id)).toEqual([5, 6, 7])
+  })
+
+  test('keeps latest review per type for the chapter neighborhood plus latest global per type', () => {
+    const reviews = [
+      { id: 1, chapter_id: 3, chapter_no: 3, review_type: 'prose_quality', created_at: '2026-07-13T01:00:00Z' },
+      { id: 2, chapter_id: 3, chapter_no: 3, review_type: 'prose_quality', created_at: '2026-07-13T02:00:00Z' },
+      { id: 3, chapter_id: 4, chapter_no: 4, review_type: 'editor_report', created_at: '2026-07-13T03:00:00Z' },
+      { id: 4, chapter_id: 6, chapter_no: 6, review_type: 'prose_quality', created_at: '2026-07-13T04:00:00Z' },
+      { id: 5, chapter_id: null, chapter_no: null, review_type: 'book_review', created_at: '2026-07-13T05:00:00Z' },
+      { id: 6, chapter_id: 7, chapter_no: 7, review_type: 'editor_report', created_at: '2026-07-13T06:00:00Z' },
+    ]
+    const working = selectChapterWorkingSet(chapters, 4)
+
+    expect(selectReviewDetailIds(reviews, working)).toEqual([6, 5, 4, 3, 2])
+  })
+
+  test('selects active and exceptional runs plus the latest bounded operational categories', () => {
+    const runs = [
+      { id: 1, run_type: 'chapter_group_generation', status: 'completed', created_at: '2026-07-13T01:00:00Z' },
+      { id: 2, run_type: 'chapter_group_generation', status: 'completed', created_at: '2026-07-13T02:00:00Z' },
+      { id: 3, run_type: 'quality_benchmark', status: 'failed', created_at: '2026-07-13T03:00:00Z' },
+      { id: 4, run_type: 'release_repair_queue', status: 'paused', created_at: '2026-07-13T04:00:00Z' },
+      { id: 5, run_type: 'batch_generate_prose', status: 'completed', created_at: '2026-07-13T05:00:00Z' },
+      { id: 6, run_type: 'serial_governance', status: 'completed', created_at: '2026-07-13T06:00:00Z' },
+      { id: 7, run_type: 'generate_prose', status: 'running', created_at: '2026-07-13T07:00:00Z' },
+    ]
+
+    expect(selectRunDetailIds(runs)).toEqual([7, 6, 5, 4, 3, 2])
+
+    const manyFailures = Array.from({ length: 40 }, (_, index) => ({
+      id: 100 + index,
+      run_type: 'generate_prose',
+      status: 'failed',
+      created_at: `2026-07-13T10:${String(59 - index).padStart(2, '0')}:00Z`,
+    }))
+    const olderCategories = [
+      { id: 90, run_type: 'chapter_group_generation', status: 'completed', created_at: '2026-07-13T01:00:00Z' },
+      { id: 91, run_type: 'batch_generate_prose', status: 'completed', created_at: '2026-07-13T02:00:00Z' },
+      { id: 92, run_type: 'release_repair_queue', status: 'completed', created_at: '2026-07-13T03:00:00Z' },
+      { id: 93, run_type: 'serial_governance', status: 'completed', created_at: '2026-07-13T04:00:00Z' },
+    ]
+    const bounded = selectRunDetailIds([...manyFailures, ...olderCategories], 12)
+    expect(bounded).toHaveLength(12)
+    expect(bounded).toEqual(expect.arrayContaining([90, 91, 92, 93]))
+  })
+
+  test('deduplicates concurrent detail requests and retains summaries in degraded state on failure', async () => {
+    let calls = 0
+    const pendingResolvers: Array<(value: any) => void> = []
+    const cache = createWorkspaceDetailCache(async (kind, id) => {
+      calls += 1
+      if (id === 9) throw new Error('detail unavailable')
+      return new Promise(resolve => pendingResolvers.push(resolve))
+    })
+
+    const first = cache.load('review', 8, 'v1')
+    const second = cache.load('review', 8, 'v1')
+    expect(calls).toBe(1)
+    pendingResolvers[0]({ id: 8, payload: '{"score":91}', issues: ['保留承接'] })
+    const [firstResult, secondResult] = await Promise.all([first, second])
+    expect(firstResult).toEqual(secondResult)
+
+    const failed = await cache.load('review', 9, 'v1')
+    const merged = applyWorkspaceDetailResults(
+      [{ id: 8, summary: '评分 91' }, { id: 9, summary: '评分 72' }],
+      [firstResult, failed],
+    )
+    expect(merged[0]).toMatchObject({ id: 8, summary: '评分 91', payload: '{"score":91}', detail_status: 'ready' })
+    expect(merged[1]).toMatchObject({ id: 9, summary: '评分 72', detail_status: 'degraded' })
+    expect(merged[1]).not.toHaveProperty('payload')
+    expect(calls).toBe(2)
+
+    const failedAgain = await cache.load('review', 9, 'v1')
+    expect(failedAgain.status).toBe('degraded')
+    expect(calls).toBe(3)
+  })
+
+  test('does not let a detail request that predates clear repopulate the cache', async () => {
+    let calls = 0
+    const resolvers: Array<(value: any) => void> = []
+    const cache = createWorkspaceDetailCache(async () => {
+      calls += 1
+      return new Promise(resolve => resolvers.push(resolve))
+    })
+
+    const stale = cache.load('chapter', 7, 'same-version')
+    cache.clear()
+    const fresh = cache.load('chapter', 7, 'same-version')
+    expect(calls).toBe(2)
+    resolvers[1]({ id: 7, title: '新项目章节' })
+    expect((await fresh).record?.title).toBe('新项目章节')
+    resolvers[0]({ id: 7, title: '旧项目章节' })
+    await stale
+
+    const cached = await cache.load('chapter', 7, 'same-version')
+    expect(cached.record?.title).toBe('新项目章节')
+    expect(calls).toBe(2)
+  })
+
+  test('preserves representative planning, writing, and auto outputs with latest working-set details', () => {
+    const project = {
+      title: '工作集等价回归',
+      reference_config: {
+        writing_bible: {
+          promise: '少年用残阵打破旧秩序',
+          volumes: [{ title: '第一卷', goal: '拿到试炼资格', stages: [{ title: '外门压迫', conflict: '执事阻拦' }] }],
+        },
+        story_state: { last_updated_chapter: 2 },
+      },
+    }
+    const fullChapters = [
+      { id: 1, chapter_no: 1, title: '旧令', chapter_goal: '找到残阵', conflict: '执事搜查', ending_hook: '阵纹亮起', chapter_text: '第一章正文。'.repeat(300), raw_payload: { must_advance: ['残阵现身'] }, updated_at: '2026-07-13T01:00:00Z' },
+      { id: 2, chapter_no: 2, title: '阵纹', chapter_goal: '保住试炼资格', conflict: '执事当众剥夺资格', ending_hook: '内门长老点名', chapter_text: '第二章正文。'.repeat(300), raw_payload: { must_advance: ['公开反击'] }, scene_list: [{ scene_no: 1, title: '当众验阵' }], updated_at: '2026-07-13T02:00:00Z' },
+      { id: 3, chapter_no: 3, title: '点名', chapter_goal: '进入内门视野', conflict: '旧秩序追加条件', ending_hook: '残阵缺口扩大', chapter_text: '', raw_payload: { must_advance: ['接住点名'] }, updated_at: '2026-07-13T03:00:00Z' },
+    ]
+    const qualityPayload = JSON.stringify({
+      chapter_id: 2,
+      chapter_no: 2,
+      self_check: { review: { score: 88, passed: true, issues: [], needs_revision: false } },
+    })
+    const fullReviews = [
+      { id: 10, chapter_id: 2, chapter_no: 2, review_type: 'prose_quality', status: 'ok', summary: '旧质量记录', payload: qualityPayload, issues: [], created_at: '2026-07-13T01:00:00Z' },
+      { id: 11, chapter_id: 2, chapter_no: 2, review_type: 'prose_quality', status: 'ok', summary: '最新质量记录', payload: qualityPayload, issues: [], created_at: '2026-07-13T02:00:00Z' },
+      { id: 12, chapter_id: null, chapter_no: null, review_type: 'first30_retention_diagnosis', status: 'ok', summary: '前30章留存 84', payload: JSON.stringify({ report: { score: 84, status: 'ready', summary: '留存稳定', positioning: { promise_ready: true }, segments: [], chapter_cards: [], risks: [], next_actions: [] } }), issues: [], created_at: '2026-07-13T03:00:00Z' },
+      { id: 13, chapter_id: null, chapter_no: null, review_type: 'unrelated_archive', status: 'ok', summary: '旧归档', payload: JSON.stringify({ archive: 'x'.repeat(20000) }), issues: [], created_at: '2026-07-13T00:00:00Z' },
+    ]
+    const fullRuns = [
+      { id: 21, run_type: 'chapter_group_generation', status: 'completed', step_name: 'chapter-2', input_ref: '{}', output_ref: JSON.stringify({ chapter_id: 2, admission_status: 'accepted' }), created_at: '2026-07-13T02:30:00Z' },
+      { id: 20, run_type: 'unrelated_archive', status: 'completed', step_name: 'archive', input_ref: '{"archive":true}', output_ref: JSON.stringify({ archive: 'y'.repeat(20000) }), created_at: '2026-07-13T00:30:00Z' },
+    ]
+    const chapterSummaries = fullChapters.map(chapter => ({
+      id: chapter.id,
+      chapter_no: chapter.chapter_no,
+      title: chapter.title,
+      chapter_goal: chapter.chapter_goal,
+      conflict: chapter.conflict,
+      ending_hook: chapter.ending_hook,
+      chapter_text: chapter.chapter_text,
+      has_prose: Boolean(chapter.chapter_text),
+      has_scene_plan: Boolean(chapter.scene_list?.length),
+      word_count: chapter.chapter_text.replace(/\s/g, '').length,
+      updated_at: chapter.updated_at,
+    }))
+    const reviewSummaries = fullReviews.map(review => ({
+      id: review.id,
+      chapter_id: review.chapter_id,
+      chapter_no: review.chapter_no,
+      review_type: review.review_type,
+      status: review.status,
+      summary: review.summary,
+      created_at: review.created_at,
+      issue_count: review.issues.length,
+      preview: '',
+      payload_bytes: review.payload.length,
+    }))
+    const runSummaries = fullRuns.map(run => ({
+      id: run.id,
+      run_type: run.run_type,
+      status: run.status,
+      step_name: run.step_name,
+      created_at: run.created_at,
+      input_bytes: run.input_ref.length,
+      output_bytes: run.output_ref.length,
+      admission_status: run.id === 21 ? 'accepted' : '',
+    }))
+    const workingChapterRows = selectChapterWorkingSet(chapterSummaries, 2)
+    const workingChapters = applyWorkspaceDetailResults(chapterSummaries, workingChapterRows.map(chapter => ({
+      kind: 'chapter' as const,
+      id: chapter.id,
+      status: 'ready' as const,
+      record: fullChapters.find(item => item.id === chapter.id),
+    })))
+    const selectedReviewIds = selectReviewDetailIds(reviewSummaries, workingChapterRows)
+    const workingReviews = applyWorkspaceDetailResults(reviewSummaries, selectedReviewIds.map(id => ({
+      kind: 'review' as const,
+      id,
+      status: 'ready' as const,
+      record: fullReviews.find(item => item.id === id),
+    })))
+    const selectedRunIds = selectRunDetailIds(runSummaries)
+    const workingRuns = applyWorkspaceDetailResults(runSummaries, selectedRunIds.map(id => ({
+      kind: 'run' as const,
+      id,
+      status: 'ready' as const,
+      record: fullRuns.find(item => item.id === id),
+    })))
+    const buildModels = (chaptersInput: any[], reviewsInput: any[], runsInput: any[]) => {
+      const activeChapter = chaptersInput.find(item => item.id === 2)
+      const planning = buildPlanningWorkspaceModel({
+        selectedProject: project,
+        outlines: [],
+        chapters: chaptersInput,
+        activeChapter,
+        reviews: reviewsInput,
+        settingEntities: [],
+      })
+      const writing = buildWritingCockpitModel({
+        project,
+        outlines: [],
+        chapters: chaptersInput,
+        activeChapter,
+        reviews: reviewsInput,
+        activeRuns: runsInput,
+        materialScore: { score: 90 },
+        memorySummary: { memory_count: 1 },
+      })
+      const auto = buildAutoCreationDirectorModel({
+        planning,
+        writing,
+        activeTasks: [],
+        selectedModelId: 1,
+        reviews: reviewsInput,
+        runRecords: runsInput,
+        chapters: chaptersInput,
+        storyState: project.reference_config.story_state,
+      })
+      return { planning, writing, auto }
+    }
+    const full = buildModels(fullChapters, fullReviews, fullRuns)
+    const working = buildModels(workingChapters, workingReviews, workingRuns)
+
+    expect(working.planning.first30Retention).toEqual(full.planning.first30Retention)
+    expect(working.planning.topStatus).toEqual(full.planning.topStatus)
+    expect(working.writing.chapterAcceptanceDesk).toEqual(full.writing.chapterAcceptanceDesk)
+    expect(working.writing.chapterHandoffDesk).toEqual(full.writing.chapterHandoffDesk)
+    expect(working.auto.status).toBe(full.auto.status)
+    expect(working.auto.mainAction).toEqual(full.auto.mainAction)
+    expect(working.auto.deliveryRiskGate).toEqual(full.auto.deliveryRiskGate)
+    expect(working.auto.batchReviewQueue).toEqual(full.auto.batchReviewQueue)
   })
 })

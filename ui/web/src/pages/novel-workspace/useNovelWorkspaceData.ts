@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { message } from 'antd'
 import apiClient from '../../api/client'
 import {
@@ -6,9 +6,86 @@ import {
   buildTree,
   wc,
 } from './utils'
+import {
+  applyWorkspaceDetailResults,
+  createWorkspaceDetailCache,
+  selectChapterWorkingSet,
+  selectReviewDetailIds,
+  selectRunDetailIds,
+  type WorkspaceDetailKind,
+  type WorkspaceDetailResult,
+} from './workspaceDetailCache'
 
 export type ChapterStatusFilter = 'all' | 'written' | 'unwritten' | 'placeholder'
 export type ChapterSortMode = 'chapter_no_asc' | 'chapter_no_desc' | 'word_count_desc' | 'title_asc'
+
+export function initialWorkspaceRequestPlan(projectId: number) {
+  return [
+    { key: 'chapters', url: `/novel/projects/${projectId}/chapters`, params: { view: 'workspace' } },
+    { key: 'runs', url: '/novel/runs', params: { project_id: projectId, view: 'summary' } },
+    { key: 'reviews', url: `/novel/projects/${projectId}/reviews`, params: { view: 'summary' } },
+  ] as Array<{ key: string; url: string; params?: Record<string, any> }>
+}
+
+export function createWorkspaceRequestEpoch() {
+  let current = 0
+  return {
+    begin: () => {
+      current += 1
+      return current
+    },
+    invalidate: () => {
+      current += 1
+    },
+    isCurrent: (token: number) => token === current,
+  }
+}
+
+const CHAPTER_WORKSPACE_FIELDS = [
+  'id',
+  'project_id',
+  'outline_id',
+  'chapter_no',
+  'title',
+  'chapter_goal',
+  'chapter_summary',
+  'conflict',
+  'ending_hook',
+  'chapter_text',
+  'timeline_note',
+  'status',
+  'version',
+  'published_at',
+  'created_at',
+  'updated_at',
+  'has_prose',
+  'has_scene_plan',
+  'word_count',
+] as const
+
+function compactChapterWorkspaceRecord(record: any) {
+  const compact: Record<string, any> = {}
+  for (const field of CHAPTER_WORKSPACE_FIELDS) {
+    if (record?.[field] !== undefined) compact[field] = record[field]
+  }
+  const text = String(record?.chapter_text || '')
+  const hasSceneArrays = Array.isArray(record?.scene_breakdown) || Array.isArray(record?.scene_list)
+  compact.has_prose = Boolean(text.replace(/\s/g, '') && !text.includes('【占位正文】'))
+  compact.word_count = text.replace(/\s/g, '').length
+  compact.has_scene_plan = hasSceneArrays
+    ? Boolean(
+        (Array.isArray(record?.scene_breakdown) && record.scene_breakdown.length > 0)
+          || (Array.isArray(record?.scene_list) && record.scene_list.length > 0)
+      )
+    : Boolean(record?.has_scene_plan)
+  return compact
+}
+
+function detailVersion(kind: WorkspaceDetailKind, record: any) {
+  if (kind === 'chapter') return String(record?.updated_at || record?.version || record?.word_count || '')
+  if (kind === 'review') return `${record?.created_at || ''}:${record?.payload_bytes || 0}:${record?.status || ''}`
+  return `${record?.created_at || ''}:${record?.status || ''}:${record?.output_bytes || 0}:${record?.error_message || ''}`
+}
 
 export function resolveSelectedWorkspaceModelId(currentId: number | undefined, models: any[]) {
   if (!Array.isArray(models) || models.length === 0) return undefined
@@ -39,31 +116,64 @@ export function useNovelWorkspaceData({
   const [worldbuilding, setWorldbuilding] = useState<any[]>([])
   const [characters, setCharacters] = useState<any[]>([])
   const [outlines, setOutlines] = useState<any[]>([])
-  const [chapters, setChapters] = useState<any[]>([])
-  const [runRecords, setRunRecords] = useState<any[]>([])
-  const [reviews, setReviews] = useState<any[]>([])
+  const [chapterSummaries, setChapterSummaries] = useState<any[]>([])
+  const [runSummaries, setRunSummaries] = useState<any[]>([])
+  const [reviewSummaries, setReviewSummaries] = useState<any[]>([])
+  const [chapterDetailResults, setChapterDetailResults] = useState<WorkspaceDetailResult[]>([])
+  const [reviewDetailResults, setReviewDetailResults] = useState<WorkspaceDetailResult[]>([])
+  const [runDetailResults, setRunDetailResults] = useState<WorkspaceDetailResult[]>([])
   const [agentExecution, setAgentExecution] = useState<any | null>(null)
   const [pipeline, setPipeline] = useState<any | null>(null)
   const [models, setModels] = useState<any[]>([])
   const [selectedModelId, setSelectedModelId] = useState<number | undefined>()
   const [activeChapterId, setActiveChapterId] = useState<number | null>(null)
+  const chapterDetailEpochRef = useRef(0)
+  const reviewDetailEpochRef = useRef(0)
+  const runDetailEpochRef = useRef(0)
+  const chaptersRef = useRef<any[]>([])
+  const projectLoadEpochRef = useRef<ReturnType<typeof createWorkspaceRequestEpoch> | null>(null)
+  const projectLoadAbortRef = useRef<AbortController | null>(null)
+  const detailCacheRef = useRef<ReturnType<typeof createWorkspaceDetailCache> | null>(null)
+  if (!projectLoadEpochRef.current) projectLoadEpochRef.current = createWorkspaceRequestEpoch()
+  if (!detailCacheRef.current) {
+    detailCacheRef.current = createWorkspaceDetailCache(async (kind, id) => {
+      const url = kind === 'chapter'
+        ? `/novel/chapters/${id}`
+        : kind === 'review'
+          ? `/novel/reviews/${id}`
+          : `/novel/runs/${id}`
+      const response = await apiClient.get(url)
+      return response.data
+    })
+  }
 
   const loadProjectModules = useCallback(async () => {
     if (!projectId) return
+    projectLoadAbortRef.current?.abort()
+    const controller = new AbortController()
+    projectLoadAbortRef.current = controller
+    const requestEpoch = projectLoadEpochRef.current!.begin()
     setLoading(true)
     try {
+      const requestPlan = initialWorkspaceRequestPlan(projectId)
+      const compactRequest = (key: string) => {
+        const request = requestPlan.find(item => item.key === key)
+        if (!request) throw new Error(`workspace request missing: ${key}`)
+        return apiClient.get(request.url, { params: request.params, signal: controller.signal })
+      }
       const [pr, wr, cr, olr, chr, rnr, revr, plr, mr] = await Promise.all([
-        apiClient.get(`/novel/projects/${projectId}`),
-        apiClient.get(`/novel/projects/${projectId}/worldbuilding`),
-        apiClient.get(`/novel/projects/${projectId}/characters`),
-        apiClient.get(`/novel/projects/${projectId}/outlines`),
-        apiClient.get(`/novel/projects/${projectId}/chapters`),
-        apiClient.get('/novel/runs', { params: { project_id: projectId } }),
-        apiClient.get(`/novel/projects/${projectId}/reviews`),
-        apiClient.get(`/novel/projects/${projectId}/pipeline`).catch(() => ({ data: null })),
-        apiClient.get('/models').catch(() => ({ data: [] })),
+        apiClient.get(`/novel/projects/${projectId}`, { signal: controller.signal }),
+        apiClient.get(`/novel/projects/${projectId}/worldbuilding`, { signal: controller.signal }),
+        apiClient.get(`/novel/projects/${projectId}/characters`, { signal: controller.signal }),
+        apiClient.get(`/novel/projects/${projectId}/outlines`, { signal: controller.signal }),
+        compactRequest('chapters'),
+        compactRequest('runs'),
+        compactRequest('reviews'),
+        apiClient.get(`/novel/projects/${projectId}/pipeline`, { signal: controller.signal }).catch(() => ({ data: null })),
+        apiClient.get('/models', { signal: controller.signal }).catch(() => ({ data: [] })),
       ])
-      const nextChapters = Array.isArray(chr.data) ? chr.data : []
+      if (!projectLoadEpochRef.current?.isCurrent(requestEpoch) || controller.signal.aborted) return
+      const nextChapters = Array.isArray(chr.data) ? chr.data.map(compactChapterWorkspaceRecord) : []
       const nextModels = Array.isArray(mr.data) ? mr.data : []
       const nextReviews = Array.isArray(revr.data) ? revr.data : []
 
@@ -71,24 +181,123 @@ export function useNovelWorkspaceData({
       setWorldbuilding(Array.isArray(wr.data) ? wr.data : [])
       setCharacters(Array.isArray(cr.data) ? cr.data : [])
       setOutlines(Array.isArray(olr.data) ? olr.data : [])
-      setChapters(nextChapters)
-      setRunRecords(Array.isArray(rnr.data) ? rnr.data : [])
-      setReviews(nextReviews)
+      chapterDetailEpochRef.current += 1
+      reviewDetailEpochRef.current += 1
+      runDetailEpochRef.current += 1
+      setChapterDetailResults([])
+      setReviewDetailResults([])
+      setRunDetailResults([])
+      setChapterSummaries(nextChapters)
+      setRunSummaries(Array.isArray(rnr.data) ? rnr.data : [])
+      setReviewSummaries(nextReviews)
       setAgentExecution(null)
       setPipeline(plr.data?.pipeline || null)
       setModels(nextModels)
       setSelectedModelId(prev => resolveSelectedWorkspaceModelId(prev, nextModels))
       setActiveChapterId(prev => resolveActiveWorkspaceChapterId(prev, nextChapters))
     } catch {
-      message.error('无法加载项目工作台')
+      if (projectLoadEpochRef.current?.isCurrent(requestEpoch) && !controller.signal.aborted) {
+        message.error('无法加载项目工作台')
+      }
     } finally {
-      setLoading(false)
+      if (projectLoadEpochRef.current?.isCurrent(requestEpoch) && !controller.signal.aborted) setLoading(false)
     }
   }, [projectId])
 
   useEffect(() => {
     void loadProjectModules()
+    return () => {
+      projectLoadAbortRef.current?.abort()
+      projectLoadEpochRef.current?.invalidate()
+    }
   }, [loadProjectModules])
+
+  useEffect(() => {
+    detailCacheRef.current?.clear()
+    chapterDetailEpochRef.current += 1
+    reviewDetailEpochRef.current += 1
+    runDetailEpochRef.current += 1
+    setChapterDetailResults([])
+    setReviewDetailResults([])
+    setRunDetailResults([])
+  }, [projectId])
+
+  const chapterWorkingSet = useMemo(
+    () => selectChapterWorkingSet(chapterSummaries, activeChapterId),
+    [chapterSummaries, activeChapterId],
+  )
+
+  useEffect(() => {
+    const epoch = ++chapterDetailEpochRef.current
+    setChapterDetailResults([])
+    if (chapterWorkingSet.length === 0) return
+    void detailCacheRef.current?.loadMany('chapter', chapterWorkingSet.map(record => ({
+      id: Number(record.id),
+      version: detailVersion('chapter', record),
+    }))).then(results => {
+      if (epoch === chapterDetailEpochRef.current) setChapterDetailResults(results)
+    })
+  }, [projectId, chapterWorkingSet])
+
+  useEffect(() => {
+    const epoch = ++reviewDetailEpochRef.current
+    setReviewDetailResults([])
+    const ids = selectReviewDetailIds(reviewSummaries, chapterWorkingSet)
+    if (ids.length === 0) return
+    const byId = new Map(reviewSummaries.map(record => [Number(record?.id || 0), record]))
+    void detailCacheRef.current?.loadMany('review', ids.map(id => ({
+      id,
+      version: detailVersion('review', byId.get(id)),
+    }))).then(results => {
+      if (epoch === reviewDetailEpochRef.current) setReviewDetailResults(results)
+    })
+  }, [projectId, reviewSummaries, chapterWorkingSet])
+
+  useEffect(() => {
+    const epoch = ++runDetailEpochRef.current
+    setRunDetailResults([])
+    const ids = selectRunDetailIds(runSummaries)
+    if (ids.length === 0) return
+    const byId = new Map(runSummaries.map(record => [Number(record?.id || 0), record]))
+    void detailCacheRef.current?.loadMany('run', ids.map(id => ({
+      id,
+      version: detailVersion('run', byId.get(id)),
+    }))).then(results => {
+      if (epoch === runDetailEpochRef.current) setRunDetailResults(results)
+    })
+  }, [projectId, runSummaries])
+
+  const chapters = useMemo(
+    () => applyWorkspaceDetailResults(chapterSummaries, chapterDetailResults),
+    [chapterSummaries, chapterDetailResults],
+  )
+  const reviews = useMemo(
+    () => applyWorkspaceDetailResults(reviewSummaries, reviewDetailResults),
+    [reviewSummaries, reviewDetailResults],
+  )
+  const runRecords = useMemo(
+    () => applyWorkspaceDetailResults(runSummaries, runDetailResults),
+    [runSummaries, runDetailResults],
+  )
+
+  useEffect(() => {
+    chaptersRef.current = chapters
+  }, [chapters])
+
+  const setChapters = useCallback((update: any) => {
+    const current = chaptersRef.current
+    const next = typeof update === 'function' ? update(current) : update
+    if (!Array.isArray(next)) return
+    const normalizedNext = next.map(record => ({ ...record, ...compactChapterWorkspaceRecord(record) }))
+    chaptersRef.current = normalizedNext
+    setChapterSummaries(normalizedNext.map(compactChapterWorkspaceRecord))
+    const byId = new Map(normalizedNext.map(record => [Number(record?.id || 0), record]))
+    setChapterDetailResults(currentResults => currentResults.map(result => (
+      result.status === 'ready' && byId.has(result.id)
+        ? { ...result, record: byId.get(result.id) }
+        : result
+    )))
+  }, [])
 
   const activeChapter = useMemo(
     () => chapters.find(c => c.id === activeChapterId) || null,
