@@ -130,8 +130,8 @@ function exactHandoffFragments(value: any) {
 function relativeExactCoverageRegression(handoff: string, originalText: string, candidateText: string) {
   const fragments = exactHandoffFragments(handoff)
   if (fragments.size < 6) return false
-  const originalOpening = candidateOpeningText(originalText)
-  const candidateOpening = candidateOpeningText(candidateText)
+  const originalOpening = currentActionOpeningText(originalText)
+  const candidateOpening = currentActionOpeningText(candidateText)
   const originalHits = Array.from(fragments).filter(fragment => originalOpening.includes(fragment)).length
   const candidateHits = Array.from(fragments).filter(fragment => candidateOpening.includes(fragment)).length
   const originalCoverage = originalHits / fragments.size
@@ -141,13 +141,23 @@ function relativeExactCoverageRegression(handoff: string, originalText: string, 
     && candidateHits / Math.max(1, originalHits) <= 0.4
 }
 
-function openingAnchorCount(text: string, groups: readonly (readonly string[])[]) {
-  const openingText = candidateOpeningText(text)
-  return groups.filter(group => group.some(alias => conservativeAnchorMatch(alias, openingText))).length
-}
-
 function candidateOpeningText(text: string) {
   return String(text || '').slice(0, 500)
+}
+
+const NON_CURRENT_HANDOFF_SENTENCE_PATTERN = /照片|相片|旧照|消息里|短信里|来信里|档案里|记录里|梦里|梦中|已经是.{0,16}(?:年前|过去|往事)|成了过去|只是旧照片/u
+const DISMISSED_HANDOFF_STATE_PATTERN = /已经是.{0,16}(?:年前|过去|往事)|成了过去|(?:这些|那些|这一切|那一切).{0,8}(?:不重要|无关)|(?:没有回复|不再理会|丢在脑后|抛在脑后)/u
+
+function currentActionOpeningText(text: string) {
+  return candidateOpeningText(text)
+    .split(/(?<=[。！？!?；;\n])/u)
+    .filter(sentence => !NON_CURRENT_HANDOFF_SENTENCE_PATTERN.test(sentence))
+    .join('')
+}
+
+function openingAnchorCount(text: string, groups: readonly (readonly string[])[]) {
+  const openingText = currentActionOpeningText(text)
+  return groups.filter(group => group.some(alias => conservativeAnchorMatch(alias, openingText))).length
 }
 
 function hasExplicitCausalBridge(text: string) {
@@ -168,11 +178,11 @@ export function selectContinuitySafeProseCandidate(
   const originalAnchors = openingAnchorCount(original, groups)
   const candidateAnchors = openingAnchorCount(candidate, groups)
   const compoundItemStateGroup = groups.find(group => group.some(anchor => anchor.startsWith('__item_temperature__:')))
-  const originalHasCompoundItemState = Boolean(compoundItemStateGroup?.some(anchor => conservativeAnchorMatch(anchor, candidateOpeningText(original))))
-  const candidateHasCompoundItemState = Boolean(compoundItemStateGroup?.some(anchor => conservativeAnchorMatch(anchor, candidateOpeningText(candidate))))
+  const originalHasCompoundItemState = Boolean(compoundItemStateGroup?.some(anchor => conservativeAnchorMatch(anchor, currentActionOpeningText(original))))
+  const candidateHasCompoundItemState = Boolean(compoundItemStateGroup?.some(anchor => conservativeAnchorMatch(anchor, currentActionOpeningText(candidate))))
   const target = context?.chapter_target || context?.chapterTarget || context
   const transition = normalized(target?.scene_cards?.[0]?.transition_from_previous || target?.sceneCards?.[0]?.transitionFromPrevious)
-  const candidateOpening = normalized(candidateOpeningText(candidate))
+  const candidateOpening = normalized(currentActionOpeningText(candidate))
   const transitionMatched = Boolean(transition)
     && candidateAnchors >= 2
     && groups.filter(group => group.some(alias => transition.includes(normalized(alias)) && candidateOpening.includes(normalized(alias)))).length >= 2
@@ -186,7 +196,9 @@ export function selectContinuitySafeProseCandidate(
   const handoff = String(target?.previous_handoff || target?.previousHandoff || '')
   const relativeRegression = candidateAnchors < 3 && relativeExactCoverageRegression(handoff, original, candidate)
   const compoundItemStateRegression = originalAnchors >= 2 && originalHasCompoundItemState && !candidateHasCompoundItemState
-  const regressed = structuredRegression || relativeRegression || compoundItemStateRegression
+  const dismissedHandoffStateRegression = originalAnchors >= 2
+    && DISMISSED_HANDOFF_STATE_PATTERN.test(candidateOpeningText(candidate))
+  const regressed = structuredRegression || relativeRegression || compoundItemStateRegression || dismissedHandoffStateRegression
   if (!regressed) return { text: candidate, accepted: true, warning: null }
   return {
     text: original,
@@ -196,6 +208,33 @@ export function selectContinuitySafeProseCandidate(
       source: 'quality',
       message: `${options.candidate_stage || 'revision'} 候选丢失上一章章末交接，已保留修订前正文`,
       details: { original_anchor_count: originalAnchors, candidate_anchor_count: candidateAnchors },
+    },
+  }
+}
+
+export function assessInitialProseOpeningContinuity(text: string, context: any = {}) {
+  const target = context?.chapter_target || context?.chapterTarget || context
+  const previousHandoff = String(target?.previous_handoff || target?.previousHandoff || '')
+  const firstScene = target?.scene_cards?.[0] || target?.sceneCards?.[0] || {}
+  const transition = String(firstScene?.transition_from_previous || firstScene?.transitionFromPrevious || '')
+  const baseline = previousHandoff || transition
+  const groups = anchorGroups(context)
+  const baselineAnchorCount = openingAnchorCount(baseline, groups)
+  const required = Boolean(baseline) && baselineAnchorCount >= 2
+  if (!required) return { required: false, passed: true, failure: null }
+  const selection = selectContinuitySafeProseCandidate(baseline, text, context, { candidate_stage: 'initial_draft' })
+  if (selection.accepted) return { required: true, passed: true, failure: null }
+  return {
+    required: true,
+    passed: false,
+    failure: {
+      code: 'opening_handoff_disconnected',
+      source: 'canonical_continuity' as const,
+      message: '正文开篇未接住上一章强交接义务，已阻止断章初稿入库。',
+      details: {
+        baseline_anchor_count: baselineAnchorCount,
+        continuity_warning: selection.warning,
+      },
     },
   }
 }

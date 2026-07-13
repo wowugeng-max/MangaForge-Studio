@@ -274,6 +274,42 @@ describe('chapter prose storage patch builders', () => {
     expect(normalizeProseForStorage(source)).toBe(source)
   })
 
+  test('protects only the title marker when a long single-line chapter starts with its title', () => {
+    const body = [
+      '沈砚贴着地下通道的墙向前挪。',
+      '老陈守住身后的门。',
+      '铁链声越来越近。',
+      '暗金绢册忽然发热。',
+      '两人同时停下。',
+    ].join('').repeat(20)
+    const source = `第十一章 铁链声${body}`
+
+    const normalized = normalizeProseForStorage(source)
+
+    expect(normalized).not.toBe(source)
+    expect(normalized.startsWith('第十一章 ')).toBe(true)
+    expect(normalized).toContain('\n\n')
+    expectOnlyNewlinesInserted(source, normalized)
+  })
+
+  test('never splits inside long dialogue wrapped in ASCII double quotes', () => {
+    const dialogue = '"第一句话很长很长用来交代危险已经靠近。第二句话继续说明门后的怪物正在模仿呼吸。第三句话要求所有人不要回头也不要回答名字。第四句话告诉他们必须等灯亮之后才能离开。第五句话警告灯灭以前触碰门把就会死。第六句话让老陈带着名单先走。"'
+    const source = `${dialogue}${[
+      '沈砚贴着地下通道的墙向前挪。',
+      '老陈守住身后的门。',
+      '铁链声越来越近。',
+      '暗金绢册忽然发热。',
+      '两人同时停下。',
+    ].join('').repeat(12)}`
+
+    const normalized = normalizeProseForStorage(source)
+
+    expect(normalized).not.toBe(source)
+    expect(normalized).toContain(dialogue)
+    expect(normalized).not.toContain('离开。\n\n第五句话')
+    expectOnlyNewlinesInserted(source, normalized)
+  })
+
   test('adds post-draft director aliases only when a director is supplied', () => {
     const director = { status: 'ok', checks: ['delivery'] }
     const patch = buildChapterProseStoragePatch({

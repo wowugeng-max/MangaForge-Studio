@@ -51,12 +51,13 @@ function splitProseSentences(value: string): ProseSentence[] {
   let previousChar = ''
   for (const char of text) {
     buffer += char
-    if (PROSE_QUOTE_PAIRS[char]) quoteStack.push(PROSE_QUOTE_PAIRS[char])
     const closesCurrentQuote = quoteStack.at(-1) === char
     const closesQuotedSentence = closesCurrentQuote
       && quoteStack.length === 1
       && /[。！？!?；;]/.test(previousChar)
     if (closesCurrentQuote) quoteStack.pop()
+    else if (char === '"') quoteStack.push('"')
+    else if (PROSE_QUOTE_PAIRS[char]) quoteStack.push(PROSE_QUOTE_PAIRS[char])
     if ((/[。！？!?；;]/.test(char) && quoteStack.length === 0) || closesQuotedSentence) {
       if (buffer) sentences.push({ text: buffer, complete: true })
       buffer = ''
@@ -77,7 +78,7 @@ function splitProseSentences(value: string): ProseSentence[] {
 }
 
 function isDialogueParagraph(value: string) {
-  return /^[“‘「『][\s\S]*[”’」』]$/.test(String(value || '').trim())
+  return /^(?:[“‘「『][\s\S]*[”’」』]|"[\s\S]*")$/.test(String(value || '').trim())
 }
 
 function isProtectedProseLine(value: string) {
@@ -88,7 +89,14 @@ function isProtectedProseLine(value: string) {
 
 function addParagraphBreaksToWall(value: string) {
   const text = String(value || '')
-  if (proseCharCount(text) < 180 || isProtectedProseLine(text)) return text
+  if (proseCharCount(text) < 180) return text
+  const leadingTitle = text.match(/^#{0,6}\s*第[一二三四五六七八九十百千万两0-9]+章(?:[：:《「【_ -]+)?/)?.[0] || ''
+  if (leadingTitle && text.length > leadingTitle.length) {
+    const body = text.slice(leadingTitle.length)
+    const segmentedBody = addParagraphBreaksToWall(body)
+    return segmentedBody === body ? text : `${leadingTitle}\n\n${segmentedBody}`
+  }
+  if (isProtectedProseLine(text)) return text
   const sentences = splitProseSentences(text)
   if (sentences.filter(sentence => sentence.complete).length < 4) return text
 

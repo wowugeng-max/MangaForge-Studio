@@ -23,6 +23,10 @@ import { normalizeProseForStorage } from '../novel-writing/chapter-prose-storage
 import { buildCanonicalSurfaceIndex } from '../novel-writing/canonical-continuity'
 import { REAL_CHAPTER_11_CANONICAL_CONFLICT_PROSE } from '../novel-writing/fixtures/real-chapter-11-canonical-conflict'
 import {
+  chapter10HandoffFixture,
+  chapterScaleText,
+} from '../novel-writing/fixtures/chapter-10-11-handoff'
+import {
   buildFocusedProseReviewPrompt,
   buildProseQualityDecision,
   normalizeProseQualityReview,
@@ -189,6 +193,50 @@ describe('novel writing service prose quality wiring', () => {
     expect(error?.admission_failure).toMatchObject({ code: 'canonical_proper_noun_conflict', source: 'canonical_continuity' })
     expect(after).toEqual(before)
     expect(harness.modelCalls.scene_cards).toBe(1)
+    expect(harness.storeCalls).toBe(0)
+    expect(harness.storyStateCalls).toBe(0)
+    expect(harness.memoryTexts).toHaveLength(0)
+  })
+
+  test('rejects a disconnected initial chapter-11 opening without another model request or subjective quality gate', async () => {
+    const draftText = chapterScaleText(chapter10HandoffFixture.disconnectedRewriteOpening)
+    const sceneCards = [{
+      scene_no: 1,
+      title: '地下岔口',
+      transition_from_previous: '暗金绢册继续发热，沈砚和老陈在地下通道处理逼近的铁链声。',
+    }]
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText,
+      editorText: draftText,
+      chapterWordTarget: { mode: 'custom', target: 4000, min: 3000, max: 5000 },
+      initialSceneCards: sceneCards,
+      contextPackageOverride: {
+        chapter_target: {
+          id: 10,
+          chapter_no: 11,
+          title: '铁链声',
+          previous_handoff: chapter10HandoffFixture.previousChapterTail,
+          requiredHandoffAnchors: chapter10HandoffFixture.requiredAnchors,
+          scene_cards: sceneCards,
+          word_target: { mode: 'custom', target: 4000, min: 3000, max: 5000 },
+        },
+      },
+    })
+
+    const error = await harness.service.generateChapterForGroup(
+      harness.workspace,
+      harness.project.id,
+      harness.chapter.id,
+      { model_id: 217, auto_repair_quality_gate: false, production_mode: 'draft_only' },
+    ).then(() => null, (caught: any) => caught)
+
+    expect(error?.code).toBe('PROSE_QUALITY_GATE_BLOCKED')
+    expect(error?.admission_status).toBe('blocked_invalid')
+    expect(error?.admission_failure).toMatchObject({
+      code: 'opening_handoff_disconnected',
+      source: 'canonical_continuity',
+    })
+    expect(harness.modelCalls.revision).toBe(0)
     expect(harness.storeCalls).toBe(0)
     expect(harness.storyStateCalls).toBe(0)
     expect(harness.memoryTexts).toHaveLength(0)

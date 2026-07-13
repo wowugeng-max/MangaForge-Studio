@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { chapter10HandoffFixture, chapterScaleText } from './fixtures/chapter-10-11-handoff'
-import { selectContinuitySafeProseCandidate } from './prose-candidate-continuity'
+import {
+  assessInitialProseOpeningContinuity,
+  selectContinuitySafeProseCandidate,
+} from './prose-candidate-continuity'
 
 const context = {
   previous_handoff: chapter10HandoffFixture.previousChapterTail,
@@ -126,5 +129,41 @@ describe('continuity-safe prose candidate selection', () => {
     const original = chapterScaleText(chapter10HandoffFixture.continuousCandidateOpening)
     const candidate = chapterScaleText('三小时后，剧痛从骨髓深处炸开，他在陌生白房间里醒来。')
     expect(selectContinuitySafeProseCandidate(original, candidate, context).accepted).toBe(false)
+  })
+
+  for (const disconnectedOpening of [
+    '沈砚看见照片里的暗金绢册正在发热，背景正是地下通道，老陈站在角落。可那只是旧照片。此刻他在白色病房里醒来。',
+    '暗金绢册仍在发热。老陈和地下通道已经是三年前的事。沈砚推开新公司的门。',
+    '老陈发来的消息里写着：地下通道中的暗金绢册仍在发热。沈砚没有回复，转身参加婚礼。',
+  ]) {
+    test(`rejects surface-only handoff mentions outside the current action chain: ${disconnectedOpening.slice(0, 8)}`, () => {
+      const original = chapterScaleText(chapter10HandoffFixture.continuousCandidateOpening)
+      const candidate = chapterScaleText(disconnectedOpening)
+      expect(selectContinuitySafeProseCandidate(original, candidate, context).accepted).toBe(false)
+    })
+  }
+
+  test('rejects a disconnected initial draft when the chapter has a strong handoff obligation', () => {
+    const assessment = assessInitialProseOpeningContinuity(
+      chapterScaleText(chapter10HandoffFixture.disconnectedRewriteOpening),
+      context,
+    )
+
+    expect(assessment).toMatchObject({ required: true, passed: false })
+    expect(assessment.failure).toMatchObject({
+      code: 'opening_handoff_disconnected',
+      source: 'canonical_continuity',
+    })
+  })
+
+  test('accepts a connected initial draft and does not enforce weak handoff context', () => {
+    expect(assessInitialProseOpeningContinuity(
+      chapterScaleText(chapter10HandoffFixture.continuousCandidateOpening),
+      context,
+    )).toMatchObject({ required: true, passed: true, failure: null })
+    expect(assessInitialProseOpeningContinuity(
+      chapterScaleText(chapter10HandoffFixture.disconnectedRewriteOpening),
+      { previous_handoff: '他走了。' },
+    )).toMatchObject({ required: false, passed: true, failure: null })
   })
 })

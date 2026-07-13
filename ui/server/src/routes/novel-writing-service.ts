@@ -181,7 +181,10 @@ import {
   runProseQualityLoop,
   sanitizeProseQualityReviewTransport,
 } from '../novel-writing/prose-quality-loop'
-import { selectContinuitySafeProseCandidate } from '../novel-writing/prose-candidate-continuity'
+import {
+  assessInitialProseOpeningContinuity,
+  selectContinuitySafeProseCandidate,
+} from '../novel-writing/prose-candidate-continuity'
 import {
   classifyProseAdmission,
   markBlockedInvalidError,
@@ -46771,10 +46774,15 @@ export function createNovelWritingService(ctx: {
       cleanupRepairPunctuationNormalization,
       cleanupRepairDeslopTermNormalization,
     }))
+    const openingContinuityAssessment = assessInitialProseOpeningContinuity(finalText, contextPackage)
+    const openingContinuityFailures: ProseAdmissionHardFailure[] = openingContinuityAssessment.failure
+      ? [openingContinuityAssessment.failure]
+      : []
     if (isDraftOnly || isDraftReviewOnly) {
       const draftModeHardAdmission = classifyProseAdmission({
         hard_failures: [
           ...validateMinimalChapterProse(finalText).failures,
+          ...openingContinuityFailures,
           ...asArray(qualityLoop.decision?.hard_failures)
             .filter((failure: any) => failure?.source === 'deterministic' && failure?.key === 'canonical_proper_noun_conflict')
             .map((failure: any) => ({
@@ -47289,7 +47297,7 @@ export function createNovelWritingService(ctx: {
         details: failure,
       }))
     const hardAdmission = classifyProseAdmission({
-      hard_failures: [...minimalValidation.failures, ...canonicalFailures],
+      hard_failures: [...minimalValidation.failures, ...openingContinuityFailures, ...canonicalFailures],
     })
     if (hardAdmission.hard_failures.length) {
       const primaryFailure = hardAdmission.hard_failures[0]
