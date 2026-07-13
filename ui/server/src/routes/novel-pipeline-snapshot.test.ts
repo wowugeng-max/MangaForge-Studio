@@ -421,6 +421,10 @@ describe('novel pipeline snapshot', () => {
           { task_status: ' completed ' },
           { task_status: '\t\n', status: 'resolved' },
           { task_status: '\u00a0', taskStatus: 'resolved' },
+          { task_status: '\u1680', status: 'resolved' },
+          { task_status: '\u2003', status: '\u2028resolved\u2029' },
+          { task_status: '\u202f', taskStatus: 'resolved' },
+          { task_status: '\u205f', status: 'completed' },
           { task_status: '\u3000', taskStatus: ' resolved ' },
           { task_status: '\ufeff', status: 'completed' },
         ],
@@ -540,7 +544,9 @@ describe('novel pipeline snapshot', () => {
       expect(repairSemanticQuery).toContain(`json_type(run.output_ref, '${path}') = 'array'`)
       expect(repairSemanticQuery).toContain(`json_type(run.input_ref, '${path}') = 'array'`)
     }
-    expect(source).toContain("const NOVEL_PIPELINE_SQL_TRIM_CHARS = 'char(9) || char(10) || char(11) || char(12) || char(13) || char(32) || char(160) || char(12288) || char(65279)'")
+    for (const codePoint of [9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279]) {
+      expect(source).toContain(`char(${codePoint})`)
+    }
     expect(repairSemanticQuery).toContain("NULLIF(TRIM(CASE WHEN json_valid(repair_task.value) THEN json_extract(repair_task.value, '$.task_status') END, ${NOVEL_PIPELINE_SQL_TRIM_CHARS}), '')")
     expect(governanceRunQuery).not.toContain('input_ref')
     expect(governanceRunQuery).not.toContain('output_ref')

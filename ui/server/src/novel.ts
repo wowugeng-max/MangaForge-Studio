@@ -1383,7 +1383,11 @@ export type NovelPipelineSnapshot = {
 }
 
 const NOVEL_PIPELINE_CHAPTER_REVIEW_TYPES = ['prose_quality', 'editor_report', 'editor_revision'] as const
-const NOVEL_PIPELINE_SQL_TRIM_CHARS = 'char(9) || char(10) || char(11) || char(12) || char(13) || char(32) || char(160) || char(12288) || char(65279)'
+const NOVEL_PIPELINE_SQL_TRIM_CHARS = [
+  9, 10, 11, 12, 13, 32, 160, 5760,
+  8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202,
+  8232, 8233, 8239, 8287, 12288, 65279,
+].map(codePoint => `char(${codePoint})`).join(' || ')
 const NOVEL_PIPELINE_GOVERNANCE_REVIEW_TYPES = [
   'longform_production_repair_audit',
   'book_review',
