@@ -403,6 +403,27 @@ describe('novel sqlite persistence', () => {
     expect(projectsAfterJsonChange.map(item => item.title)).toEqual(['旧 JSON 项目'])
   })
 
+  test('imports legacy json before a project-scoped direct list is the first read', async () => {
+    const workspace = await tempWorkspace()
+    const timestamp = '2026-01-01T00:00:00.000Z'
+    await writeFile(join(workspace, 'novel-store.json'), JSON.stringify({
+      projects: [{ id: 1, title: '直接读取迁移', updated_at: timestamp }],
+      chapters: [{ id: 2, project_id: 1, chapter_no: 3, title: '第三章', chapter_text: '旧正文', scene_breakdown: [{ title: '旧场景' }], updated_at: timestamp }],
+      reviews: [{ id: 3, project_id: 1, review_type: 'quality', status: 'warning', summary: '旧审查', issues: ['待修订'], payload: '{"score":80}', created_at: timestamp }],
+      runs: [{ id: 4, project_id: 1, run_type: 'generate', step_name: 'chapter-3', status: 'success', created_at: timestamp }],
+    }))
+
+    expect(await listNovelChapters(workspace, 1)).toEqual([
+      expect.objectContaining({ id: 2, chapter_no: 3, chapter_text: '旧正文', scene_breakdown: [{ title: '旧场景' }] }),
+    ])
+    expect(await listNovelReviews(workspace, 1)).toEqual([
+      expect.objectContaining({ id: 3, issues: ['待修订'], payload: '{"score":80}' }),
+    ])
+    expect(await listNovelRuns(workspace, 1)).toEqual([
+      expect.objectContaining({ id: 4, step_name: 'chapter-3' }),
+    ])
+  })
+
   test('appends reviews and runs through sqlite without reloading the full novel store', async () => {
     const source = await readFile(join(import.meta.dir, 'novel.ts'), 'utf8')
     const createReviewStart = source.indexOf('export async function createNovelReview')
