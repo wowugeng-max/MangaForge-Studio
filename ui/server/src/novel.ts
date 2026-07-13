@@ -1383,6 +1383,7 @@ export type NovelPipelineSnapshot = {
 }
 
 const NOVEL_PIPELINE_CHAPTER_REVIEW_TYPES = ['prose_quality', 'editor_report', 'editor_revision'] as const
+const NOVEL_PIPELINE_SQL_TRIM_CHARS = 'char(9) || char(10) || char(11) || char(12) || char(13) || char(32) || char(160) || char(12288) || char(65279)'
 const NOVEL_PIPELINE_GOVERNANCE_REVIEW_TYPES = [
   'longform_production_repair_audit',
   'book_review',
@@ -1707,9 +1708,9 @@ export async function getNovelPipelineSnapshot(activeWorkspace: string, projectI
               )
             ) AS repair_task
             WHERE LOWER(COALESCE(
-              NULLIF(TRIM(CASE WHEN json_valid(repair_task.value) THEN json_extract(repair_task.value, '$.task_status') END), ''),
-              NULLIF(TRIM(CASE WHEN json_valid(repair_task.value) THEN json_extract(repair_task.value, '$.taskStatus') END), ''),
-              NULLIF(TRIM(CASE WHEN json_valid(repair_task.value) THEN json_extract(repair_task.value, '$.status') END), ''),
+              NULLIF(TRIM(CASE WHEN json_valid(repair_task.value) THEN json_extract(repair_task.value, '$.task_status') END, ${NOVEL_PIPELINE_SQL_TRIM_CHARS}), ''),
+              NULLIF(TRIM(CASE WHEN json_valid(repair_task.value) THEN json_extract(repair_task.value, '$.taskStatus') END, ${NOVEL_PIPELINE_SQL_TRIM_CHARS}), ''),
+              NULLIF(TRIM(CASE WHEN json_valid(repair_task.value) THEN json_extract(repair_task.value, '$.status') END, ${NOVEL_PIPELINE_SQL_TRIM_CHARS}), ''),
               ''
             )) NOT IN ('resolved', 'closed', 'completed', 'complete', 'done', 'success', 'ok')
           ) AS open_task_count
