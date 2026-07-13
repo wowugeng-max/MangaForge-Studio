@@ -265,9 +265,20 @@ describe('novel pipeline snapshot', () => {
     }
     insertRun.run(project.id, 'chapter_group_generation', 'failed-batch', 'failed', '', JSON.stringify({ chapters: [{ chapter_no: 8, status: 'failed' }], history: hugeHistory }), '2026-07-02T00:00:00.000Z')
     insertRun.run(project.id, 'chapter_group_generation', 'active-batch', 'paused', '', JSON.stringify({ chapters: [{ chapter_no: 8, status: 'pending' }], history: hugeHistory }), '2026-07-02T00:01:00.000Z')
+    insertRun.run(project.id, 'batch_generate_prose', 'active-batch-with-failure', 'paused', '', JSON.stringify({ chapters: [{ chapter_no: 8, status: 'failed' }], history: hugeHistory }), '2026-07-02T00:01:30.000Z')
+    insertRun.run(project.id, 'chapter_group_generation', 'unknown-batch-with-failure', 'mystery', '', JSON.stringify({ chapters: [{ chapter_no: 8, status: 'blocked' }], history: hugeHistory }), '2026-07-02T00:01:45.000Z')
     insertRun.run(project.id, 'longform_production_repair', 'open-repair', 'completed', '', JSON.stringify({ tasks: [{ status: 'open' }, { task_status: 'resolved' }] }), '2026-07-02T00:02:00.000Z')
     insertRun.run(project.id, 'longform_production_repair', 'paused-repair', 'paused', '', JSON.stringify({ tasks: [{ status: 'open' }, { status: 'resolved' }], history: hugeHistory }), '2026-07-02T00:03:00.000Z')
     insertRun.run(project.id, 'release_repair_queue', 'failed-repair', 'failed', JSON.stringify({ repair_tasks: [{ task_status: 'open' }], history: hugeHistory }), '', '2026-07-02T00:04:00.000Z')
+    for (let index = 0; index < 40; index += 1) {
+      const suffix = String(index).padStart(2, '0')
+      insertRun.run(project.id, 'chapter_group_generation', `historical-failed-${index}`, 'failed', '', hugeHistory, `2026-03-01T00:${suffix}:00.000Z`)
+      insertRun.run(project.id, 'batch_generate_prose', `historical-paused-${index}`, 'paused', '', hugeHistory, `2026-03-02T00:${suffix}:00.000Z`)
+      insertRun.run(project.id, 'longform_production_repair', `historical-repair-failed-${index}`, 'failed', hugeHistory, '', `2026-03-03T00:${suffix}:00.000Z`)
+      insertRun.run(project.id, 'release_repair_queue', `historical-repair-paused-${index}`, 'paused', '', hugeHistory, `2026-03-04T00:${suffix}:00.000Z`)
+    }
+    insertRun.run(project.id, 'chapter_group_generation', 'ninth-completed-failure', 'completed', '', JSON.stringify({ chapters: [{ chapter_no: 8, status: 'needs_repair' }], history: hugeHistory }), '2026-01-01T00:00:00.000Z')
+    insertRun.run(project.id, 'longform_production_repair', 'seventeenth-open-repair', 'completed', '', JSON.stringify({ tasks: [{ status: 'open' }], history: hugeHistory }), '2026-01-02T00:00:00.000Z')
     for (let index = 0; index < 30; index += 1) {
       insertRun.run(project.id, 'quality_benchmark', `governance-${index}`, 'completed', '', hugeHistory, `2026-04-${String((index % 28) + 1).padStart(2, '0')}T00:00:00.000Z`)
     }
@@ -292,6 +303,7 @@ describe('novel pipeline snapshot', () => {
     expect(snapshot!.reviews.length).toBeLessThanOrEqual(13)
     expect(snapshot!.runs.length).toBeLessThanOrEqual(12)
     expect(JSON.stringify(snapshot)).not.toContain(hugeHistory.slice(0, 200))
+    expect(JSON.stringify(snapshot).length).toBeLessThan(1_000_000)
     expect(snapshot!.reviews.filter((review: any) => review.review_type === 'quality_benchmark')).toHaveLength(1)
     expect(snapshot!.reviews.filter((review: any) => review.chapter_id === chapter.id).map((review: any) => review.review_type).sort()).toEqual([
       'editor_report',
@@ -308,10 +320,14 @@ describe('novel pipeline snapshot', () => {
     expect(snapshot!.runs.some((run: any) => run.status === 'failed')).toBe(true)
     expect(snapshot!.runs.some((run: any) => Number(run.pipeline_open_task_count || 0) === 1)).toBe(true)
     expect(snapshot!.runs.filter((run: any) => ['paused', 'failed'].includes(run.status)).map((run: any) => `${run.run_type}:${run.status}`).sort()).toEqual([
+      'batch_generate_prose:failed',
+      'batch_generate_prose:paused',
       'chapter_group_generation:failed',
       'chapter_group_generation:paused',
+      'longform_production_repair:failed',
       'longform_production_repair:paused',
       'release_repair_queue:failed',
+      'release_repair_queue:paused',
     ])
     expect(snapshot!.runs.every((run: any) => !run.input_ref && !run.output_ref)).toBe(true)
   })
@@ -327,9 +343,41 @@ describe('novel pipeline snapshot', () => {
     expect(block).not.toContain('chapter_versions')
     expect(block).not.toContain('readStore(activeWorkspace)')
     expect(block).not.toContain('listNovel')
-    for (const table of ['projects', 'chapters', 'outlines', 'worldbuilding', 'characters', 'reviews', 'runs']) {
-      expect(block.match(new RegExp(`FROM ${table}\\b`, 'g'))?.length || 0).toBe(1)
-    }
+    expect(block).toContain('WITH chapter_review_index AS MATERIALIZED')
+    expect(block).toContain('chapter_review_winners AS')
+    expect(block).toContain('JOIN reviews AS review ON review.id = winner.id')
+    expect(block).toContain('WITH batch_run_semantics AS MATERIALIZED')
+    expect(block).toContain('WITH repair_run_semantics AS MATERIALIZED')
+    expect(block).toContain('WITH governance_run_index AS')
+    expect(block).not.toContain('WITH run_base AS')
+    const chapterReviewRanking = block.slice(
+      block.indexOf('WITH chapter_review_index AS'),
+      block.indexOf('const governanceReviews'),
+    )
+    const batchSemanticQuery = block.slice(
+      block.indexOf('WITH batch_run_semantics AS'),
+      block.indexOf('const batchRows:'),
+    )
+    const repairSemanticQuery = block.slice(
+      block.indexOf('WITH repair_run_semantics AS'),
+      block.indexOf('const repairRows:'),
+    )
+    const governanceRunQuery = block.slice(
+      block.indexOf('WITH governance_run_index AS'),
+      block.indexOf('const governanceRuns:'),
+    )
+    expect(chapterReviewRanking).not.toContain('\n          payload,')
+    expect(chapterReviewRanking.indexOf('WHERE pipeline_rank = 1')).toBeLessThan(chapterReviewRanking.indexOf('JOIN reviews AS review'))
+    expect(batchSemanticQuery).not.toContain('output_ref,')
+    expect(batchSemanticQuery).not.toContain('ROW_NUMBER')
+    expect(batchSemanticQuery).toContain('END AS has_chapter_failure')
+    expect(repairSemanticQuery).not.toContain('input_ref,')
+    expect(repairSemanticQuery).not.toContain('output_ref,')
+    expect(repairSemanticQuery).not.toContain('ROW_NUMBER')
+    expect(repairSemanticQuery).toContain('AS open_task_count')
+    expect(governanceRunQuery).not.toContain('input_ref')
+    expect(governanceRunQuery).not.toContain('output_ref')
+    expect(governanceRunQuery).not.toContain('json_each')
     expect(block).toContain('AS chapter_text')
     expect(block).toContain('WHERE project_id = ?')
   })

@@ -1341,29 +1341,6 @@ export type NovelPipelineSnapshot = {
   runs: NovelRunRecord[]
 }
 
-const NOVEL_PIPELINE_REVIEW_TYPES = [
-  'prose_quality',
-  'editor_report',
-  'editor_revision',
-  'longform_production_repair_audit',
-  'book_review',
-  'quality_benchmark',
-  'delivery_risk_convergence',
-] as const
-
-const NOVEL_PIPELINE_RUN_TYPES = [
-  'chapter_group_generation',
-  'batch_generate_prose',
-  'longform_production_repair',
-  'release_repair_queue',
-  'longform_creation_diagnosis',
-  'longform_pressure_test',
-  'quality_benchmark',
-  'book_review',
-  'regression_benchmark',
-  'first30_retention_diagnosis',
-] as const
-
 const NOVEL_PIPELINE_CHAPTER_REVIEW_TYPES = ['prose_quality', 'editor_report', 'editor_revision'] as const
 const NOVEL_PIPELINE_GOVERNANCE_REVIEW_TYPES = [
   'longform_production_repair_audit',
@@ -1471,105 +1448,174 @@ export async function getNovelPipelineSnapshot(activeWorkspace: string, projectI
       WHERE project_id = ?
     `).all(projectId) as any[]).map(characterFromRow)
 
-    const reviewPlaceholders = NOVEL_PIPELINE_REVIEW_TYPES.map(() => '?').join(', ')
     const chapterReviewPlaceholders = NOVEL_PIPELINE_CHAPTER_REVIEW_TYPES.map(() => '?').join(', ')
     const governanceReviewPlaceholders = NOVEL_PIPELINE_GOVERNANCE_REVIEW_TYPES.map(() => '?').join(', ')
-    const reviews = (db.query(`
-      WITH review_candidates AS (
+    const chapterReviews = (db.query(`
+      WITH chapter_review_index AS MATERIALIZED (
         SELECT
           id,
-          project_id,
           review_type,
-          status,
-          payload,
           created_at,
           CASE WHEN json_valid(payload) THEN CAST(json_extract(payload, '$.chapter_id') AS INTEGER) END AS chapter_id,
           CASE WHEN json_valid(payload) THEN CAST(json_extract(payload, '$.chapter_no') AS INTEGER) END AS chapter_no
         FROM reviews
         WHERE project_id = ?
-          AND review_type IN (${reviewPlaceholders})
-          AND (
-            review_type IN (${governanceReviewPlaceholders})
-            OR (
-              review_type IN (${chapterReviewPlaceholders})
-              AND json_valid(payload)
-              AND CAST(json_extract(payload, '$.chapter_id') AS INTEGER) IN (?, ?, ?)
-            )
-          )
-      ), ranked_reviews AS (
+          AND review_type IN (${chapterReviewPlaceholders})
+      ), ranked_chapter_reviews AS (
         SELECT
           id,
-          project_id,
           review_type,
-          status,
-          payload,
           created_at,
           chapter_id,
           chapter_no,
           ROW_NUMBER() OVER (
-            PARTITION BY review_type, CASE
-              WHEN review_type IN (${chapterReviewPlaceholders})
-                THEN COALESCE('id:' || chapter_id, 'no:' || chapter_no, 'chapter:unknown')
-              ELSE 'project'
-            END
+            PARTITION BY review_type, chapter_id
             ORDER BY created_at DESC, id DESC
           ) AS pipeline_rank
-        FROM review_candidates
+        FROM chapter_review_index
+        WHERE chapter_id IN (?, ?, ?)
+      ), chapter_review_winners AS (
+        SELECT id, chapter_id, chapter_no
+        FROM ranked_chapter_reviews
+        WHERE pipeline_rank = 1
       )
       SELECT
-        id,
-        project_id,
-        chapter_id,
-        chapter_no,
-        review_type,
-        status,
+        review.id,
+        review.project_id,
+        winner.chapter_id,
+        winner.chapter_no,
+        review.review_type,
+        review.status,
         '' AS summary,
         '[]' AS issues,
-        CASE WHEN review_type IN (${chapterReviewPlaceholders}) THEN payload ELSE '' END AS payload,
-        created_at
-      FROM ranked_reviews
-      WHERE pipeline_rank = 1
+        review.payload,
+        review.created_at
+      FROM chapter_review_winners AS winner
+      JOIN reviews AS review ON review.id = winner.id
     `).all(
       projectId,
-      ...NOVEL_PIPELINE_REVIEW_TYPES,
-      ...NOVEL_PIPELINE_GOVERNANCE_REVIEW_TYPES,
       ...NOVEL_PIPELINE_CHAPTER_REVIEW_TYPES,
       ...chapterWindow,
-      ...NOVEL_PIPELINE_CHAPTER_REVIEW_TYPES,
-      ...NOVEL_PIPELINE_CHAPTER_REVIEW_TYPES,
     ) as any[]).map(reviewFromRow)
+    const governanceReviews = (db.query(`
+      SELECT
+        -MIN(id) AS id,
+        project_id,
+        review_type,
+        MAX(created_at) AS created_at
+      FROM reviews
+      WHERE project_id = ? AND review_type IN (${governanceReviewPlaceholders})
+      GROUP BY project_id, review_type
+    `).all(projectId, ...NOVEL_PIPELINE_GOVERNANCE_REVIEW_TYPES) as any[]).map(row => reviewFromRow({
+      ...row,
+      status: 'ok',
+      summary: '',
+      issues: '[]',
+      payload: '',
+    }))
+    const reviews = [...chapterReviews, ...governanceReviews]
 
-    const runPlaceholders = NOVEL_PIPELINE_RUN_TYPES.map(() => '?').join(', ')
     const batchRunPlaceholders = NOVEL_PIPELINE_BATCH_RUN_TYPES.map(() => '?').join(', ')
     const repairRunPlaceholders = NOVEL_PIPELINE_REPAIR_RUN_TYPES.map(() => '?').join(', ')
     const governanceRunPlaceholders = NOVEL_PIPELINE_GOVERNANCE_RUN_TYPES.map(() => '?').join(', ')
-    const runs = db.query(`
-      WITH run_base AS (
+    const batchSemanticRows = db.query(`
+      WITH batch_run_semantics AS MATERIALIZED (
         SELECT
-          id,
-          project_id,
-          run_type,
-          step_name,
-          status,
-          LOWER(status) AS status_norm,
-          '' AS input_ref,
-          '' AS output_ref,
-          created_at,
-          (
-            SELECT COUNT(*)
-            FROM json_each(CASE WHEN json_valid(output_ref) THEN output_ref ELSE '{}' END, '$.chapters') AS chapter_result
+          run.id,
+          run.project_id,
+          run.run_type,
+          LOWER(run.status) AS status_norm,
+          run.created_at,
+          CASE WHEN EXISTS (
+            SELECT 1
+            FROM json_each(CASE WHEN json_valid(run.output_ref) THEN run.output_ref ELSE '{}' END, '$.chapters') AS chapter_result
             WHERE LOWER(COALESCE(json_extract(chapter_result.value, '$.status'), '')) IN ('failed', 'error', 'blocked', 'needs_repair')
-          ) AS chapter_failure_count,
+          ) THEN 1 ELSE 0 END AS has_chapter_failure
+        FROM runs AS run
+        WHERE run.project_id = ? AND run.run_type IN (${batchRunPlaceholders})
+      )
+      SELECT
+        -MIN(id) AS id,
+        project_id,
+        run_type,
+        MAX(created_at) AS created_at,
+        SUM(CASE
+          WHEN status_norm IN ('completed', 'complete', 'success', 'succeeded', 'done', 'ok') AND has_chapter_failure = 0 THEN 1
+          ELSE 0
+        END) AS successful_run_count,
+        SUM(CASE
+          WHEN status_norm IN ('failed', 'error', 'blocked', 'cancelled') OR has_chapter_failure = 1 THEN 1
+          ELSE 0
+        END) AS failed_run_count,
+        SUM(CASE
+          WHEN status_norm IN ('queued', 'ready', 'running', 'paused', 'pending', 'needs_approval') THEN 1
+          ELSE 0
+        END) AS active_run_count
+      FROM batch_run_semantics
+      GROUP BY project_id, run_type
+    `).all(projectId, ...NOVEL_PIPELINE_BATCH_RUN_TYPES) as any[]
+    const batchRows: NovelRunRecord[] = []
+    for (const row of batchSemanticRows) {
+      const shared = {
+        project_id: Number(row.project_id || projectId),
+        run_type: String(row.run_type || ''),
+        input_ref: '',
+        output_ref: '',
+        created_at: String(row.created_at || ''),
+        pipeline_open_task_count: 0,
+      }
+      const successfulCount = Math.max(0, Number(row.successful_run_count || 0))
+      const failedCount = Math.max(0, Number(row.failed_run_count || 0))
+      const activeCount = Math.max(0, Number(row.active_run_count || 0))
+      if (successfulCount) batchRows.push({
+        ...shared,
+        id: Number(row.id || 0),
+        step_name: 'pipeline-completed-batch',
+        status: 'completed',
+        pipeline_run_count: successfulCount,
+        pipeline_chapter_failure_count: 0,
+      })
+      if (failedCount) batchRows.push({
+        ...shared,
+        id: Number(row.id || 0) - 1,
+        step_name: 'pipeline-failed-batch',
+        status: 'failed',
+        pipeline_run_count: failedCount,
+        pipeline_chapter_failure_count: 1,
+      })
+      if (activeCount) batchRows.push({
+        ...shared,
+        id: Number(row.id || 0) - 2,
+        step_name: 'pipeline-active-batch',
+        status: 'paused',
+        pipeline_run_count: activeCount,
+        pipeline_chapter_failure_count: 0,
+      })
+    }
+
+    const repairSemanticRows = db.query(`
+      WITH repair_run_semantics AS MATERIALIZED (
+        SELECT
+          run.id,
+          run.project_id,
+          run.run_type,
+          LOWER(run.status) AS status_norm,
+          run.created_at,
+          COALESCE(json_array_length(CASE WHEN json_valid(run.output_ref) THEN run.output_ref ELSE '{}' END, '$.tasks'), 0)
+            + COALESCE(json_array_length(CASE WHEN json_valid(run.output_ref) THEN run.output_ref ELSE '{}' END, '$.repair_tasks'), 0)
+            + COALESCE(json_array_length(CASE WHEN json_valid(run.input_ref) THEN run.input_ref ELSE '{}' END, '$.tasks'), 0)
+            + COALESCE(json_array_length(CASE WHEN json_valid(run.input_ref) THEN run.input_ref ELSE '{}' END, '$.repair_tasks'), 0)
+            AS task_count,
           (
             SELECT COUNT(*)
             FROM (
-              SELECT value FROM json_each(CASE WHEN json_valid(output_ref) THEN output_ref ELSE '{}' END, '$.tasks')
+              SELECT value FROM json_each(CASE WHEN json_valid(run.output_ref) THEN run.output_ref ELSE '{}' END, '$.tasks')
               UNION ALL
-              SELECT value FROM json_each(CASE WHEN json_valid(output_ref) THEN output_ref ELSE '{}' END, '$.repair_tasks')
+              SELECT value FROM json_each(CASE WHEN json_valid(run.output_ref) THEN run.output_ref ELSE '{}' END, '$.repair_tasks')
               UNION ALL
-              SELECT value FROM json_each(CASE WHEN json_valid(input_ref) THEN input_ref ELSE '{}' END, '$.tasks')
+              SELECT value FROM json_each(CASE WHEN json_valid(run.input_ref) THEN run.input_ref ELSE '{}' END, '$.tasks')
               UNION ALL
-              SELECT value FROM json_each(CASE WHEN json_valid(input_ref) THEN input_ref ELSE '{}' END, '$.repair_tasks')
+              SELECT value FROM json_each(CASE WHEN json_valid(run.input_ref) THEN run.input_ref ELSE '{}' END, '$.repair_tasks')
             ) AS repair_task
             WHERE LOWER(COALESCE(
               CASE WHEN json_valid(repair_task.value) THEN json_extract(repair_task.value, '$.task_status') END,
@@ -1578,9 +1624,90 @@ export async function getNovelPipelineSnapshot(activeWorkspace: string, projectI
               ''
             )) NOT IN ('resolved', 'closed', 'completed', 'complete', 'done', 'success', 'ok')
           ) AS open_task_count
+        FROM runs AS run
+        WHERE run.project_id = ? AND run.run_type IN (${repairRunPlaceholders})
+      )
+      SELECT
+        -MIN(id) AS id,
+        project_id,
+        run_type,
+        MAX(created_at) AS created_at,
+        SUM(open_task_count) AS open_task_count,
+        SUM(CASE WHEN status_norm IN ('failed', 'error', 'blocked', 'cancelled') THEN 1 ELSE 0 END) AS failed_run_count,
+        SUM(CASE WHEN status_norm IN ('queued', 'ready', 'running', 'paused', 'pending', 'needs_approval') THEN 1 ELSE 0 END) AS active_run_count,
+        SUM(CASE
+          WHEN status_norm NOT IN (
+            'completed', 'complete', 'success', 'succeeded', 'done', 'ok',
+            'failed', 'error', 'blocked', 'cancelled',
+            'queued', 'ready', 'running', 'paused', 'pending', 'needs_approval'
+          ) AND task_count = 0 THEN 1
+          ELSE 0
+        END) AS incomplete_run_count
+      FROM repair_run_semantics
+      GROUP BY project_id, run_type
+    `).all(projectId, ...NOVEL_PIPELINE_REPAIR_RUN_TYPES) as any[]
+    const repairRows: NovelRunRecord[] = []
+    for (const row of repairSemanticRows) {
+      const shared = {
+        project_id: Number(row.project_id || projectId),
+        run_type: String(row.run_type || ''),
+        input_ref: '',
+        output_ref: '',
+        created_at: String(row.created_at || ''),
+        pipeline_chapter_failure_count: 0,
+      }
+      const failedCount = Math.max(0, Number(row.failed_run_count || 0))
+      const activeCount = Math.max(0, Number(row.active_run_count || 0))
+      const incompleteCount = Math.max(0, Number(row.incomplete_run_count || 0))
+      const openTaskCount = Math.max(0, Number(row.open_task_count || 0))
+      if (failedCount) repairRows.push({
+        ...shared,
+        id: Number(row.id || 0),
+        step_name: 'pipeline-failed-repair',
+        status: 'failed',
+        pipeline_run_count: failedCount,
+        pipeline_open_task_count: 0,
+      })
+      if (activeCount) repairRows.push({
+        ...shared,
+        id: Number(row.id || 0) - 1,
+        step_name: 'pipeline-active-repair',
+        status: 'paused',
+        pipeline_run_count: activeCount,
+        pipeline_open_task_count: 0,
+      })
+      if (incompleteCount) repairRows.push({
+        ...shared,
+        id: Number(row.id || 0) - 2,
+        step_name: 'pipeline-incomplete-repair',
+        status: 'pending',
+        pipeline_run_count: incompleteCount,
+        pipeline_open_task_count: 0,
+      })
+      if (openTaskCount) repairRows.push({
+        ...shared,
+        id: Number(row.id || 0) - 3,
+        step_name: 'pipeline-open-repair',
+        status: 'completed',
+        pipeline_run_count: 1,
+        pipeline_open_task_count: openTaskCount,
+      })
+    }
+
+    const governanceRows = db.query(`
+      WITH governance_run_index AS (
+        SELECT
+          id,
+          project_id,
+          run_type,
+          step_name,
+          status,
+          created_at
         FROM runs
-        WHERE project_id = ? AND run_type IN (${runPlaceholders})
-      ), governance_ranked AS (
+        WHERE project_id = ?
+          AND run_type IN (${governanceRunPlaceholders})
+          AND LOWER(status) IN ('completed', 'complete', 'success', 'succeeded', 'done', 'ok')
+      ), ranked_governance_runs AS (
         SELECT
           id,
           project_id,
@@ -1589,54 +1716,24 @@ export async function getNovelPipelineSnapshot(activeWorkspace: string, projectI
           status,
           created_at,
           ROW_NUMBER() OVER (PARTITION BY run_type ORDER BY created_at DESC, id DESC) AS pipeline_rank
-        FROM run_base
-        WHERE run_type IN (${governanceRunPlaceholders})
-          AND status_norm IN ('completed', 'complete', 'success', 'succeeded', 'done', 'ok')
+        FROM governance_run_index
       )
-      SELECT
-        id, project_id, run_type, step_name, status, input_ref, output_ref, created_at,
-        1 AS pipeline_run_count,
-        chapter_failure_count AS pipeline_chapter_failure_count,
-        open_task_count AS pipeline_open_task_count
-      FROM run_base
-      WHERE status_norm NOT IN ('completed', 'complete', 'success', 'succeeded', 'done', 'ok')
-      UNION ALL
-      SELECT
-        -MIN(id), project_id, run_type, 'pipeline-completed-batch', 'completed', '', '', MAX(created_at),
-        COUNT(*) AS pipeline_run_count,
-        CASE WHEN chapter_failure_count > 0 THEN 1 ELSE 0 END AS pipeline_chapter_failure_count,
-        0 AS pipeline_open_task_count
-      FROM run_base
-      WHERE run_type IN (${batchRunPlaceholders})
-        AND status_norm IN ('completed', 'complete', 'success', 'succeeded', 'done', 'ok')
-      GROUP BY project_id, run_type, CASE WHEN chapter_failure_count > 0 THEN 1 ELSE 0 END
-      UNION ALL
-      SELECT
-        -MIN(id), project_id, run_type, 'pipeline-open-repair', 'completed', '', '', MAX(created_at),
-        COUNT(*) AS pipeline_run_count,
-        0 AS pipeline_chapter_failure_count,
-        SUM(open_task_count) AS pipeline_open_task_count
-      FROM run_base
-      WHERE run_type IN (${repairRunPlaceholders})
-        AND status_norm IN ('completed', 'complete', 'success', 'succeeded', 'done', 'ok')
-        AND open_task_count > 0
-      GROUP BY project_id, run_type
-      UNION ALL
-      SELECT
-        id, project_id, run_type, step_name, status, '', '', created_at,
-        1 AS pipeline_run_count,
-        0 AS pipeline_chapter_failure_count,
-        0 AS pipeline_open_task_count
-      FROM governance_ranked
+      SELECT id, project_id, run_type, step_name, status, created_at
+      FROM ranked_governance_runs
       WHERE pipeline_rank = 1
-      ORDER BY created_at DESC
     `).all(
       projectId,
-      ...NOVEL_PIPELINE_RUN_TYPES,
       ...NOVEL_PIPELINE_GOVERNANCE_RUN_TYPES,
-      ...NOVEL_PIPELINE_BATCH_RUN_TYPES,
-      ...NOVEL_PIPELINE_REPAIR_RUN_TYPES,
-    ) as NovelRunRecord[]
+    ) as any[]
+    const governanceRuns: NovelRunRecord[] = governanceRows.map(row => ({
+      ...row,
+      input_ref: '',
+      output_ref: '',
+      pipeline_run_count: 1,
+      pipeline_chapter_failure_count: 0,
+      pipeline_open_task_count: 0,
+    }))
+    const runs = [...batchRows.filter(row => Number(row.pipeline_run_count || 0) > 0), ...repairRows, ...governanceRuns]
 
     return {
       project: projectFromRow(projectRow),
