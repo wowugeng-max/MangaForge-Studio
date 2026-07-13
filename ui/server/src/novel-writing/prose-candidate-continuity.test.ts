@@ -60,10 +60,17 @@ describe('continuity-safe prose candidate selection', () => {
     expect(selectContinuitySafeProseCandidate(original, bridged, context).accepted).toBe(true)
   })
 
-  test('does not guess synonym equivalence without structured aliases', () => {
+  test('accepts the production-shaped synonym rewrite without hand-authored alias groups', () => {
     const original = chapterScaleText(chapter10HandoffFixture.continuousCandidateOpening)
     const synonym = chapterScaleText('金色旧册贴着胸口再次升温，沈砚扶住陈叔，在地底甬道循着锁链摩擦声后退。')
-    expect(selectContinuitySafeProseCandidate(original, synonym, context).accepted).toBe(false)
+    expect(selectContinuitySafeProseCandidate(original, synonym, context).accepted).toBe(true)
+  })
+
+  test('does not accept merely similar words when two independent handoff states are not preserved', () => {
+    const original = chapterScaleText('苏禾守在临江车站。\n\n青铜罗盘正在倒转。')
+    const candidate = chapterScaleText('苏青走进临江商场。\n\n她拿起铜色餐盘。')
+    const similarContext = { requiredHandoffAnchors: ['苏禾', '临江车站', '青铜罗盘', '罗盘倒转'] }
+    expect(selectContinuitySafeProseCandidate(original, candidate, similarContext).accepted).toBe(false)
   })
 
   test('does not police a weak original opening that never established two handoff anchors', () => {

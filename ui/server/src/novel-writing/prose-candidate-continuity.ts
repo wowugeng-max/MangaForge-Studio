@@ -70,10 +70,48 @@ function anchorGroups(context: any) {
   return [...equivalents, ...singles.filter(group => !equivalents.some(equivalent => equivalent.some(alias => normalized(alias) === normalized(group[0]))))].slice(0, 12)
 }
 
+function chineseNgrams(text: string, minLength = 2, maxLength = 8) {
+  const values = new Set<string>()
+  for (const run of String(text || '').match(/[\p{Script=Han}]+/gu) || []) {
+    for (let length = minLength; length <= Math.min(maxLength, run.length); length += 1) {
+      for (let index = 0; index + length <= run.length; index += 1) values.add(run.slice(index, index + length))
+    }
+  }
+  return Array.from(values).slice(0, 800)
+}
+
+function commonChineseSubsequenceLength(left: string, right: string) {
+  const rows = Array.from({ length: left.length + 1 }, () => Array(right.length + 1).fill(0))
+  for (let i = 1; i <= left.length; i += 1) for (let j = 1; j <= right.length; j += 1) {
+    rows[i][j] = left[i - 1] === right[j - 1] ? rows[i - 1][j - 1] + 1 : Math.max(rows[i - 1][j], rows[i][j - 1])
+  }
+  return rows[left.length][right.length]
+}
+
+function conservativeAnchorMatch(anchor: string, opening: string, ngrams: string[]) {
+  const exact = normalized(anchor)
+  if (!exact) return false
+  if (normalized(opening).includes(exact)) return true
+  if (/^老[\p{Script=Han}]$/u.test(anchor)) {
+    const core = anchor.slice(1)
+    if (ngrams.some(token => token.length === 2 && token.startsWith(core) && /[叔伯哥姐姨婶爷]/u.test(token[1]))) return true
+  }
+  if (/^[\p{Script=Han}][叔伯哥姐姨婶爷]$/u.test(anchor)) {
+    const core = anchor[0]
+    if (ngrams.includes(`老${core}`)) return true
+  }
+  if (!/^[\p{Script=Han}]{3,8}$/u.test(anchor)) return false
+  return ngrams.some(token => {
+    if (token.length < 3 || Math.abs(token.length - anchor.length) > 1) return false
+    const common = commonChineseSubsequenceLength(anchor, token)
+    return common >= 2 && common / Math.min(anchor.length, token.length) >= 0.5
+  })
+}
+
 function openingAnchorCount(text: string, groups: readonly (readonly string[])[]) {
   const openingText = candidateOpeningText(text)
-  const opening = normalized(openingText)
-  return groups.filter(group => group.some(alias => opening.includes(normalized(alias)))).length
+  const ngrams = chineseNgrams(openingText)
+  return groups.filter(group => group.some(alias => conservativeAnchorMatch(alias, openingText, ngrams))).length
 }
 
 function candidateOpeningText(text: string) {
@@ -103,8 +141,11 @@ export function selectContinuitySafeProseCandidate(
   const transitionMatched = Boolean(transition)
     && candidateAnchors >= 2
     && groups.filter(group => group.some(alias => transition.includes(normalized(alias)) && candidateOpening.includes(normalized(alias)))).length >= 2
+  const preservesEnoughIndependentState = candidateAnchors >= Math.min(3, originalAnchors)
+    && candidateAnchors / Math.max(1, originalAnchors) >= 0.5
   const regressed = originalAnchors >= 2
     && candidateAnchors <= Math.max(0, originalAnchors - 2)
+    && !preservesEnoughIndependentState
     && !transitionMatched
     && !(candidateAnchors >= 2 && hasExplicitCausalBridge(candidate))
   if (!regressed) return { text: candidate, accepted: true, warning: null }
