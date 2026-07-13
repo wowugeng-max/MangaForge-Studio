@@ -46083,6 +46083,13 @@ export function createNovelWritingService(ctx: {
     }
     await onStage('draft', { status: 'success', word_count: countProseChars(chapterText), modelName: (draftResult as any).modelName, scene_status: 'generated', prompt_diagnostics: draftPromptDiagnostics, plain_text_fallback_used: Boolean(plainProseFallback && !targetProse?.chapter_text && !targetProse?.chapterText && !resultPayload?.chapter_text && !resultPayload?.chapterText) })
     let finalText = String(chapterText || '')
+    const initialOpeningContinuityAssessment = assessInitialProseOpeningContinuity(finalText, contextPackage)
+    if (initialOpeningContinuityAssessment.failure) {
+      const failure = initialOpeningContinuityAssessment.failure
+      throw markBlockedInvalidError(Object.assign(new Error(failure.message), {
+        code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+      }), failure)
+    }
     let finalSceneBreakdown = targetProse?.scene_breakdown || targetProse?.sceneBreakdown || resultPayload?.scene_breakdown || resultPayload?.sceneBreakdown || []
     let ohStoryDeliveryReceipts = normalizeStoredOhStoryDeliveryReceipts({
       ...(resultPayload || {}),
@@ -46825,7 +46832,9 @@ export function createNovelWritingService(ctx: {
       if (draftModeHardAdmission.hard_failures.length) {
         const primaryFailure = draftModeHardAdmission.hard_failures[0]
         throw markBlockedInvalidError(Object.assign(new Error(primaryFailure.message), {
-          code: primaryFailure.source === 'canonical_continuity' ? 'PROSE_QUALITY_GATE_BLOCKED' : 'PROSE_INVALID',
+          code: primaryFailure.code === 'opening_handoff_disconnected'
+            ? 'PROSE_ADMISSION_BLOCKED_INVALID'
+            : primaryFailure.source === 'canonical_continuity' ? 'PROSE_QUALITY_GATE_BLOCKED' : 'PROSE_INVALID',
           quality_loop: qualityLoopDiagnostics,
         }), primaryFailure)
       }
@@ -47331,7 +47340,9 @@ export function createNovelWritingService(ctx: {
     if (hardAdmission.hard_failures.length) {
       const primaryFailure = hardAdmission.hard_failures[0]
       const error = Object.assign(new Error(primaryFailure.message), {
-        code: primaryFailure.source === 'canonical_continuity' ? 'PROSE_QUALITY_GATE_BLOCKED' : 'PROSE_INVALID',
+        code: primaryFailure.code === 'opening_handoff_disconnected'
+          ? 'PROSE_ADMISSION_BLOCKED_INVALID'
+          : primaryFailure.source === 'canonical_continuity' ? 'PROSE_QUALITY_GATE_BLOCKED' : 'PROSE_INVALID',
         quality_loop: qualityLoopDiagnostics,
       })
       throw markBlockedInvalidError(error, primaryFailure)

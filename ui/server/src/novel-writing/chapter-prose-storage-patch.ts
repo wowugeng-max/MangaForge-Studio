@@ -87,10 +87,24 @@ function isProtectedProseLine(value: string) {
     || /^(?:[-*+]\s+|\d+[.．、)）]\s*|[一二三四五六七八九十]+[、.．)）]\s*)/.test(line)
 }
 
+function extractLeadingBracketedChapterTitle(value: string) {
+  const text = String(value || '')
+  const marker = text.match(/^#{0,6}\s*第[一二三四五六七八九十百千万两0-9]+章/)?.[0] || ''
+  if (!marker) return ''
+  const afterMarker = text.slice(marker.length)
+  const spacing = afterMarker.match(/^\s*/)?.[0] || ''
+  const opening = afterMarker.slice(spacing.length, spacing.length + 1)
+  const closing = opening === '《' ? '》' : opening === '「' ? '」' : opening === '【' ? '】' : ''
+  if (!closing) return ''
+  const closingIndex = afterMarker.indexOf(closing, spacing.length + 1)
+  if (closingIndex < 0 || closingIndex > spacing.length + 80) return ''
+  return text.slice(0, marker.length + closingIndex + 1)
+}
+
 function addParagraphBreaksToWall(value: string) {
   const text = String(value || '')
   if (proseCharCount(text) < 180) return text
-  const leadingTitle = text.match(/^#{0,6}\s*第[一二三四五六七八九十百千万两0-9]+章(?:[：:《「【_ -]+)?/)?.[0] || ''
+  const leadingTitle = extractLeadingBracketedChapterTitle(text)
   if (leadingTitle && text.length > leadingTitle.length) {
     const body = text.slice(leadingTitle.length)
     const segmentedBody = addParagraphBreaksToWall(body)

@@ -274,7 +274,7 @@ describe('chapter prose storage patch builders', () => {
     expect(normalizeProseForStorage(source)).toBe(source)
   })
 
-  test('protects only the title marker when a long single-line chapter starts with its title', () => {
+  test('keeps an ambiguous unbracketed title line intact instead of splitting inside the title', () => {
     const body = [
       '沈砚贴着地下通道的墙向前挪。',
       '老陈守住身后的门。',
@@ -286,9 +286,25 @@ describe('chapter prose storage patch builders', () => {
 
     const normalized = normalizeProseForStorage(source)
 
+    expect(normalized).toBe(source)
+  })
+
+  test('protects the complete bracketed title before restoring body paragraphs', () => {
+    const body = [
+      '沈砚贴着地下通道的墙向前挪。',
+      '老陈守住身后的门。',
+      '铁链声越来越近。',
+      '暗金绢册忽然发热。',
+      '两人同时停下。',
+    ].join('').repeat(20)
+    const title = '第十一章《铁链声》'
+    const source = `${title}${body}`
+
+    const normalized = normalizeProseForStorage(source)
+
     expect(normalized).not.toBe(source)
-    expect(normalized.startsWith('第十一章 ')).toBe(true)
-    expect(normalized).toContain('\n\n')
+    expect(normalized.startsWith(`${title}\n\n沈砚`)).toBe(true)
+    expect(normalized).not.toContain('第十一章《\n\n铁链声》')
     expectOnlyNewlinesInserted(source, normalized)
   })
 

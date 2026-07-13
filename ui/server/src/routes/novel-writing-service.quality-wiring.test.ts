@@ -230,13 +230,18 @@ describe('novel writing service prose quality wiring', () => {
       { model_id: 217, auto_repair_quality_gate: false, production_mode: 'draft_only' },
     ).then(() => null, (caught: any) => caught)
 
-    expect(error?.code).toBe('PROSE_QUALITY_GATE_BLOCKED')
+    expect(error?.code).toBe('PROSE_ADMISSION_BLOCKED_INVALID')
     expect(error?.admission_status).toBe('blocked_invalid')
     expect(error?.admission_failure).toMatchObject({
       code: 'opening_handoff_disconnected',
       source: 'canonical_continuity',
     })
+    expect(harness.modelCalls.review).toBe(0)
     expect(harness.modelCalls.revision).toBe(0)
+    expect(harness.modelCalls.editor).toBe(0)
+    expect(harness.modelCalls.meme).toBe(0)
+    expect(harness.modelCalls.contraction).toBe(0)
+    expect(harness.modelCalls.expansion).toBe(0)
     expect(harness.storeCalls).toBe(0)
     expect(harness.storyStateCalls).toBe(0)
     expect(harness.memoryTexts).toHaveLength(0)
