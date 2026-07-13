@@ -5,6 +5,28 @@ import { displayValue } from './utils'
 
 const ACTIVE_POLLING_STATUSES = new Set(['queued', 'ready', 'running', 'pending', 'in_progress', 'processing'])
 
+export type WorkspaceTaskRefreshState<T> = {
+  data: T
+  confirmed: boolean
+  error: string | null
+}
+
+export function workspaceTaskRefreshStarted<T>(state: WorkspaceTaskRefreshState<T>): WorkspaceTaskRefreshState<T> {
+  return { ...state, confirmed: false }
+}
+
+export function workspaceTaskRefreshSucceeded<T>(_state: WorkspaceTaskRefreshState<T>, data: T): WorkspaceTaskRefreshState<T> {
+  return { data, confirmed: true, error: null }
+}
+
+export function workspaceTaskRefreshFailed<T>(state: WorkspaceTaskRefreshState<T>, error: unknown): WorkspaceTaskRefreshState<T> {
+  return {
+    ...state,
+    confirmed: false,
+    error: error instanceof Error ? error.message : String(error || '任务刷新失败'),
+  }
+}
+
 function hasLiveStatus(items: any[]) {
   return items.some(item => ACTIVE_POLLING_STATUSES.has(String(item?.status || '').toLowerCase()))
 }
@@ -28,14 +50,20 @@ export function workspaceTaskPollingIntervalMs({
   productionTasks,
   knowledgeIngestJobs,
   hasLocalActiveTask,
+  productionRefreshConfirmed = true,
+  knowledgeRefreshConfirmed = true,
 }: {
   taskCenterOpen: boolean
   productionTasks: any
   knowledgeIngestJobs: any[]
   hasLocalActiveTask: boolean
+  productionRefreshConfirmed?: boolean
+  knowledgeRefreshConfirmed?: boolean
 }) {
   if (!taskCenterOpen) return null
-  return hasLocalActiveTask
+  return !productionRefreshConfirmed
+    || !knowledgeRefreshConfirmed
+    || hasLocalActiveTask
     || workspaceHasLiveProductionTasks(productionTasks)
     || workspaceHasLiveKnowledgeJobs(knowledgeIngestJobs)
     ? 3500
@@ -77,33 +105,45 @@ export function useWorkspaceTasks({
   activeChapter: any | null
   onCancelProseBatch?: () => void
 }) {
-  const [knowledgeIngestJobs, setKnowledgeIngestJobs] = useState<any[]>([])
+  const [knowledgeRefresh, setKnowledgeRefresh] = useState<WorkspaceTaskRefreshState<any[]>>({
+    data: [],
+    confirmed: false,
+    error: null,
+  })
   const [knowledgeJobsLoading, setKnowledgeJobsLoading] = useState(false)
-  const [productionTasks, setProductionTasks] = useState<any | null>(null)
+  const [productionRefresh, setProductionRefresh] = useState<WorkspaceTaskRefreshState<any | null>>({
+    data: null,
+    confirmed: false,
+    error: null,
+  })
   const [productionTasksLoading, setProductionTasksLoading] = useState(false)
-  const knowledgeIngestJobsRef = useRef<any[]>([])
-  const productionTasksRef = useRef<any | null>(null)
+  const knowledgeRefreshRef = useRef(knowledgeRefresh)
+  const productionRefreshRef = useRef(productionRefresh)
+  const knowledgeIngestJobs = knowledgeRefresh.data
+  const productionTasks = productionRefresh.data
 
   const loadProductionTasks = useCallback(async () => {
     if (!projectId) return
+    setProductionRefresh(workspaceTaskRefreshStarted)
     setProductionTasksLoading(true)
     try {
       const res = await apiClient.get(`/novel/projects/${projectId}/tasks`)
-      setProductionTasks(res.data || null)
-    } catch {
-      setProductionTasks(null)
+      setProductionRefresh(state => workspaceTaskRefreshSucceeded(state, res.data || null))
+    } catch (error) {
+      setProductionRefresh(state => workspaceTaskRefreshFailed(state, error))
     } finally {
       setProductionTasksLoading(false)
     }
   }, [projectId])
 
   const loadKnowledgeIngestJobs = useCallback(async () => {
+    setKnowledgeRefresh(workspaceTaskRefreshStarted)
     setKnowledgeJobsLoading(true)
     try {
       const res = await apiClient.get('/knowledge/ingest')
-      setKnowledgeIngestJobs(Array.isArray(res.data?.jobs) ? res.data.jobs : [])
-    } catch {
-      setKnowledgeIngestJobs([])
+      setKnowledgeRefresh(state => workspaceTaskRefreshSucceeded(state, Array.isArray(res.data?.jobs) ? res.data.jobs : []))
+    } catch (error) {
+      setKnowledgeRefresh(state => workspaceTaskRefreshFailed(state, error))
     } finally {
       setKnowledgeJobsLoading(false)
     }
@@ -125,12 +165,12 @@ export function useWorkspaceTasks({
   }, [loadKnowledgeIngestJobs])
 
   useEffect(() => {
-    knowledgeIngestJobsRef.current = knowledgeIngestJobs
-  }, [knowledgeIngestJobs])
+    knowledgeRefreshRef.current = knowledgeRefresh
+  }, [knowledgeRefresh])
 
   useEffect(() => {
-    productionTasksRef.current = productionTasks
-  }, [productionTasks])
+    productionRefreshRef.current = productionRefresh
+  }, [productionRefresh])
 
   useEffect(() => {
     if (!taskCenterOpen) return
@@ -149,13 +189,17 @@ export function useWorkspaceTasks({
     productionTasks,
     knowledgeIngestJobs,
     hasLocalActiveTask,
+    productionRefreshConfirmed: productionRefresh.confirmed,
+    knowledgeRefreshConfirmed: knowledgeRefresh.confirmed,
   })
 
   useEffect(() => {
     if (pollingIntervalMs === null) return
     const timer = setInterval(() => {
-      if (workspaceHasLiveKnowledgeJobs(knowledgeIngestJobsRef.current)) void loadKnowledgeIngestJobs()
-      if (hasLocalActiveTask || workspaceHasLiveProductionTasks(productionTasksRef.current)) void loadProductionTasks()
+      const knowledgeState = knowledgeRefreshRef.current
+      const productionState = productionRefreshRef.current
+      if (!knowledgeState.confirmed || workspaceHasLiveKnowledgeJobs(knowledgeState.data)) void loadKnowledgeIngestJobs()
+      if (!productionState.confirmed || hasLocalActiveTask || workspaceHasLiveProductionTasks(productionState.data)) void loadProductionTasks()
     }, pollingIntervalMs)
     return () => clearInterval(timer)
   }, [hasLocalActiveTask, loadKnowledgeIngestJobs, loadProductionTasks, pollingIntervalMs])
@@ -231,9 +275,11 @@ export function useWorkspaceTasks({
     activeKnowledgeJobCount,
     productionTasks,
     productionTasksLoading,
+    productionTasksError: productionRefresh.error,
     loadProductionTasks,
     knowledgeIngestJobs,
     knowledgeJobsLoading,
+    knowledgeJobsError: knowledgeRefresh.error,
     loadKnowledgeIngestJobs,
     pauseKnowledgeIngestJob,
     resumeKnowledgeIngestJob,

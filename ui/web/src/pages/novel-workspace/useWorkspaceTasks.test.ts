@@ -59,4 +59,69 @@ describe('workspace task polling policy', () => {
     expect(actionBody('onPauseRun={async', 'onResumeRun={async')).toContain('await loadProductionTasks()')
     expect(actionBody('onResumeRun={async', '</TaskCenterDrawer>')).toContain('await loadProductionTasks()')
   })
+
+  test('keeps polling across a failed refresh until a successful idle response confirms completion', async () => {
+    const module = await loadPollingModule()
+    expect(module).not.toBeNull()
+    if (!module) return
+    expect(typeof module.workspaceTaskRefreshStarted).toBe('function')
+    expect(typeof module.workspaceTaskRefreshSucceeded).toBe('function')
+    expect(typeof module.workspaceTaskRefreshFailed).toBe('function')
+    if (
+      typeof module.workspaceTaskRefreshStarted !== 'function'
+      || typeof module.workspaceTaskRefreshSucceeded !== 'function'
+      || typeof module.workspaceTaskRefreshFailed !== 'function'
+    ) return
+
+    const idleKnowledge = {
+      data: [{ status: 'completed' }],
+      confirmed: true,
+      error: null,
+    }
+    let production = module.workspaceTaskRefreshSucceeded(
+      { data: null, confirmed: false, error: null },
+      { tasks: [{ status: 'running' }] },
+    )
+    expect(module.workspaceTaskPollingIntervalMs({
+      taskCenterOpen: true,
+      productionTasks: production.data,
+      knowledgeIngestJobs: idleKnowledge.data,
+      hasLocalActiveTask: false,
+      productionRefreshConfirmed: production.confirmed,
+      knowledgeRefreshConfirmed: idleKnowledge.confirmed,
+    })).toBe(3500)
+
+    production = module.workspaceTaskRefreshStarted(production)
+    production = module.workspaceTaskRefreshFailed(production, new Error('temporary network failure'))
+    expect(production.data).toEqual({ tasks: [{ status: 'running' }] })
+    expect(production.confirmed).toBe(false)
+    expect(production.error).toContain('temporary network failure')
+    expect(module.workspaceTaskPollingIntervalMs({
+      taskCenterOpen: true,
+      productionTasks: production.data,
+      knowledgeIngestJobs: idleKnowledge.data,
+      hasLocalActiveTask: false,
+      productionRefreshConfirmed: production.confirmed,
+      knowledgeRefreshConfirmed: idleKnowledge.confirmed,
+    })).toBe(3500)
+
+    production = module.workspaceTaskRefreshStarted(production)
+    production = module.workspaceTaskRefreshSucceeded(production, { tasks: [{ status: 'completed' }] })
+    expect(module.workspaceTaskPollingIntervalMs({
+      taskCenterOpen: true,
+      productionTasks: production.data,
+      knowledgeIngestJobs: idleKnowledge.data,
+      hasLocalActiveTask: false,
+      productionRefreshConfirmed: production.confirmed,
+      knowledgeRefreshConfirmed: idleKnowledge.confirmed,
+    })).toBeNull()
+    expect(module.workspaceTaskPollingIntervalMs({
+      taskCenterOpen: false,
+      productionTasks: { tasks: [{ status: 'running' }] },
+      knowledgeIngestJobs: [],
+      hasLocalActiveTask: false,
+      productionRefreshConfirmed: false,
+      knowledgeRefreshConfirmed: false,
+    })).toBeNull()
+  })
 })
