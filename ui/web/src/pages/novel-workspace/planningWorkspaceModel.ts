@@ -829,7 +829,7 @@ function buildVolumeTree(outlines: AnyRecord[], chapters: AnyRecord[]): Planning
       title: text(chapter.title, `第${chapter.chapter_no || '?'}章`),
       level: 'chapter',
       chapterNo: Number(chapter.chapter_no),
-      wordCount: wc(chapter.chapter_text),
+      wordCount: chapterWordCount(chapter),
       children: [],
     }
     const parent = outlines.find(outline => outline.id === chapter.outline_id) || outlines.find(outline => isStage(outline) && chapterInRange(chapterNode.chapterNo, outline))
@@ -907,8 +907,7 @@ function healthLabel(issues: PlanningHealthIssue[]): PlanningHealthStatus {
 
 function latestWrittenChapterNo(chapters: AnyRecord[]) {
   return chapters.reduce((latest, chapter) => {
-    const chapterText = text(chapter?.chapter_text)
-    if (!chapterText || chapterText.includes('【占位正文】')) return latest
+    if (!chapterHasProse(chapter)) return latest
     const chapterNo = Number(chapter?.chapter_no || 0)
     return chapterNo > latest ? chapterNo : latest
   }, 0)
@@ -2366,7 +2365,7 @@ function buildVolumeSegmentGateModel(args: {
   const total = start && end ? Math.max(1, end - start + 1) : Math.max(1, args.volumeBeatBudget.totalChapters || 50)
   const written = args.chapters.filter(chapter => {
     const chapterNo = Number(chapter?.chapter_no || 0)
-    return chapterNo >= (start || 1) && chapterNo <= end && Boolean(text(chapter?.chapter_text))
+    return chapterNo >= (start || 1) && chapterNo <= end && chapterHasProse(chapter)
   }).length
   const percent = Math.max(0, Math.min(100, Math.round((written / total) * 100)))
   const riskCounts = latestDeliveryRiskCounts(args.reviews)
@@ -3530,7 +3529,13 @@ function resolveSerializationPolicy(project?: AnyRecord | null) {
 
 function chapterHasProse(chapter: AnyRecord) {
   const chapterText = text(chapter?.chapter_text || chapter?.content || chapter?.prose)
-  return Boolean(chapterText && !chapterText.includes('【占位正文】') && wc(chapterText) > 0)
+  if (chapterText) return Boolean(!chapterText.includes('【占位正文】') && wc(chapterText) > 0)
+  return Boolean(chapter?.has_prose || chapter?.hasProse || Number(chapter?.word_count ?? chapter?.wordCount ?? 0) > 0)
+}
+
+function chapterWordCount(chapter: AnyRecord) {
+  const chapterText = text(chapter?.chapter_text || chapter?.content || chapter?.prose)
+  return chapterText ? wc(chapterText) : Math.max(0, Number(chapter?.word_count ?? chapter?.wordCount ?? 0) || 0)
 }
 
 function chapterIsPlannedForRelease(chapter: AnyRecord) {
@@ -3661,7 +3666,7 @@ function buildSerialReleaseDeskModel(args: {
     return 'planned'
   }
   const titleForChapter = (chapterNo: number) => text(byNo.get(chapterNo)?.title, `第${chapterNo}章`)
-  const wordCountForChapter = (chapterNo: number) => wc(byNo.get(chapterNo)?.chapter_text)
+  const wordCountForChapter = (chapterNo: number) => chapterWordCount(byNo.get(chapterNo) || {})
   const publishableChapters = sortedChapters.filter(chapter => {
     const chapterNo = Number(chapter?.chapter_no || 0)
     return chapterNo > policy.lastPublishedChapter && chapterHasProse(chapter) && !(riskMap.get(chapterNo) || []).length
@@ -4250,7 +4255,7 @@ export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelIn
   const innovationRadar = buildInnovationRadarModel(reviews)
   const storylineBoard = buildStorylineBoardModel(settingEntities, first30Retention, activeChapterNo, reviews)
   const characterArcBoard = buildCharacterArcBoardModel(settingEntities, reviews, activeChapterNo)
-  const writtenWords = chapters.reduce((sum, chapter) => sum + wc(chapter?.chapter_text), 0)
+  const writtenWords = chapters.reduce((sum, chapter) => sum + chapterWordCount(chapter), 0)
   const targetWords = Number(selectedProject?.target_words || selectedProject?.targetWords || 0)
   const longformMemoryCapsule = buildLongformMemoryCapsuleModel({
     writingBible,

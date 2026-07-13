@@ -1667,7 +1667,8 @@ function compactText(value: any) {
 function hasProse(chapter?: AnyRecord | null) {
   const chapterText = String(chapter?.chapter_text || '')
   const compact = chapterText.replace(/\s/g, '')
-  return Boolean(compact && !chapterText.includes('【占位正文】'))
+  if (chapterText) return Boolean(compact && !chapterText.includes('【占位正文】'))
+  return Boolean(chapter?.has_prose || chapter?.hasProse || Number(chapter?.word_count ?? chapter?.wordCount ?? 0) > 0)
 }
 
 function sortChapters(chapters: AnyRecord[]) {
@@ -2201,7 +2202,9 @@ function toCockpitChapter(chapter: AnyRecord, context: { previousChapter?: AnyRe
     chapterGoal: plan.goal,
     conflict: plan.conflict,
     endingHook: plan.endingHook,
-    wordCount: hasProse(chapter) ? compactWordCount(chapter?.chapter_text) : 0,
+    wordCount: hasProse(chapter)
+      ? (chapter?.chapter_text ? compactWordCount(chapter.chapter_text) : Number(chapter?.word_count ?? chapter?.wordCount ?? 0) || 0)
+      : 0,
     hasProse: hasProse(chapter),
     rawPayload,
   }

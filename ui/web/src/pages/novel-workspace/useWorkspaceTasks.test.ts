@@ -43,6 +43,55 @@ describe('workspace task polling policy', () => {
     expect(module.workspaceTaskPollingIntervalMs({ ...base, hasLocalActiveTask: true })).toBe(3500)
   })
 
+  test('backs off repeated refresh failures and resets to fast polling after recovery', async () => {
+    const module = await loadPollingModule()
+    expect(module).not.toBeNull()
+    if (!module) return
+    let state = { data: { tasks: [{ status: 'running' }] }, confirmed: true, error: null, failures: 0 }
+    state = module.workspaceTaskRefreshStarted(state)
+    state = module.workspaceTaskRefreshFailed(state, new Error('first failure'))
+    expect(state.failures).toBe(1)
+    expect(module.workspaceTaskPollingIntervalMs({
+      taskCenterOpen: true,
+      productionTasks: state.data,
+      knowledgeIngestJobs: [],
+      hasLocalActiveTask: false,
+      productionRefreshConfirmed: state.confirmed,
+      productionRefreshFailures: state.failures,
+    })).toBe(10000)
+
+    state = module.workspaceTaskRefreshStarted(state)
+    state = module.workspaceTaskRefreshFailed(state, new Error('second failure'))
+    expect(state.failures).toBe(2)
+    expect(module.workspaceTaskPollingIntervalMs({
+      taskCenterOpen: true,
+      productionTasks: state.data,
+      knowledgeIngestJobs: [],
+      hasLocalActiveTask: false,
+      productionRefreshConfirmed: state.confirmed,
+      productionRefreshFailures: state.failures,
+    })).toBe(30000)
+
+    state = module.workspaceTaskRefreshSucceeded(state, { tasks: [{ status: 'running' }] })
+    expect(state.failures).toBe(0)
+    expect(module.workspaceTaskPollingIntervalMs({
+      taskCenterOpen: true,
+      productionTasks: state.data,
+      knowledgeIngestJobs: [],
+      hasLocalActiveTask: false,
+      productionRefreshConfirmed: state.confirmed,
+      productionRefreshFailures: state.failures,
+    })).toBe(3500)
+    expect(module.workspaceTaskPollingIntervalMs({
+      taskCenterOpen: false,
+      productionTasks: state.data,
+      knowledgeIngestJobs: [],
+      hasLocalActiveTask: false,
+      productionRefreshConfirmed: false,
+      productionRefreshFailures: 99,
+    })).toBeNull()
+  })
+
   test('refreshes immediately when the drawer opens and after task-center actions', () => {
     const hookSource = readFileSync(join(import.meta.dir, 'useWorkspaceTasks.ts'), 'utf8')
     const workspaceSource = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
@@ -77,9 +126,10 @@ describe('workspace task polling policy', () => {
       data: [{ status: 'completed' }],
       confirmed: true,
       error: null,
+      failures: 0,
     }
     let production = module.workspaceTaskRefreshSucceeded(
-      { data: null, confirmed: false, error: null },
+      { data: null, confirmed: false, error: null, failures: 0 },
       { tasks: [{ status: 'running' }] },
     )
     expect(module.workspaceTaskPollingIntervalMs({
@@ -89,6 +139,7 @@ describe('workspace task polling policy', () => {
       hasLocalActiveTask: false,
       productionRefreshConfirmed: production.confirmed,
       knowledgeRefreshConfirmed: idleKnowledge.confirmed,
+      productionRefreshFailures: production.failures,
     })).toBe(3500)
 
     production = module.workspaceTaskRefreshStarted(production)
@@ -103,7 +154,8 @@ describe('workspace task polling policy', () => {
       hasLocalActiveTask: false,
       productionRefreshConfirmed: production.confirmed,
       knowledgeRefreshConfirmed: idleKnowledge.confirmed,
-    })).toBe(3500)
+      productionRefreshFailures: production.failures,
+    })).toBe(10000)
 
     production = module.workspaceTaskRefreshStarted(production)
     production = module.workspaceTaskRefreshSucceeded(production, { tasks: [{ status: 'completed' }] })
@@ -114,6 +166,7 @@ describe('workspace task polling policy', () => {
       hasLocalActiveTask: false,
       productionRefreshConfirmed: production.confirmed,
       knowledgeRefreshConfirmed: idleKnowledge.confirmed,
+      productionRefreshFailures: production.failures,
     })).toBeNull()
     expect(module.workspaceTaskPollingIntervalMs({
       taskCenterOpen: false,

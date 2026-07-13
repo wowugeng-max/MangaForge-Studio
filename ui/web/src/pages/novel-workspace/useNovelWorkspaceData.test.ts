@@ -4,11 +4,13 @@ import {
   createWorkspaceRequestEpoch,
   resolveActiveWorkspaceChapterId,
   resolveSelectedWorkspaceModelId,
+  workspaceDetailsBelongToProject,
 } from './useNovelWorkspaceData'
 import {
   applyWorkspaceDetailResults,
   createWorkspaceDetailCache,
   selectChapterWorkingSet,
+  selectAutomaticChapterDetailRecords,
   selectReviewDetailIds,
   selectRunDetailIds,
   workspacePayloadBytes,
@@ -54,6 +56,10 @@ describe('novel workspace active chapter selector', () => {
       { id: 2, chapter_no: 2, chapter_text: '' },
     ])).toBe(1)
     expect(resolveActiveWorkspaceChapterId(1, [])).toBeNull()
+    expect(resolveActiveWorkspaceChapterId(null, [
+      { id: 1, chapter_no: 1, has_prose: false, word_count: 0 },
+      { id: 2, chapter_no: 2, has_prose: true, word_count: 3200 },
+    ])).toBe(2)
   })
 })
 
@@ -78,6 +84,12 @@ describe('novel workspace compact loading plan', () => {
     expect(JSON.stringify(initialWorkspaceRequestPlan(17))).not.toContain('view":"full')
   })
 
+  test('does not hydrate stale summary ids while switching projects', () => {
+    expect(workspaceDetailsBelongToProject(7, { id: 7 })).toBe(true)
+    expect(workspaceDetailsBelongToProject(8, { id: 7 })).toBe(false)
+    expect(workspaceDetailsBelongToProject(8, null)).toBe(false)
+  })
+
   test('keeps a realistic initial workspace payload below two megabytes without diagnostic refs', () => {
     const chapters = Array.from({ length: 120 }, (_, index) => ({
       id: index + 1,
@@ -88,7 +100,6 @@ describe('novel workspace compact loading plan', () => {
       chapter_summary: '本章完成一次选择和反馈',
       conflict: '旧秩序阻拦主角行动',
       ending_hook: '新的追踪信号出现',
-      chapter_text: index < 96 ? '正文段落。'.repeat(600) : '',
       has_prose: index < 96,
       has_scene_plan: true,
       word_count: index < 96 ? 3000 : 0,
@@ -127,12 +138,17 @@ describe('novel workspace compact loading plan', () => {
       post_commit_warning_count: 0,
     }))
 
+    const automaticDetails = chapters
+      .filter(chapter => chapter.has_prose)
+      .slice(-15)
+      .map(chapter => ({ ...chapter, chapter_text: '正文段落。'.repeat(600), raw_payload: { bounded: true } }))
     const serverSummaryResponse = { chapters, reviews, runs }
-    const bytes = workspacePayloadBytes(serverSummaryResponse)
+    const bytes = workspacePayloadBytes({ initial: serverSummaryResponse, automatic_details: automaticDetails })
     expect(bytes).toBeLessThan(2 * 1024 * 1024)
     expect(chapters.filter(chapter => chapter.has_prose)).toHaveLength(96)
     expect(JSON.stringify(serverSummaryResponse)).not.toContain('output_ref')
     expect(JSON.stringify(serverSummaryResponse)).not.toContain('payload":"')
+    expect(JSON.stringify(serverSummaryResponse)).not.toContain('chapter_text')
   })
 })
 
@@ -148,6 +164,26 @@ describe('novel workspace detail working set', () => {
   test('loads active, previous, and next chapter details and changes the set on chapter switch', () => {
     expect(selectChapterWorkingSet(chapters, 4).map(item => item.id)).toEqual([3, 4, 5])
     expect(selectChapterWorkingSet(chapters, 6).map(item => item.id)).toEqual([5, 6, 7])
+  })
+
+  test('adds a bounded recent written window without hydrating the whole book', () => {
+    const longBook = Array.from({ length: 80 }, (_, index) => ({
+      id: index + 1,
+      chapter_no: index + 1,
+      has_prose: index < 70,
+      word_count: index < 70 ? 3200 : 0,
+      updated_at: String(index),
+    }))
+    const selected = selectAutomaticChapterDetailRecords(longBook, 40, 12)
+    expect(selected.length).toBeLessThanOrEqual(15)
+    expect(selected.map(item => item.id)).toEqual(expect.arrayContaining([39, 40, 41, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70]))
+    expect(selected.some(item => item.id === 1)).toBe(false)
+  })
+
+  test('retains the complete automatic chapter working set in the bounded detail cache', async () => {
+    const cache = createWorkspaceDetailCache(async (_kind, id) => ({ id }))
+    await cache.loadMany('chapter', Array.from({ length: 15 }, (_, index) => ({ id: index + 1 })))
+    expect(cache.stats().cached).toBe(15)
   })
 
   test('keeps latest review per type for the chapter neighborhood plus latest global per type', () => {
@@ -175,7 +211,7 @@ describe('novel workspace detail working set', () => {
       { id: 7, run_type: 'generate_prose', status: 'running', created_at: '2026-07-13T07:00:00Z' },
     ]
 
-    expect(selectRunDetailIds(runs)).toEqual([7, 6, 5, 4, 3, 2])
+    expect(selectRunDetailIds(runs)).toEqual([7, 6, 5, 4, 3, 2, 1])
 
     const manyFailures = Array.from({ length: 40 }, (_, index) => ({
       id: 100 + index,
@@ -192,6 +228,14 @@ describe('novel workspace detail working set', () => {
     const bounded = selectRunDetailIds([...manyFailures, ...olderCategories], 12)
     expect(bounded).toHaveLength(12)
     expect(bounded).toEqual(expect.arrayContaining([90, 91, 92, 93]))
+
+    const trendRuns = [
+      ...Array.from({ length: 18 }, (_, index) => ({ id: 300 + index, run_type: 'batch_generate_prose', status: 'completed', created_at: `2026-07-12T${String(index).padStart(2, '0')}:00:00Z` })),
+      ...Array.from({ length: 18 }, (_, index) => ({ id: 400 + index, run_type: 'longform_production_repair', status: 'completed', created_at: `2026-07-11T${String(index).padStart(2, '0')}:00:00Z` })),
+    ]
+    const trendSelected = selectRunDetailIds(trendRuns, 32)
+    expect(trendSelected.filter(id => id >= 300 && id < 400)).toHaveLength(12)
+    expect(trendSelected.filter(id => id >= 400)).toHaveLength(12)
   })
 
   test('deduplicates concurrent detail requests and retains summaries in degraded state on failure', async () => {
@@ -223,6 +267,45 @@ describe('novel workspace detail working set', () => {
     const failedAgain = await cache.load('review', 9, 'v1')
     expect(failedAgain.status).toBe('degraded')
     expect(calls).toBe(3)
+
+    const degradedRun = applyWorkspaceDetailResults([
+      {
+        id: 19,
+        status: 'completed',
+        admission_status: 'accepted_with_warnings',
+        admission_warning_count: 2,
+        admission_warning_preview: '静态描写偏多',
+        story_state_pending: true,
+        story_state_warning: '故事状态等待补同步',
+        post_commit_warning_count: 1,
+      },
+    ], [{ kind: 'run', id: 19, status: 'degraded', error: 'detail unavailable' }])
+    expect(degradedRun[0]).toMatchObject({
+      admission_status: 'accepted_with_warnings',
+      admission_warning_count: 2,
+      story_state_pending: true,
+      post_commit_warning_count: 1,
+      detail_status: 'degraded',
+    })
+  })
+
+  test('keeps a bounded latest history for review types that drive planning and auto trends', () => {
+    const reviews = Array.from({ length: 14 }, (_, index) => ({
+      id: 500 + index,
+      chapter_id: 20 + index,
+      chapter_no: 20 + index,
+      review_type: 'delivery_risk_convergence',
+      created_at: `2026-07-13T${String(index).padStart(2, '0')}:00:00Z`,
+    }))
+    const selected = selectReviewDetailIds(reviews, [{ id: 99, chapter_no: 99 }])
+    expect(selected).toEqual([513, 512, 511, 510, 509])
+
+    const manyTypes = Array.from({ length: 140 }, (_, index) => ({
+      id: 700 + index,
+      review_type: `bounded_type_${index}`,
+      created_at: `2026-07-13T00:${String(index % 60).padStart(2, '0')}:00Z`,
+    }))
+    expect(selectReviewDetailIds(manyTypes, [])).toHaveLength(96)
   })
 
   test('does not let a detail request that predates clear repopulate the cache', async () => {

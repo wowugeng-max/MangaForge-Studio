@@ -9,6 +9,7 @@ export type WorkspaceTaskRefreshState<T> = {
   data: T
   confirmed: boolean
   error: string | null
+  failures: number
 }
 
 export function workspaceTaskRefreshStarted<T>(state: WorkspaceTaskRefreshState<T>): WorkspaceTaskRefreshState<T> {
@@ -16,7 +17,7 @@ export function workspaceTaskRefreshStarted<T>(state: WorkspaceTaskRefreshState<
 }
 
 export function workspaceTaskRefreshSucceeded<T>(_state: WorkspaceTaskRefreshState<T>, data: T): WorkspaceTaskRefreshState<T> {
-  return { data, confirmed: true, error: null }
+  return { data, confirmed: true, error: null, failures: 0 }
 }
 
 export function workspaceTaskRefreshFailed<T>(state: WorkspaceTaskRefreshState<T>, error: unknown): WorkspaceTaskRefreshState<T> {
@@ -24,6 +25,7 @@ export function workspaceTaskRefreshFailed<T>(state: WorkspaceTaskRefreshState<T
     ...state,
     confirmed: false,
     error: error instanceof Error ? error.message : String(error || '任务刷新失败'),
+    failures: Number(state.failures || 0) + 1,
   }
 }
 
@@ -52,6 +54,8 @@ export function workspaceTaskPollingIntervalMs({
   hasLocalActiveTask,
   productionRefreshConfirmed = true,
   knowledgeRefreshConfirmed = true,
+  productionRefreshFailures = 0,
+  knowledgeRefreshFailures = 0,
 }: {
   taskCenterOpen: boolean
   productionTasks: any
@@ -59,15 +63,20 @@ export function workspaceTaskPollingIntervalMs({
   hasLocalActiveTask: boolean
   productionRefreshConfirmed?: boolean
   knowledgeRefreshConfirmed?: boolean
+  productionRefreshFailures?: number
+  knowledgeRefreshFailures?: number
 }) {
   if (!taskCenterOpen) return null
-  return !productionRefreshConfirmed
+  const shouldPoll = !productionRefreshConfirmed
     || !knowledgeRefreshConfirmed
     || hasLocalActiveTask
     || workspaceHasLiveProductionTasks(productionTasks)
     || workspaceHasLiveKnowledgeJobs(knowledgeIngestJobs)
-    ? 3500
-    : null
+  if (!shouldPoll) return null
+  const failures = Math.max(Number(productionRefreshFailures || 0), Number(knowledgeRefreshFailures || 0))
+  if (failures >= 2) return 30000
+  if (failures >= 1) return 10000
+  return 3500
 }
 
 export function useWorkspaceTasks({
@@ -109,12 +118,14 @@ export function useWorkspaceTasks({
     data: [],
     confirmed: false,
     error: null,
+    failures: 0,
   })
   const [knowledgeJobsLoading, setKnowledgeJobsLoading] = useState(false)
   const [productionRefresh, setProductionRefresh] = useState<WorkspaceTaskRefreshState<any | null>>({
     data: null,
     confirmed: false,
     error: null,
+    failures: 0,
   })
   const [productionTasksLoading, setProductionTasksLoading] = useState(false)
   const knowledgeRefreshRef = useRef(knowledgeRefresh)
@@ -191,6 +202,8 @@ export function useWorkspaceTasks({
     hasLocalActiveTask,
     productionRefreshConfirmed: productionRefresh.confirmed,
     knowledgeRefreshConfirmed: knowledgeRefresh.confirmed,
+    productionRefreshFailures: productionRefresh.failures,
+    knowledgeRefreshFailures: knowledgeRefresh.failures,
   })
 
   useEffect(() => {

@@ -11,7 +11,7 @@ export type WorkspaceDetailResult = {
 type CacheEntry = WorkspaceDetailResult
 
 const DEFAULT_LIMITS: Record<WorkspaceDetailKind, number> = {
-  chapter: 12,
+  chapter: 15,
   review: 96,
   run: 48,
 }
@@ -127,18 +127,45 @@ export function selectChapterWorkingSet(chapters: any[], activeChapterId: number
   return sorted.slice(Math.max(0, index - 1), Math.min(sorted.length, index + 2))
 }
 
-export function selectReviewDetailIds(reviews: any[], chapters: any[]) {
+export function selectAutomaticChapterDetailRecords(chapters: any[], activeChapterId: number | null, _recentWrittenLimit = 12) {
+  const nearby = selectChapterWorkingSet(chapters, activeChapterId)
+  const recentWritten = [...chapters]
+    .filter(chapter => Boolean(chapter?.has_prose) || Number(chapter?.word_count || 0) > 0 || Boolean(String(chapter?.chapter_text || '').trim()))
+    .sort((left, right) => Number(right?.chapter_no || 0) - Number(left?.chapter_no || 0))
+    .slice(0, Math.max(0, _recentWrittenLimit))
+  const selected = new Map<number, any>()
+  for (const chapter of [...nearby, ...recentWritten]) selected.set(Number(chapter?.id || 0), chapter)
+  return [...selected.values()].sort((left, right) => Number(left?.chapter_no || 0) - Number(right?.chapter_no || 0))
+}
+
+export function selectReviewDetailIds(reviews: any[], chapters: any[], maxDetails = 96) {
   const sorted = newestFirst(Array.isArray(reviews) ? reviews : [])
   const chapterIds = new Set((chapters || []).map((chapter: any) => Number(chapter?.id || 0)).filter(Boolean))
   const chapterNos = new Set((chapters || []).map((chapter: any) => Number(chapter?.chapter_no || 0)).filter(Boolean))
   const selected = new Set<number>()
   const globalTypes = new Set<string>()
   const chapterTypes = new Set<string>()
+  const trendCounts = new Map<string, number>()
+  const trendLimits: Record<string, number> = {
+    storyline_sync: 5,
+    delivery_risk_convergence: 5,
+    review_annotation_status: 5,
+    chapter_core_drift: 5,
+    reader_payoff_sync: 5,
+    reader_retention_sync: 5,
+    governance_recheck_sync: 5,
+  }
 
   for (const review of sorted) {
     const id = Number(review?.id || 0)
     const type = String(review?.review_type || '')
     if (!id || !type) continue
+    const trendLimit = trendLimits[type] || 0
+    const trendCount = trendCounts.get(type) || 0
+    if (trendCount < trendLimit) {
+      trendCounts.set(type, trendCount + 1)
+      selected.add(id)
+    }
     if (!globalTypes.has(type)) {
       globalTypes.add(type)
       selected.add(id)
@@ -153,7 +180,7 @@ export function selectReviewDetailIds(reviews: any[], chapters: any[]) {
       selected.add(id)
     }
   }
-  return sorted.map(review => Number(review?.id || 0)).filter(id => selected.has(id))
+  return sorted.map(review => Number(review?.id || 0)).filter(id => selected.has(id)).slice(0, Math.max(0, maxDetails))
 }
 
 const ACTIVE_RUN_STATUSES = new Set(['queued', 'ready', 'running', 'pending', 'in_progress', 'processing'])
@@ -172,16 +199,31 @@ export function selectRunDetailIds(runs: any[], maxDetails = 32) {
   const sorted = newestFirst(Array.isArray(runs) ? runs : [])
   const exceptionalIds: number[] = []
   const categoryIds = new Map<string, number>()
+  const trendIds: number[] = []
+  const trendCounts = new Map<string, number>()
   for (const run of sorted) {
     const id = Number(run?.id || 0)
     if (!id) continue
     const status = String(run?.status || '').trim().toLowerCase()
     if (ACTIVE_RUN_STATUSES.has(status) || EXCEPTIONAL_RUN_STATUSES.has(status)) exceptionalIds.push(id)
+    const runType = String(run?.run_type || '')
+    const trendLimit = runType === 'batch_generate_prose' || runType === 'longform_production_repair'
+      ? 12
+      : runType === 'chapter_group_generation'
+        ? 5
+        : /(repair|governance|quality|review|audit)/.test(runType)
+          ? 5
+          : 0
+    const trendCount = trendCounts.get(runType) || 0
+    if (trendCount < trendLimit) {
+      trendCounts.set(runType, trendCount + 1)
+      trendIds.push(id)
+    }
     const category = operationalCategory(run?.run_type)
     if (category && !categoryIds.has(category)) categoryIds.set(category, id)
   }
   const reservedCategoryIds = [...categoryIds.values()]
-  const selected = new Set<number>(reservedCategoryIds)
+  const selected = new Set<number>([...reservedCategoryIds, ...trendIds])
   for (const id of exceptionalIds) {
     if (selected.size >= maxDetails) break
     selected.add(id)

@@ -93,6 +93,9 @@ describe('workspace payload parse cache', () => {
     const stats = cache.workspacePayloadParseCacheStats()
     expect(stats.entries).toBeLessThanOrEqual(stats.maxEntries)
     expect(stats.sourceBytes).toBeLessThanOrEqual(stats.maxSourceBytes)
+    expect(stats.parsedBytes).toBeLessThanOrEqual(stats.maxParsedBytes)
+    expect(stats.maxEntries).toBeLessThanOrEqual(96)
+    expect(stats.maxSourceBytes).toBeLessThanOrEqual(2 * 1024 * 1024)
   })
 
   test('routes the planning, writing, and auto director payload hotspots through the shared cache', () => {
@@ -107,5 +110,11 @@ describe('workspace payload parse cache', () => {
     expect(planning).toContain('return parseWorkspacePayload(value, options)')
     expect(writing).toContain("parseWorkspacePayload(value, { owner: review, kind: 'review', field })")
     expect(director).toContain('return parseWorkspacePayload(value, options)')
+  })
+
+  test('clears parsed payload objects when the workspace project changes or unmounts', () => {
+    const source = readFileSync(join(import.meta.dir, 'useNovelWorkspaceData.ts'), 'utf8')
+    expect(source).toContain("import { clearWorkspacePayloadParseCache } from './payloadParseCache'")
+    expect(source).toContain('clearWorkspacePayloadParseCache()')
   })
 })
