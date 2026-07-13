@@ -26,6 +26,7 @@ import {
   replaceNovelChapterSettingUsage,
   updateNovelChapter,
   updateNovelProject,
+  updateNovelRun,
   upsertNovelChapterByNumber,
 } from './novel'
 import { setNovelMutationTestHook } from './novel-test-support'
@@ -443,6 +444,116 @@ describe('novel sqlite persistence', () => {
     expect(appendRunBlock).toContain('INSERT INTO runs')
     expect(appendRunBlock).not.toContain('readStore(activeWorkspace)')
     expect(appendRunBlock).not.toContain('writeStore(activeWorkspace')
+  })
+
+  test('persists exact pipeline run summaries on append and recomputes them on update', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '运行摘要写入' })
+    const run = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'longform_production_repair',
+      step_name: 'summary-semantics',
+      status: 'completed',
+      input_ref: JSON.stringify({ repair_tasks: { only: { status: 'open' } } }),
+      output_ref: JSON.stringify({
+        chapters: [{ status: 'failed' }, 'failed', { status: ' completed ' }],
+        tasks: [
+          { task_status: ['failed'] },
+          { task_status: [], status: 'resolved' },
+          { task_status: ['resolved'] },
+          { task_status: { value: 'resolved' } },
+          { task_status: 0, status: 'resolved' },
+        ],
+        repair_tasks: 'open',
+      }),
+    })
+
+    expect(run).toMatchObject({
+      pipeline_chapter_failure_count: 1,
+      pipeline_open_task_count: 3,
+      pipeline_task_count: 5,
+    })
+
+    const updated = await updateNovelRun(workspace, run.id, {
+      input_ref: JSON.stringify({ tasks: [] }),
+      output_ref: JSON.stringify({
+        chapters: { ignored: { status: 'failed' } },
+        tasks: [
+          { task_status: [], status: 'resolved' },
+          { task_status: ['resolved'] },
+        ],
+      }),
+    })
+
+    expect(updated).toMatchObject({
+      pipeline_chapter_failure_count: 0,
+      pipeline_open_task_count: 0,
+      pipeline_task_count: 2,
+    })
+    const db = new Database(join(workspace, 'novel.sqlite'))
+    try {
+      expect(db.query(`
+        SELECT pipeline_chapter_failure_count, pipeline_open_task_count, pipeline_task_count
+        FROM runs WHERE id = ?
+      `).get(run.id)).toMatchObject({
+        pipeline_chapter_failure_count: 0,
+        pipeline_open_task_count: 0,
+        pipeline_task_count: 2,
+      })
+    } finally {
+      db.close()
+    }
+  })
+
+  test('backfills legacy null pipeline summaries in bounded batches', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '运行摘要回填' })
+    const db = new Database(join(workspace, 'novel.sqlite'))
+    try {
+      const insert = db.prepare(`
+        INSERT INTO runs (
+          project_id, run_type, step_name, status, input_ref, output_ref, created_at,
+          pipeline_chapter_failure_count, pipeline_open_task_count, pipeline_task_count
+        ) VALUES (?, 'longform_production_repair', ?, 'completed', '', ?, ?, NULL, NULL, NULL)
+      `)
+      for (let index = 0; index < 70; index += 1) {
+        insert.run(
+          project.id,
+          `legacy-${index}`,
+          JSON.stringify({
+            chapters: [{ status: index === 69 ? 'failed' : 'completed' }],
+            tasks: [{ task_status: index === 69 ? ['failed'] : ['resolved'] }],
+          }),
+          `2026-07-01T00:${String(index).padStart(2, '0')}:00.000Z`,
+        )
+      }
+    } finally {
+      db.close()
+    }
+
+    await listNovelRuns(workspace, project.id)
+
+    const dbAfter = new Database(join(workspace, 'novel.sqlite'))
+    try {
+      const pending = dbAfter.query(`
+        SELECT COUNT(*) AS count FROM runs
+        WHERE pipeline_chapter_failure_count IS NULL
+          OR pipeline_open_task_count IS NULL
+          OR pipeline_task_count IS NULL
+      `).get() as any
+      const last = dbAfter.query(`
+        SELECT pipeline_chapter_failure_count, pipeline_open_task_count, pipeline_task_count
+        FROM runs WHERE step_name = 'legacy-69'
+      `).get() as any
+      expect(Number(pending.count)).toBe(0)
+      expect(last).toMatchObject({
+        pipeline_chapter_failure_count: 1,
+        pipeline_open_task_count: 1,
+        pipeline_task_count: 1,
+      })
+    } finally {
+      dbAfter.close()
+    }
   })
 })
 
@@ -1372,7 +1483,11 @@ describe('novel diagnostic payload compaction', () => {
 
     const db = new Database(join(workspace, 'novel.sqlite'))
     try {
-      db.query('UPDATE runs SET output_ref=?').run('历史 run'.repeat(50000))
+      db.query('UPDATE runs SET output_ref=?, pipeline_chapter_failure_count=9, pipeline_open_task_count=9, pipeline_task_count=9').run(JSON.stringify({
+        chapters: [{ status: 'completed' }],
+        tasks: [{ task_status: ['failed'] }],
+        context_package: { hugeText: '历史 run'.repeat(50000) },
+      }))
       db.query('UPDATE reviews SET payload=?').run('历史 review'.repeat(50000))
       db.query('UPDATE chapters SET raw_payload=? WHERE id=?').run(JSON.stringify({
         keep: '章节蓝图',
@@ -1399,6 +1514,14 @@ describe('novel diagnostic payload compaction', () => {
       expect(lengths.chapter_bytes).toBeLessThan(70000)
       expect(chapterPayload.keep).toBe('章节蓝图')
       expect(chapterPayload.context_package).toMatchObject({ omitted: true, reason: 'storage_compaction' })
+      expect(dbAfter.query(`
+        SELECT pipeline_chapter_failure_count, pipeline_open_task_count, pipeline_task_count
+        FROM runs LIMIT 1
+      `).get()).toMatchObject({
+        pipeline_chapter_failure_count: 0,
+        pipeline_open_task_count: 1,
+        pipeline_task_count: 1,
+      })
     } finally {
       dbAfter.close()
     }

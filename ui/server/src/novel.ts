@@ -26,7 +26,7 @@ export type NovelChapterVersionSource = 'manual_edit' | 'agent_execute' | 'repai
 export type NovelChapterVersionRecord = { id: number; chapter_id: number; project_id: number; version_no: number; chapter_text: string; scene_breakdown: any[]; continuity_notes: string[]; source: NovelChapterVersionSource; created_at: string }
 export type NovelReviewRecord = { id: number; project_id: number; chapter_id?: number | null; chapter_no?: number | null; review_type: string; status: string; summary: string; issues: string[]; created_at: string; payload?: string }
 export type NovelReviewSummaryRecord = Omit<NovelReviewRecord, 'issues' | 'payload'> & { issue_count: number; preview: string; score: number | null; passed: boolean | null; payload_bytes: number }
-export type NovelRunRecord = { id: number; project_id: number; run_type: string; step_name: string; status: string; input_ref?: string; output_ref?: string; duration_ms?: number; error_message?: string; created_at: string; pipeline_run_count?: number; pipeline_chapter_failure_count?: number; pipeline_open_task_count?: number }
+export type NovelRunRecord = { id: number; project_id: number; run_type: string; step_name: string; status: string; input_ref?: string; output_ref?: string; duration_ms?: number; error_message?: string; created_at: string; pipeline_run_count?: number; pipeline_chapter_failure_count?: number; pipeline_open_task_count?: number; pipeline_task_count?: number }
 export type NovelRunSummaryRecord = Omit<NovelRunRecord, 'input_ref' | 'output_ref'> & { chapter_id: number | null; chapter_no: number | null; input_bytes: number; output_bytes: number; admission_status: string; admission_warning_count: number; admission_warning_preview: string; story_state_status: string; story_state_pending: boolean; story_state_warning: string; post_commit_warning_count: number; post_commit_warning_preview: string }
 export type NovelProjectSeedDraftRecord = { id: number; title: string; idea?: string; seed: any; review_model?: any; diagnostics?: any; model_id?: number | null; source?: string; created_at: string; updated_at: string }
 export type NovelSettingEntityRecord = {
@@ -474,6 +474,84 @@ function compactPersistedText(value: any, maxChars = MAX_PERSISTED_DIAGNOSTIC_CH
   })
 }
 
+function pipelineRunPayload(value: any) {
+  if (!value) return {}
+  if (typeof value === 'object') return value
+  if (typeof value !== 'string') return {}
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function pipelineRunArray(value: any): any[] {
+  return Array.isArray(value) ? value : []
+}
+
+function pipelineRunTaskStatus(task: any) {
+  for (const key of ['task_status', 'taskStatus', 'status']) {
+    const normalized = String(task?.[key] ?? '').trim().toLowerCase()
+    if (normalized) return normalized
+  }
+  return ''
+}
+
+function summarizeNovelRunPipelineRefs(inputRef: any, outputRef: any) {
+  const input = pipelineRunPayload(inputRef)
+  const output = pipelineRunPayload(outputRef)
+  const chapterFailureCount = pipelineRunArray(output.chapters).filter((chapter: any) => {
+    const status = String(chapter?.status || '').toLowerCase()
+    return ['failed', 'error', 'blocked', 'needs_repair'].includes(status)
+  }).length
+  const tasks = [
+    ...pipelineRunArray(output.tasks),
+    ...pipelineRunArray(output.repair_tasks),
+    ...pipelineRunArray(input.tasks),
+    ...pipelineRunArray(input.repair_tasks),
+  ]
+  const openTaskCount = tasks.filter(task => {
+    const status = pipelineRunTaskStatus(task)
+    return !status || !['resolved', 'closed', 'completed', 'complete', 'done', 'success', 'ok'].includes(status)
+  }).length
+  return {
+    pipeline_chapter_failure_count: chapterFailureCount,
+    pipeline_open_task_count: openTaskCount,
+    pipeline_task_count: tasks.length,
+  }
+}
+
+function backfillNovelRunPipelineSummaries(db: Database, batchSize = 64) {
+  const selectRows = db.query(`
+    SELECT id, input_ref, output_ref
+    FROM runs
+    WHERE pipeline_chapter_failure_count IS NULL
+      OR pipeline_open_task_count IS NULL
+      OR pipeline_task_count IS NULL
+    ORDER BY id ASC
+    LIMIT ?
+  `)
+  const updateRow = db.query(`
+    UPDATE runs
+    SET pipeline_chapter_failure_count = ?, pipeline_open_task_count = ?, pipeline_task_count = ?
+    WHERE id = ?
+  `)
+  while (true) {
+    const rows = selectRows.all(batchSize) as any[]
+    if (!rows.length) return
+    for (const row of rows) {
+      const summary = summarizeNovelRunPipelineRefs(row.input_ref, row.output_ref)
+      updateRow.run(
+        summary.pipeline_chapter_failure_count,
+        summary.pipeline_open_task_count,
+        summary.pipeline_task_count,
+        row.id,
+      )
+    }
+  }
+}
+
 function compactRawPayloadForStorage(value: any) {
   return compactJsonPayloadForStorage(value)
 }
@@ -884,6 +962,9 @@ CREATE TABLE IF NOT EXISTS runs (
   output_ref TEXT DEFAULT '',
   duration_ms INTEGER DEFAULT 0,
   error_message TEXT DEFAULT '',
+  pipeline_chapter_failure_count INTEGER DEFAULT NULL,
+  pipeline_open_task_count INTEGER DEFAULT NULL,
+  pipeline_task_count INTEGER DEFAULT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
@@ -964,6 +1045,7 @@ CREATE INDEX IF NOT EXISTS idx_chapter_setting_usage_project_chapter ON chapter_
     outlines: [['beats', "TEXT DEFAULT '[]'"], ['target_length', "TEXT DEFAULT ''"], ['version', 'INTEGER DEFAULT 1'], ['raw_payload', "TEXT DEFAULT '{}'"], ['created_at', "TEXT DEFAULT ''"]],
     chapters: [['scene_list', "TEXT DEFAULT '[]'"], ['items_in_play', "TEXT DEFAULT '[]'"], ['foreshadowing', "TEXT DEFAULT '[]'"], ['timeline_note', "TEXT DEFAULT ''"], ['version', 'INTEGER DEFAULT 1'], ['published_at', 'TEXT DEFAULT NULL'], ['raw_payload', "TEXT DEFAULT '{}'"]],
     reviews: [['payload', "TEXT DEFAULT ''"], ['status', "TEXT DEFAULT 'ok'"]],
+    runs: [['pipeline_chapter_failure_count', 'INTEGER DEFAULT NULL'], ['pipeline_open_task_count', 'INTEGER DEFAULT NULL'], ['pipeline_task_count', 'INTEGER DEFAULT NULL']],
     project_seed_drafts: [['review_model', "TEXT DEFAULT '{}'"], ['diagnostics', "TEXT DEFAULT '{}'"], ['model_id', 'INTEGER DEFAULT NULL'], ['source', "TEXT DEFAULT 'deep_draft'"]],
     setting_entities: [['payload_json', "TEXT DEFAULT '{}'"], ['state_json', "TEXT DEFAULT '{}'"], ['constraints_json', "TEXT DEFAULT '{}'"]],
     chapter_setting_usage: [['expected_state_change', "TEXT DEFAULT '{}'"], ['actual_state_change', "TEXT DEFAULT '{}'"]],
@@ -971,6 +1053,7 @@ CREATE INDEX IF NOT EXISTS idx_chapter_setting_usage_project_chapter ON chapter_
     if (!tableExists(db, table)) continue
     for (const [column, definition] of columns) addColumnIfMissing(db, table, column, definition)
   }
+  backfillNovelRunPipelineSummaries(db)
 }
 function projectFromRow(item: any): NovelProjectRecord {
   return { ...item, sub_genres: parseDbArray(item.sub_genres), style_tags: parseDbArray(item.style_tags), commercial_tags: parseDbArray(item.commercial_tags), reference_config: parseDbJson(item.reference_config, {}) }
@@ -1111,7 +1194,10 @@ function replaceStoreInOpenDb(db: Database, store: NovelStore) {
     for (const c of normalized.chapters) insert('INSERT INTO chapters (id,project_id,outline_id,chapter_no,title,chapter_goal,chapter_summary,conflict,ending_hook,chapter_text,scene_breakdown,scene_list,continuity_notes,items_in_play,foreshadowing,timeline_note,status,version,published_at,raw_payload,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [c.id,c.project_id,c.outline_id ?? null,c.chapter_no,c.title,c.chapter_goal||'',c.chapter_summary||'',c.conflict||'',c.ending_hook||'',c.chapter_text||'',jsonText(c.scene_breakdown),jsonText(c.scene_list || c.scene_breakdown),jsonText(c.continuity_notes),jsonText(c.items_in_play),jsonText(c.foreshadowing),c.timeline_note||'',c.status||'draft',c.version||1,c.published_at||null,jsonText(c.raw_payload || c, {}),c.created_at||nowIso(),c.updated_at||nowIso()])
     for (const v of normalized.chapter_versions) insert('INSERT INTO chapter_versions (id,chapter_id,project_id,version_no,chapter_text,scene_breakdown,continuity_notes,source,created_at) VALUES (?,?,?,?,?,?,?,?,?)', [v.id,v.chapter_id,v.project_id,v.version_no,v.chapter_text||'',jsonText(v.scene_breakdown||[]),jsonText(v.continuity_notes||[]),v.source||'manual_edit',v.created_at||nowIso()])
     for (const r of normalized.reviews) insert('INSERT INTO reviews (id,project_id,review_type,status,summary,issues,payload,created_at) VALUES (?,?,?,?,?,?,?,?)', [r.id,r.project_id,r.review_type,r.status,r.summary||'',jsonText(r.issues||[]),r.payload||'',r.created_at||nowIso()])
-    for (const r of normalized.runs) insert('INSERT INTO runs (id,project_id,run_type,step_name,status,input_ref,output_ref,duration_ms,error_message,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)', [r.id,r.project_id,r.run_type,r.step_name,r.status,r.input_ref||'',r.output_ref||'',r.duration_ms||0,r.error_message||'',r.created_at||nowIso()])
+    for (const rawRun of normalized.runs) {
+      const r = normalizeRunRecord(rawRun)
+      insert('INSERT INTO runs (id,project_id,run_type,step_name,status,input_ref,output_ref,duration_ms,error_message,pipeline_chapter_failure_count,pipeline_open_task_count,pipeline_task_count,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [r.id,r.project_id,r.run_type,r.step_name,r.status,r.input_ref||'',r.output_ref||'',r.duration_ms||0,r.error_message||'',r.pipeline_chapter_failure_count ?? 0,r.pipeline_open_task_count ?? 0,r.pipeline_task_count ?? 0,r.created_at||nowIso()])
+    }
     for (const s of normalized.setting_entities) insert('INSERT INTO setting_entities (id,project_id,entity_type,name,summary,status,visibility,first_chapter_no,last_chapter_no,related_character_ids,related_chapter_ids,related_entity_ids,constraints_json,state_json,payload_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [s.id,s.project_id,s.entity_type||'rule',s.name,s.summary||'',s.status||'active',s.visibility||'public',s.first_chapter_no ?? null,s.last_chapter_no ?? null,jsonText(s.related_character_ids, []),jsonText(s.related_chapter_ids, []),jsonText(s.related_entity_ids, []),jsonText(s.constraints_json, {}),jsonText(s.state_json, {}),jsonText(s.payload_json || s, {}),s.created_at||nowIso(),s.updated_at||nowIso()])
   for (const u of normalized.chapter_setting_usage) insert('INSERT INTO chapter_setting_usage (id,project_id,chapter_id,entity_id,usage_type,required,allowed,forbidden,reveal_level,expected_state_change,actual_state_change,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [u.id,u.project_id,u.chapter_id,u.entity_id,u.usage_type||'allowed',u.required ? 1 : 0,u.allowed === false ? 0 : 1,u.forbidden ? 1 : 0,u.reveal_level||'none',jsonText(u.expected_state_change, {}),jsonText(u.actual_state_change, {}),u.created_at||nowIso(),u.updated_at||nowIso()])
 }
@@ -1292,7 +1378,23 @@ function normalizeReviewRecord(data: Partial<NovelReviewRecord>, existing?: Part
     payload: compactReviewPayloadText(data.payload ?? existing?.payload ?? '', reviewType),
   }
 }
-function normalizeRunRecord(data: Partial<NovelRunRecord>, existing?: Partial<NovelRunRecord>): NovelRunRecord { return { id: Number(existing?.id || data.id || 0), project_id: Number(data.project_id ?? existing?.project_id ?? 0), run_type: String(data.run_type ?? existing?.run_type ?? 'plan'), step_name: String(data.step_name ?? existing?.step_name ?? 'step'), status: String(data.status ?? existing?.status ?? 'pending'), input_ref: compactPersistedText(data.input_ref ?? existing?.input_ref ?? ''), output_ref: compactPersistedText(data.output_ref ?? existing?.output_ref ?? ''), duration_ms: Number(data.duration_ms ?? existing?.duration_ms ?? 0), error_message: String(data.error_message ?? existing?.error_message ?? ''), created_at: String(existing?.created_at ?? data.created_at ?? nowIso()) } }
+function normalizeRunRecord(data: Partial<NovelRunRecord>, existing?: Partial<NovelRunRecord>): NovelRunRecord {
+  const inputRef = compactPersistedText(data.input_ref ?? existing?.input_ref ?? '')
+  const outputRef = compactPersistedText(data.output_ref ?? existing?.output_ref ?? '')
+  return {
+    id: Number(existing?.id || data.id || 0),
+    project_id: Number(data.project_id ?? existing?.project_id ?? 0),
+    run_type: String(data.run_type ?? existing?.run_type ?? 'plan'),
+    step_name: String(data.step_name ?? existing?.step_name ?? 'step'),
+    status: String(data.status ?? existing?.status ?? 'pending'),
+    input_ref: inputRef,
+    output_ref: outputRef,
+    duration_ms: Number(data.duration_ms ?? existing?.duration_ms ?? 0),
+    error_message: String(data.error_message ?? existing?.error_message ?? ''),
+    created_at: String(existing?.created_at ?? data.created_at ?? nowIso()),
+    ...summarizeNovelRunPipelineRefs(inputRef, outputRef),
+  }
+}
 function normalizeProjectSeedDraftRecord(data: Partial<NovelProjectSeedDraftRecord>, existing?: Partial<NovelProjectSeedDraftRecord>): NovelProjectSeedDraftRecord {
   const seed = data.seed ?? existing?.seed ?? {}
   const title = String(data.title ?? existing?.title ?? seed?.title ?? seed?.project_title ?? '未命名孵化草稿').trim() || '未命名孵化草稿'
@@ -1405,18 +1507,167 @@ const NOVEL_PIPELINE_GOVERNANCE_RUN_TYPES = [
   'first30_retention_diagnosis',
 ] as const
 
+function pipelineJsonTruthySql(column: string, path: string) {
+  const type = `json_type(${column}, '${path}')`
+  const value = `json_extract(${column}, '${path}')`
+  return `(json_valid(${column}) AND CASE ${type}
+    WHEN 'null' THEN 0
+    WHEN 'false' THEN 0
+    WHEN 'true' THEN 1
+    WHEN 'integer' THEN ${value} != 0
+    WHEN 'real' THEN ${value} != 0
+    WHEN 'text' THEN length(trim(CAST(${value} AS TEXT), ${NOVEL_PIPELINE_SQL_TRIM_CHARS})) > 0
+    WHEN 'array' THEN 1
+    WHEN 'object' THEN 1
+    ELSE 0
+  END)`
+}
+
+function pipelineAnyJsonTruthySql(column: string, paths: string[]) {
+  return `CASE WHEN ${paths.map(path => pipelineJsonTruthySql(column, path)).join(' OR ')} THEN 1 ELSE 0 END`
+}
+
+function pipelineJsonAnchorTruthySql(column: string, path: string) {
+  const type = `json_type(${column}, '${path}')`
+  const value = `json_extract(${column}, '${path}')`
+  return `(json_valid(${column}) AND CASE ${type}
+    WHEN 'null' THEN 0
+    WHEN 'false' THEN 0
+    WHEN 'true' THEN 1
+    WHEN 'integer' THEN ${value} != 0
+    WHEN 'real' THEN ${value} != 0
+    WHEN 'text' THEN length(trim(CAST(${value} AS TEXT), ${NOVEL_PIPELINE_SQL_TRIM_CHARS})) > 0
+    WHEN 'array' THEN json_array_length(${column}, '${path}') > 0
+    WHEN 'object' THEN 1
+    ELSE 0
+  END)`
+}
+
+function pipelineReviewText(...values: any[]) {
+  for (const value of values) {
+    const normalized = String(value ?? '').trim()
+    if (normalized) return normalized
+  }
+  return ''
+}
+
+function pipelineReviewArray(value: any): any[] {
+  return Array.isArray(value) ? value : []
+}
+
+function projectNovelPipelineReview(review: NovelReviewRecord): NovelReviewRecord {
+  let payload: any = {}
+  try { payload = review.payload ? JSON.parse(String(review.payload)) : {} } catch { payload = {} }
+  if (!payload || typeof payload !== 'object') payload = {}
+  if (review.review_type === 'prose_quality') {
+    const quality = payload.self_check?.review || payload.review || payload.quality || payload.result || payload
+    const score = Number(quality?.score ?? quality?.overall_score ?? quality?.quality_score ?? 0)
+    const passed = quality?.passed === true
+      || (Number.isFinite(score) && score >= 75 && quality?.passed !== false)
+    return { ...review, issues: [], payload: JSON.stringify({ passed }) }
+  }
+  if (review.review_type === 'editor_report') {
+    const report = payload.editor_report || payload.report || payload.result || payload
+    const hasIssues = [
+      ...pipelineReviewArray(report?.issues),
+      ...pipelineReviewArray(report?.revision_items),
+      ...pipelineReviewArray(report?.revisions),
+      ...pipelineReviewArray(payload?.issues),
+    ].length > 0
+    const status = pipelineReviewText(report?.status, payload?.status, review.status).toLowerCase()
+    const needsRevision = hasIssues
+      || /warn|fail|risk|revision|revise|needs/.test(status)
+      || !/ok|pass|clean|accept|accepted|completed/.test(status)
+    return {
+      ...review,
+      issues: [],
+      payload: JSON.stringify({ status: needsRevision ? 'needs_revision' : 'accepted', issues: needsRevision ? ['[pipeline-issue-present]'] : [] }),
+    }
+  }
+  return { ...review, issues: [], payload: '' }
+}
+
 export async function getNovelPipelineSnapshot(activeWorkspace: string, projectId: number): Promise<NovelPipelineSnapshot | null> {
   await ensureLegacyNovelStoreImportedForRead(activeWorkspace)
   const db = openDb(activeWorkspace)
   try {
     ensureSqliteSchema(db)
     const projectRow = db.query(`
-      SELECT id, title, synopsis, reference_config, updated_at
+      SELECT
+        id,
+        title,
+        CASE WHEN length(trim(COALESCE(synopsis, ''), ${NOVEL_PIPELINE_SQL_TRIM_CHARS})) > 0 THEN '[pipeline-present]' ELSE '' END AS synopsis,
+        ${pipelineAnyJsonTruthySql('reference_config', [
+          '$.writing_bible.reader_promise', '$.writing_bible.readerPromise', '$.writing_bible.promise',
+          '$.writing_bible.reader_hook', '$.writing_bible.readerHook',
+        ])} AS pipeline_reader_promise,
+        ${pipelineAnyJsonTruthySql('reference_config', [
+          '$.writing_bible.protagonist_drive', '$.writing_bible.protagonistDrive', '$.writing_bible.protagonist_motivation',
+          '$.writing_bible.main_character_drive', '$.writing_bible.hero_drive', '$.writing_bible.motivation',
+        ])} AS pipeline_protagonist_drive,
+        ${pipelineAnyJsonTruthySql('reference_config', [
+          '$.writing_bible.core_conflict', '$.writing_bible.coreConflict', '$.writing_bible.main_conflict',
+          '$.writing_bible.conflict_axis', '$.writing_bible.longform_conflict',
+        ])} AS pipeline_core_conflict,
+        ${pipelineAnyJsonTruthySql('reference_config', [
+          '$.writing_bible.current_volume_goal', '$.writing_bible.currentVolumeGoal', '$.writing_bible.volume_goal',
+          '$.writing_bible.first_volume_goal', '$.writing_bible.stage_goal',
+        ])} AS pipeline_volume_goal,
+        ${pipelineAnyJsonTruthySql('reference_config', [
+          '$.writing_bible.innovation_hook', '$.writing_bible.innovationHook', '$.writing_bible.original_hook',
+          '$.writing_bible.unique_selling_point', '$.writing_bible.selling_point', '$.writing_bible.freshness_hook',
+        ])} AS pipeline_innovation_hook,
+        ${pipelineAnyJsonTruthySql('reference_config', [
+          '$.writing_bible.first30_plan', '$.writing_bible.first30Plan', '$.writing_bible.first_30_plan',
+          '$.writing_bible.opening_strategy', '$.writing_bible.retention_plan', '$.writing_bible.first_thirty_plan',
+        ])} AS pipeline_first30_plan,
+        ${pipelineAnyJsonTruthySql('reference_config', [
+          '$.writing_bible.longform_capacity', '$.writing_bible.longformCapacity', '$.writing_bible.million_word_spine',
+          '$.writing_bible.longform_spine', '$.writing_bible.serial_engine', '$.writing_bible.longform_engine',
+        ])} AS pipeline_longform_capacity,
+        CASE WHEN
+          ${pipelineJsonTruthySql('reference_config', '$.writing_bible.world_summary')}
+          OR ${pipelineJsonTruthySql('reference_config', '$.writing_bible.worldSummary')}
+          OR ${pipelineJsonAnchorTruthySql('reference_config', '$.writing_bible.world_rules')}
+        THEN 1 ELSE 0 END AS pipeline_world_anchor,
+        CASE WHEN json_valid(reference_config)
+          AND json_type(reference_config, '$.writing_bible.characters') = 'array'
+          AND EXISTS (
+            SELECT 1
+            FROM json_each(reference_config, '$.writing_bible.characters') AS character
+            WHERE ${pipelineJsonTruthySql('character.value', '$.name')}
+              OR ${pipelineJsonTruthySql('character.value', '$.goal')}
+              OR ${pipelineJsonTruthySql('character.value', '$.desire')}
+              OR ${pipelineJsonTruthySql('character.value', '$.arc')}
+          )
+        THEN 1 ELSE 0 END AS pipeline_character_anchor,
+        CASE WHEN json_valid(reference_config) THEN CAST(json_extract(reference_config, '$.story_state.last_updated_chapter') AS INTEGER) ELSE 0 END AS pipeline_story_state_chapter,
+        updated_at
       FROM projects
       WHERE id = ?
       LIMIT 1
     `).get(projectId) as any
     if (!projectRow) return null
+    const project = {
+      id: Number(projectRow.id || 0),
+      title: String(projectRow.title || ''),
+      synopsis: String(projectRow.synopsis || ''),
+      reference_config: {
+        writing_bible: {
+          reader_promise: projectRow.pipeline_reader_promise ? '[pipeline-present]' : '',
+          protagonist_drive: projectRow.pipeline_protagonist_drive ? '[pipeline-present]' : '',
+          core_conflict: projectRow.pipeline_core_conflict ? '[pipeline-present]' : '',
+          current_volume_goal: projectRow.pipeline_volume_goal ? '[pipeline-present]' : '',
+          innovation_hook: projectRow.pipeline_innovation_hook ? '[pipeline-present]' : '',
+          first30_plan: projectRow.pipeline_first30_plan ? '[pipeline-present]' : '',
+          longform_capacity: projectRow.pipeline_longform_capacity ? '[pipeline-present]' : '',
+          world_summary: projectRow.pipeline_world_anchor ? '[pipeline-present]' : '',
+          characters: projectRow.pipeline_character_anchor ? [{ name: '[pipeline-present]' }] : [],
+        },
+        story_state: { last_updated_chapter: Number(projectRow.pipeline_story_state_chapter || 0) },
+      },
+      updated_at: String(projectRow.updated_at || ''),
+    } as NovelProjectRecord
 
     const chapters = (db.query(`
       SELECT
@@ -1441,9 +1692,21 @@ export async function getNovelPipelineSnapshot(activeWorkspace: string, projectI
         END AS chapter_text,
         CASE
           WHEN json_valid(raw_payload) THEN json_object(
-            'scene_cards', json_extract(raw_payload, '$.scene_cards'),
-            'scenes', json_extract(raw_payload, '$.scenes'),
-            'pre_draft_brief', json_extract(raw_payload, '$.pre_draft_brief')
+            'scene_cards', CASE
+              WHEN json_type(raw_payload, '$.scene_cards') = 'array' AND json_array_length(raw_payload, '$.scene_cards') > 0
+                THEN json_array(json_object('pipeline_signal', 1))
+              ELSE json('[]')
+            END,
+            'scenes', CASE
+              WHEN json_type(raw_payload, '$.scenes') = 'array' AND json_array_length(raw_payload, '$.scenes') > 0
+                THEN json_array(json_object('pipeline_signal', 1))
+              ELSE json('[]')
+            END,
+            'pre_draft_brief', CASE
+              WHEN ${pipelineJsonTruthySql('raw_payload', '$.pre_draft_brief')}
+                THEN json_object('pipeline_signal', 1)
+              ELSE NULL
+            END
           )
           ELSE '{}'
         END AS raw_payload,
@@ -1456,13 +1719,7 @@ export async function getNovelPipelineSnapshot(activeWorkspace: string, projectI
     const targetChapter = chapters.find(chapter => !chapter.chapter_text || chapter.chapter_text.includes('【占位正文】'))
       || chapters[chapters.length - 1]
       || null
-    const targetChapterNo = Number(targetChapter?.chapter_no || 0)
-    const chapterWindow = chapters
-      .filter(chapter => Math.abs(Number(chapter.chapter_no || 0) - targetChapterNo) <= 1)
-      .map(chapter => Number(chapter.id || 0))
-      .filter(Boolean)
-      .slice(0, 3)
-    while (chapterWindow.length < 3) chapterWindow.push(0)
+    const targetChapterId = Number(targetChapter?.id || 0)
 
     const outlines = (db.query(`
       SELECT
@@ -1497,39 +1754,30 @@ export async function getNovelPipelineSnapshot(activeWorkspace: string, projectI
     const chapterReviewPlaceholders = NOVEL_PIPELINE_CHAPTER_REVIEW_TYPES.map(() => '?').join(', ')
     const governanceReviewPlaceholders = NOVEL_PIPELINE_GOVERNANCE_REVIEW_TYPES.map(() => '?').join(', ')
     const chapterReviews = (db.query(`
-      WITH chapter_review_index AS MATERIALIZED (
-        SELECT
-          id,
-          review_type,
-          created_at,
-          CASE WHEN json_valid(payload) THEN CAST(json_extract(payload, '$.chapter_id') AS INTEGER) END AS chapter_id,
-          CASE WHEN json_valid(payload) THEN CAST(json_extract(payload, '$.chapter_no') AS INTEGER) END AS chapter_no
+      WITH target_review_times AS (
+        SELECT review_type, MAX(created_at) AS created_at
         FROM reviews
         WHERE project_id = ?
           AND review_type IN (${chapterReviewPlaceholders})
-      ), ranked_chapter_reviews AS (
-        SELECT
-          id,
-          review_type,
-          created_at,
-          chapter_id,
-          chapter_no,
-          ROW_NUMBER() OVER (
-            PARTITION BY review_type, chapter_id
-            ORDER BY created_at DESC, id ASC
-          ) AS pipeline_rank
-        FROM chapter_review_index
-        WHERE chapter_id IN (?, ?, ?)
+          AND json_valid(payload)
+          AND CAST(json_extract(payload, '$.chapter_id') AS INTEGER) = ?
+        GROUP BY review_type
       ), chapter_review_winners AS (
-        SELECT id, chapter_id, chapter_no
-        FROM ranked_chapter_reviews
-        WHERE pipeline_rank = 1
+        SELECT MIN(review.id) AS id
+        FROM reviews AS review
+        JOIN target_review_times AS latest
+          ON latest.review_type = review.review_type
+          AND latest.created_at = review.created_at
+        WHERE review.project_id = ?
+          AND json_valid(review.payload)
+          AND CAST(json_extract(review.payload, '$.chapter_id') AS INTEGER) = ?
+        GROUP BY review.review_type
       )
       SELECT
         review.id,
         review.project_id,
-        winner.chapter_id,
-        winner.chapter_no,
+        CASE WHEN json_valid(review.payload) THEN CAST(json_extract(review.payload, '$.chapter_id') AS INTEGER) END AS chapter_id,
+        CASE WHEN json_valid(review.payload) THEN CAST(json_extract(review.payload, '$.chapter_no') AS INTEGER) END AS chapter_no,
         review.review_type,
         review.status,
         '' AS summary,
@@ -1541,8 +1789,10 @@ export async function getNovelPipelineSnapshot(activeWorkspace: string, projectI
     `).all(
       projectId,
       ...NOVEL_PIPELINE_CHAPTER_REVIEW_TYPES,
-      ...chapterWindow,
-    ) as any[]).map(reviewFromRow)
+      targetChapterId,
+      projectId,
+      targetChapterId,
+    ) as any[]).map(row => projectNovelPipelineReview(reviewFromRow(row)))
     const governanceReviews = (db.query(`
       SELECT
         -MIN(id) AS id,
@@ -1565,51 +1815,27 @@ export async function getNovelPipelineSnapshot(activeWorkspace: string, projectI
     const repairRunPlaceholders = NOVEL_PIPELINE_REPAIR_RUN_TYPES.map(() => '?').join(', ')
     const governanceRunPlaceholders = NOVEL_PIPELINE_GOVERNANCE_RUN_TYPES.map(() => '?').join(', ')
     const batchSemanticRows = db.query(`
-      WITH batch_run_semantics AS MATERIALIZED (
-        SELECT
-          run.id,
-          run.project_id,
-          run.run_type,
-          LOWER(run.status) AS status_norm,
-          run.created_at,
-          CASE WHEN EXISTS (
-            SELECT 1
-            FROM json_each(
-              CASE
-                WHEN json_valid(run.output_ref) THEN CASE
-                  WHEN json_type(run.output_ref, '$.chapters') = 'array' THEN run.output_ref
-                  ELSE '{}'
-                END
-                ELSE '{}'
-              END,
-              '$.chapters'
-            ) AS chapter_result
-            WHERE LOWER(COALESCE(
-              CASE WHEN json_valid(chapter_result.value) THEN json_extract(chapter_result.value, '$.status') END,
-              ''
-            )) IN ('failed', 'error', 'blocked', 'needs_repair')
-          ) THEN 1 ELSE 0 END AS has_chapter_failure
-        FROM runs AS run
-        WHERE run.project_id = ? AND run.run_type IN (${batchRunPlaceholders})
-      )
       SELECT
         -MIN(id) AS id,
         project_id,
         run_type,
         MAX(created_at) AS created_at,
         SUM(CASE
-          WHEN status_norm IN ('completed', 'complete', 'success', 'succeeded', 'done', 'ok') AND has_chapter_failure = 0 THEN 1
+          WHEN LOWER(status) IN ('completed', 'complete', 'success', 'succeeded', 'done', 'ok')
+            AND COALESCE(pipeline_chapter_failure_count, 0) = 0 THEN 1
           ELSE 0
         END) AS successful_run_count,
         SUM(CASE
-          WHEN status_norm IN ('failed', 'error', 'blocked', 'cancelled') OR has_chapter_failure = 1 THEN 1
+          WHEN LOWER(status) IN ('failed', 'error', 'blocked', 'cancelled')
+            OR COALESCE(pipeline_chapter_failure_count, 0) > 0 THEN 1
           ELSE 0
         END) AS failed_run_count,
         SUM(CASE
-          WHEN status_norm IN ('queued', 'ready', 'running', 'paused', 'pending', 'needs_approval') THEN 1
+          WHEN LOWER(status) IN ('queued', 'ready', 'running', 'paused', 'pending', 'needs_approval') THEN 1
           ELSE 0
         END) AS active_run_count
-      FROM batch_run_semantics
+      FROM runs
+      WHERE project_id = ? AND run_type IN (${batchRunPlaceholders})
       GROUP BY project_id, run_type
     `).all(projectId, ...NOVEL_PIPELINE_BATCH_RUN_TYPES) as any[]
     const batchRows: NovelRunRecord[] = []
@@ -1652,92 +1878,24 @@ export async function getNovelPipelineSnapshot(activeWorkspace: string, projectI
     }
 
     const repairSemanticRows = db.query(`
-      WITH repair_run_semantics AS MATERIALIZED (
-        SELECT
-          run.id,
-          run.project_id,
-          run.run_type,
-          LOWER(run.status) AS status_norm,
-          run.created_at,
-          COALESCE(json_array_length(CASE WHEN json_valid(run.output_ref) THEN run.output_ref ELSE '{}' END, '$.tasks'), 0)
-            + COALESCE(json_array_length(CASE WHEN json_valid(run.output_ref) THEN run.output_ref ELSE '{}' END, '$.repair_tasks'), 0)
-            + COALESCE(json_array_length(CASE WHEN json_valid(run.input_ref) THEN run.input_ref ELSE '{}' END, '$.tasks'), 0)
-            + COALESCE(json_array_length(CASE WHEN json_valid(run.input_ref) THEN run.input_ref ELSE '{}' END, '$.repair_tasks'), 0)
-            AS task_count,
-          (
-            SELECT COUNT(*)
-            FROM (
-              SELECT value FROM json_each(
-                CASE
-                  WHEN json_valid(run.output_ref) THEN CASE
-                    WHEN json_type(run.output_ref, '$.tasks') = 'array' THEN run.output_ref
-                    ELSE '{}'
-                  END
-                  ELSE '{}'
-                END,
-                '$.tasks'
-              )
-              UNION ALL
-              SELECT value FROM json_each(
-                CASE
-                  WHEN json_valid(run.output_ref) THEN CASE
-                    WHEN json_type(run.output_ref, '$.repair_tasks') = 'array' THEN run.output_ref
-                    ELSE '{}'
-                  END
-                  ELSE '{}'
-                END,
-                '$.repair_tasks'
-              )
-              UNION ALL
-              SELECT value FROM json_each(
-                CASE
-                  WHEN json_valid(run.input_ref) THEN CASE
-                    WHEN json_type(run.input_ref, '$.tasks') = 'array' THEN run.input_ref
-                    ELSE '{}'
-                  END
-                  ELSE '{}'
-                END,
-                '$.tasks'
-              )
-              UNION ALL
-              SELECT value FROM json_each(
-                CASE
-                  WHEN json_valid(run.input_ref) THEN CASE
-                    WHEN json_type(run.input_ref, '$.repair_tasks') = 'array' THEN run.input_ref
-                    ELSE '{}'
-                  END
-                  ELSE '{}'
-                END,
-                '$.repair_tasks'
-              )
-            ) AS repair_task
-            WHERE LOWER(COALESCE(
-              NULLIF(TRIM(CASE WHEN json_valid(repair_task.value) THEN json_extract(repair_task.value, '$.task_status') END, ${NOVEL_PIPELINE_SQL_TRIM_CHARS}), ''),
-              NULLIF(TRIM(CASE WHEN json_valid(repair_task.value) THEN json_extract(repair_task.value, '$.taskStatus') END, ${NOVEL_PIPELINE_SQL_TRIM_CHARS}), ''),
-              NULLIF(TRIM(CASE WHEN json_valid(repair_task.value) THEN json_extract(repair_task.value, '$.status') END, ${NOVEL_PIPELINE_SQL_TRIM_CHARS}), ''),
-              ''
-            )) NOT IN ('resolved', 'closed', 'completed', 'complete', 'done', 'success', 'ok')
-          ) AS open_task_count
-        FROM runs AS run
-        WHERE run.project_id = ? AND run.run_type IN (${repairRunPlaceholders})
-      )
       SELECT
         -MIN(id) AS id,
         project_id,
         run_type,
         MAX(created_at) AS created_at,
-        SUM(open_task_count) AS open_task_count,
-        SUM(CASE WHEN status_norm IN ('failed', 'error', 'blocked', 'cancelled') THEN 1 ELSE 0 END) AS failed_run_count,
-        SUM(CASE WHEN status_norm IN ('queued', 'ready', 'running', 'paused', 'pending', 'needs_approval') THEN 1 ELSE 0 END) AS active_run_count,
+        SUM(COALESCE(pipeline_open_task_count, 0)) AS open_task_count,
+        SUM(CASE WHEN LOWER(status) IN ('failed', 'error', 'blocked', 'cancelled') THEN 1 ELSE 0 END) AS failed_run_count,
+        SUM(CASE WHEN LOWER(status) IN ('queued', 'ready', 'running', 'paused', 'pending', 'needs_approval') THEN 1 ELSE 0 END) AS active_run_count,
         SUM(CASE
-          WHEN status_norm NOT IN (
+          WHEN LOWER(status) NOT IN (
             'completed', 'complete', 'success', 'succeeded', 'done', 'ok',
             'failed', 'error', 'blocked', 'cancelled',
             'queued', 'ready', 'running', 'paused', 'pending', 'needs_approval'
-          ) AND task_count = 0 THEN 1
+          ) AND COALESCE(pipeline_task_count, 0) = 0 THEN 1
           ELSE 0
         END) AS incomplete_run_count
-      FROM repair_run_semantics
+      FROM runs
+      WHERE project_id = ? AND run_type IN (${repairRunPlaceholders})
       GROUP BY project_id, run_type
     `).all(projectId, ...NOVEL_PIPELINE_REPAIR_RUN_TYPES) as any[]
     const repairRows: NovelRunRecord[] = []
@@ -1789,35 +1947,30 @@ export async function getNovelPipelineSnapshot(activeWorkspace: string, projectI
     }
 
     const governanceRows = db.query(`
-      WITH governance_run_index AS (
-        SELECT
-          id,
-          project_id,
-          run_type,
-          step_name,
-          status,
-          created_at
+      WITH governance_run_times AS (
+        SELECT run_type, MAX(created_at) AS created_at
         FROM runs
         WHERE project_id = ?
           AND run_type IN (${governanceRunPlaceholders})
           AND LOWER(status) IN ('completed', 'complete', 'success', 'succeeded', 'done', 'ok')
-      ), ranked_governance_runs AS (
-        SELECT
-          id,
-          project_id,
-          run_type,
-          step_name,
-          status,
-          created_at,
-          ROW_NUMBER() OVER (PARTITION BY run_type ORDER BY created_at DESC, id DESC) AS pipeline_rank
-        FROM governance_run_index
+        GROUP BY run_type
+      ), governance_run_winners AS (
+        SELECT MIN(run.id) AS id
+        FROM runs AS run
+        JOIN governance_run_times AS latest
+          ON latest.run_type = run.run_type
+          AND latest.created_at = run.created_at
+        WHERE run.project_id = ?
+          AND LOWER(run.status) IN ('completed', 'complete', 'success', 'succeeded', 'done', 'ok')
+        GROUP BY run.run_type
       )
-      SELECT id, project_id, run_type, step_name, status, created_at
-      FROM ranked_governance_runs
-      WHERE pipeline_rank = 1
+      SELECT run.id, run.project_id, run.run_type, run.step_name, run.status, run.created_at
+      FROM governance_run_winners AS winner
+      JOIN runs AS run ON run.id = winner.id
     `).all(
       projectId,
       ...NOVEL_PIPELINE_GOVERNANCE_RUN_TYPES,
+      projectId,
     ) as any[]
     const governanceRuns: NovelRunRecord[] = governanceRows.map(row => ({
       ...row,
@@ -1830,7 +1983,7 @@ export async function getNovelPipelineSnapshot(activeWorkspace: string, projectI
     const runs = [...batchRows.filter(row => Number(row.pipeline_run_count || 0) > 0), ...repairRows, ...governanceRuns]
 
     return {
-      project: projectFromRow(projectRow),
+      project,
       chapters: dedupById(chapters).sort((a, b) => a.chapter_no - b.chapter_no),
       outlines: dedupById(outlines),
       worldbuilding: dedupById(worldbuilding),
@@ -2675,7 +2828,12 @@ export async function listNovelRuns(activeWorkspace: string, projectId: number) 
   const db = openDb(activeWorkspace)
   try {
     ensureSqliteSchema(db)
-    return (db.query('SELECT * FROM runs WHERE project_id = ? ORDER BY created_at DESC').all(projectId) as NovelRunRecord[])
+    return (db.query(`
+      SELECT id, project_id, run_type, step_name, status, input_ref, output_ref, duration_ms, error_message, created_at
+      FROM runs
+      WHERE project_id = ?
+      ORDER BY created_at DESC
+    `).all(projectId) as NovelRunRecord[])
       .sort((a, b) => b.created_at.localeCompare(a.created_at))
   } finally {
     db.close()
@@ -2833,7 +2991,7 @@ export async function appendNovelRun(activeWorkspace: string, data: Partial<Nove
   const db = openDb(activeWorkspace)
   try {
     ensureSqliteSchema(db)
-    const result = db.query('INSERT INTO runs (project_id,run_type,step_name,status,input_ref,output_ref,duration_ms,error_message,created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(
+    const result = db.query('INSERT INTO runs (project_id,run_type,step_name,status,input_ref,output_ref,duration_ms,error_message,pipeline_chapter_failure_count,pipeline_open_task_count,pipeline_task_count,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(
       record.project_id,
       record.run_type,
       record.step_name,
@@ -2842,6 +3000,9 @@ export async function appendNovelRun(activeWorkspace: string, data: Partial<Nove
       record.output_ref || '',
       record.duration_ms || 0,
       record.error_message || '',
+      record.pipeline_chapter_failure_count ?? 0,
+      record.pipeline_open_task_count ?? 0,
+      record.pipeline_task_count ?? 0,
       record.created_at,
     ) as any
     const id = Number(result?.lastInsertRowid || (db.query('SELECT last_insert_rowid() AS id').get() as any)?.id || 0)
@@ -2875,13 +3036,21 @@ export async function compactNovelStorage(activeWorkspace: string, options: { va
         OR input_ref LIKE ?
         OR output_ref LIKE ?
     `).all(maxChars, maxChars, contextPattern, contextPattern, camelContextPattern, camelContextPattern) as any[]
-    const updateRun = db.query('UPDATE runs SET input_ref=?, output_ref=? WHERE id=?')
+    const updateRun = db.query('UPDATE runs SET input_ref=?, output_ref=?, pipeline_chapter_failure_count=?, pipeline_open_task_count=?, pipeline_task_count=? WHERE id=?')
     for (const row of runRows) {
       scanned += 1
       const nextInput = compactPersistedText(row.input_ref || '', maxChars)
       const nextOutput = compactPersistedText(row.output_ref || '', maxChars)
       if (nextInput !== String(row.input_ref || '') || nextOutput !== String(row.output_ref || '')) {
-        updateRun.run(nextInput, nextOutput, row.id)
+        const summary = summarizeNovelRunPipelineRefs(nextInput, nextOutput)
+        updateRun.run(
+          nextInput,
+          nextOutput,
+          summary.pipeline_chapter_failure_count,
+          summary.pipeline_open_task_count,
+          summary.pipeline_task_count,
+          row.id,
+        )
         compacted += 1
       }
     }

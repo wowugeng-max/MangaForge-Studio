@@ -427,6 +427,9 @@ describe('novel pipeline snapshot', () => {
           { task_status: '\u205f', status: 'completed' },
           { task_status: '\u3000', taskStatus: ' resolved ' },
           { task_status: '\ufeff', status: 'completed' },
+          { task_status: ['failed'] },
+          { task_status: [], status: 'resolved' },
+          { task_status: ['resolved'] },
         ],
         repair_tasks: 'open',
       }),
@@ -445,8 +448,112 @@ describe('novel pipeline snapshot', () => {
     const legacySummary = buildNovelPipelineSummary(legacyInput)
     const snapshotSummary = buildNovelPipelineSummary(snapshot!)
 
-    expect(legacySummary.current_stage).toBe('serial_governance')
+    expect(legacySummary.current_stage).toBe('batch_scaling')
     expect(stablePipeline(snapshotSummary)).toEqual(stablePipeline(legacySummary))
+  })
+
+  test('keeps active project chapter and winner review payloads compact without changing decisions', async () => {
+    const workspace = await tempWorkspace()
+    const { project, chapter } = await createAcceptedPipelineFixture(workspace, '活跃大对象')
+    const hugeActivePayload = '活跃 payload 不得进入快照。'.repeat(25_000)
+    const db = new Database(join(workspace, 'novel.sqlite'))
+    db.query('UPDATE projects SET reference_config = ? WHERE id = ?').run(JSON.stringify({
+      writing_bible: {
+        reader_promise: '每章都有破局推进',
+        protagonist_drive: '主角必须夺回火种',
+        core_conflict: '新火与旧规对抗',
+        current_volume_goal: '进入大荒门',
+        innovation_hook: '符火审案',
+        first30_plan: '前三十章完成入门破局',
+        longform_capacity: '九卷火种谜团',
+        diagnostics: hugeActivePayload,
+      },
+      story_state: { last_updated_chapter: 1 },
+      unrelated_diagnostics: hugeActivePayload,
+    }), project.id)
+    db.query('UPDATE chapters SET raw_payload = ? WHERE id = ?').run(JSON.stringify({
+      scene_cards: Array.from({ length: 8 }, (_, index) => ({ purpose: `推进${index}`, diagnostics: hugeActivePayload })),
+      pre_draft_brief: { ready: true, diagnostics: hugeActivePayload },
+    }), chapter.id)
+    const insertReview = db.prepare(`
+      INSERT INTO reviews (project_id, review_type, status, summary, issues, payload, created_at)
+      VALUES (?, ?, ?, '', '[]', ?, ?)
+    `)
+    insertReview.run(project.id, 'prose_quality', 'ok', JSON.stringify({
+      chapter_id: chapter.id,
+      self_check: { review: { score: 88, passed: true } },
+      diagnostics: hugeActivePayload,
+    }), '2026-07-05T00:00:00.000Z')
+    insertReview.run(project.id, 'editor_report', 'ok', JSON.stringify({
+      chapter_id: chapter.id,
+      report: { status: 'accepted', issues: [] },
+      diagnostics: hugeActivePayload,
+    }), '2026-07-05T00:01:00.000Z')
+    db.close()
+
+    const legacyInput = {
+      project: await getNovelProject(workspace, project.id),
+      chapters: await listNovelChapters(workspace, project.id),
+      outlines: await listNovelOutlines(workspace, project.id),
+      worldbuilding: await listNovelWorldbuilding(workspace, project.id),
+      characters: await listNovelCharacters(workspace, project.id),
+      reviews: await listNovelReviews(workspace, project.id),
+      runs: await listNovelRuns(workspace, project.id),
+    }
+    const snapshot = await getNovelPipelineSnapshot(workspace, project.id)
+
+    expect(stablePipeline(buildNovelPipelineSummary(snapshot!))).toEqual(stablePipeline(buildNovelPipelineSummary(legacyInput)))
+    expect(JSON.stringify(snapshot)).not.toContain(hugeActivePayload.slice(0, 200))
+    expect(JSON.stringify(snapshot).length).toBeLessThan(100_000)
+    expect(snapshot!.chapters[0].raw_payload.scene_cards).toHaveLength(1)
+    expect(snapshot!.chapters[0].raw_payload.pre_draft_brief).toBeTruthy()
+  })
+
+  test('always selects reviews for the explicit target id when chapter numbers are duplicated', async () => {
+    const workspace = await tempWorkspace()
+    const { project } = await createAcceptedPipelineFixture(workspace, '重复章号')
+    let target: any = null
+    for (let index = 0; index < 3; index += 1) {
+      target = await createNovelChapter(workspace, {
+        project_id: project.id,
+        chapter_no: 1,
+        title: `重复章${index + 2}`,
+        chapter_goal: '夺回火种',
+        conflict: '旧规拦截',
+        chapter_text: `第${index + 2}份正文`.repeat(300),
+      })
+    }
+    await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'prose_quality',
+      status: 'ok',
+      payload: JSON.stringify({ chapter_id: target.id, self_check: { review: { score: 88, passed: true } } }),
+      created_at: '2026-07-06T00:00:00.000Z',
+    })
+    await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'editor_report',
+      status: 'ok',
+      payload: JSON.stringify({ chapter_id: target.id, report: { status: 'accepted', issues: [] } }),
+      created_at: '2026-07-06T00:01:00.000Z',
+    })
+
+    const legacyInput = {
+      project: await getNovelProject(workspace, project.id),
+      chapters: await listNovelChapters(workspace, project.id),
+      outlines: await listNovelOutlines(workspace, project.id),
+      worldbuilding: await listNovelWorldbuilding(workspace, project.id),
+      characters: await listNovelCharacters(workspace, project.id),
+      reviews: await listNovelReviews(workspace, project.id),
+      runs: await listNovelRuns(workspace, project.id),
+    }
+    const snapshot = await getNovelPipelineSnapshot(workspace, project.id)
+    const legacySummary = buildNovelPipelineSummary(legacyInput)
+    const snapshotSummary = buildNovelPipelineSummary(snapshot!)
+
+    expect(legacySummary.current_stage).toBe('batch_scaling')
+    expect(stablePipeline(snapshotSummary)).toEqual(stablePipeline(legacySummary))
+    expect(snapshot!.reviews.filter((review: any) => Number(review.chapter_id) === Number(target.id))).toHaveLength(2)
   })
 
   test('keeps the earlier review id on equal timestamps like the legacy stable ordering', async () => {
@@ -505,52 +612,67 @@ describe('novel pipeline snapshot', () => {
     expect(block).not.toContain('chapter_versions')
     expect(block).not.toContain('readStore(activeWorkspace)')
     expect(block).not.toContain('listNovel')
-    expect(block).toContain('WITH chapter_review_index AS MATERIALIZED')
+    expect(block).not.toContain('MATERIALIZED')
+    expect(block).not.toContain('ROW_NUMBER')
+    expect(block).toContain('WITH target_review_times AS')
     expect(block).toContain('chapter_review_winners AS')
     expect(block).toContain('JOIN reviews AS review ON review.id = winner.id')
-    expect(block).toContain('WITH batch_run_semantics AS MATERIALIZED')
-    expect(block).toContain('WITH repair_run_semantics AS MATERIALIZED')
-    expect(block).toContain('WITH governance_run_index AS')
+    expect(block).toContain("CAST(json_extract(payload, '$.chapter_id') AS INTEGER) = ?")
+    expect(block).toContain('targetChapterId')
+    expect(block).toContain('WITH governance_run_times AS')
+    expect(block).toContain('governance_run_winners AS')
     expect(block).not.toContain('WITH run_base AS')
-    const chapterReviewRanking = block.slice(
-      block.indexOf('WITH chapter_review_index AS'),
+    const projectProjection = block.slice(
+      block.indexOf('const projectRow ='),
+      block.indexOf('if (!projectRow)'),
+    )
+    const chapterProjection = block.slice(
+      block.indexOf('const chapters ='),
+      block.indexOf('const targetChapter ='),
+    )
+    const targetReviewQuery = block.slice(
+      block.indexOf('WITH target_review_times AS'),
       block.indexOf('const governanceReviews'),
     )
     const batchSemanticQuery = block.slice(
-      block.indexOf('WITH batch_run_semantics AS'),
+      block.indexOf('const batchSemanticRows ='),
       block.indexOf('const batchRows:'),
     )
     const repairSemanticQuery = block.slice(
-      block.indexOf('WITH repair_run_semantics AS'),
+      block.indexOf('const repairSemanticRows ='),
       block.indexOf('const repairRows:'),
     )
     const governanceRunQuery = block.slice(
-      block.indexOf('WITH governance_run_index AS'),
+      block.indexOf('WITH governance_run_times AS'),
       block.indexOf('const governanceRuns:'),
     )
-    expect(chapterReviewRanking).not.toContain('\n          payload,')
-    expect(chapterReviewRanking.indexOf('WHERE pipeline_rank = 1')).toBeLessThan(chapterReviewRanking.indexOf('JOIN reviews AS review'))
-    expect(chapterReviewRanking).toContain('ORDER BY created_at DESC, id ASC')
-    expect(batchSemanticQuery.slice(0, batchSemanticQuery.indexOf('CASE WHEN EXISTS'))).not.toContain('output_ref')
-    expect(batchSemanticQuery).not.toContain('ROW_NUMBER')
-    expect(batchSemanticQuery).toContain('END AS has_chapter_failure')
-    expect(batchSemanticQuery).toContain("json_type(run.output_ref, '$.chapters') = 'array'")
-    const repairNarrowProjection = repairSemanticQuery.slice(0, repairSemanticQuery.indexOf('COALESCE(json_array_length'))
-    expect(repairNarrowProjection).not.toContain('input_ref')
-    expect(repairNarrowProjection).not.toContain('output_ref')
-    expect(repairSemanticQuery).not.toContain('ROW_NUMBER')
-    expect(repairSemanticQuery).toContain('AS open_task_count')
-    for (const path of ['$.tasks', '$.repair_tasks']) {
-      expect(repairSemanticQuery).toContain(`json_type(run.output_ref, '${path}') = 'array'`)
-      expect(repairSemanticQuery).toContain(`json_type(run.input_ref, '${path}') = 'array'`)
-    }
+    expect(projectProjection).not.toContain('SELECT id, title, synopsis, reference_config')
+    expect(projectProjection).toContain('AS pipeline_reader_promise')
+    expect(projectProjection).toContain('AS pipeline_story_state_chapter')
+    expect(chapterProjection).toContain("json_object('pipeline_signal', 1)")
+    expect(chapterProjection).not.toContain("json_extract(raw_payload, '$.scene_cards')")
+    expect(targetReviewQuery).toContain('SELECT MIN(review.id) AS id')
+    expect(targetReviewQuery).toContain('review.payload')
+    expect(block).toContain('projectNovelPipelineReview(reviewFromRow(row))')
+    expect(batchSemanticQuery).not.toContain('input_ref')
+    expect(batchSemanticQuery).not.toContain('output_ref')
+    expect(batchSemanticQuery).not.toContain('json_each')
+    expect(batchSemanticQuery).toContain('pipeline_chapter_failure_count')
+    expect(repairSemanticQuery).not.toContain('input_ref')
+    expect(repairSemanticQuery).not.toContain('output_ref')
+    expect(repairSemanticQuery).not.toContain('json_each')
+    expect(repairSemanticQuery).toContain('pipeline_open_task_count')
+    expect(repairSemanticQuery).toContain('pipeline_task_count')
     for (const codePoint of [9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279]) {
       expect(source).toContain(`char(${codePoint})`)
     }
-    expect(repairSemanticQuery).toContain("NULLIF(TRIM(CASE WHEN json_valid(repair_task.value) THEN json_extract(repair_task.value, '$.task_status') END, ${NOVEL_PIPELINE_SQL_TRIM_CHARS}), '')")
+    expect(source).toContain("for (const key of ['task_status', 'taskStatus', 'status'])")
+    expect(source).toContain("String(task?.[key] ?? '').trim().toLowerCase()")
     expect(governanceRunQuery).not.toContain('input_ref')
     expect(governanceRunQuery).not.toContain('output_ref')
     expect(governanceRunQuery).not.toContain('json_each')
+    expect(governanceRunQuery).toContain('MAX(created_at) AS created_at')
+    expect(governanceRunQuery).toContain('SELECT MIN(run.id) AS id')
     expect(block).toContain('AS chapter_text')
     expect(block).toContain('WHERE project_id = ?')
   })
