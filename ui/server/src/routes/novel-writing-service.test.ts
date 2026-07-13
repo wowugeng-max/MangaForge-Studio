@@ -260,9 +260,13 @@ const readChapterProseStoragePatchSource = () => readFileSync(join(import.meta.d
 const readPostDeliverySyncReviewRecordSource = () => readFileSync(join(import.meta.dir, '../novel-writing/post-delivery-sync-review-record.ts'), 'utf8')
 const readDraftSyncReviewRecordSource = () => readFileSync(join(import.meta.dir, '../novel-writing/draft-sync-review-record.ts'), 'utf8')
 
-test('stores the best complete revision with warnings when subjective quality remains below target', async () => {
+test('keeps the connected draft with warnings when a quality revision drops the opening handoff', async () => {
+  const initialDraft = buildPipelineProse(
+    '倒数压到最后三秒，江澈停在围墙阴影里等待。',
+    '只看着追捕队继续收紧包围',
+  )
   const firstRevision = buildPipelineProse(
-    '第一轮改稿里，江澈离开墙角，却把选择交给顾遥。',
+    '倒数压到最后三秒，江澈仍在围墙阴影里，却终于离开墙角。',
     '跟着顾遥留下的手势挪动，没有改变封锁结构',
   )
   const secondRevision = buildPipelineProse(
@@ -292,7 +296,7 @@ test('stores the best complete revision with warnings when subjective quality re
   const harness = await createProsePipelineHarness({
     reviewPayloads: [
       failedReview('倒数压到最后三秒，江澈停在围墙阴影里等待。'),
-      failedReview('第一轮改稿里，江澈离开墙角，却把选择交给顾遥。'),
+      failedReview('倒数压到最后三秒，江澈仍在围墙阴影里，却终于离开墙角。'),
       unexpectedThirdReview,
     ],
     revisionTexts: [firstRevision, secondRevision],
@@ -309,22 +313,24 @@ test('stores the best complete revision with warnings when subjective quality re
     admission_status: 'accepted_with_warnings',
     quality_loop: {
       decision: { passed: false },
-      rounds: [
-        { round: 1, accepted: true, reason: '' },
-      ],
     },
   })
+  expect(result.quality_loop?.rounds).toContainEqual(expect.objectContaining({
+    round: 1,
+    accepted: false,
+    reason: expect.stringContaining('承接'),
+  }))
   expect(result.quality_warnings).toContainEqual(expect.objectContaining({ source: 'quality' }))
   expect(result.prompt_diagnostics?.prompt_chars).toBeGreaterThan(0)
   expect(JSON.stringify(result.quality_loop)).not.toContain(firstRevision.slice(0, 80))
   expect(JSON.stringify(result.quality_loop)).not.toContain(secondRevision.slice(0, 80))
 
   const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
-  expect(stored?.chapter_text).toBe(normalizeProseForStorage(firstRevision))
+  expect(stored?.chapter_text).toBe(normalizeProseForStorage(initialDraft))
   expect(harness.storeCalls).toBe(1)
   expect(harness.storyStateCalls).toBe(1)
-  expect(harness.memoryTexts).toEqual([normalizeProseForStorage(firstRevision)])
-  expect(harness.modelCalls.review).toBe(2)
+  expect(harness.memoryTexts).toEqual([normalizeProseForStorage(initialDraft)])
+  expect(harness.modelCalls.review).toBe(1)
   expect(harness.modelCalls.revision).toBe(1)
 })
 test('stores revised prose with warnings when the independent quality recheck is unavailable', async () => {

@@ -185,7 +185,7 @@ export function selectContinuitySafeProseCandidate(
     && !(candidateAnchors >= 2 && hasExplicitCausalBridge(candidate))
   const handoff = String(target?.previous_handoff || target?.previousHandoff || '')
   const relativeRegression = candidateAnchors < 3 && relativeExactCoverageRegression(handoff, original, candidate)
-  const compoundItemStateRegression = originalHasCompoundItemState && !candidateHasCompoundItemState
+  const compoundItemStateRegression = originalAnchors >= 2 && originalHasCompoundItemState && !candidateHasCompoundItemState
   const regressed = structuredRegression || relativeRegression || compoundItemStateRegression
   if (!regressed) return { text: candidate, accepted: true, warning: null }
   return {
