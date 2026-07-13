@@ -96,6 +96,17 @@ function proseSceneCardRepairList(value: any, maxItems = 6, maxChars = 180) {
   return proseSceneCardList(value, maxItems, maxChars)
 }
 
+function compactStoryDrivingValue(value: any, depth = 0): any {
+  if (value == null || depth > 5) return undefined
+  if (typeof value !== 'object') return compactProsePromptValue(value, depth)
+  if (Array.isArray(value)) return value.slice(0, 12).map(item => compactStoryDrivingValue(item, depth + 1)).filter(item => item !== undefined)
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => !/(?:_sync$|Sync$|receipt|diagnostic|audit_log|raw_payload)/i.test(key))
+    .slice(0, 28)
+    .map(([key, item]) => [key, compactStoryDrivingValue(item, depth + 1)])
+    .filter(([, item]) => item !== undefined))
+}
+
 export function compactProseSceneCard(card: any) {
   return compactProsePromptValue({
     scene_no: card?.scene_no || card?.sceneNo,
@@ -248,6 +259,12 @@ export function buildProsePromptContextSnapshot(contextPackage: any) {
       word_target: target.word_target || target.wordTarget,
       scene_cards: asArray(target.scene_cards || target.sceneCards).slice(0, 8).map(compactProseSceneCard),
       chapter_positioning_brief: target.chapter_positioning_brief || target.chapterPositioningBrief,
+      recent_fatigue_brief: compactStoryDrivingValue(target.recent_fatigue_brief || target.recentFatigueBrief),
+      write_preparation_brief: compactStoryDrivingValue(target.write_preparation_brief || target.writePreparationBrief),
+      delivery_risk_carry_over: compactStoryDrivingValue(target.delivery_risk_carry_over || target.deliveryRiskCarryOver),
+      conflict_structure_contract: compactStoryDrivingValue(target.conflict_structure_contract || target.conflictStructureContract),
+      dialogue_contract: compactStoryDrivingValue(target.dialogue_contract || target.dialogueContract),
+      style_boundary_contract: compactStoryDrivingValue(target.style_boundary_contract || target.styleBoundaryContract),
       longform_structure_contract: omittedContracts.has('longform_structure_contract')
         ? undefined
         : target.longform_structure_contract || target.longformStructureContract,

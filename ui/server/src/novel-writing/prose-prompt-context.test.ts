@@ -124,4 +124,29 @@ describe('prose prompt context helpers', () => {
     expect(serialized).toContain('transition_from_previous')
     expect(serialized).toContain('暗金绢册再次发热')
   })
+
+  test('keeps compact story-driving briefs while removing receipt and sync diagnostics', () => {
+    const snapshot = buildProsePromptContextSnapshot({
+      chapter_target: {
+        recent_fatigue_brief: { next_actions: ['让失控列车逼苏禾当场选择'], diagnostics: 'DROP_DIAGNOSTIC' },
+        write_preparation_brief: { rolling_rhythm_preflight: { principle: '列车进站前必须新增一次信息反转' } },
+        delivery_risk_carry_over: { opening_actions: ['青铜罗盘倒转直接触发封站'], receipts: ['DROP_RECEIPT'] },
+        conflict_structure_contract: { no_exit_rules: ['苏禾离站就会失去弟弟坐标'] },
+        dialogue_contract: { key_lines: ['苏禾：下一班车根本不存在。'] },
+        style_boundary_contract: { hard_constraints: ['短段推进，不写静态站景'] },
+        prose_craft_checks_sync: { next_actions: ['DROP_SYNC'] },
+      },
+    })
+    const serialized = prosePromptJson(snapshot, 10000)
+
+    expect(serialized).toContain('让失控列车逼苏禾当场选择')
+    expect(serialized).toContain('列车进站前必须新增一次信息反转')
+    expect(serialized).toContain('青铜罗盘倒转直接触发封站')
+    expect(serialized).toContain('苏禾离站就会失去弟弟坐标')
+    expect(serialized).toContain('苏禾：下一班车根本不存在。')
+    expect(serialized).toContain('短段推进，不写静态站景')
+    expect(serialized).not.toContain('DROP_DIAGNOSTIC')
+    expect(serialized).not.toContain('DROP_RECEIPT')
+    expect(serialized).not.toContain('DROP_SYNC')
+  })
 })
