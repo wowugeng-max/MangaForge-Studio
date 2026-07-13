@@ -25,46 +25,57 @@ function proseCharCount(value: string) {
   return String(value || '').replace(/\s+/g, '').length
 }
 
-function splitProseSentences(value: string) {
+type ProseSentence = {
+  text: string
+  complete: boolean
+}
+
+function splitProseSentences(value: string): ProseSentence[] {
   const text = String(value || '')
-  const sentences: string[] = []
+  const sentences: ProseSentence[] = []
   let buffer = ''
   let quoteDepth = 0
+  let previousChar = ''
   for (const char of text) {
     buffer += char
     if ('“「『'.includes(char)) quoteDepth += 1
+    const closesQuotedSentence = '”」』'.includes(char)
+      && quoteDepth === 1
+      && /[。！？!?；;]/.test(previousChar)
     if ('”」』'.includes(char)) quoteDepth = Math.max(0, quoteDepth - 1)
-    if (/。|！|？|!|\?|；|;/.test(char) && quoteDepth === 0) {
-      const sentence = buffer.trim()
-      if (sentence) sentences.push(sentence)
+    if ((/[。！？!?；;]/.test(char) && quoteDepth === 0) || closesQuotedSentence) {
+      if (buffer) sentences.push({ text: buffer, complete: true })
       buffer = ''
     }
+    if (!/\s/.test(char)) previousChar = char
   }
-  const tail = buffer.trim()
-  if (tail) sentences.push(tail)
+  if (buffer) sentences.push({ text: buffer, complete: false })
   return sentences
 }
 
 function isDialogueParagraph(value: string) {
-  return /^[“「『].*[”」』]$/.test(String(value || '').trim())
+  return /^[“「『][\s\S]*[”」』]$/.test(String(value || '').trim())
 }
 
-function restoreParagraphBreaksForSingleLineProse(value: any) {
-  const text = String(value || '').replace(/\r\n?/g, '\n').trim()
-  if (!text) return text
-  const nonEmptyLines = text.split('\n').map(line => line.trim()).filter(Boolean)
-  if (nonEmptyLines.length !== 1) return text
-  if (proseCharCount(text) < 500) return text
+function isProtectedProseLine(value: string) {
+  const line = String(value || '').trim()
+  return /^#{0,6}\s*第[一二三四五六七八九十百千万两0-9]+章(?:\s|$|[：:《「【_ -])/.test(line)
+    || /^(?:[-*+]\s+|\d+[.．、)）]\s*|[一二三四五六七八九十]+[、.．)）]\s*)/.test(line)
+}
+
+function addParagraphBreaksToWall(value: string) {
+  const text = String(value || '')
+  if (proseCharCount(text) < 180 || isProtectedProseLine(text)) return text
   const sentences = splitProseSentences(text)
-  if (sentences.length < 6) return text
+  if (sentences.filter(sentence => sentence.complete).length < 4) return text
 
   const paragraphs: string[] = []
   let current = ''
   let currentChars = 0
   for (let index = 0; index < sentences.length; index += 1) {
-    const sentence = sentences[index]
+    const sentence = sentences[index].text
     const sentenceChars = proseCharCount(sentence)
-    const nextSentence = sentences[index + 1] || ''
+    const nextSentence = sentences[index + 1]?.text || ''
     const dialogue = isDialogueParagraph(sentence)
     if (dialogue) {
       if (current) paragraphs.push(current)
@@ -73,7 +84,7 @@ function restoreParagraphBreaksForSingleLineProse(value: any) {
       currentChars = 0
       continue
     }
-    if (current && currentChars >= 18 && currentChars + sentenceChars > 78) {
+    if (current && currentChars >= 45 && currentChars + sentenceChars > 90) {
       paragraphs.push(current)
       current = ''
       currentChars = 0
@@ -82,9 +93,8 @@ function restoreParagraphBreaksForSingleLineProse(value: any) {
     currentChars += sentenceChars
     const nextStartsDialogue = isDialogueParagraph(nextSentence)
     if (
-      currentChars >= 68
-      || (currentChars >= 40 && nextStartsDialogue)
-      || (currentChars >= 48 && sentenceChars >= 32)
+      currentChars >= 90
+      || (currentChars >= 45 && nextStartsDialogue)
     ) {
       paragraphs.push(current)
       current = ''
@@ -95,8 +105,18 @@ function restoreParagraphBreaksForSingleLineProse(value: any) {
   return paragraphs.length > 1 ? paragraphs.join('\n\n') : text
 }
 
+function restoreParagraphBreaksForWallProse(value: any) {
+  const text = String(value || '')
+  if (!text) return text
+  const normalized = text
+    .split(/(\r?\n)/)
+    .map(part => (/^\r?\n$/.test(part) ? part : addParagraphBreaksToWall(part)))
+    .join('')
+  return normalized.replace(/\s+/g, '') === text.replace(/\s+/g, '') ? normalized : text
+}
+
 export function normalizeProseForStorage(value: any) {
-  return restoreParagraphBreaksForSingleLineProse(value)
+  return restoreParagraphBreaksForWallProse(value)
 }
 
 export function buildChapterProseStoragePatch(input: ChapterProseStoragePatchInput) {
