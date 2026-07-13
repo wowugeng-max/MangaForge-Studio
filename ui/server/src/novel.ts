@@ -2980,7 +2980,11 @@ export async function getNovelRun(activeWorkspace: string, runId: number, projec
   const db = openDb(activeWorkspace)
   try {
     ensureSqliteSchema(db)
-    return (db.query('SELECT * FROM runs WHERE id = ? AND project_id = ?').get(runId, projectId) as NovelRunRecord | null) || null
+    return (db.query(`
+      SELECT id, project_id, run_type, step_name, status, input_ref, output_ref, duration_ms, error_message, created_at
+      FROM runs
+      WHERE id = ? AND project_id = ?
+    `).get(runId, projectId) as NovelRunRecord | null) || null
   } finally {
     db.close()
   }

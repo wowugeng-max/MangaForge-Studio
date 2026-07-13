@@ -318,6 +318,33 @@ describe('novel pipeline summary', () => {
     expect(batch?.checks.find(check => check.key === 'repair_queue')?.status).toBe('blocked')
   })
 
+  test('uses persisted repair task counts as a payload replacement without double counting', () => {
+    const run = {
+      id: 304,
+      project_id: 1,
+      run_type: 'longform_production_repair',
+      step_name: 'persisted-summary',
+      status: 'completed',
+      output_ref: JSON.stringify({ tasks: [{ task_status: 'open' }] }),
+      created_at: '2026-06-21T01:06:00.000Z',
+    }
+    const input = {
+      project: acceptedProject,
+      chapters: [acceptedChapter],
+      outlines: acceptedOutlines,
+      worldbuilding,
+      characters,
+      reviews: acceptedReviews,
+    }
+    const legacy = buildNovelPipelineSummary({ ...input, runs: [run] })
+    const persisted = buildNovelPipelineSummary({
+      ...input,
+      runs: [{ ...run, pipeline_open_task_count: 1, pipeline_task_count: 1 }],
+    })
+
+    expect(persisted.stages).toEqual(legacy.stages)
+  })
+
   test('moves to serial governance when safe-batch evidence is clean and exposes governance checks', () => {
     const summary = buildNovelPipelineSummary({
       project: acceptedProject,

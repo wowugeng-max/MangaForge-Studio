@@ -476,9 +476,16 @@ function repairQueueHealth(runs: any[]) {
   let openRuns = 0
   for (const run of arrayValue(runs).filter(isRepairRun)) {
     const tasks = repairTasksFromRun(run)
-    const taskOpenCount = tasks.filter(isOpenRepairTask).length + Math.max(0, Number(run?.pipeline_open_task_count || 0))
+    const projectedOpenTaskCount = Number(run?.pipeline_open_task_count)
+    const taskOpenCount = Number.isFinite(projectedOpenTaskCount) && projectedOpenTaskCount >= 0
+      ? projectedOpenTaskCount
+      : tasks.filter(isOpenRepairTask).length
+    const projectedTaskCount = Number(run?.pipeline_task_count)
+    const taskCount = Number.isFinite(projectedTaskCount) && projectedTaskCount >= 0
+      ? projectedTaskCount
+      : tasks.length
     openTasks += taskOpenCount
-    if (isActiveRun(run) || isFailedRun(run) || (!tasks.length && !isSuccessRun(run))) {
+    if (isActiveRun(run) || isFailedRun(run) || (!taskCount && !isSuccessRun(run))) {
       openRuns += Math.max(1, Number(run?.pipeline_run_count || 1))
     }
   }
