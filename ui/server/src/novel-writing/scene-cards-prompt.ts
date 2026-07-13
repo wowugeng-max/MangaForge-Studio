@@ -1,4 +1,7 @@
+import { buildProsePromptContextSnapshot, prosePromptJson } from './prose-prompt-context'
+
 export function buildSceneCardsPrompt(project: any, contextPackage: any) {
+  const cleanContext = buildProsePromptContextSnapshot(contextPackage)
   return [
     '任务：为当前章节生成可人工确认的场景卡。场景卡是正文生成前的蓝图，不要写完整正文。',
     `作品标题：${project.title}`,
@@ -9,7 +12,7 @@ export function buildSceneCardsPrompt(project: any, contextPackage: any) {
     '只允许围绕目标章节生成 2-6 个 scene_cards；不得输出其他章节内容。',
     '',
     '【结构化上下文包】',
-    JSON.stringify(contextPackage, null, 2).slice(0, 9000),
+    prosePromptJson(cleanContext, 9000),
     '',
     '输出 JSON，字段 scene_cards(array)。每个场景卡包含：scene_no, title, scene_type, location, characters_present(array), purpose_tag, purpose_tags(array), chapter_positioning, pressure_level, chapter_positioning_role, benchmark_structure_coordinate, purpose, conflict, conflict_ladder_step, motivation_source, opposing_force, blocked_desire, protagonist_agency_action, no_exit_reason, event_value_change, next_conflict_seed, visible_line_role, hidden_line_seed, ab_weave_role, required_beats(array), action_beats(array), beat, opening_hook, reader_payoff, fear_point, rule_pressure, information_gap, reversal, ending_hook_seed, character_voice, dialogue_goals(array), style_directives(array), benchmark_recall_directives(array), concept_anchor_rules(array), prose_craft_directives(array), relationship_progression_plan, relationship_buffer_zone, supporting_character_action, attitude_shift_checkpoint, relationship_next_hook, showoff_stage_chain, spectator_interest_shift, secondary_showoff_effect, combat_result_type, combat_dimension_plan, combat_reversal_plan, sensory_anchor, serial_risk_repairs(array), recent_fatigue_action, emotional_tone, key_dialogue, dialogue_goal, required_information(array), used_settings(array), revealed_settings(array), forbidden_settings(array), ability_beats(array), item_beats(array), boss_move, rule_trigger, state_changes_expected(array), turning_point, description_budget, density_level, transition_from_previous, exit_state。',
     '章节定位：每张场景卡必须填写 chapter_positioning，取值参考 高压/推进/修炼试错/关系回收/低压生活/信息整理；pressure_level 用 1-5 表示冲突压力；chapter_positioning_role 写明本场怎样服务本章定位，避免所有章节同一强度。',
@@ -26,6 +29,7 @@ export function buildSceneCardsPrompt(project: any, contextPackage: any) {
     '执行 delivery_risk_carry_over：opening_actions 必须进入第一场 opening_hook、purpose 或 required_beats；middle_actions 必须进入中段场景的 conflict、turning_point 或 state_changes_expected；ending_actions 必须进入最后一场 ending_hook_seed；forbidden_repeats 必须写入对应场景的 serial_risk_repairs，提醒正文不得复现该套路。',
     '每个承接上一章/批次风险的场景都必须在 serial_risk_repairs 写入 delivery_risk_carry_over 或 质量续航，并用 recent_fatigue_action 或 required_beats 说明本场如何把承接风险转成可见目标推进、阻碍升级、新信息、关系/状态变化或章末追读钩子。',
     '场景推进硬约束：每个场景必须同时声明：人物要什么、什么挡着、结束后哪里不同；缺任一项不得输出该场景卡。',
+    '章首因果桥：第一张场景卡必须填写 transition_from_previous，直接承接 chapter_target.previous_handoff 中上一章最后一幕、人物所在位置、持有物和未完成动作；如需换时空，必须写出明确时间/空间转移及其因果桥，禁止为了强钩子无桥接另起危机。',
     'purpose 不得只写“观察/进入/等待/经过”，必须写出角色主动目标或当场必须完成的任务。',
     'conflict 必须是可见阻碍/规则压力/对手动作/代价，不能只写“气氛紧张”“内心挣扎”。',
     '冲突结构合同：如果 chapter_target.conflict_structure_contract 存在，必须读取 conflict_ladder、motivation_sources、antagonist_pressure_rules、protagonist_agency_rules、event_value_changes、next_conflict_seeds、conflict_network_layers、no_exit_rules，并拆进每个主要场景的 conflict_ladder_step、motivation_source、opposing_force、blocked_desire、protagonist_agency_action、no_exit_reason、event_value_change、next_conflict_seed。',

@@ -1,3 +1,5 @@
+import { selectContinuitySafeProseCandidate } from './prose-candidate-continuity'
+
 export type ProseQualityDimension =
   | 'continuity'
   | 'core_promise_agency'
@@ -725,10 +727,19 @@ export async function runProseQualityLoop(input: {
       })
       break
     }
-    const selection = selectUsableRevisionText(finalText, revision, {
+    const usableSelection = selectUsableRevisionText(finalText, revision, {
       chapterNo: Number(input.coreContract?.chapter_no || input.coreContract?.chapterNo || 0),
       blockingFindings,
+      candidateStage: 'quality_revision',
+      previousChapterTail: input.coreContract?.previous_handoff || input.coreContract?.previousHandoff,
+      sceneCards: input.coreContract?.scene_cards || input.coreContract?.sceneCards,
     })
+    const continuitySelection = usableSelection.accepted
+      ? selectContinuitySafeProseCandidate(finalText, usableSelection.text, input.coreContract, { candidate_stage: 'quality_revision' })
+      : null
+    const selection = continuitySelection?.accepted === false
+      ? { ...usableSelection, accepted: false, reason: 'opening_continuity_regression', text: finalText, warning: continuitySelection.warning }
+      : usableSelection
     const residueNormalization = selection.accepted
       ? normalizeProseQualityRepairResidue(selection.text)
       : null
@@ -743,7 +754,16 @@ export async function runProseQualityLoop(input: {
           }
         : null,
     })
-    if (!selection.accepted) continue
+    if (!selection.accepted) {
+      if (selection.warning) {
+        decision = {
+          ...decision,
+          advisory_failures: Array.from(new Set([...decision.advisory_failures, selection.warning.message])),
+        }
+        qualityWarning = selection.warning
+      }
+      continue
+    }
 
     finalText = residueNormalization?.text || selection.text
     scan = await input.scan(finalText)

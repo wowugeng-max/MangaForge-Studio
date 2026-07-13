@@ -181,6 +181,7 @@ import {
   runProseQualityLoop,
   sanitizeProseQualityReviewTransport,
 } from '../novel-writing/prose-quality-loop'
+import { selectContinuitySafeProseCandidate } from '../novel-writing/prose-candidate-continuity'
 import {
   classifyProseAdmission,
   markBlockedInvalidError,
@@ -1103,7 +1104,7 @@ function buildRequiredProseCoreSections(
   const context: any = contract.context || {}
   const target: any = mergedContextChapterTargetPreferRuntime(context)
   const previousHandoff = contract.chapter.previous_handoff || buildPreviousChapterHandoff(context)
-  const sceneCards = asArray(contract.chapter.scene_cards)
+  const sceneCards = asArray(contract.chapter.scene_cards).slice(0, 8).map(compactProseSceneCard)
   const failedChecks = asArray(contract.preflight?.checks)
     .filter((item: any) => item?.ok === false)
     .map((item: any) => ({
@@ -44280,11 +44281,13 @@ export function createNovelWritingService(ctx: {
         revision: null,
       }
     }
+    const continuitySelection = selectContinuitySafeProseCandidate(chapterText, rewrittenText, contextPackage?.chapter_target || contextPackage?.chapterTarget || {}, { candidate_stage: 'editor' })
     return {
-      final_text: rewrittenText,
-      edited: rewrittenText !== chapterText,
+      final_text: continuitySelection.text,
+      edited: continuitySelection.accepted && rewrittenText !== chapterText,
       editor_report: {
         ...editorReport,
+        ...(continuitySelection.warning ? { continuity_warning: continuitySelection.warning } : {}),
         modelName: (editorResult as any).modelName,
         original_word_count: originalCount,
         edited_word_count: rewrittenCount,
@@ -44353,11 +44356,13 @@ export function createNovelWritingService(ctx: {
         revision: null,
       }
     }
+    const continuitySelection = selectContinuitySafeProseCandidate(chapterText, polishedText, contextPackage?.chapter_target || contextPackage?.chapterTarget || {}, { candidate_stage: 'meme_polish' })
     return {
-      final_text: polishedText,
-      polished: polishedText !== chapterText,
+      final_text: continuitySelection.text,
+      polished: continuitySelection.accepted && polishedText !== chapterText,
       meme_polish_report: {
         ...memePolishReport,
+        ...(continuitySelection.warning ? { continuity_warning: continuitySelection.warning } : {}),
         modelName: (polishResult as any).modelName,
         original_word_count: originalCount,
         polished_word_count: polishedCount,

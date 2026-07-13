@@ -33,6 +33,19 @@ function proseContextPromptJson(contextPackage: any, maxChars = 7000) {
   return prosePromptJson(buildProsePromptContextSnapshot(contextPackage || {}), maxChars)
 }
 
+function openingHandoffPromptBlock(contextPackage: any) {
+  const snapshot = buildProsePromptContextSnapshot(contextPackage || {})
+  const target: any = snapshot.chapter_target || {}
+  const firstScene = target.scene_cards?.[0] || {}
+  if (!target.previous_handoff && !firstScene.transition_from_previous) return ''
+  return [
+    '【不可丢失的章首交接】',
+    target.previous_handoff ? `上一章最后一幕：${target.previous_handoff}` : '',
+    firstScene.transition_from_previous ? `第一场因果桥：${firstScene.transition_from_previous}` : '',
+    '改稿或润色后的开篇必须保留上一章地点、在场人物、关键持有物/状态和未完成动作，或明确写出合法的时间/空间转移及因果桥；不得为制造强钩子无桥接另起危机。',
+  ].filter(Boolean).join('\n')
+}
+
 function mergedPromptChapterTargetPreferRuntime(contextPackage: any = {}) {
   const runtimeTarget = contextPackage?.chapterTarget || {}
   const merged = {
@@ -140,6 +153,8 @@ export function buildCommercialEditorRewritePrompt(project: any, contextPackage:
     target?.target ? `字数约束：目标 ${target.target} 字，可接受范围 ${target.min}-${target.max} 字。改稿后不得低于下限，不能为追求精炼而明显缩短。` : '',
     options?.phase ? `改稿阶段：${options.phase}` : '',
     '',
+    openingHandoffPromptBlock(contextPackage),
+    '',
     '【主编改稿重点】',
     '1. 开篇钩子：前 300 字必须给出事故、异常、危险、欲望或反常信息，不要平铺醒来和解释。',
     '2. 人物声音：主角、智者、求生者等角色说话方式要可区分；减少通用惊讶、通用冷静和旁白替角色总结。',
@@ -183,6 +198,8 @@ export function buildMemePolishPrompt(project: any, contextPackage: any, chapter
     '4. 如果素材不适合本章，必须拒绝使用，并在 rejected_memes 说明。',
     '5. 必须保留并更新 scene_breakdown 中的 scene_start_anchor、scene_end_anchor 和 scene_card_receipts；scene_start_anchor/scene_end_anchor 必须摘自润色后对应场景正文，scene_card_receipts.evidence 必须引用润色后对应场景证据，不得借用其他场景。',
     '6. oh-story 网感边界：网感不能覆盖自然写法；对话要像人说话，心情不写心里话，章尾不搞大升华；不得为了梗改角色声线、情绪基调、章末钩子或场景因果。',
+    '',
+    openingHandoffPromptBlock(contextPackage),
     '',
     '【本章网感策略】',
     stringifyPromptJsonSafely(memeStrategy, 2, 5000),

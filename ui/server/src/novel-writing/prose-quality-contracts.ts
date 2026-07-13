@@ -1,4 +1,5 @@
 import { stripProseEngineeringAppendix } from './prose-format'
+import { selectContinuitySafeProseCandidate } from './prose-candidate-continuity'
 
 type LaunchGateCheck = {
   key: string
@@ -176,6 +177,10 @@ export function selectUsableRevisionText(
   options: {
     chapterNo?: number
     blockingFindings?: any[]
+    candidateStage?: string
+    previousChapterTail?: string
+    requiredHandoffAnchors?: string[]
+    sceneCards?: any[]
   } = {},
 ) {
   const current = String(currentText || '')
@@ -228,6 +233,14 @@ export function selectUsableRevisionText(
       accepted: false,
       reason: `修订稿过短：${candidateChars}/${currentChars}`,
     }
+  }
+  const continuity = selectContinuitySafeProseCandidate(current, candidate, {
+    previous_handoff: options.previousChapterTail,
+    requiredHandoffAnchors: options.requiredHandoffAnchors,
+    scene_cards: options.sceneCards,
+  }, { candidate_stage: options.candidateStage })
+  if (!continuity.accepted) {
+    return { text: current, accepted: false, reason: '修订稿丢失上一章承接', warning: continuity.warning }
   }
   return { text: candidate, accepted: true, reason: '' }
 }

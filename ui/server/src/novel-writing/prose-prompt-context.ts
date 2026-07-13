@@ -17,6 +17,13 @@ export function prosePromptText(value: any, maxChars = 360) {
   return `${text.slice(0, maxChars)}…`
 }
 
+function prosePromptTailText(value: any, maxChars = 700) {
+  const text = compactBriefText(value)
+  if (!text || text.length <= maxChars) return text
+  const tailChars = Math.max(260, Math.floor(maxChars * 0.62))
+  return `${text.slice(0, maxChars - tailChars - 1)}…${text.slice(-tailChars)}`
+}
+
 export function compactProsePromptValue(value: any, depth = 0): any {
   if (value == null) return value
   if (typeof value === 'string') return prosePromptText(value, depth > 1 ? 220 : 360)
@@ -28,7 +35,9 @@ export function compactProsePromptValue(value: any, depth = 0): any {
   return Object.fromEntries(
     Object.entries(value)
       .slice(0, depth > 1 ? 24 : 28)
-      .map(([key, item]) => [key, compactProsePromptValue(item, depth + 1)]),
+      .map(([key, item]) => [key, key === 'previous_handoff' || key === 'previousHandoff'
+        ? prosePromptTailText(item, 700)
+        : compactProsePromptValue(item, depth + 1)]),
   )
 }
 
@@ -91,6 +100,7 @@ export function compactProseSceneCard(card: any) {
   return compactProsePromptValue({
     scene_no: card?.scene_no || card?.sceneNo,
     title: card?.title,
+    transition_from_previous: proseSceneCardText(card?.transition_from_previous || card?.transitionFromPrevious, 420),
     purpose_tag: proseSceneCardText(card?.purpose_tag || card?.purposeTag, 80),
     goal: proseSceneCardText(card?.goal || card?.scene_goal || card?.sceneGoal),
     purpose: proseSceneCardText(card?.purpose),
@@ -228,8 +238,7 @@ export function buildProsePromptContextSnapshot(contextPackage: any) {
   const director = getOhStoryDirector(contextPackage)
   const budgetPlan = director?.prompt_budget_plan || director?.promptBudgetPlan || {}
   const omittedContracts = new Set(compactOhStoryDirectorBudgetList(budgetPlan.omit))
-  return {
-    chapter_target: compactProsePromptValue({
+  const compactChapterTarget: any = compactProsePromptValue({
       chapter_no: target.chapter_no || target.chapterNo,
       title: target.title,
       summary: target.summary || target.goal,
@@ -242,7 +251,10 @@ export function buildProsePromptContextSnapshot(contextPackage: any) {
       longform_structure_contract: omittedContracts.has('longform_structure_contract')
         ? undefined
         : target.longform_structure_contract || target.longformStructureContract,
-    }),
+    })
+  compactChapterTarget.previous_handoff = prosePromptTailText(target.previous_handoff || target.previousHandoff, 700)
+  return {
+    chapter_target: compactChapterTarget,
     oh_story_director: buildOhStoryDirectorSnapshot(contextPackage),
     preflight: compactProsePromptValue(contextPackage?.preflight || {}),
     continuity: compactProsePromptValue(contextPackage?.continuity || {}),
