@@ -43,6 +43,37 @@ function stablePipeline(summary: any) {
   }
 }
 
+async function createAcceptedPipelineFixture(workspace: string, title: string) {
+  const project = await createNovelProject(workspace, {
+    title,
+    reference_config: {
+      writing_bible: {
+        reader_promise: '每章都有破局推进',
+        protagonist_drive: '主角必须夺回火种',
+        core_conflict: '新火与旧规对抗',
+        current_volume_goal: '进入大荒门',
+        innovation_hook: '符火审案',
+        first30_plan: '前三十章完成入门破局',
+        longform_capacity: '九卷火种谜团',
+      },
+      story_state: { last_updated_chapter: 1 },
+    },
+  })
+  const chapter = await createNovelChapter(workspace, {
+    project_id: project.id,
+    chapter_no: 1,
+    title: '火种复明',
+    chapter_goal: '夺回火种',
+    conflict: '旧规拦截',
+    chapter_text: '主角在旧门前夺回火种。'.repeat(200),
+    raw_payload: { scene_cards: [{ purpose: '公开破局' }] },
+  })
+  await createNovelOutline(workspace, { project_id: project.id, title: '第1章 火种复明', raw_payload: { chapter_no: 1 } })
+  await createNovelWorldbuilding(workspace, { project_id: project.id, world_summary: '大荒门以旧规约束符火。' })
+  await createNovelCharacter(workspace, { project_id: project.id, name: '丁松言', goal: '夺回火种' })
+  return { project, chapter }
+}
+
 describe('novel pipeline snapshot', () => {
   test('preserves pipeline stages, blockers, and actions while projecting only bounded project data', async () => {
     const workspace = await tempWorkspace()
@@ -332,6 +363,129 @@ describe('novel pipeline snapshot', () => {
     expect(snapshot!.runs.every((run: any) => !run.input_ref && !run.output_ref)).toBe(true)
   })
 
+  test('matches legacy array-only run payload semantics and trimmed task status fallback', async () => {
+    const workspace = await tempWorkspace()
+    const { project, chapter } = await createAcceptedPipelineFixture(workspace, '数组语义')
+    await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'prose_quality',
+      status: 'ok',
+      created_at: '2026-07-03T00:00:00.000Z',
+      payload: JSON.stringify({ chapter_id: chapter.id, self_check: { review: { score: 88, passed: true } } }),
+    })
+    await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'editor_report',
+      status: 'ok',
+      created_at: '2026-07-03T00:01:00.000Z',
+      payload: JSON.stringify({ chapter_id: chapter.id, report: { status: 'accepted', issues: [] } }),
+    })
+    await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'chapter_group_generation',
+      step_name: 'clean-batch',
+      status: 'completed',
+      output_ref: JSON.stringify({ chapters: [{ status: 'completed' }] }),
+    })
+    await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'chapter_group_generation',
+      step_name: 'object-chapters',
+      status: 'completed',
+      output_ref: JSON.stringify({ chapters: { only: { status: 'failed' } } }),
+    })
+    await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'batch_generate_prose',
+      step_name: 'scalar-chapters',
+      status: 'completed',
+      output_ref: JSON.stringify({ chapters: 'failed' }),
+    })
+    await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'batch_generate_prose',
+      step_name: 'scalar-chapter-items',
+      status: 'completed',
+      output_ref: JSON.stringify({ chapters: ['failed', 1, null] }),
+    })
+    await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'longform_production_repair',
+      step_name: 'non-array-and-trimmed-tasks',
+      status: 'completed',
+      input_ref: JSON.stringify({ repair_tasks: { only: { status: 'open' } } }),
+      output_ref: JSON.stringify({
+        tasks: [
+          { task_status: '', status: 'resolved' },
+          { task_status: '   ', taskStatus: ' resolved ' },
+          { task_status: ' completed ' },
+        ],
+        repair_tasks: 'open',
+      }),
+    })
+
+    const legacyInput = {
+      project: await getNovelProject(workspace, project.id),
+      chapters: await listNovelChapters(workspace, project.id),
+      outlines: await listNovelOutlines(workspace, project.id),
+      worldbuilding: await listNovelWorldbuilding(workspace, project.id),
+      characters: await listNovelCharacters(workspace, project.id),
+      reviews: await listNovelReviews(workspace, project.id),
+      runs: await listNovelRuns(workspace, project.id),
+    }
+    const snapshot = await getNovelPipelineSnapshot(workspace, project.id)
+    const legacySummary = buildNovelPipelineSummary(legacyInput)
+    const snapshotSummary = buildNovelPipelineSummary(snapshot!)
+
+    expect(legacySummary.current_stage).toBe('serial_governance')
+    expect(stablePipeline(snapshotSummary)).toEqual(stablePipeline(legacySummary))
+  })
+
+  test('keeps the earlier review id on equal timestamps like the legacy stable ordering', async () => {
+    const workspace = await tempWorkspace()
+    const { project, chapter } = await createAcceptedPipelineFixture(workspace, '同秒复检')
+    const tiedAt = '2026-07-04T00:00:00.000Z'
+    const passing = await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'prose_quality',
+      status: 'ok',
+      created_at: tiedAt,
+      payload: JSON.stringify({ chapter_id: chapter.id, self_check: { review: { score: 88, passed: true } } }),
+    })
+    const failing = await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'prose_quality',
+      status: 'warn',
+      created_at: tiedAt,
+      payload: JSON.stringify({ chapter_id: chapter.id, self_check: { review: { score: 40, passed: false } } }),
+    })
+    await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'editor_report',
+      status: 'ok',
+      created_at: '2026-07-04T00:01:00.000Z',
+      payload: JSON.stringify({ chapter_id: chapter.id, report: { status: 'accepted', issues: [] } }),
+    })
+
+    const legacyInput = {
+      project: await getNovelProject(workspace, project.id),
+      chapters: await listNovelChapters(workspace, project.id),
+      outlines: await listNovelOutlines(workspace, project.id),
+      worldbuilding: await listNovelWorldbuilding(workspace, project.id),
+      characters: await listNovelCharacters(workspace, project.id),
+      reviews: await listNovelReviews(workspace, project.id),
+      runs: await listNovelRuns(workspace, project.id),
+    }
+    const snapshot = await getNovelPipelineSnapshot(workspace, project.id)
+    const legacySummary = buildNovelPipelineSummary(legacyInput)
+    const snapshotSummary = buildNovelPipelineSummary(snapshot!)
+
+    expect(passing.id).toBeLessThan(failing.id)
+    expect(legacySummary.current_stage).toBe('batch_scaling')
+    expect(legacySummary.primary_action.key).toBe('start_safe_batch')
+    expect(stablePipeline(snapshotSummary)).toEqual(stablePipeline(legacySummary))
+  })
+
   test('uses one bounded projection per required table and never reads versions or full rows', async () => {
     const source = await readFile(join(import.meta.dir, '../novel.ts'), 'utf8')
     const start = source.indexOf('export async function getNovelPipelineSnapshot')
@@ -368,13 +522,21 @@ describe('novel pipeline snapshot', () => {
     )
     expect(chapterReviewRanking).not.toContain('\n          payload,')
     expect(chapterReviewRanking.indexOf('WHERE pipeline_rank = 1')).toBeLessThan(chapterReviewRanking.indexOf('JOIN reviews AS review'))
-    expect(batchSemanticQuery).not.toContain('output_ref,')
+    expect(chapterReviewRanking).toContain('ORDER BY created_at DESC, id ASC')
+    expect(batchSemanticQuery.slice(0, batchSemanticQuery.indexOf('CASE WHEN EXISTS'))).not.toContain('output_ref')
     expect(batchSemanticQuery).not.toContain('ROW_NUMBER')
     expect(batchSemanticQuery).toContain('END AS has_chapter_failure')
-    expect(repairSemanticQuery).not.toContain('input_ref,')
-    expect(repairSemanticQuery).not.toContain('output_ref,')
+    expect(batchSemanticQuery).toContain("json_type(run.output_ref, '$.chapters') = 'array'")
+    const repairNarrowProjection = repairSemanticQuery.slice(0, repairSemanticQuery.indexOf('COALESCE(json_array_length'))
+    expect(repairNarrowProjection).not.toContain('input_ref')
+    expect(repairNarrowProjection).not.toContain('output_ref')
     expect(repairSemanticQuery).not.toContain('ROW_NUMBER')
     expect(repairSemanticQuery).toContain('AS open_task_count')
+    for (const path of ['$.tasks', '$.repair_tasks']) {
+      expect(repairSemanticQuery).toContain(`json_type(run.output_ref, '${path}') = 'array'`)
+      expect(repairSemanticQuery).toContain(`json_type(run.input_ref, '${path}') = 'array'`)
+    }
+    expect(repairSemanticQuery).toContain("NULLIF(TRIM(CASE WHEN json_valid(repair_task.value) THEN json_extract(repair_task.value, '$.task_status') END), '')")
     expect(governanceRunQuery).not.toContain('input_ref')
     expect(governanceRunQuery).not.toContain('output_ref')
     expect(governanceRunQuery).not.toContain('json_each')

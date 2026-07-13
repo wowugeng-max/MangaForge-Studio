@@ -1511,7 +1511,7 @@ export async function getNovelPipelineSnapshot(activeWorkspace: string, projectI
           chapter_no,
           ROW_NUMBER() OVER (
             PARTITION BY review_type, chapter_id
-            ORDER BY created_at DESC, id DESC
+            ORDER BY created_at DESC, id ASC
           ) AS pipeline_rank
         FROM chapter_review_index
         WHERE chapter_id IN (?, ?, ?)
@@ -1569,8 +1569,20 @@ export async function getNovelPipelineSnapshot(activeWorkspace: string, projectI
           run.created_at,
           CASE WHEN EXISTS (
             SELECT 1
-            FROM json_each(CASE WHEN json_valid(run.output_ref) THEN run.output_ref ELSE '{}' END, '$.chapters') AS chapter_result
-            WHERE LOWER(COALESCE(json_extract(chapter_result.value, '$.status'), '')) IN ('failed', 'error', 'blocked', 'needs_repair')
+            FROM json_each(
+              CASE
+                WHEN json_valid(run.output_ref) THEN CASE
+                  WHEN json_type(run.output_ref, '$.chapters') = 'array' THEN run.output_ref
+                  ELSE '{}'
+                END
+                ELSE '{}'
+              END,
+              '$.chapters'
+            ) AS chapter_result
+            WHERE LOWER(COALESCE(
+              CASE WHEN json_valid(chapter_result.value) THEN json_extract(chapter_result.value, '$.status') END,
+              ''
+            )) IN ('failed', 'error', 'blocked', 'needs_repair')
           ) THEN 1 ELSE 0 END AS has_chapter_failure
         FROM runs AS run
         WHERE run.project_id = ? AND run.run_type IN (${batchRunPlaceholders})
@@ -1650,18 +1662,54 @@ export async function getNovelPipelineSnapshot(activeWorkspace: string, projectI
           (
             SELECT COUNT(*)
             FROM (
-              SELECT value FROM json_each(CASE WHEN json_valid(run.output_ref) THEN run.output_ref ELSE '{}' END, '$.tasks')
+              SELECT value FROM json_each(
+                CASE
+                  WHEN json_valid(run.output_ref) THEN CASE
+                    WHEN json_type(run.output_ref, '$.tasks') = 'array' THEN run.output_ref
+                    ELSE '{}'
+                  END
+                  ELSE '{}'
+                END,
+                '$.tasks'
+              )
               UNION ALL
-              SELECT value FROM json_each(CASE WHEN json_valid(run.output_ref) THEN run.output_ref ELSE '{}' END, '$.repair_tasks')
+              SELECT value FROM json_each(
+                CASE
+                  WHEN json_valid(run.output_ref) THEN CASE
+                    WHEN json_type(run.output_ref, '$.repair_tasks') = 'array' THEN run.output_ref
+                    ELSE '{}'
+                  END
+                  ELSE '{}'
+                END,
+                '$.repair_tasks'
+              )
               UNION ALL
-              SELECT value FROM json_each(CASE WHEN json_valid(run.input_ref) THEN run.input_ref ELSE '{}' END, '$.tasks')
+              SELECT value FROM json_each(
+                CASE
+                  WHEN json_valid(run.input_ref) THEN CASE
+                    WHEN json_type(run.input_ref, '$.tasks') = 'array' THEN run.input_ref
+                    ELSE '{}'
+                  END
+                  ELSE '{}'
+                END,
+                '$.tasks'
+              )
               UNION ALL
-              SELECT value FROM json_each(CASE WHEN json_valid(run.input_ref) THEN run.input_ref ELSE '{}' END, '$.repair_tasks')
+              SELECT value FROM json_each(
+                CASE
+                  WHEN json_valid(run.input_ref) THEN CASE
+                    WHEN json_type(run.input_ref, '$.repair_tasks') = 'array' THEN run.input_ref
+                    ELSE '{}'
+                  END
+                  ELSE '{}'
+                END,
+                '$.repair_tasks'
+              )
             ) AS repair_task
             WHERE LOWER(COALESCE(
-              CASE WHEN json_valid(repair_task.value) THEN json_extract(repair_task.value, '$.task_status') END,
-              CASE WHEN json_valid(repair_task.value) THEN json_extract(repair_task.value, '$.taskStatus') END,
-              CASE WHEN json_valid(repair_task.value) THEN json_extract(repair_task.value, '$.status') END,
+              NULLIF(TRIM(CASE WHEN json_valid(repair_task.value) THEN json_extract(repair_task.value, '$.task_status') END), ''),
+              NULLIF(TRIM(CASE WHEN json_valid(repair_task.value) THEN json_extract(repair_task.value, '$.taskStatus') END), ''),
+              NULLIF(TRIM(CASE WHEN json_valid(repair_task.value) THEN json_extract(repair_task.value, '$.status') END), ''),
               ''
             )) NOT IN ('resolved', 'closed', 'completed', 'complete', 'done', 'success', 'ok')
           ) AS open_task_count
