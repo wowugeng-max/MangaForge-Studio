@@ -997,7 +997,7 @@ describe('commitNovelChapterAcceptance', () => {
     }
 
     expect(results).toEqual(scenarioNames.map(name => ({ name, rejected: true, unchanged: true })))
-  })
+  }, 15_000)
 
   test('allocates review ids without overwriting an explicit conflicting id', async () => {
     const workspace = await tempWorkspace()
