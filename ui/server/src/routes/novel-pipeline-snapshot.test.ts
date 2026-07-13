@@ -363,6 +363,54 @@ describe('novel pipeline snapshot', () => {
     expect(snapshot!.runs.every((run: any) => !run.input_ref && !run.output_ref)).toBe(true)
   })
 
+  test('matches legacy JavaScript string truthiness for writing-bible array values', async () => {
+    const cases = [
+      { label: 'empty', value: [], ready: false },
+      { label: 'single-null', value: [null], ready: false },
+      { label: 'single-empty-text', value: [''], ready: false },
+      { label: 'single-zero', value: [0], ready: true },
+      { label: 'single-false', value: [false], ready: true },
+      { label: 'two-empty-values', value: [null, null], ready: true },
+      { label: 'text', value: ['每章都有破局推进'], ready: true },
+    ]
+
+    for (const item of cases) {
+      const workspace = await tempWorkspace()
+      const project = await createNovelProject(workspace, {
+        title: `数组 truthy-${item.label}`,
+        reference_config: {
+          writing_bible: {
+            reader_promise: item.value,
+            protagonist_drive: '主角必须夺回火种',
+            core_conflict: '新火与旧规对抗',
+            current_volume_goal: '进入大荒门',
+            innovation_hook: '符火审案',
+            first30_plan: '前三十章完成入门破局',
+            longform_capacity: '九卷火种谜团',
+            world_summary: '大荒门以旧规约束符火',
+            characters: [{ name: '丁松言', goal: '夺回火种' }],
+          },
+        },
+      })
+      const legacyInput = {
+        project: await getNovelProject(workspace, project.id),
+        chapters: await listNovelChapters(workspace, project.id),
+        outlines: await listNovelOutlines(workspace, project.id),
+        worldbuilding: await listNovelWorldbuilding(workspace, project.id),
+        characters: await listNovelCharacters(workspace, project.id),
+        reviews: await listNovelReviews(workspace, project.id),
+        runs: await listNovelRuns(workspace, project.id),
+      }
+      const snapshot = await getNovelPipelineSnapshot(workspace, project.id)
+      const legacySummary = buildNovelPipelineSummary(legacyInput)
+      const snapshotSummary = buildNovelPipelineSummary(snapshot!)
+
+      expect(stablePipeline(snapshotSummary)).toEqual(stablePipeline(legacySummary))
+      const readerPromiseCheck = legacySummary.stages[0].checks.find(check => check.key === 'reader_promise')
+      expect(readerPromiseCheck?.status === 'pass').toBe(item.ready)
+    }
+  })
+
   test('matches legacy array-only run payload semantics and trimmed task status fallback', async () => {
     const workspace = await tempWorkspace()
     const { project, chapter } = await createAcceptedPipelineFixture(workspace, '数组语义')

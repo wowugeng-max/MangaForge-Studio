@@ -19,6 +19,7 @@ import {
   listNovelChapters,
   listNovelProjects,
   listNovelReviews,
+  listNovelRunSummaries,
   listNovelRuns,
   listNovelSettingEntities,
   listNovelWorldbuilding,
@@ -505,6 +506,45 @@ describe('novel sqlite persistence', () => {
     }
   })
 
+  test('summarizes the last completed chapter when current_index points past the chapter array', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '完成态运行摘要' })
+    const run = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'chapter_group_generation',
+      step_name: 'completed-group',
+      status: 'completed',
+      output_ref: JSON.stringify({
+        current_index: 2,
+        chapters: [
+          { id: 10, chapter_no: 10, status: 'success' },
+          {
+            id: 11,
+            chapter_no: 11,
+            status: 'success',
+            admission_status: 'accepted_with_warnings',
+            quality_warnings: [{ message: '静态装饰细节偏多' }],
+            story_state_status: 'pending',
+            post_commit_warnings: [{ message: '记忆索引等待补同步' }],
+          },
+        ],
+      }),
+    })
+
+    const summary = (await listNovelRunSummaries(workspace, project.id)).find(item => item.id === run.id)
+    expect(summary).toMatchObject({
+      chapter_id: 11,
+      chapter_no: 11,
+      admission_status: 'accepted_with_warnings',
+      admission_warning_count: 1,
+      admission_warning_preview: '静态装饰细节偏多',
+      story_state_status: 'pending',
+      story_state_pending: true,
+      post_commit_warning_count: 1,
+      post_commit_warning_preview: '记忆索引等待补同步',
+    })
+  })
+
   test('backfills legacy null pipeline summaries in bounded batches', async () => {
     const workspace = await tempWorkspace()
     const project = await createNovelProject(workspace, { title: '运行摘要回填' })
@@ -541,7 +581,27 @@ describe('novel sqlite persistence', () => {
           OR pipeline_open_task_count IS NULL
           OR pipeline_task_count IS NULL
       `).get() as any
-      const last = dbAfter.query(`
+      const lastBeforeSecondBatch = dbAfter.query(`
+        SELECT pipeline_chapter_failure_count, pipeline_open_task_count, pipeline_task_count
+        FROM runs WHERE step_name = 'legacy-69'
+      `).get() as any
+      expect(Number(pending.count)).toBe(6)
+      expect(lastBeforeSecondBatch.pipeline_chapter_failure_count).toBeNull()
+    } finally {
+      dbAfter.close()
+    }
+
+    await listNovelRuns(workspace, project.id)
+
+    const dbComplete = new Database(join(workspace, 'novel.sqlite'))
+    try {
+      const pending = dbComplete.query(`
+        SELECT COUNT(*) AS count FROM runs
+        WHERE pipeline_chapter_failure_count IS NULL
+          OR pipeline_open_task_count IS NULL
+          OR pipeline_task_count IS NULL
+      `).get() as any
+      const last = dbComplete.query(`
         SELECT pipeline_chapter_failure_count, pipeline_open_task_count, pipeline_task_count
         FROM runs WHERE step_name = 'legacy-69'
       `).get() as any
@@ -552,8 +612,17 @@ describe('novel sqlite persistence', () => {
         pipeline_task_count: 1,
       })
     } finally {
-      dbAfter.close()
+      dbComplete.close()
     }
+
+    const source = await readFile(join(import.meta.dir, 'novel.ts'), 'utf8')
+    const start = source.indexOf('function backfillNovelRunPipelineSummaries')
+    const end = source.indexOf('\nfunction compactRawPayloadForStorage', start)
+    const backfillBlock = source.slice(start, end)
+    expect(backfillBlock).toContain('SELECT id')
+    expect(backfillBlock).not.toContain('SELECT id, input_ref, output_ref')
+    expect(backfillBlock).toContain('SELECT input_ref, output_ref FROM runs WHERE id = ?')
+    expect(backfillBlock).not.toContain('while (true)')
   })
 })
 

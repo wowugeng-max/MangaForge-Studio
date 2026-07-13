@@ -523,32 +523,31 @@ function summarizeNovelRunPipelineRefs(inputRef: any, outputRef: any) {
 }
 
 function backfillNovelRunPipelineSummaries(db: Database, batchSize = 64) {
-  const selectRows = db.query(`
-    SELECT id, input_ref, output_ref
+  const rows = db.query(`
+    SELECT id
     FROM runs
     WHERE pipeline_chapter_failure_count IS NULL
       OR pipeline_open_task_count IS NULL
       OR pipeline_task_count IS NULL
     ORDER BY id ASC
     LIMIT ?
-  `)
+  `).all(batchSize) as Array<{ id: number }>
+  const selectPayload = db.query('SELECT input_ref, output_ref FROM runs WHERE id = ?')
   const updateRow = db.query(`
     UPDATE runs
     SET pipeline_chapter_failure_count = ?, pipeline_open_task_count = ?, pipeline_task_count = ?
     WHERE id = ?
   `)
-  while (true) {
-    const rows = selectRows.all(batchSize) as any[]
-    if (!rows.length) return
-    for (const row of rows) {
-      const summary = summarizeNovelRunPipelineRefs(row.input_ref, row.output_ref)
-      updateRow.run(
-        summary.pipeline_chapter_failure_count,
-        summary.pipeline_open_task_count,
-        summary.pipeline_task_count,
-        row.id,
-      )
-    }
+  for (const { id } of rows) {
+    const row = selectPayload.get(id) as any
+    if (!row) continue
+    const summary = summarizeNovelRunPipelineRefs(row.input_ref, row.output_ref)
+    updateRow.run(
+      summary.pipeline_chapter_failure_count,
+      summary.pipeline_open_task_count,
+      summary.pipeline_task_count,
+      id,
+    )
   }
 }
 
@@ -1517,7 +1516,24 @@ function pipelineJsonTruthySql(column: string, path: string) {
     WHEN 'integer' THEN ${value} != 0
     WHEN 'real' THEN ${value} != 0
     WHEN 'text' THEN length(trim(CAST(${value} AS TEXT), ${NOVEL_PIPELINE_SQL_TRIM_CHARS})) > 0
-    WHEN 'array' THEN 1
+    WHEN 'array' THEN EXISTS (
+      WITH RECURSIVE pipeline_array_string(item_value, item_type) AS (
+        SELECT json_extract(${column}, '${path}'), json_type(${column}, '${path}')
+        UNION ALL
+        SELECT json_extract(item_value, '$[0]'), json_type(item_value, '$[0]')
+        FROM pipeline_array_string
+        WHERE item_type = 'array' AND json_array_length(item_value) = 1
+      )
+      SELECT 1
+      FROM pipeline_array_string
+      WHERE CASE item_type
+        WHEN 'null' THEN 0
+        WHEN 'text' THEN length(trim(CAST(item_value AS TEXT), ${NOVEL_PIPELINE_SQL_TRIM_CHARS})) > 0
+        WHEN 'array' THEN json_array_length(item_value) > 1
+        ELSE 1
+      END
+      LIMIT 1
+    )
     WHEN 'object' THEN 1
     ELSE 0
   END)`
@@ -2707,12 +2723,13 @@ export async function listNovelReviews(activeWorkspace: string, projectId: numbe
     db.close()
   }
 }
-export async function listNovelReviewSummaries(activeWorkspace: string, projectId: number): Promise<NovelReviewSummaryRecord[]> {
+export async function listNovelReviewSummaries(activeWorkspace: string, projectId: number, limit?: number): Promise<NovelReviewSummaryRecord[]> {
   await ensureLegacyNovelStoreImportedForRead(activeWorkspace)
   const db = openDb(activeWorkspace)
   try {
     ensureSqliteSchema(db)
-    return (db.query(`
+    const normalizedLimit = Number.isInteger(limit) && Number(limit) > 0 ? Number(limit) : null
+    const statement = db.query(`
       SELECT
         id,
         project_id,
@@ -2771,7 +2788,10 @@ export async function listNovelReviewSummaries(activeWorkspace: string, projectI
       FROM reviews
       WHERE project_id = ?
       ORDER BY created_at DESC, id DESC
-    `).all(projectId) as any[]).map(reviewSummaryFromRow)
+      ${normalizedLimit ? 'LIMIT ?' : ''}
+    `)
+    const rows = normalizedLimit ? statement.all(projectId, normalizedLimit) : statement.all(projectId)
+    return (rows as any[]).map(reviewSummaryFromRow)
   } finally {
     db.close()
   }
@@ -2839,12 +2859,22 @@ export async function listNovelRuns(activeWorkspace: string, projectId: number) 
     db.close()
   }
 }
-export async function listNovelRunSummaries(activeWorkspace: string, projectId: number): Promise<NovelRunSummaryRecord[]> {
+export async function listNovelRunSummaries(activeWorkspace: string, projectId: number, limit?: number): Promise<NovelRunSummaryRecord[]> {
   await ensureLegacyNovelStoreImportedForRead(activeWorkspace)
   const db = openDb(activeWorkspace)
   try {
     ensureSqliteSchema(db)
-    return (db.query(`
+    const currentChapterIndexSql = `CASE
+      WHEN json_type(output_ref, '$.chapters') = 'array'
+        AND json_array_length(output_ref, '$.chapters') > 0
+      THEN MIN(
+        MAX(CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER), 0),
+        json_array_length(output_ref, '$.chapters') - 1
+      )
+      ELSE 0
+    END`
+    const normalizedLimit = Number.isInteger(limit) && Number(limit) > 0 ? Number(limit) : null
+    const statement = db.query(`
       SELECT
         id,
         project_id,
@@ -2860,7 +2890,7 @@ export async function listNovelRunSummaries(activeWorkspace: string, projectId: 
           json_extract(output_ref, '$.chapter.id'),
           json_extract(output_ref, '$.result.chapter_id'),
           json_extract(output_ref, '$.result.chapterId'),
-          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].id')
+          json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].id')
         ) AS INTEGER) END AS chapter_id,
         CASE WHEN json_valid(output_ref) THEN CAST(COALESCE(
           json_extract(output_ref, '$.chapter_no'),
@@ -2869,8 +2899,8 @@ export async function listNovelRunSummaries(activeWorkspace: string, projectId: 
           json_extract(output_ref, '$.chapter.chapterNo'),
           json_extract(output_ref, '$.result.chapter_no'),
           json_extract(output_ref, '$.result.chapterNo'),
-          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].chapter_no'),
-          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].chapterNo')
+          json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].chapter_no'),
+          json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].chapterNo')
         ) AS INTEGER) END AS chapter_no,
         length(CAST(COALESCE(input_ref, '') AS BLOB)) AS input_bytes,
         length(CAST(COALESCE(output_ref, '') AS BLOB)) AS output_bytes,
@@ -2881,8 +2911,8 @@ export async function listNovelRunSummaries(activeWorkspace: string, projectId: 
           json_extract(output_ref, '$.proseAdmission.status'),
           json_extract(output_ref, '$.result.admission_status'),
           json_extract(output_ref, '$.result.admissionStatus'),
-          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].admission_status'),
-          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].admissionStatus'),
+          json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].admission_status'),
+          json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].admissionStatus'),
           ''
         ) ELSE '' END AS admission_status,
         CASE WHEN json_valid(output_ref) THEN COALESCE(
@@ -2890,8 +2920,8 @@ export async function listNovelRunSummaries(activeWorkspace: string, projectId: 
           CASE WHEN json_type(output_ref, '$.qualityWarnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.qualityWarnings')) END,
           CASE WHEN json_type(output_ref, '$.prose_admission.quality_warnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.prose_admission.quality_warnings')) END,
           CASE WHEN json_type(output_ref, '$.proseAdmission.qualityWarnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.proseAdmission.qualityWarnings')) END,
-          CASE WHEN json_type(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].quality_warnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].quality_warnings')) END,
-          CASE WHEN json_type(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].qualityWarnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].qualityWarnings')) END,
+          CASE WHEN json_type(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].quality_warnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].quality_warnings')) END,
+          CASE WHEN json_type(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].qualityWarnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].qualityWarnings')) END,
           0
         ) ELSE 0 END AS admission_warning_count,
         CASE WHEN json_valid(output_ref) THEN substr(COALESCE(
@@ -2899,10 +2929,10 @@ export async function listNovelRunSummaries(activeWorkspace: string, projectId: 
           json_extract(output_ref, '$.qualityWarnings[0].message'),
           json_extract(output_ref, '$.prose_admission.quality_warnings[0].message'),
           json_extract(output_ref, '$.proseAdmission.qualityWarnings[0].message'),
-          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].quality_warnings[0].message'),
-          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].qualityWarnings[0].message'),
+          json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].quality_warnings[0].message'),
+          json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].qualityWarnings[0].message'),
           CASE WHEN json_type(output_ref, '$.quality_warnings[0]') = 'text' THEN json_extract(output_ref, '$.quality_warnings[0]') END,
-          CASE WHEN json_type(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].quality_warnings[0]') = 'text' THEN json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].quality_warnings[0]') END,
+          CASE WHEN json_type(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].quality_warnings[0]') = 'text' THEN json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].quality_warnings[0]') END,
           ''
         ), 1, 220) ELSE '' END AS admission_warning_preview,
         CASE WHEN json_valid(output_ref) THEN COALESCE(
@@ -2912,8 +2942,8 @@ export async function listNovelRunSummaries(activeWorkspace: string, projectId: 
           json_extract(output_ref, '$.proseAdmission.storyStateStatus'),
           json_extract(output_ref, '$.result.story_state_status'),
           json_extract(output_ref, '$.result.storyStateStatus'),
-          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].story_state_status'),
-          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].storyStateStatus'),
+          json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].story_state_status'),
+          json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].storyStateStatus'),
           ''
         ) ELSE '' END AS story_state_status,
         CASE WHEN json_valid(output_ref) AND (
@@ -2922,16 +2952,16 @@ export async function listNovelRunSummaries(activeWorkspace: string, projectId: 
             json_extract(output_ref, '$.storyStateWarning'),
             json_extract(output_ref, '$.prose_admission.story_state_warning'),
             json_extract(output_ref, '$.proseAdmission.storyStateWarning'),
-            json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].story_state_warning'),
-            json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].storyStateWarning')
+            json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].story_state_warning'),
+            json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].storyStateWarning')
           ) IS NOT NULL
           OR lower(COALESCE(
             json_extract(output_ref, '$.story_state_status'),
             json_extract(output_ref, '$.storyStateStatus'),
             json_extract(output_ref, '$.prose_admission.story_state_status'),
             json_extract(output_ref, '$.proseAdmission.storyStateStatus'),
-            json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].story_state_status'),
-            json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].storyStateStatus'),
+            json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].story_state_status'),
+            json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].storyStateStatus'),
             ''
           )) = 'pending'
         ) THEN 1 ELSE 0 END AS story_state_pending,
@@ -2940,11 +2970,11 @@ export async function listNovelRunSummaries(activeWorkspace: string, projectId: 
           json_extract(output_ref, '$.storyStateWarning.message'),
           json_extract(output_ref, '$.prose_admission.story_state_warning.message'),
           json_extract(output_ref, '$.proseAdmission.storyStateWarning.message'),
-          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].story_state_warning.message'),
-          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].storyStateWarning.message'),
+          json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].story_state_warning.message'),
+          json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].storyStateWarning.message'),
           CASE WHEN json_type(output_ref, '$.story_state_warning') = 'text' THEN json_extract(output_ref, '$.story_state_warning') END,
           CASE WHEN json_type(output_ref, '$.storyStateWarning') = 'text' THEN json_extract(output_ref, '$.storyStateWarning') END,
-          CASE WHEN json_type(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].story_state_warning') = 'text' THEN json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].story_state_warning') END,
+          CASE WHEN json_type(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].story_state_warning') = 'text' THEN json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].story_state_warning') END,
           ''
         ), 1, 220) ELSE '' END AS story_state_warning,
         CASE WHEN json_valid(output_ref) THEN COALESCE(
@@ -2952,8 +2982,8 @@ export async function listNovelRunSummaries(activeWorkspace: string, projectId: 
           CASE WHEN json_type(output_ref, '$.postCommitWarnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.postCommitWarnings')) END,
           CASE WHEN json_type(output_ref, '$.prose_admission.post_commit_warnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.prose_admission.post_commit_warnings')) END,
           CASE WHEN json_type(output_ref, '$.proseAdmission.postCommitWarnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.proseAdmission.postCommitWarnings')) END,
-          CASE WHEN json_type(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].post_commit_warnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].post_commit_warnings')) END,
-          CASE WHEN json_type(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].postCommitWarnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].postCommitWarnings')) END,
+          CASE WHEN json_type(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].post_commit_warnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].post_commit_warnings')) END,
+          CASE WHEN json_type(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].postCommitWarnings') = 'array' THEN json_array_length(json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].postCommitWarnings')) END,
           0
         ) ELSE 0 END AS post_commit_warning_count,
         CASE WHEN json_valid(output_ref) THEN substr(COALESCE(
@@ -2961,16 +2991,19 @@ export async function listNovelRunSummaries(activeWorkspace: string, projectId: 
           json_extract(output_ref, '$.postCommitWarnings[0].message'),
           json_extract(output_ref, '$.prose_admission.post_commit_warnings[0].message'),
           json_extract(output_ref, '$.proseAdmission.postCommitWarnings[0].message'),
-          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].post_commit_warnings[0].message'),
-          json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].postCommitWarnings[0].message'),
+          json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].post_commit_warnings[0].message'),
+          json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].postCommitWarnings[0].message'),
           CASE WHEN json_type(output_ref, '$.post_commit_warnings[0]') = 'text' THEN json_extract(output_ref, '$.post_commit_warnings[0]') END,
-          CASE WHEN json_type(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].post_commit_warnings[0]') = 'text' THEN json_extract(output_ref, '$.chapters[' || CAST(COALESCE(json_extract(output_ref, '$.current_index'), 0) AS INTEGER) || '].post_commit_warnings[0]') END,
+          CASE WHEN json_type(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].post_commit_warnings[0]') = 'text' THEN json_extract(output_ref, '$.chapters[' || ${currentChapterIndexSql} || '].post_commit_warnings[0]') END,
           ''
         ), 1, 220) ELSE '' END AS post_commit_warning_preview
       FROM runs
       WHERE project_id = ?
       ORDER BY created_at DESC, id DESC
-    `).all(projectId) as any[]).map(runSummaryFromRow)
+      ${normalizedLimit ? 'LIMIT ?' : ''}
+    `)
+    const rows = normalizedLimit ? statement.all(projectId, normalizedLimit) : statement.all(projectId)
+    return (rows as any[]).map(runSummaryFromRow)
   } finally {
     db.close()
   }

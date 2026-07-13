@@ -70,6 +70,20 @@ describe('novel run task center source guards', () => {
     const production = createNovelProductionService()
     const project = await createNovelProject(workspace, { title: '任务摘要体积回归', reference_config: {} })
     const otherProject = await createNovelProject(workspace, { title: '其他任务项目', reference_config: {} })
+    await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'book_review',
+      status: 'ok',
+      summary: '较早的全书复盘',
+      created_at: '2025-01-01T00:00:00.000Z',
+    })
+    await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'quality_benchmark',
+      step_name: 'older-run',
+      status: 'completed',
+      created_at: '2025-01-01T00:00:00.000Z',
+    })
     const largeDiagnostic = '完整诊断上下文、提示词、模型返回与证据链。'.repeat(1800)
     const review = await createNovelReview(workspace, {
       project_id: project.id,
@@ -126,7 +140,8 @@ describe('novel run task center source guards', () => {
     const runDetailRoute = handlers.get('GET /api/novel/runs/:id')
     const fullReviews = await listNovelReviews(workspace, project.id)
     const fullRuns = await listNovelRuns(workspace, project.id)
-    const storedReviewPayload = JSON.parse(String(fullReviews[0].payload || '{}'))
+    const storedReview = fullReviews.find(item => item.id === review.id)!
+    const storedReviewPayload = JSON.parse(String(storedReview.payload || '{}'))
     expect(storedReviewPayload).not.toHaveProperty('chapter_no')
     expect(storedReviewPayload.context_package.chapter_target.chapter_no).toBe(11)
     expect(storedReviewPayload.self_check.review.passed).toBe(false)
@@ -151,7 +166,7 @@ describe('novel run task center source guards', () => {
     })
     expect(summaryReviews.body[0].summary.length).toBeLessThanOrEqual(240)
     expect(summaryReviews.body[0].preview).toContain('问题1')
-    expect(summaryReviews.body[0].payload_bytes).toBe(Buffer.byteLength(String(fullReviews[0].payload || ''), 'utf8'))
+    expect(summaryReviews.body[0].payload_bytes).toBe(Buffer.byteLength(String(storedReview.payload || ''), 'utf8'))
     expect(summaryReviews.body[0]).not.toHaveProperty('issues')
     expect(summaryReviews.body[0]).not.toHaveProperty('payload')
     expect(JSON.stringify(summaryReviews.body).length).toBeLessThan(JSON.stringify(defaultReviews.body).length * 0.1)
@@ -178,7 +193,14 @@ describe('novel run task center source guards', () => {
     expect(summaryRuns.body[0]).not.toHaveProperty('output_ref')
     expect(JSON.stringify(summaryRuns.body).length).toBeLessThan(JSON.stringify(defaultRuns.body).length * 0.1)
 
-    expect((await callRoute(reviewDetailRoute, { params: { reviewId: String(review.id) }, query: { project_id: String(project.id) } })).body).toEqual(fullReviews[0])
+    const limitedReviews = await callRoute(reviewsRoute, { params: { id: String(project.id) }, query: { view: 'summary', limit: '1' } })
+    const limitedRuns = await callRoute(runsRoute, { query: { project_id: String(project.id), view: 'summary', limit: '1' } })
+    expect(limitedReviews.body).toHaveLength(1)
+    expect(limitedRuns.body).toHaveLength(1)
+    expect((await callRoute(reviewsRoute, { params: { id: String(project.id) }, query: { view: 'summary', limit: '0' } })).body).toMatchObject({ error_code: 'INVALID_LIMIT' })
+    expect((await callRoute(runsRoute, { query: { project_id: String(project.id), view: 'summary', limit: 'all' } })).body).toMatchObject({ error_code: 'INVALID_LIMIT' })
+
+    expect((await callRoute(reviewDetailRoute, { params: { reviewId: String(review.id) }, query: { project_id: String(project.id) } })).body).toEqual(storedReview)
     expect((await callRoute(runDetailRoute, { params: { id: String(run.id) }, query: { project_id: String(project.id) } })).body).toEqual(fullRuns[0])
 
     const missingReviewProject = await callRoute(reviewDetailRoute, { params: { reviewId: String(review.id) }, query: {} })

@@ -100,6 +100,17 @@ function requireProjectId(req: any, res: any) {
   return projectId
 }
 
+function optionalSummaryLimit(req: any, res: any) {
+  const raw = req.query?.limit
+  if (raw === undefined || raw === null || raw === '') return undefined
+  const limit = Number(raw)
+  if (!Number.isInteger(limit) || limit <= 0 || limit > 5000) {
+    res.status(400).json({ error: 'limit must be an integer between 1 and 5000', error_code: 'INVALID_LIMIT' })
+    return null
+  }
+  return limit
+}
+
 function asAuditArray(value: any) {
   return Array.isArray(value) ? value : []
 }
@@ -415,8 +426,10 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
     try {
       const view = String(req.query?.view || 'full')
       if (!['full', 'summary'].includes(view)) return rejectInvalidQueryView(res, view, ['full', 'summary'])
+      const limit = view === 'summary' ? optionalSummaryLimit(req, res) : undefined
+      if (limit === null) return
       res.json(view === 'summary'
-        ? await listNovelReviewSummaries(ctx.getWorkspace(), Number(req.params.id))
+        ? await listNovelReviewSummaries(ctx.getWorkspace(), Number(req.params.id), limit)
         : await listNovelReviews(ctx.getWorkspace(), Number(req.params.id)))
     } catch (error) {
       res.status(500).json({ error: String(error) })
@@ -439,8 +452,10 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
     try {
       const view = String(req.query?.view || 'full')
       if (!['full', 'summary'].includes(view)) return rejectInvalidQueryView(res, view, ['full', 'summary'])
+      const limit = view === 'summary' ? optionalSummaryLimit(req, res) : undefined
+      if (limit === null) return
       res.json(view === 'summary'
-        ? await listNovelRunSummaries(ctx.getWorkspace(), Number(req.query.project_id || 0))
+        ? await listNovelRunSummaries(ctx.getWorkspace(), Number(req.query.project_id || 0), limit)
         : await listNovelRuns(ctx.getWorkspace(), Number(req.query.project_id || 0)))
     } catch (error) {
       res.status(500).json({ error: String(error) })
