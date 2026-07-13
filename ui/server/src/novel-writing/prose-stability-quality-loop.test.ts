@@ -144,4 +144,32 @@ describe('prose stability quality loop', () => {
     expect(result.rounds).toEqual([])
     expect(result.decision.advisory_failures.join('｜')).toContain('质检评分 79 低于 80')
   })
+
+  test('keeps stacked-description diagnostics as warnings without auto-revising them', async () => {
+    let reviseCalls = 0
+    const result = await runProseQualityLoop({
+      initialText: '沈砚抬手推门。\n\n手腕一顿。\n\n门后的铁链绷直。'.repeat(40),
+      minScore: 80,
+      maxRevisionRounds: 1,
+      scan: async () => ({
+        hard_failures: [],
+        advisory_findings: [{
+          key: 'prose_stacked_description',
+          pattern: 'prose_stacked_description',
+          status: 'warn',
+          evidence: '动作、感知和反应连续三段',
+          fix: '确认语义重复后再合并。',
+        }],
+      }),
+      review: async () => passingReview,
+      revise: async () => {
+        reviseCalls += 1
+        return { final_text: '不应调用。' }
+      },
+    })
+
+    expect(reviseCalls).toBe(0)
+    expect(result.rounds).toEqual([])
+    expect(result.decision.advisory_failures.join('｜')).toContain('prose_stacked_description')
+  })
 })

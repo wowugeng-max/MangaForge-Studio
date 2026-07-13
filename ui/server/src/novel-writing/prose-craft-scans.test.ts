@@ -113,6 +113,20 @@ describe('prose craft deterministic scans', () => {
     expect(checks[0]?.key).toBe('prose_stacked_description')
   })
 
+  test('does not treat action, physical feedback, and a new threat as stacked repetition', () => {
+    const checks = scanProseStackedDescriptionRisks([
+      '第13章 铁门',
+      '',
+      '沈砚抬手推开铁门，手腕擦过门框的锈钉。',
+      '',
+      '手腕一顿。',
+      '',
+      '手腕刚退半寸，门后铁链突然绷直，贴着他的指尖抽向老陈。',
+    ].join('\n'))
+
+    expect(checks).toEqual([])
+  })
+
   test('detects static environment without character interaction', () => {
     const checks = scanProseStaticEnvironmentRisks([
       '第13章 雨夜',
@@ -143,6 +157,16 @@ describe('prose craft deterministic scans', () => {
 
     expect(shortAtmosphere).toEqual([])
     expect(functionalProps).toEqual([])
+  })
+
+  test('does not flag props whose story function becomes clear in the next paragraph', () => {
+    const checks = scanProseDecorativeDetailRisks([
+      '桌上摊着一本旧账本，第一页写着八万块，旁边放着一把旧钥匙。银色戒指压在账角，内圈刻着三年两个小字，下面还有一张800元收据。',
+      '',
+      '沈砚认出戒指属于失踪者，收据日期则证明他三年前来过这里。',
+    ].join('\n'))
+
+    expect(checks).toEqual([])
   })
 
   test('detects vague quantity weight', () => {

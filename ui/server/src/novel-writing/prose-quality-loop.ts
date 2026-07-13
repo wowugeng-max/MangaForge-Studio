@@ -441,7 +441,7 @@ function deterministicFindings(scan: any): ProseQualityFinding[] {
   })
 }
 
-const CRAFT_ADVISORY_REVISION_KEY_PATTERN = /^(?:paragraph_wall_text_line_|paragraph_comma_chain_density_line_|prose_static_environment$|prose_decorative_detail$|prose_stacked_description$)/
+const CRAFT_ADVISORY_REVISION_KEY_PATTERN = /^(?:paragraph_wall_text_line_|paragraph_comma_chain_density_line_|prose_static_environment$|prose_decorative_detail$)/
 
 function deterministicCraftAdvisoryFindings(scan: any): ProseQualityFinding[] {
   const findings = deterministicAdvisoryFindings(scan)

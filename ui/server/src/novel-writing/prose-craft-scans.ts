@@ -207,6 +207,7 @@ export function scanProseMotionStillRisks(text: string) {
 
 const PROSE_STACKED_BODY_ANCHOR_PATTERN = /手|指|腕|肘|肩|眼|嘴|唇|喉|背|膝|脚|血|汗|呼吸|笔|刀|杯|碗|文书|账本|名单|钥匙|门|纸/g
 const PROSE_STACKED_REACTION_PATTERN = /抖|停|顿|偏|歪|压|重写|没稳|发颤|僵|攥|握|松|喘|咽|低|抬|垂|退|缩/
+const PROSE_STACKED_NEW_EVENT_PATTERN = /突然|猛地|骤然|却|门后|身后|脚下|头顶|远处|逼近|袭来|扑来|冲来|抽向|射向|砸向|绷直|炸开|裂开|倒塌|追兵|敌人|人影|刀光|枪声|脚步声|警报|威胁|危险/
 
 function proseStackedAnchors(paragraph: string) {
   PROSE_STACKED_BODY_ANCHOR_PATTERN.lastIndex = 0
@@ -244,6 +245,8 @@ export function scanProseStackedDescriptionRisks(text: string) {
     if (!setsIntersect(first.anchors, last.anchors) && !setsIntersect(first.anchors, middle.anchors)) continue
     PROSE_STACKED_REACTION_PATTERN.lastIndex = 0
     if (!PROSE_STACKED_REACTION_PATTERN.test(middle.paragraph + last.paragraph)) continue
+    PROSE_STACKED_NEW_EVENT_PATTERN.lastIndex = 0
+    if (PROSE_STACKED_NEW_EVENT_PATTERN.test(last.paragraph)) continue
     hits.push({
       key: 'prose_stacked_description',
       label: '堆叠式描写扫描',
@@ -344,7 +347,8 @@ export function scanProseDecorativeDetailRisks(text: string) {
     const numberCount = countConcreteNumbers(paragraph)
     const propCount = countPropDetails(paragraph)
     if (length < 42 || numberCount + propCount < 4 || numberCount < 1 || propCount < 1) continue
-    if (paragraphHasDetailFunction(paragraph)) continue
+    const nextParagraph = paragraphs[index + 1] || ''
+    if (paragraphHasDetailFunction(`${paragraph} ${nextParagraph}`)) continue
     hits.push({
       key: 'prose_decorative_detail',
       label: '道具/数字功能扫描',
