@@ -75,7 +75,10 @@ function anchorGroups(context: any) {
     && !/^老[\p{Script=Han}]$/u.test(anchor))
   const hasTemperatureState = structured.some(isTemperatureStateAnchor)
     || aliasGroups(context).some(group => group.some(isTemperatureStateAnchor))
-  const compoundGroups = itemAnchor && hasTemperatureState ? [[`__item_temperature__:${itemAnchor.slice(-1)}`]] : []
+  const itemAliases = itemAnchor
+    ? equivalents.find(group => group.some(alias => normalized(alias) === normalized(itemAnchor))) || [itemAnchor]
+    : []
+  const compoundGroups = itemAliases.length && hasTemperatureState ? [[`__item_temperature__:${itemAliases.join('|')}`]] : []
   const singles = [...structured, ...textualAnchorValues(context)]
     .map(boundedAnchor)
     .filter(anchor => !isTemperatureStateAnchor(anchor))
@@ -87,12 +90,12 @@ function anchorGroups(context: any) {
 
 function conservativeAnchorMatch(anchor: string, opening: string) {
   if (anchor.startsWith('__item_temperature__:')) {
-    const head = anchor.split(':')[1]
+    const items = anchor.slice(anchor.indexOf(':') + 1).split('|').filter(Boolean)
     const stateMatches = Array.from(opening.matchAll(new RegExp(TEMPERATURE_STATE_PATTERN.source, 'gu')))
     return stateMatches.some(match => {
       const start = Math.max(0, Number(match.index || 0) - 24)
       const nearby = opening.slice(start, Number(match.index || 0) + match[0].length)
-      return new RegExp(`[\\p{Script=Han}]{1,7}${head}`, 'u').test(nearby)
+      return items.some(item => nearby.includes(item))
     })
   }
   const exact = normalized(anchor)
@@ -107,9 +110,35 @@ function conservativeAnchorMatch(anchor: string, opening: string) {
     const core = anchor[0]
     if (opening.includes(`老${core}`)) return true
   }
-  const undergroundSpace = /地下|地底/u.test(anchor) && /通道|甬道/u.test(anchor)
-  if (undergroundSpace && /地下|地底/u.test(opening) && /通道|甬道/u.test(opening)) return true
   return false
+}
+
+const RELATIVE_FRAGMENT_STOPWORDS = new Set(['一个', '这个', '那个', '已经', '正在', '还是', '没有', '必须', '开始', '突然', '随后', '他们', '自己', '什么', '一样'])
+
+function exactHandoffFragments(value: any) {
+  const output = new Set<string>()
+  for (const run of String(value || '').match(/[\p{Script=Han}]+/gu) || []) {
+    for (let length = 2; length <= 4; length += 1) for (let index = 0; index + length <= run.length; index += 1) {
+      const fragment = run.slice(index, index + length)
+      if (!RELATIVE_FRAGMENT_STOPWORDS.has(fragment) && !/^(?:他的|她的|里的|已经|正在)/u.test(fragment)) output.add(fragment)
+      if (output.size >= 80) return output
+    }
+  }
+  return output
+}
+
+function relativeExactCoverageRegression(handoff: string, originalText: string, candidateText: string) {
+  const fragments = exactHandoffFragments(handoff)
+  if (fragments.size < 6) return false
+  const originalOpening = candidateOpeningText(originalText)
+  const candidateOpening = candidateOpeningText(candidateText)
+  const originalHits = Array.from(fragments).filter(fragment => originalOpening.includes(fragment)).length
+  const candidateHits = Array.from(fragments).filter(fragment => candidateOpening.includes(fragment)).length
+  const originalCoverage = originalHits / fragments.size
+  return originalHits >= 2
+    && originalCoverage >= 0.08
+    && originalHits - candidateHits >= 2
+    && candidateHits / Math.max(1, originalHits) <= 0.4
 }
 
 function openingAnchorCount(text: string, groups: readonly (readonly string[])[]) {
@@ -138,6 +167,9 @@ export function selectContinuitySafeProseCandidate(
   const groups = anchorGroups(context)
   const originalAnchors = openingAnchorCount(original, groups)
   const candidateAnchors = openingAnchorCount(candidate, groups)
+  const compoundItemStateGroup = groups.find(group => group.some(anchor => anchor.startsWith('__item_temperature__:')))
+  const originalHasCompoundItemState = Boolean(compoundItemStateGroup?.some(anchor => conservativeAnchorMatch(anchor, candidateOpeningText(original))))
+  const candidateHasCompoundItemState = Boolean(compoundItemStateGroup?.some(anchor => conservativeAnchorMatch(anchor, candidateOpeningText(candidate))))
   const target = context?.chapter_target || context?.chapterTarget || context
   const transition = normalized(target?.scene_cards?.[0]?.transition_from_previous || target?.sceneCards?.[0]?.transitionFromPrevious)
   const candidateOpening = normalized(candidateOpeningText(candidate))
@@ -146,11 +178,15 @@ export function selectContinuitySafeProseCandidate(
     && groups.filter(group => group.some(alias => transition.includes(normalized(alias)) && candidateOpening.includes(normalized(alias)))).length >= 2
   const preservesEnoughIndependentState = candidateAnchors >= Math.min(3, originalAnchors)
     && candidateAnchors / Math.max(1, originalAnchors) >= 0.5
-  const regressed = originalAnchors >= 2
+  const structuredRegression = originalAnchors >= 2
     && candidateAnchors <= Math.max(0, originalAnchors - 2)
     && !preservesEnoughIndependentState
     && !transitionMatched
     && !(candidateAnchors >= 2 && hasExplicitCausalBridge(candidate))
+  const handoff = String(target?.previous_handoff || target?.previousHandoff || '')
+  const relativeRegression = candidateAnchors < 3 && relativeExactCoverageRegression(handoff, original, candidate)
+  const compoundItemStateRegression = originalHasCompoundItemState && !candidateHasCompoundItemState
+  const regressed = structuredRegression || relativeRegression || compoundItemStateRegression
   if (!regressed) return { text: candidate, accepted: true, warning: null }
   return {
     text: original,

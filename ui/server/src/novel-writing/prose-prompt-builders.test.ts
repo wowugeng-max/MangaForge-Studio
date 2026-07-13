@@ -168,6 +168,36 @@ describe('prose prompt builders', () => {
     expect(prompt).toContain('scene_card_receipts')
   })
 
+  test('keeps the complete opening handoff contract ahead of an eight-card context budget', () => {
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 11,
+        opening_obligations: ['OPENING_OBLIGATION_SENTINEL'],
+        must_deliver: ['MUST_DELIVER_SENTINEL'],
+        keep_alive: ['KEEP_ALIVE_SENTINEL'],
+        overdue: ['OVERDUE_SENTINEL'],
+        scene_cards: Array.from({ length: 8 }, (_, index) => ({
+          title: `预算场景${index + 1}`,
+          goal: '冗长场景资料'.repeat(500),
+        })),
+      },
+      batch_preflight: {
+        chapter_handoff_contract: { previous_handoff: 'BATCH_HANDOFF_PROMPT_SENTINEL' },
+        delivery_risk_carry_over: { opening_actions: ['BATCH_OPENING_ACTION_SENTINEL'] },
+      },
+    }
+    const prompt = buildCommercialEditorRewritePrompt({ title: '夜行旧册' }, contextPackage, '初稿正文')
+    const handoffIndex = prompt.indexOf('【不可丢失的章首交接】')
+    const contextIndex = prompt.indexOf('【结构化上下文包】')
+
+    expect(handoffIndex).toBeGreaterThan(-1)
+    expect(handoffIndex).toBeLessThan(contextIndex)
+    for (const sentinel of [
+      'OPENING_OBLIGATION_SENTINEL', 'MUST_DELIVER_SENTINEL', 'KEEP_ALIVE_SENTINEL', 'OVERDUE_SENTINEL',
+      'BATCH_HANDOFF_PROMPT_SENTINEL', 'BATCH_OPENING_ACTION_SENTINEL',
+    ]) expect(prompt).toContain(sentinel)
+  })
+
   test('builds restrained meme polish prompts from an injected strategy', () => {
     const contextPackage: any = {
       chapter_target: {

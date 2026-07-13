@@ -36,12 +36,24 @@ function proseContextPromptJson(contextPackage: any, maxChars = 7000) {
 function openingHandoffPromptBlock(contextPackage: any) {
   const snapshot = buildProsePromptContextSnapshot(contextPackage || {})
   const target: any = snapshot.chapter_target || {}
+  const rawTarget: any = mergedPromptChapterTargetPreferRuntime(contextPackage || {})
   const firstScene = target.scene_cards?.[0] || {}
-  if (!target.previous_handoff && !firstScene.transition_from_previous) return ''
+  const batch: any = snapshot.batch_preflight || {}
+  const openingContract = {
+    chapter_handoff_contract: batch.chapter_handoff_contract || batch.chapterHandoffContract || rawTarget.chapter_handoff_contract || rawTarget.chapterHandoffContract,
+    opening_obligations: rawTarget.opening_obligations || rawTarget.openingObligations,
+    must_deliver: rawTarget.must_deliver || rawTarget.mustDeliver,
+    keep_alive: rawTarget.keep_alive || rawTarget.keepAlive,
+    overdue: rawTarget.overdue,
+    opening_actions: batch.delivery_risk_carry_over?.opening_actions || batch.deliveryRiskCarryOver?.openingActions,
+  }
+  const hasOpeningContract = Object.values(openingContract).some(value => Array.isArray(value) ? value.length > 0 : Boolean(value))
+  if (!target.previous_handoff && !firstScene.transition_from_previous && !hasOpeningContract) return ''
   return [
     '【不可丢失的章首交接】',
     target.previous_handoff ? `上一章最后一幕：${target.previous_handoff}` : '',
     firstScene.transition_from_previous ? `第一场因果桥：${firstScene.transition_from_previous}` : '',
+    hasOpeningContract ? `章首执行合同：${stringifyPromptJsonSafely(openingContract, 0, 3200)}` : '',
     '改稿或润色后的开篇必须保留上一章地点、在场人物、关键持有物/状态和未完成动作，或明确写出合法的时间/空间转移及因果桥；不得为制造强钩子无桥接另起危机。',
   ].filter(Boolean).join('\n')
 }

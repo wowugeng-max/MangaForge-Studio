@@ -60,10 +60,10 @@ describe('continuity-safe prose candidate selection', () => {
     expect(selectContinuitySafeProseCandidate(original, bridged, context).accepted).toBe(true)
   })
 
-  test('accepts the production-shaped synonym rewrite without hand-authored alias groups', () => {
+  test('safely keeps the old draft when production-shaped synonyms have no structured aliases', () => {
     const original = chapterScaleText(chapter10HandoffFixture.continuousCandidateOpening)
     const synonym = chapterScaleText('金色旧册贴着胸口再次升温，沈砚扶住陈叔，在地底甬道循着锁链摩擦声后退。')
-    expect(selectContinuitySafeProseCandidate(original, synonym, context).accepted).toBe(true)
+    expect(selectContinuitySafeProseCandidate(original, synonym, context).accepted).toBe(false)
   })
 
   test('does not accept merely similar words when two independent handoff states are not preserved', () => {
@@ -96,6 +96,25 @@ describe('continuity-safe prose candidate selection', () => {
     const candidate = chapterScaleText('陈叔退进地底甬道，锅里的水变烫了，他催沈砚快走。')
     expect(selectContinuitySafeProseCandidate(original, candidate, context).accepted).toBe(false)
   })
+
+  for (const [handoff, originalOpening] of [
+    ['周岚困在负二层，铜钥匙卡在门锁里，电梯正在下行。', '周岚还在负二层。\n\n铜钥匙拧不动，电梯下行声越来越近。'],
+    ['顾九护着阿梨退进窄巷，追兵已经封住前后出口。', '顾九把阿梨挡在身后。\n\n追兵从窄巷两端同时逼近。'],
+  ]) {
+    test(`uses exact relative handoff coverage to reject a disconnected generic rewrite: ${handoff.slice(0, 2)}`, () => {
+      const original = chapterScaleText(originalOpening)
+      const candidate = chapterScaleText('天亮后，他在陌生办公室醒来，桌上放着一份新合同。')
+      expect(selectContinuitySafeProseCandidate(original, candidate, { previous_handoff: handoff }).accepted).toBe(false)
+    })
+  }
+
+  for (const wrongItem of ['相册', '账册', '名册']) {
+    test(`does not bind temperature state to a merely same-suffix item: ${wrongItem}`, () => {
+      const original = chapterScaleText(chapter10HandoffFixture.continuousCandidateOpening)
+      const candidate = chapterScaleText(`老陈仍在地下通道，${wrongItem}突然升温，铁链声从远处传来。`)
+      expect(selectContinuitySafeProseCandidate(original, candidate, context).accepted).toBe(false)
+    })
+  }
 
   test('does not police a weak original opening that never established two handoff anchors', () => {
     const original = chapterScaleText('沈砚向前走去。')
