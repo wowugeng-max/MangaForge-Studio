@@ -10,7 +10,7 @@ import {
   UnorderedListOutlined,
 } from '@ant-design/icons'
 import { ProductionGuidePanel } from './ProductionGuidePanel'
-import { chapterStatusTag, displayValue, wc } from './utils'
+import { chapterStatusTag, chapterWordCount, displayValue } from './utils'
 
 const { Text } = Typography
 
@@ -192,7 +192,7 @@ export function ChapterDirectorySidebar({
                     <Text style={{ fontSize: 12, color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', maxWidth: 160 }}>
                       {displayValue(ch.title) || '无标题'}
                     </Text>
-                    <Text type="secondary" style={{ fontSize: 11 }}>{wc(ch.chapter_text)} 字</Text>
+                    <Text type="secondary" style={{ fontSize: 11 }}>{chapterWordCount(ch)} 字</Text>
                   </div>
                 </div>
               </div>

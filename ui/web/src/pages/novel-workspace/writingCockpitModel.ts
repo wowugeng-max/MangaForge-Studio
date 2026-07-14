@@ -294,6 +294,19 @@ export interface ChapterAcceptanceDeskModel {
   admissionStatus: 'accepted' | 'accepted_with_warnings' | 'blocked_invalid' | ''
   qualityWarnings: Array<{ code: string; source: string; message: string }>
   storyStateStatus: 'synced' | 'pending' | ''
+  storyStatePanel: {
+    visible: boolean
+    status: 'synced' | 'pending' | 'skipped' | 'lagging' | 'synced_with_gaps'
+    statusLabel: string
+    headline: string
+    summary: string
+    reasons: string[]
+    guidance: string
+    chapterNo: number
+    lastUpdatedChapter: number
+    canSync: boolean
+    primaryAction: { key: WritingCockpitActionKey; label: string } | null
+  } | null
   postCommitWarnings: Array<{ stage: string; message: string }>
   statusLabel: string
   acceptanceReasons: string[]
@@ -1049,7 +1062,7 @@ const ACTION_LABELS: Record<WritingCockpitActionKey, string> = {
   refresh_current_quality: '复检当前版本',
   create_editor_report: '生成编辑报告',
   apply_editor_revision: '生成修订稿',
-  sync_story_state: '同步故事状态',
+  sync_story_state: '立即同步故事状态',
   accept_chapter_and_continue: '验收并进入下一章',
   open_editor_reports: '查看编辑报告',
   open_version_history: '查看版本历史',
@@ -4419,10 +4432,41 @@ function recordValue(value: any): AnyRecord {
   return parsed && typeof parsed === 'object' ? parsed : {}
 }
 
+function unwrapStorageEnvelope(record: AnyRecord): AnyRecord {
+  if (!record || typeof record !== 'object') return {}
+  const preview = typeof record.preview === 'string' ? recordValue(record.preview) : {}
+  const hasPreview = Object.keys(preview).length > 0
+  if (!record.truncated || !hasPreview) return record
+  return {
+    ...preview,
+    ...record,
+    chapter_id: record.chapter_id ?? record.chapterId ?? preview.chapter_id ?? preview.chapterId ?? preview.chapter?.id,
+    chapter_no: record.chapter_no ?? record.chapterNo ?? preview.chapter_no ?? preview.chapterNo ?? preview.chapter?.chapter_no ?? preview.chapter?.chapterNo,
+    admission_status: firstNonEmpty(record.admission_status, record.admissionStatus, preview.admission_status, preview.admissionStatus),
+    prose_admission: record.prose_admission || record.proseAdmission || preview.prose_admission || preview.proseAdmission,
+    quality_score: record.quality_score ?? record.qualityScore ?? preview.quality_score ?? preview.qualityScore ?? preview.score,
+    quality_warnings: record.quality_warnings || record.qualityWarnings || preview.quality_warnings || preview.qualityWarnings || preview.warnings,
+    story_state_status: firstNonEmpty(record.story_state_status, record.storyStateStatus, preview.story_state_status, preview.storyStateStatus),
+    post_commit_warnings: record.post_commit_warnings || record.postCommitWarnings || preview.post_commit_warnings || preview.postCommitWarnings,
+  }
+}
+
 function normalizeAdmissionCandidate(value: any): AnyRecord | null {
-  const record = recordValue(value)
+  const record = unwrapStorageEnvelope(recordValue(value))
   const direct = record?.prose_admission || record?.proseAdmission
-  if (direct && typeof direct === 'object') return direct
+  if (direct && typeof direct === 'object') {
+    const status = firstNonEmpty(direct.status, direct.admission_status, direct.admissionStatus)
+    if (!['accepted', 'accepted_with_warnings', 'blocked_invalid'].includes(status)) return null
+    return {
+      ...direct,
+      status,
+      quality_score: direct.quality_score ?? direct.qualityScore ?? record?.quality_score ?? record?.qualityScore ?? record?.score,
+      quality_warnings: direct.quality_warnings || direct.qualityWarnings || record?.quality_warnings || record?.qualityWarnings || record?.warnings,
+      story_state_status: direct.story_state_status || direct.storyStateStatus || record?.story_state_status || record?.storyStateStatus,
+      story_state_warning: direct.story_state_warning || direct.storyStateWarning || record?.story_state_warning || record?.storyStateWarning || null,
+      post_commit_warnings: direct.post_commit_warnings || direct.postCommitWarnings || record?.post_commit_warnings || record?.postCommitWarnings,
+    }
+  }
   const status = firstNonEmpty(record?.status, record?.admission_status, record?.admissionStatus)
   if (!['accepted', 'accepted_with_warnings', 'blocked_invalid'].includes(status)) return null
   return {
@@ -4431,6 +4475,7 @@ function normalizeAdmissionCandidate(value: any): AnyRecord | null {
     quality_score: record?.quality_score ?? record?.qualityScore ?? record?.score,
     quality_warnings: record?.quality_warnings || record?.qualityWarnings || record?.warnings,
     story_state_status: record?.story_state_status || record?.storyStateStatus,
+    story_state_warning: record?.story_state_warning || record?.storyStateWarning || null,
     post_commit_warnings: record?.post_commit_warnings || record?.postCommitWarnings,
   }
 }
@@ -4454,29 +4499,55 @@ function runAdmissionOrder(run: AnyRecord) {
   return Number.isFinite(id) ? id : 0
 }
 
+function admissionRank(status: string) {
+  if (status === 'accepted') return 3
+  if (status === 'accepted_with_warnings') return 2
+  if (status === 'blocked_invalid') return 1
+  return 0
+}
+
 function runAdmission(runs: AnyRecord[], chapter: AnyRecord): AnyRecord | null {
   const sortedRuns = [...runs].sort((left, right) => runAdmissionOrder(right) - runAdmissionOrder(left))
+  let best: AnyRecord | null = null
+  let bestRank = 0
   for (const run of sortedRuns) {
     const roots = [run?.output_ref, run?.outputRef, run?.output, run?.payload, run]
       .map(recordValue)
+      .map(unwrapStorageEnvelope)
       .filter(value => Object.keys(value).length > 0)
     for (const root of roots) {
       const direct = recordBelongsToChapter(root, chapter) ? normalizeAdmissionCandidate(root) : null
-      if (direct) return direct
       const items = [...arrayValue(root?.chapters), ...arrayValue(root?.results)]
       const item = items.find(candidate => recordBelongsToChapter(candidate, chapter))
       const nested = normalizeAdmissionCandidate(item)
-      if (nested) return nested
+      const candidate = direct || nested
+      if (!candidate) continue
+      const status = firstNonEmpty(candidate.status, candidate.admission_status, candidate.admissionStatus)
+      const rank = admissionRank(status)
+      // Prefer the newest successful admission; only fall back to blocked_invalid when nothing better exists.
+      if (rank > bestRank || (rank === bestRank && !best)) {
+        best = candidate
+        bestRank = rank
+      }
+      if (bestRank >= 2) return best
     }
   }
-  return null
+  return best
 }
 
 function resolveProseAdmission(chapter: AnyRecord, qualityReviewPayload: AnyRecord, runs: AnyRecord[]) {
   const rawPayload = chapter?.raw_payload || chapter?.rawPayload || {}
-  return normalizeAdmissionCandidate(rawPayload?.prose_admission || rawPayload?.proseAdmission)
-    || normalizeAdmissionCandidate(qualityReviewPayload?.prose_admission || qualityReviewPayload?.proseAdmission)
-    || runAdmission(runs, chapter)
+  const fromChapter = normalizeAdmissionCandidate(rawPayload?.prose_admission || rawPayload?.proseAdmission)
+  if (fromChapter) return fromChapter
+  const fromReview = normalizeAdmissionCandidate(qualityReviewPayload?.prose_admission || qualityReviewPayload?.proseAdmission)
+  if (fromReview) return fromReview
+  const fromRun = runAdmission(runs, chapter)
+  if (!fromRun) return null
+  const status = firstNonEmpty(fromRun.status, fromRun.admission_status, fromRun.admissionStatus)
+  // blocked_invalid means prose was rejected before store. If the chapter already has prose,
+  // the failed run is stale relative to a later successful commit.
+  if (status === 'blocked_invalid' && hasProse(chapter)) return null
+  return fromRun
 }
 
 function normalizedAdmissionWarnings(value: any): Array<{ code: string; source: string; message: string }> {
@@ -4553,6 +4624,107 @@ function reportBelongsToCurrentQualityCycle(args: {
     && (!args.revisionRef || compareReviewRefs(args.reportRef, args.revisionRef) > 0)
 }
 
+
+function storyStateFailureMessages(warning: any): string[] {
+  const failures = arrayValue(warning?.hard_failures || warning?.hardFailures || warning?.failures)
+  const messages = failures.map((item: any) => {
+    if (typeof item === 'string') return text(item)
+    return firstNonEmpty(item?.message, item?.detail, item?.summary, item?.key)
+  }).filter(Boolean)
+  const skipped = firstNonEmpty(warning?.reason, warning?.skipped === true ? 'story_state_skipped' : '')
+  if (skipped && !messages.length) {
+    if (/draft_only/i.test(skipped)) return ['当前是“只生成正文初稿”模式，正文入库后故意不更新状态机，避免草稿污染长期记忆。']
+    if (/draft_review/i.test(skipped)) return ['当前是“生成并自检”模式，正文入库后故意不更新状态机；完整流水线或手动同步后才会写入。']
+    return [`状态机更新被跳过：${skipped}`]
+  }
+  if (warning?.error) messages.unshift(firstNonEmpty(warning.error, '故事状态准备失败'))
+  return Array.from(new Set(messages)).slice(0, 6)
+}
+
+function buildStoryStatePanel(args: {
+  chapter: AnyRecord
+  storyState: AnyRecord
+  proseAdmission: AnyRecord | null
+  hasChapterProse: boolean
+}): ChapterAcceptanceDeskModel['storyStatePanel'] {
+  if (!args.hasChapterProse) return null
+  const chapterNo = Number(args.chapter?.chapter_no || args.chapter?.chapterNo || 0)
+  const lastUpdatedChapter = Number(args.storyState?.last_updated_chapter || args.storyState?.lastUpdatedChapter || 0)
+  const admissionStoryStatus = firstNonEmpty(
+    args.proseAdmission?.story_state_status,
+    args.proseAdmission?.storyStateStatus,
+  )
+  const warning = args.proseAdmission?.story_state_warning || args.proseAdmission?.storyStateWarning || null
+  const reasons = storyStateFailureMessages(warning)
+  const skippedReason = firstNonEmpty(warning?.reason, '')
+  const skippedByMode = /draft_only|draft_review/i.test(skippedReason)
+  const laggingByCursor = chapterNo > 0 && lastUpdatedChapter > 0 && lastUpdatedChapter < chapterNo
+  const laggingUnknown = chapterNo > 0 && lastUpdatedChapter === 0
+  let status: 'synced' | 'pending' | 'skipped' | 'lagging' | 'synced_with_gaps' = 'synced'
+  if (admissionStoryStatus === 'pending' || skippedByMode) {
+    status = skippedByMode ? 'skipped' : 'pending'
+  } else if (admissionStoryStatus === 'synced' && reasons.length > 0) {
+    status = 'synced_with_gaps'
+  } else if (admissionStoryStatus === 'synced') {
+    status = laggingByCursor ? 'lagging' : 'synced'
+  } else if (laggingByCursor || laggingUnknown) {
+    status = 'lagging'
+  } else if (reasons.length > 0) {
+    status = 'pending'
+  } else {
+    status = lastUpdatedChapter >= chapterNo && chapterNo > 0 ? 'synced' : 'lagging'
+  }
+
+  const statusLabel = ({
+    synced: '已同步',
+    pending: '待同步',
+    skipped: '本模式跳过',
+    lagging: '落后于正文',
+    synced_with_gaps: '已同步（有缺口）',
+  } as const)[status]
+
+  const headline = ({
+    synced: `状态机已同步到第 ${Math.max(lastUpdatedChapter, chapterNo)} 章`,
+    pending: '正文已入库，故事状态机尚未写入',
+    skipped: '当前生产模式不会自动更新状态机',
+    lagging: `状态机仍停在第 ${lastUpdatedChapter || 0} 章，落后于第 ${chapterNo} 章正文`,
+    synced_with_gaps: '状态机已推进，但仍有计划状态缺口',
+  } as const)[status]
+
+  const defaultSummary = ({
+    synced: '角色位置、道具归属、伏笔和时间线已与本章正文对齐。',
+    pending: '系统设计会把“正文入库”和“状态机写入”拆开：准备不完整时先保住正文，避免用不完整 delta 污染长期记忆。',
+    skipped: '只初稿 / 生成并自检 模式为防草稿污染，不会自动写状态机。满意正文后可手动同步。',
+    lagging: '已有正文比状态机更新更靠后。继续写下一章前，建议先同步本章状态机。',
+    synced_with_gaps: 'last_updated_chapter 已推进，但部分角色/资产/交接变化仍被标记为缺口，可按需重新同步补齐。',
+  } as const)[status]
+
+  const guidance = ({
+    synced: '可继续下一章；若你刚改过大纲或角色设定，也可重新同步一次。',
+    pending: '正文不用重写。点“立即同步故事状态”即可补写状态机；同步时允许带软警告推进。',
+    skipped: '切换到“生成、自检、修订、入库”会自动尝试更新；或现在直接点“立即同步故事状态”。',
+    lagging: '点“立即同步故事状态”，系统会从本章起按已写正文补跑状态机。',
+    synced_with_gaps: '若你对正文已满意，可再点一次同步尝试补齐缺口；也可先继续写作。',
+  } as const)[status]
+
+  const canSync = status !== 'synced'
+  return {
+    visible: true,
+    status,
+    statusLabel,
+    headline,
+    summary: defaultSummary,
+    reasons,
+    guidance,
+    chapterNo,
+    lastUpdatedChapter,
+    canSync,
+    primaryAction: canSync
+      ? { key: 'sync_story_state', label: status === 'skipped' || status === 'pending' || status === 'lagging' ? '立即同步故事状态' : '重新同步故事状态' }
+      : { key: 'sync_story_state', label: '重新同步故事状态' },
+  }
+}
+
 function buildHiddenAcceptanceDesk(): ChapterAcceptanceDeskModel {
   return {
     visible: false,
@@ -4560,6 +4732,7 @@ function buildHiddenAcceptanceDesk(): ChapterAcceptanceDeskModel {
     admissionStatus: '',
     qualityWarnings: [],
     storyStateStatus: '',
+    storyStatePanel: null,
     postCommitWarnings: [],
     statusLabel: '等待正文',
     acceptanceReasons: ['本章还没有正文，先完成章节计划和初稿。'],
@@ -4710,7 +4883,13 @@ function buildChapterAcceptanceDesk(args: {
   const qualityWarnings = normalizedAdmissionWarnings(proseAdmission?.quality_warnings || proseAdmission?.qualityWarnings)
   const storyStateStatus = firstNonEmpty(proseAdmission?.story_state_status, proseAdmission?.storyStateStatus) as ChapterAcceptanceDeskModel['storyStateStatus']
   const postCommitWarnings = normalizedPostCommitWarnings(proseAdmission?.post_commit_warnings || proseAdmission?.postCommitWarnings)
-  const admissionFields = { admissionStatus, qualityWarnings, storyStateStatus, postCommitWarnings }
+  const storyStatePanel = buildStoryStatePanel({
+    chapter: args.nextChapter,
+    storyState: args.storyState,
+    proseAdmission,
+    hasChapterProse: hasProse(args.nextChapter),
+  })
+  const admissionFields = { admissionStatus, qualityWarnings, storyStateStatus, storyStatePanel, postCommitWarnings }
   if (!hasProse(args.nextChapter) && admissionStatus !== 'blocked_invalid') return buildHiddenAcceptanceDesk()
   const storylineSync = buildStorylineSyncSummary(latestStorylineSyncRef?.review || null)
   const storyUnitSync = buildStoryUnitSyncSummary(latestStoryUnitSyncRef?.review || null)
@@ -4958,8 +5137,12 @@ function buildChapterAcceptanceDesk(args: {
   if (admissionStatus === 'accepted_with_warnings' && (scoreNeedsRevision || mustFix.length > 0 || qualityWarnings.length > 0)) {
     secondaryActions.unshift({ key: 'apply_editor_revision', label: ACTION_LABELS.apply_editor_revision })
   }
-  if (admissionStatus === 'accepted_with_warnings' && storyStateStatus === 'pending') {
-    secondaryActions.unshift({ key: 'sync_story_state', label: ACTION_LABELS.sync_story_state })
+  const needsStoryStateSync = Boolean(storyStatePanel && ['pending', 'skipped', 'lagging'].includes(storyStatePanel.status))
+  if (needsStoryStateSync) {
+    secondaryActions.unshift({
+      key: 'sync_story_state',
+      label: storyStatePanel?.primaryAction?.label || ACTION_LABELS.sync_story_state,
+    })
   }
 
   const admissionCommon = {
@@ -4983,34 +5166,44 @@ function buildChapterAcceptanceDesk(args: {
   }
 
   if (admissionStatus === 'accepted_with_warnings') {
+    const storyReason = needsStoryStateSync
+      ? (storyStatePanel?.headline || '正文已入库，故事状态待补同步')
+      : ''
     return {
       visible: true,
-      acceptanceStatus: 'delivered_with_warnings',
+      acceptanceStatus: needsStoryStateSync ? 'needs_state_sync' : 'delivered_with_warnings',
       ...admissionFields,
-      statusLabel: '已入库，建议修订',
+      statusLabel: needsStoryStateSync ? '已入库，待同步状态机' : '已入库，建议修订',
       acceptanceReasons: [
+        storyReason,
         ...qualityWarnings.map(item => item.message),
-        storyStateStatus === 'pending' ? '正文已入库，故事状态待补同步' : '',
         ...postCommitWarnings.map(item => item.message),
-      ].filter(Boolean).slice(0, 3),
+      ].filter(Boolean).slice(0, 4),
       ...admissionCommon,
       approvalBlocker: null,
-      recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: ACTION_LABELS.accept_chapter_and_continue },
-      shouldAutoExpandAcceptance: false,
+      recommendedAcceptanceAction: needsStoryStateSync
+        ? { key: 'sync_story_state', label: storyStatePanel?.primaryAction?.label || ACTION_LABELS.sync_story_state }
+        : { key: 'accept_chapter_and_continue', label: ACTION_LABELS.accept_chapter_and_continue },
+      shouldAutoExpandAcceptance: needsStoryStateSync || Boolean(storyStatePanel?.reasons?.length),
     }
   }
 
   if (admissionStatus === 'accepted') {
+    const storyReason = needsStoryStateSync
+      ? (storyStatePanel?.headline || '正文已入库，故事状态待补同步')
+      : '正文已入库，可以继续下一章。'
     return {
       visible: true,
-      acceptanceStatus: 'delivered',
+      acceptanceStatus: needsStoryStateSync ? 'needs_state_sync' : 'delivered',
       ...admissionFields,
-      statusLabel: '已入库',
-      acceptanceReasons: ['正文已入库，可以继续下一章。'],
+      statusLabel: needsStoryStateSync ? '已入库，待同步状态机' : '已入库',
+      acceptanceReasons: [storyReason, ...(storyStatePanel?.reasons || [])].filter(Boolean).slice(0, 4),
       ...admissionCommon,
       approvalBlocker: null,
-      recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: ACTION_LABELS.accept_chapter_and_continue },
-      shouldAutoExpandAcceptance: false,
+      recommendedAcceptanceAction: needsStoryStateSync
+        ? { key: 'sync_story_state', label: storyStatePanel?.primaryAction?.label || ACTION_LABELS.sync_story_state }
+        : { key: 'accept_chapter_and_continue', label: ACTION_LABELS.accept_chapter_and_continue },
+      shouldAutoExpandAcceptance: needsStoryStateSync,
     }
   }
 
@@ -5337,7 +5530,10 @@ function buildChapterAcceptanceDesk(args: {
       acceptanceStatus: 'needs_state_sync',
       ...admissionFields,
       statusLabel: '需同步故事状态',
-      acceptanceReasons: [`故事状态还没有同步到第 ${args.nextChapter.chapter_no} 章。`],
+      acceptanceReasons: [
+        storyStatePanel?.headline || `故事状态还没有同步到第 ${args.nextChapter.chapter_no} 章。`,
+        ...(storyStatePanel?.reasons || []),
+      ].filter(Boolean).slice(0, 4),
       storylineSync,
       storyUnitSync,
       assetIntake,

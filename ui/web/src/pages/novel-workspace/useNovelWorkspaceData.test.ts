@@ -205,8 +205,40 @@ describe('novel workspace detail working set', () => {
     const stats = cache.stats()
 
     expect(maxActive).toBeLessThanOrEqual(2)
-    expect(results.filter(result => result.status === 'ready').length).toBeLessThanOrEqual(2)
+    // Ready details are always returned for UI hydration; byte budget only limits cache retention.
+    expect(results.filter(result => result.status === 'ready')).toHaveLength(20)
     expect(stats.cachedBytes.review).toBeLessThanOrEqual(stats.maxBytes.review)
+    expect(stats.cached).toBeLessThan(20)
+  })
+
+  test('returns oversized chapter details instead of dropping prose when scene cards bloat the payload', async () => {
+    const { compactChapterDetailForWorkspace } = await import('./workspaceDetailCache')
+    const bloated = {
+      id: 2,
+      chapter_no: 2,
+      chapter_text: '刺耳的金属摩擦声撕裂了浓雾。',
+      scene_breakdown: [
+        { scene_no: 1, title: '目标入场', purpose_tags: ['x'.repeat(20000)], prose_craft_directives: 'y'.repeat(50000) },
+        { scene_no: 2, title: '冲突升级', purpose_tags: ['x'.repeat(20000)], prose_craft_directives: 'y'.repeat(50000) },
+      ],
+      scene_list: [
+        { scene_no: 1, title: '目标入场', purpose_tags: ['x'.repeat(20000)] },
+      ],
+      raw_payload: { scene_cards: [{ scene_no: 1, title: '目标入场', prose_craft_directives: 'z'.repeat(30000) }], archive: 'w'.repeat(100000) },
+    }
+    const compact = compactChapterDetailForWorkspace(bloated)
+    expect(compact.chapter_text).toBe('刺耳的金属摩擦声撕裂了浓雾。')
+    expect(JSON.stringify(compact).length).toBeLessThan(JSON.stringify(bloated).length / 5)
+    expect(compact.scene_breakdown[0].purpose_tags).toBeUndefined()
+    expect(compact.scene_breakdown[0].title).toBe('目标入场')
+
+    const cache = createWorkspaceDetailCache(async () => compactChapterDetailForWorkspace(bloated), { chapter: 4 }, {
+      maxBytes: { chapter: 2048 },
+    })
+    const results = await cache.loadMany('chapter', [{ id: 2, estimatedBytes: 500000 }])
+    expect(results).toHaveLength(1)
+    expect(results[0]?.status).toBe('ready')
+    expect(results[0]?.record?.chapter_text).toContain('金属摩擦声')
   })
 
   test('aborts in-flight detail HTTP work when the cache generation is cleared', async () => {

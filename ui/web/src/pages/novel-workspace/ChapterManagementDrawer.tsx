@@ -22,7 +22,7 @@ import {
   InteractionOutlined,
   PlayCircleOutlined,
 } from '@ant-design/icons'
-import { chapterStatusTag, displayValue, wc } from './utils'
+import { chapterStatusTag, chapterWordCount, displayValue } from './utils'
 
 const { Text, Title, Paragraph } = Typography
 
@@ -139,7 +139,7 @@ export function ChapterManagementDrawer({
                 <Tag color="green">已写 {proseChapters.length}</Tag>
                 <Tag color="orange">未写 {chapters.length - proseChapters.length}</Tag>
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  总计 {chapters.reduce((sum, ch) => sum + wc(ch.chapter_text), 0).toLocaleString()} 字
+                  总计 {chapters.reduce((sum, ch) => sum + chapterWordCount(ch), 0).toLocaleString()} 字
                 </Text>
               </div>
 
@@ -247,7 +247,7 @@ export function ChapterManagementDrawer({
                           </Text>
                         )}
                         <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                          <Text type="secondary" style={{ fontSize: 11 }}>{wc(ch.chapter_text)} 字</Text>
+                          <Text type="secondary" style={{ fontSize: 11 }}>{chapterWordCount(ch)} 字</Text>
                           {displayValue(ch.status) && <Tag color="default" style={{ fontSize: 10, padding: '0 4px' }}>{displayValue(ch.status)}</Tag>}
                         </div>
                       </div>
@@ -286,7 +286,7 @@ export function ChapterManagementDrawer({
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                   <Title level={4} style={{ margin: 0 }}>第{activeChapter.chapter_no}章《{displayValue(activeChapter.title) || '无标题'}》</Title>
                   {chapterStatusTag(activeChapter)}
-                  <Tag color="blue">{wc(activeChapter.chapter_text)} 字</Tag>
+                  <Tag color="blue">{chapterWordCount(activeChapter)} 字</Tag>
                 </div>
                 <Text type="secondary">在这里预览章节信息与正文片段；需要深入编辑时，可直接切回主工作区正文编辑。</Text>
               </Space>
@@ -307,7 +307,7 @@ export function ChapterManagementDrawer({
                     <Descriptions.Item label="冲突">{displayValue(activeChapter.conflict) || '-'}</Descriptions.Item>
                     <Descriptions.Item label="结尾钩子">{displayValue(activeChapter.ending_hook) || '-'}</Descriptions.Item>
                     <Descriptions.Item label="状态">{displayValue(activeChapter.status) || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="正文长度">{wc(activeChapter.chapter_text)} 字</Descriptions.Item>
+                    <Descriptions.Item label="正文长度">{chapterWordCount(activeChapter)} 字</Descriptions.Item>
                   </Descriptions>
                 </Card>
 
@@ -324,7 +324,7 @@ export function ChapterManagementDrawer({
                   }
                   styles={{ body: { padding: 18 } }}
                 >
-                  {activeChapter.chapter_text ? (
+                  {String(activeChapter.chapter_text || '').trim() ? (
                     <Paragraph style={{ whiteSpace: 'pre-wrap', lineHeight: 1.75, marginBottom: 0, fontSize: 14 }}>
                       {String(activeChapter.chapter_text).slice(0, 6000)}
                       {String(activeChapter.chapter_text).length > 6000 ? '\n\n……（预览已截断，请回到主编辑区查看全文）' : ''}

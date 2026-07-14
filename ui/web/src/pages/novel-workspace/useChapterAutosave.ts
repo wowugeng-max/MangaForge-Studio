@@ -38,6 +38,14 @@ export function useChapterAutosave({
     if (!next) return true
 
     pendingSaveRef.current = null
+    // Autosave must not wipe an existing chapter with a blank editor state.
+    // Empty drafts are common while compact workspace rows hydrate chapter_text.
+    if (!String(next.text || '').replace(/\s/g, '')) {
+      setSaveStatus('idle')
+      const waiters = saveWaitersRef.current.splice(0)
+      waiters.forEach(resolve => resolve(true))
+      return true
+    }
     saveInFlightRef.current = true
     setSaveStatus('saving')
 

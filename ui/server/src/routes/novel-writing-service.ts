@@ -41,8 +41,10 @@ import {
   type ProseGenerationContract,
 } from '../novel-writing/prose-generation-contract'
 import {
+  blockingPreparedStoryStateHardFailures,
   buildPendingPreparedStoryStateUpdate,
   buildPreparedStoryStateHardFailures,
+  formatPreparedStoryStateFailureSummary,
   type PreparedStoryStateFailure,
   type PreparedStoryStateUpdate,
 } from '../novel-writing/prepared-story-state'
@@ -27693,22 +27695,41 @@ function styleBoundaryCopyRules(styleStrategy: any, benchmarkStrategy: any) {
   ], 18)
 }
 
-function buildStyleBoundaryContract(project: any = {}, contextPackage: any = {}, options: any = {}) {
-  const explicit = styleBoundaryExplicitContract(contextPackage)
-  const contextWithoutExplicit = {
+function stripStyleBoundaryExplicitContract(contextPackage: any = {}) {
+  const stripBrief = (brief: any) => (
+    brief && typeof brief === 'object' && !Array.isArray(brief)
+      ? {
+          ...brief,
+          style_boundary_contract: null,
+          styleBoundaryContract: null,
+        }
+      : brief
+  )
+  const stripTarget = (target: any) => (
+    target && typeof target === 'object' && !Array.isArray(target)
+      ? {
+          ...target,
+          style_boundary_contract: null,
+          styleBoundaryContract: null,
+          pre_draft_brief: stripBrief(target.pre_draft_brief),
+          preDraftBrief: stripBrief(target.preDraftBrief),
+        }
+      : target
+  )
+  return {
     ...(contextPackage || {}),
     style_boundary_contract: null,
     styleBoundaryContract: null,
-    pre_draft_brief: contextPackage?.pre_draft_brief
-      ? { ...(contextPackage.pre_draft_brief || {}), style_boundary_contract: null, styleBoundaryContract: null }
-      : contextPackage?.pre_draft_brief,
-    preDraftBrief: contextPackage?.preDraftBrief
-      ? { ...(contextPackage.preDraftBrief || {}), style_boundary_contract: null, styleBoundaryContract: null }
-      : contextPackage?.preDraftBrief,
-    chapter_target: contextPackage?.chapter_target
-      ? { ...(contextPackage.chapter_target || {}), style_boundary_contract: null, styleBoundaryContract: null }
-      : contextPackage?.chapter_target,
+    pre_draft_brief: stripBrief(contextPackage?.pre_draft_brief),
+    preDraftBrief: stripBrief(contextPackage?.preDraftBrief),
+    chapter_target: stripTarget(contextPackage?.chapter_target),
+    chapterTarget: stripTarget(contextPackage?.chapterTarget),
   }
+}
+
+function buildStyleBoundaryContract(project: any = {}, contextPackage: any = {}, options: any = {}) {
+  const explicit = options.ignoreExplicit === true ? null : styleBoundaryExplicitContract(contextPackage)
+  const contextWithoutExplicit = stripStyleBoundaryExplicitContract(contextPackage)
   const styleStrategy = options.style_sample_strategy
     || contextPackage?.chapter_target?.style_sample_strategy
     || contextPackage?.style_sample_strategy
@@ -27729,6 +27750,8 @@ function buildStyleBoundaryContract(project: any = {}, contextPackage: any = {},
 
   if (explicit && typeof explicit === 'object' && !Array.isArray(explicit)) {
     const derived = hasStyleInput ? buildStyleBoundaryContract(project, contextWithoutExplicit, {
+      ...options,
+      ignoreExplicit: true,
       style_sample_strategy: styleStrategy,
       chapter_benchmark_strategy: benchmarkStrategy,
       benchmark_recall_brief: benchmarkRecall,
@@ -34110,6 +34133,115 @@ const DAILY_WORKFLOW_SOURCE_REQUIREMENT_CHECKS = [
   },
 ]
 
+export function resolveSerialStoryStateReadiness(contextPackage: any = {}) {
+  const target = mergedContextChapterTarget(contextPackage)
+  const previous = contextPackage?.continuity?.previous_chapter
+    || contextPackage?.continuity?.previousChapter
+    || contextPackage?.previous_chapter
+    || contextPackage?.previousChapter
+    || {}
+  const chapterNo = Number(
+    target?.chapter_no
+    || target?.chapterNo
+    || contextPackage?.chapter?.chapter_no
+    || contextPackage?.chapter?.chapterNo
+    || 0,
+  )
+  const previousChapterNo = Number(previous?.chapter_no || previous?.chapterNo || 0)
+  const storyStateGlobal = contextPackage?.story_state?.global
+    || contextPackage?.storyState?.global
+    || contextPackage?.story_state
+    || contextPackage?.storyState
+    || {}
+  const storyStateLastUpdatedChapter = Number(
+    storyStateGlobal?.last_updated_chapter
+    || storyStateGlobal?.lastUpdatedChapter
+    || storyStateGlobal?.last_updated_chapter_no
+    || storyStateGlobal?.lastUpdatedChapterNo
+    || 0,
+  )
+  const stale = previousChapterNo > 0
+    && chapterNo > previousChapterNo
+    && storyStateLastUpdatedChapter > 0
+    && storyStateLastUpdatedChapter < previousChapterNo
+  return {
+    stale,
+    chapter_no: chapterNo,
+    previous_chapter_no: previousChapterNo,
+    last_updated_chapter: storyStateLastUpdatedChapter,
+    evidence: stale
+      ? `上一章第${previousChapterNo}章已进入承接链，但状态机只更新到第${storyStateLastUpdatedChapter}章。`
+      : (previousChapterNo > 0
+        ? `上一章第${previousChapterNo}章状态机已同步至第${Math.max(storyStateLastUpdatedChapter, previousChapterNo)}章。`
+        : '无需串行状态机检查'),
+    fix: stale
+      ? `先完成第${previousChapterNo}章状态机更新，再继续第${chapterNo || '?'}章，避免下一章读取旧角色状态、伏笔、时间线或资产状态。`
+      : '',
+  }
+}
+
+function reconcileSerialStoryStateSourceRows(rows: any[] = [], contextPackage: any = {}) {
+  const live = resolveSerialStoryStateReadiness(contextPackage)
+  const nextRows = asArray(rows).filter((item: any) => {
+    const key = compactBriefText(item?.key || item?.name)
+    return key !== 'serial_story_state'
+  })
+  if (live.stale) {
+    nextRows.push(stateSourceReadinessRow(
+      'serial_story_state',
+      '串行连续性/状态机',
+      false,
+      live.evidence,
+      live.fix,
+    ))
+  }
+  return nextRows
+}
+
+async function refreshFollowingChapterSerialStoryStateReadiness(
+  activeWorkspace: string,
+  projectId: number,
+  syncedChapterNo: number,
+  storyStateLastUpdatedChapter: number,
+) {
+  const chapterNo = Number(syncedChapterNo || 0)
+  const lastUpdated = Number(storyStateLastUpdatedChapter || syncedChapterNo || 0)
+  if (!chapterNo || !projectId) return { refreshed: 0 }
+  const chapters = await listNovelChapters(activeWorkspace, projectId)
+  let refreshed = 0
+  for (const nextChapter of chapters) {
+    const nextNo = Number(nextChapter?.chapter_no || 0)
+    if (nextNo <= chapterNo) continue
+    const raw = nextChapter?.raw_payload && typeof nextChapter.raw_payload === 'object' ? nextChapter.raw_payload : {}
+    const brief = raw.pre_draft_brief || raw.preDraftBrief
+    if (!brief || typeof brief !== 'object') continue
+    const contract = brief.state_tracking_contract || brief.stateTrackingContract
+    if (!contract || typeof contract !== 'object') continue
+    const rows = asArray(contract.source_readiness || contract.sourceReadiness)
+    if (!rows.some((item: any) => compactBriefText(item?.key || item?.name) === 'serial_story_state')) continue
+    // only clear when live state covers previous chapter of this next chapter
+    const previousNo = nextNo - 1
+    if (lastUpdated > 0 && lastUpdated < previousNo) continue
+    const nextRows = rows.filter((item: any) => compactBriefText(item?.key || item?.name) !== 'serial_story_state')
+    const nextContract = {
+      ...contract,
+      source_readiness: nextRows,
+      ...(contract.sourceReadiness !== undefined ? { sourceReadiness: nextRows } : {}),
+    }
+    const nextBrief = {
+      ...brief,
+      state_tracking_contract: nextContract,
+      ...(brief.stateTrackingContract !== undefined ? { stateTrackingContract: nextContract } : {}),
+    }
+    await mergeNovelChapterRawPayload(activeWorkspace, Number(nextChapter.id), {
+      pre_draft_brief: nextBrief,
+      ...(raw.preDraftBrief !== undefined ? { preDraftBrief: nextBrief } : {}),
+    })
+    refreshed += 1
+  }
+  return { refreshed }
+}
+
 export function buildSourceReadinessChecks(contextPackage: any = {}) {
   const target = mergedContextChapterTarget(contextPackage)
   const contract = target?.state_tracking_contract
@@ -34121,7 +34253,7 @@ export function buildSourceReadinessChecks(contextPackage: any = {}) {
     || contextPackage?.preDraftBrief?.state_tracking_contract
     || contextPackage?.preDraftBrief?.stateTrackingContract
     || {}
-  return asArray(contract?.source_readiness || contract?.sourceReadiness)
+  return reconcileSerialStoryStateSourceRows(asArray(contract?.source_readiness || contract?.sourceReadiness), contextPackage)
     .map((item: any) => {
       const key = compactBriefText(item?.key || item?.name)
       const label = compactBriefText(item?.label || item?.title || key, '来源就绪')
@@ -34151,7 +34283,7 @@ export function buildSourceReadinessPreflightChecks(contextPackage: any = {}) {
     || contextPackage?.preDraftBrief?.state_tracking_contract
     || contextPackage?.preDraftBrief?.stateTrackingContract
     || {}
-  const sourceRows = asArray(contract?.source_readiness || contract?.sourceReadiness)
+  const sourceRows = reconcileSerialStoryStateSourceRows(asArray(contract?.source_readiness || contract?.sourceReadiness), contextPackage)
   const hasBlueprintSourceRow = sourceRows.some((item: any) => compactBriefText(item?.key || item?.name) === 'chapter_blueprint')
   const blueprintForReadiness = getChapterBlueprintForReadiness(contextPackage)
   const checks = buildSourceReadinessChecks(contextPackage).map((check: any) => {
@@ -34330,12 +34462,34 @@ export function buildSourceReadinessSyncReport(project: any, chapter: any, conte
 
 function applySourceReadinessPreflightChecks(preflight: any, contextPackage: any = {}) {
   if (!preflight) return preflight
+  const liveSerial = resolveSerialStoryStateReadiness(contextPackage)
+  // Drop cached serial_story_state blockers once the live story state has caught up.
+  if (!liveSerial.stale) {
+    const isSerialStoryStateItem = (item: any) => {
+      const key = String(item?.key || '')
+      const text = `${item?.label || ''}${item?.fix || ''}${item?.evidence || ''}${item || ''}`
+      return key === 'source_readiness_serial_story_state'
+        || key === 'serial_story_state'
+        || /串行连续性|状态机只更新到第|先完成第\s*\d+\s*章状态机/.test(text)
+    }
+    preflight.checks = asArray(preflight.checks).filter((item: any) => !isSerialStoryStateItem(item))
+    preflight.blockers = asArray(preflight.blockers).filter((item: any) => !isSerialStoryStateItem(item))
+    preflight.warnings = asArray(preflight.warnings).filter((item: any) => !isSerialStoryStateItem(item))
+  }
   const checks = buildSourceReadinessPreflightChecks(contextPackage)
-  if (!checks.length) return preflight
+  if (!checks.length) {
+    preflight.strict_ready = asArray(preflight.checks).every((item: any) => item.ok || item.severity === 'low')
+    preflight.ready = preflight.strict_ready
+    return preflight
+  }
 
   const existingKeys = new Set(asArray(preflight.checks).map((item: any) => String(item?.key || '')))
   const nextChecks = checks.filter((item: any) => !existingKeys.has(item.key))
-  if (!nextChecks.length) return preflight
+  if (!nextChecks.length) {
+    preflight.strict_ready = asArray(preflight.checks).every((item: any) => item.ok || item.severity === 'low')
+    preflight.ready = preflight.strict_ready
+    return preflight
+  }
 
   preflight.checks = [...asArray(preflight.checks), ...nextChecks]
   preflight.warnings = [
@@ -34391,13 +34545,17 @@ function buildStateTrackingContract(contextPackage: any = {}, options: { ignoreE
     const explicitHistoricalCausality = asArray(explicit.historical_causality || explicit.historicalCausality).map(assetText).filter(Boolean)
     const explicitWorldConstraints = asArray(explicit.world_constraints || explicit.worldConstraints).map(assetText).filter(Boolean)
     const explicitSourceReadiness = normalizeStateSourceReadiness(explicit.source_readiness || explicit.sourceReadiness)
+    const reconciledSourceReadiness = reconcileSerialStoryStateSourceRows(
+      explicitSourceReadiness.length ? explicitSourceReadiness : asArray(derived.source_readiness),
+      contextPackage,
+    )
     return {
       version: explicit.version || 'oh_story_state_tracking_v1',
       source: explicit.source || 'oh_story_embedded_fallback',
       character_states: explicitCharacterStates.length ? explicitCharacterStates : asArray(derived.character_states),
       historical_causality: explicitHistoricalCausality.length ? explicitHistoricalCausality : asArray(derived.historical_causality),
       world_constraints: explicitWorldConstraints.length ? explicitWorldConstraints : asArray(derived.world_constraints),
-      source_readiness: explicitSourceReadiness.length ? explicitSourceReadiness : asArray(derived.source_readiness),
+      source_readiness: reconciledSourceReadiness,
       filter_rules: asArray(explicit.filter_rules || explicit.filterRules).length
         ? asArray(explicit.filter_rules || explicit.filterRules).map(assetText).filter(Boolean)
         : OH_STORY_STATE_TRACKING_FILTER_RULES,
@@ -37385,7 +37543,12 @@ function buildWritePreparationBrief(contextPackage: any = {}, options: any = {})
     reader_expectation_debt_context: options.reader_expectation_debt_context || options.readerExpectationDebtContext || contextPackage?.chapter_target?.reader_expectation_debt_context || contextPackage?.reader_expectation_debt_context,
   })
   const benchmarkRecallPreparation = buildWritePreparationBenchmarkRecallContext(contextPackage, options)
-  const sourceRows = normalizeStateSourceReadiness(stateTrackingContract?.source_readiness || stateTrackingContract?.sourceReadiness)
+  // Drop stale serial_story_state rows once live story_state has caught up, so write-prep
+  // readiness does not hard-block on a cached "状态机只更新到第N章" snapshot.
+  const sourceRows = reconcileSerialStoryStateSourceRows(
+    normalizeStateSourceReadiness(stateTrackingContract?.source_readiness || stateTrackingContract?.sourceReadiness),
+    contextPackage,
+  )
   return buildWritePreparationBriefFromParts({
     state_source_rows: sourceRows,
     benchmark_recall_preparation: benchmarkRecallPreparation,
@@ -42045,95 +42208,183 @@ export function createNovelWritingService(ctx: {
 
   const prepareStoryStateUpdate = async (activeWorkspace: string, project: any, chapter: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}): Promise<PreparedStoryStateUpdate> => {
     const stageModelId = ctx.production.getStageModelId(project, 'review', modelId)
-    throwIfAborted(options)
-    const result = await executeAgent('review-agent', project, {
-      task: buildStoryStatePrompt(project, contextPackage, chapterText),
-    }, {
-      activeWorkspace,
-      modelId: stageModelId ? String(stageModelId) : undefined,
-      maxTokens: 2500,
-      temperature: ctx.production.getStageTemperature(project, 'review', 0.15),
-      skipMemory: true,
-      signal: options.abortSignal,
-      timeoutMs: options.llmTimeoutMs,
-    })
-    const payload = getNovelPayload(result)
-    const diagnostics = buildLLMResultDiagnostics(result)
-    const rawStateDelta = payload?.state_delta || payload?.stateDelta
-    const stateDelta = normalizeStoryStateDeltaForStorage(rawStateDelta || {})
-    const styleFingerprintSnapshot = buildStyleFingerprintStateSnapshot(contextPackage, project, project.reference_config?.story_state || {})
-    const stateDeltaWithStyleFingerprint = styleFingerprintSnapshot
-      ? { ...stateDelta, ...styleFingerprintSnapshot }
-      : stateDelta
-    const nextReferenceConfig = {
-      ...(project.reference_config || {}),
-      story_state: mergeStoryState(project.reference_config?.story_state || {}, stateDeltaWithStyleFingerprint, chapter),
+    const buildFromAgentResult = async (result: any): Promise<PreparedStoryStateUpdate> => {
+      const payload = getNovelPayload(result)
+      const diagnostics = buildLLMResultDiagnostics(result)
+      const rawStateDelta = payload?.state_delta || payload?.stateDelta
+      const stateDelta = normalizeStoryStateDeltaForStorage(rawStateDelta || {})
+      const styleFingerprintSnapshot = buildStyleFingerprintStateSnapshot(contextPackage, project, project.reference_config?.story_state || {})
+      const stateDeltaWithStyleFingerprint = styleFingerprintSnapshot
+        ? { ...stateDelta, ...styleFingerprintSnapshot }
+        : stateDelta
+      const nextReferenceConfig = {
+        ...(project.reference_config || {}),
+        story_state: mergeStoryState(project.reference_config?.story_state || {}, stateDeltaWithStyleFingerprint, chapter),
+      }
+      const characterUpdates = asArray(payload?.character_updates || payload?.characterUpdates)
+      const settingUpdates = asArray(payload?.setting_updates || payload?.settingUpdates)
+      const storylineUpdates = asArray(payload?.storyline_updates || payload?.storylineUpdates)
+      const [assetCharacters, assetSettings] = await Promise.all([
+        listNovelCharacters(activeWorkspace, project.id),
+        listNovelSettingEntities(activeWorkspace, project.id),
+      ])
+      const discoveredAssets = normalizeDiscoveredAssets(asArray(payload?.discovered_assets || payload?.discoveredAssets), {
+        existingCharacters: assetCharacters,
+        existingSettings: assetSettings,
+        chapter,
+      })
+      const syncReports = {
+        character_state_delta_sync: buildCharacterStateDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint, characterUpdates),
+        asset_state_delta_sync: buildAssetStateDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint, settingUpdates, discoveredAssets),
+        chapter_handoff_delta_sync: buildChapterHandoffDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint),
+        timeline_delta_sync: buildTimelineDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint, settingUpdates),
+        state_delta_completeness: buildStateDeltaCompletenessReport(chapter, chapterText, stateDeltaWithStyleFingerprint, {
+          settingUpdates,
+          characterUpdates,
+          storylineUpdates,
+          discoveredAssets,
+          foreshadowingStatus: payload?.foreshadowing_status || payload?.foreshadowingStatus || {},
+        }),
+      }
+      payload.style_fingerprint = stateDeltaWithStyleFingerprint.style_fingerprint
+      payload.style_fingerprint_contract = stateDeltaWithStyleFingerprint.style_fingerprint_contract
+      Object.assign(payload, syncReports)
+      const finishReason = rejectedProseTransportFinishReason(result)
+        || String(diagnostics.finish_reason || '').toLowerCase()
+      const validStateFields = [
+        'current_time', 'currentTime', 'character_positions', 'characterPositions', 'character_relationships', 'characterRelationships',
+        'relationship_graph', 'relationshipGraph', 'known_secrets', 'knownSecrets', 'secret_visibility', 'secretVisibility',
+        'item_ownership', 'itemOwnership', 'resource_status', 'resourceStatus', 'foreshadowing_status', 'foreshadowingStatus',
+        'payoff_queue', 'payoffQueue', 'active_locations', 'activeLocations', 'open_questions', 'openQuestions',
+        'next_chapter_priorities', 'nextChapterPriorities', 'timeline', 'progress_summary', 'progressSummary',
+      ]
+      const payloadDiagnostics = {
+        invalid_payload: !payload || typeof payload !== 'object' || Array.isArray(payload)
+          || !rawStateDelta || typeof rawStateDelta !== 'object' || Array.isArray(rawStateDelta)
+          || !validStateFields.some(key => Object.prototype.hasOwnProperty.call(rawStateDelta, key)),
+        transport_incomplete: Boolean(finishReason)
+          && ['length', 'incomplete', 'max_tokens', 'content_filter', 'tool', 'tool_calls'].some(reason => String(finishReason).includes(reason))
+          || hasProseTransportIncompleteDetails(result),
+      }
+      return {
+        state_delta: stateDeltaWithStyleFingerprint,
+        next_reference_config: nextReferenceConfig,
+        character_updates: characterUpdates,
+        setting_updates: settingUpdates,
+        storyline_updates: storylineUpdates,
+        sync_reports: syncReports,
+        hard_failures: buildPreparedStoryStateHardFailures(syncReports, payloadDiagnostics),
+        payload,
+      }
     }
-    const characterUpdates = asArray(payload?.character_updates || payload?.characterUpdates)
-    const settingUpdates = asArray(payload?.setting_updates || payload?.settingUpdates)
-    const storylineUpdates = asArray(payload?.storyline_updates || payload?.storylineUpdates)
-    const [assetCharacters, assetSettings] = await Promise.all([
-      listNovelCharacters(activeWorkspace, project.id),
-      listNovelSettingEntities(activeWorkspace, project.id),
-    ])
-    const discoveredAssets = normalizeDiscoveredAssets(asArray(payload?.discovered_assets || payload?.discoveredAssets), {
-      existingCharacters: assetCharacters,
-      existingSettings: assetSettings,
-      chapter,
-    })
-    const syncReports = {
-      character_state_delta_sync: buildCharacterStateDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint, characterUpdates),
-      asset_state_delta_sync: buildAssetStateDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint, settingUpdates, discoveredAssets),
-      chapter_handoff_delta_sync: buildChapterHandoffDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint),
-      timeline_delta_sync: buildTimelineDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint, settingUpdates),
-      state_delta_completeness: buildStateDeltaCompletenessReport(chapter, chapterText, stateDeltaWithStyleFingerprint, {
-        settingUpdates,
-        characterUpdates,
-        storylineUpdates,
-        discoveredAssets,
-        foreshadowingStatus: payload?.foreshadowing_status || payload?.foreshadowingStatus || {},
-      }),
+
+    const runAgentOnce = async (maxTokens: number) => {
+      throwIfAborted(options)
+      return executeAgent('review-agent', project, {
+        task: buildStoryStatePrompt(project, contextPackage, chapterText),
+      }, {
+        activeWorkspace,
+        modelId: stageModelId ? String(stageModelId) : undefined,
+        maxTokens,
+        temperature: ctx.production.getStageTemperature(project, 'review', 0.15),
+        skipMemory: true,
+        signal: options.abortSignal,
+        timeoutMs: options.llmTimeoutMs,
+      })
     }
-    payload.style_fingerprint = stateDeltaWithStyleFingerprint.style_fingerprint
-    payload.style_fingerprint_contract = stateDeltaWithStyleFingerprint.style_fingerprint_contract
-    Object.assign(payload, syncReports)
-    const finishReason = rejectedProseTransportFinishReason(result)
-      || String(diagnostics.finish_reason || '').toLowerCase()
-    const validStateFields = [
-      'current_time', 'currentTime', 'character_positions', 'characterPositions', 'character_relationships', 'characterRelationships',
-      'relationship_graph', 'relationshipGraph', 'known_secrets', 'knownSecrets', 'secret_visibility', 'secretVisibility',
-      'item_ownership', 'itemOwnership', 'resource_status', 'resourceStatus', 'foreshadowing_status', 'foreshadowingStatus',
-      'payoff_queue', 'payoffQueue', 'active_locations', 'activeLocations', 'open_questions', 'openQuestions',
-      'next_chapter_priorities', 'nextChapterPriorities', 'timeline', 'progress_summary', 'progressSummary',
-    ]
-    const payloadDiagnostics = {
-      invalid_payload: !payload || typeof payload !== 'object' || Array.isArray(payload)
-        || !rawStateDelta || typeof rawStateDelta !== 'object' || Array.isArray(rawStateDelta)
-        || !validStateFields.some(key => Object.prototype.hasOwnProperty.call(rawStateDelta, key)),
-      transport_incomplete: Boolean(finishReason)
-        && ['length', 'incomplete', 'max_tokens', 'content_filter', 'tool', 'tool_calls'].some(reason => String(finishReason).includes(reason))
-        || hasProseTransportIncompleteDetails(result),
+
+    const primaryMaxTokens = Number(options.maxTokens || options.max_tokens || 4500) || 4500
+    let prepared = await buildFromAgentResult(await runAgentOnce(primaryMaxTokens))
+    const hasTransportBlock = (item: PreparedStoryStateUpdate) => item.hard_failures.some((failure: any) => (
+      failure?.key === 'story_state_invalid_payload' || failure?.key === 'story_state_transport_incomplete'
+    ))
+    const shouldRetry = options.retryOnBlockedTransport === true && hasTransportBlock(prepared)
+    if (shouldRetry) {
+      const retryMaxTokens = Math.max(primaryMaxTokens + 1500, 6000)
+      prepared = await buildFromAgentResult(await runAgentOnce(retryMaxTokens))
+      prepared.payload = {
+        ...(prepared.payload || {}),
+        story_state_prepare_retry: true,
+        story_state_prepare_retry_max_tokens: retryMaxTokens,
+      }
     }
-    return {
-      state_delta: stateDeltaWithStyleFingerprint,
-      next_reference_config: nextReferenceConfig,
-      character_updates: characterUpdates,
-      setting_updates: settingUpdates,
-      storyline_updates: storylineUpdates,
-      sync_reports: syncReports,
-      hard_failures: buildPreparedStoryStateHardFailures(syncReports, payloadDiagnostics),
-      payload,
+    // Manual/cockpit sync can fall back to a minimal handoff delta so last_updated_chapter still advances.
+    if (options.allowDeterministicFallback === true && hasTransportBlock(prepared)) {
+      const endingHook = String(chapter?.ending_hook || chapter?.endingHook || '').trim()
+      const summary = String(chapter?.chapter_summary || chapter?.chapterSummary || chapter?.chapter_goal || chapter?.chapterGoal || chapter?.title || '').trim()
+      const deterministicDelta = {
+        open_questions: endingHook ? [endingHook] : [],
+        next_chapter_priorities: [endingHook, summary].filter(Boolean),
+        progress_summary: {
+          last_completed_chapter: Number(chapter?.chapter_no || 0) || null,
+          notes: summary || endingHook || `第${chapter?.chapter_no || '?'}章正文已写，状态机使用确定性回退更新。`,
+        },
+      }
+      const styleFingerprintSnapshot = buildStyleFingerprintStateSnapshot(contextPackage, project, project.reference_config?.story_state || {})
+      const stateDeltaWithStyleFingerprint = styleFingerprintSnapshot
+        ? { ...normalizeStoryStateDeltaForStorage(deterministicDelta), ...styleFingerprintSnapshot }
+        : normalizeStoryStateDeltaForStorage(deterministicDelta)
+      const nextReferenceConfig = {
+        ...(project.reference_config || {}),
+        story_state: mergeStoryState(project.reference_config?.story_state || {}, stateDeltaWithStyleFingerprint, chapter),
+      }
+      const syncReports = {
+        character_state_delta_sync: buildCharacterStateDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint, []),
+        asset_state_delta_sync: buildAssetStateDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint, [], []),
+        chapter_handoff_delta_sync: buildChapterHandoffDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint),
+        timeline_delta_sync: buildTimelineDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint, []),
+        state_delta_completeness: buildStateDeltaCompletenessReport(chapter, chapterText, stateDeltaWithStyleFingerprint, {
+          settingUpdates: [],
+          characterUpdates: [],
+          storylineUpdates: [],
+          discoveredAssets: [],
+          foreshadowingStatus: {},
+        }),
+      }
+      const softFailures = buildPreparedStoryStateHardFailures(syncReports, { invalid_payload: false, transport_incomplete: false })
+      prepared = {
+        state_delta: stateDeltaWithStyleFingerprint,
+        next_reference_config: nextReferenceConfig,
+        character_updates: [],
+        setting_updates: [],
+        storyline_updates: [],
+        sync_reports: syncReports,
+        hard_failures: softFailures,
+        payload: {
+          ...(prepared.payload || {}),
+          state_delta: stateDeltaWithStyleFingerprint,
+          ...syncReports,
+          story_state_deterministic_fallback: true,
+          story_state_prepare_retry: Boolean(prepared.payload?.story_state_prepare_retry),
+          previous_hard_failures: prepared.hard_failures,
+        },
+      }
     }
+    return prepared
   }
 
   const updateStoryStateMachine = async (activeWorkspace: string, project: any, chapter: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
-    const prepared: PreparedStoryStateUpdate = options.prepared || await prepareStoryStateUpdate(activeWorkspace, project, chapter, contextPackage, chapterText, modelId, options)
-    if (prepared.hard_failures.length) {
-      throw Object.assign(new Error('故事状态准备阶段未通过'), { code: 'STORY_STATE_PREPARE_BLOCKED', hard_failures: prepared.hard_failures })
+    const prepared: PreparedStoryStateUpdate = options.prepared || await prepareStoryStateUpdate(activeWorkspace, project, chapter, contextPackage, chapterText, modelId, {
+      ...options,
+      allowDeterministicFallback: options.allowDeterministicFallback !== false,
+      retryOnBlockedTransport: options.retryOnBlockedTransport !== false,
+    })
+    const blockingFailures = blockingPreparedStoryStateHardFailures(prepared.hard_failures)
+    if (blockingFailures.length) {
+      const summary = formatPreparedStoryStateFailureSummary(blockingFailures) || '故事状态准备阶段未通过'
+      throw Object.assign(new Error(summary), {
+        code: 'STORY_STATE_PREPARE_BLOCKED',
+        hard_failures: prepared.hard_failures,
+        blocking_hard_failures: blockingFailures,
+      })
     }
     const payload = prepared.payload
     const stateDelta = prepared.state_delta
     const nextReferenceConfig = prepared.next_reference_config
+    if (prepared.hard_failures.length) {
+      payload.soft_hard_failures = prepared.hard_failures
+      payload.story_state_applied_with_warnings = true
+    }
     await updateNovelProject(activeWorkspace, project.id, { reference_config: nextReferenceConfig } as any)
     payload.style_fingerprint = stateDelta.style_fingerprint
     payload.style_fingerprint_contract = stateDelta.style_fingerprint_contract
@@ -42498,6 +42749,37 @@ export function createNovelWritingService(ctx: {
     }))
     payload.runway_sync = runwaySync
     await createNovelReview(activeWorkspace, buildStoryStateReviewRecord({ projectId: project.id, chapter, payload }))
+    try {
+      const chapterId = Number(chapter?.id || 0)
+      if (chapterId) {
+        const existingAdmission = (chapter?.raw_payload && typeof chapter.raw_payload === 'object' ? chapter.raw_payload.prose_admission : null)
+          || (chapter?.raw_payload && typeof chapter.raw_payload === 'object' ? chapter.raw_payload.proseAdmission : null)
+          || {}
+        const nextAdmission = {
+          ...(existingAdmission && typeof existingAdmission === 'object' ? existingAdmission : {}),
+          story_state_status: 'synced',
+          story_state_warning: prepared.hard_failures.length
+            ? { hard_failures: prepared.hard_failures, soft: true }
+            : null,
+        }
+        await mergeNovelChapterRawPayload(activeWorkspace, chapterId, {
+          prose_admission: nextAdmission,
+          proseAdmission: nextAdmission,
+        })
+      }
+    } catch {
+      // manual sync still succeeds even if chapter admission flag cannot be patched
+    }
+    try {
+      await refreshFollowingChapterSerialStoryStateReadiness(
+        activeWorkspace,
+        project.id,
+        Number(chapter?.chapter_no || 0),
+        Number(chapter?.chapter_no || 0),
+      )
+    } catch {
+      // cache refresh is best-effort; live preflight reconcile is the source of truth
+    }
     return payload
   }
 
@@ -44824,7 +45106,21 @@ export function createNovelWritingService(ctx: {
   const autoRepairChapterPreflightGaps = async (activeWorkspace: string, project: any, chapter: any, contextPackage: any, modelId?: number, options: any = {}) => {
     const persist = options.persist !== false
     const checks = Array.isArray(contextPackage?.preflight?.checks) ? contextPackage.preflight.checks : []
-    const missingKeys = checks.filter((item: any) => !item.ok).map((item: any) => String(item.key || '')).filter(Boolean)
+    const blockers = asArray(contextPackage?.preflight?.blockers)
+    const warnings = asArray(contextPackage?.preflight?.warnings)
+    const warningCorpus = [
+      ...checks.filter((item: any) => !item.ok).map((item: any) => `${item.key || ''} ${item.label || ''} ${item.fix || ''} ${item.evidence || ''}`),
+      ...blockers.map((item: any) => `${item?.key || ''} ${item?.label || ''} ${item?.fix || ''} ${item?.evidence || ''} ${item || ''}`),
+      ...warnings.map((item: any) => String(item || '')),
+    ].join('；')
+    const missingKeys = Array.from(new Set([
+      ...checks.filter((item: any) => !item.ok).map((item: any) => String(item.key || '')).filter(Boolean),
+      ...blockers.map((item: any) => String(item?.key || '')).filter(Boolean),
+      ...(/蓝图|细纲|target_emotion|人物出场|character_order|opening_hook|core_payoff/.test(warningCorpus) ? ['chapter_blueprint', 'source_readiness_chapter_blueprint'] : []),
+      ...(/source_paths_missing|文风召回|benchmark_recall|style_sample|样章/.test(warningCorpus) ? ['benchmark_recall_source_paths', 'benchmark_recall_gate'] : []),
+      ...(/追踪\/?时间线|timeline_tracking|时间线\.md/.test(warningCorpus) ? ['source_readiness_timeline_tracking'] : []),
+      ...(/场景卡|scene_card|goal_obstacle/.test(warningCorpus) ? ['scene_cards', 'source_readiness_scene_card_goal_obstacle_change'] : []),
+    ].filter(Boolean)))
     const repaired: any[] = []
     const errors: string[] = []
     const stagedChapterPatch: any = {}
@@ -45719,6 +46015,43 @@ export function createNovelWritingService(ctx: {
         ? { writePreparationBrief: finalWritePreparationBrief }
         : {}),
     }
+    // Keep returned context_package aligned with the repaired brief/contracts. buildChapterContextPackage
+    // above still saw the pre-repair snapshot; without this handoff, cockpit generate reuses stale
+    // write_preparation_brief + launch-gate blockers after material_repair.
+    const repairedContextPackage = {
+      ...finalContextPackage,
+      pre_draft_brief: {
+        ...(finalContextPackage?.pre_draft_brief || {}),
+        ...finalStoredPreDraftBrief,
+      },
+      ...(finalContextPackage?.preDraftBrief !== undefined ? {
+        preDraftBrief: {
+          ...(finalContextPackage?.preDraftBrief || {}),
+          ...finalStoredPreDraftBrief,
+        },
+      } : {}),
+      write_preparation_brief: finalWritePreparationBrief,
+      chapter_target: {
+        ...(finalContextPackage?.chapter_target || {}),
+        state_tracking_contract: finalStateTrackingContract,
+        write_preparation_brief: finalWritePreparationBrief,
+        ...(finalContextPackage?.chapter_target?.stateTrackingContract !== undefined
+          ? { stateTrackingContract: finalStateTrackingContract }
+          : {}),
+        ...(finalContextPackage?.chapter_target?.writePreparationBrief !== undefined
+          ? { writePreparationBrief: finalWritePreparationBrief }
+          : {}),
+      },
+    }
+    if (repairedContextPackage?.preflight) {
+      applySourceReadinessPreflightChecks(repairedContextPackage.preflight, {
+        ...repairedContextPackage,
+        chapter_target: {
+          ...(repairedContextPackage.chapter_target || {}),
+          state_tracking_contract: finalStateTrackingContract,
+        },
+      })
+    }
     const latestFinalChapter = persist
       ? (await listNovelChapters(activeWorkspace, project.id)).find(item => item.id === finalChapter.id) || finalChapter
       : finalChapter
@@ -45753,7 +46086,7 @@ export function createNovelWritingService(ctx: {
       worldbuilding: finalWorldbuilding,
       characters: finalCharacters,
       settings: latestSettings,
-      context_package: finalContextPackage,
+      context_package: repairedContextPackage,
       staged_worldbuilding_creates: stagedWorldbuildingCreates,
       staged_character_creates: stagedCharacterCreates,
       staged_setting_creates: stagedSettingCreates,
@@ -45897,7 +46230,24 @@ export function createNovelWritingService(ctx: {
         ctx.runtime?.buildChapterContext ? await buildGenerationContext() : repairResult.context_package,
         wordTarget,
       )
-      preparedGeneration = prepareProseGenerationContract(repairedContextPackage, options)
+      const repairedWritePrep = repairedContextPackage?.chapter_target?.write_preparation_brief
+        || repairedContextPackage?.chapter_target?.writePreparationBrief
+        || repairedContextPackage?.pre_draft_brief?.write_preparation_brief
+        || repairedContextPackage?.write_preparation_brief
+      const repairedWritePrepReady = ['ready', 'ok', 'pass'].includes(String(
+        repairedWritePrep?.readiness_status
+        || repairedWritePrep?.readinessStatus
+        || '',
+      ).toLowerCase())
+      const postRepairOptions = repairedWritePrepReady
+        ? {
+            ...(options || {}),
+            // Drop stale cockpit launch-gate snapshots after local material repair succeeded.
+            chapter_launch_gate: undefined,
+            chapterLaunchGate: undefined,
+          }
+        : options
+      preparedGeneration = prepareProseGenerationContract(repairedContextPackage, postRepairOptions)
       contextPackage = preparedGeneration.contextPackage
       if (contextPackage?.setting_context?.auto_matched) stagedContextUsageReplacement = asArray(contextPackage.setting_context.chapter_usage)
       generationContract = preparedGeneration.contract

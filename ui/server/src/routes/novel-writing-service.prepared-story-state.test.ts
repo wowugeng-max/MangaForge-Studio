@@ -689,4 +689,112 @@ describe('prepareStoryStateUpdate', () => {
     ])
     expect((await listNovelReviews(harness.workspace, harness.project.id)).some(review => review.review_type === 'unattended_preflight_repair')).toBe(false)
   })
+
+  test('manual story-state update applies soft planned-delta misses and deterministic fallback unblocks invalid payload', async () => {
+    const project = await createNovelProject(workspace, {
+      title: '状态机回退测试',
+      genre: '仙侠',
+      status: 'draft',
+      reference_config: { story_state: { last_updated_chapter: 10, open_questions: ['旧问题'] } },
+    } as any)
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 11,
+      title: '山路截杀',
+      chapter_goal: '第一场移动战',
+      chapter_summary: '江哲离开熟悉地点',
+      ending_hook: '截杀者带着主角熟悉却变形的知识。',
+      chapter_text: '江哲冲出山路，截杀者的刀光贴着耳际掠过。',
+      status: 'draft',
+    } as any)
+
+    // soft miss only: valid state_delta but missing planned character change
+    const softPrepared: any = {
+      state_delta: {
+        open_questions: ['下一章追查截杀者'],
+        next_chapter_priorities: ['接住山路截杀的钩子'],
+        progress_summary: { notes: '第11章已完成' },
+      },
+      next_reference_config: {
+        ...(project.reference_config || {}),
+        story_state: {
+          ...(project.reference_config?.story_state || {}),
+          open_questions: ['下一章追查截杀者'],
+          next_chapter_priorities: ['接住山路截杀的钩子'],
+          progress_summary: { notes: '第11章已完成' },
+          last_updated_chapter: 11,
+        },
+      },
+      character_updates: [],
+      setting_updates: [],
+      storyline_updates: [],
+      sync_reports: {
+        character_state_delta_sync: { missed: [{ name: '江哲', text: '主角' }], planned_count: 1, recorded_count: 0 },
+        asset_state_delta_sync: { missed: [], planned_count: 0, recorded_count: 0 },
+        chapter_handoff_delta_sync: { missed: [], planned_count: 0, recorded_count: 0 },
+        timeline_delta_sync: { missed: [], planned_count: 0, recorded_count: 0 },
+        state_delta_completeness: { planned_count: 0, missed_count: 0, missed: [], blocking_missed: [] },
+      },
+      hard_failures: [{
+        key: 'character_state_delta_sync',
+        message: '本章计划的关键状态变化未记录：character_state_delta_sync',
+        source: 'story_state',
+        details: [{ name: '江哲', text: '主角' }],
+      }],
+      payload: {
+        state_delta: {
+          open_questions: ['下一章追查截杀者'],
+          next_chapter_priorities: ['接住山路截杀的钩子'],
+          progress_summary: { notes: '第11章已完成' },
+        },
+      },
+    }
+    const softService = createService({ parsed: softPrepared.payload, finish_reason: 'stop' })
+    const softPayload = await softService.updateStoryStateMachine(
+      workspace,
+      project,
+      chapter,
+      { chapter_target: { state_tracking_contract: { character_states: [{ name: '江哲', text: '主角' }] } } },
+      String(chapter.chapter_text || ''),
+      217,
+      { prepared: softPrepared },
+    )
+    expect(softPayload.story_state_applied_with_warnings).toBe(true)
+    expect(softPayload.soft_hard_failures?.length).toBeGreaterThan(0)
+    let fresh = await getNovelProject(workspace, project.id)
+    expect(Number(fresh?.reference_config?.story_state?.last_updated_chapter || 0)).toBe(11)
+
+    // invalid payload: update path retries then falls back deterministically
+    let calls = 0
+    const fallbackService = createNovelWritingService({
+      getProject: async () => null,
+      production: { getStageModelId: () => 217, getStageTemperature: (_p: any, _s: string, f: number) => f } as any,
+      reference: {} as any,
+      runtime: {
+        executeAgent: async () => {
+          calls += 1
+          return { parsed: { state_delta: {} }, finish_reason: 'stop' }
+        },
+      },
+    })
+    await updateNovelProject(workspace, project.id, {
+      reference_config: { story_state: { last_updated_chapter: 10, open_questions: ['旧问题'] } },
+    } as any)
+    const latestProject = await getNovelProject(workspace, project.id)
+    const payload = await fallbackService.updateStoryStateMachine(
+      workspace,
+      latestProject,
+      chapter,
+      {},
+      String(chapter.chapter_text || ''),
+      217,
+    )
+    expect(calls).toBe(2)
+    expect(payload.story_state_deterministic_fallback).toBe(true)
+    fresh = await getNovelProject(workspace, project.id)
+    expect(Number(fresh?.reference_config?.story_state?.last_updated_chapter || 0)).toBe(11)
+    expect(Array.isArray(fresh?.reference_config?.story_state?.open_questions)).toBe(true)
+    expect(String(fresh?.reference_config?.story_state?.open_questions?.[0] || '')).toContain('截杀者')
+  })
+
 })

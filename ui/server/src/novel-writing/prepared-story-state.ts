@@ -82,3 +82,31 @@ export function buildPreparedStoryStateHardFailures(
   }
   return failures
 }
+
+const BLOCKING_PREPARED_STORY_STATE_KEYS = new Set([
+  'story_state_invalid_payload',
+  'story_state_transport_incomplete',
+])
+
+/** Failures that must stop persistence. Planned-delta misses remain hard for prose admission, but manual sync can still advance last_updated_chapter with soft warnings. */
+export function isBlockingPreparedStoryStateFailure(failure: PreparedStoryStateFailure | null | undefined): boolean {
+  const key = String(failure?.key || '')
+  return BLOCKING_PREPARED_STORY_STATE_KEYS.has(key)
+}
+
+export function blockingPreparedStoryStateHardFailures(
+  failures: PreparedStoryStateFailure[] = [],
+): PreparedStoryStateFailure[] {
+  return (Array.isArray(failures) ? failures : []).filter(isBlockingPreparedStoryStateFailure)
+}
+
+export function formatPreparedStoryStateFailureSummary(
+  failures: PreparedStoryStateFailure[] = [],
+  limit = 3,
+): string {
+  const messages = (Array.isArray(failures) ? failures : [])
+    .map(item => String(item?.message || item?.key || '').trim())
+    .filter(Boolean)
+  if (!messages.length) return ''
+  return messages.slice(0, Math.max(1, limit)).join('；')
+}

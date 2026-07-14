@@ -81,13 +81,23 @@ function recoverPartialProseJsonPayload(value: any) {
   for (const candidate of candidates) {
     let partialJsonOpenStringRecovered = false
     let chapterText = readClosedJsonStringField(candidate, 'chapter_text')
-    if (!chapterText) {
-      chapterText = readOpenJsonStringField(candidate, 'chapter_text')
-      partialJsonOpenStringRecovered = Boolean(chapterText)
+    // Closed parse can stop early on unescaped quotes; only then use structural end markers.
+    if (compactLen(chapterText) < 200) {
+      chapterText = pickLongestText([
+        chapterText,
+        recoverStructuredJsonStringField(candidate, 'chapter_text'),
+      ])
     }
-    if (!chapterText || chapterText.replace(/\s/g, '').length < 200) continue
+    if (compactLen(chapterText) < 200) {
+      const openText = readOpenJsonStringField(candidate, 'chapter_text')
+      if (compactLen(openText) > compactLen(chapterText)) {
+        chapterText = openText
+        partialJsonOpenStringRecovered = Boolean(openText)
+      }
+    }
+    if (!chapterText || compactLen(chapterText) < 200) continue
     const chapterNo = readJsonNumberField(candidate, 'chapter_no') || readJsonNumberField(candidate, 'chapterNo')
-    const title = readClosedJsonStringField(candidate, 'title')
+    const title = readClosedJsonStringField(candidate, 'title') || recoverStructuredJsonStringField(candidate, 'title')
     return {
       recovered_from_partial_json: true,
       partial_json_open_string_recovered: partialJsonOpenStringRecovered,
@@ -104,6 +114,16 @@ function recoverPartialProseJsonPayload(value: any) {
   return null
 }
 
+function compactLen(value: string) {
+  return String(value || '').replace(/\s/g, '').length
+}
+
+function pickLongestText(values: Array<string | null | undefined>) {
+  return values
+    .map(value => String(value || ''))
+    .sort((left, right) => right.length - left.length)[0] || ''
+}
+
 function readJsonNumberField(text: string, field: string) {
   const match = new RegExp(`"${field}"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)`).exec(text)
   return match ? Number(match[1]) : 0
@@ -112,12 +132,30 @@ function readJsonNumberField(text: string, field: string) {
 function readClosedJsonStringField(text: string, field: string) {
   const regex = new RegExp(`"${field}"\\s*:\\s*"`, 'g')
   let match: RegExpExecArray | null
+  let best = ''
   while ((match = regex.exec(text))) {
     const quoteIndex = match.index + match[0].length - 1
     const parsed = readClosedJsonStringAt(text, quoteIndex)
-    if (parsed) return parsed
+    if (parsed && parsed.length > best.length) best = parsed
   }
-  return ''
+  return best
+}
+
+function recoverStructuredJsonStringField(text: string, field: string) {
+  const regex = new RegExp(`"${field}"\\s*:\\s*"`, 'g')
+  let match: RegExpExecArray | null
+  let best = ''
+  while ((match = regex.exec(text))) {
+    const start = match.index + match[0].length
+    const rest = text.slice(start)
+    const endRegex = /"(?:\s*,\s*"(?:scene_breakdown|continuity_notes|expansion_blueprint_patch|chapter_summary|chapter_no|title|chapter_text)"|\s*\}\s*(?:,|\]|$)|\s*\]\s*(?:,|\}|$))/g
+    const endMatch = endRegex.exec(rest)
+    // First structural terminator is the chapter_text closer; later JSON fields can look similar.
+    if (!endMatch) continue
+    const decoded = decodeJsonStringFragment(rest.slice(0, endMatch.index))
+    if (decoded.length > best.length) best = decoded
+  }
+  return best
 }
 
 function readClosedJsonStringAt(text: string, quoteIndex: number) {
@@ -134,10 +172,12 @@ function readClosedJsonStringAt(text: string, quoteIndex: number) {
       continue
     }
     if (char === '"') {
+      const slice = text.slice(quoteIndex, i + 1)
       try {
-        return JSON.parse(text.slice(quoteIndex, i + 1))
+        return JSON.parse(slice)
       } catch {
-        return ''
+        // Closed-but-invalid JSON strings (raw newlines / bad escapes) still carry prose.
+        return decodeJsonStringFragment(text.slice(quoteIndex + 1, i))
       }
     }
   }

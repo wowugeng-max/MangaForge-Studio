@@ -446,16 +446,54 @@ function compactJsonPayloadForStorage(value: any, key = '', seen = new WeakSet<o
   return output
 }
 
+function extractPersistedAdmissionSummary(value: any): Record<string, any> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const chapter = value.chapter && typeof value.chapter === 'object' ? value.chapter : null
+  const proseAdmission = value.prose_admission || value.proseAdmission
+    || (chapter?.raw_payload && typeof chapter.raw_payload === 'object' ? chapter.raw_payload.prose_admission || chapter.raw_payload.proseAdmission : null)
+    || null
+  const admissionStatus = value.admission_status || value.admissionStatus
+    || proseAdmission?.status || proseAdmission?.admission_status || proseAdmission?.admissionStatus || ''
+  const summary: Record<string, any> = {}
+  const chapterId = value.chapter_id ?? value.chapterId ?? chapter?.id
+  const chapterNo = value.chapter_no ?? value.chapterNo ?? chapter?.chapter_no ?? chapter?.chapterNo
+  if (chapterId !== undefined && chapterId !== null && chapterId !== '') summary.chapter_id = Number(chapterId) || chapterId
+  if (chapterNo !== undefined && chapterNo !== null && chapterNo !== '') summary.chapter_no = Number(chapterNo) || chapterNo
+  if (admissionStatus) summary.admission_status = String(admissionStatus)
+  const qualityScore = value.quality_score ?? value.qualityScore ?? proseAdmission?.quality_score ?? proseAdmission?.qualityScore
+  if (qualityScore !== undefined && qualityScore !== null && qualityScore !== '') summary.quality_score = qualityScore
+  const qualityWarnings = value.quality_warnings || value.qualityWarnings || proseAdmission?.quality_warnings || proseAdmission?.qualityWarnings
+  if (Array.isArray(qualityWarnings) && qualityWarnings.length) summary.quality_warnings = qualityWarnings.slice(0, 8)
+  const storyStateStatus = value.story_state_status || value.storyStateStatus
+    || proseAdmission?.story_state_status || proseAdmission?.storyStateStatus || ''
+  if (storyStateStatus) summary.story_state_status = String(storyStateStatus)
+  if (proseAdmission && typeof proseAdmission === 'object') {
+    summary.prose_admission = {
+      status: proseAdmission.status || proseAdmission.admission_status || proseAdmission.admissionStatus || admissionStatus || '',
+      quality_score: proseAdmission.quality_score ?? proseAdmission.qualityScore ?? qualityScore ?? null,
+      quality_warnings: Array.isArray(proseAdmission.quality_warnings || proseAdmission.qualityWarnings)
+        ? (proseAdmission.quality_warnings || proseAdmission.qualityWarnings).slice(0, 8)
+        : [],
+      story_state_status: proseAdmission.story_state_status || proseAdmission.storyStateStatus || storyStateStatus || '',
+    }
+  }
+  return summary
+}
+
 function compactPersistedText(value: any, maxChars = MAX_PERSISTED_DIAGNOSTIC_CHARS) {
   const text = String(value ?? '')
   if (!text) return ''
   const trimmed = text.trim()
   if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
     try {
-      const compacted = compactJsonPayloadForStorage(JSON.parse(trimmed))
+      const parsed = JSON.parse(trimmed)
+      const compacted = compactJsonPayloadForStorage(parsed)
       const compactedText = safeJsonText(compacted)
       if (compactedText.length <= maxChars) return compactedText
+      // Keep admission/chapter identity at the top level so later UI can read it after storage truncation.
       return safeJsonText({
+        ...extractPersistedAdmissionSummary(parsed),
+        ...extractPersistedAdmissionSummary(compacted),
         truncated: true,
         reason: 'storage_compaction',
         original_chars: compactedText.length,
@@ -2294,7 +2332,7 @@ export async function syncNovelChapterPlanByNumber(activeWorkspace: string, data
     return { outline, chapter }
   })
 }
-type UpdateNovelChapterOptions = { createVersion?: boolean; versionSource?: NovelChapterVersionSource; forceVersion?: boolean }
+type UpdateNovelChapterOptions = { createVersion?: boolean; versionSource?: NovelChapterVersionSource; forceVersion?: boolean; allowEmptyProse?: boolean }
 export type NovelChapterAcceptanceUpdate = {
   id?: number
   name?: string
@@ -2341,7 +2379,39 @@ export async function listChapterVersions(activeWorkspace: string, chapterId: nu
   }
 }
 export async function rollbackChapterVersion(activeWorkspace: string, chapterId: number, versionId: number) { return mutateNovelStore(activeWorkspace, store => { const idx = store.chapters.findIndex(item => item.id === chapterId); const version = store.chapter_versions.find(item => item.id === versionId && item.chapter_id === chapterId); if (idx < 0 || !version) return null; const current = store.chapters[idx]; store.chapter_versions.push(createChapterVersionRecord(store, { chapter_id: current.id, project_id: current.project_id, version_no: store.chapter_versions.filter(v => v.chapter_id === current.id).length + 1, chapter_text: current.chapter_text || '', scene_breakdown: current.scene_breakdown || [], continuity_notes: current.continuity_notes || [], source: 'rollback' })); store.chapters[idx] = { ...current, chapter_text: version.chapter_text, scene_breakdown: version.scene_breakdown || [], continuity_notes: version.continuity_notes || [], updated_at: nowIso() }; return store.chapters[idx] }) }
-export async function updateNovelChapter(activeWorkspace: string, chapterId: number, data: Partial<NovelChapterRecord>, options: UpdateNovelChapterOptions = {}) { return mutateNovelStore(activeWorkspace, store => { const idx = store.chapters.findIndex(item => item.id === chapterId); if (idx < 0) return null; const current = store.chapters[idx]; const updated = normalizeChapterRecord(data, { ...current, id: current.id, updated_at: nowIso() }); const next = { ...current, ...updated, updated_at: nowIso() }; const shouldCreateVersion = options.createVersion !== false && (options.forceVersion || versionedChapterSnapshotChanged(current, next)); if (shouldCreateVersion) store.chapter_versions.push(createChapterVersionRecord(store, { chapter_id: current.id, project_id: current.project_id, version_no: store.chapter_versions.filter(v => v.chapter_id === current.id).length + 1, chapter_text: current.chapter_text || '', scene_breakdown: current.scene_breakdown || [], continuity_notes: current.continuity_notes || [], source: options.versionSource || 'manual_edit' })); store.chapters[idx] = next; return store.chapters[idx] }) }
+export async function updateNovelChapter(activeWorkspace: string, chapterId: number, data: Partial<NovelChapterRecord>, options: UpdateNovelChapterOptions = {}) {
+  return mutateNovelStore(activeWorkspace, store => {
+    const idx = store.chapters.findIndex(item => item.id === chapterId)
+    if (idx < 0) return null
+    const current = store.chapters[idx]
+    const patch: Partial<NovelChapterRecord> = { ...data }
+    /* Guard accidental empty autosave wipes: blank chapter_text must not replace existing prose for manual_edit unless allowEmptyProse. */
+    if (patch.chapter_text !== undefined) {
+      const nextText = String(patch.chapter_text || '')
+      const currentText = String(current.chapter_text || '')
+      const wiping = !nextText.replace(/\s/g, '') && Boolean(currentText.replace(/\s/g, ''))
+      if (wiping && !options.allowEmptyProse && (options.versionSource || 'manual_edit') === 'manual_edit') {
+        delete (patch as any).chapter_text
+      }
+    }
+    const updated = normalizeChapterRecord(patch, { ...current, id: current.id, updated_at: nowIso() })
+    const next = { ...current, ...updated, updated_at: nowIso() }
+    const shouldCreateVersion = options.createVersion !== false && (options.forceVersion || versionedChapterSnapshotChanged(current, next))
+    if (shouldCreateVersion) {
+      store.chapter_versions.push(createChapterVersionRecord(store, {
+        chapter_id: current.id,
+        project_id: current.project_id,
+        version_no: store.chapter_versions.filter(v => v.chapter_id === current.id).length + 1,
+        chapter_text: current.chapter_text || '',
+        scene_breakdown: current.scene_breakdown || [],
+        continuity_notes: current.continuity_notes || [],
+        source: options.versionSource || 'manual_edit',
+      }))
+    }
+    store.chapters[idx] = next
+    return store.chapters[idx]
+  })
+}
 export async function mergeNovelChapterRawPayload(activeWorkspace: string, chapterId: number, patch: Record<string, any>) {
   return withNovelWorkspaceMutation(activeWorkspace, async () => {
   const db = openDb(activeWorkspace)

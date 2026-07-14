@@ -708,6 +708,62 @@ function ChapterPlanningDesk({
   )
 }
 
+
+function StoryStateSyncBanner({
+  model,
+  loading,
+  onAction,
+}: {
+  model: WritingCockpitModel
+  loading: boolean
+  onAction: (key: WritingCockpitActionKey) => void
+}) {
+  const panel = model.chapterAcceptanceDesk.storyStatePanel
+  if (!panel?.visible || panel.status === 'synced') return null
+  return (
+    <Alert
+      type={panel.status === 'synced_with_gaps'
+        ? 'warning'
+        : panel.status === 'skipped'
+          ? 'info'
+          : 'warning'}
+      showIcon
+      style={{ marginTop: 2 }}
+      message={panel.headline}
+      description={(
+        <Space direction="vertical" size={6} style={{ width: '100%' }}>
+          <Text style={wrapTextStyle}>{panel.summary}</Text>
+          <Text type="secondary" style={wrapTextStyle}>
+            状态机进度：第 {panel.lastUpdatedChapter || 0} 章
+            {panel.chapterNo ? ` ｜ 当前正文：第 ${panel.chapterNo} 章` : ''}
+          </Text>
+          {panel.reasons.length > 0 && (
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {panel.reasons.slice(0, 4).map(reason => (
+                <li key={reason}><Text style={wrapTextStyle}>{reason}</Text></li>
+              ))}
+            </ul>
+          )}
+          <Text type="secondary" style={wrapTextStyle}>{panel.guidance}</Text>
+          {panel.primaryAction && (
+            <div>
+              <Button
+                type="primary"
+                size="small"
+                loading={loading}
+                icon={actionIcon(panel.primaryAction.key, model.modelTeam.recommendedRole)}
+                onClick={() => onAction(panel.primaryAction!.key)}
+              >
+                {panel.primaryAction.label}
+              </Button>
+            </div>
+          )}
+        </Space>
+      )}
+    />
+  )
+}
+
 function ChapterAcceptanceDesk({
   model,
   loading,
@@ -738,7 +794,16 @@ function ChapterAcceptanceDesk({
             <Space wrap size={[6, 4]}>
               <Tag color={acceptanceColor(desk.acceptanceStatus)} bordered={false}>{desk.statusLabel}</Tag>
               <Tag bordered={false}>质量：{qualityScoreText(desk.qualityScore)}</Tag>
-              <Tag bordered={false}>故事状态：{desk.storyStateSynced ? '已同步' : '待同步'}</Tag>
+              <Tag
+                color={desk.storyStatePanel?.status === 'synced'
+                  ? 'green'
+                  : desk.storyStatePanel?.status === 'synced_with_gaps'
+                    ? 'gold'
+                    : desk.storyStateSynced ? 'green' : 'orange'}
+                bordered={false}
+              >
+                故事状态：{desk.storyStatePanel?.statusLabel || (desk.storyStateSynced ? '已同步' : '待同步')}
+              </Tag>
               {desk.coreDrift && <Tag color={desk.coreDrift.status === 'ok' ? 'green' : 'gold'} bordered={false}>{desk.coreDrift.label}</Tag>}
               {desk.readerPayoffSync && <Tag color={desk.readerPayoffSync.status === 'ok' ? 'green' : 'gold'} bordered={false}>{desk.readerPayoffSync.label}</Tag>}
             </Space>
@@ -751,19 +816,82 @@ function ChapterAcceptanceDesk({
               <Button size="small" onClick={() => setExpanded(value => !value)}>
                 {expanded ? '收起交稿台' : '展开交稿台'}
               </Button>
-              <Button
-                type={desk.acceptanceStatus === 'ready_to_accept' ? 'primary' : 'default'}
-                size="small"
-                loading={loading}
-                icon={actionIcon(desk.recommendedAcceptanceAction.key, model.modelTeam.recommendedRole)}
-                onClick={() => onAction(desk.recommendedAcceptanceAction.key)}
-                style={{ whiteSpace: 'normal', height: 'auto', lineHeight: 1.25 }}
-              >
-                {desk.recommendedAcceptanceAction.label}
-              </Button>
+              {desk.storyStatePanel?.primaryAction && desk.storyStatePanel.status !== 'synced' && (
+                <Button
+                  type={desk.recommendedAcceptanceAction.key === 'sync_story_state' ? 'primary' : 'default'}
+                  size="small"
+                  loading={loading}
+                  icon={actionIcon('sync_story_state', model.modelTeam.recommendedRole)}
+                  onClick={() => onAction(desk.storyStatePanel!.primaryAction!.key)}
+                  style={{ whiteSpace: 'normal', height: 'auto', lineHeight: 1.25 }}
+                >
+                  {desk.storyStatePanel.primaryAction.label}
+                </Button>
+              )}
+              {desk.recommendedAcceptanceAction.key !== 'sync_story_state' && (
+                <Button
+                  type={desk.acceptanceStatus === 'ready_to_accept' ? 'primary' : 'default'}
+                  size="small"
+                  loading={loading}
+                  icon={actionIcon(desk.recommendedAcceptanceAction.key, model.modelTeam.recommendedRole)}
+                  onClick={() => onAction(desk.recommendedAcceptanceAction.key)}
+                  style={{ whiteSpace: 'normal', height: 'auto', lineHeight: 1.25 }}
+                >
+                  {desk.recommendedAcceptanceAction.label}
+                </Button>
+              )}
             </Space>
           </Col>
         </Row>
+
+        {desk.storyStatePanel?.visible && (
+          <Alert
+            type={desk.storyStatePanel.status === 'synced'
+              ? 'success'
+              : desk.storyStatePanel.status === 'synced_with_gaps'
+                ? 'warning'
+                : desk.storyStatePanel.status === 'skipped'
+                  ? 'info'
+                  : 'warning'}
+            showIcon
+            style={{ marginTop: 2 }}
+            message={desk.storyStatePanel.headline}
+            description={(
+              <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                <Text style={wrapTextStyle}>{desk.storyStatePanel.summary}</Text>
+                <Text type="secondary" style={wrapTextStyle}>
+                  状态机进度：第 {desk.storyStatePanel.lastUpdatedChapter || 0} 章
+                  {desk.storyStatePanel.chapterNo ? ` ｜ 当前正文：第 ${desk.storyStatePanel.chapterNo} 章` : ''}
+                </Text>
+                {desk.storyStatePanel.reasons.length > 0 && (
+                  <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                    <Text strong style={wrapTextStyle}>为什么还没完全更新：</Text>
+                    {desk.storyStatePanel.reasons.slice(0, 4).map(reason => (
+                      <Text key={reason} type="secondary" style={wrapTextStyle}>· {reason}</Text>
+                    ))}
+                  </Space>
+                )}
+                <Text type="secondary" style={wrapTextStyle}>{desk.storyStatePanel.guidance}</Text>
+                {desk.storyStatePanel.primaryAction && (
+                  <Space wrap>
+                    <Button
+                      type={desk.storyStatePanel.status === 'synced' ? 'default' : 'primary'}
+                      size="small"
+                      loading={loading}
+                      icon={actionIcon('sync_story_state', model.modelTeam.recommendedRole)}
+                      onClick={() => onAction(desk.storyStatePanel!.primaryAction!.key)}
+                    >
+                      {desk.storyStatePanel.primaryAction.label}
+                    </Button>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      正文不用重写；满意当前正文后点这里主动更新状态机。
+                    </Text>
+                  </Space>
+                )}
+              </Space>
+            )}
+          />
+        )}
 
         {expanded && (
           <Row gutter={[12, 10]}>
@@ -841,6 +969,15 @@ export function WritingCockpitPanel({
   const recommendedRole = model.modelTeam.recommendedRole
   const [cockpitCollapsed, setCockpitCollapsed] = useState(true)
   const [cockpitDetailsOpen, setCockpitDetailsOpen] = useState(false)
+  const needsStoryStateSurface = Boolean(
+    model.chapterAcceptanceDesk.visible
+    && model.chapterAcceptanceDesk.storyStatePanel
+    && model.chapterAcceptanceDesk.storyStatePanel.status !== 'synced',
+  )
+  const shouldSurfaceAcceptance = Boolean(
+    model.chapterAcceptanceDesk.visible
+    && (model.chapterAcceptanceDesk.shouldAutoExpandAcceptance || needsStoryStateSurface),
+  )
   const nextChapterLabel = model.nextChapter
     ? `第${model.nextChapter.chapterNo}章 · ${model.nextChapter.title || '未命名章节'}`
     : '等待规划下一章'
@@ -859,6 +996,12 @@ export function WritingCockpitPanel({
   useEffect(() => {
     if (forceCollapsed) setCockpitCollapsed(true)
   }, [forceCollapsed])
+
+  useEffect(() => {
+    if (forceCollapsed) return
+    if (!shouldSurfaceAcceptance) return
+    setCockpitDetailsOpen(true)
+  }, [forceCollapsed, shouldSurfaceAcceptance, model.nextChapter?.id, model.chapterAcceptanceDesk.acceptanceStatus])
 
   if (cockpitCollapsed) {
     return (
@@ -889,8 +1032,20 @@ export function WritingCockpitPanel({
                   无人值守
                 </Button>
               )}
+              {model.chapterAcceptanceDesk.storyStatePanel?.primaryAction
+                && model.chapterAcceptanceDesk.storyStatePanel.status !== 'synced' && (
+                <Button
+                  type="primary"
+                  size="small"
+                  loading={loading}
+                  icon={actionIcon('sync_story_state', recommendedRole)}
+                  onClick={() => onAction(model.chapterAcceptanceDesk.storyStatePanel!.primaryAction!.key)}
+                >
+                  {model.chapterAcceptanceDesk.storyStatePanel.primaryAction.label}
+                </Button>
+              )}
               <Button
-                type="primary"
+                type={model.chapterAcceptanceDesk.storyStatePanel?.status && model.chapterAcceptanceDesk.storyStatePanel.status !== 'synced' ? 'default' : 'primary'}
                 size="small"
                 className="writing-cockpit-summary-primary"
                 loading={loading}
@@ -1006,12 +1161,18 @@ export function WritingCockpitPanel({
 
           {blockerAlert(model, loading, onAction)}
 
+          {needsStoryStateSurface && (
+            <StoryStateSyncBanner model={model} loading={loading} onAction={onAction} />
+          )}
+
           <details
             className="writing-cockpit-details"
             open={cockpitDetailsOpen}
             onToggle={(e) => setCockpitDetailsOpen((e.target as HTMLDetailsElement).open)}
           >
-            <summary className="writing-cockpit-details-summary">写作详情</summary>
+            <summary className="writing-cockpit-details-summary">
+              {needsStoryStateSurface ? '写作详情 · 故事状态待同步' : '写作详情'}
+            </summary>
             <div className="writing-cockpit-details-body">
               <Paragraph type="secondary" style={{ marginBottom: 0, fontSize: 12 }}>
                 承接钩子：{previousHook}

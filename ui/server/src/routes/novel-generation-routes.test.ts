@@ -118,6 +118,23 @@ describe('novel generate prose route source guards', () => {
     expect(options.approvals.scene_cards).toBeUndefined()
     expect(options.onStage).toBe(onStage)
     expect(options.abortSignal).toBe(abortSignal)
+    // Cockpit generate-prose must auto-repair materials by default, matching unattended writing.
+    expect(options.auto_repair_missing_material).toBe(true)
+  })
+
+  test('allows cockpit generate-prose to disable material auto-repair explicitly', () => {
+    const onStage = async () => {}
+    const abortSignal = new AbortController().signal
+    const options = buildStandaloneProseServiceOptions(
+      { auto_repair_missing_material: false },
+      {
+        modelId: 217,
+        autoRepairQualityGate: false,
+        onStage,
+        abortSignal,
+      },
+    )
+    expect(options.auto_repair_missing_material).toBe(false)
   })
 
   test('compacts standalone prose progress stages before storing them in the SSE pipeline', () => {

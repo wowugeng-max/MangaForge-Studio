@@ -60,10 +60,19 @@ import type { SafeBatchRecoveryFocusSnapshot } from './novel-workspace/TaskCente
 import { useReferenceWorkflow } from './novel-workspace/useReferenceWorkflow'
 import { useWorkspaceTasks } from './novel-workspace/useWorkspaceTasks'
 import {
+  chapterHasProse,
+  chapterWordCount,
   displayValue,
   summarizeOutlineExecution,
   wc,
 } from './novel-workspace/utils'
+import {
+  buildGenerationPreflightRepairActionSpecs,
+  extractStoryStateChapterNo,
+  generationPreflightMissingKeys,
+  generationPreflightTargetChapterId,
+  type GenerationPreflightRepairActionSpec,
+} from './novel-workspace/generationPreflightRepairModel'
 import { buildSerialPipelineViewModel } from './novel-workspace/serialPipelineModel'
 import {
   immersiveEnterPanelDefaults,
@@ -403,23 +412,6 @@ export default function NovelProjectWorkspace() {
     return Array.isArray(preflight.checks) ? preflight.checks : []
   }
 
-  const generationPreflightMissingKeys = (payload: any) => {
-    const checks = generationPreflightChecks(payload)
-    return new Set(checks.filter((check: any) => !check.ok).map((check: any) => String(check.key || '').trim()).filter(Boolean))
-  }
-
-  const generationPreflightTargetChapterId = (payload: any, fallbackChapterId?: number) => {
-    const candidates = [
-      fallbackChapterId,
-      payload?.chapter_id,
-      payload?.chapter?.id,
-      payload?.context_package?.chapter_target?.id,
-      payload?.contextPackage?.chapter_target?.id,
-      payload?.contextPackage?.chapterTarget?.id,
-    ]
-    return Number(candidates.find(item => Number(item || 0) > 0) || 0)
-  }
-
   const repairGenerationPreflightGaps = async (payload: any, options: { targetChapterId?: number; repairKeys?: string[]; continueAfterRepair?: () => void; closeModal?: () => void } = {}) => {
     const targetChapterId = generationPreflightTargetChapterId(payload, options.targetChapterId)
     if (!targetChapterId) return message.warning('无法定位需要补齐的章节')
@@ -473,101 +465,208 @@ export default function NovelProjectWorkspace() {
     }
   }
 
-  const buildGenerationPreflightRepairActions = (payload: any, options: { targetChapterId?: number; onRepairComplete?: () => void; closeModal?: () => void } = {}): GenerationPreflightRepairAction[] => {
-    const missingKeys = generationPreflightMissingKeys(payload)
+  const runGenerationPreflightRepairSpec = async (
+    payload: any,
+    spec: GenerationPreflightRepairActionSpec,
+    options: { targetChapterId?: number; onRepairComplete?: () => void; closeModal?: () => void } = {},
+  ) => {
     const targetChapterId = generationPreflightTargetChapterId(payload, options.targetChapterId)
-    const actions: GenerationPreflightRepairAction[] = []
-    const repairableKeys = ['characters', 'character_state', 'no_repeat', 'setting_workshop', 'chapter_setting_usage'].filter(key => missingKeys.has(key))
-    if (repairableKeys.length > 1 && options.onRepairComplete) {
-      actions.push({
-        key: 'repair_all_generation_preflight',
-        label: '自动补齐并继续生成',
-        description: '依次处理角色卡不足、设定工坊不足、本章设定调用不足，刷新材料后重新生成。',
-        modelCall: true,
-        primary: true,
-        run: () => repairGenerationPreflightGaps(payload, {
-          targetChapterId,
-          repairKeys: repairableKeys,
-          continueAfterRepair: options.onRepairComplete,
-          closeModal: options.closeModal,
-        }),
-      })
+    const resolveChapterByNo = (chapterNo?: number) => {
+      const no = Number(chapterNo || 0)
+      if (!no) return null
+      return sortedChapters.find((chapter: any) => Number(chapter.chapter_no || 0) === no) || null
     }
-    if (missingKeys.has('characters') || missingKeys.has('character_state') || missingKeys.has('no_repeat')) {
-      actions.push({
-        key: 'repair_character_cards',
-        label: '补角色卡',
-        description: '修复角色卡不足：调用大模型补齐角色卡、角色当前状态和本章禁止重复材料。',
-        modelCall: true,
-        run: () => repairGenerationPreflightGaps(payload, {
-          targetChapterId,
-          repairKeys: ['characters', 'character_state', 'no_repeat'],
-          closeModal: options.closeModal,
-        }),
-      })
+    const ensureTargetSelected = async (chapterId?: number) => {
+      const id = Number(chapterId || targetChapterId || activeChapter?.id || 0)
+      if (!id) return false
+      if (Number(activeChapter?.id || 0) === id) return true
+      return selectChapterForWriting(id)
     }
-    if (missingKeys.has('setting_workshop')) {
-      actions.push({
-        key: 'incubate_setting_workshop',
-        label: '提炼设定工坊',
-        description: '修复设定工坊不足：调用大模型从项目资料、世界观、角色和大纲提炼设定资产。',
-        modelCall: true,
-        run: () => repairGenerationPreflightGaps(payload, {
-          targetChapterId,
-          repairKeys: ['setting_workshop'],
-          closeModal: options.closeModal,
-        }),
-      })
+
+    const navigationKinds = new Set(['open_story_state_editor', 'open_story_assets', 'open_outline_tree', 'edit_chapter'])
+    const messageKey = `preflight-repair-${spec.kind}`
+    const isNavigation = navigationKinds.has(spec.kind)
+    if (isNavigation) {
+      options.closeModal?.()
+    } else {
+      message.loading({ content: `正在${spec.label || '补齐材料'}...`, key: messageKey, duration: 0 })
     }
-    if (missingKeys.has('chapter_setting_usage')) {
-      actions.push({
-        key: 'match_chapter_setting_usage',
-        label: '匹配本章设定调用',
-        description: '修复本章设定调用不足：调用大模型为本章标记必用、允许和禁揭设定。',
-        modelCall: true,
-        run: () => repairGenerationPreflightGaps(payload, {
-          targetChapterId,
-          repairKeys: ['chapter_setting_usage'],
-          closeModal: options.closeModal,
-        }),
-      })
-    }
-    if (missingKeys.has('setting_workshop') || missingKeys.has('chapter_setting_usage')) {
-      actions.push({
-        key: 'open_setting_workshop',
-        label: '打开设定工坊',
-        description: '不调用大模型，只跳转到设定资产工作台手动补齐。',
-        modelCall: false,
-        run: () => {
+
+    try {
+      switch (spec.kind) {
+        case 'repair_all_auto':
+          await repairGenerationPreflightGaps(payload, {
+            targetChapterId,
+            repairKeys: ['characters', 'character_state', 'no_repeat', 'setting_workshop', 'chapter_setting_usage']
+              .filter(key => generationPreflightMissingKeys(payload).has(key)),
+            continueAfterRepair: options.onRepairComplete,
+            closeModal: options.closeModal,
+          })
+          // repairGenerationPreflightGaps already closes modal + toasts
+          message.destroy(messageKey)
+          return
+        case 'repair_character_cards':
+          await repairGenerationPreflightGaps(payload, {
+            targetChapterId,
+            repairKeys: ['characters', 'character_state', 'no_repeat'],
+            closeModal: options.closeModal,
+          })
+          message.destroy(messageKey)
+          return
+        case 'incubate_setting_workshop':
+          await repairGenerationPreflightGaps(payload, {
+            targetChapterId,
+            repairKeys: ['setting_workshop'],
+            closeModal: options.closeModal,
+          })
+          message.destroy(messageKey)
+          return
+        case 'match_chapter_setting_usage':
+          await repairGenerationPreflightGaps(payload, {
+            targetChapterId,
+            repairKeys: ['chapter_setting_usage'],
+            closeModal: options.closeModal,
+          })
+          message.destroy(messageKey)
+          return
+        case 'sync_story_state': {
+          const chapterNo = Number(spec.targetChapterNo || extractStoryStateChapterNo(payload) || 0)
+          const chapter = resolveChapterByNo(chapterNo)
+            || sortedChapters.filter((item: any) => chapterHasProse(item)).slice(-1)[0]
+            || null
+          if (!chapter?.id) {
+            message.destroy(messageKey)
+            openStoryStateEditor()
+            message.warning('没有找到可同步的已写章节，已打开人工故事状态校正。')
+            return
+          }
+          await syncStoryStateForChapter(Number(chapter.id))
+          message.destroy(messageKey)
           options.closeModal?.()
+          return
+        }
+        case 'replace_style_samples': {
+          if (!await ensureTargetSelected(targetChapterId)) {
+            message.warning({ content: '无法切换到目标章节', key: messageKey, duration: 3 })
+            return
+          }
+          await applyStyleSampleActionForChapter(
+            sortedChapters.find((chapter: any) => Number(chapter.id) === Number(targetChapterId || activeChapter?.id || 0)) || activeChapter,
+            'replace',
+            '已重选文风样章，请重新确认任务书后再生成',
+          )
+          options.closeModal?.()
+          message.success({ content: `已完成：${spec.label}`, key: messageKey, duration: 2 })
+          return
+        }
+        case 'build_pre_draft_brief': {
+          if (!await ensureTargetSelected(targetChapterId)) {
+            message.warning({ content: '无法切换到目标章节', key: messageKey, duration: 3 })
+            return
+          }
+          await buildPreDraftBriefForActiveChapter()
+          options.closeModal?.()
+          message.success({ content: `已完成：${spec.label}`, key: messageKey, duration: 2 })
+          return
+        }
+        case 'generate_scene_cards': {
+          const chapterId = Number(targetChapterId || activeChapter?.id || 0)
+          if (!chapterId) {
+            message.warning({ content: '无法定位需要刷新场景卡的章节', key: messageKey, duration: 3 })
+            return
+          }
+          await generateSceneCardsForChapter(chapterId, true)
+          options.closeModal?.()
+          message.success({ content: `已完成：${spec.label}`, key: messageKey, duration: 2 })
+          return
+        }
+        case 'open_story_state_editor':
+          openStoryStateEditor()
+          return
+        case 'open_story_assets':
           openStoryAssetsWorkspace()
-        },
-      })
+          return
+        case 'open_outline_tree':
+          setOutlineTreeOpen(true)
+          return
+        case 'edit_chapter': {
+          const chapter = sortedChapters.find((item: any) => Number(item.id) === Number(targetChapterId || activeChapter?.id || 0)) || activeChapter
+          if (!chapter) {
+            message.warning('无法定位需要编辑的章节')
+            return
+          }
+          openEditor('chapter', chapter)
+          return
+        }
+        default:
+          if (!isNavigation) message.destroy(messageKey)
+          return
+      }
+    } catch (error: any) {
+      if (isNavigation) {
+        message.error(error?.response?.data?.error || error?.message || `${spec.label || '操作'}失败`)
+      } else {
+        message.error({
+          content: error?.response?.data?.error || error?.message || `${spec.label || '补齐材料'}失败`,
+          key: messageKey,
+          duration: 5,
+        })
+      }
     }
-    return actions
+  }
+
+  const buildGenerationPreflightRepairActions = (payload: any, options: { targetChapterId?: number; onRepairComplete?: () => void; closeModal?: () => void } = {}): GenerationPreflightRepairAction[] => {
+    const specs = buildGenerationPreflightRepairActionSpecs(payload, {
+      includeContinueRepairAll: Boolean(options.onRepairComplete),
+    })
+    return specs.map(spec => ({
+      key: spec.key,
+      label: spec.label,
+      description: spec.reason ? `${spec.description}（对应：${spec.reason}）` : spec.description,
+      modelCall: spec.modelCall,
+      primary: Boolean(spec.primary),
+      run: () => runGenerationPreflightRepairSpec(payload, spec, options),
+    }))
   }
 
   const renderGenerationPreflightRepairActions = (actions: GenerationPreflightRepairAction[]) => {
-    if (!actions.length) return null
+    if (!actions.length) {
+      return (
+        <Alert
+          type="info"
+          showIcon
+          message="当前缺口需要人工处理"
+          description="下方阻断项暂无一对一自动动作。可先打开资料设定台或章节编辑器补齐，再回来继续生成。"
+        />
+      )
+    }
     return (
       <div>
-        <Text strong>可自动处理</Text>
-        <Space direction="vertical" size={8} style={{ width: '100%', marginTop: 8 }}>
+        <Text strong>立刻补齐（直接点按钮）</Text>
+        <Paragraph type="secondary" style={{ margin: '4px 0 8px' }}>
+          不用再去侧栏找入口：按阻断原因点对应动作即可。
+        </Paragraph>
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
           {actions.map(action => (
-            <div key={action.key} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-              <Space direction="vertical" size={2} style={{ flex: '1 1 320px' }}>
-                <Space size={6} wrap>
-                  <Text>{action.label}</Text>
-                  <Tag color={action.modelCall ? 'blue' : 'default'} bordered={false}>{action.modelCall ? '调用大模型' : '不调用大模型'}</Tag>
+            <Card
+              key={action.key}
+              size="small"
+              styles={{ body: { padding: '10px 12px' } }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <Space direction="vertical" size={2} style={{ flex: '1 1 320px' }}>
+                  <Space size={6} wrap>
+                    <Text strong>{action.label}</Text>
+                    <Tag color={action.modelCall ? 'blue' : 'default'} bordered={false}>{action.modelCall ? '调用大模型' : '本地入口'}</Tag>
+                    {action.primary ? <Tag color="green" bordered={false}>推荐先做</Tag> : null}
+                  </Space>
+                  <Text type="secondary">{action.description}</Text>
                 </Space>
-                <Text type="secondary">{action.description}</Text>
-              </Space>
-              <Tooltip title={action.description}>
-                <Button type={action.primary ? 'primary' : 'default'} size="small" onClick={() => { void action.run() }}>
+                <Button type={action.primary ? 'primary' : 'default'} onClick={() => { void action.run() }}>
                   {action.label}
                 </Button>
-              </Tooltip>
-            </div>
+              </div>
+            </Card>
           ))}
         </Space>
       </div>
@@ -586,8 +685,9 @@ export default function NovelProjectWorkspace() {
           type={payload?.error_code === 'REFERENCE_SAFETY_BLOCKED' ? 'error' : 'warning'}
           showIcon
           message={payload?.error || '生成条件未满足'}
-          description="系统没有直接写入正文，避免整章生成失败后污染当前版本。你可以补齐材料、刷新场景卡，或选择允许缺材料继续。"
+          description="系统没有直接写入正文，避免整章生成失败后污染当前版本。请直接点下方按钮补齐对应材料；补齐后可重新生成，或选择允许缺材料继续。"
         />
+        {renderGenerationPreflightRepairActions(repairActions)}
         {blockers.length > 0 && (
           <div>
             <Text strong>阻塞项</Text>
@@ -622,7 +722,6 @@ export default function NovelProjectWorkspace() {
             {warnings.join('\n')}
           </Paragraph>
         )}
-        {renderGenerationPreflightRepairActions(repairActions)}
         {safetyDecision && (
           <Alert
             type={safetyDecision.blocked ? 'error' : 'info'}
@@ -641,12 +740,12 @@ export default function NovelProjectWorkspace() {
     const closeModal = () => { modalRef?.destroy() }
     const repairActions = isSafetyBlocked ? [] : buildGenerationPreflightRepairActions(payload, { ...options, closeModal })
     modalRef = Modal.confirm({
-      title: isSafetyBlocked ? '仿写安全阈值未通过' : '章节生成前置检查未通过',
-      width: 760,
+      title: isSafetyBlocked ? '仿写安全门槛未通过' : '章节生成前置检查未通过',
+      width: 820,
       icon: null,
       content: renderPreflightModalContent(payload, repairActions),
       okText: onContinue && !isSafetyBlocked ? '允许缺材料继续' : '知道了',
-      cancelText: onContinue && !isSafetyBlocked ? '先补齐材料' : undefined,
+      cancelText: '关闭',
       okButtonProps: isSafetyBlocked ? { danger: true } : undefined,
       onOk: () => {
         if (onContinue && !isSafetyBlocked) onContinue()
@@ -1295,7 +1394,7 @@ export default function NovelProjectWorkspace() {
     if (!selectedModelId) return message.warning('请先选择模型')
     if (!await flushPendingSave()) return
     const allowedChapterNoSet = new Set((options?.allowedChapterNos || []).map(chapterNo => Number(chapterNo)).filter(Boolean))
-    const allUnwrittenChapters = sortedChapters.filter(ch => !ch.chapter_text || ch.chapter_text.includes('【占位正文】'))
+    const allUnwrittenChapters = sortedChapters.filter(ch => !chapterHasProse(ch))
     const allUnwritten = allowedChapterNoSet.size > 0
       ? allUnwrittenChapters.filter(ch => allowedChapterNoSet.has(Number(ch.chapter_no || 0)))
       : allUnwrittenChapters
@@ -2143,7 +2242,7 @@ export default function NovelProjectWorkspace() {
   const startUnattendedWritingGoal = async () => {
     if (!selectedProject) return
     if (!selectedModelId) return message.warning('请先选择模型')
-    const startChapter = Number(activeChapter?.chapter_no || sortedChapters.find((chapter: any) => !chapter.chapter_text)?.chapter_no || 1)
+    const startChapter = Number(activeChapter?.chapter_no || sortedChapters.find((chapter: any) => !chapterHasProse(chapter))?.chapter_no || 1)
     if (!Number(unattendedTargetChapter || 0) || Number(unattendedTargetChapter) < startChapter) {
       return message.warning(`目标章号需要不小于第${startChapter}章`)
     }
@@ -4626,6 +4725,23 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const formatStoryStateSyncFailure = (update: any) => {
+    const hardFailures = [
+      ...((Array.isArray(update?.errors) ? update.errors : []).flatMap((item: any) => Array.isArray(item?.hard_failures) ? item.hard_failures : [])),
+      ...(Array.isArray(update?.hard_failures) ? update.hard_failures : []),
+    ]
+    const hardSummary = hardFailures
+      .map((item: any) => String(item?.message || item?.key || '').trim())
+      .filter(Boolean)
+      .slice(0, 3)
+      .join('；')
+    if (hardSummary) return hardSummary
+    if (update?.error) return String(update.error)
+    const firstError = Array.isArray(update?.errors) ? update.errors[0] : null
+    if (firstError?.error) return String(firstError.error)
+    return '故事状态同步失败，请打开人工校正检查。'
+  }
+
   const syncStoryStateForChapter = async (chapterId?: number) => {
     const targetId = Number(chapterId || 0)
     const targetChapter = targetId
@@ -4636,7 +4752,7 @@ export default function NovelProjectWorkspace() {
       return message.warning('当前没有可同步的目标章节，已打开人工故事状态校正。')
     }
     if (!selectedModelId) return message.warning('请先选择模型，再同步故事状态。')
-    if (!String(targetChapter.chapter_text || '').replace(/\s/g, '').trim()) {
+    if (!chapterHasProse(targetChapter)) {
       openStoryStateEditor()
       return message.warning('当前章节还没有正文，已打开人工故事状态校正。')
     }
@@ -4644,10 +4760,16 @@ export default function NovelProjectWorkspace() {
       targetChapterId: Number(targetChapter.id),
       activeChapterId: activeChapter?.id,
       selectChapterForWriting,
-    })) return
-    if (!await flushPendingSave()) return
+    })) {
+      return message.warning('切换到目标章节失败，未能开始状态机同步。')
+    }
+    if (!await flushPendingSave()) {
+      return message.warning('保存当前章节失败，未能开始状态机同步。')
+    }
 
+    const messageKey = 'story-state-sync'
     setCommercialToolLoading('storyStateSync')
+    message.loading({ content: `正在同步第 ${targetChapter.chapter_no} 章故事状态机...`, key: messageKey, duration: 0 })
     try {
       const res = await apiClient.post(`/novel/chapters/${targetChapter.id}/story-state-sync`, {
         project_id: projectId,
@@ -4658,13 +4780,28 @@ export default function NovelProjectWorkspace() {
       await loadProductionTasks()
       const update = res.data?.story_state_update || {}
       if (update?.ok === false || update?.error) {
-        message.error(update?.error || '故事状态同步失败，请打开人工校正检查。')
+        message.error({
+          content: formatStoryStateSyncFailure(update),
+          key: messageKey,
+          duration: 6,
+        })
         return
       }
+      const softCount = (Array.isArray(update?.synced) ? update.synced : [])
+        .reduce((sum: number, item: any) => sum + (Array.isArray(item?.soft_hard_failures) ? item.soft_hard_failures.length : 0), 0)
       const syncedTo = update?.last_synced_chapter || update?.last_updated_chapter || targetChapter.chapter_no
-      message.success(syncedTo ? `故事状态已同步至第 ${syncedTo} 章。` : '故事状态已同步。')
+      const base = syncedTo ? `故事状态已同步至第 ${syncedTo} 章。` : '故事状态已同步。'
+      message.success({
+        content: softCount > 0 ? `${base} 另有 ${softCount} 项计划状态仍有缺口，已写入警告。` : base,
+        key: messageKey,
+        duration: 4,
+      })
     } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '故事状态同步失败')
+      message.error({
+        content: error?.response?.data?.error || error?.message || '故事状态同步失败',
+        key: messageKey,
+        duration: 5,
+      })
     } finally {
       setCommercialToolLoading('')
     }
@@ -5837,7 +5974,7 @@ export default function NovelProjectWorkspace() {
 
   const acceptCockpitChapterAndContinue = async () => {
     const currentNo = Number(writingCockpitModel.nextChapter?.chapterNo || 0)
-    const next = sortedChapters.find(chapter => Number(chapter.chapter_no || 0) > currentNo && !String(chapter.chapter_text || '').replace(/\s/g, '').trim())
+    const next = sortedChapters.find(chapter => Number(chapter.chapter_no || 0) > currentNo && !chapterHasProse(chapter))
       || sortedChapters.find(chapter => Number(chapter.chapter_no || 0) > currentNo)
       || null
 
@@ -6387,7 +6524,7 @@ export default function NovelProjectWorkspace() {
       materialReady,
       materialRecommendations,
       sceneCardCount: activeChapterSceneCards.length,
-      activeWordCount: wc(activeChapter?.chapter_text),
+      activeWordCount: chapterWordCount(activeChapter),
       deliveryRiskCarryOverActionCount: [
         ...(writingCockpitModel.chapterPlanningDesk.episodePlan.deliveryRiskCarryOver.requiredActions || []),
         ...(writingCockpitModel.chapterPlanningDesk.episodePlan.deliveryRiskCarryOver.openingActions || []),

@@ -315,7 +315,17 @@ export function evaluateProsePreDraftGate(
     || context.chapterLaunchGate
     || context.chapter_target?.chapter_launch_gate
     || context.chapterTarget?.chapterLaunchGate
-  const launchBlocker = getChapterLaunchGateBlocker(launchGate)
+  const liveWritePreparationBrief = context.chapter_target?.write_preparation_brief
+    || context.chapter_target?.writePreparationBrief
+    || context.chapterTarget?.write_preparation_brief
+    || context.chapterTarget?.writePreparationBrief
+    || context.write_preparation_brief
+    || context.writePreparationBrief
+    || context.pre_draft_brief?.write_preparation_brief
+    || context.pre_draft_brief?.writePreparationBrief
+  const launchBlocker = getChapterLaunchGateBlocker(launchGate, {
+    writePreparationBrief: liveWritePreparationBrief,
+  })
   if (launchBlocker) {
     return {
       passed: false,

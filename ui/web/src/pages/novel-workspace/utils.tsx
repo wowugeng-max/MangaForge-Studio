@@ -4,10 +4,37 @@ import { STATUS_LABELS } from '../../constants/uiCopy'
 
 const { Text } = Typography
 
+const PLACEHOLDER_PROSE_MARK = '【占位正文】'
+
+export function chapterText(chapter: any) {
+  return String(chapter?.chapter_text || '')
+}
+
+export function chapterIsPlaceholder(chapter: any) {
+  return chapterText(chapter).includes(PLACEHOLDER_PROSE_MARK)
+}
+
+/** True when compact workspace fields or full prose show this chapter as written. */
+export function chapterHasProse(chapter: any) {
+  if (!chapter) return false
+  if (chapterIsPlaceholder(chapter)) return false
+  const text = chapterText(chapter).replace(/\s/g, '')
+  if (text) return true
+  if (Boolean(chapter.has_prose ?? chapter.hasProse)) return true
+  return Number(chapter.word_count ?? chapter.wordCount ?? 0) > 0
+}
+
+export function chapterWordCount(chapter: any) {
+  const text = chapterText(chapter)
+  if (text) return text.replace(/\s/g, '').length
+  const reported = Number(chapter?.word_count ?? chapter?.wordCount ?? 0)
+  return Number.isFinite(reported) && reported > 0 ? reported : 0
+}
+
 export function chapterStatusTag(chapter: any) {
-  if (!chapter?.chapter_text) return <Tag color="default">未写</Tag>
-  if (String(chapter.chapter_text).includes('【占位正文】')) return <Tag color="orange">占位</Tag>
-  return <Tag color="green">已写</Tag>
+  if (chapterIsPlaceholder(chapter)) return <Tag color="orange">占位</Tag>
+  if (chapterHasProse(chapter)) return <Tag color="green">已写</Tag>
+  return <Tag color="default">未写</Tag>
 }
 
 export function sourceLabel(item: any) {

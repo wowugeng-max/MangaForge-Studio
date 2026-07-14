@@ -87,16 +87,38 @@ async function syncStoryStateFromChapter(
       const freshChapter = chapters.find(item => item.id === target.id) || target
       const contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, currentProject, freshChapter, chapters, worldbuilding, characters, outlines, reviews)
       const update = await ctx.updateStoryStateMachine(activeWorkspace, currentProject, freshChapter, contextPackage, String(freshChapter.chapter_text || ''), modelId)
-      synced.push({ chapter_id: freshChapter.id, chapter_no: freshChapter.chapter_no, update })
+      synced.push({
+        chapter_id: freshChapter.id,
+        chapter_no: freshChapter.chapter_no,
+        update,
+        soft_hard_failures: Array.isArray(update?.soft_hard_failures) ? update.soft_hard_failures : [],
+      })
     } catch (error: any) {
-      errors.push({ chapter_id: target.id, chapter_no: target.chapter_no, error: String(error?.message || error) })
+      const hardFailures = Array.isArray(error?.hard_failures) ? error.hard_failures : []
+      const blockingHardFailures = Array.isArray(error?.blocking_hard_failures) ? error.blocking_hard_failures : hardFailures
+      errors.push({
+        chapter_id: target.id,
+        chapter_no: target.chapter_no,
+        error: String(error?.message || error),
+        code: error?.code || '',
+        hard_failures: hardFailures,
+        blocking_hard_failures: blockingHardFailures,
+      })
       break
     }
   }
+  const firstError = errors[0]
   return {
     ok: errors.length === 0,
     synced,
     errors,
+    error: firstError
+      ? (
+          Array.isArray(firstError.hard_failures) && firstError.hard_failures.length
+            ? firstError.hard_failures.map((item: any) => item?.message || item?.key).filter(Boolean).slice(0, 3).join('；')
+            : firstError.error
+        )
+      : undefined,
     last_synced_chapter: synced.length ? synced[synced.length - 1].chapter_no : null,
   }
 }

@@ -50,6 +50,51 @@ describe('prose quality contracts', () => {
     expect(blocker).toBeNull()
   })
 
+  test('ignores stale write-preparation launch blocks when live write prep is ready', () => {
+    const blocker = getChapterLaunchGateBlocker({
+      status: 'blocked',
+      summary: '写前准备：来源缺口：串行连续性/状态机',
+      signals: [
+        {
+          key: 'write_preparation',
+          label: '写前准备',
+          status: 'block',
+          reason: '来源缺口：串行连续性/状态机｜状态=missing｜状态机只更新到第10章。',
+        },
+        { key: 'ending_hook', label: '章末钩子', status: 'ok', reason: '已有钩子' },
+      ],
+    }, {
+      writePreparationBrief: { readiness_status: 'ready', source_gaps: [] },
+    })
+
+    expect(blocker).toBeNull()
+  })
+
+  test('keeps hard non-write-prep launch blocks even when write prep is ready', () => {
+    const blocker = getChapterLaunchGateBlocker({
+      status: 'blocked',
+      signals: [
+        {
+          key: 'write_preparation',
+          label: '写前准备',
+          status: 'block',
+          reason: '来源缺口：状态机',
+        },
+        {
+          key: 'ending_hook',
+          label: '章末钩子',
+          status: 'blocked',
+          reason: '章末钩子为空，不能开写。',
+        },
+      ],
+    }, {
+      writePreparationBrief: { readiness_status: 'ready' },
+    })
+
+    expect(blocker?.blocked_checks.map(item => item.key)).toEqual(['ending_hook'])
+    expect(blocker?.summary).toContain('章末钩子')
+  })
+
   test('rejects tiny self-review final_text so it cannot overwrite full prose', () => {
     const currentText = [
       '第八章 会长私印',

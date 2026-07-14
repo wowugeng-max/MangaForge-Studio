@@ -151,6 +151,36 @@ describe('prose generation contract', () => {
     expect(decision.reasons.join('；')).toContain('合围')
   })
 
+  test('does not block on stale write-preparation launch gate when live write prep is ready', () => {
+    const contract = buildProseGenerationContract({
+      chapter_target: {
+        chapter_no: 12,
+        scene_cards: [{ scene_no: 1 }],
+        write_preparation_brief: {
+          readiness_status: 'ready',
+          source_gaps: [],
+        },
+      },
+      preflight: { ready: true, strict_ready: true },
+      chapter_launch_gate: {
+        status: 'blocked',
+        summary: '写前准备：来源缺口：串行连续性/状态机｜状态=missing｜状态机只更新到第10章。',
+        signals: [
+          {
+            key: 'write_preparation',
+            label: '写前准备',
+            status: 'block',
+            reason: '来源缺口：串行连续性/状态机｜状态=missing｜状态机只更新到第10章。',
+          },
+        ],
+      },
+      oh_story_director: { readiness: 'ready', required_repairs: [] },
+    })
+
+    const decision = evaluateProsePreDraftGate(contract, { requireSceneCards: true })
+    expect(decision).toMatchObject({ passed: true, code: '' })
+  })
+
   test('blocks strict preflight independently from general preflight readiness', () => {
     const contract = buildProseGenerationContract({
       chapter_target: { chapter_no: 10, scene_cards: [{ scene_no: 1 }] },

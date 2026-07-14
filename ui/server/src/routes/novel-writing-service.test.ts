@@ -202,6 +202,7 @@ import {
   scanNewConceptAnchorRisks,
   buildSourceReadinessChecks,
   buildSourceReadinessPreflightChecks,
+  resolveSerialStoryStateReadiness,
   buildSourceReadinessSyncReport,
   scanUniformRhythmRisks,
   buildStorylineSyncReport,
@@ -11866,6 +11867,41 @@ describe('chapter prose word target', () => {
     expect(payload.partial_json_open_string_recovered).toBe(true)
   })
 
+  test('recovers closed chapter text with raw newlines inside fenced prose JSON', () => {
+    const chapterText = [
+      '枯井下方的通道比预想中更为潮湿。',
+      '',
+      '惨绿色的雾气在石板路上低低地漂浮，像是有生命般贴着两人的脚踝盘旋。',
+      '',
+      '江哲伸出右手，虚扶在老陈的肩膀上。他体内那股如恒星般炽热、狂暴的超人气血，在穿过皮下的瞬间开始稳压。',
+    ].join('\n').repeat(12)
+    const payload = getNovelPayload({
+      content: `\`\`\`json\n{"prose_chapters":[{"chapter_no":13,"title":"盟友入局","chapter_text":"${chapterText}"}],"scene_breakdown":[],"continuity_notes":[]}\n\`\`\``,
+      finish_reason: 'stop',
+      usage: { output_tokens: 7562 },
+    })
+
+    expect(payload.prose_chapters?.[0]?.chapter_no).toBe(13)
+    expect(payload.prose_chapters?.[0]?.title).toBe('盟友入局')
+    expect(payload.prose_chapters?.[0]?.chapter_text).toBe(chapterText)
+    expect(payload.chapter_text).toBe(chapterText)
+    expect(payload.recovered_from_partial_json).toBe(true)
+  })
+
+  test('recovers closed chapter text when prose contains unescaped ascii quotes', () => {
+    const chapterText = '他的目光落在那个写着"CN-001"的屏幕上，左手在卫衣口袋里缓缓松开了那枚已经布满裂痕的秩序核心。'.repeat(20)
+    const payload = getNovelPayload({
+      content: `\`\`\`json\n{"prose_chapters":[{"chapter_no":13,"title":"盟友入局","chapter_text":"${chapterText}"}],"scene_breakdown":[],"continuity_notes":[]}\n\`\`\``,
+      finish_reason: 'stop',
+    })
+
+    expect(payload.prose_chapters?.[0]?.chapter_no).toBe(13)
+    expect(payload.prose_chapters?.[0]?.chapter_text).toBe(chapterText)
+    expect(payload.chapter_text).toBe(chapterText)
+    expect(payload.recovered_from_partial_json).toBe(true)
+  })
+
+
   test('defaults normal chapters to roughly 4200 Chinese characters', () => {
     const target = resolveChapterWordTarget({ length_target: 'epic' }, { chapter_no: 1 }, {})
 
@@ -20734,6 +20770,104 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('状态机只更新到第12章')
     expect(prompt).toContain('先完成第13章状态机更新')
   })
+
+  test('clears cached serial story state preflight once live state catches up', () => {
+    const contextPackage = {
+      continuity: {
+        previous_chapter: {
+          chapter_no: 11,
+          title: '山路截杀',
+          ending_hook: '截杀者带着主角熟悉却变形的知识。',
+        },
+      },
+      story_state: {
+        last_updated_chapter: 11,
+        open_questions: ['截杀者是谁'],
+      },
+      chapter_target: {
+        chapter_no: 12,
+        title: '异兽交易',
+        summary: '把线索变成交易筹码',
+        state_tracking_contract: {
+          source_readiness: [
+            {
+              key: 'serial_story_state',
+              label: '串行连续性/状态机',
+              status: 'missing',
+              evidence: '上一章第11章已进入承接链，但状态机只更新到第10章。',
+              fix: '先完成第11章状态机更新，再继续第12章，避免下一章读取旧角色状态、伏笔、时间线或资产状态。',
+            },
+            {
+              key: 'character_state',
+              label: '角色状态',
+              status: 'ready',
+              evidence: '江哲：已同步',
+            },
+          ],
+        },
+      },
+    }
+
+    const live = resolveSerialStoryStateReadiness(contextPackage)
+    expect(live.stale).toBe(false)
+    const checks = buildSourceReadinessPreflightChecks(contextPackage)
+    expect(checks.some((item: any) => String(item.key || '').includes('serial_story_state'))).toBe(false)
+
+    // still flags when live lag remains
+    const stalePackage = {
+      ...contextPackage,
+      story_state: { last_updated_chapter: 10 },
+    }
+    expect(resolveSerialStoryStateReadiness(stalePackage).stale).toBe(true)
+    expect(buildSourceReadinessPreflightChecks(stalePackage).some((item: any) => item.key === 'source_readiness_serial_story_state' && item.severity === 'high')).toBe(true)
+  })
+
+  test('write preparation brief drops stale serial story state once live state catches up', () => {
+    const contextPackage = {
+      continuity: {
+        previous_chapter: {
+          chapter_no: 11,
+          title: '山路截杀',
+          ending_hook: '截杀者带着主角熟悉却变形的知识。',
+        },
+      },
+      story_state: {
+        last_updated_chapter: 11,
+      },
+      chapter_target: {
+        chapter_no: 12,
+        title: '异兽交易',
+        summary: '把线索变成交易筹码',
+        goal: '把线索变成交易筹码',
+        conflict: '交易对象故意缺页',
+        ending_hook: '缺页资料指向更大网络',
+        state_tracking_contract: {
+          source_readiness: [
+            {
+              key: 'serial_story_state',
+              label: '串行连续性/状态机',
+              status: 'missing',
+              evidence: '上一章第11章已进入承接链，但状态机只更新到第10章。',
+              fix: '先完成第11章状态机更新，再继续第12章。',
+            },
+            {
+              key: 'timeline_tracking',
+              label: '追踪/时间线',
+              status: 'ready',
+              evidence: '本章时间地点已确认',
+            },
+          ],
+        },
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief({ title: '旧城维修师' }, contextPackage)
+    const writePrep = brief.write_preparation_brief || {}
+    expect(writePrep.readiness_status).toBe('ready')
+    expect((writePrep.source_gaps || []).join('｜')).not.toContain('状态机')
+    expect((writePrep.source_gaps || []).join('｜')).not.toContain('serial')
+  })
+
 
   test('registers delivery risk carry-over as state tracking source material', () => {
     const deliveryRiskCarryOver = buildDeliveryRiskCarryOverContext(
@@ -41929,6 +42063,87 @@ describe('readability and restrained meme workflow', () => {
     expect(styleSection).toContain('你以为这就结束了吗')
   })
 
+  test('strips nested style boundary aliases before recursive merge', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const stripStart = source.indexOf('function stripStyleBoundaryExplicitContract')
+    const buildStart = source.indexOf('function buildStyleBoundaryContract')
+    const derivedCall = source.indexOf('const derived = hasStyleInput ? buildStyleBoundaryContract', buildStart)
+    const stripBlock = source.slice(stripStart, buildStart)
+    const derivedBlock = source.slice(buildStart, derivedCall + 260)
+
+    expect(stripStart).toBeGreaterThanOrEqual(0)
+    expect(buildStart).toBeGreaterThan(stripStart)
+    expect(stripBlock).toContain('chapter_target: stripTarget(contextPackage?.chapter_target)')
+    expect(stripBlock).toContain('chapterTarget: stripTarget(contextPackage?.chapterTarget)')
+    expect(stripBlock).toContain('pre_draft_brief: stripBrief(target.pre_draft_brief)')
+    expect(derivedBlock).toContain('options.ignoreExplicit === true ? null : styleBoundaryExplicitContract')
+    expect(derivedBlock).toContain('ignoreExplicit: true')
+  })
+
+  test('merges nested explicit style boundary contracts without overflowing', () => {
+    const styleBoundary = {
+      version: 'oh_story_style_boundary_v1',
+      source: 'nested_explicit',
+      style_override_rules: ['文风可覆盖默认 Gate D'],
+      hard_constraints: ['禁用词 / banned_words 永远优先'],
+      copy_boundary_rules: ['不得复制样章桥段'],
+      conflict_resolution_rules: ['硬约束永远赢'],
+      quality_checks: ['硬约束永远赢：禁用词'],
+      revision_priorities: ['删风格越界禁用词'],
+    }
+    const project = {
+      title: '超人的规则怪谈世界',
+      reference_config: {
+        style_sample_bank: [
+          {
+            sample_key: '规则危机反打',
+            scene_function: '规则压力下的动作反制',
+            narrative_rhythm: '先压迫，再拆规则，再小反打',
+            sentence_pattern: '短中句为主，解释压短',
+            dialogue_ratio: '35%-45%',
+            abstract_usage: '动作链和规则判定交替推进',
+            unsafe_direct_phrases: ['样章原句不能照搬'],
+            applicable_scenes: ['规则压迫', '高压反打'],
+            avoid_scenes: ['纯背景说明'],
+          },
+        ],
+      },
+    }
+    const contextPackage = {
+      writing_bible: {},
+      style_boundary_contract: styleBoundary,
+      pre_draft_brief: {
+        style_boundary_contract: styleBoundary,
+        style_sample_strategy: {
+          enabled: true,
+          samples: [{ sample_key: '规则危机反打', unsafe_direct_phrases: ['样章原句不能照搬'] }],
+        },
+      },
+      chapter_target: {
+        chapter_no: 12,
+        title: '异兽交易',
+        summary: '主角把线索变成交易筹码。',
+        conflict: '交易对象故意缺页。',
+        style_boundary_contract: styleBoundary,
+        style_sample_strategy: {
+          enabled: true,
+          samples: [{ sample_key: '规则危机反打', unsafe_direct_phrases: ['样章原句不能照搬'] }],
+        },
+        pre_draft_brief: {
+          style_boundary_contract: styleBoundary,
+        },
+        preDraftBrief: {
+          styleBoundaryContract: styleBoundary,
+        },
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+    expect(brief.style_boundary_contract.version).toBe('oh_story_style_boundary_v1')
+    expect(brief.style_boundary_contract.hard_constraints.join('｜')).toContain('禁用词')
+    expect(brief.style_boundary_contract.copy_boundary_rules.join('｜')).toContain('不得复制样章桥段')
+  })
+
   test('adds an oh-story style boundary contract to pre-draft brief and prose prompt', () => {
     const project = {
       title: '超人的规则怪谈世界',
@@ -53652,6 +53867,34 @@ describe('chapter context word target source guards', () => {
     expect(beforeGate).toContain('const repairedContextPackage = applyChapterWordTargetToContext(')
     expect(beforeGate).toContain('preparedGeneration = prepareProseGenerationContract(repairedContextPackage, options)')
     expect(beforeGate).not.toContain('options.allow_incomplete !== true')
+  })
+
+  test('returns repaired write preparation brief on context_package after preflight repair', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
+    const returnStart = source.indexOf('return {', source.indexOf('const finalWritePreparationBrief = buildWritePreparationBrief', repairStart))
+    const returnBlock = source.slice(returnStart, returnStart + 900)
+    expect(repairStart).toBeGreaterThanOrEqual(0)
+    expect(returnBlock).toContain('context_package: repairedContextPackage')
+    expect(source.slice(repairStart, returnStart + 900)).toContain('write_preparation_brief: finalWritePreparationBrief')
+    expect(source.slice(repairStart, returnStart + 900)).toContain('Keep returned context_package aligned with the repaired brief/contracts')
+  })
+
+  test('infers material repair keys from preflight warning corpus, not only failed check keys', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
+    const needsStart = source.indexOf('const needsChapterBlueprint =', repairStart)
+    const repairHeader = source.slice(repairStart, needsStart)
+
+    expect(repairStart).toBeGreaterThanOrEqual(0)
+    expect(needsStart).toBeGreaterThan(repairStart)
+    expect(repairHeader).toContain('const warningCorpus =')
+    expect(repairHeader).toContain("target_emotion|人物出场|character_order")
+    expect(repairHeader).toContain('source_paths_missing|文风召回|benchmark_recall')
+    expect(repairHeader).toContain('追踪\\/?时间线|timeline_tracking')
+    expect(repairHeader).toContain("['chapter_blueprint', 'source_readiness_chapter_blueprint']")
+    expect(repairHeader).toContain("['benchmark_recall_source_paths', 'benchmark_recall_gate']")
+    expect(repairHeader).toContain("['source_readiness_timeline_tracking']")
   })
 
   test('blocks unattended prose generation when scene cards remain missing after auto repair', () => {

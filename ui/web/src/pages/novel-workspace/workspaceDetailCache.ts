@@ -18,7 +18,7 @@ const DEFAULT_LIMITS: Record<WorkspaceDetailKind, number> = {
 }
 
 const DEFAULT_BYTE_LIMITS: Record<WorkspaceDetailKind, number> = {
-  chapter: 2 * 1024 * 1024,
+  chapter: 8 * 1024 * 1024,
   review: 2 * 1024 * 1024,
   run: 3 * 1024 * 1024,
 }
@@ -34,6 +34,62 @@ function detailKey(kind: WorkspaceDetailKind, id: number, version = '') {
 
 function compactError(error: unknown) {
   return (error instanceof Error ? error.message : String(error || 'detail unavailable')).slice(0, 300)
+}
+
+
+const CHAPTER_DETAIL_SCENE_KEYS = [
+  'scene_no', 'title', 'scene_type', 'location', 'characters_present',
+  'purpose', 'purpose_tag', 'conflict', 'beat', 'opening_hook', 'ending_hook_seed',
+  'emotional_tone', 'exit_state', 'description',
+] as const
+
+function compactDetailText(value: any, max = 400) {
+  const text = String(value ?? '')
+  if (text.length <= max) return text
+  return `${text.slice(0, max)}…`
+}
+
+function compactChapterSceneForWorkspace(scene: any) {
+  if (!scene || typeof scene !== 'object') return scene
+  const compact: Record<string, any> = {}
+  for (const key of CHAPTER_DETAIL_SCENE_KEYS) {
+    if (scene[key] === undefined) continue
+    const value = scene[key]
+    compact[key] = typeof value === 'string' ? compactDetailText(value, key === 'purpose' || key === 'conflict' ? 500 : 180) : value
+  }
+  if (!compact.title && scene.description) compact.title = compactDetailText(scene.description, 80)
+  return compact
+}
+
+/** Keep chapter_text intact while slimming bloated scene/raw payloads for workspace hydration. */
+export function compactChapterDetailForWorkspace(record: any) {
+  if (!record || typeof record !== 'object') return record
+  const scenes = Array.isArray(record.scene_breakdown)
+    ? record.scene_breakdown.slice(0, 20).map(compactChapterSceneForWorkspace)
+    : record.scene_breakdown
+  const sceneList = Array.isArray(record.scene_list)
+    ? record.scene_list.slice(0, 20).map(compactChapterSceneForWorkspace)
+    : record.scene_list
+  let rawPayload = record.raw_payload
+  if (rawPayload && typeof rawPayload === 'object' && !Array.isArray(rawPayload)) {
+    const next: Record<string, any> = {}
+    for (const key of [
+      'scene_cards', 'scenes', 'pre_draft_brief', 'must_advance', 'forbidden_repeats',
+      'chapter_blueprint', 'story_function',
+    ]) {
+      if (rawPayload[key] !== undefined) next[key] = rawPayload[key]
+    }
+    if (Array.isArray(next.scene_cards)) next.scene_cards = next.scene_cards.slice(0, 20).map(compactChapterSceneForWorkspace)
+    if (Array.isArray(next.scenes)) next.scenes = next.scenes.slice(0, 20).map(compactChapterSceneForWorkspace)
+    rawPayload = next
+  }
+  return {
+    ...record,
+    chapter_text: record.chapter_text,
+    scene_breakdown: scenes,
+    scene_list: sceneList,
+    raw_payload: rawPayload,
+  }
 }
 
 export function createWorkspaceDetailCache(
@@ -156,24 +212,25 @@ export function createWorkspaceDetailCache(
       let cursor = 0
       let retainedBytes = 0
       const worker = async () => {
-        while (!requestOptions.signal?.aborted && retainedBytes < maxBytes[kind]) {
+        while (!requestOptions.signal?.aborted) {
           const index = cursor
           cursor += 1
           if (index >= candidates.length) return
           const record = candidates[index]
-          const expectedBytes = Math.max(0, Number(record.estimatedBytes || 0))
-          if (expectedBytes > 0 && expectedBytes > maxBytes[kind] - retainedBytes) continue
           const result = await load(kind, record.id, record.version || '', requestOptions)
+          if (requestOptions.signal?.aborted) return
           if (result.status !== 'ready') {
-            if (!requestOptions.signal?.aborted) results[index] = result
+            results[index] = result
             continue
           }
           const bytes = Math.max(0, Number(result.bytes || 0))
-          if (bytes > maxBytes[kind] - retainedBytes) {
+          // Byte budget only limits caching retention. Ready details must still be returned,
+          // otherwise active chapter prose disappears when scene cards are oversized.
+          if (bytes > 0 && retainedBytes + bytes <= maxBytes[kind]) {
+            retainedBytes += bytes
+          } else {
             removeCached(detailKey(kind, record.id, record.version || ''))
-            continue
           }
-          retainedBytes += bytes
           results[index] = result
         }
       }

@@ -28,7 +28,7 @@ import {
   SyncOutlined,
   UpOutlined,
 } from '@ant-design/icons'
-import { chapterStatusTag, displayValue, wc } from './utils'
+import { chapterStatusTag, chapterWordCount, displayValue } from './utils'
 import {
   buildNovelDraftBriefSummary,
   buildNovelDeliverySummary,
@@ -246,6 +246,7 @@ function ProseEditor({
   const viewRef = React.useRef<EditorView | null>(null)
   const onChangeRef = React.useRef(onChange)
   const valueRef = React.useRef(value)
+  const syncingExternalValueRef = React.useRef(false)
 
   React.useEffect(() => {
     onChangeRef.current = onChange
@@ -255,9 +256,13 @@ function ProseEditor({
     valueRef.current = value
     const view = viewRef.current
     if (!view || view.state.doc.toString() === value) return
+    // External prop sync (detail hydrate / chapter switch) must not look like user edits,
+    // otherwise autosave can persist an empty draft and wipe stored prose.
+    syncingExternalValueRef.current = true
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert: value },
     })
+    syncingExternalValueRef.current = false
   }, [value])
 
   React.useEffect(() => {
@@ -338,6 +343,7 @@ function ProseEditor({
             if (!update.docChanged) return
             const next = update.state.doc.toString()
             valueRef.current = next
+            if (syncingExternalValueRef.current) return
             onChangeRef.current(next)
           }),
           proseTheme,
@@ -520,7 +526,7 @@ export function WorkspaceCenter({
     characterCount > 0 ? '角色已备' : '缺角色',
     outlineCount > 0 ? '大纲已备' : '缺大纲',
   ].join(' · ')
-  const activeWordCount = wc(activeChapter?.chapter_text)
+  const activeWordCount = chapterWordCount(activeChapter)
   const recommendedAction = writingRecommendation ?? buildNovelWritingRecommendation({
     materialReady,
     materialRecommendations,
@@ -529,6 +535,28 @@ export function WorkspaceCenter({
   })
   const aiResponsibility = buildNovelWritingResponsibility(recommendedAction)
   const deliverySummary = buildNovelDeliverySummary(chapterAcceptanceDesk)
+  const deliveryNeedsStorySync = Boolean(deliverySummary.storyStateSyncAction)
+  const deliveryPrimaryIsSync = deliverySummary.actionKey === 'sync_story_state'
+  const deliveryNextStepText = (() => {
+    if (deliveryPrimaryIsSync) return '正文已就绪。当前优先同步故事状态，再继续下一章。'
+    if (deliveryNeedsStorySync && deliverySummary.actionKey) {
+      return `当前优先：${deliverySummary.actionLabel}。正文若已满意，可另外同步故事状态（不会回滚正文）。`
+    }
+    if (deliverySummary.actionKey) {
+      return `当前优先：${deliverySummary.actionLabel}${deliverySummary.reason ? `。${deliverySummary.reason}` : '。'}`
+    }
+    return deliverySummary.reason || '按交稿进度完成质检、修订和故事状态同步。'
+  })()
+  const deliveryQualityPending = Boolean(
+    deliverySummary.qualityLabel.includes('待')
+    || ['needs_quality_check', 'needs_recheck', 'needs_revision'].includes(String(chapterAcceptanceDesk?.acceptanceStatus || '')),
+  )
+  const deliveryQualityDetail = deliveryQualityPending
+    ? (deliverySummary.reason || '完成质量复检后再验收更稳妥。')
+    : '质量已通过，可继续同步状态或验收。'
+  const deliveryStoryDetail = deliveryNeedsStorySync
+    ? (deliverySummary.storyStatePanel?.guidance || '可在正文满意后手动同步；同步失败不会回滚正文。')
+    : '状态机已与当前正文对齐。'
   const activePreDraftBrief = activeChapter?.raw_payload?.pre_draft_brief || activeChapter?.raw_payload?.preDraftBrief || null
   const ipSceneIntakeTooltip = deliverySummary.ipSceneIntake?.candidates?.length ? (
     <div className="novel-delivery-ip-scene-tooltip">
@@ -688,15 +716,15 @@ export function WorkspaceCenter({
           }
         : {
             tone: 'delivery',
-            title: '本章待质检',
+            title: '本章交稿中',
             detail: deliverySummary.visible
-              ? `${deliverySummary.statusLabel}：${deliverySummary.reason || '按交稿状态完成质检、修订、状态同步和验收。'}`
-              : '正文已生成，下一步进入交稿质检、编辑报告和故事状态同步。',
-            actionLabel: '处理交稿质检',
+              ? (deliverySummary.reason || '按交稿进度完成质检、修订和故事状态同步。')
+              : '正文已生成，下一步进入交稿质检与故事状态同步。',
+            actionLabel: deliverySummary.actionLabel || '处理交稿',
             disabled: false,
             loading: Boolean(deliveryActionLoading),
             run: runQueueDeliveryAction,
-            tags: deliverySummary.visible ? [deliverySummary.qualityLabel, deliverySummary.storyStateLabel].filter(Boolean) : ['待质检'],
+            tags: [],
           }
     : null
   const recommendedToolbarLoading = recommendedAction.key === 'diagnostics'
@@ -817,7 +845,7 @@ export function WorkspaceCenter({
                   </Tooltip>
                 ))}
               </div>
-              {queueFocus && currentQueueItem && (
+              {queueFocus && currentQueueItem && !(queueFocus.tone === 'delivery' && deliverySummary.visible) && (
                 <div className={`novel-writing-queue-focus novel-writing-queue-focus-${queueFocus.tone}`}>
                   <div className="novel-writing-queue-focus-main">
                     <span>{queueFocus.title}</span>
@@ -826,10 +854,20 @@ export function WorkspaceCenter({
                       {queueFocus.detail}
                     </Text>
                   </div>
-                  <Space wrap size={6}>
+                  <Space wrap size={6} align="center">
                     {queueFocus.tags.map(label => (
                       <Tag key={label} color={queueFocus.tone === 'delivery' ? 'blue' : queueFocus.tone === 'draft' ? 'green' : 'gold'} bordered={false}>{label}</Tag>
                     ))}
+                    <Button
+                      size="small"
+                      type="primary"
+                      className="novel-writing-queue-focus-action"
+                      loading={queueFocus.loading}
+                      disabled={queueFocus.disabled}
+                      onClick={queueFocus.run}
+                    >
+                      {queueFocus.actionLabel}
+                    </Button>
                   </Space>
                 </div>
               )}
@@ -837,14 +875,66 @@ export function WorkspaceCenter({
           )}
 
           {deliverySummary.visible && (
-            <div className={`novel-delivery-status-strip novel-delivery-status-strip-${deliverySummary.tone}`}>
+            <div className={`novel-delivery-status-strip novel-delivery-progress-panel novel-delivery-status-strip-${deliverySummary.tone}`}>
               <div className="novel-delivery-status-main">
-                <div className="novel-delivery-status-head">
-                  <span className="novel-delivery-status-label">交稿状态</span>
-                  <Tag className="novel-delivery-status-tag" bordered={false}>{deliverySummary.statusLabel}</Tag>
-                  <Tag bordered={false}>{deliverySummary.qualityLabel}</Tag>
-                  <Tag bordered={false}>{deliverySummary.storyStateLabel}</Tag>
+                <div className="novel-delivery-progress-header">
+                  <div className="novel-delivery-progress-title-block">
+                    <div className="novel-delivery-status-head">
+                      <span className="novel-delivery-status-label">交稿进度</span>
+                      <Tag className="novel-delivery-status-tag" bordered={false}>{deliverySummary.statusLabel}</Tag>
+                    </div>
+                    <Text className="novel-delivery-status-reason">
+                      {deliveryNextStepText}
+                    </Text>
+                  </div>
+                  <Space className="novel-delivery-status-actions" size={8} wrap>
+                    {deliverySummary.actionKey && (
+                      <Button
+                        className="novel-delivery-status-action"
+                        type="primary"
+                        size="small"
+                        loading={deliveryActionLoading}
+                        icon={deliverySummary.actionKey === 'sync_story_state' ? <SyncOutlined /> : undefined}
+                        onClick={() => onDeliveryAction?.(deliverySummary.actionKey!)}
+                      >
+                        <span className="novel-delivery-status-action-full">{deliverySummary.actionLabel}</span>
+                        <span className="novel-delivery-status-action-compact">{deliverySummary.compactActionLabel}</span>
+                      </Button>
+                    )}
+                    {deliverySummary.storyStateSyncAction
+                      && deliverySummary.actionKey !== 'sync_story_state' && (
+                      <Button
+                        className="novel-delivery-status-action"
+                        size="small"
+                        icon={<SyncOutlined />}
+                        loading={deliveryActionLoading}
+                        onClick={() => onDeliveryAction?.(deliverySummary.storyStateSyncAction!.key)}
+                      >
+                        <span className="novel-delivery-status-action-full">{deliverySummary.storyStateSyncAction.label}</span>
+                        <span className="novel-delivery-status-action-compact">同步状态</span>
+                      </Button>
+                    )}
+                  </Space>
                 </div>
+
+                <div className="novel-delivery-progress-steps">
+                  <div className="novel-delivery-progress-step is-done">
+                    <span className="novel-delivery-progress-step-label">1. 正文</span>
+                    <strong>已入库</strong>
+                    <Text type="secondary">本章正文已保留，可继续质检或同步状态。</Text>
+                  </div>
+                  <div className={`novel-delivery-progress-step ${deliveryQualityPending ? 'is-current' : 'is-done'}`}>
+                    <span className="novel-delivery-progress-step-label">2. 质量</span>
+                    <strong>{deliverySummary.qualityLabel}</strong>
+                    <Text type="secondary">{deliveryQualityDetail}</Text>
+                  </div>
+                  <div className={`novel-delivery-progress-step ${deliveryNeedsStorySync ? 'is-current' : 'is-done'}`}>
+                    <span className="novel-delivery-progress-step-label">3. 故事状态</span>
+                    <strong>{deliverySummary.storyStateLabel}</strong>
+                    <Text type="secondary">{deliveryStoryDetail}</Text>
+                  </div>
+                </div>
+
                 <div className="novel-delivery-status-chips">
                 {deliverySummary.deliveryRiskQueue && (
                   <Tooltip title={deliverySummary.deliveryRiskQueue.items.join('；')}>
@@ -1323,9 +1413,6 @@ export function WorkspaceCenter({
                   </>
                 )}
                 </div>
-                {deliverySummary.reason && (
-                  <Text className="novel-delivery-status-reason">{deliverySummary.reason}</Text>
-                )}
               </div>
             </div>
           )}
@@ -1862,7 +1949,7 @@ export function WorkspaceCenter({
               {recommendedAction.phase === 'draft' && renderWordTargetControl()}
             </div>
             <div className="novel-editor-toolbar-controls">
-              <Text className="novel-editor-word-count" type="secondary">{wc(activeChapter.chapter_text)} 字</Text>
+              <Text className="novel-editor-word-count" type="secondary">{chapterWordCount(activeChapter)} 字</Text>
               <SaveIndicator status={saveStatus} />
               <EditorDisplayControls prefs={editorDisplayPrefs} onChange={setEditorDisplayPrefs} />
               <Popover content={secondaryActionMenu} trigger="click" placement="bottomRight">

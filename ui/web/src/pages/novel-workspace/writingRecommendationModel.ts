@@ -32,6 +32,19 @@ export type NovelDeliverySummaryInput = {
   admissionStatus?: 'accepted' | 'accepted_with_warnings' | 'blocked_invalid' | ''
   qualityWarnings?: Array<{ code: string; source: string; message: string }>
   storyStateStatus?: 'synced' | 'pending' | ''
+  storyStatePanel?: {
+    visible?: boolean
+    status?: 'synced' | 'pending' | 'skipped' | 'lagging' | 'synced_with_gaps'
+    statusLabel?: string
+    headline?: string
+    summary?: string
+    reasons?: string[]
+    guidance?: string
+    chapterNo?: number
+    lastUpdatedChapter?: number
+    canSync?: boolean
+    primaryAction?: { key: NovelDeliveryActionKey; label: string } | null
+  } | null
   postCommitWarnings?: Array<{ stage: string; message: string }>
   statusLabel: string
   acceptanceReasons: string[]
@@ -353,6 +366,8 @@ export type NovelDeliverySummary = {
   actionLabel: string
   compactActionLabel: string
   secondaryActions: Array<{ key: NovelDeliveryActionKey; label: string }>
+  storyStatePanel: NonNullable<NovelDeliverySummaryInput['storyStatePanel']> | null
+  storyStateSyncAction: { key: NovelDeliveryActionKey; label: string } | null
 }
 
 export type NovelDraftBriefActionKey = 'metadata' | 'scene_cards' | 'build_brief' | 'confirm_brief' | 'generate'
@@ -1452,6 +1467,8 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
       actionLabel: '',
       compactActionLabel: '',
       secondaryActions: [],
+      storyStatePanel: null,
+      storyStateSyncAction: null,
     }
   }
 
@@ -1468,9 +1485,15 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
     tone,
     statusLabel: desk.statusLabel,
     qualityLabel: desk.qualityScore === null ? '质量待复检' : `质量 ${desk.qualityScore}`,
-    storyStateLabel: desk.acceptanceStatus === 'delivered_with_warnings' && desk.storyStateStatus === 'pending'
-      ? '正文已入库，故事状态待补同步'
-      : desk.storyStateSynced ? '故事状态已同步' : '故事状态待同步',
+    storyStateLabel: (() => {
+      if (desk.acceptanceStatus === 'needs_state_sync' || desk.storyStateStatus === 'pending') {
+        return desk.storyStatePanel?.headline || '正文已入库，故事状态待补同步'
+      }
+      if (desk.storyStatePanel?.status && desk.storyStatePanel.status !== 'synced') {
+        return desk.storyStatePanel.headline || '故事状态待同步'
+      }
+      return desk.storyStateSynced ? '故事状态已同步' : '故事状态待同步'
+    })(),
     reason: desk.acceptanceReasons.filter(Boolean).slice(0, 2).join('；') || '本章已有正文，请按交稿流程完成复检。',
     storylineSync: desk.storylineSync || null,
     storyUnitSync: desk.storyUnitSync || null,
@@ -1510,6 +1533,19 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
     actionLabel: desk.recommendedAcceptanceAction.label,
     compactActionLabel: compactDeliveryActionLabel(desk.recommendedAcceptanceAction.key, desk.recommendedAcceptanceAction.label),
     secondaryActions: desk.secondaryActions || [],
+    storyStatePanel: desk.storyStatePanel || null,
+    storyStateSyncAction: (() => {
+      const panel = desk.storyStatePanel
+      if (panel?.primaryAction && panel.status && panel.status !== 'synced') {
+        return { key: panel.primaryAction.key, label: panel.primaryAction.label }
+      }
+      const secondary = (desk.secondaryActions || []).find(item => item.key === 'sync_story_state')
+      if (secondary) return secondary
+      if (!desk.storyStateSynced && desk.acceptanceStatus !== 'hidden') {
+        return { key: 'sync_story_state', label: '立即同步故事状态' }
+      }
+      return null
+    })(),
   }
 }
 

@@ -156,8 +156,19 @@ function isBlockingLaunchGateStatus(status: string) {
   return /^(block|blocked|fail|failed|failure|error|missing|invalid|stop|stopped)$/i.test(compactText(status))
 }
 
-export function getChapterLaunchGateBlocker(gate: any) {
-  const blockedChecks = launchGateChecks(gate).filter(check => isBlockingLaunchGateStatus(check.status))
+export function getChapterLaunchGateBlocker(gate: any, options: { writePreparationBrief?: any } = {}) {
+  const liveWritePrep = options.writePreparationBrief
+  const liveWritePrepReady = ['ready', 'ok', 'pass'].includes(String(
+    liveWritePrep?.readiness_status
+    || liveWritePrep?.readinessStatus
+    || '',
+  ).toLowerCase())
+  const blockedChecks = launchGateChecks(gate).filter((check) => {
+    if (!isBlockingLaunchGateStatus(check.status)) return false
+    // Cockpit may send a cached write-prep launch gate; once live write prep is ready, do not hard-block.
+    if (liveWritePrepReady && /write_preparation|写前准备/i.test(`${check.key} ${check.label}`)) return false
+    return true
+  })
   if (blockedChecks.length === 0) return null
   const summary = blockedChecks
     .map(check => [check.label, check.reason || check.status].filter(Boolean).join('：'))

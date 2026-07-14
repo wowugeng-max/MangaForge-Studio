@@ -4,10 +4,13 @@ import apiClient from '../../api/client'
 import {
   buildChapterTreeData,
   buildTree,
-  wc,
+  chapterHasProse,
+  chapterIsPlaceholder,
+  chapterWordCount,
 } from './utils'
 import {
   applyWorkspaceDetailResults,
+  compactChapterDetailForWorkspace,
   createWorkspaceDetailCache,
   selectChapterWorkingSet,
   selectAutomaticChapterDetailRecords,
@@ -69,13 +72,9 @@ function compactChapterWorkspaceRecord(record: any) {
   for (const field of CHAPTER_WORKSPACE_FIELDS) {
     if (record?.[field] !== undefined) compact[field] = record[field]
   }
-  const text = String(record?.chapter_text || '')
   const hasSceneArrays = Array.isArray(record?.scene_breakdown) || Array.isArray(record?.scene_list)
-  const compactText = text.replace(/\s/g, '')
-  compact.has_prose = text
-    ? Boolean(compactText && !text.includes('【占位正文】'))
-    : Boolean(record?.has_prose || Number(record?.word_count || 0) > 0)
-  compact.word_count = text ? compactText.length : Number(record?.word_count || 0)
+  compact.has_prose = chapterHasProse(record)
+  compact.word_count = chapterWordCount(record)
   compact.has_scene_plan = hasSceneArrays
     ? Boolean(
         (Array.isArray(record?.scene_breakdown) && record.scene_breakdown.length > 0)
@@ -100,7 +99,7 @@ export function resolveSelectedWorkspaceModelId(currentId: number | undefined, m
 export function resolveActiveWorkspaceChapterId(currentId: number | null, chapters: any[]) {
   if (!Array.isArray(chapters) || chapters.length === 0) return null
   if (currentId && chapters.some((chapter: any) => Number(chapter.id) === Number(currentId))) return currentId
-  const fallback = chapters.find?.((chapter: any) => Boolean(chapter?.has_prose) || Number(chapter?.word_count || 0) > 0 || Boolean(chapter?.chapter_text)) || chapters[0] || null
+  const fallback = chapters.find?.((chapter: any) => chapterHasProse(chapter)) || chapters[0] || null
   return fallback?.id || null
 }
 
@@ -153,6 +152,7 @@ export function useNovelWorkspaceData({
           ? `/novel/reviews/${id}`
           : `/novel/runs/${id}`
       const response = await apiClient.get(url, { params: { project_id: projectIdRef.current }, signal })
+      if (kind === 'chapter') return compactChapterDetailForWorkspace(response.data)
       return response.data
     })
   }
@@ -257,18 +257,28 @@ export function useNovelWorkspaceData({
   useEffect(() => {
     const epoch = ++chapterDetailEpochRef.current
     const controller = new AbortController()
-    setChapterDetailResults([])
-    if (!workspaceDetailsBelongToProject(projectId, selectedProject)) return () => controller.abort()
+    if (!workspaceDetailsBelongToProject(projectId, selectedProject)) {
+      setChapterDetailResults([])
+      return () => controller.abort()
+    }
     if (chapterWorkingSet.length === 0) return () => controller.abort()
-    void detailCacheRef.current?.loadMany('chapter', chapterWorkingSet.map(record => ({
+    const workingIds = new Set(chapterWorkingSet.map(record => Number(record.id)))
+    // Keep already-ready details so compact summaries do not flash as unwritten while rehydrating.
+    setChapterDetailResults(prev => prev.filter(result => workingIds.has(Number(result.id)) && result.status === 'ready'))
+    const orderedWorkingSet = [...chapterWorkingSet].sort((left, right) => {
+      const leftActive = Number(left?.id || 0) === Number(activeChapterId || 0) ? 0 : 1
+      const rightActive = Number(right?.id || 0) === Number(activeChapterId || 0) ? 0 : 1
+      return leftActive - rightActive || Number(left?.chapter_no || 0) - Number(right?.chapter_no || 0)
+    })
+    void detailCacheRef.current?.loadMany('chapter', orderedWorkingSet.map(record => ({
       id: Number(record.id),
       version: detailVersion('chapter', record),
-      estimatedBytes: Math.max(1024, Number(record?.word_count || 0) * 4 + 32 * 1024),
+      estimatedBytes: Math.max(1024, Number(record?.word_count || 0) * 4 + 64 * 1024),
     })), { signal: controller.signal }).then(results => {
       if (!controller.signal.aborted && epoch === chapterDetailEpochRef.current) setChapterDetailResults(results)
     })
     return () => controller.abort()
-  }, [projectId, selectedProject, chapterWorkingSet])
+  }, [projectId, selectedProject, chapterWorkingSet, activeChapterId])
 
   useEffect(() => {
     const epoch = ++reviewDetailEpochRef.current
@@ -345,7 +355,7 @@ export function useNovelWorkspaceData({
 
   const chapterTree = useMemo(() => buildTree(outlines, chapters), [outlines, chapters])
   const chapterTreeData = useMemo(() => buildChapterTreeData(chapterTree), [chapterTree])
-  const proseChapters = useMemo(() => chapters.filter(ch => Boolean(ch?.has_prose) || Number(ch?.word_count || 0) > 0 || Boolean(ch?.chapter_text)), [chapters])
+  const proseChapters = useMemo(() => chapters.filter(ch => chapterHasProse(ch)), [chapters])
 
   const referenceSummary = useMemo(() => {
     const refs = Array.isArray(selectedProject?.reference_config?.references)
@@ -380,9 +390,8 @@ export function useNovelWorkspaceData({
   const filteredChapters = useMemo(() => {
     const keyword = chapterSearch.trim().toLowerCase()
     const filtered = sortedChapters.filter((ch) => {
-      const text = String(ch.chapter_text || '')
-      const isPlaceholder = text.includes('【占位正文】')
-      const isWritten = !isPlaceholder && (Boolean(ch?.has_prose) || Number(ch?.word_count || 0) > 0 || Boolean(text))
+      const isPlaceholder = chapterIsPlaceholder(ch)
+      const isWritten = chapterHasProse(ch)
       const matchesKeyword = !keyword || [
         ch.title,
         ch.chapter_summary,
@@ -402,7 +411,7 @@ export function useNovelWorkspaceData({
 
     const sorted = [...filtered]
     if (chapterSortMode === 'chapter_no_desc') sorted.sort((a, b) => b.chapter_no - a.chapter_no)
-    else if (chapterSortMode === 'word_count_desc') sorted.sort((a, b) => Number(b?.word_count || wc(b.chapter_text)) - Number(a?.word_count || wc(a.chapter_text)))
+    else if (chapterSortMode === 'word_count_desc') sorted.sort((a, b) => chapterWordCount(b) - chapterWordCount(a))
     else if (chapterSortMode === 'title_asc') sorted.sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'zh-CN'))
     else sorted.sort((a, b) => a.chapter_no - b.chapter_no)
 

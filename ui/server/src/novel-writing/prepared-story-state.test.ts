@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  blockingPreparedStoryStateHardFailures,
   buildPendingPreparedStoryStateUpdate,
   buildPreparedStoryStateHardFailures,
+  formatPreparedStoryStateFailureSummary,
+  isBlockingPreparedStoryStateFailure,
 } from './prepared-story-state'
 
 describe('prepared story state hard failures', () => {
@@ -75,5 +78,25 @@ describe('prepared story state hard failures', () => {
         expect.objectContaining({ key: 'story_state_invalid_payload' }),
       )
     }
+  })
+})
+
+describe('blocking prepared story state hard failures', () => {
+  test('only invalid payload and incomplete transport block manual apply', () => {
+    const failures = buildPreparedStoryStateHardFailures({
+      character_state_delta_sync: { missed: [{ name: '李玄', text: '计划受伤' }] },
+      state_delta_completeness: { blocking_missed: [{ key: 'relationship', blocking: true }] },
+    }, { invalid_payload: true })
+
+    expect(failures.map(item => item.key)).toEqual(expect.arrayContaining([
+      'story_state_invalid_payload',
+      'character_state_delta_sync',
+      'state_delta_completeness',
+    ]))
+    expect(blockingPreparedStoryStateHardFailures(failures).map(item => item.key)).toEqual([
+      'story_state_invalid_payload',
+    ])
+    expect(isBlockingPreparedStoryStateFailure({ key: 'character_state_delta_sync', message: 'x', source: 'story_state' })).toBe(false)
+    expect(formatPreparedStoryStateFailureSummary(failures)).toContain('无效 payload')
   })
 })

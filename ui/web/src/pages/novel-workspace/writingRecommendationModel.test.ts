@@ -119,6 +119,33 @@ describe('buildNovelDeliverySummary', () => {
     expect(summary.compactActionLabel).toBe('编辑报告')
   })
 
+  test('keeps quality recheck as primary but still exposes manual story-state sync', () => {
+    const summary = buildNovelDeliverySummary({
+      visible: true,
+      acceptanceStatus: 'needs_quality_check',
+      statusLabel: '需复检',
+      acceptanceReasons: ['本章已有正文，但还没有当前章节的质量复检记录。'],
+      qualityScore: null,
+      storyStateSynced: false,
+      storyStatePanel: {
+        visible: true,
+        status: 'lagging',
+        headline: '状态机仍停在第 14 章，落后于第 15 章正文',
+        guidance: '点“立即同步故事状态”，系统会从本章起按已写正文补跑状态机。',
+        reasons: ['故事状态更新返回了无效 payload/state_delta。'],
+        primaryAction: { key: 'sync_story_state', label: '立即同步故事状态' },
+      },
+      secondaryActions: [{ key: 'sync_story_state', label: '立即同步故事状态' }],
+      recommendedAcceptanceAction: { key: 'refresh_current_quality', label: '复检当前版本' },
+    })
+
+    expect(summary.visible).toBe(true)
+    expect(summary.actionKey).toBe('refresh_current_quality')
+    expect(summary.actionLabel).toBe('复检当前版本')
+    expect(summary.storyStateLabel).toContain('落后于第 15 章')
+    expect(summary.storyStateSyncAction).toEqual({ key: 'sync_story_state', label: '立即同步故事状态' })
+  })
+
   test('summarizes ready state with accept action', () => {
     const summary = buildNovelDeliverySummary({
       visible: true,

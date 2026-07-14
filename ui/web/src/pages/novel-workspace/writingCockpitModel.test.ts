@@ -3012,8 +3012,8 @@ describe('buildWritingCockpitModel', () => {
       }],
     })
 
-    expect(model.chapterAcceptanceDesk.statusLabel).toBe('已入库，建议修订')
-    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('delivered_with_warnings')
+    expect(model.chapterAcceptanceDesk.statusLabel).toBe('已入库，待同步状态机')
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('needs_state_sync')
     expect(model.chapterAcceptanceDesk.admissionStatus).toBe('accepted_with_warnings')
     expect(model.chapterAcceptanceDesk.qualityWarnings).toEqual([
       { code: 'quality_score_below_target', source: 'quality', message: '评分低于建议目标' },
@@ -3023,11 +3023,12 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterAcceptanceDesk.qualityScore).toBe(72)
     expect(model.chapterAcceptanceDesk.mustFix).toContain('强化章末钩子')
     expect(model.chapterAcceptanceDesk.storyStateSynced).toBe(false)
-    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('accept_chapter_and_continue')
+    expect(model.chapterAcceptanceDesk.storyStatePanel?.status).toBe('pending')
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('sync_story_state')
     expect(model.chapterAcceptanceDesk.secondaryActions.map(action => action.key)).toEqual(expect.arrayContaining(['apply_editor_revision', 'sync_story_state']))
     expect(model.chapterAcceptanceDesk.approvalBlocker).toBeNull()
-    expect(model.chapterHandoffDesk.status).toBe('ready')
-    expect(model.primaryActionKey).toBe('accept_chapter_and_continue')
+    expect(model.chapterHandoffDesk.status).toBe('needs_delivery')
+    expect(model.primaryActionKey).toBe('sync_story_state')
   })
 
   test('accepted admission metadata overrides legacy low score must-fix and failed quality gate', () => {
@@ -3215,9 +3216,175 @@ describe('buildWritingCockpitModel', () => {
     })
 
     expect(model.chapterAcceptanceDesk.admissionStatus).toBe('accepted_with_warnings')
-    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('delivered_with_warnings')
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('needs_state_sync')
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('sync_story_state')
     expect(model.chapterAcceptanceDesk.qualityWarnings[0]?.message).toBe('评分低于建议目标')
   })
+
+  test('ignores stale blocked_invalid runs when the chapter already has stored prose', () => {
+    const writtenChapter = {
+      ...chapters[0],
+      chapter_text: '盟友已经入局，通道尽头的裂缝又裂开一寸。'.repeat(40),
+      raw_payload: {
+        ...(chapters[0].raw_payload || {}),
+      },
+    }
+    delete (writtenChapter.raw_payload as any).prose_admission
+    delete (writtenChapter.raw_payload as any).proseAdmission
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [writtenChapter, chapters[1]],
+      activeChapter: writtenChapter,
+      materialScore: { score: 82, can_generate: true },
+      reviews: [],
+      activeRuns: [
+        {
+          id: 431,
+          status: 'success',
+          created_at: '2026-07-14T03:22:23.483Z',
+          output_ref: JSON.stringify({
+            truncated: true,
+            reason: 'storage_compaction',
+            chapter_id: writtenChapter.id,
+            chapter_no: writtenChapter.chapter_no,
+            admission_status: 'accepted_with_warnings',
+            quality_warnings: [{ source: 'quality', code: 'quality_advisory', message: '替换一级禁用词' }],
+            preview: '{"chapter":{"id":' + writtenChapter.id + ',"chapter_no":' + writtenChapter.chapter_no + '}}',
+          }),
+        },
+        {
+          id: 430,
+          status: 'failed',
+          created_at: '2026-07-14T03:06:57.786Z',
+          output_ref: JSON.stringify({
+            error: '模型未返回正文',
+            error_code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+            admission_status: 'blocked_invalid',
+            chapter_id: writtenChapter.id,
+            chapter_no: writtenChapter.chapter_no,
+          }),
+        },
+      ],
+    })
+
+    expect(model.chapterAcceptanceDesk.admissionStatus).toBe('accepted_with_warnings')
+    expect(model.chapterAcceptanceDesk.statusLabel).toBe('已入库，建议修订')
+    expect(model.chapterAcceptanceDesk.approvalBlocker).toBeNull()
+  })
+
+  test('does not terminal-block a written chapter from an older failed admission-only run', () => {
+    const writtenChapter = {
+      ...chapters[0],
+      chapter_text: '通道里的雾气更浓，老陈的呼吸声贴着岩壁。'.repeat(40),
+      has_prose: true,
+      word_count: 2400,
+      raw_payload: {},
+    }
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [writtenChapter, chapters[1]],
+      activeChapter: writtenChapter,
+      materialScore: { score: 82, can_generate: true },
+      reviews: [],
+      activeRuns: [{
+        id: 430,
+        status: 'failed',
+        created_at: '2026-07-14T03:06:57.786Z',
+        output_ref: JSON.stringify({
+          error: '模型未返回正文',
+          error_code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+          admission_status: 'blocked_invalid',
+          chapter_id: writtenChapter.id,
+          chapter_no: writtenChapter.chapter_no,
+        }),
+      }],
+    })
+
+    expect(model.chapterAcceptanceDesk.admissionStatus).not.toBe('blocked_invalid')
+    expect(model.chapterAcceptanceDesk.statusLabel).not.toBe('正文无效，未入库')
+  })
+
+  test('surfaces a clear story-state panel and primary sync action when prose is stored but state is pending', () => {
+    const writtenChapter = {
+      ...chapters[0],
+      chapter_text: '通道尽头的裂缝又裂开一寸，老陈的符文随之颤了一下。'.repeat(30),
+      raw_payload: {
+        ...(chapters[0].raw_payload || {}),
+        prose_admission: {
+          status: 'accepted_with_warnings',
+          quality_score: 88,
+          story_state_status: 'pending',
+          story_state_warning: {
+            hard_failures: [
+              { key: 'character_state_delta_sync', message: '本章计划的关键状态变化未记录：character_state_delta_sync' },
+              { key: 'chapter_handoff_delta_sync', message: '本章计划的关键状态变化未记录：chapter_handoff_delta_sync' },
+            ],
+          },
+          quality_warnings: [{ source: 'quality', code: 'quality_advisory', message: '替换一级禁用词' }],
+        },
+      },
+    }
+    const model = buildWritingCockpitModel({
+      project: {
+        ...project,
+        reference_config: {
+          ...(project.reference_config || {}),
+          story_state: { last_updated_chapter: 10 },
+        },
+      },
+      outlines,
+      chapters: [writtenChapter, chapters[1]],
+      activeChapter: writtenChapter,
+      materialScore: { score: 82, can_generate: true },
+      reviews: [],
+    })
+
+    expect(model.chapterAcceptanceDesk.visible).toBe(true)
+    expect(model.chapterAcceptanceDesk.storyStateSynced).toBe(false)
+    expect(model.chapterAcceptanceDesk.storyStatePanel?.status).toBe('pending')
+    expect(model.chapterAcceptanceDesk.storyStatePanel?.headline).toContain('尚未写入')
+    expect(model.chapterAcceptanceDesk.storyStatePanel?.reasons.join('；')).toContain('character_state_delta_sync')
+    expect(model.chapterAcceptanceDesk.storyStatePanel?.primaryAction?.key).toBe('sync_story_state')
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('sync_story_state')
+    expect(model.chapterAcceptanceDesk.statusLabel).toContain('待同步状态机')
+  })
+
+  test('explains draft_only mode skip and still offers manual story-state sync', () => {
+    const writtenChapter = {
+      ...chapters[0],
+      chapter_text: '他把秩序核心捏进掌心，决定先活着离开回廊。'.repeat(30),
+      raw_payload: {
+        prose_admission: {
+          status: 'accepted',
+          story_state_status: 'pending',
+          story_state_warning: {
+            skipped: true,
+            reason: 'draft_only production mode',
+          },
+        },
+      },
+    }
+    const model = buildWritingCockpitModel({
+      project: {
+        ...project,
+        reference_config: { story_state: { last_updated_chapter: 0 } },
+      },
+      outlines,
+      chapters: [writtenChapter, chapters[1]],
+      activeChapter: writtenChapter,
+      materialScore: { score: 82, can_generate: true },
+      reviews: [],
+    })
+
+    expect(model.chapterAcceptanceDesk.storyStatePanel?.status).toBe('skipped')
+    expect(model.chapterAcceptanceDesk.storyStatePanel?.summary).toContain('不会自动写状态机')
+    expect(model.chapterAcceptanceDesk.storyStatePanel?.primaryAction?.label).toContain('同步故事状态')
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('sync_story_state')
+  })
+
+
 
   test('readability review is summarized without blocking chapter acceptance', () => {
     const model = buildWritingCockpitModel({

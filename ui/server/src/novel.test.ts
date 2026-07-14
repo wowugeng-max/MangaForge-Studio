@@ -1402,6 +1402,52 @@ describe('novel diagnostic payload compaction', () => {
     expect(review.payload).not.toContain(hugeText)
   })
 
+  test('preserves admission summary fields when run output is storage-truncated', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '入库摘要保留' })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 13,
+      title: '盟友入局',
+      chapter_text: '正文'.repeat(3000),
+    })
+    // Keep two near-limit diagnostic strings so compacted JSON still exceeds the storage budget.
+    const hugePayload = {
+      chapter: {
+        id: chapter.id,
+        chapter_no: 13,
+        title: '盟友入局',
+        chapter_text: '正文字符'.repeat(2000),
+      },
+      admission_status: 'accepted_with_warnings',
+      quality_score: 92,
+      quality_warnings: [{ source: 'quality', code: 'quality_advisory', message: '替换一级禁用词' }],
+      story_state_status: 'pending',
+      prose_admission: {
+        status: 'accepted_with_warnings',
+        quality_score: 92,
+        quality_warnings: [{ source: 'quality', code: 'quality_advisory', message: '替换一级禁用词' }],
+        story_state_status: 'pending',
+      },
+      diagnostic_a: 'A'.repeat(50000),
+      diagnostic_b: 'B'.repeat(50000),
+    }
+    const run = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'generate_prose',
+      step_name: 'chapter-13',
+      status: 'success',
+      output_ref: JSON.stringify(hugePayload),
+    })
+    const stored = JSON.parse(String(run.output_ref || '{}'))
+    expect(stored.truncated).toBe(true)
+    expect(stored.admission_status).toBe('accepted_with_warnings')
+    expect(Number(stored.chapter_id || 0)).toBe(chapter.id)
+    expect(Number(stored.chapter_no || 0)).toBe(13)
+    expect(stored.prose_admission?.status || stored.quality_score).toBeTruthy()
+  })
+
+
   test('keeps prose quality review payload readable after compaction', async () => {
     const workspace = await tempWorkspace()
     const project = await createNovelProject(workspace, { title: '质检摘要压缩测试' })

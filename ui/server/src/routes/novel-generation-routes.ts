@@ -644,6 +644,8 @@ export function buildStandaloneProseServiceOptions(body: any = {}, runtime: {
     ...(body || {}),
     ...(runtime.modelId ? { model_id: runtime.modelId } : {}),
     auto_repair_quality_gate: runtime.autoRepairQualityGate,
+    // Match unattended writing: auto-fill local/model materials before hard-blocking the cockpit generate path.
+    auto_repair_missing_material: body?.auto_repair_missing_material !== false,
     approvals: body?.approvals || {},
     onStage: runtime.onStage,
     abortSignal: runtime.abortSignal,
