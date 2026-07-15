@@ -740,6 +740,30 @@ describe('novel project seed prompt', () => {
     expect(finalizeBlock).toContain('!authorConfirmed')
   })
 
+  test('derive-stream route writes stage and result SSE frames', async () => {
+    const source = await readFile(join(import.meta.dir, 'novel-core-routes.ts'), 'utf8')
+    expect(source).toContain("/api/novel/project-seed/derive-stream")
+    expect(source).toContain('text/event-stream')
+    expect(source).toContain("type: 'result'")
+    expect(source).toContain(': mangaforge-project-seed-heartbeat')
+    expect(source).toContain('sseData')
+    expect(source).toContain("type: 'error'")
+    expect(source).toContain('safeReportProjectSeedProgress')
+
+    const deriveStreamStart = source.indexOf("app.post('/api/novel/project-seed/derive-stream'")
+    const finalizeStart = source.indexOf("app.post('/api/novel/project-seed/finalize'", deriveStreamStart)
+    expect(deriveStreamStart).toBeGreaterThan(-1)
+    expect(finalizeStart).toBeGreaterThan(deriveStreamStart)
+    const streamBlock = source.slice(deriveStreamStart, finalizeStart)
+    expect(streamBlock).toContain('deriveProjectSeedWithModel')
+    expect(streamBlock).toContain('expandThinProjectSeedWithModel')
+    expect(streamBlock).toContain('ensureProjectSeedModelOutlines')
+    expect(streamBlock).toContain('onProgress')
+    expect(streamBlock).toContain("stage: 'assemble'")
+    expect(streamBlock).toContain('Cache-Control')
+    expect(streamBlock).toContain('no-cache, no-transform')
+  })
+
   test('materializes seed chapters even when raw payload contains an empty chapter array', async () => {
     const workspace = await tempDir('mangaforge-novel-materialize-chapters-')
     const { registerNovelCoreRoutes } = await import('./novel-core-routes')

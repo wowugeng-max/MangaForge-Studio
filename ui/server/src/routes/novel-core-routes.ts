@@ -43,7 +43,7 @@ import { buildOhStoryMainlineDefinitionContract, formatOhStoryMainlineDefinition
 import { buildOhStoryLongformStructureContract, formatOhStoryLongformStructurePrompt } from './novel-longform-structure-contract'
 import { buildOhStoryDirectorForProjectSeed } from './novel-oh-story-director'
 import { normalizeSettingAgentPayload } from './novel-setting-routes'
-import { safeReportProjectSeedProgress, resolvePassA3VolumeStageStatus, type ProjectSeedProgressReporter } from './novel-project-seed-progress'
+import { safeReportProjectSeedProgress, resolvePassA3VolumeStageStatus, sseData, type ProjectSeedProgressReporter } from './novel-project-seed-progress'
 
 
 function parseOptionalBoolean(value: any) {
@@ -3124,6 +3124,89 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
       res.json({ ok: true, seed, result, seed_diagnostics: seedDiagnostics })
     } catch (error) {
       res.status(500).json({ error: String(error) })
+    }
+  })
+
+
+  app.post('/api/novel/project-seed/derive-stream', async (req, res) => {
+    const activeWorkspace = getWorkspace()
+    await ensureWorkspaceStructure(activeWorkspace)
+    const idea = String(req.body?.idea || '').trim()
+    const title = String(req.body?.title || '').trim()
+    const lengthTarget = normalizeLengthTarget(req.body?.length_target) || 'medium'
+    const modelId = req.body?.model_id ? String(req.body.model_id) : undefined
+    if (!idea && !title) return res.status(400).json({ error: 'title or idea is required' })
+    if (!modelId) return res.status(400).json({ error: 'model_id is required' })
+
+    res.status(200)
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
+    res.setHeader('Cache-Control', 'no-cache, no-transform')
+    res.setHeader('Connection', 'keep-alive')
+    if (typeof (res as any).flushHeaders === 'function') (res as any).flushHeaders()
+
+    let closed = false
+    const markClosed = () => { closed = true }
+    req.on('close', markClosed)
+    res.on('close', markClosed)
+
+    const writeEvent = (payload: any) => {
+      if (closed || res.writableEnded) return
+      res.write(sseData(payload))
+    }
+
+    const onProgress: ProjectSeedProgressReporter = (event) => writeEvent(event)
+    const heartbeat = setInterval(() => {
+      if (closed || res.writableEnded) return
+      try { res.write(': mangaforge-project-seed-heartbeat\n\n') } catch { closed = true }
+    }, 15000)
+
+    try {
+      let { seed, result } = await deriveProjectSeedWithModel(activeWorkspace, idea, modelId, title, lengthTarget, onProgress)
+      seed = stripLocalScaffoldOutlines(seed)
+      let seedDiagnostics = annotateOutlineScaffoldDiagnostics(seed, buildProjectSeedDiagnostics(seed, idea, result))
+      const needsExpansion = !seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length || !hasUsableProjectSeed(seed) || projectSeedNeedsOutlineExpansion(seed)
+      if (needsExpansion) {
+        const recovered = await expandThinProjectSeedWithModel(activeWorkspace, seed, result, idea, modelId, title, lengthTarget, onProgress)
+        seed = stripLocalScaffoldOutlines(recovered.seed)
+        result = recovered.result
+        seedDiagnostics = annotateOutlineScaffoldDiagnostics(seed, recovered.seed_diagnostics)
+      }
+      // 分卷/前30章细纲：oh-story 思路是独立模型步骤，禁止本地模板落库。
+      if (projectSeedNeedsOutlineExpansion(seed)) {
+        const outlined = await ensureProjectSeedModelOutlines(activeWorkspace, seed, idea, modelId, title, lengthTarget, result, onProgress)
+        seed = stripLocalScaffoldOutlines(outlined.seed)
+        result = outlined.result || result
+        seedDiagnostics = annotateOutlineScaffoldDiagnostics(seed, outlined.seed_diagnostics)
+      }
+      safeReportProjectSeedProgress(onProgress, { stage: 'assemble', status: 'running', progress: 0.92 })
+      if (!seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length || !hasUsableProjectSeed(seed)) {
+        writeEvent({
+          type: 'error',
+          message: (result as any)?.error || '模型返回的项目种子仍不足',
+          seed,
+          seed_diagnostics: seedDiagnostics,
+        })
+        return res.end()
+      }
+      seedDiagnostics = annotateOutlineScaffoldDiagnostics(seed, seedDiagnostics || seed.seed_diagnostics)
+      seed = attachProjectSeedDirector({ ...seed, seed_diagnostics: seedDiagnostics })
+      safeReportProjectSeedProgress(onProgress, {
+        stage: 'assemble',
+        status: 'completed',
+        progress: 1,
+        outline_chapter_count: Array.isArray(seed.chapter_outlines) ? seed.chapter_outlines.length : 0,
+        outline_volume_count: Array.isArray(seed.volume_outlines) ? seed.volume_outlines.length : 0,
+        outline_foreshadowing_count: Array.isArray(seed.foreshadowing_plan) ? seed.foreshadowing_plan.length : 0,
+      })
+      writeEvent({ type: 'result', ok: true, seed, result, seed_diagnostics: seedDiagnostics })
+      res.end()
+    } catch (error) {
+      writeEvent({ type: 'error', message: String(error) })
+      if (!res.writableEnded) res.end()
+    } finally {
+      clearInterval(heartbeat)
+      req.off('close', markClosed)
+      res.off('close', markClosed)
     }
   })
 
