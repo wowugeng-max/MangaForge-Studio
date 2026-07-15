@@ -395,7 +395,9 @@ function buildAgentMessages(
   const promptOverrides = promptConfig.project_overrides_enabled === false ? {} : (promptConfig.prompts || {})
   const systemOverride = String(promptOverrides?.[agentId]?.system || promptOverrides?.global?.system || '').trim()
   const userOverride = String(promptOverrides?.[agentId]?.user || promptOverrides?.[agentId]?.prompt || '').trim()
-  const authoritativeProseTask = agentId === 'prose-agent' && context?.authoritativeProseTask === true
+  // authoritativeTask：调用方已提供完整 user prompt，禁止再套一层 agent 模板（否则会挤掉章纲/分卷）
+  const authoritativeTask = Boolean(context?.authoritativeTask)
+    || (agentId === 'prose-agent' && context?.authoritativeProseTask === true)
   const styleGuardrails = buildStyleGuardrails(project)
   const upstreamContext = context?.upstreamContext
     ? `\n\n前置 Agent 输出（作为参考上下文）：\n${JSON.stringify(context.upstreamContext, null, 2).slice(0, 4000)}`
@@ -413,7 +415,7 @@ function buildAgentMessages(
     ? knowledgeInjectionText
     : ''
 
-  const systemContent = (authoritativeProseTask ? baseNovelSystemPrompt() : (systemOverride || baseNovelSystemPrompt()))
+  const systemContent = (authoritativeTask ? baseNovelSystemPrompt() : (systemOverride || baseNovelSystemPrompt()))
     + styleGuardrails + memorySection + knowledgeSection + upstreamContext
 
   // Extract upstream results
@@ -422,7 +424,7 @@ function buildAgentMessages(
   const outlineResult = (context?.upstreamContext as any)?.['outline-agent'] || null
 
   // Task-specific prompt
-  const taskPrompt = authoritativeProseTask ? context.task : userOverride || (() => {
+  const taskPrompt = authoritativeTask ? context.task : userOverride || (() => {
     switch (agentId) {
       case 'market-agent':
         return buildMarketPrompt(project)

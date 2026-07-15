@@ -435,35 +435,47 @@ describe('novel project seed prompt', () => {
     expect(recovered.seed.synopsis).toContain('丁松')
     expect(recovered.seed.worldbuilding.world_summary).toContain('山海经')
     expect(recovered.seed.protagonist.goal).toContain('大荒')
-    expect(recovered.seed.volume_outlines.length).toBeGreaterThanOrEqual(5)
-    expect(recovered.seed.chapter_outlines.length).toBeGreaterThanOrEqual(10)
+    // 分卷/前30章细纲必须由模型生成，本地恢复草稿不再注入模板章纲。
+    expect(recovered.seed.volume_outlines || []).toEqual([])
+    expect(recovered.seed.chapter_outlines || []).toEqual([])
     expect(recovered.seed.seed_diagnostics.status).toBe('needs_model_expansion')
     expect(recovered.seed.seed_diagnostics.retained_fragments.join('\n')).toContain('蛾虫')
     expect(recovered.seed.seed_diagnostics.missing_fields).toContain('main_conflict')
   })
 
-  test('builds varied local fallback chapters instead of repeated pressure templates', async () => {
-    const { buildRecoverableProjectSeed } = await import('./novel-core-routes')
+  test('does not inject local scaffold chapter outlines into recoverable seeds', async () => {
+    const { buildRecoverableProjectSeed, stripLocalScaffoldOutlines, projectSeedOutlinesLookLikeLocalScaffold } = await import('./novel-core-routes')
     const recovered = buildRecoverableProjectSeed(
-      { title: '剑烛大荒', genre: '玄幻' },
+      {
+        title: '剑烛大荒',
+        genre: '玄幻',
+        chapter_outlines: [
+          { chapter_no: 1, title: '异常入局', summary: '江哲在日常位置撞见第一条异常规则', source: 'local_scaffold', scaffold: true },
+          { chapter_no: 2, title: '药铺夜问', summary: '安全地点在夜里变成审问场', source: 'local_scaffold', scaffold: true },
+        ],
+        volume_outlines: [
+          { title: '开局规则验证', summary: '验证核心规则', source: 'local_scaffold', scaffold: true },
+        ],
+      },
       '丁松言在边陲药铺发现蛾虫药性与《山海经》记载不一致，楚天行追索残篇，大荒规则开始反噬。',
       '剑烛大荒',
       'epic',
       { content: '已有线索：丁松言、蛾虫、山海经、边陲药铺、楚天行、残篇。' },
     )
 
-    const chapterTitles = recovered.seed.chapter_outlines.slice(0, 30).map((item: any) => String(item.title || ''))
-    const chapterSummaries = recovered.seed.chapter_outlines.slice(0, 30).map((item: any) => String(item.summary || item.chapter_goal || ''))
-    const volumeTitles = recovered.seed.volume_outlines.map((item: any) => String(item.title || ''))
-    const structuralLabels = ['逼问真相', '反向设局', '伏笔回收', '镇外大火', '首卷决战', '更大地图', '大荒开门']
-
-    expect(chapterTitles.some(title => /第\d+章压力升级/.test(title))).toBe(false)
-    expect(chapterTitles.filter(title => structuralLabels.includes(title))).toEqual([])
-    expect(recovered.seed.chapter_outlines[25].story_function).toBe('伏笔回收')
-    expect(chapterSummaries.some(summary => /在已有线索基础上推进规则验证、人物关系和阶段冲突/.test(summary))).toBe(false)
-    expect(new Set(chapterSummaries).size).toBeGreaterThanOrEqual(12)
-    expect(volumeTitles.some(title => /第\d+阶段长线扩容/.test(title))).toBe(false)
-    expect(new Set(volumeTitles).size).toBe(volumeTitles.length)
+    expect(recovered.seed.chapter_outlines || []).toEqual([])
+    expect(recovered.seed.volume_outlines || []).toEqual([])
+    const stripped = stripLocalScaffoldOutlines({
+      chapter_outlines: [
+        { chapter_no: 1, title: '异常入局', summary: '江哲在日常位置撞见第一条异常规则' },
+        { chapter_no: 2, title: '夜市第一笔交易', summary: '江哲用摊位规则换一条活路' },
+      ],
+    })
+    expect(stripped.chapter_outlines).toHaveLength(1)
+    expect(stripped.chapter_outlines[0].title).toBe('夜市第一笔交易')
+    expect(projectSeedOutlinesLookLikeLocalScaffold({
+      chapter_outlines: Array.from({ length: 8 }, (_, i) => ({ chapter_no: i + 1, title: '异常入局', summary: '日常位置撞见异常规则' })),
+    })).toBe(true)
   })
 
   test('repairs zero foreshadowing and turns confirmation gaps into usable seed assets', async () => {
@@ -497,14 +509,12 @@ describe('novel project seed prompt', () => {
 
     const repaired = repairProjectSeedGaps(seed, '丁松言靠山海经异兽食性在大荒升级。')
 
-    expect(repaired.foreshadowing_plan.length).toBeGreaterThanOrEqual(8)
-    expect(repaired.foreshadowing_plan[0].plant_at).toContain('第1章')
-    expect(repaired.foreshadowing_plan[0].payoff_at).toBeTruthy()
-    expect(repaired.foreshadowing_plan[0].description).toContain('丁松言')
+    // 伏笔改由模型生成；repair 不再注入本地固定伏笔模板。
+    expect(repaired.foreshadowing_plan || []).toEqual([])
     expect(repaired.author_confirmations.length).toBeGreaterThanOrEqual(3)
     expect(repaired.author_confirmations[0].answer).toContain('丁松言')
     expect(repaired.open_questions).toEqual([])
-    expect(repaired.seed_diagnostics.generated_fields).toContain('foreshadowing_plan')
+    expect(repaired.seed_diagnostics.generated_fields || []).not.toContain('foreshadowing_plan')
     expect(repaired.seed_diagnostics.generated_fields).toContain('author_confirmations')
   })
 
@@ -1071,3 +1081,112 @@ describe('novel project seed prompt', () => {
     expect(afterDelete.body.drafts).toHaveLength(0)
   })
 })
+
+
+describe('project seed local scaffold outlines', () => {
+  test('detects generic fallback chapter titles as local scaffold', async () => {
+    const { projectSeedOutlinesLookLikeLocalScaffold, projectSeedNeedsOutlineExpansion } = await import('./novel-core-routes')
+    const scaffoldSeed = {
+      synopsis: '有一句话故事',
+      logline: '主角要破局',
+      chapter_outlines: [
+        { chapter_no: 1, title: '异常入局', summary: '江哲在日常位置撞见第一条异常规则' },
+        { chapter_no: 2, title: '旧法失准', summary: '试图按旧经验处理危机' },
+        { chapter_no: 3, title: '初次验证', summary: '完成第一次小规模验证' },
+        { chapter_no: 4, title: '药铺夜问', summary: '安全地点在夜里变成审问场' },
+        { chapter_no: 5, title: '伏藏试验', summary: '主动设计低风险试验' },
+        { chapter_no: 6, title: '小镇追索', summary: '第一批追索者进入小镇' },
+        { chapter_no: 7, title: '禁忌代价', summary: '使用规则会留下代价' },
+        { chapter_no: 8, title: '残篇显影', summary: '核心物品第一次显形' },
+      ],
+      volume_outlines: [{ title: '开局规则验证', summary: '验证核心规则' }],
+    }
+    expect(projectSeedOutlinesLookLikeLocalScaffold(scaffoldSeed)).toBe(true)
+    expect(projectSeedNeedsOutlineExpansion(scaffoldSeed)).toBe(true)
+  })
+
+  test('keeps unique story outlines out of scaffold detection', async () => {
+    const { projectSeedOutlinesLookLikeLocalScaffold, projectSeedNeedsOutlineExpansion } = await import('./novel-core-routes')
+    const uniqueSeed = {
+      synopsis: '夜市规则超市',
+      chapter_outlines: Array.from({ length: 10 }, (_, i) => ({
+        chapter_no: i + 1,
+        title: `夜市第${i + 1}笔交易`,
+        summary: `江哲用第${i + 1}条摊位规则换一条活人线索，并支付对应代价。`,
+        chapter_goal: `完成第${i + 1}次规则交易闭环`,
+      })),
+      volume_outlines: [{ title: '夜市立规', goal: '建立交易线' }],
+    }
+    expect(projectSeedOutlinesLookLikeLocalScaffold(uniqueSeed)).toBe(false)
+    expect(projectSeedNeedsOutlineExpansion(uniqueSeed)).toBe(false)
+  })
+})
+
+describe('project seed first30 model outlines', () => {
+  test('first30 outline prompt forbids local template chapter titles and requires model-only chapters', async () => {
+    const { buildProjectSeedFirst30OutlinePrompt } = await import('./novel-core-routes')
+    const prompt = buildProjectSeedFirst30OutlinePrompt({
+      title: '夜市诡闻',
+      logline: '摊主用规则漏洞卖活路',
+      synopsis: '江哲在夜市用交易规则对抗怪谈副本',
+      protagonist: { name: '江哲', goal: '守住摊位与活人' },
+      chapter_outlines: [{ chapter_no: 1, title: '异常入局', source: 'local_scaffold', scaffold: true }],
+    }, '规则怪谈夜市', '夜市诡闻', 'long')
+    expect(prompt).toContain('chapter_outlines')
+    expect(prompt).toContain('禁止通用模板章名')
+    expect(prompt).toContain('异常入局')
+    expect(prompt).toContain('只为当前小说项目生成')
+    expect(prompt).not.toContain('source": "local_scaffold"')
+  })
+})
+
+describe('project seed outline extraction and volume prompt', () => {
+  test('extractOutlineFieldsFromModelPayload recovers arrays from messy payloads', async () => {
+    const { extractOutlineFieldsFromModelPayload } = await import('./novel-core-routes')
+    const extracted = extractOutlineFieldsFromModelPayload({
+      content: JSON.stringify({
+        volume_outlines: [{ title: '夜市开张', goal: '立规矩', summary: '江哲守摊' }],
+        chapter_outlines: [
+          { chapter_no: 1, title: '第一单诡货', summary: '怪谈入摊' },
+          { chapter_no: 2, title: '假秤见血', summary: '规则反噬' },
+        ],
+        foreshadowing_plan: [{ name: '秤砣里的旧名', plant_at: '第2章', payoff_at: '第18章' }],
+      }),
+    })
+    expect(extracted.volume_outlines.length).toBe(1)
+    expect(extracted.chapter_outlines.length).toBe(2)
+    expect(extracted.foreshadowing_plan.length).toBe(1)
+  })
+
+  test('volume-only prompt asks only for volume_outlines', async () => {
+    const { buildProjectSeedVolumeOutlineOnlyPrompt } = await import('./novel-core-routes')
+    const prompt = buildProjectSeedVolumeOutlineOnlyPrompt({
+      title: '夜市诡闻',
+      logline: '摊主用规则漏洞卖活路',
+      synopsis: '江哲在夜市对抗怪谈',
+      protagonist: { name: '江哲' },
+    }, '规则怪谈夜市', '夜市诡闻', 'medium')
+    expect(prompt).toContain('volume_outlines')
+    expect(prompt).toContain('不要输出 chapter_outlines')
+    expect(prompt).toContain('开局规则验证')
+  })
+
+  test('stripLocalScaffoldOutlines keeps model-marked volumes and chapters', async () => {
+    const { stripLocalScaffoldOutlines } = await import('./novel-core-routes')
+    const stripped = stripLocalScaffoldOutlines({
+      volume_outlines: [
+        { title: '夜市开张', goal: '立规矩', summary: '江哲守摊', source: 'model', scaffold: false },
+        { title: '开局规则验证', goal: '模板', summary: '模板', source: 'local_scaffold', scaffold: true },
+      ],
+      chapter_outlines: [
+        { chapter_no: 1, title: '第一单诡货', summary: '怪谈入摊', source: 'model', scaffold: false },
+        { chapter_no: 2, title: '异常入局', summary: '本地兜底模板', source: 'local_scaffold', scaffold: true },
+      ],
+    })
+    expect(stripped.volume_outlines).toHaveLength(1)
+    expect(stripped.volume_outlines[0].title).toBe('夜市开张')
+    expect(stripped.chapter_outlines).toHaveLength(1)
+    expect(stripped.chapter_outlines[0].title).toBe('第一单诡货')
+  })
+})
+

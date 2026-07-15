@@ -309,7 +309,13 @@ export function evaluateLaunchpadReadiness(
       risks.push(lengthTarget === 'epic' ? '超长篇缺长线冲突引擎' : '缺长线冲突引擎')
       longformMissing.push('长线冲突引擎')
     }
-    if (!firstText(fields.growth_engine, plotEngine.growth_engine, root.growth_engine, root.power_system)) {
+    if (!firstText(
+      fields.growth_engine,
+      plotEngine.growth_engine,
+      root.growth_engine,
+      root.power_system,
+      asObject(root.worldbuilding).power_system,
+    )) {
       risks.push('缺成长引擎')
       longformMissing.push('成长引擎')
     }

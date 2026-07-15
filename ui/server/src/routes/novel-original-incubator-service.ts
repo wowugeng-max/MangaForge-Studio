@@ -92,6 +92,8 @@ export function createNovelOriginalIncubatorService() {
     'writing_bible.reader_retention_contract: {retention_double_engine,opening_hook_rule,ending_hook_rule,reward_randomness_rule,quality_checks}，opening_hook_rule 必须包含“前300字”，ending_hook_rule 必须留下下一章动作压力。',
     'writing_bible.opening_strategy_contract: {hook_type,opening_flow,mainline_graft,first_5_chapter_promise,threshold_ladder,forbidden_mixing,quality_checks}，hook_type 只能取“事件噱头/金手指噱头/人设噱头”之一；必须明确事件噱头和金手指噱头不能混用，写清前5章如何完成吸量承诺、何时嫁接主线、如何用 threshold_ladder 设门槛拉长剧情。',
     'commercial_positioning: {platform,reader_promise,selling_points,tropes,risks}',
+    'foundation_scorecard: {overall:0-100,grade:S|A|B|C|D,dimensions:[{key,title,score,missing,next_action}],top_risks,open_book_recommendation:recommend|polish|rewrite}，按 oh-story 项目创建标准自检。',
+    'foundation_scorecard.dimensions 至少覆盖 commercial_hook,story_power,character_design,world_system,opening_first30,longform_capacity,writing_bible。',
     '',
     '必须只输出一个合法 JSON object，不要输出 Markdown、解释、代码块或空对象。',
     '如果无法完整生成，也必须至少输出 commercial_positioning、characters、outlines、chapters 四类内容；chapters 数量不得少于 5。',
@@ -114,6 +116,7 @@ export function createNovelOriginalIncubatorService() {
         : (Array.isArray(selectedDirection?.setting_entities) ? selectedDirection.setting_entities : []),
       writing_bible: payload?.writing_bible || selectedDirection?.writing_bible || {},
       commercial_positioning: payload?.commercial_positioning || selectedDirection?.commercial_positioning || {},
+      foundation_scorecard: payload?.foundation_scorecard || selectedDirection?.foundation_scorecard || null,
     }
   }
 

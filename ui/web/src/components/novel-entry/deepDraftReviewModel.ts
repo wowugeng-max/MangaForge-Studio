@@ -146,6 +146,32 @@ function joinListItems(value: any, fields: string[]) {
     .join('\n')
 }
 
+function joinForeshadowingItems(value: any) {
+  if (!Array.isArray(value)) return ''
+  return value
+    .map(item => {
+      if (typeof item === 'string') return firstText(item)
+      const record = asObject(item)
+      const name = firstText(record.name, record.title)
+      const plant = firstText(record.plant_at, record.plant_chapter, record.plant)
+      const payoff = firstText(record.payoff_at, record.payoff_chapter, record.payoff)
+      const description = firstText(record.description, record.surface, record.summary, record.hook)
+      const truth = firstText(record.true_meaning, record.truth)
+      if (name && (plant || payoff || description)) {
+        return [
+          name,
+          plant ? `埋设：${plant}` : '',
+          payoff ? `回收：${payoff}` : '',
+          description ? `表层：${description}` : '',
+          truth ? `真相：${truth}` : '',
+        ].filter(Boolean).join('｜')
+      }
+      return firstText(description, name, item)
+    })
+    .filter(Boolean)
+    .join('\n')
+}
+
 function joinConfirmationItems(value: any) {
   if (!Array.isArray(value)) return ''
   return value
@@ -263,47 +289,46 @@ function buildReviewForeshadowingLines(model: DeepDraftReviewModel, seed: any) {
   const root = asObject(seed)
   const protagonist = model.characters[0]
   const antagonist = model.characters[1]
+  const support = model.characters[2]
   const protagonistName = firstText(protagonist?.name, asObject(root.protagonist).name, '主角')
-  const antagonistName = firstText(antagonist?.name, asObject(root.antagonist).name, '阶段对手')
-  const ruleName = firstText(model.world.powerSystem, model.world.summary, model.basics.pitch, `${model.basics.title || '本书'}核心规则`)
-  const firstVolume = firstText(model.volumes[0]?.title, '第一卷')
-  const secondVolume = firstText(model.volumes[1]?.title, '第二卷')
-  const anchors = [
-    chapterAnchor(model.chapters, 0, 1),
-    chapterAnchor(model.chapters, 2, 3),
-    chapterAnchor(model.chapters, 4, 5),
-    chapterAnchor(model.chapters, 7, 8),
-    chapterAnchor(model.chapters, 10, 11),
-    chapterAnchor(model.chapters, 14, 15),
-    chapterAnchor(model.chapters, 18, 19),
-    chapterAnchor(model.chapters, 23, 24),
-    chapterAnchor(model.chapters, 27, 28),
-    chapterAnchor(model.chapters, 29, 30),
-  ]
-  const payoffs = [
-    chapterAnchor(model.chapters, 8, 9),
-    chapterAnchor(model.chapters, 12, 13),
-    chapterAnchor(model.chapters, 16, 17),
-    chapterAnchor(model.chapters, 20, 21),
-    chapterAnchor(model.chapters, 24, 25),
-    chapterAnchor(model.chapters, 27, 28),
-    chapterAnchor(model.chapters, 29, 30),
-    `${firstVolume}结尾`,
-    `${secondVolume}中段`,
-    `${secondVolume}结尾`,
-  ]
+  const antagonistName = firstText(antagonist?.name, asObject(root.antagonist).name, '主要对手')
+  const supportName = firstText(support?.name, '关键同伴')
+  const title = firstText(model.basics.title, root.title, '本书')
+  const ruleName = firstText(model.world.powerSystem, model.world.summary, model.basics.pitch, `${title}核心规则`)
+  const worldHook = firstText(model.world.summary, model.basics.synopsis, model.basics.pitch, title)
+  const firstVolume = firstText(model.volumes[0]?.title, model.volumes[0]?.goal, '第一卷')
+  const secondVolume = firstText(model.volumes[1]?.title, model.volumes[1]?.goal, '第二卷')
+  const chapterHooks = model.chapters
+    .slice(0, 12)
+    .map((chapter, index) => ({
+      no: chapter.chapterNo || index + 1,
+      title: firstText(chapter.title, `第${chapter.chapterNo || index + 1}章`),
+      goal: firstText(chapter.goal, chapter.title, `第${chapter.chapterNo || index + 1}章事件`),
+    }))
+  const pickChapter = (index: number, fallbackNo: number) => {
+    const chapter = chapterHooks[index]
+    if (!chapter) return `第${fallbackNo}章`
+    return chapter.title ? `第${chapter.no}章《${chapter.title}》` : `第${chapter.no}章`
+  }
+  const pickGoal = (index: number, fallback: string) => firstText(chapterHooks[index]?.goal, fallback)
+
+  // 基于当前书名/人物/章节生成可编辑草稿，避免固定“异兽/规则异常”词表。
   return [
-    ['异兽/规则异常', `${protagonistName}第一次发现${ruleName}并不完全符合常识。`, '世界规则存在被篡改或缺页。'],
-    ['知识来源破绽', `${protagonistName}说出一个此世不该知道的词。`, `${antagonistName}由此锁定主角异常来源。`],
-    ['规则代价', `第一次成功利用${ruleName}后留下轻微反噬。`, '力量不是免费升级，代价会在首卷决战前集中爆发。'],
-    ['禁忌边界', '旁人提到一个不能触碰的禁忌，却没有解释原因。', '禁忌会打开更大地图。'],
-    ['反派旧识', `${antagonistName}对${protagonistName}的判断快得反常。`, '反派掌握残篇、前史或多重身份。'],
-    ['第一位见证者', `同盟或路人记住${protagonistName}一次看似随手的选择。`, '这次选择会变成主角道德底线的公开证据。'],
-    ['残缺地图/残篇', '出现一块不完整地图、残页、药方、符号或旧物。', '它对应第二卷入口。'],
-    ['错误答案', `${protagonistName}用错误理解得到一次小胜。`, '小胜会误导主角，回收时发现真正规则更残酷。'],
-    ['爽点债务', '首卷中段给出一次明显爽点，但留下未完全兑现的债务。', '首卷结尾必须用更大回报偿还。'],
-    ['全书级谜面', `${firstVolume}收束前露出一句和全书核心真相有关的话。`, '这是超长篇主线的第一行答案。'],
-  ].map(([name, surface, truth], index) => `${name}｜埋设：${anchors[index]}｜回收：${payoffs[index]}｜表层：${surface}｜真相：${truth}`)
+    [`${title}异常开端`, `${protagonistName}在${pickGoal(0, '开局事件')}中第一次确认${ruleName}与常识冲突。`, `${worldHook}背后另有更大规则层。`],
+    [`${protagonistName}的信息差`, `${protagonistName}使用只有自己知道的细节推进局面。`, `${antagonistName}会因此锁定其异常来源。`],
+    [`${ruleName}的代价`, `${protagonistName}第一次兑现${ruleName}后留下可见代价。`, '代价会在首卷高潮前集中爆发。'],
+    [`${antagonistName}的旧账`, `${antagonistName}对${protagonistName}的反应快得反常。`, `${antagonistName}掌握与${title}相关的旧线索。`],
+    [`${supportName}的见证`, `${supportName}记住${protagonistName}一次关键选择。`, '该选择会成为后续立场与冲突证据。'],
+    [`${firstVolume}隐藏入口`, pickGoal(3, '中段事件') + '里出现一件未解释的关键物证/地点。', `它通往${secondVolume}的真正入口。`],
+    [`错误胜利`, `${protagonistName}靠错误理解取得一次小胜。`, '回收时会证明真正规则更残酷。'],
+    [`首卷债务`, `${pickChapter(5, 6)}给出爽点但留下未还清的债务。`, `${firstVolume}结尾必须用更大回报偿还。`],
+    [`${title}主线谜面`, `${firstVolume}收束前露出一句只属于${title}的核心真相。`, '这是长线主线的第一行答案。'],
+    [`不可回头的选择`, `${protagonistName}在${pickChapter(8, 9)}做出不可逆选择。`, '该选择会改写人物关系与后续地图。'],
+  ].map(([name, surface, truth], index) => {
+    const plant = pickChapter(index % Math.max(chapterHooks.length, 1), index + 1)
+    const payoff = pickChapter(Math.min(index + 4, Math.max(chapterHooks.length - 1, 0)), index + 8)
+    return `${name}｜埋设：${plant}｜回收：${payoff}｜表层：${surface}｜真相：${truth}`
+  })
 }
 
 function buildReviewConfirmationLines(model: DeepDraftReviewModel, seed: any) {
@@ -400,7 +425,7 @@ export function buildDeepDraftReviewModel(seed: any): DeepDraftReviewModel {
     volumes: volumes.map(normalizeVolume).filter(Boolean) as DeepDraftVolume[],
     chapters: chapters.map(normalizeChapter).filter(Boolean) as DeepDraftChapter[],
     continuity: {
-      foreshadowing: joinListItems(foreshadowing, ['name', 'title', 'hook', 'description']),
+      foreshadowing: joinForeshadowingItems(foreshadowing),
       openQuestions: openQuestions.map((item: any) => firstText(item)).filter(Boolean).join('\n') || joinConfirmationItems(authorConfirmations),
     },
   }

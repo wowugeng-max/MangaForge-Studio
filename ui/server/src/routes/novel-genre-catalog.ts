@@ -710,3 +710,59 @@ export function formatOhStoryGenreCatalogPrompt(contract: OhStoryGenreCatalogCon
     JSON.stringify(contract, null, 2),
   ].join('\n')
 }
+
+
+export type OhStoryGenreCatalogGuide = {
+  framework: string
+  keywords: string[]
+  reader_promise: string
+  structure_beats: string[]
+  must_have_scenes: string[]
+  emotional_rhythm: string[]
+  pitfalls: string[]
+  quality_checks: string[]
+  category_hint: string
+}
+
+function categoryHintForFramework(framework: string) {
+  if (/婚恋|小三|甜宠|霸总|追妻|后悔|死人/.test(framework)) return '女频/情感'
+  if (/规则怪谈|无限|悬疑|死人/.test(framework)) return '高压求生/智斗'
+  if (/仙侠|玄幻|凡人|都市高武|西幻|长生/.test(framework)) return '升级成长'
+  if (/历史|文娱|新媒体|同人|脑洞|搞笑|世情/.test(framework)) return '题材外壳/脑洞'
+  return '通用长篇'
+}
+
+export function listOhStoryGenreCatalogGuides(): OhStoryGenreCatalogGuide[] {
+  return GENRE_CATALOG_ROUTES.map(route => ({
+    framework: route.framework,
+    keywords: [...route.keywords],
+    reader_promise: route.contract.reader_promise,
+    structure_beats: [...route.contract.structure_beats],
+    must_have_scenes: [...route.contract.must_have_scenes],
+    emotional_rhythm: [...route.contract.emotional_rhythm],
+    pitfalls: [...route.contract.pitfalls],
+    quality_checks: [...route.contract.quality_checks],
+    category_hint: categoryHintForFramework(route.framework),
+  }))
+}
+
+export function matchOhStoryGenreCatalogGuide(...inputs: any[]): OhStoryGenreCatalogGuide | null {
+  const text = inputs
+    .flatMap(input => Array.isArray(input) ? input : [input])
+    .filter(input => input !== undefined && input !== null)
+    .map(input => typeof input === 'string' ? input : JSON.stringify(input))
+    .join('\n')
+  const route = firstMatchedRoute(text)
+  if (!route) return null
+  return {
+    framework: route.framework,
+    keywords: [...route.keywords],
+    reader_promise: route.contract.reader_promise,
+    structure_beats: [...route.contract.structure_beats],
+    must_have_scenes: [...route.contract.must_have_scenes],
+    emotional_rhythm: [...route.contract.emotional_rhythm],
+    pitfalls: [...route.contract.pitfalls],
+    quality_checks: [...route.contract.quality_checks],
+    category_hint: categoryHintForFramework(route.framework),
+  }
+}

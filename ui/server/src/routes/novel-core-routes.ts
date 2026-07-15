@@ -34,7 +34,7 @@ import {
 import { executeNovelAgent, previewNovelKnowledgeInjection } from '../llm'
 import { extractLLMText, parseJsonLikePayload, safeJsonStringify } from './novel-route-utils'
 import { purgeMemoryPalaceProject } from '../memory-service'
-import { buildOhStoryGenreCatalogContract, formatOhStoryGenreCatalogPrompt } from './novel-genre-catalog'
+import { buildOhStoryGenreCatalogContract, formatOhStoryGenreCatalogPrompt, listOhStoryGenreCatalogGuides, matchOhStoryGenreCatalogGuide } from './novel-genre-catalog'
 import { buildOhStoryGenreCoreMechanicsContract, formatOhStoryGenreCoreMechanicsPrompt } from './novel-genre-core-mechanics'
 import { buildOhStoryPlotSpecialTopicsContract, formatOhStoryPlotSpecialTopicsPrompt } from './novel-plot-special-topics'
 import { buildOhStoryCharacterDesignContract, formatOhStoryCharacterDesignPrompt } from './novel-character-design-contract'
@@ -329,6 +329,7 @@ function seedOutlineLooksTemplate(value: any, kind: 'volume' | 'chapter') {
   ].join(' '), 500)
   if (!textValue) return false
   if (/开篇承诺验证|第\d+阶段长线扩容/.test(textValue)) return true
+  if (/开局规则验证|第一敌手入局|地图与势力扩容|核心秘密反噬|大荒主线开门/.test(textValue)) return true
   if (/异象开端|第\d+章压力升级/.test(textValue)) return true
   if (/主角在已有线索基础上|围绕.+继续扩展地图/.test(textValue)) return true
   if (kind === 'chapter' && chapterTitleLooksStructural(record.title || record.name)) return true
@@ -450,6 +451,703 @@ function preferSeedArray(primary: any, fallback: any, kind: 'volume' | 'chapter'
   return primaryArray
 }
 
+
+const LOCAL_SCAFFOLD_CHAPTER_TITLES = new Set([
+  ...STRUCTURAL_CHAPTER_TITLES,
+  ...SHANHAI_FALLBACK_CHAPTER_TITLES,
+  ...GENERIC_FALLBACK_CHAPTER_TITLES,
+  '伏藏试验',
+  '禁忌代价',
+  '第一次反击',
+  '药铺夜问',
+  '残篇显影',
+  '小镇追索',
+])
+
+const LOCAL_SCAFFOLD_SUMMARY_PATTERNS = [
+  /在日常位置撞见第一条异常规则/,
+  /试图按旧经验处理危机/,
+  /完成第一次小规模验证/,
+  /安全地点在夜里变成审问场/,
+  /主动设计低风险试验/,
+  /第一批追索者进入/,
+  /开篇承诺验证/,
+  /第\d+阶段长线扩容/,
+  /根据已有线索建立可升级/,
+]
+
+export function projectSeedOutlinesLookLikeLocalScaffold(seed: any) {
+  const root = parseNestedSeed(seed)
+  const chapters = asSeedArray(root.chapter_outlines)
+  const volumes = asSeedArray(root.volume_outlines)
+  if (!chapters.length && !volumes.length) return true
+  if (chapters.length) {
+    const scaffoldHits = chapters.filter((item, index) => {
+      const record = parseNestedSeed(item)
+      const title = firstSeedText(record.title, record.name)
+      const summary = firstSeedText(record.summary, record.chapter_goal, record.goal, record.conflict)
+      if (title && LOCAL_SCAFFOLD_CHAPTER_TITLES.has(title)) return true
+      if (seedOutlineLooksTemplate(record, 'chapter')) return true
+      if (LOCAL_SCAFFOLD_SUMMARY_PATTERNS.some(pattern => pattern.test(summary))) return true
+      // generic "第N章压力升级" / empty unique identity
+      if (/^第\d+章$/.test(title) && !summary) return true
+      return false
+    }).length
+    if (scaffoldHits / chapters.length >= 0.6) return true
+  }
+  if (volumes.length) {
+    const volumeHits = volumes.filter(item => seedOutlineLooksTemplate(item, 'volume')).length
+    if (volumeHits / volumes.length >= 0.6) return true
+  }
+  return false
+}
+
+export function projectSeedNeedsOutlineExpansion(seed: any) {
+  const root = parseNestedSeed(seed)
+  if (!hasUsableProjectSeed(root)) return true
+  const chapters = asSeedArray(root.chapter_outlines)
+  if (chapters.length < 8) return true
+  return projectSeedOutlinesLookLikeLocalScaffold(root)
+}
+
+function mergeRecoveredSeedPreferModelOutlines(recoveredSeed: any, expandedSeed: any) {
+  const recovered = parseNestedSeed(recoveredSeed)
+  const expanded = parseNestedSeed(expandedSeed)
+  const expandedChapters = asSeedArray(expanded.chapter_outlines)
+  const recoveredChapters = asSeedArray(recovered.chapter_outlines)
+  const expandedVolumes = asSeedArray(expanded.volume_outlines)
+  const recoveredVolumes = asSeedArray(recovered.volume_outlines)
+  const preferExpandedChapters = expandedChapters.length > 0 && (
+    !projectSeedOutlinesLookLikeLocalScaffold({ chapter_outlines: expandedChapters })
+    || projectSeedOutlinesLookLikeLocalScaffold({ chapter_outlines: recoveredChapters })
+  )
+  const preferExpandedVolumes = expandedVolumes.length > 0 && (
+    !projectSeedOutlinesLookLikeLocalScaffold({ volume_outlines: expandedVolumes, chapter_outlines: [] })
+    || projectSeedOutlinesLookLikeLocalScaffold({ volume_outlines: recoveredVolumes, chapter_outlines: [] })
+  )
+  return {
+    ...recovered,
+    ...expanded,
+    writing_bible: {
+      ...parseNestedSeed(recovered.writing_bible),
+      ...parseNestedSeed(expanded.writing_bible),
+    },
+    worldbuilding: {
+      ...parseNestedSeed(recovered.worldbuilding),
+      ...parseNestedSeed(expanded.worldbuilding),
+    },
+    plot_engine: {
+      ...parseNestedSeed(recovered.plot_engine),
+      ...parseNestedSeed(expanded.plot_engine),
+    },
+    commercial_positioning: {
+      ...parseNestedSeed(recovered.commercial_positioning),
+      ...parseNestedSeed(expanded.commercial_positioning),
+    },
+    character_pool: {
+      ...parseNestedSeed(recovered.character_pool),
+      ...parseNestedSeed(expanded.character_pool),
+    },
+    chapter_outlines: preferExpandedChapters ? expandedChapters : (expandedChapters.length ? expandedChapters : recoveredChapters),
+    volume_outlines: preferExpandedVolumes ? expandedVolumes : (expandedVolumes.length ? expandedVolumes : recoveredVolumes),
+    characters: asSeedArray(expanded.characters).length ? asSeedArray(expanded.characters) : asSeedArray(recovered.characters),
+    foreshadowing_plan: asSeedArray(expanded.foreshadowing_plan).length ? asSeedArray(expanded.foreshadowing_plan) : asSeedArray(recovered.foreshadowing_plan),
+  }
+}
+
+function annotateOutlineScaffoldDiagnostics(seed: any, diagnostics: any = {}) {
+  const scaffolded = projectSeedOutlinesLookLikeLocalScaffold(seed)
+  return {
+    ...parseNestedSeed(diagnostics),
+    outlines_are_local_scaffold: scaffolded,
+    suggestion: scaffolded
+      ? (firstSeedText(diagnostics?.suggestion) || '当前分卷/细纲仍是本地兜底模板，尚未按你的创意差异化。请重新生成详细草稿，或手动改写分卷与前30章。')
+      : diagnostics?.suggestion,
+  }
+}
+
+
+const LOCAL_SCAFFOLD_FORESHADOWING_NAMES = new Set([
+  '异兽/规则异常',
+  '知识来源破绽',
+  '规则代价',
+  '禁忌边界',
+  '反派旧识',
+  '第一位见证者',
+  '残缺地图/残篇',
+  '错误答案',
+  '爽点债务',
+  '全书级谜面',
+])
+
+function foreshadowingLooksLikeLocalScaffold(item: any) {
+  const record = parseNestedSeed(item)
+  if (record.scaffold || record.source === 'local_scaffold' || record.source === 'auto_gap_repair' || record.source === 'deep_draft_review') {
+    const name = firstSeedText(record.name, record.title)
+    if (!name || LOCAL_SCAFFOLD_FORESHADOWING_NAMES.has(name)) return true
+    // deep_draft_review lines that are just the fixed short labels
+    if (LOCAL_SCAFFOLD_FORESHADOWING_NAMES.has(name.split(/[｜|]/)[0].trim())) return true
+  }
+  const name = firstSeedText(record.name, record.title)
+  if (name && LOCAL_SCAFFOLD_FORESHADOWING_NAMES.has(name)) {
+    const description = firstSeedText(record.description, record.surface, record.true_meaning)
+    if (!description || /并不完全符合常识|此世不该知道|轻微反噬|不能触碰的禁忌|残篇、前史|不完整地图/.test(description)) return true
+  }
+  if (typeof item === 'string') {
+    const line = firstSeedText(item)
+    const head = line.split(/[｜|]/)[0].trim()
+    if (LOCAL_SCAFFOLD_FORESHADOWING_NAMES.has(head)) return true
+  }
+  return false
+}
+
+function chapterLooksLikeLocalScaffold(item: any) {
+  const record = parseNestedSeed(item)
+  // 模型刚生成的细纲不要被模板指纹误杀
+  if (record.source === 'model' && record.scaffold !== true) return false
+  if (record.scaffold || record.source === 'local_scaffold') return true
+  const title = firstSeedText(record.title, record.name)
+  const summary = firstSeedText(record.summary, record.chapter_goal, record.goal, record.conflict)
+  if (LOCAL_SCAFFOLD_SUMMARY_PATTERNS.some(pattern => pattern.test(summary))) return true
+  // 仅标题命中模板词表不够；必须同时像结构模板或摘要空洞
+  if (title && LOCAL_SCAFFOLD_CHAPTER_TITLES.has(title)) {
+    if (seedOutlineLooksTemplate(record, 'chapter')) return true
+    if (!summary || summary.length < 12) return true
+    if (/规则验证|阶段冲突|已有线索|本地兜底|模板/.test(summary)) return true
+  }
+  if (seedOutlineLooksTemplate(record, 'chapter') && (!summary || /压力升级|开篇承诺验证/.test(summary + title))) return true
+  return false
+}
+
+export function stripLocalScaffoldOutlines(seed: any) {
+  const root = parseNestedSeed(seed)
+  const rawChapters = asSeedArray(root.chapter_outlines)
+  const chapters = rawChapters.filter(item => !chapterLooksLikeLocalScaffold(item) && firstSeedText(parseNestedSeed(item).title, parseNestedSeed(item).summary, parseNestedSeed(item).chapter_goal))
+  // 如果绝大多数都是模板，整组丢弃，避免“半模板半真”污染审阅台
+  const finalChapters = rawChapters.length && chapters.length / rawChapters.length < 0.4 ? [] : chapters
+  const rawVolumes = asSeedArray(root.volume_outlines)
+  const volumes = rawVolumes.filter(item => {
+    const record = parseNestedSeed(item)
+    if (record.source === 'model' && record.scaffold !== true) return true
+    if (record.scaffold || record.source === 'local_scaffold') return false
+    return !seedOutlineLooksTemplate(record, 'volume')
+  })
+  const finalVolumes = rawVolumes.length && volumes.length / rawVolumes.length < 0.4 ? [] : volumes
+  const rawForeshadowing = asSeedArray(root.foreshadowing_plan)
+  const foreshadowing = rawForeshadowing.filter(item => !foreshadowingLooksLikeLocalScaffold(item))
+  const finalForeshadowing = rawForeshadowing.length && foreshadowing.length / rawForeshadowing.length < 0.4 ? [] : foreshadowing
+  return {
+    ...root,
+    chapter_outlines: finalChapters,
+    volume_outlines: finalVolumes,
+    foreshadowing_plan: finalForeshadowing,
+  }
+}
+
+function requiredFirst30ChapterCount(lengthTarget: string) {
+  switch (normalizeLengthTarget(lengthTarget)) {
+    case 'short':
+      return 12
+    case 'epic':
+    case 'long':
+    case 'medium':
+    default:
+      return 30
+  }
+}
+
+export function buildProjectSeedFirst30OutlinePrompt(seed: any, idea = '', requestedTitle = '', lengthTarget = 'medium') {
+  const root = stripLocalScaffoldOutlines(seed)
+  const count = requiredFirst30ChapterCount(lengthTarget)
+  const storyCard = {
+    title: firstSeedText(requestedTitle, root.title),
+    genre: root.genre,
+    sub_genres: root.sub_genres,
+    logline: root.logline,
+    synopsis: root.synopsis,
+    core_premise: root.core_premise,
+    main_conflict: root.main_conflict,
+    protagonist: root.protagonist,
+    antagonist: root.antagonist,
+    characters: asSeedArray(root.characters).slice(0, 12),
+    character_pool: root.character_pool,
+    worldbuilding: root.worldbuilding,
+    plot_engine: root.plot_engine,
+    commercial_positioning: root.commercial_positioning,
+    writing_bible: root.writing_bible,
+    existing_volume_outlines: asSeedArray(root.volume_outlines).slice(0, 8),
+    existing_chapter_outlines: asSeedArray(root.chapter_outlines).slice(0, 8),
+  }
+  return [
+    '任务：只为当前小说项目生成“分卷大纲 + 前N章细纲”。只输出 JSON object，不要 Markdown，不要解释。',
+    requestedTitle ? `作品名：${requestedTitle}` : '',
+    describeLengthTarget(lengthTarget),
+    '',
+    '【用户原始想法】',
+    String(idea || root.raw_idea || '').slice(0, 8000),
+    '',
+    '【已确定的项目骨架（不要推翻主角名/核心因果/金手指限制）】',
+    safeJsonStringify(storyCard, 2, 18000),
+    '',
+    '输出字段：',
+    `{`,
+    `  "volume_outlines": [ { "title","goal","summary","hook","chapter_count" } ],`,
+    `  "chapter_outlines": [ { "chapter_no","title","summary","conflict","ending_hook","must_advance","forbidden_repeats" } ],`,
+    `  "first30_plan": { "chapters_1_3","chapters_4_10","chapters_11_30" }`,
+    `}`,
+    '',
+    '硬性要求：',
+    `1. 本轮优先完整输出 volume_outlines + chapter_outlines；chapter_outlines 必须覆盖第1-${count}章，chapter_no 从 1 连续递增。`,
+    '2. 每一章标题、summary、conflict、ending_hook 必须只属于本故事，禁止通用模板章名（如：异常入局、旧法失准、药铺夜问、开局规则验证、第N章压力升级）。',
+    '3. 1-3章兑现开篇承诺；4-10章完成试读闭环；11-30章抬高赌注并蓄势付费点（短篇按对应章数压缩）。',
+    '4. 章与章必须因果递进：上一章 ending_hook 要能自然接下一章。',
+    '5. volume_outlines 至少按篇幅给出完整分卷方向，标题与摘要不得套用“开局规则验证/第一敌手入局”等本地模板。',
+    '6. 本轮不要输出 foreshadowing_plan（伏笔会另一次调用生成）。',
+    '7. 不要生成正文；输出必须是可解析 JSON。',
+  ].filter(Boolean).join('\n')
+}
+
+
+export function extractOutlineFieldsFromModelPayload(payload: any) {
+  const root = parseNestedSeed(payload)
+  const bags = [
+    root,
+    parseNestedSeed(root.data),
+    parseNestedSeed(root.result),
+    parseNestedSeed(root.output),
+    parseNestedSeed(root.seed),
+    parseNestedSeed(root.project_seed),
+    parseNestedSeed(root.outline),
+    parseNestedSeed(root.outlines),
+    parseNestedSeed(root.master_outline),
+    parseNestedSeed(root.project),
+  ]
+  let chapter_outlines: any[] = []
+  let volume_outlines: any[] = []
+  let foreshadowing_plan: any[] = []
+  let first30_plan: any = {}
+  for (const bag of bags) {
+    if (!bag || typeof bag !== 'object') continue
+    const chapters = firstSeedArray(
+      bag.chapter_outlines,
+      bag.chapters,
+      bag.first_30_chapters,
+      bag.first30_chapters,
+      bag.detail_chapters,
+    )
+    const volumes = firstSeedArray(bag.volume_outlines, bag.volumes, bag.volumeOutlines)
+    const foreshadowing = asSeedArray(bag.foreshadowing_plan).length
+      ? asSeedArray(bag.foreshadowing_plan)
+      : asSeedArray(bag.foreshadowing)
+    const plan = parseNestedSeed(bag.first30_plan || bag.first_30_plan)
+    if (chapters.length && chapters.length >= chapter_outlines.length) chapter_outlines = chapters
+    if (volumes.length && volumes.length >= volume_outlines.length) volume_outlines = volumes
+    if (foreshadowing.length && foreshadowing.length >= foreshadowing_plan.length) foreshadowing_plan = foreshadowing
+    if (Object.keys(plan).length) first30_plan = { ...first30_plan, ...plan }
+  }
+
+  const tryExtractFromText = (raw: string) => {
+    if (!raw || typeof raw !== 'string') return
+    const chapterProp = extractJsonProperty(raw, 'chapter_outlines') || extractJsonProperty(raw, 'chapters')
+    const volumeProp = extractJsonProperty(raw, 'volume_outlines') || extractJsonProperty(raw, 'volumes')
+    const foreshadowProp = extractJsonProperty(raw, 'foreshadowing_plan') || extractJsonProperty(raw, 'foreshadowing')
+    const planProp = extractJsonProperty(raw, 'first30_plan') || extractJsonProperty(raw, 'first_30_plan')
+    if (Array.isArray(chapterProp) && chapterProp.length > chapter_outlines.length) chapter_outlines = chapterProp
+    if (Array.isArray(volumeProp) && volumeProp.length > volume_outlines.length) volume_outlines = volumeProp
+    if (Array.isArray(foreshadowProp) && foreshadowProp.length > foreshadowing_plan.length) foreshadowing_plan = foreshadowProp
+    const plan = parseNestedSeed(planProp)
+    if (Object.keys(plan).length) first30_plan = { ...first30_plan, ...plan }
+  }
+
+  // 文本兜底：从 raw string / content 字段抽数组（截断 JSON 时 partial parse 常会丢数组）
+  if (!chapter_outlines.length || !volume_outlines.length || !foreshadowing_plan.length) {
+    if (typeof payload === 'string') tryExtractFromText(payload)
+    if (root && typeof root === 'object') {
+      tryExtractFromText(firstSeedText(root.raw_content, root.content, root.text, root.message))
+      // 对象 stringify 后再抽一次，兼容嵌套奇怪但仍含字段的返回
+      try {
+        tryExtractFromText(JSON.stringify(root))
+      } catch {
+        // ignore
+      }
+    }
+  }
+  return { chapter_outlines, volume_outlines, foreshadowing_plan, first30_plan }
+}
+
+function buildProjectSeedChapterOutlineOnlyPrompt(seed: any, idea = '', requestedTitle = '', lengthTarget = 'medium', startNo = 1, endNo = 30) {
+  const root = stripLocalScaffoldOutlines(seed)
+  const storyCard = {
+    title: firstSeedText(requestedTitle, root.title),
+    genre: root.genre,
+    logline: root.logline,
+    synopsis: root.synopsis,
+    main_conflict: root.main_conflict,
+    protagonist: root.protagonist,
+    antagonist: root.antagonist,
+    worldbuilding: root.worldbuilding,
+    plot_engine: root.plot_engine,
+    volume_outlines: asSeedArray(root.volume_outlines).slice(0, 8),
+  }
+  return [
+    `任务：只生成第${startNo}-${endNo}章 chapter_outlines。只输出 JSON object，不要 Markdown。`,
+    requestedTitle ? `作品名：${requestedTitle}` : '',
+    describeLengthTarget(lengthTarget),
+    '',
+    '【故事骨架】',
+    safeJsonStringify(storyCard, 2, 14000),
+    '',
+    '【用户想法】',
+    String(idea || root.raw_idea || '').slice(0, 6000),
+    '',
+    '输出：',
+    `{ "chapter_outlines": [ { "chapter_no","title","summary","conflict","ending_hook","must_advance" } ] }`,
+    '',
+    `硬性要求：必须输出 chapter_no=${startNo} 到 ${endNo} 的连续章节；标题和摘要必须只属于本故事；禁止异常入局/药铺夜问/开局规则验证等模板章名；不要输出伏笔、分卷、正文。`,
+  ].filter(Boolean).join('\n')
+}
+
+
+export function buildProjectSeedVolumeOutlineOnlyPrompt(seed: any, idea = '', requestedTitle = '', lengthTarget = 'medium') {
+  const root = stripLocalScaffoldOutlines(seed)
+  const minVolumes = normalizeLengthTarget(lengthTarget) === 'short' ? 2 : 3
+  return [
+    '任务：只为当前小说生成 volume_outlines。只输出 JSON object，不要 Markdown，不要解释。',
+    requestedTitle || root.title ? `作品名：${firstSeedText(requestedTitle, root.title)}` : '',
+    describeLengthTarget(lengthTarget),
+    '',
+    '【用户原始想法】',
+    String(idea || root.raw_idea || '').slice(0, 6000),
+    '',
+    '【故事骨架】',
+    safeJsonStringify({
+      title: firstSeedText(requestedTitle, root.title),
+      genre: root.genre,
+      logline: root.logline,
+      synopsis: root.synopsis,
+      core_premise: root.core_premise,
+      main_conflict: root.main_conflict,
+      protagonist: root.protagonist,
+      antagonist: root.antagonist,
+      worldbuilding: root.worldbuilding,
+      plot_engine: root.plot_engine,
+      existing_chapter_outlines: asSeedArray(root.chapter_outlines).slice(0, 10),
+    }, 2, 14000),
+    '',
+    '输出：',
+    '{ "volume_outlines": [ { "title","goal","summary","hook","chapter_count" } ] }',
+    '',
+    '硬性要求：',
+    `1. 至少 ${minVolumes} 卷，标题与摘要必须只属于本故事，禁止“开局规则验证 / 第一敌手入局 / 阶段决局”等本地模板卷名。`,
+    '2. 每卷写清阶段目标、阶段冲突、本卷结尾钩子；chapter_count 合理。',
+    '3. 本轮不要输出 chapter_outlines、foreshadowing_plan、正文。',
+  ].filter(Boolean).join('\n')
+}
+
+async function generateProjectSeedFirst30OutlinesWithModel(
+  activeWorkspace: string,
+  seed: any,
+  idea: string,
+  modelId: string,
+  requestedTitle = '',
+  requestedLengthTarget = '',
+) {
+  const base = stripLocalScaffoldOutlines(seed)
+  const lengthTarget = normalizeLengthTarget(requestedLengthTarget || base.length_target) || 'medium'
+  const count = requiredFirst30ChapterCount(lengthTarget)
+  const projectStub = {
+    id: 0,
+    title: requestedTitle || base.title || '前30章细纲生成',
+    genre: base.genre || '',
+    sub_genres: base.sub_genres || [],
+    synopsis: base.synopsis || idea.slice(0, 500),
+    length_target: lengthTarget,
+    target_audience: base.target_audience || '',
+    style_tags: base.style_tags || [],
+    commercial_tags: base.commercial_tags || [],
+    reference_config: {},
+    status: 'draft',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }
+
+  const runOutlineAgent = async (prompt: string, maxTokens = 12000, temperature = 0.42) => {
+    return executeNovelAgent('outline-agent', projectStub as any, {
+      // 完整任务 prompt，禁止再套 buildOutlinePrompt（会重新塞回伏笔/总纲，挤掉分卷与章纲）
+      task: prompt,
+      authoritativeTask: true,
+    }, {
+      activeWorkspace,
+      modelId,
+      maxTokens,
+      temperature,
+      skipMemory: true,
+      responseMode: 'non_stream',
+    })
+  }
+
+  const payloadFromResult = (result: any) => {
+    const content = resultContentText(result)
+    const fromOutput = (result as any)?.output
+    if (fromOutput && typeof fromOutput === 'object' && !Array.isArray(fromOutput)) return fromOutput
+    return parseJsonLikePayload(fromOutput)
+      || parseJsonLikePayload(content)
+      || (typeof fromOutput === 'string' ? fromOutput : null)
+      || content
+      || {}
+  }
+
+  const normalizeChapters = (items: any[]) => asSeedArray(items)
+    .map((item, index) => {
+      const record = parseNestedSeed(item)
+      return {
+        ...record,
+        chapter_no: Number(record.chapter_no || record.chapter_number || record.chapterNo || index + 1) || index + 1,
+        title: firstSeedText(record.title, record.name),
+        summary: firstSeedText(record.summary, record.chapter_goal, record.goal, record.synopsis),
+        conflict: firstSeedText(record.conflict),
+        ending_hook: firstSeedText(record.ending_hook, record.hook),
+        must_advance: firstSeedText(record.must_advance, record.summary, record.chapter_goal),
+        source: 'model',
+        scaffold: false,
+      }
+    })
+    .filter(item => firstSeedText(item.title, item.summary))
+    .sort((a, b) => Number(a.chapter_no) - Number(b.chapter_no))
+
+  const normalizeVolumes = (items: any[]) => asSeedArray(items)
+    .map(item => ({ ...parseNestedSeed(item), source: 'model', scaffold: false }))
+    .filter(item => firstSeedText(item.title, item.summary, item.goal))
+
+  const normalizeForeshadowing = (items: any[]) => asSeedArray(items)
+    .map(item => {
+      if (typeof item === 'string') {
+        return { name: firstSeedText(item), description: firstSeedText(item), source: 'model', scaffold: false }
+      }
+      const record = parseNestedSeed(item)
+      return {
+        ...record,
+        name: firstSeedText(record.name, record.title),
+        plant_at: firstSeedText(record.plant_at, record.plant_chapter, record.plant),
+        payoff_at: firstSeedText(record.payoff_at, record.payoff_chapter, record.payoff),
+        description: firstSeedText(record.description, record.surface, record.summary),
+        true_meaning: firstSeedText(record.true_meaning, record.truth),
+        source: 'model',
+        scaffold: false,
+      }
+    })
+    .filter(item => firstSeedText(item.name, item.description) && !foreshadowingLooksLikeLocalScaffold(item))
+
+  const passNotes: string[] = []
+  const passErrors: string[] = []
+
+  // Pass A: 分卷 + 前N章细纲（不带伏笔，避免长输出互相挤掉）
+  const outlinePrompt = buildProjectSeedFirst30OutlinePrompt(base, idea, requestedTitle || base.title, lengthTarget)
+  let outlineResult: any = null
+  try {
+    outlineResult = await runOutlineAgent(outlinePrompt, 14000, 0.42)
+    if ((outlineResult as any)?.error) passErrors.push(`pass_a:${String((outlineResult as any).error).slice(0, 240)}`)
+  } catch (error: any) {
+    passErrors.push(`pass_a_throw:${String(error?.message || error).slice(0, 240)}`)
+    outlineResult = { error: String(error?.message || error), content: '' }
+  }
+  const outlineRaw = payloadFromResult(outlineResult)
+  const outlineExtracted = extractOutlineFieldsFromModelPayload(outlineRaw)
+  // 兼容 normalize 路径
+  const outlineNormalized = normalizeProjectSeedPayload(outlineRaw, idea, lengthTarget)
+  let modelChapters = normalizeChapters(
+    outlineExtracted.chapter_outlines.length ? outlineExtracted.chapter_outlines : outlineNormalized.chapter_outlines,
+  )
+  let modelVolumes = normalizeVolumes(
+    outlineExtracted.volume_outlines.length ? outlineExtracted.volume_outlines : outlineNormalized.volume_outlines,
+  )
+  let first30Plan = {
+    ...parseNestedSeed(base.first30_plan),
+    ...parseNestedSeed(outlineExtracted.first30_plan),
+    ...parseNestedSeed(outlineNormalized.first30_plan),
+  }
+  passNotes.push(`pass_a chapters=${modelChapters.length} volumes=${modelVolumes.length}`)
+
+  // Pass A2: 若章纲仍不足，拆段补生成（oh-story 细纲分步思路）
+  if (modelChapters.length < Math.min(12, count)) {
+    const mid = Math.ceil(count / 2)
+    try {
+      const part1Result = await runOutlineAgent(
+        buildProjectSeedChapterOutlineOnlyPrompt(base, idea, requestedTitle || base.title, lengthTarget, 1, mid),
+        10000,
+        0.4,
+      )
+      if ((part1Result as any)?.error) passErrors.push(`pass_a2_1:${String((part1Result as any).error).slice(0, 200)}`)
+      const part1 = extractOutlineFieldsFromModelPayload(payloadFromResult(part1Result))
+      const part1Chapters = normalizeChapters(part1.chapter_outlines)
+
+      const part2Result = await runOutlineAgent(
+        buildProjectSeedChapterOutlineOnlyPrompt(
+          { ...base, chapter_outlines: part1Chapters, volume_outlines: modelVolumes },
+          idea,
+          requestedTitle || base.title,
+          lengthTarget,
+          mid + 1,
+          count,
+        ),
+        10000,
+        0.4,
+      )
+      if ((part2Result as any)?.error) passErrors.push(`pass_a2_2:${String((part2Result as any).error).slice(0, 200)}`)
+      const part2 = extractOutlineFieldsFromModelPayload(payloadFromResult(part2Result))
+      const part2Chapters = normalizeChapters(part2.chapter_outlines)
+      const merged = [...part1Chapters, ...part2Chapters]
+      if (merged.length > modelChapters.length) modelChapters = merged
+      passNotes.push(`pass_a2 chapters=${modelChapters.length} (p1=${part1Chapters.length}, p2=${part2Chapters.length})`)
+    } catch (error: any) {
+      passErrors.push(`pass_a2_throw:${String(error?.message || error).slice(0, 240)}`)
+    }
+  }
+
+  // Pass A3: 分卷仍空时单独生成（不与 30 章挤同一响应）
+  if (!modelVolumes.length) {
+    try {
+      const volumeResult = await runOutlineAgent(
+        buildProjectSeedVolumeOutlineOnlyPrompt(
+          { ...base, chapter_outlines: modelChapters },
+          idea,
+          requestedTitle || base.title,
+          lengthTarget,
+        ),
+        5000,
+        0.4,
+      )
+      if ((volumeResult as any)?.error) passErrors.push(`pass_a3:${String((volumeResult as any).error).slice(0, 200)}`)
+      const volumeExtracted = extractOutlineFieldsFromModelPayload(payloadFromResult(volumeResult))
+      const volumeNormalized = normalizeProjectSeedPayload(payloadFromResult(volumeResult), idea, lengthTarget)
+      const nextVolumes = normalizeVolumes(
+        volumeExtracted.volume_outlines.length ? volumeExtracted.volume_outlines : volumeNormalized.volume_outlines,
+      )
+      if (nextVolumes.length) modelVolumes = nextVolumes
+      passNotes.push(`pass_a3 volumes=${modelVolumes.length}`)
+    } catch (error: any) {
+      passErrors.push(`pass_a3_throw:${String(error?.message || error).slice(0, 240)}`)
+    }
+  }
+
+  // Pass B: 伏笔单独生成（不挤占章纲 token）
+  let modelForeshadowing = normalizeForeshadowing(asSeedArray(base.foreshadowing_plan))
+  try {
+    const foreshadowPrompt = [
+      '任务：只为当前小说生成 foreshadowing_plan。只输出 JSON object。',
+      `作品：${firstSeedText(requestedTitle, base.title)}`,
+      '',
+      '【故事骨架】',
+      safeJsonStringify({
+        title: firstSeedText(requestedTitle, base.title),
+        logline: base.logline,
+        synopsis: base.synopsis,
+        protagonist: base.protagonist,
+        antagonist: base.antagonist,
+        worldbuilding: base.worldbuilding,
+        volume_outlines: modelVolumes.slice(0, 6),
+        chapter_outlines: modelChapters.slice(0, 12),
+      }, 2, 12000),
+      '',
+      '输出：{ "foreshadowing_plan": [ { "name","plant_at","payoff_at","description","true_meaning" } ] }',
+      '要求：至少 6 条；必须绑定本故事专有人物/规则/地点；禁止异兽/规则异常、知识来源破绽、规则代价、禁忌边界等模板伏笔名。',
+      '本轮不要输出 volume_outlines、chapter_outlines、正文。',
+    ].join('\n')
+    const foreshadowResult = await runOutlineAgent(foreshadowPrompt, 5000, 0.4)
+    if ((foreshadowResult as any)?.error) passErrors.push(`pass_b:${String((foreshadowResult as any).error).slice(0, 200)}`)
+    const foreshadowExtracted = extractOutlineFieldsFromModelPayload(payloadFromResult(foreshadowResult))
+    const nextForeshadowing = normalizeForeshadowing(foreshadowExtracted.foreshadowing_plan)
+    if (nextForeshadowing.length) modelForeshadowing = nextForeshadowing
+    passNotes.push(`pass_b foreshadowing=${modelForeshadowing.length}`)
+  } catch (error: any) {
+    passErrors.push(`pass_b_throw:${String(error?.message || error).slice(0, 240)}`)
+  }
+
+  let nextSeed = {
+    ...base,
+    volume_outlines: modelVolumes.length ? modelVolumes : asSeedArray(base.volume_outlines),
+    chapter_outlines: modelChapters.length ? modelChapters : [],
+    foreshadowing_plan: modelForeshadowing.length ? modelForeshadowing : asSeedArray(base.foreshadowing_plan).filter(item => !foreshadowingLooksLikeLocalScaffold(item)),
+    first30_plan: first30Plan,
+  }
+  // 只剥离明确本地模板，不误杀 source=model
+  nextSeed = stripLocalScaffoldOutlines(nextSeed)
+  nextSeed = repairProjectSeedGaps(nextSeed, idea)
+  nextSeed = attachProjectSeedDirector(nextSeed)
+
+  const chapterCount = asSeedArray(nextSeed.chapter_outlines).length
+  const volumeCount = asSeedArray(nextSeed.volume_outlines).length
+  const ok = chapterCount >= Math.min(8, count) && volumeCount > 0 && !projectSeedOutlinesLookLikeLocalScaffold(nextSeed)
+  const diagnostics = annotateOutlineScaffoldDiagnostics(nextSeed, {
+    ...buildProjectSeedDiagnostics(nextSeed, idea, outlineResult),
+    status: ok ? 'outlines_generated_by_model' : 'needs_model_outline',
+    usable: hasUsableProjectSeed(nextSeed),
+    outlines_generated_by_model: ok,
+    outline_chapter_count: chapterCount,
+    outline_volume_count: volumeCount,
+    outline_foreshadowing_count: asSeedArray(nextSeed.foreshadowing_plan).length,
+    outline_raw_preview: resultContentPreview(outlineResult).slice(0, 1500),
+    outline_pass_notes: passNotes,
+    outline_pass_errors: passErrors,
+    required_outline_chapter_count: count,
+    recovery_strategy: 'dedicated_first30_outline_model_pass_split',
+    suggestion: ok
+      ? `已由模型生成分卷 ${volumeCount} 个、前30章细纲 ${chapterCount} 章。`
+      : `模型细纲仍不足（当前章纲 ${chapterCount}/${count}，分卷 ${volumeCount}）。${passErrors.length ? `调用异常：${passErrors[0]}。` : ''}系统未使用本地模板填充。请重试或换更强模型。`,
+  })
+  return {
+    seed: attachProjectSeedDirector({ ...nextSeed, seed_diagnostics: diagnostics }),
+    result: outlineResult,
+    seed_diagnostics: diagnostics,
+    ok,
+  }
+}
+
+async function ensureProjectSeedModelOutlines(
+  activeWorkspace: string,
+  seed: any,
+  idea: string,
+  modelId: string | undefined,
+  requestedTitle = '',
+  requestedLengthTarget = '',
+  previousResult: any = null,
+) {
+  let current = stripLocalScaffoldOutlines(seed)
+  let diagnostics = annotateOutlineScaffoldDiagnostics(current, current.seed_diagnostics || buildProjectSeedDiagnostics(current, idea, previousResult))
+  if (!projectSeedNeedsOutlineExpansion(current)) {
+    return {
+      seed: attachProjectSeedDirector({ ...current, seed_diagnostics: diagnostics }),
+      result: previousResult,
+      seed_diagnostics: diagnostics,
+    }
+  }
+  if (!modelId) {
+    diagnostics = annotateOutlineScaffoldDiagnostics(current, {
+      ...diagnostics,
+      status: 'needs_model_outline',
+      suggestion: '缺少模型，无法生成前30章细纲。请选择模型后重新生成。',
+    })
+    return {
+      seed: attachProjectSeedDirector({ ...current, chapter_outlines: [], volume_outlines: asSeedArray(current.volume_outlines), seed_diagnostics: diagnostics }),
+      result: previousResult,
+      seed_diagnostics: diagnostics,
+    }
+  }
+  const generated = await generateProjectSeedFirst30OutlinesWithModel(
+    activeWorkspace,
+    current,
+    idea,
+    modelId,
+    requestedTitle,
+    requestedLengthTarget || current.length_target,
+  )
+  return {
+    seed: generated.seed,
+    result: generated.result || previousResult,
+    seed_diagnostics: generated.seed_diagnostics,
+  }
+}
+
 function mergeProjectSeedInput(primary: any, fallback: any) {
   const source = parseNestedSeed(primary)
   const extracted = parseNestedSeed(fallback)
@@ -517,30 +1215,40 @@ function buildFallbackVolumeOutlines(title: string, protagonistName: string, len
       summary: `${protagonistName}在${title}的第一处高压现场验证核心规则，建立读者承诺、能力代价和第一批敌意。`,
       hook: pitch,
       chapter_count: chapterCount,
+      source: 'local_scaffold',
+      scaffold: true,
     },
     {
       title: '第一敌手入局',
       summary: `${protagonistName}带着开局收益离开安全区，遭遇更高层势力试探，核心线索从生存工具变成争夺目标。`,
       hook: `${protagonistName}发现第一阶段胜利只是更大规则的入口。`,
       chapter_count: chapterCount,
+      source: 'local_scaffold',
+      scaffold: true,
     },
     {
       title: '地图与势力扩容',
       summary: `故事从局部事件扩展到组织、地图和资源链，盟友、债务、禁忌与反派阶梯同时加压。`,
       hook: '旧规则在新地图失效，主角必须付出更高代价重新破局。',
       chapter_count: chapterCount,
+      source: 'local_scaffold',
+      scaffold: true,
     },
     {
       title: '核心秘密反噬',
       summary: `${protagonistName}接近${title}底层真相，早期收益开始反噬，人物关系和主线目标出现不可逆选择。`,
       hook: '主角得到答案，也暴露了真正的长线敌人。',
       chapter_count: chapterCount,
+      source: 'local_scaffold',
+      scaffold: true,
     },
     {
       title: '大荒主线开门',
       summary: `第一轮世界规则、敌人和资产池完成升级，故事打开更大地图，为百万字以后持续连载预留主线引擎。`,
       hook: '首卷答案引出全书级问题，主角必须主动进入更危险的棋局。',
       chapter_count: chapterCount,
+      source: 'local_scaffold',
+      scaffold: true,
     },
   ].slice(0, count)
 }
@@ -595,6 +1303,8 @@ function buildFallbackChapterOutlines(
     ending_hook: endingHook,
     must_advance: index === 0 ? pitch : summary,
     forbidden_repeats: '不得重复上一章的信息揭示、震惊反应或单纯解释设定。',
+    source: 'local_scaffold',
+    scaffold: true,
   }))
 }
 
@@ -726,11 +1436,11 @@ export function repairProjectSeedGaps(seed: any, idea = '') {
   const root = parseNestedSeed(seed)
   if (!root || !Object.keys(root).length) return root
   const generated: string[] = []
-  const existingForeshadowing = asSeedArray(root.foreshadowing_plan)
+  const existingForeshadowing = asSeedArray(root.foreshadowing_plan).filter(item => !foreshadowingLooksLikeLocalScaffold(item))
   const existingConfirmations = asSeedArray(root.author_confirmations)
   const openQuestions = asSeedArray(root.open_questions).map(item => firstSeedText(item)).filter(Boolean)
-  const foreshadowingPlan = existingForeshadowing.length ? existingForeshadowing : buildFallbackForeshadowingPlan(root, idea)
-  if (!existingForeshadowing.length && foreshadowingPlan.length) generated.push('foreshadowing_plan')
+  // 伏笔必须由模型生成；本地模板只保留给前端“自动补齐”按钮，不再写入项目种子。
+  const foreshadowingPlan = existingForeshadowing
   const authorConfirmations = existingConfirmations.length ? existingConfirmations : (openQuestions.length ? buildAuthorConfirmations(root, idea) : [])
   if (!existingConfirmations.length && authorConfirmations.length) generated.push('author_confirmations')
   const seedDiagnostics = parseNestedSeed(root.seed_diagnostics)
@@ -935,12 +1645,13 @@ export function buildRecoverableProjectSeed(seed: any, idea = '', requestedTitle
     normalized.synopsis,
     compactSeedText(`${corePremise} ${mainConflict} 已有材料：${diagnostics.retained_fragments.join('；')}`, 500),
   )
-  const volumes = asSeedArray(normalized.volume_outlines).length
-    ? asSeedArray(normalized.volume_outlines)
-    : buildFallbackVolumeOutlines(title, protagonistName, lengthTarget, pitch)
-  const chapters = asSeedArray(normalized.chapter_outlines).length
-    ? asSeedArray(normalized.chapter_outlines)
-    : buildFallbackChapterOutlines(title, protagonistName, lengthTarget, mainConflict, pitch, diagnostics)
+  // 前30章/分卷必须由模型生成。本地兜底不再写入可返回给作者的种子。
+  const cleaned = stripLocalScaffoldOutlines({
+    volume_outlines: normalized.volume_outlines,
+    chapter_outlines: normalized.chapter_outlines,
+  })
+  const volumes = asSeedArray(cleaned.volume_outlines)
+  const chapters = asSeedArray(cleaned.chapter_outlines)
   const recoveredSeed = repairProjectSeedGaps({
     ...normalized,
     title,
@@ -983,7 +1694,7 @@ export function buildRecoverableProjectSeed(seed: any, idea = '', requestedTitle
       '请确认第一卷读者最期待的爽点回报是什么。',
     ],
     next_steps: [
-      '先让模型根据这份恢复草稿补齐商业钩子、人物池、世界规则、分卷和前30章。',
+      '先让模型根据这份恢复草稿补齐商业钩子、人物池、世界规则；分卷与前30章细纲必须由模型单独生成，禁止使用本地模板章名。',
       '作者审阅深度孵化草稿，保留有效灵感，删掉不符合口味的自动补位。',
       '定稿前检查核心承诺、主线矛盾、前30章追读和超长篇扩容引擎。',
     ],
@@ -992,14 +1703,14 @@ export function buildRecoverableProjectSeed(seed: any, idea = '', requestedTitle
     seedFieldMissing(seed || {}).filter(field => !seedFieldMissing(recoveredSeed).includes(field)),
     recoveredSeed.seed_diagnostics?.generated_fields || [],
   )
-  const recoveredDiagnostics = {
+  const recoveredDiagnostics = annotateOutlineScaffoldDiagnostics(recoveredSeed, {
     ...diagnostics,
     status: 'needs_model_expansion',
     usable: hasUsableProjectSeed(recoveredSeed),
     generated_fields: generatedFields,
     recovery_strategy: 'local_scaffold_then_same_model_expansion',
-    suggestion: '模型首轮返回偏薄。系统已把已有有效信息搭成可编辑草稿，并会继续要求同一模型按缺口清单扩写。',
-  }
+    suggestion: '模型首轮返回偏薄。系统已保留有效灵感为可编辑草稿；分卷/前30章细纲将继续请求同一模型生成，不会使用本地模板细纲冒充创作结果。',
+  })
   return {
     seed: {
       ...recoveredSeed,
@@ -1070,6 +1781,7 @@ export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea
   return [
     '任务：上一次项目种子输出偏薄，但里面有可用灵感。请基于这些有效信息补齐小说项目种子。只输出 JSON object，不要 Markdown，不要解释。',
     '关键原则：不要要求作者更换模型；不要丢弃已有线索；不要重新开一个无关故事；必须保留已有有效信息，并围绕缺口清单补齐。',
+    '特别注意：若当前草稿 chapter_outlines/volume_outlines 带有 local_scaffold、或章名像“异常入局/旧法失准/药铺夜问/开局规则验证”这类通用模板，必须全部重写为只属于本故事的分卷与前30章，禁止原样保留模板章名和模板摘要。',
     requestedTitle ? `用户指定作品名：${requestedTitle}` : '',
     describeLengthTarget(lengthTarget),
     '',
@@ -1223,6 +1935,7 @@ function buildFinalizeProjectSeedPrompt(draft: any, idea: string, requestedTitle
   ].filter(Boolean).join('\n')
 }
 
+
 async function deriveProjectSeedWithModel(activeWorkspace: string, idea: string, modelId: string, requestedTitle = '', requestedLengthTarget = '') {
   const lengthTarget = normalizeLengthTarget(requestedLengthTarget) || 'medium'
   const prompt = buildProjectSeedPrompt(idea, requestedTitle, lengthTarget)
@@ -1241,12 +1954,13 @@ async function deriveProjectSeedWithModel(activeWorkspace: string, idea: string,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   }
-  const result = await executeNovelAgent('outline-agent', projectStub as any, { task: prompt }, {
+  const result = await executeNovelAgent('outline-agent', projectStub as any, { task: prompt, authoritativeTask: true }, {
     activeWorkspace,
     modelId,
-    maxTokens: 9000,
+    maxTokens: 12000,
     temperature: 0.42,
     skipMemory: true,
+    responseMode: 'non_stream',
   })
   let seed = repairProjectSeedGaps(normalizeProjectSeedPayload((result as any).output || parseJsonLikePayload((result as any).content) || {}, idea, lengthTarget), idea)
   if (requestedTitle && !seed.title) seed.title = requestedTitle
@@ -1271,12 +1985,13 @@ async function finalizeProjectSeedWithModel(activeWorkspace: string, draft: any,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   }
-  const result = await executeNovelAgent('outline-agent', projectStub as any, { task: prompt }, {
+  const result = await executeNovelAgent('outline-agent', projectStub as any, { task: prompt, authoritativeTask: true }, {
     activeWorkspace,
     modelId,
     maxTokens: 10000,
     temperature: 0.35,
     skipMemory: true,
+    responseMode: 'non_stream',
   })
   let seed = repairProjectSeedGaps(normalizeProjectSeedPayload((result as any).output || parseJsonLikePayload((result as any).content) || {}, idea, draft?.length_target), idea)
   if (requestedTitle && !seed.title) seed.title = requestedTitle
@@ -1294,6 +2009,8 @@ async function expandThinProjectSeedWithModel(
   requestedLengthTarget = '',
 ) {
   const recovered = buildRecoverableProjectSeed(seed, idea, requestedTitle, requestedLengthTarget, result)
+  // 恢复草稿中不携带本地模板细纲，避免模型抄模板。
+  recovered.seed = stripLocalScaffoldOutlines(recovered.seed)
   const lengthTarget = normalizeLengthTarget(requestedLengthTarget || recovered.seed?.length_target) || 'medium'
   const prompt = buildProjectSeedRecoveryPrompt(recovered.seed, recovered.diagnostics, idea, requestedTitle, lengthTarget)
   const projectStub = {
@@ -1313,68 +2030,124 @@ async function expandThinProjectSeedWithModel(
   }
 
   try {
-    const recoveryResult = await executeNovelAgent('outline-agent', projectStub as any, { task: prompt }, {
+    const recoveryResult = await executeNovelAgent('outline-agent', projectStub as any, { task: prompt, authoritativeTask: true }, {
       activeWorkspace,
       modelId,
       maxTokens: 10000,
       temperature: 0.36,
       skipMemory: true,
+      responseMode: 'non_stream',
     })
     let expandedSeed = repairProjectSeedGaps(normalizeProjectSeedPayload((recoveryResult as any).output || parseJsonLikePayload((recoveryResult as any).content) || {}, idea, lengthTarget), idea)
     if (requestedTitle && !expandedSeed.title) expandedSeed.title = requestedTitle
+    expandedSeed = repairProjectSeedGaps(mergeRecoveredSeedPreferModelOutlines(recovered.seed, expandedSeed), idea)
     expandedSeed = attachProjectSeedDirector(expandedSeed)
     if (!(recoveryResult as any).error && hasUsableProjectSeed(expandedSeed)) {
-      const diagnostics = {
+      const stillScaffold = projectSeedOutlinesLookLikeLocalScaffold(expandedSeed)
+      const diagnostics = annotateOutlineScaffoldDiagnostics(expandedSeed, {
         ...buildProjectSeedDiagnostics(expandedSeed, idea, recoveryResult),
-        status: 'recovered_by_model',
+        status: stillScaffold ? 'needs_author_review' : 'recovered_by_model',
         usable: true,
         initial_missing_fields: recovered.diagnostics.missing_fields,
         retained_fragments: recovered.diagnostics.retained_fragments,
         recovery_strategy: 'same_model_second_pass',
-        suggestion: '首轮返回偏薄，系统已保留有效线索并让同一模型补齐为可审阅项目种子。',
+        suggestion: stillScaffold
+          ? '二次补种子后分卷/细纲仍像本地模板。请更换更具体的创意描述后重试，或手动改写分卷与前30章细纲。'
+          : '首轮返回偏薄，系统已保留有效线索并让同一模型补齐为可审阅项目种子。',
+      })
+      let ensured = {
+        seed: attachProjectSeedDirector({ ...expandedSeed, seed_diagnostics: diagnostics }),
+        result: recoveryResult,
+        seed_diagnostics: diagnostics,
+      }
+      if (projectSeedNeedsOutlineExpansion(ensured.seed)) {
+        ensured = await ensureProjectSeedModelOutlines(
+          activeWorkspace,
+          ensured.seed,
+          idea,
+          modelId,
+          requestedTitle,
+          lengthTarget,
+          recoveryResult,
+        )
       }
       return {
-        seed: attachProjectSeedDirector({ ...expandedSeed, seed_diagnostics: diagnostics }),
+        seed: ensured.seed,
         result: {
-          ...recoveryResult,
+          ...(ensured.result || recoveryResult),
           seed_recovery: {
             attempted: true,
-            status: 'recovered_by_model',
+            status: projectSeedOutlinesLookLikeLocalScaffold(ensured.seed) ? 'needs_model_outline' : 'recovered_by_model',
             initial_result: result,
           },
         },
-        seed_diagnostics: diagnostics,
+        seed_diagnostics: annotateOutlineScaffoldDiagnostics(ensured.seed, ensured.seed_diagnostics || diagnostics),
       }
     }
 
-    const diagnostics = {
+    const diagnostics = annotateOutlineScaffoldDiagnostics(stripLocalScaffoldOutlines(recovered.seed), {
       ...recovered.diagnostics,
       status: 'needs_author_review',
       recovery_model_error: String((recoveryResult as any).error || ''),
       recovery_model_preview: resultContentPreview(recoveryResult).slice(0, 1200),
-      suggestion: '同一模型二次补种子仍偏薄。系统已保留有效材料并生成可编辑草稿，请作者先审阅补几处关键设定后再定稿。',
-    }
+      suggestion: '同一模型二次补种子仍偏薄。系统将继续尝试单独生成前30章细纲；不会用本地模板章纲冒充。',
+    })
+    let ensured = await ensureProjectSeedModelOutlines(
+      activeWorkspace,
+      stripLocalScaffoldOutlines(recovered.seed),
+      idea,
+      modelId,
+      requestedTitle,
+      lengthTarget,
+      recoveryResult,
+    )
     return {
-      seed: attachProjectSeedDirector({ ...recovered.seed, seed_diagnostics: diagnostics }),
+      seed: attachProjectSeedDirector({ ...ensured.seed, seed_diagnostics: annotateOutlineScaffoldDiagnostics(ensured.seed, ensured.seed_diagnostics || diagnostics) }),
       result: {
-        ...recoveryResult,
+        ...(ensured.result || recoveryResult),
         seed_recovery: {
           attempted: true,
-          status: 'needs_author_review',
+          status: projectSeedNeedsOutlineExpansion(ensured.seed) ? 'needs_model_outline' : 'needs_author_review',
           initial_result: result,
         },
       },
-      seed_diagnostics: diagnostics,
+      seed_diagnostics: annotateOutlineScaffoldDiagnostics(ensured.seed, ensured.seed_diagnostics || diagnostics),
     }
   } catch (error: any) {
-    const diagnostics = {
+    const diagnostics = annotateOutlineScaffoldDiagnostics(stripLocalScaffoldOutlines(recovered.seed), {
       ...recovered.diagnostics,
       status: 'needs_author_review',
       recovery_model_error: String(error?.message || error),
-      suggestion: '同一模型二次补种子调用失败。系统已保留有效材料并生成可编辑草稿，请作者先审阅补几处关键设定后再定稿。',
+      suggestion: '同一模型二次补种子调用失败。系统将尝试单独生成前30章细纲；不会回填本地模板章纲。',
+    })
+    try {
+      const ensured = await ensureProjectSeedModelOutlines(
+        activeWorkspace,
+        stripLocalScaffoldOutlines(recovered.seed),
+        idea,
+        modelId,
+        requestedTitle,
+        requestedLengthTarget || recovered.seed?.length_target,
+        { error: String(error?.message || error) },
+      )
+      return {
+        seed: ensured.seed,
+        result: {
+          ...(ensured.result || {}),
+          error: String(error?.message || error),
+          seed_recovery: {
+            attempted: true,
+            status: projectSeedNeedsOutlineExpansion(ensured.seed) ? 'needs_model_outline' : 'needs_author_review',
+            initial_result: result,
+          },
+        },
+        seed_diagnostics: annotateOutlineScaffoldDiagnostics(ensured.seed, ensured.seed_diagnostics || diagnostics),
+      }
+    } catch {
+      // fall through to stripped seed without local scaffold outlines
     }
     return {
-      seed: attachProjectSeedDirector({ ...recovered.seed, seed_diagnostics: diagnostics }),
+      seed: attachProjectSeedDirector({ ...stripLocalScaffoldOutlines(recovered.seed), seed_diagnostics: diagnostics }),
       result: {
         error: String(error?.message || error),
         seed_recovery: {
@@ -2163,6 +2936,22 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
     }
   })
 
+  app.get('/api/novel/genre-catalog', async (req, res) => {
+    try {
+      const query = String(req.query?.q || req.query?.idea || req.query?.genre || '').trim()
+      const guides = listOhStoryGenreCatalogGuides()
+      const matched = query ? matchOhStoryGenreCatalogGuide(query) : null
+      res.json({
+        ok: true,
+        source: 'oh_story_genre_catalog_v1',
+        guides,
+        matched,
+      })
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || 'failed to load genre catalog' })
+    }
+  })
+
   app.get('/api/novel/project-seed/drafts', async (_req, res) => {
     try {
       const activeWorkspace = getWorkspace()
@@ -2220,12 +3009,21 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
       const modelId = req.body?.model_id ? String(req.body.model_id) : undefined
       if (!modelId) return res.status(400).json({ error: 'model_id is required' })
       let { seed, result } = await deriveProjectSeedWithModel(activeWorkspace, idea, modelId, title, lengthTarget)
-      let seedDiagnostics = buildProjectSeedDiagnostics(seed, idea, result)
-      if (!seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length || !hasUsableProjectSeed(seed)) {
+      seed = stripLocalScaffoldOutlines(seed)
+      let seedDiagnostics = annotateOutlineScaffoldDiagnostics(seed, buildProjectSeedDiagnostics(seed, idea, result))
+      const needsExpansion = !seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length || !hasUsableProjectSeed(seed) || projectSeedNeedsOutlineExpansion(seed)
+      if (needsExpansion) {
         const recovered = await expandThinProjectSeedWithModel(activeWorkspace, seed, result, idea, modelId, title, lengthTarget)
-        seed = recovered.seed
+        seed = stripLocalScaffoldOutlines(recovered.seed)
         result = recovered.result
-        seedDiagnostics = recovered.seed_diagnostics
+        seedDiagnostics = annotateOutlineScaffoldDiagnostics(seed, recovered.seed_diagnostics)
+      }
+      // 分卷/前30章细纲：oh-story 思路是独立模型步骤，禁止本地模板落库。
+      if (projectSeedNeedsOutlineExpansion(seed)) {
+        const outlined = await ensureProjectSeedModelOutlines(activeWorkspace, seed, idea, modelId, title, lengthTarget, result)
+        seed = stripLocalScaffoldOutlines(outlined.seed)
+        result = outlined.result || result
+        seedDiagnostics = annotateOutlineScaffoldDiagnostics(seed, outlined.seed_diagnostics)
       }
       if (!seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length || !hasUsableProjectSeed(seed)) {
         return res.status(502).json({
@@ -2235,6 +3033,8 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
           seed_diagnostics: seedDiagnostics,
         })
       }
+      seedDiagnostics = annotateOutlineScaffoldDiagnostics(seed, seedDiagnostics || seed.seed_diagnostics)
+      seed = attachProjectSeedDirector({ ...seed, seed_diagnostics: seedDiagnostics })
       res.json({ ok: true, seed, result, seed_diagnostics: seedDiagnostics })
     } catch (error) {
       res.status(500).json({ error: String(error) })
@@ -2327,18 +3127,26 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
           raw_preview: String((result as any)?.content || '').slice(0, 3000),
         })
       }
-      let seedDiagnostics = buildProjectSeedDiagnostics(seed, idea, result)
+      seed = stripLocalScaffoldOutlines(seed)
+      let seedDiagnostics = annotateOutlineScaffoldDiagnostics(seed, buildProjectSeedDiagnostics(seed, idea, result))
       if (!hasUsableProjectSeed(seed)) {
         if (!modelId) {
           const recovered = buildRecoverableProjectSeed(seed, idea, title, lengthTarget, result)
-          seed = recovered.seed
-          seedDiagnostics = recovered.diagnostics
+          seed = stripLocalScaffoldOutlines(recovered.seed)
+          seedDiagnostics = annotateOutlineScaffoldDiagnostics(seed, recovered.diagnostics)
         } else {
           const recovered = await expandThinProjectSeedWithModel(activeWorkspace, seed, result, idea, modelId, title, lengthTarget)
-          seed = recovered.seed
+          seed = stripLocalScaffoldOutlines(recovered.seed)
           result = recovered.result
-          seedDiagnostics = recovered.seed_diagnostics
+          seedDiagnostics = annotateOutlineScaffoldDiagnostics(seed, recovered.seed_diagnostics)
         }
+      }
+      // 有模型时，前30章细纲走独立模型步骤；无模型但种子本身可用则允许创建。
+      if (modelId && projectSeedNeedsOutlineExpansion(seed)) {
+        const outlined = await ensureProjectSeedModelOutlines(activeWorkspace, seed, idea, modelId, title, lengthTarget, result)
+        seed = stripLocalScaffoldOutlines(outlined.seed)
+        result = outlined.result || result
+        seedDiagnostics = annotateOutlineScaffoldDiagnostics(seed, outlined.seed_diagnostics)
       }
       if (!hasUsableProjectSeed(seed)) {
         return res.status(502).json({
@@ -2348,6 +3156,9 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
           seed_diagnostics: seedDiagnostics,
         })
       }
+      seedDiagnostics = annotateOutlineScaffoldDiagnostics(seed, seedDiagnostics || seed.seed_diagnostics)
+      seed = attachProjectSeedDirector({ ...seed, seed_diagnostics: seedDiagnostics })
+      // 作者已提交可用 seed 时，即使前30章仍待模型补强，也不阻断项目创建；仅在种子本身仍偏薄时 409。
       if (seedDiagnostics?.status === 'needs_author_review' || seedDiagnostics?.status === 'needs_model_expansion') {
         return res.status(409).json({
           error: '项目种子已恢复为可编辑草稿，但仍需要作者确认后再自动创建',

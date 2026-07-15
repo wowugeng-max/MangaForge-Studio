@@ -1,5 +1,5 @@
-import React, { useState, useCallback } from 'react'
-import { Alert, Button, Card, Form, Input, List, Modal, Popconfirm, Result, Segmented, Select, Space, Steps, Tag, Typography, message } from 'antd'
+import React, { useState, useCallback, useEffect, useMemo } from 'react'
+import { Alert, Button, Card, Form, Input, List, Modal, Popconfirm, Progress, Result, Segmented, Select, Space, Steps, Tag, Typography, message } from 'antd'
 import { ArrowLeftOutlined, ArrowRightOutlined, CheckCircleOutlined, DeleteOutlined, FolderOpenOutlined, RocketOutlined, SaveOutlined } from '@ant-design/icons'
 import apiClient from '../api/client'
 import {
@@ -20,6 +20,15 @@ import {
   type DeepDraftReviewModel,
   type DeepDraftVolume,
 } from './novel-entry/deepDraftReviewModel'
+import { buildDeepDraftFoundationScore } from './novel-entry/deepDraftFoundationScore'
+import {
+  FALLBACK_GENRE_CATALOG_GUIDES,
+  buildGenreGuideIdeaPrefix,
+  genreFrameworkToPrimaryGenre,
+  groupGenreCatalogGuides,
+  matchGenreCatalogGuide,
+  type GenreCatalogGuide,
+} from './novel-entry/genreCatalogGuide'
 
 const { Text, Paragraph } = Typography
 const projectSeedModelStorageKey = 'novel.projectSeed.model_id'
@@ -200,6 +209,29 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
   const [seed, setSeed] = useState<any | null>(null)
   const [seedDiagnostics, setSeedDiagnostics] = useState<any | null>(null)
   const [seedFinalized, setSeedFinalized] = useState(false)
+  const [foundationAccepted, setFoundationAccepted] = useState(false)
+  const [genreCatalogGuides, setGenreCatalogGuides] = useState<GenreCatalogGuide[]>(FALLBACK_GENRE_CATALOG_GUIDES)
+  const [selectedGenreFramework, setSelectedGenreFramework] = useState('')
+  const [genreCatalogLoading, setGenreCatalogLoading] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    const loadGenreCatalog = async () => {
+      setGenreCatalogLoading(true)
+      try {
+        const res = await apiClient.get('/novel/genre-catalog')
+        const guides = Array.isArray(res.data?.guides) ? res.data.guides : []
+        if (!cancelled && guides.length > 0) setGenreCatalogGuides(guides)
+      } catch {
+        if (!cancelled) setGenreCatalogGuides(FALLBACK_GENRE_CATALOG_GUIDES)
+      } finally {
+        if (!cancelled) setGenreCatalogLoading(false)
+      }
+    }
+    void loadGenreCatalog()
+    return () => { cancelled = true }
+  }, [open])
   const [deepDraftReview, setDeepDraftReview] = useState<DeepDraftReviewModel>(() => buildDeepDraftReviewForUi({}))
   const [launchpad, setLaunchpad] = useState<LaunchpadFields>(() => createEmptyLaunchpadFields())
   const [modelsLoading, setModelsLoading] = useState(false)
@@ -320,6 +352,33 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
 
   const first30Summary = summarizeFirst30Plan(seed)
   const launchpadReadiness = evaluateLaunchpadReadiness(launchpad, seed, data.length_target)
+  const foundationScore = buildDeepDraftFoundationScore({
+    seed,
+    launchpad,
+    review: deepDraftReview,
+    lengthTarget: data.length_target,
+  })
+  const foundationReadyToCreate = foundationScore.recommendCreate || foundationAccepted
+  const outlinesAreLocalScaffold = Boolean(
+    seedDiagnostics?.outlines_are_local_scaffold
+    || seedDiagnostics?.status === 'needs_model_outline'
+    || seed?.seed_diagnostics?.outlines_are_local_scaffold
+    || seed?.seed_diagnostics?.status === 'needs_model_outline'
+    || (Array.isArray(seed?.chapter_outlines) && seed.chapter_outlines.length > 0 && seed.chapter_outlines.filter((item: any) => item?.scaffold || item?.source === 'local_scaffold').length >= Math.ceil(seed.chapter_outlines.length * 0.6))
+    || (createMode === 'deep_draft' && seed && (!Array.isArray(seed.chapter_outlines) || seed.chapter_outlines.length < 8))
+  )
+
+  const autoMatchedGenreGuide = useMemo(
+    () => matchGenreCatalogGuide(genreCatalogGuides, selectedGenreFramework, data.title, data.genre, seedIdea, data.synopsis, ...(data.sub_genres || [])),
+    [genreCatalogGuides, selectedGenreFramework, data.title, data.genre, seedIdea, data.synopsis, data.sub_genres],
+  )
+  const activeGenreGuide = useMemo(() => {
+    if (selectedGenreFramework) {
+      return genreCatalogGuides.find(item => item.framework === selectedGenreFramework) || autoMatchedGenreGuide
+    }
+    return autoMatchedGenreGuide
+  }, [selectedGenreFramework, genreCatalogGuides, autoMatchedGenreGuide])
+  const genreGuideGroups = useMemo(() => groupGenreCatalogGuides(genreCatalogGuides), [genreCatalogGuides])
   const seedRecoveryView = buildSeedRecoveryDiagnosticsView(seed || {}, seedDiagnostics)
   const effectiveForeshadowingCount = createMode === 'deep_draft'
     ? deepDraftReview.continuity.foreshadowing.split(/\r?\n/).map(line => line.trim()).filter(Boolean).length
@@ -351,14 +410,26 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
         message.warning('请先生成详细草稿，并由模型生成确定版本')
         return
       }
+      if (createMode === 'deep_draft' && seed && seedFinalized && !foundationReadyToCreate) {
+        message.warning(foundationScore.allowCreateWithWarning
+          ? '当前评分未达推荐开书线，请先补强短板，或点“我满意，以当前版本开书”'
+          : '当前基础偏弱，请先按评分卡补强，或明确标记满意后再继续')
+        return
+      }
     }
     if (current === formItems.length - 2) {
+      if (createMode === 'deep_draft' && !foundationReadyToCreate) {
+        message.warning(foundationScore.allowCreateWithWarning
+          ? '评分未达推荐开书线。请先打磨，或在评分卡确认“我满意，以当前版本开书”'
+          : '基础评分过低，请先补强后再创建')
+        return
+      }
       // Step 4 -> 创建
       await handleCreate()
       return
     }
     setCurrent(c => c + 1)
-  }, [current, data, formItems, createMode, seed, seedFinalized])
+  }, [current, data, formItems, createMode, seed, seedFinalized, foundationReadyToCreate, foundationScore.allowCreateWithWarning])
 
   const handlePrev = () => {
     if (current === 5) return
@@ -368,6 +439,12 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
   const buildCreatePayload = (projectSeed = seed, payloadData = data, payloadLaunchpad = launchpad) => {
     const readiness = evaluateLaunchpadReadiness(payloadLaunchpad, projectSeed, payloadData.length_target)
     const seedWithLaunchpad = buildLaunchpadSeedPatch(projectSeed || {}, payloadLaunchpad, readiness.risks)
+    const foundation = buildDeepDraftFoundationScore({
+      seed: seedWithLaunchpad,
+      launchpad: payloadLaunchpad,
+      review: deepDraftReview,
+      lengthTarget: payloadData.length_target,
+    })
     return {
       title: payloadData.title,
       genre: payloadData.genre || '',
@@ -387,6 +464,8 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
         oh_story_controls: {
           female_audience_mode: payloadData.female_audience_mode || 'auto',
         },
+        foundation_score: foundation,
+        foundation_accepted: foundationAccepted || foundation.recommendCreate,
         writing_bible: projectSeed?.writing_bible || {},
         commercial_positioning: {
           reader_promise: payloadLaunchpad.reader_promise || projectSeed?.logline || projectSeed?.synopsis || '',
@@ -475,7 +554,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
 
   const handleAutoCreate = async () => {
     const title = String(data.title || seed?.title || '').trim()
-    const idea = seedIdea.trim()
+    const idea = [buildGenreGuideIdeaPrefix(activeGenreGuide), seedIdea.trim()].filter(Boolean).join('\n\n')
     if (!title && !idea && !seed) {
       message.warning('请输入作品名称，或粘贴创意草稿')
       return
@@ -536,6 +615,8 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     setSeed(null)
     setSeedDiagnostics(null)
     setSeedFinalized(false)
+    setSelectedGenreFramework('')
+    setFoundationAccepted(false)
     setSelectedSeedDraftId(undefined)
     setSavingSeedDraft(false)
     setDeletingSeedDraft(false)
@@ -600,6 +681,16 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     const normalizedSeed = normalizeProjectSeedForUi(nextSeed)
     const extractedLaunchpad = extractLaunchpadFieldsFromSeed(normalizedSeed)
     setDeepDraftReview(buildDeepDraftReviewForUi(normalizedSeed))
+    setFoundationAccepted(false)
+    const matched = matchGenreCatalogGuide(
+      genreCatalogGuides,
+      normalizedSeed.genre,
+      normalizedSeed.title,
+      normalizedSeed.synopsis,
+      normalizedSeed.logline,
+      normalizedSeed.writing_bible?.genre_positioning_contract?.genre_catalog_contract?.matched_framework,
+    )
+    if (matched?.framework) setSelectedGenreFramework(matched.framework)
     const nextData = {
       title: String(normalizedSeed.title || data.title || normalizedSeed.logline || '').trim().slice(0, 32),
       genre: pickGenre(normalizedSeed.genre || data.genre),
@@ -653,7 +744,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     setDeepDraftReview(repairedReview)
     setSeed(repairedSeed)
     setSeedFinalized(false)
-    message.success('已补齐待确认项和伏笔计划，可继续编辑')
+    message.success('已生成本地可编辑伏笔/确认草稿（非模型定稿），可继续改写')
   }
 
   const saveCurrentSeedDraft = async () => {
@@ -727,18 +818,21 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     if (!seedModelId) return message.warning('请先选择用于整理创意的模型')
     setSeedLoading(true)
     try {
+      const genrePrefix = buildGenreGuideIdeaPrefix(activeGenreGuide)
+      const ideaWithGenre = [genrePrefix, seedIdea.trim() || data.title.trim()].filter(Boolean).join('\n\n')
       const res = await apiClient.post('/novel/project-seed/derive', {
-        idea: seedIdea,
+        idea: ideaWithGenre,
         title: data.title,
         model_id: seedModelId,
         length_target: data.length_target,
+        genre_framework: activeGenreGuide?.framework || selectedGenreFramework || '',
       })
       const nextSeed = normalizeProjectSeedForUi(res.data?.seed || {})
       const diagnostics = res.data?.seed_diagnostics || nextSeed.seed_diagnostics || null
       setSeed(nextSeed)
       setSeedDiagnostics(diagnostics)
       setSeedFinalized(createMode !== 'deep_draft' && !seedDiagnosticsNeedReview(diagnostics))
-      applySeedToForm(nextSeed)
+        applySeedToForm(nextSeed)
       if (typeof window !== 'undefined') window.localStorage.setItem(projectSeedModelStorageKey, String(seedModelId))
       if (seedDiagnosticsNeedReview(diagnostics)) {
         message.warning('模型返回偏薄，已保留有效信息并生成可编辑草稿')
@@ -802,6 +896,146 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     }
   }
 
+
+
+  const selectGenreFramework = (framework: string) => {
+    const guide = genreCatalogGuides.find(item => item.framework === framework) || null
+    setSelectedGenreFramework(framework)
+    if (!guide) return
+    const primary = genreFrameworkToPrimaryGenre(guide.framework)
+    setData(prev => ({
+      ...prev,
+      genre: prev.genre || primary,
+      sub_genres: Array.from(new Set([...(prev.sub_genres || []), guide.framework, ...guide.keywords.slice(0, 2)])).slice(0, 6),
+    }))
+    if (!launchpad.reader_promise) {
+      setLaunchpad(prev => ({
+        ...prev,
+        reader_promise: prev.reader_promise || guide.reader_promise,
+      }))
+    }
+  }
+
+  const foundationStatusColor = foundationScore.recommendCreate
+    ? 'success'
+    : foundationScore.allowCreateWithWarning
+      ? 'warning'
+      : 'error'
+
+  const renderFoundationScoreCard = (opts?: { compact?: boolean }) => {
+    if (createMode !== 'deep_draft' || !seed) return null
+    const compact = Boolean(opts?.compact)
+    return (
+      <Card
+        size="small"
+        className="novel-deep-draft-foundation-card"
+        title={compact ? '开书基础评分' : 'oh-story 开书基础评分'}
+        extra={<Tag color={foundationScore.recommendCreate ? 'green' : foundationScore.allowCreateWithWarning ? 'gold' : 'red'} bordered={false}>{foundationScore.statusLabel}</Tag>}
+        style={{ borderRadius: 10 }}
+      >
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Progress
+              type="circle"
+              percent={foundationScore.overall}
+              size={compact ? 64 : 78}
+              strokeColor={foundationScore.recommendCreate ? '#22c55e' : foundationScore.allowCreateWithWarning ? '#f59e0b' : '#ef4444'}
+              format={percent => (
+                <div style={{ lineHeight: 1.15 }}>
+                  <div style={{ fontSize: compact ? 16 : 18, fontWeight: 700 }}>{percent}</div>
+                  <div style={{ fontSize: 11, color: '#64748b' }}>{foundationScore.grade}</div>
+                </div>
+              )}
+            />
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <Text strong style={{ display: 'block' }}>{foundationScore.headline}</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>{foundationScore.summary}</Text>
+              <div style={{ marginTop: 6 }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  推荐阈值：{foundationScore.threshold.recommend}+ 开书 · {foundationScore.threshold.warning}+ 可带风险开书
+                </Text>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
+            {foundationScore.dimensions.map(dimension => (
+              <div
+                key={dimension.key}
+                style={{
+                  border: '1px solid #e5e7eb',
+                  borderRadius: 8,
+                  padding: '8px 10px',
+                  background: dimension.status === 'strong' ? '#f5fbf7' : dimension.status === 'ok' ? '#f8fafc' : '#fff8eb',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <Text style={{ fontSize: 12, fontWeight: 600 }}>{dimension.title}</Text>
+                  <Text style={{ fontSize: 12 }}>{dimension.score}</Text>
+                </div>
+                <Progress
+                  percent={dimension.score}
+                  size="small"
+                  showInfo={false}
+                  strokeColor={dimension.status === 'strong' ? '#22c55e' : dimension.status === 'ok' ? '#3b82f6' : '#f59e0b'}
+                  style={{ margin: '4px 0' }}
+                />
+                <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>{dimension.summary}</Text>
+                {dimension.missing.length > 0 && (
+                  <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+                    缺口：{dimension.missing.slice(0, 3).join('、')}{dimension.missing.length > 3 ? '…' : ''}
+                  </Text>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {foundationScore.nextActions.length > 0 && (
+            <Alert
+              type={foundationStatusColor === 'success' ? 'success' : 'info'}
+              showIcon
+              message="下一步怎么补更稳"
+              description={(
+                <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                  {foundationScore.nextActions.map(action => (
+                    <li key={action}><Text style={{ fontSize: 12 }}>{action}</Text></li>
+                  ))}
+                </ul>
+              )}
+            />
+          )}
+
+          {!foundationScore.recommendCreate && (
+            <Alert
+              type={foundationScore.allowCreateWithWarning ? 'warning' : 'error'}
+              showIcon
+              message={foundationScore.allowCreateWithWarning ? '当前版本可开书，但建议先打磨短板' : '当前基础偏弱，不建议直接开书'}
+              description={(
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  {foundationScore.topRisks.length > 0 && (
+                    <Text style={{ fontSize: 12 }}>主要缺口：{foundationScore.topRisks.join('、')}</Text>
+                  )}
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    可在下方审阅台手动补全缺口；满意当前版本时，点“我满意，以当前版本开书”后继续。
+                  </Text>
+                  <Space wrap>
+                    <Button size="small" type={foundationAccepted ? 'default' : 'primary'} onClick={() => setFoundationAccepted(true)}>
+                      {foundationAccepted ? '已标记满意此版本' : '我满意，以当前版本开书'}
+                    </Button>
+                    {foundationAccepted && (
+                      <Button size="small" onClick={() => setFoundationAccepted(false)}>取消满意标记</Button>
+                    )}
+                  </Space>
+                </Space>
+              )}
+            />
+          )}
+        </Space>
+      </Card>
+    )
+  }
+
+
   return (
     <Modal
       open={open}
@@ -853,7 +1087,8 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                         onClick={() => {
                           setCreateMode(item.key as CreateMode)
                           setSeedFinalized(item.key !== 'deep_draft' && Boolean(seed) && !seedDiagnosticsNeedReview(seedDiagnostics))
-                        }}
+                          setFoundationAccepted(false)
+                                              }}
                         style={{
                           textAlign: 'left',
                           padding: 12,
@@ -873,6 +1108,66 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                 {createMode === 'manual' && (
                   <Alert type="info" showIcon message="手动创建只需要填写基础资料，不会调用模型；创建后进入工作台再逐步补世界观、角色、设定和章节。" />
                 )}
+                <Card
+                  size="small"
+                  title="小说类型引导（oh-story）"
+                  extra={genreCatalogLoading ? <Text type="secondary">加载中…</Text> : <Text type="secondary">{genreCatalogGuides.length} 个类型框架</Text>}
+                  style={{ borderRadius: 10 }}
+                >
+                  <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      先选类型框架，再填资料或生成草稿。这是 oh-story 题材目录在创建台的可视化入口；后端生成时也会注入对应契约。
+                    </Text>
+                    {genreGuideGroups.map(group => (
+                      <div key={group.category}>
+                        <Text strong style={{ fontSize: 12, color: '#64748b' }}>{group.category}</Text>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+                          {group.items.map(item => {
+                            const active = selectedGenreFramework === item.framework || activeGenreGuide?.framework === item.framework
+                            return (
+                              <button
+                                key={item.framework}
+                                type="button"
+                                onClick={() => selectGenreFramework(item.framework)}
+                                style={{
+                                  border: active ? '1px solid #1677ff' : '1px solid #e5e7eb',
+                                  background: active ? '#eff6ff' : '#fff',
+                                  borderRadius: 999,
+                                  padding: '4px 10px',
+                                  cursor: 'pointer',
+                                  fontSize: 12,
+                                }}
+                              >
+                                {item.framework}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ))}
+
+                    {activeGenreGuide ? (
+                      <Alert
+                        type="info"
+                        showIcon
+                        message={`已选/命中：${activeGenreGuide.framework}`}
+                        description={(
+                          <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                            <Text style={{ fontSize: 12 }}><strong>读者承诺：</strong>{activeGenreGuide.reader_promise}</Text>
+                            <Text style={{ fontSize: 12 }}><strong>结构节拍：</strong>{activeGenreGuide.structure_beats.slice(0, 2).join('；')}</Text>
+                            <Text style={{ fontSize: 12 }}><strong>必备场景：</strong>{activeGenreGuide.must_have_scenes.slice(0, 3).join('；')}</Text>
+                            <Text style={{ fontSize: 12 }}><strong>情绪节奏：</strong>{activeGenreGuide.emotional_rhythm.slice(0, 2).join('；')}</Text>
+                            <Text style={{ fontSize: 12 }}><strong>避坑：</strong>{activeGenreGuide.pitfalls.slice(0, 2).join('；')}</Text>
+                            <Text type="secondary" style={{ fontSize: 12 }}>生成草稿时会把该类型契约注入模型，避免只挂题材标签。</Text>
+                          </Space>
+                        )}
+                      />
+                    ) : (
+                      <Alert type="warning" showIcon message="尚未命中类型框架。可先点选上方类型，或在创意里写“规则怪谈/都市高武/重生复仇”等关键词。" />
+                    )}
+                  </Space>
+                </Card>
+
 
                 {createMode !== 'manual' && (
                   <>
@@ -883,6 +1178,22 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                         ? '输入作品名即可自动建项；如果有零散设定，也可以粘贴进来，AI 会整理成项目简介、分卷、章节细纲和伏笔计划。'
                         : '先让 AI 生成详细草稿，再在审阅台里按创作资料修改标题、世界观、人物、分卷、章节和伏笔，最后让模型整理成确定版。'}
                     />
+                    {createMode === 'deep_draft' && (
+                      <Alert
+                        type="success"
+                        showIcon
+                        message="深度孵化开书引导（对照 oh-story）"
+                        description={(
+                          <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                            <li>先立清读者承诺、核心卖点和开篇噱头，再扩世界与人物。</li>
+                            <li>主角目标、主要对手、规则代价必须能写成一句话。</li>
+                            <li>前30章按 1-3 / 4-10 / 11-30 三段检查追读闭环。</li>
+                            <li>生成后看基础评分；达到推荐分，或你明确满意，再定稿开书。</li>
+                          </ul>
+                        )}
+                      />
+                    )}
+
                     <Input
                       value={data.title}
                       onChange={event => setData(prev => ({ ...prev, title: event.target.value }))}
@@ -993,6 +1304,38 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                           type={seedFinalized ? 'success' : 'warning'}
                           showIcon
                           message={seedFinalized ? '当前是确定版项目种子' : '当前是草稿。请先审阅并修改下方创作资料，再点击“模型整理为确定版”。'}
+                        />
+                      )}
+                      {renderFoundationScoreCard()}
+                      {outlinesAreLocalScaffold && (
+                        <Alert
+                          type="warning"
+                          showIcon
+                          message="分卷/前30章细纲尚未由模型成功生成"
+                          description={(
+                            <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                              <Text type="secondary" style={{ fontSize: 12 }}>
+                                {seedDiagnostics?.suggestion
+                                  || seed?.seed_diagnostics?.suggestion
+                                  || '系统不会再用本地模板章纲冒充结果。请重新点“生成详细草稿”，让模型单独生成分卷与前30章；若多次失败，请换更强模型或把创意写得更具体后再试。'}
+                              </Text>
+                              <Text style={{ fontSize: 12 }}>
+                                当前：分卷 {Number(seedDiagnostics?.outline_volume_count ?? seed?.volume_outlines?.length ?? 0)}
+                                ｜章节细纲 {Number(seedDiagnostics?.outline_chapter_count ?? seed?.chapter_outlines?.length ?? 0)}
+                                ｜伏笔 {Number(seedDiagnostics?.outline_foreshadowing_count ?? seed?.foreshadowing_plan?.length ?? 0)}
+                              </Text>
+                              {Array.isArray(seedDiagnostics?.outline_pass_notes) && seedDiagnostics.outline_pass_notes.length > 0 && (
+                                <Text type="secondary" style={{ fontSize: 11 }}>
+                                  生成步骤：{seedDiagnostics.outline_pass_notes.join('；')}
+                                </Text>
+                              )}
+                              {Array.isArray(seedDiagnostics?.outline_pass_errors) && seedDiagnostics.outline_pass_errors.length > 0 && (
+                                <Text type="danger" style={{ fontSize: 11 }}>
+                                  调用异常：{seedDiagnostics.outline_pass_errors[0]}
+                                </Text>
+                              )}
+                            </Space>
+                          )}
                         />
                       )}
                       {seedRecoveryView.visible && (
@@ -1169,7 +1512,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
 
                               <Space wrap align="center">
                                 <Text strong>伏笔与确认项</Text>
-                                <Button size="small" onClick={repairCurrentDeepDraftGaps}>自动补齐待确认/伏笔</Button>
+                                <Button size="small" onClick={repairCurrentDeepDraftGaps}>生成本地可编辑伏笔草稿</Button>
                               </Space>
                               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 8 }}>
                                 <Input.TextArea
@@ -1540,6 +1883,8 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
             <h3 style={{ margin: 0, fontSize: 16 }}>创建预览与风险</h3>
 
+            {renderFoundationScoreCard({ compact: true })}
+
             <Space wrap>
               {[
                 launchpadReadiness.sellable,
@@ -1550,6 +1895,11 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                   {item.title} {item.ready ? '就绪' : `待补 ${item.missing.length}`}
                 </Tag>
               ))}
+              {createMode === 'deep_draft' && (
+                <Tag color={foundationScore.recommendCreate ? 'green' : foundationAccepted ? 'blue' : 'gold'} bordered={false}>
+                  基础分 {foundationScore.overall} · {foundationScore.statusLabel}
+                </Tag>
+              )}
             </Space>
 
             {launchpadReadiness.risks.length > 0 && (
@@ -1691,12 +2041,15 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
               icon={current === 4 ? <RocketOutlined /> : <ArrowRightOutlined />}
               onClick={handleNext}
               loading={creating}
-              disabled={current === 0 && (
-                !data.title.trim()
-                || (createMode === 'manual' && !data.genre)
-                || (createMode === 'quick_ai' && !seed)
-                || (createMode === 'deep_draft' && (!seed || !seedFinalized))
-              )}
+              disabled={
+                (current === 0 && (
+                  !data.title.trim()
+                  || (createMode === 'manual' && !data.genre)
+                  || (createMode === 'quick_ai' && !seed)
+                  || (createMode === 'deep_draft' && (!seed || !seedFinalized || !foundationReadyToCreate))
+                ))
+                || (current === 4 && createMode === 'deep_draft' && !foundationReadyToCreate)
+              }
             >
               {current === 4 ? '创建项目' : '下一步'}
             </Button>
