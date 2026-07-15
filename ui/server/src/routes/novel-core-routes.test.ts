@@ -1190,3 +1190,18 @@ describe('project seed outline extraction and volume prompt', () => {
   })
 })
 
+
+
+describe('project seed progress stage events', () => {
+  test('buildProjectSeedStageEvent sequence for first30 passes is ordered', async () => {
+    const { buildProjectSeedStageEvent } = await import('./novel-project-seed-progress')
+    const events = [
+      buildProjectSeedStageEvent({ stage: 'outlines', status: 'running', progress: 0.35, detail: 'pass_a' }),
+      buildProjectSeedStageEvent({ stage: 'outlines', status: 'running', progress: 0.55, detail: 'pass_a2' }),
+      buildProjectSeedStageEvent({ stage: 'volumes', status: 'completed', progress: 0.65, outline_volume_count: 3 }),
+      buildProjectSeedStageEvent({ stage: 'foreshadowing', status: 'completed', progress: 0.8, outline_foreshadowing_count: 6 }),
+    ]
+    expect(events.map(e => e.ui_step)).toEqual([1, 1, 1, 2])
+    expect(events.at(-1)?.stage).toBe('foreshadowing')
+  })
+})

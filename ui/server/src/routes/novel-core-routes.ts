@@ -43,6 +43,17 @@ import { buildOhStoryMainlineDefinitionContract, formatOhStoryMainlineDefinition
 import { buildOhStoryLongformStructureContract, formatOhStoryLongformStructurePrompt } from './novel-longform-structure-contract'
 import { buildOhStoryDirectorForProjectSeed } from './novel-oh-story-director'
 import { normalizeSettingAgentPayload } from './novel-setting-routes'
+import { buildProjectSeedStageEvent, type ProjectSeedProgressReporter } from './novel-project-seed-progress'
+
+
+function reportProgress(onProgress: ProjectSeedProgressReporter | undefined, eventInput: Parameters<typeof buildProjectSeedStageEvent>[0]) {
+  if (!onProgress) return
+  try {
+    onProgress(buildProjectSeedStageEvent(eventInput))
+  } catch {
+    // never break generation because UI progress failed
+  }
+}
 
 function parseOptionalBoolean(value: any) {
   if (value === undefined) return undefined
@@ -851,6 +862,7 @@ async function generateProjectSeedFirst30OutlinesWithModel(
   modelId: string,
   requestedTitle = '',
   requestedLengthTarget = '',
+  onProgress?: ProjectSeedProgressReporter,
 ) {
   const base = stripLocalScaffoldOutlines(seed)
   const lengthTarget = normalizeLengthTarget(requestedLengthTarget || base.length_target) || 'medium'
@@ -942,6 +954,12 @@ async function generateProjectSeedFirst30OutlinesWithModel(
   const passErrors: string[] = []
 
   // Pass A: 分卷 + 前N章细纲（不带伏笔，避免长输出互相挤掉）
+  reportProgress(onProgress, {
+    stage: 'outlines',
+    status: 'running',
+    progress: 0.3,
+    detail: 'pass_a',
+  })
   const outlinePrompt = buildProjectSeedFirst30OutlinePrompt(base, idea, requestedTitle || base.title, lengthTarget)
   let outlineResult: any = null
   try {
@@ -967,9 +985,25 @@ async function generateProjectSeedFirst30OutlinesWithModel(
     ...parseNestedSeed(outlineNormalized.first30_plan),
   }
   passNotes.push(`pass_a chapters=${modelChapters.length} volumes=${modelVolumes.length}`)
+  reportProgress(onProgress, {
+    stage: 'outlines',
+    status: 'running',
+    progress: 0.45,
+    detail: 'pass_a',
+    outline_chapter_count: modelChapters.length,
+    outline_volume_count: modelVolumes.length,
+  })
 
   // Pass A2: 若章纲仍不足，拆段补生成（oh-story 细纲分步思路）
   if (modelChapters.length < Math.min(12, count)) {
+    reportProgress(onProgress, {
+      stage: 'outlines',
+      status: 'running',
+      progress: 0.5,
+      detail: 'pass_a2',
+      outline_chapter_count: modelChapters.length,
+      outline_volume_count: modelVolumes.length,
+    })
     const mid = Math.ceil(count / 2)
     try {
       const part1Result = await runOutlineAgent(
@@ -999,6 +1033,14 @@ async function generateProjectSeedFirst30OutlinesWithModel(
       const merged = [...part1Chapters, ...part2Chapters]
       if (merged.length > modelChapters.length) modelChapters = merged
       passNotes.push(`pass_a2 chapters=${modelChapters.length} (p1=${part1Chapters.length}, p2=${part2Chapters.length})`)
+      reportProgress(onProgress, {
+        stage: 'outlines',
+        status: 'running',
+        progress: 0.55,
+        detail: 'pass_a2',
+        outline_chapter_count: modelChapters.length,
+        outline_volume_count: modelVolumes.length,
+      })
     } catch (error: any) {
       passErrors.push(`pass_a2_throw:${String(error?.message || error).slice(0, 240)}`)
     }
@@ -1006,6 +1048,14 @@ async function generateProjectSeedFirst30OutlinesWithModel(
 
   // Pass A3: 分卷仍空时单独生成（不与 30 章挤同一响应）
   if (!modelVolumes.length) {
+    reportProgress(onProgress, {
+      stage: 'volumes',
+      status: 'running',
+      progress: 0.6,
+      detail: 'pass_a3',
+      outline_chapter_count: modelChapters.length,
+      outline_volume_count: modelVolumes.length,
+    })
     try {
       const volumeResult = await runOutlineAgent(
         buildProjectSeedVolumeOutlineOnlyPrompt(
@@ -1025,6 +1075,14 @@ async function generateProjectSeedFirst30OutlinesWithModel(
       )
       if (nextVolumes.length) modelVolumes = nextVolumes
       passNotes.push(`pass_a3 volumes=${modelVolumes.length}`)
+      reportProgress(onProgress, {
+        stage: 'volumes',
+        status: 'completed',
+        progress: 0.65,
+        detail: 'pass_a3',
+        outline_chapter_count: modelChapters.length,
+        outline_volume_count: modelVolumes.length,
+      })
     } catch (error: any) {
       passErrors.push(`pass_a3_throw:${String(error?.message || error).slice(0, 240)}`)
     }
@@ -1032,6 +1090,15 @@ async function generateProjectSeedFirst30OutlinesWithModel(
 
   // Pass B: 伏笔单独生成（不挤占章纲 token）
   let modelForeshadowing = normalizeForeshadowing(asSeedArray(base.foreshadowing_plan))
+  reportProgress(onProgress, {
+    stage: 'foreshadowing',
+    status: 'running',
+    progress: 0.75,
+    detail: 'pass_b',
+    outline_chapter_count: modelChapters.length,
+    outline_volume_count: modelVolumes.length,
+    outline_foreshadowing_count: modelForeshadowing.length,
+  })
   try {
     const foreshadowPrompt = [
       '任务：只为当前小说生成 foreshadowing_plan。只输出 JSON object。',
@@ -1059,6 +1126,15 @@ async function generateProjectSeedFirst30OutlinesWithModel(
     const nextForeshadowing = normalizeForeshadowing(foreshadowExtracted.foreshadowing_plan)
     if (nextForeshadowing.length) modelForeshadowing = nextForeshadowing
     passNotes.push(`pass_b foreshadowing=${modelForeshadowing.length}`)
+    reportProgress(onProgress, {
+      stage: 'foreshadowing',
+      status: 'completed',
+      progress: 0.85,
+      detail: 'pass_b',
+      outline_chapter_count: modelChapters.length,
+      outline_volume_count: modelVolumes.length,
+      outline_foreshadowing_count: modelForeshadowing.length,
+    })
   } catch (error: any) {
     passErrors.push(`pass_b_throw:${String(error?.message || error).slice(0, 240)}`)
   }
@@ -1111,6 +1187,7 @@ async function ensureProjectSeedModelOutlines(
   requestedTitle = '',
   requestedLengthTarget = '',
   previousResult: any = null,
+  onProgress?: ProjectSeedProgressReporter,
 ) {
   let current = stripLocalScaffoldOutlines(seed)
   let diagnostics = annotateOutlineScaffoldDiagnostics(current, current.seed_diagnostics || buildProjectSeedDiagnostics(current, idea, previousResult))
@@ -1140,6 +1217,7 @@ async function ensureProjectSeedModelOutlines(
     modelId,
     requestedTitle,
     requestedLengthTarget || current.length_target,
+    onProgress,
   )
   return {
     seed: generated.seed,
@@ -1936,7 +2014,13 @@ function buildFinalizeProjectSeedPrompt(draft: any, idea: string, requestedTitle
 }
 
 
-async function deriveProjectSeedWithModel(activeWorkspace: string, idea: string, modelId: string, requestedTitle = '', requestedLengthTarget = '') {
+async function deriveProjectSeedWithModel(activeWorkspace: string, idea: string, modelId: string, requestedTitle = '', requestedLengthTarget = '', onProgress?: ProjectSeedProgressReporter) {
+  reportProgress(onProgress, {
+    stage: 'skeleton',
+    status: 'running',
+    progress: 0.08,
+    detail: 'derive_skeleton',
+  })
   const lengthTarget = normalizeLengthTarget(requestedLengthTarget) || 'medium'
   const prompt = buildProjectSeedPrompt(idea, requestedTitle, lengthTarget)
   const projectStub = {
@@ -1965,6 +2049,12 @@ async function deriveProjectSeedWithModel(activeWorkspace: string, idea: string,
   let seed = repairProjectSeedGaps(normalizeProjectSeedPayload((result as any).output || parseJsonLikePayload((result as any).content) || {}, idea, lengthTarget), idea)
   if (requestedTitle && !seed.title) seed.title = requestedTitle
   seed = attachProjectSeedDirector(seed)
+  reportProgress(onProgress, {
+    stage: 'skeleton',
+    status: 'completed',
+    progress: 0.22,
+    detail: 'derive_skeleton',
+  })
   return { seed, result }
 }
 
@@ -2007,6 +2097,7 @@ async function expandThinProjectSeedWithModel(
   modelId: string,
   requestedTitle = '',
   requestedLengthTarget = '',
+  onProgress?: ProjectSeedProgressReporter,
 ) {
   const recovered = buildRecoverableProjectSeed(seed, idea, requestedTitle, requestedLengthTarget, result)
   // 恢复草稿中不携带本地模板细纲，避免模型抄模板。
@@ -2069,6 +2160,7 @@ async function expandThinProjectSeedWithModel(
           requestedTitle,
           lengthTarget,
           recoveryResult,
+          onProgress,
         )
       }
       return {
@@ -2100,6 +2192,7 @@ async function expandThinProjectSeedWithModel(
       requestedTitle,
       lengthTarget,
       recoveryResult,
+      onProgress,
     )
     return {
       seed: attachProjectSeedDirector({ ...ensured.seed, seed_diagnostics: annotateOutlineScaffoldDiagnostics(ensured.seed, ensured.seed_diagnostics || diagnostics) }),
@@ -2129,6 +2222,7 @@ async function expandThinProjectSeedWithModel(
         requestedTitle,
         requestedLengthTarget || recovered.seed?.length_target,
         { error: String(error?.message || error) },
+        onProgress,
       )
       return {
         seed: ensured.seed,
