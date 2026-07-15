@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react'
-import { Alert, Button, Card, Form, Input, List, Modal, Popconfirm, Progress, Result, Segmented, Select, Space, Steps, Tag, Typography, message } from 'antd'
-import { ArrowLeftOutlined, ArrowRightOutlined, CheckCircleOutlined, DeleteOutlined, FolderOpenOutlined, RocketOutlined, SaveOutlined } from '@ant-design/icons'
+import { Alert, Button, Card, Form, Input, List, Modal, Progress, Result, Segmented, Select, Space, Steps, Tag, Typography, message } from 'antd'
+import { ArrowLeftOutlined, ArrowRightOutlined, CheckCircleOutlined, RocketOutlined } from '@ant-design/icons'
 import apiClient from '../api/client'
 import {
   buildLaunchpadSeedPatch,
@@ -29,8 +29,15 @@ import {
   matchGenreCatalogGuide,
   type GenreCatalogGuide,
 } from './novel-entry/genreCatalogGuide'
+import { CreateModeSection, type CreateWizardMode } from './novel-entry/create/CreateModeSection'
+import { GenreGuideSection } from './novel-entry/create/GenreGuideSection'
+import { SeedInputSection } from './novel-entry/create/SeedInputSection'
+import { SeedStatusBar } from './novel-entry/create/SeedStatusBar'
+import { DeepDraftReviewSection } from './novel-entry/create/DeepDraftReviewSection'
+import { GenerationProgressPanel } from './novel-entry/create/GenerationProgressPanel'
+import { useProjectSeedStream } from './novel-entry/create/useProjectSeedStream'
 
-const { Text, Paragraph } = Typography
+const { Text } = Typography
 const projectSeedModelStorageKey = 'novel.projectSeed.model_id'
 
 interface NovelFormValues {
@@ -204,6 +211,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
   const [seedIdea, setSeedIdea] = useState('')
   const [createMode, setCreateMode] = useState<CreateMode>('manual')
   const [seedLoading, setSeedLoading] = useState(false)
+  const seedStream = useProjectSeedStream()
   const [finalizingSeed, setFinalizingSeed] = useState(false)
   const [autoCreating, setAutoCreating] = useState(false)
   const [seed, setSeed] = useState<any | null>(null)
@@ -820,21 +828,27 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     try {
       const genrePrefix = buildGenreGuideIdeaPrefix(activeGenreGuide)
       const ideaWithGenre = [genrePrefix, seedIdea.trim() || data.title.trim()].filter(Boolean).join('\n\n')
-      const res = await apiClient.post('/novel/project-seed/derive', {
+      const latest = await seedStream.start({
         idea: ideaWithGenre,
         title: data.title,
         model_id: seedModelId,
         length_target: data.length_target,
         genre_framework: activeGenreGuide?.framework || selectedGenreFramework || '',
       })
-      const nextSeed = normalizeProjectSeedForUi(res.data?.seed || {})
-      const diagnostics = res.data?.seed_diagnostics || nextSeed.seed_diagnostics || null
+      if (latest.error && !latest.seed) {
+        message.error(latest.error)
+        return
+      }
+      const nextSeed = normalizeProjectSeedForUi(latest.seed || {})
+      const diagnostics = latest.seed_diagnostics || nextSeed.seed_diagnostics || null
       setSeed(nextSeed)
       setSeedDiagnostics(diagnostics)
       setSeedFinalized(createMode !== 'deep_draft' && !seedDiagnosticsNeedReview(diagnostics))
-        applySeedToForm(nextSeed)
+      applySeedToForm(nextSeed)
       if (typeof window !== 'undefined') window.localStorage.setItem(projectSeedModelStorageKey, String(seedModelId))
-      if (seedDiagnosticsNeedReview(diagnostics)) {
+      if (latest.error) {
+        message.warning(latest.error)
+      } else if (seedDiagnosticsNeedReview(diagnostics)) {
         message.warning('模型返回偏薄，已保留有效信息并生成可编辑草稿')
       } else if (diagnostics?.status === 'recovered_by_model') {
         message.success('首轮返回偏薄，已自动补种子为可审阅草稿')
@@ -842,6 +856,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
         message.success('已整理创意草稿，可继续编辑后创建项目')
       }
     } catch (error: any) {
+      if (error?.name === 'AbortError') return
       message.error(error?.response?.data?.error || error?.message || '创意草稿整理失败')
     } finally {
       setSeedLoading(false)
@@ -1067,529 +1082,113 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
         {/* Step 0: Basic Info */}
         {current === 0 && (
           <>
-            <Card
-              size="small"
-              title="选择创建方式"
-              style={{ marginBottom: 16, borderRadius: 12, background: '#fbfdff' }}
-            >
-              <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
-                  {[
-                    { key: 'manual', title: '手动开书', desc: '先建可写项目，商业钩子和长线计划由你手动填写。' },
-                    { key: 'quick_ai', title: 'AI 快速开书', desc: '给作品名或一句想法，AI 整理卖点、前30章和长线骨架。' },
-                    { key: 'deep_draft', title: '深度孵化', desc: 'AI 先产出可编辑草稿，人工修订后再定稿创建。' },
-                  ].map(item => {
-                    const active = createMode === item.key
-                    return (
-                      <button
-                        key={item.key}
-                        type="button"
-                        onClick={() => {
-                          setCreateMode(item.key as CreateMode)
-                          setSeedFinalized(item.key !== 'deep_draft' && Boolean(seed) && !seedDiagnosticsNeedReview(seedDiagnostics))
-                          setFoundationAccepted(false)
-                                              }}
-                        style={{
-                          textAlign: 'left',
-                          padding: 12,
-                          borderRadius: 10,
-                          border: active ? '1px solid #1677ff' : '1px solid #e5e7eb',
-                          background: active ? '#eff6ff' : '#fff',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <div style={{ fontWeight: 700, marginBottom: 4 }}>{item.title}</div>
-                        <div style={{ color: '#666', fontSize: 12, lineHeight: 1.45 }}>{item.desc}</div>
-                      </button>
-                    )
-                  })}
-                </div>
+            <Space direction="vertical" size={12} style={{ width: '100%', marginBottom: 16 }}>
+              <CreateModeSection
+                value={createMode}
+                onChange={(mode: CreateWizardMode) => {
+                  setCreateMode(mode)
+                  setSeedFinalized(mode !== 'deep_draft' && Boolean(seed) && !seedDiagnosticsNeedReview(seedDiagnostics))
+                  setFoundationAccepted(false)
+                }}
+              />
 
-                {createMode === 'manual' && (
-                  <Alert type="info" showIcon message="手动创建只需要填写基础资料，不会调用模型；创建后进入工作台再逐步补世界观、角色、设定和章节。" />
-                )}
-                <Card
-                  size="small"
-                  title="小说类型引导（oh-story）"
-                  extra={genreCatalogLoading ? <Text type="secondary">加载中…</Text> : <Text type="secondary">{genreCatalogGuides.length} 个类型框架</Text>}
-                  style={{ borderRadius: 10 }}
-                >
-                  <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      先选类型框架，再填资料或生成草稿。这是 oh-story 题材目录在创建台的可视化入口；后端生成时也会注入对应契约。
-                    </Text>
-                    {genreGuideGroups.map(group => (
-                      <div key={group.category}>
-                        <Text strong style={{ fontSize: 12, color: '#64748b' }}>{group.category}</Text>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
-                          {group.items.map(item => {
-                            const active = selectedGenreFramework === item.framework || activeGenreGuide?.framework === item.framework
-                            return (
-                              <button
-                                key={item.framework}
-                                type="button"
-                                onClick={() => selectGenreFramework(item.framework)}
-                                style={{
-                                  border: active ? '1px solid #1677ff' : '1px solid #e5e7eb',
-                                  background: active ? '#eff6ff' : '#fff',
-                                  borderRadius: 999,
-                                  padding: '4px 10px',
-                                  cursor: 'pointer',
-                                  fontSize: 12,
-                                }}
-                              >
-                                {item.framework}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    ))}
+              <GenreGuideSection
+                groups={genreGuideGroups}
+                selectedFramework={selectedGenreFramework || activeGenreGuide?.framework || ''}
+                loading={genreCatalogLoading}
+                onSelect={selectGenreFramework}
+              />
 
-                    {activeGenreGuide ? (
-                      <Alert
-                        type="info"
-                        showIcon
-                        message={`已选/命中：${activeGenreGuide.framework}`}
-                        description={(
-                          <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                            <Text style={{ fontSize: 12 }}><strong>读者承诺：</strong>{activeGenreGuide.reader_promise}</Text>
-                            <Text style={{ fontSize: 12 }}><strong>结构节拍：</strong>{activeGenreGuide.structure_beats.slice(0, 2).join('；')}</Text>
-                            <Text style={{ fontSize: 12 }}><strong>必备场景：</strong>{activeGenreGuide.must_have_scenes.slice(0, 3).join('；')}</Text>
-                            <Text style={{ fontSize: 12 }}><strong>情绪节奏：</strong>{activeGenreGuide.emotional_rhythm.slice(0, 2).join('；')}</Text>
-                            <Text style={{ fontSize: 12 }}><strong>避坑：</strong>{activeGenreGuide.pitfalls.slice(0, 2).join('；')}</Text>
-                            <Text type="secondary" style={{ fontSize: 12 }}>生成草稿时会把该类型契约注入模型，避免只挂题材标签。</Text>
-                          </Space>
-                        )}
-                      />
-                    ) : (
-                      <Alert type="warning" showIcon message="尚未命中类型框架。可先点选上方类型，或在创意里写“规则怪谈/都市高武/重生复仇”等关键词。" />
-                    )}
-                  </Space>
-                </Card>
+              {createMode !== 'manual' && (
+                <SeedInputSection
+                  title={data.title}
+                  lengthTarget={data.length_target}
+                  idea={seedIdea}
+                  modelId={seedModelId}
+                  modelOptions={modelOptions}
+                  draftOptions={seedDraftOptions}
+                  selectedDraftId={selectedSeedDraftId}
+                  loading={seedLoading}
+                  modelsLoading={modelsLoading}
+                  draftsLoading={seedDraftsLoading}
+                  deletingDraft={deletingSeedDraft}
+                  showDraftControls={createMode === 'deep_draft'}
+                  showAutoCreate={createMode === 'quick_ai'}
+                  autoCreating={autoCreating}
+                  autoCreateDisabled={seedLoading || creating}
+                  autoCreateLabel={seed ? '用这个种子自动创建并进入工作台' : 'AI整理并自动创建项目'}
+                  lengthOptions={LENGTH_TARGETS}
+                  onTitleChange={value => setData(prev => ({ ...prev, title: value }))}
+                  onLengthChange={value => {
+                    setData(prev => ({ ...prev, length_target: value }))
+                    setSeedFinalized(false)
+                  }}
+                  onIdeaChange={setSeedIdea}
+                  onModelChange={setSeedModelId}
+                  onDraftChange={setSelectedSeedDraftId}
+                  onGenerate={deriveProjectSeed}
+                  onSaveDraft={saveCurrentSeedDraft}
+                  onLoadDraft={loadSelectedSeedDraft}
+                  onDeleteDraft={deleteSelectedSeedDraft}
+                  onAutoCreate={handleAutoCreate}
+                  generateLabel={createMode === 'deep_draft' ? '生成详细草稿' : 'AI整理创意'}
+                />
+              )}
 
-
-                {createMode !== 'manual' && (
-                  <>
-                    <Alert
-                      type="info"
-                      showIcon
-                      message={createMode === 'quick_ai'
-                        ? '输入作品名即可自动建项；如果有零散设定，也可以粘贴进来，AI 会整理成项目简介、分卷、章节细纲和伏笔计划。'
-                        : '先让 AI 生成详细草稿，再在审阅台里按创作资料修改标题、世界观、人物、分卷、章节和伏笔，最后让模型整理成确定版。'}
+              {seedLoading ? (
+                <GenerationProgressPanel state={seedStream.state} />
+              ) : seed ? (
+                <>
+                  <SeedStatusBar
+                    volumeCount={Number(seedDiagnostics?.outline_volume_count ?? seed?.volume_outlines?.length ?? 0)}
+                    chapterCount={Number(seedDiagnostics?.outline_chapter_count ?? seed?.chapter_outlines?.length ?? 0)}
+                    foreshadowingCount={effectiveForeshadowingCount}
+                    characterCount={createMode === 'deep_draft' ? deepDraftReview.characters.length : (Array.isArray(seed?.characters) ? seed.characters.length : 0)}
+                    score={createMode === 'deep_draft' ? {
+                      overall: foundationScore.overall,
+                      grade: foundationScore.grade,
+                      statusLabel: foundationScore.statusLabel,
+                      recommendCreate: foundationScore.recommendCreate,
+                    } : undefined}
+                    diagnosticsSuggestion={
+                      outlinesAreLocalScaffold
+                        ? String(seedDiagnostics?.suggestion || seed?.seed_diagnostics?.suggestion || '分卷/前30章细纲尚未由模型成功生成，请重新生成或换更强模型')
+                        : (seedRecoveryView.visible ? seedRecoveryView.message : undefined)
+                    }
+                    riskMessage={
+                      outlinesAreLocalScaffold
+                        ? '分卷/前30章细纲尚未由模型成功生成'
+                        : (seedRecoveryView.visible ? seedRecoveryView.title : undefined)
+                    }
+                    finalized={seedFinalized}
+                    regenerating={seedLoading}
+                    savingDraft={savingSeedDraft}
+                    finalizing={finalizingSeed}
+                    showDraftActions={createMode === 'deep_draft'}
+                    showFinalize={createMode === 'deep_draft'}
+                    onRegenerate={deriveProjectSeed}
+                    onSaveDraft={saveCurrentSeedDraft}
+                    onFinalize={() => finalizeProjectSeed(false)}
+                    onConfirmFinalize={() => finalizeProjectSeed(true)}
+                    showConfirmFinalize={createMode === 'deep_draft' && seedDiagnosticsNeedReview(seedDiagnostics)}
+                    finalizeLabel="定稿并创建项目"
+                    confirmFinalizeLabel="我已确认，创建项目"
+                  />
+                  {createMode === 'deep_draft' && renderFoundationScoreCard({ compact: true })}
+                  {createMode === 'deep_draft' && (
+                    <DeepDraftReviewSection
+                      model={deepDraftReview}
+                      onChange={updateDeepDraftReview}
+                      onChangeCharacter={updateDeepDraftCharacter}
+                      onChangeVolume={updateDeepDraftVolume}
+                      onChangeChapter={updateDeepDraftChapter}
+                      onRemoveItem={removeDeepDraftItem}
+                      onRepairGaps={repairCurrentDeepDraftGaps}
                     />
-                    {createMode === 'deep_draft' && (
-                      <Alert
-                        type="success"
-                        showIcon
-                        message="深度孵化开书引导（对照 oh-story）"
-                        description={(
-                          <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
-                            <li>先立清读者承诺、核心卖点和开篇噱头，再扩世界与人物。</li>
-                            <li>主角目标、主要对手、规则代价必须能写成一句话。</li>
-                            <li>前30章按 1-3 / 4-10 / 11-30 三段检查追读闭环。</li>
-                            <li>生成后看基础评分；达到推荐分，或你明确满意，再定稿开书。</li>
-                          </ul>
-                        )}
-                      />
-                    )}
-
-                    <Input
-                      value={data.title}
-                      onChange={event => setData(prev => ({ ...prev, title: event.target.value }))}
-                      placeholder="作品名称，例如：长生天尊"
-                      size="large"
-                    />
-                    <Select
-                      size="large"
-                      value={data.length_target}
-                      placeholder="选择篇幅目标"
-                      options={LENGTH_TARGETS}
-                      optionRender={(option) => (
-                        <div>
-                          <div>{option.label}</div>
-                          <div style={{ fontSize: 12, color: '#999' }}>{option.data?.description}</div>
-                        </div>
-                      )}
-                      onChange={value => {
-                        setData(prev => ({ ...prev, length_target: value }))
-                        setSeedFinalized(false)
-                      }}
-                    />
-                    <Input.TextArea
-                      rows={5}
-                      value={seedIdea}
-                      onChange={event => setSeedIdea(event.target.value)}
-                      placeholder="可选：粘贴碎片想法。只填作品名时，系统会按原创项目自动扩展；粘贴设定时，会优先保留你的核心因果。"
-                      maxLength={20000}
-                      showCount
-                    />
-                    <Space.Compact block>
-                      <Select
-                        style={{ width: '65%' }}
-                        value={seedModelId}
-                        loading={modelsLoading}
-                        placeholder="选择模型"
-                        options={modelOptions}
-                        onChange={setSeedModelId}
-                      />
-                      <Button
-                        type="primary"
-                        loading={seedLoading}
-                        onClick={deriveProjectSeed}
-                        style={{ width: '35%' }}
-                      >
-                        {createMode === 'deep_draft' ? '生成详细草稿' : 'AI整理创意'}
-                      </Button>
-                    </Space.Compact>
-                    {createMode === 'deep_draft' && (
-                      <Card size="small" title="已保存孵化草稿" styles={{ body: { padding: 10 } }}>
-                        <Space.Compact block>
-                          <Select
-                            style={{ width: '58%' }}
-                            value={selectedSeedDraftId}
-                            loading={seedDraftsLoading}
-                            placeholder={seedDrafts.length ? '选择草稿' : '暂无已保存草稿'}
-                            options={seedDraftOptions}
-                            onChange={setSelectedSeedDraftId}
-                            allowClear
-                          />
-                          <Button
-                            style={{ width: '21%' }}
-                            icon={<FolderOpenOutlined />}
-                            disabled={!selectedSeedDraftId}
-                            onClick={loadSelectedSeedDraft}
-                          >
-                            载入
-                          </Button>
-                          <Popconfirm
-                            title="删除这个孵化草稿？"
-                            okText="删除"
-                            cancelText="取消"
-                            onConfirm={deleteSelectedSeedDraft}
-                            disabled={!selectedSeedDraftId}
-                          >
-                            <Button
-                              danger
-                              style={{ width: '21%' }}
-                              icon={<DeleteOutlined />}
-                              loading={deletingSeedDraft}
-                              disabled={!selectedSeedDraftId}
-                            >
-                              删除
-                            </Button>
-                          </Popconfirm>
-                        </Space.Compact>
-                      </Card>
-                    )}
-                    {createMode === 'quick_ai' && (
-                      <Button
-                        block
-                        type="primary"
-                        icon={<RocketOutlined />}
-                        loading={autoCreating}
-                        disabled={seedLoading || creating}
-                        onClick={handleAutoCreate}
-                      >
-                        {seed ? '用这个种子自动创建并进入工作台' : 'AI整理并自动创建项目'}
-                      </Button>
-                    )}
-                  </>
-                )}
-                {seed && (
-                  <Card size="small" title="已生成项目种子" style={{ borderRadius: 8 }}>
-                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                      {createMode === 'deep_draft' && (
-                        <Alert
-                          type={seedFinalized ? 'success' : 'warning'}
-                          showIcon
-                          message={seedFinalized ? '当前是确定版项目种子' : '当前是草稿。请先审阅并修改下方创作资料，再点击“模型整理为确定版”。'}
-                        />
-                      )}
-                      {renderFoundationScoreCard()}
-                      {outlinesAreLocalScaffold && (
-                        <Alert
-                          type="warning"
-                          showIcon
-                          message="分卷/前30章细纲尚未由模型成功生成"
-                          description={(
-                            <Space direction="vertical" size={2} style={{ width: '100%' }}>
-                              <Text type="secondary" style={{ fontSize: 12 }}>
-                                {seedDiagnostics?.suggestion
-                                  || seed?.seed_diagnostics?.suggestion
-                                  || '系统不会再用本地模板章纲冒充结果。请重新点“生成详细草稿”，让模型单独生成分卷与前30章；若多次失败，请换更强模型或把创意写得更具体后再试。'}
-                              </Text>
-                              <Text style={{ fontSize: 12 }}>
-                                当前：分卷 {Number(seedDiagnostics?.outline_volume_count ?? seed?.volume_outlines?.length ?? 0)}
-                                ｜章节细纲 {Number(seedDiagnostics?.outline_chapter_count ?? seed?.chapter_outlines?.length ?? 0)}
-                                ｜伏笔 {Number(seedDiagnostics?.outline_foreshadowing_count ?? seed?.foreshadowing_plan?.length ?? 0)}
-                              </Text>
-                              {Array.isArray(seedDiagnostics?.outline_pass_notes) && seedDiagnostics.outline_pass_notes.length > 0 && (
-                                <Text type="secondary" style={{ fontSize: 11 }}>
-                                  生成步骤：{seedDiagnostics.outline_pass_notes.join('；')}
-                                </Text>
-                              )}
-                              {Array.isArray(seedDiagnostics?.outline_pass_errors) && seedDiagnostics.outline_pass_errors.length > 0 && (
-                                <Text type="danger" style={{ fontSize: 11 }}>
-                                  调用异常：{seedDiagnostics.outline_pass_errors[0]}
-                                </Text>
-                              )}
-                            </Space>
-                          )}
-                        />
-                      )}
-                      {seedRecoveryView.visible && (
-                        <Alert
-                          type={seedRecoveryView.type}
-                          showIcon
-                          message={seedRecoveryView.title}
-                          description={(
-                            <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                              <Text type="secondary" style={{ fontSize: 12 }}>{seedRecoveryView.message}</Text>
-                              {seedRecoveryView.retainedFragments.length > 0 && (
-                                <Text style={{ fontSize: 12 }}>
-                                  保留：{seedRecoveryView.retainedFragments.slice(0, 3).join('；')}
-                                </Text>
-                              )}
-                              <Space wrap size={[4, 4]}>
-                                {seedRecoveryView.generatedFields.slice(0, 4).map(field => (
-                                  <Tag key={`generated-${field}`} color="green" bordered={false}>已补 {field}</Tag>
-                                ))}
-                                {seedRecoveryView.missingFields.slice(0, 4).map(field => (
-                                  <Tag key={`missing-${field}`} color="gold" bordered={false}>待确认 {field}</Tag>
-                                ))}
-                              </Space>
-                            </Space>
-                          )}
-                        />
-                      )}
-                      <Space wrap>
-                        <Tag color="blue" bordered={false}>{seed.genre || '未定题材'}</Tag>
-                        {asStringArray(seed.sub_genres).slice(0, 4).map(item => <Tag key={item} bordered={false}>{item}</Tag>)}
-                      </Space>
-                      <Text strong>{seed.title || seed.logline || '项目种子已生成'}</Text>
-                      {seed.logline && <Text>{seed.logline}</Text>}
-                      <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
-                        {seed.synopsis || seed.core_premise || seed.main_conflict || '模型已返回项目种子，但核心简介字段为空。可展开下方完整结构查看。'}
-                      </Paragraph>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
-                        <Card size="small" title="主角" styles={{ body: { padding: 10 } }}>
-                          <Text type="secondary" style={{ fontSize: 12 }}>
-                            {firstText(seed.protagonist?.name, seed.protagonist?.identity, '未提取')}
-                            {firstText(seed.protagonist?.goal) ? `：${firstText(seed.protagonist?.goal)}` : ''}
-                          </Text>
-                        </Card>
-                        <Card size="small" title="核心矛盾" styles={{ body: { padding: 10 } }}>
-                          <Text type="secondary" style={{ fontSize: 12 }}>{seed.main_conflict || seed.core_premise || '未提取'}</Text>
-                        </Card>
-                      </div>
-                      {(seed.worldbuilding?.world_summary || seed.worldbuilding?.history_secret || seed.worldbuilding?.power_system) && (
-                        <Card size="small" title="世界观摘要" styles={{ body: { padding: 10 } }}>
-                          <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap', fontSize: 12 }}>
-                            {firstText(seed.worldbuilding?.world_summary, seed.worldbuilding?.history_secret, seed.worldbuilding?.power_system)}
-                          </Paragraph>
-                        </Card>
-                      )}
-                      {Array.isArray(seed.characters) && seed.characters.length > 0 && (
-                        <Card size="small" title="关键人物" styles={{ body: { padding: 10 } }}>
-                          <Space wrap>
-                            {seed.characters.slice(0, 8).map((character: any, index: number) => (
-                              <Tag key={`${character?.name || 'character'}-${index}`} bordered={false}>
-                                {firstText(character?.name, character?.role_type, `人物${index + 1}`)}
-                              </Tag>
-                            ))}
-                          </Space>
-                        </Card>
-                      )}
-                      {(Array.isArray(seed.volume_outlines) || Array.isArray(seed.chapter_outlines)) && (
-                        <Space wrap>
-                          <Tag color="purple" bordered={false}>分卷 {seed.volume_outlines?.length || 0}</Tag>
-                          <Tag color="geekblue" bordered={false}>章节细纲 {seed.chapter_outlines?.length || 0}</Tag>
-                          <Tag color="cyan" bordered={false}>伏笔 {effectiveForeshadowingCount}</Tag>
-                        </Space>
-                      )}
-                      {seedConfirmationSummary && (
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          已补确认：{seedConfirmationSummary}
-                        </Text>
-                      )}
-                      {asStringArray(seed.open_questions).length > 0 && (
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          待确认：{asStringArray(seed.open_questions).slice(0, 3).join('；')}
-                        </Text>
-                      )}
-                      {createMode === 'deep_draft' ? (
-                        <>
-                          <Card size="small" title="创作草稿审阅台" styles={{ body: { padding: 12 } }}>
-                            <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
-                                <Input
-                                  value={deepDraftReview.basics.title}
-                                  onChange={event => updateDeepDraftReview({ basics: { ...deepDraftReview.basics, title: event.target.value } })}
-                                  placeholder="书名"
-                                />
-                                <Input
-                                  value={deepDraftReview.basics.genre}
-                                  onChange={event => updateDeepDraftReview({ basics: { ...deepDraftReview.basics, genre: event.target.value } })}
-                                  placeholder="题材"
-                                />
-                              </div>
-                              <Input.TextArea
-                                rows={2}
-                                value={deepDraftReview.basics.pitch}
-                                onChange={event => updateDeepDraftReview({ basics: { ...deepDraftReview.basics, pitch: event.target.value } })}
-                                placeholder="一句话卖点：主角、冲突、爽点承诺"
-                              />
-                              <Input.TextArea
-                                rows={3}
-                                value={deepDraftReview.basics.synopsis}
-                                onChange={event => updateDeepDraftReview({ basics: { ...deepDraftReview.basics, synopsis: event.target.value } })}
-                                placeholder="项目简介：给后续大纲和正文使用的核心简介"
-                              />
-
-                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 8 }}>
-                                <Input.TextArea
-                                  rows={4}
-                                  value={deepDraftReview.world.summary}
-                                  onChange={event => updateDeepDraftReview({ world: { ...deepDraftReview.world, summary: event.target.value } })}
-                                  placeholder="世界观摘要"
-                                />
-                                <Input.TextArea
-                                  rows={4}
-                                  value={deepDraftReview.world.powerSystem}
-                                  onChange={event => updateDeepDraftReview({ world: { ...deepDraftReview.world, powerSystem: event.target.value } })}
-                                  placeholder="能力 / 金手指 / 成长体系"
-                                />
-                              </div>
-
-                              <Card size="small" title="关键人物" extra={<Button size="small" onClick={() => updateDeepDraftReview({ characters: [...deepDraftReview.characters, { name: '', role: '', goal: '' }] })}>添加人物</Button>}>
-                                <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                                  {deepDraftReview.characters.map((character, index) => (
-                                    <div key={`review-character-${index}`} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8 }}>
-                                      <Input value={character.name} onChange={event => updateDeepDraftCharacter(index, { name: event.target.value })} placeholder="姓名" />
-                                      <Input value={character.role} onChange={event => updateDeepDraftCharacter(index, { role: event.target.value })} placeholder="定位" />
-                                      <Input value={character.goal} onChange={event => updateDeepDraftCharacter(index, { goal: event.target.value })} placeholder="目标 / 压力 / 关系" />
-                                      <Button onClick={() => removeDeepDraftItem('characters', index)}>移除</Button>
-                                    </div>
-                                  ))}
-                                  {deepDraftReview.characters.length === 0 && <Text type="secondary">还没有人物，可先添加主角、对手和核心同盟。</Text>}
-                                </Space>
-                              </Card>
-
-                              <Card size="small" title="分卷规划" extra={<Button size="small" onClick={() => updateDeepDraftReview({ volumes: [...deepDraftReview.volumes, { title: '', goal: '' }] })}>添加分卷</Button>}>
-                                <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                                  {deepDraftReview.volumes.map((volume, index) => (
-                                    <div key={`review-volume-${index}`} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
-                                      <Input value={volume.title} onChange={event => updateDeepDraftVolume(index, { title: event.target.value })} placeholder="卷名" />
-                                      <Input value={volume.goal} onChange={event => updateDeepDraftVolume(index, { goal: event.target.value })} placeholder="本卷阶段目标 / 地图 / 矛盾" />
-                                      <Button onClick={() => removeDeepDraftItem('volumes', index)}>移除</Button>
-                                    </div>
-                                  ))}
-                                  {deepDraftReview.volumes.length === 0 && <Text type="secondary">还没有分卷，可先写第一卷目标，再让模型扩展。</Text>}
-                                </Space>
-                              </Card>
-
-                              <Card size="small" title="前30章细纲" extra={<Button size="small" onClick={() => updateDeepDraftReview({ chapters: [...deepDraftReview.chapters, { chapterNo: deepDraftReview.chapters.length + 1, title: '', goal: '' }] })}>添加章节</Button>}>
-                                <div style={{ maxHeight: 360, overflow: 'auto', paddingRight: 4 }}>
-                                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                                    {deepDraftReview.chapters.slice(0, 30).map((chapter, index) => (
-                                      <div key={`review-chapter-${index}`} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))', gap: 8 }}>
-                                        <Input
-                                          type="number"
-                                          value={chapter.chapterNo}
-                                          onChange={event => updateDeepDraftChapter(index, { chapterNo: Number(event.target.value) || index + 1 })}
-                                          placeholder="章"
-                                        />
-                                        <Input value={chapter.title} onChange={event => updateDeepDraftChapter(index, { title: event.target.value })} placeholder="章节名" />
-                                        <Input value={chapter.goal} onChange={event => updateDeepDraftChapter(index, { goal: event.target.value })} placeholder="本章目标 / 爽点 / 悬念" />
-                                        <Button onClick={() => removeDeepDraftItem('chapters', index)}>移除</Button>
-                                      </div>
-                                    ))}
-                                    {deepDraftReview.chapters.length === 0 && <Text type="secondary">还没有章节细纲，可添加前3章或直接让模型定稿补齐。</Text>}
-                                  </Space>
-                                </div>
-                              </Card>
-
-                              <Space wrap align="center">
-                                <Text strong>伏笔与确认项</Text>
-                                <Button size="small" onClick={repairCurrentDeepDraftGaps}>生成本地可编辑伏笔草稿</Button>
-                              </Space>
-                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 8 }}>
-                                <Input.TextArea
-                                  rows={4}
-                                  value={deepDraftReview.continuity.foreshadowing}
-                                  onChange={event => updateDeepDraftReview({ continuity: { ...deepDraftReview.continuity, foreshadowing: event.target.value } })}
-                                  placeholder="伏笔与回收计划，每行一个"
-                                />
-                                <Input.TextArea
-                                  rows={4}
-                                  value={deepDraftReview.continuity.openQuestions}
-                                  onChange={event => updateDeepDraftReview({ continuity: { ...deepDraftReview.continuity, openQuestions: event.target.value } })}
-                                  placeholder="确认项或待确认问题，每行一个；确认项会随项目种子保存"
-                                />
-                              </div>
-                            </Space>
-                          </Card>
-                          <Space.Compact block>
-                            <Button
-                              style={{ width: '33.333%' }}
-                              icon={<SaveOutlined />}
-                              loading={savingSeedDraft}
-                              onClick={saveCurrentSeedDraft}
-                            >
-                              保存草稿
-                            </Button>
-                            <Button
-                              style={{ width: '33.333%' }}
-                              onClick={() => {
-                                const nextSeed = normalizeProjectSeedForUi(deepDraftReviewModelToSeed(seed || {}, deepDraftReview))
-                                setSeed(nextSeed)
-                                applySeedToForm(nextSeed)
-                                setSeedFinalized(false)
-                                message.success('已采用审阅台草稿预览，仍建议模型定稿后创建')
-                              }}
-                            >
-                              采用当前草稿预览
-                            </Button>
-                            <Button
-                              type="primary"
-                              style={{ width: '33.333%' }}
-                              loading={finalizingSeed}
-                              onClick={() => finalizeProjectSeed(false)}
-                            >
-                              定稿并创建项目
-                            </Button>
-                          </Space.Compact>
-                          {seedDiagnosticsNeedReview(seedDiagnostics) && (
-                            <Button
-                              block
-                              type="primary"
-                              loading={finalizingSeed}
-                              onClick={() => finalizeProjectSeed(true)}
-                            >
-                              我已确认，创建项目
-                            </Button>
-                          )}
-                          <details>
-                            <summary style={{ cursor: 'pointer', color: '#1677ff' }}>查看完整项目种子 JSON（高级）</summary>
-                            <pre style={{ maxHeight: 260, overflow: 'auto', marginTop: 8, padding: 10, background: '#f8fafc', borderRadius: 8, fontSize: 12, whiteSpace: 'pre-wrap' }}>
-                              {JSON.stringify(deepDraftReviewModelToSeed(seed || {}, deepDraftReview), null, 2)}
-                            </pre>
-                          </details>
-                        </>
-                      ) : (
-                        <details>
-                          <summary style={{ cursor: 'pointer', color: '#1677ff' }}>查看完整项目种子 JSON</summary>
-                          <pre style={{ maxHeight: 260, overflow: 'auto', marginTop: 8, padding: 10, background: '#f8fafc', borderRadius: 8, fontSize: 12, whiteSpace: 'pre-wrap' }}>
-                            {JSON.stringify(seed, null, 2)}
-                          </pre>
-                        </details>
-                      )}
-                    </Space>
-                  </Card>
-                )}
-              </Space>
-            </Card>
+                  )}
+                </>
+              ) : null}
+            </Space>
 
             {(createMode === 'manual' || seed) && (
               <>
