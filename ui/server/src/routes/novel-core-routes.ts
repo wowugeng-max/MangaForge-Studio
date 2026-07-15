@@ -3151,7 +3151,17 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
 
     const writeEvent = (payload: any) => {
       if (closed || res.writableEnded) return
-      res.write(sseData(payload))
+      try {
+        res.write(sseData(payload))
+      } catch {
+        closed = true
+      }
+    }
+
+    const endStream = () => {
+      if (!res.writableEnded) {
+        try { res.end() } catch { /* ignore */ }
+      }
     }
 
     const onProgress: ProjectSeedProgressReporter = (event) => writeEvent(event)
@@ -3186,7 +3196,7 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
           seed,
           seed_diagnostics: seedDiagnostics,
         })
-        return res.end()
+        return
       }
       seedDiagnostics = annotateOutlineScaffoldDiagnostics(seed, seedDiagnostics || seed.seed_diagnostics)
       seed = attachProjectSeedDirector({ ...seed, seed_diagnostics: seedDiagnostics })
@@ -3199,14 +3209,13 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
         outline_foreshadowing_count: Array.isArray(seed.foreshadowing_plan) ? seed.foreshadowing_plan.length : 0,
       })
       writeEvent({ type: 'result', ok: true, seed, result, seed_diagnostics: seedDiagnostics })
-      res.end()
     } catch (error) {
       writeEvent({ type: 'error', message: String(error) })
-      if (!res.writableEnded) res.end()
     } finally {
       clearInterval(heartbeat)
       req.off('close', markClosed)
       res.off('close', markClosed)
+      endStream()
     }
   })
 
