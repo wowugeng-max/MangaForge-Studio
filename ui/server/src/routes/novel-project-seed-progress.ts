@@ -80,3 +80,21 @@ export function buildProjectSeedStageEvent(input: {
 export function sseData(value: any) {
   return `data: ${JSON.stringify(value)}\n\n`
 }
+
+export function safeReportProjectSeedProgress(
+  onProgress: ProjectSeedProgressReporter | undefined,
+  eventInput: Parameters<typeof buildProjectSeedStageEvent>[0],
+) {
+  if (!onProgress) return
+  try {
+    onProgress(buildProjectSeedStageEvent(eventInput))
+  } catch {
+    // never break generation because UI progress failed
+  }
+}
+
+/** After pass A3, empty volumes must not be reported as completed. */
+export function resolvePassA3VolumeStageStatus(volumeCount: number): ProjectSeedStageStatus {
+  return volumeCount > 0 ? 'completed' : 'error'
+}
+
