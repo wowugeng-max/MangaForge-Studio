@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react'
-import { Alert, Button, Card, Form, Input, List, Modal, Progress, Result, Segmented, Select, Space, Steps, Tag, Typography, message } from 'antd'
+import { Button, Form, Input, Modal, Result, Segmented, Select, Space, Steps, message } from 'antd'
 import { ArrowLeftOutlined, ArrowRightOutlined, CheckCircleOutlined, RocketOutlined } from '@ant-design/icons'
 import apiClient from '../api/client'
 import {
@@ -35,9 +35,11 @@ import { SeedInputSection } from './novel-entry/create/SeedInputSection'
 import { SeedStatusBar } from './novel-entry/create/SeedStatusBar'
 import { DeepDraftReviewSection } from './novel-entry/create/DeepDraftReviewSection'
 import { GenerationProgressPanel } from './novel-entry/create/GenerationProgressPanel'
+import { CreateStepHeader } from './novel-entry/create/CreateStepHeader'
+import { CreateSummaryCard } from './novel-entry/create/CreateSummaryCard'
+import { CREATE_MODE_LABELS } from './novel-entry/create/createWizardCopy'
 import { useProjectSeedStream } from './novel-entry/create/useProjectSeedStream'
 
-const { Text } = Typography
 const projectSeedModelStorageKey = 'novel.projectSeed.model_id'
 
 interface NovelFormValues {
@@ -428,7 +430,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     if (current === formItems.length - 2) {
       if (createMode === 'deep_draft' && !foundationReadyToCreate) {
         message.warning(foundationScore.allowCreateWithWarning
-          ? '评分未达推荐开书线。请先打磨，或在评分卡确认“我满意，以当前版本开书”'
+          ? '评分未达推荐开书线。请先打磨，或在结果状态区确认“我满意，以当前版本开书”'
           : '基础评分过低，请先补强后再创建')
         return
       }
@@ -931,126 +933,6 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     }
   }
 
-  const foundationStatusColor = foundationScore.recommendCreate
-    ? 'success'
-    : foundationScore.allowCreateWithWarning
-      ? 'warning'
-      : 'error'
-
-  const renderFoundationScoreCard = (opts?: { compact?: boolean }) => {
-    if (createMode !== 'deep_draft' || !seed) return null
-    const compact = Boolean(opts?.compact)
-    return (
-      <Card
-        size="small"
-        className="novel-deep-draft-foundation-card"
-        title={compact ? '开书基础评分' : 'oh-story 开书基础评分'}
-        extra={<Tag color={foundationScore.recommendCreate ? 'green' : foundationScore.allowCreateWithWarning ? 'gold' : 'red'} bordered={false}>{foundationScore.statusLabel}</Tag>}
-        style={{ borderRadius: 10 }}
-      >
-        <Space direction="vertical" size={10} style={{ width: '100%' }}>
-          <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
-            <Progress
-              type="circle"
-              percent={foundationScore.overall}
-              size={compact ? 64 : 78}
-              strokeColor={foundationScore.recommendCreate ? '#22c55e' : foundationScore.allowCreateWithWarning ? '#f59e0b' : '#ef4444'}
-              format={percent => (
-                <div style={{ lineHeight: 1.15 }}>
-                  <div style={{ fontSize: compact ? 16 : 18, fontWeight: 700 }}>{percent}</div>
-                  <div style={{ fontSize: 11, color: '#64748b' }}>{foundationScore.grade}</div>
-                </div>
-              )}
-            />
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <Text strong style={{ display: 'block' }}>{foundationScore.headline}</Text>
-              <Text type="secondary" style={{ fontSize: 12 }}>{foundationScore.summary}</Text>
-              <div style={{ marginTop: 6 }}>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  推荐阈值：{foundationScore.threshold.recommend}+ 开书 · {foundationScore.threshold.warning}+ 可带风险开书
-                </Text>
-              </div>
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
-            {foundationScore.dimensions.map(dimension => (
-              <div
-                key={dimension.key}
-                style={{
-                  border: '1px solid #e5e7eb',
-                  borderRadius: 8,
-                  padding: '8px 10px',
-                  background: dimension.status === 'strong' ? '#f5fbf7' : dimension.status === 'ok' ? '#f8fafc' : '#fff8eb',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                  <Text style={{ fontSize: 12, fontWeight: 600 }}>{dimension.title}</Text>
-                  <Text style={{ fontSize: 12 }}>{dimension.score}</Text>
-                </div>
-                <Progress
-                  percent={dimension.score}
-                  size="small"
-                  showInfo={false}
-                  strokeColor={dimension.status === 'strong' ? '#22c55e' : dimension.status === 'ok' ? '#3b82f6' : '#f59e0b'}
-                  style={{ margin: '4px 0' }}
-                />
-                <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>{dimension.summary}</Text>
-                {dimension.missing.length > 0 && (
-                  <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
-                    缺口：{dimension.missing.slice(0, 3).join('、')}{dimension.missing.length > 3 ? '…' : ''}
-                  </Text>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {foundationScore.nextActions.length > 0 && (
-            <Alert
-              type={foundationStatusColor === 'success' ? 'success' : 'info'}
-              showIcon
-              message="下一步怎么补更稳"
-              description={(
-                <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
-                  {foundationScore.nextActions.map(action => (
-                    <li key={action}><Text style={{ fontSize: 12 }}>{action}</Text></li>
-                  ))}
-                </ul>
-              )}
-            />
-          )}
-
-          {!foundationScore.recommendCreate && (
-            <Alert
-              type={foundationScore.allowCreateWithWarning ? 'warning' : 'error'}
-              showIcon
-              message={foundationScore.allowCreateWithWarning ? '当前版本可开书，但建议先打磨短板' : '当前基础偏弱，不建议直接开书'}
-              description={(
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                  {foundationScore.topRisks.length > 0 && (
-                    <Text style={{ fontSize: 12 }}>主要缺口：{foundationScore.topRisks.join('、')}</Text>
-                  )}
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    可在下方审阅台手动补全缺口；满意当前版本时，点“我满意，以当前版本开书”后继续。
-                  </Text>
-                  <Space wrap>
-                    <Button size="small" type={foundationAccepted ? 'default' : 'primary'} onClick={() => setFoundationAccepted(true)}>
-                      {foundationAccepted ? '已标记满意此版本' : '我满意，以当前版本开书'}
-                    </Button>
-                    {foundationAccepted && (
-                      <Button size="small" onClick={() => setFoundationAccepted(false)}>取消满意标记</Button>
-                    )}
-                  </Space>
-                </Space>
-              )}
-            />
-          )}
-        </Space>
-      </Card>
-    )
-  }
-
-
   return (
     <Modal
       open={open}
@@ -1150,6 +1032,8 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                       statusLabel: foundationScore.statusLabel,
                       recommendCreate: foundationScore.recommendCreate,
                     } : undefined}
+                    scoreSummary={createMode === 'deep_draft' ? foundationScore.summary : undefined}
+                    topRisks={createMode === 'deep_draft' ? foundationScore.topRisks : undefined}
                     diagnosticsSuggestion={
                       outlinesAreLocalScaffold
                         ? String(seedDiagnostics?.suggestion || seed?.seed_diagnostics?.suggestion || '分卷/前30章细纲尚未由模型成功生成，请重新生成或换更强模型')
@@ -1166,6 +1050,10 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                     finalizing={finalizingSeed}
                     showDraftActions={createMode === 'deep_draft'}
                     showFinalize={createMode === 'deep_draft'}
+                    showFoundationAccept={createMode === 'deep_draft'}
+                    foundationAccepted={foundationAccepted}
+                    onAcceptFoundation={() => setFoundationAccepted(true)}
+                    onClearFoundationAccept={() => setFoundationAccepted(false)}
                     onRegenerate={deriveProjectSeed}
                     onSaveDraft={saveCurrentSeedDraft}
                     onFinalize={() => finalizeProjectSeed(false)}
@@ -1174,7 +1062,6 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                     finalizeLabel="定稿并创建项目"
                     confirmFinalizeLabel="我已确认，创建项目"
                   />
-                  {createMode === 'deep_draft' && renderFoundationScoreCard({ compact: true })}
                   {createMode === 'deep_draft' && (
                     <DeepDraftReviewSection
                       model={deepDraftReview}
@@ -1272,6 +1159,16 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
         {/* Step 1: Commercial Hook */}
         {current === 1 && (
           <>
+            <CreateStepHeader
+              title="商业钩子"
+              tags={[
+                { label: '读者承诺', ok: Boolean(launchpad.reader_promise.trim()) },
+                { label: '核心卖点', ok: Boolean(launchpad.core_selling_point.trim()) },
+                { label: '主角处境', ok: Boolean(launchpad.protagonist_situation.trim()) },
+                { label: '主角压力', ok: Boolean(launchpad.protagonist_pressure.trim()) },
+                { label: '开篇钩子', ok: Boolean(launchpad.opening_hook.trim()) },
+              ]}
+            />
             <Form.Item label="读者承诺">
               <Input.TextArea
                 rows={2}
@@ -1347,6 +1244,20 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
         {/* Step 2: Long-form Capacity */}
         {current === 2 && (
           <>
+            <CreateStepHeader
+              title="长线承载"
+              tags={[
+                { label: '主线目标', ok: Boolean(launchpad.mainline_goal.trim()) },
+                { label: '长线冲突', ok: Boolean(launchpad.long_term_conflict.trim()) },
+                { label: '成长引擎', ok: Boolean(launchpad.growth_engine.trim()) },
+                { label: '分卷方向', ok: Boolean(launchpad.volume_direction.trim()) },
+                ...(seed ? [
+                  { label: `分卷 ${seed.volume_outlines?.length || 0}`, ok: (seed.volume_outlines?.length || 0) > 0 },
+                  { label: `细纲 ${seed.chapter_outlines?.length || 0}`, ok: (seed.chapter_outlines?.length || 0) > 0 },
+                  { label: `伏笔 ${effectiveForeshadowingCount}`, ok: effectiveForeshadowingCount > 0 },
+                ] : []),
+              ]}
+            />
             <Form.Item label="长篇主线目标">
               <Input.TextArea
                 rows={2}
@@ -1401,41 +1312,22 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
               />
             </Form.Item>
 
-            {seed && (
-              <Card size="small" title="种子素材覆盖" style={{ borderRadius: 8 }}>
-                <Space wrap>
-                  <Tag color="purple" bordered={false}>分卷 {seed.volume_outlines?.length || 0}</Tag>
-                  <Tag color="geekblue" bordered={false}>章节细纲 {seed.chapter_outlines?.length || 0}</Tag>
-                  <Tag color="cyan" bordered={false}>伏笔 {effectiveForeshadowingCount}</Tag>
-                  <Tag color="blue" bordered={false}>人物 {seed.characters?.length || 0}</Tag>
-                </Space>
-              </Card>
-            )}
           </>
         )}
 
         {/* Step 3: First 30 Chapters */}
         {current === 3 && (
           <>
-            <Card size="small" title="AI 种子前30章覆盖" style={{ marginBottom: 16, borderRadius: 8 }}>
-              <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                <Space wrap>
-                  <Tag color={first30Summary.hasOpening ? 'green' : 'default'} bordered={false}>1-3章 {first30Summary.hasOpening ? '已覆盖' : '待补'}</Tag>
-                  <Tag color={first30Summary.hasTrialRead ? 'green' : 'default'} bordered={false}>4-10章 {first30Summary.hasTrialRead ? '已覆盖' : '待补'}</Tag>
-                  <Tag color={first30Summary.hasPaidBuildup ? 'green' : 'default'} bordered={false}>11-30章 {first30Summary.hasPaidBuildup ? '已覆盖' : '待补'}</Tag>
-                  <Tag color="blue" bordered={false}>细纲 {first30Summary.outlineCount}</Tag>
-                </Space>
-                {first30Summary.sample.length > 0 ? (
-                  <List
-                    size="small"
-                    dataSource={first30Summary.sample}
-                    renderItem={item => <List.Item>{item}</List.Item>}
-                  />
-                ) : (
-                  <Text type="secondary">当前种子没有可识别的前30章细纲，可在下方手动填写追读启动计划。</Text>
-                )}
-              </Space>
-            </Card>
+            <CreateStepHeader
+              title="前30章"
+              tags={[
+                { label: '1-3章', ok: first30Summary.hasOpening || Boolean(launchpad.first30_plan.chapters_1_3.trim()) },
+                { label: '4-10章', ok: first30Summary.hasTrialRead || Boolean(launchpad.first30_plan.chapters_4_10.trim()) },
+                { label: '11-30章', ok: first30Summary.hasPaidBuildup || Boolean(launchpad.first30_plan.chapters_11_30.trim()) },
+                { label: `细纲 ${first30Summary.outlineCount}`, ok: first30Summary.outlineCount > 0 },
+                { label: '首写任务', ok: Boolean(launchpad.first_writing_task.trim()) },
+              ]}
+            />
 
             <Form.Item label="1-3章：开篇承诺">
               <Input.TextArea
@@ -1478,124 +1370,46 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
 
       {/* Step 4: Confirm — 从 data state 读取，不依赖 Form */}
       {current === 4 && (
-        <div style={{ background: '#f8f9fa', borderRadius: 12, padding: 20 }}>
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <h3 style={{ margin: 0, fontSize: 16 }}>创建预览与风险</h3>
-
-            {renderFoundationScoreCard({ compact: true })}
-
-            <Space wrap>
-              {[
-                launchpadReadiness.sellable,
-                launchpadReadiness.first30,
-                launchpadReadiness.longform,
-              ].map(item => (
-                <Tag key={item.key} color={item.ready ? 'green' : 'orange'} bordered={false}>
-                  {item.title} {item.ready ? '就绪' : `待补 ${item.missing.length}`}
-                </Tag>
-              ))}
-              {createMode === 'deep_draft' && (
-                <Tag color={foundationScore.recommendCreate ? 'green' : foundationAccepted ? 'blue' : 'gold'} bordered={false}>
-                  基础分 {foundationScore.overall} · {foundationScore.statusLabel}
-                </Tag>
-              )}
-            </Space>
-
-            {launchpadReadiness.risks.length > 0 && (
-              <Alert
-                type="warning"
-                showIcon
-                message="创建后可继续补齐这些启动风险"
-                description={launchpadReadiness.risks.join('；')}
-              />
-            )}
-
-            <div style={{ display: 'grid', gap: 8 }}>
-              <div style={{ display: 'flex' }}>
-                <span style={{ minWidth: 80, color: '#999' }}>作品标题</span>
-                <span style={{ fontWeight: 500 }}>{data.title || '-'}</span>
-              </div>
-              <div style={{ display: 'flex' }}>
-                <span style={{ minWidth: 80, color: '#999' }}>题材</span>
-                <span>{data.genre || '-'}</span>
-              </div>
-              {data.sub_genres?.length > 0 && (
-                <div style={{ display: 'flex' }}>
-                  <span style={{ minWidth: 80, color: '#999' }}>子题材</span>
-                  <span>{data.sub_genres.join(' / ')}</span>
-                </div>
-              )}
-              {data.synopsis && (
-                <div style={{ display: 'flex' }}>
-                  <span style={{ minWidth: 80, color: '#999' }}>简介</span>
-                  <span style={{ fontStyle: 'italic', color: '#666' }}>{data.synopsis}</span>
-                </div>
-              )}
-              <div style={{ display: 'flex' }}>
-                <span style={{ minWidth: 80, color: '#999' }}>篇幅</span>
-                <span>{LENGTH_TARGETS.find(l => l.value === data.length_target)?.label || '中篇'}</span>
-              </div>
-              {data.target_audience && (
-                <div style={{ display: 'flex' }}>
-                  <span style={{ minWidth: 80, color: '#999' }}>读者</span>
-                  <span>{data.target_audience}</span>
-                </div>
-              )}
-              {data.style_tags?.length > 0 && (
-                <div style={{ display: 'flex' }}>
-                  <span style={{ minWidth: 80, color: '#999' }}>风格</span>
-                  <span>{data.style_tags.join(' / ')}</span>
-                </div>
-              )}
-              {data.commercial_tags?.length > 0 && (
-                <div style={{ display: 'flex' }}>
-                  <span style={{ minWidth: 80, color: '#999' }}>商业</span>
-                  <span>{data.commercial_tags.join(' / ')}</span>
-                </div>
-              )}
-              {seed && (
-                <div style={{ display: 'flex' }}>
-                  <span style={{ minWidth: 80, color: '#999' }}>创意种子</span>
-                  <span>已保存，并会自动创建分卷大纲、章节目录/细纲与伏笔计划</span>
-                </div>
-              )}
-            </div>
-
-            <Card size="small" title="核心承诺" style={{ borderRadius: 8 }}>
-              <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                <Text strong>{launchpad.reader_promise || data.synopsis || '未填写读者承诺'}</Text>
-                <Text type="secondary">{launchpad.core_selling_point || '未填写核心卖点'}</Text>
-                <Text type="secondary">{launchpad.opening_hook || '未填写开篇钩子'}</Text>
-              </Space>
-            </Card>
-
-            <List
-              size="small"
-              header={<Text strong>写作准备</Text>}
-              dataSource={[
-                {
-                  title: '前30章',
-                  text: launchpad.first30_plan.chapters_1_3 || launchpad.first30_plan.chapters_4_10 || launchpad.first30_plan.chapters_11_30 || '待补前30章追读计划',
-                },
-                {
-                  title: '长线承载',
-                  text: launchpad.mainline_goal || launchpad.long_term_conflict || launchpad.growth_engine || '待补长篇主线与成长引擎',
-                },
-                {
-                  title: '下一步',
-                  text: launchpadReadiness.nextAction,
-                },
-              ]}
-              renderItem={item => (
-                <List.Item>
-                  <List.Item.Meta
-                    title={item.title}
-                    description={<span style={{ whiteSpace: 'pre-wrap' }}>{item.text}</span>}
-                  />
-                </List.Item>
-              )}
-            />
-          </Space>
+        <div style={{ borderRadius: 12 }}>
+          <CreateStepHeader
+            title="确认创建"
+            tags={[
+              { label: launchpadReadiness.sellable.title, ok: launchpadReadiness.sellable.ready },
+              { label: launchpadReadiness.first30.title, ok: launchpadReadiness.first30.ready },
+              { label: launchpadReadiness.longform.title, ok: launchpadReadiness.longform.ready },
+              ...(createMode === 'deep_draft' ? [{
+                label: `基础分 ${foundationScore.overall}`,
+                ok: foundationScore.recommendCreate || foundationAccepted,
+              }] : []),
+              ...(seed ? [{ label: '种子已备', ok: true }] : [{ label: '种子待补', ok: false }]),
+            ]}
+          />
+          <CreateSummaryCard
+            modeLabel={CREATE_MODE_LABELS[createMode].title}
+            title={data.title}
+            genre={data.genre}
+            framework={selectedGenreFramework || activeGenreGuide?.framework || (data.sub_genres || [])[0] || ''}
+            lengthLabel={LENGTH_TARGETS.find(item => item.value === data.length_target)?.label || '中篇'}
+            score={createMode === 'deep_draft' && seed ? {
+              overall: foundationScore.overall,
+              grade: foundationScore.grade,
+              statusLabel: foundationScore.statusLabel,
+              recommendCreate: foundationScore.recommendCreate || foundationAccepted,
+            } : undefined}
+            volumeCount={Number(seedDiagnostics?.outline_volume_count ?? seed?.volume_outlines?.length ?? 0)}
+            chapterCount={Number(seedDiagnostics?.outline_chapter_count ?? seed?.chapter_outlines?.length ?? 0)}
+            foreshadowingCount={effectiveForeshadowingCount}
+            characterCount={createMode === 'deep_draft' ? deepDraftReview.characters.length : (Array.isArray(seed?.characters) ? seed.characters.length : 0)}
+            readinessTags={[
+              { label: `${launchpadReadiness.sellable.title}${launchpadReadiness.sellable.ready ? '就绪' : '待补'}`, ok: launchpadReadiness.sellable.ready },
+              { label: `${launchpadReadiness.first30.title}${launchpadReadiness.first30.ready ? '就绪' : '待补'}`, ok: launchpadReadiness.first30.ready },
+              { label: `${launchpadReadiness.longform.title}${launchpadReadiness.longform.ready ? '就绪' : '待补'}`, ok: launchpadReadiness.longform.ready },
+            ]}
+            topRisks={[
+              ...(createMode === 'deep_draft' ? foundationScore.topRisks : []),
+              ...launchpadReadiness.risks,
+            ].filter(Boolean).slice(0, 8)}
+          />
         </div>
       )}
 

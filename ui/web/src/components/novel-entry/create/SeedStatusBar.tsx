@@ -10,6 +10,8 @@ export function SeedStatusBar(props: {
   foreshadowingCount: number
   characterCount: number
   score?: { overall: number; grade: string; statusLabel: string; recommendCreate: boolean }
+  scoreSummary?: string
+  topRisks?: string[]
   diagnosticsSuggestion?: string
   riskMessage?: string
   finalized?: boolean
@@ -18,6 +20,10 @@ export function SeedStatusBar(props: {
   finalizing?: boolean
   showDraftActions?: boolean
   showFinalize?: boolean
+  foundationAccepted?: boolean
+  showFoundationAccept?: boolean
+  onAcceptFoundation?: () => void
+  onClearFoundationAccept?: () => void
   onRegenerate: () => void
   onSaveDraft: () => void
   onFinalize: () => void
@@ -27,6 +33,9 @@ export function SeedStatusBar(props: {
   confirmFinalizeLabel?: string
 }) {
   const scoreColor = props.score?.recommendCreate ? 'green' : 'gold'
+  const showOutlineGap = Boolean(props.diagnosticsSuggestion || props.riskMessage)
+  const showFoundationAccept = Boolean(props.showFoundationAccept && props.score && !props.score.recommendCreate)
+
   return (
     <Card size="small" title={STEP0_SECTION_TITLES.status} style={{ borderRadius: 12 }}>
       <Space direction="vertical" size={10} style={{ width: '100%' }}>
@@ -43,7 +52,11 @@ export function SeedStatusBar(props: {
           {props.finalized ? <Tag color="success" bordered={false}>确定版</Tag> : null}
         </Space>
 
-        {(props.diagnosticsSuggestion || props.riskMessage) && (
+        {props.score && props.scoreSummary ? (
+          <Text type="secondary" style={{ fontSize: 12 }}>{props.scoreSummary}</Text>
+        ) : null}
+
+        {showOutlineGap && (
           <Alert
             type="warning"
             showIcon
@@ -51,6 +64,35 @@ export function SeedStatusBar(props: {
             description={props.diagnosticsSuggestion ? (
               <Text type="secondary" style={{ fontSize: 12 }}>{props.diagnosticsSuggestion}</Text>
             ) : undefined}
+          />
+        )}
+
+        {showFoundationAccept && (
+          <Alert
+            type={props.foundationAccepted ? 'info' : 'warning'}
+            showIcon
+            message={props.foundationAccepted ? '已标记满意当前版本' : '评分未达推荐开书线'}
+            description={(
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                {(props.topRisks || []).length > 0 && (
+                  <Text style={{ fontSize: 12 }}>主要缺口：{(props.topRisks || []).join('、')}</Text>
+                )}
+                <Space wrap>
+                  <Button
+                    size="small"
+                    type={props.foundationAccepted ? 'default' : 'primary'}
+                    onClick={props.onAcceptFoundation}
+                  >
+                    {props.foundationAccepted ? '已标记满意此版本' : '我满意，以当前版本开书'}
+                  </Button>
+                  {props.foundationAccepted && props.onClearFoundationAccept && (
+                    <Button size="small" onClick={props.onClearFoundationAccept}>
+                      取消满意标记
+                    </Button>
+                  )}
+                </Space>
+              </Space>
+            )}
           />
         )}
 
