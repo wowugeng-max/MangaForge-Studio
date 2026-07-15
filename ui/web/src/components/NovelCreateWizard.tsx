@@ -24,9 +24,13 @@ import { buildDeepDraftFoundationScore } from './novel-entry/deepDraftFoundation
 import {
   FALLBACK_GENRE_CATALOG_GUIDES,
   buildGenreGuideIdeaPrefix,
+  filterGenreCatalogGuidesByPrimary,
+  frameworkMatchesPrimaryGenre,
   genreFrameworkToPrimaryGenre,
   groupGenreCatalogGuides,
+  isSeedGenreAligned,
   matchGenreCatalogGuide,
+  primaryGenreLockText,
   type GenreCatalogGuide,
 } from './novel-entry/genreCatalogGuide'
 import { CreateModeSection, type CreateWizardMode } from './novel-entry/create/CreateModeSection'
@@ -388,7 +392,10 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     }
     return autoMatchedGenreGuide
   }, [selectedGenreFramework, genreCatalogGuides, autoMatchedGenreGuide])
-  const genreGuideGroups = useMemo(() => groupGenreCatalogGuides(genreCatalogGuides), [genreCatalogGuides])
+  const genreGuideGroups = useMemo(() => {
+    const filtered = filterGenreCatalogGuidesByPrimary(genreCatalogGuides, data.genre)
+    return groupGenreCatalogGuides(filtered)
+  }, [genreCatalogGuides, data.genre])
   const seedRecoveryView = buildSeedRecoveryDiagnosticsView(seed || {}, seedDiagnostics)
   const effectiveForeshadowingCount = createMode === 'deep_draft'
     ? deepDraftReview.continuity.foreshadowing.split(/\r?\n/).map(line => line.trim()).filter(Boolean).length
@@ -580,7 +587,15 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
         : null
       const res = patchedSeed
         ? await apiClient.post('/novel/projects/auto-create', { title, idea, seed: { ...patchedSeed, length_target: data.length_target }, length_target: data.length_target })
-        : await apiClient.post('/novel/projects/auto-create', { title, idea, model_id: seedModelId, length_target: data.length_target })
+        : await apiClient.post('/novel/projects/auto-create', {
+            title,
+            idea,
+            model_id: seedModelId,
+            length_target: data.length_target,
+            genre: data.genre,
+            primary_genre: data.genre,
+            genre_framework: activeGenreGuide?.framework || selectedGenreFramework || '',
+          })
       const project = res.data?.project || res.data
       const projectId = project?.id
       if (!projectId) throw new Error('自动建项未返回项目 ID')
@@ -826,15 +841,21 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
   const deriveProjectSeed = async () => {
     if (!seedIdea.trim() && !data.title.trim()) return message.warning('请输入作品名称，或粘贴创意草稿')
     if (!seedModelId) return message.warning('请先选择用于整理创意的模型')
+    if (!String(data.genre || '').trim()) return message.warning('请先选择主题材（如都市、悬疑）')
     setSeedLoading(true)
     try {
-      const genrePrefix = buildGenreGuideIdeaPrefix(activeGenreGuide)
+      const genrePrefix = buildGenreGuideIdeaPrefix(
+        activeGenreGuide,
+        data.genre,
+      ) || primaryGenreLockText(data.genre)
       const ideaWithGenre = [genrePrefix, seedIdea.trim() || data.title.trim()].filter(Boolean).join('\n\n')
       const latest = await seedStream.start({
         idea: ideaWithGenre,
         title: data.title,
         model_id: seedModelId,
         length_target: data.length_target,
+        genre: data.genre,
+        primary_genre: data.genre,
         genre_framework: activeGenreGuide?.framework || selectedGenreFramework || '',
       })
       if (latest.error && !latest.seed) {
@@ -847,6 +868,12 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
       setSeedDiagnostics(diagnostics)
       setSeedFinalized(createMode !== 'deep_draft' && !seedDiagnosticsNeedReview(diagnostics))
       applySeedToForm(nextSeed)
+      // 主题材硬约束：生成结果偏题时保留用户选择并提示
+      if (data.genre && !isSeedGenreAligned(nextSeed.genre, data.genre)) {
+        setData(prev => ({ ...prev, genre: data.genre }))
+        form.setFieldsValue({ genre: data.genre })
+        message.warning(`生成结果题材偏成「${nextSeed.genre || '未知'}」，已按你选的主题材「${data.genre}」保留；可改玩法后重生成`)
+      }
       if (typeof window !== 'undefined') window.localStorage.setItem(projectSeedModelStorageKey, String(seedModelId))
       if (latest.error) {
         message.warning(latest.error)
@@ -854,6 +881,8 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
         message.warning('模型返回偏薄，已保留有效信息并生成可编辑草稿')
       } else if (diagnostics?.status === 'recovered_by_model') {
         message.success('首轮返回偏薄，已自动补种子为可审阅草稿')
+      } else if (data.genre && isSeedGenreAligned(nextSeed.genre, data.genre)) {
+        message.success(`已按「${data.genre}」整理创意草稿`)
       } else {
         message.success('已整理创意草稿，可继续编辑后创建项目')
       }
@@ -915,6 +944,15 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
 
 
 
+  const selectPrimaryGenre = (genre: string) => {
+    setData(prev => ({ ...prev, genre }))
+    form.setFieldsValue({ genre })
+    // 切换主题材后，清掉不匹配的玩法框架，避免继续带着仙侠框架生成都市
+    if (selectedGenreFramework && !frameworkMatchesPrimaryGenre(selectedGenreFramework, genre)) {
+      setSelectedGenreFramework('')
+    }
+  }
+
   const selectGenreFramework = (framework: string) => {
     const guide = genreCatalogGuides.find(item => item.framework === framework) || null
     setSelectedGenreFramework(framework)
@@ -922,9 +960,11 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     const primary = genreFrameworkToPrimaryGenre(guide.framework)
     setData(prev => ({
       ...prev,
+      // 玩法服务于主题材：已有主题材则保留；否则用框架映射
       genre: prev.genre || primary,
       sub_genres: Array.from(new Set([...(prev.sub_genres || []), guide.framework, ...guide.keywords.slice(0, 2)])).slice(0, 6),
     }))
+    if (!data.genre) form.setFieldsValue({ genre: primary })
     if (!launchpad.reader_promise) {
       setLaunchpad(prev => ({
         ...prev,
@@ -975,10 +1015,12 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
               />
 
               <GenreGuideSection
+                primaryGenre={data.genre}
+                onPrimaryChange={selectPrimaryGenre}
                 groups={genreGuideGroups}
-                selectedFramework={selectedGenreFramework || activeGenreGuide?.framework || ''}
+                selectedFramework={selectedGenreFramework || ''}
                 loading={genreCatalogLoading}
-                onSelect={selectGenreFramework}
+                onSelectFramework={selectGenreFramework}
               />
 
               {createMode !== 'manual' && (

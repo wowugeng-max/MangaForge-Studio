@@ -6,7 +6,7 @@ export const CREATE_MODE_LABELS = {
 
 export const STEP0_SECTION_TITLES = {
   mode: '创建方式',
-  genre: '类型',
+  genre: '题材',
   input: '输入',
   status: '结果状态',
   progress: '生成进度',

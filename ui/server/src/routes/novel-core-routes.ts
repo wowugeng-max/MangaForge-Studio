@@ -1906,11 +1906,24 @@ export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea
   ].filter(Boolean).join('\n')
 }
 
-export function buildProjectSeedPrompt(idea: string, requestedTitle = '', requestedLengthTarget = '') {
+export function buildProjectSeedPrompt(
+  idea: string,
+  requestedTitle = '',
+  requestedLengthTarget = '',
+  options: { preferredGenre?: string; preferredFramework?: string } = {},
+) {
   const normalizedLengthTarget = normalizeLengthTarget(requestedLengthTarget) || 'medium'
-  const genreCatalogContract = buildOhStoryGenreCatalogContract(idea, requestedTitle)
-  const genreCoreMechanicsContract = buildOhStoryGenreCoreMechanicsContract(idea, requestedTitle)
-  const plotSpecialTopicsContract = buildOhStoryPlotSpecialTopicsContract(idea, requestedTitle)
+  const preferredGenre = String(options.preferredGenre || '').trim()
+  const preferredFramework = String(options.preferredFramework || '').trim()
+  const genreCatalogContract = buildOhStoryGenreCatalogContract(
+    idea,
+    requestedTitle,
+    preferredGenre,
+    preferredFramework,
+    preferredFramework ? { force_framework: preferredFramework } : null,
+  )
+  const genreCoreMechanicsContract = buildOhStoryGenreCoreMechanicsContract(idea, requestedTitle, preferredFramework, preferredGenre)
+  const plotSpecialTopicsContract = buildOhStoryPlotSpecialTopicsContract(idea, requestedTitle, preferredFramework, preferredGenre)
   const mainlineDefinitionContract = buildOhStoryMainlineDefinitionContract(idea, requestedTitle)
   const storyPowerContract = buildOhStoryStoryPowerContract(idea, requestedTitle)
   const characterDesignContract = buildOhStoryCharacterDesignContract(idea, requestedTitle)
@@ -1918,6 +1931,8 @@ export function buildProjectSeedPrompt(idea: string, requestedTitle = '', reques
   return [
     '任务：把用户碎片化小说想法整理成可创建项目的结构化项目种子。只输出 JSON object，不要 Markdown，不要解释。',
     requestedTitle ? `用户指定作品名：${requestedTitle}` : '',
+    preferredGenre ? `用户指定主题材（硬约束）：${preferredGenre}。genre 字段必须输出该主类，禁止漂到无关主类（尤其禁止无故写成仙侠/修真）。` : '',
+    preferredFramework ? `用户指定类型框架：${preferredFramework}。分卷、细纲与卖点必须服务该玩法。` : '',
     describeLengthTarget(normalizedLengthTarget),
     '',
     '用户原始想法：',
@@ -2006,7 +2021,15 @@ function buildFinalizeProjectSeedPrompt(draft: any, idea: string, requestedTitle
 }
 
 
-async function deriveProjectSeedWithModel(activeWorkspace: string, idea: string, modelId: string, requestedTitle = '', requestedLengthTarget = '', onProgress?: ProjectSeedProgressReporter) {
+async function deriveProjectSeedWithModel(
+  activeWorkspace: string,
+  idea: string,
+  modelId: string,
+  requestedTitle = '',
+  requestedLengthTarget = '',
+  onProgress?: ProjectSeedProgressReporter,
+  options: { preferredGenre?: string; preferredFramework?: string } = {},
+) {
   safeReportProjectSeedProgress(onProgress, {
     stage: 'skeleton',
     status: 'running',
@@ -2014,12 +2037,17 @@ async function deriveProjectSeedWithModel(activeWorkspace: string, idea: string,
     detail: 'derive_skeleton',
   })
   const lengthTarget = normalizeLengthTarget(requestedLengthTarget) || 'medium'
-  const prompt = buildProjectSeedPrompt(idea, requestedTitle, lengthTarget)
+  const preferredGenre = String(options.preferredGenre || '').trim()
+  const preferredFramework = String(options.preferredFramework || '').trim()
+  const prompt = buildProjectSeedPrompt(idea, requestedTitle, lengthTarget, {
+    preferredGenre,
+    preferredFramework,
+  })
   const projectStub = {
     id: 0,
     title: requestedTitle || '创意草稿解析',
-    genre: '',
-    sub_genres: [],
+    genre: preferredGenre || '',
+    sub_genres: preferredFramework ? [preferredFramework] : [],
     synopsis: idea.slice(0, 500),
     length_target: lengthTarget,
     target_audience: '',
@@ -2040,6 +2068,11 @@ async function deriveProjectSeedWithModel(activeWorkspace: string, idea: string,
   })
   let seed = repairProjectSeedGaps(normalizeProjectSeedPayload((result as any).output || parseJsonLikePayload((result as any).content) || {}, idea, lengthTarget), idea)
   if (requestedTitle && !seed.title) seed.title = requestedTitle
+  if (preferredGenre) seed.genre = preferredGenre
+  if (preferredFramework) {
+    const subs = Array.isArray(seed.sub_genres) ? seed.sub_genres.map((item: any) => String(item || '').trim()).filter(Boolean) : []
+    if (!subs.includes(preferredFramework)) seed.sub_genres = [preferredFramework, ...subs].slice(0, 8)
+  }
   seed = attachProjectSeedDirector(seed)
   safeReportProjectSeedProgress(onProgress, {
     stage: 'skeleton',
@@ -3094,7 +3127,17 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
       if (!idea && !title) return res.status(400).json({ error: 'title or idea is required' })
       const modelId = req.body?.model_id ? String(req.body.model_id) : undefined
       if (!modelId) return res.status(400).json({ error: 'model_id is required' })
-      let { seed, result } = await deriveProjectSeedWithModel(activeWorkspace, idea, modelId, title, lengthTarget)
+      const preferredGenre = String(req.body?.primary_genre || req.body?.genre || '').trim()
+      const preferredFramework = String(req.body?.genre_framework || req.body?.framework || '').trim()
+      let { seed, result } = await deriveProjectSeedWithModel(
+        activeWorkspace,
+        idea,
+        modelId,
+        title,
+        lengthTarget,
+        undefined,
+        { preferredGenre, preferredFramework },
+      )
       seed = stripLocalScaffoldOutlines(seed)
       let seedDiagnostics = annotateOutlineScaffoldDiagnostics(seed, buildProjectSeedDiagnostics(seed, idea, result))
       const needsExpansion = !seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length || !hasUsableProjectSeed(seed) || projectSeedNeedsOutlineExpansion(seed)
@@ -3171,7 +3214,17 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
     }, 15000)
 
     try {
-      let { seed, result } = await deriveProjectSeedWithModel(activeWorkspace, idea, modelId, title, lengthTarget, onProgress)
+      const preferredGenre = String(req.body?.primary_genre || req.body?.genre || '').trim()
+      const preferredFramework = String(req.body?.genre_framework || req.body?.framework || '').trim()
+      let { seed, result } = await deriveProjectSeedWithModel(
+        activeWorkspace,
+        idea,
+        modelId,
+        title,
+        lengthTarget,
+        onProgress,
+        { preferredGenre, preferredFramework },
+      )
       seed = stripLocalScaffoldOutlines(seed)
       let seedDiagnostics = annotateOutlineScaffoldDiagnostics(seed, buildProjectSeedDiagnostics(seed, idea, result))
       const needsExpansion = !seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length || !hasUsableProjectSeed(seed) || projectSeedNeedsOutlineExpansion(seed)
@@ -3295,7 +3348,17 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
       if (!seed || !Object.keys(seed).length || (!seed.title && !seed.synopsis && !seed.logline)) {
         if (!title && !idea) return res.status(400).json({ error: 'title or idea is required' })
         if (!modelId) return res.status(400).json({ error: 'model_id is required when seed is not provided' })
-        const derived = await deriveProjectSeedWithModel(activeWorkspace, idea, modelId, title, lengthTarget)
+        const preferredGenre = String(req.body?.primary_genre || req.body?.genre || '').trim()
+        const preferredFramework = String(req.body?.genre_framework || req.body?.framework || '').trim()
+        const derived = await deriveProjectSeedWithModel(
+          activeWorkspace,
+          idea,
+          modelId,
+          title,
+          lengthTarget,
+          undefined,
+          { preferredGenre, preferredFramework },
+        )
         seed = derived.seed
         result = derived.result
       }

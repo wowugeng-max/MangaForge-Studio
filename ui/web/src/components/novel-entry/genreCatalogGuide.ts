@@ -137,23 +137,110 @@ export function groupGenreCatalogGuides(guides: GenreCatalogGuide[]) {
   return Array.from(groups.entries()).map(([category, items]) => ({ category, items }))
 }
 
+export const PRIMARY_GENRE_OPTIONS = [
+  { value: '都市', label: '都市' },
+  { value: '悬疑', label: '悬疑' },
+  { value: '玄幻', label: '玄幻' },
+  { value: '仙侠', label: '仙侠' },
+  { value: '科幻', label: '科幻' },
+  { value: '历史', label: '历史' },
+  { value: '奇幻', label: '奇幻' },
+  { value: '武侠', label: '武侠' },
+  { value: '言情', label: '言情' },
+  { value: '末世', label: '末世' },
+  { value: '穿越', label: '穿越' },
+  { value: '系统', label: '系统流' },
+  { value: '其他', label: '其他' },
+] as const
+
 export function genreFrameworkToPrimaryGenre(framework: string) {
-  if (/仙侠|玄幻|凡人|长生/.test(framework)) return '玄幻'
+  if (/仙侠\/玄幻|玄幻/.test(framework) && !/^仙侠$/.test(framework)) return '玄幻'
+  if (/仙侠|凡人|长生/.test(framework)) return '仙侠'
   if (/都市高武|都市|文娱|新媒体|脑洞/.test(framework)) return '都市'
   if (/规则怪谈|无限|悬疑/.test(framework)) return '悬疑'
   if (/历史/.test(framework)) return '历史'
   if (/西幻/.test(framework)) return '奇幻'
   if (/婚恋|甜宠|霸总|追妻|后悔|死人|世情/.test(framework)) return '言情'
   if (/同人/.test(framework)) return '其他'
+  if (/科幻/.test(framework)) return '科幻'
+  if (/武侠/.test(framework)) return '武侠'
+  if (/末世/.test(framework)) return '末世'
+  if (/穿越|重生/.test(framework)) return '穿越'
+  if (/系统/.test(framework)) return '系统'
   return '其他'
 }
 
-export function buildGenreGuideIdeaPrefix(guide: GenreCatalogGuide | null | undefined) {
-  if (!guide) return ''
+export function frameworkMatchesPrimaryGenre(framework: string, primaryGenre: string) {
+  const primary = String(primaryGenre || '').trim()
+  if (!primary) return true
+  const mapped = genreFrameworkToPrimaryGenre(framework)
+  if (mapped === primary) return true
+  // 玄幻/仙侠互通
+  if ((primary === '玄幻' || primary === '仙侠') && (mapped === '玄幻' || mapped === '仙侠' || /仙侠|玄幻|凡人|长生/.test(framework))) return true
+  if (primary === '都市' && /都市|文娱|新媒体|脑洞|高武/.test(framework)) return true
+  if (primary === '悬疑' && /悬疑|规则怪谈|无限|推理|怪谈/.test(framework)) return true
+  if (primary === '言情' && /婚恋|甜宠|霸总|追妻|后悔|死人|世情/.test(framework)) return true
+  if (primary === '系统' && /脑洞|系统/.test(framework)) return true
+  if (primary === '穿越' && /重生|穿越|归来/.test(framework)) return true
+  if (primary === '其他') return true
+  return false
+}
+
+export function filterGenreCatalogGuidesByPrimary(
+  guides: GenreCatalogGuide[],
+  primaryGenre: string,
+) {
+  const primary = String(primaryGenre || '').trim()
+  if (!primary) return guides
+  const filtered = guides.filter(guide => frameworkMatchesPrimaryGenre(guide.framework, primary))
+  return filtered.length ? filtered : guides
+}
+
+export function primaryGenreLockText(primaryGenre: string) {
+  const primary = String(primaryGenre || '').trim()
+  if (!primary) return ''
+  const forbidMap: Record<string, string> = {
+    都市: '禁止写成仙侠/修真/灵气境界/宗门飞升体系；世界必须落在当代或近当代都市社会（可含隐藏异能，但外壳与日常场景仍是都市）。',
+    悬疑: '禁止写成仙侠修真升级文；核心必须是谜题、线索、真相、推理或信息差压力。',
+    言情: '禁止写成纯修仙升级主线；关系推进、情感确认与人物互动必须是主轴。',
+    科幻: '禁止写成古典仙侠；冲突应依托科技、未来社会或科幻设定。',
+    历史: '禁止写成现代都市爽文外壳；时代制度、历史语境与势力逻辑必须站得住。',
+    奇幻: '禁止写成东方式修真境界通胀；冲突应依托奇幻世界规则。',
+    末世: '禁止写成太平修仙日常；资源、秩序崩坏与生存压力必须在场。',
+    系统: '系统/金手指必须服务选定主类，不得无故漂到无关的仙侠地图。',
+    仙侠: '以仙侠修真为核心，不要漂成现代都市言情或纯悬疑本格。',
+    玄幻: '以玄幻升级/异界冲突为核心，不要漂成现代都市日常文。',
+  }
   return [
+    `【主题材硬约束：${primary}】`,
+    `genre 字段必须输出「${primary}」（或同义主类），不得漂到其他主类。`,
+    forbidMap[primary] || `所有世界观、分卷、前30章细纲与伏笔必须服务「${primary}」主类。`,
+  ].join('\n')
+}
+
+export function isSeedGenreAligned(seedGenre: any, primaryGenre: string) {
+  const primary = String(primaryGenre || '').trim()
+  const seed = String(seedGenre || '').trim()
+  if (!primary || !seed) return !primary
+  if (seed === primary) return true
+  if ((primary === '玄幻' || primary === '仙侠') && (seed === '玄幻' || seed === '仙侠')) return true
+  if (primary === '都市' && /都市|现实|职场|异能/.test(seed)) return true
+  if (primary === '悬疑' && /悬疑|推理|怪谈|无限/.test(seed)) return true
+  return seed.includes(primary) || primary.includes(seed)
+}
+
+export function buildGenreGuideIdeaPrefix(
+  guide: GenreCatalogGuide | null | undefined,
+  primaryGenre = '',
+) {
+  const primaryLock = primaryGenreLockText(primaryGenre || (guide ? genreFrameworkToPrimaryGenre(guide.framework) : ''))
+  if (!guide) return primaryLock
+  return [
+    primaryLock,
     `【oh-story 类型框架：${guide.framework}】`,
     `读者承诺：${guide.reader_promise}`,
     `必备场景：${guide.must_have_scenes.slice(0, 3).join('；')}`,
     `避坑：${guide.pitfalls.slice(0, 2).join('；')}`,
-  ].join('\n')
+    primaryGenre ? `主题材与玩法必须一致：主类=${primaryGenre || genreFrameworkToPrimaryGenre(guide.framework)}，玩法=${guide.framework}` : '',
+  ].filter(Boolean).join('\n')
 }

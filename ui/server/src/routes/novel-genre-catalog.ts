@@ -687,11 +687,44 @@ function firstMatchedRoute(input: string) {
   return scoredRoutes[0]?.route
 }
 
-export function buildOhStoryGenreCatalogContract(...inputs: any[]): OhStoryGenreCatalogContract {
+export function findGenreCatalogRouteByFramework(framework: string) {
+  const key = String(framework || '').trim()
+  if (!key) return null
+  return GENRE_CATALOG_ROUTES.find(route => route.framework === key) || null
+}
+
+export function buildOhStoryGenreCatalogContract(
+  ...inputs: any[]
+): OhStoryGenreCatalogContract {
+  const forceFramework = (() => {
+    for (const input of inputs) {
+      if (input && typeof input === 'object' && !Array.isArray(input) && input.force_framework) {
+        return String(input.force_framework || '').trim()
+      }
+    }
+    return ''
+  })()
+  if (forceFramework) {
+    const forced = findGenreCatalogRouteByFramework(forceFramework)
+    if (forced) {
+      return {
+        source: 'oh_story_genre_catalog_v1',
+        matched_framework: forced.framework,
+        route_reason: `作者指定类型框架：${forced.framework}`,
+        ...forced.contract,
+      }
+    }
+  }
   const text = inputs
     .flatMap(input => Array.isArray(input) ? input : [input])
     .filter(input => input !== undefined && input !== null)
-    .map(input => typeof input === 'string' ? input : JSON.stringify(input))
+    .map(input => {
+      if (typeof input === 'string') return input
+      if (input && typeof input === 'object' && !Array.isArray(input) && input.force_framework) {
+        return String(input.force_framework)
+      }
+      return JSON.stringify(input)
+    })
     .join('\n')
   const route = firstMatchedRoute(text)
   if (!route) return { ...GENERIC_GENRE_CATALOG_CONTRACT }
