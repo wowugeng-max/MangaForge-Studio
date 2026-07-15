@@ -1,0 +1,14 @@
+export const CREATE_MODE_LABELS = {
+  manual: { title: '手动开书', hint: '先建项目' },
+  quick_ai: { title: 'AI 快速', hint: '一键整理' },
+  deep_draft: { title: '深度孵化', hint: '生成后修订' },
+} as const
+
+export const STEP0_SECTION_TITLES = {
+  mode: '创建方式',
+  genre: '类型',
+  input: '输入',
+  status: '结果状态',
+  progress: '生成进度',
+  review: '审阅编辑',
+} as const
