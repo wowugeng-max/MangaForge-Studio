@@ -1,3 +1,4 @@
+import React from 'react'
 import { Card, Space, Typography } from 'antd'
 import { STEP0_SECTION_TITLES } from './createWizardCopy'
 

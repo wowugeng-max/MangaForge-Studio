@@ -1,3 +1,4 @@
+import React from 'react'
 import { Progress, Space, Typography } from 'antd'
 import type { ProjectSeedStreamState } from './projectSeedStreamTypes'
 import { STEP0_SECTION_TITLES } from './createWizardCopy'

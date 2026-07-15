@@ -1,3 +1,4 @@
+import React from 'react'
 import { Space, Tag } from 'antd'
 
 export function CreateStepHeader(props: {

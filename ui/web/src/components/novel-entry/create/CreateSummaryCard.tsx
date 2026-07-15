@@ -1,3 +1,4 @@
+import React from 'react'
 import { Alert, Card, Space, Tag, Typography } from 'antd'
 
 const { Text } = Typography

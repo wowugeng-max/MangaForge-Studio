@@ -1,3 +1,4 @@
+import React from 'react'
 import { Button, Card, Input, Popconfirm, Select, Space } from 'antd'
 import { DeleteOutlined, FolderOpenOutlined, RocketOutlined } from '@ant-design/icons'
 import { STEP0_SECTION_TITLES } from './createWizardCopy'

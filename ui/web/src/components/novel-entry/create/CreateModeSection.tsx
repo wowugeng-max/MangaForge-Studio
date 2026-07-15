@@ -1,3 +1,4 @@
+import React from 'react'
 import { Card } from 'antd'
 import { CREATE_MODE_LABELS, STEP0_SECTION_TITLES } from './createWizardCopy'
 
