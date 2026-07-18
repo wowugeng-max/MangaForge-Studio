@@ -24,9 +24,9 @@
 | 4 context/prompt glue | done | service modules extracted |
 | 5 monofile barrel-only | done | `monolith.ts` ~91 lines + public surface re-exports |
 | 6 monotest split | done | `novel-writing-service.test.ts` shim-only |
-| 7 editor/core routes packages | in progress | editor + core package-split (builders/register); further domain split + remaining routes open |
-| 8 auto-creation model package | in progress | package exists; helpers split into basics/main barrel; helpers-main still large |
-| 9 cockpit + repair prompt | in progress | cockpit model already sliced; repair prompt package scaffolded (prompt.ts still large) |
+| 7 editor/core routes packages | largely done | editor, core, commercial-ops, generation, planning package-split (builders/register); deeper domain split open |
+| 8 auto-creation model package | in progress | helpers barrel: basics + main(~10k) + batch/command/pipeline/leaf modules |
+| 9 cockpit + repair prompt | in progress | cockpit sliced; repair-task package scaffolded (prompt monofile remains large) |
 | 10 shell UI split | open | |
 | 11 final hardening | open | |
 
