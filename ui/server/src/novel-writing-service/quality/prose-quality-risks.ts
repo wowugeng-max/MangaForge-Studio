@@ -1371,7 +1371,7 @@ export function proseQualityCoreContractRisks(payload: any) {
     .filter(Boolean)
 }
 
-function normalizePerspectiveVerdicts(value: any) {
+export function normalizePerspectiveVerdicts(value: any) {
   const rows = Array.isArray(value)
     ? value
     : value && typeof value === 'object'

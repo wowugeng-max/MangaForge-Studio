@@ -2493,6 +2493,37 @@ bindStateTrackingContractDeps({
 
 
 
+export {
+  buildHeuristicSettingUsage,
+  selectProseForChapter,
+  throwIfAborted,
+  isAbortError,
+} from './service/runtime-helpers'
+import {
+  buildHeuristicSettingUsage,
+  selectProseForChapter,
+  throwIfAborted,
+  isAbortError,
+} from './service/runtime-helpers'
+
+export {
+  normalizeStoryStateDeltaForStorage,
+  mergeStoryState,
+} from './service/story-state-helpers'
+import {
+  normalizeStoryStateDeltaForStorage,
+  mergeStoryState,
+} from './service/story-state-helpers'
+
+export {
+  buildWritingBible,
+  hasMeaningfulWritingBible,
+} from './service/writing-bible'
+import {
+  buildWritingBible,
+  hasMeaningfulWritingBible,
+} from './service/writing-bible'
+
 export function createNovelWritingService(ctx: {
   getProject: (workspace: string, id: number) => Promise<any>
   production: NovelProductionService
@@ -2506,81 +2537,13 @@ export function createNovelWritingService(ctx: {
   const mergeChapterRawPayload = ctx.runtime?.mergeChapterRawPayload || mergeNovelChapterRawPayload
   const buildSceneCardsPrompt = (project: any, contextPackage: any) => buildSceneCardsPromptFromBuilder(project, contextPackage)
 
-  const buildHeuristicSettingUsage = (chapter: any, settings: any[]) => {
-    const chapterText = [
-      chapter.title,
-      chapter.chapter_goal,
-      chapter.chapter_summary,
-      chapter.conflict,
-      chapter.ending_hook,
-      safeJsonStringify(chapter.raw_payload || {}, undefined, 0),
-    ].join(' ')
-    return settings.map((setting: any) => {
-      const settingText = [
-        setting.name,
-        setting.summary,
-        JSON.stringify(setting.constraints_json || {}),
-        JSON.stringify(setting.state_json || {}),
-      ].join(' ')
-      let score = 0
-      const name = String(setting.name || '')
-      if (name && chapterText.includes(name)) score += 40
-      for (const token of settingText.split(/[\s,，。；;、/|]+/).filter(item => item.length >= 2).slice(0, 50)) {
-        if (chapterText.includes(token)) score += 2
-      }
-      if (['character', 'boss', 'rule'].includes(setting.entity_type)) score += 4
-      if (['ability', 'item', 'foreshadowing'].includes(setting.entity_type)) score += 2
-      return { setting, score }
-    })
-      .filter(item => item.score >= 6)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 12)
-      .map(({ setting, score }, index) => ({
-        entity_id: setting.id,
-        usage_type: index < 4 || score >= 30 ? 'required' : 'allowed',
-        required: index < 4 || score >= 30,
-        allowed: true,
-        forbidden: false,
-        reveal_level: setting.visibility === 'hidden' || setting.visibility === 'spoiler' ? 'hint' : 'partial',
-        expected_state_change: { reason: `生成前自动匹配：与本章目标/摘要/冲突相似度 ${score}` },
-      }))
-  }
 
-  const selectProseForChapter = (payload: any, chapter: any) => {
-    const targetNo = Number(chapter?.chapter_no || 0)
-    const proseArr = Array.isArray(payload?.prose_chapters) ? payload.prose_chapters : []
-    const matched = proseArr.find((item: any) => Number(item?.chapter_no || 0) === targetNo)
-    if (matched) return matched
-    if (proseArr.length === 1) {
-      const onlyNo = Number(proseArr[0]?.chapter_no || 0)
-      if (!onlyNo || onlyNo === targetNo) return proseArr[0]
-      throw new Error(`模型返回的正文章节与目标不一致：目标第${targetNo}章，返回第${onlyNo}章`)
-    }
-    if (proseArr.length > 1) {
-      const foundNos = proseArr.map((item: any) => item?.chapter_no).filter(Boolean).join('、') || '无'
-      throw new Error(`模型返回的正文章节与目标不一致：目标第${targetNo}章，返回章节号为：${foundNos}`)
-    }
-    const topLevelNo = Number(payload?.chapter_no || 0)
-    if (topLevelNo && topLevelNo !== targetNo) {
-      throw new Error(`模型返回的正文章节与目标不一致：目标第${targetNo}章，返回第${topLevelNo}章`)
-    }
-    return payload || {}
-  }
 
-  const throwIfAborted = (options: any = {}) => {
-    if (options?.abortSignal?.aborted || options?.signal?.aborted) {
-      throw Object.assign(new Error('Request canceled'), { code: 'REQUEST_CANCELED' })
-    }
-  }
 
-  const isAbortError = (error: any) => {
-    const message = String(error?.message || error || '').toLowerCase()
-    return error?.code === 'REQUEST_CANCELED'
-      || error?.name === 'AbortError'
-      || message.includes('request canceled')
-      || message.includes('aborted')
-      || message.includes('abort')
-  }
+
+
+
+
 
   const generateSceneCardsForChapter = async (activeWorkspace: string, project: any, contextPackage: any, modelId?: number, options: any = {}) => {
     const stageModelId = ctx.production.getStageModelId(project, 'scene_cards', modelId)
@@ -3686,72 +3649,9 @@ export function createNovelWritingService(ctx: {
     return buildStoryStatePromptFromBuilder(project, contextPackage, chapterText)
   }
 
-  const normalizeStoryStateDeltaForStorage = (delta: any = {}) => {
-    const objectValue = (value: any) => value && typeof value === 'object' && !Array.isArray(value) ? value : {}
-    const source = delta || {}
-    return {
-      ...source,
-      current_time: source.current_time ?? source.currentTime,
-      character_positions: { ...objectValue(source.character_positions), ...objectValue(source.characterPositions) },
-      character_relationships: { ...objectValue(source.character_relationships), ...objectValue(source.characterRelationships) },
-      relationship_graph: { ...objectValue(source.relationship_graph), ...objectValue(source.relationshipGraph) },
-      known_secrets: { ...objectValue(source.known_secrets), ...objectValue(source.knownSecrets) },
-      secret_visibility: { ...objectValue(source.secret_visibility), ...objectValue(source.secretVisibility) },
-      item_ownership: { ...objectValue(source.item_ownership), ...objectValue(source.itemOwnership) },
-      resource_status: { ...objectValue(source.resource_status), ...objectValue(source.resourceStatus) },
-      foreshadowing_status: { ...objectValue(source.foreshadowing_status), ...objectValue(source.foreshadowingStatus) },
-      payoff_queue: asArray(source.payoff_queue || source.payoffQueue),
-      active_locations: asArray(source.active_locations || source.activeLocations),
-      open_questions: asArray(source.open_questions || source.openQuestions),
-      recent_repeated_information: asArray(source.recent_repeated_information || source.recentRepeatedInformation),
-      next_chapter_priorities: asArray(source.next_chapter_priorities || source.nextChapterPriorities),
-      layered_memory_context: source.layered_memory_context || source.layeredMemoryContext,
-      progress_summary: source.progress_summary || source.progressSummary,
-      daily_context_snapshot: normalizeDailyContextSnapshot(source.daily_context_snapshot || source.dailyContextSnapshot),
-      style_fingerprint: source.style_fingerprint ?? source.styleFingerprint,
-      style_fingerprint_contract: source.style_fingerprint_contract || source.styleFingerprintContract,
-    }
-  }
 
-  const mergeStoryState = (prev: any, delta: any, chapter: any) => {
-    const establishedEvents = mergeEstablishedEvents(
-      [
-        ...asArray((prev || {}).established_events),
-        ...asArray((prev || {}).canon_facts),
-      ],
-      [
-        ...asArray((delta || {}).established_events),
-        ...asArray((delta || {}).canon_facts),
-      ],
-      { chapterNo: chapter?.chapter_no },
-    )
-    const projectedFacts = projectCanonFactsFromEvents(establishedEvents)
-    return {
-      ...(prev || {}),
-      ...(delta || {}),
-      character_positions: { ...((prev || {}).character_positions || {}), ...((delta || {}).character_positions || {}) },
-      character_relationships: { ...((prev || {}).character_relationships || {}), ...((delta || {}).character_relationships || {}) },
-      relationship_graph: { ...((prev || {}).relationship_graph || {}), ...((delta || {}).relationship_graph || {}) },
-      known_secrets: { ...((prev || {}).known_secrets || {}), ...((delta || {}).known_secrets || {}) },
-      secret_visibility: { ...((prev || {}).secret_visibility || {}), ...((delta || {}).secret_visibility || {}) },
-      item_ownership: { ...((prev || {}).item_ownership || {}), ...((delta || {}).item_ownership || {}) },
-      resource_status: { ...((prev || {}).resource_status || {}), ...((delta || {}).resource_status || {}) },
-      foreshadowing_status: { ...((prev || {}).foreshadowing_status || {}), ...((delta || {}).foreshadowing_status || {}) },
-      payoff_queue: asArray((delta || {}).payoff_queue).length ? asArray((delta || {}).payoff_queue) : asArray((prev || {}).payoff_queue),
-      active_locations: asArray((delta || {}).active_locations).length ? asArray((delta || {}).active_locations) : asArray((prev || {}).active_locations),
-      open_questions: asArray((delta || {}).open_questions).length ? asArray((delta || {}).open_questions) : asArray((prev || {}).open_questions),
-      next_chapter_priorities: asArray((delta || {}).next_chapter_priorities).length ? asArray((delta || {}).next_chapter_priorities) : asArray((prev || {}).next_chapter_priorities),
-      layered_memory_context: buildMergedLayeredMemoryContext((prev || {}).layered_memory_context, (delta || {}).layered_memory_context, chapter),
-      progress_summary: (delta || {}).progress_summary || (prev || {}).progress_summary || null,
-      daily_context_snapshot: (delta || {}).daily_context_snapshot || (prev || {}).daily_context_snapshot || null,
-      established_events: establishedEvents,
-      canon_facts: projectedFacts.length
-        ? projectedFacts
-        : (asArray((delta || {}).canon_facts).length ? asArray((delta || {}).canon_facts) : asArray((prev || {}).canon_facts)),
-      last_updated_chapter: chapter.chapter_no,
-      last_updated_at: new Date().toISOString(),
-    }
-  }
+
+
 
   const prepareStoryStateUpdate = async (activeWorkspace: string, project: any, chapter: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}): Promise<PreparedStoryStateUpdate> => {
     const stageModelId = ctx.production.getStageModelId(project, 'review', modelId)
@@ -4341,63 +4241,9 @@ export function createNovelWritingService(ctx: {
     return payload
   }
 
-  const buildWritingBible = (project: any, worldbuilding: any[], characters: any[], outlines: any[], reviews: any[] = []) => {
-    const storyState = getStoryState(project)
-    const styleLock = getStyleLock(project)
-    const safety = getSafetyPolicy(project)
-    const masterOutline = outlines.find(outline => outline.outline_type === 'master') || null
-    const volumePlan = getVolumePlan(outlines)
-    return {
-      project: {
-        title: project.title,
-        genre: project.genre || '',
-        synopsis: project.synopsis || '',
-        target_audience: project.target_audience || '',
-        style_tags: project.style_tags || [],
-        length_target: project.length_target || '',
-      },
-      promise: masterOutline?.summary || project.synopsis || '',
-      world_rules: worldbuilding[0]?.rules || [],
-      world_summary: worldbuilding[0]?.world_summary || '',
-      mainline: masterOutline ? {
-        title: masterOutline.title,
-        hook: masterOutline.hook || '',
-        conflict_points: masterOutline.conflict_points || [],
-        turning_points: masterOutline.turning_points || [],
-      } : null,
-      volume_plan: volumePlan,
-      characters: characters.map(char => ({
-        name: char.name,
-        role: char.role_type || char.role || '',
-        goal: char.goal || '',
-        motivation: char.motivation || '',
-        conflict: char.conflict || '',
-        growth_arc: char.growth_arc || '',
-        current_state: char.current_state || {},
-      })),
-      style_lock: styleLock,
-      safety_policy: safety,
-      story_state: storyState,
-      latest_state_entries: collectRecentFacts(reviews),
-      forbidden: safety.forbidden,
-      preferred_words: styleLock.preferred_words || [],
-      banned_words: styleLock.banned_words || [],
-      meme_bank: normalizeMemeBank(project.reference_config?.meme_bank || []),
-      updated_at: new Date().toISOString(),
-    }
-  }
 
-  const hasMeaningfulWritingBible = (value: any) => {
-    if (!value || typeof value !== 'object') return false
-    return Boolean(
-      String(value.promise || value.world_summary || '').trim() ||
-      (Array.isArray(value.world_rules) && value.world_rules.length > 0) ||
-      (Array.isArray(value.volume_plan) && value.volume_plan.length > 0) ||
-      (Array.isArray(value.characters) && value.characters.length > 0) ||
-      (value.mainline && Object.keys(value.mainline || {}).length > 0) ||
-      (value.style_lock && Object.values(value.style_lock || {}).some(item => Array.isArray(item) ? item.length > 0 : Boolean(String(item || '').trim())))
-    )
-  }
+
+
 
   const getStoredOrBuiltWritingBible = async (activeWorkspace: string, project: any) => {
     const [worldbuilding, characters, outlines, reviews] = await Promise.all([
@@ -5155,6 +5001,10 @@ export function createNovelWritingService(ctx: {
     '输出 JSON，字段：passed(boolean), score(0-100), rubric, rubric_source, platform_checks(array), content_rubric_source, content_rubric_checks(array), factual_checks(array), model_degeneration_checks(array), chapter_positioning_checks(array), innovation_checks(array), chapter_attraction_checks(array), story_drive_checks(array), character_arc_checks(array), chapter_benchmark_checks(array), title_uniqueness_checks(array), prose_meta_checks(array), banned_words_checks(array), blueprint_consumption_checks(array), word_count_checks(array), reader_retention_checks(array), target_reader_checks(array), genre_positioning_checks(array), plot_special_topics_checks(array), core_contract_checks(array), female_audience_checks(array), upgrade_rhythm_checks(array), structure_checks(array), progression_checks(array), information_checks(array), conflict_structure_checks(array), perspective_verdicts(array), deslop_level("无"|"轻度"|"中度"|"重度"), deslop_checks(array), dialogue_checks(array), plot_dynamics_checks(array), story_power_checks(array), continuity_heat_checks(array), character_relation_checks(array), character_behavior_checks(array), asset_linkage_checks(array), state_tracking_checks(array), status_filter_receipts(array), source_readiness_checks(array), write_preparation_checks(array), next_chapter_quality_plan_receipts(array), chapter_handoff_checks(array), intent_confirmation_checks(array), benchmark_recall_checks(array), style_boundary_checks(array), style_sample_checks(array), information_flow_checks(array), expectation_threshold_checks(array), story_loop_checks(array), emotional_arc_checks(array), chapter_hook_checks(array), chapter_hook_quality_checks(array), paragraph_hook_checks(array), suspense_checks(array), reversal_checks(array), showdown_checks(array), bridge_unit_checks(array), opening_checks(array), prose_craft_checks(array), serial_risk_repair_checks(array), revision_receipt_checks(array), deslop_repair_checks(array), punctuation_tone_checks(array), quality_audit_checks(array), longform_checks(array), five_dimension_scores({core_consistency,surface_rewrite,format_consistency,readability,logic_coherence}，每项含 score/evidence/fix), craft_metrics({action_detail_score,description_overuse_score,event_density_score,combat_process_score,setting_consistency_score}), focused_revision_modes(array，可取 expand_action/cut_description/tighten_pacing/add_consequence/restore_hook/repair_setting_violation), setting_violations(array), delivery_risk_receipts(array), next_chapter_quality_plan({version,quality_focus,opening_actions,middle_actions,ending_actions,avoid_repetition,evidence_basis,ending_contract:{final_state,unresolved_question,next_chapter_pull,handoff_to_next}}), issues(array，使用上面的统一 Findings Schema), revision_directives(array), needs_revision(boolean)。只返回 JSON。',
   ].join('\n')
 
+
+
+
+
   const buildProseRevisionPrompt = (project: any, contextPackage: any, chapterText: string, review: any) => {
     const revisionStrategyBrief = buildRevisionStrategyBrief(review)
     const failedDeliveryRiskReceipts = asArray(review?.delivery_risk_receipts || review?.deliveryRiskReceipts)
@@ -5323,76 +5173,6 @@ export function createNovelWritingService(ctx: {
     ].some(([snakeField]) => !compactBriefText(endingContract?.[snakeField]))
   }
 
-  const fillMissingStructuredReviewChecks = async (
-    activeWorkspace: string,
-    project: any,
-    contextPackage: any,
-    chapterText: string,
-    review: any,
-    modelId?: number,
-    options: any = {},
-  ) => {
-    const missingFields = missingStructuredReviewCheckFields(review)
-    if (!missingFields.length || options.fill_missing_structured_checks === false) return null
-    const reviewModelId = ctx.production.getStageModelId(project, 'review', modelId)
-    const batches = chunkStructuredReviewFields(missingFields, options.structuredReviewBatchSize || options.structured_review_batch_size || 4)
-    const structuredReviewLlmTimeoutMs = Math.max(30000, Math.min(
-      Number(options.llmTimeoutMs || options.timeoutMs || 600000) || 600000,
-      Number(options.structuredReviewLlmTimeoutMs || options.structured_review_llm_timeout_ms || 90000) || 90000,
-    ))
-    const mergedPayload: any = {}
-    const diagnostics: any[] = []
-    let modelName = ''
-    for (const batchFields of batches) {
-      throwIfAborted(options)
-      const result = await executeAgent('review-agent', project, {
-        task: buildMissingStructuredReviewChecksPrompt(project, contextPackage, chapterText, review, batchFields),
-      }, {
-        activeWorkspace,
-        modelId: reviewModelId ? String(reviewModelId) : undefined,
-        maxTokens: Math.max(8000, Math.min(14000, Number(options.structuredReviewMaxTokens || options.structured_review_max_tokens || 12000))),
-        temperature: ctx.production.getStageTemperature(project, 'review', 0.15),
-        skipMemory: true,
-        signal: options.abortSignal,
-        timeoutMs: structuredReviewLlmTimeoutMs,
-      })
-      if ((result as any).error) {
-        diagnostics.push({
-          missing_fields: batchFields,
-          status: 'structured_fill_failed',
-          error: String((result as any).error),
-          llm_diagnostics: buildLLMResultDiagnostics(result),
-          modelName: (result as any).modelName,
-        })
-        modelName = (result as any).modelName || modelName
-        break
-      }
-      const payload = getNovelPayload(result)
-      diagnostics.push({
-        missing_fields: batchFields,
-        llm_diagnostics: buildLLMResultDiagnostics(result),
-        modelName: (result as any).modelName,
-      })
-      modelName = (result as any).modelName || modelName
-      for (const [snakeField, camelField] of STRUCTURED_REVIEW_CHECK_FIELDS) {
-        const value = payload?.[snakeField] || payload?.[camelField]
-        if (Array.isArray(value)) mergedPayload[snakeField] = value
-      }
-      for (const key of ['delivery_risk_receipts', 'deliveryRiskReceipts', 'next_chapter_quality_plan_receipts', 'nextChapterQualityPlanReceipts', 'issues', 'findings']) {
-        if (Array.isArray(payload?.[key])) mergedPayload[key] = payload[key]
-      }
-      for (const key of ['next_chapter_quality_plan', 'nextChapterQualityPlan', 'passed', 'score', 'needs_revision', 'needsRevision']) {
-        if (payload?.[key] !== undefined) mergedPayload[key] = payload[key]
-      }
-    }
-    return {
-      payload: mergedPayload,
-      diagnostics,
-      missing_fields: missingFields,
-      modelName,
-    }
-  }
-
   const shouldReviseProse = (review: any, options: any = {}) => {
     const issues = Array.isArray(review?.issues) ? review.issues.map(normalizeIssue) : []
     const hasHighIssue = issues.some(issue => ['high', 'critical', 's1', 's2'].includes(issue.severity.toLowerCase()))
@@ -5492,6 +5272,78 @@ export function createNovelWritingService(ctx: {
     const revisionThreshold = Math.max(78, Number(options.quality_threshold || 0))
     return Boolean(review?.needs_revision) || Number(review?.score || 100) < revisionThreshold || hasHighIssue || hasPerspectiveConcern || hasDeslopConcern || hasDeslopGateDiagnosticConcern || hasFactualConcern || hasProseMetaConcern || hasDialogueConcern || hasPlotDynamicsConcern || hasStoryPowerConcern || hasContinuityHeatConcern || hasCharacterRelationConcern || hasCharacterBehaviorConcern || hasAssetLinkageConcern || hasStateTrackingConcern || hasSourceReadinessConcern || hasArtifactProtocolConcern || hasWritePreparationConcern || hasNextChapterQualityPlanReceiptConcern || hasChapterHandoffConcern || hasReaderRetentionConcern || hasIntentConfirmationConcern || hasBenchmarkRecallConcern || hasStyleBoundaryConcern || hasStyleSampleConcern || hasInformationFlowConcern || hasExpectationThresholdConcern || hasTargetReaderConcern || hasGenrePositioningConcern || hasPlotSpecialTopicsConcern || hasFemaleAudienceConcern || hasUpgradeRhythmConcern || hasConflictStructureConcern || hasStoryLoopConcern || hasEmotionalArcConcern || hasChapterHookConcern || hasParagraphHookConcern || hasSuspenseConcern || hasReversalConcern || hasShowdownConcern || hasBridgeUnitConcern || hasOpeningConcern || hasProseCraftConcern || hasPunctuationToneConcern || hasQualityAuditConcern || hasNextChapterQualityPlanConcern
   }
+
+  const fillMissingStructuredReviewChecks = async (
+    activeWorkspace: string,
+    project: any,
+    contextPackage: any,
+    chapterText: string,
+    review: any,
+    modelId?: number,
+    options: any = {},
+  ) => {
+    const missingFields = missingStructuredReviewCheckFields(review)
+    if (!missingFields.length || options.fill_missing_structured_checks === false) return null
+    const reviewModelId = ctx.production.getStageModelId(project, 'review', modelId)
+    const batches = chunkStructuredReviewFields(missingFields, options.structuredReviewBatchSize || options.structured_review_batch_size || 4)
+    const structuredReviewLlmTimeoutMs = Math.max(30000, Math.min(
+      Number(options.llmTimeoutMs || options.timeoutMs || 600000) || 600000,
+      Number(options.structuredReviewLlmTimeoutMs || options.structured_review_llm_timeout_ms || 90000) || 90000,
+    ))
+    const mergedPayload: any = {}
+    const diagnostics: any[] = []
+    let modelName = ''
+    for (const batchFields of batches) {
+      throwIfAborted(options)
+      const result = await executeAgent('review-agent', project, {
+        task: buildMissingStructuredReviewChecksPrompt(project, contextPackage, chapterText, review, batchFields),
+      }, {
+        activeWorkspace,
+        modelId: reviewModelId ? String(reviewModelId) : undefined,
+        maxTokens: Math.max(8000, Math.min(14000, Number(options.structuredReviewMaxTokens || options.structured_review_max_tokens || 12000))),
+        temperature: ctx.production.getStageTemperature(project, 'review', 0.15),
+        skipMemory: true,
+        signal: options.abortSignal,
+        timeoutMs: structuredReviewLlmTimeoutMs,
+      })
+      if ((result as any).error) {
+        diagnostics.push({
+          missing_fields: batchFields,
+          status: 'structured_fill_failed',
+          error: String((result as any).error),
+          llm_diagnostics: buildLLMResultDiagnostics(result),
+          modelName: (result as any).modelName,
+        })
+        modelName = (result as any).modelName || modelName
+        break
+      }
+      const payload = getNovelPayload(result)
+      diagnostics.push({
+        missing_fields: batchFields,
+        llm_diagnostics: buildLLMResultDiagnostics(result),
+        modelName: (result as any).modelName,
+      })
+      modelName = (result as any).modelName || modelName
+      for (const [snakeField, camelField] of STRUCTURED_REVIEW_CHECK_FIELDS) {
+        const value = payload?.[snakeField] || payload?.[camelField]
+        if (Array.isArray(value)) mergedPayload[snakeField] = value
+      }
+      for (const key of ['delivery_risk_receipts', 'deliveryRiskReceipts', 'next_chapter_quality_plan_receipts', 'nextChapterQualityPlanReceipts', 'issues', 'findings']) {
+        if (Array.isArray(payload?.[key])) mergedPayload[key] = payload[key]
+      }
+      for (const key of ['next_chapter_quality_plan', 'nextChapterQualityPlan', 'passed', 'score', 'needs_revision', 'needsRevision']) {
+        if (payload?.[key] !== undefined) mergedPayload[key] = payload[key]
+      }
+    }
+    return {
+      payload: mergedPayload,
+      diagnostics,
+      missing_fields: missingFields,
+      modelName,
+    }
+  }
+
+
 
   const runProseSelfReviewAndRevision = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
     const reviewModelId = ctx.production.getStageModelId(project, 'review', modelId)

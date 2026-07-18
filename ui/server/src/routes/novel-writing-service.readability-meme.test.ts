@@ -7295,6 +7295,7 @@ describe('readability and restrained meme workflow', () => {
     expect(source).toContain('runReadabilityReview')
     expect(source).toContain('ending_hook_score: Number(payload?.ending_hook_score')
     expect(source).toContain('runMemePolish')
-    expect(source).toContain('reference_config?.meme_bank')
+    const writingBibleSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/writing-bible.ts'), 'utf8')
+    expect(writingBibleSource).toContain('reference_config?.meme_bank')
   })
 })
