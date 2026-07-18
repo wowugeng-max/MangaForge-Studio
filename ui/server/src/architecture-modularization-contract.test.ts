@@ -37,6 +37,8 @@ const SOFT_BASELINES: Record<string, number> = {
   'novel-writing-service/service/prose-self-review-policy.ts': 200,
   'novel-writing-service/service/prose-self-review-run-deterministic.ts': 550,
   'novel-writing-service/service/prose-self-review-run.ts': 850,
+  'novel-writing-service/service/auto-repair-preflight-methods.ts': 750,
+  'novel-writing-service/service/auto-repair-preflight-materials.ts': 600,
   'llm/executor-helpers.ts': 480,
   'llm/executor.ts': 650,
   'routes/novel-editor/builders.ts': 900,

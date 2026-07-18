@@ -279,7 +279,7 @@ const readDraftSyncReviewRecordSource = () => readFileSync(join(import.meta.dir,
 
 describe('chapter context word target source guards 2 a', () => {
   test('auto-repairs unattended chapter blueprint with a persisted oh-story blueprint contract', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
+    const source = ['auto-repair-preflight-methods.ts','auto-repair-preflight-materials.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -299,7 +299,7 @@ describe('chapter context word target source guards 2 a', () => {
     expect(repairBlock).toContain('chapter_blueprint: repairedChapterBlueprint')
   })
   test('auto-repairs unattended chapter blueprint with an oh-story outline methods contract', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
+    const source = ['auto-repair-preflight-methods.ts','auto-repair-preflight-materials.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -316,7 +316,7 @@ describe('chapter context word target source guards 2 a', () => {
     expect(repairBlock).toContain('outline_methods_contract: buildOutlineMethodsContract')
   })
   test('auto-repairs unattended chapter blueprint with oh-story emotion and paragraph hook contracts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
+    const source = ['auto-repair-preflight-methods.ts','auto-repair-preflight-materials.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -359,7 +359,7 @@ describe('chapter context word target source guards 2 a', () => {
     expect(repairBlock).toContain('反转合同')
   })
   test('auto-repairs unattended chapter blueprint with oh-story plot and prose quality contracts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
+    const source = ['auto-repair-preflight-methods.ts','auto-repair-preflight-materials.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -435,7 +435,7 @@ describe('chapter context word target source guards 2 a', () => {
     expect(repairBlock).toContain('maxTokens: 6800')
   })
   test('auto-repairs unattended chapter blueprint with oh-story character asset and state contracts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
+    const source = ['auto-repair-preflight-methods.ts','auto-repair-preflight-materials.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -516,7 +516,7 @@ describe('chapter context word target source guards 2 a', () => {
     expect(repairBlock).toContain('意图确认合同')
   })
   test('unattended character repair asks for layered missing role pools', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
+    const source = ['auto-repair-preflight-methods.ts','auto-repair-preflight-materials.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const repairStart = source.indexOf('任务：为无人值守章节写作自动补齐前置材料')
     const characterCreateStart = source.indexOf('const existingNames = new Set', repairStart)
     const repairBlock = source.slice(repairStart, characterCreateStart)
@@ -531,13 +531,13 @@ describe('chapter context word target source guards 2 a', () => {
     expect(repairBlock).toContain('antagonist_logic')
   })
   test('unattended character repair uses tier-aware candidate limits instead of first six', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
+    const source = ['auto-repair-preflight-methods.ts','auto-repair-preflight-materials.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain('selectTierAwareCharacterRepairCandidates')
     expect(source).not.toContain('characterCandidates.slice(0, 6)')
   })
   test('auto-repairs unattended chapter blueprint with oh-story reader genre upgrade and conflict contracts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
+    const source = ['auto-repair-preflight-methods.ts','auto-repair-preflight-materials.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -567,7 +567,7 @@ describe('chapter context word target source guards 2 a', () => {
     expect(repairBlock).toContain('maxTokens: 6800')
   })
   test('auto-repairs unattended chapter blueprint with oh-story female audience contract', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
+    const source = ['auto-repair-preflight-methods.ts','auto-repair-preflight-materials.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -585,7 +585,7 @@ describe('chapter context word target source guards 2 a', () => {
     expect(repairBlock).toContain('货板一致')
   })
   test('auto-repairs unattended chapter blueprint with oh-story showdown contract', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
+    const source = ['auto-repair-preflight-methods.ts','auto-repair-preflight-materials.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -607,7 +607,7 @@ describe('chapter context word target source guards 2 a', () => {
     expect(repairBlock).toContain('主角登场即杀伐果断')
   })
   test('auto-repairs unattended chapter blueprint with oh-story bridge unit contract', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
+    const source = ['auto-repair-preflight-methods.ts','auto-repair-preflight-materials.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -622,7 +622,7 @@ describe('chapter context word target source guards 2 a', () => {
     expect(repairBlock).toContain('连续 2 章没有目标推进')
   })
   test('auto-repairs unattended chapter blueprint with oh-story plot framework contract', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
+    const source = ['auto-repair-preflight-methods.ts','auto-repair-preflight-materials.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -639,7 +639,7 @@ describe('chapter context word target source guards 2 a', () => {
     expect(repairBlock).toContain('五不崩')
   })
   test('auto-repairs unattended chapter blueprint with oh-story style boundary contract', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
+    const source = ['auto-repair-preflight-methods.ts','auto-repair-preflight-materials.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -654,7 +654,7 @@ describe('chapter context word target source guards 2 a', () => {
     expect(repairBlock).toContain('禁用词')
   })
   test('auto-repairs unattended chapter blueprint with persisted pre-draft launch briefs', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
+    const source = ['auto-repair-preflight-methods.ts','auto-repair-preflight-materials.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -674,7 +674,7 @@ describe('chapter context word target source guards 2 a', () => {
     expect(repairBlock).toContain('core_contract_radar: repairedEmotionAndHookBrief.core_contract_radar')
   })
   test('auto-repairs unattended chapter blueprint with persisted longform continuity launch briefs', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
+    const source = ['auto-repair-preflight-methods.ts','auto-repair-preflight-materials.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)

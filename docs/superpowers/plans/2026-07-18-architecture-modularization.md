@@ -20,7 +20,8 @@
 - Committed paragraph-prose-context prepare/sections package (compose ~218).
 - Extracted prose-self-review-run-deterministic (~492); cleaned dead imports in methods/policy/prompts; run ~777.
 - Split helpers-batch-risk-radar-compute into compute (~553) + guards (~579); shell source joins both.
-- Still deferred ≥1k: provider-runtime (~1778 DI), NWS view (~1593 composition), knowledge panels (~1132), auto-repair-preflight (~1078), GenerateNode (~1002).
+- Extracted auto-repair-preflight materials leaf (~520); methods ~683.
+- Still deferred ≥1k: provider-runtime (~1778 DI), NWS view (~1593 composition), knowledge panels (~1132), GenerateNode (~1002).
 - Task 11 full UI write-path click smoke still open.
 
 ### Residual inventory update (2026-07-19 goal-continue XXIX)

@@ -279,7 +279,7 @@ const readDraftSyncReviewRecordSource = () => readFileSync(join(import.meta.dir,
 
 describe('chapter context word target source guards 2 b a', () => {
   test('auto-repairs unattended chapter blueprint with persisted commercial style and scene briefs', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
+    const source = ['auto-repair-preflight-methods.ts','auto-repair-preflight-materials.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)

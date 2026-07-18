@@ -759,7 +759,7 @@ ${selfReviewSource}`
     expect(beforeGate).not.toContain('options.allow_incomplete !== true')
   })
   test('returns repaired write preparation brief on context_package after preflight repair', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
+    const source = ['auto-repair-preflight-methods.ts','auto-repair-preflight-materials.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const returnStart = source.indexOf('return {', source.indexOf('const finalWritePreparationBrief = buildWritePreparationBrief', repairStart))
     const returnBlock = source.slice(returnStart, returnStart + 900)
@@ -769,7 +769,7 @@ ${selfReviewSource}`
     expect(source.slice(repairStart, returnStart + 900)).toContain('Keep returned context_package aligned with the repaired brief/contracts')
   })
   test('infers material repair keys from preflight warning corpus, not only failed check keys', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
+    const source = ['auto-repair-preflight-methods.ts','auto-repair-preflight-materials.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const needsStart = source.indexOf('const needsChapterBlueprint =', repairStart)
     const repairHeader = source.slice(repairStart, needsStart)
@@ -825,7 +825,7 @@ ${selfReviewSource}`
     expect(rebuiltContractBlock).toContain('generationContract = preparedGeneration.contract')
   })
   test('auto-repairs missing unattended chapter blueprint before prose generation', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
+    const source = ['auto-repair-preflight-methods.ts','auto-repair-preflight-materials.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
