@@ -10,7 +10,7 @@ import {
 import {
   chapterReceiptProseText,
   stateDeltaEvidenceText
-} from './delta-sync-reports'
+} from './delta-sync-reports-storyline'
 
 type AnyFn = (...args: any[]) => any
 let assetLinkageExplicitContract: AnyFn = (_contextPackage: any = {}) => ({})
