@@ -15,6 +15,23 @@
 
 
 
+
+### Residual inventory update (2026-07-19 goal-continue XVII)
+
+Landed reverse-free splits:
+- `planning-workspace-builder` → primitives/model (+ listLength import from radar)
+- `cockpit-acceptance-sync-b` → intent-attraction/drive-style/retention-volume/delivery-risk
+- `writing-recommendation-types` → actions/delivery/pre-draft/draft-brief
+- `support-normalize-repairs-audit` → quality-deslop/revision/residuals/pre-draft-state
+- `novel-setting-helpers` → shared/agent-prompts/relationship/agent-usage/state-assets
+
+Task 11 focused batch: **277 pass / 0 fail** (architecture, setting-routes, planning a/b, shell a/b, writingRecommendation, TaskCenter, CreateWizard, character-card, closed-beat).
+
+Still open:
+- DI/single-function/composition roots: provider-runtime, NWS view, prose-self-review factory, detail drawer, CreateWizard, paragraph-prose-context, batch-risk-radar, delivery-risk carry-over, auto-repair, studio controller, cockpit-acceptance-desk-chapter
+- Full write-path UI smoke
+
+
 ### Residual inventory update (2026-07-19 goal-continue XVI)
 
 Additional reverse-free web splits:
