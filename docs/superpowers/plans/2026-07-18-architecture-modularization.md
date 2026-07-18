@@ -56,6 +56,8 @@ Recent extracts (continued):
 - 2026-07-19 goal: WorkspaceCenter writing-support leaf (~796 monofile); prior ACD/StoryPlanning/commercial/generate-chapter extracts. Remaining: NWS ~2.0k, generate-chapter mid-loop, Task 11.
 - 2026-07-19 goal: NWS barrel + NovelProjectWorkspaceView (~1 line monofile); WorkspaceCenter ~793; generate-chapter ~1500. Task 11 still open.
 - 2026-07-19 architecture continuation: NWS UI-state hook; WritingCockpitPanel package leaves; story-planning board ops/audience/story; WorkspaceCenter writing-support strip leaves; novel-core builders seed outline helpers/model/normalize; novel-editor delivery-risk + revision-prompt leaves + builders-json; shell suites 92 green; core+architecture+shell+writingRecommendation 185 green; editor delivery/revision/quality green. builders-seed multi-leaf done. Remaining large residuals: NovelProjectWorkspaceView ~1.84k composition root, various quality/post-delivery leaves >1k, Task11 full smoke/memory still open.
+
+- 2026-07-19 Task11 partial: modularization-focused batch 281 pass (architecture+core+editor delivery/revision/quality+storyline sync+shell a/b+writingRecommendation). Server boot smoke: `bun src/index.ts` listens on :8787; idle RSS ~111MB after mempalace init. Full UI write-path/manual memory under load still open. Remaining large residuals: NWS view composition root ~1843, quality/post-delivery domain leaves >1k, delivery-status strip ~557.
 - 2026-07-19 cont2: NovelStudio controller hook (~698 page / ~1256 hook); broad modularization batch 281 green earlier; live smoke still blocked (server not running).
 - 2026-07-19 cont: builders-seed recovery/materialize/fill leaves; NWS repair handlers into factory (~1843 view); seed package fully multi-leaf.
 
