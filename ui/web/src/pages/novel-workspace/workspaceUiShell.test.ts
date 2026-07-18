@@ -131,6 +131,7 @@ function projectWorkspaceSource() {
     sourceCached('shell/workspace-lazy.tsx', localSourceCache),
     sourceCached('shell/workspace-editor-fields.ts', localSourceCache),
     sourceCached('shell/workspace-commercial-result.tsx', localSourceCache),
+    sourceCached('shell/workspace-serial-pipeline.tsx', localSourceCache),
   ].join('\n')
   return projectWorkspaceSourceCache
 }
