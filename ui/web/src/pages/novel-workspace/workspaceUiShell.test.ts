@@ -27,6 +27,7 @@ let directorModelSourceCache: string | null = null
 let writingCockpitModelSourceCache: string | null = null
 let taskCenterSourceCache: string | null = null
 let projectWorkspaceSourceCache: string | null = null
+let autoCreationDirectorWorkspaceSourceCache: string | null = null
 let planningWorkspaceSourceCache: string | null = null
 
 function packageSource(relativeDir: string) {
@@ -175,6 +176,16 @@ function taskCenterSource() {
     sourceCached('task-center/TaskCenterDrawerPanel.tsx', localSourceCache),
   ].join('\n')
   return taskCenterSourceCache
+}
+
+
+function autoCreationDirectorWorkspaceSource() {
+  if (autoCreationDirectorWorkspaceSourceCache != null) return autoCreationDirectorWorkspaceSourceCache
+  autoCreationDirectorWorkspaceSourceCache = [
+    sourceCached('AutoCreationDirectorWorkspace.tsx', localSourceCache),
+    sourceCached('auto-creation/director-workspace-chrome.tsx', localSourceCache),
+  ].join('\n')
+  return autoCreationDirectorWorkspaceSourceCache
 }
 
 function writingCockpitModelSource() {
@@ -560,7 +571,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('surfaces writing queue focus inside the auto creation director', () => {
-    const component = source('AutoCreationDirectorWorkspace.tsx')
+    const component = autoCreationDirectorWorkspaceSource()
     const css = source('AutoCreationDirectorWorkspace.css')
     const model = directorModelSource()
 
@@ -578,7 +589,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows a five-stage serial production rail in the auto creation director', () => {
-    const component = source('AutoCreationDirectorWorkspace.tsx')
+    const component = autoCreationDirectorWorkspaceSource()
     const css = source('AutoCreationDirectorWorkspace.css')
     const model = directorModelSource()
     const projectWorkspace = projectWorkspaceSource()
@@ -657,7 +668,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows the shared six-stage AI creation pipeline inside the auto creation director', () => {
-    const component = source('AutoCreationDirectorWorkspace.tsx')
+    const component = autoCreationDirectorWorkspaceSource()
     const css = source('AutoCreationDirectorWorkspace.css')
     const model = directorModelSource()
 
@@ -747,7 +758,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('keeps longform governance rails inside the auto creation detail drawer', () => {
-    const component = source('AutoCreationDirectorWorkspace.tsx')
+    const component = autoCreationDirectorWorkspaceSource()
 
     const drawerIndex = component.indexOf('auto-director-detail-drawer')
     expect(drawerIndex).toBeGreaterThan(0)
@@ -1348,7 +1359,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows million word runway gate in the auto creation director', () => {
-    const workspace = source('AutoCreationDirectorWorkspace.tsx')
+    const workspace = autoCreationDirectorWorkspaceSource()
     const workspaceCss = source('AutoCreationDirectorWorkspace.css')
     const model = directorModelSource()
     const projectWorkspace = projectWorkspaceSource()
@@ -1441,7 +1452,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows unresolved delivery risk fuse in the auto creation director', () => {
-    const director = source('AutoCreationDirectorWorkspace.tsx')
+    const director = autoCreationDirectorWorkspaceSource()
     const directorCss = source('AutoCreationDirectorWorkspace.css')
     const directorModel = directorModelSource()
     const projectWorkspace = projectWorkspaceSource()
@@ -1488,7 +1499,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('unifies auto creation action hints and execution type labels', () => {
-    const director = source('AutoCreationDirectorWorkspace.tsx')
+    const director = autoCreationDirectorWorkspaceSource()
     const directorCss = source('AutoCreationDirectorWorkspace.css')
     const projectWorkspace = projectWorkspaceSource()
 
@@ -2157,7 +2168,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows auto creation director as the longform control workspace', () => {
-    const directorWorkspace = source('AutoCreationDirectorWorkspace.tsx')
+    const directorWorkspace = autoCreationDirectorWorkspaceSource()
     const directorCss = source('AutoCreationDirectorWorkspace.css')
     const directorModel = directorModelSource()
     const projectWorkspace = projectWorkspaceSource()
