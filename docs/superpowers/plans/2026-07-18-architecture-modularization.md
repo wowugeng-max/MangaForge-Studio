@@ -13,6 +13,15 @@
 **Branch:** `codex/architecture-modularization`
 
 
+### Residual inventory update (2026-07-19 goal-continue LIII)
+- Split NWS model into base (~889) + ready runtime (~568) + thin composer (~16).
+- Package-split risk-delivery-core into config (~475) + resolve (~495) + barrel.
+- Package-split adapter-support into normalize-bodies (~289) + runtime (~541) + barrel.
+- Extract ReferencePanel pure helpers leaf; panel monofile thinned.
+- Still deferred: batch-guardrail-core giant function (~827), ComfyUI, continuity-guard, types bag, Task 11 full UI write-path smoke.
+
+
+
 ### Residual inventory update (2026-07-19 goal-continue LII)
 - Split `novel-genre-catalog` data leaf (~669) + API monofile (~140).
 - Still deferred: NWS model hook ~994, ComfyUI ~877, auto-creation helpers, continuity-guard, ReferencePanel, seed-fill-gaps. Task 11 full UI write-path click smoke still open.

@@ -92,6 +92,8 @@ export function directorModelSource() {
     sourceCached('auto-creation/model/helpers-risk-and-governance.ts', localSourceCache), sourceCached('auto-creation/model/helpers-risk-issue-catalog.ts', localSourceCache), sourceCached('auto-creation/model/helpers-risk-review-signals.ts', localSourceCache), sourceCached('auto-creation/model/helpers-risk-shared.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-risk-delivery-and-recovery.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-risk-delivery-core.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-risk-delivery-config.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-risk-delivery-resolve.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-risk-delivery-recovery-queue.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-risk-recovery-governance.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-risk-recovery-governance-core.ts', localSourceCache),
