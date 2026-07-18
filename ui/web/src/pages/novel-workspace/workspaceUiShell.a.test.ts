@@ -15,6 +15,7 @@ import {
   planningWorkspaceSource,
   workspaceCenterSource,
   projectWorkspaceSource,
+  writingCockpitPanelSource,
   taskCenterSource,
   storyPlanningWorkspaceSource,
   autoCreationDirectorWorkspaceSource,
@@ -88,7 +89,7 @@ describe('commercial writing workspace UI shell a', () => {
   })
 
   test('keeps pipeline and model team as status displays instead of duplicate writing actions', () => {
-    const cockpit = source('WritingCockpitPanel.tsx')
+    const cockpit = writingCockpitPanelSource()
     const projectWorkspace = projectWorkspaceSource()
     const projectWorkspaceCss = source('../NovelProjectWorkspace.css')
 
@@ -198,7 +199,7 @@ describe('commercial writing workspace UI shell a', () => {
   })
 
   test('surfaces a direct unattended shortcut inside the writing cockpit', () => {
-    const component = source('WritingCockpitPanel.tsx')
+    const component = writingCockpitPanelSource()
     const projectWorkspace = projectWorkspaceSource()
 
     expect(component).toContain('onOpenProductionOps')
@@ -207,7 +208,7 @@ describe('commercial writing workspace UI shell a', () => {
   })
 
   test('surfaces the oh-story longform workflow in the writing cockpit', () => {
-    const component = source('WritingCockpitPanel.tsx')
+    const component = writingCockpitPanelSource()
     const css = source('WritingCockpitPanel.css')
 
     expect(component).toContain('LongformWorkflowStrip')
@@ -641,7 +642,7 @@ describe('commercial writing workspace UI shell a', () => {
   })
 
   test('separates the writing cockpit from delivery and collapsed workspace bars', () => {
-    const component = source('WritingCockpitPanel.tsx')
+    const component = writingCockpitPanelSource()
     const css = source('WritingCockpitPanel.css')
 
     expect(component).toContain("import './WritingCockpitPanel.css'")

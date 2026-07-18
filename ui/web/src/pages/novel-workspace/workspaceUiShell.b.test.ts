@@ -15,6 +15,7 @@ import {
   planningWorkspaceSource,
   workspaceCenterSource,
   projectWorkspaceSource,
+  writingCockpitPanelSource,
   taskCenterSource,
   storyPlanningWorkspaceSource,
   autoCreationDirectorWorkspaceSource,
@@ -1576,7 +1577,7 @@ describe('commercial writing workspace UI shell b', () => {
   })
 
   test('writing cockpit collapsed strip exposes primary action and L2 details default closed', () => {
-    const component = source('WritingCockpitPanel.tsx')
+    const component = writingCockpitPanelSource()
     const css = source('WritingCockpitPanel.css')
 
     expect(component).toContain('writing-cockpit-summary-strip')

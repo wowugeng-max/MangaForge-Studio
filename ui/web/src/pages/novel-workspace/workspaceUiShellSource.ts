@@ -31,6 +31,7 @@ let projectWorkspaceSourceCache: string | null = null
 let autoCreationDirectorWorkspaceSourceCache: string | null = null
 let storyPlanningWorkspaceSourceCache: string | null = null
 let planningWorkspaceSourceCache: string | null = null
+let writingCockpitPanelSourceCache: string | null = null
 
 export function packageSource(relativeDir: string) {
   const cached = packageSourceCache.get(relativeDir)
@@ -203,6 +204,19 @@ export function taskCenterSource() {
 }
 
 
+
+
+export function writingCockpitPanelSource() {
+  if (writingCockpitPanelSourceCache != null) return writingCockpitPanelSourceCache
+  writingCockpitPanelSourceCache = [
+    sourceCached('WritingCockpitPanel.tsx', localSourceCache),
+    sourceCached('writing-cockpit/panel-utils.tsx', localSourceCache),
+    sourceCached('writing-cockpit/panel-workflow-strip.tsx', localSourceCache),
+    sourceCached('writing-cockpit/panel-planning-desk.tsx', localSourceCache),
+    sourceCached('writing-cockpit/panel-acceptance-desk.tsx', localSourceCache),
+  ].join('\n')
+  return writingCockpitPanelSourceCache
+}
 
 export function storyPlanningWorkspaceSource() {
   if (storyPlanningWorkspaceSourceCache != null) return storyPlanningWorkspaceSourceCache
