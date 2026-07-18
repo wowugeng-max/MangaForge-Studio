@@ -23,7 +23,7 @@ function walkTs(dir: string): string[] {
 const BASELINES: Record<string, number> = {
   'novel-writing-service/monolith.ts': 47085,
   'routes/novel-writing-service.ts': 2,
-  'routes/novel-writing-service.test.ts': 62495,
+  'routes/novel-writing-service.test.ts': 62278,
 }
 
 describe('architecture modularization contracts', () => {
