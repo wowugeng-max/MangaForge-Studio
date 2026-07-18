@@ -39,6 +39,21 @@ Still open for Task 11:
 - Residual composition roots (`NovelProjectWorkspaceView`, `useNovelStudioController`, `provider-runtime`, audience/craft monofiles)
 - Full write-path UI smoke / memory notes
 
+### Residual inventory (2026-07-19 end of goal-continue arc)
+
+Still large / DI-heavy (defer mechanical split):
+- `provider-runtime.ts` ~1778
+- `craft-tension-contracts.ts` / `audience-quality-contracts.ts` ~1.5–1.6k
+- `NovelProjectWorkspaceView.tsx` ~1593 composition root
+- `prose-self-review-methods.ts` ~1496 factory
+- `director-workspace-detail-drawer.tsx` ~1413
+- `NovelCreateWizard.tsx` ~1381 (partially thinned)
+- single-function giants: `paragraph-prose-context`, `helpers-batch-risk-radar`, `builders-annotations-prose-quality`, delivery-risk carry-over, auto-repair factory, llm executor
+
+Landed this arc (selection): serial-momentum-briefs, prose-generation-prompt-sections, chapter-progress-ledger, cockpit acceptance desk, pre-draft-brief, create wizard export restore + payload utils, quality-sync craft, scene-card-delivery-risk, memory-service, closed-beat-canon, chapter-blueprint-execution, state-tracking-contracts, novel-generation/planning register, character-asset, audience risks, plot-opening, delta receipts.
+
+Task 11: focused **261** tests green earlier; architecture + pre-draft sync-core + prompt sections + CreateWizard green after latest leaf fixes. Full write-path UI smoke/memory still open.
+
 ### Residual inventory (still above ~1k, 2026-07-19)
 
 Keep reverse-free only; do not mechanical-split packages that share private helpers/constants (audience/craft/audit lesson).
