@@ -157,6 +157,8 @@ function projectWorkspaceSource() {
     sourceCached('shell/workspace-action-handlers.tsx', localSourceCache),
     sourceCached('shell/workspace-chapter-prose-handlers.tsx', localSourceCache),
     sourceCached('shell/workspace-writing-bible-handlers.tsx', localSourceCache),
+    sourceCached('shell/workspace-production-handlers.tsx', localSourceCache),
+    sourceCached('shell/workspace-planning-handlers.tsx', localSourceCache),
     sourceCached('shell/workspace-incubator-views.tsx', localSourceCache),
     sourceCached('shell/workspace-serial-pipeline.tsx', localSourceCache),
     sourceCached('shell/workspace-area-view.tsx', localSourceCache),
@@ -641,11 +643,13 @@ describe('commercial writing workspace UI shell', () => {
 
   test('exposes unattended writing goal controls in the production toolbox', () => {
     const projectWorkspace = projectWorkspaceSource()
-    const startBlock = projectWorkspace.slice(
-      projectWorkspace.indexOf('const startUnattendedWritingGoal = async () =>'),
-      projectWorkspace.indexOf('const openRunQueue = async () =>'),
-    )
+    const startIdx = projectWorkspace.indexOf('const startUnattendedWritingGoal = async () =>')
+    // After extract, openRunQueue stays in NWS while startUnattended lives in production handlers;
+    // slice to the factory return binding that follows the function body.
+    const endIdx = projectWorkspace.indexOf('startUnattendedWritingGoal,', startIdx + 1)
+    const startBlock = projectWorkspace.slice(startIdx, endIdx > startIdx ? endIdx : startIdx + 2500)
 
+    expect(startIdx).toBeGreaterThanOrEqual(0)
     expect(projectWorkspace).toContain('unattendedTargetChapter')
     expect(projectWorkspace).toContain('startUnattendedWritingGoal')
     expect(projectWorkspace).toContain("chapter-groups/start-unattended")
