@@ -1,5 +1,5 @@
 import React from 'react'
-import { Alert, Button, Card, List, Space, Tag, Typography } from 'antd'
+import { Alert, Button, Card, List, Progress, Space, Tag, Typography } from 'antd'
 
 const { Text, Paragraph } = Typography
 
@@ -104,6 +104,97 @@ export function renderPreflightModalContentView(payload: any, repairActions: any
           message={`仿写安全评分：${safetyDecision.score ?? '-'}，照搬命中：${safetyDecision.copy_hit_count ?? 0}`}
           description={(safetyDecision.reasons || []).join('；') || '未发现阻塞项'}
         />
+      )}
+    </Space>
+  )
+}
+
+/** Generation diagnostics modal body. */
+export function renderDiagnosticsModalContentView(diagnostics: any) {
+  const preflight = diagnostics?.preflight || {}
+  const materialScore = diagnostics?.material_score || {}
+  const checks = Array.isArray(preflight.checks) ? preflight.checks : []
+  const recommendations = Array.isArray(diagnostics?.recommendations) ? diagnostics.recommendations : []
+  return (
+    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Card size="small">
+        <Space align="center" size={16}>
+          <Progress type="circle" size={72} percent={Number(materialScore.score ?? diagnostics?.readiness_score ?? 0)} status={materialScore.can_generate || preflight.ready ? 'success' : 'normal'} />
+          <Space direction="vertical" size={4}>
+            <Text strong>{materialScore.can_generate || preflight.ready ? '可以生成' : '存在材料缺口'}</Text>
+            <Text type="secondary">系统会根据高危缺口决定是否阻止直接生成。</Text>
+          </Space>
+        </Space>
+      </Card>
+      {Array.isArray(materialScore.categories) && materialScore.categories.length > 0 && (
+        <Card size="small" title="材料完整度">
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            {materialScore.categories.map((item: any) => (
+              <div key={item.key} style={{ display: 'grid', gridTemplateColumns: '92px minmax(0, 1fr) 42px', gap: 8, alignItems: 'center' }}>
+                <Text style={{ fontSize: 12 }}>{item.label}</Text>
+                <Progress percent={Number(item.score || 0)} size="small" status={item.score >= 80 ? 'success' : item.score < 60 && item.required ? 'exception' : 'normal'} />
+                <Text type="secondary" style={{ fontSize: 12 }}>{item.score}</Text>
+              </div>
+            ))}
+          </Space>
+        </Card>
+      )}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {checks.map((check: any, index: number) => (
+          <Tag key={`${check.key || index}`} color={check.ok ? 'green' : check.severity === 'high' ? 'red' : 'gold'} bordered={false}>
+            {check.ok ? '✓' : '!'} {check.label || check.key}
+          </Tag>
+        ))}
+      </div>
+      {recommendations.length > 0 && (
+        <Card size="small" title="补齐建议">
+          <List size="small" dataSource={recommendations} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+        </Card>
+      )}
+      {diagnostics?.writing_bible && (
+        <Card size="small" title="写作圣经摘要">
+          <Paragraph ellipsis={{ rows: 4, expandable: true }} style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
+            {JSON.stringify(diagnostics.writing_bible, null, 2)}
+          </Paragraph>
+        </Card>
+      )}
+    </Space>
+  )
+}
+
+/** Commercial readiness modal body. */
+export function renderCommercialReadinessModalContentView(readiness: any) {
+  const categories = Array.isArray(readiness?.categories) ? readiness.categories : []
+  return (
+    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Card size="small">
+        <Space align="center" size={16}>
+          <Progress type="circle" size={76} percent={Number(readiness?.score || 0)} status={readiness?.can_batch_generate ? 'success' : 'normal'} />
+          <Space direction="vertical" size={4}>
+            <Text strong>{readiness?.can_batch_generate ? '可以进入批量生产' : '建议先补齐关键材料'}</Text>
+            <Text type="secondary">
+              {readiness?.level || '-'} · 章节 {readiness?.summary?.chapters || 0} · 已写 {readiness?.summary?.written_chapters || 0} · 失败任务 {readiness?.summary?.failed_runs || 0}
+            </Text>
+          </Space>
+        </Space>
+      </Card>
+      {categories.length > 0 && (
+        <Card size="small" title="分项评分">
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            {categories.map((item: any) => (
+              <div key={item.key} style={{ display: 'grid', gridTemplateColumns: '96px minmax(0, 1fr) 44px', gap: 8, alignItems: 'center' }}>
+                <Text style={{ fontSize: 12 }}>{item.label}</Text>
+                <Progress percent={Number(item.score || 0)} size="small" status={item.score >= 80 ? 'success' : item.score < 60 && item.required ? 'exception' : 'normal'} />
+                <Text type="secondary" style={{ fontSize: 12 }}>{item.score}</Text>
+              </div>
+            ))}
+          </Space>
+        </Card>
+      )}
+      {Array.isArray(readiness?.next_actions) && readiness.next_actions.length > 0 && (
+        <Card size="small" title="下一步动作">
+          <List size="small" dataSource={readiness.next_actions} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+        </Card>
       )}
     </Space>
   )
