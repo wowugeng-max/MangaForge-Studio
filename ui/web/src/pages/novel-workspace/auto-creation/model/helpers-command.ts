@@ -102,7 +102,6 @@ import {
   buildBatchHandoff,
   buildResolvedBatchRiskIssueKeys,
   chapterHandoffDetail,
-  chapterRangeLabel,
   characterArcNeedsAction,
   compactChapterNoEvidence,
   compactList,
@@ -111,10 +110,13 @@ import {
   recordTime,
   retentionNeedsAction,
   rhythmNeedsAction,
-  serialReleaseInventoryIssue,
   storylineNeedsAction,
   volumeBeatNeedsAction,
 } from './helpers-main'
+import {
+  chapterRangeLabel,
+  serialReleaseInventoryIssue,
+} from './helpers-next-batch-brief'
 import {
   arrayValue,
   deliveryRiskRepairPayload,

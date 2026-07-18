@@ -96,11 +96,13 @@ import type {
   BuildAutoCreationDirectorModelInput
 } from './types'
 import {
-  buildNextBatchBrief,
-  chapterRangeLabel,
   currentChapterDirectorAction,
   targetChapter,
 } from './helpers-main'
+import {
+  buildNextBatchBrief,
+  chapterRangeLabel,
+} from './helpers-next-batch-brief'
 import {
   arrayValue,
   opsAction,

@@ -96,7 +96,6 @@ import type {
   BuildAutoCreationDirectorModelInput
 } from './types'
 import {
-  buildLongformMemoryAnchor,
   latestLongformCreationReport,
   latestReaderTrialReview,
   latestReviewReport,
@@ -108,6 +107,9 @@ import {
   reportScore,
   stressGateStatus,
 } from './helpers-main'
+import {
+  buildLongformMemoryAnchor,
+} from './helpers-next-batch-brief'
 import {
   arrayValue,
   planningAction,
