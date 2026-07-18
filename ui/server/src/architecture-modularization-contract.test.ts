@@ -37,7 +37,7 @@ const SOFT_BASELINES: Record<string, number> = {
   'routes/novel-core/builders-seed-normalize.ts': 600,
   'routes/novel-core/builders-seed.ts': 20,
   'routes/novel-core/builders-seed-recovery.ts': 800,
-  'routes/novel-core/builders-seed-materialize.ts': 1100,
+  'routes/novel-core/builders-seed-materialize.ts': 20,
   'routes/novel-core/builders-seed-fill-gaps.ts': 400,
   'routes/novel-editor/builders-delivery-risk-brief.ts': 700,
   'routes/novel-editor/builders-revision-prompts.ts': 500,

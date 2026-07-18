@@ -26,6 +26,7 @@ Landed reverse-free splits:
 - `novel-setting-helpers` → shared/agent-prompts/relationship/agent-usage/state-assets
 
 - `prose-quality-loop` → core/prompts/run
+- `builders-seed-materialize` → helpers/run
 
 Task 11 focused batch: **277 pass / 0 fail** (+ prose-quality-loop 38 pass) (architecture, setting-routes, planning a/b, shell a/b, writingRecommendation, TaskCenter, CreateWizard, character-card, closed-beat).
 
