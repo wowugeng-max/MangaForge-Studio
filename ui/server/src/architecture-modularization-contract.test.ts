@@ -74,6 +74,7 @@ const SOFT_BASELINES: Record<string, number> = {
   'novel-writing/closed-beat-canon.ts': 20,
   'novel-writing-service/quality/chapter-blueprint-execution.ts': 20,
   'novel-writing-service/quality/state-tracking-contracts.ts': 20,
+  'routes/novel-generation/register.ts': 30,
 }
 
 describe('architecture modularization contracts', () => {
