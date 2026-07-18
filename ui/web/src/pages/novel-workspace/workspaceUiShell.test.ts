@@ -127,6 +127,18 @@ function planningWorkspaceSource() {
   return planningWorkspaceSourceCache
 }
 
+
+let workspaceCenterSourceCache: string | null = null
+function workspaceCenterSource() {
+  if (workspaceCenterSourceCache != null) return workspaceCenterSourceCache
+  workspaceCenterSourceCache = [
+    sourceCached('WorkspaceCenter.tsx', localSourceCache),
+    sourceCached('workspace-center-chrome.tsx', localSourceCache),
+    sourceCached('workspace-center-prose-editor.tsx', localSourceCache),
+  ].join('\n')
+  return workspaceCenterSourceCache
+}
+
 function projectWorkspaceSource() {
   if (projectWorkspaceSourceCache != null) return projectWorkspaceSourceCache
   projectWorkspaceSourceCache = [
@@ -203,7 +215,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('uses a single primary action entry in the central writing toolbar', () => {
-    const component = source('WorkspaceCenter.tsx')
+    const component = workspaceCenterSource()
     const css = source('WorkspaceCenter.css')
 
     expect(component).toContain('runRecommendedToolbarAction')
@@ -270,7 +282,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows a compact writing queue in the chapter workspace', () => {
-    const component = source('WorkspaceCenter.tsx')
+    const component = workspaceCenterSource()
     const css = source('WorkspaceCenter.css')
     const projectWorkspace = projectWorkspaceSource()
     const model = writingCockpitModelSource()
@@ -325,7 +337,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('keeps manual writing visible by collapsing auxiliary writing panels', () => {
-    const component = source('WorkspaceCenter.tsx')
+    const component = workspaceCenterSource()
     const css = source('WorkspaceCenter.css')
     const projectWorkspaceCss = source('../NovelProjectWorkspace.css')
 
@@ -381,7 +393,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('surfaces the oh-story chapter blueprint contract in the writing brief card', () => {
-    const component = source('WorkspaceCenter.tsx')
+    const component = workspaceCenterSource()
     const css = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
     const projectWorkspace = projectWorkspaceSource()
@@ -436,7 +448,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('reads camelCase raw pre-draft briefs in the writing workspace UI', () => {
-    const component = source('WorkspaceCenter.tsx')
+    const component = workspaceCenterSource()
     const projectWorkspace = projectWorkspaceSource()
 
     expect(component).toContain('activeChapter?.raw_payload?.pre_draft_brief || activeChapter?.raw_payload?.preDraftBrief || null')
@@ -446,7 +458,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('surfaces chapter blueprint, revision, and delivery risk receipts in the delivery status strip', () => {
-    const component = source('WorkspaceCenter.tsx')
+    const component = workspaceCenterSource()
     const css = source('WorkspaceCenter.css')
     const model = writingCockpitModelSource()
     const recommendationModel = source('writingRecommendationModel.ts')
@@ -707,7 +719,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('offers a direct de-ai gate repair action from the chapter writing desk', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const projectWorkspace = projectWorkspaceSource()
 
     expect(workspaceCenter).toContain('onRepairDeslopGate')
@@ -877,7 +889,7 @@ describe('commercial writing workspace UI shell', () => {
   test('shows storyline workshop types and draft brief storyline section', () => {
     const settingPanel = source('SettingWorkshopPanel.tsx')
     const usageModel = source('settingUsageWorkbenchModel.ts')
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
 
     expect(settingPanel).toContain("value: 'mainline'")
@@ -901,7 +913,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows character growth obligations in the chapter pre-draft brief', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
     const service = writingServiceSource()
@@ -940,7 +952,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows reader retention radar in the chapter pre-draft brief', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
     const service = writingServiceSource()
@@ -958,7 +970,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows story unit task in the chapter pre-draft brief', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
     const service = writingServiceSource()
@@ -975,7 +987,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows volume climax budget in the chapter pre-draft brief', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
     const service = writingServiceSource()
@@ -991,7 +1003,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows recent fatigue avoidance in the chapter pre-draft brief', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
     const service = writingServiceSource()
@@ -1008,7 +1020,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows strong story and reader pull execution in the chapter pre-draft brief', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
     const service = writingServiceSource()
@@ -1035,7 +1047,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows chapter innovation execution in the pre-draft brief', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
     const service = writingServiceSource()
@@ -1052,7 +1064,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows signature scene repair in the pre-draft brief', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
     const service = writingServiceSource()
@@ -1069,7 +1081,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows longform battle obligations in the pre-draft brief', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
     const service = writingServiceSource()
@@ -1087,7 +1099,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows governance recheck memory in the pre-draft brief', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
     const service = writingServiceSource()
@@ -1105,7 +1117,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows storyline sync status in the delivery strip', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
 
     expect(workspaceCenter).toContain('storylineSync')
@@ -1115,7 +1127,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows story unit sync status in the delivery strip', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const writingModel = writingCockpitModelSource()
     const recommendationModel = source('writingRecommendationModel.ts')
@@ -1133,7 +1145,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows chapter core drift status in the delivery strip', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = writingCockpitModelSource()
     const service = writingServiceSource()
@@ -1149,7 +1161,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows reader payoff sync status in the delivery strip', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = writingCockpitModelSource()
     const service = writingServiceSource()
@@ -1165,7 +1177,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows reader retention sync status in the delivery strip', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = writingCockpitModelSource()
     const recommendationModel = source('writingRecommendationModel.ts')
@@ -1197,7 +1209,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows reader expectation ledger in draft brief and delivery strip', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = writingCockpitModelSource()
     const recommendationModel = source('writingRecommendationModel.ts')
@@ -1221,7 +1233,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows quality audit carry-over sync in the delivery strip', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = writingCockpitModelSource()
     const recommendationModel = source('writingRecommendationModel.ts')
@@ -1241,7 +1253,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows quality audit repair receipt sync in the delivery strip', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = writingCockpitModelSource()
     const recommendationModel = source('writingRecommendationModel.ts')
@@ -1261,7 +1273,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows reader expectation debt carry-over in the draft brief', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const recommendationModel = source('writingRecommendationModel.ts')
     const repairPrompt = [source('repair-task/prompt.ts'), source('repair-task/prompt-lines.ts'), source('repair-task/prompt-lines-quality.ts')].join('\n')
@@ -1314,7 +1326,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows chapter handoff between delivery and next draft brief', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const cockpitModel = writingCockpitModelSource()
 
@@ -1339,7 +1351,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCss = source('AutoCreationDirectorWorkspace.css')
     const model = directorModelSource()
     const projectWorkspace = projectWorkspaceSource()
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCenterCss = source('WorkspaceCenter.css')
     const cockpitModel = writingCockpitModelSource()
     const recommendationModel = source('writingRecommendationModel.ts')
@@ -1370,7 +1382,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows innovation sync status in the delivery strip and risk queue', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = writingCockpitModelSource()
     const recommendationModel = source('writingRecommendationModel.ts')
@@ -1389,7 +1401,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows aggregated delivery risk queue in the delivery strip', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = writingCockpitModelSource()
     const recommendationModel = source('writingRecommendationModel.ts')
@@ -1568,7 +1580,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows delivery risk convergence in the delivery strip', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = writingCockpitModelSource()
     const recommendationModel = source('writingRecommendationModel.ts')
@@ -1584,7 +1596,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows discovered asset intake in delivery strip and setting workshop', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const settingPanel = source('SettingWorkshopPanel.tsx')
     const projectWorkspace = projectWorkspaceSource()
@@ -1616,7 +1628,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows IP scene intake in delivery strip after story state sync', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const writingModel = writingCockpitModelSource()
     const recommendationModel = source('writingRecommendationModel.ts')
@@ -1637,7 +1649,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows signature scene sync in delivery strip and risk queue', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const writingModel = writingCockpitModelSource()
     const recommendationModel = source('writingRecommendationModel.ts')
@@ -1656,7 +1668,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows readability and restrained meme strategy in writing workflow', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const projectWorkspace = projectWorkspaceSource()
 
@@ -1956,7 +1968,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('shows longform memory capsule in planning and chapter launch workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const recommendationModel = source('writingRecommendationModel.ts')
     const planningModel = planningWorkspaceSource()
     const writingService = writingServiceSource()
@@ -2130,7 +2142,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows volume beat sync status in the delivery strip', () => {
-    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const writingModel = writingCockpitModelSource()
     const recommendationModel = source('writingRecommendationModel.ts')
@@ -2699,7 +2711,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('immersive writing aux uses toolbar popover instead of in-flow aux rail', () => {
-    const component = source('WorkspaceCenter.tsx')
+    const component = workspaceCenterSource()
     const projectWorkspace = projectWorkspaceSource()
     const focusModel = source('writingAuxFocusModel.ts')
 

@@ -10,8 +10,7 @@ import {
 } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { EditorState } from '@codemirror/state'
-
-export type EditorDisplayPrefs = { fontSize: number; lineHeight: number }
+import type { EditorDisplayPrefs } from './workspace-center-chrome'
 
 export function ProseEditor({
   value,
