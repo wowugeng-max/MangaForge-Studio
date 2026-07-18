@@ -116,6 +116,11 @@ import {
   resolveChapterWordTarget,
 } from '../../novel-writing/word-target'
 import {
+  isRestorableWordTargetText,
+  recordWordTargetExpansionPatch,
+  wordTargetWarningAsError,
+} from './generate-chapter-word-target-helpers'
+import {
   buildOhStoryDirectorForPostDraft,
 } from '../../routes/novel-oh-story-director'
 import {
@@ -745,37 +750,12 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   await onStage('word_target', { status: 'running', target: wordTarget.target, min: wordTarget.min, max: wordTarget.max, actual: countProseChars(finalText) })
   const wordTargetExpansionPatches: any[] = []
   let wordTargetCompatibility: any = null
-  const recordWordTargetExpansionPatch = (wordTargetCheck: any) => {
-    const patch = wordTargetCheck?.expansion?.expansion_blueprint_patch
-    if (patch) wordTargetExpansionPatches.push(patch)
-  }
-  const isRestorableWordTargetText = (text: string, compatibility: any) => {
-    const strictEvaluation = evaluateProseWordTarget(text, wordTarget)
-    if (strictEvaluation.passed) return true
-    return compatibility?.word_target_compatibility_pass === true
-      && wordTarget?.mode === 'standard'
-      && Number(compatibility?.compatibility_ceiling || 0) > 0
-      && strictEvaluation.actual <= Number(compatibility.compatibility_ceiling)
-  }
-  const wordTargetWarningAsError = (wordTargetCheck: any) => {
-    const warning = wordTargetCheck?.word_target_warning
-    if (!warning) return null
-    return Object.assign(new Error(String(warning.message || '章节正文未达到字数目标')), {
-      code: warning.code === 'word_target_short' ? 'PROSE_WORD_TARGET_SHORT' : 'PROSE_WORD_TARGET_LONG',
-      word_target: wordTarget,
-      evaluation: wordTargetCheck.evaluation,
-      final_evaluation: wordTargetCheck.final_evaluation,
-      contraction_attempts: wordTargetCheck.contraction?.attempts || [],
-      expansion_attempts: wordTargetCheck.expansion?.attempts || [],
-      word_target_warning: warning,
-    })
-  }
   try {
     const wordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId, llmControlOptions)
     wordTargetCompatibility = wordTargetCheck.word_target_compatibility_pass ? wordTargetCheck : null
     finalText = wordTargetCheck.final_text || finalText
     if (wordTargetCheck.word_target_warning) qualityWarningCandidates.push(wordTargetCheck.word_target_warning)
-    recordWordTargetExpansionPatch(wordTargetCheck)
+    recordWordTargetExpansionPatch(wordTargetExpansionPatches, wordTargetCheck)
     if (wordTargetCheck.expanded && wordTargetCheck.expansion) {
       finalSceneBreakdown = selectVerifiedSceneBreakdownUpdate(finalSceneBreakdown, wordTargetCheck.expansion.scene_breakdown, finalText)
       finalContinuityNotes = wordTargetCheck.expansion.continuity_notes?.length ? wordTargetCheck.expansion.continuity_notes : finalContinuityNotes
@@ -819,14 +799,14 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   try {
     throwIfChapterGenerationAborted()
     const postEditorWordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId, llmControlOptions)
-    const postEditorWordTargetWarning = wordTargetWarningAsError(postEditorWordTargetCheck)
+    const postEditorWordTargetWarning = wordTargetWarningAsError(wordTarget, postEditorWordTargetCheck)
     if (postEditorWordTargetWarning) {
       if (!validateMinimalChapterProse(postEditorWordTargetCheck.final_text || finalText).valid) throw postEditorWordTargetWarning
       qualityWarningCandidates.push(postEditorWordTargetCheck.word_target_warning)
     }
     wordTargetCompatibility = postEditorWordTargetCheck.word_target_compatibility_pass ? postEditorWordTargetCheck : null
     finalText = postEditorWordTargetCheck.final_text || finalText
-    recordWordTargetExpansionPatch(postEditorWordTargetCheck)
+    recordWordTargetExpansionPatch(wordTargetExpansionPatches, postEditorWordTargetCheck)
     if (postEditorWordTargetCheck.expanded && postEditorWordTargetCheck.expansion) {
       finalSceneBreakdown = selectVerifiedSceneBreakdownUpdate(finalSceneBreakdown, postEditorWordTargetCheck.expansion.scene_breakdown, finalText)
       finalContinuityNotes = postEditorWordTargetCheck.expansion.continuity_notes?.length ? postEditorWordTargetCheck.expansion.continuity_notes : finalContinuityNotes
@@ -837,7 +817,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   } catch (error: any) {
     if (error?.word_target_warning) qualityWarningCandidates.push(error.word_target_warning)
     const preEditorEvaluation = evaluateProseWordTarget(preEditorText, wordTarget)
-    if ((error?.code === 'PROSE_WORD_TARGET_LONG' || error?.code === 'PROSE_WORD_TARGET_SHORT') && isRestorableWordTargetText(preEditorText, preEditorWordTargetCompatibility)) {
+    if ((error?.code === 'PROSE_WORD_TARGET_LONG' || error?.code === 'PROSE_WORD_TARGET_SHORT') && isRestorableWordTargetText(preEditorText, wordTarget, preEditorWordTargetCompatibility)) {
       finalText = preEditorText
       finalSceneBreakdown = preEditorSceneBreakdown
       finalContinuityNotes = preEditorContinuityNotes
@@ -906,14 +886,14 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   try {
     throwIfChapterGenerationAborted()
     const postMemeWordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId, llmControlOptions)
-    const postMemeWordTargetWarning = wordTargetWarningAsError(postMemeWordTargetCheck)
+    const postMemeWordTargetWarning = wordTargetWarningAsError(wordTarget, postMemeWordTargetCheck)
     if (postMemeWordTargetWarning) {
       if (!validateMinimalChapterProse(postMemeWordTargetCheck.final_text || finalText).valid) throw postMemeWordTargetWarning
       qualityWarningCandidates.push(postMemeWordTargetCheck.word_target_warning)
     }
     wordTargetCompatibility = postMemeWordTargetCheck.word_target_compatibility_pass ? postMemeWordTargetCheck : null
     finalText = postMemeWordTargetCheck.final_text || finalText
-    recordWordTargetExpansionPatch(postMemeWordTargetCheck)
+    recordWordTargetExpansionPatch(wordTargetExpansionPatches, postMemeWordTargetCheck)
     if (postMemeWordTargetCheck.expanded && postMemeWordTargetCheck.expansion) {
       finalSceneBreakdown = selectVerifiedSceneBreakdownUpdate(finalSceneBreakdown, postMemeWordTargetCheck.expansion.scene_breakdown, finalText)
       finalContinuityNotes = postMemeWordTargetCheck.expansion.continuity_notes?.length ? postMemeWordTargetCheck.expansion.continuity_notes : finalContinuityNotes
@@ -923,7 +903,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     }
     } catch (error: any) {
       if (error?.word_target_warning) qualityWarningCandidates.push(error.word_target_warning)
-      if ((error?.code === 'PROSE_WORD_TARGET_LONG' || error?.code === 'PROSE_WORD_TARGET_SHORT') && isRestorableWordTargetText(preMemeText, preMemeWordTargetCompatibility)) {
+      if ((error?.code === 'PROSE_WORD_TARGET_LONG' || error?.code === 'PROSE_WORD_TARGET_SHORT') && isRestorableWordTargetText(preMemeText, wordTarget, preMemeWordTargetCompatibility)) {
         finalText = preMemeText
         finalSceneBreakdown = preMemeSceneBreakdown
         finalContinuityNotes = preMemeContinuityNotes
