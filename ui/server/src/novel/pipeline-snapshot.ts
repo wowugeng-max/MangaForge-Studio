@@ -1,43 +1,10 @@
-import * as core from './core'
-import type * as T from './types'
+import type { NovelPipelineSnapshot, NovelProjectRecord, NovelRunRecord } from './types'
+import { openDb, ensureSqliteSchema } from './db'
+import { ensureLegacyNovelStoreImportedForRead } from './legacy-import'
+import { dedupById } from './normalize'
+import { NOVEL_PIPELINE_SQL_TRIM_CHARS, NOVEL_PIPELINE_CHAPTER_REVIEW_TYPES, NOVEL_PIPELINE_GOVERNANCE_REVIEW_TYPES, NOVEL_PIPELINE_BATCH_RUN_TYPES, NOVEL_PIPELINE_REPAIR_RUN_TYPES, NOVEL_PIPELINE_GOVERNANCE_RUN_TYPES, pipelineJsonTruthySql, pipelineAnyJsonTruthySql, pipelineJsonAnchorTruthySql, projectNovelPipelineReview } from './pipeline-sql'
+import { worldbuildingFromRow, characterFromRow, outlineFromRow, chapterFromRow, reviewFromRow } from './row-mappers'
 
-const {
-  nowIso, openDb, ensureSqliteSchema, ensureLegacyNovelStoreImportedForRead, withNovelDbWrite, withNovelWorkspaceMutation,
-  importLegacyNovelStoreIfNeeded, nextTableId, nextChapterVersionNo, createChapterVersionRecord, versionedChapterSnapshotChanged,
-  projectFromRow, worldbuildingFromRow, characterFromRow, outlineFromRow, chapterFromRow, chapterVersionFromRow,
-  reviewFromRow, reviewSummaryFromRow, runSummaryFromRow, settingEntityFromRow, chapterSettingUsageFromRow, projectSeedDraftFromRow,
-  normalizeProjectRecord, normalizeWorldbuildingRecord, normalizeCharacterRecord, normalizeOutlineRecord, normalizeChapterRecord,
-  normalizeReviewRecord, normalizeRunRecord, normalizeProjectSeedDraftRecord, normalizeSettingEntityRecord, normalizeChapterSettingUsageRecord,
-  insertProjectRow, updateProjectRow, insertWorldbuildingRow, updateWorldbuildingRow, insertCharacterRow, updateCharacterRow,
-  insertOutlineRow, updateOutlineRow, insertChapterRow, updateChapterRow, insertChapterVersionRow, insertSettingEntityRow,
-  updateSettingEntityRow, insertChapterSettingUsageRow, updateChapterSettingUsageRow, updateRunRow, dedupById, jsonText, textValue,
-  parseDbJson, compactRawPayloadForStorage, compactPersistedText, compactReviewPayloadText, sanitizeJsonValue, NESTED_STORAGE_KEYS,
-  MAX_PERSISTED_DIAGNOSTIC_CHARS, summarizeNovelRunPipelineRefs, toAnyArray, outlineChapterNo, cleanChapterPlanTitle,
-  chapterPlanOutlineTitle, chapterPlanOutlineSummary, loadAcceptanceWorkingSet, persistNovelChapterAcceptanceDelta,
-  NOVEL_PIPELINE_SQL_TRIM_CHARS, NOVEL_PIPELINE_CHAPTER_REVIEW_TYPES, NOVEL_PIPELINE_GOVERNANCE_REVIEW_TYPES,
-  NOVEL_PIPELINE_BATCH_RUN_TYPES, NOVEL_PIPELINE_REPAIR_RUN_TYPES, NOVEL_PIPELINE_GOVERNANCE_RUN_TYPES,
-  pipelineJsonTruthySql, pipelineAnyJsonTruthySql, pipelineJsonAnchorTruthySql, projectNovelPipelineReview, pipelineReviewArray,
-  pipelineReviewText, nullableSqliteBoolean,
-} = core as any
-
-type NovelProjectRecord = T.NovelProjectRecord
-type NovelWorldbuildingRecord = T.NovelWorldbuildingRecord
-type NovelCharacterRecord = T.NovelCharacterRecord
-type NovelOutlineRecord = T.NovelOutlineRecord
-type NovelChapterRecord = T.NovelChapterRecord
-type NovelChapterWorkspaceRecord = T.NovelChapterWorkspaceRecord
-type NovelChapterVersionRecord = T.NovelChapterVersionRecord
-type NovelReviewRecord = T.NovelReviewRecord
-type NovelReviewSummaryRecord = T.NovelReviewSummaryRecord
-type NovelRunRecord = T.NovelRunRecord
-type NovelRunSummaryRecord = T.NovelRunSummaryRecord
-type NovelProjectSeedDraftRecord = T.NovelProjectSeedDraftRecord
-type NovelSettingEntityRecord = T.NovelSettingEntityRecord
-type NovelChapterSettingUsageRecord = T.NovelChapterSettingUsageRecord
-type UpdateNovelChapterOptions = T.UpdateNovelChapterOptions
-type NovelChapterAcceptanceInput = T.NovelChapterAcceptanceInput
-type NovelPipelineSnapshot = T.NovelPipelineSnapshot
-type NovelReferenceConfig = T.NovelReferenceConfig
 
 export async function getNovelPipelineSnapshot(activeWorkspace: string, projectId: number): Promise<NovelPipelineSnapshot | null> {
   await ensureLegacyNovelStoreImportedForRead(activeWorkspace)

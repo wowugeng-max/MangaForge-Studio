@@ -6,7 +6,7 @@ import type {
 } from './types'
 import { openDb, ensureSqliteSchema } from './db'
 import { withNovelWorkspaceMutation } from './lock'
-import { importLegacyNovelStoreIfNeeded } from './legacy-store'
+import { importLegacyNovelStoreIfNeeded } from './legacy-import'
 import { getNovelMutationTestHook } from '../novel-test-support'
 import { jsonText, textValue, nowIso } from './json'
 
