@@ -700,7 +700,7 @@ describe('novel project seed prompt', () => {
   })
 
   test('seed routes run thin-output recovery before returning a hard seed error', async () => {
-    const source = await readFile(join(import.meta.dir, 'novel-core-routes.ts'), 'utf8')
+    const source = [await readFile(join(import.meta.dir, 'novel-core/builders.ts'), 'utf8'), await readFile(join(import.meta.dir, 'novel-core/register.ts'), 'utf8')].join('\n')
     const deriveStart = source.indexOf("app.post('/api/novel/project-seed/derive'")
     const finalizeStart = source.indexOf("app.post('/api/novel/project-seed/finalize'", deriveStart)
     const autoCreateStart = source.indexOf("app.post('/api/novel/projects/auto-create'", finalizeStart)
@@ -718,7 +718,7 @@ describe('novel project seed prompt', () => {
   })
 
   test('finalize route can create a project atomically when requested', async () => {
-    const source = await readFile(join(import.meta.dir, 'novel-core-routes.ts'), 'utf8')
+    const source = [await readFile(join(import.meta.dir, 'novel-core/builders.ts'), 'utf8'), await readFile(join(import.meta.dir, 'novel-core/register.ts'), 'utf8')].join('\n')
     const finalizeStart = source.indexOf("app.post('/api/novel/project-seed/finalize'")
     const autoCreateStart = source.indexOf("app.post('/api/novel/projects/auto-create'", finalizeStart)
     const finalizeBlock = source.slice(finalizeStart, autoCreateStart)
@@ -730,7 +730,7 @@ describe('novel project seed prompt', () => {
   })
 
   test('finalize route allows explicit author confirmation to create a review-needed seed', async () => {
-    const source = await readFile(join(import.meta.dir, 'novel-core-routes.ts'), 'utf8')
+    const source = [await readFile(join(import.meta.dir, 'novel-core/builders.ts'), 'utf8'), await readFile(join(import.meta.dir, 'novel-core/register.ts'), 'utf8')].join('\n')
     const finalizeStart = source.indexOf("app.post('/api/novel/project-seed/finalize'")
     const autoCreateStart = source.indexOf("app.post('/api/novel/projects/auto-create'", finalizeStart)
     const finalizeBlock = source.slice(finalizeStart, autoCreateStart)
@@ -741,7 +741,7 @@ describe('novel project seed prompt', () => {
   })
 
   test('fill-gaps route is registered and uses safe merge helpers', async () => {
-    const source = await readFile(join(import.meta.dir, 'novel-core-routes.ts'), 'utf8')
+    const source = [await readFile(join(import.meta.dir, 'novel-core/builders.ts'), 'utf8'), await readFile(join(import.meta.dir, 'novel-core/register.ts'), 'utf8')].join('\n')
     expect(source).toContain("/api/novel/project-seed/fill-gaps")
     expect(source).toContain('fillProjectSeedGapsWithModel')
     expect(source).toContain('mergeSeedPreferRicher')
@@ -750,7 +750,7 @@ describe('novel project seed prompt', () => {
   })
 
   test('derive-stream route writes stage and result SSE frames', async () => {
-    const source = await readFile(join(import.meta.dir, 'novel-core-routes.ts'), 'utf8')
+    const source = [await readFile(join(import.meta.dir, 'novel-core/builders.ts'), 'utf8'), await readFile(join(import.meta.dir, 'novel-core/register.ts'), 'utf8')].join('\n')
     expect(source).toContain("/api/novel/project-seed/derive-stream")
     expect(source).toContain('text/event-stream')
     expect(source).toContain("type: 'result'")
