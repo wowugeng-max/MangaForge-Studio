@@ -16,6 +16,16 @@
 
 
 
+### Residual inventory update (2026-07-19 goal-continue XXIV)
+
+Landed:
+- monotest halves: writingCockpit planning / writingRecommendation / repairTaskRevisionPrompt main; server chapter-context handoff / pre-draft sync-audience-b / scene-cards.b
+- binding repair: `serial-momentum-briefs-expectation` imports `parseJsonLikePayload` (was ReferenceError on reader expectation debt path)
+
+Task 11 focused: server monotest batch **127 pass** after binding fix; prior XXIII web/server/API smoke still valid. Idle server RSS ~165MB. Full UI write-path click smoke still open (vite :5173 up).
+
+Still deferred: provider-runtime DI, NWS composition root, prose-self-review factory, helpers-batch-risk-radar single builder, paragraph-prose-context, knowledge panels controller, auto-repair-preflight factory.
+
 ### Residual inventory update (2026-07-19 goal-continue XXIII)
 
 Landed:
