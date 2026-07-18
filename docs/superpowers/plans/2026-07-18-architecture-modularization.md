@@ -873,3 +873,5 @@ cd ui/server && bun test src/novel/mutation-contract.test.ts src/novel/sqlite-pe
 - 2026-07-19 goal-continue XXXVI: NWS workspaceViewDeps spreads core/action handler bags (~1252 composition root); structured-review-fields barrel (~71) + required-fields leaf (~770) with export-const marker for package-join contracts. Focused architecture+provider-runtime sample+chapter-context contracts green.
 
 - 2026-07-19 goal-continue XXXVII: intent-benchmark-recall leaf (~611) + contracts (~230); continuity-heat-contracts leaf (~284) + dialogue contracts (~457). Pre-existing contracts-b-a failures (write-prep receipt debt symbol, asset_linkage riskCarryOver empty) not introduced by this split. Focused architecture+core-b-1+contracts-a-b green.
+
+- 2026-07-19 goal-continue XXXVIII: prompts monofile → barrel + prompts-core (~355) / prompts-prose (~392) / prompts-misc (~226); prompts.test 10 green.
