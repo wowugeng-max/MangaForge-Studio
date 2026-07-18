@@ -156,6 +156,7 @@ export function projectWorkspaceSource() {
     sourceCached('NovelProjectWorkspaceView.tsx', localSourceCache),
     sourceCached('useNovelProjectWorkspaceUiState.ts', localSourceCache),
     sourceCached('shell/workspace-helpers.tsx', localSourceCache),
+    sourceCached('shell/workspace-view-props.ts', localSourceCache),
     sourceCached('shell/workspace-types.ts', localSourceCache),
     sourceCached('shell/workspace-lazy.tsx', localSourceCache),
     sourceCached('shell/workspace-editor-fields.ts', localSourceCache),
