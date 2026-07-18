@@ -21,7 +21,7 @@ function walkTs(dir: string): string[] {
 }
 
 const BASELINES: Record<string, number> = {
-  'novel-writing-service/monolith.ts': 47271,
+  'novel-writing-service/monolith.ts': 47085,
   'routes/novel-writing-service.ts': 2,
   'routes/novel-writing-service.test.ts': 62495,
 }
@@ -32,6 +32,7 @@ describe('architecture modularization contracts', () => {
     expect(existsSync(join(serverSrc, 'novel-writing-service/monolith.ts'))).toBe(true)
     expect(existsSync(join(serverSrc, 'novel-writing-service/quality/review-merge.ts'))).toBe(true)
     expect(existsSync(join(serverSrc, 'novel-writing-service/quality/word-count-guard.ts'))).toBe(true)
+    expect(existsSync(join(serverSrc, 'novel-writing-service/quality/prose-quality-entry.ts'))).toBe(true)
     const shim = readFileSync(join(serverSrc, 'routes/novel-writing-service.ts'), 'utf8')
     expect(shim).toContain("export * from '../novel-writing-service'")
     expect(shim.split(/\r?\n/).length).toBeLessThanOrEqual(20)
@@ -58,5 +59,7 @@ describe('architecture modularization contracts', () => {
     expect(typeof (mod as any).applyDeterministicWordCountIssueGuard).toBe('function')
     expect(typeof (mod as any).mergeQualityRecheckReviewWithStructuredEvidence).toBe('function')
     expect(typeof (mod as any).mergePostDeliveryReceiptSyncIntoQualityGateReview).toBe('function')
+    expect(typeof (mod as any).scanProseForQualityLoop).toBe('function')
+    expect(typeof (mod as any).prepareProseGenerationContract).toBe('function')
   })
 })
