@@ -13,6 +13,21 @@
 **Branch:** `codex/architecture-modularization`
 
 
+
+## Progress checkpoint (2026-07-19 architecture continuation)
+
+| Area | Status | Notes |
+|---|---|---|
+| writing-service monofile barrel | done | ~91 lines |
+| writing monotest shim | done | shim-only |
+| editor/core route packages | done | builders thinned; seed multi-leaf; editor delivery/revision leaves |
+| generate-chapter composition | largely done | ~703 under soft baseline 750 |
+| Web shell packages | advanced | NWS UI-state + view-props builders; cockpit/planning/writing-support/studio splits |
+| Focused regression | green | 211+ modularization-related tests this arc; shell 92 green |
+| Task 11 smoke/memory | partial | server boot on :8787; idle RSS ~111MB; full write-path UI smoke still open |
+| Residual >1k | open | NWS view ~1764 composition; domain quality/post-delivery leaves; NovelStudio controller ~1256 |
+
+
 ## Progress checkpoint (2026-07-18 late, architecture branch)
 
 | Task | Status | Notes |
