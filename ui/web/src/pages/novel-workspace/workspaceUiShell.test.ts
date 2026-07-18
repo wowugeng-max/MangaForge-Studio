@@ -145,6 +145,8 @@ function taskCenterSource() {
     sourceCached('TaskCenterDrawer.tsx', localSourceCache),
     sourceCached('task-center/chapter-group.ts', localSourceCache),
     sourceCached('task-center/drawer-model.tsx', localSourceCache),
+    sourceCached('task-center/drawer-task-run-card.tsx', localSourceCache),
+    sourceCached('task-center/drawer-default-lane.ts', localSourceCache),
     sourceCached('task-center/drawer-previews.tsx', localSourceCache),
     sourceCached('task-center/drawer-recovery-evidence.tsx', localSourceCache),
     sourceCached('task-center/drawer-safe-batch.ts', localSourceCache),

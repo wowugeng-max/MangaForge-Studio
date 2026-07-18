@@ -733,7 +733,7 @@ export function buildRecoveryEvidenceAuditView(audit?: any | null, latestTasks: 
   }
 }
 
-type RepairTaskTagMeta = {
+export type RepairTaskTagMeta = {
   key: string
   label: string
   color: string
