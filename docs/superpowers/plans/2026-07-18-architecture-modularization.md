@@ -40,6 +40,8 @@ Recent extracts (continued):
 
 - 2026-07-18 night: NWS commercial-tools + preflight factories; novel-editor monotest split + leaf import fix; pre-draft monotest further slices; chapter-context contracts package-join post-commit-sync-bundle.
 
+- 2026-07-18 late night+: NWS commercial/preflight/repair factories (NWS ~3.9k); editor+pre-draft+scene-cards monotest splits; chapter-context contracts package-join post-commit-sync-bundle; soft baselines refreshed.
+
 Still open: NWS ~3.9k (handlers factories landed; prose gen / action routers remain); generate-chapter-for-group ~2.3k; WorkspaceCenter/ACD/StoryPlanning ~1.7-1.8k; builders-annotations ~1.9k; remaining monotests >2k; Task 11 full smoke/memory.
 
 
