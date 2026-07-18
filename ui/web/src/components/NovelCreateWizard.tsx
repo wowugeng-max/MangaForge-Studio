@@ -11,7 +11,6 @@ import {
   type LaunchpadFields,
 } from './novel-entry/launchpadModel'
 import {
-  buildDeepDraftReviewModel,
   buildSeedRecoveryDiagnosticsView,
   deepDraftReviewModelToSeed,
   repairDeepDraftReviewModelGaps,
@@ -43,6 +42,22 @@ import { CreateStepHeader } from './novel-entry/create/CreateStepHeader'
 import { CreateSummaryCard } from './novel-entry/create/CreateSummaryCard'
 import { CREATE_MODE_LABELS } from './novel-entry/create/createWizardCopy'
 import { useProjectSeedStream } from './novel-entry/create/useProjectSeedStream'
+import {
+  AUDIENCES,
+  COMMERCIAL_TAGS,
+  FEMALE_AUDIENCE_MODES,
+  GENRES,
+  LENGTH_TARGETS,
+  STYLE_TAGS,
+  type CreateMode,
+} from './novel-entry/create/createWizardOptions'
+import {
+  buildDeepDraftReviewForUi,
+  normalizeLengthTarget,
+  normalizeProjectSeedForUi,
+  pickGenre,
+  seedDiagnosticsNeedReview,
+} from './novel-entry/create/createWizardSeedUtils'
 
 const projectSeedModelStorageKey = 'novel.projectSeed.model_id'
 
@@ -64,56 +79,6 @@ interface NovelCreateWizardProps {
   onSuccess: (projectId: number) => void
 }
 
-const GENRES = [
-  { value: '玄幻', label: '玄幻' },
-  { value: '仙侠', label: '仙侠' },
-  { value: '科幻', label: '科幻' },
-  { value: '悬疑', label: '悬疑' },
-  { value: '都市', label: '都市' },
-  { value: '历史', label: '历史' },
-  { value: '奇幻', label: '奇幻' },
-  { value: '武侠', label: '武侠' },
-  { value: '言情', label: '言情' },
-  { value: '末世', label: '末世' },
-  { value: '穿越', label: '穿越' },
-  { value: '系统', label: '系统流' },
-  { value: '其他', label: '其他' },
-]
-
-const LENGTH_TARGETS = [
-  { value: 'short', label: '短篇（< 20万）', description: '短篇快完结，适合试水' },
-  { value: 'medium', label: '中篇（20-80万）', description: '节奏紧凑，主线明确' },
-  { value: 'long', label: '长篇连载（80-300万）', description: '多卷多线，世界观宏大' },
-  { value: 'epic', label: '超长篇连载（> 300万）', description: '史诗级篇幅，适合长线连载' },
-]
-
-const AUDIENCES = [
-  { value: '男频', label: '男频' },
-  { value: '女频', label: '女频' },
-  { value: '全向', label: '全向' },
-  { value: '轻小说', label: '轻小说' },
-  { value: '漫剧', label: '漫剧读者' },
-  { value: 'Z世代', label: 'Z世代' },
-]
-
-const FEMALE_AUDIENCE_MODES = [
-  { value: 'auto', label: '自动识别' },
-  { value: 'enabled', label: '强制启用' },
-  { value: 'disabled', label: '强制关闭' },
-]
-
-const STYLE_TAGS = [
-  '高燃', '黑暗', '轻松', '群像', '单线', '智斗', '热血',
-  '搞笑', '催泪', '虐心', '慢热', '快节奏', '沙雕', '治愈',
-  '致郁', '赛博朋克', '克苏鲁', '种田', '经营', '冒险',
-]
-
-const COMMERCIAL_TAGS = [
-  '爆款潜质', '爽文', '起点感', '番茄感', '知乎感',
-  'IP改编', '影视化', '短剧改编', '漫改', '有声书',
-]
-
-type CreateMode = 'manual' | 'quick_ai' | 'deep_draft'
 type ProjectSeedDraft = {
   id: number
   title: string
@@ -124,90 +89,6 @@ type ProjectSeedDraft = {
   model_id?: number | null
   created_at?: string
   updated_at?: string
-}
-
-function asStringArray(value: any): string[] {
-  if (!Array.isArray(value)) return []
-  return value.map(item => String(item || '').trim()).filter(Boolean)
-}
-
-function firstText(...values: any[]) {
-  return values.map(value => String(value || '').trim()).find(Boolean) || ''
-}
-
-function asObject(value: any) {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
-}
-
-function buildDeepDraftReviewForUi(seed: any) {
-  const model = buildDeepDraftReviewModel(seed)
-  return repairDeepDraftReviewModelGaps(model, seed)
-}
-
-function inferGenreFromText(text: string) {
-  if (/修仙|仙门|仙道|天尊|长生|古神|外神|神祇|王朝|皇子/.test(text)) return '仙侠'
-  if (/异能|灵气|武魂|斗气|神魔|玄幻/.test(text)) return '玄幻'
-  if (/都市|公司|学校|职场/.test(text)) return '都市'
-  if (/末世|丧尸|灾变/.test(text)) return '末世'
-  if (/星际|飞船|AI|人工智能|科幻/.test(text)) return '科幻'
-  if (/悬疑|推理|凶案|诡案/.test(text)) return '悬疑'
-  return ''
-}
-
-function normalizeProjectSeedForUi(payload: any) {
-  const root = asObject(payload)
-  const rawPayload = asObject(root.raw_payload)
-  const source = [root.project_seed, root.seed, root.project, root.novel_project, root.data, root.result, root, rawPayload]
-    .map(asObject)
-    .find(item => firstText(item.title, item.project_title, item.book_title, item.synopsis, item.summary, item.logline, item.core_premise) || item.worldbuilding || item.protagonist) || root
-  const masterOutline = asObject(source.master_outline || root.master_outline || rawPayload.master_outline)
-  const rawText = `${JSON.stringify(root).slice(0, 5000)} ${String(root.raw_idea || '').slice(0, 5000)}`
-  const commercial = asObject(source.commercial_positioning || root.commercial_positioning || rawPayload.commercial_positioning)
-  const worldbuilding = asObject(source.worldbuilding || root.worldbuilding || rawPayload.worldbuilding)
-  const plotEngine = asObject(source.plot_engine || root.plot_engine || rawPayload.plot_engine)
-  return {
-    ...source,
-    title: firstText(source.title, source.project_title, source.book_title, source.name, source.working_title, masterOutline.title),
-    genre: firstText(source.genre, source.main_genre, source.category, inferGenreFromText(rawText)),
-    sub_genres: asStringArray(source.sub_genres).length ? asStringArray(source.sub_genres) : asStringArray(source.genre_tags || source.tags),
-    target_audience: firstText(source.target_audience, source.audience, commercial.platform),
-    length_target: firstText(source.length_target, source.length, 'medium'),
-    style_tags: asStringArray(source.style_tags).length ? asStringArray(source.style_tags) : asStringArray(source.tone_tags),
-    commercial_tags: asStringArray(source.commercial_tags).length ? asStringArray(source.commercial_tags) : asStringArray(commercial.selling_points || commercial.tropes),
-    synopsis: firstText(source.synopsis, source.project_summary, source.summary, masterOutline.summary, commercial.reader_promise, source.core_premise, source.logline),
-    logline: firstText(source.logline, source.hook, masterOutline.hook, commercial.reader_promise),
-    core_premise: firstText(source.core_premise, source.premise, source.setting, source.summary, masterOutline.summary),
-    main_conflict: firstText(source.main_conflict, source.conflict, plotEngine.long_term_goal, masterOutline.hook),
-    protagonist: asObject(source.protagonist || root.protagonist || rawPayload.protagonist),
-    antagonist: asObject(source.antagonist || root.antagonist || rawPayload.antagonist),
-    worldbuilding,
-    plot_engine: plotEngine,
-    writing_bible: asObject(source.writing_bible || root.writing_bible || rawPayload.writing_bible),
-    volume_outlines: Array.isArray(source.volume_outlines) ? source.volume_outlines : (Array.isArray(root.volume_outlines) ? root.volume_outlines : (Array.isArray(rawPayload.volume_outlines) ? rawPayload.volume_outlines : [])),
-    chapter_outlines: Array.isArray(source.chapter_outlines) ? source.chapter_outlines : (Array.isArray(root.chapter_outlines) ? root.chapter_outlines : (Array.isArray(rawPayload.chapter_outlines) ? rawPayload.chapter_outlines : [])),
-    foreshadowing_plan: Array.isArray(source.foreshadowing_plan) ? source.foreshadowing_plan : (Array.isArray(root.foreshadowing_plan) ? root.foreshadowing_plan : (Array.isArray(rawPayload.foreshadowing_plan) ? rawPayload.foreshadowing_plan : [])),
-    characters: Array.isArray(source.characters) ? source.characters : (Array.isArray(root.characters) ? root.characters : (Array.isArray(rawPayload.characters) ? rawPayload.characters : [])),
-    open_questions: asStringArray(source.open_questions).length ? asStringArray(source.open_questions) : (asStringArray(source.questions).length ? asStringArray(source.questions) : asStringArray(rawPayload.open_questions || rawPayload.questions)),
-    next_steps: asStringArray(source.next_steps).length ? asStringArray(source.next_steps) : (asStringArray(source.suggested_next_steps).length ? asStringArray(source.suggested_next_steps) : asStringArray(rawPayload.next_steps || rawPayload.suggested_next_steps)),
-    raw_payload: root.raw_payload || root,
-  }
-}
-
-function normalizeLengthTarget(value: any) {
-  const raw = String(value || '').trim()
-  return LENGTH_TARGETS.some(item => item.value === raw) ? raw : 'medium'
-}
-
-function pickGenre(value: any) {
-  const raw = String(value || '').trim()
-  if (GENRES.some(item => item.value === raw)) return raw
-  const matched = GENRES.find(item => raw.includes(item.value))
-  return matched?.value || raw || '其他'
-}
-
-function seedDiagnosticsNeedReview(value: any) {
-  const status = String(value?.status || '').trim()
-  return status === 'needs_author_review' || status === 'needs_model_expansion'
 }
 
 export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCreateWizardProps) {
