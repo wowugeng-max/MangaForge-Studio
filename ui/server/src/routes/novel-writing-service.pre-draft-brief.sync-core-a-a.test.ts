@@ -741,7 +741,7 @@ describe('chapter pre-draft brief sync-core a a', () => {
   })
 
   test('wires benchmark recall checks into prose self-review and revision', () => {
-    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run-deterministic.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewPromptBlock = source.slice(
       source.indexOf('const buildProseReviewPrompt ='),
       source.indexOf('const buildProseRevisionPrompt ='),
@@ -779,7 +779,7 @@ describe('chapter pre-draft brief sync-core a a', () => {
   })
 
   test('asks prose self review and revision to enforce reader retention Hook addiction checks', () => {
-    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run-deterministic.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewPromptBlock = source.slice(
       source.indexOf('const buildProseReviewPrompt ='),
       source.indexOf('const buildProseRevisionPrompt ='),
@@ -816,7 +816,7 @@ describe('chapter pre-draft brief sync-core a a', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story style boundary checks', () => {
-    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run-deterministic.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewPromptBlock = source.slice(
       source.indexOf('const buildProseReviewPrompt ='),
       source.indexOf('const buildProseRevisionPrompt ='),
@@ -847,7 +847,7 @@ describe('chapter pre-draft brief sync-core a a', () => {
   })
 
   test('asks prose self review and revision to enforce style sample strategy checks', () => {
-    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run-deterministic.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewPromptBlock = source.slice(
       source.indexOf('const buildProseReviewPrompt ='),
       source.indexOf('const buildProseRevisionPrompt ='),

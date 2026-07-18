@@ -436,7 +436,7 @@ describe('chapter context handoff a', () => {
   })
 
   test('merges deterministic oh-story banned word scan into deslop checks', () => {
-    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run-deterministic.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewNormalizeBlock = source.slice(
       source.indexOf('const normalizedDeslopChecks = ['),
       source.indexOf('const normalizedReview = {', source.indexOf('const normalizedDeslopChecks = [')),
@@ -516,7 +516,7 @@ describe('chapter context handoff a', () => {
   })
 
   test('revision prompt uses delete-first deslop repair before polishing', () => {
-    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run-deterministic.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const revisionStart = source.indexOf('const buildProseRevisionPrompt =')
     const revisionEnd = source.indexOf('const nextChapterQualityPlanNeedsRepair =', revisionStart)
     const revisionBlock = source.slice(revisionStart, revisionEnd)
@@ -815,7 +815,7 @@ describe('chapter context handoff a', () => {
   })
 
   test('wires deterministic prose format risks into normalized self review', () => {
-    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run-deterministic.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),

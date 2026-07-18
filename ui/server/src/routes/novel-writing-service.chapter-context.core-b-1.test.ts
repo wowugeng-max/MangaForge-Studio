@@ -681,7 +681,7 @@ describe('chapter context word target source guards 1', () => {
   })
   test('requires scene-card prompts and prose prompts to preserve purpose tags for detail allocation', () => {
     const source = ['paragraph-prose-context.ts','paragraph-prose-context-prepare.ts','paragraph-prose-context-sections.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
-    const selfReviewSource = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const selfReviewSource = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run-deterministic.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const scenePromptBlock = readSceneCardsPromptSource()
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.length

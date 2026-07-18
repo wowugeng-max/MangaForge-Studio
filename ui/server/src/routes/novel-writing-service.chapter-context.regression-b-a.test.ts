@@ -279,7 +279,7 @@ const readDraftSyncReviewRecordSource = () => readFileSync(join(import.meta.dir,
 
 describe('chapter context regression b a', () => {
   test('keeps prose revision receipts for post-revision quality audit', () => {
-    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run-deterministic.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const revisionPrompt = source.slice(
       source.indexOf('const buildProseRevisionPrompt'),
       source.indexOf('const shouldReviseProse'),
@@ -319,7 +319,7 @@ describe('chapter context regression b a', () => {
   })
 
   test('keeps nested oh-story revision receipts for post-revision quality audit', () => {
-    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run-deterministic.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const revisionStart = source.indexOf('const revisionPayload = getNovelPayload(revisionResult)')
     const revisionParseBlock = source.slice(
       revisionStart,
@@ -354,7 +354,7 @@ describe('chapter context regression b a', () => {
   })
 
   test('normalizes camelCase review control fields from model output', () => {
-    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run-deterministic.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewNormalizeStart = source.indexOf('const rawReviewIssues = [')
     const reviewNormalizeBlock = source.slice(
       reviewNormalizeStart,
