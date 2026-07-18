@@ -29,6 +29,7 @@ describe('buildRepairTaskRevisionPrompt', () => {
     const source = [
       readFileSync(new URL('./repair-task/prompt.ts', import.meta.url), 'utf8'),
       readFileSync(new URL('./repair-task/prompt-lines.ts', import.meta.url), 'utf8'),
+      readFileSync(new URL('./repair-task/prompt-lines-quality.ts', import.meta.url), 'utf8'),
     ].join('\n')
     const promptContractKeys = new Set(promptQualityContractFields(source).keys())
     const requiredFieldKeys = new Set(listQualityContractRequiredFieldKeys())
@@ -43,6 +44,7 @@ describe('buildRepairTaskRevisionPrompt', () => {
     const source = [
       readFileSync(new URL('./repair-task/prompt.ts', import.meta.url), 'utf8'),
       readFileSync(new URL('./repair-task/prompt-lines.ts', import.meta.url), 'utf8'),
+      readFileSync(new URL('./repair-task/prompt-lines-quality.ts', import.meta.url), 'utf8'),
     ].join('\n')
     const promptContracts = promptQualityContractFields(source)
     const requiredFields = listQualityContractRequiredFields()

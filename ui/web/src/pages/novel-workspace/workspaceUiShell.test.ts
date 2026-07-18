@@ -132,6 +132,7 @@ function projectWorkspaceSource() {
     sourceCached('shell/workspace-editor-fields.ts', localSourceCache),
     sourceCached('shell/workspace-commercial-result.tsx', localSourceCache),
     sourceCached('shell/workspace-serial-pipeline.tsx', localSourceCache),
+    sourceCached('shell/workspace-area-view.tsx', localSourceCache),
   ].join('\n')
   return projectWorkspaceSourceCache
 }
@@ -1250,7 +1251,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const repairPrompt = [source('repair-task/prompt.ts'), source('repair-task/prompt-lines.ts')].join('\n')
+    const repairPrompt = [source('repair-task/prompt.ts'), source('repair-task/prompt-lines.ts'), source('repair-task/prompt-lines-quality.ts')].join('\n')
     const service = writingServiceSource()
 
     expect(workspaceCenter).toContain('期待债务承接')
@@ -1324,7 +1325,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspace = source('AutoCreationDirectorWorkspace.tsx')
     const workspaceCss = source('AutoCreationDirectorWorkspace.css')
     const model = directorModelSource()
-    const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
+    const projectWorkspace = projectWorkspaceSource()
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCenterCss = source('WorkspaceCenter.css')
     const cockpitModel = writingCockpitModelSource()
@@ -1380,7 +1381,7 @@ describe('commercial writing workspace UI shell', () => {
     const model = writingCockpitModelSource()
     const recommendationModel = source('writingRecommendationModel.ts')
     const reviewAnnotations = source('ReviewAnnotationsDrawer.tsx')
-    const workspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
+    const workspace = projectWorkspaceSource()
 
     expect(workspaceCenter).toContain('deliveryRiskQueue')
     expect(workspaceCenter).toContain('novel-delivery-risk-tag')
@@ -1417,7 +1418,7 @@ describe('commercial writing workspace UI shell', () => {
     const director = source('AutoCreationDirectorWorkspace.tsx')
     const directorCss = source('AutoCreationDirectorWorkspace.css')
     const directorModel = directorModelSource()
-    const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
+    const projectWorkspace = projectWorkspaceSource()
 
     expect(directorModel).toContain('deliveryRiskGate')
     expect(directorModel).toContain('未清交稿风险')
@@ -1463,7 +1464,7 @@ describe('commercial writing workspace UI shell', () => {
   test('unifies auto creation action hints and execution type labels', () => {
     const director = source('AutoCreationDirectorWorkspace.tsx')
     const directorCss = source('AutoCreationDirectorWorkspace.css')
-    const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
+    const projectWorkspace = projectWorkspaceSource()
 
     expect(director).toContain('actionExecutionMeta')
     expect(director).toContain('ActionSurfaceButton')
@@ -1481,7 +1482,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('offers automatic fixes for preflight character and setting gaps', () => {
-    const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
+    const projectWorkspace = projectWorkspaceSource()
     const repairModel = readFileSync(join(import.meta.dir, './generationPreflightRepairModel.ts'), 'utf8')
 
     expect(projectWorkspace).toContain('buildGenerationPreflightRepairActions')
@@ -1506,7 +1507,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('routes recovery evidence source actions to single-chapter and batch rechecks', () => {
-    const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
+    const projectWorkspace = projectWorkspaceSource()
     const taskCenter = taskCenterSource()
 
     expect(taskCenter).toContain('recoveryEvidenceSourceRecheckAction')
@@ -1573,7 +1574,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
     const settingPanel = source('SettingWorkshopPanel.tsx')
-    const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
+    const projectWorkspace = projectWorkspaceSource()
 
     expect(workspaceCenter).toContain('assetIntake')
     expect(workspaceCenter).toContain('novel-delivery-asset-tag')
@@ -1644,7 +1645,7 @@ describe('commercial writing workspace UI shell', () => {
   test('shows readability and restrained meme strategy in writing workflow', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
-    const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
+    const projectWorkspace = projectWorkspaceSource()
 
     expect(workspaceCenter).toContain('readabilityReview')
     expect(workspaceCenter).toContain('novel-delivery-readability-tag')
@@ -1771,7 +1772,7 @@ describe('commercial writing workspace UI shell', () => {
   test('shows first30 retention curve as a story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
     const planningModel = planningWorkspaceSource()
-    const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
+    const projectWorkspace = projectWorkspaceSource()
     const taskCenter = taskCenterSource()
 
     expect(planningWorkspace).toContain('前30章留存曲线')
@@ -1791,7 +1792,7 @@ describe('commercial writing workspace UI shell', () => {
   test('shows storyline board as a story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
     const planningModel = planningWorkspaceSource()
-    const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
+    const projectWorkspace = projectWorkspaceSource()
     const taskCenter = taskCenterSource()
 
     expect(planningWorkspace).toContain('剧情线看板')
@@ -1823,7 +1824,7 @@ describe('commercial writing workspace UI shell', () => {
   test('shows serial governance hub in the story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
     const planningModel = planningWorkspaceSource()
-    const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
+    const projectWorkspace = projectWorkspaceSource()
 
     expect(planningWorkspace).toContain('连载治理中枢')
     expect(planningWorkspace).toContain('novel-governance-hub-card')
