@@ -15,6 +15,29 @@
 
 
 
+### Residual inventory update (2026-07-19 goal-continue XV)
+
+Landed reverse-free package splits + cross-leaf binding repairs:
+- `task-center/drawer-snapshots` → lane/structure/policy (+ package-join)
+- `character-card-sync` → shared/name/identity
+- `quality-sync-reports-extended-arcs` → emotional-character/attraction-innovation/story-unit-volume/runway
+- `chapter-plan-from-prose` → core/patches
+- `craft-tension-contracts` → deps + emotional/chapter-hook/paragraph-hook/suspense/reversal/showdown/bridge
+- `audience-quality-contracts` → deps + info-expectation/concept-scans/quality-audit/story-loop/target-reader/genre/female
+- Binding repairs: closed-beat `uniqueBlocked`/`shouldSuppressOpenHook`, progress-ledger `isCleanProgressPhrase`, plot-opening opening consts
+
+Task 11 focused regression: **211 pass / 0 fail** (architecture, character-card, closed-beat, progress-ledger, chapter-plan, pre-draft sync-core/audience, TaskCenter safe-batch a/b, workspace shell a/b, CreateWizard flow).
+
+Still open / deferred (DI or single giant function / composition root):
+- `provider-runtime.ts` ~1778 (explicit DI plan; out of mechanical main path)
+- `NovelProjectWorkspaceView.tsx` ~1593 composition root
+- `prose-self-review-methods.ts` ~1496 factory
+- `director-workspace-detail-drawer.tsx` ~1413
+- `NovelCreateWizard.tsx` ~1381 (partially thinned)
+- single-function giants: paragraph-prose-context, helpers-batch-risk-radar, builders-annotations-prose-quality, delivery-risk carry-over, auto-repair factory, llm executor
+- `useNovelStudioController.tsx` ~1215
+- Full write-path UI smoke + live memory note still open
+
 ### Residual inventory update (2026-07-19 goal-continue XIII–XIV)
 
 Landed reverse-free splits + leaf binding fixes:
