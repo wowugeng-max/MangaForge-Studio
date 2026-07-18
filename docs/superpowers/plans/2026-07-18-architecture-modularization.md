@@ -56,6 +56,8 @@ Recent extracts (continued):
 
 - 2026-07-19 late+: generate-chapter word-target pure helpers leaf extracted (~2245 monofile).
 
+- 2026-07-19 night: more monotest splits (quality-wiring, scene/chapter contracts, expansion/readability, provider-runtime, receipts-gates, chapter-context core); generate-chapter pure helper leaves. NWS ~2.0k. Task 11 still open.
+
 Still open: NWS ~3.4k (commercial/preflight/repair/action/chapter-prose factories done; stepGenerateProse and more remain); generate-chapter-for-group ~2.3k; WorkspaceCenter/ACD/StoryPlanning/builders-annotations ~1.7-1.9k; some monotests still >1.5k; Task 11 full smoke/memory not finished.
 
 
