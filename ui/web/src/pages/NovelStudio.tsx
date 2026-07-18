@@ -1220,474 +1220,64 @@ export default function NovelStudio() {
         />
       </Drawer>
 
-      <Drawer
-        title={
-          <Space direction="vertical" size={2}>
-            <Space>
-              <FileTextOutlined style={{ color: '#1677ff' }} />
-              <Text strong style={{ fontSize: 18 }}>正文缓存总览</Text>
-            </Space>
-            <Text type="secondary" style={{ fontSize: 12 }}>查看已抓取原文，用来和知识提炼结果互相印证</Text>
-          </Space>
-        }
-        placement="right"
-        width={1120}
-        open={sourceCacheOpen}
-        onClose={handleCloseSourceCache}
-        destroyOnHidden={false}
-        extra={
-          <Button size="small" icon={<ReloadOutlined />} loading={sourceCacheLoading} onClick={() => loadSourceCaches(true)}>
-            刷新
-          </Button>
-        }
-      >
-        <div style={{ display: 'grid', gridTemplateColumns: '340px minmax(0, 1fr)', gap: 16, height: 'calc(100vh - 120px)' }}>
-          <div style={{ minHeight: 0, display: 'grid', gridTemplateRows: 'auto minmax(160px, 1fr) minmax(220px, 1.3fr)', gap: 12 }}>
-            <Input
-              value={sourceCacheSearch}
-              onChange={(event) => setSourceCacheSearch(event.target.value)}
-              placeholder="搜索项目名、来源、缓存键"
-              prefix={<SearchOutlined style={{ color: '#94a3b8' }} />}
-              allowClear
-            />
+      <NovelStudioSourceCacheDrawer
+        filteredSourceCaches={filteredSourceCaches}
+        handleCloseSourceCache={handleCloseSourceCache}
+        loadSourceCacheChapter={loadSourceCacheChapter}
+        loadSourceCacheDetail={loadSourceCacheDetail}
+        loadSourceCaches={loadSourceCaches}
+        selectedSourceCacheKey={selectedSourceCacheKey}
+        setSourceCacheSearch={setSourceCacheSearch}
+        sourceCacheChapter={sourceCacheChapter}
+        sourceCacheChapterLoading={sourceCacheChapterLoading}
+        sourceCacheDetail={sourceCacheDetail}
+        sourceCacheLoading={sourceCacheLoading}
+        sourceCacheOpen={sourceCacheOpen}
+        sourceCacheSearch={sourceCacheSearch}
+      />
 
-            <Card
-              size="small"
-              title={`缓存项目 ${filteredSourceCaches.length}`}
-              style={{ borderRadius: 8, minHeight: 0, overflow: 'hidden' }}
-              bodyStyle={{ padding: 8, height: 'calc(100% - 38px)', overflowY: 'auto' }}
-            >
-              {filteredSourceCaches.length === 0 ? (
-                <div style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>
-                  {sourceCacheLoading ? '正在加载正文缓存...' : '还没有正文缓存'}
-                </div>
-              ) : (
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                  {filteredSourceCaches.map(cache => {
-                    const active = cache.cache_key === selectedSourceCacheKey
-                    return (
-                      <div
-                        key={cache.cache_key}
-                        onClick={() => loadSourceCacheDetail(cache.cache_key)}
-                        style={{
-                          cursor: 'pointer',
-                          border: `1px solid ${active ? '#93c5fd' : '#e5e7eb'}`,
-                          background: active ? '#eff6ff' : '#fff',
-                          borderRadius: 8,
-                          padding: 10,
-                        }}
-                      >
-                        <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                          <Space style={{ justifyContent: 'space-between', width: '100%' }} align="start">
-                            <Text strong style={{ color: '#0f172a' }}>{cache.project_title || '未命名缓存'}</Text>
-                            <Tag color={cache.complete ? 'green' : 'gold'} bordered={false}>
-                              {cache.complete ? '完整' : '未完'}
-                            </Tag>
-                          </Space>
-                          <Text type="secondary" style={{ fontSize: 12 }}>
-                            {cache.chapter_count || 0} 章 · 第 {cache.first_chapter || '-'}-{cache.last_chapter || '-'} 章 · {Math.round(Number(cache.total_chars || 0) / 1000)}k 字
-                          </Text>
-                          <Text type="secondary" style={{ fontSize: 12 }}>
-                            {truncateText(cache.source_url || cache.canonical_source_url || cache.cache_key, 54)}
-                          </Text>
-                        </Space>
-                      </div>
-                    )
-                  })}
-                </Space>
-              )}
-            </Card>
-
-            <Card
-              size="small"
-              title={`章节目录 ${sourceCacheDetail?.chapter_count ? `(${sourceCacheDetail.chapter_count})` : ''}`}
-              style={{ borderRadius: 8, minHeight: 0, overflow: 'hidden' }}
-              bodyStyle={{ padding: 8, height: 'calc(100% - 38px)', overflowY: 'auto' }}
-            >
-              {!sourceCacheDetail ? (
-                <div style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>选择一个缓存项目查看章节</div>
-              ) : (
-                <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                  {(sourceCacheDetail.chapters || []).map((chapter: any) => {
-                    const active = Number(sourceCacheChapter?.chapter || 0) === Number(chapter.chapter)
-                    return (
-                      <div
-                        key={chapter.chapter}
-                        onClick={() => loadSourceCacheChapter(sourceCacheDetail.cache_key, Number(chapter.chapter))}
-                        style={{
-                          cursor: 'pointer',
-                          border: `1px solid ${active ? '#bfdbfe' : '#e5e7eb'}`,
-                          background: active ? '#eff6ff' : '#fff',
-                          borderRadius: 8,
-                          padding: '8px 10px',
-                        }}
-                      >
-                        <Text strong={active} style={{ display: 'block', fontSize: 13 }}>
-                          第{chapter.chapter}章
-                        </Text>
-                        <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
-                          {truncateText(chapter.title || '', 28)}
-                        </Text>
-                      </div>
-                    )
-                  })}
-                </Space>
-              )}
-            </Card>
-          </div>
-
-          <Card
-            style={{ borderRadius: 8, minHeight: 0, overflow: 'hidden' }}
-            bodyStyle={{ height: '100%', padding: 0, display: 'flex', flexDirection: 'column' }}
-          >
-            {sourceCacheChapter ? (
-              <>
-                <div style={{ padding: '18px 22px', borderBottom: '1px solid #e5e7eb', background: '#fafcff' }}>
-                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                    <Space wrap style={{ justifyContent: 'space-between', width: '100%' }}>
-                      <div>
-                        <Title level={4} style={{ margin: 0 }}>{sourceCacheChapter.title || `第${sourceCacheChapter.chapter}章`}</Title>
-                        <Text type="secondary">《{sourceCacheChapter.project_title || sourceCacheDetail?.project_title || '未命名缓存'}》第 {sourceCacheChapter.chapter} 章</Text>
-                      </div>
-                      <Space wrap>
-                        <Tag bordered={false}>{Number(sourceCacheChapter.length || 0).toLocaleString()} 字</Tag>
-                        {sourceCacheDetail?.complete !== undefined && (
-                          <Tag color={sourceCacheDetail.complete ? 'green' : 'gold'} bordered={false}>
-                            {sourceCacheDetail.complete ? '完整缓存' : '未完缓存'}
-                          </Tag>
-                        )}
-                      </Space>
-                    </Space>
-                    {(sourceCacheChapter.url || sourceCacheDetail?.source_url) && (
-                      <Paragraph copyable={{ text: sourceCacheChapter.url || sourceCacheDetail?.source_url }} style={{ margin: 0, fontSize: 12 }}>
-                        <Text type="secondary">{sourceCacheChapter.url || sourceCacheDetail?.source_url}</Text>
-                      </Paragraph>
-                    )}
-                  </Space>
-                </div>
-                <div style={{ flex: 1, overflowY: 'auto', padding: '22px 34px', background: '#ffffff' }}>
-                  {sourceCacheChapterLoading ? (
-                    <Text type="secondary">正在读取正文...</Text>
-                  ) : (
-                    <div
-                      style={{
-                        maxWidth: 760,
-                        margin: '0 auto',
-                        whiteSpace: 'pre-wrap',
-                        fontSize: 16,
-                        lineHeight: 1.82,
-                        color: '#1f2937',
-                      }}
-                    >
-                      {sourceCacheChapter.text || '该章节没有正文内容'}
-                    </div>
-                  )}
-                </div>
-              </>
-            ) : (
-              <div style={{ height: '100%', display: 'grid', placeItems: 'center', color: '#94a3b8' }}>
-                {sourceCacheLoading ? '正在加载正文缓存...' : '选择左侧项目和章节查看正文'}
-              </div>
-            )}
-          </Card>
-        </div>
-      </Drawer>
-
-      <Drawer
-        title={
-          <Space direction="vertical" size={2}>
-            <Space>
-              <ReadOutlined style={{ color: '#1677ff' }} />
-              <Text strong style={{ fontSize: 18 }}>写作知识库</Text>
-            </Space>
-            <Text type="secondary" style={{ fontSize: 12 }}>沉淀拆书知识，并同步到项目记忆宫殿</Text>
-          </Space>
-        }
-        placement="right"
-        width={640}
-        open={knowledgeOpen}
-        onClose={handleCloseKnowledge}
-        destroyOnHidden={false}
-        extra={
-          <Space>
-            <Button size="small" icon={<EditOutlined />} onClick={handleOpenFeed}>投喂</Button>
-            <Button
-              danger
-              size="small"
-              icon={<DeleteOutlined />}
-              disabled={filteredKnowledgeEntries.length === 0}
-              loading={knowledgeBulkDeleting}
-              onClick={handleDeleteVisibleKnowledge}
-            >
-              清空当前结果
-            </Button>
-            <Button size="small" icon={<ReloadOutlined />} onClick={handleRefreshKnowledge} loading={knowledgeLoading}>刷新</Button>
-          </Space>
-        }
-      >
-        <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          <Card size="small" style={{ borderRadius: 8, background: 'linear-gradient(135deg, #f8fbff 0%, #ffffff 100%)' }}>
-            <Row gutter={12}>
-              <Col span={8}>
-                <Text type="secondary" style={{ fontSize: 12 }}>知识条目</Text>
-                <div style={{ fontSize: 22, fontWeight: 700, color: '#0f172a' }}>{knowledgeStats.total}</div>
-              </Col>
-              <Col span={8}>
-                <Text type="secondary" style={{ fontSize: 12 }}>分类数量</Text>
-                <div style={{ fontSize: 22, fontWeight: 700, color: '#4f46e5' }}>{knowledgeStats.categories}</div>
-              </Col>
-              <Col span={8}>
-                <Text type="secondary" style={{ fontSize: 12 }}>当前项目</Text>
-                <div style={{ fontSize: 14, fontWeight: 600, color: '#334155', marginTop: 4 }}>{knowledgeProjectLabel}</div>
-              </Col>
-            </Row>
-            <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>{knowledgeCategoryLabel} · {knowledgeCountText}</Text>
-          </Card>
-
-          {feedIngestJob && feedSerialFetch && (
-            <Card size="small" title="后台投喂任务" style={{ borderRadius: 8, background: '#fafcff' }}>
-              <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                <Space style={{ justifyContent: 'space-between', width: '100%' }}>
-                  <Text strong>{feedIngestJob.phase || '后台任务'}</Text>
-                  <Space size={6}>
-                    <Tag color={getIngestStatusColor(feedIngestJob.status)} bordered={false}>
-                      {feedIngestJob.status || 'running'}
-                    </Tag>
-                    {getSourceCacheLabel(feedIngestJob.source_cache) && (
-                      <Tag color={getSourceCacheColor(feedIngestJob.source_cache?.status)} bordered={false}>
-                        {getSourceCacheLabel(feedIngestJob.source_cache)}
-                      </Tag>
-                    )}
-                    {feedIngestJob.fetch_only && feedIngestJob.status === 'completed' && (
-                      <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={handleAnalyzeCachedJob}>
-                        从缓存开始提炼
-                      </Button>
-                    )}
-                    {['queued', 'running'].includes(feedIngestJob.status) && (
-                      <Button size="small" icon={<PauseCircleOutlined />} onClick={handlePauseIngestJob}>
-                        暂停
-                      </Button>
-                    )}
-                    {['paused', 'failed', 'canceled'].includes(feedIngestJob.status) && (
-                      <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={handleResumeIngestJob}>
-                        继续
-                      </Button>
-                    )}
-                    {!['completed', 'canceled'].includes(feedIngestJob.status) && (
-                      <Popconfirm title="确定取消当前后台提炼任务？" okText="取消任务" cancelText="返回" onConfirm={handleCancelIngestJob}>
-                        <Button size="small" danger icon={<StopOutlined />}>
-                          取消
-                        </Button>
-                      </Popconfirm>
-                    )}
-                  </Space>
-                </Space>
-                <Progress percent={Math.max(0, Math.min(100, Number(feedIngestJob.progress || 0)))} size="small" />
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  {feedIngestJob.full_book ? '全本模式；' : ''}
-                  {feedIngestJob.fetch_only ? '仅拉取正文缓存；' : ''}
-                  从第 {feedIngestJob.start_chapter || feedStartChapter || 1} 章开始；并发 {feedIngestJob.fetch_concurrency || feedFetchConcurrency || 1}；已抓取 {feedIngestJob.fetched_chapters || 0} 章
-                  {feedIngestJob.fetch_only ? '' : `，已分析 ${feedIngestJob.analyzed_batches || 0}/${feedIngestJob.total_batches || 0} 批，候选知识 ${Array.isArray(feedIngestJob.entries) ? feedIngestJob.entries.length : 0} 条`}
-                  {feedIngestJob.stored_count ? `，已入库 ${feedIngestJob.stored_count} 条` : ''}
-                </Text>
-                {(feedIngestJob.current_range || feedIngestJob.current_chapter) && (
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {feedIngestJob.status === 'completed' ? '已完成到' : '当前处理'}：
-                    {feedIngestJob.current_range || `第${feedIngestJob.current_chapter}章`}
-                    {feedIngestJob.current_chapter_title ? ` / ${feedIngestJob.current_chapter_title}` : ''}
-                  </Text>
-                )}
-              </Space>
-            </Card>
-          )}
-
-          <Card size="small" title="筛选与检索" style={{ borderRadius: 8 }}>
-            <Space direction="vertical" size={12} style={{ width: '100%' }}>
-              <Input.Search
-                value={knowledgeProjectDraft}
-                onChange={(e) => {
-                  const next = e.target.value
-                  setKnowledgeProjectDraft(next)
-                  if (!next.trim()) handleKnowledgeProjectChange('')
-                }}
-                onSearch={handleKnowledgeProjectChange}
-                placeholder="输入投喂项目名，例如：没钱修什么仙；留空查看全局混合视图"
-                enterButton="筛选"
-                allowClear
-                style={inputStyle}
-              />
-              {knowledgeProjectOptions.length > 0 ? (
-                <Space wrap>
-                  <Tag
-                    color={!knowledgeProjectTitle ? 'purple' : 'default'}
-                    bordered={false}
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => handleKnowledgeProjectChange('')}
-                  >
-                    全部投喂项目
-                  </Tag>
-                  {knowledgeProjectOptions.map(option => (
-                    <Tag
-                      key={option.value}
-                      color={knowledgeProjectTitle === option.value ? 'purple' : 'default'}
-                      bordered={false}
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => handleKnowledgeProjectChange(option.value)}
-                    >
-                      {option.label}
-                    </Tag>
-                  ))}
-                </Space>
-              ) : (
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  还没有带投喂项目名的知识条目；投喂时填入项目名后会出现在这里。
-                </Text>
-              )}
-              <Input
-                value={knowledgeSearch}
-                onChange={(e) => setKnowledgeSearch(e.target.value)}
-                placeholder="搜索标题、内容、来源、标签"
-                prefix={<SearchOutlined style={{ color: '#94a3b8' }} />}
-                allowClear
-                style={inputStyle}
-              />
-              <Space wrap>
-                <Tag
-                  color={!knowledgeCategory ? 'blue' : 'default'}
-                  bordered={false}
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => setKnowledgeCategory('')}
-                >
-                  全部分类
-                </Tag>
-                {categoryOptions.map(option => (
-                  <Tag
-                    key={option.key}
-                    color={knowledgeCategory === option.key ? 'blue' : 'default'}
-                    bordered={false}
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => setKnowledgeCategory(option.key)}
-                  >
-                    {option.label} {option.count}
-                  </Tag>
-                ))}
-              </Space>
-              <Space.Compact style={{ width: '100%' }}>
-                <Input
-                  value={knowledgeQuery}
-                  onChange={(e) => setKnowledgeQuery(e.target.value)}
-                  placeholder="按语义检索知识库，例如：悬念、伏笔、开篇钩子"
-                  prefix={<SearchOutlined style={{ color: '#94a3b8' }} />}
-                  onPressEnter={handleQueryKnowledge}
-                />
-                <Button type="primary" loading={knowledgeQueryLoading} onClick={handleQueryKnowledge}>检索</Button>
-              </Space.Compact>
-            </Space>
-          </Card>
-
-          {knowledgeQuery.trim() && (
-            <Card size="small" title={`语义检索结果 ${knowledgeQueryResults.length ? `(${knowledgeQueryResults.length})` : ''}`} style={{ borderRadius: 8 }}>
-              {knowledgeQueryResults.length === 0 ? (
-                <Text type="secondary">暂无命中结果</Text>
-              ) : (
-                <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                  {knowledgeQueryResults.map((entry: any, index: number) => (
-                    <Card
-                      key={entry.id || `${entry.title}-${index}`}
-                      size="small"
-                      hoverable
-                      onClick={() => setKnowledgeDetailEntry(entry)}
-                      style={{ borderRadius: 8, background: '#fafcff' }}
-                    >
-                      <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                        <Space wrap style={{ justifyContent: 'space-between', width: '100%' }}>
-                          <Space wrap>
-                            <Text strong>{entry.title || '未命名知识'}</Text>
-                            {typeof entry.score === 'number' && <Tag color="cyan" bordered={false}>相关度 {entry.score.toFixed(3)}</Tag>}
-                          </Space>
-                          <Button
-                            size="small"
-                            type="link"
-                            icon={<EyeOutlined />}
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              setKnowledgeDetailEntry(entry)
-                            }}
-                          >
-                            详情
-                          </Button>
-                        </Space>
-                        <Space wrap>
-                          <Tag color="geekblue" bordered={false}>{formatKnowledgeCategory(entry)}</Tag>
-                          {formatProjectScope(entry) && <Tag color="purple" bordered={false}>{formatProjectScope(entry)}</Tag>}
-                          <Tag bordered={false}>{formatSource(entry)}</Tag>
-                          {renderMetaTags(entry)}
-                        </Space>
-                        <Text>{truncateText(entry.content || '', 220)}</Text>
-                      </Space>
-                    </Card>
-                  ))}
-                </Space>
-              )}
-            </Card>
-          )}
-
-          {knowledgeEmpty ? (
-            <Card style={{ borderRadius: 8, textAlign: 'center', borderStyle: 'dashed', background: '#fafcff' }}>
-              <Space direction="vertical" size={10}>
-                <DatabaseOutlined style={{ fontSize: 28, color: '#1677ff' }} />
-                <Text strong>知识库还是空的</Text>
-                <Text type="secondary">先投喂文本、导入 TXT/PDF，或用 URL 抓取后交给 AI 提炼。</Text>
-                <Button type="primary" icon={<EditOutlined />} onClick={handleOpenFeed}>投喂第一条知识</Button>
-              </Space>
-            </Card>
-          ) : (
-            <Space direction="vertical" size={12} style={{ width: '100%' }}>
-              {filteredKnowledgeEntries.map((entry: any) => (
-                <Card
-                  key={entry.id}
-                  size="small"
-                  hoverable
-                  onClick={() => setKnowledgeDetailEntry(entry)}
-                  title={entry.title || '未命名知识'}
-                  extra={
-                    <Space size={4} onClick={(event) => event.stopPropagation()}>
-                      <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => setKnowledgeDetailEntry(entry)}>
-                        详情
-                      </Button>
-                      <Popconfirm
-                        title="删除知识条目"
-                        description="确定删除这条知识吗？"
-                        okText="删除"
-                        okButtonProps={{ danger: true }}
-                        onConfirm={() => handleDeleteKnowledge(entry.id)}
-                      >
-                        <Button danger size="small" type="text" icon={<DeleteOutlined />} />
-                      </Popconfirm>
-                    </Space>
-                  }
-                  style={{ borderRadius: 8 }}
-                >
-                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                    <Space wrap>
-                      <Tag color="geekblue" bordered={false}>{formatKnowledgeCategory(entry)}</Tag>
-                      {formatProjectScope(entry) && <Tag color="purple" bordered={false}>{formatProjectScope(entry)}</Tag>}
-                      <Tag bordered={false}>{formatSource(entry)}</Tag>
-                      {renderMetaTags(entry)}
-                    </Space>
-                    <Text>{truncateText(entry.content || '')}</Text>
-                    {Array.isArray(entry.tags) && entry.tags.length > 0 && (
-                      <Space wrap>
-                        {entry.tags.map((tag: string, idx: number) => renderKnowledgeTag(tag, idx))}
-                      </Space>
-                    )}
-                  </Space>
-                </Card>
-              ))}
-            </Space>
-          )}
-        </Space>
-      </Drawer>
+      <NovelStudioKnowledgeDrawer
+        feedFetchConcurrency={feedFetchConcurrency}
+        feedIngestJob={feedIngestJob}
+        feedSerialFetch={feedSerialFetch}
+        feedStartChapter={feedStartChapter}
+        filteredKnowledgeEntries={filteredKnowledgeEntries}
+        formatKnowledgeCategory={formatKnowledgeCategory}
+        handleAnalyzeCachedJob={handleAnalyzeCachedJob}
+        handleCancelIngestJob={handleCancelIngestJob}
+        handleCloseKnowledge={handleCloseKnowledge}
+        handleDeleteKnowledge={handleDeleteKnowledge}
+        handleDeleteVisibleKnowledge={handleDeleteVisibleKnowledge}
+        handleKnowledgeProjectChange={handleKnowledgeProjectChange}
+        handleOpenFeed={handleOpenFeed}
+        handlePauseIngestJob={handlePauseIngestJob}
+        handleQueryKnowledge={handleQueryKnowledge}
+        handleRefreshKnowledge={handleRefreshKnowledge}
+        handleResumeIngestJob={handleResumeIngestJob}
+        knowledgeBulkDeleting={knowledgeBulkDeleting}
+        knowledgeCategory={knowledgeCategory}
+        knowledgeCategoryLabel={knowledgeCategoryLabel}
+        knowledgeCountText={knowledgeCountText}
+        knowledgeEmpty={knowledgeEmpty}
+        knowledgeLoading={knowledgeLoading}
+        knowledgeOpen={knowledgeOpen}
+        knowledgeProjectDraft={knowledgeProjectDraft}
+        knowledgeProjectLabel={knowledgeProjectLabel}
+        knowledgeProjectOptions={knowledgeProjectOptions}
+        knowledgeProjectTitle={knowledgeProjectTitle}
+        knowledgeQuery={knowledgeQuery}
+        knowledgeQueryLoading={knowledgeQueryLoading}
+        knowledgeQueryResults={knowledgeQueryResults}
+        knowledgeSearch={knowledgeSearch}
+        knowledgeStats={knowledgeStats}
+        renderKnowledgeTag={renderKnowledgeTag}
+        renderMetaTags={renderMetaTags}
+        setKnowledgeCategory={setKnowledgeCategory}
+        setKnowledgeDetailEntry={setKnowledgeDetailEntry}
+        setKnowledgeProjectDraft={setKnowledgeProjectDraft}
+        setKnowledgeQuery={setKnowledgeQuery}
+        setKnowledgeSearch={setKnowledgeSearch}
+      />
 
       <Modal
         title={
