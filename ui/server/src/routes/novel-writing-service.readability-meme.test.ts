@@ -1268,7 +1268,7 @@ describe('readability and restrained meme workflow', () => {
   })
 
   test('story state sync persists a chapter_benchmark_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: chapterBenchmarkSync, reviewType: 'chapter_benchmark_sync'")
     expect(source).toContain('buildChapterBenchmarkSyncReport(project, chapter, contextPackage, chapterText)')
@@ -1760,7 +1760,7 @@ describe('readability and restrained meme workflow', () => {
   })
 
   test('story state sync persists a chapter_blueprint_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: chapterBlueprintSync, reviewType: 'chapter_blueprint_sync'")
     expect(source).toContain('buildChapterBlueprintSyncReport(project, chapter, contextPackage, chapterText)')
@@ -2048,7 +2048,7 @@ describe('readability and restrained meme workflow', () => {
   })
 
   test('story state sync persists a benchmark_recall_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: benchmarkRecallSync, reviewType: 'benchmark_recall_sync'")
     expect(source).toContain('buildBenchmarkRecallSyncReport(project, chapter, contextPackage, chapterText)')
@@ -2153,7 +2153,7 @@ describe('readability and restrained meme workflow', () => {
   })
 
   test('story state sync persists a style_boundary_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: styleBoundarySync, reviewType: 'style_boundary_sync'")
     expect(source).toContain('buildStyleBoundarySyncReport(project, chapter, contextPackage, chapterText)')
@@ -2337,7 +2337,7 @@ describe('readability and restrained meme workflow', () => {
   })
 
   test('story state sync persists a style_sample_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'style_sample_sync'")
     expect(source).toContain('buildStyleSampleSyncReport(project, chapter, contextPackage, chapterText)')
