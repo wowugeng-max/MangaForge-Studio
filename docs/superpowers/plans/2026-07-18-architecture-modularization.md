@@ -869,3 +869,5 @@ cd ui/server && bun test src/novel/mutation-contract.test.ts src/novel/sqlite-pe
 - 2026-07-19 goal-continue XXXIV: provider-runtime endpoint leaf (route/poll ~251) under support (~1152) + monofile execute (~509); no circular re-export (entry imports support+endpoint). NWS view TDZ fix (writingRecommendation/cockpitPrimaryActionOverride before workspaceViewDeps) + cockpit primary override leaf. provider-runtime 62 + architecture contracts green. Remaining: support further body/stream split, NWS deps bag, craft/audience monofiles, Task11 write-path smoke/memory.
 
 - 2026-07-19 goal-continue XXXV: provider-runtime stream leaf (~317: read/parse payload) under support (~854) + endpoint (~251) + monofile (~510). Acyclic entry imports. provider-runtime 62 green.
+
+- 2026-07-19 goal-continue XXXVI: NWS workspaceViewDeps spreads core/action handler bags (~1252 composition root); structured-review-fields barrel (~71) + required-fields leaf (~770) with export-const marker for package-join contracts. Focused architecture+provider-runtime sample+chapter-context contracts green.
