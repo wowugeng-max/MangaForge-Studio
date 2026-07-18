@@ -436,7 +436,7 @@ describe('chapter context word-target a', () => {
   })
 
   test('uses run-level quality threshold for unattended chapter group quality gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-full-production-store.ts'), 'utf8')].join('\n')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const preStoreStart = source.indexOf('const preStoreQualityDecision =', groupStart)
     const finalStart = source.indexOf('const finalQualityDecision =', groupStart)
@@ -452,7 +452,7 @@ describe('chapter context word-target a', () => {
   })
 
   test('reports scene-card progress as summaries instead of full card payloads', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-full-production-store.ts'), 'utf8')].join('\n')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const sceneTitlesStart = source.indexOf('scene_card_titles', groupStart)
     const sceneSuccessStart = source.lastIndexOf("await onStage('scene_cards'", sceneTitlesStart)
@@ -466,7 +466,7 @@ describe('chapter context word-target a', () => {
   })
 
   test('fails visibly when the authoritative prose quality review request fails', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-full-production-store.ts'), 'utf8')].join('\n')
     const qualityStart = source.indexOf('qualityLoop = await runProseQualityLoop')
     const reviewCallStart = source.indexOf("const result = await executeAgent('review-agent'", qualityStart)
     const reviseCallbackStart = source.indexOf('revise: async ({ prompt, round }) =>', reviewCallStart)
@@ -511,7 +511,7 @@ describe('chapter context word-target a', () => {
   })
 
   test('surfaces authoritative prose revision failures instead of storing the candidate', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-full-production-store.ts'), 'utf8')].join('\n')
     const qualityStart = source.indexOf('qualityLoop = await runProseQualityLoop')
     const reviseStart = source.indexOf('revise: async ({ prompt, round }) =>', qualityStart)
     const qualityEnd = source.indexOf('finalText = qualityLoop.final_text', reviseStart)
@@ -570,7 +570,7 @@ describe('chapter context word-target a', () => {
   })
 
   test('passes compact previous chapter handoffs into prose draft generation', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-full-production-store.ts'), 'utf8')].join('\n')
     const utilsSource = readFileSync(join(import.meta.dir, 'novel-route-utils.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup = async')
     const prevChaptersStart = source.indexOf('const prevChapters = compactPreviousChaptersForProse', groupStart)
@@ -595,7 +595,7 @@ describe('chapter context word-target a', () => {
   })
 
   test('checks abort signal between expensive chapter prose pipeline stages', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-full-production-store.ts'), 'utf8')].join('\n')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const serviceReturn = source.indexOf('\n  return {\n    generateChapterForGroup,', groupStart)
     const groupBlock = source.slice(groupStart, serviceReturn)
@@ -622,7 +622,7 @@ describe('chapter context word-target a', () => {
   })
 
   test('defers non-blocking readability review without weakening core oh-story gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-full-production-store.ts'), 'utf8')].join('\n')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const selfReviewStart = source.indexOf('let qualityLoop: Awaited<ReturnType<typeof runProseQualityLoop>>', groupStart)
     const readabilityStart = source.indexOf('if (shouldRunSynchronousReadabilityReview(options, project))', selfReviewStart)

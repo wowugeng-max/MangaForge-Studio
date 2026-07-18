@@ -35,7 +35,8 @@ Recent extracts (continued):
 - 2026-07-19 night++: delta-sync storyline leaf (~1190 monofile); generate-chapter draft-sync (~1989); knowledge-base package (~590); NovelStudio panels (~1560); workspaceUiShell split. Remaining: NWS/WorkspaceCenter/StoryPlanning/ACD/builders-annotations further, Task 11 smoke/memory.
 
 
-- 2026-07-19 night+: generate-chapter draft-sync leaf (~1989 monofile); knowledge-base package complete (~590); NovelStudio panels ~1560; workspaceUiShell a/b; multiple monotest halves; soft baselines lowered. Still open: NWS residual composition, WorkspaceCenter/StoryPlanning/ACD/builders-annotations/delta-sync further split, Task 11 full smoke/memory.
+- 2026-07-19 night+: generate-chapter draft-sync leaf (~1989 monofile); knowledge-base package complete (~590); NovelStudio panels ~1560; workspaceUiShell a/b; multiple monotest halves; soft baselines lowered. - 2026-07-19 goal-continue: generate-chapter full-production-store + prestore-receipt-reviews leaves (~1766 monofile); soft baseline 1850.
+Still open: NWS residual composition, WorkspaceCenter/StoryPlanning/ACD/builders-annotations/delta-sync further split, Task 11 full smoke/memory.
 
 
 - 2026-07-19 continue: generate-chapter post-commit leaf; knowledge-base types/pure/source-cache/analyze package leaves (~1.2k monofile); NovelStudio knowledge-ui-shared; monotest splits (TaskCenter, word-target pipeline, readability review, scene-cards regression); soft baselines tightened. Task 11 still open for full smoke/memory and remaining monofiles (generate-chapter ~2.1k, NovelStudio ~2.3k, NWS ~2.0k, WorkspaceCenter/StoryPlanning/ACD/builders-annotations/delta-sync).
