@@ -1,11 +1,9 @@
 import React from 'react'
-import { Button, Input, InputNumber, Modal, Popover, Progress, Slider, Space, Tag, Tooltip, Typography } from 'antd'
+import { Button, Input, Modal, Popover, Progress, Slider, Space, Tag, Tooltip, Typography } from 'antd'
 import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   DownOutlined,
-  EditOutlined,
-  FileTextOutlined,
   FontSizeOutlined,
   LineHeightOutlined,
   MoreOutlined,
@@ -33,6 +31,11 @@ import { WorkspaceCenterWritingSupport } from './workspace-center-writing-suppor
 import { WorkspaceCenterEmptyProject } from './workspace-center-empty-project'
 import { WorkspaceCenterNoChapter } from './workspace-center-no-chapter'
 import {
+  WorkspaceCenterSecondaryActionMenu,
+  WorkspaceCenterWordTargetControl,
+  type ChapterWordTargetMode,
+} from './workspace-center-editor-controls'
+import {
   DEFAULT_EDITOR_DISPLAY_PREFS,
   DeslopGateDiagnosticsPanel,
   EditorDisplayControls,
@@ -48,8 +51,6 @@ import {
 import './WorkspaceCenter.css'
 
 const { Title, Text, Paragraph } = Typography
-
-type ChapterWordTargetMode = 'standard' | 'long' | 'custom'
 
 export function WorkspaceCenter({
   isEmptyProject,
@@ -283,52 +284,13 @@ export function WorkspaceCenter({
     key ? recommendedClass(key) : '',
     extra,
   ].filter(Boolean).join(' ')
-  const selectWordPreset = (mode: Exclude<ChapterWordTargetMode, 'custom'>) => {
-    onGenerationWordTargetModeChange?.(mode)
-    onGenerationTargetWordCountChange?.(mode === 'long' ? 10000 : 3000)
-  }
   const renderWordTargetControl = () => (
-    <div className="novel-word-target-control" aria-label="章节字数目标">
-      <Tooltip title="标准章节，适合日常连载更新">
-        <Button
-          size="small"
-          className="novel-word-preset"
-          type={generationWordTargetMode === 'standard' ? 'primary' : 'default'}
-          onClick={() => selectWordPreset('standard')}
-        >
-          标准章
-        </Button>
-      </Tooltip>
-      <Tooltip title="长章，适合高潮、战斗或阶段收束">
-        <Button
-          size="small"
-          className="novel-word-preset"
-          type={generationWordTargetMode === 'long' ? 'primary' : 'default'}
-          onClick={() => selectWordPreset('long')}
-        >
-          长章
-        </Button>
-      </Tooltip>
-      <Tooltip title="手动输入本次生成的目标字数">
-        <InputNumber
-          size="small"
-          min={1000}
-          max={12000}
-          step={500}
-          value={generationTargetWordCount}
-          controls={false}
-          className={generationWordTargetMode === 'custom' ? 'is-custom' : undefined}
-          formatter={(value) => `${value || 0}`}
-          parser={(value) => Number(String(value || '').replace(/[^\d]/g, ''))}
-          onChange={(value) => {
-            const next = clampNumber(value, 1000, 12000, 3000)
-            onGenerationTargetWordCountChange?.(next)
-            onGenerationWordTargetModeChange?.('custom')
-          }}
-        />
-      </Tooltip>
-      <span className="novel-word-target-unit">字</span>
-    </div>
+    <WorkspaceCenterWordTargetControl
+      generationWordTargetMode={generationWordTargetMode}
+      generationTargetWordCount={generationTargetWordCount}
+      onGenerationWordTargetModeChange={onGenerationWordTargetModeChange}
+      onGenerationTargetWordCountChange={onGenerationTargetWordCountChange}
+    />
   )
   const recommendedBadge = (phase: typeof recommendedAction.phase) => (
     phase === recommendedAction.phase ? <span className="novel-editor-recommended-badge">推荐下一步</span> : null
@@ -441,25 +403,18 @@ export function WorkspaceCenter({
   }, [isImmersiveShell])
 
   const secondaryActionMenu = (
-    <div className="novel-editor-action-popover novel-editor-secondary-actions">
-      <div className="novel-editor-action-group novel-editor-action-group-prep">
-        <div className="novel-editor-action-group-heading">
-          <Text className="novel-editor-action-group-label">写前准备</Text>
-          {recommendedBadge('prep')}
-        </div>
-        <Button size="small" className={commandClass('diagnostics')} loading={diagnosticsLoading} onClick={onOpenGenerationDiagnostics}>诊断</Button>
-        <Button size="small" className={commandClass('scene_cards')} icon={<FileTextOutlined />} loading={generatingSceneCards} onClick={onGenerateSceneCards}>场景卡</Button>
-        <Button size="small" className={commandClass(undefined, 'novel-editor-muted-command')} onClick={onEditActiveChapter} icon={<EditOutlined />}>元数据</Button>
-      </div>
-      <div className="novel-editor-action-group novel-editor-action-group-review">
-        <div className="novel-editor-action-group-heading">
-          <Text className="novel-editor-action-group-label">写后复检</Text>
-          {recommendedBadge('review')}
-        </div>
-        <Button size="small" className={commandClass('quality_card')} onClick={onOpenQualityCard}>交稿质检</Button>
-        <Button size="small" className={commandClass(undefined, 'novel-editor-muted-command')} loading={editorReportLoading} onClick={onCreateEditorReport}>编辑报告</Button>
-      </div>
-    </div>
+    <WorkspaceCenterSecondaryActionMenu
+      commandClass={commandClass}
+      recommendedBadge={recommendedBadge}
+      diagnosticsLoading={diagnosticsLoading}
+      generatingSceneCards={generatingSceneCards}
+      editorReportLoading={editorReportLoading}
+      onOpenGenerationDiagnostics={onOpenGenerationDiagnostics}
+      onGenerateSceneCards={onGenerateSceneCards}
+      onEditActiveChapter={onEditActiveChapter}
+      onOpenQualityCard={onOpenQualityCard}
+      onCreateEditorReport={onCreateEditorReport}
+    />
   )
 
   const writingSupportBody = (
