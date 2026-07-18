@@ -23,11 +23,13 @@ describe('NovelCreateWizard deep draft flow', () => {
   test('creates a novel project after deep draft finalization succeeds', async () => {
     const monofile = readFileSync(join(import.meta.dir, 'NovelCreateWizard.tsx'), 'utf8')
     const controller = readFileSync(join(import.meta.dir, 'novel-entry/create/useCreateWizardController.ts'), 'utf8')
-    const source = [monofile, controller, packageJoin('novel-entry')].join('\n')
-    const finalizeStart = controller.indexOf('const finalizeProjectSeed = async')
-    const finalizeEnd = controller.indexOf('const selectPrimaryGenre', finalizeStart)
-    const finalizeBlock = controller.slice(finalizeStart, finalizeEnd)
+    const seedPipeline = readFileSync(join(import.meta.dir, 'novel-entry/create/useCreateWizardSeedPipeline.ts'), 'utf8')
+    const source = [monofile, controller, seedPipeline, packageJoin('novel-entry')].join('\n')
+    const finalizeStart = seedPipeline.indexOf('const finalizeProjectSeed = async')
+    const finalizeEnd = seedPipeline.indexOf('return {', finalizeStart)
+    const finalizeBlock = seedPipeline.slice(finalizeStart, finalizeEnd)
 
+    expect(controller).toContain('createSeedPipelineActions')
     expect(finalizeBlock).toContain('createProjectFromFinalizedSeed')
     expect(finalizeBlock).toContain('create_project: true')
     expect(finalizeBlock).toContain('author_confirmed')
@@ -38,7 +40,6 @@ describe('NovelCreateWizard deep draft flow', () => {
     expect(source).toContain('定稿并创建项目')
     expect(source).toContain('我已确认，创建项目')
     expect(source).toContain('finalizeProjectSeed(true)')
-    // Package-join covers create leaves; controller retains finalize path.
     expect(source).toContain('normalizeProjectSeedForUi')
     expect(monofile).toContain('useCreateWizardController')
   })
