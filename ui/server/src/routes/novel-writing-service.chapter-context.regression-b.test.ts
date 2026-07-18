@@ -1363,7 +1363,7 @@ describe('chapter context regression b', () => {
   })
 
   test('reports review stage status from quality gate decisions', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-editor-meme-polish.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore.ts'), 'utf8')].join('\n')
     const reviewStart = source.indexOf("await onStage('review', { status: 'running' })")
     const qualityGateStart = source.indexOf('let qualityGateReview = buildQualityGateReviewWithDeterministicCleanup')
     const reviewBlock = source.slice(reviewStart, qualityGateStart)

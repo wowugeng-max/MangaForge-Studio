@@ -574,13 +574,13 @@ describe('novel writing service prose quality wiring b', () => {
     })))
   })
   test('rechecks revised prose before advisory admission classification', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
-    const generateSource = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-mode-store.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-full-production-store.ts'), 'utf8')].join('\n')
+    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-editor-meme-polish.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-mode-store.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-full-production-store.ts'), 'utf8')].join('\n')
+    const generateSource = source
     const qualityLoopStart = source.indexOf('let qualityLoop: Awaited<ReturnType<typeof runProseQualityLoop>>')
     const gateStart = generateSource.indexOf('const preStoreQualityDecision =', qualityLoopStart)
     const reviewCallbackStart = source.indexOf('review: async ({ prompt, round, attempt }) => {', qualityLoopStart)
     const reviseCallbackStart = source.indexOf('revise: async ({ prompt, round }) => {', reviewCallbackStart)
-    const qualityLoopEnd = source.indexOf('\n    } catch (error: any) {', reviseCallbackStart)
+    const qualityLoopEnd = source.indexOf('} catch (error: any) {', reviseCallbackStart)
     const beforeGate = source.slice(qualityLoopStart, gateStart)
     const reviewBlock = source.slice(reviewCallbackStart, reviseCallbackStart)
     const reviseBlock = source.slice(reviseCallbackStart, qualityLoopEnd)
@@ -772,7 +772,10 @@ describe('novel writing service prose quality wiring b', () => {
     expect(result.quality_warnings).toContainEqual(expect.objectContaining({ code: 'reference_review_unavailable' }))
   })
   test('records caught editor, meme, and readability failures as admission warnings', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = [
+      readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-editor-meme-polish.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore.ts'), 'utf8'),
+    ].join('\n')
     const editorCatch = source.slice(source.indexOf('} catch (editorError)'), source.indexOf('const postEditorWordTargetCheck'))
     const memeCatch = source.slice(source.indexOf('} catch (memeError)'), source.indexOf('const postMemeWordTargetCheck'))
     const readabilityStart = source.indexOf('} catch (readabilityError)')
@@ -1039,7 +1042,7 @@ describe('novel writing service prose quality wiring b', () => {
   })
   test('attempts accepted prose memory after chapter storage without depending on a returned record', () => {
     const source = [
-      readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-editor-meme-polish.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore.ts'), 'utf8'),
       readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-mode-store.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-full-production-store.ts'), 'utf8'),
       readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-post-commit.ts'), 'utf8'),
     ].join('\n')
