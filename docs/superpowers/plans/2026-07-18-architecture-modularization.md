@@ -13,6 +13,14 @@
 **Branch:** `codex/architecture-modularization`
 
 
+### Residual inventory update (2026-07-19 goal-continue LX)
+- Extract `paragraph-prose-context-prepare-foundation` (~453) from prepare monofile (~662).
+- Prior LIX: continuity-guard, deferred-ops modals, batch-guardrail core phase split.
+- Task 11 focused: architecture + chapter-context.core-b-1 + continuity/director batches green.
+- Still open: ComfyUI, NWS base model thin, quality-prestore, SettingWorkshop/WorkspaceCenter soft edges, full UI write-path smoke.
+
+
+
 ### Residual inventory update (2026-07-19 goal-continue LIX)
 - Cycle-free package-split `chapter-continuity-guard` into basics (~316) + directives (~521) + barrel.
 - Split deferred-ops surfaces into toolbox/creative/bible modal leaves + thin composer.

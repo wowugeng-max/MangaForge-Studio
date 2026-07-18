@@ -213,89 +213,37 @@ import {
   prepareBatchMemoryFields,
 } from './paragraph-prose-context-prepare-batch-memory'
 
-export function prepareParagraphProseContext(project: any, contextPackage: any, migrationPlan: any = null, chapterDraft: any = null) {
-  if (contextPackage?.chapterTarget) {
-    const mergedChapterTarget = mergedContextChapterTargetPreferRuntime(contextPackage)
-    contextPackage = {
-      ...contextPackage,
-      chapter_target: mergedChapterTarget,
-      chapterTarget: mergedChapterTarget,
-    }
-  }
-  let chapterTarget = contextPackage?.chapter_target || {}
-  const preDraftBrief = contextPackage?.pre_draft_brief || contextPackage?.preDraftBrief || {}
-  const chapterSceneCards = Array.isArray(chapterTarget.scene_cards) && chapterTarget.scene_cards.length
-    ? normalizeSceneCardsPayload({ scene_cards: chapterTarget.scene_cards }, contextPackage)
-    : Array.isArray(chapterTarget.sceneCards)
-      ? normalizeSceneCardsPayload({ sceneCards: chapterTarget.sceneCards }, contextPackage)
-      : []
-  if (chapterSceneCards.length) {
-    chapterTarget = {
-      ...chapterTarget,
-      scene_cards: chapterSceneCards,
-      sceneCards: chapterSceneCards,
-    }
-    contextPackage = {
-      ...contextPackage,
-      chapter_target: chapterTarget,
-      chapterTarget: contextPackage?.chapterTarget
-        ? {
-            ...contextPackage.chapterTarget,
-            scene_cards: chapterSceneCards,
-            sceneCards: chapterSceneCards,
-          }
-        : contextPackage?.chapterTarget,
-    }
-  }
-  const preDraftSceneBriefs = asArray(preDraftBrief.scene_briefs || preDraftBrief.sceneBriefs)
-  const sceneBriefs = chapterSceneCards.length
-    ? chapterSceneCards.map(sceneBriefFromCard)
-    : preDraftSceneBriefs.map(sceneBriefFromCard)
-  const chapterPositioningBrief = normalizeChapterPositioningBrief(contextPackage, sceneBriefs)
-  chapterTarget = {
-    ...chapterTarget,
-    chapter_positioning_brief: chapterPositioningBrief,
+import {
+  prepareParagraphProseContextFoundation,
+} from './paragraph-prose-context-prepare-foundation'
+
+export function prepareParagraphProseContext(project: any, inputContextPackage: any, migrationPlan: any = null, chapterDraft: any = null) {
+  const foundation = prepareParagraphProseContextFoundation(project, inputContextPackage, migrationPlan, chapterDraft)
+  let {
+    contextPackage,
+    chapterTarget,
+    preDraftBrief,
+    chapterSceneCards,
+    preDraftSceneBriefs,
+    sceneBriefs,
     chapterPositioningBrief,
-  }
-  contextPackage = {
-    ...contextPackage,
-    chapter_target: chapterTarget,
-    chapterTarget: contextPackage?.chapterTarget
-      ? {
-          ...contextPackage.chapterTarget,
-          chapter_positioning_brief: chapterPositioningBrief,
-          chapterPositioningBrief,
-        }
-      : {
-          ...chapterTarget,
-        },
-  }
-  const readerRetentionBrief = chapterTarget.reader_retention_brief
-    || chapterTarget.readerRetentionBrief
-    || preDraftBrief.reader_retention_brief
-    || preDraftBrief.readerRetentionBrief
-    || buildReaderRetentionBrief(project, contextPackage, sceneBriefs)
-  const longformCompass = normalizeLongformCompass(
-    longformCompassFromContext(contextPackage, preDraftBrief, chapterDraft),
-  )
-  const longformBattleContext = normalizeLongformBattleContext(
-    longformBattleContextFromContext(contextPackage, preDraftBrief, chapterDraft),
-  )
-  const chapterLaunchGate = chapterLaunchGateFromContext(contextPackage, preDraftBrief, chapterDraft)
-  const governanceRecheckMemory = normalizeGovernanceRecheckMemoryContext(
-    contextPackage?.chapter_target?.governance_recheck_memory
-    || contextPackage?.chapter_target?.governanceRecheckMemory
-    || preDraftBrief.governance_recheck_memory
-    || preDraftBrief.governanceRecheckMemory
-    || contextPackage?.governance_recheck_memory
-    || contextPackage?.governanceRecheckMemory
-  )
-  const coreContractRadar = buildCoreContractRadar(project, contextPackage, sceneBriefs, longformCompass, longformBattleContext)
-  const nextBatchBrief = normalizeNextBatchBrief(
-    nextBatchBriefFromContext(contextPackage, preDraftBrief, chapterDraft),
-    Number(chapterDraft?.chapter_no || contextPackage?.chapter_target?.chapter_no || 0),
-  )
-  const {
+    readerRetentionBrief,
+    longformCompass,
+    longformBattleContext,
+    chapterLaunchGate,
+    governanceRecheckMemory,
+    coreContractRadar,
+    nextBatchBrief,
+    styleSampleStrategy,
+    styleFingerprintHandoff,
+    chapterBenchmarkStrategy,
+    first30RetentionBrief,
+    readerDropRiskBrief,
+    goldenThreeBrief,
+    storyPressureBrief,
+    storyDriveBrief,
+    serialRhythmBrief,
+    pageTurnHookBrief,
     expansionStructureDecision,
     defaultFiveChapterLaneRedesign,
     expansionStructureVerification,
@@ -317,91 +265,7 @@ export function prepareParagraphProseContext(project: any, contextPackage: any, 
     defaultFiveChapterLaneTemplateProductionRelapseValidationNos,
     defaultFiveChapterLaneTemplateProductionFailureReasons,
     defaultFiveChapterLaneTemplateProductionFailedRequirements,
-  } = prepareDefaultFiveChapterLaneFields(nextBatchBrief)
-  const {
-    batchPreflight,
-    batchDeliveryRiskCarryOver,
-    batchCreationContractCarryOver,
-    batchChapterHandoffContract,
-    longformMemoryAnchor,
-    longformMemoryCapsule,
-    layeredMemoryContext,
-    progressSummary,
-    dailyContextSnapshot,
-    foreshadowingConsistencyRadar,
-    millionWordRunway,
-  } = prepareBatchMemoryFields({
-    contextPackage,
-    preDraftBrief,
-    chapterDraft,
-    project,
-  })
-  const styleSampleStrategy = contextPackage?.chapter_target?.style_sample_strategy || buildStyleSampleStrategy(project, contextPackage)
-  const styleFingerprintHandoff = buildStyleFingerprintPromptHandoff(contextPackage, project, styleSampleStrategy)
-  const chapterBenchmarkStrategy = contextPackage?.chapter_target?.chapter_benchmark_strategy || buildChapterBenchmarkStrategy(project, contextPackage)
-  const first30RetentionBrief = first30RetentionBriefFromContext(contextPackage, preDraftBrief)
-  const readerDropRiskBrief = normalizeReaderDropRiskBrief(
-    contextPackage?.chapter_target?.reader_drop_risk_brief
-    || contextPackage?.chapter_target?.readerDropRiskBrief
-    || preDraftBrief.reader_drop_risk_brief
-    || preDraftBrief.readerDropRiskBrief
-    || contextPackage?.reader_drop_risk_brief
-    || contextPackage?.readerDropRiskBrief
-    || contextPackage?.reader_trial_context
-    || contextPackage?.readerTrialContext,
-    readerRetentionBrief,
-    first30RetentionBrief,
-  )
-  const goldenThreeBrief = normalizeGoldenThreeBrief(
-    contextPackage?.chapter_target?.golden_three_brief
-    || contextPackage?.chapter_target?.goldenThreeBrief
-    || preDraftBrief.golden_three_brief
-    || preDraftBrief.goldenThreeBrief
-    || contextPackage?.golden_three_brief
-    || contextPackage?.goldenThreeBrief,
-    Number(chapterDraft?.chapter_no || contextPackage?.chapter_target?.chapter_no || 0),
-  )
-  const storyPressureBrief = normalizeStoryPressureBrief(
-    contextPackage?.chapter_target?.story_pressure_brief
-    || contextPackage?.chapter_target?.storyPressureBrief
-    || preDraftBrief.story_pressure_brief
-    || preDraftBrief.storyPressureBrief
-    || contextPackage?.story_pressure_brief
-    || contextPackage?.storyPressureBrief
-    || contextPackage?.story_pressure_ladder
-    || contextPackage?.storyPressureLadder,
-  )
-  const storyDriveBrief = normalizeStoryDriveBrief(
-    contextPackage?.chapter_target?.story_drive_brief
-    || contextPackage?.chapter_target?.storyDriveBrief
-    || preDraftBrief.story_drive_brief
-    || preDraftBrief.storyDriveBrief
-    || contextPackage,
-    chapterSceneCards.length ? chapterSceneCards : sceneBriefs,
-  )
-  const serialRhythmBrief = normalizeSerialRhythmBrief(
-    contextPackage?.chapter_target?.serial_rhythm_brief
-    || contextPackage?.chapter_target?.serialRhythmBrief
-    || preDraftBrief.serial_rhythm_brief
-    || preDraftBrief.serialRhythmBrief
-    || contextPackage?.serial_rhythm_brief
-    || contextPackage?.serialRhythmBrief,
-    sceneBriefs,
-    readerRetentionBrief,
-    contextPackage?.chapter_target?.word_target,
-  )
-  const pageTurnHookBrief = normalizePageTurnHookBrief(
-    contextPackage?.chapter_target?.page_turn_hook_brief
-    || contextPackage?.chapter_target?.pageTurnHookBrief
-    || preDraftBrief.page_turn_hook_brief
-    || preDraftBrief.pageTurnHookBrief
-    || contextPackage?.page_turn_hook_brief
-    || contextPackage?.pageTurnHookBrief,
-    contextPackage?.chapter_target || {},
-    sceneBriefs,
-    readerRetentionBrief,
-    storyDriveBrief,
-  )
+  } = foundation
   const chapterBlueprint = contextPackage?.chapter_target?.chapter_blueprint
     || contextPackage?.chapter_target?.chapterBlueprint
     || contextPackage?.chapter_blueprint
