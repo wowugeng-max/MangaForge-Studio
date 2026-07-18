@@ -13,22 +13,24 @@
 **Branch:** `codex/architecture-modularization`
 
 
-## Progress checkpoint (2026-07-18, architecture branch)
+## Progress checkpoint (2026-07-18 late, architecture branch)
 
 | Task | Status | Notes |
 |---|---|---|
 | 0 size contracts | done | hardened hard caps for completed monofiles |
 | 1 writing-service scaffold | done | package + route shim |
 | 2 quality/review-merge slice | done | under `novel-writing-service/quality/*` |
-| 3 post-delivery sync reports | done | quality-sync-reports core/benchmark/extended barrels |
+| 3 post-delivery sync reports | done | quality-sync-reports + carry-over prose-quality extended leaf |
 | 4 context/prompt glue | done | service modules extracted |
 | 5 monofile barrel-only | done | `monolith.ts` ~91 lines + public surface re-exports |
 | 6 monotest split | done | `novel-writing-service.test.ts` shim-only |
-| 7 editor/core routes packages | largely done | editor, core, commercial-ops, generation, planning package-split (builders/register); deeper domain split open |
+| 7 editor/core routes packages | largely done | editor, core, commercial-ops, generation, planning package-split |
 | 8 auto-creation model package | in progress | risk multi-leaf; director helpers modularized |
-| 9 cockpit + repair prompt | in progress | prompt split to context(~597)+lines(~2.3k); support multi-leaf; cockpit-acceptance split |
-| 10 shell UI split | in progress | TaskCenter multi-leaf; NWS area-view/commercial/serial/fields; main ~7.3k |
+| 9 cockpit + repair prompt | in progress | prompt multi-leaf; support multi-leaf; specialty leaf |
+| 10 shell UI split | in progress | TaskCenter previews leaf; planning signals leaf; NWS topbar; main ~7.2k |
 | 11 final hardening | open | |
+
+Recent extracts: `drawer-previews`, `planning-workspace-builder-signals`, `delivery-risk-carry-over-prose-quality-extended`, `workspace-topbar`.
 
 
 ---

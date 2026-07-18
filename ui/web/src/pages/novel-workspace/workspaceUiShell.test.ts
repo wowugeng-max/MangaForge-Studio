@@ -118,6 +118,7 @@ function planningWorkspaceSource() {
     sourceCached('planning/model/planning-workspace-builder.ts', localSourceCache),
     sourceCached('planning/model/planning-workspace-builder-desks.ts', localSourceCache),
     sourceCached('planning/model/planning-workspace-builder-boards.ts', localSourceCache),
+    sourceCached('planning/model/planning-workspace-builder-signals.ts', localSourceCache),
   ].join('\n')
   return planningWorkspaceSourceCache
 }
@@ -133,6 +134,7 @@ function projectWorkspaceSource() {
     sourceCached('shell/workspace-commercial-result.tsx', localSourceCache),
     sourceCached('shell/workspace-serial-pipeline.tsx', localSourceCache),
     sourceCached('shell/workspace-area-view.tsx', localSourceCache),
+    sourceCached('shell/workspace-topbar.tsx', localSourceCache),
   ].join('\n')
   return projectWorkspaceSourceCache
 }
@@ -143,6 +145,7 @@ function taskCenterSource() {
     sourceCached('TaskCenterDrawer.tsx', localSourceCache),
     sourceCached('task-center/chapter-group.ts', localSourceCache),
     sourceCached('task-center/drawer-model.tsx', localSourceCache),
+    sourceCached('task-center/drawer-previews.tsx', localSourceCache),
     sourceCached('task-center/drawer-recovery-evidence.tsx', localSourceCache),
     sourceCached('task-center/drawer-safe-batch.ts', localSourceCache),
     sourceCached('task-center/drawer-snapshots.tsx', localSourceCache),
