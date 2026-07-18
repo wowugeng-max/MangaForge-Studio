@@ -203,6 +203,8 @@ export function storyPlanningWorkspaceSource() {
   if (storyPlanningWorkspaceSourceCache != null) return storyPlanningWorkspaceSourceCache
   storyPlanningWorkspaceSourceCache = [
     sourceCached('StoryPlanningWorkspace.tsx', localSourceCache),
+    sourceCached('planning/story-planning-board-panels.tsx', localSourceCache),
+    sourceCached('planning/story-planning-chrome.tsx', localSourceCache),
     sourceCached('planning/story-planning-chrome.tsx', localSourceCache),
   ].join('\n')
   return storyPlanningWorkspaceSourceCache
