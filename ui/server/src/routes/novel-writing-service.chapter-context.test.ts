@@ -1103,7 +1103,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('accepts camelCase commercial editor rewrite payloads', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-polish-methods.ts'), 'utf8')
     const editorStart = source.indexOf('const runCommercialEditorRewrite =')
     const editorEnd = source.indexOf('const runMemePolish =', editorStart)
     const editorBlock = source.slice(editorStart, editorEnd)
@@ -1121,7 +1121,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('accepts camelCase meme polish payloads without losing safety reports', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-polish-methods.ts'), 'utf8')
     const memeStart = source.indexOf('const runMemePolish =')
     const memeEnd = source.indexOf('const runReadabilityReview =', memeStart)
     const memeBlock = source.slice(memeStart, memeEnd)
