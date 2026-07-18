@@ -1,0 +1,15 @@
+export function inferEndingHookType(text: string) {
+  if (/宣布|公布|揭示|报出|出现|露出|有效|真名|名单|日期|改变全局/.test(text)) return '突然揭示'
+  if (/危机|裂缝|追来|逼近|危险|来不及|只剩/.test(text)) return '紧急危机'
+  if (/刚|正要|伸手|转身|开门|被.*扣住|打断/.test(text)) return '未完成动作'
+  if (/身份|已故|其实|档案|真身|马甲/.test(text)) return '身份反转'
+  if (/选择|签|两难|救|不救|二选一/.test(text)) return '两难抉择'
+  if (/钥匙|信|包裹|戒指|账本|物件|道具/.test(text)) return '神秘物品'
+  if (/倒计时|三个月|三天|零点|期限|还剩/.test(text)) return '倒计时'
+  if (/威胁|承诺|今晚|之前|我会|告诉所有人/.test(text)) return '承诺/威胁'
+  if (/消失|不见|空房间|手铐/.test(text)) return '离奇消失'
+  if (/像|独生女|妹妹|隐藏含义|话里有话/.test(text)) return '隐藏含义'
+  if (/花苞|钟|雨|影子|意象|反复出现/.test(text)) return '意象钩子'
+  if (/又说|再一次|呼应|同一句|回声/.test(text)) return '回声钩子'
+  return '留白钩子'
+}

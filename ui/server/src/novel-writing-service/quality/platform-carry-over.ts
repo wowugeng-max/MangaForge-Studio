@@ -124,3 +124,10 @@ export function platformCheckNeedsCarryOver(value: any) {
   return evidenceValues.some(isGenericDeliveryRiskEvidence)
 }
 
+
+
+export function preDraftReceiptCheckNeedsCarryOver(value: any) {
+  if (platformCheckNeedsCarryOver(value)) return true
+  if (value?.delivered === false) return true
+  return Boolean(compactBriefText(value?.remaining_risk || value?.remainingRisk))
+}
