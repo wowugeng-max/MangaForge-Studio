@@ -13,6 +13,11 @@
 **Branch:** `codex/architecture-modularization`
 
 
+### Residual inventory update (2026-07-19 goal-continue XLIX)
+- Extracted `paragraph-prose-context-prepare-batch-memory` (~150); prepare monofile ~798.
+- Still deferred: NWS model hook ~994, ComfyUI ~877, auto-creation helpers ~827. Task 11 full UI write-path click smoke still open.
+
+
 ### Residual inventory update (2026-07-19 goal-continue XLVIII)
 - Split novel-editor register into annotations/revision/quality leaves; monofile ~17 composition root; package-join safeguards tests green.
 - Still deferred: NWS model hook ~994, prepare ~888, ComfyUI ~877, auto-creation helpers ~827. Task 11 full UI write-path click smoke still open.

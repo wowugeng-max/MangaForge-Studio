@@ -30,7 +30,8 @@ const HARD_CAPS: Record<string, number> = {
 
 const SOFT_BASELINES: Record<string, number> = {
   'novel-writing-service/service/paragraph-prose-context.ts': 250,
-  'novel-writing-service/service/paragraph-prose-context-prepare.ts': 950,
+  'novel-writing-service/service/paragraph-prose-context-prepare.ts': 900,
+  'novel-writing-service/service/paragraph-prose-context-prepare-batch-memory.ts': 200,
   'novel-writing-service/service/paragraph-prose-context-prepare-default-five.ts': 200,
   'novel-writing-service/service/paragraph-prose-context-sections.ts': 850,
   'novel-writing-service/service/prose-self-review-methods.ts': 80,
