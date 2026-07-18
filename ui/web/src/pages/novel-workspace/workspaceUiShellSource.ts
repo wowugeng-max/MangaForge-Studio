@@ -152,6 +152,11 @@ export function planningWorkspaceSource() {
     sourceCached('planning/model/planning-workspace-builder-desks.ts', localSourceCache),
     sourceCached('planning/model/planning-workspace-builder-boards.ts', localSourceCache),
     sourceCached('planning/model/planning-workspace-builder-signals.ts', localSourceCache),
+    sourceCached('planning/model/planning-workspace-builder-signals-reader.ts', localSourceCache),
+    sourceCached('planning/model/planning-workspace-builder-signals-volume.ts', localSourceCache),
+    sourceCached('planning/model/planning-workspace-builder-signals-fatigue.ts', localSourceCache),
+    sourceCached('planning/model/planning-workspace-builder-signals-pressure.ts', localSourceCache),
+    sourceCached('planning/model/planning-workspace-builder-signals-story-unit.ts', localSourceCache),
     sourceCached('planning/model/planning-workspace-builder-radar.ts', localSourceCache),
   ].join('\n')
   return planningWorkspaceSourceCache
@@ -300,6 +305,9 @@ export function writingCockpitModelSource() {
   writingCockpitModelSourceCache = [
     sourceCached('writingCockpitModel.ts', localSourceCache),
     sourceCached('writing-cockpit/model/types.ts', localSourceCache),
+    sourceCached('writing-cockpit/model/types-core.ts', localSourceCache),
+    sourceCached('writing-cockpit/model/types-acceptance.ts', localSourceCache),
+    sourceCached('writing-cockpit/model/types-workflow.ts', localSourceCache),
     sourceCached('writing-cockpit/model/helpers.ts', localSourceCache),
     sourceCached('writing-cockpit/model/cockpit-basics.ts', localSourceCache),
     sourceCached('writing-cockpit/model/cockpit-basics-core.ts', localSourceCache),
