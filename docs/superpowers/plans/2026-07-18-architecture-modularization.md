@@ -25,9 +25,9 @@
 | 5 monofile barrel-only | done | `monolith.ts` ~91 lines + public surface re-exports |
 | 6 monotest split | done | `novel-writing-service.test.ts` shim-only |
 | 7 editor/core routes packages | largely done | editor, core, commercial-ops, generation, planning package-split (builders/register); deeper domain split open |
-| 8 auto-creation model package | in progress | helpers leaves: main~4.2k, recovery~1.3k, expansion-structure~3.8k, next-batch-brief |
-| 9 cockpit + repair prompt | in progress | repair-task: utils + support(~5.2k) + prompt(~2.7k) |
-| 10 shell UI split | in progress | TaskCenter chapter-group helpers extracted; drawer still large |
+| 8 auto-creation model package | in progress | helpers-main~203 barrel-head; risk-governance~4.1k; expansion-trends~3.7k; recovery~1.3k; next-batch-brief~1.4k |
+| 9 cockpit + repair prompt | in progress | repair-task: utils + quality-contract(~1.1k) + support(~4.1k) + prompt(~2.7k) |
+| 10 shell UI split | in progress | TaskCenter chapter-group helpers extracted; drawer still ~6.1k |
 | 11 final hardening | open | |
 
 

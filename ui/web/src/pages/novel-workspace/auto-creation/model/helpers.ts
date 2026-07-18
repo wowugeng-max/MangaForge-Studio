@@ -1,6 +1,7 @@
 /** Auto-creation director pure helpers barrel. */
 export * from './helpers-basics'
 export * from './helpers-main'
+export * from './helpers-risk-and-governance'
 export * from './helpers-batch-completion-dashboard'
 export * from './helpers-batch-guardrail'
 export * from './helpers-batch-risk-radar'
@@ -15,3 +16,4 @@ export * from './helpers-safe-batch-expansion-policy'
 export * from './helpers-next-batch-brief'
 export * from './helpers-safe-batch-recovery'
 export * from './helpers-safe-batch-expansion-structure'
+export * from './helpers-safe-batch-expansion-trends'

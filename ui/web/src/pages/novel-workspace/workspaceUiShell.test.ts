@@ -82,6 +82,7 @@ function directorModelSource() {
     sourceCached('auto-creation/model/helpers.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-basics.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-main.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-risk-and-governance.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-pipeline.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-command.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-batch-guardrail.ts', localSourceCache),
@@ -96,6 +97,7 @@ function directorModelSource() {
     sourceCached('auto-creation/model/helpers-next-batch-brief.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-safe-batch-recovery.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-safe-batch-expansion-structure.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-safe-batch-expansion-trends.ts', localSourceCache),
   ].join('\n')
   return directorModelSourceCache
 }
