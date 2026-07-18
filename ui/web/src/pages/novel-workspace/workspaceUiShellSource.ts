@@ -172,7 +172,7 @@ export function projectWorkspaceSource() {
     sourceCached('shell/workspace-preflight-handlers.tsx', localSourceCache),
     sourceCached('shell/workspace-repair-task-handlers.tsx', localSourceCache),
     sourceCached('shell/workspace-action-handlers.tsx', localSourceCache),
-    sourceCached('shell/workspace-chapter-prose-handlers.tsx', localSourceCache),
+    sourceCached('shell/workspace-chapter-prose-handlers.tsx', localSourceCache), sourceCached('shell/workspace-chapter-version-handlers.tsx', localSourceCache),
     sourceCached('shell/workspace-writing-bible-handlers.tsx', localSourceCache),
     sourceCached('shell/workspace-production-handlers.tsx', localSourceCache),
     sourceCached('shell/workspace-planning-handlers.tsx', localSourceCache),

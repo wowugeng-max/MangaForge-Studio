@@ -97,6 +97,7 @@ import {
 } from './shell/workspace-view-props'
 import { createWorkspaceActionHandlers } from './shell/workspace-action-handlers'
 import { createChapterProseHandlers } from './shell/workspace-chapter-prose-handlers'
+import { createChapterVersionHandlers, createProjectAssetDeleteHandlers, createSceneCardHandlers, createStorylineDecisionHandlers } from './shell/workspace-chapter-version-handlers'
 import { createWritingBibleHandlers } from './shell/workspace-writing-bible-handlers'
 import { createPlanningHandlers } from './shell/workspace-planning-handlers'
 import { createProductionHandlers } from './shell/workspace-production-handlers'
@@ -698,28 +699,19 @@ export default function NovelProjectWorkspace() {
     reloadProject: loadProjectModules,
   })
 
-  const mergeChapterVersion = async (version: any, choices: Array<{ index: number; source: 'current' | 'version' }>) => {
-    if (!activeChapter) return
-    if (!await flushPendingSave()) return
-    try {
-      const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/version-merge`, {
-        project_id: projectId,
-        version_id: version.id,
-        choices,
-      })
-      if (res.data?.chapter) setChapters(prev => prev.map(ch => ch.id === res.data.chapter.id ? res.data.chapter : ch))
-      await loadProjectModules()
-      setChapterVersionDetail(null)
-      message.success('合并稿已生成')
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '版本合并失败')
-    }
-  }
-
-  const acceptChapterVersion = async (version: any) => {
-    await rollbackChapterVersion(version.id)
-    setChapterVersionDetail(null)
-  }
+  const {
+    mergeChapterVersion,
+    acceptChapterVersion,
+  } = createChapterVersionHandlers({
+    activeChapter,
+    apiClient,
+    flushPendingSave,
+    loadProjectModules,
+    projectId,
+    rollbackChapterVersion,
+    setChapterVersionDetail,
+    setChapters,
+  })
 
   const { confirmReferenceReady } = useReferenceWorkflow({
     projectId,
@@ -747,40 +739,20 @@ export default function NovelProjectWorkspace() {
     setStepOutlineLoading,
   })
 
-  const generateSceneCardsForChapter = async (chapterId: number, allowIncomplete = false) => {
-    if (!selectedModelId) return message.warning('请先选择写作模型')
-    if (!await flushPendingSave()) return
-    setGeneratingSceneCards(true)
-    try {
-      const res = await apiClient.post(`/novel/chapters/${chapterId}/scene-cards`, {
-        project_id: projectId,
-        model_id: selectedModelId,
-        allow_incomplete: allowIncomplete,
-      })
-      if (res.data?.chapter) {
-        setChapters(prev => prev.map(c => c.id === res.data.chapter.id ? res.data.chapter : c))
-      }
-      await loadProjectModules()
-      message.success(`场景卡已生成：${Array.isArray(res.data?.scene_cards) ? res.data.scene_cards.length : 0} 个`)
-    } catch (error: any) {
-      const payload = error?.response?.data
-      if (payload?.error_code === 'SCENE_PREFLIGHT_BLOCKED') {
-        showGenerationBlockedModal(payload, () => { void generateSceneCardsForChapter(chapterId, true) }, {
-          targetChapterId: chapterId,
-          onRepairComplete: () => { void generateSceneCardsForChapter(chapterId, false) },
-        })
-      } else {
-        message.error(payload?.error || error?.message || '场景卡生成失败')
-      }
-    } finally {
-      setGeneratingSceneCards(false)
-    }
-  }
-
-  const generateSceneCardsForActiveChapter = async (allowIncomplete = false) => {
-    if (!activeChapter) return message.warning('请先选择章节')
-    await generateSceneCardsForChapter(Number(activeChapter.id), allowIncomplete)
-  }
+  const {
+    generateSceneCardsForChapter,
+    generateSceneCardsForActiveChapter,
+  } = createSceneCardHandlers({
+    apiClient,
+    flushPendingSave,
+    loadProjectModules,
+    projectId,
+    selectedModelId,
+    setChapters,
+    setGeneratingSceneCards,
+    showGenerationBlockedModal,
+    activeChapterId,
+  })
 
   const {
     buildPreDraftBriefForActiveChapter,
@@ -1157,26 +1129,17 @@ export default function NovelProjectWorkspace() {
     setTaskCenterOpen,
   })
 
-  const deleteProject = () => {
-    if (!selectedProject) return
-    Modal.confirm({
-      title: '删除项目',
-      content: '确定删除整个项目吗？此操作会清理所有目录、章节和版本记录。',
-      okText: '删除', okButtonProps: { danger: true },
-      onOk: async () => { await apiClient.delete(`/novel/projects/${selectedProject.id}`); navigate('/novel') },
-    })
-  }
-
-  const deleteChapter = async (cid: number) => {
-    if (!await flushPendingSave()) return
-    await apiClient.delete(`/novel/chapters/${cid}`)
-    await loadProjectModules()
-  }
-
-  const deleteOutline = async (oid: number) => {
-    await apiClient.delete(`/novel/outlines/${oid}`)
-    await loadProjectModules()
-  }
+  const {
+    deleteProject,
+    deleteChapter,
+    deleteOutline,
+  } = createProjectAssetDeleteHandlers({
+    apiClient,
+    flushPendingSave,
+    loadProjectModules,
+    navigate,
+    selectedProject,
+  })
 
   const {
     generationPreflightChecks,
@@ -1276,45 +1239,17 @@ export default function NovelProjectWorkspace() {
     { key: 'productionOps', label: '生产运营', icon: <RocketOutlined /> },
   ]
 
-  const recordStorylineDiffDecision = async (intent: any) => {
-    if (!intent?.decisionKey) return message.warning('缺少剧情线差异决策键')
-    try {
-      await apiClient.post(`/novel/projects/${projectId}/storyline-diff-decisions`, {
-        decision_key: intent.decisionKey,
-        decision: intent.recommendedDecision,
-        chapter_no: intent.chapterNo,
-        entity_id: intent.entityId,
-        entity_name: intent.entityName,
-        entity_type: intent.entityType,
-        risk_type: intent.riskType,
-        risk_label: intent.riskLabel,
-        summary: intent.summary,
-        evidence: intent.evidence,
-      })
-      await loadProjectModules()
-      message.success(`已记录剧情线决策：${intent.recommendedActionLabel || '已处理'}`)
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '剧情线决策记录失败')
-    }
-  }
-
-  const createStorylineDecisionTasks = async () => {
-    setAutoDirectorActionLoadingKey('create_storyline_decision_tasks')
-    try {
-      const res = await apiClient.post(`/novel/projects/${projectId}/storyline-diff-decisions/repair-queue`)
-      const tasks = res.data?.tasks || []
-      await loadProjectModules()
-      await loadProductionTasks()
-      setTaskCenterOpen(true)
-      const skipped = Number(res.data?.skipped_existing || 0)
-      const ignored = Number(res.data?.skipped_ignored || 0)
-      message.success(`已生成剧情线决策任务：${tasks.length} 项${skipped ? `，跳过已有 ${skipped} 项` : ''}${ignored ? `，忽略误判 ${ignored} 项` : ''}`)
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '生成剧情线决策任务失败')
-    } finally {
-      setAutoDirectorActionLoadingKey('')
-    }
-  }
+  const {
+    recordStorylineDiffDecision,
+    createStorylineDecisionTasks,
+  } = createStorylineDecisionHandlers({
+    apiClient,
+    loadProductionTasks,
+    loadProjectModules,
+    projectId,
+    setAutoDirectorActionLoadingKey,
+    setTaskCenterOpen,
+  })
 
   const {
     handlePlanningAction,
