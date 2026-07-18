@@ -35,6 +35,8 @@ const SOFT_BASELINES: Record<string, number> = {
   'routes/novel-writing-service.pre-draft-brief.core-a.test.ts': 2300,
   'routes/novel-writing-service.pre-draft-brief.pipeline-a.test.ts': 2400,
   'routes/novel-writing-service.pre-draft-brief.sync-receipts-a.test.ts': 2600,
+  'routes/novel-writing-service.pre-draft-brief.sync-core-a.test.ts': 1800,
+  'routes/novel-writing-service.pre-draft-brief.sync-audience-a.test.ts': 1700,
   'routes/novel-writing-service.scene-cards.test.ts': 50,
   'routes/novel-writing-service.scene-cards.a.test.ts': 1500,
   'routes/novel-writing-service.scene-cards.b.test.ts': 1700,
