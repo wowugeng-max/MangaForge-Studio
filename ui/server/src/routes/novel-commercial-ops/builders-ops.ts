@@ -23,6 +23,7 @@ import { readProviders } from '../../provider-store'
 import { executeNovelAgent } from '../../llm'
 import { asArray, compactText, parseJsonLikePayload, safeJsonStringify } from '../novel-route-utils'
 
+
 export function modelUsageRecommendation(model: any) {
   const name = `${model.display_name || ''} ${model.model_name || ''}`.toLowerCase()
   const caps = model.capabilities || {}

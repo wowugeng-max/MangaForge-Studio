@@ -23,6 +23,19 @@ import { readProviders } from '../../provider-store'
 import { executeNovelAgent } from '../../llm'
 import { asArray, compactText, parseJsonLikePayload, safeJsonStringify } from '../novel-route-utils'
 
+import {
+  wc,
+  topRepeatedPhrases,
+  chapterSnippet,
+  includesAny,
+  outlineText,
+  latestReportByKey,
+  segmentTrialScore,
+  personaRiskLevel,
+  parseChapterNoFromText,
+  latestReport,
+  firstText,
+} from './builders-shared'
 import { textHash } from './builders-core'
 
 export function buildFirst30RetentionDiagnosis(project: any, chapters: any[], outlines: any[], characters: any[], reviews: any[]) {
@@ -195,49 +208,8 @@ export function buildFirst30RetentionRepairTasks(report: any) {
     .slice(0, 80)
 }
 
-function latestReportByKey(reviews: any[], reviewType: string, payloadKey: string) {
-  const rows = asArray(reviews)
-    .filter(review => review?.review_type === reviewType)
-    .sort((a, b) => Date.parse(String(b.created_at || '')) - Date.parse(String(a.created_at || '')))
-  const payload = parseJsonLikePayload(rows[0]?.payload) || {}
-  return payload[payloadKey] || payload.report || payload.result?.[payloadKey] || payload.result?.report || payload.result || payload
-}
 
-function segmentTrialScore(chapters: any[], chapterNos: number[]) {
-  const selected = chapters.filter(chapter => chapterNos.includes(Number(chapter.chapter_no || 0)))
-  if (!selected.length) return { score: 0, chapter_count: 0, hook_rate: 0, payoff_average: 0, weak_chapters: [] as any[] }
-  const payoffWords = ['爽', '赢', '反杀', '突破', '奖励', '收获', '打脸', '震惊', '压迫', '危机', '秘密', '线索', '反转', '升级', '资格', '排名', '真相']
-  const rows = selected.map(chapter => {
-    const body = [chapter.title, chapter.chapter_goal, chapter.chapter_summary, chapter.ending_hook, chapter.chapter_text].filter(Boolean).join('\n')
-    const wordCount = wc(chapter.chapter_text || '')
-    const hasHook = wc(chapter.ending_hook || '') >= 8 || includesAny(body.slice(-360), ['却', '然而', '忽然', '没想到', '下一刻', '身后', '门外', '消息'])
-    const payoffHits = payoffWords.filter(word => body.includes(word)).length
-    const score = Math.max(0, Math.min(100, 42 + (hasHook ? 18 : 0) + Math.min(24, payoffHits * 3) + (wordCount >= 1800 ? 16 : wordCount >= 900 ? 8 : 0) - (!chapter.chapter_text ? 28 : 0)))
-    return {
-      chapter_no: chapter.chapter_no,
-      title: chapter.title,
-      score,
-      has_hook: hasHook,
-      payoff_hits: payoffHits,
-      word_count: wordCount,
-    }
-  })
-  const hookRate = Math.round(rows.filter(row => row.has_hook).length / rows.length * 100)
-  const payoffAverage = Number((rows.reduce((sum, row) => sum + row.payoff_hits, 0) / rows.length).toFixed(1))
-  return {
-    score: Math.round(rows.reduce((sum, row) => sum + row.score, 0) / rows.length),
-    chapter_count: rows.length,
-    hook_rate: hookRate,
-    payoff_average: payoffAverage,
-    weak_chapters: rows.filter(row => row.score < 72).slice(0, 6),
-  }
-}
 
-function personaRiskLevel(score: number) {
-  if (score >= 82) return 'low'
-  if (score >= 68) return 'medium'
-  return 'high'
-}
 
 export function buildReaderTrialReview(project: any, chapters: any[], outlines: any[], reviews: any[]) {
   const sorted = chapters.slice().sort((a, b) => Number(a.chapter_no || 0) - Number(b.chapter_no || 0))
@@ -363,11 +335,6 @@ export function buildReaderTrialReview(project: any, chapters: any[], outlines: 
   }
 }
 
-function parseChapterNoFromText(value: any) {
-  const raw = String(value || '')
-  const match = raw.match(/第\s*(\d+)\s*章/i) || raw.match(/chapter\s*(\d+)/i)
-  return match ? Number(match[1]) : null
-}
 
 export function buildReaderTrialRepairTasks(report: any) {
   const dropPoints = asArray(report?.drop_points || report?.dropPoints).map(item => String(item || '').trim()).filter(Boolean)

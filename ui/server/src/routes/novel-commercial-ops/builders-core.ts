@@ -23,6 +23,7 @@ import { readProviders } from '../../provider-store'
 import { executeNovelAgent } from '../../llm'
 import { asArray, compactText, parseJsonLikePayload, safeJsonStringify } from '../novel-route-utils'
 
+
 export type CommercialOpsContext = {
   getWorkspace: () => string
   getProject: (workspace: string, id: number) => Promise<any>
@@ -93,36 +94,7 @@ export function opsJson(value: any) {
   return safeJsonStringify(value, undefined, 0)
 }
 
-function wc(text: string) {
-  return String(text || '').replace(/\s/g, '').length
-}
 
-function splitParagraphs(text: string) {
-  return String(text || '').split(/\n+/).map(item => item.trim()).filter(Boolean)
-}
 
-function topRepeatedPhrases(text: string) {
-  const normalized = String(text || '').replace(/\s+/g, '')
-  const counts = new Map<string, number>()
-  for (let size = 4; size <= 8; size += 2) {
-    for (let index = 0; index <= normalized.length - size; index += size) {
-      const phrase = normalized.slice(index, index + size)
-      if (/^[\u4e00-\u9fa5]{4,8}$/.test(phrase)) counts.set(phrase, (counts.get(phrase) || 0) + 1)
-    }
-  }
-  return Array.from(counts.entries())
-    .filter(([, count]) => count >= 5)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
-    .map(([phrase, count]) => ({ phrase, count }))
-}
 
-function chapterSnippet(chapter: any, limit = 900) {
-  const text = String(chapter.chapter_text || '')
-  if (!text) return ''
-  if (text.length <= limit) return text
-  const head = text.slice(0, Math.floor(limit * 0.55))
-  const tail = text.slice(-Math.floor(limit * 0.35))
-  return `${head}\n...\n${tail}`
-}
 

@@ -23,6 +23,13 @@ import { readProviders } from '../../provider-store'
 import { executeNovelAgent } from '../../llm'
 import { asArray, compactText, parseJsonLikePayload, safeJsonStringify } from '../novel-route-utils'
 
+import {
+  wc,
+  splitParagraphs,
+  topRepeatedPhrases,
+  chapterSnippet,
+} from './builders-shared'
+
 export function buildMechanicalQaLlmPrompt(project: any, report: any, chapters: any[]) {
   const issueChapterNos = new Set(report.issues.slice(0, 18).map((item: any) => Number(item.chapter_no || 0)).filter(Boolean))
   const chapterSamples = chapters
@@ -252,12 +259,5 @@ export function buildPropagationDebt(project: any, chapters: any[], characters: 
   }
 }
 
-function includesAny(value: string, words: string[]) {
-  const text = String(value || '')
-  return words.some(word => text.includes(word))
-}
 
-function outlineText(outlines: any[]) {
-  return outlines.map(item => [item.title, item.summary, item.key_plot, item.goal, item.conflict, item.payoff].filter(Boolean).join(' ')).join('\n')
-}
 

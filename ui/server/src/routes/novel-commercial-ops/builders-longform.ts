@@ -23,6 +23,16 @@ import { readProviders } from '../../provider-store'
 import { executeNovelAgent } from '../../llm'
 import { asArray, compactText, parseJsonLikePayload, safeJsonStringify } from '../novel-route-utils'
 
+import {
+  wc,
+  includesAny,
+  outlineText,
+  latestReport,
+  buildDiagnosisDimension,
+  countSettingTypes,
+  buildLongformCompass,
+} from './builders-shared'
+
 export function buildLongformPressureTest(project: any, chapters: any[], outlines: any[], characters: any[], worldbuilding: any[], reviews: any[]) {
   const config = project.reference_config || {}
   const bible = config.writing_bible || {}
@@ -224,81 +234,12 @@ export function buildLongformPressureTest(project: any, chapters: any[], outline
   }
 }
 
-function latestReport(reviews: any[], reviewType: string) {
-  const rows = asArray(reviews)
-    .filter(review => review?.review_type === reviewType)
-    .sort((a, b) => Date.parse(String(b.created_at || '')) - Date.parse(String(a.created_at || '')))
-  const payload = parseJsonLikePayload(rows[0]?.payload) || {}
-  return payload.report || payload.result?.report || payload
-}
 
-function dimensionStatus(score: number, block = false) {
-  if (block || score < 60) return 'block'
-  if (score < 80) return 'warn'
-  return 'ok'
-}
 
-function buildDiagnosisDimension(key: string, label: string, score: number, detail: string, evidence: string[], blockers: string[] = [], warnings: string[] = []) {
-  return {
-    key,
-    label,
-    score: Math.max(0, Math.min(100, Math.round(score))),
-    status: dimensionStatus(score, blockers.length > 0),
-    detail,
-    evidence: evidence.filter(Boolean).slice(0, 5),
-    blockers,
-    warnings,
-  }
-}
 
-function countSettingTypes(settings: any[], types: string[]) {
-  return settings.filter(item => types.includes(String(item.entity_type || item.type || ''))).length
-}
 
-function firstText(...values: any[]) {
-  for (const value of values) {
-    const normalized = String(value || '').trim()
-    if (normalized) return normalized
-  }
-  return ''
-}
 
-function uniqueTexts(values: any[], limit: number) {
-  return Array.from(new Set(values.map(item => String(item || '').trim()).filter(Boolean))).slice(0, limit)
-}
 
-function buildLongformCompass(project: any, bible: any, outlines: any[], settingEntities: any[], worldbuilding: any[]) {
-  const volumeOutlines = outlines.filter(item => ['volume', 'arc', 'part'].includes(String(item.outline_type || item.outline_level || '')))
-  const firstConflict = firstText(...outlines.map(item => item.conflict), ...outlines.map(item => item.summary))
-  const systemAsset = settingEntities.find(item => ['ability', 'rule', 'realm', 'item'].includes(String(item.entity_type || item.type || '')))
-  const worldAsset = worldbuilding[0] || settingEntities.find(item => ['location', 'faction'].includes(String(item.entity_type || item.type || '')))
-  const readerPromise = compactText(firstText(bible.reader_promise, bible.core_selling_point, project.summary), 180)
-  const coreConflict = compactText(firstText(bible.core_conflict, firstConflict, project.summary), 180)
-  const innovationHook = compactText(firstText(bible.innovation_hook, bible.core_selling_point, systemAsset?.summary, systemAsset?.name, project.summary), 180)
-  const payoffLoop = compactText(firstText(bible.payoff_loop, bible.payoff_density, bible.reader_promise, volumeOutlines[0]?.payoff), 180)
-  const endingDirection = compactText(firstText(bible.ending_direction, project.summary, volumeOutlines.at(-1)?.summary), 180)
-
-  return {
-    reader_promise: readerPromise,
-    protagonist_drive: compactText(firstText(bible.protagonist_drive, project.summary), 180),
-    core_conflict: coreConflict,
-    world_hook: compactText(firstText(bible.world_hook, worldAsset?.content, worldAsset?.summary, worldAsset?.name), 180),
-    innovation_hook: innovationHook,
-    payoff_loop: payoffLoop,
-    ending_direction: endingDirection,
-    immutable_rules: uniqueTexts([
-      readerPromise ? `读者承诺不可漂移：${readerPromise}` : '',
-      coreConflict ? `核心矛盾不可绕开：${coreConflict}` : '',
-      innovationHook ? `创新卖点不能被写成普通套路：${innovationHook}` : '',
-      payoffLoop ? `长期爽点循环必须持续兑现：${payoffLoop}` : '',
-    ], 6),
-    flexible_zones: uniqueTexts([
-      '地图、副本、支线人物和新资产可以扩展，但必须服务读者承诺与当前卷目标。',
-      '单章场景、打斗方式和对话网感可以调整，但不能改主角长期欲望和核心矛盾。',
-      '支线可增删，伏笔可延后，但不能无回报制造长期悬空债务。',
-    ], 6),
-  }
-}
 
 export function buildLongformCreationDiagnosis(project: any, chapters: any[], outlines: any[], characters: any[], worldbuilding: any[], settingEntities: any[], reviews: any[]) {
   const bible = project.reference_config?.writing_bible || {}
