@@ -201,9 +201,9 @@ describe('novel sqlite persistence', () => {
       const block = file!.source.slice(start, nextExport < 0 ? file!.source.length : nextExport)
       expect(block.includes('withNovelWorkspaceMutation(activeWorkspace') || block.includes('withNovelDbWrite(activeWorkspace') || block.includes('mutateNovelStore(activeWorkspace')).toBe(true)
     }
-    const core = readFileSync(join(novelDir, 'core.ts'), 'utf8')
-    const transactionalMutationStart = core.indexOf('async function withNovelDbWrite')
-    const transactionalMutationBlock = core.slice(transactionalMutationStart, transactionalMutationStart + 1500)
+    const sqlRows = readFileSync(join(novelDir, 'sql-rows.ts'), 'utf8')
+    const transactionalMutationStart = sqlRows.indexOf('async function withNovelDbWrite')
+    const transactionalMutationBlock = sqlRows.slice(transactionalMutationStart, transactionalMutationStart + 1500)
     expect(transactionalMutationStart).toBeGreaterThanOrEqual(0)
     expect(transactionalMutationBlock).toContain("db.exec('BEGIN IMMEDIATE')")
     expect(transactionalMutationBlock).not.toContain('loadStoreFromOpenDb(db)')
@@ -602,7 +602,7 @@ describe('novel sqlite persistence', () => {
       dbComplete.close()
     }
 
-    const source = await readFile(join(import.meta.dir, 'novel/core.ts'), 'utf8')
+    const source = await readFile(join(import.meta.dir, 'novel/storage-compaction.ts'), 'utf8')
     const start = source.indexOf('function backfillNovelRunPipelineSummaries')
     const end = source.indexOf('\nexport function compactRawPayloadForStorage', start)
     const backfillBlock = source.slice(start, end)

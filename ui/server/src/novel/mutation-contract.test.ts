@@ -48,10 +48,10 @@ describe('novel point-SQL mutation contracts', () => {
     }
   })
 
-  test('legacy bulk replace remains only in core import path', () => {
-    const core = readFileSync(join(novelDir, 'core.ts'), 'utf8')
-    expect(core).toContain('function replaceStoreInOpenDb')
-    expect(core).toContain('importLegacyNovelStoreIfNeeded')
+  test('legacy bulk replace remains only in legacy-store path', () => {
+    const legacy = readFileSync(join(novelDir, 'legacy-store.ts'), 'utf8')
+    expect(legacy).toContain('function replaceStoreInOpenDb')
+    expect(legacy).toContain('importLegacyNovelStoreIfNeeded')
     for (const rel of HOT_EXPORT_FILES) {
       const source = readFileSync(join(novelDir, rel), 'utf8')
       expect(source).not.toContain('replaceStoreInOpenDb(')
