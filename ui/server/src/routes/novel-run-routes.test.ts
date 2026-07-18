@@ -309,7 +309,7 @@ describe('novel run task center source guards', () => {
   })
 
   test('treats repair task runs as actionable repair queues instead of resumable worker jobs', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-run-routes.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-run-routes.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-run-helpers.ts'), 'utf8')].join('\n')
 
     expect(source).toContain('REPAIR_TASK_RUN_TYPES')
     expect(source).toContain('can_process_repair_tasks')
@@ -318,7 +318,7 @@ describe('novel run task center source guards', () => {
   })
 
   test('aborts the current unattended chapter execution when the worker is stopped', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-run-routes.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-run-routes.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-run-helpers.ts'), 'utf8')].join('\n')
     const startRoute = source.slice(
       source.indexOf("app.post('/api/novel/projects/:id/run-queue/start-worker'"),
       source.indexOf("app.post('/api/novel/projects/:id/run-queue/stop-worker'"),
@@ -336,7 +336,7 @@ describe('novel run task center source guards', () => {
   })
 
   test('does not mark an aborted unattended worker as failed', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-run-routes.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-run-routes.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-run-helpers.ts'), 'utf8')].join('\n')
     const startRoute = source.slice(
       source.indexOf("app.post('/api/novel/projects/:id/run-queue/start-worker'"),
       source.indexOf("app.post('/api/novel/projects/:id/run-queue/stop-worker'"),

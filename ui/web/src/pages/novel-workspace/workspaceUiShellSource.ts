@@ -98,6 +98,8 @@ export function directorModelSource() {
     sourceCached('auto-creation/model/helpers-risk-recovery-governance-reviews.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-risk-strengthened-roadmap.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-pipeline.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-pipeline-core.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-pipeline-battle.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-command.ts', localSourceCache), sourceCached('auto-creation/model/helpers-command-runway-queue.ts', localSourceCache), sourceCached('auto-creation/model/helpers-command-gates.ts', localSourceCache), sourceCached('auto-creation/model/helpers-command-actions.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-batch-guardrail.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-batch-risk-radar.ts', localSourceCache),
@@ -116,9 +118,13 @@ export function directorModelSource() {
     sourceCached('auto-creation/model/helpers-safe-batch-recovery-structure.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-safe-batch-expansion-structure.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-safe-batch-expansion-trends.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-safe-batch-expansion-trends-core.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-safe-batch-expansion-trends-stability.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-safe-batch-expansion-repair-trends.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-recovery-evidence-trends.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-batch-handoff-and-launch.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-batch-handoff-core.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-batch-handoff-launch.ts', localSourceCache),
   ].join('\n')
   return directorModelSourceCache
 }
