@@ -5,6 +5,7 @@ import { buildOhStoryMainlineDefinitionContract } from '../../routes/novel-mainl
 import { buildOhStoryStoryPowerContract } from '../../routes/novel-story-power-contract'
 import { normalizeReaderExpectationDebtContext } from '../batch-serial/serial-momentum'
 import { continuityHeatExplicitContract } from './intent-benchmark-contracts'
+import { normalizeLongformMemoryCapsule } from './memory-longform-contracts'
 import { compactBriefText, uniqueBriefStrings } from './text-utils'
 const OH_STORY_PLOT_DYNAMICS_CHECKS = [
   '最小剧情循环必须完整：目标→阻碍→行动→代价/反馈→新期待。',

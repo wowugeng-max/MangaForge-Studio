@@ -49,6 +49,9 @@ import {
   buildCreatePayload as buildCreatePayloadFromUtils,
   buildFinalizedSeedCreatePayload as buildFinalizedSeedCreatePayloadFromUtils,
 } from './createWizardPayloadUtils'
+import {
+  createDeepDraftActions,
+} from './useCreateWizardDeepDraftActions'
 
 const projectSeedModelStorageKey = 'novel.projectSeed.model_id'
 
@@ -197,43 +200,6 @@ export function useCreateWizardController({ open, onCancel, onSuccess }: NovelCr
         ...prev.first30_plan,
         ...patch,
       },
-    }))
-  }
-
-  const updateDeepDraftReview = (patch: Partial<DeepDraftReviewModel>) => {
-    setSeedFinalized(false)
-    setDeepDraftReview(prev => ({ ...prev, ...patch }))
-  }
-
-  const updateDeepDraftCharacter = (index: number, patch: Partial<DeepDraftCharacter>) => {
-    setSeedFinalized(false)
-    setDeepDraftReview(prev => ({
-      ...prev,
-      characters: prev.characters.map((character, currentIndex) => currentIndex === index ? { ...character, ...patch } : character),
-    }))
-  }
-
-  const updateDeepDraftVolume = (index: number, patch: Partial<DeepDraftVolume>) => {
-    setSeedFinalized(false)
-    setDeepDraftReview(prev => ({
-      ...prev,
-      volumes: prev.volumes.map((volume, currentIndex) => currentIndex === index ? { ...volume, ...patch } : volume),
-    }))
-  }
-
-  const updateDeepDraftChapter = (index: number, patch: Partial<DeepDraftChapter>) => {
-    setSeedFinalized(false)
-    setDeepDraftReview(prev => ({
-      ...prev,
-      chapters: prev.chapters.map((chapter, currentIndex) => currentIndex === index ? { ...chapter, ...patch } : chapter),
-    }))
-  }
-
-  const removeDeepDraftItem = (section: 'characters' | 'volumes' | 'chapters', index: number) => {
-    setSeedFinalized(false)
-    setDeepDraftReview(prev => ({
-      ...prev,
-      [section]: prev[section].filter((_, currentIndex) => currentIndex !== index),
     }))
   }
 
@@ -561,81 +527,39 @@ export function useCreateWizardController({ open, onCancel, onSuccess }: NovelCr
     }))
   }
 
-  const repairCurrentDeepDraftGaps = () => {
-    if (!seed) return message.warning('请先生成或载入深度孵化草稿')
-    const repairedReview = repairDeepDraftReviewModelGaps(deepDraftReview, seed)
-    const repairedSeed = normalizeProjectSeedForUi(deepDraftReviewModelToSeed(seed, repairedReview))
-    setDeepDraftReview(repairedReview)
-    setSeed(repairedSeed)
-    setSeedFinalized(false)
-    message.success('已生成本地可编辑伏笔/确认草稿（非模型定稿），可继续改写')
-  }
-
-  const saveCurrentSeedDraft = async () => {
-    if (!seed) return message.warning('请先生成或载入深度孵化草稿')
-    const draftSeed = normalizeProjectSeedForUi(deepDraftReviewModelToSeed({ ...(seed || {}), length_target: data.length_target }, deepDraftReview))
-    const title = firstText(deepDraftReview.basics.title, data.title, draftSeed.title, '未命名孵化草稿')
-    setSavingSeedDraft(true)
-    try {
-      const res = await apiClient.post('/novel/project-seed/drafts', {
-        title,
-        idea: seedIdea,
-        seed: draftSeed,
-        review_model: deepDraftReview,
-        diagnostics: seedDiagnostics || draftSeed.seed_diagnostics || {},
-        model_id: seedModelId || null,
-        source: 'deep_draft_review',
-      })
-      const savedDraft = res.data?.draft
-      if (savedDraft?.id) {
-        setSeedDrafts(prev => [savedDraft, ...prev.filter(item => item.id !== savedDraft.id)])
-        setSelectedSeedDraftId(savedDraft.id)
-      } else {
-        await loadSeedDrafts()
-      }
-      setSeed(draftSeed)
-      setSeedFinalized(false)
-      message.success('孵化草稿已保存')
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '保存孵化草稿失败')
-    } finally {
-      setSavingSeedDraft(false)
-    }
-  }
-
-  const loadSelectedSeedDraft = () => {
-    const draft = seedDrafts.find(item => Number(item.id) === Number(selectedSeedDraftId))
-    if (!draft) return message.warning('请选择要载入的孵化草稿')
-    const draftSeed = normalizeProjectSeedForUi(draft.seed || {})
-    setCreateMode('deep_draft')
-    setSeed(draftSeed)
-    setSeedIdea(String(draft.idea || ''))
-    setSeedDiagnostics(draft.diagnostics || draftSeed.seed_diagnostics || null)
-    setSeedFinalized(false)
-    if (draft.model_id) {
-      setSeedModelId(Number(draft.model_id))
-      if (typeof window !== 'undefined') window.localStorage.setItem(projectSeedModelStorageKey, String(draft.model_id))
-    }
-    applySeedToForm(draftSeed)
-    setDeepDraftReview(restoreDeepDraftReview(draftSeed, draft.review_model))
-    message.success('已载入孵化草稿')
-  }
-
-  const deleteSelectedSeedDraft = async () => {
-    const id = Number(selectedSeedDraftId || 0)
-    if (!id) return message.warning('请选择要删除的孵化草稿')
-    setDeletingSeedDraft(true)
-    try {
-      await apiClient.delete(`/novel/project-seed/drafts/${id}`)
-      setSeedDrafts(prev => prev.filter(item => Number(item.id) !== id))
-      setSelectedSeedDraftId(undefined)
-      message.success('孵化草稿已删除')
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '删除孵化草稿失败')
-    } finally {
-      setDeletingSeedDraft(false)
-    }
-  }
+  const {
+    updateDeepDraftReview,
+    updateDeepDraftCharacter,
+    updateDeepDraftVolume,
+    updateDeepDraftChapter,
+    removeDeepDraftItem,
+    repairCurrentDeepDraftGaps,
+    saveCurrentSeedDraft,
+    loadSelectedSeedDraft,
+    deleteSelectedSeedDraft,
+  } = createDeepDraftActions({
+    seed,
+    setSeed,
+    deepDraftReview,
+    setDeepDraftReview,
+    setSeedFinalized,
+    seedIdea,
+    data,
+    seedDiagnostics,
+    seedModelId,
+    setSeedModelId,
+    seedDrafts,
+    setSeedDrafts,
+    selectedSeedDraftId,
+    setSelectedSeedDraftId,
+    setSavingSeedDraft,
+    setDeletingSeedDraft,
+    setCreateMode,
+    setSeedIdea,
+    setSeedDiagnostics,
+    applySeedToForm,
+    loadSeedDrafts,
+  })
 
   const deriveProjectSeed = async () => {
     if (!seedIdea.trim() && !data.title.trim()) return message.warning('请输入作品名称，或粘贴创意草稿')

@@ -68,18 +68,7 @@ import {
   WorkspaceCenter,
 } from './WorkspaceCenter'
 import {
-  buildAutoCreationDirectorModel,
-  type AutoCreationDirectorAction,
-} from './autoCreationDirectorModel'
-import {
-  buildPlanningWorkspaceModel,
-  type PlanningActionKey,
-} from './planningWorkspaceModel'
-import {
-  buildWritingCockpitModel,
-  resolveEditorRevisionChapterId,
   selectTargetChapterForWriting,
-  type WritingCockpitActionKey,
 } from './writingCockpitModel'
 import {
   type CreativeAssistCard,
@@ -109,9 +98,6 @@ import {
   displayValue,
   wc,
 } from './utils'
-import {
-  buildSerialPipelineViewModel,
-} from './serialPipelineModel'
 import {
   immersiveEnterPanelDefaults,
   isImmersiveShell as deriveIsImmersiveShell,
@@ -189,6 +175,12 @@ import {
 import {
   bindNovelWorkspaceCoreHandlers,
 } from './shell/workspace-view-bind-core-handlers'
+import {
+  useNovelWorkspaceChapterLoads,
+} from './shell/use-workspace-chapter-loads'
+import {
+  useNovelWorkspaceDomainModels,
+} from './shell/use-workspace-domain-models'
 import '../NovelProjectWorkspace.css'
 
 type AnyRecord = Record<string, any>
@@ -479,192 +471,64 @@ export default function NovelProjectWorkspace() {
     void loadProductionTasks()
   }, [projectId, workspaceArea, loadProductionTasks])
 
-  const planningWorkspaceModel = useMemo(() => buildPlanningWorkspaceModel({
+  const {
+    planningWorkspaceModel,
+    writingCockpitModel,
+    autoCreationDirectorModel,
+    serialPipelineModel,
+    recentFatigueRollingPlanIntent,
+    autoDirectorBusy,
+    findReviewById,
+    latestCockpitEditorReport,
+    latestCockpitQualityReport,
+  } = useNovelWorkspaceDomainModels({
     selectedProject,
     outlines,
-    chapters: sortedChapters,
-    activeChapter,
-    materialScore: activeChapterDiagnosticsData?.material_score,
-    commercialReadiness,
-    reviews,
-    settingEntities: projectSettings,
-    productionTasks,
-  }), [selectedProject, outlines, sortedChapters, activeChapter, activeChapterDiagnosticsData?.material_score, commercialReadiness, reviews, projectSettings, productionTasks])
-
-  const writingCockpitModel = useMemo(() => buildWritingCockpitModel({
-    project: selectedProject,
-    chapters: sortedChapters,
-    outlines,
-    activeChapter,
-    contextPackage: activeContextPackageData,
-    diagnostics: activeChapterDiagnosticsData,
-    materialScore: activeChapterDiagnosticsData?.material_score || null,
-    commercialReadiness,
-    activeRuns: [...activeTasks, ...runRecords],
-    reviews,
-    memorySummary: activeMemorySummary,
-  }), [
-    selectedProject,
     sortedChapters,
-    outlines,
     activeChapter,
-    activeContextPackageData,
     activeChapterDiagnosticsData,
     commercialReadiness,
+    reviews,
+    projectSettings,
+    productionTasks,
+    activeContextPackageData,
     activeTasks,
     runRecords,
-    reviews,
     activeMemorySummary,
-  ])
-
-  const autoCreationDirectorModel = useMemo(() => buildAutoCreationDirectorModel({
-    planning: planningWorkspaceModel,
-    writing: writingCockpitModel,
-    activeTasks,
     selectedModelId,
-    reviews,
-    runRecords,
-    chapters: sortedChapters,
-    storyState: selectedProject?.reference_config?.story_state || {},
     styleSampleEffectiveness,
-  }), [planningWorkspaceModel, writingCockpitModel, activeTasks, selectedModelId, reviews, runRecords, sortedChapters, selectedProject?.reference_config?.story_state, styleSampleEffectiveness])
-  const serialPipelineModel = useMemo(() => buildSerialPipelineViewModel(pipeline), [pipeline])
+    pipeline,
+    projectId,
+    setStyleSampleEffectiveness,
+    stepProseLoading,
+    generatingProse,
+    generatingSceneCards,
+    diagnosticsLoading,
+    contextPackageLoading,
+    editorReportLoading,
+    proseQualityLoading,
+    commercialToolLoading,
+    setAutoDirectorActionLoadingKey,
+  })
 
-  useEffect(() => {
-    if (!projectId) return
-    let cancelled = false
-    apiClient.get(`/novel/projects/${projectId}/writing-bible/style-sample-effectiveness`)
-      .then(res => {
-        if (!cancelled) {
-          setStyleSampleEffectiveness(res.data?.style_sample_effectiveness || res.data?.report || null)
-        }
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [projectId, selectedProject?.updated_at, reviews.length, sortedChapters.length])
-
-  const recentFatigueRollingPlanIntent = useMemo(() => {
-    const fatigue = planningWorkspaceModel.recentFatigueRadar
-    const fatigueWarnings = Array.isArray(fatigue?.signals)
-      ? fatigue.signals.filter((signal: any) => String(signal?.status || '') === 'warn')
-      : []
-    if (fatigue?.status !== 'needs_attention' && fatigueWarnings.length === 0) return null
-    return {
-      source: 'recent_fatigue_repair',
-      recent_fatigue_radar: fatigue,
-    }
-  }, [planningWorkspaceModel.recentFatigueRadar])
-
-  const autoDirectorBusy = Boolean(
-    stepProseLoading
-    || generatingProse
-    || generatingSceneCards
-    || diagnosticsLoading
-    || contextPackageLoading
-    || editorReportLoading
-    || proseQualityLoading
-    || commercialToolLoading,
-  )
-
-  useEffect(() => {
-    if (!autoDirectorBusy) setAutoDirectorActionLoadingKey('')
-  }, [autoDirectorBusy])
-
-  const findReviewById = (reviewId: any) => (
-    reviews.find((review: any) => String(review.id) === String(reviewId)) || null
-  )
-
-  const latestCockpitEditorReport = () => {
-    const reviewId = writingCockpitModel.chapterAcceptanceDesk.latestEditorReportId
-    return reviewId ? findReviewById(reviewId) : null
-  }
-
-  const latestCockpitQualityReport = () => {
-    const reviewId = writingCockpitModel.chapterAcceptanceDesk.latestQualityReviewId
-    return reviewId ? findReviewById(reviewId) : null
-  }
-
-  useEffect(() => {
-    const loadDiagnostics = async () => {
-      const chapterId = Number(activeChapter?.id || 0)
-      const updatedAt = activeChapter?.updated_at || null
-      if (!chapterId || !projectId) {
-        diagnosticsRequestRef.current += 1
-        setActiveChapterDiagnostics(null)
-        return
-      }
-      const requestId = ++diagnosticsRequestRef.current
-      try {
-        const res = await apiClient.get(`/novel/chapters/${chapterId}/generation-diagnostics`, { params: { project_id: projectId } })
-        if (diagnosticsRequestRef.current !== requestId) return
-        setActiveChapterDiagnostics({ chapterId, updatedAt, data: res.data || null })
-      } catch {
-        if (diagnosticsRequestRef.current === requestId) setActiveChapterDiagnostics(null)
-      }
-    }
-    void loadDiagnostics()
-  }, [activeChapter?.id, activeChapter?.updated_at, projectId])
-
-  const loadActiveChapterContextPackage = useCallback(async (options: { silent?: boolean; chapterId?: number; updatedAt?: any } = {}) => {
-    const chapterId = Number(options.chapterId || activeChapter?.id || 0)
-    const updatedAt = options.updatedAt !== undefined
-      ? options.updatedAt
-      : (chapterId === Number(activeChapter?.id || 0) ? activeChapter?.updated_at || null : null)
-    if (!chapterId || !projectId) {
-      contextPackageRequestRef.current += 1
-      setActiveChapterContextPackage(null)
-      setContextPackageLoading(false)
-      return null
-    }
-    const requestId = ++contextPackageRequestRef.current
-    setContextPackageLoading(true)
-    setActiveChapterContextPackage(prev => (
-      prev?.chapterId === chapterId && prev?.updatedAt === updatedAt ? prev : null
-    ))
-    try {
-      const res = await apiClient.get(`/novel/chapters/${chapterId}/context-package`, {
-        params: { project_id: projectId },
-      })
-      if (contextPackageRequestRef.current !== requestId) return null
-      setActiveChapterContextPackage({ chapterId, updatedAt, data: res.data || null })
-      if (!options.silent) message.success('上下文包已刷新')
-      return res.data || null
-    } catch (error: any) {
-      if (contextPackageRequestRef.current !== requestId) return null
-      setActiveChapterContextPackage(null)
-      if (!options.silent) message.error(error?.response?.data?.error || error?.message || '上下文包加载失败')
-      return null
-    } finally {
-      if (contextPackageRequestRef.current === requestId) setContextPackageLoading(false)
-    }
-  }, [activeChapter?.id, activeChapter?.updated_at, projectId])
-
-  useEffect(() => {
-    const chapterId = Number(activeChapter?.id || 0)
-    if (!chapterId) {
-      void loadActiveChapterContextPackage({ silent: true, chapterId: 0 })
-      return
-    }
-    void loadActiveChapterContextPackage({ silent: true, chapterId, updatedAt: activeChapter?.updated_at || null })
-  }, [activeChapter?.id, activeChapter?.updated_at, projectId, loadActiveChapterContextPackage])
-
-  useEffect(() => {
-    let canceled = false
-    const loadCommercialReadiness = async () => {
-      if (!projectId || !selectedProject) {
-        setCommercialReadiness(null)
-        return
-      }
-      try {
-        const res = await apiClient.get(`/novel/projects/${projectId}/commercial-readiness`)
-        if (!canceled) setCommercialReadiness(res.data?.readiness || null)
-      } catch {
-        if (!canceled) setCommercialReadiness(null)
-      }
-    }
-    void loadCommercialReadiness()
-    return () => { canceled = true }
-  }, [projectId, selectedProject?.updated_at, chapters.length, outlines.length, characters.length, runRecords.length, reviews.length])
+  const {
+    loadActiveChapterContextPackage,
+  } = useNovelWorkspaceChapterLoads({
+    activeChapter,
+    projectId,
+    selectedProject,
+    chapters,
+    outlines,
+    characters,
+    runRecords,
+    reviews,
+    diagnosticsRequestRef,
+    contextPackageRequestRef,
+    setActiveChapterDiagnostics,
+    setActiveChapterContextPackage,
+    setContextPackageLoading,
+    setCommercialReadiness,
+  })
 
   // ── diff toggle ──
   const [showOnlyDiff, setShowOnlyDiff] = useState(true)

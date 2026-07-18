@@ -7,8 +7,11 @@ import { compactBriefText, uniqueBriefStrings } from './text-utils'
 
 import {
   benchmarkRecallGapsFromContext,
+  benchmarkRecallHasGap,
   benchmarkRecallIsNoBenchmark,
   buildBenchmarkRecallBrief,
+  styleRecallList,
+  styleRecallValueText,
 } from './intent-benchmark-recall'
 export {
   styleRecallValueText,

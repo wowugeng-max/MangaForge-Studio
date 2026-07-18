@@ -877,3 +877,5 @@ cd ui/server && bun test src/novel/mutation-contract.test.ts src/novel/sqlite-pe
 - 2026-07-19 goal-continue XXXVIII: prompts monofile → barrel + prompts-core (~355) / prompts-prose (~392) / prompts-misc (~226); prompts.test 10 green.
 
 - 2026-07-19 goal-continue XXXIX: adapter-support leaf (~803 pure helpers) + adapter classes (~210); adapter tests 29 green. Residual composition roots: NWS view ~1252, useCreateWizardController ~905, SettingWorkshopPanel ~888; provider-runtime package already leafed.
+
+- 2026-07-19 goal-continue XL: scene-card apply-card → thin orchestrator (~144) + phase-a/b (~500 each); NWS domain-models + chapter-loads hooks (view ~1116); create-wizard deep-draft actions factory (~194, controller ~829); package-join fixes for continuity-heat memory capsule + intent-benchmark local imports. scene-cards a/b + architecture contracts green.
