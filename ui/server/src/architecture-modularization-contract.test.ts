@@ -66,6 +66,7 @@ const SOFT_BASELINES: Record<string, number> = {
   'routes/novel-editor/builders-annotations-prose-quality.ts': 50,
   'novel-writing-service/post-delivery/delivery-risk-carry-over-prose-quality.ts': 50,
   'novel-writing-service/post-delivery/delivery-risk-carry-over-prose-quality-extended.ts': 50,
+  'novel-writing-service/post-delivery/delivery-risk-carry-over-prose-quality-extended-assets.ts': 50,
   'novel-writing-service/post-delivery/core-handoff-sync-reports.ts': 20,
   'knowledge-base.ts': 700,
   'novel-writing-service/post-delivery/delta-sync-reports.ts': 250,

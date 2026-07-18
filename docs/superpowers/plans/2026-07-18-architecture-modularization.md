@@ -16,6 +16,17 @@
 
 
 
+### Residual inventory update (2026-07-19 goal-continue XX)
+
+Landed:
+- `cockpit-acceptance-desk-chapter`: collapse duplicated acceptance return arms onto `admissionCommon` (~1009 → ~586), behavior preserved
+- `delivery-risk-carry-over-prose-quality-extended-assets` → a/b leaves + thin barrel
+- Prior XIX: delivery-risk core/mid + core-handoff live DI bindings; package-join order-safe tests
+
+Task 11 focused: post-delivery-sync a/b + architecture **86 pass**; writingCockpit quality/planning/target-actions **87 pass**.
+
+Still deferred: provider-runtime, NWS composition root ~1593, prose-self-review factory, director drawer, useNovelStudioController ~1215, helpers-batch-risk-radar, paragraph-prose-context, auto-repair factory; full write-path UI smoke/memory.
+
 ### Residual inventory update (2026-07-19 goal-continue XIX)
 
 Landed:
