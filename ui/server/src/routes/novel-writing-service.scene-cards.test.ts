@@ -10610,7 +10610,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires generated duplicate-title repair into every chapter store path', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const storagePatchSource = readChapterProseStoragePatchSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const groupBlock = source.slice(groupStart, source.indexOf('const routes', groupStart) > 0 ? source.indexOf('const routes', groupStart) : source.indexOf('return { generateChapterForGroup', groupStart))

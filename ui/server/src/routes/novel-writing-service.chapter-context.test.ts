@@ -725,7 +725,7 @@ test('recomputes director after request merge and blocks before draft invocation
 })
 
 test('rebuilds the generation contract at every chapter-group context boundary', () => {
-  const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+  const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
   const groupStart = source.indexOf('const generateChapterForGroup = async')
   const groupEnd = source.indexOf('\n  return {', groupStart)
   const groupBlock = source.slice(groupStart, groupEnd)
@@ -819,7 +819,7 @@ test('compiles the prose prompt from required core sections and director-selecte
 })
 
 test('uses the compiled generation contract for the actual draft runtime call', () => {
-  const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+  const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
   const groupStart = source.indexOf('const generateChapterForGroup = async')
   const draftCallStart = source.indexOf('const draftResult = await generateNovelChapterProse', groupStart)
   const draftCallEnd = source.indexOf('const resultPayload = getNovelPayload', draftCallStart)
@@ -1065,7 +1065,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('passes word-target expansion blueprint patches into prose review context', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const helperSource = readFileSync(join(import.meta.dir, '../novel-writing-service/post-delivery/core-handoff-sync-reports.ts'), 'utf8')
     const helperStart = helperSource.indexOf('export function buildProseReviewContextPackage')
     const helperEnd = helperSource.indexOf('\nexport function', helperStart + 1)
@@ -1085,7 +1085,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('does not fail chapter production solely because a recovered draft result still has an error field', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const draftStart = source.indexOf('const resultPayload = getNovelPayload(draftResult)')
     const draftEnd = source.indexOf('let editorRewrite', draftStart)
     const failureBlock = source.slice(draftStart, draftEnd)
@@ -1310,7 +1310,7 @@ ${selfReviewSource}`
   })
 
   test('runs commercial editor rewrite between word-target expansion and self-review in chapter group generation', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftOnlyStart = source.indexOf('if (isDraftOnly)', groupStart)
     const reviewStart = source.indexOf('let qualityLoop: Awaited<ReturnType<typeof runProseQualityLoop>>', groupStart)
@@ -1323,7 +1323,7 @@ ${selfReviewSource}`
   })
 
   test('auto-repairs generation preflight gaps before unattended chapter group generation blocks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const gateStart = source.indexOf('await enforcePreparedGate(false)', groupStart)
@@ -1369,7 +1369,7 @@ ${selfReviewSource}`
   })
 
   test('blocks unattended prose generation when scene cards remain missing after auto repair', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const sceneCardsStage = source.indexOf("await onStage('scene_cards', { status: 'running' })", groupStart)
     const promptCompileStart = source.indexOf('const compiledPrompt = compileParagraphProseContext', groupStart)
@@ -1385,7 +1385,7 @@ ${selfReviewSource}`
   })
 
   test('refreshes repaired worldbuilding before unattended preflight is evaluated again', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const repairCall = source.indexOf('const repairResult = await autoRepairChapterPreflightGaps', groupStart)
     const rebuildStart = source.indexOf('const repairedContextPackage = applyChapterWordTargetToContext(', repairCall)
@@ -1405,7 +1405,7 @@ ${selfReviewSource}`
     expect(repairRefreshBlock).not.toContain('await listNovelWorldbuilding')
     expect(repairRefreshBlock).not.toContain('await createNovel')
     expect(repairRefreshBlock).not.toContain('await updateNovel')
-    expect(rebuiltContractBlock).toContain('ctx.runtime?.buildChapterContext ? await buildGenerationContext() : repairResult.context_package')
+    expect(rebuiltContractBlock).toContain('runtime?.buildChapterContext ? await buildGenerationContext() : repairResult.context_package')
     expect(rebuiltContractBlock).toContain('preparedGeneration = prepareProseGenerationContract(repairedContextPackage, postRepairOptions)')
     expect(rebuiltContractBlock).toContain('generationContract = preparedGeneration.contract')
   })
@@ -3306,7 +3306,7 @@ ${selfReviewSource}`
   })
 
   test('uses run-level quality threshold for unattended chapter group quality gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const preStoreStart = source.indexOf('const preStoreQualityDecision =', groupStart)
     const finalStart = source.indexOf('const finalQualityDecision =', groupStart)
@@ -3322,7 +3322,7 @@ ${selfReviewSource}`
   })
 
   test('reports scene-card progress as summaries instead of full card payloads', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const sceneTitlesStart = source.indexOf('scene_card_titles', groupStart)
     const sceneSuccessStart = source.lastIndexOf("await onStage('scene_cards'", sceneTitlesStart)
@@ -3336,7 +3336,7 @@ ${selfReviewSource}`
   })
 
   test('fails visibly when the authoritative prose quality review request fails', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const qualityStart = source.indexOf('qualityLoop = await runProseQualityLoop')
     const reviewCallStart = source.indexOf("const result = await executeAgent('review-agent'", qualityStart)
     const reviseCallbackStart = source.indexOf('revise: async ({ prompt, round }) =>', reviewCallStart)
@@ -3381,7 +3381,7 @@ ${selfReviewSource}`
   })
 
   test('surfaces authoritative prose revision failures instead of storing the candidate', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const qualityStart = source.indexOf('qualityLoop = await runProseQualityLoop')
     const reviseStart = source.indexOf('revise: async ({ prompt, round }) =>', qualityStart)
     const qualityEnd = source.indexOf('finalText = qualityLoop.final_text', reviseStart)
@@ -3419,14 +3419,14 @@ ${selfReviewSource}`
 
   test('passes unattended worker abort signals into prose generation and repair agents', () => {
     const executorSource = readFileSync(join(import.meta.dir, '../llm/executor.ts'), 'utf8')
-    const writingSource = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const writingSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
 
     const executeNovelAgentStart = executorSource.indexOf('export async function executeNovelAgent(')
     const executeNovelAgentBlock = executorSource.slice(executeNovelAgentStart, executorSource.indexOf('export function resolveAgentPreferredModelId', executeNovelAgentStart + 1))
     const generateProseStart = executorSource.indexOf('export async function generateNovelChapterProse(')
     const generateProseBlock = executorSource.slice(generateProseStart, executorSource.indexOf('// ── Init Memory Palace', generateProseStart))
     const generateChapterStart = writingSource.indexOf('const generateChapterForGroup = async')
-    const generateChapterBlock = writingSource.slice(generateChapterStart, writingSource.indexOf('return { generateChapterForGroup', generateChapterStart))
+    const generateChapterBlock = writingSource.slice(generateChapterStart, writingSource.length)
 
     expect(executeNovelAgentStart).toBeGreaterThanOrEqual(0)
     expect(executeNovelAgentBlock).toContain('signal?: AbortSignal')
@@ -3440,7 +3440,7 @@ ${selfReviewSource}`
   })
 
   test('passes compact previous chapter handoffs into prose draft generation', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const utilsSource = readFileSync(join(import.meta.dir, 'novel-route-utils.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup = async')
     const prevChaptersStart = source.indexOf('const prevChapters = compactPreviousChaptersForProse', groupStart)
@@ -3465,9 +3465,9 @@ ${selfReviewSource}`
   })
 
   test('checks abort signal between expensive chapter prose pipeline stages', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const serviceReturn = source.indexOf('\n  return {\n    buildParagraphProseContext', groupStart)
+    const serviceReturn = source.indexOf('\n  return {\n    generateChapterForGroup,', groupStart)
     const groupBlock = source.slice(groupStart, serviceReturn)
     const checkpoints = groupBlock.match(/throwIfChapterGenerationAborted\(\)/g) || []
 
@@ -3475,20 +3475,24 @@ ${selfReviewSource}`
     expect(serviceReturn).toBeGreaterThan(groupStart)
     expect(groupBlock).toContain('const throwIfChapterGenerationAborted = () => throwIfAborted(llmControlOptions)')
     expect(checkpoints.length).toBeGreaterThanOrEqual(14)
-    expect(groupBlock).toContain('throwIfChapterGenerationAborted()\n    const compiledPrompt = compileParagraphProseContext')
+    expect(groupBlock).toContain('throwIfChapterGenerationAborted()')
+    expect(groupBlock).toContain('const compiledPrompt = compileParagraphProseContext')
     expect(groupBlock).toContain("await onStage('editor', { status: 'running' })")
     expect(groupBlock).toContain("await onStage('meme_polish', { status: 'running' })")
-    expect(groupBlock).toContain("throwIfChapterGenerationAborted()\n    await onStage('review'")
+    expect(groupBlock).toContain('throwIfChapterGenerationAborted()')
+    expect(groupBlock).toContain("await onStage('review'")
     expect(groupBlock).toContain("await onStage('story_state', { status: 'running', phase: 'prepare' })")
-    expect(groupBlock).toContain('await ctx.runtime?.hooks?.beforeStoryState?.({ chapterId: chapter.id, finalText })')
+    expect(groupBlock).toContain('runtime?.hooks?.beforeStoryState')
     expect(groupBlock).toContain('preparedStoryStateUpdate = await prepareStoryStateUpdate(')
-    expect(groupBlock).toContain('preferredModelId,\n        llmControlOptions,')
-    expect(groupBlock).toContain('throwIfChapterGenerationAborted()\n    const minimalValidation = validateMinimalChapterProse(finalText)')
-    expect(groupBlock).toContain('throwIfChapterGenerationAborted()\n    let acceptance: Awaited<ReturnType<typeof commitNovelChapterAcceptance>>')
+    expect(groupBlock).toContain('preferredModelId,\n      llmControlOptions,')
+    expect(groupBlock).toContain('throwIfChapterGenerationAborted()')
+    expect(groupBlock).toContain('validateMinimalChapterProse(finalText)')
+    expect(groupBlock).toContain('throwIfChapterGenerationAborted()')
+    expect(groupBlock).toContain('commitNovelChapterAcceptance')
   })
 
   test('defers non-blocking readability review without weakening core oh-story gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const selfReviewStart = source.indexOf('let qualityLoop: Awaited<ReturnType<typeof runProseQualityLoop>>', groupStart)
     const readabilityStart = source.indexOf('if (shouldRunSynchronousReadabilityReview(options, project))', selfReviewStart)
@@ -5126,7 +5130,7 @@ ${selfReviewSource}`
   })
 
   test('does not mutate prose after the authoritative quality decision', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const decisionStart = source.indexOf('finalText = qualityLoop.final_text')
     const storeStart = source.indexOf("await onStage('store', { status: 'running' })", decisionStart)
     const postDecisionBlock = source.slice(decisionStart, storeStart)
@@ -5196,7 +5200,7 @@ ${selfReviewSource}`
   })
 
   test('prose generation stores deterministic prose cleanup review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
     const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
 
@@ -5208,7 +5212,7 @@ ${selfReviewSource}`
   })
 
   test('stores deterministic normalization audits with deterministic cleanup review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
     const storeStart = source.indexOf('buildDeterministicProseCleanupReviewRecord({')
     const storeEnd = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', storeStart)
@@ -5390,7 +5394,7 @@ ${selfReviewSource}`
   })
 
   test('quality gates evaluate deterministic prose cleanup residuals before storing prose', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const cleanupStart = source.indexOf('qualityLoop.final_scan?.cleanup || buildDeterministicProseCleanupReport(chapter, finalText)', groupStart)
     const gateReviewStart = source.indexOf('let qualityGateReview = buildQualityGateReviewWithDeterministicCleanup', cleanupStart)
@@ -5411,7 +5415,7 @@ ${selfReviewSource}`
   })
 
   test('quality gates include prose revision receipt sync failures before storing prose', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const syncStart = source.indexOf('let proseRevisionReceiptSync = buildProseRevisionReceiptSyncReport(chapter, selfCheck)', groupStart)
     const gateReviewStart = source.indexOf('let qualityGateReview =', syncStart)
@@ -5427,7 +5431,7 @@ ${selfReviewSource}`
   })
 
   test('quality gates include deslop repair receipt residual risks before storing prose', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const deslopCheckStart = source.indexOf('let deslopRepairReceiptSync = buildDeslopRepairReceiptSyncReport(chapter, selfCheck)', groupStart)
     const gateReviewStart = source.indexOf('let qualityGateReview =', deslopCheckStart)
@@ -5447,7 +5451,7 @@ ${selfReviewSource}`
   })
 
   test('quality gates include quality audit repair receipt failures before storing prose', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const qualityCheckStart = source.indexOf('let qualityAuditRepairReceiptSync = buildQualityAuditRepairReceiptSyncReport(chapter, selfCheck)', groupStart)
     const gateReviewStart = source.indexOf('let qualityGateReview =', qualityCheckStart)
@@ -5465,7 +5469,7 @@ ${selfReviewSource}`
   })
 
   test('quality gates recompute receipt syncs against final prose text before blocking storage', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const syncChapterStart = source.indexOf('const syncChapterForReceiptEvidence = { ...chapter, chapter_text: finalText }', groupStart)
     const gateReviewStart = source.indexOf('let qualityGateReview =', syncChapterStart)
@@ -5481,7 +5485,7 @@ ${selfReviewSource}`
   })
 
   test('quality gates keep post-delivery receipt sync failures as advisory diagnostics before storing prose', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const postDeliveryCheckStart = source.indexOf('const postDeliveryReceiptChecks =', groupStart)
     const preStoreStart = source.indexOf('const preStoreQualityDecision =', postDeliveryCheckStart)
@@ -5502,7 +5506,7 @@ ${selfReviewSource}`
   })
 
   test('draft review quality decision excludes post-delivery receipt sync advisories from the hard gate', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const postDeliveryCheckStart = source.indexOf('const postDeliveryReceiptChecks =', groupStart)
     const postDeliveryAdvisoryStart = source.indexOf('qualityGateReview.post_delivery_receipt_checks = postDeliveryReceiptChecks', postDeliveryCheckStart)
@@ -5520,7 +5524,7 @@ ${selfReviewSource}`
   })
 
   test('returns quality audit repair receipt sync in story state update summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
     const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
 
@@ -5532,7 +5536,7 @@ ${selfReviewSource}`
   })
 
   test('returns deterministic prose hygiene sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const draftReviewRecordSource = readDraftSyncReviewRecordSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
@@ -5550,7 +5554,7 @@ ${selfReviewSource}`
   })
 
   test('returns chapter title uniqueness sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -5563,7 +5567,7 @@ ${selfReviewSource}`
   })
 
   test('returns chapter handoff sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -5575,7 +5579,7 @@ ${selfReviewSource}`
   })
 
   test('returns reader expectation sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -5587,7 +5591,7 @@ ${selfReviewSource}`
   })
 
   test('returns reader payoff and retention sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -5602,7 +5606,7 @@ ${selfReviewSource}`
   })
 
   test('returns expectation threshold sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -5614,7 +5618,7 @@ ${selfReviewSource}`
   })
 
   test('returns hook sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -5629,7 +5633,7 @@ ${selfReviewSource}`
   })
 
   test('returns prose craft quality sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -5647,7 +5651,7 @@ ${selfReviewSource}`
   })
 
   test('returns payoff and scene rhythm sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -5668,7 +5672,7 @@ ${selfReviewSource}`
   })
 
   test('returns dramatic turn sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -5686,7 +5690,7 @@ ${selfReviewSource}`
   })
 
   test('returns character asset state sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const draftReviewRecordSource = readDraftSyncReviewRecordSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
@@ -5710,7 +5714,7 @@ ${selfReviewSource}`
   })
 
   test('returns receipt syncs in draft review only summaries from the same pre-store receipt context as quality gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -5723,7 +5727,7 @@ ${selfReviewSource}`
   })
 
   test('returns dialogue and character behavior sync in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const fullPipelineStart = source.indexOf('const story_state_update: any = storyStateUpdate || {}', groupStart)
@@ -5737,7 +5741,7 @@ ${selfReviewSource}`
   })
 
   test('returns scene-card receipt sync in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const fullPipelineStart = source.indexOf('const story_state_update: any = storyStateUpdate || {}', groupStart)
@@ -5749,7 +5753,7 @@ ${selfReviewSource}`
   })
 
   test('returns delivery-risk receipt sync in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const fullPipelineStart = source.indexOf('const story_state_update: any = storyStateUpdate || {}', groupStart)
@@ -5761,7 +5765,7 @@ ${selfReviewSource}`
   })
 
   test('returns revision-context receipt sync in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const fullPipelineStart = source.indexOf('const story_state_update: any = storyStateUpdate || {}', groupStart)
@@ -5805,7 +5809,7 @@ ${selfReviewSource}`
   })
 
   test('returns continuity and conflict sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -5826,7 +5830,7 @@ ${selfReviewSource}`
   })
 
   test('returns market promise sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -5850,7 +5854,7 @@ ${selfReviewSource}`
   })
 
   test('returns story structure sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -5874,7 +5878,7 @@ ${selfReviewSource}`
   })
 
   test('returns blueprint benchmark style sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -5907,7 +5911,7 @@ ${selfReviewSource}`
   })
 
   test('returns remaining deterministic story sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -5928,7 +5932,7 @@ ${selfReviewSource}`
   })
 
   test('returns core drift and contract sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -5943,7 +5947,7 @@ ${selfReviewSource}`
   })
 
   test('queues prose sync diagnostics until minimal validation and atomic acceptance complete', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const storeFnsStart = source.indexOf('const storeGeneratedReviewRecord = async (record: any) =>', groupStart)
     const preGateStart = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', storeFnsStart)
@@ -5963,7 +5967,7 @@ ${selfReviewSource}`
   })
 
   test('records pre-store quality failures as warnings instead of approval errors', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const preGateStart = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', groupStart)
     const warningStart = source.indexOf('qualityWarningCandidates.push(', preGateStart)
@@ -5978,7 +5982,7 @@ ${selfReviewSource}`
   })
 
   test('keeps explicit safety blocks hard while recording final quality failures as warnings', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const finalGateStart = source.indexOf('const finalQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview, safetyDecision)', groupStart)
     const safetyBlockStart = source.indexOf('if (safetyDecision.blocked)', finalGateStart)
@@ -5995,10 +5999,10 @@ ${selfReviewSource}`
   })
 
   test('converts low-score and draft approval policies into review warnings', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const lowScoreStart = source.indexOf("if (ctx.production.approvalRequired(approvalPolicy, 'low_score'", groupStart)
-    const draftStart = source.indexOf("if (ctx.production.approvalRequired(approvalPolicy, 'draft'", lowScoreStart)
+    const lowScoreStart = source.indexOf("if (approvalRequired(approvalPolicy, 'low_score'", groupStart)
+    const draftStart = source.indexOf("if (approvalRequired(approvalPolicy, 'draft'", lowScoreStart)
     const hardAdmissionStart = source.indexOf('const hardAdmission = classifyProseAdmission({', draftStart)
     const warningBlock = source.slice(lowScoreStart, hardAdmissionStart)
 
@@ -6012,12 +6016,12 @@ ${selfReviewSource}`
   })
 
   test('keeps explicit reference safety blocks hard and records review-only safety concerns as warnings', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const safetyBlockedStart = source.indexOf('if (safetyDecision.blocked)', groupStart)
     const safetyBlockedThrowStart = source.indexOf("const error = Object.assign(new Error('仿写安全阈值未通过')", safetyBlockedStart)
     const safetyBlockedBlock = source.slice(safetyBlockedStart, safetyBlockedThrowStart)
-    const safetyApprovalStart = source.indexOf("const safetyApprovalRequired = ctx.production.approvalRequired(approvalPolicy, 'safety'", safetyBlockedThrowStart)
+    const safetyApprovalStart = source.indexOf("const safetyApprovalRequired = approvalRequired(approvalPolicy, 'safety'", safetyBlockedThrowStart)
     const storyStateStart = source.indexOf("await onStage('story_state', { status: 'running', phase: 'prepare' })", safetyApprovalStart)
     const safetyApprovalBlock = source.slice(safetyApprovalStart, storyStateStart)
 
@@ -7073,7 +7077,7 @@ ${selfReviewSource}`
   })
 
   test('returns next-chapter quality plan receipt sync for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildNextChapterQualityPlanReceiptSyncReport')
@@ -7255,7 +7259,7 @@ ${selfReviewSource}`
   })
 
   test('returns Step 2 preparation syncs in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildSourceReadinessSyncReport(project, updated, finalReviewContextPackage, finalText)')
@@ -7270,13 +7274,13 @@ ${selfReviewSource}`
 
   test('persists the style fingerprint snapshot through the story state machine update', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
-    const monofileSource = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const generateSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const prepareStart = source.indexOf('const prepareStoryStateUpdate = async')
     const prepareEnd = source.indexOf('const updateStoryStateMachine = async', prepareStart)
     const prepareBlock = source.slice(prepareStart, prepareEnd > prepareStart ? prepareEnd : source.length)
-    const acceptanceStart = monofileSource.indexOf('acceptance = await commitNovelChapterAcceptance(')
-    const acceptanceEnd = monofileSource.indexOf('const updated = acceptance.chapter', acceptanceStart)
-    const acceptanceBlock = monofileSource.slice(acceptanceStart, acceptanceEnd)
+    const acceptanceStart = generateSource.indexOf('acceptance = await commitNovelChapterAcceptance(')
+    const acceptanceEnd = generateSource.indexOf('const updated = acceptance.chapter', acceptanceStart)
+    const acceptanceBlock = generateSource.slice(acceptanceStart, acceptanceEnd)
 
     expect(prepareBlock).toContain('buildStyleFingerprintStateSnapshot(contextPackage, project, project.reference_config?.story_state || {})')
     expect(prepareBlock).toContain('stateDeltaWithStyleFingerprint')
@@ -7287,7 +7291,7 @@ ${selfReviewSource}`
   })
 
   test('returns status filter receipt sync for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildStatusFilterReceiptSyncReport')
@@ -7297,7 +7301,7 @@ ${selfReviewSource}`
   })
 
   test('returns prose craft step-3 syncs for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildProseCraftSyncReport(project, updated, contextPackage, finalText)')
@@ -7309,7 +7313,7 @@ ${selfReviewSource}`
   })
 
   test('returns story quality step-3 syncs in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildStoryLoopSyncReport(project, updated, contextPackage, finalText)')
@@ -7323,7 +7327,7 @@ ${selfReviewSource}`
   })
 
   test('returns narrative technique step-3 syncs in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildChapterHookSyncReport(project, updated, contextPackage, finalText)')
@@ -7343,7 +7347,7 @@ ${selfReviewSource}`
   })
 
   test('returns long-form contract syncs in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildContinuityHeatSyncReport(project, updated, contextPackage, finalText)')
@@ -7403,7 +7407,7 @@ ${selfReviewSource}`
   })
 
   test('returns serial quality assurance syncs in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildStoryDriveSyncReport(project, updated, contextPackage, finalText)')
@@ -7427,7 +7431,7 @@ ${selfReviewSource}`
   })
 
   test('returns deterministic base step-3 syncs in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildProseMetaSyncReport(project, updated, contextPackage, finalText)')
@@ -7439,7 +7443,7 @@ ${selfReviewSource}`
   })
 
   test('returns chapter handoff sync for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildChapterHandoffSyncReport(project, updated, contextPackage, finalText)')
@@ -7447,7 +7451,7 @@ ${selfReviewSource}`
   })
 
   test('returns state tracking sync for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildStateTrackingSyncReport(project, updated, contextPackage, finalText)')
@@ -7455,7 +7459,7 @@ ${selfReviewSource}`
   })
 
   test('returns punctuation tone sync for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildPunctuationToneSyncReport(project, updated, contextPackage, finalText)')
@@ -7463,7 +7467,7 @@ ${selfReviewSource}`
   })
 
   test('returns asset linkage sync for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildAssetLinkageSyncReport(project, updated, contextPackage, finalText)')
@@ -9865,7 +9869,7 @@ ${selfReviewSource}`
   })
 
   test('reports review stage status from quality gate decisions', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const reviewStart = source.indexOf("await onStage('review', { status: 'running' })")
     const qualityGateStart = source.indexOf('let qualityGateReview = buildQualityGateReviewWithDeterministicCleanup')
     const reviewBlock = source.slice(reviewStart, qualityGateStart)

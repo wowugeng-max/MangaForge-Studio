@@ -1428,8 +1428,9 @@ describe('novel writing service prose quality wiring', () => {
 
   test('rechecks revised prose before advisory admission classification', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const generateSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const qualityLoopStart = source.indexOf('let qualityLoop: Awaited<ReturnType<typeof runProseQualityLoop>>')
-    const gateStart = source.indexOf('const preStoreQualityDecision =', qualityLoopStart)
+    const gateStart = generateSource.indexOf('const preStoreQualityDecision =', qualityLoopStart)
     const reviewCallbackStart = source.indexOf('review: async ({ prompt, round, attempt }) => {', qualityLoopStart)
     const reviseCallbackStart = source.indexOf('revise: async ({ prompt, round }) => {', reviewCallbackStart)
     const qualityLoopEnd = source.indexOf('\n    } catch (error: any) {', reviseCallbackStart)
