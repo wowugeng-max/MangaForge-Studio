@@ -32,6 +32,9 @@
 
 Recent extracts (continued):
 
+- 2026-07-19 night++: delta-sync storyline leaf (~1190 monofile); generate-chapter draft-sync (~1989); knowledge-base package (~590); NovelStudio panels (~1560); workspaceUiShell split. Remaining: NWS/WorkspaceCenter/StoryPlanning/ACD/builders-annotations further, Task 11 smoke/memory.
+
+
 - 2026-07-19 night+: generate-chapter draft-sync leaf (~1989 monofile); knowledge-base package complete (~590); NovelStudio panels ~1560; workspaceUiShell a/b; multiple monotest halves; soft baselines lowered. Still open: NWS residual composition, WorkspaceCenter/StoryPlanning/ACD/builders-annotations/delta-sync further split, Task 11 full smoke/memory.
 
 
