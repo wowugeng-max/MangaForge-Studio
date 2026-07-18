@@ -121,6 +121,7 @@ describe('workspace payload parse cache', () => {
     const writing = [
       source('writingCockpitModel.ts'),
       source('writing-cockpit/model/cockpit-basics.ts'),
+      source('writing-cockpit/model/cockpit-basics-context.ts'),
       [source('writing-cockpit/model/cockpit-acceptance.ts'), source('writing-cockpit/model/cockpit-acceptance-desk.ts')].join('\n'),
       source('writing-cockpit/model/cockpit-planning.ts'),
     ].join('\n')

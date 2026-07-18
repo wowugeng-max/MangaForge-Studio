@@ -209,6 +209,7 @@ function writingCockpitModelSource() {
     sourceCached('writing-cockpit/model/types.ts', localSourceCache),
     sourceCached('writing-cockpit/model/helpers.ts', localSourceCache),
     sourceCached('writing-cockpit/model/cockpit-basics.ts', localSourceCache),
+    sourceCached('writing-cockpit/model/cockpit-basics-context.ts', localSourceCache),
     sourceCached('writing-cockpit/model/cockpit-acceptance.ts', localSourceCache),
     sourceCached('writing-cockpit/model/cockpit-acceptance-desk.ts', localSourceCache),
     sourceCached('writing-cockpit/model/cockpit-planning.ts', localSourceCache),
