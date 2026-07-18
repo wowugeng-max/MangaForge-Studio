@@ -487,7 +487,7 @@ describe('chapter context contracts a a', () => {
     expect(safetyApprovalBlock).not.toContain("buildApprovalError('safety'")
   })
   test('passes deterministic cleanup report into cleanup repair prompts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const revisionPrompt = source.slice(
       source.indexOf('const buildProseRevisionPrompt'),
       source.indexOf('const shouldReviseProse'),
@@ -505,7 +505,7 @@ describe('chapter context contracts a a', () => {
     expect(reviewNormalizeBlock).toContain('options.deterministic_prose_cleanup')
   })
   test('asks prose self review and revision to enforce oh-story dialogue checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -595,7 +595,7 @@ describe('chapter context contracts a a', () => {
     expect(reviewNormalizeBlock).toContain('reviewPayload?.dialogue_checks')
   })
   test('asks prose self review and revision to enforce oh-story plot dynamics checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -626,7 +626,7 @@ describe('chapter context contracts a a', () => {
     expect(reviewNormalizeBlock).toContain('reviewPayload?.plot_dynamics_checks')
   })
   test('asks prose self review and revision to enforce oh-story story power checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -683,7 +683,7 @@ describe('chapter context contracts a a', () => {
     expect(report.delivered.map((item: any) => item.key).join('｜')).toContain('causal_feedback_rules')
   })
   test('asks prose self review and revision to enforce oh-story continuity heat checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -711,7 +711,7 @@ describe('chapter context contracts a a', () => {
     expect(reviewNormalizeBlock).toContain('reviewPayload?.continuity_heat_checks')
   })
   test('asks prose self review and revision to enforce oh-story character relation checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -744,7 +744,7 @@ describe('chapter context contracts a a', () => {
     expect(reviewNormalizeBlock).toContain('reviewPayload?.character_relation_checks')
   })
   test('asks prose self review and revision to enforce oh-story information flow checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),

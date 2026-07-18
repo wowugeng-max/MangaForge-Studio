@@ -16,6 +16,17 @@
 
 
 
+### Residual inventory update (2026-07-19 goal-continue XXVIII)
+
+Landed:
+- `prose-self-review` package: methods barrel (~319) + prompts (~621) + policy (~412) + run (~1029)
+- Source-contract tests package-join all 4 leaves; methods return composes runner without early `const run...` shadowing
+- Soft baselines for self-review leaves; package-join fixes for specialty risks + unattended register-chapter-groups in focused tests
+
+Task 11 focused: contracts-a + word-target-a + regression + architecture **110 pass**
+
+Still deferred ≥1k: provider-runtime, NWS view, paragraph-prose-context, helpers-batch-risk-radar, knowledge panels, auto-repair-preflight; run leaf still ~1029.
+
 ### Residual inventory update (2026-07-19 goal-continue XXVII)
 
 Landed:

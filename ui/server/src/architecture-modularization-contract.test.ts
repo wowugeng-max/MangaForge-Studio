@@ -29,6 +29,10 @@ const HARD_CAPS: Record<string, number> = {
 }
 
 const SOFT_BASELINES: Record<string, number> = {
+  'novel-writing-service/service/prose-self-review-methods.ts': 350,
+  'novel-writing-service/service/prose-self-review-prompts.ts': 650,
+  'novel-writing-service/service/prose-self-review-policy.ts': 450,
+  'novel-writing-service/service/prose-self-review-run.ts': 1050,
   'llm/executor-helpers.ts': 480,
   'llm/executor.ts': 650,
   'routes/novel-editor/builders.ts': 900,

@@ -263,7 +263,7 @@ const readDraftSyncReviewRecordSource = () => readFileSync(join(import.meta.dir,
 
 describe('chapter pre-draft brief sync-craft/next-chapter-plan', () => {
   test('asks prose review to output a next-chapter quality continuity plan', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -284,7 +284,7 @@ describe('chapter pre-draft brief sync-craft/next-chapter-plan', () => {
   })
 
   test('asks prose revision to output a final next-chapter quality continuity plan', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const revisionPrompt = source.slice(
       source.indexOf('const buildProseRevisionPrompt'),
       source.indexOf('const shouldReviseProse'),
@@ -597,7 +597,7 @@ describe('chapter pre-draft brief sync-craft/next-chapter-plan', () => {
   })
 
   test('keeps next-chapter quality plan in normalized prose self review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -612,7 +612,7 @@ describe('chapter pre-draft brief sync-craft/next-chapter-plan', () => {
   })
 
   test('treats a missing next-chapter quality plan as a prose revision trigger', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const revisionDecisionBlock = source.slice(
       source.indexOf('const nextChapterQualityPlanNeedsRepair'),
       source.indexOf('const runProseSelfReviewAndRevision'),
@@ -641,7 +641,7 @@ describe('chapter pre-draft brief sync-craft/next-chapter-plan', () => {
   })
 
   test('keeps final next-chapter quality plan in prose revision result', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const revisionStart = source.indexOf('const revisionPayload = getNovelPayload(revisionResult)')
     const revisionBlock = source.slice(
       revisionStart,

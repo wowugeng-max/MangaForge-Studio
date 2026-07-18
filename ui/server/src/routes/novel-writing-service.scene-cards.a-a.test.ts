@@ -425,7 +425,7 @@ describe('normalizeSceneCardsPayload a a', () => {
 
   test('wires chapter positioning and benchmark structure coordinates into scene-card and prose prompts', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
-    const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const selfReviewSource = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const promptBlock = readSceneCardsPromptSource()
     const proseStart = source.indexOf('export function buildParagraphProseContext')
     const proseEnd = source.indexOf('const buildStoryStatePrompt =', proseStart)

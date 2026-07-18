@@ -263,7 +263,7 @@ const readDraftSyncReviewRecordSource = () => readFileSync(join(import.meta.dir,
 
 const readWritingServicePackageSource = () => [
   readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-context-scene-cards.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-prose.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-editor-meme-polish.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore.ts'), 'utf8'),
-  readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8'),
+  ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n'),
   readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8'),
   readFileSync(join(import.meta.dir, '../novel-writing-service/service/chapter-context-package.ts'), 'utf8'),
   readFileSync(join(import.meta.dir, '../novel-writing-service/quality/review-merge.ts'), 'utf8'),
@@ -293,7 +293,7 @@ describe('normalizeSceneCardsPayload quality a b', () => {
     expect(checks).toHaveLength(0)
   })
   test('wires deterministic character order risks into intent confirmation checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -347,7 +347,7 @@ describe('normalizeSceneCardsPayload quality a b', () => {
     expect(checks).toHaveLength(0)
   })
   test('wires deterministic beat sequence risks into intent confirmation checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -392,7 +392,7 @@ describe('normalizeSceneCardsPayload quality a b', () => {
     expect(checks).toHaveLength(0)
   })
   test('wires deterministic cost reward risks into intent confirmation checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -433,7 +433,7 @@ describe('normalizeSceneCardsPayload quality a b', () => {
     expect(checks).toHaveLength(0)
   })
   test('wires deterministic local victory cost risks into plot dynamics checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -443,7 +443,7 @@ describe('normalizeSceneCardsPayload quality a b', () => {
     expect(reviewBlock).toContain('...deterministicLocalVictoryCostChecks')
   })
   test('wires deterministic blueprint craft risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),

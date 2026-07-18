@@ -279,7 +279,7 @@ const readDraftSyncReviewRecordSource = () => readFileSync(join(import.meta.dir,
 
 describe('chapter context regression a a', () => {
   test('asks prose self review and revision to enforce oh-story chapter hook checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -320,7 +320,7 @@ describe('chapter context regression a a', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story paragraph hook checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -355,7 +355,7 @@ describe('chapter context regression a a', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story suspense checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -401,7 +401,7 @@ describe('chapter context regression a a', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story reversal checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -436,7 +436,7 @@ describe('chapter context regression a a', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story opening checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -474,7 +474,7 @@ describe('chapter context regression a a', () => {
   })
 
   test('asks prose self review to enforce opening hook strategy contract', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -787,7 +787,7 @@ describe('chapter context regression a a', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story prose craft checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
