@@ -20,6 +20,7 @@ import {
   normalizeAssetLinkageStateChangeCheck,
 } from '../../novel-writing/asset-linkage-basics'
 import {
+  BEAT_COOLING_LABELS,
   beatCoolingPriority,
   beatCoolingSequence,
 } from '../../novel-writing/beat-cooling-basics'
@@ -144,6 +145,8 @@ import {
   normalizeReaderDesireFormulaRulesCheck,
 } from '../../novel-writing/emotional-arc-execution-basics'
 import {
+  scanDownwardSafetyRisks,
+  scanOppressionPurposeRisks,
   scanPayoffDensityRisks,
   scanPayoffEscalationRisks,
   scanTrumpCardEffectRisks,
@@ -277,6 +280,7 @@ import {
   scanProseStaticEnvironmentRisks,
   scanRecapFillerRisks,
   scanVagueQuantityWeightRisks,
+  scanEmotionalStasisRisks,
 } from '../../novel-writing/prose-craft-scans'
 import {
   scanPeriodMonotonyRisks,
