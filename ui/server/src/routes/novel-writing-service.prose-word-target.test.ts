@@ -289,10 +289,10 @@ describe('chapter prose word target', () => {
   })
 
   test('contracts over-target prose before returning the best complete candidate with a warning', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-word-target-methods.ts'), 'utf8')
     const ensureStart = source.indexOf('const ensureProseMeetsWordTarget =')
-    const ensureEnd = source.indexOf('const autoRepairChapterPreflightGaps =', ensureStart)
-    const ensureBlock = source.slice(ensureStart, ensureEnd)
+    const ensureEnd = source.indexOf('return {\n    ensureProseMeetsWordTarget,', ensureStart)
+    const ensureBlock = source.slice(ensureStart, ensureEnd > ensureStart ? ensureEnd : source.length)
     const tooLongStart = ensureBlock.indexOf('if (evaluation.too_long && options.contract !== false)')
     const contractionStart = ensureBlock.indexOf('const maxContractionAttempts', tooLongStart)
     const expansionStart = ensureBlock.indexOf('const maxExpansionAttempts')

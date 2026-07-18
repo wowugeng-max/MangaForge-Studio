@@ -1037,11 +1037,12 @@ describe('chapter context word target source guards', () => {
 
   test('declares word target inside chapter context builder instead of writing bible builder', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
-    const bibleStart = source.indexOf('const buildWritingBible =')
-    const bibleEnd = source.indexOf('const hasMeaningfulWritingBible =', bibleStart)
+    const bibleSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/writing-bible.ts'), 'utf8')
+    const bibleStart = bibleSource.indexOf('export function buildWritingBible')
+    const bibleEnd = bibleSource.indexOf('export function hasMeaningfulWritingBible', bibleStart)
     const contextStart = source.indexOf('const buildChapterContextPackage =')
     const basePackageStart = source.indexOf('const basePackage =', contextStart)
-    const bibleBlock = source.slice(bibleStart, bibleEnd)
+    const bibleBlock = bibleSource.slice(bibleStart, bibleEnd > bibleStart ? bibleEnd : bibleSource.length)
     const contextSetupBlock = source.slice(contextStart, basePackageStart)
 
     expect(bibleStart).toBeGreaterThanOrEqual(0)
@@ -1052,10 +1053,10 @@ describe('chapter context word target source guards', () => {
   })
 
   test('uses multiple completion attempts before failing a short chapter', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-word-target-methods.ts'), 'utf8')
     const ensureStart = source.indexOf('const ensureProseMeetsWordTarget =')
-    const groupStart = source.indexOf('const generateChapterForGroup =', ensureStart)
-    const ensureBlock = source.slice(ensureStart, groupStart)
+    const groupStart = source.indexOf('return {\n    ensureProseMeetsWordTarget,', ensureStart)
+    const ensureBlock = source.slice(ensureStart, groupStart > ensureStart ? groupStart : source.length)
 
     expect(ensureStart).toBeGreaterThanOrEqual(0)
     expect(ensureBlock).toContain('maxExpansionAttempts')
@@ -3346,7 +3347,7 @@ describe('chapter context word target source guards', () => {
     expect(reviewBlock).toContain('buildLLMResultDiagnostics(result)')
   })
   test('stops structured review fill after a batch LLM failure', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/structured-review-fill-methods.ts'), 'utf8')
     const fillStart = source.indexOf('const fillMissingStructuredReviewChecks')
     const loopStart = source.indexOf('for (const batchFields of batches)', fillStart)
     const payloadStart = source.indexOf('const payload = getNovelPayload(result)', loopStart)
@@ -3365,7 +3366,7 @@ describe('chapter context word target source guards', () => {
     const reviewPromptStart = source.indexOf('const buildProseReviewPrompt =')
     const revisionPromptStart = source.indexOf('const buildProseRevisionPrompt =', reviewPromptStart)
     const reviewPromptBlock = source.slice(reviewPromptStart, revisionPromptStart)
-    const revisionPromptEnd = source.indexOf('const runCommercialEditorRewrite', revisionPromptStart)
+    const revisionPromptEnd = source.indexOf('const shouldReviseProse', revisionPromptStart)
     const revisionPromptBlock = source.slice(revisionPromptStart, revisionPromptEnd)
 
     expect(reviewPromptStart).toBeGreaterThanOrEqual(0)
@@ -5771,11 +5772,11 @@ describe('chapter context word target source guards', () => {
   })
 
   test('stores common post-delivery sync reviews through the shared record builder', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
     const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
     const updateStoryStateStart = source.indexOf('const updateStoryStateMachine = async')
-    const updateStoryStateEnd = source.indexOf('const buildWritingBible =', updateStoryStateStart)
-    const updateStoryStateBlock = source.slice(updateStoryStateStart, updateStoryStateEnd)
+    const updateStoryStateEnd = source.indexOf('return {', updateStoryStateStart)
+    const updateStoryStateBlock = source.slice(updateStoryStateStart, updateStoryStateEnd > updateStoryStateStart ? updateStoryStateEnd : source.length)
 
     expect(updateStoryStateBlock).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: chapterHandoffSync, reviewType: 'chapter_handoff_sync'")
     expect(updateStoryStateBlock).toContain('sync: readerExpectationSync')
@@ -7266,13 +7267,14 @@ describe('chapter context word target source guards', () => {
   })
 
   test('persists the style fingerprint snapshot through the story state machine update', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const monofileSource = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const prepareStart = source.indexOf('const prepareStoryStateUpdate = async')
     const prepareEnd = source.indexOf('const updateStoryStateMachine = async', prepareStart)
-    const prepareBlock = source.slice(prepareStart, prepareEnd)
-    const acceptanceStart = source.indexOf('acceptance = await commitNovelChapterAcceptance(')
-    const acceptanceEnd = source.indexOf('const updated = acceptance.chapter', acceptanceStart)
-    const acceptanceBlock = source.slice(acceptanceStart, acceptanceEnd)
+    const prepareBlock = source.slice(prepareStart, prepareEnd > prepareStart ? prepareEnd : source.length)
+    const acceptanceStart = monofileSource.indexOf('acceptance = await commitNovelChapterAcceptance(')
+    const acceptanceEnd = monofileSource.indexOf('const updated = acceptance.chapter', acceptanceStart)
+    const acceptanceBlock = monofileSource.slice(acceptanceStart, acceptanceEnd)
 
     expect(prepareBlock).toContain('buildStyleFingerprintStateSnapshot(contextPackage, project, project.reference_config?.story_state || {})')
     expect(prepareBlock).toContain('stateDeltaWithStyleFingerprint')
