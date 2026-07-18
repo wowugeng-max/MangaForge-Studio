@@ -294,11 +294,11 @@ ui/server/src/novel/
 
 ## 10. 成功标准
 
-- [ ] 生产写路径 0 次 `mutateNovelStore` / 热路径 `replaceStoreInOpenDb`
-- [ ] `ui/server/src/novel.ts` 仅为兼容 re-export
-- [ ] 单 repo 文件体量可控（目标 <600 行）
-- [ ] 测试按模块拆分，无 1900+ 行巨石 novel 单测作为唯一归属
-- [ ] 现有相关 bun test 通过
+- [x] 生产写路径 0 次 `mutateNovelStore` / 热路径 `replaceStoreInOpenDb`
+- [x] `ui/server/src/novel.ts` 仅为兼容 re-export
+- [x] 单 repo 文件体量可控（目标 <600 行）
+- [x] 测试按模块拆分，无 1900+ 行巨石 novel 单测作为唯一归属
+- [x] 现有相关 bun test 通过
 - [ ] 写章/入库内存尖刺明显下降
 
 ---

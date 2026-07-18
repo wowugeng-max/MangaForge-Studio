@@ -10,6 +10,16 @@
 
 **Design spec:** `docs/superpowers/specs/2026-07-18-novel-store-sql-repos-design.md`
 
+## Status
+
+Completed on 2026-07-18 via package modularization commits through `662f6810`:
+- point SQL writes / no hot-path full-store rewrite
+- `ui/server/src/novel/` module tree + concrete imports
+- monotest split into package domain tests
+- contracts green (`65 pass` focused novel package suite)
+
+Out of scope remains: `novel-writing-service.ts` split (explicitly excluded).
+
 ---
 
 ## File map (target)
