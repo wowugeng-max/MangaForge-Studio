@@ -30,7 +30,10 @@
 | 10 shell UI split | in progress | TaskCenter multi-leaf; planning signals+radar; NWS topbar/deferred; main ~6.6k |
 | 11 final hardening | open | |
 
-Recent extracts: `drawer-previews`, `planning-workspace-builder-signals`, `delivery-risk-carry-over-prose-quality-extended`, `workspace-topbar`.
+Recent extracts (continued): delta-sync-revision, quality-sync threshold/arcs, audience-extended, risk-recovery-governance, planning-radar, NWS body/deferred/topbar, TaskCenter monotest slices, cockpit target-actions test, annotations repair-tasks, ProseEditor.
+
+Still open: NWS handlers monofile (~6.5k), large monotests (pre-draft/director), Task 11 hardening.
+
 
 
 ---
