@@ -21,6 +21,7 @@ import {
   autoCreationDirectorWorkspaceSource,
   writingCockpitModelSource,
   writingRecommendationModelSource,
+  settingWorkshopSource,
 } from './workspaceUiShellSource'
 
 describe('commercial writing workspace UI shell a b', () => {
@@ -216,10 +217,7 @@ describe('commercial writing workspace UI shell a b', () => {
   })
 
   test('shows storyline workshop types and draft brief storyline section', () => {
-    const settingPanel = [
-      source('SettingWorkshopPanel.tsx'),
-      source('settingWorkshopHelpers.ts'),
-    ].join('\n')
+    const settingPanel = settingWorkshopSource()
     const usageModel = source('settingUsageWorkbenchModel.ts')
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')

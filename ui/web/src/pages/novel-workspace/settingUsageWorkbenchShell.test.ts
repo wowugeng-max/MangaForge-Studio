@@ -6,9 +6,17 @@ function source(file: string) {
   return readFileSync(join(import.meta.dir, file), 'utf8')
 }
 
+function settingWorkshopSource() {
+  return [
+    source('SettingWorkshopPanel.tsx'),
+    source('use-setting-workshop-model.ts'),
+    source('settingWorkshopHelpers.ts'),
+  ].join('\n')
+}
+
 describe('setting usage workbench shell', () => {
   test('renders a chapter-first usage board before the asset type tabs', () => {
-    const component = source('SettingWorkshopPanel.tsx')
+    const component = settingWorkshopSource()
 
     expect(component).toContain('setting-workshop-usage-board')
     expect(component).toContain('usageFilterOptions.map')
@@ -20,7 +28,7 @@ describe('setting usage workbench shell', () => {
   })
 
   test('renders compact scheduling cards instead of raw debug-style asset cards', () => {
-    const component = source('SettingWorkshopPanel.tsx')
+    const component = settingWorkshopSource()
 
     expect(component).toContain('setting-workshop-asset-card')
     expect(component).toContain('setting-workshop-usage-segment')
@@ -33,7 +41,7 @@ describe('setting usage workbench shell', () => {
   })
 
   test('filters each asset tab by that tab type instead of reusing one global type result', () => {
-    const component = source('SettingWorkshopPanel.tsx')
+    const component = settingWorkshopSource()
 
     expect(component).toContain('filterSettingsForUsage(settings, usageMap, item.value, activeUsageFilter)')
     expect(component).not.toContain('filterSettingsForUsage(settings, usageMap, activeType, activeUsageFilter)')
@@ -47,7 +55,7 @@ describe('setting usage workbench shell', () => {
       source('shell/workspace-view-props-area.ts'),
     ].join('\n')
     const assetsWorkspace = source('StoryAssetsWorkspace.tsx')
-    const settingPanel = source('SettingWorkshopPanel.tsx')
+    const settingPanel = settingWorkshopSource()
 
     expect(projectWorkspace).toContain('projectSettings')
     expect(projectWorkspace).toContain('projectSettings={projectSettings}')

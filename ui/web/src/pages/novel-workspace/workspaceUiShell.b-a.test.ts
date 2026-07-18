@@ -21,6 +21,7 @@ import {
   autoCreationDirectorWorkspaceSource,
   writingCockpitModelSource,
   writingRecommendationModelSource,
+  settingWorkshopSource,
 } from './workspaceUiShellSource'
 
 describe('commercial writing workspace UI shell b a', () => {
@@ -447,7 +448,7 @@ describe('commercial writing workspace UI shell b a', () => {
   test('shows discovered asset intake in delivery strip and setting workshop', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
-    const settingPanel = source('SettingWorkshopPanel.tsx')
+    const settingPanel = settingWorkshopSource()
     const projectWorkspace = projectWorkspaceSource()
 
     expect(workspaceCenter).toContain('assetIntake')

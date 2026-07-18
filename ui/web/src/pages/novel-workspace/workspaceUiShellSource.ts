@@ -199,6 +199,18 @@ export function workspaceCenterSource() {
   return workspaceCenterSourceCache
 }
 
+let settingWorkshopSourceCache: string | null = null
+export function settingWorkshopSource() {
+  if (settingWorkshopSourceCache != null) return settingWorkshopSourceCache
+  settingWorkshopSourceCache = [
+    sourceCached('SettingWorkshopPanel.tsx', localSourceCache),
+    sourceCached('use-setting-workshop-model.ts', localSourceCache),
+    sourceCached('settingWorkshopHelpers.ts', localSourceCache),
+  ].join('\n')
+  return settingWorkshopSourceCache
+}
+
+
 export function projectWorkspaceSource() {
   if (projectWorkspaceSourceCache != null) return projectWorkspaceSourceCache
   projectWorkspaceSourceCache = [
