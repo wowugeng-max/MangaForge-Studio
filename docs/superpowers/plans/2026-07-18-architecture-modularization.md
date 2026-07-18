@@ -26,8 +26,8 @@
 | 6 monotest split | done | `novel-writing-service.test.ts` shim-only |
 | 7 editor/core routes packages | largely done | editor, core, commercial-ops, generation, planning package-split (builders/register); deeper domain split open |
 | 8 auto-creation model package | in progress | risk multi-leaf; director helpers modularized |
-| 9 cockpit + repair prompt | in progress | repair support multi-leaf; prompt still ~2.7k monofunction; cockpit-acceptance split |
-| 10 shell UI split | in progress | TaskCenter multi-leaf; NWS shell + editor-fields; main still ~7.7k |
+| 9 cockpit + repair prompt | in progress | prompt split to context(~597)+lines(~2.3k); support multi-leaf; cockpit-acceptance split |
+| 10 shell UI split | in progress | TaskCenter multi-leaf + safe-batch; NWS shell fields/commercial/serial; main ~7.5k |
 | 11 final hardening | open | |
 
 
@@ -470,6 +470,8 @@ cd ui/server && bun test src/novel/mutation-contract.test.ts src/novel/sqlite-pe
 ```
 
 ## Progress log (agent)
+
+- 2026-07-18 evening: prompt-lines, planning boards/desks, drawer-safe-batch, serial-momentum gap-runs, NWS commercial-result + serial-pipeline extracts; verification ~422 pass focused suite
 - 2026-07-18: drawer-safe-batch, repair prompt-lines, planning boards leaves extracted
 - 2026-07-18: serial-momentum gap-runs leaf extracted (~2554 + ~693); planning builder desks leaf (~2979 + ~861); NWS shell editor-fields + story-state helper; source contracts updated
 
