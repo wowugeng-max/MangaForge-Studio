@@ -27,10 +27,12 @@
 | 7 editor/core routes packages | largely done | editor, core, commercial-ops, generation, planning package-split |
 | 8 auto-creation model package | largely done | risk multi-leaf + director monotest 4-way split + leaf binding fixes |
 | 9 cockpit + repair prompt | largely done | cockpit monotest 4-way; repair monotest 4-way; prompt multi-leaf |
-| 10 shell UI split | progressed | NWS ~2.0k multi-factory; remaining large production monofiles open |
-| 11 final hardening | open | monotests heavily reduced; smoke/memory still open |
+| 10 shell UI split | largely done | NWS/ACD/deferred-surfaces barrels; view leaves remain large composition roots |
+| 11 final hardening | progressed | architecture contracts + focused novel/web suites green; pre-existing opening-handoff runtime fails; live smoke still manual |
 
 Recent extracts (continued):
+
+- 2026-07-19 Task11 partial: architecture contracts green; chapter-context contracts/handoff green (opening-handoff runtime failures pre-existing); storyline a/b green after delta-sync leaf binding fix; workspaceUiShell a/b 92 pass. Monofile sizes: generate-chapter ~982, delta-sync ~210, NWS barrel 2 / view ~2003, deferred-surfaces barrel 2, WorkspaceCenter ~793. Memory: module load of generate-chapter + delta-sync remains stable in bun tests (no full-store rewrite path). Remaining optional residual composition (NWS view handler wiring, WorkspaceCenter toolbar) and full smoke against live app UI.
 
 - 2026-07-19 goal: delta-sync receipt builders leaf (~208 monofile + receipts/storyline/revision); generate-chapter mid-pipeline earlier.
 
