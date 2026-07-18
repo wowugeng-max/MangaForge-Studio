@@ -43,9 +43,10 @@ const SOFT_BASELINES: Record<string, number> = {
   'routes/novel-writing-service.chapter-context.test.ts': 3600,
   'routes/novel-writing-service.prose-word-target.test.ts': 1800,
   'routes/novel-writing-service.readability-meme.test.ts': 2200,
-  'novel-writing-service/service/generate-chapter-for-group-methods.ts': 2500,
+  'novel-writing-service/service/generate-chapter-for-group-methods.ts': 2300,
   'novel-writing-service/post-delivery/scene-card-delivery-risk.ts': 1300,
   'routes/novel-editor/builders-annotations.ts': 2000,
+  'knowledge-base.ts': 1500,
 }
 
 describe('architecture modularization contracts', () => {
