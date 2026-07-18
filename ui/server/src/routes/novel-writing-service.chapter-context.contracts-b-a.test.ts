@@ -282,6 +282,8 @@ const readGenerateChapterForGroupSource = () => {
   const postDeliveryDir = join(import.meta.dir, '../novel-writing-service/post-delivery')
   return [
     readFileSync(join(serviceDir, 'generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(serviceDir, 'generate-chapter-context-scene-cards.ts'), 'utf8'), readFileSync(join(serviceDir, 'generate-chapter-draft-prose.ts'), 'utf8'), readFileSync(join(serviceDir, 'generate-chapter-editor-meme-polish.ts'), 'utf8'), readFileSync(join(serviceDir, 'generate-chapter-quality-prestore.ts'), 'utf8'),
+    readFileSync(join(serviceDir, 'generate-chapter-quality-prestore-loop.ts'), 'utf8'),
+    readFileSync(join(serviceDir, 'generate-chapter-quality-prestore-finalize.ts'), 'utf8'),
     readFileSync(join(serviceDir, 'generate-chapter-draft-mode-store.ts'), 'utf8'),
     readFileSync(join(serviceDir, 'generate-chapter-full-production-store.ts'), 'utf8'),
     readFileSync(join(serviceDir, 'generate-chapter-acceptance-prep.ts'), 'utf8'),
