@@ -1247,7 +1247,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const repairPrompt = source('repair-task/prompt.ts')
+    const repairPrompt = [source('repair-task/prompt.ts'), source('repair-task/prompt-lines.ts')].join('\n')
     const service = writingServiceSource()
 
     expect(workspaceCenter).toContain('期待债务承接')
