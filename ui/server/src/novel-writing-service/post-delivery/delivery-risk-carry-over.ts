@@ -3,6 +3,7 @@ import { compactBriefText, uniqueBriefStrings } from '../quality/text-utils'
 import {
   deliveryRiskItemText,
   normalizeDeliveryRiskCarryOverContext,
+  normalizeDeliveryRiskReceiptDelivered,
 } from './delivery-risk-core'
 import {
   artifactProtocolReceiptsFromSource,
@@ -81,7 +82,8 @@ import {
   proseQualityTitleUniquenessRisks,
   proseQualityUpgradeRhythmRisks,
   proseQualityWordCountRisks,
-  proseQualityWritePreparationRisks
+  proseQualityWritePreparationRisks,
+  readabilityAiSmellRisks,
 } from '../quality/prose-quality-risks'
 
 export function normalizeStoredOhStoryDeliveryReceipts(source: any = {}) {

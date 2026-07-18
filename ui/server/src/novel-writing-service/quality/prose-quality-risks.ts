@@ -3520,7 +3520,7 @@ export function proseQualityFiveDimensionRisks(payload: any) {
     .filter((item: any) => item.label || item.evidence || item.fix)
 }
 
-function readabilityAiSmellRisks(payload: any) {
+export function readabilityAiSmellRisks(payload: any) {
   const aiSmell = payload?.ai_smell || payload?.aiSmell || {}
   const level = compactBriefText(aiSmell?.level || payload?.ai_smell_level || payload?.aiSmellLevel)
   const normalizedLevel = level.toLowerCase()
