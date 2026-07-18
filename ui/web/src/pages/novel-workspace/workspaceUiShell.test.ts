@@ -123,6 +123,7 @@ function taskCenterSource() {
     sourceCached('TaskCenterDrawer.tsx', localSourceCache),
     sourceCached('task-center/chapter-group.ts', localSourceCache),
     sourceCached('task-center/drawer-model.tsx', localSourceCache),
+    sourceCached('task-center/drawer-snapshots.tsx', localSourceCache),
     sourceCached('task-center/TaskCenterDrawerPanel.tsx', localSourceCache),
   ].join('\n')
   return taskCenterSourceCache
