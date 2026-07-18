@@ -16,6 +16,11 @@ import { asArray, buildLLMResultDiagnostics, clampScore, extractLLMText, getNove
 import { mergeProseQualityWithDeliveryRisks } from '../../novel-writing/prose-quality-delivery-link'
 import { collectPlanAlignmentPatchesAfterProseChange, collectProjectPlanAlignmentPatches } from '../../novel-writing/chapter-plan-from-prose'
 import { buildLiveContractChapterPatch, collectClosedBeatFamiliesFromChapters } from '../../novel-writing/closed-beat-canon'
+import {
+  deliveryRiskMissedCount,
+  deslopRepairReceiptCount,
+  qualityAuditRepairReceiptCount,
+} from './builders-quality-receipt-helpers'
 
 export type EditorRoutesContext = {
   getWorkspace: () => string
