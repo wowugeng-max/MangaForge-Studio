@@ -88,3 +88,15 @@ export function seedDiagnosticsNeedReview(value: any) {
   return status === 'needs_author_review' || status === 'needs_model_expansion'
 }
 
+export function restoreDeepDraftReview(draftSeed: any, savedReview: any) {
+  const baseReview = buildDeepDraftReviewForUi(draftSeed)
+  const review = asObject(savedReview)
+  return repairDeepDraftReviewModelGaps({
+    basics: { ...baseReview.basics, ...asObject(review.basics) },
+    world: { ...baseReview.world, ...asObject(review.world) },
+    characters: Array.isArray(review.characters) ? review.characters : baseReview.characters,
+    volumes: Array.isArray(review.volumes) ? review.volumes : baseReview.volumes,
+    chapters: Array.isArray(review.chapters) ? review.chapters : baseReview.chapters,
+    continuity: { ...baseReview.continuity, ...asObject(review.continuity) },
+  }, draftSeed)
+}

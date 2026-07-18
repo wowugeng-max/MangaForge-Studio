@@ -29,6 +29,12 @@ Landed reverse-free splits + leaf binding fixes:
 
 Additional landed (XIV): quality-sync craft bridge/prose/punctuation; scene-card-delivery-risk bind/actions; memory-service types/runtime/agent; closed-beat-canon shared/detect/live/gates; chapter-blueprint-execution basics/checks/scans.
 
+### Task 11 progress (2026-07-19 goal-continue)
+
+Focused regression green: **261 tests / 0 fail** across architecture contracts, run/setting/bible routes, serial-momentum, readability pipeline-a, pre-draft sync-core-a, prompt-sections, workspace shell a/b, CreateWizard flow, cockpit planning, TaskCenter safe-batch-a.
+
+Still open: full write-path UI smoke + memory note; residual composition roots and DI-heavy monofiles (`provider-runtime`, audience/craft, NWS view, studio controller, giant single-function leaves).
+
 Still open for Task 11:
 - Residual composition roots (`NovelProjectWorkspaceView`, `useNovelStudioController`, `provider-runtime`, audience/craft monofiles)
 - Full write-path UI smoke / memory notes
