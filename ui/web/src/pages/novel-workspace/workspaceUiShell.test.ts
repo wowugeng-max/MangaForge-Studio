@@ -1095,7 +1095,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const repairPrompt = source('repairTaskRevisionPrompt.ts')
+    const repairPrompt = source('repair-task/prompt.ts')
     const service = readFileSync(join(import.meta.dir, '../../../../server/src/novel-writing-service/monolith.ts'), 'utf8')
 
     expect(workspaceCenter).toContain('期待债务承接')

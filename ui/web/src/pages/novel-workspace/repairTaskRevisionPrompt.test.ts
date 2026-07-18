@@ -26,7 +26,7 @@ describe('buildRepairTaskRevisionPrompt', () => {
   }
 
   test('keeps every prompt quality contract wired into required-field validation', () => {
-    const source = readFileSync(new URL('./repairTaskRevisionPrompt.ts', import.meta.url), 'utf8')
+    const source = readFileSync(new URL('./repair-task/prompt.ts', import.meta.url), 'utf8')
     const promptContractKeys = new Set(promptQualityContractFields(source).keys())
     const requiredFieldKeys = new Set(listQualityContractRequiredFieldKeys())
 
@@ -37,7 +37,7 @@ describe('buildRepairTaskRevisionPrompt', () => {
   })
 
   test('keeps prompt quality contract fields identical to required-field validation', () => {
-    const source = readFileSync(new URL('./repairTaskRevisionPrompt.ts', import.meta.url), 'utf8')
+    const source = readFileSync(new URL('./repair-task/prompt.ts', import.meta.url), 'utf8')
     const promptContracts = promptQualityContractFields(source)
     const requiredFields = listQualityContractRequiredFields()
     const mismatches = [...promptContracts.entries()]
