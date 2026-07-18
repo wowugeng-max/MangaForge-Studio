@@ -128,6 +128,13 @@ export function isCompletedRepairRun(run: AnyRecord) {
   return ['completed', 'success', 'done'].includes(text(run?.status).toLowerCase())
 }
 
+import {
+  batchRiskIssueBatchKey,
+  batchRiskIssueKeys,
+  repairTaskIssueType,
+  resolvedBatchRiskIssueTypes,
+} from './helpers-risk-issue-catalog'
+
 export * from './helpers-risk-issue-catalog'
 
 export function recoveryEvidenceReleaseSummaryFromPreflight(preflight: AnyRecord | null | undefined) {
