@@ -590,3 +590,6 @@ cd ui/server && bun test src/novel/mutation-contract.test.ts src/novel/sqlite-pe
 - 2026-07-18 late+: prose-word-target + readability-meme monotest splits; serial-momentum/quality-sync leaf import repairs.
 
 - 2026-07-18 cont: post-commit-sync-bundle; scene-card-delivery-risk-apply leaf; builders-annotations-delivery-risk; NWS first30/style-sample views; generate-chapter ~2.4k.
+
+- 2026-07-19 goal-continue: prompt-lines-quality package (core/craft-a/b/receipts/repairs); novel-production run-state + post-delivery leaves (monofile ~637); support-normalize-repairs batch/post/scene/audit; quality-contract evidence/fields/checks; specialty closure A/B/C; risk issue catalog leaf + explicit re-import. Task11 modularization batch green (architecture+core+editor delivery/revision/quality+production behavior+shell+repair prompt+writingRecommendation). provider-runtime mechanical split aborted (private helper DI incomplete). Remaining: NWS view composition ~1764, useNovelStudioController ~1256, audience/craft monofiles (no mechanical private-const splits), provider-runtime reverse-free DI plan, Task11 full UI write-path smoke/memory under load.
+
