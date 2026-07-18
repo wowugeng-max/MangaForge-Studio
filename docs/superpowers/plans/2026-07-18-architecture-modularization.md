@@ -13,6 +13,15 @@
 **Branch:** `codex/architecture-modularization`
 
 
+### Residual inventory update (2026-07-19 goal-continue LIX)
+- Cycle-free package-split `chapter-continuity-guard` into basics (~316) + directives (~521) + barrel.
+- Split deferred-ops surfaces into toolbox/creative/bible modal leaves + thin composer.
+- Split `helpers-batch-guardrail-core` into signals-state (~486) + decision (~655) + thin composer (~193).
+- Task 11 focused: continuity 12 + architecture 6 + shell/director guardrail batches green.
+- Still open: ComfyUI (~877 non-novel), NWS base model further thin (~889 orchestrator), bind-core (~763), Task 11 full UI write-path smoke.
+
+
+
 ### Residual inventory update (2026-07-19 goal-continue LVIII)
 - Extract QualityBenchmarkModal pure helpers leaf.
 - Package-join fix for chapter-group generation contract source contract.
