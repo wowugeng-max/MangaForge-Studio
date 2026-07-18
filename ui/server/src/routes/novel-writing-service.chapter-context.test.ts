@@ -1221,10 +1221,10 @@ describe('chapter context word target source guards', () => {
   })
 
   test('requires scene-card prompts to plan and prose prompts to execute beat density levels', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
     const scenePromptBlock = readSceneCardsPromptSource()
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
-    const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
+    const prosePromptEnd = source.length
     const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
 
     expect(prosePromptStart).toBeGreaterThanOrEqual(0)
@@ -1242,9 +1242,9 @@ describe('chapter context word target source guards', () => {
   })
 
   test('requires prose generation prompts to apply oh-story natural writing baselines', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
-    const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
+    const prosePromptEnd = source.length
     const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
 
     expect(prosePromptStart).toBeGreaterThanOrEqual(0)
@@ -1258,11 +1258,11 @@ describe('chapter context word target source guards', () => {
   })
 
   test('requires scene-card prompts and prose prompts to preserve purpose tags for detail allocation', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
     const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const scenePromptBlock = readSceneCardsPromptSource()
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
-    const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
+    const prosePromptEnd = source.length
     const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
 ${selfReviewSource}`
     const reviewPrompt = selfReviewSource.slice(
@@ -1290,10 +1290,10 @@ ${selfReviewSource}`
   })
 
   test('requires scene-card prompts to plan and prose prompts to execute sensory anchors', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
     const scenePromptBlock = readSceneCardsPromptSource()
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
-    const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
+    const prosePromptEnd = source.length
     const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
 
     expect(prosePromptStart).toBeGreaterThanOrEqual(0)
@@ -8253,11 +8253,11 @@ ${selfReviewSource}`
   })
 
   test('asks prose generation self review and revision to enforce oh-story subject name rhythm', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
     const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const promptSectionsSource = readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
-    const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
+    const prosePromptEnd = source.length
     const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
 ${selfReviewSource}`
     const proseCraftSnippetStart = promptSectionsSource.indexOf('function formatProseCraftPromptSnippet')
@@ -8289,10 +8289,10 @@ ${selfReviewSource}`
   })
 
   test('asks prose generation self review and revision to enforce oh-story natural paragraph rhythm', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
     const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
-    const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
+    const prosePromptEnd = source.length
     const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
 ${selfReviewSource}`
     const reviewPrompt = selfReviewSource.slice(
@@ -8318,10 +8318,10 @@ ${selfReviewSource}`
   })
 
   test('asks prose generation self review and revision to enforce oh-story specific character-count expression guard', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
     const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
-    const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
+    const prosePromptEnd = source.length
     const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
 ${selfReviewSource}`
     const reviewPrompt = selfReviewSource.slice(
@@ -8345,10 +8345,10 @@ ${selfReviewSource}`
   })
 
   test('asks prose generation self review and revision to enforce oh-story external fact research guard', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
     const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
-    const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
+    const prosePromptEnd = source.length
     const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
 ${selfReviewSource}`
     const reviewPrompt = selfReviewSource.slice(
@@ -8373,10 +8373,10 @@ ${selfReviewSource}`
   })
 
   test('asks prose generation self review and revision to enforce oh-story supporting-character buffer zones', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
     const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
-    const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
+    const prosePromptEnd = source.length
     const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
 ${selfReviewSource}`
     const reviewPrompt = selfReviewSource.slice(
@@ -8400,11 +8400,11 @@ ${selfReviewSource}`
   })
 
   test('asks prose generation self review and revision to enforce oh-story section density diagnosis', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
     const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const promptSectionsSource = readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
-    const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
+    const prosePromptEnd = source.length
     const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
 ${selfReviewSource}`
     const proseCraftSnippetStart = promptSectionsSource.indexOf('function formatProseCraftPromptSnippet')
@@ -8452,11 +8452,11 @@ ${selfReviewSource}`
   })
 
   test('asks prose generation self review and revision to enforce oh-story event content ratio', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
     const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const promptSectionsSource = readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
-    const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
+    const prosePromptEnd = source.length
     const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
 ${selfReviewSource}`
     const qualityAuditPromptStart = promptSectionsSource.indexOf('export function buildQualityAuditPromptSection')
@@ -8528,10 +8528,10 @@ ${selfReviewSource}`
   })
 
   test('asks prose generation self review and revision to enforce scene-card serial risk repairs', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
     const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
-    const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
+    const prosePromptEnd = source.length
     const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
 ${selfReviewSource}`
     const reviewPrompt = selfReviewSource.slice(
@@ -8564,9 +8564,9 @@ ${selfReviewSource}`
   })
 
   test('asks prose generation to output per-scene scene-card execution receipts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
-    const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
+    const prosePromptEnd = source.length
     const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
 
     expect(prosePromptStart).toBeGreaterThanOrEqual(0)
@@ -8588,9 +8588,9 @@ ${selfReviewSource}`
   })
 
   test('asks prose generation to output top-level oh-story delivery receipts for storage', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
-    const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
+    const prosePromptEnd = source.length
     const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
 
     expect(prosePromptStart).toBeGreaterThanOrEqual(0)
@@ -8746,10 +8746,10 @@ ${selfReviewSource}`
   })
 
   test('asks prose generation self review and revision to enforce oh-story punctuation function beats', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
     const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
-    const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
+    const prosePromptEnd = source.length
     const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
 ${selfReviewSource}`
     const reviewPrompt = selfReviewSource.slice(
