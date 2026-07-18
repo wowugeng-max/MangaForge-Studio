@@ -266,7 +266,7 @@ export function buildPlotFrameworkContract(project: any = {}, contextPackage: an
   }
 }
 
-const OH_STORY_OPENING_REQUIRED_BEATS = [
+export const OH_STORY_OPENING_REQUIRED_BEATS = [
   '从故事最精彩、最有冲突的地方写起。',
   '主角三种状态选一：身处危机 / 令人羡慕 / 被丢入陌生环境。',
   '300 字内主角登场，1000 字内出现爽点或期待点。',
@@ -275,13 +275,13 @@ const OH_STORY_OPENING_REQUIRED_BEATS = [
   '第一章必须说明：主角目标 + 本文卖点。',
 ]
 
-const OH_STORY_OPENING_FOUNDATION_POINTS = [
+export const OH_STORY_OPENING_FOUNDATION_POINTS = [
   '人设基点：展示主角核心性格和处境，建立代入感和共情。',
   '切入点基点：主角遭遇的第一个冲突/机遇，最好第 1 章完成。',
   '金手指基点：展示主角独特优势，前 3 章内完成。',
 ]
 
-const OH_STORY_OPENING_FIVE_ESSENTIALS_RULES = [
+export const OH_STORY_OPENING_FIVE_ESSENTIALS_RULES = [
   '简单点：简明扼要交代谁、在哪里、有什么、为什么、要做什么，第一章就点明。',
   '不能偏：开头剧情必须符合主线和本文卖点，跑偏就是零分开头。',
   '要快：切入剧情速度要快，磨磨蹭蹭交代背景就是啰嗦。',
@@ -289,7 +289,7 @@ const OH_STORY_OPENING_FIVE_ESSENTIALS_RULES = [
   '不能平：文似看山不喜平，开头必须有冲突矛盾，不能平淡如水。',
 ]
 
-const OH_STORY_OPENING_FORBIDDEN = [
+export const OH_STORY_OPENING_FORBIDDEN = [
   '大段背景介绍：开头全是缓没有冲突。',
   '天气/风景开头：除非反差极大。',
   '出场 3 个以上主要角色：信息过载。',
@@ -298,14 +298,14 @@ const OH_STORY_OPENING_FORBIDDEN = [
   '世界观详细解说：至少等到第一个一级结构结束。',
 ]
 
-const OH_STORY_OPENING_INFORMATION_PRIORITY = [
+export const OH_STORY_OPENING_INFORMATION_PRIORITY = [
   '背景融入冲突，用旁人议论或现场压力同时完成背景和冲突。',
   '背景信息分批释放，优先级：危机感 > 人设 > 金手指暗示 > 世界观。',
   '两个紧张场景间可以缓和，但缓和不等于无冲突。',
   '每个情报都要有期待价值，关键情报拉起“然后呢？”。',
 ]
 
-const OH_STORY_OPENING_QUALITY_CHECKS = [
+export const OH_STORY_OPENING_QUALITY_CHECKS = [
   '300 字内主角必须登场，且带着危机、优势或陌生环境进入现场。',
   '1000 字内必须出现爽点或期待点，不能只铺背景和世界观。',
   '三大基点必须可追踪：人设基点、切入点基点、金手指基点。',

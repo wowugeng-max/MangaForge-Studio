@@ -1,6 +1,16 @@
 import { asArray } from '../../routes/novel-route-utils'
 import { compactBriefText, uniqueBriefStrings } from './text-utils'
 
+import {
+  OH_STORY_OPENING_REQUIRED_BEATS,
+  OH_STORY_OPENING_FOUNDATION_POINTS,
+  OH_STORY_OPENING_FIVE_ESSENTIALS_RULES,
+  OH_STORY_OPENING_FORBIDDEN,
+  OH_STORY_OPENING_INFORMATION_PRIORITY,
+  OH_STORY_OPENING_QUALITY_CHECKS,
+} from './plot-opening-prose-contracts-plot'
+
+
 function openingExplicitContract(contextPackage: any = {}) {
   return contextPackage?.chapter_target?.opening_contract
     || contextPackage?.chapter_target?.openingContract
