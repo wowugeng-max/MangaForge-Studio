@@ -128,7 +128,7 @@ describe('workspace payload parse cache', () => {
     const directorHelpers = [
       source('auto-creation/model/helpers-main.ts'),
       source('auto-creation/model/helpers-basics.ts'),
-      source('auto-creation/model/helpers-risk-and-governance.ts'), source('auto-creation/model/helpers-risk-issue-catalog.ts'),
+      source('auto-creation/model/helpers-risk-and-governance.ts'), source('auto-creation/model/helpers-risk-issue-catalog.ts'), source('auto-creation/model/helpers-risk-review-signals.ts'), source('auto-creation/model/helpers-risk-shared.ts'),
     ].join('\n')
 
     for (const modelSource of [planning, writing, directorHelpers]) {

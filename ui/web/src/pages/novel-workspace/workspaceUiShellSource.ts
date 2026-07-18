@@ -89,7 +89,7 @@ export function directorModelSource() {
     sourceCached('auto-creation/model/helpers.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-basics.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-main.ts', localSourceCache),
-    sourceCached('auto-creation/model/helpers-risk-and-governance.ts', localSourceCache), sourceCached('auto-creation/model/helpers-risk-issue-catalog.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-risk-and-governance.ts', localSourceCache), sourceCached('auto-creation/model/helpers-risk-issue-catalog.ts', localSourceCache), sourceCached('auto-creation/model/helpers-risk-review-signals.ts', localSourceCache), sourceCached('auto-creation/model/helpers-risk-shared.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-risk-delivery-and-recovery.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-risk-recovery-governance.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-risk-strengthened-roadmap.ts', localSourceCache),
