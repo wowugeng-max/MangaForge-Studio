@@ -3556,7 +3556,7 @@ describe('chapter pre-draft brief', () => {
       null,
       { chapter_no: 18, title: '雨夜反证' },
     )
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPromptBlock = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -4192,7 +4192,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('wires benchmark recall checks into prose self-review and revision', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPromptBlock = source.slice(
       source.indexOf('const buildProseReviewPrompt ='),
       source.indexOf('const buildProseRevisionPrompt ='),
@@ -4230,7 +4230,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('asks prose self review and revision to enforce reader retention Hook addiction checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPromptBlock = source.slice(
       source.indexOf('const buildProseReviewPrompt ='),
       source.indexOf('const buildProseRevisionPrompt ='),
@@ -4267,7 +4267,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story style boundary checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPromptBlock = source.slice(
       source.indexOf('const buildProseReviewPrompt ='),
       source.indexOf('const buildProseRevisionPrompt ='),
@@ -4298,7 +4298,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('asks prose self review and revision to enforce style sample strategy checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPromptBlock = source.slice(
       source.indexOf('const buildProseReviewPrompt ='),
       source.indexOf('const buildProseRevisionPrompt ='),
@@ -4333,14 +4333,15 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('asks prose revision to preserve core direction and only repair evidenced findings', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const monofileSource = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const prosePromptSource = readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8')
     const prosePromptBlock = prosePromptSource.slice(
       prosePromptSource.indexOf('export function buildCoreContractRadarPromptSection'),
     )
-    const prosePromptCallBlock = source.slice(
-      source.indexOf('...buildLongformCompassPromptSection(longformCompass)'),
-      source.indexOf("nextBatchBrief ? '【本批连载任务书】'"),
+    const prosePromptCallBlock = monofileSource.slice(
+      monofileSource.indexOf('...buildLongformCompassPromptSection(longformCompass)'),
+      monofileSource.indexOf("nextBatchBrief ? '【本批连载任务书】'"),
     )
     const reviewPromptBlock = source.slice(
       source.indexOf('const buildProseReviewPrompt ='),
@@ -4384,7 +4385,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('asks prose self review and revision to enforce ten-chapter core selling point drift checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPromptBlock = source.slice(
       source.indexOf('const buildProseReviewPrompt ='),
       source.indexOf('const buildProseRevisionPrompt ='),
@@ -4448,7 +4449,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('wires deterministic benchmark recall risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse'),
@@ -6135,7 +6136,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('asks prose self review to enforce oh-story emotional three-blade methods', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -7786,7 +7787,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('wires deterministic vague quantity weight risks into prose craft self review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -13141,7 +13142,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('asks prose review to output a next-chapter quality continuity plan', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -13162,7 +13163,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('asks prose revision to output a final next-chapter quality continuity plan', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const revisionPrompt = source.slice(
       source.indexOf('const buildProseRevisionPrompt'),
       source.indexOf('const shouldReviseProse'),
@@ -13475,7 +13476,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('keeps next-chapter quality plan in normalized prose self review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -13490,7 +13491,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('treats a missing next-chapter quality plan as a prose revision trigger', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const revisionDecisionBlock = source.slice(
       source.indexOf('const nextChapterQualityPlanNeedsRepair'),
       source.indexOf('const runProseSelfReviewAndRevision'),
@@ -13519,10 +13520,11 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('keeps final next-chapter quality plan in prose revision result', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const revisionStart = source.indexOf('const revisionPayload = getNovelPayload(revisionResult)')
     const revisionBlock = source.slice(
-      source.indexOf('const revisionPayload = getNovelPayload(revisionResult)'),
-      source.indexOf('const runMemePolishPass', source.indexOf('const revisionPayload = getNovelPayload(revisionResult)')),
+      revisionStart,
+      source.indexOf('next_chapter_quality_plan: revisionNextChapterQualityPlan', revisionStart) + 'next_chapter_quality_plan: revisionNextChapterQualityPlan'.length + 40,
     )
 
     expect(revisionBlock).toContain('const revisionNextChapterQualityPlan =')

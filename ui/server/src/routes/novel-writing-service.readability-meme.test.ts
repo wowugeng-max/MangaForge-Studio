@@ -7118,7 +7118,7 @@ describe('readability and restrained meme workflow', () => {
   })
 
   test('feeds serial quality regression brief into chapter context fatigue radar', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/chapter-context-package.ts'), 'utf8')
     const contextBuildBlock = source.slice(
       source.indexOf('const serialMomentumBrief = buildSerialMomentumBrief(chapter, sorted)'),
       source.indexOf('const previousHandoff = buildPreviousChapterHandoff', source.indexOf('const serialMomentumBrief = buildSerialMomentumBrief(chapter, sorted)')),

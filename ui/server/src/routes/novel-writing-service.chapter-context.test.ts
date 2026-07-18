@@ -1259,17 +1259,19 @@ describe('chapter context word target source guards', () => {
 
   test('requires scene-card prompts and prose prompts to preserve purpose tags for detail allocation', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const scenePromptBlock = readSceneCardsPromptSource()
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
-    const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
-    const reviewPrompt = source.slice(
-      source.indexOf('const buildProseReviewPrompt'),
-      source.indexOf('const buildProseRevisionPrompt'),
+    const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
+${selfReviewSource}`
+    const reviewPrompt = selfReviewSource.slice(
+      selfReviewSource.indexOf('const buildProseReviewPrompt'),
+      selfReviewSource.indexOf('const buildProseRevisionPrompt'),
     )
-    const revisionPrompt = source.slice(
-      source.indexOf('const buildProseRevisionPrompt'),
-      source.indexOf('const shouldReviseProse'),
+    const revisionPrompt = selfReviewSource.slice(
+      selfReviewSource.indexOf('const buildProseRevisionPrompt'),
+      selfReviewSource.indexOf('const shouldReviseProse'),
     )
 
     expect(prosePromptStart).toBeGreaterThanOrEqual(0)
@@ -3362,7 +3364,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('uses compact prose context snapshots in review and revision prompts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPromptStart = source.indexOf('const buildProseReviewPrompt =')
     const revisionPromptStart = source.indexOf('const buildProseRevisionPrompt =', reviewPromptStart)
     const reviewPromptBlock = source.slice(reviewPromptStart, revisionPromptStart)
@@ -3392,7 +3394,7 @@ describe('chapter context word target source guards', () => {
   })
   test('feeds quality gate failure reasons into the oh-story revision strategy brief', () => {
     const strategySource = readFileSync(join(import.meta.dir, '../novel-writing-service/revision/revision-strategy.ts'), 'utf8')
-    const monofileSource = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const monofileSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const strategyStart = strategySource.indexOf('export function buildRevisionStrategyBrief')
     const strategyBlock = strategySource.slice(strategyStart)
     const revisionPrompt = monofileSource.slice(
@@ -3517,7 +3519,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('passes oh-story revision strategy brief into prose revision prompt', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const revisionPrompt = source.slice(
       source.indexOf('const buildProseRevisionPrompt'),
       source.indexOf('const shouldReviseProse'),
@@ -3530,7 +3532,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose revision to execute oh-story three-pass de-ai method', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const revisionPrompt = source.slice(
       source.indexOf('const buildProseRevisionPrompt'),
       source.indexOf('const shouldReviseProse'),
@@ -3565,7 +3567,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('checks the chapter blueprint contract during prose self review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const runProseSelfReviewAndRevision'),
@@ -3578,7 +3580,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('checks oh-story quick natural prose checklist during prose self review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const runProseSelfReviewAndRevision'),
@@ -3594,7 +3596,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('checks delivery risk carry-over during prose self review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const runProseSelfReviewAndRevision'),
@@ -3616,7 +3618,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('checks safe batch creation contract carry-over during prose self review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const runProseSelfReviewAndRevision'),
@@ -3629,7 +3631,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('keeps core contract checks in normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -3652,7 +3654,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('wires deterministic hard-risk summaries into remaining normalized self review checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -3682,7 +3684,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('wires chapter and paragraph hook deterministic summaries into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -3699,7 +3701,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('keeps delivery risk receipts from prose self review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewNormalizeBlock = source.slice(
       source.indexOf('const normalizedDeslopChecks = ['),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedDeslopChecks = [')),
@@ -4200,7 +4202,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose revision to repair missed delivery risk receipts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const revisionPrompt = source.slice(
       source.indexOf('const buildProseRevisionPrompt'),
       source.indexOf('const shouldReviseProse'),
@@ -4225,7 +4227,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose revision to output nested oh-story delivery receipts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const revisionPrompt = source.slice(
       source.indexOf('const buildProseRevisionPrompt'),
       source.indexOf('const shouldReviseProse'),
@@ -4250,7 +4252,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose revision to output context comparison receipts before rewriting', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const revisionPrompt = source.slice(
       source.indexOf('const buildProseRevisionPrompt'),
       source.indexOf('const shouldReviseProse'),
@@ -4276,7 +4278,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review for oh-story style findings and keeps them for revision', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const runProseSelfReviewAndRevision'),
@@ -4301,7 +4303,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce platform rubric checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -4327,7 +4329,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce content rubric checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -4351,7 +4353,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to use oh-story adversarial perspectives', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -4386,7 +4388,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story deslop gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -4734,7 +4736,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('merges deterministic oh-story banned word scan into deslop checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewNormalizeBlock = source.slice(
       source.indexOf('const normalizedDeslopChecks = ['),
       source.indexOf('const normalizedReview = {', source.indexOf('const normalizedDeslopChecks = [')),
@@ -4814,7 +4816,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('revision prompt uses delete-first deslop repair before polishing', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const revisionStart = source.indexOf('const buildProseRevisionPrompt =')
     const revisionEnd = source.indexOf('const nextChapterQualityPlanNeedsRepair =', revisionStart)
     const revisionBlock = source.slice(revisionStart, revisionEnd)
@@ -5113,7 +5115,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('wires deterministic prose format risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -6030,7 +6032,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('passes deterministic cleanup report into cleanup repair prompts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const revisionPrompt = source.slice(
       source.indexOf('const buildProseRevisionPrompt'),
       source.indexOf('const shouldReviseProse'),
@@ -6049,7 +6051,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story dialogue checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -6140,7 +6142,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story plot dynamics checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -6172,7 +6174,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story story power checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -6231,7 +6233,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story continuity heat checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -6260,7 +6262,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story character relation checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -6294,7 +6296,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story information flow checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -6323,7 +6325,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story expectation threshold checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -6362,7 +6364,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story target reader checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -6420,7 +6422,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story genre positioning checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -6467,7 +6469,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story plot special topic checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -6513,7 +6515,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story female audience checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -6550,7 +6552,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('names required rich contract fields in prose self review prompt', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -6614,7 +6616,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story showdown checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -6656,7 +6658,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story bridge unit checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -6689,7 +6691,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story upgrade rhythm checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -6740,7 +6742,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story conflict structure checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -6781,7 +6783,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story character behavior checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -6843,7 +6845,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story asset linkage checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -6882,7 +6884,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story state tracking checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -6936,7 +6938,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story intent confirmation checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -6981,7 +6983,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce write-preparation execution checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -7028,7 +7030,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce next-chapter quality plan receipts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -7469,7 +7471,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce chapter handoff checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -7504,7 +7506,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('wires deterministic chapter handoff hard risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -7528,7 +7530,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story prose meta checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -7562,7 +7564,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story story loop checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -7601,7 +7603,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story emotional arc checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -7656,7 +7658,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story chapter hook checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -7697,7 +7699,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story paragraph hook checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -7732,7 +7734,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story suspense checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -7778,7 +7780,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story reversal checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -7813,7 +7815,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story opening checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -7851,7 +7853,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review to enforce opening hook strategy contract', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -8164,7 +8166,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story prose craft checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -8252,20 +8254,22 @@ describe('chapter context word target source guards', () => {
 
   test('asks prose generation self review and revision to enforce oh-story subject name rhythm', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const promptSectionsSource = readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
-    const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
+    const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
+${selfReviewSource}`
     const proseCraftSnippetStart = promptSectionsSource.indexOf('function formatProseCraftPromptSnippet')
     const proseCraftSnippetEnd = promptSectionsSource.indexOf('function formatQualityAuditPhaseChecklist', proseCraftSnippetStart)
     const proseCraftPromptSource = `${prosePromptBlock}\n${promptSectionsSource.slice(proseCraftSnippetStart, proseCraftSnippetEnd)}`
-    const reviewPrompt = source.slice(
-      source.indexOf('const buildProseReviewPrompt'),
-      source.indexOf('const buildProseRevisionPrompt'),
+    const reviewPrompt = selfReviewSource.slice(
+      selfReviewSource.indexOf('const buildProseReviewPrompt'),
+      selfReviewSource.indexOf('const buildProseRevisionPrompt'),
     )
-    const revisionPrompt = source.slice(
-      source.indexOf('const buildProseRevisionPrompt'),
-      source.indexOf('const shouldReviseProse'),
+    const revisionPrompt = selfReviewSource.slice(
+      selfReviewSource.indexOf('const buildProseRevisionPrompt'),
+      selfReviewSource.indexOf('const shouldReviseProse'),
     )
 
     expect(prosePromptStart).toBeGreaterThanOrEqual(0)
@@ -8286,16 +8290,18 @@ describe('chapter context word target source guards', () => {
 
   test('asks prose generation self review and revision to enforce oh-story natural paragraph rhythm', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
-    const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
-    const reviewPrompt = source.slice(
-      source.indexOf('const buildProseReviewPrompt'),
-      source.indexOf('const buildProseRevisionPrompt'),
+    const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
+${selfReviewSource}`
+    const reviewPrompt = selfReviewSource.slice(
+      selfReviewSource.indexOf('const buildProseReviewPrompt'),
+      selfReviewSource.indexOf('const buildProseRevisionPrompt'),
     )
-    const revisionPrompt = source.slice(
-      source.indexOf('const buildProseRevisionPrompt'),
-      source.indexOf('const shouldReviseProse'),
+    const revisionPrompt = selfReviewSource.slice(
+      selfReviewSource.indexOf('const buildProseRevisionPrompt'),
+      selfReviewSource.indexOf('const shouldReviseProse'),
     )
 
     expect(prosePromptStart).toBeGreaterThanOrEqual(0)
@@ -8313,16 +8319,18 @@ describe('chapter context word target source guards', () => {
 
   test('asks prose generation self review and revision to enforce oh-story specific character-count expression guard', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
-    const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
-    const reviewPrompt = source.slice(
-      source.indexOf('const buildProseReviewPrompt'),
-      source.indexOf('const buildProseRevisionPrompt'),
+    const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
+${selfReviewSource}`
+    const reviewPrompt = selfReviewSource.slice(
+      selfReviewSource.indexOf('const buildProseReviewPrompt'),
+      selfReviewSource.indexOf('const buildProseRevisionPrompt'),
     )
-    const revisionPrompt = source.slice(
-      source.indexOf('const buildProseRevisionPrompt'),
-      source.indexOf('const shouldReviseProse'),
+    const revisionPrompt = selfReviewSource.slice(
+      selfReviewSource.indexOf('const buildProseRevisionPrompt'),
+      selfReviewSource.indexOf('const shouldReviseProse'),
     )
 
     expect(prosePromptStart).toBeGreaterThanOrEqual(0)
@@ -8338,16 +8346,18 @@ describe('chapter context word target source guards', () => {
 
   test('asks prose generation self review and revision to enforce oh-story external fact research guard', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
-    const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
-    const reviewPrompt = source.slice(
-      source.indexOf('const buildProseReviewPrompt'),
-      source.indexOf('const buildProseRevisionPrompt'),
+    const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
+${selfReviewSource}`
+    const reviewPrompt = selfReviewSource.slice(
+      selfReviewSource.indexOf('const buildProseReviewPrompt'),
+      selfReviewSource.indexOf('const buildProseRevisionPrompt'),
     )
-    const revisionPrompt = source.slice(
-      source.indexOf('const buildProseRevisionPrompt'),
-      source.indexOf('const shouldReviseProse'),
+    const revisionPrompt = selfReviewSource.slice(
+      selfReviewSource.indexOf('const buildProseRevisionPrompt'),
+      selfReviewSource.indexOf('const shouldReviseProse'),
     )
 
     expect(prosePromptStart).toBeGreaterThanOrEqual(0)
@@ -8364,16 +8374,18 @@ describe('chapter context word target source guards', () => {
 
   test('asks prose generation self review and revision to enforce oh-story supporting-character buffer zones', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
-    const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
-    const reviewPrompt = source.slice(
-      source.indexOf('const buildProseReviewPrompt'),
-      source.indexOf('const buildProseRevisionPrompt'),
+    const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
+${selfReviewSource}`
+    const reviewPrompt = selfReviewSource.slice(
+      selfReviewSource.indexOf('const buildProseReviewPrompt'),
+      selfReviewSource.indexOf('const buildProseRevisionPrompt'),
     )
-    const revisionPrompt = source.slice(
-      source.indexOf('const buildProseRevisionPrompt'),
-      source.indexOf('const shouldReviseProse'),
+    const revisionPrompt = selfReviewSource.slice(
+      selfReviewSource.indexOf('const buildProseRevisionPrompt'),
+      selfReviewSource.indexOf('const shouldReviseProse'),
     )
 
     expect(prosePromptStart).toBeGreaterThanOrEqual(0)
@@ -8389,20 +8401,22 @@ describe('chapter context word target source guards', () => {
 
   test('asks prose generation self review and revision to enforce oh-story section density diagnosis', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const promptSectionsSource = readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
-    const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
+    const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
+${selfReviewSource}`
     const proseCraftSnippetStart = promptSectionsSource.indexOf('function formatProseCraftPromptSnippet')
     const proseCraftSnippetEnd = promptSectionsSource.indexOf('function formatQualityAuditPhaseChecklist', proseCraftSnippetStart)
     const proseCraftPromptSource = `${prosePromptBlock}\n${promptSectionsSource.slice(proseCraftSnippetStart, proseCraftSnippetEnd)}`
-    const reviewPrompt = source.slice(
-      source.indexOf('const buildProseReviewPrompt'),
-      source.indexOf('const buildProseRevisionPrompt'),
+    const reviewPrompt = selfReviewSource.slice(
+      selfReviewSource.indexOf('const buildProseReviewPrompt'),
+      selfReviewSource.indexOf('const buildProseRevisionPrompt'),
     )
-    const revisionPrompt = source.slice(
-      source.indexOf('const buildProseRevisionPrompt'),
-      source.indexOf('const shouldReviseProse'),
+    const revisionPrompt = selfReviewSource.slice(
+      selfReviewSource.indexOf('const buildProseRevisionPrompt'),
+      selfReviewSource.indexOf('const shouldReviseProse'),
     )
 
     expect(prosePromptStart).toBeGreaterThanOrEqual(0)
@@ -8439,19 +8453,21 @@ describe('chapter context word target source guards', () => {
 
   test('asks prose generation self review and revision to enforce oh-story event content ratio', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const promptSectionsSource = readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
-    const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
+    const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
+${selfReviewSource}`
     const qualityAuditPromptStart = promptSectionsSource.indexOf('export function buildQualityAuditPromptSection')
     const prosePromptSource = `${prosePromptBlock}\n${promptSectionsSource.slice(qualityAuditPromptStart)}`
-    const reviewPrompt = source.slice(
-      source.indexOf('const buildProseReviewPrompt'),
-      source.indexOf('const buildProseRevisionPrompt'),
+    const reviewPrompt = selfReviewSource.slice(
+      selfReviewSource.indexOf('const buildProseReviewPrompt'),
+      selfReviewSource.indexOf('const buildProseRevisionPrompt'),
     )
-    const revisionPrompt = source.slice(
-      source.indexOf('const buildProseRevisionPrompt'),
-      source.indexOf('const shouldReviseProse'),
+    const revisionPrompt = selfReviewSource.slice(
+      selfReviewSource.indexOf('const buildProseRevisionPrompt'),
+      selfReviewSource.indexOf('const shouldReviseProse'),
     )
 
     expect(prosePromptStart).toBeGreaterThanOrEqual(0)
@@ -8468,7 +8484,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce scene-card density execution', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -8492,7 +8508,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce scene-card sensory anchors', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -8513,16 +8529,18 @@ describe('chapter context word target source guards', () => {
 
   test('asks prose generation self review and revision to enforce scene-card serial risk repairs', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
-    const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
-    const reviewPrompt = source.slice(
-      source.indexOf('const buildProseReviewPrompt'),
-      source.indexOf('const buildProseRevisionPrompt'),
+    const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
+${selfReviewSource}`
+    const reviewPrompt = selfReviewSource.slice(
+      selfReviewSource.indexOf('const buildProseReviewPrompt'),
+      selfReviewSource.indexOf('const buildProseRevisionPrompt'),
     )
-    const revisionPrompt = source.slice(
-      source.indexOf('const buildProseRevisionPrompt'),
-      source.indexOf('const shouldReviseProse'),
+    const revisionPrompt = selfReviewSource.slice(
+      selfReviewSource.indexOf('const buildProseRevisionPrompt'),
+      selfReviewSource.indexOf('const shouldReviseProse'),
     )
     const structuredFieldsSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/structured-review-fields.ts'), 'utf8')
     const reviewFieldList = structuredFieldsSource.slice(
@@ -8589,7 +8607,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce artifact protocol receipts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -8609,7 +8627,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to verify scene-card execution receipts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -8633,7 +8651,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story quality audit checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -8693,7 +8711,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story punctuation tone checks', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -8729,16 +8747,18 @@ describe('chapter context word target source guards', () => {
 
   test('asks prose generation self review and revision to enforce oh-story punctuation function beats', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
-    const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
-    const reviewPrompt = source.slice(
-      source.indexOf('const buildProseReviewPrompt'),
-      source.indexOf('const buildProseRevisionPrompt'),
+    const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
+${selfReviewSource}`
+    const reviewPrompt = selfReviewSource.slice(
+      selfReviewSource.indexOf('const buildProseReviewPrompt'),
+      selfReviewSource.indexOf('const buildProseRevisionPrompt'),
     )
-    const revisionPrompt = source.slice(
-      source.indexOf('const buildProseRevisionPrompt'),
-      source.indexOf('const shouldReviseProse'),
+    const revisionPrompt = selfReviewSource.slice(
+      selfReviewSource.indexOf('const buildProseRevisionPrompt'),
+      selfReviewSource.indexOf('const shouldReviseProse'),
     )
 
     expect(prosePromptStart).toBeGreaterThanOrEqual(0)
@@ -8755,7 +8775,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('keeps prose revision receipts for post-revision quality audit', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const revisionPrompt = source.slice(
       source.indexOf('const buildProseRevisionPrompt'),
       source.indexOf('const shouldReviseProse'),
@@ -8795,10 +8815,11 @@ describe('chapter context word target source guards', () => {
   })
 
   test('keeps nested oh-story revision receipts for post-revision quality audit', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
+    const revisionStart = source.indexOf('const revisionPayload = getNovelPayload(revisionResult)')
     const revisionParseBlock = source.slice(
-      source.indexOf('const revisionPayload = getNovelPayload(revisionResult)'),
-      source.indexOf('const runCommercialEditorRewrite', source.indexOf('const revisionPayload = getNovelPayload(revisionResult)')),
+      revisionStart,
+      source.indexOf('oh_story_delivery_receipts: revisionDeliveryReceipts', revisionStart) + 'oh_story_delivery_receipts: revisionDeliveryReceipts'.length + 80,
     )
 
     expect(revisionParseBlock).toContain('revisedFirst?.oh_story_delivery_receipts')
@@ -8829,7 +8850,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('normalizes camelCase review control fields from model output', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const reviewNormalizeStart = source.indexOf('const rawReviewIssues = [')
     const reviewNormalizeBlock = source.slice(
       reviewNormalizeStart,
