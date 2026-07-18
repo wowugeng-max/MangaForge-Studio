@@ -539,7 +539,7 @@ describe('chapter context word-target a', () => {
   })
 
   test('passes run-level quality threshold from chapter group worker into chapter generation', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-production-service.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-production-service.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-production/run-state.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-production/post-delivery-quality.ts'), 'utf8')].join('\n')
     const executeStart = source.indexOf('const chapterResult = await ctx.generateChapterForGroup')
     const executeBlock = source.slice(executeStart, source.indexOf('onStage:', executeStart))
 
@@ -640,7 +640,7 @@ describe('chapter context word-target a', () => {
   })
 
   test('keeps aborted unattended chapters resumable instead of consuming retry attempts', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-production-service.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-production-service.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-production/run-state.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-production/post-delivery-quality.ts'), 'utf8')].join('\n')
     const catchStart = source.indexOf('} catch (chapterError: any) {')
     const catchBlock = source.slice(catchStart, source.indexOf('const failedStages =', catchStart))
 
@@ -693,7 +693,7 @@ describe('chapter context word-target a', () => {
       readFileSync(join(import.meta.dir, 'novel-generation/register.ts'), 'utf8'),
       readFileSync(join(import.meta.dir, 'novel-generation/builders.ts'), 'utf8'),
     ].join('\n')
-    const productionSource = readFileSync(join(import.meta.dir, 'novel-production-service.ts'), 'utf8')
+    const productionSource = [readFileSync(join(import.meta.dir, 'novel-production-service.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-production/run-state.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-production/post-delivery-quality.ts'), 'utf8')].join('\n')
     const unattendedStart = routeSource.indexOf("mode: 'unattended_goal'")
     const unattendedBlock = routeSource.slice(unattendedStart, routeSource.indexOf('const run = await appendNovelRun', unattendedStart))
     const executeStart = productionSource.indexOf('const chapterResult = await ctx.generateChapterForGroup')
