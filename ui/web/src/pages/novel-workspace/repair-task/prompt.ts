@@ -1,44 +1,12 @@
-type AnyRecord = Record<string, any>
-
-function arrayValue(value: any): any[] {
-  return Array.isArray(value) ? value : []
-}
-
-function text(value: any, fallback = '') {
-  if (value === null || value === undefined) return fallback
-  const normalized = String(value).trim()
-  return normalized || fallback
-}
-
-function parseJsonValue(value: any) {
-  if (!value) return null
-  if (typeof value === 'object') return value
-  try {
-    return JSON.parse(String(value))
-  } catch {
-    return null
-  }
-}
-
-function firstText(...values: any[]) {
-  for (const value of values) {
-    const normalized = text(value)
-    if (normalized) return normalized
-  }
-  return ''
-}
-
-function objectValue(value: any): AnyRecord {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
-}
-
-function limitedArray(...values: any[]) {
-  for (const value of values) {
-    const items = arrayValue(value).filter(Boolean)
-    if (items.length > 0) return items.slice(0, 6)
-  }
-  return []
-}
+import {
+  type AnyRecord,
+  arrayValue,
+  firstText,
+  limitedArray,
+  objectValue,
+  parseJsonValue,
+  text,
+} from './utils'
 
 function isSingleChapterRecoveryEvidenceTask(task: AnyRecord) {
   if (firstText(task?.issue_type, task?.issueType) !== 'recovery_evidence_mismatch') return false
