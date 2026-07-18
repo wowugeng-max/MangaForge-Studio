@@ -6,7 +6,7 @@ import { tmpdir } from 'os'
 
 async function coreBuildersSource() {
   const dir = join(import.meta.dir, 'novel-core')
-  const files = ['builders.ts', 'builders-seed-outline.ts', 'builders-seed.ts', 'register.ts']
+  const files = ['builders.ts', 'builders-seed-helpers.ts', 'builders-seed-outline-model.ts', 'builders-seed-normalize.ts', 'builders-seed-outline.ts', 'builders-seed.ts', 'register.ts']
   return (await Promise.all(files.map(async name => await readFile(join(dir, name), 'utf8')))).join('\n')
 }
 
