@@ -13,6 +13,14 @@
 **Branch:** `codex/architecture-modularization`
 
 
+### Residual inventory update (2026-07-19 goal-continue LVIII)
+- Extract QualityBenchmarkModal pure helpers leaf.
+- Package-join fix for chapter-group generation contract source contract.
+- Task 11 partial: architecture + shell/director/adapters green; full UI write-path smoke still open (local servers not required for pure refactor).
+- Still deferred over soft/hard: batch-guardrail-core (~827), continuity-guard (~814), ComfyUI (~877), NWS base model (~889 orchestrator).
+
+
+
 ### Residual inventory update (2026-07-19 goal-continue LVII)
 - Extract SettingAssetGraphPanel pure helpers leaf; package-join shell test.
 - Split structured-review-required-fields into core/extended data leaves + merge monofile (62 keys preserved).
