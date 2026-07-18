@@ -16,6 +16,14 @@ import {
   isRevisionOutputTruncated,
 } from './novel-editor-routes'
 
+
+function editorBuildersSource() {
+  const dir = join(import.meta.dir, 'novel-editor')
+  return [
+    'builders.ts',
+    'builders-annotations.ts',
+  ].map(name => readFileSync(join(dir, name), 'utf8')).join('\n')
+}
 describe('buildChapterQualityCard', () => {
   test('marks a chapter below the configured word target as needing expansion', () => {
     const card = buildChapterQualityCard({
@@ -111,7 +119,7 @@ describe('editor revision route safeguards', () => {
     const { readFileSync } = await import('fs')
     const { join } = await import('path')
     const source = [
-      readFileSync(join(import.meta.dir, 'novel-editor/builders.ts'), 'utf8'),
+      editorBuildersSource(),
       readFileSync(join(import.meta.dir, 'novel-editor/register.ts'), 'utf8'),
     ].join('\n')
 
@@ -215,7 +223,7 @@ describe('editor revision route safeguards', () => {
     const { readFileSync } = await import('fs')
     const { join } = await import('path')
     const source = [
-      readFileSync(join(import.meta.dir, 'novel-editor/builders.ts'), 'utf8'),
+      editorBuildersSource(),
       readFileSync(join(import.meta.dir, 'novel-editor/register.ts'), 'utf8'),
     ].join('\n')
     const routeStart = source.indexOf("app.post('/api/novel/reviews/:reviewId/apply-revision'")
@@ -233,7 +241,7 @@ describe('editor revision route safeguards', () => {
     const { readFileSync } = await import('fs')
     const { join } = await import('path')
     const source = [
-      readFileSync(join(import.meta.dir, 'novel-editor/builders.ts'), 'utf8'),
+      editorBuildersSource(),
       readFileSync(join(import.meta.dir, 'novel-editor/register.ts'), 'utf8'),
     ].join('\n')
     const saveStart = source.indexOf("review_type: 'editor_revision'")
@@ -269,7 +277,7 @@ describe('editor revision route safeguards', () => {
     const { readFileSync } = await import('fs')
     const { join } = await import('path')
     const source = [
-      readFileSync(join(import.meta.dir, 'novel-editor/builders.ts'), 'utf8'),
+      editorBuildersSource(),
       readFileSync(join(import.meta.dir, 'novel-editor/register.ts'), 'utf8'),
     ].join('\n')
 
@@ -282,7 +290,7 @@ describe('editor revision route safeguards', () => {
     const { readFileSync } = await import('fs')
     const { join } = await import('path')
     const source = [
-      readFileSync(join(import.meta.dir, 'novel-editor/builders.ts'), 'utf8'),
+      editorBuildersSource(),
       readFileSync(join(import.meta.dir, 'novel-editor/register.ts'), 'utf8'),
     ].join('\n')
 
@@ -817,7 +825,7 @@ describe('chapter delivery risk brief', () => {
 
   test('uses safe json for editor payloads that include context packages', () => {
     const source = [
-      readFileSync(join(import.meta.dir, 'novel-editor/builders.ts'), 'utf8'),
+      editorBuildersSource(),
       readFileSync(join(import.meta.dir, 'novel-editor/register.ts'), 'utf8'),
     ].join('\n')
 
@@ -4115,7 +4123,7 @@ describe('story state sync route source guards', () => {
     const { readFileSync } = await import('fs')
     const { join } = await import('path')
     const source = [
-      readFileSync(join(import.meta.dir, 'novel-editor/builders.ts'), 'utf8'),
+      editorBuildersSource(),
       readFileSync(join(import.meta.dir, 'novel-editor/register.ts'), 'utf8'),
     ].join('\n')
 

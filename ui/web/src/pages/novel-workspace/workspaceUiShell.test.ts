@@ -25,6 +25,7 @@ let editorRoutesSourceCache: string | null = null
 let commercialOpsRoutesSourceCache: string | null = null
 let directorModelSourceCache: string | null = null
 let writingCockpitModelSourceCache: string | null = null
+let taskCenterSourceCache: string | null = null
 
 function packageSource(relativeDir: string) {
   const cached = packageSourceCache.get(relativeDir)
@@ -102,6 +103,18 @@ function directorModelSource() {
     sourceCached('auto-creation/model/helpers-recovery-evidence-trends.ts', localSourceCache),
   ].join('\n')
   return directorModelSourceCache
+}
+
+
+function taskCenterSource() {
+  if (taskCenterSourceCache != null) return taskCenterSourceCache
+  taskCenterSourceCache = [
+    sourceCached('TaskCenterDrawer.tsx', localSourceCache),
+    sourceCached('task-center/chapter-group.ts', localSourceCache),
+    sourceCached('task-center/drawer-model.tsx', localSourceCache),
+    sourceCached('task-center/TaskCenterDrawerPanel.tsx', localSourceCache),
+  ].join('\n')
+  return taskCenterSourceCache
 }
 
 function writingCockpitModelSource() {
@@ -1399,7 +1412,7 @@ describe('commercial writing workspace UI shell', () => {
     expect(projectWorkspace).toContain('/story-state-sync')
     expect(projectWorkspace).toContain('/review-annotations/status')
     expect(projectWorkspace).toContain('sourceTaskIndex')
-    const taskCenter = source('TaskCenterDrawer.tsx')
+    const taskCenter = taskCenterSource()
     expect(taskCenter).toContain('交稿风险修复任务')
     expect(taskCenter).toContain('按风险修订')
     expect(taskCenter).toContain('onStartRepairTaskRevision?.(task, run, taskIndex, options)')
@@ -1460,7 +1473,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('routes recovery evidence source actions to single-chapter and batch rechecks', () => {
     const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
-    const taskCenter = source('TaskCenterDrawer.tsx')
+    const taskCenter = taskCenterSource()
 
     expect(taskCenter).toContain('recoveryEvidenceSourceRecheckAction')
     expect(taskCenter).toContain('复检单章')
@@ -1472,7 +1485,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('routes recovery evidence residuals into the next repair action', () => {
-    const taskCenter = source('TaskCenterDrawer.tsx')
+    const taskCenter = taskCenterSource()
 
     expect(taskCenter).toContain('residualActionLabel')
     expect(taskCenter).toContain('回修依据')
@@ -1482,7 +1495,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('renders task center runs as clear lifecycle cards instead of ambiguous status chips', () => {
-    const taskCenter = source('TaskCenterDrawer.tsx')
+    const taskCenter = taskCenterSource()
 
     expect(taskCenter).toContain('buildTaskRunCardModel')
     expect(taskCenter).toContain('TaskRunCard')
@@ -1498,7 +1511,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows recovery evidence production block hints after source recheck', () => {
-    const taskCenter = source('TaskCenterDrawer.tsx')
+    const taskCenter = taskCenterSource()
 
     expect(taskCenter).toContain('productionBlockLabel')
     expect(taskCenter).toContain('生产阻断已解除')
@@ -1725,7 +1738,7 @@ describe('commercial writing workspace UI shell', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
     const planningModel = source('planning/model/planning-workspace-model.ts')
     const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
-    const taskCenter = source('TaskCenterDrawer.tsx')
+    const taskCenter = taskCenterSource()
 
     expect(planningWorkspace).toContain('前30章留存曲线')
     expect(planningWorkspace).toContain('novel-first30-retention-card')
@@ -1745,7 +1758,7 @@ describe('commercial writing workspace UI shell', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
     const planningModel = source('planning/model/planning-workspace-model.ts')
     const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
-    const taskCenter = source('TaskCenterDrawer.tsx')
+    const taskCenter = taskCenterSource()
 
     expect(planningWorkspace).toContain('剧情线看板')
     expect(planningWorkspace).toContain('novel-storyline-board-card')
@@ -1971,7 +1984,7 @@ describe('commercial writing workspace UI shell', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
     const projectWorkspace = source('../NovelProjectWorkspace.tsx')
     const planningModel = source('planning/model/planning-workspace-model.ts')
-    const taskCenter = source('TaskCenterDrawer.tsx')
+    const taskCenter = taskCenterSource()
     const service = commercialOpsRoutesSource()
 
     expect(planningWorkspace).toContain('读者试读室')
@@ -2088,7 +2101,7 @@ describe('commercial writing workspace UI shell', () => {
     const directorModel = directorModelSource()
     const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
     const writingService = writingServiceSource()
-    const taskCenter = source('TaskCenterDrawer.tsx')
+    const taskCenter = taskCenterSource()
 
     expect(projectWorkspace).toContain("autoCreation")
     expect(projectWorkspace).toContain('自动创作')

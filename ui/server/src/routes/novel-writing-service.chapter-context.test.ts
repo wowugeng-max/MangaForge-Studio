@@ -255,6 +255,14 @@ import { buildProseGenerationContract } from '../novel-writing/prose-generation-
 import { buildProsePromptContextSnapshot } from '../novel-writing/prose-prompt-context'
 import { normalizeProseForStorage } from '../novel-writing/chapter-prose-storage-patch'
 import { buildPipelineProse, createProsePipelineHarness as createProsePipelineHarnessWithService, proseQualityScores } from './novel-writing-service.test-support'
+
+function proseQualityRisksSource() {
+  const dir = join(import.meta.dir, '../novel-writing-service/quality')
+  return [
+    'prose-quality-risks.ts',
+    'prose-quality-risks-extended.ts',
+  ].map(name => readFileSync(join(dir, name), 'utf8')).join('\n')
+}
 const createProsePipelineHarness = (options?: any) => createProsePipelineHarnessWithService(createNovelWritingService, options)
 const readSceneCardsPromptSource = () => readFileSync(join(import.meta.dir, '../novel-writing/scene-cards-prompt.ts'), 'utf8')
 const readPostDeliveryStoryStateUpdateSource = () => readFileSync(join(import.meta.dir, '../novel-writing/post-delivery-story-state-update.ts'), 'utf8')
@@ -6346,7 +6354,7 @@ ${selfReviewSource}`
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualityExpectationThresholdRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
@@ -6385,7 +6393,7 @@ ${selfReviewSource}`
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualityTargetReaderRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
@@ -6443,7 +6451,7 @@ ${selfReviewSource}`
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualityGenrePositioningRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
@@ -6495,7 +6503,7 @@ ${selfReviewSource}`
       structuredFieldsSource.indexOf('export const STRUCTURED_REVIEW_CHECK_FIELDS'),
       structuredFieldsSource.indexOf('export const STRUCTURED_REVIEW_REQUIRED_FIELDS'),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualityPlotSpecialTopicsRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
@@ -6712,7 +6720,7 @@ ${selfReviewSource}`
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualityUpgradeRhythmRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
@@ -6763,7 +6771,7 @@ ${selfReviewSource}`
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualityConflictStructureRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
@@ -6804,7 +6812,7 @@ ${selfReviewSource}`
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualityCharacterBehaviorRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
@@ -6866,7 +6874,7 @@ ${selfReviewSource}`
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualityAssetLinkageRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
@@ -6905,7 +6913,7 @@ ${selfReviewSource}`
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualityStateTrackingRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
@@ -6963,7 +6971,7 @@ ${selfReviewSource}`
       source.indexOf('const preDraftReceiptChecks ='),
       source.indexOf('const normalizedReview = {', source.indexOf('const preDraftReceiptChecks =')),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualityIntentConfirmationRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
@@ -7009,7 +7017,7 @@ ${selfReviewSource}`
       structuredFieldsSource.indexOf('export const STRUCTURED_REVIEW_CHECK_FIELDS'),
       structuredFieldsSource.indexOf('export const STRUCTURED_REVIEW_REQUIRED_FIELDS'),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualityWritePreparationRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
@@ -7551,7 +7559,7 @@ ${selfReviewSource}`
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualityProseMetaRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
@@ -7585,7 +7593,7 @@ ${selfReviewSource}`
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualityStoryLoopRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
@@ -7624,7 +7632,7 @@ ${selfReviewSource}`
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualityEmotionalArcRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
@@ -7679,7 +7687,7 @@ ${selfReviewSource}`
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualityChapterHookRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
@@ -7720,7 +7728,7 @@ ${selfReviewSource}`
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualityParagraphHookRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
@@ -7755,7 +7763,7 @@ ${selfReviewSource}`
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualitySuspenseRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
@@ -7801,7 +7809,7 @@ ${selfReviewSource}`
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualityReversalRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
@@ -7836,7 +7844,7 @@ ${selfReviewSource}`
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualityOpeningRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
@@ -8187,7 +8195,7 @@ ${selfReviewSource}`
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualityProseCraftRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
@@ -8676,7 +8684,7 @@ ${selfReviewSource}`
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualityQualityAuditRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
@@ -8732,7 +8740,7 @@ ${selfReviewSource}`
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskSource = proseQualityRisksSource()
     const riskStart = riskSource.indexOf('export function proseQualityPunctuationToneRisks')
     const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
