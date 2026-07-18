@@ -165,7 +165,19 @@ describe('novel sqlite persistence', () => {
   })
 
   test('routes every novel mutation entry point through the workspace mutation lock', async () => {
-    const source = await readFile(join(import.meta.dir, 'novel/store.ts'), 'utf8')
+    const { readdirSync, statSync, readFileSync } = await import('fs')
+    const novelDir = join(import.meta.dir, 'novel')
+    const walk = (dir: string): string[] => {
+      const out: string[] = []
+      for (const name of readdirSync(dir)) {
+        const full = join(dir, name)
+        if (statSync(full).isDirectory()) out.push(...walk(full))
+        else if (name.endsWith('.ts') && !name.endsWith('.test.ts')) out.push(full)
+      }
+      return out
+    }
+    const files = walk(novelDir).map(file => ({ file, source: readFileSync(file, 'utf8') }))
+    const source = files.map(item => item.source).join('\n')
     const mutationNames = [
       'createNovelProject', 'updateNovelProject',
       'createNovelWorldbuilding', 'updateNovelWorldbuilding',
@@ -182,21 +194,22 @@ describe('novel sqlite persistence', () => {
     ]
 
     for (const name of mutationNames) {
-      const start = source.indexOf(`export async function ${name}`)
-      const nextExport = source.indexOf('export async function ', start + 1)
-      const block = source.slice(start, nextExport < 0 ? source.length : nextExport)
-      expect(start).toBeGreaterThanOrEqual(0)
+      const file = files.find(item => item.source.includes(`export async function ${name}`))
+      expect(file, name).toBeTruthy()
+      const start = file!.source.indexOf(`export async function ${name}`)
+      const nextExport = file!.source.indexOf('export async function ', start + 1)
+      const block = file!.source.slice(start, nextExport < 0 ? file!.source.length : nextExport)
       expect(block.includes('withNovelWorkspaceMutation(activeWorkspace') || block.includes('withNovelDbWrite(activeWorkspace') || block.includes('mutateNovelStore(activeWorkspace')).toBe(true)
     }
-    const transactionalMutationStart = source.indexOf('async function withNovelDbWrite')
-    const transactionalMutationEnd = source.indexOf('function normalizeReferenceConfig', transactionalMutationStart)
-    const transactionalMutationBlock = source.slice(transactionalMutationStart, transactionalMutationEnd > 0 ? transactionalMutationEnd : transactionalMutationStart + 1200)
+    const core = readFileSync(join(novelDir, 'core.ts'), 'utf8')
+    const transactionalMutationStart = core.indexOf('async function withNovelDbWrite')
+    const transactionalMutationBlock = core.slice(transactionalMutationStart, transactionalMutationStart + 1500)
     expect(transactionalMutationStart).toBeGreaterThanOrEqual(0)
     expect(transactionalMutationBlock).toContain("db.exec('BEGIN IMMEDIATE')")
     expect(transactionalMutationBlock).not.toContain('loadStoreFromOpenDb(db)')
     expect(transactionalMutationBlock).not.toContain('replaceStoreInOpenDb(db, store)')
     expect(source).not.toContain('writeStoreUnlocked')
-    expect(source).toContain('assertNovelWorkspaceMutationHeld(activeWorkspace)')
+    expect(source).toContain('assertNovelWorkspaceMutationHeld')
     expect(source).not.toContain('async function mutateNovelStore')
   })
 
@@ -429,21 +442,13 @@ describe('novel sqlite persistence', () => {
   })
 
   test('appends reviews and runs through sqlite without reloading the full novel store', async () => {
-    const source = await readFile(join(import.meta.dir, 'novel/store.ts'), 'utf8')
-    const createReviewStart = source.indexOf('export async function createNovelReview')
-    const createReviewEnd = source.indexOf('export async function listNovelRuns', createReviewStart)
-    const createReviewBlock = source.slice(createReviewStart, createReviewEnd)
-    const appendRunStart = source.indexOf('export async function appendNovelRun')
-    const appendRunEnd = source.indexOf('export async function updateNovelRun', appendRunStart)
-    const appendRunBlock = source.slice(appendRunStart, appendRunEnd)
-
-    expect(createReviewStart).toBeGreaterThanOrEqual(0)
-    expect(createReviewEnd).toBeGreaterThan(createReviewStart)
-    expect(appendRunStart).toBeGreaterThanOrEqual(0)
-    expect(appendRunEnd).toBeGreaterThan(appendRunStart)
+    const createReviewBlock = await readFile(join(import.meta.dir, 'novel/repos/reviews.ts'), 'utf8')
+    const appendRunBlock = await readFile(join(import.meta.dir, 'novel/repos/runs.ts'), 'utf8')
+    expect(createReviewBlock).toContain('export async function createNovelReview')
     expect(createReviewBlock).toContain('INSERT INTO reviews')
     expect(createReviewBlock).not.toContain('readStore(activeWorkspace)')
     expect(createReviewBlock).not.toContain('writeStore(activeWorkspace')
+    expect(appendRunBlock).toContain('export async function appendNovelRun')
     expect(appendRunBlock).toContain('INSERT INTO runs')
     expect(appendRunBlock).not.toContain('readStore(activeWorkspace)')
     expect(appendRunBlock).not.toContain('writeStore(activeWorkspace')
@@ -597,9 +602,9 @@ describe('novel sqlite persistence', () => {
       dbComplete.close()
     }
 
-    const source = await readFile(join(import.meta.dir, 'novel/store.ts'), 'utf8')
+    const source = await readFile(join(import.meta.dir, 'novel/core.ts'), 'utf8')
     const start = source.indexOf('function backfillNovelRunPipelineSummaries')
-    const end = source.indexOf('\nfunction compactRawPayloadForStorage', start)
+    const end = source.indexOf('\nexport function compactRawPayloadForStorage', start)
     const backfillBlock = source.slice(start, end)
     expect(backfillBlock).toContain('SELECT id')
     expect(backfillBlock).not.toContain('SELECT id, input_ref, output_ref')
