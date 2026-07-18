@@ -52,9 +52,7 @@ import {
   normalizeBaseUrl,
   normalizeRoutingStrategy,
   openAIResponsesSdkBaseUrl,
-  parseProviderResponsePayload,
   rankModelsByBalancedKey,
-  readProviderStream,
   recordRuntimeKeyMetrics,
   requestWithLocalAssetDataUris,
   runtimeRequestCanceledError,
@@ -75,6 +73,10 @@ import {
   selectionForRequestRoute,
   waitForPollInterval,
 } from './provider-runtime-endpoint'
+import {
+  parseProviderResponsePayload,
+  readProviderStream,
+} from './provider-runtime-stream'
 
 export type {
   RuntimeExecutionOptions,
@@ -100,9 +102,7 @@ export {
   normalizeBaseUrl,
   normalizeRoutingStrategy,
   openAIResponsesSdkBaseUrl,
-  parseProviderResponsePayload,
   rankModelsByBalancedKey,
-  readProviderStream,
   recordRuntimeKeyMetrics,
   requestWithLocalAssetDataUris,
   runtimeRequestCanceledError,
@@ -123,6 +123,10 @@ export {
   selectionForRequestRoute,
   waitForPollInterval,
 } from './provider-runtime-endpoint'
+export {
+  parseProviderResponsePayload,
+  readProviderStream,
+} from './provider-runtime-stream'
 
 async function postProviderJson<T = any>(
   selection: RuntimeModelSelection,
