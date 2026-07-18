@@ -16,6 +16,16 @@
 
 
 
+### Residual inventory update (2026-07-19 goal-continue XXVII)
+
+Landed:
+- `llm/executor` reverse-free helpers extract: monofile **628** + `executor-helpers` **475**; soft baselines added
+- monotest inventory: **0** non-shim suites ≥1000 (except target-actions-a ~1007 with only 2 huge tests)
+
+Task 11: architecture+executor **10 pass**; expansion-guardrails **17 pass** after deep-repair binding move.
+
+Still deferred ≥1k production: provider-runtime, NWS view, prose-self-review factory, paragraph-prose-context, helpers-batch-risk-radar, knowledge panels, auto-repair-preflight. Full write-path UI click smoke still open.
+
 ### Residual inventory update (2026-07-19 goal-continue XXVI)
 
 Landed:

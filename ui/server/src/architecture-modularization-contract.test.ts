@@ -29,6 +29,8 @@ const HARD_CAPS: Record<string, number> = {
 }
 
 const SOFT_BASELINES: Record<string, number> = {
+  'llm/executor-helpers.ts': 480,
+  'llm/executor.ts': 650,
   'routes/novel-editor/builders.ts': 900,
   'routes/novel-core/builders.ts': 120,
   'routes/novel-core/builders-seed-outline.ts': 20,
