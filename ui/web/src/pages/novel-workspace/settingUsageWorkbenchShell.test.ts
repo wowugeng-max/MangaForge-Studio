@@ -40,10 +40,16 @@ describe('setting usage workbench shell', () => {
   })
 
   test('syncs parent-loaded project settings into the setting workbench', () => {
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    // Package-join: composition root keeps projectSettings in deps; area view wires JSX prop.
+    const projectWorkspace = [
+      source('NovelProjectWorkspaceView.tsx'),
+      source('shell/workspace-area-view.tsx'),
+      source('shell/workspace-view-props-area.ts'),
+    ].join('\n')
     const assetsWorkspace = source('StoryAssetsWorkspace.tsx')
     const settingPanel = source('SettingWorkshopPanel.tsx')
 
+    expect(projectWorkspace).toContain('projectSettings')
     expect(projectWorkspace).toContain('projectSettings={projectSettings}')
     expect(assetsWorkspace).toContain('projectSettings?: any[]')
     expect(assetsWorkspace).toContain('initialSettings={projectSettings}')

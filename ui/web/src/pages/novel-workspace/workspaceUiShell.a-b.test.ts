@@ -216,7 +216,10 @@ describe('commercial writing workspace UI shell a b', () => {
   })
 
   test('shows storyline workshop types and draft brief storyline section', () => {
-    const settingPanel = source('SettingWorkshopPanel.tsx')
+    const settingPanel = [
+      source('SettingWorkshopPanel.tsx'),
+      source('settingWorkshopHelpers.ts'),
+    ].join('\n')
     const usageModel = source('settingUsageWorkbenchModel.ts')
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')

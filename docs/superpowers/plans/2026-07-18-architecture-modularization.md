@@ -13,6 +13,14 @@
 **Branch:** `codex/architecture-modularization`
 
 
+### Residual inventory update (2026-07-19 goal-continue XLIII)
+- Extracted NWS `WORKSPACE_AREA_TABS` leaf; cleaned dead composition-root imports; fixed missing package-join imports (`useNovelProjectWorkspaceUiState`, `SerialPipelineStrip`, `NovelWorkspaceAreaView`).
+- Extracted `useNovelProjectWorkspaceModel` (~994) so `NovelProjectWorkspaceView` composition root is thin (~51, under React 800 hard cap).
+- Package-join: `projectWorkspaceSource` includes model hook + bind/loads/domain-models/area-tabs; setting-usage + storyline workshop source joins helpers.
+- Focused web shell suites **97 pass**; architecture contracts **6 pass**.
+- Still deferred large leaves: model hook ~994, paragraph-prose-context-prepare ~952, provider-runtime-support ~854, planning desks ~863. Task 11 full UI write-path click smoke still open.
+
+
 
 
 
