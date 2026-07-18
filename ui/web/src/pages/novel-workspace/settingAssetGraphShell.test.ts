@@ -6,6 +6,13 @@ function source(file: string) {
   return readFileSync(join(import.meta.dir, file), 'utf8')
 }
 
+function panelSource() {
+  return [
+    source('SettingAssetGraphPanel.tsx'),
+    source('setting-asset-graph-helpers.tsx'),
+  ].join('\n')
+}
+
 describe('setting asset relationship graph shell', () => {
   test('integrates the graph panel into the story assets workspace', () => {
     const workspace = source('StoryAssetsWorkspace.tsx')
@@ -16,7 +23,7 @@ describe('setting asset relationship graph shell', () => {
   })
 
   test('renders a relationship graph panel with diagnostics and asset metadata', () => {
-    const panel = source('SettingAssetGraphPanel.tsx')
+    const panel = panelSource()
 
     expect(panel).toContain('/settings/relationship-graph')
     expect(panel).toContain('ReactFlow')
@@ -43,7 +50,7 @@ describe('setting asset relationship graph shell', () => {
   })
 
   test('offers a large modal view for reading dense relationship graphs', () => {
-    const panel = source('SettingAssetGraphPanel.tsx')
+    const panel = panelSource()
     const css = source('SettingAssetGraphPanel.css')
 
     expect(panel).toContain('Modal')
@@ -62,7 +69,7 @@ describe('setting asset relationship graph shell', () => {
 
   test('supports model-assisted relationship repair for isolated assets', () => {
     const workspace = source('StoryAssetsWorkspace.tsx')
-    const panel = source('SettingAssetGraphPanel.tsx')
+    const panel = panelSource()
 
     expect(workspace).toContain('selectedModelId={selectedModelId}')
     expect(panel).toContain('selectedModelId')
@@ -77,7 +84,7 @@ describe('setting asset relationship graph shell', () => {
   })
 
   test('lets both embedded and modal graph details collapse for a wider canvas', () => {
-    const panel = source('SettingAssetGraphPanel.tsx')
+    const panel = panelSource()
     const css = source('SettingAssetGraphPanel.css')
 
     expect(panel).toContain('EyeInvisibleOutlined')
