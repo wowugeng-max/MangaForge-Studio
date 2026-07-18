@@ -94,7 +94,7 @@ export function directorModelSource() {
     sourceCached('auto-creation/model/helpers-risk-recovery-governance.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-risk-strengthened-roadmap.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-pipeline.ts', localSourceCache),
-    sourceCached('auto-creation/model/helpers-command.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-command.ts', localSourceCache), sourceCached('auto-creation/model/helpers-command-runway-queue.ts', localSourceCache), sourceCached('auto-creation/model/helpers-command-gates.ts', localSourceCache), sourceCached('auto-creation/model/helpers-command-actions.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-batch-guardrail.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-batch-risk-radar.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-delivery-risk-gate.ts', localSourceCache),
