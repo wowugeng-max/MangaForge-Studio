@@ -88,7 +88,7 @@ describe('writing bible style sample candidates', () => {
   })
 
   test('exposes a writing bible style sample candidate endpoint', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-project-bible-routes.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-project-bible-routes.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-project-bible-helpers.ts'), 'utf8')].join('\n')
 
     expect(source).toContain("app.post('/api/novel/projects/:id/writing-bible/style-sample-candidates'")
     expect(source).toContain('buildStyleSampleCandidatesFromChapters(')
@@ -96,7 +96,7 @@ describe('writing bible style sample candidates', () => {
   })
 
   test('exposes a writing bible style sample effectiveness endpoint', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-project-bible-routes.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-project-bible-routes.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-project-bible-helpers.ts'), 'utf8')].join('\n')
 
     expect(source).toContain("app.get('/api/novel/projects/:id/writing-bible/style-sample-effectiveness'")
     expect(source).toContain('buildStyleSampleEffectivenessReport(')
@@ -446,7 +446,7 @@ describe('writing bible style sample candidates', () => {
   })
 
   test('exposes a confirmed style sample adjustment patch endpoint', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-project-bible-routes.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-project-bible-routes.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-project-bible-helpers.ts'), 'utf8')].join('\n')
 
     expect(source).toContain("app.post('/api/novel/projects/:id/writing-bible/style-sample-adjustment'")
     expect(source).toContain('dry_run')
@@ -455,7 +455,7 @@ describe('writing bible style sample candidates', () => {
   })
 
   test('exposes a confirmed batch style sample adjustment endpoint', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-project-bible-routes.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-project-bible-routes.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-project-bible-helpers.ts'), 'utf8')].join('\n')
 
     expect(source).toContain("app.post('/api/novel/projects/:id/writing-bible/style-sample-adjustments'")
     expect(source).toContain('style_sample_patch_batch')
@@ -463,7 +463,7 @@ describe('writing bible style sample candidates', () => {
   })
 
   test('exposes a style sample adjustment undo endpoint', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-project-bible-routes.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-project-bible-routes.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-project-bible-helpers.ts'), 'utf8')].join('\n')
 
     expect(source).toContain("app.post('/api/novel/projects/:id/writing-bible/style-sample-adjustments/undo'")
     expect(source).toContain('undoLatestStyleSamplePatchHistory')
@@ -471,7 +471,7 @@ describe('writing bible style sample candidates', () => {
   })
 
   test('exposes a style sample patch post-apply review endpoint', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-project-bible-routes.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-project-bible-routes.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-project-bible-helpers.ts'), 'utf8')].join('\n')
 
     expect(source).toContain("app.post('/api/novel/projects/:id/writing-bible/style-sample-adjustments/post-apply-review'")
     expect(source).toContain('buildStyleSamplePatchPostApplyReview')
@@ -480,7 +480,7 @@ describe('writing bible style sample candidates', () => {
   })
 
   test('uses safe json when hashing generated writing bible output', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-project-bible-routes.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-project-bible-routes.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-project-bible-helpers.ts'), 'utf8')].join('\n')
 
     expect(source).not.toContain('stableTextHash(JSON.stringify(writingBible))')
   })
