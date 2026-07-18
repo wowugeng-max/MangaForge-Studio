@@ -13,10 +13,6 @@ import {
   enrichContextWithStrongHandoff,
   } from '../../novel-writing/chapter-handoff-basics'
 import {
-  collectPlanAlignmentPatchesAfterProseChange,
-  collectProjectPlanAlignmentPatches,
-  } from '../../novel-writing/chapter-plan-from-prose'
-import {
   enrichContextWithProgressResync,
   } from '../../novel-writing/chapter-progress-ledger'
 import {
@@ -123,6 +119,12 @@ import {
 import {
   attachQualityLoopFailureDiagnostics,
 } from './generate-chapter-quality-helpers'
+import {
+  applyPostCommitAdmissionWarnings,
+  createPostCommitWarningRunner,
+  resolveReturnedAdmissionStatus,
+  resyncChapterPlanAlignmentAfterProseStore,
+} from './generate-chapter-post-commit'
 import {
   buildOhStoryDirectorForPostDraft,
 } from '../../routes/novel-oh-story-director'
@@ -1744,31 +1746,21 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
         message: '章节原子验收失败，未写入任何业务数据。',
       })
     }
-    const draftPostCommitWarnings: Array<{ stage: string; message: string }> = []
-    const runDraftPostCommitBestEffort = async (stage: string, task: () => any | Promise<any>) => {
-      try {
-        await task()
-      } catch (error) {
-        draftPostCommitWarnings.push({ stage, message: formatAdmissionError(error, 300) })
-      }
-    }
+    const {
+      warnings: draftPostCommitWarnings,
+      runPostCommitBestEffort: runDraftPostCommitBestEffort,
+    } = createPostCommitWarningRunner(formatAdmissionError)
     await runDraftPostCommitBestEffort('after_commit_hook', () => runtime?.hooks?.afterChapterCommit?.({ chapterId: chapter.id, finalText }))
     await runDraftPostCommitBestEffort('store_stage', () => onStage('store', { status: 'success', word_count: countProseChars(finalText), scene_status: 'accepted' }))
     await runDraftPostCommitBestEffort('progress_resync_next_chapters', async () => {
-      const allChapters = await listNovelChapters(activeWorkspace, projectId)
-      const previousForLedger = { ...chapter, ...draftModeChapterPatch, ...(updatedReviewedDraft || {}) }
-      const alignment = collectPlanAlignmentPatchesAfterProseChange(allChapters, previousForLedger, {
-        force: true,
+      updatedReviewedDraft = await resyncChapterPlanAlignmentAfterProseStore({
+        activeWorkspace,
+        projectId,
+        chapter,
+        chapterPatch: draftModeChapterPatch,
+        updated: updatedReviewedDraft,
         source: 'post_draft_store',
-        followLimit: 5,
-        alignWrittenFollowers: true,
       })
-      for (const item of alignment.patches) {
-        const patched = await updateNovelChapter(activeWorkspace, item.chapter_id, item.patch as any, { createVersion: false })
-        if (Number(item.chapter_id) === Number(previousForLedger.id || chapter.id)) {
-          updatedReviewedDraft = patched
-        }
-      }
     })
     await runDraftPostCommitBestEffort('story_state_stage', () => onStage('story_state', {
       status: 'skipped',
@@ -1776,35 +1768,17 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
         ? '初稿模式不更新状态机，避免草稿污染长期记忆'
         : '自检模式不更新状态机，确认后可继续完整流水线',
     }))
-    const draftReturnedAdmissionStatus = draftPostCommitWarnings.length > 0 && draftModeProseAdmission.status === 'accepted'
-      ? 'accepted_with_warnings'
-      : draftModeProseAdmission.status
-    if (draftPostCommitWarnings.length > 0) {
-      const finalDraftAdmission = {
-        ...draftModeProseAdmission,
-        status: draftReturnedAdmissionStatus,
-        post_commit_warnings: draftPostCommitWarnings,
-      }
-      let persistedDraftRawPayload: any = null
-      try {
-        persistedDraftRawPayload = await mergeChapterRawPayload(activeWorkspace, chapter.id, {
-          prose_admission: finalDraftAdmission,
-          proseAdmission: finalDraftAdmission,
-        })
-      } catch (error) {
-        draftPostCommitWarnings.push({ stage: 'admission_metadata', message: formatAdmissionError(error, 300) })
-      }
-      updatedReviewedDraft = {
-        ...updatedReviewedDraft,
-        raw_payload: {
-          ...(persistedDraftRawPayload || updatedReviewedDraft?.raw_payload || {}),
-          ...(!persistedDraftRawPayload ? {
-            prose_admission: finalDraftAdmission,
-            proseAdmission: finalDraftAdmission,
-          } : {}),
-        },
-      }
-    }
+    const draftReturnedAdmissionStatus = resolveReturnedAdmissionStatus(draftModeProseAdmission.status, draftPostCommitWarnings)
+    updatedReviewedDraft = await applyPostCommitAdmissionWarnings({
+      warnings: draftPostCommitWarnings,
+      proseAdmission: draftModeProseAdmission,
+      returnedAdmissionStatus: draftReturnedAdmissionStatus,
+      mergeChapterRawPayload,
+      activeWorkspace,
+      chapterId: chapter.id,
+      formatAdmissionError,
+      chapterLike: updatedReviewedDraft,
+    })
     return {
       chapter: updatedReviewedDraft,
       score: selfCheck?.review?.score ?? null,
@@ -2089,45 +2063,20 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     })
   }
   let updated = acceptance.chapter
-  const postCommitWarnings: Array<{ stage: string; message: string }> = []
-  const runPostCommitBestEffort = async (stage: string, task: () => any | Promise<any>) => {
-    try {
-      await task()
-      return true
-    } catch (error) {
-      postCommitWarnings.push({ stage, message: formatAdmissionError(error, 300) })
-      return false
-    }
-  }
+  const { warnings: postCommitWarnings, runPostCommitBestEffort } = createPostCommitWarningRunner(formatAdmissionError)
   await runPostCommitBestEffort('after_commit_hook', () => runtime?.hooks?.afterChapterCommit?.({ chapterId: chapter.id, finalText }))
   await runPostCommitBestEffort('store_stage', () => onStage('store', { status: 'success', word_count: countProseChars(finalText), scene_status: 'accepted' }))
   await runPostCommitBestEffort('progress_resync_next_chapters', async () => {
-    const allChapters = await listNovelChapters(activeWorkspace, projectId)
-    const previousForLedger = { ...chapter, ...chapterPatch, ...(updated || {}) }
-    const alignment = collectPlanAlignmentPatchesAfterProseChange(allChapters, previousForLedger, {
-      force: true,
+    updated = await resyncChapterPlanAlignmentAfterProseStore({
+      activeWorkspace,
+      projectId,
+      chapter,
+      chapterPatch,
+      updated,
       source: 'post_prose_store',
-      followLimit: 5,
-      alignWrittenFollowers: true,
+      includeProjectAlign: true,
+      projectAlignSource: 'post_prose_store_project_align',
     })
-    for (const item of alignment.patches) {
-      const patched = await updateNovelChapter(activeWorkspace, item.chapter_id, item.patch as any, { createVersion: false })
-      if (Number(item.chapter_id) === Number(previousForLedger.id || chapter.id || updated?.id)) {
-        updated = patched
-      }
-    }
-    const refreshed = await listNovelChapters(activeWorkspace, projectId)
-    const projectAlign = collectProjectPlanAlignmentPatches(refreshed, {
-      source: 'post_prose_store_project_align',
-      onlyFromChapterNo: Math.max(1, Number(chapter.chapter_no || 1) - 1),
-      followLimit: 2,
-    })
-    for (const item of projectAlign.patches) {
-      const patched = await updateNovelChapter(activeWorkspace, item.chapter_id, item.patch as any, { createVersion: false })
-      if (Number(item.chapter_id) === Number(previousForLedger.id || chapter.id || updated?.id)) {
-        updated = patched
-      }
-    }
   })
   await runPostCommitBestEffort('memory', async () => {
     await storeChapterProseMemory(project, chapter.chapter_no, finalText)
@@ -2160,35 +2109,17 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
       deterministicProseCleanup,
     })
   })
-  const returnedAdmissionStatus = postCommitWarnings.length > 0 && proseAdmission.status === 'accepted'
-    ? 'accepted_with_warnings'
-    : proseAdmission.status
-  if (postCommitWarnings.length > 0) {
-    const finalProseAdmission = {
-      ...proseAdmission,
-      status: returnedAdmissionStatus,
-      post_commit_warnings: postCommitWarnings,
-    }
-    let persistedRawPayload: any = null
-    try {
-      persistedRawPayload = await mergeChapterRawPayload(activeWorkspace, chapter.id, {
-        prose_admission: finalProseAdmission,
-        proseAdmission: finalProseAdmission,
-      })
-    } catch (error) {
-      postCommitWarnings.push({ stage: 'admission_metadata', message: formatAdmissionError(error, 300) })
-    }
-    updated = {
-      ...updated,
-      raw_payload: {
-        ...(persistedRawPayload || updated?.raw_payload || {}),
-        ...(!persistedRawPayload ? {
-          prose_admission: finalProseAdmission,
-          proseAdmission: finalProseAdmission,
-        } : {}),
-      },
-    }
-  }
+  const returnedAdmissionStatus = resolveReturnedAdmissionStatus(proseAdmission.status, postCommitWarnings)
+  updated = await applyPostCommitAdmissionWarnings({
+    warnings: postCommitWarnings,
+    proseAdmission,
+    returnedAdmissionStatus,
+    mergeChapterRawPayload,
+    activeWorkspace,
+    chapterId: chapter.id,
+    formatAdmissionError,
+    chapterLike: updated,
+  })
   return {
     chapter: updated,
     score: selfCheck?.review?.score ?? null,

@@ -1038,7 +1038,10 @@ describe('novel writing service prose quality wiring b', () => {
     })
   })
   test('attempts accepted prose memory after chapter storage without depending on a returned record', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = [
+      readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-post-commit.ts'), 'utf8'),
+    ].join('\n')
     const storageStart = source.indexOf('acceptance = await commitNovelChapterAcceptance(activeWorkspace, {')
     const memoryStore = source.indexOf('await storeChapterProseMemory(project, chapter.chapter_no, finalText)', storageStart)
     const storyState = source.indexOf("runPostCommitBestEffort('story_state_stage'", storageStart)
@@ -1048,5 +1051,7 @@ describe('novel writing service prose quality wiring b', () => {
     expect(memoryStore).toBeGreaterThan(storageStart)
     expect(memoryStore).toBeLessThan(storyState)
     expect(postStorageBlock).toContain("runPostCommitBestEffort('memory'")
+    expect(source).toContain('createPostCommitWarningRunner')
+    expect(source).toContain('resyncChapterPlanAlignmentAfterProseStore')
   })
 })
