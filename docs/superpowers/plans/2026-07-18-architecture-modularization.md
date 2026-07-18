@@ -449,3 +449,12 @@ git checkout codex/architecture-modularization
 cd ui/server && bun test src/novel/mutation-contract.test.ts src/novel/sqlite-persistence.test.ts
 # then implement Task 0 contracts and Task 1 scaffold
 ```
+
+## Progress log (agent)
+
+- 2026-07-18: writing-service package scaffolded; quality leaf helpers extracted
+- 2026-07-18: review-fill / revision-artifacts / missing-checks / context-contract / prose-expansion extracted
+- 2026-07-18: batch-serial serial-momentum (~4.2k) extracted
+- 2026-07-18: post-delivery asset-banks extracted
+- monofile size trend: 48512 → ~42050 lines
+
