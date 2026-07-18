@@ -491,3 +491,4 @@ cd ui/server && bun test src/novel/mutation-contract.test.ts src/novel/sqlite-pe
 - 2026-07-18: post-delivery asset-banks extracted
 - monofile size trend: 48512 → ~42050 lines
 
+- 2026-07-18 late: chapter-context monotest 5-way split; unattended source-contract package join.
