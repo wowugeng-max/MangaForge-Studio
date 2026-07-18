@@ -44,6 +44,8 @@ Recent extracts (continued):
 
 - Also: chapter-context regression monotest split; NWS now ~3.5k.
 
+- 2026-07-19: NWS down to ~3507 via commercial/preflight/repair/action factories; monotests further halved (editor, pre-draft, scene-cards, regression, storyline, production, planning, director-model); delta-sync revision leaf DI + source package joins repaired; Task 11 partial regression green (200+ focused tests).
+
 Still open: NWS ~3.5k after commercial/preflight/repair/action factories; generate-chapter-for-group ~2.3k; WorkspaceCenter/ACD/StoryPlanning/builders-annotations ~1.7-1.9k; some monotests still >1.5k; Task 11 full smoke/memory not done.
 
 
