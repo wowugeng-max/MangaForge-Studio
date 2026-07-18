@@ -134,6 +134,7 @@ export function directorModelSource() {
     sourceCached('auto-creation/model/helpers-batch-handoff-and-launch.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-batch-handoff-core.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-batch-handoff-launch.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-batch-handoff-launch-shared.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-batch-handoff-launch-compass.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-batch-handoff-launch-queue.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-batch-handoff-launch-contract.ts', localSourceCache),
@@ -303,6 +304,10 @@ export function autoCreationDirectorWorkspaceSource() {
     sourceCached('auto-creation/director-workspace-view.tsx', localSourceCache),
     sourceCached('auto-creation/director-workspace-derived.ts', localSourceCache),
     sourceCached('auto-creation/director-workspace-detail-drawer.tsx', localSourceCache),
+    sourceCached('auto-creation/director-workspace-detail-drawer-core.tsx', localSourceCache),
+    sourceCached('auto-creation/director-workspace-detail-drawer-ops.tsx', localSourceCache),
+    sourceCached('auto-creation/director-workspace-detail-drawer-continuity.tsx', localSourceCache),
+    sourceCached('auto-creation/director-workspace-detail-drawer-batch.tsx', localSourceCache),
     sourceCached('auto-creation/director-workspace-chrome.tsx', localSourceCache),
   ].join('\n')
   return autoCreationDirectorWorkspaceSourceCache

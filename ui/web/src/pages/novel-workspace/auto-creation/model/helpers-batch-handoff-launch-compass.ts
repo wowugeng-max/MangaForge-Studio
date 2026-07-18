@@ -135,6 +135,8 @@ import {
   latestLongformCreationReport
 } from './helpers-batch-handoff-core'
 
+import { chapterHandoffDetail } from './helpers-batch-handoff-launch-shared'
+
 export const COMPASS_AXIS_LABELS: Record<AutoCreationLongformCompassAxis['key'], string> = {
   reader_promise: '读者承诺',
   protagonist_drive: '主角长期欲望',

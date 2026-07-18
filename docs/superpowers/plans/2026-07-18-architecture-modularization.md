@@ -16,6 +16,17 @@
 
 
 
+### Residual inventory update (2026-07-19 goal-continue XXII)
+
+Landed:
+- Director drawer package split: barrel ~54 + core/ops/continuity/batch leaves; package-join lists all leaves
+- monotest half: `director-model.memory-batch` shim → a (~837) + b (~974)
+- binding repair: extract `helpers-batch-handoff-launch-shared` (`chapterHandoffDetail` / `uniqueTextItems` / `deliveryRiskStagedActions`); compass imports shared; queue keeps DI to compass without cycle
+
+Task 11 focused: architecture contract 6 pass; director memory-batch+a 52 pass; shell a/b 92 pass; drawer/shared import smoke green.
+
+Still deferred: provider-runtime DI, NWS composition root (~1593), prose-self-review factory, helpers-batch-risk-radar, paragraph-prose-context, useStudioKnowledgePanelsController thinning, full write-path UI smoke/memory.
+
 ### Residual inventory update (2026-07-19 goal-continue XXI)
 
 Landed:
