@@ -24,6 +24,8 @@ Landed:
 
 Task 11 focused: server 115 pass (architecture+post-delivery-a+annotations-surface+core-routes); web 91 pass (CreateWizard+cockpit planning+shell a). Idle server RSS ~69MB.
 
+API smoke (2026-07-19 XXI): GET /api/novel/projects OK; project 3 has 30 chapters, 25 with nonempty chapter_text (ch1~5910 chars). Idle RSS ~69MB. Full UI write-path / create-wizard click smoke still open.
+
 Still deferred: provider-runtime, NWS composition root, prose-self-review factory, director drawer, helpers-batch-risk-radar, paragraph-prose-context, further panel hook thinning, full write-path UI smoke/memory.
 
 ### Residual inventory update (2026-07-19 goal-continue XX)
