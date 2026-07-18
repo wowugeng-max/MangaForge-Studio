@@ -102,8 +102,11 @@ import {
   parseListField,
 } from './novel-workspace/shell/workspace-editor-fields'
 import {
+  renderChapterQualityCardContentView,
   renderCommercialResult,
   renderFirst30RetentionDiagnosisContentView,
+  renderLongformCreationDiagnosisContentView,
+  renderProductionDashboardContentView,
   renderReaderTrialReviewContentView,
   renderStyleSamplePatchPreviewContentView,
 } from './novel-workspace/shell/workspace-commercial-result'
@@ -1543,40 +1546,7 @@ export default function NovelProjectWorkspace() {
       Modal.info({
         title: '章节交稿质检',
         width: 900,
-        content: (
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <Card size="small">
-              <Space align="center" size={16}>
-                <Progress type="circle" size={76} percent={Number(card.overall_score || 0)} status={card.overall_score >= 80 ? 'success' : card.overall_score < 65 ? 'exception' : 'normal'} />
-                <Space direction="vertical" size={4}>
-                  <Text strong>第{card.chapter_no}章《{card.title || '未命名'}》</Text>
-                  <Text type="secondary">{card.word_count || 0} 字 · {card.status || '-'}</Text>
-                </Space>
-              </Space>
-            </Card>
-            <Card size="small" title="质量维度">
-              <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                {(card.dimensions || []).map((item: any) => (
-                  <div key={item.key} style={{ display: 'grid', gridTemplateColumns: '92px minmax(0, 1fr) 44px', gap: 8, alignItems: 'center' }}>
-                    <Text style={{ fontSize: 12 }}>{item.label}</Text>
-                    <Progress percent={Number(item.score || 0)} size="small" status={item.score >= 80 ? 'success' : item.score < 65 ? 'exception' : 'normal'} />
-                    <Text type="secondary" style={{ fontSize: 12 }}>{item.score}</Text>
-                  </div>
-                ))}
-              </Space>
-            </Card>
-            {Array.isArray(card.must_fix) && card.must_fix.length > 0 && (
-              <Card size="small" title="必须修复">
-                <List size="small" dataSource={card.must_fix} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
-              </Card>
-            )}
-            {Array.isArray(card.next_actions) && card.next_actions.length > 0 && (
-              <Card size="small" title="下一步建议">
-                <List size="small" dataSource={card.next_actions} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
-              </Card>
-            )}
-          </Space>
-        ),
+        content: renderChapterQualityCardContentView(card),
       })
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '章节交稿质检加载失败')
@@ -1610,100 +1580,16 @@ export default function NovelProjectWorkspace() {
       Modal.info({
         title: '生产看板',
         width: 900,
-        content: (
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <Space wrap>
-              <Tag color="blue" bordered={false}>章节 {dashboard.chapter_total || 0}</Tag>
-              <Tag color="green" bordered={false}>已写 {dashboard.written_chapters || 0}</Tag>
-              <Tag bordered={false}>字数 {Number(dashboard.word_count || 0).toLocaleString()}</Tag>
-              <Tag color={dashboard.average_quality_score >= 78 ? 'green' : 'gold'} bordered={false}>均分 {dashboard.average_quality_score ?? '-'}</Tag>
-              {readiness && <Tag color={readiness.can_batch_generate ? 'green' : 'gold'} bordered={false}>就绪 {readiness.score}%</Tag>}
-              {dashboard.story_state_updated_to && <Tag color="purple" bordered={false}>状态至第{dashboard.story_state_updated_to}章</Tag>}
-            </Space>
-            {readiness && (
-              <Card size="small" title="商业化就绪度">
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                  <Progress percent={Number(readiness.score || 0)} size="small" status={readiness.can_batch_generate ? 'success' : 'normal'} />
-                  {Array.isArray(readiness.next_actions) && readiness.next_actions.length > 0 && (
-                    <Paragraph style={{ marginBottom: 0 }} ellipsis={{ rows: 2, expandable: true }}>{readiness.next_actions.join('；')}</Paragraph>
-                  )}
-                </Space>
-              </Card>
-            )}
-            {Array.isArray(dashboard.recommendations) && dashboard.recommendations.length > 0 && (
-              <Card size="small" title="生产建议">
-                <List size="small" dataSource={dashboard.recommendations} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
-              </Card>
-            )}
-            {governance && (
-              <Card size="small" title="长线治理闭环">
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                  <Space wrap>
-                    <Tag color={governance.latest_audit?.status === 'closed' ? 'green' : 'gold'} bordered={false}>{governance.latest_audit ? (governance.latest_audit.status === 'closed' ? '已闭环' : '需跟进') : '未审计'}</Tag>
-                    <Tag bordered={false}>修复任务 {governance.latest_repair_run?.task_count || 0}</Tag>
-                    <Tag bordered={false}>已确认 {governance.latest_repair_run?.resolved_count || 0}</Tag>
-                    <Tag color={(governance.risk_summary?.needs_review_count || 0) ? 'gold' : 'default'} bordered={false}>需复查 {governance.risk_summary?.needs_review_count || 0}</Tag>
-                    <Tag color={(governance.current_trends?.weak_count || 0) ? 'gold' : 'green'} bordered={false}>薄弱 {governance.current_trends?.weak_count || 0}</Tag>
-                  </Space>
-                  {(governance.latest_audit?.conclusion || governance.next_actions || []).slice(0, 3).map((item: string, index: number) => (
-                    <Text key={`${item}-${index}`} type="secondary" style={{ fontSize: 12 }}>{item}</Text>
-                  ))}
-                </Space>
-              </Card>
-            )}
-            {materialMatrix?.summary && (
-              <Card size="small" title="章节材料矩阵">
-                <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                  <Space wrap>
-                    <Tag color="blue" bordered={false}>扫描 {materialMatrix.summary.total || 0} 章</Tag>
-                    <Tag color="green" bordered={false}>可生成 {materialMatrix.summary.ready || 0}</Tag>
-                    <Tag color={(materialMatrix.summary.blocked || 0) > 0 ? 'red' : 'default'} bordered={false}>阻塞 {materialMatrix.summary.blocked || 0}</Tag>
-                    <Tag color={(materialMatrix.summary.average_score || 0) >= 75 ? 'green' : 'gold'} bordered={false}>均分 {materialMatrix.summary.average_score || 0}</Tag>
-                  </Space>
-                  <List
-                    size="small"
-                    dataSource={(materialMatrix.weakest || []).slice(0, 8)}
-                    renderItem={(row: any) => (
-                      <List.Item
-                        actions={[
-                          <Button key="open" size="small" type="link" onClick={() => {
-                            Modal.destroyAll()
-                            void selectChapterForWriting(row.chapter_id)
-                          }}>打开</Button>,
-                        ]}
-                      >
-                        <List.Item.Meta
-                          title={(
-                            <Space wrap>
-                              <Tag color={row.can_generate ? 'green' : Number(row.score || 0) >= 65 ? 'gold' : 'red'} bordered={false}>{row.score}%</Tag>
-                              <Text>第{row.chapter_no}章《{row.title || '未命名'}》</Text>
-                              {row.has_text && <Tag bordered={false}>已写</Tag>}
-                            </Space>
-                          )}
-                          description={(row.recommendations || []).slice(0, 2).join('；') || '材料可用'}
-                        />
-                      </List.Item>
-                    )}
-                  />
-                </Space>
-              </Card>
-            )}
-            <Card size="small" title="写作资产库覆盖">
-              <Space wrap>
-                {assets.map((group: any) => (
-                  <Tag key={group.category} color={Array.isArray(group.entries) && group.entries.length ? 'green' : 'default'} bordered={false}>
-                    {group.category} {Array.isArray(group.entries) ? group.entries.length : 0}
-                  </Tag>
-                ))}
-              </Space>
-            </Card>
-            <Card size="small" title="模型调度策略">
-              <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }} ellipsis={{ rows: 8, expandable: true }}>
-                {JSON.stringify(strategy, null, 2)}
-              </Paragraph>
-            </Card>
-          </Space>
-        ),
+        content: renderProductionDashboardContentView({
+          dashboard,
+          readiness,
+          governance,
+          materialMatrix,
+          assets,
+          strategy,
+        }, {
+          onOpenChapter: (chapterId) => { Modal.destroyAll(); void selectChapterForWriting(chapterId) },
+        }),
       })
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '生产看板加载失败')
@@ -3795,60 +3681,7 @@ export default function NovelProjectWorkspace() {
       Modal.info({
         title: '长篇创作诊断',
         width: 920,
-        content: (
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <Card size="small">
-              <Space align="center" size={16}>
-                <Progress
-                  type="circle"
-                  size={76}
-                  percent={Number(report.score || 0)}
-                  status={Number(report.score || 0) >= 82 ? 'success' : Number(report.score || 0) < 68 ? 'exception' : 'normal'}
-                />
-                <Space direction="vertical" size={4}>
-                  <Text strong>{report.summary || '已完成长篇创作诊断'}</Text>
-                  <Text type="secondary">质量线：{report.quality_bar || 'qidian_10k_subscription_baseline'}；状态：{report.status || '-'}</Text>
-                  <Text type="secondary">
-                    支持范围：{Number(report.support_range_words?.min || 3000000).toLocaleString()} - {Number(report.support_range_words?.max || 10000000).toLocaleString()} 字
-                  </Text>
-                </Space>
-              </Space>
-            </Card>
-            <Card size="small" title="创作契约四项">
-              <List
-                size="small"
-                dataSource={report.dimensions || []}
-                locale={{ emptyText: '暂无诊断维度' }}
-                renderItem={(item: any) => (
-                  <List.Item>
-                    <List.Item.Meta
-                      title={(
-                        <Space wrap>
-                          <Text strong>{item.label || item.key}</Text>
-                          <Tag color={item.status === 'ok' ? 'green' : item.status === 'block' ? 'red' : 'gold'} bordered={false}>{item.status || '-'}</Tag>
-                          <Tag bordered={false}>{Number(item.score || 0)}分</Tag>
-                        </Space>
-                      )}
-                      description={(
-                        <Space direction="vertical" size={2}>
-                          <Text type="secondary">{item.detail || '无说明'}</Text>
-                          {Array.isArray(item.evidence) && item.evidence.length > 0 && (
-                            <Text type="secondary" style={{ fontSize: 12 }}>证据：{item.evidence.slice(0, 3).join('；')}</Text>
-                          )}
-                        </Space>
-                      )}
-                    />
-                  </List.Item>
-                )}
-              />
-            </Card>
-            {(report.next_actions || []).length > 0 && (
-              <Card size="small" title="下一步">
-                <List size="small" dataSource={report.next_actions} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
-              </Card>
-            )}
-          </Space>
-        ),
+        content: renderLongformCreationDiagnosisContentView(report),
       })
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '长篇创作诊断失败')
