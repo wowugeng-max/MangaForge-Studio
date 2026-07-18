@@ -1010,8 +1010,8 @@ describe('chapter context word target source guards', () => {
   })
 
   test('rechecks benchmark recall preflight after confirmed context is merged', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
-    const contextStart = source.indexOf('const buildChapterContextPackage =')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/chapter-context-package.ts'), 'utf8')
+    const contextStart = source.indexOf('export async function buildChapterContextPackage')
     const mergeStart = source.indexOf('const confirmedPackage = mergeConfirmedPreDraftBriefIntoContext', contextStart)
     const overrideStart = source.indexOf('const override = chapter.raw_payload?.context_package_override', mergeStart)
     const mergeBlock = source.slice(mergeStart, overrideStart)
@@ -1023,8 +1023,8 @@ describe('chapter context word target source guards', () => {
   })
 
   test('rechecks source readiness preflight after confirmed context is merged', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
-    const contextStart = source.indexOf('const buildChapterContextPackage =')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/chapter-context-package.ts'), 'utf8')
+    const contextStart = source.indexOf('export async function buildChapterContextPackage')
     const mergeStart = source.indexOf('const confirmedPackage = mergeConfirmedPreDraftBriefIntoContext', contextStart)
     const overrideStart = source.indexOf('const override = chapter.raw_payload?.context_package_override', mergeStart)
     const mergeBlock = source.slice(mergeStart, overrideStart)
@@ -1036,11 +1036,11 @@ describe('chapter context word target source guards', () => {
   })
 
   test('declares word target inside chapter context builder instead of writing bible builder', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/chapter-context-package.ts'), 'utf8')
     const bibleSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/writing-bible.ts'), 'utf8')
     const bibleStart = bibleSource.indexOf('export function buildWritingBible')
     const bibleEnd = bibleSource.indexOf('export function hasMeaningfulWritingBible', bibleStart)
-    const contextStart = source.indexOf('const buildChapterContextPackage =')
+    const contextStart = source.indexOf('export async function buildChapterContextPackage')
     const basePackageStart = source.indexOf('const basePackage =', contextStart)
     const bibleBlock = bibleSource.slice(bibleStart, bibleEnd > bibleStart ? bibleEnd : bibleSource.length)
     const contextSetupBlock = source.slice(contextStart, basePackageStart)
