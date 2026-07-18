@@ -13,6 +13,13 @@
 **Branch:** `codex/architecture-modularization`
 
 
+### Residual inventory update (2026-07-19 goal-continue LVII)
+- Extract SettingAssetGraphPanel pure helpers leaf; package-join shell test.
+- Split structured-review-required-fields into core/extended data leaves + merge monofile (62 keys preserved).
+- Still deferred: batch-guardrail-core (~827), ComfyUI (~877), continuity-guard (~814), Task 11 full UI write-path smoke.
+
+
+
 ### Residual inventory update (2026-07-19 goal-continue LVI)
 - Split novel-generation chapter-groups register into start/unattended/run leaves + thin composition monofile (~59).
 - Still deferred: batch-guardrail-core (~827), ComfyUI (~877), continuity-guard (~814), Task 11 full UI write-path smoke.
