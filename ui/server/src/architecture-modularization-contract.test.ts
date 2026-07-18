@@ -21,7 +21,7 @@ function walkTs(dir: string): string[] {
 }
 
 const BASELINES: Record<string, number> = {
-  'novel-writing-service/monolith.ts': 47662,
+  'novel-writing-service/monolith.ts': 47271,
   'routes/novel-writing-service.ts': 2,
   'routes/novel-writing-service.test.ts': 62495,
 }
@@ -30,6 +30,8 @@ describe('architecture modularization contracts', () => {
   test('writing-service package exists with compatibility barrel', () => {
     expect(existsSync(join(serverSrc, 'novel-writing-service/index.ts'))).toBe(true)
     expect(existsSync(join(serverSrc, 'novel-writing-service/monolith.ts'))).toBe(true)
+    expect(existsSync(join(serverSrc, 'novel-writing-service/quality/review-merge.ts'))).toBe(true)
+    expect(existsSync(join(serverSrc, 'novel-writing-service/quality/word-count-guard.ts'))).toBe(true)
     const shim = readFileSync(join(serverSrc, 'routes/novel-writing-service.ts'), 'utf8')
     expect(shim).toContain("export * from '../novel-writing-service'")
     expect(shim.split(/\r?\n/).length).toBeLessThanOrEqual(20)
@@ -53,5 +55,8 @@ describe('architecture modularization contracts', () => {
     expect(typeof (mod as any).formatAdmissionError).toBe('function')
     expect(typeof (mod as any).createNovelWritingService).toBe('function')
     expect(typeof (mod as any).hasFailingReviewChecks).toBe('function')
+    expect(typeof (mod as any).applyDeterministicWordCountIssueGuard).toBe('function')
+    expect(typeof (mod as any).mergeQualityRecheckReviewWithStructuredEvidence).toBe('function')
+    expect(typeof (mod as any).mergePostDeliveryReceiptSyncIntoQualityGateReview).toBe('function')
   })
 })
