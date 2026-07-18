@@ -571,7 +571,7 @@ describe('chapter context word-target a', () => {
 
   test('passes compact previous chapter handoffs into prose draft generation', () => {
     const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-context-scene-cards.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-prose.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-editor-meme-polish.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-mode-store.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-full-production-store.ts'), 'utf8')].join('\n')
-    const utilsSource = readFileSync(join(import.meta.dir, 'novel-route-utils.ts'), 'utf8')
+    const utilsSource = [readFileSync(join(import.meta.dir, 'novel-route-utils.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-route-utils-payload.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-route-utils-quality.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-route-utils-preflight.ts'), 'utf8')].join('\n')
     const groupStart = source.indexOf('const generateChapterForGroup = async')
     const prevChaptersStart = source.indexOf('const prevChapters = compactPreviousChaptersForProse', groupStart)
     const draftCallStart = source.indexOf('const draftResult = await generateNovelChapterProse', prevChaptersStart)
