@@ -1684,4 +1684,5 @@ export function buildSuspenseSyncReport(project: any, chapter: any, contextPacka
   }
 }
 
+export * from './quality-sync-reports-benchmark-craft'
 export * from './quality-sync-reports-benchmark-structure'

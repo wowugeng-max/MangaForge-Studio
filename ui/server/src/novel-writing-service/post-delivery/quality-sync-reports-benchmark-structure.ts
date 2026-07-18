@@ -1,4 +1,370 @@
 import {
+  assetLinkagePriority,
+  normalizeAssetLinkageFunctionChainCheck,
+  normalizeAssetLinkageInformationCheck,
+  normalizeAssetLinkageStateChangeCheck,
+} from '../../novel-writing/asset-linkage-basics'
+import {
+  BEAT_COOLING_LABELS,
+  beatCoolingPriority,
+  beatCoolingSequence,
+} from '../../novel-writing/beat-cooling-basics'
+import {
+  bridgeUnitPriority,
+  normalizeBridgeClimaxDurationCheck,
+  normalizeBridgeExpectationChainCheck,
+  normalizeBridgeFatigueRepairCheck,
+  normalizeBridgePlanCheck,
+  normalizeBridgePositionCheck,
+  normalizeBridgeTargetProgressCheck,
+  normalizeBridgeTransitionCheck,
+} from '../../novel-writing/bridge-unit-basics'
+import {
+  buildChapterHookDeterministicCheck,
+  chapterHookPriority,
+  normalizeChapterHookCheck,
+} from '../../novel-writing/chapter-hook-basics'
+import {
+  buildCharacterBehaviorDeterministicCheck,
+  characterBehaviorPriority,
+  normalizeCharacterBehaviorAntagonistLogicCheck,
+  normalizeCharacterBehaviorAntagonistSelfStoryCheck,
+  normalizeCharacterBehaviorAntagonistTierExitCheck,
+  normalizeCharacterBehaviorAntagonistWeightCheck,
+  normalizeCharacterBehaviorLayeredTagsCheck,
+  normalizeCharacterBehaviorMotivationCheck,
+  normalizeCharacterBehaviorMotivationSpecificityCheck,
+  normalizeCharacterBehaviorProtagonistComposureCheck,
+  normalizeCharacterBehaviorRepeatCheck,
+  normalizeCharacterBehaviorRoleCardCheck,
+  normalizeCharacterBehaviorRulesCheck,
+  normalizeCharacterBehaviorStrongAssociationCheck,
+  normalizeCharacterBehaviorSupportingRoleCheck,
+  normalizeCharacterBehaviorSupportingRoleExitCheck,
+  normalizeCharacterDrivenEventCheck,
+  normalizeIdentityGoldfingerAlignmentCheck,
+  normalizeProtagonistRedLineCheck,
+} from '../../novel-writing/character-behavior-basics'
+import {
+  buildConflictStructureDeterministicCheck,
+  conflictStructurePriority,
+  normalizeConflictAgencyCheck,
+  normalizeConflictEventValueCheck,
+  normalizeConflictLadderCheck,
+  normalizeConflictMotivationCheck,
+  normalizeConflictNetworkLayersCheck,
+  normalizeConflictNextSeedCheck,
+  normalizeConflictNoExitCheck,
+  normalizeConflictPressureCheck,
+  normalizeConflictWebCheck,
+} from '../../novel-writing/conflict-structure-basics'
+import {
+  buildContinuityHeatDeterministicCheck,
+  continuityHeatPriority,
+  normalizeContinuityActiveExpectationCheck,
+  normalizeContinuityDormantBoundaryCheck,
+  normalizeContinuityHeatStateCheck,
+  normalizeContinuityWatchItemsCheck,
+} from '../../novel-writing/continuity-heat-basics'
+import {
+  scanDialogueBreathRisks,
+  scanDialoguePowerBalanceRisks,
+  scanDialogueVoiceSamenessRisks,
+} from '../../novel-writing/dialogue-balance'
+import {
+  normalizeDialogueAuditCheck,
+  normalizeDialogueDriveCheck,
+  normalizeDialogueGoalCheck,
+  normalizeDialogueInformationEmbedCheck,
+  normalizeDialoguePowerCheck,
+  normalizeDialogueSubtextCheck,
+  normalizeDialogueVoiceCheck,
+} from '../../novel-writing/dialogue-contract-basics'
+import {
+  scanDialogueDensityRisks,
+  scanDialogueProtagonistLineEconomyRisks,
+  scanDialogueQuestionAnswerLoopRisks,
+} from '../../novel-writing/dialogue-economy'
+import {
+  scanDialogueEasyPersuasionRisks,
+  scanDialogueEmotionContinuityRisks,
+} from '../../novel-writing/dialogue-emotion'
+import {
+  scanDialogueFormatRisks,
+  scanDialogueQuoteStyleRisks,
+} from '../../novel-writing/dialogue-format'
+import {
+  scanDialogueFunctionalFillerRisks,
+} from '../../novel-writing/dialogue-functional'
+import {
+  scanDialogueDetachedJokeRisks,
+  scanDialogueFlatCallbackRisks,
+  scanDialogueHighPressureMemeRisks,
+  scanDialogueHollowHumorPayoffRisks,
+} from '../../novel-writing/dialogue-humor'
+import {
+  scanDialogueInfodumpRisks,
+} from '../../novel-writing/dialogue-infodump'
+import {
+  scanDialogueEmptyPraiseRisks,
+  scanDialogueJudgmentQuestionRisks,
+  scanDialogueSubtextAgendaRisks,
+} from '../../novel-writing/dialogue-intent'
+import {
+  normalizeDialogueSupportingSpeakerLimitCheck,
+} from '../../novel-writing/dialogue-supporting-speakers'
+import {
+  scanDialogueToneRisks,
+} from '../../novel-writing/dialogue-tone'
+import {
+  scanPayoffDensityRisks,
+  scanPayoffEscalationRisks,
+  scanTrumpCardEffectRisks,
+} from '../../novel-writing/emotional-payoff-scans'
+import {
+  expectationThresholdArray,
+} from '../../novel-writing/expectation-threshold-basics'
+import {
+  scanAntagonistDownfallAgencyRisks,
+  scanEvidenceChainDumpRisks,
+  scanEvidenceTimeBombRisks,
+  scanFaceSlapRhythmRisks,
+  scanFinalEvidenceImpactRisks,
+} from '../../novel-writing/face-slap-scans'
+import {
+  scanEndingHookRisks,
+  scanEntryPromiseAlignmentRisks,
+  scanOpeningConflictAlignmentRisks,
+  scanOpeningHookEchoRisks,
+  scanParagraphHookStallRisks,
+  scanSuddenEndingClueRisks,
+} from '../../novel-writing/hook-alignment-scans'
+import {
+  buildIntentConfirmationDeterministicCheck,
+  buildIntentConfirmationSelfReportCheck,
+  intentConfirmationAnchorScore,
+  intentConfirmationArray,
+  intentConfirmationPriority,
+  intentCostRewardPlan,
+  normalizeIntentConfirmedCheck,
+  normalizeIntentDialogueToneBaselineCheck,
+  normalizeIntentEndingHandoffCheck,
+  normalizeIntentReactionCheck,
+  normalizeIntentRhythmStyleCheck,
+} from '../../novel-writing/intent-confirmation-basics'
+import {
+  firstProseText,
+  normalizeOpeningExpectationCheck,
+  normalizeOpeningFiveEssentialsCheck,
+  normalizeOpeningFoundationCheck,
+  normalizeOpeningGoalAndHookCheck,
+  normalizeOpeningInformationCheck,
+  normalizeOpeningProtagonistCheck,
+  openingPriority,
+} from '../../novel-writing/opening-basics'
+import {
+  scanOpeningEventDensityRisks,
+  scanOpeningFirst50ConflictRisks,
+  scanOpeningHookRisks,
+  scanOpeningProtagonistDelayRisks,
+} from '../../novel-writing/opening-scans'
+import {
+  buildParagraphHookDeterministicCheck,
+  normalizeParagraphHookCombinationCheck,
+  normalizeParagraphHookListCheck,
+  normalizeParagraphHookPresenceCheck,
+  paragraphHookPriority,
+} from '../../novel-writing/paragraph-hook-basics'
+import {
+  scanExpectationVacuumRisks,
+  scanMeaningInflationFillerRisks,
+  scanNarrativeTransitionRisks,
+  scanParagraphProgressionRisks,
+} from '../../novel-writing/progression-scans'
+import {
+  scanEmotionTellingRisks,
+  scanInfodumpRisks,
+  scanInternalMonologueRisks,
+  scanParagraphFragmentationRisks,
+  scanParagraphLengthUniformityRisks,
+  scanProseCameraAnchorRisks,
+  scanProseDecorativeDetailRisks,
+  scanProseMotionStillRisks,
+  scanProseOmniscientCrowdCameraRisks,
+  scanProseStackedDescriptionRisks,
+  scanProseStaticEnvironmentRisks,
+  scanRecapFillerRisks,
+  scanVagueQuantityWeightRisks,
+} from '../../novel-writing/prose-craft-scans'
+import {
+  scanPeriodMonotonyRisks,
+  scanProseFormatRisks,
+  scanPunctuationToneRisks,
+} from '../../novel-writing/prose-format'
+import {
+  scanPayoffSetupRisks,
+  scanShockLayeringRisks,
+  scanSpectatorReactionDifferentiationRisks,
+} from '../../novel-writing/public-payoff-scans'
+import {
+  normalizeHookAddictionModelCheck,
+  normalizeRetentionBeat,
+  normalizeRetentionDoubleEngineCheck,
+  normalizeRetentionPillarsCheck,
+  retentionBeatMatch,
+} from '../../novel-writing/reader-retention-basics'
+import {
+  normalizeReversalFaceSlapCheck,
+  normalizeReversalImpactCheck,
+  normalizeReversalMisdirectionCheck,
+  normalizeReversalSetupCheck,
+  normalizeReversalTimingCheck,
+  normalizeReversalTypeCheck,
+  reversalPriority,
+} from '../../novel-writing/reversal-basics'
+import {
+  scanCombatProcessRisks,
+  scanSceneDensityExecutionRisks,
+  scanSceneGoalObstacleChangeRisks,
+} from '../../novel-writing/scene-action-scans'
+import {
+  scanSceneSensoryAnchorRisks,
+} from '../../novel-writing/scene-card-execution-scans'
+import {
+  normalizeShowdownCombatCheck,
+  normalizeShowdownCounterplayCheck,
+  normalizeShowdownEmotionRhythmCheck,
+  normalizeShowdownPayoffCheck,
+  normalizeShowdownShockCheck,
+  normalizeShowdownStageCheck,
+  normalizeShowdownThreePressureShockCheck,
+  normalizeShowdownTransmissionChannelCheck,
+  normalizeShowdownTrumpCardReserveCheck,
+  normalizeShowdownWeakOverStrongCheck,
+  showdownPriority,
+} from '../../novel-writing/showdown-basics'
+import {
+  buildStateTrackingDeterministicCheck,
+  normalizeStateTrackingCharacterCheck,
+  normalizeStateTrackingFilterRuleCheck,
+  normalizeStateTrackingHistoricalCheck,
+  normalizeStateTrackingSourceReadinessCheck,
+  normalizeStateTrackingWorldConstraintCheck,
+  stateTrackingPriority,
+} from '../../novel-writing/state-tracking-basics'
+import {
+  styleFingerprintSentenceBeat,
+} from '../../novel-writing/style-fingerprint'
+import {
+  normalizeSuspenseListCheck,
+  normalizeSuspenseStrengthCheck,
+  suspenseArray,
+  suspensePriority,
+} from '../../novel-writing/suspense-basics'
+import {
+  scanObscureSuspenseRisks,
+  scanSuspenseFalseAlarmRisks,
+  scanSuspenseWithheldInfoRisks,
+} from '../../novel-writing/suspense-scans'
+import {
+  anchorMatchScore,
+  normalizedMatchText,
+} from '../../novel-writing/text-matching'
+import {
+  buildUpgradeRhythmDeterministicCheck,
+  normalizeGoldfingerConflictBalanceCheck,
+  normalizeGoldfingerEvolutionCheck,
+  normalizeGoldfingerMultiDimensionGrowthCheck,
+  normalizeGoldfingerSimplicityCheck,
+  normalizeUpgradeBridgeRhythmCheck,
+  normalizeUpgradeEmotionModuleCheck,
+  normalizeUpgradeFeedbackCheck,
+  normalizeUpgradeGainCheck,
+  normalizeUpgradeGapCheck,
+  normalizeUpgradeRankingLadderCheck,
+  upgradeRhythmPriority,
+} from '../../novel-writing/upgrade-rhythm-basics'
+import {
+  countProseChars,
+} from '../../novel-writing/word-target'
+import {
+  asArray,
+  compactText,
+} from '../../routes/novel-route-utils'
+import {
+  buildConflictStructureContract,
+  buildQualityAuditContract,
+  buildTargetReaderContract,
+  buildUpgradeRhythmContract,
+  explicitNewConceptNames,
+  scanEconomicPowerScaleAnchorRisks,
+  scanNewConceptAnchorRisks,
+  scanNewConceptOverloadRisks,
+} from '../quality/audience-quality-contracts'
+import {
+  buildChapterBlueprintCraftChecks,
+  buildChapterBlueprintMainlineDefinitionCheck,
+  buildChapterBlueprintSmallOutlineCheck,
+  chapterBlueprintBeat,
+  chapterBlueprintBeatMatch,
+  chapterBlueprintCausalChainCheck,
+  chapterBlueprintFromContext,
+  chapterBlueprintText,
+  endingContractFromContext,
+  scanBeatSequenceExecutionRisks,
+  scanChapterBlueprintCraftRisks,
+  scanCharacterOrderExecutionRisks,
+  scanCostRewardExecutionRisks,
+  scanEndingContractExecutionRisks,
+  scanGoldenThreeExecutionRisks,
+  scanLocalVictoryCostRisks,
+} from '../quality/chapter-blueprint-execution'
+import {
+  assetText,
+  buildAssetLinkageContract,
+  buildCharacterBehaviorContract,
+} from '../quality/character-asset-contracts'
+import {
+  buildContinuityHeatContract,
+  buildDialogueContract,
+} from '../quality/continuity-dialogue-contracts'
+import {
+  buildBridgeUnitContract,
+  buildParagraphHookContract,
+  buildReversalContract,
+  buildShowdownContract,
+  buildSuspenseContract,
+  showdownExplicitContract,
+} from '../quality/craft-tension-contracts'
+import {
+  benchmarkRecallGapStrings,
+  benchmarkRecallHasGap,
+  buildBenchmarkRecallBrief,
+  buildIntentConfirmationContract,
+} from '../quality/intent-benchmark-contracts'
+import {
+  buildOpeningContract,
+  buildProseCraftContract,
+  buildPunctuationToneContract,
+} from '../quality/plot-opening-prose-contracts'
+import {
+  proseParagraphsWithoutTitle,
+} from '../quality/prose-expansion'
+import {
+  buildStateTrackingContract,
+} from '../quality/state-tracking-contracts'
+import {
+  compactBriefText,
+  uniqueBriefStrings,
+} from '../quality/text-utils'
+import {
+  chapterBenchmarkStrategyFromContext,
+  normalizeChapterBenchmarkBeat,
+} from './quality-sync-reports-core'
+import {
+  buildStyleSampleStrategy,
+  styleBoundaryExplicitContract,
+} from '../quality/style-sample-strategy'
 import {
   contextWithChapterRawPreDraftForSync,
 } from './quality-sync-reports-benchmark'
