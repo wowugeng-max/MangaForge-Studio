@@ -13,6 +13,11 @@
 **Branch:** `codex/architecture-modularization`
 
 
+### Residual inventory update (2026-07-19 goal-continue XLVI)
+- Split planning desks package: monofile ~192 + shared ~84 + serial ~295 + longform ~415; planning model suites green.
+- Still deferred: NWS model hook ~994, prepare further phases (~888), commercial-ops register ~850. Task 11 full UI write-path click smoke still open.
+
+
 ### Residual inventory update (2026-07-19 goal-continue XLV)
 - Extracted `paragraph-prose-context-prepare-default-five` (~127); prepare monofile ~888; package-join source contracts updated.
 - Task 11 sample: server focused **78/70** style batches green; web shell **99 pass** earlier; architecture green.
