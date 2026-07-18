@@ -277,6 +277,8 @@ export function writingCockpitModelSource() {
     sourceCached('writing-cockpit/model/cockpit-basics-plans.ts', localSourceCache),
     sourceCached('writing-cockpit/model/cockpit-basics-context.ts', localSourceCache),
     sourceCached('writing-cockpit/model/cockpit-acceptance.ts', localSourceCache),
+    sourceCached('writing-cockpit/model/cockpit-acceptance-sync-a.ts', localSourceCache),
+    sourceCached('writing-cockpit/model/cockpit-acceptance-sync-b.ts', localSourceCache),
     sourceCached('writing-cockpit/model/cockpit-acceptance-desk.ts', localSourceCache),
     sourceCached('writing-cockpit/model/cockpit-planning.ts', localSourceCache),
   ].join('\n')
