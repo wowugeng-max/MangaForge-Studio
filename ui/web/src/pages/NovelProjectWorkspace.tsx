@@ -88,10 +88,8 @@ import {
 import {
   DeferredWorkspaceSurfaces,
   buildRecoveryEvidenceQueueRecheckTask,
-  flattenIncubationCharacters,
   formatRunResumeErrorMessage,
   formatStoryStateSyncFailure,
-  normalizeIncubationCharacterTier,
   safeBatchRecoveryFocusFromPayload,
 } from './novel-workspace/shell/workspace-helpers'
 import {
@@ -1645,18 +1643,10 @@ export default function NovelProjectWorkspace() {
             Modal.error({
               title: '原创孵化没有生成有效内容',
               width: 720,
-              content: (
-                <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                  <Text>模型返回了空方案，系统已阻止入库。请重试、切换模型，或先补充项目简介/题材/目标读者。</Text>
-                  {res.data?.raw_preview && (
-                    <Card size="small" title="模型原始返回片段">
-                      <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }} ellipsis={{ rows: 8, expandable: true }}>
-                        {res.data.raw_preview}
-                      </Paragraph>
-                    </Card>
-                  )}
-                </Space>
-              ),
+              content: renderOriginalIncubationEmptyErrorContentView({
+                error: '模型返回了空方案，系统已阻止入库。请重试、切换模型，或先补充项目简介/题材/目标读者。',
+                raw_preview: res.data?.raw_preview,
+              }),
             })
             return
           }
