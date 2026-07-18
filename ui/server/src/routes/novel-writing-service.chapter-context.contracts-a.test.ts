@@ -283,11 +283,11 @@ const readGenerateChapterForGroupSource = () => {
 
 describe('chapter context contracts a', () => {
   test('returns market promise sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-sync-reviews.ts'), 'utf8')].join('\n')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
-    const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
+    const draftBlock = [source.slice(draftReviewOnlyStart, draftReviewOnlyEnd), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-sync-reviews.ts'), 'utf8')].join('\n')
 
     expect(draftBlock).toContain('const draftTargetReaderSync = buildTargetReaderSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
     expect(draftBlock).toContain("reviewType: 'target_reader_sync'")
@@ -306,11 +306,11 @@ describe('chapter context contracts a', () => {
     expect(draftBlock).toContain("payloadKey: 'character_relation_sync'")
   })
   test('returns story structure sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-sync-reviews.ts'), 'utf8')].join('\n')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
-    const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
+    const draftBlock = [source.slice(draftReviewOnlyStart, draftReviewOnlyEnd), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-sync-reviews.ts'), 'utf8')].join('\n')
 
     expect(draftBlock).toContain('const draftStoryDriveSync = buildStoryDriveSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
     expect(draftBlock).toContain("reviewType: 'story_drive_sync'")
@@ -329,11 +329,11 @@ describe('chapter context contracts a', () => {
     expect(draftBlock).toContain("payloadKey: 'character_arc_sync'")
   })
   test('returns blueprint benchmark style sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-sync-reviews.ts'), 'utf8')].join('\n')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
-    const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
+    const draftBlock = [source.slice(draftReviewOnlyStart, draftReviewOnlyEnd), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-sync-reviews.ts'), 'utf8')].join('\n')
 
     expect(draftBlock).toContain('const draftChapterBlueprintSync = buildChapterBlueprintSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
     expect(draftBlock).toContain("reviewType: 'chapter_blueprint_sync'")
@@ -361,11 +361,11 @@ describe('chapter context contracts a', () => {
     expect(draftBlock).toContain("payloadKey: 'runway_sync'")
   })
   test('returns remaining deterministic story sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-sync-reviews.ts'), 'utf8')].join('\n')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
-    const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
+    const draftBlock = [source.slice(draftReviewOnlyStart, draftReviewOnlyEnd), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-sync-reviews.ts'), 'utf8')].join('\n')
 
     expect(draftBlock).toContain('const draftChapterAttractionReview = buildChapterAttractionReviewReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
     expect(draftBlock).toContain('buildChapterAttractionDraftReviewRecord({ projectId, chapter, sync: draftChapterAttractionReview })')
@@ -381,11 +381,11 @@ describe('chapter context contracts a', () => {
     expect(draftBlock).toContain('storyUnitSync: draftStoryUnitSync')
   })
   test('returns core drift and contract sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-sync-reviews.ts'), 'utf8')].join('\n')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
-    const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
+    const draftBlock = [source.slice(draftReviewOnlyStart, draftReviewOnlyEnd), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-sync-reviews.ts'), 'utf8')].join('\n')
 
     expect(draftBlock).toContain('const draftCoreDrift = buildChapterCoreDriftReport(project, updatedReviewedDraft || chapter, contextPackage, finalText, { missed: [], forbidden_touched: [] })')
     expect(draftBlock).toContain('buildChapterCoreDriftDraftReviewRecord({ projectId, chapter, sync: draftCoreDrift })')
@@ -395,7 +395,7 @@ describe('chapter context contracts a', () => {
     expect(draftBlock).toContain('coreContractSync: draftCoreContractSync')
   })
   test('queues prose sync diagnostics until minimal validation and atomic acceptance complete', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-sync-reviews.ts'), 'utf8')].join('\n')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const storeFnsStart = source.indexOf('const storeGeneratedReviewRecord = async (record: any) =>', groupStart)
     const preGateStart = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', storeFnsStart)
@@ -414,7 +414,7 @@ describe('chapter context contracts a', () => {
     expect(atomicCommitBlock).toContain('...pendingGeneratedReviews')
   })
   test('records pre-store quality failures as warnings instead of approval errors', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-sync-reviews.ts'), 'utf8')].join('\n')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const preGateStart = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', groupStart)
     const warningStart = source.indexOf('qualityWarningCandidates.push(', preGateStart)
@@ -428,7 +428,7 @@ describe('chapter context contracts a', () => {
     expect(preGateBlock).not.toContain("buildApprovalError('quality_gate'")
   })
   test('keeps explicit safety blocks hard while recording final quality failures as warnings', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-sync-reviews.ts'), 'utf8')].join('\n')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const finalGateStart = source.indexOf('const finalQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview, safetyDecision)', groupStart)
     const safetyBlockStart = source.indexOf('if (safetyDecision.blocked)', finalGateStart)
@@ -444,7 +444,7 @@ describe('chapter context contracts a', () => {
     expect(finalGateBlock).not.toContain("buildApprovalError('quality_gate'")
   })
   test('converts low-score and draft approval policies into review warnings', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-sync-reviews.ts'), 'utf8')].join('\n')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const lowScoreStart = source.indexOf("if (approvalRequired(approvalPolicy, 'low_score'", groupStart)
     const draftStart = source.indexOf("if (approvalRequired(approvalPolicy, 'draft'", lowScoreStart)
@@ -460,7 +460,7 @@ describe('chapter context contracts a', () => {
     expect(warningBlock).not.toContain("buildApprovalError('draft'")
   })
   test('keeps explicit reference safety blocks hard and records review-only safety concerns as warnings', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-sync-reviews.ts'), 'utf8')].join('\n')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const safetyBlockedStart = source.indexOf('if (safetyDecision.blocked)', groupStart)
     const safetyBlockedThrowStart = source.indexOf("const error = Object.assign(new Error('仿写安全阈值未通过')", safetyBlockedStart)
