@@ -124,6 +124,9 @@ export function directorModelSource() {
     sourceCached('auto-creation/model/helpers-safe-batch-expansion-trends-core.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-safe-batch-expansion-trends-stability.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-safe-batch-expansion-repair-trends.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-safe-batch-expansion-repair-trends-core.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-safe-batch-expansion-repair-trends-lane.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-safe-batch-expansion-repair-trends-restore.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-recovery-evidence-trends.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-recovery-evidence-trends-core.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-recovery-evidence-trends-effects.ts', localSourceCache),
@@ -131,6 +134,9 @@ export function directorModelSource() {
     sourceCached('auto-creation/model/helpers-batch-handoff-and-launch.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-batch-handoff-core.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-batch-handoff-launch.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-batch-handoff-launch-compass.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-batch-handoff-launch-queue.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-batch-handoff-launch-contract.ts', localSourceCache),
   ].join('\n')
   return directorModelSourceCache
 }
