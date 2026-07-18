@@ -570,6 +570,8 @@ cd ui/server && bun test src/novel/mutation-contract.test.ts src/novel/sqlite-pe
 
 ## Progress log (agent)
 
+- 2026-07-19 goal-continue X: serial-momentum-chapter-states shared/core/extended; prior IX risk delivery/governance splits. Focused Task11 233+ and serial-momentum/readability joins green. Remaining: NWS view ~1593, useNovelStudioController ~1215, NovelCreateWizard ~1449, provider-runtime DI, craft/audience monofiles, full write-path smoke/memory.
+
 - 2026-07-19 goal-continue IX: risk-recovery-governance core/reviews; risk-delivery core/recovery-queue; prior VIII desk/studio derived. Focused director receipts tests green. Remaining: NWS view ~1593 composition, useNovelStudioController ~1215, NovelCreateWizard ~1449, provider-runtime DI, craft/audience monofiles, full write-path smoke/memory.
 
 - 2026-07-19 goal-continue VIII: cockpit-acceptance-desk utils/builders; studio-controller-derived filters/lobby; prior VII recovery/NWS derived. Focused Task11 172+ green. Remaining: NWS view ~1593 composition root, useNovelStudioController ~1215 (feed/knowledge still intertwined), NovelCreateWizard ~1449, provider-runtime DI, full write-path smoke/memory.
