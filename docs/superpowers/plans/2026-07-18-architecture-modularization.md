@@ -15,7 +15,7 @@
 
 
 
-### Residual inventory update (2026-07-19 goal-continue XIII)
+### Residual inventory update (2026-07-19 goal-continue XIII–XIV)
 
 Landed reverse-free splits + leaf binding fixes:
 - `serial-momentum-briefs` → core/quality/expectation (+ `normalizedMatchText` import fix)
@@ -26,6 +26,8 @@ Landed reverse-free splits + leaf binding fixes:
 - Create wizard: restore missing leaf exports; extract `createWizardPayloadUtils`
 - `memory-longform-contracts-brief`: import `OH_STORY_NEXT_BATCH_WORKFLOW_RULES` from battle leaf
 - Soft baselines tightened for new barrels; focused pre-draft/sync-core + shell + architecture green
+
+Additional landed (XIV): quality-sync craft bridge/prose/punctuation; scene-card-delivery-risk bind/actions; memory-service types/runtime/agent; closed-beat-canon shared/detect/live/gates; chapter-blueprint-execution basics/checks/scans.
 
 Still open for Task 11:
 - Residual composition roots (`NovelProjectWorkspaceView`, `useNovelStudioController`, `provider-runtime`, audience/craft monofiles)
