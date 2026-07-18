@@ -16,6 +16,12 @@
 
 
 
+### Residual inventory update (2026-07-19 goal-continue XXV)
+
+Landed monotest halves: workspaceUiShell.b; director receipts-gates-a; prose-word-target + regression.
+
+Task 11: shell.b+receipts **61 pass**; word-target suites **82 pass**. Production monofiles still ≥1000: provider-runtime, NWS view, prose-self-review factory, paragraph-prose-context, helpers-batch-risk-radar, knowledge panels, auto-repair-preflight, executor. Full write-path UI click smoke still open.
+
 ### Residual inventory update (2026-07-19 goal-continue XXIV)
 
 Landed:
