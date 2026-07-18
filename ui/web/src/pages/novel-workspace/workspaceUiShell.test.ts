@@ -117,6 +117,7 @@ function planningWorkspaceSource() {
     sourceCached('planning/model/planning-workspace-model.ts', localSourceCache),
     sourceCached('planning/model/planning-workspace-builder.ts', localSourceCache),
     sourceCached('planning/model/planning-workspace-builder-desks.ts', localSourceCache),
+    sourceCached('planning/model/planning-workspace-builder-boards.ts', localSourceCache),
   ].join('\n')
   return planningWorkspaceSourceCache
 }

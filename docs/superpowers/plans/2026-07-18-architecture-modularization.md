@@ -470,6 +470,7 @@ cd ui/server && bun test src/novel/mutation-contract.test.ts src/novel/sqlite-pe
 ```
 
 ## Progress log (agent)
+- 2026-07-18: drawer-safe-batch, repair prompt-lines, planning boards leaves extracted
 - 2026-07-18: serial-momentum gap-runs leaf extracted (~2554 + ~693); planning builder desks leaf (~2979 + ~861); NWS shell editor-fields + story-state helper; source contracts updated
 
 
