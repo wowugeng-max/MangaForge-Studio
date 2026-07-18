@@ -12,6 +12,22 @@ import {
   stateDeltaEvidenceText
 } from './delta-sync-reports'
 
+type AnyFn = (...args: any[]) => any
+let assetLinkageExplicitContract: AnyFn = (_contextPackage: any = {}) => ({})
+let assetText: AnyFn = (item: any) => String(item?.name || item?.title || item?.id || '').trim()
+let assetStateChangeText: AnyFn = (value: any) => String(value || '').trim()
+
+export function bindPostDeliveryDeltaSyncRevisionDeps(deps: {
+  assetLinkageExplicitContract?: AnyFn
+  assetText?: AnyFn
+  assetStateChangeText?: AnyFn
+} = {}) {
+  if (deps.assetLinkageExplicitContract) assetLinkageExplicitContract = deps.assetLinkageExplicitContract
+  if (deps.assetText) assetText = deps.assetText
+  if (deps.assetStateChangeText) assetStateChangeText = deps.assetStateChangeText
+}
+
+
 export function buildRevisionScopeGuardSyncReport(chapter: any, selfCheck: any = {}) {
   const revision = selfCheck?.revision || selfCheck?.revised_revision || selfCheck || {}
   const guard = selfCheck?.revision_scope_guard

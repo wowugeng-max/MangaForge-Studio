@@ -32,6 +32,7 @@ import {
   inferDeliveryRiskReceiptRepairSegment,
 } from './delivery-risk-core'
 import { normalizeStoredOhStoryDeliveryReceipts } from './delivery-risk-carry-over'
+import { bindPostDeliveryDeltaSyncRevisionDeps } from './delta-sync-reports-revision'
 
 type AnyFn = (...args: any[]) => any
 
@@ -56,6 +57,11 @@ export function bindPostDeliveryDeltaSyncDeps(deps: {
   if (deps.assetText) assetText = deps.assetText
   if (deps.assetStateChangeText) assetStateChangeText = deps.assetStateChangeText
   if (deps.stateTrackingExplicitContract) stateTrackingExplicitContract = deps.stateTrackingExplicitContract
+  bindPostDeliveryDeltaSyncRevisionDeps({
+    assetLinkageExplicitContract: deps.assetLinkageExplicitContract || assetLinkageExplicitContract,
+    assetText: deps.assetText || assetText,
+    assetStateChangeText: deps.assetStateChangeText || assetStateChangeText,
+  })
 }
 
 const STORYLINE_TYPES = ['mainline', 'subplot', 'character_arc', 'relationship_arc', 'faction_arc', 'foreshadowing_arc']
@@ -809,6 +815,33 @@ function foreshadowingOrHandoffRecordedCount(stateDelta: any = {}, storylineUpda
     ...asArray(discoveredAssets).filter((item: any) => String(item?.entity_type || item?.type || '') === 'foreshadowing').map(assetText).filter(Boolean),
     ...Object.keys(foreshadowingStatus || {}),
   ].filter(Boolean).length
+}
+
+
+function assetStateDeltaRecordedItems(stateDelta: any = {}, settingUpdates: any[] = [], discoveredAssets: any[] = []) {
+  const rows = new Map<string, { entity_id: any; name: string; text: string; evidence: string }>()
+  const add = (item: any, textValue?: any) => {
+    const name = assetText(item)
+    const text = assetStateChangeText(textValue ?? item?.actual_state_change ?? item?.actualStateChange ?? item?.state_delta ?? item?.stateDelta ?? item?.state_json ?? item?.stateJson ?? item?.summary ?? item)
+    const evidence = stateDeltaEvidenceText(item) || stateDeltaEvidenceText(textValue)
+    if (!name || !text) return
+    const key = Number(item?.entity_id || item?.id || 0) ? `id:${Number(item?.entity_id || item?.id || 0)}` : `name:${name}`
+    const existing = rows.get(key)
+    rows.set(key, {
+      entity_id: Number(item?.entity_id || item?.id || 0) || existing?.entity_id || null,
+      name,
+      text: [existing?.text, text].filter(Boolean).join('；'),
+      evidence: uniqueBriefStrings([existing?.evidence, evidence], 3).join('；'),
+    })
+  }
+
+  for (const update of asArray(settingUpdates)) add(update)
+  for (const asset of asArray(discoveredAssets)) add(asset)
+  for (const [name, value] of Object.entries(stateDelta?.resource_status || stateDelta?.resourceStatus || {})) add({ name }, value)
+  for (const [name, value] of Object.entries(stateDelta?.item_ownership || stateDelta?.itemOwnership || {})) add({ name }, { owner: value })
+  for (const [name, value] of Object.entries(stateDelta?.foreshadowing_status || stateDelta?.foreshadowingStatus || {})) add({ name }, value)
+
+  return Array.from(rows.values())
 }
 
 export function buildStateDeltaCompletenessReport(chapter: any, chapterText: string, stateDelta: any = {}, options: any = {}) {
