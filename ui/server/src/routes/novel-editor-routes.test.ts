@@ -110,7 +110,10 @@ describe('editor revision route safeguards', () => {
   test('requests enough output tokens for long local revision patches', async () => {
     const { readFileSync } = await import('fs')
     const { join } = await import('path')
-    const source = readFileSync(join(import.meta.dir, 'novel-editor-routes.ts'), 'utf8')
+    const source = [
+      readFileSync(join(import.meta.dir, 'novel-editor/builders.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register.ts'), 'utf8'),
+    ].join('\n')
 
     expect(source).toContain('REVISION_MAX_TOKENS')
     expect(source).not.toContain('maxTokens: 2600')
@@ -211,7 +214,10 @@ describe('editor revision route safeguards', () => {
   test('builds context package before applying editor revision', async () => {
     const { readFileSync } = await import('fs')
     const { join } = await import('path')
-    const source = readFileSync(join(import.meta.dir, 'novel-editor-routes.ts'), 'utf8')
+    const source = [
+      readFileSync(join(import.meta.dir, 'novel-editor/builders.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register.ts'), 'utf8'),
+    ].join('\n')
     const routeStart = source.indexOf("app.post('/api/novel/reviews/:reviewId/apply-revision'")
     const routeBlock = source.slice(routeStart, source.indexOf("app.post('/api/novel/chapters/:chapterId/quality-card'", routeStart))
 
@@ -226,7 +232,10 @@ describe('editor revision route safeguards', () => {
   test('persists editor workflow revision receipts for handoff tracking', async () => {
     const { readFileSync } = await import('fs')
     const { join } = await import('path')
-    const source = readFileSync(join(import.meta.dir, 'novel-editor-routes.ts'), 'utf8')
+    const source = [
+      readFileSync(join(import.meta.dir, 'novel-editor/builders.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register.ts'), 'utf8'),
+    ].join('\n')
     const saveStart = source.indexOf("review_type: 'editor_revision'")
     const saveBlock = source.slice(saveStart, source.indexOf('})', saveStart))
 
@@ -259,7 +268,10 @@ describe('editor revision route safeguards', () => {
   test('routes truncated revision output through a compact retry before returning failure', async () => {
     const { readFileSync } = await import('fs')
     const { join } = await import('path')
-    const source = readFileSync(join(import.meta.dir, 'novel-editor-routes.ts'), 'utf8')
+    const source = [
+      readFileSync(join(import.meta.dir, 'novel-editor/builders.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register.ts'), 'utf8'),
+    ].join('\n')
 
     expect(source).toContain('buildCompactEditorRevisionPrompt')
     expect(source).toContain('retryResult')
@@ -269,7 +281,10 @@ describe('editor revision route safeguards', () => {
   test('routes anchor-miss revision output through a compact retry before returning failure', async () => {
     const { readFileSync } = await import('fs')
     const { join } = await import('path')
-    const source = readFileSync(join(import.meta.dir, 'novel-editor-routes.ts'), 'utf8')
+    const source = [
+      readFileSync(join(import.meta.dir, 'novel-editor/builders.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register.ts'), 'utf8'),
+    ].join('\n')
 
     expect(source).toContain('initial_patch_not_applicable')
     expect(source).toContain('shouldRetryRevisionPatch')
@@ -801,7 +816,10 @@ describe('chapter delivery risk brief', () => {
   })
 
   test('uses safe json for editor payloads that include context packages', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-editor-routes.ts'), 'utf8')
+    const source = [
+      readFileSync(join(import.meta.dir, 'novel-editor/builders.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register.ts'), 'utf8'),
+    ].join('\n')
 
     expect(source).not.toContain('payload: JSON.stringify({ chapter_id: chapter.id, report, context_package')
     expect(source).not.toContain('payload: JSON.stringify({ chapter_id: chapter.id, plan, context_package')
@@ -4096,7 +4114,10 @@ describe('story state sync route source guards', () => {
   test('exposes chapter story-state sync for repair task recheck convergence', async () => {
     const { readFileSync } = await import('fs')
     const { join } = await import('path')
-    const source = readFileSync(join(import.meta.dir, 'novel-editor-routes.ts'), 'utf8')
+    const source = [
+      readFileSync(join(import.meta.dir, 'novel-editor/builders.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register.ts'), 'utf8'),
+    ].join('\n')
 
     expect(source).toContain('/api/novel/chapters/:chapterId/story-state-sync')
     expect(source).toContain('buildDeliveryRiskConvergenceReport')
