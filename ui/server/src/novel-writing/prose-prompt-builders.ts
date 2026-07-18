@@ -48,12 +48,17 @@ function openingHandoffPromptBlock(contextPackage: any) {
     opening_actions: batch.delivery_risk_carry_over?.opening_actions || batch.deliveryRiskCarryOver?.openingActions,
   }
   const hasOpeningContract = Object.values(openingContract).some(value => Array.isArray(value) ? value.length > 0 : Boolean(value))
-  if (!target.previous_handoff && !firstScene.transition_from_previous && !hasOpeningContract) return ''
+  const requiredAnchors = Array.isArray(rawTarget.requiredHandoffAnchors || rawTarget.required_handoff_anchors || target.requiredHandoffAnchors)
+    ? (rawTarget.requiredHandoffAnchors || rawTarget.required_handoff_anchors || target.requiredHandoffAnchors)
+    : []
+  if (!target.previous_handoff && !firstScene.transition_from_previous && !hasOpeningContract && !requiredAnchors.length) return ''
   return [
     '【不可丢失的章首交接】',
     target.previous_handoff ? `上一章最后一幕：${target.previous_handoff}` : '',
     firstScene.transition_from_previous ? `第一场因果桥：${firstScene.transition_from_previous}` : '',
+    requiredAnchors.length ? `交接锚点（前300字必须命中）：${requiredAnchors.slice(0, 8).join('、')}` : '',
     hasOpeningContract ? `章首执行合同：${stringifyPromptJsonSafely(openingContract, 0, 3200)}` : '',
+    '开篇必须先接住上一章未完成动作；若本章目标包含“解决危机后进入新地点/新副本”，禁止把新地点直接写成第一句。',
     '改稿或润色后的开篇必须保留上一章地点、在场人物、关键持有物/状态和未完成动作，或明确写出合法的时间/空间转移及因果桥；不得为制造强钩子无桥接另起危机。',
   ].filter(Boolean).join('\n')
 }

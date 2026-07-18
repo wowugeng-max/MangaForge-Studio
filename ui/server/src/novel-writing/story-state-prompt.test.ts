@@ -34,4 +34,12 @@ describe('story state prompt builder', () => {
     expect(prompt).toContain('ip_scene_candidates')
     expect(prompt).toContain('李玄把半枚旧印按进门缝')
   })
+
+  test('story state prompt requires established_events with source_excerpt', () => {
+    const prompt = buildStoryStatePrompt({ id: 1, title: '怪谈世界' }, { chapter_no: 1 }, '林战开了不该开的门。')
+    expect(prompt).toContain('established_events')
+    expect(prompt).toContain('source_excerpt')
+    expect(prompt).toMatch(/死亡|规则触发|不可改写|正史/)
+  })
 })
+

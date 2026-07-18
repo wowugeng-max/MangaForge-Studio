@@ -306,6 +306,13 @@ export interface ChapterAcceptanceDeskModel {
     lastUpdatedChapter: number
     canSync: boolean
     primaryAction: { key: WritingCockpitActionKey; label: string } | null
+    establishedEvents: {
+      confirmedCount: number
+      candidateCount: number
+      hardCount: number
+      preview: string[]
+      guidance: string
+    } | null
   } | null
   postCommitWarnings: Array<{ stage: string; message: string }>
   statusLabel: string
@@ -4707,6 +4714,48 @@ function buildStoryStatePanel(args: {
     synced_with_gaps: '若你对正文已满意，可再点一次同步尝试补齐缺口；也可先继续写作。',
   } as const)[status]
 
+  const eventSource = Array.isArray(args.storyState?.established_events)
+    ? args.storyState.established_events
+    : Array.isArray(args.storyState?.establishedEvents)
+      ? args.storyState.establishedEvents
+      : Array.isArray(args.storyState?.canon_facts)
+        ? args.storyState.canon_facts
+        : Array.isArray(args.storyState?.canonFacts)
+          ? args.storyState.canonFacts
+          : []
+  const preview = eventSource
+    .map((item: any) => {
+      if (typeof item === 'string') return String(item || '').trim()
+      return String(item?.fact || item?.text || item?.summary || '').trim()
+    })
+    .filter(Boolean)
+    .slice(0, 5)
+  const confirmedCount = eventSource.filter((item: any) => {
+    if (typeof item === 'string') return Boolean(item.trim())
+    const st = String(item?.status || 'confirmed')
+    return st === 'confirmed' || !item?.status
+  }).length
+  const candidateCount = eventSource.filter((item: any) => item && typeof item === 'object' && item.status === 'candidate').length
+  const hardCount = eventSource.filter((item: any) => {
+    if (typeof item === 'string') return false
+    return item?.lock_level === 'hard' || item?.lockLevel === 'hard' || item?.kind === 'death' || item?.kind === 'rule_trigger'
+  }).length
+  const establishedEvents = {
+    confirmedCount,
+    candidateCount,
+    hardCount,
+    preview,
+    guidance: preview.length
+      ? `已锁正史事件 ${confirmedCount} 条（硬锁 ${hardCount}）。下一章闪回/复述必须一致。`
+      : (status === 'synced'
+        ? '本章已同步，但还没有抽到事件级正史。若正文含死亡方式/规则触发，建议重新同步。'
+        : '同步故事状态后，会抽取死亡方式、规则触发等不可改写事件。'),
+  }
+  const panelReasons = [...reasons]
+  if (!preview.length && status === 'synced') {
+    panelReasons.push('未抽到事件级正史（死亡/规则等），闪回章可能改写旧事实')
+  }
+
   const canSync = status !== 'synced'
   return {
     visible: true,
@@ -4714,7 +4763,7 @@ function buildStoryStatePanel(args: {
     statusLabel,
     headline,
     summary: defaultSummary,
-    reasons,
+    reasons: Array.from(new Set(panelReasons)).slice(0, 6),
     guidance,
     chapterNo,
     lastUpdatedChapter,
@@ -4722,6 +4771,7 @@ function buildStoryStatePanel(args: {
     primaryAction: canSync
       ? { key: 'sync_story_state', label: status === 'skipped' || status === 'pending' || status === 'lagging' ? '立即同步故事状态' : '重新同步故事状态' }
       : { key: 'sync_story_state', label: '重新同步故事状态' },
+    establishedEvents,
   }
 }
 

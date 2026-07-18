@@ -302,6 +302,10 @@ export function buildProsePromptContextSnapshot(contextPackage: any) {
       active_locations: storyState.active_locations || storyState.activeLocations,
       open_questions: storyState.open_questions || storyState.openQuestions,
       next_chapter_priorities: storyState.next_chapter_priorities || storyState.nextChapterPriorities,
+      character_name_rules: storyState.character_name_rules || storyState.characterNameRules,
+      title_name_canon: storyState.title_name_canon || storyState.titleNameCanon,
+      character_identity_rules: storyState.character_identity_rules || storyState.characterIdentityRules,
+      character_identity_canon: storyState.character_identity_canon || storyState.characterIdentityCanon,
     }),
   }
 }

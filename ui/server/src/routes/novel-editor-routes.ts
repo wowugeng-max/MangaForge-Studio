@@ -14,6 +14,9 @@ import {
 } from '../novel'
 import { executeNovelAgent, previewNovelKnowledgeInjection } from '../llm'
 import { asArray, buildLLMResultDiagnostics, clampScore, extractLLMText, getNovelPayload, getSafetyPolicy, normalizeIssue, parseJsonLikePayload, safeJsonStringify } from './novel-route-utils'
+import { mergeProseQualityWithDeliveryRisks } from '../novel-writing/prose-quality-delivery-link'
+import { collectPlanAlignmentPatchesAfterProseChange, collectProjectPlanAlignmentPatches } from '../novel-writing/chapter-plan-from-prose'
+import { buildLiveContractChapterPatch, collectClosedBeatFamiliesFromChapters } from '../novel-writing/closed-beat-canon'
 
 type EditorRoutesContext = {
   getWorkspace: () => string
@@ -266,6 +269,48 @@ export function applySurgicalRevisionPatch(originalText: string, payload: any) {
   const fullText = firstPatchText(payload?.chapter_text, payload?.prose_chapters?.[0]?.chapter_text)
   if (fullText) {
     return { chapterText: fullText, applied: [{ type: 'full_text', chars: fullText.length }], unapplied: [] as any[] }
+  }
+
+  const openingRewrite = firstPatchText(
+    payload?.opening_rewrite,
+    payload?.opening_text,
+    payload?.new_opening,
+    payload?.prose_chapters?.[0]?.opening_rewrite,
+  )
+  if (openingRewrite) {
+    const source = String(originalText || '')
+    const keepFrom = firstAnchorText(
+      payload?.keep_from,
+      payload?.keep_from_anchor,
+      payload?.resume_from,
+      payload?.resume_anchor,
+      payload?.keep_tail_from,
+    )
+    if (keepFrom) {
+      const match = findPatchAnchor(source, keepFrom)
+      if (match.index >= 0) {
+        const chapterText = `${openingRewrite.replace(/\s+$/g, '')}
+
+${source.slice(match.index)}`
+        return {
+          chapterText,
+          applied: [{ type: 'opening_rewrite', chars: openingRewrite.length, keep_from: match.anchor.slice(0, 80), match: match.match }],
+          unapplied: [] as any[],
+        }
+      }
+    }
+    // Fallback: replace the original opening window with rewritten opening.
+    const cut = Math.min(Math.max(900, Math.floor(source.length * 0.28)), 1800, Math.max(0, source.length - 400))
+    const chapterText = source.length > cut
+      ? `${openingRewrite.replace(/\s+$/g, '')}
+
+${source.slice(cut).replace(/^\s+/, '')}`
+      : openingRewrite
+    return {
+      chapterText,
+      applied: [{ type: 'opening_rewrite', chars: openingRewrite.length, keep_from: cut ? `offset:${cut}` : 'full', match: keepFrom ? 'anchor_not_found_fallback' : 'offset_cut' }],
+      unapplied: keepFrom ? [{ type: 'opening_rewrite', reason: 'keep_from_not_found', keep_from: String(keepFrom).slice(0, 120) }] : [],
+    }
   }
 
   let chapterText = String(originalText || '')
@@ -962,6 +1007,82 @@ export function buildEditorRevisionPrompt({
   const originalText = String(chapter.chapter_text || '')
   const originalLength = originalText.length
   const workflowRevisionContextBrief = buildWorkflowRevisionContextBrief(contextPackage, chapter)
+  const strategy = String(report?.revision_strategy || deliveryRiskBrief?.revision_strategy || 'surgical_patch')
+  const structural = strategy === 'structural_rewrite'
+  const openingStructural = strategy === 'opening_structural_patch'
+  const focusedRiskBrief = focusDeliveryRiskBriefForRevision(deliveryRiskBrief || {}, report || {})
+  const mustFixLines = uniqueRevisionTexts(report?.must_fix || report?.one_click_revision_prompt, 6)
+  if (openingStructural) {
+    const replaceableOpening = originalText.slice(0, Math.min(1400, Math.max(700, Math.floor(originalLength * 0.24))))
+    const resumeHint = originalText.slice(replaceableOpening.length, replaceableOpening.length + 180).trim()
+    return [
+      '任务：只修本章开篇连续性（章末主钩子/进度回放）。只输出 JSON。禁止输出完整 chapter_text。',
+      `项目：${project.title}`,
+      '要求：开篇前 300-800 字必须先承接上一章真正章末钩子；禁止先重播上一章中段平行戏或已兑现冲突。',
+      `本次修订模式：${revisionMode}。opening_structural_patch = 只重写开篇，其余正文尽量保留。`,
+      `原文长度：${originalLength} 字。不要为了修开篇而重写整章。`,
+      '硬优先级（只修这些）：',
+      ...mustFixLines.map((item, index) => `${index + 1}. ${item}`),
+      '推荐输出方式（二选一，优先 A）：',
+      'A) opening_rewrite + keep_from：opening_rewrite=新开篇；keep_from=原文后段唯一短锚点（从下方“可保留接续锚点”复制）。',
+      'B) replacements：1-2 条，find 必须从“可替换开篇区”精确复制，replace 为新开篇。',
+      '【可替换开篇区】',
+      replaceableOpening,
+      resumeHint ? '【可保留接续锚点候选】' : '',
+      resumeHint || '',
+      '【必修项】',
+      editorJson({ must_fix: mustFixLines, revision_strategy: 'opening_structural_patch', overall_score: report?.overall_score }, 2500),
+      '【聚焦交稿风险】',
+      editorJson(focusedRiskBrief || {}, 2500),
+      workflowRevisionContextBrief ? '【上下文摘要】' : '',
+      workflowRevisionContextBrief ? editorJson({
+        previous_chapter: workflowRevisionContextBrief.previous_chapter,
+        current_chapter: workflowRevisionContextBrief.current_chapter,
+      }, 3500) : '',
+      '【修订提示】',
+      String(userPrompt || report?.one_click_revision_prompt || mustFixLines.join('；')),
+      '输出 JSON 示例：',
+      '{"revision_mode":"opening_structural_patch","opening_rewrite":"新开篇正文...","keep_from":"原文唯一短锚点","revision_summary":"开篇改接章末主钩子，去掉平行戏回放"}',
+    ].filter(Boolean).join('\n')
+  }
+  if (structural) {
+    return [
+      '任务：根据质检/交付风险对当前章节做结构修订。只输出 JSON。',
+      `项目：${project.title}`,
+      '要求：优先消除进度回放、章首承接失败、章末交接缺口；可以改写开篇与中段冲突，但必须承接上一章已兑现事实，不得重演已打完的高潮。',
+      `本次修订模式：${revisionMode}。结构修订允许较大改动，不只是润色。`,
+      `原文长度：${originalLength} 字。若因消除回放导致字数变化超过 30%，revision_scope_guard.over_limit=true，但仍应完成本次结构修复。`,
+      '硬优先级（只修这些，不要同时处理全部交稿标签）：',
+      ...mustFixLines.map((item, index) => `${index + 1}. ${item}`),
+      '正文工艺硬约束：动作链完整；不要用环境描写替代推进；章末必须留下未解决钩子。',
+      '禁止把“无需修改/处理得精彩”之类低优先级意见覆盖高优先级回放修复。',
+      '输出策略：优先输出完整 chapter_text；只有改动极少时才改用 replacements。',
+      '【必修项】',
+      editorJson({ must_fix: mustFixLines, revision_strategy: 'structural_rewrite', overall_score: report?.overall_score }, 4000),
+      '【聚焦交稿风险】',
+      editorJson(focusedRiskBrief || {}, 3500),
+      workflowRevisionContextBrief ? '【上下文摘要】' : '',
+      workflowRevisionContextBrief ? editorJson({
+        previous_chapter: workflowRevisionContextBrief.previous_chapter,
+        current_chapter: workflowRevisionContextBrief.current_chapter,
+        next_chapter: workflowRevisionContextBrief.next_chapter,
+        outline: workflowRevisionContextBrief.outline,
+      }, 5000) : '',
+      '【修订提示】',
+      String(userPrompt || report?.one_click_revision_prompt || mustFixLines.join('；')),
+      '【原章节正文】',
+      originalText.slice(0, 14000),
+      '输出 JSON：',
+      '{',
+      '  "revision_mode": "structural_rewrite",',
+      '  "chapter_text": "完整修订后正文",',
+      '  "continuity_notes": ["修订后的连续性说明"],',
+      '  "revision_scope_guard": {"original_word_count": 0, "revised_word_count": 0, "word_delta": 0, "over_limit": false, "action": "结构修订"},',
+      '  "revision_receipts": [{"required_action": "对应必修项", "repair_segment": "opening|middle|ending|global", "applied_fix": "实际改法", "changed_evidence": "修后正文短句"}],',
+      '  "revision_summary": "简述如何消除回放并承接上一章"',
+      '}',
+    ].filter(Boolean).join('\n')
+  }
   return [
     '任务：根据商业编辑报告对当前章节做局部修订补丁。只输出 JSON。',
     `项目：${project.title}`,
@@ -979,7 +1100,7 @@ export function buildEditorRevisionPrompt({
     '【编辑报告】',
     editorJson(report, 7000),
     '【交稿风险清单】',
-    editorJson(deliveryRiskBrief || {}, 5000),
+    editorJson(focusedRiskBrief || deliveryRiskBrief || {}, 5000),
     workflowRevisionContextBrief ? '【workflow-revision 上下文包】' : '',
     workflowRevisionContextBrief ? '以下片段来自 MangaForge 章节上下文包；修订前必须据此完成 Step 2 上下文对照，修订后在 revision_context_receipts 中逐项回执。' : '',
     workflowRevisionContextBrief ? editorJson(workflowRevisionContextBrief, 7000) : '',
@@ -998,8 +1119,7 @@ export function buildEditorRevisionPrompt({
     '  "revision_receipts": [{"required_action": "对应报告或交稿风险的修订动作", "repair_segment": "opening|middle|ending|global", "applied_fix": "实际改法", "changed_evidence": "修订后正文可定位证据", "affected_chapters": [], "cascade_impacts": []}],',
     '  "revision_summary": "简述修了什么"',
     '}',
-    '只有在补丁无法表达时，才输出 chapter_text 完整修订正文。',
-  ].join('\n')
+  ].filter(Boolean).join('\n')
 }
 
 export function buildCompactEditorRevisionPrompt({
@@ -1019,6 +1139,33 @@ export function buildCompactEditorRevisionPrompt({
   userPrompt?: string
   previousOutputPreview?: string
 }) {
+  const strategy = String(report?.revision_strategy || deliveryRiskBrief?.revision_strategy || '')
+  const structural = strategy === 'structural_rewrite'
+  const openingStructural = strategy === 'opening_structural_patch' || strategy === 'structural_rewrite'
+  // Truncated full-chapter structural rewrite almost always needs opening-only retry, not another full chapter_text.
+  if (openingStructural) {
+    const originalText = String(chapter.chapter_text || '')
+    const replaceableOpening = originalText.slice(0, Math.min(1200, Math.max(600, Math.floor(originalText.length * 0.22))))
+    const resumeHint = originalText.slice(replaceableOpening.length, replaceableOpening.length + 160).trim()
+    return [
+      '上一次修订因输出过长被截断或不可解析。现在只修开篇连续性，禁止输出完整 chapter_text。',
+      `项目：${project.title}`,
+      '只处理最高优先级：开篇承接章末主钩子 / 禁止平行戏或进度回放。',
+      '只输出一个可完整闭合的 JSON object。',
+      '【必修项】',
+      editorJson({ must_fix: uniqueRevisionTexts(report?.must_fix || report?.one_click_revision_prompt, 4), revision_strategy: 'opening_structural_patch' }, 1800),
+      '【可替换开篇区】',
+      replaceableOpening,
+      resumeHint ? '【可保留接续锚点候选】' : '',
+      resumeHint || '',
+      '【修订提示】',
+      String(userPrompt || report?.one_click_revision_prompt || ''),
+      previousOutputPreview ? '【上次失败输出预览】' : '',
+      previousOutputPreview ? String(previousOutputPreview).slice(0, 800) : '',
+      'JSON 示例：{"revision_mode":"opening_structural_patch","opening_rewrite":"新开篇...","keep_from":"原文短锚点","revision_summary":"开篇改接主钩子"}',
+      '也可：{"revision_mode":"patch","replacements":[{"find":"开篇区唯一短锚点","replace":"新开篇片段"}],"revision_summary":"去掉回放"}',
+    ].filter(Boolean).join('\n')
+  }
   return [
     '任务：上一次修订输出被截断。现在只生成极短、可应用的 JSON 补丁。不要输出 Markdown，不要输出代码块，不要解释。',
     `项目：${project.title}`,
@@ -1040,6 +1187,123 @@ export function buildCompactEditorRevisionPrompt({
     String(chapter.chapter_text || '').slice(0, 12000),
     'JSON 示例：{"revision_mode":"patch","replacements":[{"find":"原文中唯一短锚点","replace":""}],"insertions":[],"continuity_notes":[],"revision_summary":"修了最高优先级问题"}',
   ].join('\n')
+}
+
+function uniqueRevisionTexts(values: any, limit = 8) {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of asArray(values)) {
+    const text = String(raw ?? '').replace(/\s+/g, ' ').trim()
+    if (!text) continue
+    const key = text.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(text)
+    if (out.length >= limit) break
+  }
+  return out
+}
+
+function isKeepAsIsRevisionIssue(issue: any) {
+  const blob = [
+    issue?.description,
+    issue?.suggestion,
+    issue?.fix,
+    issue?.message,
+    typeof issue === 'string' ? issue : '',
+  ].map(item => String(item || '')).join('｜')
+  return /无需修改|不判定为失误|不需要修改|维持当前|无需修订|无需改动/.test(blob)
+}
+
+/** Build a revision-facing report from prose_quality self_check, prioritizing delivery_link. */
+export function buildProseQualityRevisionReport(selfCheckReview: any = {}) {
+  const deliveryLink = selfCheckReview?.delivery_link || selfCheckReview?.deliveryLink || {}
+  const selected = asArray(deliveryLink?.selected)
+  const linkedDirectives = uniqueRevisionTexts([
+    ...selected.map((item: any) => item?.directive || item?.label || item),
+    ...asArray(selfCheckReview?.revision_directives || selfCheckReview?.revisionDirectives),
+  ], 8)
+  const highIssues = asArray(selfCheckReview?.issues)
+    .filter((issue: any) => {
+      if (isKeepAsIsRevisionIssue(issue)) return false
+      const severity = String(issue?.severity || issue?.level || '').toLowerCase()
+      return ['high', 'critical', 'blocker', 'must_fix', 'error'].includes(severity)
+    })
+    .map((issue: any) => String(issue?.fix || issue?.description || issue?.suggestion || issue?.message || issue || '').trim())
+    .filter(Boolean)
+  const optional = asArray(selfCheckReview?.issues)
+    .filter((issue: any) => {
+      if (isKeepAsIsRevisionIssue(issue)) return false
+      const severity = String(issue?.severity || issue?.level || 'medium').toLowerCase()
+      return !['high', 'critical', 'blocker', 'must_fix', 'error'].includes(severity)
+    })
+    .map((issue: any) => String(issue?.fix || issue?.description || issue?.suggestion || issue || '').trim())
+    .filter(Boolean)
+  const mustFix = uniqueRevisionTexts([...linkedDirectives, ...highIssues], 6)
+  const selectedKeys = selected.map((item: any) => String(item?.key || item?.type || ''))
+  const hasContinuityStructural = selectedKeys.some((key: string) => (
+    key === 'progress_replay'
+    || key === 'opening_hook_miss'
+    || key.startsWith('handoff')
+  )) || mustFix.some(item => /禁止回放|进度回放|超写|章首承接|章末交接|双死局|开篇未接|平行戏回放|物业合规/.test(item))
+  const hasQualityStructural = selectedKeys.some((key: string) => key.startsWith('quality_audit'))
+    || mustFix.some(item => /质量诊断|质量硬伤|全文重写|结构重排/.test(item))
+  // Continuity/open-hook issues only need opening rewrite; full-chapter JSON rewrite often truncates.
+  const revisionStrategy = hasContinuityStructural && !hasQualityStructural
+    ? 'opening_structural_patch'
+    : (hasContinuityStructural || hasQualityStructural)
+      ? 'structural_rewrite'
+      : 'surgical_patch'
+
+  return {
+    overall_score: Number(selfCheckReview?.score || 0) || null,
+    must_fix: mustFix,
+    optional_improvements: uniqueRevisionTexts(optional, 4),
+    one_click_revision_prompt: mustFix.join('；'),
+    prose_quality_review: selfCheckReview,
+    delivery_link: deliveryLink,
+    revision_strategy: revisionStrategy,
+  }
+}
+
+export function focusDeliveryRiskBriefForRevision(brief: any = {}, report: any = {}) {
+  const strategy = String(report?.revision_strategy || '')
+  const mustFix = uniqueRevisionTexts(report?.must_fix || report?.one_click_revision_prompt, 6)
+  if (!brief || typeof brief !== 'object') {
+    return {
+      total_count: mustFix.length,
+      label: mustFix.length ? `待修复 ${mustFix.length}` : '无待修复风险',
+      items: mustFix,
+      revision_directives: mustFix,
+      risks: mustFix.map(item => ({ count: 1, item, directive: item, priority_label: '优先修质量' })),
+    }
+  }
+  const preferred = asArray(brief.risks).filter((risk: any) => {
+    const blob = `${risk?.item || ''} ${risk?.directive || ''} ${risk?.priority_label || ''}`
+    if (strategy === 'structural_rewrite' || strategy === 'opening_structural_patch') {
+      return /质量|回放|交接|承接|核心|章首|章末|进度|开篇|平行|物业/.test(blob)
+    }
+    return true
+  })
+  const risks = (preferred.length ? preferred : asArray(brief.risks)).slice(0, (strategy === 'structural_rewrite' || strategy === 'opening_structural_patch') ? 5 : 8)
+  const directives = uniqueRevisionTexts([
+    ...mustFix,
+    ...risks.map((risk: any) => risk?.directive || risk?.item),
+    ...asArray(brief.revision_directives),
+  ], (strategy === 'structural_rewrite' || strategy === 'opening_structural_patch') ? 6 : 10)
+  return {
+    ...brief,
+    total_count: Math.min(Number(brief.total_count || 0) || directives.length, directives.length || Number(brief.total_count || 0)),
+    items: uniqueRevisionTexts([
+      ...mustFix,
+      ...risks.map((risk: any) => risk?.item || risk?.directive),
+      ...asArray(brief.items),
+    ], 8),
+    revision_directives: directives,
+    risks,
+    focused_for_revision: true,
+    revision_strategy: strategy || 'surgical_patch',
+  }
 }
 
 function scoreStatus(score: number) {
@@ -1099,7 +1363,7 @@ async function createProseQualityReview(ctx: EditorRoutesContext, activeWorkspac
   })
   if ((result as any).error) throw new Error(String((result as any).error))
   const reviewPayload = getNovelPayload(result)
-  const normalizedReview = {
+  const modelReview = {
     passed: reviewPayload?.passed !== false,
     score: Number(reviewPayload?.score || 80),
     issues: Array.isArray(reviewPayload?.issues) ? reviewPayload.issues.map(normalizeIssue) : [],
@@ -1109,16 +1373,104 @@ async function createProseQualityReview(ctx: EditorRoutesContext, activeWorkspac
     needs_revision: Boolean(reviewPayload?.needs_revision),
     modelName: (result as any).modelName,
   }
-  const contentHash = textHash(currentChapter.chapter_text || '')
+  const previousChapters = chapters
+    .filter((item: any) => Number(item.chapter_no || 0) < Number(currentChapter.chapter_no || 0))
+    .sort((a: any, b: any) => Number(a.chapter_no || 0) - Number(b.chapter_no || 0))
+  const previousChapter = previousChapters.length ? previousChapters[previousChapters.length - 1] : null
+  // If accepted prose already diverged from frozen task-book, reverse-sync plan first so
+  // quality / revision / blueprint no longer judge against dead seeds.
+  let alignedChapter = currentChapter
+  let planAlignment: any = null
+  try {
+    const alignment = collectPlanAlignmentPatchesAfterProseChange(chapters, currentChapter, {
+      force: true,
+      source: options.source ? `pre_quality_${options.source}` : 'pre_quality',
+      followLimit: 5,
+      alignWrittenFollowers: true,
+    })
+    planAlignment = {
+      rebuilt: alignment.current.rebuilt,
+      reason: alignment.current.reason,
+      following_count: alignment.following_count,
+    }
+    if (alignment.current.rebuilt || alignment.following_count > 0) {
+      for (const item of alignment.patches) {
+        const patched = await updateNovelChapter(activeWorkspace, item.chapter_id, item.patch as any, { createVersion: false })
+        if (Number(item.chapter_id) === Number(currentChapter.id)) alignedChapter = patched
+      }
+    } else if (alignment.alignedChapter) {
+      alignedChapter = alignment.alignedChapter
+    }
+    try {
+      const refreshed = await listNovelChapters(activeWorkspace, projectId)
+      const projectAlign = collectProjectPlanAlignmentPatches(refreshed, {
+        source: options.source ? `pre_quality_project_${options.source}` : 'pre_quality_project',
+        onlyFromChapterNo: Math.max(1, Number(currentChapter.chapter_no || 1) - 2),
+        followLimit: 2,
+      })
+      for (const item of projectAlign.patches) {
+        const patched = await updateNovelChapter(activeWorkspace, item.chapter_id, item.patch as any, { createVersion: false })
+        if (Number(item.chapter_id) === Number(currentChapter.id)) alignedChapter = patched
+      }
+      planAlignment = {
+        ...(planAlignment || {}),
+        project_align: {
+          patch_count: projectAlign.patch_count,
+          closed_families: projectAlign.closed_families,
+        },
+      }
+    } catch (projectAlignError: any) {
+      planAlignment = {
+        ...(planAlignment || {}),
+        project_align_error: String(projectAlignError?.message || projectAlignError),
+      }
+    }
+  } catch (error: any) {
+    planAlignment = { rebuilt: false, error: String(error?.message || error) }
+  }
+  // Persist live contract: strip closed beats from stored task book before QA judges goals.
+  try {
+    const closedBeats = collectClosedBeatFamiliesFromChapters(previousChapters || [])
+    const live = buildLiveContractChapterPatch(alignedChapter, {
+      previousChapters: previousChapters || [],
+      previousChapter,
+      closedBeats,
+    })
+    if (live.changed && alignedChapter?.id) {
+      alignedChapter = await updateNovelChapter(activeWorkspace, Number(alignedChapter.id), live.patch as any, { createVersion: false })
+      planAlignment = {
+        ...(planAlignment || {}),
+        live_contract: {
+          plan_health: live.contract.plan_health,
+          closed_blocked: live.contract.closed_blocked,
+          acceptance_goals: live.contract.acceptance_goals,
+        },
+      }
+    }
+  } catch (error: any) {
+    planAlignment = {
+      ...(planAlignment || {}),
+      live_contract_error: String(error?.message || error),
+    }
+  }
+
+  const normalizedReview = mergeProseQualityWithDeliveryRisks(modelReview, {
+    reviews,
+    chapter: alignedChapter,
+    previousChapter,
+    previousChapters,
+    limit: 5,
+  })
+  const contentHash = textHash(alignedChapter.chapter_text || '')
   const saved = await createNovelReview(activeWorkspace, {
     project_id: projectId,
     review_type: 'prose_quality',
-    status: normalizedReview.passed === false || Number(normalizedReview.score || 100) < 78 ? 'warn' : 'ok',
-    summary: `当前版本质检评分 ${normalizedReview.score ?? '-'}`,
+    status: normalizedReview.passed === false || Number(normalizedReview.score || 100) < 78 || normalizedReview.needs_revision ? 'warn' : 'ok',
+    summary: `当前版本质检评分 ${normalizedReview.score ?? '-'}${normalizedReview.delivery_link?.source_count ? `，已并入 ${normalizedReview.delivery_link.source_count} 条交付风险` : ''}`,
     issues: normalizedReview.issues.map((issue: any) => `${issue.severity || 'medium'}｜${issue.description || issue}`),
     payload: editorJson({
-      chapter_id: currentChapter.id,
-      chapter_updated_at: currentChapter.updated_at || '',
+      chapter_id: alignedChapter.id,
+      chapter_updated_at: alignedChapter.updated_at || '',
       content_hash: contentHash,
       source: options.source || 'manual_refresh',
       source_review_id: options.source_review_id || null,
@@ -1126,20 +1478,29 @@ async function createProseQualityReview(ctx: EditorRoutesContext, activeWorkspac
       self_check: {
         review: normalizedReview,
         revision: null,
-        final_text: currentChapter.chapter_text || '',
+        final_text: alignedChapter.chapter_text || '',
         revised: false,
       },
+      delivery_link: normalizedReview.delivery_link || null,
+      plan_alignment: planAlignment,
     }),
   })
   await appendNovelRun(activeWorkspace, {
     project_id: projectId,
     run_type: 'prose_quality',
-    step_name: `chapter-${currentChapter.chapter_no}`,
+    step_name: `chapter-${alignedChapter.chapter_no}`,
     status: 'success',
-    input_ref: JSON.stringify({ chapter_id: currentChapter.id, source: options.source || 'manual_refresh' }),
-    output_ref: JSON.stringify({ review_id: saved.id, score: normalizedReview.score, modelName: (result as any).modelName }),
+    input_ref: JSON.stringify({ chapter_id: alignedChapter.id, source: options.source || 'manual_refresh' }),
+    output_ref: JSON.stringify({
+      review_id: saved.id,
+      score: normalizedReview.score,
+      needs_revision: normalizedReview.needs_revision,
+      delivery_link_count: normalizedReview.delivery_link?.source_count || 0,
+      plan_alignment: planAlignment,
+      modelName: (result as any).modelName,
+    }),
   })
-  return { review: normalizedReview, saved, contextPackage, result, content_hash: contentHash }
+  return { review: normalizedReview, saved, contextPackage, result, content_hash: contentHash, chapter: alignedChapter, plan_alignment: planAlignment }
 }
 
 export function buildChapterQualityCard(chapter: any, contextPackage: any, reviews: any[]) {
@@ -4397,13 +4758,9 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
       if (!review) return res.status(404).json({ error: 'review not found' })
       const payload = parseJsonLikePayload(review.payload) || {}
       const selfCheckReview = payload.self_check?.review || {}
-      const report = payload.report || (review.review_type === 'prose_quality' ? {
-        overall_score: selfCheckReview.score,
-        must_fix: asArray(selfCheckReview.issues).map((issue: any) => issue?.description || issue?.suggestion || issue).filter(Boolean),
-        optional_improvements: asArray(selfCheckReview.revision_directives),
-        one_click_revision_prompt: asArray(selfCheckReview.revision_directives).join('；'),
-        prose_quality_review: selfCheckReview,
-      } : {})
+      const report = payload.report || (review.review_type === 'prose_quality'
+        ? buildProseQualityRevisionReport(selfCheckReview)
+        : {})
       const chapterId = Number(payload.chapter_id || req.body.chapter_id || 0)
       const chapters = await listNovelChapters(activeWorkspace, projectId)
       const chapter = chapters.find(item => item.id === chapterId)
@@ -4415,7 +4772,20 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
       ])
       const contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
       const revisionMode = String(req.body.revision_mode || 'from_report')
-      const deliveryRiskBrief = buildChapterDeliveryRiskBrief(chapter, reviews)
+      const deliveryRiskBrief = focusDeliveryRiskBriefForRevision(
+        buildChapterDeliveryRiskBrief(chapter, reviews),
+        report,
+      )
+      const revisionStrategy = String(report?.revision_strategy || 'surgical_patch')
+      const structuralRewrite = revisionStrategy === 'structural_rewrite'
+      const openingStructuralPatch = revisionStrategy === 'opening_structural_patch'
+      const originalChapterChars = String(chapter.chapter_text || '').length
+      // Full structural rewrite needs ~2x chapter chars in tokens once JSON-escaped; opening patch stays small.
+      const revisionMaxTokens = structuralRewrite
+        ? Math.min(28000, Math.max(12000, Math.ceil(originalChapterChars * 2.4) + 2500))
+        : openingStructuralPatch
+          ? Math.max(REVISION_MAX_TOKENS, 6000)
+          : REVISION_MAX_TOKENS
       const prompt = buildEditorRevisionPrompt({
         project,
         chapter,
@@ -4429,22 +4799,35 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
       let result = await executeNovelAgent('prose-agent', project, { task: prompt }, {
         activeWorkspace,
         modelId: modelId ? String(modelId) : undefined,
-        maxTokens: REVISION_MAX_TOKENS,
-        temperature: ctx.getStageTemperature(project, 'revise', 0.62),
+        maxTokens: revisionMaxTokens,
+        temperature: ctx.getStageTemperature(project, 'revise', (structuralRewrite || openingStructuralPatch) ? 0.5 : 0.62),
         responseMode: 'stream',
         skipMemory: true,
       })
-      if ((result as any).error) return res.status(502).json({ error: (result as any).error, result })
+      if ((result as any).error) {
+        await appendNovelRun(activeWorkspace, {
+          project_id: projectId,
+          run_type: 'editor_revision',
+          step_name: `chapter-${chapter.chapter_no}`,
+          status: 'failed',
+          input_ref: JSON.stringify({ review_id: review.id, revision_strategy: report?.revision_strategy || 'surgical_patch' }),
+          output_ref: JSON.stringify({ error: (result as any).error, stage: 'initial_llm' }),
+        }).catch(() => null)
+        return res.status(502).json({ error: (result as any).error, result })
+      }
       let resultPayload = getNovelPayload(result)
       let patchResult = applySurgicalRevisionPatch(String(chapter.chapter_text || ''), resultPayload)
       let nextText = patchResult.chapterText
       if (!nextText || (!patchResult.applied.length && !resultPayload?.chapter_text && !resultPayload?.prose_chapters?.[0]?.chapter_text)) {
-        if (shouldRetryRevisionPatch(resultPayload, patchResult, result)) {
+        if (shouldRetryRevisionPatch(resultPayload, patchResult, result) || structuralRewrite || openingStructuralPatch) {
           const retryReason = isRevisionOutputTruncated(result) ? 'initial_output_truncated' : 'initial_patch_not_applicable'
+          const retryReport = (structuralRewrite && isRevisionOutputTruncated(result))
+            ? { ...report, revision_strategy: 'opening_structural_patch' }
+            : report
           const retryPrompt = buildCompactEditorRevisionPrompt({
             project,
             chapter,
-            report,
+            report: retryReport,
             deliveryRiskBrief,
             revisionMode,
             userPrompt: req.body.prompt,
@@ -4453,8 +4836,10 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
           const retryResult = await executeNovelAgent('prose-agent', project, { task: retryPrompt }, {
             activeWorkspace,
             modelId: modelId ? String(modelId) : undefined,
-            maxTokens: COMPACT_REVISION_RETRY_MAX_TOKENS,
-            temperature: 0.15,
+            maxTokens: structuralRewrite
+              ? Math.min(16000, Math.max(COMPACT_REVISION_RETRY_MAX_TOKENS, Math.ceil(originalChapterChars * 1.2) + 2000))
+              : Math.max(COMPACT_REVISION_RETRY_MAX_TOKENS, openingStructuralPatch ? 6000 : COMPACT_REVISION_RETRY_MAX_TOKENS),
+            temperature: (structuralRewrite || openingStructuralPatch) ? 0.35 : 0.15,
             responseMode: 'stream',
             skipMemory: true,
           })
@@ -4477,6 +4862,17 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
               }
               nextText = retryNextText
             } else {
+              await appendNovelRun(activeWorkspace, {
+                project_id: projectId,
+                run_type: 'editor_revision',
+                step_name: `chapter-${chapter.chapter_no}`,
+                status: 'failed',
+                input_ref: JSON.stringify({ review_id: review.id, revision_strategy: report?.revision_strategy || 'surgical_patch', retry: true }),
+                output_ref: JSON.stringify({
+                  error_code: isRevisionOutputTruncated(retryResult) ? 'REVISION_RETRY_OUTPUT_TRUNCATED' : 'REVISION_RETRY_NO_APPLICABLE_PATCH',
+                  patch_applied: retryPatchResult?.applied?.length || 0,
+                }),
+              }).catch(() => null)
               return res.status(502).json({
                 error: isRevisionOutputTruncated(retryResult) ? '修订重试输出仍被截断，未形成完整 JSON 补丁' : '修订重试未返回可应用补丁',
                 error_code: isRevisionOutputTruncated(retryResult) ? 'REVISION_RETRY_OUTPUT_TRUNCATED' : 'REVISION_RETRY_NO_APPLICABLE_PATCH',
@@ -4494,6 +4890,14 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
       }
       if (!nextText || (!patchResult.applied.length && !resultPayload?.chapter_text && !resultPayload?.prose_chapters?.[0]?.chapter_text)) {
         if (isRevisionOutputTruncated(result)) {
+          await appendNovelRun(activeWorkspace, {
+            project_id: projectId,
+            run_type: 'editor_revision',
+            step_name: `chapter-${chapter.chapter_no}`,
+            status: 'failed',
+            input_ref: JSON.stringify({ review_id: review.id, revision_strategy: report?.revision_strategy || 'surgical_patch' }),
+            output_ref: JSON.stringify({ error_code: 'REVISION_OUTPUT_TRUNCATED', patch_applied: patchResult?.applied?.length || 0, patch_unapplied: patchResult?.unapplied?.length || 0 }),
+          }).catch(() => null)
           return res.status(502).json({
             error: '修订输出被截断，未形成完整 JSON 补丁',
             error_code: 'REVISION_OUTPUT_TRUNCATED',
@@ -4502,9 +4906,17 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
             patch_result: patchResult,
           })
         }
-        return res.status(502).json({ error: '修订未返回可应用补丁', result, patch_result: patchResult })
+        await appendNovelRun(activeWorkspace, {
+            project_id: projectId,
+            run_type: 'editor_revision',
+            step_name: `chapter-${chapter.chapter_no}`,
+            status: 'failed',
+            input_ref: JSON.stringify({ review_id: review.id, revision_strategy: report?.revision_strategy || 'surgical_patch' }),
+            output_ref: JSON.stringify({ error_code: 'REVISION_NO_APPLICABLE_PATCH', patch_applied: patchResult?.applied?.length || 0, patch_unapplied: patchResult?.unapplied?.length || 0 }),
+          }).catch(() => null)
+          return res.status(502).json({ error: '修订未返回可应用补丁', result, patch_result: patchResult })
       }
-      const updated = await updateNovelChapter(activeWorkspace, chapter.id, {
+      let updated = await updateNovelChapter(activeWorkspace, chapter.id, {
         chapter_text: nextText,
         continuity_notes: resultPayload?.continuity_notes || resultPayload?.prose_chapters?.[0]?.continuity_notes || chapter.continuity_notes || [],
         raw_payload: {
@@ -4513,6 +4925,27 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
         },
         status: 'draft',
       }, { versionSource: 'repair' })
+      let planAlignment: any = null
+      try {
+        const allChapters = await listNovelChapters(activeWorkspace, projectId)
+        const alignment = collectPlanAlignmentPatchesAfterProseChange(allChapters, updated, {
+          force: true,
+          source: structuralRewrite ? 'post_structural_revision' : 'post_editor_revision',
+          followLimit: 3,
+        })
+        planAlignment = {
+          rebuilt: alignment.current.rebuilt,
+          reason: alignment.current.reason,
+          following_count: alignment.following_count,
+          patches: alignment.patches.map(item => ({ chapter_id: item.chapter_id, kind: item.kind })),
+        }
+        for (const item of alignment.patches) {
+          const patched = await updateNovelChapter(activeWorkspace, item.chapter_id, item.patch as any, { createVersion: false })
+          if (Number(item.chapter_id) === Number(updated.id)) updated = patched
+        }
+      } catch (error: any) {
+        planAlignment = { rebuilt: false, error: String(error?.message || error) }
+      }
       const saved = await createNovelReview(activeWorkspace, {
         project_id: projectId,
         review_type: 'editor_revision',
@@ -4538,6 +4971,7 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
           ],
           workflow_revision_context: buildWorkflowRevisionContextBrief(contextPackage, chapter),
           delivery_risk_brief: deliveryRiskBrief,
+          plan_alignment: planAlignment,
         }),
       })
       let qualityRefresh: any = null
@@ -4609,7 +5043,8 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
         input_ref: JSON.stringify({ review_id: review.id }),
         output_ref: JSON.stringify({ review: saved, modelName: (result as any).modelName, applied_patches: patchResult.applied.length, unapplied_patches: patchResult.unapplied.length, quality_refresh: qualityRefresh, story_state_update: storyStateUpdate, delivery_risk_convergence: convergenceReport }),
       })
-      res.json({ ok: true, chapter: updated, review: saved, result, patch_result: patchResult, quality_refresh: qualityRefresh, story_state_update: storyStateUpdate, delivery_risk_convergence: convergenceReport, delivery_risk_convergence_review: convergenceReview })
+      res.json({
+        plan_alignment: planAlignment, ok: true, chapter: updated, review: saved, result, patch_result: patchResult, quality_refresh: qualityRefresh, story_state_update: storyStateUpdate, delivery_risk_convergence: convergenceReport, delivery_risk_convergence_review: convergenceReview })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

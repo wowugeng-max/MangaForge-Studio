@@ -872,6 +872,26 @@ function ChapterAcceptanceDesk({
                   </Space>
                 )}
                 <Text type="secondary" style={wrapTextStyle}>{desk.storyStatePanel.guidance}</Text>
+                {desk.storyStatePanel.establishedEvents && (
+                  <div style={{ marginTop: 8 }}>
+                    <Text strong>
+                      正史事件：已锁 {desk.storyStatePanel.establishedEvents.confirmedCount}
+                      ／候选 {desk.storyStatePanel.establishedEvents.candidateCount}
+                      ／硬锁 {desk.storyStatePanel.establishedEvents.hardCount}
+                    </Text>
+                    {desk.storyStatePanel.establishedEvents.preview.length > 0 ? (
+                      <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                        {desk.storyStatePanel.establishedEvents.preview.map((fact) => (
+                          <li key={fact}><Text style={wrapTextStyle}>{fact}</Text></li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div>
+                        <Text type="secondary" style={wrapTextStyle}>{desk.storyStatePanel.establishedEvents.guidance}</Text>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {desk.storyStatePanel.primaryAction && (
                   <Space wrap>
                     <Button

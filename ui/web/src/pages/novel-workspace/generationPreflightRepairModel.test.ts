@@ -57,3 +57,28 @@ describe('generation preflight repair action specs', () => {
     ]))
   })
 })
+
+
+  test('maps foreshadowing/history and world constraint blockers to direct buttons', () => {
+    const payload = {
+      error: '伏笔/前史：补齐上一章钩子、待回收伏笔或本章必须承接的前史因果。；世界约束：补齐本章会改变行动选择的规则、地点、能力限制、触发条件或代价。',
+      preflight: {
+        ready: false,
+        blockers: [
+          '伏笔/前史：补齐上一章钩子、待回收伏笔或本章必须承接的前史因果。',
+          '世界约束：补齐本章会改变行动选择的规则、地点、能力限制、触发条件或代价。',
+        ],
+        checks: [
+          { key: 'source_readiness_foreshadowing_history', ok: false, label: '伏笔/前史', severity: 'medium' },
+          { key: 'source_readiness_world_constraints', ok: false, label: '世界约束', severity: 'medium' },
+        ],
+      },
+    }
+    const actions = buildGenerationPreflightRepairActionSpecs(payload)
+    const kinds = actions.map(item => item.kind)
+    expect(kinds).toContain('open_story_state_editor')
+    expect(kinds).toContain('open_story_assets')
+    expect(kinds).toContain('incubate_setting_workshop')
+    expect(actions.some(item => item.reason === '伏笔/前史')).toBe(true)
+    expect(actions.some(item => item.reason === '世界约束')).toBe(true)
+  })

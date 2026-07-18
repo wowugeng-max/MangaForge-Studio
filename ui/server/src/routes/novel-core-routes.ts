@@ -44,6 +44,12 @@ import { buildOhStoryLongformStructureContract, formatOhStoryLongformStructurePr
 import { buildOhStoryDirectorForProjectSeed } from './novel-oh-story-director'
 import { normalizeSettingAgentPayload } from './novel-setting-routes'
 import { safeReportProjectSeedProgress, resolvePassA3VolumeStageStatus, sseData, type ProjectSeedProgressReporter } from './novel-project-seed-progress'
+import {
+  buildProjectSeedFillGapsPrompt,
+  extractFillGapsPatch,
+  listProjectSeedGapTargets,
+  mergeSeedPreferRicher,
+} from './novel-project-seed-fill-gaps'
 
 
 function parseOptionalBoolean(value: any) {
@@ -1882,7 +1888,7 @@ export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea
     'title, genre, sub_genres, target_audience, length_target, style_tags, commercial_tags',
     'synopsis, logline, core_premise, main_conflict',
     'protagonist, antagonist, worldbuilding, plot_engine, writing_bible, characters, character_pool',
-    'writing_bible 必须包含 target_reader_contract, genre_positioning_contract, plot_special_topics_contract, mainline_definition_contract, story_power_contract, character_design_contract, longform_structure_contract, core_contract_radar, reader_retention_contract',
+    'writing_bible 必须包含 target_reader_contract, genre_positioning_contract, plot_special_topics_contract, mainline_definition_contract, story_power_contract, character_design_contract, longform_structure_contract, core_contract_radar, reader_retention_contract, opening_strategy_contract',
     'commercial_positioning 必须包含 platform, reader_promise, selling_points, risks',
     'master_outline, volume_outlines, chapter_outlines, foreshadowing_plan, open_questions, next_steps',
     '',
@@ -1970,7 +1976,7 @@ export function buildProjectSeedPrompt(
     'antagonist: {name, identity, goal, method, hidden_truth}',
     'worldbuilding: {world_summary, history_secret, power_system, ancient_gods, outer_gods, rules, taboos}',
     'plot_engine: {inciting_incident, long_term_goal, volume_arc_suggestions, first_10_chapters_direction}',
-    'writing_bible: {promise, mainline, world_rules, style_lock, forbidden, safety_policy, target_reader_contract, genre_positioning_contract, plot_special_topics_contract, mainline_definition_contract, story_power_contract, character_design_contract, longform_structure_contract, core_contract_radar, reader_retention_contract}',
+    'writing_bible: {promise, mainline, world_rules, style_lock, forbidden, safety_policy, target_reader_contract, genre_positioning_contract, plot_special_topics_contract, mainline_definition_contract, story_power_contract, character_design_contract, longform_structure_contract, core_contract_radar, reader_retention_contract, opening_strategy_contract}',
     'writing_bible.target_reader_contract: {reader_profile, reader_desires, emotional_gap, chapter_value_test, quality_checks}，必须回答“写给谁看、读者想看什么、本章给什么”',
     'writing_bible.genre_positioning_contract: {genre_tags, platform, reader_psychology, core_hook, type_formula, selling_points, long_board, innovation_boundary, genre_catalog_contract, genre_core_mechanics_contract, quality_checks}，必须包含“拉长板而非补短板”和上方 oh-story 题材目录/核心机制契约',
     'writing_bible.plot_special_topics_contract: 必须完整写入上方 oh-story 特殊题材操作契约，按 matched_topics 约束金手指、题材边界、扫榜对标、都市高武、三万字卡点、阵营手牌等专题',
@@ -1980,6 +1986,7 @@ export function buildProjectSeedPrompt(
     'writing_bible.longform_structure_contract: 必须完整写入上方 oh-story 长篇结构骨架合同，覆盖一级/二级/三级结构选择、五幕因果链、五级大纲、每卷目的+高潮、支线服务主线、顶层势力柱子和人际关系先行换地图',
     'writing_bible.core_contract_radar: {must_serve, no_drift, theme_unity_rules, repair_focus, periodic_drift_check}，periodic_drift_check.question 必须包含“当初吸引读者的卖点还在吗”',
     'writing_bible.reader_retention_contract: {retention_double_engine, opening_hook_rule, ending_hook_rule, reward_randomness_rule, quality_checks}，opening_hook_rule 必须包含“前300字”',
+    'writing_bible.opening_strategy_contract: {hook_type, opening_flow, mainline_graft, first_5_chapter_promise, threshold_ladder, forbidden_mixing, quality_checks}，hook_type 只能取“事件噱头/金手指噱头/人设噱头”之一；事件/金手指/人设噱头不能混用；写清前5章吸量承诺与主线嫁接时机',
     'commercial_positioning: {platform, reader_promise, selling_points, tropes, risks}',
     'characters: array，列出关键人物 name, role_type, tier, narrative_function, motivation, goal, conflict, relationship_to_protagonist, first_appearance_chapter, active_range, voice_anchor, signature_action, secret_or_pressure, current_state, role_card, layered_tags, strong_associations, memory_anchor, supporting_function, exit_or_turning_point, antagonist_logic',
     'character_pool: object，可按角色池分层输出 protagonist, primary_supporting, secondary_supporting, cameo_supporting, antagonist_primary, antagonist_arc, antagonist_minor, faction_agent；每项角色字段同 characters，反派层必须填写 antagonist_logic',
@@ -2565,6 +2572,21 @@ function buildFallbackWritingBible(seed: any, project: any = {}) {
     risks: positioningRisks,
     ...parseNestedSeed(existing.commercial_positioning),
   }
+  const openingStrategyContract = {
+    source: 'oh_story_creation_contract_v1',
+    hook_type: /金手指|系统|外挂/.test(`${promise} ${firstSeedText(protagonist.power_or_cheat, world.power_system)}`) ? '金手指噱头' : '事件噱头',
+    opening_flow: `开篇用具体事件压住读者，再露出「${firstSeedText(root.title, project.title, '本书')}」的规则代价。`,
+    mainline_graft: `前5章完成吸量承诺后，嫁接到主线冲突：${firstSeedText(coreConflict, mainlineGoal, promise)}。`,
+    first_5_chapter_promise: firstSeedText(first30Plan, `前5章兑现「${readerPromise}」并让主角完成一次小规模验证。`),
+    threshold_ladder: '用信息差、资源门槛、身份门槛和对手反制逐级抬高行动成本。',
+    forbidden_mixing: '事件噱头、金手指噱头、人设噱头三选一，不在开篇混用。',
+    quality_checks: [
+      '开篇第一屏必须是剧情推进，而不是设定说明书。',
+      '前5章承诺必须可在细纲中核对。',
+      '主线嫁接时机必须明确。',
+    ],
+    ...parseNestedSeed(existing.opening_strategy_contract),
+  }
   return {
     ...existing,
     promise,
@@ -2598,6 +2620,7 @@ function buildFallbackWritingBible(seed: any, project: any = {}) {
     longform_structure_contract: longformStructureContract,
     core_contract_radar: coreContractRadar,
     reader_retention_contract: readerRetentionContract,
+    opening_strategy_contract: openingStrategyContract,
     commercial_positioning: commercialPositioning,
     source: firstSeedText(existing.source, 'project_seed_fallback'),
   }
@@ -2773,6 +2796,19 @@ function buildProjectSeedStoryState(seed: any, project: any, characters: any[]) 
       source: 'project_seed_materialization',
     }
   }).filter((character: any) => character.name)
+  const foreshadowingStatus = { ...(parseNestedSeed(existing.foreshadowing_status) || {}) }
+  for (const item of asSeedArray(seed?.foreshadowing_plan)) {
+    const record = parseNestedSeed(item)
+    const name = firstSeedText(record.name, record.title)
+    if (!name || foreshadowingStatus[name]) continue
+    foreshadowingStatus[name] = firstSeedText(
+      record.description,
+      record.summary,
+      record.true_meaning,
+      `埋设：${firstSeedText(record.plant_at, record.plantAt, '待定')}；回收：${firstSeedText(record.payoff_at, record.payoffAt, '待定')}`,
+    )
+  }
+  const world = parseNestedSeed(seed?.worldbuilding)
   return {
     ...existing,
     source: existing.source || 'project_seed_materialization',
@@ -2786,6 +2822,16 @@ function buildProjectSeedStoryState(seed: any, project: any, characters: any[]) 
         seed?.core_premise,
       ], 5),
     characters: asSeedArray(existing.characters).length ? existing.characters : stateCharacters,
+    foreshadowing_status: Object.keys(foreshadowingStatus).length
+      ? foreshadowingStatus
+      : (existing.foreshadowing_status || {}),
+    world_rules: asSeedArray(existing.world_rules).length
+      ? existing.world_rules
+      : uniqueSeedTexts([
+        ...asSeedArray(world.rules),
+        world.power_system,
+        seed?.writing_bible?.world_rules,
+      ], 8),
     updated_at: new Date().toISOString(),
   }
 }
@@ -2901,6 +2947,51 @@ async function materializeProjectSeed(activeWorkspace: string, project: any, see
       ...entity,
       project_id: project.id,
       payload_json: { ...(entity.payload_json || {}), source: entity.payload_json?.source || 'project_seed_materialization' },
+    } as any)
+    created.setting_entities += 1
+  }
+
+  // Materialize foreshadowing plan and world rules so chapter-1 preflight can read them as source readiness.
+  for (const item of asSeedArray(seed.foreshadowing_plan)) {
+    const record = parseNestedSeed(item)
+    const name = firstSeedText(record.name, record.title)
+    if (!name) continue
+    await createNovelSettingEntity(activeWorkspace, {
+      project_id: project.id,
+      entity_type: 'foreshadowing',
+      name,
+      summary: firstSeedText(record.description, record.summary, record.true_meaning, `${name} 待埋设/回收`),
+      state_json: {
+        planted_chapter: firstSeedText(record.plant_at, record.plantAt, '1'),
+        payoff_chapter: firstSeedText(record.payoff_at, record.payoffAt, ''),
+        true_meaning: firstSeedText(record.true_meaning, record.trueMeaning, ''),
+        status: 'planted_pending',
+      },
+      payload_json: { ...record, source: 'project_seed_materialization' },
+    } as any)
+    created.setting_entities += 1
+  }
+  for (const rule of asSeedArray(world.rules)) {
+    const ruleText = firstSeedText(rule)
+    if (!ruleText) continue
+    await createNovelSettingEntity(activeWorkspace, {
+      project_id: project.id,
+      entity_type: 'rule',
+      name: compactSeedText(ruleText, 24) || '世界规则',
+      summary: ruleText,
+      constraints_json: { rule: ruleText, source: 'project_seed_worldbuilding' },
+      payload_json: { source: 'project_seed_materialization', kind: 'world_rule' },
+    } as any)
+    created.setting_entities += 1
+  }
+  if (firstSeedText(world.power_system)) {
+    await createNovelSettingEntity(activeWorkspace, {
+      project_id: project.id,
+      entity_type: 'system',
+      name: '力量体系',
+      summary: firstSeedText(world.power_system),
+      constraints_json: { power_system: firstSeedText(world.power_system), source: 'project_seed_worldbuilding' },
+      payload_json: { source: 'project_seed_materialization', kind: 'power_system' },
     } as any)
     created.setting_entities += 1
   }
@@ -3025,6 +3116,186 @@ async function createProjectFromSeed(activeWorkspace: string, seed: any, options
   })
   const materialized = await materializeProjectSeed(activeWorkspace, project, seedForProject)
   return { project: materialized.project || project, seed: seedForProject, created: materialized.created }
+}
+
+
+async function fillProjectSeedGapsWithModel(
+  activeWorkspace: string,
+  seed: any,
+  idea: string,
+  modelId: string,
+  requestedTitle = '',
+  risks: string[] = [],
+  gapHints: string[] = [],
+) {
+  const baseSeed = parseNestedSeed(seed)
+  const gaps = listProjectSeedGapTargets(baseSeed, [...risks, ...gapHints])
+  if (!gaps.length) {
+    return {
+      seed: attachProjectSeedDirector(baseSeed),
+      filled: [] as string[],
+      skipped: [] as string[],
+      gaps,
+      result: null as any,
+      seed_diagnostics: {
+        ...buildProjectSeedDiagnostics(baseSeed, idea, null),
+        status: 'no_gaps',
+        suggestion: '未检测到可补缺口，已保留当前种子。',
+      },
+    }
+  }
+  const prompt = buildProjectSeedFillGapsPrompt({
+    seed: baseSeed,
+    idea,
+    title: requestedTitle || baseSeed.title || '',
+    gaps,
+    risks: [...risks, ...gapHints],
+  })
+  const projectStub = {
+    id: 0,
+    title: requestedTitle || baseSeed.title || '项目种子补缺口',
+    genre: baseSeed.genre || '',
+    sub_genres: baseSeed.sub_genres || [],
+    synopsis: baseSeed.synopsis || idea.slice(0, 500),
+    length_target: baseSeed.length_target || 'medium',
+    target_audience: baseSeed.target_audience || '',
+    style_tags: baseSeed.style_tags || [],
+    commercial_tags: baseSeed.commercial_tags || [],
+    reference_config: {},
+    status: 'draft',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }
+  const result = await executeNovelAgent('outline-agent', projectStub as any, { task: prompt, authoritativeTask: true }, {
+    activeWorkspace,
+    modelId,
+    maxTokens: 7000,
+    temperature: 0.34,
+    skipMemory: true,
+    responseMode: 'non_stream',
+  })
+  // Even if model fails, continue to local deterministic fill below with empty model patch.
+  const modelFailed = Boolean((result as any)?.error)
+  // Robust extract: output may be string/empty object; content may hold JSON.
+  const payloadCandidates = [
+    (result as any)?.parsed,
+    (result as any)?.output,
+    (result as any)?.content,
+    result,
+  ]
+  let rawPatch: Record<string, any> = {}
+  for (const candidate of payloadCandidates) {
+    const extracted = extractFillGapsPatch(candidate)
+    if (extracted && Object.keys(extracted).length) {
+      rawPatch = extracted
+      break
+    }
+  }
+  // Build a narrow patch only. Do NOT full-normalize against the whole seed,
+  // or fields like character_pool / first30_plan can be dropped.
+  const modelPatch: Record<string, any> = {}
+  for (const key of [
+    'writing_bible',
+    'commercial_positioning',
+    'worldbuilding',
+    'plot_engine',
+    'protagonist',
+    'antagonist',
+    'characters',
+    'character_pool',
+    'reader_promise',
+    'core_selling_point',
+    'opening_hook',
+    'mainline_goal',
+    'long_term_conflict',
+    'growth_engine',
+    'target_audience',
+    'foreshadowing_plan',
+  ]) {
+    if (rawPatch[key] !== undefined) modelPatch[key] = rawPatch[key]
+  }
+  // nested convenience: allow top-level contract objects
+  if (!modelPatch.writing_bible) {
+    const bibleKeys = [
+      'target_reader_contract',
+      'opening_strategy_contract',
+      'reader_retention_contract',
+      'story_power_contract',
+      'core_contract_radar',
+      'character_design_contract',
+      'longform_structure_contract',
+      'plot_special_topics_contract',
+      'genre_positioning_contract',
+      'mainline_definition_contract',
+    ]
+    const nested: Record<string, any> = {}
+    for (const key of bibleKeys) {
+      if (rawPatch[key] !== undefined) nested[key] = rawPatch[key]
+    }
+    if (Object.keys(nested).length) modelPatch.writing_bible = nested
+  }
+  // Never accept outline rewrites from fill-gaps unless foreshadowing was empty.
+  delete modelPatch.chapter_outlines
+  delete modelPatch.volume_outlines
+  delete modelPatch.title
+  delete modelPatch.genre
+  if (asSeedArray(baseSeed.foreshadowing_plan).length) delete modelPatch.foreshadowing_plan
+
+  const merged = mergeSeedPreferRicher(baseSeed, modelPatch)
+  const filled = Array.from(new Set([...(merged.filled || [])]))
+  const skipped = Array.from(new Set([...(merged.skipped || [])]))
+
+  let nextSeed = repairProjectSeedGaps(merged.seed, idea)
+  nextSeed = {
+    ...nextSeed,
+    // hard preserve protected fields
+    title: firstSeedText(baseSeed.title, nextSeed.title),
+    genre: firstSeedText(baseSeed.genre, nextSeed.genre),
+    chapter_outlines: asSeedArray(baseSeed.chapter_outlines).length ? baseSeed.chapter_outlines : nextSeed.chapter_outlines,
+    volume_outlines: asSeedArray(baseSeed.volume_outlines).length ? baseSeed.volume_outlines : nextSeed.volume_outlines,
+    foreshadowing_plan: asSeedArray(baseSeed.foreshadowing_plan).length
+      ? baseSeed.foreshadowing_plan
+      : nextSeed.foreshadowing_plan,
+    character_pool: nextSeed.character_pool || baseSeed.character_pool,
+    raw_idea: baseSeed.raw_idea || idea,
+  }
+  nextSeed = attachProjectSeedDirector(nextSeed)
+  const remaining = listProjectSeedGapTargets(nextSeed, [...risks, ...gapHints])
+  const modelPatchKeys = Object.keys(modelPatch)
+  const diagnostics = {
+    ...buildProjectSeedDiagnostics(nextSeed, idea, result),
+    status: remaining.length ? (filled.length ? 'gaps_partially_filled' : 'gaps_unchanged') : 'gaps_filled',
+    usable: true,
+    filled_fields: filled,
+    skipped_fields: skipped,
+    requested_gaps: gaps,
+    remaining_gaps: remaining,
+    model_patch_keys: modelPatchKeys,
+    model_patch_empty: modelPatchKeys.length === 0,
+    raw_preview: resultContentPreview(result).slice(0, 1200),
+    model_error: modelFailed ? String((result as any)?.error || '').slice(0, 300) : '',
+    suggestion: !filled.length
+      ? (
+          modelFailed
+            ? `模型调用失败：${String((result as any)?.error || '').slice(0, 120)}。已完整保留原种子，可换模型后重试补齐。`
+            : modelPatchKeys.length === 0
+              ? '模型未返回可解析补丁，已完整保留原种子。可重试补齐或换更强模型。'
+              : '模型补丁未优于现有内容，已保留原种子。'
+        )
+      : remaining.length
+        ? `已用模型安全补齐 ${filled.length} 项，仍有 ${remaining.length} 项可继续补。原有优质内容已保留。`
+        : `已用模型安全补齐缺口（${filled.length} 项），未覆盖已有优质内容。`,
+  }
+  nextSeed = attachProjectSeedDirector({ ...nextSeed, seed_diagnostics: diagnostics })
+  return {
+    seed: nextSeed,
+    filled,
+    skipped,
+    gaps,
+    remaining,
+    result,
+    seed_diagnostics: diagnostics,
+  }
 }
 
 export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string) {
@@ -3269,6 +3540,49 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
       req.off('close', markClosed)
       res.off('close', markClosed)
       endStream()
+    }
+  })
+
+
+  app.post('/api/novel/project-seed/fill-gaps', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      await ensureWorkspaceStructure(activeWorkspace)
+      const seed = req.body?.seed
+      if (!seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length) {
+        return res.status(400).json({ error: 'seed is required' })
+      }
+      const modelId = req.body?.model_id ? String(req.body.model_id) : ''
+      if (!modelId) return res.status(400).json({ error: 'model_id is required' })
+      const idea = String(req.body?.idea || seed.raw_idea || '').trim()
+      const title = String(req.body?.title || seed.title || '').trim()
+      const risks = Array.isArray(req.body?.risks) ? req.body.risks.map((item: any) => String(item || '').trim()).filter(Boolean) : []
+      const gapHints = Array.isArray(req.body?.gaps)
+        ? req.body.gaps.map((item: any) => String(item?.label || item?.key || item || '').trim()).filter(Boolean)
+        : []
+      const filled = await fillProjectSeedGapsWithModel(activeWorkspace, seed, idea, modelId, title, risks, gapHints)
+      if ((filled.result as any)?.error && !filled.filled.length) {
+        return res.status(502).json({
+          error: (filled.result as any).error || '补齐缺口失败',
+          seed: filled.seed,
+          seed_diagnostics: filled.seed_diagnostics,
+          filled_fields: filled.filled,
+          skipped_fields: filled.skipped,
+          gaps: filled.gaps,
+        })
+      }
+      res.json({
+        ok: true,
+        seed: filled.seed,
+        seed_diagnostics: filled.seed_diagnostics,
+        filled_fields: filled.filled,
+        skipped_fields: filled.skipped,
+        gaps: filled.gaps,
+        remaining_gaps: filled.remaining || [],
+        result: filled.result,
+      })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
     }
   })
 

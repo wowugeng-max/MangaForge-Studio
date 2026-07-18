@@ -1,3 +1,5 @@
+import { resolveOutgoingChapterHandoff } from './chapter-handoff-basics'
+import { resolveChapterProgressLedger } from './chapter-progress-ledger'
 export type ChapterProseStoragePatchInput = {
   chapter: any
   generatedTitlePatch: Record<string, any>
@@ -175,6 +177,25 @@ export function normalizeProseForStorage(value: any) {
 
 export function buildChapterProseStoragePatch(input: ChapterProseStoragePatchInput) {
   const receipts = input.ohStoryDeliveryReceipts || {}
+  const storedText = normalizeProseForStorage(input.finalText)
+  const endingHook = input.chapter?.ending_hook
+    || input.chapter?.endingHook
+    || input.generatedTitlePatch?.ending_hook
+    || input.generatedTitlePatch?.endingHook
+    || ''
+  const outgoingHandoff = resolveOutgoingChapterHandoff({
+    chapterText: storedText,
+    endingHook,
+  })
+  const progressLedger = resolveChapterProgressLedger({
+    chapterText: storedText,
+    endingHook,
+    plannedGoal: input.chapter?.chapter_goal || input.chapter?.chapterGoal || input.chapter?.goal || '',
+    plannedSummary: input.chapter?.chapter_summary || input.chapter?.chapterSummary || input.chapter?.summary || '',
+    plannedConflict: input.chapter?.conflict || '',
+    plannedMustAdvance: input.chapter?.raw_payload?.must_advance || input.chapter?.raw_payload?.mustAdvance,
+    outgoingHandoff,
+  })
   const rawPayload: Record<string, any> = {
     ...(input.chapter?.raw_payload || {}),
     generated_scene_breakdown: input.finalSceneBreakdown,
@@ -188,6 +209,14 @@ export function buildChapterProseStoragePatch(input: ChapterProseStoragePatchInp
     rawPayload.prose_admission = input.proseAdmission
     rawPayload.proseAdmission = input.proseAdmission
   }
+  if (outgoingHandoff) {
+    rawPayload.outgoing_handoff = outgoingHandoff
+    rawPayload.outgoingHandoff = outgoingHandoff
+  }
+  if (progressLedger && progressLedger.source !== 'empty') {
+    rawPayload.chapter_progress_ledger = progressLedger
+    rawPayload.chapterProgressLedger = progressLedger
+  }
   Object.assign(rawPayload, {
     chapter_blueprint: receipts?.chapter_blueprint,
     scene_card_receipts: receipts?.scene_card_receipts,
@@ -200,7 +229,7 @@ export function buildChapterProseStoragePatch(input: ChapterProseStoragePatchInp
   })
   return {
     ...(input.generatedTitlePatch || {}),
-    chapter_text: normalizeProseForStorage(input.finalText),
+    chapter_text: storedText,
     continuity_notes: input.finalContinuityNotes,
     raw_payload: rawPayload,
     status: 'draft',

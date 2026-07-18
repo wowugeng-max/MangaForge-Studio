@@ -3384,7 +3384,48 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('sync_story_state')
   })
 
+  test('shows established event preview when present', () => {
+    const writtenChapter = {
+      ...chapters[0],
+      chapter_no: 2,
+      chapter_text: '他把秩序核心捏进掌心，决定先活着离开回廊。'.repeat(30),
+      raw_payload: {
+        prose_admission: {
+          status: 'accepted',
+          story_state_status: 'synced',
+        },
+      },
+    }
+    const model = buildWritingCockpitModel({
+      project: {
+        ...project,
+        reference_config: {
+          story_state: {
+            last_updated_chapter: 2,
+            established_events: [
+              {
+                kind: 'death',
+                subject: '林战',
+                predicate: '死亡方式',
+                fact: '林战因违规开门被剥皮而死',
+                status: 'confirmed',
+                lock_level: 'hard',
+                source_excerpt: '开了不该开的门',
+              },
+            ],
+          },
+        },
+      },
+      outlines,
+      chapters: [writtenChapter, chapters[1]],
+      activeChapter: writtenChapter,
+      materialScore: { score: 82, can_generate: true },
+      reviews: [],
+    })
 
+    expect(model.chapterAcceptanceDesk.storyStatePanel?.establishedEvents?.confirmedCount).toBe(1)
+    expect(model.chapterAcceptanceDesk.storyStatePanel?.establishedEvents?.preview[0]).toContain('林战')
+  })
 
   test('readability review is summarized without blocking chapter acceptance', () => {
     const model = buildWritingCockpitModel({

@@ -224,6 +224,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
   const [seedDiagnostics, setSeedDiagnostics] = useState<any | null>(null)
   const [seedFinalized, setSeedFinalized] = useState(false)
   const [foundationAccepted, setFoundationAccepted] = useState(false)
+  const [fillingGaps, setFillingGaps] = useState(false)
   const [genreCatalogGuides, setGenreCatalogGuides] = useState<GenreCatalogGuide[]>(FALLBACK_GENRE_CATALOG_GUIDES)
   const [selectedGenreFramework, setSelectedGenreFramework] = useState('')
   const [genreCatalogLoading, setGenreCatalogLoading] = useState(false)
@@ -894,6 +895,54 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     }
   }
 
+
+  const fillSeedGaps = async () => {
+    if (!seed) return message.warning('请先生成详细草稿')
+    if (!seedModelId) return message.warning('请先选择模型')
+    const draft = createMode === 'deep_draft'
+      ? deepDraftReviewModelToSeed({ ...(seed || {}), length_target: data.length_target }, deepDraftReview)
+      : seed
+    setFillingGaps(true)
+    try {
+      const res = await apiClient.post('/novel/project-seed/fill-gaps', {
+        seed: draft,
+        idea: seedIdea,
+        title: data.title,
+        model_id: seedModelId,
+        risks: foundationScore.topRisks || [],
+        gaps: foundationScore.dimensions
+          .flatMap(item => item.missing.map(label => ({ key: item.key, label })))
+          .slice(0, 20),
+      })
+      const nextSeed = normalizeProjectSeedForUi(res.data?.seed || draft)
+      const diagnostics = res.data?.seed_diagnostics || nextSeed.seed_diagnostics || null
+      setSeed(nextSeed)
+      setSeedDiagnostics(diagnostics)
+      setSeedFinalized(false)
+      setFoundationAccepted(false)
+      applySeedToForm(nextSeed)
+      setDeepDraftReview(buildDeepDraftReviewForUi(nextSeed))
+      setLaunchpad(extractLaunchpadFieldsFromSeed(nextSeed, data.length_target))
+      const filledCount = Array.isArray(res.data?.filled_fields) ? res.data.filled_fields.length : 0
+      const remaining = Array.isArray(res.data?.remaining_gaps) ? res.data.remaining_gaps.length : 0
+      const modelEmpty = Boolean(res.data?.seed_diagnostics?.model_patch_empty)
+      if (filledCount > 0 && remaining === 0) {
+        message.success(`已安全补齐缺口（${filledCount} 项），未覆盖已有优质内容`)
+      } else if (filledCount > 0) {
+        message.success(`已补齐 ${filledCount} 项，仍有 ${remaining} 项可继续补；已有内容已保留`)
+      } else {
+        message.warning(
+          res.data?.seed_diagnostics?.suggestion
+          || (modelEmpty ? '模型未返回可解析补丁，已保留原种子。可重试或换模型' : '模型补丁未优于现有内容，已保留原种子'),
+        )
+      }
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '补齐缺口失败')
+    } finally {
+      setFillingGaps(false)
+    }
+  }
+
   const finalizeProjectSeed = async (authorConfirmed = false) => {
     const confirmedByAuthor = authorConfirmed === true
     if (!seedModelId) return message.warning('请先选择用于定稿的模型')
@@ -1094,6 +1143,9 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                     showFinalize={createMode === 'deep_draft'}
                     showFoundationAccept={createMode === 'deep_draft'}
                     foundationAccepted={foundationAccepted}
+                    showFillGaps={createMode === 'deep_draft' && (foundationScore.topRisks?.length || 0) > 0}
+                    fillingGaps={fillingGaps}
+                    onFillGaps={fillSeedGaps}
                     onAcceptFoundation={() => setFoundationAccepted(true)}
                     onClearFoundationAccept={() => setFoundationAccepted(false)}
                     onRegenerate={deriveProjectSeed}

@@ -740,6 +740,15 @@ describe('novel project seed prompt', () => {
     expect(finalizeBlock).toContain('!authorConfirmed')
   })
 
+  test('fill-gaps route is registered and uses safe merge helpers', async () => {
+    const source = await readFile(join(import.meta.dir, 'novel-core-routes.ts'), 'utf8')
+    expect(source).toContain("/api/novel/project-seed/fill-gaps")
+    expect(source).toContain('fillProjectSeedGapsWithModel')
+    expect(source).toContain('mergeSeedPreferRicher')
+    expect(source).toContain('listProjectSeedGapTargets')
+    expect(source).toContain('opening_strategy_contract')
+  })
+
   test('derive-stream route writes stage and result SSE frames', async () => {
     const source = await readFile(join(import.meta.dir, 'novel-core-routes.ts'), 'utf8')
     expect(source).toContain("/api/novel/project-seed/derive-stream")

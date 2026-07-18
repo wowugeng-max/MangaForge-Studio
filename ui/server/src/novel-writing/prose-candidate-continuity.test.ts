@@ -166,4 +166,74 @@ describe('continuity-safe prose candidate selection', () => {
       { previous_handoff: '他走了。' },
     )).toMatchObject({ required: false, passed: true, failure: null })
   })
+
+  test('accepts connected hospital key handoff and rejects skip-to-new-goal opening', () => {
+    const hospitalContext = {
+      chapter_target: {
+        previous_handoff: '第4章《深夜的查房风波》 章末钩子：护士在地上痛苦地爬行，身体开始融化，江哲一脚踩在她的头上，冷冷地问：“医生办公室的钥匙在哪？”；最后一幕：' + '他俯下身子继续逼问钥匙。'.repeat(20),
+        scene_cards: [{ scene_no: 1, title: '目标入场', purpose: '查看医生守则' }],
+      },
+      continuity: {
+        previous_chapter: {
+          ending_hook: '护士在地上痛苦地爬行，身体开始融化，江哲一脚踩在她的头上，冷冷地问：“医生办公室的钥匙在哪？”',
+        },
+      },
+    }
+    const connected = chapterScaleText('江哲一脚仍踩在融化的护士头上，冷冷问医生办公室的钥匙在哪。护士颤着交出钥匙，身体还在冒白烟。')
+    const skipped = chapterScaleText('江哲握着钥匙扫过《医生守则》，决定今晚去治愈重症患者，反客为主。')
+    expect(assessInitialProseOpeningContinuity(connected, hospitalContext)).toMatchObject({ required: true, passed: true, failure: null })
+    expect(assessInitialProseOpeningContinuity(skipped, hospitalContext)).toMatchObject({ required: true, passed: false })
+  })
+
+  test('accepts connected ch5->ch6 baton handoff and rejects ICU skip', () => {
+    const hospitalCorridorContext = {
+      chapter_target: {
+        previous_handoff: '第5章《医患身份的颠倒逻辑》 章末钩子：江哲走出病房，迎面撞上了巡逻的保安诡异，保安手里拿着电击棍，狞笑着向江哲走来。',
+        goal: '保安诡异试图用高压电击棍制服江哲，江哲吸入高压电后一路来到重症监护室，准备开始物理治疗。',
+        scene_cards: [{ scene_no: 1, title: '物理治疗', purpose: '进入重症监护室对怪物开始物理治疗' }],
+      },
+      continuity: {
+        previous_chapter: {
+          ending_hook: '江哲走出病房，迎面撞上了巡逻的保安诡异，保安手里拿着电击棍，狞笑着向江哲走来。',
+          ending_excerpt: '宵禁时间。巡逻保安手中的电击棍拥有绝对的判定。保安诡异狞笑着，电击棍高高举起，狠狠砸下！江哲站在原地。',
+        },
+      },
+    }
+    const connected = chapterScaleText('保安诡异狞笑着举起电击棍砸下。江哲单手握住电击棍，将高压电吸入体内，顺手把保安扔进垃圾桶。')
+    const skipped = chapterScaleText('江哲一路来到重症监护室。里面躺着一个浑身长满肿瘤的怨憎级怪物，他准备开始物理治疗。')
+    expect(assessInitialProseOpeningContinuity(connected, hospitalCorridorContext)).toMatchObject({ required: true, passed: true, failure: null })
+    expect(assessInitialProseOpeningContinuity(skipped, hospitalCorridorContext)).toMatchObject({ required: true, passed: false })
+  })
+
+
+  test('accepts connected ch8->ch9 fragment-eye handoff and rejects carnival result-skip', () => {
+    const context = {
+      continuity: {
+        previous_chapter: {
+          chapter_no: 8,
+          ending_hook: '在江哲的物理威胁下，院长颤抖着签下了“医院改制声明”，整个副本空间开始剧烈颤抖，一道金光从院长体内剥离出来。',
+          ending_excerpt: '江哲手指即将触碰到那枚权柄碎片。金色碎片内突然睁开一只冰冷巨眼，古老意志隔着虚空轰然降临！',
+          outgoing_handoff: {
+            version: 'chapter_outgoing_handoff_v1',
+            source: 'chapter_text_tail',
+            unresolved_action: '江哲手指即将触碰到那枚权柄碎片。金色碎片内突然睁开一只冰冷巨眼，古老意志隔着虚空轰然降临！',
+            anchors: ['权柄碎片', '巨眼', '江哲', '古老意志'],
+            ending_excerpt: '江哲手指即将触碰到那枚权柄碎片。金色碎片内突然睁开一只冰冷巨眼，古老意志隔着虚空轰然降临！',
+            declared_hook: '院长签下医院改制声明，金光剥离。',
+            hook_tail_divergence: true,
+            confidence: 0.92,
+          },
+        },
+      },
+      chapter_target: {
+        goal: '江哲成功夺取第一枚世界权柄碎片，完美通关，迷雾退散，举国狂欢。',
+        scene_cards: [{ scene_no: 1, purpose: '通关后举国狂欢' }],
+      },
+    }
+    const connected = chapterScaleText('江哲手指将触权柄碎片时，碎片内猛地睁开冰冷巨眼。古老意志隔空压来，他眼神一凝，没有退开。')
+    const skipped = chapterScaleText('青山精神病院完美通关，大夏国北方迷雾退散，全球直播间沸腾，举国狂欢。编织者在虚空中睁眼。')
+    expect(assessInitialProseOpeningContinuity(connected, context)).toMatchObject({ required: true, passed: true, failure: null })
+    expect(assessInitialProseOpeningContinuity(skipped, context)).toMatchObject({ required: true, passed: false })
+  })
+
 })

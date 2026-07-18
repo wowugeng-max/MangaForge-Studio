@@ -49,6 +49,11 @@ import {
   type PreparedStoryStateUpdate,
 } from '../novel-writing/prepared-story-state'
 import {
+  mergeNameCanonIntoStoryState,
+  mergeIdentityCanonIntoStoryState,
+  planCharacterCardSync,
+} from '../novel-writing/character-card-sync'
+import {
   compileProseContractPrompt,
   type ProseRequiredPromptSection,
   type ProseRiskPromptSection,
@@ -168,6 +173,12 @@ import {
   scanCanonicalContinuityConflicts,
 } from '../novel-writing/canonical-continuity'
 import {
+  mergeEstablishedEvents,
+  projectCanonFactsFromEvents,
+  scanEstablishedEventConflicts,
+  selectEstablishedEventsForChapter,
+} from '../novel-writing/established-event-canon'
+import {
   buildChapterProseStoragePatch,
   normalizeProseForStorage,
   resolveChapterProseVersionSource,
@@ -187,6 +198,19 @@ import {
   assessInitialProseOpeningContinuity,
   selectContinuitySafeProseCandidate,
 } from '../novel-writing/prose-candidate-continuity'
+import {
+  enrichContextWithStrongHandoff,
+  formatOutgoingHandoffAsPrevious,
+  readChapterOutgoingHandoff,
+  resolveOutgoingChapterHandoff,
+} from '../novel-writing/chapter-handoff-basics'
+import {
+  buildNextChapterProgressResyncPatch,
+  collectFollowingChapterProgressResyncPatches,
+  enrichContextWithProgressResync,
+  readChapterProgressLedger,
+} from '../novel-writing/chapter-progress-ledger'
+import { collectPlanAlignmentPatchesAfterProseChange, collectProjectPlanAlignmentPatches } from '../novel-writing/chapter-plan-from-prose'
 import {
   classifyProseAdmission,
   markBlockedInvalidError,
@@ -949,6 +973,21 @@ export function scanProseForQualityLoop(text: string, contextPackage: any, wordT
     text,
     contextPackage?.canonical_surface_index || contextPackage?.canonicalSurfaceIndex || { stable_entities: [] },
   )
+  const establishedEventConflicts = scanEstablishedEventConflicts({
+    chapterText: text,
+    events: contextPackage?.chapter_target?.established_events_contract?.events
+      || contextPackage?.chapterTarget?.established_events_contract?.events
+      || contextPackage?.established_events_contract?.events
+      || contextPackage?.story_state?.established_events
+      || contextPackage?.storyState?.established_events
+      || [],
+  }).map((item: any) => ({
+    key: item.key,
+    message: item.message,
+    evidence: item.evidence,
+    status: 'warn',
+    severity: 'high',
+  }))
   const cleanupHardTypes = new Set(['model_degeneration', 'prose_meta', 'prose_format'])
   const cleanupHardFailures = asArray(cleanup?.categories)
     .filter((category: any) => Number(category?.count || 0) > 0)
@@ -997,6 +1036,7 @@ export function scanProseForQualityLoop(text: string, contextPackage: any, wordT
   ).values())
   const advisoryFindings = [
     ...craftAdvisoryChecks,
+    ...establishedEventConflicts,
     ...bannedWordChecks.filter((item: any) => item?.status === 'warn'),
   ]
     .map((item: any) => ({
@@ -3124,13 +3164,18 @@ function buildPreviousChapterHandoff(contextPackage: any) {
     : compactBriefText(explicitValue)
   if (explicit) return explicit
 
-  const previous = contextPackage?.continuity?.previous_chapter || null
+  const previous = contextPackage?.continuity?.previous_chapter || contextPackage?.continuity?.previousChapter || null
   if (!previous) return ''
   const label = previous.chapter_no
     ? `第${previous.chapter_no}章${previous.title ? `《${previous.title}》` : ''}`
     : '上一章'
+  const outgoing = previous.outgoing_handoff
+    || previous.outgoingHandoff
+    || readChapterOutgoingHandoff(previous)
+  const formattedOutgoing = formatOutgoingHandoffAsPrevious(outgoing, label)
+  if (formattedOutgoing) return formattedOutgoing
   const endingHook = compactBriefText(previous.ending_hook)
-  const endingExcerpt = compactBriefText(previous.ending_excerpt)
+  const endingExcerpt = compactBriefText(previous.ending_excerpt || previous.chapter_text || previous.chapterText)
   const parts = [
     endingHook ? `章末钩子：${endingHook}` : '',
     endingExcerpt ? `最后一幕：${compactHandoffExcerpt(endingExcerpt, 360)}` : '',
@@ -15892,12 +15937,18 @@ function buildLongformMemoryCapsule(project: any, writingBible: any) {
       ...asArray(storyState.payoff_queue),
       ...asArray(global.payoff_queue),
     ],
-    canon_facts: [
-      ...asArray(storyState.canon_facts),
-      ...asArray(global.canon_facts),
-      ...asArray(storyState.facts),
-      ...asArray(global.facts),
-    ],
+    canon_facts: Array.from(new Set([
+      ...projectCanonFactsFromEvents(mergeEstablishedEvents([
+        ...asArray(storyState.established_events),
+        ...asArray(global.established_events),
+        ...asArray(storyState.canon_facts),
+        ...asArray(global.canon_facts),
+        ...asArray(storyState.facts),
+        ...asArray(global.facts),
+      ], [])),
+      ...asArray(storyState.canon_facts).map((item: any) => typeof item === 'string' ? item : (item?.fact || item?.text || '')).filter(Boolean),
+      ...asArray(global.canon_facts).map((item: any) => typeof item === 'string' ? item : (item?.fact || item?.text || '')).filter(Boolean),
+    ].map((item: any) => String(item || '').trim()).filter(Boolean))).slice(0, 12),
     red_lines: [
       ...asArray(writingBible?.immutable_rules),
       ...asArray(writingBible?.immutableRules),
@@ -34604,12 +34655,65 @@ function buildStateTrackingContract(contextPackage: any = {}, options: { ignoreE
   const settingEntities = asArray(contextPackage?.setting_context?.entities)
   const settingUsage = asArray(contextPackage?.setting_context?.chapter_usage)
   const causalityEntities = settingEntities.filter((entity: any) => ['foreshadowing', 'plot_thread', 'mainline', 'relationship_arc'].includes(String(entity?.entity_type || entity?.type || '')))
+  const chapterNo = Number(target.chapter_no || target.chapterNo || 0)
+  const storyStateRoot = contextPackage?.story_state || contextPackage?.storyState || {}
+  const storyStateGlobal = storyStateRoot?.global || storyStateRoot || {}
+  const worldbuildingRow = storyStateRoot?.worldbuilding
+    || contextPackage?.worldbuilding
+    || contextPackage?.project?.reference_config?.project_seed?.worldbuilding
+    || {}
+  const writingBible = contextPackage?.writing_bible
+    || contextPackage?.writingBible
+    || contextPackage?.project?.reference_config?.writing_bible
+    || {}
+  const projectSeed = contextPackage?.project?.reference_config?.project_seed
+    || contextPackage?.project_seed
+    || contextPackage?.projectSeed
+    || {}
+  const foreshadowingStatus = {
+    ...(typeof storyStateGlobal?.foreshadowing_status === 'object' ? storyStateGlobal.foreshadowing_status : {}),
+    ...(typeof storyStateRoot?.foreshadowing_status === 'object' ? storyStateRoot.foreshadowing_status : {}),
+    ...(typeof storyStateRoot?.foreshadowingStatus === 'object' ? storyStateRoot.foreshadowingStatus : {}),
+  }
+  const seedForeshadowing = asArray(projectSeed?.foreshadowing_plan || projectSeed?.foreshadowingPlan)
+  const worldRules = uniqueBriefStrings([
+    ...asArray(worldbuildingRow?.rules),
+    ...asArray(worldbuildingRow?.systems).map((item: any) => compactBriefText(item?.content || item?.name || item)),
+    worldbuildingRow?.power_system,
+    worldbuildingRow?.powerSystem,
+    writingBible?.world_rules,
+    writingBible?.worldRules,
+    ...asArray(writingBible?.taboos),
+    ...asArray(projectSeed?.worldbuilding?.rules),
+    projectSeed?.worldbuilding?.power_system,
+  ], 12)
+
   const historicalCausality = uniqueBriefStrings([
     previous?.chapter_no ? `上一章第${previous.chapter_no}章《${previous.title || ''}》：${previous.ending_hook || previous.ending_excerpt || previous.summary || ''}` : '',
     deliveryRiskCarryOver ? `上一章诊断承接：${[
       deliveryRiskCarryOver.priority_label,
       ...asArray(deliveryRiskCarryOver.required_actions),
     ].filter(Boolean).join('；')}` : '',
+    // Chapter 1 / seed-backed opening history: allow opening promise as causality when no previous chapter.
+    chapterNo <= 1 ? compactBriefText(
+      target.goal || target.chapter_goal || target.summary || target.conflict
+        ? `开篇前史/承诺：${compactBriefText(target.goal || target.chapter_goal || target.summary || target.conflict)}`
+        : '',
+    ) : '',
+    chapterNo <= 1 ? compactBriefText(
+      projectSeed?.main_conflict || projectSeed?.logline || projectSeed?.core_premise || writingBible?.promise
+        ? `开书前史：${compactBriefText(projectSeed?.main_conflict || projectSeed?.logline || projectSeed?.core_premise || writingBible?.promise)}`
+        : '',
+    ) : '',
+    ...asArray(storyStateGlobal?.active_threads || storyStateRoot?.active_threads).map((item: any) => `活跃线索：${compactBriefText(item)}`),
+    ...Object.entries(foreshadowingStatus).map(([name, value]) => `伏笔「${name}」：${compactBriefText(value)}`),
+    ...seedForeshadowing.map((item: any) => {
+      const record = item && typeof item === 'object' ? item : { name: item }
+      const name = compactBriefText(record.name || record.title || record)
+      const plant = compactBriefText(record.plant_at || record.plantAt || record.plant_chapter || record.plantChapter)
+      const desc = compactBriefText(record.description || record.summary || record.true_meaning || record.trueMeaning)
+      return name ? `种子伏笔「${name}」${plant ? `（埋设：${plant}）` : ''}${desc ? `：${desc}` : ''}` : ''
+    }),
     ...causalityEntities.map((entity: any) => {
       const state = entity?.state || entity?.state_json || {}
       const planted = state?.planted_chapter || state?.plantedChapter || entity?.first_chapter_no || entity?.firstChapterNo
@@ -34632,10 +34736,13 @@ function buildStateTrackingContract(contextPackage: any = {}, options: { ignoreE
     ...settingUsage
       .filter((usage: any) => usage?.required || usage?.forbidden || usage?.constraints)
       .map((usage: any) => `${assetText(usage)}：${usage?.forbidden ? '禁揭' : '本章必用'}${assetConstraintText(usage?.constraints || usage?.constraints_json) ? `；${assetConstraintText(usage?.constraints || usage?.constraints_json)}` : ''}`),
+    // Seed / worldbuilding backed constraints so newly created projects are not blocked on empty setting workshop.
+    ...worldRules.map((rule: any) => `世界规则：${compactBriefText(rule)}`),
+    compactBriefText(worldbuildingRow?.world_summary || worldbuildingRow?.summary)
+      ? `世界运行逻辑：${compactBriefText(worldbuildingRow?.world_summary || worldbuildingRow?.summary)}`
+      : '',
   ], 14)
-  const chapterNo = Number(target.chapter_no || target.chapterNo || 0)
   const previousChapterNo = Number(previous?.chapter_no || previous?.chapterNo || 0)
-  const storyStateGlobal = contextPackage?.story_state?.global || contextPackage?.storyState?.global || contextPackage?.story_state || contextPackage?.storyState || {}
   const storyStateLastUpdatedChapter = Number(
     storyStateGlobal?.last_updated_chapter
     || storyStateGlobal?.lastUpdatedChapter
@@ -41852,6 +41959,7 @@ export function createNovelWritingService(ctx: {
       '',
       longformMemoryCapsule ? '【长篇记忆胶囊】' : '',
       longformMemoryCapsule ? '硬性要求：执行 chapter_target.longform_memory_capsule；这是本章必须召回的压缩正史。核心承诺、主线进度、角色状态、开放悬念、回报债务、正史事实和红线不得被遗忘、矛盾改写或跳过。' : '',
+      '硬性要求：执行 chapter_target.established_events_contract；已锁正史事件（死亡方式、规则触发、能力代价等）在闪回或复述时不得改写 cause/mechanism/constraints，只能同义转述。',
       longformMemoryCapsule ? JSON.stringify(longformMemoryCapsule, null, 2).slice(0, 4000) : '',
       '',
       layeredMemoryContext ? '【长篇分层记忆】' : '',
@@ -42070,6 +42178,7 @@ export function createNovelWritingService(ctx: {
       '2A+. 执行 scene_cards.dialogue_goals、scene_cards.style_directives、scene_cards.benchmark_recall_directives、scene_cards.concept_anchor_rules、scene_cards.prose_craft_directives、scene_cards.relationship_progression_plan、scene_cards.relationship_buffer_zone、scene_cards.supporting_character_action、scene_cards.attitude_shift_checkpoint 和 scene_cards.relationship_next_hook：对白目标必须变成角色差异化对话和潜台词，文风/对标召回只学习节奏与句式呼吸，新名词/新设定首次出现必须用动作反应、对话半句或物理后果建立当下作用锚点，不得写整段来历、原理或等级说明；关系推进必须写出关系类型/边界、配角攻略缓冲区、配角主动行动、从旁观/质疑/拒绝/试探到行动/协助/设限的态度变化，以及下一轮关系期待。',
       '2A+showdown. 执行 scene_cards.showoff_stage_chain、scene_cards.spectator_interest_shift、scene_cards.secondary_showoff_effect、scene_cards.combat_result_type、scene_cards.combat_dimension_plan 和 scene_cards.combat_reversal_plan：公开爽点必须按群众层 -> 中间层 -> 核心层落成不同反应；旁观者反应必须回答“这跟我有关系”的利益、目标、计划或站队变化；二级装逼效果必须让展示改变旁观者行动；战斗/智斗必须明确结果类型、心/体/技维度和预判反制/反预判链条。',
       '2A+. 如果存在 chapter_target.previous_handoff 或 continuity.previous_chapter，开篇前 300 字必须承接上一章最后一幕或章末钩子，先处理连续危机、角色反应和期待欠账，再展开新的场景信息。',
+      '2A++. 如果存在 chapter_target.requiredHandoffAnchors 或 opening_obligations，开篇前 300 字必须命中这些交接锚点/义务；不得跳过上一章未完成动作直接进入新目标。',
       '2A++. 执行 chapter_target.delivery_risk_carry_over：上一章交稿后残留的吸引力、追读、创新、故事力、剧情线、强场面或可读性风险，必须在本章变成可见修复动作；尤其优先级指向开篇或章末时，必须在前 300 字或最后 300 字落地。',
       '2B. 执行 chapter_target.reader_retention_brief：开篇钩子必须在前 300 字落地；爽点承诺、信息缺口、情绪回报和短剧化场面必须转成可见行动；retention_double_engine 必须按留存=情绪+饥饿落地，情绪让读者快速代入，饥饿用信息差植入问号并按剥洋葱把关键信息卡到章末；retention_pillars 必须按留存四大支柱落地，升级、资源困境、目标、解密至少两项要转成正文证据；hook_addiction_model 必须按触发 -> 行动 -> 奖励 -> 投入落地，并用奖励随机性给出出乎意料的额外收获或沉没投入；章末追读问题必须压到最后一幕。',
       '2B+. 执行 chapter_target.reader_expectation_ledger：must_deliver 是本章必须还给读者的期待账，必须写成可见事件、冲突结果、情绪回报或章末钩子；keep_alive 可以保留但不能遗忘或矛盾改写。',
@@ -42127,6 +42236,7 @@ export function createNovelWritingService(ctx: {
       batchCreationContractCarryOver ? '14A+++.1 执行 batch_preflight.delivery_risk_carry_over.creation_contract_carry_over：安全连写第一章必须先修创作契约；目标读者、题材定位、核心承诺、追读留存分别要有正文证据，不能只靠旁白声明或任务书自述。' : '',
       '14A++++. 执行 batch_preflight.chapter_handoff_contract：安全连写第一章必须承接上一章最后一幕、开篇义务和读者期待债；must_deliver 写成可见回报，keep_alive 保持存在感，overdue 优先推进。',
       '14A+++++. 执行 chapter_target.longform_memory_capsule：单章开写也必须召回压缩正史，角色状态、开放悬念、回报债务、正史事实和 red_lines 不得遗忘、矛盾改写或跳过。',
+      '14A++++++. 执行 chapter_target.established_events_contract：已锁正史事件不得在闪回或复述中改写；只能同义转述，并保留 cause/mechanism/constraints。',
       layeredMemoryContext ? '14A++++++. 执行 chapter_target.layered_memory_context：近5章详记决定本章承接细节，十章概要决定阶段正史，卷级总览决定卷级方向和关键转折；不得只看最近一章导致早期正史或卷级目标漂移。' : '',
       '14B. 执行 chapter_target.million_word_runway：正文必须可见回答本章四问，守住 redLines，不丢 readerFuel；如果航线为 single_chapter 或 blocked，只写当前章可兑现内容，不得预支后续章节主线回收。',
       '14C. 执行 chapter_target.story_unit_context：正文必须完成当前剧情单元的 current_chapter_role；只推进本章职责需要的 pressure_escalation、setup_and_storyline 和 reader payoff，不得提前写完 mini_climax_payoff、exit_hook 或 forbidden_advance 标注的后续兑现。',
@@ -42184,35 +42294,64 @@ export function createNovelWritingService(ctx: {
     }
   }
 
-  const mergeStoryState = (prev: any, delta: any, chapter: any) => ({
-    ...(prev || {}),
-    ...(delta || {}),
-    character_positions: { ...((prev || {}).character_positions || {}), ...((delta || {}).character_positions || {}) },
-    character_relationships: { ...((prev || {}).character_relationships || {}), ...((delta || {}).character_relationships || {}) },
-    relationship_graph: { ...((prev || {}).relationship_graph || {}), ...((delta || {}).relationship_graph || {}) },
-    known_secrets: { ...((prev || {}).known_secrets || {}), ...((delta || {}).known_secrets || {}) },
-    secret_visibility: { ...((prev || {}).secret_visibility || {}), ...((delta || {}).secret_visibility || {}) },
-    item_ownership: { ...((prev || {}).item_ownership || {}), ...((delta || {}).item_ownership || {}) },
-    resource_status: { ...((prev || {}).resource_status || {}), ...((delta || {}).resource_status || {}) },
-    foreshadowing_status: { ...((prev || {}).foreshadowing_status || {}), ...((delta || {}).foreshadowing_status || {}) },
-    payoff_queue: asArray((delta || {}).payoff_queue).length ? asArray((delta || {}).payoff_queue) : asArray((prev || {}).payoff_queue),
-    active_locations: asArray((delta || {}).active_locations).length ? asArray((delta || {}).active_locations) : asArray((prev || {}).active_locations),
-    open_questions: asArray((delta || {}).open_questions).length ? asArray((delta || {}).open_questions) : asArray((prev || {}).open_questions),
-    next_chapter_priorities: asArray((delta || {}).next_chapter_priorities).length ? asArray((delta || {}).next_chapter_priorities) : asArray((prev || {}).next_chapter_priorities),
-    layered_memory_context: buildMergedLayeredMemoryContext((prev || {}).layered_memory_context, (delta || {}).layered_memory_context, chapter),
-    progress_summary: (delta || {}).progress_summary || (prev || {}).progress_summary || null,
-    daily_context_snapshot: (delta || {}).daily_context_snapshot || (prev || {}).daily_context_snapshot || null,
-    last_updated_chapter: chapter.chapter_no,
-    last_updated_at: new Date().toISOString(),
-  })
+  const mergeStoryState = (prev: any, delta: any, chapter: any) => {
+    const establishedEvents = mergeEstablishedEvents(
+      [
+        ...asArray((prev || {}).established_events),
+        ...asArray((prev || {}).canon_facts),
+      ],
+      [
+        ...asArray((delta || {}).established_events),
+        ...asArray((delta || {}).canon_facts),
+      ],
+      { chapterNo: chapter?.chapter_no },
+    )
+    const projectedFacts = projectCanonFactsFromEvents(establishedEvents)
+    return {
+      ...(prev || {}),
+      ...(delta || {}),
+      character_positions: { ...((prev || {}).character_positions || {}), ...((delta || {}).character_positions || {}) },
+      character_relationships: { ...((prev || {}).character_relationships || {}), ...((delta || {}).character_relationships || {}) },
+      relationship_graph: { ...((prev || {}).relationship_graph || {}), ...((delta || {}).relationship_graph || {}) },
+      known_secrets: { ...((prev || {}).known_secrets || {}), ...((delta || {}).known_secrets || {}) },
+      secret_visibility: { ...((prev || {}).secret_visibility || {}), ...((delta || {}).secret_visibility || {}) },
+      item_ownership: { ...((prev || {}).item_ownership || {}), ...((delta || {}).item_ownership || {}) },
+      resource_status: { ...((prev || {}).resource_status || {}), ...((delta || {}).resource_status || {}) },
+      foreshadowing_status: { ...((prev || {}).foreshadowing_status || {}), ...((delta || {}).foreshadowing_status || {}) },
+      payoff_queue: asArray((delta || {}).payoff_queue).length ? asArray((delta || {}).payoff_queue) : asArray((prev || {}).payoff_queue),
+      active_locations: asArray((delta || {}).active_locations).length ? asArray((delta || {}).active_locations) : asArray((prev || {}).active_locations),
+      open_questions: asArray((delta || {}).open_questions).length ? asArray((delta || {}).open_questions) : asArray((prev || {}).open_questions),
+      next_chapter_priorities: asArray((delta || {}).next_chapter_priorities).length ? asArray((delta || {}).next_chapter_priorities) : asArray((prev || {}).next_chapter_priorities),
+      layered_memory_context: buildMergedLayeredMemoryContext((prev || {}).layered_memory_context, (delta || {}).layered_memory_context, chapter),
+      progress_summary: (delta || {}).progress_summary || (prev || {}).progress_summary || null,
+      daily_context_snapshot: (delta || {}).daily_context_snapshot || (prev || {}).daily_context_snapshot || null,
+      established_events: establishedEvents,
+      canon_facts: projectedFacts.length
+        ? projectedFacts
+        : (asArray((delta || {}).canon_facts).length ? asArray((delta || {}).canon_facts) : asArray((prev || {}).canon_facts)),
+      last_updated_chapter: chapter.chapter_no,
+      last_updated_at: new Date().toISOString(),
+    }
+  }
 
   const prepareStoryStateUpdate = async (activeWorkspace: string, project: any, chapter: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}): Promise<PreparedStoryStateUpdate> => {
     const stageModelId = ctx.production.getStageModelId(project, 'review', modelId)
     const buildFromAgentResult = async (result: any): Promise<PreparedStoryStateUpdate> => {
       const payload = getNovelPayload(result)
       const diagnostics = buildLLMResultDiagnostics(result)
-      const rawStateDelta = payload?.state_delta || payload?.stateDelta
-      const stateDelta = normalizeStoryStateDeltaForStorage(rawStateDelta || {})
+      const rawStateDelta = payload?.state_delta || payload?.stateDelta || {}
+      const establishedEventsIncoming = asArray(
+        payload?.established_events
+        || payload?.establishedEvents
+        || rawStateDelta?.established_events
+        || rawStateDelta?.establishedEvents,
+      )
+      const stateDelta = normalizeStoryStateDeltaForStorage({
+        ...(rawStateDelta || {}),
+        established_events: establishedEventsIncoming.length
+          ? establishedEventsIncoming
+          : asArray(rawStateDelta?.established_events || rawStateDelta?.establishedEvents),
+      })
       const styleFingerprintSnapshot = buildStyleFingerprintStateSnapshot(contextPackage, project, project.reference_config?.story_state || {})
       const stateDeltaWithStyleFingerprint = styleFingerprintSnapshot
         ? { ...stateDelta, ...styleFingerprintSnapshot }
@@ -42925,8 +43064,19 @@ export function createNovelWritingService(ctx: {
         previous_chapter: previousChapter ? {
           chapter_no: previousChapter.chapter_no,
           title: previousChapter.title,
+          chapter_goal: previousChapter.chapter_goal || '',
+          chapter_summary: previousChapter.chapter_summary || '',
+          conflict: previousChapter.conflict || '',
           ending_hook: previousChapter.ending_hook || '',
           ending_excerpt: String(previousChapter.chapter_text || '').slice(-800),
+          chapter_text: previousChapter.chapter_text || '',
+          outgoing_handoff: readChapterOutgoingHandoff(previousChapter),
+          chapter_progress_ledger: readChapterProgressLedger(previousChapter),
+          raw_payload: {
+            must_advance: previousChapter.raw_payload?.must_advance,
+            outgoing_handoff: readChapterOutgoingHandoff(previousChapter),
+            chapter_progress_ledger: readChapterProgressLedger(previousChapter),
+          },
         } : null,
       },
     })
@@ -42939,6 +43089,34 @@ export function createNovelWritingService(ctx: {
     })
     const longformCompass = latestLongformCompassFromReviews(reviews) || fallbackCompass
     const longformMemoryCapsule = buildLongformMemoryCapsule(project, writingBible)
+    const storyStateForEvents = getStoryState(project) || project?.reference_config?.story_state || {}
+    const storyStateGlobalForEvents = storyStateForEvents?.global || storyStateForEvents || {}
+    const establishedEventsContract = {
+      version: 'established_event_canon_v1',
+      events: selectEstablishedEventsForChapter({
+        events: [
+          ...asArray(storyStateForEvents.established_events),
+          ...asArray(storyStateGlobalForEvents.established_events),
+          ...asArray(storyStateForEvents.canon_facts),
+          ...asArray(storyStateGlobalForEvents.canon_facts),
+        ],
+        chapterNo: Number(chapter.chapter_no || 0),
+        outlineText: [
+          chapter.chapter_summary || '',
+          chapter.conflict || '',
+          chapter.chapter_goal || '',
+          JSON.stringify(chapter.raw_payload?.outline || chapter.raw_payload?.blueprint || {}),
+        ].join('\n'),
+        previousExcerpt: previousChapter
+          ? String(previousChapter.ending_hook || '') + '\n' + String(previousChapter.chapter_text || '').slice(-800)
+          : '',
+        limit: 10,
+      }),
+      hard_rules: [
+        '复述已锁正史事件时，不得改写 cause/mechanism/constraints；只能同义转述。',
+        '闪回前任死亡、规则触发、能力代价时必须命中 established_events_contract.events。',
+      ],
+    }
     const layeredMemoryContext = normalizeLayeredMemoryContext(
       project?.reference_config?.story_state?.layered_memory_context
       || project?.story_state?.layered_memory_context,
@@ -43140,6 +43318,48 @@ export function createNovelWritingService(ctx: {
       ],
       setting_entities: settingEntities,
     })
+    const chapterBlueprintSeed = chapter.raw_payload?.chapter_blueprint
+      || chapter.raw_payload?.chapterBlueprint
+      || null
+    const handoffContextSeed = enrichContextWithStrongHandoff({
+      chapter_target: {
+        previous_handoff: previousHandoff,
+        goal: chapter.chapter_goal || '',
+        summary: chapter.chapter_summary || '',
+        scene_cards: sceneCards,
+        chapter_blueprint: chapterBlueprintSeed,
+      },
+      continuity: {
+        previous_chapter: previousChapter ? {
+          chapter_no: previousChapter.chapter_no,
+          title: previousChapter.title,
+          chapter_goal: previousChapter.chapter_goal || '',
+          chapter_summary: previousChapter.chapter_summary || '',
+          conflict: previousChapter.conflict || '',
+          ending_hook: previousChapter.ending_hook || '',
+          ending_excerpt: String(previousChapter.chapter_text || '').slice(-800),
+          chapter_text: previousChapter.chapter_text || '',
+          outgoing_handoff: readChapterOutgoingHandoff(previousChapter),
+          chapter_progress_ledger: readChapterProgressLedger(previousChapter),
+          raw_payload: {
+            must_advance: previousChapter.raw_payload?.must_advance,
+            outgoing_handoff: readChapterOutgoingHandoff(previousChapter),
+            chapter_progress_ledger: readChapterProgressLedger(previousChapter),
+          },
+        } : null,
+      },
+    })
+    const strongHandoffTarget = handoffContextSeed?.chapter_target || {}
+    const strongHandoffAnchors = asArray(strongHandoffTarget?.requiredHandoffAnchors || handoffContextSeed?.requiredHandoffAnchors)
+    const strongOpeningObligations = asArray(strongHandoffTarget?.opening_obligations)
+    const strongSceneCards = asArray(strongHandoffTarget?.scene_cards).length
+      ? asArray(strongHandoffTarget?.scene_cards)
+      : sceneCards
+    const strongAlignedGoal = strongHandoffTarget?.goal || chapter.chapter_goal || ''
+    const strongAlignedSummary = strongHandoffTarget?.summary || chapter.chapter_summary || ''
+    const strongAlignedBlueprint = strongHandoffTarget?.chapter_blueprint
+      || strongHandoffTarget?.chapterBlueprint
+      || chapterBlueprintSeed
     const basePackage = {
       project: {
         id: project.id,
@@ -43154,14 +43374,19 @@ export function createNovelWritingService(ctx: {
         id: chapter.id,
         chapter_no: chapter.chapter_no,
         title: chapter.title,
-        goal: chapter.chapter_goal || '',
-        summary: chapter.chapter_summary || '',
+        goal: strongAlignedGoal,
+        summary: strongAlignedSummary,
         conflict: chapter.conflict || '',
         ending_hook: chapter.ending_hook || '',
         previous_handoff: previousHandoff,
+        requiredHandoffAnchors: strongHandoffAnchors,
+        required_handoff_anchors: strongHandoffAnchors,
+        opening_obligations: strongOpeningObligations.length ? strongOpeningObligations : asArray(chapter.raw_payload?.opening_obligations),
+        handoff_opening_alignment: strongHandoffTarget?.handoff_opening_alignment,
+        chapter_blueprint: strongAlignedBlueprint || undefined,
         rollingPlan: chapterRollingPlan || undefined,
         signature_scene_brief: signatureSceneBrief,
-        scene_cards: sceneCards,
+        scene_cards: strongSceneCards,
         word_target: wordTarget,
         title_uniqueness_report: titleUniquenessReport,
         meme_strategy: buildMemeStrategy(project, { writing_bible: writingBible, chapter_target: Object.keys(chapterRawPreDraftBrief).length ? { meme_strategy: chapterRawPreDraftBrief.meme_strategy } : {} }),
@@ -43182,6 +43407,8 @@ export function createNovelWritingService(ctx: {
         delivery_risk_carry_over: (chapterRawPreDraftBrief.delivery_risk_carry_over || chapterRawPreDraftBrief.deliveryRiskCarryOver)
           ? normalizeDeliveryRiskCarryOverContext(chapterRawPreDraftBrief.delivery_risk_carry_over || chapterRawPreDraftBrief.deliveryRiskCarryOver)
           : deliveryRiskCarryOverContext,
+        longform_memory_capsule: longformMemoryCapsule,
+        established_events_contract: establishedEventsContract,
         progress_summary: progressSummary,
         daily_context_snapshot: dailyContextSnapshot,
         foreshadowing_consistency_radar: foreshadowingConsistencyRadar,
@@ -43196,8 +43423,19 @@ export function createNovelWritingService(ctx: {
           chapter_no: previousChapter.chapter_no,
           title: previousChapter.title,
           summary: previousChapter.chapter_summary || '',
+          chapter_goal: previousChapter.chapter_goal || '',
+          chapter_summary: previousChapter.chapter_summary || '',
+          conflict: previousChapter.conflict || '',
           ending_hook: previousChapter.ending_hook || '',
           ending_excerpt: String(previousChapter.chapter_text || '').slice(-800),
+          chapter_text: previousChapter.chapter_text || '',
+          outgoing_handoff: readChapterOutgoingHandoff(previousChapter),
+          chapter_progress_ledger: readChapterProgressLedger(previousChapter),
+          raw_payload: {
+            must_advance: previousChapter.raw_payload?.must_advance,
+            outgoing_handoff: readChapterOutgoingHandoff(previousChapter),
+            chapter_progress_ledger: readChapterProgressLedger(previousChapter),
+          },
         } : null,
         previous_prose_chapters: previousProseChapters,
       },
@@ -43243,6 +43481,7 @@ export function createNovelWritingService(ctx: {
       writing_bible: writingBible,
       longform_compass: longformCompass,
       longform_memory_capsule: longformMemoryCapsule,
+      established_events_contract: establishedEventsContract,
       layered_memory_context: layeredMemoryContext,
       progress_summary: progressSummary,
       daily_context_snapshot: dailyContextSnapshot,
@@ -43295,8 +43534,9 @@ export function createNovelWritingService(ctx: {
       applyBenchmarkRecallPreflightChecks(confirmedPackage.preflight, { benchmark_recall_brief: confirmedBenchmarkRecallBrief })
     }
     const override = chapter.raw_payload?.context_package_override || null
-    const finalPackage = override ? deepMergeObjects(confirmedPackage, override) : confirmedPackage
-    return attachOhStoryDirectorToContextPackage(finalPackage)
+    const mergedPackage = override ? deepMergeObjects(confirmedPackage, override) : confirmedPackage
+    const progressResyncedPackage = enrichContextWithProgressResync(mergedPackage)
+    return attachOhStoryDirectorToContextPackage(progressResyncedPackage)
   }
 
   const buildProseReviewPrompt = (project: any, contextPackage: any, chapterText: string) => [
@@ -46268,9 +46508,26 @@ export function createNovelWritingService(ctx: {
       const sceneResult = await generateSceneCardsForChapter(activeWorkspace, project, contextPackage, preferredModelId, llmControlOptions)
       if (sceneResult.sceneCards.length > 0) {
         generatedSceneCardsThisRun = true
+        // Re-align strong handoff onto newly generated scene cards before any persist/use.
+        const alignedSceneContext = enrichContextWithStrongHandoff({
+          ...contextPackage,
+          chapter_target: {
+            ...(contextPackage?.chapter_target || {}),
+            scene_cards: sceneResult.sceneCards,
+            sceneCards: sceneResult.sceneCards,
+          },
+          ...(contextPackage?.chapterTarget ? {
+            chapterTarget: {
+              ...contextPackage.chapterTarget,
+              scene_cards: sceneResult.sceneCards,
+              sceneCards: sceneResult.sceneCards,
+            },
+          } : {}),
+        })
+        const alignedSceneCards = asArray(alignedSceneContext?.chapter_target?.scene_cards || sceneResult.sceneCards)
         const sceneChapterPatch = {
-          scene_breakdown: sceneResult.sceneCards,
-          scene_list: sceneResult.sceneCards,
+          scene_breakdown: alignedSceneCards,
+          scene_list: alignedSceneCards,
           raw_payload: { ...(chapter.raw_payload || {}), scene_cards_source: 'chapter_group' },
         }
         if (isSceneCardsOnly) {
@@ -46284,25 +46541,58 @@ export function createNovelWritingService(ctx: {
         wordTarget = resolveChapterWordTarget(project, chapter, options)
         const sceneContextPackage = applyChapterWordTargetToContext(
           {
-            ...contextPackage,
+            ...alignedSceneContext,
             chapter_target: {
-              ...(contextPackage?.chapter_target || {}),
-              scene_cards: sceneResult.sceneCards,
-              sceneCards: sceneResult.sceneCards,
+              ...(alignedSceneContext?.chapter_target || {}),
+              scene_cards: alignedSceneCards,
+              sceneCards: alignedSceneCards,
             },
-            ...(contextPackage?.chapterTarget ? {
+            ...(alignedSceneContext?.chapterTarget ? {
               chapterTarget: {
-                ...contextPackage.chapterTarget,
-                scene_cards: sceneResult.sceneCards,
-                sceneCards: sceneResult.sceneCards,
+                ...alignedSceneContext.chapterTarget,
+                scene_cards: alignedSceneCards,
+                sceneCards: alignedSceneCards,
               },
             } : {}),
           },
           wordTarget,
         )
         preparedGeneration = prepareProseGenerationContract(sceneContextPackage, options)
-        contextPackage = preparedGeneration.contextPackage
-        generationContract = preparedGeneration.contract
+        // Contract merge may reshuffle target fields; keep strong handoff alignment authoritative.
+        contextPackage = enrichContextWithProgressResync(enrichContextWithStrongHandoff(preparedGeneration.contextPackage))
+        if (contextPackage?.chapter_target?.plan_stale) {
+          try {
+            const staleTarget = contextPackage.chapter_target || {}
+            await updateNovelChapter(activeWorkspace, chapter.id, {
+              chapter_goal: staleTarget.goal || staleTarget.chapter_goal || chapter.chapter_goal,
+              chapter_summary: staleTarget.summary || staleTarget.chapter_summary || chapter.chapter_summary,
+              conflict: staleTarget.conflict || chapter.conflict,
+              raw_payload: {
+                ...(chapter.raw_payload || {}),
+                must_advance: staleTarget.must_advance || [],
+                forbidden_repeats: staleTarget.forbidden_repeats || [],
+                progress_resync: staleTarget.progress_resync || { plan_stale: true },
+                plan_stale: true,
+              },
+            } as any, { createVersion: false })
+            chapter = {
+              ...chapter,
+              chapter_goal: staleTarget.goal || chapter.chapter_goal,
+              chapter_summary: staleTarget.summary || chapter.chapter_summary,
+              conflict: staleTarget.conflict || chapter.conflict,
+              raw_payload: {
+                ...(chapter.raw_payload || {}),
+                must_advance: staleTarget.must_advance || [],
+                forbidden_repeats: staleTarget.forbidden_repeats || [],
+                progress_resync: staleTarget.progress_resync || { plan_stale: true },
+                plan_stale: true,
+              },
+            }
+          } catch {
+            // seed persist is best-effort; live context already carries resynced plan
+          }
+        }
+        generationContract = prepareProseGenerationContract(contextPackage, options).contract
       }
     }
     await enforcePreparedGate(true)
@@ -46433,7 +46723,7 @@ export function createNovelWritingService(ctx: {
     }
     await onStage('draft', { status: 'success', word_count: countProseChars(chapterText), modelName: (draftResult as any).modelName, scene_status: 'generated', prompt_diagnostics: draftPromptDiagnostics, plain_text_fallback_used: Boolean(plainProseFallback && !targetProse?.chapter_text && !targetProse?.chapterText && !resultPayload?.chapter_text && !resultPayload?.chapterText) })
     let finalText = String(chapterText || '')
-    const initialOpeningContinuityAssessment = assessInitialProseOpeningContinuity(finalText, contextPackage)
+    const initialOpeningContinuityAssessment = assessInitialProseOpeningContinuity(finalText, enrichContextWithProgressResync(enrichContextWithStrongHandoff(contextPackage)))
     if (initialOpeningContinuityAssessment.failure) {
       const failure = initialOpeningContinuityAssessment.failure
       throw markBlockedInvalidError(Object.assign(new Error(failure.message), {
@@ -47160,7 +47450,7 @@ export function createNovelWritingService(ctx: {
       cleanupRepairPunctuationNormalization,
       cleanupRepairDeslopTermNormalization,
     }))
-    const openingContinuityAssessment = assessInitialProseOpeningContinuity(finalText, contextPackage)
+    const openingContinuityAssessment = assessInitialProseOpeningContinuity(finalText, enrichContextWithProgressResync(enrichContextWithStrongHandoff(contextPackage)))
     const openingContinuityFailures: ProseAdmissionHardFailure[] = openingContinuityAssessment.failure
       ? [openingContinuityAssessment.failure]
       : []
@@ -47534,6 +47824,22 @@ export function createNovelWritingService(ctx: {
       }
       await runDraftPostCommitBestEffort('after_commit_hook', () => ctx.runtime?.hooks?.afterChapterCommit?.({ chapterId: chapter.id, finalText }))
       await runDraftPostCommitBestEffort('store_stage', () => onStage('store', { status: 'success', word_count: countProseChars(finalText), scene_status: 'accepted' }))
+      await runDraftPostCommitBestEffort('progress_resync_next_chapters', async () => {
+        const allChapters = await listNovelChapters(activeWorkspace, projectId)
+        const previousForLedger = { ...chapter, ...draftModeChapterPatch, ...(updatedReviewedDraft || {}) }
+        const alignment = collectPlanAlignmentPatchesAfterProseChange(allChapters, previousForLedger, {
+          force: true,
+          source: 'post_draft_store',
+          followLimit: 5,
+          alignWrittenFollowers: true,
+        })
+        for (const item of alignment.patches) {
+          const patched = await updateNovelChapter(activeWorkspace, item.chapter_id, item.patch as any, { createVersion: false })
+          if (Number(item.chapter_id) === Number(previousForLedger.id || chapter.id)) {
+            updatedReviewedDraft = patched
+          }
+        }
+      })
       await runDraftPostCommitBestEffort('story_state_stage', () => onStage('story_state', {
         status: 'skipped',
         reason: isDraftOnly
@@ -47792,16 +48098,71 @@ export function createNovelWritingService(ctx: {
       postDraftDirector,
       proseAdmission,
     })
-    const acceptanceCharacterUpdates = asArray(preparedStoryStateUpdate.character_updates).map((update: any) => ({
-      id: Number(update?.character_id || update?.characterId || update?.id || 0) || undefined,
-      name: String(update?.name || '').trim() || undefined,
-      patch: {
-        current_state: {
-          ...(update?.current_state || update?.currentState || {}),
-          last_seen_chapter: chapter.chapter_no,
+    // Auto-create missing named cast cards and sync current_state from prose + story-state updates.
+    const characterCardSync = planCharacterCardSync({
+      projectId,
+      chapter: { ...chapter, ...chapterPatch, chapter_text: finalText },
+      existingCharacters: characters,
+      previousChapters: asArray(chapters).filter((item: any) => Number(item?.chapter_no || 0) < Number(chapter.chapter_no || 0)),
+      characterUpdates: preparedStoryStateUpdate.character_updates,
+    })
+    const acceptanceCharacterCreates = [
+      ...asArray(stagedPreflightRepair?.staged_character_creates),
+      ...asArray(characterCardSync.character_creates),
+    ]
+    const acceptanceCharacterUpdates = (() => {
+      const byKey = new Map<string, any>()
+      for (const update of characterCardSync.character_updates) {
+        const key = String(update?.id || update?.name || '')
+        if (!key) continue
+        byKey.set(key, update)
+      }
+      for (const update of asArray(preparedStoryStateUpdate.character_updates)) {
+        const name = String(update?.name || '').trim()
+        const id = Number(update?.character_id || update?.characterId || update?.id || 0) || undefined
+        const key = String(id || name || '')
+        if (!key) continue
+        const prev = byKey.get(key) || { id, name, patch: { current_state: {} } }
+        byKey.set(key, {
+          id: id || prev.id,
+          name: name || prev.name,
+          patch: {
+            current_state: {
+              ...(prev.patch?.current_state || {}),
+              ...(update?.current_state || update?.currentState || {}),
+              last_seen_chapter: chapter.chapter_no,
+            },
+          },
+        })
+      }
+      return [...byKey.values()]
+    })()
+    if (storyStateStatus === 'synced' && (characterCardSync.title_name_canon.length || characterCardSync.identity_canon?.length)) {
+      const nextConfig = preparedStoryStateUpdate.next_reference_config || project.reference_config || {}
+      let nextStoryState = mergeNameCanonIntoStoryState(
+        nextConfig.story_state || nextConfig.storyState || getStoryState(project) || {},
+        characterCardSync.title_name_canon,
+      )
+      if (characterCardSync.identity_canon?.length) {
+        nextStoryState = mergeIdentityCanonIntoStoryState(nextStoryState, characterCardSync.identity_canon)
+      }
+      preparedStoryStateUpdate = {
+        ...preparedStoryStateUpdate,
+        next_reference_config: {
+          ...nextConfig,
+          story_state: {
+            ...nextStoryState,
+            character_card_sync: {
+              version: characterCardSync.version,
+              created_names: characterCardSync.created_names,
+              updated_names: characterCardSync.updated_names,
+              name_drifts: characterCardSync.name_drifts,
+              identity_drifts: characterCardSync.identity_drifts || [],
+            },
+          },
         },
-      },
-    }))
+      }
+    }
     const acceptanceSettingUpdates = [
       ...asArray(preparedStoryStateUpdate.setting_updates).map((update: any) => ({ update, storyline: false })),
       ...asArray(preparedStoryStateUpdate.storyline_updates).map((update: any) => ({ update, storyline: true })),
@@ -47878,7 +48239,7 @@ export function createNovelWritingService(ctx: {
           setting_updates: acceptanceSettingUpdates,
           usage_updates: acceptanceUsageUpdates,
           worldbuilding_creates: asArray(stagedPreflightRepair?.staged_worldbuilding_creates),
-          character_creates: asArray(stagedPreflightRepair?.staged_character_creates),
+          character_creates: acceptanceCharacterCreates,
           setting_creates: asArray(stagedPreflightRepair?.staged_setting_creates),
           chapter_setting_usage_replacement: stagedPreflightRepair?.staged_usage_replacement || stagedContextUsageReplacement || undefined,
         } : {}),
@@ -47915,6 +48276,34 @@ export function createNovelWritingService(ctx: {
     }
     await runPostCommitBestEffort('after_commit_hook', () => ctx.runtime?.hooks?.afterChapterCommit?.({ chapterId: chapter.id, finalText }))
     await runPostCommitBestEffort('store_stage', () => onStage('store', { status: 'success', word_count: countProseChars(finalText), scene_status: 'accepted' }))
+    await runPostCommitBestEffort('progress_resync_next_chapters', async () => {
+      const allChapters = await listNovelChapters(activeWorkspace, projectId)
+      const previousForLedger = { ...chapter, ...chapterPatch, ...(updated || {}) }
+      const alignment = collectPlanAlignmentPatchesAfterProseChange(allChapters, previousForLedger, {
+        force: true,
+        source: 'post_prose_store',
+        followLimit: 5,
+        alignWrittenFollowers: true,
+      })
+      for (const item of alignment.patches) {
+        const patched = await updateNovelChapter(activeWorkspace, item.chapter_id, item.patch as any, { createVersion: false })
+        if (Number(item.chapter_id) === Number(previousForLedger.id || chapter.id || updated?.id)) {
+          updated = patched
+        }
+      }
+      const refreshed = await listNovelChapters(activeWorkspace, projectId)
+      const projectAlign = collectProjectPlanAlignmentPatches(refreshed, {
+        source: 'post_prose_store_project_align',
+        onlyFromChapterNo: Math.max(1, Number(chapter.chapter_no || 1) - 1),
+        followLimit: 2,
+      })
+      for (const item of projectAlign.patches) {
+        const patched = await updateNovelChapter(activeWorkspace, item.chapter_id, item.patch as any, { createVersion: false })
+        if (Number(item.chapter_id) === Number(previousForLedger.id || chapter.id || updated?.id)) {
+          updated = patched
+        }
+      }
+    })
     await runPostCommitBestEffort('memory', async () => {
       await storeChapterProseMemory(project, chapter.chapter_no, finalText)
     })

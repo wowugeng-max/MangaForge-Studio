@@ -1657,7 +1657,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
           await appendNovelRun(activeWorkspace, {
             project_id: projectId,
             run_type: 'generate_prose',
-            step_name: `chapter-${chapterId}`,
+            step_name: `chapter-${standaloneChapter?.chapter_no || chapterId}`,
             status: 'failed',
             input_ref: stringifyNovelGenerationPayload(req.body),
             output_ref: stringifyNovelGenerationPayload(errorPayload),

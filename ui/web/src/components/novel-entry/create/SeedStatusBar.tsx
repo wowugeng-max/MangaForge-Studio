@@ -25,6 +25,9 @@ export function SeedStatusBar(props: {
   showFoundationAccept?: boolean
   onAcceptFoundation?: () => void
   onClearFoundationAccept?: () => void
+  fillingGaps?: boolean
+  showFillGaps?: boolean
+  onFillGaps?: () => void
   onRegenerate: () => void
   onSaveDraft: () => void
   onFinalize: () => void
@@ -65,6 +68,30 @@ export function SeedStatusBar(props: {
             description={props.diagnosticsSuggestion ? (
               <Text type="secondary" style={{ fontSize: 12 }}>{props.diagnosticsSuggestion}</Text>
             ) : undefined}
+          />
+        )}
+
+        {props.showFillGaps && props.onFillGaps && (props.topRisks || []).length > 0 && (
+          <Alert
+            type="info"
+            showIcon
+            message="检测到基础评分缺口"
+            description={(
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Text style={{ fontSize: 12 }}>主要缺口：{(props.topRisks || []).join('、')}</Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  由模型只补缺失/偏薄字段；已有优质内容不会被空值或弱结果覆盖。
+                </Text>
+                <Button
+                  size="small"
+                  type="primary"
+                  loading={props.fillingGaps}
+                  onClick={props.onFillGaps}
+                >
+                  补齐缺口
+                </Button>
+              </Space>
+            )}
           />
         )}
 

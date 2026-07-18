@@ -1,3 +1,5 @@
+import { compactHandoffObligation, enrichContextWithStrongHandoff } from './chapter-handoff-basics'
+import { assessPrimaryOpeningHookContinuity } from './chapter-continuity-guard'
 function normalized(value: any) {
   return String(value || '').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '')
 }
@@ -102,6 +104,11 @@ function conservativeAnchorMatch(anchor: string, opening: string) {
   if (!exact) return false
   const normalizedOpening = normalized(opening)
   if (normalizedOpening.includes(exact)) return true
+  // Strong handoff aliases for climax objects that rewrite wording slightly across chapters.
+  if (anchor === '巨眼' && (opening.includes('巨大眼睛') || opening.includes('巨眼'))) return true
+  if (anchor === '巨大眼睛' && (opening.includes('巨眼') || opening.includes('巨大眼睛'))) return true
+  if ((anchor === '金色碎片' || anchor === '权柄碎片' || anchor === '世界权柄碎片')
+    && (/金色碎片|权柄碎片|世界权柄碎片/.test(opening))) return true
   if (/^老[\p{Script=Han}]$/u.test(anchor)) {
     const core = anchor.slice(1)
     if (new RegExp(`${core}[叔伯哥姐姨婶爷]`, 'u').test(opening)) return true
@@ -213,16 +220,46 @@ export function selectContinuitySafeProseCandidate(
 }
 
 export function assessInitialProseOpeningContinuity(text: string, context: any = {}) {
-  const target = context?.chapter_target || context?.chapterTarget || context
+  const enriched = enrichContextWithStrongHandoff(context)
+  const target = enriched?.chapter_target || enriched?.chapterTarget || enriched
+  const previous = enriched?.continuity?.previous_chapter || enriched?.continuity?.previousChapter || context?.continuity?.previous_chapter || context?.continuity?.previousChapter || null
   const previousHandoff = String(target?.previous_handoff || target?.previousHandoff || '')
   const firstScene = target?.scene_cards?.[0] || target?.sceneCards?.[0] || {}
   const transition = String(firstScene?.transition_from_previous || firstScene?.transitionFromPrevious || '')
   const baseline = previousHandoff || transition
-  const groups = anchorGroups(context)
-  const baselineAnchorCount = openingAnchorCount(baseline, groups)
+  // Use compact obligation as the "original" draft so long ending excerpts do not force
+  // the new chapter opening to replay the whole previous tail via fragment coverage.
+  const compactBaseline = compactHandoffObligation(previousHandoff, transition) || baseline
+  const groups = anchorGroups(enriched)
+  const baselineAnchorCount = openingAnchorCount(compactBaseline, groups)
   const required = Boolean(baseline) && baselineAnchorCount >= 2
+
+  // Primary ending-hook miss is a separate hard continuity class (e.g. 物业钩子 vs 电视回放).
+  if (previous) {
+    const primary = assessPrimaryOpeningHookContinuity({
+      chapterText: text,
+      previousChapter: {
+        ...previous,
+        chapter_text: previous.chapter_text || previous.chapterText || previous.ending_excerpt || '',
+        ending_hook: previous.ending_hook || previous.endingHook || target?.previous_ending_hook || '',
+      },
+    })
+    if (primary.required && !primary.passed) {
+      return {
+        required: true,
+        passed: false,
+        failure: {
+          code: primary.failure?.code || 'opening_primary_hook_miss',
+          source: 'canonical_continuity' as const,
+          message: primary.failure?.message || '正文开篇未承接上一章章末主钩子。',
+          details: primary.failure?.details || {},
+        },
+      }
+    }
+  }
+
   if (!required) return { required: false, passed: true, failure: null }
-  const selection = selectContinuitySafeProseCandidate(baseline, text, context, { candidate_stage: 'initial_draft' })
+  const selection = selectContinuitySafeProseCandidate(compactBaseline, text, enriched, { candidate_stage: 'initial_draft' })
   if (selection.accepted) return { required: true, passed: true, failure: null }
   return {
     required: true,
@@ -233,6 +270,7 @@ export function assessInitialProseOpeningContinuity(text: string, context: any =
       message: '正文开篇未接住上一章强交接义务，已阻止断章初稿入库。',
       details: {
         baseline_anchor_count: baselineAnchorCount,
+        required_handoff_anchors: target?.requiredHandoffAnchors || [],
         continuity_warning: selection.warning,
       },
     },

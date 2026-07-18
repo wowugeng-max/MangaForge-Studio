@@ -38,7 +38,7 @@ describe('chapter prose storage patch builders', () => {
       },
     })
 
-    expect(patch).toEqual({
+    expect(patch).toMatchObject({
       title: '第二章 新门槛',
       chapter_text: '正文内容',
       continuity_notes: ['时间线：雨夜'],
@@ -63,11 +63,16 @@ describe('chapter prose storage patch builders', () => {
         quality_audit_repair_receipts: [{ label: '质量诊断' }],
         artifact_protocol_receipts: [{ label: '协议' }],
         pre_draft_execution_receipts: { intent_confirmation_checks: [] },
+        outgoing_handoff: {
+          version: 'chapter_outgoing_handoff_v1',
+          unresolved_action: '正文内容',
+        },
       },
       status: 'draft',
     })
     expect(patch.raw_payload).not.toHaveProperty('oh_story_director')
     expect(patch.raw_payload).not.toHaveProperty('ohStoryDirector')
+    expect(patch.raw_payload.outgoingHandoff).toEqual(patch.raw_payload.outgoing_handoff)
   })
 
   test('restores paragraph breaks before storing long single-line prose', () => {
@@ -390,5 +395,38 @@ describe('chapter prose storage patch builders', () => {
       editorRewrite: { edited: true },
       selfCheck: { revised: true },
     })).toBe('repair')
+  })
+
+  test('persists outgoing_handoff derived from stored prose tail', () => {
+    const patch = buildChapterProseStoragePatch({
+      chapter: { ending_hook: '院长签下医院改制声明，金光剥离。', raw_payload: {} },
+      generatedTitlePatch: {},
+      finalText: '江哲手指即将触碰到权柄碎片。金色碎片内突然睁开一只冰冷巨眼，古老意志轰然降临！',
+      finalContinuityNotes: [],
+      finalSceneBreakdown: [],
+      ohStoryDeliveryReceipts: {},
+    })
+    expect(patch.raw_payload.outgoing_handoff.hook_tail_divergence).toBe(true)
+    expect(patch.raw_payload.outgoing_handoff.unresolved_action).toMatch(/巨眼|古老意志|碎片/)
+  })
+
+  test('persists chapter_progress_ledger with delivered beats and unresolved next', () => {
+    const patch = buildChapterProseStoragePatch({
+      chapter: {
+        chapter_goal: '江哲倒汤反制家人。',
+        chapter_summary: '倒汤逼出规则冲突。',
+        conflict: '毒汤考验',
+        ending_hook: '汤倒在爸爸头上。',
+        raw_payload: {},
+      },
+      generatedTitlePatch: {},
+      finalText: '江哲将整碗汤倒在爸爸头上。爸爸暴怒挥出利爪。江哲反手一记耳光。门外十点响起敲门声，邻居来借东西了。',
+      finalContinuityNotes: [],
+      finalSceneBreakdown: [],
+      ohStoryDeliveryReceipts: {},
+    })
+    expect(patch.raw_payload.chapter_progress_ledger.version).toBe('chapter_progress_ledger_v1')
+    expect(patch.raw_payload.chapter_progress_ledger.delivered_beats.length).toBeGreaterThan(0)
+    expect(patch.raw_payload.chapterProgressLedger).toEqual(patch.raw_payload.chapter_progress_ledger)
   })
 })

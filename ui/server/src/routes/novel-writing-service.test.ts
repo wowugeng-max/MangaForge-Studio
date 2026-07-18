@@ -20704,6 +20704,56 @@ describe('chapter pre-draft brief', () => {
     expect(prompt.indexOf('【状态筛选合同】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
   })
 
+  test('chapter 1 pre-draft brief derives foreshadowing and world constraints from seed materials', async () => {
+    const { buildChapterPreDraftBrief } = await import('./novel-writing-service')
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 1,
+        title: '夜市回声',
+        goal: '主角第一次确认回声规则与代价',
+        summary: '顾临在夜市听到异常回声，被迫验证规则。',
+        conflict: '真凶势力试图掩盖异常。',
+        ending_hook: '回声指向旧案物证。',
+        scene_cards: [
+          { scene_no: 1, title: '夜市异响', characters_present: ['顾临'], purpose: '确认回声异常', conflict: '被盯梢' },
+        ],
+      },
+      story_state: {
+        global: {
+          foreshadowing_status: {
+            旧案回声: '第1章埋设：回声会暴露旧案坐标',
+          },
+          active_threads: ['查清回声来源'],
+        },
+        worldbuilding: {
+          world_summary: '都市表层秩序下有可触发的异常回声规则。',
+          rules: ['回声只能在压迫现场触发', '每次触发都会留下可追踪代价'],
+          power_system: '回声辨位，越准代价越大',
+        },
+        characters: [
+          { name: '顾临', goal: '查清回声来源', current_state: { status: '开局' } },
+        ],
+      },
+      writing_bible: {
+        promise: '用异常回声破案并付出代价',
+        world_rules: '回声规则不可无代价使用',
+      },
+    }
+    const brief = buildChapterPreDraftBrief({ title: '夜市回声' }, contextPackage)
+    expect(brief.state_tracking_contract.historical_causality.join('｜')).toMatch(/开篇|伏笔|回声|前史/)
+    expect(brief.state_tracking_contract.world_constraints.join('｜')).toMatch(/回声|规则|代价|力量/)
+    expect(brief.state_tracking_contract.source_readiness.some((item: any) => item.key === 'foreshadowing_history' && item.status === 'ready')).toBe(true)
+    expect(brief.state_tracking_contract.source_readiness.some((item: any) => item.key === 'world_constraints' && item.status === 'ready')).toBe(true)
+    const checks = (await import('./novel-writing-service')).buildSourceReadinessPreflightChecks({
+      chapter_target: {
+        ...contextPackage.chapter_target,
+        state_tracking_contract: brief.state_tracking_contract,
+      },
+    })
+    expect(checks.some((item: any) => item.key === 'source_readiness_foreshadowing_history')).toBe(false)
+    expect(checks.some((item: any) => item.key === 'source_readiness_world_constraints')).toBe(false)
+  })
+
   test('flags stale story state before serial unattended continuation', () => {
     const service = createNovelWritingService({
       getProject: async () => null,

@@ -114,6 +114,10 @@ export function buildGenerationPreflightRepairActionSpecs(
     || corpusMentions(payload, /上一章正文|章尾钩子|previous_chapter/)
   const needsContextTracking = hasKey(missingKeys, 'context_tracking', 'foreshadowing')
     || corpusMentions(payload, /追踪\/上下文|追踪\/伏笔|context_tracking|foreshadowing/)
+  const needsForeshadowingHistory = hasKey(missingKeys, 'foreshadowing_history', 'historical_causality')
+    || corpusMentions(payload, /伏笔\/前史|待回收伏笔|前史因果|foreshadowing_history/)
+  const needsWorldConstraints = hasKey(missingKeys, 'world_constraints', 'world_constraint')
+    || corpusMentions(payload, /世界约束|能力限制|触发条件或代价|world_constraints/)
 
   if (options.includeContinueRepairAll && autoKeys.length > 1) {
     actions.push({
@@ -209,6 +213,46 @@ export function buildGenerationPreflightRepairActionSpecs(
       description: '到资料设定工作台查看并补齐追踪类材料。',
       modelCall: false,
       reason: needsTimeline ? '追踪/时间线' : '追踪/上下文',
+    })
+  }
+
+  if (needsForeshadowingHistory) {
+    actions.push({
+      key: 'open_story_state_foreshadowing',
+      kind: 'open_story_state_editor',
+      label: '补伏笔/前史状态',
+      description: '打开故事状态，补齐上一章钩子、待回收伏笔或本章必须承接的前史因果。',
+      modelCall: false,
+      primary: true,
+      reason: '伏笔/前史',
+    })
+    actions.push({
+      key: 'open_story_assets_foreshadowing',
+      kind: 'open_story_assets',
+      label: '打开资料设定台·伏笔',
+      description: '在资料设定台补伏笔实体，或确认开书时的伏笔计划已入库。',
+      modelCall: false,
+      reason: '伏笔/前史',
+    })
+  }
+
+  if (needsWorldConstraints) {
+    actions.push({
+      key: 'incubate_setting_workshop_world',
+      kind: 'incubate_setting_workshop',
+      label: '提炼世界规则设定',
+      description: '调用大模型从世界观/写作圣经提炼规则、地点、能力限制与代价。',
+      modelCall: true,
+      primary: true,
+      reason: '世界约束',
+    })
+    actions.push({
+      key: 'open_story_assets_world',
+      kind: 'open_story_assets',
+      label: '打开资料设定台·世界',
+      description: '补齐会改变本章行动选择的规则、地点、能力限制或触发代价。',
+      modelCall: false,
+      reason: '世界约束',
     })
   }
 
