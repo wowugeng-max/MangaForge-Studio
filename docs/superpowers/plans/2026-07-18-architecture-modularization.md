@@ -27,7 +27,7 @@
 | 7 editor/core routes packages | largely done | editor, core, commercial-ops, generation, planning package-split (builders/register); deeper domain split open |
 | 8 auto-creation model package | in progress | risk/trends/recovery leaves modularized; still some >2k leaves |
 | 9 cockpit + repair prompt | in progress | support thin + support-normalize~3.8k; prompt/quality-contract split |
-| 10 shell UI split | in progress | TaskCenter barrel + drawer-model~5.4k + panel~0.7k; NovelProjectWorkspace still monofile |
+| 10 shell UI split | in progress | TaskCenter package + shell/workspace-helpers; NWS still large component; drawer-model~5.4k |
 | 11 final hardening | open | |
 
 

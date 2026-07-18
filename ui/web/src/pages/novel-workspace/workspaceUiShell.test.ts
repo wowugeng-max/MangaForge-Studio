@@ -26,6 +26,7 @@ let commercialOpsRoutesSourceCache: string | null = null
 let directorModelSourceCache: string | null = null
 let writingCockpitModelSourceCache: string | null = null
 let taskCenterSourceCache: string | null = null
+let projectWorkspaceSourceCache: string | null = null
 
 function packageSource(relativeDir: string) {
   const cached = packageSourceCache.get(relativeDir)
@@ -106,6 +107,16 @@ function directorModelSource() {
 }
 
 
+
+function projectWorkspaceSource() {
+  if (projectWorkspaceSourceCache != null) return projectWorkspaceSourceCache
+  projectWorkspaceSourceCache = [
+    sourceCached('../NovelProjectWorkspace.tsx', localSourceCache),
+    sourceCached('shell/workspace-helpers.tsx', localSourceCache),
+  ].join('\n')
+  return projectWorkspaceSourceCache
+}
+
 function taskCenterSource() {
   if (taskCenterSourceCache != null) return taskCenterSourceCache
   taskCenterSourceCache = [
@@ -133,7 +144,7 @@ function writingCockpitModelSource() {
 
 describe('commercial writing workspace UI shell', () => {
   test('lets the inner chapter directory rail collapse without hiding task center', () => {
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
     const projectWorkspaceCss = source('../NovelProjectWorkspace.css')
     const directorySidebar = source('ChapterDirectorySidebar.tsx')
 
@@ -198,7 +209,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('keeps pipeline and model team as status displays instead of duplicate writing actions', () => {
     const cockpit = source('WritingCockpitPanel.tsx')
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
     const projectWorkspaceCss = source('../NovelProjectWorkspace.css')
 
     expect(cockpit).toContain('writing-cockpit-role-strip')
@@ -213,7 +224,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('keeps chapter writing to one guidance layer by hiding global cockpit and pipeline there', () => {
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
 
     expect(projectWorkspace).toContain('showGlobalWritingGuidance')
     expect(projectWorkspace).toContain("workspaceArea !== 'chapterWriting'")
@@ -224,7 +235,7 @@ describe('commercial writing workspace UI shell', () => {
   test('shows a compact writing queue in the chapter workspace', () => {
     const component = source('WorkspaceCenter.tsx')
     const css = source('WorkspaceCenter.css')
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
     const model = writingCockpitModelSource()
 
     expect(model).toContain('writingQueue')
@@ -308,7 +319,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('surfaces a direct unattended shortcut inside the writing cockpit', () => {
     const component = source('WritingCockpitPanel.tsx')
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
 
     expect(component).toContain('onOpenProductionOps')
     expect(component).toContain('无人值守')
@@ -336,7 +347,7 @@ describe('commercial writing workspace UI shell', () => {
     const component = source('WorkspaceCenter.tsx')
     const css = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
 
     expect(model).toContain('chapter_blueprint')
     expect(model).toContain('blueprintOutline')
@@ -389,7 +400,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('reads camelCase raw pre-draft briefs in the writing workspace UI', () => {
     const component = source('WorkspaceCenter.tsx')
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
 
     expect(component).toContain('activeChapter?.raw_payload?.pre_draft_brief || activeChapter?.raw_payload?.preDraftBrief || null')
     expect(projectWorkspace).toContain('activeChapter.raw_payload?.pre_draft_brief || activeChapter.raw_payload?.preDraftBrief')
@@ -490,7 +501,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('explains approval-blocker resume failures instead of showing a generic run error', () => {
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
 
     expect(projectWorkspace).toContain('formatRunResumeErrorMessage')
     expect(projectWorkspace).toContain('APPROVAL_BLOCKER_REQUIRES_REPAIR')
@@ -520,7 +531,7 @@ describe('commercial writing workspace UI shell', () => {
     const component = source('AutoCreationDirectorWorkspace.tsx')
     const css = source('AutoCreationDirectorWorkspace.css')
     const model = directorModelSource()
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
 
     expect(model).toContain('serialWorkflow')
     expect(model).toContain('book_core')
@@ -547,7 +558,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('exposes unattended writing goal controls in the production toolbox', () => {
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
     const startBlock = projectWorkspace.slice(
       projectWorkspace.indexOf('const startUnattendedWritingGoal = async () =>'),
       projectWorkspace.indexOf('const openRunQueue = async () =>'),
@@ -568,7 +579,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('surfaces unattended writing directly in the production operations workspace', () => {
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
     const productionOpsBlock = projectWorkspace.slice(
       projectWorkspace.indexOf("productionOps: {"),
       projectWorkspace.indexOf('const group = groups[workspaceArea]'),
@@ -581,7 +592,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('keeps a top bar shortcut for unattended writing visible from any workspace area', () => {
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
     const projectWorkspaceCss = source('../NovelProjectWorkspace.css')
     const topbarBlock = projectWorkspace.slice(
       projectWorkspace.indexOf('className="novel-workspace-topbar"'),
@@ -620,7 +631,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows the current agent chain inside the shared novel pipeline', () => {
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
     const css = source('../NovelProjectWorkspace.css')
 
     expect(projectWorkspace).toContain('serialPipelineModel.currentAgentSteps')
@@ -636,7 +647,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('keeps the shared novel pipeline stage rail compact enough to scan at once', () => {
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
     const css = source('../NovelProjectWorkspace.css')
 
     expect(projectWorkspace).toContain('`阻${stage.blockerCount}`')
@@ -646,7 +657,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('surfaces the shared novel pipeline as a blocker repair guide', () => {
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
     const css = source('../NovelProjectWorkspace.css')
 
     expect(projectWorkspace).toContain('novel-serial-pipeline-guide')
@@ -660,7 +671,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('offers a direct de-ai gate repair action from the chapter writing desk', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
 
     expect(workspaceCenter).toContain('onRepairDeslopGate')
     expect(workspaceCenter).toContain('修复去AI味并复检')
@@ -671,7 +682,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('exposes creation contract fields in the writing bible editor', () => {
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
 
     expect(projectWorkspace).toContain('创建契约')
     expect(projectWorkspace).toContain('name="reader_promise"')
@@ -708,7 +719,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('passes memory palace summary into the writing cockpit runway checks', () => {
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
 
     expect(projectWorkspace).toContain('memoryPalaceProjects')
     expect(projectWorkspace).toContain('/memory-palace/projects')
@@ -719,7 +730,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('runs story state sync automatically from writing cockpit actions', () => {
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
 
     expect(projectWorkspace).toContain('syncStoryStateForChapter')
     expect(projectWorkspace).toContain('/story-state-sync')
@@ -1982,7 +1993,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('shows reader trial room as a story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
     const planningModel = source('planning/model/planning-workspace-model.ts')
     const taskCenter = taskCenterSource()
     const service = commercialOpsRoutesSource()
@@ -2574,7 +2585,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('shows the creative assistant panel shell', () => {
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
     const panel = source('CreativeAssistantPanel.tsx')
     const model = source('creativeAssistantModel.ts')
     const css = source('CreativeAssistantPanel.css')
@@ -2606,7 +2617,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('dual-mode shell replaces focus mode with immersive/workbench classes and always-on task center', () => {
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
     const projectWorkspaceCss = source('../NovelProjectWorkspace.css')
     const shellModel = source('workspaceShellModel.ts')
 
@@ -2639,7 +2650,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('immersive writing keeps global cockpit hidden and does not zero-hide directory by focus class', () => {
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
     const projectWorkspaceCss = source('../NovelProjectWorkspace.css')
 
     expect(projectWorkspace).toContain('showGlobalWritingGuidance')
@@ -2652,7 +2663,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('immersive writing aux uses toolbar popover instead of in-flow aux rail', () => {
     const component = source('WorkspaceCenter.tsx')
-    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspace = projectWorkspaceSource()
     const focusModel = source('writingAuxFocusModel.ts')
 
     expect(focusModel).toContain('pickWritingAuxFocusTags')
