@@ -589,7 +589,11 @@ describe('normalizeSceneCardsPayload quality a a', () => {
   })
   test('passes the authoritative generation contract into the prose quality loop', () => {
     const source = readWritingServicePackageSource()
-    const helperSource = readFileSync(join(import.meta.dir, '../novel-writing-service/post-delivery/core-handoff-sync-reports.ts'), 'utf8')
+    const helperSource = [
+      readFileSync(join(import.meta.dir, '../novel-writing-service/post-delivery/core-handoff-sync-reports.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, '../novel-writing-service/post-delivery/core-handoff-sync-reports-core.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, '../novel-writing-service/post-delivery/core-handoff-sync-reports-extended.ts'), 'utf8'),
+    ].join('\n')
     const helperStart = helperSource.indexOf('export function buildProseReviewContextPackage')
     const helperBlock = helperSource.slice(
       helperStart,

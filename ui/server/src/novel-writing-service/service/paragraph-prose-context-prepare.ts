@@ -265,6 +265,17 @@ export function prepareParagraphProseContext(project: any, inputContextPackage: 
     defaultFiveChapterLaneTemplateProductionRelapseValidationNos,
     defaultFiveChapterLaneTemplateProductionFailureReasons,
     defaultFiveChapterLaneTemplateProductionFailedRequirements,
+    batchPreflight,
+    batchDeliveryRiskCarryOver,
+    batchCreationContractCarryOver,
+    batchChapterHandoffContract,
+    longformMemoryAnchor,
+    longformMemoryCapsule,
+    layeredMemoryContext,
+    progressSummary,
+    dailyContextSnapshot,
+    foreshadowingConsistencyRadar,
+    millionWordRunway,
   } = foundation
   const chapterBlueprint = contextPackage?.chapter_target?.chapter_blueprint
     || contextPackage?.chapter_target?.chapterBlueprint

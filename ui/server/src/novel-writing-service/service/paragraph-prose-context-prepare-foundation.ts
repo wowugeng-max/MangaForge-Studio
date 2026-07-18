@@ -449,5 +449,16 @@ export function prepareParagraphProseContextFoundation(project: any, contextPack
     defaultFiveChapterLaneTemplateProductionRelapseValidationNos,
     defaultFiveChapterLaneTemplateProductionFailureReasons,
     defaultFiveChapterLaneTemplateProductionFailedRequirements,
+    batchPreflight,
+    batchDeliveryRiskCarryOver,
+    batchCreationContractCarryOver,
+    batchChapterHandoffContract,
+    longformMemoryAnchor,
+    longformMemoryCapsule,
+    layeredMemoryContext,
+    progressSummary,
+    dailyContextSnapshot,
+    foreshadowingConsistencyRadar,
+    millionWordRunway,
   }
 }
