@@ -32,7 +32,7 @@
 
 Recent extracts (continued): director/repair/cockpit/pre-draft/scene-cards monotest splits; NWS diagnostics views + action routers; audience/trends leaf binding fixes; golden-three opening pattern restore.
 
-Still open: NWS handlers still large (~6.4k), remaining large production modules (generate-chapter-for-group, builders-annotations, scene-card-delivery-risk), Task 11 hardening.
+Still open: NWS handlers still large (~6.4k), remaining large production modules (generate-chapter-for-group ~2.5k, builders-annotations, scene-card-delivery-risk), Task 11 full hardening/smoke.
 
 
 

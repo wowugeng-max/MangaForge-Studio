@@ -31,6 +31,11 @@ const HARD_CAPS: Record<string, number> = {
 const SOFT_BASELINES: Record<string, number> = {
   'routes/novel-editor/builders.ts': 4600,
   'routes/novel-core/builders.ts': 3400,
+  'routes/novel-writing-service.pre-draft-brief.test.ts': 4200,
+  'routes/novel-writing-service.scene-cards.test.ts': 3200,
+  'routes/novel-writing-service.chapter-context.test.ts': 3600,
+  'routes/novel-writing-service.prose-word-target.test.ts': 1800,
+  'routes/novel-writing-service.readability-meme.test.ts': 2200,
 }
 
 describe('architecture modularization contracts', () => {
