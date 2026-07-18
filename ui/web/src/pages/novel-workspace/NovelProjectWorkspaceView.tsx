@@ -1,6 +1,23 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert, Badge, Button, Card, Checkbox, Dropdown, Form, Input, InputNumber, List, message, Modal, Progress, Select, Space, Typography, Tooltip, Tag,
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  Dropdown,
+  Form,
+  Input,
+  InputNumber,
+  List,
+  message,
+  Modal,
+  Progress,
+  Select,
+  Space,
+  Typography,
+  Tooltip,
+  Tag,
 } from 'antd'
 import {
   ArrowLeftOutlined,
@@ -18,22 +35,47 @@ import {
   SafetyOutlined,
 } from '@ant-design/icons'
 import type { EditorView } from '@codemirror/view'
-import { useNavigate, useParams } from 'react-router-dom'
+import {
+  useNavigate,
+  useParams,
+} from 'react-router-dom'
 import apiClient from '../../api/client'
-import { createSSEClient, generateClientId, type SSEMessage } from '../../utils/sse'
-import { ChapterDirectorySidebar } from './ChapterDirectorySidebar'
-import { CreativeAssistantPanel } from './CreativeAssistantPanel'
+import {
+  generateClientId,
+  type SSEMessage,
+} from '../../utils/sse'
+import {
+  ChapterDirectorySidebar,
+} from './ChapterDirectorySidebar'
+import {
+  CreativeAssistantPanel,
+} from './CreativeAssistantPanel'
 import type { EditorKind } from './EditorModal'
-import { ReferencePanel } from './ReferencePanel'
-import { StoryAssetsWorkspace } from './StoryAssetsWorkspace'
-import { StoryPlanningWorkspace, type PlanningLoadingKey } from './StoryPlanningWorkspace'
-import { WritingCockpitPanel, type WritingCockpitPrimaryActionOverride } from './WritingCockpitPanel'
-import { WorkspaceCenter } from './WorkspaceCenter'
+import {
+  ReferencePanel,
+} from './ReferencePanel'
+import {
+  StoryAssetsWorkspace,
+} from './StoryAssetsWorkspace'
+import {
+  StoryPlanningWorkspace,
+  type PlanningLoadingKey,
+} from './StoryPlanningWorkspace'
+import {
+  WritingCockpitPanel,
+  type WritingCockpitPrimaryActionOverride,
+} from './WritingCockpitPanel'
+import {
+  WorkspaceCenter,
+} from './WorkspaceCenter'
 import {
   buildAutoCreationDirectorModel,
   type AutoCreationDirectorAction,
 } from './autoCreationDirectorModel'
-import { buildPlanningWorkspaceModel, type PlanningActionKey } from './planningWorkspaceModel'
+import {
+  buildPlanningWorkspaceModel,
+  type PlanningActionKey,
+} from './planningWorkspaceModel'
 import {
   buildWritingCockpitModel,
   resolveEditorRevisionChapterId,
@@ -45,18 +87,32 @@ import {
   type CreativeAssistResult,
   type CreativeAssistantModeKey,
 } from './creativeAssistantModel'
-import { useChapterAutosave } from './useChapterAutosave'
-import { useChapterVersions } from './useChapterVersions'
-import { useNovelWorkspaceData, type ChapterSortMode, type ChapterStatusFilter } from './useNovelWorkspaceData'
+import {
+  useChapterAutosave,
+} from './useChapterAutosave'
+import {
+  useChapterVersions,
+} from './useChapterVersions'
+import {
+  useNovelWorkspaceData,
+  type ChapterSortMode,
+  type ChapterStatusFilter,
+} from './useNovelWorkspaceData'
 import type { SafeBatchRecoveryFocusSnapshot } from './TaskCenterDrawer'
-import { useReferenceWorkflow } from './useReferenceWorkflow'
-import { useWorkspaceTasks } from './useWorkspaceTasks'
+import {
+  useReferenceWorkflow,
+} from './useReferenceWorkflow'
+import {
+  useWorkspaceTasks,
+} from './useWorkspaceTasks'
 import {
   chapterHasProse,
   displayValue,
   wc,
 } from './utils'
-import { buildSerialPipelineViewModel } from './serialPipelineModel'
+import {
+  buildSerialPipelineViewModel,
+} from './serialPipelineModel'
 import {
   immersiveEnterPanelDefaults,
   isImmersiveShell as deriveIsImmersiveShell,
@@ -78,32 +134,21 @@ import {
 import {
   renderGenerationResultDiffContentView,
 } from './shell/workspace-commercial-result'
-import { NovelWorkspaceTopBar } from './shell/workspace-topbar'
-import { NovelWorkspaceDeferredSurfaces } from './shell/workspace-deferred-surfaces'
-import { NovelWorkspaceBody } from './shell/workspace-body'
-import { createCommercialToolHandlers } from './shell/workspace-commercial-tools'
-import { createPreflightHandlers } from './shell/workspace-preflight-handlers'
-import { createRepairTaskHandlers } from './shell/workspace-repair-task-handlers'
+import {
+  NovelWorkspaceTopBar,
+} from './shell/workspace-topbar'
+import {
+  NovelWorkspaceDeferredSurfaces,
+} from './shell/workspace-deferred-surfaces'
+import {
+  NovelWorkspaceBody,
+} from './shell/workspace-body'
 import {
   buildNovelWorkspaceAreaViewProps,
   buildNovelWorkspaceBodyProps,
   buildNovelWorkspaceDeferredSurfacesProps,
   buildNovelWorkspaceTopBarProps,
 } from './shell/workspace-view-props'
-import { createWorkspaceActionHandlers } from './shell/workspace-action-handlers'
-import { createChapterProseHandlers } from './shell/workspace-chapter-prose-handlers'
-import { createChapterVersionHandlers, createProjectAssetDeleteHandlers, createSceneCardHandlers, createStorylineDecisionHandlers } from './shell/workspace-chapter-version-handlers'
-import { createWritingBibleHandlers } from './shell/workspace-writing-bible-handlers'
-import { createPlanningHandlers } from './shell/workspace-planning-handlers'
-import { createProductionHandlers } from './shell/workspace-production-handlers'
-import { createEditorHandlers } from './shell/workspace-editor-handlers'
-import { createEditorReportHandlers } from './shell/workspace-editor-report-handlers'
-import { createRunQueueHandlers } from './shell/workspace-run-queue-handlers'
-import { createChapterPrepHandlers } from './shell/workspace-chapter-prep-handlers'
-import { createDiagnosticsHandlers } from './shell/workspace-diagnostics-handlers'
-import { createCreativeHandlers } from './shell/workspace-creative-handlers'
-import { createStyleSampleHandlers } from './shell/workspace-style-sample-handlers'
-import { createWritingQueueHandlers } from './shell/workspace-writing-queue-handlers'
 import {
   buildWorkspaceWritingRecommendation,
   filterReviewsByType,
@@ -136,6 +181,12 @@ import {
   type ChapterWordTargetMode,
   type WorkspaceArea,
 } from './shell/workspace-types'
+import {
+  bindNovelWorkspaceActionHandlers,
+} from './shell/workspace-view-bind-action-handlers'
+import {
+  bindNovelWorkspaceCoreHandlers,
+} from './shell/workspace-view-bind-core-handlers'
 import '../NovelProjectWorkspace.css'
 
 type AnyRecord = Record<string, any>
@@ -635,500 +686,234 @@ export default function NovelProjectWorkspace() {
     reloadProject: loadProjectModules,
   })
 
-  const {
-    mergeChapterVersion,
-    acceptChapterVersion,
-  } = createChapterVersionHandlers({
-    activeChapter,
-    apiClient,
-    flushPendingSave,
-    loadProjectModules,
-    projectId,
-    rollbackChapterVersion,
-    setChapterVersionDetail,
-    setChapters,
-  })
-
   const { confirmReferenceReady } = useReferenceWorkflow({
     projectId,
     referenceSummary,
     onNeedConfig: () => setReferenceConfigOpen(true),
   })
 
-  /* ── 大纲生成 ──────────────────────────────────────────────────── */
-  const {
-    handleOutlineGenerate,
-    runPlan,
-    executeAgents,
-  } = createPlanningHandlers({
-    apiClient,
-    projectId,
-    selectedModelId,
-    flushPendingSave,
-    loadProjectModules,
-    confirmReferenceReady,
-    setAgentExecution,
-    setExecutingAgents,
-    setOutlinePanelOpen,
-    setPlanProgress,
-    setPlanning,
-    setStepOutlineLoading,
-  })
-
-  const {
-    generateSceneCardsForChapter,
-    generateSceneCardsForActiveChapter,
-  } = createSceneCardHandlers({
-    apiClient,
-    flushPendingSave,
-    loadProjectModules,
-    projectId,
-    selectedModelId,
-    setChapters,
-    setGeneratingSceneCards,
-    showGenerationBlockedModal,
+  const coreHandlers = bindNovelWorkspaceCoreHandlers({
+    activeChapter,
     activeChapterId,
-  })
-
-  const {
-    buildPreDraftBriefForActiveChapter,
-    confirmPreDraftBriefForActiveChapter,
-    savePreDraftBriefForActiveChapter,
-    applyStyleSampleActionForChapter,
-    applyStyleSampleActionForActiveChapter,
-  } = createChapterPrepHandlers({
-    activeChapter,
+    agentConfigForm,
     apiClient,
-    flushPendingSave,
-    loadProjectModules,
-    projectId,
-    selectChapterForWriting,
-    setChapters,
-    setCommercialToolLoading,
-  })
-
-  const {
-    openProductionDashboard,
-    runOriginalIncubator,
-    startChapterGroupGeneration,
-    startReadyChapterGroupGeneration,
-    startFuture100ChapterGroupGeneration,
-    startUnattendedWritingGoal,
-  } = createProductionHandlers({
-    activeChapter,
-    apiClient,
+    approvalPolicyForm,
+    autoCreationDirectorModel,
+    backupImportText,
+    chapterHasProse,
     chapterWordTargetPayload,
-    loadProductionTasks,
-    loadProjectModules,
-    productionMode,
-    projectId,
-    selectChapterForWriting,
-    selectedModelId,
-    selectedProject,
-    setCommercialReadiness,
-    setCommercialToolLoading,
-    setDashboardLoading,
-    setIncubatingOriginal,
-    setRightPanelOpen,
-    setRightPanelTab,
-    setTaskCenterOpen,
-    sortedChapters,
-    unattendedTargetChapter,
-  })
-
-  const applyEditorRevisionRef = { current: null as null | ((...args: any[]) => any) }
-  const runRollingPlanRef = { current: null as null | ((...args: any[]) => any) }
-  const executeStyleSampleTaskBookRebuildRef = { current: null as null | ((...args: any[]) => any) }
-  const generateLongformRepairAuditSummaryRef = { current: null as null | ((...args: any[]) => any) }
-  const generateCurrentChapterProseRef = { current: null as null | ((...args: any[]) => any) }
-  const generateSceneCardsForChapterRef = { current: null as null | ((...args: any[]) => any) }
-  const runSimilarityForChapterRef = { current: null as null | ((...args: any[]) => any) }
-  const {
-    createEditorReport,
-    createEditorReportForChapter,
-  } = createEditorReportHandlers({
-    activeChapter,
-    apiClient,
-    applyEditorRevision: (...args: any[]) => {
-      if (!applyEditorRevisionRef.current) {
-        throw new Error('applyEditorRevision is not ready')
-      }
-      return applyEditorRevisionRef.current(...args)
-    },
-    flushPendingSave,
-    loadProjectModules,
-    projectId,
-    selectedModelId,
-    setEditorReportLoading,
-    setRightPanelOpen,
-    setRightPanelTab,
-  })
-
-  const {
-    openEditor,
-    submitEditor,
-  } = createEditorHandlers({
-    apiClient,
+    chapters,
+    characters,
+    commercialToolLoading,
+    confirmReferenceReady,
+    creativeAssistantSelectedText,
+    creativeCommandText,
     editorForm,
     editorItem,
     editorKind,
     flushPendingSave,
-    loadProjectModules,
-    projectId,
-    setEditorItem,
-    setEditorKind,
-    worldbuilding,
-  })
-
-  const {
-    locateRepairTaskChapter,
-    openRepairTaskChapterEditor,
-    startRepairTaskRevision,
-    updateRepairTaskStatus,
-    bulkUpdateRepairTaskStatus,
-    resolveRepairQueueTaskChapterId,
-    executeRecoveryEvidenceGovernanceQueueTask,
-    executeTypedRepairTask,
-    refreshActiveProseQuality,
-    repairActiveDeslopGate,
-    refreshProseQualityForChapter,
-    closeRepairTaskAfterRevision,
-    isSingleChapterRecoveryEvidenceRepairTask,
-    recheckRepairTaskConvergence,
-    applyEditorRevision
-  } = createRepairTaskHandlers({
-    activeChapter,
-    apiClient,
-    chapters,
-    createEditorReportForChapter,
-    executeStyleSampleTaskBookRebuild: (...args: any[]) => {
-      if (!executeStyleSampleTaskBookRebuildRef.current) {
-        throw new Error('executeStyleSampleTaskBookRebuild is not ready')
-      }
-      return executeStyleSampleTaskBookRebuildRef.current(...args)
-    },
-    flushPendingSave,
-    generateCurrentChapterProse: (...args: any[]) => {
-      if (!generateCurrentChapterProseRef.current) {
-        throw new Error('generateCurrentChapterProse is not ready')
-      }
-      return generateCurrentChapterProseRef.current(...args)
-    },
-    generateLongformRepairAuditSummary: (...args: any[]) => {
-      if (!generateLongformRepairAuditSummaryRef.current) {
-        throw new Error('generateLongformRepairAuditSummary is not ready')
-      }
-      return generateLongformRepairAuditSummaryRef.current(...args)
-    },
-    generateSceneCardsForChapter: (...args: any[]) => {
-      if (!generateSceneCardsForChapterRef.current) {
-        throw new Error('generateSceneCardsForChapter is not ready')
-      }
-      return generateSceneCardsForChapterRef.current(...args)
-    },
-    latestCockpitQualityReport,
-    loadProjectModules,
-    loadProductionTasks,
-    openEditor,
-    outlines,
-    projectId,
-    reviews,
-    runRecords,
-    runRollingPlan: (...args: any[]) => {
-      if (!runRollingPlanRef.current) {
-        throw new Error('runRollingPlan is not ready')
-      }
-      return runRollingPlanRef.current(...args)
-    },
-    runSimilarityForChapter: (...args: any[]) => {
-      if (!runSimilarityForChapterRef.current) {
-        throw new Error('runSimilarityForChapter is not ready')
-      }
-      return runSimilarityForChapterRef.current(...args)
-    },
-    selectChapterForWriting,
-    selectedModelId,
-    setActiveChapterId,
-    setChapters,
-    setCommercialToolLoading,
-    setFuture100FocusOutlineIds,
-    setOutlineTreeOpen,
-    setProseQualityLoading,
-    setReviewAnnotationsOpen,
-    setRightPanelOpen,
-    setRightPanelTab,
-    setSelectedProject,
-    setTaskCenterOpen,
-    sortedChapters,
-  })
-  applyEditorRevisionRef.current = applyEditorRevision
-
-  const {
-    recheckStyleSampleTaskBookReviewTasks,
-    generateLongformRepairAuditSummary,
-    executeStyleSampleTaskBookRebuild,
-  } = createStyleSampleHandlers({
-    apiClient,
-    applyStyleSampleActionForChapter,
-    autoCreationDirectorModel,
-    loadProductionTasks,
-    loadProjectModules,
-    projectId,
-    setTaskCenterOpen,
-    sortedChapters,
-    updateRepairTaskStatus,
-  })
-  executeStyleSampleTaskBookRebuildRef.current = executeStyleSampleTaskBookRebuild
-  generateLongformRepairAuditSummaryRef.current = generateLongformRepairAuditSummary
-  generateSceneCardsForChapterRef.current = generateSceneCardsForChapter
-
-
-  const {
-    showCommercialResult,
-    runCommercialTool,
-    openApprovalPolicyEditor,
-    openAgentConfigEditor,
-    runSimilarityForChapter,
-    runSimilarityForActiveChapter,
-    runReferenceMigrationPlan,
-    runVersionReviewForActiveChapter,
-    showFuture100SkeletonModal,
-    runFuture100SkeletonAudit,
-    generateFuture100Skeleton,
-    applyFuture100SkeletonDraft,
-    runTopicValidation,
-    runQualityBenchmark,
-    runFirst30RetentionDiagnosis,
-    createFirst30RetentionRepairQueue,
-    runReaderTrialReview,
-    createReaderTrialRepairQueue,
-    createStyleSampleBatchRepairQueue,
-    createRecoveryEvidenceGovernanceQueue,
-    createSafeBatchRiskRepairQueue,
-    createScriptRoomRepairQueue,
-    createDeliveryRiskRepairQueue,
-    runLongformCreationDiagnosis,
-    runLongformPressureTest,
-    openProductionMetrics,
-    openLongformProductionTrends,
-    createLongformProductionRepairQueue,
-    openMaterialRepairPlan,
-    openContinuityAudit,
-    syncStoryStateForChapter,
-    refreshConsistencyAudit,
-    openReferenceKnowledgeDiagnosis,
-    runMechanicalQa,
-    runMechanicalQaLlmReview,
-    createMechanicalQaRepairQueue,
-    refreshPropagationDebt,
-    runPropagationDebtLlmPlan,
-    openModelDiagnostics,
-    openGenreTemplates,
-    createBackupSnapshot,
-    runRollingPlan,
-  } = createCommercialToolHandlers({
-    activeChapter,
-    activeChapterId,
-    apiClient,
-    chapters,
-    characters,
-    commercialToolLoading,
-    flushPendingSave,
+    formatStoryStateSyncFailure,
     future100Draft,
     future100SelectedNos,
-    loadProductionTasks,
-    loadProjectModules,
-    openStoryStateEditor,
-    outlines,
-    projectId,
-    reviews,
-    selectChapterForWriting,
-    selectTargetChapterForWriting,
-    selectedModelId,
-    setAutoDirectorActionLoadingKey,
-    setCommercialToolLoading,
-    setContinuityAudit,
-    setContinuityAuditLoading,
-    setFuture100ApplyLoading,
-    setFuture100Draft,
-    setFuture100FocusOutlineIds,
-    setFuture100SelectedNos,
-    setOutlineTreeOpen,
-    setRightPanelOpen,
-    setRightPanelTab,
-    setSelectedProject,
-    setTaskCenterOpen,
-    sortedChapters,
-    startFuture100ChapterGroupGeneration,
-    agentConfigForm,
-    approvalPolicyForm,
-    formatStoryStateSyncFailure,
-    chapterHasProse,
-    autoCreationDirectorModel,
-  })
-
-  const {
-    repairWritingQueuePlan,
-    repairWritingQueuePlanBatch,
-  } = createWritingQueueHandlers({
-    runRollingPlan,
-    selectChapterForWriting,
-  })
-  runRollingPlanRef.current = runRollingPlan
-  runSimilarityForChapterRef.current = runSimilarityForChapter
-
-
-  const {
-    downloadBackupPackage,
-    importBackupPackage,
-    runCreativeCommand,
-    openCreativeAssistant,
-    copyCreativeAssistantCard,
-    runCreativeAssistant,
-  } = createCreativeHandlers({
-    activeChapter,
-    apiClient,
-    backupImportText,
-    creativeAssistantSelectedText,
-    creativeCommandText,
+    latestCockpitQualityReport,
     loadProductionTasks,
     loadProjectModules,
     navigate,
+    openStoryAssetsWorkspace,
+    openStoryStateEditor,
+    outlines,
+    productionMode,
     projectId,
+    proseBatchCancelRef,
+    reviews,
+    rollbackChapterVersion,
+    runRecords,
+    selectChapterForWriting,
+    selectTargetChapterForWriting,
+    selectedChapterIds,
     selectedModelId,
+    selectedProject,
+    setActiveChapterId,
+    setAgentExecution,
+    setAutoDirectorActionLoadingKey,
     setBackupImportOpen,
     setBackupImportText,
+    setChapterGroupExecutingId,
+    setChapterVersionDetail,
+    setChapters,
+    setCommercialReadiness,
     setCommercialToolLoading,
+    setContinuityAudit,
+    setContinuityAuditLoading,
     setCreativeAssistantError,
     setCreativeAssistantLoading,
     setCreativeAssistantOpen,
     setCreativeAssistantResult,
     setCreativeAssistantSelectedText,
     setCreativeCommandPlan,
-  })
-
-  const {
-    openRunQueue,
-    openProductionDesk,
-    startRunQueueWorker,
-    stopRunQueueWorker,
-    recoverRunQueue,
-    executeChapterGroupRun,
-    approveChapterGroupStage,
-    retryChapterGroupStage,
-    skipChapterGroupStage,
-    executeReleaseRepairRun,
-    startChapterPipeline,
-    handleRestructure,
-  } = createRunQueueHandlers({
-    activeChapter,
-    apiClient,
-    chapterWordTargetPayload,
-    flushPendingSave,
-    loadProductionTasks,
-    loadProjectModules,
-    navigate,
-    productionMode,
-    projectId,
-    runCommercialTool,
-    selectedChapterIds,
-    selectedModelId,
-    setChapterGroupExecutingId,
-    setChapters,
-    setPipelineLoading,
-    setReleaseRepairExecutingId,
-    setSelectMode,
-    setSelectedChapterIds,
-    setTaskCenterOpen,
-  })
-
-  const {
-    deleteProject,
-    deleteChapter,
-    deleteOutline,
-  } = createProjectAssetDeleteHandlers({
-    apiClient,
-    flushPendingSave,
-    loadProjectModules,
-    navigate,
-    selectedProject,
-  })
-
-  const {
-    generationPreflightChecks,
-    repairGenerationPreflightGaps,
-    runGenerationPreflightRepairSpec,
-    buildGenerationPreflightRepairActions,
-    renderGenerationPreflightRepairActions,
-    renderPreflightModalContent,
-    showGenerationBlockedModal,
-    showDiagnosticsModal,
-    showCommercialReadinessModal,
-  } = createPreflightHandlers({
-    activeChapter,
-    apiClient,
-    applyStyleSampleActionForChapter,
-    buildPreDraftBriefForActiveChapter,
-    flushPendingSave,
-    generateSceneCardsForChapter,
-    loadProjectModules,
-    openEditor,
-    openStoryAssetsWorkspace,
-    openStoryStateEditor,
-    projectId,
-    selectChapterForWriting,
-    selectedModelId,
-    setOutlineTreeOpen,
-    sortedChapters,
-    syncStoryStateForChapter,
-  })
-
-
-  const {
-    openGenerationDiagnostics,
-    openChapterQualityCardForChapter,
-    openChapterQualityCard,
-  } = createDiagnosticsHandlers({
-    activeChapter,
-    apiClient,
-    flushPendingSave,
-    projectId,
+    setDashboardLoading,
     setDiagnosticsLoading,
-    showDiagnosticsModal,
-  })
-
-  const {
-    stepGenerateProse,
-    generateCurrentChapterProse,
-    repairContextAndGenerateCurrentChapter,
-  } = createChapterProseHandlers({
-    activeChapter,
-    apiClient,
-    autoCreationDirectorModel,
-    chapterWordTargetPayload,
-    chapters,
-    confirmReferenceReady,
-    flushPendingSave,
-    loadProjectModules,
-    projectId,
-    selectedModelId,
-    setChapters,
+    setEditorItem,
+    setEditorKind,
+    setEditorReportLoading,
+    setExecutingAgents,
+    setFuture100ApplyLoading,
+    setFuture100Draft,
+    setFuture100FocusOutlineIds,
+    setFuture100SelectedNos,
     setGeneratingProse,
+    setGeneratingSceneCards,
     setGenerationPipeline,
+    setIncubatingOriginal,
+    setOutlinePanelOpen,
+    setOutlineTreeOpen,
+    setPipelineLoading,
+    setPlanProgress,
+    setPlanning,
+    setProseBatchStatus,
+    setProseProgress,
+    setProseQualityLoading,
+    setReleaseRepairExecutingId,
+    setReviewAnnotationsOpen,
     setRightPanelOpen,
     setRightPanelTab,
+    setSelectMode,
+    setSelectedChapterIds,
+    setSelectedProject,
+    setStepOutlineLoading,
+    setStepProseLoading,
     setStreamingChapterId,
     setStreamingPercent,
     setStreamingProgress,
     setStreamingText,
-    showGenerationBlockedModal,
-    proseBatchCancelRef,
-    setProseBatchStatus,
-    setProseProgress,
-    setStepProseLoading,
+    setTaskCenterOpen,
     sortedChapters,
+    unattendedTargetChapter,
+    worldbuilding,
+
   })
-  generateCurrentChapterProseRef.current = generateCurrentChapterProse
+  const {
+    acceptChapterVersion,
+    applyEditorRevision,
+    applyFuture100SkeletonDraft,
+    applyStyleSampleActionForActiveChapter,
+    applyStyleSampleActionForChapter,
+    approveChapterGroupStage,
+    buildGenerationPreflightRepairActions,
+    buildPreDraftBriefForActiveChapter,
+    bulkUpdateRepairTaskStatus,
+    closeRepairTaskAfterRevision,
+    confirmPreDraftBriefForActiveChapter,
+    copyCreativeAssistantCard,
+    createBackupSnapshot,
+    createDeliveryRiskRepairQueue,
+    createEditorReport,
+    createEditorReportForChapter,
+    createFirst30RetentionRepairQueue,
+    createLongformProductionRepairQueue,
+    createMechanicalQaRepairQueue,
+    createReaderTrialRepairQueue,
+    createRecoveryEvidenceGovernanceQueue,
+    createSafeBatchRiskRepairQueue,
+    createScriptRoomRepairQueue,
+    createStyleSampleBatchRepairQueue,
+    deleteChapter,
+    deleteOutline,
+    deleteProject,
+    downloadBackupPackage,
+    executeAgents,
+    executeChapterGroupRun,
+    executeRecoveryEvidenceGovernanceQueueTask,
+    executeReleaseRepairRun,
+    executeStyleSampleTaskBookRebuild,
+    executeTypedRepairTask,
+    generateCurrentChapterProse,
+    generateFuture100Skeleton,
+    generateLongformRepairAuditSummary,
+    generateSceneCardsForActiveChapter,
+    generateSceneCardsForChapter,
+    generationPreflightChecks,
+    handleOutlineGenerate,
+    handleRestructure,
+    importBackupPackage,
+    isSingleChapterRecoveryEvidenceRepairTask,
+    locateRepairTaskChapter,
+    mergeChapterVersion,
+    openAgentConfigEditor,
+    openApprovalPolicyEditor,
+    openChapterQualityCard,
+    openChapterQualityCardForChapter,
+    openContinuityAudit,
+    openCreativeAssistant,
+    openEditor,
+    openGenerationDiagnostics,
+    openGenreTemplates,
+    openLongformProductionTrends,
+    openMaterialRepairPlan,
+    openModelDiagnostics,
+    openProductionDashboard,
+    openProductionDesk,
+    openProductionMetrics,
+    openReferenceKnowledgeDiagnosis,
+    openRepairTaskChapterEditor,
+    openRunQueue,
+    recheckRepairTaskConvergence,
+    recheckStyleSampleTaskBookReviewTasks,
+    recoverRunQueue,
+    refreshActiveProseQuality,
+    refreshConsistencyAudit,
+    refreshPropagationDebt,
+    refreshProseQualityForChapter,
+    renderGenerationPreflightRepairActions,
+    renderPreflightModalContent,
+    repairActiveDeslopGate,
+    repairContextAndGenerateCurrentChapter,
+    repairGenerationPreflightGaps,
+    repairWritingQueuePlan,
+    repairWritingQueuePlanBatch,
+    resolveRepairQueueTaskChapterId,
+    retryChapterGroupStage,
+    runCommercialTool,
+    runCreativeAssistant,
+    runCreativeCommand,
+    runFirst30RetentionDiagnosis,
+    runFuture100SkeletonAudit,
+    runGenerationPreflightRepairSpec,
+    runLongformCreationDiagnosis,
+    runLongformPressureTest,
+    runMechanicalQa,
+    runMechanicalQaLlmReview,
+    runOriginalIncubator,
+    runPlan,
+    runPropagationDebtLlmPlan,
+    runQualityBenchmark,
+    runReaderTrialReview,
+    runReferenceMigrationPlan,
+    runRollingPlan,
+    runSimilarityForActiveChapter,
+    runSimilarityForChapter,
+    runTopicValidation,
+    runVersionReviewForActiveChapter,
+    savePreDraftBriefForActiveChapter,
+    showCommercialReadinessModal,
+    showCommercialResult,
+    showDiagnosticsModal,
+    showFuture100SkeletonModal,
+    showGenerationBlockedModal,
+    skipChapterGroupStage,
+    startChapterGroupGeneration,
+    startChapterPipeline,
+    startFuture100ChapterGroupGeneration,
+    startReadyChapterGroupGeneration,
+    startRepairTaskRevision,
+    startRunQueueWorker,
+    startUnattendedWritingGoal,
+    stepGenerateProse,
+    stopRunQueueWorker,
+    submitEditor,
+    syncStoryStateForChapter,
+    updateRepairTaskStatus,
+  } = coreHandlers
 
   /* ── streaming scroll ──────────────────────────────────────────── */
   useEffect(() => {
@@ -1153,29 +938,10 @@ export default function NovelProjectWorkspace() {
     { key: 'productionOps', label: '生产运营', icon: <RocketOutlined /> },
   ]
 
-  const {
-    recordStorylineDiffDecision,
-    createStorylineDecisionTasks,
-  } = createStorylineDecisionHandlers({
-    apiClient,
-    loadProductionTasks,
-    loadProjectModules,
-    projectId,
-    setAutoDirectorActionLoadingKey,
-    setTaskCenterOpen,
-  })
-
-  const {
-    handlePlanningAction,
-    acceptCockpitChapterAndContinue,
-    handleWritingCockpitAction,
-    runAutoCreationRepairAction,
-    runAutoCreationRepairPlan,
-    handleAutoCreationDirectorAction,
-    handleSerialPipelineAction,
-  } = createWorkspaceActionHandlers({
+  const actionHandlers = bindNovelWorkspaceActionHandlers({
     activeChapter,
     activeChapterId,
+    apiClient,
     applyEditorRevision,
     autoCreationDirectorModel,
     chapterHasProse,
@@ -1200,6 +966,7 @@ export default function NovelProjectWorkspace() {
     openStoryAssetsWorkspace,
     openStoryStateEditor,
     openWritingBibleEditor,
+    projectId,
     recentFatigueRollingPlanIntent,
     refreshActiveProseQuality,
     runRecords,
@@ -1219,6 +986,17 @@ export default function NovelProjectWorkspace() {
     syncStoryStateForChapter,
     writingCockpitModel,
   })
+  const {
+    acceptCockpitChapterAndContinue,
+    createStorylineDecisionTasks,
+    handleAutoCreationDirectorAction,
+    handlePlanningAction,
+    handleSerialPipelineAction,
+    handleWritingCockpitAction,
+    recordStorylineDiffDecision,
+    runAutoCreationRepairAction,
+    runAutoCreationRepairPlan,
+  } = actionHandlers
 
   const workspaceViewDeps = {
     acceptChapterVersion,
@@ -1518,7 +1296,6 @@ export default function NovelProjectWorkspace() {
   const renderSerialPipeline = () => (
     <SerialPipelineStrip model={serialPipelineModel} />
   )
-
 
   const activeChapterSceneCards = resolveActiveChapterSceneCards(activeChapter)
 
