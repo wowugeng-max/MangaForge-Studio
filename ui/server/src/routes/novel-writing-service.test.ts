@@ -56250,10 +56250,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualityExpectationThresholdRisks'),
-      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualityExpectationThresholdRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('chapter_target.expectation_threshold_contract')
     expect(reviewPrompt).toContain('expectation_threshold_checks')
@@ -56290,10 +56289,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualityTargetReaderRisks'),
-      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualityTargetReaderRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('chapter_target.target_reader_contract')
     expect(reviewPrompt).toContain('target_reader_checks')
@@ -56349,10 +56347,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualityGenrePositioningRisks'),
-      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualityGenrePositioningRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('chapter_target.genre_positioning_contract')
     expect(reviewPrompt).toContain('genre_positioning_checks')
@@ -56401,10 +56398,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const STRUCTURED_REVIEW_CHECK_FIELDS = ['),
       source.indexOf('export function hasFailingReviewChecks'),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualityPlotSpecialTopicsRisks'),
-      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualityPlotSpecialTopicsRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('chapter_target.plot_special_topics_contract')
     expect(reviewPrompt).toContain('plot_special_topics_checks')
@@ -56619,10 +56615,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualityUpgradeRhythmRisks'),
-      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualityUpgradeRhythmRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('chapter_target.upgrade_rhythm_contract')
     expect(reviewPrompt).toContain('upgrade_rhythm_checks')
@@ -56671,10 +56666,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualityConflictStructureRisks'),
-      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualityConflictStructureRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('chapter_target.conflict_structure_contract')
     expect(reviewPrompt).toContain('conflict_structure_checks')
@@ -56713,10 +56707,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualityCharacterBehaviorRisks'),
-      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualityCharacterBehaviorRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('chapter_target.character_behavior_contract')
     expect(reviewPrompt).toContain('character_behavior_checks')
@@ -56776,10 +56769,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualityAssetLinkageRisks'),
-      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualityAssetLinkageRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('chapter_target.asset_linkage_contract')
     expect(reviewPrompt).toContain('asset_linkage_checks')
@@ -56816,10 +56808,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualityStateTrackingRisks'),
-      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualityStateTrackingRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('chapter_target.state_tracking_contract')
     expect(reviewPrompt).toContain('state_tracking_checks')
@@ -56870,10 +56861,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const preDraftReceiptChecks ='),
       source.indexOf('const normalizedReview = {', source.indexOf('const preDraftReceiptChecks =')),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualityIntentConfirmationRisks'),
-      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualityIntentConfirmationRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('chapter_target.intent_confirmation_contract')
     expect(reviewPrompt).toContain('intent_confirmation_checks')
@@ -56916,10 +56906,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const STRUCTURED_REVIEW_CHECK_FIELDS = ['),
       source.indexOf('export function hasFailingReviewChecks'),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualityWritePreparationRisks'),
-      source.indexOf('function proseQualityStyleBoundaryRisks'),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualityWritePreparationRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('write_preparation_checks')
     expect(reviewPrompt).toContain('写前准备')
@@ -57456,10 +57445,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualityProseMetaRisks'),
-      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualityProseMetaRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('prose_meta_checks')
     expect(reviewPrompt).toContain('第[一二三四五六七八九十百千万两0-9]+章|上一章|上章|前一章|本章|这一章|前文|后文|伏笔|细纲|读者')
@@ -57491,10 +57479,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualityStoryLoopRisks'),
-      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualityStoryLoopRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('chapter_target.story_loop_contract')
     expect(reviewPrompt).toContain('story_loop_checks')
@@ -57531,10 +57518,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualityEmotionalArcRisks'),
-      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualityEmotionalArcRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('chapter_target.emotional_arc_contract')
     expect(reviewPrompt).toContain('emotional_arc_checks')
@@ -57587,10 +57573,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualityChapterHookRisks'),
-      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualityChapterHookRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('chapter_target.chapter_hook_contract')
     expect(reviewPrompt).toContain('chapter_hook_checks')
@@ -57629,10 +57614,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualityParagraphHookRisks'),
-      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualityParagraphHookRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('chapter_target.paragraph_hook_contract')
     expect(reviewPrompt).toContain('paragraph_hook_checks')
@@ -57665,10 +57649,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualitySuspenseRisks'),
-      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualitySuspenseRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('chapter_target.suspense_contract')
     expect(reviewPrompt).toContain('suspense_checks')
@@ -57712,10 +57695,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualityReversalRisks'),
-      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualityReversalRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('chapter_target.reversal_contract')
     expect(reviewPrompt).toContain('reversal_checks')
@@ -57748,10 +57730,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualityOpeningRisks'),
-      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualityOpeningRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('chapter_target.opening_contract')
     expect(reviewPrompt).toContain('opening_checks')
@@ -58100,10 +58081,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualityProseCraftRisks'),
-      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualityProseCraftRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('chapter_target.prose_craft_contract')
     expect(reviewPrompt).toContain('prose_craft_checks')
@@ -58573,10 +58553,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualityQualityAuditRisks'),
-      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualityQualityAuditRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('chapter_target.quality_audit_contract')
     expect(reviewPrompt).toContain('quality_audit_checks')
@@ -58630,10 +58609,9 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskCarryOverBlock = source.slice(
-      source.indexOf('function proseQualityPunctuationToneRisks'),
-      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
-    )
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks.ts'), 'utf8')
+    const riskStart = riskSource.indexOf('export function proseQualityPunctuationToneRisks')
+    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
 
     expect(reviewPrompt).toContain('chapter_target.punctuation_tone_contract')
     expect(reviewPrompt).toContain('punctuation_tone_checks')

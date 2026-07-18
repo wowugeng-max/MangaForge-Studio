@@ -34,6 +34,7 @@ import { proseQualitySerialRiskRepairRisks } from './serial-risk-repair'
 import { STRUCTURED_REVIEW_CHECK_FIELDS } from './structured-review-fields'
 import { isMissingStructuredReviewCheck } from './review-merge'
 import { getContextContract } from '../context/context-contract'
+import { preDraftExecutionReceiptSections } from './pre-draft-receipt-sections'
 
 export function deliveryRiskCountFromPayload(payload: any, keys: string[] = []) {
   for (const key of keys) {
