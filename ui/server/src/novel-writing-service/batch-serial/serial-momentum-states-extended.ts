@@ -1,5 +1,11 @@
 import { asArray } from '../../routes/novel-route-utils'
 import { compactBriefText, uniqueBriefStrings } from '../quality/text-utils'
+import {
+  paragraphHasDownwardPressure,
+  paragraphHasOppressionPressure,
+  textHasDownwardSafetySignal,
+} from '../../novel-writing/emotional-payoff-scans'
+import { anchorMatchScore } from '../../novel-writing/text-matching'
 import { firstCompactText } from '../../novel-writing/story-drive-basics'
 import { normalizeBeatCoolingType } from '../../novel-writing/beat-cooling-basics'
 import {

@@ -361,6 +361,10 @@ import {
   chapterBenchmarkStrategyFromContext,
   normalizeChapterBenchmarkBeat,
 } from './quality-sync-reports-core'
+import {
+  buildStyleSampleStrategy,
+  styleBoundaryExplicitContract,
+} from '../quality/style-sample-strategy'
 
 export function uniqueChapterBenchmarkBeats(items: any[]) {
   const seen = new Set<string>()
