@@ -1,4 +1,5 @@
 export * from './chapter-group'
 export * from './drawer-model'
 export * from './drawer-snapshots'
+export * from './drawer-run-summaries'
 export { TaskCenterDrawer } from './TaskCenterDrawerPanel'

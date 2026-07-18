@@ -67,6 +67,14 @@ function writingServiceSource() {
 }
 
 
+function deliveryRiskCarryOverSource() {
+  const dir = join(import.meta.dir, '../novel-writing-service/post-delivery')
+  return [
+    'delivery-risk-carry-over.ts',
+    'delivery-risk-carry-over-context.ts',
+  ].map(name => readFileSync(join(dir, name), 'utf8')).join('\n')
+}
+
 describe('story unit sync report', () => {
   test('checks current story unit role and warns when the prose rushes later unit payoffs', () => {
     const contextPackage = {
@@ -317,7 +325,7 @@ describe('story unit sync report', () => {
 
   test('prose generation preserves pre-draft execution receipts for write-preparation diagnostics', () => {
     const source = writingServiceSource()
-    const carryOverSource = readFileSync(join(import.meta.dir, '../novel-writing-service/post-delivery/delivery-risk-carry-over.ts'), 'utf8')
+    const carryOverSource = deliveryRiskCarryOverSource()
     const storagePatchSource = readChapterProseStoragePatchSource()
     const normalizeBlock = carryOverSource.slice(
       carryOverSource.indexOf('export function normalizeStoredOhStoryDeliveryReceipts'),

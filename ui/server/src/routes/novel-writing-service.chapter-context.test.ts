@@ -261,6 +261,7 @@ function proseQualityRisksSource() {
   return [
     'prose-quality-risks.ts',
     'prose-quality-risks-extended.ts',
+    'prose-quality-risks-audience.ts',
   ].map(name => readFileSync(join(dir, name), 'utf8')).join('\n')
 }
 const createProsePipelineHarness = (options?: any) => createProsePipelineHarnessWithService(createNovelWritingService, options)

@@ -25,9 +25,9 @@
 | 5 monofile barrel-only | done | `monolith.ts` ~91 lines + public surface re-exports |
 | 6 monotest split | done | `novel-writing-service.test.ts` shim-only |
 | 7 editor/core routes packages | largely done | editor, core, commercial-ops, generation, planning package-split (builders/register); deeper domain split open |
-| 8 auto-creation model package | in progress | risk/trends/recovery leaves modularized; still some >2k leaves |
-| 9 cockpit + repair prompt | in progress | support thin + support-normalize~3.8k; prompt/quality-contract split |
-| 10 shell UI split | in progress | TaskCenter package + shell/workspace-helpers; NWS still large component; drawer-model~5.4k |
+| 8 auto-creation model package | in progress | risk/trends modularized; risk-governance still ~3.5k |
+| 9 cockpit + repair prompt | in progress | support-normalize thin; support-delivery-closure~3.6k; prompt~2.7k |
+| 10 shell UI split | in progress | TaskCenter snapshots+run-summaries; NWS still ~7.8k main component |
 | 11 final hardening | open | |
 
 
