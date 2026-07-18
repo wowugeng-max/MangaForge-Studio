@@ -27,7 +27,7 @@
 | 7 editor/core routes packages | largely done | editor, core, commercial-ops, generation, planning package-split |
 | 8 auto-creation model package | largely done | risk multi-leaf + director monotest 4-way split + leaf binding fixes |
 | 9 cockpit + repair prompt | largely done | cockpit monotest 4-way; repair monotest 4-way; prompt multi-leaf |
-| 10 shell UI split | in progress | TaskCenter multi-leaf; NWS diagnostics/preflight/action routers; main ~6.4k |
+| 10 shell UI split | in progress | TaskCenter multi-leaf; NWS diagnostics/preflight/action routers/commercial views; main ~6.3k |
 | 11 final hardening | open | remaining size caps + broad regression |
 
 Recent extracts (continued): director/repair/cockpit/pre-draft/scene-cards monotest splits; NWS diagnostics views + action routers; audience/trends leaf binding fixes; golden-three opening pattern restore.
@@ -494,3 +494,5 @@ cd ui/server && bun test src/novel/mutation-contract.test.ts src/novel/sqlite-pe
 - 2026-07-18 late: chapter-context monotest 5-way split; unattended source-contract package join.
 
 - 2026-07-18 late+: prose-word-target + readability-meme monotest splits; serial-momentum/quality-sync leaf import repairs.
+
+- 2026-07-18 cont: post-commit-sync-bundle; scene-card-delivery-risk-apply leaf; builders-annotations-delivery-risk; NWS first30/style-sample views; generate-chapter ~2.4k.

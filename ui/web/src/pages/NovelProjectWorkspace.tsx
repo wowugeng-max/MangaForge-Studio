@@ -101,7 +101,12 @@ import {
   parseJsonField,
   parseListField,
 } from './novel-workspace/shell/workspace-editor-fields'
-import { renderCommercialResult, renderReaderTrialReviewContentView } from './novel-workspace/shell/workspace-commercial-result'
+import {
+  renderCommercialResult,
+  renderFirst30RetentionDiagnosisContentView,
+  renderReaderTrialReviewContentView,
+  renderStyleSamplePatchPreviewContentView,
+} from './novel-workspace/shell/workspace-commercial-result'
 import { NovelWorkspaceTopBar } from './novel-workspace/shell/workspace-topbar'
 import { NovelWorkspaceDeferredSurfaces } from './novel-workspace/shell/workspace-deferred-surfaces'
 import { NovelWorkspaceBody } from './novel-workspace/shell/workspace-body'
@@ -2780,17 +2785,7 @@ export default function NovelProjectWorkspace() {
         width: 760,
         okText: '应用补丁',
         cancelText: '暂不应用',
-        content: (
-          <Space direction="vertical" size={8} style={{ width: '100%' }}>
-            <Alert
-              type="info"
-              showIcon
-              message={`将调整样章：${sampleKey}`}
-              description="补丁只会写回风格样章库，不会改正文；请确认 JSON 变更符合作者口吻和禁抄边界。"
-            />
-            <Input.TextArea value={patchText} rows={12} readOnly />
-          </Space>
-        ),
+        content: renderStyleSamplePatchPreviewContentView(sampleKey, patchText),
         onOk: async () => {
           try {
             const applyRes = await apiClient.post(`/novel/projects/${projectId}/writing-bible/style-sample-adjustment`, {
@@ -3490,78 +3485,10 @@ export default function NovelProjectWorkspace() {
       Modal.info({
         title: '前30章留存诊断',
         width: 960,
-        content: (
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <Card size="small">
-              <Space align="center" size={16}>
-                <Progress
-                  type="circle"
-                  size={76}
-                  percent={Number(report.score || 0)}
-                  status={Number(report.score || 0) >= 80 ? 'success' : Number(report.score || 0) < 65 ? 'exception' : 'normal'}
-                />
-                <Space direction="vertical" size={4}>
-                  <Text strong>{report.summary || '已完成前30章留存诊断'}</Text>
-                  <Text type="secondary">状态：{report.status || '-'}；读者承诺：{report.positioning?.promise_ready ? '已具备' : '需补强'}</Text>
-                  {report.positioning?.reader_promise && <Text type="secondary">{report.positioning.reader_promise}</Text>}
-                  <Button size="small" type="primary" onClick={() => { void createFirst30RetentionRepairQueue() }}>
-                    生成留存修复任务
-                  </Button>
-                </Space>
-              </Space>
-            </Card>
-            <Card size="small" title="分段留存">
-              <List
-                size="small"
-                dataSource={report.segments || []}
-                renderItem={(segment: any) => (
-                  <List.Item>
-                    <List.Item.Meta
-                      title={<Space wrap><Text strong>{segment.label || segment.key}</Text><Tag color={segment.score >= 80 ? 'green' : segment.score < 65 ? 'red' : 'gold'} bordered={false}>{segment.score}分</Tag><Tag bordered={false}>覆盖 {segment.coverage}%</Tag><Tag bordered={false}>钩子 {segment.hook_rate}%</Tag><Tag bordered={false}>爽点/悬念 {segment.payoff_average}</Tag></Space>}
-                      description={`章节 ${segment.chapter_count || 0}；目标覆盖 ${segment.goal_rate || 0}%`}
-                    />
-                  </List.Item>
-                )}
-              />
-            </Card>
-            <Card size="small" title="高优先级风险">
-              <List
-                size="small"
-                dataSource={(report.risks || []).slice(0, 12)}
-                locale={{ emptyText: '暂无明显风险' }}
-                renderItem={(risk: any) => (
-                  <List.Item>
-                    <List.Item.Meta
-                      title={<Space><Tag color={risk.severity === 'high' ? 'red' : risk.severity === 'medium' ? 'gold' : 'default'} bordered={false}>{risk.severity}</Tag><Text>{risk.segment}：{risk.issue}</Text></Space>}
-                      description={risk.action}
-                    />
-                  </List.Item>
-                )}
-              />
-            </Card>
-            <Card size="small" title="章节卡片">
-              <List
-                size="small"
-                dataSource={(report.chapter_cards || []).slice(0, 30)}
-                renderItem={(row: any) => (
-                  <List.Item
-                    actions={row.chapter_id ? [<Button key="open" size="small" type="link" onClick={() => { Modal.destroyAll(); void selectChapterForWriting(row.chapter_id) }}>打开</Button>] : undefined}
-                  >
-                    <List.Item.Meta
-                      title={<Space wrap><Text>第{row.chapter_no}章 {row.title || '未命名'}</Text><Tag color={row.score >= 80 ? 'green' : row.score < 65 ? 'red' : 'gold'} bordered={false}>{row.score}分</Tag><Tag bordered={false}>{row.word_count || 0}字</Tag></Space>}
-                      description={(row.flags || []).join('、') || '基础留存信号正常'}
-                    />
-                  </List.Item>
-                )}
-              />
-            </Card>
-            {(report.next_actions || []).length > 0 && (
-              <Card size="small" title="下一步">
-                <List size="small" dataSource={report.next_actions} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
-              </Card>
-            )}
-          </Space>
-        ),
+        content: renderFirst30RetentionDiagnosisContentView(report, {
+          onCreateRepairQueue: () => { void createFirst30RetentionRepairQueue() },
+          onOpenChapter: (chapterId) => { Modal.destroyAll(); void selectChapterForWriting(chapterId) },
+        }),
       })
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '前30章留存诊断失败')

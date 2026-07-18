@@ -141,6 +141,9 @@ import {
   buildArtifactProtocolReceiptSyncReport,
 } from '../post-delivery/artifact-protocol'
 import {
+  buildPostCommitStoryStateSyncUpdate,
+} from '../post-delivery/post-commit-sync-bundle'
+import {
   buildChapterCoreDriftReport,
   buildChapterHandoffSyncReport,
   buildCoreContractSyncReport,
@@ -2280,124 +2283,28 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     : { status: 'warn', phase: 'pending', warning: storyStateWarning }))
   let storyStateUpdateWithSync: any = preparedStoryStateUpdate.payload
   if (storyStateStatus === 'synced') await runPostCommitBestEffort('post_commit_sync', async () => {
-  await runtime?.hooks?.beforePostCommitSync?.({ chapterId: chapter.id, finalText })
-  const storyStateUpdate = preparedStoryStateUpdate.payload
-  const story_state_update: any = storyStateUpdate || {}
-  const proseMetaSync = buildProseMetaSyncReport(project, updated, contextPackage, finalText)
-  const chapterBlueprintSync = buildChapterBlueprintSyncReport(project, updated, contextPackage, finalText)
-  const generationChapters = await listNovelChapters(activeWorkspace, projectId)
-  const chapterTitleUniquenessSync = buildChapterTitleUniquenessSyncReport(generationChapters, updated)
-  const dialogueSync = buildDialogueSyncReport(project, updated, contextPackage, finalText)
-  const characterBehaviorSync = buildCharacterBehaviorSyncReport(project, updated, contextPackage, finalText)
-  const sceneCardReceiptSync = buildSceneCardReceiptSyncReport(project, updated, preStoreReceiptSyncContextPackage, finalText)
-  const deliveryRiskReceiptSync = buildDeliveryRiskReceiptSyncReport(project, updated, preStoreReceiptSyncContextPackage, finalText)
-  const artifactProtocolReceiptSync = buildArtifactProtocolReceiptSyncReport(project, updated, preStoreReceiptSyncContextPackage, finalText)
-  const assetLinkageSync = buildAssetLinkageSyncReport(project, updated, contextPackage, finalText)
-  const stateTrackingSync = buildStateTrackingSyncReport(project, updated, contextPackage, finalText)
-  const chapterHandoffSync = buildChapterHandoffSyncReport(project, updated, contextPackage, finalText)
-  const proseCraftSync = buildProseCraftSyncReport(project, updated, contextPackage, finalText)
-  const punctuationToneSync = buildPunctuationToneSyncReport(project, updated, contextPackage, finalText)
-  const payoffSetupSync = buildPayoffSetupSyncReport(project, updated, contextPackage, finalText)
-  const spectatorReactionSync = buildSpectatorReactionSyncReport(project, updated, contextPackage, finalText)
-  const sourceReadinessSync = buildSourceReadinessSyncReport(project, updated, finalReviewContextPackage, finalText)
-  const intentConfirmationSync = buildIntentConfirmationSyncReport(project, updated, finalReviewContextPackage, finalText)
-  const benchmarkRecallSync = buildBenchmarkRecallSyncReport(project, updated, finalReviewContextPackage, finalText)
-  const styleSampleSync = buildStyleSampleSyncReport(project, updated, finalReviewContextPackage, finalText)
-  const storyLoopSync = buildStoryLoopSyncReport(project, updated, contextPackage, finalText)
-  const informationFlowSync = buildInformationFlowSyncReport(project, updated, contextPackage, finalText)
-  const expectationThresholdSync = buildExpectationThresholdSyncReport(project, updated, contextPackage, finalText)
-  const emotionalArcSync = buildEmotionalArcSyncReport(project, updated, contextPackage, finalText)
-  const chapterHookSync = buildChapterHookSyncReport(project, updated, contextPackage, finalText)
-  const paragraphHookSync = buildParagraphHookSyncReport(project, updated, contextPackage, finalText)
-  const suspenseSync = buildSuspenseSyncReport(project, updated, contextPackage, finalText)
-  const reversalSync = buildReversalSyncReport(project, updated, contextPackage, finalText)
-  const showdownSync = buildShowdownSyncReport(project, updated, contextPackage, finalText)
-  const openingSync = buildOpeningSyncReport(project, updated, contextPackage, finalText)
-  const bridgeUnitSync = buildBridgeUnitSyncReport(project, updated, contextPackage, finalText)
-  const continuityHeatSync = buildContinuityHeatSyncReport(project, updated, contextPackage, finalText)
-  const conflictStructureSync = buildConflictStructureSyncReport(project, updated, contextPackage, finalText)
-  const upgradeRhythmSync = buildUpgradeRhythmSyncReport(project, updated, contextPackage, finalText)
-  const targetReaderSync = buildTargetReaderSyncReport(project, updated, contextPackage, finalText)
-  const genrePositioningSync = buildGenrePositioningSyncReport(project, updated, contextPackage, finalText)
-  const plotSpecialTopicsSync = buildPlotSpecialTopicsSyncReport(project, updated, contextPackage, finalText)
-  const femaleAudienceSync = buildFemaleAudienceSyncReport(project, updated, contextPackage, finalText)
-  const plotDynamicsSync = buildPlotDynamicsSyncReport(project, updated, contextPackage, finalText)
-  const storyPowerSync = buildStoryPowerSyncReport(project, updated, contextPackage, finalText)
-  const characterRelationSync = buildCharacterRelationSyncReport(project, updated, contextPackage, finalText)
-  const readerRetentionSync = buildReaderRetentionSyncReport(project, updated, contextPackage, finalText)
-  const coreContractSync = buildCoreContractSyncReport(project, updated, contextPackage, finalText)
-  const storyDriveSync = buildStoryDriveSyncReport(project, updated, contextPackage, finalText)
-  const characterArcSync = buildCharacterArcSyncReport(project, updated, contextPackage, finalText)
-  const styleBoundarySync = buildStyleBoundarySyncReport(project, updated, contextPackage, finalText)
-  const innovationSync = buildInnovationSyncReport(project, updated, contextPackage, finalText)
-  const runwaySync = buildRunwaySyncReport(project, updated, contextPackage, finalText)
-  const readerExpectationSync = buildReaderExpectationSyncReport(project, updated, contextPackage, finalText)
-  const qualityAuditSync = buildQualityAuditSyncReport(project, updated, contextPackage, finalText)
-  const beatCoolingSync = buildBeatCoolingSyncReport(project, updated, contextPackage, finalText)
-  const readerPayoffSync = buildReaderPayoffSyncReport(project, updated, contextPackage, finalText, story_state_update)
-  storyStateUpdateWithSync = buildPostDeliveryStoryStateUpdate(story_state_update, {
-    proseRevisionReceiptSync,
-    deslopRepairReceiptSync,
-    qualityAuditRepairReceiptSync,
-    nextChapterQualityPlanReceiptSync,
-    statusFilterReceiptSync,
-    writePreparationReceiptSync,
-    revisionContextReceiptSync,
-    revisionCascadeImpactSync,
-    revisionScopeGuardSync,
-    deterministicProseCleanup,
-    proseMetaSync,
-    chapterBlueprintSync,
-    chapterTitleUniquenessSync,
-    dialogueSync,
-    characterBehaviorSync,
-    sceneCardReceiptSync,
-    deliveryRiskReceiptSync,
-    artifactProtocolReceiptSync,
-    assetLinkageSync,
-    stateTrackingSync,
-    chapterHandoffSync,
-    proseCraftSync,
-    punctuationToneSync,
-    payoffSetupSync,
-    spectatorReactionSync,
-    sourceReadinessSync,
-    intentConfirmationSync,
-    benchmarkRecallSync,
-    styleSampleSync,
-    storyLoopSync,
-    informationFlowSync,
-    expectationThresholdSync,
-    emotionalArcSync,
-    chapterHookSync,
-    paragraphHookSync,
-    suspenseSync,
-    reversalSync,
-    showdownSync,
-    openingSync,
-    bridgeUnitSync,
-    continuityHeatSync,
-    conflictStructureSync,
-    upgradeRhythmSync,
-    targetReaderSync,
-    genrePositioningSync,
-    plotSpecialTopicsSync,
-    femaleAudienceSync,
-    plotDynamicsSync,
-    storyPowerSync,
-    characterRelationSync,
-    readerRetentionSync,
-    coreContractSync,
-    storyDriveSync,
-    characterArcSync,
-    styleBoundarySync,
-    innovationSync,
-    runwaySync,
-    readerExpectationSync,
-    qualityAuditSync,
-    beatCoolingSync,
-    readerPayoffSync,
-  })
+    await runtime?.hooks?.beforePostCommitSync?.({ chapterId: chapter.id, finalText })
+    const generationChapters = await listNovelChapters(activeWorkspace, projectId)
+    storyStateUpdateWithSync = buildPostCommitStoryStateSyncUpdate({
+      project,
+      chapter: updated,
+      contextPackage,
+      chapterText: finalText,
+      preStoreReceiptSyncContextPackage,
+      finalReviewContextPackage,
+      generationChapters,
+      storyStateUpdate: preparedStoryStateUpdate.payload,
+      proseRevisionReceiptSync,
+      deslopRepairReceiptSync,
+      qualityAuditRepairReceiptSync,
+      nextChapterQualityPlanReceiptSync,
+      statusFilterReceiptSync,
+      writePreparationReceiptSync,
+      revisionContextReceiptSync,
+      revisionCascadeImpactSync,
+      revisionScopeGuardSync,
+      deterministicProseCleanup,
+    })
   })
   const returnedAdmissionStatus = postCommitWarnings.length > 0 && proseAdmission.status === 'accepted'
     ? 'accepted_with_warnings'
