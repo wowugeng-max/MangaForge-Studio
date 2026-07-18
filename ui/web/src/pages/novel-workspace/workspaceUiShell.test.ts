@@ -155,6 +155,7 @@ function projectWorkspaceSource() {
     sourceCached('shell/workspace-area-view.tsx', localSourceCache),
     sourceCached('shell/workspace-topbar.tsx', localSourceCache),
     sourceCached('shell/workspace-deferred-surfaces.tsx', localSourceCache),
+    sourceCached('shell/workspace-deferred-surfaces-types.ts', localSourceCache),
     sourceCached('shell/workspace-body.tsx', localSourceCache),
     sourceCached('shell/workspace-preflight-views.tsx', localSourceCache),
     sourceCached('shell/workspace-action-routers.ts', localSourceCache),
