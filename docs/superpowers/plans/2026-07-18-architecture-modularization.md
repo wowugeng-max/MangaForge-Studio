@@ -492,3 +492,5 @@ cd ui/server && bun test src/novel/mutation-contract.test.ts src/novel/sqlite-pe
 - monofile size trend: 48512 → ~42050 lines
 
 - 2026-07-18 late: chapter-context monotest 5-way split; unattended source-contract package join.
+
+- 2026-07-18 late+: prose-word-target + readability-meme monotest splits; serial-momentum/quality-sync leaf import repairs.
