@@ -99,13 +99,9 @@ import type {
 import {
   batchChapterDelivered,
   batchReleaseEvidenceFromPreflight,
-  buildBatchHandoff,
   buildResolvedBatchRiskIssueKeys,
-  chapterHandoffDetail,
   characterArcNeedsAction,
   compactChapterNoEvidence,
-  compactList,
-  isSafeBatchGenerationSource,
   parsePayload,
   recordTime,
   retentionNeedsAction,
@@ -113,6 +109,12 @@ import {
   storylineNeedsAction,
   volumeBeatNeedsAction,
 } from './helpers-main'
+import {
+  buildBatchHandoff,
+  chapterHandoffDetail,
+  compactList,
+  isSafeBatchGenerationSource,
+} from './helpers-safe-batch-recovery'
 import {
   chapterRangeLabel,
   serialReleaseInventoryIssue,

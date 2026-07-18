@@ -97,15 +97,17 @@ import type {
 } from './types'
 import {
   batchPipelineStatus,
-  chapterHandoffDetail,
   characterArcNeedsAction,
-  contractPipelineStatus,
-  deliveryRiskStagedActions,
   hasRunningTasks,
   retentionNeedsAction,
-  rollingLayerStatusToPipeline,
   storylineNeedsAction,
 } from './helpers-main'
+import {
+  chapterHandoffDetail,
+  contractPipelineStatus,
+  deliveryRiskStagedActions,
+  rollingLayerStatusToPipeline,
+} from './helpers-safe-batch-recovery'
 import {
   PLANNING_ACTION_LABELS,
   arrayValue,

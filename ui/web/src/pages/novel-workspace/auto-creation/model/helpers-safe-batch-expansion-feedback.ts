@@ -96,14 +96,16 @@ import type {
   BuildAutoCreationDirectorModelInput
 } from './types'
 import {
+  coreRiskCount,
+  parsePayload,
+  recordTime,
+} from './helpers-main'
+import {
   buildDefaultFiveChapterLaneTemplateStabilityProfile,
   buildSafeBatchExpansionStructureDecisionTrend,
   buildSafeBatchExpansionStructureRepairEffectiveness,
   buildSafeBatchExpansionStructureValidationTrend,
-  coreRiskCount,
   isSafeBatchGenerationSource,
-  parsePayload,
-  recordTime,
   safeBatchDefaultFiveChapterRecoveryVerdictRelapse,
   safeBatchDefaultFiveChapterRegression,
   safeBatchExpansionEntryEvaluation,
@@ -116,7 +118,7 @@ import {
   safeBatchExpansionStructureVerificationFromPreflight,
   safeBatchRecoveryRestoreRelapseSegment,
   safeBatchRecoveryRestoreStabilityEvidence,
-} from './helpers-main'
+} from './helpers-safe-batch-recovery'
 import {
   arrayValue,
   text,

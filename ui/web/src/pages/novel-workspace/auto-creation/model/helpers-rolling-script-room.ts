@@ -96,9 +96,11 @@ import type {
   BuildAutoCreationDirectorModelInput
 } from './types'
 import {
-  currentChapterDirectorAction,
   targetChapter,
 } from './helpers-main'
+import {
+  currentChapterDirectorAction,
+} from './helpers-safe-batch-recovery'
 import {
   buildNextBatchBrief,
   chapterRangeLabel,

@@ -94,6 +94,7 @@ function directorModelSource() {
     sourceCached('auto-creation/model/helpers-safe-batch-expansion-feedback.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-safe-batch-expansion-policy.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-next-batch-brief.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-safe-batch-recovery.ts', localSourceCache),
   ].join('\n')
   return directorModelSourceCache
 }

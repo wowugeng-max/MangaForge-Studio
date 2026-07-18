@@ -97,8 +97,10 @@ import type {
 } from './types'
 import {
   buildSafeBatchRecoveryRoadmap,
-  safeBatchExpansionFeedbackSnapshot,
 } from './helpers-main'
+import {
+  safeBatchExpansionFeedbackSnapshot,
+} from './helpers-safe-batch-recovery'
 import {
   text,
 } from './helpers-basics'

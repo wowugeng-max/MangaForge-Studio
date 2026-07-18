@@ -96,17 +96,19 @@ import type {
   BuildAutoCreationDirectorModelInput
 } from './types'
 import {
-  latestLongformCreationReport,
   latestReaderTrialReview,
+  readerTrialReport,
+} from './helpers-main'
+import {
+  latestLongformCreationReport,
   latestReviewReport,
   latestWrittenChapterNo,
   manualTestGate,
-  readerTrialReport,
   reportIsBlocked,
   reportNeedsRepair,
   reportScore,
   stressGateStatus,
-} from './helpers-main'
+} from './helpers-safe-batch-recovery'
 import {
   buildLongformMemoryAnchor,
 } from './helpers-next-batch-brief'
