@@ -104,7 +104,7 @@ export function directorModelSource() {
     sourceCached('auto-creation/model/helpers-rolling-script-room.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-safe-batch-expansion-feedback.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-safe-batch-expansion-policy.ts', localSourceCache),
-    sourceCached('auto-creation/model/helpers-next-batch-brief.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-next-batch-brief.ts', localSourceCache), sourceCached('auto-creation/model/helpers-next-batch-brief-basics.ts', localSourceCache), sourceCached('auto-creation/model/helpers-next-batch-brief-lane.ts', localSourceCache), sourceCached('auto-creation/model/helpers-next-batch-brief-core.ts', localSourceCache), sourceCached('auto-creation/model/helpers-next-batch-brief-style.ts', localSourceCache), sourceCached('auto-creation/model/helpers-next-batch-brief-recovery.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-safe-batch-recovery.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-safe-batch-expansion-structure.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-safe-batch-expansion-trends.ts', localSourceCache),
