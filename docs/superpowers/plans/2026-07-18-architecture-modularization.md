@@ -22,7 +22,7 @@
 - Split helpers-batch-risk-radar-compute into compute (~553) + guards (~579); shell source joins both.
 - Extracted auto-repair-preflight materials leaf (~520); methods ~683.
 - GenerateNode pure model leaf (~344) + component (~719).
-- Still deferred ≥1k: provider-runtime (~1778 DI), NWS view (~1593 composition), knowledge panels (~1132). monotest outliers ~1k remain.
+- Still deferred ≥1k: provider-runtime (~1778 DI), NWS view (~1593 composition), knowledge panels (~1132). shared target-actions fixtures leaf; monotest a/b under soft 1k. Task11 sample green (server 85 + web 63 focused).
 - Task 11 full UI write-path click smoke still open.
 
 ### Residual inventory update (2026-07-19 goal-continue XXIX)
