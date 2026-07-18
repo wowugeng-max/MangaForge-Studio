@@ -25,9 +25,9 @@
 | 5 monofile barrel-only | done | `monolith.ts` ~91 lines + public surface re-exports |
 | 6 monotest split | done | `novel-writing-service.test.ts` shim-only |
 | 7 editor/core routes packages | largely done | editor, core, commercial-ops, generation, planning package-split |
-| 8 auto-creation model package | in progress | risk multi-leaf; director helpers modularized |
+| 8 auto-creation model package | in progress | risk multi-leaf + recovery-governance leaf |
 | 9 cockpit + repair prompt | in progress | prompt multi-leaf; support multi-leaf; specialty leaf |
-| 10 shell UI split | in progress | TaskCenter previews leaf; planning signals leaf; NWS topbar; main ~7.2k |
+| 10 shell UI split | in progress | TaskCenter multi-leaf; planning signals+radar; NWS topbar/deferred; main ~6.6k |
 | 11 final hardening | open | |
 
 Recent extracts: `drawer-previews`, `planning-workspace-builder-signals`, `delivery-risk-carry-over-prose-quality-extended`, `workspace-topbar`.

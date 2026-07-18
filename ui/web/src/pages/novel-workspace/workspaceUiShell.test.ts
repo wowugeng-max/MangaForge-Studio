@@ -87,6 +87,7 @@ function directorModelSource() {
     sourceCached('auto-creation/model/helpers-main.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-risk-and-governance.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-risk-delivery-and-recovery.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-risk-recovery-governance.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-risk-strengthened-roadmap.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-pipeline.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-command.ts', localSourceCache),
@@ -119,6 +120,7 @@ function planningWorkspaceSource() {
     sourceCached('planning/model/planning-workspace-builder-desks.ts', localSourceCache),
     sourceCached('planning/model/planning-workspace-builder-boards.ts', localSourceCache),
     sourceCached('planning/model/planning-workspace-builder-signals.ts', localSourceCache),
+    sourceCached('planning/model/planning-workspace-builder-radar.ts', localSourceCache),
   ].join('\n')
   return planningWorkspaceSourceCache
 }
