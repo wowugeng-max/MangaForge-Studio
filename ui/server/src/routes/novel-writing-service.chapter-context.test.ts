@@ -1686,7 +1686,7 @@ ${selfReviewSource}`
   })
 
   test('unattended character repair uses tier-aware candidate limits instead of first six', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
 
     expect(source).toContain('selectTierAwareCharacterRepairCandidates')
     expect(source).not.toContain('characterCandidates.slice(0, 6)')
@@ -7249,7 +7249,7 @@ ${selfReviewSource}`
   })
 
   test('returns write-preparation receipt sync for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const draftReturnBlock = readPostDeliveryStoryStateUpdateSource()
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 

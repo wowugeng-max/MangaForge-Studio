@@ -4,17 +4,19 @@ import { join } from 'node:path'
 
 describe('prose candidate continuity wiring', () => {
   test('guards editor, meme polish, and quality revision replacements with the shared continuity-safe selector', () => {
-    const routeSource = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const polishSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-polish-methods.ts'), 'utf8')
+    const generateSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const qualityLoopSource = readFileSync(join(import.meta.dir, '../novel-writing/prose-quality-loop.ts'), 'utf8')
     const sharedSelector = 'selectContinuitySafeProseCandidate'
+    const routeSource = [polishSource, generateSource].join('\n')
 
-    expect(routeSource).toContain(sharedSelector)
-    expect(routeSource.match(new RegExp(`${sharedSelector}\\(`, 'g'))?.length || 0).toBeGreaterThanOrEqual(2)
+    expect(polishSource).toContain(sharedSelector)
+    expect(polishSource.match(new RegExp(`${sharedSelector}\\(`, 'g'))?.length || 0).toBeGreaterThanOrEqual(2)
     expect(qualityLoopSource).toContain(sharedSelector)
-    expect(routeSource).toContain("candidate_stage: 'editor'")
-    expect(routeSource).toContain("candidate_stage: 'meme_polish'")
+    expect(polishSource).toContain("candidate_stage: 'editor'")
+    expect(polishSource).toContain("candidate_stage: 'meme_polish'")
     expect(qualityLoopSource).toContain("candidate_stage: 'quality_revision'")
-    expect(routeSource.match(/selectContinuitySafeProseCandidate\(chapterText, (?:rewrittenText|polishedText), contextPackage,/g)?.length || 0).toBe(2)
+    expect(polishSource.match(/selectContinuitySafeProseCandidate\(chapterText, (?:rewrittenText|polishedText), contextPackage,/g)?.length || 0).toBe(2)
     expect(routeSource).toContain('continuityContext: contextPackage')
     expect(qualityLoopSource).toContain('input.continuityContext || input.coreContract')
   })

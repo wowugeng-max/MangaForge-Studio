@@ -7289,13 +7289,16 @@ describe('readability and restrained meme workflow', () => {
   })
 
   test('source creates readability review and stores meme bank in reference config', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const polishSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-polish-methods.ts'), 'utf8')
+    const createSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/create-novel-writing-service.ts'), 'utf8')
 
     expect(source).toContain('buildReadabilityReviewRecord')
-    expect(source).toContain('runReadabilityReview')
+    expect(polishSource).toContain('runReadabilityReview')
     expect(polishSource).toContain('ending_hook_score: Number(payload?.ending_hook_score')
-    expect(source).toContain('runMemePolish')
+    expect(polishSource).toContain('runMemePolish')
+    expect(createSource).toContain('runReadabilityReview')
+    expect(createSource).toContain('runMemePolish')
     const writingBibleSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/writing-bible.ts'), 'utf8')
     expect(writingBibleSource).toContain('reference_config?.meme_bank')
   })

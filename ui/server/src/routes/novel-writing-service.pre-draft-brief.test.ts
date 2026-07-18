@@ -23506,10 +23506,10 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('builds storyline context in the chapter context package', () => {
-    const monolithSource = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const contextPackageSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/chapter-context-package.ts'), 'utf8')
     const outlineSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/outline-blueprint-contracts.ts'), 'utf8')
     const handoffSource = readFileSync(join(import.meta.dir, '../novel-writing-service/post-delivery/core-handoff-sync-reports.ts'), 'utf8')
-    const storylineSource = [monolithSource, outlineSource, handoffSource].join('\n')
+    const storylineSource = [contextPackageSource, outlineSource, handoffSource].join('\n')
 
     expect(storylineSource).toContain('storyline_context')
     expect(storylineSource).toContain('STORYLINE_TYPES')
