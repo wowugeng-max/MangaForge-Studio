@@ -1121,7 +1121,7 @@ describe('commercial writing workspace UI shell b', () => {
     expect(directorModel).toContain('governanceRecheckMemory: args.governanceRecheckMemory')
     expect(projectWorkspace).toContain('runLongformCreationDiagnosis')
     expect(projectWorkspace).toContain('/longform-creation-diagnosis')
-    expect(directorWorkspace).toContain("import './AutoCreationDirectorWorkspace.css'")
+    expect(directorWorkspace).toMatch(/import ['"].*AutoCreationDirectorWorkspace\.css['"]/)
     expect(directorWorkspace).toContain('自动创作总控台')
     expect(directorWorkspace).toContain('唯一下一步')
     expect(directorWorkspace).toContain('当前判断')

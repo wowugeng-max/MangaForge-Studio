@@ -214,6 +214,7 @@ export function autoCreationDirectorWorkspaceSource() {
   if (autoCreationDirectorWorkspaceSourceCache != null) return autoCreationDirectorWorkspaceSourceCache
   autoCreationDirectorWorkspaceSourceCache = [
     sourceCached('AutoCreationDirectorWorkspace.tsx', localSourceCache),
+    sourceCached('auto-creation/director-workspace-view.tsx', localSourceCache),
     sourceCached('auto-creation/director-workspace-chrome.tsx', localSourceCache),
   ].join('\n')
   return autoCreationDirectorWorkspaceSourceCache
