@@ -101,6 +101,12 @@ import {
   recordTime,
 } from './helpers-main'
 import {
+  safeBatchExpansionPolicyFromPreflight,
+  safeBatchExpansionRollbackPolicy,
+  safeBatchExpansionStructureDecisionFromContext,
+  safeBatchExpansionStructureVerificationFromPreflight,
+} from './helpers-safe-batch-recovery'
+import {
   buildDefaultFiveChapterLaneTemplateStabilityProfile,
   buildSafeBatchExpansionStructureDecisionTrend,
   buildSafeBatchExpansionStructureRepairEffectiveness,
@@ -110,15 +116,11 @@ import {
   safeBatchDefaultFiveChapterRegression,
   safeBatchExpansionEntryEvaluation,
   safeBatchExpansionItemsFromOutput,
-  safeBatchExpansionPolicyFromPreflight,
-  safeBatchExpansionRollbackPolicy,
   safeBatchExpansionStructureDecisionEntryEvaluation,
-  safeBatchExpansionStructureDecisionFromContext,
   safeBatchExpansionStructureValidationEntryEvaluation,
-  safeBatchExpansionStructureVerificationFromPreflight,
   safeBatchRecoveryRestoreRelapseSegment,
   safeBatchRecoveryRestoreStabilityEvidence,
-} from './helpers-safe-batch-recovery'
+} from './helpers-safe-batch-expansion-structure'
 import {
   arrayValue,
   text,

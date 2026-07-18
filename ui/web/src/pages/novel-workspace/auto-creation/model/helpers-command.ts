@@ -114,7 +114,7 @@ import {
   chapterHandoffDetail,
   compactList,
   isSafeBatchGenerationSource,
-} from './helpers-safe-batch-recovery'
+} from './helpers-safe-batch-expansion-structure'
 import {
   chapterRangeLabel,
   serialReleaseInventoryIssue,

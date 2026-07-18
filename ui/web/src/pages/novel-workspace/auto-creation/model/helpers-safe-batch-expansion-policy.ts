@@ -100,7 +100,7 @@ import {
 } from './helpers-main'
 import {
   safeBatchExpansionFeedbackSnapshot,
-} from './helpers-safe-batch-recovery'
+} from './helpers-safe-batch-expansion-structure'
 import {
   text,
 } from './helpers-basics'

@@ -100,7 +100,7 @@ import {
 } from './helpers-main'
 import {
   currentChapterDirectorAction,
-} from './helpers-safe-batch-recovery'
+} from './helpers-safe-batch-expansion-structure'
 import {
   buildNextBatchBrief,
   chapterRangeLabel,

@@ -144,23 +144,25 @@ import {
   volumeSegmentRiskCount,
 } from './helpers-main'
 import {
+  buildDefaultFiveChapterLaneTemplateRedesignQueue,
+  buildDefaultFiveChapterLaneTemplateRepair,
+  buildSafeBatchExpansionStructureReview,
+  buildSafeBatchExpansionStructureValidationResult,
+  safeBatchExpansionRollbackPolicy,
+  safeBatchExpansionSegmentReviewSnapshot,
+} from './helpers-safe-batch-recovery'
+import {
   batchBriefAppliesToItem,
   batchBriefVisible,
   buildBatchChecklistExecution,
   buildBatchPlanContext,
-  buildDefaultFiveChapterLaneTemplateRedesignQueue,
-  buildDefaultFiveChapterLaneTemplateRepair,
   buildRecoveryEvidenceRegovernanceQueue,
   buildSafeBatchExpansionSegmentReview,
   buildSafeBatchExpansionStructureDecisionExecutionReview,
-  buildSafeBatchExpansionStructureReview,
-  buildSafeBatchExpansionStructureValidationResult,
   first30RetentionRisk,
   normalizePostBatchQualityCheck,
-  safeBatchExpansionRollbackPolicy,
   safeBatchExpansionSegmentResolvedForItems,
-  safeBatchExpansionSegmentReviewSnapshot,
-} from './helpers-safe-batch-recovery'
+} from './helpers-safe-batch-expansion-structure'
 import {
   arrayValue,
   firstText,

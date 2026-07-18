@@ -108,7 +108,7 @@ import {
   reportNeedsRepair,
   reportScore,
   stressGateStatus,
-} from './helpers-safe-batch-recovery'
+} from './helpers-safe-batch-expansion-structure'
 import {
   buildLongformMemoryAnchor,
 } from './helpers-next-batch-brief'

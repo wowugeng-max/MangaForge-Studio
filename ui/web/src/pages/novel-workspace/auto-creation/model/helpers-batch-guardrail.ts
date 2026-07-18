@@ -112,23 +112,25 @@ import {
   volumeBeatNeedsAction,
 } from './helpers-main'
 import {
+  buildSafeBatchRecoveryRestoreConfirmation,
+  safeBatchExpansionPolicySnapshot,
+  safeBatchRecoveryRoadmapRecommendedAction,
+} from './helpers-safe-batch-recovery'
+import {
   buildBatchReleaseWindow,
   buildProductionRelapseReviewCta,
   buildRecoveryEvidenceDeepRepairQueue,
   buildRecoveryEvidenceSourceRiskProfile,
   buildRecoveryEvidenceTrend,
-  buildSafeBatchRecoveryRestoreConfirmation,
   buildSafeBatchRecoveryRestoreStabilityLane,
   buildSerialReleaseInventoryGuardrail,
   chapterHandoffDetail,
   normalizeSafeBatchChapterHandoffContract,
   normalizeSafeBatchDeliveryRiskCarryOver,
   productionRelapseCtaExecutionPayload,
-  safeBatchExpansionPolicySnapshot,
   safeBatchRecoveryRestoreObservationConfirmation,
-  safeBatchRecoveryRoadmapRecommendedAction,
   writingQueueRelease,
-} from './helpers-safe-batch-recovery'
+} from './helpers-safe-batch-expansion-structure'
 import {
   buildLongformMemoryAnchor,
   buildNextBatchBrief,

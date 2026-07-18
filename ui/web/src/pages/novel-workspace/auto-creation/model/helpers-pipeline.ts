@@ -107,7 +107,7 @@ import {
   contractPipelineStatus,
   deliveryRiskStagedActions,
   rollingLayerStatusToPipeline,
-} from './helpers-safe-batch-recovery'
+} from './helpers-safe-batch-expansion-structure'
 import {
   PLANNING_ACTION_LABELS,
   arrayValue,
