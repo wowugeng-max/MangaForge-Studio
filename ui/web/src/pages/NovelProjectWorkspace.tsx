@@ -81,12 +81,6 @@ import {
   safeBatchRecoveryFocusFromPayload,
 } from './novel-workspace/shell/workspace-helpers'
 import {
-  formatJsonField,
-  formatListField,
-  parseJsonField,
-  parseListField,
-} from './novel-workspace/shell/workspace-editor-fields'
-import {
   renderChapterQualityCardContentView,
   renderLongformRepairAuditContentView,
   renderGenerationResultDiffContentView,
@@ -102,6 +96,8 @@ import { createChapterProseHandlers } from './novel-workspace/shell/workspace-ch
 import { createWritingBibleHandlers } from './novel-workspace/shell/workspace-writing-bible-handlers'
 import { createPlanningHandlers } from './novel-workspace/shell/workspace-planning-handlers'
 import { createProductionHandlers } from './novel-workspace/shell/workspace-production-handlers'
+import { createEditorHandlers } from './novel-workspace/shell/workspace-editor-handlers'
+import { createRunQueueHandlers } from './novel-workspace/shell/workspace-run-queue-handlers'
 import {
   AgentAuditDrawer,
   AgentExecutionModal,
@@ -1193,6 +1189,22 @@ export default function NovelProjectWorkspace() {
   }
 
   const {
+    openEditor,
+    submitEditor,
+  } = createEditorHandlers({
+    apiClient,
+    editorForm,
+    editorItem,
+    editorKind,
+    flushPendingSave,
+    loadProjectModules,
+    projectId,
+    setEditorItem,
+    setEditorKind,
+    worldbuilding,
+  })
+
+  const {
     resolveRepairQueueTaskChapterId,
     executeRecoveryEvidenceGovernanceQueueTask,
     executeTypedRepairTask,
@@ -1450,173 +1462,40 @@ export default function NovelProjectWorkspace() {
     }
   }
 
-  const openRunQueue = async () => {
-    await runCommercialTool('queue', '后台任务队列', async () => {
-      const res = await apiClient.get(`/novel/projects/${projectId}/run-queue`)
-      return res.data
-    })
-  }
-
-  const openProductionDesk = async () => {
-    navigate(`/novel/workspace/${projectId}/production`)
-  }
-
-  const startRunQueueWorker = async () => {
-    if (!selectedModelId) return message.warning('请先选择模型')
-    await runCommercialTool('queueWorker', '后台任务队列', async () => {
-      await apiClient.post(`/novel/projects/${projectId}/run-queue/start-worker`, {
-        model_id: selectedModelId,
-        max_chapters_per_run: 1,
-      })
-      const res = await apiClient.get(`/novel/projects/${projectId}/run-queue`)
-      setTaskCenterOpen(true)
-      return res.data
-    })
-  }
-
-  const stopRunQueueWorker = async () => {
-    await runCommercialTool('queueStop', '后台任务队列', async () => {
-      await apiClient.post(`/novel/projects/${projectId}/run-queue/stop-worker`)
-      const res = await apiClient.get(`/novel/projects/${projectId}/run-queue`)
-      return res.data
-    })
-  }
-
-  const recoverRunQueue = async () => {
-    await runCommercialTool('queueRecover', '恢复后台任务队列', async () => {
-      const res = await apiClient.post(`/novel/projects/${projectId}/run-queue/recover`)
-      await loadProductionTasks()
-      setTaskCenterOpen(true)
-      return res.data
-    })
-  }
-
-  const executeChapterGroupRun = async (run: any) => {
-    if (!selectedModelId) return message.warning('请先选择模型')
-    setChapterGroupExecutingId(run.id)
-    try {
-      await apiClient.post(`/novel/projects/${projectId}/chapter-groups/${run.id}/execute`, {
-        model_id: selectedModelId,
-        max_chapters: 50,
-        production_mode: productionMode,
-        ...chapterWordTargetPayload(),
-      })
-      await loadProjectModules()
-      await loadProductionTasks()
-      message.success('章节群执行完成或已暂停')
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '章节群执行失败')
-    } finally {
-      setChapterGroupExecutingId(null)
-    }
-  }
-
-  const approveChapterGroupStage = async (run: any, chapter: any) => {
-    try {
-      await apiClient.post(`/novel/projects/${projectId}/chapter-groups/${run.id}/approve`, {
-        chapter_id: chapter.id,
-        stage: chapter.approval_stage || run?.output_ref?.last_error?.approval_stage || 'scene_cards',
-      })
-      await loadProjectModules()
-      await loadProductionTasks()
-      message.success('已确认，任务可继续执行')
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '确认失败')
-    }
-  }
-
-  const retryChapterGroupStage = async (run: any, chapter: any) => {
-    try {
-      await apiClient.post(`/novel/projects/${projectId}/chapter-groups/${run.id}/retry-now`, { chapter_id: chapter.id })
-      await loadProjectModules()
-      await loadProductionTasks()
-      message.success('已加入立即重试')
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '重试失败')
-    }
-  }
-
-  const skipChapterGroupStage = async (run: any, chapter: any) => {
-    try {
-      await apiClient.post(`/novel/projects/${projectId}/chapter-groups/${run.id}/skip-chapter`, {
-        chapter_id: chapter.id,
-        reason: '用户在任务中心跳过',
-      })
-      await loadProjectModules()
-      await loadProductionTasks()
-      message.success(`已跳过第${chapter.chapter_no}章，可继续执行后续章节`)
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '跳过失败')
-    }
-  }
-
-  const executeReleaseRepairRun = async (run: any) => {
-    setReleaseRepairExecutingId(run.id)
-    try {
-      const res = await apiClient.post(`/novel/projects/${projectId}/release-repair-runs/${run.id}/execute`, {
-        max_items: 100,
-      })
-      await loadProjectModules()
-      await loadProductionTasks()
-      const audit = res.data?.release_audit
-      message.success(audit?.can_release ? '发布批量任务已完成，发布审核已通过' : '发布批量任务已完成，请刷新交付审核查看剩余问题')
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '发布批量任务执行失败')
-    } finally {
-      setReleaseRepairExecutingId(null)
-    }
-  }
-
-  const startChapterPipeline = async () => {
-    if (!activeChapter) return message.warning('请先选择章节')
-    if (!selectedModelId) return message.warning('请先选择写作模型')
-    if (!await flushPendingSave()) return
-    setPipelineLoading(true)
-    try {
-      const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/generation-pipeline/start`, {
-        project_id: projectId,
-        model_id: selectedModelId,
-        ...chapterWordTargetPayload(),
-        generate_scene_cards: true,
-      })
-      if (res.data?.chapter) {
-        setChapters(prev => prev.map(c => c.id === res.data.chapter.id ? res.data.chapter : c))
-      }
-      await loadProjectModules()
-      setTaskCenterOpen(true)
-      message.success('流水线已创建，已停在场景卡确认阶段')
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '流水线启动失败')
-    } finally {
-      setPipelineLoading(false)
-    }
-  }
-
-  const handleRestructure = async (mode: string, targetCount: number, instructions: string) => {
-    if (selectedChapterIds.size < 2) {
-      message.warning('至少选择 2 章才能进行重组')
-      return
-    }
-    if (!await flushPendingSave()) return
-    message.loading({ content: `${mode === 'expand' ? '正在扩展' : '正在合并'}章节...`, key: 'restructure', duration: 0 })
-
-    const res = await apiClient.post('/novel/chapters/restructure', {
-      project_id: projectId,
-      model_id: selectedModelId,
-      chapter_ids: Array.from(selectedChapterIds),
-      mode,
-      target_count: targetCount,
-      instructions: instructions.trim(),
-    })
-
-    message.destroy('restructure')
-    message.success(res.data?.message || '章节重组完成')
-
-    // Reset selection and reload
-    setSelectedChapterIds(new Set())
-    setSelectMode(false)
-    await loadProjectModules()
-  }
+  const {
+    openRunQueue,
+    openProductionDesk,
+    startRunQueueWorker,
+    stopRunQueueWorker,
+    recoverRunQueue,
+    executeChapterGroupRun,
+    approveChapterGroupStage,
+    retryChapterGroupStage,
+    skipChapterGroupStage,
+    executeReleaseRepairRun,
+    startChapterPipeline,
+    handleRestructure,
+  } = createRunQueueHandlers({
+    activeChapter,
+    apiClient,
+    chapterWordTargetPayload,
+    flushPendingSave,
+    loadProductionTasks,
+    loadProjectModules,
+    navigate,
+    productionMode,
+    projectId,
+    runCommercialTool,
+    selectedChapterIds,
+    selectedModelId,
+    setChapterGroupExecutingId,
+    setChapters,
+    setPipelineLoading,
+    setReleaseRepairExecutingId,
+    setSelectMode,
+    setSelectedChapterIds,
+    setTaskCenterOpen,
+  })
 
   const deleteProject = () => {
     if (!selectedProject) return
@@ -1638,66 +1517,6 @@ export default function NovelProjectWorkspace() {
     await apiClient.delete(`/novel/outlines/${oid}`)
     await loadProjectModules()
   }
-
-  /* editor field helpers: shell/workspace-editor-fields */
-
-  const openEditor = (kind: typeof editorKind, item?: any) => {
-    const currentItem = item || (kind === 'worldbuilding' ? worldbuilding[0] : null)
-    setEditorItem(currentItem || null)
-    if (kind === 'worldbuilding') {
-      const data = currentItem || {
-        world_summary: '', rules: [], timeline_anchor: '', known_unknowns: [], version: 1,
-      }
-      editorForm.setFieldsValue({
-        ...data,
-        rules: formatListField(data.rules),
-        timeline_anchor: formatListField(data.timeline_anchor),
-        known_unknowns: formatListField(data.known_unknowns),
-      })
-    } else if (kind === 'character') {
-      const data = currentItem || { name: '', role_type: '', archetype: '', motivation: '', goal: '', conflict: '' }
-      const state = data.current_state || {}
-      const profile = data.raw_payload?.profile || {}
-      editorForm.setFieldsValue({
-        ...data,
-        role_type: data.role_type || data.role || '',
-        age: state.age ?? profile.age ?? '',
-        gender: profile.gender || state.gender || '',
-        identity: profile.identity || state.identity || '',
-        faction: profile.faction || state.faction || '',
-        personality: formatListField(data.personality),
-        abilities: formatListField(data.abilities),
-        items: formatListField(state.items || state.inventory || data.raw_payload?.items),
-        knowledge_scope: formatListField(state.knowledge_scope || state.known_facts),
-        information_boundaries: formatListField(state.information_boundaries),
-        relationships: formatJsonField(data.relationships || []),
-        current_state: formatJsonField(state || {}),
-      })
-    } else if (kind === 'outline') {
-      const data = currentItem || {
-        outline_type: 'master', title: '', summary: '', conflict_points: [],
-        turning_points: [], hook: '', parent_id: null,
-      }
-      editorForm.setFieldsValue({
-        ...data,
-        conflict_points: formatListField(data.conflict_points),
-        turning_points: formatListField(data.turning_points),
-      })
-    } else if (kind === 'chapter') {
-      const data = currentItem || {
-        chapter_no: 1, title: '', chapter_goal: '', chapter_summary: '',
-        conflict: '', ending_hook: '', outline_id: null, chapter_text: '',
-      }
-      editorForm.setFieldsValue({
-        ...data,
-        must_advance: formatListField(data.raw_payload?.must_advance),
-        forbidden_repeats: formatListField(data.raw_payload?.forbidden_repeats),
-        scene_breakdown: formatJsonField(data.scene_list || data.scene_breakdown || []),
-      })
-    }
-    setEditorKind(kind)
-  }
-
 
   const {
     generationPreflightChecks,
@@ -1760,97 +1579,6 @@ export default function NovelProjectWorkspace() {
     setStepProseLoading,
     sortedChapters,
   })
-
-  const submitEditor = async () => {
-    if (!await flushPendingSave()) return
-    const v = await editorForm.validateFields()
-    try {
-      if (editorKind === 'worldbuilding') {
-        const payload = {
-          project_id: projectId,
-          world_summary: v.world_summary || '',
-          rules: parseListField(v.rules),
-          timeline_anchor: v.timeline_anchor || '',
-          known_unknowns: parseListField(v.known_unknowns),
-          version: Number(v.version || 1),
-        }
-        if (editorItem?.id) await apiClient.put(`/novel/worldbuilding/${editorItem.id}`, payload)
-        else await apiClient.post(`/novel/projects/${projectId}/worldbuilding`, payload)
-      } else if (editorKind === 'character') {
-        const baseState = parseJsonField(v.current_state, {})
-        const nextCurrentState = {
-          ...(baseState && typeof baseState === 'object' && !Array.isArray(baseState) ? baseState : {}),
-          age: v.age || baseState?.age || '',
-          gender: v.gender || baseState?.gender || '',
-          identity: v.identity || baseState?.identity || '',
-          faction: v.faction || baseState?.faction || '',
-          items: parseListField(v.items),
-          knowledge_scope: parseListField(v.knowledge_scope),
-          information_boundaries: parseListField(v.information_boundaries),
-        }
-        const payload = {
-          project_id: projectId, name: v.name,
-          role_type: v.role_type || '', archetype: v.archetype || '',
-          motivation: v.motivation || '', goal: v.goal || '', conflict: v.conflict || '',
-          personality: parseListField(v.personality),
-          abilities: parseListField(v.abilities),
-          appearance: v.appearance || '',
-          backstory: v.backstory || '',
-          secret: v.secret || '',
-          growth_arc: v.growth_arc || '',
-          arc_hint: v.arc_hint || '',
-          relationships: parseJsonField(v.relationships, []),
-          current_state: nextCurrentState,
-          raw_payload: {
-            ...(editorItem?.raw_payload || {}),
-            profile: {
-              ...((editorItem?.raw_payload || {}).profile || {}),
-              age: v.age || '',
-              gender: v.gender || '',
-              identity: v.identity || '',
-              faction: v.faction || '',
-            },
-            items: parseListField(v.items),
-          },
-        }
-        if (editorItem?.id) await apiClient.put(`/novel/characters/${editorItem.id}`, payload)
-        else await apiClient.post('/novel/characters', payload)
-      } else if (editorKind === 'outline') {
-        const payload = {
-          project_id: projectId,
-          outline_type: v.outline_type || 'master', title: v.title,
-          summary: v.summary || '',
-          conflict_points: parseListField(v.conflict_points),
-          turning_points: parseListField(v.turning_points),
-          hook: v.hook || '', parent_id: v.parent_id ?? null,
-        }
-        if (editorItem?.id) await apiClient.put(`/novel/outlines/${editorItem.id}`, payload)
-        else await apiClient.post('/novel/outlines', payload)
-      } else if (editorKind === 'chapter') {
-        const payload = {
-          project_id: projectId,
-          chapter_no: Number(v.chapter_no || 1), title: v.title,
-          chapter_goal: v.chapter_goal || '', chapter_summary: v.chapter_summary || '',
-          conflict: v.conflict || '', ending_hook: v.ending_hook || '',
-          status: editorItem?.status || 'draft', outline_id: v.outline_id ?? null,
-          chapter_text: v.chapter_text || '',
-          scene_breakdown: parseJsonField(v.scene_breakdown, []),
-          scene_list: parseJsonField(v.scene_breakdown, []),
-          raw_payload: {
-            ...(editorItem?.raw_payload || {}),
-            must_advance: parseListField(v.must_advance),
-            forbidden_repeats: parseListField(v.forbidden_repeats),
-          },
-        }
-        if (editorItem?.id) await apiClient.put(`/novel/chapters/${editorItem.id}`, payload)
-        else await apiClient.post('/novel/chapters', { ...payload, scene_breakdown: [], continuity_notes: [] })
-      }
-      message.success('已保存')
-      setEditorKind(null)
-      setEditorItem(null)
-      await loadProjectModules()
-    } catch { message.error('保存失败') }
-  }
 
   /* ── streaming scroll ──────────────────────────────────────────── */
   useEffect(() => {
