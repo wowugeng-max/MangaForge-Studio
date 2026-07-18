@@ -15,6 +15,15 @@
 
 
 
+### Residual inventory update (2026-07-19 goal-continue XVI)
+
+Additional reverse-free web splits:
+- writing-cockpit `types` → core/acceptance/workflow
+- `planning-workspace-builder-signals` → reader/volume/fatigue/pressure/story-unit
+- task-center `drawer-model` → tags + helpers basics/quality/repair/batch
+
+Focused regressions green (TaskCenter core/safe-batch, workspace shell).
+
 ### Residual inventory update (2026-07-19 goal-continue XV)
 
 Landed reverse-free package splits + cross-leaf binding repairs:
