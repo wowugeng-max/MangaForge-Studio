@@ -152,6 +152,7 @@ export function projectWorkspaceSource() {
     sourceCached('shell/workspace-commercial-result.tsx', localSourceCache),
     sourceCached('shell/workspace-commercial-ops-views.tsx', localSourceCache),
     sourceCached('shell/workspace-commercial-tools.tsx', localSourceCache),
+    sourceCached('shell/workspace-commercial-repair-queues.tsx', localSourceCache),
     sourceCached('shell/workspace-preflight-handlers.tsx', localSourceCache),
     sourceCached('shell/workspace-repair-task-handlers.tsx', localSourceCache),
     sourceCached('shell/workspace-action-handlers.tsx', localSourceCache),
