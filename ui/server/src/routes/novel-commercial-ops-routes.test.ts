@@ -122,7 +122,7 @@ describe('longform creation diagnosis', () => {
   })
 
   test('commercial ops route persists longform_creation_diagnosis reviews', () => {
-    const source = [readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/register.ts'), 'utf8')].join('\n')
+    const source = [readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders-core.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders-qa-debt.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders-retention-trial.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders-longform.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders-ops.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/register.ts'), 'utf8')].join('\n')
 
     expect(source).toContain('/api/novel/projects/:id/longform-creation-diagnosis')
     expect(source).toContain("review_type: 'longform_creation_diagnosis'")
@@ -226,7 +226,7 @@ describe('longform creation diagnosis', () => {
   })
 
   test('commercial ops route persists reader_trial_review reviews', () => {
-    const source = [readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/register.ts'), 'utf8')].join('\n')
+    const source = [readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders-core.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders-qa-debt.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders-retention-trial.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders-longform.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders-ops.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/register.ts'), 'utf8')].join('\n')
 
     expect(source).toContain('/api/novel/projects/:id/reader-trial-review')
     expect(source).toContain("review_type: 'reader_trial_review'")
@@ -258,7 +258,7 @@ describe('longform creation diagnosis', () => {
   })
 
   test('commercial ops route persists reader trial repair queue as longform production repair', () => {
-    const source = [readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/register.ts'), 'utf8')].join('\n')
+    const source = [readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders-core.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders-qa-debt.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders-retention-trial.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders-longform.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders-ops.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/register.ts'), 'utf8')].join('\n')
 
     expect(source).toContain('/api/novel/projects/:id/reader-trial-review/repair-queue')
     expect(source).toContain('buildReaderTrialRepairTasks')
@@ -267,7 +267,7 @@ describe('longform creation diagnosis', () => {
   })
 
   test('uses safe json for commercial ops payloads that include llm results or writing bible', () => {
-    const source = [readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/register.ts'), 'utf8')].join('\n')
+    const source = [readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders-core.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders-qa-debt.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders-retention-trial.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders-longform.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/builders-ops.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-commercial-ops/register.ts'), 'utf8')].join('\n')
 
     expect(source).not.toContain('payload: JSON.stringify({ local_report: report, ai_report: aiReport, llm_result: result })')
     expect(source).not.toContain('output_ref: JSON.stringify({ local_report: report, ai_report: aiReport, review_id: review.id, llm_result: result })')
