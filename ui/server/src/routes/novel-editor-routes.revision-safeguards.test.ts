@@ -46,6 +46,9 @@ describe('editor revision route safeguards', () => {
     const source = [
       editorBuildersSource(),
       readFileSync(join(import.meta.dir, 'novel-editor/register.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register-annotations.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register-revision.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register-quality.ts'), 'utf8'),
     ].join('\n')
 
     expect(source).toContain('REVISION_MAX_TOKENS')
@@ -150,6 +153,9 @@ describe('editor revision route safeguards', () => {
     const source = [
       editorBuildersSource(),
       readFileSync(join(import.meta.dir, 'novel-editor/register.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register-annotations.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register-revision.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register-quality.ts'), 'utf8'),
     ].join('\n')
     const routeStart = source.indexOf("app.post('/api/novel/reviews/:reviewId/apply-revision'")
     const routeBlock = source.slice(routeStart, source.indexOf("app.post('/api/novel/chapters/:chapterId/quality-card'", routeStart))
@@ -168,6 +174,9 @@ describe('editor revision route safeguards', () => {
     const source = [
       editorBuildersSource(),
       readFileSync(join(import.meta.dir, 'novel-editor/register.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register-annotations.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register-revision.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register-quality.ts'), 'utf8'),
     ].join('\n')
     const saveStart = source.indexOf("review_type: 'editor_revision'")
     const saveBlock = source.slice(saveStart, source.indexOf('})', saveStart))
@@ -204,6 +213,9 @@ describe('editor revision route safeguards', () => {
     const source = [
       editorBuildersSource(),
       readFileSync(join(import.meta.dir, 'novel-editor/register.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register-annotations.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register-revision.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register-quality.ts'), 'utf8'),
     ].join('\n')
 
     expect(source).toContain('buildCompactEditorRevisionPrompt')
@@ -217,6 +229,9 @@ describe('editor revision route safeguards', () => {
     const source = [
       editorBuildersSource(),
       readFileSync(join(import.meta.dir, 'novel-editor/register.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register-annotations.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register-revision.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register-quality.ts'), 'utf8'),
     ].join('\n')
 
     expect(source).toContain('initial_patch_not_applicable')

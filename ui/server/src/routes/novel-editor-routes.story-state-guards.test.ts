@@ -38,6 +38,9 @@ describe('story state sync route source guards', () => {
     const source = [
       editorBuildersSource(),
       readFileSync(join(import.meta.dir, 'novel-editor/register.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register-annotations.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register-revision.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register-quality.ts'), 'utf8'),
     ].join('\n')
 
     expect(source).toContain('/api/novel/chapters/:chapterId/story-state-sync')

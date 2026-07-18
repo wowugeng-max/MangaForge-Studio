@@ -559,6 +559,9 @@ describe('chapter delivery risk brief', () => {
     const source = [
       editorBuildersSource(),
       readFileSync(join(import.meta.dir, 'novel-editor/register.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register-annotations.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register-revision.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, 'novel-editor/register-quality.ts'), 'utf8'),
     ].join('\n')
 
     expect(source).not.toContain('payload: JSON.stringify({ chapter_id: chapter.id, report, context_package')
