@@ -156,6 +156,7 @@ function projectWorkspaceSource() {
     sourceCached('shell/workspace-repair-task-handlers.tsx', localSourceCache),
     sourceCached('shell/workspace-action-handlers.tsx', localSourceCache),
     sourceCached('shell/workspace-chapter-prose-handlers.tsx', localSourceCache),
+    sourceCached('shell/workspace-writing-bible-handlers.tsx', localSourceCache),
     sourceCached('shell/workspace-incubator-views.tsx', localSourceCache),
     sourceCached('shell/workspace-serial-pipeline.tsx', localSourceCache),
     sourceCached('shell/workspace-area-view.tsx', localSourceCache),
