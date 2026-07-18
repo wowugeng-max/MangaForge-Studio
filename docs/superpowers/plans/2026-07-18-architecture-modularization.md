@@ -19,7 +19,9 @@
 ### Residual inventory update (2026-07-19 goal-continue XXXI)
 - Split useStudioKnowledgePanelsController into source-cache (~134) + feed (~722) + compose (~364).
 - Still deferred ≥1k production: provider-runtime DI (~1778), NWS view composition (~1593).
-- Task 11 full UI write-path click smoke still open; focused build of novel-studio package green.
+- Split scene-card-delivery-risk-apply package. Task 11 full UI write-path click smoke still open; focused build of novel-studio package green.
+- Split scene-card-delivery-risk-apply into apply barrel (~14) + context (~349) + card (~979).
+
 
 ### Residual inventory update (2026-07-19 goal-continue XXX)
 - Committed paragraph-prose-context prepare/sections package (compose ~218).
