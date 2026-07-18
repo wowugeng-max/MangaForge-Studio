@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, test } from 'bun:test'
 
-const readServiceSource = () => readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+const readServiceSource = () => readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 const readProseQualityReviewRecordSource = () => readFileSync(join(import.meta.dir, '../novel-writing/prose-quality-review-record.ts'), 'utf8')
 
 describe('novel writing service quality contract wiring', () => {

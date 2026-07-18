@@ -724,7 +724,7 @@ test('recomputes director after request merge and blocks before draft invocation
 })
 
 test('rebuilds the generation contract at every chapter-group context boundary', () => {
-  const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+  const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
   const groupStart = source.indexOf('const generateChapterForGroup = async')
   const groupEnd = source.indexOf('\n  return {', groupStart)
   const groupBlock = source.slice(groupStart, groupEnd)
@@ -818,7 +818,7 @@ test('compiles the prose prompt from required core sections and director-selecte
 })
 
 test('uses the compiled generation contract for the actual draft runtime call', () => {
-  const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+  const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
   const groupStart = source.indexOf('const generateChapterForGroup = async')
   const draftCallStart = source.indexOf('const draftResult = await generateNovelChapterProse', groupStart)
   const draftCallEnd = source.indexOf('const resultPayload = getNovelPayload', draftCallStart)
@@ -1218,7 +1218,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires chapter positioning and benchmark structure coordinates into scene-card and prose prompts', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const promptBlock = readSceneCardsPromptSource()
     const proseStart = source.indexOf('const buildParagraphProseContext =')
     const proseEnd = source.indexOf('const buildStoryStatePrompt =', proseStart)
@@ -1321,7 +1321,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('asks scene-card generation to split showdown contracts into public payoff and combat presets', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const promptBlock = readSceneCardsPromptSource()
     const proseStart = source.indexOf('const buildParagraphProseContext =')
     const proseEnd = source.indexOf('const reviewPrompt', proseStart)
@@ -1347,7 +1347,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('asks scene-card generation to split conflict-structure contracts into per-scene execution fields', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const promptBlock = readSceneCardsPromptSource()
     const proseStart = source.indexOf('const buildParagraphProseContext =')
     const proseEnd = source.indexOf('const reviewPrompt', proseStart)
@@ -4983,7 +4983,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic opening hook risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -5021,7 +5021,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic first-50 conflict risks into opening self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -5048,7 +5048,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic opening event density risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -5085,7 +5085,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic protagonist delay risks into opening self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -5250,7 +5250,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic entry promise alignment into opening self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -5340,7 +5340,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic opening conflict alignment into opening self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -5363,7 +5363,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic ending hook risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -5407,7 +5407,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic sudden ending clue risks into chapter hook checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -5511,7 +5511,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic ending contract risks into chapter hook checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -5558,7 +5558,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic opening-hook echo risks into chapter hook self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -5663,7 +5663,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic golden-three risks into quality audit checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -5698,7 +5698,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic paragraph hook stall risks into paragraph hook self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -5814,7 +5814,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic shock layering risks into paragraph hook self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -5901,7 +5901,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic payoff setup risks into quality audit self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -5951,7 +5951,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic face-slap rhythm risks into reversal self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -6001,7 +6001,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic evidence-chain dump risks into reversal self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -6049,7 +6049,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic final-evidence impact risks into reversal self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -6103,7 +6103,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic evidence time-bomb risks into reversal self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -6146,7 +6146,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic antagonist-downfall agency risks into reversal self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -6234,7 +6234,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic protagonist composure risks into character behavior self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -6267,7 +6267,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic false suspense risks into suspense self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -6316,7 +6316,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic withheld suspense risks into suspense self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -6360,7 +6360,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic obscure suspense risks into suspense self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -6407,7 +6407,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic relationship scene changes into character relation self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -6439,7 +6439,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic expectation vacuum risks into expectation threshold self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -7487,7 +7487,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic scene-card receipt risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -7499,7 +7499,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('passes the authoritative generation contract into the prose quality loop', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const helperBlock = source.slice(
       source.indexOf('function buildProseReviewContextPackage'),
       source.indexOf('function sceneCardReceiptEvidenceParts'),
@@ -7517,7 +7517,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic scene-card density risks into prose craft self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -7528,7 +7528,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic scene-card purpose weight risks into quality audit self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -7540,7 +7540,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic scene-card sensory anchor risks into prose craft self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -7551,7 +7551,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic scene-card serial risk repairs into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -7563,7 +7563,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic scene-card consumption risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -7666,7 +7666,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic character order risks into intent confirmation checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -7723,7 +7723,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic beat sequence risks into intent confirmation checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -7771,7 +7771,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic cost reward risks into intent confirmation checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -7815,7 +7815,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic local victory cost risks into plot dynamics checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -7826,7 +7826,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic blueprint craft risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -8224,7 +8224,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('story state sync persists a source_readiness_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'source_readiness_sync', payloadKey: 'source_readiness_sync'")
     expect(source).toContain('buildSourceReadinessSyncReport(project, chapter, contextPackage, chapterText)')
@@ -8279,7 +8279,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('story state sync persists a prose_meta_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toMatch(/reviewType: 'prose_meta_sync'[\s\S]*payloadKey: 'prose_meta_sync'/)
     expect(source).toContain('buildProseMetaSyncReport(project, chapter, contextPackage, chapterText)')
@@ -8489,7 +8489,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic meaning-inflation filler risks into quality audit hard risks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const qualityAuditBlock = source.slice(
       source.indexOf('function buildQualityAuditDeterministicCheck'),
       source.indexOf('function qualityAuditPriority', source.indexOf('function buildQualityAuditDeterministicCheck')),
@@ -8499,7 +8499,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic paragraph progression risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -8564,7 +8564,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic narrative transition risks into prose craft self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -8575,7 +8575,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story sub-event connectors', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -8632,7 +8632,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic scene goal obstacle change risks into quality audit self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -8680,7 +8680,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic combat process risks into prose craft self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -8712,7 +8712,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic paragraph fragmentation risks into prose craft self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -8744,7 +8744,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic paragraph length uniformity risks into prose craft self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -8774,7 +8774,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic comma-chain paragraph density risks into prose craft self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -8803,7 +8803,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic motion-still rhythm risks into prose craft self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -8832,7 +8832,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic stacked description risks into prose craft self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -8861,7 +8861,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic static environment risks into prose craft self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -8888,7 +8888,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic decorative detail risks into prose craft self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -8915,7 +8915,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic camera-anchor risks into prose craft self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -8944,7 +8944,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic omniscient crowd camera risks into prose craft self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -8970,7 +8970,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic infodump risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -9010,7 +9010,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic recap filler risks into quality audit and cleanup gates', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -9064,7 +9064,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic emotion telling risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -9097,7 +9097,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic emotional stasis risks into emotional arc self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -9145,7 +9145,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic downward safety risks into emotional arc self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -9194,7 +9194,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic oppression purpose risks into emotional arc self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -9241,7 +9241,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic payoff density risks into emotional arc self review and cleanup gate', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -9295,7 +9295,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic payoff escalation risks into emotional arc self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -9342,7 +9342,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic trump card effect risks into emotional arc self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -9386,7 +9386,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic upgrade aftermath risks into upgrade rhythm self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -9397,7 +9397,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic upgrade rhythm hard risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -9489,7 +9489,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic internal monologue risks into prose craft self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -9500,7 +9500,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic specific character-count expression risks into prose craft self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -9550,7 +9550,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic dialogue infodump risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -9700,7 +9700,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic authorial forecast risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -9762,7 +9762,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic repeated-subject risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -9791,7 +9791,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic repeated-reaction risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -9816,7 +9816,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic uniform-rhythm risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -9857,7 +9857,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic dialogue-tone risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -9886,7 +9886,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic dialogue voice sameness risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -9950,7 +9950,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic dialogue breath risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -9983,7 +9983,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic dialogue density risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -10032,7 +10032,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic dialogue-format risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -10061,7 +10061,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic dialogue quote style risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -10090,7 +10090,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic dialogue power balance risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -10137,7 +10137,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic protagonist line economy risks into dialogue self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -10169,7 +10169,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic dialogue question answer loops into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -10215,7 +10215,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic judgment-question risks into dialogue self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -10243,7 +10243,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic dialogue subtext agenda risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -10270,7 +10270,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic empty praise dialogue risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -10321,7 +10321,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic dialogue emotion continuity risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -10350,7 +10350,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic dialogue easy persuasion risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -10421,7 +10421,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic ending-summary risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -10469,7 +10469,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deterministic punctuation tone risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -10499,7 +10499,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires deslop gate diagnostics into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -10989,7 +10989,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires missing contract review checks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
@@ -11002,7 +11002,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('marks normalized self review score as defaulted only when model omits score', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const scoreStart = source.indexOf('const rawReviewScore = Number(reviewPayload?.score)')
     const reviewBlock = source.slice(
       scoreStart,
@@ -11018,14 +11018,14 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('asks prose self review and revision to cover dialogue execution checklist', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     expect(source).toContain('dialogue_execution_checklist')
     expect(source).toContain('必须按对话执行清单逐场覆盖 dialogue_checks')
     expect(source).toContain('dialogue_checks.changed_evidence')
   })
 
   test('aligns normalized review passed flag with failing structured checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
@@ -11035,7 +11035,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('aligns normalized review needs_revision flag with repair-worthy structured checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
@@ -11045,7 +11045,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('does not synthesize missing structured contract failures when structured fill is disabled', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('const structuredFillReview = await fillMissingStructuredReviewChecks', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -11056,7 +11056,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires foreshadowing delta checks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
@@ -11101,7 +11101,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('story state sync persists a chapter_title_uniqueness_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'chapter_title_uniqueness_sync'")
     expect(source).toContain('buildChapterTitleUniquenessSyncReport(chapters, chapter)')
@@ -11109,7 +11109,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires title uniqueness report into chapter context preflight', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const contextBuilderBlock = source.slice(
       source.indexOf('const buildChapterContextPackage'),
       source.indexOf('const buildProseReviewPrompt'),
@@ -11218,7 +11218,7 @@ describe('normalizeSceneCardsPayload', () => {
     expect(prompt).toContain('「」')
     expect(prompt).toContain('一个主事件 + 3-5 个子事件')
 
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPromptBlock = source.slice(
       source.indexOf('const buildProseReviewPrompt ='),
       source.indexOf('const buildProseRevisionPrompt ='),
@@ -11401,7 +11401,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('wires generated duplicate-title repair into every chapter store path', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const storagePatchSource = readChapterProseStoragePatchSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const groupBlock = source.slice(groupStart, source.indexOf('const routes', groupStart) > 0 ? source.indexOf('const routes', groupStart) : source.indexOf('return { generateChapterForGroup', groupStart))
@@ -11503,7 +11503,7 @@ describe('chapter prose word target', () => {
   })
 
   test('contracts over-target prose before returning the best complete candidate with a warning', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const ensureStart = source.indexOf('const ensureProseMeetsWordTarget =')
     const ensureEnd = source.indexOf('const autoRepairChapterPreflightGaps =', ensureStart)
     const ensureBlock = source.slice(ensureStart, ensureEnd)
@@ -14212,7 +14212,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a story_drive_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: storyDriveSync, reviewType: 'story_drive_sync'")
     expect(source).toContain('buildStoryDriveSyncReport(project, chapter, contextPackage, chapterText)')
@@ -14354,7 +14354,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a story_loop_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: storyLoopSync, reviewType: 'story_loop_sync'")
     expect(source).toContain('buildStoryLoopSyncReport(project, chapter, contextPackage, chapterText)')
@@ -14488,7 +14488,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists an information_flow_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: informationFlowSync, reviewType: 'information_flow_sync'")
     expect(source).toContain('buildInformationFlowSyncReport(project, chapter, contextPackage, chapterText)')
@@ -14619,7 +14619,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists an expectation_threshold_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'expectation_threshold_sync'")
     expect(source).toContain("payloadKey: 'expectation_threshold_sync'")
@@ -14900,7 +14900,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists an emotional_arc_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: emotionalArcSync, reviewType: 'emotional_arc_sync'")
     expect(source).toContain('buildEmotionalArcSyncReport(project, chapter, contextPackage, chapterText)')
@@ -14982,7 +14982,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a chapter_hook_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'chapter_hook_sync'")
     expect(source).toContain("payloadKey: 'chapter_hook_sync'")
@@ -15072,7 +15072,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a paragraph_hook_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'paragraph_hook_sync'")
     expect(source).toContain("payloadKey: 'paragraph_hook_sync'")
@@ -15277,7 +15277,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a suspense_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'suspense_sync'")
     expect(source).toContain("payloadKey: 'suspense_sync'")
@@ -15368,7 +15368,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a reversal_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'reversal_sync'")
     expect(source).toContain("payloadKey: 'reversal_sync'")
@@ -15633,7 +15633,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a showdown_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'showdown_sync'")
     expect(source).toContain("payloadKey: 'showdown_sync'")
@@ -15642,7 +15642,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a spectator_reaction_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: spectatorReactionSync, reviewType: 'spectator_reaction_sync'")
     expect(source).toContain('buildSpectatorReactionSyncReport(project, chapter, contextPackage, chapterText)')
@@ -15650,7 +15650,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a payoff_setup_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: payoffSetupSync, reviewType: 'payoff_setup_sync'")
     expect(source).toContain('buildPayoffSetupSyncReport(project, chapter, contextPackage, chapterText)')
@@ -15770,7 +15770,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a bridge_unit_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: bridgeUnitSync, reviewType: 'bridge_unit_sync'")
     expect(source).toContain('buildBridgeUnitSyncReport(project, chapter, contextPackage, chapterText)')
@@ -16335,7 +16335,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a beat_cooling_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: beatCoolingSync, reviewType: 'beat_cooling_sync'")
     expect(source).toContain('buildBeatCoolingSyncReport(project, chapter, contextPackage, chapterText)')
@@ -16436,7 +16436,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists an opening_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'opening_sync', payloadKey: 'opening_sync'")
     expect(source).toContain('buildOpeningSyncReport(project, chapter, contextPackage, chapterText)')
@@ -16515,7 +16515,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a prose_craft_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'prose_craft_sync', payloadKey: 'prose_craft_sync'")
     expect(source).toContain('buildProseCraftSyncReport(project, chapter, contextPackage, chapterText)')
@@ -16579,7 +16579,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a punctuation_tone_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'punctuation_tone_sync', payloadKey: 'punctuation_tone_sync'")
     expect(source).toContain('buildPunctuationToneSyncReport(project, chapter, contextPackage, chapterText)')
@@ -16677,7 +16677,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a quality_audit_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'quality_audit_sync', payloadKey: 'quality_audit_sync'")
     expect(source).toContain('buildQualityAuditSyncReport(project, chapter, contextPackage, chapterText)')
@@ -16977,7 +16977,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a dialogue_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'dialogue_sync', payloadKey: 'dialogue_sync'")
     expect(source).toContain('buildDialogueSyncReport(project, chapter, contextPackage, chapterText)')
@@ -17144,7 +17144,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a character_behavior_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'character_behavior_sync', payloadKey: 'character_behavior_sync'")
     expect(source).toContain('buildCharacterBehaviorSyncReport(project, chapter, contextPackage, chapterText)')
@@ -17245,7 +17245,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists an asset_linkage_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'asset_linkage_sync', payloadKey: 'asset_linkage_sync'")
     expect(source).toContain('buildAssetLinkageSyncReport(project, chapter, contextPackage, chapterText)')
@@ -17253,7 +17253,7 @@ describe('chapter prose word target', () => {
   })
 
   test('wires deterministic asset linkage hard risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -17326,7 +17326,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a state_tracking_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'state_tracking_sync', payloadKey: 'state_tracking_sync'")
     expect(source).toContain('buildStateTrackingSyncReport(project, chapter, contextPackage, chapterText)')
@@ -17334,7 +17334,7 @@ describe('chapter prose word target', () => {
   })
 
   test('wires deterministic state tracking hard risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -17437,7 +17437,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists an intent_confirmation_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'intent_confirmation_sync', payloadKey: 'intent_confirmation_sync'")
     expect(source).toContain('buildIntentConfirmationSyncReport(project, chapter, contextPackage, chapterText)')
@@ -17445,7 +17445,7 @@ describe('chapter prose word target', () => {
   })
 
   test('wires deterministic intent confirmation hard risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -17499,7 +17499,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a continuity_heat_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: continuityHeatSync, reviewType: 'continuity_heat_sync'")
     expect(source).toContain('buildContinuityHeatSyncReport(project, chapter, contextPackage, chapterText)')
@@ -17507,7 +17507,7 @@ describe('chapter prose word target', () => {
   })
 
   test('wires deterministic continuity heat hard risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -17518,7 +17518,7 @@ describe('chapter prose word target', () => {
   })
 
   test('wires deterministic conflict structure hard risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -17744,7 +17744,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a conflict_structure_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: conflictStructureSync, reviewType: 'conflict_structure_sync'")
     expect(source).toContain('buildConflictStructureSyncReport(project, chapter, contextPackage, chapterText)')
@@ -17956,7 +17956,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists an upgrade_rhythm_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: upgradeRhythmSync, reviewType: 'upgrade_rhythm_sync'")
     expect(source).toContain('buildUpgradeRhythmSyncReport(project, chapter, contextPackage, chapterText)')
@@ -18069,7 +18069,7 @@ describe('chapter prose word target', () => {
   })
 
   test('wires deterministic target reader hard risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -18080,7 +18080,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a target_reader_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: targetReaderSync, reviewType: 'target_reader_sync'")
     expect(source).toContain('buildTargetReaderSyncReport(project, chapter, contextPackage, chapterText)')
@@ -18145,7 +18145,7 @@ describe('chapter prose word target', () => {
   })
 
   test('wires deterministic genre positioning hard risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -18156,7 +18156,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a genre_positioning_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: genrePositioningSync, reviewType: 'genre_positioning_sync'")
     expect(source).toContain('buildGenrePositioningSyncReport(project, chapter, contextPackage, chapterText)')
@@ -18212,7 +18212,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a female_audience_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: femaleAudienceSync, reviewType: 'female_audience_sync'")
     expect(source).toContain('buildFemaleAudienceSyncReport(project, chapter, contextPackage, chapterText)')
@@ -18220,7 +18220,7 @@ describe('chapter prose word target', () => {
   })
 
   test('wires deterministic female audience hard risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -18300,7 +18300,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a plot_dynamics_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: plotDynamicsSync, reviewType: 'plot_dynamics_sync'")
     expect(source).toContain('buildPlotDynamicsSyncReport(project, chapter, contextPackage, chapterText)')
@@ -18308,7 +18308,7 @@ describe('chapter prose word target', () => {
   })
 
   test('wires deterministic plot dynamics hard risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -18427,7 +18427,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a character_relation_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: characterRelationSync, reviewType: 'character_relation_sync'")
     expect(source).toContain('buildCharacterRelationSyncReport(project, chapter, contextPackage, chapterText)')
@@ -18435,7 +18435,7 @@ describe('chapter prose word target', () => {
   })
 
   test('wires deterministic character relation hard risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -18523,7 +18523,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a character_arc_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: characterArcSync, reviewType: 'character_arc_sync'")
     expect(source).toContain('buildCharacterArcSyncReport(project, chapter, contextPackage, chapterText)')
@@ -18636,7 +18636,7 @@ describe('chapter prose word target', () => {
   })
 
   test('uses safe json for prose quality review payloads that include context packages', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).not.toContain('payload: JSON.stringify({ chapter_id: chapter.id, context_package')
     expect(source).not.toContain('payload: JSON.stringify({\n          chapter_id: chapter.id,\n          context_package: finalReviewContextPackage')
@@ -21961,7 +21961,7 @@ describe('chapter pre-draft brief', () => {
       null,
       { chapter_no: 18, title: '雨夜反证' },
     )
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPromptBlock = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -22597,7 +22597,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('wires benchmark recall checks into prose self-review and revision', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPromptBlock = source.slice(
       source.indexOf('const buildProseReviewPrompt ='),
       source.indexOf('const buildProseRevisionPrompt ='),
@@ -22635,7 +22635,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('asks prose self review and revision to enforce reader retention Hook addiction checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPromptBlock = source.slice(
       source.indexOf('const buildProseReviewPrompt ='),
       source.indexOf('const buildProseRevisionPrompt ='),
@@ -22672,7 +22672,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story style boundary checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPromptBlock = source.slice(
       source.indexOf('const buildProseReviewPrompt ='),
       source.indexOf('const buildProseRevisionPrompt ='),
@@ -22703,7 +22703,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('asks prose self review and revision to enforce style sample strategy checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPromptBlock = source.slice(
       source.indexOf('const buildProseReviewPrompt ='),
       source.indexOf('const buildProseRevisionPrompt ='),
@@ -22738,7 +22738,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('asks prose revision to preserve core direction and only repair evidenced findings', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const prosePromptSource = readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8')
     const prosePromptBlock = prosePromptSource.slice(
       prosePromptSource.indexOf('export function buildCoreContractRadarPromptSection'),
@@ -22789,7 +22789,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('asks prose self review and revision to enforce ten-chapter core selling point drift checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPromptBlock = source.slice(
       source.indexOf('const buildProseReviewPrompt ='),
       source.indexOf('const buildProseRevisionPrompt ='),
@@ -22853,7 +22853,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('wires deterministic benchmark recall risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse'),
@@ -24540,7 +24540,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('asks prose self review to enforce oh-story emotional three-blade methods', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -26191,7 +26191,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('wires deterministic vague quantity weight risks into prose craft self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -31546,7 +31546,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('asks prose review to output a next-chapter quality continuity plan', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -31567,7 +31567,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('asks prose revision to output a final next-chapter quality continuity plan', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const revisionPrompt = source.slice(
       source.indexOf('const buildProseRevisionPrompt'),
       source.indexOf('const shouldReviseProse'),
@@ -31880,7 +31880,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('keeps next-chapter quality plan in normalized prose self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -31895,7 +31895,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('treats a missing next-chapter quality plan as a prose revision trigger', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const revisionDecisionBlock = source.slice(
       source.indexOf('const nextChapterQualityPlanNeedsRepair'),
       source.indexOf('const runProseSelfReviewAndRevision'),
@@ -31924,7 +31924,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('keeps final next-chapter quality plan in prose revision result', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const revisionBlock = source.slice(
       source.indexOf('const revisionPayload = getNovelPayload(revisionResult)'),
       source.indexOf('const runMemePolishPass', source.indexOf('const revisionPayload = getNovelPayload(revisionResult)')),
@@ -41909,7 +41909,7 @@ describe('chapter pre-draft brief', () => {
   })
 
   test('builds storyline context in the chapter context package', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain('storyline_context')
     expect(source).toContain('STORYLINE_TYPES')
@@ -42114,7 +42114,7 @@ describe('readability and restrained meme workflow', () => {
   })
 
   test('strips nested style boundary aliases before recursive merge', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const stripStart = source.indexOf('function stripStyleBoundaryExplicitContract')
     const buildStart = source.indexOf('function buildStyleBoundaryContract')
     const derivedCall = source.indexOf('const derived = hasStyleInput ? buildStyleBoundaryContract', buildStart)
@@ -42931,7 +42931,7 @@ describe('readability and restrained meme workflow', () => {
   })
 
   test('story state sync persists a chapter_benchmark_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: chapterBenchmarkSync, reviewType: 'chapter_benchmark_sync'")
     expect(source).toContain('buildChapterBenchmarkSyncReport(project, chapter, contextPackage, chapterText)')
@@ -43423,7 +43423,7 @@ describe('readability and restrained meme workflow', () => {
   })
 
   test('story state sync persists a chapter_blueprint_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: chapterBlueprintSync, reviewType: 'chapter_blueprint_sync'")
     expect(source).toContain('buildChapterBlueprintSyncReport(project, chapter, contextPackage, chapterText)')
@@ -43711,7 +43711,7 @@ describe('readability and restrained meme workflow', () => {
   })
 
   test('story state sync persists a benchmark_recall_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: benchmarkRecallSync, reviewType: 'benchmark_recall_sync'")
     expect(source).toContain('buildBenchmarkRecallSyncReport(project, chapter, contextPackage, chapterText)')
@@ -43816,7 +43816,7 @@ describe('readability and restrained meme workflow', () => {
   })
 
   test('story state sync persists a style_boundary_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: styleBoundarySync, reviewType: 'style_boundary_sync'")
     expect(source).toContain('buildStyleBoundarySyncReport(project, chapter, contextPackage, chapterText)')
@@ -44000,7 +44000,7 @@ describe('readability and restrained meme workflow', () => {
   })
 
   test('story state sync persists a style_sample_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'style_sample_sync'")
     expect(source).toContain('buildStyleSampleSyncReport(project, chapter, contextPackage, chapterText)')
@@ -46824,7 +46824,7 @@ describe('readability and restrained meme workflow', () => {
   })
 
   test('serial momentum contract readers use merged raw context chapter target paths', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const legacyRawTargetReadCount = (source.match(/rawPayload\?\.context_package\?\.chapter_target \|\| rawPayload\?\.contextPackage\?\.chapterTarget \|\| \{\}/g) || []).length
 
     expect(source).toContain('function serialChapterRawContextTarget(chapter: any)')
@@ -48781,7 +48781,7 @@ describe('readability and restrained meme workflow', () => {
   })
 
   test('feeds serial quality regression brief into chapter context fatigue radar', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const contextBuildBlock = source.slice(
       source.indexOf('const serialMomentumBrief = buildSerialMomentumBrief(chapter, sorted)'),
       source.indexOf('const previousHandoff = buildPreviousChapterHandoff', source.indexOf('const serialMomentumBrief = buildSerialMomentumBrief(chapter, sorted)')),
@@ -48952,7 +48952,7 @@ describe('readability and restrained meme workflow', () => {
   })
 
   test('source creates readability review and stores meme bank in reference config', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain('buildReadabilityReviewRecord')
     expect(source).toContain('runReadabilityReview')
@@ -49054,7 +49054,7 @@ describe('story unit sync report', () => {
   })
 
   test('story state sync persists a story_unit_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain('buildStoryUnitSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain("reviewType: 'story_unit_sync'")
@@ -49089,7 +49089,7 @@ describe('story unit sync report', () => {
   })
 
   test('story state prompt asks for layered memory context and merge stores it in project story state', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const promptBlock = readFileSync(join(import.meta.dir, '../novel-writing/story-state-prompt.ts'), 'utf8')
     const mergeBlock = source.slice(
       source.indexOf('const mergeStoryState ='),
@@ -49105,7 +49105,7 @@ describe('story unit sync report', () => {
   })
 
   test('story state prompt asks for oh-story daily progress summary and stores it for the next chapter', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const promptBlock = readFileSync(join(import.meta.dir, '../novel-writing/story-state-prompt.ts'), 'utf8')
     const normalizeBlock = source.slice(
       source.indexOf('const normalizeStoryStateDeltaForStorage ='),
@@ -49128,7 +49128,7 @@ describe('story unit sync report', () => {
   })
 
   test('story state prompt asks for oh-story daily context snapshot and stores it for the next chapter', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const promptBlock = readFileSync(join(import.meta.dir, '../novel-writing/story-state-prompt.ts'), 'utf8')
     const normalizeBlock = source.slice(
       source.indexOf('const normalizeStoryStateDeltaForStorage ='),
@@ -49162,7 +49162,7 @@ describe('story unit sync report', () => {
   })
 
   test('story state sync receives latest generated scene breakdown context', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const contextStart = source.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')
     const prepareStart = source.indexOf('preparedStoryStateUpdate = await prepareStoryStateUpdate(', contextStart)
     const acceptanceStart = source.indexOf('acceptance = await commitNovelChapterAcceptance(', prepareStart)
@@ -49176,7 +49176,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation stores oh-story delivery receipts in every chapter store branch', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const storagePatchSource = readChapterProseStoragePatchSource()
     const generationBlock = source.slice(
       source.indexOf('const draftResult = await generateNovelChapterProse'),
@@ -49194,7 +49194,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation stores post-draft oh-story director after delivery receipts and quality review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const storagePatchSource = readChapterProseStoragePatchSource()
     const postReviewStart = source.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')
     const acceptanceStart = source.indexOf('acceptance = await commitNovelChapterAcceptance(', postReviewStart)
@@ -49228,7 +49228,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation preserves pre-draft execution receipts for write-preparation diagnostics', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const storagePatchSource = readChapterProseStoragePatchSource()
     const normalizeBlock = source.slice(
       source.indexOf('function normalizeStoredOhStoryDeliveryReceipts'),
@@ -49248,7 +49248,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation refreshes stored oh-story receipts from the final reviewed draft before storage', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const generationBlock = source.slice(
       source.indexOf('const draftResult = await generateNovelChapterProse'),
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
@@ -49267,7 +49267,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation refreshes stored oh-story receipts from nested revision delivery receipts', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const generationBlock = source.slice(
       source.indexOf('const draftResult = await generateNovelChapterProse'),
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
@@ -49284,7 +49284,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation preserves nested deslop and quality repair receipts in stored oh-story receipts', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const generationBlock = source.slice(
       source.indexOf('const draftResult = await generateNovelChapterProse'),
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
@@ -49301,7 +49301,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation deduplicates final delivery risk receipts before storage', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const generationBlock = source.slice(
       source.indexOf('const draftResult = await generateNovelChapterProse'),
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
@@ -49316,7 +49316,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation prefers nested revision scene-card receipts over stale final scene breakdown receipts', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const generationBlock = source.slice(
       source.indexOf('const draftResult = await generateNovelChapterProse'),
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
@@ -49335,7 +49335,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation prefers nested revision scene-card receipts over stale draft delivery receipts', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const generationBlock = source.slice(
       source.indexOf('const draftResult = await generateNovelChapterProse'),
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
@@ -49353,7 +49353,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation prefers nested revision receipts over stale draft delivery receipts', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const generationBlock = source.slice(
       source.indexOf('const draftResult = await generateNovelChapterProse'),
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
@@ -49403,7 +49403,7 @@ describe('storyline sync backfill', () => {
   })
 
   test('story state prompt asks for storyline updates and sync review is created', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('storyline_updates')
@@ -49413,7 +49413,7 @@ describe('storyline sync backfill', () => {
   })
 
   test('accepts camelCase story state agent payloads before persistence', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const helperStart = source.indexOf('const normalizeStoryStateDeltaForStorage =')
     const helperEnd = source.indexOf('const mergeStoryState =', helperStart)
     const helperBlock = source.slice(helperStart, helperEnd)
@@ -49520,7 +49520,7 @@ describe('storyline sync backfill', () => {
   })
 
   test('story state sync persists a state delta completeness review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'state_delta_completeness'")
     expect(source).toContain('buildStateDeltaCompletenessReport(chapter, chapterText, stateDelta')
@@ -49575,7 +49575,7 @@ describe('storyline sync backfill', () => {
   })
 
   test('story state sync persists a foreshadowing_delta_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain("reviewType: 'foreshadowing_delta_sync'")
@@ -49664,7 +49664,7 @@ describe('storyline sync backfill', () => {
   })
 
   test('story state sync persists a timeline_delta_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const promptSource = readFileSync(join(import.meta.dir, '../novel-writing/story-state-prompt.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'timeline_delta_sync'")
@@ -49747,7 +49747,7 @@ describe('storyline sync backfill', () => {
   })
 
   test('story state sync persists a character_state_delta_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'character_state_delta_sync'")
     expect(source).toContain('buildCharacterStateDeltaSyncReport(chapter, contextPackage, stateDelta, characterUpdates)')
@@ -49842,7 +49842,7 @@ describe('storyline sync backfill', () => {
   })
 
   test('story state sync persists an asset_state_delta_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const promptSource = readFileSync(join(import.meta.dir, '../novel-writing/story-state-prompt.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'asset_state_delta_sync'")
@@ -49909,7 +49909,7 @@ describe('storyline sync backfill', () => {
   })
 
   test('story state sync persists a relationship_delta_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'relationship_delta_sync'")
     expect(source).toContain('buildRelationshipDeltaSyncReport(chapter, contextPackage, stateDelta, storylineUpdates)')
@@ -50008,7 +50008,7 @@ describe('storyline sync backfill', () => {
   })
 
   test('story state sync persists a chapter_handoff_delta_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'chapter_handoff_delta_sync'")
     expect(source).toContain('buildChapterHandoffDeltaSyncReport(chapter, contextPackage, stateDelta)')
@@ -51774,7 +51774,7 @@ describe('storyline sync backfill', () => {
   })
 
   test('prose quality stores a revision_cascade_impact_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
     const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
 
@@ -51786,7 +51786,7 @@ describe('storyline sync backfill', () => {
   })
 
   test('prose quality stores a revision_scope_guard_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
     const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
 
@@ -51798,7 +51798,7 @@ describe('storyline sync backfill', () => {
   })
 
   test('prose quality stores a prose_revision_receipt_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
     const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
 
@@ -51809,7 +51809,7 @@ describe('storyline sync backfill', () => {
   })
 
   test('prose quality stores a deslop_repair_receipt_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
     const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
 
@@ -51946,7 +51946,7 @@ describe('chapter handoff sync report', () => {
   })
 
   test('story state sync persists a chapter_handoff_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'chapter_handoff_sync'")
     expect(source).toContain('buildChapterHandoffSyncReport(project, chapter, contextPackage, chapterText)')
@@ -52196,7 +52196,7 @@ describe('chapter core drift report', () => {
   })
 
   test('story state sync persists a chapter_core_drift review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'chapter_core_drift'")
     expect(source).toContain('buildChapterCoreDriftReport(project, chapter, contextPackage, chapterText, storylineSync)')
@@ -52460,7 +52460,7 @@ describe('chapter core drift report', () => {
   })
 
   test('story state sync persists a core_contract_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'core_contract_sync'")
     expect(source).toContain('buildCoreContractSyncReport(project, chapter, contextPackage, chapterText)')
@@ -52547,7 +52547,7 @@ describe('reader payoff sync report', () => {
   })
 
   test('story state sync persists a reader_payoff_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'reader_payoff_sync'")
     expect(source).toContain('buildReaderPayoffSyncReport(project, chapter, contextPackage, chapterText, payload)')
@@ -52675,7 +52675,7 @@ describe('reader expectation sync report', () => {
   })
 
   test('story state sync persists a reader_expectation_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'reader_expectation_sync'")
     expect(source).toContain("payloadKey: 'reader_expectation_sync'")
@@ -52920,7 +52920,7 @@ describe('reader retention sync report', () => {
   })
 
   test('story state sync persists a reader_retention_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'reader_retention_sync'")
     expect(source).toContain('buildReaderRetentionSyncReport(project, chapter, contextPackage, chapterText)')
@@ -52928,7 +52928,7 @@ describe('reader retention sync report', () => {
   })
 
   test('story state sync persists a chapter_attraction_review review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'chapter_attraction_review'")
     expect(source).toContain('buildChapterAttractionReviewReport(project, chapter, contextPackage, chapterText)')
@@ -53010,7 +53010,7 @@ describe('innovation sync report', () => {
   })
 
   test('story state sync persists an innovation_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: innovationSync, reviewType: 'innovation_sync'")
     expect(source).toContain('buildInnovationSyncReport(project, chapter, contextPackage, chapterText)')
@@ -53093,7 +53093,7 @@ describe('signature scene sync report', () => {
   })
 
   test('story state sync persists a signature_scene_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'signature_scene_sync'")
     expect(source).toContain('buildSignatureSceneSyncReport(project, chapter, contextPackage, chapterText)')
@@ -53221,7 +53221,7 @@ describe('volume beat sync report', () => {
   })
 
   test('story state sync persists a volume_beat_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: volumeBeatSync, reviewType: 'volume_beat_sync'")
     expect(source).toContain('buildVolumeBeatSyncReport(project, chapter, contextPackage, chapterText)')
@@ -53312,7 +53312,7 @@ describe('million word runway sync report', () => {
   })
 
   test('story state sync persists a runway_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'runway_sync'")
     expect(source).toContain('buildRunwaySyncReport(project, chapter, contextPackage, chapterText)')
@@ -53346,7 +53346,7 @@ describe('discovered asset intake', () => {
   })
 
   test('story state prompt asks for discovered assets and creates asset intake review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain('discovered_assets')
     expect(source).toContain('normalizeDiscoveredAssets(')
@@ -53385,7 +53385,7 @@ describe('ip scene intake', () => {
   })
 
   test('story state prompt asks for ip scene candidates and creates ip scene intake review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain('ip_scene_candidates')
     expect(source).toContain('normalizeIpSceneCandidates(')
@@ -53593,7 +53593,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('rechecks benchmark recall preflight after confirmed context is merged', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const contextStart = source.indexOf('const buildChapterContextPackage =')
     const mergeStart = source.indexOf('const confirmedPackage = mergeConfirmedPreDraftBriefIntoContext', contextStart)
     const overrideStart = source.indexOf('const override = chapter.raw_payload?.context_package_override', mergeStart)
@@ -53606,7 +53606,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('rechecks source readiness preflight after confirmed context is merged', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const contextStart = source.indexOf('const buildChapterContextPackage =')
     const mergeStart = source.indexOf('const confirmedPackage = mergeConfirmedPreDraftBriefIntoContext', contextStart)
     const overrideStart = source.indexOf('const override = chapter.raw_payload?.context_package_override', mergeStart)
@@ -53619,7 +53619,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('declares word target inside chapter context builder instead of writing bible builder', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const bibleStart = source.indexOf('const buildWritingBible =')
     const bibleEnd = source.indexOf('const hasMeaningfulWritingBible =', bibleStart)
     const contextStart = source.indexOf('const buildChapterContextPackage =')
@@ -53635,7 +53635,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('uses multiple completion attempts before failing a short chapter', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const ensureStart = source.indexOf('const ensureProseMeetsWordTarget =')
     const groupStart = source.indexOf('const generateChapterForGroup =', ensureStart)
     const ensureBlock = source.slice(ensureStart, groupStart)
@@ -53647,7 +53647,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('passes word-target expansion blueprint patches into prose review context', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const helperStart = source.indexOf('function buildProseReviewContextPackage')
     const helperEnd = source.indexOf('function sceneCardReceiptEvidenceParts', helperStart)
     const helperBlock = source.slice(helperStart, helperEnd)
@@ -53666,7 +53666,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('does not fail chapter production solely because a recovered draft result still has an error field', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const draftStart = source.indexOf('const resultPayload = getNovelPayload(draftResult)')
     const draftEnd = source.indexOf('let editorRewrite', draftStart)
     const failureBlock = source.slice(draftStart, draftEnd)
@@ -53685,7 +53685,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('accepts camelCase commercial editor rewrite payloads', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const editorStart = source.indexOf('const runCommercialEditorRewrite =')
     const editorEnd = source.indexOf('const runMemePolish =', editorStart)
     const editorBlock = source.slice(editorStart, editorEnd)
@@ -53703,7 +53703,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('accepts camelCase meme polish payloads without losing safety reports', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const memeStart = source.indexOf('const runMemePolish =')
     const memeEnd = source.indexOf('const runReadabilityReview =', memeStart)
     const memeBlock = source.slice(memeStart, memeEnd)
@@ -53802,7 +53802,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('requires scene-card prompts to plan and prose prompts to execute beat density levels', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const scenePromptBlock = readSceneCardsPromptSource()
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
@@ -53823,7 +53823,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('requires prose generation prompts to apply oh-story natural writing baselines', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
     const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
@@ -53839,7 +53839,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('requires scene-card prompts and prose prompts to preserve purpose tags for detail allocation', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const scenePromptBlock = readSceneCardsPromptSource()
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
@@ -53869,7 +53869,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('requires scene-card prompts to plan and prose prompts to execute sensory anchors', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const scenePromptBlock = readSceneCardsPromptSource()
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
@@ -53889,7 +53889,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('runs commercial editor rewrite between word-target expansion and self-review in chapter group generation', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftOnlyStart = source.indexOf('if (isDraftOnly)', groupStart)
     const reviewStart = source.indexOf('let qualityLoop: Awaited<ReturnType<typeof runProseQualityLoop>>', groupStart)
@@ -53902,7 +53902,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs generation preflight gaps before unattended chapter group generation blocks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const gateStart = source.indexOf('await enforcePreparedGate(false)', groupStart)
@@ -53920,7 +53920,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns repaired write preparation brief on context_package after preflight repair', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const returnStart = source.indexOf('return {', source.indexOf('const finalWritePreparationBrief = buildWritePreparationBrief', repairStart))
     const returnBlock = source.slice(returnStart, returnStart + 900)
@@ -53931,7 +53931,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('infers material repair keys from preflight warning corpus, not only failed check keys', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const needsStart = source.indexOf('const needsChapterBlueprint =', repairStart)
     const repairHeader = source.slice(repairStart, needsStart)
@@ -53948,7 +53948,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('blocks unattended prose generation when scene cards remain missing after auto repair', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const sceneCardsStage = source.indexOf("await onStage('scene_cards', { status: 'running' })", groupStart)
     const promptCompileStart = source.indexOf('const compiledPrompt = compileParagraphProseContext', groupStart)
@@ -53964,7 +53964,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('refreshes repaired worldbuilding before unattended preflight is evaluated again', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const repairCall = source.indexOf('const repairResult = await autoRepairChapterPreflightGaps', groupStart)
     const rebuildStart = source.indexOf('const repairedContextPackage = applyChapterWordTargetToContext(', repairCall)
@@ -53990,7 +53990,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs missing unattended chapter blueprint before prose generation', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -54007,7 +54007,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with a persisted oh-story blueprint contract', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -54028,7 +54028,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with an oh-story outline methods contract', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -54046,7 +54046,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with oh-story emotion and paragraph hook contracts', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -54090,7 +54090,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with oh-story plot and prose quality contracts', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -54167,7 +54167,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with oh-story character asset and state contracts', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -54249,7 +54249,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('unattended character repair asks for layered missing role pools', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const repairStart = source.indexOf('任务：为无人值守章节写作自动补齐前置材料')
     const characterCreateStart = source.indexOf('const existingNames = new Set', repairStart)
     const repairBlock = source.slice(repairStart, characterCreateStart)
@@ -54265,14 +54265,14 @@ describe('chapter context word target source guards', () => {
   })
 
   test('unattended character repair uses tier-aware candidate limits instead of first six', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     expect(source).toContain('selectTierAwareCharacterRepairCandidates')
     expect(source).not.toContain('characterCandidates.slice(0, 6)')
   })
 
   test('auto-repairs unattended chapter blueprint with oh-story reader genre upgrade and conflict contracts', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -54303,7 +54303,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with oh-story female audience contract', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -54322,7 +54322,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with oh-story showdown contract', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -54345,7 +54345,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with oh-story bridge unit contract', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -54361,7 +54361,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with oh-story plot framework contract', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -54379,7 +54379,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with oh-story style boundary contract', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -54395,7 +54395,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with persisted pre-draft launch briefs', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -54416,7 +54416,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with persisted longform continuity launch briefs', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -54444,7 +54444,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with persisted commercial style and scene briefs', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -55870,7 +55870,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs missing worldbuilding before unattended prose generation', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -55885,7 +55885,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('uses run-level quality threshold for unattended chapter group quality gates', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const preStoreStart = source.indexOf('const preStoreQualityDecision =', groupStart)
     const finalStart = source.indexOf('const finalQualityDecision =', groupStart)
@@ -55901,7 +55901,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('reports scene-card progress as summaries instead of full card payloads', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const sceneTitlesStart = source.indexOf('scene_card_titles', groupStart)
     const sceneSuccessStart = source.lastIndexOf("await onStage('scene_cards'", sceneTitlesStart)
@@ -55915,7 +55915,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('fails visibly when the authoritative prose quality review request fails', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const qualityStart = source.indexOf('qualityLoop = await runProseQualityLoop')
     const reviewCallStart = source.indexOf("const result = await executeAgent('review-agent'", qualityStart)
     const reviseCallbackStart = source.indexOf('revise: async ({ prompt, round }) =>', reviewCallStart)
@@ -55928,7 +55928,7 @@ describe('chapter context word target source guards', () => {
     expect(reviewBlock).toContain('buildLLMResultDiagnostics(result)')
   })
   test('stops structured review fill after a batch LLM failure', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const fillStart = source.indexOf('const fillMissingStructuredReviewChecks')
     const loopStart = source.indexOf('for (const batchFields of batches)', fillStart)
     const payloadStart = source.indexOf('const payload = getNovelPayload(result)', loopStart)
@@ -55943,7 +55943,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('uses compact prose context snapshots in review and revision prompts', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPromptStart = source.indexOf('const buildProseReviewPrompt =')
     const revisionPromptStart = source.indexOf('const buildProseRevisionPrompt =', reviewPromptStart)
     const reviewPromptBlock = source.slice(reviewPromptStart, revisionPromptStart)
@@ -55960,7 +55960,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('surfaces authoritative prose revision failures instead of storing the candidate', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const qualityStart = source.indexOf('qualityLoop = await runProseQualityLoop')
     const reviseStart = source.indexOf('revise: async ({ prompt, round }) =>', qualityStart)
     const qualityEnd = source.indexOf('finalText = qualityLoop.final_text', reviseStart)
@@ -55972,7 +55972,7 @@ describe('chapter context word target source guards', () => {
     expect(reviseBlock).toContain('buildLLMResultDiagnostics(result)')
   })
   test('feeds quality gate failure reasons into the oh-story revision strategy brief', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const strategyStart = source.indexOf('export function buildRevisionStrategyBrief')
     const strategyEnd = source.indexOf('function proseQualityPlatformRubricRisks', strategyStart)
     const strategyBlock = source.slice(strategyStart, strategyEnd)
@@ -55999,7 +55999,7 @@ describe('chapter context word target source guards', () => {
 
   test('passes unattended worker abort signals into prose generation and repair agents', () => {
     const executorSource = readFileSync(join(import.meta.dir, '../llm/executor.ts'), 'utf8')
-    const writingSource = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const writingSource = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
 
     const executeNovelAgentStart = executorSource.indexOf('export async function executeNovelAgent(')
     const executeNovelAgentBlock = executorSource.slice(executeNovelAgentStart, executorSource.indexOf('export function resolveAgentPreferredModelId', executeNovelAgentStart + 1))
@@ -56020,7 +56020,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('passes compact previous chapter handoffs into prose draft generation', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const utilsSource = readFileSync(join(import.meta.dir, 'novel-route-utils.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup = async')
     const prevChaptersStart = source.indexOf('const prevChapters = compactPreviousChaptersForProse', groupStart)
@@ -56045,7 +56045,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('checks abort signal between expensive chapter prose pipeline stages', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const serviceReturn = source.indexOf('\n  return {\n    buildParagraphProseContext', groupStart)
     const groupBlock = source.slice(groupStart, serviceReturn)
@@ -56068,7 +56068,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('defers non-blocking readability review without weakening core oh-story gates', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const selfReviewStart = source.indexOf('let qualityLoop: Awaited<ReturnType<typeof runProseQualityLoop>>', groupStart)
     const readabilityStart = source.indexOf('if (shouldRunSynchronousReadabilityReview(options, project))', selfReviewStart)
@@ -56099,7 +56099,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('passes oh-story revision strategy brief into prose revision prompt', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const revisionPrompt = source.slice(
       source.indexOf('const buildProseRevisionPrompt'),
       source.indexOf('const shouldReviseProse'),
@@ -56112,7 +56112,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose revision to execute oh-story three-pass de-ai method', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const revisionPrompt = source.slice(
       source.indexOf('const buildProseRevisionPrompt'),
       source.indexOf('const shouldReviseProse'),
@@ -56147,7 +56147,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('checks the chapter blueprint contract during prose self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const runProseSelfReviewAndRevision'),
@@ -56160,7 +56160,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('checks oh-story quick natural prose checklist during prose self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const runProseSelfReviewAndRevision'),
@@ -56176,7 +56176,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('checks delivery risk carry-over during prose self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const runProseSelfReviewAndRevision'),
@@ -56198,7 +56198,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('checks safe batch creation contract carry-over during prose self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const runProseSelfReviewAndRevision'),
@@ -56211,7 +56211,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('keeps core contract checks in normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -56233,7 +56233,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('wires deterministic hard-risk summaries into remaining normalized self review checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -56263,7 +56263,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('wires chapter and paragraph hook deterministic summaries into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -56280,7 +56280,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('keeps delivery risk receipts from prose self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewNormalizeBlock = source.slice(
       source.indexOf('const normalizedDeslopChecks = ['),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedDeslopChecks = [')),
@@ -56776,7 +56776,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose revision to repair missed delivery risk receipts', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const revisionPrompt = source.slice(
       source.indexOf('const buildProseRevisionPrompt'),
       source.indexOf('const shouldReviseProse'),
@@ -56801,7 +56801,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose revision to output nested oh-story delivery receipts', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const revisionPrompt = source.slice(
       source.indexOf('const buildProseRevisionPrompt'),
       source.indexOf('const shouldReviseProse'),
@@ -56826,7 +56826,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose revision to output context comparison receipts before rewriting', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const revisionPrompt = source.slice(
       source.indexOf('const buildProseRevisionPrompt'),
       source.indexOf('const shouldReviseProse'),
@@ -56852,7 +56852,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review for oh-story style findings and keeps them for revision', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const runProseSelfReviewAndRevision'),
@@ -56877,7 +56877,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce platform rubric checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -56903,7 +56903,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce content rubric checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -56927,7 +56927,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to use oh-story adversarial perspectives', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -56962,7 +56962,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story deslop gates', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -57310,7 +57310,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('merges deterministic oh-story banned word scan into deslop checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewNormalizeBlock = source.slice(
       source.indexOf('const normalizedDeslopChecks = ['),
       source.indexOf('const normalizedReview = {', source.indexOf('const normalizedDeslopChecks = [')),
@@ -57390,7 +57390,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('revision prompt uses delete-first deslop repair before polishing', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const revisionStart = source.indexOf('const buildProseRevisionPrompt =')
     const revisionEnd = source.indexOf('const nextChapterQualityPlanNeedsRepair =', revisionStart)
     const revisionBlock = source.slice(revisionStart, revisionEnd)
@@ -57689,7 +57689,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('wires deterministic prose format risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -57700,7 +57700,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('does not mutate prose after the authoritative quality decision', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const decisionStart = source.indexOf('finalText = qualityLoop.final_text')
     const storeStart = source.indexOf("await onStage('store', { status: 'running' })", decisionStart)
     const postDecisionBlock = source.slice(decisionStart, storeStart)
@@ -57770,7 +57770,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('prose generation stores deterministic prose cleanup review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
     const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
 
@@ -57782,7 +57782,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('stores deterministic normalization audits with deterministic cleanup review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
     const storeStart = source.indexOf('buildDeterministicProseCleanupReviewRecord({')
     const storeEnd = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', storeStart)
@@ -57964,7 +57964,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('quality gates evaluate deterministic prose cleanup residuals before storing prose', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const cleanupStart = source.indexOf('qualityLoop.final_scan?.cleanup || buildDeterministicProseCleanupReport(chapter, finalText)', groupStart)
     const gateReviewStart = source.indexOf('let qualityGateReview = buildQualityGateReviewWithDeterministicCleanup', cleanupStart)
@@ -57985,7 +57985,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('quality gates include prose revision receipt sync failures before storing prose', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const syncStart = source.indexOf('let proseRevisionReceiptSync = buildProseRevisionReceiptSyncReport(chapter, selfCheck)', groupStart)
     const gateReviewStart = source.indexOf('let qualityGateReview =', syncStart)
@@ -58001,7 +58001,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('quality gates include deslop repair receipt residual risks before storing prose', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const deslopCheckStart = source.indexOf('let deslopRepairReceiptSync = buildDeslopRepairReceiptSyncReport(chapter, selfCheck)', groupStart)
     const gateReviewStart = source.indexOf('let qualityGateReview =', deslopCheckStart)
@@ -58021,7 +58021,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('quality gates include quality audit repair receipt failures before storing prose', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const qualityCheckStart = source.indexOf('let qualityAuditRepairReceiptSync = buildQualityAuditRepairReceiptSyncReport(chapter, selfCheck)', groupStart)
     const gateReviewStart = source.indexOf('let qualityGateReview =', qualityCheckStart)
@@ -58039,7 +58039,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('quality gates recompute receipt syncs against final prose text before blocking storage', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const syncChapterStart = source.indexOf('const syncChapterForReceiptEvidence = { ...chapter, chapter_text: finalText }', groupStart)
     const gateReviewStart = source.indexOf('let qualityGateReview =', syncChapterStart)
@@ -58055,7 +58055,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('quality gates keep post-delivery receipt sync failures as advisory diagnostics before storing prose', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const postDeliveryCheckStart = source.indexOf('const postDeliveryReceiptChecks =', groupStart)
     const preStoreStart = source.indexOf('const preStoreQualityDecision =', postDeliveryCheckStart)
@@ -58076,7 +58076,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('draft review quality decision excludes post-delivery receipt sync advisories from the hard gate', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const postDeliveryCheckStart = source.indexOf('const postDeliveryReceiptChecks =', groupStart)
     const postDeliveryAdvisoryStart = source.indexOf('qualityGateReview.post_delivery_receipt_checks = postDeliveryReceiptChecks', postDeliveryCheckStart)
@@ -58094,7 +58094,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns quality audit repair receipt sync in story state update summaries', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
     const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
 
@@ -58106,7 +58106,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns deterministic prose hygiene sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const draftReviewRecordSource = readDraftSyncReviewRecordSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
@@ -58124,7 +58124,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns chapter title uniqueness sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -58137,7 +58137,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns chapter handoff sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -58149,7 +58149,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns reader expectation sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -58161,7 +58161,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns reader payoff and retention sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -58176,7 +58176,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns expectation threshold sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -58188,7 +58188,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns hook sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -58203,7 +58203,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns prose craft quality sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -58221,7 +58221,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns payoff and scene rhythm sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -58242,7 +58242,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns dramatic turn sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -58260,7 +58260,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns character asset state sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const draftReviewRecordSource = readDraftSyncReviewRecordSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
@@ -58284,7 +58284,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns receipt syncs in draft review only summaries from the same pre-store receipt context as quality gates', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -58297,7 +58297,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns dialogue and character behavior sync in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const fullPipelineStart = source.indexOf('const story_state_update: any = storyStateUpdate || {}', groupStart)
@@ -58311,7 +58311,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns scene-card receipt sync in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const fullPipelineStart = source.indexOf('const story_state_update: any = storyStateUpdate || {}', groupStart)
@@ -58323,7 +58323,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns delivery-risk receipt sync in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const fullPipelineStart = source.indexOf('const story_state_update: any = storyStateUpdate || {}', groupStart)
@@ -58335,7 +58335,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns revision-context receipt sync in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const fullPipelineStart = source.indexOf('const story_state_update: any = storyStateUpdate || {}', groupStart)
@@ -58348,7 +58348,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('stores common post-delivery sync reviews through the shared record builder', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
     const updateStoryStateStart = source.indexOf('const updateStoryStateMachine = async')
     const updateStoryStateEnd = source.indexOf('const buildWritingBible =', updateStoryStateStart)
@@ -58379,7 +58379,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns continuity and conflict sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -58400,7 +58400,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns market promise sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -58424,7 +58424,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns story structure sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -58448,7 +58448,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns blueprint benchmark style sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -58481,7 +58481,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns remaining deterministic story sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -58502,7 +58502,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns core drift and contract sync in draft review only summaries', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -58517,7 +58517,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('queues prose sync diagnostics until minimal validation and atomic acceptance complete', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const storeFnsStart = source.indexOf('const storeGeneratedReviewRecord = async (record: any) =>', groupStart)
     const preGateStart = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', storeFnsStart)
@@ -58537,7 +58537,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('records pre-store quality failures as warnings instead of approval errors', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const preGateStart = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', groupStart)
     const warningStart = source.indexOf('qualityWarningCandidates.push(', preGateStart)
@@ -58552,7 +58552,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('keeps explicit safety blocks hard while recording final quality failures as warnings', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const finalGateStart = source.indexOf('const finalQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview, safetyDecision)', groupStart)
     const safetyBlockStart = source.indexOf('if (safetyDecision.blocked)', finalGateStart)
@@ -58569,7 +58569,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('converts low-score and draft approval policies into review warnings', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const lowScoreStart = source.indexOf("if (ctx.production.approvalRequired(approvalPolicy, 'low_score'", groupStart)
     const draftStart = source.indexOf("if (ctx.production.approvalRequired(approvalPolicy, 'draft'", lowScoreStart)
@@ -58586,7 +58586,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('keeps explicit reference safety blocks hard and records review-only safety concerns as warnings', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const safetyBlockedStart = source.indexOf('if (safetyDecision.blocked)', groupStart)
     const safetyBlockedThrowStart = source.indexOf("const error = Object.assign(new Error('仿写安全阈值未通过')", safetyBlockedStart)
@@ -58606,7 +58606,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('passes deterministic cleanup report into cleanup repair prompts', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const revisionPrompt = source.slice(
       source.indexOf('const buildProseRevisionPrompt'),
       source.indexOf('const shouldReviseProse'),
@@ -58625,7 +58625,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story dialogue checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -58716,7 +58716,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story plot dynamics checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -58748,7 +58748,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story story power checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -58807,7 +58807,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story continuity heat checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -58836,7 +58836,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story character relation checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -58870,7 +58870,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story information flow checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -58899,7 +58899,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story expectation threshold checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -58939,7 +58939,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story target reader checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -58998,7 +58998,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story genre positioning checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -59046,7 +59046,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story plot special topic checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -59092,7 +59092,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story female audience checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -59129,7 +59129,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('names required rich contract fields in prose self review prompt', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -59193,7 +59193,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story showdown checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -59235,7 +59235,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story bridge unit checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -59268,7 +59268,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story upgrade rhythm checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -59320,7 +59320,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story conflict structure checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -59362,7 +59362,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story character behavior checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -59425,7 +59425,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story asset linkage checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -59465,7 +59465,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story state tracking checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -59515,7 +59515,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story intent confirmation checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -59561,7 +59561,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce write-preparation execution checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -59608,7 +59608,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce next-chapter quality plan receipts', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -59650,7 +59650,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns next-chapter quality plan receipt sync for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildNextChapterQualityPlanReceiptSyncReport')
@@ -59822,7 +59822,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns write-preparation receipt sync for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const draftReturnBlock = readPostDeliveryStoryStateUpdateSource()
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
@@ -59832,7 +59832,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns Step 2 preparation syncs in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildSourceReadinessSyncReport(project, updated, finalReviewContextPackage, finalText)')
@@ -59846,7 +59846,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('persists the style fingerprint snapshot through the story state machine update', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const prepareStart = source.indexOf('const prepareStoryStateUpdate = async')
     const prepareEnd = source.indexOf('const updateStoryStateMachine = async', prepareStart)
     const prepareBlock = source.slice(prepareStart, prepareEnd)
@@ -59863,7 +59863,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns status filter receipt sync for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildStatusFilterReceiptSyncReport')
@@ -59873,7 +59873,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns prose craft step-3 syncs for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildProseCraftSyncReport(project, updated, contextPackage, finalText)')
@@ -59885,7 +59885,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns story quality step-3 syncs in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildStoryLoopSyncReport(project, updated, contextPackage, finalText)')
@@ -59899,7 +59899,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns narrative technique step-3 syncs in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildChapterHookSyncReport(project, updated, contextPackage, finalText)')
@@ -59919,7 +59919,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns long-form contract syncs in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildContinuityHeatSyncReport(project, updated, contextPackage, finalText)')
@@ -59979,7 +59979,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns serial quality assurance syncs in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildStoryDriveSyncReport(project, updated, contextPackage, finalText)')
@@ -60003,7 +60003,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns deterministic base step-3 syncs in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildProseMetaSyncReport(project, updated, contextPackage, finalText)')
@@ -60015,7 +60015,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns chapter handoff sync for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildChapterHandoffSyncReport(project, updated, contextPackage, finalText)')
@@ -60023,7 +60023,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns state tracking sync for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildStateTrackingSyncReport(project, updated, contextPackage, finalText)')
@@ -60031,7 +60031,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns punctuation tone sync for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildPunctuationToneSyncReport(project, updated, contextPackage, finalText)')
@@ -60039,7 +60039,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns asset linkage sync for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildAssetLinkageSyncReport(project, updated, contextPackage, finalText)')
@@ -60047,7 +60047,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce chapter handoff checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -60081,7 +60081,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('wires deterministic chapter handoff hard risks into normalized self review', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewBlock = source.slice(
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
@@ -60105,7 +60105,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story prose meta checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -60140,7 +60140,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story story loop checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -60180,7 +60180,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story emotional arc checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -60236,7 +60236,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story chapter hook checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -60278,7 +60278,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story paragraph hook checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -60314,7 +60314,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story suspense checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -60361,7 +60361,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story reversal checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -60397,7 +60397,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story opening checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -60436,7 +60436,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review to enforce opening hook strategy contract', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -60749,7 +60749,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story prose craft checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -60837,7 +60837,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose generation self review and revision to enforce oh-story subject name rhythm', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const promptSectionsSource = readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
@@ -60871,7 +60871,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose generation self review and revision to enforce oh-story natural paragraph rhythm', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
     const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
@@ -60898,7 +60898,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose generation self review and revision to enforce oh-story specific character-count expression guard', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
     const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
@@ -60923,7 +60923,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose generation self review and revision to enforce oh-story external fact research guard', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
     const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
@@ -60949,7 +60949,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose generation self review and revision to enforce oh-story supporting-character buffer zones', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
     const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
@@ -60974,7 +60974,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose generation self review and revision to enforce oh-story section density diagnosis', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const promptSectionsSource = readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
@@ -61024,7 +61024,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose generation self review and revision to enforce oh-story event content ratio', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const promptSectionsSource = readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
@@ -61054,7 +61054,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce scene-card density execution', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -61078,7 +61078,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce scene-card sensory anchors', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -61098,7 +61098,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose generation self review and revision to enforce scene-card serial risk repairs', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
     const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
@@ -61131,7 +61131,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose generation to output per-scene scene-card execution receipts', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
     const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
@@ -61155,7 +61155,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose generation to output top-level oh-story delivery receipts for storage', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
     const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
@@ -61174,7 +61174,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce artifact protocol receipts', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -61194,7 +61194,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to verify scene-card execution receipts', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -61218,7 +61218,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story quality audit checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -61279,7 +61279,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose self review and revision to enforce oh-story punctuation tone checks', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -61315,7 +61315,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('asks prose generation self review and revision to enforce oh-story punctuation function beats', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
     const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
@@ -61342,7 +61342,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('keeps prose revision receipts for post-revision quality audit', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const revisionPrompt = source.slice(
       source.indexOf('const buildProseRevisionPrompt'),
       source.indexOf('const shouldReviseProse'),
@@ -61382,7 +61382,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('keeps nested oh-story revision receipts for post-revision quality audit', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const revisionParseBlock = source.slice(
       source.indexOf('const revisionPayload = getNovelPayload(revisionResult)'),
       source.indexOf('const runCommercialEditorRewrite', source.indexOf('const revisionPayload = getNovelPayload(revisionResult)')),
@@ -61416,7 +61416,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('normalizes camelCase review control fields from model output', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewNormalizeStart = source.indexOf('const rawReviewIssues = [')
     const reviewNormalizeBlock = source.slice(
       reviewNormalizeStart,
@@ -62431,7 +62431,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('reports review stage status from quality gate decisions', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const reviewStart = source.indexOf("await onStage('review', { status: 'running' })")
     const qualityGateStart = source.indexOf('let qualityGateReview = buildQualityGateReviewWithDeterministicCleanup')
     const reviewBlock = source.slice(reviewStart, qualityGateStart)

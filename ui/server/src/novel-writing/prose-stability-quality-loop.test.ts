@@ -33,7 +33,7 @@ const craftRiskText = [
 
 describe('prose stability quality loop', () => {
   test('classifies wall-text, static-environment, and decorative-detail scans as advisory rather than hard invalidity', () => {
-    const source = readFileSync(join(import.meta.dir, '../routes/novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const start = source.indexOf('export function scanProseForQualityLoop')
     const end = source.indexOf('export function buildFocusedQualityCoreContract', start)
     const scanSource = source.slice(start, end)

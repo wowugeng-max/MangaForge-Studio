@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 describe('prose candidate continuity wiring', () => {
   test('guards editor, meme polish, and quality revision replacements with the shared continuity-safe selector', () => {
-    const routeSource = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const routeSource = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const qualityLoopSource = readFileSync(join(import.meta.dir, '../novel-writing/prose-quality-loop.ts'), 'utf8')
     const sharedSelector = 'selectContinuitySafeProseCandidate'
 

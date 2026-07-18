@@ -1427,7 +1427,7 @@ describe('novel writing service prose quality wiring', () => {
   })
 
   test('rechecks revised prose before advisory admission classification', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const qualityLoopStart = source.indexOf('let qualityLoop: Awaited<ReturnType<typeof runProseQualityLoop>>')
     const gateStart = source.indexOf('const preStoreQualityDecision =', qualityLoopStart)
     const reviewCallbackStart = source.indexOf('review: async ({ prompt, round, attempt }) => {', qualityLoopStart)
@@ -1631,7 +1631,7 @@ describe('novel writing service prose quality wiring', () => {
   })
 
   test('records caught editor, meme, and readability failures as admission warnings', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const editorCatch = source.slice(source.indexOf('} catch (editorError)'), source.indexOf('const postEditorWordTargetCheck'))
     const memeCatch = source.slice(source.indexOf('} catch (memeError)'), source.indexOf('const postMemeWordTargetCheck'))
     const readabilityStart = source.indexOf('} catch (readabilityError)')
@@ -1905,7 +1905,7 @@ describe('novel writing service prose quality wiring', () => {
   })
 
   test('attempts accepted prose memory after chapter storage without depending on a returned record', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
     const storageStart = source.indexOf('acceptance = await commitNovelChapterAcceptance(activeWorkspace, {')
     const memoryStore = source.indexOf('await storeChapterProseMemory(project, chapter.chapter_no, finalText)', storageStart)
     const storyState = source.indexOf("runPostCommitBestEffort('story_state_stage'", storageStart)
