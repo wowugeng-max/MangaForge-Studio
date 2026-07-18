@@ -19,6 +19,7 @@ import {
   storyPlanningWorkspaceSource,
   autoCreationDirectorWorkspaceSource,
   writingCockpitModelSource,
+  writingRecommendationModelSource,
 } from './workspaceUiShellSource'
 
 describe('commercial writing workspace UI shell b', () => {
@@ -27,7 +28,7 @@ describe('commercial writing workspace UI shell b', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = writingCockpitModelSource()
-    const recommendationModel = source('writingRecommendationModel.ts')
+    const recommendationModel = writingRecommendationModelSource()
     const service = writingServiceSource()
     const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
@@ -59,7 +60,7 @@ describe('commercial writing workspace UI shell b', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = writingCockpitModelSource()
-    const recommendationModel = source('writingRecommendationModel.ts')
+    const recommendationModel = writingRecommendationModelSource()
     const service = writingServiceSource()
     const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
@@ -83,7 +84,7 @@ describe('commercial writing workspace UI shell b', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = writingCockpitModelSource()
-    const recommendationModel = source('writingRecommendationModel.ts')
+    const recommendationModel = writingRecommendationModelSource()
     const service = writingServiceSource()
     const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
@@ -103,7 +104,7 @@ describe('commercial writing workspace UI shell b', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = writingCockpitModelSource()
-    const recommendationModel = source('writingRecommendationModel.ts')
+    const recommendationModel = writingRecommendationModelSource()
     const service = writingServiceSource()
     const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
@@ -122,7 +123,7 @@ describe('commercial writing workspace UI shell b', () => {
   test('shows reader expectation debt carry-over in the draft brief', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
-    const recommendationModel = source('writingRecommendationModel.ts')
+    const recommendationModel = writingRecommendationModelSource()
     const repairPrompt = [source('repair-task/prompt.ts'), source('repair-task/prompt-lines.ts'), source('repair-task/prompt-lines-quality.ts')].join('\n')
     const service = writingServiceSource()
 
@@ -201,7 +202,7 @@ describe('commercial writing workspace UI shell b', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCenterCss = source('WorkspaceCenter.css')
     const cockpitModel = writingCockpitModelSource()
-    const recommendationModel = source('writingRecommendationModel.ts')
+    const recommendationModel = writingRecommendationModelSource()
     const service = writingServiceSource()
     const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
@@ -232,7 +233,7 @@ describe('commercial writing workspace UI shell b', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = writingCockpitModelSource()
-    const recommendationModel = source('writingRecommendationModel.ts')
+    const recommendationModel = writingRecommendationModelSource()
     const service = writingServiceSource()
     const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
@@ -251,7 +252,7 @@ describe('commercial writing workspace UI shell b', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = writingCockpitModelSource()
-    const recommendationModel = source('writingRecommendationModel.ts')
+    const recommendationModel = writingRecommendationModelSource()
     const reviewAnnotations = source('ReviewAnnotationsDrawer.tsx')
     const workspace = projectWorkspaceSource()
 
@@ -430,7 +431,7 @@ describe('commercial writing workspace UI shell b', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const model = writingCockpitModelSource()
-    const recommendationModel = source('writingRecommendationModel.ts')
+    const recommendationModel = writingRecommendationModelSource()
     const editorRoutes = editorRoutesSource()
 
     expect(workspaceCenter).toContain('deliveryRiskConvergence')
@@ -478,7 +479,7 @@ describe('commercial writing workspace UI shell b', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const writingModel = writingCockpitModelSource()
-    const recommendationModel = source('writingRecommendationModel.ts')
+    const recommendationModel = writingRecommendationModelSource()
     const service = writingServiceSource()
     const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
@@ -499,7 +500,7 @@ describe('commercial writing workspace UI shell b', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const writingModel = writingCockpitModelSource()
-    const recommendationModel = source('writingRecommendationModel.ts')
+    const recommendationModel = writingRecommendationModelSource()
     const service = writingServiceSource()
     const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
@@ -619,7 +620,7 @@ describe('commercial writing workspace UI shell b', () => {
     expect(projectWorkspace).toContain('chapter_benchmark_sample_bank')
 
     const cockpitModel = writingCockpitModelSource()
-    const recommendationModel = source('writingRecommendationModel.ts')
+    const recommendationModel = writingRecommendationModelSource()
     const service = writingServiceSource()
     const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
     expect(cockpitModel).toContain('buildChapterBenchmarkSyncSummary')
@@ -816,7 +817,7 @@ describe('commercial writing workspace UI shell b', () => {
   test('shows longform memory capsule in planning and chapter launch workflow', () => {
     const planningWorkspace = storyPlanningWorkspaceSource()
     const workspaceCenter = workspaceCenterSource()
-    const recommendationModel = source('writingRecommendationModel.ts')
+    const recommendationModel = writingRecommendationModelSource()
     const planningModel = planningWorkspaceSource()
     const writingService = writingServiceSource()
 
@@ -992,7 +993,7 @@ describe('commercial writing workspace UI shell b', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const writingModel = writingCockpitModelSource()
-    const recommendationModel = source('writingRecommendationModel.ts')
+    const recommendationModel = writingRecommendationModelSource()
 
     expect(writingModel).toContain('volumeBeatSync')
     expect(writingModel).toContain('buildVolumeBeatSyncSummary')

@@ -19,6 +19,7 @@ import {
   storyPlanningWorkspaceSource,
   autoCreationDirectorWorkspaceSource,
   writingCockpitModelSource,
+  writingRecommendationModelSource,
 } from './workspaceUiShellSource'
 
 describe('commercial writing workspace UI shell a', () => {
@@ -225,7 +226,7 @@ describe('commercial writing workspace UI shell a', () => {
   test('surfaces the oh-story chapter blueprint contract in the writing brief card', () => {
     const component = workspaceCenterSource()
     const css = source('WorkspaceCenter.css')
-    const model = source('writingRecommendationModel.ts')
+    const model = writingRecommendationModelSource()
     const projectWorkspace = projectWorkspaceSource()
 
     expect(model).toContain('chapter_blueprint')
@@ -291,7 +292,7 @@ describe('commercial writing workspace UI shell a', () => {
     const component = workspaceCenterSource()
     const css = source('WorkspaceCenter.css')
     const model = writingCockpitModelSource()
-    const recommendationModel = source('writingRecommendationModel.ts')
+    const recommendationModel = writingRecommendationModelSource()
 
     expect(model).toContain('blueprintReceipt')
     expect(model).toContain('revisionReceipt')
@@ -747,7 +748,7 @@ describe('commercial writing workspace UI shell a', () => {
   test('shows character growth obligations in the chapter pre-draft brief', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
-    const model = source('writingRecommendationModel.ts')
+    const model = writingRecommendationModelSource()
     const service = writingServiceSource()
 
     expect(workspaceCenter).toContain('人物成长承接')
@@ -786,7 +787,7 @@ describe('commercial writing workspace UI shell a', () => {
   test('shows reader retention radar in the chapter pre-draft brief', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
-    const model = source('writingRecommendationModel.ts')
+    const model = writingRecommendationModelSource()
     const service = writingServiceSource()
 
     expect(workspaceCenter).toContain('追读雷达')
@@ -804,7 +805,7 @@ describe('commercial writing workspace UI shell a', () => {
   test('shows story unit task in the chapter pre-draft brief', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
-    const model = source('writingRecommendationModel.ts')
+    const model = writingRecommendationModelSource()
     const service = writingServiceSource()
 
     expect(workspaceCenter).toContain('剧情单元任务')
@@ -821,7 +822,7 @@ describe('commercial writing workspace UI shell a', () => {
   test('shows volume climax budget in the chapter pre-draft brief', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
-    const model = source('writingRecommendationModel.ts')
+    const model = writingRecommendationModelSource()
     const service = writingServiceSource()
 
     expect(workspaceCenter).toContain('卷级爆点预算')
@@ -837,7 +838,7 @@ describe('commercial writing workspace UI shell a', () => {
   test('shows recent fatigue avoidance in the chapter pre-draft brief', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
-    const model = source('writingRecommendationModel.ts')
+    const model = writingRecommendationModelSource()
     const service = writingServiceSource()
 
     expect(workspaceCenter).toContain('近10章疲劳规避')
@@ -854,7 +855,7 @@ describe('commercial writing workspace UI shell a', () => {
   test('shows strong story and reader pull execution in the chapter pre-draft brief', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
-    const model = source('writingRecommendationModel.ts')
+    const model = writingRecommendationModelSource()
     const service = writingServiceSource()
 
     expect(workspaceCenter).toContain('弃读预警')
@@ -881,7 +882,7 @@ describe('commercial writing workspace UI shell a', () => {
   test('shows chapter innovation execution in the pre-draft brief', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
-    const model = source('writingRecommendationModel.ts')
+    const model = writingRecommendationModelSource()
     const service = writingServiceSource()
 
     expect(workspaceCenter).toContain('创新执行')
@@ -898,7 +899,7 @@ describe('commercial writing workspace UI shell a', () => {
   test('shows signature scene repair in the pre-draft brief', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
-    const model = source('writingRecommendationModel.ts')
+    const model = writingRecommendationModelSource()
     const service = writingServiceSource()
 
     expect(workspaceCenter).toContain('强场面补位')
@@ -915,7 +916,7 @@ describe('commercial writing workspace UI shell a', () => {
   test('shows longform battle obligations in the pre-draft brief', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
-    const model = source('writingRecommendationModel.ts')
+    const model = writingRecommendationModelSource()
     const service = writingServiceSource()
     const promptSections = serverSource('novel-writing/prose-generation-prompt-sections.ts')
 
@@ -933,7 +934,7 @@ describe('commercial writing workspace UI shell a', () => {
   test('shows governance recheck memory in the pre-draft brief', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
-    const model = source('writingRecommendationModel.ts')
+    const model = writingRecommendationModelSource()
     const service = writingServiceSource()
     const promptSections = serverSource('novel-writing/prose-generation-prompt-sections.ts')
 
@@ -962,7 +963,7 @@ describe('commercial writing workspace UI shell a', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const writingModel = writingCockpitModelSource()
-    const recommendationModel = source('writingRecommendationModel.ts')
+    const recommendationModel = writingRecommendationModelSource()
     const service = writingServiceSource()
     const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 

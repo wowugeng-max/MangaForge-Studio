@@ -25,6 +25,7 @@ let editorRoutesSourceCache: string | null = null
 let commercialOpsRoutesSourceCache: string | null = null
 let directorModelSourceCache: string | null = null
 let writingCockpitModelSourceCache: string | null = null
+let writingRecommendationModelSourceCache: string | null = null
 let taskCenterSourceCache: string | null = null
 let projectWorkspaceSourceCache: string | null = null
 let autoCreationDirectorWorkspaceSourceCache: string | null = null
@@ -238,6 +239,17 @@ export function writingCockpitModelSource() {
     sourceCached('writing-cockpit/model/cockpit-planning.ts', localSourceCache),
   ].join('\n')
   return writingCockpitModelSourceCache
+}
+
+export function writingRecommendationModelSource() {
+  if (writingRecommendationModelSourceCache != null) return writingRecommendationModelSourceCache
+  writingRecommendationModelSourceCache = [
+    sourceCached('writingRecommendationModel.ts', localSourceCache),
+    sourceCached('writing-recommendation-types.ts', localSourceCache),
+    sourceCached('writing-recommendation-draft-brief.ts', localSourceCache),
+    sourceCached('writing-recommendation-core.ts', localSourceCache),
+  ].join('\n')
+  return writingRecommendationModelSourceCache
 }
 
 
