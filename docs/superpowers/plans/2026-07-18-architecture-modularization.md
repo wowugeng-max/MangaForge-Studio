@@ -570,6 +570,8 @@ cd ui/server && bun test src/novel/mutation-contract.test.ts src/novel/sqlite-pe
 
 ## Progress log (agent)
 
+- 2026-07-19 goal-continue XII: novel-project-bible helpers extract; prior XI setting helpers + memory-longform. Focused bible/setting tests green. Remaining: NWS view ~1593 composition, useNovelStudioController ~1215, NovelCreateWizard ~1449, provider-runtime DI, craft/audience monofiles, full write-path smoke/memory.
+
 - 2026-07-19 goal-continue XI: memory-longform contracts memory/battle/brief; novel-setting helpers extract (~408 route register). Focused setting/serial/writing unit tests green. Remaining: NWS view ~1593, useNovelStudioController ~1215, NovelCreateWizard ~1449, provider-runtime DI, craft/audience monofiles, full write-path smoke/memory.
 
 - 2026-07-19 goal-continue X: serial-momentum-chapter-states shared/core/extended; prior IX risk delivery/governance splits. Focused Task11 233+ and serial-momentum/readability joins green. Remaining: NWS view ~1593, useNovelStudioController ~1215, NovelCreateWizard ~1449, provider-runtime DI, craft/audience monofiles, full write-path smoke/memory.
