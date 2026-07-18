@@ -103,6 +103,7 @@ import {
 import { renderCommercialResult } from './novel-workspace/shell/workspace-commercial-result'
 import { NovelWorkspaceTopBar } from './novel-workspace/shell/workspace-topbar'
 import { NovelWorkspaceDeferredSurfaces } from './novel-workspace/shell/workspace-deferred-surfaces'
+import { NovelWorkspaceBody } from './novel-workspace/shell/workspace-body'
 import {
   AgentAuditDrawer,
   AgentExecutionModal,
@@ -762,7 +763,6 @@ export default function NovelProjectWorkspace() {
   }
 
   const {
-    loading,
     selectedProject,
     setSelectedProject,
     worldbuilding,
@@ -6318,103 +6318,80 @@ export default function NovelProjectWorkspace() {
         workspaceAreaTabs={workspaceAreaTabs}
       />
 
-      {/* ═══ BODY: 3-column layout ═══ */}
-      <div className="novel-workspace-body" style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
-
-        <div className={directoryShellClassName}>
-          <ChapterDirectorySidebar
-            collapsed={directoryCollapsed}
-            onCollapsedChange={handleDirectoryCollapsedChange}
-            planningMode={workspaceArea === 'storyPlanning'}
-            proseProgress={proseProgress}
-            chapters={sortedChapters}
-            proseChapterCount={proseChapters.length}
-            activeChapterId={activeChapterId}
-            materialScore={activeChapterDiagnosticsData?.material_score}
-            commercialReadiness={commercialReadiness}
-            activeTaskCount={activeTasks.length + activeKnowledgeJobCount}
-            onOpenProductionDesk={() => navigate(`/novel/workspace/${projectId}/production`)}
-            onOpenTaskCenter={() => setTaskCenterOpen(true)}
-            onOpenOutlineTree={() => setOutlineTreeOpen(true)}
-            onOpenChapterDrawer={() => setChapterDrawerOpen(true)}
-            onCreateChapter={() => openEditor('chapter')}
-            onSelectChapter={(chapterId) => { void selectChapterForWriting(chapterId) }}
-          />
-        </div>
-
-        <div className="novel-workspace-main" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {showGlobalWritingGuidance && (
-            <div className="novel-workspace-cockpit" style={{ flexShrink: 1, minHeight: 0 }}>
-              <WritingCockpitPanel
-                model={writingCockpitModel}
-                loading={stepProseLoading || generatingProse || generatingSceneCards || diagnosticsLoading || contextPackageLoading || commercialToolLoading === 'storyStateSync'}
-                forceCollapsed={isImmersiveShell}
-                primaryActionOverride={cockpitPrimaryActionOverride}
-                onOpenProductionOps={() => setWorkspaceArea('productionOps')}
-                onAction={handleWritingCockpitAction}
-              />
-            </div>
-          )}
-          {showGlobalWritingGuidance && renderSerialPipeline()}
-          <Suspense fallback={null}>
-            {renderWorkspaceArea()}
-          </Suspense>
-        </div>
-
-        <div className={rightPanelOpen ? 'novel-workspace-reference-shell is-open' : 'novel-workspace-reference-shell'}>
-          <ReferencePanel
-            open={rightPanelOpen}
-            activeTab={rightPanelTab}
-            worldbuilding={worldbuilding}
-            characters={characters}
-            outlines={outlines}
-            selectedProject={selectedProject}
-            projectId={projectId}
-            selectedModelId={selectedModelId}
-            referenceReports={referenceReports}
-            proseQualityReports={proseQualityReports}
-            editorReports={editorReports}
-            editorRevisionReports={editorRevisionReports}
-            bookReviews={bookReviews}
-            activeChapter={activeChapter}
-            activeChapterId={activeChapterId}
-            activeChapterUpdatedAt={activeChapter?.updated_at || ''}
-            chapterVersions={chapterVersions}
-            chapterVersionsLoading={chapterVersionsLoading}
-            proseQualityLoading={proseQualityLoading}
-            rollingBackVersionId={rollingBackVersionId}
-            onClose={() => setRightPanelOpen(false)}
-            onOpen={() => setRightPanelOpen(true)}
-            onTabChange={setRightPanelTab}
-            onEdit={(kind, item) => openEditor(kind, item)}
-            onOpenCreativeCards={() => setCreativeCardsOpen(true)}
-            onOpenStoryStateEditor={openStoryStateEditor}
-            onApplyEditorRevision={applyEditorRevision}
-            onRefreshProseQuality={() => refreshActiveProseQuality('manual_refresh')}
-            onRollbackVersion={rollbackChapterVersion}
-            onOpenVersionDetail={setChapterVersionDetail}
-          />
-        </div>
-      </div>
-
-      <CreativeAssistantPanel
-        open={creativeAssistantOpen}
-        loading={creativeAssistantLoading}
-        mode={creativeAssistantMode}
-        result={creativeAssistantResult}
-        project={selectedProject}
+      <NovelWorkspaceBody
         activeChapter={activeChapter}
-        selectedText={creativeAssistantSelectedText}
-        contextPackage={activeContextPackageData}
+        activeChapterDiagnosticsData={activeChapterDiagnosticsData}
+        activeChapterId={activeChapterId}
+        activeContextPackageData={activeContextPackageData}
+        activeKnowledgeJobCount={activeKnowledgeJobCount}
+        activeTasks={activeTasks}
+        applyEditorRevision={applyEditorRevision}
+        bookReviews={bookReviews}
+        chapterId={chapterId}
+        chapterVersions={chapterVersions}
+        chapterVersionsLoading={chapterVersionsLoading}
+        characters={characters}
+        cockpitPrimaryActionOverride={cockpitPrimaryActionOverride}
+        commercialReadiness={commercialReadiness}
+        commercialToolLoading={commercialToolLoading}
+        contextPackage={contextPackage}
+        contextPackageLoading={contextPackageLoading}
+        copyCreativeAssistantCard={copyCreativeAssistantCard}
+        creativeAssistantError={creativeAssistantError}
+        creativeAssistantLoading={creativeAssistantLoading}
+        creativeAssistantMode={creativeAssistantMode}
+        creativeAssistantOpen={creativeAssistantOpen}
+        creativeAssistantResult={creativeAssistantResult}
+        creativeAssistantSelectedText={creativeAssistantSelectedText}
+        diagnosticsLoading={diagnosticsLoading}
+        directoryCollapsed={directoryCollapsed}
+        directoryShellClassName={directoryShellClassName}
+        editorReports={editorReports}
+        editorRevisionReports={editorRevisionReports}
+        generatingProse={generatingProse}
+        generatingSceneCards={generatingSceneCards}
+        handleDirectoryCollapsedChange={handleDirectoryCollapsedChange}
+        handleWritingCockpitAction={handleWritingCockpitAction}
+        isImmersiveShell={isImmersiveShell}
+        openEditor={openEditor}
+        openStoryStateEditor={openStoryStateEditor}
+        outlines={outlines}
+        projectId={projectId}
+        proseChapters={proseChapters}
+        proseProgress={proseProgress}
+        proseQualityLoading={proseQualityLoading}
+        proseQualityReports={proseQualityReports}
+        referenceReports={referenceReports}
+        refreshActiveProseQuality={refreshActiveProseQuality}
+        renderSerialPipeline={renderSerialPipeline}
+        renderWorkspaceArea={renderWorkspaceArea}
         reviews={reviews}
+        rightPanelOpen={rightPanelOpen}
+        rightPanelTab={rightPanelTab}
+        rollbackChapterVersion={rollbackChapterVersion}
+        rollingBackVersionId={rollingBackVersionId}
+        runCreativeAssistant={runCreativeAssistant}
         runRecords={runRecords}
-        error={creativeAssistantError}
-        onClose={() => setCreativeAssistantOpen(false)}
-        onModeChange={setCreativeAssistantMode}
-        onRun={runCreativeAssistant}
-        onCopyCard={copyCreativeAssistantCard}
+        selectChapterForWriting={selectChapterForWriting}
+        selectedModelId={selectedModelId}
+        selectedProject={selectedProject}
+        setChapterDrawerOpen={setChapterDrawerOpen}
+        setChapterVersionDetail={setChapterVersionDetail}
+        setCreativeAssistantMode={setCreativeAssistantMode}
+        setCreativeAssistantOpen={setCreativeAssistantOpen}
+        setCreativeCardsOpen={setCreativeCardsOpen}
+        setOutlineTreeOpen={setOutlineTreeOpen}
+        setRightPanelOpen={setRightPanelOpen}
+        setRightPanelTab={setRightPanelTab}
+        setTaskCenterOpen={setTaskCenterOpen}
+        setWorkspaceArea={setWorkspaceArea}
+        showGlobalWritingGuidance={showGlobalWritingGuidance}
+        sortedChapters={sortedChapters}
+        stepProseLoading={stepProseLoading}
+        workspaceArea={workspaceArea}
+        worldbuilding={worldbuilding}
+        writingCockpitModel={writingCockpitModel}
       />
-
       <NovelWorkspaceDeferredSurfaces
         acceptChapterVersion={acceptChapterVersion}
         activeChapter={activeChapter}
