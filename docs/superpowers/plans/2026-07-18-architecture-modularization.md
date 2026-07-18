@@ -27,10 +27,12 @@
 | 7 editor/core routes packages | largely done | editor, core, commercial-ops, generation, planning package-split |
 | 8 auto-creation model package | largely done | risk multi-leaf + director monotest 4-way split + leaf binding fixes |
 | 9 cockpit + repair prompt | largely done | cockpit monotest 4-way; repair monotest 4-way; prompt multi-leaf |
-| 10 shell UI split | in progress | TaskCenter multi-leaf; NWS commercial views/ops leaf; ACD/StoryPlanning chrome leaves; main ~5.6k |
+| 10 shell UI split | in progress | commercial views/ops/incubator leaves; ACD/StoryPlanning chrome; deferred types; NWS ~5.5k |
 | 11 final hardening | open | remaining size caps + broad regression |
 
 Recent extracts (continued):
+- 2026-07-18 night+: fixed benchmark-structure leaf; NWS down to ~5.5k via commercial/incubator/diff views; monotests heavily sliced.
+
 - 2026-07-18 late night: generate-chapter acceptance-prep leaf; more monotest slices (contracts/memory/craft/receipts/expansion); deferred-surfaces types leaf.
 
 - 2026-07-18 night: NWS longform trends + remaining commercial diagnosis modal views extracted; commercial-result split to ops leaf; AutoCreation/StoryPlanning chrome helpers extracted; expansion/receipts/specialty monotests further sliced.
