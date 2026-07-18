@@ -81,6 +81,38 @@ import {
   uniqueSeedTexts,
 } from './builders'
 
+import {
+  annotateOutlineScaffoldDiagnostics,
+  asSeedArray,
+  attachProjectSeedDirector,
+  buildProjectSeedDiagnostics,
+  chapterTitleLooksStructural,
+  cleanSeedCharacterName,
+  compactSeedText,
+  describeLengthTarget,
+  ensureProjectSeedModelOutlines,
+  extractProjectSeedFactsFromText,
+  fallbackChapterDisplayTitle,
+  firstSeedText,
+  hasUsableProjectSeed,
+  inferSeedCharacterName,
+  inferSeedGenre,
+  mergeGeneratedFields,
+  mergeProjectSeedInput,
+  mergeRecoveredSeedPreferModelOutlines,
+  normalizeLengthTarget,
+  normalizeProjectSeedPayload,
+  parseNestedSeed,
+  projectSeedNeedsOutlineExpansion,
+  projectSeedOutlinesLookLikeLocalScaffold,
+  repairProjectSeedGaps,
+  resultContentPreview,
+  resultContentText,
+  seedFieldMissing,
+  stripLocalScaffoldOutlines,
+  uniqueSeedTexts,
+} from './builders-seed-outline'
+
 export function buildRecoverableProjectSeed(seed: any, idea = '', requestedTitle = '', requestedLengthTarget = '', result: any = null) {
   const lengthTarget = normalizeLengthTarget(requestedLengthTarget) || normalizeLengthTarget(seed?.length_target) || 'medium'
   const rawText = [

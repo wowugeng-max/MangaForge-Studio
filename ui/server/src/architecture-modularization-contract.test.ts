@@ -29,8 +29,11 @@ const HARD_CAPS: Record<string, number> = {
 }
 
 const SOFT_BASELINES: Record<string, number> = {
-  'routes/novel-editor/builders.ts': 4600,
-  'routes/novel-core/builders.ts': 3400,
+  'routes/novel-editor/builders.ts': 900,
+  'routes/novel-core/builders.ts': 120,
+  'routes/novel-core/builders-seed-outline.ts': 1800,
+  'routes/novel-editor/builders-delivery-risk-brief.ts': 700,
+  'routes/novel-editor/builders-revision-prompts.ts': 500,
   'routes/novel-writing-service.pre-draft-brief.test.ts': 50,
   'routes/novel-writing-service.pre-draft-brief.core-a.test.ts': 2300,
   'routes/novel-writing-service.pre-draft-brief.pipeline-a.test.ts': 2400,
