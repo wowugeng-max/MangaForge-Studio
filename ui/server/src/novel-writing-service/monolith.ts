@@ -17,11 +17,51 @@ export {
   buildFocusedQualityCoreContract,
   buildLegacyCompatibleSelfCheck,
 } from './quality/prose-quality-entry'
+export {
+  revisionReceiptRemainingRisk,
+  revisionReceiptMissingChangedEvidenceRisk,
+  revisionReceiptGenericEvidenceRisk,
+} from './quality/revision-receipt-risk'
+export {
+  uniqueObjectReferences,
+  preDraftExecutionReceiptSections,
+} from './quality/pre-draft-receipt-sections'
+export {
+  bindDeliveryRiskReceiptNormalizer,
+  mergeStructuredReviewFillPayload,
+  normalizeStructuredReviewFillCheck,
+  structuredReviewFillPayloadValues,
+  structuredReviewFillPayloadHasUsableField,
+} from './quality/review-fill'
+export {
+  mergeProseRevisionArtifacts,
+  meaningfulRevisionValue,
+  latestRevisionValue,
+  mergePreDraftExecutionReceipts,
+  mergeOhStoryDeliveryArtifacts,
+  REVISION_ARTIFACT_RECEIPT_FIELDS,
+  DELIVERY_ARTIFACT_RECEIPT_FIELDS,
+  PRE_DRAFT_ARTIFACT_RECEIPT_FIELDS,
+} from './revision/revision-artifacts'
 import { attachOhStoryDirectorToContextPackage } from './quality/prose-quality-entry'
 import {
   isMissingStructuredReviewCheck,
   missingStructuredReviewCheckFields,
 } from './quality/review-merge'
+import {
+  revisionReceiptRemainingRisk,
+} from './quality/revision-receipt-risk'
+import {
+  uniqueObjectReferences,
+  preDraftExecutionReceiptSections,
+} from './quality/pre-draft-receipt-sections'
+import {
+  bindDeliveryRiskReceiptNormalizer,
+  mergeStructuredReviewFillPayload,
+} from './quality/review-fill'
+import {
+  mergeProseRevisionArtifacts,
+} from './revision/revision-artifacts'
 import { camelizeSnakeField, compactBriefText } from './quality/text-utils'
 import { platformCheckNeedsCarryOver, deliveryRiskEvidenceSearchText, isGenericDeliveryRiskEvidence } from './quality/platform-carry-over'
 import { STRUCTURED_REVIEW_CHECK_FIELDS, STRUCTURED_REVIEW_REQUIRED_FIELDS } from './quality/structured-review-fields'
@@ -1436,204 +1476,6 @@ function chunkStructuredReviewFields(fields: string[], batchSize = 4) {
     chunks.push(fields.slice(index, index + size))
   }
   return chunks
-}
-
-function normalizeStructuredReviewFillCheck(value: any) {
-  if (!value || typeof value !== 'object') return value
-  const deliveredEvidence = compactBriefText(
-    value?.delivered_evidence
-    || value?.deliveredEvidence
-    || value?.evidence
-    || value?.changed_evidence
-    || value?.changedEvidence
-    || value?.chapter_evidence
-    || value?.chapterEvidence
-    || value?.source_excerpt
-    || value?.sourceExcerpt,
-  )
-  const status = compactBriefText(
-    value?.status
-    || value?.state
-    || (value?.delivered === false || revisionReceiptRemainingRisk(value) ? 'fail' : 'pass'),
-  ).toLowerCase()
-  return {
-    ...value,
-    status,
-    evidence: compactBriefText(value?.evidence || deliveredEvidence || value?.remaining_risk || value?.remainingRisk || value?.fix),
-    delivered_evidence: value?.delivered_evidence || value?.deliveredEvidence || deliveredEvidence,
-  }
-}
-
-function structuredReviewFillPayloadValues(payload: any, snakeField: string, camelField: string) {
-  return [
-    ...asArray(payload?.[snakeField] || payload?.[camelField]),
-    ...preDraftExecutionReceiptSections(payload)
-      .flatMap((section: any) => asArray(section?.[snakeField] || section?.[camelField])),
-  ].map(normalizeStructuredReviewFillCheck)
-}
-
-function structuredReviewFillPayloadHasUsableField(payload: any, snakeField: string, camelField: string) {
-  const values = structuredReviewFillPayloadValues(payload, snakeField, camelField)
-  return values.some((item: any) => !isMissingStructuredReviewCheck(item))
-}
-
-export function mergeStructuredReviewFillPayload(review: any, payload: any, contextPackage: any, chapterText: string) {
-  if (!payload || typeof payload !== 'object') return review
-  const merged: any = {
-    ...review,
-    structured_fill_diagnostics: payload?.structured_fill_diagnostics || payload?.structuredFillDiagnostics || review?.structured_fill_diagnostics,
-  }
-  for (const [snakeField, camelField] of STRUCTURED_REVIEW_CHECK_FIELDS) {
-    if (!structuredReviewFillPayloadHasUsableField(payload, snakeField, camelField)) continue
-    merged[snakeField] = structuredReviewFillPayloadValues(payload, snakeField, camelField)
-      .filter((item: any) => !isMissingStructuredReviewCheck(item))
-  }
-  if (Array.isArray(payload?.delivery_risk_receipts) || Array.isArray(payload?.deliveryRiskReceipts)) {
-    merged.delivery_risk_receipts = normalizeDeliveryRiskReceipts(payload, contextPackage, chapterText)
-  }
-  if (payload?.next_chapter_quality_plan || payload?.nextChapterQualityPlan) {
-    merged.next_chapter_quality_plan = payload.next_chapter_quality_plan || payload.nextChapterQualityPlan
-  }
-  if (Array.isArray(payload?.issues) || Array.isArray(payload?.findings)) {
-    merged.issues = [
-      ...asArray(review?.issues),
-      ...asArray(payload?.issues),
-      ...asArray(payload?.findings),
-    ].map(normalizeIssue)
-  }
-  return merged
-}
-
-
-
-
-
-
-
-
-const REVISION_ARTIFACT_RECEIPT_FIELDS = [
-  ['revision_context_receipts', 'revisionContextReceipts'],
-  ['revision_receipts', 'revisionReceipts'],
-  ['deslop_repair_receipts', 'deslopRepairReceipts'],
-  ['quality_audit_repair_receipts', 'qualityAuditRepairReceipts'],
-  ['artifact_protocol_receipts', 'artifactProtocolReceipts'],
-]
-
-const DELIVERY_ARTIFACT_RECEIPT_FIELDS = [
-  ['scene_card_receipts', 'sceneCardReceipts'],
-  ['delivery_risk_receipts', 'deliveryRiskReceipts'],
-  ...REVISION_ARTIFACT_RECEIPT_FIELDS,
-]
-
-const PRE_DRAFT_ARTIFACT_RECEIPT_FIELDS = [
-  ['status_filter_receipts', 'statusFilterReceipts'],
-  ['source_readiness_checks', 'sourceReadinessChecks'],
-  ['artifact_protocol_receipts', 'artifactProtocolReceipts'],
-  ['write_preparation_checks', 'writePreparationChecks'],
-  ['intent_confirmation_checks', 'intentConfirmationChecks'],
-  ['benchmark_recall_checks', 'benchmarkRecallChecks'],
-  ['style_sample_checks', 'styleSampleChecks'],
-  ['next_chapter_quality_plan_receipts', 'nextChapterQualityPlanReceipts'],
-  ['fallback_usage_receipts', 'fallbackUsageReceipts'],
-]
-
-function artifactArray(value: any) {
-  if (value === undefined || value === null) return []
-  return Array.isArray(value) ? value : [value]
-}
-
-function uniqueArtifactArray(items: any[]) {
-  const seen = new Set<string>()
-  const result: any[] = []
-  for (const item of items) {
-    if (item === undefined || item === null) continue
-    const key = typeof item === 'object'
-      ? stringifyRouteJsonSafely(item, undefined, 2000)
-      : String(item)
-    if (seen.has(key)) continue
-    seen.add(key)
-    result.push(item)
-  }
-  return result
-}
-
-function mergeArtifactArrayField(target: any, previous: any, next: any, snakeField: string, camelField: string) {
-  const merged = uniqueArtifactArray([
-    ...artifactArray(previous?.[snakeField]),
-    ...artifactArray(previous?.[camelField]),
-    ...artifactArray(next?.[snakeField]),
-    ...artifactArray(next?.[camelField]),
-  ])
-  if (merged.length > 0) target[snakeField] = merged
-}
-
-function meaningfulRevisionValue(value: any) {
-  if (value === undefined || value === null) return false
-  if (Array.isArray(value)) return value.length > 0
-  if (typeof value === 'string') return value.trim().length > 0
-  if (typeof value === 'object') return Object.keys(value).length > 0
-  return true
-}
-
-function latestRevisionValue(next: any, previous: any, snakeField: string, camelField: string = snakeField) {
-  const nextValue = next?.[snakeField] ?? next?.[camelField]
-  if (meaningfulRevisionValue(nextValue)) return nextValue
-  const previousValue = previous?.[snakeField] ?? previous?.[camelField]
-  return meaningfulRevisionValue(previousValue) ? previousValue : nextValue
-}
-
-function mergePreDraftExecutionReceipts(previous: any, next: any) {
-  const previousReceipts = previous?.pre_draft_execution_receipts || previous?.preDraftExecutionReceipts || {}
-  const nextReceipts = next?.pre_draft_execution_receipts || next?.preDraftExecutionReceipts || {}
-  if (!meaningfulRevisionValue(previousReceipts) && !meaningfulRevisionValue(nextReceipts)) return null
-  const merged: any = {
-    ...previousReceipts,
-    ...nextReceipts,
-  }
-  for (const [snakeField, camelField] of PRE_DRAFT_ARTIFACT_RECEIPT_FIELDS) {
-    mergeArtifactArrayField(merged, previousReceipts, nextReceipts, snakeField, camelField)
-  }
-  return merged
-}
-
-function mergeOhStoryDeliveryArtifacts(previous: any, next: any) {
-  const previousDelivery = previous?.oh_story_delivery_receipts || previous?.ohStoryDeliveryReceipts || {}
-  const nextDelivery = next?.oh_story_delivery_receipts || next?.ohStoryDeliveryReceipts || {}
-  if (!meaningfulRevisionValue(previousDelivery) && !meaningfulRevisionValue(nextDelivery)) return null
-  const merged: any = {
-    ...previousDelivery,
-    ...nextDelivery,
-  }
-  for (const [snakeField, camelField] of DELIVERY_ARTIFACT_RECEIPT_FIELDS) {
-    mergeArtifactArrayField(merged, previousDelivery, nextDelivery, snakeField, camelField)
-  }
-  const preDraftExecutionReceipts = mergePreDraftExecutionReceipts(previousDelivery, nextDelivery)
-  if (preDraftExecutionReceipts) merged.pre_draft_execution_receipts = preDraftExecutionReceipts
-  return merged
-}
-
-export function mergeProseRevisionArtifacts(previousRevision: any = null, nextRevision: any = null) {
-  if (!meaningfulRevisionValue(previousRevision)) return nextRevision || null
-  if (!meaningfulRevisionValue(nextRevision)) return previousRevision || null
-  const merged: any = {
-    ...previousRevision,
-    ...nextRevision,
-  }
-  for (const [snakeField, camelField] of REVISION_ARTIFACT_RECEIPT_FIELDS) {
-    mergeArtifactArrayField(merged, previousRevision, nextRevision, snakeField, camelField)
-  }
-  const ohStoryDeliveryReceipts = mergeOhStoryDeliveryArtifacts(previousRevision, nextRevision)
-  if (ohStoryDeliveryReceipts) merged.oh_story_delivery_receipts = ohStoryDeliveryReceipts
-  for (const [snakeField, camelField] of [
-    ['scene_breakdown', 'sceneBreakdown'],
-    ['continuity_notes', 'continuityNotes'],
-    ['revision_scope_guard', 'revisionScopeGuard'],
-    ['next_chapter_quality_plan', 'nextChapterQualityPlan'],
-  ]) {
-    const selected = latestRevisionValue(nextRevision, previousRevision, snakeField, camelField)
-    if (meaningfulRevisionValue(selected)) merged[snakeField] = selected
-  }
-  return merged
 }
 
 function buildMissingStructuredReviewChecksPrompt(project: any, contextPackage: any, chapterText: string, review: any, missingFields: string[]) {
@@ -6308,43 +6150,6 @@ function pendingIpSceneIntakeRisks(payload: any) {
     .slice(0, 6)
 }
 
-function revisionReceiptRemainingRisk(value: any) {
-  const risk = compactBriefText(value?.remaining_risk || value?.remainingRisk || value?.risk)
-  if (!risk) return revisionReceiptMissingChangedEvidenceRisk(value) || revisionReceiptGenericEvidenceRisk(value)
-  const normalized = risk.toLowerCase()
-  if (['无', 'none', 'no', 'n/a', 'null', 'false', '0'].includes(normalized)) return ''
-  return risk
-}
-
-function revisionReceiptMissingChangedEvidenceRisk(value: any) {
-  const looksLikeRevisionReceipt = Boolean(
-    compactBriefText(value?.applied_fix || value?.appliedFix)
-    || compactBriefText(value?.original_evidence || value?.originalEvidence)
-    || compactBriefText(value?.check_key || value?.checkKey)
-    || compactBriefText(value?.key)
-    || compactBriefText(value?.label || value?.name)
-    || compactBriefText(value?.gate)
-    || Number.isFinite(Number(value?.issue_index ?? value?.issueIndex)),
-  )
-  if (!looksLikeRevisionReceipt) return ''
-  const changedEvidence = compactBriefText(value?.changed_evidence || value?.changedEvidence)
-  return changedEvidence ? '' : '缺少 changed_evidence，无法定位修订后正文证据。'
-}
-
-function revisionReceiptGenericEvidenceRisk(value: any) {
-  const evidenceValues = [
-    value?.changed_evidence,
-    value?.changedEvidence,
-    value?.evidence,
-    value?.source_excerpt,
-    value?.sourceExcerpt,
-    value?.chapter_evidence,
-    value?.chapterEvidence,
-  ].map((item: any) => compactBriefText(item)).filter(Boolean)
-  const genericEvidence = evidenceValues.find(isGenericDeliveryRiskEvidence)
-  return genericEvidence ? `changed_evidence 证据泛化，无法定位修订后正文：${genericEvidence}` : ''
-}
-
 function revisionReceiptRepairSegment(value: any) {
   const repairSegment = compactBriefText(value?.repair_segment || value?.repairSegment)
   if (!repairSegment) return inferDeliveryRiskReceiptRepairSegment(value)
@@ -7160,32 +6965,6 @@ function preDraftReceiptCheckNeedsCarryOver(value: any) {
   if (platformCheckNeedsCarryOver(value)) return true
   if (value?.delivered === false) return true
   return Boolean(compactBriefText(value?.remaining_risk || value?.remainingRisk))
-}
-
-function uniqueObjectReferences(values: any[]) {
-  const seen = new Set<any>()
-  return values.filter((value) => {
-    if (!value || typeof value !== 'object') return false
-    if (seen.has(value)) return false
-    seen.add(value)
-    return true
-  })
-}
-
-function preDraftExecutionReceiptSections(payload: any) {
-  const selfCheck = payload?.self_check || payload?.selfCheck || payload || {}
-  const review = selfCheck?.review || selfCheck?.initial_review || payload?.review || payload || {}
-  const receiptSources = uniqueObjectReferences([
-    review?.oh_story_delivery_receipts || review?.ohStoryDeliveryReceipts,
-    selfCheck?.oh_story_delivery_receipts || selfCheck?.ohStoryDeliveryReceipts,
-    payload?.oh_story_delivery_receipts || payload?.ohStoryDeliveryReceipts,
-  ])
-  return uniqueObjectReferences([
-    review?.pre_draft_execution_receipts || review?.preDraftExecutionReceipts,
-    selfCheck?.pre_draft_execution_receipts || selfCheck?.preDraftExecutionReceipts,
-    payload?.pre_draft_execution_receipts || payload?.preDraftExecutionReceipts,
-    ...receiptSources.map((source) => source?.pre_draft_execution_receipts || source?.preDraftExecutionReceipts),
-  ])
 }
 
 const OH_STORY_ARTIFACT_PROTOCOL_REQUIREMENTS = [
@@ -10947,6 +10726,8 @@ export function normalizeDeliveryRiskReceipts(reviewPayload: any = {}, contextPa
   }
   return appendMissingDeliveryRiskReceipts([], contextPackage)
 }
+
+bindDeliveryRiskReceiptNormalizer(normalizeDeliveryRiskReceipts)
 
 export function buildDeliveryRiskReceiptSyncReport(project: any, chapter: any, contextPackage: any, chapterText: string) {
   const receipts = normalizeDeliveryRiskReceipts({}, contextPackage, chapterText)
