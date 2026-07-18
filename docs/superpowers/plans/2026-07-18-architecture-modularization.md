@@ -1001,3 +1001,10 @@ cd ui/server && bun test src/novel/mutation-contract.test.ts src/novel/sqlite-pe
 - 2026-07-19 goal-continue XLI: create-wizard seed pipeline leaf (~313 apply/derive/fill/finalize) + controller ~673; deep-draft actions already ~194; flow tests package-join updated (2 pass).
 
 - 2026-07-19 goal-continue XLII: SettingWorkshop helpers leaf (~110) + panel ~793; create-wizard seed pipeline already landed. settingUsageWorkbenchShell 1 pre-existing fail (NovelProjectWorkspace barrel path for projectSettings).
+
+### Residual progress (2026-07-19 goal-continue LXI+)
+- Landed: quality-prestore loop/finalize; SettingWorkshop model hook; prose-self-review-run normalize/revision leaves.
+- Fixed: prepare-foundation missing batch/memory return fields (package-join gap).
+- Soft residual still open: WorkspaceCenter (~793), base model (~889 under orchestrator 1000), paragraph-prose-context-sections (~778), bind-core (~763), ComfyUI non-novel.
+- Task 11 still open: broader write-path UI smoke + memory note.
+
