@@ -87,6 +87,8 @@ const SOFT_BASELINES: Record<string, number> = {
   'novel-writing-service/batch-serial/serial-momentum.ts': 50,
   'routes/novel-commercial-ops/builders.ts': 50,
   'routes/novel-commercial-ops/register.ts': 80,
+  'routes/novel-genre-catalog.ts': 200,
+  'routes/novel-genre-catalog-data.ts': 750,
   'routes/novel-commercial-ops/register-creative.ts': 250,
   'routes/novel-commercial-ops/register-qa.ts': 400,
   'routes/novel-commercial-ops/register-longform.ts': 300,

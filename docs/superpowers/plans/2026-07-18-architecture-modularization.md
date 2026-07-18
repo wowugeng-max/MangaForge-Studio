@@ -13,6 +13,11 @@
 **Branch:** `codex/architecture-modularization`
 
 
+### Residual inventory update (2026-07-19 goal-continue LII)
+- Split `novel-genre-catalog` data leaf (~669) + API monofile (~140).
+- Still deferred: NWS model hook ~994, ComfyUI ~877, auto-creation helpers, continuity-guard, ReferencePanel, seed-fill-gaps. Task 11 full UI write-path click smoke still open.
+
+
 ### Residual inventory update (2026-07-19 goal-continue LI)
 - Session landed: NWS view composition root ~51 + model hook ~994; provider-runtime-support package; commercial-ops/editor register group splits; planning desks package; prepare default-five + batch-memory; post-delivery-quality package; package-join fixes.
 - Deferred with care: chapter-continuity-guard (~814) reverse-free split hit leaf cycles (reverted); NWS model hook still large composition; ComfyUI/auto-creation monofiles; Task 11 full UI write-path click smoke still open.
