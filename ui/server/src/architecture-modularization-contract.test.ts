@@ -55,6 +55,8 @@ const SOFT_BASELINES: Record<string, number> = {
   'llm/adapter-support.ts': 50,
   'llm/adapter-support-normalize-bodies.ts': 350,
   'llm/adapter-support-runtime.ts': 600,
+  'routes/novel-project-insight-routes.ts': 350,
+  'routes/novel-project-insight-helpers.ts': 600,
   'routes/novel-editor/builders.ts': 900,
   'routes/novel-core/builders.ts': 120,
   'routes/novel-core/builders-seed-outline.ts': 20,
