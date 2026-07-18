@@ -14,6 +14,18 @@
 
 
 
+
+### Residual inventory (still above ~1k, 2026-07-19)
+
+Keep reverse-free only; do not mechanical-split packages that share private helpers/constants (audience/craft/audit lesson).
+
+- `NovelProjectWorkspaceView.tsx` ~1764 (composition + workspaceViewDeps)
+- `useNovelStudioController.tsx` ~1256
+- `repair-task/prompt-lines-quality.ts` ~1805
+- domain quality/post-delivery/auto-creation helpers still >1k (list via `find ... | wc -l`)
+- Task11: focused 173+ tests green; server boot RSS ~111MB; full write-path UI smoke still open
+
+
 ## Progress checkpoint (2026-07-19 architecture continuation)
 
 | Area | Status | Notes |
