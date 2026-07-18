@@ -213,7 +213,12 @@ export function taskCenterSource() {
     sourceCached('task-center/drawer-recovery-evidence.tsx', localSourceCache),
     sourceCached('task-center/drawer-safe-batch.ts', localSourceCache),
     sourceCached('task-center/drawer-snapshots.tsx', localSourceCache),
+    sourceCached('task-center/drawer-snapshots-recovery-evidence.ts', localSourceCache),
     sourceCached('task-center/drawer-run-summaries.tsx', localSourceCache),
+    sourceCached('task-center/drawer-run-summary-batch-prose.tsx', localSourceCache),
+    sourceCached('task-center/drawer-run-summary-pipelines.tsx', localSourceCache),
+    sourceCached('task-center/drawer-run-summary-repair-task.tsx', localSourceCache),
+    sourceCached('task-center/drawer-run-summary-release-batch.tsx', localSourceCache),
     sourceCached('task-center/TaskCenterDrawerPanel.tsx', localSourceCache),
   ].join('\n')
   return taskCenterSourceCache
