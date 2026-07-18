@@ -130,6 +130,7 @@ function projectWorkspaceSource() {
     sourceCached('shell/workspace-types.ts', localSourceCache),
     sourceCached('shell/workspace-lazy.tsx', localSourceCache),
     sourceCached('shell/workspace-editor-fields.ts', localSourceCache),
+    sourceCached('shell/workspace-commercial-result.tsx', localSourceCache),
   ].join('\n')
   return projectWorkspaceSourceCache
 }
