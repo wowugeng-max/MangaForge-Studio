@@ -21,7 +21,7 @@ describe('novel generate prose route source guards', () => {
   })
 
   test('uses safe serialization for generation run payloads', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-generation/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-generation/register.ts'), 'utf8')].join('\n')
 
     expect(source).not.toContain('input_ref: JSON.stringify(req.body || {})')
     expect(source).not.toContain('output_ref: JSON.stringify(output)')
@@ -79,7 +79,7 @@ describe('novel generate prose route source guards', () => {
     expect(resolveThreshold?.({}, { reference_config: { quality_gate: { minScore: 91 } } })).toBe(91)
     expect(resolveThreshold?.({}, {})).toBe(78)
 
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-generation/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-generation/register.ts'), 'utf8')].join('\n')
     expect(source).not.toContain('Number(req.body.quality_threshold || 78)')
     expect(source).not.toContain('Number(req.body.quality_threshold || project.reference_config?.quality_gate?.min_score || 78)')
     expect(source.match(/resolveChapterGroupQualityThreshold\(req\.body, project\)/g)).toHaveLength(4)
@@ -665,7 +665,7 @@ describe('novel generate prose route source guards', () => {
   })
 
   test('routes standalone prose generation exclusively through the bounded chapter writing service', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-generation/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-generation/register.ts'), 'utf8')].join('\n')
     const contextTypeStart = source.indexOf('type GenerationRoutesContext =')
     const contextTypeEnd = source.indexOf('function buildTextDiffSummary', contextTypeStart)
     const contextTypeBlock = source.slice(contextTypeStart, contextTypeEnd)
@@ -686,7 +686,7 @@ describe('novel generate prose route source guards', () => {
   })
 
   test('delegates standalone prose failures to one safe payload for run, SSE, and JSON outputs', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-generation/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-generation/register.ts'), 'utf8')].join('\n')
     const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
     const catchStart = source.indexOf('} catch (serviceError: any) {', routeStart)
     const catchEnd = source.indexOf('\n        }\n      }', catchStart)
@@ -703,7 +703,7 @@ describe('novel generate prose route source guards', () => {
   })
 
   test('standalone prose service path aborts generation only on real client disconnects', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-generation/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-generation/register.ts'), 'utf8')].join('\n')
     const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
     const serviceCallStart = source.indexOf('ctx.generateChapterForGroup(activeWorkspace, projectId, chapterId', routeStart)
     const serviceCallEnd = source.indexOf('const updated = serviceResult?.chapter || null', serviceCallStart)
@@ -729,7 +729,7 @@ describe('novel generate prose route source guards', () => {
   })
 
   test('standalone prose service path keeps a lightweight SSE heartbeat during long model calls', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-generation/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-generation/register.ts'), 'utf8')].join('\n')
     const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
     const serviceCallStart = source.indexOf('ctx.generateChapterForGroup(activeWorkspace, projectId, chapterId', routeStart)
     const serviceCallEnd = source.indexOf('const updated = serviceResult?.chapter || null', serviceCallStart)
@@ -745,7 +745,7 @@ describe('novel generate prose route source guards', () => {
   })
 
   test('applies word target context in the standalone scene-cards route', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-generation/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-generation/register.ts'), 'utf8')].join('\n')
     const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/scene-cards'")
     const routeEnd = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'", routeStart)
     const routeBlock = source.slice(routeStart, routeEnd)
@@ -789,7 +789,7 @@ describe('novel generate prose route source guards', () => {
   })
 
   test('stores LLM diagnostics when standalone scene-card generation returns no cards', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-generation/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-generation/register.ts'), 'utf8')].join('\n')
     const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/scene-cards'")
     const routeEnd = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'", routeStart)
     const routeBlock = source.slice(routeStart, routeEnd)
@@ -800,7 +800,7 @@ describe('novel generate prose route source guards', () => {
   })
 
   test('exposes an unattended chapter goal route that creates full-auto chapter group runs', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-generation/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-generation/register.ts'), 'utf8')].join('\n')
     const routeStart = source.indexOf("app.post('/api/novel/projects/:id/chapter-groups/start-unattended'")
     const routeEnd = source.indexOf("app.post('/api/novel/projects/:id/chapter-groups/:runId/execute'", routeStart)
     const routeBlock = source.slice(routeStart, routeEnd)
@@ -820,7 +820,7 @@ describe('novel generate prose route source guards', () => {
   })
 
   test('requires an explicit target chapter for unattended writing goals', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-generation/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-generation/register.ts'), 'utf8')].join('\n')
     const routeStart = source.indexOf("app.post('/api/novel/projects/:id/chapter-groups/start-unattended'")
     const routeEnd = source.indexOf("app.post('/api/novel/projects/:id/chapter-groups/:runId/execute'", routeStart)
     const routeBlock = source.slice(routeStart, routeEnd)
@@ -835,7 +835,7 @@ describe('novel generate prose route source guards', () => {
   })
 
   test('keeps unattended writing strict unless incomplete generation is explicitly enabled', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'novel-generation/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-generation/register.ts'), 'utf8')].join('\n')
     const routeStart = source.indexOf("app.post('/api/novel/projects/:id/chapter-groups/start-unattended'")
     const routeEnd = source.indexOf("app.post('/api/novel/projects/:id/chapter-groups/:runId/execute'", routeStart)
     const routeBlock = source.slice(routeStart, routeEnd)
