@@ -1,0 +1,539 @@
+import { message, Modal } from 'antd'
+import type { TaskCenterActionOptions } from './workspace-types'
+import {
+  buildRecoveryEvidenceQueueRecheckTask,
+} from './workspace-helpers'
+import {
+  buildDeliveryRiskRevisionClosurePlan,
+  buildRepairTaskRevisionPrompt,
+} from '../repairTaskRevisionPrompt'
+import {
+  resolveEditorRevisionChapterId,
+} from '../writingCockpitModel'
+import {
+  chapterHasProse,
+} from '../utils'
+
+export type RepairTaskHandlerDeps = {
+  activeChapter: any
+  apiClient: any
+  chapters: any
+  createEditorReportForChapter: any
+  flushPendingSave: any
+  loadProjectModules: any
+  loadProductionTasks: any
+  openEditor: any
+  openRepairTaskChapterEditor: any
+  outlines: any
+  projectId: any
+  reviews: any
+  runRecords: any
+  selectChapterForWriting: any
+  selectedModelId: any
+  setActiveChapterId: any
+  setChapters: any
+  setCommercialToolLoading: any
+  setFuture100FocusOutlineIds: any
+  setOutlineTreeOpen: any
+  setProseQualityLoading: any
+  setReviewAnnotationsOpen: any
+  setRightPanelOpen: any
+  setRightPanelTab: any
+  setSelectedProject: any
+  setTaskCenterOpen: any
+  sortedChapters: any
+}
+
+export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
+  const activeChapter = deps.activeChapter
+  const apiClient = deps.apiClient
+  const chapters = deps.chapters
+  const createEditorReportForChapter = deps.createEditorReportForChapter
+  const flushPendingSave = deps.flushPendingSave
+  const loadProjectModules = deps.loadProjectModules
+  const loadProductionTasks = deps.loadProductionTasks
+  const openEditor = deps.openEditor
+  const openRepairTaskChapterEditor = deps.openRepairTaskChapterEditor
+  const outlines = deps.outlines
+  const projectId = deps.projectId
+  const reviews = deps.reviews
+  const runRecords = deps.runRecords
+  const selectChapterForWriting = deps.selectChapterForWriting
+  const selectedModelId = deps.selectedModelId
+  const setActiveChapterId = deps.setActiveChapterId
+  const setChapters = deps.setChapters
+  const setCommercialToolLoading = deps.setCommercialToolLoading
+  const setFuture100FocusOutlineIds = deps.setFuture100FocusOutlineIds
+  const setOutlineTreeOpen = deps.setOutlineTreeOpen
+  const setProseQualityLoading = deps.setProseQualityLoading
+  const setReviewAnnotationsOpen = deps.setReviewAnnotationsOpen
+  const setRightPanelOpen = deps.setRightPanelOpen
+  const setRightPanelTab = deps.setRightPanelTab
+  const setSelectedProject = deps.setSelectedProject
+  const setTaskCenterOpen = deps.setTaskCenterOpen
+  const sortedChapters = deps.sortedChapters
+
+  const resolveRepairQueueTaskChapterId = (task: any) => {
+    const chapterId = Number(task?.chapter_id || task?.chapterId || 0)
+    if (chapterId) return chapterId
+    const chapterNo = Number(task?.chapter_no || task?.chapterNo || 0)
+    if (!chapterNo) return 0
+    const chapter = sortedChapters.find(item => Number(item.chapter_no ?? item.chapterNo ?? 0) === chapterNo)
+    return Number(chapter?.id || 0)
+  }
+
+  const executeRecoveryEvidenceGovernanceQueueTask = async (task: any, run?: any, taskIndex = -1, options: TaskCenterActionOptions = {}) => {
+    const actionKey = String(task?.action_key || task?.actionKey || '')
+    const keepOpenOptions = { ...options, keepTaskCenterOpen: true }
+    if (actionKey === 'recheck_single_chapter') {
+      const recheckTask = buildRecoveryEvidenceQueueRecheckTask(task, resolveRepairQueueTaskChapterId(task))
+      await recheckRepairTaskConvergence(recheckTask, run, taskIndex, keepOpenOptions)
+      return
+    }
+    if (actionKey === 'revision') {
+      const recheckTask = buildRecoveryEvidenceQueueRecheckTask(task, resolveRepairQueueTaskChapterId(task))
+      const chapterId = Number(recheckTask.chapter_id || 0)
+      if (!chapterId) return message.warning('这个治理队列任务没有匹配章节')
+      if (!selectedModelId) return message.warning('请先选择模型')
+      if (!await selectChapterForWriting(chapterId)) return
+      if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
+      const revisionResult = await createEditorReportForChapter(chapterId, {
+        sourceTask: recheckTask,
+        sourceRun: run,
+        sourceTaskIndex: taskIndex,
+        autoRevision: true,
+        skipRevisionConfirm: true,
+      })
+      if (revisionResult) {
+        await recheckRepairTaskConvergence(recheckTask, run, taskIndex, { keepTaskCenterOpen: true })
+      }
+      return
+    }
+    if (actionKey === 'deep_repair_single_brief') {
+      const chapterId = resolveRepairQueueTaskChapterId(task)
+      const chapterNo = Number(task?.chapter_no || task?.chapterNo || 0)
+      const targetChapter = chapterId
+        ? sortedChapters.find(item => Number(item.id || 0) === chapterId)
+        : chapterNo
+          ? sortedChapters.find(item => Number(item.chapter_no || 0) === chapterNo)
+          : null
+      if (targetChapter && !await selectChapterForWriting(Number(targetChapter.id))) return
+      await runRollingPlan({
+        fromChapter: Number(targetChapter?.chapter_no || chapterNo || activeChapter?.chapter_no || 0) || undefined,
+        intent: {
+          source: 'recovery_evidence_source_deep_repair',
+          action_key: actionKey,
+          repair_scope: 'single_chapter_brief',
+          chapter_id: Number(targetChapter?.id || chapterId || 0) || undefined,
+          chapter_no: Number(targetChapter?.chapter_no || chapterNo || 0) || undefined,
+          source_label: task?.source_label || task?.sourceLabel || '',
+          failed_evidence: task?.failed_evidence || task?.failedEvidence || task?.recovery_evidence_review?.failed_evidence || [],
+          deep_repair_direction: task?.deep_repair_direction || task?.deepRepairDirection || '',
+          instruction: '回到单章任务书，把恢复依据写成当前章可见的冲突行动、对白选择、读者回报和章末钩子；不要只补审计说明。',
+        },
+      })
+      if (run?.id && taskIndex >= 0) {
+        await updateRepairTaskStatus(run, taskIndex, 'needs_review', '已生成单章任务书深修意图，等待正文继承后复查')
+      }
+      if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
+      return
+    }
+    if (actionKey === 'deep_repair_batch_brief') {
+      await runRollingPlan({
+        intent: {
+          source: 'recovery_evidence_source_deep_repair',
+          action_key: actionKey,
+          repair_scope: 'batch_brief',
+          source_label: task?.source_label || task?.sourceLabel || '',
+          chapter_nos: task?.chapter_nos || task?.chapterNos || [],
+          failed_evidence: task?.failed_evidence || task?.failedEvidence || task?.recovery_evidence_review?.failed_evidence || [],
+          deep_repair_direction: task?.deep_repair_direction || task?.deepRepairDirection || '',
+          instruction: '复盘批次任务书，把多章恢复依据拆回每章冲突职责、剧情线推进、读者回报落点和章末钩子，再恢复批量连写。',
+        },
+      })
+      if (run?.id && taskIndex >= 0) {
+        await updateRepairTaskStatus(run, taskIndex, 'needs_review', '已生成批次任务书深修意图，等待批次复盘审计')
+      }
+      if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
+      return
+    }
+    if (actionKey === 'recheck_safe_batch' || actionKey === 'focus_task' || actionKey === 'review_governance_closure') {
+      if (!run?.id) return message.warning('这个治理队列没有绑定修复运行')
+      await generateLongformRepairAuditSummary(run, { keepTaskCenterOpen: true })
+      if (run?.id && taskIndex >= 0) {
+        const note = actionKey === 'focus_task'
+          ? '已按作者确认处理批次残留，等待恢复依据复盘回填'
+          : '已触发恢复依据复盘，等待审计回填'
+        await updateRepairTaskStatus(run, taskIndex, 'needs_review', note)
+      }
+      return
+    }
+    message.warning('这个治理队列动作暂不支持自动执行')
+  }
+
+  const executeTypedRepairTask = async (task: any, run?: any, taskIndex = -1, options: TaskCenterActionOptions = {}) => {
+    const taskType = String(task?.task_type || '')
+    const chapterId = Number(task?.chapter_id || 0)
+    const markNeedsReview = async () => {
+      if (run?.id && taskIndex >= 0) {
+        await updateRepairTaskStatus(run, taskIndex, 'needs_review', '已执行类型化动作，等待复查验收')
+      }
+    }
+    if (String(task?.issue_type || '') === 'style_sample_task_book_rebuild') {
+      await executeStyleSampleTaskBookRebuild(task, run, taskIndex, options)
+      return
+    }
+    if (String(task?.issue_type || '') === 'recovery_evidence_governance_queue') {
+      await executeRecoveryEvidenceGovernanceQueueTask(task, run, taskIndex, options)
+      return
+    }
+    if (taskType === 'repair_skeleton') {
+      const outlineId = Number(task?.outline_id || 0)
+      const outline = outlineId ? outlines.find(item => Number(item.id) === outlineId) : null
+      if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
+      if (outline) {
+        openEditor('outline', outline)
+        message.success('已打开骨架大纲，请补齐目标、冲突、回报和钩子')
+      } else {
+        setOutlineTreeOpen(true)
+        if (outlineId) setFuture100FocusOutlineIds([outlineId])
+        message.warning('未找到绑定大纲，已打开大纲树')
+      }
+      await markNeedsReview()
+      return
+    }
+    if (taskType === 'repair_script_room' || String(task?.source || '') === 'rolling_script_room' || String(task?.issue_type || '') === 'script_room_layer_gap') {
+      if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
+      const actionArea = String(task?.action_area || '')
+      const actionKey = String(task?.action_key || '')
+      if (actionArea === 'assets' || actionKey === 'open_story_assets') {
+        openStoryAssetsWorkspace()
+      } else if (actionArea === 'planning' && actionKey) {
+        handlePlanningAction(actionKey as PlanningActionKey)
+      } else if ((actionArea === 'writing' || actionArea === 'quality') && actionKey) {
+        handleWritingCockpitAction(actionKey as WritingCockpitActionKey)
+      } else {
+        setTaskCenterOpen(true)
+      }
+      await markNeedsReview()
+      return
+    }
+    if (taskType === 'repair_assets') {
+      if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
+      if (String(task?.source || '') === 'storyline_diff_decision') openStoryAssetsWorkspace()
+      else openStoryAssetsWorkspace('discoveredAssets')
+      await markNeedsReview()
+      return
+    }
+    if (taskType === 'chapter_retention_patch') {
+      if (!chapterId) return message.warning('这个任务没有绑定章节')
+      const issueText = [task?.issue_type, task?.message, task?.action].filter(Boolean).join(' ')
+      if (issueText.includes('缺正文') || issueText.includes('生成正文')) {
+        if (!selectedModelId) return message.warning('请先选择模型')
+        if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
+        await generateCurrentChapterProse({ allowIncomplete: true, forceSceneCards: true, targetChapterId: chapterId })
+        await markNeedsReview()
+        return
+      }
+      await startRepairTaskRevision(task, run, taskIndex, options)
+      return
+    }
+    if (!chapterId) return message.warning('这个任务没有绑定章节')
+    if (taskType === 'repair_materials') {
+      if (!selectedModelId) return message.warning('请先选择模型')
+      if (!await selectChapterForWriting(chapterId)) return
+      if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
+      await generateSceneCardsForChapter(chapterId, true)
+      await markNeedsReview()
+      return
+    }
+    if (taskType === 'repair_quality') {
+      await startRepairTaskRevision(task, run, taskIndex, options)
+      return
+    }
+    if (taskType === 'repair_similarity') {
+      if (!await selectChapterForWriting(chapterId)) return
+      if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
+      await runSimilarityForChapter(chapterId)
+      await markNeedsReview()
+      return
+    }
+    if (taskType === 'resolve_failure') {
+      await locateRepairTaskChapter(chapterId)
+      Modal.info({
+        title: '失败处理建议',
+        width: 720,
+        content: (
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <Text>{task.message || '该章节存在生产失败记录。'}</Text>
+            <Text type="secondary">{task.action || '先处理失败原因，再重新进入章节群生产。'}</Text>
+            {Array.isArray(task.acceptance_criteria) && task.acceptance_criteria.length > 0 && (
+              <List size="small" dataSource={task.acceptance_criteria} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+            )}
+          </Space>
+        ),
+      })
+      await markNeedsReview()
+      return
+    }
+    await startRepairTaskRevision(task, run, taskIndex, options)
+  }
+
+  const refreshActiveProseQuality = async (source = 'manual_refresh', targetChapter: any = activeChapter) => {
+    if (!targetChapter) return message.warning('请先选择章节')
+    if (!selectedModelId) return message.warning('请先选择模型')
+    if (!await flushPendingSave()) return
+    setProseQualityLoading(true)
+    try {
+      const res = await apiClient.post(`/novel/chapters/${targetChapter.id}/prose-quality`, {
+        project_id: projectId,
+        model_id: selectedModelId,
+        source,
+      })
+      await loadProjectModules()
+      setRightPanelOpen(true)
+      setRightPanelTab('proseQuality')
+      message.success(`当前版本复检完成，评分 ${res.data?.self_check?.score ?? '-'}`)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '正文复检失败')
+    } finally {
+      setProseQualityLoading(false)
+    }
+  }
+
+  const repairActiveDeslopGate = async () => {
+    if (!activeChapter) return message.warning('请先选择章节')
+    if (!selectedModelId) return message.warning('请先选择模型')
+    if (!await flushPendingSave()) return
+
+    setProseQualityLoading(true)
+    try {
+      let report = latestCockpitQualityReport()
+      if (!report) {
+        const qualityRes = await apiClient.post(`/novel/chapters/${activeChapter.id}/prose-quality`, {
+          project_id: projectId,
+          model_id: selectedModelId,
+          source: 'deslop_gate_repair',
+        })
+        report = qualityRes.data?.review || null
+      }
+
+      if (!report?.id) {
+        message.warning('还没有可用于去AI味修订的正文自检报告。')
+        setRightPanelOpen(true)
+        setRightPanelTab('proseQuality')
+        return
+      }
+
+      await applyEditorRevision(report, {
+        revisionMode: 'tighten_pacing',
+        prompt: [
+          '重点修复 story-deslop Gate A-G 去AI味门禁。',
+          '逐条处理 fail/warn 项：禁用词/模板表达、句式套路、抽象心理告知、重复描写、无功能环境、万能转折、节奏均匀等。',
+          '修订后必须输出 deslop_repair_receipts.changed_evidence，引用修订后正文里的具体句子、动作、对白或语序变化，不能只写“已修复”。',
+          '修订完成后自动复检，目标是 deslop_gate_diagnostics 与 deslop_repair_checks 清零或转 pass。',
+        ].join('\n'),
+        skipConfirm: true,
+        targetChapterId: activeChapter.id,
+        autoStoryState: true,
+        source: 'deslop_gate_repair',
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '去AI味修复失败')
+    } finally {
+      setProseQualityLoading(false)
+    }
+  }
+
+  const refreshProseQualityForChapter = async (chapterId: number, source = 'manual_refresh') => {
+    const chapter = sortedChapters.find(item => Number(item.id) === Number(chapterId))
+      || (Number(activeChapter?.id) === Number(chapterId) ? activeChapter : null)
+    if (!chapter?.id) return
+    if (Number(activeChapter?.id) !== Number(chapterId)) {
+      const saved = await selectChapterForWriting(chapterId)
+      if (!saved) return
+    }
+    await refreshActiveProseQuality(source, chapter)
+  }
+
+  const closeRepairTaskAfterRevision = async (task: any, run: any, taskIndex: number, revisionResult: any) => {
+    if (!run?.id || taskIndex < 0) return null
+    const plan = buildDeliveryRiskRevisionClosurePlan(task, revisionResult || {})
+    await apiClient.post(`/novel/runs/${run.id}/tasks/${taskIndex}/status`, {
+      project_id: projectId,
+      status: plan.taskStatus,
+      note: plan.note,
+    })
+    if (plan.annotationStatus && plan.annotationKey) {
+      await apiClient.post(`/novel/projects/${projectId}/review-annotations/status`, {
+        annotation_key: plan.annotationKey,
+        status: plan.annotationStatus,
+        note: plan.note,
+      })
+    }
+    await loadProjectModules()
+    await loadProductionTasks()
+    return plan
+  }
+
+  const isSingleChapterRecoveryEvidenceRepairTask = (task: any) => {
+    if (String(task?.issue_type || '') !== 'recovery_evidence_mismatch') return false
+    const source = String(task?.source || '')
+    const annotationSource = String(task?.annotation_source || task?.annotationSource || '')
+    const annotationCategory = String(task?.annotation_category || task?.annotationCategory || '')
+    return source === 'review_annotation_risk'
+      || annotationSource === 'governance_recheck_sync'
+      || annotationCategory === 'recovery_evidence'
+  }
+
+  const recheckRepairTaskConvergence = async (task: any, run: any, taskIndex: number, options: TaskCenterActionOptions = {}) => {
+    const chapterId = Number(task?.chapter_id || 0)
+    if (!chapterId) return message.warning('这个复查任务没有绑定章节')
+    if (!selectedModelId) return message.warning('请先选择模型')
+    if (!await selectChapterForWriting(chapterId)) return
+    if (!await flushPendingSave()) return
+    if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
+    setProseQualityLoading(true)
+    try {
+      const storylineDecisionRecheckMeta = { source: 'storyline_decision_recheck', storyline_decision_closure: true }
+      const singleChapterRecoveryRecheckMeta = { source: 'governance_recheck_sync', storyline_decision_closure: false }
+      const recheckMeta = String(task?.source || '') === 'storyline_diff_decision'
+        ? storylineDecisionRecheckMeta
+        : isSingleChapterRecoveryEvidenceRepairTask(task)
+          ? singleChapterRecoveryRecheckMeta
+          : { source: 'repair_task_recheck', storyline_decision_closure: false }
+      const qualityRes = await apiClient.post(`/novel/chapters/${chapterId}/prose-quality`, {
+        project_id: projectId,
+        model_id: selectedModelId,
+        source: recheckMeta.source,
+        source_review_id: task?.review_id || null,
+      })
+      const storyRes = await apiClient.post(`/novel/chapters/${chapterId}/story-state-sync`, {
+        project_id: projectId,
+        model_id: selectedModelId,
+        source: recheckMeta.source,
+        source_review_id: qualityRes.data?.review?.id || task?.review_id || null,
+      })
+      const closurePlan = await closeRepairTaskAfterRevision(task, run, taskIndex, {
+        storyline_decision_closure: recheckMeta.storyline_decision_closure,
+        quality_refresh: {
+          ok: true,
+          score: qualityRes.data?.self_check?.score,
+          status: qualityRes.data?.review?.status,
+        },
+        story_state_update: storyRes.data?.story_state_update,
+        delivery_risk_convergence: storyRes.data?.delivery_risk_convergence,
+      })
+      setRightPanelOpen(true)
+      setRightPanelTab('proseQuality')
+      const recheckLabel = recheckMeta.source === 'governance_recheck_sync' ? '单章治理复查' : '复检收敛'
+      if (closurePlan?.taskStatus === 'resolved') {
+        message.success(`${recheckLabel}完成，评分 ${qualityRes.data?.self_check?.score ?? '-'}，风险已清零，任务已关闭`)
+      } else {
+        message.warning(`${recheckLabel}完成，评分 ${qualityRes.data?.self_check?.score ?? '-'}，仍需复查`)
+      }
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '复检收敛失败')
+    } finally {
+      setProseQualityLoading(false)
+    }
+  }
+
+  const applyEditorRevision = async (report: any, options: { revisionMode?: string; prompt?: string; skipConfirm?: boolean; targetChapterId?: number; autoStoryState?: boolean; source?: string; sourceTask?: any; sourceRun?: any; sourceTaskIndex?: number } = {}) => {
+    if (!selectedModelId) return message.warning('请先选择模型')
+    const isSelfCheckRevision = report?.review_type === 'prose_quality'
+    const isDeliveryRiskRevision = [
+      'chapter_core_drift',
+      'reader_expectation_sync',
+      'reader_retention_sync',
+      'chapter_attraction_review',
+      'story_drive_sync',
+      'character_arc_sync',
+      'style_sample_sync',
+      'reader_payoff_sync',
+      'innovation_sync',
+      'storyline_sync',
+      'readability_review',
+    ].includes(String(report?.review_type || ''))
+    const revisionLabels: Record<string, string> = {
+      from_report: isSelfCheckRevision ? '按正文自检生成修订稿' : isDeliveryRiskRevision ? '按交稿风险生成修订稿' : '按编辑报告生成修订稿',
+      expand_action: '补动作/战斗细节',
+      cut_description: '压缩环境描写',
+      tighten_pacing: '提升事件密度',
+      add_consequence: '补行动后果',
+      restore_hook: '强化章末钩子',
+    }
+    const revisionMode = options.revisionMode || 'from_report'
+    const runRevision = async () => {
+      try {
+        const res = await apiClient.post(`/novel/reviews/${report.id}/apply-revision`, {
+          project_id: projectId,
+          chapter_id: resolveEditorRevisionChapterId(report, activeChapter?.id, options.targetChapterId),
+          model_id: selectedModelId,
+          revision_mode: revisionMode,
+          prompt: options.prompt || '',
+          source: options.source || undefined,
+          auto_quality_check: true,
+          auto_story_state: options.autoStoryState !== false,
+        })
+        if (res.data?.chapter) {
+          setChapters(prev => prev.map(c => c.id === res.data.chapter.id ? res.data.chapter : c))
+        }
+        await loadProjectModules()
+        let closurePlan: any = null
+        if (options.sourceTask && options.sourceRun && typeof options.sourceTaskIndex === 'number') {
+          closurePlan = await closeRepairTaskAfterRevision(options.sourceTask, options.sourceRun, options.sourceTaskIndex, res.data)
+        }
+        setRightPanelOpen(true)
+        setRightPanelTab('proseQuality')
+        const closureSuffix = closurePlan
+          ? closurePlan.taskStatus === 'resolved'
+            ? '；风险任务已自动关闭'
+            : '；风险任务已转入需复查'
+          : ''
+        if (res.data?.quality_refresh?.ok) {
+          const syncedTo = res.data?.story_state_update?.last_synced_chapter
+          message.success(`${revisionLabels[revisionMode] || '修订稿'}已入库，并已复检当前版本，评分 ${res.data.quality_refresh.score ?? '-'}${syncedTo ? `；状态机已同步至第${syncedTo}章` : ''}${closureSuffix}`)
+        } else if (res.data?.quality_refresh?.ok === false) {
+          message.warning(`修订稿已入库，但自动复检失败：${res.data.quality_refresh.error || '未知错误'}。可在正文质检里手动复检。${closureSuffix}`)
+        } else if (res.data?.story_state_update?.last_synced_chapter) {
+          message.success(`修订稿已入库，状态机已同步至第${res.data.story_state_update.last_synced_chapter}章${closureSuffix}`)
+        } else {
+          message.success(`修订稿已入库${closureSuffix}`)
+        }
+        return res.data
+      } catch (error: any) {
+        message.error(error?.response?.data?.error || error?.message || '修订失败')
+        return null
+      }
+    }
+    if (options.skipConfirm) {
+      return await runRevision()
+    }
+    Modal.confirm({
+      title: revisionLabels[revisionMode] || revisionLabels.from_report,
+      content: isSelfCheckRevision
+        ? '系统会根据这份正文质检的修订指令重写当前章节，并保存为新的章节版本。'
+        : isDeliveryRiskRevision
+          ? '系统会根据这条交稿风险和当前章节的完整风险清单生成修订补丁，并保存为新的章节版本。'
+        : '系统会根据这份编辑报告重写当前章节，并保存为新的章节版本。',
+      okText: isSelfCheckRevision ? '按自检修订' : isDeliveryRiskRevision ? '按风险修订' : '生成修订稿',
+      onOk: runRevision,
+    })
+    return null
+  }
+
+
+  return {
+    resolveRepairQueueTaskChapterId,
+    executeRecoveryEvidenceGovernanceQueueTask,
+    executeTypedRepairTask,
+    refreshActiveProseQuality,
+    repairActiveDeslopGate,
+    refreshProseQualityForChapter,
+    closeRepairTaskAfterRevision,
+    isSingleChapterRecoveryEvidenceRepairTask,
+    recheckRepairTaskConvergence,
+    applyEditorRevision,
+  }
+}
