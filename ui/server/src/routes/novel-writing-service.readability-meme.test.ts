@@ -451,7 +451,7 @@ describe('readability and restrained meme workflow', () => {
   })
 
   test('strips nested style boundary aliases before recursive merge', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/style-sample-strategy.ts'), 'utf8')
     const stripStart = source.indexOf('function stripStyleBoundaryExplicitContract')
     const buildStart = source.indexOf('function buildStyleBoundaryContract')
     const derivedCall = source.indexOf('const derived = hasStyleInput ? buildStyleBoundaryContract', buildStart)
