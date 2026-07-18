@@ -26,7 +26,7 @@
 | 6 monotest split | done | `novel-writing-service.test.ts` shim-only |
 | 7 editor/core routes packages | largely done | editor, core, commercial-ops, generation, planning package-split (builders/register); deeper domain split open |
 | 8 auto-creation model package | in progress | helpers barrel + next-batch-brief leaf; helpers-main ~9.0k after tail extract |
-| 9 cockpit + repair prompt | in progress | cockpit sliced; repair-task package scaffolded (prompt monofile remains large) |
+| 9 cockpit + repair prompt | in progress | cockpit sliced; repair-task utils extracted; prompt monofile still large |
 | 10 shell UI split | open | |
 | 11 final hardening | open | |
 
