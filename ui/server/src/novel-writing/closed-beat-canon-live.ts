@@ -15,6 +15,7 @@ import {
   textHitsFamilyGoal,
   extractEvidence,
   familyDef,
+  uniqueBlocked,
 } from './closed-beat-canon-shared'
 
 import {
@@ -24,6 +25,7 @@ import {
   matchFamiliesInText,
   isZombieResidualHook,
   textDemandsClosedBeat,
+  shouldSuppressOpenHook,
 } from './closed-beat-canon-detect'
 
 function stripClausesMatchingClosed(text: string, closed: ClosedBeatRecord[]) {

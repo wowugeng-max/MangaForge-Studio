@@ -105,6 +105,23 @@ export const PROGRESS_CLUSTERS: Array<{ key: string; patterns: RegExp[] }> = [
   },
 ]
 
+export function isCleanProgressPhrase(value: any) {
+  const text = compactText(value, 160)
+  if (!text || text.length < 6 || text.length > 48) return false
+  if (/^[的了在把被从与和及间座面上哲那这连刻已“"]/.test(text)) return false
+  if (/分析员|弹幕|系统提示|按照小区管理条例|能量波动并无异常|超级感官|手心里全是冷汗/.test(text)) return false
+  if (/[“”].{6,}[“”]/.test(text) && /说|道|喊|问|惨叫|笑/.test(text)) return false
+  if (/，\s*。|。\s*，/.test(text)) return false
+  if (/说|道|喊|问/.test(text) && text.length < 22) return false
+  if (/章末留下|十点邻居敲门借火|主动开门迎敌|假的终究是假的|膝撞|保安队长/.test(text) && !/禁止|不要|已关闭/.test(text)) return false
+  // Reject recursive meta wrappers used as atomic beats.
+  if (/^承接上一章|^优先推进：|^禁止回放：/.test(text)) return false
+  // Prefer label-like or short actionable hooks.
+  if (/\/|线$|压力$|冲突$|对峙$|推进$|压迫$|核心$|倒计时$|去向$|未解$|已兑现$|已打爆$|敲门$/.test(text)) return true
+  if (/推进|巩固|转向|1号楼|通行证|居委会|电梯|物业|王奶奶/.test(text) && text.length <= 36) return true
+  return false
+}
+
 export function clusterHits(text: string) {
   const value = String(text || '')
   return PROGRESS_CLUSTERS.filter(cluster => cluster.patterns.some(pattern => pattern.test(value))).map(cluster => cluster.key)

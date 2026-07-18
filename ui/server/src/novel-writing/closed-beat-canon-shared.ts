@@ -205,3 +205,16 @@ export function familyDef(family: ProgressBeatFamilyId) {
 }
 
 /** Detect closed families from a single chapter's prose (+ optional delivered labels). */
+
+export function uniqueBlocked(items: LiveChapterContract['closed_blocked']) {
+  const seen = new Set<string>()
+  const out: LiveChapterContract['closed_blocked'] = []
+  for (const item of items) {
+    const key = `${item.family}|${item.snippet}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(item)
+  }
+  return out
+}
+

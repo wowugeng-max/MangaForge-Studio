@@ -15,6 +15,7 @@ import {
   textHitsFamilyGoal,
   extractEvidence,
   familyDef,
+  uniqueBlocked,
 } from './closed-beat-canon-shared'
 
 import {
@@ -31,17 +32,6 @@ import {
   buildLiveChapterContract,
 } from './closed-beat-canon-live'
 
-function uniqueBlocked(items: LiveChapterContract['closed_blocked']) {
-  const seen = new Set<string>()
-  const out: LiveChapterContract['closed_blocked'] = []
-  for (const item of items) {
-    const key = `${item.family}|${item.snippet}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(item)
-  }
-  return out
-}
 
 /** Build DB patch that persists live contract and strips dead/zombie goals. */
 export function buildLiveContractChapterPatch(
@@ -298,15 +288,6 @@ export function closedFamilyLabels(closed: ClosedBeatRecord[] = []) {
   return closed.map(item => item.label)
 }
 
-export function shouldSuppressOpenHook(hint: string, closed: ClosedBeatRecord[] = []) {
-  if (!hint || !closed.length) return false
-  if (isZombieResidualHook(hint, closed)) return true
-  if (textDemandsClosedBeat(hint, closed)) return true
-  if (isFamilyClosed(closed, 'neighbor_borrow_fire') && /十点邻居敲门|借火|主动开门迎敌|404号房门外的敲门|不知死活的敲门者/.test(hint)) return true
-  if (isFamilyClosed(closed, 'property_compliance') && /物业合规清场|清场倒计时|合规清场|赶在清场|五分钟后登门/.test(hint)) return true
-  if (isFamilyClosed(closed, 'dining_rule_force') && /再盛汤|空碗|倒汤|耳光|利爪/.test(hint) && !/敲门|邻居|物业|王奶奶|居委会|1号楼/.test(hint)) return true
-  return matchFamiliesInText(hint, closed).length > 0 && /未解决|继续|必须|倒计时|未完成/.test(hint)
-}
 
 export function listProgressBeatFamilyDefs() {
   return FAMILY_DEFS.map(item => ({ family: item.family, label: item.label }))
