@@ -9,7 +9,8 @@ import { join } from 'path'
 // - novel-editor-routes.delivery-risk-brief.test.ts
 // - novel-editor-routes.storyline-diff.test.ts
 // - novel-editor-routes.annotations-surface.test.ts
-// - novel-editor-routes.annotations-repair-tasks.test.ts
+// - novel-editor-routes.annotations-repair-tasks-a.test.ts
+// - novel-editor-routes.annotations-repair-tasks-b.test.ts
 // - novel-editor-routes.story-state-guards.test.ts
 
 function editorBuildersSource() {

@@ -271,6 +271,16 @@ const readChapterProseStoragePatchSource = () => readFileSync(join(import.meta.d
 const readPostDeliverySyncReviewRecordSource = () => readFileSync(join(import.meta.dir, '../novel-writing/post-delivery-sync-review-record.ts'), 'utf8')
 const readDraftSyncReviewRecordSource = () => readFileSync(join(import.meta.dir, '../novel-writing/draft-sync-review-record.ts'), 'utf8')
 
+const readGenerateChapterForGroupSource = () => {
+  const serviceDir = join(import.meta.dir, '../novel-writing-service/service')
+  const postDeliveryDir = join(import.meta.dir, '../novel-writing-service/post-delivery')
+  return [
+    readFileSync(join(serviceDir, 'generate-chapter-for-group-methods.ts'), 'utf8'),
+    readFileSync(join(serviceDir, 'generate-chapter-acceptance-prep.ts'), 'utf8'),
+    readFileSync(join(postDeliveryDir, 'post-commit-sync-bundle.ts'), 'utf8'),
+  ].join('\n')
+}
+
 describe('chapter context contracts', () => {
   test('returns market promise sync in draft review only summaries', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
@@ -1520,7 +1530,7 @@ describe('chapter context contracts', () => {
   })
 
   test('returns next-chapter quality plan receipt sync for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = readGenerateChapterForGroupSource()
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildNextChapterQualityPlanReceiptSyncReport')
@@ -1692,7 +1702,7 @@ describe('chapter context contracts', () => {
   })
 
   test('returns write-preparation receipt sync for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = readGenerateChapterForGroupSource()
     const draftReturnBlock = readPostDeliveryStoryStateUpdateSource()
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
@@ -1702,7 +1712,7 @@ describe('chapter context contracts', () => {
   })
 
   test('returns Step 2 preparation syncs in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = readGenerateChapterForGroupSource()
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildSourceReadinessSyncReport(project, updated, finalReviewContextPackage, finalText)')
@@ -1734,7 +1744,7 @@ describe('chapter context contracts', () => {
   })
 
   test('returns status filter receipt sync for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = readGenerateChapterForGroupSource()
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildStatusFilterReceiptSyncReport')
@@ -1744,7 +1754,7 @@ describe('chapter context contracts', () => {
   })
 
   test('returns prose craft step-3 syncs for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = readGenerateChapterForGroupSource()
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildProseCraftSyncReport(project, updated, contextPackage, finalText)')
@@ -1756,7 +1766,7 @@ describe('chapter context contracts', () => {
   })
 
   test('returns story quality step-3 syncs in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = readGenerateChapterForGroupSource()
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildStoryLoopSyncReport(project, updated, contextPackage, finalText)')
@@ -1770,7 +1780,7 @@ describe('chapter context contracts', () => {
   })
 
   test('returns narrative technique step-3 syncs in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = readGenerateChapterForGroupSource()
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildChapterHookSyncReport(project, updated, contextPackage, finalText)')
@@ -1790,7 +1800,7 @@ describe('chapter context contracts', () => {
   })
 
   test('returns long-form contract syncs in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = readGenerateChapterForGroupSource()
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildContinuityHeatSyncReport(project, updated, contextPackage, finalText)')
@@ -1850,7 +1860,7 @@ describe('chapter context contracts', () => {
   })
 
   test('returns serial quality assurance syncs in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = readGenerateChapterForGroupSource()
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildStoryDriveSyncReport(project, updated, contextPackage, finalText)')
@@ -1874,7 +1884,7 @@ describe('chapter context contracts', () => {
   })
 
   test('returns deterministic base step-3 syncs in full pipeline story state update', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = readGenerateChapterForGroupSource()
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildProseMetaSyncReport(project, updated, contextPackage, finalText)')
@@ -1886,7 +1896,7 @@ describe('chapter context contracts', () => {
   })
 
   test('returns chapter handoff sync for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = readGenerateChapterForGroupSource()
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildChapterHandoffSyncReport(project, updated, contextPackage, finalText)')
@@ -1894,7 +1904,7 @@ describe('chapter context contracts', () => {
   })
 
   test('returns state tracking sync for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = readGenerateChapterForGroupSource()
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildStateTrackingSyncReport(project, updated, contextPackage, finalText)')
@@ -1902,7 +1912,7 @@ describe('chapter context contracts', () => {
   })
 
   test('returns punctuation tone sync for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = readGenerateChapterForGroupSource()
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildPunctuationToneSyncReport(project, updated, contextPackage, finalText)')
@@ -1910,7 +1920,7 @@ describe('chapter context contracts', () => {
   })
 
   test('returns asset linkage sync for unattended post-delivery gates', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const source = readGenerateChapterForGroupSource()
     const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildAssetLinkageSyncReport(project, updated, contextPackage, finalText)')

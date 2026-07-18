@@ -38,6 +38,8 @@ Recent extracts (continued):
 - 2026-07-18 night: NWS longform trends + remaining commercial diagnosis modal views extracted; commercial-result split to ops leaf; AutoCreation/StoryPlanning chrome helpers extracted; expansion/receipts/specialty monotests further sliced.
  director/repair/cockpit/pre-draft/scene-cards monotest splits; NWS diagnostics views + action routers; audience/trends leaf binding fixes; golden-three opening pattern restore.
 
+- 2026-07-18 night: NWS commercial-tools + preflight factories; novel-editor monotest split + leaf import fix; pre-draft monotest further slices; chapter-context contracts package-join post-commit-sync-bundle.
+
 Still open: NWS handlers still large (~6.4k), remaining large production modules (generate-chapter-for-group ~2.5k, builders-annotations, scene-card-delivery-risk), Task 11 full hardening/smoke.
 
 
