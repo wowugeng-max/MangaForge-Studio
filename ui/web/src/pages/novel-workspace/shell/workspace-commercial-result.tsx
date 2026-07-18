@@ -1,5 +1,5 @@
 import React from 'react'
-import { Alert, Card, List, Space, Tag, Typography } from 'antd'
+import { Alert, Card, List, Progress, Space, Tag, Typography } from 'antd'
 
 const { Text, Paragraph, Title } = Typography
 
@@ -163,3 +163,54 @@ export function renderCommercialResult(title: string, data: any) {
     </Paragraph>
   )
 }
+
+export function renderReaderTrialReviewContentView(report: any) {
+  return (
+    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Card size="small">
+        <Space align="center" size={16}>
+          <Progress
+            type="circle"
+            size={76}
+            percent={Number(report.score || 0)}
+            status={Number(report.score || 0) >= 82 ? 'success' : Number(report.score || 0) < 65 ? 'exception' : 'normal'}
+          />
+          <Space direction="vertical" size={4}>
+            <Text strong>{report.summary || '已完成读者试读复盘'}</Text>
+            <Text type="secondary">{report.quality_bar_label || '起点1万均订试读基准'} · {report.status || '-'}</Text>
+            {(report.drop_points || []).length > 0 && <Tag color="red" bordered={false}>弃读点 {(report.drop_points || []).length}</Tag>}
+          </Space>
+        </Space>
+      </Card>
+      <Card size="small" title="模拟读者">
+        <List
+          size="small"
+          dataSource={report.personas || []}
+          locale={{ emptyText: '暂无模拟读者结论' }}
+          renderItem={(persona: any) => (
+            <List.Item>
+              <List.Item.Meta
+                title={<Space wrap><Text strong>{persona.label}</Text><Tag color={persona.risk_level === 'high' ? 'red' : persona.risk_level === 'low' ? 'green' : 'gold'} bordered={false}>{persona.score || '-'}分</Tag></Space>}
+                description={`${persona.focus || ''} ${persona.verdict || ''}`}
+              />
+            </List.Item>
+          )}
+        />
+      </Card>
+      <Card size="small" title="弃读点与修复动作">
+        <List
+          size="small"
+          dataSource={(report.drop_points || []).slice(0, 10)}
+          locale={{ emptyText: '暂无明显弃读点' }}
+          renderItem={(item: string) => <List.Item>{item}</List.Item>}
+        />
+        {(report.repair_actions || []).length > 0 && (
+          <Space wrap style={{ marginTop: 8 }}>
+            {(report.repair_actions || []).slice(0, 5).map((item: string) => <Tag key={item} color="gold" bordered={false}>{item}</Tag>)}
+          </Space>
+        )}
+      </Card>
+    </Space>
+  )
+}
+

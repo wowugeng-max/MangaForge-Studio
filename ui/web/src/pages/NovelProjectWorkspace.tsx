@@ -87,6 +87,7 @@ import {
 } from './novel-workspace/workspaceShellModel'
 import {
   DeferredWorkspaceSurfaces,
+  buildRecoveryEvidenceQueueRecheckTask,
   flattenIncubationCharacters,
   formatRunResumeErrorMessage,
   formatStoryStateSyncFailure,
@@ -100,7 +101,7 @@ import {
   parseJsonField,
   parseListField,
 } from './novel-workspace/shell/workspace-editor-fields'
-import { renderCommercialResult } from './novel-workspace/shell/workspace-commercial-result'
+import { renderCommercialResult, renderReaderTrialReviewContentView } from './novel-workspace/shell/workspace-commercial-result'
 import { NovelWorkspaceTopBar } from './novel-workspace/shell/workspace-topbar'
 import { NovelWorkspaceDeferredSurfaces } from './novel-workspace/shell/workspace-deferred-surfaces'
 import { NovelWorkspaceBody } from './novel-workspace/shell/workspace-body'
@@ -2241,29 +2242,16 @@ export default function NovelProjectWorkspace() {
     return Number(chapter?.id || 0)
   }
 
-  const buildRecoveryEvidenceQueueRecheckTask = (task: any) => {
-    const chapterId = resolveRepairQueueTaskChapterId(task)
-    return {
-      ...task,
-      chapter_id: chapterId || task?.chapter_id || task?.chapterId,
-      issue_type: 'recovery_evidence_mismatch',
-      source: 'review_annotation_risk',
-      annotation_source: 'governance_recheck_sync',
-      annotation_category: 'recovery_evidence',
-      task_type: 'repair_quality',
-    }
-  }
-
   const executeRecoveryEvidenceGovernanceQueueTask = async (task: any, run?: any, taskIndex = -1, options: TaskCenterActionOptions = {}) => {
     const actionKey = String(task?.action_key || task?.actionKey || '')
     const keepOpenOptions = { ...options, keepTaskCenterOpen: true }
     if (actionKey === 'recheck_single_chapter') {
-      const recheckTask = buildRecoveryEvidenceQueueRecheckTask(task)
+      const recheckTask = buildRecoveryEvidenceQueueRecheckTask(task, resolveRepairQueueTaskChapterId(task))
       await recheckRepairTaskConvergence(recheckTask, run, taskIndex, keepOpenOptions)
       return
     }
     if (actionKey === 'revision') {
-      const recheckTask = buildRecoveryEvidenceQueueRecheckTask(task)
+      const recheckTask = buildRecoveryEvidenceQueueRecheckTask(task, resolveRepairQueueTaskChapterId(task))
       const chapterId = Number(recheckTask.chapter_id || 0)
       if (!chapterId) return message.warning('这个治理队列任务没有匹配章节')
       if (!selectedModelId) return message.warning('请先选择模型')
@@ -3609,53 +3597,7 @@ export default function NovelProjectWorkspace() {
       Modal.info({
         title: '读者试读复盘',
         width: 920,
-        content: (
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <Card size="small">
-              <Space align="center" size={16}>
-                <Progress
-                  type="circle"
-                  size={76}
-                  percent={Number(report.score || 0)}
-                  status={Number(report.score || 0) >= 82 ? 'success' : Number(report.score || 0) < 65 ? 'exception' : 'normal'}
-                />
-                <Space direction="vertical" size={4}>
-                  <Text strong>{report.summary || '已完成读者试读复盘'}</Text>
-                  <Text type="secondary">{report.quality_bar_label || '起点1万均订试读基准'} · {report.status || '-'}</Text>
-                  {(report.drop_points || []).length > 0 && <Tag color="red" bordered={false}>弃读点 {(report.drop_points || []).length}</Tag>}
-                </Space>
-              </Space>
-            </Card>
-            <Card size="small" title="模拟读者">
-              <List
-                size="small"
-                dataSource={report.personas || []}
-                locale={{ emptyText: '暂无模拟读者结论' }}
-                renderItem={(persona: any) => (
-                  <List.Item>
-                    <List.Item.Meta
-                      title={<Space wrap><Text strong>{persona.label}</Text><Tag color={persona.risk_level === 'high' ? 'red' : persona.risk_level === 'low' ? 'green' : 'gold'} bordered={false}>{persona.score || '-'}分</Tag></Space>}
-                      description={`${persona.focus || ''} ${persona.verdict || ''}`}
-                    />
-                  </List.Item>
-                )}
-              />
-            </Card>
-            <Card size="small" title="弃读点与修复动作">
-              <List
-                size="small"
-                dataSource={(report.drop_points || []).slice(0, 10)}
-                locale={{ emptyText: '暂无明显弃读点' }}
-                renderItem={(item: string) => <List.Item>{item}</List.Item>}
-              />
-              {(report.repair_actions || []).length > 0 && (
-                <Space wrap style={{ marginTop: 8 }}>
-                  {(report.repair_actions || []).slice(0, 5).map((item: string) => <Tag key={item} color="gold" bordered={false}>{item}</Tag>)}
-                </Space>
-              )}
-            </Card>
-          </Space>
-        ),
+        content: renderReaderTrialReviewContentView(report),
       })
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '读者试读复盘失败')

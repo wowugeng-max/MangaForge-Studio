@@ -109,3 +109,15 @@ export function formatStoryStateSyncFailure(update: any) {
   if (firstError?.error) return String(firstError.error)
   return '故事状态同步失败，请打开人工校正检查。'
 }
+
+export function buildRecoveryEvidenceQueueRecheckTask(task: any, chapterId?: number) {
+  return {
+    ...task,
+    chapter_id: chapterId || task?.chapter_id || task?.chapterId,
+    issue_type: 'recovery_evidence_mismatch',
+    source: 'review_annotation_risk',
+    annotation_source: 'governance_recheck_sync',
+    annotation_category: 'recovery_evidence',
+    task_type: 'repair_quality',
+  }
+}
