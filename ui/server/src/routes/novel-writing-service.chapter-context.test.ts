@@ -1339,7 +1339,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('returns repaired write preparation brief on context_package after preflight repair', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const returnStart = source.indexOf('return {', source.indexOf('const finalWritePreparationBrief = buildWritePreparationBrief', repairStart))
     const returnBlock = source.slice(returnStart, returnStart + 900)
@@ -1350,7 +1350,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('infers material repair keys from preflight warning corpus, not only failed check keys', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const needsStart = source.indexOf('const needsChapterBlueprint =', repairStart)
     const repairHeader = source.slice(repairStart, needsStart)
@@ -1409,7 +1409,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs missing unattended chapter blueprint before prose generation', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -1426,7 +1426,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with a persisted oh-story blueprint contract', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -1447,7 +1447,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with an oh-story outline methods contract', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -1465,7 +1465,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with oh-story emotion and paragraph hook contracts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -1509,7 +1509,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with oh-story plot and prose quality contracts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -1586,7 +1586,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with oh-story character asset and state contracts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -1668,7 +1668,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('unattended character repair asks for layered missing role pools', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
     const repairStart = source.indexOf('任务：为无人值守章节写作自动补齐前置材料')
     const characterCreateStart = source.indexOf('const existingNames = new Set', repairStart)
     const repairBlock = source.slice(repairStart, characterCreateStart)
@@ -1691,7 +1691,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with oh-story reader genre upgrade and conflict contracts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -1722,7 +1722,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with oh-story female audience contract', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -1741,7 +1741,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with oh-story showdown contract', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -1764,7 +1764,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with oh-story bridge unit contract', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -1780,7 +1780,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with oh-story plot framework contract', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -1798,7 +1798,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with oh-story style boundary contract', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -1814,7 +1814,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with persisted pre-draft launch briefs', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -1835,7 +1835,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with persisted longform continuity launch briefs', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -1863,7 +1863,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs unattended chapter blueprint with persisted commercial style and scene briefs', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
@@ -3289,7 +3289,7 @@ describe('chapter context word target source guards', () => {
   })
 
   test('auto-repairs missing worldbuilding before unattended prose generation', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/auto-repair-preflight-methods.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
     const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
     const repairBlock = source.slice(repairStart, settingsStart)
