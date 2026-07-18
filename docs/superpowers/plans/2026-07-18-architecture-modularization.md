@@ -570,6 +570,8 @@ cd ui/server && bun test src/novel/mutation-contract.test.ts src/novel/sqlite-pe
 
 ## Progress log (agent)
 
+- 2026-07-19 goal-continue VII: NWS derived-state leaf; helpers-safe-batch-recovery core/decision/default-lane/structure; create-wizard options/seed utils; cockpit basics/acceptance already in VI. Task11 focused batches green. Remaining: NWS view ~1593 composition, useNovelStudioController ~1256, NovelCreateWizard ~1449, provider-runtime reverse-free DI, full write-path smoke/memory.
+
 - 2026-07-19 goal-continue VI: NWS style-sample/writing-queue/editor-report handler factories + runRollingPlan export/wiring; task-center drawer-run-summaries component package + recovery-evidence snapshot leaf; cockpit-basics core/receipts/plans; cockpit-acceptance sync-a/b. Focused Task11 243+ green. Remaining: NWS view ~1644, useNovelStudioController ~1256, NovelCreateWizard ~1568, provider-runtime ~1778 (no mechanical DI), helpers-safe-batch-recovery cycles, full write-path smoke. Also: NovelCreateWizard options+seed utils (~1450), cockpit-basics/acceptance barrels, task-center run-summary package.
 
 - 2026-07-18 late: drawer-recovery-evidence; support-delivery-closure-specialty; serial-momentum-states-extended
