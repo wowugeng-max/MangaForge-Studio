@@ -734,19 +734,25 @@ test('recomputes director after request merge and blocks before draft invocation
   expect(prepared.contract.director.readiness).toBe('ready')
 })
 test('rebuilds the generation contract at every chapter-group context boundary', () => {
-  const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-context-scene-cards.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-prose.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-editor-meme-polish.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore.ts'), 'utf8')].join('\n')
+  const source = [
+    readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'),
+    readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-context-scene-cards.ts'), 'utf8'),
+    readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-prose.ts'), 'utf8'),
+    readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-editor-meme-polish.ts'), 'utf8'),
+    readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore.ts'), 'utf8'),
+  ].join('\n')
+  // After package-split, prepareProseGenerationContract rebuild sites live in the scene-cards leaf
+  // while generateChapterForGroup remains the composition root in for-group methods.
   const groupStart = source.indexOf('const generateChapterForGroup = async')
-  const groupEnd = source.indexOf('\n  return {', groupStart)
-  const groupBlock = source.slice(groupStart, groupEnd)
-  const preparationCalls = groupBlock.match(/prepareProseGenerationContract\(/g) || []
+  const preparationCalls = source.match(/prepareProseGenerationContract\(/g) || []
 
   expect(groupStart).toBeGreaterThanOrEqual(0)
   expect(preparationCalls.length).toBeGreaterThanOrEqual(3)
-  expect(groupBlock).toContain('runAfterGate')
-  expect(groupBlock).toContain('generationContract')
-  expect(groupBlock).not.toContain("!contextPackage.preflight.ready && options.allow_incomplete !== true")
-  expect(groupBlock).not.toContain('launchGateBlocker && options.allow_incomplete !== true')
-  expect(groupBlock).not.toContain("!contextPackage.chapter_target.scene_cards.length && options.allow_incomplete !== true")
+  expect(source).toContain('runAfterGate')
+  expect(source).toContain('generationContract')
+  expect(source).not.toContain("!contextPackage.preflight.ready && options.allow_incomplete !== true")
+  expect(source).not.toContain('launchGateBlocker && options.allow_incomplete !== true')
+  expect(source).not.toContain("!contextPackage.chapter_target.scene_cards.length && options.allow_incomplete !== true")
 })
 test('compiles the prose prompt from required core sections and director-selected contracts', () => {
   const contract = buildProseGenerationContract({
