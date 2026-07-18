@@ -13,6 +13,12 @@
 **Branch:** `codex/architecture-modularization`
 
 
+### Residual inventory update (2026-07-19 goal-continue XLV)
+- Extracted `paragraph-prose-context-prepare-default-five` (~127); prepare monofile ~888; package-join source contracts updated.
+- Task 11 sample: server focused **78/70** style batches green; web shell **99 pass** earlier; architecture green.
+- Still deferred: NWS model hook ~994, prepare further phases, planning desks ~863, commercial-ops register ~850. Full UI write-path click smoke still open.
+
+
 ### Residual inventory update (2026-07-19 goal-continue XLIV)
 - Package-split `provider-runtime-support` into types (~35) + route-dsl (~10) + bodies (~461) + monofile support (~420); re-export barrel keeps public API stable; local import binds for format helpers.
 - provider-runtime focused suites **68 pass** with architecture contracts.
