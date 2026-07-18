@@ -870,7 +870,7 @@ describe('chapter context regression a', () => {
   test('asks prose generation self review and revision to enforce oh-story subject name rhythm', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
     const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
-    const promptSectionsSource = readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8')
+    const promptSectionsSource = [readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections-shared.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections-prep.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections-hooks.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections-craft.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections-governance.ts'), 'utf8')].join('\n')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.length
     const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
@@ -1017,7 +1017,7 @@ ${selfReviewSource}`
   test('asks prose generation self review and revision to enforce oh-story section density diagnosis', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
     const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
-    const promptSectionsSource = readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8')
+    const promptSectionsSource = [readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections-shared.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections-prep.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections-hooks.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections-craft.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections-governance.ts'), 'utf8')].join('\n')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.length
     const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}
@@ -1069,7 +1069,7 @@ ${selfReviewSource}`
   test('asks prose generation self review and revision to enforce oh-story event content ratio', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
     const selfReviewSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
-    const promptSectionsSource = readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8')
+    const promptSectionsSource = [readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections-shared.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections-prep.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections-hooks.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections-craft.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections-governance.ts'), 'utf8')].join('\n')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.length
     const prosePromptBlock = `${source.slice(prosePromptStart, prosePromptEnd)}

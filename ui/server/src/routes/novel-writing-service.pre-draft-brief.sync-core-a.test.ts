@@ -884,7 +884,7 @@ describe('chapter pre-draft brief sync-core a', () => {
   test('asks prose revision to preserve core direction and only repair evidenced findings', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-self-review-methods.ts'), 'utf8')
     const monofileSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
-    const prosePromptSource = readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8')
+    const prosePromptSource = [readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections-shared.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections-prep.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections-hooks.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections-craft.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections-governance.ts'), 'utf8')].join('\n')
     const prosePromptBlock = prosePromptSource.slice(
       prosePromptSource.indexOf('export function buildCoreContractRadarPromptSection'),
     )

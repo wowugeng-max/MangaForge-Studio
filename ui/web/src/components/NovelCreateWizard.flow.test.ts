@@ -44,9 +44,9 @@ describe('NovelCreateWizard deep draft flow', () => {
   test('carries the female audience confirmation mode into project reference config', async () => {
     const monofile = readFileSync(join(import.meta.dir, 'NovelCreateWizard.tsx'), 'utf8')
     const source = [monofile, packageJoin('novel-entry')].join('\n')
-    const payloadStart = monofile.indexOf('const buildCreatePayload =')
-    const payloadEnd = monofile.indexOf('const buildFinalizedSeedCreatePayload', payloadStart)
-    const payloadBlock = monofile.slice(payloadStart, payloadEnd)
+    const payloadStart = source.indexOf('export function buildCreatePayload')
+    const payloadEnd = source.indexOf('export function buildFinalizedSeedCreatePayload', payloadStart)
+    const payloadBlock = source.slice(payloadStart, payloadEnd)
 
     expect(source).toContain('female_audience_mode')
     expect(source).toContain('女频长篇口径')
@@ -55,5 +55,6 @@ describe('NovelCreateWizard deep draft flow', () => {
     expect(source).toContain('强制关闭')
     expect(payloadBlock).toContain('oh_story_controls')
     expect(payloadBlock).toContain('female_audience_mode')
+    expect(monofile).toContain('buildCreatePayloadFromUtils')
   })
 })

@@ -4,25 +4,25 @@ import {
 } from '../deepDraftReviewModel'
 import { GENRES, LENGTH_TARGETS } from './createWizardOptions'
 
-function asStringArray(value: any): string[] {
+export function asStringArray(value: any): string[] {
   if (!Array.isArray(value)) return []
   return value.map(item => String(item || '').trim()).filter(Boolean)
 }
 
-function firstText(...values: any[]) {
+export function firstText(...values: any[]) {
   return values.map(value => String(value || '').trim()).find(Boolean) || ''
 }
 
-function asObject(value: any) {
+export function asObject(value: any) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
 }
 
-function buildDeepDraftReviewForUi(seed: any) {
+export function buildDeepDraftReviewForUi(seed: any) {
   const model = buildDeepDraftReviewModel(seed)
   return repairDeepDraftReviewModelGaps(model, seed)
 }
 
-function inferGenreFromText(text: string) {
+export function inferGenreFromText(text: string) {
   if (/修仙|仙门|仙道|天尊|长生|古神|外神|神祇|王朝|皇子/.test(text)) return '仙侠'
   if (/异能|灵气|武魂|斗气|神魔|玄幻/.test(text)) return '玄幻'
   if (/都市|公司|学校|职场/.test(text)) return '都市'
@@ -32,7 +32,7 @@ function inferGenreFromText(text: string) {
   return ''
 }
 
-function normalizeProjectSeedForUi(payload: any) {
+export function normalizeProjectSeedForUi(payload: any) {
   const root = asObject(payload)
   const rawPayload = asObject(root.raw_payload)
   const source = [root.project_seed, root.seed, root.project, root.novel_project, root.data, root.result, root, rawPayload]
@@ -71,19 +71,19 @@ function normalizeProjectSeedForUi(payload: any) {
   }
 }
 
-function normalizeLengthTarget(value: any) {
+export function normalizeLengthTarget(value: any) {
   const raw = String(value || '').trim()
   return LENGTH_TARGETS.some(item => item.value === raw) ? raw : 'medium'
 }
 
-function pickGenre(value: any) {
+export function pickGenre(value: any) {
   const raw = String(value || '').trim()
   if (GENRES.some(item => item.value === raw)) return raw
   const matched = GENRES.find(item => raw.includes(item.value))
   return matched?.value || raw || '其他'
 }
 
-function seedDiagnosticsNeedReview(value: any) {
+export function seedDiagnosticsNeedReview(value: any) {
   const status = String(value?.status || '').trim()
   return status === 'needs_author_review' || status === 'needs_model_expansion'
 }

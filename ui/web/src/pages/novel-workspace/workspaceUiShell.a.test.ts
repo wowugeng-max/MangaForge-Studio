@@ -919,7 +919,14 @@ describe('commercial writing workspace UI shell a', () => {
     const workspaceCss = source('WorkspaceCenter.css')
     const model = writingRecommendationModelSource()
     const service = writingServiceSource()
-    const promptSections = serverSource('novel-writing/prose-generation-prompt-sections.ts')
+    const promptSections = [
+      serverSource('novel-writing/prose-generation-prompt-sections.ts'),
+      serverSource('novel-writing/prose-generation-prompt-sections-shared.ts'),
+      serverSource('novel-writing/prose-generation-prompt-sections-prep.ts'),
+      serverSource('novel-writing/prose-generation-prompt-sections-hooks.ts'),
+      serverSource('novel-writing/prose-generation-prompt-sections-craft.ts'),
+      serverSource('novel-writing/prose-generation-prompt-sections-governance.ts'),
+    ].join('\n')
 
     expect(workspaceCenter).toContain('长篇作战承接')
     expect(workspaceCenter).toContain('今日优先')
@@ -937,7 +944,14 @@ describe('commercial writing workspace UI shell a', () => {
     const workspaceCss = source('WorkspaceCenter.css')
     const model = writingRecommendationModelSource()
     const service = writingServiceSource()
-    const promptSections = serverSource('novel-writing/prose-generation-prompt-sections.ts')
+    const promptSections = [
+      serverSource('novel-writing/prose-generation-prompt-sections.ts'),
+      serverSource('novel-writing/prose-generation-prompt-sections-shared.ts'),
+      serverSource('novel-writing/prose-generation-prompt-sections-prep.ts'),
+      serverSource('novel-writing/prose-generation-prompt-sections-hooks.ts'),
+      serverSource('novel-writing/prose-generation-prompt-sections-craft.ts'),
+      serverSource('novel-writing/prose-generation-prompt-sections-governance.ts'),
+    ].join('\n')
 
     expect(workspaceCenter).toContain('治理复查承接')
     expect(workspaceCenter).toContain('修后证据')

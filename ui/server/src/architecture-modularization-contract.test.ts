@@ -65,6 +65,9 @@ const SOFT_BASELINES: Record<string, number> = {
   'routes/novel-editor/builders-annotations.ts': 800,
   'knowledge-base.ts': 700,
   'novel-writing-service/post-delivery/delta-sync-reports.ts': 250,
+  'novel-writing-service/batch-serial/serial-momentum-briefs.ts': 20,
+  'novel-writing/prose-generation-prompt-sections.ts': 20,
+  'novel-writing/chapter-progress-ledger.ts': 20,
 }
 
 describe('architecture modularization contracts', () => {
