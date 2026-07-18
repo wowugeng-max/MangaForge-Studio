@@ -16,6 +16,26 @@
 
 
 
+### Residual inventory update (2026-07-19 goal-continue XVIII)
+
+Landed reverse-free package splits:
+- `NovelCreateWizard` → `useCreateWizardController` (~653 view / ~905 controller); flow test package-joins controller
+- `builders-annotations-prose-quality` → types + core/craft/audience leaves (~35 barrel); editor annotations package-joins updated
+- Soft baseline: `routes/novel-editor/builders-annotations-prose-quality.ts` = 50
+
+Task 11 focused batch: **193 pass / 0 fail** (architecture 6, annotations-surface 12, annotations-repair-a, core-routes, setting-routes, CreateWizard flow 2, workspace shell a/b).
+
+Still open / deferred (DI or single giant function / composition root):
+- `provider-runtime.ts` ~1778 (explicit DI plan; out of mechanical main path)
+- `NovelProjectWorkspaceView.tsx` ~1593 composition root
+- `prose-self-review-methods.ts` ~1496 factory
+- `director-workspace-detail-drawer.tsx` ~1413
+- `useNovelStudioController.tsx` ~1215 (knowledge/feed/source intertwined)
+- single-function giants: paragraph-prose-context, helpers-batch-risk-radar, delivery-risk carry-over leaves, auto-repair factory
+- Full write-path UI smoke + live memory note still open
+
+Memory snapshot (2026-07-19 XVIII): existing server :8787 pid 61421 idle RSS ~69MB; architecture contracts still forbid full-store rewrite API; full write-path UI smoke still open.
+
 ### Residual inventory update (2026-07-19 goal-continue XVII)
 
 Landed reverse-free splits:

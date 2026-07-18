@@ -19,6 +19,10 @@ function editorBuildersSource() {
     'builders.ts',
     'builders-annotations.ts',
     'builders-annotations-prose-quality.ts',
+    'builders-annotations-prose-quality-types.ts',
+    'builders-annotations-prose-quality-core.ts',
+    'builders-annotations-prose-quality-craft.ts',
+    'builders-annotations-prose-quality-audience.ts',
     'builders-annotations-delivery-risk.ts',
     'builders-annotations-repair-tasks.ts',
   ].map(name => readFileSync(join(dir, name), 'utf8')).join('\n')

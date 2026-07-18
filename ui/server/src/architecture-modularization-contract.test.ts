@@ -63,6 +63,7 @@ const SOFT_BASELINES: Record<string, number> = {
   'novel-writing-service/service/generate-chapter-for-group-methods.ts': 750,
   'novel-writing-service/post-delivery/scene-card-delivery-risk.ts': 20,
   'routes/novel-editor/builders-annotations.ts': 800,
+  'routes/novel-editor/builders-annotations-prose-quality.ts': 50,
   'knowledge-base.ts': 700,
   'novel-writing-service/post-delivery/delta-sync-reports.ts': 250,
   'novel-writing-service/batch-serial/serial-momentum-briefs.ts': 20,

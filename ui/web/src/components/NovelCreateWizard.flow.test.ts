@@ -22,10 +22,11 @@ function packageJoin(dir: string) {
 describe('NovelCreateWizard deep draft flow', () => {
   test('creates a novel project after deep draft finalization succeeds', async () => {
     const monofile = readFileSync(join(import.meta.dir, 'NovelCreateWizard.tsx'), 'utf8')
-    const source = [monofile, packageJoin('novel-entry')].join('\n')
-    const finalizeStart = monofile.indexOf('const finalizeProjectSeed = async')
-    const renderStart = monofile.indexOf('return (', finalizeStart)
-    const finalizeBlock = monofile.slice(finalizeStart, renderStart)
+    const controller = readFileSync(join(import.meta.dir, 'novel-entry/create/useCreateWizardController.ts'), 'utf8')
+    const source = [monofile, controller, packageJoin('novel-entry')].join('\n')
+    const finalizeStart = controller.indexOf('const finalizeProjectSeed = async')
+    const finalizeEnd = controller.indexOf('const selectPrimaryGenre', finalizeStart)
+    const finalizeBlock = controller.slice(finalizeStart, finalizeEnd)
 
     expect(finalizeBlock).toContain('createProjectFromFinalizedSeed')
     expect(finalizeBlock).toContain('create_project: true')
@@ -37,8 +38,9 @@ describe('NovelCreateWizard deep draft flow', () => {
     expect(source).toContain('定稿并创建项目')
     expect(source).toContain('我已确认，创建项目')
     expect(source).toContain('finalizeProjectSeed(true)')
-    // Package-join covers create leaves; monofile retains finalize path.
+    // Package-join covers create leaves; controller retains finalize path.
     expect(source).toContain('normalizeProjectSeedForUi')
+    expect(monofile).toContain('useCreateWizardController')
   })
 
   test('carries the female audience confirmation mode into project reference config', async () => {
@@ -55,6 +57,6 @@ describe('NovelCreateWizard deep draft flow', () => {
     expect(source).toContain('强制关闭')
     expect(payloadBlock).toContain('oh_story_controls')
     expect(payloadBlock).toContain('female_audience_mode')
-    expect(monofile).toContain('buildCreatePayloadFromUtils')
+    expect(source).toContain('buildCreatePayloadFromUtils')
   })
 })
