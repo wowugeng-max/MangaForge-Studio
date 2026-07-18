@@ -1,6 +1,3 @@
 export * from './types'
-export {
-  selectTargetChapterForWriting,
-  resolveEditorRevisionChapterId,
-  buildWritingCockpitModel,
-} from '../../writingCockpitModel'
+export * from './helpers'
+export { buildWritingCockpitModel } from '../../writingCockpitModel'
