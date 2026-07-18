@@ -13,6 +13,12 @@
 **Branch:** `codex/architecture-modularization`
 
 
+### Residual inventory update (2026-07-19 goal-continue L)
+- Split novel-production post-delivery-quality into core/batch/repair leaves; monofile ~17 barrel.
+- Fixed planning desks package-join for shell source contracts.
+- Still deferred: NWS model hook ~994, ComfyUI ~877, auto-creation helpers ~827/810, ReferencePanel ~809. Task 11 full UI write-path click smoke still open.
+
+
 ### Residual inventory update (2026-07-19 goal-continue XLIX)
 - Extracted `paragraph-prose-context-prepare-batch-memory` (~150); prepare monofile ~798.
 - Still deferred: NWS model hook ~994, ComfyUI ~877, auto-creation helpers ~827. Task 11 full UI write-path click smoke still open.
