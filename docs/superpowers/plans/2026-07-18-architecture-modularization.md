@@ -38,6 +38,8 @@ Still open / deferred (DI or single giant function / composition root):
 - `useNovelStudioController.tsx` ~1215
 - Full write-path UI smoke + live memory note still open
 
+Memory snapshot (2026-07-19): existing server on :8787 pid 61421 RSS ~43MB idle (no write-path load in this sample). Architecture contracts still forbid full-store rewrite API.
+
 ### Residual inventory update (2026-07-19 goal-continue XIII–XIV)
 
 Landed reverse-free splits + leaf binding fixes:
