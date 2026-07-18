@@ -752,7 +752,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('shows storyline board evidence details for plan versus actual sync', () => {
     const workspaceCenter = source('StoryPlanningWorkspace.tsx')
-    const model = source('planningWorkspaceModel.ts')
+    const model = source('planning/model/planning-workspace-model.ts')
 
     expect(workspaceCenter).toContain('剧情线证据')
     expect(workspaceCenter).toContain('计划推进')
@@ -1615,7 +1615,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('shows first30 retention curve as a story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
-    const planningModel = source('planningWorkspaceModel.ts')
+    const planningModel = source('planning/model/planning-workspace-model.ts')
     const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
     const taskCenter = source('TaskCenterDrawer.tsx')
 
@@ -1635,7 +1635,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('shows storyline board as a story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
-    const planningModel = source('planningWorkspaceModel.ts')
+    const planningModel = source('planning/model/planning-workspace-model.ts')
     const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
     const taskCenter = source('TaskCenterDrawer.tsx')
 
@@ -1667,7 +1667,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('shows serial governance hub in the story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
-    const planningModel = source('planningWorkspaceModel.ts')
+    const planningModel = source('planning/model/planning-workspace-model.ts')
     const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
 
     expect(planningWorkspace).toContain('连载治理中枢')
@@ -1692,7 +1692,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('shows longform battle desk as the first daily planning decision surface', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
-    const planningModel = source('planningWorkspaceModel.ts')
+    const planningModel = source('planning/model/planning-workspace-model.ts')
 
     expect(planningWorkspace).toContain('长篇作战台')
     expect(planningWorkspace).toContain('novel-longform-battle-desk-card')
@@ -1710,7 +1710,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('shows an AI longform creation pipeline as the top story planning navigator', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
-    const planningModel = source('planningWorkspaceModel.ts')
+    const planningModel = source('planning/model/planning-workspace-model.ts')
 
     expect(planningWorkspace).toContain('AI长篇创作流水线')
     expect(planningWorkspace).toContain('novel-creation-pipeline-card')
@@ -1731,7 +1731,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('shows serial release desk in the story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
-    const planningModel = source('planningWorkspaceModel.ts')
+    const planningModel = source('planning/model/planning-workspace-model.ts')
 
     expect(planningWorkspace).toContain('连载发布节奏台')
     expect(planningWorkspace).toContain('novel-serial-release-desk-card')
@@ -1750,7 +1750,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('shows a longform spine guard in the story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
-    const planningModel = source('planningWorkspaceModel.ts')
+    const planningModel = source('planning/model/planning-workspace-model.ts')
 
     expect(planningWorkspace).toContain('核心契约雷达')
     expect(planningWorkspace).toContain('novel-core-contract-radar-card')
@@ -1772,7 +1772,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('shows a million-word milestone map in the story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
-    const planningModel = source('planningWorkspaceModel.ts')
+    const planningModel = source('planning/model/planning-workspace-model.ts')
 
     expect(planningWorkspace).toContain('百万字里程碑地图')
     expect(planningWorkspace).toContain('novel-million-word-milestone-card')
@@ -1789,7 +1789,7 @@ describe('commercial writing workspace UI shell', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const planningModel = source('planningWorkspaceModel.ts')
+    const planningModel = source('planning/model/planning-workspace-model.ts')
     const writingService = readFileSync(join(import.meta.dir, '../../../../server/src/novel-writing-service/monolith.ts'), 'utf8')
 
     expect(planningWorkspace).toContain('长篇记忆胶囊')
@@ -1808,7 +1808,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('shows reader trust ledger as a story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
-    const planningModel = source('planningWorkspaceModel.ts')
+    const planningModel = source('planning/model/planning-workspace-model.ts')
 
     expect(planningWorkspace).toContain('追读信任账本')
     expect(planningWorkspace).toContain('novel-reader-trust-ledger-card')
@@ -1826,7 +1826,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('shows innovation radar as a story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
-    const planningModel = source('planningWorkspaceModel.ts')
+    const planningModel = source('planning/model/planning-workspace-model.ts')
 
     expect(planningWorkspace).toContain('创新雷达')
     expect(planningWorkspace).toContain('novel-innovation-radar-card')
@@ -1842,7 +1842,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('shows character growth board as a story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
-    const planningModel = source('planningWorkspaceModel.ts')
+    const planningModel = source('planning/model/planning-workspace-model.ts')
     const autoDirectorModel = source('auto-creation/model/director-model.ts')
 
     expect(planningWorkspace).toContain('人物成长看板')
@@ -1862,7 +1862,7 @@ describe('commercial writing workspace UI shell', () => {
   test('shows reader trial room as a story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
     const projectWorkspace = source('../NovelProjectWorkspace.tsx')
-    const planningModel = source('planningWorkspaceModel.ts')
+    const planningModel = source('planning/model/planning-workspace-model.ts')
     const taskCenter = source('TaskCenterDrawer.tsx')
     const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-commercial-ops-routes.ts'), 'utf8')
 
@@ -1884,7 +1884,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('shows volume climax budget as a story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
-    const planningModel = source('planningWorkspaceModel.ts')
+    const planningModel = source('planning/model/planning-workspace-model.ts')
     const directorModel = source('auto-creation/model/director-model.ts')
 
     expect(planningWorkspace).toContain('卷级高潮预算')
@@ -1899,7 +1899,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('shows volume segment acceptance as a story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
-    const planningModel = source('planningWorkspaceModel.ts')
+    const planningModel = source('planning/model/planning-workspace-model.ts')
 
     expect(planningWorkspace).toContain('卷段验收')
     expect(planningWorkspace).toContain('novel-volume-segment-gate-card')
@@ -1915,7 +1915,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('shows recent fatigue radar as a story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
-    const planningModel = source('planningWorkspaceModel.ts')
+    const planningModel = source('planning/model/planning-workspace-model.ts')
 
     expect(planningWorkspace).toContain('近10章疲劳雷达')
     expect(planningWorkspace).toContain('novel-recent-fatigue-radar-card')
@@ -1932,7 +1932,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('shows story pressure ladder as a story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
-    const planningModel = source('planningWorkspaceModel.ts')
+    const planningModel = source('planning/model/planning-workspace-model.ts')
 
     expect(planningWorkspace).toContain('故事压力阶梯')
     expect(planningWorkspace).toContain('novel-story-pressure-ladder-card')
@@ -1947,7 +1947,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('shows story unit workshop as a story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
-    const planningModel = source('planningWorkspaceModel.ts')
+    const planningModel = source('planning/model/planning-workspace-model.ts')
 
     expect(planningWorkspace).toContain('剧情单元工坊')
     expect(planningWorkspace).toContain('novel-story-unit-workshop-card')
