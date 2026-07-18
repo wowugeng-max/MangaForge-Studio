@@ -61,7 +61,7 @@ const SOFT_BASELINES: Record<string, number> = {
   'novel-writing-service/batch-serial/serial-momentum.ts': 50,
   'routes/novel-commercial-ops/builders.ts': 50,
   'novel-writing-service/service/generate-chapter-for-group-methods.ts': 750,
-  'novel-writing-service/post-delivery/scene-card-delivery-risk.ts': 1300,
+  'novel-writing-service/post-delivery/scene-card-delivery-risk.ts': 20,
   'routes/novel-editor/builders-annotations.ts': 800,
   'knowledge-base.ts': 700,
   'novel-writing-service/post-delivery/delta-sync-reports.ts': 250,
@@ -69,6 +69,7 @@ const SOFT_BASELINES: Record<string, number> = {
   'novel-writing/prose-generation-prompt-sections.ts': 20,
   'novel-writing/chapter-progress-ledger.ts': 20,
   'novel-writing-service/quality/pre-draft-brief.ts': 20,
+  'novel-writing-service/post-delivery/quality-sync-reports-benchmark-craft.ts': 20,
 }
 
 describe('architecture modularization contracts', () => {
