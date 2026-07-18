@@ -110,13 +110,6 @@ import { createPreflightHandlers } from './novel-workspace/shell/workspace-prefl
 import { createRepairTaskHandlers } from './novel-workspace/shell/workspace-repair-task-handlers'
 import { createWorkspaceActionHandlers } from './novel-workspace/shell/workspace-action-handlers'
 import {
-  isAutoCreationPlanningArea,
-  isAutoCreationWritingArea,
-  resolveWritingCockpitTarget,
-  runPlanningAction,
-  serialPipelineActionWorkspaceArea,
-} from './novel-workspace/shell/workspace-action-routers'
-import {
   AgentAuditDrawer,
   AgentExecutionModal,
   AutoCreationDirectorWorkspace,
