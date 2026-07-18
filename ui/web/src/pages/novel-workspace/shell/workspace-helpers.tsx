@@ -91,3 +91,21 @@ export function groupIncubationCharacters(payload: any) {
 export function DeferredWorkspaceSurfaces({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={null}>{children}</Suspense>
 }
+
+
+export function formatStoryStateSyncFailure(update: any) {
+  const hardFailures = [
+    ...((Array.isArray(update?.errors) ? update.errors : []).flatMap((item: any) => Array.isArray(item?.hard_failures) ? item.hard_failures : [])),
+    ...(Array.isArray(update?.hard_failures) ? update.hard_failures : []),
+  ]
+  const hardSummary = hardFailures
+    .map((item: any) => String(item?.message || item?.key || '').trim())
+    .filter(Boolean)
+    .slice(0, 3)
+    .join('；')
+  if (hardSummary) return hardSummary
+  if (update?.error) return String(update.error)
+  const firstError = Array.isArray(update?.errors) ? update.errors[0] : null
+  if (firstError?.error) return String(firstError.error)
+  return '故事状态同步失败，请打开人工校正检查。'
+}

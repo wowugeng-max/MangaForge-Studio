@@ -116,6 +116,7 @@ function planningWorkspaceSource() {
   planningWorkspaceSourceCache = [
     sourceCached('planning/model/planning-workspace-model.ts', localSourceCache),
     sourceCached('planning/model/planning-workspace-builder.ts', localSourceCache),
+    sourceCached('planning/model/planning-workspace-builder-desks.ts', localSourceCache),
   ].join('\n')
   return planningWorkspaceSourceCache
 }
@@ -127,6 +128,7 @@ function projectWorkspaceSource() {
     sourceCached('shell/workspace-helpers.tsx', localSourceCache),
     sourceCached('shell/workspace-types.ts', localSourceCache),
     sourceCached('shell/workspace-lazy.tsx', localSourceCache),
+    sourceCached('shell/workspace-editor-fields.ts', localSourceCache),
   ].join('\n')
   return projectWorkspaceSourceCache
 }

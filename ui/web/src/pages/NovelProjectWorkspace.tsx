@@ -89,10 +89,17 @@ import {
   DeferredWorkspaceSurfaces,
   flattenIncubationCharacters,
   formatRunResumeErrorMessage,
+  formatStoryStateSyncFailure,
   groupIncubationCharacters,
   normalizeIncubationCharacterTier,
   safeBatchRecoveryFocusFromPayload,
 } from './novel-workspace/shell/workspace-helpers'
+import {
+  formatJsonField,
+  formatListField,
+  parseJsonField,
+  parseListField,
+} from './novel-workspace/shell/workspace-editor-fields'
 import {
   AgentAuditDrawer,
   AgentExecutionModal,
@@ -4626,22 +4633,6 @@ export default function NovelProjectWorkspace() {
     }
   }
 
-  const formatStoryStateSyncFailure = (update: any) => {
-    const hardFailures = [
-      ...((Array.isArray(update?.errors) ? update.errors : []).flatMap((item: any) => Array.isArray(item?.hard_failures) ? item.hard_failures : [])),
-      ...(Array.isArray(update?.hard_failures) ? update.hard_failures : []),
-    ]
-    const hardSummary = hardFailures
-      .map((item: any) => String(item?.message || item?.key || '').trim())
-      .filter(Boolean)
-      .slice(0, 3)
-      .join('；')
-    if (hardSummary) return hardSummary
-    if (update?.error) return String(update.error)
-    const firstError = Array.isArray(update?.errors) ? update.errors[0] : null
-    if (firstError?.error) return String(firstError.error)
-    return '故事状态同步失败，请打开人工校正检查。'
-  }
 
   const syncStoryStateForChapter = async (chapterId?: number) => {
     const targetId = Number(chapterId || 0)
@@ -5597,41 +5588,7 @@ export default function NovelProjectWorkspace() {
     await loadProjectModules()
   }
 
-  /* ── editor helpers ────────────────────────────────────────────── */
-  const formatListField = (value: any) => {
-    if (Array.isArray(value)) return value.map(item => typeof item === 'string' ? item : JSON.stringify(item)).join(', ')
-    if (value && typeof value === 'object') return JSON.stringify(value)
-    return value || ''
-  }
-
-  const parseListField = (value: any) => {
-    if (Array.isArray(value)) return value
-    const text = String(value || '').trim()
-    if (!text) return []
-    try {
-      const parsed = JSON.parse(text)
-      if (Array.isArray(parsed)) return parsed
-    } catch { /* fall back to comma split */ }
-    return text.split(/[,，\n]/).map((s: string) => s.trim()).filter(Boolean)
-  }
-  const formatJsonField = (value: any) => {
-    if (value === undefined || value === null || value === '') return ''
-    try {
-      return JSON.stringify(value, null, 2)
-    } catch {
-      return String(value || '')
-    }
-  }
-  const parseJsonField = (value: any, fallback: any = []) => {
-    if (Array.isArray(value) || (value && typeof value === 'object')) return value
-    const text = String(value || '').trim()
-    if (!text) return fallback
-    try {
-      return JSON.parse(text)
-    } catch {
-      return fallback
-    }
-  }
+  /* editor field helpers: shell/workspace-editor-fields */
 
   const openEditor = (kind: typeof editorKind, item?: any) => {
     const currentItem = item || (kind === 'worldbuilding' ? worldbuilding[0] : null)
