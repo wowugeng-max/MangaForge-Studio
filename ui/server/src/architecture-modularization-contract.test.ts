@@ -89,6 +89,7 @@ const SOFT_BASELINES: Record<string, number> = {
   'novel-writing-service/quality/craft-tension-contracts.ts': 20,
   'novel-writing-service/quality/audience-quality-contracts.ts': 20,
   'routes/novel-setting-helpers.ts': 20,
+  'novel-writing/prose-quality-loop.ts': 20,
   'novel-writing-service/post-delivery/quality-sync-reports-extended-arcs.ts': 20,
 }
 

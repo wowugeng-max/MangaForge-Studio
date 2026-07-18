@@ -25,7 +25,9 @@ Landed reverse-free splits:
 - `support-normalize-repairs-audit` → quality-deslop/revision/residuals/pre-draft-state
 - `novel-setting-helpers` → shared/agent-prompts/relationship/agent-usage/state-assets
 
-Task 11 focused batch: **277 pass / 0 fail** (architecture, setting-routes, planning a/b, shell a/b, writingRecommendation, TaskCenter, CreateWizard, character-card, closed-beat).
+- `prose-quality-loop` → core/prompts/run
+
+Task 11 focused batch: **277 pass / 0 fail** (+ prose-quality-loop 38 pass) (architecture, setting-routes, planning a/b, shell a/b, writingRecommendation, TaskCenter, CreateWizard, character-card, closed-beat).
 
 Still open:
 - DI/single-function/composition roots: provider-runtime, NWS view, prose-self-review factory, detail drawer, CreateWizard, paragraph-prose-context, batch-risk-radar, delivery-risk carry-over, auto-repair, studio controller, cockpit-acceptance-desk-chapter
