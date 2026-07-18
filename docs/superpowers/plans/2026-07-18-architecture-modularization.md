@@ -27,10 +27,12 @@
 | 7 editor/core routes packages | largely done | editor, core, commercial-ops, generation, planning package-split |
 | 8 auto-creation model package | largely done | risk multi-leaf + director monotest 4-way split + leaf binding fixes |
 | 9 cockpit + repair prompt | largely done | cockpit monotest 4-way; repair monotest 4-way; prompt multi-leaf |
-| 10 shell UI split | largely done | NWS/ACD/deferred-surfaces barrels; view leaves remain large composition roots |
+| 10 shell UI split | largely done | NWS/ACD/deferred barrels; ACD view ~383 + detail drawer; NWS view residual ~2.0k |
 | 11 final hardening | progressed | architecture contracts + focused novel/web suites green; pre-existing opening-handoff runtime fails; live smoke still manual |
 
 Recent extracts (continued):
+
+- 2026-07-19 goal-continue: generate-chapter context/scene + draft leaves (~703); ACD view derived+detail-drawer (~383 view); writingRecommendationModel package-split (types/draft-brief/core + barrel). Soft baseline generate-chapter 750. Task11 focused suites green; manual smoke/memory still open. NWS view residual ~2.0k composition root remains.
 
 - 2026-07-19 goal: generate-chapter context/scene-cards + draft-prose leaves (~703 monofile, soft baseline 750); package-joins updated. Remaining: NWS view residual, WorkspaceCenter residual, Task 11 live smoke.
 
