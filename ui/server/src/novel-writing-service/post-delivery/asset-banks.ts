@@ -274,7 +274,7 @@ export function resolveChapterBenchmarkSampleBank(project: any, contextPackage: 
   ])
 }
 
-function buildStyleSampleSelectionSignals(contextPackage: any = {}) {
+export function buildStyleSampleSelectionSignals(contextPackage: any = {}) {
   const target = contextPackage?.chapter_target || {}
   const sceneCards = asArray(target.scene_cards || target.sceneCards || target.scenes)
   const endingHook = String(target.ending_hook || target.endingHook || '').trim()
@@ -335,14 +335,14 @@ function styleSampleEffectivenessRows(contextPackage: any = {}) {
   return asArray(report?.samples || report?.items || report)
 }
 
-function styleSampleEffectivenessForSample(sample: any, contextPackage: any = {}) {
+export function styleSampleEffectivenessForSample(sample: any, contextPackage: any = {}) {
   const key = String(sample?.sample_key || '').trim()
   if (!key) return null
   return styleSampleEffectivenessRows(contextPackage)
     .find((item: any) => String(item?.sample_key || item?.sampleKey || '').trim() === key) || null
 }
 
-function styleSampleEffectivenessAdjustment(effectiveness: any) {
+export function styleSampleEffectivenessAdjustment(effectiveness: any) {
   if (!effectiveness) return 0
   const usage = Number(effectiveness.usage_count || effectiveness.usageCount || 0) || 0
   if (usage <= 0) return 0
@@ -365,7 +365,7 @@ function styleSampleEffectivenessAdjustment(effectiveness: any) {
   return adjustment
 }
 
-function styleSampleEffectivenessShouldAvoid(effectiveness: any) {
+export function styleSampleEffectivenessShouldAvoid(effectiveness: any) {
   if (!effectiveness) return false
   const usage = Number(effectiveness.usage_count || effectiveness.usageCount || 0) || 0
   if (usage < 2) return false
@@ -376,7 +376,7 @@ function styleSampleEffectivenessShouldAvoid(effectiveness: any) {
   return copyRiskCount > 0 || missedCount >= 3 || riskLabel === '需复盘' || (hitRate > 0 && hitRate < 60)
 }
 
-function styleSampleEffectivenessReason(effectiveness: any) {
+export function styleSampleEffectivenessReason(effectiveness: any) {
   if (!effectiveness) return ''
   const usage = Number(effectiveness.usage_count || effectiveness.usageCount || 0) || 0
   if (usage <= 0) return ''
@@ -392,7 +392,7 @@ function styleSampleEffectivenessReason(effectiveness: any) {
   ].filter(Boolean).join('；')
 }
 
-function latestStyleSelectionReviewPayload(reviews: any[] = [], chapter: any, reviewType: string, payloadKey = '') {
+export function latestStyleSelectionReviewPayload(reviews: any[] = [], chapter: any, reviewType: string, payloadKey = '') {
   const chapterId = Number(chapter?.id || 0)
   const chapterNo = Number(chapter?.chapter_no || 0)
   const review = asArray(reviews)
@@ -409,13 +409,13 @@ function latestStyleSelectionReviewPayload(reviews: any[] = [], chapter: any, re
   return payloadKey ? (payload[payloadKey] || payload?.result?.[payloadKey] || payload) : payload
 }
 
-function styleSelectionChapterQualityScore(chapter: any, reviews: any[] = []) {
+export function styleSelectionChapterQualityScore(chapter: any, reviews: any[] = []) {
   const payload = latestStyleSelectionReviewPayload(reviews, chapter, 'prose_quality')
   const score = Number(payload?.self_check?.review?.score ?? payload?.review?.score ?? payload?.score ?? 0)
   return Number.isFinite(score) ? score : 0
 }
 
-function styleSelectionChapterStrategy(chapter: any) {
+export function styleSelectionChapterStrategy(chapter: any) {
   return chapter?.raw_payload?.pre_draft_brief?.style_sample_strategy
     || chapter?.raw_payload?.pre_draft_brief?.styleSampleStrategy
     || chapter?.raw_payload?.preDraftBrief?.style_sample_strategy
@@ -429,11 +429,11 @@ function styleSelectionChapterStrategy(chapter: any) {
     || {}
 }
 
-function styleSelectionItemSampleKey(item: any) {
+export function styleSelectionItemSampleKey(item: any) {
   return String(item?.sample_key || item?.sampleKey || item?.key || '').trim()
 }
 
-function styleSelectionRoundAverage(values: number[]) {
+export function styleSelectionRoundAverage(values: number[]) {
   const valid = values.filter(value => Number.isFinite(value) && value > 0)
   if (!valid.length) return 0
   return Math.round(valid.reduce((sum, value) => sum + value, 0) / valid.length)

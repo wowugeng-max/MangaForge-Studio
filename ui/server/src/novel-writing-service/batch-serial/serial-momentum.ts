@@ -6,6 +6,13 @@ import { compactBriefText, uniqueBriefStrings } from '../quality/text-utils'
 import { reviewBelongsToChapter, reviewPayloadForType, reviewTimestamp } from '../quality/review-lookup'
 import { proseQualitySerialRiskRepairRisks } from '../quality/serial-risk-repair'
 import { inferEndingHookType } from './ending-hook-type'
+import {
+  paragraphHasDownwardPressure,
+  paragraphHasOppressionPressure,
+  textHasDownwardSafetySignal,
+} from '../../novel-writing/emotional-payoff-scans'
+import { anchorMatchScore, normalizedMatchText } from '../../novel-writing/text-matching'
+import { normalizeRecentFatigueBrief } from '../../novel-writing/rolling-rhythm-preflight'
 
 const SERIAL_PROGRESS_SIGNAL_PATTERN = /发现|揭开|确认|决定|选择|进入|打开|破解|反制|击败|夺回|获得|失去|暴露|改变|升级|回收|推进|救|逃|杀|追查|定位|证明|否定|推翻|兑现|转向|封锁|阻止/
 const SERIAL_PAYOFF_SIGNAL_PATTERN = /爽点|回报|兑现|打脸|反杀|反制|奖励|收益|拿到|夺回|证明|洗清|升级|突破|赢|胜|失态|改口|翻盘|救下|解锁|阶段结算|读者看到/
@@ -3950,7 +3957,7 @@ export function buildSerialQualityRegressionBrief(chapter: any, chapters: any[] 
   }
 }
 
-function mergeRecentFatigueBriefs(...briefs: any[]) {
+export function mergeRecentFatigueBriefs(...briefs: any[]) {
   const normalized = briefs
     .map(brief => brief ? normalizeRecentFatigueBrief(brief) : null)
     .filter(Boolean)
@@ -3994,7 +4001,7 @@ function mergeRecentFatigueBriefs(...briefs: any[]) {
   }
 }
 
-function normalizeExpectationItem(value: any, fallback: { key: string; label: string; type: string }) {
+export function normalizeExpectationItem(value: any, fallback: { key: string; label: string; type: string }) {
   const text = compactBriefText(typeof value === 'string' ? value : value?.text || value?.summary || value?.description || value?.name || value?.title)
   if (!text) return null
   return {
@@ -4005,7 +4012,7 @@ function normalizeExpectationItem(value: any, fallback: { key: string; label: st
   }
 }
 
-function uniqueExpectationItems(items: any[]) {
+export function uniqueExpectationItems(items: any[]) {
   const seen = new Set<string>()
   const rows: any[] = []
   for (const item of items) {
@@ -4034,7 +4041,7 @@ function normalizeDebtExpectationItem(value: any, fallback: { key: string; label
 const EXPECTATION_MUST_CARRY_OVERDUE_AFTER_CHAPTERS = 2
 const EXPECTATION_KEEP_ALIVE_OVERDUE_AFTER_CHAPTERS = 4
 
-function applyReaderExpectationDebtAging(context: any, currentChapterNo: number) {
+export function applyReaderExpectationDebtAging(context: any, currentChapterNo: number) {
   const chapterNo = Number(currentChapterNo || 0)
   const decorate = (item: any, kind: 'must_carry' | 'keep_alive') => {
     const fromChapterNo = Number(item?.from_chapter_no || item?.fromChapterNo || 0) || null
@@ -4079,7 +4086,7 @@ function applyReaderExpectationDebtAging(context: any, currentChapterNo: number)
   }
 }
 
-function normalizeReaderExpectationDebtContext(value: any) {
+export function normalizeReaderExpectationDebtContext(value: any) {
   const raw = value || {}
   const mustCarry = uniqueExpectationItems(asArray(raw.must_carry || raw.mustCarry || raw.carry_over || raw.carryOver)
     .map((item: any, index: number) => normalizeDebtExpectationItem(item, { key: `carry_over_${index + 1}`, label: '期待债务', type: 'carry_over' }, {
@@ -4120,7 +4127,7 @@ function normalizeReaderExpectationDebtContext(value: any) {
   }
 }
 
-function normalizeReaderExpectationLedgerContract(explicit: any, target: any = {}, brief: any = {}, debtContext: any = {}) {
+export function normalizeReaderExpectationLedgerContract(explicit: any, target: any = {}, brief: any = {}, debtContext: any = {}) {
   if (!explicit || typeof explicit !== 'object') return null
   const carryOver = uniqueExpectationItems([
     ...asArray(explicit.carry_over || explicit.carryOver).map((item: any, index: number) => normalizeExpectationItem(item, { key: `carry_over_${index + 1}`, label: '期待债务', type: 'carry_over' })),

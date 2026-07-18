@@ -55755,17 +55755,16 @@ describe('chapter context word target source guards', () => {
     expect(reviseBlock).toContain('buildLLMResultDiagnostics(result)')
   })
   test('feeds quality gate failure reasons into the oh-story revision strategy brief', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
-    const strategyStart = source.indexOf('export function buildRevisionStrategyBrief')
-    const strategyEnd = source.indexOf('function proseQualityPlatformRubricRisks', strategyStart)
-    const strategyBlock = source.slice(strategyStart, strategyEnd)
-    const revisionPrompt = source.slice(
-      source.indexOf('const buildProseRevisionPrompt'),
-      source.indexOf('const shouldReviseProse'),
+    const strategySource = readFileSync(join(import.meta.dir, '../novel-writing-service/revision/revision-strategy.ts'), 'utf8')
+    const monofileSource = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const strategyStart = strategySource.indexOf('export function buildRevisionStrategyBrief')
+    const strategyBlock = strategySource.slice(strategyStart)
+    const revisionPrompt = monofileSource.slice(
+      monofileSource.indexOf('const buildProseRevisionPrompt'),
+      monofileSource.indexOf('const shouldReviseProse'),
     )
 
     expect(strategyStart).toBeGreaterThanOrEqual(0)
-    expect(strategyEnd).toBeGreaterThan(strategyStart)
     expect(strategyBlock).toContain('const qualityGateFailureRisks = proseQualityGateFailureRisks(review)')
     expect(strategyBlock).toContain("field: 'quality_gate'")
     expect(revisionPrompt).toContain('若无法输出严格 JSON，也必须直接输出修订后的完整正文')
