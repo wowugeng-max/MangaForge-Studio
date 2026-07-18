@@ -52,6 +52,8 @@ Recent extracts (continued):
 
 - 2026-07-19 cont: split provider-runtime and chapter-context monotests (core-a/b); receipts-gates split landed. Known pre-existing opening-handoff admission failures remain in chapter-context.core-a (same as pre-split monotest).
 
+- 2026-07-19 late: NWS ~2003 via multi-factory shell extract; monotests split (receipts-gates, provider-runtime, chapter-context core, expansion-default-lane). Remaining large production monofiles: generate-chapter-for-group ~2.3k, NovelStudio/knowledge-base/WorkspaceCenter/StoryPlanning/builders-annotations/delta-sync ~1.7-2.4k. Task 11 full smoke/memory still open.
+
 Still open: NWS ~3.4k (commercial/preflight/repair/action/chapter-prose factories done; stepGenerateProse and more remain); generate-chapter-for-group ~2.3k; WorkspaceCenter/ACD/StoryPlanning/builders-annotations ~1.7-1.9k; some monotests still >1.5k; Task 11 full smoke/memory not finished.
 
 
