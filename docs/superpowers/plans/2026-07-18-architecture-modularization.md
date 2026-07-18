@@ -871,3 +871,5 @@ cd ui/server && bun test src/novel/mutation-contract.test.ts src/novel/sqlite-pe
 - 2026-07-19 goal-continue XXXV: provider-runtime stream leaf (~317: read/parse payload) under support (~854) + endpoint (~251) + monofile (~510). Acyclic entry imports. provider-runtime 62 green.
 
 - 2026-07-19 goal-continue XXXVI: NWS workspaceViewDeps spreads core/action handler bags (~1252 composition root); structured-review-fields barrel (~71) + required-fields leaf (~770) with export-const marker for package-join contracts. Focused architecture+provider-runtime sample+chapter-context contracts green.
+
+- 2026-07-19 goal-continue XXXVII: intent-benchmark-recall leaf (~611) + contracts (~230); continuity-heat-contracts leaf (~284) + dialogue contracts (~457). Pre-existing contracts-b-a failures (write-prep receipt debt symbol, asset_linkage riskCarryOver empty) not introduced by this split. Focused architecture+core-b-1+contracts-a-b green.
