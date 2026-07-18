@@ -31,6 +31,12 @@ import { normalizeStoredOhStoryDeliveryReceipts } from './delivery-risk-carry-ov
 import {
   chapterReceiptProseText,
 } from './delta-sync-reports-storyline'
+import {
+  nextChapterQualityPlanReceiptRows,
+  nextChapterQualityPlanReceiptRisk,
+  nextChapterQualityPlanReceiptEvidence,
+  nextChapterQualityPlanReceiptSegment,
+} from './delta-sync-reports-receipts-revision'
 
 function proseRevisionReceiptRows(selfCheck: any = {}, extraReceipts: any[] = [], chapterText = '') {
   const revision = selfCheck?.revision || selfCheck?.revised_revision || selfCheck || {}

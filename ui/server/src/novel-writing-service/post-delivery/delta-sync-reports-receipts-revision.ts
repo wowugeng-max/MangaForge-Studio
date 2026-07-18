@@ -308,7 +308,7 @@ export function buildRevisionContextReceiptSyncReport(chapter: any, selfCheck: a
   }
 }
 
-function nextChapterQualityPlanReceiptRows(chapter: any = {}, selfCheck: any = {}) {
+export function nextChapterQualityPlanReceiptRows(chapter: any = {}, selfCheck: any = {}) {
   const review = selfCheck?.review || selfCheck?.initial_review || {}
   const revision = selfCheck?.revision || selfCheck?.revised_revision || {}
   const revisionDeliveryReceipts = revision?.oh_story_delivery_receipts || revision?.ohStoryDeliveryReceipts || {}
@@ -343,7 +343,7 @@ function nextChapterQualityPlanReceiptRows(chapter: any = {}, selfCheck: any = {
   })
 }
 
-function nextChapterQualityPlanReceiptEvidence(receipt: any) {
+export function nextChapterQualityPlanReceiptEvidence(receipt: any) {
   return compactBriefText(
     receipt?.evidence
     || receipt?.changed_evidence
@@ -355,7 +355,7 @@ function nextChapterQualityPlanReceiptEvidence(receipt: any) {
 
 
 
-function nextChapterQualityPlanReceiptSegment(receipt: any) {
+export function nextChapterQualityPlanReceiptSegment(receipt: any) {
   const searchable = [
     receipt?.key,
     receipt?.label,
@@ -373,7 +373,7 @@ function nextChapterQualityPlanReceiptSegment(receipt: any) {
   return ''
 }
 
-function nextChapterQualityPlanReceiptSegmentRisk(receipt: any, evidence: any, chapterText: any) {
+export function nextChapterQualityPlanReceiptSegmentRisk(receipt: any, evidence: any, chapterText: any) {
   const segment = nextChapterQualityPlanReceiptSegment(receipt)
   if (receiptEvidenceLocatedInQualityPlanSegment(evidence, chapterText, segment)) return ''
   if (segment === 'opening_actions') return '质量续航回执 opening_actions 的 evidence 未落在前300字。'
@@ -382,7 +382,7 @@ function nextChapterQualityPlanReceiptSegmentRisk(receipt: any, evidence: any, c
   return ''
 }
 
-function nextChapterQualityPlanReceiptRisk(receipt: any, chapterText = '') {
+export function nextChapterQualityPlanReceiptRisk(receipt: any, chapterText = '') {
   const evidence = nextChapterQualityPlanReceiptEvidence(receipt)
   if (evidence && isGenericDeliveryRiskEvidence(evidence)) {
     return '质量续航回执缺少可定位正文证据。'
