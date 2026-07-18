@@ -118,10 +118,18 @@ describe('workspace payload parse cache', () => {
   test('routes the planning, writing, and auto director payload hotspots through the shared cache', () => {
     const source = (name: string) => readFileSync(join(import.meta.dir, name), 'utf8')
     const planning = source('planning/model/planning-workspace-model.ts')
-    const writing = source('writingCockpitModel.ts')
-    const director = source('auto-creation/model/director-model.ts')
+    const writing = [
+      source('writingCockpitModel.ts'),
+      source('writing-cockpit/model/cockpit-basics.ts'),
+      source('writing-cockpit/model/cockpit-acceptance.ts'),
+      source('writing-cockpit/model/cockpit-planning.ts'),
+    ].join('\n')
+    const directorHelpers = [
+      source('auto-creation/model/helpers-main.ts'),
+      source('auto-creation/model/helpers-basics.ts'),
+    ].join('\n')
 
-    for (const modelSource of [planning, writing, director]) {
+    for (const modelSource of [planning, writing, directorHelpers]) {
       expect(
         modelSource.includes("from './payloadParseCache'")
         || modelSource.includes("from '../../payloadParseCache'"),
@@ -129,8 +137,9 @@ describe('workspace payload parse cache', () => {
     }
     expect(planning).toContain('return parseWorkspacePayload(value, options)')
     expect(writing).toContain("parseWorkspacePayload(value, { owner: review, kind: 'review', field })")
-    expect(director).toContain('return parseWorkspacePayload(value, options)')
+    expect(directorHelpers).toContain('return parseWorkspacePayload(value, options)')
   })
+
 
   test('clears parsed payload objects when the workspace project changes or unmounts', () => {
     const source = readFileSync(join(import.meta.dir, 'useNovelWorkspaceData.ts'), 'utf8')
