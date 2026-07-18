@@ -23,7 +23,6 @@ export type RepairTaskHandlerDeps = {
   loadProjectModules: any
   loadProductionTasks: any
   openEditor: any
-  openRepairTaskChapterEditor: any
   outlines: any
   projectId: any
   reviews: any
@@ -53,7 +52,6 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
   const loadProjectModules = deps.loadProjectModules
   const loadProductionTasks = deps.loadProductionTasks
   const openEditor = deps.openEditor
-  const openRepairTaskChapterEditor = deps.openRepairTaskChapterEditor
   const outlines = deps.outlines
   const projectId = deps.projectId
   const reviews = deps.reviews
@@ -72,6 +70,74 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
   const setSelectedProject = deps.setSelectedProject
   const setTaskCenterOpen = deps.setTaskCenterOpen
   const sortedChapters = deps.sortedChapters
+
+  const locateRepairTaskChapter = async (chapterId: number) => {
+    if (await selectChapterForWriting(chapterId)) {
+      setTaskCenterOpen(false)
+      setRightPanelOpen(true)
+      message.success('已定位到章节')
+    }
+  }
+
+  const openRepairTaskChapterEditor = async (chapterId: number) => {
+    if (!await selectChapterForWriting(chapterId)) return
+    const chapter = chapters.find(ch => Number(ch.id) === Number(chapterId))
+    if (chapter) {
+      setTaskCenterOpen(false)
+      openEditor('chapter', chapter)
+    }
+  }
+
+  const startRepairTaskRevision = async (task: any, run?: any, taskIndex = -1, options: TaskCenterActionOptions = {}) => {
+    const chapterId = Number(task?.chapter_id || 0)
+    if (!chapterId) return message.warning('这个任务没有绑定章节')
+    if (!selectedModelId) return message.warning('请先选择模型')
+    if (!await selectChapterForWriting(chapterId)) return
+    if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
+    await createEditorReportForChapter(chapterId, { sourceTask: task, sourceRun: run, sourceTaskIndex: taskIndex, autoRevision: true })
+  }
+
+  const updateRepairTaskStatus = async (run: any, taskIndex: number, status: string, note = '') => {
+    try {
+      await apiClient.post(`/novel/runs/${run.id}/tasks/${taskIndex}/status`, {
+        project_id: projectId,
+        status,
+        note,
+      })
+      await loadProjectModules()
+      await loadProductionTasks()
+      message.success(status === 'resolved' ? '任务已标记为已处理' : status === 'needs_review' ? '任务已标记为需复查' : '任务状态已更新')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '任务状态更新失败')
+    }
+  }
+
+  const bulkUpdateRepairTaskStatus = async (items: any[], status: string) => {
+    try {
+      const grouped = new Map<number, { run: any; indices: number[] }>()
+      for (const item of items || []) {
+        const runId = Number(item?.run?.id || 0)
+        if (!runId || !Number.isInteger(Number(item?.taskIndex))) continue
+        const existing = grouped.get(runId) || { run: item.run, indices: [] }
+        existing.indices.push(Number(item.taskIndex))
+        grouped.set(runId, existing)
+      }
+      for (const group of grouped.values()) {
+        await apiClient.post(`/novel/runs/${group.run.id}/tasks/status-bulk`, {
+          project_id: projectId,
+          task_indices: group.indices,
+          status,
+          note: status === 'resolved' ? '批量复查确认通过' : '批量状态更新',
+        })
+      }
+      await loadProjectModules()
+      await loadProductionTasks()
+      message.success(status === 'resolved' ? `已确认通过 ${items.length} 个复查任务` : `已更新 ${items.length} 个任务`)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '批量更新任务状态失败')
+    }
+  }
+
 
   const resolveRepairQueueTaskChapterId = (task: any) => {
     const chapterId = Number(task?.chapter_id || task?.chapterId || 0)
@@ -525,6 +591,11 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
 
 
   return {
+    locateRepairTaskChapter,
+    openRepairTaskChapterEditor,
+    startRepairTaskRevision,
+    updateRepairTaskStatus,
+    bulkUpdateRepairTaskStatus,
     resolveRepairQueueTaskChapterId,
     executeRecoveryEvidenceGovernanceQueueTask,
     executeTypedRepairTask,
