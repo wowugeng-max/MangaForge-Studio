@@ -52,15 +52,21 @@ describe('architecture modularization contracts', () => {
     expect(shim.split(/\r?\n/).length).toBeLessThanOrEqual(20)
   })
 
-  test('editor and core routes are package-split with compatibility barrels', () => {
-    expect(existsSync(join(serverSrc, 'routes/novel-editor/index.ts'))).toBe(true)
-    expect(existsSync(join(serverSrc, 'routes/novel-editor/builders.ts'))).toBe(true)
-    expect(existsSync(join(serverSrc, 'routes/novel-editor/register.ts'))).toBe(true)
-    expect(existsSync(join(serverSrc, 'routes/novel-core/index.ts'))).toBe(true)
-    expect(existsSync(join(serverSrc, 'routes/novel-core/builders.ts'))).toBe(true)
-    expect(existsSync(join(serverSrc, 'routes/novel-core/register.ts'))).toBe(true)
-    expect(readFileSync(join(serverSrc, 'routes/novel-editor-routes.ts'), 'utf8')).toContain("export * from './novel-editor'")
-    expect(readFileSync(join(serverSrc, 'routes/novel-core-routes.ts'), 'utf8')).toContain("export * from './novel-core'")
+  test('major novel routes are package-split with compatibility barrels', () => {
+    const packages = [
+      ['novel-editor', 'novel-editor-routes.ts'],
+      ['novel-core', 'novel-core-routes.ts'],
+      ['novel-commercial-ops', 'novel-commercial-ops-routes.ts'],
+      ['novel-generation', 'novel-generation-routes.ts'],
+      ['novel-planning', 'novel-planning-routes.ts'],
+    ] as const
+    for (const [pkg, shim] of packages) {
+      expect(existsSync(join(serverSrc, `routes/${pkg}/index.ts`)), pkg).toBe(true)
+      expect(existsSync(join(serverSrc, `routes/${pkg}/builders.ts`)), pkg).toBe(true)
+      expect(existsSync(join(serverSrc, `routes/${pkg}/register.ts`)), pkg).toBe(true)
+      expect(readFileSync(join(serverSrc, `routes/${shim}`), 'utf8')).toContain(`export * from './${pkg}'`)
+      expect(lineCount(`routes/${shim}`)).toBeLessThanOrEqual(20)
+    }
   })
 
   test('completed monofiles stay under hard caps', () => {
