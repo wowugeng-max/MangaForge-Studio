@@ -32,6 +32,8 @@
 
 Recent extracts (continued):
 
+- 2026-07-19 goal: generate-chapter context/scene-cards + draft-prose leaves (~703 monofile, soft baseline 750); package-joins updated. Remaining: NWS view residual, WorkspaceCenter residual, Task 11 live smoke.
+
 - 2026-07-19 Task11 partial: architecture contracts green; chapter-context contracts/handoff green (opening-handoff runtime failures pre-existing); storyline a/b green after delta-sync leaf binding fix; workspaceUiShell a/b 92 pass. Monofile sizes: generate-chapter ~982, delta-sync ~210, NWS barrel 2 / view ~2003, deferred-surfaces barrel 2, WorkspaceCenter ~793. Memory: module load of generate-chapter + delta-sync remains stable in bun tests (no full-store rewrite path). Remaining optional residual composition (NWS view handler wiring, WorkspaceCenter toolbar) and full smoke against live app UI.
 
 - 2026-07-19 goal: delta-sync receipt builders leaf (~208 monofile + receipts/storyline/revision); generate-chapter mid-pipeline earlier.

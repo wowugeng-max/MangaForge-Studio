@@ -119,6 +119,12 @@ import {
   runDraftModeAdmissionAndStore,
 } from './generate-chapter-draft-mode-store'
 import {
+  runGenerateChapterContextAndSceneCards,
+} from './generate-chapter-context-scene-cards'
+import {
+  runGenerateChapterDraftProse,
+} from './generate-chapter-draft-prose'
+import {
   runPostDraftEditorAndMemePolish,
 } from './generate-chapter-editor-meme-polish'
 import {
@@ -359,244 +365,50 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     listNovelChapterSettingUsage(activeWorkspace, projectId, chapterId).catch(() => []),
     listNovelChapterSettingUsage(activeWorkspace, projectId).catch(() => []),
   ])
-  const buildGenerationContext = async () => runtime?.buildChapterContext
-    ? runtime.buildChapterContext({
-        workspace: activeWorkspace,
-        project,
-        chapter,
-        chapters,
-        worldbuilding,
-        characters,
-        outlines,
-        reviews,
-        settings,
-        chapterSettingUsage,
-        projectSettingUsage,
-      })
-    : buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews, {
-        settingEntities: settings,
-        chapterSettingUsage,
-        projectSettingUsage,
-        persistSettingUsage: false,
-      })
-  let wordTarget = resolveChapterWordTarget(project, chapter, options)
-  const initialContextPackage = applyChapterWordTargetToContext(
-    await buildGenerationContext(),
-    wordTarget,
-  )
-  let stagedContextUsageReplacement = initialContextPackage?.setting_context?.auto_matched
-    ? asArray(initialContextPackage?.setting_context?.chapter_usage)
-    : null
-  if (stagedContextUsageReplacement) {
-    chapterSettingUsage = stagedContextUsageReplacement
-    projectSettingUsage = [
-      ...projectSettingUsage.filter((usage: any) => Number(usage?.chapter_id || 0) !== chapter.id),
-      ...chapterSettingUsage,
-    ]
-  }
-  let preparedGeneration = prepareProseGenerationContract(initialContextPackage, options)
-  let contextPackage = preparedGeneration.contextPackage
-  let generationContract = preparedGeneration.contract
-  let strictPreflightReadiness = resolveStrictPreflightReadiness(contextPackage.preflight)
-  let stagedPreflightRepair: any = null
-  const enforcePreparedGate = async (requireSceneCards: boolean) => {
-    try {
-      await preparedGeneration.runAfterGate(async () => undefined, requireSceneCards)
-    } catch (error: any) {
-      await onStage(requireSceneCards ? 'scene_cards' : 'context', {
-        status: 'failed',
-        code: error?.code,
-        reasons: error?.gateDecision?.reasons || [],
-        gate_decision: error?.gateDecision,
-      })
-      throw error
-    }
-  }
-  const contextPreflightReady = contextPackage.preflight.ready === true && strictPreflightReadiness.ready
-  await onStage('context', {
-    status: contextPreflightReady ? 'success' : 'failed',
-    score: contextPreflightReady ? 100 : 0,
-    warnings: contextPackage.preflight.warnings || [],
-    blockers: contextPackage.preflight.blockers || [],
-    director_readiness: generationContract.director?.readiness,
+  const contextSceneResult = await runGenerateChapterContextAndSceneCards({
+    activeWorkspace,
+    projectId,
+    project,
+    chapter,
+    chapters,
+    worldbuilding,
+    characters,
+    outlines,
+    reviews,
+    settings,
+    chapterSettingUsage,
+    projectSettingUsage,
+    options,
+    preferredModelId,
+    llmControlOptions,
+    productionMode,
+    isSceneCardsOnly,
+    approvalPolicy,
+    approvals,
+    configSnapshot,
+    runtime,
+    buildChapterContextPackage,
+    autoRepairChapterPreflightGaps,
+    generateSceneCardsForChapter,
+    approvalRequired,
+    buildApprovalError,
+    throwIfChapterGenerationAborted,
+    onStage,
   })
-  const preflightNeedsMaterialRepair = contextPackage.preflight.ready !== true || !strictPreflightReadiness.ready
-  if (preflightNeedsMaterialRepair && options.auto_repair_missing_material === true) {
-    await onStage('material_repair', { status: 'running', warnings: contextPackage.preflight.warnings || [], blockers: contextPackage.preflight.blockers || [] })
-    const repairResult = await autoRepairChapterPreflightGaps(activeWorkspace, project, chapter, contextPackage, preferredModelId, { ...llmControlOptions, persist: false })
-    stagedPreflightRepair = repairResult
-    chapter = repairResult.chapter || chapter
-    chapters = chapters.map(item => item.id === chapterId ? chapter : item)
-    worldbuilding = repairResult.worldbuilding || worldbuilding
-    characters = repairResult.characters || characters
-    settings = repairResult.settings || settings
-    chapterSettingUsage = repairResult.staged_usage_replacement || chapterSettingUsage
-    projectSettingUsage = [
-      ...projectSettingUsage.filter((usage: any) => Number(usage?.chapter_id || 0) !== chapter.id),
-      ...chapterSettingUsage,
-    ]
-    reviews = [...reviews, ...asArray(repairResult.staged_reviews)]
-    wordTarget = resolveChapterWordTarget(project, chapter, options)
-    const repairedContextPackage = applyChapterWordTargetToContext(
-      runtime?.buildChapterContext ? await buildGenerationContext() : repairResult.context_package,
-      wordTarget,
-    )
-    const repairedWritePrep = repairedContextPackage?.chapter_target?.write_preparation_brief
-      || repairedContextPackage?.chapter_target?.writePreparationBrief
-      || repairedContextPackage?.pre_draft_brief?.write_preparation_brief
-      || repairedContextPackage?.write_preparation_brief
-    const repairedWritePrepReady = ['ready', 'ok', 'pass'].includes(String(
-      repairedWritePrep?.readiness_status
-      || repairedWritePrep?.readinessStatus
-      || '',
-    ).toLowerCase())
-    const postRepairOptions = repairedWritePrepReady
-      ? {
-          ...(options || {}),
-          // Drop stale cockpit launch-gate snapshots after local material repair succeeded.
-          chapter_launch_gate: undefined,
-          chapterLaunchGate: undefined,
-        }
-      : options
-    preparedGeneration = prepareProseGenerationContract(repairedContextPackage, postRepairOptions)
-    contextPackage = preparedGeneration.contextPackage
-    if (contextPackage?.setting_context?.auto_matched) stagedContextUsageReplacement = asArray(contextPackage.setting_context.chapter_usage)
-    generationContract = preparedGeneration.contract
-    strictPreflightReadiness = resolveStrictPreflightReadiness(contextPackage.preflight)
-    await onStage('material_repair', {
-      status: contextPackage.preflight.ready === true && strictPreflightReadiness.ready ? 'success' : 'warn',
-      repaired: repairResult.repaired,
-      errors: repairResult.errors,
-      remaining_warnings: contextPackage.preflight.warnings || [],
-      remaining_blockers: contextPackage.preflight.blockers || [],
-    })
+  if (contextSceneResult.earlyReturn) {
+    return contextSceneResult.earlyReturn
   }
-  await enforcePreparedGate(false)
-  throwIfChapterGenerationAborted()
-  await onStage('scene_cards', { status: 'running' })
-  let generatedSceneCardsThisRun = false
-  if (!generationContract.chapter.scene_cards.length || options.force_scene_cards === true) {
-    const sceneResult = await generateSceneCardsForChapter(activeWorkspace, project, contextPackage, preferredModelId, llmControlOptions)
-    if (sceneResult.sceneCards.length > 0) {
-      generatedSceneCardsThisRun = true
-      // Re-align strong handoff onto newly generated scene cards before any persist/use.
-      const alignedSceneContext = enrichContextWithStrongHandoff({
-        ...contextPackage,
-        chapter_target: {
-          ...(contextPackage?.chapter_target || {}),
-          scene_cards: sceneResult.sceneCards,
-          sceneCards: sceneResult.sceneCards,
-        },
-        ...(contextPackage?.chapterTarget ? {
-          chapterTarget: {
-            ...contextPackage.chapterTarget,
-            scene_cards: sceneResult.sceneCards,
-            sceneCards: sceneResult.sceneCards,
-          },
-        } : {}),
-      })
-      const alignedSceneCards = asArray(alignedSceneContext?.chapter_target?.scene_cards || sceneResult.sceneCards)
-      const sceneChapterPatch = {
-        scene_breakdown: alignedSceneCards,
-        scene_list: alignedSceneCards,
-        raw_payload: { ...(chapter.raw_payload || {}), scene_cards_source: 'chapter_group' },
-      }
-      if (isSceneCardsOnly) {
-        const updatedSceneChapter = await updateNovelChapter(activeWorkspace, chapter.id, sceneChapterPatch as any, { createVersion: false })
-        if (updatedSceneChapter) chapter = updatedSceneChapter
-        chapters = await listNovelChapters(activeWorkspace, projectId)
-      } else {
-        chapter = { ...chapter, ...sceneChapterPatch }
-        chapters = chapters.map(item => item.id === chapter.id ? chapter : item)
-      }
-      wordTarget = resolveChapterWordTarget(project, chapter, options)
-      const sceneContextPackage = applyChapterWordTargetToContext(
-        {
-          ...alignedSceneContext,
-          chapter_target: {
-            ...(alignedSceneContext?.chapter_target || {}),
-            scene_cards: alignedSceneCards,
-            sceneCards: alignedSceneCards,
-          },
-          ...(alignedSceneContext?.chapterTarget ? {
-            chapterTarget: {
-              ...alignedSceneContext.chapterTarget,
-              scene_cards: alignedSceneCards,
-              sceneCards: alignedSceneCards,
-            },
-          } : {}),
-        },
-        wordTarget,
-      )
-      preparedGeneration = prepareProseGenerationContract(sceneContextPackage, options)
-      // Contract merge may reshuffle target fields; keep strong handoff alignment authoritative.
-      contextPackage = enrichContextWithProgressResync(enrichContextWithStrongHandoff(preparedGeneration.contextPackage))
-      if (contextPackage?.chapter_target?.plan_stale) {
-        try {
-          const staleTarget = contextPackage.chapter_target || {}
-          await updateNovelChapter(activeWorkspace, chapter.id, {
-            chapter_goal: staleTarget.goal || staleTarget.chapter_goal || chapter.chapter_goal,
-            chapter_summary: staleTarget.summary || staleTarget.chapter_summary || chapter.chapter_summary,
-            conflict: staleTarget.conflict || chapter.conflict,
-            raw_payload: {
-              ...(chapter.raw_payload || {}),
-              must_advance: staleTarget.must_advance || [],
-              forbidden_repeats: staleTarget.forbidden_repeats || [],
-              progress_resync: staleTarget.progress_resync || { plan_stale: true },
-              plan_stale: true,
-            },
-          } as any, { createVersion: false })
-          chapter = {
-            ...chapter,
-            chapter_goal: staleTarget.goal || chapter.chapter_goal,
-            chapter_summary: staleTarget.summary || chapter.chapter_summary,
-            conflict: staleTarget.conflict || chapter.conflict,
-            raw_payload: {
-              ...(chapter.raw_payload || {}),
-              must_advance: staleTarget.must_advance || [],
-              forbidden_repeats: staleTarget.forbidden_repeats || [],
-              progress_resync: staleTarget.progress_resync || { plan_stale: true },
-              plan_stale: true,
-            },
-          }
-        } catch {
-          // seed persist is best-effort; live context already carries resynced plan
-        }
-      }
-      generationContract = prepareProseGenerationContract(contextPackage, options).contract
-    }
-  }
-  await enforcePreparedGate(true)
-  await onStage('scene_cards', {
-    status: 'success',
-    count: generationContract.chapter.scene_cards.length,
-    scene_card_titles: generationContract.chapter.scene_cards
-      .slice(0, 6)
-      .map((card: any) => String(card?.title || card?.scene_title || card?.sceneTitle || `场景${card?.scene_no || card?.sceneNo || ''}`).trim())
-      .filter(Boolean),
-  })
-  if (generatedSceneCardsThisRun && approvalRequired(approvalPolicy, 'scene_cards', approvals, { count: generationContract.chapter.scene_cards.length })) {
-    await onStage('scene_cards', { status: 'needs_confirmation', count: generationContract.chapter.scene_cards.length })
-    throw buildApprovalError('scene_cards', '新生成的场景卡等待人工确认', { count: generationContract.chapter.scene_cards.length })
-  }
-  if (isSceneCardsOnly) {
-    await onStage('migration_plan', { status: 'skipped', reason: '生产模式：只生成场景卡' })
-    await onStage('draft', { status: 'skipped', reason: '生产模式：只生成场景卡' })
-    await onStage('review', { status: 'skipped', reason: '生产模式：只生成场景卡' })
-    await onStage('revise', { status: 'skipped', reason: '生产模式：只生成场景卡' })
-    await onStage('safety', { status: 'skipped', reason: '生产模式：只生成场景卡' })
-    await onStage('store', { status: 'skipped', reason: '场景卡已保存到章节元数据' })
-    await onStage('story_state', { status: 'skipped', reason: '未生成正文，无需更新状态机' })
-    return {
-      chapter,
-      score: null,
-      revised: false,
-      production_mode: productionMode,
-      completed_stage: 'scene_cards',
-      story_state_update: { skipped: true },
-      config_snapshot: configSnapshot,
-    }
-  }
+  chapter = contextSceneResult.chapter
+  chapters = contextSceneResult.chapters
+  chapterSettingUsage = contextSceneResult.chapterSettingUsage
+  projectSettingUsage = contextSceneResult.projectSettingUsage
+  const wordTarget = contextSceneResult.wordTarget
+  const stagedContextUsageReplacement = contextSceneResult.stagedContextUsageReplacement
+  const stagedPreflightRepair = contextSceneResult.stagedPreflightRepair
+  let contextPackage = contextSceneResult.contextPackage
+  let generationContract = contextSceneResult.generationContract
+  const strictPreflightReadiness = contextSceneResult.strictPreflightReadiness
+
   const configuredQualityThreshold = [
     options.quality_threshold,
     options.qualityThreshold,
@@ -623,126 +435,35 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
         },
       }
     : project
-  const prevChapters = compactPreviousChaptersForProse(chapters, chapter.chapter_no)
-  throwIfChapterGenerationAborted()
-  await onStage('migration_plan', { status: 'running' })
-  const migrationPlan = await getReferenceMigrationPlanForChapter(activeWorkspace, project, chapter).catch(error => ({ error: String(error) }))
-  await onStage('migration_plan', { status: (migrationPlan as any)?.error ? 'warn' : 'success', active_reference_count: (migrationPlan as any)?.chapter_specific_plan?.active_reference_count || 0 })
-  throwIfChapterGenerationAborted()
-  const compiledPrompt = compileParagraphProseContext(project, generationContract, migrationPlan, chapter)
-  await onStage('draft', { status: 'running', prompt_diagnostics: compiledPrompt.diagnostics })
-  const draftResult = await generateNovelChapterProse(project, chapter, {
+
+  const draftResultBundle = await runGenerateChapterDraftProse({
+    activeWorkspace,
+    project,
+    chapter,
+    chapters,
     worldbuilding,
     characters,
-    outline: outlines,
-    prompt: String(options.prompt || ''),
-    prevChapters,
+    outlines,
     contextPackage,
-    migrationPlan,
-    paragraphTask: compiledPrompt.prompt,
-    promptDiagnostics: compiledPrompt.diagnostics,
-    boundedProseContract: true,
-    maxTokens: proseMaxTokensForWordTarget(wordTarget),
-    abortSignal: options.abortSignal,
-    llmTimeoutMs: options.llmTimeoutMs,
-  } as any, {
-    activeWorkspace,
-    modelId: String(getStageModelId(project, 'draft', preferredModelId) || ''),
-    skipMemoryStore: true,
+    generationContract,
+    wordTarget,
+    preferredModelId,
+    options,
+    getStageModelId,
+    generateNovelChapterProse,
+    getReferenceMigrationPlanForChapter,
+    throwIfChapterGenerationAborted,
+    onStage,
   })
-  assertCompleteProseTransportResult(draftResult, 'PROSE_DRAFT_TRUNCATED')
-  const draftPromptDiagnostics = {
-    ...compiledPrompt.diagnostics,
-    model_usage: (draftResult as any)?.prose_prompt_diagnostics?.model_usage
-      || (draftResult as any)?.usage
-      || (draftResult as any)?.raw?.usage
-      || null,
-  }
-  const resultPayload = getNovelPayload(draftResult)
-  const draftProseChapters = Array.isArray(resultPayload?.prose_chapters)
-    ? resultPayload.prose_chapters
-    : Array.isArray(resultPayload?.proseChapters)
-      ? resultPayload.proseChapters
-      : []
-  let targetProse: any
-  try {
-    targetProse = selectProseForChapter(resultPayload, chapter)
-      || draftProseChapters.find((item: any) => Number(item?.chapter_no ?? item?.chapterNo) === Number(chapter.chapter_no))
-      || draftProseChapters[0]
-  } catch (error) {
-    throw markBlockedInvalidError(error, {
-      code: 'prose_wrong_chapter',
-      source: 'prose_shape',
-      message: '模型返回的正文不属于目标章节。',
-    })
-  }
-  const generatedTitlePatch = buildGeneratedChapterTitlePatch(
-    chapter,
-    contextPackage?.chapter_target?.title_uniqueness_report,
-    targetProse?.title || resultPayload?.title,
-  )
-  const plainProseFallback = extractPlainProseFallback(draftResult, 800)
-  const chapterText = targetProse?.chapter_text || targetProse?.chapterText || resultPayload?.chapter_text || resultPayload?.chapterText || plainProseFallback
-  if (!chapterText) {
-    await onStage('draft', {
-      status: 'failed',
-      error: String((draftResult as any).error || (draftResult as any).fallbackReason || '模型未返回正文'),
-      llm_diagnostics: buildLLMResultDiagnostics(draftResult),
-    })
-    const error = new Error(String((draftResult as any).error || (draftResult as any).fallbackReason || '模型未返回正文'))
-    throw markBlockedInvalidError(error, validateMinimalChapterProse('').failures[0])
-  }
-  await onStage('draft', { status: 'success', word_count: countProseChars(chapterText), modelName: (draftResult as any).modelName, scene_status: 'generated', prompt_diagnostics: draftPromptDiagnostics, plain_text_fallback_used: Boolean(plainProseFallback && !targetProse?.chapter_text && !targetProse?.chapterText && !resultPayload?.chapter_text && !resultPayload?.chapterText) })
-  let finalText = String(chapterText || '')
-  const initialOpeningContinuityAssessment = assessInitialProseOpeningContinuity(finalText, enrichContextWithProgressResync(enrichContextWithStrongHandoff(contextPackage)))
-  if (initialOpeningContinuityAssessment.failure) {
-    const failure = initialOpeningContinuityAssessment.failure
-    throw markBlockedInvalidError(Object.assign(new Error(failure.message), {
-      code: 'PROSE_ADMISSION_BLOCKED_INVALID',
-    }), failure)
-  }
-  let finalSceneBreakdown = targetProse?.scene_breakdown || targetProse?.sceneBreakdown || resultPayload?.scene_breakdown || resultPayload?.sceneBreakdown || []
-  let ohStoryDeliveryReceipts = normalizeStoredOhStoryDeliveryReceipts({
-    ...(resultPayload || {}),
-    ...(targetProse || {}),
-    chapter_blueprint: targetProse?.chapter_blueprint
-      || targetProse?.chapterBlueprint
-      || resultPayload?.chapter_blueprint
-      || resultPayload?.chapterBlueprint
-      || contextPackage?.chapter_target?.chapter_blueprint
-      || contextPackage?.chapter_target?.chapterBlueprint,
-    scene_card_receipts: [
-      ...asArray(resultPayload?.scene_card_receipts || resultPayload?.sceneCardReceipts),
-      ...asArray(targetProse?.scene_card_receipts || targetProse?.sceneCardReceipts),
-      ...asArray(finalSceneBreakdown)
-        .map((scene: any) => scene?.scene_card_receipts || scene?.sceneCardReceipts)
-        .filter(Boolean),
-    ],
-    delivery_risk_receipts: [
-      ...asArray(resultPayload?.delivery_risk_receipts || resultPayload?.deliveryRiskReceipts),
-      ...asArray(targetProse?.delivery_risk_receipts || targetProse?.deliveryRiskReceipts),
-    ],
-    revision_context_receipts: [
-      ...asArray(resultPayload?.revision_context_receipts || resultPayload?.revisionContextReceipts),
-      ...asArray(targetProse?.revision_context_receipts || targetProse?.revisionContextReceipts),
-    ],
-    revision_receipts: [
-      ...asArray(resultPayload?.revision_receipts || resultPayload?.revisionReceipts),
-      ...asArray(targetProse?.revision_receipts || targetProse?.revisionReceipts),
-    ],
-    artifact_protocol_receipts: [
-      ...asArray(resultPayload?.artifact_protocol_receipts || resultPayload?.artifactProtocolReceipts),
-      ...asArray(targetProse?.artifact_protocol_receipts || targetProse?.artifactProtocolReceipts),
-    ],
-    pre_draft_execution_receipts: resultPayload?.pre_draft_execution_receipts
-      || resultPayload?.preDraftExecutionReceipts
-      || targetProse?.pre_draft_execution_receipts
-      || targetProse?.preDraftExecutionReceipts,
-  }) || { chapter_blueprint: null, scene_card_receipts: [], delivery_risk_receipts: [], revision_context_receipts: [], revision_receipts: [], deslop_repair_receipts: [], quality_audit_repair_receipts: [], artifact_protocol_receipts: [], pre_draft_execution_receipts: null }
-  let finalContinuityNotes = targetProse?.continuity_notes || targetProse?.continuityNotes || resultPayload?.continuity_notes || resultPayload?.continuityNotes || chapter.continuity_notes || []
-  let editorRewrite: any = null
-  let memePolish: any = null
-  let readabilityReview: any = null
+  let finalText = draftResultBundle.finalText
+  let finalSceneBreakdown = draftResultBundle.finalSceneBreakdown
+  let finalContinuityNotes = draftResultBundle.finalContinuityNotes
+  let ohStoryDeliveryReceipts = draftResultBundle.ohStoryDeliveryReceipts
+  const generatedTitlePatch = draftResultBundle.generatedTitlePatch
+  const draftPromptDiagnostics = draftResultBundle.draftPromptDiagnostics
+  let editorRewrite = draftResultBundle.editorRewrite
+  let memePolish = draftResultBundle.memePolish
+  let readabilityReview = draftResultBundle.readabilityReview
   const editorMemeResult = await runPostDraftEditorAndMemePolish({
     isDraftOnly,
     activeWorkspace,
