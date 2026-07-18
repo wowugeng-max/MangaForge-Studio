@@ -33,7 +33,6 @@ import {
   buildAutoCreationDirectorModel,
   type AutoCreationDirectorAction,
 } from './autoCreationDirectorModel'
-import { buildNovelWritingRecommendation } from './writingRecommendationModel'
 import { buildPlanningWorkspaceModel, type PlanningActionKey } from './planningWorkspaceModel'
 import {
   buildWritingCockpitModel,
@@ -54,7 +53,6 @@ import { useReferenceWorkflow } from './useReferenceWorkflow'
 import { useWorkspaceTasks } from './useWorkspaceTasks'
 import {
   chapterHasProse,
-  chapterWordCount,
   displayValue,
   wc,
 } from './utils'
@@ -106,6 +104,13 @@ import { createDiagnosticsHandlers } from './shell/workspace-diagnostics-handler
 import { createCreativeHandlers } from './shell/workspace-creative-handlers'
 import { createStyleSampleHandlers } from './shell/workspace-style-sample-handlers'
 import { createWritingQueueHandlers } from './shell/workspace-writing-queue-handlers'
+import {
+  buildWorkspaceWritingRecommendation,
+  filterReviewsByType,
+  resolveActiveChapterOwnedData,
+  resolveActiveChapterSceneCards,
+  resolveActiveMemorySummary,
+} from './shell/workspace-derived-state'
 import {
   AgentAuditDrawer,
   AgentExecutionModal,
@@ -289,14 +294,8 @@ export default function NovelProjectWorkspace() {
 
   const activeChapterIdNumber = Number(activeChapter?.id || 0)
   const activeChapterUpdatedAt = activeChapter?.updated_at || null
-  const activeChapterDiagnosticsData = activeChapterDiagnostics?.chapterId === activeChapterIdNumber
-    && activeChapterDiagnostics?.updatedAt === activeChapterUpdatedAt
-    ? activeChapterDiagnostics.data
-    : null
-  const activeContextPackageData = activeChapterContextPackage?.chapterId === activeChapterIdNumber
-    && activeChapterContextPackage?.updatedAt === activeChapterUpdatedAt
-    ? activeChapterContextPackage.data
-    : null
+  const activeChapterDiagnosticsData = resolveActiveChapterOwnedData(activeChapterDiagnostics, activeChapterIdNumber, activeChapterUpdatedAt)
+  const activeContextPackageData = resolveActiveChapterOwnedData(activeChapterContextPackage, activeChapterIdNumber, activeChapterUpdatedAt)
   const modelOptions = useMemo(() => models.map((model: any) => {
     const modelName = String(model.display_name || model.model_name || '未命名模型')
     const providerName = String(model.provider || '未知厂商')
@@ -311,17 +310,10 @@ export default function NovelProjectWorkspace() {
       ),
     }
   }), [models])
-  const activeMemorySummary = useMemo(() => {
-    if (!projectId) return null
-    if (!Array.isArray(memoryPalaceProjects)) return null
-    return memoryPalaceProjects.find((item: any) => Number(item?.project_id || 0) === projectId) || {
-      project_id: projectId,
-      memory_count: 0,
-      fact_count: 0,
-      continuity_issue_count: 0,
-      missing: true,
-    }
-  }, [memoryPalaceProjects, projectId])
+  const activeMemorySummary = useMemo(
+    () => resolveActiveMemorySummary(memoryPalaceProjects, projectId),
+    [memoryPalaceProjects, projectId],
+  )
 
   useEffect(() => {
     if (!projectId) return
@@ -356,33 +348,10 @@ export default function NovelProjectWorkspace() {
     }
   }, [projectId, runRecords.length, reviews.length, sortedChapters.length])
 
-  const proseQualityReports = useMemo(() => (
-    reviews
-      .filter((item: any) => item.review_type === 'prose_quality')
-      .slice()
-      .sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
-  ), [reviews])
-
-  const editorReports = useMemo(() => (
-    reviews
-      .filter((item: any) => item.review_type === 'editor_report')
-      .slice()
-      .sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
-  ), [reviews])
-
-  const editorRevisionReports = useMemo(() => (
-    reviews
-      .filter((item: any) => item.review_type === 'editor_revision')
-      .slice()
-      .sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
-  ), [reviews])
-
-  const bookReviews = useMemo(() => (
-    reviews
-      .filter((item: any) => item.review_type === 'book_review')
-      .slice()
-      .sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
-  ), [reviews])
+  const proseQualityReports = useMemo(() => filterReviewsByType(reviews, 'prose_quality'), [reviews])
+  const editorReports = useMemo(() => filterReviewsByType(reviews, 'editor_report'), [reviews])
+  const editorRevisionReports = useMemo(() => filterReviewsByType(reviews, 'editor_revision'), [reviews])
+  const bookReviews = useMemo(() => filterReviewsByType(reviews, 'book_review'), [reviews])
 
   const cancelStepGenerateProse = () => {
     if (!stepProseLoading) return
@@ -1551,34 +1520,14 @@ export default function NovelProjectWorkspace() {
   )
 
 
-  const activeChapterSceneCards = (
-    activeChapter && Array.isArray(activeChapter.scene_list) && activeChapter.scene_list.length > 0
-      ? activeChapter.scene_list
-      : (activeChapter && Array.isArray(activeChapter.scene_breakdown) ? activeChapter.scene_breakdown : [])
-  )
+  const activeChapterSceneCards = resolveActiveChapterSceneCards(activeChapter)
 
-  const writingRecommendation = (() => {
-    const materialScore = activeChapterDiagnosticsData?.material_score
-    const materialReady = !materialScore || Boolean(materialScore.can_generate)
-    const materialRecommendations = Array.isArray(materialScore?.recommendations)
-      ? materialScore.recommendations.filter(Boolean)
-      : []
-
-    return buildNovelWritingRecommendation({
-      materialReady,
-      materialRecommendations,
-      sceneCardCount: activeChapterSceneCards.length,
-      activeWordCount: chapterWordCount(activeChapter),
-      deliveryRiskCarryOverActionCount: [
-        ...(writingCockpitModel.chapterPlanningDesk.episodePlan.deliveryRiskCarryOver.requiredActions || []),
-        ...(writingCockpitModel.chapterPlanningDesk.episodePlan.deliveryRiskCarryOver.openingActions || []),
-        ...(writingCockpitModel.chapterPlanningDesk.episodePlan.deliveryRiskCarryOver.middleActions || []),
-        ...(writingCockpitModel.chapterPlanningDesk.episodePlan.deliveryRiskCarryOver.endingActions || []),
-        ...(writingCockpitModel.chapterPlanningDesk.episodePlan.deliveryRiskCarryOver.forbiddenRepeats || []),
-      ].length,
-      qualityContinuitySceneMapCount: writingCockpitModel.chapterPlanningDesk.qualityContinuitySceneMap.length,
-    })
-  })()
+  const writingRecommendation = buildWorkspaceWritingRecommendation({
+    activeChapterDiagnosticsData,
+    activeChapterSceneCards,
+    activeChapter,
+    writingCockpitModel,
+  })
 
   const cockpitPrimaryActionOverride: WritingCockpitPrimaryActionOverride | null = (() => {
     if (!activeChapter || workspaceArea !== 'chapterWriting') return null

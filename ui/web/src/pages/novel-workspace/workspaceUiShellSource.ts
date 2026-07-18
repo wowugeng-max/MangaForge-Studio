@@ -175,6 +175,7 @@ export function projectWorkspaceSource() {
     sourceCached('shell/workspace-chapter-prose-handlers.tsx', localSourceCache), sourceCached('shell/workspace-chapter-version-handlers.tsx', localSourceCache),
     sourceCached('shell/workspace-style-sample-handlers.tsx', localSourceCache),
     sourceCached('shell/workspace-writing-queue-handlers.tsx', localSourceCache),
+    sourceCached('shell/workspace-derived-state.ts', localSourceCache),
     sourceCached('shell/workspace-editor-report-handlers.tsx', localSourceCache),
     sourceCached('shell/workspace-writing-bible-handlers.tsx', localSourceCache),
     sourceCached('shell/workspace-production-handlers.tsx', localSourceCache),
