@@ -41,6 +41,7 @@ Recent extracts (continued):
 - 2026-07-19 goal-continue+++: builders-annotations prose-quality leaf (~662 monofile); generate-chapter ~1500; commercial-tools ~477.
 - 2026-07-19 goal-continue++++: StoryPlanning board panels leaf (~269 monofile); builders-annotations ~663; generate-chapter ~1500; commercial-tools ~477.
 - 2026-07-19 goal-continue+++++: ACD monofile barrel + director-workspace-view; StoryPlanning ~244; commercial-tools ~477; generate-chapter ~1500; builders-annotations ~663. Task 11 + NWS/WorkspaceCenter still open.
+- 2026-07-19 goal: WorkspaceCenter writing-support leaf (~796 monofile); prior ACD/StoryPlanning/commercial/generate-chapter extracts. Remaining: NWS ~2.0k, generate-chapter mid-loop, Task 11.
 Still open: NWS residual composition, WorkspaceCenter/StoryPlanning/ACD/builders-annotations/delta-sync further split, Task 11 full smoke/memory.
 
 

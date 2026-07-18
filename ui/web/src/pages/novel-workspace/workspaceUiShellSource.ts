@@ -135,6 +135,7 @@ export function workspaceCenterSource() {
   if (workspaceCenterSourceCache != null) return workspaceCenterSourceCache
   workspaceCenterSourceCache = [
     sourceCached('WorkspaceCenter.tsx', localSourceCache),
+    sourceCached('workspace-center-writing-support.tsx', localSourceCache),
     sourceCached('workspace-center-chrome.tsx', localSourceCache),
     sourceCached('workspace-center-prose-editor.tsx', localSourceCache),
   ].join('\n')
