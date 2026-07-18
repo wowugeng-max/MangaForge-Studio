@@ -35,6 +35,8 @@ Recent extracts (continued):
 - 2026-07-19 continue: generate-chapter post-commit leaf; knowledge-base types/pure/source-cache/analyze package leaves (~1.2k monofile); NovelStudio knowledge-ui-shared; monotest splits (TaskCenter, word-target pipeline, readability review, scene-cards regression); soft baselines tightened. Task 11 still open for full smoke/memory and remaining monofiles (generate-chapter ~2.1k, NovelStudio ~2.3k, NWS ~2.0k, WorkspaceCenter/StoryPlanning/ACD/builders-annotations/delta-sync).
 
 - 2026-07-19 late continue: NovelStudio panels (feed/knowledge/source-cache) ~1.56k; monotest splits safe-batch/admission/word-target; knowledge-base ~1.17k; generate-chapter post-commit done. Remaining: generate-chapter ~2.1k, NWS ~2.0k, WorkspaceCenter/StoryPlanning/ACD/builders-annotations/delta-sync, workspaceUiShell contracts ~2.8k, Task 11 smoke/memory.
+
+- 2026-07-19 night: knowledge-base fully package-split (~590 monofile + types/pure/source-cache/analyze/ingest-state/ingest-runtime); NovelStudio ~1.56k with panels; workspaceUiShell split; more monotest halves. Remaining large: generate-chapter ~2.1k, NWS ~2.0k, WorkspaceCenter/StoryPlanning/ACD/builders-annotations/delta-sync; Task 11 open.
 - 2026-07-18 night+: fixed benchmark-structure leaf; NWS down to ~5.5k via commercial/incubator/diff views; monotests heavily sliced.
 
 - 2026-07-18 late night: generate-chapter acceptance-prep leaf; more monotest slices (contracts/memory/craft/receipts/expansion); deferred-surfaces types leaf.

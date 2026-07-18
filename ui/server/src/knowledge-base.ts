@@ -34,7 +34,7 @@ export {
   getSourceCachedChapter,
   listSourceCaches,
 } from './knowledge-base/source-cache'
-import { analyzeKnowledge, synthesizeFullBookKnowledge } from './knowledge-base/analyze'
+import { analyzeKnowledge } from './knowledge-base/analyze'
 export { analyzeKnowledge } from './knowledge-base/analyze'
 import {
   ingestJobChapters,
