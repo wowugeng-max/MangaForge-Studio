@@ -85,6 +85,7 @@ function directorModelSource() {
     sourceCached('auto-creation/model/helpers-basics.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-main.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-risk-and-governance.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-risk-delivery-and-recovery.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-risk-strengthened-roadmap.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-pipeline.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-command.ts', localSourceCache),

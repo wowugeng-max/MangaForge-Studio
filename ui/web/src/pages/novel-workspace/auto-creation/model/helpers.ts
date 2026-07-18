@@ -2,6 +2,7 @@
 export * from './helpers-basics'
 export * from './helpers-main'
 export * from './helpers-risk-and-governance'
+export * from './helpers-risk-delivery-and-recovery'
 export * from './helpers-risk-strengthened-roadmap'
 export * from './helpers-batch-completion-dashboard'
 export * from './helpers-batch-guardrail'
