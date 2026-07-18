@@ -13,6 +13,12 @@
 **Branch:** `codex/architecture-modularization`
 
 
+### Residual inventory update (2026-07-19 goal-continue LVI)
+- Split novel-generation chapter-groups register into start/unattended/run leaves + thin composition monofile (~59).
+- Still deferred: batch-guardrail-core (~827), ComfyUI (~877), continuity-guard (~814), Task 11 full UI write-path smoke.
+
+
+
 ### Residual inventory update (2026-07-19 goal-continue LV)
 - Split novel-chapter-context into helpers (~309) + register monofile (~533) with public re-exports.
 - Split quality-sync-reports-benchmark-blueprint into core (~598) + recall (~572) + barrel.
