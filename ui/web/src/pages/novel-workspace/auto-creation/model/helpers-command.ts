@@ -107,7 +107,6 @@ import {
 import {
   batchChapterDelivered,
   batchReleaseEvidenceFromPreflight,
-  batchStatusToSignal,
   buildBatchCompletionDashboard,
   buildBatchHandoff,
   buildBatchRiskRadar,
@@ -118,18 +117,21 @@ import {
   characterArcNeedsAction,
   compactChapterNoEvidence,
   compactList,
-  contractStatusToSignal,
   isSafeBatchGenerationSource,
   parsePayload,
   recordTime,
   retentionNeedsAction,
   rhythmNeedsAction,
-  runwayGate,
-  runwayQuestion,
   serialReleaseInventoryIssue,
   storylineNeedsAction,
   volumeBeatNeedsAction,
 } from './helpers-main'
+import {
+  batchStatusToSignal,
+  contractStatusToSignal,
+  runwayGate,
+  runwayQuestion,
+} from './helpers-batch-guardrail'
 
 export function buildMillionWordRunway(args: {
   planning: PlanningWorkspaceModel
