@@ -125,7 +125,7 @@ describe('commercial writing workspace UI shell b', () => {
     const workspaceCenter = workspaceCenterSource()
     const workspaceCss = source('WorkspaceCenter.css')
     const recommendationModel = writingRecommendationModelSource()
-    const repairPrompt = [source('repair-task/prompt.ts'), source('repair-task/prompt-lines.ts'), source('repair-task/prompt-lines-quality.ts')].join('\n')
+    const repairPrompt = [source('repair-task/prompt.ts'), source('repair-task/prompt-lines.ts'), source('repair-task/prompt-lines-quality.ts'), source('repair-task/prompt-lines-quality-core.ts'), source('repair-task/prompt-lines-quality-craft.ts'), source('repair-task/prompt-lines-quality-craft-a.ts'), source('repair-task/prompt-lines-quality-craft-b.ts'), source('repair-task/prompt-lines-quality-receipts.ts'), source('repair-task/prompt-lines-quality-repairs.ts')].join('\n')
     const service = writingServiceSource()
 
     expect(workspaceCenter).toContain('期待债务承接')

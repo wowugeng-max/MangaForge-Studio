@@ -30,6 +30,12 @@ describe('buildRepairTaskRevisionPrompt', () => {
       readFileSync(new URL('./repair-task/prompt.ts', import.meta.url), 'utf8'),
       readFileSync(new URL('./repair-task/prompt-lines.ts', import.meta.url), 'utf8'),
       readFileSync(new URL('./repair-task/prompt-lines-quality.ts', import.meta.url), 'utf8'),
+      readFileSync(new URL('./repair-task/prompt-lines-quality-core.ts', import.meta.url), 'utf8'),
+      readFileSync(new URL('./repair-task/prompt-lines-quality-craft.ts', import.meta.url), 'utf8'),
+      readFileSync(new URL('./repair-task/prompt-lines-quality-craft-a.ts', import.meta.url), 'utf8'),
+      readFileSync(new URL('./repair-task/prompt-lines-quality-craft-b.ts', import.meta.url), 'utf8'),
+      readFileSync(new URL('./repair-task/prompt-lines-quality-receipts.ts', import.meta.url), 'utf8'),
+      readFileSync(new URL('./repair-task/prompt-lines-quality-repairs.ts', import.meta.url), 'utf8'),
     ].join('\n')
     const promptContractKeys = new Set(promptQualityContractFields(source).keys())
     const requiredFieldKeys = new Set(listQualityContractRequiredFieldKeys())
@@ -45,6 +51,12 @@ describe('buildRepairTaskRevisionPrompt', () => {
       readFileSync(new URL('./repair-task/prompt.ts', import.meta.url), 'utf8'),
       readFileSync(new URL('./repair-task/prompt-lines.ts', import.meta.url), 'utf8'),
       readFileSync(new URL('./repair-task/prompt-lines-quality.ts', import.meta.url), 'utf8'),
+      readFileSync(new URL('./repair-task/prompt-lines-quality-core.ts', import.meta.url), 'utf8'),
+      readFileSync(new URL('./repair-task/prompt-lines-quality-craft.ts', import.meta.url), 'utf8'),
+      readFileSync(new URL('./repair-task/prompt-lines-quality-craft-a.ts', import.meta.url), 'utf8'),
+      readFileSync(new URL('./repair-task/prompt-lines-quality-craft-b.ts', import.meta.url), 'utf8'),
+      readFileSync(new URL('./repair-task/prompt-lines-quality-receipts.ts', import.meta.url), 'utf8'),
+      readFileSync(new URL('./repair-task/prompt-lines-quality-repairs.ts', import.meta.url), 'utf8'),
     ].join('\n')
     const promptContracts = promptQualityContractFields(source)
     const requiredFields = listQualityContractRequiredFields()
