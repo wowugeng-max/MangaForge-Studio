@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert, Badge, Button, Card, Checkbox, Dropdown, Form, Input, InputNumber, List, message, Modal, Progress, Select, Space, Typography, Tooltip, Tag,
 } from 'antd'
@@ -93,53 +93,38 @@ import {
   normalizeIncubationCharacterTier,
   safeBatchRecoveryFocusFromPayload,
 } from './novel-workspace/shell/workspace-helpers'
+import {
+  AgentAuditDrawer,
+  AgentExecutionModal,
+  AutoCreationDirectorWorkspace,
+  ChapterManagementDrawer,
+  ChapterRestructurePanel,
+  ConsistencyGraphModal,
+  CreativeCardsModal,
+  EditorModal,
+  ExportDeliveryModal,
+  OutlineControlPanel,
+  OutlineTreeModal,
+  QualityBenchmarkModal,
+  ReferenceConfigModal,
+  ReferenceEngineeringModal,
+  ReviewAnnotationsDrawer,
+  TaskCenterDrawer,
+  VersionDetailModal,
+} from './novel-workspace/shell/workspace-lazy'
+import {
+  productionModeOptions,
+  type ChapterOwnedData,
+  type ChapterWordTargetMode,
+  type EditorReportForChapterOptions,
+  type TaskCenterActionOptions,
+  type WorkspaceArea,
+} from './novel-workspace/shell/workspace-types'
 import './NovelProjectWorkspace.css'
 
 type AnyRecord = Record<string, any>
 
 const { Title, Text, Paragraph } = Typography
-
-const AgentExecutionModal = lazy(() => import('./novel-workspace/AgentExecutionModal').then(module => ({ default: module.AgentExecutionModal })))
-const AgentAuditDrawer = lazy(() => import('./novel-workspace/AgentAuditDrawer').then(module => ({ default: module.AgentAuditDrawer })))
-const AutoCreationDirectorWorkspace = lazy(() => import('./novel-workspace/AutoCreationDirectorWorkspace').then(module => ({ default: module.AutoCreationDirectorWorkspace })))
-const ChapterManagementDrawer = lazy(() => import('./novel-workspace/ChapterManagementDrawer').then(module => ({ default: module.ChapterManagementDrawer })))
-const ChapterRestructurePanel = lazy(() => import('./novel-workspace/ChapterRestructurePanel').then(module => ({ default: module.ChapterRestructurePanel })))
-const ConsistencyGraphModal = lazy(() => import('./novel-workspace/ConsistencyGraphModal').then(module => ({ default: module.ConsistencyGraphModal })))
-const CreativeCardsModal = lazy(() => import('./novel-workspace/CreativeCardsModal').then(module => ({ default: module.CreativeCardsModal })))
-const EditorModal = lazy(() => import('./novel-workspace/EditorModal').then(module => ({ default: module.EditorModal })))
-const ExportDeliveryModal = lazy(() => import('./novel-workspace/ExportDeliveryModal').then(module => ({ default: module.ExportDeliveryModal })))
-const OutlineControlPanel = lazy(() => import('./novel-workspace/OutlineControlPanel').then(module => ({ default: module.OutlineControlPanel })))
-const OutlineTreeModal = lazy(() => import('./novel-workspace/OutlineTreeModal').then(module => ({ default: module.OutlineTreeModal })))
-const ReferenceConfigModal = lazy(() => import('./novel-workspace/ReferenceConfigModal').then(module => ({ default: module.ReferenceConfigModal })))
-const ReferenceEngineeringModal = lazy(() => import('./novel-workspace/ReferenceEngineeringModal').then(module => ({ default: module.ReferenceEngineeringModal })))
-const QualityBenchmarkModal = lazy(() => import('./novel-workspace/QualityBenchmarkModal').then(module => ({ default: module.QualityBenchmarkModal })))
-const ReviewAnnotationsDrawer = lazy(() => import('./novel-workspace/ReviewAnnotationsDrawer').then(module => ({ default: module.ReviewAnnotationsDrawer })))
-const TaskCenterDrawer = lazy(() => import('./novel-workspace/TaskCenterDrawer').then(module => ({ default: module.TaskCenterDrawer })))
-const VersionDetailModal = lazy(() => import('./novel-workspace/VersionDetailModal').then(module => ({ default: module.VersionDetailModal })))
-
-type TaskCenterActionOptions = {
-  keepTaskCenterOpen?: boolean
-}
-
-type EditorReportForChapterOptions = {
-  sourceTask?: any
-  sourceRun?: any
-  sourceTaskIndex?: number
-  autoRevision?: boolean
-  skipRevisionConfirm?: boolean
-}
-
-const productionModeOptions = [
-  { value: 'scene_cards_only', label: '只生成场景卡' },
-  { value: 'draft_only', label: '只生成正文初稿' },
-  { value: 'draft_review', label: '生成并自检' },
-  { value: 'draft_review_revise_store', label: '生成、自检、修订、入库' },
-  { value: 'full_auto', label: '全自动完整流水线' },
-]
-
-type WorkspaceArea = 'autoCreation' | 'storyPlanning' | 'chapterWriting' | 'storyAssets' | 'qualityRevision' | 'productionOps'
-type ChapterOwnedData = { chapterId: number; updatedAt: any; data: any }
-type ChapterWordTargetMode = 'standard' | 'long' | 'custom'
 
 export default function NovelProjectWorkspace() {
   const navigate = useNavigate()

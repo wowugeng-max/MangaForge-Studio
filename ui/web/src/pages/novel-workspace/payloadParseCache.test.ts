@@ -117,16 +117,17 @@ describe('workspace payload parse cache', () => {
 
   test('routes the planning, writing, and auto director payload hotspots through the shared cache', () => {
     const source = (name: string) => readFileSync(join(import.meta.dir, name), 'utf8')
-    const planning = source('planning/model/planning-workspace-model.ts')
+    const planning = [source('planning/model/planning-workspace-model.ts'), source('planning/model/planning-workspace-builder.ts')].join('\n')
     const writing = [
       source('writingCockpitModel.ts'),
       source('writing-cockpit/model/cockpit-basics.ts'),
-      source('writing-cockpit/model/cockpit-acceptance.ts'),
+      [source('writing-cockpit/model/cockpit-acceptance.ts'), source('writing-cockpit/model/cockpit-acceptance-desk.ts')].join('\n'),
       source('writing-cockpit/model/cockpit-planning.ts'),
     ].join('\n')
     const directorHelpers = [
       source('auto-creation/model/helpers-main.ts'),
       source('auto-creation/model/helpers-basics.ts'),
+      source('auto-creation/model/helpers-risk-and-governance.ts'),
     ].join('\n')
 
     for (const modelSource of [planning, writing, directorHelpers]) {
