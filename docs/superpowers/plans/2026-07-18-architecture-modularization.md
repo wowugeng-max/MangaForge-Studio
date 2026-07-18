@@ -48,6 +48,8 @@ Recent extracts (continued):
 
 - 2026-07-19: NWS shell factories expanded further (planning/production/writing-bible/editor/run-queue/chapter-prep/diagnostics/creative + prior commercial/preflight/repair/action/chapter-prose). NWS ~2.0k lines. Shell source contracts green (92). Task 11 still open for full monofile caps + broad regression/smoke/memory.
 
+- 2026-07-19 cont: split director-model.receipts-gates monotest into a/b + shim (previously aborted).
+
 Still open: NWS ~3.4k (commercial/preflight/repair/action/chapter-prose factories done; stepGenerateProse and more remain); generate-chapter-for-group ~2.3k; WorkspaceCenter/ACD/StoryPlanning/builders-annotations ~1.7-1.9k; some monotests still >1.5k; Task 11 full smoke/memory not finished.
 
 
