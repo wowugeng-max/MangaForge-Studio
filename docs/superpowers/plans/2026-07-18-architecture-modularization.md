@@ -881,3 +881,5 @@ cd ui/server && bun test src/novel/mutation-contract.test.ts src/novel/sqlite-pe
 - 2026-07-19 goal-continue XL: scene-card apply-card → thin orchestrator (~144) + phase-a/b (~500 each); NWS domain-models + chapter-loads hooks (view ~1116); create-wizard deep-draft actions factory (~194, controller ~829); package-join fixes for continuity-heat memory capsule + intent-benchmark local imports. scene-cards a/b + architecture contracts green.
 
 - 2026-07-19 goal-continue XLI: create-wizard seed pipeline leaf (~313 apply/derive/fill/finalize) + controller ~673; deep-draft actions already ~194; flow tests package-join updated (2 pass).
+
+- 2026-07-19 goal-continue XLII: SettingWorkshop helpers leaf (~110) + panel ~793; create-wizard seed pipeline already landed. settingUsageWorkbenchShell 1 pre-existing fail (NovelProjectWorkspace barrel path for projectSettings).
