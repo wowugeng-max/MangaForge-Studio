@@ -1,5 +1,5 @@
 import React from 'react'
-import { Button, Checkbox, Input, InputNumber, Modal, Progress, Radio, Select, Space, Tag, Typography } from 'antd'
+import { Button, Checkbox, Col, Input, InputNumber, Modal, Progress, Radio, Row, Select, Space, Tag, Typography } from 'antd'
 import {
   BookOutlined,
   CloudUploadOutlined,
