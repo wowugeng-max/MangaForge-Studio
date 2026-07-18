@@ -68,6 +68,7 @@ const SOFT_BASELINES: Record<string, number> = {
   'novel-writing-service/batch-serial/serial-momentum-briefs.ts': 20,
   'novel-writing/prose-generation-prompt-sections.ts': 20,
   'novel-writing/chapter-progress-ledger.ts': 20,
+  'novel-writing-service/quality/pre-draft-brief.ts': 20,
 }
 
 describe('architecture modularization contracts', () => {

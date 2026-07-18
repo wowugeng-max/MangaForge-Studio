@@ -15,6 +15,22 @@
 
 
 
+### Residual inventory update (2026-07-19 goal-continue XIII)
+
+Landed reverse-free splits + leaf binding fixes:
+- `serial-momentum-briefs` → core/quality/expectation (+ `normalizedMatchText` import fix)
+- `prose-generation-prompt-sections` → shared/prep/hooks/craft/governance
+- `chapter-progress-ledger` → core/resync
+- `cockpit-acceptance-desk-builders` → story-state/hidden/chapter
+- `pre-draft-brief` → bind/build/merge
+- Create wizard: restore missing leaf exports; extract `createWizardPayloadUtils`
+- `memory-longform-contracts-brief`: import `OH_STORY_NEXT_BATCH_WORKFLOW_RULES` from battle leaf
+- Soft baselines tightened for new barrels; focused pre-draft/sync-core + shell + architecture green
+
+Still open for Task 11:
+- Residual composition roots (`NovelProjectWorkspaceView`, `useNovelStudioController`, `provider-runtime`, audience/craft monofiles)
+- Full write-path UI smoke / memory notes
+
 ### Residual inventory (still above ~1k, 2026-07-19)
 
 Keep reverse-free only; do not mechanical-split packages that share private helpers/constants (audience/craft/audit lesson).

@@ -1,5 +1,6 @@
 import { asArray } from '../../routes/novel-route-utils'
 import { firstCompactText } from '../../novel-writing/story-drive-basics'
+import { normalizedMatchText } from '../../novel-writing/text-matching'
 import { compactBriefText, uniqueBriefStrings } from '../quality/text-utils'
 import { reviewTimestamp } from '../quality/review-lookup'
 import { inferEndingHookType } from './ending-hook-type'
