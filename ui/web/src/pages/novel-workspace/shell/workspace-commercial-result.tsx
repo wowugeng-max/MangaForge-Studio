@@ -1,5 +1,5 @@
 import React from 'react'
-import { Alert, Button, Card, Input, List, Progress, Space, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Input, List, Modal, Progress, Space, Tag, Typography } from 'antd'
 
 const { Text, Paragraph, Title } = Typography
 
@@ -499,6 +499,86 @@ export function renderChapterQualityCardContentView(card: any) {
             {Array.isArray(card.next_actions) && card.next_actions.length > 0 && (
               <Card size="small" title="下一步建议">
                 <List size="small" dataSource={card.next_actions} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+              </Card>
+            )}
+          </Space>
+  )
+}
+
+export function renderLongformProductionTrendsContentView(args: {
+  summary: any
+  weakRows: any[]
+  recommendations: any[]
+  failureReasons: any[]
+  repairLoading?: boolean
+}, options: {
+  onCreateRepairQueue: () => void
+  onOpenChapter?: (chapterId: number) => void
+}) {
+  const { summary, weakRows, recommendations, failureReasons, repairLoading } = args
+  return (
+<Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space wrap>
+              <Tag color="blue" bordered={false}>跟踪 {summary.chapter_count || 0} 章</Tag>
+              <Tag color="cyan" bordered={false}>骨架 {summary.skeleton_count || 0} 章</Tag>
+              <Tag color="green" bordered={false}>已写 {summary.written_count || 0} 章</Tag>
+              <Tag color={(summary.failed_chapter_count || 0) > 0 ? 'red' : 'default'} bordered={false}>失败关注 {summary.failed_chapter_count || 0}</Tag>
+              <Button size="small" type="primary" loading={Boolean(repairLoading)} onClick={() => { options.onCreateRepairQueue() }}>生成修复任务</Button>
+            </Space>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+              {[
+                ['骨架均分', summary.avg_skeleton_score],
+                ['材料均分', summary.avg_material_score],
+                ['质量均分', summary.avg_quality_score],
+                ['生产就绪', summary.avg_readiness],
+              ].map(([label, value]) => (
+                <Card key={label as string} size="small">
+                  <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                    <Text type="secondary">{label}</Text>
+                    <Progress
+                      percent={Number(value || 0)}
+                      size="small"
+                      status={Number(value || 0) >= 75 ? 'success' : Number(value || 0) < 55 ? 'exception' : 'normal'}
+                    />
+                  </Space>
+                </Card>
+              ))}
+            </div>
+            {recommendations.length > 0 && (
+              <Alert
+                type="warning"
+                showIcon
+                message="优先处理建议"
+                description={<Space direction="vertical" size={4}>{recommendations.map((item: string, index: number) => <Text key={`${item}-${index}`}>{item}</Text>)}</Space>}
+              />
+            )}
+            <Card size="small" title="薄弱章节">
+              <List
+                size="small"
+                dataSource={weakRows.slice(0, 20)}
+                locale={{ emptyText: '当前没有明显薄弱章节' }}
+                renderItem={(row: any) => (
+                  <List.Item
+                    actions={row.chapter_id ? [
+                      <Button key="open" size="small" type="link" onClick={() => { options.onOpenChapter?.(Number(row.chapter_id)) }}>打开</Button>,
+                    ] : []}
+                  >
+                    <List.Item.Meta
+                      title={<Space wrap><Text>第{row.chapter_no}章《{row.title || '未命名'}》</Text><Tag bordered={false}>{row.status}</Tag><Tag bordered={false}>就绪 {row.readiness || 0}</Tag></Space>}
+                      description={
+                        <Space direction="vertical" size={4}>
+                          <Text type="secondary">骨架 {row.skeleton_score ?? '-'} / 材料 {row.material_score ?? '-'} / 质量 {row.quality_score ?? '-'} / 相似风险 {row.similarity_risk ?? '-'}</Text>
+                          {(row.failures || []).length > 0 && <Text type="danger">{(row.failures || []).join('；')}</Text>}
+                        </Space>
+                      }
+                    />
+                  </List.Item>
+                )}
+              />
+            </Card>
+            {failureReasons.length > 0 && (
+              <Card size="small" title="失败原因">
+                <List size="small" dataSource={failureReasons} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
               </Card>
             )}
           </Space>
