@@ -595,3 +595,5 @@ cd ui/server && bun test src/novel/mutation-contract.test.ts src/novel/sqlite-pe
 - 2026-07-19 goal-continue II: risk-and-governance → issue-catalog + shared + review-signals (mono ~732). Server boot smoke :8787 idle RSS ~107MB. Task11 focused batch green. Still open: NWS view ~1764 composition, useNovelStudioController ~1256, provider-runtime reverse-free DI, full write-path UI smoke.
 - 2026-07-19 goal-continue III: deferred-surfaces split core/ops/outline (view ~43). Task11 shell 92 green. Remaining large: NWS view ~1764, useNovelStudioController ~1256, provider-runtime ~1778, NovelCreateWizard ~1568.
 
+- 2026-07-19 goal-continue IV: quality-sync-reports-benchmark-audit domain leaves; helpers-next-batch-brief basics/lane/core/style/recovery; quality-sync-reports-extended target/genre/story/info leaves; serial-momentum patterns+chapter-states barrel; commercial-ops builders shared+domain leaves. Focused Task11 suites green. Remaining: NWS view ~1764, useNovelStudioController ~1256, provider-runtime ~1778, NovelCreateWizard ~1568, craft/audience monofiles (no mechanical private-const splits), full write-path smoke.
+
