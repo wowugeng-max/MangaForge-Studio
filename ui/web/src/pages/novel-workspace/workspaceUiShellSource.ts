@@ -138,6 +138,10 @@ export function workspaceCenterSource() {
   workspaceCenterSourceCache = [
     sourceCached('WorkspaceCenter.tsx', localSourceCache),
     sourceCached('workspace-center-writing-support.tsx', localSourceCache),
+    sourceCached('workspace-center-writing-queue-strip.tsx', localSourceCache),
+    sourceCached('workspace-center-delivery-status-strip.tsx', localSourceCache),
+    sourceCached('workspace-center-chapter-handoff-strip.tsx', localSourceCache),
+    sourceCached('workspace-center-draft-brief-strip.tsx', localSourceCache),
     sourceCached('workspace-center-chrome.tsx', localSourceCache),
     sourceCached('workspace-center-prose-editor.tsx', localSourceCache),
   ].join('\n')
