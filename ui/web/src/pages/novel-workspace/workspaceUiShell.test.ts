@@ -104,6 +104,7 @@ function directorModelSource() {
     sourceCached('auto-creation/model/helpers-safe-batch-recovery.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-safe-batch-expansion-structure.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-safe-batch-expansion-trends.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-safe-batch-expansion-repair-trends.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-recovery-evidence-trends.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-batch-handoff-and-launch.ts', localSourceCache),
   ].join('\n')
