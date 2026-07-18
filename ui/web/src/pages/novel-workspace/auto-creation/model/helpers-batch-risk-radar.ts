@@ -96,11 +96,6 @@ import type {
   BuildAutoCreationDirectorModelInput
 } from './types'
 import {
-  arrayValue,
-  firstText,
-  text,
-} from './helpers-basics'
-import {
   BATCH_DELIVERY_QUALITY_THRESHOLD,
   batchBriefAppliesToItem,
   batchBriefVisible,
@@ -164,6 +159,11 @@ import {
   styleSampleRiskCount,
   volumeSegmentRiskCount,
 } from './helpers-main'
+import {
+  arrayValue,
+  firstText,
+  text,
+} from './helpers-basics'
 
 export function buildBatchRiskRadar(args: {
   items: AutoCreationBatchReviewItem[]

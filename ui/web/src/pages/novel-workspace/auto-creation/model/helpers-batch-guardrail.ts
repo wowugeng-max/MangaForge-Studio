@@ -96,15 +96,6 @@ import type {
   BuildAutoCreationDirectorModelInput
 } from './types'
 import {
-  arrayValue,
-  deliveryRiskRepairPayload,
-  firstText,
-  opsAction,
-  planningAction,
-  text,
-  writingAction,
-} from './helpers-basics'
-import {
   buildBatchReleaseWindow,
   buildCanonRunway,
   buildLongformMemoryAnchor,
@@ -121,8 +112,6 @@ import {
   buildRecoveryEvidenceSourceRiskProfile,
   buildRecoveryEvidenceTrend,
   buildResolvedSafeBatchExpansionStructureVerificationSeed,
-  buildSafeBatchExpansionFeedback,
-  buildSafeBatchExpansionPolicy,
   buildSafeBatchRecoveryRestoreConfirmation,
   buildSafeBatchRecoveryRestoreStabilityLane,
   buildSerialReleaseInventoryGuardrail,
@@ -150,6 +139,21 @@ import {
   volumeBeatNeedsAction,
   writingQueueRelease,
 } from './helpers-main'
+import {
+  arrayValue,
+  deliveryRiskRepairPayload,
+  firstText,
+  opsAction,
+  planningAction,
+  text,
+  writingAction,
+} from './helpers-basics'
+import {
+  buildSafeBatchExpansionFeedback,
+} from './helpers-safe-batch-expansion-feedback'
+import {
+  buildSafeBatchExpansionPolicy,
+} from './helpers-safe-batch-expansion-policy'
 
 export const SAFE_BATCH_MODEL_PIPELINE = [
   '章节任务书',
