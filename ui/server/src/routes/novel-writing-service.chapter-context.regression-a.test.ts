@@ -261,7 +261,13 @@ function proseQualityRisksSource() {
   return [
     'prose-quality-risks.ts',
     'prose-quality-risks-extended.ts',
+    'prose-quality-risks-extended-core.ts',
+    'prose-quality-risks-extended-handoff.ts',
+    'prose-quality-risks-extended-audience.ts',
     'prose-quality-risks-audience.ts',
+    'prose-quality-risks-audience-core.ts',
+    'prose-quality-risks-audience-hooks.ts',
+    'prose-quality-risks-audience-craft.ts',
   ].map(name => readFileSync(join(dir, name), 'utf8')).join('\n')
 }
 const createProsePipelineHarness = (options?: any) => createProsePipelineHarnessWithService(createNovelWritingService, options)

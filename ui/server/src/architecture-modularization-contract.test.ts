@@ -80,6 +80,10 @@ const SOFT_BASELINES: Record<string, number> = {
   'novel-writing-service/quality/prose-quality-risks-audience.ts': 20,
   'novel-writing-service/quality/plot-opening-prose-contracts.ts': 20,
   'novel-writing-service/post-delivery/delta-sync-reports-receipts.ts': 20,
+  'novel-writing-service/post-delivery/quality-sync-reports-benchmark-hooks.ts': 20,
+  'novel-writing-service/quality/prose-quality-risks-extended.ts': 20,
+  'novel-writing-service/quality/audience-quality-contracts-extended.ts': 20,
+  'novel-writing-service/batch-serial/serial-momentum-chapter-states-extended-states.ts': 20,
 }
 
 describe('architecture modularization contracts', () => {
