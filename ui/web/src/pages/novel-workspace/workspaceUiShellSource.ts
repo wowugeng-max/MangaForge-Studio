@@ -149,6 +149,8 @@ export function planningWorkspaceSource() {
   planningWorkspaceSourceCache = [
     sourceCached('planning/model/planning-workspace-model.ts', localSourceCache),
     sourceCached('planning/model/planning-workspace-builder.ts', localSourceCache),
+    sourceCached('planning/model/planning-workspace-builder-primitives.ts', localSourceCache),
+    sourceCached('planning/model/planning-workspace-builder-model.ts', localSourceCache),
     sourceCached('planning/model/planning-workspace-builder-desks.ts', localSourceCache),
     sourceCached('planning/model/planning-workspace-builder-boards.ts', localSourceCache),
     sourceCached('planning/model/planning-workspace-builder-signals.ts', localSourceCache),
@@ -323,6 +325,10 @@ export function writingCockpitModelSource() {
     sourceCached('writing-cockpit/model/cockpit-acceptance.ts', localSourceCache),
     sourceCached('writing-cockpit/model/cockpit-acceptance-sync-a.ts', localSourceCache),
     sourceCached('writing-cockpit/model/cockpit-acceptance-sync-b.ts', localSourceCache),
+    sourceCached('writing-cockpit/model/cockpit-acceptance-sync-b-intent-attraction.ts', localSourceCache),
+    sourceCached('writing-cockpit/model/cockpit-acceptance-sync-b-drive-style.ts', localSourceCache),
+    sourceCached('writing-cockpit/model/cockpit-acceptance-sync-b-retention-volume.ts', localSourceCache),
+    sourceCached('writing-cockpit/model/cockpit-acceptance-sync-b-delivery-risk.ts', localSourceCache),
     sourceCached('writing-cockpit/model/cockpit-acceptance-desk.ts', localSourceCache),
     sourceCached('writing-cockpit/model/cockpit-acceptance-desk-utils.ts', localSourceCache),
     sourceCached('writing-cockpit/model/cockpit-acceptance-desk-builders.ts', localSourceCache),
@@ -339,6 +345,10 @@ export function writingRecommendationModelSource() {
   writingRecommendationModelSourceCache = [
     sourceCached('writingRecommendationModel.ts', localSourceCache),
     sourceCached('writing-recommendation-types.ts', localSourceCache),
+    sourceCached('writing-recommendation-types-actions.ts', localSourceCache),
+    sourceCached('writing-recommendation-types-delivery.ts', localSourceCache),
+    sourceCached('writing-recommendation-types-pre-draft.ts', localSourceCache),
+    sourceCached('writing-recommendation-types-draft-brief.ts', localSourceCache),
     sourceCached('writing-recommendation-draft-brief.ts', localSourceCache),
     sourceCached('writing-recommendation-core.ts', localSourceCache),
   ].join('\n')

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { mkdtemp } from 'fs/promises'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import {
@@ -22,6 +22,15 @@ import {
   listNovelCharacters,
   listNovelSettingEntities,
 } from '../novel'
+
+
+function settingHelpersSource() {
+  const dir = import.meta.dir
+  const files = readdirSync(dir)
+    .filter((name) => name === 'novel-setting-helpers.ts' || (name.startsWith('novel-setting-helpers-') && name.endsWith('.ts') && !name.endsWith('.test.ts')))
+    .sort()
+  return files.map((name) => readFileSync(join(dir, name), 'utf8')).join('\n')
+}
 
 describe('setting agent workflow', () => {
   test('exposes storyline setting entity types', () => {
@@ -166,7 +175,7 @@ describe('setting agent workflow', () => {
   })
 
   test('uses setting-agent in the project setting incubation route', () => {
-    const source = [readFileSync(join(import.meta.dir, 'novel-setting-routes.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-setting-helpers.ts'), 'utf8')].join('\n')
+    const source = [readFileSync(join(import.meta.dir, 'novel-setting-routes.ts'), 'utf8'), settingHelpersSource()].join('\n')
     const routeStart = source.indexOf("app.post('/api/novel/projects/:id/settings/incubate-from-project'")
     const routeEnd = source.indexOf("app.post('/api/novel/chapters/:chapterId/settings-consistency-check'", routeStart)
     const routeBlock = source.slice(routeStart, routeEnd)
@@ -178,7 +187,7 @@ describe('setting agent workflow', () => {
   })
 
   test('exposes storyline incubation and chapter suggestion routes', () => {
-    const source = [readFileSync(join(import.meta.dir, 'novel-setting-routes.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-setting-helpers.ts'), 'utf8')].join('\n')
+    const source = [readFileSync(join(import.meta.dir, 'novel-setting-routes.ts'), 'utf8'), settingHelpersSource()].join('\n')
 
     expect(source).toContain("app.post('/api/novel/projects/:id/storylines/incubate'")
     expect(source).toContain("app.post('/api/novel/chapters/:chapterId/storylines/suggest'")
@@ -189,7 +198,7 @@ describe('setting agent workflow', () => {
   })
 
   test('exposes a relationship graph route for setting assets', () => {
-    const source = [readFileSync(join(import.meta.dir, 'novel-setting-routes.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-setting-helpers.ts'), 'utf8')].join('\n')
+    const source = [readFileSync(join(import.meta.dir, 'novel-setting-routes.ts'), 'utf8'), settingHelpersSource()].join('\n')
 
     expect(source).toContain("app.get('/api/novel/projects/:id/settings/relationship-graph'")
     expect(source).toContain('buildSettingRelationshipGraph')
@@ -336,7 +345,7 @@ describe('setting agent workflow', () => {
   })
 
   test('exposes relationship repair suggest and apply endpoints', () => {
-    const source = [readFileSync(join(import.meta.dir, 'novel-setting-routes.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-setting-helpers.ts'), 'utf8')].join('\n')
+    const source = [readFileSync(join(import.meta.dir, 'novel-setting-routes.ts'), 'utf8'), settingHelpersSource()].join('\n')
 
     expect(source).toContain("app.post('/api/novel/projects/:id/settings/relationship-repair/suggest'")
     expect(source).toContain("app.post('/api/novel/projects/:id/settings/relationship-repair/apply'")
@@ -488,14 +497,14 @@ describe('discovered asset intake route', () => {
   })
 
   test('exposes discovered assets apply endpoint', () => {
-    const source = [readFileSync(join(import.meta.dir, 'novel-setting-routes.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-setting-helpers.ts'), 'utf8')].join('\n')
+    const source = [readFileSync(join(import.meta.dir, 'novel-setting-routes.ts'), 'utf8'), settingHelpersSource()].join('\n')
 
     expect(source).toContain("app.post('/api/novel/chapters/:chapterId/discovered-assets/apply'")
     expect(source).toContain('applyDiscoveredAssetsToProject(')
   })
 
   test('uses safe json for setting prompts that include runtime chapter context', () => {
-    const source = [readFileSync(join(import.meta.dir, 'novel-setting-routes.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-setting-helpers.ts'), 'utf8')].join('\n')
+    const source = [readFileSync(join(import.meta.dir, 'novel-setting-routes.ts'), 'utf8'), settingHelpersSource()].join('\n')
 
     expect(source).not.toContain('JSON.stringify(chapter.raw_payload || {})')
     expect(source).not.toContain('JSON.stringify({ setting_context: contextPackage.setting_context, settings, usage }, null, 2).slice(0, 9000)')
