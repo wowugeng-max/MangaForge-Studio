@@ -32,6 +32,8 @@
 
 Recent extracts (continued):
 
+- 2026-07-19 goal: delta-sync receipt builders leaf (~208 monofile + receipts/storyline/revision); generate-chapter mid-pipeline earlier.
+
 - 2026-07-19 goal: deferred-surfaces barrel + view leaf; generate-chapter mid-pipeline editor-meme-polish + quality-prestore leaves (~982 monofile, soft baseline 1050); package-join contracts updated. Remaining: NWS view residual, WorkspaceCenter residual, delta-sync further, Task 11 smoke/memory.
 
 - 2026-07-19 night++: delta-sync storyline leaf (~1190 monofile); generate-chapter draft-sync (~1989); knowledge-base package (~590); NovelStudio panels (~1560); workspaceUiShell split. Remaining: NWS/WorkspaceCenter/StoryPlanning/ACD/builders-annotations further, Task 11 smoke/memory.
