@@ -54825,8 +54825,13 @@ describe('chapter context word target source guards', () => {
     expect(reviewNormalizeBlock).toContain('const deterministicSourceReadinessChecks = buildSourceReadinessChecks(contextPackage)')
     expect(reviewNormalizeBlock).toContain('...deterministicSourceReadinessChecks')
     expect(riskCarryOverBlock).toContain('state_tracking_checks')
-    expect(riskCarryOverBlock).toContain('source_readiness_checks')
     expect(riskCarryOverBlock).toContain('状态筛选')
+    const sourceReadinessRiskStart = riskSource.indexOf('export function proseQualitySourceReadinessRisks')
+    const sourceReadinessRiskBlock = riskSource.slice(
+      sourceReadinessRiskStart,
+      riskSource.indexOf('\nexport function', sourceReadinessRiskStart + 1),
+    )
+    expect(sourceReadinessRiskBlock).toContain('source_readiness_checks')
   })
 
   test('asks prose self review and revision to enforce oh-story intent confirmation checks', () => {
