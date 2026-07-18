@@ -150,6 +150,7 @@ function projectWorkspaceSource() {
     sourceCached('shell/workspace-lazy.tsx', localSourceCache),
     sourceCached('shell/workspace-editor-fields.ts', localSourceCache),
     sourceCached('shell/workspace-commercial-result.tsx', localSourceCache),
+    sourceCached('shell/workspace-commercial-ops-views.tsx', localSourceCache),
     sourceCached('shell/workspace-serial-pipeline.tsx', localSourceCache),
     sourceCached('shell/workspace-area-view.tsx', localSourceCache),
     sourceCached('shell/workspace-topbar.tsx', localSourceCache),
