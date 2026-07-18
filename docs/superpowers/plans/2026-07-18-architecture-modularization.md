@@ -32,6 +32,8 @@
 
 Recent extracts (continued):
 
+- 2026-07-19: writingRecommendationModelSource package-join; ACD/generate-chapter/writingRecommendation extracts landed. Design success: writing monofile barrel 91; generate-chapter 703; ACD view 383; writingRecommendation barrel 21. Open: NWS view residual ~2003, Task11 manual smoke/memory.
+
 - 2026-07-19 goal-continue: generate-chapter context/scene + draft leaves (~703); ACD view derived+detail-drawer (~383 view); writingRecommendationModel package-split (types/draft-brief/core + barrel). Soft baseline generate-chapter 750. Task11 focused suites green; manual smoke/memory still open. NWS view residual ~2.0k composition root remains.
 
 - 2026-07-19 goal: generate-chapter context/scene-cards + draft-prose leaves (~703 monofile, soft baseline 750); package-joins updated. Remaining: NWS view residual, WorkspaceCenter residual, Task 11 live smoke.
