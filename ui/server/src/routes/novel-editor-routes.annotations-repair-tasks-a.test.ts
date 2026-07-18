@@ -22,6 +22,9 @@ function editorBuildersSource() {
   return [
     'builders.ts',
     'builders-annotations.ts',
+    'builders-annotations-prose-quality.ts',
+    'builders-annotations-delivery-risk.ts',
+    'builders-annotations-repair-tasks.ts',
   ].map(name => readFileSync(join(dir, name), 'utf8')).join('\n')
 }
 describe('review annotations delivery risk repair tasks a', () => {
