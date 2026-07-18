@@ -58,7 +58,13 @@ export {
   DELIVERY_ARTIFACT_RECEIPT_FIELDS,
   PRE_DRAFT_ARTIFACT_RECEIPT_FIELDS,
 } from './revision/revision-artifacts'
-import { attachOhStoryDirectorToContextPackage } from './quality/prose-quality-entry'
+import {
+  attachOhStoryDirectorToContextPackage,
+  prepareProseGenerationContract,
+  scanProseForQualityLoop,
+  buildFocusedQualityCoreContract,
+  buildLegacyCompatibleSelfCheck,
+} from './quality/prose-quality-entry'
 import {
   isMissingStructuredReviewCheck,
   missingStructuredReviewCheckFields,
