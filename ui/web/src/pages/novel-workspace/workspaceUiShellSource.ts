@@ -106,6 +106,8 @@ export function directorModelSource() {
     sourceCached('auto-creation/model/helpers-batch-guardrail-core.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-batch-guardrail-signals.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-batch-risk-radar.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-batch-risk-radar-compute.ts', localSourceCache),
+    sourceCached('auto-creation/model/helpers-batch-risk-radar-signals.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-delivery-risk-gate.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-batch-completion-dashboard.ts', localSourceCache),
     sourceCached('auto-creation/model/helpers-longform-capacity.ts', localSourceCache),

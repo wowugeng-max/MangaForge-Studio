@@ -16,6 +16,15 @@
 
 
 
+### Residual inventory update (2026-07-19 goal-continue XXIX)
+
+Landed:
+- `helpers-batch-risk-radar` package: thin monofile (~188) + compute (~1095) + signals (~495); package-join updated
+
+Task 11 focused: director memory-batch + expansion-guardrails + shell.b **90 pass**
+
+Still deferred ≥1k: provider-runtime, NWS view, paragraph-prose-context, knowledge panels, auto-repair-preflight, risk-radar-compute leaf, prose-self-review-run leaf.
+
 ### Residual inventory update (2026-07-19 goal-continue XXVIII)
 
 Landed:
