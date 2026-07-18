@@ -27,10 +27,12 @@
 | 7 editor/core routes packages | largely done | editor, core, commercial-ops, generation, planning package-split |
 | 8 auto-creation model package | largely done | risk multi-leaf + director monotest 4-way split + leaf binding fixes |
 | 9 cockpit + repair prompt | largely done | cockpit monotest 4-way; repair monotest 4-way; prompt multi-leaf |
-| 10 shell UI split | in progress | TaskCenter multi-leaf; NWS diagnostics/preflight/action routers/commercial views; main ~6.3k |
+| 10 shell UI split | in progress | TaskCenter multi-leaf; NWS commercial views/ops leaf; ACD/StoryPlanning chrome leaves; main ~5.6k |
 | 11 final hardening | open | remaining size caps + broad regression |
 
-Recent extracts (continued): director/repair/cockpit/pre-draft/scene-cards monotest splits; NWS diagnostics views + action routers; audience/trends leaf binding fixes; golden-three opening pattern restore.
+Recent extracts (continued):
+- 2026-07-18 night: NWS longform trends + remaining commercial diagnosis modal views extracted; commercial-result split to ops leaf; AutoCreation/StoryPlanning chrome helpers extracted; expansion/receipts/specialty monotests further sliced.
+ director/repair/cockpit/pre-draft/scene-cards monotest splits; NWS diagnostics views + action routers; audience/trends leaf binding fixes; golden-three opening pattern restore.
 
 Still open: NWS handlers still large (~6.4k), remaining large production modules (generate-chapter-for-group ~2.5k, builders-annotations, scene-card-delivery-risk), Task 11 full hardening/smoke.
 
