@@ -972,12 +972,15 @@ export function scanEndingContractExecutionRisks(contextPackage: any = {}, chapt
   }]
 }
 
+const OPENING_NON_PROTAGONIST_SUBJECT_PATTERN = /^(?:广播|警报|铃声|校规|规则|名单|红光|黑点|钟声|楼梯|安全门|规则册|惩罚栏|雨水|风|门|窗|灯|走廊|教学楼|宿舍|城市|天空|月光|阳光)/
+const OPENING_PROTAGONIST_ACTION_PATTERN = /(?:我|他|她|少年|少女|男人|女人|孩子|学生|弟子|队长|警员|医生|老师|父亲|母亲|哥哥|姐姐|妹妹|弟弟|[赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳鲍史唐费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄和穆萧尹][一-龥]{1,3})(?:[^。！？!?]{0,18})(?:醒|坐起|站起|抬头|低头|睁眼|闭眼|回头|转身|伸手|抓|握|按|推|拉|跑|冲|退|躲|跪|看见|听见|发现|开口|说道|问|喊|吼|笑|咬|攥|拿|递|打开|关上|盯|望|摸|踢|撞|撕|挡|拦|选择|决定)/
 const GOLDEN_THREE_WORLDBUILDING_PATTERN = /世界观|大陆|王朝|宗门|体系|境界|等级|历史|设定|规矩|规则|传承|三百年|千年|外门|内门|阵修|修炼|魔法|异能/
 const GOLDEN_THREE_HOOK_SIGNAL_PATTERN = /死|血|痛|伤|尸|刀|枪|火|爆炸|撞|追查|追问|追杀|追上|追来|逃|杀|危险|警报|广播(?:响|炸|停|变)|倒计时|失控|突然|威胁|逼|发现|选择|代价|冲突|问题|门响|敲门|尖叫|喊|吼|问|[？！!?“「]/
 const GOLDEN_THREE_EVENT_SIGNAL_PATTERN = /[“「]|死|血|痛|伤|尸|爆炸|撞|追查|追问|追杀|追上|追来|逃|杀|救|广播(?:响|炸|停|变)|警报(?:响|亮|炸)|铃声(?:响|炸)|倒计时(?:开始|归零|跳)|门(?:响|开|关|撞)|敲门|尖叫|喊|吼|问|答|说|抓|握|按|推|拉|撕|砸|踢|冲|跑|退|躲|跪|倒|站|抬|低|转身|打开|关上|掉|落|响|亮|熄|出现|消失|露出|发现|看见|听见|递|拿|放|抢|夺|拦|阻止|威胁|逼|选择|决定|触发|否则|[？！!?]/
 const GOLDEN_THREE_ESCALATION_PATTERN = /升级|加深|更|反制|逼|代价|危险|倒计时|失去|暴露|新阻碍|新敌人|第二|加码|翻脸|撕破|追杀|封死|惩罚/
 const GOLDEN_THREE_PURSUIT_PATTERN = /为什么|为何|谁|真相|秘密|身份|下一步|必须|否则|倒计时|追|查|找到|打开|门后|名单|缺页|第二|第三|[？?]/
 const GOLDEN_THREE_SUMMARY_ENDING_PATTERN = /故事才刚刚开始|一切才刚刚开始|拉开序幕|新的生活才刚刚开始|未来还有很长的路|这只是开始|属于[他她我]的故事/
+const OPENING_HOOK_SIGNAL_PATTERN = GOLDEN_THREE_HOOK_SIGNAL_PATTERN
 
 export function goldenThreeBriefFromContext(contextPackage: any = {}) {
   const target = {

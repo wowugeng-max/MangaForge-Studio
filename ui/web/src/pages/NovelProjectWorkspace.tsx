@@ -111,6 +111,13 @@ import {
   renderPreflightModalContentView,
 } from './novel-workspace/shell/workspace-preflight-views'
 import {
+  isAutoCreationPlanningArea,
+  isAutoCreationWritingArea,
+  resolveWritingCockpitTarget,
+  runPlanningAction,
+  serialPipelineActionWorkspaceArea,
+} from './novel-workspace/shell/workspace-action-routers'
+import {
   AgentAuditDrawer,
   AgentExecutionModal,
   AutoCreationDirectorWorkspace,
@@ -5496,7 +5503,7 @@ export default function NovelProjectWorkspace() {
       create_storyline_decision_tasks: () => { void createStorylineDecisionTasks() },
       open_task_center: () => setTaskCenterOpen(true),
     }
-    return actions[key]?.()
+    return runPlanningAction(actions, key)
   }
 
   const acceptCockpitChapterAndContinue = async () => {
@@ -5516,13 +5523,11 @@ export default function NovelProjectWorkspace() {
   }
 
   const handleWritingCockpitAction = (key: WritingCockpitActionKey) => {
-    const rawTargetChapterId = writingCockpitModel.nextChapter?.id
-    const targetChapterId = rawTargetChapterId != null ? Number(rawTargetChapterId) : undefined
-    const targetChapter = targetChapterId
-      ? sortedChapters.find(chapter => Number(chapter.id) === targetChapterId)
-        || (Number(activeChapter?.id) === targetChapterId ? activeChapter : null)
-      : activeChapter
-    const targetChapterUpdatedAt = targetChapter?.updated_at || null
+    const { targetChapterId, targetChapterUpdatedAt } = resolveWritingCockpitTarget({
+      nextChapterId: writingCockpitModel.nextChapter?.id,
+      activeChapter,
+      sortedChapters,
+    })
 
     switch (key) {
       case 'open_writing_bible':
@@ -5806,7 +5811,7 @@ export default function NovelProjectWorkspace() {
     }
     if (action.modelCall) setAutoDirectorActionLoadingKey(String(action.key))
 
-    if (action.area === 'planning' || action.area === 'assets') {
+    if (isAutoCreationPlanningArea(action)) {
       if (action.key === 'open_story_assets') {
         openStoryAssetsWorkspace()
         setAutoDirectorActionLoadingKey('')
@@ -5822,7 +5827,7 @@ export default function NovelProjectWorkspace() {
       return
     }
 
-    if (action.area === 'writing' || action.area === 'quality') {
+    if (isAutoCreationWritingArea(action)) {
       void Promise.resolve(handleWritingCockpitAction(action.key as WritingCockpitActionKey))
         .finally(() => setAutoDirectorActionLoadingKey(''))
       return
@@ -5934,8 +5939,10 @@ export default function NovelProjectWorkspace() {
         setWorkspaceArea('productionOps')
         void openLongformProductionTrends()
         break
-      default:
-        if (serialPipelineModel.primaryAction.workspace_area) setWorkspaceArea(serialPipelineModel.primaryAction.workspace_area as WorkspaceArea)
+      default: {
+        const area = serialPipelineActionWorkspaceArea(key, serialPipelineModel.primaryAction.workspace_area)
+        if (area) setWorkspaceArea(area)
+      }
     }
   }
 

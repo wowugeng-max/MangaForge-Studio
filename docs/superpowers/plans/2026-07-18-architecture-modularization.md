@@ -25,14 +25,14 @@
 | 5 monofile barrel-only | done | `monolith.ts` ~91 lines + public surface re-exports |
 | 6 monotest split | done | `novel-writing-service.test.ts` shim-only |
 | 7 editor/core routes packages | largely done | editor, core, commercial-ops, generation, planning package-split |
-| 8 auto-creation model package | in progress | risk multi-leaf + recovery-governance leaf |
-| 9 cockpit + repair prompt | in progress | prompt multi-leaf; support multi-leaf; specialty leaf |
-| 10 shell UI split | in progress | TaskCenter multi-leaf; planning signals+radar; NWS topbar/deferred; main ~6.6k |
-| 11 final hardening | open | |
+| 8 auto-creation model package | largely done | risk multi-leaf + director monotest 4-way split + leaf binding fixes |
+| 9 cockpit + repair prompt | largely done | cockpit monotest 4-way; repair monotest 4-way; prompt multi-leaf |
+| 10 shell UI split | in progress | TaskCenter multi-leaf; NWS diagnostics/preflight/action routers; main ~6.4k |
+| 11 final hardening | open | remaining size caps + broad regression |
 
-Recent extracts (continued): delta-sync-revision, quality-sync threshold/arcs, audience-extended, risk-recovery-governance, planning-radar, NWS body/deferred/topbar, TaskCenter monotest slices, cockpit target-actions test, annotations repair-tasks, ProseEditor.
+Recent extracts (continued): director/repair/cockpit/pre-draft/scene-cards monotest splits; NWS diagnostics views + action routers; audience/trends leaf binding fixes; golden-three opening pattern restore.
 
-Still open: NWS handlers monofile (~6.5k), large monotests (pre-draft/director), Task 11 hardening.
+Still open: NWS handlers still large (~6.4k), remaining large production modules (generate-chapter-for-group, builders-annotations, scene-card-delivery-risk), Task 11 hardening.
 
 
 
