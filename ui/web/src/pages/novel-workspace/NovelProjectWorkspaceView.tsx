@@ -185,6 +185,9 @@ import {
   bindNovelWorkspaceActionHandlers,
 } from './shell/workspace-view-bind-action-handlers'
 import {
+  buildWorkspaceCockpitPrimaryActionOverride,
+} from './shell/workspace-cockpit-primary-override'
+import {
   bindNovelWorkspaceCoreHandlers,
 } from './shell/workspace-view-bind-core-handlers'
 import '../NovelProjectWorkspace.css'
@@ -998,6 +1001,30 @@ export default function NovelProjectWorkspace() {
     runAutoCreationRepairPlan,
   } = actionHandlers
 
+  const renderSerialPipeline = () => (
+    <SerialPipelineStrip model={serialPipelineModel} />
+  )
+
+  const activeChapterSceneCards = resolveActiveChapterSceneCards(activeChapter)
+
+  const writingRecommendation = buildWorkspaceWritingRecommendation({
+    activeChapterDiagnosticsData,
+    activeChapterSceneCards,
+    activeChapter,
+    writingCockpitModel,
+  })
+
+  const cockpitPrimaryActionOverride = buildWorkspaceCockpitPrimaryActionOverride({
+    activeChapter,
+    workspaceArea,
+    writingRecommendation,
+    openGenerationDiagnostics,
+    generateSceneCardsForActiveChapter,
+    repairContextAndGenerateCurrentChapter,
+    generateCurrentChapterProse,
+    openChapterQualityCard,
+  })
+
   const workspaceViewDeps = {
     acceptChapterVersion,
     activeChapter,
@@ -1292,63 +1319,6 @@ export default function NovelProjectWorkspace() {
     writingCockpitModel,
     writingRecommendation,
   }
-
-  const renderSerialPipeline = () => (
-    <SerialPipelineStrip model={serialPipelineModel} />
-  )
-
-  const activeChapterSceneCards = resolveActiveChapterSceneCards(activeChapter)
-
-  const writingRecommendation = buildWorkspaceWritingRecommendation({
-    activeChapterDiagnosticsData,
-    activeChapterSceneCards,
-    activeChapter,
-    writingCockpitModel,
-  })
-
-  const cockpitPrimaryActionOverride: WritingCockpitPrimaryActionOverride | null = (() => {
-    if (!activeChapter || workspaceArea !== 'chapterWriting') return null
-
-    switch (writingRecommendation.key) {
-      case 'diagnostics':
-        return {
-          label: writingRecommendation.label,
-          reason: writingRecommendation.reason,
-          actionKey: 'open_generation_diagnostics',
-          onClick: () => { void openGenerationDiagnostics() },
-        }
-      case 'scene_cards':
-        return {
-          label: writingRecommendation.label,
-          reason: writingRecommendation.reason,
-          actionKey: 'build_scene_plan',
-          onClick: () => { void generateSceneCardsForActiveChapter() },
-        }
-      case 'repair_generate':
-        return {
-          label: writingRecommendation.label,
-          reason: writingRecommendation.reason,
-          actionKey: 'repair_materials',
-          onClick: repairContextAndGenerateCurrentChapter,
-        }
-      case 'generate':
-        return {
-          label: writingRecommendation.label,
-          reason: writingRecommendation.reason,
-          actionKey: 'write_draft',
-          onClick: () => { void generateCurrentChapterProse() },
-        }
-      case 'quality_card':
-        return {
-          label: writingRecommendation.label,
-          reason: writingRecommendation.reason,
-          actionKey: 'refresh_current_quality',
-          onClick: openChapterQualityCard,
-        }
-      default:
-        return null
-    }
-  })()
 
   const renderWorkspaceArea = () => (
     <NovelWorkspaceAreaView {...buildNovelWorkspaceAreaViewProps(workspaceViewDeps)} />
