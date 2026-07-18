@@ -165,7 +165,7 @@ describe('novel sqlite persistence', () => {
   })
 
   test('routes every novel mutation entry point through the workspace mutation lock', async () => {
-    const source = await readFile(join(import.meta.dir, 'novel.ts'), 'utf8')
+    const source = await readFile(join(import.meta.dir, 'novel/store.ts'), 'utf8')
     const mutationNames = [
       'createNovelProject', 'updateNovelProject',
       'createNovelWorldbuilding', 'updateNovelWorldbuilding',
@@ -186,16 +186,18 @@ describe('novel sqlite persistence', () => {
       const nextExport = source.indexOf('export async function ', start + 1)
       const block = source.slice(start, nextExport < 0 ? source.length : nextExport)
       expect(start).toBeGreaterThanOrEqual(0)
-      expect(block.includes('withNovelWorkspaceMutation(activeWorkspace') || block.includes('mutateNovelStore(activeWorkspace')).toBe(true)
+      expect(block.includes('withNovelWorkspaceMutation(activeWorkspace') || block.includes('withNovelDbWrite(activeWorkspace') || block.includes('mutateNovelStore(activeWorkspace')).toBe(true)
     }
-    const transactionalMutationStart = source.indexOf('async function mutateNovelStore')
+    const transactionalMutationStart = source.indexOf('async function withNovelDbWrite')
     const transactionalMutationEnd = source.indexOf('function normalizeReferenceConfig', transactionalMutationStart)
-    const transactionalMutationBlock = source.slice(transactionalMutationStart, transactionalMutationEnd)
+    const transactionalMutationBlock = source.slice(transactionalMutationStart, transactionalMutationEnd > 0 ? transactionalMutationEnd : transactionalMutationStart + 1200)
+    expect(transactionalMutationStart).toBeGreaterThanOrEqual(0)
     expect(transactionalMutationBlock).toContain("db.exec('BEGIN IMMEDIATE')")
-    expect(transactionalMutationBlock).toContain('const store = loadStoreFromOpenDb(db)')
-    expect(transactionalMutationBlock).toContain('replaceStoreInOpenDb(db, store)')
+    expect(transactionalMutationBlock).not.toContain('loadStoreFromOpenDb(db)')
+    expect(transactionalMutationBlock).not.toContain('replaceStoreInOpenDb(db, store)')
     expect(source).not.toContain('writeStoreUnlocked')
     expect(source).toContain('assertNovelWorkspaceMutationHeld(activeWorkspace)')
+    expect(source).not.toContain('async function mutateNovelStore')
   })
 
   test('fails a queued workspace mutation after the configured lock bound', async () => {
@@ -427,7 +429,7 @@ describe('novel sqlite persistence', () => {
   })
 
   test('appends reviews and runs through sqlite without reloading the full novel store', async () => {
-    const source = await readFile(join(import.meta.dir, 'novel.ts'), 'utf8')
+    const source = await readFile(join(import.meta.dir, 'novel/store.ts'), 'utf8')
     const createReviewStart = source.indexOf('export async function createNovelReview')
     const createReviewEnd = source.indexOf('export async function listNovelRuns', createReviewStart)
     const createReviewBlock = source.slice(createReviewStart, createReviewEnd)
@@ -595,7 +597,7 @@ describe('novel sqlite persistence', () => {
       dbComplete.close()
     }
 
-    const source = await readFile(join(import.meta.dir, 'novel.ts'), 'utf8')
+    const source = await readFile(join(import.meta.dir, 'novel/store.ts'), 'utf8')
     const start = source.indexOf('function backfillNovelRunPipelineSummaries')
     const end = source.indexOf('\nfunction compactRawPayloadForStorage', start)
     const backfillBlock = source.slice(start, end)

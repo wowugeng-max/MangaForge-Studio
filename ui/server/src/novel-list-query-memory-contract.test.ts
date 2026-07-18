@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const source = readFileSync(join(import.meta.dir, 'novel.ts'), 'utf8')
+const source = readFileSync(join(import.meta.dir, 'novel/store.ts'), 'utf8')
 
 function exportedFunctionSource(name: string, nextName: string) {
   const start = source.indexOf(`export async function ${name}`)
