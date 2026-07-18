@@ -36,7 +36,7 @@ export function formatRunResumeErrorMessage(error: any) {
   return payload?.error || error?.message || '任务继续失败'
 }
 
-const INCUBATION_CHARACTER_TIER_LABELS: Record<string, string> = {
+export const INCUBATION_CHARACTER_TIER_LABELS: Record<string, string> = {
   protagonist: '主角',
   primary_supporting: '主要配角',
   secondary_supporting: '次要配角',
