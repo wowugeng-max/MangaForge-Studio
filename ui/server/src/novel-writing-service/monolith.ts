@@ -18,6 +18,21 @@ export {
   buildLegacyCompatibleSelfCheck,
 } from './quality/prose-quality-entry'
 export {
+  appendMissingContractReviewCheck,
+  appendMissingStatusFilterReceiptCheck,
+  appendMissingNextChapterQualityPlanReceiptCheck,
+  contextHasNextChapterQualityPlanDebt,
+  contextHasStatusFilterReceiptDebt,
+} from './quality/missing-review-checks'
+export { getContextContract } from './context/context-contract'
+export {
+  extractProseExpansionPayload,
+  isLikelyChapterTitleLine,
+  proseBodyWithoutTitleLine,
+  proseParagraphsWithoutTitle,
+  chunkStructuredReviewFields,
+} from './quality/prose-expansion'
+export {
   revisionReceiptRemainingRisk,
   revisionReceiptMissingChangedEvidenceRisk,
   revisionReceiptGenericEvidenceRisk,
@@ -48,6 +63,21 @@ import {
   isMissingStructuredReviewCheck,
   missingStructuredReviewCheckFields,
 } from './quality/review-merge'
+import {
+  appendMissingContractReviewCheck,
+  appendMissingStatusFilterReceiptCheck,
+  appendMissingNextChapterQualityPlanReceiptCheck,
+  contextHasNextChapterQualityPlanDebt,
+  contextHasStatusFilterReceiptDebt,
+} from './quality/missing-review-checks'
+import { getContextContract } from './context/context-contract'
+import {
+  extractProseExpansionPayload,
+  isLikelyChapterTitleLine,
+  proseBodyWithoutTitleLine,
+  proseParagraphsWithoutTitle,
+  chunkStructuredReviewFields,
+} from './quality/prose-expansion'
 import {
   revisionReceiptRemainingRisk,
 } from './quality/revision-receipt-risk'
@@ -1320,89 +1350,6 @@ export function compileParagraphProseContext(
   })
 }
 
-export function appendMissingContractReviewCheck(
-  checks: any[] = [],
-  contract: any,
-  checkField: string,
-  contractField: string,
-  label: string,
-  options: { emit_missing_check?: boolean } = {},
-) {
-  const existing = asArray(checks)
-  if (options.emit_missing_check === false) return existing
-  if (!contract || typeof contract !== 'object' || Array.isArray(contract)) return existing
-  if (existing.length > 0) return existing
-  return [
-    {
-      key: `missing_${checkField}`,
-      label: `缺少${label}自检`,
-      status: 'fail',
-      evidence: `chapter_target.${contractField} 存在，但模型没有输出 ${checkField}。`,
-      fix: `按 chapter_target.${contractField} 补充 ${checkField}，逐项给出 status/evidence/fix。`,
-    },
-  ]
-}
-
-export function appendMissingStatusFilterReceiptCheck(
-  checks: any[] = [],
-  stateTrackingContract: any,
-  statusFilterReceipts: any[] = [],
-) {
-  const existing = asArray(checks)
-  if (!stateTrackingContract || typeof stateTrackingContract !== 'object' || Array.isArray(stateTrackingContract)) return existing
-  if (asArray(statusFilterReceipts).length > 0) return existing
-  if (existing.some(item => String(item?.key || '') === 'missing_status_filter_receipts')) return existing
-  return [
-    ...existing,
-    {
-      key: 'missing_status_filter_receipts',
-      label: '缺少状态筛选回执',
-      status: 'fail',
-      evidence: 'chapter_target.state_tracking_contract 存在，但模型没有输出 oh_story_delivery_receipts.pre_draft_execution_receipts.status_filter_receipts。',
-      fix: '按状态筛选合同补充 status_filter_receipts；每项必须包含 key、label、used_in_chapter、evidence、excluded_reason、remaining_risk，说明该状态是否影响本章正确性。',
-    },
-  ]
-}
-
-function contextHasNextChapterQualityPlanDebt(contextPackage: any = {}) {
-  return Boolean(
-    contextPackage?.chapter_target?.delivery_risk_carry_over
-    || contextPackage?.chapterTarget?.delivery_risk_carry_over
-    || contextPackage?.chapterTarget?.deliveryRiskCarryOver
-    || contextPackage?.delivery_risk_carry_over
-    || contextPackage?.deliveryRiskCarryOver
-    || contextPackage?.batch_preflight?.delivery_risk_carry_over
-    || contextPackage?.batchPreflight?.delivery_risk_carry_over
-    || contextPackage?.batchPreflight?.deliveryRiskCarryOver
-    || contextPackage?.pre_draft_brief?.delivery_risk_carry_over
-    || contextPackage?.preDraftBrief?.deliveryRiskCarryOver
-  )
-}
-
-function contextHasStatusFilterReceiptDebt(contextPackage: any = {}) {
-  const contract = getContextContract(contextPackage, 'state_tracking_contract')
-  return Boolean(contract && typeof contract === 'object' && !Array.isArray(contract) && Object.keys(contract).length > 0)
-}
-
-export function appendMissingNextChapterQualityPlanReceiptCheck(
-  checks: any[] = [],
-  contextPackage: any = {},
-) {
-  const existing = asArray(checks)
-  if (!contextHasNextChapterQualityPlanDebt(contextPackage)) return existing
-  if (existing.length > 0) return existing
-  return [
-    {
-      key: 'missing_next_chapter_quality_plan_receipts',
-      label: '缺少质量续航回执',
-      status: 'fail',
-      evidence: 'chapter_target.delivery_risk_carry_over 或 batch_preflight.delivery_risk_carry_over 存在，但模型没有输出 oh_story_delivery_receipts.pre_draft_execution_receipts.next_chapter_quality_plan_receipts。',
-      fix: '按上一章 next_chapter_quality_plan 和 delivery_risk_carry_over 补充 next_chapter_quality_plan_receipts；逐项证明 quality_focus、opening_actions、middle_actions、ending_actions、avoid_repetition 和 evidence_basis 是否已落成正文证据。',
-    },
-  ]
-}
-
-
 function mergedContextChapterTarget(contextPackage: any = {}) {
   return mergedContextChapterTargetPreferRuntime(contextPackage)
 }
@@ -1433,49 +1380,6 @@ function mergedContextChapterTargetPreferRuntime(contextPackage: any = {}) {
     merged[snakeField] = runtimeTarget[camelField]
   }
   return merged
-}
-
-export function getContextContract(contextPackage: any, contractField: string) {
-  const camelField = camelizeSnakeField(contractField)
-  const targetBlueprint = contextPackage?.chapter_target?.chapter_blueprint
-    || contextPackage?.chapter_target?.chapterBlueprint
-    || contextPackage?.chapterTarget?.chapter_blueprint
-    || contextPackage?.chapterTarget?.chapterBlueprint
-    || contextPackage?.chapter_blueprint
-    || contextPackage?.chapterBlueprint
-    || contextPackage?.pre_draft_brief?.chapter_blueprint
-    || contextPackage?.pre_draft_brief?.chapterBlueprint
-    || contextPackage?.preDraftBrief?.chapter_blueprint
-    || contextPackage?.preDraftBrief?.chapterBlueprint
-  return contextPackage?.chapter_target?.[contractField]
-    || contextPackage?.chapter_target?.[camelField]
-    || contextPackage?.chapterTarget?.[contractField]
-    || contextPackage?.chapterTarget?.[camelField]
-    || targetBlueprint?.[contractField]
-    || targetBlueprint?.[camelField]
-    || contextPackage?.[contractField]
-    || contextPackage?.[camelField]
-    || contextPackage?.pre_draft_brief?.[contractField]
-    || contextPackage?.pre_draft_brief?.[camelField]
-    || contextPackage?.preDraftBrief?.[contractField]
-    || contextPackage?.preDraftBrief?.[camelField]
-}
-
-
-
-
-
-
-
-
-
-function chunkStructuredReviewFields(fields: string[], batchSize = 4) {
-  const size = Math.max(1, Math.min(6, Number(batchSize || 4)))
-  const chunks: string[][] = []
-  for (let index = 0; index < fields.length; index += size) {
-    chunks.push(fields.slice(index, index + size))
-  }
-  return chunks
 }
 
 function buildMissingStructuredReviewChecksPrompt(project: any, contextPackage: any, chapterText: string, review: any, missingFields: string[]) {
@@ -1514,51 +1418,10 @@ function buildMissingStructuredReviewChecksPrompt(project: any, contextPackage: 
   ].join('\n')
 }
 
-function isLikelyChapterTitleLine(line: string) {
-  return /^#{0,6}\s*第[一二三四五六七八九十百千万两0-9]+章(?:\s|$|[：:《「【_ -])/.test(String(line || '').trim())
-}
 
 const OPENING_HOOK_SIGNAL_PATTERN = /死|血|痛|伤|尸|刀|枪|火|爆炸|撞|追|逃|杀|危险|禁止|规则|警报|广播|倒计时|失控|突然|必须|不能|威胁|逼|发现|选择|代价|冲突|问题|门响|敲门|尖叫|喊|吼|问|[？！!?“「]/
 const OPENING_PROTAGONIST_ACTION_PATTERN = /(?:我|他|她|少年|少女|男人|女人|孩子|学生|弟子|队长|警员|医生|老师|父亲|母亲|哥哥|姐姐|妹妹|弟弟|[赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳鲍史唐费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄和穆萧尹][一-龥]{1,3})(?:[^。！？!?]{0,18})(?:醒|坐起|站起|抬头|低头|睁眼|闭眼|回头|转身|伸手|抓|握|按|推|拉|跑|冲|退|躲|跪|看见|听见|发现|开口|说道|问|喊|吼|笑|咬|攥|拿|递|打开|关上|盯|望|摸|踢|撞|撕|挡|拦|选择|决定)/
 const OPENING_NON_PROTAGONIST_SUBJECT_PATTERN = /^(?:广播|警报|铃声|校规|规则|名单|红光|黑点|钟声|楼梯|安全门|规则册|惩罚栏|雨水|风|门|窗|灯|走廊|教学楼|宿舍|城市|天空|月光|阳光)/
-
-function proseBodyWithoutTitleLine(text: string) {
-  const lines = String(text || '').split(/\r?\n/)
-  const firstContentLine = lines.findIndex(line => String(line || '').trim())
-  if (firstContentLine >= 0 && isLikelyChapterTitleLine(lines[firstContentLine])) {
-    lines.splice(firstContentLine, 1)
-  }
-  return lines.join('\n').trim()
-}
-
-function proseParagraphsWithoutTitle(text: string) {
-  return proseBodyWithoutTitleLine(text)
-    .split(/\n\s*\n+/)
-    .map(paragraph => paragraph.replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-}
-
-export function extractProseExpansionPayload(result: any) {
-  const payload = getNovelPayload(result)
-  const expandedChapters = Array.isArray(payload?.prose_chapters)
-    ? payload.prose_chapters
-    : Array.isArray(payload?.proseChapters)
-      ? payload.proseChapters
-      : []
-  const expandedFirst = expandedChapters[0] || payload
-  return {
-    text: String(expandedFirst?.chapter_text || expandedFirst?.chapterText || payload?.chapter_text || payload?.chapterText || ''),
-    scene_breakdown: expandedFirst?.scene_breakdown || expandedFirst?.sceneBreakdown || payload?.scene_breakdown || payload?.sceneBreakdown || [],
-    continuity_notes: expandedFirst?.continuity_notes || expandedFirst?.continuityNotes || payload?.continuity_notes || payload?.continuityNotes || [],
-    expansion_blueprint_patch: expandedFirst?.expansion_blueprint_patch
-      || expandedFirst?.expansionBlueprintPatch
-      || payload?.expansion_blueprint_patch
-      || payload?.expansionBlueprintPatch
-      || null,
-    payload,
-  }
-}
-
 
 function compactJsonBriefText(value: any, fallback = '') {
   if (typeof value === 'string') return compactBriefText(value, fallback)
