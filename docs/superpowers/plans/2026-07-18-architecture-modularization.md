@@ -13,6 +13,13 @@
 **Branch:** `codex/architecture-modularization`
 
 
+### Residual inventory update (2026-07-19 goal-continue LV)
+- Split novel-chapter-context into helpers (~309) + register monofile (~533) with public re-exports.
+- Split quality-sync-reports-benchmark-blueprint into core (~598) + recall (~572) + barrel.
+- Still deferred: batch-guardrail-core (~827), ComfyUI (~877), continuity-guard (~814), NWS base model further thin, Task 11 full UI write-path smoke.
+
+
+
 ### Residual inventory update (2026-07-19 goal-continue LIV)
 - Split auto-creation `types` into status + models-batch + models-ops barrels.
 - Package-split recovery-governance reviews into batch/chapter leaves.
