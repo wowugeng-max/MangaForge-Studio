@@ -1008,3 +1008,8 @@ cd ui/server && bun test src/novel/mutation-contract.test.ts src/novel/sqlite-pe
 - Soft residual still open: WorkspaceCenter (~793), base model (~889 under orchestrator 1000), paragraph-prose-context-sections (~778), bind-core (~763), ComfyUI non-novel.
 - Task 11 still open: broader write-path UI smoke + memory note.
 
+### Residual progress (2026-07-19 goal-continue LXI++ WorkspaceCenter)
+- WorkspaceCenter now ~698 with empty/no-chapter + editor-controls leaves package-joined.
+- Soft residual: base model ~889 (orchestrator <1000), sections ~778, bind-core ~763, ComfyUI non-novel.
+- Task 11 focused regression green this round; full write-path UI smoke + memory note still open.
+
