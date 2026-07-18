@@ -119,10 +119,13 @@ describe('workspace payload parse cache', () => {
     const source = (name: string) => readFileSync(join(import.meta.dir, name), 'utf8')
     const planning = source('planningWorkspaceModel.ts')
     const writing = source('writingCockpitModel.ts')
-    const director = source('autoCreationDirectorModel.ts')
+    const director = source('auto-creation/model/director-model.ts')
 
     for (const modelSource of [planning, writing, director]) {
-      expect(modelSource).toContain("from './payloadParseCache'")
+      expect(
+        modelSource.includes("from './payloadParseCache'")
+        || modelSource.includes("from '../../payloadParseCache'"),
+      ).toBe(true)
     }
     expect(planning).toContain('return parseWorkspacePayload(value, options)')
     expect(writing).toContain("parseWorkspacePayload(value, { owner: review, kind: 'review', field })")

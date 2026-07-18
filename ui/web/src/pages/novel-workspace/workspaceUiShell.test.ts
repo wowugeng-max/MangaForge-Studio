@@ -380,7 +380,7 @@ describe('commercial writing workspace UI shell', () => {
   test('surfaces writing queue focus inside the auto creation director', () => {
     const component = source('AutoCreationDirectorWorkspace.tsx')
     const css = source('AutoCreationDirectorWorkspace.css')
-    const model = source('autoCreationDirectorModel.ts')
+    const model = source('auto-creation/model/director-model.ts')
 
     expect(model).toContain('writingQueueFocus')
     expect(model).toContain('buildWritingQueueFocus')
@@ -398,7 +398,7 @@ describe('commercial writing workspace UI shell', () => {
   test('shows a five-stage serial production rail in the auto creation director', () => {
     const component = source('AutoCreationDirectorWorkspace.tsx')
     const css = source('AutoCreationDirectorWorkspace.css')
-    const model = source('autoCreationDirectorModel.ts')
+    const model = source('auto-creation/model/director-model.ts')
     const projectWorkspace = source('../NovelProjectWorkspace.tsx')
 
     expect(model).toContain('serialWorkflow')
@@ -477,7 +477,7 @@ describe('commercial writing workspace UI shell', () => {
   test('shows the shared six-stage AI creation pipeline inside the auto creation director', () => {
     const component = source('AutoCreationDirectorWorkspace.tsx')
     const css = source('AutoCreationDirectorWorkspace.css')
-    const model = source('autoCreationDirectorModel.ts')
+    const model = source('auto-creation/model/director-model.ts')
 
     expect(model).toContain('creationPipeline')
     expect(model).toContain('buildCreationPipeline')
@@ -575,7 +575,7 @@ describe('commercial writing workspace UI shell', () => {
   })
 
   test('guards longform canon and memory runway before safe batching', () => {
-    const model = source('autoCreationDirectorModel.ts')
+    const model = source('auto-creation/model/director-model.ts')
 
     expect(model).toContain('buildCanonRunway')
     expect(model).toContain('story_state_stale')
@@ -735,7 +735,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = readFileSync(join(import.meta.dir, '../../../../server/src/novel-writing-service/monolith.ts'), 'utf8')
 
     expect(workspaceCenter).toContain('人物成长承接')
     expect(workspaceCenter).toContain('角色欲望')
@@ -774,7 +774,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = readFileSync(join(import.meta.dir, '../../../../server/src/novel-writing-service/monolith.ts'), 'utf8')
 
     expect(workspaceCenter).toContain('追读雷达')
     expect(workspaceCenter).toContain('开篇钩子')
@@ -792,7 +792,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = readFileSync(join(import.meta.dir, '../../../../server/src/novel-writing-service/monolith.ts'), 'utf8')
 
     expect(workspaceCenter).toContain('剧情单元任务')
     expect(workspaceCenter).toContain('当前职责')
@@ -809,7 +809,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = readFileSync(join(import.meta.dir, '../../../../server/src/novel-writing-service/monolith.ts'), 'utf8')
 
     expect(workspaceCenter).toContain('卷级爆点预算')
     expect(workspaceCenter).toContain('本章爆点职责')
@@ -825,7 +825,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = readFileSync(join(import.meta.dir, '../../../../server/src/novel-writing-service/monolith.ts'), 'utf8')
 
     expect(workspaceCenter).toContain('近10章疲劳规避')
     expect(workspaceCenter).toContain('冲突换源')
@@ -842,7 +842,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = readFileSync(join(import.meta.dir, '../../../../server/src/novel-writing-service/monolith.ts'), 'utf8')
 
     expect(workspaceCenter).toContain('弃读预警')
     expect(workspaceCenter).toContain('强故事节奏')
@@ -869,7 +869,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = readFileSync(join(import.meta.dir, '../../../../server/src/novel-writing-service/monolith.ts'), 'utf8')
 
     expect(workspaceCenter).toContain('创新执行')
     expect(workspaceCenter).toContain('创新角度')
@@ -886,7 +886,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = readFileSync(join(import.meta.dir, '../../../../server/src/novel-writing-service/monolith.ts'), 'utf8')
 
     expect(workspaceCenter).toContain('强场面补位')
     expect(workspaceCenter).toContain('标志性场面')
@@ -903,7 +903,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
-    const service = serverSource('routes/novel-writing-service.ts')
+    const service = serverSource('novel-writing-service/monolith.ts')
     const promptSections = serverSource('novel-writing/prose-generation-prompt-sections.ts')
 
     expect(workspaceCenter).toContain('长篇作战承接')
@@ -921,7 +921,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingRecommendationModel.ts')
-    const service = serverSource('routes/novel-writing-service.ts')
+    const service = serverSource('novel-writing-service/monolith.ts')
     const promptSections = serverSource('novel-writing/prose-generation-prompt-sections.ts')
 
     expect(workspaceCenter).toContain('治理复查承接')
@@ -950,7 +950,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCss = source('WorkspaceCenter.css')
     const writingModel = source('writingCockpitModel.ts')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const service = serverSource('routes/novel-writing-service.ts')
+    const service = serverSource('novel-writing-service/monolith.ts')
     const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
     expect(workspaceCenter).toContain('storyUnitSync')
@@ -967,7 +967,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingCockpitModel.ts')
-    const service = serverSource('routes/novel-writing-service.ts')
+    const service = serverSource('novel-writing-service/monolith.ts')
     const draftReviewRecords = serverSource('novel-writing/draft-sync-review-record.ts')
 
     expect(workspaceCenter).toContain('coreDrift')
@@ -983,7 +983,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingCockpitModel.ts')
-    const service = serverSource('routes/novel-writing-service.ts')
+    const service = serverSource('novel-writing-service/monolith.ts')
     const draftReviewRecords = serverSource('novel-writing/draft-sync-review-record.ts')
 
     expect(workspaceCenter).toContain('readerPayoffSync')
@@ -1000,7 +1000,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingCockpitModel.ts')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const service = serverSource('routes/novel-writing-service.ts')
+    const service = serverSource('novel-writing-service/monolith.ts')
     const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
     expect(workspaceCenter).toContain('readerRetentionSync')
@@ -1032,7 +1032,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingCockpitModel.ts')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const service = serverSource('routes/novel-writing-service.ts')
+    const service = serverSource('novel-writing-service/monolith.ts')
     const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
     expect(workspaceCenter).toContain('读者期待账本')
@@ -1056,7 +1056,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingCockpitModel.ts')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const service = serverSource('routes/novel-writing-service.ts')
+    const service = serverSource('novel-writing-service/monolith.ts')
     const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
     expect(workspaceCenter).toContain('qualityAuditSync')
@@ -1076,7 +1076,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingCockpitModel.ts')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const service = serverSource('routes/novel-writing-service.ts')
+    const service = serverSource('novel-writing-service/monolith.ts')
     const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
     expect(workspaceCenter).toContain('qualityAuditRepairReceiptSync')
@@ -1096,7 +1096,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCss = source('WorkspaceCenter.css')
     const recommendationModel = source('writingRecommendationModel.ts')
     const repairPrompt = source('repairTaskRevisionPrompt.ts')
-    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const service = readFileSync(join(import.meta.dir, '../../../../server/src/novel-writing-service/monolith.ts'), 'utf8')
 
     expect(workspaceCenter).toContain('期待债务承接')
     expect(workspaceCenter).toContain('上一章承接')
@@ -1168,13 +1168,13 @@ describe('commercial writing workspace UI shell', () => {
   test('shows million word runway gate in the auto creation director', () => {
     const workspace = source('AutoCreationDirectorWorkspace.tsx')
     const workspaceCss = source('AutoCreationDirectorWorkspace.css')
-    const model = source('autoCreationDirectorModel.ts')
+    const model = source('auto-creation/model/director-model.ts')
     const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCenterCss = source('WorkspaceCenter.css')
     const cockpitModel = source('writingCockpitModel.ts')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const service = serverSource('routes/novel-writing-service.ts')
+    const service = serverSource('novel-writing-service/monolith.ts')
     const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
     expect(workspace).toContain('百万字航线守门')
@@ -1205,7 +1205,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCss = source('WorkspaceCenter.css')
     const model = source('writingCockpitModel.ts')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const service = serverSource('routes/novel-writing-service.ts')
+    const service = serverSource('novel-writing-service/monolith.ts')
     const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
     expect(workspaceCenter).toContain('innovationSync')
@@ -1261,7 +1261,7 @@ describe('commercial writing workspace UI shell', () => {
   test('shows unresolved delivery risk fuse in the auto creation director', () => {
     const director = source('AutoCreationDirectorWorkspace.tsx')
     const directorCss = source('AutoCreationDirectorWorkspace.css')
-    const directorModel = source('autoCreationDirectorModel.ts')
+    const directorModel = source('auto-creation/model/director-model.ts')
     const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
 
     expect(directorModel).toContain('deliveryRiskGate')
@@ -1451,7 +1451,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCss = source('WorkspaceCenter.css')
     const writingModel = source('writingCockpitModel.ts')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const service = serverSource('routes/novel-writing-service.ts')
+    const service = serverSource('novel-writing-service/monolith.ts')
     const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
     expect(workspaceCenter).toContain('ipSceneIntake')
@@ -1472,7 +1472,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCss = source('WorkspaceCenter.css')
     const writingModel = source('writingCockpitModel.ts')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const service = serverSource('routes/novel-writing-service.ts')
+    const service = serverSource('novel-writing-service/monolith.ts')
     const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
 
     expect(workspaceCenter).toContain('signatureSceneSync')
@@ -1592,7 +1592,7 @@ describe('commercial writing workspace UI shell', () => {
 
     const cockpitModel = source('writingCockpitModel.ts')
     const recommendationModel = source('writingRecommendationModel.ts')
-    const service = serverSource('routes/novel-writing-service.ts')
+    const service = serverSource('novel-writing-service/monolith.ts')
     const reviewRecords = serverSource('novel-writing/post-delivery-sync-review-record.ts')
     expect(cockpitModel).toContain('buildChapterBenchmarkSyncSummary')
     expect(cockpitModel).toContain('chapter_benchmark_sync')
@@ -1790,7 +1790,7 @@ describe('commercial writing workspace UI shell', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const recommendationModel = source('writingRecommendationModel.ts')
     const planningModel = source('planningWorkspaceModel.ts')
-    const writingService = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const writingService = readFileSync(join(import.meta.dir, '../../../../server/src/novel-writing-service/monolith.ts'), 'utf8')
 
     expect(planningWorkspace).toContain('长篇记忆胶囊')
     expect(planningWorkspace).toContain('novel-longform-memory-capsule-card')
@@ -1843,7 +1843,7 @@ describe('commercial writing workspace UI shell', () => {
   test('shows character growth board as a story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
     const planningModel = source('planningWorkspaceModel.ts')
-    const autoDirectorModel = source('autoCreationDirectorModel.ts')
+    const autoDirectorModel = source('auto-creation/model/director-model.ts')
 
     expect(planningWorkspace).toContain('人物成长看板')
     expect(planningWorkspace).toContain('novel-character-arc-board-card')
@@ -1885,7 +1885,7 @@ describe('commercial writing workspace UI shell', () => {
   test('shows volume climax budget as a story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
     const planningModel = source('planningWorkspaceModel.ts')
-    const directorModel = source('autoCreationDirectorModel.ts')
+    const directorModel = source('auto-creation/model/director-model.ts')
 
     expect(planningWorkspace).toContain('卷级高潮预算')
     expect(planningWorkspace).toContain('novel-volume-beat-budget-card')
@@ -1978,9 +1978,9 @@ describe('commercial writing workspace UI shell', () => {
   test('shows auto creation director as the longform control workspace', () => {
     const directorWorkspace = source('AutoCreationDirectorWorkspace.tsx')
     const directorCss = source('AutoCreationDirectorWorkspace.css')
-    const directorModel = source('autoCreationDirectorModel.ts')
+    const directorModel = source('auto-creation/model/director-model.ts')
     const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
-    const writingService = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+    const writingService = readFileSync(join(import.meta.dir, '../../../../server/src/novel-writing-service/monolith.ts'), 'utf8')
     const taskCenter = source('TaskCenterDrawer.tsx')
 
     expect(projectWorkspace).toContain("autoCreation")
