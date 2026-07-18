@@ -164,7 +164,7 @@ import {
   normalizeTargetReaderProfileCheck,
   normalizeTargetReaderDesireCheck,
   normalizeTargetReaderEmotionalGapCheck,
-} from './quality-sync-reports-core'
+} from './quality-sync-reports-benchmark'
 
 export function normalizeTargetReaderAttractionCheck(values: any[], chapterText: string) {
   const planned = targetReaderArray(values)

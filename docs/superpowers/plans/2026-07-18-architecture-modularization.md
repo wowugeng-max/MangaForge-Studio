@@ -20,7 +20,7 @@
 | 0 size contracts | done | hardened hard caps for completed monofiles |
 | 1 writing-service scaffold | done | package + route shim |
 | 2 quality/review-merge slice | done | under `novel-writing-service/quality/*` |
-| 3 post-delivery sync reports | done | under `post-delivery/*`; quality-sync-reports core/extended split |
+| 3 post-delivery sync reports | done | quality-sync-reports core/benchmark/extended barrels |
 | 4 context/prompt glue | done | service modules extracted |
 | 5 monofile barrel-only | done | `monolith.ts` ~91 lines + public surface re-exports |
 | 6 monotest split | done | `novel-writing-service.test.ts` shim-only |
