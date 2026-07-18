@@ -118,6 +118,8 @@ import {
   renderPropagationDebtLlmPlanContentView,
   renderModelDiagnosticsContentView,
   renderGenreTemplatesContentView,
+  renderLongformRepairAuditContentView,
+  renderGenerationResultDiffContentView,
 } from './novel-workspace/shell/workspace-commercial-result'
 import {
   renderOriginalIncubationEmptyErrorContentView,
@@ -2010,28 +2012,7 @@ export default function NovelProjectWorkspace() {
       Modal.info({
         title: '长线生产修复闭环审计',
         width: 760,
-        content: (
-          <Space direction="vertical" size={10} style={{ width: '100%' }}>
-            <Space wrap>
-              <Tag color={audit.status === 'closed' ? 'green' : 'gold'} bordered={false}>{audit.status === 'closed' ? '已闭环' : '需跟进'}</Tag>
-              <Tag bordered={false}>已确认 {audit.task_summary?.resolved || 0}/{audit.task_summary?.total || 0}</Tag>
-              <Tag bordered={false}>触达章节 {audit.task_summary?.touched_chapter_count || 0}</Tag>
-            </Space>
-            {(audit.conclusion || []).map((item: string, index: number) => <Text key={`${item}-${index}`}>{item}</Text>)}
-            <Card size="small" title="指标变化">
-              <Space wrap>
-                {Object.entries(audit.metric_deltas || {}).map(([key, value]: [string, any]) => (
-                  <Tag key={key} bordered={false}>{key} {value.before ?? '-'} {'->'} {value.after ?? '-'}{value.delta === null || value.delta === undefined ? '' : ` (${value.delta >= 0 ? '+' : ''}${value.delta})`}</Tag>
-                ))}
-              </Space>
-            </Card>
-            {(audit.remaining_risks?.unresolved_tasks || []).length > 0 && (
-              <Card size="small" title="未关闭任务">
-                <List size="small" dataSource={(audit.remaining_risks.unresolved_tasks || []).slice(0, 10)} renderItem={(item: any) => <List.Item>{item.chapter_no ? `第${item.chapter_no}章 ` : ''}{item.message || item.title}</List.Item>} />
-              </Card>
-            )}
-          </Space>
-        ),
+        content: renderLongformRepairAuditContentView(audit),
       })
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '生成闭环审计失败')
@@ -4299,30 +4280,7 @@ export default function NovelProjectWorkspace() {
         Modal.info({
           title: '生成结果差异',
           width: 820,
-          content: (
-            <Space direction="vertical" size={12} style={{ width: '100%' }}>
-              <Space wrap>
-                <Tag color={Number(diff.delta_length || 0) >= 0 ? 'green' : 'gold'} bordered={false}>字数变化 {diff.delta_length >= 0 ? '+' : ''}{diff.delta_length || 0}</Tag>
-                <Tag bordered={false}>原 {diff.before_length || 0} 字</Tag>
-                <Tag bordered={false}>新 {diff.after_length || 0} 字</Tag>
-                <Tag bordered={false}>改动段落 {diff.change_count || 0}</Tag>
-                {done.previous_version?.version_no && <Tag color="blue" bordered={false}>已保留 v{done.previous_version.version_no}</Tag>}
-              </Space>
-              <Card size="small" title="段落变更预览">
-                {(diff.paragraph_changes || []).length ? (
-                  <Space direction="vertical" size={8} style={{ width: '100%', maxHeight: 360, overflow: 'auto' }}>
-                    {(diff.paragraph_changes || []).slice(0, 12).map((row: any) => (
-                      <div key={row.index} style={{ borderBottom: '1px solid #f0f0f0', paddingBottom: 8 }}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>第 {row.index} 段</Text>
-                        {row.before && <Paragraph style={{ margin: '4px 0', fontSize: 12, color: '#b42318' }} ellipsis={{ rows: 2, expandable: true }}>旧：{row.before}</Paragraph>}
-                        {row.after && <Paragraph style={{ margin: 0, fontSize: 12, color: '#067647' }} ellipsis={{ rows: 2, expandable: true }}>新：{row.after}</Paragraph>}
-                      </div>
-                    ))}
-                  </Space>
-                ) : <Text type="secondary">正文差异很小或原文为空。</Text>}
-              </Card>
-            </Space>
-          ),
+          content: renderGenerationResultDiffContentView(diff, done.previous_version),
         })
       }
       setRightPanelOpen(true)
