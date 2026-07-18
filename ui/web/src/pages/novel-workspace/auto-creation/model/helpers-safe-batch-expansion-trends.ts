@@ -1,12 +1,6 @@
 import type { PlanningActionKey, PlanningWorkspaceModel } from '../../planningWorkspaceModel'
 import type { WritingCockpitActionKey, WritingCockpitModel } from '../../writingCockpitModel'
 import { parseWorkspacePayload, type WorkspacePayloadParseOptions } from '../../payloadParseCache'
-import type { PlanningActionKey, PlanningWorkspaceModel } from '../../planningWorkspaceModel'
-import type { WritingCockpitActionKey, WritingCockpitModel } from '../../writingCockpitModel'
-import { parseWorkspacePayload, type WorkspacePayloadParseOptions } from '../../payloadParseCache'
-import type { PlanningActionKey, PlanningWorkspaceModel } from '../../planningWorkspaceModel'
-import type { WritingCockpitActionKey, WritingCockpitModel } from '../../writingCockpitModel'
-import { parseWorkspacePayload, type WorkspacePayloadParseOptions } from '../../payloadParseCache'
 import type {
   AnyRecord,
   AutoCreationDirectorStatus,
@@ -148,6 +142,14 @@ import {
 import {
   buildSafeBatchExpansionStructureDecisionExecutionReview,
 } from './helpers-safe-batch-expansion-structure'
+import {
+  defaultFiveChapterLaneFromEntry,
+  defaultFiveChapterRecoveryVerdictFromEntry,
+  safeBatchDefaultFiveChapterRecoveryVerdictRelapse,
+  safeBatchDefaultFiveChapterRegression,
+  safeBatchRecoveryRestoreConfirmationFromEntry,
+  safeBatchRecoveryRestoreValidationSegmentFromEntry,
+} from './helpers-safe-batch-expansion-repair-trends'
 
 export function safeBatchExpansionStructureDecisionEntryEvaluation(args: {
   entry: AnyRecord
