@@ -187,6 +187,8 @@ export function workspaceCenterSource() {
   if (workspaceCenterSourceCache != null) return workspaceCenterSourceCache
   workspaceCenterSourceCache = [
     sourceCached('WorkspaceCenter.tsx', localSourceCache),
+    sourceCached('workspace-center-empty-project.tsx', localSourceCache),
+    sourceCached('workspace-center-no-chapter.tsx', localSourceCache),
     sourceCached('workspace-center-writing-support.tsx', localSourceCache),
     sourceCached('workspace-center-writing-queue-strip.tsx', localSourceCache),
     sourceCached('workspace-center-delivery-status-strip.tsx', localSourceCache),
