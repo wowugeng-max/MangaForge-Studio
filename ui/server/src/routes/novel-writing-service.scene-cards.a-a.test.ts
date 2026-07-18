@@ -425,7 +425,7 @@ describe('normalizeSceneCardsPayload a a', () => {
 
   test('wires chapter positioning and benchmark structure coordinates into scene-card and prose prompts', () => {
     const source = ['paragraph-prose-context.ts','paragraph-prose-context-prepare.ts','paragraph-prose-context-prepare-foundation.ts','paragraph-prose-context-prepare-foundation.ts','paragraph-prose-context-prepare-default-five.ts','paragraph-prose-context-prepare-batch-memory.ts','paragraph-prose-context-sections.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
-    const selfReviewSource = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run-deterministic.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const selfReviewSource = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run-deterministic.ts','prose-self-review-run-normalize.ts','prose-self-review-run-revision.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const promptBlock = readSceneCardsPromptSource()
     const proseStart = source.indexOf('export function buildParagraphProseContext')
     const proseEnd = source.indexOf('const buildStoryStatePrompt =', proseStart)
