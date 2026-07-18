@@ -27,8 +27,8 @@
 | 7 editor/core routes packages | largely done | editor, core, commercial-ops, generation, planning package-split |
 | 8 auto-creation model package | largely done | risk multi-leaf + director monotest 4-way split + leaf binding fixes |
 | 9 cockpit + repair prompt | largely done | cockpit monotest 4-way; repair monotest 4-way; prompt multi-leaf |
-| 10 shell UI split | in progress | commercial views/ops/incubator leaves; ACD/StoryPlanning chrome; deferred types; NWS ~5.5k |
-| 11 final hardening | open | remaining size caps + broad regression |
+| 10 shell UI split | progressed | NWS ~2.0k multi-factory; remaining large production monofiles open |
+| 11 final hardening | open | monotests heavily reduced; smoke/memory still open |
 
 Recent extracts (continued):
 - 2026-07-18 night+: fixed benchmark-structure leaf; NWS down to ~5.5k via commercial/incubator/diff views; monotests heavily sliced.
@@ -57,6 +57,8 @@ Recent extracts (continued):
 - 2026-07-19 late+: generate-chapter word-target pure helpers leaf extracted (~2245 monofile).
 
 - 2026-07-19 night: more monotest splits (quality-wiring, scene/chapter contracts, expansion/readability, provider-runtime, receipts-gates, chapter-context core); generate-chapter pure helper leaves. NWS ~2.0k. Task 11 still open.
+
+- 2026-07-19 end-of-session checkpoint: NWS ~2003 with planning/production/writing-bible/editor/run-queue/prep/diagnostics/creative/chapter-prose/preflight/repair/action/commercial factories. generate-chapter pure helper leaves. Large monotests mostly halved (remaining outliers mainly workspaceUiShell source contracts + a few ~1.8-1.9k suites). Task 11 incomplete.
 
 Still open: NWS ~3.4k (commercial/preflight/repair/action/chapter-prose factories done; stepGenerateProse and more remain); generate-chapter-for-group ~2.3k; WorkspaceCenter/ACD/StoryPlanning/builders-annotations ~1.7-1.9k; some monotests still >1.5k; Task 11 full smoke/memory not finished.
 
