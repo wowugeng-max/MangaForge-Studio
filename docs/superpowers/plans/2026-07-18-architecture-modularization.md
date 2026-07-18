@@ -16,6 +16,22 @@
 
 
 
+### Residual inventory update (2026-07-19 goal-continue XXIII)
+
+Landed:
+- monotest halves: `director-model.memory-batch-blocks` a/b; `director-model.expansion-structure` a/b; `repairTaskRevisionPrompt.contracts-open` a/b
+- Prior XXII: director drawer package + handoff shared binding fix
+
+Task 11 focused (this turn):
+- web: shell a/b + director a/memory-batch/blocks/expansion **182 pass**
+- server: architecture + core-routes (+seed suites in batch) **103 pass**; annotations-surface + post-delivery-sync-a **69 pass**
+- contracts-open **12 pass**
+- API smoke: GET /api/novel/projects **200** (2 projects); project 3 chapters **30**, prose **25**, ch1 **5910** chars
+- Memory: server pid 61421 idle RSS **~165MB** (168480 KB) on :8787; architecture contracts still forbid full-store rewrite API
+- Full UI write-path / create-wizard click smoke still open
+
+Still deferred production residuals: provider-runtime DI (~1778), NWS composition root (~1593 mostly handlers), prose-self-review factory (~1496), helpers-batch-risk-radar single builder (~1278), paragraph-prose-context, useStudioKnowledgePanelsController (~1132), auto-repair-preflight factory.
+
 ### Residual inventory update (2026-07-19 goal-continue XXII)
 
 Landed:
