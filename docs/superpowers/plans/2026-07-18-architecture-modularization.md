@@ -50,6 +50,8 @@ Recent extracts (continued):
 
 - 2026-07-19 cont: split director-model.receipts-gates monotest into a/b + shim (previously aborted).
 
+- 2026-07-19 cont: split provider-runtime and chapter-context monotests (core-a/b); receipts-gates split landed. Known pre-existing opening-handoff admission failures remain in chapter-context.core-a (same as pre-split monotest).
+
 Still open: NWS ~3.4k (commercial/preflight/repair/action/chapter-prose factories done; stepGenerateProse and more remain); generate-chapter-for-group ~2.3k; WorkspaceCenter/ACD/StoryPlanning/builders-annotations ~1.7-1.9k; some monotests still >1.5k; Task 11 full smoke/memory not finished.
 
 
