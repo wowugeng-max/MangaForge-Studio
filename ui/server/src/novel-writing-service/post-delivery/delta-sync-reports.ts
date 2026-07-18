@@ -12,6 +12,11 @@ import {
   buildRelationshipDeltaSyncReport,
   buildChapterHandoffDeltaSyncReport,
   chapterReceiptProseText,
+  timelineDeltaRecordedTexts,
+  characterStateDeltaRecordedItems,
+  relationshipDeltaRecordedItems,
+  chapterHandoffRecordedTexts,
+  isForeshadowingPlanItem,
 } from './delta-sync-reports-storyline'
 export {
   buildStorylineSyncReport,
@@ -46,6 +51,8 @@ export function bindPostDeliveryDeltaSyncDeps(deps: {
   bindPostDeliveryDeltaSyncStorylineDeps({
     contextWithChapterRawPreDraftForSync: deps.contextWithChapterRawPreDraftForSync || contextWithChapterRawPreDraftForSync,
     characterRelationExplicitContract: deps.characterRelationExplicitContract || characterRelationExplicitContract,
+    stateTrackingExplicitContract: deps.stateTrackingExplicitContract || stateTrackingExplicitContract,
+    assetStateChangeText: deps.assetStateChangeText || assetStateChangeText,
   })
   if (deps.assetLinkageExplicitContract) assetLinkageExplicitContract = deps.assetLinkageExplicitContract
   if (deps.assetText) assetText = deps.assetText

@@ -32,8 +32,12 @@ const readPostDeliverySyncReviewRecordSource = () => readFileSync(join(import.me
 const readGenerateChapterPipelineSource = () => {
   const serviceDir = join(import.meta.dir, '../novel-writing-service/service')
   return [
-    readFileSync(join(serviceDir, 'generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(serviceDir, 'generate-chapter-editor-meme-polish.ts'), 'utf8'), readFileSync(join(serviceDir, 'generate-chapter-quality-prestore.ts'), 'utf8'),
+    readFileSync(join(serviceDir, 'generate-chapter-for-group-methods.ts'), 'utf8'),
+    readFileSync(join(serviceDir, 'generate-chapter-editor-meme-polish.ts'), 'utf8'),
+    readFileSync(join(serviceDir, 'generate-chapter-quality-prestore.ts'), 'utf8'),
     readFileSync(join(serviceDir, 'generate-chapter-acceptance-prep.ts'), 'utf8'),
+    readFileSync(join(serviceDir, 'generate-chapter-full-production-store.ts'), 'utf8'),
+    readFileSync(join(serviceDir, 'generate-chapter-draft-mode-store.ts'), 'utf8'),
     readFileSync(join(serviceDir, 'prose-self-review-methods.ts'), 'utf8'),
     readFileSync(join(serviceDir, 'story-state-machine.ts'), 'utf8'),
     readFileSync(join(serviceDir, 'story-state-helpers.ts'), 'utf8'),

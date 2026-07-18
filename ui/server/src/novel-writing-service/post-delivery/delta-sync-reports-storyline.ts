@@ -1,17 +1,25 @@
 import { asArray } from '../../routes/novel-route-utils'
+import { anchorMatchScore, anchorTerms, normalizedMatchText } from '../../novel-writing/text-matching'
 import { compactBriefText, uniqueBriefStrings } from '../quality/text-utils'
+import { deliveryRiskItemText } from './delivery-risk-core'
 
 type AnyFn = (...args: any[]) => any
 
 let contextWithChapterRawPreDraftForSync: AnyFn = (contextPackage: any = {}, _chapter: any = {}) => contextPackage || {}
 let characterRelationExplicitContract: AnyFn = (_contextPackage: any = {}) => ({})
+let stateTrackingExplicitContract: AnyFn = (_contextPackage: any = {}) => ({})
+let assetStateChangeText: AnyFn = (value: any) => String(value || '').trim()
 
 export function bindPostDeliveryDeltaSyncStorylineDeps(deps: {
   contextWithChapterRawPreDraftForSync?: AnyFn
   characterRelationExplicitContract?: AnyFn
+  stateTrackingExplicitContract?: AnyFn
+  assetStateChangeText?: AnyFn
 } = {}) {
   if (deps.contextWithChapterRawPreDraftForSync) contextWithChapterRawPreDraftForSync = deps.contextWithChapterRawPreDraftForSync
   if (deps.characterRelationExplicitContract) characterRelationExplicitContract = deps.characterRelationExplicitContract
+  if (deps.stateTrackingExplicitContract) stateTrackingExplicitContract = deps.stateTrackingExplicitContract
+  if (deps.assetStateChangeText) assetStateChangeText = deps.assetStateChangeText
 }
 
 const STORYLINE_TYPES = ['mainline', 'subplot', 'character_arc', 'relationship_arc', 'faction_arc', 'foreshadowing_arc']
@@ -90,7 +98,7 @@ export function buildStorylineSyncReport(contextPackage: any, storylineUpdates: 
   return { status, planned, actual, completed, missed, unplanned, forbidden_touched }
 }
 
-function isForeshadowingPlanItem(item: any) {
+export function isForeshadowingPlanItem(item: any) {
   const type = String(item?.entity_type || item?.type || '')
   const name = String(item?.name || item?.title || item || '')
   return type === 'foreshadowing_arc' || type === 'foreshadowing' || /伏笔|埋线|线索/.test(name)
@@ -289,7 +297,7 @@ function timelineDeltaRecordedRows(stateDelta: any = {}, settingUpdates: any[] =
   ].filter(Boolean)
 }
 
-function timelineDeltaRecordedTexts(stateDelta: any = {}, settingUpdates: any[] = []) {
+export function timelineDeltaRecordedTexts(stateDelta: any = {}, settingUpdates: any[] = []) {
   return timelineDeltaRecordedRows(stateDelta, settingUpdates).map((item: any) => item.text)
 }
 
@@ -405,7 +413,7 @@ function characterStateDeltaText(value: any) {
   return compactBriefText(value)
 }
 
-function characterStateDeltaRecordedItems(stateDelta: any = {}, characterUpdates: any[] = []) {
+export function characterStateDeltaRecordedItems(stateDelta: any = {}, characterUpdates: any[] = []) {
   const rows = new Map<string, { name: string; text: string; evidence: string }>()
   const add = (name: any, text: any, evidence: any = '') => {
     const safeName = compactBriefText(name)
@@ -525,7 +533,7 @@ function normalizeRelationshipDeltaPlanItem(item: any, fallbackText = '') {
   return name ? { entity_id: Number(item?.entity_id || item?.id || 0) || null, name, text: text || fallbackText || name } : null
 }
 
-function relationshipDeltaRecordedItems(stateDelta: any = {}, storylineUpdates: any[] = []) {
+export function relationshipDeltaRecordedItems(stateDelta: any = {}, storylineUpdates: any[] = []) {
   const rows = new Map<string, { entity_id: any; name: string; text: string }>()
   const add = (item: any, textValue?: any) => {
     const name = compactBriefText(item?.name || item?.title || item?.relationship)
@@ -622,7 +630,7 @@ function normalizeChapterHandoffPlanItem(label: string, value: any) {
   return text ? { label, text } : null
 }
 
-function chapterHandoffRecordedTexts(stateDelta: any = {}) {
+export function chapterHandoffRecordedTexts(stateDelta: any = {}) {
   return [
     ...asArray(stateDelta?.open_questions || stateDelta?.openQuestions),
     ...asArray(stateDelta?.next_chapter_priorities || stateDelta?.nextChapterPriorities),
