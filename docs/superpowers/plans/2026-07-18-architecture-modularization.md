@@ -13,6 +13,11 @@
 **Branch:** `codex/architecture-modularization`
 
 
+### Residual inventory update (2026-07-19 goal-continue LI)
+- Session landed: NWS view composition root ~51 + model hook ~994; provider-runtime-support package; commercial-ops/editor register group splits; planning desks package; prepare default-five + batch-memory; post-delivery-quality package; package-join fixes.
+- Deferred with care: chapter-continuity-guard (~814) reverse-free split hit leaf cycles (reverted); NWS model hook still large composition; ComfyUI/auto-creation monofiles; Task 11 full UI write-path click smoke still open.
+
+
 ### Residual inventory update (2026-07-19 goal-continue L)
 - Split novel-production post-delivery-quality into core/batch/repair leaves; monofile ~17 barrel.
 - Fixed planning desks package-join for shell source contracts.
