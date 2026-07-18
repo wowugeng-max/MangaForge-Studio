@@ -21,7 +21,7 @@ function walkTs(dir: string): string[] {
 }
 
 const BASELINES: Record<string, number> = {
-  'novel-writing-service/monolith.ts': 48504,
+  'novel-writing-service/monolith.ts': 47662,
   'routes/novel-writing-service.ts': 2,
   'routes/novel-writing-service.test.ts': 62495,
 }
