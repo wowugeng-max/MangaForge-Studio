@@ -2541,32 +2541,6 @@ export default function NovelProjectWorkspace() {
     }
   }
 
-  const {
-    generateCurrentChapterProse,
-    repairContextAndGenerateCurrentChapter,
-  } = createChapterProseHandlers({
-    activeChapter,
-    apiClient,
-    autoCreationDirectorModel,
-    chapterWordTargetPayload,
-    chapters,
-    confirmReferenceReady,
-    flushPendingSave,
-    loadProjectModules,
-    projectId,
-    selectedModelId,
-    setChapters,
-    setGeneratingProse,
-    setGenerationPipeline,
-    setRightPanelOpen,
-    setRightPanelTab,
-    setStreamingChapterId,
-    setStreamingPercent,
-    setStreamingProgress,
-    setStreamingText,
-    showGenerationBlockedModal,
-  })
-
   const handleRestructure = async (mode: string, targetCount: number, instructions: string) => {
     if (selectedChapterIds.size < 2) {
       message.warning('至少选择 2 章才能进行重组')
@@ -2701,6 +2675,33 @@ export default function NovelProjectWorkspace() {
     setOutlineTreeOpen,
     sortedChapters,
     syncStoryStateForChapter,
+  })
+
+
+  const {
+    generateCurrentChapterProse,
+    repairContextAndGenerateCurrentChapter,
+  } = createChapterProseHandlers({
+    activeChapter,
+    apiClient,
+    autoCreationDirectorModel,
+    chapterWordTargetPayload,
+    chapters,
+    confirmReferenceReady,
+    flushPendingSave,
+    loadProjectModules,
+    projectId,
+    selectedModelId,
+    setChapters,
+    setGeneratingProse,
+    setGenerationPipeline,
+    setRightPanelOpen,
+    setRightPanelTab,
+    setStreamingChapterId,
+    setStreamingPercent,
+    setStreamingProgress,
+    setStreamingText,
+    showGenerationBlockedModal,
   })
 
   const submitEditor = async () => {
