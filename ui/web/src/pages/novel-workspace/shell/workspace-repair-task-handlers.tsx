@@ -19,7 +19,12 @@ export type RepairTaskHandlerDeps = {
   apiClient: any
   chapters: any
   createEditorReportForChapter: any
+  executeStyleSampleTaskBookRebuild: any
   flushPendingSave: any
+  generateCurrentChapterProse: any
+  generateLongformRepairAuditSummary: any
+  generateSceneCardsForChapter: any
+  latestCockpitQualityReport: any
   loadProjectModules: any
   loadProductionTasks: any
   openEditor: any
@@ -27,6 +32,8 @@ export type RepairTaskHandlerDeps = {
   projectId: any
   reviews: any
   runRecords: any
+  runRollingPlan: any
+  runSimilarityForChapter: any
   selectChapterForWriting: any
   selectedModelId: any
   setActiveChapterId: any
@@ -48,7 +55,12 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
   const apiClient = deps.apiClient
   const chapters = deps.chapters
   const createEditorReportForChapter = deps.createEditorReportForChapter
+  const executeStyleSampleTaskBookRebuild = deps.executeStyleSampleTaskBookRebuild
   const flushPendingSave = deps.flushPendingSave
+  const generateCurrentChapterProse = deps.generateCurrentChapterProse
+  const generateLongformRepairAuditSummary = deps.generateLongformRepairAuditSummary
+  const generateSceneCardsForChapter = deps.generateSceneCardsForChapter
+  const latestCockpitQualityReport = deps.latestCockpitQualityReport
   const loadProjectModules = deps.loadProjectModules
   const loadProductionTasks = deps.loadProductionTasks
   const openEditor = deps.openEditor
@@ -56,6 +68,8 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
   const projectId = deps.projectId
   const reviews = deps.reviews
   const runRecords = deps.runRecords
+  const runRollingPlan = deps.runRollingPlan
+  const runSimilarityForChapter = deps.runSimilarityForChapter
   const selectChapterForWriting = deps.selectChapterForWriting
   const selectedModelId = deps.selectedModelId
   const setActiveChapterId = deps.setActiveChapterId

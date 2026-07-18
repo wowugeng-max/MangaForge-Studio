@@ -31,7 +31,6 @@ import { WritingCockpitPanel, type WritingCockpitPrimaryActionOverride } from '.
 import { WorkspaceCenter } from './WorkspaceCenter'
 import {
   buildAutoCreationDirectorModel,
-  buildStyleSampleTaskBookRecheckPlan,
   type AutoCreationDirectorAction,
 } from './autoCreationDirectorModel'
 import { buildNovelWritingRecommendation } from './writingRecommendationModel'
@@ -50,7 +49,6 @@ import {
 import { useChapterAutosave } from './useChapterAutosave'
 import { useChapterVersions } from './useChapterVersions'
 import { useNovelWorkspaceData, type ChapterSortMode, type ChapterStatusFilter } from './useNovelWorkspaceData'
-import { buildDeliveryRiskRevisionClosurePlan, buildRepairTaskRevisionPrompt } from './repairTaskRevisionPrompt'
 import type { SafeBatchRecoveryFocusSnapshot } from './TaskCenterDrawer'
 import { useReferenceWorkflow } from './useReferenceWorkflow'
 import { useWorkspaceTasks } from './useWorkspaceTasks'
@@ -80,7 +78,6 @@ import {
   safeBatchRecoveryFocusFromPayload,
 } from './shell/workspace-helpers'
 import {
-  renderLongformRepairAuditContentView,
   renderGenerationResultDiffContentView,
 } from './shell/workspace-commercial-result'
 import { NovelWorkspaceTopBar } from './shell/workspace-topbar'
@@ -102,10 +99,13 @@ import { createWritingBibleHandlers } from './shell/workspace-writing-bible-hand
 import { createPlanningHandlers } from './shell/workspace-planning-handlers'
 import { createProductionHandlers } from './shell/workspace-production-handlers'
 import { createEditorHandlers } from './shell/workspace-editor-handlers'
+import { createEditorReportHandlers } from './shell/workspace-editor-report-handlers'
 import { createRunQueueHandlers } from './shell/workspace-run-queue-handlers'
 import { createChapterPrepHandlers } from './shell/workspace-chapter-prep-handlers'
 import { createDiagnosticsHandlers } from './shell/workspace-diagnostics-handlers'
 import { createCreativeHandlers } from './shell/workspace-creative-handlers'
+import { createStyleSampleHandlers } from './shell/workspace-style-sample-handlers'
+import { createWritingQueueHandlers } from './shell/workspace-writing-queue-handlers'
 import {
   AgentAuditDrawer,
   AgentExecutionModal,
@@ -129,8 +129,6 @@ import {
   productionModeOptions,
   type ChapterOwnedData,
   type ChapterWordTargetMode,
-  type EditorReportForChapterOptions,
-  type TaskCenterActionOptions,
   type WorkspaceArea,
 } from './shell/workspace-types'
 import '../NovelProjectWorkspace.css'
@@ -414,37 +412,6 @@ export default function NovelProjectWorkspace() {
     const saved = await selectChapter(chapterId)
     if (saved) setWorkspaceArea('chapterWriting')
     return saved
-  }
-
-  const repairWritingQueuePlan = async (item: any) => {
-    const chapterId = Number(item?.id || 0)
-    if (!chapterId) return message.warning('这个队列项没有绑定章节')
-    if (!await selectChapterForWriting(chapterId)) return
-    await runRollingPlan({
-      intent: {
-        ...(item?.repairIntent || {}),
-        source: 'writing_queue_plan_repair',
-        chapter_id: chapterId,
-        chapter_no: Number(item?.chapterNo || 0),
-        title: item?.title || '',
-        source_label: item?.sourceLabel || '',
-        missing_fields: Array.isArray(item?.missingPlanFields) ? item.missingPlanFields : [],
-        missing_labels: Array.isArray(item?.missingPlanLabels) ? item.missingPlanLabels : [],
-        instruction: '只补齐当前章节的目标、核心冲突、章末钩子和必要场景职责，不改长期主线、不提前消费后续爆点。',
-      },
-    })
-  }
-
-  const repairWritingQueuePlanBatch = async (queue: any) => {
-    const intent = queue?.planRepair?.intent
-    if (!intent) return message.warning('当前队列没有可补齐的计划缺口')
-    await runRollingPlan({
-      intent: {
-        ...intent,
-        source: 'writing_queue_batch_plan_repair',
-        instruction: '批量补齐写作队列里缺少的章节目标、核心冲突、章末钩子和必要场景职责；保持章节顺序、长期主线、剧情线和禁揭边界不变，不提前消费后续爆点。',
-      },
-    })
   }
 
   const openStoryAssetsWorkspace = (focus?: 'discoveredAssets') => {
@@ -800,45 +767,33 @@ export default function NovelProjectWorkspace() {
     unattendedTargetChapter,
   })
 
-  const createEditorReport = async () => {
-    if (!activeChapter) return message.warning('请先选择章节')
-    await createEditorReportForChapter(activeChapter.id)
-  }
-
-  const createEditorReportForChapter = async (chapterId: number, options: EditorReportForChapterOptions = {}) => {
-    if (!selectedModelId) return message.warning('请先选择模型')
-    if (!await flushPendingSave()) return
-    setEditorReportLoading(true)
-    try {
-      const res = await apiClient.post(`/novel/chapters/${chapterId}/editor-report`, {
-        project_id: projectId,
-        model_id: selectedModelId,
-      })
-      await loadProjectModules()
-      setRightPanelOpen(true)
-      setRightPanelTab('editorReports')
-      if (options.autoRevision && res.data?.review) {
-        const task = options.sourceTask || {}
-        const revisionResult = await applyEditorRevision(res.data.review, {
-          revisionMode: String(task.message || task.issue_type || '').includes('钩子') ? 'restore_hook' : 'tighten_pacing',
-          prompt: buildRepairTaskRevisionPrompt(task, options.sourceRun),
-          sourceTask: task,
-          sourceRun: options.sourceRun,
-          sourceTaskIndex: options.sourceTaskIndex,
-          skipConfirm: options.skipRevisionConfirm,
-        })
-        return revisionResult
-      } else {
-        message.success('编辑报告已生成')
+  const applyEditorRevisionRef = { current: null as null | ((...args: any[]) => any) }
+  const runRollingPlanRef = { current: null as null | ((...args: any[]) => any) }
+  const executeStyleSampleTaskBookRebuildRef = { current: null as null | ((...args: any[]) => any) }
+  const generateLongformRepairAuditSummaryRef = { current: null as null | ((...args: any[]) => any) }
+  const generateCurrentChapterProseRef = { current: null as null | ((...args: any[]) => any) }
+  const generateSceneCardsForChapterRef = { current: null as null | ((...args: any[]) => any) }
+  const runSimilarityForChapterRef = { current: null as null | ((...args: any[]) => any) }
+  const {
+    createEditorReport,
+    createEditorReportForChapter,
+  } = createEditorReportHandlers({
+    activeChapter,
+    apiClient,
+    applyEditorRevision: (...args: any[]) => {
+      if (!applyEditorRevisionRef.current) {
+        throw new Error('applyEditorRevision is not ready')
       }
-      return res.data
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '编辑报告生成失败')
-      return null
-    } finally {
-      setEditorReportLoading(false)
-    }
-  }
+      return applyEditorRevisionRef.current(...args)
+    },
+    flushPendingSave,
+    loadProjectModules,
+    projectId,
+    selectedModelId,
+    setEditorReportLoading,
+    setRightPanelOpen,
+    setRightPanelTab,
+  })
 
   const {
     openEditor,
@@ -877,7 +832,32 @@ export default function NovelProjectWorkspace() {
     apiClient,
     chapters,
     createEditorReportForChapter,
+    executeStyleSampleTaskBookRebuild: (...args: any[]) => {
+      if (!executeStyleSampleTaskBookRebuildRef.current) {
+        throw new Error('executeStyleSampleTaskBookRebuild is not ready')
+      }
+      return executeStyleSampleTaskBookRebuildRef.current(...args)
+    },
     flushPendingSave,
+    generateCurrentChapterProse: (...args: any[]) => {
+      if (!generateCurrentChapterProseRef.current) {
+        throw new Error('generateCurrentChapterProse is not ready')
+      }
+      return generateCurrentChapterProseRef.current(...args)
+    },
+    generateLongformRepairAuditSummary: (...args: any[]) => {
+      if (!generateLongformRepairAuditSummaryRef.current) {
+        throw new Error('generateLongformRepairAuditSummary is not ready')
+      }
+      return generateLongformRepairAuditSummaryRef.current(...args)
+    },
+    generateSceneCardsForChapter: (...args: any[]) => {
+      if (!generateSceneCardsForChapterRef.current) {
+        throw new Error('generateSceneCardsForChapter is not ready')
+      }
+      return generateSceneCardsForChapterRef.current(...args)
+    },
+    latestCockpitQualityReport,
     loadProjectModules,
     loadProductionTasks,
     openEditor,
@@ -885,6 +865,18 @@ export default function NovelProjectWorkspace() {
     projectId,
     reviews,
     runRecords,
+    runRollingPlan: (...args: any[]) => {
+      if (!runRollingPlanRef.current) {
+        throw new Error('runRollingPlan is not ready')
+      }
+      return runRollingPlanRef.current(...args)
+    },
+    runSimilarityForChapter: (...args: any[]) => {
+      if (!runSimilarityForChapterRef.current) {
+        throw new Error('runSimilarityForChapter is not ready')
+      }
+      return runSimilarityForChapterRef.current(...args)
+    },
     selectChapterForWriting,
     selectedModelId,
     setActiveChapterId,
@@ -900,86 +892,27 @@ export default function NovelProjectWorkspace() {
     setTaskCenterOpen,
     sortedChapters,
   })
+  applyEditorRevisionRef.current = applyEditorRevision
 
-  const recheckStyleSampleTaskBookReviewTasks = async (items: any[]) => {
-    const preflight = autoCreationDirectorModel.batchGuardrail.preflight.inputSnapshot?.style_sample_batch_preflight
-    const plan = buildStyleSampleTaskBookRecheckPlan({
-      items,
-      styleSampleBatchPreflight: preflight,
-    })
-    if (plan.status === 'needs_preflight') {
-      message.warning(plan.summary)
-      return
-    }
-    if (!plan.resolvedItems.length) {
-      message.warning(plan.summary)
-      return
-    }
-    try {
-      const grouped = new Map<number, { run: any; indices: number[] }>()
-      for (const item of plan.resolvedItems) {
-        const runId = Number(item?.run?.id || 0)
-        if (!runId || !Number.isInteger(Number(item?.taskIndex))) continue
-        const existing = grouped.get(runId) || { run: item.run, indices: [] }
-        existing.indices.push(Number(item.taskIndex))
-        grouped.set(runId, existing)
-      }
-      for (const group of grouped.values()) {
-        await apiClient.post(`/novel/runs/${group.run.id}/tasks/status-bulk`, {
-          project_id: projectId,
-          task_indices: group.indices,
-          status: 'resolved',
-          note: '样章任务书复检通过：下一批任务书已避开风险样章',
-        })
-      }
-      await loadProjectModules()
-      await loadProductionTasks()
-      if (plan.blockedItems.length > 0) {
-        message.warning(plan.summary)
-      } else {
-        message.success(plan.summary)
-      }
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '样章任务书复检失败')
-    }
-  }
+  const {
+    recheckStyleSampleTaskBookReviewTasks,
+    generateLongformRepairAuditSummary,
+    executeStyleSampleTaskBookRebuild,
+  } = createStyleSampleHandlers({
+    apiClient,
+    applyStyleSampleActionForChapter,
+    autoCreationDirectorModel,
+    loadProductionTasks,
+    loadProjectModules,
+    projectId,
+    setTaskCenterOpen,
+    sortedChapters,
+    updateRepairTaskStatus,
+  })
+  executeStyleSampleTaskBookRebuildRef.current = executeStyleSampleTaskBookRebuild
+  generateLongformRepairAuditSummaryRef.current = generateLongformRepairAuditSummary
+  generateSceneCardsForChapterRef.current = generateSceneCardsForChapter
 
-  const generateLongformRepairAuditSummary = async (run: any, options: TaskCenterActionOptions = {}) => {
-    try {
-      const res = await apiClient.post(`/novel/projects/${projectId}/longform-production-trends/repair-runs/${run.id}/audit-summary`)
-      const audit = res.data?.audit || {}
-      await loadProjectModules()
-      await loadProductionTasks()
-      if (options.keepTaskCenterOpen) {
-        message.success('恢复依据复盘已刷新')
-        return
-      }
-      Modal.info({
-        title: '长线生产修复闭环审计',
-        width: 760,
-        content: renderLongformRepairAuditContentView(audit),
-      })
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '生成闭环审计失败')
-    }
-  }
-
-  const executeStyleSampleTaskBookRebuild = async (task: any, run?: any, taskIndex = -1, options: TaskCenterActionOptions = {}) => {
-    const chapterId = Number(task?.chapter_id || 0)
-    const chapterNo = Number(task?.chapter_no || task?.chapterNo || 0)
-    const targetChapter = (chapterId ? sortedChapters.find(item => Number(item.id) === chapterId) : null)
-      || (chapterNo ? sortedChapters.find(item => Number(item.chapter_no || 0) === chapterNo) : null)
-      || null
-    if (!targetChapter?.id) {
-      message.warning('这个样章任务没有匹配章节')
-      return
-    }
-    if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
-    const changed = await applyStyleSampleActionForChapter(targetChapter, 'replace', '已换样章并重审任务书，请重新确认任务书')
-    if (changed && run?.id && taskIndex >= 0) {
-      await updateRepairTaskStatus(run, taskIndex, 'needs_review', '已换样章并清除任务书确认状态，等待作者重审任务书')
-    }
-  }
 
   const {
     showCommercialResult,
@@ -1023,6 +956,7 @@ export default function NovelProjectWorkspace() {
     openModelDiagnostics,
     openGenreTemplates,
     createBackupSnapshot,
+    runRollingPlan,
   } = createCommercialToolHandlers({
     activeChapter,
     activeChapterId,
@@ -1063,6 +997,16 @@ export default function NovelProjectWorkspace() {
     chapterHasProse,
     autoCreationDirectorModel,
   })
+
+  const {
+    repairWritingQueuePlan,
+    repairWritingQueuePlanBatch,
+  } = createWritingQueueHandlers({
+    runRollingPlan,
+    selectChapterForWriting,
+  })
+  runRollingPlanRef.current = runRollingPlan
+  runSimilarityForChapterRef.current = runSimilarityForChapter
 
 
   const {
@@ -1215,6 +1159,7 @@ export default function NovelProjectWorkspace() {
     setStepProseLoading,
     sortedChapters,
   })
+  generateCurrentChapterProseRef.current = generateCurrentChapterProse
 
   /* ── streaming scroll ──────────────────────────────────────────── */
   useEffect(() => {

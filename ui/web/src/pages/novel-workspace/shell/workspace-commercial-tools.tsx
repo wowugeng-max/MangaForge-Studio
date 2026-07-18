@@ -473,5 +473,6 @@ export function createCommercialToolHandlers(deps: CommercialToolHandlerDeps) {
     openModelDiagnostics,
     openGenreTemplates,
     createBackupSnapshot,
+    runRollingPlan,
   }
 }
