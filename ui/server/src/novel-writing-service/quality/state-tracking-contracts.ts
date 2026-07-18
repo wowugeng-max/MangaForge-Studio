@@ -231,7 +231,7 @@ export function reconcileSerialStoryStateSourceRows(rows: any[] = [], contextPac
   return nextRows
 }
 
-async function refreshFollowingChapterSerialStoryStateReadiness(
+export async function refreshFollowingChapterSerialStoryStateReadiness(
   activeWorkspace: string,
   projectId: number,
   syncedChapterNo: number,

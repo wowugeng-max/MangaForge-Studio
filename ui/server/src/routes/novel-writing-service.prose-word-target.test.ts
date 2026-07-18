@@ -2998,7 +2998,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a story_drive_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: storyDriveSync, reviewType: 'story_drive_sync'")
     expect(source).toContain('buildStoryDriveSyncReport(project, chapter, contextPackage, chapterText)')
@@ -3140,7 +3140,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a story_loop_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: storyLoopSync, reviewType: 'story_loop_sync'")
     expect(source).toContain('buildStoryLoopSyncReport(project, chapter, contextPackage, chapterText)')
@@ -3274,7 +3274,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists an information_flow_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: informationFlowSync, reviewType: 'information_flow_sync'")
     expect(source).toContain('buildInformationFlowSyncReport(project, chapter, contextPackage, chapterText)')
@@ -3405,7 +3405,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists an expectation_threshold_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'expectation_threshold_sync'")
     expect(source).toContain("payloadKey: 'expectation_threshold_sync'")
@@ -3686,7 +3686,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists an emotional_arc_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: emotionalArcSync, reviewType: 'emotional_arc_sync'")
     expect(source).toContain('buildEmotionalArcSyncReport(project, chapter, contextPackage, chapterText)')
@@ -3768,7 +3768,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a chapter_hook_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'chapter_hook_sync'")
     expect(source).toContain("payloadKey: 'chapter_hook_sync'")
@@ -3858,7 +3858,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a paragraph_hook_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'paragraph_hook_sync'")
     expect(source).toContain("payloadKey: 'paragraph_hook_sync'")
@@ -4063,7 +4063,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a suspense_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'suspense_sync'")
     expect(source).toContain("payloadKey: 'suspense_sync'")
@@ -4154,7 +4154,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a reversal_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'reversal_sync'")
     expect(source).toContain("payloadKey: 'reversal_sync'")
@@ -4419,7 +4419,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a showdown_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'showdown_sync'")
     expect(source).toContain("payloadKey: 'showdown_sync'")
@@ -4428,7 +4428,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a spectator_reaction_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: spectatorReactionSync, reviewType: 'spectator_reaction_sync'")
     expect(source).toContain('buildSpectatorReactionSyncReport(project, chapter, contextPackage, chapterText)')
@@ -4436,7 +4436,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a payoff_setup_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: payoffSetupSync, reviewType: 'payoff_setup_sync'")
     expect(source).toContain('buildPayoffSetupSyncReport(project, chapter, contextPackage, chapterText)')
@@ -4556,7 +4556,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a bridge_unit_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: bridgeUnitSync, reviewType: 'bridge_unit_sync'")
     expect(source).toContain('buildBridgeUnitSyncReport(project, chapter, contextPackage, chapterText)')
@@ -5121,7 +5121,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a beat_cooling_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: beatCoolingSync, reviewType: 'beat_cooling_sync'")
     expect(source).toContain('buildBeatCoolingSyncReport(project, chapter, contextPackage, chapterText)')
@@ -5222,7 +5222,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists an opening_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'opening_sync', payloadKey: 'opening_sync'")
     expect(source).toContain('buildOpeningSyncReport(project, chapter, contextPackage, chapterText)')
@@ -5301,7 +5301,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a prose_craft_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'prose_craft_sync', payloadKey: 'prose_craft_sync'")
     expect(source).toContain('buildProseCraftSyncReport(project, chapter, contextPackage, chapterText)')
@@ -5365,7 +5365,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a punctuation_tone_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'punctuation_tone_sync', payloadKey: 'punctuation_tone_sync'")
     expect(source).toContain('buildPunctuationToneSyncReport(project, chapter, contextPackage, chapterText)')
@@ -5463,7 +5463,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a quality_audit_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'quality_audit_sync', payloadKey: 'quality_audit_sync'")
     expect(source).toContain('buildQualityAuditSyncReport(project, chapter, contextPackage, chapterText)')
@@ -5763,7 +5763,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a dialogue_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'dialogue_sync', payloadKey: 'dialogue_sync'")
     expect(source).toContain('buildDialogueSyncReport(project, chapter, contextPackage, chapterText)')
@@ -5930,7 +5930,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a character_behavior_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'character_behavior_sync', payloadKey: 'character_behavior_sync'")
     expect(source).toContain('buildCharacterBehaviorSyncReport(project, chapter, contextPackage, chapterText)')
@@ -6031,7 +6031,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists an asset_linkage_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'asset_linkage_sync', payloadKey: 'asset_linkage_sync'")
     expect(source).toContain('buildAssetLinkageSyncReport(project, chapter, contextPackage, chapterText)')
@@ -6112,7 +6112,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a state_tracking_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'state_tracking_sync', payloadKey: 'state_tracking_sync'")
     expect(source).toContain('buildStateTrackingSyncReport(project, chapter, contextPackage, chapterText)')
@@ -6223,7 +6223,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists an intent_confirmation_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("reviewType: 'intent_confirmation_sync', payloadKey: 'intent_confirmation_sync'")
     expect(source).toContain('buildIntentConfirmationSyncReport(project, chapter, contextPackage, chapterText)')
@@ -6285,7 +6285,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a continuity_heat_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: continuityHeatSync, reviewType: 'continuity_heat_sync'")
     expect(source).toContain('buildContinuityHeatSyncReport(project, chapter, contextPackage, chapterText)')
@@ -6530,7 +6530,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a conflict_structure_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: conflictStructureSync, reviewType: 'conflict_structure_sync'")
     expect(source).toContain('buildConflictStructureSyncReport(project, chapter, contextPackage, chapterText)')
@@ -6742,7 +6742,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists an upgrade_rhythm_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: upgradeRhythmSync, reviewType: 'upgrade_rhythm_sync'")
     expect(source).toContain('buildUpgradeRhythmSyncReport(project, chapter, contextPackage, chapterText)')
@@ -6866,7 +6866,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a target_reader_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: targetReaderSync, reviewType: 'target_reader_sync'")
     expect(source).toContain('buildTargetReaderSyncReport(project, chapter, contextPackage, chapterText)')
@@ -6942,7 +6942,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a genre_positioning_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: genrePositioningSync, reviewType: 'genre_positioning_sync'")
     expect(source).toContain('buildGenrePositioningSyncReport(project, chapter, contextPackage, chapterText)')
@@ -6998,7 +6998,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a female_audience_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: femaleAudienceSync, reviewType: 'female_audience_sync'")
     expect(source).toContain('buildFemaleAudienceSyncReport(project, chapter, contextPackage, chapterText)')
@@ -7086,7 +7086,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a plot_dynamics_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: plotDynamicsSync, reviewType: 'plot_dynamics_sync'")
     expect(source).toContain('buildPlotDynamicsSyncReport(project, chapter, contextPackage, chapterText)')
@@ -7213,7 +7213,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a character_relation_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: characterRelationSync, reviewType: 'character_relation_sync'")
     expect(source).toContain('buildCharacterRelationSyncReport(project, chapter, contextPackage, chapterText)')
@@ -7309,7 +7309,7 @@ describe('chapter prose word target', () => {
   })
 
   test('story state sync persists a character_arc_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: characterArcSync, reviewType: 'character_arc_sync'")
     expect(source).toContain('buildCharacterArcSyncReport(project, chapter, contextPackage, chapterText)')

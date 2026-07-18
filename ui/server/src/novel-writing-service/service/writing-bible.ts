@@ -64,3 +64,24 @@ export function hasMeaningfulWritingBible(value: any) {
     (value.style_lock && Object.values(value.style_lock || {}).some(item => Array.isArray(item) ? item.length > 0 : Boolean(String(item || '').trim())))
   )
 }
+
+
+export async function getStoredOrBuiltWritingBible(args: {
+  activeWorkspace: string
+  project: any
+  listNovelWorldbuilding: (workspace: string, projectId: number) => Promise<any[]>
+  listNovelCharacters: (workspace: string, projectId: number) => Promise<any[]>
+  listNovelOutlines: (workspace: string, projectId: number) => Promise<any[]>
+  listNovelReviews: (workspace: string, projectId: number) => Promise<any[]>
+}) {
+  const [worldbuilding, characters, outlines, reviews] = await Promise.all([
+    args.listNovelWorldbuilding(args.activeWorkspace, args.project.id),
+    args.listNovelCharacters(args.activeWorkspace, args.project.id),
+    args.listNovelOutlines(args.activeWorkspace, args.project.id),
+    args.listNovelReviews(args.activeWorkspace, args.project.id),
+  ])
+  const stored = args.project.reference_config?.writing_bible
+  return hasMeaningfulWritingBible(stored)
+    ? stored
+    : buildWritingBible(args.project, worldbuilding, characters, outlines, reviews)
+}
