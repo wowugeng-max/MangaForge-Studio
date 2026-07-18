@@ -121,6 +121,9 @@ import {
   wordTargetWarningAsError,
 } from './generate-chapter-word-target-helpers'
 import {
+  attachQualityLoopFailureDiagnostics,
+} from './generate-chapter-quality-helpers'
+import {
   buildOhStoryDirectorForPostDraft,
 } from '../../routes/novel-oh-story-director'
 import {
@@ -933,27 +936,6 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   await onStage('review', { status: 'running' })
   finalText = normalizeProseForStorage(finalText)
   let qualityLoop: Awaited<ReturnType<typeof runProseQualityLoop>>
-  const attachQualityLoopFailureDiagnostics = (error: any, qualityLoopDiagnostics?: any) => {
-    const code = String(error?.code || 'PROSE_QUALITY_GATE_BLOCKED')
-    error.prompt_diagnostics = draftPromptDiagnostics
-    error.quality_loop = error?.quality_loop || qualityLoopDiagnostics || {
-      rounds: [],
-      decision: {
-        passed: false,
-        approvable: false,
-        score: 0,
-        min_score: qualityThreshold,
-        hard_failures: [{
-          key: code.toLowerCase(),
-          message: String(error?.message || '正文质量门禁不可用').slice(0, 500),
-          source: code === 'PROSE_QUALITY_RECHECK_UNAVAILABLE' ? 'recheck' : 'llm',
-        }],
-        advisory_failures: [],
-      },
-    }
-    if (Object.prototype.hasOwnProperty.call(error, 'rounds')) delete error.rounds
-    return error
-  }
   try {
     qualityLoop = await runProseQualityLoop({
       initialText: finalText,
@@ -1031,7 +1013,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
       },
     })
   } catch (error: any) {
-    throw attachQualityLoopFailureDiagnostics(error)
+    throw attachQualityLoopFailureDiagnostics(error, { draftPromptDiagnostics, qualityThreshold })
   }
   finalText = qualityLoop.final_text
   const qualityLoopDiagnostics = {
