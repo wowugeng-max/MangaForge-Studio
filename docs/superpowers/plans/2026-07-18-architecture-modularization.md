@@ -31,6 +31,8 @@
 | 11 final hardening | open | remaining size caps + broad regression |
 
 Recent extracts (continued):
+- 2026-07-18 late night: generate-chapter acceptance-prep leaf; more monotest slices (contracts/memory/craft/receipts/expansion); deferred-surfaces types leaf.
+
 - 2026-07-18 night: NWS longform trends + remaining commercial diagnosis modal views extracted; commercial-result split to ops leaf; AutoCreation/StoryPlanning chrome helpers extracted; expansion/receipts/specialty monotests further sliced.
  director/repair/cockpit/pre-draft/scene-cards monotest splits; NWS diagnostics views + action routers; audience/trends leaf binding fixes; golden-three opening pattern restore.
 
