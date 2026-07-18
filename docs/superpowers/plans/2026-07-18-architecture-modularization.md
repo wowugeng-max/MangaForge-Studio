@@ -13,6 +13,12 @@
 **Branch:** `codex/architecture-modularization`
 
 
+### Residual inventory update (2026-07-19 goal-continue XLIV)
+- Package-split `provider-runtime-support` into types (~35) + route-dsl (~10) + bodies (~461) + monofile support (~420); re-export barrel keeps public API stable; local import binds for format helpers.
+- provider-runtime focused suites **68 pass** with architecture contracts.
+- Still deferred: NWS model hook ~994, paragraph-prose-context-prepare ~952, planning desks ~863. Task 11 full UI write-path click smoke still open.
+
+
 ### Residual inventory update (2026-07-19 goal-continue XLIII)
 - Extracted NWS `WORKSPACE_AREA_TABS` leaf; cleaned dead composition-root imports; fixed missing package-join imports (`useNovelProjectWorkspaceUiState`, `SerialPipelineStrip`, `NovelWorkspaceAreaView`).
 - Extracted `useNovelProjectWorkspaceModel` (~994) so `NovelProjectWorkspaceView` composition root is thin (~51, under React 800 hard cap).
