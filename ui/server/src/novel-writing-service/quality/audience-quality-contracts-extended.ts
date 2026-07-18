@@ -7,6 +7,7 @@ import { continuityHeatItemText } from '../../novel-writing/continuity-heat-basi
 import { normalizeReaderExpectationDebtContext } from '../batch-serial/serial-momentum'
 import { firstDefined } from '../post-delivery/core-handoff-sync-reports'
 import { compactBriefText, uniqueBriefStrings } from './text-utils'
+import { storylineUsageByAnyType } from './continuity-dialogue-contracts'
 
 import {
   OH_STORY_EXPECTATION_BEFORE_PAYOFF_RULES,
