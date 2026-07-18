@@ -16,6 +16,16 @@
 
 
 
+### Residual inventory update (2026-07-19 goal-continue XXI)
+
+Landed:
+- `useNovelStudioController` → thin lobby shell (~90) + `useStudioKnowledgePanelsController` (~1133 knowledge/source/feed panels)
+- Prior XX: acceptance desk admissionCommon collapse; delivery-risk extended-assets a/b
+
+Task 11 focused still green on prior cockpit/post-delivery batches; studio controller is composition-only for lobby path.
+
+Still deferred: provider-runtime, NWS composition root, prose-self-review factory, director drawer, helpers-batch-risk-radar, paragraph-prose-context, further panel hook thinning, full write-path UI smoke/memory.
+
 ### Residual inventory update (2026-07-19 goal-continue XX)
 
 Landed:
