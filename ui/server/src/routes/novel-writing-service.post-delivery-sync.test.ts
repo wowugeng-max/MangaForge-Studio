@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import {
   buildChapterAttractionReviewReport,
@@ -28,6 +28,44 @@ import {
 } from '../novel-writing/post-delivery-sync-review-record'
 
 const readChapterProseStoragePatchSource = () => readFileSync(join(import.meta.dir, '../novel-writing/chapter-prose-storage-patch.ts'), 'utf8')
+
+
+const writingServicePackageCache = new Map<string, string>()
+const writingServiceSourceCache: { value: string | null } = { value: null }
+
+function packageSource(relativeDir: string) {
+  const cached = writingServicePackageCache.get(relativeDir)
+  if (cached != null) return cached
+  const root = join(import.meta.dir, '..', relativeDir)
+  const files: string[] = []
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        walk(full)
+        continue
+      }
+      if (entry.isFile() && entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+        files.push(full)
+      }
+    }
+  }
+  walk(root)
+  files.sort()
+  const value = files.map((file) => readFileSync(file, 'utf8')).join('\n')
+  writingServicePackageCache.set(relativeDir, value)
+  return value
+}
+
+function writingServiceSource() {
+  if (writingServiceSourceCache.value != null) return writingServiceSourceCache.value
+  writingServiceSourceCache.value = [
+    packageSource('novel-writing-service'),
+    packageSource('novel-writing'),
+  ].join('\n')
+  return writingServiceSourceCache.value
+}
+
 
 describe('story unit sync report', () => {
   test('checks current story unit role and warns when the prose rushes later unit payoffs', () => {
@@ -121,7 +159,7 @@ describe('story unit sync report', () => {
   })
 
   test('story state sync persists a story_unit_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
 
     expect(source).toContain('buildStoryUnitSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain("reviewType: 'story_unit_sync'")
@@ -156,32 +194,21 @@ describe('story unit sync report', () => {
   })
 
   test('story state prompt asks for layered memory context and merge stores it in project story state', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
     const promptBlock = readFileSync(join(import.meta.dir, '../novel-writing/story-state-prompt.ts'), 'utf8')
-    const mergeBlock = source.slice(
-      source.indexOf('const mergeStoryState ='),
-      source.indexOf('const updateStoryStateMachine =', source.indexOf('const mergeStoryState =')),
-    )
 
     expect(promptBlock).toContain('layered_memory_context')
     expect(promptBlock).toContain('recent_chapter_details')
     expect(promptBlock).toContain('ten_chapter_summaries')
     expect(promptBlock).toContain('volume_overview')
-    expect(mergeBlock).toContain('buildMergedLayeredMemoryContext')
-    expect(mergeBlock).toContain('layered_memory_context')
+    expect(source).toContain('buildMergedLayeredMemoryContext')
+    expect(source).toContain('layered_memory_context')
+    expect(source).toMatch(/function mergeStoryState|const mergeStoryState\s*=/)
   })
 
   test('story state prompt asks for oh-story daily progress summary and stores it for the next chapter', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
     const promptBlock = readFileSync(join(import.meta.dir, '../novel-writing/story-state-prompt.ts'), 'utf8')
-    const normalizeBlock = source.slice(
-      source.indexOf('const normalizeStoryStateDeltaForStorage ='),
-      source.indexOf('const mergeStoryState =', source.indexOf('const normalizeStoryStateDeltaForStorage =')),
-    )
-    const mergeBlock = source.slice(
-      source.indexOf('const mergeStoryState ='),
-      source.indexOf('const updateStoryStateMachine =', source.indexOf('const mergeStoryState =')),
-    )
 
     expect(promptBlock).toContain('progress_summary')
     expect(promptBlock).toContain('last_completed_chapter')
@@ -189,22 +216,15 @@ describe('story unit sync report', () => {
     expect(promptBlock).toContain('recent_changed_characters')
     expect(promptBlock).toContain('next_outline_status')
     expect(promptBlock).toContain('注意事项')
-    expect(normalizeBlock).toContain('progress_summary')
-    expect(normalizeBlock).toContain('progressSummary')
-    expect(mergeBlock).toContain('progress_summary')
+    expect(source).toContain('progress_summary')
+    expect(source).toContain('progressSummary')
+    expect(source).toMatch(/function normalizeStoryStateDeltaForStorage|const normalizeStoryStateDeltaForStorage\s*=/)
+    expect(source).toMatch(/function mergeStoryState|const mergeStoryState\s*=/)
   })
 
   test('story state prompt asks for oh-story daily context snapshot and stores it for the next chapter', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
     const promptBlock = readFileSync(join(import.meta.dir, '../novel-writing/story-state-prompt.ts'), 'utf8')
-    const normalizeBlock = source.slice(
-      source.indexOf('const normalizeStoryStateDeltaForStorage ='),
-      source.indexOf('const mergeStoryState =', source.indexOf('const normalizeStoryStateDeltaForStorage =')),
-    )
-    const mergeBlock = source.slice(
-      source.indexOf('const mergeStoryState ='),
-      source.indexOf('const updateStoryStateMachine =', source.indexOf('const mergeStoryState =')),
-    )
 
     expect(promptBlock).toContain('daily_context_snapshot')
     expect(promptBlock).toContain('current_chapter')
@@ -214,9 +234,10 @@ describe('story unit sync report', () => {
     expect(promptBlock).toContain('pending_clues')
     expect(promptBlock).toContain('daily_context_snapshot 只保存追踪/上下文.md 的进度元信息')
     expect(promptBlock).toContain('不得复制详细伏笔表、时间线表或角色状态表')
-    expect(normalizeBlock).toContain('daily_context_snapshot')
-    expect(normalizeBlock).toContain('dailyContextSnapshot')
-    expect(mergeBlock).toContain('daily_context_snapshot')
+    expect(source).toContain('daily_context_snapshot')
+    expect(source).toContain('dailyContextSnapshot')
+    expect(source).toMatch(/function normalizeStoryStateDeltaForStorage|const normalizeStoryStateDeltaForStorage\s*=/)
+    expect(source).toMatch(/function mergeStoryState|const mergeStoryState\s*=/)
   })
 
   test('story state prompt uses scene-card receipts for state deltas and next chapter prep', () => {
@@ -229,7 +250,7 @@ describe('story unit sync report', () => {
   })
 
   test('story state sync receives latest generated scene breakdown context', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
     const contextStart = source.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')
     const prepareStart = source.indexOf('preparedStoryStateUpdate = await prepareStoryStateUpdate(', contextStart)
     const acceptanceStart = source.indexOf('acceptance = await commitNovelChapterAcceptance(', prepareStart)
@@ -243,7 +264,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation stores oh-story delivery receipts in every chapter store branch', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
     const storagePatchSource = readChapterProseStoragePatchSource()
     const generationBlock = source.slice(
       source.indexOf('const draftResult = await generateNovelChapterProse'),
@@ -261,7 +282,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation stores post-draft oh-story director after delivery receipts and quality review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
     const storagePatchSource = readChapterProseStoragePatchSource()
     const postReviewStart = source.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')
     const acceptanceStart = source.indexOf('acceptance = await commitNovelChapterAcceptance(', postReviewStart)
@@ -295,7 +316,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation preserves pre-draft execution receipts for write-preparation diagnostics', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
     const carryOverSource = readFileSync(join(import.meta.dir, '../novel-writing-service/post-delivery/delivery-risk-carry-over.ts'), 'utf8')
     const storagePatchSource = readChapterProseStoragePatchSource()
     const normalizeBlock = carryOverSource.slice(
@@ -316,7 +337,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation refreshes stored oh-story receipts from the final reviewed draft before storage', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
     const generationBlock = source.slice(
       source.indexOf('const draftResult = await generateNovelChapterProse'),
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
@@ -335,7 +356,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation refreshes stored oh-story receipts from nested revision delivery receipts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
     const generationBlock = source.slice(
       source.indexOf('const draftResult = await generateNovelChapterProse'),
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
@@ -352,7 +373,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation preserves nested deslop and quality repair receipts in stored oh-story receipts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
     const generationBlock = source.slice(
       source.indexOf('const draftResult = await generateNovelChapterProse'),
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
@@ -369,7 +390,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation deduplicates final delivery risk receipts before storage', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
     const generationBlock = source.slice(
       source.indexOf('const draftResult = await generateNovelChapterProse'),
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
@@ -385,7 +406,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation prefers nested revision scene-card receipts over stale final scene breakdown receipts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
     const generationBlock = source.slice(
       source.indexOf('const draftResult = await generateNovelChapterProse'),
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
@@ -404,7 +425,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation prefers nested revision scene-card receipts over stale draft delivery receipts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
     const generationBlock = source.slice(
       source.indexOf('const draftResult = await generateNovelChapterProse'),
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
@@ -422,7 +443,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation prefers nested revision receipts over stale draft delivery receipts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
     const generationBlock = source.slice(
       source.indexOf('const draftResult = await generateNovelChapterProse'),
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
@@ -567,7 +588,7 @@ describe('chapter handoff sync report', () => {
   })
 
   test('story state sync persists a chapter_handoff_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
 
     expect(source).toContain("reviewType: 'chapter_handoff_sync'")
     expect(source).toContain('buildChapterHandoffSyncReport(project, chapter, contextPackage, chapterText)')
@@ -817,7 +838,7 @@ describe('chapter core drift report', () => {
   })
 
   test('story state sync persists a chapter_core_drift review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
 
     expect(source).toContain("reviewType: 'chapter_core_drift'")
     expect(source).toContain('buildChapterCoreDriftReport(project, chapter, contextPackage, chapterText, storylineSync)')
@@ -1081,7 +1102,7 @@ describe('chapter core drift report', () => {
   })
 
   test('story state sync persists a core_contract_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
 
     expect(source).toContain("reviewType: 'core_contract_sync'")
     expect(source).toContain('buildCoreContractSyncReport(project, chapter, contextPackage, chapterText)')
@@ -1168,7 +1189,7 @@ describe('reader payoff sync report', () => {
   })
 
   test('story state sync persists a reader_payoff_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
 
     expect(source).toContain("reviewType: 'reader_payoff_sync'")
     expect(source).toContain('buildReaderPayoffSyncReport(project, chapter, contextPackage, chapterText, payload)')
@@ -1296,7 +1317,7 @@ describe('reader expectation sync report', () => {
   })
 
   test('story state sync persists a reader_expectation_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
 
     expect(source).toContain("reviewType: 'reader_expectation_sync'")
     expect(source).toContain("payloadKey: 'reader_expectation_sync'")
@@ -1541,7 +1562,7 @@ describe('reader retention sync report', () => {
   })
 
   test('story state sync persists a reader_retention_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
 
     expect(source).toContain("reviewType: 'reader_retention_sync'")
     expect(source).toContain('buildReaderRetentionSyncReport(project, chapter, contextPackage, chapterText)')
@@ -1549,7 +1570,7 @@ describe('reader retention sync report', () => {
   })
 
   test('story state sync persists a chapter_attraction_review review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
 
     expect(source).toContain("reviewType: 'chapter_attraction_review'")
     expect(source).toContain('buildChapterAttractionReviewReport(project, chapter, contextPackage, chapterText)')
@@ -1631,7 +1652,7 @@ describe('innovation sync report', () => {
   })
 
   test('story state sync persists an innovation_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: innovationSync, reviewType: 'innovation_sync'")
     expect(source).toContain('buildInnovationSyncReport(project, chapter, contextPackage, chapterText)')
@@ -1714,7 +1735,7 @@ describe('signature scene sync report', () => {
   })
 
   test('story state sync persists a signature_scene_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
 
     expect(source).toContain("reviewType: 'signature_scene_sync'")
     expect(source).toContain('buildSignatureSceneSyncReport(project, chapter, contextPackage, chapterText)')
@@ -1842,7 +1863,7 @@ describe('volume beat sync report', () => {
   })
 
   test('story state sync persists a volume_beat_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: volumeBeatSync, reviewType: 'volume_beat_sync'")
     expect(source).toContain('buildVolumeBeatSyncReport(project, chapter, contextPackage, chapterText)')
@@ -1933,7 +1954,7 @@ describe('million word runway sync report', () => {
   })
 
   test('story state sync persists a runway_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
 
     expect(source).toContain("reviewType: 'runway_sync'")
     expect(source).toContain('buildRunwaySyncReport(project, chapter, contextPackage, chapterText)')
@@ -1967,7 +1988,7 @@ describe('discovered asset intake', () => {
   })
 
   test('story state prompt asks for discovered assets and creates asset intake review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
 
     expect(source).toContain('discovered_assets')
     expect(source).toContain('normalizeDiscoveredAssets(')
@@ -2006,7 +2027,7 @@ describe('ip scene intake', () => {
   })
 
   test('story state prompt asks for ip scene candidates and creates ip scene intake review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+    const source = writingServiceSource()
 
     expect(source).toContain('ip_scene_candidates')
     expect(source).toContain('normalizeIpSceneCandidates(')

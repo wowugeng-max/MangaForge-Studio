@@ -113,7 +113,6 @@ import {
   normalizeDefaultFiveChapterLaneTemplateProductionRelapseReview,
   compactChapterNoEvidence,
   DEFAULT_FIVE_CHAPTER_LANE_TEMPLATE_REQUIREMENTS,
-  DEFAULT_FIVE_CHAPTER_LANE_TEMPLATE_RECEIPTS,
 } from './helpers-main'
 
 export function serialReleaseInventoryIssue(guardrail: AutoCreationBatchGuardrail) {
