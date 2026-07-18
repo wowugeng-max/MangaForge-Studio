@@ -575,7 +575,7 @@ describe('novel writing service prose quality wiring b', () => {
   })
   test('rechecks revised prose before advisory admission classification', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
-    const generateSource = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-full-production-store.ts'), 'utf8')].join('\n')
+    const generateSource = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-mode-store.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-full-production-store.ts'), 'utf8')].join('\n')
     const qualityLoopStart = source.indexOf('let qualityLoop: Awaited<ReturnType<typeof runProseQualityLoop>>')
     const gateStart = generateSource.indexOf('const preStoreQualityDecision =', qualityLoopStart)
     const reviewCallbackStart = source.indexOf('review: async ({ prompt, round, attempt }) => {', qualityLoopStart)
@@ -1040,7 +1040,7 @@ describe('novel writing service prose quality wiring b', () => {
   test('attempts accepted prose memory after chapter storage without depending on a returned record', () => {
     const source = [
       readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'),
-      readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-full-production-store.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-mode-store.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-full-production-store.ts'), 'utf8'),
       readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-post-commit.ts'), 'utf8'),
     ].join('\n')
     const storageStart = source.indexOf('acceptance = await commitNovelChapterAcceptance(activeWorkspace, {')

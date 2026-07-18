@@ -276,6 +276,7 @@ const readGenerateChapterForGroupSource = () => {
   const postDeliveryDir = join(import.meta.dir, '../novel-writing-service/post-delivery')
   return [
     readFileSync(join(serviceDir, 'generate-chapter-for-group-methods.ts'), 'utf8'),
+    readFileSync(join(serviceDir, 'generate-chapter-draft-mode-store.ts'), 'utf8'),
     readFileSync(join(serviceDir, 'generate-chapter-full-production-store.ts'), 'utf8'),
     readFileSync(join(serviceDir, 'generate-chapter-acceptance-prep.ts'), 'utf8'),
     readFileSync(join(postDeliveryDir, 'post-commit-sync-bundle.ts'), 'utf8'),
