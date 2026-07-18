@@ -43,7 +43,6 @@ import {
   type WritingCockpitActionKey,
 } from './novel-workspace/writingCockpitModel'
 import {
-  normalizeCreativeAssistPayload,
   type CreativeAssistCard,
   type CreativeAssistResult,
   type CreativeAssistantModeKey,
@@ -81,7 +80,6 @@ import {
   safeBatchRecoveryFocusFromPayload,
 } from './novel-workspace/shell/workspace-helpers'
 import {
-  renderChapterQualityCardContentView,
   renderLongformRepairAuditContentView,
   renderGenerationResultDiffContentView,
 } from './novel-workspace/shell/workspace-commercial-result'
@@ -98,6 +96,9 @@ import { createPlanningHandlers } from './novel-workspace/shell/workspace-planni
 import { createProductionHandlers } from './novel-workspace/shell/workspace-production-handlers'
 import { createEditorHandlers } from './novel-workspace/shell/workspace-editor-handlers'
 import { createRunQueueHandlers } from './novel-workspace/shell/workspace-run-queue-handlers'
+import { createChapterPrepHandlers } from './novel-workspace/shell/workspace-chapter-prep-handlers'
+import { createDiagnosticsHandlers } from './novel-workspace/shell/workspace-diagnostics-handlers'
+import { createCreativeHandlers } from './novel-workspace/shell/workspace-creative-handlers'
 import {
   AgentAuditDrawer,
   AgentExecutionModal,
@@ -832,145 +833,22 @@ export default function NovelProjectWorkspace() {
     await generateSceneCardsForChapter(Number(activeChapter.id), allowIncomplete)
   }
 
-  const buildPreDraftBriefForActiveChapter = async () => {
-    if (!activeChapter) return message.warning('请先选择章节')
-    if (!await flushPendingSave()) return
-    setCommercialToolLoading('preDraftBrief')
-    try {
-      const res = await apiClient.get(`/novel/chapters/${activeChapter.id}/pre-draft-brief`, {
-        params: { project_id: projectId },
-      })
-      const brief = res.data?.brief || {}
-      const saveRes = await apiClient.put(`/novel/chapters/${activeChapter.id}/pre-draft-brief`, {
-        project_id: projectId,
-        brief,
-      })
-      if (saveRes.data?.chapter) {
-        setChapters(prev => prev.map(c => c.id === saveRes.data.chapter.id ? saveRes.data.chapter : c))
-      }
-      await loadProjectModules()
-      message.success('章节开写任务书已生成')
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '任务书生成失败')
-    } finally {
-      setCommercialToolLoading('')
-    }
-  }
-
-  const confirmPreDraftBriefForActiveChapter = async () => {
-    if (!activeChapter) return message.warning('请先选择章节')
-    if (!await flushPendingSave()) return
-    setCommercialToolLoading('preDraftBriefConfirm')
-    try {
-      const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/pre-draft-brief/confirm`, {
-        project_id: projectId,
-        brief: activeChapter.raw_payload?.pre_draft_brief || activeChapter.raw_payload?.preDraftBrief,
-      })
-      if (res.data?.chapter) {
-        setChapters(prev => prev.map(c => c.id === res.data.chapter.id ? res.data.chapter : c))
-      }
-      await loadProjectModules()
-      message.success('章节开写任务书已确认')
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '任务书确认失败')
-    } finally {
-      setCommercialToolLoading('')
-    }
-  }
-
-  const savePreDraftBriefForActiveChapter = async (brief: any) => {
-    if (!activeChapter) return message.warning('请先选择章节')
-    if (!await flushPendingSave()) return
-    setCommercialToolLoading('preDraftBrief')
-    try {
-      const res = await apiClient.put(`/novel/chapters/${activeChapter.id}/pre-draft-brief`, {
-        project_id: projectId,
-        brief,
-      })
-      if (res.data?.chapter) {
-        setChapters(prev => prev.map(c => c.id === res.data.chapter.id ? res.data.chapter : c))
-      }
-      await loadProjectModules()
-      message.success('章节开写任务书已保存')
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '任务书保存失败')
-    } finally {
-      setCommercialToolLoading('')
-    }
-  }
-
-  const applyStyleSampleActionForChapter = async (targetChapter: any, action: 'lock' | 'replace' | 'disable', successMessage = '') => {
-    if (!targetChapter?.id) {
-      message.warning('请先选择章节')
-      return false
-    }
-    if (Number(activeChapter?.id || 0) === Number(targetChapter.id)) {
-      if (!await flushPendingSave()) return false
-    } else if (!await selectChapterForWriting(Number(targetChapter.id))) {
-      return false
-    }
-    const loadingKey = action === 'lock' ? 'styleSampleLock' : action === 'replace' ? 'styleSampleReplace' : 'styleSampleDisable'
-    setCommercialToolLoading(loadingKey)
-    try {
-      const res = await apiClient.post(`/novel/chapters/${targetChapter.id}/pre-draft-brief/style-samples`, {
-        project_id: projectId,
-        action,
-      })
-      if (res.data?.chapter) {
-        setChapters(prev => prev.map(c => c.id === res.data.chapter.id ? res.data.chapter : c))
-      }
-      await loadProjectModules()
-      if (successMessage) message.success(successMessage)
-      else if (action === 'lock') message.success('本章风格样章已锁定')
-      else if (action === 'replace') message.success('已换一组风格样章，请重新确认任务书')
-      else if (action === 'disable') message.success('本章已不用风格样章，请重新确认任务书')
-      return true
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '风格样章操作失败')
-      return false
-    } finally {
-      setCommercialToolLoading('')
-    }
-  }
-
-  const applyStyleSampleActionForActiveChapter = async (action: 'lock' | 'replace' | 'disable') => {
-    return applyStyleSampleActionForChapter(activeChapter, action)
-  }
-
-  const openGenerationDiagnostics = async () => {
-    if (!activeChapter) return message.warning('请先选择章节')
-    if (!await flushPendingSave()) return
-    setDiagnosticsLoading(true)
-    try {
-      const res = await apiClient.get(`/novel/chapters/${activeChapter.id}/generation-diagnostics`, {
-        params: { project_id: projectId },
-      })
-      showDiagnosticsModal(res.data || {})
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '生成前诊断失败')
-    } finally {
-      setDiagnosticsLoading(false)
-    }
-  }
-
-  const openChapterQualityCardForChapter = async (chapterId: number) => {
-    try {
-      const res = await apiClient.get(`/novel/chapters/${chapterId}/quality-card`, { params: { project_id: projectId } })
-      const card = res.data?.quality_card || {}
-      Modal.info({
-        title: '章节交稿质检',
-        width: 900,
-        content: renderChapterQualityCardContentView(card),
-      })
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '章节交稿质检加载失败')
-    }
-  }
-
-  const openChapterQualityCard = async () => {
-    if (!activeChapter) return message.warning('请先选择章节')
-    await openChapterQualityCardForChapter(Number(activeChapter.id))
-  }
+  const {
+    buildPreDraftBriefForActiveChapter,
+    confirmPreDraftBriefForActiveChapter,
+    savePreDraftBriefForActiveChapter,
+    applyStyleSampleActionForChapter,
+    applyStyleSampleActionForActiveChapter,
+  } = createChapterPrepHandlers({
+    activeChapter,
+    apiClient,
+    flushPendingSave,
+    loadProjectModules,
+    projectId,
+    selectChapterForWriting,
+    setChapters,
+    setCommercialToolLoading,
+  })
 
   const {
     openProductionDashboard,
@@ -1369,98 +1247,34 @@ export default function NovelProjectWorkspace() {
   })
 
 
-  const downloadBackupPackage = () => {
-    const baseURL = String(apiClient.defaults.baseURL || '').replace(/\/$/, '')
-    const link = document.createElement('a')
-    link.href = `${baseURL}/novel/projects/${projectId}/backup-package`
-    link.target = '_blank'
-    link.rel = 'noopener noreferrer'
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-  }
-
-  const importBackupPackage = async () => {
-    if (!backupImportText.trim()) return message.warning('请粘贴项目备份 JSON')
-    setCommercialToolLoading('backupImport')
-    try {
-      const backup = JSON.parse(backupImportText)
-      const res = await apiClient.post('/novel/backup-package/import', { package: backup })
-      const project = res.data?.project
-      message.success(`已导入项目：${project?.title || project?.id || ''}`)
-      setBackupImportOpen(false)
-      setBackupImportText('')
-      if (project?.id) navigate(`/novel/workspace/${project.id}`)
-    } catch (error: any) {
-      message.error(error?.message?.includes('JSON') ? '备份内容必须是合法 JSON' : (error?.response?.data?.error || error?.message || '导入备份失败'))
-    } finally {
-      setCommercialToolLoading('')
-    }
-  }
-
-  const runCreativeCommand = async (execute = false) => {
-    if (!creativeCommandText.trim()) return message.warning('请输入创作指令')
-    setCommercialToolLoading('creativeCommand')
-    try {
-      const res = await apiClient.post(`/novel/projects/${projectId}/creative-command`, {
-        command: creativeCommandText,
-        execute,
-      })
-      setCreativeCommandPlan(res.data || null)
-      await loadProductionTasks()
-      if (execute) await loadProjectModules()
-      message.success(execute ? '指令已执行可安全执行的部分' : '指令已解析')
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '创作指令处理失败')
-    } finally {
-      setCommercialToolLoading('')
-    }
-  }
-
-  const openCreativeAssistant = () => {
-    const selection = typeof window !== 'undefined' ? window.getSelection()?.toString() || '' : ''
-    setCreativeAssistantSelectedText(selection.trim())
-    setCreativeAssistantOpen(true)
-  }
-
-  const copyCreativeAssistantCard = async (card: CreativeAssistCard) => {
-    const content = [
-      card.title,
-      card.intent ? `目的：${card.intent}` : '',
-      card.reason ? `依据：${card.reason}` : '',
-      card.suggestion ? `建议：${card.suggestion}` : '',
-      card.risk ? `风险：${card.risk}` : '',
-    ].filter(Boolean).join('\n')
-    try {
-      await navigator.clipboard?.writeText(content)
-      message.success('建议卡已复制')
-    } catch {
-      message.info(content)
-    }
-  }
-
-  const runCreativeAssistant = async (input: { mode: CreativeAssistantModeKey; question: string; researchQuery: string }) => {
-    setCreativeAssistantLoading(true)
-    setCreativeAssistantError('')
-    try {
-      const res = await apiClient.post(`/novel/projects/${projectId}/creative-assist`, {
-        mode: input.mode,
-        chapter_id: activeChapter?.id,
-        selected_text: creativeAssistantSelectedText,
-        question: input.question,
-        research_query: input.researchQuery,
-        model_id: selectedModelId,
-        save: true,
-      })
-      setCreativeAssistantResult(normalizeCreativeAssistPayload(res.data?.assist || res.data))
-      if (res.data?.review) await loadProjectModules()
-      message.success('创作参谋建议已生成')
-    } catch (error: any) {
-      setCreativeAssistantError(error?.response?.data?.error || error?.message || '创作参谋调用失败')
-    } finally {
-      setCreativeAssistantLoading(false)
-    }
-  }
+  const {
+    downloadBackupPackage,
+    importBackupPackage,
+    runCreativeCommand,
+    openCreativeAssistant,
+    copyCreativeAssistantCard,
+    runCreativeAssistant,
+  } = createCreativeHandlers({
+    activeChapter,
+    apiClient,
+    backupImportText,
+    creativeAssistantSelectedText,
+    creativeCommandText,
+    loadProductionTasks,
+    loadProjectModules,
+    navigate,
+    projectId,
+    selectedModelId,
+    setBackupImportOpen,
+    setBackupImportText,
+    setCommercialToolLoading,
+    setCreativeAssistantError,
+    setCreativeAssistantLoading,
+    setCreativeAssistantOpen,
+    setCreativeAssistantResult,
+    setCreativeAssistantSelectedText,
+    setCreativeCommandPlan,
+  })
 
   const {
     openRunQueue,
@@ -1547,6 +1361,19 @@ export default function NovelProjectWorkspace() {
     syncStoryStateForChapter,
   })
 
+
+  const {
+    openGenerationDiagnostics,
+    openChapterQualityCardForChapter,
+    openChapterQualityCard,
+  } = createDiagnosticsHandlers({
+    activeChapter,
+    apiClient,
+    flushPendingSave,
+    projectId,
+    setDiagnosticsLoading,
+    showDiagnosticsModal,
+  })
 
   const {
     stepGenerateProse,
