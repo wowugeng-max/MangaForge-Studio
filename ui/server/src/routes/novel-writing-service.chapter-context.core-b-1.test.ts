@@ -498,7 +498,7 @@ describe('chapter context word target source guards 1', () => {
       readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-context-scene-cards.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-prose.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-editor-meme-polish.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore.ts'), 'utf8'),
       readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-word-target-helpers.ts'), 'utf8'),
     ].join('\n')
-    const helperSource = readFileSync(join(import.meta.dir, '../novel-writing-service/post-delivery/core-handoff-sync-reports.ts'), 'utf8')
+    const helperSource = ['core-handoff-sync-reports.ts','core-handoff-sync-reports-core.ts','core-handoff-sync-reports-extended.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/post-delivery', name), 'utf8')).join('\n')
     const helperStart = helperSource.indexOf('export function buildProseReviewContextPackage')
     const helperEnd = helperSource.indexOf('\nexport function', helperStart + 1)
     const helperBlock = helperSource.slice(helperStart, helperEnd > helperStart ? helperEnd : undefined)
@@ -645,7 +645,7 @@ describe('chapter context word target source guards 1', () => {
     expect(briefBlock).toContain('recent_fatigue_action')
   })
   test('requires scene-card prompts to plan and prose prompts to execute beat density levels', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
+    const source = ['paragraph-prose-context.ts','paragraph-prose-context-prepare.ts','paragraph-prose-context-sections.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const scenePromptBlock = readSceneCardsPromptSource()
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.length
@@ -665,7 +665,7 @@ describe('chapter context word target source guards 1', () => {
     expect(prosePromptBlock).toContain('不允许每个 beat 一样长一样细')
   })
   test('requires prose generation prompts to apply oh-story natural writing baselines', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
+    const source = ['paragraph-prose-context.ts','paragraph-prose-context-prepare.ts','paragraph-prose-context-sections.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.length
     const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
@@ -680,7 +680,7 @@ describe('chapter context word target source guards 1', () => {
     expect(prosePromptBlock).toContain('不得用总结性感悟、哲理升华或作者预告收尾')
   })
   test('requires scene-card prompts and prose prompts to preserve purpose tags for detail allocation', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
+    const source = ['paragraph-prose-context.ts','paragraph-prose-context-prepare.ts','paragraph-prose-context-sections.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const selfReviewSource = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const scenePromptBlock = readSceneCardsPromptSource()
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
@@ -711,7 +711,7 @@ ${selfReviewSource}`
     expect(revisionPrompt).toContain('目的词详略分配')
   })
   test('requires scene-card prompts to plan and prose prompts to execute sensory anchors', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
+    const source = ['paragraph-prose-context.ts','paragraph-prose-context-prepare.ts','paragraph-prose-context-sections.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const scenePromptBlock = readSceneCardsPromptSource()
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.length

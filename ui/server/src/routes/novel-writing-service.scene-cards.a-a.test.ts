@@ -424,7 +424,7 @@ describe('normalizeSceneCardsPayload a a', () => {
   })
 
   test('wires chapter positioning and benchmark structure coordinates into scene-card and prose prompts', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
+    const source = ['paragraph-prose-context.ts','paragraph-prose-context-prepare.ts','paragraph-prose-context-sections.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const selfReviewSource = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const promptBlock = readSceneCardsPromptSource()
     const proseStart = source.indexOf('export function buildParagraphProseContext')
@@ -528,7 +528,7 @@ describe('normalizeSceneCardsPayload a a', () => {
   })
 
   test('asks scene-card generation to split showdown contracts into public payoff and combat presets', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
+    const source = ['paragraph-prose-context.ts','paragraph-prose-context-prepare.ts','paragraph-prose-context-sections.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const promptBlock = readSceneCardsPromptSource()
     const proseStart = source.indexOf('export function buildParagraphProseContext')
     const proseEnd = source.indexOf('const reviewPrompt', proseStart)
@@ -554,7 +554,7 @@ describe('normalizeSceneCardsPayload a a', () => {
   })
 
   test('asks scene-card generation to split conflict-structure contracts into per-scene execution fields', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/paragraph-prose-context.ts'), 'utf8')
+    const source = ['paragraph-prose-context.ts','paragraph-prose-context-prepare.ts','paragraph-prose-context-sections.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const promptBlock = readSceneCardsPromptSource()
     const proseStart = source.indexOf('export function buildParagraphProseContext')
     const proseEnd = source.indexOf('const reviewPrompt', proseStart)
