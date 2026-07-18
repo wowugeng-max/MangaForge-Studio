@@ -910,7 +910,7 @@ describe('readability meme pipeline a', () => {
     expect(brief?.fatigue_risks.join('；')).toContain('伏笔不是谜语人')
   })
   test('serial momentum contract readers use merged raw context chapter target paths', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/batch-serial/serial-momentum.ts'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/batch-serial/serial-momentum.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/batch-serial/serial-momentum-patterns.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/batch-serial/serial-momentum-chapter-states.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/batch-serial/serial-momentum-states-extended.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/batch-serial/serial-momentum-gap-runs.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/batch-serial/serial-momentum-briefs.ts'), 'utf8')].join('\n')
     const legacyRawTargetReadCount = (source.match(/rawPayload\?\.context_package\?\.chapter_target \|\| rawPayload\?\.contextPackage\?\.chapterTarget \|\| \{\}/g) || []).length
 
     expect(source).toContain('function serialChapterRawContextTarget(chapter: any)')
