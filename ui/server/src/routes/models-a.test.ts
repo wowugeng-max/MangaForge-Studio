@@ -1,0 +1,684 @@
+import { afterEach, describe, expect, test } from 'bun:test'
+import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
+import { join } from 'path'
+import { tmpdir } from 'os'
+import { buildProbeRequest, determineProbeType } from './models'
+import { resetOpenAIResponsesCreateForTest, setOpenAIResponsesCreateForTest } from '../llm/openai-responses-sdk'
+
+let workspaces: string[] = []
+
+async function tempWorkspace() {
+  const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-model-route-'))
+  workspaces.push(workspace)
+  return workspace
+}
+
+function createRouteHarness() {
+  const handlers = new Map<string, any>()
+  const app = {
+    get: (paths: string | string[], handler: any) => {
+      for (const path of Array.isArray(paths) ? paths : [paths]) handlers.set(`GET ${path}`, handler)
+      return app
+    },
+    post: (paths: string | string[], handler: any) => {
+      for (const path of Array.isArray(paths) ? paths : [paths]) handlers.set(`POST ${path}`, handler)
+      return app
+    },
+    put: (paths: string | string[], handler: any) => {
+      for (const path of Array.isArray(paths) ? paths : [paths]) handlers.set(`PUT ${path}`, handler)
+      return app
+    },
+    patch: (paths: string | string[], handler: any) => {
+      for (const path of Array.isArray(paths) ? paths : [paths]) handlers.set(`PATCH ${path}`, handler)
+      return app
+    },
+    delete: (paths: string | string[], handler: any) => {
+      for (const path of Array.isArray(paths) ? paths : [paths]) handlers.set(`DELETE ${path}`, handler)
+      return app
+    },
+  }
+  return { app, handlers }
+}
+
+async function call(handler: any, req: any = {}) {
+  const res: any = {
+    statusCode: 200,
+    body: null,
+    status(code: number) {
+      this.statusCode = code
+      return this
+    },
+    json(body: any) {
+      this.body = body
+      return this
+    },
+  }
+  await handler({ params: {}, query: {}, body: {}, ...req }, res)
+  return res
+}
+
+async function writeMuyuanCodexFixture(workspace: string) {
+  await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+    {
+      id: 'jun',
+      display_name: 'jun',
+      service_type: 'llm',
+      api_format: 'codex_responses',
+      auth_type: 'bearer',
+      supported_modalities: ['chat'],
+      default_base_url: 'https://muyuan.do/v1',
+      is_active: true,
+    },
+  ]))
+  await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+    { id: 6, provider: 'jun', key: 'sk-muyuan-test', is_active: true },
+  ]))
+  await writeFile(join(workspace, 'models.json'), JSON.stringify([
+    {
+      id: 131,
+      api_key_id: 6,
+      provider: 'jun',
+      display_name: 'gpt-5.4',
+      model_name: 'gpt-5.4',
+      capabilities: { chat: true },
+      health_status: 'unknown',
+    },
+  ]))
+}
+
+afterEach(async () => {
+  await Promise.all(workspaces.map(workspace => rm(workspace, { recursive: true, force: true })))
+  workspaces = []
+  resetOpenAIResponsesCreateForTest()
+})
+
+describe('model health probes a', () => {
+  test('uses plain text response format for chat probes', () => {
+    expect(buildProbeRequest('chat', 'gpt-5-codex')).toMatchObject({
+      model: 'gpt-5-codex',
+      response_format: 'text',
+    })
+  })
+
+  test('marks non-chat probes with their upstream modality type', () => {
+    expect(buildProbeRequest('text_to_image', 'image-model')).toMatchObject({
+      model: 'image-model',
+      type: 'text_to_image',
+      prompt: 'A simple white circle on a black background.',
+      response_format: 'text',
+    })
+  })
+
+  test('maps legacy broad image and video capabilities to concrete probe types', () => {
+    expect(determineProbeType({ image: true } as any)).toBe('text_to_image')
+    expect(determineProbeType({ video: true } as any)).toBe('text_to_video')
+  })
+
+  test('prioritizes chat probes for multimodal LLMs so text health is not blocked by vision routes', () => {
+    expect(determineProbeType({ chat: true, vision: true } as any)).toBe('chat')
+    expect(determineProbeType({ chat: true, vision: true, text_to_image: true } as any)).toBe('chat')
+  })
+
+  test('includes the upstream official image in vision probes', () => {
+    const request = buildProbeRequest('vision', 'vision-model') as any
+
+    expect(request.messages?.[0]?.content).toEqual([
+      { type: 'text', text: 'Describe this image.' },
+      {
+        type: 'image_url',
+        image_url: { url: 'https://img.alicdn.com/tfs/TB1p.bgQXXXXXbFXFXXXXXXXXXX-500-500.png' },
+      },
+    ])
+  })
+
+  test('includes image_url for image-to-image and image-to-video probes', () => {
+    expect(buildProbeRequest('image_to_image', 'i2i-model')).toMatchObject({
+      type: 'image_to_image',
+      image_url: 'https://img.alicdn.com/tfs/TB1p.bgQXXXXXbFXFXXXXXXXXXX-500-500.png',
+    })
+    expect(buildProbeRequest('image_to_video', 'i2v-model')).toMatchObject({
+      type: 'image_to_video',
+      image_url: 'https://img.alicdn.com/tfs/TB1p.bgQXXXXXbFXFXXXXXXXXXX-500-500.png',
+    })
+  })
+
+  test('classifies connection refused during model probes as a network error', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+      {
+        id: 'openai',
+        display_name: 'OpenAI',
+        service_type: 'llm',
+        api_format: 'openai_compatible',
+        auth_type: 'bearer',
+        supported_modalities: ['chat'],
+        default_base_url: 'https://gateway.example/v1',
+        is_active: true,
+      },
+    ]))
+    await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+      { id: 10, provider: 'openai', key: 'sk-network', is_active: true },
+    ]))
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([
+      {
+        id: 1,
+        api_key_id: 10,
+        provider: 'openai',
+        display_name: 'Network Model',
+        model_name: 'gpt-network',
+        capabilities: { chat: true },
+        health_status: 'unknown',
+      },
+    ]))
+
+    const previousFetch = globalThis.fetch
+    globalThis.fetch = (async () => {
+      throw new Error('ConnectionRefused')
+    }) as any
+
+    try {
+      const { registerModelRoutes } = await import('./models')
+      const { app, handlers } = createRouteHarness()
+      registerModelRoutes(app as any, () => workspace)
+
+      const response = await call(handlers.get('POST /api/models/:id/test'), { params: { id: '1' } })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.body.status).toBe('network_error')
+      expect(response.body.message).toContain('ConnectionRefused')
+
+      const stored = JSON.parse(await readFile(join(workspace, 'models.json'), 'utf8'))
+      expect(stored[0].health_status).toBe('network_error')
+      expect(stored[0].last_tested_at).toBeTruthy()
+    } finally {
+      globalThis.fetch = previousFetch
+    }
+  })
+
+  test('diagnoses AnyRouter Claude 403 as provider-side Claude permission and persists the last error', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+      {
+        id: 'any',
+        display_name: 'AnyRouter',
+        service_type: 'llm',
+        api_format: 'codex_responses',
+        auth_type: 'bearer',
+        supported_modalities: ['chat'],
+        default_base_url: 'https://anyrouter.top/v1',
+        is_active: true,
+      },
+    ]))
+    await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+      { id: 10, provider: 'any', key: 'sk-ar-test', is_active: true },
+    ]))
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([
+      {
+        id: 1,
+        api_key_id: 10,
+        provider: 'any',
+        display_name: 'Claude Opus',
+        model_name: 'claude-opus-4-8[1m]',
+        api_format: 'claude_code',
+        capabilities: { chat: true },
+        health_status: 'unknown',
+      },
+    ]))
+
+    const previousFetch = globalThis.fetch
+    let capturedUrl = ''
+    let capturedHeaders: Record<string, string> = {}
+    let capturedBody: any = null
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      capturedUrl = String(url)
+      capturedHeaders = Object.fromEntries(new Headers(init?.headers || {}).entries())
+      capturedBody = JSON.parse(String(init?.body || '{}'))
+      return new Response(JSON.stringify({
+        error: {
+          code: 'provider_unauthorized',
+          message: 'No permission to access anthropic_byok model',
+        },
+      }), { status: 403 })
+    }) as any
+
+    try {
+      const { registerModelRoutes } = await import('./models')
+      const { app, handlers } = createRouteHarness()
+      registerModelRoutes(app as any, () => workspace)
+
+      const response = await call(handlers.get('POST /api/models/:id/test'), { params: { id: '1' } })
+
+      expect(capturedUrl).toBe('https://anyrouter.top/v1/messages')
+      expect(capturedHeaders.authorization).toBe('Bearer sk-ar-test')
+      expect(capturedHeaders['x-api-key']).toBeUndefined()
+      expect(capturedBody.model).toBe('claude-opus-4-8[1m]')
+      expect(response.statusCode).toBe(200)
+      expect(response.body.status).toBe('unauthorized')
+      expect(response.body.message).toContain('AnyRouter')
+      expect(response.body.message).toContain('Claude/Anthropic')
+      expect(response.body.message).toContain('Claude Messages 格式')
+      expect(response.body.message).toContain('claude-opus-4-8')
+      expect(response.body.message).toContain('BYOK')
+
+      const stored = JSON.parse(await readFile(join(workspace, 'models.json'), 'utf8'))
+      expect(stored[0].health_status).toBe('unauthorized')
+      expect(stored[0].last_error).toContain('AnyRouter')
+      expect(stored[0].last_error).toContain('No permission')
+    } finally {
+      globalThis.fetch = previousFetch
+    }
+  })
+
+  test('diagnoses AnyRouter get_channel_failed as temporary upstream capacity and persists it', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+      {
+        id: 'any',
+        display_name: 'AnyRouter',
+        service_type: 'llm',
+        api_format: 'codex_responses',
+        auth_type: 'bearer',
+        supported_modalities: ['chat'],
+        default_base_url: 'https://anyrouter.top/v1',
+        is_active: true,
+      },
+    ]))
+    await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+      { id: 10, provider: 'any', key: 'sk-ar-test', is_active: true },
+    ]))
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([
+      {
+        id: 1,
+        api_key_id: 10,
+        provider: 'any',
+        display_name: 'gpt-5.5',
+        model_name: 'gpt-5.5',
+        capabilities: { chat: true },
+        health_status: 'unknown',
+      },
+    ]))
+
+    const previousFetch = globalThis.fetch
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      message: '当前模型 gpt-5.5 负载已经达到上限，请稍后重试',
+      type: 'new_api_error',
+      code: 'get_channel_failed',
+    }), { status: 500 })) as any
+    setOpenAIResponsesCreateForTest(async () => {
+      throw new Error('OpenAI SDK should not be used for AnyRouter capacity probes')
+    })
+
+    try {
+      const { registerModelRoutes } = await import('./models')
+      const { app, handlers } = createRouteHarness()
+      registerModelRoutes(app as any, () => workspace)
+
+      const response = await call(handlers.get('POST /api/models/:id/test'), { params: { id: '1' } })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.body.status).toBe('upstream_busy')
+      expect(response.body.message).toContain('上游临时繁忙')
+      expect(response.body.message).toContain('gpt-5.5')
+      expect(response.body.message).toContain('稍后重试')
+
+      const stored = JSON.parse(await readFile(join(workspace, 'models.json'), 'utf8'))
+      expect(stored[0].health_status).toBe('upstream_busy')
+      expect(stored[0].last_error).toContain('get_channel_failed')
+    } finally {
+      globalThis.fetch = previousFetch
+    }
+  })
+
+  test('diagnoses Codex channel client restrictions separately from invalid credentials', async () => {
+    const workspace = await tempWorkspace()
+    await writeMuyuanCodexFixture(workspace)
+
+    setOpenAIResponsesCreateForTest(async () => {
+      throw {
+        status: 403,
+        error: {
+          error: {
+            code: 'channel:client_restricted',
+            message: 'This channel does not allow the current client (detected: MangaForge-Studio/1.0)',
+            type: 'new_api_error',
+          },
+        },
+      }
+    })
+
+    const { registerModelRoutes } = await import('./models')
+    const { app, handlers } = createRouteHarness()
+    registerModelRoutes(app as any, () => workspace)
+
+    const response = await call(handlers.get('POST /api/models/:id/test'), { params: { id: '131' } })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body.status).toBe('client_restricted')
+    expect(response.body.message).toContain('客户端受限')
+    expect(response.body.message).toContain('不是普通 Key 无权限')
+    expect(response.body.message).toContain('channel:client_restricted')
+
+    const stored = JSON.parse(await readFile(join(workspace, 'models.json'), 'utf8'))
+    expect(stored[0].health_status).toBe('client_restricted')
+    expect(stored[0].last_error).toContain('MangaForge-Studio/1.0')
+  })
+
+  test('diagnoses muyuan.do Codex SDK blocks as client restrictions', async () => {
+    const workspace = await tempWorkspace()
+    await writeMuyuanCodexFixture(workspace)
+
+    setOpenAIResponsesCreateForTest(async () => {
+      throw {
+        status: 403,
+        error: { error: 'Your request was blocked.' },
+      }
+    })
+
+    const { registerModelRoutes } = await import('./models')
+    const { app, handlers } = createRouteHarness()
+    registerModelRoutes(app as any, () => workspace)
+
+    const response = await call(handlers.get('POST /api/models/:id/test'), { params: { id: '131' } })
+
+    expect(response.body.status).toBe('client_restricted')
+    expect(response.body.message).toContain('客户端受限')
+    expect(response.body.message).toContain('muyuan.do')
+    expect(response.body.message).toContain('Your request was blocked')
+  })
+
+  test('lists models by upstream mode capability and key id filters', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([
+      { id: 1, api_key_id: 10, provider: 'p', display_name: 'Chat', model_name: 'chat', capabilities: { chat: true }, health_status: 'healthy' },
+      { id: 2, api_key_id: 10, provider: 'p', display_name: 'Vision', model_name: 'vision', capabilities: { vision: true, chat: true }, health_status: 'healthy' },
+      { id: 3, api_key_id: 11, provider: 'p', display_name: 'Image', model_name: 'image', capabilities: { text_to_image: true }, health_status: 'healthy' },
+    ]))
+    const { registerModelRoutes } = await import('./models')
+    const { app, handlers } = createRouteHarness()
+    registerModelRoutes(app as any, () => workspace)
+
+    const vision = await call(handlers.get('GET /api/models'), { query: { mode: 'vision' } })
+    expect(vision.body.map((model: any) => model.id)).toEqual([2])
+
+    const imageForKey = await call(handlers.get('GET /api/models'), { query: { mode: 'text_to_image', key_id: '11' } })
+    expect(imageForKey.body.map((model: any) => model.id)).toEqual([3])
+  })
+
+  test('hides models whose bound API key is disabled from workspace selectors', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+      { id: 10, provider: 'p', key: 'sk-active', is_active: true },
+      { id: 11, provider: 'p', key: 'sk-disabled', is_active: false },
+    ]))
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([
+      { id: 1, api_key_id: 10, provider: 'p', display_name: 'Active Key Model', model_name: 'active-key-model', capabilities: { chat: true }, health_status: 'healthy' },
+      { id: 2, api_key_id: 11, provider: 'p', display_name: 'Disabled Key Model', model_name: 'disabled-key-model', capabilities: { chat: true }, health_status: 'healthy' },
+      { id: 3, provider: 'legacy', display_name: 'Legacy Model', model_name: 'legacy-model', capabilities: { chat: true }, health_status: 'healthy' },
+    ]))
+    const { registerModelRoutes } = await import('./models')
+    const { app, handlers } = createRouteHarness()
+    registerModelRoutes(app as any, () => workspace)
+
+    const listed = await call(handlers.get('GET /api/models'))
+    expect(listed.body.map((model: any) => model.id)).toEqual([1, 3])
+
+    const disabledKeyModels = await call(handlers.get('GET /api/models'), { query: { key_id: '11' } })
+    expect(disabledKeyModels.body).toEqual([])
+  })
+
+  test('normalizes legacy model records when listing models', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([
+      { id: 1, provider: 'legacy', display_name: 'Legacy Model', model_name: 'legacy-model' },
+    ]))
+    const { registerModelRoutes } = await import('./models')
+    const { app, handlers } = createRouteHarness()
+    registerModelRoutes(app as any, () => workspace)
+
+    const response = await call(handlers.get('GET /api/models'))
+
+    expect(response.body).toHaveLength(1)
+    expect(response.body[0]).toMatchObject({
+      id: 1,
+      api_key_id: undefined,
+      provider: 'legacy',
+      display_name: 'Legacy Model',
+      model_name: 'legacy-model',
+      health_status: 'unknown',
+      is_active: true,
+      is_favorite: false,
+      is_manual: false,
+      context_ui_params: {},
+      capabilities: {
+        chat: false,
+        vision: false,
+        text_to_image: false,
+        image_to_image: false,
+        text_to_video: false,
+        image_to_video: false,
+      },
+      last_tested_at: '',
+    })
+  })
+
+  test('normalizes legacy camelCase model records when listing models', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([
+      {
+        id: 1,
+        apiKeyId: 10,
+        provider: 'legacy',
+        displayName: 'Camel Model',
+        modelName: 'camel-model',
+        healthStatus: 'healthy',
+        isActive: true,
+        isFavorite: true,
+        isManual: true,
+        contextUiParams: { chat: [{ name: 'temperature' }] },
+        lastTestedAt: '2026-06-01T00:00:00.000Z',
+        capabilities: { chat: true },
+      },
+    ]))
+    const { registerModelRoutes } = await import('./models')
+    const { app, handlers } = createRouteHarness()
+    registerModelRoutes(app as any, () => workspace)
+
+    const response = await call(handlers.get('GET /api/models'))
+
+    expect(response.body[0]).toMatchObject({
+      id: 1,
+      api_key_id: 10,
+      provider: 'legacy',
+      display_name: 'Camel Model',
+      model_name: 'camel-model',
+      health_status: 'healthy',
+      is_active: true,
+      is_favorite: true,
+      is_manual: true,
+      context_ui_params: { chat: [{ name: 'temperature' }] },
+      last_tested_at: '2026-06-01T00:00:00.000Z',
+      capabilities: {
+        chat: true,
+        vision: false,
+        text_to_image: false,
+        image_to_image: false,
+        text_to_video: false,
+        image_to_video: false,
+      },
+    })
+  })
+
+  test('supports upstream broad image and video mode aliases against six-task capabilities', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([
+      { id: 1, api_key_id: 10, provider: 'p', display_name: 'T2I', model_name: 't2i', capabilities: { text_to_image: true }, health_status: 'healthy' },
+      { id: 2, api_key_id: 10, provider: 'p', display_name: 'I2I', model_name: 'i2i', capabilities: { image_to_image: true }, health_status: 'healthy' },
+      { id: 3, api_key_id: 10, provider: 'p', display_name: 'T2V', model_name: 't2v', capabilities: { text_to_video: true }, health_status: 'healthy' },
+      { id: 4, api_key_id: 10, provider: 'p', display_name: 'I2V', model_name: 'i2v', capabilities: { image_to_video: true }, health_status: 'healthy' },
+      { id: 5, api_key_id: 10, provider: 'p', display_name: 'Chat', model_name: 'chat', capabilities: { chat: true }, health_status: 'healthy' },
+    ]))
+    const { registerModelRoutes } = await import('./models')
+    const { app, handlers } = createRouteHarness()
+    registerModelRoutes(app as any, () => workspace)
+
+    const image = await call(handlers.get('GET /api/models'), { query: { mode: 'image' } })
+    const video = await call(handlers.get('GET /api/models'), { query: { mode: 'video' } })
+
+    expect(image.body.map((model: any) => model.id)).toEqual([1, 2])
+    expect(video.body.map((model: any) => model.id)).toEqual([3, 4])
+  })
+
+  test('registers FastAPI-compatible trailing slash aliases for model subroutes', async () => {
+    const workspace = await tempWorkspace()
+    const { registerModelRoutes } = await import('./models')
+    const { app, handlers } = createRouteHarness()
+    registerModelRoutes(app as any, () => workspace)
+
+    expect(handlers.has('POST /api/models/sync/:keyId/')).toBe(true)
+    expect(handlers.has('PUT /api/models/:id/')).toBe(true)
+    expect(handlers.has('DELETE /api/models/:id/')).toBe(true)
+    expect(handlers.has('POST /api/models/:id/test/')).toBe(true)
+    expect(handlers.has('PUT /api/models/:id/ui-params/')).toBe(true)
+    expect(handlers.has('PUT /api/models/bulk/ui-params/')).toBe(true)
+    expect(handlers.has('PATCH /api/models/:id/favorite/')).toBe(true)
+  })
+
+  test('blocks manual deletion of synced upstream models', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([
+      { id: 1, api_key_id: 10, provider: 'p', display_name: 'Synced', model_name: 'synced', capabilities: { chat: true }, health_status: 'healthy', is_manual: false },
+      { id: 2, api_key_id: 10, provider: 'p', display_name: 'Manual', model_name: 'manual', capabilities: { chat: true }, health_status: 'healthy', is_manual: true },
+    ]))
+    const { registerModelRoutes } = await import('./models')
+    const { app, handlers } = createRouteHarness()
+    registerModelRoutes(app as any, () => workspace)
+
+    const blocked = await call(handlers.get('DELETE /api/models/:id'), { params: { id: '1' } })
+
+    expect(blocked.statusCode).toBe(403)
+    expect(blocked.body.error).toContain('官方同步')
+
+    const allowed = await call(handlers.get('DELETE /api/models/:id'), { params: { id: '2' } })
+    expect(allowed.statusCode).toBe(200)
+    expect(allowed.body.ok).toBe(true)
+    expect(allowed.body.status).toBe('success')
+  })
+
+  test('persists active state and hides disabled models from selectors', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([
+      { id: 1, api_key_id: 10, provider: 'p', display_name: 'Active', model_name: 'active', capabilities: { chat: true }, health_status: 'healthy', is_active: true },
+      { id: 2, api_key_id: 10, provider: 'p', display_name: 'Disabled', model_name: 'disabled', capabilities: { chat: true }, health_status: 'healthy', is_active: false },
+    ]))
+    await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+      { id: 10, provider: 'p', key: 'sk-valid', is_active: true },
+    ]))
+    const { registerModelRoutes } = await import('./models')
+    const { app, handlers } = createRouteHarness()
+    registerModelRoutes(app as any, () => workspace)
+
+    const listed = await call(handlers.get('GET /api/models'))
+    expect(listed.body.map((model: any) => model.id)).toEqual([1])
+
+    const created = await call(handlers.get('POST /api/models'), {
+      body: {
+        api_key_id: 10,
+        provider: 'p',
+        display_name: 'Created Disabled',
+        model_name: 'created-disabled',
+        capabilities: { chat: true },
+        is_active: false,
+      },
+    })
+    expect(created.body.status).toBe('success')
+    expect(typeof created.body.id).toBe('number')
+    expect(created.body.is_active).toBe(false)
+  })
+
+  test('accepts camelCase model fields from TS clients', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+      { id: 10, provider: 'p', key: 'sk-valid', is_active: true },
+    ]))
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([]))
+    const { registerModelRoutes } = await import('./models')
+    const { app, handlers } = createRouteHarness()
+    registerModelRoutes(app as any, () => workspace)
+
+    const created = await call(handlers.get('POST /api/models'), {
+      body: {
+        apiKeyId: 10,
+        provider: 'p',
+        displayName: 'Camel Model',
+        modelName: 'camel-model',
+        capabilities: { chat: true },
+        healthStatus: 'healthy',
+        isActive: 'false',
+        isFavorite: 'true',
+        isManual: 'true',
+        contextUiParams: { chat: [{ name: 'temperature' }] },
+      },
+    })
+
+    expect(created.statusCode).toBe(200)
+    expect(created.body).toMatchObject({
+      status: 'success',
+      api_key_id: 10,
+      provider: 'p',
+      display_name: 'Camel Model',
+      model_name: 'camel-model',
+      health_status: 'healthy',
+      is_active: false,
+      is_favorite: true,
+      is_manual: true,
+      context_ui_params: { chat: [{ name: 'temperature' }] },
+    })
+
+    const updated = await call(handlers.get('PUT /api/models/:id'), {
+      params: { id: String(created.body.id) },
+      body: {
+        displayName: 'Camel Model Updated',
+        modelName: 'camel-model-v2',
+        isActive: 'true',
+        isFavorite: 'false',
+        contextUiParams: { chat: [{ name: 'top_p' }] },
+      },
+    })
+
+    expect(updated.statusCode).toBe(200)
+    expect(updated.body.model).toMatchObject({
+      id: created.body.id,
+      api_key_id: 10,
+      display_name: 'Camel Model Updated',
+      model_name: 'camel-model-v2',
+      is_active: true,
+      is_favorite: false,
+      context_ui_params: { chat: [{ name: 'top_p' }] },
+    })
+  })
+
+  test('requires an existing key when manually creating a bound model', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([]))
+    await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+      { id: 10, provider: 'p', key: 'sk-valid', is_active: true },
+    ]))
+    const { registerModelRoutes } = await import('./models')
+    const { app, handlers } = createRouteHarness()
+    registerModelRoutes(app as any, () => workspace)
+
+    const response = await call(handlers.get('POST /api/models'), {
+      body: {
+        api_key_id: 99,
+        provider: 'p',
+        display_name: 'Missing Key Model',
+        model_name: 'missing-key',
+        capabilities: { chat: true },
+      },
+    })
+
+    expect(response.statusCode).toBe(404)
+    expect(response.body.error).toContain('API Key')
+  })
+
+})

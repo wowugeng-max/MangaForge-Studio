@@ -16,6 +16,18 @@
 
 
 
+### Residual inventory update (2026-07-19 goal-continue XXVI)
+
+Landed:
+- binding repair: move `recoveryEvidenceDeepRepairAction` into recovery-evidence-trends-core (effects imports it; core no longer unbound)
+- Batch monotest halves: **73** single-describe suites ≥1k split to a/b leaves
+- Multi-describe packages split: post-delivery-sync-a, prose-quality-loop, novel-core-routes (large seed describe halved)
+- Result: **0** non-shim monotest files remain ≥1000 lines under `ui/`
+
+Task 11 sample: novel-core-routes **40 pass**; architecture+post-delivery-sync-a+prose-quality-loop earlier batch **141 pass**.
+
+Still deferred production monofiles ≥1k: provider-runtime, NWS view, prose-self-review factory, paragraph-prose-context, helpers-batch-risk-radar, knowledge panels, auto-repair-preflight, executor. Full write-path UI click smoke still open.
+
 ### Residual inventory update (2026-07-19 goal-continue XXV)
 
 Landed monotest halves: workspaceUiShell.b; director receipts-gates-a; prose-word-target + regression.

@@ -151,6 +151,7 @@ import {
 
 import {
   buildRecoveryEvidenceDeepRepairEffects,
+  recoveryEvidenceDeepRepairAction,
   recoveryEvidenceDeepRepairEventsFromTask,
   recoveryEvidenceDefaultDeepRepairEffect,
   recoveryEvidenceDefaultStrengthenedRepairClosure,
@@ -341,16 +342,6 @@ export function buildRecoveryEvidenceTrend(
     sources,
     strengthenedAcceptanceTrend,
   }
-}
-
-export function recoveryEvidenceDeepRepairAction(source: string) {
-  if (source === 'single_chapter_governance_recheck') {
-    return { actionKey: 'deep_repair_single_brief', label: '深修单章任务书' }
-  }
-  if (source === 'safe_batch_recovery_recheck') {
-    return { actionKey: 'deep_repair_batch_brief', label: '深修批次任务书' }
-  }
-  return { actionKey: 'review_governance_closure', label: '治理复查台' }
 }
 
 export function buildRecoveryEvidenceDeepRepairQueue(trend: AutoCreationRecoveryEvidenceTrend) {

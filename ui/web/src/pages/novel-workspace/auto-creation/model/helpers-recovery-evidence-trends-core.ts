@@ -208,6 +208,16 @@ export function isRecoveryEvidenceDeepRepairAction(actionKey: string) {
   return actionKey === 'deep_repair_single_brief' || actionKey === 'deep_repair_batch_brief'
 }
 
+export function recoveryEvidenceDeepRepairAction(source: string) {
+  if (source === 'single_chapter_governance_recheck') {
+    return { actionKey: 'deep_repair_single_brief', label: '深修单章任务书' }
+  }
+  if (source === 'safe_batch_recovery_recheck') {
+    return { actionKey: 'deep_repair_batch_brief', label: '深修批次任务书' }
+  }
+  return { actionKey: 'review_governance_closure', label: '治理复查台' }
+}
+
 export function recoveryEvidenceDeepRepairEventsFromTask(task: AnyRecord, run: AnyRecord, taskIndex: number) {
   if (text(task?.issue_type || task?.issueType) !== 'recovery_evidence_governance_queue') return []
   const actionKey = text(task?.action_key || task?.actionKey)
