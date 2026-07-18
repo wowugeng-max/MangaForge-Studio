@@ -471,6 +471,8 @@ cd ui/server && bun test src/novel/mutation-contract.test.ts src/novel/sqlite-pe
 
 ## Progress log (agent)
 
+- 2026-07-18 late: drawer-recovery-evidence; support-delivery-closure-specialty; serial-momentum-states-extended
+
 - 2026-07-18 night: delivery-risk-carry-over prose-quality leaf; prompt-lines-quality; NWS workspace-area-view extract; source contracts package-join for NWS monofile reads
 
 - 2026-07-18 evening: prompt-lines, planning boards/desks, drawer-safe-batch, serial-momentum gap-runs, NWS commercial-result + serial-pipeline extracts; verification ~422 pass focused suite
