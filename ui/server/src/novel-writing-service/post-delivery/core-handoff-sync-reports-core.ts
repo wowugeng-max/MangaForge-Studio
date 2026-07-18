@@ -16,11 +16,11 @@ import { compactBriefText, uniqueBriefStrings } from '../quality/text-utils'
 
 type AnyFn = (...args: any[]) => any
 
-let buildReaderExpectationLedger: AnyFn = (_review: any = {}) => ({})
-let contextWithChapterRawPreDraftForSync: AnyFn = (contextPackage: any = {}, _chapter: any = {}) => contextPackage || {}
-let normalizeBatchChapterHandoffContract: AnyFn = (value: any = {}) => value || {}
-let normalizeCoreContractPeriodicDriftCheck: AnyFn = (value: any = {}) => value || {}
-let normalizeCoreContractRadar: AnyFn = (value: any = {}) => value || {}
+export let buildReaderExpectationLedger: AnyFn = (_review: any = {}) => ({})
+export let contextWithChapterRawPreDraftForSync: AnyFn = (contextPackage: any = {}, _chapter: any = {}) => contextPackage || {}
+export let normalizeBatchChapterHandoffContract: AnyFn = (value: any = {}) => value || {}
+export let normalizeCoreContractPeriodicDriftCheck: AnyFn = (value: any = {}) => value || {}
+export let normalizeCoreContractRadar: AnyFn = (value: any = {}) => value || {}
 
 export function bindCoreHandoffSyncReportDeps(deps: {
   buildReaderExpectationLedger?: AnyFn
@@ -252,7 +252,7 @@ function coreContractArray(values: any) {
   return asArray(values).map((item: any) => compactBriefText(item)).filter(Boolean)
 }
 
-function normalizeCoreContractServeCheck(values: any, chapterText: string) {
+export function normalizeCoreContractServeCheck(values: any, chapterText: string) {
   const planned = coreContractArray(values)
   if (!planned.length) return null
   const scored = planned.map(item => ({ text: item, match: anchorMatchScore(item, chapterText) }))
@@ -291,7 +291,7 @@ function redLineTouched(redLine: string, chapterText: string) {
   return compactedPhrase.length >= 8 && compactedText.includes(compactedPhrase)
 }
 
-function normalizeCoreContractNoDriftCheck(values: any, chapterText: string) {
+export function normalizeCoreContractNoDriftCheck(values: any, chapterText: string) {
   const planned = coreContractArray(values)
   if (!planned.length) return null
   const touched = planned.filter(item => redLineTouched(item, chapterText))
@@ -323,7 +323,7 @@ function coreThemeEmotionCandidates(values: any) {
   }), 8)
 }
 
-function normalizeCoreContractThemeUnityCheck(values: any, chapterText: string) {
+export function normalizeCoreContractThemeUnityCheck(values: any, chapterText: string) {
   const planned = coreContractArray(values)
   if (!planned.length) return null
   const text = String(chapterText || '')
@@ -362,7 +362,7 @@ function countCoreContractSignals(chapterText: string, patterns: RegExp[]) {
   return patterns.reduce((count, pattern) => count + (pattern.test(text) ? 1 : 0), 0)
 }
 
-function normalizeCoreContractSellingPointExecutionCheck(values: any, chapterText: string) {
+export function normalizeCoreContractSellingPointExecutionCheck(values: any, chapterText: string) {
   const planned = coreContractArray(values)
   if (!planned.length) return null
   const text = String(chapterText || '')
@@ -397,7 +397,7 @@ function normalizeCoreContractSellingPointExecutionCheck(values: any, chapterTex
   }
 }
 
-function normalizeCoreContractRepetitionStrategyCheck(values: any, chapterText: string) {
+export function normalizeCoreContractRepetitionStrategyCheck(values: any, chapterText: string) {
   const planned = coreContractArray(values)
   if (!planned.length) return null
   const text = String(chapterText || '')
@@ -431,7 +431,7 @@ function normalizeCoreContractRepetitionStrategyCheck(values: any, chapterText: 
   }
 }
 
-function normalizeCoreContractCommercialRhythmCheck(values: any, chapterText: string) {
+export function normalizeCoreContractCommercialRhythmCheck(values: any, chapterText: string) {
   const planned = coreContractArray(values)
   if (!planned.length) return null
   const text = String(chapterText || '')
@@ -469,7 +469,7 @@ function normalizeCoreContractCommercialRhythmCheck(values: any, chapterText: st
   }
 }
 
-function normalizeCoreContractGoldfingerStructureCheck(values: any, chapterText: string) {
+export function normalizeCoreContractGoldfingerStructureCheck(values: any, chapterText: string) {
   const planned = coreContractArray(values)
   if (!planned.length) return null
   const text = String(chapterText || '')
@@ -503,7 +503,7 @@ function normalizeCoreContractGoldfingerStructureCheck(values: any, chapterText:
   }
 }
 
-function normalizeCoreContractLaunchPressureCheck(values: any, chapterText: string) {
+export function normalizeCoreContractLaunchPressureCheck(values: any, chapterText: string) {
   const planned = coreContractArray(values)
   if (!planned.length) return null
   const text = String(chapterText || '')
@@ -537,7 +537,7 @@ function normalizeCoreContractLaunchPressureCheck(values: any, chapterText: stri
   }
 }
 
-function normalizeCoreContractRepairFocusCheck(values: any, chapterText: string) {
+export function normalizeCoreContractRepairFocusCheck(values: any, chapterText: string) {
   const planned = coreContractArray(values)
   if (!planned.length) return null
   const scored = planned.map(item => ({ text: item, match: anchorMatchScore(item, chapterText) }))
@@ -566,7 +566,7 @@ function normalizeCoreContractRepairFocusCheck(values: any, chapterText: string)
   }
 }
 
-function normalizeCoreContractPeriodicSellingPointCheck(periodicDriftCheck: any, fallbackPoints: any, chapterText: string) {
+export function normalizeCoreContractPeriodicSellingPointCheck(periodicDriftCheck: any, fallbackPoints: any, chapterText: string) {
   const check = normalizeCoreContractPeriodicDriftCheck(periodicDriftCheck)
   if (!check?.due) return null
   const planned = uniqueBriefStrings([
@@ -642,7 +642,7 @@ function hasCoreConflictRhythmRule(radar: any, contextPackage: any) {
   return /核心冲突|核心矛盾|非大结局|大结局|局部胜利|代价|风险|全书|主线/.test(ruleText)
 }
 
-function buildCoreConflictRhythmProtectionCheck(project: any, chapter: any, contextPackage: any, chapterText: string, radar: any) {
+export function buildCoreConflictRhythmProtectionCheck(project: any, chapter: any, contextPackage: any, chapterText: string, radar: any) {
   if (!hasCoreConflictRhythmRule(radar, contextPackage)) return null
   if (isCoreContractFinaleChapter(project, chapter, contextPackage)) return null
 
@@ -717,7 +717,7 @@ export function buildCoreContractDeterministicCheck(chapterText: string) {
   }
 }
 
-function coreContractPriority(missed: any[]) {
+export function coreContractPriority(missed: any[]) {
   if (missed.some(item => item.key === 'core_conflict_premature_resolution')) return '优先守核心节奏'
   if (missed.some(item => item.key === 'ten_chapter_selling_point')) return '优先补核心卖点'
   if (missed.some(item => item.key === 'selling_point_execution_rules')) return '优先补卖点执行'

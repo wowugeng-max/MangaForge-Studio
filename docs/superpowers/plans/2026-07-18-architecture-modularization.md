@@ -16,6 +16,19 @@
 
 
 
+### Residual inventory update (2026-07-19 goal-continue XIX)
+
+Landed:
+- `delivery-risk-carry-over-prose-quality` → core/mid + extended assets/craft barrels
+- Binding repair: `core-handoff-sync-reports` export private normalizers + live DI deps into extended (fixes monofile split `export *` local-binding gap)
+- Prior XVIII: CreateWizard controller + prose-quality annotations leaves
+
+Task 11: post-delivery-sync a/b **78 pass**; 2 pre-existing source-order contract fails in story-unit package-join (`prepareStoryStateUpdate` / `chapter_patch` search), unrelated to this extract. Architecture + annotations + CreateWizard + shell batches green earlier.
+
+Still deferred: provider-runtime DI, NWS composition root, prose-self-review factory, director drawer, useNovelStudioController feed/knowledge intertwine, single-function giants (paragraph-prose-context, helpers-batch-risk-radar), full write-path UI smoke.
+
+Memory: server :8787 idle RSS ~69MB (earlier sample).
+
 ### Residual inventory update (2026-07-19 goal-continue XVIII)
 
 Landed reverse-free package splits:

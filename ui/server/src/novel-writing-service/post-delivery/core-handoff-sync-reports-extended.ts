@@ -14,17 +14,29 @@ import {
 } from '../batch-serial/serial-momentum'
 import { compactBriefText, uniqueBriefStrings } from '../quality/text-utils'
 
-type AnyFn = (...args: any[]) => any
-
-let buildReaderExpectationLedger: AnyFn = (_review: any = {}) => ({})
-let contextWithChapterRawPreDraftForSync: AnyFn = (contextPackage: any = {}, _chapter: any = {}) => contextPackage || {}
-let normalizeBatchChapterHandoffContract: AnyFn = (value: any = {}) => value || {}
-let normalizeCoreContractPeriodicDriftCheck: AnyFn = (value: any = {}) => value || {}
-let normalizeCoreContractRadar: AnyFn = (value: any = {}) => value || {}
-
 import {
-  buildCoreContractDeterministicCheck
+  buildCoreContractDeterministicCheck,
+  normalizeCoreContractServeCheck,
+  normalizeCoreContractNoDriftCheck,
+  normalizeCoreContractThemeUnityCheck,
+  normalizeCoreContractSellingPointExecutionCheck,
+  normalizeCoreContractRepetitionStrategyCheck,
+  normalizeCoreContractCommercialRhythmCheck,
+  normalizeCoreContractGoldfingerStructureCheck,
+  normalizeCoreContractLaunchPressureCheck,
+  normalizeCoreContractRepairFocusCheck,
+  normalizeCoreContractPeriodicSellingPointCheck,
+  buildCoreConflictRhythmProtectionCheck,
+  coreContractPriority,
+  buildReaderExpectationLedger,
+  contextWithChapterRawPreDraftForSync,
+  normalizeBatchChapterHandoffContract,
+  normalizeCoreContractPeriodicDriftCheck,
+  normalizeCoreContractRadar,
 } from './core-handoff-sync-reports-core'
+
+
+
 
 export function buildCoreContractSyncReport(project: any, chapter: any, contextPackage: any, chapterText: string) {
   const syncContextPackage = contextWithChapterRawPreDraftForSync(contextPackage, chapter)

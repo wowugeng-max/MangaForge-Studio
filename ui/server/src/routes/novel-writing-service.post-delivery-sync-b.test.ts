@@ -73,7 +73,11 @@ function deliveryRiskCarryOverSource() {
     'delivery-risk-carry-over.ts',
     'delivery-risk-carry-over-context.ts',
     'delivery-risk-carry-over-prose-quality.ts',
+    'delivery-risk-carry-over-prose-quality-core.ts',
+    'delivery-risk-carry-over-prose-quality-mid.ts',
     'delivery-risk-carry-over-prose-quality-extended.ts',
+    'delivery-risk-carry-over-prose-quality-extended-assets.ts',
+    'delivery-risk-carry-over-prose-quality-extended-craft.ts',
   ].map(name => readFileSync(join(dir, name), 'utf8')).join('\n')
 }
 
