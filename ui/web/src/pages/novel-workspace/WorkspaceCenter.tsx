@@ -30,6 +30,7 @@ import {
 } from './writingRecommendationModel'
 import type { ChapterHandoffDeskModel, DeslopGateDiagnosticsModel, WritingQueueItem, WritingQueueModel } from './writingCockpitModel'
 import { pickWritingAuxFocusTags } from './writingAuxFocusModel'
+import type { EditorView } from '@codemirror/view'
 import { ProseEditor } from './workspace-center-prose-editor'
 import './WorkspaceCenter.css'
 
