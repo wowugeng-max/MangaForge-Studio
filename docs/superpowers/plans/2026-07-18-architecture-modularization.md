@@ -1013,3 +1013,17 @@ cd ui/server && bun test src/novel/mutation-contract.test.ts src/novel/sqlite-pe
 - Soft residual: base model ~889 (orchestrator <1000), sections ~778, bind-core ~763, ComfyUI non-novel.
 - Task 11 focused regression green this round; full write-path UI smoke + memory note still open.
 
+### Residual progress (2026-07-19 goal-continue session landings)
+Landed this session on `codex/architecture-modularization`:
+- quality-prestore loop/finalize
+- SettingWorkshop model hook
+- prose-self-review-run normalize/revision
+- prepare-foundation batch-memory package-join fix
+- WorkspaceCenter empty/no-chapter + editor-controls
+- paragraph-prose-context-sections lead/body/tail
+Focused regression: architecture + chapter-context/scene-cards/prose-word-target/storyline + workspace shell batches green.
+Still open for goal complete:
+- optional further soft thinning (base model 889, bind-core 763, story-state-machine 741)
+- Task 11 full write-path UI smoke + memory note
+- monofiles already mostly composition roots under hard caps; residual soft leaves under 800/1000
+
