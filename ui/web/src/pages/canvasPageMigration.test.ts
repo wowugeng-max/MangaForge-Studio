@@ -146,7 +146,7 @@ describe('ComfyForge canvas feature migration', () => {
   })
 
   test('generate node responds to DAG run signals and exposes the out handle', () => {
-    const generateNode = source('../components/nodes/GenerateNode.tsx')
+    const generateNode = [source('../components/nodes/generate-node-model.ts'), source('../components/nodes/GenerateNode.tsx')].join('\n')
 
     expect(generateNode).toContain('prevRunSignalRef')
     expect(generateNode).toContain('data?._runSignal')
@@ -155,7 +155,7 @@ describe('ComfyForge canvas feature migration', () => {
   })
 
   test('generate node migrates upstream model configuration experience', () => {
-    const generateNode = source('../components/nodes/GenerateNode.tsx')
+    const generateNode = [source('../components/nodes/generate-node-model.ts'), source('../components/nodes/GenerateNode.tsx')].join('\n')
 
     expect(generateNode).toContain("apiClient.get('/keys/')")
     expect(generateNode).toContain('apiClient.get(`/models/?key_id=${selectedKey}&mode=${mode}`)')
@@ -168,7 +168,7 @@ describe('ComfyForge canvas feature migration', () => {
   })
 
   test('generate node can create preset SystemRole prompt assets', () => {
-    const generateNode = source('../components/nodes/GenerateNode.tsx')
+    const generateNode = [source('../components/nodes/generate-node-model.ts'), source('../components/nodes/GenerateNode.tsx')].join('\n')
 
     expect(generateNode).toContain('PRESET_ROLES')
     expect(generateNode).toContain('提示词优化大师')
@@ -182,7 +182,7 @@ describe('ComfyForge canvas feature migration', () => {
   })
 
   test('generate node uses compact view with a floating config panel', () => {
-    const generateNode = source('../components/nodes/GenerateNode.tsx')
+    const generateNode = [source('../components/nodes/generate-node-model.ts'), source('../components/nodes/GenerateNode.tsx')].join('\n')
 
     expect(generateNode).toContain("import ReactDOM from 'react-dom'")
     expect(generateNode).toContain("import { BaseNode } from './BaseNode'")
@@ -197,7 +197,7 @@ describe('ComfyForge canvas feature migration', () => {
   })
 
   test('generate node listens for backend SSE generation results', () => {
-    const generateNode = source('../components/nodes/GenerateNode.tsx')
+    const generateNode = [source('../components/nodes/generate-node-model.ts'), source('../components/nodes/GenerateNode.tsx')].join('\n')
 
     expect(generateNode).toContain("import { createSSEClient")
     expect(generateNode).toContain('const sseClientRef = useRef')

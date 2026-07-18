@@ -17,7 +17,7 @@ import {
 
 describe('GenerateNode migration behavior', () => {
   test('refreshes React Flow handles after generation mode changes', () => {
-    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'generate-node-model.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')].join('\n')
 
     expect(source).toContain('const updateNodeInternals = useUpdateNodeInternals()')
     expect(source).toContain('updateNodeInternals(id)')
@@ -196,13 +196,13 @@ describe('GenerateNode migration behavior', () => {
       'random',
     ])
 
-    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'generate-node-model.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')].join('\n')
     expect(source).toContain('routing_strategy: routingStrategy')
     expect(source).toContain('setRoutingStrategy')
   })
 
   test('loads models through the upstream key and mode filtered selector route', () => {
-    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'generate-node-model.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')].join('\n')
 
     expect(source).toContain('&mode=')
   })
@@ -317,7 +317,7 @@ describe('GenerateNode migration behavior', () => {
   })
 
   test('collects all connected image assets instead of only the first one', () => {
-    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const source = [readFileSync(join(import.meta.dir, 'generate-node-model.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')].join('\n')
 
     expect(source).toContain('incomingAssets.push')
     expect(source).toContain('incomingAssets,')
