@@ -12,6 +12,25 @@
 
 **Branch:** `codex/architecture-modularization`
 
+
+## Progress checkpoint (2026-07-18, architecture branch)
+
+| Task | Status | Notes |
+|---|---|---|
+| 0 size contracts | done | hardened hard caps for completed monofiles |
+| 1 writing-service scaffold | done | package + route shim |
+| 2 quality/review-merge slice | done | under `novel-writing-service/quality/*` |
+| 3 post-delivery sync reports | done | under `post-delivery/*` |
+| 4 context/prompt glue | done | service modules extracted |
+| 5 monofile barrel-only | done | `monolith.ts` ~91 lines + public surface re-exports |
+| 6 monotest split | done | `novel-writing-service.test.ts` shim-only |
+| 7 editor/core routes packages | in progress | editor + core package-split (builders/register); further domain split + remaining routes open |
+| 8 auto-creation model package | in progress | package exists; helpers split into basics/main barrel; helpers-main still large |
+| 9 cockpit + repair prompt | partial | cockpit model already sliced; repair prompt monofile remains |
+| 10 shell UI split | open | |
+| 11 final hardening | open | |
+
+
 ---
 
 ## Baseline inventory (2026-07-18)

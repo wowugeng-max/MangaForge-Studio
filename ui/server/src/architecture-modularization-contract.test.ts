@@ -20,29 +20,62 @@ function walkTs(dir: string): string[] {
   return out
 }
 
-const BASELINES: Record<string, number> = {
-  'novel-writing-service/monolith.ts': 47085,
-  'routes/novel-writing-service.ts': 2,
-  'routes/novel-writing-service.test.ts': 62278,
+const HARD_CAPS: Record<string, number> = {
+  'novel-writing-service/monolith.ts': 150,
+  'routes/novel-writing-service.ts': 20,
+  'routes/novel-writing-service.test.ts': 50,
+  'routes/novel-editor-routes.ts': 20,
+  'routes/novel-core-routes.ts': 20,
+}
+
+const SOFT_BASELINES: Record<string, number> = {
+  'routes/novel-editor/builders.ts': 4600,
+  'routes/novel-core/builders.ts': 3400,
 }
 
 describe('architecture modularization contracts', () => {
-  test('writing-service package exists with compatibility barrel', () => {
+  test('writing-service package exists with barrel-only monofile', () => {
     expect(existsSync(join(serverSrc, 'novel-writing-service/index.ts'))).toBe(true)
     expect(existsSync(join(serverSrc, 'novel-writing-service/monolith.ts'))).toBe(true)
+    expect(existsSync(join(serverSrc, 'novel-writing-service/public-novel-writing-surface.ts'))).toBe(true)
+    expect(existsSync(join(serverSrc, 'novel-writing-service/service/create-novel-writing-service.ts'))).toBe(true)
+    expect(existsSync(join(serverSrc, 'novel-writing-service/service/runtime-bindings.ts'))).toBe(true)
     expect(existsSync(join(serverSrc, 'novel-writing-service/quality/review-merge.ts'))).toBe(true)
     expect(existsSync(join(serverSrc, 'novel-writing-service/quality/word-count-guard.ts'))).toBe(true)
     expect(existsSync(join(serverSrc, 'novel-writing-service/quality/prose-quality-entry.ts'))).toBe(true)
+    const monofile = readFileSync(join(serverSrc, 'novel-writing-service/monolith.ts'), 'utf8')
+    expect(monofile).toContain("import './service/runtime-bindings'")
+    expect(monofile).toContain("export * from './public-novel-writing-surface'")
+    expect(monofile).not.toMatch(/^export function createNovelWritingService/m)
     const shim = readFileSync(join(serverSrc, 'routes/novel-writing-service.ts'), 'utf8')
     expect(shim).toContain("export * from '../novel-writing-service'")
     expect(shim.split(/\r?\n/).length).toBeLessThanOrEqual(20)
   })
 
-  test('P0 monofiles do not grow beyond recorded baselines', () => {
-    for (const [rel, baseline] of Object.entries(BASELINES)) {
+  test('editor and core routes are package-split with compatibility barrels', () => {
+    expect(existsSync(join(serverSrc, 'routes/novel-editor/index.ts'))).toBe(true)
+    expect(existsSync(join(serverSrc, 'routes/novel-editor/builders.ts'))).toBe(true)
+    expect(existsSync(join(serverSrc, 'routes/novel-editor/register.ts'))).toBe(true)
+    expect(existsSync(join(serverSrc, 'routes/novel-core/index.ts'))).toBe(true)
+    expect(existsSync(join(serverSrc, 'routes/novel-core/builders.ts'))).toBe(true)
+    expect(existsSync(join(serverSrc, 'routes/novel-core/register.ts'))).toBe(true)
+    expect(readFileSync(join(serverSrc, 'routes/novel-editor-routes.ts'), 'utf8')).toContain("export * from './novel-editor'")
+    expect(readFileSync(join(serverSrc, 'routes/novel-core-routes.ts'), 'utf8')).toContain("export * from './novel-core'")
+  })
+
+  test('completed monofiles stay under hard caps', () => {
+    for (const [rel, cap] of Object.entries(HARD_CAPS)) {
       const lines = lineCount(rel)
       expect(lines, rel).toBeGreaterThan(0)
-      expect(lines, rel).toBeLessThanOrEqual(baseline + 25)
+      expect(lines, rel).toBeLessThanOrEqual(cap)
+    }
+  })
+
+  test('package builder modules do not regrow beyond soft baselines', () => {
+    for (const [rel, baseline] of Object.entries(SOFT_BASELINES)) {
+      const lines = lineCount(rel)
+      expect(lines, rel).toBeGreaterThan(0)
+      expect(lines, rel).toBeLessThanOrEqual(baseline + 50)
     }
   })
 
@@ -61,5 +94,8 @@ describe('architecture modularization contracts', () => {
     expect(typeof (mod as any).mergePostDeliveryReceiptSyncIntoQualityGateReview).toBe('function')
     expect(typeof (mod as any).scanProseForQualityLoop).toBe('function')
     expect(typeof (mod as any).prepareProseGenerationContract).toBe('function')
+    expect(typeof (mod as any).scanProseMetaLeaks).toBe('function')
+    expect(typeof (mod as any).evaluateProseWordTarget).toBe('function')
+    expect(typeof (mod as any).buildReadabilityReviewPrompt).toBe('function')
   })
 })
