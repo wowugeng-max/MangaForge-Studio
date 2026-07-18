@@ -89,6 +89,7 @@ import type {
   AutoCreationSerialCockpit,
   AutoCreationMillionWordRunwayGate,
   AutoCreationMillionWordRunwayQuestion,
+  AutoCreationCanonRunway,
   AutoCreationMillionWordRunway,
   AutoCreationRollingScriptLayer,
   AutoCreationRollingScriptRoom,
@@ -109,7 +110,6 @@ import {
   batchReleaseEvidenceFromPreflight,
   buildBatchCompletionDashboard,
   buildBatchHandoff,
-  buildBatchRiskRadar,
   buildResolvedBatchRiskIssueKeys,
   buildSafeBatchExpansionFeedback,
   chapterHandoffDetail,
@@ -126,6 +126,9 @@ import {
   storylineNeedsAction,
   volumeBeatNeedsAction,
 } from './helpers-main'
+import {
+  buildBatchRiskRadar,
+} from './helpers-batch-risk-radar'
 import {
   batchStatusToSignal,
   contractStatusToSignal,
