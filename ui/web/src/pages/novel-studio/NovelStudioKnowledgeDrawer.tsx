@@ -13,6 +13,8 @@ import {
   StopOutlined,
 } from '@ant-design/icons'
 import {
+  formatProjectScope,
+  formatSource,
   getIngestStatusColor,
   getSourceCacheColor,
   getSourceCacheLabel,
@@ -20,11 +22,13 @@ import {
   knowledgeCategoryPresets,
   panelStyle,
   softPanelStyle,
+  truncateText,
 } from './knowledge-ui-shared'
 
 const { Text } = Typography
 
 export type NovelStudioKnowledgeDrawerProps = {
+  categoryOptions: any
   feedFetchConcurrency: any
   feedIngestJob: any
   feedSerialFetch: any
@@ -68,6 +72,7 @@ export type NovelStudioKnowledgeDrawerProps = {
 }
 
 export function NovelStudioKnowledgeDrawer({
+  categoryOptions,
   feedFetchConcurrency,
   feedIngestJob,
   feedSerialFetch,

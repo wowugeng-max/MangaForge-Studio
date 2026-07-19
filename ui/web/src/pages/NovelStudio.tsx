@@ -377,6 +377,7 @@ navigate,
       />
 
       <NovelStudioKnowledgeDrawer
+        categoryOptions={categoryOptions}
         feedFetchConcurrency={feedFetchConcurrency}
         feedIngestJob={feedIngestJob}
         feedSerialFetch={feedSerialFetch}
