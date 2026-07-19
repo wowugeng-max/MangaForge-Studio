@@ -1027,3 +1027,9 @@ Still open for goal complete:
 - Task 11 full write-path UI smoke + memory note
 - monofiles already mostly composition roots under hard caps; residual soft leaves under 800/1000
 
+### Residual progress (2026-07-19 goal-continue story-state + base model)
+- story-state-machine: prepare + update + phase-a/phase-b leaves; monofile factory ~198
+- base model: unused coreHandlers destructure removed (~791, under orchestrator 1000)
+- Focused contracts green (storyline/chapter-context/architecture/workspace shell)
+- Still open: bind-core soft residual (~763), optional further leaves, Task 11 full write-path UI smoke + memory
+
