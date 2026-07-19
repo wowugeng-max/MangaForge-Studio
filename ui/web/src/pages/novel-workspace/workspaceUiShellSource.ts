@@ -296,6 +296,8 @@ export function taskCenterSource() {
     sourceCached('task-center/drawer-default-lane.ts', localSourceCache),
     sourceCached('task-center/drawer-previews.tsx', localSourceCache),
     sourceCached('task-center/drawer-recovery-evidence.tsx', localSourceCache),
+    sourceCached('task-center/drawer-recovery-evidence-review.ts', localSourceCache),
+    sourceCached('task-center/drawer-recovery-evidence-audit.tsx', localSourceCache),
     sourceCached('task-center/drawer-safe-batch.ts', localSourceCache),
     sourceCached('task-center/drawer-snapshots.tsx', localSourceCache),
     sourceCached('task-center/drawer-snapshots-lane.ts', localSourceCache),
