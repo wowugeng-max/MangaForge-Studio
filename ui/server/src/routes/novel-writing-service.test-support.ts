@@ -21,11 +21,50 @@ export const proseQualityScores = {
   fact_setting_safety: 8,
 }
 
+/** Matches harness previous-chapter ending so opening continuity admission can pass. */
+export const PIPELINE_HANDOFF_CONTINUATION =
+  '红灯同时亮起，追捕队从四面压进旧巷。江澈听见耳机里的倒数，立刻撞开铁门。'
+
+/** Clears strong-handoff opening admission so tests can isolate later gates (shape / quality / proper nouns). */
+export function withoutOpeningHandoffGuard(override: Record<string, any> = {}) {
+  const chapterTarget = {
+    previous_handoff: '',
+    previousHandoff: '',
+    requiredHandoffAnchors: [],
+    required_handoff_anchors: [],
+    ...(override.chapter_target || override.chapterTarget || {}),
+  }
+  const continuity = {
+    previous_chapter: null,
+    previousChapter: null,
+    ...(override.continuity || {}),
+  }
+  const {
+    chapter_target: _chapterTarget,
+    chapterTarget: _chapterTargetCamel,
+    continuity: _continuity,
+    ...rest
+  } = override
+  return {
+    ...rest,
+    chapter_target: chapterTarget,
+    continuity,
+  }
+}
+
 export function buildPipelineProse(opening: string, action: string) {
   const subjects = ['江澈', '顾遥', '短发追兵', '巷口队长', '楼顶观察手']
   const locations = ['路灯下', '旧墙边', '排水沟旁', '铁门前', '消防梯口']
   const consequences = ['封锁线向东偏移', '通讯频道短暂失声', '后排脚步乱了一拍', '出口露出半步空隙', '楼顶的手电偏离目标']
-  const sentences = [opening]
+  const rawOpening = String(opening || '').trim()
+  const connectedOpening = (
+    rawOpening.includes('追捕队从四面压进旧巷')
+    || rawOpening.includes('耳机里的倒数')
+    || rawOpening.includes('红灯同时亮起')
+  )
+    ? rawOpening
+    : `${PIPELINE_HANDOFF_CONTINUATION}${rawOpening}`
+  const sentences = [connectedOpening]
   for (let index = 0; countProseChars(sentences.join('')) < 960; index += 1) {
     sentences.push(`${subjects[index % subjects.length]}在${locations[index % locations.length]}${action}，${index + 1}号标记随即熄灭，${consequences[index % consequences.length]}。`)
   }
@@ -126,8 +165,8 @@ export async function createProsePipelineHarness(
   })
 
   const draftText = options.draftText || buildPipelineProse(
-    '倒数压到最后三秒，江澈停在围墙阴影里等待。',
-    '只看着追捕队继续收紧包围',
+    '江澈没有停在阴影里等待，直接切入追捕线。',
+    '主动打乱包围并夺取通讯器',
   )
   const reviewPayloads = [...(options.reviewPayloads || [])]
   const revisionTexts = [...(options.revisionTexts || [])]
@@ -143,6 +182,13 @@ export async function createProsePipelineHarness(
   let contextCalls = 0
   const contextInputs: any[] = []
 
+  const contextOverride = options.contextPackageOverride || {}
+  const {
+    chapter_target: chapterTargetOverride,
+    chapterTarget: chapterTargetCamelOverride,
+    continuity: continuityOverride,
+    ...contextPackageRestOverride
+  } = contextOverride
   const contextPackage = {
     preflight: { ready: true, strict_ready: true, checks: [], warnings: [], blockers: [] },
     chapter_target: {
@@ -164,6 +210,7 @@ export async function createProsePipelineHarness(
         no_drift: ['不得等待配角代办破局结果。'],
       },
       ...(options.enableMemePolish ? { meme_strategy: { intensity: '低', meme_bank: ['稳住'] } } : {}),
+      ...(chapterTargetOverride || chapterTargetCamelOverride || {}),
     },
     continuity: {
       previous_chapter: {
@@ -172,8 +219,9 @@ export async function createProsePipelineHarness(
         ending_hook: '所有耳机同时传出幕后指挥者的倒数。',
         ending_excerpt: '红灯同时亮起，追捕队从四面压进旧巷。江澈听见耳机里的倒数，只剩铁门后那条路还没有完全合拢。',
       },
+      ...(continuityOverride || {}),
     },
-    ...(options.contextPackageOverride || {}),
+    ...contextPackageRestOverride,
   }
 
   const executeAgent = async (_agent: string, _project: any, input: any) => {

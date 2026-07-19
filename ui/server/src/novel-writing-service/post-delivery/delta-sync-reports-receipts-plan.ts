@@ -524,3 +524,61 @@ function writePreparationReceiptRisk(receipt: any, chapterText = '') {
   return ''
 }
 
+export function buildWritePreparationReceiptSyncReport(project: any, chapter: any, contextPackage: any = {}, chapterText = '', selfCheck: any = {}) {
+  const requiresReceipts = contextHasWritePreparationReceiptDebt(contextPackage)
+  const allReceipts = writePreparationReceiptRows(chapter, selfCheck)
+  const residuals = allReceipts
+    .map((receipt: any) => {
+      const risk = writePreparationReceiptRisk(receipt, chapterText)
+      if (!risk) return null
+      return {
+        key: compactBriefText(receipt?.key || receipt?.name || 'write_preparation_checks'),
+        label: compactBriefText(receipt?.label || receipt?.key || receipt?.name, '写前准备'),
+        text: risk,
+        evidence: writePreparationReceiptEvidence(receipt),
+        required_action: compactBriefText(receipt?.required_action || receipt?.requiredAction || receipt?.fix || receipt?.action),
+        delivered: receipt?.delivered ?? null,
+      }
+    })
+    .filter(Boolean)
+  const missed = requiresReceipts && allReceipts.length === 0
+    ? [{
+        key: 'write_preparation_checks',
+        label: '写前准备回执未生成',
+        text: `第${chapter?.chapter_no || '-'}章未返回写前准备回执复检证据。`,
+        evidence: 'write_preparation_brief 存在，但 write_preparation_checks 为空。',
+        required_action: '补齐 write_preparation_checks，逐项证明来源缺口、资产风险、蓝图焦点、读者回报焦点和执行顺序已落成正文证据。',
+        delivered: false,
+      }]
+    : residuals
+  const status = missed.length > 0 ? 'warn' : 'ok'
+  return {
+    report_id: `write-preparation-receipt-sync-${chapter?.id || chapter?.chapter_no || Date.now()}`,
+    chapter_id: chapter?.id || null,
+    chapter_no: chapter?.chapter_no || null,
+    status,
+    label: allReceipts.length === 0
+      ? requiresReceipts ? '写前准备回执未生成' : '写前准备回执未触发'
+      : status === 'ok' ? '写前准备回执 OK' : `写前准备缺口 ${missed.length}`,
+    summary: allReceipts.length === 0
+      ? requiresReceipts
+        ? '本章存在写前准备卡，但没有返回 write_preparation_checks。'
+        : '本章没有触发必须闭环的写前准备回执。'
+      : status === 'ok'
+        ? '写前准备回执已证明来源缺口、资产风险、蓝图焦点、读者回报和执行顺序落成正文。'
+        : `写前准备回执仍有 ${missed.length} 项未闭环。`,
+    requires_receipts: requiresReceipts,
+    receipt_count: allReceipts.length,
+    missed_count: missed.length,
+    completed_count: Math.max(0, allReceipts.length - missed.length),
+    missed,
+    completed: allReceipts.filter((receipt: any) => !writePreparationReceiptRisk(receipt, chapterText)).slice(0, 20),
+    next_actions: status === 'ok'
+      ? ['保持 write_preparation_checks 逐项引用本章正文证据，证明写前准备不是只停留在任务书。']
+      : [
+          '补齐 write_preparation_checks；逐项覆盖来源缺口、资产风险、上一轮待修复、创作契约清单、蓝图焦点、读者回报焦点和 must_confirm。',
+          '每条回执必须写 delivered/status、evidence 或 source_excerpt；仍未兑现的项必须写 remaining_risk 和下一轮修复动作。',
+        ],
+  }
+}
+

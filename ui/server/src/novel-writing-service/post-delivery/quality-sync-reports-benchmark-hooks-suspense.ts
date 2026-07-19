@@ -362,6 +362,9 @@ import {
   normalizeChapterBenchmarkBeat,
 } from './quality-sync-reports-core'
 import {
+  contextWithChapterRawPreDraftForSync,
+} from './quality-sync-reports-benchmark-hooks-paragraph'
+import {
   buildStyleSampleStrategy,
   styleBoundaryExplicitContract,
 } from '../quality/style-sample-strategy'

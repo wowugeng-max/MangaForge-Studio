@@ -35,6 +35,7 @@ import {
   buildPipelineProse,
   createProsePipelineHarness,
   proseQualityScores,
+  withoutOpeningHandoffGuard,
 } from './novel-writing-service.test-support'
 
 describe('novel writing service prose quality wiring b a', () => {
@@ -60,7 +61,14 @@ describe('novel writing service prose quality wiring b a', () => {
 
   test('restores earned-compatible prose when optional meme polish exceeds the compatibility ceiling', async () => {
     const draftText = buildPipelineProse('江澈撞断路灯，切入铁门。', '主动夺取通讯器').repeat(7).slice(0, 6596)
-    const harness = await createProsePipelineHarness(createNovelWritingService, { draftText, editorText: draftText, memeText: '润'.repeat(7000), enableMemePolish: true, chapterWordTarget: { mode: 'standard' } })
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText,
+      editorText: draftText,
+      memeText: '润'.repeat(7000),
+      enableMemePolish: true,
+      chapterWordTarget: { mode: 'standard' },
+      contextPackageOverride: withoutOpeningHandoffGuard(),
+    })
     const stages: any[] = []
     const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, { model_id: 217, onStage: async (_name: string, payload: any) => stages.push(payload) })
     expect(result.admission_status).toBe('accepted_with_warnings')

@@ -230,7 +230,7 @@ export async function prepareStoryStateUpdate(
   const runAgentOnce = async (maxTokens: number) => {
     throwIfAborted(options)
     return executeAgent('review-agent', project, {
-      task: buildStoryStatePrompt(project, contextPackage, chapterText),
+      task: buildStoryStatePromptFromBuilder(project, contextPackage, chapterText),
     }, {
       activeWorkspace,
       modelId: stageModelId ? String(stageModelId) : undefined,

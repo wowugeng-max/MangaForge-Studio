@@ -35,6 +35,7 @@ import {
   buildPipelineProse,
   createProsePipelineHarness,
   proseQualityScores,
+  withoutOpeningHandoffGuard,
 } from './novel-writing-service.test-support'
 
 describe('novel writing service prose quality wiring a', () => {
@@ -156,10 +157,10 @@ describe('novel writing service prose quality wiring a', () => {
       draftText: REAL_CHAPTER_11_CANONICAL_CONFLICT_PROSE,
       chapterWordTarget: { mode: 'custom', target: 5000 },
       initialSceneCards: [],
-      contextPackageOverride: {
+      contextPackageOverride: withoutOpeningHandoffGuard({
         canonical_surface_index: canonicalSurfaceIndex,
         canonicalSurfaceIndex,
-      },
+      }),
     })
     const snapshot = async () => ({
       project: await getNovelProject(harness.workspace, harness.project.id),
@@ -251,10 +252,17 @@ describe('novel writing service prose quality wiring a', () => {
     const cases = [
       {
         draftText: REAL_CHAPTER_11_CANONICAL_CONFLICT_PROSE,
-        contextPackageOverride: { canonical_surface_index: canonicalSurfaceIndex, canonicalSurfaceIndex },
+        contextPackageOverride: withoutOpeningHandoffGuard({
+          canonical_surface_index: canonicalSurfaceIndex,
+          canonicalSurfaceIndex,
+        }),
         expectedSource: 'canonical_continuity',
       },
-      { draftText: '第十章：生成失败', contextPackageOverride: {}, expectedSource: 'prose_shape' },
+      {
+        draftText: '第十章：生成失败',
+        contextPackageOverride: withoutOpeningHandoffGuard(),
+        expectedSource: 'prose_shape',
+      },
     ]
     for (const item of cases) {
       const harness = await createProsePipelineHarness(createNovelWritingService, {
@@ -858,7 +866,13 @@ describe('novel writing service prose quality wiring a', () => {
   })
   test('restores earned-compatible prose when editor exceeds the compatibility ceiling', async () => {
     const draftText = buildPipelineProse('江澈撞断路灯，切入铁门。', '主动夺取通讯器').repeat(7).slice(0, 6596)
-    const harness = await createProsePipelineHarness(createNovelWritingService, { draftText, editorText: '编'.repeat(7000), chapterWordTarget: { mode: 'standard' } })
+    // Disable opening-handoff regression so the invalid overlong editor payload reaches the word-target restore path.
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText,
+      editorText: '编'.repeat(7000),
+      chapterWordTarget: { mode: 'standard' },
+      contextPackageOverride: withoutOpeningHandoffGuard(),
+    })
     const stages: any[] = []
     const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, { model_id: 217, onStage: async (_name: string, payload: any) => stages.push(payload) })
     expect(result.admission_status).toBe('accepted_with_warnings')
