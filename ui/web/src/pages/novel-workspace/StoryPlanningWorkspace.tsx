@@ -1,26 +1,20 @@
 import React from 'react'
-import { Alert, Button, Card, Empty, Grid, Progress, Space, Tag, Tooltip, Typography } from 'antd'
+import { Button, Card, Grid, Progress, Space, Tag, Typography } from 'antd'
 import {
   BranchesOutlined,
-  CheckCircleOutlined,
   DownOutlined,
   EditOutlined,
-  ExclamationCircleOutlined,
-  FileSearchOutlined,
   NodeIndexOutlined,
-  ThunderboltOutlined,
   UpOutlined,
 } from '@ant-design/icons'
-import type { PlanningActionKey, PlanningVolumeTreeNode, PlanningWorkspaceModel } from './planningWorkspaceModel'
+import type { PlanningActionKey, PlanningWorkspaceModel } from './planningWorkspaceModel'
 import {
   healthColor,
-  issueIconColor,
   formatWords,
-  actionLabel,
-  renderVolumeNode,
 } from './planning/story-planning-chrome'
+import { StoryPlanningBoardPanels } from './planning/story-planning-board-panels'
 
-const { Text, Paragraph } = Typography
+const { Text } = Typography
 const { useBreakpoint } = Grid
 
 export type PlanningLoadingKey = 'rollingPlan' | 'future100Audit' | 'future100Generate' | 'longformPressure' | 'longformCreationDiagnosis' | 'topic' | 'referenceDiagnosis' | 'first30Retention' | 'first30Repair' | 'readerTrial' | 'readerTrialRepair'
@@ -113,131 +107,6 @@ export function StoryPlanningWorkspace({
           onSelectChapter={onSelectChapter}
           compact={compact}
         />
-            <Card title="主线与分卷推进" size="small">
-              <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
-                <Alert type="info" showIcon message="全书主线承诺" description={model.mainline.readerPromise || '未设置'} />
-                <Alert
-                  type={model.mainline.currentChapterServesVolume ? 'success' : 'warning'}
-                  showIcon
-                  message="当前章服务卷目标"
-                  description={model.mainline.currentChapterServesVolume ? '当前章已有主线推进证据。' : '当前章任务或卷目标不足，需要先补规划。'}
-                />
-                {[
-                  ['当前卷目标', model.mainline.currentVolumeGoal],
-                  ['当前阶段冲突', model.mainline.currentStageConflict],
-                  ['本阶段爽点模型', model.mainline.payoffModel],
-                  ['关键转折', `上一转折：${model.mainline.previousTurn || '未标注'}\n下一转折：${model.mainline.nextTurn || '未标注'}`],
-                ].map(([label, value]) => (
-                  <div key={label} style={{ border: '1px solid #edf0f5', borderRadius: 8, padding: '10px 12px', background: '#fbfcfe' }}>
-                    <Text strong style={{ display: 'block', marginBottom: 6 }}>{label}</Text>
-                    <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>{value || '未设置'}</Paragraph>
-                  </div>
-                ))}
-              </div>
-              {model.mainline.risks.length > 0 && (
-                <Space wrap style={{ marginTop: 12 }}>
-                  {model.mainline.risks.map(risk => <Tag key={risk} color="red" bordered={false}>{risk}</Tag>)}
-                </Space>
-              )}
-            </Card>
-
-            <Card
-              title="未来 10 章路线"
-              size="small"
-              extra={<Button size="small" type="link" onClick={() => onAction('open_outline_tree')}>查看完整大纲</Button>}
-            >
-              {model.futureRoute.length === 0 ? (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无未来章节路线" />
-              ) : (
-                <div style={{ display: 'grid', gap: 8 }}>
-                  {model.futureRoute.map(row => (
-                    <button
-                      key={`${row.chapterNo}-${row.title}`}
-                      type="button"
-                      onClick={() => onSelectChapter(row.chapterNo)}
-                      style={{
-                        border: '1px solid #edf0f5',
-                        borderRadius: 8,
-                        padding: '10px 12px',
-                        background: '#fff',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        width: '100%',
-                        font: 'inherit',
-                        color: 'inherit',
-                      }}
-                    >
-                      <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                        <Space wrap>
-                          <Tag color="blue" bordered={false}>第{row.chapterNo}章</Tag>
-                          <Text strong>{row.title || '无标题'}</Text>
-                          {row.riskTags.map(tag => <Tag key={tag} color="gold" bordered={false}>{tag}</Tag>)}
-                        </Space>
-                        <Text>{row.chapterTask || '未设置章节任务'}</Text>
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          主线：{row.mainlineProgress || '未标注'} · 冲突：{row.conflict || '未设置'} · 钩子：{row.endingHook || '未设置'}
-                        </Text>
-                      </Space>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </Card>
-
-            <Card title="分卷结构" size="small">
-              {model.volumeTree.length === 0 ? (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无分卷结构" />
-              ) : (
-                <div style={{ display: 'grid', gap: 6 }}>
-                  {model.volumeTree.map(node => renderVolumeNode(node))}
-                </div>
-              )}
-            </Card>
-          </Space>
-
-          <Space direction="vertical" size={16} style={{ minWidth: 0 }}>
-            <Card title="规划健康" size="small">
-              {model.healthIssues.length === 0 ? (
-                <Alert type="success" showIcon icon={<CheckCircleOutlined />} message="主线规划暂未发现明显风险" />
-              ) : (
-                <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                  {model.healthIssues.map(issue => (
-                    <div
-                      key={issue.key}
-                      style={{ border: '1px solid #edf0f5', borderRadius: 8, padding: '10px 12px', background: '#fff' }}
-                    >
-                      <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                        <Space>
-                          <ExclamationCircleOutlined style={{ color: issueIconColor(issue.severity) }} />
-                          <Text strong>{issue.title}</Text>
-                        </Space>
-                        <Text type="secondary" style={{ fontSize: 12 }}>{issue.detail}</Text>
-                        <Button size="small" block onClick={() => onAction(issue.actionKey)}>{actionLabel(issue.actionKey)}</Button>
-                      </Space>
-                    </div>
-                  ))}
-                </Space>
-              )}
-            </Card>
-
-            <Card title="低频规划入口" size="small">
-              <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                <Tooltip title="检查未来 100 章骨架是否覆盖长线节奏">
-                  <Button block icon={<FileSearchOutlined />} loading={loadingKey === 'future100Audit'} onClick={() => onAction('future100_audit')}>
-                    未来100章骨架检查
-                  </Button>
-                </Tooltip>
-                <Button block type="primary" icon={<ThunderboltOutlined />} loading={loadingKey === 'future100Generate'} onClick={() => onAction('future100_generate')}>
-                  AI 生成未来100章骨架
-                </Button>
-                <Button block loading={loadingKey === 'longformPressure'} onClick={() => onAction('longform_pressure')}>300万字长线压力测试</Button>
-                <Button block loading={loadingKey === 'topic'} onClick={() => onAction('topic_validation')}>原创选题验证</Button>
-                <Button block loading={loadingKey === 'referenceDiagnosis'} onClick={() => onAction('reference_diagnosis')}>参考知识诊断</Button>
-              </Space>
-            </Card>
-
-          </Space>
-        </div>
       </div>
     </div>
   )
