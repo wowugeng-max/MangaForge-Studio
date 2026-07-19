@@ -1,4 +1,5 @@
-import { List, message, Modal } from 'antd'
+import React from 'react'
+import { List, message, Modal, Space } from 'antd'
 import { chapterHasProse } from '../utils'
 import { renderProductionDashboardContentView } from './workspace-commercial-result'
 import {

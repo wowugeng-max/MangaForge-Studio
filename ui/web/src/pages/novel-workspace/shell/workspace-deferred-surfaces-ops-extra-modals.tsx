@@ -1,3 +1,4 @@
+import React from 'react'
 import type { NovelWorkspaceDeferredSurfacesProps } from './workspace-deferred-surfaces-types'
 import {
   NovelWorkspaceDeferredOpsCreativeModals,

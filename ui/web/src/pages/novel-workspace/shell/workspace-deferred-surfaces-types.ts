@@ -21,6 +21,7 @@ export type NovelWorkspaceDeferredSurfacesProps = {
   chapterVersionDetail: any
   chapters: any
   characters: any
+  commercialToolLoading: any
   commercialToolsOpen: any
   consistencyGraphOpen: any
   continuityAudit: any
@@ -32,6 +33,7 @@ export type NovelWorkspaceDeferredSurfacesProps = {
   createRecoveryEvidenceGovernanceQueue: any
   creativeCardsOpen: any
   creativeCommandOpen: any
+  creativeCommandPlan: any
   creativeCommandText: any
   deleteChapter: any
   downloadBackupPackage: any
@@ -60,6 +62,7 @@ export type NovelWorkspaceDeferredSurfacesProps = {
   loadKnowledgeIngestJobs: any
   loadProductionTasks: any
   loadProjectModules: any
+  loading: any
   locateRepairTaskChapter: any
   mergeChapterVersion: any
   openAgentConfigEditor: any
@@ -87,6 +90,7 @@ export type NovelWorkspaceDeferredSurfacesProps = {
   productionMode: any
   productionModeOptions: any
   productionTasks: any
+  productionTasksLoading: any
   projectId: any
   proseChapters: any
   qualityBenchmarkOpen: any
@@ -180,6 +184,10 @@ export type NovelWorkspaceDeferredSurfacesProps = {
   storyStateForm: any
   storyStateOpen: any
   styleSampleCandidateLoading: any
+  styleSampleEffectiveness: any
+  styleSampleEffectivenessItems: any
+  styleSampleEffectivenessLoading: any
+  styleSamplePatchLoadingKey: any
   submitEditor: any
   taskCenterOpen: any
   taskCenterRecoveryFocus: any
@@ -190,4 +198,8 @@ export type NovelWorkspaceDeferredSurfacesProps = {
   writingBibleForm: any
   writingBibleGenerating: any
   writingBibleOpen: any
+  chapterId: any
+  future100Draft: any
+  future100SelectedNos: any
+  id: any
 }

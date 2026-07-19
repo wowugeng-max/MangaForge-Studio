@@ -1,4 +1,5 @@
-import { message, Modal } from 'antd'
+import React from 'react'
+import { message, Modal, Space, Tag } from 'antd'
 import {
   renderContinuityAuditContentView,
   renderFirst30RetentionDiagnosisContentView,

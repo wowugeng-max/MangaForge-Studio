@@ -3,6 +3,8 @@ import { Button, Tag, Tooltip, Typography } from 'antd'
 import {
   CheckCircleOutlined,
   SyncOutlined,
+  EditOutlined,
+  StopOutlined,
 } from '@ant-design/icons'
 const { Text } = Typography
 

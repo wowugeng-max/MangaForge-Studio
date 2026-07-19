@@ -200,28 +200,6 @@ export function useStudioKnowledgePanelsController() {
   const knowledgeEmpty = !knowledgeLoading && filteredKnowledgeEntries.length === 0
 
 
-  const handleOpenKnowledge = () => {
-    setKnowledgeOpen(true)
-    updateKnowledgeRoute({ panel: 'knowledge', action: null })
-  }
-
-  const handleCloseKnowledge = () => {
-    setKnowledgeOpen(false)
-    setFeedOpen(false)
-    updateKnowledgeRoute({ panel: null, action: null, projectTitle: null })
-  }
-
-  const handleOpenMemoryPalace = () => {
-    setMemoryPalaceOpen(true)
-    updateKnowledgeRoute({ panel: 'memory-palace', action: null })
-  }
-
-  const handleCloseMemoryPalace = () => {
-    setMemoryPalaceOpen(false)
-    updateKnowledgeRoute({ panel: null, action: null })
-  }
-
-
   useEffect(() => {
     if (knowledgePanelFromUrl && !knowledgeOpen) {
       setKnowledgeOpen(true)
@@ -284,6 +262,27 @@ export function useStudioKnowledgePanelsController() {
     sourceCacheOpen: sourceCache.sourceCacheOpen,
     loadSourceCaches: sourceCache.loadSourceCaches,
   })
+
+  const handleOpenKnowledge = () => {
+    setKnowledgeOpen(true)
+    updateKnowledgeRoute({ panel: 'knowledge', action: null })
+  }
+
+  const handleCloseKnowledge = () => {
+    setKnowledgeOpen(false)
+    feed.setFeedOpen(false)
+    updateKnowledgeRoute({ panel: null, action: null, projectTitle: null })
+  }
+
+  const handleOpenMemoryPalace = () => {
+    setMemoryPalaceOpen(true)
+    updateKnowledgeRoute({ panel: 'memory-palace', action: null })
+  }
+
+  const handleCloseMemoryPalace = () => {
+    setMemoryPalaceOpen(false)
+    updateKnowledgeRoute({ panel: null, action: null })
+  }
 
   useEffect(() => {
     if (!knowledgePanelFromUrl) return

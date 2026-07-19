@@ -16,6 +16,7 @@ import {
   TeamOutlined,
   ToolOutlined,
   WarningOutlined,
+  ExclamationCircleOutlined,
 } from '@ant-design/icons'
 import type { WritingCockpitActionKey, WritingCockpitModel, WritingCockpitRole } from '../writingCockpitModel'
 

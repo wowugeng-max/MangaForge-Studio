@@ -1,4 +1,4 @@
-import { message } from 'antd'
+import { message, Modal } from 'antd'
 
 export type ChapterVersionHandlerDeps = {
   activeChapter: any

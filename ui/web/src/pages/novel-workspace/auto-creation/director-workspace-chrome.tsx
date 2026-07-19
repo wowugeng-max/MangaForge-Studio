@@ -5,6 +5,7 @@ import {
   ClockCircleOutlined,
   ExclamationCircleOutlined,
   LoadingOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons'
 import type {
   AutoCreationContractStatus,

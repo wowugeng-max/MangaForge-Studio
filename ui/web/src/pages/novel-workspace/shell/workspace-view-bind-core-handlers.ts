@@ -44,6 +44,9 @@ import {
   createStyleSampleHandlers,
 } from './workspace-style-sample-handlers'
 import {
+  createWritingBibleHandlers,
+} from './workspace-writing-bible-handlers'
+import {
   createWritingQueueHandlers,
 } from './workspace-writing-queue-handlers'
 
@@ -76,7 +79,7 @@ export function bindNovelWorkspaceCoreHandlers(deps: Record<string, any>) {
     loadProjectModules,
     navigate,
     openStoryAssetsWorkspace,
-    openStoryStateEditor,
+    activeContextPackageData,
     outlines,
     productionMode,
     projectId,
@@ -143,6 +146,17 @@ export function bindNovelWorkspaceCoreHandlers(deps: Record<string, any>) {
     setStreamingProgress,
     setStreamingText,
     setTaskCenterOpen,
+    setBookReviewLoading,
+    setStoryStateOpen,
+    setStyleSampleCandidateLoading,
+    setStyleSampleEffectiveness,
+    setStyleSampleEffectivenessLoading,
+    setStyleSamplePatchLoadingKey,
+    setWorkspaceArea,
+    setWritingBibleGenerating,
+    setWritingBibleOpen,
+    storyStateForm,
+    writingBibleForm,
     sortedChapters,
     unattendedTargetChapter,
     worldbuilding,
@@ -183,6 +197,21 @@ export function bindNovelWorkspaceCoreHandlers(deps: Record<string, any>) {
     setStepOutlineLoading,
   })
 
+  const showGenerationBlockedModalRef = { current: null as null | ((...args: any[]) => any) }
+  const showDiagnosticsModalRef = { current: null as null | ((...args: any[]) => any) }
+  const showGenerationBlockedModalProxy = (...args: any[]) => {
+    if (!showGenerationBlockedModalRef.current) {
+      throw new Error('showGenerationBlockedModal is not ready')
+    }
+    return showGenerationBlockedModalRef.current(...args)
+  }
+  const showDiagnosticsModalProxy = (...args: any[]) => {
+    if (!showDiagnosticsModalRef.current) {
+      throw new Error('showDiagnosticsModal is not ready')
+    }
+    return showDiagnosticsModalRef.current(...args)
+  }
+
   const {
     generateSceneCardsForChapter,
     generateSceneCardsForActiveChapter,
@@ -194,7 +223,7 @@ export function bindNovelWorkspaceCoreHandlers(deps: Record<string, any>) {
     selectedModelId,
     setChapters,
     setGeneratingSceneCards,
-    showGenerationBlockedModal,
+    showGenerationBlockedModal: showGenerationBlockedModalProxy,
     activeChapterId,
   })
 
@@ -390,6 +419,45 @@ export function bindNovelWorkspaceCoreHandlers(deps: Record<string, any>) {
   generateLongformRepairAuditSummaryRef.current = generateLongformRepairAuditSummary
   generateSceneCardsForChapterRef.current = generateSceneCardsForChapter
 
+  const {
+    fillWritingBibleForm,
+    fillDefaultStyleSampleBank,
+    extractStyleSampleCandidates,
+    openWritingBibleEditor,
+    previewStyleSampleAdjustmentPatch,
+    previewStyleSampleAdjustmentBatch,
+    undoStyleSampleAdjustmentPatch,
+    repairStyleSamplePatchReviewSelection,
+    reviewStyleSampleAdjustmentPatch,
+    generateWritingBibleEditor,
+    saveWritingBibleEditor,
+    openStoryStateEditor,
+    saveStoryStateEditor,
+    runBookReview,
+  } = createWritingBibleHandlers({
+    activeChapter,
+    activeContextPackageData,
+    apiClient,
+    applyStyleSampleActionForActiveChapter,
+    loadProjectModules,
+    projectId,
+    selectedModelId,
+    selectedProject,
+    setBookReviewLoading,
+    setRightPanelOpen,
+    setRightPanelTab,
+    setSelectedProject,
+    setStoryStateOpen,
+    setStyleSampleCandidateLoading,
+    setStyleSampleEffectiveness,
+    setStyleSampleEffectivenessLoading,
+    setStyleSamplePatchLoadingKey,
+    setWorkspaceArea,
+    setWritingBibleGenerating,
+    setWritingBibleOpen,
+    storyStateForm,
+    writingBibleForm,
+  })
 
   const {
     showCommercialResult,
@@ -590,6 +658,8 @@ export function bindNovelWorkspaceCoreHandlers(deps: Record<string, any>) {
     sortedChapters,
     syncStoryStateForChapter,
   })
+  showGenerationBlockedModalRef.current = showGenerationBlockedModal
+  showDiagnosticsModalRef.current = showDiagnosticsModal
 
 
   const {
@@ -641,6 +711,20 @@ export function bindNovelWorkspaceCoreHandlers(deps: Record<string, any>) {
   return {
     acceptChapterVersion,
     applyEditorRevision,
+    extractStyleSampleCandidates,
+    fillDefaultStyleSampleBank,
+    fillWritingBibleForm,
+    generateWritingBibleEditor,
+    openStoryStateEditor,
+    openWritingBibleEditor,
+    previewStyleSampleAdjustmentBatch,
+    previewStyleSampleAdjustmentPatch,
+    repairStyleSamplePatchReviewSelection,
+    reviewStyleSampleAdjustmentPatch,
+    runBookReview,
+    saveStoryStateEditor,
+    saveWritingBibleEditor,
+    undoStyleSampleAdjustmentPatch,
     applyFuture100SkeletonDraft,
     applyStyleSampleActionForActiveChapter,
     applyStyleSampleActionForChapter,

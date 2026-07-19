@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { Suspense } from 'react'
 import { ChapterDirectorySidebar } from '../ChapterDirectorySidebar'
 import { CreativeAssistantPanel } from '../CreativeAssistantPanel'
 import { ReferencePanel } from '../ReferencePanel'

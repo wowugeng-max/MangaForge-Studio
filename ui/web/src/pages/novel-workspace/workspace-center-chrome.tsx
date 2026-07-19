@@ -1,6 +1,12 @@
 import React from 'react'
 import { Button, Card, Col, InputNumber, Popover, Row, Slider, Space, Tag, Tooltip, Typography } from 'antd'
-import { FontSizeOutlined, LineHeightOutlined } from '@ant-design/icons'
+import {
+  FontSizeOutlined,
+  LineHeightOutlined,
+  CheckCircleOutlined,
+  ClockCircleOutlined,
+  SyncOutlined,
+} from '@ant-design/icons'
 import type { DeslopGateDiagnosticsModel } from './writingCockpitModel'
 
 const { Text } = Typography

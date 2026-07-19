@@ -1,4 +1,5 @@
-import { message } from 'antd'
+import React from 'react'
+import { message, Modal } from 'antd'
 
 export type ChapterProseHandlerDeps = {
   proseBatchCancelRef: any
