@@ -29,6 +29,8 @@ import {
   truncateText,
 } from './novel-studio/knowledge-ui-shared'
 import { NovelStudioFeedModal } from './novel-studio/NovelStudioFeedModal'
+import { NovelStudioKnowledgeDrawer } from './novel-studio/NovelStudioKnowledgeDrawer'
+import { NovelStudioSourceCacheDrawer } from './novel-studio/NovelStudioSourceCacheDrawer'
 import { useNovelStudioController } from './novel-studio/useNovelStudioController'
 
 export default function NovelStudio() {
