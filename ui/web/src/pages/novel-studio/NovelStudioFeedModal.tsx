@@ -9,7 +9,9 @@ import {
   LinkOutlined,
   PauseCircleOutlined,
   PlayCircleOutlined,
+  ReloadOutlined,
   StopOutlined,
+  TagsOutlined,
 } from '@ant-design/icons'
 import {
   fieldLabelStyle,
