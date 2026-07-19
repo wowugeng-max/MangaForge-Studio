@@ -1033,3 +1033,8 @@ Still open for goal complete:
 - Focused contracts green (storyline/chapter-context/architecture/workspace shell)
 - Still open: bind-core soft residual (~763), optional further leaves, Task 11 full write-path UI smoke + memory
 
+### Residual progress (2026-07-19 goal-continue recovery-evidence)
+- drawer-recovery-evidence monofile is barrel-only; review + audit leaves landed
+- base model ~791; story-state-machine package-split complete
+- Task 11 full write-path UI smoke + memory still open
+
