@@ -63,8 +63,7 @@ export function renderOriginalIncubationPreviewContentView(payload: any) {
       </Card>
       <Card size="small" title="章节方向">
         <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }} ellipsis={{ rows: 6, expandable: true }}>
-          {(payload.chapters || []).slice(0, 12).map((chapter: any) => `第${chapter.chapter_no}章 ${chapter.title}：${chapter.chapter_goal || chapter.chapter_summary || ''}`).join('
-')}
+          {(payload.chapters || []).slice(0, 12).map((chapter: any) => `第${chapter.chapter_no}章 ${chapter.title}：${chapter.chapter_goal || chapter.chapter_summary || ''}`).join('\n')}
         </Paragraph>
       </Card>
     </Space>
