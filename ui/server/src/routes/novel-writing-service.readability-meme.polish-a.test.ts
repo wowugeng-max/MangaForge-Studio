@@ -496,7 +496,7 @@ describe('readability meme polish a', () => {
   })
 
   test('story state sync persists a benchmark_recall_sync review', () => {
-    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts','story-state-machine-update-phase-a.ts','story-state-machine-update-phase-b.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: benchmarkRecallSync, reviewType: 'benchmark_recall_sync'")
     expect(source).toContain('buildBenchmarkRecallSyncReport(project, chapter, contextPackage, chapterText)')
@@ -601,7 +601,7 @@ describe('readability meme polish a', () => {
   })
 
   test('story state sync persists a style_boundary_sync review', () => {
-    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts','story-state-machine-update-phase-a.ts','story-state-machine-update-phase-b.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: styleBoundarySync, reviewType: 'style_boundary_sync'")
     expect(source).toContain('buildStyleBoundarySyncReport(project, chapter, contextPackage, chapterText)')
@@ -785,7 +785,7 @@ describe('readability meme polish a', () => {
   })
 
   test('story state sync persists a style_sample_sync review', () => {
-    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts','story-state-machine-update-phase-a.ts','story-state-machine-update-phase-b.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("reviewType: 'style_sample_sync'")
     expect(source).toContain('buildStyleSampleSyncReport(project, chapter, contextPackage, chapterText)')

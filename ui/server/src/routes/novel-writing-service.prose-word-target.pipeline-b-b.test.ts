@@ -422,7 +422,7 @@ describe('prose word target pipeline b b', () => {
   })
 
   test('story state sync persists a character_behavior_sync review', () => {
-    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts','story-state-machine-update-phase-a.ts','story-state-machine-update-phase-b.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("reviewType: 'character_behavior_sync', payloadKey: 'character_behavior_sync'")
     expect(source).toContain('buildCharacterBehaviorSyncReport(project, chapter, contextPackage, chapterText)')
@@ -523,7 +523,7 @@ describe('prose word target pipeline b b', () => {
   })
 
   test('story state sync persists an asset_linkage_sync review', () => {
-    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts','story-state-machine-update-phase-a.ts','story-state-machine-update-phase-b.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("reviewType: 'asset_linkage_sync', payloadKey: 'asset_linkage_sync'")
     expect(source).toContain('buildAssetLinkageSyncReport(project, chapter, contextPackage, chapterText)')
@@ -604,7 +604,7 @@ describe('prose word target pipeline b b', () => {
   })
 
   test('story state sync persists a state_tracking_sync review', () => {
-    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts','story-state-machine-update-phase-a.ts','story-state-machine-update-phase-b.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("reviewType: 'state_tracking_sync', payloadKey: 'state_tracking_sync'")
     expect(source).toContain('buildStateTrackingSyncReport(project, chapter, contextPackage, chapterText)')
@@ -715,7 +715,7 @@ describe('prose word target pipeline b b', () => {
   })
 
   test('story state sync persists an intent_confirmation_sync review', () => {
-    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts','story-state-machine-update-phase-a.ts','story-state-machine-update-phase-b.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("reviewType: 'intent_confirmation_sync', payloadKey: 'intent_confirmation_sync'")
     expect(source).toContain('buildIntentConfirmationSyncReport(project, chapter, contextPackage, chapterText)')

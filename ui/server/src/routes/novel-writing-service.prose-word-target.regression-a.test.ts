@@ -317,7 +317,7 @@ describe('prose word target regression a', () => {
   })
 
   test('story state sync persists a continuity_heat_sync review', () => {
-    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts','story-state-machine-update-phase-a.ts','story-state-machine-update-phase-b.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: continuityHeatSync, reviewType: 'continuity_heat_sync'")
     expect(source).toContain('buildContinuityHeatSyncReport(project, chapter, contextPackage, chapterText)')
@@ -562,7 +562,7 @@ describe('prose word target regression a', () => {
   })
 
   test('story state sync persists a conflict_structure_sync review', () => {
-    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts','story-state-machine-update-phase-a.ts','story-state-machine-update-phase-b.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: conflictStructureSync, reviewType: 'conflict_structure_sync'")
     expect(source).toContain('buildConflictStructureSyncReport(project, chapter, contextPackage, chapterText)')
@@ -774,7 +774,7 @@ describe('prose word target regression a', () => {
   })
 
   test('story state sync persists an upgrade_rhythm_sync review', () => {
-    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts','story-state-machine-update-phase-a.ts','story-state-machine-update-phase-b.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: upgradeRhythmSync, reviewType: 'upgrade_rhythm_sync'")
     expect(source).toContain('buildUpgradeRhythmSyncReport(project, chapter, contextPackage, chapterText)')
