@@ -7,6 +7,7 @@ import {
   inputStyle,
   panelStyle,
   softPanelStyle,
+  truncateText,
 } from './knowledge-ui-shared'
 
 const { Text } = Typography
