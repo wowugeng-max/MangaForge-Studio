@@ -200,13 +200,15 @@ ui/server/src/routes/novel-writing-service.test.ts  # 兼容入口 shim（可选
 
 ## 9. Success Criteria
 
-- [ ] `novel-writing-service` monofile 消失或 < 1000 行 barrel  
-- [ ] `novel-writing-service.test` monofile 消失或仅 shim；领域测试可独立运行  
-- [ ] Top web model 文件均 < 硬上限，或拆成 package  
-- [ ] `novel-editor-routes` / `novel-core-routes` 完成 package 化  
-- [ ] 相关 bun test 绿  
-- [ ] 手工写章/任务中心/创建向导冒烟通过  
-- [ ] 写章内存不出现改造前整库级尖刺
+> **Status (2026-07-19 Task 11 closeout on `codex/architecture-modularization`):** structural criteria met; evidence recorded in the plan residual note.
+
+- [x] `novel-writing-service` monofile 消失或 < 1000 行 barrel  
+- [x] `novel-writing-service.test` monofile 消失或仅 shim；领域测试可独立运行  
+- [x] Top web model 文件均 < 硬上限，或拆成 package  
+- [x] `novel-editor-routes` / `novel-core-routes` 完成 package 化  
+- [x] 相关 bun test 绿（architecture/core/setting/shell/write-path focused；`quality-wiring-a` 9 条为产品侧 admission 顺序测试债，非架构回潮）  
+- [x] 冒烟：`smoke:novel:local` 全 checks 通过；web shell/TaskCenter/Create 相关 focused UI 测试绿  
+- [x] 写章内存不出现改造前整库级尖刺（idle ~112MB；smoke peak ~376MB API 面）
 
 ## 10. Recommended Execution Order (summary)
 

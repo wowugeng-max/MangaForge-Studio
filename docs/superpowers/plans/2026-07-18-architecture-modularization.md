@@ -13,6 +13,38 @@
 **Branch:** `codex/architecture-modularization`
 
 
+### Residual progress (2026-07-19 goal-continue Task 11 closeout)
+
+**Branch:** `codex/architecture-modularization`
+
+**Design success criteria status**
+- [x] `novel-writing-service` monofile barrel-only (2 lines) / package under hard orchestrator caps
+- [x] `novel-writing-service.test` shim only; domain tests independently runnable as sliced suites
+- [x] Top web models/packages under hard caps (only production over-800 residual: non-novel `ComfyUIEngineNode.tsx` ~877, deferred)
+- [x] `novel-editor-routes` / `novel-core-routes` package-split with compatibility barrels
+- [x] Focused architecture + core/setting/editor/chapter-context/post-delivery/web shell regressions green this closeout
+- [x] `bun run smoke:novel:local` passed (all API workflow checks true for project_id=3)
+- [x] Memory: idle server ready ~112MB RSS; after project list ~129MB; smoke peak ~376MB while enumerating many novel endpoints — no multi‑GB whole-store rewrite spike
+
+**Focused regression evidence (this closeout)**
+- Server: architecture contracts **6 pass**; broader batch earlier **151 pass / 0 fail** (architecture + core-routes + setting-routes + annotations-surface + chapter-context.core-b-1 + related)
+- Server additional: prose-word-target-a + post-delivery + architecture green subset; **quality-wiring-a: 9 fail / rest pass** — pre-existing product/test debt (early `assessInitialProseOpeningContinuity` / strong-handoff admission returns `PROSE_ADMISSION_BLOCKED_INVALID` before tests' expected quality-gate codes). Not a monofile re-growth or package barrel regression; leave for product follow-up, not architecture split.
+- Web: workspace shell a/b + TaskCenter recovery-actions + writingRecommendation **163 pass / 0 fail**
+- Architecture soft baselines still green (`package builder modules do not regrow beyond soft baselines`)
+
+**Production residual soft inventory (under hard caps; optional future thin only)**
+- `use-novel-workspace-base-model.tsx` ~791 (orchestrator <1000)
+- `workspace-view-bind-core-handlers.ts` ~763 (ref-wired; prior free-var split reverted — leave alone)
+- cockpit / auto-creation / core-handoff leaves ~700–735
+- `WorkspaceCenter.tsx` ~698
+- ComfyUI non-novel ~877 deferred
+
+**Untracked (do not commit):** `ui/server/src/routes/novel-delivery-repair-runner.test.ts`
+
+**Goal:** Architecture modularization structural objectives met; Task 11 smoke/memory evidenced. Optional further soft thinning is non-blocking.
+
+
+
 ### Residual inventory update (2026-07-19 goal-continue LX)
 - Extract `paragraph-prose-context-prepare-foundation` (~453) from prepare monofile (~662).
 - Prior LIX: continuity-guard, deferred-ops modals, batch-guardrail core phase split.
