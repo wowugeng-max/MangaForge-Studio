@@ -263,7 +263,7 @@ const readDraftSyncReviewRecordSource = () => readFileSync(join(import.meta.dir,
 
 describe('prose word target admission a b', () => {
   test('story state sync persists an emotional_arc_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: emotionalArcSync, reviewType: 'emotional_arc_sync'")
     expect(source).toContain('buildEmotionalArcSyncReport(project, chapter, contextPackage, chapterText)')
@@ -345,7 +345,7 @@ describe('prose word target admission a b', () => {
   })
 
   test('story state sync persists a chapter_hook_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("reviewType: 'chapter_hook_sync'")
     expect(source).toContain("payloadKey: 'chapter_hook_sync'")
@@ -435,7 +435,7 @@ describe('prose word target admission a b', () => {
   })
 
   test('story state sync persists a paragraph_hook_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("reviewType: 'paragraph_hook_sync'")
     expect(source).toContain("payloadKey: 'paragraph_hook_sync'")
@@ -640,7 +640,7 @@ describe('prose word target admission a b', () => {
   })
 
   test('story state sync persists a suspense_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("reviewType: 'suspense_sync'")
     expect(source).toContain("payloadKey: 'suspense_sync'")

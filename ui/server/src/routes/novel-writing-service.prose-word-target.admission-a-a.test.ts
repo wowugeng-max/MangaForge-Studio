@@ -386,7 +386,7 @@ describe('prose word target admission a a', () => {
   })
 
   test('story state sync persists an expectation_threshold_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("reviewType: 'expectation_threshold_sync'")
     expect(source).toContain("payloadKey: 'expectation_threshold_sync'")

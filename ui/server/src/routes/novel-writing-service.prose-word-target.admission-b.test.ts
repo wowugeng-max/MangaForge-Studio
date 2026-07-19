@@ -345,7 +345,7 @@ describe('prose word target admission b', () => {
   })
 
   test('story state sync persists a reversal_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("reviewType: 'reversal_sync'")
     expect(source).toContain("payloadKey: 'reversal_sync'")
@@ -610,7 +610,7 @@ describe('prose word target admission b', () => {
   })
 
   test('story state sync persists a showdown_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("reviewType: 'showdown_sync'")
     expect(source).toContain("payloadKey: 'showdown_sync'")
@@ -619,7 +619,7 @@ describe('prose word target admission b', () => {
   })
 
   test('story state sync persists a spectator_reaction_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: spectatorReactionSync, reviewType: 'spectator_reaction_sync'")
     expect(source).toContain('buildSpectatorReactionSyncReport(project, chapter, contextPackage, chapterText)')
@@ -627,7 +627,7 @@ describe('prose word target admission b', () => {
   })
 
   test('story state sync persists a payoff_setup_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: payoffSetupSync, reviewType: 'payoff_setup_sync'")
     expect(source).toContain('buildPayoffSetupSyncReport(project, chapter, contextPackage, chapterText)')
@@ -747,7 +747,7 @@ describe('prose word target admission b', () => {
   })
 
   test('story state sync persists a bridge_unit_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: bridgeUnitSync, reviewType: 'bridge_unit_sync'")
     expect(source).toContain('buildBridgeUnitSyncReport(project, chapter, contextPackage, chapterText)')

@@ -274,7 +274,7 @@ describe('prose word target regression b', () => {
   })
 
   test('story state sync persists a target_reader_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: targetReaderSync, reviewType: 'target_reader_sync'")
     expect(source).toContain('buildTargetReaderSyncReport(project, chapter, contextPackage, chapterText)')
@@ -350,7 +350,7 @@ describe('prose word target regression b', () => {
   })
 
   test('story state sync persists a genre_positioning_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: genrePositioningSync, reviewType: 'genre_positioning_sync'")
     expect(source).toContain('buildGenrePositioningSyncReport(project, chapter, contextPackage, chapterText)')
@@ -406,7 +406,7 @@ describe('prose word target regression b', () => {
   })
 
   test('story state sync persists a female_audience_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: femaleAudienceSync, reviewType: 'female_audience_sync'")
     expect(source).toContain('buildFemaleAudienceSyncReport(project, chapter, contextPackage, chapterText)')
@@ -494,7 +494,7 @@ describe('prose word target regression b', () => {
   })
 
   test('story state sync persists a plot_dynamics_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: plotDynamicsSync, reviewType: 'plot_dynamics_sync'")
     expect(source).toContain('buildPlotDynamicsSyncReport(project, chapter, contextPackage, chapterText)')
@@ -621,7 +621,7 @@ describe('prose word target regression b', () => {
   })
 
   test('story state sync persists a character_relation_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: characterRelationSync, reviewType: 'character_relation_sync'")
     expect(source).toContain('buildCharacterRelationSyncReport(project, chapter, contextPackage, chapterText)')
@@ -717,7 +717,7 @@ describe('prose word target regression b', () => {
   })
 
   test('story state sync persists a character_arc_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: characterArcSync, reviewType: 'character_arc_sync'")
     expect(source).toContain('buildCharacterArcSyncReport(project, chapter, contextPackage, chapterText)')

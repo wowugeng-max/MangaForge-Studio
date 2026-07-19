@@ -41,7 +41,7 @@ const readGenerateChapterPipelineSource = () => {
     readFileSync(join(serviceDir, 'generate-chapter-full-production-store.ts'), 'utf8'),
     readFileSync(join(serviceDir, 'generate-chapter-draft-mode-store.ts'), 'utf8'),
     ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run-deterministic.ts','prose-self-review-run-normalize.ts','prose-self-review-run-revision.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(serviceDir, name), 'utf8')).join('\n'),
-    readFileSync(join(serviceDir, 'story-state-machine.ts'), 'utf8'),
+    ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(serviceDir, name), 'utf8')).join('\n'),
     readFileSync(join(serviceDir, 'story-state-helpers.ts'), 'utf8'),
   ].join('\n')
 }
@@ -92,8 +92,8 @@ describe('storyline sync a a', () => {
     const helperStart = source.indexOf('function normalizeStoryStateDeltaForStorage')
     const helperEnd = source.indexOf('function mergeStoryState', helperStart)
     const helperBlock = source.slice(helperStart, helperEnd)
-    const prepareStart = source.indexOf('const prepareStoryStateUpdate =')
-    const prepareEnd = source.indexOf('const updateStoryStateMachine =', prepareStart)
+    const prepareStart = source.indexOf('export async function prepareStoryStateUpdate')
+    const prepareEnd = source.indexOf('export async function updateStoryStateMachine', prepareStart)
     const prepareBlock = source.slice(prepareStart, prepareEnd)
     const acceptanceStart = source.indexOf('acceptance = await commitNovelChapterAcceptance(')
     const acceptanceEnd = source.indexOf('const updated = acceptance.chapter', acceptanceStart)

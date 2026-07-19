@@ -848,9 +848,9 @@ describe('chapter context handoff b', () => {
   })
 
   test('stores common post-delivery sync reviews through the shared record builder', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
-    const updateStoryStateStart = source.indexOf('const updateStoryStateMachine = async')
+    const updateStoryStateStart = source.indexOf('export async function updateStoryStateMachine')
     const updateStoryStateEnd = source.indexOf('return {', updateStoryStateStart)
     const updateStoryStateBlock = source.slice(updateStoryStateStart, updateStoryStateEnd > updateStoryStateStart ? updateStoryStateEnd : source.length)
 

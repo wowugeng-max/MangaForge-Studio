@@ -313,10 +313,10 @@ describe('chapter context contracts b b', () => {
     expect(generationReturnBlock).toContain('style_sample_sync')
   })
   test('persists the style fingerprint snapshot through the story state machine update', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
     const generateSource = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-context-scene-cards.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-prose.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-editor-meme-polish.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore-loop.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore-finalize.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-full-production-store.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-mode-store.ts'), 'utf8')].join('\n')
-    const prepareStart = source.indexOf('const prepareStoryStateUpdate = async')
-    const prepareEnd = source.indexOf('const updateStoryStateMachine = async', prepareStart)
+    const prepareStart = source.indexOf('export async function prepareStoryStateUpdate')
+    const prepareEnd = source.indexOf('export async function updateStoryStateMachine', prepareStart)
     const prepareBlock = source.slice(prepareStart, prepareEnd > prepareStart ? prepareEnd : source.length)
     const acceptanceStart = generateSource.indexOf('acceptance = await commitNovelChapterAcceptance(')
     const acceptanceEnd = generateSource.indexOf('const updated = acceptance.chapter', acceptanceStart)

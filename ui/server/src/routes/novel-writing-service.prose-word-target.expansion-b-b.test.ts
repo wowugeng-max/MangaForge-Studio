@@ -349,7 +349,7 @@ describe('prose word target expansion b b', () => {
     expect(report.status).toBe('ok')
   })
   test('story state sync persists a story_drive_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: storyDriveSync, reviewType: 'story_drive_sync'")
     expect(source).toContain('buildStoryDriveSyncReport(project, chapter, contextPackage, chapterText)')
@@ -487,7 +487,7 @@ describe('prose word target expansion b b', () => {
     expect(warnReport.next_actions.join('；')).toContain('换地图承接')
   })
   test('story state sync persists a story_loop_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: storyLoopSync, reviewType: 'story_loop_sync'")
     expect(source).toContain('buildStoryLoopSyncReport(project, chapter, contextPackage, chapterText)')
@@ -617,7 +617,7 @@ describe('prose word target expansion b b', () => {
     expect(report.quality_checks.join('｜')).toContain('每个信息团必须能一句话概括')
   })
   test('story state sync persists an information_flow_sync review', () => {
-    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine.ts'), 'utf8')
+    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
 
     expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: informationFlowSync, reviewType: 'information_flow_sync'")
     expect(source).toContain('buildInformationFlowSyncReport(project, chapter, contextPackage, chapterText)')

@@ -42,7 +42,7 @@ const readGenerateChapterPipelineSource = () => {
     readFileSync(join(serviceDir, 'generate-chapter-full-production-store.ts'), 'utf8'),
     readFileSync(join(serviceDir, 'generate-chapter-draft-mode-store.ts'), 'utf8'),
     ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run-deterministic.ts','prose-self-review-run-normalize.ts','prose-self-review-run-revision.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(serviceDir, name), 'utf8')).join('\n'),
-    readFileSync(join(serviceDir, 'story-state-machine.ts'), 'utf8'),
+    ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts'].map((name) => readFileSync(join(serviceDir, name), 'utf8')).join('\n'),
   ].join('\n')
 }
 
