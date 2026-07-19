@@ -2,7 +2,7 @@ import React from 'react'
 import {
   Alert, Button, Card, Checkbox, Form, Input, InputNumber, List, Modal, Select, Space, Tag, Tooltip, Typography, message,
 } from 'antd'
-import apiClient from '../../api/client'
+import apiClient from '../../../api/client'
 import { ChapterManagementDrawer } from '../ChapterManagementDrawer'
 import { ChapterRestructurePanel } from '../ChapterRestructurePanel'
 import { OutlineControlPanel } from '../OutlineControlPanel'
