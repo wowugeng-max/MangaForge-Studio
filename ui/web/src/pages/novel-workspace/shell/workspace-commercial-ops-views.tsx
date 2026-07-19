@@ -533,7 +533,7 @@ export function renderGenreTemplatesContentView(templates: any[], options: {
               renderItem={(item: any) => (
                 <List.Item
                   actions={[
-                    <Button key="apply" size="small" type="primary" onClick={() => { void options.onApplyTemplate?.(item) }}}>应用</Button>,
+                    <Button key="apply" size="small" type="primary" onClick={() => { void options.onApplyTemplate?.(item) }}>应用</Button>,
                   ]}
                 >
                   <List.Item.Meta
