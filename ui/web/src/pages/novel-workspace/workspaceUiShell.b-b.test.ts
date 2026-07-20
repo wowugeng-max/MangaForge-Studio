@@ -772,17 +772,14 @@ describe('commercial writing workspace UI shell b b', () => {
   test('immersive writing aux uses toolbar popover instead of in-flow aux rail', () => {
     const component = workspaceCenterSource()
     const projectWorkspace = projectWorkspaceSource()
-    const focusModel = source('writingAuxFocusModel.ts')
 
-    expect(focusModel).toContain('pickWritingAuxFocusTags')
     expect(component).toContain('isImmersiveShell')
     expect(component).toContain('novel-writing-immersive-aux')
     expect(component).toContain('novel-writing-immersive-aux-trigger')
     expect(component).toContain('immersiveAuxOpen')
-    expect(component).toContain('pickWritingAuxFocusTags')
     expect(component).toContain('辅助')
-    expect(component).toContain('!isImmersiveShell')
-    expect(component).toContain('novel-writing-aux-rail')
+    expect(component).toContain('novel-writing-header-details')
+    expect(component).toContain('!isImmersiveShell && !writingAuxCollapsed')
     expect(projectWorkspace).toContain('isImmersiveShell={isImmersiveShell}')
   })
 
