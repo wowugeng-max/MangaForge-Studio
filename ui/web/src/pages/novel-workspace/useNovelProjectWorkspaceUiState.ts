@@ -140,7 +140,7 @@ export function useNovelProjectWorkspaceUiState() {
   // ── right reference panel ──
   const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const [rightPanelTab, setRightPanelTab] = useState('worldbuilding')
-  const [workspaceArea, setWorkspaceArea] = useState<WorkspaceArea>('autoCreation')
+  const [workspaceArea, setWorkspaceArea] = useState<WorkspaceArea>('chapterWriting')
   const [writingShellMode, setWritingShellMode] = useState<WorkspaceShellMode>(() => loadWorkspaceShellMode())
   const [directoryCollapsed, setDirectoryCollapsed] = useState(() => loadWorkbenchDirectoryCollapsed())
   const [storyAssetsFocusDiscoveredToken, setStoryAssetsFocusDiscoveredToken] = useState(0)

@@ -86,6 +86,8 @@ export type NovelWorkspaceAreaViewProps = {
   setReferenceConfigOpen: any
   setReferenceEngineeringOpen: any
   setReviewAnnotationsOpen: any
+  setRightPanelOpen: any
+  setRightPanelTab: any
   setTaskCenterOpen: any
   setUnattendedTargetChapter: any
   setWorkspaceArea: any
@@ -186,6 +188,8 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
     setReferenceConfigOpen,
     setReferenceEngineeringOpen,
     setReviewAnnotationsOpen,
+    setRightPanelOpen,
+    setRightPanelTab,
     setTaskCenterOpen,
     setUnattendedTargetChapter,
     setWorkspaceArea,
@@ -301,6 +305,14 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
         deliveryActionLoading={proseQualityLoading || editorReportLoading || generatingProse}
         onDeliveryAction={handleWritingCockpitAction}
         onRepairDeslopGate={repairActiveDeslopGate}
+        onOpenVersionHistory={() => {
+          setRightPanelOpen?.(true)
+          setRightPanelTab?.('versions')
+        }}
+        onFocusQualityPanel={() => {
+          setRightPanelOpen?.(true)
+          setRightPanelTab?.('proseQuality')
+        }}
         isImmersiveShell={isImmersiveShell}
         onChapterTextChange={(next) => {
           const chapterId = activeChapterId
@@ -383,7 +395,7 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
   const group = groups[workspaceArea]
   return (
     <div style={{ flex: 1, minHeight: 0, overflow: 'auto', background: '#f6f8fb', padding: 20 }}>
-      <Card title={group.title} extra={<Button onClick={() => setWorkspaceArea('storyPlanning')}>返回故事规划</Button>}>
+      <Card title={group.title} extra={<Space><Button onClick={() => setWorkspaceArea('chapterWriting')}>返回写作</Button><Button onClick={() => setWorkspaceArea('storyPlanning')}>返回大纲</Button></Space>}>
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           <Text type="secondary">{group.desc}</Text>
           {group.highlightTitle && (

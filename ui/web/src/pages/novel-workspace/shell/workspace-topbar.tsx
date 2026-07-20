@@ -4,12 +4,21 @@ import {
   ArrowLeftOutlined,
   BulbOutlined,
   ClockCircleOutlined,
+  ControlOutlined,
   FullscreenExitOutlined,
   FullscreenOutlined,
   MoreOutlined,
   ReloadOutlined,
   RocketOutlined,
+  SafetyOutlined,
+  ToolOutlined,
 } from '@ant-design/icons'
+import {
+  primaryTabForArea,
+  WORKSPACE_TOOL_MENU_DEFS,
+  type WorkspacePrimaryArea,
+} from './workspace-core-area'
+import type { WorkspaceArea } from './workspace-types'
 
 const { Title } = Typography
 
@@ -33,6 +42,13 @@ export type NovelWorkspaceTopBarProps = {
   workspaceAreaTabs: Array<{ key: any; label: any; icon?: any }>
 }
 
+function toolIcon(key: string) {
+  if (key === 'autoCreation') return <ControlOutlined />
+  if (key === 'productionOps') return <RocketOutlined />
+  if (key === 'qualityRevision') return <SafetyOutlined />
+  return <ToolOutlined />
+}
+
 export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
   const {
     activeKnowledgeJobCount,
@@ -54,9 +70,57 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
     workspaceAreaTabs,
   } = props
 
+  const activePrimary = primaryTabForArea(workspaceArea as WorkspaceArea)
+  const moreMenuItems = [
+    {
+      type: 'group' as const,
+      label: '写作工具',
+      children: [
+        {
+          key: 'assistant',
+          icon: <BulbOutlined />,
+          label: '创作参谋',
+          onClick: () => openCreativeAssistant(),
+        },
+      ],
+    },
+    {
+      type: 'group' as const,
+      label: '生产与自动化',
+      children: WORKSPACE_TOOL_MENU_DEFS
+        .filter(item => item.group === '生产与自动化')
+        .map(item => ({
+          key: item.key,
+          icon: toolIcon(item.key),
+          label: item.label,
+          onClick: () => setWorkspaceArea(item.key),
+        })),
+    },
+    {
+      type: 'group' as const,
+      label: '诊断',
+      children: WORKSPACE_TOOL_MENU_DEFS
+        .filter(item => item.group === '诊断')
+        .map(item => ({
+          key: item.key,
+          icon: toolIcon(item.key),
+          label: item.label,
+          onClick: () => setWorkspaceArea(item.key),
+        })),
+    },
+    { type: 'divider' as const },
+    {
+      key: 'refresh',
+      icon: <ReloadOutlined />,
+      label: '刷新项目数据',
+      onClick: async () => {
+        if (await flushPendingSave()) await loadProjectModules()
+      },
+    },
+  ]
+
   return (
     <>
-      {/* ═══ TOP BAR ═══ */}
       <div className="novel-workspace-topbar">
         <div className="novel-workspace-topbar-left">
           <Button type="text" size="small" icon={<ArrowLeftOutlined />} onClick={() => navigate('/novel')} />
@@ -67,20 +131,23 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
 
         <div className="novel-workspace-topbar-center">
           <div className="novel-workspace-area-tabs" role="tablist" aria-label="工作区">
-            {workspaceAreaTabs.map(tab => (
-              <Button
-                key={tab.key}
-                size="small"
-                type="text"
-                icon={tab.icon}
-                role="tab"
-                aria-selected={workspaceArea === tab.key}
-                className={`novel-mode-tab novel-mode-tab-${tab.key} ${workspaceArea === tab.key ? 'is-active' : ''}`}
-                onClick={() => setWorkspaceArea(tab.key)}
-              >
-                <span className="novel-mode-tab-label">{tab.label}</span>
-              </Button>
-            ))}
+            {workspaceAreaTabs.map(tab => {
+              const selected = activePrimary === tab.key
+              return (
+                <Button
+                  key={tab.key}
+                  size="small"
+                  type="text"
+                  icon={tab.icon}
+                  role="tab"
+                  aria-selected={selected}
+                  className={`novel-mode-tab novel-mode-tab-${tab.key} ${selected ? 'is-active' : ''}`}
+                  onClick={() => setWorkspaceArea(tab.key as WorkspacePrimaryArea)}
+                >
+                  <span className="novel-mode-tab-label">{tab.label}</span>
+                </Button>
+              )
+            })}
           </div>
         </div>
 
@@ -101,79 +168,7 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
                   {referenceSummary.strengthLabel} · {referenceSummary.count} 部参考
                 </Tag>
               )}
-              <Tooltip title="进入无人值守生产入口">
-                <Button
-                  className={`novel-unattended-topbar-entry ${workspaceArea === 'productionOps' ? 'is-active' : ''}`}
-                  size="small"
-                  icon={<RocketOutlined />}
-                  onClick={() => setWorkspaceArea('productionOps')}
-                >
-                  无人值守
-                </Button>
-              </Tooltip>
-              <Tooltip title="打开当前节点的创作参谋建议">
-                <Button type="text" size="small" icon={<BulbOutlined />} onClick={openCreativeAssistant}>
-                  创作参谋
-                </Button>
-              </Tooltip>
-              <Tooltip title="刷新">
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<ReloadOutlined />}
-                  onClick={async () => { if (await flushPendingSave()) await loadProjectModules() }}
-                />
-              </Tooltip>
             </>
-          )}
-
-          {isImmersiveShell && (
-            <Dropdown
-              menu={{
-                items: [
-                  {
-                    key: 'model',
-                    label: (
-                      <div onClick={(e) => e.stopPropagation()}>
-                        <Select
-                          className="novel-workspace-model-select novel-workspace-model-select-menu"
-                          size="small"
-                          value={selectedModelId}
-                          onChange={(v) => setSelectedModelId(v)}
-                          options={modelOptions}
-                          popupMatchSelectWidth={440}
-                          placeholder="选择模型"
-                          style={{ width: 200 }}
-                        />
-                      </div>
-                    ),
-                  },
-                  {
-                    key: 'assistant',
-                    icon: <BulbOutlined />,
-                    label: '创作参谋',
-                    onClick: () => openCreativeAssistant(),
-                  },
-                  {
-                    key: 'unattended',
-                    icon: <RocketOutlined />,
-                    label: '无人值守',
-                    onClick: () => setWorkspaceArea('productionOps'),
-                  },
-                  {
-                    key: 'refresh',
-                    icon: <ReloadOutlined />,
-                    label: '刷新',
-                    onClick: async () => { if (await flushPendingSave()) await loadProjectModules() },
-                  },
-                ],
-              }}
-              trigger={['click']}
-            >
-              <Button type="text" size="small" className="novel-workspace-topbar-more" icon={<MoreOutlined />}>
-                更多
-              </Button>
-            </Dropdown>
           )}
 
           {workspaceArea === 'chapterWriting' && (
@@ -191,14 +186,18 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
           <Tooltip title="查看运行中任务和历史运行记录">
             <Badge className="novel-workspace-task-entry" count={activeTasks.length + activeKnowledgeJobCount} size="small">
               <Button type="text" size="small" icon={<ClockCircleOutlined />} onClick={() => setTaskCenterOpen(true)}>
-                任务中心
+                任务
               </Button>
             </Badge>
           </Tooltip>
+
+          <Dropdown menu={{ items: moreMenuItems as any }} trigger={['click']}>
+            <Button type="text" size="small" className="novel-workspace-topbar-more" icon={<MoreOutlined />}>
+              更多
+            </Button>
+          </Dropdown>
         </div>
       </div>
-
-
     </>
   )
 }

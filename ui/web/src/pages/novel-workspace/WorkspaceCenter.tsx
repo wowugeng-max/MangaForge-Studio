@@ -48,6 +48,8 @@ import {
   type EditorDisplayPrefs,
   type SaveStatus,
 } from './workspace-center-chrome'
+import { ChapterActionBar } from './workspace-center-chapter-action-bar'
+import { buildChapterWorkflowPresenter } from './chapter-workflow-presenter'
 import './WorkspaceCenter.css'
 
 const { Title, Text, Paragraph } = Typography
@@ -113,6 +115,8 @@ export function WorkspaceCenter({
   deliveryActionLoading,
   onDeliveryAction,
   onRepairDeslopGate,
+  onOpenVersionHistory,
+  onFocusQualityPanel,
   isImmersiveShell = false,
 }: {
   isEmptyProject: boolean
@@ -175,10 +179,12 @@ export function WorkspaceCenter({
   deliveryActionLoading?: boolean
   onDeliveryAction?: (key: NovelDeliveryActionKey) => void
   onRepairDeslopGate?: () => void
+  onOpenVersionHistory?: () => void
+  onFocusQualityPanel?: () => void
   isImmersiveShell?: boolean
 }) {
   const [editorDisplayPrefs, setEditorDisplayPrefs] = React.useState<EditorDisplayPrefs>(() => loadEditorDisplayPrefs())
-  const [writingAuxCollapsed, setWritingAuxCollapsed] = React.useState(() => loadWritingAuxCollapsed())
+  const [writingAuxCollapsed, setWritingAuxCollapsed] = React.useState(() => true)
   const [immersiveAuxOpen, setImmersiveAuxOpen] = React.useState(false)
   const [blueprintEditorOpen, setBlueprintEditorOpen] = React.useState(false)
   const [blueprintEditorText, setBlueprintEditorText] = React.useState('')
@@ -378,6 +384,64 @@ export function WorkspaceCenter({
     if (recommendedAction.key === 'generate') onGenerateCurrentChapterProse()
     if (recommendedAction.key === 'quality_card') onOpenQualityCard()
   }
+  const chapterWorkflow = buildChapterWorkflowPresenter({
+    hasChapter: Boolean(activeChapter),
+    hasProse: activeWordCount > 0,
+    materialReady,
+    materialBlockReason: materialRecommendations[0] || '',
+    acceptanceStatus: String(chapterAcceptanceDesk?.acceptanceStatus || ''),
+    admissionStatus: String((chapterAcceptanceDesk as any)?.admissionStatus || ''),
+    admissionMessage: String((chapterAcceptanceDesk as any)?.admissionMessage || deliverySummary.reason || ''),
+    storyStateSynced: Boolean(
+      chapterAcceptanceDesk?.storyStateSynced
+      ?? (deliverySummary.storyStateLabel.includes('已同步') ? true : deliverySummary.storyStateSyncAction ? false : true),
+    ),
+    qualityScore: chapterAcceptanceDesk?.qualityScore ?? null,
+    canSyncStoryState: Boolean(deliverySummary.storyStateSyncAction || deliverySummary.storyStatePanel?.canSync),
+    revisionAvailable: Boolean(chapterAcceptanceDesk?.acceptanceStatus === 'needs_revision'),
+  })
+  const chapterActionLoading = Boolean(
+    generatingProse || deliveryActionLoading || preDraftBriefLoading || editorReportLoading,
+  )
+  const runChapterWorkflowAction = (key: string) => {
+    if (key === 'generate') {
+      onGenerateCurrentChapterProse()
+      return
+    }
+    if (key === 'repair_generate') {
+      onRepairAndGenerateCurrentChapter()
+      return
+    }
+    if (key === 'repair_materials') {
+      onRepairAndGenerateCurrentChapter()
+      return
+    }
+    if (key === 'open_story_assets') {
+      onOpenStoryAssets()
+      return
+    }
+    if (key === 'open_generation_diagnostics') {
+      onOpenGenerationDiagnostics()
+      return
+    }
+    if (key === 'open_versions') {
+      onOpenVersionHistory?.()
+      return
+    }
+    if (key === 'view_brief') {
+      setWritingAuxCollapsed(false)
+      return
+    }
+    if (key === 'view_quality') {
+      onFocusQualityPanel?.()
+      onOpenQualityCard()
+      return
+    }
+    if (key === 'refresh_current_quality' || key === 'create_editor_report' || key === 'apply_editor_revision' || key === 'sync_story_state' || key === 'accept_chapter_and_continue') {
+      onDeliveryAction?.(key as any)
+      return
+    }
+  }
   const writingAuxToggleLabel = writingAuxCollapsed ? '展开辅助面板' : '收起辅助面板'
   const writingAuxToggleHint = writingAuxCollapsed
     ? '辅助面板已收起，编辑器优先显示'
@@ -499,21 +563,10 @@ export function WorkspaceCenter({
             </div>
             <div className="novel-editor-primary-entry">
               <div className="novel-editor-primary-cluster">
-                <Tag className="novel-editor-primary-phase" bordered={false}>{aiResponsibility.phaseLabel}</Tag>
-                <Tooltip title={`${recommendedAction.label}：${recommendedAction.reason}`}>
-                  <Button
-                    type="primary"
-                    size="small"
-                    className={commandClass(recommendedAction.key, 'novel-editor-primary-command novel-editor-primary-action-main')}
-                    icon={<PlayCircleOutlined />}
-                    loading={recommendedToolbarLoading}
-                    onClick={runRecommendedToolbarAction}
-                  >
-                    {recommendedAction.label}
-                  </Button>
-                </Tooltip>
+                <Tag className="novel-editor-primary-phase" bordered={false}>{chapterWorkflow.phaseLabel}</Tag>
+                <Text type="secondary" style={{ fontSize: 12 }}>{aiResponsibility.phaseLabel}</Text>
               </div>
-              {recommendedAction.phase === 'draft' && renderWordTargetControl()}
+              {(chapterWorkflow.phase === 'empty' || chapterWorkflow.phase === 'blocked_materials' || recommendedAction.phase === 'draft') && renderWordTargetControl()}
             </div>
             <div className="novel-editor-toolbar-controls">
               <Text className="novel-editor-word-count" type="secondary">{chapterWordCount(activeChapter)} 字</Text>
@@ -567,6 +620,30 @@ export function WorkspaceCenter({
                 </div>
               )}
             </div>
+          </div>
+
+          <div style={{ flexShrink: 0, padding: '10px 16px 0' }}>
+            <ChapterActionBar
+              presenter={chapterWorkflow}
+              loading={chapterActionLoading}
+              wordCountLabel={`${chapterWordCount(activeChapter)} 字`}
+              saveStatusLabel={saveStatus === 'saved' ? '已保存' : saveStatus === 'saving' ? '保存中' : saveStatus === 'error' ? '保存失败' : undefined}
+              handlers={{
+                onGenerate: () => runChapterWorkflowAction('generate'),
+                onRepairGenerate: () => runChapterWorkflowAction('repair_generate'),
+                onRepairMaterials: () => runChapterWorkflowAction('repair_materials'),
+                onRefreshQuality: () => runChapterWorkflowAction('refresh_current_quality'),
+                onCreateEditorReport: () => runChapterWorkflowAction('create_editor_report'),
+                onApplyEditorRevision: () => runChapterWorkflowAction('apply_editor_revision'),
+                onSyncStoryState: () => runChapterWorkflowAction('sync_story_state'),
+                onAcceptAndContinue: () => runChapterWorkflowAction('accept_chapter_and_continue'),
+                onOpenStoryAssets: () => runChapterWorkflowAction('open_story_assets'),
+                onOpenDiagnostics: () => runChapterWorkflowAction('open_generation_diagnostics'),
+                onOpenVersions: () => runChapterWorkflowAction('open_versions'),
+                onOpenBrief: () => runChapterWorkflowAction('view_brief'),
+                onOpenQuality: () => runChapterWorkflowAction('view_quality'),
+              }}
+            />
           </div>
 
           {!isImmersiveShell && (

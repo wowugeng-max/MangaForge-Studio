@@ -75,7 +75,7 @@ export function StoryPlanningWorkspace({
                 icon={overviewCollapsed ? <DownOutlined /> : <UpOutlined />}
                 onClick={() => setOverviewCollapsed(value => !value)}
               >
-                {overviewCollapsed ? '展开规划概览' : '收起规划概览'}
+                {overviewCollapsed ? '展开大纲概览' : '收起大纲概览'}
               </Button>
               {!overviewCollapsed && (
                 <>
@@ -93,7 +93,7 @@ export function StoryPlanningWorkspace({
                 </>
               )}
               <Button type="primary" icon={<EditOutlined />} onClick={() => onAction('enter_chapter_writing')}>
-                进入当前章写作
+                进入写作
               </Button>
             </Space>
           </div>

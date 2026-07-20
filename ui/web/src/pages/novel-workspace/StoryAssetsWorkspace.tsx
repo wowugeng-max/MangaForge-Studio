@@ -44,20 +44,20 @@ export function StoryAssetsWorkspace({
         <div className="novel-story-assets-titleblock">
           <Space size={8} align="center">
             <DatabaseOutlined className="novel-story-assets-icon" />
-            <Title level={4}>设定资产</Title>
+            <Title level={4}>资产</Title>
             <Tag color={hasWritingBible ? 'green' : 'gold'} bordered={false}>
               {hasWritingBible ? '写作圣经已配置' : '待配置写作圣经'}
             </Tag>
           </Space>
           <Text type="secondary">
-            集中维护角色、能力、物品、势力、地点、剧情线和新资产候选；这些资产会进入章节任务书、正文生成和交稿后的状态回填。
+            角色、设定与本章关联。写作缺材料时可从这里补建并回填。
           </Text>
         </div>
         <Space wrap size={8}>
           <Button size="small" type="primary" icon={<BookOutlined />} onClick={onOpenWritingBibleEditor}>写作圣经</Button>
           <Button size="small" icon={<SettingOutlined />} onClick={onOpenStoryStateEditor}>故事状态机</Button>
-          <Button size="small" onClick={onOpenCreativeCards}>资料卡</Button>
-          <Button size="small" onClick={onOpenReferenceEngineering}>参考工程</Button>
+          <Button size="small" type="text" onClick={onOpenCreativeCards}>资料卡</Button>
+          <Button size="small" type="text" onClick={onOpenReferenceEngineering}>参考工程</Button>
         </Space>
       </section>
 

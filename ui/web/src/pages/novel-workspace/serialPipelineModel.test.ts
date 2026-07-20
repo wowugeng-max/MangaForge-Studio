@@ -82,7 +82,7 @@ describe('serial pipeline view model', () => {
       severity: 'blocked',
       blockerLabel: '交稿验收：质量复检',
       reason: '当前正文缺少通过的质量复检。',
-      repairAreaLabel: '质检修订',
+      repairAreaLabel: '质检',
       repairActionLabel: '复检当前正文',
       verificationLabel: '复检、修订和状态同步完成后，回到流水线确认交稿验收通过。',
     })

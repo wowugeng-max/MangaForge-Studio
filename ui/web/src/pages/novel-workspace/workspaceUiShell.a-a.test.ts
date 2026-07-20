@@ -50,10 +50,10 @@ describe('commercial writing workspace UI shell a a', () => {
     const component = workspaceCenterSource()
     const css = source('WorkspaceCenter.css')
 
-    expect(component).toContain('runRecommendedToolbarAction')
-    expect(component).toContain('recommendedToolbarLoading')
+    expect(component).toContain('runChapterWorkflowAction')
+    expect(component).toContain('chapterActionLoading')
     expect(component).toContain('novel-editor-primary-entry')
-    expect(component).toContain('novel-editor-primary-action-main')
+    expect(component).toContain('ChapterActionBar')
     expect(component).toContain('novel-editor-secondary-actions')
     expect(component).toContain('novel-editor-command-pill')
     expect(component).toContain('novel-word-preset')
@@ -75,7 +75,7 @@ describe('commercial writing workspace UI shell a a', () => {
     expect(component).not.toContain('novel-ai-responsibility-strip')
     expect(css).toContain('.novel-editor-command-pill')
     expect(css).toContain('.novel-editor-primary-entry')
-    expect(css).toContain('.novel-editor-primary-action-main')
+    expect(component).toContain('buildChapterWorkflowPresenter')
     expect(css).toContain('.novel-editor-secondary-actions')
     expect(css).toContain('.novel-editor-toolbar-meta')
     expect(css).toContain('grid-template-columns')
@@ -200,11 +200,16 @@ describe('commercial writing workspace UI shell a a', () => {
 
   test('surfaces a direct unattended shortcut inside the writing cockpit', () => {
     const component = writingCockpitPanelSource()
-    const projectWorkspace = projectWorkspaceSource()
+    const topbar = source('shell/workspace-topbar.tsx')
+    const core = source('shell/workspace-core-area.ts')
 
+    // Unattended is demoted from cockpit primary chrome into the topbar More tools menu.
     expect(component).toContain('onOpenProductionOps')
-    expect(component).toContain('无人值守')
-    expect(projectWorkspace).toContain('onOpenProductionOps={() => setWorkspaceArea(\'productionOps\')}')
+    expect(topbar).toContain('WORKSPACE_TOOL_MENU_DEFS')
+    expect(topbar).toContain('setWorkspaceArea(item.key)')
+    expect(topbar).toContain('更多')
+    expect(core).toContain("key: 'productionOps'")
+    expect(core).toContain('生产运营 / 无人值守')
   })
 
   test('surfaces the oh-story longform workflow in the writing cockpit', () => {
@@ -475,18 +480,21 @@ describe('commercial writing workspace UI shell a a', () => {
   })
 
   test('keeps a top bar shortcut for unattended writing visible from any workspace area', () => {
-    const projectWorkspace = projectWorkspaceSource()
-    const projectWorkspaceCss = source('../NovelProjectWorkspace.css')
-    const topbarBlock = projectWorkspace.slice(
-      projectWorkspace.indexOf('className="novel-workspace-topbar"'),
-      projectWorkspace.indexOf("{workspaceArea === 'chapterWriting' && ("),
-    )
+    const topbar = source('shell/workspace-topbar.tsx')
+    const core = source('shell/workspace-core-area.ts')
+    const tabs = source('shell/workspace-area-tabs.tsx')
 
-    expect(topbarBlock).toContain('novel-unattended-topbar-entry')
-    expect(topbarBlock).toContain("setWorkspaceArea('productionOps')")
-    expect(topbarBlock).toContain('无人值守')
-    expect(projectWorkspaceCss).toContain('.novel-unattended-topbar-entry')
-    expect(projectWorkspaceCss).toContain('flex: 0 0 auto')
+    // Unattended stays reachable from More tools, not as a permanent primary topbar button.
+    expect(topbar).toContain('更多')
+    expect(topbar).toContain('WORKSPACE_TOOL_MENU_DEFS')
+    expect(topbar).toContain('setWorkspaceArea(item.key)')
+    expect(core).toContain("key: 'productionOps'")
+    expect(core).toContain('生产运营 / 无人值守')
+    expect(core).toContain("label: '大纲'")
+    expect(core).toContain("label: '写作'")
+    expect(core).toContain("label: '资产'")
+    expect(tabs).not.toContain("label: '自动创作'")
+    expect(tabs).toContain('WORKSPACE_PRIMARY_TAB_DEFS')
   })
 
   test('shows the shared six-stage AI creation pipeline inside the auto creation director', () => {

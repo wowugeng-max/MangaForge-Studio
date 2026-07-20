@@ -1,4 +1,6 @@
 import React from 'react'
+import { Button, Card, Space, Typography } from 'antd'
+import { DownOutlined, UpOutlined } from '@ant-design/icons'
 import type { StoryPlanningBoardPanelsProps } from './story-planning-board-types'
 import { StoryPlanningOpsPanels } from './story-planning-board-panels-ops'
 import { StoryPlanningAudiencePanels } from './story-planning-board-panels-audience'
@@ -6,12 +8,40 @@ import { StoryPlanningStoryPanels } from './story-planning-board-panels-story'
 
 export type { StoryPlanningBoardLoadingKey, StoryPlanningBoardPanelsProps } from './story-planning-board-types'
 
+const { Text } = Typography
+
 export function StoryPlanningBoardPanels(props: StoryPlanningBoardPanelsProps) {
+  const [advancedOpen, setAdvancedOpen] = React.useState(false)
+
   return (
     <>
-      <StoryPlanningOpsPanels {...props} />
-      <StoryPlanningAudiencePanels {...props} />
+      {/* Core outline / story structure first */}
       <StoryPlanningStoryPanels {...props} />
+
+      <Card size="small" styles={{ body: { padding: 12 } }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <Space direction="vertical" size={2}>
+            <Text strong>长线视图（高级）</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              作战台、契约雷达、发布节奏等运营面板默认收起，不挡大纲主路径。
+            </Text>
+          </Space>
+          <Button
+            size="small"
+            icon={advancedOpen ? <UpOutlined /> : <DownOutlined />}
+            onClick={() => setAdvancedOpen(value => !value)}
+          >
+            {advancedOpen ? '收起长线视图' : '展开长线视图'}
+          </Button>
+        </div>
+      </Card>
+
+      {advancedOpen ? (
+        <>
+          <StoryPlanningOpsPanels {...props} />
+          <StoryPlanningAudiencePanels {...props} />
+        </>
+      ) : null}
     </>
   )
 }
