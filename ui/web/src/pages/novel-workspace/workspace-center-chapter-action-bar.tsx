@@ -1,5 +1,5 @@
 import React from 'react'
-import { Button, Space, Tag, Typography } from 'antd'
+import { Button, Space, Tag, Tooltip, Typography } from 'antd'
 import {
   buildChapterWorkflowPresenter,
   chapterWorkflowStepLabels,
@@ -8,7 +8,7 @@ import {
 } from './chapter-workflow-presenter'
 import type { WritingCockpitActionKey } from './writingCockpitModel'
 
-const { Text } = Typography
+const { Text, Title } = Typography
 
 export type ChapterActionBarHandlers = {
   onGenerate: () => void
@@ -29,19 +29,31 @@ export type ChapterActionBarHandlers = {
 export function ChapterActionBar({
   input,
   loading = false,
+  title,
+  statusTags = [],
   wordCountLabel,
   saveStatusLabel,
+  trailing,
+  detailsOpen = false,
+  onToggleDetails,
+  detailsSummary,
   handlers,
   presenter: presenterOverride,
 }: {
-  input: ChapterWorkflowInput
+  input?: ChapterWorkflowInput
   loading?: boolean
+  title?: React.ReactNode
+  statusTags?: Array<{ key: string; label: string; color?: string; tooltip?: string }>
   wordCountLabel?: string
   saveStatusLabel?: string
+  trailing?: React.ReactNode
+  detailsOpen?: boolean
+  onToggleDetails?: () => void
+  detailsSummary?: string
   handlers: ChapterActionBarHandlers
   presenter?: ChapterWorkflowPresenter
 }) {
-  const presenter = presenterOverride || buildChapterWorkflowPresenter(input)
+  const presenter = presenterOverride || buildChapterWorkflowPresenter(input || {})
   const steps = chapterWorkflowStepLabels()
 
   const run = (key: string) => {
@@ -98,42 +110,41 @@ export function ChapterActionBar({
         ? 'gold'
         : 'blue'
 
-  const primaryType = presenter.primaryAction.kind === 'danger'
-    ? 'primary'
-    : 'primary'
-
   const primaryDanger = presenter.primaryAction.kind === 'danger'
 
   return (
-    <div className="chapter-action-bar" style={{
-      border: '1px solid #e6ebf2',
-      borderRadius: 14,
-      background: '#fff',
-      padding: '12px 14px',
-      display: 'grid',
-      gap: 10,
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-        <Space direction="vertical" size={6} style={{ minWidth: 0 }}>
-          <Space wrap size={[6, 6]}>
+    <div className="chapter-action-bar">
+      <div className="chapter-action-bar-top">
+        <div className="chapter-action-bar-titleblock">
+          {title ? (
+            <div className="chapter-action-bar-title-row">
+              {typeof title === 'string' ? (
+                <Title level={5} className="chapter-action-bar-title">{title}</Title>
+              ) : title}
+            </div>
+          ) : null}
+          <div className="chapter-action-bar-tags">
             <Tag color={phaseColor} bordered={false}>{presenter.phaseLabel}</Tag>
+            {statusTags.map(tag => (
+              <Tooltip key={tag.key} title={tag.tooltip || tag.label}>
+                <Tag color={tag.color || 'default'} bordered={false}>{tag.label}</Tag>
+              </Tooltip>
+            ))}
             {wordCountLabel ? <Tag bordered={false}>{wordCountLabel}</Tag> : null}
             {saveStatusLabel ? <Tag color="green" bordered={false}>{saveStatusLabel}</Tag> : null}
-          </Space>
-          <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.55 }}>
-            {presenter.reasonText}
-          </Text>
-        </Space>
-        <Space wrap>
+          </div>
+        </div>
+
+        <div className="chapter-action-bar-actions">
           <Button
-            type={primaryType as any}
+            type="primary"
             danger={primaryDanger}
             loading={loading}
             onClick={() => run(presenter.primaryAction.key)}
           >
             {presenter.primaryAction.label}
           </Button>
-          {presenter.secondaryActions.map(action => (
+          {presenter.secondaryActions.slice(0, 2).map(action => (
             <Button
               key={`${action.key}-${action.label}`}
               type={action.kind === 'ghost' ? 'text' : 'default'}
@@ -142,25 +153,29 @@ export function ChapterActionBar({
               {action.label}
             </Button>
           ))}
-        </Space>
+          {trailing}
+        </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))`, gap: 6 }}>
+
+      <div className="chapter-action-bar-reason-row">
+        <Text type="secondary" className="chapter-action-bar-reason">
+          {presenter.reasonText}
+        </Text>
+        {onToggleDetails ? (
+          <Button type="link" size="small" onClick={onToggleDetails} className="chapter-action-bar-details-toggle">
+            {detailsOpen ? '收起详情' : (detailsSummary ? `详情 · ${detailsSummary}` : '详情')}
+          </Button>
+        ) : null}
+      </div>
+
+      <div className="chapter-action-bar-steps" aria-label="写作闭环进度">
         {steps.map((label, index) => {
           const done = presenter.stepsDone[index]
           const now = presenter.stepIndex === index
           return (
             <div
               key={label}
-              style={{
-                textAlign: 'center',
-                fontSize: 11,
-                fontWeight: 600,
-                borderRadius: 10,
-                padding: '7px 4px',
-                border: `1px solid ${done ? '#bfe8d1' : now ? '#cdddff' : '#e6ebf2'}`,
-                background: done ? '#e9f8f0' : now ? '#eaf1ff' : '#f7f9fc',
-                color: done ? '#1f9d63' : now ? '#2f6fed' : '#66758b',
-              }}
+              className={`chapter-action-bar-step${done ? ' is-done' : ''}${now ? ' is-now' : ''}`}
             >
               {label}
             </div>
