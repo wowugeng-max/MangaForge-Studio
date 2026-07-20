@@ -3566,3 +3566,23 @@
 .novel-delivery-chip-panel-action:hover {
   background: #eef4ff;
 }
+
+
+.novel-delivery-chip-panel-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+.novel-chapter-handoff-card {
+  cursor: pointer;
+  transition: box-shadow .15s ease, border-color .15s ease;
+}
+.novel-chapter-handoff-card:hover,
+.novel-chapter-handoff-card:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px rgba(47, 111, 237, 0.2);
+}
+.novel-chapter-handoff-grid > .novel-chapter-handoff-card,
+.novel-chapter-handoff-grid > div {
+  min-width: 0;
+}
