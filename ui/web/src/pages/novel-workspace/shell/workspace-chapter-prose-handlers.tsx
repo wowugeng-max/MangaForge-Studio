@@ -1,5 +1,7 @@
 import React from 'react'
 import { message, Modal } from 'antd'
+import { chapterHasProse, displayValue } from '../utils'
+import { renderGenerationResultDiffContentView } from './workspace-commercial-ops-views'
 
 export type ChapterProseHandlerDeps = {
   proseBatchCancelRef: any
@@ -27,6 +29,9 @@ export type ChapterProseHandlerDeps = {
   setStreamingProgress: any
   setStreamingText: any
   showGenerationBlockedModal: any
+  worldbuilding: any
+  characters: any
+  outlines: any
 }
 
 export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
@@ -55,6 +60,9 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
   const setStreamingProgress = deps.setStreamingProgress
   const setStreamingText = deps.setStreamingText
   const showGenerationBlockedModal = deps.showGenerationBlockedModal
+  const worldbuilding = Array.isArray(deps.worldbuilding) ? deps.worldbuilding : []
+  const characters = Array.isArray(deps.characters) ? deps.characters : []
+  const outlines = Array.isArray(deps.outlines) ? deps.outlines : []
 
   const generateCurrentChapterProse = async (options: { allowIncomplete?: boolean; forceSceneCards?: boolean; targetChapterId?: number } = {}) => {
     const targetChapter = options.targetChapterId

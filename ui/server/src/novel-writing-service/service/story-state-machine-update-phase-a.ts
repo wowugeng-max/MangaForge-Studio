@@ -39,6 +39,9 @@ import {
   buildChapterTitleUniquenessSyncReport,
 } from '../../novel-writing/title-uniqueness'
 import {
+  STORYLINE_TYPES,
+} from '../../routes/novel-setting-helpers-shared'
+import {
   hasProseTransportIncompleteDetails,
   rejectedProseTransportFinishReason,
 } from '../quality/prose-transport-admission'

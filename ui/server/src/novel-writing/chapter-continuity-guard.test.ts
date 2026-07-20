@@ -249,6 +249,30 @@ const CH23_PROSE_INTERIOR = `
 `
 
 describe('late-arc primary ending hooks', () => {
+  test('stale 1号楼 ending_hook cannot override true-tail 2号楼 seeker climax', () => {
+    const prose = `
+江哲嘴角勾起冰冷弧度。双重权柄碎片共鸣。
+
+【3……2……1……】
+【游戏开始。】
+【“寻找者”已降临。】
+
+通往2号楼的走廊血雾翻滚。大堂里的血肉王座都停止蠕动，缩成干瘪球体。
+
+一个庞大身影走出血雾——红衣级怪谈，2号楼保安队长！它拖着巨型消防斧，脸中央是一只巨大猩红眼球。
+
+“找到……你们了……”
+
+抹杀规则轰然降临！
+`
+    const hooks = extractPrimaryEndingHooks({
+      chapter_text: prose,
+      ending_hook: '章末落在：1号楼内部/血肉王座',
+    })
+    expect(hooks[0]?.key).toBe('building_two_seeker')
+    expect(hooks[0]?.label).toMatch(/2号楼|寻找者/)
+  })
+
   test('ch23-like bronze-door ending is building interior, not residual property cleanup', () => {
     const hooks = extractPrimaryEndingHooks({
       chapter_text: CH23_PROSE_INTERIOR,

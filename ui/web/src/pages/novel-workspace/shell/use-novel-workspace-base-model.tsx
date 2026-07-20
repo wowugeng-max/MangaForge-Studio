@@ -819,6 +819,11 @@ export function useNovelWorkspaceBaseModel() {
     writingBibleForm,
     writingBibleGenerating,
     writingBibleOpen,
+    latestCockpitEditorReport,
+    loadActiveChapterContextPackage,
+    refreshProseQualityForChapter: coreHandlers.refreshProseQualityForChapter,
+    openChapterQualityCardForChapter: coreHandlers.openChapterQualityCardForChapter,
+    openMaterialRepairPlan: coreHandlers.openMaterialRepairPlan,
     writingCockpitModel,
   }
 }

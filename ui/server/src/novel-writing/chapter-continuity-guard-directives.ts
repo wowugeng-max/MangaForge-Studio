@@ -481,14 +481,6 @@ export function assessPrimaryOpeningHookContinuity(input: {
     }
   }
 
-  const directive = detectOpeningHookMissDirective({
-    chapter: { chapter_text: chapterText },
-    previousChapter,
-  })
-  if (!directive) {
-    return { required: false, passed: true, failure: null, directive: null }
-  }
-  // Only hard-require when previous ending has a clear forward hook cluster or delivered landing.
   const hooks = extractPrimaryEndingHooks(previousChapter)
   const landings = extractDeliveredClimaxLandings(previousChapter)
   const hard = landings.length > 0 || hooks.some(item => [
@@ -497,9 +489,24 @@ export function assessPrimaryOpeningHookContinuity(input: {
     'kitchen_entity',
     'elevator_anomaly',
     'building_one_interior',
+    'building_two_seeker',
     'authority_fragment',
     'companion_chosen',
   ].includes(item.key))
+
+  const directive = detectOpeningHookMissDirective({
+    chapter: { chapter_text: chapterText },
+    previousChapter,
+  })
+  if (!directive) {
+    // Hard primary class already owns continuity for this arc beat.
+    // Report required=true so callers do not re-run brittle fragment gates.
+    if (hard) {
+      return { required: true, passed: true, failure: null, directive: null }
+    }
+    return { required: false, passed: true, failure: null, directive: null }
+  }
+  // Only hard-require when previous ending has a clear forward hook cluster or delivered landing.
   if (!hard) {
     return { required: false, passed: true, failure: null, directive }
   }

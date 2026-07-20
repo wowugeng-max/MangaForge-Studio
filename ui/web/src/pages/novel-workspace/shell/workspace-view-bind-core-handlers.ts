@@ -685,9 +685,11 @@ export function bindNovelWorkspaceCoreHandlers(deps: Record<string, any>) {
     autoCreationDirectorModel,
     chapterWordTargetPayload,
     chapters,
+    characters,
     confirmReferenceReady,
     flushPendingSave,
     loadProjectModules,
+    outlines,
     projectId,
     selectedModelId,
     setChapters,
@@ -705,6 +707,7 @@ export function bindNovelWorkspaceCoreHandlers(deps: Record<string, any>) {
     setProseProgress,
     setStepProseLoading,
     sortedChapters,
+    worldbuilding,
   })
   generateCurrentChapterProseRef.current = generateCurrentChapterProse
 

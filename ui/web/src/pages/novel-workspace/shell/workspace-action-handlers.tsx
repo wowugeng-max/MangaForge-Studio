@@ -37,8 +37,16 @@ export type WorkspaceActionHandlerDeps = {
   openStoryAssetsWorkspace: any
   openStoryStateEditor: any
   openWritingBibleEditor: any
+  openChapterQualityCardForChapter: any
+  openMaterialRepairPlan: any
+  loadActiveChapterContextPackage: any
+  latestCockpitEditorReport: any
+  generateSceneCardsForActiveChapter: any
   recentFatigueRollingPlanIntent: any
   refreshActiveProseQuality: any
+  refreshProseQualityForChapter: any
+  recordStorylineDiffDecision: any
+  createStorylineDecisionTasks: any
   runRecords: any
   runRollingPlan: any
   selectChapterForWriting: any
@@ -84,8 +92,16 @@ export function createWorkspaceActionHandlers(deps: WorkspaceActionHandlerDeps) 
   const openStoryAssetsWorkspace = deps.openStoryAssetsWorkspace
   const openStoryStateEditor = deps.openStoryStateEditor
   const openWritingBibleEditor = deps.openWritingBibleEditor
+  const openChapterQualityCardForChapter = deps.openChapterQualityCardForChapter
+  const openMaterialRepairPlan = deps.openMaterialRepairPlan
+  const loadActiveChapterContextPackage = deps.loadActiveChapterContextPackage
+  const latestCockpitEditorReport = deps.latestCockpitEditorReport
+  const generateSceneCardsForActiveChapter = deps.generateSceneCardsForActiveChapter
   const recentFatigueRollingPlanIntent = deps.recentFatigueRollingPlanIntent
   const refreshActiveProseQuality = deps.refreshActiveProseQuality
+  const refreshProseQualityForChapter = deps.refreshProseQualityForChapter
+  const recordStorylineDiffDecision = deps.recordStorylineDiffDecision
+  const createStorylineDecisionTasks = deps.createStorylineDecisionTasks
   const runRecords = deps.runRecords
   const runRollingPlan = deps.runRollingPlan
   const selectChapterForWriting = deps.selectChapterForWriting
@@ -231,9 +247,24 @@ export function createWorkspaceActionHandlers(deps: WorkspaceActionHandlerDeps) 
       case 'refresh_current_quality':
         setWorkspaceArea('chapterWriting')
         if (targetChapterId) {
-          void refreshProseQualityForChapter(targetChapterId, 'writing_cockpit')
+          if (typeof refreshProseQualityForChapter === 'function') {
+            void refreshProseQualityForChapter(targetChapterId, 'writing_cockpit')
+          } else {
+            void (async () => {
+              if (Number(activeChapter?.id) !== Number(targetChapterId)) {
+                const saved = await selectChapterForWriting(targetChapterId)
+                if (!saved) return
+              }
+              const chapter = sortedChapters.find((item: any) => Number(item.id) === Number(targetChapterId))
+                || activeChapter
+                || { id: targetChapterId }
+              await refreshActiveProseQuality('writing_cockpit', chapter)
+            })()
+          }
         } else if (activeChapter) {
           void refreshActiveProseQuality('writing_cockpit')
+        } else {
+          message.warning('请先选择章节')
         }
         break
       case 'create_editor_report':

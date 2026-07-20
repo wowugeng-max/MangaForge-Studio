@@ -4,6 +4,15 @@ import { normalizeLongformCompass } from '../../novel-writing/longform-compass'
 import { reviewTimestamp } from './review-lookup'
 import { compactBriefText, uniqueBriefStrings } from './text-utils'
 
+const LONGFORM_BATTLE_LANE_LABELS: Record<string, string> = {
+  story_core: '核心守恒',
+  reader_pull: '读者拉力',
+  storyline: '剧情线调度',
+  volume_beat: '卷级爆点',
+  innovation_ip: '创新/IP场面',
+  production_fuel: '生产燃料',
+}
+
 export function isLongformBattleLaneRisk(status: string, score: number | null) {
   const normalized = status.toLowerCase()
   if (['block', 'blocked', 'warn', 'warning', 'needs_action', 'risk'].includes(normalized)) return true

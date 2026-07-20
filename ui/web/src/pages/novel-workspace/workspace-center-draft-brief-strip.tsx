@@ -9,7 +9,8 @@ import {
 const { Text } = Typography
 
 export function WorkspaceDraftBriefStrip(props: Record<string, any>) {
-  const { draftBriefActionLoading, draftBriefSummary, generatingProse, generationTargetWordCount, onDisableStyleSamples, onLockStyleSamples, onReplaceStyleSamples, onSavePreDraftBrief, openChapterBlueprintEditor, preDraftBriefLoading, runDraftBriefAction, styleSampleActionDisabled, styleSampleActionLoading } = props
+  const { draftBriefActionLoading, draftBriefSummary, generatingProse, generationTargetWordCount, onDisableStyleSamples, onLockStyleSamples, onReplaceStyleSamples, onSavePreDraftBrief, openChapterBlueprintEditor, preDraftBriefLoading, runDraftBriefAction, sceneCardCount = 0, sceneCards = [], styleSampleActionDisabled, styleSampleActionLoading } = props
+  const resolvedSceneCardCount = Number(sceneCardCount || (Array.isArray(sceneCards) ? sceneCards.length : 0) || 0)
   return (
     <>
         {draftBriefSummary.visible && (
@@ -41,7 +42,7 @@ export function WorkspaceDraftBriefStrip(props: Record<string, any>) {
                 <div><span>情绪曲线</span><strong>{draftBriefSummary.briefFields.emotionalCurve || '待生成任务书'}</strong></div>
                 <div><span>关键设定</span><strong>{draftBriefSummary.briefFields.keySettings || '无明确必用设定'}</strong></div>
                 <div><span>禁揭/禁写</span><strong>{draftBriefSummary.briefFields.forbiddenContent || '无明确禁写项'}</strong></div>
-                <div><span>场景预算</span><strong>{draftBriefSummary.briefFields.sceneBudget || `${sceneCards.length} 个场景`}</strong></div>
+                <div><span>场景预算</span><strong>{draftBriefSummary.briefFields.sceneBudget || `${resolvedSceneCardCount} 个场景`}</strong></div>
                 <div><span>字数目标</span><strong>{draftBriefSummary.briefFields.wordBudget || `${generationTargetWordCount} 字`}</strong></div>
                 <div><span>章末钩子</span><strong>{draftBriefSummary.briefFields.endingHook || '待补齐'}</strong></div>
               </div>

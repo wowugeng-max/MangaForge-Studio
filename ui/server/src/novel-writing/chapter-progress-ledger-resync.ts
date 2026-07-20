@@ -330,14 +330,42 @@ export function applyProgressResyncToChapterPlan(
     ], 16))
   }
 
+  // When previous true-ending is a later forward hook (e.g. 2号楼寻找者), do not keep stale 1号楼 seeds.
+  const previousTrueHooks = extractPrimaryEndingHooks({
+    chapter_text: previousText,
+    ending_hook: previousTrueEnding || previousText.slice(-180),
+  })
+  const seekerHook = previousTrueHooks.find(item => item.key === 'building_two_seeker') || null
+  if (seekerHook && unwritten && !interiorLanding) {
+    nextGoal = compactText(
+      `承接上一章章末「${seekerHook.label}」：优先应对2号楼寻找者/保安队长抹杀压力与规则对峙；禁止回放门外撞门突入与已结束的中段场景`,
+      240,
+    )
+    nextSummary = compactText(nextGoal, 220)
+    nextConflict = '2号楼寻找者抹杀对峙；门内规则压力'
+    must_advance.splice(0, must_advance.length, ...uniqueTexts([
+      '2号楼寻找者/保安队长抹杀压力',
+      '规则对峙与代价释放',
+      '门内存活与下一步突破',
+    ], 6))
+    forbidden_repeats.splice(0, forbidden_repeats.length, ...uniqueTexts([
+      '不要回放特权卡撞开青铜巨门入内',
+      '不要回放无头保安通道围杀到进门',
+      '不要把章末钩子回退成1号楼内部/血肉王座冷开场',
+      '不要重开已关闭的中段平行线',
+    ], 16))
+  }
+
   let nextEndingHook = endingHook
   if (unwritten) {
     if (interiorLanding) {
       // Post-state seed, not a second copy of the crash climax.
       nextEndingHook = compactText(interiorLanding.post_state, 160)
+    } else if (seekerHook) {
+      nextEndingHook = compactText(previousTrueEnding || seekerHook.evidence, 160)
     } else if (
       previousTrueEnding
-      && (outlineLikeEnding || !endingHook || /电梯\/未定义|1号楼通行证去向|清场倒计时/.test(endingHook))
+      && (outlineLikeEnding || !endingHook || /电梯\/未定义|1号楼通行证去向|清场倒计时|1号楼内部|血肉王座/.test(endingHook))
     ) {
       nextEndingHook = previousTrueEnding
     }
@@ -400,7 +428,7 @@ export function applyProgressResyncToChapterPlan(
     chapter_summary: nextSummary,
     conflict: nextConflict,
     ...(nextEndingHook && nextEndingHook !== endingHook ? { ending_hook: nextEndingHook } : {}),
-    ...(interiorLanding && unwritten ? { ending_hook: nextEndingHook } : {}),
+    ...((interiorLanding || seekerHook) && unwritten ? { ending_hook: nextEndingHook } : {}),
     raw_payload: rawPayload,
   }
 

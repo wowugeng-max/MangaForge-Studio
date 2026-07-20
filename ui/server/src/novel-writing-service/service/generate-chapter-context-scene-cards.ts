@@ -153,7 +153,7 @@ if (preflightNeedsMaterialRepair && options.auto_repair_missing_material === tru
   const repairResult = await autoRepairChapterPreflightGaps(activeWorkspace, project, chapter, contextPackage, preferredModelId, { ...llmControlOptions, persist: false })
   stagedPreflightRepair = repairResult
   chapter = repairResult.chapter || chapter
-  chapters = chapters.map(item => item.id === chapterId ? chapter : item)
+  chapters = chapters.map(item => item.id === chapter.id ? chapter : item)
   worldbuilding = repairResult.worldbuilding || worldbuilding
   characters = repairResult.characters || characters
   settings = repairResult.settings || settings

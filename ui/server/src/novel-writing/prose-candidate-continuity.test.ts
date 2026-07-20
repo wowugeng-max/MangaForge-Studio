@@ -236,4 +236,34 @@ describe('continuity-safe prose candidate selection', () => {
     expect(assessInitialProseOpeningContinuity(skipped, context)).toMatchObject({ required: true, passed: false })
   })
 
+
+  test('does not double-block initial draft when hard primary ending hook already passed', () => {
+    const previousText = `
+江哲站在大堂中央。通往2号楼的走廊血雾翻滚。
+红衣级怪谈——2号楼保安队长！它拖着巨型消防斧，脸中央是一只巨大猩红眼球。
+“找到……你们了……”
+抹杀规则轰然降临！
+`.repeat(3)
+    const context = {
+      continuity: {
+        previous_chapter: {
+          chapter_no: 25,
+          chapter_text: previousText,
+          ending_hook: '2号楼保安队长（寻找者）降临大堂，抹杀规则锁定江哲',
+        },
+      },
+      chapter_target: {
+        previous_handoff: previousText.slice(-500),
+        requiredHandoffAnchors: ['暗金绢册', '地下通道', '老陈', '发热', '白色病房', '沈砚'],
+        scene_cards: [{ scene_no: 1, purpose: '对峙寻找者', characters_present: ['江哲'], location: '大堂' }],
+      },
+    }
+    const connected = chapterScaleText('抹杀规则的红光笼罩江哲。2号楼保安队长的猩红眼球死死锁住他，消防斧高高抬起。江哲双手插兜，冷声道：“来。”')
+    // Even if unrelated required anchors from another story are injected, primary hard-hook pass owns admission.
+    expect(assessInitialProseOpeningContinuity(connected, context)).toMatchObject({ required: true, passed: true, failure: null })
+    const skipped = chapterScaleText('青山精神病院完美通关，大夏国北方迷雾退散，举国狂欢。')
+    expect(assessInitialProseOpeningContinuity(skipped, context)).toMatchObject({ required: true, passed: false })
+  })
+
+
 })

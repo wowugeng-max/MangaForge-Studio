@@ -449,6 +449,8 @@ export function WorkspaceCenter({
       queueFocus={queueFocus}
       runDraftBriefAction={runDraftBriefAction}
       saveChapterBlueprintEditor={saveChapterBlueprintEditor}
+      sceneCardCount={sceneCards.length}
+      sceneCards={sceneCards}
       selectWritingQueueChapter={selectWritingQueueChapter}
       setBlueprintEditorError={setBlueprintEditorError}
       setBlueprintEditorOpen={setBlueprintEditorOpen}

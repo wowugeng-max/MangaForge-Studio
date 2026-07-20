@@ -94,6 +94,18 @@ export const CONTINUITY_CLUSTERS: ContinuityCluster[] = [
     forward: true,
   },
   {
+    key: 'building_two_seeker',
+    label: '2号楼寻找者对峙',
+    patterns: [
+      /2号楼保安队长|红衣级怪谈.{0,12}保安队长/,
+      /寻找者.{0,8}已降临|捉迷藏/,
+      /找到[…·.。]{0,4}你们了|抹杀规则.{0,8}轰然降临/,
+      /巨型消防斧|猩红.{0,6}眼球/,
+      /通往2号楼/,
+    ],
+    forward: true,
+  },
+  {
     key: 'authority_fragment',
     label: '权柄碎片对峙',
     patterns: [/权柄碎片|世界权柄/, /秩序.{0,6}混乱|混乱.{0,6}秩序/, /黑色石棺|黑色蚕茧/],
@@ -156,8 +168,22 @@ export function extractPrimaryEndingHooks(previousChapter: any = {}) {
   }
 
   for (const cluster of CONTINUITY_CLUSTERS) {
-    bump(cluster, scoreWithBonus(cluster, endingHook, 3), endingHook)
-    bump(cluster, scoreWithBonus(cluster, trueTail, 1), trueTail || endingHook)
+    const hookScore = scoreWithBonus(cluster, endingHook, 3)
+    const tailScore = scoreWithBonus(cluster, trueTail, 1)
+    const inTrueTail = scoreClusterInZone(cluster, trueTail) > 0
+    const inWideTail = scoreClusterInZone(cluster, wideTail) > 0
+    // Stale ending_hook metadata must not outrank the real chapter-ending zone.
+    // Only keep hook-field evidence when the same cluster is still visible in the true/wide tail,
+    // or when there is no usable true tail text.
+    if (hookScore > 0 && (trueTail.length < 40 || inTrueTail || inWideTail)) {
+      // When the hook only appears as atmospheric residue in wideTail but not trueTail,
+      // heavily demote so trueTail forward climax can win.
+      const adjustedHookScore = (!inTrueTail && inWideTail && trueTail.length >= 80)
+        ? Math.min(hookScore, 1.5)
+        : hookScore
+      bump(cluster, adjustedHookScore, endingHook)
+    }
+    bump(cluster, tailScore, trueTail || endingHook)
   }
 
   // Demote mid-body-only non-forward clusters even if they barely appear near the end of short chapters.
@@ -193,11 +219,20 @@ export function extractPrimaryEndingHooks(previousChapter: any = {}) {
   // Prefer concrete late-scene primary when residual early labels still score on incidental words.
   const lateSceneEvidence = compactText(trueTail || endingHook || wideTail, 180)
   const lateSceneCandidates: Array<{ key: string; label: string; score: number; evidence: string }> = []
-  if (/青铜巨门|血肉王座|门内大堂|撞进.{0,12}(黑暗|巨门)/.test(lateSceneEvidence)) {
+  if (/青铜巨门|血肉王座|门内大堂|撞进.{0,12}(黑暗|巨门)/.test(lateSceneEvidence)
+    && !/2号楼保安队长|寻找者.{0,8}已降临|抹杀规则.{0,8}轰然降临/.test(lateSceneEvidence)) {
     lateSceneCandidates.push({
       key: 'building_one_interior',
       label: '1号楼内部突入',
       score: 20,
+      evidence: lateSceneEvidence,
+    })
+  }
+  if (/2号楼保安队长|寻找者.{0,8}已降临|抹杀规则.{0,8}轰然降临|找到[…·.。]{0,4}你们了/.test(lateSceneEvidence)) {
+    lateSceneCandidates.push({
+      key: 'building_two_seeker',
+      label: '2号楼寻找者对峙',
+      score: 22,
       evidence: lateSceneEvidence,
     })
   }

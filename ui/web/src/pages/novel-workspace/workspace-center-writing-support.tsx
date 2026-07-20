@@ -40,6 +40,8 @@ export function WorkspaceCenterWritingSupport(props: Record<string, any>) {
     queueFocus,
     runDraftBriefAction,
     saveChapterBlueprintEditor,
+    sceneCardCount = 0,
+    sceneCards = [],
     selectWritingQueueChapter,
     setBlueprintEditorError,
     setBlueprintEditorOpen,
@@ -86,6 +88,8 @@ export function WorkspaceCenterWritingSupport(props: Record<string, any>) {
         draftBriefSummary={draftBriefSummary}
         generatingProse={generatingProse}
         generationTargetWordCount={generationTargetWordCount}
+        sceneCardCount={sceneCardCount}
+        sceneCards={sceneCards}
         onDisableStyleSamples={onDisableStyleSamples}
         onLockStyleSamples={onLockStyleSamples}
         onReplaceStyleSamples={onReplaceStyleSamples}

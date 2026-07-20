@@ -497,12 +497,3 @@ export function buildLongformMemoryCapsule(project: any, writingBible: any) {
   })
 }
 
-const LONGFORM_BATTLE_LANE_LABELS: Record<string, string> = {
-  story_core: '核心守恒',
-  reader_pull: '读者拉力',
-  storyline: '剧情线调度',
-  volume_beat: '卷级爆点',
-  innovation_ip: '创新/IP场面',
-  production_fuel: '生产燃料',
-}
-

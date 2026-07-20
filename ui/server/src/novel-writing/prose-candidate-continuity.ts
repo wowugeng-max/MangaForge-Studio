@@ -256,6 +256,13 @@ export function assessInitialProseOpeningContinuity(text: string, context: any =
         },
       }
     }
+    // When a hard primary ending-hook class already owns admission and the opening passed it,
+    // do not double-block the initial draft with brittle fragment/anchor coverage.
+    // The fragment gate remains for generic handoff cases without a hard primary class,
+    // and for revision-time regression via selectContinuitySafeProseCandidate.
+    if (primary.required && primary.passed) {
+      return { required: true, passed: true, failure: null }
+    }
   }
 
   if (!required) return { required: false, passed: true, failure: null }
