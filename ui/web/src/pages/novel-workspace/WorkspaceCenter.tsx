@@ -371,8 +371,9 @@ export function WorkspaceCenter({
     admissionStatus: String((chapterAcceptanceDesk as any)?.admissionStatus || ''),
     admissionMessage: String((chapterAcceptanceDesk as any)?.admissionMessage || deliverySummary.reason || ''),
     storyStateSynced: Boolean(
-      chapterAcceptanceDesk?.storyStateSynced
-      ?? (deliverySummary.storyStateLabel.includes('已同步') ? true : deliverySummary.storyStateSyncAction ? false : true),
+      chapterAcceptanceDesk?.storyStateSynced === true
+      || deliverySummary.storyStatePanel?.status === 'synced'
+      || String(deliverySummary.storyStateLabel || '').includes('已同步'),
     ),
     qualityScore: chapterAcceptanceDesk?.qualityScore ?? null,
     canSyncStoryState: Boolean(deliverySummary.storyStateSyncAction || deliverySummary.storyStatePanel?.canSync),

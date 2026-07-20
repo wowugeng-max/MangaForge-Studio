@@ -176,8 +176,9 @@ export function ChapterActionBar({
             <div
               key={label}
               className={`chapter-action-bar-step${done ? ' is-done' : ''}${now ? ' is-now' : ''}`}
+              title={done ? `${label}已完成` : now ? `当前：${label}` : `${label}未完成`}
             >
-              {label}
+              {done ? `✓ ${label}` : label}
             </div>
           )
         })}

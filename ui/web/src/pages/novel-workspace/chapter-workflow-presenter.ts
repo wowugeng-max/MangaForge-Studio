@@ -49,17 +49,71 @@ export function chapterWorkflowStepLabels() {
   return [...STEPS]
 }
 
-function phaseLabel(phase: ChapterWorkflowPhase) {
+function phaseLabel(phase: ChapterWorkflowPhase, input: ChapterWorkflowInput = {}) {
   switch (phase) {
     case 'empty': return '未写'
     case 'blocked_materials': return '缺材料'
     case 'writing': return '写作中'
-    case 'written_unchecked': return '已写待复检'
+    case 'written_unchecked':
+      return input.storyStateSynced ? '可复检提升' : '已写待复检'
     case 'needs_revision': return '待修订'
     case 'needs_state_sync': return '待同步状态'
     case 'ready_next': return '可写下一章'
     case 'failed_admission': return '生成被拦截'
   }
+}
+
+function acceptanceOf(input: ChapterWorkflowInput) {
+  return String(input.acceptanceStatus || '')
+}
+
+function qualityChecked(input: ChapterWorkflowInput) {
+  const acceptance = acceptanceOf(input)
+  if (input.qualityScore != null && Number.isFinite(Number(input.qualityScore))) return true
+  return Boolean(acceptance)
+    && !['', 'hidden', 'needs_quality_check'].includes(acceptance)
+}
+
+function needsRevision(input: ChapterWorkflowInput) {
+  return ['needs_revision', 'needs_recheck'].includes(acceptanceOf(input))
+}
+
+function revisionSettled(input: ChapterWorkflowInput) {
+  // Revision step is complete when quality has been checked and no open revision remains.
+  return qualityChecked(input) && !needsRevision(input)
+}
+
+function storySynced(input: ChapterWorkflowInput) {
+  return input.storyStateSynced === true
+}
+
+/** Fact-based step completion — not a rigid linear cascade. */
+export function buildWorkflowSteps(input: ChapterWorkflowInput = {}, phase?: ChapterWorkflowPhase) {
+  const resolved = phase || resolveChapterWorkflowPhase(input)
+  const proseDone = Boolean(input.hasProse)
+  const qualityDone = qualityChecked(input)
+  const revisionDone = revisionSettled(input)
+  const syncDone = storySynced(input)
+  const nextDone = resolved === 'ready_next'
+
+  const stepsDone = [proseDone, qualityDone, revisionDone, syncDone, nextDone]
+
+  let stepIndex = 0
+  if (!proseDone) stepIndex = 0
+  else if (!qualityDone) stepIndex = 1
+  else if (!revisionDone) stepIndex = 2
+  else if (!syncDone) stepIndex = 3
+  else stepIndex = 4
+
+  // If primary work is quality but sync already finished, keep current on 复检
+  // while still highlighting completed 状态同步.
+  if (resolved === 'written_unchecked' || resolved === 'writing') stepIndex = 1
+  if (resolved === 'needs_revision') stepIndex = 2
+  if (resolved === 'needs_state_sync') stepIndex = 3
+  if (resolved === 'ready_next') stepIndex = 4
+  if (resolved === 'empty' || resolved === 'blocked_materials' || resolved === 'failed_admission') stepIndex = 0
+
+  return { stepsDone, stepIndex }
 }
 
 export function resolveChapterWorkflowPhase(input: ChapterWorkflowInput = {}): ChapterWorkflowPhase {
@@ -72,7 +126,7 @@ export function resolveChapterWorkflowPhase(input: ChapterWorkflowInput = {}): C
     return 'empty'
   }
 
-  const acceptance = String(input.acceptanceStatus || '')
+  const acceptance = acceptanceOf(input)
   if (['needs_revision', 'needs_recheck'].includes(acceptance)) return 'needs_revision'
   if (acceptance === 'needs_quality_check' || !acceptance || acceptance === 'hidden') return 'written_unchecked'
   if (acceptance === 'needs_state_sync' || (input.storyStateSynced === false && ['ready_to_accept', 'delivered_with_warnings', 'delivered'].includes(acceptance))) {
@@ -88,11 +142,14 @@ export function resolveChapterWorkflowPhase(input: ChapterWorkflowInput = {}): C
 export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}): ChapterWorkflowPresenter {
   const phase = resolveChapterWorkflowPhase(input)
   const hasProse = Boolean(input.hasProse)
+  const { stepsDone, stepIndex } = buildWorkflowSteps(input, phase)
 
   const base = {
     phase,
-    phaseLabel: phaseLabel(phase),
+    phaseLabel: phaseLabel(phase, input),
     hasProse,
+    stepsDone,
+    stepIndex,
   }
 
   if (phase === 'failed_admission') {
@@ -104,8 +161,6 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
         { key: 'view_brief', label: '查看交接要点', kind: 'ghost' },
         { key: 'open_generation_diagnostics', label: '查看拦截详情', kind: 'ghost' },
       ],
-      stepIndex: 0,
-      stepsDone: [false, false, false, false, false],
       panelToOpen: 'brief',
     }
   }
@@ -119,8 +174,6 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
         { key: 'view_brief', label: '查看缺口', kind: 'ghost' },
         { key: 'open_story_assets', label: '打开资产', kind: 'ghost' },
       ],
-      stepIndex: 0,
-      stepsDone: [false, false, false, false, false],
       panelToOpen: 'brief',
     }
   }
@@ -134,23 +187,22 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
         { key: 'repair_materials', label: '补齐材料', kind: 'default' },
         { key: 'view_brief', label: '看任务', kind: 'ghost' },
       ],
-      stepIndex: 0,
-      stepsDone: [false, false, false, false, false],
       panelToOpen: 'brief',
     }
   }
 
   if (phase === 'written_unchecked' || phase === 'writing') {
+    const synced = storySynced(input)
     return {
       ...base,
-      reasonText: '正文已具备，但还没完成复检。先复检，再决定修订或同步状态。',
+      reasonText: synced
+        ? '正文已具备，故事状态已同步。可继续复检提高正文质量。'
+        : '正文已具备，但还没完成复检。先复检，再决定修订或同步状态。',
       primaryAction: { key: 'refresh_current_quality', label: '复检', kind: 'primary' },
       secondaryActions: [
         { key: 'generate', label: '重写', kind: 'default' },
         { key: 'open_versions', label: '版本', kind: 'ghost' },
       ],
-      stepIndex: 1,
-      stepsDone: [true, false, false, false, false],
       panelToOpen: 'quality',
     }
   }
@@ -158,7 +210,9 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
   if (phase === 'needs_revision') {
     return {
       ...base,
-      reasonText: '复检发现问题。按报告修订后再复检，避免带着已知问题进入下一章。',
+      reasonText: storySynced(input)
+        ? '复检发现问题。故事状态已同步，可按报告修订继续提高正文质量。'
+        : '复检发现问题。按报告修订后再复检，避免带着已知问题进入下一章。',
       primaryAction: {
         key: input.revisionAvailable ? 'apply_editor_revision' : 'create_editor_report',
         label: input.revisionAvailable ? '一键修订' : '生成修订报告',
@@ -168,8 +222,6 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
         { key: 'view_quality', label: '查看问题', kind: 'default' },
         { key: 'refresh_current_quality', label: '再次复检', kind: 'ghost' },
       ],
-      stepIndex: 2,
-      stepsDone: [true, true, false, false, false],
       panelToOpen: 'quality',
     }
   }
@@ -183,8 +235,6 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
         { key: 'view_quality', label: '查看状态差', kind: 'ghost' },
         { key: 'open_versions', label: '版本', kind: 'ghost' },
       ],
-      stepIndex: 3,
-      stepsDone: [true, true, true, false, false],
       panelToOpen: 'quality',
     }
   }
@@ -197,8 +247,6 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
       { key: 'open_versions', label: '版本', kind: 'ghost' },
       { key: 'view_quality', label: '回看质检', kind: 'ghost' },
     ],
-    stepIndex: 4,
-    stepsDone: [true, true, true, true, true],
     panelToOpen: 'version',
   }
 }
