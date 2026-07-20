@@ -3495,3 +3495,74 @@
     justify-content: flex-start;
   }
 }
+
+
+/* Delivery chip click popover */
+.novel-delivery-chip-interactive.ant-tag {
+  cursor: pointer;
+  user-select: none;
+}
+.novel-delivery-chip-interactive.ant-tag:hover {
+  filter: brightness(0.98);
+  box-shadow: 0 0 0 1px rgba(47, 111, 237, 0.18);
+}
+.novel-delivery-chip-popover .ant-popover-inner {
+  padding: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 12px 32px rgba(21, 32, 51, 0.14);
+}
+.novel-delivery-chip-popover .ant-popover-inner-content {
+  padding: 0;
+}
+.novel-delivery-chip-panel {
+  width: min(360px, 78vw);
+  max-width: 360px;
+  max-height: min(320px, 48vh);
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+.novel-delivery-chip-panel-head {
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid #edf1f7;
+  display: grid;
+  gap: 2px;
+  background: #f8fafc;
+}
+.novel-delivery-chip-panel-title {
+  font-size: 13px !important;
+  line-height: 1.35 !important;
+  color: #152033 !important;
+}
+.novel-delivery-chip-panel-hint {
+  font-size: 11px !important;
+}
+.novel-delivery-chip-panel-list {
+  margin: 0;
+  padding: 8px 12px 10px 28px;
+  overflow: auto;
+  display: grid;
+  gap: 6px;
+  list-style: disc;
+}
+.novel-delivery-chip-panel-list li {
+  font-size: 12px;
+  line-height: 1.55;
+  color: #334155;
+  word-break: break-word;
+}
+.novel-delivery-chip-panel-action {
+  border: 0;
+  border-top: 1px solid #edf1f7;
+  background: #f8fafc;
+  color: #2f6fed;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.novel-delivery-chip-panel-action:hover {
+  background: #eef4ff;
+}
