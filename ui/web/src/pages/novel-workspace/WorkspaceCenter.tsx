@@ -554,20 +554,22 @@ export function WorkspaceCenter({
                     <Button className="novel-editor-more-actions" size="small" icon={<MoreOutlined />}>更多</Button>
                   </Popover>
                   {isImmersiveShell && (
-                    <Popover
-                      trigger="click"
-                      open={immersiveAuxOpen}
-                      onOpenChange={setImmersiveAuxOpen}
-                      placement="bottomRight"
-                      overlayClassName="novel-writing-immersive-aux-popover"
-                      content={(
-                        <div className="novel-writing-immersive-aux-panel" aria-label="写作辅助面板">
-                          {writingSupportBody}
-                        </div>
-                      )}
-                    >
-                      <Button size="small">辅助</Button>
-                    </Popover>
+                    <div className="novel-writing-immersive-aux">
+                      <Popover
+                        trigger="click"
+                        open={immersiveAuxOpen}
+                        onOpenChange={setImmersiveAuxOpen}
+                        placement="bottomRight"
+                        overlayClassName="novel-writing-immersive-aux-popover"
+                        content={(
+                          <div className="novel-writing-immersive-aux-panel" aria-label="写作辅助面板">
+                            {writingSupportBody}
+                          </div>
+                        )}
+                      >
+                        <Button size="small" className="novel-writing-immersive-aux-trigger">辅助</Button>
+                      </Popover>
+                    </div>
                   )}
                 </Space>
               )}
