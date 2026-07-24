@@ -15,6 +15,13 @@ import {
   enrichContextWithProgressResync,
   } from '../../novel-writing/chapter-progress-ledger'
 import {
+  evaluateHumanWebnovelResistance,
+  isStoreBlockingPureAiResistanceKey,
+} from '../../novel-writing/human-webnovel-resistance'
+import {
+  applyR76PreStoreSanitize,
+} from '../../novel-writing/r76-zhuque-stack'
+import {
   buildChapterProseStoragePatch,
   normalizeProseForStorage,
   resolveChapterProseVersionSource,
@@ -323,7 +330,21 @@ export async function runQualityLoopPhase(args: {
 
 throwIfChapterGenerationAborted()
 await onStage('review', { status: 'running' })
-finalText = normalizeProseForStorage(finalText)
+finalText = applyR76PreStoreSanitize(normalizeProseForStorage(finalText))
+// System-wide detector resistance: even draft_only gets one minimal revise when pure-AI hard classes hit.
+// This is not chapter-specific tuning; full quality revise still stays off for pure draft modes when clean.
+const resistanceProbe = evaluateHumanWebnovelResistance(finalText)
+const resistanceHardCount = Array.isArray(resistanceProbe?.hard_failures) ? resistanceProbe.hard_failures.length : 0
+const resistanceNeedsRevise = resistanceHardCount > 0
+// R24 lesson: inventory/clinical/symmetry hard fails often need >1 revise; do not stop at one warn/skip.
+// Hard detector risks get revision attempts; store still blocks if residual hard remains.
+// Claude/cliproxy long revise streams often hang or truncate — prefer fewer rounds + residual sanitize.
+const explicitRevisionCap = Number((options as any)?.max_quality_revision_rounds)
+const defaultDraftRounds = resistanceNeedsRevise ? 3 : 0
+const defaultFullRounds = resistanceNeedsRevise ? 3 : 2
+const qualityRevisionRounds = Number.isFinite(explicitRevisionCap)
+  ? Math.max(0, Math.min(5, Math.floor(explicitRevisionCap)))
+  : ((isDraftReviewOnly || isDraftOnly) ? defaultDraftRounds : defaultFullRounds)
 let qualityLoop: Awaited<ReturnType<typeof runProseQualityLoop>>
 try {
   qualityLoop = await runProseQualityLoop({
@@ -331,7 +352,7 @@ try {
     minScore: qualityThreshold,
     coreContract: buildFocusedQualityCoreContract(generationContract),
     continuityContext: contextPackage,
-    maxRevisionRounds: isDraftReviewOnly || isDraftOnly ? 0 : 1,
+    maxRevisionRounds: qualityRevisionRounds,
     scan: text => scanProseForQualityLoop(text, contextPackage, wordTarget, wordTargetCompatibility ? {
       word_target_compatibility_pass: true,
       compatibility_ceiling: wordTargetCompatibility.compatibility_ceiling,
@@ -371,16 +392,37 @@ try {
     revise: async ({ prompt, round }) => {
       throwIfChapterGenerationAborted()
       await onStage('revise', { status: 'running', phase: 'quality_revision', round })
+      // Flash/Gemini: full-chapter revise often hits output ceiling; give extra headroom vs draft.
+      const reviseMaxTokens = Math.min(48000, Math.max(24000, proseMaxTokensForWordTarget(wordTarget) + 6000))
       const result = await executeAgent('prose-agent', project, { task: prompt }, {
         activeWorkspace,
         modelId: String(getStageModelId(project, 'review', preferredModelId) || ''),
-        maxTokens: proseMaxTokensForWordTarget(wordTarget),
+        maxTokens: reviseMaxTokens,
         temperature: 0.25,
         skipMemory: true,
         signal: options.abortSignal,
         timeoutMs: qualityRepairTimeoutMs,
       })
-      assertCompleteProseTransportResult(result, 'PROSE_REVISION_TRUNCATED')
+      try {
+        assertCompleteProseTransportResult(result, 'PROSE_REVISION_TRUNCATED')
+      } catch (error: any) {
+        // System-wide: truncated revise must not kill whole chapter generation.
+        // Return unusable payload so quality loop keeps pre-revision text, then residual sanitize + hard admission still run.
+        if (String(error?.code || '') === 'PROSE_REVISION_TRUNCATED') {
+          await onStage('revise', {
+            status: 'warn',
+            phase: 'quality_revision_truncated_fallback',
+            round,
+            detail: '修订输出截断，本轮跳过，保留修订前正文并继续抗检测清洗/入库门禁',
+          })
+          return {
+            final_text: '',
+            revision_truncated: true,
+            revision_receipts: [{ key: 'revision_truncated_fallback', changed_evidence: 'kept_pre_revision_text' }],
+          }
+        }
+        throw error
+      }
       if ((result as any)?.error) {
         throw Object.assign(new Error(String((result as any).error)), {
           code: 'PROSE_REVISION_FAILED',
@@ -404,7 +446,33 @@ try {
 } catch (error: any) {
   throw attachQualityLoopFailureDiagnostics(error, { draftPromptDiagnostics, qualityThreshold })
 }
-finalText = qualityLoop.final_text
+finalText = applyR76PreStoreSanitize(String(qualityLoop.final_text || ''))
+// Re-scan after sanitize; residual hard risks stay on decision for admission/store block.
+{
+  const residual = evaluateHumanWebnovelResistance(finalText)
+  // Store-blocking residual: pure-AI families only. Positive fingerprint / texture soft-gates
+  // stay as revise targets and warnings while Zhuque pass is being validated first.
+  const residualHard = (Array.isArray(residual?.hard_failures) ? residual.hard_failures : [])
+    .filter((item: any) => isStoreBlockingPureAiResistanceKey(String(item?.key || '')))
+  if (residualHard.length) {
+    const existing = Array.isArray(qualityLoop?.decision?.hard_failures) ? qualityLoop.decision.hard_failures : []
+    const mapped = residualHard.map((item: any) => ({
+      key: String(item?.key || 'hw_resistance'),
+      message: String(item?.evidence || item?.fix || item?.label || item?.key || '抗检测硬门禁未清除'),
+      source: 'deterministic' as const,
+    }))
+    const keys = new Set(existing.map((item: any) => String(item?.key || '')))
+    qualityLoop.decision = {
+      ...(qualityLoop.decision || {}),
+      passed: false,
+      approvable: false,
+      hard_failures: [
+        ...existing,
+        ...mapped.filter((item: any) => !keys.has(String(item.key || ''))),
+      ],
+    }
+  }
+}
 const qualityLoopDiagnostics = {
   rounds: qualityLoop.rounds.map((item: any) => ({
     round: item.round,

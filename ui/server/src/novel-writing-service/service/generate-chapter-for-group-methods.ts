@@ -20,6 +20,11 @@ import {
   resolveChapterProseVersionSource,
   } from '../../novel-writing/chapter-prose-storage-patch'
 import {
+  applyR76PreStoreSanitize,
+  buildR76HumanizeDefaultOptions,
+  R76_ZHUQUE_STACK_VERSION,
+} from '../../novel-writing/r76-zhuque-stack'
+import {
   buildDeterministicProseCleanupReport,
   buildQualityGateReviewWithDeterministicCleanup,
   } from '../../novel-writing/deterministic-prose-cleanup'
@@ -283,6 +288,7 @@ export function createGenerateChapterForGroupMethods(deps: {
   runCommercialEditorRewrite: (...args: any[]) => any
   runMemePolish: (...args: any[]) => any
   runReadabilityReview: (...args: any[]) => any
+  runHumanizePostProcess: (...args: any[]) => any
   prepareStoryStateUpdate: (...args: any[]) => any
   trustedWordTargetContractionBudgets: WeakSet<object>
 }) {
@@ -310,6 +316,7 @@ export function createGenerateChapterForGroupMethods(deps: {
   const runCommercialEditorRewrite = deps.runCommercialEditorRewrite
   const runMemePolish = deps.runMemePolish
   const runReadabilityReview = deps.runReadabilityReview
+  const runHumanizePostProcess = deps.runHumanizePostProcess
   const prepareStoryStateUpdate = deps.prepareStoryStateUpdate
   const trustedWordTargetContractionBudgets = deps.trustedWordTargetContractionBudgets
 
@@ -321,6 +328,8 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     llmTimeoutMs: options.llmTimeoutMs,
     signal: options.abortSignal,
     timeoutMs: options.llmTimeoutMs,
+    // Allow callers to skip hard word-target expand (e.g. slow Claude proxy 524 on long rewrites).
+    expand: options.expand,
     reviewLlmTimeoutMs: options.review_llm_timeout_ms || options.reviewLlmTimeoutMs,
     review_llm_timeout_ms: options.review_llm_timeout_ms || options.reviewLlmTimeoutMs,
     structuredReviewLlmTimeoutMs: options.structured_review_llm_timeout_ms || options.structuredReviewLlmTimeoutMs,
@@ -556,6 +565,63 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   const postDraftDirector = qualityPrestoreResult.postDraftDirector
   const draftQualityDecision = qualityPrestoreResult.draftQualityDecision
   const buildProseQualityReview = qualityPrestoreResult.buildProseQualityReview
+
+  // R76 Zhuque stack default: risk_segment humanize + pre-store stock sanitize (not chapter-tuned).
+  await onStage('humanize_postprocess', {
+    status: 'running',
+    version: 'humanize_postprocess_v3',
+    r76_zhuque_stack: R76_ZHUQUE_STACK_VERSION,
+  })
+  let humanizePostprocess: any = null
+  try {
+    const humanizeResult = await runHumanizePostProcess(
+      activeWorkspace,
+      project,
+      contextPackage,
+      finalText,
+      preferredModelId,
+      buildR76HumanizeDefaultOptions({
+        ...llmControlOptions,
+        skip_humanize_postprocess: options.skip_humanize_postprocess ?? options.skipHumanizePostprocess,
+        skipHumanizePostprocess: options.skip_humanize_postprocess ?? options.skipHumanizePostprocess,
+        enable_humanize_postprocess: options.enable_humanize_postprocess ?? options.enableHumanizePostprocess,
+        enableHumanizePostprocess: options.enable_humanize_postprocess ?? options.enableHumanizePostprocess,
+      }),
+    )
+    finalText = String(humanizeResult?.final_text || finalText)
+    humanizePostprocess = humanizeResult?.report || null
+    if (humanizePostprocess && typeof humanizePostprocess === 'object') {
+      humanizePostprocess = {
+        ...humanizePostprocess,
+        r76_zhuque_stack: humanizePostprocess.r76_zhuque_stack || R76_ZHUQUE_STACK_VERSION,
+      }
+    }
+    await onStage('humanize_postprocess', {
+      status: humanizePostprocess?.skipped ? 'skipped' : (humanizePostprocess?.accepted ? 'success' : 'warn'),
+      report: humanizePostprocess,
+      chars: (finalText || '').length,
+      r76_zhuque_stack: R76_ZHUQUE_STACK_VERSION,
+    })
+  } catch (error: any) {
+    humanizePostprocess = {
+      version: 'humanize_postprocess_v3',
+      enabled: true,
+      accepted: false,
+      skipped: false,
+      reason: 'humanize_postprocess_failed',
+      error: String(error?.message || error || 'unknown').slice(0, 240),
+      r76_zhuque_stack: R76_ZHUQUE_STACK_VERSION,
+    }
+    await onStage('humanize_postprocess', {
+      status: 'failed',
+      report: humanizePostprocess,
+      r76_zhuque_stack: R76_ZHUQUE_STACK_VERSION,
+    })
+    // Non-blocking: keep quality-loop text if postprocess throws.
+  }
+  // Always apply R76 pre-store sanitize (even if humanize skipped/failed).
+  finalText = applyR76PreStoreSanitize(finalText)
+
   await storePreStoreReceiptSyncReviews({
     storeGeneratedReviewRecord,
     projectId,
@@ -612,6 +678,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
       buildProseQualityReview,
       mergeChapterRawPayload,
       editorRewrite,
+      humanizePostprocess,
       productionMode,
       draftPromptDiagnostics,
       ohStoryDeliveryReceipts,
@@ -679,6 +746,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     mergeChapterRawPayload,
     editorRewrite,
     memePolish,
+    humanizePostprocess,
     readabilityReview,
     productionMode,
     draftPromptDiagnostics,
