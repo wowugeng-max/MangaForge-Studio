@@ -1,10 +1,11 @@
 /**
  * True post-process dual-pass humanize for finished chapter prose.
  *
- * Architecture (baibai/Bypass):
- *   finished prose → deterministic shell cleanup → chunk
- *   → Pass A structural rewrite (all chunks)
- *   → Pass B human texture (all chunks)
+ * Architecture (novel-writer-master + baibai/Bypass):
+ *   finished prose → deterministic shell cleanup
+ *   → local risk heatmap → rewrite ONLY high-risk segments (≤2 rounds)
+ *   → optional full Pass A only when explicitly enabled (capped shrink)
+ *   → Pass B OFF by default (texture pass raised Zhuque AI)
  *   → stitch → length/fingerprint gates
  *
  * Also absorbs B1lli/remove-ai-flavor-writing-skill shell rules:
@@ -24,7 +25,7 @@ import {
 } from './humanize-dual-pass'
 import { countProseChars } from './word-target'
 
-export const HUMANIZE_POSTPROCESS_VERSION = 'humanize_postprocess_v3'
+export const HUMANIZE_POSTPROCESS_VERSION = 'humanize_postprocess_v4'
 export const HUMANIZE_CHUNK_LIMIT = 900
 
 export type HumanizeChunk = {
@@ -80,6 +81,16 @@ export function buildZhuqueNarrativeRewriteDirectives(): string[] {
     'Z10. 禁止氛围词刷屏（死死/绿荧荧/刺鼻/牙酸/蜘蛛网）；章末禁十二点/齿轮/秒针定格。',
     'Z11. 禁止临床三联总结句（心跳停止+瞳孔散大+无心音）；改一次触感后立刻对白/动作。',
     'Z12. Pass B 只删不增：不得为“更有人味”添加电影镜头与感官堆叠。',
+    'Z13. 设备特写包装：删“走纸/尺子画直线/微小电信号/毫无波折”讲义；改一刀动作（撕纸/塞口袋/喊停）+半截私心。',
+    'Z14. 多体复检流水线：禁止第二具/第三具同构复检（再摸温/再对尸斑/再比刚才那具）；后到对象最多一句差异后立刻被打断。',
+    'Z15. 删包装后必须挂半截私心噪声在动作上（先别写进系统/这锅别背上/先把人支开），禁止删完只剩平滑临床流水。',
+    'Z16. 禁规章条文号（规章第N条）与盖章胁迫长辩；改当面短推责+未完成动作。',
+    'Z17. 禁口袋清点流水线（钥匙+卡+证件并列表）；最多留一件物件并立刻接藏/被抢动作。',
+    'Z18. 禁章末证据复盘句（卡片、没心跳却热…）+电梯铁链/石灰味/门缝定格；改肩膀硬挤或半截对白收。',
+    'Z19. 禁厘米倒计时门缝/不可逆收窄/防夹感应器；禁 B1 数字跳转与「顺延下一位」命运纸。',
+    'Z20. 高风险只改局部：禁止为清包装而全文重写砍半（防 R67 回归）。',
+    'Z21. 禁 B2 按键lore/合规告示墙/感应光幕/金属牌白条全揭/合规部运送禁触；章末只留未完成抢纸或挡门。',
+    'Z22. 禁章末小牌/半截纸条/运送单禁触连环；门合时只挡门或半截骂声，不写物件编号。',
   ]
 }
 
@@ -233,6 +244,8 @@ export type HumanizePostProcessReport = {
   accepted: boolean
   reject_reason?: string
   stages: Array<Record<string, any>>
+  /** Locked default anti-AIGC stack id (R76 high-water baseline). */
+  r76_zhuque_stack?: string
 }
 
 export function buildEmptyHumanizePostProcessReport(
