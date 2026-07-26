@@ -34,6 +34,20 @@ interface CanvasState {
   dissolveGroup: (groupId: string) => void
 }
 
+const LOAD_STRIP_KEYS = ['_runSignal', '_isGroupRunning'] as const
+
+export function sanitizeLoadedNodes(nodes: Node[]): Node[] {
+  return nodes.map(node => {
+    if (!node.data) return node
+    const data: Record<string, any> = { ...(node.data as any) }
+    let changed = false
+    for (const key of LOAD_STRIP_KEYS) {
+      if (key in data) { delete data[key]; changed = true }
+    }
+    return changed ? { ...node, data } : node
+  })
+}
+
 export const useCanvasStore = create<CanvasState>((set, get) => ({
   nodes: [],
   edges: [],
@@ -45,7 +59,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   setNodes: nodes => set({ nodes }),
   setEdges: edges => set({ edges }),
   setCanvasData: (nodes, edges) => {
-    const sorted = [...nodes].sort((a, b) => {
+    const sorted = sanitizeLoadedNodes(nodes).sort((a, b) => {
       if (a.type === 'nodeGroup' && b.parentNode === a.id) return -1
       if (b.type === 'nodeGroup' && a.parentNode === b.id) return 1
       return 0

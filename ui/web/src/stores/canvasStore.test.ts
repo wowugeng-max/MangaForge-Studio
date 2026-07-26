@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { useCanvasStore } from './canvasStore'
+import { sanitizeLoadedNodes, useCanvasStore } from './canvasStore'
 
 function resetStore() {
   useCanvasStore.setState({
@@ -192,5 +192,28 @@ describe('canvasStore fission migration', () => {
     expect(useCanvasStore.getState().nodeRunStatus).toEqual({})
     expect(useCanvasStore.getState().isGlobalRunning).toBe(false)
     expect(useCanvasStore.getState().nodes.map(node => node.id)).toEqual(['new-node'])
+  })
+})
+
+describe('sanitizeLoadedNodes', () => {
+  afterEach(resetStore)
+
+  test('strips runtime trigger fields so loading never auto-runs', () => {
+    const loaded = sanitizeLoadedNodes([
+      { id: 'g1', type: 'nodeGroup', position: { x: 0, y: 0 }, data: { label: '组', _isGroupRunning: true, _muted: false } } as any,
+      { id: 'n1', type: 'generate', position: { x: 0, y: 0 }, data: { label: 'A', _runSignal: 12345, prompt: 'keep me' } } as any,
+    ])
+    expect((loaded[0].data as any)._isGroupRunning).toBeUndefined()
+    expect((loaded[0].data as any)._muted).toBe(false)
+    expect((loaded[1].data as any)._runSignal).toBeUndefined()
+    expect((loaded[1].data as any).prompt).toBe('keep me')
+  })
+
+  test('setCanvasData applies sanitize', () => {
+    useCanvasStore.getState().setCanvasData([
+      { id: 'g1', type: 'nodeGroup', position: { x: 0, y: 0 }, data: { _isGroupRunning: true } } as any,
+    ], [])
+    const node = useCanvasStore.getState().nodes.find(n => n.id === 'g1')!
+    expect((node.data as any)._isGroupRunning).toBeUndefined()
   })
 })
