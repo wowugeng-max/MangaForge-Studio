@@ -67,12 +67,12 @@ describe('DisplayNode migration behavior', () => {
     })
   })
 
-  test('keeps a running display node untouched when it receives a run signal without data', () => {
+  test('empty display input resolves to error instead of hanging the DAG', () => {
     expect(buildDisplayPropagationPlan({
       sourceId: 'display-1',
       data: {},
       edges: [{ id: 'e1', source: 'display-1', target: 'next' }] as any,
-    })).toEqual({ status: null, targetPatches: {} })
+    })).toEqual({ status: 'error', targetPatches: {} })
   })
 
   test('builds saved asset payload with lineage and media dimensions', () => {

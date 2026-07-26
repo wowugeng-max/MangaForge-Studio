@@ -62,7 +62,7 @@ export function buildDisplayPropagationPlan(input: {
 }) {
   const { rawData } = resolveDisplayContent(input.data)
   if (rawData === undefined || rawData === null || rawData === '') {
-    return { status: null as null, targetPatches: {} as Record<string, { incoming_data: any }> }
+    return { status: 'error' as const, targetPatches: {} as Record<string, { incoming_data: any }> }
   }
   const outData = typeof rawData === 'object' ? rawData : { content: rawData }
   const targetPatches: Record<string, { incoming_data: any }> = {}
@@ -141,22 +141,26 @@ function DisplayNodeImpl(props: NodeProps) {
   const projectId = Number(routeProjectId || 0) || null
   const { displayContent, mediaSrc, mediaType } = resolveDisplayContent(data || {})
 
-  const propagateIfReady = React.useCallback(() => {
+  const propagateIfReady = React.useCallback((fromRunSignal: boolean) => {
     const plan = buildDisplayPropagationPlan({ sourceId: id, data: data || {}, edges: getEdges() })
-    if (plan.status) setNodeStatus(id, plan.status)
+    if (plan.status === 'error') {
+      if (fromRunSignal) setNodeStatus(id, 'error')
+      return
+    }
+    setNodeStatus(id, plan.status)
     Object.entries(plan.targetPatches).forEach(([targetId, patch]) => updateNodeData(targetId, patch))
   }, [id, data, getEdges, setNodeStatus, updateNodeData])
 
   React.useEffect(() => {
     if (!data?._runSignal || data._runSignal === prevSignalRef.current) return
     prevSignalRef.current = data._runSignal
-    propagateIfReady()
+    propagateIfReady(true)
   }, [data?._runSignal, propagateIfReady])
 
   React.useEffect(() => {
     if (!data?.incoming_data || data.incoming_data === prevIncomingRef.current) return
     prevIncomingRef.current = data.incoming_data
-    propagateIfReady()
+    propagateIfReady(false)
   }, [data?.incoming_data, propagateIfReady])
 
   React.useEffect(() => { setMediaDims('') }, [displayContent])
