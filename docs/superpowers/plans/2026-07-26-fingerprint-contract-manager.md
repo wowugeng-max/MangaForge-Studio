@@ -69,6 +69,7 @@
   - `type FingerprintContractSetRecord = { id: string; label: string; created_at: string; mode: 'builtin' | 'offline_refit' | 'online_fetch'; sample_count: number; notes: string; source_set_id?: string }`
   - `type FingerprintContractSelection = { active_set_id: string; locked?: { set_id: string; key: string } | null }`
   - `getFingerprintLibRoot(repoRoot: string): string` → `<repoRoot>/workspace/fingerprint-lib`
+  - `getFingerprintLibRootFromWorkspace(activeWorkspace: string): string` → `<activeWorkspace>/fingerprint-lib`（路由层用；`getWorkspace()` 返回的已经是 `<repo>/workspace`）
   - `getContractSetsIndexPath(libRoot: string): string`
   - `getContractSelectionPath(libRoot: string): string`
   - `getContractSetDir(libRoot: string, setId: string): string`（builtin → `<libRoot>/contracts`，其它 → `<libRoot>/contract-sets/<setId>`）
@@ -217,6 +218,11 @@ export const BUILTIN_CONTRACT_SET: FingerprintContractSetRecord = {
 
 export function getFingerprintLibRoot(repoRoot: string) {
   return join(repoRoot, 'workspace', 'fingerprint-lib')
+}
+
+/** Route layer helper: getWorkspace() already returns <repo>/workspace. */
+export function getFingerprintLibRootFromWorkspace(activeWorkspace: string) {
+  return join(activeWorkspace, 'fingerprint-lib')
 }
 
 export function getContractSetsIndexPath(libRoot: string) {
@@ -551,20 +557,13 @@ Expected: PASS，6 pass / 0 fail
 
 - [ ] **Step 5: 三个旧入口改走 resolver**
 
-在 `ui/server/src/novel-writing/prose-fingerprint-lib.ts`，把 `fingerprintContractCandidates` 与 `loadFingerprintContract`（606-631 行）替换为兼容壳：
+在 `ui/server/src/novel-writing/prose-fingerprint-lib.ts`，**整体删除** `fingerprintContractCandidates`（606-620 行，含那条 `/Users/ruiyaosong/MangaForge-Studio/...` 硬编码路径）与 `loadFingerprintContract`（623-631 行）两个函数。
 
-```ts
-/** Load the active contract through the central resolver (kept for existing callers). */
-export function loadFingerprintContract(options: { cwd?: string; genre?: string | null } = {}): FingerprintContract | null {
-  // Lazy require avoids a module cycle: resolver imports this file for types/slug helper.
-  const { resolveFingerprintContract } = require('./fingerprint-contract-resolver') as typeof import('./fingerprint-contract-resolver')
-  return resolveFingerprintContract(options)
-}
-```
+删除是安全的且不留兼容壳：全仓 grep 证实 `loadFingerprintContract` 的唯一外部调用方就是 `human-webnovel-resistance.ts:19,59`，本 Step 一并改掉；`fingerprintContractCandidates` 仅被 `loadFingerprintContract` 内部使用。删掉后依赖方向单一（resolver → prose-fingerprint-lib），不存在模块循环，无需 lazy require。
 
-删除 `fingerprintContractCandidates` 函数（含那条 `/Users/ruiyaosong/MangaForge-Studio/...` 硬编码路径）。
+若删除后 `existsSync` 在 `prose-fingerprint-lib.ts` 已无其他用途，同时清理其 import。
 
-在 `ui/server/src/novel-writing/human-webnovel-resistance.ts:58-60`，`loadActiveFingerprintContract` 保持签名不变，内部改为：
+在 `ui/server/src/novel-writing/human-webnovel-resistance.ts:58-60`，`loadActiveFingerprintContract` 保持签名不变，内部改为（并从第 19 行的 `./prose-fingerprint-lib` import 列表里移除 `loadFingerprintContract`）：
 
 ```ts
 function loadActiveFingerprintContract(cwd = process.cwd(), genre?: string | null): FingerprintContract | null {
@@ -1724,7 +1723,7 @@ describe('fingerprint contract routes', () => {
   test('GET list returns the builtin set', async () => {
     const ws = await tempWorkspace()
     const { app, handlers } = createRouteHarness()
-    registerFingerprintContractRoutes(app, () => ws)
+    registerFingerprintContractRoutes(app, () => join(ws, 'workspace'))
     const res = await call(handlers.get('GET /api/fingerprint-contracts'), {})
     expect(res.statusCode).toBe(200)
     expect(res.body.sets[0].id).toBe('builtin')
@@ -1734,7 +1733,7 @@ describe('fingerprint contract routes', () => {
   test('GET active reports the resolved contract', async () => {
     const ws = await tempWorkspace()
     const { app, handlers } = createRouteHarness()
-    registerFingerprintContractRoutes(app, () => ws)
+    registerFingerprintContractRoutes(app, () => join(ws, 'workspace'))
     const res = await call(handlers.get('GET /api/fingerprint-contracts/active'), {})
     expect(res.body.contract_name).toBe('qidian_free_rank_human')
     expect(res.body.set_id).toBe('builtin')
@@ -1744,7 +1743,7 @@ describe('fingerprint contract routes', () => {
   test('GET samples-status reports an empty corpus', async () => {
     const ws = await tempWorkspace()
     const { app, handlers } = createRouteHarness()
-    registerFingerprintContractRoutes(app, () => ws)
+    registerFingerprintContractRoutes(app, () => join(ws, 'workspace'))
     const res = await call(handlers.get('GET /api/fingerprint-contracts/samples-status'), {})
     expect(res.body.available).toBe(false)
     expect(res.body.count).toBe(0)
@@ -1753,7 +1752,7 @@ describe('fingerprint contract routes', () => {
   test('PUT selection rejects an unknown set and accepts a known one', async () => {
     const ws = await tempWorkspace()
     const { app, handlers } = createRouteHarness()
-    registerFingerprintContractRoutes(app, () => ws)
+    registerFingerprintContractRoutes(app, () => join(ws, 'workspace'))
     const bad = await call(handlers.get('PUT /api/fingerprint-contracts/selection'), { body: { active_set_id: 'ghost' } })
     expect(bad.statusCode).toBe(400)
     const ok = await call(handlers.get('PUT /api/fingerprint-contracts/selection'), { body: { active_set_id: 'builtin' } })
@@ -1764,7 +1763,7 @@ describe('fingerprint contract routes', () => {
   test('DELETE refuses to remove the builtin set', async () => {
     const ws = await tempWorkspace()
     const { app, handlers } = createRouteHarness()
-    registerFingerprintContractRoutes(app, () => ws)
+    registerFingerprintContractRoutes(app, () => join(ws, 'workspace'))
     const res = await call(handlers.get('DELETE /api/fingerprint-contracts/:id'), { params: { id: 'builtin' } })
     expect(res.statusCode).toBe(400)
     expect(String(res.body.error)).toContain('内置')
@@ -1773,7 +1772,7 @@ describe('fingerprint contract routes', () => {
   test('POST generate rejects offline mode without samples', async () => {
     const ws = await tempWorkspace()
     const { app, handlers } = createRouteHarness()
-    registerFingerprintContractRoutes(app, () => ws)
+    registerFingerprintContractRoutes(app, () => join(ws, 'workspace'))
     const res = await call(handlers.get('POST /api/fingerprint-contracts/generate'), { body: { mode: 'offline_refit' } })
     expect(res.statusCode).toBe(400)
     expect(String(res.body.error)).toContain('样本')
@@ -1800,7 +1799,7 @@ Expected: FAIL —— `Cannot find module './fingerprint-contracts'`
 创建 `ui/server/src/routes/fingerprint-contracts.ts`。要求：
 - 顶部 `function errorBody(message: unknown) { const error = String(message); return { error, detail: error } }`（照 providers.ts）。
 - 每个 handler 全包 try/catch，catch 里 `res.status(500).json(errorBody(error))`。
-- `libRoot` 由 `getFingerprintLibRoot(getWorkspace())`——注意 `getWorkspace()` 返回的是 `<repo>/workspace`，而 `getFingerprintLibRoot` 期望仓库根，因此这里改为直接 `join(getWorkspace(), 'fingerprint-lib')`；为此在 store 里额外导出 `getFingerprintLibRootFromWorkspace(activeWorkspace: string) { return join(activeWorkspace, 'fingerprint-lib') }` 并在本路由使用它（测试里的 tempWorkspace 造的是 `<root>/workspace/fingerprint-lib`，因此测试传入的 `getWorkspace()` 应为 `join(root,'workspace')`——若测试当前传 root，请把测试的 `() => ws` 改为 `() => join(ws, 'workspace')` 并在测试注释说明）。
+- `libRoot` 一律通过 Task 1 的 `getFingerprintLibRootFromWorkspace(getWorkspace())` 取得（`getWorkspace()` 返回的已经是 `<repo>/workspace`，不要用接仓库根的 `getFingerprintLibRoot`）。上面测试里的 `tempWorkspace()` 返回的是假仓库根，因此测试中传入的必须是 `() => join(ws, 'workspace')` —— 测试代码里已按此写法调用，实现时不要改测试。
 - `GET /api/fingerprint-contracts`：`{ sets, selection, active }`，每个 set 附 `target_summary`（读该集 active-contract.json 的 `subject_ta_opener_ratio_max` 等 3 个关键值，读不到给 null）。
 - `GET .../active`：`resolveFingerprintContractInfo()` 的结果 + 该集 label；解析不到返回 `{ set_id: null, contract_name: null, locked: false }`。
 - `GET .../samples-status`：`readSamplesStatus(libRoot)`。
@@ -2315,4 +2314,4 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 **占位符扫描：** 无 TBD/TODO；每个代码步骤都给出完整实现或逐项明确的结构要求（Task 7、Task 9 的实现步骤以精确清单形式给出路由行为与组件结构，含具体文案、字段名、状态码）。
 
-**类型一致性：** `FingerprintContractSetRecord` / `FingerprintContractSelection`（Task 1）在 Task 2/6/7 中使用一致；`getContractSetDir`、`readContractSelectionSync`、`BUILTIN_CONTRACT_SET_ID` 跨 Task 命名一致；`RefitSampleInput`（Task 3）与 Task 6 的 `loadRefitSamples` 返回类型一致；`FINGERPRINT_SCORE_REVIEW_TYPE` / `buildFingerprintScoreReviewRecord`（Task 4）在 Task 5/7 一致；`ContractSetRow` / `buildContractSetRows` / `buildCheckPassRateItems` / `nextJobPollDelayMs`（Task 8）在 Task 9 一致。Task 7 明确指出 `getFingerprintLibRoot(repoRoot)` 与工作区语义的差异，并要求新增 `getFingerprintLibRootFromWorkspace(activeWorkspace)`——实现时需回到 Task 1 文件补这个导出（已在 Task 7 Step 3 说明并纳入该 Task 的提交清单）。
+**类型一致性：** `FingerprintContractSetRecord` / `FingerprintContractSelection`（Task 1）在 Task 2/6/7 中使用一致；`getContractSetDir`、`readContractSelectionSync`、`BUILTIN_CONTRACT_SET_ID` 跨 Task 命名一致；`RefitSampleInput`（Task 3）与 Task 6 的 `loadRefitSamples` 返回类型一致；`FINGERPRINT_SCORE_REVIEW_TYPE` / `buildFingerprintScoreReviewRecord`（Task 4）在 Task 5/7 一致；`ContractSetRow` / `buildContractSetRows` / `buildCheckPassRateItems` / `nextJobPollDelayMs`（Task 8）在 Task 9 一致。`getFingerprintLibRootFromWorkspace(activeWorkspace)` 在 Task 1 的 Produces 中定义、Task 7 的路由中使用，语义与接仓库根的 `getFingerprintLibRoot(repoRoot)` 明确区分。
