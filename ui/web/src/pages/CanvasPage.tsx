@@ -14,6 +14,10 @@ import apiClient from '../api/client'
 import { planCanvasDagStep } from './canvasDagRunner'
 import { buildCanvasAssetDropPlan } from './canvasAssetDrop'
 import { expandFissionAndDistribute } from './canvasFission'
+import { clampToViewport } from '../utils/viewportClamp'
+
+const NODE_MENU_SIZE = { width: 300, height: 380 }
+const GROUP_MENU_SIZE = { width: 180, height: 88 }
 
 const { Content, Sider } = Layout
 const { Title, Text } = Typography
@@ -309,7 +313,8 @@ function CanvasWorkspace() {
   const openNodeSearch = (x: number, y: number) => {
     if (!reactFlowInstance) return
     const pos = reactFlowInstance.screenToFlowPosition({ x, y })
-    setMenuConfig({ x, y, flowX: pos.x, flowY: pos.y })
+    const clamped = clampToViewport({ x, y, ...NODE_MENU_SIZE, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight })
+    setMenuConfig({ x: clamped.x, y: clamped.y, flowX: pos.x, flowY: pos.y })
     setSearchTerm('')
   }
 
@@ -330,14 +335,15 @@ function CanvasWorkspace() {
     event.stopPropagation()
     setMenuConfig(null)
     const selectedNodes = nodes.filter(node => node.selected)
+    const clamped = clampToViewport({ x: event.clientX, y: event.clientY, ...GROUP_MENU_SIZE, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight })
     if (selectedNodes.length < 2) {
       if (selectedNodes.length === 1 && selectedNodes[0].type === 'nodeGroup') {
-        setGroupMenuConfig({ x: event.clientX, y: event.clientY, selectedNodeIds: [], dissolveGroupId: selectedNodes[0].id })
+        setGroupMenuConfig({ x: clamped.x, y: clamped.y, selectedNodeIds: [], dissolveGroupId: selectedNodes[0].id })
       }
       return
     }
     if (selectedNodes.some(node => node.parentNode)) return
-    setGroupMenuConfig({ x: event.clientX, y: event.clientY, selectedNodeIds: selectedNodes.map(node => node.id) })
+    setGroupMenuConfig({ x: clamped.x, y: clamped.y, selectedNodeIds: selectedNodes.map(node => node.id) })
   }, [nodes])
 
   const onNodeContextMenu = useCallback((event: React.MouseEvent, node: any) => {
@@ -345,7 +351,8 @@ function CanvasWorkspace() {
       event.preventDefault()
       event.stopPropagation()
       setMenuConfig(null)
-      setGroupMenuConfig({ x: event.clientX, y: event.clientY, selectedNodeIds: [], dissolveGroupId: node.id })
+      const clamped = clampToViewport({ x: event.clientX, y: event.clientY, ...GROUP_MENU_SIZE, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight })
+      setGroupMenuConfig({ x: clamped.x, y: clamped.y, selectedNodeIds: [], dissolveGroupId: node.id })
     }
   }, [])
 

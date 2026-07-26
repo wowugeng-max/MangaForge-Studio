@@ -89,7 +89,7 @@ describe('ComfyForge canvas feature migration', () => {
     expect(canvasPage).toContain('onSelectionContextMenu')
     expect(canvasPage).toContain('onNodeContextMenu')
     expect(canvasPage).toContain("node.type === 'nodeGroup'")
-    expect(canvasPage).toContain('setGroupMenuConfig({ x: event.clientX, y: event.clientY, selectedNodeIds: []')
+    expect(canvasPage).toContain('setGroupMenuConfig({ x: clamped.x, y: clamped.y, selectedNodeIds: []')
     expect(canvasPage).toContain("e.key === 'b'")
     expect(canvasPage).toContain("updateNodeData(selected[0].id, { _muted: !selected[0].data?._muted })")
     expect(canvasPage).toContain("const groupId = createGroup(ids, '节点组')")
