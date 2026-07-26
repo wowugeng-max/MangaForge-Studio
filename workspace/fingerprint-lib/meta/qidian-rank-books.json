@@ -1,0 +1,247 @@
+{
+  "at": "2026-07-22T07:45:28.229Z",
+  "ranks": [
+    "https://m.qidian.com/rank/yuepiao/",
+    "https://m.qidian.com/rank/hotsales/",
+    "https://m.qidian.com/rank/readindex/",
+    "https://m.qidian.com/rank/newfans/",
+    "https://m.qidian.com/rank/collect/",
+    "https://m.qidian.com/rank/finish/"
+  ],
+  "books": [
+    {
+      "book_id": "1035420986",
+      "title": "玄鉴仙族",
+      "rank": 1,
+      "rank_source": "https://m.qidian.com/rank/yuepiao/"
+    },
+    {
+      "book_id": "1040765595",
+      "title": "夜无疆",
+      "rank": 2,
+      "rank_source": "https://m.qidian.com/rank/yuepiao/"
+    },
+    {
+      "book_id": "1033014772",
+      "title": "青山",
+      "rank": 3,
+      "rank_source": "https://m.qidian.com/rank/yuepiao/"
+    },
+    {
+      "book_id": "1041637443",
+      "title": "捞尸人",
+      "rank": 4,
+      "rank_source": "https://m.qidian.com/rank/yuepiao/"
+    },
+    {
+      "book_id": "1048862481",
+      "title": "剑烛大荒",
+      "rank": 5,
+      "rank_source": "https://m.qidian.com/rank/yuepiao/"
+    },
+    {
+      "book_id": "1042256511",
+      "title": "没钱修什么仙？",
+      "rank": 6,
+      "rank_source": "https://m.qidian.com/rank/yuepiao/"
+    },
+    {
+      "book_id": "1044818845",
+      "title": "1984：从破产川菜馆开始",
+      "rank": 7,
+      "rank_source": "https://m.qidian.com/rank/yuepiao/"
+    },
+    {
+      "book_id": "1044896207",
+      "title": "以神通之名",
+      "rank": 8,
+      "rank_source": "https://m.qidian.com/rank/yuepiao/"
+    },
+    {
+      "book_id": "1048827563",
+      "title": "我正经学生，每天只吃九种魔药",
+      "rank": 9,
+      "rank_source": "https://m.qidian.com/rank/yuepiao/"
+    },
+    {
+      "book_id": "1047654482",
+      "title": "星河之主",
+      "rank": 10,
+      "rank_source": "https://m.qidian.com/rank/yuepiao/"
+    },
+    {
+      "book_id": "1043128588",
+      "title": "以一龙之力打倒整个世界！",
+      "rank": 11,
+      "rank_source": "https://m.qidian.com/rank/yuepiao/"
+    },
+    {
+      "book_id": "1045003390",
+      "title": "苟在武道世界成圣",
+      "rank": 12,
+      "rank_source": "https://m.qidian.com/rank/yuepiao/"
+    },
+    {
+      "book_id": "1010868264",
+      "title": "诡秘之主",
+      "rank": 13,
+      "rank_source": "https://m.qidian.com/rank/yuepiao/"
+    },
+    {
+      "book_id": "1047881102",
+      "title": "廓晋",
+      "rank": 14,
+      "rank_source": "https://m.qidian.com/rank/yuepiao/"
+    },
+    {
+      "book_id": "1041604040",
+      "title": "异度旅社",
+      "rank": 15,
+      "rank_source": "https://m.qidian.com/rank/yuepiao/"
+    },
+    {
+      "book_id": "1046770618",
+      "title": "真实历史游戏：只有我知道剧情",
+      "rank": 16,
+      "rank_source": "https://m.qidian.com/rank/yuepiao/"
+    },
+    {
+      "book_id": "1049107474",
+      "title": "让仙门再次伟大",
+      "rank": 17,
+      "rank_source": "https://m.qidian.com/rank/yuepiao/"
+    },
+    {
+      "book_id": "1048499963",
+      "title": "我加载了神秘学面板",
+      "rank": 18,
+      "rank_source": "https://m.qidian.com/rank/yuepiao/"
+    },
+    {
+      "book_id": "1046738077",
+      "title": "万生痴魔",
+      "rank": 19,
+      "rank_source": "https://m.qidian.com/rank/yuepiao/"
+    },
+    {
+      "book_id": "1047166699",
+      "title": "我，枪神！",
+      "rank": 20,
+      "rank_source": "https://m.qidian.com/rank/yuepiao/"
+    },
+    {
+      "book_id": "1047213880",
+      "title": "苟在两界修仙",
+      "rank": 21,
+      "rank_source": "https://m.qidian.com/rank/hotsales/"
+    },
+    {
+      "book_id": "1048675282",
+      "title": "这个武圣太谨慎了",
+      "rank": 22,
+      "rank_source": "https://m.qidian.com/rank/hotsales/"
+    },
+    {
+      "book_id": "1042108416",
+      "title": "元始法则",
+      "rank": 23,
+      "rank_source": "https://m.qidian.com/rank/hotsales/"
+    },
+    {
+      "book_id": "1047321972",
+      "title": "律师：从合法报复出轨开始！",
+      "rank": 24,
+      "rank_source": "https://m.qidian.com/rank/hotsales/"
+    },
+    {
+      "book_id": "1046692521",
+      "title": "我在永夜打造庇护所",
+      "rank": 25,
+      "rank_source": "https://m.qidian.com/rank/hotsales/"
+    },
+    {
+      "book_id": "1047259146",
+      "title": "人在美利坚：我的叔叔堂吉诃德",
+      "rank": 26,
+      "rank_source": "https://m.qidian.com/rank/hotsales/"
+    },
+    {
+      "book_id": "1047956575",
+      "title": "我的学习群里全是真大佬",
+      "rank": 27,
+      "rank_source": "https://m.qidian.com/rank/hotsales/"
+    },
+    {
+      "book_id": "1017281778",
+      "title": "绍宋",
+      "rank": 28,
+      "rank_source": "https://m.qidian.com/rank/readindex/"
+    },
+    {
+      "book_id": "1036370336",
+      "title": "宿命之环",
+      "rank": 29,
+      "rank_source": "https://m.qidian.com/rank/readindex/"
+    },
+    {
+      "book_id": "1045463939",
+      "title": "姐姐，我也要一起当女仆吗？",
+      "rank": 30,
+      "rank_source": "https://m.qidian.com/rank/readindex/"
+    },
+    {
+      "book_id": "1039931006",
+      "title": "夺嫡在嘉靖朝",
+      "rank": 31,
+      "rank_source": "https://m.qidian.com/rank/readindex/"
+    },
+    {
+      "book_id": "1048302379",
+      "title": "诳言法师的十三试炼",
+      "rank": 32,
+      "rank_source": "https://m.qidian.com/rank/readindex/"
+    },
+    {
+      "book_id": "1049347239",
+      "title": "战锤：群星与蝼蚁",
+      "rank": 33,
+      "rank_source": "https://m.qidian.com/rank/readindex/"
+    },
+    {
+      "book_id": "1049461865",
+      "title": "东京：从假冒男友开始",
+      "rank": 34,
+      "rank_source": "https://m.qidian.com/rank/newfans/"
+    },
+    {
+      "book_id": "1049192649",
+      "title": "斗罗绝世：多情剑客无情剑",
+      "rank": 35,
+      "rank_source": "https://m.qidian.com/rank/newfans/"
+    },
+    {
+      "book_id": "1048640442",
+      "title": "临圣",
+      "rank": 36,
+      "rank_source": "https://m.qidian.com/rank/newfans/"
+    },
+    {
+      "book_id": "1048016867",
+      "title": "重生08，我被确诊为医学泰斗",
+      "rank": 37,
+      "rank_source": "https://m.qidian.com/rank/newfans/"
+    },
+    {
+      "book_id": "1048538381",
+      "title": "你的技能很好，现在我也有了",
+      "rank": 38,
+      "rank_source": "https://m.qidian.com/rank/newfans/"
+    },
+    {
+      "book_id": "1047996831",
+      "title": "首富从AI浪潮开始",
+      "rank": 39,
+      "rank_source": "https://m.qidian.com/rank/newfans/"
+    }
+  ]
+}

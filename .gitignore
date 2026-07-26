@@ -38,6 +38,11 @@ ui/server/I*/
 package/cli.js.map
 claude-code-2.1.88.tgz
 
+# Fingerprint corpus: third-party novel chapter texts stay local (copyright);
+# contracts/ and meta/ are our own fitted stats and ARE tracked.
+workspace/fingerprint-lib/human/
+workspace/fingerprint-lib/ai/
+
 # UI build artifacts
 ui/web/dist/
 ui/web/.vite/

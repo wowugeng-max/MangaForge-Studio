@@ -1,0 +1,949 @@
+{
+  "updated_at": "2026-07-23T07:49:55.950Z",
+  "books": [
+    {
+      "book_id": "1049600494",
+      "title": "华娱：我只想摆烂，顶流什么鬼",
+      "author": "百川流逝东到海",
+      "cat": "都市",
+      "sub_cat": "娱乐明星",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1049370597",
+      "title": "年代系统劈叉了，非说包子是仙丹",
+      "author": "名窑",
+      "cat": "都市",
+      "sub_cat": "都市生活",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1049358618",
+      "title": "1977的铁拳文豪",
+      "author": "半山半圩",
+      "cat": "都市",
+      "sub_cat": "都市生活",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1049625790",
+      "title": "文豪1979：为人民写作",
+      "author": "想当榜一",
+      "cat": "都市",
+      "sub_cat": "都市生活",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1049586877",
+      "title": "这个导演爱交朋友",
+      "author": "择日北飞",
+      "cat": "都市",
+      "sub_cat": "娱乐明星",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1041637443",
+      "title": "捞尸人",
+      "author": "纯洁滴小龙",
+      "cat": "都市",
+      "sub_cat": "异术超能",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1044896207",
+      "title": "以神通之名",
+      "author": "猪心虾仁",
+      "cat": "都市",
+      "sub_cat": "都市异能",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1044818845",
+      "title": "1984：从破产川菜馆开始",
+      "author": "轻语江湖",
+      "cat": "都市",
+      "sub_cat": "都市生活",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1039689097",
+      "title": "1979黄金时代",
+      "author": "睡觉会变白",
+      "cat": "都市",
+      "sub_cat": "都市生活",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1047259146",
+      "title": "人在美利坚：我的叔叔堂吉诃德",
+      "author": "喜欢吃圣代",
+      "cat": "都市",
+      "sub_cat": "异术超能",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1047166699",
+      "title": "我，枪神！",
+      "author": "如水意",
+      "cat": "都市",
+      "sub_cat": "都市生活",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1047956575",
+      "title": "我的学习群里全是真大佬",
+      "author": "胖胖的小橘",
+      "cat": "都市",
+      "sub_cat": "都市生活",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1045354296",
+      "title": "神的模仿犯",
+      "author": "青衫取醉",
+      "cat": "都市",
+      "sub_cat": "都市异能",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1048016867",
+      "title": "重生08，我被确诊为医学泰斗",
+      "author": "忧伤的饭饭",
+      "cat": "都市",
+      "sub_cat": "都市生活",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1038504669",
+      "title": "重生高考前99天",
+      "author": "柳岸花又明",
+      "cat": "都市",
+      "sub_cat": "都市生活",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1047996831",
+      "title": "首富从AI浪潮开始",
+      "author": "路大头",
+      "cat": "都市",
+      "sub_cat": "商战职场",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1033148818",
+      "title": "多我一个后富怎么了",
+      "author": "渔雪",
+      "cat": "都市",
+      "sub_cat": "都市生活",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1047321972",
+      "title": "律师：从合法报复出轨开始！",
+      "author": "青衫仗剑行天涯",
+      "cat": "都市",
+      "sub_cat": "都市生活",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1047777980",
+      "title": "我在美国搞内战",
+      "author": "捕梦者",
+      "cat": "都市",
+      "sub_cat": "异术超能",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1042685395",
+      "title": "Z世代艺术家",
+      "author": "起酥面包",
+      "cat": "都市",
+      "sub_cat": "都市生活",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1044155341",
+      "title": "我，影帝！",
+      "author": "江公子阿宝",
+      "cat": "都市",
+      "sub_cat": "娱乐明星",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1041467170",
+      "title": "华娱情报王",
+      "author": "胖一点",
+      "cat": "都市",
+      "sub_cat": "娱乐明星",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1040790581",
+      "title": "刚准备高考，离婚逆袭系统来了",
+      "author": "七月封阳",
+      "cat": "都市",
+      "sub_cat": "都市生活",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1048193111",
+      "title": "要当总统了，你告诉我是纸牌屋？",
+      "author": "山居寒岁",
+      "cat": "都市",
+      "sub_cat": "都市生活",
+      "genre_slug": "urban",
+      "genre_name": "都市",
+      "intended_genre_slug": "urban",
+      "source_url": "https://m.qidian.com/category/4/"
+    },
+    {
+      "book_id": "1049568446",
+      "title": "修真界防骗手册",
+      "author": "三十二变",
+      "cat": "仙侠",
+      "sub_cat": "修真文明",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1049204782",
+      "title": "长生了，然后呢？",
+      "author": "拏云入梦",
+      "cat": "仙侠",
+      "sub_cat": "古典仙侠",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1049653449",
+      "title": "猫游饲饿传",
+      "author": "看书伤眼",
+      "cat": "仙侠",
+      "sub_cat": "神话修真",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1049556381",
+      "title": "长生真仙：从每日遗言开始",
+      "author": "荆楚乔木",
+      "cat": "仙侠",
+      "sub_cat": "幻想修仙",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1049644131",
+      "title": "凡人：从燕家堡旁支开始",
+      "author": "长尾山雀",
+      "cat": "仙侠",
+      "sub_cat": "幻想修仙",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1035420986",
+      "title": "玄鉴仙族",
+      "author": "季越人",
+      "cat": "仙侠",
+      "sub_cat": "修真文明",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1042256511",
+      "title": "没钱修什么仙？",
+      "author": "熊狼狗",
+      "cat": "仙侠",
+      "sub_cat": "修真文明",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1047213880",
+      "title": "苟在两界修仙",
+      "author": "文抄公",
+      "cat": "仙侠",
+      "sub_cat": "修真文明",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1048640442",
+      "title": "临圣",
+      "author": "卖报小郎君",
+      "cat": "仙侠",
+      "sub_cat": "修真文明",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1039449163",
+      "title": "山海提灯",
+      "author": "跃千愁",
+      "cat": "仙侠",
+      "sub_cat": "幻想修仙",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1048817253",
+      "title": "清光宝鉴",
+      "author": "一片苏叶",
+      "cat": "仙侠",
+      "sub_cat": "古典仙侠",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1039889503",
+      "title": "仙工开物",
+      "author": "蛊真人",
+      "cat": "仙侠",
+      "sub_cat": "修真文明",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1042665043",
+      "title": "今天他飞升了吗",
+      "author": "裴不了",
+      "cat": "仙侠",
+      "sub_cat": "修真文明",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1044334449",
+      "title": "仙道尽头",
+      "author": "怕辣的红椒",
+      "cat": "仙侠",
+      "sub_cat": "幻想修仙",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1033991975",
+      "title": "仙人消失之后",
+      "author": "风行水云间",
+      "cat": "仙侠",
+      "sub_cat": "幻想修仙",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1036645930",
+      "title": "阵问长生",
+      "author": "观虚",
+      "cat": "仙侠",
+      "sub_cat": "古典仙侠",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1016530091",
+      "title": "赤心巡天",
+      "author": "情何以甚",
+      "cat": "仙侠",
+      "sub_cat": "古典仙侠",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1035985996",
+      "title": "仙业",
+      "author": "鹓扶君",
+      "cat": "仙侠",
+      "sub_cat": "古典仙侠",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1039775049",
+      "title": "蜀山镇世地仙",
+      "author": "东海镇守",
+      "cat": "仙侠",
+      "sub_cat": "古典仙侠",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1046179008",
+      "title": "西游：拦路人！",
+      "author": "九月病句",
+      "cat": "仙侠",
+      "sub_cat": "古典仙侠",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1038152211",
+      "title": "乌龙山修行笔记",
+      "author": "八宝饭",
+      "cat": "仙侠",
+      "sub_cat": "幻想修仙",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1047076501",
+      "title": "观山！",
+      "author": "要胖的红烧肉",
+      "cat": "仙侠",
+      "sub_cat": "古典仙侠",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1041838605",
+      "title": "大赤仙门",
+      "author": "古顽石",
+      "cat": "仙侠",
+      "sub_cat": "修真文明",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1031777108",
+      "title": "光阴之外",
+      "author": "耳根",
+      "cat": "仙侠",
+      "sub_cat": "神话修真",
+      "genre_slug": "xianxia",
+      "genre_name": "仙侠",
+      "intended_genre_slug": "xianxia",
+      "source_url": "https://m.qidian.com/category/22/"
+    },
+    {
+      "book_id": "1049488097",
+      "title": "诡异凶灵",
+      "author": "璞誉",
+      "cat": "悬疑灵异",
+      "sub_cat": "诡异神秘",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1049414584",
+      "title": "出马大舞台，有仙你就来",
+      "author": "宝蛋不是蛋",
+      "cat": "悬疑灵异",
+      "sub_cat": "灵异民俗",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1049111402",
+      "title": "鬼上房",
+      "author": "头大似铁",
+      "cat": "悬疑灵异",
+      "sub_cat": "灵异民俗",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1046067565",
+      "title": "盗墓：我观山太保，只想成仙",
+      "author": "就爱吃游粉",
+      "cat": "悬疑灵异",
+      "sub_cat": "灵异民俗",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1049745717",
+      "title": "仵作：尸体从不撒谎",
+      "author": "呲牙就乐",
+      "cat": "悬疑灵异",
+      "sub_cat": "侦探推理",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1038356866",
+      "title": "噩梦使徒",
+      "author": "温柔劝睡师",
+      "cat": "悬疑灵异",
+      "sub_cat": "侦探推理",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1012584111",
+      "title": "神秘复苏",
+      "author": "佛前献花",
+      "cat": "悬疑灵异",
+      "sub_cat": "诡异神秘",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1042875987",
+      "title": "重生97，我在市局破悬案",
+      "author": "贫道信佛",
+      "cat": "悬疑灵异",
+      "sub_cat": "侦探推理",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1024194308",
+      "title": "玩家请上车",
+      "author": "海晏山",
+      "cat": "悬疑灵异",
+      "sub_cat": "规则怪谈",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1048817077",
+      "title": "赶尸匠",
+      "author": "洛小阳",
+      "cat": "悬疑灵异",
+      "sub_cat": "灵异民俗",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1045961766",
+      "title": "超级警探",
+      "author": "勤奋的关关",
+      "cat": "悬疑灵异",
+      "sub_cat": "侦探推理",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1042290063",
+      "title": "谁说这里有怪谈的？",
+      "author": "你是不是笨蛋",
+      "cat": "悬疑灵异",
+      "sub_cat": "诡异神秘",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1048070916",
+      "title": "我在神异司斩邪",
+      "author": "徍男",
+      "cat": "悬疑灵异",
+      "sub_cat": "诡异神秘",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1045495146",
+      "title": "神秘复苏：假如",
+      "author": "爱躺尸的风",
+      "cat": "悬疑灵异",
+      "sub_cat": "诡异神秘",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1012284323",
+      "title": "我有一座冒险屋",
+      "author": "我会修空调",
+      "cat": "悬疑灵异",
+      "sub_cat": "侦探推理",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1040223815",
+      "title": "欢迎来到诡诞游戏",
+      "author": "酒月剑仙",
+      "cat": "悬疑灵异",
+      "sub_cat": "诡异神秘",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1041820067",
+      "title": "不死的我速通灵异游戏",
+      "author": "去码头整点儿薯条",
+      "cat": "悬疑灵异",
+      "sub_cat": "诡异神秘",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1025901449",
+      "title": "我的治愈系游戏",
+      "author": "我会修空调",
+      "cat": "悬疑灵异",
+      "sub_cat": "侦探推理",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1037780233",
+      "title": "天官赐邪",
+      "author": "幻梦猎人",
+      "cat": "悬疑灵异",
+      "sub_cat": "诡异神秘",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1039450212",
+      "title": "伪像报告",
+      "author": "须尾俱全",
+      "cat": "悬疑灵异",
+      "sub_cat": "诡异神秘",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1044359267",
+      "title": "变成了厉鬼怎么办？",
+      "author": "几人得鹿皆梦鱼",
+      "cat": "悬疑灵异",
+      "sub_cat": "灵异民俗",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1043944827",
+      "title": "驱邪从食尸请神开始",
+      "author": "蟹黄鸡蛋",
+      "cat": "悬疑灵异",
+      "sub_cat": "诡异神秘",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1013823270",
+      "title": "全球崩坏",
+      "author": "间歇性诈尸",
+      "cat": "悬疑灵异",
+      "sub_cat": "诡异神秘",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "68223",
+      "title": "盗墓笔记",
+      "author": "南派三叔",
+      "cat": "悬疑灵异",
+      "sub_cat": "灵异民俗",
+      "genre_slug": "suspense",
+      "genre_name": "悬疑",
+      "intended_genre_slug": "suspense",
+      "source_url": "https://m.qidian.com/category/10/"
+    },
+    {
+      "book_id": "1049550977",
+      "title": "红楼：我给宝玉当二哥",
+      "author": "金笼鹦鹉",
+      "cat": "历史",
+      "sub_cat": "架空历史",
+      "genre_slug": "history",
+      "genre_name": "历史",
+      "intended_genre_slug": "history",
+      "source_url": "https://m.qidian.com/category/5/"
+    },
+    {
+      "book_id": "1049659986",
+      "title": "三国：末将俞涉，百世轮回",
+      "author": "许君.",
+      "cat": "历史",
+      "sub_cat": "秦汉三国",
+      "genre_slug": "history",
+      "genre_name": "历史",
+      "intended_genre_slug": "history",
+      "source_url": "https://m.qidian.com/category/5/"
+    },
+    {
+      "book_id": "1049722468",
+      "title": "德皇陛下，万岁！",
+      "author": "难闻奶酪",
+      "cat": "历史",
+      "sub_cat": "外国历史",
+      "genre_slug": "history",
+      "genre_name": "历史",
+      "intended_genre_slug": "history",
+      "source_url": "https://m.qidian.com/category/5/"
+    },
+    {
+      "book_id": "1048894762",
+      "title": "朕乃隋太宗",
+      "author": "桃锋居士",
+      "cat": "历史",
+      "sub_cat": "两晋隋唐",
+      "genre_slug": "history",
+      "genre_name": "历史",
+      "intended_genre_slug": "history",
+      "source_url": "https://m.qidian.com/category/5/"
+    },
+    {
+      "book_id": "1049688954",
+      "title": "大明：进击吧，永乐大帝！",
+      "author": "始皇大人",
+      "cat": "历史",
+      "sub_cat": "两宋元明",
+      "genre_slug": "history",
+      "genre_name": "历史",
+      "intended_genre_slug": "history",
+      "source_url": "https://m.qidian.com/category/5/"
+    },
+    {
+      "book_id": "1047881102",
+      "title": "廓晋",
+      "author": "榴弹怕水",
+      "cat": "历史",
+      "sub_cat": "两晋隋唐",
+      "genre_slug": "history",
+      "genre_name": "历史",
+      "intended_genre_slug": "history",
+      "source_url": "https://m.qidian.com/category/5/"
+    },
+    {
+      "book_id": "1044750637",
+      "title": "北望江山",
+      "author": "孤独麦客",
+      "cat": "历史",
+      "sub_cat": "两宋元明",
+      "genre_slug": "history",
+      "genre_name": "历史",
+      "intended_genre_slug": "history",
+      "source_url": "https://m.qidian.com/category/5/"
+    },
+    {
+      "book_id": "3223937",
+      "title": "神话版三国",
+      "author": "坟土荒草",
+      "cat": "历史",
+      "sub_cat": "秦汉三国",
+      "genre_slug": "history",
+      "genre_name": "历史",
+      "intended_genre_slug": "history",
+      "source_url": "https://m.qidian.com/category/5/"
+    }
+  ],
+  "genre_counts": {
+    "urban": 174,
+    "scifi": 18,
+    "multiverse": 12,
+    "xuanhuan": 112,
+    "game": 22,
+    "military": 12,
+    "suspense": 144,
+    "xianxia": 154,
+    "wuxia": 12,
+    "history": 66,
+    "lightnovel": 66,
+    "fantasy": 18
+  },
+  "genre_contracts": {
+    "urban": {
+      "name": "都市",
+      "sample_count": 174
+    },
+    "scifi": {
+      "name": "科幻",
+      "sample_count": 18
+    },
+    "multiverse": {
+      "name": "诸天无限",
+      "sample_count": 12
+    },
+    "xuanhuan": {
+      "name": "玄幻",
+      "sample_count": 112
+    },
+    "game": {
+      "name": "游戏",
+      "sample_count": 22
+    },
+    "military": {
+      "name": "军事",
+      "sample_count": 12
+    },
+    "suspense": {
+      "name": "悬疑",
+      "sample_count": 144
+    },
+    "xianxia": {
+      "name": "仙侠",
+      "sample_count": 154
+    },
+    "wuxia": {
+      "name": "武侠",
+      "sample_count": 12
+    },
+    "history": {
+      "name": "历史",
+      "sample_count": 66
+    },
+    "lightnovel": {
+      "name": "轻小说",
+      "sample_count": 66
+    },
+    "fantasy": {
+      "name": "奇幻",
+      "sample_count": 18
+    }
+  }
+}

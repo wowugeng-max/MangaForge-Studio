@@ -1,0 +1,133 @@
+{
+  "human_n": 810,
+  "ai_n": 6,
+  "human": {
+    "cv_para": 0.5945,
+    "single": 0.8767,
+    "two": 0.0984,
+    "dialogue": 0.2137,
+    "mid_streak": 4.1642,
+    "clinical": 0.0417
+  },
+  "ai": {
+    "cv_para": 0.5967,
+    "single": 0.8403,
+    "two": 0.1362,
+    "dialogue": 0.1348,
+    "mid_streak": 5.6667,
+    "clinical": 1.2995
+  },
+  "by_genre": {
+    "urban": {
+      "n": 174,
+      "cv_para": 0.599,
+      "single": 0.8912,
+      "two": 0.0901,
+      "dialogue": 0.2196,
+      "clinical": 0.0306
+    },
+    "scifi": {
+      "n": 18,
+      "cv_para": 0.5698,
+      "single": 0.9047,
+      "two": 0.0712,
+      "dialogue": 0.1884,
+      "clinical": 0
+    },
+    "multiverse": {
+      "n": 12,
+      "cv_para": 0.6097,
+      "single": 0.9216,
+      "two": 0.066,
+      "dialogue": 0.1511,
+      "clinical": 0.0413
+    },
+    "xuanhuan": {
+      "n": 112,
+      "cv_para": 0.6558,
+      "single": 0.889,
+      "two": 0.0968,
+      "dialogue": 0.2393,
+      "clinical": 0.0339
+    },
+    "game": {
+      "n": 22,
+      "cv_para": 0.5526,
+      "single": 0.8775,
+      "two": 0.0988,
+      "dialogue": 0.2004,
+      "clinical": 0
+    },
+    "military": {
+      "n": 12,
+      "cv_para": 0.5241,
+      "single": 0.9449,
+      "two": 0.049,
+      "dialogue": 0.1473,
+      "clinical": 0
+    },
+    "suspense": {
+      "n": 144,
+      "cv_para": 0.5788,
+      "single": 0.8823,
+      "two": 0.0931,
+      "dialogue": 0.2336,
+      "clinical": 0.108
+    },
+    "xianxia": {
+      "n": 154,
+      "cv_para": 0.5982,
+      "single": 0.8701,
+      "two": 0.1047,
+      "dialogue": 0.1766,
+      "clinical": 0.0213
+    },
+    "wuxia": {
+      "n": 12,
+      "cv_para": 0.5654,
+      "single": 0.7647,
+      "two": 0.1254,
+      "dialogue": 0.1107,
+      "clinical": 0.0474
+    },
+    "history": {
+      "n": 66,
+      "cv_para": 0.5746,
+      "single": 0.7836,
+      "two": 0.1617,
+      "dialogue": 0.2589,
+      "clinical": 0.0138
+    },
+    "lightnovel": {
+      "n": 66,
+      "cv_para": 0.5516,
+      "single": 0.8852,
+      "two": 0.0893,
+      "dialogue": 0.2073,
+      "clinical": 0.0456
+    },
+    "fantasy": {
+      "n": 18,
+      "cv_para": 0.625,
+      "single": 0.9513,
+      "two": 0.0418,
+      "dialogue": 0.2089,
+      "clinical": 0.0468
+    }
+  },
+  "contract_name": "qidian_free_rank_human",
+  "genre_contracts": [
+    "urban",
+    "scifi",
+    "multiverse",
+    "xuanhuan",
+    "game",
+    "military",
+    "suspense",
+    "xianxia",
+    "wuxia",
+    "history",
+    "lightnovel",
+    "fantasy"
+  ]
+}
