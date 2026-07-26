@@ -55,6 +55,12 @@ export function getContractSetDir(libRoot: string, setId: string) {
 
 const MODES: FingerprintContractSetMode[] = ['builtin', 'offline_refit', 'online_fetch']
 
+// Shared by read and write sides so a stray null/string/number/array in the
+// index can't slip past optional chaining and get normalized into a ghost record.
+function isPlainRecord(value: any): value is Record<string, any> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
 export function normalizeContractSetRecord(raw: any): FingerprintContractSetRecord {
   const id = String(raw?.id ?? '').trim() || `set-${randomUUID()}`
   const mode = MODES.includes(String(raw?.mode) as FingerprintContractSetMode)
@@ -84,6 +90,7 @@ export async function readContractSets(libRoot: string): Promise<FingerprintCont
   return [
     BUILTIN_CONTRACT_SET,
     ...stored
+      .filter(isPlainRecord)
       .map(normalizeContractSetRecord)
       .filter((record) => record.id !== BUILTIN_CONTRACT_SET_ID),
   ]
@@ -94,12 +101,12 @@ export async function writeContractSets(libRoot: string, sets: FingerprintContra
   await mkdir(dirname(path), { recursive: true })
   // Normalize before filtering/deduping so records missing an id still get one
   // instead of being silently dropped, mirroring the map->filter order readContractSets uses.
-  // Non-object entries (null/undefined/string/number) are rejected up front, since
+  // Non-plain-record entries (null/undefined/string/number/array) are rejected up front, since
   // normalizeContractSetRecord's optional chaining would otherwise turn them into
   // fully-formed ghost records instead of skipping them.
   const byId = new Map<string, FingerprintContractSetRecord>()
   for (const raw of sets) {
-    if (!raw || typeof raw !== 'object') continue
+    if (!isPlainRecord(raw)) continue
     const record = normalizeContractSetRecord(raw)
     if (record.id === BUILTIN_CONTRACT_SET_ID) continue
     byId.set(record.id, record)

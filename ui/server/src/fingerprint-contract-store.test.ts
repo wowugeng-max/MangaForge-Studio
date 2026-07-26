@@ -161,6 +161,45 @@ describe('fingerprint contract store', () => {
     expect(raw).toEqual([])
   })
 
+  test('writeContractSets drops array entries instead of turning them into ghost records', async () => {
+    const lib = await tempLib()
+    await writeContractSets(lib, [[1, 2, 3]] as any)
+    const raw = JSON.parse(await readFile(getContractSetsIndexPath(lib), 'utf8'))
+    expect(raw).toEqual([])
+  })
+
+  test('readContractSets drops non-object stored entries instead of turning them into ghost records', async () => {
+    const lib = await tempLib()
+    await mkdir(join(lib, 'contract-sets'), { recursive: true })
+    await writeFile(
+      getContractSetsIndexPath(lib),
+      JSON.stringify([null, 'garbage', 42, [1, 2, 3]]),
+      'utf8',
+    )
+    const sets = await readContractSets(lib)
+    expect(sets.length).toBe(1)
+    expect(sets[0].id).toBe(BUILTIN_CONTRACT_SET.id)
+  })
+
+  test('readContractSets keeps valid stored records while dropping null entries among them', async () => {
+    const lib = await tempLib()
+    await mkdir(join(lib, 'contract-sets'), { recursive: true })
+    await writeFile(
+      getContractSetsIndexPath(lib),
+      JSON.stringify([{ id: 'set-valid', label: 'Valid' }, null, { label: 'no id yet' }]),
+      'utf8',
+    )
+    const sets = await readContractSets(lib)
+    const nonBuiltin = sets.filter((s) => s.id !== BUILTIN_CONTRACT_SET.id)
+    expect(nonBuiltin.length).toBe(2)
+    const valid = nonBuiltin.find((s) => s.id === 'set-valid')
+    expect(valid?.label).toBe('Valid')
+    const idLess = nonBuiltin.find((s) => s.id !== 'set-valid')
+    expect(typeof idLess?.id).toBe('string')
+    expect(idLess?.id.length).toBeGreaterThan(0)
+    expect(idLess?.label).toBe('no id yet')
+  })
+
   test('source_set_id round-trips through write and read', async () => {
     const lib = await tempLib()
     await writeContractSets(lib, [
