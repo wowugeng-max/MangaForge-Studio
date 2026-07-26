@@ -18,6 +18,7 @@ import { buildCopyPayload, buildPastePlan, type ClipboardPayload } from './canva
 import { layoutCanvas } from './canvasLayout'
 import { clampToViewport } from '../utils/viewportClamp'
 import { moveMenuHighlight } from '../utils/menuNavigation'
+import { resolveAutoConnectHandle } from '../utils/autoConnect'
 
 const NODE_MENU_SIZE = { width: 300, height: 380 }
 const GROUP_MENU_SIZE = { width: 180, height: 88 }
@@ -62,6 +63,8 @@ function CanvasWorkspace() {
   const [comicModalOpen, setComicModalOpen] = useState(false)
   const [comicConfig, setComicConfig] = useState({ story: '', panelCount: 6, style: '', platform: '通用' })
   const clipboardRef = React.useRef<ClipboardPayload | null>(null)
+  const [pendingConnection, setPendingConnection] = useState<{ source: string; sourceHandle: string | null } | null>(null)
+  const connectStartRef = React.useRef<{ nodeId: string | null; handleId: string | null; handleType: string | null } | null>(null)
 
   const [, canvasDrop] = useDrop(() => ({
     accept: DndItemTypes.ASSET,
@@ -332,14 +335,49 @@ function CanvasWorkspace() {
   const closeNodeSearch = useCallback(() => {
     setMenuConfig(null)
     setSearchTerm('')
+    setPendingConnection(null)
   }, [])
 
   const createNodeAtMenu = (node: typeof AVAILABLE_NODES[number]) => {
     if (!menuConfig) return
-    addNode({ id: getId(), type: node.type, position: { x: menuConfig.flowX, y: menuConfig.flowY }, data: { label: node.label } } as any)
+    const newNodeId = getId()
+    addNode({ id: newNodeId, type: node.type, position: { x: menuConfig.flowX, y: menuConfig.flowY }, data: { label: node.label } } as any)
+    if (pendingConnection) {
+      const store = useCanvasStore.getState()
+      const sourceNode = store.nodes.find(n => n.id === pendingConnection.source)
+      const sourceType = getHandleDataType(sourceNode?.type, pendingConnection.sourceHandle ?? undefined, sourceNode?.data, 'source')
+      const targetHandle = resolveAutoConnectHandle(sourceType, node.type)
+      if (targetHandle) {
+        store.setEdges([...store.edges, {
+          id: `edge_auto_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
+          source: pendingConnection.source,
+          sourceHandle: pendingConnection.sourceHandle ?? undefined,
+          target: newNodeId,
+          targetHandle,
+        } as any])
+      } else {
+        message.info('新节点没有匹配的输入端口，未自动连线')
+      }
+      setPendingConnection(null)
+    }
     setMenuConfig(null)
     setSearchTerm('')
   }
+
+  const onConnectStart = useCallback((_: any, params: { nodeId: string | null; handleId: string | null; handleType: string | null }) => {
+    connectStartRef.current = params
+  }, [])
+
+  const onConnectEnd = useCallback((event: any) => {
+    const start = connectStartRef.current
+    connectStartRef.current = null
+    if (!start?.nodeId || start.handleType !== 'source') return
+    const target = event.target as HTMLElement
+    if (!target?.classList?.contains('react-flow__pane')) return
+    const point = 'changedTouches' in event ? event.changedTouches[0] : event
+    setPendingConnection({ source: start.nodeId, sourceHandle: start.handleId })
+    openNodeSearch(point.clientX, point.clientY)
+  }, [openNodeSearch])
 
   const onSelectionContextMenu = useCallback((event: React.MouseEvent) => {
     event.preventDefault()
@@ -484,7 +522,7 @@ function CanvasWorkspace() {
 
       <Content ref={(el: HTMLDivElement | null) => { (reactFlowWrapper as any).current = el; canvasDrop(el) }} style={{ background: 'transparent', position: 'relative' }} onDoubleClick={(e) => { if ((e.target as HTMLElement).closest('.react-flow__pane')) openNodeSearch(e.clientX, e.clientY) }} onContextMenu={(e) => { if ((e.target as HTMLElement).closest('.react-flow__pane')) { e.preventDefault(); openNodeSearch(e.clientX, e.clientY) } }}>
         <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at top right, rgba(99,102,241,0.09), transparent 28%), radial-gradient(circle at bottom left, rgba(14,165,233,0.08), transparent 24%)' }} />
-        <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} isValidConnection={isValidConnection} onInit={setReactFlowInstance} nodeTypes={nodeTypes} fitView zoomOnDoubleClick={false} onPaneClick={closeNodeSearch} onNodeClick={closeNodeSearch} onSelectionContextMenu={onSelectionContextMenu} onNodeContextMenu={onNodeContextMenu} deleteKeyCode={['Backspace', 'Delete']} selectionKeyCode={['Shift', 'Control', 'Meta']}>
+        <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onConnectStart={onConnectStart} onConnectEnd={onConnectEnd} isValidConnection={isValidConnection} onInit={setReactFlowInstance} nodeTypes={nodeTypes} fitView zoomOnDoubleClick={false} onPaneClick={closeNodeSearch} onNodeClick={closeNodeSearch} onSelectionContextMenu={onSelectionContextMenu} onNodeContextMenu={onNodeContextMenu} deleteKeyCode={['Backspace', 'Delete']} selectionKeyCode={['Shift', 'Control', 'Meta']}>
           <Background color="#cbd5e1" gap={18} />
           <Controls style={{ left: 16, right: 'auto' }} />
           <MiniMap style={{ border: '1px solid rgba(148,163,184,0.25)', borderRadius: 16, right: 16, bottom: 16, boxShadow: '0 14px 36px rgba(15,23,42,0.12)' }} zoomable pannable />
