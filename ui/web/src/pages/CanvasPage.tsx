@@ -17,6 +17,7 @@ import { expandFissionAndDistribute } from './canvasFission'
 import { buildCopyPayload, buildPastePlan, type ClipboardPayload } from './canvasClipboard'
 import { layoutCanvas } from './canvasLayout'
 import { clampToViewport } from '../utils/viewportClamp'
+import { moveMenuHighlight } from '../utils/menuNavigation'
 
 const NODE_MENU_SIZE = { width: 300, height: 380 }
 const GROUP_MENU_SIZE = { width: 180, height: 88 }
@@ -313,6 +314,13 @@ function CanvasWorkspace() {
     }, { ai: [], resource: [], display: [], structure: [] })
   }, [filteredNodes])
 
+  const [menuHighlight, setMenuHighlight] = useState(0)
+  const flatMenuNodes = useMemo(
+    () => (['ai', 'resource', 'display', 'structure'] as NodeCategory[]).flatMap(category => groupedNodes[category]),
+    [groupedNodes]
+  )
+  useEffect(() => { setMenuHighlight(0) }, [searchTerm, menuConfig?.x, menuConfig?.y])
+
   const openNodeSearch = (x: number, y: number) => {
     if (!reactFlowInstance) return
     const pos = reactFlowInstance.screenToFlowPosition({ x, y })
@@ -483,20 +491,25 @@ function CanvasWorkspace() {
         </ReactFlow>
 
         {menuConfig && <div style={{ position: 'fixed', left: menuConfig.x, top: menuConfig.y, zIndex: 9999, background: 'rgba(255,255,255,0.96)', backdropFilter: 'blur(16px)', boxShadow: '0 20px 45px rgba(15,23,42,0.18)', borderRadius: 16, width: 300, border: '1px solid rgba(148,163,184,0.18)', overflow: 'hidden' }} onDoubleClick={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
-          <div style={{ padding: 10, background: '#fafafa', borderBottom: '1px solid #e2e8f0' }}><Input prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />} placeholder="搜索节点..." variant="borderless" ref={(input) => input && setTimeout(() => input.focus(), 50)} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ padding: 0 }} /></div>
+          <div style={{ padding: 10, background: '#fafafa', borderBottom: '1px solid #e2e8f0' }}><Input prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />} placeholder="搜索节点..." variant="borderless" ref={(input) => input && setTimeout(() => input.focus(), 50)} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') { e.preventDefault(); setMenuHighlight(h => moveMenuHighlight(h, 1, flatMenuNodes.length)) }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); setMenuHighlight(h => moveMenuHighlight(h, -1, flatMenuNodes.length)) }
+            else if (e.key === 'Enter') { e.preventDefault(); const target = flatMenuNodes[menuHighlight]; if (target) createNodeAtMenu(target) }
+            else if (e.key === 'Escape') { closeNodeSearch() }
+          }} style={{ padding: 0 }} /></div>
           <div style={{ maxHeight: 320, overflowY: 'auto', padding: 8 }}>
             {(['ai', 'resource', 'display', 'structure'] as NodeCategory[]).map(category => {
               const list = groupedNodes[category]
               if (!list.length) return null
               return <div key={category} style={{ marginBottom: 10 }}>
                 <div style={{ padding: '6px 10px', fontSize: 11, color: '#64748b', fontWeight: 700 }}>{NODE_CATEGORY_LABELS[category]}</div>
-                {list.map(node => <div key={node.type} onClick={() => createNodeAtMenu(node)} style={{ padding: '10px 12px', cursor: 'pointer', borderRadius: 10, display: 'flex', flexDirection: 'column', background: 'transparent' }}>
+                {list.map(node => { const flatIndex = flatMenuNodes.indexOf(node); return <div key={node.type} onClick={() => createNodeAtMenu(node)} onMouseEnter={() => setMenuHighlight(flatIndex)} style={{ padding: '10px 12px', cursor: 'pointer', borderRadius: 10, display: 'flex', flexDirection: 'column', background: flatIndex === menuHighlight ? '#eef2ff' : 'transparent' }}>
                   <Space align="center" style={{ marginBottom: 2 }}>
                     <span style={{ fontSize: 16 }}>{node.icon}</span>
                     <Text strong style={{ fontSize: 13 }}>{node.label}</Text>
                   </Space>
                   <Text type="secondary" style={{ fontSize: 11 }}>{node.desc}</Text>
-                </div>)}
+                </div> })}
               </div>
             })}
             {!filteredNodes.length && <div style={{ padding: '16px 0', textAlign: 'center' }}><Text type="secondary">未找到节点</Text></div>}
