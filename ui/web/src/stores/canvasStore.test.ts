@@ -217,3 +217,19 @@ describe('sanitizeLoadedNodes', () => {
     expect((node.data as any)._isGroupRunning).toBeUndefined()
   })
 })
+
+describe('executeFission spacing', () => {
+  afterEach(resetStore)
+
+  test('clone branches are offset by at least template height + 60', () => {
+    useCanvasStore.getState().setCanvasData([
+      { id: 'src', type: 'generate', position: { x: 0, y: 0 }, data: {} } as any,
+      { id: 'child', type: 'generate', position: { x: 400, y: 0 }, style: { width: 360, height: 380 }, data: {} } as any,
+    ], [{ id: 'e1', source: 'src', target: 'child' } as any])
+    useCanvasStore.getState().executeFission('src', ['a', 'b', 'c'])
+    const clones = useCanvasStore.getState().nodes.filter(n => (n.data as any)?._fissionIndex)
+    expect(clones).toHaveLength(2)
+    expect(clones[0].position.y).toBeGreaterThanOrEqual(380 + 60)
+    expect(clones[1].position.y).toBeGreaterThanOrEqual((380 + 60) * 2)
+  })
+})

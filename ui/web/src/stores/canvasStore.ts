@@ -141,6 +141,12 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
       const subtreeEdges = edges.filter(edge => subtreeIds.includes(edge.source) && subtreeIds.includes(edge.target))
 
+      const subtreeNodes = subtreeIds
+        .map(subtreeId => nodes.find(node => node.id === subtreeId))
+        .filter((node): node is Node => Boolean(node))
+      const branchHeight = Math.max(380, ...subtreeNodes.map(node => Number((node.style as any)?.height || node.height || 380)))
+      const branchGap = branchHeight + 60
+
       for (let index = 0; index < count; index += 1) {
         if (index === 0) {
           branchRootIds.push(templateId)
@@ -161,7 +167,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
             id: clonedId,
             position: {
               x: original.position.x,
-              y: original.position.y + index * 220,
+              y: original.position.y + index * branchGap,
             },
             data: {
               ...(original.data as any),
