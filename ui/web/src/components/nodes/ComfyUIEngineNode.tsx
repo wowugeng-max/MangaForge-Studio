@@ -10,6 +10,7 @@ import { keyApi } from '../../api/keys'
 import apiClient from '../../api/client'
 import { createSSEClient, type SSEClient, type SSEMessage } from '../../utils/sse'
 import { getTypeLabel, inferParamType } from '../../utils/handleTypes'
+import { clampToViewport } from '../../utils/viewportClamp'
 import { nodeRegistry } from '../../utils/nodeRegistry'
 import { DndItemTypes } from '../../constants/dnd'
 import { AspectRatioPanel, AspectRatioTrigger, getAspectRatioSize, type AspectRatioValue } from '../AspectRatioSelector'
@@ -439,7 +440,16 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
   const updatePanelPos = () => {
     if (!nodeRef.current) return
     const nodeRect = nodeRef.current.closest('.react-flow__node')?.getBoundingClientRect() || nodeRef.current.getBoundingClientRect()
-    setPanelPos({ top: nodeRect.bottom + 8, left: nodeRect.left })
+    const clamped = clampToViewport({
+      x: nodeRect.left,
+      y: nodeRect.bottom + 8,
+      width: 560,
+      height: 520,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      margin: 12,
+    })
+    setPanelPos({ top: clamped.y, left: clamped.x })
   }
 
   useEffect(() => {
@@ -652,7 +662,7 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
         left: panelPos.left,
         width: 560,
         maxWidth: 'calc(100vw - 24px)',
-        maxHeight: 'calc(100vh - 24px)',
+        maxHeight: 520,
         overflow: 'auto',
         background: '#fff',
         borderRadius: 12,

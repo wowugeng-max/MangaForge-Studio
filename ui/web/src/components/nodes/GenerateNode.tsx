@@ -15,6 +15,7 @@ import { ASPECT_RATIOS as SHARED_ASPECT_RATIOS, getAspectRatioSize, type AspectR
 import { BaseNode } from './BaseNode'
 import { TypedHandle } from './TypedHandle'
 import { expandFissionAndDistribute } from '../../pages/canvasFission'
+import { clampToViewport } from '../../utils/viewportClamp'
 import { pickMediaResultContent } from '../../utils/mediaResult'
 import { buildAssetMediaUrl } from '../../utils/assetMedia'
 
@@ -206,7 +207,16 @@ function GenerateNodeImpl(props: NodeProps) {
   const updatePanelPos = () => {
     if (!nodeRef.current) return
     const nodeRect = nodeRef.current.closest('.react-flow__node')?.getBoundingClientRect() || nodeRef.current.getBoundingClientRect()
-    setPanelPos({ top: nodeRect.bottom + 8, left: nodeRect.left })
+    const clamped = clampToViewport({
+      x: nodeRect.left,
+      y: nodeRect.bottom + 8,
+      width: 560,
+      height: 520,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      margin: 12,
+    })
+    setPanelPos({ top: clamped.y, left: clamped.x })
   }
 
   useEffect(() => {
@@ -538,7 +548,7 @@ function GenerateNodeImpl(props: NodeProps) {
         left: panelPos.left,
         width: 560,
         maxWidth: 'calc(100vw - 24px)',
-        maxHeight: 'calc(100vh - 24px)',
+        maxHeight: 520,
         overflow: 'auto',
         background: '#fff',
         borderRadius: 12,

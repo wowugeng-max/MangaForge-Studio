@@ -325,3 +325,14 @@ describe('ComfyForge canvas feature migration', () => {
     expect(videoWorkshop).toContain('prompt: templatePromptKey.trim() || undefined')
   })
 })
+
+describe('canvas config panel clamping', () => {
+  test('node config panels clamp to viewport', () => {
+    const generateNode = source('../components/nodes/GenerateNode.tsx')
+    const comfyNode = source('../components/nodes/ComfyUIEngineNode.tsx')
+    for (const code of [generateNode, comfyNode]) {
+      expect(code).toContain("import { clampToViewport } from '../../utils/viewportClamp'")
+      expect(code).toContain('clampToViewport({')
+    }
+  })
+})
