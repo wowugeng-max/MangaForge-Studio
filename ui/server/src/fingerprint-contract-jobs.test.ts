@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdtemp, mkdir, rm, writeFile, readFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { loadRefitSamples, readSamplesStatus, runOfflineRefitJob } from './fingerprint-contract-jobs'
+import { createFingerprintContractJob, loadRefitSamples, readSamplesStatus, runOfflineRefitJob } from './fingerprint-contract-jobs'
 import { readContractSets } from './fingerprint-contract-store'
 
 let dirs: string[] = []
@@ -107,5 +107,47 @@ describe('fingerprint contract generation job', () => {
   test('runOfflineRefitJob fails clearly when there are no samples', async () => {
     const lib = await tempLib(0)
     await expect(runOfflineRefitJob({ libRoot: lib, setId: 'set-x', label: 'x', notes: '' })).rejects.toThrow(/样本/)
+  })
+
+  test('runOfflineRefitJob rejects setId "builtin" and leaves the real contract untouched', async () => {
+    const lib = await tempLib(4)
+    const contractPath = join(lib, 'contracts', 'active-contract.json')
+    const before = await readFile(contractPath, 'utf8')
+    await expect(
+      runOfflineRefitJob({ libRoot: lib, setId: 'builtin', label: '覆盖测试', notes: '' }),
+    ).rejects.toThrow(/只读/)
+    const after = await readFile(contractPath, 'utf8')
+    expect(after).toBe(before)
+  })
+
+  test('runOfflineRefitJob rejects a setId that already exists and preserves the first set', async () => {
+    const lib = await tempLib(4)
+    const first = await runOfflineRefitJob({ libRoot: lib, setId: 'set-dup', label: '第一次', notes: 'first' })
+    expect(first.sample_count).toBe(4)
+    const contractPath = join(lib, 'contract-sets', 'set-dup', 'active-contract.json')
+    const before = await readFile(contractPath, 'utf8')
+    const setsBefore = await readContractSets(lib)
+    await expect(
+      runOfflineRefitJob({ libRoot: lib, setId: 'set-dup', label: '第二次', notes: 'second' }),
+    ).rejects.toThrow(/set-dup/)
+    const after = await readFile(contractPath, 'utf8')
+    expect(after).toBe(before)
+    const setsAfter = await readContractSets(lib)
+    expect(setsAfter).toEqual(setsBefore)
+  })
+
+  test('listSampleFiles ignores a directory named like a sample file', async () => {
+    const lib = await tempLib(2)
+    await mkdir(join(lib, 'human', 'urban', 'fake.txt'), { recursive: true })
+    const status = await readSamplesStatus(lib)
+    const samples = await loadRefitSamples(lib)
+    expect(status.count).toBe(2)
+    expect(status.by_genre.urban).toBe(2)
+    expect(samples.length).toBe(status.count)
+  })
+
+  test('createFingerprintContractJob rejects a duplicate id', () => {
+    createFingerprintContractJob('offline_refit', 'dup-job-id-test')
+    expect(() => createFingerprintContractJob('offline_refit', 'dup-job-id-test')).toThrow(/dup-job-id-test/)
   })
 })

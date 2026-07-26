@@ -24,6 +24,7 @@ export type FingerprintContractJob = {
 const jobs = new Map<string, FingerprintContractJob>()
 
 export function createFingerprintContractJob(mode: FingerprintContractJob['mode'], id: string): FingerprintContractJob {
+  if (jobs.has(id)) throw new Error(`任务 id 已存在，无法覆盖历史状态：${id}`)
   const job: FingerprintContractJob = { id, mode, status: 'queued', progress: '排队中', created_at: new Date().toISOString() }
   jobs.set(id, job)
   return job
@@ -60,7 +61,13 @@ async function listSampleFiles(libRoot: string): Promise<Array<{ abs: string; ge
       if (!(await stat(dir)).isDirectory()) continue
       for (const file of await readdir(dir)) {
         if (!file.endsWith('.txt')) continue
-        out.push({ abs: join(dir, file), genre })
+        const abs = join(dir, file)
+        try {
+          if (!(await stat(abs)).isFile()) continue
+        } catch {
+          continue
+        }
+        out.push({ abs, genre })
       }
     } catch {
       continue
@@ -104,6 +111,14 @@ export async function runOfflineRefitJob(input: {
   notes: string
   onProgress?: (text: string) => void
 }) {
+  if (input.setId === BUILTIN_CONTRACT_SET_ID) {
+    throw new Error('setId 不能为 builtin：内置合同只读，不可作为离线重拟合的写入目标')
+  }
+  const existingSets = await readContractSets(input.libRoot)
+  if (existingSets.some((set) => set.id === input.setId)) {
+    throw new Error(`合同集 id 已存在，拒绝覆盖：${input.setId}`)
+  }
+
   const report = (text: string) => input.onProgress?.(text)
   report('读取内置合同')
   const builtinDir = getContractSetDir(input.libRoot, BUILTIN_CONTRACT_SET_ID)
@@ -146,9 +161,8 @@ export async function runOfflineRefitJob(input: {
     'utf8',
   )
 
-  const sets = await readContractSets(input.libRoot)
   await writeContractSets(input.libRoot, [
-    ...sets,
+    ...existingSets,
     normalizeContractSetRecord({
       id: input.setId,
       label: input.label,
