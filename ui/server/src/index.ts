@@ -22,6 +22,7 @@ import { registerDirectTaskRoutes } from './routes/direct-task'
 import { registerMangaCompatRoutes } from './routes/manga-compat'
 import { registerNovelRoutes } from './routes/novel'
 import { registerKnowledgeRoutes } from './routes/knowledge'
+import { registerFingerprintContractRoutes } from './routes/fingerprint-contracts'
 import { registerRecommendationRoutes } from './routes/recommendation-rules'
 import { acceptWebSocketKey, sseManager, taskMessageManager, interruptRegisteredTask, webSocketManager, webSocketClientIdFromPath } from './ws-manager'
 import { keyMonitorEnabledFromEnv, startKeyMonitor } from './key-monitor'
@@ -91,6 +92,7 @@ registerDirectTaskRoutes(app, getWorkspace)
 registerRecommendationRoutes(app, getWorkspace)
 registerNovelRoutes(app, getWorkspace)
 registerKnowledgeRoutes(app)
+registerFingerprintContractRoutes(app, getWorkspace)
 
 // ── SSE: Real-time task progress ──
 app.get('/api/sse/:clientId', (_req, res) => {
