@@ -40,8 +40,14 @@ export function buildFingerprintScoreReviewRecord(input: {
 }) {
   const checks = normalizeChecks(input.contractScore?.checks)
   const statChecks = checks.filter((check) => check.key !== 'zhuque_narrative_hard')
-  const pass = Number(input.contractScore?.pass ?? 0)
-  const total = Number(input.contractScore?.total ?? 0) || statChecks.length || 1
+  const narrativeHardCheck = checks.find((check) => check.key === 'zhuque_narrative_hard')
+  const narrativeHardFailed = narrativeHardCheck ? narrativeHardCheck.ok === false : false
+  const total = statChecks.length || 1
+  // pass/score are derived from checks[] rather than trusted from the caller-supplied
+  // contractScore.pass/score, so a failed narrative hard gate always docks the stored
+  // score instead of being silently absorbed by inconsistent top-level fields.
+  const pass = Math.max(0, statChecks.filter((check) => check.ok).length - (narrativeHardFailed ? 1 : 0))
+  const score = Number((pass / total).toFixed(3))
   const failing = checks.filter((check) => !check.ok)
   const payload = {
     chapter_id: input.chapterId,
@@ -51,7 +57,7 @@ export function buildFingerprintScoreReviewRecord(input: {
     set_label: input.setLabel,
     contract_name: input.contractName,
     locked: input.locked,
-    score: Number(input.contractScore?.score ?? 0),
+    score,
     pass,
     total,
     checks,
@@ -75,16 +81,19 @@ export function parseFingerprintScoreRow(row: { payload?: string | null }): Pars
     const parsed = JSON.parse(String(row?.payload || ''))
     if (!parsed || typeof parsed !== 'object') return null
     const checks = normalizeChecks(parsed.checks)
-    const statChecks = checks.filter((check) => check.key !== 'zhuque_narrative_hard')
-    const total = statChecks.length || Number(parsed.total ?? 0) || 1
-    const pass = statChecks.length ? statChecks.filter((check) => check.ok).length : Number(parsed.pass ?? 0)
+    // Literal read: pass/total/score are already correct in the payload (computed once, at
+    // build time, including the narrative hard-gate penalty). Recomputing them here from
+    // checks[] would silently drop that penalty whenever the hard gate itself failed.
+    const total = Number(parsed.total ?? 0) || checks.length || 1
+    const pass = Number(parsed.pass ?? 0)
+    const score = Number(parsed.score ?? 0)
     return {
       set_id: String(parsed.set_id || 'builtin'),
       set_label: String(parsed.set_label || parsed.set_id || 'builtin'),
       contract_name: parsed.contract_name == null ? null : String(parsed.contract_name),
       chapter_id: parsed.chapter_id == null ? null : Number(parsed.chapter_id),
       chapter_no: parsed.chapter_no == null ? null : Number(parsed.chapter_no),
-      score: total ? Number((pass / total).toFixed(3)) : 0,
+      score,
       pass,
       total,
       checks,
