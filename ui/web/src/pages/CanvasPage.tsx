@@ -13,6 +13,7 @@ import { getHandleDataType, areTypesCompatible } from '../utils/handleTypes'
 import apiClient from '../api/client'
 import { planCanvasDagStep } from './canvasDagRunner'
 import { buildCanvasAssetDropPlan } from './canvasAssetDrop'
+import { expandFissionAndDistribute } from './canvasFission'
 
 const { Content, Sider } = Layout
 const { Title, Text } = Typography
@@ -42,7 +43,7 @@ function CanvasWorkspace() {
   const canvasProjectId = Number.isFinite(routeProjectId) ? routeProjectId : undefined
   const reactFlowWrapper = React.useRef<HTMLDivElement>(null)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, addNode, setCanvasData, clearCanvas, undo, redo, past, future, saveHistory, isGlobalRunning, setGlobalRunning, nodeRunStatus, setNodeStatus, resetAllNodeStatus, smartResetNodeStatus, updateNodeData, executeFission, createGroup, dissolveGroup } = useCanvasStore()
+  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, addNode, setCanvasData, clearCanvas, undo, redo, past, future, saveHistory, isGlobalRunning, setGlobalRunning, nodeRunStatus, setNodeStatus, resetAllNodeStatus, smartResetNodeStatus, updateNodeData, createGroup, dissolveGroup } = useCanvasStore()
   const [projectName, setProjectName] = useState(id ? '加载中...' : '全局画布')
   const [saving, setSaving] = useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
@@ -178,14 +179,8 @@ function CanvasWorkspace() {
         }
 
         fissionDoneRef.current.add(node.id)
-        const clonedRootIds = executeFission(node.id, result.items)
-        edges.filter(edge => edge.source === node.id).forEach(edge => {
-          updateNodeData(edge.target, { incoming_data: result.items[0] })
-        })
-        for (let index = 1; index < clonedRootIds.length; index += 1) {
-          updateNodeData(clonedRootIds[index], { incoming_data: result.items[index] })
-        }
-        message.info(`裂变完成，已创建 ${actualCount} 个并行分支`, 3)
+        const outcome = expandFissionAndDistribute({ nodeId: node.id, items: result.items, store: useCanvasStore })
+        if (outcome.expanded) message.info(`裂变完成，已创建 ${actualCount} 个并行分支`, 3)
         return
       }
     }
@@ -210,7 +205,7 @@ function CanvasWorkspace() {
       message.error('检测到死锁或未连接的节点孤岛，执行已终止')
       setGlobalRunning(false)
     }
-  }, [isGlobalRunning, nodeRunStatus, nodes, edges, updateNodeData, setNodeStatus, setGlobalRunning, executeFission])
+  }, [isGlobalRunning, nodeRunStatus, nodes, edges, updateNodeData, setNodeStatus, setGlobalRunning])
 
   const createComicPipeline = useCallback((config: typeof comicConfig) => {
     if (!config.story.trim()) {

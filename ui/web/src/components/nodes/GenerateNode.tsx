@@ -14,6 +14,7 @@ import CameraMovement from '../CameraMovement'
 import { ASPECT_RATIOS as SHARED_ASPECT_RATIOS, getAspectRatioSize, type AspectRatioValue } from '../AspectRatioSelector'
 import { BaseNode } from './BaseNode'
 import { TypedHandle } from './TypedHandle'
+import { expandFissionAndDistribute } from '../../pages/canvasFission'
 import { pickMediaResultContent } from '../../utils/mediaResult'
 import { buildAssetMediaUrl } from '../../utils/assetMedia'
 
@@ -296,7 +297,14 @@ function GenerateNodeImpl(props: NodeProps) {
     sseClientRef.current = null
     message.success('🧠 AI 思考完成！')
 
-    if (!finalResult?._fission) {
+    if (finalResult?._fission && Array.isArray(finalResult.items)) {
+      const store = useCanvasStore.getState()
+      if (!store.isGlobalRunning) {
+        const outcome = expandFissionAndDistribute({ nodeId: id, items: finalResult.items, store: useCanvasStore })
+        if (outcome.expanded) message.info(`裂变完成，已创建 ${finalResult.items.length} 个并行分支`, 3)
+        else if (outcome.reason === 'no_downstream') message.warning('裂变结果已生成，但没有下游节点可展开')
+      }
+    } else {
       getEdges().filter(e => e.source === id).forEach(edge => {
         updateNodeData(edge.target, { incoming_data: finalResult })
       })

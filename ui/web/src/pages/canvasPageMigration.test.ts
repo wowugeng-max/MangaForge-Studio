@@ -65,7 +65,7 @@ describe('ComfyForge canvas feature migration', () => {
 
     expect(canvasPage).toContain('const dagTickRef = React.useRef(0)')
     expect(canvasPage).toContain('const fissionDoneRef = React.useRef<Set<string>>(new Set())')
-    expect(canvasPage).toContain('const clonedRootIds = executeFission(node.id, result.items)')
+    expect(canvasPage).toContain('expandFissionAndDistribute({ nodeId: node.id, items: result.items, store: useCanvasStore })')
     expect(canvasPage).toContain('planCanvasDagStep({')
     expect(canvasPage).toContain('dagStep.statusUpdates')
     expect(canvasPage).toContain('dagStep.dataUpdates')
