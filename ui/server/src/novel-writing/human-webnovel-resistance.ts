@@ -1981,9 +1981,9 @@ export function isStoreBlockingPureAiResistanceKey(key: string): boolean {
   return STORE_BLOCKING_PURE_AI_KEYS.has(k)
 }
 
-/** Convert residual pure-AI detector hard failures into store-blocking admission failures. */
-export function buildResistanceAdmissionHardFailures(text: string) {
-  return scanHumanWebnovelResistanceHard(text)
+/** Map already-computed resistance findings into store-blocking admission failures. */
+export function buildResistanceAdmissionFromReport(report: { hard_failures?: any[] }) {
+  return (Array.isArray(report?.hard_failures) ? report.hard_failures : [])
     .filter((item) => isStoreBlockingPureAiResistanceKey(String(item?.key || '')))
     .map((item) => ({
       code: String(item?.key || 'hw_resistance'),
@@ -2002,6 +2002,17 @@ export function buildResistanceAdmissionHardFailures(text: string) {
         store_policy: 'pure_ai_only',
       },
     }))
+}
+
+/** Evaluate once, return both the full report (for score recording) and admission failures. */
+export function evaluateResistanceAdmission(text: string) {
+  const report = evaluateHumanWebnovelResistance(text)
+  return { report, hard_failures: buildResistanceAdmissionFromReport(report) }
+}
+
+/** Convert residual pure-AI detector hard failures into store-blocking admission failures. */
+export function buildResistanceAdmissionHardFailures(text: string) {
+  return evaluateResistanceAdmission(text).hard_failures
 }
 
 /** For quality-loop advisory list: statistical soft misses + soft pattern warns. */

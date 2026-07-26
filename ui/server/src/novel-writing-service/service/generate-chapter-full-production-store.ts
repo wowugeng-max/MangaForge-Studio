@@ -17,8 +17,11 @@ import {
   validateMinimalChapterProse,
 } from '../../novel-writing/prose-admission-policy'
 import {
-  buildResistanceAdmissionHardFailures,
+  evaluateResistanceAdmission,
 } from '../../novel-writing/human-webnovel-resistance'
+import { resolveFingerprintContractInfo } from '../../novel-writing/fingerprint-contract-resolver'
+import { buildFingerprintScoreReviewRecord } from '../../fingerprint-contract-scores'
+import { BUILTIN_CONTRACT_SET } from '../../fingerprint-contract-store'
 import type {
   ProseAdmissionHardFailure,
   ProseAdmissionWarning,
@@ -206,13 +209,14 @@ export async function runFullProductionAdmissionAndStore(args: {
       message: failure?.message || '正文与高置信正史专名冲突。',
       details: failure,
     }))
+  const resistanceAdmission = evaluateResistanceAdmission(finalText)
   const hardAdmission = classifyProseAdmission({
     hard_failures: [
       ...minimalValidation.failures,
       ...openingContinuityFailures,
       ...canonicalFailures,
       // System-wide: detector hard risks must never soft-pass into store.
-      ...buildResistanceAdmissionHardFailures(finalText),
+      ...resistanceAdmission.hard_failures,
     ],
   })
   if (hardAdmission.hard_failures.length) {
@@ -368,6 +372,18 @@ export async function runFullProductionAdmissionAndStore(args: {
       reviews: [
         ...(storyStateStatus === 'synced' ? asArray(stagedPreflightRepair?.staged_reviews) : []),
         ...pendingGeneratedReviews,
+        buildFingerprintScoreReviewRecord({
+          projectId,
+          chapterId: chapter.id,
+          chapterNo: Number(chapter?.chapter_no ?? chapter?.chapterNo ?? 0) || 0,
+          setId: resolveFingerprintContractInfo()?.set_id || BUILTIN_CONTRACT_SET.id,
+          setLabel: BUILTIN_CONTRACT_SET.label,
+          contractName: resistanceAdmission.report.contract_name,
+          locked: Boolean(resolveFingerprintContractInfo()?.locked),
+          contractScore: resistanceAdmission.report.contract_score,
+          textChars: String(finalText || '').replace(/\s+/g, '').length,
+          createdAt: new Date().toISOString(),
+        }),
         buildProseQualityReview(precommitAdmission.status === 'accepted' ? 'ok' : 'warn', finalQualityDecision, '', {
           referenceReport,
           safetyDecision,
