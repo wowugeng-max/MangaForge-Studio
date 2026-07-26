@@ -203,6 +203,48 @@ describe('aggregateFingerprintScores', () => {
     expect(dialogue.target).toBe(0.35)
   })
 
+  // Builds a payload like `record()` but with a caller-chosen target for one check key, so
+  // two records can disagree on target the way two contract revisions would.
+  function recordWithTarget(key: string, target: number, createdAt: string) {
+    const built = record({ contractScore: contractScore(9), createdAt })
+    const payload = JSON.parse(built.payload)
+    payload.checks = payload.checks.map((c: any) => (c.key === key ? { ...c, target } : c))
+    return { payload: JSON.stringify(payload) }
+  }
+
+  test('target reflects the most recently created record for that check, even when it is processed first (out-of-order input)', () => {
+    // Simulates the real route ordering: projects come back updated_at DESC, so a project
+    // that scored more recently with a raised threshold can appear before an older project
+    // that scored long ago with the old threshold, even though its own row is newer.
+    const older = recordWithTarget('dialogue_para_ratio', 0.3, '2026-01-01T00:00:00.000Z')
+    const newer = recordWithTarget('dialogue_para_ratio', 0.35, '2026-06-01T00:00:00.000Z')
+    // newer is placed first to simulate the non-chronological row order.
+    const agg = aggregateFingerprintScores([newer, older])
+    const builtin = agg.find((r) => r.set_id === 'builtin')!
+    const dialogue = builtin.check_pass_rates.find((c) => c.key === 'dialogue_para_ratio')!
+    expect(dialogue.target).toBe(0.35)
+    // both rows must still be folded into the pass-rate/sample-count stats regardless of
+    // which one wins the target slot.
+    expect(dialogue.sample_count).toBe(2)
+    expect(builtin.chapter_count).toBe(2)
+  })
+
+  test('a record with missing created_at is not allowed to corrupt target selection', () => {
+    const dated = recordWithTarget('dialogue_para_ratio', 0.35, '2026-03-01T00:00:00.000Z')
+    const undatedPayload = JSON.parse(dated.payload)
+    delete undatedPayload.created_at
+    undatedPayload.checks = undatedPayload.checks.map((c: any) => (c.key === 'dialogue_para_ratio' ? { ...c, target: 0.99 } : c))
+    const undated = { payload: JSON.stringify(undatedPayload) }
+
+    // The undated row arrives after the dated one; it must not clobber the target the
+    // dated row already established.
+    const agg = aggregateFingerprintScores([dated, undated])
+    const builtin = agg.find((r) => r.set_id === 'builtin')!
+    const dialogue = builtin.check_pass_rates.find((c) => c.key === 'dialogue_para_ratio')!
+    expect(dialogue.target).toBe(0.35)
+    expect(dialogue.sample_count).toBe(2)
+  })
+
   test('leaves target null when no row carried one', () => {
     const built = buildFingerprintScoreReviewRecord({
       projectId: 1,

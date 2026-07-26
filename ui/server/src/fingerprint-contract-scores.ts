@@ -12,6 +12,7 @@ export type ParsedFingerprintScore = {
   pass: number
   total: number
   checks: FingerprintScoreCheck[]
+  created_at: string
 }
 
 function normalizeChecks(raw: any): FingerprintScoreCheck[] {
@@ -97,6 +98,7 @@ export function parseFingerprintScoreRow(row: { payload?: string | null }): Pars
       pass,
       total,
       checks,
+      created_at: parsed.created_at == null ? '' : String(parsed.created_at),
     }
   } catch {
     return null
@@ -104,20 +106,30 @@ export function parseFingerprintScoreRow(row: { payload?: string | null }): Pars
 }
 
 export function aggregateFingerprintScores(rows: Array<{ payload?: string | null }>) {
-  const groups = new Map<string, { label: string; scores: number[]; checks: Map<string, { pass: number; total: number; valueSum: number; target: number | [number, number] | null }> }>()
+  const groups = new Map<
+    string,
+    { label: string; scores: number[]; checks: Map<string, { pass: number; total: number; valueSum: number; target: number | [number, number] | null; targetTimestamp: number | null }> }
+  >()
   for (const row of rows) {
     const parsed = parseFingerprintScoreRow(row)
     if (!parsed) continue
     if (!groups.has(parsed.set_id)) groups.set(parsed.set_id, { label: parsed.set_label, scores: [], checks: new Map() })
     const group = groups.get(parsed.set_id)!
     group.scores.push(parsed.score)
+    // rows are not time-ordered (routes concatenate per-project reviews, and projects are
+    // sorted by updated_at DESC), so target must be picked by each record's own created_at
+    // rather than by iteration order, or a stale threshold can silently win.
+    const createdAtMs = parsed.created_at ? Date.parse(parsed.created_at) : NaN
     for (const check of parsed.checks) {
-      if (!group.checks.has(check.key)) group.checks.set(check.key, { pass: 0, total: 0, valueSum: 0, target: null })
+      if (!group.checks.has(check.key)) group.checks.set(check.key, { pass: 0, total: 0, valueSum: 0, target: null, targetTimestamp: null })
       const stat = group.checks.get(check.key)!
       stat.total += 1
       if (check.ok) stat.pass += 1
       stat.valueSum += check.value
-      stat.target = check.target
+      if (!Number.isNaN(createdAtMs) && (stat.targetTimestamp === null || createdAtMs >= stat.targetTimestamp)) {
+        stat.target = check.target
+        stat.targetTimestamp = createdAtMs
+      }
     }
   }
   return [...groups.entries()].map(([setId, group]) => ({
