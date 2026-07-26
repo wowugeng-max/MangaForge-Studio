@@ -16,9 +16,9 @@ export async function analyzeKnowledge(text: string, source: string, modelId?: n
   timeoutMs?: number
   maxRetries?: number
 }): Promise<KnowledgeEntry[]> {
-  const { buildNovelAnalysisPrompt } = await import('./llm/prompts')
-  const { executeWithRuntimeModel } = await import('./llm/provider-runtime')
-  const { loadActiveWorkspace } = await import('./workspace')
+  const { buildNovelAnalysisPrompt } = await import('../llm/prompts')
+  const { executeWithRuntimeModel } = await import('../llm/provider-runtime')
+  const { loadActiveWorkspace } = await import('../workspace')
 
   const workspace = await loadActiveWorkspace()
   const preferredModelId = Number(modelId || 0) || undefined
@@ -96,8 +96,8 @@ export async function synthesizeFullBookKnowledge(
 ): Promise<KnowledgeEntry[]> {
   if (!entries.length) return []
 
-  const { executeWithRuntimeModel } = await import('./llm/provider-runtime')
-  const { loadActiveWorkspace } = await import('./workspace')
+  const { executeWithRuntimeModel } = await import('../llm/provider-runtime')
+  const { loadActiveWorkspace } = await import('../workspace')
   const workspace = await loadActiveWorkspace()
 
   const firstChapter = chapters[0]?.chapter || job.start_chapter || 1

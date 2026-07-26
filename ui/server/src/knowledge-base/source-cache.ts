@@ -30,7 +30,7 @@ export function sourceCacheKey(projectTitle: string, sourceUrl: string) {
 }
 
 async function activeWorkspacePath() {
-  const { loadActiveWorkspace } = await import('./workspace')
+  const { loadActiveWorkspace } = await import('../workspace')
   return loadActiveWorkspace()
 }
 
