@@ -489,10 +489,10 @@ function CanvasWorkspace() {
 
   return <Layout style={{ height: '100vh', overflow: 'hidden', background: 'linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)' }}>
     <Layout.Header style={{ height: 72, background: 'rgba(255,255,255,0.88)', backdropFilter: 'blur(18px)', borderBottom: '1px solid rgba(148,163,184,0.18)', padding: '0 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 8px 30px rgba(15,23,42,0.04)' }}>
-      <Space size="middle" style={{ display: 'flex', alignItems: 'center' }}>
+      <Space size="middle" style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
         <Tooltip title={isSidebarOpen ? '收起资产库' : '展开资产库'}><Button type="text" icon={isSidebarOpen ? <MenuFoldOutlined /> : <MenuUnfoldOutlined />} onClick={() => setIsSidebarOpen(!isSidebarOpen)} /></Tooltip>
         <Tooltip title="返回中枢大厅"><Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/')} /></Tooltip>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}><Title level={5} style={{ margin: 0 }}>{projectName}</Title><Tag color="processing" bordered={false}>创作中</Tag></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}><Title level={5} style={{ margin: 0, whiteSpace: 'nowrap' }}>{projectName}</Title><Tag color="processing" bordered={false}>创作中</Tag></div>
       </Space>
       <Space size="middle">
         <Space.Compact>
