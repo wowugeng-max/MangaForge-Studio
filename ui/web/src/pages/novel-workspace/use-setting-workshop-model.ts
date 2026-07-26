@@ -30,6 +30,11 @@ import {
 
 const { Text, Paragraph } = Typography
 
+// 'consistency_check' lost its panel button (and its SettingWorkshopActionKey member) but
+// runConsistencyCheck is still exposed by this hook; widen the loading-key union locally so the
+// constant passed to setActionLoadingKey stays type-consistent.
+type SettingWorkshopLoadingKey = SettingWorkshopActionKey | 'consistency_check'
+
 export function useSettingWorkshopModel({
   projectId,
   activeChapter,
@@ -48,7 +53,7 @@ export function useSettingWorkshopModel({
   onAssetsApplied?: () => void
 }) {
   const [loading, setLoading] = useState(false)
-  const [actionLoadingKey, setActionLoadingKey] = useState<SettingWorkshopActionKey | ''>('')
+  const [actionLoadingKey, setActionLoadingKey] = useState<SettingWorkshopLoadingKey | ''>('')
   const [settings, setSettings] = useState<any[]>(initialSettings)
   const [usage, setUsage] = useState<any[]>([])
   const [discoveredAssets, setDiscoveredAssets] = useState<any[]>([])

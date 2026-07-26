@@ -226,32 +226,45 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
     compactActionLabel: compactDeliveryActionLabel(desk.recommendedAcceptanceAction.key, desk.recommendedAcceptanceAction.label),
     secondaryActions: desk.secondaryActions || [],
     characterPov: (() => {
+      // Prefer planning desk POV if present: it already carries the declared UI string shape
+      // (scenePreview/violations are string lists), so pass it through untouched.
+      const fromDesk = desk.characterPov
+      if (fromDesk) {
+        return {
+          visible: true,
+          status: fromDesk.status,
+          statusLabel: fromDesk.statusLabel,
+          primaryPov: fromDesk.primaryPov,
+          multiPovLocked: fromDesk.multiPovLocked,
+          allowedSecondaryPovs: fromDesk.allowedSecondaryPovs || [],
+          secondaryCutPreview: fromDesk.secondaryCutPreview || [],
+          assetFirewallPreview: fromDesk.assetFirewallPreview || [],
+          dialogueFilterPreview: fromDesk.dialogueFilterPreview || [],
+          scenePreview: fromDesk.scenePreview || [],
+          knowledgePreview: fromDesk.knowledgePreview || [],
+          violations: fromDesk.violations || [],
+        }
+      }
       const qualityFindings = [
-        ...(((desk as any).qualityWarnings) || []),
-        ...((((desk as any).qualityAudit || {}).checks) || []),
-        ...((((desk as any).qualityAudit || {}).evidence) || []),
+        ...(desk.qualityWarnings || []),
+        ...(desk.qualityAudit?.checks || []),
+        ...(desk.qualityAudit?.evidence || []),
       ]
-      const pov = buildCharacterPovUiModel({
-        sceneCards: desk.sceneCards || (desk as any).sceneCards || [],
-        chapterText: '',
-        qualityFindings,
-      })
-      // Prefer planning desk POV if present on writing cockpit path via optional field.
-      const fromDesk = (desk as any).characterPov || pov
-      if (!fromDesk) return null
+      const pov = buildCharacterPovUiModel({ chapterText: '', qualityFindings })
+      if (!pov) return null
       return {
         visible: true,
-        status: fromDesk.status,
-        statusLabel: fromDesk.statusLabel,
-        primaryPov: fromDesk.primaryPov,
-        multiPovLocked: fromDesk.multiPovLocked,
-        allowedSecondaryPovs: fromDesk.allowedSecondaryPovs,
-        secondaryCutPreview: fromDesk.secondaryCutPreview || [],
-        assetFirewallPreview: fromDesk.assetFirewallPreview || [],
-        dialogueFilterPreview: fromDesk.dialogueFilterPreview || [],
-        scenePreview: (fromDesk.scenes || []).slice(0, 4).map((scene: any) => `场景${scene.sceneNo} · ${scene.povCharacter || '未定'} · 选择=${scene.decisionInScene || '待补'}`),
-        knowledgePreview: fromDesk.knowledgePreview || [],
-        violations: (fromDesk.violations || []).map((item: any) => `${item.label}${item.evidence ? `：${item.evidence}` : ''}`),
+        status: pov.status,
+        statusLabel: pov.statusLabel,
+        primaryPov: pov.primaryPov,
+        multiPovLocked: pov.multiPovLocked,
+        allowedSecondaryPovs: pov.allowedSecondaryPovs,
+        secondaryCutPreview: pov.secondaryCutPreview || [],
+        assetFirewallPreview: pov.assetFirewallPreview || [],
+        dialogueFilterPreview: pov.dialogueFilterPreview || [],
+        scenePreview: (pov.scenes || []).slice(0, 4).map((scene) => `场景${scene.sceneNo} · ${scene.povCharacter || '未定'} · 选择=${scene.decisionInScene || '待补'}`),
+        knowledgePreview: pov.knowledgePreview || [],
+        violations: (pov.violations || []).map((item) => `${item.label}${item.evidence ? `：${item.evidence}` : ''}`),
       }
     })(),
     storyStatePanel: desk.storyStatePanel || null,

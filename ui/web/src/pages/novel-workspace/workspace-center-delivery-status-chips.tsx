@@ -3,28 +3,34 @@ import { Popover, Tag, Typography } from 'antd'
 
 const { Text } = Typography
 
-function asItems(...parts: Array<string | string[] | null | undefined>) {
-  const items: string[] = []
-  for (const part of parts) {
-    if (!part) continue
-    if (Array.isArray(part)) {
-      for (const item of part) {
-        const text = String(item || '').trim()
-        if (text) items.push(text)
+function asItems(...parts: Array<React.ReactNode | React.ReactNode[] | null | undefined>) {
+  const items: React.ReactNode[] = []
+  const push = (value: React.ReactNode) => {
+    if (value === null || value === undefined || value === false || value === true) return
+    if (typeof value === 'string' || typeof value === 'number') {
+      const text = String(value).trim()
+      if (!text) return
+      // Split long joined strings into bullet-like items when they use Chinese semicolons.
+      if (text.includes('；')) {
+        for (const piece of text.split('；')) {
+          const trimmed = piece.trim()
+          if (trimmed) items.push(trimmed)
+        }
+        return
       }
+      items.push(text)
+      return
+    }
+    // Keep real JSX detail nodes renderable; anything else would stringify
+    // into "[object Object]", so drop it instead of showing garbage.
+    if (React.isValidElement(value)) items.push(value)
+  }
+  for (const part of parts) {
+    if (Array.isArray(part)) {
+      for (const item of part) push(item)
       continue
     }
-    const text = String(part).trim()
-    if (!text) continue
-    // Split long joined strings into bullet-like items when they use Chinese semicolons.
-    if (text.includes('；')) {
-      for (const piece of text.split('；')) {
-        const trimmed = piece.trim()
-        if (trimmed) items.push(trimmed)
-      }
-    } else {
-      items.push(text)
-    }
+    push(part)
   }
   return items
 }
@@ -37,7 +43,7 @@ function DeliveryInfoChip({
 }: {
   label: React.ReactNode
   className?: string
-  items?: string[]
+  items?: React.ReactNode[]
   onActivate?: () => void
 }) {
   const detailItems = asItems(...items)
@@ -84,7 +90,7 @@ function DeliveryInfoChip({
           </div>
           <ul className="novel-delivery-chip-panel-list">
             {detailItems.map((item, index) => (
-              <li key={`${index}-${item.slice(0, 24)}`}>{item}</li>
+              <li key={typeof item === 'string' ? `${index}-${item.slice(0, 24)}` : index}>{item}</li>
             ))}
           </ul>
           {onActivate ? (
@@ -424,24 +430,22 @@ export function WorkspaceDeliveryStatusChips(props: Record<string, any>) {
 
       {deliverySummary.qualityAuditSync && (
         <DeliveryInfoChip
-          className={`novel-delivery-quality-audit-tag novel-delivery-quality-audit-tag-${deliverySummary.qualityAuditSync.status}`}
-          label={deliverySummary.qualityAuditSync.scoreLabel || deliverySummary.qualityAuditSync.label}
+          className={`novel-delivery-quality-sync-tag novel-delivery-quality-sync-tag-${deliverySummary.qualityAuditSync.status}`}
+          label={`诊断承接 · ${deliverySummary.qualityAuditSync.label}`}
           items={[
-            deliverySummary.qualityAuditSync.label,
-            ...(deliverySummary.qualityAuditSync.evidence || []),
-            ...(deliverySummary.qualityAuditSync.nextActions || []),
+            ...(deliverySummary.qualityAuditSync.evidence || []).map((item: string) => `证据：${item}`),
+            ...(deliverySummary.qualityAuditSync.nextActions || []).map((item: string) => `动作：${item}`),
           ]}
         />
       )}
 
       {deliverySummary.qualityAuditRepairReceiptSync && (
         <DeliveryInfoChip
-          className={`novel-delivery-quality-repair-tag novel-delivery-quality-repair-tag-${deliverySummary.qualityAuditRepairReceiptSync.status}`}
-          label={deliverySummary.qualityAuditRepairReceiptSync.label}
+          className={`novel-delivery-quality-repair-receipt-tag novel-delivery-quality-repair-receipt-tag-${deliverySummary.qualityAuditRepairReceiptSync.status}`}
+          label={`质量回执 · ${deliverySummary.qualityAuditRepairReceiptSync.label}`}
           items={[
-            deliverySummary.qualityAuditRepairReceiptSync.summary,
-            ...(deliverySummary.qualityAuditRepairReceiptSync.evidence || []),
-            ...(deliverySummary.qualityAuditRepairReceiptSync.nextActions || []),
+            ...(deliverySummary.qualityAuditRepairReceiptSync.evidence || []).map((item: string) => `证据：${item}`),
+            ...(deliverySummary.qualityAuditRepairReceiptSync.nextActions || []).map((item: string) => `动作：${item}`),
           ]}
         />
       )}
@@ -449,11 +453,11 @@ export function WorkspaceDeliveryStatusChips(props: Record<string, any>) {
       {deliverySummary.blueprintReceipt && (
         <DeliveryInfoChip
           className={`novel-delivery-blueprint-tag novel-delivery-blueprint-tag-${deliverySummary.blueprintReceipt.status}`}
-          label={deliverySummary.blueprintReceipt.label}
+          label={deliverySummary.blueprintReceipt.scoreLabel || deliverySummary.blueprintReceipt.label}
           items={[
-            deliverySummary.blueprintReceipt.summary,
-            ...(deliverySummary.blueprintReceipt.evidence || []),
-            ...(deliverySummary.blueprintReceipt.nextActions || []),
+            deliverySummary.blueprintReceipt.label,
+            (deliverySummary.blueprintReceipt.missed || []).length ? `缺口：${deliverySummary.blueprintReceipt.missed.join('、')}` : '',
+            ...(deliverySummary.blueprintReceipt.evidence || []).map((item: string) => `证据：${item}`),
           ]}
         />
       )}
@@ -461,11 +465,11 @@ export function WorkspaceDeliveryStatusChips(props: Record<string, any>) {
       {deliverySummary.revisionReceipt && (
         <DeliveryInfoChip
           className={`novel-delivery-revision-tag novel-delivery-revision-tag-${deliverySummary.revisionReceipt.status}`}
-          label={deliverySummary.revisionReceipt.label}
+          label={deliverySummary.revisionReceipt.scoreLabel || deliverySummary.revisionReceipt.label}
           items={[
-            deliverySummary.revisionReceipt.summary,
-            ...(deliverySummary.revisionReceipt.evidence || []),
-            ...(deliverySummary.revisionReceipt.nextActions || []),
+            deliverySummary.revisionReceipt.label,
+            (deliverySummary.revisionReceipt.risks || []).length ? `残余：${deliverySummary.revisionReceipt.risks.join('、')}` : '',
+            ...(deliverySummary.revisionReceipt.evidence || []).map((item: string) => `修后证据：${item}`),
           ]}
         />
       )}
@@ -473,35 +477,36 @@ export function WorkspaceDeliveryStatusChips(props: Record<string, any>) {
       {deliverySummary.deliveryRiskReceipt && (
         <DeliveryInfoChip
           className={`novel-delivery-risk-receipt-tag novel-delivery-risk-receipt-tag-${deliverySummary.deliveryRiskReceipt.status}`}
-          label={deliverySummary.deliveryRiskReceipt.label}
+          label={deliverySummary.deliveryRiskReceipt.scoreLabel || deliverySummary.deliveryRiskReceipt.label}
           items={[
-            deliverySummary.deliveryRiskReceipt.summary,
-            ...(deliverySummary.deliveryRiskReceipt.evidence || []),
-            ...(deliverySummary.deliveryRiskReceipt.nextActions || []),
+            deliverySummary.deliveryRiskReceipt.label,
+            (deliverySummary.deliveryRiskReceipt.risks || []).length ? `残余：${deliverySummary.deliveryRiskReceipt.risks.join('、')}` : '',
+            ...(deliverySummary.deliveryRiskReceipt.evidence || []).map((item: string) => `承接证据：${item}`),
           ]}
         />
       )}
 
       {deliverySummary.sceneCardReceipt && (
         <DeliveryInfoChip
-          className={`novel-delivery-scene-card-tag novel-delivery-scene-card-tag-${deliverySummary.sceneCardReceipt.status}`}
+          className={`novel-delivery-scene-card-receipt-tag novel-delivery-scene-card-receipt-tag-${deliverySummary.sceneCardReceipt.status}`}
           label={deliverySummary.sceneCardReceipt.label}
           items={[
-            deliverySummary.sceneCardReceipt.summary,
-            ...(deliverySummary.sceneCardReceipt.evidence || []),
-            ...(deliverySummary.sceneCardReceipt.nextActions || []),
+            (deliverySummary.sceneCardReceipt.scenes || []).length ? `场景：${deliverySummary.sceneCardReceipt.scenes.join('、')}` : '',
+            (deliverySummary.sceneCardReceipt.fields || []).length ? `字段：${deliverySummary.sceneCardReceipt.fields.join('、')}` : '',
+            ...(deliverySummary.sceneCardReceipt.evidence || []).map((item: string) => `证据：${item}`),
           ]}
         />
       )}
 
       {deliverySummary.qualityAudit && (
         <DeliveryInfoChip
-          className={`novel-delivery-quality-audit-main-tag novel-delivery-quality-audit-main-tag-${deliverySummary.qualityAudit.status}`}
-          label={deliverySummary.qualityAudit.scoreLabel || deliverySummary.qualityAudit.label}
+          className={`novel-delivery-quality-audit-tag novel-delivery-quality-audit-tag-${deliverySummary.qualityAudit.status}`}
+          label={deliverySummary.qualityAudit.label}
           items={[
-            deliverySummary.qualityAudit.label,
-            ...(deliverySummary.qualityAudit.evidence || []),
-            ...(deliverySummary.qualityAudit.nextActions || []),
+            (deliverySummary.qualityAudit.checks || []).length ? `检查：${deliverySummary.qualityAudit.checks.join('、')}` : '',
+            ...(deliverySummary.qualityAudit.evidence || []).map((item: string) => `证据：${item}`),
+            (deliverySummary.qualityAudit.fixes || []).length ? `修法：${deliverySummary.qualityAudit.fixes.join('；')}` : '',
+            (deliverySummary.qualityAudit.strategies || []).length ? `策略：${deliverySummary.qualityAudit.strategies.join('、')}` : '',
           ]}
         />
       )}
@@ -528,7 +533,7 @@ export function WorkspaceDeliveryStatusChips(props: Record<string, any>) {
 
       {deliverySummary.chapterHandoffSync && (
         <DeliveryInfoChip
-          className={`novel-delivery-handoff-tag novel-delivery-handoff-tag-${deliverySummary.chapterHandoffSync.status}`}
+          className={`novel-delivery-handoff-sync-tag novel-delivery-handoff-sync-tag-${deliverySummary.chapterHandoffSync.status}`}
           label={`章首承接 · ${deliverySummary.chapterHandoffSync.label}`}
           items={[
             ...(deliverySummary.chapterHandoffSync.evidence || []).map((item: string) => `证据：${item}`),

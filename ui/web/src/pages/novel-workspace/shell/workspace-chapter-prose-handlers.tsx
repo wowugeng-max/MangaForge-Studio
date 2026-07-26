@@ -4,6 +4,16 @@ import { chapterHasProse, displayValue } from '../utils'
 import { renderGenerationResultDiffContentView } from './workspace-commercial-ops-views'
 import { isAbortError, proseStreamControl } from '../prose-stream-control'
 
+/**
+ * Shared streaming UI state (streamingChapterId/generatingProse/progress) may only be written by
+ * the run that still owns the stream: either its controller is still the active one, or the stream
+ * ended/was canceled with no successor. A run superseded by proseStreamControl.begin() must stay
+ * silent so it cannot clobber the newer run's state from its catch/finally (incl. delayed cleanup).
+ */
+export function canFinalizeProseRun(activeController: AbortController | null | undefined, runController: AbortController) {
+  return !activeController || activeController === runController
+}
+
 export type ChapterProseHandlerDeps = {
   proseBatchCancelRef: any
   setProseBatchStatus: any
@@ -171,18 +181,29 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
       setRightPanelTab('proseQuality')
       message.success(`已使用 ${done?.result?.modelName || '所选模型'} 生成正文`)
     } catch (error: any) {
+      // A newer run may have taken over via proseStreamControl.begin(); it now owns the shared UI state.
+      const runSuperseded = !canFinalizeProseRun(proseStreamControl.controller, streamController)
       if (isAbortError(error) || streamSignal.aborted) {
-        setStreamingProgress('已取消生成')
-        setStreamingPercent(0)
-        message.info('已取消正文生成，可继续浏览或切换章节')
-      } else {
+        if (!runSuperseded) {
+          setStreamingProgress('已取消生成')
+          setStreamingPercent(0)
+          message.info('已取消正文生成，可继续浏览或切换章节')
+        }
+      } else if (!runSuperseded) {
         setStreamingProgress('生成失败'); setStreamingPercent(0)
         message.error(error?.message || '正文生成失败')
       }
     } finally {
+      const runSuperseded = !canFinalizeProseRun(proseStreamControl.controller, streamController)
       proseStreamControl.end(streamController)
-      setGeneratingProse(false)
-      setTimeout(() => { setStreamingChapterId(null); setStreamingPercent(0); setStreamingProgress(prev => prev === '已取消生成' || prev === '生成失败' ? prev : '') }, 1500)
+      if (!runSuperseded) {
+        setGeneratingProse(false)
+        setTimeout(() => {
+          // Re-check at fire time: a new run may have started during the 1.5s cleanup delay.
+          if (!canFinalizeProseRun(proseStreamControl.controller, streamController)) return
+          setStreamingChapterId(null); setStreamingPercent(0); setStreamingProgress(prev => prev === '已取消生成' || prev === '生成失败' ? prev : '')
+        }, 1500)
+      }
     }
   }
 
@@ -226,17 +247,21 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
         message.success(applied.length ? `已自动补齐 ${applied.length} 项上下文材料` : '上下文材料无需补齐')
       }
     } catch (error: any) {
+      // A newer run may have taken over via proseStreamControl.begin(); it now owns the shared UI state.
+      const runSuperseded = !canFinalizeProseRun(proseStreamControl.controller, repairController)
       if (isAbortError(error) || repairController.signal.aborted) {
-        setStreamingProgress('已取消生成')
-        setStreamingPercent(0)
-        message.info('已取消材料补齐')
-      } else {
+        if (!runSuperseded) {
+          setStreamingProgress('已取消生成')
+          setStreamingPercent(0)
+          message.info('已取消材料补齐')
+        }
+      } else if (!runSuperseded) {
         message.error(error?.response?.data?.error || error?.message || '上下文自动补齐失败')
         setStreamingProgress('生成失败')
         setStreamingPercent(0)
       }
       proseStreamControl.end(repairController)
-      setGeneratingProse(false)
+      if (!runSuperseded) setGeneratingProse(false)
       return
     }
     proseStreamControl.end(repairController)

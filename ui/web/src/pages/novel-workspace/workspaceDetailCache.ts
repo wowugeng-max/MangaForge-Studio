@@ -44,6 +44,8 @@ const CHAPTER_DETAIL_SCENE_KEYS = [
   // Character POV (keep compact but visible in workspace UI)
   'pov_lens', 'pov_character', 'decision_in_scene', 'want_now', 'fear_or_cost_now',
   'emotion_in_situation', 'emotion_tell', 'protagonist_agency_action',
+  // POV authorization surfaces consumed by buildCharacterPovUiModel previews.
+  'secondary_cut', 'forbidden_settings', 'used_settings',
 ] as const
 
 function compactDetailText(value: any, max = 400) {
@@ -59,6 +61,7 @@ function compactPovLensForWorkspace(lens: any) {
       ? value.slice(0, maxItems).map((item) => compactDetailText(item, maxLen)).filter(Boolean)
       : []
   )
+  const secondaryCut = lens.secondary_cut || lens.secondaryCut
   return {
     pov_character: compactDetailText(lens.pov_character || lens.povCharacter, 40),
     knows_now: list(lens.knows_now || lens.knowsNow),
@@ -71,6 +74,16 @@ function compactPovLensForWorkspace(lens: any) {
     decision_in_scene: compactDetailText(lens.decision_in_scene || lens.decisionInScene, 120),
     emotion_from_pov: compactDetailText(lens.emotion_from_pov || lens.emotionFromPov, 80),
     emotion_tell: compactDetailText(lens.emotion_tell || lens.emotionTell, 100),
+    // POV authorization surfaces consumed by buildCharacterPovUiModel previews.
+    secondary_cut: secondaryCut && typeof secondaryCut === 'object'
+      ? {
+          character: compactDetailText(secondaryCut.character || secondaryCut.pov_character || secondaryCut.name, 40),
+          max_lines: Number(secondaryCut.max_lines || secondaryCut.maxLines || 3) || 3,
+          purpose: compactDetailText(secondaryCut.purpose, 80),
+        }
+      : undefined,
+    asset_bound_knows: list(lens.asset_bound_knows || lens.assetBoundKnows, 4),
+    asset_bound_unknown: list(lens.asset_bound_unknown || lens.assetBoundUnknown, 4),
   }
 }
 

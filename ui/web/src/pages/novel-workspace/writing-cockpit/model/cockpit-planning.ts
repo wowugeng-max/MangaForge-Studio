@@ -40,6 +40,7 @@ import {
   blockerTexts,
   buildQualityContinuitySceneMap,
   chapterSceneCards,
+  rawChapterSceneCards,
   contextPackageStatus,
   contextPreflight,
   contextTarget,
@@ -170,7 +171,7 @@ export function buildChapterPlanningDesk(args: {
   const contextStatus = contextPackageStatus(args.contextPackage)
   const sceneCards = chapterSceneCards(args.nextChapter, args.contextPackage)
   const characterPov = buildCharacterPovUiModel({
-    sceneCards,
+    sceneCards: rawChapterSceneCards(args.nextChapter, args.contextPackage),
     characters: Array.isArray(args.contextPackage?.characters) ? args.contextPackage.characters : [],
     chapterText: String(args.nextChapter?.chapter_text || args.nextChapter?.chapterText || ''),
   })

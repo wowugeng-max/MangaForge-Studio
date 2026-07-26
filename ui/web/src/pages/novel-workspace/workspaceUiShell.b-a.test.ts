@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
+import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { WorkspaceDeliveryStatusChips } from './workspace-center-delivery-status-chips'
 import {
   source,
   serverSource,
@@ -475,7 +478,8 @@ describe('commercial writing workspace UI shell b a', () => {
     expect(settingPanel).toContain('merge_target_id')
     expect(settingPanel).toContain('target_name')
     expect(settingPanel).not.toContain('loading={saving}')
-    expect(projectWorkspace).toContain('设定资产')
+    // Primary tab was intentionally renamed 设定资产 -> 资产 in the core-area IA (workspace-core-area.ts).
+    expect(source('shell/workspace-core-area.ts')).toContain("label: '资产'")
     expect(projectWorkspace).toContain('StoryAssetsWorkspace')
     expect(projectWorkspace).toContain('focusDiscoveredAssetsToken')
   })
@@ -499,6 +503,47 @@ describe('commercial writing workspace UI shell b a', () => {
     expect(recommendationModel).toContain('ipSceneIntake')
     expect(service).toContain('buildIpSceneIntakeReviewRecord')
     expect(reviewRecords).toContain("review_type: 'ip_scene_intake'")
+  })
+
+  test('renders ip scene intake detail list without [object Object]', () => {
+    const deliverySummary = {
+      ipSceneIntake: {
+        status: 'ready',
+        label: 'IP场面 1',
+        candidateCount: 1,
+        candidates: [
+          {
+            title: '天台对峙',
+            summary: '主角雨夜天台摊牌',
+            visualHook: '雨夜霓虹俯拍',
+            adaptationValue: '预告片级画面',
+            spreadPoint: '截图传播点',
+          },
+        ],
+      },
+    }
+    const ipSceneIntakeTooltip = React.createElement(
+      'div',
+      null,
+      React.createElement('div', null, '天台对峙'),
+      React.createElement('div', null, '视觉钩子：雨夜霓虹俯拍'),
+      React.createElement('div', null, '改编价值：预告片级画面'),
+      React.createElement('div', null, '传播点：截图传播点'),
+    )
+
+    const tree: any = (WorkspaceDeliveryStatusChips as any)({ deliverySummary, ipSceneIntakeTooltip })
+    const children = (Array.isArray(tree.props.children) ? tree.props.children : [tree.props.children])
+      .flat(Infinity)
+      .filter(Boolean)
+    const ipChip: any = children.find((child: any) => String(child?.props?.className || '').includes('novel-delivery-ip-scene-tag'))
+    expect(ipChip).toBeTruthy()
+
+    const rendered: any = ipChip.type(ipChip.props)
+    const detailPanel = rendered?.props?.content ?? rendered
+    const html = renderToStaticMarkup(detailPanel)
+    expect(html).not.toContain('[object Object]')
+    expect(html).toContain('天台对峙')
+    expect(html).toContain('雨夜霓虹俯拍')
   })
 
   test('shows signature scene sync in delivery strip and risk queue', () => {

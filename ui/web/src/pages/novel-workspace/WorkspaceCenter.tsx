@@ -37,6 +37,7 @@ import {
   EditorDisplayControls,
   EDITOR_DISPLAY_PRESETS,
   loadEditorDisplayPrefs,
+  loadWritingAuxCollapsed,
   saveEditorDisplayPrefs,
   saveWritingAuxCollapsed,
   type EditorDisplayPrefs,
@@ -191,7 +192,7 @@ export function WorkspaceCenter({
   isImmersiveShell?: boolean
 }) {
   const [editorDisplayPrefs, setEditorDisplayPrefs] = React.useState<EditorDisplayPrefs>(() => loadEditorDisplayPrefs())
-  const [writingAuxCollapsed, setWritingAuxCollapsed] = React.useState(() => true)
+  const [writingAuxCollapsed, setWritingAuxCollapsed] = React.useState(() => loadWritingAuxCollapsed())
   const [immersiveAuxOpen, setImmersiveAuxOpen] = React.useState(false)
   const [blueprintEditorOpen, setBlueprintEditorOpen] = React.useState(false)
   const [blueprintEditorText, setBlueprintEditorText] = React.useState('')
@@ -478,7 +479,10 @@ export function WorkspaceCenter({
       return
     }
     if (key === 'view_brief') {
-      setWritingAuxCollapsed(false)
+      // Immersive shell renders the aux content only inside the trailing Popover, so open that
+      // instead of toggling the (hidden) inline details track.
+      if (isImmersiveShell) setImmersiveAuxOpen(true)
+      else setWritingAuxCollapsed(false)
       return
     }
     if (key === 'view_quality') {
@@ -619,7 +623,9 @@ export function WorkspaceCenter({
               wordCountLabel={`${chapterWordCount(activeChapter)} 字`}
               saveStatusLabel={saveStatus === 'saved' ? '已保存' : saveStatus === 'saving' ? '保存中' : saveStatus === 'error' ? '保存失败' : undefined}
               detailsOpen={!writingAuxCollapsed}
-              onToggleDetails={() => setWritingAuxCollapsed(prev => !prev)}
+              // Immersive shell never renders the inline details track, so hide the toggle there
+              // (the aux content stays reachable via the trailing "辅助" Popover).
+              onToggleDetails={isImmersiveShell ? undefined : () => setWritingAuxCollapsed(prev => !prev)}
               detailsSummary={[
                 ...(writingQueue?.visible
                   ? [

@@ -46,12 +46,15 @@ const CRAFT_METRIC_LABELS: Record<string, string> = {
   description_overuse_score: '描写过量',
 }
 
-function reportChapterId(report: any) {
+export function reportChapterId(report: any) {
   const payload = parseReviewPayload(report)
   return Number(
     payload.chapter_id
     || payload.context_package?.chapter_target?.id
     || payload.chapter_target?.id
+    // Legacy truncated reports (pre 2026-07-14 compaction) only keep chapter_id inside the
+    // preview text; reuse the ReferencePanel fallback so both panels agree on the chapter.
+    || resolveQualityReportView(report).chapterTarget?.id
     || 0,
   )
 }
