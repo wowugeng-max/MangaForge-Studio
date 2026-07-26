@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Card, Empty, Input, Modal, Radio, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
+import { Alert, Button, Card, Drawer, Empty, Input, Modal, Radio, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
 import { fingerprintContractApi } from '../../api/fingerprintContracts'
-import { CHECK_LABELS, buildCheckPassRateItems, buildContractSetRows, canApplyJobUpdate, nextJobPollDelayMs, shouldResumeJobPolling, type ContractSetRow } from './fingerprintContractsModel'
+import { CHECK_LABELS, buildCheckPassRateItems, buildContractDetailRows, buildContractSetRows, canApplyJobUpdate, nextJobPollDelayMs, shouldResumeJobPolling, type ContractSetRow } from './fingerprintContractsModel'
 
 const { Text } = Typography
 const JOB_STORAGE_KEY = 'fingerprint.contract.last_job_id'
@@ -20,6 +20,9 @@ export default function FingerprintContracts() {
   const [mode, setMode] = useState<'offline_refit' | 'online_fetch'>('offline_refit')
   const [label, setLabel] = useState('')
   const [notes, setNotes] = useState('')
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detail, setDetail] = useState<any>(null)
 
   const mountedRef = useRef(true)
   const pollTokenRef = useRef(0)
@@ -182,6 +185,19 @@ export default function FingerprintContracts() {
     }
   }
 
+  const viewDetail = async (id: string) => {
+    setDetailOpen(true)
+    setDetailLoading(true)
+    try {
+      const { data } = await fingerprintContractApi.detail(id)
+      setDetail(data)
+    } catch (e: any) {
+      message.error(e?.response?.data?.error || '加载详情失败')
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
   const confirmDelete = (record: ContractSetRow) => {
     Modal.confirm({
       title: `删除合同集「${record.label}」？`,
@@ -248,6 +264,7 @@ export default function FingerprintContracts() {
           {!record.is_active && <Button size="small" onClick={() => activate(record.id)}>启用</Button>}
           {!record.is_locked && <Button size="small" onClick={() => lockSet(record.id)}>锁定此份</Button>}
           {record.is_locked && <Button size="small" onClick={() => unlockSet()}>解除锁定</Button>}
+          <Button size="small" type="link" onClick={() => viewDetail(record.id)}>详情</Button>
           {!record.is_builtin && <Button size="small" danger onClick={() => confirmDelete(record)}>删除</Button>}
         </Space>
       ),
@@ -368,6 +385,33 @@ export default function FingerprintContracts() {
           </Space>
         </Card>
       </Space>
+
+      <Drawer
+        title="合同集详情"
+        width={640}
+        destroyOnHidden
+        open={detailOpen}
+        onClose={() => setDetailOpen(false)}
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size={16}>
+          <Alert
+            type="info"
+            showIcon
+            message="散文字段（提示词指令 / 规避 / 优先 / 朱雀硬门槛）继承自内置合同、不随重拟合改变；重拟合仅重算下表中的统计门槛值。"
+          />
+          <Table
+            rowKey="label"
+            loading={detailLoading}
+            pagination={false}
+            size="small"
+            dataSource={buildContractDetailRows(detail)}
+            columns={[
+              { title: '项', dataIndex: 'label', key: 'label' },
+              { title: '值', dataIndex: 'value', key: 'value' },
+            ]}
+          />
+        </Space>
+      </Drawer>
     </div>
   )
 }

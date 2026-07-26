@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   CHECK_LABELS,
   buildCheckPassRateItems,
+  buildContractDetailRows,
   buildContractSetRows,
   canApplyJobUpdate,
   nextJobPollDelayMs,
@@ -107,5 +108,53 @@ describe('shouldResumeJobPolling', () => {
 
   test('resumes a stored job even if a different job is being polled', () => {
     expect(shouldResumeJobPolling('job-1', 'job-2')).toBe(true)
+  })
+})
+
+describe('buildContractDetailRows', () => {
+  const detail = {
+    record: { id: 'set-a', label: '离线 A', mode: 'offline_refit', sample_count: 810, created_at: '2026-07-27T00:00:00.000Z' },
+    contract: {
+      name: 'qidian_free_rank_human',
+      built_from: ['a', 'b'],
+      target: {
+        cv_para: [0.483, 0.699],
+        single_sentence_para_ratio: [0.792, 0.977],
+        two_sentence_para_ratio: [0.021, 0.168],
+        dialogue_para_ratio: [0.099, 0.328],
+        max_mid_streak_max: 6,
+        template_contrast_per_1k_max: 1,
+        stock_adverb_per_1k_max: 1.5,
+        clinical_hit_per_1k_max: 0.5,
+        subject_ta_opener_ratio_max: 0.35,
+      },
+    },
+    meta: { mode: 'offline_refit', sample_count: 810, genre_count: 12, inherited_prose_from: 'builtin' },
+  }
+
+  test('renders range targets as a dash-joined span and scalar targets as-is', () => {
+    const rows = buildContractDetailRows(detail)
+    const byLabel = Object.fromEntries(rows.map((r) => [r.label, r.value]))
+    expect(byLabel['句长突发 cv']).toBe('0.483–0.699')
+    expect(byLabel['他/姓名起句占比 上限']).toBe('0.35')
+    expect(byLabel['合同名']).toBe('qidian_free_rank_human')
+  })
+
+  test('surfaces generation meta and the inherited-prose source', () => {
+    const byLabel = Object.fromEntries(buildContractDetailRows(detail).map((r) => [r.label, r.value]))
+    expect(byLabel['样本数']).toBe('810')
+    expect(byLabel['题材合同数']).toBe('12')
+    expect(byLabel['散文字段继承自']).toBe('builtin')
+  })
+
+  test('renders missing pieces as a dash instead of throwing', () => {
+    const rows = buildContractDetailRows({ record: { id: 'builtin', label: '内置' }, contract: null, meta: null })
+    expect(rows.length).toBeGreaterThan(0)
+    expect(rows.every((r) => typeof r.value === 'string')).toBe(true)
+    expect(rows.some((r) => r.value === '—')).toBe(true)
+  })
+
+  test('returns an empty list for a null detail', () => {
+    expect(buildContractDetailRows(null)).toEqual([])
   })
 })

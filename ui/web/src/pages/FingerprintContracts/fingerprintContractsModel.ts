@@ -68,6 +68,41 @@ export function buildCheckPassRateItems(aggregate: any) {
   })
 }
 
+const TARGET_LABELS: Array<{ key: string; label: string }> = [
+  { key: 'cv_para', label: '句长突发 cv' },
+  { key: 'single_sentence_para_ratio', label: '一句一段占比' },
+  { key: 'two_sentence_para_ratio', label: '双句密段占比' },
+  { key: 'dialogue_para_ratio', label: '对白段占比' },
+  { key: 'max_mid_streak_max', label: '中句同带连续 上限' },
+  { key: 'template_contrast_per_1k_max', label: '模板对比/千字 上限' },
+  { key: 'stock_adverb_per_1k_max', label: '套话副词/千字 上限' },
+  { key: 'clinical_hit_per_1k_max', label: '临床命中/千字 上限' },
+  { key: 'subject_ta_opener_ratio_max', label: '他/姓名起句占比 上限' },
+]
+
+function formatTargetValue(value: any): string {
+  if (Array.isArray(value) && value.length === 2) return `${value[0]}–${value[1]}`
+  if (value === null || value === undefined || value === '') return '—'
+  return String(value)
+}
+
+export function buildContractDetailRows(detail: any): Array<{ label: string; value: string }> {
+  if (!detail) return []
+  const rows: Array<{ label: string; value: string }> = [
+    { label: '合同集', value: formatTargetValue(detail.record?.label) },
+    { label: '合同名', value: formatTargetValue(detail.contract?.name) },
+    { label: '生成方式', value: formatTargetValue(detail.record?.mode) },
+    { label: '生成时间', value: formatTargetValue(detail.record?.created_at) },
+    { label: '样本数', value: formatTargetValue(detail.meta?.sample_count ?? detail.record?.sample_count) },
+    { label: '题材合同数', value: formatTargetValue(detail.meta?.genre_count) },
+    { label: '散文字段继承自', value: formatTargetValue(detail.meta?.inherited_prose_from) },
+  ]
+  for (const item of TARGET_LABELS) {
+    rows.push({ label: item.label, value: formatTargetValue(detail.contract?.target?.[item.key]) })
+  }
+  return rows
+}
+
 export function nextJobPollDelayMs(job: { status: string } | null, failures: number): number | null {
   if (!job) return null
   if (job.status !== 'queued' && job.status !== 'running') return null
