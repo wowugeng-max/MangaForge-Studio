@@ -66,6 +66,21 @@ function toOpenAIBody(request: LLMRequest, selection: RuntimeModelSelection): Re
     'source_asset_ids',
   ])
   if (isMediaRouteType(routeType)) {
+    // Chat-style image generation (Gemini-family on openai-compatible proxies):
+    // the endpoint is chat/completions, so send messages and let the proxy
+    // return the image inside the message content.
+    if (String(selection.endpoint || '').includes('chat/completions')) {
+      const prompt = (request as any).prompt || textPromptFromMessages(request.messages)
+      const imageUrl = (request as any).image_url
+      const userContent = imageUrl
+        ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: imageUrl } }]
+        : prompt
+      return {
+        model: selection.model.model_name || request.model,
+        messages: [{ role: 'user', content: userContent }],
+        max_tokens: request.max_tokens ?? 4096,
+      }
+    }
     const body: Record<string, any> = {
       model: selection.model.model_name || request.model,
       prompt: (request as any).prompt || textPromptFromMessages(request.messages),

@@ -9,6 +9,7 @@ import {
   parseProviderResponsePayload,
   readProviderStream,
   selectRuntimeModel,
+  selectionForRequestRoute,
   summarizeProviderRequestBodyForLog,
   type RuntimeModelSelection,
 } from './provider-runtime'
@@ -740,5 +741,60 @@ describe('codex responses provider runtime b b', () => {
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
+  })
+})
+
+describe('gemini chat-style image generation routing', () => {
+  const openaiSelection = (overrides: Partial<RuntimeModelSelection> = {}) => selection({
+    apiFormat: 'openai_compatible',
+    provider: { ...selection().provider, api_format: 'openai_compatible', endpoints: {} },
+    ...overrides,
+  })
+
+  test('media fallback endpoint for gemini image models is chat/completions', () => {
+    const routed = selectionForRequestRoute(openaiSelection({
+      model: { ...selection().model, model_name: 'gemini-3.1-flash-image', capabilities: { text_to_image: true } },
+    }), { model: 'x', messages: [{ role: 'user', content: '画一只猫' }], type: 'text_to_image' } as any)
+    expect(routed.endpoint).toBe('chat/completions')
+  })
+
+  test('media fallback endpoint for non-gemini image models stays images/generations', () => {
+    const routed = selectionForRequestRoute(openaiSelection({
+      model: { ...selection().model, model_name: 'gpt-image-2', capabilities: { text_to_image: true } },
+    }), { model: 'x', messages: [{ role: 'user', content: 'a cat' }], type: 'text_to_image' } as any)
+    expect(routed.endpoint).toBe('images/generations')
+  })
+
+  test('image request bound for chat/completions builds a messages body', () => {
+    const body = buildProviderRequestBody({
+      model: 'x',
+      messages: [{ role: 'user', content: '生成一张美女吃泡面的图' }],
+      type: 'text_to_image',
+      size: '1024*1024',
+    } as any, openaiSelection({
+      endpoint: 'chat/completions',
+      routeType: 'text_to_image',
+      model: { ...selection().model, model_name: 'gemini-3.1-flash-image', capabilities: { text_to_image: true } },
+    }))
+    expect(body.messages).toEqual([{ role: 'user', content: '生成一张美女吃泡面的图' }])
+    expect(body.prompt).toBeUndefined()
+    expect(body.size).toBeUndefined()
+  })
+
+  test('image_to_image request bound for chat endpoint attaches the source image', () => {
+    const body = buildProviderRequestBody({
+      model: 'x',
+      messages: [{ role: 'user', content: '改成夜景' }],
+      type: 'image_to_image',
+      image_url: 'https://example.com/a.png',
+    } as any, openaiSelection({
+      endpoint: 'chat/completions',
+      routeType: 'image_to_image',
+      model: { ...selection().model, model_name: 'gemini-3.1-flash-image', capabilities: { image_to_image: true } },
+    }))
+    expect(body.messages[0].content).toEqual([
+      { type: 'text', text: '改成夜景' },
+      { type: 'image_url', image_url: { url: 'https://example.com/a.png' } },
+    ])
   })
 })

@@ -87,11 +87,20 @@ export function routeConfigForProvider(provider: ProviderRecord, apiFormat = pro
   return firstUsableRouteConfig(endpoints.chat, endpoints.completions, endpoints.llm)
 }
 
+// Gemini-family image models on openai-compatible proxies generate through
+// chat/completions (image comes back in the message content), not /v1/images.
+export function isChatStyleImageModel(modelName = '') {
+  return /gemini/i.test(String(modelName || ''))
+}
+
 function fallbackEndpointForProvider(provider: ProviderRecord, routeType = '', modelName = '', apiFormat = provider.api_format) {
   if (isClaudeCodeFormat(apiFormat)) return 'messages'
   if (isCodexResponsesFormat(apiFormat)) return 'responses'
   if (isGeminiNativeFormat(apiFormat)) return `models/${encodeURIComponent(normalizeGeminiModelName(modelName || 'gemini-1.5-flash'))}:generateContent`
-  if (String(routeType).includes('image')) return 'images/generations'
+  if (String(routeType).includes('image')) {
+    if (isChatStyleImageModel(modelName)) return 'chat/completions'
+    return 'images/generations'
+  }
   if (String(routeType).includes('video')) return 'videos/generations'
   return 'chat/completions'
 }
