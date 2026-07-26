@@ -130,6 +130,37 @@ describe('fingerprint contract store', () => {
     expect(raw[0].id.length).toBeGreaterThan(0)
   })
 
+  test('writeContractSets persists an empty array for null/undefined entries', async () => {
+    const lib = await tempLib()
+    await writeContractSets(lib, [null, undefined] as any)
+    const raw = JSON.parse(await readFile(getContractSetsIndexPath(lib), 'utf8'))
+    expect(raw).toEqual([])
+  })
+
+  test('writeContractSets drops null entries but still keeps a valid record and an id-less one', async () => {
+    const lib = await tempLib()
+    await writeContractSets(lib, [
+      normalizeContractSetRecord({ id: 'set-valid', label: 'Valid' }),
+      null,
+      { label: 'no id yet' },
+    ] as any)
+    const raw = JSON.parse(await readFile(getContractSetsIndexPath(lib), 'utf8'))
+    expect(raw.length).toBe(2)
+    const valid = raw.find((r: any) => r.id === 'set-valid')
+    expect(valid?.label).toBe('Valid')
+    const idLess = raw.find((r: any) => r.id !== 'set-valid')
+    expect(typeof idLess?.id).toBe('string')
+    expect(idLess?.id.length).toBeGreaterThan(0)
+    expect(idLess?.label).toBe('no id yet')
+  })
+
+  test('writeContractSets drops non-object entries like strings and numbers', async () => {
+    const lib = await tempLib()
+    await writeContractSets(lib, ['garbage', 42] as any)
+    const raw = JSON.parse(await readFile(getContractSetsIndexPath(lib), 'utf8'))
+    expect(raw).toEqual([])
+  })
+
   test('source_set_id round-trips through write and read', async () => {
     const lib = await tempLib()
     await writeContractSets(lib, [

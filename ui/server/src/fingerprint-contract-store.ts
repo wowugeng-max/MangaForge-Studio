@@ -94,8 +94,12 @@ export async function writeContractSets(libRoot: string, sets: FingerprintContra
   await mkdir(dirname(path), { recursive: true })
   // Normalize before filtering/deduping so records missing an id still get one
   // instead of being silently dropped, mirroring the map->filter order readContractSets uses.
+  // Non-object entries (null/undefined/string/number) are rejected up front, since
+  // normalizeContractSetRecord's optional chaining would otherwise turn them into
+  // fully-formed ghost records instead of skipping them.
   const byId = new Map<string, FingerprintContractSetRecord>()
   for (const raw of sets) {
+    if (!raw || typeof raw !== 'object') continue
     const record = normalizeContractSetRecord(raw)
     if (record.id === BUILTIN_CONTRACT_SET_ID) continue
     byId.set(record.id, record)
