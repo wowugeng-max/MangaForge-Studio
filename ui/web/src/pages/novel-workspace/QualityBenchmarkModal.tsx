@@ -409,7 +409,7 @@ export function QualityBenchmarkModal({
       title={<Space><BarChartOutlined />质量评测基准面板</Space>}
       width={1160}
       onCancel={onClose}
-      footer={<Button type="primary" onClick={onClose}>关闭</Button>}
+      footer={<Button type="primary" onClick={onClose}> 关闭</Button>}
     >
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         <Card size="small" style={{ borderRadius: 8 }} styles={{ body: { padding: 12 } }}>
@@ -484,8 +484,7 @@ export function QualityBenchmarkModal({
               <Button size="small" loading={regressionLoading} onClick={saveRegressionSuite}>
                 {regressionSuite ? '重建样本集' : '固化建议样本'}
               </Button>
-              <Button size="small" type="primary" loading={regressionLoading} disabled={!regressionSuite && !(suggestedSuite?.samples || []).length} onClick={runRegressionSuite}>
-                运行回归基准
+              <Button size="small" type="primary" loading={regressionLoading} disabled={!regressionSuite && !(suggestedSuite?.samples || []).length} onClick={runRegressionSuite}> 运行回归基准
               </Button>
               <Button size="small" icon={<ReloadOutlined />} loading={regressionLoading} onClick={() => { void loadRegressionSuite() }}>刷新样本集</Button>
             </Space>
@@ -531,7 +530,7 @@ export function QualityBenchmarkModal({
             />
             <Space wrap>
               <Button size="small" loading={abLoading} onClick={() => { void loadAbExperiments() }}>刷新实验</Button>
-              <Button size="small" type="primary" loading={abLoading} onClick={createAbExperiment}>创建候选实验</Button>
+              <Button size="small" type="primary" loading={abLoading} onClick={createAbExperiment}> 创建候选实验</Button>
             </Space>
             <List
               size="small"

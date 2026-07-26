@@ -113,6 +113,39 @@ export function buildWorkflowRevisionContextBrief(contextPackage: any = {}, chap
   return Object.keys(compactBrief).length ? compactBrief : null
 }
 
+
+export function composeRevisionPromptHint({
+  userPrompt,
+  report,
+  mustFixLines = [],
+}: {
+  userPrompt?: string
+  report?: any
+  mustFixLines?: string[]
+}) {
+  const custom = String(userPrompt || '').replace(/\s+/g, ' ').trim()
+  const systemHint = String(report?.one_click_revision_prompt || asArray(mustFixLines).join('；') || '').replace(/\s+/g, ' ').trim()
+  if (custom && systemHint) {
+    return [
+      '【人工强制修订指令（最高优先级，必须先兑现）】',
+      custom,
+      '【报告必修项（仍须覆盖，不得因人工指令被整体忽略）】',
+      systemHint,
+      '执行要求：先完成人工强制指令，再覆盖报告必修项；不得只做无关润色；revision_receipts 必须写明人工指令的落实证据。',
+    ].join('\n')
+  }
+  if (custom) {
+    return [
+      '【人工强制修订指令（最高优先级，必须先兑现）】',
+      custom,
+      '执行要求：必须先兑现人工强制指令，并在 revision_summary / revision_receipts 写明落实证据。',
+    ].join('\n')
+  }
+  return systemHint
+}
+
+const REVISION_LANGUAGE_HARD_RULE = '语言硬约束：中文网文正文禁止夹杂英文粘连词、拼音碎片、葡萄牙语或整段外语；若报告或人工指令要求清英文/清外语，必须逐处替换为自然简体中文，必要专名除外，并在 revision_receipts 给出改写证据。'
+
 export function buildEditorRevisionPrompt({
   project,
   chapter,
@@ -138,6 +171,7 @@ export function buildEditorRevisionPrompt({
   const openingStructural = strategy === 'opening_structural_patch'
   const focusedRiskBrief = focusDeliveryRiskBriefForRevision(deliveryRiskBrief || {}, report || {})
   const mustFixLines = uniqueRevisionTexts(report?.must_fix || report?.one_click_revision_prompt, 6)
+  const revisionPromptHint = composeRevisionPromptHint({ userPrompt, report, mustFixLines })
   if (openingStructural) {
     const replaceableOpening = originalText.slice(0, Math.min(1400, Math.max(700, Math.floor(originalLength * 0.24))))
     const resumeHint = originalText.slice(replaceableOpening.length, replaceableOpening.length + 180).trim()
@@ -147,6 +181,7 @@ export function buildEditorRevisionPrompt({
       '要求：开篇前 300-800 字必须先承接上一章真正章末钩子；禁止先重播上一章中段平行戏或已兑现冲突。',
       `本次修订模式：${revisionMode}。opening_structural_patch = 只重写开篇，其余正文尽量保留。`,
       `原文长度：${originalLength} 字。不要为了修开篇而重写整章。`,
+      REVISION_LANGUAGE_HARD_RULE,
       '硬优先级（只修这些）：',
       ...mustFixLines.map((item, index) => `${index + 1}. ${item}`),
       '推荐输出方式（二选一，优先 A）：',
@@ -166,7 +201,7 @@ export function buildEditorRevisionPrompt({
         current_chapter: workflowRevisionContextBrief.current_chapter,
       }, 3500) : '',
       '【修订提示】',
-      String(userPrompt || report?.one_click_revision_prompt || mustFixLines.join('；')),
+      revisionPromptHint,
       '输出 JSON 示例：',
       '{"revision_mode":"opening_structural_patch","opening_rewrite":"新开篇正文...","keep_from":"原文唯一短锚点","revision_summary":"开篇改接章末主钩子，去掉平行戏回放"}',
     ].filter(Boolean).join('\n')
@@ -178,6 +213,7 @@ export function buildEditorRevisionPrompt({
       '要求：优先消除进度回放、章首承接失败、章末交接缺口；可以改写开篇与中段冲突，但必须承接上一章已兑现事实，不得重演已打完的高潮。',
       `本次修订模式：${revisionMode}。结构修订允许较大改动，不只是润色。`,
       `原文长度：${originalLength} 字。若因消除回放导致字数变化超过 30%，revision_scope_guard.over_limit=true，但仍应完成本次结构修复。`,
+      REVISION_LANGUAGE_HARD_RULE,
       '硬优先级（只修这些，不要同时处理全部交稿标签）：',
       ...mustFixLines.map((item, index) => `${index + 1}. ${item}`),
       '正文工艺硬约束：动作链完整；不要用环境描写替代推进；章末必须留下未解决钩子。',
@@ -195,7 +231,7 @@ export function buildEditorRevisionPrompt({
         outline: workflowRevisionContextBrief.outline,
       }, 5000) : '',
       '【修订提示】',
-      String(userPrompt || report?.one_click_revision_prompt || mustFixLines.join('；')),
+      revisionPromptHint,
       '【原章节正文】',
       originalText.slice(0, 14000),
       '输出 JSON：',
@@ -214,6 +250,7 @@ export function buildEditorRevisionPrompt({
     `项目：${project.title}`,
     '要求：保留当前章节整体结构、节奏、章末钩子和可用文气；只修复报告指出的问题；不得照搬参考作品。',
     `本次修订模式：${revisionMode}。${REVISION_MODE_GUIDE[revisionMode] || REVISION_MODE_GUIDE.from_report}`,
+    REVISION_LANGUAGE_HARD_RULE,
     `oh-story workflow-revision：本次属于已写章节大修/回炉；修订前按 Step 2 做上下文对照，修订后按 Step 4 做级联检查和 Step 5 质量检查。`,
     `原文长度：${originalLength} 字；修订后字数差异超过原文 30% 或超过 800 字（取较大值）时，必须在 revision_scope_guard 标记 over_limit=true 并说明是否需要拆成局部二修。`,
     'workflow-revision 上下文对照：必须逐项核对 previous_chapter、current_chapter、next_chapter 或下一章细纲、foreshadowing、character_cards、timeline、setting_context、资产归属和关系边界；缺来源时 status=warn/fail，不得假设已经一致。',
@@ -231,7 +268,7 @@ export function buildEditorRevisionPrompt({
     workflowRevisionContextBrief ? '以下片段来自 MangaForge 章节上下文包；修订前必须据此完成 Step 2 上下文对照，修订后在 revision_context_receipts 中逐项回执。' : '',
     workflowRevisionContextBrief ? editorJson(workflowRevisionContextBrief, 7000) : '',
     '【修订提示】',
-    String(userPrompt || report.one_click_revision_prompt || ''),
+    revisionPromptHint,
     '【原章节正文】',
     String(chapter.chapter_text || '').slice(0, 12000),
     '输出 JSON：',
@@ -265,6 +302,8 @@ export function buildCompactEditorRevisionPrompt({
   userPrompt?: string
   previousOutputPreview?: string
 }) {
+  const mustFixLines = uniqueRevisionTexts(report?.must_fix || report?.one_click_revision_prompt, 6)
+  const revisionPromptHint = composeRevisionPromptHint({ userPrompt, report, mustFixLines })
   const strategy = String(report?.revision_strategy || deliveryRiskBrief?.revision_strategy || '')
   const structural = strategy === 'structural_rewrite'
   const openingStructural = strategy === 'opening_structural_patch' || strategy === 'structural_rewrite'
@@ -284,8 +323,9 @@ export function buildCompactEditorRevisionPrompt({
       replaceableOpening,
       resumeHint ? '【可保留接续锚点候选】' : '',
       resumeHint || '',
+      REVISION_LANGUAGE_HARD_RULE,
       '【修订提示】',
-      String(userPrompt || report?.one_click_revision_prompt || ''),
+      revisionPromptHint,
       previousOutputPreview ? '【上次失败输出预览】' : '',
       previousOutputPreview ? String(previousOutputPreview).slice(0, 800) : '',
       'JSON 示例：{"revision_mode":"opening_structural_patch","opening_rewrite":"新开篇...","keep_from":"原文短锚点","revision_summary":"开篇改接主钩子"}',
@@ -296,6 +336,7 @@ export function buildCompactEditorRevisionPrompt({
     '任务：上一次修订输出被截断。现在只生成极短、可应用的 JSON 补丁。不要输出 Markdown，不要输出代码块，不要解释。',
     `项目：${project.title}`,
     `本次修订模式：${revisionMode}。${REVISION_MODE_GUIDE[revisionMode] || REVISION_MODE_GUIDE.from_report}`,
+    REVISION_LANGUAGE_HARD_RULE,
     '硬性格式：只输出一个 JSON object，字段只允许 revision_mode, replacements, insertions, continuity_notes, revision_summary。',
     '硬性限制：禁止输出 chapter_text。最多 6 条 replacements，最多 3 条 insertions。',
     'replacement 限制：find 控制在 20-160 字，必须从原文精确复制且能唯一定位；replace 控制在 0-900 字。删除时 replace 用空字符串。不要把整段长正文塞进 find 或 replace。',
@@ -306,7 +347,7 @@ export function buildCompactEditorRevisionPrompt({
     '【交稿风险清单】',
     editorJson(deliveryRiskBrief || {}, 2500),
     '【修订提示】',
-    String(userPrompt || report.one_click_revision_prompt || ''),
+    revisionPromptHint,
     '【上一次被截断输出片段，仅用于避免重复犯错】',
     String(previousOutputPreview || '').slice(0, 1200),
     '【原章节正文】',

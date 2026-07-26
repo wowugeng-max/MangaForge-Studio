@@ -67,7 +67,7 @@ export function formatProseCraftPromptSnippet(contract: any = {}) {
     '画面口径：baimiao_sensory_rules=白描/五感，用最少的字写准信息和情绪，关键场景两到三种感官且必须服务情绪、动作、规则或危险；dynamic_description_rules=动态描写优于静态描写，人物用动作和反应展现，环境在角色行动中穿插点染。',
     '转场与小节：transition_bridge_rules=场景切换与转场，用相似物/相似五感/相似情绪，时间跳转靠动作或物件，空间跳转靠声音或光影；section_structure_rules=小节内部结构，一个主事件 + 3-5 个子事件 + 一个情绪变化 + 一条读者新获知的信息 + 必要 3-5 轮对话交锋，小节结尾留一个钩子，下一节开头快速接续，情绪跨节递进。',
     '控水与新概念：section_density_rules=小节密度诊断，偏短不得加环境描写，先查子事件三维度，再补身体动作、感官细节、对话交锋、阻碍/反应/发现/递进或 2-3 句简短回忆；concept_anchor_rules=新概念锚点，新名词/新设定/新道具首次出现必须有动作反应、对话半句或物理后果；description_limits=水分控制，删掉这段后读者不会困惑的环境、心理、旁白、回忆和重复信息必须删除或压缩。',
-    '去AI味：anti_ai_smell_rules=扫描高危词、章末总结体、叠加式描写和心理告知；仿佛/犹如/一丝/一抹/深吸一口气/眼中闪过/嘴角勾起等模板表达高频出现时改成动作、物件、对话或白描。',
+    '去AI味：anti_ai_smell_rules=扫描高危词、章末总结体、叠加式描写、心理告知、书面排比和议论文连接词；仿佛/犹如/一丝/一抹/深吸一口气/眼中闪过/嘴角勾起/与此同时/更为重要的是/他感到/他意识到等模板表达出现时改成动作、物件、对话或白描；保留自然虚词，不做书面腔。',
     `字段清单：${OH_STORY_PROSE_CRAFT_REQUIRED_FIELDS.join(', ')}；交稿自检必须输出 prose_craft_checks，并用正文证据检查深度限知、身体细节、三维度揉进、间接描写/侧面反应、三机位、然后呢、核心情绪、白描五感、动态描写、镜头转场、小节结构、新概念锚点、水分控制和去AI味。`,
     sceneAnchors ? `本章工艺锚点：${sceneAnchors}` : '',
     qualityChecks ? `prose_craft_checks 摘录：${qualityChecks}` : '',

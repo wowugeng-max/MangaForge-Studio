@@ -9,4 +9,6 @@ export type StoryPlanningBoardPanelsProps = {
   onAction: (key: PlanningActionKey, options?: { intent?: any }) => void
   onSelectChapter: (chapterNo: number) => void
   compact: boolean
+  healthBoardsOpen?: boolean
+  onToggleHealthBoards?: () => void
 }

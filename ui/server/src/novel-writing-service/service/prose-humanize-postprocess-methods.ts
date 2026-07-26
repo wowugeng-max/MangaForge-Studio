@@ -27,6 +27,8 @@ import {
   selectFingerprintSafeProse,
 } from '../../novel-writing/human-webnovel-resistance'
 import { R76_ZHUQUE_STACK_VERSION } from '../../novel-writing/r76-zhuque-stack'
+import { applyCanonicalNameGuard } from '../../novel-writing/canonical-name-guard'
+import { ensureDialoguePauseWindows, MIN_DIALOGUE_PAUSE_WINDOWS } from '../../novel-writing/dialogue-pause-window'
 import {
   assessChapterShrinkGuard,
   buildAigcRiskHeatmap,
@@ -273,12 +275,12 @@ export function createProseHumanizePostprocessMethods(deps: {
     const zhuqueSegments = resolveZhuqueSegments(options)
     let working = current
     let passAApplied = false
-    const maxRounds = Math.max(1, Math.min(HUMANIZE_RISK_MAX_ROUNDS, Number(options?.risk_rewrite_rounds || options?.riskRewriteRounds || HUMANIZE_RISK_MAX_ROUNDS) || HUMANIZE_RISK_MAX_ROUNDS))
+    const maxRounds = Math.max(1, Math.min(HUMANIZE_RISK_MAX_ROUNDS, Number(options?.risk_rewrite_rounds || options?.riskRewriteRounds || 1) || 1))
 
     for (let round = 1; round <= maxRounds; round += 1) {
       const heatmap = buildAigcRiskHeatmap(working, { zhuqueSegments: round === 1 ? zhuqueSegments : null })
       const windows = selectHighRiskRewriteWindows(heatmap, {
-        maxWindows: Number(options?.max_risk_windows || options?.maxRiskWindows || 6) || 6,
+        maxWindows: Number(options?.max_risk_windows || options?.maxRiskWindows || 3) || 3,
         maxChars: HUMANIZE_CHUNK_LIMIT,
       })
       stages.push({
@@ -549,6 +551,37 @@ export function createProseHumanizePostprocessMethods(deps: {
       used_deterministic_fallback: usedFallback,
       risk_segment_version: HUMANIZE_RISK_SEGMENT_VERSION,
     })
+
+    // System-level name consistency: repair rare near-miss slips after humanize rewrites.
+    {
+      const guarded = applyCanonicalNameGuard(finalText, { project, contextPackage })
+      if (guarded.report.changed) {
+        finalText = guarded.text
+        stages.push({
+          stage: 'canonical_name_guard',
+          changed: true,
+          repairs: guarded.report.repairs,
+        })
+      }
+    }
+
+    // R76 v1.3: dual-zone dialogue-pause ensure after sparse humanize (system-level, not chapter-tuned).
+    if (!(options?.skip_dialogue_pause_ensure === true || options?.skipDialoguePauseEnsure === true)) {
+      const ensured = ensureDialoguePauseWindows(finalText, { minWindows: MIN_DIALOGUE_PAUSE_WINDOWS })
+      stages.push({
+        stage: 'dialogue_pause_window_ensure',
+        version: ensured.report.version,
+        before_count: ensured.report.before_count,
+        after_count: ensured.report.after_count,
+        injected: ensured.report.injected,
+        zones: ensured.report.zones,
+        changed: ensured.report.changed,
+        skip_reason: ensured.report.skip_reason || '',
+      })
+      if (ensured.report.changed) {
+        finalText = ensured.text
+      }
+    }
 
     const report: HumanizePostProcessReport = {
       version: HUMANIZE_POSTPROCESS_VERSION,

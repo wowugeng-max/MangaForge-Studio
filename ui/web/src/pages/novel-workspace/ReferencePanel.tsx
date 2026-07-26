@@ -153,7 +153,7 @@ export function ReferencePanel({
               key: 'storyMemory', label: '故事记忆',
               children: (
                 <Space direction="vertical" size={8} style={{ width: '100%', padding: 8 }}>
-                  <Button size="small" block onClick={onOpenStoryStateEditor}>校正故事状态机</Button>
+                  <Button size="small" block onClick={onOpenStoryStateEditor}> 校正故事状态机</Button>
                   {!storyState || Object.keys(storyState).length === 0 ? (
                     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无故事状态机；生成章节入库后会自动更新。" />
                   ) : (
@@ -439,8 +439,7 @@ export function ReferencePanel({
                 <div style={{ padding: 8 }}>
                   <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无正文质检" style={{ padding: '16px 8px' }} />
                   {onRefreshProseQuality && (
-                    <Button size="small" block loading={proseQualityLoading} onClick={onRefreshProseQuality}>
-                      复检当前版本
+                    <Button size="small" block loading={proseQualityLoading} onClick={onRefreshProseQuality}> 复检当前版本
                     </Button>
                   )}
                 </div>
@@ -448,8 +447,7 @@ export function ReferencePanel({
                 <>
                   {onRefreshProseQuality && (
                     <div style={{ padding: '8px 8px 0' }}>
-                      <Button size="small" block loading={proseQualityLoading} onClick={onRefreshProseQuality}>
-                        复检当前版本
+                      <Button size="small" block loading={proseQualityLoading} onClick={onRefreshProseQuality}> 复检当前版本
                       </Button>
                     </div>
                   )}
@@ -580,7 +578,7 @@ export function ReferencePanel({
                                 </Button>
                               )}
                               {onApplyEditorRevision && (
-                                <Button size="small" block disabled={isStale || usedByRevisions.length > 0} onClick={() => onApplyEditorRevision(report)}>
+                                <Button size="small" block disabled={isStale || usedByRevisions.length> 0} onClick={() => onApplyEditorRevision(report)}>
                                   {usedByRevisions.length ? '已用于修订' : isStale ? '旧报告不可直接修订' : '按自检修订'}
                                 </Button>
                               )}

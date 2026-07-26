@@ -80,9 +80,7 @@ export function SeedInputSection(props: {
             type="primary"
             loading={props.loading}
             onClick={props.onGenerate}
-            style={{ width: '35%' }}
-          >
-            {props.generateLabel}
+            style={{ width: '35%' }}> {props.generateLabel}
           </Button>
         </Space.Compact>
 

@@ -9,6 +9,7 @@ import {
   evaluateProseWordTarget,
   isExplicitlyCompleteProseContractionFinishReason,
   isRejectedProseContractionFinishReason,
+  isUsableProseWordTargetFinishReason,
   isWithinProseWordTargetSoftCap,
   normalizeProseContractionFinishReason,
   normalizeProseContractionIncompleteReason,
@@ -16,15 +17,18 @@ import {
   proseMaxTokensForWordTarget,
   resolveChapterWordTarget,
   resolveStandardWordTargetCompatibility,
+  shouldForceProseWordTargetExpand,
+  shouldSkipWordTargetRepairForSoftCap,
+  surgicalContractProseToWordTarget,
 } from './word-target'
 
 describe('novel writing word target utilities', () => {
   test('allows only standard chapters through the finite 30% compatibility ceiling', () => {
     const standard = resolveChapterWordTarget({}, {}, {})
-    expect(resolveStandardWordTargetCompatibility(evaluateProseWordTarget('文'.repeat(6596), standard), standard)).toMatchObject({ passed: true, ceiling: 6760 })
-    expect(resolveStandardWordTargetCompatibility(evaluateProseWordTarget('文'.repeat(6761), standard), standard).passed).toBe(false)
+    expect(resolveStandardWordTargetCompatibility(evaluateProseWordTarget('文'.repeat(5900), standard), standard)).toMatchObject({ passed: true, ceiling: 6006 })
+    expect(resolveStandardWordTargetCompatibility(evaluateProseWordTarget('文'.repeat(6007), standard), standard).passed).toBe(false)
     const custom = resolveChapterWordTarget({}, {}, { word_target_mode: 'custom', target_word_count: 5200 })
-    expect(resolveStandardWordTargetCompatibility(evaluateProseWordTarget('文'.repeat(6596), custom), custom).passed).toBe(false)
+    expect(resolveStandardWordTargetCompatibility(evaluateProseWordTarget('文'.repeat(5900), custom), custom).passed).toBe(false)
   })
   test('counts prose characters without whitespace', () => {
     expect(countProseChars('李辰 醒来\n规则响起。')).toBe(9)
@@ -34,8 +38,8 @@ describe('novel writing word target utilities', () => {
     expect(resolveChapterWordTarget({}, { chapter_no: 1 }, {})).toMatchObject({
       mode: 'standard',
       target: 4200,
-      min: 3200,
-      max: 5200,
+      min: 3780,
+      max: 4620,
     })
     expect(resolveChapterWordTarget({}, { chapter_no: 8 }, { word_target_mode: 'long' })).toMatchObject({
       mode: 'long',
@@ -73,8 +77,8 @@ describe('novel writing word target utilities', () => {
     expect(evaluation).toMatchObject({
       actual: 1732,
       target: 4200,
-      min: 3200,
-      deficit: 1468,
+      min: 3780,
+      deficit: 2048,
       too_short: true,
       passed: false,
     })
@@ -88,7 +92,7 @@ describe('novel writing word target utilities', () => {
 
     expect(evaluation).toMatchObject({
       actual: 12389,
-      max: 5200,
+      max: 4620,
       too_short: false,
       too_long: true,
       passed: false,
@@ -122,9 +126,9 @@ describe('novel writing word target utilities', () => {
   test('allows tiny over-target drift as a soft cap but rejects substantial overruns', () => {
     const target = resolveChapterWordTarget({}, { chapter_no: 1 }, {})
 
-    expect(isWithinProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(5220), target))).toBe(true)
-    expect(isWithinProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(5700), target))).toBe(false)
-    expect(isWithinProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(3199), target))).toBe(false)
+    expect(isWithinProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(4635), target))).toBe(true)
+    expect(isWithinProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(4800), target))).toBe(false)
+    expect(isWithinProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(3770), target))).toBe(false)
   })
 
   test('bridges only a mildly short complete contraction into the existing expansion gate', () => {
@@ -133,19 +137,19 @@ describe('novel writing word target utilities', () => {
 
     expect(canBridgeShortContractionToExpansion(
       overTarget,
-      evaluateProseWordTarget('字'.repeat(3012), target),
+      evaluateProseWordTarget('字'.repeat(3500), target),
     )).toBe(true)
     expect(canBridgeShortContractionToExpansion(
       overTarget,
-      evaluateProseWordTarget('字'.repeat(2879), target),
+      evaluateProseWordTarget('字'.repeat(3300), target),
     )).toBe(false)
     expect(canBridgeShortContractionToExpansion(
       overTarget,
-      evaluateProseWordTarget('字'.repeat(3200), target),
+      evaluateProseWordTarget('字'.repeat(3780), target),
     )).toBe(false)
     expect(canBridgeShortContractionToExpansion(
-      evaluateProseWordTarget('字'.repeat(5000), target),
-      evaluateProseWordTarget('字'.repeat(3012), target),
+      evaluateProseWordTarget('字'.repeat(4500), target),
+      evaluateProseWordTarget('字'.repeat(3500), target),
     )).toBe(false)
   })
 
@@ -162,55 +166,98 @@ describe('novel writing word target utilities', () => {
     expect(isExplicitlyCompleteProseContractionFinishReason('incomplete')).toBe(false)
     expect(isRejectedProseContractionFinishReason('content_filter')).toBe(true)
     expect(isRejectedProseContractionFinishReason(null)).toBe(false)
+    // Streaming proxies often omit finish_reason; missing must be usable for expand.
+    expect(isUsableProseWordTargetFinishReason(null)).toBe(true)
+    expect(isUsableProseWordTargetFinishReason('stop')).toBe(true)
+    expect(isUsableProseWordTargetFinishReason('length')).toBe(false)
+    expect(isUsableProseWordTargetFinishReason('max_tokens')).toBe(false)
   })
 
   test('normalizes a tiny over-target result into one shared passing decision', () => {
     const target = resolveChapterWordTarget({}, { chapter_no: 1 }, {})
 
-    expect(applyProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(5219), target))).toMatchObject({
-      actual: 5219,
+    expect(applyProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(4635), target))).toMatchObject({
+      actual: 4635,
       too_long: false,
       passed: true,
       soft_cap: true,
     })
-    expect(applyProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(5700), target))).toMatchObject({
-      actual: 5700,
+    expect(applyProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(4800), target))).toMatchObject({
+      actual: 4800,
       too_long: true,
       passed: false,
       soft_cap: false,
     })
   })
 
-  test('uses a symmetric five-percent compatibility band around the configured range', () => {
+  test('uses a symmetric soft compatibility band around the configured range', () => {
     const target = resolveChapterWordTarget({}, { chapter_no: 1 }, {})
 
-    expect(applyProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(3040), target))).toMatchObject({
-      actual: 3040,
+    expect(applyProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(3700), target))).toMatchObject({
+      actual: 3700,
       too_short: false,
       passed: true,
       soft_cap: true,
       soft_floor: true,
     })
-    expect(applyProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(3039), target))).toMatchObject({
-      actual: 3039,
+    expect(applyProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(3660), target))).toMatchObject({
+      actual: 3660,
       too_short: true,
       passed: false,
       soft_cap: false,
       soft_floor: false,
     })
-    expect(applyProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(5460), target))).toMatchObject({
-      actual: 5460,
+    expect(applyProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(4759), target))).toMatchObject({
+      actual: 4759,
       too_long: false,
       passed: true,
       soft_cap: true,
       soft_floor: false,
     })
-    expect(applyProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(5461), target))).toMatchObject({
-      actual: 5461,
+    expect(applyProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(4760), target))).toMatchObject({
+      actual: 4760,
       too_long: true,
       passed: false,
       soft_cap: false,
       soft_floor: false,
     })
+  })
+
+
+  test('forces expand on hard short or dialogue deficit; soft floor never skips hard expand', () => {
+    const target = resolveChapterWordTarget({}, { chapter_no: 1 }, {})
+    const hardShort = evaluateProseWordTarget('字'.repeat(3759), target)
+    const softShort = applyProseWordTargetSoftCap(hardShort)
+    expect(hardShort.too_short).toBe(true)
+    expect(softShort.soft_floor).toBe(true)
+    expect(softShort.passed).toBe(true)
+    expect(shouldForceProseWordTargetExpand(hardShort, { dialogue_para_ratio: 0.18 })).toBe(true)
+    expect(shouldSkipWordTargetRepairForSoftCap(hardShort, softShort, { dialogue_para_ratio: 0.18 })).toBe(false)
+
+    const hardOk = evaluateProseWordTarget('字'.repeat(4000), target)
+    expect(shouldForceProseWordTargetExpand(hardOk, { dialogue_para_ratio: 0.07 })).toBe(true)
+    expect(shouldForceProseWordTargetExpand(hardOk, { dialogue_para_ratio: 0.15 })).toBe(false)
+    expect(shouldForceProseWordTargetExpand(hardOk, { dialogue_para_ratio: 0.07, expand: false })).toBe(false)
+
+    const hardLongSoft = applyProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(4635), target))
+    const hardLong = evaluateProseWordTarget('字'.repeat(4635), target)
+    expect(shouldSkipWordTargetRepairForSoftCap(hardLong, hardLongSoft, { dialogue_para_ratio: 0.2 })).toBe(true)
+  })
+
+  test('surgical contraction drops pure-AI heavy tails into standard band', () => {
+    const target = resolveChapterWordTarget({}, { chapter_no: 1 }, {})
+    const body = Array.from({ length: 220 }, (_, i) => {
+      if (i === 40) return '“先别出声。”'
+      if (i === 41) return '“……好。”他按住门闩，又把纸条塞回内侧口袋。'
+      if (i > 160) return `这不是病，这是某种结算。扣减凭证 LX-00${i}。门外重重地，一下又一下拍门。编号连在一起。`
+      if (i > 110) return `他再次核对第${i}具的颈动脉与体温读数，瞳孔对光反射消失，无心音无呼吸。转运单编号${i}。`
+      return `他摸了摸桌上的编号纸角，手心发潮，动作停了半拍。这是第${i + 1}次确认现场细节。`
+    }).join('\n\n')
+    const over = body + '\n'
+    expect(evaluateProseWordTarget(over, target).too_long).toBe(true)
+    const out = surgicalContractProseToWordTarget(over, target)
+    expect(out.removed).toBeGreaterThan(0)
+    expect(out.to).toBeLessThanOrEqual(target.max)
+    expect(out.text).toContain('先别出声')
   })
 })

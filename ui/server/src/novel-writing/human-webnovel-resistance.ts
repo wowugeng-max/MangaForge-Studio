@@ -26,6 +26,7 @@ import {
 } from './prose-fingerprint-lib'
 import { ensureWebnovelParagraphBreaks } from './chapter-prose-storage-patch'
 import { buildHumanizeDualPassPromptDirectives } from './humanize-dual-pass'
+import { buildEndingPackagingHardBans } from './humanize-dual-pass'
 
 export type ResistanceFinding = {
   key: string
@@ -394,6 +395,18 @@ export function buildHumanWebnovelResistancePromptDirectives(
     '段形强制混排：一句一段做底色，但 dense 关键选择处必须有双句密段；禁止全章 >97% 一句一段匀速。',
     '【全链路指纹守恒】草稿/扩写/压缩/质检修订/润色/改稿每一步都必须保留：短对白独立成段、物件核对链、不对称私心噪声、双句密段；禁止为“更整齐”抹平纹理。',
     '【最高优先·朱雀绿段】能出人工的是“短测温窗”：一次异常读数 → 1–3句短对白 → 半截私心/脏动作。禁多体同构复检、身份编号对号、夜灯齿轮电影尾、银行stamp拼接。',
+    '【V5绿段·半拍停顿对白窗】短回合对白独立成段 + 沉默/停顿/改口 + 轻物件触感；比长叙述润色更易出人工。电话可用，但禁止电话说明文/长转述。',
+    '【R73b朱雀绿段·实证】Human 段来自：①安静配角微互动（端水/放旁边/没说话就走/瞟一眼）；②私心与物件阻力同句粘连（懒得交差+钥匙硌手，不是 stamp 孤句）；③物件读不全（洇开/划掉/认不出/看了半天只能确认半截）。优先这三类，甩锅对白只作辅料。',
+    '【R73b禁止】禁止只堆推责 stamp 对白当“人味”；禁止干净清单盘点（第一袋/第二袋）；禁止完整读清命运名单。证据必须半糊半残并立刻收手。',
+    '【R75朱雀·扩绿压流水】检查动作不可连打：颈动脉/对光/听诊/读数每1–2次必须插入安静微互动、私心挂物件、读不全或笔悬着。目标是抬高Human占比，不是堆stamp对白。',
+    '【R75开篇】开篇少流程报数（心率零/血氧无/血压无连打）；一次触感后立刻人/私心/物件，再进入下一动作。',
+    '【R76朱雀·压报数】禁止开篇/前段“心率：/血氧：/血压：”三联报数；最多1次读数，立刻接私心或安静微互动；报数连打比检查动作更易整段疑似AI。',
+    '【R76开篇优先】先触感+人/私心，再给读数；禁止监控三项零值清单体开场。',
+    '【R77朱雀·压开篇流程】开篇1100字内：最多1次体温/读数，禁止复测连打（再按/重新看/又摸）；压缩听诊器/外套/帘子/鞋带流程铺垫；尽早私心+安静微互动。',
+    '【R77禁讲义】禁止“不是那种…是真的暖/像睡着的人/手背上能感觉到”温度讲义腔；一次触感后立刻人/私心。',
+    '【R78朱雀·轻开篇】开篇只轻改前300字：删温度讲义腔，最多补1句私心挂动作；禁止重写中后段绿区，禁止1100字级开篇重洗（R77回退教训）。',
+    '【正向人工指纹·密度硬指标】中段人际冲突优先于私心间距；物件阻力全章 ≥3 次；短对白段占比 ≥0.12；缺密度时先补冲突，不靠bank盖章。',
+    '【正向人工指纹·窗口交付】把全章按约 450 字切窗，每窗至少命中私心/物件阻力/短对白三者之一；连续两窗落空会抬高纯AI判定。',
     '【R55朱雀】禁止“今晚第二个/第二张担架/三具一起”+同样的温度/脉搏归零复检；禁止合规协议/合规移交/不合规区域/联合盖章程序胁迫；禁止未划定+电梯井+搁置室打包lore；禁止写着LX的湿纸角对号。优先：1次触感+当面业务短对白+看不清残字立刻藏。',
     '【R57朱雀·系统】禁对仗宣判句（活人的温度/死人的体征/所有征象都在指向）；禁章末电影定格（空气凝固/紧绷钢丝/挺直脊梁/连一步也不让）；禁编号拼音自注（而LX正是…习惯用法）；禁甲床青灰临床三联与微不可察/死一样的寂静文学空词。',
     '【R57朱雀·人工】优先交付：乱对白打断+半拍误判+脏触感私心；段长故意不匀（短句后接2句密段）；结尾用未完成动作收，不要升华旁白。',
@@ -421,8 +434,6 @@ export function buildHumanWebnovelResistancePromptDirectives(
     '【正向人工指纹·反模板】禁止把检查写成“A→B→C 全覆盖”；同一对象最多 1 次确认动作，其余改成角色误判、半拍耽误、旁人打断。',
     '【正向人工指纹·中段乱局】中段必须有 4–6 句配角乱对白（甩锅/推责/半截矛盾），对白窗前后各 1 个短触感私心；禁止乱对白后接讲义/名单/遗物三联。',
     '【正向人工指纹·起句】“他/她/姓名”起句占比必须 ≤0.30；优先物件/触感/半截对白起句，制造节拍不匀。',
-    '【正向人工指纹·密度硬指标】中段人际冲突优先于私心间距；物件阻力全章 ≥3 次；短对白段占比 ≥0.12；缺密度时先补冲突，不靠bank盖章。',
-    '【正向人工指纹·窗口交付】把全章按约 450 字切窗，每窗至少命中私心/物件阻力/短对白三者之一；连续两窗落空会抬高纯AI判定。',
     '临床词可以写，但必须是角色手上的动作/触感，禁止“标准死亡体征/生物学死亡/临床死亡/死亡体征/死亡生理学/流程讲义”空转。',
     '【临床讲义清零】全文不得残留：生物学死亡、临床死亡、死亡体征、死亡生理学、基础生理学规律、尸僵未形成、尸斑未见、心电图拉直线；改成触感+私心半句。',
     '朱雀绿段偏好：短动作链（压、听、捏壳、咬笔帽）、短对白回合、物件阻力声、半截私心；禁止多体对称复制检查模板。',
@@ -447,6 +458,7 @@ export function buildHumanWebnovelResistancePromptDirectives(
     '禁止名册身份揭示腔与 1/2/3 袋遗物流水线；证据只保留一件可核对物件，立刻接藏证/锁门/支开人。',
     '禁平行雪花电视模板、冷却速率讲义、未定义电梯/--横杠、规则网/交易总结/名单核对等全知压迫收束。',
     '【收束硬约束】章末 400 字内禁止规则网/编号台账/未定义区域/名单核对；只用可见私行动作收（藏证/锁门/改口/支开人）。',
+    ...buildEndingPackagingHardBans(),
     '【身份缩写禁】禁止姓名缩写/LX/L.X./扣减凭证对号/某种结算宣判；证据只留看不清的字/湿纸角，立刻藏证改口，禁止解释“这是他编号/名字”。',
     '【身份残码清零】全文不得残留：拼音缩写、姓名缩写、L.X.、半截残码stamp、写着自己编号的纸片、下一次交割预定；改成看不清的字/湿纸角+立刻藏证。',
     '【交割缩写禁】禁止“下一次交割预定/值班医师对号/拼音缩写 L.X.”；章末禁止均匀脚步计时+门把手下压电影镜头。',
@@ -454,6 +466,8 @@ export function buildHumanWebnovelResistancePromptDirectives(
     '【对称交付禁】同一异常读数/编号/残码全章最多出现一次；多体/多物检查时每人每物只给一个非对称差异，禁止同构并列盘点。',
     '【收束禁模板】章末禁止监控雪花平行线、未定义空间lore、分步机关慢镜头+全黑三联；只用一个可见私行动作收。',
     '【绿段保真】中段必须交付 4–6 句配角乱对白（甩锅/推责/半截矛盾），前后 2 段禁临床讲义与遗物并列表。',
+    '【Human-positive 硬交付】每 350–500 字必须出现一次半截私心噪声（嫌/烦/先不/改口/背锅/谁担）并立刻接动作；禁止空声明段。',
+    '【中段摩擦】中段至少一次当面推责/甩锅/半截对白冲突，禁止只做冷静检查流水线。',
     '【乱对白禁阴谋总结】乱对白后禁止器官贩子/套牌/精确投放/核对登记簿全知概括；对白后立刻接一个私心动作。',
     '【禁电视预兆】禁止雪花点/平行线/宣教电视成图案；章末只用藏证或锁门一个短动作，禁止钥匙插入锁芯慢镜头。',
     '【开篇硬限】开篇先私心噪声+短对白，再最多一次触诊；禁止肌肉纹理/胸锁乳突肌解剖词堆。',
@@ -465,7 +479,7 @@ export function buildHumanWebnovelResistancePromptDirectives(
   // Cap length but never drop the first 5 narrative-hard lines from contract.
   const narrativeHead = fromContract.slice(0, 5)
   const rest = [...base, ...fromContract.slice(5)]
-  const _resistanceBase = [...narrativeHead, ...rest].slice(0, 48)
+  const _resistanceBase = [...narrativeHead, ...rest].slice(0, 72)
   return Array.from(new Set([...(Array.isArray(_resistanceBase) ? _resistanceBase : []), ...dualPass]))
 }
 
@@ -595,6 +609,443 @@ export function scanFingerprintContractRisks(
 }
 
 /** Opening multi-probe cascade: first 500 chars may keep at most one verification family. Genre-agnostic. */
+export function scanMidChapterExamPipelineRisks(text: string): ResistanceFinding[] {
+  const body = String(text || '').replace(/\r/g, '')
+  const out: ResistanceFinding[] = []
+  if (!body.trim()) return out
+  const compact = body.replace(/\s+/g, '')
+  if (compact.length < 1600) return out
+
+  const paras = body.split(/\n+/).map((p) => p.trim()).filter(Boolean)
+  const examRe = /颈动脉|对光|听诊|额温|体温枪|监护仪|电极片|心电图|脉搏|瞳孔|血氧|血压|心率[：:]/
+  const interruptRe = /没说话|端了|放在旁边|就走了|瞟|先别|背锅|改口|懒得|纸边|洇|认不|不想写|先不|悬着|没落/
+  let examRun = 0
+  let maxRun = 0
+  let examCount = 0
+  let interruptNear = 0
+  for (let i = 0; i < paras.length; i += 1) {
+    const p = paras[i]
+    if (examRe.test(p)) {
+      examCount += 1
+      examRun += 1
+      maxRun = Math.max(maxRun, examRun)
+      const window = paras.slice(Math.max(0, i - 1), Math.min(paras.length, i + 2)).join('\n')
+      if (interruptRe.test(window)) interruptNear += 1
+    } else if (p.length > 8) {
+      examRun = 0
+    }
+  }
+  if (examCount >= 8 && (interruptNear < Math.ceil(examCount * 0.35) || maxRun >= 4)) {
+    out.push({
+      key: 'hw_exam_pipeline_uninterrupted',
+      pattern: 'hw_exam_pipeline_uninterrupted',
+      label: '检查流水线缺少中断纹理',
+      status: 'fail',
+      severity: 'blocking',
+      blocking: true,
+      evidence: `exam=${examCount} interruptNear=${interruptNear} maxRun=${maxRun}`,
+      fix: '检查动作每1–2次必须插入：安静微互动/私心挂物件/读不全/笔悬着不写；禁止颈动脉→对光→听诊→读数连打。',
+      remaining_risk: '不中断的检查流水会被朱雀整段打成疑似AI，压制Human占比',
+    })
+  }
+  return out
+}
+
+export function sanitizeExamPipelineInterrupt(text: string): string {
+  const body = String(text || '')
+  if (!body.trim()) return body
+  const hits = scanMidChapterExamPipelineRisks(body)
+  if (!hits.length) return body
+
+  const paras = body.split(/\n+/).map((p) => p.trim()).filter(Boolean)
+  const examRe = /颈动脉|对光|听诊|额温|体温枪|监护仪|电极片|心电图|脉搏|瞳孔|血氧|血压|心率[：:]/
+  const interruptRe = /没说话|端了|放在旁边|就走了|瞟|先别|背锅|改口|懒得|纸边|洇|认不|不想写|先不|悬着|没落/
+  const banks = [
+    '旁边有人把杯子搁到桌角，没说话，放完就走了。',
+    '他懒得现在交差，先别上报，纸边被指腹揉得发涩。',
+    '笔尖悬着没落，墨点洇开一点，他先不写死。',
+    '字迹有点糊，他看了半秒就压回去，不确定自己看清了没有。',
+    '他手在裤腿上蹭了一下，这锅先别接。',
+  ]
+  let examSinceInterrupt = 0
+  let bi = Math.abs(body.length) % banks.length
+  const out: string[] = []
+  for (let i = 0; i < paras.length; i += 1) {
+    const p = paras[i]
+    out.push(p)
+    if (examRe.test(p)) {
+      examSinceInterrupt += 1
+      if (examSinceInterrupt >= 2) {
+        const look = [p, paras[i + 1] || '', paras[i + 2] || ''].join('\n')
+        if (!interruptRe.test(look)) {
+          let line = banks[bi % banks.length]
+          bi += 1
+          for (let k = 0; k < banks.length; k += 1) {
+            const cand = banks[(bi + k) % banks.length]
+            if (!body.includes(cand) && !out.includes(cand)) {
+              line = cand
+              break
+            }
+          }
+          if (!out.includes(line)) out.push(line)
+          examSinceInterrupt = 0
+        } else {
+          examSinceInterrupt = 0
+        }
+      }
+    } else if (interruptRe.test(p)) {
+      examSinceInterrupt = 0
+    }
+  }
+  const joined = out.join('\n\n').trim()
+  return joined ? (joined.endsWith('\n') ? joined : joined + '\n') : joined
+}
+
+
+/** R76: opening/mid vital-sign report cascade (心率/血氧/血压 连打) is a strong Zhuque suspected_ai pattern. */
+
+/** R77: opening process/exam density keeps Zhuque on suspected_ai even after vital colon strip. */
+export function scanOpeningProcessPipelineRisks(text: string): ResistanceFinding[] {
+  const body = String(text || '').replace(/\r/g, '')
+  const out: ResistanceFinding[] = []
+  if (!body.trim()) return out
+  const compactAll = body.replace(/\s+/g, '')
+  // R77: fire on short opening stubs too (unit tests + partial chapters).
+  if (compactAll.length < 500) return out
+
+  const paras = body.split(/\n+/).map((p) => p.trim()).filter(Boolean)
+  let compact = 0
+  const early: string[] = []
+  for (const p of paras) {
+    if (compact >= 1100) break
+    early.push(p)
+    compact += p.replace(/\s+/g, '').length
+  }
+  const earlyText = early.join('\n')
+  const examRe = /颈动脉|对光|听诊|额温|体温枪|监护|电极|心电图|脉搏|瞳孔|血氧|血压|心率|三十六|36\.\d|手[指掌]?压|摸[到了]|按[了上一]|三条线|三个零/
+  const processRe = /听诊器挂|拿起外套|放回椅背|拉开?帘子|鞋带|塑料袋|分诊台|推车|120送|随车医生|床头柜/
+  const privateRe = /嫌|烦|先不|改口|背锅|这锅|懒得|先别|不想|支开|交差|别写|别上报|悬着|没落/
+  const quietRe = /没说话|放完就走|端了|搁到|瞟|没吭声/
+  const dialogRe = /^[“"「]/
+  const examHits = early.filter((p) => examRe.test(p)).length
+  const processHits = early.filter((p) => processRe.test(p)).length
+  const privateHits = early.filter((p) => privateRe.test(p)).length
+  const quietHits = early.filter((p) => quietRe.test(p)).length
+  const dialogHits = early.filter((p) => dialogRe.test(p)).length
+  const tempHits = (earlyText.match(/三十六|36\.\d/g) || []).length
+  const reExamHits = (earlyText.match(/再按|重新看|又摸|又压|又听|再量|再测/g) || []).length
+  const lectureHits = (earlyText.match(/不是那种.{0,12}是真的|像睡着的人|手背上能感觉到/g) || []).length
+
+  // Dense opening process: many exam/process beats, few private/quiet, or repeated temp/re-exam.
+  if (
+    (examHits + processHits >= 10 && privateHits + quietHits < 3)
+    || tempHits >= 3
+    || reExamHits >= 2
+    || (examHits >= 7 && dialogHits < 2)
+    || lectureHits >= 1 && examHits >= 5
+  ) {
+    out.push({
+      key: 'hw_opening_process_pipeline',
+      pattern: 'hw_opening_process_pipeline',
+      label: '开篇流程/检查密度过高',
+      status: 'fail',
+      severity: 'blocking',
+      blocking: true,
+      evidence: `early exam=${examHits} process=${processHits} private=${privateHits} quiet=${quietHits} temp=${tempHits} reExam=${reExamHits} lecture=${lectureHits}`,
+      fix: '开篇1100字：最多1次读数、禁止复测连打；道具/流程铺垫压缩；尽早半截私心+安静微互动；删“不是那种…是真的暖”讲义腔。',
+      remaining_risk: '开篇流程腔会整段疑似AI，卡住Human继续上涨',
+    })
+  }
+  return out
+}
+
+export function sanitizeOpeningProcessPipeline(text: string): string {
+  const body = String(text || '')
+  if (!body.trim()) return body
+  if (!scanOpeningProcessPipelineRisks(body).length) {
+    // still lightly collapse repeated opening temps even if soft
+  }
+
+  const paras = body.split(/\n+/).map((p) => p.trim()).filter(Boolean)
+  const examRe = /颈动脉|对光|听诊|额温|体温枪|监护|电极|心电图|脉搏|瞳孔|手[指掌]?压|摸[到了]|按[了上一]|三条线|三个零|三十六|36\.\d/
+  const privateRe = /嫌|烦|先不|改口|背锅|这锅|懒得|先别|不想|支开|交差|别写|别上报|悬着|没落/
+  const quietRe = /没说话|放完就走|端了|搁到|瞟|没吭声/
+  const dialogRe = /^[“"「]/
+  const reExamRe = /再按|重新看|又摸|又压|又听|再量|再测|还是三个零|比刚才高了/
+  const lectureRe = /不是那种[^。]{0,16}是真的[^。]{0,20}。?|像睡着的人[^。]{0,24}。?|手背上能感觉到[^。]{0,24}。?/
+
+  let compact = 0
+  let tempKept = 0
+  let examKept = 0
+  let privateSeen = 0
+  let quietSeen = 0
+  let injectedEarlyPrivate = false
+  let injectedEarlyQuiet = false
+  const out: string[] = []
+  const privateBank = [
+    '他懒得现在把这单写死，先别往系统里录。',
+    '这锅先别接，笔在指间转了半圈又停住。',
+    '他嫌麻烦，又不能不看，袖口蹭到一点灰。',
+  ]
+  const quietBank = [
+    '旁边有人把杯子搁到桌角，没说话，放完就走了。',
+    '有人瞟了他一眼，没接话，低头走开了。',
+  ]
+  let bi = Math.abs(body.length) % privateBank.length
+  let qi = Math.abs(body.length + 3) % quietBank.length
+
+  for (let i = 0; i < paras.length; i += 1) {
+    let p = paras[i]
+    const plain = p.replace(/\s+/g, '')
+    const inOpening = compact < 1100
+    compact += plain.length
+    if (!inOpening) {
+      out.push(p)
+      continue
+    }
+
+    // strip lecture contrast warmth packaging
+    if (lectureRe.test(p)) {
+      p = p
+        .replace(/不是那种[^，。]{0,16}，?是真的暖[^。]{0,40}。?/g, '')
+        .replace(/像睡着的人[^。]{0,30}。?/g, '')
+        .replace(/他手背上能感觉到[^。]{0,40}。?/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+      if (!p) continue
+    }
+
+    // collapse re-exam loops
+    if (reExamRe.test(p) && examKept >= 2) {
+      if (privateSeen < 2) {
+        const line = privateBank[bi % privateBank.length]
+        bi += 1
+        if (!out.includes(line) && !body.includes(line)) {
+          out.push(line)
+          privateSeen += 1
+        }
+      }
+      continue
+    }
+
+    // cap temperature reads
+    if (/三十六|36\.\d/.test(p)) {
+      tempKept += 1
+      if (tempKept > 1) {
+        if (privateSeen < 3) {
+          const line = privateBank[bi % privateBank.length]
+          bi += 1
+          if (!out.includes(line)) {
+            out.push(line)
+            privateSeen += 1
+          }
+        }
+        continue
+      }
+    }
+
+    if (examRe.test(p)) {
+      examKept += 1
+      // after several exam beats, force interrupt instead of more pure exam
+      if (examKept >= 4 && !privateRe.test(p) && !dialogRe.test(p) && !quietRe.test(p)) {
+        if (privateSeen < 3) {
+          const line = privateBank[bi % privateBank.length]
+          bi += 1
+          if (!out.includes(line)) {
+            out.push(line)
+            privateSeen += 1
+          }
+        }
+        // keep short residual if it has non-exam content, else drop pure exam extras
+        if (plain.length <= 18 && examRe.test(p) && !privateRe.test(p)) continue
+      }
+    }
+
+    if (privateRe.test(p)) privateSeen += 1
+    if (quietRe.test(p)) quietSeen += 1
+    out.push(p)
+
+    // early inject after first touch/dialog window
+    if (!injectedEarlyPrivate && compact >= 180 && privateSeen < 1) {
+      const line = privateBank[bi % privateBank.length]
+      bi += 1
+      if (!out.includes(line)) {
+        out.push(line)
+        privateSeen += 1
+        injectedEarlyPrivate = true
+      }
+    }
+    if (!injectedEarlyQuiet && compact >= 320 && quietSeen < 1) {
+      const line = quietBank[qi % quietBank.length]
+      qi += 1
+      if (!out.includes(line) && !body.includes(line)) {
+        out.push(line)
+        quietSeen += 1
+        injectedEarlyQuiet = true
+      }
+    }
+  }
+
+  // If opening still private-starved, append one fused beat near end of opening region
+  if (privateSeen < 2) {
+    const line = privateBank[bi % privateBank.length]
+    // insert around 40% of out for early chapter feel
+    const at = Math.min(out.length - 1, Math.max(3, Math.floor(out.length * 0.25)))
+    if (!out.includes(line)) out.splice(at, 0, line)
+  }
+
+  let joined = out.join('\n\n').trim()
+  joined = collapseExactDuplicateParagraphs(joined)
+  // Do NOT stripSanitizeStampGarbage here: it can erase legitimate mid private-noise injects (R77).
+  return joined ? (joined.endsWith('\n') ? joined : joined + '\n') : joined
+}
+
+
+/**
+ * R78: light opening polish only (first ~300 compact chars).
+ * Lesson from R77: rewriting first 1100 chars + injects can split a large human block and drop Human%.
+ * Never touch mid/late green segments.
+ */
+export function sanitizeOpeningLightTouch(text: string): string {
+  const body = String(text || '')
+  if (!body.trim()) return body
+  const paras = body.split(/\n+/).map((p) => p.trim()).filter(Boolean)
+  if (paras.length < 4) return body
+
+  const LIMIT = 300
+  let compact = 0
+  let privateSeen = 0
+  let injected = false
+  const privateRe = /嫌|烦|先不|改口|背锅|这锅|懒得|先别|不想|支开|交差|别写|别上报|悬着|没落/
+  const lectureRe = /不是那种[^。]{0,20}是真的[^。]{0,30}|像睡着的人|手背上能感觉到/
+  const out: string[] = []
+  const injectLine = '他嫌麻烦，又不能不看，袖口蹭到一点灰。'
+
+  for (const p of paras) {
+    const plain = p.replace(/\s+/g, '')
+    const inHead = compact < LIMIT
+    compact += plain.length
+    if (!inHead) {
+      out.push(p)
+      continue
+    }
+
+    let next = p
+    // Only strip warmth-lecture packaging in the head; keep all other content.
+    if (lectureRe.test(next)) {
+      next = next
+        .replace(/不是那种[^，。]{0,16}，?是真的暖[^。]{0,40}。?/g, '')
+        .replace(/像睡着的人[^。]{0,30}。?/g, '')
+        .replace(/他手背上能感觉到[^。]{0,40}。?/g, '')
+        .replace(/[，,]{2,}/g, '，')
+        .replace(/\s+/g, ' ')
+        .trim()
+      if (!next) continue
+      // if only leftover is a bare 皮肤是暖的 already present, keep single short beat
+      if (next === '皮肤是暖的。' || next === '皮肤是暖的') {
+        // keep one tactile line
+      }
+    }
+    if (privateRe.test(next)) privateSeen += 1
+    out.push(next)
+
+    // At most one early private inject after we have some scene (not at absolute first para).
+    if (!injected && privateSeen < 1 && compact >= 120 && compact <= LIMIT) {
+      if (!body.includes(injectLine) && !out.includes(injectLine)) {
+        out.push(injectLine)
+        privateSeen += 1
+        injected = true
+      }
+    }
+  }
+
+  const joined = out.join('\n\n').trim()
+  return joined ? (joined.endsWith('\n') ? joined : joined + '\n') : joined
+}
+
+export function scanOpeningVitalReportCascadeRisks(text: string): ResistanceFinding[] {
+  const body = String(text || '').replace(/\r/g, '')
+  const out: ResistanceFinding[] = []
+  if (!body.trim()) return out
+  const paras = body.split(/\n+/).map((p) => p.trim()).filter(Boolean)
+  // Focus early-mid chapter where R75 SEG1 lived.
+  let compact = 0
+  const early: string[] = []
+  for (const p of paras) {
+    if (compact > 1400) break
+    early.push(p)
+    compact += p.replace(/\s+/g, '').length
+  }
+  const vitalLine = /^(?:心率|血氧|血压|脉搏|体温|呼吸)[：:]\s*\S+/
+  const vitalToken = /心率[：:]|血氧[：:]|血压[：:]|脉搏[：:]|呼吸[：:]|心率[：:]?\s*零|血氧[：:]?\s*没|血压[：:]?\s*无/
+  const lines = early.filter((p) => vitalLine.test(p) || (p.length <= 16 && vitalToken.test(p)))
+  // Also count clustered vital tokens in early window text.
+  const earlyText = early.join('\n')
+  const tokenHits = (earlyText.match(/心率|血氧|血压|脉搏读数|监护三项/g) || []).length
+  const colonHits = lines.length
+  if (colonHits >= 2 || tokenHits >= 3) {
+    out.push({
+      key: 'hw_opening_vital_report_cascade',
+      pattern: 'hw_opening_vital_report_cascade',
+      label: '开篇/前段生命体征报数连打',
+      status: 'fail',
+      severity: 'blocking',
+      blocking: true,
+      evidence: `early vitalLines=${colonHits} tokenHits=${tokenHits}`,
+      fix: '禁止心率/血氧/血压(/脉搏)连续报数；最多保留1次读数，立刻接私心/短对白/物件动作；其余改成一次触感或半截犹豫。',
+      remaining_risk: '体征报数连打会被朱雀整段打成疑似AI，压低Human',
+    })
+  }
+  return out
+}
+
+export function sanitizeOpeningVitalReportCascade(text: string): string {
+  const body = String(text || '')
+  if (!body.trim()) return body
+  const hits = scanOpeningVitalReportCascadeRisks(body)
+  if (!hits.length) return body
+
+  const paras = body.split(/\n+/).map((p) => p.trim()).filter(Boolean)
+  const vitalLine = /^(?:心率|血氧|血压|脉搏|体温|呼吸)[：:]\s*\S+/
+  const vitalToken = /心率[：:]|血氧[：:]|血压[：:]|脉搏[：:]|呼吸[：:]/
+  const replacements = [
+    '他懒得把三项都录全，先别写死，纸边被指腹揉了一下。',
+    '数字跳出来他只扫一眼，这锅先别接，手在裤腿上蹭了蹭。',
+    '监护上该亮的都没亮，他先不报，笔尖悬着没落。',
+  ]
+  let keptOne = false
+  let compact = 0
+  let ri = Math.abs(body.length) % replacements.length
+  const out: string[] = []
+  for (const p of paras) {
+    const plain = p.replace(/\s+/g, '')
+    const inEarly = compact < 1400
+    compact += plain.length
+    const isVital = vitalLine.test(p) || (p.length <= 18 && vitalToken.test(p))
+    if (inEarly && isVital) {
+      if (!keptOne) {
+        // keep first vital as tactile/private, not colon report
+        out.push(replacements[ri % replacements.length])
+        keptOne = true
+        ri += 1
+      } else {
+        // drop subsequent pure report lines; optionally inject quiet interrupt sparingly
+        continue
+      }
+      continue
+    }
+    // collapse inline "心率：零。血氧：没读到。血压：无。" style inside longer paras
+    if (inEarly && /心率[：:].{0,8}血氧[：:]|血氧[：:].{0,8}血压[：:]/.test(p)) {
+      out.push(replacements[ri % replacements.length])
+      ri += 1
+      continue
+    }
+    out.push(p)
+  }
+  const joined = out.join('\n\n').trim()
+  return joined ? (joined.endsWith('\n') ? joined : joined + '\n') : joined
+}
+
 export function scanOpeningClinicalCascadeRisks(text: string): ResistanceFinding[] {
   const body = String(text || '').replace(/\r/g, '')
   if (!body.trim()) return []
@@ -790,7 +1241,7 @@ export function scanTextureDeliveryRisks(text: string): ResistanceFinding[] {
   const endIdx = Math.max(startIdx + 1, Math.floor(total * 0.82))
   const midParas = paras.slice(startIdx, endIdx)
   const isDialogue = (p: string) => /^[“"「]/.test(p)
-  const messCue = /不关|推给|推责|责任|背锅|改口|先记|先别|别扯|凭什么|我不管|你别管|按规定|不合规矩|绩效|签字|先走|别写|别上报|别动|……|不是我|这事不能|谁知道|我看这情况|要不先|维保|交差|扣的就是我/
+  const messCue = /不关|推给|推责|责任|背锅|改口|先记|先别|别扯|凭什么|我不管|你别管|按规定|不合规矩|绩效|签字|先走|别写|别上报|别动|……|不是我|这事不能|谁知道|我看这情况|要不先|维保|交差|扣的就是我|烂摊子|谁担|谁背|怕担|怕主任|先保|别往我|这锅|别给我|先糊|先放|说不清|时间不允许|先别过去|你签还是|算谁的|谁垫/
   const pollutionCue = /未定义|废弃区域|废弃了|冰冷的横杠|完全一致|一模一样|瞳孔散大固定|临床死亡|对光反射|心电图拉|规则网|失踪名单|登记凭证|核对一下名单|第[一二三]袋|第一袋|第二袋|第三袋|待交割|交割手续|规则一旦|规则已经|代谢滞后|中枢神经|这不是感染|也不是中毒|抽走了所有的生命体征|体温卖|器官贩子|套牌|精确地投放|死因登记|死因异常|平行线|雪花点/
   const privateTouch = /咬|手套|口袋|锁|塞|扣|捏|烦|嫌|先不|不想|改口|支开/
 
@@ -819,7 +1270,8 @@ export function scanTextureDeliveryRisks(text: string): ResistanceFinding[] {
       cur.push(globalIdx)
       continue
     }
-    if ((!p || p.length <= 10) && cur.length) continue
+    // Short action bridges keep multi-turn mess clusters intact (R73: narrative cuts used to flush at 2).
+    if (cur.length && (!p || p.length <= 18 || privateTouch.test(p))) continue
     flush()
   }
   flush()
@@ -897,7 +1349,7 @@ export function scanTextureDeliveryRisks(text: string): ResistanceFinding[] {
  * Pure-AI deletion alone is insufficient: Zhuque needs dense private noise, object friction,
  * short dialogue, and non-name openers.
  */
-const POSITIVE_PRIVATE_NOISE_RE = /绩效|奖金|交班|质控|背锅|甩锅|嫌|麻烦|改口|支开|不该写|别写|安全分|扣绩效|先保|责任|月底|说不清|别往系统|日志|报告|先不|不想|烦|交差|维保|推给|不是我|先记|先别|塞进|藏|锁门|别上报|口误|改口|怕被|怕主任|怕出事/
+const POSITIVE_PRIVATE_NOISE_RE = /绩效|奖金|交班|质控|背锅|甩锅|嫌|麻烦|改口|支开|不该写|别写|安全分|扣绩效|先保|责任|月底|说不清|别往系统|日志|报告|先不|不想|烦|交差|维保|推给|不是我|先记|先别|塞进|藏|锁门|别上报|口误|改口|怕被|怕主任|怕出事|谁担|谁背|别给我|懒得|先放|先糊|不想写|别扯/
 
 const POSITIVE_OBJECT_FRICTION_RE = /咬|笔帽|锈|漏墨|黏|粘|金属|边框|纸边|毛刺|手套|抽屉|钥匙|锁芯|铁盘|当啷|潮湿|泥斑|拉链|线头|口袋|袖口|指腹|刺手|发涩|发黏|发烫|发僵|冷得|烫手|硌手|起刺/
 
@@ -1354,9 +1806,13 @@ export function evaluateHumanWebnovelResistance(
     ...scanPrivateNoiseDeclarationRisks(text),
     ...scanStructuralMultiBodyRisks(text),
     ...scanStructuralAbandonedSpaceRisks(text),
+    ...scanMidChapterExamPipelineRisks(text),
+    ...scanOpeningVitalReportCascadeRisks(text),
+    ...scanOpeningProcessPipelineRisks(text),
   ]
   const textureFindings = scanTextureDeliveryRisks(text)
   const positiveFindings = scanPositiveFingerprintDelivery(text)
+  const greenFindings = scanZhuqueGreenHumanTexture(text)
   const socialFindings = scanSocialConflictFrictionDelivery(text)
   const bankStampFindings = scanPrivateNoiseBankStampRisks(text)
   const { vector, score, findings: fpFindings } = scanFingerprintContractRisks(text, contract)
@@ -1369,6 +1825,7 @@ export function evaluateHumanWebnovelResistance(
     ...socialFindings,
     ...bankStampFindings,
     ...positiveFindings,
+    ...greenFindings,
     ...fpFindings,
     ...narrativeHardFindings,
   ]
@@ -2446,6 +2903,398 @@ export function sanitizeR60ZhuqueKillers(text: string): string {
   return out
 }
 
+
+/** R63: Zhuque 100% AI — packaging density leftovers (system shells, not plot beats). */
+export function sanitizeR63ZhuqueKillers(text: string): string {
+  let out = String(text || '')
+  if (!out.trim()) return out
+
+  // Clinical textbook / physiology lecture shells
+  out = out
+    .replace(/血液循环彻底停止[、，]?心电拉直的状态下[，,]?体温应该迅速散失[。！？]?/g, '按理早该凉了。')
+    .replace(/散发着活人一样的体热[。！？]?/g, '还热着。')
+    .replace(/体温毫无疑问维持在正常的活人范围里[。！？]?/g, '摸着还热。')
+    .replace(/毫无疑问/g, '')
+    .replace(/心电拉直/g, '心电平了')
+    .replace(/血液循环彻底停止/g, '人已经停了')
+
+  // Opening intensifier / sensory spam tokens (soft)
+  out = out
+    .replace(/冰凉刺骨/g, '挺凉')
+    .replace(/尖锐牙酸的/g, '')
+    .replace(/牙酸的/g, '')
+    .replace(/牙酸/g, '')
+    .replace(/源源不断的/g, '')
+    .replace(/源源不断/g, '')
+    .replace(/赫然/g, '')
+    .replace(/极其冰冷/g, '冷')
+    .replace(/剧烈的杂音/g, '杂音')
+    .replace(/压制不住的震颤/g, '发紧')
+
+  // Procedure / shelf room packaging
+  out = out
+    .replace(/搁置室和连廊/g, '后廊')
+    .replace(/搁置室/g, '后间')
+    .replace(/规程和合规[，,]?很多时候只是用来掩盖麻烦的工具[。！？]?/g, '规程常被拿来挡麻烦。')
+    .replace(/规程和合规/g, '规程')
+    .replace(/严禁触碰的合规禁区/g, '不让进的地方')
+    .replace(/合规禁区/g, '禁区')
+    .replace(/这是违规操作/g, '这不合规矩')
+    .replace(/违规操作/g, '乱来')
+    .replace(/按合规/g, '按规矩')
+    .replace(/走合规/g, '走流程')
+    .replace(/做合规/g, '走流程')
+    .replace(/为了合规/g, '为了交差')
+    .replace(/合规封闭巡检/g, '封闭巡检')
+    .replace(/合规巡检/g, '巡检')
+    .replace(/合规主管/g, '主管')
+    .replace(/未经合规授权/g, '未经授权')
+    .replace(/非合规物品/g, '不能留的东西')
+    .replace(/合规物品/g, '物品')
+    .replace(/合规授权/g, '授权')
+    .replace(/(?<![\u4e00-\u9fff])合规(?![\u4e00-\u9fff])/g, '规矩')
+
+  // Lore / stamp packaging shells (keep object fact, drop oracle tone)
+  out = out
+    .replace(/[“"']?第三次履约[，,]?带温移交[。”"']?/g, '先别交出去')
+    .replace(/第三次履约[，,]?带温移交/g, '先别交出去')
+    .replace(/带温移交/g, '先别交')
+    .replace(/””/g, '”')
+    .replace(/“”/g, '')
+    .replace(/先别交出去[”']+/g, '先别交出去')
+    .replace(/[“']先别交出去[”']?/g, '先别交出去')
+    .replace(/医院建筑图纸上未标注的死角/g, '图上找不到的角')
+    .replace(/未标注的死角/g, '死角')
+    .replace(/[“"]通道[，,]?后果自负[”"]/g, '“闲人止步”')
+    .replace(/后果自负/g, '止步')
+    .replace(/但他已经没有退路了[。！？]?/g, '他没再回头。')
+    .replace(/绝不是什么巧合[，,]?也不是简单的急诊偶发病例[。！？]?/g, '这事不对。')
+    .replace(/这绝不是什么巧合/g, '这事不对')
+
+  // Multi-body / corridor packaging soften
+  out = out
+    .replace(/两具躺在平车上的尸体[，,]?却散发着源源不断的温热[。！？]?/g, '车上的人还热着。')
+    .replace(/站在两具尸体中间/g, '站在平车旁')
+
+  out = out
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/，{2,}/g, '，')
+    .replace(/。{2,}/g, '。')
+    .replace(/，。/g, '。')
+  return out
+}
+
+
+export function sanitizeR64ZhuqueKillers(text: string): string {
+  let out = String(text || '')
+  if (!out.trim()) return out
+
+  // Clinical triad / textbook verdict (R64 residual)
+  out = out
+    .replace(/心脏不跳了[，,]?呼吸停了[，,]?瞳孔散了[，,]?体温却[^。！？\n]{0,24}[。！？]?/g, '人没反应，可手底下还热。')
+    .replace(/心跳不跳了[，,]?呼吸停了[，,]?瞳孔散了[，,]?体温却[^。！？\n]{0,24}[。！？]?/g, '人没反应，可手底下还热。')
+    .replace(/心脏不跳了[，,]?呼吸停了[，,]?瞳孔散了[。！？]?/g, '人没反应。')
+    .replace(/体温却稳稳押在活人的区间里[。！？]?/g, '摸着还热。')
+    .replace(/体温却[^。！？\n]{0,16}活人[^。！？\n]{0,12}[。！？]?/g, '摸着还热。')
+    .replace(/这不合逻辑[。！？]?/g, '')
+    .replace(/不合逻辑/g, '不对')
+
+  // Multi-body / fate-oracle summary packaging
+  out = out
+    .replace(/三个有体温的[“"']?非账上人员[”"']?[。！？]?/g, '这几个人还热着。')
+    .replace(/非账上人员/g, '名单外的人')
+    .replace(/要是这批是回收品[，,]?下一个名字会写在谁的单子上[？?]?/g, '他不想自己名字出现在下一张单上。')
+    .replace(/回收品/g, '要运走的')
+    .replace(/跟他在病历本上签了数千次的习惯一模一样[。！？]?/g, '笔迹看着像他常写的那种。')
+    .replace(/一模一样/g, '很像')
+
+  // Form/stamp packaging soften (keep paper fact)
+  out = out
+    .replace(/《暂存移交单》/g, '单子')
+    .replace(/暂存移交单/g, '单子')
+    .replace(/签了字[，,]?出这道门就当什么都没见过[。！？]?/g, '签了就当今晚没这事。')
+    .replace(/你要是不签[，,]?今晚这台电梯你走不出去[。！？]?/g, '不签就别想走。')
+
+  // Elevator cinematic freeze stack → unfinished move
+  out = out
+    .replace(/电梯井里忽地炸开一道闷响[。！？]?/g, '电梯里闷响了一声。')
+    .replace(/卡在半空中的轿厢猛然往下顿了半寸[，,]?金属摩擦声刺得人[。！？]?/g, '轿厢顿了一下。')
+    .replace(/卡在半空中的轿厢猛然往下顿了半寸[。！？]?/g, '轿厢顿了一下。')
+    .replace(/顶上最后一点微弱的应急灯灭了[。！？]?/g, '灯灭了。')
+    .replace(/黑漆漆的井底吹上来一股冷风[，,]?夹着股陈年腥气[，,]?迎面拍在两人脸上[。！？]?/g, '井底吹上冷风。')
+    .replace(/黑漆漆的井底吹上来一股冷风[。！？]?/g, '井底吹上冷风。')
+    .replace(/夹着股陈年腥气[，,]?迎面拍在两人脸上[。！？]?/g, '')
+
+  // Device textbook / parallel-negation packaging (R64 pure-AI middle segment)
+  out = out
+    .replace(/机器吐出狭长的走纸[。！？]?/g, '机器吐出一截走纸。')
+    .replace(/笔尖在红色的方格纸上划出一道毫无波折的直线[。！？]?/g, '纸上是一条直线。')
+    .replace(/毫无波折的直线/g, '直线')
+    .replace(/直得像人用尺子比着画出来的[。！？]?/g, '直得发假。')
+    .replace(/仔细看上面的微小电信号[。！？]?/g, '他盯着走纸。')
+    .replace(/微小电信号/g, '走纸')
+    .replace(/底下毫无起伏[。！？]?/g, '底下没动静。')
+    .replace(/毫无起伏/g, '没动静')
+    .replace(/没有颤动[。！？]?/g, '没跳。')
+    .replace(/眼球表面蒙着一层死灰色的薄膜[。！？]?/g, '眼睛发灰。')
+    .replace(/死灰色的薄膜/g, '发灰')
+    .replace(/指尖底下死寂一片[。！？]?/g, '指尖下没脉。')
+    .replace(/死寂一片/g, '没动静')
+    .replace(/掌心传来的不是死人的冰凉[，,]?反而透着股温热[。！？]?/g, '掌心还热。')
+    .replace(/比刚才那个夹克男人还要明显[。！？]?/g, '')
+    .replace(/不像尸斑[，,]?倒像是皮下大面积淤血[。！？]?/g, '青黑一块。')
+    .replace(/推责任的熟练劲儿一听就是老油条了[。！？]?/g, '她把话往外推。')
+    .replace(/一听就是老油条了[。！？]?/g, '')
+    .replace(/皮肤软乎乎的[，,]?指尖摸上去甚至带着点潮干的汗意[。！？]?/g, '皮还软，指尖有点潮。')
+    .replace(/像随时会睁开眼骂一句这破空调太冷[。！？]?/g, '')
+    .replace(/依然是死寂的[。！？]?/g, '还是没动静。')
+    .replace(/没有呼吸音[。！？]?/g, '')
+    .replace(/带着明显的体温[。！？]?/g, '还热。')
+    .replace(/像刚从被窝里抬出来一样[，,]?/g, '')
+
+  // Humanize artifact: accidental triple chars / over-onomatopoeia spam
+  out = out
+    .replace(/([\u4e00-\u9fff])\1\1+/g, '$1$1') // collapse 3+ identical CJK chars (humanize artifacts)
+    .replace(/刺刺拉拉/g, '刺啦')
+    .replace(/刺拉拉/g, '刺啦')
+
+  out = out
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/，{2,}/g, '，')
+    .replace(/。{2,}/g, '。')
+    .replace(/，。/g, '。')
+  return out
+}
+
+
+export function sanitizeR65ZhuqueKillers(text: string): string {
+  let out = String(text || '')
+  if (!out.trim()) return out
+
+  // Procedure citation / stamp coercion packaging (R65 pure-AI segments)
+  out = out
+    .replace(/[“"']?规章第[一二三四五六七八九十百零〇0-9]+条[^”"']{0,40}[”"']?/g, '“让开。”')
+    .replace(/规章第[一二三四五六七八九十百零〇0-9]+条[^。！？\n]{0,36}[。！？]?/g, '他不想把这事说成条文。')
+    .replace(/交接规定写得清清楚楚[，,]?[^。！？\n]{0,36}[。！？]?/g, '他催着签字。')
+    .replace(/赶紧盖章[！!]?/g, '赶紧签！')
+    .replace(/盖章/g, '签字')
+    .replace(/非法处置/g, '说不清')
+    .replace(/这字只要落下[，,]?出事就是说不清[。！？]?/g, '这字落下，锅就背上了。')
+    .replace(/这字只要落下[，,]?出事就是[^。！？\n]{0,16}[。！？]?/g, '这字落下，锅就背上了。')
+
+  // Pocket inventory pipeline (keys+card list packaging)
+  out = out
+    .replace(/口袋里没身份证[，,]?只摸出一串生锈的钥匙[，,]?还有一张被水浸得发软的硬质塑胶卡[。！？]?/g, '口袋里摸出一张泡软的卡。')
+    .replace(/一串生锈的钥匙[，,]?还有一张[^。！？\n]{0,24}卡[。！？]?/g, '一张泡软的卡。')
+    .replace(/没身份证[，,]?只摸出/g, '只摸出')
+
+  // Ending elevator cinematic / contrast summary packaging
+  out = out
+    .replace(/井道里响起铁链扯动的吱呀声[，,]?轿厢晃晃荡荡沉下来[。！？]?/g, '电梯往下沉。')
+    .replace(/轿厢晃晃荡荡沉下来[。！？]?/g, '电梯往下沉。')
+    .replace(/老张平时连个夜班都恨不得躲值班室打盹[，,]?这会儿腰杆挺得比钢筋还硬[。！？]?/g, '老张这会儿绷得紧。')
+    .replace(/那张沾水揉烂的卡片[、，,]?没心跳却带着热气的皮肉[………]{1,2}/g, '口袋里那张卡还烫手。')
+    .replace(/没心跳却带着热气的皮肉/g, '还热着的人')
+    .replace(/散出一股子冲的石灰味[。！？]?/g, '')
+    .replace(/整个人斜着挤进了将要关合的门缝——?/g, '他挤进门缝。')
+    .replace(/将要关合的门缝——?/g, '门缝')
+    .replace(/腰杆挺得比钢筋还硬/g, '绷得紧')
+    .replace(/电梯门开始缓缓向中间靠拢[。！？]?/g, '电梯门往中间合。')
+    .replace(/缓缓向中间靠拢/g, '往中间合')
+    .replace(/散发着一股陈旧的石灰和消毒水混合的怪味[。！？]?/g, '')
+    .replace(/石灰和消毒水混合的怪味/g, '冲味')
+    .replace(/轿厢内部那片阴暗的空间里[，,]?仿佛有什么东西正在顺着风口倒灌出来[。！？]?/g, '')
+    .replace(/仿佛有什么东西正在顺着风口倒灌出来[。！？]?/g, '')
+    .replace(/门缝正在以不可逆的速度收窄[。！？]?/g, '门缝在收。')
+    .replace(/以不可逆的速度收窄/g, '在收')
+    .replace(/十厘米[，,]?十五厘米[，,]?二十厘米[………]{0,2}/g, '')
+    .replace(/电梯门的边缘距离框体只剩下不到二十厘米[。！？]?/g, '门快合上了。')
+    .replace(/防夹感应器没有任何反应[。！？]?/g, '')
+    .replace(/防夹感应器/g, '门感应')
+    .replace(/电梯内部那片阴暗的空间/g, '电梯里')
+    .replace(/那片阴暗的空间/g, '电梯里')
+    .replace(/黑洞洞的空间/g, '电梯里')
+    .replace(/那片黑洞洞的空间/g, '电梯里')
+    .replace(/电梯内部那片电梯里/g, '电梯里')
+    .replace(/那片电梯里/g, '电梯里')
+    .replace(/顶部的指示灯忽明忽暗[，,]?发出[“"]?滋滋[”"]?的电流声[，,]?[^。！？\n]{0,40}[。！？]?/g, '灯闪了两下。')
+    .replace(/顶部的指示灯忽明忽暗[，,]?发出[“"]?滋滋[”"]?的电流声[，,]?/g, '灯闪了两下。')
+    .replace(/灯闪了两下，\s*/g, '灯闪了两下。')
+
+
+  // Soft antithesis / procedure debate leftovers
+  out = out
+    .replace(/交接单可没写过死人带体温[。！？]?/g, '单子上没写还热着。')
+    .replace(/你管他热不热[！!]?/g, '别磨叽！')
+    .replace(/物业今晚跟后勤打过招呼了[，,]?[^。！？\n]{0,30}[。！？]?/g, '她怕闹大。')
+    .replace(/动静闹大了惹来医务科[，,]?明早交班咱俩都得挨骂[。！？]?/g, '她怕明早挨骂。')
+
+  out = out
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/，{2,}/g, '，')
+    .replace(/。{2,}/g, '。')
+    .replace(/，。/g, '。')
+  return out
+}
+
+/** R66/R67 Zhuque: ending pure-AI packaging (cm door countdown / anti-pinch / B1 fate paper). System shells. */
+export function sanitizeR66ZhuqueKillers(text: string): string {
+  let out = String(text || '')
+  if (!out.trim()) return out
+
+  // Centimeter door-close countdown + irreversible packaging
+  out = out
+    .replace(/门缝正在以不可逆的速度收窄[。！？]?/g, '门缝越收越窄。')
+    .replace(/以不可逆的速度收窄/g, '越收越窄')
+    .replace(/不可逆地收窄/g, '越收越窄')
+    .replace(/十厘米[，,]?十五厘米[，,]?二十厘米…{0,3}/g, '')
+    .replace(/十厘米[，,]十五厘米[，,]二十厘米/g, '')
+    .replace(/不到二十厘米/g, '只剩一条缝')
+    .replace(/电梯门的边缘距离框体只剩下[^。！？\n]{0,16}[。！？]?/g, '门缝只剩一条。')
+    .replace(/防夹感应器没有任何反应[。！？]?/g, '')
+    .replace(/防夹感应器/g, '门感应')
+    .replace(/警报声没有响[。！？]?/g, '')
+    .replace(/电梯的感应灯闪烁得更加剧烈[。！？]?/g, '电梯灯乱闪。')
+    .replace(/轿厢内部那片阴暗的空间里[，,]?仿佛有什么东西正在顺着风口倒灌出来[。！？]?/g, '轿厢里闷得慌。')
+    .replace(/顺着风口倒灌出来/g, '往外灌')
+    .replace(/黑洞洞的空间/g, '暗处')
+    .replace(/顶部的指示灯忽明忽暗[，,]?发出[“"]滋滋[”"]的电流声[，,]?散发着一股陈旧的石灰和消毒水混合的怪味[。！？]?/g, '灯管闪了一下，有股消毒水味。')
+    .replace(/石灰和消毒水混合的怪味/g, '消毒水味')
+    .replace(/带着石灰味的冷风/g, '冷风')
+    .replace(/石灰味的冷风/g, '冷风')
+
+  // B1 / fate roster packaging
+  out = out
+    .replace(/显示屏上的数字从[“"]?1[”"]?直接跳成了[“"]?B1[”"]?[。！？]?/g, '电梯往下走了。')
+    .replace(/从[“"]?B1[”"]?往上跳/g, '往上跳')
+    .replace(/[“"]未完结[，,]?顺延下一位[”"]/g, '“未处理”')
+    .replace(/未完结[，,]?顺延下一位/g, '未处理')
+    .replace(/精确到分钟的时间[，,]?以及一个体温读数[：:]?\s*36\.5℃?/g, '一个看不清的时间')
+    .replace(/体温读数[：:]?\s*36\.5℃?/g, '看不清的数字')
+
+  out = out
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/，{2,}/g, '，')
+    .replace(/。{2,}/g, '。')
+    .replace(/，。/g, '。')
+  return out
+}
+
+
+/** R69 Zhuque: ending pure-AI cabin lore / compliance wall / metal-tag note / light-curtain. System shells. */
+export function sanitizeR69ZhuqueKillers(text: string): string {
+  let out = String(text || '')
+  if (!out.trim()) return out
+
+  // Elevator B2 / panel lore packaging
+  out = out
+    .replace(/数字停在[“"]B2[”"][，,]?一直没有变化[。！？]?/g, '数字乱跳。')
+    .replace(/但现在[，,]?电梯显示屏上清清楚楚地显示着[“"]B2[”"][。！？]?/g, '')
+    .replace(/这电梯能去B2/g, '这电梯怎么往下窜')
+    .replace(/哪有什么B2[，,]?就是显示屏坏了[，,]?经常乱跳数字[。！？]?/g, '显示坏了，别多问。')
+    .replace(/那个本该被黑色胶布封住的[“"]B2[”"]按键[，,]?胶布已经被撕掉了一半[。！？]?/g, '面板上有个键，胶布翘着边。')
+    .replace(/胶布下面露出的按键边缘[，,]?残留着一点暗红色的油漆渍[。！？]?/g, '')
+    .replace(/暗红色的油漆渍/g, '旧漆')
+    .replace(/[“"]B2[”"]按键/g, '那个键')
+    .replace(/(?<![A-Za-z0-9])B2(?![A-Za-z0-9])/g, '负层')
+
+  // Compliance wall / procedure packaging
+  out = out
+    .replace(/轿厢内部的墙壁上贴满了各种合规告示和安全注意事项[，,]?许多地方的纸张已经发黄剥落[。！？]?/g, '轿厢里贴着旧告示。')
+    .replace(/合规告示和安全注意事项/g, '旧告示')
+    .replace(/合规告示/g, '告示')
+    .replace(/[“"]林医生[，,]?这可不能乱动！合规部规定[，,]?运送过程中的物品一律不准接触！[”"]/g, '“别碰！运送单上的东西不能动！”')
+    .replace(/合规部规定[，,]?运送过程中的物品一律不准接触/g, '运送单上的东西不能动')
+    .replace(/合规部规定/g, '规定')
+    .replace(/运送过程中的物品一律不准接触/g, '别乱动车上的东西')
+
+  // Light curtain / cabin atmosphere packaging
+  out = out
+    .replace(/挡在了电梯门中间的感应光幕前/g, '挡在门缝前')
+    .replace(/感应光幕/g, '门缝')
+    .replace(/轿厢内的灯光有些偏黄[，,]?顶上的排风扇发出咔哒咔哒的杂音[。！？]?/g, '电梯里灯有点暗。')
+    .replace(/一股潮湿[、，]冲的石灰味混杂着冷气从轿厢里冲了出来[。！？]?/g, '门一开，冷气灌出来。')
+    .replace(/石灰味混杂着冷气/g, '冷气')
+    .replace(/随着电梯井里吹来的冷风微微晃动/g, '晃了晃')
+
+  // Residual cabin/elevator packaging still pure-AI on Zhuque after first strip
+  out = out
+    .replace(/电梯井内部传来一阵沉闷的金属摩擦声[，,]?像是有什么重物在钢丝绳上缓慢滑动[。！？]?/g, '电梯里闷响了一下。')
+    .replace(/感应灯从红色变成了黄色[，,]?但电梯门并没有立刻打开[。！？]?/g, '灯亮了，门还没开。')
+    .replace(/感应灯从红色变成了黄色/g, '灯变了色')
+    .replace(/在电梯按钮旁边的感应区刷了一下/g, '在门边刷了一下')
+    .replace(/面板上有个键[，,]?胶布翘着边[。！？]?/g, '面板上有个键。')
+    .replace(/老周[，,]?“这电梯怎么往下窜？””/g, '老周，“这电梯怎么往下窜？”')
+    .replace(/“老周[，,]?“这电梯怎么往下窜？””/g, '“老周，这电梯怎么往下窜？”')
+    .replace(/“老周[，,]?“/g, '“老周，')
+    .replace(/？””/g, '？”')
+
+  // Metal tag + note full-reveal packaging → unfinished grab
+  out = out
+    .replace(/在羽绒服女人的平车底盘钢架上[，,]?挂着一块小小的金属牌[。！？]?\s*金属牌上刻着一串数字[，,]?而在数字下方[，,]?用胶带贴着一张半折叠的白色小纸条[。！？]?/g,
+             '平车底下挂着个小牌，胶带粘着半截纸条。')
+    .replace(/金属牌上刻着一串数字[，,]?而在数字下方[，,]?用胶带贴着一张半折叠的白色小纸条[。！？]?/g, '牌下粘着半截纸条。')
+    .replace(/半折叠的白色小纸条/g, '半截纸条')
+    .replace(/小小的金属牌/g, '小牌')
+    .replace(/争抢间[，,]?那张半折叠的白色小纸条被撕裂开来[，,]?大半截脱落下来[，,]?直接贴在了老周和电梯门的缝隙之间[。！？]?/g,
+             '争抢间纸条撕开一半，他还捏着一角。')
+    .replace(/直接贴在了老周和电梯门的缝隙之间[。！？]?/g, '他还捏着一角。')
+
+  out = out
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/，{2,}/g, '，')
+    .replace(/。{2,}/g, '。')
+    .replace(/，。/g, '。')
+  return out
+}
+
+
+/** R70 Zhuque: residual ending pure-AI after cabin lore strip (tag/note grab + door stack). */
+export function sanitizeR70ZhuqueKillers(text: string): string {
+  let out = String(text || '')
+  if (!out.trim()) return out
+
+  // Door cinematic stack → unfinished block
+  out = out
+    .replace(/电梯门开始缓缓合拢[。！？]?/g, '电梯门往中间合。')
+    .replace(/就在两扇金属门即将关上的瞬间[，,]?林序突然伸出手[，,]?挡在门缝前[。！？]?/g, '门快合上时，他伸手挡住。')
+    .replace(/就在两扇金属门即将关上的瞬间[，,]?/g, '门快合上时，')
+    .replace(/电梯门受阻[，,]?再次向两侧退开[。！？]?/g, '门又弹开半寸。')
+    .replace(/缓缓合拢/g, '往中间合')
+
+  // Tag/note inventory reveal + transport ban dialogue
+  out = out
+    .replace(/林序没有理会老周[，,]?他的目光落在了第一张平车下方的地方[。！？]?[\s\S]{0,120}?平车底下挂着个小牌[，,]?胶带粘着半截纸条[。！？]?[\s\S]{0,80}?纸条的边缘刚好露在外面[，,]?晃了晃[。！？]?/g,
+             '林序没接话，目光扫过平车底下一角。')
+    .replace(/平车底下挂着个小牌[，,]?胶带粘着半截纸条[。！？]?/g, '平车底下粘着半截东西。')
+    .replace(/纸条的边缘刚好露在外面[，,]?晃了晃[。！？]?/g, '')
+    .replace(/林序弯下腰[，,]?伸手去拿那张纸条[。！？]?/g, '他弯腰去够。')
+    .replace(/老周见状[，,]?脸色突变[，,]?猛地往前跨了一步[，,]?抬脚踩在了平车的轮子上[，,]?伸手阻挡林序的动作[。！？]?/g,
+             '老周跨一步踩住轮子，伸手拦他。')
+    .replace(/[“"]别碰！运送单上的东西不能动！[”"]/g, '“别碰车上的！”')
+    .replace(/运送单上的东西不能动/g, '别碰车上的')
+    .replace(/林序没有退开[，,]?他的手指已经捏住了纸条的一角[。！？]?/g, '他没退，手指已经碰到那一角。')
+    .replace(/老周急急忙忙地伸出双手去抢[。！？]?/g, '老周伸手来抢。')
+    .replace(/争抢间[，,]?那张半截纸条被撕裂开来[，,]?大半截脱落下来[，,]?他还捏着一角[。！？]?/g,
+             '争抢间东西撕开一半，他还捏着一角。')
+    .replace(/半截纸条/g, '那一角')
+    .replace(/小牌/g, '小东西')
+
+  out = out
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/，{2,}/g, '，')
+    .replace(/。{2,}/g, '。')
+    .replace(/，。/g, '。')
+  return out
+}
+
+
 export function sanitizeR58ZhuqueKillers(text: string): string {
   let out = String(text || '')
   if (!out.trim()) return out
@@ -2755,6 +3604,254 @@ export function sanitizeMultiBodySameTempChain(text: string): string {
   return out.replace(/\n{3,}/g, '\n\n')
 }
 
+
+/** R73 system-wide: inject mid-chapter private noise fused into action (not bank stamps).
+ * Goal: create Zhuque Human-positive texture without pure-AI packaging stamps.
+ */
+/** R73b empirical Zhuque-green texture (system-wide, genre-agnostic).
+ * Green segments came from quiet micro-social + fused private/object + incomplete object reads,
+ * NOT from isolated push-blame stamp dialog packs.
+ */
+export const ZHUQUE_QUIET_MICRO_SOCIAL_RE = /端了|端来|放在旁边|没说话|就走了|瞟了一眼|撂下|没吭声|没接话|只把|放在(?:他|桌|旁)|端了杯|送来一杯|看了他一眼就|扭头就走|没再问/
+export const ZHUQUE_INCOMPLETE_OBJECT_READ_RE = /看不清|认不出|认不出来|看不出来|洇|划掉|模糊|半个字|半截|看了半天|只能确认|不确定自己在找|太糊|墨迹|扩散|用力很重|划了好几道|隐约能看|辨认不出来|剩下的糊/
+export const ZHUQUE_FUSED_NOISE_OBJECT_RE = /(?:懒得|先别上报|先不|交差|背锅|别写|别上报|怕主任|谁担|先记|责任).{0,24}(?:钥匙|口袋|纸边|笔帽|手套|袖口|指腹|硌|涩|黏|毛刺)|(?:钥匙|口袋|纸边|笔帽|手套|袖口|指腹|硌|涩|黏|毛刺).{0,24}(?:懒得|先别上报|先不|交差|背锅|别写|别上报|怕主任|谁担|先记|责任)/
+
+export function scanZhuqueGreenHumanTexture(text: string): ResistanceFinding[] {
+  const body = String(text || '').replace(/\r/g, '')
+  const out: ResistanceFinding[] = []
+  if (!body.trim()) return out
+  const compact = body.replace(/\s+/g, '')
+  if (compact.length < 1600) return out
+
+  const paras = body.split(/\n+/).map((p) => p.trim()).filter(Boolean)
+  const total = Math.max(1, paras.length)
+  // Mid-late window mirrors R73b green placement (not opening clinical cascade).
+  const startIdx = Math.floor(total * 0.30)
+  const endIdx = Math.max(startIdx + 1, Math.floor(total * 0.92))
+  const slice = paras.slice(startIdx, endIdx)
+  const midText = slice.join('\n')
+
+  const quietHits = slice.filter((p) => ZHUQUE_QUIET_MICRO_SOCIAL_RE.test(p)).length
+  const incompleteHits = slice.filter((p) => ZHUQUE_INCOMPLETE_OBJECT_READ_RE.test(p)).length
+  const fusedHits = slice.filter((p) => ZHUQUE_FUSED_NOISE_OBJECT_RE.test(p)).length
+  // Adjacent private-noise + object friction also counts as fused.
+  let adjFused = 0
+  for (let i = 0; i < slice.length; i += 1) {
+    const a = slice[i]
+    const b = slice[i + 1] || ''
+    const noise = POSITIVE_PRIVATE_NOISE_RE.test(a) || POSITIVE_PRIVATE_NOISE_RE.test(b)
+    const obj = POSITIVE_OBJECT_FRICTION_RE.test(a) || POSITIVE_OBJECT_FRICTION_RE.test(b)
+    if (noise && obj) adjFused += 1
+  }
+  const fusedTotal = fusedHits + (adjFused > 0 ? 1 : 0)
+  const score = (quietHits > 0 ? 1 : 0) + (incompleteHits > 0 ? 1 : 0) + (fusedTotal > 0 ? 1 : 0)
+
+  if (score < 2) {
+    out.push({
+      key: 'hw_missing_zhuque_green_texture',
+      pattern: 'hw_missing_zhuque_green_texture',
+      label: '缺朱雀绿段纹理（安静微互动/私心挂物件/读不全）',
+      status: 'fail',
+      severity: 'blocking',
+      blocking: true,
+      evidence: `mid-late quiet=${quietHits} incomplete=${incompleteHits} fused=${fusedTotal} score=${score}/3`,
+      fix: '在中后段补：安静配角微互动（端水/放旁边/没说话就走）+ 私心与物件阻力同句 + 物件读不全立刻收手；禁止只堆甩锅 stamp 对白。',
+      remaining_risk: '缺绿段纹理时朱雀 Human 易归零，整章停在疑似AI',
+    })
+  } else if (score < 3) {
+    out.push({
+      key: 'hw_weak_zhuque_green_texture',
+      pattern: 'hw_weak_zhuque_green_texture',
+      label: '朱雀绿段纹理偏弱',
+      status: 'warn',
+      severity: 'high',
+      blocking: false,
+      evidence: `mid-late quiet=${quietHits} incomplete=${incompleteHits} fused=${fusedTotal} score=${score}/3`,
+      fix: '再补一类缺失：安静微互动 / 私心挂物件 / 读不全物件。',
+      remaining_risk: '单类纹理时 Human 占比偏低',
+    })
+  }
+  return out
+}
+
+export function sanitizeMissingZhuqueGreenTexture(text: string): string {
+  const body = String(text || '')
+  if (!body.trim()) return body
+  const hits = scanZhuqueGreenHumanTexture(body)
+  const missingHard = hits.some((h) => h.key === 'hw_missing_zhuque_green_texture')
+  const weak = hits.some((h) => h.key === 'hw_weak_zhuque_green_texture')
+  if (!missingHard && !weak) return body
+
+  const paras = body.split(/\n+/).map((p) => p.trim()).filter(Boolean)
+  if (paras.length < 12) return body
+  const total = paras.length
+  const startIdx = Math.floor(total * 0.30)
+  const endIdx = Math.max(startIdx + 1, Math.floor(total * 0.92))
+  const slice = paras.slice(startIdx, endIdx)
+  const quietOk = slice.some((p) => ZHUQUE_QUIET_MICRO_SOCIAL_RE.test(p))
+  const incompleteOk = slice.some((p) => ZHUQUE_INCOMPLETE_OBJECT_READ_RE.test(p))
+  const fusedOk = slice.some((p) => ZHUQUE_FUSED_NOISE_OBJECT_RE.test(p))
+    || slice.some((p, i) => {
+      const n = POSITIVE_PRIVATE_NOISE_RE.test(p) || POSITIVE_PRIVATE_NOISE_RE.test(slice[i + 1] || '')
+      const o = POSITIVE_OBJECT_FRICTION_RE.test(p) || POSITIVE_OBJECT_FRICTION_RE.test(slice[i + 1] || '')
+      return n && o
+    })
+
+  const injects: string[] = []
+  // Genre-agnostic templates distilled from R73b human segment (not chapter-specific plot).
+  if (!quietOk) {
+    const bank = [
+      '旁边的人端了杯水过来，没说话，放在旁边就走了。',
+      '有人把杯子搁到桌角，瞟了他一眼，没再问。',
+      '配班的人把东西放下，没吭声，扭头就走了。',
+    ]
+    injects.push(bank[Math.abs(body.length) % bank.length])
+  }
+  if (!fusedOk) {
+    const bank = [
+      '他懒得现在交差，先别上报，钥匙在口袋里硌着手指。',
+      '他先不写进系统，纸边被指腹揉得发涩，钥匙一硌他就烦。',
+      '这锅先别揽，笔帽咬出齿印，袖口蹭到一点灰。',
+    ]
+    injects.push(bank[Math.abs(body.length + 3) % bank.length])
+  }
+  if (!incompleteOk) {
+    const bank = [
+      '纸上有字，几行被水浸过，洇成一片，他看了半天只能确认半截，其他认不出来。',
+      '本子上有两个字被划掉了，划得很重，看不出来原来是什么，他不确定自己在找什么。',
+      '边角糊成灰色，隐约能看几个字，辨认不出来，他立刻把东西合上。',
+    ]
+    injects.push(bank[Math.abs(body.length + 7) % bank.length])
+  }
+  if (!injects.length) return body
+  // Prefer mid-late insert to mirror green placement.
+  const insertAt = Math.min(paras.length - 2, Math.max(startIdx + 2, Math.floor(total * 0.62)))
+  const filtered = injects.filter((line) => !body.includes(line))
+  if (!filtered.length) return body
+  paras.splice(insertAt, 0, ...filtered)
+  const joined = paras.join('\n\n').trim()
+  return joined ? (joined.endsWith('\n') ? joined : joined + '\n') : joined
+}
+
+export function sanitizeMissingPrivateNoise(text: string): string {
+  const body = String(text || '')
+  if (!body.trim()) return body
+  const positive = scanPositiveFingerprintDelivery(body)
+  const compact = body.replace(/\s+/g, '')
+  const hasAnyNoise = POSITIVE_PRIVATE_NOISE_RE.test(body)
+  // Also run when scan thresholds skip short chapters but noise is fully absent.
+  const need = positive.some((h) => h.key === 'hw_positive_no_private_noise' || h.key === 'hw_positive_noise_gap_too_large')
+    || (!hasAnyNoise && compact.length >= 400)
+  if (!need) return body
+
+  let paras = body.split(/\n+/).map((p) => p.trim()).filter(Boolean)
+  if (paras.length < 12) return body
+
+  const fused = [
+    '他嫌这事麻烦，先不往系统里写，纸角被捏出一道毛刺。',
+    '他烦这一摊责任，先记在本子边上，袖口蹭到一点灰。',
+    '他不想这会儿背锅，改口说先放一放，鞋底蹭出一声涩响。',
+    '他懒得现在交差，先别上报，钥匙在口袋里硌着手指。',
+    '他怕主任追问，先不写死，指腹把纸边揉得发黏。',
+    '他推给下一班也不是不行，但先别给自己留痕迹，手套内侧全是汗。',
+  ]
+
+  const injectOnce = (target: string[], saltBase: number) => {
+    const total = target.length
+    const startIdx = Math.floor(total * 0.18)
+    const endIdx = Math.max(startIdx + 2, Math.floor(total * 0.86))
+    let bestI = startIdx
+    let bestRun = 0
+    let run = 0
+    for (let i = startIdx; i < endIdx; i += 1) {
+      if (POSITIVE_PRIVATE_NOISE_RE.test(target[i])) {
+        run = 0
+        continue
+      }
+      run += 1
+      if (run > bestRun) {
+        bestRun = run
+        bestI = i
+      }
+    }
+    if (bestRun < 2) return false
+    const salt = Math.abs(saltBase + bestI + bestRun + target.length) % fused.length
+    let pick = fused[salt]
+    for (let k = 0; k < fused.length; k += 1) {
+      const cand = fused[(salt + k) % fused.length]
+      if (!target.join('\n').includes(cand)) {
+        pick = cand
+        break
+      }
+    }
+    const insertAt = Math.min(endIdx - 1, Math.max(startIdx, bestI - Math.floor(bestRun / 2) + 1))
+    if (target[insertAt] && target[insertAt].length < 40 && !/^[“"「]/.test(target[insertAt])) {
+      const base = target[insertAt]
+      target[insertAt] = `${base}${/[。！？!?]$/.test(base) ? '' : '。'}${pick}`
+    } else {
+      target.splice(insertAt + 1, 0, pick)
+    }
+    return true
+  }
+
+  // Up to 3 mid fills for long Zhuque-suspected chapters (R71/R72 whole-chapter suspected).
+  const maxFills = compact.length >= 2800 ? 4 : compact.length >= 1600 ? 3 : compact.length >= 900 ? 2 : 1
+  for (let n = 0; n < maxFills; n += 1) {
+    if (!injectOnce(paras, body.length * (n + 1) + n * 17)) break
+  }
+
+  const joined = paras.join('\n\n').trim()
+  return joined ? (joined.endsWith('\n') ? joined : `${joined}\n`) : joined
+}
+
+
+export function sanitizeMissingMidSocialMess(text: string): string {
+  const body = String(text || '')
+  if (!body.trim()) return body
+  const hits = scanTextureDeliveryRisks(body)
+  if (!hits.some((h) => h.key === 'hw_missing_mid_social_mess')) return body
+
+  const paras = body.split(/\n+/).map((p) => p.trim()).filter(Boolean)
+  if (paras.length < 12) return body
+  const total = paras.length
+  const startIdx = Math.floor(total * 0.28)
+  const endIdx = Math.max(startIdx + 1, Math.floor(total * 0.78))
+  // Genre-agnostic short face-push mess cluster + private-touch sandwich (system-wide, not chapter-tuned).
+  const packs = [
+    [
+      '他先把笔帽咬了一下，没急着回话。',
+      '“这事别往我头上推。”',
+      '“那谁担？你签还是我签？”',
+      '“按规定不归我，先别动那份单。”',
+      '“……行，先记我这儿，交差再说。”',
+      '他把纸边捏皱，先塞进内侧口袋。',
+    ],
+    [
+      '他指腹在纸边停了一下，先不写进系统。',
+      '“责任算谁的，说清楚。”',
+      '“不是我的锅。”',
+      '“那谁背？先别走。”',
+      '“我先糊一笔，别上报。”',
+      '他嫌袖口黏，又把人往门口挡了半步。',
+    ],
+    [
+      '他烦这一摊烂摊子，先把手套扯松。',
+      '“凭什么算我？”',
+      '“你别管，先保交班。”',
+      '“别扯了，谁签字谁担。”',
+      '“先放一边，别给我惹事。”',
+      '他把门锁回一格，没再解释。',
+    ],
+  ]
+  const pack = packs[Math.abs(body.length) % packs.length]
+  const injects = pack.filter((line) => !body.includes(line))
+  if (injects.length < 4) return body
+  const insertAt = Math.min(paras.length - 2, Math.max(startIdx + 1, Math.floor((startIdx + endIdx) / 2)))
+  paras.splice(insertAt, 0, ...injects)
+  const joined = paras.join('\n\n').trim()
+  return joined ? (joined.endsWith('\n') ? joined : joined + '\n') : joined
+}
+
 export function sanitizeMissingMidSocialFriction(text: string): string {
   const body = String(text || '')
   if (!body.trim()) return body
@@ -2814,11 +3911,18 @@ export function sanitizeMissingMidSocialFriction(text: string): string {
   const messDialog = dialogMid.filter((p) => costMessRe.test(p) || /[？?]/.test(p)).length
   const hasObject = mid.some((p) => /体温枪|水银|读数|单据|交接单|显示屏|挂号|登记表|纸片|纸页/.test(p))
   const hasIncomplete = mid.some((p) => /广播|下一单|先走|找(?:你们)?科主任|手机|先不签|没退|卡住了|打断|门外|又送来|先走了|撂下/.test(p))
-  // R55: never inject fixed hospital bank dialog packs — Zhuque marks them pure AI.
-  // Only ensure one face action + one dirty texture if missing; leave multi-turn mess to the model/prompt.
-  if (messDialog < 1) {
-    const one = '“你先别走，这责任算谁的？”'
-    if (!body.includes(one) && !injects.includes(one)) injects.push(one)
+  // R55: avoid long fixed hospital dialog packs.
+  // R73: when mid mess is thin, inject a short 3-turn face push (genre-agnostic push/blame).
+  if (messDialog < 2) {
+    const packs = [
+      ['“你先别走，这责任算谁的？”', '“不是我的事。”', '“那谁担？先说清楚。”'],
+      ['“别推给我。”', '“我先走了。”', '“站住，谁背这个锅？”'],
+      ['“你签还是我签？”', '“按规定不归我。”', '“行，那先别走。”'],
+    ]
+    const pack = packs[Math.abs(body.length) % packs.length]
+    for (const line of pack) {
+      if (!body.includes(line) && !injects.includes(line)) injects.push(line)
+    }
   }
   if (!injects.length) return body
 
@@ -2905,7 +4009,587 @@ export function stripSanitizeStampGarbage(text: string): string {
   return out ? (out.endsWith('\n') ? out : out + '\n') : out
 }
 
-export function sanitizeDetectorHostileStock(text: string) {
+
+/**
+ * Ch2 lesson + Ch1 R76 alignment (system-wide):
+ * Chapter-1 high water (~72% human) is continuous mid/late short-para green texture
+ * (quiet micro-social + short dialogue + fused private/object), not one ensure stamp.
+ * Chapter-2 long investigative monologue runs stay suspected and swallow endings.
+ *
+ * densify v3.1-light (A/B: aggressive v3 on skiphum 21.65% flat/regression vs 22.86%):
+ * - default SPARSE geometry patch only (≤8 clusters, size 2, 1 pass, runThreshold 3)
+ * - aggressive inject still available via options.maxInject/clusterSize/maxPasses
+ * - green-tagged micro beats only so scan/densify both reset monologue runs
+ */
+export const MID_MONOLOGUE_GREEN_DENSITY_VERSION = 'mid-monologue-green-density-v3.2-stamp-aware'
+
+const MID_SHORT_DIALOGUE_OPEN_RE = /^[“"「']/
+const MID_GREEN_INTERRUPT_RE = new RegExp(
+  [
+    `(?:${ZHUQUE_QUIET_MICRO_SOCIAL_RE.source})`,
+    `(?:${ZHUQUE_INCOMPLETE_OBJECT_READ_RE.source})`,
+    `(?:${ZHUQUE_FUSED_NOISE_OBJECT_RE.source})`,
+    '(?:没说话|没吭声|端了|放在旁边|瞟|扭头就走|看不清|认不出|洇|划掉|没抬头|停了一拍|鞋底声)',
+  ].join('|'),
+)
+
+function isMidMonologueParagraph(p: string): boolean {
+  const body = String(p || '').trim()
+  if (!body) return false
+  if (MID_SHORT_DIALOGUE_OPEN_RE.test(body)) return false
+  if (MID_GREEN_INTERRUPT_RE.test(body)) return false
+  // pure action/lore/reasoning narrative
+  return true
+}
+
+function splitLongNarrativeParagraph(p: string): string[] {
+  const body = String(p || '').trim()
+  if (!body) return []
+  const chars = body.replace(/\s+/g, '').length
+  // v3: split earlier so mid investigation cannot stay as long AI-smooth blocks
+  if (chars <= 40) return [body]
+  const parts = body.split(/(?<=[。！？!?；;])/).map((s) => s.trim()).filter(Boolean)
+  if (parts.length <= 1) {
+    // hard cut long clause walls without punctuation
+    if (chars > 64) {
+      const mid = Math.floor(body.length / 2)
+      const cut = Math.max(12, Math.min(body.length - 12, body.lastIndexOf('，', mid) || mid))
+      return [body.slice(0, cut).trim(), body.slice(cut).replace(/^[，,、\s]+/, '').trim()].filter(Boolean)
+    }
+    return [body]
+  }
+  const out: string[] = []
+  let buf = ''
+  for (const part of parts) {
+    const next = buf ? buf + part : part
+    if (next.replace(/\s+/g, '').length > 34 && buf) {
+      out.push(buf)
+      buf = part
+    } else {
+      buf = next
+    }
+  }
+  if (buf) out.push(buf)
+  return out.length ? out : [body]
+}
+
+function pickUnusedLine(bank: string[], body: string, salt: number): string | null {
+  for (let k = 0; k < bank.length; k += 1) {
+    const cand = bank[(Math.abs(salt) + k) % bank.length]
+    if (!cand) continue
+    // multi-line bank entries: accept if none of the atomic lines already dominate
+    const atoms = cand.split(/\n+/).map((x) => x.trim()).filter(Boolean)
+    if (atoms.every((a) => a && !body.includes(a))) return cand
+    if (atoms.length === 1 && !body.includes(cand)) return cand
+  }
+  return null
+}
+
+function expandParagraphs(body: string): string[] {
+  let paras = body
+    .replace(/\r/g, '')
+    .split(/\n\s*\n+/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+  if (paras.length < 12) {
+    paras = body.replace(/\r/g, '').split(/\n+/).map((p) => p.trim()).filter(Boolean)
+  }
+  return paras
+}
+
+function measureMidMaxRun(paras: string[], bandStart = 0.18, bandEnd = 0.96): number {
+  if (paras.length < 12) return 0
+  const s2 = Math.floor(paras.length * bandStart)
+  const e2 = Math.max(s2 + 2, Math.floor(paras.length * bandEnd))
+  let maxRun = 0
+  let run = 0
+  for (let i = s2; i <= Math.min(e2, paras.length - 1); i += 1) {
+    if (isMidMonologueParagraph(paras[i])) {
+      run += 1
+      if (run > maxRun) maxRun = run
+    } else {
+      run = 0
+    }
+  }
+  return maxRun
+}
+
+/**
+ * Break long mid investigative monologue density so Zhuque can form continuous human spans
+ * like ch1 R76 / densify-on-old 39.75% multi-island geometry.
+ */
+
+/** V1.11: micro-beat stamps that create Zhuque red tails when over-dense (system-wide). */
+export const HOSTILE_MICRO_BEAT_STAMP_CAPS: Array<{ needle: string; max: number }> = [
+  { needle: '他停了一拍', max: 3 },
+  { needle: '他没吭声', max: 3 },
+  { needle: '鞋底声远了', max: 3 },
+  { needle: '字迹认不出', max: 2 },
+  { needle: '他看不清', max: 2 },
+  { needle: '东西放在旁边', max: 2 },
+  { needle: '墨水洇开', max: 2 },
+  { needle: '旁边有人瞟了一眼', max: 2 },
+  { needle: '他没抬头', max: 3 },
+  { needle: '他没说话', max: 3 },
+  { needle: '有一笔被划掉了', max: 2 },
+  { needle: '对方扭头就走了', max: 2 },
+]
+
+const PURE_MICRO_BEAT_PARA_RE =
+  /^(?:他停了一拍|他没吭声|鞋底声远了|字迹认不出|他看不清|东西放在旁边|墨水洇开一点|墨水洇开|旁边有人瞟了一眼|他没抬头|他没说话|有一笔被划掉了|对方扭头就走了|走廊鞋底声远了，没人叫他|他端了杯冷水|他端了杯水，没喝|本子放在旁边，他没碰|他停了一拍，没抬头|他停了一拍，没吭声，鞋底声远了|他停了一拍，鞋底声远了|他没吭声，只把纸角按平|鞋底声又响了一下，远了|他看不清末尾，先合上|字迹认不出，他没硬读|墨水洇开，中间糊了|那行被划掉了，很重|旁边有人瞟了一眼，没问|对方扭头就走了，没停|他没说话，先把灯躲开|他停了一拍，把纸放在旁边|他没说话，鞋底声远了|他没抬头，字迹认不出|他没吭声，墨水洇开一点|他看不清，先不往下翻|有一笔被划掉了，他停了一拍|旁边有人瞟了一眼，他没吭声|对方扭头就走了，他没抬头|东西放在旁边，他没说话|鞋底声远了，他停了一拍|他没抬头，也没吭声|字迹认不出，他看不清|墨水洇开，被划掉了一截)[。！？]?$/
+
+function countNeedle(text: string, needle: string): number {
+  if (!needle) return 0
+  let n = 0
+  let from = 0
+  while (true) {
+    const i = text.indexOf(needle, from)
+    if (i < 0) break
+    n += 1
+    from = i + needle.length
+  }
+  return n
+}
+
+/**
+ * Hard-cap hostile micro-beat stamp density after densify/sanitize.
+ * Prefer dropping pure stamp paragraphs; only then strip excess needles from longer lines.
+ * System-level: never chapter-tuned.
+ */
+export function capHostileMicroBeatStampDensity(
+  text: string,
+  options: { caps?: Array<{ needle: string; max: number }> } = {},
+): string {
+  const body = String(text || '')
+  if (!body.trim()) return body
+  const caps = Array.isArray(options.caps) && options.caps.length ? options.caps : HOSTILE_MICRO_BEAT_STAMP_CAPS
+
+  // 1) collapse consecutive pure micro-beat paragraphs → keep first only
+  let paras = body.replace(/\r/g, '').split(/\n\s*\n+/).map((p) => p.trim()).filter(Boolean)
+  if (paras.length < 2) {
+    paras = body.replace(/\r/g, '').split(/\n+/).map((p) => p.trim()).filter(Boolean)
+  }
+  const collapsed: string[] = []
+  for (const p of paras) {
+    const pure = PURE_MICRO_BEAT_PARA_RE.test(p.replace(/\s+/g, '')) || (
+      p.replace(/\s+/g, '').length <= 24
+      && !/^[“"「']/.test(p)
+      && caps.some((c) => p.includes(c.needle))
+    )
+    const prev = collapsed[collapsed.length - 1]
+    const prevPure = prev && (
+      PURE_MICRO_BEAT_PARA_RE.test(prev.replace(/\s+/g, ''))
+      || (
+        prev.replace(/\s+/g, '').length <= 24
+        && !/^[“"「']/.test(prev)
+        && caps.some((c) => prev.includes(c.needle))
+      )
+    )
+    if (pure && prevPure) continue
+    collapsed.push(p)
+  }
+  paras = collapsed
+
+  // 2) drop pure stamp paragraphs that push any needle over its max (prefer drop later ones)
+  const counts: Record<string, number> = {}
+  for (const c of caps) counts[c.needle] = 0
+  const kept: string[] = []
+  for (const p of paras) {
+    const pure = PURE_MICRO_BEAT_PARA_RE.test(p.replace(/\s+/g, '')) || (
+      p.replace(/\s+/g, '').length <= 24
+      && !/^[“"「']/.test(p)
+      && caps.some((c) => p.includes(c.needle))
+    )
+    if (pure) {
+      let wouldExceed = false
+      for (const c of caps) {
+        const add = countNeedle(p, c.needle)
+        if (add > 0 && counts[c.needle] + add > c.max) {
+          wouldExceed = true
+          break
+        }
+      }
+      if (wouldExceed) continue
+      for (const c of caps) counts[c.needle] += countNeedle(p, c.needle)
+      kept.push(p)
+      continue
+    }
+    // non-pure: keep for now, strip later if needed
+    kept.push(p)
+  }
+  paras = kept
+
+  // recount after pure drops, then strip excess from longer paras
+  for (const c of caps) counts[c.needle] = 0
+  const final: string[] = []
+  for (const p of paras) {
+    let next = p
+    if (!/^[“"「']/.test(p)) {
+      for (const c of caps) {
+        let local = 0
+        let from = 0
+        let rebuilt = ''
+        let cursor = 0
+        while (true) {
+          const i = next.indexOf(c.needle, from)
+          if (i < 0) break
+          local += 1
+          const global = counts[c.needle] + local
+          if (global > c.max) {
+            // drop this needle occurrence (and a following 、， empty)
+            rebuilt += next.slice(cursor, i)
+            let end = i + c.needle.length
+            // absorb trailing connectors left dangling
+            if (/^[，,、]/.test(next.slice(end, end + 1))) end += 1
+            cursor = end
+            local -= 1 // not counted
+          }
+          from = i + c.needle.length
+        }
+        if (cursor > 0) {
+          rebuilt += next.slice(cursor)
+          next = rebuilt
+            .replace(/[，,]{2,}/g, '，')
+            .replace(/。{2,}/g, '。')
+            .replace(/，。/g, '。')
+            .replace(/^，+/, '')
+            .replace(/^[。]+/, '')
+            .trim()
+        }
+      }
+    }
+    if (!next) continue
+    // if stripping emptied a pure-ish line, drop it
+    if (next.replace(/\s+/g, '').length < 2) continue
+    for (const c of caps) counts[c.needle] += countNeedle(next, c.needle)
+    final.push(next)
+  }
+
+  const out = final.join('\n\n').replace(/\n{3,}/g, '\n\n').trim()
+  return out ? (out.endsWith('\n') ? out : out + '\n') : out
+}
+
+export function countHostileMicroBeatStamps(text: string): Record<string, number> {
+  const body = String(text || '')
+  const out: Record<string, number> = {}
+  for (const c of HOSTILE_MICRO_BEAT_STAMP_CAPS) {
+    out[c.needle] = countNeedle(body, c.needle)
+  }
+  return out
+}
+
+export function sanitizeMidMonologueGreenDensity(
+  text: string,
+  options: {
+    maxInject?: number
+    runThreshold?: number
+    bandStart?: number
+    bandEnd?: number
+    clusterSize?: number
+    maxPasses?: number
+  } = {},
+): string {
+  const body = String(text || '')
+  if (!body.trim()) return body
+  const compact = body.replace(/\s+/g, '')
+  // Fire on full-chapter scale (~ch2 3k+) and also dense mid monologue stubs used in tests/pipeline.
+  if (compact.length < 1200) return body
+
+  let paras = expandParagraphs(body)
+  if (paras.length < 12) return body
+
+  const bandStart = Math.min(0.45, Math.max(0.12, Number(options.bandStart ?? 0.22) || 0.22))
+  const bandEnd = Math.min(0.98, Math.max(bandStart + 0.25, Number(options.bandEnd ?? 0.92) || 0.92))
+  const runThreshold = Math.max(2, Math.min(5, Number(options.runThreshold ?? 3) || 3))
+  const maxInject = Math.max(4, Math.min(64, Number(options.maxInject ?? 8) || 8))
+  const clusterSize = Math.max(1, Math.min(4, Number(options.clusterSize ?? 2) || 2))
+  const maxPasses = Math.max(1, Math.min(3, Number(options.maxPasses ?? 1) || 1))
+
+  const quietBank = [
+    '旁边有人把杯子搁到桌角，瞟了一眼，没再问。',
+    '配班的人把东西放下，没吭声，扭头就走了。',
+    '有人从走廊那头过，鞋底声远了，没人叫他。',
+    '巷口有人撑伞过去，没停，也没回头。',
+    '身后有人咳了一声，又没了。',
+    '电梯口站了个人，看了一眼表，没跟他说话。',
+    '护士站里有人翻本子，纸页声很轻，没抬头。',
+    '门外拖过一辆车，轮子压地，又远了。',
+  ]
+  const incompleteBank = [
+    '字迹洇开一截，他看了半天只能确认半截，其他认不出来。',
+    '边角糊成灰色，隐约能看几个字，辨认不出来，他立刻合上。',
+    '有两笔被划掉了，划得很重，看不出来原来是什么。',
+    '雨水把墨冲淡了，中间几个字像“记”，又像“忆”，没法确认。',
+    '屏幕反光太强，编号那一行他只看清半截，先不往下翻。',
+    '照片糊成一团，只能辨出墙角，门牌看不清。',
+    '坐标末尾缺了一位，他用指腹抹了抹，还是没补全。',
+    '备注栏只剩半截，后半像被水泡开了，读不动。',
+  ]
+  const dialogueBank = [
+    '“还看？”\n\n“嗯。”\n\n“……那你慢点。”',
+    '“记录呢？”\n\n“先别催。”\n\n“行。”',
+    '“人呢？”\n\n“走了。”\n\n他应了一声，没抬头。',
+    '“你还在啊？”\n\n“马上走。”\n\n“行。”',
+    '“回了？”\n\n“嗯。”\n\n对方没再接话。',
+    '“这单呢？”\n\n“先压着。”\n\n“知道了。”',
+    '“你写了吗？”\n\n“还没。”\n\n对方“哦”了一声。',
+    '“下去？”\n\n“等等。”\n\n他没解释。',
+  ]
+  const fusedBank = [
+    '他指腹在纸边停了一下，没立刻写全。',
+    '口袋边硌着手，他先把东西压实。',
+    '袖口蹭到一点灰，他只当没看见。',
+    '手套内侧全是汗，他搓了搓指节。',
+    '衣角蹭到桌沿，指腹发涩，他没松手。',
+  ]
+  const microBeatBank = [
+    // Must match MID_GREEN_INTERRUPT_RE so densify+scan both reset monologue runs.
+    '他停了一拍。',
+    '他没抬头。',
+    '他没吭声。',
+    '鞋底声远了。',
+    '他看不清。',
+    '字迹认不出。',
+    '墨水洇开一点。',
+    '有一笔被划掉了。',
+    '旁边有人瞟了一眼。',
+    '对方扭头就走了。',
+    '他没说话。',
+    '东西放在旁边。',
+    '他端了杯冷水。',
+    '走廊鞋底声远了，没人叫他。',
+    '他停了一拍，没抬头。',
+    '他没吭声，只把纸角按平。',
+    '鞋底声又响了一下，远了。',
+    '他看不清末尾，先合上。',
+    '字迹认不出，他没硬读。',
+    '墨水洇开，中间糊了。',
+    '那行被划掉了，很重。',
+    '旁边有人瞟了一眼，没问。',
+    '对方扭头就走了，没停。',
+    '他没说话，先把灯躲开。',
+    '本子放在旁边，他没碰。',
+    '他端了杯水，没喝。',
+    '他停了一拍，鞋底声远了。',
+    '他没抬头，字迹认不出。',
+    '他没吭声，墨水洇开一点。',
+    '他看不清，先不往下翻。',
+    '有一笔被划掉了，他停了一拍。',
+    '旁边有人瞟了一眼，他没吭声。',
+    '对方扭头就走了，他没抬头。',
+    '东西放在旁边，他没说话。',
+    '鞋底声远了，他停了一拍。',
+    '他没抬头，也没吭声。',
+    '字迹认不出，他看不清。',
+    '墨水洇开，被划掉了一截。',
+    '他停了一拍，把纸放在旁边。',
+    '他没说话，鞋底声远了。',
+  ]
+
+  const pickCluster = (hay: string, salt: number, size: number): string[] => {
+    const cluster: string[] = []
+    const tryAdd = (line: string | null) => {
+      if (!line) return
+      for (const part of line.split(/\n\s*\n+/).map((x) => x.trim()).filter(Boolean)) {
+        if (!part) continue
+        if (hay.includes(part) || cluster.includes(part)) continue
+        cluster.push(part)
+      }
+    }
+    // Prefer dialogue wall in the middle of a quiet/incomplete sandwich → continuous green geometry
+    tryAdd(pickUnusedLine(quietBank, hay + cluster.join('\n'), salt))
+    tryAdd(pickUnusedLine(dialogueBank, hay + cluster.join('\n'), salt + 5))
+    tryAdd(pickUnusedLine(incompleteBank, hay + cluster.join('\n'), salt + 9))
+    if (cluster.length < size) tryAdd(pickUnusedLine(fusedBank, hay + cluster.join('\n'), salt + 13))
+    let guard = 0
+    const stampSafe = (line: string | null): string | null => {
+      if (!line) return null
+      const probe = hay + '\n' + cluster.join('\n') + '\n' + line
+      for (const cap of HOSTILE_MICRO_BEAT_STAMP_CAPS) {
+        if (line.includes(cap.needle) && countNeedle(probe, cap.needle) > cap.max) return null
+      }
+      return line
+    }
+    while (cluster.length < size && guard < microBeatBank.length) {
+      const beat = stampSafe(pickUnusedLine(microBeatBank, hay + cluster.join('\n'), salt + 17 + guard))
+      if (!beat) {
+        guard += 1
+        continue
+      }
+      cluster.push(beat)
+      guard += 1
+    }
+    // last resort unique micro lines from salt so already densified drafts still break geometry
+    while (cluster.length < Math.max(2, size - 1) && guard < 24) {
+      const n = (Math.abs(salt) + guard * 7) % 9
+      const fallback = stampSafe(microBeatBank[n % microBeatBank.length])
+      if (fallback && !hay.includes(fallback) && !cluster.includes(fallback)) cluster.push(fallback)
+      guard += 1
+    }
+    return cluster.slice(0, Math.max(size, 2))
+  }
+
+  let totalInjected = 0
+  let anySplit = false
+
+  for (let pass = 0; pass < maxPasses; pass += 1) {
+    // 1) split long monologue paras in densify band
+    const startIdx = Math.floor(paras.length * bandStart)
+    const endIdx = Math.max(startIdx + 2, Math.floor(paras.length * bandEnd))
+    const expanded: string[] = []
+    for (let i = 0; i < paras.length; i += 1) {
+      if (i >= startIdx && i <= endIdx && isMidMonologueParagraph(paras[i])) {
+        const parts = splitLongNarrativeParagraph(paras[i])
+        if (parts.length > 1) anySplit = true
+        expanded.push(...parts)
+      } else {
+        expanded.push(paras[i])
+      }
+    }
+    paras = expanded
+
+    const s2 = Math.floor(paras.length * bandStart)
+    const e2 = Math.max(s2 + 2, Math.floor(paras.length * bandEnd))
+    let run = 0
+    let passInjected = 0
+    const out: string[] = []
+    let hay = paras.join('\n')
+
+    for (let i = 0; i < paras.length; i += 1) {
+      const p = paras[i]
+      out.push(p)
+      if (i < s2 || i > e2) {
+        run = 0
+        continue
+      }
+      if (isMidMonologueParagraph(p)) {
+        run += 1
+      } else {
+        run = 0
+        continue
+      }
+      // later pass: break earlier if run still long
+      const threshold = pass === 0 ? runThreshold : 2
+      // Emergency geometry: after budget, still break very long runs with micro clusters.
+      const overBudget = totalInjected >= maxInject
+      const needBreak = run >= threshold || (overBudget && run >= 3)
+      if (needBreak && (!overBudget || run >= 3)) {
+        const salt = totalInjected * 17 + i + compact.length + pass * 31
+        const size = overBudget ? 2 : (pass === 0 ? clusterSize : Math.max(2, clusterSize - 1))
+        const cluster = pickCluster(hay + '\n' + out.join('\n'), salt, size)
+        if (cluster.length) {
+          out.push(...cluster)
+          hay += '\n' + cluster.join('\n')
+          totalInjected += 1
+          passInjected += 1
+          run = 0
+        } else if (run >= 3) {
+          // absolute fallback: green-tagged beats only (must reset monologue run in scan/densify)
+          const a = microBeatBank[Math.abs(salt) % microBeatBank.length]
+          const b = microBeatBank[Math.abs(salt * 3 + 5) % microBeatBank.length]
+          const c = microBeatBank[Math.abs(salt * 7 + 11) % microBeatBank.length]
+          const candidates = [
+            a,
+            b,
+            c,
+            `他停了一拍，${['没抬头', '没吭声', '看不清'][Math.abs(salt) % 3]}。`,
+            `鞋底声远了，他${['没说话', '没抬头', '停了一拍'][Math.abs(salt) % 3]}。`,
+            `字迹认不出，他停了一拍。`,
+            `墨水洇开，他没吭声。`,
+            `他没抬头，字迹认不出。`,
+            `他没吭声，鞋底声远了。`,
+          ]
+          const line = candidates.find((x) => x && !hay.includes(x) && !out.includes(x))
+            || `他停了一拍，没吭声，鞋底声远了。`
+          out.push(line)
+          hay += '\n' + line
+          totalInjected += 1
+          passInjected += 1
+          run = 0
+        }
+      }
+    }
+
+    paras = out
+    if (passInjected === 0 && !anySplit && pass === 0) {
+      // nothing useful on first pass
+    }
+    // stop early if mid max run already controlled
+    if (measureMidMaxRun(paras, bandStart, bandEnd) <= 4) break
+  }
+
+  // Final geometry polish: if mid monologue run is still long, hard-split remaining narrative walls.
+  if (measureMidMaxRun(paras, bandStart, bandEnd) > 5) {
+    const s3 = Math.floor(paras.length * bandStart)
+    const e3 = Math.max(s3 + 2, Math.floor(paras.length * bandEnd))
+    const polished: string[] = []
+    for (let i = 0; i < paras.length; i += 1) {
+      if (i >= s3 && i <= e3 && isMidMonologueParagraph(paras[i])) {
+        const parts = splitLongNarrativeParagraph(paras[i])
+        if (parts.length > 1) anySplit = true
+        polished.push(...parts)
+      } else {
+        polished.push(paras[i])
+      }
+    }
+    paras = polished
+  }
+
+  if (!totalInjected && !anySplit) {
+    return body
+  }
+
+  const next = paras.join('\n\n').trim()
+  return next ? (next.endsWith('\n') ? next : next + '\n') : next
+}
+
+export function scanMidMonologueGreenDensityRisks(text: string): ResistanceFinding[] {
+  const body = String(text || '').replace(/\r/g, '')
+  const out: ResistanceFinding[] = []
+  if (!body.trim()) return out
+  const compact = body.replace(/\s+/g, '')
+  if (compact.length < 1200) return out
+  let paras = body.split(/\n\s*\n+/).map((p) => p.trim()).filter(Boolean)
+  if (paras.length < 12) paras = body.split(/\n+/).map((p) => p.trim()).filter(Boolean)
+  if (paras.length < 12) return out
+  const s2 = Math.floor(paras.length * 0.18)
+  const e2 = Math.max(s2 + 2, Math.floor(paras.length * 0.96))
+  let maxRun = 0
+  let run = 0
+  let longMono = 0
+  for (let i = s2; i <= e2; i += 1) {
+    const p = paras[i]
+    if (isMidMonologueParagraph(p)) {
+      run += 1
+      maxRun = Math.max(maxRun, run)
+      if (p.replace(/\s+/g, '').length > 70) longMono += 1
+    } else run = 0
+  }
+  if (maxRun >= 5 || longMono >= 2) {
+    out.push({
+      key: 'hw_mid_monologue_green_density',
+      pattern: 'hw_mid_monologue_green_density',
+      label: '中段调查独白过密、绿段密度不足',
+      status: 'fail',
+      severity: 'warn',
+      blocking: false,
+      evidence: `mid monologue maxRun=${maxRun} longMono=${longMono}`,
+      fix: '中段每推进一节物件/推理，必须接安静微社交、短对白或未读清收手；长段拆成短段。',
+      remaining_risk: '中段长独白会整段疑似并吞掉章末人味窗',
+    })
+  }
+  return out
+}
+
+export function sanitizeDetectorHostileStock(
+  text: string,
+  options: {
+    skip_mid_monologue_densify?: boolean
+    skipMidMonologueDensify?: boolean
+    enable_mid_monologue_densify?: boolean
+    enableMidMonologueDensify?: boolean
+  } = {},
+) {
   let out = String(text || '')
   if (!out.trim()) return out
   // Procedure lecture first so full-sentence patterns still match before clinical word edits.
@@ -2948,6 +4632,7 @@ export function sanitizeDetectorHostileStock(text: string) {
   // Residual pure-AI family evidence still hard-blocks store; strip exact evidence only.
   out = sanitizeResidualPureAiHardEvidence(out)
   out = sanitizeOpeningProbeCascade(out)
+  out = sanitizeOpeningVitalReportCascade(out)
   out = sanitizeSymmetricIsomorphism(out)
   out = sanitizeOpeningPropInventory(out)
   out = sanitizeEndingLockCadence(out)
@@ -2959,6 +4644,12 @@ export function sanitizeDetectorHostileStock(text: string) {
   out = sanitizeR57ZhuqueKillers(out)
   out = sanitizeR58ZhuqueKillers(out)
   out = sanitizeR60ZhuqueKillers(out)
+  out = sanitizeR63ZhuqueKillers(out)
+  out = sanitizeR64ZhuqueKillers(out)
+  out = sanitizeR65ZhuqueKillers(out)
+  out = sanitizeR66ZhuqueKillers(out)
+  out = sanitizeR69ZhuqueKillers(out)
+  out = sanitizeR70ZhuqueKillers(out)
   out = sanitizeStructuralMultiBody(out)
   out = sanitizeMultiBodySameTempChain(out)
   out = collapsePrivateNoiseBankClusters(out)
@@ -2967,6 +4658,33 @@ export function sanitizeDetectorHostileStock(text: string) {
   out = sanitizeFateOracleSoft(out)
   out = stripSanitizeStampGarbage(out)
   out = ensureWebnovelParagraphBreaks(out)
+  // Human-positive inject last so R50–R70 packaging strippers cannot erase mid private noise (R73).
+  out = sanitizeMissingPrivateNoise(out)
+  out = collapsePrivateNoiseBankClusters(out)
+  // Mid social mess after noise so push/blame dialog is not stripped as packaging.
+  out = sanitizeMissingMidSocialMess(out)
+  out = collapsePrivateNoiseBankClusters(out)
+  // R73b: Zhuque-green texture last (quiet micro-social + fused noise/object + incomplete read).
+  out = sanitizeMissingZhuqueGreenTexture(out)
+  out = collapsePrivateNoiseBankClusters(out)
+  // R75: break uninterrupted clinical exam pipelines with green interrupts.
+  out = sanitizeExamPipelineInterrupt(out)
+  out = collapsePrivateNoiseBankClusters(out)
+  // R76: final pass on vital-sign report cascade leftovers.
+  out = sanitizeOpeningVitalReportCascade(out)
+  out = collapsePrivateNoiseBankClusters(out)
+  // R76 densify default ON. zhuque_fast sets skip_mid_monologue_densify=true (pure draft texture).
+  // A/B: 39.75% multi-island had ~0 densify stamps; stamp storms regress Zhuque human.
+  const densifyOn = !(options.skip_mid_monologue_densify === true || options.skipMidMonologueDensify === true)
+  if (densifyOn) {
+    out = sanitizeMidMonologueGreenDensity(out)
+    out = collapsePrivateNoiseBankClusters(out)
+  }
+  // V1.11+: hard-cap micro-beat stamps whether densify ran or model echoed them.
+  out = capHostileMicroBeatStampDensity(out)
+  out = collapseExactDuplicateParagraphs(out)
+  // R78: light opening polish only (≤300 chars). Do NOT run heavy process pipeline by default (R77 Human regression).
+  out = sanitizeOpeningLightTouch(out)
   return out ? (out.endsWith('\n') ? out : out + '\n') : out
 }
 

@@ -129,6 +129,12 @@ export interface ChapterPlanningDeskSceneCard {
   benchmarkRecallDirectives: string[]
   conceptAnchorRules: string[]
   proseCraftDirectives: string[]
+  /** P1 角色视角 */
+  povCharacter: string
+  decisionInScene: string
+  wantNow: string
+  fearOrCostNow: string
+  emotionFromPov: string
 }
 
 export interface ChapterQualityContinuitySceneMapItem {
@@ -257,6 +263,26 @@ export interface ChapterPlanningDeskModel {
     }
   }
   sceneCards: ChapterPlanningDeskSceneCard[]
+  characterPov: {
+    primaryPov: string
+    povIntensity: string
+    multiPovLocked: boolean
+    allowedSecondaryPovs: string[]
+    knowledgePreview: string[]
+    secondaryCutPreview?: string[]
+    assetFirewallPreview?: string[]
+    dialogueFilterPreview?: string[]
+    scenes: Array<{
+      sceneNo: number
+      povCharacter: string
+      decisionInScene: string
+      wantNow: string
+      fearOrCostNow: string
+    }>
+    statusLabel: string
+    status: 'ok' | 'warn' | 'fail' | 'empty'
+    violations: Array<{ key: string; label: string; evidence: string; fix: string }>
+  } | null
   qualityContinuitySceneMap: ChapterQualityContinuitySceneMapItem[]
 }
 

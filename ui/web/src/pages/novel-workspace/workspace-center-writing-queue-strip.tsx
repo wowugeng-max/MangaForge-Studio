@@ -82,11 +82,10 @@ export function WorkspaceWritingQueueStrip(props: Record<string, any>) {
                   <Button
                     size="small"
                     type="primary"
-                    className="novel-writing-queue-focus-action"
+                    className="novel-writing-queue-focus-action novel-btn-crystal novel-btn-crystal-model"
                     loading={queueFocus.loading}
                     disabled={queueFocus.disabled}
-                    onClick={queueFocus.run}
-                  >
+                    onClick={queueFocus.run}>
                     {queueFocus.actionLabel}
                   </Button>
                 </Space>

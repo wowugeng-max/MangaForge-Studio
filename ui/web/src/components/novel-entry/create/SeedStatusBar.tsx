@@ -86,9 +86,7 @@ export function SeedStatusBar(props: {
                   size="small"
                   type="primary"
                   loading={props.fillingGaps}
-                  onClick={props.onFillGaps}
-                >
-                  补齐缺口
+                  onClick={props.onFillGaps}> 补齐缺口
                 </Button>
               </Space>
             )}
@@ -109,13 +107,11 @@ export function SeedStatusBar(props: {
                   <Button
                     size="small"
                     type={props.foundationAccepted ? 'default' : 'primary'}
-                    onClick={props.onAcceptFoundation}
-                  >
+                    onClick={props.onAcceptFoundation}>
                     {props.foundationAccepted ? '已标记满意此版本' : '我满意，以当前版本开书'}
                   </Button>
                   {props.foundationAccepted && props.onClearFoundationAccept && (
-                    <Button size="small" onClick={props.onClearFoundationAccept}>
-                      取消满意标记
+                    <Button size="small" onClick={props.onClearFoundationAccept}> 取消满意标记
                     </Button>
                   )}
                 </Space>
@@ -125,20 +121,18 @@ export function SeedStatusBar(props: {
         )}
 
         <Space wrap>
-          <Button loading={props.regenerating} onClick={props.onRegenerate}>重新生成</Button>
+          <Button loading={props.regenerating} onClick={props.onRegenerate}> 重新生成</Button>
           {props.showDraftActions && (
             <Button icon={<SaveOutlined />} loading={props.savingDraft} onClick={props.onSaveDraft}>
               保存草稿
             </Button>
           )}
           {props.showFinalize && (
-            <Button type="primary" loading={props.finalizing} onClick={props.onFinalize}>
-              {props.finalizeLabel}
+            <Button type="primary" loading={props.finalizing} onClick={props.onFinalize}> {props.finalizeLabel}
             </Button>
           )}
           {props.showConfirmFinalize && props.onConfirmFinalize && (
-            <Button type="primary" loading={props.finalizing} onClick={props.onConfirmFinalize}>
-              {props.confirmFinalizeLabel || '我已确认，创建项目'}
+            <Button type="primary" loading={props.finalizing} onClick={props.onConfirmFinalize}> {props.confirmFinalizeLabel || '我已确认，创建项目'}
             </Button>
           )}
         </Space>

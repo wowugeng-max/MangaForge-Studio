@@ -260,8 +260,7 @@ export default function VideoWorkshop() {
           </Form.Item>
 
           <Form.Item>
-            <Button type="primary" onClick={handleGenerate} loading={loading}>
-              一键生成
+            <Button type="primary" onClick={handleGenerate} loading={loading}> 一键生成
             </Button>
           </Form.Item>
         </Form>

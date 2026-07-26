@@ -79,8 +79,7 @@ export function ChapterDirectorySidebar({
                 type="text"
                 size="small"
                 onClick={onOpenTaskCenter}
-                aria-label="任务中心"
-              >
+                aria-label="任务中心">
                 {activeTaskCount > 99 ? '99+' : activeTaskCount}
               </Button>
             </Tooltip>
@@ -150,7 +149,7 @@ export function ChapterDirectorySidebar({
                 <Tooltip title="弹出查看大纲树">
                   <Button size="small" onClick={onOpenOutlineTree} icon={<BookOutlined />}>大纲树</Button>
                 </Tooltip>
-                <Button size="small" type="primary" onClick={onOpenChapterDrawer}>管理</Button>
+                <Button size="small" type="primary" onClick={onOpenChapterDrawer}> 管理</Button>
               </Space>
             </div>
             <Space wrap size={[4, 2]}>

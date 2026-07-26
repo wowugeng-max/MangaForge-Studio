@@ -535,11 +535,14 @@ export async function generateNovelChapterProse(
 
   // Execute prose agent
   const maxTokens = Number((context as any).maxTokens || 8000)
+  const temperature = Number.isFinite(Number((context as any).temperature))
+    ? Number((context as any).temperature)
+    : 0.8
   const response = await executeNovelAgent(
     'prose-agent',
     project,
     agentContext,
-    { modelId, activeWorkspace, skipMemory: skipAgentMemoryStore, maxTokens, temperature: 0.8, signal: (context as any).abortSignal, timeoutMs: (context as any).llmTimeoutMs },
+    { modelId, activeWorkspace, skipMemory: skipAgentMemoryStore, maxTokens, temperature, signal: (context as any).abortSignal, timeoutMs: (context as any).llmTimeoutMs },
   )
   let finalResponse = response
   if (shouldRetryReasoningOnlyEmptyProse(response)) {

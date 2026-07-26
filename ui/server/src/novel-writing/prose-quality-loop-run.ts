@@ -26,8 +26,9 @@ export function proseQualityReviewMaxTokensForAttempt(attempt: number) {
 
 function deterministicFindings(scan: any): ProseQualityFinding[] {
   const failures = Array.isArray(scan?.hard_failures) ? scan.hard_failures : []
-  return failures.slice(0, 6).map((item: any, index: number) => {
+  return failures.slice(0, 8).map((item: any, index: number) => {
     const key = compactQualityText(item?.key || `deterministic_${index + 1}`, 100)
+    const isDetector = /^hw_/.test(key)
     return {
       key,
       severity: 'S1',
@@ -35,7 +36,14 @@ function deterministicFindings(scan: any): ProseQualityFinding[] {
         ? 'fact_setting_safety'
         : 'prose_style',
       evidence: compactQualityText(item?.evidence || item?.message || item?.key),
-      required_change: compactQualityText(item?.required_change || item?.fix || item?.message || '修复确定性硬失败'),
+      required_change: compactQualityText(
+        item?.required_change
+        || item?.fix
+        || (isDetector
+          ? '最小修订：只改纯AI模式句（流程讲义/命运名册/临床连击/宇宙总结），保留剧情物件与对白纹理，禁止整章重写。'
+          : item?.message)
+        || '修复确定性硬失败',
+      ),
       acceptance_test: `重新运行确定性扫描后不再出现 ${key}`,
     }
   })
@@ -252,7 +260,7 @@ export async function runProseQualityLoop(input: {
     prompt: string
   }) => Promise<any>
 }) {
-  const maxRounds = Math.min(1, Math.max(0, Number(input.maxRevisionRounds ?? 1)))
+  const maxRounds = Math.min(3, Math.max(0, Number(input.maxRevisionRounds ?? 1)))
   const rounds: any[] = []
   let qualityWarning: any = null
   let finalText = String(input.initialText || '')
@@ -308,11 +316,17 @@ export async function runProseQualityLoop(input: {
   for (let round = 1; round <= maxRounds; round += 1) {
     const craftAdvisoryFindings = deterministicCraftAdvisoryFindings(scan)
     if (decision.passed && craftAdvisoryFindings.length === 0) break
-    const blockingFindings = [
-      ...deterministicFindings(scan),
-      ...classification.blockingFindings,
-      ...craftAdvisoryFindings,
-    ].slice(0, 6)
+    const deterministic = deterministicFindings(scan)
+    const resistanceFindings = deterministic.filter((item) => /^hw_/.test(String(item?.key || '')))
+    // When pure-AI detector hard classes exist, only revise those (avoid craft rewrites that flatten texture).
+    const blockingFindings = (resistanceFindings.length
+      ? resistanceFindings
+      : [
+          ...deterministic,
+          ...classification.blockingFindings,
+          ...craftAdvisoryFindings,
+        ]
+    ).slice(0, 6)
     if (blockingFindings.length === 0) break
 
     let revision: any
@@ -327,6 +341,7 @@ export async function runProseQualityLoop(input: {
           chapterText: finalText,
           blockingFindings,
           round,
+          project: (input as any).project || (input as any).novelProject || null,
         }),
       })
     } catch (error: any) {

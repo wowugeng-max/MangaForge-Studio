@@ -3,10 +3,15 @@ import { scanCanonicalContinuityConflicts } from '../../novel-writing/canonical-
 import { scanBannedWordLeaks } from '../../novel-writing/deslop-scans'
 import { buildDeterministicProseCleanupReport } from '../../novel-writing/deterministic-prose-cleanup'
 import { scanEstablishedEventConflicts } from '../../novel-writing/established-event-canon'
-import { scanParagraphCommaChainDensityRisks, scanParagraphWallTextRisks, scanProseDecorativeDetailRisks, scanProseStackedDescriptionRisks, scanProseStaticEnvironmentRisks } from '../../novel-writing/prose-craft-scans'
+import { buildChapterProgressBudget } from '../../novel-writing/chapter-progress-budget'
+import { scanParagraphCommaChainDensityRisks, scanParagraphWallTextRisks, scanProseDecorativeDetailRisks, scanProseStackedDescriptionRisks, scanProseStaticEnvironmentRisks, scanWebNovelParagraphShapeRisks } from '../../novel-writing/prose-craft-scans'
 import { scanProseFormatRisks, scanProseLanguageRisks } from '../../novel-writing/prose-format'
 import { buildProseGenerationContract, evaluateProsePreDraftGate, mergeProseGenerationRequestOverrides, normalizeProseContractKey } from '../../novel-writing/prose-generation-contract'
 import { scanModelDegenerationRisks, scanProseMetaLeaks } from '../../novel-writing/prose-meta'
+import { scanToxicAiPatterns } from '../../novel-writing/toxic-ai-pattern-scans'
+import { scanCharacterPovRisks } from '../../novel-writing/character-pov'
+import { scanHumanWebnovelResistanceAdvisory, scanHumanWebnovelResistanceHard } from '../../novel-writing/human-webnovel-resistance'
+import { evaluateToxicAiDebtGate } from '../../novel-writing/toxic-ai-debt-gate'
 import { applyProseWordTargetSoftCap, evaluateProseWordTarget, resolveStandardWordTargetCompatibility } from '../../novel-writing/word-target'
 import { buildOhStoryDirectorForPreDraft } from '../../routes/novel-oh-story-director'
 import { asArray, compactText } from '../../routes/novel-route-utils'
@@ -39,6 +44,23 @@ export function prepareProseGenerationContract(baseContext: any, options: any = 
         {
           code: gateDecision.code,
           gateDecision,
+          contextPackage,
+          generationContract: contract,
+        },
+      )
+    }
+    const toxicDebtGate = evaluateToxicAiDebtGate({
+      targetChapterNo: contract?.chapter?.chapter_no,
+      chapters: contextPackage?.chapters || contextPackage?.chapter_list || options.chapters,
+      previousChapter: contextPackage?.previous_chapter || contextPackage?.previousChapter || contextPackage?.continuity?.previous_chapter_full,
+      allowSkip: options.allow_toxic_debt_skip === true || options.allowToxicDebtSkip === true,
+    })
+    if (toxicDebtGate.blocked) {
+      throw Object.assign(
+        new Error(toxicDebtGate.reasons.join('；') || '上一章毒句式欠账未清，暂不可写下一章'),
+        {
+          code: 'TOXIC_AI_DEBT_GATE',
+          gateDecision: toxicDebtGate,
           contextPackage,
           generationContract: contract,
         },
@@ -92,24 +114,45 @@ export function scanProseForQualityLoop(text: string, contextPackage: any, wordT
       status: 'fail',
       severity: 'blocking',
     }))
+  const progressBudget = buildChapterProgressBudget({
+    chapterText: text,
+    currentChapter: contextPackage?.chapter || contextPackage?.chapter_target || contextPackage?.chapterTarget,
+    currentPlan: {
+      goal: contextPackage?.chapter_target?.goal || contextPackage?.chapterTarget?.goal || contextPackage?.chapter_target?.chapter_goal,
+      summary: contextPackage?.chapter_target?.summary || contextPackage?.chapterTarget?.summary,
+      conflict: contextPackage?.chapter_target?.conflict || contextPackage?.chapterTarget?.conflict,
+      ending_hook: contextPackage?.chapter_target?.ending_hook || contextPackage?.chapterTarget?.ending_hook,
+      must_advance: contextPackage?.chapter_target?.must_advance || contextPackage?.chapterTarget?.must_advance,
+    },
+    futureChapters: contextPackage?.future_chapters || contextPackage?.futureChapters || [],
+    chapters: contextPackage?.chapters || contextPackage?.workspace_chapters || [],
+    storyUnitRole: contextPackage?.story_unit_context?.current_chapter_role || contextPackage?.storyUnitContext?.current_chapter_role,
+  })
+  const webNovelParagraphChecks = scanWebNovelParagraphShapeRisks(text)
   const craftAdvisoryChecks = [
     ...scanParagraphWallTextRisks(text),
     ...scanParagraphCommaChainDensityRisks(text),
+    ...webNovelParagraphChecks.filter((item: any) => item?.status !== 'fail'),
     ...scanProseStaticEnvironmentRisks(text),
     ...scanProseDecorativeDetailRisks(text),
     ...scanProseStackedDescriptionRisks(text),
-  ].slice(0, 5)
+  ].slice(0, 8)
+  // Progress / paragraph shape are repair drivers, not pure reject gates.
+  // Word target remains actionable because expansion/contraction loops exist.
   const hardFailures = [
     ...scanProseLanguageRisks(text),
     ...scanProseMetaLeaks(text),
     ...scanModelDegenerationRisks(text),
+    ...scanToxicAiPatterns(text),
+    ...scanCharacterPovRisks(text, contextPackage).filter((item: any) => item?.blocking === true || item?.status === 'fail'),
+    ...scanHumanWebnovelResistanceHard(text),
     ...scanProseFormatRisks(text),
     ...bannedWordChecks,
     ...canonicalContinuityConflicts,
     ...cleanupHardFailures,
     ...(!word.passed && !compatibilityPass ? [{
       key: 'word_target',
-      message: `正文 ${word.actual} 字，不在 ${word.min}-${word.max} 字范围`,
+      message: `正文 ${word.actual} 字，不在 ${word.min}-${word.max} 字范围（标准章目标 ${word.target || 4200}，硬范围 ${word.min}-${word.max}）；按场景/情节点预算扩写或压缩，不要跳后续大纲。`,
       status: 'fail',
     }] : []),
   ]
@@ -124,12 +167,27 @@ export function scanProseForQualityLoop(text: string, contextPackage: any, wordT
       message: String(item?.key === 'canonical_proper_noun_conflict'
         ? item?.message
         : item?.evidence || item?.message || item?.fix || item?.label || item?.key || '确定性正文检查未通过'),
+      evidence: String(item?.evidence || item?.matched_text || item?.message || ''),
+      fix: String(item?.fix || item?.required_change || item?.repair_instruction || ''),
     }))
   const uniqueFailures = Array.from(new Map(
     hardFailures.map(item => [`${item.key}:${item.message}`, item]),
   ).values())
+  const povAdvisory = scanCharacterPovRisks(text, contextPackage).filter((item: any) => item?.status === 'warn' || item?.blocking === false)
+  const humanWebnovelAdvisory = scanHumanWebnovelResistanceAdvisory(text)
   const advisoryFindings = [
     ...craftAdvisoryChecks,
+    ...povAdvisory,
+    ...humanWebnovelAdvisory,
+    ...webNovelParagraphChecks,
+    ...progressBudget.findings.map((item: any) => ({
+      key: item.key,
+      pattern: item.key,
+      matched_text: '',
+      status: 'warn' as const,
+      evidence: item.evidence,
+      fix: item.fix,
+    })),
     ...establishedEventConflicts,
     ...bannedWordChecks.filter((item: any) => item?.status === 'warn'),
   ]
@@ -149,6 +207,7 @@ export function scanProseForQualityLoop(text: string, contextPackage: any, wordT
     advisory_findings: uniqueAdvisoryFindings,
     cleanup,
     word_target: word,
+    progress_budget: progressBudget,
   }
 }
 

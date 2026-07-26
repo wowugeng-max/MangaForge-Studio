@@ -11,8 +11,22 @@ import {
   selectFingerprintSafeProse,
   sanitizeR58ZhuqueKillers,
   sanitizeR60ZhuqueKillers,
+  sanitizeR63ZhuqueKillers,
+  sanitizeR64ZhuqueKillers,
+  sanitizeR65ZhuqueKillers,
   sanitizeDetectorHostileStock,
-  sanitizeDetectorHostileStock,
+  sanitizeMissingMidSocialMess,
+  scanZhuqueGreenHumanTexture,
+  sanitizeMissingZhuqueGreenTexture,
+  scanMidChapterExamPipelineRisks,
+  sanitizeExamPipelineInterrupt,
+  scanOpeningVitalReportCascadeRisks,
+  sanitizeOpeningVitalReportCascade,
+  scanOpeningProcessPipelineRisks,
+  sanitizeOpeningProcessPipeline,
+  sanitizeOpeningLightTouch,
+  sanitizeMissingPrivateNoise,
+  sanitizeR66ZhuqueKillers,
   sanitizeMissingMidSocialFriction,
   repairMidSentenceBankSplices,
   sanitizeResidualPureAiHardEvidence,
@@ -361,6 +375,135 @@ test('r23 pure-AI families: abandoned lore + rule ledger + essay verdict', () =>
     expect(cleaned).not.toContain('规则网的边缘')
   })
 
+
+
+
+
+
+
+
+  test('r78 light opening only strips lecture and keeps mid body intact', () => {
+    const head = [
+      '凌晨两点。',
+      '林序拿起外套。',
+      '他先把手压上去。',
+      '皮肤是暖的。',
+      '不是那种刚死没多久的余温，是真的暖，像睡着的人。他手背上能感觉到，就在皮肤和皮肤接触的地方，有温度在。',
+      '“接一下。”',
+    ].join('\n\n')
+    const midMarker = '【中段绿区标记】纸边有点湿，字迹洇开，他懒得现在交差，先别上报。'
+    const mid = Array.from({ length: 20 }, (_, i) => `中段动作${i + 1}，他继续往下做。`).join('\n\n')
+    const raw = [head, midMarker, mid].join('\n\n')
+    const fixed = sanitizeOpeningLightTouch(raw)
+    expect(fixed).not.toMatch(/不是那种刚死没多久的余温，是真的暖/)
+    expect(fixed).toContain(midMarker)
+    expect(fixed).toMatch(/嫌|烦|这锅|懒得|袖口/)
+    // must not delete mid marker region
+    expect(fixed.indexOf(midMarker)).toBeGreaterThan(20)
+  })
+
+  test('r77 opening process pipeline compresses re-exam and lecture warmth', () => {
+    const pad = Array.from({ length: 25 }, (_, i) => `走廊灯还亮着第${i + 1}下，他鞋底蹭过地砖继续往前。`).join('\n\n')
+    const opening = [
+      '林序把听诊器挂回脖子上，顺手拿起外套。',
+      '他推开帘子，鞋带松着，塑料袋攥在手里。',
+      '他先把手压上去。',
+      '皮肤是暖的。',
+      '不是那种刚死没多久的余温，是真的暖，像睡着的人。他手背上能感觉到，就在皮肤和皮肤接触的地方，有温度在。',
+      '小吴开始贴电极片。',
+      '他拿额温枪按了一下。',
+      '三十六点四。',
+      '他听诊了十秒。',
+      '没有。',
+      '监护仪三条线，平的。',
+      '额温枪再按一次。',
+      '三十六点五。',
+      '比刚才高了零点一。',
+      '重新看，还是三个零。',
+      '他又摸了一次脉搏。',
+    ].join('\n\n')
+    const raw = [opening, pad, pad, pad].join('\n\n')
+    const before = scanOpeningProcessPipelineRisks(raw)
+    expect(before.some((f) => f.key === 'hw_opening_process_pipeline')).toBe(true)
+    const fixed = sanitizeOpeningProcessPipeline(raw)
+    const after = scanOpeningProcessPipelineRisks(fixed)
+    expect(after.some((f) => f.key === 'hw_opening_process_pipeline')).toBe(false)
+    expect(fixed).not.toMatch(/不是那种刚死没多久的余温，是真的暖/)
+    expect((fixed.match(/三十六/g) || []).length).toBeLessThanOrEqual(1)
+    expect(fixed).toMatch(/先别|这锅|懒得|嫌|没说话|搁到/)
+  })
+
+  test('r76 opening vital report cascade strips heart/spo2/bp colon lines', () => {
+    const pad = Array.from({ length: 20 }, (_, i) => `他走了第${i + 1}步，鞋底蹭过地砖，没急着进门。`).join('\n\n')
+    const report = [
+      '他先把手压上去。',
+      '心率：零。',
+      '血氧：没读到。',
+      '血压：无。',
+      '他盯着那个数字看了一会儿。',
+    ].join('\n\n')
+    const raw = [pad, report, pad].join('\n\n')
+    const before = scanOpeningVitalReportCascadeRisks(raw)
+    expect(before.some((f) => f.key === 'hw_opening_vital_report_cascade')).toBe(true)
+    const fixed = sanitizeOpeningVitalReportCascade(raw)
+    const after = scanOpeningVitalReportCascadeRisks(fixed)
+    expect(after.some((f) => f.key === 'hw_opening_vital_report_cascade')).toBe(false)
+    expect(fixed).not.toMatch(/^心率：/m)
+    expect(fixed).not.toMatch(/^血氧：/m)
+    expect(fixed).not.toMatch(/^血压：/m)
+    expect(fixed).toMatch(/先别|这锅|纸边|悬着|私心|裤腿|录全|写死/)
+  })
+
+  test('r75 exam pipeline interrupt inserts green texture between clinical probes', () => {
+    const chain = Array.from({ length: 12 }, (_, i) => {
+      const probes = ['他摸了颈动脉。', '对光反射没有。', '听诊没有心音。', '额温枪显示三十六度四。', '监护仪三条线是平的。', '他再按了一次脉搏。']
+      return probes[i % probes.length]
+    }).join('\n\n')
+    const pad = Array.from({ length: 50 }, (_, i) => `他在走廊第${i + 1}步停了一下，鞋底蹭过地砖，继续往护士站方向走。`).join('\n\n')
+    const raw = [pad, chain, pad].join('\n\n')
+    const before = scanMidChapterExamPipelineRisks(raw)
+    expect(before.some((f) => f.key === 'hw_exam_pipeline_uninterrupted')).toBe(true)
+    const fixed = sanitizeExamPipelineInterrupt(raw)
+    const after = scanMidChapterExamPipelineRisks(fixed)
+    expect(after.some((f) => f.key === 'hw_exam_pipeline_uninterrupted')).toBe(false)
+    expect(fixed).toMatch(/没说话|先别|纸边|洇|这锅|悬着/)
+  })
+
+  test('r73b green texture: quiet micro-social + fused noise/object + incomplete read', () => {
+    const open = Array.from({ length: 20 }, (_, i) => `他先看了第${i + 1}项读数，指腹在纸边停了一下，把数字抄进本子。`).join('\n\n')
+    const green = [
+      '旁边的人端了杯水过来，没说话，放在旁边就走了。',
+      '他懒得现在交差，先别上报，钥匙在口袋里硌着手指。',
+      '纸上有字，几行被水浸过，洇成一片，他看了半天只能确认半截，其他认不出来。',
+    ].join('\n\n')
+    const close = Array.from({ length: 20 }, (_, i) => `他把第${i + 1}条记在心里，先不写进系统。`).join('\n\n')
+    const good = [open, green, close].join('\n\n')
+    const goodHits = scanZhuqueGreenHumanTexture(good)
+    expect(goodHits.some((f) => f.key === 'hw_missing_zhuque_green_texture')).toBe(false)
+
+    const sterile = Array.from({ length: 80 }, (_, i) => `他核对第${i + 1}项数据，屏幕上的数字没有变化，他又往下记了一行，继续翻到下一页。`).join('\n\n')
+    const bad = ['开场。', sterile, '收束。'].join('\n\n')
+    const before = scanZhuqueGreenHumanTexture(bad)
+    expect(before.some((f) => f.key === 'hw_missing_zhuque_green_texture')).toBe(true)
+    const fixed = sanitizeMissingZhuqueGreenTexture(bad)
+    const after = scanZhuqueGreenHumanTexture(fixed)
+    expect(after.some((f) => f.key === 'hw_missing_zhuque_green_texture')).toBe(false)
+    expect(fixed).toMatch(/没说话|端了|钥匙|认不出|看了半天|先别上报/)
+  })
+
+  test('sanitizeMissingMidSocialMess injects mid push-blame cluster without chapter tuning', () => {
+    // Mirror texture-delivery length floor (≥1600 compact) without any mess dialogue.
+    const sterile = Array.from({ length: 60 }, (_, i) => `他先看了第${i + 1}项读数，指腹在纸边停了一下，把数字抄进本子，再核对一次监护屏。`).join('\n\n')
+    const open = '急诊夜班并不安静。\n\n他把听诊器挂回脖子。'
+    const close = '窗外开始有车声。\n\n他停笔抬头。'
+    const raw = [open, sterile, close].join('\n\n')
+    const before = scanTextureDeliveryRisks(raw)
+    expect(before.some((f) => f.key === 'hw_missing_mid_social_mess')).toBe(true)
+    const fixed = sanitizeMissingMidSocialMess(raw)
+    const after = scanTextureDeliveryRisks(fixed)
+    expect(after.some((f) => f.key === 'hw_missing_mid_social_mess')).toBe(false)
+    expect(fixed).toMatch(/责任|背锅|签字|凭什么|这锅|谁担/)
+  })
 
   test('r24 lessons: polluted mess dialogue and bag inventory / undefined lore', () => {
     const polluted = [
@@ -1367,4 +1510,125 @@ test('r62 packaging strip ending freeze esophagus gear stamp without 刚才那�
   expect(cleaned).not.toContain('物业合规')
   expect(cleaned).not.toContain('刚才那个点')
   expect(cleaned).not.toContain('十二点')
+})
+
+
+test('r63 packaging strip clinical lecture compliance shelf stamp without adding texture', () => {
+  const raw = [
+    '血液循环彻底停止、心电拉直的状态下，体温应该迅速散失。',
+    '规程和合规，很多时候只是用来掩盖麻烦的工具。',
+    '搁置室和连廊只进不出。',
+    '“第三次履约，带温移交。”',
+    '医院建筑图纸上未标注的死角，也是物业口中严禁触碰的合规禁区。',
+    '但他已经没有退路了。',
+    '尖锐牙酸的擦铁声。冰凉刺骨。',
+  ].join('\n\n')
+  const cleaned = sanitizeR63ZhuqueKillers(raw)
+  expect(cleaned).not.toContain('血液循环彻底停止')
+  expect(cleaned).not.toContain('规程和合规')
+  expect(cleaned).not.toContain('搁置室')
+  expect(cleaned).not.toContain('第三次履约')
+  expect(cleaned).not.toContain('未标注的死角')
+  expect(cleaned).not.toContain('合规禁区')
+  expect(cleaned).not.toContain('没有退路了')
+  expect(cleaned).not.toContain('牙酸')
+  expect(cleaned).not.toContain('冰凉刺骨')
+  const stock = sanitizeDetectorHostileStock(raw)
+  expect(stock).not.toContain('搁置室')
+})
+
+test('r64 packaging strip clinical triad multi-body elevator freeze without adding texture', () => {
+  const raw = [
+    '心脏不跳了，呼吸停了，瞳孔散了，体温却稳稳押在活人的区间里。',
+    '这不合逻辑。',
+    '三个有体温的“非账上人员”。',
+    '要是这批是回收品，下一个名字会写在谁的单子上？',
+    '露出一张湿透的《暂存移交单》。',
+    '字迹跟他在病历本上签了数千次的习惯一模一样。',
+    '电梯井里忽地炸开一道闷响。',
+    '卡在半空中的轿厢猛然往下顿了半寸，金属摩擦声刺得人。',
+    '顶上最后一点微弱的应急灯灭了。',
+    '黑漆漆的井底吹上来一股冷风，夹着股陈年腥气，迎面拍在两人脸上。',
+    '冷气开得太猛，吹在脖子里有点发发发僵。',
+    '笔尖在红色的方格纸上划出一道毫无波折的直线。',
+    '直得像人用尺子比着画出来的。',
+    '指尖底下死寂一片。',
+    '比刚才那个夹克男人还要明显。',
+    '推责任的熟练劲儿一听就是老油条了。',
+  ].join('\n\n')
+  const cleaned = sanitizeR64ZhuqueKillers(raw)
+  expect(cleaned).not.toContain('心脏不跳了')
+  expect(cleaned).not.toContain('这不合逻辑')
+  expect(cleaned).not.toContain('非账上人员')
+  expect(cleaned).not.toContain('回收品')
+  expect(cleaned).not.toContain('暂存移交单')
+  expect(cleaned).not.toContain('一模一样')
+  expect(cleaned).not.toContain('卡在半空中的轿厢')
+  expect(cleaned).not.toContain('黑漆漆的井底')
+  expect(cleaned).not.toContain('发发发')
+  expect(cleaned).not.toContain('毫无波折')
+  expect(cleaned).not.toContain('尺子比着')
+  expect(cleaned).not.toContain('死寂一片')
+  expect(cleaned).not.toContain('夹克男人还要明显')
+  expect(cleaned).not.toContain('老油条了')
+  const stock = sanitizeDetectorHostileStock(raw)
+  expect(stock).not.toContain('这不合逻辑')
+  expect(stock).not.toContain('发发发')
+})
+
+
+test('r65 packaging strip procedure citation inventory elevator ending without texture', () => {
+  const raw = [
+    '“规章第十二条，急诊医生随时查验遗体状态。”',
+    '交接规定写得清清楚楚，急诊负责遗体临时寄存！',
+    '赶紧盖章！',
+    '这字只要落下，出事就是非法处置。',
+    '口袋里没身份证，只摸出一串生锈的钥匙，还有一张被水浸得发软的硬质塑胶卡。',
+    '井道里响起铁链扯动的吱呀声，轿厢晃晃荡荡沉下来。',
+    '老张平时连个夜班都恨不得躲值班室打盹，这会儿腰杆挺得比钢筋还硬。',
+    '那张沾水揉烂的卡片、没心跳却带着热气的皮肉……',
+    '散出一股子冲的石灰味。',
+    '整个人斜着挤进了将要关合的门缝——',
+  ].join('\n\n')
+  const cleaned = sanitizeR65ZhuqueKillers(raw)
+  expect(cleaned).not.toContain('规章第十二条')
+  expect(cleaned).not.toContain('盖章')
+  expect(cleaned).not.toContain('非法处置')
+  expect(cleaned).not.toContain('生锈的钥匙')
+  expect(cleaned).not.toContain('铁链扯动')
+  expect(cleaned).not.toContain('钢筋还硬')
+  expect(cleaned).not.toContain('石灰味')
+  expect(cleaned).not.toContain('门缝——')
+  const stock = sanitizeDetectorHostileStock(raw)
+  expect(stock).not.toContain('规章第十二条')
+  expect(stock).not.toContain('非法处置')
+})
+
+
+describe("sanitizeR66 ending packaging", () => {
+  test("strips cm countdown and fate paper", () => {
+    const raw = "门缝正在以不可逆的速度收窄。十厘米，十五厘米，二十厘米……防夹感应器没有任何反应。未完结，顺延下一位。"
+    const out = sanitizeR66ZhuqueKillers(raw)
+    expect(out.includes("防夹感应器")).toBe(false)
+    expect(out.includes("不可逆的速度收窄")).toBe(false)
+    expect(out.includes("顺延下一位")).toBe(false)
+    const stock = sanitizeDetectorHostileStock(raw)
+    expect(stock.includes("防夹感应器")).toBe(false)
+  })
+})
+
+
+test('sanitizeMissingPrivateNoise injects fused mid private noise when missing', () => {
+  const paras = Array.from({ length: 30 }, (_, i) => {
+    if (i === 0) return '推车卡在门槛上。'
+    if (i === 1) return '“进来。”'
+    return `他检查了第${i}处细节，没有多话，继续往下写，把可见动作再确认一遍，然后回到桌边。`
+  })
+  const raw = paras.join('\n\n')
+  const out = sanitizeMissingPrivateNoise(raw)
+  expect(out.length).toBeGreaterThan(raw.length * 0.9)
+  // should introduce at least one private-noise cue
+  expect(/嫌|烦|先不|背锅|责任|懒得|改口|怕主任|谁担|谁背|别给我|先放|先糊|不想写|别扯/.test(out)).toBe(true)
+  const stock = sanitizeDetectorHostileStock(raw)
+  expect(/嫌|烦|先不|背锅|责任|懒得|改口|怕主任/.test(stock)).toBe(true)
 })

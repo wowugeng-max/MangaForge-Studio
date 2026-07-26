@@ -1,5 +1,7 @@
 import type { ProseWordTargetEvaluation } from './word-target'
 import { buildProsePromptContextSnapshot, prosePromptJson } from './prose-prompt-context'
+import { buildWebnovelDraftPersonaBlock, buildWebnovelRevisePersonaBlock } from './webnovel-author-personas'
+import { buildHumanizeDualPassPromptBlock } from './humanize-dual-pass'
 
 function sanitizeJsonValue(value: any, seen = new WeakSet<object>(), depth = 0): any {
   if (value == null || typeof value !== 'object') return value
@@ -92,17 +94,32 @@ export function buildProseWordTargetExpansionPrompt(project: any, contextPackage
   const deficit = Math.max(0, Number(evaluation.deficit || 0))
   const targetCount = Number(evaluation.target || target.target || 0)
   const underNinetyPercent = targetCount > 0 && Number(evaluation.actual || 0) < Math.ceil(targetCount * 0.9)
+  const forceDialogue = options.force_dialogue_expand === true || options.forceDialogueExpand === true
+  const dialogueRatio = Number(options.dialogue_para_ratio ?? options.dialogueParaRatio ?? NaN)
+  const dialogueMin = Number(options.dialogue_min_ratio ?? options.dialogueMinRatio ?? 0.12)
+  const dialogueHint = Number.isFinite(dialogueRatio)
+    ? `当前对白独立成段占比约 ${dialogueRatio.toFixed(3)}，目标下限 ${dialogueMin.toFixed(2)}。`
+    : `对白独立成段占比目标下限 ${dialogueMin.toFixed(2)}。`
   return [
+    buildWebnovelDraftPersonaBlock(project),
     '任务：将本章正文扩写到商业网文标准章节长度。',
     `作品标题：${project.title || '未命名作品'}`,
     `目标章节：第${chapterTarget?.chapter_no || chapterTarget?.chapterNo || '?'}章《${chapterTarget?.title || '无标题'}》`,
     maxAttempts > 1 ? `这是第 ${attempt} 轮补写，共最多 ${maxAttempts} 轮。` : '',
-    `当前正文约 ${evaluation.actual} 字，目标 ${evaluation.target || target.target || 4200} 字，至少 ${evaluation.min || target.min || 3200} 字，可接受上限 ${evaluation.max || target.max || 5200} 字。`,
+    `当前正文约 ${evaluation.actual} 字，目标 ${evaluation.target || target.target || 4200} 字，至少 ${evaluation.min || target.min || 3780} 字，可接受上限 ${evaluation.max || target.max || 4620} 字。`,
     deficit > 0 ? `当前仍缺至少 ${deficit} 字；本轮必须优先补足缺口，再检查章节结尾是否自然。` : '',
     underNinetyPercent ? 'oh-story 90% 字数门禁：当前低于目标 90%，先回到 chapter_blueprint 补充更多子事件/情节点，再把新增子事件写成正文；优先把承载爽点/卖点的情节点展开成具体事例，过渡点保持带过，爽点/卖点优先保扩，不得均匀注水。' : '',
     underNinetyPercent ? '蓝图回补回执：输出 expansion_blueprint_patch，字段 added_beats(array, 新增情节点), expanded_beats(array, 原情节点补充的子事件), compressed_beats(array, 过渡点保持带过的理由)；每项必须写 beat_no/scene_no/action/function_tag/payoff 或 reason。' : '',
     '硬性要求：不得删改已有效内容，不得把正文改成大纲、摘要或设定说明；必须保留本章主线、角色状态、章末钩子和已经成立的连续性。',
-    '扩写重点：扩写动作过程、选择代价、对话交锋、章末钩子铺垫；补足每个场景的行动链、反应链、信息变化和后果，不要靠堆砌环境描写凑字数。',
+    '扩写重点：先按场景/情节点预算补当前章必须交付点，再补动作过程、选择代价、对话交锋、章末钩子铺垫；补足每个场景的行动链、反应链、信息变化和后果，不要靠堆砌环境描写凑字数。',
+    '进度精控：只深化本章 must_advance / 场景目标；禁止用后续章情节、终局结算或新大纲点来补字数。',
+    '分行精控：扩写后仍保持一句一段；新增过程拆成短段，不要把过程揉进长墙文。',
+    '去AI味精控：扩写时继续禁用仿佛/感到/意识到/与此同时等套话，用物件、动作、口语对白补密度。',
+    '【指纹全链路守恒 · 扩写】扩写必须保留短对白独立成段、物件核对、不对称私心噪声、双句密段；禁止把全文改成匀速一句一段；禁止用流程讲义/命运宣判/临床连击凑字。',
+    '【扩写字数硬交付】必须把 chapter_text 扩到目标区间；扩写优先补中段配角乱对白 3–6 句、半截私心动作链、物件核对阻力，不要补规则讲义/名单对号/拼音缩写揭示。',
+    forceDialogue
+      ? `【对白不足 · 强制扩写】${dialogueHint}本轮必须以补短对白为主：中段插入 4–8 句配角/现场乱对白（甩锅/推责/半截矛盾/改口），每句独立成段；前后各接 1 个短触感私心动作；禁止用环境描写或临床讲义凑字。硬门槛：扩写后对白独立成段占比必须 ≥ ${dialogueMin.toFixed(2)}。`
+      : '【扩写对白密度】对白独立成段占比尽量拉到 0.12–0.30；每扩 500 字至少新增 1 次短对白回合。',
     'oh-story 扩写守恒：不得用环境描写、重复情绪或内心独白凑字数；优先补感官细节、身体动作、对话交锋、阻碍/反应/发现/递进，每段只补 1-2 个有功能细节；不新增支线、设定、关系或时间线。',
     '场景回执要求：scene_breakdown 必须保留并更新 scene_start_anchor、scene_end_anchor 和 scene_card_receipts；scene_start_anchor/scene_end_anchor 必须摘自扩写后对应场景正文，scene_card_receipts.evidence 必须引用扩写后对应场景证据，不得借用其他场景。',
     '如果原文有跳跃、略写或只写结果的段落，请在原位置自然补充过程；如果对话过少，请补充带冲突目标的对话；如果章末钩子过弱，请强化但不要开启下一章剧情。',
@@ -124,14 +141,15 @@ export function buildProseWordTargetContractionPrompt(project: any, contextPacka
   const target = chapterTarget?.word_target || chapterTarget?.wordTarget || {}
   const attempt = Number(options.attempt || 1)
   const maxAttempts = Number(options.maxAttempts || 1)
-  const max = Number(evaluation.max || target.max || 5200)
-  const min = Number(evaluation.min || target.min || 3200)
+  const max = Number(evaluation.max || target.max || 4620)
+  const min = Number(evaluation.min || target.min || 3780)
   const targetCount = Number(evaluation.target || target.target || 4200)
   const safeMax = Math.max(min, Math.min(max, Math.round((targetCount + max) / 2)))
   const excess = Math.max(0, Number(evaluation.actual || 0) - max)
   const requiredReduction = Math.max(0, Number(evaluation.actual || 0) - safeMax)
   const laterAttempt = attempt > 1
   return [
+    buildWebnovelRevisePersonaBlock(project),
     '任务：将本章正文压缩到商业网文标准章节长度。',
     `作品标题：${project.title || '未命名作品'}`,
     `目标章节：第${chapterTarget?.chapter_no || chapterTarget?.chapterNo || '?'}章《${chapterTarget?.title || '无标题'}》`,
@@ -144,8 +162,10 @@ export function buildProseWordTargetContractionPrompt(project: any, contextPacka
     laterAttempt ? '上一轮仍超上限，本轮不得只做换词和局部删句；改用场景功能保真的重构式压缩。' : '',
     laterAttempt ? '重构规则：每个场景只保留一条完整行动链，把重复的感官、解释、反应和对话合并进行动或后果；保留事件功能不等于保留原句。' : '',
     '硬性要求：不得删主线事实、角色状态、章末钩子、关键设定触发、爽点回报和已经成立的连续性。',
-    '压缩优先级：删除重复解释、设定说明、空泛心理、环境铺陈、同义反复；合并功能相同的对话、动作、反应和旁白。',
+    '压缩优先级：先删超纲结算和后续章情节，再删重复解释、设定说明、空泛心理、环境铺陈、同义反复；合并功能相同的对话、动作、反应和旁白。',
     '保留优先级：开篇钩子、每张场景卡的目标/阻碍/转折/回报、主角选择与代价、角色关系变化、关键信息增量、章末翻页钩子。',
+    '分行精控：压缩后仍尽量一句一段；不要为了压字数把多句揉成墙文。',
+    '【指纹全链路守恒 · 压缩】压缩时优先删环境水文与讲义腔，必须保住短对白、物件核对、私心噪声和至少少量双句密段；禁止压成匀速说明书。',
     'oh-story 压缩守恒：只压水分，不压事件功能；一事一段，段落仍保持网文可读节奏；不能把正文改成大纲、摘要或设定说明。',
     '场景回执要求：scene_breakdown 必须保留并更新 scene_start_anchor、scene_end_anchor 和 scene_card_receipts；scene_card_receipts.evidence 必须引用压缩后仍存在的正文证据。',
     '',
@@ -164,6 +184,8 @@ export function buildCommercialEditorRewritePrompt(project: any, contextPackage:
   const chapterTarget = mergedPromptChapterTargetPreferRuntime(contextPackage)
   const target = chapterTarget?.word_target || chapterTarget?.wordTarget || {}
   return [
+    buildHumanizeDualPassPromptBlock({ pass: 'AB', project }),
+    buildWebnovelRevisePersonaBlock(project),
     '任务：商业主编改稿。你不是重新写新剧情，而是在保留本章事实、人物状态和设定约束的前提下，把初稿改成更像可连载商业网文的版本。',
     `作品标题：${project.title || '未命名作品'}`,
     `目标章节：第${chapterTarget?.chapter_no || chapterTarget?.chapterNo || '?'}章《${chapterTarget?.title || '无标题'}》`,
@@ -203,6 +225,7 @@ export function buildMemePolishPrompt(project: any, contextPackage: any, chapter
     || chapterTarget?.memeStrategy
     || {}
   return [
+    buildWebnovelRevisePersonaBlock(project),
     '任务：克制型网感润色。只允许做语言层润色，不允许重写剧情。',
     `作品标题：${project.title || '未命名作品'}`,
     `目标章节：第${chapterTarget?.chapter_no || chapterTarget?.chapterNo || '?'}章《${chapterTarget?.title || '无标题'}》`,

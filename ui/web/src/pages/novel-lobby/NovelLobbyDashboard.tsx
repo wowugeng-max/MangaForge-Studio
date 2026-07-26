@@ -41,7 +41,7 @@ export default function NovelLobbyDashboard({ projects, onOpenProject, onCreateP
     return (
       <Card style={{ borderRadius: 12, marginBottom: 16 }}>
         <Empty description="还没有小说项目">
-          <Button type="primary" onClick={onCreateProject}>新建小说</Button>
+          <Button type="primary" onClick={onCreateProject}> 新建小说</Button>
         </Empty>
       </Card>
     )
@@ -81,8 +81,7 @@ export default function NovelLobbyDashboard({ projects, onOpenProject, onCreateP
             >
               {featured.nextAction}
             </Button>
-            <Button block onClick={onCreateProject} style={{ minHeight: 40 }}>
-              新建小说
+            <Button block onClick={onCreateProject} style={{ minHeight: 40 }}> 新建小说
             </Button>
           </Space>
         </Card>

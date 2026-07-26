@@ -26,7 +26,7 @@ export function WorkspaceDeliveryStatusStrip(props: Record<string, any>) {
                 <Space className="novel-delivery-status-actions" size={8} wrap>
                   {deliverySummary.actionKey && (
                     <Button
-                      className="novel-delivery-status-action"
+                      className="novel-delivery-status-action novel-btn-crystal novel-btn-crystal-model"
                       type="primary"
                       size="small"
                       loading={deliveryActionLoading}

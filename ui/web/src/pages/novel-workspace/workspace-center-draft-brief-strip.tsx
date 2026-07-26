@@ -29,8 +29,7 @@ export function WorkspaceDraftBriefStrip(props: Record<string, any>) {
                     size="small"
                     type={draftBriefSummary.actionKey === 'build_brief' ? 'primary' : 'default'}
                     loading={draftBriefActionLoading}
-                    onClick={runDraftBriefAction}
-                  >
+                    onClick={runDraftBriefAction}>
                     {draftBriefSummary.actionLabel}
                   </Button>
                 )}

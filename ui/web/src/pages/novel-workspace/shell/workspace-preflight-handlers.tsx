@@ -296,6 +296,8 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
       title: isSafetyBlocked ? '仿写安全门槛未通过' : '章节生成前置检查未通过',
       width: 820,
       icon: null,
+      maskClosable: true,
+      keyboard: true,
       content: renderPreflightModalContent(payload, repairActions),
       okText: onContinue && !isSafetyBlocked ? '允许缺材料继续' : '知道了',
       cancelText: '关闭',

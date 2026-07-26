@@ -7,13 +7,16 @@ import {
   canBridgeShortContractionToExpansion,
   countProseChars,
   evaluateProseWordTarget,
-  isExplicitlyCompleteProseContractionFinishReason,
   isRejectedProseContractionFinishReason,
+  isUsableProseWordTargetFinishReason,
   normalizeProseContractionFinishReason,
   normalizeProseContractionIncompleteReason,
   proseContractionMaxTokensForAttempt,
   proseMaxTokensForWordTarget,
   resolveStandardWordTargetCompatibility,
+  shouldForceProseWordTargetExpand,
+  shouldSkipWordTargetRepairForSoftCap,
+  surgicalContractProseToWordTarget,
   type ChapterWordTarget,
 } from '../../novel-writing/word-target'
 import {
@@ -27,6 +30,7 @@ import {
   isAbortError,
   throwIfAborted,
 } from './runtime-helpers'
+import { selectFingerprintSafeProse } from '../../novel-writing/human-webnovel-resistance'
 
 export function createProseWordTargetMethods(deps: {
   executeAgent: (...args: any[]) => any
@@ -43,11 +47,42 @@ export function createProseWordTargetMethods(deps: {
 
 const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
   const wordTarget = contextPackage?.chapter_target?.word_target as ChapterWordTarget | null | undefined
-  let evaluation = applyProseWordTargetSoftCap(evaluateProseWordTarget(chapterText, wordTarget))
+  const hardEvaluation = evaluateProseWordTarget(chapterText, wordTarget)
+  let evaluation = applyProseWordTargetSoftCap(hardEvaluation)
   const initialEvaluation = evaluation
+  const measureDialogueParaRatio = (text: string) => {
+    const lines = String(text || '').split(/\n/).map((line) => line.trim()).filter(Boolean)
+    const bodyLines = lines.filter((line) => !/^第\d+章/.test(line))
+    if (!bodyLines.length) return 0
+    const dialogueParas = bodyLines.filter((line) => /^[“"「]/.test(line)).length
+    return dialogueParas / bodyLines.length
+  }
+  // Commercial fingerprint floor: short independent dialogue turns are required texture, not optional polish.
+  const DIALOGUE_EXPAND_MIN_RATIO = 0.12
+  const dialogueRatio = measureDialogueParaRatio(chapterText)
+  const dialogueDeficit = dialogueRatio + 1e-9 < DIALOGUE_EXPAND_MIN_RATIO
+  const needsHardExpand = shouldForceProseWordTargetExpand(hardEvaluation, {
+    expand: options.expand,
+    dialogue_para_ratio: dialogueRatio,
+    dialogue_min_ratio: DIALOGUE_EXPAND_MIN_RATIO,
+  })
   const reviseModelId = getStageModelId(project, 'revise', modelId)
   let currentText = String(chapterText || '')
-  let currentEvaluation = evaluation
+  // Expansion decisions use hard range + dialogue texture; soft floor never zeros deficit.
+  let currentEvaluation = needsHardExpand
+    ? {
+        ...hardEvaluation,
+        deficit: hardEvaluation.too_short
+          ? hardEvaluation.deficit
+          : Math.max(hardEvaluation.deficit, Math.ceil(Number(hardEvaluation.target || 4200) * 0.08)),
+        too_short: true,
+        passed: false,
+        soft_cap: false,
+        soft_floor: false,
+        dialogue_para_ratio: Number(dialogueRatio.toFixed(3)),
+        dialogue_expand_required: dialogueDeficit,
+      }
+    : evaluation
   let contractionResultPayload: any = null
   let bestCompleteText = currentText
   let bestCompleteEvaluation = currentEvaluation
@@ -98,7 +133,13 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
       },
     }
   }
-  if (evaluation.soft_cap) {
+  // Soft ceiling only: tiny over-max drift may skip contraction.
+  // Soft floor must NOT short-circuit expand — R30 false-passed 3759/3780 and dialogue 0.07.
+  if (shouldSkipWordTargetRepairForSoftCap(hardEvaluation, evaluation, {
+    expand: options.expand,
+    dialogue_para_ratio: dialogueRatio,
+    dialogue_min_ratio: DIALOGUE_EXPAND_MIN_RATIO,
+  })) {
     return {
       final_text: chapterText,
       contracted: false,
@@ -107,6 +148,19 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
       evaluation,
       final_evaluation: evaluation,
       expansion: null,
+    }
+  }
+  // Soft floor alone: still force expand toward hard min / dialogue texture floor.
+  if (evaluation.soft_floor && needsHardExpand && options.expand === false) {
+    return {
+      final_text: chapterText,
+      contracted: false,
+      expanded: false,
+      word_target_soft_pass: true,
+      evaluation,
+      final_evaluation: evaluation,
+      expansion: null,
+      dialogue_expand_skipped: dialogueDeficit,
     }
   }
   if (evaluation.too_long && options.contract !== false) {
@@ -125,6 +179,79 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
       ? Math.max(0, Math.min(configuredMaxContractionAttempts, configuredMaxContractionAttempts - used))
       : configuredMaxContractionAttempts
     const contractionAttempts: any[] = []
+
+    // System reliability: when draft overshoots hard (common with scene_chunk_stitch),
+    // run local surgical contraction BEFORE LLM rewrite. LLM contraction on 1.5x+ drafts
+    // often hangs/streams forever and also flattens human fingerprint.
+    const maxChars = Number(wordTarget?.max || currentEvaluation?.max || 0)
+    const actualChars = Number(currentEvaluation?.actual || countProseChars(currentText))
+    const massiveOvershoot = maxChars > 0 && (
+      actualChars > maxChars * 1.35
+      || actualChars - maxChars >= 1200
+    )
+    if (massiveOvershoot) {
+      const localFirst = surgicalContractProseToWordTarget(currentText, wordTarget)
+      if (localFirst.removed > 0 && localFirst.to < actualChars) {
+        const localGate = selectFingerprintSafeProse(String(chapterText || ''), localFirst.text, { stage: 'word_target_contract_local_first' })
+        if (localGate.accepted) {
+          const localEval = applyProseWordTargetSoftCap(evaluateProseWordTarget(localGate.text, wordTarget))
+          contractionAttempts.push({
+            attempt: 'local_surgical_first',
+            previous_count: actualChars,
+            contracted_count: localFirst.to,
+            evaluation: localEval,
+            returned_text: true,
+            candidate_rejected: false,
+            rejection_reason: null,
+            local_removed: localFirst.removed,
+            massive_overshoot: true,
+          })
+          currentText = localGate.text
+          currentEvaluation = localEval
+          bestCompleteText = localGate.text
+          bestCompleteEvaluation = localEval
+          if (!localEval.too_long || localEval.passed) {
+            return {
+              final_text: localGate.text,
+              contracted: true,
+              expanded: false,
+              evaluation,
+              final_evaluation: localEval,
+              contraction: {
+                attempts: contractionAttempts,
+                local_surgical_first: localFirst,
+                fingerprint_continuity: localGate.assessment,
+              },
+              expansion: null,
+            }
+          }
+        } else {
+          contractionAttempts.push({
+            attempt: 'local_surgical_first',
+            previous_count: actualChars,
+            contracted_count: localFirst.to,
+            returned_text: true,
+            candidate_rejected: true,
+            rejection_reason: `fingerprint_continuity:${localGate.reason || 'failed'}`,
+            massive_overshoot: true,
+          })
+        }
+      }
+    }
+
+    // If local-first already fixed overshoot, skip LLM contraction entirely.
+    if (!currentEvaluation.too_long) {
+      return {
+        final_text: currentText,
+        contracted: contractionAttempts.length > 0,
+        expanded: false,
+        evaluation,
+        final_evaluation: currentEvaluation,
+        contraction: contractionAttempts.length ? { attempts: contractionAttempts } : null,
+        expansion: null,
+      }
+    }
+
     for (let attempt = 1; attempt <= maxContractionAttempts; attempt += 1) {
       throwIfAborted(options)
       const globalAttempt = sharedBudget
@@ -158,7 +285,7 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
         break
       }
       const extracted = extractProseExpansionPayload(contractionResult)
-      const contractedText = extracted.text
+      let contractedText = extracted.text
       const finishReason = normalizeProseContractionFinishReason(contractionResult)
       const rejectedFinishReason = rejectedProseTransportFinishReason(contractionResult)
       const incompleteReason = normalizeProseContractionIncompleteReason(contractionResult)
@@ -168,7 +295,7 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
         !contractedText ? 'missing_chapter_text' : '',
         recoveredFromPartialJson ? 'recovered_from_partial_json' : '',
         partialJsonOpenStringRecovered ? 'partial_json_open_string_recovered' : '',
-        !isExplicitlyCompleteProseContractionFinishReason(finishReason) ? `finish_reason_${finishReason || 'missing'}` : '',
+        !isUsableProseWordTargetFinishReason(finishReason) ? `finish_reason_${finishReason || 'missing'}` : '',
         isRejectedProseContractionFinishReason(finishReason) ? `finish_reason_${finishReason}` : '',
         rejectedFinishReason ? `transport_finish_reason_${rejectedFinishReason}` : '',
         incompleteReason ? `incomplete_reason_${incompleteReason}` : '',
@@ -178,9 +305,10 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
       const finalEvaluation = applyProseWordTargetSoftCap(evaluateProseWordTarget(contractedText, wordTarget))
       const previousCount = countProseChars(currentText)
       const contractedCount = countProseChars(contractedText)
+      const finishUsable = isUsableProseWordTargetFinishReason(finishReason)
       const bridgeToExpansion = !candidateRejected
         && options.expand !== false
-        && isExplicitlyCompleteProseContractionFinishReason(finishReason)
+        && finishUsable
         && canBridgeShortContractionToExpansion(currentEvaluation, finalEvaluation)
 
       contractionAttempts.push({
@@ -202,15 +330,27 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
 
       if (candidateRejected) continue
 
+      const fingerprintGate = selectFingerprintSafeProse(currentText, contractedText, { stage: 'word_target_contract' })
+      if (!fingerprintGate.accepted) {
+        contractionAttempts[contractionAttempts.length - 1] = {
+          ...contractionAttempts[contractionAttempts.length - 1],
+          candidate_rejected: true,
+          rejection_reason: `fingerprint_continuity:${fingerprintGate.reason || 'failed'}`,
+        }
+        continue
+      }
+      contractedText = fingerprintGate.text
+
       const candidateModelName = sanitizeWordTargetModelName((contractionResult as any).modelName)
       const candidatePayload = {
         scene_breakdown: extracted.scene_breakdown,
         continuity_notes: extracted.continuity_notes,
         contraction_report: extracted.payload?.contraction_report || extracted.payload?.contractionReport || null,
         attempts: contractionAttempts,
+        fingerprint_continuity: fingerprintGate.assessment,
         ...(candidateModelName ? { modelName: candidateModelName } : {}),
       }
-      if (isExplicitlyCompleteProseContractionFinishReason(finishReason)) {
+      if (finishUsable) {
         rememberBestCompleteCandidate(contractedText, finalEvaluation, candidatePayload)
       }
 
@@ -243,6 +383,52 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
     }
 
     if (currentEvaluation.too_long) {
+      // LLM contraction often fails on long drafts (partial JSON). Fall back to local paragraph drop.
+      const local = surgicalContractProseToWordTarget(currentText, wordTarget)
+      if (local.removed > 0 && local.to < countProseChars(currentText)) {
+        const localGate = selectFingerprintSafeProse(String(chapterText || ''), local.text, { stage: 'word_target_contract_local' })
+        if (localGate.accepted) {
+          const localEval = applyProseWordTargetSoftCap(evaluateProseWordTarget(localGate.text, wordTarget))
+          contractionAttempts.push({
+            attempt: 'local_surgical',
+            previous_count: countProseChars(currentText),
+            contracted_count: local.to,
+            evaluation: localEval,
+            returned_text: true,
+            candidate_rejected: false,
+            rejection_reason: null,
+            local_removed: local.removed,
+          })
+          if (!localEval.too_long || localEval.passed) {
+            return {
+              final_text: localGate.text,
+              contracted: true,
+              expanded: false,
+              evaluation,
+              final_evaluation: localEval,
+              contraction: {
+                attempts: contractionAttempts,
+                local_surgical: local,
+                fingerprint_continuity: localGate.assessment,
+              },
+              expansion: null,
+            }
+          }
+          currentText = localGate.text
+          currentEvaluation = localEval
+          bestCompleteText = localGate.text
+          bestCompleteEvaluation = localEval
+        } else {
+          contractionAttempts.push({
+            attempt: 'local_surgical',
+            previous_count: countProseChars(currentText),
+            contracted_count: local.to,
+            returned_text: true,
+            candidate_rejected: true,
+            rejection_reason: `fingerprint_continuity:${localGate.reason || 'failed'}`,
+          })
+        }
+      }
       const compatibility = resolveStandardWordTargetCompatibility(evaluation, wordTarget)
       if (compatibility.passed) {
         return {
@@ -285,16 +471,29 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
       word_target_warning: buildWordTargetWarning(evaluation),
     }
   }
-  if (evaluation.passed || options.expand === false) {
+  // Use hard short / dialogue deficit, not soft-floor passed flag.
+  // System reliability: vignette drafts (<< hard min) must still expand even when caller set expand=false
+  // (common on zhuque_fast validation). Otherwise humanize/store freezes a 200-word stub.
+  const criticallyShort = Number(evaluation.actual || 0) > 0
+    && Number(evaluation.min || 0) > 0
+    && Number(evaluation.actual) < Number(evaluation.min) * 0.3
+  if ((!needsHardExpand && evaluation.passed) || (options.expand === false && !criticallyShort)) {
     const result: any = {
       final_text: chapterText,
       expanded: false,
-      evaluation,
+      evaluation: initialEvaluation,
       final_evaluation: evaluation,
       expansion: null,
     }
-    if (!evaluation.passed) result.word_target_warning = buildWordTargetWarning(evaluation)
+    if (evaluation.soft_floor) result.word_target_soft_pass = true
+    if (!evaluation.passed && !evaluation.soft_floor) result.word_target_warning = buildWordTargetWarning(evaluation)
+    if (dialogueDeficit && options.expand === false) result.dialogue_expand_skipped = true
+    if (criticallyShort) result.critical_short_expand_required = true
     return result
+  }
+  if (criticallyShort && options.expand === false) {
+    // fall through into expansion loop with a single recovery attempt budget
+    options = { ...options, expand: true, maxExpansionAttempts: Math.min(2, Number(options.maxExpansionAttempts || options.max_expansion_attempts || 2) || 2) }
   }
 
   const maxExpansionAttempts = Math.max(1, Math.min(5, Number(options.maxExpansionAttempts || options.max_expansion_attempts || 3)))
@@ -305,7 +504,13 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
     let expansionResult: any
     try {
       expansionResult = await executeAgent('prose-agent', project, {
-        task: buildProseWordTargetExpansionPrompt(project, contextPackage, currentText, currentEvaluation, { attempt, maxAttempts: maxExpansionAttempts }),
+        task: buildProseWordTargetExpansionPrompt(project, contextPackage, currentText, currentEvaluation, {
+          attempt,
+          maxAttempts: maxExpansionAttempts,
+          force_dialogue_expand: dialogueDeficit || Number((currentEvaluation as any)?.dialogue_para_ratio || 1) < DIALOGUE_EXPAND_MIN_RATIO,
+          dialogue_para_ratio: measureDialogueParaRatio(currentText),
+          dialogue_min_ratio: DIALOGUE_EXPAND_MIN_RATIO,
+        }),
         upstreamContext: contextPackage,
       }, {
         activeWorkspace,
@@ -329,7 +534,7 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
       break
     }
     const extracted = extractProseExpansionPayload(expansionResult)
-    const expandedText = extracted.text
+    let expandedText = extracted.text
     const finalEvaluation = applyProseWordTargetSoftCap(evaluateProseWordTarget(expandedText, wordTarget))
     const previousCount = countProseChars(currentText)
     const expandedCount = countProseChars(expandedText)
@@ -338,11 +543,19 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
     const incompleteReason = normalizeProseContractionIncompleteReason(expansionResult)
     const recoveredFromPartialJson = extracted.payload?.recovered_from_partial_json === true
     const partialJsonOpenStringRecovered = extracted.payload?.partial_json_open_string_recovered === true
+    // Critically short recovery: partial-JSON salvage with real growth is better than keeping a vignette.
+    const criticallyShortNow = previousCount > 0
+      && Number(hardEvaluation?.min || evaluation?.min || 0) > 0
+      && previousCount < Number(hardEvaluation?.min || evaluation?.min || 0) * 0.3
+    const allowPartialJsonRecovery = criticallyShortNow
+      && expandedCount >= Math.max(previousCount + 200, Math.floor(previousCount * 1.5))
+      && Boolean(expandedText)
     const rejectionReasons = [
       !expandedText ? 'missing_chapter_text' : '',
-      recoveredFromPartialJson ? 'recovered_from_partial_json' : '',
-      partialJsonOpenStringRecovered ? 'partial_json_open_string_recovered' : '',
-      !isExplicitlyCompleteProseContractionFinishReason(finishReason) ? `finish_reason_${finishReason || 'missing'}` : '',
+      recoveredFromPartialJson && !allowPartialJsonRecovery ? 'recovered_from_partial_json' : '',
+      partialJsonOpenStringRecovered && !allowPartialJsonRecovery ? 'partial_json_open_string_recovered' : '',
+      !isUsableProseWordTargetFinishReason(finishReason) ? `finish_reason_${finishReason || 'missing'}` : '',
+      isRejectedProseContractionFinishReason(finishReason) ? `finish_reason_${finishReason}` : '',
       rejectedFinishReason ? `transport_finish_reason_${rejectedFinishReason}` : '',
       incompleteReason ? `incomplete_reason_${incompleteReason}` : '',
       hasProseTransportIncompleteDetails(expansionResult) ? 'incomplete_details_present' : '',
@@ -363,39 +576,83 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
     })
 
     if (!candidateRejected && expandedText && expandedCount > previousCount) {
-      currentText = expandedText
+      const fingerprintGate = selectFingerprintSafeProse(currentText, expandedText, { stage: 'word_target_expand' })
+      if (!fingerprintGate.accepted) {
+        attempts[attempts.length - 1] = {
+          ...attempts[attempts.length - 1],
+          candidate_rejected: true,
+          rejection_reason: `fingerprint_continuity:${fingerprintGate.reason || 'failed'}`,
+        }
+      } else {
+      currentText = fingerprintGate.text
       currentEvaluation = finalEvaluation
       if (expandedCount > countProseChars(bestCompleteText)) {
         const candidateModelName = sanitizeWordTargetModelName((expansionResult as any).modelName)
-        bestCompleteText = expandedText
+        bestCompleteText = fingerprintGate.text
         bestCompleteEvaluation = finalEvaluation
         bestCompleteExpansionPayload = {
           scene_breakdown: extracted.scene_breakdown,
           continuity_notes: extracted.continuity_notes,
           expansion_blueprint_patch: extracted.expansion_blueprint_patch,
           ...(candidateModelName ? { modelName: candidateModelName } : {}),
+          fingerprint_continuity: fingerprintGate.assessment,
         }
+      }
       }
     }
 
     if (!candidateRejected && expandedText && expandedCount > previousCount && finalEvaluation.passed) {
+      const fingerprintGate = selectFingerprintSafeProse(String(chapterText || ''), expandedText, { stage: 'word_target_expand' })
+      if (!fingerprintGate.accepted) {
+        // keep searching / fall back to bestComplete
+      } else {
+      const expandedDialogueRatio = measureDialogueParaRatio(fingerprintGate.text)
+      const hardAfter = evaluateProseWordTarget(fingerprintGate.text, wordTarget)
+      const dialogueStillShort = expandedDialogueRatio + 1e-9 < DIALOGUE_EXPAND_MIN_RATIO
+      // When expand was triggered for dialogue texture, do not stop until ratio recovers (or attempts end).
+      if (dialogueDeficit && dialogueStillShort && expandedDialogueRatio <= dialogueRatio + 0.005) {
+        attempts[attempts.length - 1] = {
+          ...attempts[attempts.length - 1],
+          dialogue_para_ratio: Number(expandedDialogueRatio.toFixed(3)),
+          dialogue_still_short: true,
+        }
+        // keep candidate as best if longer / closer, but continue attempts
+      } else if (hardAfter.too_short && !applyProseWordTargetSoftCap(hardAfter).soft_floor) {
+        // still hard-short outside soft floor: continue
+      } else {
       const candidateModelName = sanitizeWordTargetModelName((expansionResult as any).modelName)
       return {
-        final_text: expandedText,
+        final_text: fingerprintGate.text,
         contracted: Boolean(contractionResultPayload),
         expanded: true,
-        evaluation,
-        final_evaluation: finalEvaluation,
+        evaluation: initialEvaluation,
+        final_evaluation: {
+          ...finalEvaluation,
+          dialogue_para_ratio: Number(expandedDialogueRatio.toFixed(3)),
+        },
         contraction: contractionResultPayload,
         expansion: {
           scene_breakdown: extracted.scene_breakdown,
           continuity_notes: extracted.continuity_notes,
           expansion_blueprint_patch: extracted.expansion_blueprint_patch,
           attempts,
+          dialogue_para_ratio: Number(expandedDialogueRatio.toFixed(3)),
           ...(candidateModelName ? { modelName: candidateModelName } : {}),
+          fingerprint_continuity: fingerprintGate.assessment,
         },
       }
+      }
+      }
     }
+  }
+
+  // Final expansion/contraction candidate also must keep fingerprint vs original draft.
+  const finalGate = selectFingerprintSafeProse(String(chapterText || ''), bestCompleteText, { stage: 'word_target_final' })
+  if (!finalGate.accepted) {
+    bestCompleteText = String(chapterText || '')
+    bestCompleteEvaluation = initialEvaluation
+  } else {
+    bestCompleteText = finalGate.text
   }
 
   return {

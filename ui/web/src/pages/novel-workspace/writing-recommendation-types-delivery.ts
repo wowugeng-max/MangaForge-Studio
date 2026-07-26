@@ -45,6 +45,7 @@ export type NovelDeliverySummary = {
   actionLabel: string
   compactActionLabel: string
   secondaryActions: Array<{ key: NovelDeliveryActionKey; label: string }>
+  characterPov: NonNullable<NovelDeliverySummaryInput['characterPov']> | null
   storyStatePanel: NonNullable<NovelDeliverySummaryInput['storyStatePanel']> | null
   storyStateSyncAction: { key: NovelDeliveryActionKey; label: string } | null
 }

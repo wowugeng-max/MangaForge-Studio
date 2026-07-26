@@ -179,7 +179,7 @@ export function ExportDeliveryModal({
       onCancel={onClose}
       footer={(
         <Space>
-          <Button onClick={onClose}>关闭</Button>
+          <Button onClick={onClose}> 关闭</Button>
           <Button icon={<ReloadOutlined />} loading={loading} onClick={() => { void loadPreview() }}>刷新预览</Button>
           <Button icon={<FileTextOutlined />} onClick={() => triggerDownload(projectId, 'txt', downloadOptions)}>TXT</Button>
           <Button icon={<FileWordOutlined />} onClick={() => triggerDownload(projectId, 'docx', downloadOptions)}>DOCX</Button>
@@ -296,9 +296,9 @@ export function ExportDeliveryModal({
                   />
                 )}
                 <Space wrap>
-                  <Button size="small" onClick={onOpenQualityBenchmark}>打开质量面板</Button>
-                  <Button size="small" onClick={onOpenConsistencyGraph}>打开一致性图谱</Button>
-                  <Button size="small" onClick={onOpenTaskCenter}>打开任务中心</Button>
+                  <Button size="small" onClick={onOpenQualityBenchmark}> 打开质量面板</Button>
+                  <Button size="small" onClick={onOpenConsistencyGraph}> 打开一致性图谱</Button>
+                  <Button size="small" onClick={onOpenTaskCenter}> 打开任务中心</Button>
                 </Space>
               </Space>
             </Card>

@@ -43,13 +43,13 @@ export function WorkspaceCenterEmptyProject({
               icon: <ExperimentOutlined />,
               title: '原创孵化',
               desc: '从题材定位、读者承诺、世界观、主角和前 30 章章纲开始。',
-              btn: <Button type="primary" loading={incubatingOriginal} onClick={onRunOriginalIncubator}>生成原创方案</Button>,
+              btn: <Button type="primary" loading={incubatingOriginal} onClick={onRunOriginalIncubator}> 生成原创方案</Button>,
             },
             {
               icon: <BookOutlined />,
               title: '参考仿写',
               desc: '先配置参考作品，提炼节奏、结构和爽点模型，再进入安全迁移。',
-              btn: <Button onClick={onOpenReferenceConfig}>配置参考作品</Button>,
+              btn: <Button onClick={onOpenReferenceConfig}> 配置参考作品</Button>,
             },
             {
               icon: <SettingOutlined />,
@@ -57,10 +57,10 @@ export function WorkspaceCenterEmptyProject({
               desc: '人工创建大纲、写作圣经或第一章，适合已有完整构思的项目。',
               btn: (
                 <Space>
-                  <Button loading={planning} onClick={onRunPlan}>AI 规划</Button>
-                  <Button onClick={onOpenWritingBibleEditor}>写作圣经</Button>
-                  <Button onClick={onCreateOutline}>创建大纲</Button>
-                  <Button onClick={onCreateChapter}>第一章</Button>
+                  <Button loading={planning} onClick={onRunPlan}> AI 规划</Button>
+                  <Button onClick={onOpenWritingBibleEditor}> 写作圣经</Button>
+                  <Button onClick={onCreateOutline}> 创建大纲</Button>
+                  <Button onClick={onCreateChapter}> 第一章</Button>
                 </Space>
               ),
             },

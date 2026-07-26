@@ -335,6 +335,8 @@ export function storyPlanningWorkspaceSource() {
     sourceCached('StoryPlanningWorkspace.tsx', localSourceCache),
     sourceCached('planning/story-planning-board-panels.tsx', localSourceCache),
     sourceCached('planning/story-planning-board-types.ts', localSourceCache),
+    sourceCached('planning/story-planning-board-panels-expand.tsx', localSourceCache),
+    sourceCached('planning/story-planning-board-panels-pipeline.tsx', localSourceCache),
     sourceCached('planning/story-planning-board-panels-ops.tsx', localSourceCache),
     sourceCached('planning/story-planning-board-panels-audience.tsx', localSourceCache),
     sourceCached('planning/story-planning-board-panels-story.tsx', localSourceCache),

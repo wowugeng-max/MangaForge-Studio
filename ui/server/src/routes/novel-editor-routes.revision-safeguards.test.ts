@@ -100,6 +100,31 @@ describe('editor revision route safeguards', () => {
     expect(prompt).toContain('revision_receipts')
     expect(prompt).toContain('cascade_impacts')
     expect(prompt).toContain('affected_chapters')
+    expect(prompt).toContain('人工强制修订指令')
+    expect(prompt).toContain('只改章末名单揭示。')
+    expect(prompt).toContain('报告必修项')
+    expect(prompt).toContain('修订后要同步下一章名单伏笔')
+    expect(prompt).toContain('语言硬约束')
+  })
+
+  test('prioritizes custom revision directives without dropping report must_fix', () => {
+    const prompt = buildEditorRevisionPrompt({
+      project: { title: '超人的规则怪谈世界' },
+      chapter: { chapter_text: '老陈看着江哲，只用纯肉身力量 and 太极暗劲就一拳轰碎了邪神意志投影。' },
+      report: {
+        must_fix: ['补足章末钩子'],
+        one_click_revision_prompt: '补足章末钩子',
+      },
+      revisionMode: 'from_report',
+      userPrompt: '删除正文中所有英文夹杂，统一改成自然中文。',
+    })
+
+    expect(prompt).toContain('【人工强制修订指令（最高优先级，必须先兑现）】')
+    expect(prompt).toContain('删除正文中所有英文夹杂，统一改成自然中文。')
+    expect(prompt).toContain('【报告必修项（仍须覆盖，不得因人工指令被整体忽略）】')
+    expect(prompt).toContain('补足章末钩子')
+    expect(prompt).toContain('语言硬约束')
+    expect(prompt.indexOf('人工强制修订指令')).toBeLessThan(prompt.indexOf('报告必修项'))
   })
 
   test('injects actual workflow-revision context slices into editor revision prompt', () => {

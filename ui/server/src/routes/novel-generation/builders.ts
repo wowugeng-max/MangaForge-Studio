@@ -14,6 +14,7 @@ import { buildMaterialScore } from '../novel-chapter-context-routes'
 import { asArray, buildLLMResultDiagnostics, compactText, getNovelPayload, normalizeSceneProduction, parseJsonLikePayload, safeJsonStringify } from '../novel-route-utils'
 import { applyChapterWordTargetToContext, countProseChars, normalizeDeliveryRiskReceipts, resolveChapterWordTarget } from '../novel-writing-service'
 import { compactProseGenerationOverride } from '../../novel-writing/prose-generation-contract'
+import { applyZhuqueFastPathOptions } from '../../novel-writing/zhuque-fast-path'
 
 export function stringifyNovelGenerationPayload(value: any) {
   return safeJsonStringify(value, undefined, 0)
@@ -296,6 +297,20 @@ function compactStandaloneQualityLoop(value: any) {
 export function buildStandaloneProseServiceErrorPayload(serviceError: any, pipeline: any[], configSnapshot: any, chapterIdentity: any = {}) {
   const admissionStatus = String(serviceError?.admission_status || serviceError?.admissionStatus || '')
   const blockedInvalid = admissionStatus === 'blocked_invalid'
+  // Keep residual prose for Zhuque/export even when admission blocks storage.
+  // Progress compaction drops chapter_text from pipeline stages; recover it here.
+  const residualCandidates = [
+    serviceError?.chapter_text,
+    serviceError?.chapterText,
+    serviceError?.finalText,
+    serviceError?.final_text,
+    serviceError?.text,
+    serviceError?.details?.chapter_text,
+    serviceError?.details?.chapterText,
+    serviceError?.admission_failure?.details?.chapter_text,
+    serviceError?.admission_failure?.details?.chapterText,
+  ]
+  const residualText = residualCandidates.find((item: any) => typeof item === 'string' && item.trim().length > 200)
   return {
     error: String(serviceError?.message || serviceError),
     error_code: serviceError?.code || serviceError?.error_code || (blockedInvalid ? 'PROSE_ADMISSION_BLOCKED_INVALID' : 'PROSE_GENERATION_FAILED'),
@@ -303,6 +318,14 @@ export function buildStandaloneProseServiceErrorPayload(serviceError: any, pipel
       admission_status: 'blocked_invalid',
       chapter_id: chapterIdentity?.chapter_id ?? chapterIdentity?.chapterId ?? serviceError?.chapter_id ?? serviceError?.chapterId ?? null,
       chapter_no: chapterIdentity?.chapter_no ?? chapterIdentity?.chapterNo ?? serviceError?.chapter_no ?? serviceError?.chapterNo ?? null,
+    } : {}),
+    ...(typeof residualText === 'string' ? {
+      chapter_text: residualText,
+      finalText: residualText,
+      details: {
+        ...(serviceError?.details && typeof serviceError.details === 'object' ? serviceError.details : {}),
+        chapter_text: residualText,
+      },
     } : {}),
     pipeline,
     launch_gate_blocker: serviceError?.launchGateBlocker || serviceError?.launch_gate_blocker,
@@ -606,6 +629,9 @@ export function standaloneProseServiceStageLabel(key: string) {
     safety: '参考安全检查',
     store: '写入章节正文与版本',
     story_state: '更新故事状态机',
+    humanize_postprocess: 'R76人味后处理',
+    opening_handoff_bridge: '开篇强交接桥接',
+    zhuque_fast: '朱雀验证快路径',
   }
   return labels[key] || key
 }
@@ -639,7 +665,7 @@ export function buildStandaloneProseServiceOptions(body: any = {}, runtime: {
   onStage: (key: string, payload?: any) => Promise<void>
   abortSignal: AbortSignal
 }) {
-  return {
+  const merged = {
     ...(body || {}),
     ...(runtime.modelId ? { model_id: runtime.modelId } : {}),
     auto_repair_quality_gate: runtime.autoRepairQualityGate,
@@ -649,5 +675,7 @@ export function buildStandaloneProseServiceOptions(body: any = {}, runtime: {
     onStage: runtime.onStage,
     abortSignal: runtime.abortSignal,
   }
+  // production_mode=zhuque_fast | draft_humanize_store | zhuque_validate or zhuque_fast:true
+  return applyZhuqueFastPathOptions(merged)
 }
 

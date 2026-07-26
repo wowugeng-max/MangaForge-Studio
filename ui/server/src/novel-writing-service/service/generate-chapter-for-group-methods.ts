@@ -25,6 +25,12 @@ import {
   R76_ZHUQUE_STACK_VERSION,
 } from '../../novel-writing/r76-zhuque-stack'
 import {
+  applyZhuqueFastPathOptions,
+  isZhuqueFastProductionMode,
+  ZHUQUE_FAST_PATH_VERSION,
+} from '../../novel-writing/zhuque-fast-path'
+import { ensureOpeningHandoffBridge, extractPrimaryEndingHooks } from '../../novel-writing/chapter-continuity-guard'
+import {
   buildDeterministicProseCleanupReport,
   buildQualityGateReviewWithDeterministicCleanup,
   } from '../../novel-writing/deterministic-prose-cleanup'
@@ -352,11 +358,15 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   const configSnapshot = buildAgentConfigSnapshot(project, preferredModelId)
   const approvalPolicy = options.approval_policy || getApprovalPolicy(project)
   const approvals = options.approvals || {}
+  // Zhuque validation fast path: draft + sparse humanize + store (skip editor/multi-round review).
+  options = applyZhuqueFastPathOptions(options || {})
   const productionMode = String(options.production_mode || 'draft_review_revise_store')
+  const isZhuqueFast = isZhuqueFastProductionMode(productionMode, options)
   const isSceneCardsOnly = productionMode === 'scene_cards_only'
   const isDraftOnly = productionMode === 'draft_only'
   const isDraftReviewOnly = productionMode === 'draft_review'
-  const isFullProduction = !isSceneCardsOnly && !isDraftOnly && !isDraftReviewOnly
+  // Fast path still uses full production store admission (not draft-mode ephemeral store).
+  const isFullProduction = (!isSceneCardsOnly && !isDraftOnly && !isDraftReviewOnly) || isZhuqueFast
   const pendingGeneratedReviews: any[] = []
   const storeGeneratedReviewRecord = async (record: any) => {
     if (!record) return
@@ -474,7 +484,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   let memePolish = draftResultBundle.memePolish
   let readabilityReview = draftResultBundle.readabilityReview
   const editorMemeResult = await runPostDraftEditorAndMemePolish({
-    isDraftOnly,
+    isDraftOnly: isDraftOnly || isZhuqueFast,
     activeWorkspace,
     project,
     contextPackage,
@@ -507,11 +517,16 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     projectId,
     activeWorkspace,
     preferredModelId,
-    llmControlOptions,
+    llmControlOptions: {
+      ...llmControlOptions,
+      // Zhuque fast: do not spend LLM rounds expanding to word target.
+      expand: isZhuqueFast ? false : llmControlOptions?.expand,
+    },
     qualityRepairTimeoutMs,
     qualityThreshold,
     isDraftOnly,
     isDraftReviewOnly,
+    isZhuqueFast,
     generationContract,
     contextPackage,
     wordTarget,
@@ -620,7 +635,44 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     // Non-blocking: keep quality-loop text if postprocess throws.
   }
   // Always apply R76 pre-store sanitize (even if humanize skipped/failed).
-  finalText = applyR76PreStoreSanitize(finalText)
+  finalText = applyR76PreStoreSanitize(finalText, {
+    project,
+    contextPackage,
+    characters,
+    skip_mid_monologue_densify: options.skip_mid_monologue_densify === true || options.skipMidMonologueDensify === true || isZhuqueFast,
+    skipMidMonologueDensify: options.skip_mid_monologue_densify === true || options.skipMidMonologueDensify === true || isZhuqueFast,
+  })
+
+  // System-level opening handoff bridge: if draft misses hard primary ending hook, prepend a short bridge.
+  // This keeps continuity admission honest while preventing flaky model openings from hard-blocking every chapter.
+  {
+    const handoffContext = enrichContextWithProgressResync(enrichContextWithStrongHandoff(contextPackage))
+    const previousChapter = (
+      handoffContext?.continuity?.previous_chapter
+      || handoffContext?.continuity?.previousChapter
+      || contextPackage?.continuity?.previous_chapter
+      || contextPackage?.continuity?.previousChapter
+      || contextPackage?.previous_chapter
+      || contextPackage?.previousChapter
+      || null
+    )
+    const bridge = ensureOpeningHandoffBridge(finalText, previousChapter)
+    if (bridge.bridged) {
+      finalText = applyR76PreStoreSanitize(bridge.text, {
+        project,
+        contextPackage,
+        characters,
+        skip_mid_monologue_densify: options.skip_mid_monologue_densify === true || options.skipMidMonologueDensify === true || isZhuqueFast,
+        skipMidMonologueDensify: options.skip_mid_monologue_densify === true || options.skipMidMonologueDensify === true || isZhuqueFast,
+      })
+      await onStage('opening_handoff_bridge', {
+        status: 'success',
+        reason: bridge.reason,
+        bridge: bridge.bridge || '',
+        primary_hooks: extractPrimaryEndingHooks(previousChapter).map((item: any) => item.key),
+      })
+    }
+  }
 
   await storePreStoreReceiptSyncReviews({
     storeGeneratedReviewRecord,
@@ -644,7 +696,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   const openingContinuityFailures: ProseAdmissionHardFailure[] = openingContinuityAssessment.failure
     ? [openingContinuityAssessment.failure]
     : []
-  if (isDraftOnly || isDraftReviewOnly) {
+  if ((isDraftOnly || isDraftReviewOnly) && !isZhuqueFast) {
     return await runDraftModeAdmissionAndStore({
       isDraftOnly,
       isDraftReviewOnly,

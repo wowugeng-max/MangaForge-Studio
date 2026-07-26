@@ -118,7 +118,7 @@ export function ChapterRestructurePanel({
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <Button onClick={onClose} disabled={running}>取消</Button>
+          <Button onClick={onClose} disabled={running}> 取消</Button>
           <Button type="primary" danger={mode === 'contract'} loading={running} onClick={handleConfirm}>
             {mode === 'expand' ? '📈 开始扩展' : '📉 开始合并'}
           </Button>

@@ -28,6 +28,7 @@ import { buildMemoryInjectionForProject, initMemoryPalace, storeAgentOutputForPr
 
 // ── Knowledge Base Service — 全局写作知识库 ──
 import { queryKnowledge } from '../knowledge-base'
+import { buildWebnovelDraftPersonaBlock } from '../novel-writing/webnovel-author-personas'
 
 // ── Knowledge Injection Helper ──
 export type ReferenceStrength = 'light' | 'balanced' | 'strong'
@@ -380,7 +381,10 @@ export function buildAgentMessages(
     ? knowledgeInjectionText
     : ''
 
-  const systemContent = (authoritativeTask ? baseNovelSystemPrompt() : (systemOverride || baseNovelSystemPrompt()))
+  const baseSystem = (authoritativeTask ? baseNovelSystemPrompt() : (systemOverride || baseNovelSystemPrompt()))
+  const systemContent = agentId === 'prose-agent'
+    ? `${baseSystem}\n\n${buildWebnovelDraftPersonaBlock(project)}`
+    : baseSystem
     + styleGuardrails + memorySection + knowledgeSection + upstreamContext
 
   // Extract upstream results

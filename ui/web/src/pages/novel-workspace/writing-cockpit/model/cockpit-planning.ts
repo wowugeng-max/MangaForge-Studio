@@ -27,6 +27,7 @@ import type {
   WritingCockpitModel,
   BuildWritingCockpitModelInput,
 } from './types'
+import { buildCharacterPovUiModel } from '../../characterPovUiModel'
 import { parseWorkspacePayload } from '../../payloadParseCache'
 
 
@@ -168,6 +169,11 @@ export function buildChapterPlanningDesk(args: {
 }): ChapterPlanningDeskModel {
   const contextStatus = contextPackageStatus(args.contextPackage)
   const sceneCards = chapterSceneCards(args.nextChapter, args.contextPackage)
+  const characterPov = buildCharacterPovUiModel({
+    sceneCards,
+    characters: Array.isArray(args.contextPackage?.characters) ? args.contextPackage.characters : [],
+    chapterText: String(args.nextChapter?.chapter_text || args.nextChapter?.chapterText || ''),
+  })
   const qualityContinuitySceneMap = buildQualityContinuitySceneMap(sceneCards)
   const scenePlanStatus: ChapterScenePlanStatus = sceneCards.length > 0 ? 'ready' : 'missing'
   const diagnosticBlockers = diagnosticsBlockers(args.diagnostics)
@@ -195,6 +201,7 @@ export function buildChapterPlanningDesk(args: {
       writePreparationBrief,
       episodePlan,
       sceneCards,
+      characterPov,
       qualityContinuitySceneMap,
     }
   }
@@ -216,6 +223,7 @@ export function buildChapterPlanningDesk(args: {
       writePreparationBrief,
       episodePlan,
       sceneCards,
+      characterPov,
       qualityContinuitySceneMap,
     }
   }
@@ -232,6 +240,7 @@ export function buildChapterPlanningDesk(args: {
       writePreparationBrief,
       episodePlan,
       sceneCards,
+      characterPov,
       qualityContinuitySceneMap,
     }
   }
@@ -248,6 +257,7 @@ export function buildChapterPlanningDesk(args: {
       writePreparationBrief,
       episodePlan,
       sceneCards,
+      characterPov,
       qualityContinuitySceneMap,
     }
   }
@@ -267,6 +277,7 @@ export function buildChapterPlanningDesk(args: {
       writePreparationBrief,
       episodePlan,
       sceneCards,
+      characterPov,
       qualityContinuitySceneMap,
     }
   }
@@ -283,6 +294,7 @@ export function buildChapterPlanningDesk(args: {
       writePreparationBrief,
       episodePlan,
       sceneCards,
+      characterPov,
       qualityContinuitySceneMap,
     }
   }
@@ -303,6 +315,7 @@ export function buildChapterPlanningDesk(args: {
       writePreparationBrief,
       episodePlan,
       sceneCards,
+      characterPov,
       qualityContinuitySceneMap,
     }
   }
@@ -319,6 +332,7 @@ export function buildChapterPlanningDesk(args: {
       writePreparationBrief,
       episodePlan,
       sceneCards,
+      characterPov,
       qualityContinuitySceneMap,
     }
   }
@@ -338,6 +352,7 @@ export function buildChapterPlanningDesk(args: {
       writePreparationBrief,
       episodePlan,
       sceneCards,
+      characterPov,
       qualityContinuitySceneMap,
     }
   }
@@ -354,6 +369,7 @@ export function buildChapterPlanningDesk(args: {
       writePreparationBrief,
       episodePlan,
       sceneCards,
+      characterPov,
       qualityContinuitySceneMap,
     }
   }
@@ -369,6 +385,7 @@ export function buildChapterPlanningDesk(args: {
     writePreparationBrief,
     episodePlan,
     sceneCards,
+    characterPov,
     qualityContinuitySceneMap,
   }
 }

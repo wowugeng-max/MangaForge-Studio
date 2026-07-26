@@ -190,7 +190,7 @@ export function ReferenceEngineeringModal({
       footer={[
         <Button key="config" icon={<SettingOutlined />} onClick={onOpenReferenceConfig}>参考配置</Button>,
         <Button key="feed" icon={<CloudUploadOutlined />} onClick={() => openNovelStudio({ panel: 'knowledge', action: 'feed' })}>投喂新参考</Button>,
-        <Button key="close" type="primary" onClick={onClose}>关闭</Button>,
+        <Button key="close" type="primary" onClick={onClose}> 关闭</Button>,
       ]}
       width={1080}
     >

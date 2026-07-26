@@ -20,7 +20,7 @@ export type ProseWordTargetEvaluation = {
   soft_floor?: boolean
 }
 
-const DEFAULT_WORD_TARGET_TOLERANCE_RATIO = 0.05
+const DEFAULT_WORD_TARGET_TOLERANCE_RATIO = 0.03
 
 const COMPLETE_CONTRACTION_FINISH_REASONS = new Set([
   'stop',
@@ -89,13 +89,14 @@ export function resolveChapterWordTarget(project: any, chapter: any, options: an
     }
   }
 
+  // ±10% band keeps commercial pacing tight; soft cap only absorbs tiny provider drift.
   return {
     mode: 'standard',
     label: '标准章',
     target: 4200,
-    min: 3200,
-    max: 5200,
-    rangeText: '3200-5200 字',
+    min: 3780,
+    max: 4620,
+    rangeText: '3780-4620 字',
   }
 }
 
@@ -155,6 +156,91 @@ export function evaluateProseWordTarget(text: string, target: ChapterWordTarget 
     too_short: tooShort,
     too_long: tooLong,
     passed: !tooShort && !tooLong,
+  }
+}
+
+/**
+ * Deterministic overlength contraction when LLM rewrite is truncated/rejected.
+ * Prefer dropping pure-AI / clinical lecture / ending-template paragraphs first,
+ * then trailing non-dialogue padding. Never rewrite sentences; only delete blocks.
+ */
+export function surgicalContractProseToWordTarget(
+  text: string,
+  target: ChapterWordTarget | null | undefined,
+): { text: string; removed: number; from: number; to: number } {
+  const source = String(text || '')
+  const evaluation = evaluateProseWordTarget(source, target)
+  if (!evaluation.too_long) {
+    return { text: source, removed: 0, from: evaluation.actual, to: evaluation.actual }
+  }
+  const max = Number(target?.max || 0)
+  const min = Number(target?.min || 0)
+  const paragraphs = source
+    .split(/\n\s*\n+/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+  if (paragraphs.length < 8) {
+    return { text: source, removed: 0, from: evaluation.actual, to: evaluation.actual }
+  }
+
+  const dropScore = (p: string, index: number, total: number) => {
+    let score = 0
+    if (/[“"']/.test(p)) score -= 8
+    if (/名单生效|代价已付|某种结算|扣减凭证|名字的缩写|拼音缩写|这不是|也不是|规则网|未定义|拍门|重重地|三张凭证|编号连在一起|体温都诡异|全部都是|同样没有|无心音|无呼吸|尸斑|对光反射/.test(p)) score += 12
+    if (/监护|瞳孔|听诊|颈动脉|体温|尸僵|转运单|凭证|编号/.test(p)) score += 4
+    if (index > total * 0.75) score += 3
+    if (index < total * 0.12) score -= 3
+    if (p.length <= 8) score += 1
+    return score
+  }
+
+  const ranked = paragraphs.map((p, i) => ({ p, i, score: dropScore(p, i, paragraphs.length) }))
+  ranked.sort((a, b) => b.score - a.score || b.i - a.i)
+  const dropped = new Set<number>()
+  let current = source
+  let currentCount = evaluation.actual
+  for (const item of ranked) {
+    if (currentCount <= max) break
+    if (item.score < 2) continue
+    dropped.add(item.i)
+    const nextParas = paragraphs.filter((_, idx) => !dropped.has(idx))
+    if (nextParas.length < 6) {
+      dropped.delete(item.i)
+      break
+    }
+    const next = `${nextParas.join('\n\n')}\n`
+    const nextCount = countProseChars(next)
+    if (min > 0 && nextCount < min) {
+      dropped.delete(item.i)
+      continue
+    }
+    current = next
+    currentCount = nextCount
+  }
+
+  if (currentCount > max) {
+    const paras = current.split(/\n\s*\n+/).map((p) => p.trim()).filter(Boolean)
+    while (paras.length > 6 && countProseChars(paras.join('\n\n')) > max) {
+      const last = paras[paras.length - 1]
+      if (/[“"']/.test(last) && paras.length > 10) {
+        let idx = paras.length - 2
+        while (idx > Math.floor(paras.length * 0.2) && /[“"']/.test(paras[idx])) idx -= 1
+        if (idx > Math.floor(paras.length * 0.2)) paras.splice(idx, 1)
+        else paras.pop()
+      } else {
+        paras.pop()
+      }
+      if (min > 0 && countProseChars(paras.join('\n\n')) < min) break
+    }
+    current = `${paras.join('\n\n')}\n`
+    currentCount = countProseChars(current)
+  }
+
+  return {
+    text: current,
+    removed: Math.max(0, evaluation.actual - currentCount),
+    from: evaluation.actual,
+    to: currentCount,
   }
 }
 
@@ -233,6 +319,19 @@ export function isRejectedProseContractionFinishReason(reason: string | null) {
   return REJECTED_CONTRACTION_FINISH_REASONS.has(String(reason || ''))
 }
 
+/**
+ * Streaming/OpenAI-compatible proxies often omit finish_reason on completed chapters.
+ * Align word-target expand/contract with draft transport admission:
+ * accept missing/complete reasons; only reject explicit truncated/error finishes.
+ */
+export function isUsableProseWordTargetFinishReason(reason: string | null) {
+  if (isRejectedProseContractionFinishReason(reason)) return false
+  if (!reason) return true
+  if (isExplicitlyCompleteProseContractionFinishReason(reason)) return true
+  // Non-rejected unknown provider values are treated as usable when payload parses cleanly.
+  return true
+}
+
 export function isWithinProseWordTargetSoftCap(evaluation: ProseWordTargetEvaluation, options: any = {}) {
   const max = Number(evaluation?.max || 0)
   const actual = Number(evaluation?.actual || 0)
@@ -251,6 +350,43 @@ export function isWithinProseWordTargetSoftFloor(evaluation: ProseWordTargetEval
   const minimumTolerance = Number.isFinite(Number(options.minimum_tolerance)) ? Number(options.minimum_tolerance) : 20
   const tolerance = Math.max(minimumTolerance, Math.ceil(min * toleranceRatio))
   return actual >= min - tolerance
+}
+
+export function shouldForceProseWordTargetExpand(
+  hardEvaluation: ProseWordTargetEvaluation | null | undefined,
+  options: {
+    expand?: boolean
+    dialogue_para_ratio?: number
+    dialogue_min_ratio?: number
+  } = {},
+) {
+  // expand=false skips ordinary shortfall expansion, but vignette drafts (<< hard min)
+  // still force recovery — otherwise zhuque_fast freezes 200-word stubs.
+  const criticallyShort = Boolean(hardEvaluation?.too_short)
+    && Number(hardEvaluation?.actual || 0) > 0
+    && Number(hardEvaluation?.min || 0) > 0
+    && Number(hardEvaluation?.actual) < Number(hardEvaluation?.min) * 0.3
+  if (options.expand === false && !criticallyShort) return false
+  if (hardEvaluation?.too_short) return true
+  const ratio = Number(options.dialogue_para_ratio)
+  const minRatio = Number.isFinite(Number(options.dialogue_min_ratio))
+    ? Number(options.dialogue_min_ratio)
+    : 0.12
+  if (Number.isFinite(ratio) && ratio + 1e-9 < minRatio) return true
+  return false
+}
+
+/** Soft floor may admit tiny shortfall, but must never suppress hard-min expansion. */
+export function shouldSkipWordTargetRepairForSoftCap(
+  hardEvaluation: ProseWordTargetEvaluation,
+  softEvaluation: ProseWordTargetEvaluation & { soft_cap?: boolean; soft_floor?: boolean },
+  options: { dialogue_para_ratio?: number; dialogue_min_ratio?: number; expand?: boolean } = {},
+) {
+  if (!softEvaluation?.soft_cap) return false
+  // Soft floor + hard short / dialogue deficit => do not skip expand.
+  if (shouldForceProseWordTargetExpand(hardEvaluation, options)) return false
+  // Soft ceiling only may skip contraction.
+  return Boolean(hardEvaluation?.too_long && !hardEvaluation?.too_short)
 }
 
 export function applyProseWordTargetSoftCap(evaluation: ProseWordTargetEvaluation) {

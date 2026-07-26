@@ -13,6 +13,9 @@ import {
   markBlockedInvalidError,
   validateMinimalChapterProse,
 } from '../../novel-writing/prose-admission-policy'
+import {
+  buildResistanceAdmissionHardFailures,
+} from '../../novel-writing/human-webnovel-resistance'
 import type {
   ProseAdmissionHardFailure,
   ProseAdmissionWarning,
@@ -79,6 +82,7 @@ export async function runDraftModeAdmissionAndStore(args: {
   buildProseQualityReview: (...a: any[]) => any
   mergeChapterRawPayload: (...a: any[]) => any
   editorRewrite: any
+  humanizePostprocess?: any
   productionMode: string
   draftPromptDiagnostics: any
   ohStoryDeliveryReceipts: any
@@ -131,6 +135,7 @@ export async function runDraftModeAdmissionAndStore(args: {
     buildProseQualityReview,
     mergeChapterRawPayload,
     editorRewrite,
+    humanizePostprocess = null,
     productionMode,
     draftPromptDiagnostics,
     ohStoryDeliveryReceipts,
@@ -163,6 +168,8 @@ export async function runDraftModeAdmissionAndStore(args: {
           message: failure?.message || '正文与高置信正史专名冲突。',
           details: failure,
         })),
+      // System-wide: detector hard risks must never soft-pass into store.
+      ...buildResistanceAdmissionHardFailures(finalText),
     ],
   })
   if (draftModeHardAdmission.hard_failures.length) {
@@ -170,8 +177,18 @@ export async function runDraftModeAdmissionAndStore(args: {
     throw markBlockedInvalidError(Object.assign(new Error(primaryFailure.message), {
       code: primaryFailure.code === 'opening_handoff_disconnected'
         ? 'PROSE_ADMISSION_BLOCKED_INVALID'
-        : primaryFailure.source === 'canonical_continuity' ? 'PROSE_QUALITY_GATE_BLOCKED' : 'PROSE_INVALID',
+        : primaryFailure.source === 'canonical_continuity'
+          ? 'PROSE_QUALITY_GATE_BLOCKED'
+          : primaryFailure.source === 'detector_resistance'
+            ? 'PROSE_RESISTANCE_GATE_BLOCKED'
+            : 'PROSE_INVALID',
       quality_loop: qualityLoopDiagnostics,
+      resistance_hard: primaryFailure.source === 'detector_resistance' ? primaryFailure : undefined,
+      // Always expose residual prose for harness packaging / Zhuque inspection even when store is blocked.
+      chapter_text: finalText,
+      finalText,
+      text: finalText,
+      details: { ...(primaryFailure as any)?.details, chapter_text: finalText },
     }), primaryFailure)
   }
   qualityWarningCandidates.push(
@@ -381,6 +398,7 @@ export async function runDraftModeAdmissionAndStore(args: {
     story_state_warning: draftModeStoryStateWarning,
     post_commit_warnings: draftPostCommitWarnings,
     revised: false,
+    humanize_postprocess: humanizePostprocess,
     production_mode: productionMode,
     completed_stage: 'store',
     prompt_diagnostics: draftPromptDiagnostics,

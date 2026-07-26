@@ -103,8 +103,26 @@ function DeliveryInfoChip({
 export function WorkspaceDeliveryStatusChips(props: Record<string, any>) {
   const { deliverySummary, ipSceneIntakeTooltip, onOpenStoryAssets } = props
 
+  const characterPov = deliverySummary.characterPov
   return (
     <div className="novel-delivery-status-chips">
+      {characterPov?.visible && (
+        <DeliveryInfoChip
+          className={`novel-delivery-pov-tag novel-delivery-pov-tag-${characterPov.status || 'ok'}`}
+          label={characterPov.statusLabel || `视角 · ${characterPov.primaryPov || '未定'}`}
+          items={[
+            characterPov.primaryPov ? `主视角：${characterPov.primaryPov}` : '',
+            characterPov.multiPovLocked ? '多视角：默认锁定主视角' : '',
+            ...(characterPov.allowedSecondaryPovs || []).map((name: string) => `授权次视角：${name}`),
+            ...(characterPov.secondaryCutPreview || []),
+            ...(characterPov.assetFirewallPreview || []),
+            ...(characterPov.dialogueFilterPreview || []),
+            ...(characterPov.scenePreview || []),
+            ...(characterPov.violations || []),
+            ...(characterPov.knowledgePreview || []),
+          ]}
+        />
+      )}
       {deliverySummary.deliveryRiskQueue && (
         <DeliveryInfoChip
           className="novel-delivery-risk-tag novel-delivery-risk-tag-warn"

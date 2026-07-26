@@ -287,8 +287,7 @@ export default function WorkflowConfig() {
                   </Button>
                 )}
                 {isEditMode && (
-                  <Button onClick={handleRefreshSuggestions} loading={suggestionsLoading}>
-                    魔法推荐参数
+                  <Button onClick={handleRefreshSuggestions} loading={suggestionsLoading}> 魔法推荐参数
                   </Button>
                 )}
               </Space>

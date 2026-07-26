@@ -34,10 +34,12 @@ export interface ProsePromptDiagnostics {
 
 export class ProseCorePromptBudgetError extends Error {
   readonly code = 'PROSE_CORE_PROMPT_BUDGET_EXCEEDED'
+  readonly prompt_diagnostics: ProsePromptDiagnostics
 
   constructor(readonly diagnostics: ProsePromptDiagnostics) {
     super(`正文核心 prompt ${diagnostics.required_chars} 字符超过预算 ${diagnostics.budget_chars}`)
     this.name = 'ProseCorePromptBudgetError'
+    this.prompt_diagnostics = diagnostics
   }
 }
 

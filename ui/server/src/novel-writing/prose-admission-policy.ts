@@ -14,6 +14,7 @@ export type ProseAdmissionHardFailureSource =
   | 'canonical_continuity'
   | 'safety'
   | 'atomic'
+  | 'detector_resistance'
 
 export type ProseAdmissionWarning = {
   code: string

@@ -39,6 +39,38 @@ const CH17_BAD = `
 `
 
 describe('character card sync', () => {
+
+  test('does not treat continuous action after office title as a person name', () => {
+    const mentions = extractNamedCharacterMentions('距离物业经理按响门铃，还有四分五十秒。')
+    expect(mentions.some(item => item.name === '按响门')).toBe(false)
+    expect(mentions.some(item => item.name === '按响门铃')).toBe(false)
+    expect(mentions.some(item => item.name === '距离')).toBe(false)
+  })
+
+  test('rejects common prose-slice junk names around office titles', () => {
+    const samples = [
+      '物业经理猛地挥手打断对讲。',
+      '物业经理身上剥离出黑色纹路。',
+      '物业经理那张扭曲的脸贴上门缝。',
+      '局长要使用权限卡。',
+      '局长瞳孔骤然收缩。',
+      '业主委员会主任它所代表的规则开始生效。',
+      '我们要局长出面说明。',
+    ]
+    const banned = ['猛地挥', '身上剥', '那张扭', '要使用', '瞳孔骤', '它所代', '我们要']
+    for (const text of samples) {
+      const mentions = extractNamedCharacterMentions(text)
+      for (const name of banned) {
+        expect(mentions.some(item => item.name === name)).toBe(false)
+      }
+    }
+  })
+
+  test('still extracts titled names with separators', () => {
+    const mentions = extractNamedCharacterMentions('物业经理，王建国站在电梯口。')
+    expect(mentions.some(item => item.name === '王建国' && item.title === '物业经理')).toBe(true)
+  })
+
   test('extracts title-bound names', () => {
     const mentions = extractNamedCharacterMentions(PREV_CHAPTERS[1].chapter_text)
     expect(mentions.some(item => item.name === '秦建国' && /局长/.test(String(item.title || '')))).toBe(true)

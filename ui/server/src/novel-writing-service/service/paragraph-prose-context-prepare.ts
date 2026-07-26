@@ -59,6 +59,8 @@ import {
   buildUpgradeRhythmPromptSection,
   buildWritePreparationPromptSection,
 } from '../../novel-writing/prose-generation-prompt-sections'
+import { buildReaderContractProgression } from '../../novel-writing/reader-contract-progression'
+import { buildGenreProseCardContract } from '../../novel-writing/genre-prose-cards'
 import {
   buildBoundedProsePrompt,
   buildOhStoryDirectorPromptBlock,
@@ -332,6 +334,26 @@ export function prepareParagraphProseContext(project: any, inputContextPackage: 
     || contextPackage?.target_reader_contract
     || contextPackage?.pre_draft_brief?.target_reader_contract
     || buildTargetReaderContract(project, contextPackage)
+  const readerContractProgression = contextPackage?.chapter_target?.reader_contract_progression
+    || contextPackage?.reader_contract_progression
+    || contextPackage?.writing_bible?.reader_contract_progression
+    || contextPackage?.pre_draft_brief?.reader_contract_progression
+    || buildReaderContractProgression({
+      project,
+      genre: project?.genre,
+      platform: project?.platform || project?.target_audience,
+      target_reader_contract: targetReaderContract,
+    })
+  const genreProseCardContract = contextPackage?.chapter_target?.genre_prose_card_contract
+    || contextPackage?.genre_prose_card_contract
+    || contextPackage?.writing_bible?.genre_prose_card_contract
+    || contextPackage?.pre_draft_brief?.genre_prose_card_contract
+    || buildGenreProseCardContract({
+      genre: project?.genre,
+      title: project?.title,
+      genre_tags: project?.genre_tags || targetReaderContract?.genre_tags,
+      summary: project?.synopsis,
+    })
   const genrePositioningContract = contextPackage?.chapter_target?.genre_positioning_contract
     || contextPackage?.genre_positioning_contract
     || contextPackage?.pre_draft_brief?.genre_positioning_contract
@@ -622,6 +644,8 @@ export function prepareParagraphProseContext(project: any, inputContextPackage: 
     platformRubric,
     contentRubric,
     targetReaderContract,
+    readerContractProgression,
+    genreProseCardContract,
     genrePositioningContract,
     plotSpecialTopicsContract,
     femaleAudienceContract,

@@ -16,6 +16,9 @@ import {
   markBlockedInvalidError,
   validateMinimalChapterProse,
 } from '../../novel-writing/prose-admission-policy'
+import {
+  buildResistanceAdmissionHardFailures,
+} from '../../novel-writing/human-webnovel-resistance'
 import type {
   ProseAdmissionHardFailure,
   ProseAdmissionWarning,
@@ -100,6 +103,7 @@ export async function runFullProductionAdmissionAndStore(args: {
   mergeChapterRawPayload: (...a: any[]) => any
   editorRewrite: any
   memePolish: any
+  humanizePostprocess?: any
   readabilityReview: any
   productionMode: string
   draftPromptDiagnostics: any
@@ -162,6 +166,7 @@ export async function runFullProductionAdmissionAndStore(args: {
     mergeChapterRawPayload,
     editorRewrite,
     memePolish,
+    humanizePostprocess = null,
     readabilityReview,
     productionMode,
     draftPromptDiagnostics,
@@ -202,15 +207,26 @@ export async function runFullProductionAdmissionAndStore(args: {
       details: failure,
     }))
   const hardAdmission = classifyProseAdmission({
-    hard_failures: [...minimalValidation.failures, ...openingContinuityFailures, ...canonicalFailures],
+    hard_failures: [
+      ...minimalValidation.failures,
+      ...openingContinuityFailures,
+      ...canonicalFailures,
+      // System-wide: detector hard risks must never soft-pass into store.
+      ...buildResistanceAdmissionHardFailures(finalText),
+    ],
   })
   if (hardAdmission.hard_failures.length) {
     const primaryFailure = hardAdmission.hard_failures[0]
     const error = Object.assign(new Error(primaryFailure.message), {
       code: primaryFailure.code === 'opening_handoff_disconnected'
         ? 'PROSE_ADMISSION_BLOCKED_INVALID'
-        : primaryFailure.source === 'canonical_continuity' ? 'PROSE_QUALITY_GATE_BLOCKED' : 'PROSE_INVALID',
+        : primaryFailure.source === 'canonical_continuity'
+          ? 'PROSE_QUALITY_GATE_BLOCKED'
+          : primaryFailure.source === 'detector_resistance'
+            ? 'PROSE_RESISTANCE_GATE_BLOCKED'
+            : 'PROSE_INVALID',
       quality_loop: qualityLoopDiagnostics,
+      resistance_hard: primaryFailure.source === 'detector_resistance' ? primaryFailure : undefined,
     })
     throw markBlockedInvalidError(error, primaryFailure)
   }
@@ -438,6 +454,7 @@ export async function runFullProductionAdmissionAndStore(args: {
     revised: Boolean(selfCheck?.revised),
     editor_rewrite: editorRewrite,
     meme_polish: memePolish,
+    humanize_postprocess: humanizePostprocess,
     readability_review: readabilityReview,
     production_mode: productionMode,
     completed_stage: 'story_state',

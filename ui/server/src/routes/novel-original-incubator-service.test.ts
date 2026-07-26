@@ -65,6 +65,20 @@ describe('original incubator setting assets', () => {
     expect(prompt).toContain('每2000字至少一个悬念/反转/信息差钩子')
   })
 
+
+  test('requires deep incubation to carry reader contract progression and genre prose card', () => {
+    const service = createNovelOriginalIncubatorService()
+    const prompt = service.buildOriginalIncubatorPrompt(
+      { title: '超人的规则怪谈世界', length_target: 'epic', genre: '规则怪谈', target_audience: '番茄男频' },
+      { idea: '规则怪谈开书' },
+    )
+    expect(prompt).toContain('读者契约')
+    expect(prompt).toContain('终局')
+    expect(prompt).toContain('题材散文卡')
+    expect(prompt).toContain('reader_contract_progression')
+    expect(prompt).toContain('genre_prose_card_contract')
+  })
+
   test('requires deep incubation to use oh-story genre core mechanics', () => {
     const service = createNovelOriginalIncubatorService()
     const prompt = service.buildOriginalIncubatorPrompt(

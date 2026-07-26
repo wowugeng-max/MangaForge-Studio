@@ -9,6 +9,7 @@ import {
   PlayCircleOutlined,
   ReadOutlined,
   ReloadOutlined,
+  RocketOutlined,
   SearchOutlined,
   StopOutlined,
 } from '@ant-design/icons'
@@ -69,6 +70,11 @@ export type NovelStudioKnowledgeDrawerProps = {
   setKnowledgeProjectDraft: any
   setKnowledgeQuery: any
   setKnowledgeSearch: any
+  ohStoryPublishKind?: string
+  ohStoryPublishInput?: string
+  setOhStoryPublishInput?: (value: string) => void
+  ohStoryLastPublish?: string
+  handlePublishOhStoryKnowledge?: (kind: string) => void | Promise<void>
 }
 
 export function NovelStudioKnowledgeDrawer({
@@ -113,6 +119,11 @@ export function NovelStudioKnowledgeDrawer({
   setKnowledgeProjectDraft,
   setKnowledgeQuery,
   setKnowledgeSearch,
+  ohStoryPublishKind = '',
+  ohStoryPublishInput = '',
+  setOhStoryPublishInput,
+  ohStoryLastPublish = '',
+  handlePublishOhStoryKnowledge,
 }: NovelStudioKnowledgeDrawerProps) {
   return (
       <Drawer
@@ -165,6 +176,62 @@ export function NovelStudioKnowledgeDrawer({
             </Row>
             <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>{knowledgeCategoryLabel} · {knowledgeCountText}</Text>
           </Card>
+
+          {handlePublishOhStoryKnowledge && (
+            <Card
+              size="small"
+              title={
+                <Space>
+                  <RocketOutlined style={{ color: '#7c3aed' }} />
+                  <span>oh-story 生产</span>
+                </Space>
+              }
+              style={{ borderRadius: 8, background: 'linear-gradient(135deg, #faf5ff 0%, #ffffff 100%)' }}
+            >
+              <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  把拆文 / 扫榜 / 导入 / 题材卡 / 终局账本发布到知识库，不另起一套系统。当前作用域：{knowledgeProjectLabel}
+                </Text>
+                <Input
+                  value={ohStoryPublishInput}
+                  onChange={(e) => setOhStoryPublishInput?.(e.target.value)}
+                  placeholder="可选：题材关键词 / 对标书名 / 平台（如：都市悬疑、怪谈、番茄）"
+                  allowClear
+                  style={inputStyle}
+                />
+                <Space wrap size={[8, 8]}>
+                  {[
+                    { kind: 'long_analyze', label: '发布拆文计划' },
+                    { kind: 'long_scan', label: '发布扫榜计划' },
+                    { kind: 'import', label: '发布导入计划' },
+                    { kind: 'genre_card', label: '发布题材卡' },
+                    { kind: 'ending_reserve', label: '发布终局账本' },
+                    { kind: 'cover', label: '发布封面简报' },
+                    { kind: 'short_suite', label: '发布短篇计划' },
+                  ].map((item) => (
+                    <Button
+                      key={item.kind}
+                      size="small"
+                      type={['long_analyze', 'genre_card', 'ending_reserve'].includes(item.kind) ? 'primary' : 'default'}
+                      ghost={['long_analyze', 'genre_card', 'ending_reserve'].includes(item.kind)}
+                      loading={ohStoryPublishKind === item.kind}
+                      disabled={Boolean(ohStoryPublishKind) && ohStoryPublishKind !== item.kind}
+                      onClick={() => handlePublishOhStoryKnowledge(item.kind)}
+                    >
+                      {item.label}
+                    </Button>
+                  ))}
+                </Space>
+                {ohStoryLastPublish ? (
+                  <Text type="secondary" style={{ fontSize: 12 }}>{ohStoryLastPublish}</Text>
+                ) : (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    发布后会按分类入库，可直接用上方分类标签筛选查看。
+                  </Text>
+                )}
+              </Space>
+            </Card>
+          )}
 
           {feedIngestJob && feedSerialFetch && (
             <Card size="small" title="后台投喂任务" style={{ borderRadius: 8, background: '#fafcff' }}>
@@ -302,7 +369,7 @@ export function NovelStudioKnowledgeDrawer({
                   prefix={<SearchOutlined style={{ color: '#94a3b8' }} />}
                   onPressEnter={handleQueryKnowledge}
                 />
-                <Button type="primary" loading={knowledgeQueryLoading} onClick={handleQueryKnowledge}>检索</Button>
+                <Button type="primary" loading={knowledgeQueryLoading} onClick={handleQueryKnowledge}> 检索</Button>
               </Space.Compact>
             </Space>
           </Card>

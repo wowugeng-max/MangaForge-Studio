@@ -1,5 +1,6 @@
 import React from 'react'
-import { Button, Space, Tag, Tooltip, Typography } from 'antd'
+import { DownOutlined, UpOutlined } from '@ant-design/icons'
+import { Button, Tag, Tooltip, Typography } from 'antd'
 import {
   buildChapterWorkflowPresenter,
   chapterWorkflowStepLabels,
@@ -7,6 +8,44 @@ import {
   type ChapterWorkflowPresenter,
 } from './chapter-workflow-presenter'
 import type { WritingCockpitActionKey } from './writingCockpitModel'
+
+
+const MODEL_ACTION_KEYS = new Set([
+  'generate',
+  'repair_generate',
+  'refresh_current_quality',
+  'apply_editor_revision',
+  'create_editor_report',
+  'accept_chapter_and_continue',
+])
+
+const LOCAL_ACTION_KEYS = new Set([
+  'repair_materials',
+  'sync_story_state',
+  'open_story_assets',
+  'open_versions',
+  'view_brief',
+  'view_quality',
+  'open_generation_diagnostics',
+])
+
+function crystalClassForAction(key: string, kind?: string) {
+  if (kind === 'danger') return 'novel-btn-crystal novel-btn-crystal-model'
+  if (MODEL_ACTION_KEYS.has(key) || kind === 'primary') return 'novel-btn-crystal novel-btn-crystal-model'
+  if (LOCAL_ACTION_KEYS.has(key)) return 'novel-btn-crystal novel-btn-crystal-local'
+  if (kind === 'ghost') return 'novel-btn-crystal novel-btn-crystal-display'
+  // secondary rewrite/generate etc. already covered; remaining defaults are display
+  if (key === 'generate' || /复检|重写|生成|修订|修复/.test(String(kind || ''))) {
+    return 'novel-btn-crystal novel-btn-crystal-model'
+  }
+  return 'novel-btn-crystal novel-btn-crystal-display'
+}
+
+function normalizeDetailsSummary(summary?: string | string[]): string[] {
+  if (!summary) return []
+  const parts = Array.isArray(summary) ? summary : String(summary).split(' · ')
+  return parts.map(part => String(part || '').trim()).filter(Boolean)
+}
 
 const { Text, Title } = Typography
 
@@ -49,7 +88,7 @@ export function ChapterActionBar({
   trailing?: React.ReactNode
   detailsOpen?: boolean
   onToggleDetails?: () => void
-  detailsSummary?: string
+  detailsSummary?: string | string[]
   handlers: ChapterActionBarHandlers
   presenter?: ChapterWorkflowPresenter
 }) {
@@ -111,6 +150,7 @@ export function ChapterActionBar({
         : 'blue'
 
   const primaryDanger = presenter.primaryAction.kind === 'danger'
+  const summaryItems = normalizeDetailsSummary(detailsSummary)
 
   return (
     <div className="chapter-action-bar">
@@ -137,8 +177,9 @@ export function ChapterActionBar({
 
         <div className="chapter-action-bar-actions">
           <Button
-            type="primary"
+            type={primaryDanger ? 'primary' : 'default'}
             danger={primaryDanger}
+            className={crystalClassForAction(String(presenter.primaryAction.key), presenter.primaryAction.kind)}
             loading={loading}
             onClick={() => run(presenter.primaryAction.key)}
           >
@@ -148,6 +189,7 @@ export function ChapterActionBar({
             <Button
               key={`${action.key}-${action.label}`}
               type={action.kind === 'ghost' ? 'text' : 'default'}
+              className={crystalClassForAction(String(action.key), action.kind)}
               onClick={() => run(action.key)}
             >
               {action.label}
@@ -162,9 +204,29 @@ export function ChapterActionBar({
           {presenter.reasonText}
         </Text>
         {onToggleDetails ? (
-          <Button type="link" size="small" onClick={onToggleDetails} className="chapter-action-bar-details-toggle">
-            {detailsOpen ? '收起详情' : (detailsSummary ? `详情 · ${detailsSummary}` : '详情')}
-          </Button>
+          <button
+            type="button"
+            className={`chapter-action-bar-details-toggle${detailsOpen ? ' is-open' : ''}`}
+            onClick={onToggleDetails}
+            aria-expanded={detailsOpen}
+            aria-label={detailsOpen ? '收起详情' : '展开详情'}
+          >
+            <span className="chapter-action-bar-details-toggle-label">
+              {detailsOpen ? <UpOutlined /> : <DownOutlined />}
+              <span>{detailsOpen ? '收起详情' : '展开详情'}</span>
+            </span>
+            {!detailsOpen ? (
+              <span className="chapter-action-bar-details-toggle-summary" aria-hidden={summaryItems.length === 0}>
+                {summaryItems.length > 0
+                  ? summaryItems.map(item => (
+                      <span key={item} className="chapter-action-bar-details-chip">{item}</span>
+                    ))
+                  : <span className="chapter-action-bar-details-chip is-muted">查看队列与交稿状态</span>}
+              </span>
+            ) : (
+              <span className="chapter-action-bar-details-toggle-hint">点击收起辅助面板</span>
+            )}
+          </button>
         ) : null}
       </div>
 

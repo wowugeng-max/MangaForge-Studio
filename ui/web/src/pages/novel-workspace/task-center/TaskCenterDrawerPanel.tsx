@@ -346,7 +346,7 @@ export function TaskCenterDrawer({
                       title={`确认通过 ${reviewTasks.length} 个需复查任务？`}
                       onConfirm={() => onBulkUpdateRepairTaskStatus(reviewTasks, 'resolved')}
                     >
-                      <Button size="small" type="primary">批量确认通过</Button>
+                      <Button size="small" type="primary"> 批量确认通过</Button>
                     </Popconfirm>
                   ) : null}
                 </Space>

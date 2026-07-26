@@ -5,6 +5,7 @@ import {
   DownOutlined,
   EditOutlined,
   NodeIndexOutlined,
+  PartitionOutlined,
   UpOutlined,
 } from '@ant-design/icons'
 import type { PlanningActionKey, PlanningWorkspaceModel } from './planningWorkspaceModel'
@@ -40,6 +41,35 @@ export function StoryPlanningWorkspace({
   const wordPercent = model.topStatus.targetWords > 0
     ? Math.min(100, Math.round((model.topStatus.writtenWords / model.topStatus.targetWords) * 100))
     : 0
+  const recommended = model.creationPipeline.primaryAction
+  const recommendedNeedsModel = [
+    'update_rolling_plan',
+    'future100_generate',
+    'future100_audit',
+    'longform_pressure',
+    'longform_creation_diagnosis',
+    'topic_validation',
+    'reference_diagnosis',
+    'update_story_state',
+    'complete_volume_plan',
+  ].includes(recommended.key)
+  const recommendedLoading = (
+    (recommended.key === 'update_rolling_plan' && loadingKey === 'rollingPlan')
+    || (recommended.key === 'future100_generate' && loadingKey === 'future100Generate')
+    || (recommended.key === 'future100_audit' && loadingKey === 'future100Audit')
+    || (recommended.key === 'longform_pressure' && loadingKey === 'longformPressure')
+    || (recommended.key === 'longform_creation_diagnosis' && loadingKey === 'longformCreationDiagnosis')
+    || (recommended.key === 'update_story_state' && loadingKey === 'rollingPlan')
+  )
+  const recommendedIcon = recommended.key === 'future100_generate' || recommended.key === 'future100_audit'
+    ? <NodeIndexOutlined />
+    : recommended.key === 'update_rolling_plan' || recommended.key === 'complete_volume_plan'
+      ? <BranchesOutlined />
+      : recommended.key === 'open_outline_tree'
+        ? <PartitionOutlined />
+        : recommended.key === 'enter_chapter_writing'
+          ? <EditOutlined />
+          : <PartitionOutlined />
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflow: 'auto', background: '#f6f8fb' }}>
@@ -60,10 +90,13 @@ export function StoryPlanningWorkspace({
                   <Space wrap size={[12, 6]}>
                     <Text type="secondary">已写 {formatWords(model.topStatus.writtenWords)} / 目标 {formatWords(model.topStatus.targetWords)}</Text>
                     <Text type="secondary">
-                      未来10章 {model.topStatus.future10Coverage.planned}/{model.topStatus.future10Coverage.required}
+                      近窗细纲 {model.topStatus.future10Coverage.planned}/{model.topStatus.future10Coverage.required}
                     </Text>
                     <Text type="secondary">
-                      未来100章 {model.topStatus.future100Coverage.planned}/{model.topStatus.future100Coverage.required}
+                      远景骨架 {model.topStatus.future100Coverage.planned}/{model.topStatus.future100Coverage.required}
+                    </Text>
+                    <Text type="secondary">
+                      下一步：{recommended.label}
                     </Text>
                   </Space>
                   <Progress percent={wordPercent} size="small" showInfo={false} />
@@ -72,28 +105,25 @@ export function StoryPlanningWorkspace({
             </Space>
             <Space wrap style={{ justifyContent: 'flex-end' }}>
               <Button
+                type="text"
                 icon={overviewCollapsed ? <DownOutlined /> : <UpOutlined />}
                 onClick={() => setOverviewCollapsed(value => !value)}
               >
-                {overviewCollapsed ? '展开大纲概览' : '收起大纲概览'}
+                {overviewCollapsed ? '展开' : '收起'}
               </Button>
-              {!overviewCollapsed && (
-                <>
-                  <Button
-                    icon={<BranchesOutlined />}
-                    loading={loadingKey === 'rollingPlan'}
-                    disabled={!selectedModelId}
-                    onClick={() => onAction('update_rolling_plan')}
-                  >
-                    更新滚动规划
-                  </Button>
-                  <Button icon={<NodeIndexOutlined />} onClick={() => onAction('complete_volume_plan')}>
-                    补齐当前卷规划
-                  </Button>
-                </>
+              {recommended.key !== 'enter_chapter_writing' && (
+                <Button icon={<EditOutlined />} onClick={() => onAction('enter_chapter_writing')}>
+                  进入写作
+                </Button>
               )}
-              <Button type="primary" icon={<EditOutlined />} onClick={() => onAction('enter_chapter_writing')}>
-                进入写作
+              <Button
+                type="primary"
+                icon={recommendedIcon}
+                loading={Boolean(recommendedLoading)}
+                disabled={Boolean(recommendedNeedsModel) && !selectedModelId}
+                onClick={() => onAction(recommended.key)}
+              >
+                {recommended.label}
               </Button>
             </Space>
           </div>

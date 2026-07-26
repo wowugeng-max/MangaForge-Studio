@@ -16,6 +16,10 @@ import {
 import {
   buildRevisionStrategyBrief,
 } from '../revision/revision-strategy'
+import {
+  buildHumanizeDualPassPromptBlock,
+  buildHumanizeRevisionStrategyAddon,
+} from '../../novel-writing/humanize-dual-pass'
 
 export const buildProseReviewPrompt = (project: any, contextPackage: any, chapterText: string) => [
   '任务：对刚生成的小说章节进行章节级自检。',
@@ -40,7 +44,7 @@ export const buildProseReviewPrompt = (project: any, contextPackage: any, chapte
   '13A. 是否违反 oh-story 正文格式与小节结构：章节标记必须统一为 ###1. / ###第一章 / 1. 或项目指定格式；按网文阅读节奏断段，段间保留一个空行，不得出现两个以上连续空行；无缩进，正文段落中不使用 Markdown；对话独立成行，引号风格按项目/平台约定，quote-mode keep 时不得把合法「」改成 ""；小节必须有主事件、3-5 个子事件、情绪变化、新信息和钩子接续。命中必须输出 quality_audit_checks、prose_craft_checks、dialogue_checks 或 punctuation_tone_checks，并给出正文行证据。',
   '13B. 是否出现模型退化：检查逐字复读/打转、末尾截断、AI 自指或拒绝语、占位符、乱码、任务描述/情节点/字数目标/下一章等工程词泄漏；必须输出 model_degeneration_checks，字段 key,label,type,severity(blocking|advisory),status,evidence,fix,line。blocking 项必须要求重写受影响段落，advisory 项必须说明例外判断。',
   '13C. 是否兑现 chapter_target.chapter_positioning_brief：检查本章钩子强度、冲突压力、爽点密度、详略分配、章尾拉力是否匹配 chapter_positioning/pressure_level；低压生活/信息整理/过场章可弱钩子但必须保留阶段目标、微好奇或关系期待；有 benchmark_structure_coordinates 时必须检查对标结构坐标是否换素材迁移而非照搬。必须输出 chapter_positioning_checks。',
-  '13D. 正文语言硬门禁：chapter_text 必须使用简体中文网文正文。若主体为葡萄牙语、英语、拼音、翻译腔外语或非中文段落，必须在 quality_audit_checks 中输出 status=fail、key=language_drift_non_chinese，并要求整章改回简体中文；不得把外语正文评为 pass。',
+  '13D. 正文语言硬门禁：chapter_text 必须使用简体中文网文正文。若主体为葡萄牙语、英语、拼音、翻译腔外语或非中文段落，必须在 quality_audit_checks 中输出 status=fail、key=language_drift_non_chinese，并要求整章改回简体中文；不得把外语正文评为 pass。中文段落中夹杂英文粘连词、小写英文碎片、拼音碎片时，也必须输出 status=fail、key=language_drift_latin_fragment，并给出 evidence 与中文改写；不得因“整体可读”放过夹杂英文。',
   '14. 是否兑现 chapter_target.delivery_risk_carry_over 和 batch_preflight.delivery_risk_carry_over：逐项检查每个 items/required_actions/opening_actions/middle_actions/ending_actions 中的上一章风险承接动作；opening_actions 必须在前300字有正文证据，middle_actions 必须落成中段事件推进，ending_actions 必须在最后300字形成追读钩子或承接余波。必须给出正文证据，未兑现必须输出 S1/S2 finding，尤其是开篇承接、章末翻页、去AI味、审稿修法、修订残留、新资产入库和 IP场面延展。',
   '14+. 是否兑现 batch_preflight.delivery_risk_carry_over.creation_contract_carry_over：如果安全连写预检要求先修创作契约，必须逐项检查目标读者、题材定位、核心承诺、追读留存是否都有正文证据；必须输出 target_reader_checks、genre_positioning_checks、core_contract_checks 和 reader_retention_checks，不能只用 delivery_risk_receipts 汇总。',
   '14++. core_contract_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),core_promise,mainline_service,core_emotion,rule_judgement,ending_question,selling_point_execution,repetition_strategy,commercial_rhythm,goldfinger_structure,launch_pressure,evidence,fix,remaining_risk；核心承诺漂移、主线不服务卖点、核心情绪散乱、规则/金手指不参与胜负、章尾没有新问题、卖点四步法缺失、未做到发现比告知爽十倍、同一卖点至少延展不足、连续 2 章没有目标推进/阻碍升级/新信息、金手指可替换故事流程不清或开篇 300-500字内交代处境、危险来源和破局希望缺失时必须给出 S1/S2 finding，category=structure 或 platform。',
@@ -220,6 +224,8 @@ export const buildProseReviewPrompt = (project: any, contextPackage: any, chapte
 
 export const buildProseRevisionPrompt = (project: any, contextPackage: any, chapterText: string, review: any) => {
   const revisionStrategyBrief = buildRevisionStrategyBrief(review)
+  const humanizeAddon = buildHumanizeRevisionStrategyAddon(review)
+  const humanizeBlock = buildHumanizeDualPassPromptBlock({ pass: humanizeAddon.pass, project })
   const failedDeliveryRiskReceipts = asArray(review?.delivery_risk_receipts || review?.deliveryRiskReceipts)
     .map((receipt: any) => {
       const remainingRisk = deliveryRiskReceiptRemainingRisk(receipt)
@@ -242,6 +248,8 @@ export const buildProseRevisionPrompt = (project: any, contextPackage: any, chap
   '先执行 oh-story 精修策略简报：根据 primary_strategy 和 strategy_order 决定修订重心；rewrite/compress/de_ai/polish 只能指导改稿顺序，不能跳过结构化 findings。',
   'oh-story 系统性去AI三遍法：若 primary_strategy 或 checks 指向 de_ai/deslop，必须按严重度执行；轻度只做 Pass 1，中度做 Pass 1 + Pass 2，重度完整三遍并重写重点段落。',
   'Pass 1：去泛化。删或替换抽象情绪总结句、假深度句、意义膨胀、空洞结论、工整对比句式和装饰性形容词；过度使用“于是/然而/此刻”删掉一半；所有角色说话一样高级时必须区分语气。',
+  '【系统层 Humanize 双轮 · baibai/Bypass 架构网文化】修订时必须内化执行结构重写(Pass A)+人味增强(Pass B)；结构优先于同义替换；禁止论文腔注水；字数锁 ±10%；只输出正文。',
+  humanizeBlock,
   'Pass 2：去书面化。把“机制/结构/逻辑/体系”换成日常表达；抽象名词滥用要直接说事；“进一步/深入/推进/落实”这类体制内用语能删就删；必要术语用白话解释。',
   'Pass 3：回自然感。补具体感官细节、角色说话方式的区分、长短句交错、社会位置感对白、场景特有记忆点和项目特有语言习惯；少即是多，每段只补 1-2 个有功能细节。',
   '定向修订要求：',
@@ -334,7 +342,7 @@ export const buildProseRevisionPrompt = (project: any, contextPackage: any, chap
   prosePromptJson(buildProsePromptContextSnapshot(contextPackage), 6000),
   '',
   '【oh-story 精修策略简报 revision_strategy_brief】',
-  JSON.stringify(revisionStrategyBrief, null, 2).slice(0, 2000),
+  JSON.stringify({ ...revisionStrategyBrief, humanize_dual_pass: humanizeAddon }, null, 2).slice(0, 3200),
   '',
   '【去AI味门禁摘要 deslop_gate_diagnostics】',
   JSON.stringify(review?.deslop_gate_diagnostics || review?.deslopGateDiagnostics || {}, null, 2).slice(0, 2000),

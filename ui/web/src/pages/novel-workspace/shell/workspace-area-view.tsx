@@ -60,6 +60,10 @@ export type NovelWorkspaceAreaViewProps = {
   projectSettings: any
   proseEditorRef: any
   proseQualityLoading: any
+  proseQualityReports: any
+  editorRevisionReports: any
+  applyEditorRevision: any
+  refreshActiveProseQuality: any
   repairActiveDeslopGate: any
   repairContextAndGenerateCurrentChapter: any
   repairWritingQueuePlan: any
@@ -162,6 +166,10 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
     projectSettings,
     proseEditorRef,
     proseQualityLoading,
+    proseQualityReports,
+    editorRevisionReports,
+    applyEditorRevision,
+    refreshActiveProseQuality,
     repairActiveDeslopGate,
     repairContextAndGenerateCurrentChapter,
     repairWritingQueuePlan,
@@ -313,6 +321,11 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
           setRightPanelOpen?.(true)
           setRightPanelTab?.('proseQuality')
         }}
+        proseQualityReports={proseQualityReports}
+        editorRevisionReports={editorRevisionReports}
+        proseQualityLoading={proseQualityLoading}
+        onRefreshProseQuality={() => { void refreshActiveProseQuality?.('manual_refresh') }}
+        onApplyEditorRevision={applyEditorRevision}
         isImmersiveShell={isImmersiveShell}
         onChapterTextChange={(next) => {
           const chapterId = activeChapterId
@@ -416,9 +429,7 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
                     type="primary"
                     loading={group.highlightLoading}
                     disabled={group.highlightDisabled}
-                    onClick={group.highlightAction}
-                  >
-                    启动无人值守
+                    onClick={group.highlightAction}> 启动无人值守
                   </Button>
                 </Space.Compact>
               </Space>
@@ -432,8 +443,7 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
                 type={action.primary ? 'primary' : 'default'}
                 loading={action.loading}
                 disabled={action.disabled}
-                onClick={action.onClick}
-              >
+                onClick={action.onClick}>
                 {action.label}
               </Button>
             ))}

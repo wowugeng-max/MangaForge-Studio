@@ -248,7 +248,7 @@ export default function ModelManager() {
             <Form.Item name="is_active" label="启用" valuePropName="checked"><Switch /></Form.Item>
           </Space>
           <div style={{ marginTop: 16 }}>
-            <Button type="primary" onClick={save} style={{ borderRadius: 10 }}>保存</Button>
+            <Button type="primary" onClick={save} style={{ borderRadius: 10 }}> 保存</Button>
           </div>
         </Form>
       </Drawer>

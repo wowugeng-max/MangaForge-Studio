@@ -89,14 +89,14 @@ try {
     finalSceneBreakdown = selectVerifiedSceneBreakdownUpdate(finalSceneBreakdown, wordTargetCheck.expansion.scene_breakdown, finalText)
     finalContinuityNotes = wordTargetCheck.expansion.continuity_notes?.length ? wordTargetCheck.expansion.continuity_notes : finalContinuityNotes
   }
-  await onStage('word_target', { status: 'success', expanded: wordTargetCheck.expanded, contracted: wordTargetCheck.contracted, soft_pass: wordTargetCheck.word_target_soft_pass, compatibility_pass: wordTargetCheck.word_target_compatibility_pass === true, compatibility_ceiling: wordTargetCheck.compatibility_ceiling, contraction_attempts: wordTargetCheck.contraction?.attempts, word_count: countProseChars(finalText), evaluation: wordTargetCheck.final_evaluation })
+  await onStage('word_target', { status: 'success', expanded: wordTargetCheck.expanded, contracted: wordTargetCheck.contracted, soft_pass: wordTargetCheck.word_target_soft_pass, compatibility_pass: wordTargetCheck.word_target_compatibility_pass === true, compatibility_ceiling: wordTargetCheck.compatibility_ceiling, contraction_attempts: wordTargetCheck.contraction?.attempts, expansion_attempts: wordTargetCheck.expansion?.attempts, word_count: countProseChars(finalText), evaluation: wordTargetCheck.final_evaluation })
 } catch (error: any) {
   await onStage('word_target', { status: 'failed', error: String(error?.message || error), word_target: error?.word_target || wordTarget, evaluation: error?.evaluation, final_evaluation: error?.final_evaluation, contraction_attempts: error?.contraction_attempts, expansion_attempts: error?.expansion_attempts })
   throw error
 }
 if (isDraftOnly) {
-  await onStage('editor', { status: 'skipped', reason: '生产模式：只生成并质检初稿' })
-  await onStage('meme_polish', { status: 'skipped', reason: '生产模式：只生成并质检初稿' })
+  await onStage('editor', { status: 'skipped', reason: '生产模式：跳过商业主编（draft_only / zhuque_fast）' })
+  await onStage('meme_polish', { status: 'skipped', reason: '生产模式：跳过网感润色（draft_only / zhuque_fast）' })
 }
 if (!isDraftOnly) {
   const preEditorText = finalText

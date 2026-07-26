@@ -148,7 +148,7 @@ export function useNovelProjectWorkspaceUiState() {
 
   const shellMode = shellModeForWorkspaceArea(workspaceArea, writingShellMode)
   const isImmersiveShell = deriveIsImmersiveShell(shellMode, workspaceArea)
-  const showGlobalWritingGuidance = workspaceArea !== 'chapterWriting'
+  const showGlobalWritingGuidance = workspaceArea !== 'chapterWriting' && workspaceArea !== 'storyAssets'
   const directoryShellClassName = directoryCollapsed
     ? 'novel-workspace-directory-shell is-collapsed'
     : 'novel-workspace-directory-shell'

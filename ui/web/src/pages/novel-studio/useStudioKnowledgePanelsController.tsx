@@ -31,6 +31,9 @@ export function useStudioKnowledgePanelsController() {
   const [knowledgeQueryResults, setKnowledgeQueryResults] = useState<any[]>([])
   const [knowledgeDetailEntry, setKnowledgeDetailEntry] = useState<any | null>(null)
   const [memoryPalaceOpen, setMemoryPalaceOpen] = useState(false)
+  const [ohStoryPublishKind, setOhStoryPublishKind] = useState<string>('')
+  const [ohStoryPublishInput, setOhStoryPublishInput] = useState('')
+  const [ohStoryLastPublish, setOhStoryLastPublish] = useState<string>('')
 
   const loadKnowledge = async (
     category?: string,
@@ -263,6 +266,103 @@ export function useStudioKnowledgePanelsController() {
     loadSourceCaches: sourceCache.loadSourceCaches,
   })
 
+  const resolveNovelProjectIdByTitle = async (title: string) => {
+    const needle = title.trim()
+    if (!needle) return undefined
+    try {
+      const res = await apiClient.get('/novel/projects')
+      const rows = Array.isArray(res.data) ? res.data : []
+      const exact = rows.find((item: any) => String(item?.title || '').trim() === needle)
+      if (exact?.id) return Number(exact.id)
+      const fuzzy = rows.find((item: any) => String(item?.title || '').includes(needle) || needle.includes(String(item?.title || '')))
+      if (fuzzy?.id) return Number(fuzzy.id)
+    } catch {
+      // ignore resolve errors; publish can still proceed without project id
+    }
+    return undefined
+  }
+
+  const handlePublishOhStoryKnowledge = async (kind: string) => {
+    const projectTitle = (knowledgeProjectTitle || knowledgeProjectDraft || ohStoryPublishInput).trim()
+    const tip = ohStoryPublishInput.trim()
+    if (!projectTitle && !['long_scan', 'short_suite', 'cover'].includes(kind)) {
+      message.warning('请先填写当前项目名或题材关键词，再发布到知识库')
+      return
+    }
+
+    setOhStoryPublishKind(kind)
+    setOhStoryLastPublish('')
+    try {
+      let projectId = Number(feed.feedProjectId || 0) || undefined
+      if (kind === 'ending_reserve' && !projectId) {
+        projectId = await resolveNovelProjectIdByTitle(projectTitle)
+        if (!projectId) {
+          message.warning('终局账本需要关联真实小说项目：请把筛选项目名写成已有小说项目名')
+          return
+        }
+      }
+
+      const input: Record<string, any> = {
+        title: tip || projectTitle,
+        book_title: tip || projectTitle,
+        project_title: projectTitle,
+      }
+      if (tip) {
+        input.genre = tip
+        input.tags = tip
+        input.platform = tip
+      } else if (projectTitle) {
+        input.genre = projectTitle
+      }
+
+      const res = await apiClient.post('/novel/oh-story/knowledge/publish', {
+        kind,
+        project_id: projectId,
+        project_title: projectTitle || undefined,
+        auto_store: true,
+        input,
+      })
+
+      const stored = res.data?.stored
+      const entryCount = Array.isArray(res.data?.entries) ? res.data.entries.length : 0
+      const storedCount = Array.isArray(stored)
+        ? stored.length
+        : Array.isArray(stored?.entries)
+          ? stored.entries.length
+          : stored?.id
+            ? 1
+            : entryCount
+      if (!entryCount) {
+        message.warning('未生成可入库条目，请检查题材关键词或项目数据')
+        setOhStoryLastPublish('未生成条目')
+        return
+      }
+
+      const kindLabelMap: Record<string, string> = {
+        long_analyze: '拆文计划',
+        long_scan: '扫榜计划',
+        import: '导入计划',
+        cover: '封面简报',
+        short_suite: '短篇计划',
+        genre_card: '题材卡',
+        ending_reserve: '终局账本',
+      }
+      const label = kindLabelMap[kind] || kind
+      message.success(`已发布${label}到知识库（${storedCount || entryCount} 条）`)
+      setOhStoryLastPublish(`最近发布：${label} · ${storedCount || entryCount} 条`)
+      if (projectTitle && projectTitle !== knowledgeProjectTitle) {
+        setKnowledgeProjectTitle(projectTitle)
+        setKnowledgeProjectDraft(projectTitle)
+      }
+      await loadKnowledge(knowledgeCategory || undefined, projectTitle || knowledgeProjectTitle)
+    } catch (error: any) {
+      message.error(String(error?.response?.data?.error || error?.message || '发布失败'))
+      setOhStoryLastPublish('发布失败')
+    } finally {
+      setOhStoryPublishKind('')
+    }
+  }
+
   const handleOpenKnowledge = () => {
     setKnowledgeOpen(true)
     updateKnowledgeRoute({ panel: 'knowledge', action: null })
@@ -355,6 +455,11 @@ export function useStudioKnowledgePanelsController() {
     renderMetaTags,
     formatKnowledgeCategory,
     knowledgeEmpty,
+    ohStoryPublishKind,
+    ohStoryPublishInput,
+    setOhStoryPublishInput,
+    ohStoryLastPublish,
+    handlePublishOhStoryKnowledge,
     handleOpenKnowledge,
     handleCloseKnowledge,
     handleOpenMemoryPalace,

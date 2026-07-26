@@ -8,7 +8,9 @@ import {
   listNovelChapterSettingUsage,
   listNovelCharacters,
   listNovelChapters,
+  listNovelWorkspaceChapters,
   listNovelOutlines,
+  listNovelReviews,
   listNovelSettingEntities,
   listNovelWorldbuilding,
   replaceNovelChapterSettingUsage,
@@ -20,6 +22,24 @@ import { formatReviewIssueForStorage, getNovelPayload, parseJsonLikePayload, saf
 import { buildSettingRelationshipGraph } from './novel-setting-relationship-graph'
 
 import type { NovelSettingRoutesContext } from './novel-setting-helpers'
+
+import {
+  applyProjectIntakeQueue,
+  buildAssetGapAudit,
+  buildChapterAssetPack,
+  buildCharacterStatusOverview,
+  buildRelationMasterTable,
+  collectPendingIntakeQueue,
+  loadAssetUpgradeBundle,
+  runAssetGapFill,
+  runProseAssetBackfill,
+} from './novel-setting-asset-upgrade'
+import {
+  buildChapterWritingBrief,
+  buildForeshadowLifecycleBoard,
+  buildStoryRelationMaster,
+  materializeStoryRelations,
+} from './novel-setting-story-relations'
 import {
   STORYLINE_TYPES,
   SETTING_TYPES,
@@ -49,7 +69,7 @@ export function registerNovelSettingRoutes(app: Express, ctx: NovelSettingRoutes
     const [settings, characters, chapters, usage] = await Promise.all([
       listNovelSettingEntities(activeWorkspace, projectId),
       listNovelCharacters(activeWorkspace, projectId),
-      listNovelChapters(activeWorkspace, projectId),
+      listNovelWorkspaceChapters(activeWorkspace, projectId),
       listNovelChapterSettingUsage(activeWorkspace, projectId),
     ])
     res.json(buildSettingRelationshipGraph({ settings, characters, chapters, usage }))
@@ -63,7 +83,7 @@ export function registerNovelSettingRoutes(app: Express, ctx: NovelSettingRoutes
     const [settings, characters, chapters, usage] = await Promise.all([
       listNovelSettingEntities(activeWorkspace, projectId),
       listNovelCharacters(activeWorkspace, projectId),
-      listNovelChapters(activeWorkspace, projectId),
+      listNovelWorkspaceChapters(activeWorkspace, projectId),
       listNovelChapterSettingUsage(activeWorkspace, projectId),
     ])
     const graph = buildSettingRelationshipGraph({ settings, characters, chapters, usage })
@@ -378,6 +398,224 @@ export function registerNovelSettingRoutes(app: Express, ctx: NovelSettingRoutes
     const appliedStateUpdates = await applyPendingStateUpdates(activeWorkspace, projectId, chapter, settings, usage, updates)
     res.json({ ok: true, applied_state_updates: appliedStateUpdates, total: appliedStateUpdates.length })
   })
+
+
+  app.get('/api/novel/projects/:id/assets/overview', async (req, res) => {
+    const activeWorkspace = ctx.getWorkspace()
+    const projectId = Number(req.params.id)
+    const project = await ctx.getProject(activeWorkspace, projectId)
+    if (!project) return res.status(404).json({ error: 'project not found' })
+    const chapterId = req.query.chapter_id ? Number(req.query.chapter_id) : undefined
+    const bundle = await loadAssetUpgradeBundle(activeWorkspace, project, chapterId)
+    res.json({ ok: true, ...bundle })
+  })
+
+  app.get('/api/novel/projects/:id/assets/character-status', async (req, res) => {
+    const activeWorkspace = ctx.getWorkspace()
+    const projectId = Number(req.params.id)
+    const project = await ctx.getProject(activeWorkspace, projectId)
+    if (!project) return res.status(404).json({ error: 'project not found' })
+    const [characters, settings, chapters] = await Promise.all([
+      listNovelCharacters(activeWorkspace, projectId),
+      listNovelSettingEntities(activeWorkspace, projectId),
+      listNovelChapters(activeWorkspace, projectId),
+    ])
+    res.json(buildCharacterStatusOverview({
+      characters,
+      settings,
+      storyState: project.reference_config?.story_state || {},
+      chapters,
+    }))
+  })
+
+  app.get('/api/novel/projects/:id/assets/relations', async (req, res) => {
+    const activeWorkspace = ctx.getWorkspace()
+    const projectId = Number(req.params.id)
+    const project = await ctx.getProject(activeWorkspace, projectId)
+    if (!project) return res.status(404).json({ error: 'project not found' })
+    const [settings, characters, chapters, usage] = await Promise.all([
+      listNovelSettingEntities(activeWorkspace, projectId),
+      listNovelCharacters(activeWorkspace, projectId),
+      listNovelChapters(activeWorkspace, projectId),
+      listNovelChapterSettingUsage(activeWorkspace, projectId),
+    ])
+    res.json(buildRelationMasterTable({ settings, characters, chapters, usage }))
+  })
+
+  app.get('/api/novel/projects/:id/assets/gap-audit', async (req, res) => {
+    const activeWorkspace = ctx.getWorkspace()
+    const projectId = Number(req.params.id)
+    const project = await ctx.getProject(activeWorkspace, projectId)
+    if (!project) return res.status(404).json({ error: 'project not found' })
+    const [characters, settings, chapters, worldbuilding, outlines, usage] = await Promise.all([
+      listNovelCharacters(activeWorkspace, projectId),
+      listNovelSettingEntities(activeWorkspace, projectId),
+      listNovelChapters(activeWorkspace, projectId),
+      listNovelWorldbuilding(activeWorkspace, projectId),
+      listNovelOutlines(activeWorkspace, projectId),
+      listNovelChapterSettingUsage(activeWorkspace, projectId),
+    ])
+    res.json(buildAssetGapAudit({
+      characters,
+      settings,
+      chapters,
+      worldbuilding,
+      outlines,
+      storyState: project.reference_config?.story_state || {},
+      usage,
+    }))
+  })
+
+  app.get('/api/novel/projects/:id/assets/intake-queue', async (req, res) => {
+    const activeWorkspace = ctx.getWorkspace()
+    const projectId = Number(req.params.id)
+    const project = await ctx.getProject(activeWorkspace, projectId)
+    if (!project) return res.status(404).json({ error: 'project not found' })
+    const [reviews, settings, characters] = await Promise.all([
+      listNovelReviews(activeWorkspace, projectId),
+      listNovelSettingEntities(activeWorkspace, projectId),
+      listNovelCharacters(activeWorkspace, projectId),
+    ])
+    res.json(collectPendingIntakeQueue({ reviews, settings, characters }))
+  })
+
+  app.post('/api/novel/projects/:id/assets/intake-queue/apply', async (req, res) => {
+    const activeWorkspace = ctx.getWorkspace()
+    const projectId = Number(req.params.id)
+    const project = await ctx.getProject(activeWorkspace, projectId)
+    if (!project) return res.status(404).json({ error: 'project not found' })
+    const assets = Array.isArray(req.body?.assets) ? req.body.assets : []
+    const result = await applyProjectIntakeQueue(activeWorkspace, projectId, assets)
+    res.json({ ok: true, ...result })
+  })
+
+  app.get('/api/novel/chapters/:chapterId/assets/pack', async (req, res) => {
+    const activeWorkspace = ctx.getWorkspace()
+    const projectId = Number(req.query.project_id || req.body?.project_id || 0)
+    const chapterId = Number(req.params.chapterId)
+    const project = await ctx.getProject(activeWorkspace, projectId)
+    if (!project) return res.status(404).json({ error: 'project not found' })
+    const [chapters, settings, characters, usage] = await Promise.all([
+      listNovelChapters(activeWorkspace, projectId),
+      listNovelSettingEntities(activeWorkspace, projectId),
+      listNovelCharacters(activeWorkspace, projectId),
+      listNovelChapterSettingUsage(activeWorkspace, projectId, chapterId),
+    ])
+    const chapter = chapters.find(item => item.id === chapterId)
+    if (!chapter) return res.status(404).json({ error: 'chapter not found' })
+    res.json(buildChapterAssetPack({
+      chapter,
+      settings,
+      characters,
+      usage,
+      storyState: project.reference_config?.story_state || {},
+    }))
+  })
+
+  app.post('/api/novel/projects/:id/assets/backfill-from-prose', async (req, res) => {
+    const activeWorkspace = ctx.getWorkspace()
+    const projectId = Number(req.params.id)
+    const project = await ctx.getProject(activeWorkspace, projectId)
+    if (!project) return res.status(404).json({ error: 'project not found' })
+    const result = await runProseAssetBackfill(activeWorkspace, project, {
+      modelId: req.body?.model_id || req.body?.modelId,
+      dryRun: req.body?.dry_run === true || req.body?.dryRun === true,
+      maxChapters: req.body?.max_chapters || req.body?.maxChapters,
+    })
+    res.json(result)
+  })
+
+
+  app.get('/api/novel/projects/:id/assets/story-relations', async (req, res) => {
+    const activeWorkspace = ctx.getWorkspace()
+    const projectId = Number(req.params.id)
+    const project = await ctx.getProject(activeWorkspace, projectId)
+    if (!project) return res.status(404).json({ error: 'project not found' })
+    const [settings, characters] = await Promise.all([
+      listNovelSettingEntities(activeWorkspace, projectId),
+      listNovelCharacters(activeWorkspace, projectId),
+    ])
+    const storyState = project?.reference_config?.story_state || project?.story_state || {}
+    res.json(buildStoryRelationMaster({ storyState, settings, characters }))
+  })
+
+  app.get('/api/novel/projects/:id/assets/foreshadow-lifecycle', async (req, res) => {
+    const activeWorkspace = ctx.getWorkspace()
+    const projectId = Number(req.params.id)
+    const project = await ctx.getProject(activeWorkspace, projectId)
+    if (!project) return res.status(404).json({ error: 'project not found' })
+    const [settings, chapters] = await Promise.all([
+      listNovelSettingEntities(activeWorkspace, projectId),
+      listNovelChapters(activeWorkspace, projectId),
+    ])
+    const storyState = project?.reference_config?.story_state || project?.story_state || {}
+    res.json(buildForeshadowLifecycleBoard({
+      storyState,
+      settings,
+      chapters,
+      includeChapterHooks: req.query.include_hooks === '1' || req.query.includeHooks === '1',
+    }))
+  })
+
+  app.get('/api/novel/projects/:id/assets/chapter-brief', async (req, res) => {
+    const activeWorkspace = ctx.getWorkspace()
+    const projectId = Number(req.params.id)
+    const project = await ctx.getProject(activeWorkspace, projectId)
+    if (!project) return res.status(404).json({ error: 'project not found' })
+    const chapterId = Number(req.query.chapter_id || req.query.chapterId || 0)
+    const chapterNo = Number(req.query.chapter_no || req.query.chapterNo || 0)
+    const [settings, characters, chapters] = await Promise.all([
+      listNovelSettingEntities(activeWorkspace, projectId),
+      listNovelCharacters(activeWorkspace, projectId),
+      listNovelChapters(activeWorkspace, projectId),
+    ])
+    const chapter = chapters.find(item => Number(item.id) === chapterId)
+      || chapters.find(item => Number(item.chapter_no) === chapterNo)
+      || chapters.slice().sort((a, b) => Number(b.chapter_no || 0) - Number(a.chapter_no || 0))[0]
+      || null
+    const storyState = project?.reference_config?.story_state || project?.story_state || {}
+    res.json(buildChapterWritingBrief({
+      chapter,
+      storyState,
+      settings,
+      characters,
+    }))
+  })
+
+  app.post('/api/novel/projects/:id/assets/story-relations/materialize', async (req, res) => {
+    const activeWorkspace = ctx.getWorkspace()
+    const projectId = Number(req.params.id)
+    const project = await ctx.getProject(activeWorkspace, projectId)
+    if (!project) return res.status(404).json({ error: 'project not found' })
+    const storyState = project?.reference_config?.story_state || project?.story_state || {}
+    const result = await materializeStoryRelations(activeWorkspace, projectId, {
+      storyState,
+      rows: Array.isArray(req.body?.rows) ? req.body.rows : undefined,
+      dryRun: req.body?.dry_run === true || req.body?.dryRun === true,
+    })
+    await createNovelReview(activeWorkspace, {
+      project_id: projectId,
+      review_type: 'story_relation_materialize',
+      status: 'ok',
+      summary: `关系主表物化：新建 ${result.summary.created}，更新 ${result.summary.updated}，角色镜像 ${result.summary.character_patches}`,
+      issues: result.rows.slice(0, 40).map((row: any) => `${row.party_a}↔${row.party_b}：${row.current_status}`),
+      payload: JSON.stringify(result),
+    })
+    res.json(result)
+  })
+
+  app.post('/api/novel/projects/:id/assets/fill-gaps', async (req, res) => {
+    const activeWorkspace = ctx.getWorkspace()
+    const projectId = Number(req.params.id)
+    const project = await ctx.getProject(activeWorkspace, projectId)
+    if (!project) return res.status(404).json({ error: 'project not found' })
+    const result = await runAssetGapFill(activeWorkspace, project, {
+      modelId: req.body?.model_id || req.body?.modelId,
+      dryRun: req.body?.dry_run === true || req.body?.dryRun === true,
+    })
+    res.json(result)
+  })
+
 
   app.post('/api/novel/chapters/:chapterId/discovered-assets/apply', async (req, res) => {
     const activeWorkspace = ctx.getWorkspace()

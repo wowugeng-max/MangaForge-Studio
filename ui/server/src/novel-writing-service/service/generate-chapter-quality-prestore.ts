@@ -24,6 +24,7 @@ export async function runQualityLoopAndPrestoreSetup(args: {
   qualityThreshold: number
   isDraftOnly: boolean
   isDraftReviewOnly: boolean
+  isZhuqueFast?: boolean
   generationContract: any
   contextPackage: any
   wordTarget: any

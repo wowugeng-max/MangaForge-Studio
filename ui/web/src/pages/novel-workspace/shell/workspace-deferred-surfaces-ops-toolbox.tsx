@@ -294,74 +294,72 @@ export function NovelWorkspaceDeferredOpsToolbox(props: NovelWorkspaceDeferredSu
                         type="primary"
                         loading={commercialToolLoading === 'unattendedGoal'}
                         disabled={!selectedModelId}
-                        onClick={startUnattendedWritingGoal}
-                      >
-                        启动无人值守
+                        onClick={startUnattendedWritingGoal}> 启动无人值守
                       </Button>
                     </Space.Compact>
                   </Space>
                 </Card>
-                <Button block loading={commercialToolLoading === 'productionDesk'} onClick={openProductionDesk}>章节生产台</Button>
-                <Button block loading={commercialToolLoading === 'materialRepair'} onClick={openMaterialRepairPlan}>材料补齐计划</Button>
-                <Button block loading={commercialToolLoading === 'readyGroup'} onClick={startReadyChapterGroupGeneration}>智能章节群入队</Button>
-                <Button block loading={commercialToolLoading === 'future100Group'} onClick={startFuture100ChapterGroupGeneration}>从未来100章骨架入队</Button>
-                <Button block loading={commercialToolLoading === 'queue'} onClick={openRunQueue}>后台任务队列</Button>
-                <Button block loading={commercialToolLoading === 'queueWorker'} onClick={startRunQueueWorker}>启动后台 worker</Button>
-                <Button block loading={commercialToolLoading === 'queueStop'} onClick={stopRunQueueWorker}>停止后台 worker</Button>
-                <Button block loading={commercialToolLoading === 'queueRecover'} onClick={recoverRunQueue}>恢复后台队列</Button>
-                <Button block loading={commercialToolLoading === 'metrics'} onClick={openProductionMetrics}>成本质量仪表盘</Button>
-                <Button block loading={commercialToolLoading === 'longformTrends'} onClick={openLongformProductionTrends}>长线生产趋势报表</Button>
-                <Button block loading={commercialToolLoading === 'longformRepair'} onClick={createLongformProductionRepairQueue}>生成长线生产修复任务</Button>
-                <Button block loading={commercialToolLoading === 'modelDiagnostics'} onClick={openModelDiagnostics}>模型服务诊断（配置）</Button>
+                <Button block loading={commercialToolLoading === 'productionDesk'} onClick={openProductionDesk}> 章节生产台</Button>
+                <Button block loading={commercialToolLoading === 'materialRepair'} onClick={openMaterialRepairPlan}> 材料补齐计划</Button>
+                <Button block loading={commercialToolLoading === 'readyGroup'} onClick={startReadyChapterGroupGeneration}> 智能章节群入队</Button>
+                <Button block loading={commercialToolLoading === 'future100Group'} onClick={startFuture100ChapterGroupGeneration}> 从未来100章骨架入队</Button>
+                <Button block loading={commercialToolLoading === 'queue'} onClick={openRunQueue}> 后台任务队列</Button>
+                <Button block loading={commercialToolLoading === 'queueWorker'} onClick={startRunQueueWorker}> 启动后台 worker</Button>
+                <Button block loading={commercialToolLoading === 'queueStop'} onClick={stopRunQueueWorker}> 停止后台 worker</Button>
+                <Button block loading={commercialToolLoading === 'queueRecover'} onClick={recoverRunQueue}> 恢复后台队列</Button>
+                <Button block loading={commercialToolLoading === 'metrics'} onClick={openProductionMetrics}> 成本质量仪表盘</Button>
+                <Button block loading={commercialToolLoading === 'longformTrends'} onClick={openLongformProductionTrends}> 长线生产趋势报表</Button>
+                <Button block loading={commercialToolLoading === 'longformRepair'} onClick={createLongformProductionRepairQueue}> 生成长线生产修复任务</Button>
+                <Button block loading={commercialToolLoading === 'modelDiagnostics'} onClick={openModelDiagnostics}> 模型服务诊断（配置）</Button>
                 <Button block onClick={() => setAgentAuditOpen(true)}>Agent 调用审计</Button>
-                <Button block loading={commercialToolLoading === 'approval'} onClick={openApprovalPolicyEditor}>审批关卡策略</Button>
+                <Button block loading={commercialToolLoading === 'approval'} onClick={openApprovalPolicyEditor}> 审批关卡策略</Button>
               </Space>
             </Card>
             <Card size="small" title="质量基准">
               <Space direction="vertical" style={{ width: '100%' }}>
-                <Button block onClick={openChapterQualityCard}>当前章交稿质检</Button>
+                <Button block onClick={openChapterQualityCard}> 当前章交稿质检</Button>
                 <Button block onClick={() => setQualityBenchmarkOpen(true)}>质量评测基准面板</Button>
                 <Button block onClick={() => setReviewAnnotationsOpen(true)}>章节审阅批注</Button>
                 <Button block onClick={() => setConsistencyGraphOpen(true)}>全书一致性图谱</Button>
-                <Button block loading={commercialToolLoading === 'continuityAudit'} onClick={openContinuityAudit}>全书连续性检查</Button>
-                <Button block loading={commercialToolLoading === 'first30Retention'} onClick={runFirst30RetentionDiagnosis}>前30章留存诊断</Button>
-                <Button block loading={commercialToolLoading === 'first30Repair'} onClick={createFirst30RetentionRepairQueue}>生成前30章留存修复任务</Button>
-                <Button block loading={commercialToolLoading === 'mechanicalQa'} onClick={runMechanicalQa}>机械质检规则引擎（本地）</Button>
-                <Button block type="primary" loading={commercialToolLoading === 'mechanicalQaLlm'} onClick={runMechanicalQaLlmReview}>AI 复核机械质检</Button>
-                <Button block loading={commercialToolLoading === 'mechanicalRepair'} onClick={createMechanicalQaRepairQueue}>机械质检修复任务</Button>
-                <Button block loading={commercialToolLoading === 'propagationDebt'} onClick={refreshPropagationDebt}>传播债务队列（本地）</Button>
-                <Button block type="primary" loading={commercialToolLoading === 'propagationDebtLlm'} onClick={runPropagationDebtLlmPlan}>AI 生成传播债务修复方案</Button>
-                <Button block loading={commercialToolLoading === 'benchmark'} onClick={runQualityBenchmark}>项目质量基准测试</Button>
-                <Button block loading={commercialToolLoading === 'versionReview'} onClick={runVersionReviewForActiveChapter}>当前章版本评审</Button>
-                <Button block loading={commercialToolLoading === 'similarity'} onClick={runSimilarityForActiveChapter}>当前章相似度检测</Button>
-                <Button block loading={commercialToolLoading === 'migrationPlan'} onClick={runReferenceMigrationPlan}>当前章参考迁移计划</Button>
+                <Button block loading={commercialToolLoading === 'continuityAudit'} onClick={openContinuityAudit}> 全书连续性检查</Button>
+                <Button block loading={commercialToolLoading === 'first30Retention'} onClick={runFirst30RetentionDiagnosis}> 前30章留存诊断</Button>
+                <Button block loading={commercialToolLoading === 'first30Repair'} onClick={createFirst30RetentionRepairQueue}> 生成前30章留存修复任务</Button>
+                <Button block loading={commercialToolLoading === 'mechanicalQa'} onClick={runMechanicalQa}> 机械质检规则引擎（本地）</Button>
+                <Button block type="primary" loading={commercialToolLoading === 'mechanicalQaLlm'} onClick={runMechanicalQaLlmReview}> AI 复核机械质检</Button>
+                <Button block loading={commercialToolLoading === 'mechanicalRepair'} onClick={createMechanicalQaRepairQueue}> 机械质检修复任务</Button>
+                <Button block loading={commercialToolLoading === 'propagationDebt'} onClick={refreshPropagationDebt}> 传播债务队列（本地）</Button>
+                <Button block type="primary" loading={commercialToolLoading === 'propagationDebtLlm'} onClick={runPropagationDebtLlmPlan}> AI 生成传播债务修复方案</Button>
+                <Button block loading={commercialToolLoading === 'benchmark'} onClick={runQualityBenchmark}> 项目质量基准测试</Button>
+                <Button block loading={commercialToolLoading === 'versionReview'} onClick={runVersionReviewForActiveChapter}> 当前章版本评审</Button>
+                <Button block loading={commercialToolLoading === 'similarity'} onClick={runSimilarityForActiveChapter}> 当前章相似度检测</Button>
+                <Button block loading={commercialToolLoading === 'migrationPlan'} onClick={runReferenceMigrationPlan}> 当前章参考迁移计划</Button>
               </Space>
             </Card>
             <Card size="small" title="规划与选题">
               <Space direction="vertical" style={{ width: '100%' }}>
-                <Button block loading={commercialToolLoading === 'topic'} onClick={runTopicValidation}>原创选题验证</Button>
-                <Button block loading={commercialToolLoading === 'longformCreationDiagnosis'} onClick={runLongformCreationDiagnosis}>长篇创作诊断</Button>
-                <Button block loading={commercialToolLoading === 'longformPressure'} onClick={runLongformPressureTest}>300万字长线压力测试</Button>
-                <Button block loading={commercialToolLoading === 'future100Audit'} onClick={runFuture100SkeletonAudit}>未来100章骨架检查</Button>
-                <Button block type="primary" loading={commercialToolLoading === 'future100Generate'} onClick={generateFuture100Skeleton}>AI 生成未来100章骨架</Button>
-                <Button block loading={commercialToolLoading === 'rollingPlan'} onClick={runRollingPlan}>未来 10 章滚动规划</Button>
-                <Button block loading={commercialToolLoading === 'referenceDiagnosis'} onClick={openReferenceKnowledgeDiagnosis}>参考知识诊断</Button>
+                <Button block loading={commercialToolLoading === 'topic'} onClick={runTopicValidation}> 原创选题验证</Button>
+                <Button block loading={commercialToolLoading === 'longformCreationDiagnosis'} onClick={runLongformCreationDiagnosis}> 长篇创作诊断</Button>
+                <Button block loading={commercialToolLoading === 'longformPressure'} onClick={runLongformPressureTest}> 300万字长线压力测试</Button>
+                <Button block loading={commercialToolLoading === 'future100Audit'} onClick={runFuture100SkeletonAudit}> 未来100章骨架检查</Button>
+                <Button block type="primary" loading={commercialToolLoading === 'future100Generate'} onClick={generateFuture100Skeleton}> AI 生成未来100章骨架</Button>
+                <Button block loading={commercialToolLoading === 'rollingPlan'} onClick={runRollingPlan}> 未来 10 章滚动规划</Button>
+                <Button block loading={commercialToolLoading === 'referenceDiagnosis'} onClick={openReferenceKnowledgeDiagnosis}> 参考知识诊断</Button>
                 <Button block onClick={() => { setCommercialToolsOpen(false); setReferenceEngineeringOpen(true) }}>多参考融合控制台</Button>
-                <Button block loading={commercialToolLoading === 'genreTemplates'} onClick={openGenreTemplates}>类型模板方法库（模板）</Button>
+                <Button block loading={commercialToolLoading === 'genreTemplates'} onClick={openGenreTemplates}> 类型模板方法库（模板）</Button>
               </Space>
             </Card>
             <Card size="small" title="Agent 配置">
               <Space direction="vertical" style={{ width: '100%' }}>
-                <Button block loading={commercialToolLoading === 'agentConfig'} onClick={openAgentConfigEditor}>提示词与 Agent 配置</Button>
-                <Button block onClick={openWritingBibleEditor}>结构化写作圣经</Button>
-                <Button block onClick={openStoryStateEditor}>状态机人工校正</Button>
+                <Button block loading={commercialToolLoading === 'agentConfig'} onClick={openAgentConfigEditor}> 提示词与 Agent 配置</Button>
+                <Button block onClick={openWritingBibleEditor}> 结构化写作圣经</Button>
+                <Button block onClick={openStoryStateEditor}> 状态机人工校正</Button>
               </Space>
             </Card>
             <Card size="small" title="交付导出">
               <Space direction="vertical" style={{ width: '100%' }}>
                 <Button block onClick={() => setExportDeliveryOpen(true)}>导出 TXT / Markdown</Button>
-                <Button block loading={commercialToolLoading === 'backup'} onClick={createBackupSnapshot}>创建项目备份快照</Button>
-                <Button block onClick={downloadBackupPackage}>下载完整项目包 JSON</Button>
+                <Button block loading={commercialToolLoading === 'backup'} onClick={createBackupSnapshot}> 创建项目备份快照</Button>
+                <Button block onClick={downloadBackupPackage}> 下载完整项目包 JSON</Button>
                 <Button block loading={commercialToolLoading === 'backupImport'} onClick={() => setBackupImportOpen(true)}>导入项目备份 JSON</Button>
                 <Button block onClick={() => setQualityBenchmarkOpen(true)}>导出前质量基准</Button>
                 <Button block onClick={() => setConsistencyGraphOpen(true)}>导出前一致性图谱</Button>

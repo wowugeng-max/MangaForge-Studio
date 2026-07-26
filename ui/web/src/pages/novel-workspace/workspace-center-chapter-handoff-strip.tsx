@@ -84,7 +84,7 @@ export function WorkspaceChapterHandoffStrip(props: Record<string, any>) {
         </div>
       </div>
       <Button
-        className="novel-chapter-handoff-action"
+        className="novel-chapter-handoff-action novel-btn-crystal novel-btn-crystal-display"
         type={chapterHandoffDesk.status === 'ready' ? 'primary' : 'default'}
         size="small"
         loading={deliveryActionLoading && chapterHandoffDesk.status !== 'ready'}

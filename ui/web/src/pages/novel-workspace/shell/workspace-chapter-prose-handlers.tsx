@@ -2,6 +2,7 @@ import React from 'react'
 import { message, Modal } from 'antd'
 import { chapterHasProse, displayValue } from '../utils'
 import { renderGenerationResultDiffContentView } from './workspace-commercial-ops-views'
+import { isAbortError, proseStreamControl } from '../prose-stream-control'
 
 export type ChapterProseHandlerDeps = {
   proseBatchCancelRef: any
@@ -85,6 +86,8 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
     setStreamingPercent(10)
     setGenerationPipeline([])
     setGeneratingProse(true)
+    const streamController = proseStreamControl.begin()
+    const streamSignal = streamController.signal
     try {
       const ctx = {
         worldbuilding: worldbuilding[0] || null,
@@ -96,6 +99,7 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+          signal: streamSignal,
           body: JSON.stringify({
             project_id: projectId, model_id: selectedModelId,
             ...chapterWordTargetPayload(),
@@ -167,12 +171,34 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
       setRightPanelTab('proseQuality')
       message.success(`已使用 ${done?.result?.modelName || '所选模型'} 生成正文`)
     } catch (error: any) {
-      setStreamingProgress('生成失败'); setStreamingPercent(0)
-      message.error(error?.message || '正文生成失败')
+      if (isAbortError(error) || streamSignal.aborted) {
+        setStreamingProgress('已取消生成')
+        setStreamingPercent(0)
+        message.info('已取消正文生成，可继续浏览或切换章节')
+      } else {
+        setStreamingProgress('生成失败'); setStreamingPercent(0)
+        message.error(error?.message || '正文生成失败')
+      }
     } finally {
+      proseStreamControl.end(streamController)
       setGeneratingProse(false)
-      setTimeout(() => { setStreamingChapterId(null); setStreamingPercent(0) }, 1500)
+      setTimeout(() => { setStreamingChapterId(null); setStreamingPercent(0); setStreamingProgress(prev => prev === '已取消生成' || prev === '生成失败' ? prev : '') }, 1500)
     }
+  }
+
+  const cancelCurrentChapterProse = () => {
+    // Abort first (no-op if already aborted by proseStreamControl.cancel).
+    proseStreamControl.controller?.abort()
+    proseStreamControl.controller = null
+    setStreamingProgress('已取消生成')
+    setStreamingPercent(0)
+    setGeneratingProse(false)
+  }
+  // UI unlock path used by the shared cancel control / stop button.
+  proseStreamControl.onCancel = () => {
+    setStreamingProgress('已取消生成')
+    setStreamingPercent(0)
+    setGeneratingProse(false)
   }
 
   const repairContextAndGenerateCurrentChapter = async () => {
@@ -180,6 +206,7 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
     if (!selectedModelId) return message.warning('请先选择模型')
     if (!await flushPendingSave()) return
     const targetChapterId = activeChapter.id
+    const repairController = proseStreamControl.begin()
     setGeneratingProse(true)
     setStreamingChapterId(targetChapterId)
     setStreamingText('')
@@ -189,7 +216,7 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
       const res = await apiClient.post(`/novel/chapters/${targetChapterId}/auto-repair-context`, {
         project_id: projectId,
         model_id: selectedModelId,
-      })
+      }, { signal: repairController.signal })
       const applied = Array.isArray(res.data?.applied) ? res.data.applied : []
       const warnings = Array.isArray(res.data?.warnings) ? res.data.warnings : []
       await loadProjectModules()
@@ -199,10 +226,20 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
         message.success(applied.length ? `已自动补齐 ${applied.length} 项上下文材料` : '上下文材料无需补齐')
       }
     } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '上下文自动补齐失败')
+      if (isAbortError(error) || repairController.signal.aborted) {
+        setStreamingProgress('已取消生成')
+        setStreamingPercent(0)
+        message.info('已取消材料补齐')
+      } else {
+        message.error(error?.response?.data?.error || error?.message || '上下文自动补齐失败')
+        setStreamingProgress('生成失败')
+        setStreamingPercent(0)
+      }
+      proseStreamControl.end(repairController)
       setGeneratingProse(false)
       return
     }
+    proseStreamControl.end(repairController)
     setGeneratingProse(false)
     await generateCurrentChapterProse({ allowIncomplete: true, forceSceneCards: true, targetChapterId })
   }
@@ -372,5 +409,6 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
     stepGenerateProse,
     generateCurrentChapterProse,
     repairContextAndGenerateCurrentChapter,
+    cancelCurrentChapterProse,
   }
 }

@@ -762,7 +762,7 @@ describe('commercial writing workspace UI shell b b', () => {
     const projectWorkspaceCss = source('../NovelProjectWorkspace.css')
 
     expect(projectWorkspace).toContain('showGlobalWritingGuidance')
-    expect(projectWorkspace).toContain("workspaceArea !== 'chapterWriting'")
+    expect(projectWorkspace).toContain("workspaceArea !== 'chapterWriting' && workspaceArea !== 'storyAssets'")
     expect(projectWorkspace).toContain('{showGlobalWritingGuidance && (')
     expect(projectWorkspace).toContain('{showGlobalWritingGuidance && renderSerialPipeline()}')
     expect(projectWorkspaceCss).toContain('.novel-workspace-directory-shell.is-collapsed')

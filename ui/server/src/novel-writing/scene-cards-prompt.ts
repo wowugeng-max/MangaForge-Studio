@@ -1,9 +1,19 @@
 import { buildProsePromptContextSnapshot, prosePromptJson } from './prose-prompt-context'
+import {
+  buildWritingPrecisionPlan,
+  formatSceneCardPrecisionPrompt,
+} from './writing-precision-prompt'
 
 export function buildSceneCardsPrompt(project: any, contextPackage: any) {
   const cleanContext = buildProsePromptContextSnapshot(contextPackage)
+  const writingPrecisionPlan = buildWritingPrecisionPlan({
+    contextPackage,
+    modelRuntime: contextPackage?.runtime_model || contextPackage?.model_runtime || null,
+    modelFamilyStrategy: contextPackage?.model_family_strategy || null,
+  })
   return [
     '任务：为当前章节生成可人工确认的场景卡。场景卡是正文生成前的蓝图，不要写完整正文。',
+    ...formatSceneCardPrecisionPrompt(writingPrecisionPlan),
     `作品标题：${project.title}`,
     `目标章节：第${contextPackage?.chapter_target?.chapter_no || '?'}章《${contextPackage?.chapter_target?.title || '无标题'}》`,
     '必须以 chapter_target.summary、chapter_target.conflict、chapter_target.ending_hook 为准重建本章场景卡。',
@@ -14,7 +24,7 @@ export function buildSceneCardsPrompt(project: any, contextPackage: any) {
     '【结构化上下文包】',
     prosePromptJson(cleanContext, 9000),
     '',
-    '输出 JSON，字段 scene_cards(array)。每个场景卡包含：scene_no, title, scene_type, location, characters_present(array), purpose_tag, purpose_tags(array), chapter_positioning, pressure_level, chapter_positioning_role, benchmark_structure_coordinate, purpose, conflict, conflict_ladder_step, motivation_source, opposing_force, blocked_desire, protagonist_agency_action, no_exit_reason, event_value_change, next_conflict_seed, visible_line_role, hidden_line_seed, ab_weave_role, required_beats(array), action_beats(array), beat, opening_hook, reader_payoff, fear_point, rule_pressure, information_gap, reversal, ending_hook_seed, character_voice, dialogue_goals(array), style_directives(array), benchmark_recall_directives(array), concept_anchor_rules(array), prose_craft_directives(array), relationship_progression_plan, relationship_buffer_zone, supporting_character_action, attitude_shift_checkpoint, relationship_next_hook, showoff_stage_chain, spectator_interest_shift, secondary_showoff_effect, combat_result_type, combat_dimension_plan, combat_reversal_plan, sensory_anchor, serial_risk_repairs(array), recent_fatigue_action, emotional_tone, key_dialogue, dialogue_goal, required_information(array), used_settings(array), revealed_settings(array), forbidden_settings(array), ability_beats(array), item_beats(array), boss_move, rule_trigger, state_changes_expected(array), turning_point, description_budget, density_level, transition_from_previous, exit_state。',
+    '输出 JSON，字段 scene_cards(array)。每个场景卡包含：scene_no, title, scene_type, location, characters_present(array), pov_lens(object: pov_character, knows_now(array), suspects_now(array), does_not_know(array), want_now, fear_or_cost_now, private_bias, allowed_senses(array), decision_in_scene, emotion_from_pov, emotion_tell), purpose_tag, purpose_tags(array), chapter_positioning, pressure_level, chapter_positioning_role, benchmark_structure_coordinate, purpose, conflict, conflict_ladder_step, motivation_source, opposing_force, blocked_desire, protagonist_agency_action, no_exit_reason, event_value_change, next_conflict_seed, visible_line_role, hidden_line_seed, ab_weave_role, required_beats(array), action_beats(array), beat, opening_hook, reader_payoff, fear_point, rule_pressure, information_gap, reversal, ending_hook_seed, character_voice, dialogue_goals(array), style_directives(array), benchmark_recall_directives(array), concept_anchor_rules(array), prose_craft_directives(array), relationship_progression_plan, relationship_buffer_zone, supporting_character_action, attitude_shift_checkpoint, relationship_next_hook, showoff_stage_chain, spectator_interest_shift, secondary_showoff_effect, combat_result_type, combat_dimension_plan, combat_reversal_plan, sensory_anchor, serial_risk_repairs(array), recent_fatigue_action, emotional_tone, key_dialogue, dialogue_goal, required_information(array), used_settings(array), revealed_settings(array), forbidden_settings(array), ability_beats(array), item_beats(array), boss_move, rule_trigger, state_changes_expected(array), turning_point, description_budget, density_level, transition_from_previous, exit_state。',
     '章节定位：每张场景卡必须填写 chapter_positioning，取值参考 高压/推进/修炼试错/关系回收/低压生活/信息整理；pressure_level 用 1-5 表示冲突压力；chapter_positioning_role 写明本场怎样服务本章定位，避免所有章节同一强度。',
     '对标结构坐标：如果 contextPackage.chapter_target.chapter_positioning_brief.benchmark_structure_coordinates 或场景已有 benchmark_structure_coordinate，必须把对标结构坐标迁移为本章本场的 normalized_position/source_event/local_event/event_type，学习结构功能位，不复制桥段。',
     'scene_type 只能取：action/combat/chase/investigation/dialogue/reveal/emotion/transition/hook。凡是本章有战斗、追逐、灾祸、清剿、冲突升级，必须至少有一个 action/combat/chase 场景。',
@@ -55,6 +65,6 @@ export function buildSceneCardsPrompt(project: any, contextPackage: any) {
     'sensory_anchor 可参考：阅读/翻看=字迹深浅、纸张触感、墨水洇开、页角卷曲；对话场景=对方表情变化、语气停顿、空气里的沉默；回忆场景=气味/声音/触感里突然清晰的细节；室内场景=光线变化、物品的位置、温度；移动场景=脚步声、地面的触感、风的方向。',
     '三维度边界：感知是主角主动注意到的细节，反应是具体身体动作；感知不能是装饰性场景描写，反应不能是情绪词。',
     '设定工坊约束：必须优先使用 setting_context.chapter_usage.required；allowed 可按需使用；forbidden_settings 不得揭露或误用；能力、物品、Boss、规则、境界和角色认知必须服从 setting_context.entities 的 constraints_json/state_json。',
-    '要求：2-6 个场景；每个场景必须服务本章目标；最后一个场景必须到达 ending_hook；不要复制参考作品专名、桥段或原句；只返回 JSON object，顶层只能包含 scene_cards。',
+    '要求：2-6 个场景；每个场景必须服务本章目标并给出 pov_lens（角色视角透镜）；dense/medium 场景必须有 decision_in_scene；最后一个场景必须到达 ending_hook；不要复制参考作品专名、桥段或原句；只返回 JSON object，顶层只能包含 scene_cards。',
   ].join('\n')
 }

@@ -14,7 +14,7 @@ export function WorkspaceCenterNoChapter({
       <Space direction="vertical" align="center" size={16}>
         <FileTextOutlined style={{ fontSize: 48, color: '#d9d9d9' }} />
         <Title level={4}>请选择一个章节</Title>
-        <Button type="primary" onClick={onCreateChapter}>创建第一章</Button>
+        <Button type="primary" onClick={onCreateChapter}> 创建第一章</Button>
       </Space>
     </div>
   )

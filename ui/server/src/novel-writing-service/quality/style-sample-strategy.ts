@@ -19,6 +19,7 @@ import {
   styleSelectionRoundAverage,
 } from '../post-delivery/asset-banks'
 import { compactBriefText, uniqueBriefStrings } from './text-utils'
+import { buildHumanizeDualPassPromptBlock } from '../../novel-writing/humanize-dual-pass'
 
 export function buildStyleSampleEffectivenessForSelection(styleSampleBank: any[] = [], chapters: any[] = [], reviews: any[] = []) {
   const rows = new Map<string, any>()

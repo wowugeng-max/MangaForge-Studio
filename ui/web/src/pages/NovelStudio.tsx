@@ -181,6 +181,11 @@ navigate,
     renderMetaTags,
     formatKnowledgeCategory,
     knowledgeEmpty,
+    ohStoryPublishKind,
+    ohStoryPublishInput,
+    setOhStoryPublishInput,
+    ohStoryLastPublish,
+    handlePublishOhStoryKnowledge,
     resetFeedForm,
     handleOpenKnowledge,
     handleCloseKnowledge,
@@ -247,7 +252,7 @@ navigate,
                 <Button className="novel-studio-page__toolbar-btn" icon={<FileTextOutlined />} onClick={handleOpenSourceCache}>正文缓存</Button>
                 <Button className="novel-studio-page__toolbar-btn" icon={<DatabaseOutlined />} onClick={handleOpenMemoryPalace}>记忆宫殿</Button>
                 <Button className="novel-studio-page__toolbar-btn" icon={<ReloadOutlined />} onClick={loadProjects} loading={loading}>刷新</Button>
-                <Button className="novel-studio-page__primary-cta" type="primary" icon={<PlusOutlined />} onClick={() => setWizardOpen(true)}>新建小说</Button>
+                <Button className="novel-studio-page__primary-cta novel-btn-crystal novel-btn-crystal-model" type="primary" icon={<PlusOutlined />} onClick={() => setWizardOpen(true)}>新建小说</Button>
               </Space>
             </Col>
           </Row>
@@ -418,6 +423,11 @@ navigate,
         setKnowledgeProjectDraft={setKnowledgeProjectDraft}
         setKnowledgeQuery={setKnowledgeQuery}
         setKnowledgeSearch={setKnowledgeSearch}
+        ohStoryPublishKind={ohStoryPublishKind}
+        ohStoryPublishInput={ohStoryPublishInput}
+        setOhStoryPublishInput={setOhStoryPublishInput}
+        ohStoryLastPublish={ohStoryLastPublish}
+        handlePublishOhStoryKnowledge={handlePublishOhStoryKnowledge}
       />
 
       <Modal

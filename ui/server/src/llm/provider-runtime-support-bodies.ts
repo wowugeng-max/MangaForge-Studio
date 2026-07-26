@@ -96,7 +96,33 @@ function toOpenAIBody(request: LLMRequest, selection: RuntimeModelSelection): Re
     if (passthroughBlocked.has(key)) continue
     body[key] = value
   }
+  // Gemini Flash-class proxies often burn max_tokens on reasoning and return empty prose.
+  // Prefer model-level context_ui_params (reasoning_effort/thinking) when present.
+  applyGeminiFlashReasoningPolicy(body, request, selection)
   return body
+}
+
+function applyGeminiFlashReasoningPolicy(
+  body: Record<string, any>,
+  request: LLMRequest,
+  selection: RuntimeModelSelection,
+) {
+  const modelName = String(selection.model.model_name || request.model || body.model || '').toLowerCase()
+  const providerId = String(selection.provider?.id || selection.provider?.name || '').toLowerCase()
+  const isGeminiFamily = providerId.includes('gemini') || modelName.includes('gemini')
+  if (!isGeminiFamily) return
+  const params = (selection.model.context_ui_params || {}) as Record<string, any>
+  const effort =
+    (request as any).reasoning_effort
+    ?? params.reasoning_effort
+    ?? params.model_reasoning_effort
+  if (effort != null && body.reasoning_effort == null) body.reasoning_effort = effort
+  const thinking = (request as any).thinking ?? params.thinking
+  if (thinking != null && body.thinking == null) body.thinking = thinking
+  // Keep enough room for output after reasoning leakage on flash-tier proxies.
+  const minBudget = Number(params.default_max_tokens || 0) || 8192
+  const current = Number(body.max_tokens || 0)
+  if (!Number.isFinite(current) || current < minBudget) body.max_tokens = minBudget
 }
 
 function toCodexResponsesBody(request: LLMRequest, selection: RuntimeModelSelection): Record<string, any> {

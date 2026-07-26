@@ -111,6 +111,14 @@ export function ChapterPlanningDesk({
               <Tag color={plannerColor(desk.readiness)} bordered={false}>{desk.statusLabel}</Tag>
               <Tag bordered={false}>上下文：{desk.contextPackageStatus === 'ready' ? '已就绪' : desk.contextPackageStatus === 'insufficient' ? '不足' : '未加载'}</Tag>
               <Tag bordered={false}>场景卡：{desk.scenePlanStatus === 'ready' ? `${desk.sceneCards.length} 个` : '缺失'}</Tag>
+              {desk.characterPov ? (
+                <Tag
+                  bordered={false}
+                  color={desk.characterPov.status === 'fail' ? 'red' : desk.characterPov.status === 'warn' ? 'gold' : 'blue'}
+                >
+                  {desk.characterPov.statusLabel}
+                </Tag>
+              ) : null}
             </Space>
             <Paragraph ellipsis={{ rows: expanded ? 3 : 1 }} style={{ ...wrapTextStyle, margin: '6px 0 0', fontSize: 12 }}>
               {desk.reasons.slice(0, 3).join('；')}
@@ -470,6 +478,48 @@ export function ChapterPlanningDesk({
             </Col>
             <Col xs={24} lg={14} style={{ minWidth: 0 }}>
               <div style={{ background: '#fafafa', borderRadius: 6, padding: 10, minWidth: 0 }}>
+                {desk.characterPov ? (
+                  <div style={{ background: desk.characterPov.status === 'fail' ? '#fff2f0' : desk.characterPov.status === 'warn' ? '#fffbe6' : '#f0f7ff', borderRadius: 6, padding: 10, marginBottom: 10, minWidth: 0 }}>
+                    <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                      <Space wrap size={[4, 4]}>
+                        <Text strong style={wrapTextStyle}>角色视角</Text>
+                        <Tag bordered={false} color={desk.characterPov.status === 'fail' ? 'red' : desk.characterPov.status === 'warn' ? 'gold' : 'blue'}>
+                          {desk.characterPov.statusLabel}
+                        </Tag>
+                        {desk.characterPov.multiPovLocked ? <Tag bordered={false}>锁主视角</Tag> : null}
+                        {desk.characterPov.povIntensity ? <Tag bordered={false}>强度 {desk.characterPov.povIntensity}</Tag> : null}
+                      </Space>
+                      <Text type="secondary" style={wrapTextStyle}>主视角：{desk.characterPov.primaryPov}</Text>
+                      {desk.characterPov.allowedSecondaryPovs.length > 0 ? (
+                        <Text type="secondary" style={wrapTextStyle}>授权次视角：{desk.characterPov.allowedSecondaryPovs.join('、')}</Text>
+                      ) : (
+                        <Text type="secondary" style={wrapTextStyle}>次视角：未授权（默认禁止切换）</Text>
+                      )}
+                      {desk.characterPov.knowledgePreview.length > 0 ? (
+                        <Text type="secondary" style={wrapTextStyle}>认知账本：{desk.characterPov.knowledgePreview.join('；')}</Text>
+                      ) : null}
+                      {(desk.characterPov.secondaryCutPreview || []).length > 0 ? (
+                        <Text type="secondary" style={wrapTextStyle}>短切授权：{(desk.characterPov.secondaryCutPreview || []).join('；')}</Text>
+                      ) : null}
+                      {(desk.characterPov.assetFirewallPreview || []).length > 0 ? (
+                        <Text type="secondary" style={wrapTextStyle}>资产边界：{(desk.characterPov.assetFirewallPreview || []).join('；')}</Text>
+                      ) : null}
+                      {(desk.characterPov.dialogueFilterPreview || []).length > 0 ? (
+                        <Text type="secondary" style={wrapTextStyle}>对白过滤：{(desk.characterPov.dialogueFilterPreview || []).join('；')}</Text>
+                      ) : null}
+                      {desk.characterPov.violations.length > 0 ? (
+                        <div>
+                          <Text type="secondary" style={wrapTextStyle}>违规：</Text>
+                          {desk.characterPov.violations.slice(0, 4).map((item) => (
+                            <Text key={item.key + item.evidence} type="secondary" style={{ ...wrapTextStyle, display: 'block' }}>
+                              · {item.label}：{item.evidence || item.fix || '需修订'}
+                            </Text>
+                          ))}
+                        </div>
+                      ) : null}
+                    </Space>
+                  </div>
+                ) : null}
                 <Text strong style={{ ...wrapTextStyle, marginBottom: 6 }}>场景卡</Text>
                 {desk.sceneCards.length > 0 ? (
                   <Space direction="vertical" size={8} style={{ width: '100%', minWidth: 0 }}>
@@ -479,8 +529,14 @@ export function ChapterPlanningDesk({
                           <Space wrap size={[4, 4]}>
                             <Tag color="blue" bordered={false}>场景 {scene.sceneNo}</Tag>
                             <Text strong style={wrapTextStyle}>{scene.title}</Text>
+                            {scene.povCharacter ? <Tag bordered={false}>视角 {scene.povCharacter}</Tag> : null}
                           </Space>
                           <Text type="secondary" style={wrapTextStyle}>目的：{compactPlanValue(scene.purpose, '待补')}</Text>
+                          {(scene.wantNow || scene.fearOrCostNow || scene.decisionInScene) ? (
+                            <Text type="secondary" style={wrapTextStyle}>
+                              视角透镜：欲={compactPlanValue(scene.wantNow || '—')}；怕={compactPlanValue(scene.fearOrCostNow || '—')}；选择={compactPlanValue(scene.decisionInScene || '待补')}
+                            </Text>
+                          ) : null}
                           <Text type="secondary" style={wrapTextStyle}>冲突：{compactPlanValue(scene.conflict, '待补')}</Text>
                           <Text type="secondary" style={wrapTextStyle}>转折：{compactPlanValue(scene.turn, '待补')}</Text>
                           <Text type="secondary" style={wrapTextStyle}>钩子：{compactPlanValue(scene.endingHook, '待补')}</Text>
