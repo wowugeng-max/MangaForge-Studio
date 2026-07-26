@@ -3,7 +3,9 @@ import {
   CHECK_LABELS,
   buildCheckPassRateItems,
   buildContractSetRows,
+  canApplyJobUpdate,
   nextJobPollDelayMs,
+  shouldResumeJobPolling,
 } from './fingerprintContractsModel'
 
 describe('buildContractSetRows', () => {
@@ -72,5 +74,38 @@ describe('nextJobPollDelayMs', () => {
   test('backs off after repeated failures', () => {
     expect(nextJobPollDelayMs({ status: 'running' }, 1)).toBe(5000)
     expect(nextJobPollDelayMs({ status: 'running' }, 3)).toBe(15000)
+  })
+})
+
+describe('canApplyJobUpdate', () => {
+  test('allows applying an update while mounted and the token still owns the poll loop', () => {
+    expect(canApplyJobUpdate(true, 1, 1)).toBe(true)
+  })
+
+  test('blocks applying an update after unmount even when the token still matches', () => {
+    expect(canApplyJobUpdate(false, 1, 1)).toBe(false)
+  })
+
+  test('blocks applying an update once a newer poll loop has taken over the token', () => {
+    expect(canApplyJobUpdate(true, 1, 2)).toBe(false)
+  })
+})
+
+describe('shouldResumeJobPolling', () => {
+  test('resumes when a job id is stored and nothing is currently polling it', () => {
+    expect(shouldResumeJobPolling('job-1', null)).toBe(true)
+  })
+
+  test('does not resume when there is no stored job id', () => {
+    expect(shouldResumeJobPolling(null, null)).toBe(false)
+    expect(shouldResumeJobPolling('', null)).toBe(false)
+  })
+
+  test('does not resume when the stored job is already being polled by another loop', () => {
+    expect(shouldResumeJobPolling('job-1', 'job-1')).toBe(false)
+  })
+
+  test('resumes a stored job even if a different job is being polled', () => {
+    expect(shouldResumeJobPolling('job-1', 'job-2')).toBe(true)
   })
 })

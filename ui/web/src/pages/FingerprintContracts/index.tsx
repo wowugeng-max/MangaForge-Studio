@@ -1,16 +1,16 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Card, Empty, Input, Modal, Radio, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
 import { fingerprintContractApi } from '../../api/fingerprintContracts'
-import { CHECK_LABELS, buildCheckPassRateItems, buildContractSetRows, nextJobPollDelayMs, type ContractSetRow } from './fingerprintContractsModel'
+import { CHECK_LABELS, buildCheckPassRateItems, buildContractSetRows, canApplyJobUpdate, nextJobPollDelayMs, shouldResumeJobPolling, type ContractSetRow } from './fingerprintContractsModel'
 
 const { Text } = Typography
 const JOB_STORAGE_KEY = 'fingerprint.contract.last_job_id'
 
+let activePollingJobId: string | null = null
+
 export default function FingerprintContracts() {
   const [loading, setLoading] = useState(false)
   const [rows, setRows] = useState<ContractSetRow[]>([])
-  const [selection, setSelection] = useState<any>(null)
-  const [active, setActive] = useState<any>(null)
   const [samplesStatus, setSamplesStatus] = useState<any>(null)
   const [aggregates, setAggregates] = useState<any[]>([])
   const [scoreRows, setScoreRows] = useState<any[]>([])
@@ -20,6 +20,10 @@ export default function FingerprintContracts() {
   const [mode, setMode] = useState<'offline_refit' | 'online_fetch'>('offline_refit')
   const [label, setLabel] = useState('')
   const [notes, setNotes] = useState('')
+
+  const mountedRef = useRef(true)
+  const pollTokenRef = useRef(0)
+  const myJobIdRef = useRef<string | null>(null)
 
   const load = async () => {
     setLoading(true)
@@ -34,8 +38,6 @@ export default function FingerprintContracts() {
       const targets = Object.fromEntries(sets.map((s: any) => [s.id, s.target_summary]))
       const aggregatesData = Array.isArray(scoresRes.data?.aggregates) ? scoresRes.data.aggregates : []
       setRows(buildContractSetRows({ sets, selection: selectionData, aggregates: aggregatesData, targets }))
-      setSelection(selectionData)
-      setActive(listRes.data?.active || null)
       setSamplesStatus(samplesRes.data || null)
       setAggregates(aggregatesData)
       setScoreRows(Array.isArray(scoresRes.data?.rows) ? scoresRes.data.rows : [])
@@ -57,16 +59,18 @@ export default function FingerprintContracts() {
     }
   }
 
-  const pollJob = async (initial: any) => {
+  const pollJob = async (initial: any, token: number) => {
     let current = initial
     let failures = 0
     while (true) {
       const delay = nextJobPollDelayMs(current, failures)
       if (delay == null) break
       await new Promise((resolve) => setTimeout(resolve, delay))
+      if (!canApplyJobUpdate(mountedRef.current, token, pollTokenRef.current)) break
       try {
         const { data } = await fingerprintContractApi.job(current.id)
         current = data.job
+        if (!canApplyJobUpdate(mountedRef.current, token, pollTokenRef.current)) break
         setJob(current)
         failures = 0
       } catch {
@@ -77,6 +81,7 @@ export default function FingerprintContracts() {
   }
 
   const finishJob = async (finalJob: any) => {
+    if (!mountedRef.current) return
     if (finalJob?.status === 'completed') message.success('合同生成完成')
     else if (finalJob?.status === 'failed') message.error(finalJob?.error || '合同生成失败')
     if (finalJob?.status === 'completed' || finalJob?.status === 'failed') {
@@ -85,44 +90,66 @@ export default function FingerprintContracts() {
     await load()
   }
 
+  const runJobPolling = async (initial: any) => {
+    const token = ++pollTokenRef.current
+    const jobId = String(initial.id)
+    activePollingJobId = jobId
+    myJobIdRef.current = jobId
+    try {
+      const final = await pollJob(initial, token)
+      if (canApplyJobUpdate(mountedRef.current, token, pollTokenRef.current)) {
+        await finishJob(final)
+      }
+    } finally {
+      if (activePollingJobId === jobId) activePollingJobId = null
+      if (myJobIdRef.current === jobId) myJobIdRef.current = null
+    }
+  }
+
   const generate = async () => {
     setGenerating(true)
     try {
       const { data } = await fingerprintContractApi.generate({ mode, label: label || undefined, notes: notes || undefined })
-      setJob(data.job)
+      if (mountedRef.current) setJob(data.job)
       try { localStorage.setItem(JOB_STORAGE_KEY, String(data.job.id)) } catch { /* private mode */ }
-      const final = await pollJob(data.job)
-      await finishJob(final)
+      await runJobPolling(data.job)
     } catch (e: any) {
-      message.error(e?.response?.data?.error || '操作失败')
+      if (mountedRef.current) message.error(e?.response?.data?.error || '操作失败')
     } finally {
-      setGenerating(false)
+      if (mountedRef.current) setGenerating(false)
     }
   }
 
   useEffect(() => {
+    mountedRef.current = true
     load()
     let savedJobId = ''
     try { savedJobId = localStorage.getItem(JOB_STORAGE_KEY) || '' } catch { /* private mode */ }
-    if (!savedJobId) return
-    ;(async () => {
-      try {
-        const { data } = await fingerprintContractApi.job(savedJobId)
-        const initial = data.job
-        if (!initial) return
-        setJob(initial)
-        if (initial.status === 'queued' || initial.status === 'running') {
-          setGenerating(true)
-          const final = await pollJob(initial)
-          await finishJob(final)
-          setGenerating(false)
-        } else {
+    if (shouldResumeJobPolling(savedJobId || null, activePollingJobId)) {
+      ;(async () => {
+        try {
+          const { data } = await fingerprintContractApi.job(savedJobId)
+          const initial = data.job
+          if (!initial || !mountedRef.current) return
+          setJob(initial)
+          if (initial.status === 'queued' || initial.status === 'running') {
+            setGenerating(true)
+            await runJobPolling(initial)
+            if (mountedRef.current) setGenerating(false)
+          } else {
+            try { localStorage.removeItem(JOB_STORAGE_KEY) } catch { /* private mode */ }
+          }
+        } catch {
           try { localStorage.removeItem(JOB_STORAGE_KEY) } catch { /* private mode */ }
         }
-      } catch {
-        try { localStorage.removeItem(JOB_STORAGE_KEY) } catch { /* private mode */ }
+      })()
+    }
+    return () => {
+      mountedRef.current = false
+      if (myJobIdRef.current && activePollingJobId === myJobIdRef.current) {
+        activePollingJobId = null
       }
-    })()
+    }
   }, [])
 
   const activate = async (id: string) => {

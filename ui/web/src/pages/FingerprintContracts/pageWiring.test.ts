@@ -28,4 +28,11 @@ describe('fingerprint contracts page wiring', () => {
     expect(page).toContain('buildContractSetRows')
     expect(page).toContain('buildCheckPassRateItems')
   })
+
+  test('job polling wires the unmount and duplicate-poll guards from the model', () => {
+    const page = read('pages/FingerprintContracts/index.tsx')
+    expect(page).toContain('canApplyJobUpdate')
+    expect(page).toContain('shouldResumeJobPolling')
+    expect(page).toContain('mountedRef.current = false')
+  })
 })

@@ -75,3 +75,11 @@ export function nextJobPollDelayMs(job: { status: string } | null, failures: num
   if (failures >= 1) return 5000
   return 2000
 }
+
+export function canApplyJobUpdate(mounted: boolean, pollToken: number, currentToken: number): boolean {
+  return mounted && pollToken === currentToken
+}
+
+export function shouldResumeJobPolling(storedJobId: string | null, activeJobId: string | null): boolean {
+  return Boolean(storedJobId) && storedJobId !== activeJobId
+}
