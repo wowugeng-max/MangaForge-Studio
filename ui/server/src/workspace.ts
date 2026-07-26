@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile, access } from 'fs/promises'
+import { existsSync, readFileSync } from 'fs'
 import { join, resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -42,6 +43,26 @@ export async function loadActiveWorkspace(): Promise<string> {
     } catch {
       return defaultWorkspace
     }
+  } catch {
+    return defaultWorkspace
+  }
+}
+
+/**
+ * Sync counterpart of loadActiveWorkspace(), for callers that can't await
+ * (e.g. the fingerprint contract resolver). Same fallback semantics: missing
+ * field, missing file, corrupt JSON, or an inaccessible path all fall back to
+ * getDefaultWorkspace(). Takes an optional config path so tests can inject a
+ * throwaway file instead of touching the real .workspace-config.json.
+ */
+export function loadActiveWorkspaceSync(configPath: string = getWorkspaceConfigPath()): string {
+  const defaultWorkspace = getDefaultWorkspace()
+  try {
+    const raw = readFileSync(configPath, 'utf8')
+    const data = JSON.parse(raw) as { activeWorkspace?: string }
+    if (!data.activeWorkspace) return defaultWorkspace
+    if (!existsSync(data.activeWorkspace)) return defaultWorkspace
+    return data.activeWorkspace
   } catch {
     return defaultWorkspace
   }

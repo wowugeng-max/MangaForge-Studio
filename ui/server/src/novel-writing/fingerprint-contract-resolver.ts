@@ -4,9 +4,11 @@ import {
   BUILTIN_CONTRACT_SET,
   BUILTIN_CONTRACT_SET_ID,
   getContractSetDir,
+  getFingerprintLibRootFromWorkspace,
   readContractSelectionSync,
   readContractSetsSync,
 } from '../fingerprint-contract-store'
+import { loadActiveWorkspaceSync } from '../workspace'
 import { normalizeFingerprintGenreSlug, type FingerprintContract } from './prose-fingerprint-lib'
 
 export type ResolvedFingerprintContractInfo = {
@@ -18,13 +20,25 @@ export type ResolvedFingerprintContractInfo = {
   genre_slug: string | null
 }
 
-/** Repo-relative fingerprint-lib roots (server cwd is <repo>/ui/server in dev). */
-export function resolveFingerprintLibRoots(cwd = process.cwd()): string[] {
-  return [
-    resolve(cwd, '../../workspace/fingerprint-lib'),
-    resolve(cwd, '../../../workspace/fingerprint-lib'),
-    resolve(cwd, 'workspace/fingerprint-lib'),
+/**
+ * Fingerprint-lib roots, most specific first. When cwd is omitted (the
+ * production default call, matching the route layer's getWorkspace()-based
+ * lookup), the active workspace's fingerprint-lib is tried before the
+ * repo-relative fallbacks so both sides agree after `/api/workspace/switch`.
+ * When cwd is passed explicitly (test injection), the active workspace is
+ * skipped entirely so fake repos stay isolated from the real one.
+ */
+export function resolveFingerprintLibRoots(cwd?: string): string[] {
+  const base = cwd ?? process.cwd()
+  const roots = [
+    resolve(base, '../../workspace/fingerprint-lib'),
+    resolve(base, '../../../workspace/fingerprint-lib'),
+    resolve(base, 'workspace/fingerprint-lib'),
   ]
+  if (cwd === undefined) {
+    roots.unshift(getFingerprintLibRootFromWorkspace(loadActiveWorkspaceSync()))
+  }
+  return roots
 }
 
 function readContract(path: string): FingerprintContract | null {
@@ -77,8 +91,7 @@ function setIdForPath(libRoot: string, path: string): string {
 export function resolveFingerprintContractInfo(
   options: { cwd?: string; genre?: string | null } = {},
 ): ResolvedFingerprintContractInfo | null {
-  const cwd = options.cwd || process.cwd()
-  for (const libRoot of resolveFingerprintLibRoots(cwd)) {
+  for (const libRoot of resolveFingerprintLibRoots(options.cwd)) {
     for (const candidate of candidatesForRoot(libRoot, options.genre)) {
       const contract = readContract(candidate.path)
       if (!contract) continue

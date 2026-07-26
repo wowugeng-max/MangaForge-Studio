@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import { tmpdir } from 'os'
-import { resolveFingerprintContract, resolveFingerprintContractInfo } from './fingerprint-contract-resolver'
+import {
+  resolveFingerprintContract,
+  resolveFingerprintContractInfo,
+  resolveFingerprintLibRoots,
+} from './fingerprint-contract-resolver'
 import { BUILTIN_CONTRACT_SET, getContractSetsIndexPath } from '../fingerprint-contract-store'
 
 let dirs: string[] = []
@@ -179,5 +183,16 @@ describe('fingerprint contract resolver', () => {
     const info = resolveFingerprintContractInfo({ cwd })
     expect(info?.set_id).toBe('set-a')
     expect(info?.set_label).toBe('离线重拟合 A')
+  })
+
+  test('resolveFingerprintLibRoots does not add the active workspace when cwd is passed explicitly', async () => {
+    const { cwd } = await tempRepo()
+    const roots = resolveFingerprintLibRoots(cwd)
+    expect(roots[0]).toBe(resolve(cwd, '../../workspace/fingerprint-lib'))
+    expect(roots).toEqual([
+      resolve(cwd, '../../workspace/fingerprint-lib'),
+      resolve(cwd, '../../../workspace/fingerprint-lib'),
+      resolve(cwd, 'workspace/fingerprint-lib'),
+    ])
   })
 })
