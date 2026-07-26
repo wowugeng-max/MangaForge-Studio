@@ -55,7 +55,7 @@ function compact(value: any, limit = 220) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit)
 }
 
-function loadActiveFingerprintContract(cwd = process.cwd(), genre?: string | null): FingerprintContract | null {
+function loadActiveFingerprintContract(cwd?: string, genre?: string | null): FingerprintContract | null {
   return resolveFingerprintContract({ cwd, genre })
 }
 

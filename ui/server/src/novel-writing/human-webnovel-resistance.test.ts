@@ -1,4 +1,8 @@
-import { describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test'
+import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises'
+import { join } from 'path'
+import { tmpdir } from 'os'
+import * as workspaceModule from '../workspace'
 import {
   assessResistanceRevisionAcceptance,
   buildHumanWebnovelResistancePromptDirectives,
@@ -51,6 +55,10 @@ import {
 } from './prose-admission-policy'
 import { scanToxicAiPatterns } from './toxic-ai-pattern-scans'
 import type { FingerprintContract } from './prose-fingerprint-lib'
+
+// Captured before any mock.module() call touches '../workspace', so the
+// mocked-active-workspace block below can restore the real module exactly.
+const realWorkspaceModule = { ...workspaceModule }
 
 const sampleContract: FingerprintContract = {
   version: 1,
@@ -1787,5 +1795,64 @@ describe('fix-brief A3-resistance regressions', () => {
     expect(finding?.blocking).toBe(false)
     expect(finding?.severity).toBe('advisory')
     expect(finding?.status).toBe('warn')
+  })
+})
+
+/**
+ * Regresses the writing-path/management-page desync bug directly: the no-cwd,
+ * no-contract call (evaluateHumanWebnovelResistance(text), matching every
+ * generation-time caller) must resolve the fingerprint contract through the
+ * same activeWorkspace-first path as fingerprint-contract-resolver.test.ts
+ * proves for resolveFingerprintContractInfo(). Before the fix, a default
+ * parameter (`cwd = process.cwd()`) made loadActiveFingerprintContract()'s
+ * cwd always defined, so it always skipped the activeWorkspace branch and
+ * fell back to the repo-relative contract instead. mock.module() is global
+ * to the process, so this stays in its own describe with beforeAll/afterAll
+ * to leave every other test file in the regression run unaffected.
+ */
+describe('evaluateHumanWebnovelResistance follows the active workspace when no contract/cwd is given', () => {
+  let fakeWorkspace: string
+
+  beforeAll(async () => {
+    fakeWorkspace = await mkdtemp(join(tmpdir(), 'mangaforge-hwr-active-workspace-'))
+    await mkdir(join(fakeWorkspace, 'fingerprint-lib', 'contracts'), { recursive: true })
+    await writeFile(
+      join(fakeWorkspace, 'fingerprint-lib', 'contracts', 'active-contract.json'),
+      JSON.stringify({
+        version: 1,
+        name: 'FAKE_WS_CONTRACT',
+        built_from: ['s1'],
+        target: {
+          cv_para: [0.4, 0.8],
+          single_sentence_para_ratio: [0.7, 0.98],
+          two_sentence_para_ratio: [0.02, 0.2],
+          dialogue_para_ratio: [0.08, 0.4],
+          max_mid_streak_max: 8,
+          template_contrast_per_1k_max: 2,
+          stock_adverb_per_1k_max: 2,
+          clinical_hit_per_1k_max: 0.5,
+          subject_ta_opener_ratio_max: 0.4,
+        },
+        avoid: ['临床连击'],
+        prefer: ['短对白'],
+        prompt_directives: ['【测试合同】对白独立成段。'],
+      }),
+      'utf8',
+    )
+    mock.module('../workspace', () => ({
+      ...realWorkspaceModule,
+      loadActiveWorkspaceSync: () => fakeWorkspace,
+    }))
+  })
+
+  afterAll(async () => {
+    mock.module('../workspace', () => realWorkspaceModule)
+    await rm(fakeWorkspace, { recursive: true, force: true })
+  })
+
+  test('resolves the mocked active workspace contract, not the repo builtin', () => {
+    const report = evaluateHumanWebnovelResistance('他推开门，屋里没有开灯。')
+    expect(report.contract_name).toBe('FAKE_WS_CONTRACT')
+    expect(report.contract_name).not.toBe('qidian_free_rank_human')
   })
 })
