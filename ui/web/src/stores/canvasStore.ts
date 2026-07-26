@@ -34,6 +34,20 @@ interface CanvasState {
   dissolveGroup: (groupId: string) => void
 }
 
+const LOAD_STRIP_KEYS = ['_runSignal', '_isGroupRunning'] as const
+
+export function sanitizeLoadedNodes(nodes: Node[]): Node[] {
+  return nodes.map(node => {
+    if (!node.data) return node
+    const data: Record<string, any> = { ...(node.data as any) }
+    let changed = false
+    for (const key of LOAD_STRIP_KEYS) {
+      if (key in data) { delete data[key]; changed = true }
+    }
+    return changed ? { ...node, data } : node
+  })
+}
+
 export const useCanvasStore = create<CanvasState>((set, get) => ({
   nodes: [],
   edges: [],
@@ -45,7 +59,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   setNodes: nodes => set({ nodes }),
   setEdges: edges => set({ edges }),
   setCanvasData: (nodes, edges) => {
-    const sorted = [...nodes].sort((a, b) => {
+    const sorted = sanitizeLoadedNodes(nodes).sort((a, b) => {
       if (a.type === 'nodeGroup' && b.parentNode === a.id) return -1
       if (b.type === 'nodeGroup' && a.parentNode === b.id) return 1
       return 0
@@ -60,7 +74,15 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     get().saveHistory()
     set(state => ({ nodes: [...state.nodes, node] }))
   },
-  updateNodeData: (id, data) => set(state => ({ nodes: state.nodes.map(node => node.id === id ? { ...node, data: { ...(node.data as any), ...data } } : node) })),
+  updateNodeData: (id, data) => set(state => {
+    const target = state.nodes.find(node => node.id === id)
+    if (target) {
+      const current = (target.data || {}) as Record<string, any>
+      const unchanged = Object.keys(data || {}).every(key => Object.is(current[key], (data as any)[key]))
+      if (unchanged) return state
+    }
+    return { nodes: state.nodes.map(node => node.id === id ? { ...node, data: { ...(node.data as any), ...data } } : node) }
+  }),
   onNodesChange: changes => set({ nodes: applyNodeChanges(changes, get().nodes) }),
   onEdgesChange: changes => set({ edges: applyEdgeChanges(changes, get().edges) }),
   onConnect: connection => {
@@ -127,6 +149,12 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
       const subtreeEdges = edges.filter(edge => subtreeIds.includes(edge.source) && subtreeIds.includes(edge.target))
 
+      const subtreeNodes = subtreeIds
+        .map(subtreeId => nodes.find(node => node.id === subtreeId))
+        .filter((node): node is Node => Boolean(node))
+      const branchHeight = Math.max(380, ...subtreeNodes.map(node => Number((node.style as any)?.height || node.height || 380)))
+      const branchGap = branchHeight + 60
+
       for (let index = 0; index < count; index += 1) {
         if (index === 0) {
           branchRootIds.push(templateId)
@@ -147,7 +175,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
             id: clonedId,
             position: {
               x: original.position.x,
-              y: original.position.y + index * 220,
+              y: original.position.y + index * branchGap,
             },
             data: {
               ...(original.data as any),

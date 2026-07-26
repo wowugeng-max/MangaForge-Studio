@@ -65,7 +65,7 @@ describe('ComfyForge canvas feature migration', () => {
 
     expect(canvasPage).toContain('const dagTickRef = React.useRef(0)')
     expect(canvasPage).toContain('const fissionDoneRef = React.useRef<Set<string>>(new Set())')
-    expect(canvasPage).toContain('const clonedRootIds = executeFission(node.id, result.items)')
+    expect(canvasPage).toContain('expandFissionAndDistribute({ nodeId: node.id, items: result.items, store: useCanvasStore })')
     expect(canvasPage).toContain('planCanvasDagStep({')
     expect(canvasPage).toContain('dagStep.statusUpdates')
     expect(canvasPage).toContain('dagStep.dataUpdates')
@@ -76,11 +76,15 @@ describe('ComfyForge canvas feature migration', () => {
     expect(dagRunner).toContain('hasBlockingError')
   })
 
-  test('canvas advanced action card uses current antd body style API', () => {
+  test('advanced actions live in the header instead of a floating card', () => {
     const canvasPage = source('CanvasPage.tsx')
 
-    expect(canvasPage).toContain("styles={{ body: { paddingTop: 12 } }}")
-    expect(canvasPage).not.toContain('bodyStyle={{ paddingTop: 12 }}')
+    expect(canvasPage).not.toContain('title="高级操作"')
+    expect(canvasPage).not.toContain("position: 'fixed', right: 24, top: 92")
+    expect(canvasPage).toContain('全局运行')
+    expect(canvasPage).toContain('漫剧生成')
+    expect(canvasPage).toContain('onClick={handleGlobalRun}')
+    expect(canvasPage).toContain('onClick={handleResumeRun}')
   })
 
   test('canvas page exposes upstream node grouping entry points', () => {
@@ -89,7 +93,7 @@ describe('ComfyForge canvas feature migration', () => {
     expect(canvasPage).toContain('onSelectionContextMenu')
     expect(canvasPage).toContain('onNodeContextMenu')
     expect(canvasPage).toContain("node.type === 'nodeGroup'")
-    expect(canvasPage).toContain('setGroupMenuConfig({ x: event.clientX, y: event.clientY, selectedNodeIds: []')
+    expect(canvasPage).toContain('setGroupMenuConfig({ x: clamped.x, y: clamped.y, selectedNodeIds: []')
     expect(canvasPage).toContain("e.key === 'b'")
     expect(canvasPage).toContain("updateNodeData(selected[0].id, { _muted: !selected[0].data?._muted })")
     expect(canvasPage).toContain("const groupId = createGroup(ids, '节点组')")
@@ -319,5 +323,41 @@ describe('ComfyForge canvas feature migration', () => {
     expect(videoWorkshop).toContain('frame_a: templateFrameAKey.trim() || undefined')
     expect(videoWorkshop).toContain('frame_b: templateFrameBKey.trim() || undefined')
     expect(videoWorkshop).toContain('prompt: templatePromptKey.trim() || undefined')
+  })
+})
+
+describe('canvas config panel clamping', () => {
+  test('node config panels clamp to viewport', () => {
+    const generateNode = source('../components/nodes/GenerateNode.tsx')
+    const comfyNode = source('../components/nodes/ComfyUIEngineNode.tsx')
+    for (const code of [generateNode, comfyNode]) {
+      expect(code).toContain("import { clampToViewport } from '../../utils/viewportClamp'")
+      expect(code).toContain('clampToViewport({')
+    }
+  })
+})
+
+describe('canvas edge reconnection', () => {
+  test('edges can be reconnected by dragging their endpoints', () => {
+    const canvasPage = source('CanvasPage.tsx')
+    expect(canvasPage).toContain('updateEdge')
+    expect(canvasPage).toContain('onEdgeUpdate={onEdgeUpdate}')
+    expect(canvasPage).toContain('edgeUpdaterRadius={12}')
+  })
+})
+
+describe('canvas cleanup pack', () => {
+  test('group Ctrl+B handling is centralized in CanvasPage', () => {
+    const canvasPage = source('CanvasPage.tsx')
+    const groupNode = source('../components/nodes/GroupNode.tsx')
+    expect(canvasPage).toContain('buildGroupMutePatches')
+    expect(groupNode).not.toContain("event.key.toLowerCase() === 'b'")
+  })
+
+  test('save-as-asset strips UI state fields', () => {
+    const baseNode = source('../components/nodes/BaseNode.tsx')
+    expect(baseNode).toContain('_prevWidth')
+    expect(baseNode).toContain('_collapsed')
+    expect(baseNode).not.toContain('data?.label || data?._customLabel')
   })
 })

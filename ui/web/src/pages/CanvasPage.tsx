@@ -1,18 +1,29 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useDrop } from 'react-dnd'
-import { Button, Input, Layout, Modal, Select, Space, Tag, Tooltip, Typography, message, Card } from 'antd'
-import { ArrowLeftOutlined, ClearOutlined, MenuFoldOutlined, MenuUnfoldOutlined, PlayCircleOutlined, SaveOutlined, SearchOutlined, StopOutlined, SyncOutlined, ThunderboltOutlined, UndoOutlined, RedoOutlined } from '@ant-design/icons'
-import ReactFlow, { Background, Controls, MiniMap, ReactFlowProvider, type ReactFlowInstance } from 'reactflow'
+import { Button, Input, Layout, Modal, Select, Space, Tag, Tooltip, Typography, message } from 'antd'
+import { ArrowLeftOutlined, ClearOutlined, MenuFoldOutlined, MenuUnfoldOutlined, PartitionOutlined, PlayCircleOutlined, SaveOutlined, SearchOutlined, StopOutlined, SyncOutlined, ThunderboltOutlined, UndoOutlined, RedoOutlined } from '@ant-design/icons'
+import ReactFlow, { Background, Controls, MiniMap, ReactFlowProvider, updateEdge, type Connection, type Edge, type ReactFlowInstance } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { DndItemTypes } from '../constants/dnd'
 import { useCanvasStore } from '../stores/canvasStore'
 import AssetLibrary from '../components/AssetLibrary'
 import { nodeTypes } from '../components/nodes'
+import { buildGroupMutePatches } from '../components/nodes/GroupNode'
 import { getHandleDataType, areTypesCompatible } from '../utils/handleTypes'
 import apiClient from '../api/client'
 import { planCanvasDagStep } from './canvasDagRunner'
 import { buildCanvasAssetDropPlan } from './canvasAssetDrop'
+import { expandFissionAndDistribute } from './canvasFission'
+import { buildCopyPayload, buildPastePlan, type ClipboardPayload } from './canvasClipboard'
+import { layoutCanvas } from './canvasLayout'
+import { decorateEdges, minimapNodeColor } from './canvasEdgeStyle'
+import { clampToViewport } from '../utils/viewportClamp'
+import { moveMenuHighlight } from '../utils/menuNavigation'
+import { resolveAutoConnectHandle } from '../utils/autoConnect'
+
+const NODE_MENU_SIZE = { width: 300, height: 380 }
+const GROUP_MENU_SIZE = { width: 180, height: 88 }
 
 const { Content, Sider } = Layout
 const { Title, Text } = Typography
@@ -42,7 +53,7 @@ function CanvasWorkspace() {
   const canvasProjectId = Number.isFinite(routeProjectId) ? routeProjectId : undefined
   const reactFlowWrapper = React.useRef<HTMLDivElement>(null)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, addNode, setCanvasData, clearCanvas, undo, redo, past, future, saveHistory, isGlobalRunning, setGlobalRunning, nodeRunStatus, setNodeStatus, resetAllNodeStatus, smartResetNodeStatus, updateNodeData, executeFission, createGroup, dissolveGroup } = useCanvasStore()
+  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, addNode, setCanvasData, clearCanvas, undo, redo, past, future, saveHistory, isGlobalRunning, setGlobalRunning, nodeRunStatus, setNodeStatus, resetAllNodeStatus, smartResetNodeStatus, updateNodeData, createGroup, dissolveGroup } = useCanvasStore()
   const [projectName, setProjectName] = useState(id ? '加载中...' : '全局画布')
   const [saving, setSaving] = useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
@@ -53,6 +64,9 @@ function CanvasWorkspace() {
   const [groupMenuConfig, setGroupMenuConfig] = useState<{ x: number; y: number; selectedNodeIds: string[]; dissolveGroupId?: string } | null>(null)
   const [comicModalOpen, setComicModalOpen] = useState(false)
   const [comicConfig, setComicConfig] = useState({ story: '', panelCount: 6, style: '', platform: '通用' })
+  const clipboardRef = React.useRef<ClipboardPayload | null>(null)
+  const [pendingConnection, setPendingConnection] = useState<{ source: string; sourceHandle: string | null } | null>(null)
+  const connectStartRef = React.useRef<{ nodeId: string | null; handleId: string | null; handleType: string | null } | null>(null)
 
   const [, canvasDrop] = useDrop(() => ({
     accept: DndItemTypes.ASSET,
@@ -144,6 +158,11 @@ function CanvasWorkspace() {
   }
   const isValidConnection = useCallback((connection: any) => { const sourceNode = nodes.find(n => n.id === connection.source); const targetNode = nodes.find(n => n.id === connection.target); if (!sourceNode || !targetNode) return false; const sourceType = getHandleDataType(sourceNode.type, connection.sourceHandle ?? undefined, sourceNode.data, 'source'); const targetType = getHandleDataType(targetNode.type, connection.targetHandle ?? undefined, targetNode.data, 'target'); return areTypesCompatible(sourceType, targetType) }, [nodes])
 
+  const decoratedEdges = useMemo(
+    () => decorateEdges({ edges, nodes, nodeRunStatus }),
+    [edges, nodes, nodeRunStatus]
+  )
+
   const hasBreakpoint = !isGlobalRunning && nodes.some(n => nodeRunStatus[n.id] === 'success') && nodes.some(n => {
     const status = nodeRunStatus[n.id]
     return status === 'error' || status === 'idle'
@@ -178,14 +197,8 @@ function CanvasWorkspace() {
         }
 
         fissionDoneRef.current.add(node.id)
-        const clonedRootIds = executeFission(node.id, result.items)
-        edges.filter(edge => edge.source === node.id).forEach(edge => {
-          updateNodeData(edge.target, { incoming_data: result.items[0] })
-        })
-        for (let index = 1; index < clonedRootIds.length; index += 1) {
-          updateNodeData(clonedRootIds[index], { incoming_data: result.items[index] })
-        }
-        message.info(`裂变完成，已创建 ${actualCount} 个并行分支`, 3)
+        const outcome = expandFissionAndDistribute({ nodeId: node.id, items: result.items, store: useCanvasStore })
+        if (outcome.expanded) message.info(`裂变完成，已创建 ${actualCount} 个并行分支`, 3)
         return
       }
     }
@@ -210,7 +223,7 @@ function CanvasWorkspace() {
       message.error('检测到死锁或未连接的节点孤岛，执行已终止')
       setGlobalRunning(false)
     }
-  }, [isGlobalRunning, nodeRunStatus, nodes, edges, updateNodeData, setNodeStatus, setGlobalRunning, executeFission])
+  }, [isGlobalRunning, nodeRunStatus, nodes, edges, updateNodeData, setNodeStatus, setGlobalRunning])
 
   const createComicPipeline = useCallback((config: typeof comicConfig) => {
     if (!config.story.trim()) {
@@ -311,38 +324,89 @@ function CanvasWorkspace() {
     }, { ai: [], resource: [], display: [], structure: [] })
   }, [filteredNodes])
 
+  const [menuHighlight, setMenuHighlight] = useState(0)
+  const flatMenuNodes = useMemo(
+    () => (['ai', 'resource', 'display', 'structure'] as NodeCategory[]).flatMap(category => groupedNodes[category]),
+    [groupedNodes]
+  )
+  useEffect(() => { setMenuHighlight(0) }, [searchTerm, menuConfig?.x, menuConfig?.y])
+
   const openNodeSearch = (x: number, y: number) => {
     if (!reactFlowInstance) return
     const pos = reactFlowInstance.screenToFlowPosition({ x, y })
-    setMenuConfig({ x, y, flowX: pos.x, flowY: pos.y })
+    const clamped = clampToViewport({ x, y, ...NODE_MENU_SIZE, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight })
+    setMenuConfig({ x: clamped.x, y: clamped.y, flowX: pos.x, flowY: pos.y })
     setSearchTerm('')
   }
 
   const closeNodeSearch = useCallback(() => {
     setMenuConfig(null)
     setSearchTerm('')
+    setPendingConnection(null)
   }, [])
 
   const createNodeAtMenu = (node: typeof AVAILABLE_NODES[number]) => {
     if (!menuConfig) return
-    addNode({ id: getId(), type: node.type, position: { x: menuConfig.flowX, y: menuConfig.flowY }, data: { label: node.label } } as any)
+    const newNodeId = getId()
+    addNode({ id: newNodeId, type: node.type, position: { x: menuConfig.flowX, y: menuConfig.flowY }, data: { label: node.label } } as any)
+    if (pendingConnection) {
+      const store = useCanvasStore.getState()
+      const sourceNode = store.nodes.find(n => n.id === pendingConnection.source)
+      const sourceType = getHandleDataType(sourceNode?.type, pendingConnection.sourceHandle ?? undefined, sourceNode?.data, 'source')
+      const targetHandle = resolveAutoConnectHandle(sourceType, node.type)
+      if (targetHandle) {
+        store.setEdges([...store.edges, {
+          id: `edge_auto_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
+          source: pendingConnection.source,
+          sourceHandle: pendingConnection.sourceHandle ?? undefined,
+          target: newNodeId,
+          targetHandle,
+        } as any])
+      } else {
+        message.info('新节点没有匹配的输入端口，未自动连线')
+      }
+      setPendingConnection(null)
+    }
     setMenuConfig(null)
     setSearchTerm('')
   }
+
+  const onConnectStart = useCallback((_: any, params: { nodeId: string | null; handleId: string | null; handleType: string | null }) => {
+    connectStartRef.current = params
+  }, [])
+
+  const onEdgeUpdate = useCallback((oldEdge: Edge, newConnection: Connection) => {
+    if (!isValidConnection(newConnection)) return
+    saveHistory()
+    const store = useCanvasStore.getState()
+    store.setEdges(updateEdge(oldEdge, newConnection, store.edges))
+  }, [isValidConnection, saveHistory])
+
+  const onConnectEnd = useCallback((event: any) => {
+    const start = connectStartRef.current
+    connectStartRef.current = null
+    if (!start?.nodeId || start.handleType !== 'source') return
+    const target = event.target as HTMLElement
+    if (!target?.classList?.contains('react-flow__pane')) return
+    const point = 'changedTouches' in event ? event.changedTouches[0] : event
+    setPendingConnection({ source: start.nodeId, sourceHandle: start.handleId })
+    openNodeSearch(point.clientX, point.clientY)
+  }, [openNodeSearch])
 
   const onSelectionContextMenu = useCallback((event: React.MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
     setMenuConfig(null)
     const selectedNodes = nodes.filter(node => node.selected)
+    const clamped = clampToViewport({ x: event.clientX, y: event.clientY, ...GROUP_MENU_SIZE, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight })
     if (selectedNodes.length < 2) {
       if (selectedNodes.length === 1 && selectedNodes[0].type === 'nodeGroup') {
-        setGroupMenuConfig({ x: event.clientX, y: event.clientY, selectedNodeIds: [], dissolveGroupId: selectedNodes[0].id })
+        setGroupMenuConfig({ x: clamped.x, y: clamped.y, selectedNodeIds: [], dissolveGroupId: selectedNodes[0].id })
       }
       return
     }
     if (selectedNodes.some(node => node.parentNode)) return
-    setGroupMenuConfig({ x: event.clientX, y: event.clientY, selectedNodeIds: selectedNodes.map(node => node.id) })
+    setGroupMenuConfig({ x: clamped.x, y: clamped.y, selectedNodeIds: selectedNodes.map(node => node.id) })
   }, [nodes])
 
   const onNodeContextMenu = useCallback((event: React.MouseEvent, node: any) => {
@@ -350,7 +414,8 @@ function CanvasWorkspace() {
       event.preventDefault()
       event.stopPropagation()
       setMenuConfig(null)
-      setGroupMenuConfig({ x: event.clientX, y: event.clientY, selectedNodeIds: [], dissolveGroupId: node.id })
+      const clamped = clampToViewport({ x: event.clientX, y: event.clientY, ...GROUP_MENU_SIZE, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight })
+      setGroupMenuConfig({ x: clamped.x, y: clamped.y, selectedNodeIds: [], dissolveGroupId: node.id })
     }
   }, [])
 
@@ -358,7 +423,12 @@ function CanvasWorkspace() {
     const handler = (e: KeyboardEvent) => {
       if (!((e.ctrlKey || e.metaKey) && e.key === 'b')) return
       e.preventDefault()
-      const selected = nodes.filter(node => node.selected && node.type !== 'nodeGroup')
+      const allNodes = useCanvasStore.getState().nodes
+      const selectedGroups = allNodes.filter(node => node.selected && node.type === 'nodeGroup')
+      const selected = allNodes.filter(node => node.selected && node.type !== 'nodeGroup')
+      selectedGroups.forEach(group => {
+        Object.entries(buildGroupMutePatches(allNodes, group.id)).forEach(([nodeId, patch]) => updateNodeData(nodeId, patch))
+      })
       if (selected.length === 0) return
       if (selected.length === 1) {
         updateNodeData(selected[0].id, { _muted: !selected[0].data?._muted })
@@ -377,17 +447,76 @@ function CanvasWorkspace() {
     return () => window.removeEventListener('keydown', handler)
   }, [nodes, updateNodeData, createGroup])
 
+  useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null
+      if (!el || typeof el.closest !== 'function') return false
+      return Boolean(el.closest('input, textarea, [contenteditable="true"], [data-config-panel]'))
+    }
+    const pasteFromClipboard = () => {
+      if (!clipboardRef.current) return
+      const plan = buildPastePlan(clipboardRef.current, getId)
+      saveHistory()
+      const store = useCanvasStore.getState()
+      store.setNodes([...store.nodes.map(n => ({ ...n, selected: false })), ...plan.nodes])
+      store.setEdges([...store.edges, ...plan.edges])
+      message.success(`已粘贴 ${plan.nodes.length} 个节点`)
+    }
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || isEditableTarget(e.target)) return
+      const key = e.key.toLowerCase()
+      if (key === 'c') {
+        const state = useCanvasStore.getState()
+        const payload = buildCopyPayload(state.nodes, state.edges)
+        if (!payload) return
+        clipboardRef.current = payload
+        message.success(`已复制 ${payload.nodes.length} 个节点`)
+      } else if (key === 'v') {
+        e.preventDefault()
+        pasteFromClipboard()
+      } else if (key === 'd') {
+        const state = useCanvasStore.getState()
+        const payload = buildCopyPayload(state.nodes, state.edges)
+        if (!payload) return
+        e.preventDefault()
+        clipboardRef.current = payload
+        pasteFromClipboard()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [saveHistory])
+
   return <Layout style={{ height: '100vh', overflow: 'hidden', background: 'linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)' }}>
     <Layout.Header style={{ height: 72, background: 'rgba(255,255,255,0.88)', backdropFilter: 'blur(18px)', borderBottom: '1px solid rgba(148,163,184,0.18)', padding: '0 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 8px 30px rgba(15,23,42,0.04)' }}>
-      <Space size="middle" style={{ display: 'flex', alignItems: 'center' }}>
+      <Space size="middle" style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
         <Tooltip title={isSidebarOpen ? '收起资产库' : '展开资产库'}><Button type="text" icon={isSidebarOpen ? <MenuFoldOutlined /> : <MenuUnfoldOutlined />} onClick={() => setIsSidebarOpen(!isSidebarOpen)} /></Tooltip>
         <Tooltip title="返回中枢大厅"><Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/')} /></Tooltip>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}><Title level={5} style={{ margin: 0 }}>{projectName}</Title><Tag color="processing" bordered={false}>创作中</Tag></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}><Title level={5} style={{ margin: 0, whiteSpace: 'nowrap' }}>{projectName}</Title><Tag color="processing" bordered={false}>创作中</Tag></div>
       </Space>
       <Space size="middle">
         <Space.Compact>
           <Tooltip title="撤销 (Ctrl+Z)"><Button icon={<UndoOutlined />} onClick={undo} disabled={past.length === 0} /></Tooltip>
           <Tooltip title="重做 (Ctrl+Y)"><Button icon={<RedoOutlined />} onClick={redo} disabled={future.length === 0} /></Tooltip>
+        </Space.Compact>
+        <Tooltip title="按连线方向自动整理布局">
+          <Button icon={<PartitionOutlined />} onClick={() => {
+            saveHistory()
+            const store = useCanvasStore.getState()
+            store.setNodes(layoutCanvas(store.nodes, store.edges))
+            window.requestAnimationFrame(() => reactFlowInstance?.fitView({ padding: 0.15, duration: 300 }))
+          }}>整理布局</Button>
+        </Tooltip>
+        <Space.Compact>
+          <Tooltip title={isGlobalRunning ? '停止全局运行' : '按 DAG 顺序运行全部节点'}>
+            <Button icon={isGlobalRunning ? <StopOutlined /> : <PlayCircleOutlined />} type="primary" danger={isGlobalRunning} onClick={handleGlobalRun}>{isGlobalRunning ? '停止' : '全局运行'}</Button>
+          </Tooltip>
+          {hasBreakpoint && (
+            <Tooltip title="跳过已成功节点，从断点续跑">
+              <Button icon={<ThunderboltOutlined />} onClick={handleResumeRun} style={{ background: '#faad14', borderColor: '#faad14', color: '#fff' }}>续跑</Button>
+            </Tooltip>
+          )}
+          <Button onClick={() => setComicModalOpen(true)} style={{ fontWeight: 'bold', borderColor: '#f59e0b', color: '#f59e0b' }}>漫剧生成</Button>
         </Space.Compact>
         <Button icon={<ClearOutlined />} onClick={clearCanvas}>清空</Button>
         <div style={{ display: 'flex', alignItems: 'center', background: '#fff', padding: 4, borderRadius: 14, border: '1px solid rgba(148,163,184,0.2)', boxShadow: '0 10px 24px rgba(15,23,42,0.04)' }}>
@@ -412,27 +541,32 @@ function CanvasWorkspace() {
 
       <Content ref={(el: HTMLDivElement | null) => { (reactFlowWrapper as any).current = el; canvasDrop(el) }} style={{ background: 'transparent', position: 'relative' }} onDoubleClick={(e) => { if ((e.target as HTMLElement).closest('.react-flow__pane')) openNodeSearch(e.clientX, e.clientY) }} onContextMenu={(e) => { if ((e.target as HTMLElement).closest('.react-flow__pane')) { e.preventDefault(); openNodeSearch(e.clientX, e.clientY) } }}>
         <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at top right, rgba(99,102,241,0.09), transparent 28%), radial-gradient(circle at bottom left, rgba(14,165,233,0.08), transparent 24%)' }} />
-        <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} isValidConnection={isValidConnection} onInit={setReactFlowInstance} nodeTypes={nodeTypes} fitView zoomOnDoubleClick={false} onPaneClick={closeNodeSearch} onNodeClick={closeNodeSearch} onSelectionContextMenu={onSelectionContextMenu} onNodeContextMenu={onNodeContextMenu} deleteKeyCode={['Backspace', 'Delete']} selectionKeyCode={['Shift', 'Control', 'Meta']}>
+        <ReactFlow nodes={nodes} edges={decoratedEdges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onConnectStart={onConnectStart} onConnectEnd={onConnectEnd} onEdgeUpdate={onEdgeUpdate} edgeUpdaterRadius={12} isValidConnection={isValidConnection} onInit={setReactFlowInstance} nodeTypes={nodeTypes} fitView zoomOnDoubleClick={false} onPaneClick={closeNodeSearch} onNodeClick={closeNodeSearch} onSelectionContextMenu={onSelectionContextMenu} onNodeContextMenu={onNodeContextMenu} deleteKeyCode={['Backspace', 'Delete']} selectionKeyCode={['Shift', 'Control', 'Meta']}>
           <Background color="#cbd5e1" gap={18} />
           <Controls style={{ left: 16, right: 'auto' }} />
-          <MiniMap style={{ border: '1px solid rgba(148,163,184,0.25)', borderRadius: 16, right: 16, bottom: 16, boxShadow: '0 14px 36px rgba(15,23,42,0.12)' }} zoomable pannable />
+          <MiniMap nodeColor={minimapNodeColor} nodeStrokeColor={minimapNodeColor} style={{ border: '1px solid rgba(148,163,184,0.25)', borderRadius: 16, right: 16, bottom: 16, boxShadow: '0 14px 36px rgba(15,23,42,0.12)' }} zoomable pannable />
         </ReactFlow>
 
         {menuConfig && <div style={{ position: 'fixed', left: menuConfig.x, top: menuConfig.y, zIndex: 9999, background: 'rgba(255,255,255,0.96)', backdropFilter: 'blur(16px)', boxShadow: '0 20px 45px rgba(15,23,42,0.18)', borderRadius: 16, width: 300, border: '1px solid rgba(148,163,184,0.18)', overflow: 'hidden' }} onDoubleClick={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
-          <div style={{ padding: 10, background: '#fafafa', borderBottom: '1px solid #e2e8f0' }}><Input prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />} placeholder="搜索节点..." variant="borderless" ref={(input) => input && setTimeout(() => input.focus(), 50)} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ padding: 0 }} /></div>
+          <div style={{ padding: 10, background: '#fafafa', borderBottom: '1px solid #e2e8f0' }}><Input prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />} placeholder="搜索节点..." variant="borderless" ref={(input) => input && setTimeout(() => input.focus(), 50)} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') { e.preventDefault(); setMenuHighlight(h => moveMenuHighlight(h, 1, flatMenuNodes.length)) }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); setMenuHighlight(h => moveMenuHighlight(h, -1, flatMenuNodes.length)) }
+            else if (e.key === 'Enter') { e.preventDefault(); const target = flatMenuNodes[menuHighlight]; if (target) createNodeAtMenu(target) }
+            else if (e.key === 'Escape') { closeNodeSearch() }
+          }} style={{ padding: 0 }} /></div>
           <div style={{ maxHeight: 320, overflowY: 'auto', padding: 8 }}>
             {(['ai', 'resource', 'display', 'structure'] as NodeCategory[]).map(category => {
               const list = groupedNodes[category]
               if (!list.length) return null
               return <div key={category} style={{ marginBottom: 10 }}>
                 <div style={{ padding: '6px 10px', fontSize: 11, color: '#64748b', fontWeight: 700 }}>{NODE_CATEGORY_LABELS[category]}</div>
-                {list.map(node => <div key={node.type} onClick={() => createNodeAtMenu(node)} style={{ padding: '10px 12px', cursor: 'pointer', borderRadius: 10, display: 'flex', flexDirection: 'column', background: 'transparent' }}>
+                {list.map(node => { const flatIndex = flatMenuNodes.indexOf(node); return <div key={node.type} onClick={() => createNodeAtMenu(node)} onMouseEnter={() => setMenuHighlight(flatIndex)} style={{ padding: '10px 12px', cursor: 'pointer', borderRadius: 10, display: 'flex', flexDirection: 'column', background: flatIndex === menuHighlight ? '#eef2ff' : 'transparent' }}>
                   <Space align="center" style={{ marginBottom: 2 }}>
                     <span style={{ fontSize: 16 }}>{node.icon}</span>
                     <Text strong style={{ fontSize: 13 }}>{node.label}</Text>
                   </Space>
                   <Text type="secondary" style={{ fontSize: 11 }}>{node.desc}</Text>
-                </div>)}
+                </div> })}
               </div>
             })}
             {!filteredNodes.length && <div style={{ padding: '16px 0', textAlign: 'center' }}><Text type="secondary">未找到节点</Text></div>}
@@ -442,14 +576,6 @@ function CanvasWorkspace() {
         {groupMenuConfig && <div style={{ position: 'fixed', left: groupMenuConfig.x, top: groupMenuConfig.y, zIndex: 9999, background: 'rgba(255,255,255,0.96)', backdropFilter: 'blur(16px)', boxShadow: '0 20px 45px rgba(15,23,42,0.18)', borderRadius: 14, width: 180, border: '1px solid rgba(148,163,184,0.18)', overflow: 'hidden', padding: 4 }} onClick={(e) => e.stopPropagation()}>{groupMenuConfig.selectedNodeIds.length > 0 && <div onClick={() => { createGroup(groupMenuConfig.selectedNodeIds, '节点组'); setGroupMenuConfig(null) }} style={{ padding: '8px 12px', cursor: 'pointer', borderRadius: 8 }}><Text strong style={{ fontSize: 13 }}>📦 创建节点组</Text></div>}{groupMenuConfig.dissolveGroupId && <div onClick={() => { dissolveGroup(groupMenuConfig.dissolveGroupId!); setGroupMenuConfig(null) }} style={{ padding: '8px 12px', cursor: 'pointer', borderRadius: 8 }}><Text strong style={{ fontSize: 13, color: '#ff4d4f' }}>🔓 解散节点组</Text></div>}</div>}
       </Content>
     </Layout>
-
-    <Card size="small" title="高级操作" style={{ position: 'fixed', right: 24, top: 92, width: 236, zIndex: 10, boxShadow: '0 18px 40px rgba(15,23,42,0.12)', borderRadius: 18, border: '1px solid rgba(148,163,184,0.16)' }} styles={{ body: { paddingTop: 12 } }}>
-      <Space direction="vertical" style={{ width: '100%' }}>
-        <Button icon={isGlobalRunning ? <StopOutlined /> : <PlayCircleOutlined />} onClick={handleGlobalRun} type={isGlobalRunning ? 'primary' : 'default'} danger={isGlobalRunning} block style={{ borderRadius: 12, height: 42 }}>{isGlobalRunning ? '停止运行' : '全局运行'}</Button>
-        {hasBreakpoint && <Button icon={<ThunderboltOutlined />} onClick={handleResumeRun} type="primary" style={{ background: '#faad14', borderColor: '#faad14', borderRadius: 12, height: 42 }} block>继续运行</Button>}
-        <Button onClick={() => setComicModalOpen(true)} style={{ fontWeight: 'bold', borderColor: '#f59e0b', color: '#f59e0b', borderRadius: 12, height: 42 }} block>漫剧生成</Button>
-      </Space>
-    </Card>
 
     <Modal title="漫剧生成" open={comicModalOpen} onCancel={() => setComicModalOpen(false)} okText="创建流水线" cancelText="取消" width={520} onOk={() => createComicPipeline(comicConfig)}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '8px 0' }}>

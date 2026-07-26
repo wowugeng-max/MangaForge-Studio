@@ -1,10 +1,11 @@
 import React from 'react'
-import { Handle, Position, type Edge, type NodeProps, useReactFlow } from 'reactflow'
+import { Position, type Edge, type NodeProps, useReactFlow } from 'reactflow'
 import { useDrop } from 'react-dnd'
 import { Button, Empty, Input, Tooltip, Typography, message } from 'antd'
 import { EditOutlined, FileImageOutlined, SaveOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { BaseNode } from './BaseNode'
+import { TypedHandle } from './TypedHandle'
 import { nodeRegistry } from '../../utils/nodeRegistry'
 import { DndItemTypes } from '../../constants/dnd'
 import { useCanvasStore } from '../../stores/canvasStore'
@@ -107,14 +108,6 @@ export function buildModifiedAssetPayload(input: {
   }
 }
 
-function handleColorForOutput(outputType: string) {
-  if (outputType === 'text') return '#52c41a'
-  if (outputType === 'image') return '#1890ff'
-  if (outputType === 'video') return '#eb2f96'
-  if (outputType === 'workflow') return '#722ed1'
-  return '#d9d9d9'
-}
-
 function isVideoPreview(asset: LoadableAsset | null, previewValue: string) {
   return asset?.type === 'video' || /\.(mp4|webm|mov)(\?|$)/i.test(previewValue)
 }
@@ -147,6 +140,7 @@ function LoadAssetNodeImpl(props: NodeProps) {
   }, [data?.asset])
 
   const handleAssetDrop = (droppedAsset: LoadableAsset) => {
+    useCanvasStore.getState().saveHistory()
     setAsset(droppedAsset)
     setContent(resolveEditableAssetContent(droppedAsset))
     setMediaDims('')
@@ -235,25 +229,28 @@ function LoadAssetNodeImpl(props: NodeProps) {
     )
   }
 
+  const nodeCollapsed = Boolean(data?._collapsed)
+
   const renderHandle = () => {
     if (!asset) return null
     const outputType = resolveAssetOutputType(asset)
     return (
-      <Tooltip title={`输出 ${outputType}`} placement="right">
-        <Handle
-          type="source"
-          position={Position.Right}
-          id="output"
-          isConnectable={isConnectable}
-          style={{ background: handleColorForOutput(outputType), width: 12, height: 12, border: '2px solid #fff' }}
-        />
-      </Tooltip>
+      <TypedHandle
+        id="output"
+        type="source"
+        position={Position.Right}
+        dataType={outputType}
+        label={`输出 ${asset.name || ''}`}
+        collapsed={nodeCollapsed}
+        isConnectable={isConnectable}
+      />
     )
   }
 
   return (
-    <BaseNode {...props} data={{ ...data, label: data?._customLabel ? data.label : (asset ? `资产 ${asset.name}` : '资产输入') }}>
+    <>
       {renderHandle()}
+      <BaseNode {...props} data={{ ...data, label: data?._customLabel ? data.label : (asset ? `资产 ${asset.name}` : '资产输入') }}>
       <div
         ref={drop}
         style={{
@@ -267,7 +264,8 @@ function LoadAssetNodeImpl(props: NodeProps) {
       >
         {renderPreview()}
       </div>
-    </BaseNode>
+      </BaseNode>
+    </>
   )
 }
 

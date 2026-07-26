@@ -14,4 +14,11 @@ describe('handleTypes migration compatibility', () => {
     expect(inferParamType('first_frame')).toBe('image')
     expect(inferParamType('last_frame')).toBe('image')
   })
+
+  test('video keywords match by inclusion like other types', () => {
+    expect(inferParamType('video_input')).toBe('video')
+    expect(inferParamType('main_clip')).toBe('video')
+    expect(inferParamType('ref_img')).toBe('image')
+    expect(inferParamType('positive_prompt')).toBe('text')
+  })
 })

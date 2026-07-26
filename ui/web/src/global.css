@@ -13,3 +13,9 @@ body {
 * {
   box-sizing: border-box;
 }
+
+/* Canvas typed handles: enlarge on hover for easier grabbing */
+.typed-handle:hover {
+  transform: scale(1.45);
+  z-index: 10;
+}

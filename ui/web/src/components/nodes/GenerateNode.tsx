@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import ReactDOM from 'react-dom'
-import { Handle, Position, type NodeProps, useReactFlow, useUpdateNodeInternals } from 'reactflow'
+import { Position, type NodeProps, useReactFlow, useUpdateNodeInternals } from 'reactflow'
 import { useParams } from 'react-router-dom'
 import { Button, Checkbox, Input, InputNumber, Select, Space, Spin, Switch, Tag, Tooltip, Typography, message, Slider } from 'antd'
 import { CloseOutlined, PlayCircleOutlined, SaveOutlined, StopOutlined, StarFilled } from '@ant-design/icons'
@@ -13,6 +13,9 @@ import CameraControl, { buildCameraPromptSuffix } from '../CameraControl'
 import CameraMovement from '../CameraMovement'
 import { ASPECT_RATIOS as SHARED_ASPECT_RATIOS, getAspectRatioSize, type AspectRatioValue } from '../AspectRatioSelector'
 import { BaseNode } from './BaseNode'
+import { TypedHandle } from './TypedHandle'
+import { expandFissionAndDistribute } from '../../pages/canvasFission'
+import { clampToViewport } from '../../utils/viewportClamp'
 import { pickMediaResultContent } from '../../utils/mediaResult'
 import { buildAssetMediaUrl } from '../../utils/assetMedia'
 
@@ -204,7 +207,16 @@ function GenerateNodeImpl(props: NodeProps) {
   const updatePanelPos = () => {
     if (!nodeRef.current) return
     const nodeRect = nodeRef.current.closest('.react-flow__node')?.getBoundingClientRect() || nodeRef.current.getBoundingClientRect()
-    setPanelPos({ top: nodeRect.bottom + 8, left: nodeRect.left })
+    const clamped = clampToViewport({
+      x: nodeRect.left,
+      y: nodeRect.bottom + 8,
+      width: 560,
+      height: 520,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      margin: 12,
+    })
+    setPanelPos({ top: clamped.y, left: clamped.x })
   }
 
   useEffect(() => {
@@ -295,7 +307,14 @@ function GenerateNodeImpl(props: NodeProps) {
     sseClientRef.current = null
     message.success('🧠 AI 思考完成！')
 
-    if (!finalResult?._fission) {
+    if (finalResult?._fission && Array.isArray(finalResult.items)) {
+      const store = useCanvasStore.getState()
+      if (!store.isGlobalRunning) {
+        const outcome = expandFissionAndDistribute({ nodeId: id, items: finalResult.items, store: useCanvasStore })
+        if (outcome.expanded) message.info(`裂变完成，已创建 ${finalResult.items.length} 个并行分支`, 3)
+        else if (outcome.reason === 'no_downstream') message.warning('裂变结果已生成，但没有下游节点可展开')
+      }
+    } else {
       getEdges().filter(e => e.source === id).forEach(edge => {
         updateNodeData(edge.target, { incoming_data: finalResult })
       })
@@ -487,11 +506,16 @@ function GenerateNodeImpl(props: NodeProps) {
     }
   }
 
+  const nodeCollapsed = Boolean(data?._collapsed)
+  const outType = mode === 'chat' || mode === 'vision' ? 'text'
+    : mode === 'text_to_image' || mode === 'image_to_image' ? 'image'
+      : mode === 'text_to_video' || mode === 'image_to_video' ? 'video' : 'any'
+
   const renderDynamicHandles = () => (
     <>
-      <Handle type="target" position={Position.Left} id="text" style={{ top: 70, background: '#52c41a', width: 12, height: 12 }} />
-      {(mode === 'vision' || mode === 'image_to_image' || mode === 'image_to_video') && <Handle type="target" position={Position.Left} id="image" style={{ top: 110, background: '#1890ff', width: 12, height: 12 }} />}
-      {(mode === 'chat' || mode === 'vision') && <Handle type="target" position={Position.Left} id="system" style={{ top: 30, background: '#fadb14', width: 12, height: 12 }} />}
+      {(mode === 'chat' || mode === 'vision') && <TypedHandle id="system" type="target" position={Position.Left} dataType="text" label="系统提示词" color="#fadb14" top={30} collapsed={nodeCollapsed} />}
+      <TypedHandle id="text" type="target" position={Position.Left} dataType="text" label="文本输入" top={70} collapsed={nodeCollapsed} />
+      {(mode === 'vision' || mode === 'image_to_image' || mode === 'image_to_video') && <TypedHandle id="image" type="target" position={Position.Left} dataType="image" label="图片输入" top={110} collapsed={nodeCollapsed} />}
     </>
   )
 
@@ -524,7 +548,7 @@ function GenerateNodeImpl(props: NodeProps) {
         left: panelPos.left,
         width: 560,
         maxWidth: 'calc(100vw - 24px)',
-        maxHeight: 'calc(100vh - 24px)',
+        maxHeight: 520,
         overflow: 'auto',
         background: '#fff',
         borderRadius: 12,
@@ -627,8 +651,9 @@ function GenerateNodeImpl(props: NodeProps) {
   ) : null
 
   return (
-    <BaseNode {...props} onOpenConfig={() => setConfigOpen(v => !v)}>
+    <>
       {renderDynamicHandles()}
+      <BaseNode {...props} onOpenConfig={() => setConfigOpen(v => !v)}>
       <div ref={nodeRef} style={{ display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0, height: '100%' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           <Tag color="#0ea5e9" style={{ margin: 0, fontWeight: 700, fontSize: 11, fontFamily: 'monospace' }}>{currentModeLabel}</Tag>
@@ -709,9 +734,10 @@ function GenerateNodeImpl(props: NodeProps) {
           )}
         </div>
       </div>
-      <Handle type="source" position={Position.Right} id="out" style={{ background: '#0ea5e9', width: 12, height: 12 }} />
+      </BaseNode>
+      <TypedHandle id="out" type="source" position={Position.Right} dataType={outType} label="生成结果" collapsed={nodeCollapsed} />
       {configPanel}
-    </BaseNode>
+    </>
   )
 }
 

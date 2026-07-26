@@ -6,19 +6,9 @@ import { useCanvasStore } from '../../stores/canvasStore'
 import { useAssetLibraryStore } from '../../stores/assetLibraryStore'
 import { useParams } from 'react-router-dom'
 import apiClient from '../../api/client'
+import { hexToRgba } from '../../utils/color'
 
 const { Text } = Typography
-
-const hexToRgba = (hex: string, alpha: number) => {
-  let c: any
-  if (/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)) {
-    c = hex.substring(1).split('')
-    if (c.length === 3) c = [c, c, c, c, c, c]
-    c = '0x' + c.join('')
-    return `rgba(${[(c >> 16) & 255, (c >> 8) & 255, c & 255].join(',')},${alpha})`
-  }
-  return `rgba(255, 255, 255, ${alpha})`
-}
 
 export const BaseNode = memo((props: NodeProps & { onOpenConfig?: () => void }) => {
   const { id, selected, data, children } = props
@@ -37,8 +27,8 @@ export const BaseNode = memo((props: NodeProps & { onOpenConfig?: () => void }) 
   const handleSaveAsAsset = async () => {
     const node = nodes.find(n => n.id === id)
     if (!node) return
-    const { result, incoming_data, _runSignal, _fissionIndex, _fissionSource, ...config } = data || {}
-    const assetName = data?.label || data?._customLabel || `节点配置_${node.type}`
+    const { result, incoming_data, _runSignal, _fissionIndex, _fissionSource, _prevWidth, _prevHeight, _collapsed, _muted, _isGroupRunning, ...config } = data || {}
+    const assetName = data?.label || `节点配置_${node.type}`
     setSavingNodeAsset(true)
     try {
       await apiClient.post('/assets/', {

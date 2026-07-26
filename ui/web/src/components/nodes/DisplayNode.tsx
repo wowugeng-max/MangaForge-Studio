@@ -1,9 +1,10 @@
 import React from 'react'
-import { Handle, Position, type Edge, type NodeProps, useReactFlow } from 'reactflow'
+import { Position, type Edge, type NodeProps, useReactFlow } from 'reactflow'
 import { Button, Input, Modal, Tooltip, Typography, message } from 'antd'
 import { SaveOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { BaseNode } from './BaseNode'
+import { TypedHandle } from './TypedHandle'
 import { nodeRegistry } from '../../utils/nodeRegistry'
 import { useAssetLibraryStore } from '../../stores/assetLibraryStore'
 import { useCanvasStore } from '../../stores/canvasStore'
@@ -61,7 +62,7 @@ export function buildDisplayPropagationPlan(input: {
 }) {
   const { rawData } = resolveDisplayContent(input.data)
   if (rawData === undefined || rawData === null || rawData === '') {
-    return { status: null as null, targetPatches: {} as Record<string, { incoming_data: any }> }
+    return { status: 'error' as const, targetPatches: {} as Record<string, { incoming_data: any }> }
   }
   const outData = typeof rawData === 'object' ? rawData : { content: rawData }
   const targetPatches: Record<string, { incoming_data: any }> = {}
@@ -140,22 +141,26 @@ function DisplayNodeImpl(props: NodeProps) {
   const projectId = Number(routeProjectId || 0) || null
   const { displayContent, mediaSrc, mediaType } = resolveDisplayContent(data || {})
 
-  const propagateIfReady = React.useCallback(() => {
+  const propagateIfReady = React.useCallback((fromRunSignal: boolean) => {
     const plan = buildDisplayPropagationPlan({ sourceId: id, data: data || {}, edges: getEdges() })
-    if (plan.status) setNodeStatus(id, plan.status)
+    if (plan.status === 'error') {
+      if (fromRunSignal) setNodeStatus(id, 'error')
+      return
+    }
+    setNodeStatus(id, plan.status)
     Object.entries(plan.targetPatches).forEach(([targetId, patch]) => updateNodeData(targetId, patch))
   }, [id, data, getEdges, setNodeStatus, updateNodeData])
 
   React.useEffect(() => {
     if (!data?._runSignal || data._runSignal === prevSignalRef.current) return
     prevSignalRef.current = data._runSignal
-    propagateIfReady()
+    propagateIfReady(true)
   }, [data?._runSignal, propagateIfReady])
 
   React.useEffect(() => {
     if (!data?.incoming_data || data.incoming_data === prevIncomingRef.current) return
     prevIncomingRef.current = data.incoming_data
-    propagateIfReady()
+    propagateIfReady(false)
   }, [data?.incoming_data, propagateIfReady])
 
   React.useEffect(() => { setMediaDims('') }, [displayContent])
@@ -188,12 +193,12 @@ function DisplayNodeImpl(props: NodeProps) {
     }
   }
 
-  return (
-    <BaseNode {...props} data={{ ...data, label: data?._customLabel ? data.label : '结果展示' }}>
-      <Tooltip title="通用输入">
-        <Handle type="target" position={Position.Left} id="in" style={{ top: '50%', background: '#fa8c16', width: 12, height: 12 }} />
-      </Tooltip>
+  const nodeCollapsed = Boolean(data?._collapsed)
 
+  return (
+    <>
+      <TypedHandle id="in" type="target" position={Position.Left} dataType="any" label="通用输入" collapsed={nodeCollapsed} />
+      <BaseNode {...props} data={{ ...data, label: data?._customLabel ? data.label : '结果展示' }}>
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexShrink: 0 }}>
           <Text type="secondary" style={{ fontSize: 13, fontWeight: 700, color: '#475569' }}>VISUAL_OUTPUT</Text>
@@ -229,14 +234,13 @@ function DisplayNodeImpl(props: NodeProps) {
         </div>
       </div>
 
-      <Tooltip title="通用输出">
-        <Handle type="source" position={Position.Right} id="out" style={{ top: '50%', background: '#fa8c16', width: 12, height: 12 }} />
-      </Tooltip>
+      </BaseNode>
+      <TypedHandle id="out" type="source" position={Position.Right} dataType="any" label="通用输出" collapsed={nodeCollapsed} />
 
       <Modal title="保存资产" open={isModalVisible} onOk={handleSaveToAsset} onCancel={() => setIsModalVisible(false)} confirmLoading={savingAsset} okText="保存" cancelText="取消" width={320}>
         <Input placeholder="给这个资产起个名字" value={assetName} onChange={event => setAssetName(event.target.value)} autoFocus />
       </Modal>
-    </BaseNode>
+    </>
   )
 }
 

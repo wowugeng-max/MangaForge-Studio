@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import {
   buildEditedLoadAssetDataPatch,
   buildLoadAssetNodeDataPatch,
@@ -123,5 +125,12 @@ describe('LoadAssetNode migration behavior', () => {
       tags: ['Modified_Asset'],
       project_id: 12,
     })
+  })
+})
+
+describe('load asset undo integration', () => {
+  test('asset drop saves history for undo', () => {
+    const code = readFileSync(join(import.meta.dir, 'LoadAssetNode.tsx'), 'utf8')
+    expect(code).toContain('saveHistory()')
   })
 })

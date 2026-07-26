@@ -79,7 +79,7 @@ const TEXT_KEYWORDS = ['prompt', 'text', 'caption', 'description', 'negative', '
 export function inferParamType(paramName: string): string {
   const lower = paramName.toLowerCase()
   if (IMAGE_KEYWORDS.some(k => lower.includes(k))) return 'image'
-  if (VIDEO_KEYWORDS.some(k => lower === k)) return 'video'
+  if (VIDEO_KEYWORDS.some(k => lower.includes(k))) return 'video'
   if (TEXT_KEYWORDS.some(k => lower.includes(k))) return 'text'
   return 'any'
 }
