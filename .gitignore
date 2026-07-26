@@ -43,6 +43,10 @@ claude-code-2.1.88.tgz
 workspace/fingerprint-lib/human/
 workspace/fingerprint-lib/ai/
 
+# Generated contract sets and machine-local active-set selection stay untracked.
+workspace/fingerprint-lib/contract-sets/
+workspace/fingerprint-lib/contract-selection.json
+
 # UI build artifacts
 ui/web/dist/
 ui/web/.vite/
