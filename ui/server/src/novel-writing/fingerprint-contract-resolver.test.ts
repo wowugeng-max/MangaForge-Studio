@@ -93,4 +93,68 @@ describe('fingerprint contract resolver', () => {
     expect(resolveFingerprintContract({ cwd: empty })).toBe(null)
     expect(resolveFingerprintContractInfo({ cwd: empty })).toBe(null)
   })
+
+  test('locked set that does not exist falls back to the active set and reports locked=false', async () => {
+    const { cwd, lib } = await tempRepo()
+    await mkdir(join(lib, 'contract-sets', 'set-a'), { recursive: true })
+    await writeFile(join(lib, 'contract-sets', 'set-a', 'active-contract.json'), contractJson('set_a_global', 0.4), 'utf8')
+    await writeFile(
+      join(lib, 'contract-selection.json'),
+      JSON.stringify({ active_set_id: 'set-a', locked: { set_id: 'ghost-set', key: 'active' } }),
+      'utf8',
+    )
+    const info = resolveFingerprintContractInfo({ cwd })
+    expect(info?.contract_name).toBe('set_a_global')
+    expect(info?.set_id).toBe('set-a')
+    expect(info?.locked).toBe(false)
+  })
+
+  test('locked genre file missing falls back to the same locked set global contract, not active_set_id', async () => {
+    const { cwd, lib } = await tempRepo()
+    await mkdir(join(lib, 'contract-sets', 'set-a'), { recursive: true })
+    await writeFile(join(lib, 'contract-sets', 'set-a', 'active-contract.json'), contractJson('set_a_global', 0.4), 'utf8')
+    await writeFile(
+      join(lib, 'contract-selection.json'),
+      JSON.stringify({ active_set_id: 'builtin', locked: { set_id: 'set-a', key: 'urban' } }),
+      'utf8',
+    )
+    const info = resolveFingerprintContractInfo({ cwd })
+    expect(info?.contract_name).toBe('set_a_global')
+    expect(info?.set_id).toBe('set-a')
+    expect(info?.locked).toBe(true)
+  })
+
+  test('locked genre file that exists is used and reported as locked', async () => {
+    const { cwd, lib } = await tempRepo()
+    await mkdir(join(lib, 'contract-sets', 'set-a', 'by-genre'), { recursive: true })
+    await writeFile(join(lib, 'contract-sets', 'set-a', 'active-contract.json'), contractJson('set_a_global', 0.4), 'utf8')
+    await writeFile(join(lib, 'contract-sets', 'set-a', 'by-genre', 'urban.json'), contractJson('set_a_urban', 0.25), 'utf8')
+    await writeFile(
+      join(lib, 'contract-selection.json'),
+      JSON.stringify({ active_set_id: 'builtin', locked: { set_id: 'set-a', key: 'urban' } }),
+      'utf8',
+    )
+    const info = resolveFingerprintContractInfo({ cwd })
+    expect(info?.contract_name).toBe('set_a_urban')
+    expect(info?.set_id).toBe('set-a')
+    expect(info?.locked).toBe(true)
+    expect(info?.genre_slug).toBe('urban')
+  })
+
+  test('reports genre_slug as null when falling back to the global contract because the genre file is missing', async () => {
+    const { cwd, lib } = await tempRepo()
+    await mkdir(join(lib, 'contract-sets', 'set-a'), { recursive: true })
+    await writeFile(join(lib, 'contract-sets', 'set-a', 'active-contract.json'), contractJson('set_a_global', 0.4), 'utf8')
+    await writeFile(join(lib, 'contract-selection.json'), JSON.stringify({ active_set_id: 'set-a' }), 'utf8')
+    const info = resolveFingerprintContractInfo({ cwd, genre: '都市' })
+    expect(info?.contract_name).toBe('set_a_global')
+    expect(info?.genre_slug).toBe(null)
+  })
+
+  test('reports the resolved genre slug when a genre-specific contract is actually used', async () => {
+    const { cwd } = await tempRepo()
+    const info = resolveFingerprintContractInfo({ cwd, genre: '都市' })
+    expect(info?.contract_name).toBe('builtin_urban')
+    expect(info?.genre_slug).toBe('urban')
+  })
 })

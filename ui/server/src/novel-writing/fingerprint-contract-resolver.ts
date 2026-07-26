@@ -29,21 +29,34 @@ function readContract(path: string): FingerprintContract | null {
   }
 }
 
-function candidatePathsForRoot(libRoot: string, genre?: string | null): string[] {
+type FingerprintContractCandidate = { path: string; locked: boolean; genreSlug: string | null }
+
+/**
+ * Candidates in priority order: locked genre/global contract > locked set's own
+ * global contract (keeps a locked set isolated when its genre file is missing,
+ * instead of spilling over into active_set_id) > active set genre > active set
+ * global > builtin genre > builtin global.
+ */
+function candidatesForRoot(libRoot: string, genre?: string | null): FingerprintContractCandidate[] {
   const selection = readContractSelectionSync(libRoot)
   const slug = genre ? normalizeFingerprintGenreSlug(genre) : null
-  const out: string[] = []
+  const out: FingerprintContractCandidate[] = []
   if (selection.locked?.set_id) {
     const dir = getContractSetDir(libRoot, selection.locked.set_id)
     const key = selection.locked.key || 'active'
-    out.push(key === 'active' ? join(dir, 'active-contract.json') : join(dir, 'by-genre', `${key}.json`))
+    if (key === 'active') {
+      out.push({ path: join(dir, 'active-contract.json'), locked: true, genreSlug: null })
+    } else {
+      out.push({ path: join(dir, 'by-genre', `${key}.json`), locked: true, genreSlug: key })
+      out.push({ path: join(dir, 'active-contract.json'), locked: true, genreSlug: null })
+    }
   }
   const activeDir = getContractSetDir(libRoot, selection.active_set_id)
-  if (slug) out.push(join(activeDir, 'by-genre', `${slug}.json`))
-  out.push(join(activeDir, 'active-contract.json'))
+  if (slug) out.push({ path: join(activeDir, 'by-genre', `${slug}.json`), locked: false, genreSlug: slug })
+  out.push({ path: join(activeDir, 'active-contract.json'), locked: false, genreSlug: null })
   const builtinDir = getContractSetDir(libRoot, BUILTIN_CONTRACT_SET_ID)
-  if (slug) out.push(join(builtinDir, 'by-genre', `${slug}.json`))
-  out.push(join(builtinDir, 'active-contract.json'))
+  if (slug) out.push({ path: join(builtinDir, 'by-genre', `${slug}.json`), locked: false, genreSlug: slug })
+  out.push({ path: join(builtinDir, 'active-contract.json'), locked: false, genreSlug: null })
   return out
 }
 
@@ -58,18 +71,16 @@ export function resolveFingerprintContractInfo(
   options: { cwd?: string; genre?: string | null } = {},
 ): ResolvedFingerprintContractInfo | null {
   const cwd = options.cwd || process.cwd()
-  const slug = options.genre ? normalizeFingerprintGenreSlug(options.genre) : null
   for (const libRoot of resolveFingerprintLibRoots(cwd)) {
-    const selection = readContractSelectionSync(libRoot)
-    for (const path of candidatePathsForRoot(libRoot, options.genre)) {
-      const contract = readContract(path)
+    for (const candidate of candidatesForRoot(libRoot, options.genre)) {
+      const contract = readContract(candidate.path)
       if (!contract) continue
       return {
-        set_id: setIdForPath(libRoot, path),
+        set_id: setIdForPath(libRoot, candidate.path),
         contract_name: String(contract.name || ''),
-        contract_path: path,
-        locked: Boolean(selection.locked?.set_id),
-        genre_slug: slug,
+        contract_path: candidate.path,
+        locked: candidate.locked,
+        genre_slug: candidate.genreSlug,
       }
     }
   }
