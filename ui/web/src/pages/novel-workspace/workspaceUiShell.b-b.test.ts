@@ -799,4 +799,11 @@ describe('commercial writing workspace UI shell b b', () => {
     expect(css).toContain('.writing-cockpit-summary-strip')
     expect(css).toContain('.writing-cockpit-details')
   })
+
+  test('ops toolbox surfaces the active fingerprint contract with a管理页 link', () => {
+    const source = projectWorkspaceSource()
+    expect(source).toContain('当前指纹合同')
+    expect(source).toContain('/fingerprint-contracts')
+    expect(source).toContain('fingerprint-contracts/active')
+  })
 })

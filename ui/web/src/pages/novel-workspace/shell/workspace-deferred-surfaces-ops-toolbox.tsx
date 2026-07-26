@@ -1,4 +1,5 @@
 import React from 'react'
+import { Link } from 'react-router-dom'
 import {
   Alert, Button, Card, Checkbox, Form, Input, InputNumber, List, Modal, Select, Space, Tag, Tooltip, Typography, message,
 } from 'antd'
@@ -27,6 +28,34 @@ export type { NovelWorkspaceDeferredSurfacesProps } from './workspace-deferred-s
 
 
 const { Text } = Typography
+
+function ActiveFingerprintContractCard() {
+  const [info, setInfo] = React.useState<any>(null)
+  const [failed, setFailed] = React.useState(false)
+  React.useEffect(() => {
+    let alive = true
+    apiClient.get('/fingerprint-contracts/active')
+      .then(({ data }) => { if (alive) setInfo(data) })
+      .catch(() => { if (alive) setFailed(true) })
+    return () => { alive = false }
+  }, [])
+  return (
+    <Card size="small" title="当前指纹合同">
+      <Space wrap size={6}>
+        {failed || !info?.contract_name
+          ? <Tag color="orange">未解析到合同</Tag>
+          : (
+            <>
+              <Tag color="blue">{info.set_label || info.set_id}</Tag>
+              <Tag>{info.contract_name}</Tag>
+              {info.locked ? <Tag color="orange">已锁定</Tag> : null}
+            </>
+          )}
+        <Link to="/fingerprint-contracts">管理合同</Link>
+      </Space>
+    </Card>
+  )
+}
 
 export function NovelWorkspaceDeferredOpsToolbox(props: NovelWorkspaceDeferredSurfacesProps) {
   const {
@@ -253,6 +282,7 @@ export function NovelWorkspaceDeferredOpsToolbox(props: NovelWorkspaceDeferredSu
             message="这些工具用于生产治理：稳定性、成本、质量、审批、相似度、滚动规划和提示词版本。"
             description="核心写作、审稿、规划、参考迁移会调用大模型；机械质检、传播债务、模型诊断、备份和模板默认是本地规则/配置工具，带 AI 前缀的按钮才会调用当前选择的大模型。"
           />
+          <ActiveFingerprintContractCard />
           <Card size="small" title="自然语言创作指令台">
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
               <Text type="secondary" style={{ fontSize: 12 }}>输入一句操作意图，系统会用本地指令解析器转成生产步骤；低风险检查类任务可以直接执行。</Text>
