@@ -58,12 +58,14 @@ export function buildCheckPassRateItems(aggregate: any) {
   const rows = Array.isArray(aggregate?.check_pass_rates) ? aggregate.check_pass_rates : []
   return rows.map((row: any) => {
     const passRate = Number(row?.pass_rate || 0)
+    const sampleCount = Number(row?.sample_count || 0)
     return {
       key: String(row?.key || ''),
       label: CHECK_LABELS[String(row?.key || '')] || String(row?.key || ''),
       pass_rate: passRate,
-      sample_count: Number(row?.sample_count || 0),
+      sample_count: sampleCount,
       tone: (passRate >= 0.9 ? 'good' : passRate >= 0.6 ? 'warn' : 'bad') as 'good' | 'warn' | 'bad',
+      tooltip: `目标 ${formatTargetValue(row?.target)} · 均值 ${formatTargetValue(row?.mean_value)} · 采样 ${sampleCount} 次`,
     }
   })
 }
@@ -101,6 +103,19 @@ export function buildContractDetailRows(detail: any): Array<{ label: string; val
     rows.push({ label: item.label, value: formatTargetValue(detail.contract?.target?.[item.key]) })
   }
   return rows
+}
+
+export function formatSamplesStatusText(status: { available?: boolean; count?: number; by_genre?: Record<string, number> } | null): string {
+  if (!status?.available) {
+    return '本地样本库为空：离线重拟合不可用（样本因版权未入库，离线重拟合只能在有样本的机器上进行）'
+  }
+  const count = Number(status.count || 0)
+  const byGenre = status.by_genre && typeof status.by_genre === 'object' ? status.by_genre : {}
+  const entries = Object.entries(byGenre).sort((a, b) => Number(b[1]) - Number(a[1]))
+  if (!entries.length) return `本地样本 ${count} 条可用`
+  const shown = entries.slice(0, 6).map(([genre, n]) => `${genre} ${n}`).join(' · ')
+  const suffix = entries.length > 6 ? ' …' : ''
+  return `本地样本 ${count} 条可用 · 按题材：${shown}${suffix}`
 }
 
 export function nextJobPollDelayMs(job: { status: string } | null, failures: number): number | null {

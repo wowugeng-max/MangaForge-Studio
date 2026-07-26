@@ -5,6 +5,7 @@ import {
   buildContractDetailRows,
   buildContractSetRows,
   canApplyJobUpdate,
+  formatSamplesStatusText,
   nextJobPollDelayMs,
   shouldResumeJobPolling,
 } from './fingerprintContractsModel'
@@ -156,5 +157,44 @@ describe('buildContractDetailRows', () => {
 
   test('returns an empty list for a null detail', () => {
     expect(buildContractDetailRows(null)).toEqual([])
+  })
+})
+
+describe('formatSamplesStatusText', () => {
+  test('lists the per-genre breakdown in descending order', () => {
+    const text = formatSamplesStatusText({ available: true, count: 810, by_genre: { urban: 174, xianxia: 154, wuxia: 12 } })
+    expect(text).toContain('810')
+    expect(text.indexOf('urban 174')).toBeLessThan(text.indexOf('xianxia 154'))
+    expect(text).toContain('wuxia 12')
+  })
+
+  test('explains the unavailable case without a breakdown', () => {
+    const text = formatSamplesStatusText({ available: false, count: 0, by_genre: {} })
+    expect(text).toContain('样本库为空')
+    expect(text).not.toContain('按题材')
+  })
+
+  test('tolerates a null status', () => {
+    expect(typeof formatSamplesStatusText(null)).toBe('string')
+  })
+})
+
+describe('buildCheckPassRateItems tooltip', () => {
+  test('includes target, mean and sample count', () => {
+    const items = buildCheckPassRateItems({
+      check_pass_rates: [
+        { key: 'dialogue_para_ratio', pass_rate: 0.5, sample_count: 4, mean_value: 0.21, target: [0.099, 0.328] },
+        { key: 'subject_ta_opener_ratio', pass_rate: 1, sample_count: 4, mean_value: 0.12, target: 0.35 },
+      ],
+    })
+    expect(items[0].tooltip).toContain('0.099–0.328')
+    expect(items[0].tooltip).toContain('0.21')
+    expect(items[0].tooltip).toContain('4')
+    expect(items[1].tooltip).toContain('0.35')
+  })
+
+  test('renders a dash when target and mean are absent', () => {
+    const items = buildCheckPassRateItems({ check_pass_rates: [{ key: 'cv_para', pass_rate: 1, sample_count: 1 }] })
+    expect(items[0].tooltip).toContain('—')
   })
 })

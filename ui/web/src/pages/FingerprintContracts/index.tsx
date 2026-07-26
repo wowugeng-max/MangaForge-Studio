@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Card, Drawer, Empty, Input, Modal, Radio, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
 import { fingerprintContractApi } from '../../api/fingerprintContracts'
-import { CHECK_LABELS, buildCheckPassRateItems, buildContractDetailRows, buildContractSetRows, canApplyJobUpdate, nextJobPollDelayMs, shouldResumeJobPolling, type ContractSetRow } from './fingerprintContractsModel'
+import { CHECK_LABELS, buildCheckPassRateItems, buildContractDetailRows, buildContractSetRows, canApplyJobUpdate, formatSamplesStatusText, nextJobPollDelayMs, shouldResumeJobPolling, type ContractSetRow } from './fingerprintContractsModel'
 
 const { Text } = Typography
 const JOB_STORAGE_KEY = 'fingerprint.contract.last_job_id'
@@ -23,10 +23,16 @@ export default function FingerprintContracts() {
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detail, setDetail] = useState<any>(null)
+  const [danglingActive, setDanglingActive] = useState(false)
 
   const mountedRef = useRef(true)
   const pollTokenRef = useRef(0)
   const myJobIdRef = useRef<string | null>(null)
+  const selectedSetIdRef = useRef('')
+
+  useEffect(() => {
+    selectedSetIdRef.current = selectedSetId
+  }, [selectedSetId])
 
   const load = async () => {
     setLoading(true)
@@ -34,17 +40,19 @@ export default function FingerprintContracts() {
       const [listRes, samplesRes, scoresRes] = await Promise.all([
         fingerprintContractApi.list(),
         fingerprintContractApi.samplesStatus(),
-        fingerprintContractApi.scores(),
+        fingerprintContractApi.scores(selectedSetIdRef.current || undefined),
       ])
       const sets = Array.isArray(listRes.data?.sets) ? listRes.data.sets : []
       const selectionData = listRes.data?.selection || null
+      const activeSetId = String(selectionData?.active_set_id || 'builtin')
       const targets = Object.fromEntries(sets.map((s: any) => [s.id, s.target_summary]))
       const aggregatesData = Array.isArray(scoresRes.data?.aggregates) ? scoresRes.data.aggregates : []
       setRows(buildContractSetRows({ sets, selection: selectionData, aggregates: aggregatesData, targets }))
       setSamplesStatus(samplesRes.data || null)
       setAggregates(aggregatesData)
       setScoreRows(Array.isArray(scoresRes.data?.rows) ? scoresRes.data.rows : [])
-      setSelectedSetId((prev) => prev || String(selectionData?.active_set_id || 'builtin'))
+      setSelectedSetId((prev) => prev || activeSetId)
+      setDanglingActive(sets.length > 0 && activeSetId !== 'builtin' && listRes.data?.active == null)
     } catch {
       message.error('加载指纹合同失败')
     } finally {
@@ -277,6 +285,14 @@ export default function FingerprintContracts() {
     <div style={{ padding: 32, minHeight: '100%' }}>
       <Space direction="vertical" style={{ width: '100%' }} size={24}>
         <Card variant="borderless" title="合同集">
+          {danglingActive && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message="当前启用的合同集已不存在，已回落到内置合同，请重新选择一套合同集。"
+            />
+          )}
           <Table
             rowKey="id"
             loading={loading}
@@ -291,13 +307,11 @@ export default function FingerprintContracts() {
             <Alert
               type={samplesStatus?.available ? 'info' : 'warning'}
               showIcon
-              message={samplesStatus?.available
-                ? `本地样本 ${samplesStatus.count} 条可用`
-                : '本地样本库为空：离线重拟合不可用（样本因版权未入库，需在有样本的机器上操作）'}
+              message={formatSamplesStatusText(samplesStatus)}
             />
             <Radio.Group value={mode} onChange={(e) => setMode(e.target.value)}>
               <Radio value="offline_refit">离线重拟合（推荐）</Radio>
-              <Radio value="online_fetch">联网抓取（耗时长、依赖站点）</Radio>
+              <Radio value="online_fetch">联网抓取（耗时长、依赖站点，需在服务端手动运行 build 脚本）</Radio>
             </Radio.Group>
             <Input
               placeholder="标签（可选）"
@@ -314,7 +328,7 @@ export default function FingerprintContracts() {
             {job && (
               <Text type="secondary">
                 最近任务：{job.status}
-                {typeof job.progress === 'number' ? ` · 进度 ${job.progress}%` : ''}
+                {job.progress ? ` · ${job.progress}` : ''}
                 {job.status === 'failed' && job.error ? ` · ${job.error}` : ''}
               </Text>
             )}
@@ -326,6 +340,9 @@ export default function FingerprintContracts() {
             >
               开始生成
             </Button>
+            {mode === 'online_fetch' && (
+              <Text type="secondary">联网抓取尚未接线：这里只会记录一条说明性失败任务，请改为在服务端手动运行 build 脚本完成抓取与拟合。</Text>
+            )}
           </Space>
         </Card>
 
@@ -346,7 +363,7 @@ export default function FingerprintContracts() {
                 </Space>
                 <Space wrap>
                   {buildCheckPassRateItems(selectedAggregate).map((item) => (
-                    <Tooltip key={item.key} title={`通过 ${item.sample_count} 次采样`}>
+                    <Tooltip key={item.key} title={item.tooltip}>
                       <Tag color={item.tone === 'good' ? 'green' : item.tone === 'warn' ? 'orange' : 'red'}>
                         {item.label} {(item.pass_rate * 100).toFixed(0)}%
                       </Tag>
