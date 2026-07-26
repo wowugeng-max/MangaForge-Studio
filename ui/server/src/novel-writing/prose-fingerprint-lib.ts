@@ -1,5 +1,3 @@
-import { existsSync, readFileSync } from 'fs'
-import { resolve } from 'path'
 /**
  * Prose statistical fingerprint library.
  *
@@ -603,29 +601,3 @@ export function normalizeFingerprintGenreSlug(raw?: string | null): string | nul
   return null
 }
 
-function fingerprintContractCandidates(cwd = process.cwd(), genreSlug?: string | null): string[] {
-  const roots = [
-    resolve(cwd, '../../workspace/fingerprint-lib/contracts'),
-    resolve(cwd, '../../../workspace/fingerprint-lib/contracts'),
-    resolve(cwd, 'workspace/fingerprint-lib/contracts'),
-    resolve('/Users/ruiyaosong/MangaForge-Studio/workspace/fingerprint-lib/contracts'),
-  ]
-  const out: string[] = []
-  const slug = genreSlug ? normalizeFingerprintGenreSlug(genreSlug) : null
-  for (const root of roots) {
-    if (slug) out.push(resolve(root, 'by-genre', `${slug}.json`))
-    out.push(resolve(root, 'active-contract.json'))
-  }
-  return out
-}
-
-/** Load global active contract, or genre-specific contract when available. */
-export function loadFingerprintContract(options: { cwd?: string; genre?: string | null } = {}): FingerprintContract | null {
-  try {
-    const path = fingerprintContractCandidates(options.cwd || process.cwd(), options.genre).find((p) => existsSync(p))
-    if (!path) return null
-    return JSON.parse(readFileSync(path, 'utf8')) as FingerprintContract
-  } catch {
-    return null
-  }
-}

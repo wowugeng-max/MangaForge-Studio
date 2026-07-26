@@ -16,7 +16,6 @@ import { existsSync, readFileSync } from 'fs'
 import { resolve } from 'path'
 import {
   formatFingerprintContractPrompt,
-  loadFingerprintContract,
   measureProseFingerprintVector,
   resolveZhuqueNarrativeHard,
   scoreAgainstContract,
@@ -24,6 +23,7 @@ import {
   type ProseFingerprintVector,
   type ZhuqueNarrativeHardGate,
 } from './prose-fingerprint-lib'
+import { resolveFingerprintContract } from './fingerprint-contract-resolver'
 import { ensureWebnovelParagraphBreaks } from './chapter-prose-storage-patch'
 import { buildHumanizeDualPassPromptDirectives } from './humanize-dual-pass'
 import { buildEndingPackagingHardBans } from './humanize-dual-pass'
@@ -56,7 +56,7 @@ function compact(value: any, limit = 220) {
 }
 
 function loadActiveFingerprintContract(cwd = process.cwd(), genre?: string | null): FingerprintContract | null {
-  return loadFingerprintContract({ cwd, genre })
+  return resolveFingerprintContract({ cwd, genre })
 }
 
 /** Abstract pure-AI pattern families learned from detector red segments (genre-agnostic). */

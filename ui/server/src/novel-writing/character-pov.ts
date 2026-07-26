@@ -1,7 +1,6 @@
-import { existsSync, readFileSync } from 'fs'
-import { resolve } from 'path'
 import { formatFingerprintContractPrompt, type FingerprintContract } from './prose-fingerprint-lib'
 import { buildHumanWebnovelResistancePromptDirectives } from './human-webnovel-resistance'
+import { resolveFingerprintContract } from './fingerprint-contract-resolver'
 /**
  * Character POV (角色视角) — system-level limited viewpoint contract.
  * Compiles chapter/scene POV lenses, injects write constraints, and scans for
@@ -662,15 +661,7 @@ export function attachPovLensesToSceneCards(sceneCards: any[], povPlan: ChapterP
 
 
 function loadActiveFingerprintContract(): FingerprintContract | null {
-  try {
-    const p = resolve(process.cwd(), '../../workspace/fingerprint-lib/contracts/active-contract.json')
-    const p2 = resolve(process.cwd(), '../../../workspace/fingerprint-lib/contracts/active-contract.json')
-    const path = existsSync(p) ? p : existsSync(p2) ? p2 : ''
-    if (!path) return null
-    return JSON.parse(readFileSync(path, 'utf8')) as FingerprintContract
-  } catch {
-    return null
-  }
+  return resolveFingerprintContract()
 }
 
 export function formatCharacterPovPrompt(plan: ChapterPovPlan | null | undefined) {
