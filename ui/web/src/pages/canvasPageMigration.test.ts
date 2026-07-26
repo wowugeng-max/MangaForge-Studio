@@ -345,3 +345,19 @@ describe('canvas edge reconnection', () => {
     expect(canvasPage).toContain('edgeUpdaterRadius={12}')
   })
 })
+
+describe('canvas cleanup pack', () => {
+  test('group Ctrl+B handling is centralized in CanvasPage', () => {
+    const canvasPage = source('CanvasPage.tsx')
+    const groupNode = source('../components/nodes/GroupNode.tsx')
+    expect(canvasPage).toContain('buildGroupMutePatches')
+    expect(groupNode).not.toContain("event.key.toLowerCase() === 'b'")
+  })
+
+  test('save-as-asset strips UI state fields', () => {
+    const baseNode = source('../components/nodes/BaseNode.tsx')
+    expect(baseNode).toContain('_prevWidth')
+    expect(baseNode).toContain('_collapsed')
+    expect(baseNode).not.toContain('data?.label || data?._customLabel')
+  })
+})

@@ -108,7 +108,6 @@ export function buildGroupRunTickPlan(input: {
   now?: number
 }) {
   const childIds = input.nodes.filter(node => node.parentNode === input.groupId).map(node => node.id)
-  const childSet = new Set(childIds)
   const now = input.now ?? Date.now()
   const statusPatches: Record<string, GroupNodeStatus> = {}
   const dataPatches: Record<string, Record<string, any>> = {}
@@ -157,7 +156,6 @@ export function buildGroupRunTickPlan(input: {
     const ready = incomingEdges.every(edge => {
       const dependencyStatus = input.nodeRunStatus[edge.source] || 'idle'
       if (dependencyStatus === 'running') waitingOnRunningDependency = true
-      if (childSet.has(edge.source)) return dependencyStatus === 'success'
       return dependencyStatus === 'success'
     })
     if (!ready) return
@@ -254,17 +252,6 @@ function GroupNodeImpl({ id, data, selected }: NodeProps) {
     event?.stopPropagation()
     applyNodeDataPatches(buildGroupMutePatches(nodes, id))
   }
-
-  React.useEffect(() => {
-    if (!selected) return undefined
-    const handler = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'b') {
-        handleToggleMute(event)
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [selected, handleToggleMute])
 
   const handleGroupRun = (event: React.MouseEvent) => {
     event.stopPropagation()

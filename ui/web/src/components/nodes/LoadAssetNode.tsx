@@ -140,6 +140,7 @@ function LoadAssetNodeImpl(props: NodeProps) {
   }, [data?.asset])
 
   const handleAssetDrop = (droppedAsset: LoadableAsset) => {
+    useCanvasStore.getState().saveHistory()
     setAsset(droppedAsset)
     setContent(resolveEditableAssetContent(droppedAsset))
     setMediaDims('')

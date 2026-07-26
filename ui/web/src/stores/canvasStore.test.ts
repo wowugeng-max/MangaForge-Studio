@@ -233,3 +233,18 @@ describe('executeFission spacing', () => {
     expect(clones[1].position.y).toBeGreaterThanOrEqual((380 + 60) * 2)
   })
 })
+
+describe('updateNodeData no-op short circuit', () => {
+  afterEach(resetStore)
+
+  test('same values leave nodes array untouched', () => {
+    useCanvasStore.getState().setCanvasData([
+      { id: 'n1', type: 'generate', position: { x: 0, y: 0 }, data: { label: 'A', prompt: 'p' } } as any,
+    ], [])
+    const before = useCanvasStore.getState().nodes
+    useCanvasStore.getState().updateNodeData('n1', { label: 'A', prompt: 'p' })
+    expect(useCanvasStore.getState().nodes).toBe(before)
+    useCanvasStore.getState().updateNodeData('n1', { prompt: 'changed' })
+    expect(useCanvasStore.getState().nodes).not.toBe(before)
+  })
+})

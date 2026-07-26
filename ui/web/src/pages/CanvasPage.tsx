@@ -9,6 +9,7 @@ import { DndItemTypes } from '../constants/dnd'
 import { useCanvasStore } from '../stores/canvasStore'
 import AssetLibrary from '../components/AssetLibrary'
 import { nodeTypes } from '../components/nodes'
+import { buildGroupMutePatches } from '../components/nodes/GroupNode'
 import { getHandleDataType, areTypesCompatible } from '../utils/handleTypes'
 import apiClient from '../api/client'
 import { planCanvasDagStep } from './canvasDagRunner'
@@ -422,7 +423,12 @@ function CanvasWorkspace() {
     const handler = (e: KeyboardEvent) => {
       if (!((e.ctrlKey || e.metaKey) && e.key === 'b')) return
       e.preventDefault()
-      const selected = nodes.filter(node => node.selected && node.type !== 'nodeGroup')
+      const allNodes = useCanvasStore.getState().nodes
+      const selectedGroups = allNodes.filter(node => node.selected && node.type === 'nodeGroup')
+      const selected = allNodes.filter(node => node.selected && node.type !== 'nodeGroup')
+      selectedGroups.forEach(group => {
+        Object.entries(buildGroupMutePatches(allNodes, group.id)).forEach(([nodeId, patch]) => updateNodeData(nodeId, patch))
+      })
       if (selected.length === 0) return
       if (selected.length === 1) {
         updateNodeData(selected[0].id, { _muted: !selected[0].data?._muted })

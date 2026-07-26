@@ -74,7 +74,15 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     get().saveHistory()
     set(state => ({ nodes: [...state.nodes, node] }))
   },
-  updateNodeData: (id, data) => set(state => ({ nodes: state.nodes.map(node => node.id === id ? { ...node, data: { ...(node.data as any), ...data } } : node) })),
+  updateNodeData: (id, data) => set(state => {
+    const target = state.nodes.find(node => node.id === id)
+    if (target) {
+      const current = (target.data || {}) as Record<string, any>
+      const unchanged = Object.keys(data || {}).every(key => Object.is(current[key], (data as any)[key]))
+      if (unchanged) return state
+    }
+    return { nodes: state.nodes.map(node => node.id === id ? { ...node, data: { ...(node.data as any), ...data } } : node) }
+  }),
   onNodesChange: changes => set({ nodes: applyNodeChanges(changes, get().nodes) }),
   onEdgesChange: changes => set({ edges: applyEdgeChanges(changes, get().edges) }),
   onConnect: connection => {

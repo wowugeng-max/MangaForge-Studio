@@ -27,8 +27,8 @@ export const BaseNode = memo((props: NodeProps & { onOpenConfig?: () => void }) 
   const handleSaveAsAsset = async () => {
     const node = nodes.find(n => n.id === id)
     if (!node) return
-    const { result, incoming_data, _runSignal, _fissionIndex, _fissionSource, ...config } = data || {}
-    const assetName = data?.label || data?._customLabel || `节点配置_${node.type}`
+    const { result, incoming_data, _runSignal, _fissionIndex, _fissionSource, _prevWidth, _prevHeight, _collapsed, _muted, _isGroupRunning, ...config } = data || {}
+    const assetName = data?.label || `节点配置_${node.type}`
     setSavingNodeAsset(true)
     try {
       await apiClient.post('/assets/', {
