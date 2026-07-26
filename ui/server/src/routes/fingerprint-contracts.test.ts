@@ -1,10 +1,15 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, mock, test } from 'bun:test'
 import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { registerFingerprintContractRoutes } from './fingerprint-contracts'
 import { createNovelProject, createNovelReview } from '../novel'
 import { buildFingerprintScoreReviewRecord } from '../fingerprint-contract-scores'
+import * as workspaceModule from '../workspace'
+
+// Captured before any mock.module() call touches '../workspace', so the
+// 'GET active' test below can restore the real module exactly.
+const realWorkspaceModule = { ...workspaceModule }
 
 let dirs: string[] = []
 
@@ -52,7 +57,7 @@ async function tempWorkspace() {
     join(lib, 'contracts', 'active-contract.json'),
     JSON.stringify({
       version: 1,
-      name: 'qidian_free_rank_human',
+      name: 'ROUTE_FIXTURE_CONTRACT',
       built_from: ['a'],
       target: {
         cv_para: [0.5, 0.7], single_sentence_para_ratio: [0.8, 0.97], two_sentence_para_ratio: [0.02, 0.15],
@@ -121,12 +126,22 @@ describe('fingerprint contract routes', () => {
 
   test('GET active reports the resolved contract', async () => {
     const ws = await tempWorkspace()
-    const { app, handlers } = createRouteHarness()
-    registerFingerprintContractRoutes(app, () => join(ws, 'workspace'))
-    const res = await call(handlers.get('GET /api/fingerprint-contracts/active'), {})
-    expect(res.body.contract_name).toBe('qidian_free_rank_human')
-    expect(res.body.set_id).toBe('builtin')
-    expect(res.body.locked).toBe(false)
+    // resolveFingerprintContractInfo() (called with no cwd, matching production) resolves
+    // through loadActiveWorkspaceSync(), not through the getWorkspace() callback below — so
+    // this must mock the former to actually exercise the injected workspace. Without it, the
+    // fixture's distinctive name (ROUTE_FIXTURE_CONTRACT) would never match, proving the two
+    // are wired together instead of just coincidentally sharing the real repo's contract name.
+    mock.module('../workspace', () => ({ ...realWorkspaceModule, loadActiveWorkspaceSync: () => join(ws, 'workspace') }))
+    try {
+      const { app, handlers } = createRouteHarness()
+      registerFingerprintContractRoutes(app, () => join(ws, 'workspace'))
+      const res = await call(handlers.get('GET /api/fingerprint-contracts/active'), {})
+      expect(res.body.contract_name).toBe('ROUTE_FIXTURE_CONTRACT')
+      expect(res.body.set_id).toBe('builtin')
+      expect(res.body.locked).toBe(false)
+    } finally {
+      mock.module('../workspace', () => realWorkspaceModule)
+    }
   })
 
   test('GET samples-status reports an empty corpus', async () => {
