@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useDrop } from 'react-dnd'
-import { Button, Input, Layout, Modal, Select, Space, Tag, Tooltip, Typography, message, Card } from 'antd'
+import { Button, Input, Layout, Modal, Select, Space, Tag, Tooltip, Typography, message } from 'antd'
 import { ArrowLeftOutlined, ClearOutlined, MenuFoldOutlined, MenuUnfoldOutlined, PlayCircleOutlined, SaveOutlined, SearchOutlined, StopOutlined, SyncOutlined, ThunderboltOutlined, UndoOutlined, RedoOutlined } from '@ant-design/icons'
 import ReactFlow, { Background, Controls, MiniMap, ReactFlowProvider, type ReactFlowInstance } from 'reactflow'
 import 'reactflow/dist/style.css'
@@ -391,6 +391,17 @@ function CanvasWorkspace() {
           <Tooltip title="撤销 (Ctrl+Z)"><Button icon={<UndoOutlined />} onClick={undo} disabled={past.length === 0} /></Tooltip>
           <Tooltip title="重做 (Ctrl+Y)"><Button icon={<RedoOutlined />} onClick={redo} disabled={future.length === 0} /></Tooltip>
         </Space.Compact>
+        <Space.Compact>
+          <Tooltip title={isGlobalRunning ? '停止全局运行' : '按 DAG 顺序运行全部节点'}>
+            <Button icon={isGlobalRunning ? <StopOutlined /> : <PlayCircleOutlined />} type="primary" danger={isGlobalRunning} onClick={handleGlobalRun}>{isGlobalRunning ? '停止' : '全局运行'}</Button>
+          </Tooltip>
+          {hasBreakpoint && (
+            <Tooltip title="跳过已成功节点，从断点续跑">
+              <Button icon={<ThunderboltOutlined />} onClick={handleResumeRun} style={{ background: '#faad14', borderColor: '#faad14', color: '#fff' }}>续跑</Button>
+            </Tooltip>
+          )}
+          <Button onClick={() => setComicModalOpen(true)} style={{ fontWeight: 'bold', borderColor: '#f59e0b', color: '#f59e0b' }}>漫剧生成</Button>
+        </Space.Compact>
         <Button icon={<ClearOutlined />} onClick={clearCanvas}>清空</Button>
         <div style={{ display: 'flex', alignItems: 'center', background: '#fff', padding: 4, borderRadius: 14, border: '1px solid rgba(148,163,184,0.2)', boxShadow: '0 10px 24px rgba(15,23,42,0.04)' }}>
           <Select variant="borderless" value={saveMode} onChange={setSaveMode} style={{ width: 130 }} options={[{ value: 'manual', label: <span><SaveOutlined /> 手动保存</span> }, { value: 'realtime', label: <span><SyncOutlined spin={saving && saveMode === 'realtime'} style={{ color: '#1890ff' }} /> 实时保存</span> }, { value: 'auto_10', label: <span><SyncOutlined /> 自动 (10秒)</span> }, { value: 'auto_30', label: <span><SyncOutlined /> 自动 (30秒)</span> }]} />
@@ -444,14 +455,6 @@ function CanvasWorkspace() {
         {groupMenuConfig && <div style={{ position: 'fixed', left: groupMenuConfig.x, top: groupMenuConfig.y, zIndex: 9999, background: 'rgba(255,255,255,0.96)', backdropFilter: 'blur(16px)', boxShadow: '0 20px 45px rgba(15,23,42,0.18)', borderRadius: 14, width: 180, border: '1px solid rgba(148,163,184,0.18)', overflow: 'hidden', padding: 4 }} onClick={(e) => e.stopPropagation()}>{groupMenuConfig.selectedNodeIds.length > 0 && <div onClick={() => { createGroup(groupMenuConfig.selectedNodeIds, '节点组'); setGroupMenuConfig(null) }} style={{ padding: '8px 12px', cursor: 'pointer', borderRadius: 8 }}><Text strong style={{ fontSize: 13 }}>📦 创建节点组</Text></div>}{groupMenuConfig.dissolveGroupId && <div onClick={() => { dissolveGroup(groupMenuConfig.dissolveGroupId!); setGroupMenuConfig(null) }} style={{ padding: '8px 12px', cursor: 'pointer', borderRadius: 8 }}><Text strong style={{ fontSize: 13, color: '#ff4d4f' }}>🔓 解散节点组</Text></div>}</div>}
       </Content>
     </Layout>
-
-    <Card size="small" title="高级操作" style={{ position: 'fixed', right: 24, top: 92, width: 236, zIndex: 10, boxShadow: '0 18px 40px rgba(15,23,42,0.12)', borderRadius: 18, border: '1px solid rgba(148,163,184,0.16)' }} styles={{ body: { paddingTop: 12 } }}>
-      <Space direction="vertical" style={{ width: '100%' }}>
-        <Button icon={isGlobalRunning ? <StopOutlined /> : <PlayCircleOutlined />} onClick={handleGlobalRun} type={isGlobalRunning ? 'primary' : 'default'} danger={isGlobalRunning} block style={{ borderRadius: 12, height: 42 }}>{isGlobalRunning ? '停止运行' : '全局运行'}</Button>
-        {hasBreakpoint && <Button icon={<ThunderboltOutlined />} onClick={handleResumeRun} type="primary" style={{ background: '#faad14', borderColor: '#faad14', borderRadius: 12, height: 42 }} block>继续运行</Button>}
-        <Button onClick={() => setComicModalOpen(true)} style={{ fontWeight: 'bold', borderColor: '#f59e0b', color: '#f59e0b', borderRadius: 12, height: 42 }} block>漫剧生成</Button>
-      </Space>
-    </Card>
 
     <Modal title="漫剧生成" open={comicModalOpen} onCancel={() => setComicModalOpen(false)} okText="创建流水线" cancelText="取消" width={520} onOk={() => createComicPipeline(comicConfig)}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '8px 0' }}>

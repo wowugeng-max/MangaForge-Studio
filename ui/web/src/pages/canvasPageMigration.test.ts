@@ -76,11 +76,15 @@ describe('ComfyForge canvas feature migration', () => {
     expect(dagRunner).toContain('hasBlockingError')
   })
 
-  test('canvas advanced action card uses current antd body style API', () => {
+  test('advanced actions live in the header instead of a floating card', () => {
     const canvasPage = source('CanvasPage.tsx')
 
-    expect(canvasPage).toContain("styles={{ body: { paddingTop: 12 } }}")
-    expect(canvasPage).not.toContain('bodyStyle={{ paddingTop: 12 }}')
+    expect(canvasPage).not.toContain('title="高级操作"')
+    expect(canvasPage).not.toContain("position: 'fixed', right: 24, top: 92")
+    expect(canvasPage).toContain('全局运行')
+    expect(canvasPage).toContain('漫剧生成')
+    expect(canvasPage).toContain('onClick={handleGlobalRun}')
+    expect(canvasPage).toContain('onClick={handleResumeRun}')
   })
 
   test('canvas page exposes upstream node grouping entry points', () => {
