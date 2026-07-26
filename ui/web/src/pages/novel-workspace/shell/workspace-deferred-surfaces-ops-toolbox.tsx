@@ -272,6 +272,7 @@ export function NovelWorkspaceDeferredOpsToolbox(props: NovelWorkspaceDeferredSu
         open={commercialToolsOpen}
         title="商业级自动写作工具箱"
         width={920}
+        destroyOnHidden
         onCancel={() => setCommercialToolsOpen(false)}
         footer={<Button type="primary" onClick={() => setCommercialToolsOpen(false)}>关闭</Button>}
       >
