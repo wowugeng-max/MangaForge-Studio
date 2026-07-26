@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { resolveFingerprintContract, resolveFingerprintContractInfo } from './fingerprint-contract-resolver'
+import { BUILTIN_CONTRACT_SET, getContractSetsIndexPath } from '../fingerprint-contract-store'
 
 let dirs: string[] = []
 
@@ -156,5 +157,27 @@ describe('fingerprint contract resolver', () => {
     const info = resolveFingerprintContractInfo({ cwd, genre: '都市' })
     expect(info?.contract_name).toBe('builtin_urban')
     expect(info?.genre_slug).toBe('urban')
+  })
+
+  test('set_label defaults to the builtin label when no selection exists', async () => {
+    const { cwd } = await tempRepo()
+    const info = resolveFingerprintContractInfo({ cwd })
+    expect(info?.set_id).toBe('builtin')
+    expect(info?.set_label).toBe(BUILTIN_CONTRACT_SET.label)
+  })
+
+  test('set_label reflects the registered label of the active custom contract set', async () => {
+    const { cwd, lib } = await tempRepo()
+    await mkdir(join(lib, 'contract-sets', 'set-a'), { recursive: true })
+    await writeFile(join(lib, 'contract-sets', 'set-a', 'active-contract.json'), contractJson('set_a_global', 0.4), 'utf8')
+    await writeFile(
+      getContractSetsIndexPath(lib),
+      JSON.stringify([{ id: 'set-a', label: '离线重拟合 A' }]),
+      'utf8',
+    )
+    await writeFile(join(lib, 'contract-selection.json'), JSON.stringify({ active_set_id: 'set-a' }), 'utf8')
+    const info = resolveFingerprintContractInfo({ cwd })
+    expect(info?.set_id).toBe('set-a')
+    expect(info?.set_label).toBe('离线重拟合 A')
   })
 })

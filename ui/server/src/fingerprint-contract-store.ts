@@ -96,6 +96,23 @@ export async function readContractSets(libRoot: string): Promise<FingerprintCont
   ]
 }
 
+export function readContractSetsSync(libRoot: string): FingerprintContractSetRecord[] {
+  let stored: any[] = []
+  try {
+    const raw = JSON.parse(readFileSync(getContractSetsIndexPath(libRoot), 'utf8'))
+    if (Array.isArray(raw)) stored = raw
+  } catch {
+    stored = []
+  }
+  return [
+    BUILTIN_CONTRACT_SET,
+    ...stored
+      .filter(isPlainRecord)
+      .map(normalizeContractSetRecord)
+      .filter((record) => record.id !== BUILTIN_CONTRACT_SET_ID),
+  ]
+}
+
 export async function writeContractSets(libRoot: string, sets: FingerprintContractSetRecord[]) {
   const path = getContractSetsIndexPath(libRoot)
   await mkdir(dirname(path), { recursive: true })

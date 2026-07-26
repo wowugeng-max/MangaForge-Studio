@@ -1,10 +1,17 @@
 import { existsSync, readFileSync } from 'fs'
 import { join, resolve } from 'path'
-import { BUILTIN_CONTRACT_SET_ID, getContractSetDir, readContractSelectionSync } from '../fingerprint-contract-store'
+import {
+  BUILTIN_CONTRACT_SET,
+  BUILTIN_CONTRACT_SET_ID,
+  getContractSetDir,
+  readContractSelectionSync,
+  readContractSetsSync,
+} from '../fingerprint-contract-store'
 import { normalizeFingerprintGenreSlug, type FingerprintContract } from './prose-fingerprint-lib'
 
 export type ResolvedFingerprintContractInfo = {
   set_id: string
+  set_label: string
   contract_name: string
   contract_path: string
   locked: boolean
@@ -75,8 +82,11 @@ export function resolveFingerprintContractInfo(
     for (const candidate of candidatesForRoot(libRoot, options.genre)) {
       const contract = readContract(candidate.path)
       if (!contract) continue
+      const setId = setIdForPath(libRoot, candidate.path)
+      const setRecord = readContractSetsSync(libRoot).find((set) => set.id === setId)
       return {
-        set_id: setIdForPath(libRoot, candidate.path),
+        set_id: setId,
+        set_label: setRecord?.label ?? BUILTIN_CONTRACT_SET.label,
         contract_name: String(contract.name || ''),
         contract_path: candidate.path,
         locked: candidate.locked,

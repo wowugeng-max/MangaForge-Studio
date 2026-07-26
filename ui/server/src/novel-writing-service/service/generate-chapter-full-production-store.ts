@@ -210,6 +210,7 @@ export async function runFullProductionAdmissionAndStore(args: {
       details: failure,
     }))
   const resistanceAdmission = evaluateResistanceAdmission(finalText)
+  const fingerprintContractInfo = resolveFingerprintContractInfo()
   const hardAdmission = classifyProseAdmission({
     hard_failures: [
       ...minimalValidation.failures,
@@ -376,10 +377,10 @@ export async function runFullProductionAdmissionAndStore(args: {
           projectId,
           chapterId: chapter.id,
           chapterNo: Number(chapter?.chapter_no ?? chapter?.chapterNo ?? 0) || 0,
-          setId: resolveFingerprintContractInfo()?.set_id || BUILTIN_CONTRACT_SET.id,
-          setLabel: BUILTIN_CONTRACT_SET.label,
+          setId: fingerprintContractInfo?.set_id || BUILTIN_CONTRACT_SET.id,
+          setLabel: fingerprintContractInfo?.set_label || BUILTIN_CONTRACT_SET.label,
           contractName: resistanceAdmission.report.contract_name,
-          locked: Boolean(resolveFingerprintContractInfo()?.locked),
+          locked: Boolean(fingerprintContractInfo?.locked),
           contractScore: resistanceAdmission.report.contract_score,
           textChars: String(finalText || '').replace(/\s+/g, '').length,
           createdAt: new Date().toISOString(),

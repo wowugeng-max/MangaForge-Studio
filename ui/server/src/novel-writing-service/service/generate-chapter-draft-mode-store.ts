@@ -160,6 +160,7 @@ export async function runDraftModeAdmissionAndStore(args: {
   } = args
 
   const draftResistanceAdmission = evaluateResistanceAdmission(finalText)
+  const fingerprintContractInfo = resolveFingerprintContractInfo()
   const draftModeHardAdmission = classifyProseAdmission({
     hard_failures: [
       ...validateMinimalChapterProse(finalText).failures,
@@ -351,10 +352,10 @@ export async function runDraftModeAdmissionAndStore(args: {
           projectId,
           chapterId: chapter.id,
           chapterNo: Number(chapter?.chapter_no ?? chapter?.chapterNo ?? 0) || 0,
-          setId: resolveFingerprintContractInfo()?.set_id || BUILTIN_CONTRACT_SET.id,
-          setLabel: BUILTIN_CONTRACT_SET.label,
+          setId: fingerprintContractInfo?.set_id || BUILTIN_CONTRACT_SET.id,
+          setLabel: fingerprintContractInfo?.set_label || BUILTIN_CONTRACT_SET.label,
           contractName: draftResistanceAdmission.report.contract_name,
-          locked: Boolean(resolveFingerprintContractInfo()?.locked),
+          locked: Boolean(fingerprintContractInfo?.locked),
           contractScore: draftResistanceAdmission.report.contract_score,
           textChars: String(finalText || '').replace(/\s+/g, '').length,
           createdAt: new Date().toISOString(),

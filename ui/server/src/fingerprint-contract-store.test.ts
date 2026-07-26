@@ -13,6 +13,7 @@ import {
   readContractSelection,
   readContractSelectionSync,
   readContractSets,
+  readContractSetsSync,
   writeContractSelection,
   writeContractSets,
 } from './fingerprint-contract-store'
@@ -208,6 +209,42 @@ describe('fingerprint contract store', () => {
     const sets = await readContractSets(lib)
     const found = sets.find((s) => s.id === 'set-c')
     expect(found?.source_set_id).toBe('set-a')
+  })
+
+  test('readContractSetsSync returns builtin first even when index is missing', async () => {
+    const lib = await tempLib()
+    const sets = readContractSetsSync(lib)
+    expect(sets.length).toBe(1)
+    expect(sets[0].id).toBe('builtin')
+    expect(sets[0].mode).toBe('builtin')
+  })
+
+  test('readContractSetsSync keeps builtin first and normalizes stored records', async () => {
+    const lib = await tempLib()
+    await mkdir(join(lib, 'contract-sets'), { recursive: true })
+    await writeFile(
+      getContractSetsIndexPath(lib),
+      JSON.stringify([{ id: 'set-a', label: '离线重拟合 A' }]),
+      'utf8',
+    )
+    const sets = readContractSetsSync(lib)
+    expect(sets.map((s) => s.id)).toEqual(['builtin', 'set-a'])
+    expect(sets[1].mode).toBe('offline_refit')
+    expect(sets[1].sample_count).toBe(0)
+    expect(typeof sets[1].created_at).toBe('string')
+  })
+
+  test('readContractSetsSync drops non-object stored entries instead of turning them into ghost records', async () => {
+    const lib = await tempLib()
+    await mkdir(join(lib, 'contract-sets'), { recursive: true })
+    await writeFile(
+      getContractSetsIndexPath(lib),
+      JSON.stringify([null, 'garbage', 42, [1, 2, 3]]),
+      'utf8',
+    )
+    const sets = readContractSetsSync(lib)
+    expect(sets.length).toBe(1)
+    expect(sets[0].id).toBe(BUILTIN_CONTRACT_SET.id)
   })
 
   test('getFingerprintLibRoot joins workspace/fingerprint-lib under the repo root', () => {
