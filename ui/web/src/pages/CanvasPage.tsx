@@ -14,6 +14,7 @@ import apiClient from '../api/client'
 import { planCanvasDagStep } from './canvasDagRunner'
 import { buildCanvasAssetDropPlan } from './canvasAssetDrop'
 import { expandFissionAndDistribute } from './canvasFission'
+import { buildCopyPayload, buildPastePlan, type ClipboardPayload } from './canvasClipboard'
 import { clampToViewport } from '../utils/viewportClamp'
 
 const NODE_MENU_SIZE = { width: 300, height: 380 }
@@ -58,6 +59,7 @@ function CanvasWorkspace() {
   const [groupMenuConfig, setGroupMenuConfig] = useState<{ x: number; y: number; selectedNodeIds: string[]; dissolveGroupId?: string } | null>(null)
   const [comicModalOpen, setComicModalOpen] = useState(false)
   const [comicConfig, setComicConfig] = useState({ story: '', panelCount: 6, style: '', platform: '通用' })
+  const clipboardRef = React.useRef<ClipboardPayload | null>(null)
 
   const [, canvasDrop] = useDrop(() => ({
     accept: DndItemTypes.ASSET,
@@ -378,6 +380,46 @@ function CanvasWorkspace() {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [nodes, updateNodeData, createGroup])
+
+  useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null
+      if (!el || typeof el.closest !== 'function') return false
+      return Boolean(el.closest('input, textarea, [contenteditable="true"], [data-config-panel]'))
+    }
+    const pasteFromClipboard = () => {
+      if (!clipboardRef.current) return
+      const plan = buildPastePlan(clipboardRef.current, getId)
+      saveHistory()
+      const store = useCanvasStore.getState()
+      store.setNodes([...store.nodes.map(n => ({ ...n, selected: false })), ...plan.nodes])
+      store.setEdges([...store.edges, ...plan.edges])
+      message.success(`已粘贴 ${plan.nodes.length} 个节点`)
+    }
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || isEditableTarget(e.target)) return
+      const key = e.key.toLowerCase()
+      if (key === 'c') {
+        const state = useCanvasStore.getState()
+        const payload = buildCopyPayload(state.nodes, state.edges)
+        if (!payload) return
+        clipboardRef.current = payload
+        message.success(`已复制 ${payload.nodes.length} 个节点`)
+      } else if (key === 'v') {
+        e.preventDefault()
+        pasteFromClipboard()
+      } else if (key === 'd') {
+        const state = useCanvasStore.getState()
+        const payload = buildCopyPayload(state.nodes, state.edges)
+        if (!payload) return
+        e.preventDefault()
+        clipboardRef.current = payload
+        pasteFromClipboard()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [saveHistory])
 
   return <Layout style={{ height: '100vh', overflow: 'hidden', background: 'linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)' }}>
     <Layout.Header style={{ height: 72, background: 'rgba(255,255,255,0.88)', backdropFilter: 'blur(18px)', borderBottom: '1px solid rgba(148,163,184,0.18)', padding: '0 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 8px 30px rgba(15,23,42,0.04)' }}>
