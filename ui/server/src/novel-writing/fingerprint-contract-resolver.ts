@@ -99,7 +99,7 @@ export function resolveFingerprintContractInfo(
       const setRecord = readContractSetsSync(libRoot).find((set) => set.id === setId)
       return {
         set_id: setId,
-        set_label: setRecord?.label ?? BUILTIN_CONTRACT_SET.label,
+        set_label: setRecord?.label || BUILTIN_CONTRACT_SET.label,
         contract_name: String(contract.name || ''),
         contract_path: candidate.path,
         locked: candidate.locked,
