@@ -45,6 +45,11 @@ export function hasRunningFingerprintContractJob() {
   return [...jobs.values()].some((job) => job.status === 'queued' || job.status === 'running')
 }
 
+// Test-only: clears the in-process job map.
+export function resetFingerprintContractJobsForTest(): void {
+  jobs.clear()
+}
+
 async function listSampleFiles(libRoot: string): Promise<Array<{ abs: string; genre: string }>> {
   const humanRoot = join(libRoot, 'human')
   const out: Array<{ abs: string; genre: string }> = []

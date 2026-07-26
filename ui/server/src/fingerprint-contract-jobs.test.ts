@@ -2,7 +2,15 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdtemp, mkdir, rm, writeFile, readFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { createFingerprintContractJob, loadRefitSamples, readSamplesStatus, runOfflineRefitJob, updateFingerprintContractJob } from './fingerprint-contract-jobs'
+import {
+  createFingerprintContractJob,
+  getFingerprintContractJob,
+  hasRunningFingerprintContractJob,
+  loadRefitSamples,
+  readSamplesStatus,
+  resetFingerprintContractJobsForTest,
+  runOfflineRefitJob,
+} from './fingerprint-contract-jobs'
 import { readContractSets } from './fingerprint-contract-store'
 
 let dirs: string[] = []
@@ -60,6 +68,12 @@ async function tempLib(sampleCount = 4) {
 afterEach(async () => {
   await Promise.all(dirs.map((d) => rm(d, { recursive: true, force: true })))
   dirs = []
+})
+
+// jobs live in a process-wide singleton map, so a job left behind by one test (e.g. still
+// queued) would otherwise leak into later tests in this file or other test files.
+afterEach(() => {
+  resetFingerprintContractJobsForTest()
 })
 
 describe('fingerprint contract generation job', () => {
@@ -147,10 +161,15 @@ describe('fingerprint contract generation job', () => {
   })
 
   test('createFingerprintContractJob rejects a duplicate id', () => {
-    const job = createFingerprintContractJob('offline_refit', 'dup-job-id-test')
+    createFingerprintContractJob('offline_refit', 'dup-job-id-test')
     expect(() => createFingerprintContractJob('offline_refit', 'dup-job-id-test')).toThrow(/dup-job-id-test/)
-    // jobs live in a process-wide singleton map, so leaving this one queued would make
-    // hasRunningFingerprintContractJob() report true for the rest of the test run.
-    updateFingerprintContractJob(job.id, { status: 'completed', progress: '完成' })
+  })
+
+  test('resetFingerprintContractJobsForTest clears the job map', () => {
+    const job = createFingerprintContractJob('offline_refit', 'reset-job-id-test')
+    expect(hasRunningFingerprintContractJob()).toBe(true)
+    resetFingerprintContractJobsForTest()
+    expect(hasRunningFingerprintContractJob()).toBe(false)
+    expect(getFingerprintContractJob(job.id)).toBe(null)
   })
 })
