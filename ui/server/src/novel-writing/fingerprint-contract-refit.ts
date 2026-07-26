@@ -7,19 +7,39 @@ import {
 
 export type RefitSampleInput = { id: string; genre: string; text: string }
 
-const TA_DIRECTIVE_PREFIX = '他/姓名起句占比 ≤'
+/**
+ * buildHumanFingerprintContract's own directive[0] (name header) never embeds a
+ * digit, so its "prefix up to the first digit" is the whole line — it can only
+ * ever match a builtin line if that line is byte-identical, which it isn't
+ * (different name), so the header always stays out of the override map below.
+ */
+function numericDirectivePrefix(line: string): string {
+  const idx = line.search(/[0-9]/)
+  return idx === -1 ? line : line.slice(0, idx)
+}
 
 /**
  * Contracts carry historical prose fields (24 directives / 17 avoid / 12 prefer /
  * narrative_hard) that buildHumanFingerprintContract cannot regenerate — it only
- * emits 7/7/5. Refitting therefore inherits prose verbatim and only rewrites the
- * one directive line that embeds a refitted number.
+ * emits 7 directives, one of them a header. The other 6 embed refitted target
+ * numbers (cv/single-two-sentence/dialogue/clinical-template-adverb/ta-opener/
+ * sample-count) and reappear verbatim inside builtin's 24, so refitting maps
+ * each fitted directive's stable non-numeric prefix to its new text and swaps
+ * in any builtin line that starts with that prefix — every other line (name
+ * header included) is copied from builtin byte-for-byte.
  */
 export function inheritContractProse(fitted: FingerprintContract, builtin: FingerprintContract): FingerprintContract {
-  const taMax = fitted.target.subject_ta_opener_ratio_max
-  const directives = (builtin.prompt_directives || []).map((line) =>
-    line.startsWith(TA_DIRECTIVE_PREFIX) ? line.replace(/≤[0-9.]+/, `≤${taMax}`) : line,
-  )
+  const overrides = new Map<string, string>()
+  for (const line of fitted.prompt_directives || []) {
+    const prefix = numericDirectivePrefix(line)
+    if (prefix) overrides.set(prefix, line)
+  }
+  const directives = (builtin.prompt_directives || []).map((line) => {
+    for (const [prefix, replacement] of overrides) {
+      if (line.startsWith(prefix)) return replacement
+    }
+    return line
+  })
   return {
     ...fitted,
     avoid: [...(builtin.avoid || [])],
