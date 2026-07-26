@@ -336,3 +336,12 @@ describe('canvas config panel clamping', () => {
     }
   })
 })
+
+describe('canvas edge reconnection', () => {
+  test('edges can be reconnected by dragging their endpoints', () => {
+    const canvasPage = source('CanvasPage.tsx')
+    expect(canvasPage).toContain('updateEdge')
+    expect(canvasPage).toContain('onEdgeUpdate={onEdgeUpdate}')
+    expect(canvasPage).toContain('edgeUpdaterRadius={12}')
+  })
+})

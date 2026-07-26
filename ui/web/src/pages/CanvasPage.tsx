@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useDrop } from 'react-dnd'
 import { Button, Input, Layout, Modal, Select, Space, Tag, Tooltip, Typography, message } from 'antd'
 import { ArrowLeftOutlined, ClearOutlined, MenuFoldOutlined, MenuUnfoldOutlined, PartitionOutlined, PlayCircleOutlined, SaveOutlined, SearchOutlined, StopOutlined, SyncOutlined, ThunderboltOutlined, UndoOutlined, RedoOutlined } from '@ant-design/icons'
-import ReactFlow, { Background, Controls, MiniMap, ReactFlowProvider, type ReactFlowInstance } from 'reactflow'
+import ReactFlow, { Background, Controls, MiniMap, ReactFlowProvider, updateEdge, type Connection, type Edge, type ReactFlowInstance } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { DndItemTypes } from '../constants/dnd'
 import { useCanvasStore } from '../stores/canvasStore'
@@ -374,6 +374,13 @@ function CanvasWorkspace() {
     connectStartRef.current = params
   }, [])
 
+  const onEdgeUpdate = useCallback((oldEdge: Edge, newConnection: Connection) => {
+    if (!isValidConnection(newConnection)) return
+    saveHistory()
+    const store = useCanvasStore.getState()
+    store.setEdges(updateEdge(oldEdge, newConnection, store.edges))
+  }, [isValidConnection, saveHistory])
+
   const onConnectEnd = useCallback((event: any) => {
     const start = connectStartRef.current
     connectStartRef.current = null
@@ -528,7 +535,7 @@ function CanvasWorkspace() {
 
       <Content ref={(el: HTMLDivElement | null) => { (reactFlowWrapper as any).current = el; canvasDrop(el) }} style={{ background: 'transparent', position: 'relative' }} onDoubleClick={(e) => { if ((e.target as HTMLElement).closest('.react-flow__pane')) openNodeSearch(e.clientX, e.clientY) }} onContextMenu={(e) => { if ((e.target as HTMLElement).closest('.react-flow__pane')) { e.preventDefault(); openNodeSearch(e.clientX, e.clientY) } }}>
         <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at top right, rgba(99,102,241,0.09), transparent 28%), radial-gradient(circle at bottom left, rgba(14,165,233,0.08), transparent 24%)' }} />
-        <ReactFlow nodes={nodes} edges={decoratedEdges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onConnectStart={onConnectStart} onConnectEnd={onConnectEnd} isValidConnection={isValidConnection} onInit={setReactFlowInstance} nodeTypes={nodeTypes} fitView zoomOnDoubleClick={false} onPaneClick={closeNodeSearch} onNodeClick={closeNodeSearch} onSelectionContextMenu={onSelectionContextMenu} onNodeContextMenu={onNodeContextMenu} deleteKeyCode={['Backspace', 'Delete']} selectionKeyCode={['Shift', 'Control', 'Meta']}>
+        <ReactFlow nodes={nodes} edges={decoratedEdges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onConnectStart={onConnectStart} onConnectEnd={onConnectEnd} onEdgeUpdate={onEdgeUpdate} edgeUpdaterRadius={12} isValidConnection={isValidConnection} onInit={setReactFlowInstance} nodeTypes={nodeTypes} fitView zoomOnDoubleClick={false} onPaneClick={closeNodeSearch} onNodeClick={closeNodeSearch} onSelectionContextMenu={onSelectionContextMenu} onNodeContextMenu={onNodeContextMenu} deleteKeyCode={['Backspace', 'Delete']} selectionKeyCode={['Shift', 'Control', 'Meta']}>
           <Background color="#cbd5e1" gap={18} />
           <Controls style={{ left: 16, right: 'auto' }} />
           <MiniMap nodeColor={minimapNodeColor} nodeStrokeColor={minimapNodeColor} style={{ border: '1px solid rgba(148,163,184,0.25)', borderRadius: 16, right: 16, bottom: 16, boxShadow: '0 14px 36px rgba(15,23,42,0.12)' }} zoomable pannable />
