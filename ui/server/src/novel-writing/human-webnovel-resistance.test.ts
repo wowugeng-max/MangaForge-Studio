@@ -28,6 +28,8 @@ import {
   sanitizeMissingPrivateNoise,
   sanitizeR66ZhuqueKillers,
   sanitizeMissingMidSocialFriction,
+  sanitizeMidMonologueGreenDensity,
+  scanMidMonologueGreenDensityRisks,
   repairMidSentenceBankSplices,
   sanitizeResidualPureAiHardEvidence,
   collapseExactDuplicateParagraphs,
@@ -47,6 +49,7 @@ import {
 import {
   classifyProseAdmission,
 } from './prose-admission-policy'
+import { scanToxicAiPatterns } from './toxic-ai-pattern-scans'
 import type { FingerprintContract } from './prose-fingerprint-lib'
 
 const sampleContract: FingerprintContract = {
@@ -142,7 +145,7 @@ describe('human-webnovel-resistance system layer', () => {
   test('prompt directives are universal and contract-driven', () => {
     const lines = buildHumanWebnovelResistancePromptDirectives(sampleContract)
     expect(lines.some((l) => l.includes('系统层'))).toBe(true)
-    expect(lines.some((l) => l.includes('测试合同') || l.includes('对白'))).toBe(true)
+    expect(lines.some((l) => l.includes('测试合同'))).toBe(true)
     expect(lines.some((l) => l.includes('开篇') || l.includes('私心'))).toBe(true)
     expect(lines.every((l) => !/NO\.00|急诊科|林序|r10|保绿段/.test(l))).toBe(true)
   })
@@ -1631,4 +1634,158 @@ test('sanitizeMissingPrivateNoise injects fused mid private noise when missing',
   expect(/嫌|烦|先不|背锅|责任|懒得|改口|怕主任|谁担|谁背|别给我|先放|先糊|不想写|别扯/.test(out)).toBe(true)
   const stock = sanitizeDetectorHostileStock(raw)
   expect(/嫌|烦|先不|背锅|责任|懒得|改口|怕主任/.test(stock)).toBe(true)
+})
+
+describe('fix-brief A3-resistance regressions', () => {
+  // #13: bare 刚想/伴随着 are ordinary connectors, not drama packaging.
+  test('bare 刚想/伴随着 connectors do not trigger hw_mid_drama_packaged_conflict', () => {
+    const pad = (i: number) => `走廊灯管吱吱响，地砖缝里积着灰，他数到第${i}步时鞋底还在发黏，手套边也湿了一截。`
+    const normal = Array.from({ length: 48 }, (_, i) => {
+      if (i === 16) return '他刚想开口，门口的人先说话了。'
+      if (i === 20) return '他刚想坐下歇口气，登记台那边喊他名字。'
+      if (i === 24) return '门外伴随着一阵脚步声，有人把车停在了走廊口。'
+      return pad(i)
+    }).join('\n\n')
+    const hits = scanSocialConflictFrictionDelivery(normal)
+    expect(hits.some((h) => h.key === 'hw_mid_drama_packaged_conflict')).toBe(false)
+  })
+
+  test('real drama packaging still triggers hw_mid_drama_packaged_conflict', () => {
+    const pad = (i: number) => `走廊灯管吱吱响，地砖缝里积着灰，他数到第${i}步时鞋底还在发黏，手套边也湿了一截。`
+    const drama = Array.from({ length: 48 }, (_, i) => {
+      if (i === 16) return '他刚想仔细检查那张纸片，走廊外突然传来一阵嘈杂的脚步声。'
+      if (i === 20) return '推车硬生生撞在林序膝盖上。'
+      if (i === 24) return '他手掌死死抵住扶手。'
+      return pad(i)
+    }).join('\n\n')
+    const hits = scanSocialConflictFrictionDelivery(drama)
+    expect(hits.some((h) => h.key === 'hw_mid_drama_packaged_conflict')).toBe(true)
+  })
+
+  // #14: sanitize-injected stock sentences must not hit toxic-ai blocking rules themselves.
+  test('coincidence omniscience stock injection passes toxic-ai blocking scan', () => {
+    const raw = [
+      '他把登记本合上。',
+      '对方知道今晚是他值班。',
+      '“先把人推进去。”',
+      '他没接话。',
+    ].join('\n\n')
+    const cleaned = sanitizeDetectorHostileStock(raw)
+    expect(cleaned).not.toContain('对方知道今晚')
+    expect(cleaned).toContain('脊背')
+    const blocking = scanToxicAiPatterns(cleaned).filter((f) => f.blocking || f.status === 'fail')
+    expect(blocking).toEqual([])
+  })
+
+  test('fate oracle stock injection passes toxic-ai scan and avoids 有人说他+他 double subject', () => {
+    const raw = [
+      '走廊里有人压低声音议论。',
+      '有人说他把体温卖了，才捂着这身热气。',
+      '他没接话，先把车推走。',
+    ].join('\n\n')
+    const cleaned = sanitizeDetectorHostileStock(raw)
+    expect(cleaned).not.toContain('把体温卖了')
+    expect(cleaned).not.toContain('他他')
+    const blocking = scanToxicAiPatterns(cleaned).filter((f) => f.blocking || f.status === 'fail')
+    expect(blocking).toEqual([])
+  })
+
+  // #15: fingerprint-contract prompt_directives / avoid / prefer must survive the 72-line cap.
+  test('contract prompt_directives, avoid and prefer lines reach the final directive array', () => {
+    const contract: FingerprintContract = {
+      ...sampleContract,
+      prompt_directives: ['【测试合同】MARKER_PD_ZZ3 对白独立成段。'],
+      avoid: ['MARKER_AVOID_ZZ1 临床连击'],
+      prefer: ['MARKER_PREFER_ZZ2 短对白'],
+    }
+    const lines = buildHumanWebnovelResistancePromptDirectives(contract)
+    expect(lines.some((l) => l.includes('MARKER_PD_ZZ3'))).toBe(true)
+    expect(lines.some((l) => l.startsWith('规避：') && l.includes('MARKER_AVOID_ZZ1'))).toBe(true)
+    expect(lines.some((l) => l.startsWith('优先：') && l.includes('MARKER_PREFER_ZZ2'))).toBe(true)
+    // narrative-hard head lines must still lead
+    expect(lines.some((l) => l.includes('朱雀叙事硬门槛'))).toBe(true)
+  })
+
+  // #16: long no-comma monologue walls must split near the middle, not hard-cut at char 12.
+  test('long no-comma monologue wall splits near the middle instead of char 12', () => {
+    const wall = '灰蒙蒙的天光顺着窗缝一点点爬进来照在那排旧柜子上又顺着柜面淌到地砖上他看着那道光从柜角慢慢挪到桌腿边始终没有挪开视线也没有伸手去拦更没有去碰桌上那杯凉透的茶'
+    expect(wall.length).toBeGreaterThan(64)
+    const pad = (i: number) => `窗外的雨声一直没停，他把第${i}份材料翻过去检查装订边，顺手把回形针捋直又弯回去，桌上的台灯闪了两下，他伸手拧了拧灯座，光稳住了，他把椅子往桌前拖了半寸，接着往下翻。`
+    const paras = Array.from({ length: 18 }, (_, i) => (i === 8 ? wall : pad(i)))
+    const raw = paras.join('\n\n')
+    const out = sanitizeMidMonologueGreenDensity(raw)
+    const outParas = out.split(/\n+/).map((p) => p.trim()).filter(Boolean)
+    // buggy behavior: hard cut at char 12
+    expect(outParas).not.toContain(wall.slice(0, 12))
+    // fixed behavior: cut falls back to the middle when no comma exists before it
+    const mid = Math.floor(wall.length / 2)
+    expect(outParas).toContain(wall.slice(0, mid))
+  })
+
+  // #17: 依然是 is an ordinary copula — it must not count toward isomorphism nor be spliced mid-sentence.
+  test('ordinary copula 依然是 text is left untouched by symmetric isomorphism sanitize and scan', () => {
+    const text = [
+      '窗外的天依然是灰的。',
+      '袖口依然是那道洗不掉的墨渍。',
+      '两份笔记一模一样。',
+      '他把笔记塞回抽屉。',
+    ].join('\n\n')
+    const cleaned = sanitizeSymmetricIsomorphism(text)
+    expect(cleaned).toBe(text)
+    expect(cleaned).not.toContain('有点不对')
+    const slip = scanSymmetricReadingCascadeRisks(text).filter((f) => f.key === 'hw_symmetric_slip_inventory')
+    expect(slip).toEqual([])
+  })
+
+  test('true multi-item isomorphism is still softened after first occurrence', () => {
+    const text = [
+      '三张单据完全相同。',
+      '编号一模一样。',
+      '背面同样印着一排小字。',
+      '他把单据收进口袋。',
+    ].join('\n\n')
+    const cleaned = sanitizeSymmetricIsomorphism(text)
+    expect(cleaned).not.toBe(text)
+    expect(cleaned).toContain('完全相同')
+    expect(cleaned).toContain('有点不对')
+  })
+
+  // #18: the leftover-cleanup regex must only collapse the literal stock sentence, not a char class.
+  test('ordinary 就可以直接… continuations are not swallowed by the stock-leftover cleanup', () => {
+    const cleanedA = sanitizeDetectorHostileStock('把资料整理好，就可以直接把这批单子交上去了。')
+    expect(cleanedA).toContain('就可以直接把这批单子交上去了')
+    expect(cleanedA).not.toContain('他不想现在就把这单写进系统')
+    const cleanedB = sanitizeDetectorHostileStock('走完流程，就可以直接进系统备案。')
+    expect(cleanedB).toContain('就可以直接进系统备案')
+    expect(cleanedB).not.toContain('他不想现在就把这单写进系统')
+  })
+
+  test('literal stock sentence after 就可以直接 is still collapsed', () => {
+    const cleaned = sanitizeDetectorHostileStock('走完流程，就可以直接签署死亡确认书。')
+    expect(cleaned).toContain('走完流程，他不想现在就把这单写进系统。')
+    expect(cleaned).not.toContain('就可以直接他不想')
+  })
+
+  // #19: the risk-scan guard must actually gate the rewrite (no injection into clean openings).
+  test('opening process pipeline sanitize is a no-op when the scan reports no risks', () => {
+    const clean = Array.from({ length: 12 }, (_, i) => (
+      `巷子口的水洼映着招牌灯，第${i + 1}块石板翘着角，他绕开积水往里走，伞骨上的水珠顺着滑下来，打湿了半边裤脚。`
+    )).join('\n\n')
+    expect(scanOpeningProcessPipelineRisks(clean)).toEqual([])
+    expect(sanitizeOpeningProcessPipeline(clean)).toBe(clean)
+  })
+
+  // #21: soft density hint must use type-legal severity and non-hard status
+  // (evaluate hard_failures filter is status==='fail' || blocking).
+  test('mid monologue green density finding is a soft advisory, not a latent hard failure', () => {
+    const mono = Array.from({ length: 24 }, (_, i) => (
+      `他把第${i + 1}条线索在脑子里过了一遍，又把先后顺序倒过来排了一次，越排越觉出不对，但还是压着性子继续往下想。`
+    )).join('\n\n')
+    const risks = scanMidMonologueGreenDensityRisks(mono)
+    const finding = risks.find((f) => f.key === 'hw_mid_monologue_green_density')
+    expect(finding).toBeTruthy()
+    expect(finding?.blocking).toBe(false)
+    expect(finding?.severity).toBe('advisory')
+    expect(finding?.status).toBe('warn')
+  })
 })

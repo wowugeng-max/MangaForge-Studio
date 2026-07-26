@@ -329,6 +329,9 @@ export function createGenerateChapterForGroupMethods(deps: {
 const generateChapterForGroup = async (activeWorkspace: string, projectId: number, chapterId: number, options: any = {}) => {
   const preferredModelId = Number(options.model_id || 0) || undefined
   const onStage = typeof options.onStage === 'function' ? options.onStage : async () => {}
+  // Zhuque validation fast path: draft + sparse humanize + store (skip editor/multi-round review).
+  // Must rebind BEFORE snapshotting llmControlOptions so expand:false reaches word-target repair.
+  options = applyZhuqueFastPathOptions(options || {})
   const llmControlOptions = {
     abortSignal: options.abortSignal,
     llmTimeoutMs: options.llmTimeoutMs,
@@ -358,8 +361,6 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   const configSnapshot = buildAgentConfigSnapshot(project, preferredModelId)
   const approvalPolicy = options.approval_policy || getApprovalPolicy(project)
   const approvals = options.approvals || {}
-  // Zhuque validation fast path: draft + sparse humanize + store (skip editor/multi-round review).
-  options = applyZhuqueFastPathOptions(options || {})
   const productionMode = String(options.production_mode || 'draft_review_revise_store')
   const isZhuqueFast = isZhuqueFastProductionMode(productionMode, options)
   const isSceneCardsOnly = productionMode === 'scene_cards_only'
@@ -517,11 +518,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     projectId,
     activeWorkspace,
     preferredModelId,
-    llmControlOptions: {
-      ...llmControlOptions,
-      // Zhuque fast: do not spend LLM rounds expanding to word target.
-      expand: isZhuqueFast ? false : llmControlOptions?.expand,
-    },
+    llmControlOptions,
     qualityRepairTimeoutMs,
     qualityThreshold,
     isDraftOnly,

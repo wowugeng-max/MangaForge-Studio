@@ -406,6 +406,7 @@ try {
     minScore: qualityThreshold,
     coreContract: buildFocusedQualityCoreContract(generationContract),
     continuityContext: contextPackage,
+    project,
     maxRevisionRounds: qualityRevisionRounds,
     scan: text => scanProseForQualityLoop(text, contextPackage, wordTarget, wordTargetCompatibility ? {
       word_target_compatibility_pass: true,

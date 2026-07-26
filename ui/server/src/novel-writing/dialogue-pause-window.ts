@@ -37,6 +37,8 @@ export type DialoguePauseWindowHit = {
   start_char: number
   end_char: number
   position: number
+  /** Anchor-paragraph midpoint used by the scan gate (band midpoint may differ); ensure filters on this. */
+  anchor_position?: number
   quote_count: number
   has_pause_cue: boolean
   has_object_cue: boolean
@@ -303,6 +305,7 @@ export function scanDialoguePauseWindows(text: string): DialoguePauseScanReport 
       start_char,
       end_char,
       position: midPos,
+      anchor_position: position,
       quote_count: band.filter((p) => isShortDialogueParagraph(p)).length,
       has_pause_cue: pauseish,
       has_object_cue: objectish,
@@ -585,7 +588,8 @@ export function ensureDialoguePauseWindows(
   }
 
   const hasFriction = beforeScan.dialogue_friction_count >= 1
-  const lateIncompleteWindows = beforeScan.windows.filter((w) => w.kind === 'incomplete_decision' && w.position >= 0.68)
+  // Use the same anchor-midpoint basis the scan gate used (band midpoint can be dragged below 0.68 by a long preceding paragraph).
+  const lateIncompleteWindows = beforeScan.windows.filter((w) => w.kind === 'incomplete_decision' && (w.anchor_position ?? w.position) >= 0.68)
   const hasIncomplete = lateIncompleteWindows.length >= 1
   const frictionPos = beforeScan.windows.find((w) => w.kind === 'dialogue_friction')?.position ?? 0
   const earliestLateIncomplete = lateIncompleteWindows.map((w) => w.position).sort((a, b) => a - b)[0] ?? 1
@@ -682,8 +686,9 @@ export function ensureDialoguePauseWindows(
     injected += 1
   }
 
-  const next = paras.join('\n\n')
-  const afterScan = scanDialoguePauseWindows(next)
+  // No injection means no change: keep the source byte-for-byte (contract: injected=0 → text === source).
+  const next = injected > 0 ? paras.join('\n\n') : source
+  const afterScan = injected > 0 ? scanDialoguePauseWindows(next) : beforeScan
   return {
     text: next,
     scan: afterScan,

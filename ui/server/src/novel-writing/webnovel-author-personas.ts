@@ -12,7 +12,7 @@ export type WebnovelPersonaProjectLike = {
   [key: string]: any
 }
 
-const GENRE_ALIASES: Array<{ label: string; patterns: RegExp }> = [
+const GENRE_ALIASES: Array<{ label: string; patterns: RegExp[] }> = [
   { label: '都市', patterns: [/都市/, /职场/, /悬疑/, /现实/, /重生都市/, /urban/i] },
   { label: '玄幻', patterns: [/玄幻/, /异界/, /高武/, /xuanhuan/i] },
   { label: '仙侠', patterns: [/仙侠/, /修真/, /修仙/, /xianxia/i] },

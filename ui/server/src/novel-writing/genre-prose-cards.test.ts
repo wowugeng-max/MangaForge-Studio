@@ -17,6 +17,20 @@ describe('genre prose cards and p1 helpers', () => {
     expect(contract.corpus_size).toBe(32)
   })
 
+  test('returns unmatched for genres with no title/alias hit (confidence bonus is tie-break only)', () => {
+    // #27: 高置信加分曾无条件执行，任何非空输入都会误配第一张高置信卡（传统玄幻）。
+    for (const genre of ['田园种田日常', 'zzzz不存在的类型qqq', '美食探店随笔']) {
+      expect(matchGenreProseCard({ genre })).toBeNull()
+      const contract = buildGenreProseCardContract({ genre })
+      expect(contract.matched).toBe(false)
+      expect(contract.card).toBeNull()
+    }
+    // 空输入维持原行为
+    expect(matchGenreProseCard({})).toBeNull()
+    // 真命中仍然工作，且高置信卡在同分时仍胜出
+    expect(matchGenreProseCard({ genre: '玄幻' })?.confidence).toBe('高')
+  })
+
   test('builds outline word budget and locates dense debt', () => {
     const budget = buildOutlineWordBudget({
       chapter_word_target: 2000,

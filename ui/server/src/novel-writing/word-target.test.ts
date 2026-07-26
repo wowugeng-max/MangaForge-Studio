@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import {
+  type ChapterWordTarget,
   applyChapterWordTargetToContext,
   applyProseWordTargetSoftCap,
   countProseChars,
@@ -242,6 +243,35 @@ describe('novel writing word target utilities', () => {
     const hardLongSoft = applyProseWordTargetSoftCap(evaluateProseWordTarget('字'.repeat(4635), target))
     const hardLong = evaluateProseWordTarget('字'.repeat(4635), target)
     expect(shouldSkipWordTargetRepairForSoftCap(hardLong, hardLongSoft, { dialogue_para_ratio: 0.2 })).toBe(true)
+  })
+
+  test('fallback tail trimming never contracts below the hard minimum', () => {
+    const fill = (limit: number, seed: string) => {
+      let out = ''
+      while (countProseChars(out + seed) <= limit) out += seed
+      return out
+    }
+    const paras: string[] = []
+    for (let i = 0; i < 7; i += 1) {
+      paras.push(fill(460, `他把柜门关好又检查了一遍锁扣${i}。走廊尽头的灯忽明忽暗。`))
+    }
+    // late paragraph with dialogue quotes -> phase-1 drop score stays negative
+    paras.push('“别出声。”他压低嗓子说。' + fill(420, '对面的人影停了一下又继续往前挪。他数着自己的心跳。'))
+    // ~1000-char tail without quotes or drop keywords: popping it would fall below min
+    paras.push(fill(1020, '夜里他沿着旧街走了很久。风把梧桐叶吹得贴在墙上。'))
+    const text = paras.join('\n\n')
+    const target: ChapterWordTarget = {
+      mode: 'standard',
+      label: '标准章',
+      target: 4200,
+      min: 3780,
+      max: 4620,
+      rangeText: '3780-4620 字',
+    }
+    expect(evaluateProseWordTarget(text, target).too_long).toBe(true)
+    const out = surgicalContractProseToWordTarget(text, target)
+    expect(out.to).toBeGreaterThanOrEqual(target.min)
+    expect(evaluateProseWordTarget(out.text, target).too_short).toBe(false)
   })
 
   test('surgical contraction drops pure-AI heavy tails into standard band', () => {

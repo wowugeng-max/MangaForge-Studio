@@ -132,6 +132,60 @@ describe('dialogue-pause-window scanner/ensure v1.6', () => {
     expect((out.text.match(/谁的责任，先讲清/g) || []).length).toBe(0)
   })
 
+  test('ensure with injected=0 returns the source text untouched (no silent re-join)', () => {
+    const filler = '天色慢慢暗下去，院里的杂草在风里晃来晃去，远处的路面还带着白天晒出来的热气。'
+    const paras: string[] = [
+      // early friction cluster (pos <= 0.55)
+      '他把签字本合上，纸边翘了一下，他没急着抚平。',
+      '“这锅谁背？”',
+      '“别全推我。”',
+    ]
+    for (let k = 0; k < 11; k += 1) paras.push(filler)
+    // non-blame short dialogue wall lands in the 0.60-0.62 skip edge of the 0.72 plan slot
+    paras.push('“还值班呢？”', '“嗯。”', '他应了一声，手里的活没放下来。')
+    for (let k = 0; k < 6; k += 1) paras.push(filler)
+    // very late incomplete-decision band (earliest late incomplete >= 0.84)
+    paras.push('他想了想，先等天亮，指腹在纸边按了一下，转身往回走。')
+    paras.push('他回到值班室外面。')
+    // Triple newlines: a paragraph re-join would silently normalize them to \n\n.
+    const source = paras.join('\n\n\n')
+    const out = ensureDialoguePauseWindows(source)
+    expect(out.report.injected).toBe(0)
+    expect(out.report.changed).toBe(false)
+    expect(out.text).toBe(source)
+  })
+
+  test('ensure honors scan-detected late incomplete even when band midpoint is dragged below 0.68', () => {
+    const filler = '天色慢慢暗下去，院里的杂草在风里晃来晃去，远处的路面还带着白天晒出来的热气。'
+    const paras: string[] = [
+      // early friction cluster so ensure only needs the late incomplete
+      '他把签字本合上，纸边翘了一下，他没急着抚平。',
+      '“这锅谁背？”',
+      '“别全推我。”',
+    ]
+    for (let k = 0; k < 14; k += 1) paras.push(filler)
+    // long paragraph right before the anchor drags the band(idx-1..idx+3) char midpoint below 0.68
+    paras.push(filler.repeat(Math.ceil(150 / filler.length)).slice(0, 150))
+    // anchor: unfinished close + halt + object, non-dialogue, gated by anchor midpoint >= 0.68
+    paras.push('他想了想，先等天亮，指腹在纸边按了一下，转身往回走。')
+    paras.push('他脚下的路比来时更黑一些。')
+    paras.push('夜风把院里的草吹得伏了一层。')
+    paras.push('他回到值班室外面。')
+    for (let k = 0; k < 6; k += 1) paras.push(filler)
+    const text = paras.join('\n\n')
+
+    const scan = scanDialoguePauseWindows(text)
+    expect(scan.incomplete_decision_count).toBeGreaterThanOrEqual(1)
+    // repro premise: the stored band midpoint sits below ensure's old 0.68 filter
+    expect(scan.windows.filter((w) => w.kind === 'incomplete_decision').every((w) => w.position < 0.68)).toBe(true)
+
+    const out = ensureDialoguePauseWindows(text)
+    // scan already found a real late incomplete window: no duplicate canned scaffold
+    expect(out.report.kinds.includes('incomplete_decision')).toBe(false)
+    expect(out.report.injected).toBe(0)
+    expect(out.text).toBe(text)
+  })
+
   test('pickDualZoneParagraphTargets returns early friction and late target', () => {
     const targets = pickDualZoneParagraphTargets(20, [])
     expect(targets.length).toBe(2)

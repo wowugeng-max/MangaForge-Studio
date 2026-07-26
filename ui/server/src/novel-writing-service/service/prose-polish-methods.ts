@@ -86,7 +86,8 @@ const runCommercialEditorRewrite = async (activeWorkspace: string, project: any,
   const continuitySelection = selectContinuitySafeProseCandidate(chapterText, fingerprintSelection.text, contextPackage, { candidate_stage: 'editor' })
   return {
     final_text: continuitySelection.text,
-    edited: continuitySelection.accepted && rewrittenText !== chapterText,
+    // Edited must reflect the finally selected text: gate rejections fall back to the original.
+    edited: continuitySelection.accepted && continuitySelection.text !== chapterText,
     editor_report: {
       ...editorReport,
       ...(continuitySelection.warning ? { continuity_warning: continuitySelection.warning } : {}),
@@ -163,7 +164,8 @@ const runMemePolish = async (activeWorkspace: string, project: any, contextPacka
   const continuitySelection = selectContinuitySafeProseCandidate(chapterText, fingerprintSelection.text, contextPackage, { candidate_stage: 'meme_polish' })
   return {
     final_text: continuitySelection.text,
-    polished: continuitySelection.accepted && polishedText !== chapterText,
+    // Polished must reflect the finally selected text: gate rejections fall back to the original.
+    polished: continuitySelection.accepted && continuitySelection.text !== chapterText,
     meme_polish_report: {
       ...memePolishReport,
       ...(continuitySelection.warning ? { continuity_warning: continuitySelection.warning } : {}),

@@ -586,7 +586,10 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
       } else {
       currentText = fingerprintGate.text
       currentEvaluation = finalEvaluation
-      if (expandedCount > countProseChars(bestCompleteText)) {
+      // Candidate selection: in-hard-range first (distance to range), only then prefer longer.
+      const bestDistance = wordTargetDistance(bestCompleteEvaluation)
+      const candidateDistance = wordTargetDistance(finalEvaluation)
+      if (candidateDistance < bestDistance || (candidateDistance === bestDistance && expandedCount > countProseChars(bestCompleteText))) {
         const candidateModelName = sanitizeWordTargetModelName((expansionResult as any).modelName)
         bestCompleteText = fingerprintGate.text
         bestCompleteEvaluation = finalEvaluation
@@ -644,6 +647,10 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
       }
       }
     }
+
+    // Hard too_long brake: once current text reaches/exceeds the hard ceiling, stop expanding.
+    const currentHardEvaluation = evaluateProseWordTarget(currentText, wordTarget)
+    if (Number(currentHardEvaluation.max || 0) > 0 && Number(currentHardEvaluation.actual || 0) >= Number(currentHardEvaluation.max)) break
   }
 
   // Final expansion/contraction candidate also must keep fingerprint vs original draft.
@@ -655,18 +662,26 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
     bestCompleteText = finalGate.text
   }
 
+  // Report the real evaluation of the returned text: dialogue-only triggers must not surface a
+  // synthesized too_short/word_target_short warning on a chapter that is inside the hard range.
+  const bestDialogueRatio = measureDialogueParaRatio(bestCompleteText)
+  const bestFinalEvaluation = {
+    ...applyProseWordTargetSoftCap(evaluateProseWordTarget(bestCompleteText, wordTarget)),
+    dialogue_para_ratio: Number(bestDialogueRatio.toFixed(3)),
+    dialogue_expand_required: bestDialogueRatio + 1e-9 < DIALOGUE_EXPAND_MIN_RATIO,
+  }
   return {
     final_text: bestCompleteText,
     contracted: Boolean(contractionResultPayload),
     expanded: bestCompleteText !== String(chapterText || ''),
     evaluation: initialEvaluation,
-    final_evaluation: bestCompleteEvaluation,
+    final_evaluation: bestFinalEvaluation,
     contraction: contractionResultPayload,
     expansion: {
       ...(bestCompleteExpansionPayload || {}),
       attempts,
     },
-    word_target_warning: buildWordTargetWarning(bestCompleteEvaluation),
+    ...(bestFinalEvaluation.passed ? {} : { word_target_warning: buildWordTargetWarning(bestFinalEvaluation) }),
   }
 }
 

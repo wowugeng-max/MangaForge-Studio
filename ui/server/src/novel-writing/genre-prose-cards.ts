@@ -74,8 +74,8 @@ export function matchGenreProseCard(input: any = {}): GenreProseCard | null {
     for (const alias of card.aliases) {
       if (blob.includes(normalize(alias))) score += 3
     }
-    // confidence tie-break
-    if (card.confidence === '高') score += 0.2
+    // confidence tie-break: only boosts cards that already have a title/alias hit
+    if (score > 0 && card.confidence === '高') score += 0.2
     if (score > 0 && (!best || score > best.score)) best = { card, score }
   }
   return best?.card || null

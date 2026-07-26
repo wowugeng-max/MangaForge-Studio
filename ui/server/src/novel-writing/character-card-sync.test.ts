@@ -71,6 +71,13 @@ describe('character card sync', () => {
     expect(mentions.some(item => item.name === '王建国' && item.title === '物业经理')).toBe(true)
   })
 
+  test('extracts titled names across whitespace separators', () => {
+    const spaced = extractNamedCharacterMentions('物业经理 王建国按响了门铃。')
+    expect(spaced.some(item => item.name === '王建国' && item.title === '物业经理')).toBe(true)
+    const newlined = extractNamedCharacterMentions('物业经理\n王建国站在门口。')
+    expect(newlined.some(item => item.name === '王建国' && item.title === '物业经理')).toBe(true)
+  })
+
   test('extracts title-bound names', () => {
     const mentions = extractNamedCharacterMentions(PREV_CHAPTERS[1].chapter_text)
     expect(mentions.some(item => item.name === '秦建国' && /局长/.test(String(item.title || '')))).toBe(true)
@@ -134,6 +141,69 @@ ${CH17_BAD}
     expect(linked.passed).toBe(false)
     expect(linked.score).toBeLessThanOrEqual(72)
     expect(linked.revision_directives.join('｜')).toMatch(/秦建国|赵国锋/)
+  })
+})
+
+describe('pov residue guard', () => {
+  const POV_CHAPTER_TEXT = [
+    '林序发现了名单上的第三个名字。',
+    '他确认纸条藏在鞋垫下面。',
+    '赵国锋看到电梯门开了一条缝。',
+    '物业经理赵国锋在楼下抽烟，没有上来。',
+    '林序把名单折好塞进口袋。',
+  ].join('\n')
+
+  const basePlanInput = () => ({
+    projectId: 1,
+    chapter: { chapter_no: 12, project_id: 1, chapter_text: POV_CHAPTER_TEXT },
+    existingCharacters: [
+      { id: 7, name: '赵国锋', current_state: { title: '物业经理' } },
+      { id: 1, name: '林序', current_state: {} },
+    ],
+    characterUpdates: [
+      { name: '林序', current_state: { mood: '紧绷' } },
+      { name: '赵国锋', current_state: { location: '楼下' } },
+    ],
+  })
+
+  test('does not write pov residue into any card when chapter pov is unknown', () => {
+    const plan = planCharacterCardSync(basePlanInput())
+    for (const update of plan.character_updates) {
+      const state = update.patch?.current_state || {}
+      expect(state.pov_mode).toBeUndefined()
+      expect(state.last_pov_character).toBeUndefined()
+      expect(state.knowledge_now).toBeUndefined()
+      expect(state.knowledge_ledger).toBeUndefined()
+    }
+  })
+
+  test('attaches knowledge residue only to the chapter primary pov and filters other-cast lines', () => {
+    const plan = planCharacterCardSync({
+      ...basePlanInput(),
+      contextPackage: { chapter_target: { primary_pov: '林序' } },
+    })
+    const lin = plan.character_updates.find(item => item.name === '林序')
+    const zhao = plan.character_updates.find(item => item.name === '赵国锋')
+    expect(lin?.patch?.current_state?.pov_mode).toBe('deep_limited')
+    expect(lin?.patch?.current_state?.knowledge_now).toContain('林序发现了名单上的第三个名字。')
+    // short line naming another cast member must not leak into the pov ledger
+    expect(lin?.patch?.current_state?.knowledge_now).not.toContain('赵国锋看到电梯门开了一条缝。')
+    expect(zhao?.patch?.current_state?.pov_mode).toBeUndefined()
+    expect(zhao?.patch?.current_state?.knowledge_now).toBeUndefined()
+    expect(zhao?.patch?.current_state?.knowledge_ledger).toBeUndefined()
+  })
+
+  test('skips pov write-back for the pov character when chapter leaves no knowledge or open questions', () => {
+    const plan = planCharacterCardSync({
+      projectId: 1,
+      chapter: { chapter_no: 3, project_id: 1, chapter_text: '林序走过长廊。他把伞收好。' },
+      existingCharacters: [{ id: 1, name: '林序', current_state: {} }],
+      characterUpdates: [{ name: '林序', current_state: { mood: '平静' } }],
+      povCharacters: ['林序'],
+    })
+    const lin = plan.character_updates.find(item => item.name === '林序')
+    expect(lin?.patch?.current_state?.pov_mode).toBeUndefined()
+    expect(lin?.patch?.current_state?.knowledge_ledger).toBeUndefined()
   })
 })
 

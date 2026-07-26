@@ -7,7 +7,7 @@ import {
   UNIQUE_OFFICE_TITLES,
   uniqueTexts,
 } from './character-card-sync-shared'
-import { buildPovCharacterStatePatch } from './character-pov'
+import { buildPovCharacterStatePatch, compileChapterPovPlan } from './character-pov'
 
 import {
   buildCharacterIdentityCanon,
@@ -45,7 +45,7 @@ export function extractNamedCharacterMentions(text: string): NamedCharacterMenti
   const bag = new Map<string, NamedCharacterMention>()
 
   for (const title of ROLE_TITLES) {
-    const titleName = new RegExp(`${title}[，,：:、\s]*([\\u4e00-\\u9fff]{2,3})`, 'g')
+    const titleName = new RegExp(`${title}[，,：:、\\s]*([\\u4e00-\\u9fff]{2,3})`, 'g')
     let match: RegExpExecArray | null
     while ((match = titleName.exec(source))) {
       pushMention(bag, {
@@ -222,6 +222,8 @@ export function planCharacterCardSync(input: {
   previousChapters?: any[]
   characterUpdates?: any[]
   titleNameCanon?: TitleNameCanonEntry[]
+  contextPackage?: any
+  povCharacters?: any[]
 } = {}): CharacterCardSyncPlan {
   const chapter = input.chapter || {}
   const chapterNo = Number(chapter?.chapter_no || chapter?.chapterNo || 0) || undefined
@@ -327,20 +329,53 @@ export function planCharacterCardSync(input: {
     }
   }
 
-  // Attach POV knowledge residue for named cast already in seed / existing cards.
+  // Attach POV knowledge residue only to this chapter's real POV cast
+  // (primary_pov / authorized secondary), never to every mentioned character.
+  const povAuthorized = new Set<string>(
+    asArray(input.povCharacters).map((value: any) => compactText(value, 24)).filter(Boolean),
+  )
+  if (!povAuthorized.size && input.contextPackage) {
+    const povPlan = compileChapterPovPlan(input.contextPackage)
+    for (const value of [povPlan?.primary_pov, ...asArray(povPlan?.allowed_secondary_povs)]) {
+      const clean = compactText(value, 24)
+      if (clean) povAuthorized.add(clean)
+    }
+  }
   const chapterTextForPov = chapterTextOf(chapter)
+  const castNames = [...new Set([...updateSeed.keys(), ...existingByName.keys()])].filter(Boolean)
   for (const [name, seed] of updateSeed.entries()) {
+    if (!povAuthorized.has(name)) continue
     const existingChar = existingByName.get(name)
+    const existingState = existingChar?.current_state || seed?.current_state || {}
     const povPatch = buildPovCharacterStatePatch({
       chapterText: chapterTextForPov,
       povCharacter: name,
       chapterNo,
-      existingState: existingChar?.current_state || seed?.current_state || {},
+      existingState,
     })
-    if (!povPatch || Object.keys(povPatch).length <= 1) continue
+    if (!povPatch) continue
+    // Lines naming another cast member (and not the POV character) are their
+    // information, not this character's; keep entries already on the card.
+    const carried = new Set(
+      asArray(existingState?.knowledge_now || existingState?.knowledgeNow || existingState?.knowledge).map(String),
+    )
+    const leaksOtherCast = (line: string) => !line.includes(name)
+      && castNames.some(other => other !== name && line.includes(other))
+    const knowledgeNow = asArray(povPatch.knowledge_now)
+      .map(String)
+      .filter(line => carried.has(line) || !leaksOtherCast(line))
+    const openQuestions = asArray(povPatch.open_questions)
+    // No knowledge and no open questions => nothing worth writing back.
+    if (!knowledgeNow.length && !openQuestions.length) continue
+    const sanitized: Record<string, any> = { ...povPatch }
+    if (knowledgeNow.length) sanitized.knowledge_now = knowledgeNow
+    else delete sanitized.knowledge_now
+    if (sanitized.knowledge_ledger && typeof sanitized.knowledge_ledger === 'object') {
+      sanitized.knowledge_ledger = { ...sanitized.knowledge_ledger, known: knowledgeNow }
+    }
     updateSeed.set(name, {
       ...seed,
-      current_state: mergeCurrentState(seed?.current_state || existingChar?.current_state || {}, povPatch, chapterNo),
+      current_state: mergeCurrentState(seed?.current_state || existingChar?.current_state || {}, sanitized, chapterNo),
     })
   }
 

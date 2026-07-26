@@ -53,6 +53,7 @@ export function buildChapterAcceptancePrep(args: {
     existingCharacters: characters,
     previousChapters: asArray(chapters).filter((item: any) => Number(item?.chapter_no || 0) < Number(chapter.chapter_no || 0)),
     characterUpdates: preparedStoryStateUpdate.character_updates,
+    contextPackage,
   })
   const acceptanceCharacterCreates = [
     ...asArray(stagedPreflightRepair?.staged_character_creates),

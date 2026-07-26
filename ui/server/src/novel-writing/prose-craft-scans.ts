@@ -90,7 +90,8 @@ export function scanWebNovelParagraphShapeRisks(text: string) {
     if (proseLength < 28) continue
     const sentences = (paragraph.text.match(/[^。！？!?]+[。！？!?]/g) || []).filter(item => countProseChars(item) >= 6)
     // Controlled 2-sentence dense blocks are intentional for anti-detector burstiness.
-    if (sentences.length === 2 && proseLength >= 90) {
+    // Over-long two-sentence walls (>=130 prose chars) fall through and escalate below.
+    if (sentences.length === 2 && proseLength >= 90 && proseLength < 130) {
       twoSentenceDenseHits += 1
       if (hits.length < 2) {
         hits.push({
@@ -105,7 +106,7 @@ export function scanWebNovelParagraphShapeRisks(text: string) {
       }
       continue
     }
-    if (sentences.length >= 3 || (sentences.length >= 2 && proseLength >= 110)) {
+    if (sentences.length >= 3 || (sentences.length === 2 && proseLength >= 130)) {
       if (sentences.length >= 3) triplePlusHits += 1
       if (hits.length < 3) {
         hits.push({

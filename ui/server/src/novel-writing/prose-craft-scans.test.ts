@@ -56,6 +56,25 @@ describe('prose craft deterministic scans', () => {
     expect(checks.some(item => String(item.key).includes('web_novel'))).toBe(true)
   })
 
+  test('escalates an over-long two-sentence wall to fail while keeping normal dense pairs as warn', () => {
+    const longSentence = (seed: string) => `${seed}沈砚把那摞被雨水泡皱的登记表一页页揭开摊在长桌上，又把台灯拽近了些，让光压着纸面，看清每一行被墨晕染开的名字和日期，再用铅笔在页边把对不上的条目逐个圈出来。`
+    const wallChecks = scanWebNovelParagraphShapeRisks([
+      '第4章 旧档案',
+      `${longSentence('入夜后')}${longSentence('过了子时')}`,
+      '门后传来一声轻响。',
+    ].join('\n'))
+    const wallHit = wallChecks.find(item => String(item.key).startsWith('web_novel_multi_sentence_paragraph_line_'))
+    expect(wallHit?.status).toBe('fail')
+
+    const denseChecks = scanWebNovelParagraphShapeRisks([
+      '第4章 旧档案',
+      '沈砚把那摞泡皱的登记表摊在长桌上，又把台灯往自己这边拽近了些，让光压着纸面，逐行看清那些被墨晕开的名字和日期。他用铅笔把对不上的条目一个个圈出来，笔尖在纸边顿了两次，才继续往下走。',
+      '门后传来一声轻响。',
+    ].join('\n'))
+    expect(denseChecks.some(item => String(item.key).startsWith('web_novel_two_sentence_dense_line_'))).toBe(true)
+    expect(denseChecks.some(item => String(item.key).startsWith('web_novel_multi_sentence_paragraph_line_'))).toBe(false)
+  })
+
   test('detects uniform paragraph lengths', () => {
     const checks = scanParagraphLengthUniformityRisks([
       '第4章 旧楼走廊',

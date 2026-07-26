@@ -542,8 +542,11 @@ export function stitchParagraphCellsWithWindows(
   if (!cells.length) return String(originalText || '')
   const parts = cells.map((cell) => {
     if (rewrittenByIndex.has(cell.index)) {
-      return String(rewrittenByIndex.get(cell.index) || '').trim() || cell.text
+      // Explicit mapping wins: an empty mapped value means "delete this paragraph"
+      // (window rewrite compressed to fewer paragraphs). Never resurrect cell.text here.
+      return String(rewrittenByIndex.get(cell.index) || '').trim()
     }
+    // Unmapped cell → untouched original paragraph.
     return cell.text
   })
   return parts.filter(Boolean).join('\n\n')
@@ -573,8 +576,9 @@ export function mapWindowRewriteToParagraphs(
   if (parts.length < indices.length) {
     parts.forEach((p, i) => out.set(indices[i], p))
     for (let i = parts.length; i < indices.length; i += 1) {
-      // drop pure packaging tails by blanking to empty then filter in stitch — use minimal unfinished action once
-      out.set(indices[i], i === parts.length ? '' : '')
+      // Rewrite compressed the window: surplus original paragraphs are explicitly
+      // deleted by mapping to '' (stitch drops mapped-empty cells instead of keeping originals).
+      out.set(indices[i], '')
     }
     return out
   }

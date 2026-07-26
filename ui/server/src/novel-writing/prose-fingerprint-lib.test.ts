@@ -22,6 +22,68 @@ describe('prose fingerprint library', () => {
     expect(v.cv_para).toBeGreaterThan(0)
   })
 
+  test('counts 『』-opened paragraphs as dialogue paragraphs (#30)', () => {
+    const kagi = [
+      '『先别动。』',
+      '『时间怎么写？』',
+      '『按原样写。』',
+      '他把笔放回桌上。',
+    ].join('\n')
+    const corner = kagi.replace(/『/g, '「').replace(/』/g, '」')
+    expect(measureProseFingerprintVector(kagi).dialogue_para_ratio).toBe(0.75)
+    expect(measureProseFingerprintVector(kagi).dialogue_para_ratio)
+      .toBe(measureProseFingerprintVector(corner).dialogue_para_ratio)
+  })
+
+  test('subject opener ratio no longer hardcodes surname 林 (#28)', () => {
+    // 非人名“林”起句不得计入主语起句
+    const forest = [
+      '林间的雾还没散。',
+      '林场大门锁着。',
+      '林荫道尽头停着一辆车。',
+      '雨下了一夜。',
+    ].join('\n')
+    expect(measureProseFingerprintVector(forest).subject_ta_opener_ratio).toBe(0)
+  })
+
+  test('subject opener ratio counts explicit protagonist names when provided (#28)', () => {
+    // 陈默 起句只有 2 次（低于自动推导阈值），只有显式传参才计入
+    const paras = [
+      '陈默推开门。',
+      '陈默把伞收了。',
+      '雨声很大。',
+      '走廊尽头的灯闪了一下。',
+      '“先别动。”',
+      '水渍顺着桌沿往下淌。',
+      '门轴响了一声。',
+      '窗外没有人。',
+      '伞架空着。',
+      '灯又灭了。',
+    ].join('\n')
+    expect(measureProseFingerprintVector(paras).subject_ta_opener_ratio).toBe(0)
+    expect(
+      measureProseFingerprintVector(paras, { protagonist_names: ['陈默'] }).subject_ta_opener_ratio,
+    ).toBe(0.2)
+  })
+
+  test('subject opener ratio auto-derives a recurring protagonist-name opener from the text (#28)', () => {
+    const paras = [
+      '陈默推开门。',
+      '陈默把伞收了。',
+      '陈默没接话。',
+      '陈默看了眼窗外。',
+      '陈默把灯关了。',
+      '陈默坐回椅子上。',
+      '雨声很大。',
+      '“先别动。”',
+      '走廊尽头的灯闪了一下。',
+      '他叹了口气。',
+    ].join('\n')
+    const v = measureProseFingerprintVector(paras)
+    // 6 个陈默起句 + 1 个“他”起句 → 0.7
+    expect(v.subject_ta_opener_ratio).toBe(0.7)
+  })
+
   test('builds contract and scores samples', () => {
     const human = createFingerprintSample({
       id: 'h1',

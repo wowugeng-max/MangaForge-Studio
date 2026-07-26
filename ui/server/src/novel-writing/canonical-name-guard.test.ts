@@ -36,6 +36,20 @@ describe('canonical name guard', () => {
     expect(result.report.repairs[0]).toMatchObject({ from: '林晓', to: '林序' })
   })
 
+  test('never renames one canon character into another canon character', () => {
+    const text = [
+      '苏晨推开门。',
+      '苏晨看向床边。',
+      '苏辰还在昏睡。',
+      '苏晨叹了口气。',
+    ].join('\n\n')
+    const result = repairCanonicalNameNearMisses(text, ['苏晨', '苏辰'])
+    expect(result.report.repairs).toEqual([])
+    expect(result.report.changed).toBe(false)
+    expect(result.text).toContain('苏辰还在昏睡')
+    expect(result.text).toBe(text)
+  })
+
   test('does not rename frequent alternate cast names', () => {
     const text = [
       '林序站在门口。',
@@ -46,6 +60,20 @@ describe('canonical name guard', () => {
     const result = repairCanonicalNameNearMisses(text, ['林序'])
     // candidate 林晓 appears 3 times (>2) so leave it
     expect(result.text).toContain('林晓')
+  })
+
+  test('leaves a longer un-carded name intact when the candidate only appears inside it', () => {
+    const text = [
+      '林序把纸条按实。',
+      '林序继续往前走。',
+      '林晚秋端着药碗进来。',
+      '林序在门口停了一下。',
+    ].join('\n\n')
+    const result = repairCanonicalNameNearMisses(text, ['林序'])
+    expect(result.report.repairs).toEqual([])
+    expect(result.text).not.toContain('林序秋')
+    expect(result.text).toContain('林晚秋端着药碗进来')
+    expect(result.text).toBe(text)
   })
 
   test('applyCanonicalNameGuard end-to-end with project characters', () => {

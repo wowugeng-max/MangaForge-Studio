@@ -128,7 +128,43 @@ function countMatches(text: string, re: RegExp) {
   return (text.match(re) || []).length
 }
 
-export function measureProseFingerprintVector(text: string): ProseFingerprintVector {
+/** Common Chinese surname chars used to spot protagonist-name paragraph openers (no single hardcoded surname). */
+const COMMON_SURNAME_CHARS =
+  '赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳酆鲍史唐费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄和穆萧尹姚邵湛汪祁毛禹狄米贝明臧计伏成戴谈宋茅庞熊纪舒屈项祝董梁杜阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田樊胡凌霍虞万支柯昝管卢莫'
+
+export type ProseFingerprintMeasureOptions = {
+  /** Protagonist names/surnames counted as subject openers; when absent they are derived from the text. */
+  protagonist_names?: string[]
+  protagonistNames?: string[]
+}
+
+function resolveProtagonistOpeners(paras: string[], options: ProseFingerprintMeasureOptions): string[] {
+  const provided = [
+    ...(Array.isArray(options.protagonist_names) ? options.protagonist_names : []),
+    ...(Array.isArray(options.protagonistNames) ? options.protagonistNames : []),
+  ]
+    .map((name) => String(name || '').trim())
+    .filter((name) => name.length >= 1 && name.length <= 4)
+  if (provided.length) return Array.from(new Set(provided))
+  // Derive recurring protagonist-name openers from the text itself: a common-surname
+  // two-char opener repeated across enough narration paragraphs counts as a name pipeline.
+  const counts = new Map<string, number>()
+  for (const p of paras) {
+    if (/^[“"「『]/.test(p) || /^(他|她)/.test(p)) continue
+    const head = p.slice(0, 2)
+    if (!/^[一-龥]{2}$/.test(head)) continue
+    if (!COMMON_SURNAME_CHARS.includes(head[0])) continue
+    counts.set(head, (counts.get(head) || 0) + 1)
+  }
+  const n = Math.max(1, paras.length)
+  const out: string[] = []
+  for (const [head, count] of counts) {
+    if (count >= 3 && count / n >= 0.12) out.push(head)
+  }
+  return out
+}
+
+export function measureProseFingerprintVector(text: string, options: ProseFingerprintMeasureOptions = {}): ProseFingerprintVector {
   const body = String(text || '').replace(/\r/g, '')
   const paras = splitParas(body)
   const plain = body.replace(/\s+/g, '')
@@ -163,6 +199,7 @@ export function measureProseFingerprintVector(text: string): ProseFingerprintVec
   let multi = 0
   let dialogue = 0
   let taOpen = 0
+  const protagonistOpeners = resolveProtagonistOpeners(paras, options)
   const openers: string[] = []
   const allSentLens: number[] = []
   for (const p of paras) {
@@ -171,10 +208,10 @@ export function measureProseFingerprintVector(text: string): ProseFingerprintVec
     if (sc <= 1) single += 1
     else if (sc === 2) two += 1
     else multi += 1
-    if (/^[“"「]/.test(p)) dialogue += 1
+    if (/^[“"「『]/.test(p)) dialogue += 1
     const opener = p.replace(/^[“"「『]/, '').slice(0, 2)
     openers.push(opener)
-    if (/^(他|她|林)/.test(p) || p.startsWith('他') || p.startsWith('她')) taOpen += 1
+    if (/^(他|她)/.test(p) || protagonistOpeners.some((name) => p.startsWith(name))) taOpen += 1
     allSentLens.push(...sentenceLens(p))
   }
   const openerCounts = new Map<string, number>()

@@ -191,6 +191,41 @@ describe('character pov system', () => {
     expect(findings.some((item) => item.key === 'pov_unauthorized_switch')).toBe(true)
   })
 
+  test('pov switch gate extracts pure names: primary and authorized secondary pass, others block', () => {
+    const strictCtx = {
+      ...context,
+      model_family_strategy: buildModelFamilyStrategy({ model_name: 'gemini-3.5-flash' }),
+      chapter_target: {
+        ...context.chapter_target,
+        scene_cards: [
+          {
+            scene_no: 1,
+            title: '急诊',
+            characters_present: ['林序', '小刘'],
+            conflict: '温尸',
+            density_level: 'medium',
+            protagonist_agency_action: '查遗物',
+            secondary_cut: {
+              character: '小刘',
+              max_lines: 2,
+              purpose: '旁观恐惧',
+              return_to_primary: '立刻回到林序',
+            },
+          },
+        ],
+      },
+    }
+    // primary self-reflection and authorized secondary cut must not trip the gate
+    const allowed = scanCharacterPovRisks('林序心想：先把门锁好。\n小刘心道：邪门。', strictCtx)
+    expect(allowed.some((item) => item.key === 'pov_unauthorized_switch')).toBe(false)
+
+    // unauthorized character must still be caught as blocking fail
+    const blocked = scanCharacterPovRisks('赵国锋心想：这事不能沾。', strictCtx)
+    const hit = blocked.find((item) => item.key === 'pov_unauthorized_switch')
+    expect(hit?.status).toBe('fail')
+    expect(hit?.blocking).toBe(true)
+  })
+
   test('ui snapshot exposes primary pov scenes and violations', () => {
     const snap = buildCharacterPovUiSnapshot({
       contextPackage: context,
@@ -317,6 +352,55 @@ describe('character pov system', () => {
     expect(findings.some((item) => item.key === 'pov_secondary_cut_overstay')).toBe(true)
   })
 
+  test('dialogue mind-read allows primary self-reaction but blocks unauthorized others', () => {
+    // primary reacting inwardly right after his own dialogue is legal deep-limited prose
+    const allowed = scanCharacterPovRisks('“先别动。”他心里咯噔一下，把手电递过去。', context)
+    expect(allowed.some((item) => item.key === 'pov_dialogue_mind_read')).toBe(false)
+
+    // an unauthorized character's inner state after dialogue must still hard-fail
+    const blocked = scanCharacterPovRisks('“先别动。”赵国锋心里一喜，把手电藏了起来。', context)
+    const hit = blocked.find((item) => item.key === 'pov_dialogue_mind_read')
+    expect(hit?.status).toBe('fail')
+    expect(hit?.blocking).toBe(true)
+  })
+
+  test('secondary cut overstay counts each line once against the authorized quota', () => {
+    const cutCtx = {
+      ...context,
+      chapter_target: {
+        ...context.chapter_target,
+        scene_cards: [
+          {
+            scene_no: 1,
+            title: '急诊',
+            characters_present: ['林序', '小刘'],
+            conflict: '温尸',
+            density_level: 'medium',
+            protagonist_agency_action: '查遗物',
+            secondary_cut: {
+              character: '小刘',
+              max_lines: 3,
+              purpose: '信息差',
+              return_to_primary: '立刻回到林序',
+            },
+          },
+        ],
+      },
+    }
+    // 2 monologue lines under a max_lines=3 authorization must not be double-counted into a fail
+    const within = scanCharacterPovRisks('小刘心想：邪门。\n小刘暗想：快跑。', cutCtx)
+    expect(within.some((item) => item.key === 'pov_secondary_cut_overstay')).toBe(false)
+
+    // 4 lines exceed the quota and must still hard-fail
+    const over = scanCharacterPovRisks(
+      '小刘心想：邪门。\n小刘暗想：快跑。\n小刘心想：不能报警。\n小刘暗想：先躲远点。',
+      cutCtx,
+    )
+    const hit = over.find((item) => item.key === 'pov_secondary_cut_overstay')
+    expect(hit?.status).toBe('fail')
+    expect(hit?.blocking).toBe(true)
+  })
+
   test('P2 scene card prompt requires secondary_cut schema', () => {
     const plan = compileChapterPovPlan(context)
     const prompt = formatSceneCardPovPrompt(plan).join('\n')
@@ -338,6 +422,16 @@ describe('character pov system', () => {
     expect(cleaned).not.toContain('一片死寂')
     const findings = scanCharacterPovRisks(cleaned, context)
     expect(findings.filter((item) => item.status === 'fail').length).toBe(0)
+  })
+
+  test('sanitize leaves no mixed punctuation after sentence-final stock phrases', () => {
+    const cleaned = sanitizeCharacterPovAntiAiStock('他深吸一口气。走进抢救室。')
+    expect(cleaned).toBe('他嗓子发紧。走进抢救室。')
+    expect(cleaned).not.toMatch(/，[。！？!?]/)
+
+    const bang = sanitizeCharacterPovAntiAiStock('他深吸一口气！')
+    expect(bang).toContain('嗓子发紧！')
+    expect(bang).not.toMatch(/，[。！？!?]/)
   })
 
   test('warns on forced slang pack and metaphor stack', () => {

@@ -74,6 +74,13 @@ export function resolveZhuqueFastHumanizePolicy(options: Record<string, any> = {
   }
 }
 
+/** Clamp a sparse risk cap to [0, max]; explicit 0 is preserved (0 = off), non-finite falls back to max. */
+function clampRiskCap(value: any, max: number): number {
+  const parsed = Number(value ?? max)
+  if (!Number.isFinite(parsed)) return max
+  return Math.max(0, Math.min(max, parsed))
+}
+
 /** Merge locked fast-path options onto caller bag (caller may still override humanize flags). */
 export function applyZhuqueFastPathOptions(options: Record<string, any> = {}): Record<string, any> {
   if (!isZhuqueFastProductionMode(options.production_mode || options.productionMode, options)) {
@@ -101,9 +108,9 @@ export function applyZhuqueFastPathOptions(options: Record<string, any> = {}): R
       skip_humanize_postprocess: humanize.skip_humanize_postprocess,
       skipHumanizePostprocess: humanize.skip_humanize_postprocess,
     }),
-    // Force sparse caps even if caller partially overwrote
-    risk_rewrite_rounds: Math.min(1, Number(options.risk_rewrite_rounds ?? options.riskRewriteRounds ?? 1) || 1),
-    max_risk_windows: Math.min(3, Number(options.max_risk_windows ?? options.maxRiskWindows ?? 3) || 3),
+    // Force sparse caps even if caller partially overwrote; explicit 0 stays 0 (= off).
+    risk_rewrite_rounds: clampRiskCap(options.risk_rewrite_rounds ?? options.riskRewriteRounds, 1),
+    max_risk_windows: clampRiskCap(options.max_risk_windows ?? options.maxRiskWindows, 3),
     r76_zhuque_stack: options.r76_zhuque_stack || R76_ZHUQUE_STACK_VERSION,
     // Re-assert humanize policy after spread so defaults cannot re-enable silently.
     enable_humanize_postprocess: humanize.enable_humanize_postprocess,

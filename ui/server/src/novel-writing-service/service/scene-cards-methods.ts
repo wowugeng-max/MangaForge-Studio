@@ -49,14 +49,16 @@ const generateSceneCardsForChapter = async (activeWorkspace: string, project: an
   }, {
     activeWorkspace,
     modelId: stageModelId ? String(stageModelId) : undefined,
-    maxTokens: 3000,
+    // 3000 truncated 2-6 full-field cards (pov_lens etc.) into unrecoverable JSON; align with gemini's 8192 floor.
+    maxTokens: 8192,
     temperature: getStageTemperature(project, 'scene_cards', 0.45),
     skipMemory: true,
     signal: options.abortSignal,
     timeoutMs: options.llmTimeoutMs,
   })
   const payload = getNovelPayload(result)
-  return { result, sceneCards: normalizeSceneCardsPayload(payload, contextPackage) }
+  // Use the same family-attached context the prompt stage used so pov_lens backfill sees model_family_strategy.
+  return { result, sceneCards: normalizeSceneCardsPayload(payload, contextWithFamily) }
 }
 
   return {

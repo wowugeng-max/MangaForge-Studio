@@ -229,3 +229,64 @@ describe('humanize risk segment (novel-writer-master path)', () => {
     expect(joined).toContain('半拍停顿对白窗')
     expect(joined).toContain('禁流程顺滑腔')
   })
+
+  test('window compressed to fewer paragraphs deletes surplus originals instead of resurrecting them (#22)', () => {
+    const paras = [
+      '“先别动。”她把杯子放在台面上，指腹蹭到一点灰，先不往系统里写。',
+      '他嫌麻烦，把抽屉钥匙塞回口袋，锁芯发涩，拧了两下才动。',
+      '门缝正在以不可逆的速度收窄，防夹感应器的感应灯闪烁得更加剧烈，十厘米，十五厘米。',
+      '黑洞洞的空间里，仿佛有什么顺着风口倒灌进来，石灰味混杂着冷气冲进轿厢。',
+      '名单纸上写着“未完结，顺延下一位”，精确到分钟的时间，以及一个体温读数。',
+      '“交班表你签了没？”对面的人没接话，先把文件夹合上，纸边硌了一下手指。',
+      '他把责任往回推了半句，又改口，先把班交了再说，袖口沾了点油污。',
+    ]
+    const text = paras.join('\n\n')
+    const heatmap = buildAigcRiskHeatmap(text)
+    const windows = selectHighRiskRewriteWindows(heatmap, { maxWindows: 3, maxChars: 900 })
+    const win = windows.find((w) => w.indices.length >= 3)
+    expect(win).toBeTruthy()
+    expect(win!.indices).toEqual([2, 3, 4])
+
+    // LLM compresses the 3-paragraph packaging window into a single paragraph (prompt S2: delete packaging).
+    const rewritten = '他伸手挡了一下门，门弹回去半寸，他趁势把平车拽出来，没去看那张纸。“先别管这个。”他顿了一下，先把人推进抢救间，钥匙在口袋里硌着手指，他嫌烦，没掏。'
+
+    // Trial stitch path must already treat blanked indices as deletions.
+    const provisionalMap = mapWindowRewriteToParagraphs(win!, rewritten, heatmap.cells)
+    expect(provisionalMap.has(3)).toBe(true)
+    expect(provisionalMap.has(4)).toBe(true)
+    const trialChapter = stitchParagraphCellsWithWindows(text, heatmap, provisionalMap)
+    expect(trialChapter).not.toContain('黑洞洞的空间')
+    expect(trialChapter).not.toContain('顺延下一位')
+
+    const gate = acceptRiskSegmentRewrite({
+      beforeWindow: win!.text,
+      afterWindow: rewritten,
+      beforeChapter: text,
+      afterChapter: trialChapter,
+      reasons: win!.reasons || [],
+    })
+    expect(gate.accepted).toBe(true)
+
+    // Final stitch: rewrite lands on the first index, surplus originals stay deleted.
+    const finalMap = mapWindowRewriteToParagraphs(win!, gate.text, heatmap.cells)
+    const stitched = stitchParagraphCellsWithWindows(text, heatmap, finalMap)
+    expect(stitched).toContain('他伸手挡了一下门')
+    expect(stitched).not.toContain('黑洞洞的空间')
+    expect(stitched).not.toContain('顺延下一位')
+    // Untouched low-risk paragraphs survive intact.
+    expect(stitched).toContain('交班表你签了没')
+    expect(stitched).toContain('袖口沾了点油污')
+    expect(stitched).not.toMatch(/\n\n\n/)
+  })
+
+  test('stitch keeps unmapped cells but drops explicitly blanked cells (#22 contract)', () => {
+    const text = 'A段落内容。\n\nB段落内容。\n\nC段落内容。'
+    const heat = buildAigcRiskHeatmap(text)
+    const map = new Map<number, string>()
+    map.set(1, '')
+    const out = stitchParagraphCellsWithWindows(text, heat, map)
+    expect(out).toContain('A段落内容')
+    expect(out).not.toContain('B段落内容')
+    expect(out).toContain('C段落内容')
+    expect(out).not.toMatch(/\n\n\n/)
+  })

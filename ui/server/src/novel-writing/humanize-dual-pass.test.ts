@@ -87,6 +87,19 @@ describe('humanize dual pass (baibai/Bypass novel-native)', () => {
     expect(scanAcademicPaddingHits(padded).length).toBeGreaterThan(0)
   })
 
+  test('strips 修改如下/调整如下 chat shells without 后 form', () => {
+    const prose = '他推开门。\n\n“先别动。”\n\n手套上还沾着水，他本想甩锅，却先把纸角按住。'
+    expect(stripHumanizeChatWrapper(`好的，修改如下：\n${prose}`)).toBe(prose)
+    expect(stripHumanizeChatWrapper(`调整如下：\n${prose}`)).toBe(prose)
+    expect(stripHumanizeChatWrapper(`改写如下：\n${prose}`)).toBe(prose)
+    expect(stripHumanizeChatWrapper(`润色内容如下所示：\n${prose}`)).toBe(prose)
+
+    const safe = selectHumanizeSafeProse(prose, `好的，修改如下：\n${prose}`)
+    expect(safe.accepted).toBe(true)
+    expect(safe.text.startsWith('修改如下')).toBe(false)
+    expect(safe.text).toBe(prose)
+  })
+
   test('strategy addon defaults pass AB for de_ai signals', () => {
     const addon = buildHumanizeRevisionStrategyAddon({ primary_strategy: 'de_ai', hw_findings: 1 })
     expect(addon.pass).toBe('AB')

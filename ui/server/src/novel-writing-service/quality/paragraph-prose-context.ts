@@ -149,7 +149,11 @@ function clipRequiredProseText(value: any, max = PROSE_CORE_SCENE_TEXT_MAX) {
   const text = requiredProsePromptText(value)
   if (!text) return ''
   if (text.length <= max) return text
-  return `${text.slice(0, Math.max(0, max - 1))}…`
+  let clipped = text.slice(0, Math.max(0, max - 1))
+  // Code-unit slice can split a surrogate pair (emoji / CJK Ext-B); drop a trailing lone high surrogate.
+  const lastCode = clipped.charCodeAt(clipped.length - 1)
+  if (lastCode >= 0xd800 && lastCode <= 0xdbff) clipped = clipped.slice(0, -1)
+  return `${clipped}…`
 }
 
 function uniqueRequiredProseTexts(values: any[], maxItems = PROSE_CORE_SCENE_LIST_MAX, maxText = PROSE_CORE_SCENE_TEXT_MAX) {

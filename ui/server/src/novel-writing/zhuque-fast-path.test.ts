@@ -72,6 +72,26 @@ describe('zhuque fast path', () => {
     expect(opts.enable_mid_monologue_densify).toBe(true)
   })
 
+  test('applyZhuqueFastPathOptions keeps explicit 0 for risk caps (0 = off)', () => {
+    const opts = applyZhuqueFastPathOptions({
+      production_mode: 'zhuque_fast',
+      enable_humanize_postprocess: true,
+      risk_rewrite_rounds: 0,
+      max_risk_windows: 0,
+    })
+    expect(opts.risk_rewrite_rounds).toBe(0)
+    expect(opts.max_risk_windows).toBe(0)
+
+    // Non-finite / missing values still fall back to sparse defaults.
+    const fallback = applyZhuqueFastPathOptions({
+      production_mode: 'zhuque_fast',
+      risk_rewrite_rounds: Number.NaN,
+      max_risk_windows: 'not-a-number',
+    })
+    expect(fallback.risk_rewrite_rounds).toBe(1)
+    expect(fallback.max_risk_windows).toBe(3)
+  })
+
   test('non-fast mode is passthrough', () => {
     const opts = applyZhuqueFastPathOptions({ production_mode: 'draft_review_revise_store', expand: true })
     expect(opts.zhuque_fast).toBeUndefined()

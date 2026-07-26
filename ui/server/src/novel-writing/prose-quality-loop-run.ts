@@ -249,6 +249,8 @@ export async function runProseQualityLoop(input: {
   minScore: number
   coreContract?: any
   continuityContext?: any
+  /** Novel project (genre/title/style_tags…) used for the genre-tuned revision persona. */
+  project?: any
   maxRevisionRounds?: number
   scan: (text: string) => any | Promise<any>
   review: (input: { text: string; scan: any; round: number; prompt: string; attempt: number }) => Promise<any>
@@ -341,7 +343,7 @@ export async function runProseQualityLoop(input: {
           chapterText: finalText,
           blockingFindings,
           round,
-          project: (input as any).project || (input as any).novelProject || null,
+          project: input.project ?? null,
         }),
       })
     } catch (error: any) {

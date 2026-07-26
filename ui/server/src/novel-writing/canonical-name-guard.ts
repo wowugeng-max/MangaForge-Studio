@@ -120,6 +120,29 @@ function replaceStandaloneName(
   return { text: next, count }
 }
 
+/**
+ * Function chars that continue prose after a standalone 2-char name
+ * (e.g. 林晓没抬头 = 林晓 + 没抬头), never the tail of a longer given name.
+ */
+const PROSE_TAIL_CHARS = /^[没不就才便再仍跟被把让向从对当替随往趁凭]/
+
+/** Find a scanned longer person name that absorbs every standalone occurrence of the candidate. */
+function findEmbeddingLongerName(
+  text: string,
+  candidate: string,
+  scannedNames: Iterable<string>,
+  knownNames: string[],
+): string | null {
+  for (const longName of scannedNames) {
+    if (longName.length <= candidate.length || !longName.includes(candidate)) continue
+    if (longName.startsWith(candidate) && PROSE_TAIL_CHARS.test(longName.slice(candidate.length))) continue
+    if (countStandaloneNameMentions(text, longName, knownNames) <= 0) continue
+    if (countStandaloneNameMentions(text, candidate, [...knownNames, longName]) > 0) continue
+    return longName
+  }
+  return null
+}
+
 /** Collect high-priority canon names from characters / context package. */
 export function collectCanonCharacterNames(input: {
   characters?: any[]
@@ -219,7 +242,8 @@ export function repairCanonicalNameNearMisses(
 
     for (const [candidate, candidateCount0] of [...candidateCounts.entries()]) {
       if (report.repairs.length >= maxRepairs) break
-      if (candidate === canonName) continue
+      // Canon names are never near-miss candidates: canon must not repair canon.
+      if (knownNames.has(candidate)) continue
       if (!isNearMissPersonName(candidate, canonName)) continue
       const candidateCount = countStandaloneNameMentions(working, candidate, known)
       if (candidateCount <= 0) continue
@@ -227,6 +251,13 @@ export function repairCanonicalNameNearMisses(
       if (candidateCount > 2) continue
       if (candidateCount >= canonCount) continue
       if (canonCount < 2 && candidateCount > 1) continue
+
+      // All occurrences inside one longer un-carded name (e.g. 林晚 in 林晚秋): protect it, skip.
+      const embedding = findEmbeddingLongerName(working, candidate, candidateCounts.keys(), [...knownNames])
+      if (embedding) {
+        knownNames.add(embedding)
+        continue
+      }
 
       const replaced = replaceStandaloneName(working, candidate, canonName, known)
       if (!replaced.count) continue

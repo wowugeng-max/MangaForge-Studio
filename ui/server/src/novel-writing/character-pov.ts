@@ -792,6 +792,7 @@ const POV_STOCK_REPLACEMENTS: Array<{ pattern: RegExp; to: string }> = [
   { pattern: /等待着命运/g, to: '他先把门反锁，再想下一步' },
   { pattern: /静静地等待着/g, to: '他先把门锁死' },
   { pattern: /毫无疑问/g, to: '他不愿多想' },
+  { pattern: /深吸一口气(?=[。！？!?])/g, to: '嗓子发紧' },
   { pattern: /深吸一口气[，,]?/g, to: '嗓子发紧，' },
   { pattern: /强迫自己冷静下来/g, to: '把到嘴边的话咽回去' },
   { pattern: /强迫自己冷静/g, to: '把话咽回去' },
@@ -913,8 +914,8 @@ export function sanitizeCharacterPovAntiAiStock(text: string) {
   for (const row of POV_STOCK_REPLACEMENTS) {
     out = out.replace(row.pattern, row.to)
   }
-  // collapse accidental double punctuation after replacements
-  out = out.replace(/，{2,}/g, '，').replace(/。{2,}/g, '。')
+  // collapse accidental double punctuation after replacements (incl. mixed 「，。」/「，！」 → keep the final mark)
+  out = out.replace(/，{2,}/g, '，').replace(/。{2,}/g, '。').replace(/，+([。！？!?])/g, '$1')
   return out
 }
 
@@ -1197,10 +1198,10 @@ export function scanCharacterPovRisks(text: string, contextPackage: any = {}) {
     plan.primary_pov,
     ...asArray(plan.allowed_secondary_povs),
   ].map((name) => compactText(name, 24)).filter(Boolean))
-  const switchHits = body.match(/(?:从|切换到)?([一-鿿]{2,4})(?:的视角|心里想|心想|暗想|心道)|([一-鿿]{2,4})不知道的是/g) || []
+  const switchHits = [...body.matchAll(/(?:从|切换到)?([一-鿿]{2,4})(?:的视角|心里想|心想|暗想|心道)|([一-鿿]{2,4})不知道的是/g)]
   for (const hit of switchHits.slice(0, 4)) {
-    const nameMatch = hit.match(/([一-鿿]{2,4})/)
-    const name = nameMatch ? nameMatch[1] : ''
+    // pure name comes from the switch regex's own capture groups; re-matching the whole hit would swallow the suffix
+    const name = hit[1] || hit[2] || ''
     if (!name || authorized.has(name) || name === plan.primary_pov) continue
     out.push({
       key: 'pov_unauthorized_switch',
@@ -1209,7 +1210,7 @@ export function scanCharacterPovRisks(text: string, contextPackage: any = {}) {
       status: plan.multi_pov_policy?.require_explicit_authorization ? 'fail' : 'warn',
       severity: plan.multi_pov_policy?.require_explicit_authorization ? 'high' : 'medium',
       blocking: Boolean(plan.multi_pov_policy?.require_explicit_authorization),
-      evidence: compactText(hit, 120),
+      evidence: compactText(hit[0], 120),
       fix: `删掉 ${name} 的全知/内心切换，回到主视角 ${plan.primary_pov}；若必须切视角，先在 scene pov_lens 授权 short secondary_cut。`,
       remaining_risk: '未授权切视角会破坏深有限代入并引入作者全知',
       repair_instruction: `删除未授权视角（${name}），改写为 ${plan.primary_pov} 可感知的证据/动作/对白。`,
@@ -1224,12 +1225,13 @@ export function scanCharacterPovRisks(text: string, contextPackage: any = {}) {
     ...asArray(plan.secondary_cut_policy?.allowed).map((item: any) => item?.character),
   ], 8).filter((name) => name && name !== plan.primary_pov)
   for (const name of secondaryNames.slice(0, 4)) {
-    const mono = body.match(new RegExp(`${name}[^\\n]{0,12}(?:心想|暗想|心道|心里|内心)[^\\n]{0,80}`, 'g')) || []
-    const namedParas = body
+    // count line-level once: monologue cue and named-para cue are unioned per line, never double-counted
+    const monoRe = new RegExp(`${name}[^\\n]{0,12}(?:心想|暗想|心道|心里|内心)`)
+    const total = body
       .split(/\n+/)
       .map((line) => line.trim())
-      .filter((line) => line.startsWith(name) && /想|觉得|意识到|明白|暗自|心中/.test(line))
-    const total = mono.length + namedParas.length
+      .filter((line) => monoRe.test(line) || (line.startsWith(name) && /想|觉得|意识到|明白|暗自|心中/.test(line)))
+      .length
     const perCut = asArray(plan.secondary_cut_policy?.allowed).find((item: any) => item?.character === name)
     const limit = Number(perCut?.max_lines || Math.min(4, maxLines)) || 3
     if (total > limit) {
@@ -1250,7 +1252,14 @@ export function scanCharacterPovRisks(text: string, contextPackage: any = {}) {
   }
 
   // P2: dialogue POV filter — mind-read after dialogue / textbook dialogue dumps.
-  const dialogueMindReads = body.match(/[「“"][^」”"]{0,40}[」”"][^。！？\n]{0,12}(?:其实|心里|心想|暗想|心道|表面)[^。！？\n]{0,40}/g) || []
+  // Attribution gate: primary's own reaction (bare 他/她 right after the dialogue) or an authorized name owning the
+  // mind-word is legal deep-limited prose; ambiguous or unauthorized attribution stays blocking.
+  const dialogueMindReads = [...body.matchAll(/[「“"][^」”"]{0,40}[」”"]([^。！？\n]{0,12})(?:其实|心里|心想|暗想|心道|表面)[^。！？\n]{0,40}/g)]
+    .filter((hit) => {
+      const owner = hit[1] || ''
+      if (/^[他她]$/.test(owner)) return false
+      return ![...authorized].some((name) => name && owner.endsWith(name))
+    })
   for (const hit of dialogueMindReads.slice(0, 3)) {
     out.push({
       key: 'pov_dialogue_mind_read',
@@ -1259,7 +1268,7 @@ export function scanCharacterPovRisks(text: string, contextPackage: any = {}) {
       status: 'fail',
       severity: 'high',
       blocking: true,
-      evidence: compactText(hit, 140),
+      evidence: compactText(hit[0], 140),
       fix: '删掉对白后的全知内心；改成主视角听到的语气停顿、表情、手部动作或半截改口。',
       remaining_risk: '对白过滤器失效会把配角内心写成作者上帝视角',
       repair_instruction: `对白只保留 ${plan.primary_pov} 能听见/看见的部分；真实动机改成可观察的微表情或行为破绽。`,

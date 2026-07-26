@@ -222,15 +222,16 @@ export function surgicalContractProseToWordTarget(
     const paras = current.split(/\n\s*\n+/).map((p) => p.trim()).filter(Boolean)
     while (paras.length > 6 && countProseChars(paras.join('\n\n')) > max) {
       const last = paras[paras.length - 1]
+      let removeIndex = paras.length - 1
       if (/[“"']/.test(last) && paras.length > 10) {
         let idx = paras.length - 2
         while (idx > Math.floor(paras.length * 0.2) && /[“"']/.test(paras[idx])) idx -= 1
-        if (idx > Math.floor(paras.length * 0.2)) paras.splice(idx, 1)
-        else paras.pop()
-      } else {
-        paras.pop()
+        if (idx > Math.floor(paras.length * 0.2)) removeIndex = idx
       }
-      if (min > 0 && countProseChars(paras.join('\n\n')) < min) break
+      // Dry-run the removal first: never trade too_long for too_short.
+      const candidate = paras.filter((_, idx) => idx !== removeIndex)
+      if (min > 0 && countProseChars(candidate.join('\n\n')) < min) break
+      paras.splice(removeIndex, 1)
     }
     current = `${paras.join('\n\n')}\n`
     currentCount = countProseChars(current)

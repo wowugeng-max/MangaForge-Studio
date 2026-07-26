@@ -475,10 +475,11 @@ export function buildHumanWebnovelResistancePromptDirectives(
     '【红段族拦截】禁止废弃区域历史讲义、仿佛有什么升压、三联体征讲义、第一袋第二袋第三袋并列盘点。',
   ]
   const fromContract = formatFingerprintContractPrompt(contract)
-  // Narrative hard contract first, then universal texture directives.
-  // Cap length but never drop the first 5 narrative-hard lines from contract.
+  // Narrative hard contract first, then contract tail lines (prompt_directives / 规避 / 优先),
+  // then universal texture directives fill up to the cap. Base alone exceeds 72 lines, so the
+  // contract lines must be placed before base or they would always be truncated away.
   const narrativeHead = fromContract.slice(0, 5)
-  const rest = [...base, ...fromContract.slice(5)]
+  const rest = [...fromContract.slice(5), ...base]
   const _resistanceBase = [...narrativeHead, ...rest].slice(0, 72)
   return Array.from(new Set([...(Array.isArray(_resistanceBase) ? _resistanceBase : []), ...dualPass]))
 }
@@ -762,9 +763,8 @@ export function scanOpeningProcessPipelineRisks(text: string): ResistanceFinding
 export function sanitizeOpeningProcessPipeline(text: string): string {
   const body = String(text || '')
   if (!body.trim()) return body
-  if (!scanOpeningProcessPipelineRisks(body).length) {
-    // still lightly collapse repeated opening temps even if soft
-  }
+  // Real guard: no opening-process risks → leave the text untouched.
+  if (!scanOpeningProcessPipelineRisks(body).length) return body
 
   const paras = body.split(/\n+/).map((p) => p.trim()).filter(Boolean)
   const examRe = /颈动脉|对光|听诊|额温|体温枪|监护|电极|心电图|脉搏|瞳孔|手[指掌]?压|摸[到了]|按[了上一]|三条线|三个零|三十六|36\.\d/
@@ -1183,7 +1183,7 @@ export function scanSymmetricReadingCascadeRisks(text: string): ResistanceFindin
   }
 
   // Isomorphic multi-item inventory phrasing (abstract, not object-specific)
-  const isoHits = flat.match(/完全相同|一模一样|同样印着|同样质地|同样结构|同样编号|依然是|仍然是同样|三种不同[^。]{0,12}完全相同|第[一二三][张份件].{0,10}同样/g) || []
+  const isoHits = flat.match(/完全相同|一模一样|同样印着|同样质地|同样结构|同样编号|仍然是同样|三种不同[^。]{0,12}完全相同|第[一二三][张份件].{0,10}同样/g) || []
   if (isoHits.length >= 3) {
     out.push({
       key: 'hw_symmetric_slip_inventory',
@@ -1557,7 +1557,8 @@ export function scanSocialConflictFrictionDelivery(text: string): ResistanceFind
   // Object/measurement embedded in conflict (R43 human green quality).
   const objectInConflictRe = /体温枪|水银|读数|三十六度|36\.\d|单据|交接单|显示屏|听诊|监护|挂号|登记表|湿漉漉的单据|屏幕朝向/
   const incompleteInterruptRe = /广播|下一单|先走|找(?:你们)?科主任|手机|先不签|没退|卡住了|打断|门外|又送来|先走了|撂下|拉着空/
-  const dramaPackRe = /硬生生|死死|像雷|令人不适|装高尚|目光冷冷|沉闷巨响|刚想|伴随着|执业医师证|未核实死亡|谈规矩/
+  // Bare 刚想/伴随着 are ordinary connectors — only count packaged drama combos (刚想…突然 / 伴随着…巨响).
+  const dramaPackRe = /硬生生|死死|像雷|令人不适|装高尚|目光冷冷|沉闷巨响|刚想[^。！？\n]{0,16}突然|伴随着[^。！？\n]{0,20}巨响|执业医师证|未核实死亡|谈规矩/
   const dualExamRe = /同时按向|分别在两人|双手传来|一男一女|两具平车/
   const dialogMid = mid.filter(isDialogue)
   const socialActions = mid.filter((p) => socialActionRe.test(p)).length
@@ -2046,7 +2047,7 @@ const COINCIDENCE_OMNISCIENCE_STOCK: Array<{ pattern: RegExp; to: string }> = [
   { pattern: /这三个人被送到这里[，,]?不是巧合。?/g, to: '他捏紧口袋里的硬卡，指节发白。' },
   { pattern: /不是巧合。?/g, to: '他先不声张。' },
   { pattern: /绝非巧合。?/g, to: '他先不声张。' },
-  { pattern: /对方知道今晚[^。！？\n]{0,24}。?/g, to: '他只觉得脊背发凉，先把纸片按住。' },
+  { pattern: /对方知道今晚[^。！？\n]{0,24}。?/g, to: '他脊背一凉，先把纸片按住。' },
   { pattern: /甚至知道他会[^。！？\n]{0,24}。?/g, to: '他不想现在把这事说破。' },
   { pattern: /他的名字为什么会[^。！？\n]{0,20}。?/g, to: '那半截字迹扎得他眼眶发紧。' },
   { pattern: /为什么会出现在这[^。！？\n]{0,16}。?/g, to: '他把纸片折死，先不给别人看。' },
@@ -2174,7 +2175,7 @@ const PROFESSION_WORLDVIEW_ESSAY_STOCK: Array<{ pattern: RegExp; to: string }> =
 
 const SEMI_SCIENCE_LECTURE_STOCK: Array<{ pattern: RegExp; to: string }> = [
   { pattern: /按理说[^。！？\n]{0,48}。?/g, to: '摸上去还热。' },
-  { pattern: /一个人只要[^。！？\n]{0,28}就会[^。！？\n]{0,36}。?/g, to: '他只觉得不对。' },
+  { pattern: /一个人只要[^。！？\n]{0,28}就会[^。！？\n]{0,36}。?/g, to: '他摸着不对劲。' },
   { pattern: /除非这具?身体[^。！？\n]{0,36}。?/g, to: '他先把判断咽回去。' },
   { pattern: /从(?:科学|医学|生理)上讲[^。！？\n]{0,36}。?/g, to: '他不想现在解释。' },
   { pattern: /理论上[，,]?[^。！？\n]{0,24}应该[^。！？\n]{0,20}。?/g, to: '他只盯住最要紧的那一点。' },
@@ -2304,8 +2305,9 @@ const FATE_ORACLE_STOCK: Array<{ pattern: RegExp; to: string }> = [
   { pattern: /待交割。?/g, to: '后面还空着。' },
   { pattern: /交割手续就得完成。?/g, to: '他不想现在写结论。' },
   { pattern: /交割手续[^。！？\n]{0,12}。?/g, to: '他不想现在写结论。' },
-  { pattern: /把体温卖了[^。！？\n]{0,20}。?/g, to: '他只觉得这说法太邪门。' },
-  { pattern: /体温卖了[^。！？\n]{0,16}。?/g, to: '他只觉得这说法太邪门。' },
+  // Consume optional leading hearsay/subject so replacement never splices behind 「有人说他…」.
+  { pattern: /(?:有人说|听说)?[他她]?把体温卖了[^。！？\n]{0,20}。?/g, to: '这说法太邪门，他先不接话。' },
+  { pattern: /(?:有人说|听说)?[他她]?体温卖了[^。！？\n]{0,16}。?/g, to: '这说法太邪门，他先不接话。' },
   { pattern: /这不是感染[，,]?也不是中毒。?/g, to: '他答不上来。' },
   { pattern: /中毒会导致中枢神经坏死[^。！？\n]{0,40}。?/g, to: '他不想给教科书答案。' },
   { pattern: /代谢停滞后体温会在半小时内快速下降。?/g, to: '摸上去还热。' },
@@ -2714,12 +2716,14 @@ export function sanitizeSymmetricIsomorphism(text: string): string {
   let out = String(text || '')
   if (!out.trim()) return out
   const flat = out.replace(/\s+/g, '')
-  const isoRe = /完全相同|一模一样|同样印着|同样质地|同样结构|同样编号|依然是|仍然是同样|三种不同[^。]{0,12}完全相同|第[一二三][张份件].{0,10}同样/g
+  // Bare copula 依然是 is ordinary prose — do not count it as an isomorphism marker.
+  const isoRe = /完全相同|一模一样|同样印着|同样质地|同样结构|同样编号|仍然是同样|三种不同[^。]{0,12}完全相同|第[一二三][张份件].{0,10}同样/g
   const hits = flat.match(isoRe) || []
   if (hits.length < 3) return out
   // Keep first occurrence of each marker family; soften later repeats into asymmetric private texture.
+  // Copula-shaped markers (仍然是同样) are count-only: in-place swaps would splice mid-sentence.
   let seen = 0
-  out = out.replace(/完全相同|一模一样|同样印着|同样质地|同样结构|同样编号|依然是|仍然是同样/g, (m) => {
+  out = out.replace(/完全相同|一模一样|同样印着|同样质地|同样结构|同样编号/g, (m) => {
     seen += 1
     if (seen <= 1) return m
     return '有点不对'
@@ -3328,7 +3332,7 @@ export function sanitizeR58ZhuqueKillers(text: string): string {
   out = out
     .replace(/[“"]给你的时间不多了[。”"]/g, '“先别走。”')
     .replace(/给你的时间不多了/g, '先别走')
-    .replace(/大厅挂钟的秒针[，,]?咔哒一声[，,]?停在了十二点的位置上[。！？]?/g, '他抬头看了眼钟，秒针还在走，他却觉得耳边发空。')
+    .replace(/大厅挂钟的秒针[，,]?咔哒一声[，,]?停在了十二点的位置上[。！？]?/g, '他抬头看了眼钟，秒针还在走，耳边却发空。')
     .replace(/秒针[，,]?咔哒一声[，,]?停在了[^。！？\n]{0,16}[。！？]?/g, '钟还在走，他顾不上再看。')
 
   // English leak / assistant residue
@@ -4053,7 +4057,9 @@ function splitLongNarrativeParagraph(p: string): string[] {
     // hard cut long clause walls without punctuation
     if (chars > 64) {
       const mid = Math.floor(body.length / 2)
-      const cut = Math.max(12, Math.min(body.length - 12, body.lastIndexOf('，', mid) || mid))
+      // lastIndexOf returns -1 (truthy) when no comma exists — fall back to mid explicitly.
+      const commaIdx = body.lastIndexOf('，', mid)
+      const cut = Math.max(12, Math.min(body.length - 12, commaIdx > 0 ? commaIdx : mid))
       return [body.slice(0, cut).trim(), body.slice(cut).replace(/^[，,、\s]+/, '').trim()].filter(Boolean)
     }
     return [body]
@@ -4570,8 +4576,9 @@ export function scanMidMonologueGreenDensityRisks(text: string): ResistanceFindi
       key: 'hw_mid_monologue_green_density',
       pattern: 'hw_mid_monologue_green_density',
       label: '中段调查独白过密、绿段密度不足',
-      status: 'fail',
-      severity: 'warn',
+      // Soft hint: status 'fail' would be caught by evaluate's hard_failures filter (status==='fail' || blocking).
+      status: 'warn',
+      severity: 'advisory',
       blocking: false,
       evidence: `mid monologue maxRun=${maxRun} longMono=${longMono}`,
       fix: '中段每推进一节物件/推理，必须接安静微社交、短对白或未读清收手；长段拆成短段。',
@@ -4604,14 +4611,14 @@ export function sanitizeDetectorHostileStock(
     .replace(/(监护屏不再跳。\s*){2,}/g, '监护屏不再跳。')
     .replace(/(还热。\s*){2,}/g, '还热。')
     // LCD readouts after stock rewrite look detector-hostile; make them tactile.
-    .replace(/液晶屏(?:上)?(?:显示|跳出)[：:]?还热。?/g, '他还是觉得热。')
+    .replace(/液晶屏(?:上)?(?:显示|跳出)[：:]?还热。?/g, '摸上去还是热的。')
     .replace(/显示[：:]?还热。?/g, '还热。')
     .replace(/读数[：:]?还热。?/g, '还热。')
     // broken lecture leftovers after partial cascade rewrites
     .replace(/[，,]?监护屏不再跳。[、，]?眼睛没反应。亡确认书。?/g, '他不想现在就把这单写进系统。')
     .replace(/[，,]?眼睛没反应。亡确认书。?/g, '。')
     .replace(/签署死?亡确认书。?/g, '他不想现在就把这单写进系统。')
-    .replace(/就可以直接[他不想现在就把这单写进系统。]+/g, '他不想现在就把这单写进系统。')
+    .replace(/就可以直接(?:他不想现在就把这单写进系统。)+/g, '他不想现在就把这单写进系统。')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .replace(/，{2,}/g, '，')

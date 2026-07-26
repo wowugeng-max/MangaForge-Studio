@@ -27,6 +27,7 @@ export function buildOutlineWordBudget(input: any = {}) {
         id: String(item?.id || `p${index + 1}`),
         label: compactText(item?.label || item?.title || item?.summary || item?.text || `情节点${index + 1}`, 80),
         density_level: String(item?.density_level || item?.densityLevel || item?.density || 'medium'),
+        word_budget: Number(item?.word_budget || item?.wordBudget || 0) || undefined,
       }
     })
 
@@ -38,6 +39,23 @@ export function buildOutlineWordBudget(input: any = {}) {
     ...point,
     word_budget: Number(point.word_budget || point.wordBudget || densityBudget(point.density_level, chapterTarget)),
   }))
+
+  // Normalize per-point budgets proportionally so Σ matches the chapter target;
+  // density levels only set the relative share, the chapter target sets the scale.
+  const rawSum = budgeted.reduce((acc: number, item: any) => acc + Number(item.word_budget || 0), 0)
+  if (rawSum > 0 && rawSum !== chapterTarget) {
+    for (const point of budgeted) {
+      point.word_budget = Math.max(1, Math.round(Number(point.word_budget) * chapterTarget / rawSum))
+    }
+    const drift = chapterTarget - budgeted.reduce((acc: number, item: any) => acc + Number(item.word_budget || 0), 0)
+    if (drift !== 0) {
+      const largest = budgeted.reduce(
+        (best: any, item: any) => (Number(item.word_budget) > Number(best.word_budget) ? item : best),
+        budgeted[0],
+      )
+      largest.word_budget = Math.max(1, Number(largest.word_budget) + drift)
+    }
+  }
 
   const sum = budgeted.reduce((acc: number, item: any) => acc + Number(item.word_budget || 0), 0)
   const min = chapterTarget

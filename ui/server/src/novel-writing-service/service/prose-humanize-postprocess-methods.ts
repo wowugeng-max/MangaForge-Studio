@@ -43,6 +43,10 @@ import {
   type ZhuqueSegmentHint,
 } from '../../novel-writing/humanize-risk-segment'
 import {
+  scanAcademicPaddingHits,
+  stripHumanizeChatWrapper,
+} from '../../novel-writing/humanize-dual-pass'
+import {
   countProseChars,
   proseMaxTokensForWordTarget,
 } from '../../novel-writing/word-target'
@@ -76,6 +80,38 @@ function extractChapterText(payload: any): string {
 function resolveZhuqueSegments(options: any): ZhuqueSegmentHint[] | null {
   const raw = options?.zhuque_segments || options?.zhuqueSegments || options?.zhuque_report?.segments || options?.zhuqueReport?.segments
   return Array.isArray(raw) ? raw : null
+}
+
+/**
+ * assessHumanizeLengthLock silently clamps lengthTolerance to [0.05, 0.35], but the
+ * risk-segment human-positive path legitimately grows beyond that (#36). Honor the
+ * caller's intended tolerance: when the shared gate rejects only on length and the
+ * intended tolerance is wider than the clamp, re-check length against the intended
+ * value while keeping the remaining gate checks (academic padding).
+ */
+function acceptHumanizeCandidateHonoringTolerance(
+  beforeText: string,
+  afterText: string,
+  options: { pass: 'A' | 'B' | 'AB'; stage: string; lengthTolerance: number },
+): { text: string; accepted: boolean; reason: string } {
+  const intended = Math.max(0.05, Number(options.lengthTolerance) || 0.1)
+  const clamped = Math.min(0.35, intended)
+  const gate = acceptHumanizePostProcessCandidate(beforeText, afterText, { ...options, lengthTolerance: clamped })
+  if (gate.accepted || intended <= clamped) return gate
+  if (!String(gate.reason || '').startsWith('humanize_length_too_long')) return gate
+  const stripped = stripHumanizeChatWrapper(afterText)
+  const beforeChars = countProseChars(beforeText)
+  const afterChars = countProseChars(stripped)
+  if (afterChars > Math.ceil(beforeChars * (1 + intended))) return gate
+  const afterAcademic = scanAcademicPaddingHits(stripped)
+  if (afterAcademic.length > scanAcademicPaddingHits(beforeText).length) {
+    return {
+      text: beforeText,
+      accepted: false,
+      reason: `humanize_academic_padding:${afterAcademic.slice(0, 3).join('|')}`,
+    }
+  }
+  return { text: stripped, accepted: true, reason: '' }
 }
 
 async function rewriteChunkWithAgent(input: {
@@ -338,7 +374,9 @@ export function createProseHumanizePostprocessMethods(deps: {
         passAApplied = true
         const finalMap = mapWindowRewriteToParagraphs(win, gate.text, heatmap.cells)
         for (const [k, v] of finalMap) {
-          if (String(v || '').trim()) rewrittenByIndex.set(k, String(v).trim())
+          // Keep explicit deletions (mapped to ''): a compressed window marks surplus
+          // paragraphs as deleted, and stitch must drop them instead of resurrecting (#22).
+          rewrittenByIndex.set(k, String(v || '').trim())
         }
       }
 
@@ -400,6 +438,9 @@ export function createProseHumanizePostprocessMethods(deps: {
       changed: current !== source,
       chars: countProseChars(current),
     })
+    // Pre-LLM baseline: deterministic shells only. humanizeGate rejections revert
+    // here instead of keeping the rejected LLM candidate (#36).
+    const preLlmBaseline = current
 
     const mode = String(options?.humanize_mode || options?.humanizeMode || 'risk_segment').toLowerCase()
     const forceFullPassA = options?.full_pass_a === true
@@ -449,14 +490,16 @@ export function createProseHumanizePostprocessMethods(deps: {
     let candidate = passBText
     // Risk-segment human_positive may expand mid friction well beyond ±22% (R73 Zhuque-first).
     // Keep Pass B tight; allow larger growth when segment path added human texture.
-    const humanizeGate = acceptHumanizePostProcessCandidate(source, candidate, {
+    const humanizeGate = acceptHumanizeCandidateHonoringTolerance(source, candidate, {
       pass: enablePassB ? 'AB' : 'A',
       stage: enablePassB ? 'humanize_pass_b_stitch' : 'humanize_segment_or_a',
       lengthTolerance: enablePassB ? 0.12 : (passAApplied ? 0.55 : 0.28),
     })
     if (!humanizeGate.accepted) {
       stages.push({ stage: 'humanize_gate_reject', reason: humanizeGate.reason })
-      candidate = current
+      // With Pass B off, passBText === current, so falling back to `current` was a
+      // no-op (#36). Revert to the pre-LLM baseline so the rejection takes effect.
+      candidate = passBText === current ? preLlmBaseline : current
     } else {
       candidate = humanizeGate.text
     }
@@ -487,7 +530,9 @@ export function createProseHumanizePostprocessMethods(deps: {
     finalText = sanitizeDetectorHostileStock(sanitizeRemoveAiFlavorShells(finalText))
 
     // If LLM path no-op, still force packaging density drop via heavy sanitize.
-    if (finalText === source || countProseChars(finalText) === beforeChars) {
+    // No-op means content equality — never char-count equality, which misfires on
+    // real rewrites whose length coincidentally matches (#37).
+    if (finalText === source) {
       const forced = sanitizeDetectorHostileStock(sanitizeRemoveAiFlavorShells(source))
       if (forced !== source) {
         finalText = forced

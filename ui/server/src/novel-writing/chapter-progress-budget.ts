@@ -138,8 +138,8 @@ export function buildChapterProgressBudget(input: {
 
   const overrun_future: string[] = []
   for (const beat of future_plan_beats) {
-    const { delivered, score } = beatDelivered(beat, chapterText)
-    if (delivered || (score >= 56 && proseCoversBeat(beat, chapterText))) {
+    const { delivered } = beatDelivered(beat, chapterText)
+    if (delivered || proseCoversBeat(beat, chapterText)) {
       overrun_future.push(beat)
     }
   }
