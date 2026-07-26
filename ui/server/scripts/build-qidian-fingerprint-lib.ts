@@ -209,6 +209,10 @@ function htmlContentToParas(content: string) {
   }
   if (paras.length <= 1) {
     const wall = paras[0] || String(content || '').replace(/<[^>]+>/g, '').replace(/\u3000/g, '').trim()
+    // #58: \u4ec5\u7528 <br>\uff08\u6216\u7eaf\u6587\u672c \n\uff09\u5206\u6bb5\u7684\u7ae0\u8282\uff0c\u6b64\u65f6\u6574\u7ae0\u6324\u5728\u4e00\u4e2a part \u91cc\uff08<br> \u5df2\u5728\u4e0a\u65b9\u8f6c\u6210 \n\uff09\u3002
+    // \u5148\u6309 \n \u6062\u590d\u771f\u5b9e\u6bb5\u843d\u7ed3\u6784\uff0c\u4ecd\u662f\u5355\u6bb5\u624d\u8d70\u5899\u6587\u672c\u9010\u53e5\u515c\u5e95\u3002
+    const newlineParas = wall.split(/\n+/).map((s) => s.trim()).filter(Boolean)
+    if (newlineParas.length > 1) return newlineParas.join('\n\n')
     const sentences = wall.match(/[^。！？!?]+[。！？!?]?/g) || [wall]
     return sentences.map((s) => s.trim()).filter(Boolean).join('\n\n')
   }
@@ -265,15 +269,17 @@ async function fetchBooksFromCategoryPage(url: string, limit: number): Promise<B
   }
 
   // HTML / embedded JSON fallbacks
+  // #62: /book/(\d+) 链接常重复出现且含推荐位，与 "bName" 数组长度/顺序并不对应，
+  // 两数组下标硬配对会张冠李戴。兜底只收 book_id、书名留 book_id 占位（无法可靠配对的
+  // 条目不再猜书名），真实书名由 main() 中 fetchBookDetail 的 detail.title 回填。
   const ids = Array.from(page.text.matchAll(/\/book\/(\d+)/g)).map((x) => x[1])
-  const titles = Array.from(page.text.matchAll(/"bName"\s*:\s*"([^"]+)"/g)).map((x) => x[1])
   for (let i = 0; i < ids.length; i += 1) {
     const book_id = ids[i]
     if (!book_id || seen.has(book_id)) continue
     seen.add(book_id)
     books.push({
       book_id,
-      title: titles[i] || book_id,
+      title: book_id,
       rank: books.length + 1,
       source_url: url,
     })
@@ -297,9 +303,11 @@ async function fetchBooksFromRank(url: string, limit: number): Promise<BookSeed[
     }
   }
   if (!records.length) {
+    // #62: 同 fetchBooksFromCategoryPage —— 链接数组与 title="X最新章节在线阅读" 数组
+    // 顺序不对应（重复链接/推荐位无 title 属性），不再下标硬配对；书名留 book_id 占位，
+    // 交给 fetchBookDetail 回填。
     const ids = Array.from(page.text.matchAll(/\/book\/(\d+)/g)).map((x) => x[1])
-    const titles = Array.from(page.text.matchAll(/title="([^"]+?)最新章节在线阅读"/g)).map((x) => x[1])
-    records = ids.map((bid, i) => ({ bid, bName: titles[i] || bid }))
+    records = ids.map((bid) => ({ bid }))
   }
   for (const row of records) {
     const book_id = String(row.bid || row.bookId || row.id || '')
@@ -666,8 +674,17 @@ async function main() {
     let text = readFileSync(file.abs, 'utf8')
     const paras = text.split(/\n+/).map((x) => x.trim()).filter(Boolean)
     if (paras.length <= 2 && text.replace(/\s+/g, '').length > 500) {
-      const sentences = text.replace(/\s+/g, '').match(/[^。！？!?]+[。！？!?]?/g) || [text]
-      text = sentences.map((s) => s.trim()).filter(Boolean).join('\n\n') + '\n'
+      // #59: 不再对全文 replace(/\s+/g,'') —— 那会把段内空格（英文名、"第1章 里"等）永久删掉。
+      // 改为逐段按句末标点重切、只做首尾 trim；且覆写前先写 .orig 备份（.orig 不会被
+      // listHumanTxtFiles 收录），保证重切可逆、不再破坏性覆写。
+      const originalText = text
+      const sentences = paras
+        .flatMap((p) => p.match(/[^。！？!?]+[。！？!?]?/g) || [p])
+        .map((s) => s.trim())
+        .filter(Boolean)
+      text = sentences.join('\n\n') + '\n'
+      const backupAbs = file.abs + '.orig'
+      if (!existsSync(backupAbs)) writeFileSync(backupAbs, originalText)
       writeFileSync(file.abs, text)
     }
     const id = basename(file.abs).replace(/\.txt$/, '')

@@ -145,14 +145,13 @@ function scoreProse(prose: string) {
 
   const futureHits = fixture.future_forbidden.filter(item => prose.includes(item) || prose.includes(item.slice(0, 6)))
   const deliverHits = fixture.must_advance.filter(item => {
-    return prose.includes(item) || (
-      (item.includes('电梯') && /电梯/.test(prose))
-      && (
-        (item.includes('击破') && /击破|识破|破除|反杀|压住|反制|无效/.test(prose))
-        || (item.includes('救出') && /救出|拖出|拉开|带出|扶出|抱出/.test(prose))
-        || (item.includes('负一') && /负一|B1|地下/.test(prose))
-      )
-    )
+    if (prose.includes(item)) return true
+    // #57: 每个交付项独立语义判定。旧版备选分支整体被 item.includes('电梯') 总门槛短路，
+    // “救出被困住户”“拿到负一层线索”两项不含“电梯”，内层 救出/负一 分支永不可达。
+    if (item.includes('击破')) return /电梯/.test(prose) && /击破|识破|破除|反杀|压住|反制|无效/.test(prose)
+    if (item.includes('救出')) return /救出|拖出|拉开|带出|扶出|抱出/.test(prose)
+    if (item.includes('负一')) return /负一|B1|地下/.test(prose)
+    return false
   })
 
   const scores = {

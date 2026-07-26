@@ -46,6 +46,7 @@ ui/web/.vite/
 *.log
 *.tmp
 *.temp
+.tmp-oh-story-*/
 .superpowers/
 .worktrees/
 

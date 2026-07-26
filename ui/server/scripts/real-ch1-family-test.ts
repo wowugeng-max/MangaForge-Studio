@@ -53,7 +53,13 @@ function scoreProse(prose: string, chapter: any, wordTarget: any) {
   const progress_pass = !progress.overrun && !progress.underrun
   const dialogueParas = bodyLines.filter(l => /^[“"「]/.test(l)).length
   const dialogue_para_ratio = bodyLines.length ? dialogueParas / bodyLines.length : 0
-  const twoSentenceParas = bodyLines.filter(l => ((l.match(/[。！？!?]/g) || []).length >= 2)).length
+  // #63: 与 prose-fingerprint-lib 的 two_sentence_para_ratio 同口径 —— 完整句（去空白后 ≥2 字符）
+  // 计数恰好为 2；排除三句以上密段与"？！"这类双标点单句。旧口径（≥2 个句末标点）会系统性
+  // 高估，而第 63 行对照的 r10 区间正是按库口径拟合的。
+  const twoSentenceParas = bodyLines.filter(l => {
+    const sents = (l.match(/[^。！？!?]+[。！？!?]/g) || []).filter(s => s.replace(/\s+/g, '').length >= 2)
+    return sents.length === 2
+  }).length
   const two_sentence_ratio = bodyLines.length ? twoSentenceParas / bodyLines.length : 0
   return {
     word_count: chars,

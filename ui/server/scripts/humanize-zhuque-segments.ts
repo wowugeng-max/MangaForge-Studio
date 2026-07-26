@@ -3,7 +3,7 @@
  * System path — not chapter特调.
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'fs'
-import { resolve } from 'path'
+import { basename, resolve } from 'path'
 import { getNovelProject } from '../src/novel'
 import { createNovelProductionService } from '../src/routes/novel-production-service'
 import { createNovelReferenceService } from '../src/routes/novel-reference-service'
@@ -65,7 +65,9 @@ async function main() {
   writeFileSync(resolve(WORKSPACE, 'zhuque-inputs', OUT_NAME), finalText)
   writeFileSync(resolve(WORKSPACE, 'zhuque-inputs', OUT_NAME.replace(/\.txt$/, '-humanize.json')), JSON.stringify(result?.report || result, null, 2))
   // also emit sanitize-only baseline
-  writeFileSync(resolve(WORKSPACE, 'zhuque-inputs', OUT_NAME.replace(/\.txt$/, 'b-sanitize-only.txt').replace('r70b', 'r70').replace('r70.txt', 'r69b-sanitize-only.txt')), sanitizedFallback)
+  // #64: 基线是 sanitize(IN_TEXT 源文本)，按输入文件轮次一次性构造 rNNb-sanitize-only 名字。
+  // 旧三连 replace 链第一步已把 .txt 吃掉，第三步 replace('r70.txt',...) 永不匹配，误产 r70-sanitize-only 命名。
+  writeFileSync(resolve(WORKSPACE, 'zhuque-inputs', `${basename(IN_TEXT, '.txt')}b-sanitize-only.txt`), sanitizedFallback)
 
   console.log(JSON.stringify({
     phase: 'done',
