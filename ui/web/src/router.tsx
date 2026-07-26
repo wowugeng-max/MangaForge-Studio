@@ -20,6 +20,7 @@ const NovelStudio = lazy(() => import('./pages/NovelStudio'))
 const NovelProjectWorkspace = lazy(() => import('./pages/NovelProjectWorkspace'))
 const NovelProductionDesk = lazy(() => import('./pages/NovelProductionDesk'))
 const ModelManager = lazy(() => import('./pages/ModelManager'))
+const FingerprintContracts = lazy(() => import('./pages/FingerprintContracts'))
 
 function PageFallback() {
   return (
@@ -54,6 +55,7 @@ const router = createBrowserRouter([
       { path: 'rules', element: page(<RulesPage />) },
       { path: 'canvas', element: page(<CanvasPage />) },
       { path: 'providers', element: page(<ProviderManager />) },
+      { path: 'fingerprint-contracts', element: page(<FingerprintContracts />) },
       {
         path: 'novel',
         element: (

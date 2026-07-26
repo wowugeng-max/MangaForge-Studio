@@ -12,6 +12,7 @@ const migratedPages = [
   'Keys/index.tsx',
   'ModelManager.tsx',
   'Providers/index.tsx',
+  'FingerprintContracts/index.tsx',
 ]
 
 function pageSource(file: string) {
