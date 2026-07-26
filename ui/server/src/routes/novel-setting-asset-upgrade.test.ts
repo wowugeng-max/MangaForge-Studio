@@ -1,12 +1,17 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdtemp } from 'fs/promises'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import {
   buildAssetGapAudit,
   buildChapterAssetPack,
   buildCharacterStatusOverview,
   buildRelationMasterTable,
   collectPendingIntakeQueue,
+  loadAssetUpgradeBundle,
   mergeNonEmpty,
 } from './novel-setting-asset-upgrade'
+import { createNovelProject, createNovelReview } from '../novel'
 
 describe('asset upgrade merge and projections', () => {
   test('mergeNonEmpty never blank-overwrites existing values', () => {
@@ -94,6 +99,53 @@ describe('asset upgrade merge and projections', () => {
     expect(queue.summary.total).toBe(1)
     expect(queue.items[0].name).toBe('青铜回声盘')
     expect(queue.items[0].chapter_no).toBe(2)
+  })
+
+  test('asset upgrade bundle keeps the newest intake reviews when history exceeds the cap', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-bundle-reviews-'))
+    const project = await createNovelProject(workspace, { title: '长篇评审截取', length_target: 'epic' })
+    const baseTime = Date.parse('2026-01-01T00:00:00.000Z')
+    for (let i = 0; i < 80; i++) {
+      await createNovelReview(workspace, {
+        project_id: project.id,
+        review_type: 'asset_intake',
+        status: 'ok',
+        summary: `第${i + 1}章资产入册`,
+        created_at: new Date(baseTime + i * 60_000).toISOString(),
+        payload: JSON.stringify({
+          chapter_id: i + 1,
+          chapter_no: i + 1,
+          discovered_assets: [{ entity_type: 'item', name: `旧资产${i + 1}`, summary: '旧发现' }],
+        }),
+      })
+    }
+    await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'asset_intake',
+      status: 'ok',
+      summary: '第81章资产入册',
+      created_at: new Date(baseTime + 81 * 60_000).toISOString(),
+      payload: JSON.stringify({
+        chapter_id: 81,
+        chapter_no: 81,
+        discovered_assets: [{ entity_type: 'item', name: '最新回声盘', summary: '最新发现' }],
+      }),
+    })
+    await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'asset_intake_apply',
+      status: 'ok',
+      summary: '已确认旧资产50',
+      created_at: new Date(baseTime + 82 * 60_000).toISOString(),
+      payload: JSON.stringify({
+        created_settings: [{ name: '旧资产50', entity_type: 'item' }],
+      }),
+    })
+
+    const bundle = await loadAssetUpgradeBundle(workspace, project)
+    const names = bundle.intake_queue.items.map((item: any) => item.name)
+    expect(names).toContain('最新回声盘')
+    expect(names).not.toContain('旧资产50')
   })
 
   test('gap audit flags missing setting coverage after many written chapters', () => {

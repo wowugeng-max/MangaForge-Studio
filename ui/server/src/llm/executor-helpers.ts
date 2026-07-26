@@ -382,9 +382,9 @@ export function buildAgentMessages(
     : ''
 
   const baseSystem = (authoritativeTask ? baseNovelSystemPrompt() : (systemOverride || baseNovelSystemPrompt()))
-  const systemContent = agentId === 'prose-agent'
+  const systemContent = (agentId === 'prose-agent'
     ? `${baseSystem}\n\n${buildWebnovelDraftPersonaBlock(project)}`
-    : baseSystem
+    : baseSystem)
     + styleGuardrails + memorySection + knowledgeSection + upstreamContext
 
   // Extract upstream results

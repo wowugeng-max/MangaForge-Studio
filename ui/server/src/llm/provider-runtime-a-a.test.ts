@@ -740,6 +740,51 @@ describe('codex responses provider runtime a a', () => {
       await rm(workspace, { recursive: true, force: true })
     }
   })
+  test('respects explicit caller max_tokens for gemini-family openai-compatible requests', () => {
+    const body = buildProviderRequestBody({
+      model: 'balanced',
+      messages: [{ role: 'user', content: 'Return exactly: OK' }],
+      max_tokens: 300,
+      response_format: 'text',
+    }, selection({
+      apiFormat: 'openai_compatible',
+      endpoint: 'chat/completions',
+      provider: {
+        ...selection().provider,
+        id: 'gemini',
+        display_name: 'Gemini Proxy',
+        api_format: 'openai_compatible',
+      },
+      model: {
+        ...selection().model,
+        model_name: 'gemini-2.5-pro',
+      },
+    }))
+
+    expect(body.max_tokens).toBe(300)
+  })
+  test('raises gemini-family max_tokens floor to 8192 when caller leaves it unset', () => {
+    const body = buildProviderRequestBody({
+      model: 'balanced',
+      messages: [{ role: 'user', content: 'write prose' }],
+      response_format: 'text',
+    }, selection({
+      apiFormat: 'openai_compatible',
+      endpoint: 'chat/completions',
+      provider: {
+        ...selection().provider,
+        id: 'gemini',
+        display_name: 'Gemini Proxy',
+        api_format: 'openai_compatible',
+      },
+      model: {
+        ...selection().model,
+        model_name: 'gemini-2.5-flash',
+      },
+    }))
+
+    expect(body.max_tokens).toBe(8192)
+  })
   test('builds media prompts from text parts only when messages include image references', () => {
     const body = buildProviderRequestBody({
       model: 'balanced',

@@ -146,6 +146,22 @@ export function relationPairKey(a: string, b: string) {
   return [left, right].sort((x, y) => x.localeCompare(y, 'zh')).join('↔')
 }
 
+/**
+ * Word boundary for "与<名字><关系描述>" style strings: the name capture must stop
+ * before a separator / copula / relation descriptor word, never swallow it (id 40).
+ */
+const RELATION_DESCRIPTOR_WORDS = [
+  '亦师亦友', '亦敌亦友', '同盟', '联盟', '结盟', '盟友', '合作', '并肩', '伙伴', '搭档',
+  '宿敌', '死敌', '仇敌', '仇人', '结仇', '结怨', '敌对', '敌人', '对立', '对抗', '竞争', '冲突', '反目', '决裂',
+  '师徒', '师父', '师傅', '徒弟', '朋友', '好友', '挚友', '交好', '相识', '认识',
+  '恋人', '恋爱', '暧昧', '喜欢', '爱慕', '夫妻', '兄弟', '姐妹', '亲人', '家人', '亲属', '祖孙',
+  '同事', '同僚', '同门', '同窗', '上司', '下属', '上下级', '主仆', '追随', '效忠',
+]
+
+const STRING_RELATION_PATTERN = new RegExp(
+  `^与?([\\u4e00-\\u9fffA-Za-z0-9·]{1,12}?)(?=[：:，,、\\s]|[是系乃]|(?:${RELATION_DESCRIPTOR_WORDS.join('|')}))`,
+)
+
 export function inferStoryRelationType(status: string) {
   const raw = text(status, 120)
   if (!raw) return '未知'
@@ -245,13 +261,17 @@ export function buildStoryRelationMaster(input: {
       })
       return
     }
+    // infer* always returns a truthy default (未知/中性); only a real hit may
+    // shadow prev, otherwise keep the previously known type/emotion (id 44).
+    const inferredType = inferStoryRelationType(status)
+    const inferredEmotion = inferEmotion(status)
     const next: StoryRelationRow = {
       id: prev?.id || row.id || `rel-${pairKey}`,
       pair_key: pairKey,
       party_a: partyA,
       party_b: partyB,
-      story_relation_type: text(row.story_relation_type, 20) || inferStoryRelationType(status) || prev?.story_relation_type || '未知',
-      emotion: row.emotion || inferEmotion(status) || prev?.emotion || '中性',
+      story_relation_type: text(row.story_relation_type, 20) || (inferredType !== '未知' ? inferredType : '') || prev?.story_relation_type || '未知',
+      emotion: row.emotion || (inferredEmotion !== '中性' ? inferredEmotion : undefined) || prev?.emotion || '中性',
       current_status: status || prev?.current_status || '',
       start_chapter_no: row.start_chapter_no ?? prev?.start_chapter_no ?? null,
       change_nodes: [
@@ -331,8 +351,8 @@ export function buildStoryRelationMaster(input: {
       if (typeof rel === 'string') {
         const status = text(rel, 240)
         if (!status) continue
-        // "与小林同盟" style
-        const m = status.match(/^与?([\u4e00-\u9fffA-Za-z0-9·]{1,12})(.+)$/)
+        // "与小林同盟" style: cut the name at the descriptor boundary; skip when unsplittable.
+        const m = status.match(STRING_RELATION_PATTERN)
         if (m) {
           upsert({
             party_a: name,
@@ -402,7 +422,13 @@ export function buildForeshadowLifecycleBoard(input: {
     if (isHook && input.includeChapterHooks === false) return
     const prev = bag.get(name)
     const summary = text(row.summary, 280) || prev?.summary || ''
-    const lifecycle = row.lifecycle || normalizeLifecycle(row.lifecycle || summary, name, lastWrittenNo)
+    // story_state is the writing truth layer (id 41): setting entities may only
+    // supplement chapter numbers etc., never downgrade a story_state lifecycle.
+    const prevIsStoryState = Boolean(prev && String(prev.source || '').startsWith('story_state'))
+    const incomingIsSetting = ['setting_entity', 'outline_hook'].includes(text(row.source, 40))
+    const lifecycle = prevIsStoryState && incomingIsSetting
+      ? prev!.lifecycle
+      : row.lifecycle || normalizeLifecycle(row.lifecycle || summary, name, lastWrittenNo)
     bag.set(name, {
       id: prev?.id || row.id || `fs-${name}`,
       name,
@@ -412,7 +438,9 @@ export function buildForeshadowLifecycleBoard(input: {
       plant_chapter_no: row.plant_chapter_no ?? prev?.plant_chapter_no ?? null,
       expected_resolve_chapter_no: row.expected_resolve_chapter_no ?? prev?.expected_resolve_chapter_no ?? null,
       resolve_chapter_no: row.resolve_chapter_no ?? prev?.resolve_chapter_no ?? null,
-      source: text(row.source, 40) || prev?.source || 'story_state',
+      source: prevIsStoryState && incomingIsSetting
+        ? prev!.source
+        : text(row.source, 40) || prev?.source || 'story_state',
       setting_id: row.setting_id ?? prev?.setting_id ?? null,
       is_chapter_hook: isHook,
     })

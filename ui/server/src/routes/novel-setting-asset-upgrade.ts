@@ -1252,10 +1252,11 @@ export async function loadAssetUpgradeBundle(activeWorkspace: string, project: a
   ])
   const chapters = lightChapters(workspaceChapters)
   // Overview only needs intake-related reviews; full review history can be multi-MB.
+  // listNovelReviews returns insert order (oldest first), so keep the NEWEST 80 (id 42).
   const lightReviews = (reviews || []).filter((item: any) => {
     const type = String(item?.review_type || "")
     return type === "asset_intake" || type === "asset_intake_apply" || type === "story_relation_materialize"
-  }).slice(0, 80)
+  }).slice(-80)
   const storyState = storyStateOf(project)
   let chapter = chapterId
     ? chapters.find(item => Number(item.id) === Number(chapterId)) || null

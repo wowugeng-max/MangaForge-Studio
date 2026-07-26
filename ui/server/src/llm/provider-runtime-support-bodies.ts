@@ -119,7 +119,9 @@ function applyGeminiFlashReasoningPolicy(
   if (effort != null && body.reasoning_effort == null) body.reasoning_effort = effort
   const thinking = (request as any).thinking ?? params.thinking
   if (thinking != null && body.thinking == null) body.thinking = thinking
-  // Keep enough room for output after reasoning leakage on flash-tier proxies.
+  // Keep enough room for output after reasoning leakage on flash-tier proxies,
+  // but respect an explicit caller budget (small probes / cheap tasks stay small).
+  if (request.max_tokens != null) return
   const minBudget = Number(params.default_max_tokens || 0) || 8192
   const current = Number(body.max_tokens || 0)
   if (!Number.isFinite(current) || current < minBudget) body.max_tokens = minBudget

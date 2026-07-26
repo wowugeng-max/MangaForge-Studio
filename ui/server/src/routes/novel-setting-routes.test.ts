@@ -13,6 +13,7 @@ import {
   normalizeSettingAgentPayload,
   normalizeSettingRelationshipRepairPayload,
   normalizeSettingUsagePayload,
+  registerNovelSettingRoutes,
   SETTING_TYPES,
 } from './novel-setting-routes'
 import {
@@ -426,6 +427,75 @@ describe('setting agent workflow', () => {
         expected_state_change: { current_state: '进入第二阶段' },
       }),
     ])
+  })
+})
+
+describe('asset route error handling', () => {
+  const ASSET_ROUTE_KEYS = [
+    'GET /api/novel/projects/:id/assets/overview',
+    'GET /api/novel/projects/:id/assets/character-status',
+    'GET /api/novel/projects/:id/assets/relations',
+    'GET /api/novel/projects/:id/assets/gap-audit',
+    'GET /api/novel/projects/:id/assets/intake-queue',
+    'POST /api/novel/projects/:id/assets/intake-queue/apply',
+    'GET /api/novel/chapters/:chapterId/assets/pack',
+    'POST /api/novel/projects/:id/assets/backfill-from-prose',
+    'GET /api/novel/projects/:id/assets/story-relations',
+    'GET /api/novel/projects/:id/assets/foreshadow-lifecycle',
+    'GET /api/novel/projects/:id/assets/chapter-brief',
+    'POST /api/novel/projects/:id/assets/story-relations/materialize',
+    'POST /api/novel/projects/:id/assets/fill-gaps',
+  ]
+
+  function createRouteHarness() {
+    const handlers = new Map<string, any>()
+    const register = (method: string, path: string, handler: any) => {
+      handlers.set(`${method.toUpperCase()} ${path}`, handler)
+      return app
+    }
+    const app = {
+      get: (path: string, handler: any) => register('GET', path, handler),
+      post: (path: string, handler: any) => register('POST', path, handler),
+      put: (path: string, handler: any) => register('PUT', path, handler),
+      delete: (path: string, handler: any) => register('DELETE', path, handler),
+    }
+    return { app, handlers }
+  }
+
+  async function callRoute(handler: any, req: any = {}) {
+    const res: any = {
+      statusCode: 200,
+      body: null,
+      status(code: number) {
+        this.statusCode = code
+        return this
+      },
+      json(body: any) {
+        this.body = body
+        return this
+      },
+    }
+    await handler(req, res)
+    return res
+  }
+
+  test('all 13 asset routes answer 500 json instead of rejecting when a dependency throws', async () => {
+    const { app, handlers } = createRouteHarness()
+    registerNovelSettingRoutes(app as any, {
+      getWorkspace: () => '/tmp/mangaforge-nonexistent-workspace',
+      getProject: async () => {
+        throw new Error('db exploded')
+      },
+      buildChapterContextPackage: async () => ({}),
+    })
+
+    for (const key of ASSET_ROUTE_KEYS) {
+      const handler = handlers.get(key)
+      expect(handler).toBeTruthy()
+      const res = await callRoute(handler, { params: { id: '1', chapterId: '1' }, query: {}, body: {} })
+      expect(`${key} -> ${res.statusCode}`).toBe(`${key} -> 500`)
+      expect(String(res.body?.error || '')).toContain('db exploded')
+    }
   })
 })
 

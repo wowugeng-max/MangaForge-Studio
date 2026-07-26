@@ -5,7 +5,7 @@
     "service_type": "llm",
     "api_format": "openai_compatible",
     "auth_type": "bearer",
-    "response_mode": "stream",
+    "response_mode": "non_stream",
     "supported_modalities": [
       "chat"
     ],

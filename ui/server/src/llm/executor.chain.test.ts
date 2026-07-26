@@ -1,4 +1,15 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { afterAll, describe, expect, mock, test } from 'bun:test'
+import * as providerRuntimeModule from './provider-runtime'
+import * as memoryServiceModule from '../memory-service'
+import * as knowledgeBaseModule from '../knowledge-base'
+
+// bun's mock.module() swaps the module for the whole process and is never
+// undone between test files, so snapshot the real exports (before mocking
+// patches the live namespaces) and re-register them in afterAll. The spreads
+// in the factories keep unrelated exports intact for files loaded later.
+const realProviderRuntime = { ...providerRuntimeModule }
+const realMemoryService = { ...memoryServiceModule }
+const realKnowledgeBase = { ...knowledgeBaseModule }
 
 const runtimeRequests: any[] = []
 const memoryRecallCalls: any[][] = []
@@ -6,6 +17,7 @@ const memoryStoreCalls: any[][] = []
 const verifiedMemoryStoreCalls: any[][] = []
 
 mock.module('./provider-runtime', () => ({
+  ...realProviderRuntime,
   executeWithRuntimeModel: mock(async (_workspace: string, request: any) => {
     runtimeRequests.push(request)
     const userPrompt = String(request.messages?.find((item: any) => item.role === 'user')?.content || '')
@@ -111,6 +123,7 @@ mock.module('./provider-runtime', () => ({
 }))
 
 mock.module('../memory-service', () => ({
+  ...realMemoryService,
   buildMemoryInjectionForProject: mock(async (...args: any[]) => {
     memoryRecallCalls.push(args)
     return { text: 'RECALLED_CHAPTER_MEMORY' }
@@ -126,8 +139,15 @@ mock.module('../memory-service', () => ({
 }))
 
 mock.module('../knowledge-base', () => ({
+  ...realKnowledgeBase,
   queryKnowledge: mock(async () => []),
 }))
+
+afterAll(() => {
+  mock.module('./provider-runtime', () => realProviderRuntime)
+  mock.module('../memory-service', () => realMemoryService)
+  mock.module('../knowledge-base', () => realKnowledgeBase)
+})
 
 describe('executeNovelAgentChain outline params', () => {
   test('passes chapter count and user outline into the outline prompt', async () => {
