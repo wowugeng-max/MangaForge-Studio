@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from 'bun:test'
 import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises'
 import { join, resolve } from 'path'
 import { tmpdir } from 'os'
@@ -8,6 +8,11 @@ import {
   resolveFingerprintLibRoots,
 } from './fingerprint-contract-resolver'
 import { BUILTIN_CONTRACT_SET, getContractSetsIndexPath } from '../fingerprint-contract-store'
+import * as workspaceModule from '../workspace'
+
+// Captured before any mock.module() call touches '../workspace', so the
+// mocked-active-workspace block below can restore the real module exactly.
+const realWorkspaceModule = { ...workspaceModule }
 
 let dirs: string[] = []
 
@@ -194,5 +199,45 @@ describe('fingerprint contract resolver', () => {
       resolve(cwd, '../../../workspace/fingerprint-lib'),
       resolve(cwd, 'workspace/fingerprint-lib'),
     ])
+  })
+})
+
+/**
+ * Regresses the route/resolver desync bug directly: mocks '../workspace' so
+ * loadActiveWorkspaceSync() answers with a throwaway workspace (never the
+ * real repo's workspace/fingerprint-lib), then asserts the no-cwd call path
+ * (the production default, matching the route layer's getWorkspace()) is
+ * actually wired to it. mock.module() is global to the process, so this is
+ * scoped to its own describe with beforeAll/afterAll to keep the 14 tests
+ * above (and every other test file in the regression run) unaffected.
+ */
+describe('resolveFingerprintLibRoots / resolveFingerprintContractInfo follow the active workspace when cwd is omitted', () => {
+  let fakeWorkspace: string
+
+  beforeAll(async () => {
+    fakeWorkspace = await mkdtemp(join(tmpdir(), 'mangaforge-fp-active-workspace-'))
+    await mkdir(join(fakeWorkspace, 'fingerprint-lib', 'contracts', 'by-genre'), { recursive: true })
+    await writeFile(
+      join(fakeWorkspace, 'fingerprint-lib', 'contracts', 'active-contract.json'),
+      contractJson('FAKE_INJECTED_CONTRACT_ABC', 0.3),
+      'utf8',
+    )
+    mock.module('../workspace', () => ({
+      ...realWorkspaceModule,
+      loadActiveWorkspaceSync: () => fakeWorkspace,
+    }))
+  })
+
+  afterAll(async () => {
+    mock.module('../workspace', () => realWorkspaceModule)
+    await rm(fakeWorkspace, { recursive: true, force: true })
+  })
+
+  test('resolveFingerprintLibRoots() with no cwd puts the mocked active workspace fingerprint-lib first', () => {
+    expect(resolveFingerprintLibRoots()[0]).toBe(join(fakeWorkspace, 'fingerprint-lib'))
+  })
+
+  test('resolveFingerprintContractInfo() with no cwd resolves the contract from the mocked active workspace, not the repo-relative fallback', () => {
+    expect(resolveFingerprintContractInfo()?.contract_name).toBe('FAKE_INJECTED_CONTRACT_ABC')
   })
 })
