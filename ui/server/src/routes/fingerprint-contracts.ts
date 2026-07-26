@@ -36,6 +36,12 @@ async function readJsonFile(path: string): Promise<any | null> {
   }
 }
 
+function normalizeSetIdParam(value: unknown): string | null {
+  const raw = Array.isArray(value) ? value[0] : value
+  const trimmed = typeof raw === 'string' ? raw.trim() : ''
+  return trimmed || null
+}
+
 async function readTargetSummary(libRoot: string, setId: string) {
   const contract = await readJsonFile(join(getContractSetDir(libRoot, setId), 'active-contract.json'))
   const target = contract?.target
@@ -174,6 +180,7 @@ export function registerFingerprintContractRoutes(app: Express, getWorkspace: ()
   app.get('/api/fingerprint-contracts/scores', async (req, res) => {
     try {
       const activeWorkspace = getWorkspace()
+      const setIdFilter = normalizeSetIdParam(req.query?.set_id)
       const projects = await listNovelProjects(activeWorkspace)
       const rows: any[] = []
       for (const project of projects) {
@@ -186,8 +193,12 @@ export function registerFingerprintContractRoutes(app: Express, getWorkspace: ()
           continue
         }
       }
+      // aggregates 始终按合同集分组覆盖全量数据，供前端跨合同集对比，不随 set_id 过滤收窄。
       const aggregates = aggregateFingerprintScores(rows)
-      const recent = [...rows]
+      const filteredRows = setIdFilter
+        ? rows.filter((row) => parseFingerprintScoreRow(row)?.set_id === setIdFilter)
+        : rows
+      const recent = [...filteredRows]
         .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
         .slice(0, 50)
         .map((row) => {

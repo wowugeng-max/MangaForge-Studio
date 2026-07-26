@@ -3,6 +3,8 @@ import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { registerFingerprintContractRoutes } from './fingerprint-contracts'
+import { createNovelProject, createNovelReview } from '../novel'
+import { buildFingerprintScoreReviewRecord } from '../fingerprint-contract-scores'
 
 let dirs: string[] = []
 
@@ -62,6 +64,32 @@ async function tempWorkspace() {
     'utf8',
   )
   return root
+}
+
+/** 落库一条可被 parseFingerprintScoreRow 解析的指纹打分评审，workspace 取自 tempWorkspace()/'workspace'。 */
+async function seedFingerprintScoreReview(
+  workspace: string,
+  opts: { setId: string; chapterNo: number; createdAt: string },
+) {
+  const project = await createNovelProject(workspace, { title: `proj-${opts.setId}-${opts.chapterNo}` })
+  const record = buildFingerprintScoreReviewRecord({
+    projectId: project.id,
+    chapterId: opts.chapterNo,
+    chapterNo: opts.chapterNo,
+    setId: opts.setId,
+    setLabel: opts.setId,
+    contractName: 'test_contract',
+    locked: false,
+    contractScore: {
+      checks: [
+        { key: 'cv_para', ok: true, value: 0.6, target: [0.5, 0.7] },
+        { key: 'stock_adverb_per_1k_max', ok: false, value: 2, target: 1.5 },
+      ],
+    },
+    textChars: 1000,
+    createdAt: opts.createdAt,
+  })
+  await createNovelReview(workspace, { ...record, created_at: opts.createdAt })
 }
 
 afterEach(async () => {
@@ -146,5 +174,55 @@ describe('fingerprint contract routes', () => {
       const res = await call(handlers.get(key), {})
       expect(res.statusCode).toBe(500)
     }
+  })
+
+  test('GET scores with set_id filters rows to that contract set only', async () => {
+    const ws = await tempWorkspace()
+    const workspace = join(ws, 'workspace')
+    await seedFingerprintScoreReview(workspace, { setId: 'set-alpha', chapterNo: 1, createdAt: '2026-01-01T00:00:00.000Z' })
+    await seedFingerprintScoreReview(workspace, { setId: 'set-alpha', chapterNo: 2, createdAt: '2026-01-02T00:00:00.000Z' })
+    await seedFingerprintScoreReview(workspace, { setId: 'set-beta', chapterNo: 50, createdAt: '2026-01-03T00:00:00.000Z' })
+    const { app, handlers } = createRouteHarness()
+    registerFingerprintContractRoutes(app, () => workspace)
+    const res = await call(handlers.get('GET /api/fingerprint-contracts/scores'), { query: { set_id: 'set-alpha' } })
+    expect(res.statusCode).toBe(200)
+    const chapterNos = res.body.rows.map((row: any) => row.chapter_no).sort()
+    expect(chapterNos).toEqual([1, 2])
+    expect(chapterNos).not.toContain(50)
+  })
+
+  test('GET scores without set_id returns rows from every contract set', async () => {
+    const ws = await tempWorkspace()
+    const workspace = join(ws, 'workspace')
+    await seedFingerprintScoreReview(workspace, { setId: 'set-alpha', chapterNo: 1, createdAt: '2026-01-01T00:00:00.000Z' })
+    await seedFingerprintScoreReview(workspace, { setId: 'set-beta', chapterNo: 50, createdAt: '2026-01-02T00:00:00.000Z' })
+    const { app, handlers } = createRouteHarness()
+    registerFingerprintContractRoutes(app, () => workspace)
+    const res = await call(handlers.get('GET /api/fingerprint-contracts/scores'), {})
+    const chapterNos = res.body.rows.map((row: any) => row.chapter_no).sort()
+    expect(chapterNos).toEqual([1, 50])
+  })
+
+  test('GET scores with set_id still aggregates across every contract set', async () => {
+    const ws = await tempWorkspace()
+    const workspace = join(ws, 'workspace')
+    await seedFingerprintScoreReview(workspace, { setId: 'set-alpha', chapterNo: 1, createdAt: '2026-01-01T00:00:00.000Z' })
+    await seedFingerprintScoreReview(workspace, { setId: 'set-beta', chapterNo: 50, createdAt: '2026-01-02T00:00:00.000Z' })
+    const { app, handlers } = createRouteHarness()
+    registerFingerprintContractRoutes(app, () => workspace)
+    const res = await call(handlers.get('GET /api/fingerprint-contracts/scores'), { query: { set_id: 'set-alpha' } })
+    const setIds = res.body.aggregates.map((group: any) => group.set_id).sort()
+    expect(setIds).toEqual(['set-alpha', 'set-beta'])
+  })
+
+  test('GET scores with an unknown set_id returns an empty row list without erroring', async () => {
+    const ws = await tempWorkspace()
+    const workspace = join(ws, 'workspace')
+    await seedFingerprintScoreReview(workspace, { setId: 'set-alpha', chapterNo: 1, createdAt: '2026-01-01T00:00:00.000Z' })
+    const { app, handlers } = createRouteHarness()
+    registerFingerprintContractRoutes(app, () => workspace)
+    const res = await call(handlers.get('GET /api/fingerprint-contracts/scores'), { query: { set_id: 'no-such-set' } })
+    expect(res.statusCode).toBe(200)
+    expect(res.body.rows).toEqual([])
   })
 })
