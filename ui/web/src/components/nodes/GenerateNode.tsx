@@ -31,6 +31,7 @@ import {
   getGenerateNodeAspectRatioSize,
   isGenerateNodeMuted,
   normalizeGenerateNodeImageUrl,
+  normalizeSelectOptions,
   resolveGenerateNodePreviewMediaSrc,
   resolveGenerateNodeSourceAssetIds,
   resolveGenerateNodeSourceContent,
@@ -44,6 +45,7 @@ export {
   GENERATE_NODE_ROUTING_STRATEGY_OPTIONS,
   getGenerateNodeAspectRatioSize,
   normalizeGenerateNodeImageUrl,
+  normalizeSelectOptions,
   resolveGenerateNodePreviewMediaSrc,
   resolveGenerateNodeSourceContent,
   resolveGenerateNodeSourceAssetIds,
@@ -228,7 +230,8 @@ function GenerateNodeImpl(props: NodeProps) {
     window.addEventListener('resize', updatePanelPos)
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as HTMLElement
-      if (!target.closest('[data-config-panel]') && !target.closest('.react-flow__node')) setConfigOpen(false)
+      const insidePopup = target.closest('.ant-select-dropdown, .ant-tooltip, .ant-popover, .ant-dropdown, .ant-color-picker')
+      if (!target.closest('[data-config-panel]') && !target.closest('.react-flow__node') && !insidePopup) setConfigOpen(false)
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => {
@@ -478,7 +481,7 @@ function GenerateNodeImpl(props: NodeProps) {
                 {param.type === 'number' && <Text type="secondary" style={{ fontSize: 12 }}>{value}</Text>}
               </div>
               {param.type === 'boolean' && <Switch size="small" checked={Boolean(value)} onChange={commit} />}
-              {param.type === 'select' && <Select size="small" value={value} options={param.options || []} style={{ width: '100%' }} onChange={commit} />}
+              {param.type === 'select' && <Select size="small" value={value} options={normalizeSelectOptions(param.options)} style={{ width: '100%' }} onChange={commit} />}
               {param.type === 'number' && Number(param.max) <= 2 && (
                 <Slider min={Number(param.min ?? 0)} max={Number(param.max ?? 2)} step={Number(param.step ?? 0.1)} value={Number(value ?? param.default ?? 0)} onChange={commit} />
               )}
@@ -554,7 +557,7 @@ function GenerateNodeImpl(props: NodeProps) {
         borderRadius: 12,
         boxShadow: '0 16px 48px rgba(15,23,42,0.18), 0 2px 10px rgba(15,23,42,0.08)',
         border: '1px solid #e2e8f0',
-        zIndex: 9999,
+        zIndex: 1000,
         padding: 14,
       }}
     >

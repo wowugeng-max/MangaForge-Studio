@@ -9,6 +9,7 @@ import {
   getGenerateNodeAspectRatioSize,
   isGenerateNodeMuted,
   normalizeGenerateNodeGenerationPacket,
+  normalizeSelectOptions,
   normalizeGenerateNodeImageUrl,
   resolveGenerateNodePreviewMediaSrc,
   resolveGenerateNodeSourceAssetIds,
@@ -342,5 +343,26 @@ describe('GenerateNode migration behavior', () => {
       fissionEnabled: true,
       expectedCount: 3,
     })).toEqual({ content: '["第一格", "第二格"]' })
+  })
+})
+
+describe('normalizeSelectOptions', () => {
+  test('wraps legacy string options into label/value objects', () => {
+    expect(normalizeSelectOptions(['1024*1024', '768*1344'])).toEqual([
+      { label: '1024*1024', value: '1024*1024' },
+      { label: '768*1344', value: '768*1344' },
+    ])
+  })
+
+  test('keeps object options and fills missing labels', () => {
+    expect(normalizeSelectOptions([{ label: '1M', value: 1000000 }, { value: 'raw' }])).toEqual([
+      { label: '1M', value: 1000000 },
+      { label: 'raw', value: 'raw' },
+    ])
+  })
+
+  test('non-array input degrades to empty list', () => {
+    expect(normalizeSelectOptions(undefined)).toEqual([])
+    expect(normalizeSelectOptions('1024*1024' as any)).toEqual([])
   })
 })

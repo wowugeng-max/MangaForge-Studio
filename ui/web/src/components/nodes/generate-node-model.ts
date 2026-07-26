@@ -342,3 +342,14 @@ export function buildGenerateNodeRequestPayload(input: {
   return payload
 }
 
+
+export function normalizeSelectOptions(options: unknown): Array<{ label: string; value: any }> {
+  if (!Array.isArray(options)) return []
+  return options.map(option => {
+    if (option && typeof option === 'object' && 'value' in (option as any)) {
+      const record = option as { label?: unknown; value: any }
+      return { label: String(record.label ?? record.value), value: record.value }
+    }
+    return { label: String(option), value: option }
+  })
+}
