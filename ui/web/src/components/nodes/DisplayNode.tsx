@@ -1,9 +1,10 @@
 import React from 'react'
-import { Handle, Position, type Edge, type NodeProps, useReactFlow } from 'reactflow'
+import { Position, type Edge, type NodeProps, useReactFlow } from 'reactflow'
 import { Button, Input, Modal, Tooltip, Typography, message } from 'antd'
 import { SaveOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { BaseNode } from './BaseNode'
+import { TypedHandle } from './TypedHandle'
 import { nodeRegistry } from '../../utils/nodeRegistry'
 import { useAssetLibraryStore } from '../../stores/assetLibraryStore'
 import { useCanvasStore } from '../../stores/canvasStore'
@@ -188,12 +189,12 @@ function DisplayNodeImpl(props: NodeProps) {
     }
   }
 
-  return (
-    <BaseNode {...props} data={{ ...data, label: data?._customLabel ? data.label : '结果展示' }}>
-      <Tooltip title="通用输入">
-        <Handle type="target" position={Position.Left} id="in" style={{ top: '50%', background: '#fa8c16', width: 12, height: 12 }} />
-      </Tooltip>
+  const nodeCollapsed = Boolean(data?._collapsed)
 
+  return (
+    <>
+      <TypedHandle id="in" type="target" position={Position.Left} dataType="any" label="通用输入" collapsed={nodeCollapsed} />
+      <BaseNode {...props} data={{ ...data, label: data?._customLabel ? data.label : '结果展示' }}>
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexShrink: 0 }}>
           <Text type="secondary" style={{ fontSize: 13, fontWeight: 700, color: '#475569' }}>VISUAL_OUTPUT</Text>
@@ -229,14 +230,13 @@ function DisplayNodeImpl(props: NodeProps) {
         </div>
       </div>
 
-      <Tooltip title="通用输出">
-        <Handle type="source" position={Position.Right} id="out" style={{ top: '50%', background: '#fa8c16', width: 12, height: 12 }} />
-      </Tooltip>
+      </BaseNode>
+      <TypedHandle id="out" type="source" position={Position.Right} dataType="any" label="通用输出" collapsed={nodeCollapsed} />
 
       <Modal title="保存资产" open={isModalVisible} onOk={handleSaveToAsset} onCancel={() => setIsModalVisible(false)} confirmLoading={savingAsset} okText="保存" cancelText="取消" width={320}>
         <Input placeholder="给这个资产起个名字" value={assetName} onChange={event => setAssetName(event.target.value)} autoFocus />
       </Modal>
-    </BaseNode>
+    </>
   )
 }
 

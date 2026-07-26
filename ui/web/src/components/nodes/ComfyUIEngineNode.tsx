@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import ReactDOM from 'react-dom'
-import { Handle, Position, type NodeProps, useReactFlow, useUpdateNodeInternals } from 'reactflow'
+import { Position, type NodeProps, useReactFlow, useUpdateNodeInternals } from 'reactflow'
 import { useParams } from 'react-router-dom'
 import { useDrop } from 'react-dnd'
 import { Button, Input, Select, Space, Spin, Switch, Tag, Tooltip, Typography, message } from 'antd'
@@ -9,7 +9,7 @@ import { providerApi } from '../../api/providers'
 import { keyApi } from '../../api/keys'
 import apiClient from '../../api/client'
 import { createSSEClient, type SSEClient, type SSEMessage } from '../../utils/sse'
-import { getTypeColor, getTypeLabel, inferParamType } from '../../utils/handleTypes'
+import { getTypeLabel, inferParamType } from '../../utils/handleTypes'
 import { nodeRegistry } from '../../utils/nodeRegistry'
 import { DndItemTypes } from '../../constants/dnd'
 import { AspectRatioPanel, AspectRatioTrigger, getAspectRatioSize, type AspectRatioValue } from '../AspectRatioSelector'
@@ -18,6 +18,7 @@ import { CameraMovementPanel, CameraMovementTrigger, type CameraMovementPreset }
 import { useAssetLibraryStore } from '../../stores/assetLibraryStore'
 import { useCanvasStore } from '../../stores/canvasStore'
 import { BaseNode } from './BaseNode'
+import { TypedHandle } from './TypedHandle'
 import { pickMediaResultContent } from '../../utils/mediaResult'
 import { buildAssetMediaUrl } from '../../utils/assetMedia'
 
@@ -629,16 +630,14 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
     }
   }
 
+  const nodeCollapsed = Boolean(data?._collapsed)
+
   const renderParameterHandles = () => {
     if (!parameters) return null
     return Object.keys(parameters).map((paramName, index) => {
       const paramType = inferParamType(paramName)
-      const color = getTypeColor(paramType)
-      const label = getTypeLabel(paramType)
       return (
-        <Tooltip key={paramName} title={`${label}输入: ${paramName}`} placement="left">
-          <Handle type="target" position={Position.Left} id={`param-${paramName}`} style={{ top: 126 + index * 42, background: color, width: 12, height: 12 }} />
-        </Tooltip>
+        <TypedHandle key={paramName} id={`param-${paramName}`} type="target" position={Position.Left} dataType={paramType} label={`参数 ${paramName}`} top={126 + index * 42} collapsed={nodeCollapsed} />
       )
     })
   }
@@ -796,11 +795,10 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
   ) : null
 
   return (
-    <BaseNode {...props} onOpenConfig={() => setConfigOpen(value => !value)}>
-      <Tooltip title="工作流输入">
-        <Handle type="target" position={Position.Left} id="in" style={{ top: 48, background: '#722ed1', width: 12, height: 12 }} />
-      </Tooltip>
+    <>
+      <TypedHandle id="in" type="target" position={Position.Left} dataType="workflow" label="工作流输入" top={48} collapsed={nodeCollapsed} />
       {renderParameterHandles()}
+      <BaseNode {...props} onOpenConfig={() => setConfigOpen(value => !value)}>
       <div
         ref={(el) => { nodeRef.current = el; (drop as any)(el) }}
         style={{
@@ -867,9 +865,10 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
           )}
         </div>
       </div>
-      <Handle type="source" position={Position.Right} id="out" style={{ background: '#722ed1', width: 12, height: 12 }} />
+      </BaseNode>
+      <TypedHandle id="out" type="source" position={Position.Right} dataType="image" label="渲染产物" color="#722ed1" collapsed={nodeCollapsed} />
       {configPanel}
-    </BaseNode>
+    </>
   )
 }
 
