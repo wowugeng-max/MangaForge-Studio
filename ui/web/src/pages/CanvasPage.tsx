@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useDrop } from 'react-dnd'
 import { Button, Input, Layout, Modal, Select, Space, Tag, Tooltip, Typography, message } from 'antd'
-import { ArrowLeftOutlined, ClearOutlined, MenuFoldOutlined, MenuUnfoldOutlined, PlayCircleOutlined, SaveOutlined, SearchOutlined, StopOutlined, SyncOutlined, ThunderboltOutlined, UndoOutlined, RedoOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, ClearOutlined, MenuFoldOutlined, MenuUnfoldOutlined, PartitionOutlined, PlayCircleOutlined, SaveOutlined, SearchOutlined, StopOutlined, SyncOutlined, ThunderboltOutlined, UndoOutlined, RedoOutlined } from '@ant-design/icons'
 import ReactFlow, { Background, Controls, MiniMap, ReactFlowProvider, type ReactFlowInstance } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { DndItemTypes } from '../constants/dnd'
@@ -15,6 +15,7 @@ import { planCanvasDagStep } from './canvasDagRunner'
 import { buildCanvasAssetDropPlan } from './canvasAssetDrop'
 import { expandFissionAndDistribute } from './canvasFission'
 import { buildCopyPayload, buildPastePlan, type ClipboardPayload } from './canvasClipboard'
+import { layoutCanvas } from './canvasLayout'
 import { clampToViewport } from '../utils/viewportClamp'
 
 const NODE_MENU_SIZE = { width: 300, height: 380 }
@@ -433,6 +434,14 @@ function CanvasWorkspace() {
           <Tooltip title="撤销 (Ctrl+Z)"><Button icon={<UndoOutlined />} onClick={undo} disabled={past.length === 0} /></Tooltip>
           <Tooltip title="重做 (Ctrl+Y)"><Button icon={<RedoOutlined />} onClick={redo} disabled={future.length === 0} /></Tooltip>
         </Space.Compact>
+        <Tooltip title="按连线方向自动整理布局">
+          <Button icon={<PartitionOutlined />} onClick={() => {
+            saveHistory()
+            const store = useCanvasStore.getState()
+            store.setNodes(layoutCanvas(store.nodes, store.edges))
+            window.requestAnimationFrame(() => reactFlowInstance?.fitView({ padding: 0.15, duration: 300 }))
+          }}>整理布局</Button>
+        </Tooltip>
         <Space.Compact>
           <Tooltip title={isGlobalRunning ? '停止全局运行' : '按 DAG 顺序运行全部节点'}>
             <Button icon={isGlobalRunning ? <StopOutlined /> : <PlayCircleOutlined />} type="primary" danger={isGlobalRunning} onClick={handleGlobalRun}>{isGlobalRunning ? '停止' : '全局运行'}</Button>
