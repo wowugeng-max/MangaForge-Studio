@@ -16,6 +16,7 @@ import { buildCanvasAssetDropPlan } from './canvasAssetDrop'
 import { expandFissionAndDistribute } from './canvasFission'
 import { buildCopyPayload, buildPastePlan, type ClipboardPayload } from './canvasClipboard'
 import { layoutCanvas } from './canvasLayout'
+import { decorateEdges, minimapNodeColor } from './canvasEdgeStyle'
 import { clampToViewport } from '../utils/viewportClamp'
 import { moveMenuHighlight } from '../utils/menuNavigation'
 import { resolveAutoConnectHandle } from '../utils/autoConnect'
@@ -155,6 +156,11 @@ function CanvasWorkspace() {
     message.success('断点续跑已启动，成功节点已跳过')
   }
   const isValidConnection = useCallback((connection: any) => { const sourceNode = nodes.find(n => n.id === connection.source); const targetNode = nodes.find(n => n.id === connection.target); if (!sourceNode || !targetNode) return false; const sourceType = getHandleDataType(sourceNode.type, connection.sourceHandle ?? undefined, sourceNode.data, 'source'); const targetType = getHandleDataType(targetNode.type, connection.targetHandle ?? undefined, targetNode.data, 'target'); return areTypesCompatible(sourceType, targetType) }, [nodes])
+
+  const decoratedEdges = useMemo(
+    () => decorateEdges({ edges, nodes, nodeRunStatus }),
+    [edges, nodes, nodeRunStatus]
+  )
 
   const hasBreakpoint = !isGlobalRunning && nodes.some(n => nodeRunStatus[n.id] === 'success') && nodes.some(n => {
     const status = nodeRunStatus[n.id]
@@ -522,10 +528,10 @@ function CanvasWorkspace() {
 
       <Content ref={(el: HTMLDivElement | null) => { (reactFlowWrapper as any).current = el; canvasDrop(el) }} style={{ background: 'transparent', position: 'relative' }} onDoubleClick={(e) => { if ((e.target as HTMLElement).closest('.react-flow__pane')) openNodeSearch(e.clientX, e.clientY) }} onContextMenu={(e) => { if ((e.target as HTMLElement).closest('.react-flow__pane')) { e.preventDefault(); openNodeSearch(e.clientX, e.clientY) } }}>
         <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at top right, rgba(99,102,241,0.09), transparent 28%), radial-gradient(circle at bottom left, rgba(14,165,233,0.08), transparent 24%)' }} />
-        <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onConnectStart={onConnectStart} onConnectEnd={onConnectEnd} isValidConnection={isValidConnection} onInit={setReactFlowInstance} nodeTypes={nodeTypes} fitView zoomOnDoubleClick={false} onPaneClick={closeNodeSearch} onNodeClick={closeNodeSearch} onSelectionContextMenu={onSelectionContextMenu} onNodeContextMenu={onNodeContextMenu} deleteKeyCode={['Backspace', 'Delete']} selectionKeyCode={['Shift', 'Control', 'Meta']}>
+        <ReactFlow nodes={nodes} edges={decoratedEdges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onConnectStart={onConnectStart} onConnectEnd={onConnectEnd} isValidConnection={isValidConnection} onInit={setReactFlowInstance} nodeTypes={nodeTypes} fitView zoomOnDoubleClick={false} onPaneClick={closeNodeSearch} onNodeClick={closeNodeSearch} onSelectionContextMenu={onSelectionContextMenu} onNodeContextMenu={onNodeContextMenu} deleteKeyCode={['Backspace', 'Delete']} selectionKeyCode={['Shift', 'Control', 'Meta']}>
           <Background color="#cbd5e1" gap={18} />
           <Controls style={{ left: 16, right: 'auto' }} />
-          <MiniMap style={{ border: '1px solid rgba(148,163,184,0.25)', borderRadius: 16, right: 16, bottom: 16, boxShadow: '0 14px 36px rgba(15,23,42,0.12)' }} zoomable pannable />
+          <MiniMap nodeColor={minimapNodeColor} nodeStrokeColor={minimapNodeColor} style={{ border: '1px solid rgba(148,163,184,0.25)', borderRadius: 16, right: 16, bottom: 16, boxShadow: '0 14px 36px rgba(15,23,42,0.12)' }} zoomable pannable />
         </ReactFlow>
 
         {menuConfig && <div style={{ position: 'fixed', left: menuConfig.x, top: menuConfig.y, zIndex: 9999, background: 'rgba(255,255,255,0.96)', backdropFilter: 'blur(16px)', boxShadow: '0 20px 45px rgba(15,23,42,0.18)', borderRadius: 16, width: 300, border: '1px solid rgba(148,163,184,0.18)', overflow: 'hidden' }} onDoubleClick={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
