@@ -15,6 +15,7 @@ import {
   clusterByKey,
   clusterHitsInText,
   compactText,
+  endingHookOf,
   extractDeliveredClimaxLandings,
   extractPrimaryEndingHooks,
   trueEndingWindow,
@@ -52,6 +53,112 @@ export type ContinuityDirective = {
 }
 
 /** Opening misses the previous chapter's primary ending hook(s). */
+
+/** Free-text ending hook continuity: opening must surface ending_hook / last-line anchors. */
+export function freeTextEndingHookHit(opening: string, previousChapter: any = {}, primary: any = {}) {
+  const open = String(opening || '').slice(0, 900)
+  if (!open.trim()) return false
+  const endingHook = endingHookOf(previousChapter)
+  const text = chapterTextOf(previousChapter)
+  const lastLines = String(text || '')
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const lastLine = lastLines[lastLines.length - 1] || ''
+  const anchors = uniqueTexts([
+    endingHook,
+    primary?.evidence,
+    lastLine,
+    ...lastLines.slice(-3),
+  ], 10).filter((item) => item && item.length >= 2)
+  // Direct full/partial anchor inclusion
+  for (const anchor of anchors) {
+    const a = compactText(anchor, 80)
+    if (!a) continue
+    if (open.includes(a)) return true
+    // Sliding 4-6 char distinctive fragments from short anchors (e.g. 脚步声在门外停了)
+    if (a.length >= 4 && a.length <= 24) {
+      for (let i = 0; i <= a.length - 4; i++) {
+        const frag = a.slice(i, i + 4)
+        if (/[\u4e00-\u9fff]{4}/.test(frag) && open.includes(frag)) return true
+      }
+    }
+  }
+  // Keyword overlap: need >=2 content words from ending hook / last line
+  const source = compactText([endingHook, lastLine, primary?.evidence].filter(Boolean).join('。'), 160)
+  const words = (source.match(/[\u4e00-\u9fff]{2,}/g) || []).filter((w) => !/然后|接着|于是|自己|他们|一个/.test(w))
+  const hits = words.filter((w) => open.includes(w))
+  const uniqueHits = [...new Set(hits)]
+  return uniqueHits.length >= 2
+}
+
+
+/** Deterministic opening bridge when draft misses a hard primary ending hook. System-wide, not chapter-tuned. */
+export function buildOpeningHandoffBridgeParagraph(previousChapter: any = {}, primary: any = {}) {
+  const hook = endingHookOf(previousChapter) || compactText(primary?.evidence || '', 48)
+  const key = String(primary?.key || '')
+  const lead = (() => {
+    const raw = compactText(hook || '', 48)
+    if (!raw) return ''
+    return /[。！？…]$/.test(raw) ? raw : `${raw}。`
+  })()
+  if (key === 'door_threshold_arrival' || /门外|脚步|门缝|敲门/.test(hook)) {
+    return compactText(
+      `${lead || '门外有动静。'}他没立刻出声，先把口袋里的东西按实，再伸手去摸门把，把人先看清楚。`,
+      120,
+    )
+  }
+  if (key === 'neighbor_knock' || /敲门|十点|邻居/.test(hook)) {
+    return compactText(
+      `${lead || '门外又响了一声。'}他走到门边，透过猫眼先看一眼，确认来人再决定开不开。`,
+      120,
+    )
+  }
+  if (key === 'elevator_anomaly' || /电梯/.test(hook)) {
+    return compactText(
+      `${lead || '电梯还停着。'}他先按住门边，听了一下里面的动静，再决定进不进。`,
+      120,
+    )
+  }
+  // Generic free-text / cluster fallback: surface the ending hook as first beat.
+  return compactText(
+    `${lead || '上一拍还没完。'}他先把这件事接住，不让它悬在半空，再往下走。`,
+    120,
+  )
+}
+
+export function ensureOpeningHandoffBridge(chapterText: string, previousChapter: any = {}) {
+  const text = String(chapterText || '')
+  if (!text.trim() || !previousChapter) {
+    return { text, bridged: false as const, reason: 'empty' }
+  }
+  const before = assessPrimaryOpeningHookContinuity({ chapterText: text, previousChapter })
+  if (!before.required || before.passed) {
+    return { text, bridged: false as const, reason: 'already_ok' }
+  }
+  const hooks = extractPrimaryEndingHooks(previousChapter)
+  const primary = hooks[0]
+  if (!primary) return { text, bridged: false as const, reason: 'no_primary' }
+  const bridge = buildOpeningHandoffBridgeParagraph(previousChapter, primary)
+  if (!bridge) return { text, bridged: false as const, reason: 'no_bridge' }
+  // Avoid double-prefix if text already starts with bridge fragment.
+  const head = text.slice(0, 80)
+  if (head.includes(bridge.slice(0, Math.min(12, bridge.length)))) {
+    return { text, bridged: false as const, reason: 'already_prefixed' }
+  }
+  const next = `${bridge}\n\n${text.replace(/^\s+/, '')}`.replace(/\n{3,}/g, '\n\n')
+  const after = assessPrimaryOpeningHookContinuity({ chapterText: next, previousChapter })
+  if (after.passed) {
+    return {
+      text: next.endsWith('\n') ? next : `${next}\n`,
+      bridged: true as const,
+      reason: primary.key,
+      bridge,
+    }
+  }
+  return { text, bridged: false as const, reason: 'bridge_insufficient', bridge }
+}
+
 export function detectOpeningHookMissDirective(input: {
   chapter?: any
   previousChapter?: any
@@ -74,11 +181,16 @@ export function detectOpeningHookMissDirective(input: {
     && !(/通道/.test(opening.slice(0, 400)) && /无头|保安|替罪羊|安德鲁|路易|侧门|清场倒计时/.test(opening))
     && !(/特权卡/.test(opening) && /青铜巨门/.test(opening) && /撞进|冲进/.test(opening))
   )
+  const patternHit = primaryCluster
+    ? primaryCluster.patterns.some(pattern => pattern.test(opening))
+    : false
+  // Free-text true ending (no cluster patterns): accept opening that continues ending_hook / last line.
+  const freeTextHit = (!primaryCluster || primary.key === 'true_ending_forward')
+    ? freeTextEndingHookHit(opening, previous, primary)
+    : false
   const primaryHit = interiorLanded
     ? interiorContinueHit
-    : primaryCluster
-      ? primaryCluster.patterns.some(pattern => pattern.test(opening))
-      : false
+    : (patternHit || freeTextHit)
   if (primaryHit) return null
   if (interiorLanded) {
     const landing = landings.find(item => item.key === 'building_one_interior_entry')!
@@ -486,10 +598,13 @@ export function assessPrimaryOpeningHookContinuity(input: {
   const hard = landings.length > 0 || hooks.some(item => [
     'property_enforcement',
     'neighbor_knock',
+    'door_threshold_arrival',
     'kitchen_entity',
     'elevator_anomaly',
     'building_one_interior',
     'building_two_seeker',
+    'deep_abyss_descent',
+    'true_ending_forward',
     'authority_fragment',
     'companion_chosen',
   ].includes(item.key))

@@ -47,6 +47,7 @@ import {
   buildLLMResultDiagnostics,
   getNovelPayload,
 } from '../../routes/novel-route-utils'
+import { materializeStoryRelations } from '../../routes/novel-setting-story-relations'
 import {
   normalizeDiscoveredAssets,
   normalizeIpSceneCandidates,
@@ -180,6 +181,20 @@ export async function updateStoryStateMachine(
     payload.story_state_applied_with_warnings = true
   }
   await updateNovelProject(activeWorkspace, project.id, { reference_config: nextReferenceConfig } as any)
+  try {
+    const storyState = nextReferenceConfig?.story_state || {}
+    if (storyState && (storyState.character_relationships || storyState.characterRelationships)) {
+      const materialized = await materializeStoryRelations(activeWorkspace, project.id, { storyState })
+      payload.story_relation_materialize = {
+        created: materialized.summary.created,
+        updated: materialized.summary.updated,
+        character_patches: materialized.summary.character_patches,
+        total: materialized.summary.total,
+      }
+    }
+  } catch (error: any) {
+    payload.story_relation_materialize_error = String(error?.message || error || 'materialize failed')
+  }
   payload.style_fingerprint = stateDelta.style_fingerprint
   payload.style_fingerprint_contract = stateDelta.style_fingerprint_contract
   await applyStoryStateMachineSyncPhaseA({

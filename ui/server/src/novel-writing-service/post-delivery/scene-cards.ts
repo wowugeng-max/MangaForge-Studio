@@ -1,6 +1,7 @@
 import { asArray } from '../../routes/novel-route-utils'
 import { normalizePressureLevel } from '../../novel-writing/scene-briefs'
 import { compactBriefText, uniqueBriefStrings } from '../quality/text-utils'
+import { attachPovLensesToSceneCards, compileChapterPovPlan } from '../../novel-writing/character-pov'
 
 type AnyFn = (...args: any[]) => any
 
@@ -337,10 +338,33 @@ export function normalizeSceneCardsPayload(payload: any, contextPackage: any = {
     density_level: String(card?.density_level || card?.densityLevel || ''),
     transition_from_previous: String(card?.transition_from_previous || card?.transitionFromPrevious || ''),
     exit_state: String(card?.exit_state || card?.exitState || ''),
+    // Character POV lens (P1/P2): keep model output and surface fields for write/UI.
+    pov_lens: card?.pov_lens || card?.povLens || undefined,
+    pov_character: String(card?.pov_character || card?.povCharacter || card?.pov_lens?.pov_character || card?.povLens?.pov_character || ''),
+    decision_in_scene: String(card?.decision_in_scene || card?.decisionInScene || card?.pov_lens?.decision_in_scene || card?.povLens?.decision_in_scene || ''),
+    want_now: String(card?.want_now || card?.wantNow || card?.pov_lens?.want_now || card?.povLens?.want_now || ''),
+    fear_or_cost_now: String(card?.fear_or_cost_now || card?.fearOrCostNow || card?.pov_lens?.fear_or_cost_now || card?.povLens?.fear_or_cost_now || ''),
+    emotion_in_situation: String(card?.emotion_in_situation || card?.emotionInSituation || card?.pov_lens?.emotion_from_pov || card?.povLens?.emotion_from_pov || ''),
+    emotion_tell: String(card?.emotion_tell || card?.emotionTell || card?.pov_lens?.emotion_tell || card?.povLens?.emotion_tell || ''),
+    secondary_cut: card?.secondary_cut || card?.secondaryCut || card?.pov_lens?.secondary_cut || card?.povLens?.secondary_cut || undefined,
+    secondary_authorized: Boolean(card?.secondary_authorized || card?.secondaryAuthorized || card?.pov_lens?.secondary_authorized || card?.povLens?.secondaryAuthorized),
+    short_secondary_pov: String(card?.short_secondary_pov || card?.shortSecondaryPov || ''),
   })).filter((card: any) => card.beat || card.purpose || card.title)
   const intentBaselineCards = applyIntentDialogueBaselineToSceneCards(normalizedCards, contextPackage)
   const styleFingerprintCards = applyStyleFingerprintToSceneCards(intentBaselineCards, contextPackage)
   const conceptAnchorCards = applyExplicitNewConceptAnchorsToSceneCards(styleFingerprintCards, contextPackage)
-  return applyDeliveryRiskCarryOverToSceneCards(conceptAnchorCards, contextPackage)
+  const withCarryOver = applyDeliveryRiskCarryOverToSceneCards(conceptAnchorCards, contextPackage)
     .map((card: any) => sanitizeSceneCardCoreDramaFields(card))
+  // Backfill missing pov_lens from chapter POV plan so UI/write path always see a lens.
+  const povPlan = compileChapterPovPlan({
+    ...contextPackage,
+    chapter_target: {
+      ...(contextPackage?.chapter_target || {}),
+      scene_cards: withCarryOver,
+    },
+    scene_cards: withCarryOver,
+  }, {
+    modelFamilyStrategy: contextPackage?.model_family_strategy || contextPackage?.modelFamilyStrategy,
+  })
+  return attachPovLensesToSceneCards(withCarryOver, povPlan)
 }

@@ -486,9 +486,7 @@ export function SettingAssetGraphPanel({ projectId, selectedModelId }: { project
               ghost
               loading={repairLoading}
               disabled={!selectedModelId || !graph.summary.isolated_key_asset_count}
-              onClick={suggestRelationshipRepair}
-            >
-              模型挂钩孤立资产
+              onClick={suggestRelationshipRepair}> 模型挂钩孤立资产
             </Button>
           </Tooltip>
         </div>

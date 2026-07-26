@@ -200,6 +200,53 @@ describe('prose contract prompt compiler', () => {
     expect(compiled.prompt).not.toContain('[MaxDepth]')
   })
 
+  test('production required content projects bloated scene cards to causal essentials under budget', () => {
+    const goalSentinel = 'PRODUCTION_SCENE_GOAL_SENTINEL'
+    const conflictSentinel = 'PRODUCTION_SCENE_CONFLICT_SENTINEL'
+    const noise = 'enrichment噪声'.repeat(400)
+    const contract = buildProseGenerationContract({
+      chapter_target: {
+        chapter_no: 29,
+        title: '地下停车场的终极恐惧',
+        goal: `承接上一章章末：${'对话'.repeat(300)}；优先推进深渊压力`,
+        conflict: '地下深渊未知正主',
+        ending_hook: '深渊之底的它苏醒',
+        scene_cards: Array.from({ length: 6 }, (_, index) => ({
+          scene_no: index + 1,
+          title: `场景${index + 1}`,
+          goal: index === 0 ? goalSentinel : `推进目标${index + 1}`,
+          scene_goal: index === 0 ? goalSentinel : `推进目标${index + 1}`,
+          purpose: index === 0 ? goalSentinel : `推进目标${index + 1}`,
+          summary: index === 0 ? goalSentinel : `推进目标${index + 1}`,
+          conflict: index === 0 ? conflictSentinel : `冲突${index + 1}`,
+          obstacle: index === 0 ? conflictSentinel : `冲突${index + 1}`,
+          style_directives: Array.from({ length: 12 }, () => noise),
+          benchmark_recall_directives: Array.from({ length: 12 }, () => noise),
+          prose_craft_directives: Array.from({ length: 12 }, () => noise),
+          concept_anchor_rules: Array.from({ length: 12 }, () => noise),
+          relationship_progression_plan: noise,
+          showoff_stage_chain: noise,
+          combat_dimension_plan: noise,
+          diagnostic_trace: { raw_payload: noise, debug: noise },
+        })),
+      },
+      preflight: { ready: true, strict_ready: true, checks: [] },
+      oh_story_director: { readiness: 'ready', selected_contracts: [] },
+    })
+
+    const compiled = compileParagraphProseContext({ title: '怪谈世界' }, contract)
+    const sceneChars = Number(compiled.diagnostics.section_chars['scene-causality'] || 0)
+
+    expect(compiled.diagnostics.required_chars).toBeLessThan(48_000)
+    expect(sceneChars).toBeLessThan(12_000)
+    expect(compiled.prompt).toContain(goalSentinel)
+    expect(compiled.prompt).toContain(conflictSentinel)
+    expect(compiled.prompt).not.toContain('enrichment噪声')
+    expect(compiled.prompt).not.toContain('style_directives')
+    expect(compiled.prompt).not.toContain('benchmark_recall_directives')
+    expect(compiled.prompt).not.toContain('prose_craft_directives')
+  })
+
   test('production safe-batch request carries chapter duties into the required prompt', () => {
     const tailSentinel = 'PRODUCTION_SAFE_BATCH_MAINLINE_TAIL'
     const context = mergeProseGenerationRequestOverrides(

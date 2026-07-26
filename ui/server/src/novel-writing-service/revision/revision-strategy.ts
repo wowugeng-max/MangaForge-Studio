@@ -10,6 +10,7 @@ import {
   normalizeFiveDimensionQualityScores,
 } from '../quality/five-dimension-scores'
 import { proseQualityGateFailureRisks } from '../quality/prose-quality-risks'
+import { buildHumanizeDualPassPromptDirectives } from '../../novel-writing/humanize-dual-pass'
 
 function inferRevisionStrategy(check: any, fieldName = '') {
   const explicit = normalizeRevisionStrategy(
@@ -242,20 +243,24 @@ export function buildRevisionStrategyBrief(review: any = {}) {
     const evidence = compactBriefText(check.evidence || check.issue || check.summary || check.reason || check.pattern)
     return evidence ? `${label}：${evidence}` : label
   })), 10)
-  const directives = uniqueBriefStrings(effectiveOrder.flatMap(strategy => {
-    const hits = asArray(strategyHits[strategy])
-    if (!hits.length && strategy === 'polish') return ['polish：小问题多时，打磨语言细节、段落节奏和信息衔接。']
-    return hits.map((hit: any) => {
-      const check = hit.check || {}
-      const fix = compactBriefText(check.fix || check.repair_instruction || check.repairInstruction || check.suggestion || check.required_action || check.requiredAction)
-      const label = compactBriefText(check.label || check.key || check.gate || hit.field, hit.field)
-      const targetLabel = check.key && check.key !== label ? `${label}(${check.key})` : label
-      if (strategy === 'de_ai') return `de_ai：去AI味，${fix || `修复 ${targetLabel} 的AI腔、解释腔、格式或正文工艺残留。`}`
-      if (strategy === 'rewrite') return `rewrite：${fix || `围绕 ${label} 重写影响核心冲突、因果、角色动机或章尾承接的段落。`}`
-      if (strategy === 'compress') return `compress：${fix || `压缩 ${label} 中不推动剧情、信息或情绪变化的内容。`}`
-      return `polish：${fix || `打磨 ${label} 的语言、节奏和衔接。`}`
-    })
-  }), 12)
+  const humanizeDirectives = buildHumanizeDualPassPromptDirectives({ pass: effectiveOrder.includes('de_ai') || effectiveOrder[0] === 'rewrite' ? 'AB' : 'B' }).filter((line) => /Pass A|Pass B|结构重写|人味增强|输出硬合同|执行顺序/.test(line))
+  const directives = uniqueBriefStrings([
+    ...humanizeDirectives,
+    ...effectiveOrder.flatMap((strategy) => {
+      const hits = asArray(strategyHits[strategy])
+      if (!hits.length && strategy === 'polish') return ['polish：小问题多时，打磨语言细节、段落节奏和信息衔接。']
+      return hits.map((hit: any) => {
+        const check = hit.check || {}
+        const fix = compactBriefText(check.fix || check.repair_instruction || check.repairInstruction || check.suggestion || check.required_action || check.requiredAction)
+        const label = compactBriefText(check.label || check.key || check.gate || hit.field, hit.field)
+        const targetLabel = check.key && check.key !== label ? `${label}(${check.key})` : label
+        if (strategy === 'de_ai') return `de_ai：去AI味，${fix || `修复 ${targetLabel} 的AI腔、解释腔、格式或正文工艺残留。`}`
+        if (strategy === 'rewrite') return `rewrite：${fix || `围绕 ${label} 重写影响核心冲突、因果、角色动机或章尾承接的段落。`}`
+        if (strategy === 'compress') return `compress：${fix || `压缩 ${label} 中不推动剧情、信息或情绪变化的内容。`}`
+        return `polish：${fix || `打磨 ${label} 的语言、节奏和衔接。`}`
+      })
+    }),
+  ], 16)
   return {
     version: 'oh_story_revision_strategy_v1',
     primary_strategy: effectiveOrder[0],

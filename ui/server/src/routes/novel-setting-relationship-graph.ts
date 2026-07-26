@@ -72,6 +72,39 @@ export type SettingRelationshipGraphInput = {
 const STORYLINE_TYPES = new Set(['mainline', 'subplot', 'character_arc', 'relationship_arc', 'faction_arc', 'foreshadowing_arc'])
 const KEY_ASSET_TYPES = new Set(['character', 'ability', 'realm', 'item', 'boss', 'faction', 'foreshadowing', ...STORYLINE_TYPES])
 
+/** Soft gate: skip isolation spam for non-person-looking character cards (e.g. 按响门). */
+function isRelationGraphPersonName(name: string) {
+  const value = String(name || '').trim()
+  if (!/^[一-鿿]{2,4}$/.test(value)) return false
+  if (/的|了|着|过|在|是|和|与|及|地/.test(value)) return false
+  if (/^(这个|那个|这张|那张|我们|你们|他们|她们|它们|自己|对方|身上|手里|眼前|瞳孔|心脏|它|他|她|我|你|这|那)/.test(value)) return false
+  if (/^(按|推|拉|敲|开|关|闯|冲|跑|走|站|坐|拿|放|扔|抓|拖|抬|举|打|杀|砍|刺|射|逃|躲|看|听|说|问|喊|叫|要|能|会|该|得|剥|扭|融|代|骤|挥|砸|甩|撕|咬|吞|猛)/.test(value)) return false
+  if (/(门铃|房门|大门|门板|开关|按钮|钥匙|使用)$/.test(value)) return false
+  return true
+}
+
+/**
+ * Chapter outline hooks are seeded as foreshadowing for continuity/context,
+ * not as worldbuilding assets that must weave into a multi-asset graph.
+ * Flagging every "第N章…钩子" as isolated key asset is pure UI noise.
+ */
+function isChapterOutlineHookAsset(setting: any) {
+  const entityType = String(setting?.entity_type || '')
+  const name = String(setting?.name || '').trim()
+  // Name-first: even if entity_type was mis-tagged, chapter hook titles are continuity notes.
+  if (/^第\d+章.+钩子$/.test(name) || /钩子$/.test(name) && /^第\d+章/.test(name)) return true
+  if (entityType !== 'foreshadowing') return false
+  let payload: any = setting?.payload_json || {}
+  if (typeof payload === 'string') {
+    try { payload = JSON.parse(payload || '{}') } catch { payload = {} }
+  }
+  if (String(payload?.source || '') === 'outline_hook') return true
+  // Some seeds store source under nested payload_json.
+  if (String(payload?.payload_json?.source || '') === 'outline_hook') return true
+  return false
+}
+
+
 function settingNodeId(setting: any) {
   return `setting-${Number(setting?.id || 0)}`
 }
@@ -296,21 +329,38 @@ export function buildSettingRelationshipGraph(input: SettingRelationshipGraphInp
     const characterMetadata = setting.entity_type === 'character'
       ? mergeCharacterMetadata(setting, charactersById, charactersByName)
       : {}
+    // Keep graph nodes lean for UI memory: no full payload dumps.
+    const leanPayload = setting.payload_json && typeof setting.payload_json === "object" && !Array.isArray(setting.payload_json)
+      ? {
+          source: (setting.payload_json as any).source || null,
+          pair_key: (setting.payload_json as any).pair_key || null,
+          character_id: (setting.payload_json as any).character_id || null,
+        }
+      : {}
+    const leanState = setting.state_json && typeof setting.state_json === "object" && !Array.isArray(setting.state_json)
+      ? {
+          owner: (setting.state_json as any).owner || null,
+          status: (setting.state_json as any).status || null,
+          current_status: (setting.state_json as any).current_status || null,
+          party_a: (setting.state_json as any).party_a || null,
+          party_b: (setting.state_json as any).party_b || null,
+          story_relation_type: (setting.state_json as any).story_relation_type || null,
+        }
+      : {}
     nodes.push({
       id: settingNodeId(setting),
-      kind: 'setting',
+      kind: "setting",
       entity_id: Number(setting.id),
-      entity_type: setting.entity_type || 'rule',
-      name: String(setting.name || '未命名资产'),
-      summary: setting.summary || '',
+      entity_type: setting.entity_type || "rule",
+      name: String(setting.name || "未命名资产"),
+      summary: String(setting.summary || "").slice(0, 240),
       metadata: {
-        status: setting.status || 'active',
-        visibility: setting.visibility || 'public',
+        status: setting.status || "active",
+        visibility: setting.visibility || "public",
         first_chapter_no: setting.first_chapter_no ?? null,
         last_chapter_no: setting.last_chapter_no ?? null,
-        constraints: setting.constraints_json || {},
-        state: setting.state_json || {},
-        payload: setting.payload_json || {},
+        state: leanState,
+        payload: leanPayload,
         ...characterMetadata,
       },
     })
@@ -505,6 +555,10 @@ export function buildSettingRelationshipGraph(input: SettingRelationshipGraphInp
   for (const setting of settings) {
     const nodeId = settingNodeId(setting)
     const entityType = String(setting.entity_type || '')
+    // Character cards that are clearly non-person slices should not spam isolation diagnostics.
+    if (entityType === 'character' && !isRelationGraphPersonName(String(setting.name || ''))) continue
+    // Per-chapter outline hooks are continuity notes, not graph-critical key assets.
+    if (isChapterOutlineHookAsset(setting)) continue
     if (KEY_ASSET_TYPES.has(entityType) && !connectedByNonChapterEdge.has(nodeId)) {
       diagnostics.push({
         type: 'isolated_key_asset',

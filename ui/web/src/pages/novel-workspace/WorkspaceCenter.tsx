@@ -3,28 +3,24 @@ import { Button, Input, Modal, Popover, Progress, Slider, Space, Tag, Tooltip, T
 import {
   CheckCircleOutlined,
   ClockCircleOutlined,
-  DownOutlined,
   FontSizeOutlined,
   LineHeightOutlined,
   MoreOutlined,
-  PlayCircleOutlined,
   StopOutlined,
   SyncOutlined,
-  UpOutlined,
 } from '@ant-design/icons'
-import { chapterStatusTag, chapterWordCount, displayValue } from './utils'
+import { chapterWordCount, displayValue } from './utils'
 import {
   buildNovelDraftBriefSummary,
   buildNovelDeliverySummary,
   buildNovelWritingRecommendation,
-  buildNovelWritingResponsibility,
   type NovelDeliveryActionKey,
   type NovelDeliverySummaryInput,
   type NovelWritingRecommendedActionKey,
   type NovelWritingRecommendation,
 } from './writingRecommendationModel'
+import { buildCharacterPovUiModel } from './characterPovUiModel'
 import type { ChapterHandoffDeskModel, DeslopGateDiagnosticsModel, WritingQueueItem, WritingQueueModel } from './writingCockpitModel'
-import { pickWritingAuxFocusTags } from './writingAuxFocusModel'
 import type { EditorView } from '@codemirror/view'
 import { ProseEditor } from './workspace-center-prose-editor'
 import { WorkspaceCenterWritingSupport } from './workspace-center-writing-support'
@@ -41,13 +37,16 @@ import {
   EditorDisplayControls,
   EDITOR_DISPLAY_PRESETS,
   loadEditorDisplayPrefs,
-  loadWritingAuxCollapsed,
   saveEditorDisplayPrefs,
   saveWritingAuxCollapsed,
-  SaveIndicator,
   type EditorDisplayPrefs,
   type SaveStatus,
 } from './workspace-center-chrome'
+import { ChapterActionBar } from './workspace-center-chapter-action-bar'
+import { proseStreamControl } from './prose-stream-control'
+import { WorkspaceCenterChapterContext } from './workspace-center-chapter-context'
+import { WorkspaceCenterQualityRevisionPanel } from './workspace-center-quality-revision-panel'
+import { buildChapterWorkflowPresenter } from './chapter-workflow-presenter'
 import './WorkspaceCenter.css'
 
 const { Title, Text, Paragraph } = Typography
@@ -113,6 +112,13 @@ export function WorkspaceCenter({
   deliveryActionLoading,
   onDeliveryAction,
   onRepairDeslopGate,
+  onOpenVersionHistory,
+  onFocusQualityPanel,
+  proseQualityReports = [],
+  editorRevisionReports = [],
+  proseQualityLoading = false,
+  onRefreshProseQuality,
+  onApplyEditorRevision,
   isImmersiveShell = false,
 }: {
   isEmptyProject: boolean
@@ -175,10 +181,17 @@ export function WorkspaceCenter({
   deliveryActionLoading?: boolean
   onDeliveryAction?: (key: NovelDeliveryActionKey) => void
   onRepairDeslopGate?: () => void
+  onOpenVersionHistory?: () => void
+  onFocusQualityPanel?: () => void
+  proseQualityReports?: any[]
+  editorRevisionReports?: any[]
+  proseQualityLoading?: boolean
+  onRefreshProseQuality?: () => void
+  onApplyEditorRevision?: (report: any, options?: { revisionMode?: string; prompt?: string; skipConfirm?: boolean }) => void
   isImmersiveShell?: boolean
 }) {
   const [editorDisplayPrefs, setEditorDisplayPrefs] = React.useState<EditorDisplayPrefs>(() => loadEditorDisplayPrefs())
-  const [writingAuxCollapsed, setWritingAuxCollapsed] = React.useState(() => loadWritingAuxCollapsed())
+  const [writingAuxCollapsed, setWritingAuxCollapsed] = React.useState(() => true)
   const [immersiveAuxOpen, setImmersiveAuxOpen] = React.useState(false)
   const [blueprintEditorOpen, setBlueprintEditorOpen] = React.useState(false)
   const [blueprintEditorText, setBlueprintEditorText] = React.useState('')
@@ -196,7 +209,6 @@ export function WorkspaceCenter({
   const sceneCards = activeChapter && Array.isArray(activeChapter.scene_list) && activeChapter.scene_list.length > 0
     ? activeChapter.scene_list
     : (activeChapter && Array.isArray(activeChapter.scene_breakdown) ? activeChapter.scene_breakdown : [])
-  const firstScene = sceneCards[0]
   const dependencyText = [
     worldbuildingCount > 0 ? '世界观已备' : '缺世界观',
     characterCount > 0 ? '角色已备' : '缺角色',
@@ -209,8 +221,50 @@ export function WorkspaceCenter({
     sceneCardCount: sceneCards.length,
     activeWordCount,
   })
-  const aiResponsibility = buildNovelWritingResponsibility(recommendedAction)
-  const deliverySummary = buildNovelDeliverySummary(chapterAcceptanceDesk)
+  const deliverySummaryBase = buildNovelDeliverySummary(chapterAcceptanceDesk)
+  const characterPovQualityFindings = [
+    ...((Array.isArray((chapterAcceptanceDesk as any)?.qualityWarnings)
+      ? (chapterAcceptanceDesk as any).qualityWarnings
+      : []) as any[]),
+    ...((Array.isArray((chapterAcceptanceDesk as any)?.qualityAudit?.checks)
+      ? (chapterAcceptanceDesk as any).qualityAudit.checks
+      : []) as any[]),
+    ...((Array.isArray((chapterAcceptanceDesk as any)?.qualityAudit?.evidence)
+      ? (chapterAcceptanceDesk as any).qualityAudit.evidence
+      : []) as any[]),
+    ...((Array.isArray((chapterAcceptanceDesk as any)?.qualityAudit?.fixes)
+      ? (chapterAcceptanceDesk as any).qualityAudit.fixes.map((fix: string) => ({ key: 'quality_fix', label: '质检修复', fix }))
+      : []) as any[]),
+  ]
+  const characterPovUi = buildCharacterPovUiModel({
+    sceneCards: Array.isArray(sceneCards) ? sceneCards : [],
+    characters: Array.isArray((chapterAcceptanceDesk as any)?.characters) ? (chapterAcceptanceDesk as any).characters : [],
+    chapterText: String(activeChapter?.chapter_text || activeChapter?.chapterText || ''),
+    qualityFindings: characterPovQualityFindings,
+  })
+  const deliverySummary = {
+    ...deliverySummaryBase,
+    characterPov: characterPovUi
+      ? {
+          visible: true,
+          status: characterPovUi.status,
+          statusLabel: characterPovUi.statusLabel,
+          primaryPov: characterPovUi.primaryPov,
+          multiPovLocked: characterPovUi.multiPovLocked,
+          allowedSecondaryPovs: characterPovUi.allowedSecondaryPovs,
+          secondaryCutPreview: characterPovUi.secondaryCutPreview,
+          assetFirewallPreview: characterPovUi.assetFirewallPreview,
+          dialogueFilterPreview: characterPovUi.dialogueFilterPreview,
+          scenePreview: characterPovUi.scenes.slice(0, 4).map((scene) => (
+            `场景${scene.sceneNo} · ${scene.povCharacter || '未定'} · 选择=${scene.decisionInScene || '待补'}`
+          )),
+          knowledgePreview: characterPovUi.knowledgePreview,
+          violations: characterPovUi.violations.map((item) => (
+            `${item.label}${item.evidence ? `：${item.evidence}` : ''}${item.fix ? ` → ${item.fix}` : ''}`
+          )),
+        }
+      : deliverySummaryBase.characterPov,
+  }
   const deliveryNeedsStorySync = Boolean(deliverySummary.storyStateSyncAction)
   const deliveryPrimaryIsSync = deliverySummary.actionKey === 'sync_story_state'
   const deliveryNextStepText = (() => {
@@ -279,8 +333,22 @@ export function WorkspaceCenter({
     }
   }
   const recommendedClass = (key: NovelWritingRecommendedActionKey) => key === recommendedAction.key ? 'novel-editor-recommended-action' : undefined
+  const modelCommandKeys = new Set<string>([
+    'generate',
+    'scene_cards',
+    'quality_card',
+    'build_brief',
+    'revise',
+    'recheck',
+    'repair',
+    'diagnostics',
+  ])
   const commandClass = (key?: NovelWritingRecommendedActionKey, extra = '') => [
     'novel-editor-command-pill',
+    'novel-btn-crystal',
+    key && modelCommandKeys.has(String(key))
+      ? 'novel-btn-crystal-model'
+      : (String(extra || '').includes('novel-btn-crystal-') ? '' : 'novel-btn-crystal-display'),
     key ? recommendedClass(key) : '',
     extra,
   ].filter(Boolean).join(' ')
@@ -364,24 +432,65 @@ export function WorkspaceCenter({
             tags: [],
           }
     : null
-  const recommendedToolbarLoading = recommendedAction.key === 'diagnostics'
-    ? diagnosticsLoading
-    : recommendedAction.key === 'scene_cards'
-      ? generatingSceneCards
-      : recommendedAction.key === 'quality_card'
-        ? false
-        : generatingProse
-  const runRecommendedToolbarAction = () => {
-    if (recommendedAction.key === 'diagnostics') onOpenGenerationDiagnostics()
-    if (recommendedAction.key === 'scene_cards') onGenerateSceneCards()
-    if (recommendedAction.key === 'repair_generate') onRepairAndGenerateCurrentChapter()
-    if (recommendedAction.key === 'generate') onGenerateCurrentChapterProse()
-    if (recommendedAction.key === 'quality_card') onOpenQualityCard()
+  const chapterWorkflow = buildChapterWorkflowPresenter({
+    hasChapter: Boolean(activeChapter),
+    hasProse: activeWordCount > 0,
+    materialReady,
+    materialBlockReason: materialRecommendations[0] || '',
+    acceptanceStatus: String(chapterAcceptanceDesk?.acceptanceStatus || ''),
+    admissionStatus: String((chapterAcceptanceDesk as any)?.admissionStatus || ''),
+    admissionMessage: String((chapterAcceptanceDesk as any)?.admissionMessage || deliverySummary.reason || ''),
+    storyStateSynced: Boolean(
+      chapterAcceptanceDesk?.storyStateSynced === true
+      || deliverySummary.storyStatePanel?.status === 'synced'
+      || String(deliverySummary.storyStateLabel || '').includes('已同步'),
+    ),
+    qualityScore: chapterAcceptanceDesk?.qualityScore ?? null,
+    canSyncStoryState: Boolean(deliverySummary.storyStateSyncAction || deliverySummary.storyStatePanel?.canSync),
+    revisionAvailable: Boolean(chapterAcceptanceDesk?.acceptanceStatus === 'needs_revision'),
+  })
+  const chapterActionLoading = Boolean(
+    generatingProse || deliveryActionLoading || preDraftBriefLoading || editorReportLoading,
+  )
+  const runChapterWorkflowAction = (key: string) => {
+    if (key === 'generate') {
+      onGenerateCurrentChapterProse()
+      return
+    }
+    if (key === 'repair_generate') {
+      onRepairAndGenerateCurrentChapter()
+      return
+    }
+    if (key === 'repair_materials') {
+      onRepairAndGenerateCurrentChapter()
+      return
+    }
+    if (key === 'open_story_assets') {
+      onOpenStoryAssets()
+      return
+    }
+    if (key === 'open_generation_diagnostics') {
+      onOpenGenerationDiagnostics()
+      return
+    }
+    if (key === 'open_versions') {
+      onOpenVersionHistory?.()
+      return
+    }
+    if (key === 'view_brief') {
+      setWritingAuxCollapsed(false)
+      return
+    }
+    if (key === 'view_quality') {
+      onFocusQualityPanel?.()
+      onOpenQualityCard()
+      return
+    }
+    if (key === 'refresh_current_quality' || key === 'create_editor_report' || key === 'apply_editor_revision' || key === 'sync_story_state' || key === 'accept_chapter_and_continue') {
+      onDeliveryAction?.(key as any)
+      return
+    }
   }
-  const writingAuxToggleLabel = writingAuxCollapsed ? '展开辅助面板' : '收起辅助面板'
-  const writingAuxToggleHint = writingAuxCollapsed
-    ? '辅助面板已收起，编辑器优先显示'
-    : '辅助面板已展开，可查看队列、交稿和任务书'
   const writingAuxQueueSummary = writingQueue?.visible
     ? [
         `可写 ${writingQueue.readyCount}`,
@@ -401,6 +510,13 @@ export function WorkspaceCenter({
   React.useEffect(() => {
     if (!isImmersiveShell) setImmersiveAuxOpen(false)
   }, [isImmersiveShell])
+
+  React.useEffect(() => {
+    if (!generatingProse) return
+    // Keep the writing surface usable: expanded delivery/brief panels can fill the center and trap the layout.
+    setWritingAuxCollapsed(true)
+    setImmersiveAuxOpen(false)
+  }, [generatingProse])
 
   const secondaryActionMenu = (
     <WorkspaceCenterSecondaryActionMenu
@@ -478,138 +594,117 @@ export function WorkspaceCenter({
 
       {!isEmptyProject && activeChapter && (
         <>
-          <div className="novel-editor-toolbar">
-            <div className="novel-editor-toolbar-meta">
-              <Title className="novel-editor-title" level={5}>
-                第{activeChapter.chapter_no}章《{displayValue(activeChapter.title) || '无标题'}》
-              </Title>
-              <div className="novel-editor-status-stack">
-                {chapterStatusTag(activeChapter)}
-                {materialScore && (
-                  <Tooltip title={(materialScore.recommendations || []).slice(0, 4).join('；') || '材料完整度'}>
-                    <Tag
-                      className={`novel-editor-material-tag${materialScore.can_generate ? ' is-ready' : Number(materialScore.score || 0) >= 65 ? ' is-warn' : ' is-blocked'}`}
-                      bordered={false}
-                    >
-                      材料 {materialScore.score ?? '-'}%
-                    </Tag>
-                  </Tooltip>
-                )}
-              </div>
-            </div>
-            <div className="novel-editor-primary-entry">
-              <div className="novel-editor-primary-cluster">
-                <Tag className="novel-editor-primary-phase" bordered={false}>{aiResponsibility.phaseLabel}</Tag>
-                <Tooltip title={`${recommendedAction.label}：${recommendedAction.reason}`}>
-                  <Button
-                    type="primary"
-                    size="small"
-                    className={commandClass(recommendedAction.key, 'novel-editor-primary-command novel-editor-primary-action-main')}
-                    icon={<PlayCircleOutlined />}
-                    loading={recommendedToolbarLoading}
-                    onClick={runRecommendedToolbarAction}
-                  >
-                    {recommendedAction.label}
-                  </Button>
-                </Tooltip>
-              </div>
-              {recommendedAction.phase === 'draft' && renderWordTargetControl()}
-            </div>
-            <div className="novel-editor-toolbar-controls">
-              <Text className="novel-editor-word-count" type="secondary">{chapterWordCount(activeChapter)} 字</Text>
-              <SaveIndicator status={saveStatus} />
-              <EditorDisplayControls prefs={editorDisplayPrefs} onChange={setEditorDisplayPrefs} />
-              <Popover content={secondaryActionMenu} trigger="click" placement="bottomRight">
-                <Button className="novel-editor-more-actions" size="small" icon={<MoreOutlined />}>更多</Button>
-              </Popover>
-              {isImmersiveShell && (
-                <div className="novel-writing-immersive-aux">
-                  <div className="novel-writing-immersive-aux-tags">
-                    {pickWritingAuxFocusTags({
-                      delivery: deliverySummary.visible
-                        ? {
-                            visible: true,
-                            statusLabel: deliverySummary.statusLabel,
-                            risky: /风险|待|阻断|失败|需/.test(String(deliverySummary.statusLabel || '')),
-                          }
-                        : null,
-                      queue: writingQueue?.visible
-                        ? { visible: true, summary: writingAuxQueueSummary }
-                        : null,
-                      brief: draftBriefSummary.visible
-                        ? {
-                            visible: true,
-                            statusLabel: draftBriefSummary.statusLabel,
-                            hasGap: /缺口|待|未/.test(String(draftBriefSummary.statusLabel || '')),
-                          }
-                        : null,
-                      handoff: chapterHandoffDesk?.visible
-                        ? { visible: true, label: chapterHandoffDesk.label }
-                        : null,
-                    }).map(tag => (
-                      <Tag key={tag.key} color={tag.color} bordered={false}>{tag.label}</Tag>
-                    ))}
-                  </div>
-                  <Popover
-                    trigger="click"
-                    open={immersiveAuxOpen}
-                    onOpenChange={setImmersiveAuxOpen}
-                    placement="bottomRight"
-                    overlayClassName="novel-writing-immersive-aux-popover"
-                    content={
-                      <div className="novel-writing-immersive-aux-panel" aria-label="写作辅助面板">
-                        {writingSupportBody}
-                      </div>
-                    }
-                  >
-                    <Button size="small" className="novel-writing-immersive-aux-trigger">辅助</Button>
+          <div className="novel-writing-header">
+            <ChapterActionBar
+              presenter={chapterWorkflow}
+              loading={chapterActionLoading}
+              title={
+                <Title className="chapter-action-bar-title novel-editor-title" level={5}>
+                  第{activeChapter.chapter_no}章《{displayValue(activeChapter.title) || '无标题'}》
+                </Title>
+              }
+              statusTags={[
+                {
+                  key: 'chapter-status',
+                  label: activeWordCount > 0 ? '已写' : '未写',
+                  color: activeWordCount > 0 ? 'green' : 'default',
+                },
+                ...(materialScore ? [{
+                  key: 'material',
+                  label: `材料 ${materialScore.score ?? '-'}%`,
+                  color: materialScore.can_generate ? 'green' : Number(materialScore.score || 0) >= 65 ? 'gold' : 'red',
+                  tooltip: (materialScore.recommendations || []).slice(0, 4).join('；') || '材料完整度',
+                }] : []),
+              ]}
+              wordCountLabel={`${chapterWordCount(activeChapter)} 字`}
+              saveStatusLabel={saveStatus === 'saved' ? '已保存' : saveStatus === 'saving' ? '保存中' : saveStatus === 'error' ? '保存失败' : undefined}
+              detailsOpen={!writingAuxCollapsed}
+              onToggleDetails={() => setWritingAuxCollapsed(prev => !prev)}
+              detailsSummary={[
+                ...(writingQueue?.visible
+                  ? [
+                      `可写 ${writingQueue.readyCount}`,
+                      writingQueue.blockedCount > 0 ? `待补 ${writingQueue.blockedCount}` : '',
+                      writingQueue.draftedCount > 0 ? `待质检 ${writingQueue.draftedCount}` : '',
+                    ]
+                  : []),
+                deliverySummary.visible ? `交稿 ${deliverySummary.statusLabel}` : '',
+              ].filter(Boolean)}
+              trailing={(
+                <Space size={6} wrap>
+                  {(chapterWorkflow.phase === 'empty' || chapterWorkflow.phase === 'blocked_materials' || recommendedAction.phase === 'draft') && renderWordTargetControl()}
+                  <EditorDisplayControls prefs={editorDisplayPrefs} onChange={setEditorDisplayPrefs} />
+                  <Popover content={secondaryActionMenu} trigger="click" placement="bottomRight">
+                    <Button className="novel-editor-more-actions" size="small" icon={<MoreOutlined />}>更多</Button>
                   </Popover>
-                </div>
+                  {isImmersiveShell && (
+                    <div className="novel-writing-immersive-aux">
+                      <Popover
+                        trigger="click"
+                        open={immersiveAuxOpen}
+                        onOpenChange={setImmersiveAuxOpen}
+                        placement="bottomRight"
+                        overlayClassName="novel-writing-immersive-aux-popover"
+                        content={(
+                          <div className="novel-writing-immersive-aux-panel" aria-label="写作辅助面板">
+                            {writingSupportBody}
+                          </div>
+                        )}
+                      >
+                        <Button size="small" className="novel-writing-immersive-aux-trigger novel-btn-crystal novel-btn-crystal-display">辅助</Button>
+                      </Popover>
+                    </div>
+                  )}
+                </Space>
               )}
-            </div>
+              handlers={{
+                onGenerate: () => runChapterWorkflowAction('generate'),
+                onRepairGenerate: () => runChapterWorkflowAction('repair_generate'),
+                onRepairMaterials: () => runChapterWorkflowAction('repair_materials'),
+                onRefreshQuality: () => runChapterWorkflowAction('refresh_current_quality'),
+                onCreateEditorReport: () => runChapterWorkflowAction('create_editor_report'),
+                onApplyEditorRevision: () => runChapterWorkflowAction('apply_editor_revision'),
+                onSyncStoryState: () => runChapterWorkflowAction('sync_story_state'),
+                onAcceptAndContinue: () => runChapterWorkflowAction('accept_chapter_and_continue'),
+                onOpenStoryAssets: () => runChapterWorkflowAction('open_story_assets'),
+                onOpenDiagnostics: () => runChapterWorkflowAction('open_generation_diagnostics'),
+                onOpenVersions: () => runChapterWorkflowAction('open_versions'),
+                onOpenBrief: () => runChapterWorkflowAction('view_brief'),
+                onOpenQuality: () => runChapterWorkflowAction('view_quality'),
+              }}
+            />
+            {!isImmersiveShell && !writingAuxCollapsed && (
+              <div className="novel-writing-header-details" aria-label="写作辅助详情">
+                {writingSupportBody}
+              </div>
+            )}
           </div>
 
-          {!isImmersiveShell && (
-            <>
-              <div className={`novel-writing-aux-rail ${writingAuxCollapsed ? 'is-collapsed' : 'is-expanded'}`} aria-label="写作辅助面板状态">
-                <div className="novel-writing-aux-summary">
-                  {writingQueue?.visible && <Tag bordered={false}>队列 {writingAuxQueueSummary}</Tag>}
-                  {deliverySummary.visible && <Tag bordered={false}>交稿 {deliverySummary.statusLabel}</Tag>}
-                  {chapterHandoffDesk?.visible && <Tag bordered={false}>交接 {chapterHandoffDesk.label}</Tag>}
-                  {draftBriefSummary.visible && <Tag bordered={false}>任务书 {draftBriefSummary.statusLabel}</Tag>}
-                </div>
-                <Space className="novel-writing-aux-controls" size={6} wrap>
-                  <Tooltip title={writingAuxToggleHint}>
+          {streamingChapterId === activeChapter.id && (
+            <div className="novel-streaming-progress" style={{ flexShrink: 0, padding: '10px 16px', background: '#f0f7ff', borderBottom: '1px solid #d6e4ff' }}>
+              <Space direction="vertical" style={{ width: '100%' }} size={8}>
+                <Space align="center" style={{ width: '100%', justifyContent: 'space-between' }} wrap>
+                  <Space align="center" wrap>
+                    <Text strong style={{ fontSize: 13 }}>🤖 生成进度</Text>
+                    <Tag color={streamingProgress === '生成失败' ? 'red' : streamingProgress?.includes('取消') ? 'default' : 'blue'}>{streamingProgress || '进行中'}</Tag>
+                    <Text type="secondary">{Math.round(streamingPercent)}%</Text>
+                  </Space>
+                  {generatingProse ? (
                     <Button
                       size="small"
-                      className="novel-writing-aux-toggle"
-                      icon={writingAuxCollapsed ? <DownOutlined /> : <UpOutlined />}
-                      aria-expanded={!writingAuxCollapsed}
-                      onClick={() => setWritingAuxCollapsed(prev => !prev)}
+                      danger
+                      icon={<StopOutlined />}
+                      onClick={() => {
+                        proseStreamControl.cancel()
+                        // local UI unlock immediately even if request is mid-flight
+                        // handlers also clear state on abort
+                      }}
                     >
-                      {writingAuxToggleLabel}
+                      停止生成
                     </Button>
-                  </Tooltip>
+                  ) : null}
                 </Space>
-              </div>
-              {!writingAuxCollapsed && (
-                <div className="novel-writing-support-stack" aria-label="写作辅助面板">
-                  {writingSupportBody}
-                </div>
-              )}
-            </>
-          )}
-
-
-          {streamingChapterId === activeChapter.id && (
-            <div style={{ flexShrink: 0, padding: '12px 24px', background: '#f0f7ff', borderBottom: '1px solid #d6e4ff' }}>
-              <Space direction="vertical" style={{ width: '100%' }} size={8}>
-                <Space align="center">
-                  <Text strong style={{ fontSize: 13 }}>🤖 生成进度</Text>
-                  <Tag color="blue">{streamingProgress || '进行中'}</Tag>
-                  <Text type="secondary">{Math.round(streamingPercent)}%</Text>
-                </Space>
-                <Progress percent={streamingPercent} status={streamingProgress === '生成失败' ? 'exception' : 'active'} size="small" />
+                <Progress percent={streamingPercent} status={streamingProgress === '生成失败' ? 'exception' : streamingProgress?.includes('取消') ? 'normal' : 'active'} size="small" />
                 {Array.isArray(generationPipeline) && generationPipeline.length > 0 && (
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     {generationPipeline.slice(-6).map((stage: any, index: number) => (
@@ -623,7 +718,7 @@ export function WorkspaceCenter({
                     ))}
                   </div>
                 )}
-                <Paragraph style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13, maxHeight: 200, overflow: 'auto', margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                <Paragraph style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13, maxHeight: 120, overflow: 'auto', margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
                   {streamingText}
                   <div ref={streamingEndRef} />
                 </Paragraph>
@@ -631,57 +726,25 @@ export function WorkspaceCenter({
             </div>
           )}
 
-          <details className="novel-context-panel" style={{ flexShrink: 0, margin: 0 }}>
-            <summary className="novel-context-strip">
-              <span className="novel-context-strip-title">章节上下文</span>
-              <span className="novel-context-pill">
-                <strong>本章任务</strong>
-                <span>{displayValue(activeChapter.chapter_goal) || displayValue(activeChapter.chapter_summary) || '待补齐'}</span>
-              </span>
-              <span className="novel-context-pill">
-                <strong>写作约束</strong>
-                <span>{displayValue(activeChapter.conflict) || displayValue(activeChapter.ending_hook) || dependencyText}</span>
-              </span>
-              <span className="novel-context-pill">
-                <strong>场景节拍</strong>
-                <span>{sceneCards.length > 0 ? `${sceneCards.length} 场 · ${displayValue(firstScene?.title || firstScene?.description || firstScene?.purpose) || '待命名'}` : '暂无场景卡'}</span>
-              </span>
-            </summary>
-            <div className="novel-context-cards">
-              <section className="novel-context-card">
-                <Text strong>本章任务</Text>
-                <Text>{displayValue(activeChapter.chapter_goal) || '暂无章节目标'}</Text>
-                <Text type="secondary">{displayValue(activeChapter.chapter_summary) || '暂无章节摘要'}</Text>
-              </section>
-              <section className="novel-context-card">
-                <Text strong>写作约束</Text>
-                <Text>冲突：{displayValue(activeChapter.conflict) || '-'}</Text>
-                <Text>结尾钩子：{displayValue(activeChapter.ending_hook) || '-'}</Text>
-                <Text type="secondary">必须推进：{requiredAdvances.length > 0 ? requiredAdvances.join('；') : '-'}</Text>
-                <Text type="secondary">禁止重复：{forbiddenRepeats.length > 0 ? forbiddenRepeats.join('；') : '-'}</Text>
-                <Text type="secondary">{dependencyText} · 状态 {displayValue(activeChapter.status) || '-'}</Text>
-              </section>
-              <section className="novel-context-card novel-context-card-scenes">
-                <Text strong>场景节拍</Text>
-                {sceneCards.length > 0 ? sceneCards.map((scene: any, index: number) => (
-                  <div key={`${scene.scene_no || index}-${scene.title || index}`} className="novel-context-scene">
-                    <Space wrap size={[6, 4]}>
-                      <Tag color="blue" bordered={false}>场景 {scene.scene_no || index + 1}</Tag>
-                      {scene.location && <Tag bordered={false}>{scene.location}</Tag>}
-                      {scene.emotional_tone && <Tag color="purple" bordered={false}>{scene.emotional_tone}</Tag>}
-                    </Space>
-                    <Text strong>{displayValue(scene.title || scene.description || scene.purpose) || '未命名场景'}</Text>
-                    {(scene.purpose || scene.description) && <Text>{displayValue(scene.purpose || scene.description)}</Text>}
-                    {scene.conflict && <Text type="secondary">冲突：{displayValue(scene.conflict)}</Text>}
-                    {scene.beat && <Text type="secondary">节拍：{displayValue(scene.beat)}</Text>}
-                    {scene.exit_state && <Text type="secondary">出场状态：{displayValue(scene.exit_state)}</Text>}
-                  </div>
-                )) : (
-                  <Text type="secondary">暂无场景卡，生成正文前建议先补齐场景节拍。</Text>
-                )}
-              </section>
-            </div>
-          </details>
+          <WorkspaceCenterChapterContext
+            activeChapter={activeChapter}
+            requiredAdvances={requiredAdvances}
+            forbiddenRepeats={forbiddenRepeats}
+            sceneCards={sceneCards}
+            dependencyText={dependencyText}
+          />
+
+          <WorkspaceCenterQualityRevisionPanel
+            activeChapter={activeChapter}
+            proseQualityReports={proseQualityReports}
+            editorRevisionReports={editorRevisionReports}
+            proseQualityLoading={proseQualityLoading}
+            editorReportLoading={editorReportLoading}
+            onRefreshProseQuality={onRefreshProseQuality}
+            onApplyEditorRevision={onApplyEditorRevision}
+            onCreateEditorReport={onCreateEditorReport}
+            onOpenSideQuality={onFocusQualityPanel}
+          />
 
           <ProseEditor
             value={activeChapter.chapter_text || ''}

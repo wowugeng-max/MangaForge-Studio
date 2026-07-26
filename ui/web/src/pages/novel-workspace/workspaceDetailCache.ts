@@ -41,6 +41,9 @@ const CHAPTER_DETAIL_SCENE_KEYS = [
   'scene_no', 'title', 'scene_type', 'location', 'characters_present',
   'purpose', 'purpose_tag', 'conflict', 'beat', 'opening_hook', 'ending_hook_seed',
   'emotional_tone', 'exit_state', 'description',
+  // Character POV (keep compact but visible in workspace UI)
+  'pov_lens', 'pov_character', 'decision_in_scene', 'want_now', 'fear_or_cost_now',
+  'emotion_in_situation', 'emotion_tell', 'protagonist_agency_action',
 ] as const
 
 function compactDetailText(value: any, max = 400) {
@@ -49,15 +52,46 @@ function compactDetailText(value: any, max = 400) {
   return `${text.slice(0, max)}…`
 }
 
+function compactPovLensForWorkspace(lens: any) {
+  if (!lens || typeof lens !== 'object') return lens
+  const list = (value: any, maxItems = 4, maxLen = 80) => (
+    Array.isArray(value)
+      ? value.slice(0, maxItems).map((item) => compactDetailText(item, maxLen)).filter(Boolean)
+      : []
+  )
+  return {
+    pov_character: compactDetailText(lens.pov_character || lens.povCharacter, 40),
+    knows_now: list(lens.knows_now || lens.knowsNow),
+    suspects_now: list(lens.suspects_now || lens.suspectsNow, 3),
+    does_not_know: list(lens.does_not_know || lens.doesNotKnow, 3),
+    want_now: compactDetailText(lens.want_now || lens.wantNow, 100),
+    fear_or_cost_now: compactDetailText(lens.fear_or_cost_now || lens.fearOrCostNow, 100),
+    private_bias: compactDetailText(lens.private_bias || lens.privateBias, 100),
+    allowed_senses: list(lens.allowed_senses || lens.allowedSenses, 5, 24),
+    decision_in_scene: compactDetailText(lens.decision_in_scene || lens.decisionInScene, 120),
+    emotion_from_pov: compactDetailText(lens.emotion_from_pov || lens.emotionFromPov, 80),
+    emotion_tell: compactDetailText(lens.emotion_tell || lens.emotionTell, 100),
+  }
+}
+
 function compactChapterSceneForWorkspace(scene: any) {
   if (!scene || typeof scene !== 'object') return scene
   const compact: Record<string, any> = {}
   for (const key of CHAPTER_DETAIL_SCENE_KEYS) {
     if (scene[key] === undefined) continue
     const value = scene[key]
+    if (key === 'pov_lens') {
+      compact[key] = compactPovLensForWorkspace(value)
+      continue
+    }
     compact[key] = typeof value === 'string' ? compactDetailText(value, key === 'purpose' || key === 'conflict' ? 500 : 180) : value
   }
   if (!compact.title && scene.description) compact.title = compactDetailText(scene.description, 80)
+  // Prefer nested lens when top-level POV fields were omitted upstream.
+  if (!compact.pov_character && compact.pov_lens?.pov_character) compact.pov_character = compact.pov_lens.pov_character
+  if (!compact.decision_in_scene && compact.pov_lens?.decision_in_scene) compact.decision_in_scene = compact.pov_lens.decision_in_scene
+  if (!compact.want_now && compact.pov_lens?.want_now) compact.want_now = compact.pov_lens.want_now
+  if (!compact.fear_or_cost_now && compact.pov_lens?.fear_or_cost_now) compact.fear_or_cost_now = compact.pov_lens.fear_or_cost_now
   return compact
 }
 

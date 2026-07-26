@@ -139,6 +139,11 @@ export function compactProseSceneCard(card: any) {
     chapter_positioning_role: card?.chapter_positioning_role || card?.chapterPositioningRole,
     benchmark_structure_coordinate: card?.benchmark_structure_coordinate || card?.benchmarkStructureCoordinate,
     ending_hook_seed: proseSceneCardText(card?.ending_hook_seed || card?.endingHookSeed),
+    pov_character: proseSceneCardText(card?.pov_character || card?.povCharacter || card?.pov_lens?.pov_character || card?.povLens?.pov_character, 40),
+    decision_in_scene: proseSceneCardText(card?.decision_in_scene || card?.decisionInScene || card?.pov_lens?.decision_in_scene || card?.povLens?.decisionInScene, 160),
+    emotion_in_situation: proseSceneCardText(card?.emotion_in_situation || card?.emotionInSituation || card?.pov_lens?.emotion_from_pov || card?.povLens?.emotion_from_pov, 120),
+    emotion_tell: proseSceneCardText(card?.emotion_tell || card?.emotionTell || card?.pov_lens?.emotion_tell || card?.povLens?.emotion_tell, 160),
+    pov_lens: card?.pov_lens || card?.povLens || undefined,
   })
 }
 

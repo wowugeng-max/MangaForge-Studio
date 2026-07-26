@@ -1,3 +1,4 @@
+import { ensureOpeningHandoffBridge, extractPrimaryEndingHooks } from '../../novel-writing/chapter-continuity-guard'
 import {
   enrichContextWithStrongHandoff,
 } from '../../novel-writing/chapter-handoff-basics'
@@ -16,8 +17,13 @@ import {
 } from '../../novel-writing/title-uniqueness'
 import {
   countProseChars,
-  proseMaxTokensForWordTarget,
 } from '../../novel-writing/word-target'
+import {
+  attachModelFamilyToContextPackage,
+  buildModelFamilyStrategy,
+  proseMaxTokensForModelFamily,
+  resolveModelRuntimeIdentity,
+} from '../../novel-writing/model-family-strategy'
 import {
   asArray,
   buildLLMResultDiagnostics,
@@ -93,25 +99,47 @@ await onStage('migration_plan', { status: 'running' })
 const migrationPlan = await getReferenceMigrationPlanForChapter(activeWorkspace, project, chapter).catch(error => ({ error: String(error) }))
 await onStage('migration_plan', { status: (migrationPlan as any)?.error ? 'warn' : 'success', active_reference_count: (migrationPlan as any)?.chapter_specific_plan?.active_reference_count || 0 })
 throwIfChapterGenerationAborted()
-const compiledPrompt = compileParagraphProseContext(project, generationContract, migrationPlan, chapter)
-await onStage('draft', { status: 'running', prompt_diagnostics: compiledPrompt.diagnostics })
+const draftModelId = getStageModelId(project, 'draft', preferredModelId)
+const runtimeModel = resolveModelRuntimeIdentity({
+  activeWorkspace,
+  modelId: draftModelId,
+  fallback: options.runtime_model || contextPackage?.runtime_model || generationContract?.context?.runtime_model,
+})
+const modelFamilyStrategy = buildModelFamilyStrategy(runtimeModel)
+const contextPackageWithFamily = attachModelFamilyToContextPackage(contextPackage, runtimeModel)
+const generationContractWithFamily = generationContract?.version === 'prose_generation_contract_v1'
+  ? {
+      ...generationContract,
+      context: attachModelFamilyToContextPackage(generationContract.context || {}, runtimeModel),
+    }
+  : attachModelFamilyToContextPackage(generationContract || contextPackageWithFamily, runtimeModel)
+const compiledPrompt = compileParagraphProseContext(project, generationContractWithFamily, migrationPlan, chapter)
+await onStage('draft', {
+  status: 'running',
+  prompt_diagnostics: compiledPrompt.diagnostics,
+  model_family: modelFamilyStrategy.family,
+  model_write_mode: modelFamilyStrategy.write_mode,
+  model_name: runtimeModel.model_name || null,
+})
 const draftResult = await generateNovelChapterProse(project, chapter, {
   worldbuilding,
   characters,
   outline: outlines,
   prompt: String(options.prompt || ''),
   prevChapters,
-  contextPackage,
+  contextPackage: contextPackageWithFamily,
   migrationPlan,
   paragraphTask: compiledPrompt.prompt,
   promptDiagnostics: compiledPrompt.diagnostics,
   boundedProseContract: true,
-  maxTokens: proseMaxTokensForWordTarget(wordTarget),
+  maxTokens: proseMaxTokensForModelFamily(wordTarget, modelFamilyStrategy),
+  temperature: modelFamilyStrategy.temperature,
+  modelFamilyStrategy,
   abortSignal: options.abortSignal,
   llmTimeoutMs: options.llmTimeoutMs,
 } as any, {
   activeWorkspace,
-  modelId: String(getStageModelId(project, 'draft', preferredModelId) || ''),
+  modelId: String(draftModelId || ''),
   skipMemoryStore: true,
 })
 assertCompleteProseTransportResult(draftResult, 'PROSE_DRAFT_TRUNCATED')
@@ -156,13 +184,39 @@ if (!chapterText) {
   const error = new Error(String((draftResult as any).error || (draftResult as any).fallbackReason || '模型未返回正文'))
   throw markBlockedInvalidError(error, validateMinimalChapterProse('').failures[0])
 }
-await onStage('draft', { status: 'success', word_count: countProseChars(chapterText), modelName: (draftResult as any).modelName, scene_status: 'generated', prompt_diagnostics: draftPromptDiagnostics, plain_text_fallback_used: Boolean(plainProseFallback && !targetProse?.chapter_text && !targetProse?.chapterText && !resultPayload?.chapter_text && !resultPayload?.chapterText) })
+await onStage('draft', { status: 'success', word_count: countProseChars(chapterText), chapter_text: String(chapterText || ''), modelName: (draftResult as any).modelName, scene_status: 'generated', prompt_diagnostics: draftPromptDiagnostics, plain_text_fallback_used: Boolean(plainProseFallback && !targetProse?.chapter_text && !targetProse?.chapterText && !resultPayload?.chapter_text && !resultPayload?.chapterText) })
 let finalText = String(chapterText || '')
+// System-level opening bridge before early draft admission (must run before quality/humanize path).
+{
+  const handoffContext = enrichContextWithProgressResync(enrichContextWithStrongHandoff(contextPackage))
+  const previousChapter = (
+    handoffContext?.continuity?.previous_chapter
+    || handoffContext?.continuity?.previousChapter
+    || contextPackage?.continuity?.previous_chapter
+    || contextPackage?.continuity?.previousChapter
+    || null
+  )
+  const bridge = ensureOpeningHandoffBridge(finalText, previousChapter)
+  if (bridge.bridged) {
+    finalText = bridge.text
+    await onStage('opening_handoff_bridge', {
+      status: 'success',
+      reason: bridge.reason,
+      bridge: bridge.bridge || '',
+      primary_hooks: extractPrimaryEndingHooks(previousChapter).map((item: any) => item.key),
+      stage: 'post_draft_early',
+    })
+  }
+}
 const initialOpeningContinuityAssessment = assessInitialProseOpeningContinuity(finalText, enrichContextWithProgressResync(enrichContextWithStrongHandoff(contextPackage)))
 if (initialOpeningContinuityAssessment.failure) {
   const failure = initialOpeningContinuityAssessment.failure
   throw markBlockedInvalidError(Object.assign(new Error(failure.message), {
     code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+    // Always expose residual prose for packaging/Zhuque even when early admission blocks.
+    chapter_text: finalText,
+    finalText,
+    text: finalText,
   }), failure)
 }
 let finalSceneBreakdown = targetProse?.scene_breakdown || targetProse?.sceneBreakdown || resultPayload?.scene_breakdown || resultPayload?.sceneBreakdown || []

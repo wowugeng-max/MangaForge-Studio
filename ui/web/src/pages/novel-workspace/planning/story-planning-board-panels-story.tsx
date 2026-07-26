@@ -1,5 +1,6 @@
 import React from 'react'
 import { Button, Card, Empty, Progress, Space, Tag, Typography } from 'antd'
+import { DownOutlined, UpOutlined } from '@ant-design/icons'
 import type { StoryPlanningBoardPanelsProps } from './story-planning-board-types'
 import {
   retentionColor,
@@ -20,7 +21,18 @@ import {
 const { Text } = Typography
 
 export function StoryPlanningStoryPanels(props: StoryPlanningBoardPanelsProps) {
-  const { model, loadingKey, onAction, onSelectChapter, compact } = props
+  const {
+    model,
+    loadingKey,
+    onAction,
+    onSelectChapter,
+    compact,
+    healthBoardsOpen = false,
+    onToggleHealthBoards,
+  } = props
+  const [localHealthOpen, setLocalHealthOpen] = React.useState(false)
+  const healthOpen = onToggleHealthBoards ? healthBoardsOpen : localHealthOpen
+  const toggleHealth = onToggleHealthBoards || (() => setLocalHealthOpen(value => !value))
   return (
     <>
           <Card
@@ -152,6 +164,26 @@ export function StoryPlanningStoryPanels(props: StoryPlanningBoardPanelsProps) {
             </Space>
           </Card>
 
+          <Card size="small" styles={{ body: { padding: 12 } }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              <Space direction="vertical" size={2}>
+                <Text strong>剧情体检</Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  压力阶梯、剧情单元、疲劳、人物成长与剧情线默认收起；扩纲时优先看上方流程与卷结构。
+                </Text>
+              </Space>
+              <Button
+                size="small"
+                icon={healthOpen ? <UpOutlined /> : <DownOutlined />}
+                onClick={toggleHealth}
+              >
+                {healthOpen ? '收起剧情体检' : '展开剧情体检'}
+              </Button>
+            </div>
+          </Card>
+
+          {healthOpen ? (
+            <>
           <Card
             className="novel-story-pressure-ladder-card"
             title="故事压力阶梯"
@@ -548,6 +580,8 @@ export function StoryPlanningStoryPanels(props: StoryPlanningBoardPanelsProps) {
               )}
             </Space>
           </Card>
+            </>
+          ) : null}
     </>
   )
 }

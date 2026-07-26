@@ -294,8 +294,7 @@ export function TaskRunCard({
             <Button
               size="small"
               type={taskRunCardPrimaryActionType(model.primaryAction.key)}
-              onClick={onPrimaryAction}
-            >
+              onClick={onPrimaryAction}>
               {model.primaryAction.label}
             </Button>
           )}

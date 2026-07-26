@@ -246,14 +246,12 @@ export function NovelWorkspaceDeferredOpsBibleModals(props: NovelWorkspaceDeferr
         width={860}
         onCancel={() => setWritingBibleOpen(false)}
         footer={[
-          <Button key="generate" onClick={generateWritingBibleEditor} loading={writingBibleGenerating}>
-            自动生成
+          <Button key="generate" onClick={generateWritingBibleEditor} loading={writingBibleGenerating}> 自动生成
           </Button>,
           <Button key="cancel" onClick={() => setWritingBibleOpen(false)}>
             取消
           </Button>,
-          <Button key="save" type="primary" onClick={saveWritingBibleEditor}>
-            保存
+          <Button key="save" type="primary" onClick={saveWritingBibleEditor}> 保存
           </Button>,
         ]}
       >
@@ -336,8 +334,8 @@ export function NovelWorkspaceDeferredOpsBibleModals(props: NovelWorkspaceDeferr
             style={{ marginBottom: 12 }}
             extra={(
               <Space size={8} wrap>
-                <Button size="small" onClick={fillDefaultStyleSampleBank}>填入默认风格样本库</Button>
-                <Button size="small" loading={styleSampleCandidateLoading} onClick={extractStyleSampleCandidates}>从高分章节提炼样本候选</Button>
+                <Button size="small" onClick={fillDefaultStyleSampleBank}> 填入默认风格样本库</Button>
+                <Button size="small" loading={styleSampleCandidateLoading} onClick={extractStyleSampleCandidates}> 从高分章节提炼样本候选</Button>
               </Space>
             )}
           >

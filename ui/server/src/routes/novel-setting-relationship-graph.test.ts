@@ -198,4 +198,48 @@ describe('buildSettingRelationshipGraph', () => {
       missing_start_chapter_count: 1,
     })
   })
+  test('does not flag chapter outline hooks as isolated key assets', () => {
+    const graph = buildSettingRelationshipGraph({
+      settings: [
+        {
+          id: 10,
+          project_id: 7,
+          entity_type: 'foreshadowing',
+          name: '第14章 超人的反向审讯钩子',
+          summary: '章末钩子正文',
+          payload_json: { source: 'outline_hook', outline_id: 92 },
+        },
+        {
+          id: 11,
+          project_id: 7,
+          entity_type: 'foreshadowing',
+          name: '第15章 电梯里的无脸邻居钩子',
+          summary: '另一个章末钩子',
+          payload_json: { source: 'outline_hook', outline_id: 93 },
+        },
+        {
+          id: 12,
+          project_id: 7,
+          entity_type: 'foreshadowing',
+          name: '真正的长线伏笔：断臂神纹',
+          summary: '需要回收的故事伏笔',
+        },
+        {
+          id: 13,
+          project_id: 7,
+          entity_type: 'item',
+          name: '孤立骨片',
+        },
+      ],
+    })
+
+    expect(graph.diagnostics.some(item => item.type === 'isolated_key_asset' && item.entity_id === 10)).toBe(false)
+    expect(graph.diagnostics.some(item => item.type === 'isolated_key_asset' && item.entity_id === 11)).toBe(false)
+    expect(graph.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'isolated_key_asset', entity_id: 12 }),
+      expect.objectContaining({ type: 'isolated_key_asset', entity_id: 13 }),
+    ]))
+    expect(graph.summary.isolated_key_asset_count).toBe(2)
+  })
+
 })

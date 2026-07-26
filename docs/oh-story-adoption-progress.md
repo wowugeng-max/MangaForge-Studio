@@ -1,8 +1,8 @@
 # oh-story 参考迁移进度台账
 
-Last updated: 2026-06-28
+Last updated: 2026-07-20
 
-Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/references`
+Source reference set: oh-story-claudecode v0.7.0 (`skills/story-long-write/references`, compared 2026-07-20)
 
 本台账用于回答三件事：
 
@@ -12,26 +12,33 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 
 <!-- oh-story-progress-summary
 {
-  "reference_total": 38,
+  "reference_total": 40,
   "integrated": 38,
-  "partial": 0,
+  "partial": 2,
   "todo": 0,
   "deferred": 0,
-  "remaining_references": 0,
-  "estimated_hours_remaining": 0,
-  "estimated_working_days_remaining": 0
+  "remaining_references": 2,
+  "estimated_hours_remaining": 16,
+  "estimated_working_days_remaining": 3,
+  "oh_story_version": "0.7.0",
+  "capability_surface": "p0_landed_p1_landed_p2_scaffolded"
 }
 -->
 
 ## Current Snapshot
 
-- Reference files: 38
+- oh-story version compared: **0.7.0** (pushed 2026-07-16)
+- Reference files: 40 md (+ genre-prose-cards directory)
 - Integrated enough for current production use: 38
-- Partially integrated, still worth mining: 0
+- Partially integrated / newly added in v0.7: 2
 - Not systematically reviewed yet: 0
 - Deferred: 0
-- Remaining references to improve: 0
-- Estimated remaining effort: 0 engineering hours for the current oh-story reference migration backlog
+- Remaining references to deepen: 2 (`reader-contract-and-progression.md`, `genre-prose-cards.md`)
+- Capability landing (2026-07-20):
+  - P0 landed: reader contract + ending reserve, toxic AI pattern scans + debt gate, genre prose cards
+  - P1 landed: story unit card schema, outline dense/sparse word budget, adoption ledger refresh
+  - P2 scaffolded: long-analyze / long-scan / import / cover / short-suite capability plans + API surface
+- Estimated remaining effort: ~16 engineering hours to deepen P2 product flows and further harden v0.7 machine gates
 
 The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. Future UI progress surfacing or real-output tuning should be tracked as separate product slices, not as remaining oh-story reference migration backlog.
 
@@ -97,3 +104,23 @@ The 38-reference migration remains complete. The next product slice is orchestra
 - Run `bun run check:oh-story-progress` before committing changes to this file.
 - A reference can move to `integrated` only when there is durable MangaForge evidence: prompt construction, workflow rule, deterministic diagnostic, structured receipt, repair task, UI flow, or test coverage.
 - Estimates are planning numbers, not commitments. Recalculate after each batch of 5-8 references or any major UI integration.
+
+
+## v0.7 Capability Landing
+
+### P0
+- Reader contract + ending reserve: `ui/server/src/novel-writing/reader-contract-progression.ts`
+- Toxic AI machine scans + debt gate: `toxic-ai-pattern-scans.ts`, `toxic-ai-debt-gate.ts` (wired into quality loop + generation preflight)
+- Genre prose cards: full oh-story corpus (32 cards) in `genre-prose-cards-data.ts` + matcher/prompt wiring
+
+### P1
+- Ending reserve ledger persistence: `ending-reserve-ledger.ts` + project writing_bible + unlock/spend APIs
+- Story unit card unification: `story-unit-basics.ts` (`buildStoryUnitCard`)
+- Outline dense/sparse word budget: `outline-word-budget.ts`
+- This ledger refreshed to oh-story **v0.7.0**
+
+### P2 (scaffold)
+- Capability surface: `ui/server/src/routes/novel-oh-story-capability-service.ts`
+- HTTP APIs under `/api/novel/oh-story/*` for analyze/scan/import/cover/short plans
+- Knowledge-base integration bridge: `oh-story-knowledge-bridge.ts` publishes P2 plans into existing knowledge categories; import reuses ingest/source-cache
+- Full product UIs and scrapers remain follow-up work

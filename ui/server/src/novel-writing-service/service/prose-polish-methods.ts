@@ -1,3 +1,5 @@
+import { selectFingerprintSafeProse } from '../../novel-writing/human-webnovel-resistance'
+import { selectHumanizeSafeProse } from '../../novel-writing/humanize-dual-pass'
 import {
   selectContinuitySafeProseCandidate,
 } from '../../novel-writing/prose-candidate-continuity'
@@ -79,7 +81,9 @@ const runCommercialEditorRewrite = async (activeWorkspace: string, project: any,
       revision: null,
     }
   }
-  const continuitySelection = selectContinuitySafeProseCandidate(chapterText, rewrittenText, contextPackage, { candidate_stage: 'editor' })
+  const humanizeSelection = selectHumanizeSafeProse(chapterText, rewrittenText, { pass: 'AB', stage: 'editor_rewrite' })
+  const fingerprintSelection = selectFingerprintSafeProse(chapterText, humanizeSelection.text, { stage: 'editor_rewrite' })
+  const continuitySelection = selectContinuitySafeProseCandidate(chapterText, fingerprintSelection.text, contextPackage, { candidate_stage: 'editor' })
   return {
     final_text: continuitySelection.text,
     edited: continuitySelection.accepted && rewrittenText !== chapterText,
@@ -154,7 +158,9 @@ const runMemePolish = async (activeWorkspace: string, project: any, contextPacka
       revision: null,
     }
   }
-  const continuitySelection = selectContinuitySafeProseCandidate(chapterText, polishedText, contextPackage, { candidate_stage: 'meme_polish' })
+  const humanizeSelection = selectHumanizeSafeProse(chapterText, polishedText, { pass: 'B', stage: 'meme_polish' })
+  const fingerprintSelection = selectFingerprintSafeProse(chapterText, humanizeSelection.text, { stage: 'meme_polish' })
+  const continuitySelection = selectContinuitySafeProseCandidate(chapterText, fingerprintSelection.text, contextPackage, { candidate_stage: 'meme_polish' })
   return {
     final_text: continuitySelection.text,
     polished: continuitySelection.accepted && polishedText !== chapterText,

@@ -187,9 +187,8 @@ export function NovelWorkspaceBody(props: NovelWorkspaceBodyProps) {
               <WritingCockpitPanel
                 model={writingCockpitModel}
                 loading={stepProseLoading || generatingProse || generatingSceneCards || diagnosticsLoading || contextPackageLoading || commercialToolLoading === 'storyStateSync'}
-                forceCollapsed={isImmersiveShell}
+                forceCollapsed
                 primaryActionOverride={cockpitPrimaryActionOverride}
-                onOpenProductionOps={() => setWorkspaceArea('productionOps')}
                 onAction={handleWritingCockpitAction}
               />
             </div>

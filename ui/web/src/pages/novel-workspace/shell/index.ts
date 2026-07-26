@@ -1,6 +1,7 @@
 export * from './workspace-helpers'
 export * from './workspace-types'
 export * from './workspace-area-tabs'
+export * from './workspace-core-area'
 export * from './workspace-lazy'
 export * from './workspace-editor-fields'
 export * from './workspace-commercial-result'

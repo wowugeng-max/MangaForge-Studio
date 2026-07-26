@@ -44,8 +44,8 @@ export default function PipelinePage() {
       </Card>
 
       <Space style={{ marginBottom: 16 }}>
-        <Button onClick={checkWorkspace} loading={preflightLoading}>预检工作区</Button>
-        <Button type="primary" onClick={runAll} loading={runLoading} disabled={!selectedProjectId || !episodeId}>运行全流程</Button>
+        <Button onClick={checkWorkspace} loading={preflightLoading}> 预检工作区</Button>
+        <Button type="primary" onClick={runAll} loading={runLoading} disabled={!selectedProjectId || !episodeId}> 运行全流程</Button>
       </Space>
 
       {preflightResult && (

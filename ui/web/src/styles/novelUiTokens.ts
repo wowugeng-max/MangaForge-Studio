@@ -49,7 +49,7 @@ export const novelAntdTheme: ThemeConfig = {
   },
   components: {
     Button: {
-      borderRadius: novelUiTokens.radius.md,
+      borderRadius: novelUiTokens.radius.pill,
       controlHeight: novelUiTokens.control.heightMd,
       controlHeightSM: novelUiTokens.control.heightSm,
       controlHeightLG: novelUiTokens.control.heightLg,

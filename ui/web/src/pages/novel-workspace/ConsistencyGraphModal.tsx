@@ -348,7 +348,7 @@ export function ConsistencyGraphModal({
       title={<Space><BranchesOutlined />全书一致性图谱</Space>}
       width={1040}
       onCancel={onClose}
-      footer={<Button type="primary" onClick={onClose}>关闭</Button>}
+      footer={<Button type="primary" onClick={onClose}> 关闭</Button>}
     >
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         <Card size="small" style={{ borderRadius: 8 }} styles={{ body: { padding: 12 } }}>
@@ -375,7 +375,7 @@ export function ConsistencyGraphModal({
             </Space>
             <Space direction="vertical">
               <Button size="small" icon={<ReloadOutlined />} loading={auditLoading} onClick={onRefreshAudit}>刷新审计</Button>
-              <Button size="small" onClick={onOpenStoryState}>校正状态机</Button>
+              <Button size="small" onClick={onOpenStoryState}> 校正状态机</Button>
             </Space>
           </div>
         </Card>

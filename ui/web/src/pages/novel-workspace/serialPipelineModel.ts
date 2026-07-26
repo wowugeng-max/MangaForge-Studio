@@ -148,10 +148,10 @@ export function buildSerialPipelineViewModel(pipeline: any): SerialPipelineViewM
 function workspaceAreaLabel(area?: string) {
   const labels: Record<string, string> = {
     autoCreation: '自动创作',
-    storyPlanning: '故事规划',
-    chapterWriting: '章节写作',
-    storyAssets: '设定资产',
-    qualityRevision: '质检修订',
+    storyPlanning: '大纲',
+    chapterWriting: '写作',
+    storyAssets: '资产',
+    qualityRevision: '质检',
     productionOps: '生产运营',
   }
   return area ? labels[area] || area : '当前工作区'

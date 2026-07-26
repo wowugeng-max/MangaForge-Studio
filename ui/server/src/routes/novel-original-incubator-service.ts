@@ -10,6 +10,8 @@ import {
 import { normalizeSettingAgentPayload } from './novel-setting-routes'
 import { buildOhStoryGenreCatalogContract, formatOhStoryGenreCatalogPrompt } from './novel-genre-catalog'
 import { buildOhStoryGenreCoreMechanicsContract, formatOhStoryGenreCoreMechanicsPrompt } from './novel-genre-core-mechanics'
+import { buildReaderContractProgression, formatReaderContractProgressionPrompt } from '../novel-writing/reader-contract-progression'
+import { buildGenreProseCardContract, formatGenreProseCardPrompt } from '../novel-writing/genre-prose-cards'
 import { buildOhStoryPlotSpecialTopicsContract, formatOhStoryPlotSpecialTopicsPrompt } from './novel-plot-special-topics'
 import { buildOhStoryCharacterDesignContract, formatOhStoryCharacterDesignPrompt } from './novel-character-design-contract'
 import { buildOhStoryStoryPowerContract, formatOhStoryStoryPowerPrompt } from './novel-story-power-contract'
@@ -25,6 +27,19 @@ export function createNovelOriginalIncubatorService() {
       body?.target_audience,
       body?.idea,
     )
+    const readerContractProgression = buildReaderContractProgression({
+      project,
+      genre: project?.genre || body?.genre,
+      platform: project?.platform || body?.platform || body?.target_audience,
+      target_reader_contract: body?.target_reader_contract,
+      target_words: body?.target_words || body?.length_words,
+    })
+    const genreProseCardContract = buildGenreProseCardContract({
+      genre: project?.genre || body?.genre,
+      title: project?.title || body?.title,
+      genre_tags: body?.genre_tags || project?.genre_tags,
+      summary: body?.summary || project?.summary,
+    })
     const genreCoreMechanicsContract = buildOhStoryGenreCoreMechanicsContract(
       project?.title,
       project?.genre,
@@ -66,6 +81,8 @@ export function createNovelOriginalIncubatorService() {
     project.reference_config?.project_seed ? JSON.stringify(project.reference_config.project_seed, null, 2).slice(0, 9000) : '',
     '',
     formatOhStoryGenreCatalogPrompt(genreCatalogContract),
+      formatReaderContractProgressionPrompt(readerContractProgression),
+      formatGenreProseCardPrompt(genreProseCardContract),
     '',
     formatOhStoryGenreCoreMechanicsPrompt(genreCoreMechanicsContract),
     '',
@@ -82,7 +99,9 @@ export function createNovelOriginalIncubatorService() {
     'outlines: array，至少包含 master 和 1-3 个 volume，每项 outline_type,title,summary,conflict_points,turning_points,hook,target_length',
     'chapters: array，生成前 30 章或指定 chapter_count 的章纲，每项 chapter_no,title,chapter_goal,chapter_summary,conflict,ending_hook,must_advance,forbidden_repeats',
     'setting_entities: array，专门用于设定工坊入库；每项 entity_type,name,summary,constraints_json,state_json,payload_json。entity_type 只能是 character/realm/ability/item/boss/rule/faction/location/foreshadowing/timeline。',
-    'writing_bible: {promise,world_rules,mainline,volume_plan,style_lock,safety_policy,forbidden,target_reader_contract,genre_positioning_contract,plot_special_topics_contract,story_power_contract,character_design_contract,core_contract_radar,reader_retention_contract,opening_strategy_contract}',
+    'writing_bible: {promise,world_rules,mainline,volume_plan,style_lock,safety_policy,forbidden,reader_contract_progression,genre_prose_card_contract,target_reader_contract,genre_positioning_contract,plot_special_topics_contract,story_power_contract,character_design_contract,core_contract_radar,reader_retention_contract,opening_strategy_contract}',
+    'writing_bible.reader_contract_progression: {reader_promise,agency,ending_reserve,current_risk,quality_checks}，必须包含读者契约、主角因果权/结算权、终局底牌与升级台阶、契约风险等级。',
+    'writing_bible.genre_prose_card_contract: {matched,card,quality_checks}，按题材散文卡约束正文落点、冲突发动机与禁止漂移。',
     'writing_bible.target_reader_contract: {reader_profile,reader_desires,emotional_gap,chapter_value_test,quality_checks}，必须回答“写给谁看、读者想看什么、本章给什么”。',
     'writing_bible.genre_positioning_contract: {genre_tags,platform,reader_psychology,core_hook,type_formula,selling_points,long_board,innovation_boundary,genre_catalog_contract,genre_core_mechanics_contract,quality_checks}，必须包含“拉长板而非补短板”和上方 oh-story 题材目录/核心机制契约。',
     'writing_bible.plot_special_topics_contract: 必须完整写入上方 oh-story 特殊题材操作契约，按 matched_topics 约束金手指、题材边界、扫榜对标、都市高武、三万字卡点、阵营手牌等专题。',

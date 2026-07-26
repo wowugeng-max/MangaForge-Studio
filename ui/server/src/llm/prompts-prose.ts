@@ -1,5 +1,6 @@
 /** Prose drafting prompt builders and pre-draft brief sections. */
 import type { NovelProjectRecord } from '../novel'
+import { buildWebnovelDraftPersonaBlock } from '../novel-writing/webnovel-author-personas'
 
 function proseBriefObject(value: any): Record<string, any> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : null
@@ -237,6 +238,7 @@ export function buildProsePrompt(
   const parts: string[] = []
 
   parts.push(`任务：创作第 ${chapterDraft.chapter_no || '?'} 章正文`)
+  parts.push(buildWebnovelDraftPersonaBlock(project))
   parts.push(`作品标题：${project.title}`)
   parts.push(`章节标题：${chapterDraft.title || '无标题'}`)
 

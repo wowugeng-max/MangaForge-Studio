@@ -132,8 +132,7 @@ export function WritingCockpitPanel({
                 className="writing-cockpit-summary-primary"
                 loading={loading}
                 icon={actionIcon(primaryKey, recommendedRole)}
-                onClick={runPrimary}
-              >
+                onClick={runPrimary}>
                 {primaryLabel}
               </Button>
               <Button size="small" icon={<DownOutlined />} onClick={() => setCockpitCollapsed(false)}>
@@ -232,9 +231,7 @@ export function WritingCockpitPanel({
                 loading={loading}
                 icon={actionIcon(primaryKey, recommendedRole)}
                 onClick={runPrimary}
-                style={{ whiteSpace: 'normal', height: 'auto', minHeight: 36, lineHeight: 1.3, paddingTop: 6, paddingBottom: 6 }}
-              >
-                {primaryLabel}
+                style={{ whiteSpace: 'normal', height: 'auto', minHeight: 36, lineHeight: 1.3, paddingTop: 6, paddingBottom: 6 }}> {primaryLabel}
               </Button>
             </Col>
           </Row>

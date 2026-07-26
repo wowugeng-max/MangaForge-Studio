@@ -2,6 +2,10 @@ import {
   buildSceneCardsPrompt as buildSceneCardsPromptFromBuilder,
 } from '../../novel-writing/scene-cards-prompt'
 import {
+  attachModelFamilyToContextPackage,
+  resolveModelRuntimeIdentity,
+} from '../../novel-writing/model-family-strategy'
+import {
   getNovelPayload,
 } from '../../routes/novel-route-utils'
 import {
@@ -33,9 +37,15 @@ const buildSceneCardsPrompt = (project: any, contextPackage: any) => buildSceneC
 const generateSceneCardsForChapter = async (activeWorkspace: string, project: any, contextPackage: any, modelId?: number, options: any = {}) => {
   const stageModelId = getStageModelId(project, 'scene_cards', modelId)
   throwIfAborted(options)
+  const runtimeModel = resolveModelRuntimeIdentity({
+    activeWorkspace,
+    modelId: stageModelId,
+    fallback: options.runtime_model || contextPackage?.runtime_model,
+  })
+  const contextWithFamily = attachModelFamilyToContextPackage(contextPackage, runtimeModel)
   const result = await executeAgent('outline-agent', project, {
-    task: buildSceneCardsPrompt(project, contextPackage),
-    upstreamContext: contextPackage,
+    task: buildSceneCardsPrompt(project, contextWithFamily),
+    upstreamContext: contextWithFamily,
   }, {
     activeWorkspace,
     modelId: stageModelId ? String(stageModelId) : undefined,

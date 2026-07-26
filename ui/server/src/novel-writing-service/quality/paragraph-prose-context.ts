@@ -2,6 +2,10 @@ import type { ProseRiskPromptSection } from '../../novel-writing/prose-contract-
 import { compileProseContractPrompt } from '../../novel-writing/prose-contract-prompt'
 import { buildProseGenerationContract, normalizeProseContractKey } from '../../novel-writing/prose-generation-contract'
 import {
+  buildWritingPrecisionPlan,
+  formatWritingPrecisionPrompt,
+} from '../../novel-writing/writing-precision-prompt'
+import {
   buildAssetLinkagePromptSection,
   buildBenchmarkRecallPromptSection,
   buildBridgeUnitPromptSection,
@@ -17,6 +21,8 @@ import {
   buildExpectationThresholdPromptSection,
   buildFemaleAudiencePromptSection,
   buildGenrePositioningPromptSection,
+  buildGenreProseCardPromptSection,
+  buildReaderContractProgressionPromptSection,
   buildGovernanceRecheckPromptSection,
   buildInformationFlowPromptSection,
   buildIntentConfirmationPromptSection,
@@ -127,6 +133,156 @@ export function requiredProseSceneCard(card: any) {
   return requiredProseSceneCardValue(sanitized) || {}
 }
 
+/** Keep only the causal spine a draft model needs; strip enrichment noise that belongs in optional risk contracts. */
+const PROSE_CORE_SCENE_TEXT_MAX = 280
+const PROSE_CORE_SCENE_LIST_MAX = 6
+
+function firstRequiredProseText(...values: any[]) {
+  for (const value of values) {
+    const text = requiredProsePromptText(value)
+    if (text) return text
+  }
+  return ''
+}
+
+function clipRequiredProseText(value: any, max = PROSE_CORE_SCENE_TEXT_MAX) {
+  const text = requiredProsePromptText(value)
+  if (!text) return ''
+  if (text.length <= max) return text
+  return `${text.slice(0, Math.max(0, max - 1))}…`
+}
+
+function uniqueRequiredProseTexts(values: any[], maxItems = PROSE_CORE_SCENE_LIST_MAX, maxText = PROSE_CORE_SCENE_TEXT_MAX) {
+  const seen = new Set<string>()
+  const rows: string[] = []
+  for (const value of asArray(values)) {
+    const text = clipRequiredProseText(value, maxText)
+    if (!text || seen.has(text)) continue
+    seen.add(text)
+    rows.push(text)
+    if (rows.length >= maxItems) break
+  }
+  return rows
+}
+
+function compactRequiredProseValue(value: any, depth = 0): any {
+  if (value === null || value === undefined) return undefined
+  if (typeof value === 'string') {
+    const text = clipRequiredProseText(value)
+    return text || undefined
+  }
+  if (typeof value !== 'object') return value
+  if (Array.isArray(value)) {
+    const items = value
+      .slice(0, PROSE_CORE_SCENE_LIST_MAX)
+      .map(item => compactRequiredProseValue(item, depth + 1))
+      .filter(item => item !== undefined)
+    return items.length ? items : undefined
+  }
+  if (depth >= 6) {
+    const text = clipRequiredProseText(JSON.stringify(value))
+    return text || undefined
+  }
+  const output: Record<string, any> = {}
+  for (const [key, item] of Object.entries(value)) {
+    if (/(?:^|_)(?:diagnostic|diagnostics|audit_log|raw_payload|debug|trace|sync)(?:$|_)/i.test(key)) continue
+    const next = compactRequiredProseValue(item, depth + 1)
+    if (next !== undefined) output[key] = next
+  }
+  return Object.keys(output).length ? output : undefined
+}
+
+export function projectSceneCardForProseCorePrompt(card: any) {
+  if (!card || typeof card !== 'object') return {}
+  const goal = clipRequiredProseText(firstRequiredProseText(
+    card.goal,
+    card.scene_goal,
+    card.sceneGoal,
+    card.purpose,
+    card.summary,
+    card.title,
+  ), 360)
+  const conflict = clipRequiredProseText(firstRequiredProseText(
+    card.conflict,
+    card.obstacle,
+    card.opposing_force,
+    card.opposingForce,
+  ))
+  const expectedStateChange = clipRequiredProseText(firstRequiredProseText(
+    card.expected_state_change,
+    card.expectedStateChange,
+    card.event_value_change,
+    card.eventValueChange,
+  ))
+  const characters = uniqueRequiredProseTexts(
+    asArray(card.characters || card.cast || card.character_names || card.characterNames)
+      .map((item: any) => (typeof item === 'string' ? item : item?.name || item?.title || item?.label)),
+    8,
+    40,
+  )
+  const mustDeliver = uniqueRequiredProseTexts(
+    [
+      ...asArray(card.must_deliver || card.mustDeliver),
+      ...asArray(card.required_actions || card.requiredActions),
+      ...asArray(card.serial_risk_repairs || card.serialRiskRepairs),
+    ],
+    6,
+    220,
+  )
+  const stateChanges = uniqueRequiredProseTexts(
+    asArray(card.state_changes_expected || card.stateChangesExpected),
+    6,
+    220,
+  )
+  const projected: Record<string, any> = {
+    scene_no: card.scene_no ?? card.sceneNo,
+    title: clipRequiredProseText(card.title, 80),
+    goal,
+    conflict,
+    characters: characters.length ? characters : undefined,
+    protagonist_agency_action: clipRequiredProseText(
+      card.protagonist_agency_action || card.protagonistAgencyAction || card.agency_action || card.agencyAction,
+    ),
+    no_exit_reason: clipRequiredProseText(card.no_exit_reason || card.noExitReason),
+    expected_state_change: expectedStateChange || undefined,
+    state_changes_expected: stateChanges.length ? stateChanges : undefined,
+    transition_from_previous: clipRequiredProseText(
+      card.transition_from_previous || card.transitionFromPrevious,
+      320,
+    ),
+    next_conflict_seed: clipRequiredProseText(
+      card.next_conflict_seed || card.nextConflictSeed || card.ending_hook_seed || card.endingHookSeed,
+      240,
+    ),
+    recent_fatigue_action: clipRequiredProseText(card.recent_fatigue_action || card.recentFatigueAction),
+    must_deliver: mustDeliver.length ? mustDeliver : undefined,
+    key_dialogue: clipRequiredProseText(card.key_dialogue || card.keyDialogue, 180),
+    forbidden_settings: uniqueRequiredProseTexts(card.forbidden_settings || card.forbiddenSettings, 4, 120),
+    // Preserve nested causal facts for writing; do not re-expand enrichment/debug trees.
+    required_information: requiredProseSceneCardValue(card.required_information || card.requiredInformation),
+    pov_character: clipRequiredProseText(card.pov_character || card.povCharacter || card.pov_lens?.pov_character || card.povLens?.pov_character, 40),
+    decision_in_scene: clipRequiredProseText(card.decision_in_scene || card.decisionInScene || card.pov_lens?.decision_in_scene || card.povLens?.decision_in_scene, 180),
+    emotion_in_situation: clipRequiredProseText(card.emotion_in_situation || card.emotionInSituation || card.pov_lens?.emotion_from_pov || card.povLens?.emotion_from_pov, 140),
+    emotion_tell: clipRequiredProseText(card.emotion_tell || card.emotionTell || card.pov_lens?.emotion_tell || card.povLens?.emotion_tell, 160),
+    pov_lens: requiredProseSceneCardValue(card.pov_lens || card.povLens),
+  }
+
+  // Drop empty values so repeated empty enrichment fields do not inflate JSON.
+  const cleaned: Record<string, any> = {}
+  for (const [key, value] of Object.entries(projected)) {
+    if (value === undefined || value === null || value === '') continue
+    if (Array.isArray(value) && value.length === 0) continue
+    cleaned[key] = value
+  }
+  return cleaned
+}
+
+export function projectSceneCardsForProseCorePrompt(cards: any[]) {
+  return asArray(cards)
+    .map(projectSceneCardForProseCorePrompt)
+    .filter(card => card && typeof card === 'object' && Object.keys(card).length > 0)
+}
+
 export function proseContractValue(context: any, key: string) {
   return getContextContract(context, `${key}_contract`)
 }
@@ -138,7 +294,7 @@ export function buildRequiredProseCoreSections(
   const context: any = contract.context || {}
   const target: any = mergedContextChapterTargetPreferRuntime(context)
   const previousHandoff = contract.chapter.previous_handoff || buildPreviousChapterHandoff(context)
-  const sceneCards = asArray(contract.chapter.scene_cards).map(requiredProseSceneCard)
+  const sceneCards = projectSceneCardsForProseCorePrompt(asArray(contract.chapter.scene_cards).map(requiredProseSceneCard))
   const failedChecks = asArray(contract.preflight?.checks)
     .filter((item: any) => item?.ok === false)
     .map((item: any) => ({
@@ -255,12 +411,32 @@ export function buildRequiredProseCoreSections(
       text: [
         `作品：${requiredProsePromptText(project?.title || '')}`,
         `章节：第${contract.chapter.chapter_no}章《${requiredProsePromptText(contract.chapter.title || '无标题')}》`,
-        `目标：${requiredProsePromptText(contract.chapter.goal || contract.chapter.summary)}`,
-        `冲突：${requiredProsePromptText(contract.chapter.conflict)}`,
-        `读者回报：${requiredProsePromptText(target?.reader_payoff || target?.readerPayoff || target?.core_payoff || target?.corePayoff)}`,
-        `章末钩子：${requiredProsePromptText(contract.chapter.ending_hook)}`,
+        `目标：${clipRequiredProseText(contract.chapter.goal || contract.chapter.summary, 420)}`,
+        `冲突：${clipRequiredProseText(contract.chapter.conflict, 240)}`,
+        `读者回报：${clipRequiredProseText(target?.reader_payoff || target?.readerPayoff || target?.core_payoff || target?.corePayoff, 240)}`,
+        `章末钩子：${clipRequiredProseText(contract.chapter.ending_hook, 240)}`,
         `字数：${requiredProsePromptJson(contract.chapter.word_target || {})}`,
       ],
+    },
+    {
+      key: 'writing-precision',
+      text: (() => {
+        const plan = buildWritingPrecisionPlan({
+          contextPackage: context,
+          chapterDraft: {
+            chapter_no: contract.chapter.chapter_no,
+            title: contract.chapter.title,
+            chapter_goal: contract.chapter.goal,
+            summary: contract.chapter.summary,
+            conflict: contract.chapter.conflict,
+            ending_hook: contract.chapter.ending_hook,
+          },
+          wordTarget: contract.chapter.word_target,
+          modelRuntime: context?.runtime_model || context?.model_runtime || null,
+          modelFamilyStrategy: context?.model_family_strategy || null,
+        })
+        return formatWritingPrecisionPrompt(plan)
+      })(),
     },
     {
       key: 'handoff',
@@ -322,6 +498,8 @@ export function buildProseRiskContractSections(context: any): ProseRiskPromptSec
   add('platform_rubric', buildPlatformRubricPromptSection(target?.platform_rubric || target?.platformRubric))
   add('content_rubric', buildContentRubricPromptSection(target?.content_rubric || target?.contentRubric))
   add('target_reader', buildTargetReaderPromptSection(contract('target_reader')))
+  add('reader_contract_progression', buildReaderContractProgressionPromptSection(target?.reader_contract_progression || target?.readerContractProgression || context?.reader_contract_progression || context?.writing_bible?.reader_contract_progression))
+  add('genre_prose_card', buildGenreProseCardPromptSection(target?.genre_prose_card_contract || target?.genreProseCardContract || context?.genre_prose_card_contract || context?.writing_bible?.genre_prose_card_contract))
   add('genre_positioning', buildGenrePositioningPromptSection(contract('genre_positioning')))
   add('plot_special_topics', buildPlotSpecialTopicsPromptSection(contract('plot_special_topics')))
   add('female_audience', buildFemaleAudiencePromptSection(contract('female_audience')))

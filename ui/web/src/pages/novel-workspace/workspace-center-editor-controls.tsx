@@ -33,8 +33,8 @@ export function WorkspaceCenterWordTargetControl({
       <Tooltip title="标准章节，适合日常连载更新">
         <Button
           size="small"
-          className="novel-word-preset"
-          type={generationWordTargetMode === 'standard' ? 'primary' : 'default'}
+          type="default"
+          className={`novel-word-preset novel-btn-crystal ${generationWordTargetMode === 'standard' ? 'novel-btn-crystal-local is-selected' : 'novel-btn-crystal-display'}`}
           onClick={() => selectWordPreset('standard')}
         >
           标准章
@@ -43,8 +43,8 @@ export function WorkspaceCenterWordTargetControl({
       <Tooltip title="长章，适合高潮、战斗或阶段收束">
         <Button
           size="small"
-          className="novel-word-preset"
-          type={generationWordTargetMode === 'long' ? 'primary' : 'default'}
+          type="default"
+          className={`novel-word-preset novel-btn-crystal ${generationWordTargetMode === 'long' ? 'novel-btn-crystal-local is-selected' : 'novel-btn-crystal-display'}`}
           onClick={() => selectWordPreset('long')}
         >
           长章

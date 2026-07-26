@@ -23,6 +23,15 @@ import { readModels } from '../../model-store'
 import { readProviders } from '../../provider-store'
 import { executeNovelAgent } from '../../llm'
 import { asArray, compactText, parseJsonLikePayload, safeJsonStringify } from '../novel-route-utils'
+import { createOhStoryCapabilityService } from '../novel-oh-story-capability-service'
+import {
+  extractEndingReserveLedgerFromProject,
+  unlockEndingReserveItem,
+  spendEndingReserveItem,
+  patchProjectWithEndingReserveLedger,
+  evaluateEndingReserveSpendRisk,
+} from '../../novel-writing/ending-reserve-ledger'
+import { describeKnowledgeIntegration, publishOhStoryPlanToKnowledge } from '../../novel-writing/oh-story-knowledge-bridge'
 import {
   buildFirst30RetentionDiagnosis,
   buildFirst30RetentionRepairTasks,
@@ -46,6 +55,121 @@ import {
 } from './builders'
 
 export function registerNovelCommercialOpsUtilityRoutes(app: Express, ctx: CommercialOpsContext) {
+  const ohStoryCapabilities = createOhStoryCapabilityService()
+  app.get('/api/novel/oh-story/capabilities', (_req, res) => {
+    res.json(ohStoryCapabilities.listCapabilities())
+  })
+  app.get('/api/novel/oh-story/genre-prose-cards', (_req, res) => {
+    res.json({ ok: true, cards: ohStoryCapabilities.listGenreCards() })
+  })
+  app.post('/api/novel/oh-story/reader-contract', (req, res) => {
+    res.json({ ok: true, contract: ohStoryCapabilities.buildReaderContract(req.body || {}) })
+  })
+  app.post('/api/novel/oh-story/genre-prose-card', (req, res) => {
+    res.json({ ok: true, contract: ohStoryCapabilities.buildGenreCard(req.body || {}) })
+  })
+  app.post('/api/novel/oh-story/story-unit-card', (req, res) => {
+    res.json({ ok: true, card: ohStoryCapabilities.buildStoryUnit(req.body || {}) })
+  })
+  app.post('/api/novel/oh-story/outline-word-budget', (req, res) => {
+    const budget = ohStoryCapabilities.buildOutlineBudget(req.body || {})
+    const debt = ohStoryCapabilities.locateBudgetDebt({ budget, actual_words: req.body?.actual_words })
+    res.json({ ok: true, budget, debt })
+  })
+  app.post('/api/novel/oh-story/toxic-debt/scan', (req, res) => {
+    res.json({ ok: true, debt: ohStoryCapabilities.scanToxicDebt(String(req.body?.text || req.body?.chapter_text || '')) })
+  })
+  app.post('/api/novel/oh-story/toxic-debt/gate', (req, res) => {
+    res.json({ ok: true, gate: ohStoryCapabilities.evaluateDebtGate(req.body || {}) })
+  })
+  app.post('/api/novel/oh-story/long-analyze/plan', (req, res) => {
+    res.json({ ok: true, plan: ohStoryCapabilities.buildLongAnalyzePlan(req.body || {}) })
+  })
+  app.post('/api/novel/oh-story/long-scan/plan', (req, res) => {
+    res.json({ ok: true, plan: ohStoryCapabilities.buildLongScanPlan(req.body || {}) })
+  })
+  app.post('/api/novel/oh-story/import/plan', (req, res) => {
+    res.json({ ok: true, plan: ohStoryCapabilities.buildImportPlan(req.body || {}) })
+  })
+  app.post('/api/novel/oh-story/cover/plan', (req, res) => {
+    res.json({ ok: true, plan: ohStoryCapabilities.buildCoverPlan(req.body || {}) })
+  })
+  app.post('/api/novel/oh-story/short-suite/plan', (req, res) => {
+    res.json({ ok: true, plan: ohStoryCapabilities.buildShortSuitePlan(req.body || {}) })
+  })
+  app.post('/api/novel/oh-story/prompt-bundle', (req, res) => {
+    res.json({ ok: true, ...ohStoryCapabilities.formatPromptBundle(req.body || {}) })
+  })
+
+  app.get('/api/novel/oh-story/knowledge-integration', (_req, res) => {
+    res.json({ ok: true, integration: describeKnowledgeIntegration() })
+  })
+  app.post('/api/novel/oh-story/knowledge/publish', async (req, res) => {
+    try {
+      const kind = String(req.body?.kind || '') as any
+      const projectId = Number(req.body?.project_id || 0) || undefined
+      let project: any = null
+      if (projectId) {
+        const activeWorkspace = ctx.getWorkspace()
+        project = await ctx.getProject(activeWorkspace, projectId)
+      }
+      const result = await publishOhStoryPlanToKnowledge({
+        kind,
+        project,
+        project_id: projectId,
+        project_title: req.body?.project_title || project?.title,
+        input: req.body?.input || req.body || {},
+        auto_store: req.body?.auto_store !== false,
+      })
+      res.json({ ok: true, ...result })
+    } catch (error: any) {
+      res.status(500).json({ error: String(error?.message || error) })
+    }
+  })
+  app.get('/api/novel/projects/:id/ending-reserve', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const ledger = extractEndingReserveLedgerFromProject(project)
+      res.json({ ok: true, ledger, risk: evaluateEndingReserveSpendRisk(ledger, { volume: req.query.volume, chapter_summary: req.query.summary }) })
+    } catch (error: any) {
+      res.status(500).json({ error: String(error?.message || error) })
+    }
+  })
+  app.post('/api/novel/projects/:id/ending-reserve/unlock', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const projectId = Number(req.params.id)
+      const project = await ctx.getProject(activeWorkspace, projectId)
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const current = extractEndingReserveLedgerFromProject(project)
+      const result = unlockEndingReserveItem(current, req.body || {})
+      if (!result.ok) return res.status(400).json(result)
+      const patch = patchProjectWithEndingReserveLedger(project, result.ledger)
+      const updated = await updateNovelProject(activeWorkspace, projectId, { reference_config: patch.reference_config } as any)
+      res.json({ ok: true, ledger: result.ledger, project: updated })
+    } catch (error: any) {
+      res.status(500).json({ error: String(error?.message || error) })
+    }
+  })
+  app.post('/api/novel/projects/:id/ending-reserve/spend', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const projectId = Number(req.params.id)
+      const project = await ctx.getProject(activeWorkspace, projectId)
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const current = extractEndingReserveLedgerFromProject(project)
+      const result = spendEndingReserveItem(current, req.body || {})
+      if (!result.ok) return res.status(400).json(result)
+      const patch = patchProjectWithEndingReserveLedger(project, result.ledger)
+      const updated = await updateNovelProject(activeWorkspace, projectId, { reference_config: patch.reference_config } as any)
+      res.json({ ok: true, ledger: result.ledger, project: updated })
+    } catch (error: any) {
+      res.status(500).json({ error: String(error?.message || error) })
+    }
+  })
+
   app.get('/api/novel/projects/:id/model-diagnostics', async (req, res) => {
     try {
       const activeWorkspace = ctx.getWorkspace()

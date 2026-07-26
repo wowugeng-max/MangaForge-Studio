@@ -9,7 +9,6 @@ export type SettingWorkshopActionKey =
   | 'suggest_usage_model'
   | 'suggest_storyline'
   | 'suggest_storyline_model'
-  | 'consistency_check'
   | 'apply_state_updates'
   | 'apply_discovered_assets'
 

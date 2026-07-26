@@ -57,7 +57,6 @@ export function SettingWorkshopPanel({
     activeUsageFilter,
     activeUsageFilterLabel,
     applySelectedDiscoveredAssets,
-    applySelectedStateUpdates,
     assetDispositionDrafts,
     commandClass,
     deleteSetting,
@@ -76,19 +75,14 @@ export function SettingWorkshopPanel({
     loading,
     mergeTargetOptions,
     openEditor,
-    pendingStateUpdates,
-    runConsistencyCheck,
     saveUsage,
     selectedDiscoveredAssetKeys,
-    selectedStateUpdateKeys,
     setActiveType,
     setActiveUsageFilter,
     setAssetDispositionDrafts,
     setDiscoveredAssets,
     setEditorOpen,
-    setPendingStateUpdates,
     setSelectedDiscoveredAssetKeys,
-    setSelectedStateUpdateKeys,
     settings,
     submitSetting,
     suggestChapterUsage,
@@ -117,7 +111,7 @@ export function SettingWorkshopPanel({
         description="把角色、境界、能力、物品、Boss、规则等精细设定结构化，再由本章调用面板决定生成时必须使用、允许使用或禁止揭露的内容。"
       />
       <Space wrap size={6}>
-        <Button size="small" type="primary" disabled={isActionBusy} onClick={() => openEditor()}>新增设定</Button>
+        <Button size="small" className="novel-btn-crystal novel-btn-crystal-local" disabled={isActionBusy} onClick={() => openEditor()}>新增设定</Button>
         <Button size="small" className={commandClass('incubate_settings')} onClick={() => incubateSettings(false)} loading={isActionLoading('incubate_settings')} disabled={disabledForAction('incubate_settings')}>从项目资料补齐</Button>
         <Button size="small" className={commandClass('incubate_settings_model', true)} onClick={() => incubateSettings(true)} loading={isActionLoading('incubate_settings_model')} disabled={disabledForAction('incubate_settings_model', !selectedModelId)}>模型提炼设定</Button>
         <Button size="small" className={commandClass('incubate_storylines')} onClick={() => incubateStorylines(false)} loading={isActionLoading('incubate_storylines')} disabled={disabledForAction('incubate_storylines')}>补齐剧情线</Button>
@@ -126,8 +120,7 @@ export function SettingWorkshopPanel({
         <Button size="small" className={commandClass('suggest_usage_model', true)} onClick={() => suggestChapterUsage(true)} loading={isActionLoading('suggest_usage_model')} disabled={disabledForAction('suggest_usage_model', !activeChapter?.id || !selectedModelId)}>模型匹配本章</Button>
         <Button size="small" className={commandClass('suggest_storyline')} onClick={() => suggestStorylineUsage(false)} loading={isActionLoading('suggest_storyline')} disabled={disabledForAction('suggest_storyline', !activeChapter?.id)}>匹配剧情线</Button>
         <Button size="small" className={commandClass('suggest_storyline_model', true)} onClick={() => suggestStorylineUsage(true)} loading={isActionLoading('suggest_storyline_model')} disabled={disabledForAction('suggest_storyline_model', !activeChapter?.id || !selectedModelId)}>模型匹配剧情线</Button>
-        <Button size="small" className={commandClass('consistency_check', true)} onClick={runConsistencyCheck} loading={isActionLoading('consistency_check')} disabled={disabledForAction('consistency_check', !activeChapter?.chapter_text)}>检查本章</Button>
-        <Button size="small" onClick={load} loading={loading} disabled={isActionBusy}>刷新</Button>
+        <Button size="small" className="novel-btn-crystal novel-btn-crystal-display" onClick={load} loading={loading} disabled={isActionBusy}>刷新</Button>
       </Space>
 
       <section className="setting-workshop-usage-board" aria-label="本章设定调用确认">
@@ -138,11 +131,10 @@ export function SettingWorkshopPanel({
           </div>
           <Button
             size="small"
-            type="primary"
+            className={commandClass('save_usage')}
             onClick={saveUsage}
             loading={isActionLoading('save_usage')}
-            disabled={disabledForAction('save_usage', !activeChapter?.id)}
-          >
+            disabled={disabledForAction('save_usage', !activeChapter?.id)}>
             保存本章调用
           </Button>
         </div>
@@ -173,7 +165,7 @@ export function SettingWorkshopPanel({
         <div ref={discoveredAssetsRef} className="setting-workshop-discovered-anchor">
         <Card
           size="small"
-          title={`新资产候选 ${discoveredAssets.length}`}
+          title={`新资产确认队列 ${discoveredAssets.length}`}
           extra={(
             <Space size={4}>
               <Button size="small" type="link" onClick={() => setSelectedDiscoveredAssetKeys(discoveredAssets.map(item => item._key))}>全选</Button>
@@ -241,62 +233,17 @@ export function SettingWorkshopPanel({
             )}
           />
           <Space style={{ width: '100%', justifyContent: 'space-between', marginTop: 8 }}>
-            <Text type="secondary" style={{ fontSize: 12 }}>已选择 {selectedDiscoveredAssetKeys.length} 项，长期资产入库；误判同源合并；临时地点和过场元素只留审计。</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>已选择 {selectedDiscoveredAssetKeys.length} 项，跨章节汇总待确认资产。长期资产入库；误判同源合并；临时过场只留审计。</Text>
             <Space size={6}>
-              <Button size="small" disabled={isActionBusy} onClick={() => { setDiscoveredAssets([]); setSelectedDiscoveredAssetKeys([]); setAssetDispositionDrafts({}) }}>暂不处理</Button>
-              <Button size="small" type="primary" loading={isActionLoading('apply_discovered_assets')} disabled={disabledForAction('apply_discovered_assets')} onClick={applySelectedDiscoveredAssets}>执行处置</Button>
+              <Button size="small" className="novel-btn-crystal novel-btn-crystal-display" disabled={isActionBusy} onClick={() => { setDiscoveredAssets([]); setSelectedDiscoveredAssetKeys([]); setAssetDispositionDrafts({}) }}>暂不处理</Button>
+              <Button size="small" className={`novel-btn-crystal novel-btn-crystal-local ${isActionLoading('apply_discovered_assets') ? 'novel-btn-crystal-running' : ''}`} loading={isActionLoading('apply_discovered_assets')} disabled={disabledForAction('apply_discovered_assets')} onClick={applySelectedDiscoveredAssets}>执行处置</Button>
             </Space>
           </Space>
         </Card>
         </div>
       )}
 
-      {pendingStateUpdates.length > 0 && (
-        <Card
-          size="small"
-          title={`待确认状态变更 ${pendingStateUpdates.length}`}
-          extra={(
-            <Space size={4}>
-              <Button size="small" type="link" onClick={() => setSelectedStateUpdateKeys(pendingStateUpdates.map(item => item._key))}>全选</Button>
-              <Button size="small" type="link" onClick={() => setSelectedStateUpdateKeys([])}>清空</Button>
-            </Space>
-          )}
-        >
-          <List
-            size="small"
-            dataSource={pendingStateUpdates}
-            renderItem={(item: any) => (
-              <List.Item>
-                <Space align="start" style={{ width: '100%' }}>
-                  <Checkbox
-                    checked={selectedStateUpdateKeys.includes(item._key)}
-                    onChange={event => setSelectedStateUpdateKeys(prev => event.target.checked ? [...prev, item._key] : prev.filter(key => key !== item._key))}
-                  />
-                  <Space direction="vertical" size={2} style={{ flex: 1 }}>
-                    <Space size={4} wrap>
-                      <Text strong>{item.name}</Text>
-                      <Tag bordered={false}>{typeLabel(item.entity_type)}</Tag>
-                      <Tag color="blue" bordered={false}>第{item.chapter_no}章</Tag>
-                    </Space>
-                    <Text type="secondary" style={{ fontSize: 12 }}>当前：{displayValue(item.current_state || {}).slice(0, 120)}</Text>
-                    <Text style={{ fontSize: 12 }}>变更：{displayValue(item.actual_state_change || {}).slice(0, 160)}</Text>
-                    {item.reason && <Text type="secondary" style={{ fontSize: 12 }}>原因：{item.reason}</Text>}
-                  </Space>
-                </Space>
-              </List.Item>
-            )}
-          />
-          <Space style={{ width: '100%', justifyContent: 'space-between', marginTop: 8 }}>
-            <Text type="secondary" style={{ fontSize: 12 }}>已选择 {selectedStateUpdateKeys.length} 项</Text>
-            <Space size={6}>
-              <Button size="small" disabled={isActionBusy} onClick={() => { setPendingStateUpdates([]); setSelectedStateUpdateKeys([]) }}>暂不处理</Button>
-              <Button size="small" type="primary" loading={isActionLoading('apply_state_updates')} disabled={disabledForAction('apply_state_updates')} onClick={applySelectedStateUpdates}>应用选中变更</Button>
-            </Space>
-          </Space>
-        </Card>
-      )}
-
-      <Tabs
+<Tabs
         activeKey={activeType}
         onChange={setActiveType}
         size="small"

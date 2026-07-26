@@ -7,6 +7,7 @@ import {
   UNIQUE_OFFICE_TITLES,
   uniqueTexts,
 } from './character-card-sync-shared'
+import { buildPovCharacterStatePatch } from './character-pov'
 
 import {
   buildCharacterIdentityCanon,
@@ -324,6 +325,23 @@ export function planCharacterCardSync(input: {
       // Ensure established cast stays on cards even if absent this chapter.
       continue
     }
+  }
+
+  // Attach POV knowledge residue for named cast already in seed / existing cards.
+  const chapterTextForPov = chapterTextOf(chapter)
+  for (const [name, seed] of updateSeed.entries()) {
+    const existingChar = existingByName.get(name)
+    const povPatch = buildPovCharacterStatePatch({
+      chapterText: chapterTextForPov,
+      povCharacter: name,
+      chapterNo,
+      existingState: existingChar?.current_state || seed?.current_state || {},
+    })
+    if (!povPatch || Object.keys(povPatch).length <= 1) continue
+    updateSeed.set(name, {
+      ...seed,
+      current_state: mergeCurrentState(seed?.current_state || existingChar?.current_state || {}, povPatch, chapterNo),
+    })
   }
 
   const characterCreates: Array<Record<string, any>> = []

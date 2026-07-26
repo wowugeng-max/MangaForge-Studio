@@ -609,8 +609,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: {
             >
               进入工作台
             </Button>,
-            <Button key="close" onClick={handleModalCancel} size="large">
-              留在项目大厅
+            <Button key="close" onClick={handleModalCancel} size="large"> 留在项目大厅
             </Button>,
           ]}
         />
@@ -627,7 +626,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: {
             上一步
           </Button>
           <Space>
-            <Button onClick={handleModalCancel}>取消</Button>
+            <Button onClick={handleModalCancel}> 取消</Button>
             <Button
               type="primary"
               icon={current === 4 ? <RocketOutlined /> : <ArrowRightOutlined />}

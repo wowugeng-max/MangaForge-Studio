@@ -149,7 +149,7 @@ export function DeepDraftReviewSection(props: {
 
         <Space wrap align="center">
           <Text strong>伏笔与确认项</Text>
-          <Button size="small" onClick={props.onRepairGaps}>生成本地可编辑伏笔草稿</Button>
+          <Button size="small" onClick={props.onRepairGaps}> 生成本地可编辑伏笔草稿</Button>
         </Space>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 8 }}>
           <Input.TextArea

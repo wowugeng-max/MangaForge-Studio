@@ -177,11 +177,11 @@ export default function NovelProductionDesk() {
         <Button type="text" size="small" icon={<ArrowLeftOutlined />} onClick={() => navigate(`/novel/workspace/${projectId}`)} />
         <Title level={5} style={{ margin: 0, flex: 1 }}>{dashboard.title || '章节生产台'}</Title>
         <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>刷新</Button>
-        <Button size="small" onClick={openBudgetEditor}>预算</Button>
-        <Button size="small" onClick={openQualityGateEditor}>门禁</Button>
-        <Button size="small" onClick={syncVolumeControl}>同步卷级规划</Button>
-        <Button size="small" onClick={recoverWorker}>恢复 worker</Button>
-        <Button size="small" type="primary" onClick={startWorker}>启动 worker</Button>
+        <Button size="small" onClick={openBudgetEditor}> 预算</Button>
+        <Button size="small" onClick={openQualityGateEditor}> 门禁</Button>
+        <Button size="small" onClick={syncVolumeControl}> 同步卷级规划</Button>
+        <Button size="small" onClick={recoverWorker}> 恢复 worker</Button>
+        <Button size="small" type="primary" onClick={startWorker}> 启动 worker</Button>
         <Button size="small" danger onClick={stopWorker}>停止 worker</Button>
       </div>
 

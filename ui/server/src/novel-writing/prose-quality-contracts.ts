@@ -1,4 +1,5 @@
 import { stripProseEngineeringAppendix } from './prose-format'
+import { assessResistanceRevisionAcceptance } from './human-webnovel-resistance'
 import { selectContinuitySafeProseCandidate } from './prose-candidate-continuity'
 
 type LaunchGateCheck = {
@@ -246,6 +247,15 @@ export function selectUsableRevisionText(
       reason: `修订稿过短：${candidateChars}/${currentChars}`,
     }
   }
+  // Commercial band protect: after word_target expand, revise must not collapse below ~90%.
+  // R31 regression: 4023 -> 3089 passed the 65% gate and undid hard-min expand + dialogue texture density.
+  if (currentChars >= 3200 && candidateChars < Math.floor(currentChars * 0.9)) {
+    return {
+      text: current,
+      accepted: false,
+      reason: `修订稿过度缩水：${candidateChars}/${currentChars}`,
+    }
+  }
   const continuity = selectContinuitySafeProseCandidate(current, candidate, options.continuityContext || {
     previous_handoff: options.previousChapterTail,
     requiredHandoffAnchors: options.requiredHandoffAnchors,
@@ -253,6 +263,20 @@ export function selectUsableRevisionText(
   }, { candidate_stage: options.candidateStage })
   if (!continuity.accepted) {
     return { text: current, accepted: false, reason: '修订稿丢失上一章承接', warning: continuity.warning }
+  }
+  const hasHw = blockingFindings.some((item) => /^hw_/.test(compactText(item?.key)))
+  // Full-pipeline fingerprint continuity: every revision must preserve human texture,
+  // not only when hw_ findings are present (r12/r15/r16 regression: polish/revise can wipe fingerprint).
+  const resistance = assessResistanceRevisionAcceptance(current, candidate, {
+    mode: hasHw ? 'improve' : 'preserve',
+    stage: String(options.candidateStage || 'quality_revision'),
+  })
+  if (!resistance.accepted) {
+    return {
+      text: current,
+      accepted: false,
+      reason: resistance.reason || '抗检测修订未通过纹理/指纹护栏',
+    }
   }
   return { text: candidate, accepted: true, reason: '' }
 }

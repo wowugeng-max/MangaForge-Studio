@@ -8,6 +8,20 @@ export {
 } from '../novel-writing/authorial-forecast'
 
 export {
+  attachPovLensesToSceneCards,
+  buildPovCharacterStatePatch,
+  buildPovRepairInstructions,
+  compileChapterPovPlan,
+  compileAssetPovBindings,
+  formatCharacterPovPrompt,
+  formatSceneCardPovPrompt,
+  scanCharacterPovRisks,
+  sanitizeCharacterPovAntiAiStock,
+  compilePovKnowledgeLedgers,
+  buildCharacterPovUiSnapshot,
+} from '../novel-writing/character-pov'
+
+export {
   scanBannedWordLeaks,
   scanContextSensitiveWordDensityRisks,
   scanWeakAdverbDensityRisks,

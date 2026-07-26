@@ -32,6 +32,20 @@ export type NovelDeliverySummaryInput = {
   admissionStatus?: 'accepted' | 'accepted_with_warnings' | 'blocked_invalid' | ''
   qualityWarnings?: Array<{ code: string; source: string; message: string }>
   storyStateStatus?: 'synced' | 'pending' | ''
+  characterPov?: {
+    visible: boolean
+    status: 'ok' | 'warn' | 'fail' | 'empty'
+    statusLabel: string
+    primaryPov: string
+    multiPovLocked?: boolean
+    allowedSecondaryPovs?: string[]
+    secondaryCutPreview?: string[]
+    assetFirewallPreview?: string[]
+    dialogueFilterPreview?: string[]
+    scenePreview?: string[]
+    knowledgePreview?: string[]
+    violations?: string[]
+  } | null
   storyStatePanel?: {
     visible?: boolean
     status?: 'synced' | 'pending' | 'skipped' | 'lagging' | 'synced_with_gaps'

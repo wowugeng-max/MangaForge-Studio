@@ -135,13 +135,13 @@ function TruthFileTab({
           showIcon
           message="故事状态机落后"
           description="已有正文比状态机更新得更靠后。继续自动生成前，建议先校正状态机，避免角色位置、道具归属和伏笔状态漂移。"
-          action={<Button size="small" onClick={onOpenStoryState}>校正</Button>}
+          action={<Button size="small" onClick={onOpenStoryState}> 校正</Button>}
         />
       )}
       <Card
         size="small"
         title="项目真相文件"
-        extra={<Button size="small" loading={loading} onClick={onRefresh}>刷新</Button>}
+        extra={<Button size="small" loading={loading} onClick={onRefresh}> 刷新</Button>}
       >
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <Space wrap>
@@ -328,7 +328,7 @@ export function CreativeCardsModal({
       title={<Space><BookOutlined />创作资料卡中心</Space>}
       width={1040}
       onCancel={onClose}
-      footer={<Button type="primary" onClick={onClose}>关闭</Button>}
+      footer={<Button type="primary" onClick={onClose}> 关闭</Button>}
     >
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         <Card size="small" style={{ borderRadius: 8 }} styles={{ body: { padding: 12 } }}>
@@ -349,8 +349,8 @@ export function CreativeCardsModal({
                 这里统一展示生成时会用到的结构化材料。卡片越完整，章节流水线越容易保持长篇连续性。
               </Text>
               <Space>
-                <Button size="small" onClick={onOpenWritingBible}>编辑写作圣经</Button>
-                <Button size="small" onClick={onOpenStoryState}>校正状态机</Button>
+                <Button size="small" onClick={onOpenWritingBible}> 编辑写作圣经</Button>
+                <Button size="small" onClick={onOpenStoryState}> 校正状态机</Button>
               </Space>
             </Space>
             <Input.Search

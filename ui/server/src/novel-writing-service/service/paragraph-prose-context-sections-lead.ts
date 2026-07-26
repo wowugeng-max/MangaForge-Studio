@@ -1,6 +1,11 @@
+import { buildWebnovelDraftPersonaBlock } from '../../novel-writing/webnovel-author-personas'
 import {
   OH_STORY_BEAT_DENSITY_RULE,
 } from '../quality/outline-blueprint-contracts'
+import {
+  buildWritingPrecisionPlan,
+  formatWritingPrecisionPrompt,
+} from '../../novel-writing/writing-precision-prompt'
 import {
   buildAssetLinkagePromptSection,
   buildBenchmarkRecallPromptSection,
@@ -20,6 +25,8 @@ import {
   buildExpectationThresholdPromptSection,
   buildFemaleAudiencePromptSection,
   buildGenrePositioningPromptSection,
+  buildGenreProseCardPromptSection,
+  buildReaderContractProgressionPromptSection,
   buildGovernanceRecheckPromptSection,
   buildInformationFlowPromptSection,
   buildIntentConfirmationPromptSection,
@@ -69,6 +76,8 @@ export function buildParagraphProsePromptLeadSections(ctx: any) {
     platformRubric,
     contentRubric,
     targetReaderContract,
+    readerContractProgression,
+    genreProseCardContract,
     genrePositioningContract,
     plotSpecialTopicsContract,
     femaleAudienceContract,
@@ -109,14 +118,22 @@ export function buildParagraphProsePromptLeadSections(ctx: any) {
     chapterDraft,
     contextPackage,
   } = ctx
+  const writingPrecisionPlan = buildWritingPrecisionPlan({
+    contextPackage,
+    chapterDraft,
+    wordTarget: contextPackage?.chapter_target?.word_target,
+    modelRuntime: contextPackage?.runtime_model || contextPackage?.model_runtime || null,
+    modelFamilyStrategy: contextPackage?.model_family_strategy || null,
+  })
   return [
+    buildWebnovelDraftPersonaBlock(ctx?.project || ctx?.novelProject || null),
+
     '任务：按场景卡生成章节正文。请先在心中按场景组织段落，再输出完整正文。',
-    '硬性语言要求：chapter_text 必须使用简体中文，按中文网文自然分段和中文引号输出；不得输出葡萄牙语、英语或拼音正文，外语只允许作为故事内必要专名少量出现。',
+    '硬性语言要求：chapter_text 必须使用简体中文，按中文网文“一句一段”为主的自然分段和中文引号输出；不得输出葡萄牙语、英语或拼音正文，外语只允许作为故事内必要专名少量出现。',
     `作品标题：${project.title}`,
     chapterDraft?.chapter_no ? `目标章节：第${chapterDraft.chapter_no}章《${chapterDraft.title || '无标题'}》` : '',
     chapterDraft?.chapter_no ? `只允许输出这一章的正文，不得混入其他章节内容。chapter_no 必须严格等于 ${chapterDraft.chapter_no}` : '',
-    contextPackage?.chapter_target?.word_target ? `本章目标字数：约 ${contextPackage.chapter_target.word_target.target} 字；可接受范围：${contextPackage.chapter_target.word_target.min}-${contextPackage.chapter_target.word_target.max} 字；类型：${contextPackage.chapter_target.word_target.label}。` : '',
-    contextPackage?.chapter_target?.word_target ? '字数执行要求：每个场景分配明确字数预算，正文不得只写剧情摘要；如果低于目标范围，必须扩写动作过程、选择代价、对话交锋和章末钩子铺垫，而不是堆砌环境描写。' : '',
+    ...formatWritingPrecisionPrompt(writingPrecisionPlan),
     chapterPositioningBrief ? '【章节定位与对标结构坐标】' : '',
     chapterPositioningBrief ? '硬性要求：执行 chapter_target.chapter_positioning_brief；按章节定位决定冲突烈度、爽点密度、详略和章尾拉力。高压/推进章要有明确升级或回报；低压/过场章可弱钩子，但必须保留阶段目标、微好奇或关系期待。' : '',
     chapterPositioningBrief ? `chapter_target.chapter_positioning_brief：${JSON.stringify(chapterPositioningBrief).slice(0, 1800)}` : '',
@@ -150,6 +167,8 @@ export function buildParagraphProsePromptLeadSections(ctx: any) {
     ...buildPlatformRubricPromptSection(platformRubric),
     ...buildContentRubricPromptSection(contentRubric),
     ...buildTargetReaderPromptSection(targetReaderContract),
+    ...buildReaderContractProgressionPromptSection(readerContractProgression),
+    ...buildGenreProseCardPromptSection(genreProseCardContract),
     ...buildGenrePositioningPromptSection(genrePositioningContract),
     ...buildPlotSpecialTopicsPromptSection(plotSpecialTopicsContract),
     ...buildFemaleAudiencePromptSection(femaleAudienceContract),

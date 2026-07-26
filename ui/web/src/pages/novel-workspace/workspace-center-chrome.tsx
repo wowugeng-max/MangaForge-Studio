@@ -53,7 +53,7 @@ export function DeslopGateDiagnosticsPanel({
         <Text type="secondary">{diagnostics.summary}</Text>
         {canRepair && (
           <Button
-            className="novel-deslop-gate-action"
+            className="novel-deslop-gate-action novel-btn-crystal novel-btn-crystal-model"
             size="small"
             type="primary"
             loading={repairLoading}
@@ -182,7 +182,7 @@ export function EditorDisplayControls({
           </div>
           <Slider min={24} max={48} value={prefs.lineHeight} onChange={lineHeight => changePrefs({ lineHeight })} />
         </div>
-        <Button size="small" block onClick={resetPrefs}>恢复默认</Button>
+        <Button size="small" block onClick={resetPrefs}> 恢复默认</Button>
       </Space>
     </div>
   )

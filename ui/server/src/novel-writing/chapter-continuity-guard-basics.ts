@@ -59,6 +59,19 @@ export const CONTINUITY_CLUSTERS: ContinuityCluster[] = [
     forward: true,
   },
   {
+    // Generic door-threshold arrival (footsteps stop / someone outside). Not limited to 10pm knock plot.
+    key: 'door_threshold_arrival',
+    label: '门外停步',
+    patterns: [
+      /脚步声.{0,12}(门外|门前|门边)/,
+      /(门外|门前|门边).{0,12}脚步/,
+      /门外停了|在门外停|停在门外/,
+      /有人在门外|门外有人|门外站/,
+      /门把|拉开.{0,4}门缝|推开门缝/,
+    ],
+    forward: true,
+  },
+  {
     key: 'wang_nainai_capture',
     label: '王奶奶捕获',
     patterns: [/王奶奶/, /借酱油/, /冰箱|冷冻室|拖进|拽进/],
@@ -102,6 +115,18 @@ export const CONTINUITY_CLUSTERS: ContinuityCluster[] = [
       /找到[…·.。]{0,4}你们了|抹杀规则.{0,8}轰然降临/,
       /巨型消防斧|猩红.{0,6}眼球/,
       /通往2号楼/,
+    ],
+    forward: true,
+  },
+  {
+    // Later-arc irreversible descent under building interior; must outrank residual mid-chapter seeker/interior labels.
+    key: 'deep_abyss_descent',
+    label: '地下深渊坠落',
+    patterns: [
+      /纵身一跃|坠入.{0,16}(深渊|黑暗|深坑|深渊之中)/,
+      /深渊.{0,12}(边缘|下方|深处|极深)|无尽的黑暗/,
+      /眼球之墙|惨白眼球|由惨白眼球/,
+      /没有头颅的庞大躯壳|古老大夏朝祭祀|不可言说/,
     ],
     forward: true,
   },
@@ -207,13 +232,36 @@ export function extractPrimaryEndingHooks(previousChapter: any = {}) {
   }
 
   // Fallback for chapters without any cluster hit in the tight window.
+  // Prefer a free-text true-ending obligation over wideTail residual mid-scene clusters.
+  // wideTail often still contains earlier beats (2号楼寻找者 / 电梯) that are no longer the chapter climax.
   if (!ranked.length) {
-    for (const cluster of CONTINUITY_CLUSTERS) {
-      bump(cluster, scoreWithBonus(cluster, `${endingHook}。${wideTail}`, 0), endingHook || wideTail)
+    if (trueTail.length >= 80 || endingHook) {
+      // Prefer explicit ending_hook / last sentence over a long mid-tail paste.
+      const lastLines = String(text || '')
+        .split(/\n+/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+      const lastSentence = compactText(lastLines.slice(-2).join('。'), 120)
+        || compactText(trueTail.split(/[。！？]/).filter(Boolean).slice(-2).join('。'), 120)
+      ranked = [{
+        cluster: {
+          key: 'true_ending_forward',
+          label: '上一章章末未解',
+          patterns: [] as RegExp[],
+          forward: true,
+        },
+        score: 8,
+        evidence: compactText(endingHook || lastSentence || trueTail, 160),
+      }]
+    } else {
+      for (const cluster of CONTINUITY_CLUSTERS) {
+        const score = scoreWithBonus(cluster, `${endingHook}。${wideTail}`, 0)
+        if (score > 0) bump(cluster, score, wideTail || endingHook)
+      }
+      ranked = [...byKey.values()].sort((a, b) => b.score - a.score || a.cluster.key.localeCompare(b.cluster.key))
+      const forwardOnly = ranked.filter(item => item.cluster.forward)
+      if (forwardOnly.length) ranked = forwardOnly
     }
-    ranked = [...byKey.values()].sort((a, b) => b.score - a.score || a.cluster.key.localeCompare(b.cluster.key))
-    const forwardOnly = ranked.filter(item => item.cluster.forward)
-    if (forwardOnly.length) ranked = forwardOnly
   }
 
   // Prefer concrete late-scene primary when residual early labels still score on incidental words.
@@ -228,11 +276,20 @@ export function extractPrimaryEndingHooks(previousChapter: any = {}) {
       evidence: lateSceneEvidence,
     })
   }
-  if (/2号楼保安队长|寻找者.{0,8}已降临|抹杀规则.{0,8}轰然降临|找到[…·.。]{0,4}你们了/.test(lateSceneEvidence)) {
+  if (/2号楼保安队长|寻找者.{0,8}已降临|抹杀规则.{0,8}轰然降临|找到[…·.。]{0,4}你们了/.test(lateSceneEvidence)
+    && !/纵身一跃|坠入.{0,12}(深渊|黑暗)|眼球之墙|深渊边缘/.test(lateSceneEvidence)) {
     lateSceneCandidates.push({
       key: 'building_two_seeker',
       label: '2号楼寻找者对峙',
       score: 22,
+      evidence: lateSceneEvidence,
+    })
+  }
+  if (/纵身一跃|坠入.{0,16}(深渊|黑暗|深坑)|眼球之墙|深渊边缘|没有头颅的庞大躯壳/.test(lateSceneEvidence)) {
+    lateSceneCandidates.push({
+      key: 'deep_abyss_descent',
+      label: '地下深渊坠落',
+      score: 26,
       evidence: lateSceneEvidence,
     })
   }

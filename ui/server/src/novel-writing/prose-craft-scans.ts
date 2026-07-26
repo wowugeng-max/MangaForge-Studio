@@ -39,8 +39,10 @@ function isShortFragmentedNarrationLine(line: string) {
   if (isLikelyChapterTitleLine(evidence)) return false
   if (/^[“"「].+[”"」][。！？!?，,；;：:]?$/.test(evidence)) return false
   if (/[“"「].+[”"」]/.test(evidence)) return false
+  // Complete one-sentence web-novel lines are desired; only flag poem-like fragments without terminators.
+  if (/[。！？!?]$/.test(evidence)) return false
   const length = countProseChars(evidence.replace(/[。！？!?，,；;：:]+$/g, ''))
-  return length >= 2 && length <= 16
+  return length >= 2 && length <= 12
 }
 
 export function scanParagraphFragmentationRisks(text: string) {
@@ -54,7 +56,7 @@ export function scanParagraphFragmentationRisks(text: string) {
         label: '段落碎片化扫描',
         status: 'warn',
         evidence: compactBriefText(window.map(item => item.evidence).join(' / '), 220),
-        fix: '连续极短叙述段像提纲或诗行；按戏剧单元合并同一镜头里的动作、感知和反应，只在新动作、新信息、对话或转折处断段。',
+        fix: '连续无句号的极短碎片像提纲或诗行；补成完整短句，或把同一镜头里的残片并入一句完整叙述。完整“一句一段”的网文短段不算碎片化。',
         line: window[0].line,
       })
     }
@@ -73,6 +75,62 @@ export function scanParagraphFragmentationRisks(text: string) {
     window.push({ line: index + 1, evidence })
   })
   flush()
+  return hits
+}
+
+/** 番茄/网文默认：一句一段为底色；允许少量 2 句密段（反朱雀段形混排）；一段塞 3 句以上完整句才算偏离。 */
+export function scanWebNovelParagraphShapeRisks(text: string) {
+  const paragraphs = proseParagraphLinesWithoutTitle(text)
+    .filter(item => !/^[“"「].+[”"」][。！？!?，,；;：:]?$/.test(item.text))
+  const hits: Array<{ key: string; label: string; status: 'warn' | 'fail'; evidence: string; fix: string; line: number; severity?: string }> = []
+  let triplePlusHits = 0
+  let twoSentenceDenseHits = 0
+  for (const paragraph of paragraphs) {
+    const proseLength = countProseChars(paragraph.text)
+    if (proseLength < 28) continue
+    const sentences = (paragraph.text.match(/[^。！？!?]+[。！？!?]/g) || []).filter(item => countProseChars(item) >= 6)
+    // Controlled 2-sentence dense blocks are intentional for anti-detector burstiness.
+    if (sentences.length === 2 && proseLength >= 90) {
+      twoSentenceDenseHits += 1
+      if (hits.length < 2) {
+        hits.push({
+          key: `web_novel_two_sentence_dense_line_${paragraph.line}`,
+          label: '网文双句密段',
+          status: 'warn',
+          severity: 'low',
+          evidence: compactBriefText(paragraph.text, 220),
+          fix: '双句密段可保留作节奏突发；若偏书面，压到 2 句内并绑定同一判断→动作链。',
+          line: paragraph.line,
+        })
+      }
+      continue
+    }
+    if (sentences.length >= 3 || (sentences.length >= 2 && proseLength >= 110)) {
+      if (sentences.length >= 3) triplePlusHits += 1
+      if (hits.length < 3) {
+        hits.push({
+          key: `web_novel_multi_sentence_paragraph_line_${paragraph.line}`,
+          label: '网文分行扫描',
+          status: sentences.length >= 4 || proseLength >= 130 ? 'fail' : 'warn',
+          severity: sentences.length >= 4 || proseLength >= 130 ? 'high' : 'warn',
+          evidence: compactBriefText(paragraph.text, 220),
+          fix: '按中文网文手机阅读重排：默认一句一段；允许少量 2 句密段；禁止一段塞 3 句以上墙文。',
+          line: paragraph.line,
+        })
+      }
+    }
+  }
+  if (triplePlusHits >= 4 && !hits.some(item => item.key === 'web_novel_paragraph_shape_density')) {
+    hits.unshift({
+      key: 'web_novel_paragraph_shape_density',
+      label: '网文分行密度',
+      status: 'fail',
+      severity: 'high',
+      evidence: `检测到 ${triplePlusHits} 处 ≥3 句段落，偏离网文可读节奏（双句密段 ${twoSentenceDenseHits} 处可保留）`,
+      fix: '把 ≥3 句墙文拆开；保留少量 2 句密段作节奏突发，其余回一句一段。',
+      line: 1,
+    })
+  }
   return hits
 }
 
@@ -148,13 +206,14 @@ export function scanParagraphWallTextRisks(text: string) {
   const hits: Array<{ key: string; label: string; status: 'warn'; evidence: string; fix: string; line: number }> = []
   for (const paragraph of paragraphs) {
     const proseLength = countProseChars(paragraph.text)
-    if (proseLength < 260) continue
+    // Mobile web-novel ceiling: ~100 chars is already hard to skim as one block.
+    if (proseLength < 100) continue
     hits.push({
       key: `paragraph_wall_text_line_${paragraph.line}`,
       label: '网文长段扫描',
       status: 'warn',
       evidence: `第${paragraph.line}行形成 ${proseLength} 字墙文：${compactBriefText(paragraph.text, 220)}`,
-      fix: '按中文网文阅读节奏拆段：说话人变化、完整动作、信息变化、角色反应或转折出现时换段；对话尽量独立成段，不改变事件、人物状态和因果顺序。',
+      fix: '按中文网文阅读节奏拆段：默认一句一段；说话人变化、完整动作、信息变化、角色反应或转折出现时换段；对话独立成段。',
       line: paragraph.line,
     })
     break

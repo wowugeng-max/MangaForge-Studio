@@ -9,6 +9,7 @@ import {
   detectOpeningHookMissDirective,
   extractDeliveredClimaxLandings,
   extractPrimaryEndingHooks,
+  ensureOpeningHandoffBridge,
 } from './chapter-continuity-guard'
 import {
   detectProgressReplayDirective,
@@ -343,3 +344,72 @@ describe('delivered climax landing replay', () => {
     expect(miss).toBeNull()
   })
 })
+
+
+describe("door threshold free-text handoff", () => {
+  test("extracts door_threshold_arrival for footsteps stop at door", () => {
+    const previous = {
+      chapter_text: `
+林序把三张纸全塞进口袋，站直了，准备去把3床的监护仪接上。
+
+脚步声在门外停了。
+`,
+      ending_hook: "脚步声在门外停了",
+    }
+    const hooks = extractPrimaryEndingHooks(previous)
+    expect(hooks.some((h) => h.key === "door_threshold_arrival" || h.key === "true_ending_forward")).toBe(true)
+    expect(hooks[0]?.evidence || "").toMatch(/门外|脚步/)
+  })
+
+  test("opening that continues door footsteps passes admission", () => {
+    const previous = {
+      chapter_text: `
+林序把三张纸全塞进口袋，站直了，准备去把3床的监护仪接上。
+
+脚步声在门外停了。
+`,
+      ending_hook: "脚步声在门外停了",
+    }
+    const open = `
+脚步声在门外停了。林序没立刻应，先把三张纸按进白大褂内侧口袋。
+
+他走过去，手按在门把上，拉开一条缝。门外站着个穿便装的男人，手里拎着一只旧帆布袋。
+`
+    const miss = detectOpeningHookMissDirective({ previousChapter: previous, chapter: { chapter_text: open } })
+    expect(miss).toBeNull()
+    const admission = assessPrimaryOpeningHookContinuity({ chapterText: open, previousChapter: previous })
+    expect(admission.required).toBe(true)
+    expect(admission.passed).toBe(true)
+  })
+
+  test("opening that jumps to unrelated mid-plot fails admission", () => {
+    const previous = {
+      chapter_text: `
+林序把三张纸全塞进口袋，站直了，准备去把3床的监护仪接上。
+
+脚步声在门外停了。
+`,
+      ending_hook: "脚步声在门外停了",
+    }
+    const open = `
+林序把手机手电筒的光束再次压低，照在三张折叠纸条最下端。那两个字母L·X在光斑里显得格外清晰。
+他先用拇指和食指捏住015号纸条的边缘，沿着折痕慢慢展开。
+`
+    const admission = assessPrimaryOpeningHookContinuity({ chapterText: open, previousChapter: previous })
+    expect(admission.required).toBe(true)
+    expect(admission.passed).toBe(false)
+  })
+})
+
+  test("ensureOpeningHandoffBridge prefixes door threshold when opening drifts", () => {
+    const previous = {
+      chapter_text: "林序把三张纸塞进口袋。\n\n脚步声在门外停了。\n",
+      ending_hook: "脚步声在门外停了",
+    }
+    const drifted = "林序把手机手电筒压低，照在三张折叠纸条最下端。他先检查编号。"
+    const out = ensureOpeningHandoffBridge(drifted, previous)
+    expect(out.bridged).toBe(true)
+    expect(out.text).toMatch(/门外|脚步|门把/)
+    const admission = assessPrimaryOpeningHookContinuity({ chapterText: out.text, previousChapter: previous })
+    expect(admission.passed).toBe(true)
+  })

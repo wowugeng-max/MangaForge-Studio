@@ -25,6 +25,13 @@ export const knowledgeCategoryPresets = [
   { value: 'character_function_matrix', label: '角色功能矩阵' },
   { value: 'resource_economy_model', label: '资源经济模型' },
   { value: 'style_profile', label: '文风画像' },
+  { value: 'benchmark_analyze', label: '对标拆文' },
+  { value: 'market_scan', label: '市场扫榜' },
+  { value: 'reverse_import', label: '逆向导入' },
+  { value: 'cover_brief', label: '封面简报' },
+  { value: 'short_suite', label: '短篇三件套' },
+  { value: 'genre_prose_card', label: '题材散文卡' },
+  { value: 'ending_reserve', label: '终局储备' },
 ]
 
 export const fieldLabelStyle: React.CSSProperties = {
@@ -72,7 +79,10 @@ export function formatKnowledgeCategory(
   entry: any,
   knowledgeSummary: Record<string, { label: string; count: number }>,
 ) {
-  return knowledgeSummary[entry?.category]?.label || entry?.category || '未分类'
+  const category = String(entry?.category || '').trim()
+  if (!category) return '未分类'
+  const preset = knowledgeCategoryPresets.find(item => item.value === category)?.label
+  return knowledgeSummary[category]?.label || preset || category
 }
 
 export function getBatchStatusColor(status?: string) {

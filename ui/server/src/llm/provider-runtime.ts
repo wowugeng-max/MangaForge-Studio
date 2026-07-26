@@ -155,6 +155,9 @@ async function postProviderJson<T = any>(
 
   let lastError: string | null = null
   let lastStatus = 0
+  // Cloudflare 524 burns ~2min per attempt; cap retries so expand/draft can fall back quickly.
+  let cloudflare524Attempts = 0
+  const maxCloudflare524Attempts = 2
 
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
     if (options.signal?.aborted) {
@@ -281,6 +284,13 @@ async function postProviderJson<T = any>(
 
       if (!isRetryable(response.status)) {
         throw new Error(errorMsg)
+      }
+
+      if (response.status === 524) {
+        cloudflare524Attempts += 1
+        if (cloudflare524Attempts >= maxCloudflare524Attempts) {
+          throw new Error(`${errorMsg} (cloudflare_524_retry_cap=${maxCloudflare524Attempts})`)
+        }
       }
 
       lastError = errorMsg

@@ -140,7 +140,7 @@ export function useNovelProjectWorkspaceUiState() {
   // ── right reference panel ──
   const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const [rightPanelTab, setRightPanelTab] = useState('worldbuilding')
-  const [workspaceArea, setWorkspaceArea] = useState<WorkspaceArea>('autoCreation')
+  const [workspaceArea, setWorkspaceArea] = useState<WorkspaceArea>('chapterWriting')
   const [writingShellMode, setWritingShellMode] = useState<WorkspaceShellMode>(() => loadWorkspaceShellMode())
   const [directoryCollapsed, setDirectoryCollapsed] = useState(() => loadWorkbenchDirectoryCollapsed())
   const [storyAssetsFocusDiscoveredToken, setStoryAssetsFocusDiscoveredToken] = useState(0)
@@ -148,7 +148,7 @@ export function useNovelProjectWorkspaceUiState() {
 
   const shellMode = shellModeForWorkspaceArea(workspaceArea, writingShellMode)
   const isImmersiveShell = deriveIsImmersiveShell(shellMode, workspaceArea)
-  const showGlobalWritingGuidance = workspaceArea !== 'chapterWriting'
+  const showGlobalWritingGuidance = workspaceArea !== 'chapterWriting' && workspaceArea !== 'storyAssets'
   const directoryShellClassName = directoryCollapsed
     ? 'novel-workspace-directory-shell is-collapsed'
     : 'novel-workspace-directory-shell'

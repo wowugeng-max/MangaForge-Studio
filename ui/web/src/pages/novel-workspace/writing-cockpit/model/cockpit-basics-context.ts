@@ -311,6 +311,46 @@ export function chapterSceneCards(chapter?: AnyRecord | null, contextPackage?: A
       benchmarkRecallDirectives: stringArray(scene?.benchmark_recall_directives || scene?.benchmarkRecallDirectives || scene?.benchmark_directives || scene?.benchmarkDirectives),
       conceptAnchorRules: stringArray(scene?.concept_anchor_rules || scene?.conceptAnchorRules || scene?.new_concept_anchor_rules || scene?.newConceptAnchorRules),
       proseCraftDirectives: stringArray(scene?.prose_craft_directives || scene?.proseCraftDirectives || scene?.prose_craft_rules || scene?.proseCraftRules),
+      povCharacter: firstNonEmpty(
+        scene?.pov_character,
+        scene?.povCharacter,
+        scene?.pov_lens?.pov_character,
+        scene?.povLens?.pov_character,
+      ),
+      decisionInScene: firstNonEmpty(
+        scene?.decision_in_scene,
+        scene?.decisionInScene,
+        scene?.pov_lens?.decision_in_scene,
+        scene?.povLens?.decision_in_scene,
+        scene?.protagonist_agency_action,
+        scene?.protagonistAgencyAction,
+      ),
+      wantNow: firstNonEmpty(
+        scene?.want_now,
+        scene?.wantNow,
+        scene?.pov_lens?.want_now,
+        scene?.povLens?.want_now,
+        scene?.blocked_desire,
+        scene?.blockedDesire,
+      ),
+      fearOrCostNow: firstNonEmpty(
+        scene?.fear_or_cost_now,
+        scene?.fearOrCostNow,
+        scene?.pov_lens?.fear_or_cost_now,
+        scene?.povLens?.fear_or_cost_now,
+        scene?.no_exit_reason,
+        scene?.noExitReason,
+      ),
+      emotionFromPov: firstNonEmpty(
+        scene?.emotion_from_pov,
+        scene?.emotionFromPov,
+        scene?.emotion_in_situation,
+        scene?.emotionInSituation,
+        scene?.pov_lens?.emotion_from_pov,
+        scene?.povLens?.emotion_from_pov,
+        scene?.emotional_tone,
+        scene?.emotionalTone,
+      ),
     }
     return card
   }).filter(card => Boolean(card.purpose || card.conflict || card.turn || card.endingHook))

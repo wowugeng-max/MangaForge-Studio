@@ -48,7 +48,7 @@ export function OutlineTreeModal({
       footer={
         <Space>
           <Button onClick={onCreateOutline} icon={<EditOutlined />}>新增大纲</Button>
-          <Button type="primary" onClick={onClose}>关闭</Button>
+          <Button type="primary" onClick={onClose}> 关闭</Button>
         </Space>
       }
       width={720}

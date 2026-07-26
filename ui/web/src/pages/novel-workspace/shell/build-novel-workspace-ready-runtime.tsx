@@ -583,6 +583,7 @@ export function buildNovelWorkspaceReadyRuntime(base: Record<string, any>) {
     writingRecommendation,
     acceptChapterVersion,
     applyEditorRevision,
+    refreshActiveProseQuality,
     createFirst30RetentionRepairQueue,
     createRecoveryEvidenceGovernanceQueue,
     generateCurrentChapterProse,

@@ -545,6 +545,7 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
       restore_hook: '强化章末钩子',
     }
     const revisionMode = options.revisionMode || 'from_report'
+    const customPrompt = String(options.prompt || '').trim()
     const runRevision = async () => {
       try {
         const res = await apiClient.post(`/novel/reviews/${report.id}/apply-revision`, {
@@ -552,7 +553,7 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
           chapter_id: resolveEditorRevisionChapterId(report, activeChapter?.id, options.targetChapterId),
           model_id: selectedModelId,
           revision_mode: revisionMode,
-          prompt: options.prompt || '',
+          prompt: customPrompt,
           source: options.source || undefined,
           auto_quality_check: true,
           auto_story_state: options.autoStoryState !== false,
@@ -591,14 +592,22 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
     if (options.skipConfirm) {
       return await runRevision()
     }
+    const baseContent = isSelfCheckRevision
+      ? '系统会根据这份正文质检的修订指令重写当前章节，并保存为新的章节版本。'
+      : isDeliveryRiskRevision
+        ? '系统会根据这条交稿风险和当前章节的完整风险清单生成修订补丁，并保存为新的章节版本。'
+        : '系统会根据这份编辑报告重写当前章节，并保存为新的章节版本。'
+    const customContent = customPrompt
+      ? `会优先执行你的自定义修订指令：${customPrompt.slice(0, 120)}${customPrompt.length > 120 ? '…' : ''}；报告必修项仍会一并覆盖。`
+      : ''
     Modal.confirm({
-      title: revisionLabels[revisionMode] || revisionLabels.from_report,
-      content: isSelfCheckRevision
-        ? '系统会根据这份正文质检的修订指令重写当前章节，并保存为新的章节版本。'
-        : isDeliveryRiskRevision
-          ? '系统会根据这条交稿风险和当前章节的完整风险清单生成修订补丁，并保存为新的章节版本。'
-        : '系统会根据这份编辑报告重写当前章节，并保存为新的章节版本。',
-      okText: isSelfCheckRevision ? '按自检修订' : isDeliveryRiskRevision ? '按风险修订' : '生成修订稿',
+      title: customPrompt
+        ? `${revisionLabels[revisionMode] || revisionLabels.from_report}（含自定义指令）`
+        : (revisionLabels[revisionMode] || revisionLabels.from_report),
+      content: [baseContent, customContent].filter(Boolean).join('\n'),
+      okText: customPrompt
+        ? '按自定义+报告修订'
+        : (isSelfCheckRevision ? '按自检修订' : isDeliveryRiskRevision ? '按风险修订' : '生成修订稿'),
       onOk: runRevision,
     })
     return null

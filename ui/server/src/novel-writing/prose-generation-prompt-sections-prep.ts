@@ -165,6 +165,34 @@ export function buildTargetReaderPromptSection(targetReaderContract: any) {
   ]
 }
 
+export function buildReaderContractProgressionPromptSection(readerContractProgression: any) {
+  if (!readerContractProgression) return []
+  return [
+    '【读者契约 + 终局储备】',
+    '硬性要求：执行 reader_contract_progression / ending_reserve；禁止提前打光终局底牌与升级台阶，主角须保有因果权与结算权，单章可放开爽感密度。',
+    readerContractProgression.reader_promise ? `读者契约：${readerContractProgression.reader_promise}` : '',
+    readerContractProgression.current_risk?.level ? `当前风险：${readerContractProgression.current_risk.level}` : '',
+    readerContractProgression.ending_reserve?.capacity_check?.note ? `台阶容量：${readerContractProgression.ending_reserve.capacity_check.note}` : '',
+    readerContractProgression.quality_checks?.length ? `检查：${joinList(readerContractProgression.quality_checks)}` : '',
+    JSON.stringify(readerContractProgression, null, 2).slice(0, 2200),
+    '',
+  ]
+}
+
+export function buildGenreProseCardPromptSection(genreProseCardContract: any) {
+  const card = genreProseCardContract?.card
+  if (!card) return []
+  return [
+    '【题材散文卡】',
+    `硬性要求：执行题材散文卡《${card.title}》：${card.core}；冲突按 ${card.conflict_engine}；禁止 ${card.forbidden_drift}`,
+    `主线目标：${card.main_goal || ''}`,
+    `爽点定位：${card.payoff_focus || ''}`,
+    `正文落点：${card.prose_landing || ''}`,
+    genreProseCardContract.quality_checks?.length ? `检查：${joinList(genreProseCardContract.quality_checks)}` : '',
+    '',
+  ]
+}
+
 export function buildGenrePositioningPromptSection(genrePositioningContract: any) {
   return [
     genrePositioningContract ? '【题材定位合同】' : '',

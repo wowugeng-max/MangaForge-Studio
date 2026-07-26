@@ -126,7 +126,7 @@ export function OutlineControlPanel({
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <Button onClick={onClose}>取消</Button>
+          <Button onClick={onClose}> 取消</Button>
           <Button type="primary" icon={<RocketOutlined />} onClick={handleGenerate}>开始生成</Button>
         </div>
       </Space>

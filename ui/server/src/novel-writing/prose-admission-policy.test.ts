@@ -330,3 +330,15 @@ describe('blocked invalid error marking', () => {
     expect(marked.admission_failure).toBe(failure)
   })
 })
+
+  test('blocks detector_resistance hard failures as blocked_invalid', () => {
+    const failure: ProseAdmissionHardFailure = {
+      code: 'hw_opening_probe_cascade',
+      source: 'detector_resistance',
+      message: '开篇连续多类验尸/确认动作叠层，模板感过强。',
+    }
+    const decision = classifyProseAdmission({ hard_failures: [failure] })
+    expect(decision.status).toBe('blocked_invalid')
+    expect(decision.hard_failures).toEqual([failure])
+  })
+

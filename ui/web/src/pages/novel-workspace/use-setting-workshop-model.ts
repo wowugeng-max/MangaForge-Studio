@@ -77,21 +77,44 @@ export function useSettingWorkshopModel({
       setSettings(Array.isArray(settingsRes.data?.items) ? settingsRes.data.items : [])
       setUsage(Array.isArray(usageRes.data?.usage) ? usageRes.data.usage : [])
       const reviews = Array.isArray(reviewsRes.data) ? reviewsRes.data : []
-      const latestAssetReview = reviews
-        .filter((review: any) => review?.review_type === 'asset_intake' && (!activeChapter?.id || reviewChapterId(review) === Number(activeChapter.id)))
-        .sort((a: any, b: any) => Date.parse(b.created_at || '') - Date.parse(a.created_at || ''))[0]
-      const payload = parseReviewPayload(latestAssetReview)
-      const appliedNames = new Set(Array.isArray(payload?.applied_asset_names) ? payload.applied_asset_names.map((item: any) => String(item || '').trim()) : [])
-      for (const review of reviews.filter((item: any) => item?.review_type === 'asset_intake_apply' && (!activeChapter?.id || reviewChapterId(item) === Number(activeChapter.id)))) {
+      // Project-wide intake queue: aggregate all asset_intake reviews, not only latest chapter.
+      const appliedNames = new Set<string>()
+      for (const review of reviews.filter((item: any) => item?.review_type === 'asset_intake_apply')) {
         const appliedPayload = parseReviewPayload(review)
         for (const item of Array.isArray(appliedPayload?.created_settings) ? appliedPayload.created_settings : []) appliedNames.add(String(item?.payload_json?.original_name || item?.name || '').trim())
+        for (const item of Array.isArray(appliedPayload?.created_characters) ? appliedPayload.created_characters : []) appliedNames.add(String(item?.name || '').trim())
         for (const item of Array.isArray(appliedPayload?.merged_assets) ? appliedPayload.merged_assets : []) appliedNames.add(String(item?.source_name || item?.name || '').trim())
         for (const item of Array.isArray(appliedPayload?.cameo_assets) ? appliedPayload.cameo_assets : []) appliedNames.add(String(item?.name || '').trim())
         for (const item of Array.isArray(appliedPayload?.skipped_existing) ? appliedPayload.skipped_existing : []) appliedNames.add(String(item?.name || '').trim())
+        for (const name of Array.isArray(appliedPayload?.applied_asset_names) ? appliedPayload.applied_asset_names : []) appliedNames.add(String(name || '').trim())
       }
-      const candidates = (Array.isArray(payload?.discovered_assets) ? payload.discovered_assets : [])
-        .filter((item: any) => item?.name && !appliedNames.has(String(item.name || '').trim()))
-        .map((item: any, index: number) => ({ ...item, _key: discoveredAssetKey(item, index) }))
+      const existingSettingNames = new Set((Array.isArray(settingsRes.data?.items) ? settingsRes.data.items : []).map((item: any) => `${item.entity_type}:${String(item?.name || '').trim()}`))
+      const seenCandidate = new Set<string>()
+      const candidates: any[] = []
+      const intakeReviews = reviews
+        .filter((review: any) => review?.review_type === 'asset_intake')
+        .sort((a: any, b: any) => Date.parse(b.created_at || '') - Date.parse(a.created_at || ''))
+      for (const review of intakeReviews) {
+        const payload = parseReviewPayload(review)
+        const chapterId = reviewChapterId(review)
+        const list = Array.isArray(payload?.discovered_assets) ? payload.discovered_assets : []
+        for (const [index, item] of list.entries()) {
+          const name = String(item?.name || '').trim()
+          const entityType = String(item?.entity_type || item?.type || 'item')
+          if (!name || appliedNames.has(name)) continue
+          const key = `${entityType}:${name}`
+          if (seenCandidate.has(key) || existingSettingNames.has(key)) continue
+          seenCandidate.add(key)
+          candidates.push({
+            ...item,
+            entity_type: entityType,
+            name,
+            chapter_id: item?.chapter_id || chapterId || null,
+            chapter_no: item?.chapter_no || item?.first_chapter_no || payload?.chapter_no || null,
+            _key: discoveredAssetKey({ ...item, entity_type: entityType, name }, candidates.length + index),
+          })
+        }
+      }
       setDiscoveredAssets(candidates)
       setSelectedDiscoveredAssetKeys(candidates.map((item: any) => item._key))
       setAssetDispositionDrafts(prev => candidates.reduce((acc: Record<string, any>, item: any) => {
@@ -127,8 +150,9 @@ export function useSettingWorkshopModel({
   const isActionLoading = (key: SettingWorkshopActionKey) => actionLoadingKey === key
   const commandClass = (key: SettingWorkshopActionKey, modelCall = false) => [
     'setting-workshop-command',
-    modelCall ? 'setting-workshop-model-command' : '',
-    isActionLoading(key) ? 'setting-workshop-running-command' : '',
+    'novel-btn-crystal',
+    modelCall ? 'novel-btn-crystal-model setting-workshop-model-command' : 'novel-btn-crystal-local',
+    isActionLoading(key) ? 'setting-workshop-running-command novel-btn-crystal-running' : '',
   ].filter(Boolean).join(' ')
   const disabledForAction = (key: SettingWorkshopActionKey, disabled = false) => disabled || (isActionBusy && !isActionLoading(key))
 
@@ -368,7 +392,6 @@ export function useSettingWorkshopModel({
   }
 
   const applySelectedDiscoveredAssets = async () => {
-    if (!activeChapter?.id) return message.warning('请先选择章节')
     const assets = discoveredAssets
       .filter(item => selectedDiscoveredAssetKeys.includes(item._key))
       .map(item => {
@@ -384,10 +407,12 @@ export function useSettingWorkshopModel({
     if (assets.length === 0) return message.warning('请先选择要入库的新资产')
     setActionLoadingKey('apply_discovered_assets')
     try {
-      const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/discovered-assets/apply`, {
-        project_id: projectId,
-        assets,
-      })
+      const res = activeChapter?.id
+        ? await apiClient.post(`/novel/chapters/${activeChapter.id}/discovered-assets/apply`, {
+          project_id: projectId,
+          assets,
+        })
+        : await apiClient.post(`/novel/projects/${projectId}/assets/intake-queue/apply`, { assets })
       const total = Number(res.data?.created_settings?.length || 0)
       const merged = Number(res.data?.merged_assets?.length || 0)
       const cameo = Number(res.data?.cameo_assets?.length || 0)

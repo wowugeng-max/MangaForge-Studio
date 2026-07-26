@@ -70,3 +70,224 @@
   border-radius: var(--novel-radius-pill);
   font-weight: var(--novel-font-weight-medium);
 }
+
+
+/* ============================================================
+   Crystal buttons (app-wide)
+   - blue/primary  = model / generative
+   - soft green    = local capability (.novel-btn-crystal-local)
+   - white/default = display / navigation
+   ============================================================ */
+:root,
+.novel-theme-root {
+  --novel-crystal-model-1: rgba(59, 130, 246, 0.92);
+  --novel-crystal-model-2: rgba(37, 99, 235, 0.88);
+  --novel-crystal-model-3: rgba(147, 197, 253, 0.55);
+  --novel-crystal-local-1: rgba(52, 211, 153, 0.88);
+  --novel-crystal-local-2: rgba(16, 185, 129, 0.82);
+  --novel-crystal-local-3: rgba(167, 243, 208, 0.65);
+  --novel-crystal-display-1: rgba(255, 255, 255, 0.92);
+  --novel-crystal-display-2: rgba(248, 250, 252, 0.88);
+  --novel-crystal-display-3: rgba(226, 232, 240, 0.75);
+  --novel-crystal-danger-1: rgba(248, 113, 113, 0.95);
+  --novel-crystal-danger-2: rgba(220, 38, 38, 0.9);
+}
+
+/* Crystal base for solid buttons (exclude pure text/link/circle icon-only) */
+.ant-btn:not(.ant-btn-text):not(.ant-btn-link):not(.ant-btn-circle):not(.ant-btn-icon-only):not(.ant-input-search-button):not(.ant-pagination-item):not(.ant-pagination-prev):not(.ant-pagination-next),
+.novel-btn-crystal.ant-btn {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  border-radius: 999px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.01em;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    inset 0 -1px 0 rgba(15, 23, 42, 0.06),
+    0 6px 14px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(10px) saturate(1.2);
+  -webkit-backdrop-filter: blur(10px) saturate(1.2);
+  transition:
+    transform 0.16s ease,
+    box-shadow 0.16s ease,
+    border-color 0.16s ease,
+    background 0.16s ease,
+    color 0.16s ease;
+}
+
+.ant-btn:not(.ant-btn-text):not(.ant-btn-link):not(.ant-btn-circle):not(.ant-btn-icon-only):not(.ant-input-search-button)::before,
+.novel-btn-crystal.ant-btn::before {
+  content: '';
+  position: absolute;
+  inset: 1px 1px auto 1px;
+  height: 48%;
+  border-radius: 999px 999px 40% 40%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.08));
+  pointer-events: none;
+  z-index: 0;
+}
+
+.ant-btn:not(.ant-btn-text):not(.ant-btn-link) > span,
+.ant-btn:not(.ant-btn-text):not(.ant-btn-link) .anticon,
+.novel-btn-crystal.ant-btn > span,
+.novel-btn-crystal.ant-btn .anticon {
+  position: relative;
+  z-index: 1;
+}
+
+.ant-btn:not(.ant-btn-text):not(.ant-btn-link):not(.ant-btn-circle):not(:disabled):hover,
+.novel-btn-crystal.ant-btn:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    inset 0 -1px 0 rgba(15, 23, 42, 0.05),
+    0 10px 20px rgba(15, 23, 42, 0.12);
+}
+
+.ant-btn:not(.ant-btn-text):not(.ant-btn-link):not(.ant-btn-circle):not(:disabled):active,
+.novel-btn-crystal.ant-btn:not(:disabled):active {
+  transform: translateY(0);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 2px 6px rgba(15, 23, 42, 0.08),
+    0 3px 8px rgba(15, 23, 42, 0.08);
+}
+
+/* Default / white display */
+.ant-btn-default:not(.ant-btn-dangerous):not(.ant-btn-background-ghost):not(.novel-btn-crystal-model):not(.novel-btn-crystal-local):not(:disabled),
+.ant-btn-dashed:not(.ant-btn-dangerous):not(.novel-btn-crystal-model):not(.novel-btn-crystal-local):not(:disabled),
+.novel-btn-crystal-display.ant-btn:not(:disabled) {
+  color: #334155 !important;
+  border-color: rgba(203, 213, 225, 0.95) !important;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.42) 42%, transparent 60%),
+    linear-gradient(165deg, var(--novel-crystal-display-1), var(--novel-crystal-display-2) 55%, #e2e8f0) !important;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+.ant-btn-default:not(.ant-btn-dangerous):not(.novel-btn-crystal-model):not(.novel-btn-crystal-local):not(:disabled):hover,
+.ant-btn-dashed:not(.ant-btn-dangerous):not(.novel-btn-crystal-model):not(.novel-btn-crystal-local):not(:disabled):hover,
+.novel-btn-crystal-display.ant-btn:not(:disabled):hover {
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 1), rgba(255, 255, 255, 0.5) 45%, transparent 62%),
+    linear-gradient(165deg, #ffffff, #f8fafc 55%, #e2e8f0) !important;
+}
+
+/* Primary / blue model */
+.ant-btn-primary:not(.ant-btn-dangerous):not(.ant-btn-background-ghost):not(.novel-btn-crystal-local):not(:disabled),
+.novel-btn-crystal-model.ant-btn:not(:disabled),
+.novel-btn-crystal-model.ant-btn-primary:not(:disabled) {
+  color: #eff6ff !important;
+  border-color: rgba(96, 165, 250, 0.9) !important;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.04) 38%, transparent 55%),
+    linear-gradient(165deg, var(--novel-crystal-model-1), var(--novel-crystal-model-2) 58%, #1d4ed8) !important;
+  text-shadow: 0 1px 0 rgba(15, 23, 42, 0.18);
+}
+
+.ant-btn-primary:not(.ant-btn-dangerous):not(.novel-btn-crystal-local):not(:disabled):hover,
+.novel-btn-crystal-model.ant-btn:not(:disabled):hover {
+  color: #ffffff !important;
+  border-color: #93c5fd !important;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.08) 40%, transparent 58%),
+    linear-gradient(165deg, #60a5fa, #2563eb 55%, #1e40af) !important;
+}
+
+/* Local soft green */
+.novel-btn-crystal-local.ant-btn:not(:disabled),
+.novel-btn-crystal-local.ant-btn-primary:not(:disabled),
+.ant-btn-primary.novel-btn-crystal-local:not(:disabled) {
+  color: #065f46 !important;
+  border-color: rgba(110, 231, 183, 0.95) !important;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.08) 40%, transparent 58%),
+    linear-gradient(165deg, #ecfdf5, var(--novel-crystal-local-3) 42%, #86efac) !important;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.novel-btn-crystal-local.ant-btn:not(:disabled):hover,
+.ant-btn-primary.novel-btn-crystal-local:not(:disabled):hover {
+  color: #064e3b !important;
+  border-color: #34d399 !important;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.12) 42%, transparent 60%),
+    linear-gradient(165deg, #f0fdf4, #a7f3d0 45%, #6ee7b7) !important;
+}
+
+/* Danger crystal */
+.ant-btn-dangerous:not(.ant-btn-text):not(.ant-btn-link):not(:disabled),
+.ant-btn-primary.ant-btn-dangerous:not(:disabled) {
+  color: #fff7f7 !important;
+  border-color: rgba(252, 165, 165, 0.95) !important;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.04) 40%, transparent 58%),
+    linear-gradient(165deg, var(--novel-crystal-danger-1), var(--novel-crystal-danger-2) 60%, #b91c1c) !important;
+  text-shadow: 0 1px 0 rgba(15, 23, 42, 0.18);
+}
+
+/* Running */
+.novel-btn-crystal-running.ant-btn:not(:disabled),
+.novel-btn-crystal-running.ant-btn:not(:disabled):hover,
+.setting-workshop-running-command.ant-btn:not(:disabled),
+.setting-workshop-running-command.ant-btn:not(:disabled):hover {
+  color: #fff !important;
+  border-color: #2563eb !important;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.28), transparent 50%),
+    linear-gradient(165deg, #3b82f6, #2563eb 60%, #1d4ed8) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 0 0 2px rgba(37, 99, 235, 0.16),
+    0 8px 18px rgba(37, 99, 235, 0.22);
+}
+
+.ant-btn:disabled,
+.novel-btn-crystal.ant-btn:disabled {
+  opacity: 0.55;
+  box-shadow: none !important;
+  transform: none !important;
+  backdrop-filter: none;
+}
+
+/* Legend */
+.novel-btn-crystal-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.novel-btn-crystal-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.novel-btn-crystal-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.novel-btn-crystal-swatch-model {
+  background: linear-gradient(165deg, #60a5fa, #2563eb);
+}
+
+.novel-btn-crystal-swatch-local {
+  background: linear-gradient(165deg, #bbf7d0, #6ee7b7);
+}
+
+.novel-btn-crystal-swatch-display {
+  background: linear-gradient(165deg, #ffffff, #e2e8f0);
+}

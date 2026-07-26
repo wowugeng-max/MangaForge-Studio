@@ -29,7 +29,7 @@ function PipelineGraphInner() {
         extra={
           <Space>
             <Text type="secondary">选中节点：{selectedNode || '(none)'}</Text>
-            <Button onClick={clearSelection}>清除选择</Button>
+            <Button onClick={clearSelection}> 清除选择</Button>
           </Space>
         }
       >

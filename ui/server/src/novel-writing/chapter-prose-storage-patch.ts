@@ -171,8 +171,27 @@ function restoreParagraphBreaksForWallProse(value: any) {
   return sourceIndex === sourceChars.length ? normalized : text
 }
 
+/**
+ * Models sometimes emit one sentence per single `\n` (no blank line).
+ * Webnovel storage/fingerprint/Zhuque all expect `\n\n` paragraph breaks.
+ * System-wide: convert single-newline sentence rows into double-newline paragraphs
+ * when blank-line density is abnormally low.
+ */
+export function ensureWebnovelParagraphBreaks(value: any) {
+  const body = String(value || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  if (!body.trim()) return body
+  const doubleCount = (body.match(/\n\n/g) || []).length
+  const lines = body.split('\n').map((line) => line.trim()).filter(Boolean)
+  if (lines.length < 12) return body.endsWith('\n') ? body : `${body}\n`
+  // Healthy webnovel draft usually has blank lines between most paragraphs.
+  if (doubleCount >= Math.max(8, Math.floor(lines.length * 0.35))) {
+    return body.endsWith('\n') ? body : `${body}\n`
+  }
+  return `${lines.join('\n\n')}\n`
+}
+
 export function normalizeProseForStorage(value: any) {
-  return restoreParagraphBreaksForWallProse(value)
+  return ensureWebnovelParagraphBreaks(restoreParagraphBreaksForWallProse(value))
 }
 
 export function buildChapterProseStoragePatch(input: ChapterProseStoragePatchInput) {

@@ -58,8 +58,7 @@ export function ProductionGuidePanel({
           type="text"
           className="production-guide-summary-action"
           icon={primaryAction.icon}
-          onClick={primaryAction.onClick}
-        >
+          onClick={primaryAction.onClick}>
           {primaryAction.label}
         </Button>
       </div>

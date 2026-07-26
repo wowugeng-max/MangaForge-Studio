@@ -9,6 +9,7 @@ import {
   scanParagraphFragmentationRisks,
   scanParagraphLengthUniformityRisks,
   scanParagraphWallTextRisks,
+  scanWebNovelParagraphShapeRisks,
   scanProseCameraAnchorRisks,
   scanProseDecorativeDetailRisks,
   scanProseMotionStillRisks,
@@ -21,8 +22,8 @@ import {
 } from './prose-craft-scans'
 
 describe('prose craft deterministic scans', () => {
-  test('detects over-fragmented short narration lines', () => {
-    const checks = scanParagraphFragmentationRisks([
+  test('allows complete one-sentence web-novel lines and only flags poem-like fragments', () => {
+    const ok = scanParagraphFragmentationRisks([
       '第4章 旧楼走廊',
       '门开了。',
       '风进来。',
@@ -32,9 +33,27 @@ describe('prose craft deterministic scans', () => {
       '水迹停在脚边。',
       '"别动。"',
     ].join('\n'))
+    expect(ok).toEqual([])
 
+    const checks = scanParagraphFragmentationRisks([
+      '第4章 旧楼走廊',
+      '冷风',
+      '黑影',
+      '脚步',
+      '水迹',
+      '锈锁',
+      '旧门',
+    ].join('\n'))
     expect(checks[0]?.key).toBe('paragraph_over_fragmented_short_lines')
-    expect(checks[0]?.evidence).toContain('门开了')
+  })
+
+  test('flags multi-sentence paragraphs that break mobile web-novel line rhythm', () => {
+    const checks = scanWebNovelParagraphShapeRisks([
+      '第4章 旧楼走廊',
+      '李辰停在门边，看见水迹贴着门缝往里渗。张智抬手按住门锁，指节被冷气冻得发白。走廊那头没有脚步声，只有广播滋滋作响。他忽然想起昨夜那张名单。',
+      '门后传来一声轻响。',
+    ].join('\n'))
+    expect(checks.some(item => String(item.key).includes('web_novel'))).toBe(true)
   })
 
   test('detects uniform paragraph lengths', () => {

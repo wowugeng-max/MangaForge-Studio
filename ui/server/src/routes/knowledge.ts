@@ -102,6 +102,13 @@ export function registerKnowledgeRoutes(app: Express) {
         character_function_matrix: '角色功能矩阵',
         resource_economy_model: '资源经济模型',
         style_profile: '文风画像',
+        benchmark_analyze: '对标拆文',
+        market_scan: '市场扫榜',
+        reverse_import: '逆向导入',
+        cover_brief: '封面简报',
+        short_suite: '短篇三件套',
+        genre_prose_card: '题材散文卡',
+        ending_reserve: '终局储备',
       }
       for (const cat of categories) {
         summary[cat] = {

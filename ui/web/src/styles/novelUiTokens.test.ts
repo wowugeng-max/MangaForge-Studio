@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { novelUiTokens, novelAntdTheme, NOVEL_THEME_ROOT_CLASS } from './novelUiTokens'
+import { crystalBtnClass, inferCrystalBtnKind } from './crystalBtn'
 
 describe('novelUiTokens', () => {
   test('exports approved color and control values', () => {
@@ -37,5 +38,15 @@ describe('novelUiTokens', () => {
     expect(css).toContain('--novel-control-height-md: 32px')
     expect(css).toContain('--novel-radius-md: 8px')
     expect(css).toContain('--novel-progress-height-sm: 6px')
+    expect(css).toContain('novel-btn-crystal-model')
+    expect(css).toContain('novel-btn-crystal-local')
+    expect(css).toContain('novel-btn-crystal-display')
+  })
+
+  test('crystal button helper maps labels to model/local/display', () => {
+    expect(inferCrystalBtnKind('模型提炼设定')).toBe('model')
+    expect(inferCrystalBtnKind('保存本章调用')).toBe('local')
+    expect(inferCrystalBtnKind('刷新')).toBe('display')
+    expect(crystalBtnClass('model')).toContain('novel-btn-crystal-model')
   })
 })

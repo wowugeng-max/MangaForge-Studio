@@ -1,3 +1,4 @@
+import { buildCharacterPovUiModel } from './characterPovUiModel'
 import type { DeslopGateDiagnosticsModel } from './writingCockpitModel'
 import type {
   NovelDeliveryActionKey,
@@ -157,6 +158,7 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
       actionLabel: '',
       compactActionLabel: '',
       secondaryActions: [],
+      characterPov: null,
       storyStatePanel: null,
       storyStateSyncAction: null,
     }
@@ -223,6 +225,35 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
     actionLabel: desk.recommendedAcceptanceAction.label,
     compactActionLabel: compactDeliveryActionLabel(desk.recommendedAcceptanceAction.key, desk.recommendedAcceptanceAction.label),
     secondaryActions: desk.secondaryActions || [],
+    characterPov: (() => {
+      const qualityFindings = [
+        ...(((desk as any).qualityWarnings) || []),
+        ...((((desk as any).qualityAudit || {}).checks) || []),
+        ...((((desk as any).qualityAudit || {}).evidence) || []),
+      ]
+      const pov = buildCharacterPovUiModel({
+        sceneCards: desk.sceneCards || (desk as any).sceneCards || [],
+        chapterText: '',
+        qualityFindings,
+      })
+      // Prefer planning desk POV if present on writing cockpit path via optional field.
+      const fromDesk = (desk as any).characterPov || pov
+      if (!fromDesk) return null
+      return {
+        visible: true,
+        status: fromDesk.status,
+        statusLabel: fromDesk.statusLabel,
+        primaryPov: fromDesk.primaryPov,
+        multiPovLocked: fromDesk.multiPovLocked,
+        allowedSecondaryPovs: fromDesk.allowedSecondaryPovs,
+        secondaryCutPreview: fromDesk.secondaryCutPreview || [],
+        assetFirewallPreview: fromDesk.assetFirewallPreview || [],
+        dialogueFilterPreview: fromDesk.dialogueFilterPreview || [],
+        scenePreview: (fromDesk.scenes || []).slice(0, 4).map((scene: any) => `场景${scene.sceneNo} · ${scene.povCharacter || '未定'} · 选择=${scene.decisionInScene || '待补'}`),
+        knowledgePreview: fromDesk.knowledgePreview || [],
+        violations: (fromDesk.violations || []).map((item: any) => `${item.label}${item.evidence ? `：${item.evidence}` : ''}`),
+      }
+    })(),
     storyStatePanel: desk.storyStatePanel || null,
     storyStateSyncAction: (() => {
       const panel = desk.storyStatePanel

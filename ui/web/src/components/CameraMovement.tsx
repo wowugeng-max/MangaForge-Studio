@@ -82,7 +82,7 @@ export function CameraMovementPanel({ onInsert, onClose, customPresets = [], onA
         <Input.TextArea size="small" rows={2} placeholder="英文 Prompt" value={newPrompt} onChange={event => setNewPrompt(event.target.value)} style={{ fontSize: 12, fontFamily: 'monospace' }} />
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4 }}>
           <Button size="small" onClick={() => setShowAddForm(false)}>取消</Button>
-          <Button size="small" type="primary" onClick={handleAdd} disabled={!newLabel.trim() || !newPrompt.trim()}>添加</Button>
+          <Button size="small" type="primary" onClick={handleAdd} disabled={!newLabel.trim() || !newPrompt.trim()}> 添加</Button>
         </div>
       </div>
     )}

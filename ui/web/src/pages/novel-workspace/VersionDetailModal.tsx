@@ -121,7 +121,7 @@ export function VersionDetailModal({
                       <Button danger size="small" loading={acceptingVersionId === version.id}>整章采纳历史版本</Button>
                     </Popconfirm>
                   )}
-                  <Button size="small" onClick={onToggleDiffMode}>{showOnlyDiff ? '显示全部' : '只看差异'}</Button>
+                  <Button size="small" onClick={onToggleDiffMode}> {showOnlyDiff ? '显示全部' : '只看差异'}</Button>
                 </Space>
               </div>
             </Card>
@@ -200,7 +200,7 @@ export function VersionDetailModal({
                 <Space>
                   <Button size="small" onClick={() => chooseAll('current')}>全部当前</Button>
                   <Button size="small" onClick={() => chooseAll('version')}>全部历史</Button>
-                  <Button size="small" type="primary" disabled={selectedRows.length === 0} onClick={mergeWithChoices}>生成合并稿</Button>
+                  <Button size="small" type="primary" disabled={selectedRows.length === 0} onClick={mergeWithChoices}> 生成合并稿</Button>
                 </Space>
               )}
             >

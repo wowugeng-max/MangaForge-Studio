@@ -124,8 +124,7 @@ export function ChapterManagementDrawer({
           <Button onClick={() => { onCreateChapter(); onClose() }}>
             <EditOutlined /> 新增章节
           </Button>
-          <Button type="primary" disabled={selectedChapterIds.size < 2} onClick={onOpenRestructure}>
-            <InteractionOutlined /> 扩展/合并章节
+          <Button type="primary" disabled={selectedChapterIds.size < 2} onClick={onOpenRestructure}> <InteractionOutlined /> 扩展/合并章节
           </Button>
         </Space>
       }
@@ -200,7 +199,7 @@ export function ChapterManagementDrawer({
                 {chapters.length === 0 ? (
                   <Button type="primary" onClick={() => { onCreateChapter(); onClose() }}>创建第一章</Button>
                 ) : (
-                  <Button onClick={clearFilters}>清空筛选条件</Button>
+                  <Button onClick={clearFilters}> 清空筛选条件</Button>
                 )}
               </div>
             ) : (
@@ -316,9 +315,8 @@ export function ChapterManagementDrawer({
                   title="正文预览"
                   extra={
                     <Space>
-                      <Button size="small" onClick={onClose}>返回主编辑区</Button>
-                      <Button size="small" type="primary" loading={generatingProse} onClick={onGenerateCurrentChapterProse}>
-                        <PlayCircleOutlined /> 生成正文
+                      <Button size="small" onClick={onClose}> 返回主编辑区</Button>
+                      <Button size="small" type="primary" loading={generatingProse} onClick={onGenerateCurrentChapterProse}> <PlayCircleOutlined /> 生成正文
                       </Button>
                     </Space>
                   }
@@ -336,7 +334,7 @@ export function ChapterManagementDrawer({
 
                 <Card size="small" title="快捷操作" styles={{ body: { padding: 18 } }}>
                   <Space wrap>
-                    <Button type="primary" onClick={onClose}>打开正文编辑</Button>
+                    <Button type="primary" onClick={onClose}> 打开正文编辑</Button>
                     <Button onClick={() => onEditChapter(activeChapter)}>
                       <EditOutlined /> 编辑章节元数据
                     </Button>

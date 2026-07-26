@@ -41,7 +41,7 @@ export default function NovelLobbyDashboard({ projects, onOpenProject, onCreateP
     return (
       <Card style={{ borderRadius: 12, marginBottom: 16 }}>
         <Empty description="还没有小说项目">
-          <Button type="primary" onClick={onCreateProject}>新建商业长篇</Button>
+          <Button type="primary" onClick={onCreateProject}> 新建小说</Button>
         </Empty>
       </Card>
     )
@@ -55,7 +55,7 @@ export default function NovelLobbyDashboard({ projects, onOpenProject, onCreateP
           bodyStyle={{ minHeight: 272, display: 'flex', flexDirection: 'column', gap: 14 }}
         >
           <Space direction="vertical" size={8} style={{ width: '100%' }}>
-            <Text type="secondary" strong>继续写作</Text>
+            <Text type="secondary" strong>继续</Text>
             <Title level={4} style={{ margin: 0, wordBreak: 'break-word' }}>
               {featured.project?.title || '未命名作品'}
             </Title>
@@ -81,8 +81,7 @@ export default function NovelLobbyDashboard({ projects, onOpenProject, onCreateP
             >
               {featured.nextAction}
             </Button>
-            <Button block onClick={onCreateProject} style={{ minHeight: 40 }}>
-              新建商业长篇
+            <Button block onClick={onCreateProject} style={{ minHeight: 40 }}> 新建小说
             </Button>
           </Space>
         </Card>
@@ -90,7 +89,7 @@ export default function NovelLobbyDashboard({ projects, onOpenProject, onCreateP
 
       <Col xs={24} lg={14}>
         <Card
-          title="下一步治理"
+          title="最近项目动作"
           style={{ borderRadius: 12, height: '100%' }}
           bodyStyle={{ minHeight: 272 }}
         >
