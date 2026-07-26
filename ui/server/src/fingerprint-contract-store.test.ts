@@ -7,6 +7,8 @@ import {
   getContractSetDir,
   getContractSetsIndexPath,
   getContractSelectionPath,
+  getFingerprintLibRoot,
+  getFingerprintLibRootFromWorkspace,
   normalizeContractSetRecord,
   readContractSelection,
   readContractSelectionSync,
@@ -82,5 +84,67 @@ describe('fingerprint contract store', () => {
     const lib = await tempLib()
     expect(getContractSetDir(lib, 'builtin')).toBe(join(lib, 'contracts'))
     expect(getContractSetDir(lib, 'set-a')).toBe(join(lib, 'contract-sets', 'set-a'))
+  })
+
+  test('readContractSets assigns distinct ids to multiple records missing an id', async () => {
+    const lib = await tempLib()
+    await mkdir(join(lib, 'contract-sets'), { recursive: true })
+    await writeFile(
+      getContractSetsIndexPath(lib),
+      JSON.stringify([{ label: 'legacy A' }, { label: 'legacy B' }, { label: 'legacy C' }]),
+      'utf8',
+    )
+    // Freeze Date.now so a timestamp-based id fallback would deterministically
+    // collide across all three records processed within the same map() call.
+    const originalNow = Date.now
+    Date.now = () => 1234567890000
+    try {
+      const sets = await readContractSets(lib)
+      const nonBuiltinIds = sets.filter((s) => s.id !== BUILTIN_CONTRACT_SET.id).map((s) => s.id)
+      expect(nonBuiltinIds.length).toBe(3)
+      expect(new Set(nonBuiltinIds).size).toBe(3)
+    } finally {
+      Date.now = originalNow
+    }
+  })
+
+  test('writeContractSets dedupes records sharing an id, keeping the later one', async () => {
+    const lib = await tempLib()
+    await writeContractSets(lib, [
+      normalizeContractSetRecord({ id: 'set-dup', label: 'first', sample_count: 1 }),
+      normalizeContractSetRecord({ id: 'set-dup', label: 'second', sample_count: 2 }),
+    ])
+    const raw = JSON.parse(await readFile(getContractSetsIndexPath(lib), 'utf8'))
+    expect(raw.length).toBe(1)
+    expect(raw[0].id).toBe('set-dup')
+    expect(raw[0].label).toBe('second')
+    expect(raw[0].sample_count).toBe(2)
+  })
+
+  test('writeContractSets keeps records missing an id instead of dropping them', async () => {
+    const lib = await tempLib()
+    await writeContractSets(lib, [{ label: 'no id yet' } as any])
+    const raw = JSON.parse(await readFile(getContractSetsIndexPath(lib), 'utf8'))
+    expect(raw.length).toBe(1)
+    expect(typeof raw[0].id).toBe('string')
+    expect(raw[0].id.length).toBeGreaterThan(0)
+  })
+
+  test('source_set_id round-trips through write and read', async () => {
+    const lib = await tempLib()
+    await writeContractSets(lib, [
+      normalizeContractSetRecord({ id: 'set-c', label: 'C', source_set_id: 'set-a' }),
+    ])
+    const sets = await readContractSets(lib)
+    const found = sets.find((s) => s.id === 'set-c')
+    expect(found?.source_set_id).toBe('set-a')
+  })
+
+  test('getFingerprintLibRoot joins workspace/fingerprint-lib under the repo root', () => {
+    expect(getFingerprintLibRoot('/repo')).toBe(join('/repo', 'workspace', 'fingerprint-lib'))
+  })
+
+  test('getFingerprintLibRootFromWorkspace joins fingerprint-lib under the workspace dir', () => {
+    expect(getFingerprintLibRootFromWorkspace('/repo/workspace')).toBe(join('/repo/workspace', 'fingerprint-lib'))
   })
 })

@@ -1,5 +1,6 @@
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { readFileSync } from 'fs'
+import { randomUUID } from 'crypto'
 import { join, dirname } from 'path'
 
 export type FingerprintContractSetMode = 'builtin' | 'offline_refit' | 'online_fetch'
@@ -55,7 +56,7 @@ export function getContractSetDir(libRoot: string, setId: string) {
 const MODES: FingerprintContractSetMode[] = ['builtin', 'offline_refit', 'online_fetch']
 
 export function normalizeContractSetRecord(raw: any): FingerprintContractSetRecord {
-  const id = String(raw?.id ?? '').trim() || `set-${Date.now()}`
+  const id = String(raw?.id ?? '').trim() || `set-${randomUUID()}`
   const mode = MODES.includes(String(raw?.mode) as FingerprintContractSetMode)
     ? (String(raw?.mode) as FingerprintContractSetMode)
     : 'offline_refit'
@@ -91,9 +92,15 @@ export async function readContractSets(libRoot: string): Promise<FingerprintCont
 export async function writeContractSets(libRoot: string, sets: FingerprintContractSetRecord[]) {
   const path = getContractSetsIndexPath(libRoot)
   await mkdir(dirname(path), { recursive: true })
-  const persisted = sets
-    .filter((record) => record?.id && record.id !== BUILTIN_CONTRACT_SET_ID)
-    .map(normalizeContractSetRecord)
+  // Normalize before filtering/deduping so records missing an id still get one
+  // instead of being silently dropped, mirroring the map->filter order readContractSets uses.
+  const byId = new Map<string, FingerprintContractSetRecord>()
+  for (const raw of sets) {
+    const record = normalizeContractSetRecord(raw)
+    if (record.id === BUILTIN_CONTRACT_SET_ID) continue
+    byId.set(record.id, record)
+  }
+  const persisted = [...byId.values()]
   await writeFile(path, `${JSON.stringify(persisted, null, 2)}\n`, 'utf8')
 }
 
