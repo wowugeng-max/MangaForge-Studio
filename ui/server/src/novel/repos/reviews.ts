@@ -32,6 +32,31 @@ export async function listNovelReviews(activeWorkspace: string, projectId: numbe
   }
 }
 
+export async function listNovelReviewsByType(activeWorkspace: string, projectId: number, reviewType: string) {
+  await ensureLegacyNovelStoreImportedForRead(activeWorkspace)
+  const db = openDb(activeWorkspace)
+  try {
+    ensureSqliteSchema(db)
+    return (db.query(`
+      SELECT
+        id,
+        project_id,
+        CASE WHEN json_valid(payload) THEN CAST(json_extract(payload, '$.chapter_id') AS INTEGER) END AS chapter_id,
+        CASE WHEN json_valid(payload) THEN CAST(json_extract(payload, '$.chapter_no') AS INTEGER) END AS chapter_no,
+        review_type,
+        status,
+        summary,
+        issues,
+        payload,
+        created_at
+      FROM reviews
+      WHERE project_id = ? AND review_type = ?
+    `).all(projectId, reviewType) as any[]).map(reviewFromRow)
+  } finally {
+    db.close()
+  }
+}
+
 export async function listNovelReviewSummaries(activeWorkspace: string, projectId: number, limit?: number): Promise<NovelReviewSummaryRecord[]> {
   await ensureLegacyNovelStoreImportedForRead(activeWorkspace)
   const db = openDb(activeWorkspace)

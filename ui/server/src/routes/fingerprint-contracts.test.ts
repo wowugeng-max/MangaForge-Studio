@@ -71,6 +71,24 @@ async function tempWorkspace() {
   return root
 }
 
+function sampleText(seed: number) {
+  const paras: string[] = []
+  for (let i = 0; i < 30; i += 1) {
+    if (i % 4 === 0) paras.push('“先别动。”他把手电递过去。')
+    else paras.push(`他伸手摸了一下门框第${seed}-${i}道。`)
+  }
+  return `${paras.join('\n\n')}\n`
+}
+
+/** 在 <libRoot>/human/urban/ 下写 n 个 .txt 样本，供离线重拟合任务消费。 */
+async function writeSamples(libRoot: string, n: number) {
+  const dir = join(libRoot, 'human', 'urban')
+  await mkdir(dir, { recursive: true })
+  for (let i = 0; i < n; i += 1) {
+    await writeFile(join(dir, `human_qd_${i}.txt`), sampleText(i), 'utf8')
+  }
+}
+
 /** 落库一条可被 parseFingerprintScoreRow 解析的指纹打分评审，workspace 取自 tempWorkspace()/'workspace'。 */
 async function seedFingerprintScoreReview(
   workspace: string,
@@ -239,5 +257,24 @@ describe('fingerprint contract routes', () => {
     const res = await call(handlers.get('GET /api/fingerprint-contracts/scores'), { query: { set_id: 'no-such-set' } })
     expect(res.statusCode).toBe(200)
     expect(res.body.rows).toEqual([])
+  })
+
+  test('generate job records the produced set id when it completes', async () => {
+    const ws = await tempWorkspace()
+    await writeSamples(join(ws, 'workspace', 'fingerprint-lib'), 4)
+    const { app, handlers } = createRouteHarness()
+    registerFingerprintContractRoutes(app, () => join(ws, 'workspace'))
+    const started = await call(handlers.get('POST /api/fingerprint-contracts/generate'), {
+      body: { mode: 'offline_refit', label: '回填测试' },
+    })
+    expect(started.statusCode).toBe(200)
+    const jobId = started.body.job.id
+    let job = started.body.job
+    for (let i = 0; i < 60 && job.status !== 'completed' && job.status !== 'failed'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      job = (await call(handlers.get('GET /api/fingerprint-contracts/jobs/:jobId'), { params: { jobId } })).body.job
+    }
+    expect(job.status).toBe('completed')
+    expect(job.set_id).toBe(jobId)
   })
 })

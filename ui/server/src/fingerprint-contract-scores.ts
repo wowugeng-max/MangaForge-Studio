@@ -104,7 +104,7 @@ export function parseFingerprintScoreRow(row: { payload?: string | null }): Pars
 }
 
 export function aggregateFingerprintScores(rows: Array<{ payload?: string | null }>) {
-  const groups = new Map<string, { label: string; scores: number[]; checks: Map<string, { pass: number; total: number }> }>()
+  const groups = new Map<string, { label: string; scores: number[]; checks: Map<string, { pass: number; total: number; valueSum: number; target: number | [number, number] | null }> }>()
   for (const row of rows) {
     const parsed = parseFingerprintScoreRow(row)
     if (!parsed) continue
@@ -112,10 +112,12 @@ export function aggregateFingerprintScores(rows: Array<{ payload?: string | null
     const group = groups.get(parsed.set_id)!
     group.scores.push(parsed.score)
     for (const check of parsed.checks) {
-      if (!group.checks.has(check.key)) group.checks.set(check.key, { pass: 0, total: 0 })
+      if (!group.checks.has(check.key)) group.checks.set(check.key, { pass: 0, total: 0, valueSum: 0, target: null })
       const stat = group.checks.get(check.key)!
       stat.total += 1
       if (check.ok) stat.pass += 1
+      stat.valueSum += check.value
+      stat.target = check.target
     }
   }
   return [...groups.entries()].map(([setId, group]) => ({
@@ -129,6 +131,8 @@ export function aggregateFingerprintScores(rows: Array<{ payload?: string | null
       key,
       pass_rate: stat.total ? Number((stat.pass / stat.total).toFixed(3)) : 0,
       sample_count: stat.total,
+      mean_value: stat.total ? Number((stat.valueSum / stat.total).toFixed(3)) : 0,
+      target: stat.target ?? null,
     })),
   }))
 }

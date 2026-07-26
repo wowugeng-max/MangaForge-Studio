@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdtemp, mkdir, rm, writeFile, readFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { createFingerprintContractJob, loadRefitSamples, readSamplesStatus, runOfflineRefitJob } from './fingerprint-contract-jobs'
+import { createFingerprintContractJob, loadRefitSamples, readSamplesStatus, runOfflineRefitJob, updateFingerprintContractJob } from './fingerprint-contract-jobs'
 import { readContractSets } from './fingerprint-contract-store'
 
 let dirs: string[] = []
@@ -147,7 +147,10 @@ describe('fingerprint contract generation job', () => {
   })
 
   test('createFingerprintContractJob rejects a duplicate id', () => {
-    createFingerprintContractJob('offline_refit', 'dup-job-id-test')
+    const job = createFingerprintContractJob('offline_refit', 'dup-job-id-test')
     expect(() => createFingerprintContractJob('offline_refit', 'dup-job-id-test')).toThrow(/dup-job-id-test/)
+    // jobs live in a process-wide singleton map, so leaving this one queued would make
+    // hasRunningFingerprintContractJob() report true for the rest of the test run.
+    updateFingerprintContractJob(job.id, { status: 'completed', progress: '完成' })
   })
 })

@@ -21,7 +21,7 @@ import {
   runOfflineRefitJob,
   updateFingerprintContractJob,
 } from '../fingerprint-contract-jobs'
-import { listNovelProjects, listNovelReviews } from '../novel'
+import { listNovelProjects, listNovelReviewsByType } from '../novel'
 
 function errorBody(message: unknown) {
   const error = String(message)
@@ -127,7 +127,7 @@ export function registerFingerprintContractRoutes(app: Express, getWorkspace: ()
         notes,
         onProgress: (text) => updateFingerprintContractJob(job.id, { status: 'running', progress: text }),
       })
-        .then(() => updateFingerprintContractJob(job.id, { status: 'completed', progress: '完成' }))
+        .then((result) => updateFingerprintContractJob(job.id, { status: 'completed', progress: '完成', set_id: result?.set_id }))
         .catch((error) => updateFingerprintContractJob(job.id, { status: 'failed', progress: '失败', error: String(error) }))
       res.json({ job })
     } catch (error) {
@@ -185,10 +185,8 @@ export function registerFingerprintContractRoutes(app: Express, getWorkspace: ()
       const rows: any[] = []
       for (const project of projects) {
         try {
-          const reviews = await listNovelReviews(activeWorkspace, project.id)
-          for (const review of reviews) {
-            if (review.review_type === FINGERPRINT_SCORE_REVIEW_TYPE) rows.push(review)
-          }
+          const reviews = await listNovelReviewsByType(activeWorkspace, project.id, FINGERPRINT_SCORE_REVIEW_TYPE)
+          for (const review of reviews) rows.push(review)
         } catch {
           continue
         }

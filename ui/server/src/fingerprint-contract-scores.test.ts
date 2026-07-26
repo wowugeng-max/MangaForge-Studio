@@ -191,4 +191,32 @@ describe('aggregateFingerprintScores', () => {
     const hard = builtin.check_pass_rates.find((c) => c.key === 'zhuque_narrative_hard')!
     expect(hard.sample_count).toBe(2)
   })
+
+  test('reports each check mean value and target alongside the pass rate', () => {
+    const rows = [
+      record({ contractScore: contractScore(9) }),
+      record({ contractScore: contractScore(9, { dialogue_para_ratio: false }) }),
+    ]
+    const builtin = aggregateFingerprintScores(rows).find((r) => r.set_id === 'builtin')!
+    const dialogue = builtin.check_pass_rates.find((c) => c.key === 'dialogue_para_ratio')!
+    expect(dialogue.mean_value).toBeCloseTo(0.2, 5)
+    expect(dialogue.target).toBe(0.35)
+  })
+
+  test('leaves target null when no row carried one', () => {
+    const built = buildFingerprintScoreReviewRecord({
+      projectId: 1,
+      chapterId: 1,
+      chapterNo: 1,
+      setId: 'set-x',
+      setLabel: 'X',
+      contractName: null,
+      locked: false,
+      contractScore: { score: 0, pass: 0, total: 1, narrative_hard_pass: false, narrative_hard_hit: 1, checks: [] },
+      textChars: 100,
+      createdAt: '2026-07-27T00:00:00.000Z',
+    })
+    const out = aggregateFingerprintScores([built]).find((r) => r.set_id === 'set-x')!
+    expect(out.check_pass_rates).toEqual([])
+  })
 })
