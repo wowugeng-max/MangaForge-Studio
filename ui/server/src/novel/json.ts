@@ -29,6 +29,18 @@ export function sanitizeJsonValue(value: any, seen = new WeakSet<object>(), dept
   return output
 }
 
+export function mergeJsonObjects(base: any, delta: any): Record<string, any> {
+  const current = base && typeof base === 'object' && !Array.isArray(base) ? base : {}
+  const patch = delta && typeof delta === 'object' && !Array.isArray(delta) ? delta : {}
+  const merged: Record<string, any> = { ...current }
+  for (const [key, value] of Object.entries(patch)) {
+    merged[key] = value && typeof value === 'object' && !Array.isArray(value)
+      ? mergeJsonObjects(current[key], value)
+      : value
+  }
+  return merged
+}
+
 export function safeJsonText(value: any, space?: number) {
   try {
     const text = JSON.stringify(sanitizeJsonValue(value), null, space)

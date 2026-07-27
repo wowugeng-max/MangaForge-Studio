@@ -4,6 +4,7 @@ import { ensureLegacyNovelStoreImportedForRead } from '../legacy-import'
 import { normalizeCharacterRecord, dedupById } from '../normalize'
 import { characterFromRow } from '../row-mappers'
 import { withNovelDbWrite, nextTableId, insertCharacterRow, updateCharacterRow } from '../sql-rows'
+import { mergeJsonObjects } from '../json'
 
 
 export async function listNovelCharacters(activeWorkspace: string, projectId: number) {
@@ -33,4 +34,17 @@ export async function updateNovelCharacter(activeWorkspace: string, id: number, 
     updateCharacterRow(db, next)
     return next
   })
+}
+
+export async function mergeNovelCharacterCurrentState(activeWorkspace: string, id: number, delta: Record<string, any>) {
+  return withNovelDbWrite(activeWorkspace, db => {
+    const row = db.query('SELECT * FROM characters WHERE id = ? LIMIT 1').get(id) as any
+    if (!row) return null
+    const current = characterFromRow(row)
+    const next = normalizeCharacterRecord({
+      current_state: mergeJsonObjects(current.current_state, delta),
+    }, current)
+    updateCharacterRow(db, next)
+    return next
+  }, 'merge-character-current-state')
 }

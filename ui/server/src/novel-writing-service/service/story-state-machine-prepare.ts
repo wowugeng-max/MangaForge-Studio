@@ -125,7 +125,20 @@ import {
   mergeStoryState,
   normalizeStoryStateDeltaForStorage,
 } from './story-state-helpers'
+import type { PreparedStoryStateUpdate } from '../../novel-writing/prepared-story-state'
 
+
+export type PrepareStoryStateUpdateOptions = {
+  signal?: AbortSignal
+  abortSignal?: AbortSignal
+  timeoutMs?: number
+  llmTimeoutMs?: number
+  maxRetries?: number
+  maxTokens?: number
+  max_tokens?: number
+  retryOnBlockedTransport?: boolean
+  allowDeterministicFallback?: boolean
+}
 
 export async function prepareStoryStateUpdate(
   activeWorkspace: string,
@@ -134,7 +147,7 @@ export async function prepareStoryStateUpdate(
   contextPackage: any,
   chapterText: string,
   modelId: number | undefined = undefined,
-  options: any = {},
+  options: PrepareStoryStateUpdateOptions = {},
   deps: {
     executeAgent: (...args: any[]) => any
     getStageModelId: (...args: any[]) => any

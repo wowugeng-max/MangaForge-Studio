@@ -1,9 +1,12 @@
 import {
-  createNovelReview,
+  createNovelReview as persistNovelReview,
   listNovelChapterSettingUsage,
   listNovelChapters,
   listNovelCharacters,
   listNovelSettingEntities,
+  mergeNovelChapterSettingUsageActualStateChange,
+  mergeNovelCharacterCurrentState,
+  mergeNovelSettingEntityState,
   mergeNovelChapterRawPayload,
   updateNovelChapterSettingUsage,
   updateNovelCharacter,
@@ -140,8 +143,11 @@ export async function applyStoryStateMachineSyncPhaseA(args: {
   prepared: any
   payload: any
   stateDelta: any
+  saveDerivedReview?: (activeWorkspace: string, record: any) => Promise<any>
+  exactChapter?: boolean
 }) {
   const { activeWorkspace, project, chapter, contextPackage, chapterText, prepared, payload, stateDelta } = args
+  const createNovelReview = args.saveDerivedReview || persistNovelReview
   const chapters = await listNovelChapters(activeWorkspace, project.id)
   const chapterTitleUniquenessSync = buildChapterTitleUniquenessSyncReport(chapters, chapter)
   await createNovelReview(activeWorkspace, buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: chapterTitleUniquenessSync, reviewType: 'chapter_title_uniqueness_sync', payloadKey: 'chapter_title_uniqueness_sync', formatIssue: (item: any) => `标题重复：第${item.chapter_no || '-'}章《${item.title || ''}》` }))
@@ -155,13 +161,20 @@ export async function applyStoryStateMachineSyncPhaseA(args: {
       const character = characters.find(item => item.name === name)
       if (!character) continue
       const currentState = update.current_state || update.currentState || {}
-      await updateNovelCharacter(activeWorkspace, character.id, {
-        current_state: {
-          ...(character.current_state || {}),
+      if (args.exactChapter) {
+        await mergeNovelCharacterCurrentState(activeWorkspace, character.id, {
           ...(currentState || {}),
           last_seen_chapter: chapter.chapter_no,
-        },
-      } as any)
+        })
+      } else {
+        await updateNovelCharacter(activeWorkspace, character.id, {
+          current_state: {
+            ...(character.current_state || {}),
+            ...(currentState || {}),
+            last_seen_chapter: chapter.chapter_no,
+          },
+        } as any)
+      }
     }
   }
   const characterStateDeltaSync = buildCharacterStateDeltaSyncReport(chapter, contextPackage, stateDelta, characterUpdates)
@@ -181,21 +194,32 @@ export async function applyStoryStateMachineSyncPhaseA(args: {
       if (!entity) continue
       const stateDelta = update.state_delta || update.stateDelta || update.actual_state_change || update.actualStateChange || {}
       const actualStateChange = update.actual_state_change || update.actualStateChange || stateDelta || {}
-      await updateNovelSettingEntity(activeWorkspace, entity.id, {
-        state_json: {
-          ...(entity.state_json || {}),
+      if (args.exactChapter) {
+        await mergeNovelSettingEntityState(activeWorkspace, entity.id, {
           ...(stateDelta || {}),
           last_seen_chapter: chapter.chapter_no,
-        },
-      } as any)
-      const usage = usages.find(item => item.entity_id === entity.id)
-      if (usage) {
-        await updateNovelChapterSettingUsage(activeWorkspace, usage.id, {
-          actual_state_change: {
-            ...(usage.actual_state_change || {}),
-            ...(actualStateChange || {}),
+        })
+      } else {
+        await updateNovelSettingEntity(activeWorkspace, entity.id, {
+          state_json: {
+            ...(entity.state_json || {}),
+            ...(stateDelta || {}),
+            last_seen_chapter: chapter.chapter_no,
           },
         } as any)
+      }
+      const usage = usages.find(item => item.entity_id === entity.id)
+      if (usage) {
+        if (args.exactChapter) {
+          await mergeNovelChapterSettingUsageActualStateChange(activeWorkspace, usage.id, actualStateChange || {})
+        } else {
+          await updateNovelChapterSettingUsage(activeWorkspace, usage.id, {
+            actual_state_change: {
+              ...(usage.actual_state_change || {}),
+              ...(actualStateChange || {}),
+            },
+          } as any)
+        }
       }
     }
   }
@@ -225,23 +249,36 @@ export async function applyStoryStateMachineSyncPhaseA(args: {
       const stateDelta = update.state_delta || update.stateDelta || update.actual_state_change || update.actualStateChange || {}
       const actualStateChange = update.actual_state_change || update.actualStateChange || stateDelta || {}
       if (!stateDelta || typeof stateDelta !== 'object' || Array.isArray(stateDelta)) continue
-      await updateNovelSettingEntity(activeWorkspace, entity.id, {
-        state_json: {
-          ...(entity.state_json || {}),
+      if (args.exactChapter) {
+        await mergeNovelSettingEntityState(activeWorkspace, entity.id, {
           ...(stateDelta || {}),
           last_seen_chapter: chapter.chapter_no,
           last_checked_chapter_id: chapter.id,
           last_checked_chapter_no: chapter.chapter_no,
-        },
-      } as any)
-      const usage = usages.find(item => item.entity_id === entity.id)
-      if (usage) {
-        await updateNovelChapterSettingUsage(activeWorkspace, usage.id, {
-          actual_state_change: {
-            ...(usage.actual_state_change || {}),
-            ...(actualStateChange || {}),
+        })
+      } else {
+        await updateNovelSettingEntity(activeWorkspace, entity.id, {
+          state_json: {
+            ...(entity.state_json || {}),
+            ...(stateDelta || {}),
+            last_seen_chapter: chapter.chapter_no,
+            last_checked_chapter_id: chapter.id,
+            last_checked_chapter_no: chapter.chapter_no,
           },
         } as any)
+      }
+      const usage = usages.find(item => item.entity_id === entity.id)
+      if (usage) {
+        if (args.exactChapter) {
+          await mergeNovelChapterSettingUsageActualStateChange(activeWorkspace, usage.id, actualStateChange || {})
+        } else {
+          await updateNovelChapterSettingUsage(activeWorkspace, usage.id, {
+            actual_state_change: {
+              ...(usage.actual_state_change || {}),
+              ...(actualStateChange || {}),
+            },
+          } as any)
+        }
       }
     }
   }

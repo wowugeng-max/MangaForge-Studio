@@ -656,6 +656,9 @@ export function compactProseQualityPayloadForStorage(value: any = {}) {
     content_hash: payload?.content_hash || payload?.contentHash || '',
     source: payload?.source || '',
     source_review_id: payload?.source_review_id ?? payload?.sourceReviewId ?? null,
+    source_run_id: payload?.source_run_id ?? payload?.sourceRunId ?? null,
+    candidate_hash: payload?.candidate_hash || payload?.candidateHash || '',
+    current_chapter_only: Boolean(payload?.current_chapter_only ?? payload?.currentChapterOnly),
     context_package: compactQualityContextForStorage(payload?.context_package || payload?.contextPackage || {}),
     self_check: {
       revised: Boolean(selfCheck.revised),

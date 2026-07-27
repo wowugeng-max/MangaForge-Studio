@@ -1,10 +1,11 @@
 import type { NovelReviewRecord, NovelReviewSummaryRecord } from '../types'
 import { openDb, ensureSqliteSchema } from '../db'
-import { jsonText } from '../json'
+import { jsonText, parseDbJson } from '../json'
 import { ensureLegacyNovelStoreImportedForRead } from '../legacy-import'
 import { withNovelWorkspaceMutation } from '../lock'
 import { normalizeReviewRecord } from '../normalize'
 import { reviewFromRow, reviewSummaryFromRow } from '../row-mappers'
+import { withNovelDbWrite } from '../sql-rows'
 
 
 export async function listNovelReviews(activeWorkspace: string, projectId: number) {
@@ -178,4 +179,63 @@ export async function createNovelReview(activeWorkspace: string, data: Partial<N
     db.close()
   }
   })
+}
+
+export async function findOrCreateNovelReviewByReceipt(activeWorkspace: string, input: {
+  data: Partial<NovelReviewRecord>
+  receiptKey: string
+  derivedKey: string
+}) {
+  return withNovelDbWrite(activeWorkspace, db => {
+    const recordPayload = parseDbJson(input.data.payload, {})
+    const record = normalizeReviewRecord({
+      ...input.data,
+      payload: jsonText({
+        ...(recordPayload && typeof recordPayload === 'object' && !Array.isArray(recordPayload) ? recordPayload : {}),
+        story_state_receipt_key: input.receiptKey,
+        derived_key: input.derivedKey,
+      }, {}),
+    })
+    const select = `
+      SELECT
+        id,
+        project_id,
+        CASE WHEN json_valid(payload) THEN CAST(json_extract(payload, '$.chapter_id') AS INTEGER) END AS chapter_id,
+        CASE WHEN json_valid(payload) THEN CAST(json_extract(payload, '$.chapter_no') AS INTEGER) END AS chapter_no,
+        review_type,
+        status,
+        summary,
+        issues,
+        payload,
+        created_at
+      FROM reviews
+    `
+    const existing = db.query(`${select}
+      WHERE project_id = ?
+        AND review_type = ?
+        AND json_valid(payload)
+        AND json_type(payload, '$.story_state_receipt_key') = 'text'
+        AND json_extract(payload, '$.story_state_receipt_key') = ?
+        AND json_type(payload, '$.derived_key') = 'text'
+        AND json_extract(payload, '$.derived_key') = ?
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(record.project_id, record.review_type, input.receiptKey, input.derivedKey) as any
+    if (existing) return reviewFromRow(existing)
+
+    const result = db.query(`
+      INSERT INTO reviews (project_id,review_type,status,summary,issues,payload,created_at)
+      VALUES (?,?,?,?,?,?,?)
+    `).run(
+      record.project_id,
+      record.review_type,
+      record.status,
+      record.summary || '',
+      jsonText(record.issues || []),
+      record.payload || '',
+      record.created_at,
+    ) as any
+    const id = Number(result?.lastInsertRowid || (db.query('SELECT last_insert_rowid() AS id').get() as any)?.id || 0)
+    return { ...record, id }
+  }, 'find-or-create-story-state-derived-review')
 }

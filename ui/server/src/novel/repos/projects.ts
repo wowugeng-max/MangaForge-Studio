@@ -50,6 +50,30 @@ export async function updateNovelProject(activeWorkspace: string, id: number, da
   })
 }
 
+export async function mutateNovelProjectReferenceConfig<T>(
+  activeWorkspace: string,
+  options: {
+    projectId: number
+    operation: string
+    mutate: (currentConfig: Record<string, any>) => { referenceConfig: Record<string, any>; result: T }
+  },
+): Promise<{ project: NovelProjectRecord; result: T } | null> {
+  return withNovelDbWrite(activeWorkspace, db => {
+    const row = db.query('SELECT * FROM projects WHERE id = ? LIMIT 1').get(options.projectId) as any
+    if (!row) return null
+    const current = projectFromRow(row)
+    const mutation = options.mutate({ ...(current.reference_config || {}) })
+    const timestamp = nowIso()
+    const next = {
+      ...current,
+      reference_config: mutation.referenceConfig,
+      updated_at: timestamp,
+    }
+    updateProjectRow(db, next)
+    return { project: next, result: mutation.result }
+  }, options.operation)
+}
+
 export async function deleteNovelProject(activeWorkspace: string, projectId: number) {
   return withNovelDbWrite(activeWorkspace, db => {
     const project = db.query('SELECT id FROM projects WHERE id = ? LIMIT 1').get(projectId) as any

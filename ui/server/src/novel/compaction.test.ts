@@ -191,6 +191,60 @@ describe('novel diagnostic payload compaction', () => {
     expect(payload.pipeline[0]).toMatchObject({ key: 'review', label: '章节级自检', status: 'failed' })
   })
 
+  test('preserves exact prose quality receipt keys without persisting source or candidate prose', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '质检回执压缩测试' })
+    const prose = '不应持久化的候选正文'.repeat(1000)
+
+    await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'prose_quality',
+      status: 'ok',
+      payload: JSON.stringify({
+        chapter_id: 2,
+        source_run_id: 44,
+        candidate_hash: 'candidate-44',
+        current_chapter_only: true,
+        source_text: prose,
+        candidate_text: prose,
+        self_check: { final_text: prose, review: { score: 90 } },
+      }),
+    })
+    await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'prose_quality',
+      status: 'ok',
+      payload: JSON.stringify({
+        chapterId: 3,
+        sourceRunId: 45,
+        candidateHash: 'candidate-45',
+        currentChapterOnly: true,
+        sourceText: prose,
+        candidateText: prose,
+        selfCheck: { finalText: prose, review: { score: 91 } },
+      }),
+    })
+
+    const payloads = (await listNovelReviews(workspace, project.id))
+      .map(review => JSON.parse(String(review.payload || '{}')))
+      .sort((a, b) => Number(a.chapter_id) - Number(b.chapter_id))
+    expect(payloads[0]).toMatchObject({
+      chapter_id: 2,
+      source_run_id: 44,
+      candidate_hash: 'candidate-44',
+      current_chapter_only: true,
+    })
+    expect(payloads[1]).toMatchObject({
+      chapter_id: 3,
+      source_run_id: 45,
+      candidate_hash: 'candidate-45',
+      current_chapter_only: true,
+    })
+    expect(JSON.stringify(payloads)).not.toContain(prose.slice(0, 100))
+    expect(payloads.every(payload => payload.source_text === undefined && payload.candidate_text === undefined)).toBe(true)
+    expect(payloads.every(payload => payload.self_check.final_text?.omitted === true)).toBe(true)
+  })
+
   test('keeps unrecoverable prose quality preview payloads intact', async () => {
     const workspace = await tempWorkspace()
     const project = await createNovelProject(workspace, { title: '历史质检预览保护测试' })
@@ -513,4 +567,3 @@ describe('novel diagnostic payload compaction', () => {
     expect(JSON.stringify(chapter.raw_payload)).not.toContain(hugeDiagnostic.slice(0, 2000))
   })
 })
-

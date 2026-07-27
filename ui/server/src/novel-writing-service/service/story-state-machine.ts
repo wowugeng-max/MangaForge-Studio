@@ -129,9 +129,11 @@ import {
 
 import {
   prepareStoryStateUpdate as prepareStoryStateUpdateImpl,
+  type PrepareStoryStateUpdateOptions,
 } from './story-state-machine-prepare'
 import {
   updateStoryStateMachine as updateStoryStateMachineImpl,
+  type StoryStateMachineUpdateOptions,
 } from './story-state-machine-update'
 
 export function createStoryStateMachineMethods(deps: {
@@ -156,7 +158,7 @@ export function createStoryStateMachineMethods(deps: {
     contextPackage: any,
     chapterText: string,
     modelId?: number,
-    options: any = {},
+    options: PrepareStoryStateUpdateOptions = {},
   ) => prepareStoryStateUpdateImpl(
     activeWorkspace,
     project,
@@ -175,7 +177,7 @@ export function createStoryStateMachineMethods(deps: {
     contextPackage: any,
     chapterText: string,
     modelId?: number,
-    options: any = {},
+    options: StoryStateMachineUpdateOptions = {},
   ) => updateStoryStateMachineImpl(
     activeWorkspace,
     project,

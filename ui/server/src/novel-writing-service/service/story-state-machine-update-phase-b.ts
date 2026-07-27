@@ -1,5 +1,5 @@
 import {
-  createNovelReview,
+  createNovelReview as persistNovelReview,
   listNovelChapterSettingUsage,
   listNovelChapters,
   listNovelCharacters,
@@ -135,8 +135,10 @@ export async function applyStoryStateMachineSyncPhaseB(args: {
   contextPackage: any
   chapterText: string
   payload: any
+  saveDerivedReview?: (activeWorkspace: string, record: any) => Promise<any>
 }) {
   const { activeWorkspace, project, chapter, contextPackage, chapterText, payload } = args
+  const createNovelReview = args.saveDerivedReview || persistNovelReview
   const proseMetaSync = buildProseMetaSyncReport(project, chapter, contextPackage, chapterText)
   await createNovelReview(activeWorkspace, buildPostDeliverySyncReviewRecord({
     projectId: project.id,

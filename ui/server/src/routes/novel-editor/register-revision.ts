@@ -1,5 +1,4 @@
 import type { Express } from 'express'
-import { createHash } from 'crypto'
 import {
   appendNovelRun,
   createNovelReview,
@@ -11,11 +10,12 @@ import {
   listNovelRuns,
   listNovelWorldbuilding,
   updateNovelChapter,
+  updateNovelRun,
 } from '../../novel'
 import { executeNovelAgent, previewNovelKnowledgeInjection } from '../../llm'
 import { asArray, buildLLMResultDiagnostics, clampScore, extractLLMText, getNovelPayload, getSafetyPolicy, normalizeIssue, parseJsonLikePayload, safeJsonStringify } from '../novel-route-utils'
 import { mergeProseQualityWithDeliveryRisks } from '../../novel-writing/prose-quality-delivery-link'
-import { collectPlanAlignmentPatchesAfterProseChange, collectProjectPlanAlignmentPatches } from '../../novel-writing/chapter-plan-from-prose'
+import { buildCurrentChapterPlanAlignment } from '../../novel-writing/chapter-plan-from-prose'
 import { buildLiveContractChapterPatch, collectClosedBeatFamiliesFromChapters } from '../../novel-writing/closed-beat-canon'
 import {
   COMPACT_REVISION_RETRY_MAX_TOKENS,
@@ -40,8 +40,9 @@ import {
   isRevisionOutputTruncated,
   loadChapterBundle,
   shouldRetryRevisionPatch,
-  syncStoryStateFromChapter,
 } from './builders'
+import { revisionTextHash } from './revision-candidate-admission'
+import { applySingleChapterStoryState, prepareSingleChapterStoryState } from './single-chapter-story-state'
 
 export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRoutesContext) {
   app.post('/api/novel/chapters/:chapterId/editor-report', async (req, res) => {
@@ -126,6 +127,24 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRoute
         userPrompt: req.body.prompt,
       })
       const modelId = ctx.getStageModelId(project, 'revise', Number(req.body.model_id || 0) || undefined)
+      const revisionRun = await appendNovelRun(activeWorkspace, {
+        project_id: projectId,
+        run_type: 'editor_revision',
+        step_name: `chapter-${chapter.chapter_no}`,
+        status: 'running',
+        input_ref: JSON.stringify({
+          chapter_id: chapter.id,
+          review_id: review.id,
+          revision_strategy: report?.revision_strategy || 'surgical_patch',
+        }),
+        output_ref: JSON.stringify({ stage: 'revision_model' }),
+      })
+      const failRevisionRun = async (output: Record<string, unknown>) => updateNovelRun(activeWorkspace, revisionRun.id, {
+        status: 'failed',
+        output_ref: JSON.stringify(output),
+        error_message: String(output.error || output.error_code || 'editor revision failed'),
+      })
+      try {
       let result = await executeNovelAgent('prose-agent', project, { task: prompt }, {
         activeWorkspace,
         modelId: modelId ? String(modelId) : undefined,
@@ -135,14 +154,7 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRoute
         skipMemory: true,
       })
       if ((result as any).error) {
-        await appendNovelRun(activeWorkspace, {
-          project_id: projectId,
-          run_type: 'editor_revision',
-          step_name: `chapter-${chapter.chapter_no}`,
-          status: 'failed',
-          input_ref: JSON.stringify({ review_id: review.id, revision_strategy: report?.revision_strategy || 'surgical_patch' }),
-          output_ref: JSON.stringify({ error: (result as any).error, stage: 'initial_llm' }),
-        }).catch(() => null)
+        await failRevisionRun({ error: (result as any).error, stage: 'initial_llm' }).catch(() => null)
         return res.status(502).json({ error: (result as any).error, result })
       }
       let resultPayload = getNovelPayload(result)
@@ -192,16 +204,9 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRoute
               }
               nextText = retryNextText
             } else {
-              await appendNovelRun(activeWorkspace, {
-                project_id: projectId,
-                run_type: 'editor_revision',
-                step_name: `chapter-${chapter.chapter_no}`,
-                status: 'failed',
-                input_ref: JSON.stringify({ review_id: review.id, revision_strategy: report?.revision_strategy || 'surgical_patch', retry: true }),
-                output_ref: JSON.stringify({
-                  error_code: isRevisionOutputTruncated(retryResult) ? 'REVISION_RETRY_OUTPUT_TRUNCATED' : 'REVISION_RETRY_NO_APPLICABLE_PATCH',
-                  patch_applied: retryPatchResult?.applied?.length || 0,
-                }),
+              await failRevisionRun({
+                error_code: isRevisionOutputTruncated(retryResult) ? 'REVISION_RETRY_OUTPUT_TRUNCATED' : 'REVISION_RETRY_NO_APPLICABLE_PATCH',
+                patch_applied: retryPatchResult?.applied?.length || 0,
               }).catch(() => null)
               return res.status(502).json({
                 error: isRevisionOutputTruncated(retryResult) ? '修订重试输出仍被截断，未形成完整 JSON 补丁' : '修订重试未返回可应用补丁',
@@ -214,19 +219,17 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRoute
               })
             }
           } else {
+            await failRevisionRun({ error: (retryResult as any).error, stage: 'revision_retry' }).catch(() => null)
             return res.status(502).json({ error: (retryResult as any).error, result, retry_result: retryResult })
           }
         }
       }
       if (!nextText || (!patchResult.applied.length && !resultPayload?.chapter_text && !resultPayload?.prose_chapters?.[0]?.chapter_text)) {
         if (isRevisionOutputTruncated(result)) {
-          await appendNovelRun(activeWorkspace, {
-            project_id: projectId,
-            run_type: 'editor_revision',
-            step_name: `chapter-${chapter.chapter_no}`,
-            status: 'failed',
-            input_ref: JSON.stringify({ review_id: review.id, revision_strategy: report?.revision_strategy || 'surgical_patch' }),
-            output_ref: JSON.stringify({ error_code: 'REVISION_OUTPUT_TRUNCATED', patch_applied: patchResult?.applied?.length || 0, patch_unapplied: patchResult?.unapplied?.length || 0 }),
+          await failRevisionRun({
+            error_code: 'REVISION_OUTPUT_TRUNCATED',
+            patch_applied: patchResult?.applied?.length || 0,
+            patch_unapplied: patchResult?.unapplied?.length || 0,
           }).catch(() => null)
           return res.status(502).json({
             error: '修订输出被截断，未形成完整 JSON 补丁',
@@ -236,14 +239,11 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRoute
             patch_result: patchResult,
           })
         }
-        await appendNovelRun(activeWorkspace, {
-            project_id: projectId,
-            run_type: 'editor_revision',
-            step_name: `chapter-${chapter.chapter_no}`,
-            status: 'failed',
-            input_ref: JSON.stringify({ review_id: review.id, revision_strategy: report?.revision_strategy || 'surgical_patch' }),
-            output_ref: JSON.stringify({ error_code: 'REVISION_NO_APPLICABLE_PATCH', patch_applied: patchResult?.applied?.length || 0, patch_unapplied: patchResult?.unapplied?.length || 0 }),
-          }).catch(() => null)
+        await failRevisionRun({
+          error_code: 'REVISION_NO_APPLICABLE_PATCH',
+          patch_applied: patchResult?.applied?.length || 0,
+          patch_unapplied: patchResult?.unapplied?.length || 0,
+        }).catch(() => null)
           return res.status(502).json({ error: '修订未返回可应用补丁', result, patch_result: patchResult })
       }
       let updated = await updateNovelChapter(activeWorkspace, chapter.id, {
@@ -258,20 +258,22 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRoute
       let planAlignment: any = null
       try {
         const allChapters = await listNovelChapters(activeWorkspace, projectId)
-        const alignment = collectPlanAlignmentPatchesAfterProseChange(allChapters, updated, {
+        const alignment = buildCurrentChapterPlanAlignment(allChapters, updated, {
           force: true,
           source: structuralRewrite ? 'post_structural_revision' : 'post_editor_revision',
-          followLimit: 3,
         })
         planAlignment = {
-          rebuilt: alignment.current.rebuilt,
-          reason: alignment.current.reason,
-          following_count: alignment.following_count,
-          patches: alignment.patches.map(item => ({ chapter_id: item.chapter_id, kind: item.kind })),
+          rebuilt: alignment.rebuilt,
+          reason: alignment.reason,
+          following_count: 0,
+          patches: alignment.patch && Object.keys(alignment.patch).length
+            ? [{ chapter_id: alignment.chapter_id, kind: 'current' }]
+            : [],
         }
-        for (const item of alignment.patches) {
-          const patched = await updateNovelChapter(activeWorkspace, item.chapter_id, item.patch as any, { createVersion: false })
-          if (Number(item.chapter_id) === Number(updated.id)) updated = patched
+        if (alignment.patch && Object.keys(alignment.patch).length) {
+          updated = await updateNovelChapter(activeWorkspace, alignment.chapter_id, alignment.patch as any, { createVersion: false })
+        } else if (alignment.alignedChapter) {
+          updated = alignment.alignedChapter
         }
       } catch (error: any) {
         planAlignment = { rebuilt: false, error: String(error?.message || error) }
@@ -311,6 +313,9 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRoute
             model_id: req.body.model_id,
             source: 'post_revision',
             source_review_id: review.id,
+            source_run_id: revisionRun.id,
+            candidate_hash: revisionTextHash(String(updated.chapter_text || '')),
+            current_chapter_only: true,
             max_tokens: 3000,
           })
           qualityRefresh = {
@@ -329,21 +334,44 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRoute
             run_type: 'prose_quality',
             step_name: `chapter-${chapter.chapter_no}`,
             status: 'failed',
-            input_ref: JSON.stringify({ chapter_id: chapter.id, source: 'post_revision', source_review_id: review.id }),
-            output_ref: JSON.stringify({ error: qualityRefresh.error }),
+            input_ref: JSON.stringify({
+              chapter_id: chapter.id,
+              source: 'post_revision',
+              source_review_id: review.id,
+              source_run_id: revisionRun.id,
+              candidate_hash: revisionTextHash(String(updated.chapter_text || '')),
+              current_chapter_only: true,
+            }),
+            output_ref: JSON.stringify({
+              error: qualityRefresh.error,
+              source_run_id: revisionRun.id,
+              candidate_hash: revisionTextHash(String(updated.chapter_text || '')),
+              current_chapter_only: true,
+            }),
           })
         }
       }
       let storyStateUpdate: any = null
       if (req.body?.auto_story_state !== false) {
-        storyStateUpdate = await syncStoryStateFromChapter(
-          ctx,
-          activeWorkspace,
-          project,
+        const receipt = {
+          source_run_id: revisionRun.id,
+          candidate_hash: revisionTextHash(String(updated.chapter_text || '')),
+          chapter_id: updated.id,
+        }
+        storyStateUpdate = await prepareSingleChapterStoryState(ctx, {
+          workspace: activeWorkspace,
           projectId,
-          Number(chapter.chapter_no || 0),
+          chapterId: updated.id,
           modelId,
-        ).catch(error => ({ ok: false, error: String(error?.message || error), synced: [], errors: [] }))
+          receipt,
+        }).then(prepared => applySingleChapterStoryState(ctx, {
+          workspace: activeWorkspace,
+          projectId,
+          chapterId: updated.id,
+          modelId,
+          receipt,
+          prepared: prepared.prepared,
+        })).catch(error => ({ ok: false, error: String(error?.message || error) }))
       }
       const postRevisionReviews = await listNovelReviews(activeWorkspace, projectId)
       const postDeliveryRiskBrief = buildChapterDeliveryRiskBrief(updated, postRevisionReviews)
@@ -365,16 +393,16 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRoute
           delivery_risk_convergence: convergenceReport,
         }),
       })
-      await appendNovelRun(activeWorkspace, {
-        project_id: projectId,
-        run_type: 'editor_revision',
-        step_name: `chapter-${chapter.chapter_no}`,
+      await updateNovelRun(activeWorkspace, revisionRun.id, {
         status: 'success',
-        input_ref: JSON.stringify({ review_id: review.id }),
         output_ref: JSON.stringify({ review: saved, modelName: (result as any).modelName, applied_patches: patchResult.applied.length, unapplied_patches: patchResult.unapplied.length, quality_refresh: qualityRefresh, story_state_update: storyStateUpdate, delivery_risk_convergence: convergenceReport }),
       })
       res.json({
         plan_alignment: planAlignment, ok: true, chapter: updated, review: saved, result, patch_result: patchResult, quality_refresh: qualityRefresh, story_state_update: storyStateUpdate, delivery_risk_convergence: convergenceReport, delivery_risk_convergence_review: convergenceReview })
+      } catch (error: any) {
+        await failRevisionRun({ error: String(error?.message || error), stage: 'revision_workflow' }).catch(() => null)
+        throw error
+      }
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

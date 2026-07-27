@@ -6,11 +6,9 @@
  * Graph edges remain auxiliary diagnostics, not the writing truth table.
  */
 import {
-  createNovelSettingEntity,
   listNovelCharacters,
   listNovelSettingEntities,
-  updateNovelCharacter,
-  updateNovelSettingEntity,
+  upsertNovelStoryRelationship,
 } from '../novel'
 import {
   attachChangeNodesFromEstablishedEvents,
@@ -689,24 +687,9 @@ export async function materializeStoryRelations(
       else created.push({ name, dry_run: true })
       continue
     }
-    if (prev) {
-      const mergedState = mergeNonEmpty(asObject(prev.state_json), nextState)
-      const mergedPayload = mergeNonEmpty(asObject(prev.payload_json), {
-        source: 'story_relation_master',
-        pair_key: pairKey,
-      })
-      const saved = await updateNovelSettingEntity(activeWorkspace, Number(prev.id), {
-        name,
-        summary: row.current_status,
-        state_json: mergedState,
-        payload_json: mergedPayload,
-        status: 'active',
-      } as any)
-      if (saved) updated.push(saved)
-    } else {
-      const saved = await createNovelSettingEntity(activeWorkspace, {
-        project_id: projectId,
-        entity_type: 'relationship',
+    const saved = await upsertNovelStoryRelationship(activeWorkspace, {
+      projectId,
+      entity: {
         name,
         summary: row.current_status,
         status: 'active',
@@ -720,47 +703,25 @@ export async function materializeStoryRelations(
         related_entity_ids: [],
         related_chapter_ids: [],
         related_character_ids: [],
-      } as any)
-      created.push(saved)
-      byPair.set(pairKey, saved)
-    }
-
-    // Mirror onto character cards (both sides) without blank overwrite.
-    for (const side of [row.party_a, row.party_b]) {
-      const character = characters.find(item => text(item.name, 40) === side)
-      if (!character) continue
-      const other = side === row.party_a ? row.party_b : row.party_a
-      const prevRels = asArray(character.relationships)
-      const nextRel = {
-        name: other,
-        target: other,
-        type: row.story_relation_type,
-        status: row.current_status,
-        emotion: row.emotion,
-      }
-      const exists = prevRels.some((item: any) => {
-        if (typeof item === 'string') return item.includes(other)
-        return text(item?.name || item?.target, 40) === other
-      })
-      const relationships = exists
-        ? prevRels.map((item: any) => {
-            if (typeof item === 'string' && item.includes(other)) return `${other}：${row.current_status}`
-            if (typeof item === 'object' && text(item?.name || item?.target, 40) === other) {
-              return mergeNonEmpty(item, nextRel)
-            }
-            return item
-          })
-        : [...prevRels, nextRel]
-      if (input.dryRun) continue
-      const savedChar = await updateNovelCharacter(activeWorkspace, Number(character.id), {
-        relationships,
-      } as any)
-      if (savedChar) {
-        characterPatches.push({ id: character.id, name: character.name, other })
-        // keep local list fresh for subsequent sides
-        character.relationships = relationships
-      }
-    }
+      },
+      characterRelations: [row.party_a, row.party_b].map(side => {
+        const other = side === row.party_a ? row.party_b : row.party_a
+        return {
+          characterName: side,
+          relation: {
+            name: other,
+            target: other,
+            type: row.story_relation_type,
+            status: row.current_status,
+            emotion: row.emotion,
+          },
+        }
+      }),
+    })
+    if (saved.created) created.push(saved.entity)
+    else updated.push(saved.entity)
+    characterPatches.push(...saved.characterPatches)
+    byPair.set(pairKey, saved.entity)
   }
 
   return {

@@ -14,6 +14,12 @@ export type PreparedStoryStateUpdate = {
   sync_reports: Record<string, any>
   hard_failures: PreparedStoryStateFailure[]
   payload: Record<string, any>
+  receipt_binding?: {
+    key: string
+    chapter_id: number
+    candidate_hash: string
+    source_run_id: number | null
+  }
 }
 
 function boundedPendingError(error: any) {

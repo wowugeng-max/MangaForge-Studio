@@ -48,5 +48,37 @@ describe('story state sync route source guards', () => {
     expect(source).toContain("run_type: 'story_state'")
     expect(source).toContain('delivery_risk_convergence')
   })
-})
 
+  test('manual and post-revision Story State entry points use the exact chapter receipt helper', () => {
+    const qualitySource = readFileSync(join(import.meta.dir, 'novel-editor/register-quality.ts'), 'utf8')
+    const revisionSource = readFileSync(join(import.meta.dir, 'novel-editor/register-revision.ts'), 'utf8')
+    const annotationSource = readFileSync(join(import.meta.dir, 'novel-editor/register-annotations.ts'), 'utf8')
+    const buildersSource = readFileSync(join(import.meta.dir, 'novel-editor/builders.ts'), 'utf8')
+
+    expect(qualitySource).toContain('prepareSingleChapterStoryState')
+    expect(qualitySource).toContain('applySingleChapterStoryState')
+    expect(qualitySource).toContain('revisionTextHash')
+    expect(qualitySource).toContain('chapter_id: chapter.id')
+    expect(qualitySource).not.toContain('last_synced_chapter')
+    expect(revisionSource).toContain('prepareSingleChapterStoryState')
+    expect(revisionSource).toContain('applySingleChapterStoryState')
+    expect(revisionSource).not.toContain('syncStoryStateFromChapter')
+    expect(annotationSource).not.toContain('syncStoryStateFromChapter')
+    expect(buildersSource).not.toContain('export async function syncStoryStateFromChapter')
+  })
+
+  test('quality and exact Story State source guards forbid follower mutation paths', () => {
+    const buildersSource = readFileSync(join(import.meta.dir, 'novel-editor/builders.ts'), 'utf8')
+    const qualityStart = buildersSource.indexOf('export async function createProseQualityReview')
+    const qualityBlock = buildersSource.slice(qualityStart)
+    const updateSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/story-state-machine-update.ts'), 'utf8')
+
+    expect(qualityBlock).toContain('buildCurrentChapterPlanAlignment')
+    expect(qualityBlock).not.toContain('collectProjectPlanAlignmentPatches')
+    expect(qualityBlock).not.toContain('collectPlanAlignmentPatchesAfterProseChange')
+    expect(qualityBlock).not.toContain('followLimit: 0')
+    expect(updateSource).toContain('if (!options.exactChapter)')
+    expect(updateSource).toContain('refreshFollowingChapterSerialStoryStateReadiness')
+    expect(updateSource).toContain('export type StoryStateMachineOptions')
+  })
+})

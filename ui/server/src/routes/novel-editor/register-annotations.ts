@@ -40,7 +40,6 @@ import {
   isRevisionOutputTruncated,
   loadChapterBundle,
   shouldRetryRevisionPatch,
-  syncStoryStateFromChapter,
 } from './builders'
 
 export function registerNovelEditorAnnotationRoutes(app: Express, ctx: EditorRoutesContext) {

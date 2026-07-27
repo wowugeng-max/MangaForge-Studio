@@ -1,5 +1,4 @@
 import type { Express } from 'express'
-import { createHash } from 'crypto'
 import {
   appendNovelRun,
   createNovelReview,
@@ -15,7 +14,6 @@ import {
 import { executeNovelAgent, previewNovelKnowledgeInjection } from '../../llm'
 import { asArray, buildLLMResultDiagnostics, clampScore, extractLLMText, getNovelPayload, getSafetyPolicy, normalizeIssue, parseJsonLikePayload, safeJsonStringify } from '../novel-route-utils'
 import { mergeProseQualityWithDeliveryRisks } from '../../novel-writing/prose-quality-delivery-link'
-import { collectPlanAlignmentPatchesAfterProseChange, collectProjectPlanAlignmentPatches } from '../../novel-writing/chapter-plan-from-prose'
 import { buildLiveContractChapterPatch, collectClosedBeatFamiliesFromChapters } from '../../novel-writing/closed-beat-canon'
 import {
   COMPACT_REVISION_RETRY_MAX_TOKENS,
@@ -40,8 +38,9 @@ import {
   isRevisionOutputTruncated,
   loadChapterBundle,
   shouldRetryRevisionPatch,
-  syncStoryStateFromChapter,
 } from './builders'
+import { revisionTextHash } from './revision-candidate-admission'
+import { applySingleChapterStoryState, prepareSingleChapterStoryState } from './single-chapter-story-state'
 
 export function registerNovelEditorQualityRoutes(app: Express, ctx: EditorRoutesContext) {
   app.post('/api/novel/chapters/:chapterId/story-state-sync', async (req, res) => {
@@ -51,14 +50,49 @@ export function registerNovelEditorQualityRoutes(app: Express, ctx: EditorRoutes
       const { activeWorkspace, project, chapter, reviews } = loaded
       const modelId = ctx.getStageModelId(project, 'review', Number(req.body.model_id || 0) || undefined)
       const beforeBrief = buildChapterDeliveryRiskBrief(chapter, reviews)
-      const storyStateUpdate = await syncStoryStateFromChapter(
-        ctx,
-        activeWorkspace,
-        project,
-        project.id,
-        Number(chapter.chapter_no || 0),
+      const receipt = {
+        source_run_id: req.body?.source_run_id == null ? null : Number(req.body.source_run_id),
+        candidate_hash: String(req.body?.candidate_hash || revisionTextHash(String(chapter.chapter_text || ''))),
+        chapter_id: chapter.id,
+      }
+      const storyStateUpdate = await prepareSingleChapterStoryState(ctx, {
+        workspace: activeWorkspace,
+        projectId: project.id,
+        chapterId: chapter.id,
         modelId,
-      ).catch(error => ({ ok: false, error: String(error?.message || error), synced: [], errors: [] }))
+        receipt,
+      }).then(preparedStoryState => applySingleChapterStoryState(ctx, {
+          workspace: activeWorkspace,
+          projectId: project.id,
+          chapterId: chapter.id,
+          modelId,
+          receipt,
+          prepared: preparedStoryState.prepared,
+        }))
+        .catch(error => ({ ok: false, error: String(error?.message || error) }))
+      if ((storyStateUpdate as any)?.ok === false) {
+        await appendNovelRun(activeWorkspace, {
+          project_id: project.id,
+          run_type: 'story_state',
+          step_name: `chapter-${chapter.chapter_no}`,
+          status: 'failed',
+          input_ref: JSON.stringify({
+            chapter_id: chapter.id,
+            chapter_no: chapter.chapter_no,
+            source: req.body?.source || 'manual_story_state_sync',
+            source_review_id: req.body?.source_review_id || null,
+            source_run_id: receipt.source_run_id,
+            candidate_hash: receipt.candidate_hash,
+          }),
+          output_ref: JSON.stringify({ story_state_update: storyStateUpdate }),
+        })
+        return res.status(502).json({
+          ok: false,
+          chapter_id: chapter.id,
+          error: (storyStateUpdate as any).error,
+          story_state_update: storyStateUpdate,
+        })
+      }
       const [freshChapters, postReviews] = await Promise.all([
         listNovelChapters(activeWorkspace, project.id),
         listNovelReviews(activeWorkspace, project.id),
@@ -89,7 +123,7 @@ export function registerNovelEditorQualityRoutes(app: Express, ctx: EditorRoutes
         project_id: project.id,
         run_type: 'story_state',
         step_name: `chapter-${chapter.chapter_no}`,
-        status: (storyStateUpdate as any)?.ok === false ? 'failed' : 'success',
+        status: 'success',
         input_ref: JSON.stringify({
           chapter_id: chapter.id,
           chapter_no: chapter.chapter_no,
@@ -104,6 +138,7 @@ export function registerNovelEditorQualityRoutes(app: Express, ctx: EditorRoutes
       })
       res.json({
         ok: true,
+        chapter_id: chapter.id,
         story_state_update: storyStateUpdate,
         delivery_risk_convergence: convergenceReport,
         delivery_risk_convergence_review: convergenceReview,
@@ -122,6 +157,9 @@ export function registerNovelEditorQualityRoutes(app: Express, ctx: EditorRoutes
         model_id: req.body.model_id,
         source: req.body.source || 'manual_refresh',
         source_review_id: req.body.source_review_id || null,
+        source_run_id: req.body.source_run_id == null ? null : Number(req.body.source_run_id),
+        candidate_hash: req.body.candidate_hash || revisionTextHash(String(chapter.chapter_text || '')),
+        current_chapter_only: true,
         max_tokens: 3000,
       })
       res.json({

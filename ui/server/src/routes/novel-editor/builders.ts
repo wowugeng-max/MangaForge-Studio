@@ -1,7 +1,11 @@
-import { createHash } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import {
   appendNovelRun,
+  claimProseQualityReceipt,
+  commitProseQualityReceipt,
   createNovelReview,
+  failProseQualityReceipt,
+  getNovelReview,
   listChapterVersions,
   listNovelCharacters,
   listNovelChapters,
@@ -14,14 +18,14 @@ import {
 import { executeNovelAgent, previewNovelKnowledgeInjection } from '../../llm'
 import { asArray, buildLLMResultDiagnostics, clampScore, extractLLMText, getNovelPayload, getSafetyPolicy, normalizeIssue, parseJsonLikePayload, safeJsonStringify } from '../novel-route-utils'
 import { mergeProseQualityWithDeliveryRisks } from '../../novel-writing/prose-quality-delivery-link'
-import { collectPlanAlignmentPatchesAfterProseChange, collectProjectPlanAlignmentPatches } from '../../novel-writing/chapter-plan-from-prose'
-import { buildLiveContractChapterPatch, collectClosedBeatFamiliesFromChapters } from '../../novel-writing/closed-beat-canon'
+import { buildCurrentChapterPlanAlignment } from '../../novel-writing/chapter-plan-from-prose'
 import {
   deliveryRiskMissedCount,
   deslopRepairReceiptCount,
   qualityAuditRepairReceiptCount,
 } from './builders-quality-receipt-helpers'
 import { editorJson } from './builders-json'
+import { revisionTextHash } from '../../novel/revision-hash'
 
 export type EditorRoutesContext = {
   getWorkspace: () => string
@@ -42,7 +46,29 @@ export type EditorRoutesContext = {
   buildStructuralSimilarityReport: (chapter: any, referenceReport: any) => any
   buildReferenceMigrationDryPlan: (project: any, chapter: any, preview: any, safety: any) => any
   diffTexts: (before: string, after: string) => any
-  updateStoryStateMachine: (workspace: string, project: any, chapter: any, contextPackage: any, chapterText: string, modelId?: number) => Promise<any>
+  executeAgent?: typeof executeNovelAgent
+  updateStoryStateMachine: (
+    workspace: string,
+    project: any,
+    chapter: any,
+    contextPackage: any,
+    chapterText: string,
+    modelId?: number,
+    options?: Record<string, any>,
+  ) => Promise<any>
+}
+
+export type ProseQualityReviewOptions = {
+  model_id?: number
+  source?: string
+  source_review_id?: number | null
+  source_run_id?: number | null
+  candidate_hash?: string
+  current_chapter_only?: boolean
+  max_tokens?: number
+  signal?: AbortSignal
+  timeoutMs?: number
+  maxRetries?: number
 }
 
 export const REVISION_MAX_TOKENS = 8000
@@ -63,69 +89,6 @@ export async function loadChapterBundle(ctx: EditorRoutesContext, projectId: num
   const chapter = chapters.find(item => item.id === chapterId)
   if (!chapter) return { activeWorkspace, project, status: 404, error: 'chapter not found' }
   return { activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews }
-}
-
-export async function syncStoryStateFromChapter(
-  ctx: EditorRoutesContext,
-  activeWorkspace: string,
-  project: any,
-  projectId: number,
-  startChapterNo: number,
-  modelId?: number,
-) {
-  const writtenChapters = (await listNovelChapters(activeWorkspace, projectId))
-    .filter(chapter => Number(chapter.chapter_no || 0) >= startChapterNo && String(chapter.chapter_text || '').trim())
-    .sort((a, b) => Number(a.chapter_no || 0) - Number(b.chapter_no || 0))
-  const synced: any[] = []
-  const errors: any[] = []
-  let currentProject = project
-  for (const target of writtenChapters) {
-    try {
-      const [chapters, worldbuilding, characters, outlines, reviews] = await Promise.all([
-        listNovelChapters(activeWorkspace, projectId),
-        listNovelWorldbuilding(activeWorkspace, projectId),
-        listNovelCharacters(activeWorkspace, projectId),
-        listNovelOutlines(activeWorkspace, projectId),
-        listNovelReviews(activeWorkspace, projectId),
-      ])
-      currentProject = await ctx.getProject(activeWorkspace, projectId) || currentProject
-      const freshChapter = chapters.find(item => item.id === target.id) || target
-      const contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, currentProject, freshChapter, chapters, worldbuilding, characters, outlines, reviews)
-      const update = await ctx.updateStoryStateMachine(activeWorkspace, currentProject, freshChapter, contextPackage, String(freshChapter.chapter_text || ''), modelId)
-      synced.push({
-        chapter_id: freshChapter.id,
-        chapter_no: freshChapter.chapter_no,
-        update,
-        soft_hard_failures: Array.isArray(update?.soft_hard_failures) ? update.soft_hard_failures : [],
-      })
-    } catch (error: any) {
-      const hardFailures = Array.isArray(error?.hard_failures) ? error.hard_failures : []
-      const blockingHardFailures = Array.isArray(error?.blocking_hard_failures) ? error.blocking_hard_failures : hardFailures
-      errors.push({
-        chapter_id: target.id,
-        chapter_no: target.chapter_no,
-        error: String(error?.message || error),
-        code: error?.code || '',
-        hard_failures: hardFailures,
-        blocking_hard_failures: blockingHardFailures,
-      })
-      break
-    }
-  }
-  const firstError = errors[0]
-  return {
-    ok: errors.length === 0,
-    synced,
-    errors,
-    error: firstError
-      ? (
-          Array.isArray(firstError.hard_failures) && firstError.hard_failures.length
-            ? firstError.hard_failures.map((item: any) => item?.message || item?.key).filter(Boolean).slice(0, 3).join('；')
-            : firstError.error
-        )
-      : undefined,
-    last_synced_chapter: synced.length ? synced[synced.length - 1].chapter_no : null,
-  }
 }
 
 export function isRevisionOutputTruncated(result: any) {
@@ -255,7 +218,88 @@ function buildProseQualityPrompt(project: any, contextPackage: any, chapterText:
   ].join('\n')
 }
 
-export async function createProseQualityReview(ctx: EditorRoutesContext, activeWorkspace: string, project: any, chapter: any, options: any = {}) {
+type ProseQualityClaimContext = {
+  runId: number
+  owner: string
+}
+
+function proseQualityResultFromSavedReview(saved: any, chapter: any) {
+  const payload = parseJsonLikePayload(saved?.payload) || {}
+  return {
+    review: payload.self_check?.review || {},
+    saved,
+    contextPackage: payload.context_package || null,
+    result: null,
+    content_hash: payload.content_hash || textHash(chapter?.chapter_text || ''),
+    chapter,
+    plan_alignment: payload.plan_alignment || null,
+    reused: true,
+  }
+}
+
+export async function createProseQualityReview(
+  ctx: EditorRoutesContext,
+  activeWorkspace: string,
+  project: any,
+  chapter: any,
+  options: ProseQualityReviewOptions = {},
+) {
+  const receiptOwned = options.current_chapter_only === true
+    && options.source_run_id !== undefined
+    && options.source_run_id !== null
+    && Boolean(String(options.candidate_hash || '').trim())
+  if (!receiptOwned) return createProseQualityReviewOnce(ctx, activeWorkspace, project, chapter, options)
+  const owner = randomUUID()
+  const deadline = Date.now() + Math.max(30_000, Number(options.timeoutMs || 5 * 60_000))
+  while (true) {
+    if (options.signal?.aborted) throw options.signal.reason || new Error('prose quality review aborted')
+    const claim = await claimProseQualityReceipt(activeWorkspace, {
+      projectId: Number(project.id),
+      chapterId: Number(chapter.id),
+      chapterNo: Number(chapter.chapter_no || chapter.id),
+      sourceRunId: Number(options.source_run_id),
+      candidateHash: String(options.candidate_hash),
+      owner,
+    })
+    if (claim.state === 'completed') {
+      const output = parseJsonLikePayload(claim.run.output_ref) || {}
+      const saved = await getNovelReview(activeWorkspace, Number(output.review_id || 0), Number(project.id))
+      if (!saved) throw new Error('completed prose quality receipt has no persisted review')
+      const chapters = await listNovelChapters(activeWorkspace, Number(project.id))
+      const currentChapter = chapters.find(item => Number(item.id) === Number(chapter.id)) || chapter
+      return proseQualityResultFromSavedReview(saved, currentChapter)
+    }
+    if (claim.state === 'claimed') {
+      try {
+        return await createProseQualityReviewOnce(ctx, activeWorkspace, project, chapter, options, {
+          runId: claim.run.id,
+          owner,
+        })
+      } catch (error) {
+        await failProseQualityReceipt(activeWorkspace, {
+          claimRunId: claim.run.id,
+          owner,
+        }).catch(() => false)
+        throw error
+      }
+    }
+    if (Date.now() >= deadline) {
+      throw Object.assign(new Error('timed out waiting for prose quality receipt owner'), {
+        code: 'PROSE_QUALITY_RECEIPT_WAIT_TIMEOUT',
+      })
+    }
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+}
+
+async function createProseQualityReviewOnce(
+  ctx: EditorRoutesContext,
+  activeWorkspace: string,
+  project: any,
+  chapter: any,
+  options: ProseQualityReviewOptions,
+  claim?: ProseQualityClaimContext,
+) {
   const projectId = Number(project.id)
   const [chapters, worldbuilding, characters, outlines, reviews] = await Promise.all([
     listNovelChapters(activeWorkspace, projectId),
@@ -265,10 +309,34 @@ export async function createProseQualityReview(ctx: EditorRoutesContext, activeW
     listNovelReviews(activeWorkspace, projectId),
   ])
   const currentChapter = chapters.find(item => item.id === chapter.id) || chapter
-  const contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, project, currentChapter, chapters, worldbuilding, characters, outlines, reviews)
+  const receiptOwned = options.current_chapter_only === true
+    && options.source_run_id !== undefined
+    && options.source_run_id !== null
+    && Boolean(String(options.candidate_hash || '').trim())
+  if (receiptOwned && revisionTextHash(String(currentChapter.chapter_text || '')) !== String(options.candidate_hash)) {
+    throw Object.assign(new Error('chapter text no longer matches prose quality receipt'), {
+      code: 'PROSE_QUALITY_CANDIDATE_STALE',
+    })
+  }
+  const alignment = buildCurrentChapterPlanAlignment(chapters, currentChapter, {
+    force: true,
+    source: options.source ? `pre_quality_${options.source}` : 'pre_quality',
+  })
+  let alignedChapter = alignment.alignedChapter || currentChapter
+  let planAlignment: any = {
+    rebuilt: alignment.rebuilt,
+    reason: alignment.reason,
+    following_count: 0,
+  }
+  if ((alignment.rebuilt || Object.keys(alignment.patch || {}).length > 0) && Number(alignment.chapter_id) === Number(currentChapter.id)) {
+    alignedChapter = await updateNovelChapter(activeWorkspace, Number(currentChapter.id), alignment.patch as any, { createVersion: false }) || alignedChapter
+  }
+  const contextChapters = chapters.map(item => Number(item.id) === Number(alignedChapter.id) ? alignedChapter : item)
+  const contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, project, alignedChapter, contextChapters, worldbuilding, characters, outlines, reviews)
   const modelId = ctx.getStageModelId(project, 'review', Number(options.model_id || 0) || undefined)
-  const result = await executeNovelAgent('review-agent', project, {
-    task: buildProseQualityPrompt(project, contextPackage, currentChapter.chapter_text || ''),
+  const executeAgent = ctx.executeAgent || executeNovelAgent
+  const result = await executeAgent('review-agent', project, {
+    task: buildProseQualityPrompt(project, contextPackage, alignedChapter.chapter_text || ''),
   }, {
     activeWorkspace,
     modelId: modelId ? String(modelId) : undefined,
@@ -276,6 +344,9 @@ export async function createProseQualityReview(ctx: EditorRoutesContext, activeW
     temperature: ctx.getStageTemperature(project, 'review', 0.2),
     responseMode: 'stream',
     skipMemory: true,
+    signal: options.signal,
+    timeoutMs: options.timeoutMs,
+    maxRetries: options.maxRetries,
   })
   if ((result as any).error) throw new Error(String((result as any).error))
   const reviewPayload = getNovelPayload(result)
@@ -293,83 +364,6 @@ export async function createProseQualityReview(ctx: EditorRoutesContext, activeW
     .filter((item: any) => Number(item.chapter_no || 0) < Number(currentChapter.chapter_no || 0))
     .sort((a: any, b: any) => Number(a.chapter_no || 0) - Number(b.chapter_no || 0))
   const previousChapter = previousChapters.length ? previousChapters[previousChapters.length - 1] : null
-  // If accepted prose already diverged from frozen task-book, reverse-sync plan first so
-  // quality / revision / blueprint no longer judge against dead seeds.
-  let alignedChapter = currentChapter
-  let planAlignment: any = null
-  try {
-    const alignment = collectPlanAlignmentPatchesAfterProseChange(chapters, currentChapter, {
-      force: true,
-      source: options.source ? `pre_quality_${options.source}` : 'pre_quality',
-      followLimit: 5,
-      alignWrittenFollowers: true,
-    })
-    planAlignment = {
-      rebuilt: alignment.current.rebuilt,
-      reason: alignment.current.reason,
-      following_count: alignment.following_count,
-    }
-    if (alignment.current.rebuilt || alignment.following_count > 0) {
-      for (const item of alignment.patches) {
-        const patched = await updateNovelChapter(activeWorkspace, item.chapter_id, item.patch as any, { createVersion: false })
-        if (Number(item.chapter_id) === Number(currentChapter.id)) alignedChapter = patched
-      }
-    } else if (alignment.alignedChapter) {
-      alignedChapter = alignment.alignedChapter
-    }
-    try {
-      const refreshed = await listNovelChapters(activeWorkspace, projectId)
-      const projectAlign = collectProjectPlanAlignmentPatches(refreshed, {
-        source: options.source ? `pre_quality_project_${options.source}` : 'pre_quality_project',
-        onlyFromChapterNo: Math.max(1, Number(currentChapter.chapter_no || 1) - 2),
-        followLimit: 2,
-      })
-      for (const item of projectAlign.patches) {
-        const patched = await updateNovelChapter(activeWorkspace, item.chapter_id, item.patch as any, { createVersion: false })
-        if (Number(item.chapter_id) === Number(currentChapter.id)) alignedChapter = patched
-      }
-      planAlignment = {
-        ...(planAlignment || {}),
-        project_align: {
-          patch_count: projectAlign.patch_count,
-          closed_families: projectAlign.closed_families,
-        },
-      }
-    } catch (projectAlignError: any) {
-      planAlignment = {
-        ...(planAlignment || {}),
-        project_align_error: String(projectAlignError?.message || projectAlignError),
-      }
-    }
-  } catch (error: any) {
-    planAlignment = { rebuilt: false, error: String(error?.message || error) }
-  }
-  // Persist live contract: strip closed beats from stored task book before QA judges goals.
-  try {
-    const closedBeats = collectClosedBeatFamiliesFromChapters(previousChapters || [])
-    const live = buildLiveContractChapterPatch(alignedChapter, {
-      previousChapters: previousChapters || [],
-      previousChapter,
-      closedBeats,
-    })
-    if (live.changed && alignedChapter?.id) {
-      alignedChapter = await updateNovelChapter(activeWorkspace, Number(alignedChapter.id), live.patch as any, { createVersion: false })
-      planAlignment = {
-        ...(planAlignment || {}),
-        live_contract: {
-          plan_health: live.contract.plan_health,
-          closed_blocked: live.contract.closed_blocked,
-          acceptance_goals: live.contract.acceptance_goals,
-        },
-      }
-    }
-  } catch (error: any) {
-    planAlignment = {
-      ...(planAlignment || {}),
-      live_contract_error: String(error?.message || error),
-    }
-  }
-
   const normalizedReview = mergeProseQualityWithDeliveryRisks(modelReview, {
     reviews,
     chapter: alignedChapter,
@@ -378,7 +372,7 @@ export async function createProseQualityReview(ctx: EditorRoutesContext, activeW
     limit: 5,
   })
   const contentHash = textHash(alignedChapter.chapter_text || '')
-  const saved = await createNovelReview(activeWorkspace, {
+  const reviewRecord = {
     project_id: projectId,
     review_type: 'prose_quality',
     status: normalizedReview.passed === false || Number(normalizedReview.score || 100) < 78 || normalizedReview.needs_revision ? 'warn' : 'ok',
@@ -390,6 +384,9 @@ export async function createProseQualityReview(ctx: EditorRoutesContext, activeW
       content_hash: contentHash,
       source: options.source || 'manual_refresh',
       source_review_id: options.source_review_id || null,
+      source_run_id: options.source_run_id ?? null,
+      candidate_hash: options.candidate_hash || null,
+      current_chapter_only: options.current_chapter_only === true,
       context_package: contextPackage,
       self_check: {
         review: normalizedReview,
@@ -400,23 +397,52 @@ export async function createProseQualityReview(ctx: EditorRoutesContext, activeW
       delivery_link: normalizedReview.delivery_link || null,
       plan_alignment: planAlignment,
     }),
-  })
-  await appendNovelRun(activeWorkspace, {
+  }
+  const auditRunRecord = {
     project_id: projectId,
     run_type: 'prose_quality',
     step_name: `chapter-${alignedChapter.chapter_no}`,
     status: 'success',
-    input_ref: JSON.stringify({ chapter_id: alignedChapter.id, source: options.source || 'manual_refresh' }),
+    input_ref: JSON.stringify({
+      chapter_id: alignedChapter.id,
+      source: options.source || 'manual_refresh',
+      source_run_id: options.source_run_id ?? null,
+      candidate_hash: options.candidate_hash || null,
+      current_chapter_only: options.current_chapter_only === true,
+    }),
     output_ref: JSON.stringify({
-      review_id: saved.id,
+      source_run_id: options.source_run_id ?? null,
+      candidate_hash: options.candidate_hash || null,
       score: normalizedReview.score,
       needs_revision: normalizedReview.needs_revision,
       delivery_link_count: normalizedReview.delivery_link?.source_count || 0,
       plan_alignment: planAlignment,
       modelName: (result as any).modelName,
     }),
-  })
-  return { review: normalizedReview, saved, contextPackage, result, content_hash: contentHash, chapter: alignedChapter, plan_alignment: planAlignment }
+  }
+  let saved: any
+  if (receiptOwned && claim) {
+    const committed = await commitProseQualityReceipt(activeWorkspace, {
+      claimRunId: claim.runId,
+      owner: claim.owner,
+      projectId,
+      chapterId: Number(alignedChapter.id),
+      candidateHash: String(options.candidate_hash),
+      review: reviewRecord,
+      auditRun: auditRunRecord,
+    })
+    saved = committed.saved
+  } else {
+    saved = await createNovelReview(activeWorkspace, reviewRecord)
+    await appendNovelRun(activeWorkspace, {
+      ...auditRunRecord,
+      output_ref: JSON.stringify({
+        ...parseJsonLikePayload(auditRunRecord.output_ref),
+        review_id: saved.id,
+      }),
+    })
+  }
+  return { review: normalizedReview, saved, contextPackage, result, content_hash: contentHash, chapter: alignedChapter, plan_alignment: planAlignment, reused: false }
 }
 
 export function buildChapterQualityCard(chapter: any, contextPackage: any, reviews: any[]) {

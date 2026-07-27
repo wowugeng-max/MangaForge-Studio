@@ -15,6 +15,7 @@ import {
   applySurgicalRevisionPatch,
   isRevisionOutputTruncated,
 } from './novel-editor-routes'
+import { buildCurrentChapterPlanAlignment } from '../novel-writing/chapter-plan-from-prose'
 
 
 function editorBuildersSource() {
@@ -193,6 +194,57 @@ describe('editor revision route safeguards', () => {
     expect(routeBlock).toContain('contextPackage')
   })
 
+  test('post-revision plan alignment is scoped to the revised chapter', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-editor/register-revision.ts'), 'utf8')
+    const routeStart = source.indexOf("app.post('/api/novel/reviews/:reviewId/apply-revision'")
+    const routeBlock = source.slice(routeStart)
+
+    expect(routeBlock).toContain('buildCurrentChapterPlanAlignment')
+    expect(routeBlock).not.toContain('collectPlanAlignmentPatchesAfterProseChange')
+    expect(routeBlock).not.toContain('followLimit')
+    expect(routeBlock).not.toContain('for (const item of alignment.patches)')
+    expect(routeBlock).toContain('updateNovelChapter(activeWorkspace, alignment.chapter_id')
+
+    const chapters = [
+      { id: 1, chapter_no: 1, chapter_text: '第一章原文。', raw_payload: { plan: 'one' } },
+      { id: 2, chapter_no: 2, chapter_text: '', chapter_goal: '后续章原目标', raw_payload: { plan: 'two' } },
+    ]
+    const followerBefore = structuredClone(chapters[1])
+    buildCurrentChapterPlanAlignment(chapters, { ...chapters[0], chapter_text: '第一章修订原文。' }, {
+      force: true,
+      source: 'post_editor_revision',
+    })
+    expect(chapters[1]).toEqual(followerBefore)
+  })
+
+  test('editor revision owns a durable run id used by downstream receipts', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-editor/register-revision.ts'), 'utf8')
+    const routeStart = source.indexOf("app.post('/api/novel/reviews/:reviewId/apply-revision'")
+    const routeBlock = source.slice(routeStart)
+    const runStart = routeBlock.indexOf('const revisionRun = await appendNovelRun')
+    const modelStart = routeBlock.indexOf("executeNovelAgent('prose-agent'")
+
+    expect(runStart).toBeGreaterThanOrEqual(0)
+    expect(modelStart).toBeGreaterThan(runStart)
+    expect(routeBlock).toContain('source_run_id: revisionRun.id')
+    expect(routeBlock).toContain('updateNovelRun(activeWorkspace, revisionRun.id')
+    expect(routeBlock).not.toContain('source_run_id: null')
+  })
+
+  test('post-revision quality failure audit retains the exact revision receipt', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-editor/register-revision.ts'), 'utf8')
+    const routeStart = source.indexOf("app.post('/api/novel/reviews/:reviewId/apply-revision'")
+    const routeBlock = source.slice(routeStart)
+    const failureRunStart = routeBlock.indexOf("run_type: 'prose_quality'")
+    const failureRunEnd = routeBlock.indexOf('\n          })', failureRunStart)
+    const failureRunBlock = routeBlock.slice(failureRunStart, failureRunEnd)
+
+    expect(failureRunStart).toBeGreaterThanOrEqual(0)
+    expect(failureRunBlock).toContain('source_run_id: revisionRun.id')
+    expect(failureRunBlock).toContain("candidate_hash: revisionTextHash(String(updated.chapter_text || ''))")
+    expect(failureRunBlock).toContain('current_chapter_only: true')
+  })
+
   test('persists editor workflow revision receipts for handoff tracking', async () => {
     const { readFileSync } = await import('fs')
     const { join } = await import('path')
@@ -263,4 +315,3 @@ describe('editor revision route safeguards', () => {
     expect(source).toContain('shouldRetryRevisionPatch')
   })
 })
-
