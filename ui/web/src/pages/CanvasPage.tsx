@@ -534,7 +534,7 @@ function CanvasWorkspace() {
             <Text type="secondary" style={{ fontSize: 13 }}>可拖拽资产到画布，或双击空白处呼出搜索菜单。</Text>
           </div>
           <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <AssetLibrary projectId={canvasProjectId} onAddToCanvas={(asset) => { const position = reactFlowInstance?.screenToFlowPosition({ x: 420, y: window.innerHeight / 2 }) ?? { x: 300, y: 200 }; addNode({ id: getId(), type: 'loadAsset', position, data: { label: asset.name, asset } } as any); message.success(`「${asset.name}」已发送到画布`) }} />
+            <AssetLibrary projectId={canvasProjectId} onAddToCanvas={(asset) => { const position = reactFlowInstance?.screenToFlowPosition({ x: 420, y: window.innerHeight / 2 }) ?? { x: 300, y: 200 }; addNode({ id: getId(), type: 'loadAsset', position, data: { label: asset.name, asset }, style: { width: 360, height: 380 } } as any); message.success(`「${asset.name}」已发送到画布`) }} />
           </div>
         </div>
       </Sider>

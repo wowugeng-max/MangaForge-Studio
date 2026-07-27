@@ -113,6 +113,17 @@ describe('ComfyForge canvas feature migration', () => {
     expect(canvasPage).toContain('position: { x: menuConfig.flowX, y: menuConfig.flowY }')
   })
 
+  test('assets sent from the library get the standard canvas node size', () => {
+    const canvasPage = source('CanvasPage.tsx')
+
+    expect(canvasPage).toContain(
+      "type: 'loadAsset', position, data: { label: asset.name, asset }, style: { width: 360, height: 380 }"
+    )
+    expect(canvasPage).toContain(
+      "style: node.type === 'generate' ? { width: 360, height: 380 } : undefined"
+    )
+  })
+
   test('canvas page restores node config and template assets with current React Flow coordinates', () => {
     const canvasPage = source('CanvasPage.tsx')
 
