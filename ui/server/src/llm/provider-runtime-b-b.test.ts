@@ -798,3 +798,42 @@ describe('gemini chat-style image generation routing', () => {
     ])
   })
 })
+
+describe('gemini chat-style image response extraction', () => {
+  const imageSelection = (overrides: Partial<RuntimeModelSelection> = {}) => selection({
+    apiFormat: 'openai_compatible',
+    endpoint: 'chat/completions',
+    routeType: 'text_to_image',
+    provider: { ...selection().provider, api_format: 'openai_compatible', endpoints: {} },
+    model: { ...selection().model, model_name: 'gemini-3.1-flash-image', capabilities: { text_to_image: true } },
+    ...overrides,
+  })
+
+  test('extracts image from message.images array with null content', () => {
+    const parsed = parseProviderResponsePayload({
+      choices: [{
+        message: {
+          role: 'assistant',
+          content: null,
+          images: [{ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,abc123' }, index: 0 }],
+        },
+        finish_reason: 'stop',
+      }],
+    }, imageSelection())
+    expect(parsed.content).toBe('data:image/jpeg;base64,abc123')
+  })
+
+  test('extracts image from multimodal content part array', () => {
+    const parsed = parseProviderResponsePayload({
+      choices: [{
+        message: {
+          content: [
+            { type: 'text', text: 'here you go' },
+            { type: 'image_url', image_url: { url: 'https://cdn.example.com/pic.png' } },
+          ],
+        },
+      }],
+    }, imageSelection())
+    expect(parsed.content).toBe('https://cdn.example.com/pic.png')
+  })
+})

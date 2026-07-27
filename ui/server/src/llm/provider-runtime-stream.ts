@@ -294,8 +294,23 @@ function extractMediaContent(raw: any) {
     if (candidate?.video_url || candidate?.image_url || candidate?.url) return normalizeExtractedMediaContent(String(candidate.video_url || candidate.image_url || candidate.url))
     const firstVideoResult = Array.isArray(candidate?.video_result) ? candidate.video_result[0] : null
     if (firstVideoResult?.url) return normalizeExtractedMediaContent(String(firstVideoResult.url))
-    const choiceContent = candidate?.choices?.[0]?.message?.content || candidate?.choices?.[0]?.text
-    if (choiceContent) return normalizeExtractedMediaContent(String(choiceContent))
+    const choiceMessage = candidate?.choices?.[0]?.message
+    // OpenRouter/cliproxyapi-style chat image generation: content is null and
+    // the image lives in message.images[].image_url.url.
+    const messageImages = Array.isArray(choiceMessage?.images) ? choiceMessage.images : []
+    for (const imageEntry of messageImages) {
+      const imageUrl = typeof imageEntry === 'string' ? imageEntry : imageEntry?.image_url?.url || imageEntry?.url
+      if (imageUrl) return normalizeExtractedMediaContent(String(imageUrl))
+    }
+    const choiceContent = choiceMessage?.content ?? candidate?.choices?.[0]?.text
+    if (Array.isArray(choiceContent)) {
+      const imagePart = choiceContent.find((part: any) => part && typeof part === 'object' && (part.image_url?.url || (part.type === 'image_url' && part.url)))
+      if (imagePart) return normalizeExtractedMediaContent(String(imagePart.image_url?.url || imagePart.url))
+      const joinedText = choiceContent.map((part: any) => typeof part === 'string' ? part : part?.text || '').filter(Boolean).join('\n')
+      if (joinedText) return normalizeExtractedMediaContent(joinedText)
+    } else if (choiceContent) {
+      return normalizeExtractedMediaContent(String(choiceContent))
+    }
   }
   return ''
 }
