@@ -1,6 +1,7 @@
 # backend/core/adapters/universal_proxy.py
 import httpx
 import asyncio
+import json
 from typing import Dict, Any, Union
 from .base import BaseAdapter
 from backend.core.registry import ProviderRegistry
@@ -81,6 +82,32 @@ class UniversalProxyAdapter(BaseAdapter):
             return template
         return template
 
+    IMAGE_VIDEO_TYPES = ["text_to_image", "image_to_image", "text_to_video", "image_to_video", "image", "video"]
+
+    # 与前端 AspectRatioSelector 预设一致：预设尺寸直接映射到用户选择的比例
+    # （1344*768 等预设是约 1MP 的近似值，按像素 gcd 反推会得到 7:4 这类错误比例）
+    PRESET_SIZE_RATIOS = {
+        "1024*1024": "1:1", "768*1344": "9:16", "1344*768": "16:9",
+        "864*1152": "3:4", "1152*864": "4:3", "1216*832": "3:2",
+        "832*1216": "2:3", "896*1120": "4:5", "1120*896": "5:4",
+        "1536*640": "21:9",
+    }
+
+    @classmethod
+    def _size_to_prompt_hint(cls, size: str) -> str:
+        """把 '1344*768' 这类尺寸转成模型能理解的比例提示，用于走 chat 通道的生图模板。"""
+        try:
+            import math, re
+            normalized = re.sub(r"[xX×]", "*", size.strip())
+            ratio = cls.PRESET_SIZE_RATIOS.get(normalized)
+            if not ratio:
+                w, h = [int(v) for v in normalized.split("*")]
+                g = math.gcd(w, h)
+                ratio = f"{w // g}:{h // g}"
+            return f"\n\n[图像要求] 宽高比 {ratio}，目标尺寸 {normalized.replace('*', 'x')}。"
+        except Exception:
+            return ""
+
     def _build_payload(self, request_params: Dict[str, Any], req_type: str, route_config: Union[str, Dict[str, Any]]) -> \
     Dict[str, Any]:
         # 1. 🌟 DSL 模式：将所有动态参数无缝注入上下文
@@ -92,6 +119,13 @@ class UniversalProxyAdapter(BaseAdapter):
             context.setdefault("size", "1024*1024")
             if "prompt" not in context:
                 context["prompt"] = ""
+
+            # 模板没有消费 {{size}} 时（如经 chat/completions 生图的 gemini 路由），
+            # 把尺寸要求折算成比例提示拼进 prompt，否则前端选择的比例会被静默丢弃
+            template_str = json.dumps(route_config["payload_template"], ensure_ascii=False)
+            size_val = request_params.get("size")
+            if req_type in self.IMAGE_VIDEO_TYPES and size_val and "{{size}}" not in template_str.replace("{{ size }}", "{{size}}"):
+                context["prompt"] = f"{context['prompt']}{self._size_to_prompt_hint(str(size_val))}"
 
             return self._render_template(route_config["payload_template"], context)
 

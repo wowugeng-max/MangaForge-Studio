@@ -348,7 +348,7 @@ function CanvasWorkspace() {
   const createNodeAtMenu = (node: typeof AVAILABLE_NODES[number]) => {
     if (!menuConfig) return
     const newNodeId = getId()
-    addNode({ id: newNodeId, type: node.type, position: { x: menuConfig.flowX, y: menuConfig.flowY }, data: { label: node.label } } as any)
+    addNode({ id: newNodeId, type: node.type, position: { x: menuConfig.flowX, y: menuConfig.flowY }, data: { label: node.label }, style: node.type === 'generate' ? { width: 360, height: 380 } : undefined } as any)
     if (pendingConnection) {
       const store = useCanvasStore.getState()
       const sourceNode = store.nodes.find(n => n.id === pendingConnection.source)

@@ -765,20 +765,83 @@ describe('gemini chat-style image generation routing', () => {
     expect(routed.endpoint).toBe('images/generations')
   })
 
-  test('image request bound for chat/completions builds a messages body', () => {
+  test('image request bound for chat/completions builds a messages body with size hint', () => {
     const body = buildProviderRequestBody({
       model: 'x',
       messages: [{ role: 'user', content: '生成一张美女吃泡面的图' }],
       type: 'text_to_image',
-      size: '1024*1024',
+      size: '1344*768',
     } as any, openaiSelection({
       endpoint: 'chat/completions',
       routeType: 'text_to_image',
       model: { ...selection().model, model_name: 'gemini-3.1-flash-image', capabilities: { text_to_image: true } },
     }))
-    expect(body.messages).toEqual([{ role: 'user', content: '生成一张美女吃泡面的图' }])
+    // chat 通道没有 size 字段可用：比例要求折算成提示语拼进 prompt，否则前端选的比例被静默丢弃
+    expect(body.messages).toHaveLength(1)
+    expect(body.messages[0].role).toBe('user')
+    expect(body.messages[0].content).toContain('生成一张美女吃泡面的图')
+    expect(body.messages[0].content).toContain('宽高比 16:9')
+    expect(body.messages[0].content).toContain('1344x768')
     expect(body.prompt).toBeUndefined()
     expect(body.size).toBeUndefined()
+  })
+
+  test('preset sizes map to the user-facing ratio, not the pixel gcd', () => {
+    const body = buildProviderRequestBody({
+      model: 'x',
+      messages: [{ role: 'user', content: 'a cat' }],
+      type: 'text_to_image',
+      size: '832*1216',
+    } as any, openaiSelection({
+      endpoint: 'chat/completions',
+      routeType: 'text_to_image',
+      model: { ...selection().model, model_name: 'gemini-3.1-flash-image', capabilities: { text_to_image: true } },
+    }))
+    expect(body.messages[0].content).toContain('宽高比 2:3')
+    expect(body.messages[0].content).not.toContain('13:19')
+  })
+
+  test('custom sizes fall back to reduced pixel ratio', () => {
+    const body = buildProviderRequestBody({
+      model: 'x',
+      messages: [{ role: 'user', content: 'a cat' }],
+      type: 'text_to_image',
+      size: '1920x1080',
+    } as any, openaiSelection({
+      endpoint: 'chat/completions',
+      routeType: 'text_to_image',
+      model: { ...selection().model, model_name: 'gemini-3.1-flash-image', capabilities: { text_to_image: true } },
+    }))
+    expect(body.messages[0].content).toContain('宽高比 16:9')
+  })
+
+  test('adaptive (empty) size adds no hint', () => {
+    const body = buildProviderRequestBody({
+      model: 'x',
+      messages: [{ role: 'user', content: 'a cat' }],
+      type: 'text_to_image',
+      size: '',
+    } as any, openaiSelection({
+      endpoint: 'chat/completions',
+      routeType: 'text_to_image',
+      model: { ...selection().model, model_name: 'gemini-3.1-flash-image', capabilities: { text_to_image: true } },
+    }))
+    expect(body.messages[0].content).toBe('a cat')
+  })
+
+  test('images/generations body passes size through in openai x-format', () => {
+    const body = buildProviderRequestBody({
+      model: 'x',
+      messages: [{ role: 'user', content: 'a cat' }],
+      type: 'text_to_image',
+      size: '1344*768',
+    } as any, openaiSelection({
+      endpoint: 'images/generations',
+      routeType: 'text_to_image',
+      model: { ...selection().model, model_name: 'gpt-image-2', capabilities: { text_to_image: true } },
+    }))
+    expect(body.prompt).toBe('a cat')
+    expect(body.size).toBe('1344x768')
   })
 
   test('image_to_image request bound for chat endpoint attaches the source image', () => {
@@ -787,15 +850,16 @@ describe('gemini chat-style image generation routing', () => {
       messages: [{ role: 'user', content: '改成夜景' }],
       type: 'image_to_image',
       image_url: 'https://example.com/a.png',
+      size: '1024*1024',
     } as any, openaiSelection({
       endpoint: 'chat/completions',
       routeType: 'image_to_image',
       model: { ...selection().model, model_name: 'gemini-3.1-flash-image', capabilities: { image_to_image: true } },
     }))
-    expect(body.messages[0].content).toEqual([
-      { type: 'text', text: '改成夜景' },
-      { type: 'image_url', image_url: { url: 'https://example.com/a.png' } },
-    ])
+    expect(body.messages[0].content[0].type).toBe('text')
+    expect(body.messages[0].content[0].text).toContain('改成夜景')
+    expect(body.messages[0].content[0].text).toContain('宽高比 1:1')
+    expect(body.messages[0].content[1]).toEqual({ type: 'image_url', image_url: { url: 'https://example.com/a.png' } })
   })
 })
 

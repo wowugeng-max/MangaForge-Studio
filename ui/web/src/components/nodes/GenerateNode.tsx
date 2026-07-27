@@ -71,7 +71,7 @@ function GenerateNodeImpl(props: NodeProps) {
   const updateNodeData = useCanvasStore(s => s.updateNodeData)
   const setNodeStatus = useCanvasStore(s => s.setNodeStatus)
   const isMuted = useCanvasStore(s => isGenerateNodeMuted(s.nodes as any, id))
-  const { getEdges, getNodes } = useReactFlow()
+  const { getEdges, getNodes, setNodes } = useReactFlow()
   const updateNodeInternals = useUpdateNodeInternals()
 
   const assets = useAssetLibraryStore(s => s.assets)
@@ -201,6 +201,21 @@ function GenerateNodeImpl(props: NodeProps) {
   }, [id])
 
   useEffect(() => { setMediaDims('') }, [result?.content])
+
+  // freezeNodeSizeBeforeMediaPreview：无显式尺寸的节点（旧画布/菜单直建）会被生成的图片/视频
+  // 撑到媒体固有尺寸；媒体结果出现时先把当前实测宽高固化进 style，保持"当前多大就多大"
+  useEffect(() => {
+    const content = typeof result?.content === 'string' ? result.content : ''
+    const isMedia = /^data:(image|video)/.test(content) || /\.(png|jpg|jpeg|webp|gif|mp4|webm|mov)(\?|$)/i.test(content) || content.startsWith('http')
+    if (!content || !isMedia) return
+    setNodes(nds => nds.map(n => {
+      if (n.id !== id) return n
+      if (n.style?.width && n.style?.height) return n
+      const width = n.style?.width || n.width || 360
+      const height = n.style?.height || n.height || 380
+      return { ...n, style: { ...n.style, width, height } }
+    }))
+  }, [result?.content, id, setNodes])
 
   useEffect(() => () => {
     sseClientRef.current?.disconnect()
@@ -483,7 +498,8 @@ function GenerateNodeImpl(props: NodeProps) {
     const modelRecord = allModels.find(item => item.model_name === nextModel)
     const uiParams = modelRecord?.context_ui_params?.[mode]
     if (Array.isArray(uiParams)) {
-      const defaults = Object.fromEntries(uiParams.map((param: any) => [param.name, param.default]))
+      // size 不注入默认值：图像尺寸由节点上的比例选择器（ratioSize 兜底）统一控制
+      const defaults = Object.fromEntries(uiParams.filter((param: any) => param?.name !== 'size').map((param: any) => [param.name, param.default]))
       setParams(defaults)
       updateNodeData(id, { params: defaults })
     }
@@ -505,18 +521,19 @@ function GenerateNodeImpl(props: NodeProps) {
       )
     }
     const quickParams = pickQuickParams(selectedModelRecord?.context_ui_params?.[mode])
-    if (quickParams.length === 0) {
-      return (
+    const ratioSelect = (
+      <Tooltip key="_aspect_ratio" title="图像尺寸">
         <Select
           size="small"
           value={aspectRatio}
           style={{ width: 130 }}
-          onChange={value => setAspectRatio(value as AspectRatioValue)}
+          onChange={selectAspectRatio}
           options={GENERATE_NODE_ASPECT_RATIO_OPTIONS.map(r => ({ value: r.value, label: r.size ? `${r.label} · ${r.size}` : r.label }))}
         />
-      )
-    }
-    return quickParams.map(param => {
+      </Tooltip>
+    )
+    if (quickParams.length === 0) return ratioSelect
+    return [ratioSelect, ...quickParams.map(param => {
       const value = params[param.name] !== undefined ? params[param.name] : param.default
       const commit = (nextValue: any) => {
         const nextParams = { ...params, [param.name]: nextValue }
@@ -535,7 +552,7 @@ function GenerateNodeImpl(props: NodeProps) {
           <InputNumber size="small" value={Number(value ?? param.default ?? 0)} min={param.min} max={param.max} step={param.step} style={{ width: 64 }} onChange={commit} />
         </Tooltip>
       )
-    })
+    })]
   }
 
   const nodeCollapsed = Boolean(data?._collapsed)
@@ -553,6 +570,17 @@ function GenerateNodeImpl(props: NodeProps) {
 
   const isImageVideoMode = ['text_to_image', 'image_to_image', 'text_to_video', 'image_to_video'].includes(mode)
   const hasModelSizeParam = (selectedModelRecord?.context_ui_params?.[mode] || []).some((param: any) => param?.name === 'size')
+
+  // 选择比例时清掉模型自带的 size 参数，否则 params.size 优先级更高会让比例失效
+  const selectAspectRatio = (nextValue: unknown) => {
+    setAspectRatio(nextValue as AspectRatioValue)
+    if (hasModelSizeParam && params.size !== undefined) {
+      const nextParams = { ...params }
+      delete nextParams.size
+      setParams(nextParams)
+      updateNodeData(id, { params: nextParams })
+    }
+  }
   const currentModeLabel = MODES.find(item => item.value === mode)?.label || mode.toUpperCase()
   const currentModelDisplay = selectedModelRecord?.display_name || selectedModel || '未配置模型'
   const expectedFissionCount = Number.isFinite(Number(data?._fissionExpectedCount)) ? Number(data?._fissionExpectedCount) : null
@@ -619,12 +647,12 @@ function GenerateNodeImpl(props: NodeProps) {
             label: '生成参数',
             children: (
               <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                {isImageVideoMode && !hasModelSizeParam && (
+                {isImageVideoMode && (
                   <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
                     <Select
                       size="small"
                       value={aspectRatio}
-                      onChange={nextValue => setAspectRatio(nextValue as AspectRatioValue)}
+                      onChange={selectAspectRatio}
                       options={GENERATE_NODE_ASPECT_RATIO_OPTIONS.map(r => ({ value: r.value, label: r.size ? `${r.label} · ${r.size}` : r.label }))}
                     />
                     {aspectRatio === 'custom' ? (

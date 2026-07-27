@@ -369,15 +369,28 @@ describe('normalizeSelectOptions', () => {
   })
 })
 
+describe('media result must not inflate the node', () => {
+  test('node dimensions are frozen before a media preview mounts', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    // 无显式尺寸的节点会被生成图片撑大：媒体结果出现时必须先把当前节点宽高固化进 style
+    expect(source).toContain('freezeNodeSizeBeforeMediaPreview')
+  })
+
+  test('menu-created generate nodes get an explicit default size', () => {
+    const source = readFileSync(join(import.meta.dir, '../../pages/CanvasPage.tsx'), 'utf8')
+    expect(source).toMatch(/style: node\.type === 'generate'/)
+  })
+})
+
 describe('pickQuickParams', () => {
-  test('promotes the first two select/number params', () => {
+  test('promotes the first two select/number params, excluding size', () => {
     const params = [
       { name: 'size', type: 'select', options: ['1024*1024'] },
       { name: 'style', type: 'string' },
       { name: 'n', type: 'number', default: 1 },
       { name: 'steps', type: 'number', default: 20 },
     ]
-    expect(pickQuickParams(params).map(p => p.name)).toEqual(['size', 'n'])
+    expect(pickQuickParams(params).map(p => p.name)).toEqual(['n', 'steps'])
   })
 
   test('non-array input degrades to empty list', () => {

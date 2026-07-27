@@ -358,7 +358,8 @@ export function normalizeSelectOptions(options: unknown): Array<{ label: string;
 
 export function pickQuickParams(uiParams: unknown, limit = 2): Array<Record<string, any>> {
   if (!Array.isArray(uiParams)) return []
+  // size 由节点主体的比例选择器统一控制，不再作为快捷参数展示
   return uiParams
-    .filter(param => param && typeof param === 'object' && ((param as any).type === 'select' || (param as any).type === 'number'))
+    .filter(param => param && typeof param === 'object' && (param as any).name !== 'size' && ((param as any).type === 'select' || (param as any).type === 'number'))
     .slice(0, limit) as Array<Record<string, any>>
 }

@@ -34,6 +34,33 @@ export function isMediaRouteType(routeType?: string) {
   return ['image', 'video', 'text_to_image', 'image_to_image', 'text_to_video', 'image_to_video'].includes(String(routeType || ''))
 }
 
+// 与前端 AspectRatioSelector 预设一致：预设尺寸直接映射到用户选择的比例
+// （1344*768 等预设是约 1MP 的近似值，按像素 gcd 反推会得到 7:4 这类错误比例）
+const PRESET_SIZE_RATIOS: Record<string, string> = {
+  '1024*1024': '1:1', '768*1344': '9:16', '1344*768': '16:9',
+  '864*1152': '3:4', '1152*864': '4:3', '1216*832': '3:2',
+  '832*1216': '2:3', '896*1120': '4:5', '1120*896': '5:4',
+  '1536*640': '21:9',
+}
+
+function gcd(a: number, b: number): number {
+  return b === 0 ? a : gcd(b, a % b)
+}
+
+/** chat 通道没有 size 字段可用：把 '1344*768' 折算成比例提示语拼进 prompt。 */
+export function mediaSizePromptHint(size: unknown): string {
+  if (typeof size !== 'string' || !size.trim()) return ''
+  const normalized = size.trim().replace(/[xX×]/g, '*')
+  let ratio = PRESET_SIZE_RATIOS[normalized]
+  if (!ratio) {
+    const [w, h] = normalized.split('*').map(part => Number.parseInt(part, 10))
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return ''
+    const divisor = gcd(w, h)
+    ratio = `${w / divisor}:${h / divisor}`
+  }
+  return `\n\n[图像要求] 宽高比 ${ratio}，目标尺寸 ${normalized.replace('*', 'x')}。`
+}
+
 export function requestRouteType(request: LLMRequest, model: ModelRecord) {
   const explicit = String((request as any).type || (request as any).mode || (request as any).task_type || '').trim()
   if (explicit) return explicit
@@ -70,7 +97,7 @@ function toOpenAIBody(request: LLMRequest, selection: RuntimeModelSelection): Re
     // the endpoint is chat/completions, so send messages and let the proxy
     // return the image inside the message content.
     if (String(selection.endpoint || '').includes('chat/completions')) {
-      const prompt = (request as any).prompt || textPromptFromMessages(request.messages)
+      const prompt = ((request as any).prompt || textPromptFromMessages(request.messages)) + mediaSizePromptHint((request as any).size)
       const imageUrl = (request as any).image_url
       const userContent = imageUrl
         ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: imageUrl } }]
@@ -91,6 +118,8 @@ function toOpenAIBody(request: LLMRequest, selection: RuntimeModelSelection): Re
       if (passthroughBlocked.has(key)) continue
       body[key] = value
     }
+    // openai 风格媒体端点用 x 分隔尺寸；星号是 DashScope 风格（那条链路走 DSL 模板并自行归一化）
+    if (typeof body.size === 'string') body.size = body.size.replace(/\*/g, 'x')
     return body
   }
   const shouldStream = shouldStreamRequest(request, selection)
