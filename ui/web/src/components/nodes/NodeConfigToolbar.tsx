@@ -20,7 +20,7 @@ export function NodeConfigToolbar({ open, onClose, title, width = 400, position 
     <NodeToolbar isVisible={open} position={position} align="start" offset={12}>
       <div
         data-config-panel
-        className="nodrag nowheel"
+        className="nodrag nowheel nopan"
         style={{
           width,
           maxHeight: 480,

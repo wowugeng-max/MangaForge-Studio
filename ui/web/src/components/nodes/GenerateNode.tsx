@@ -552,6 +552,7 @@ function GenerateNodeImpl(props: NodeProps) {
   )
 
   const isImageVideoMode = ['text_to_image', 'image_to_image', 'text_to_video', 'image_to_video'].includes(mode)
+  const hasModelSizeParam = (selectedModelRecord?.context_ui_params?.[mode] || []).some((param: any) => param?.name === 'size')
   const currentModeLabel = MODES.find(item => item.value === mode)?.label || mode.toUpperCase()
   const currentModelDisplay = selectedModelRecord?.display_name || selectedModel || '未配置模型'
   const expectedFissionCount = Number.isFinite(Number(data?._fissionExpectedCount)) ? Number(data?._fissionExpectedCount) : null
@@ -618,22 +619,24 @@ function GenerateNodeImpl(props: NodeProps) {
             label: '生成参数',
             children: (
               <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
-                  <Select
-                    size="small"
-                    value={aspectRatio}
-                    onChange={nextValue => setAspectRatio(nextValue as AspectRatioValue)}
-                    options={GENERATE_NODE_ASPECT_RATIO_OPTIONS.map(r => ({ value: r.value, label: r.size ? `${r.label} · ${r.size}` : r.label }))}
-                  />
-                  {aspectRatio === 'custom' ? (
-                    <Space.Compact block>
-                      <InputNumber size="small" value={customWidth} min={1} onChange={value => setCustomWidth(Number(value || 0))} />
-                      <InputNumber size="small" value={customHeight} min={1} onChange={value => setCustomHeight(Number(value || 0))} />
-                    </Space.Compact>
-                  ) : (
-                    <Input size="small" value={ratioSize} disabled />
-                  )}
-                </div>
+                {isImageVideoMode && !hasModelSizeParam && (
+                  <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
+                    <Select
+                      size="small"
+                      value={aspectRatio}
+                      onChange={nextValue => setAspectRatio(nextValue as AspectRatioValue)}
+                      options={GENERATE_NODE_ASPECT_RATIO_OPTIONS.map(r => ({ value: r.value, label: r.size ? `${r.label} · ${r.size}` : r.label }))}
+                    />
+                    {aspectRatio === 'custom' ? (
+                      <Space.Compact block>
+                        <InputNumber size="small" value={customWidth} min={1} onChange={value => setCustomWidth(Number(value || 0))} />
+                        <InputNumber size="small" value={customHeight} min={1} onChange={value => setCustomHeight(Number(value || 0))} />
+                      </Space.Compact>
+                    ) : (
+                      <Input size="small" value={ratioSize} disabled />
+                    )}
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>温度</Text>
                   <InputNumber size="small" value={temperature} min={0} max={2} step={0.1} style={{ width: 90 }} onChange={value => setTemperature(Number(value || 0))} />
