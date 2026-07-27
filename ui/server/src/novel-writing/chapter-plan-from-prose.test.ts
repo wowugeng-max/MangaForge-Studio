@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  buildCurrentChapterPlanAlignment,
   collectPlanAlignmentPatchesAfterProseChange,
   collectProjectPlanAlignmentPatches,
   detectAuthorialEndingBreak,
@@ -83,10 +84,43 @@ describe('chapter plan from accepted prose', () => {
       followLimit: 1,
     })
     expect(bag.current.rebuilt).toBe(true)
+    expect(bag.current.mismatch).toBeTruthy()
+    expect(bag.current.plan_alignment).toBeTruthy()
     expect(bag.patches.some(item => item.kind === 'current_plan_from_prose')).toBe(true)
     expect(bag.patches.some(item => item.kind === 'following_progress_resync')).toBe(true)
     const next = bag.patches.find(item => item.kind === 'following_progress_resync')
     expect(String(next?.patch?.chapter_goal || '')).toMatch(/承接上一章|禁止回放|厨房|邻居|敲门|推进/)
+  })
+
+  test('builds alignment for the changed chapter without exposing follower ids or patches', () => {
+    const chapter1 = { ...CH12_STALE, id: 910001, chapter_no: 1 }
+    const chapter2 = {
+      id: 920002,
+      chapter_no: 2,
+      chapter_goal: 'stale follower two',
+      chapter_text: '',
+      raw_payload: {},
+    }
+    const chapter3 = {
+      id: 930003,
+      chapter_no: 3,
+      chapter_goal: 'stale follower three',
+      chapter_text: '',
+      raw_payload: {},
+    }
+
+    const result = buildCurrentChapterPlanAlignment(
+      [chapter1, chapter2, chapter3],
+      chapter1,
+      { force: true, source: 'post_editor_revision' },
+    )
+
+    expect(result.chapter_id).toBe(chapter1.id)
+    expect(result.chapter_no).toBe(1)
+    expect(result.patch).toBeTruthy()
+    expect(result.alignedChapter.id).toBe(chapter1.id)
+    expect(JSON.stringify(result)).not.toContain(String(chapter2.id))
+    expect(JSON.stringify(result)).not.toContain(String(chapter3.id))
   })
 
   test('detectAuthorialEndingBreak catches pure rhetorical chapter tails', () => {

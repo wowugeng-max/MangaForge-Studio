@@ -104,6 +104,24 @@ export type NovelChapterAcceptanceInput = {
   reviews?: Partial<NovelReviewRecord>[]
 }
 
+export type CommitEditorRevisionChapterInput = {
+  projectId: number
+  chapterId: number
+  runId: number
+  sourceTextHash: string
+  candidateText: string
+  candidateHash: string
+  chapterPatch: Partial<NovelChapterRecord>
+  reviewPayload: Record<string, unknown>
+}
+
+export type CommitEditorRevisionChapterResult = {
+  status: 'committed' | 'already_committed'
+  chapter: NovelChapterRecord
+  review: NovelReviewRecord
+  versionCreated: boolean
+}
+
 export type NovelPipelineSnapshot = {
   project: NovelProjectRecord
   chapters: NovelChapterRecord[]

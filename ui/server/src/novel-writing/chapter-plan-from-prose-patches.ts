@@ -13,16 +13,13 @@ import {
   rebuildChapterPlanFromAcceptedProse,
 } from './chapter-plan-from-prose-core'
 
-export function collectPlanAlignmentPatchesAfterProseChange(
+export function buildCurrentChapterPlanAlignment(
   allChapters: any[] = [],
   changedChapter: any = {},
-  options: { force?: boolean; source?: string; followLimit?: number; alignWrittenFollowers?: boolean } = {},
+  options: { force?: boolean; source?: string } = {},
 ) {
   const force = options.force !== false
   const source = options.source || 'post_prose_change'
-  const followLimit = Math.max(1, Number(options.followLimit ?? 5) || 5)
-  const alignWrittenFollowers = options.alignWrittenFollowers !== false
-
   const orderedEarly = asArray(allChapters)
     .slice()
     .sort((a: any, b: any) => Number(a?.chapter_no || 0) - Number(b?.chapter_no || 0))
@@ -114,6 +111,47 @@ export function collectPlanAlignmentPatchesAfterProseChange(
     current.rebuilt = true
     current.reason = `${current.reason || 'rebuilt'}+live_contract${preferProseGoal ? '+prefer_prose_goal' : ''}`
   }
+
+  return {
+    chapter_id: Number(changedChapter.id),
+    chapter_no: Number(alignedChapter.chapter_no || 0),
+    patch: current.chapter_patch || {},
+    rebuilt: Boolean(current.rebuilt),
+    reason: String(current.reason || ''),
+    mismatch: current.mismatch,
+    plan_alignment: current.plan_alignment,
+    alignedChapter,
+  }
+}
+
+export function collectPlanAlignmentPatchesAfterProseChange(
+  allChapters: any[] = [],
+  changedChapter: any = {},
+  options: { force?: boolean; source?: string; followLimit?: number; alignWrittenFollowers?: boolean } = {},
+) {
+  const force = options.force !== false
+  const source = options.source || 'post_prose_change'
+  const followLimit = Math.max(1, Number(options.followLimit ?? 5) || 5)
+  const alignWrittenFollowers = options.alignWrittenFollowers !== false
+  const currentAlignment = buildCurrentChapterPlanAlignment(allChapters, changedChapter, { force, source })
+  const current = {
+    rebuilt: currentAlignment.rebuilt,
+    reason: currentAlignment.reason,
+    mismatch: currentAlignment.mismatch,
+    chapter_patch: currentAlignment.patch,
+    plan_alignment: currentAlignment.plan_alignment,
+  }
+  const alignedChapter = currentAlignment.alignedChapter
+  const ordered = asArray(allChapters)
+    .slice()
+    .sort((a: any, b: any) => Number(a?.chapter_no || 0) - Number(b?.chapter_no || 0))
+  const currentNo = Number(alignedChapter?.chapter_no || changedChapter?.chapter_no || 0) || 0
+  const previousWritten = ordered.filter((item: any) => {
+    const no = Number(item?.chapter_no || 0)
+    const hasProse = Boolean(String(item?.chapter_text || item?.chapterText || '').trim())
+    return no > 0 && no < currentNo && hasProse
+  })
+  const closedHistory = collectClosedBeatFamiliesFromChapters(previousWritten)
 
   const patches: Array<{ chapter_id: number; chapter_no?: number; patch: Record<string, any>; kind: string }> = []
   if (current.rebuilt || Object.keys(current.chapter_patch || {}).length) {
@@ -343,4 +381,3 @@ export function collectProjectPlanAlignmentPatches(
     written_count: written.length,
   }
 }
-
