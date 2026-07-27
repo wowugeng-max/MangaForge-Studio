@@ -66,5 +66,23 @@ describe('applySurgicalRevisionPatch', () => {
     expect(result.applied[0]).toMatchObject({ type: 'replacement', match: 'normalized_whitespace' })
     expect(result.unapplied).toEqual([])
   })
-})
 
+  test('does not guess an opening cut point when an explicit keep_from anchor is missing', () => {
+    const originalText = `${'旧开篇。'.repeat(240)}\n\n保留正文从这里继续。\n\n${'后续推进。'.repeat(120)}`
+
+    const result = applySurgicalRevisionPatch(originalText, {
+      opening_rewrite: '新开篇先写出角色行动。'.repeat(80),
+      keep_from: '不存在的保留锚点。',
+    })
+
+    expect(result.chapterText).toBe(originalText)
+    expect(result.applied).toEqual([])
+    expect(result.unapplied).toEqual([
+      expect.objectContaining({
+        type: 'opening_rewrite',
+        reason: 'keep_from_not_found',
+        keep_from: '不存在的保留锚点。',
+      }),
+    ])
+  })
+})
