@@ -68,6 +68,7 @@ function mergePlainObjects(base: unknown, patch: unknown): Record<string, unknow
   if (!isPlainObject(sanitizedPatch)) return { ...current }
   const merged: Record<string, unknown> = { ...current }
   for (const [key, value] of Object.entries(sanitizedPatch)) {
+    if (value === undefined) continue
     merged[key] = isPlainObject(value) && isPlainObject(current[key])
       ? mergePlainObjects(current[key], value)
       : value
@@ -109,9 +110,12 @@ export async function commitEditorRevisionChapter(
         WHERE project_id = ?
           AND review_type = 'editor_revision'
           AND json_valid(payload)
-          AND CAST(json_extract(payload, '$.source_run_id') AS INTEGER) = ?
-          AND CAST(json_extract(payload, '$.chapter_id') AS INTEGER) = ?
-          AND CAST(json_extract(payload, '$.candidate_hash') AS TEXT) = ?
+          AND json_type(payload, '$.source_run_id') = 'integer'
+          AND json_extract(payload, '$.source_run_id') = ?
+          AND json_type(payload, '$.chapter_id') = 'integer'
+          AND json_extract(payload, '$.chapter_id') = ?
+          AND json_type(payload, '$.candidate_hash') = 'text'
+          AND json_extract(payload, '$.candidate_hash') = ?
         ORDER BY id DESC
         LIMIT 1
       `).get(input.projectId, input.runId, input.chapterId, input.candidateHash) as any

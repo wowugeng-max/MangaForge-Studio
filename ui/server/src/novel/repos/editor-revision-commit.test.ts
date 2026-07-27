@@ -193,7 +193,11 @@ describe('commitEditorRevisionChapter', () => {
       raw_payload: {
         planning: {
           alignment: { rebuilt: true },
-          metadata: { patch_owned: 'patch value' },
+          metadata: {
+            patch_owned: 'patch value',
+            keep_on_undefined: undefined,
+            clear_on_null: null,
+          },
           ordered_steps: ['patch replacement'],
           mode: 'patch scalar',
         },
@@ -203,7 +207,11 @@ describe('commitEditorRevisionChapter', () => {
       raw_payload: {
         planning: {
           alignment: { previous: 'keep me' },
-          metadata: { concurrent_key: 'newer same-text update' },
+          metadata: {
+            concurrent_key: 'newer same-text update',
+            keep_on_undefined: 'transaction-current value',
+            clear_on_null: 'transaction-current value',
+          },
           ordered_steps: ['concurrent value must be replaced'],
           mode: 'concurrent scalar must be replaced',
         },
@@ -221,6 +229,8 @@ describe('commitEditorRevisionChapter', () => {
       metadata: {
         concurrent_key: 'newer same-text update',
         patch_owned: 'patch value',
+        keep_on_undefined: 'transaction-current value',
+        clear_on_null: null,
       },
       ordered_steps: ['patch replacement'],
       mode: 'patch scalar',
@@ -299,6 +309,62 @@ describe('commitEditorRevisionChapter', () => {
     expect(error).toMatchObject({ code: 'REVISION_COMMIT_RECEIPT_MISSING' })
     expect(await listChapterVersions(workspace, chapter.id)).toHaveLength(1)
     expect(await listNovelReviews(workspace, project.id)).toHaveLength(1)
+  })
+
+  test('rejects replay receipts whose canonical fields have non-canonical JSON types', async () => {
+    const invalidReceipts = [
+      {
+        label: 'junk string source_run_id',
+        mutate: (payload: Record<string, unknown>) => ({
+          ...payload,
+          source_run_id: `${payload.source_run_id}junk`,
+        }),
+      },
+      {
+        label: 'real source_run_id',
+        mutate: (payload: Record<string, unknown>) => ({
+          ...payload,
+          source_run_id: Number(payload.source_run_id) + 0.5,
+        }),
+      },
+      {
+        label: 'malformed chapter_id',
+        mutate: (payload: Record<string, unknown>) => ({
+          ...payload,
+          chapter_id: `${payload.chapter_id}junk`,
+        }),
+      },
+      {
+        label: 'non-text candidate_hash',
+        mutate: (payload: Record<string, unknown>) => ({
+          ...payload,
+          candidate_hash: { value: payload.candidate_hash },
+        }),
+      },
+    ]
+
+    for (const { label, mutate } of invalidReceipts) {
+      const { workspace, project, chapter, input } = await createFixture()
+      const committed = await commitEditorRevisionChapter(workspace, input)
+      const canonicalPayload = {
+        source_run_id: input.runId,
+        chapter_id: chapter.id,
+        chapter_no: chapter.chapter_no,
+        candidate_hash: input.candidateHash,
+      }
+      runDbMutation(
+        workspace,
+        'UPDATE reviews SET payload = ? WHERE id = ?',
+        JSON.stringify(mutate(canonicalPayload)),
+        committed.review.id,
+      )
+
+      const error = await commitEditorRevisionChapter(workspace, input).then(() => null, caught => caught)
+
+      expect(error, label).toMatchObject({ code: 'REVISION_COMMIT_RECEIPT_MISSING' })
+      expect(await listChapterVersions(workspace, chapter.id), label).toHaveLength(1)
+      expect(await listNovelReviews(workspace, project.id), label).toHaveLength(1)
+    }
   })
 
   test('fails with a stable error when the matching marker has no canonical receipt', async () => {
