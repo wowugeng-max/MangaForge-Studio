@@ -201,7 +201,7 @@ function DisplayNodeImpl(props: NodeProps) {
       <BaseNode {...props} data={{ ...data, label: data?._customLabel ? data.label : '结果展示' }}>
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexShrink: 0 }}>
-          <Text type="secondary" style={{ fontSize: 13, fontWeight: 700, color: '#475569' }}>VISUAL_OUTPUT</Text>
+          <Text type="secondary" style={{ fontSize: 13, fontWeight: 700, color: '#475569' }}>展示内容</Text>
           {displayContent && (
             <Tooltip title="固化为资产">
               <Button type="text" size="small" icon={<SaveOutlined />} onClick={() => setIsModalVisible(true)} style={{ color: '#0ea5e9', fontSize: 16 }} />

@@ -844,7 +844,7 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
 
         <div style={{ flex: showPreview ? 1 : '0 0 auto', display: 'flex', flexDirection: 'column', background: '#f8fafc', padding: 10, borderRadius: 8, border: '1px dashed #94a3b8', minHeight: showPreview ? 120 : 'auto', overflow: 'hidden' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-            <Text style={{ fontSize: 12, color: '#64748b', fontWeight: 700, fontFamily: 'monospace' }}>&gt; GPU_OUTPUT</Text>
+            <Text style={{ fontSize: 12, color: '#64748b', fontWeight: 700 }}>渲染结果</Text>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               {resultContent && <Tooltip title="携带工作流血统保存到资产库"><Button type="text" size="small" icon={<SaveOutlined />} loading={savingAsset} onClick={handleSaveToAsset} style={{ color: '#722ed1', padding: 0, height: 'auto' }} /></Tooltip>}
               <Switch className="nodrag" size="small" checked={showPreview} onChange={value => setShowPreview(value)} />
