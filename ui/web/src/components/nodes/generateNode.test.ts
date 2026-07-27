@@ -4,6 +4,7 @@ import { join } from 'path'
 import {
   buildGenerateNodeAssetPayload,
   buildGenerateNodeResultWithFission,
+  buildGenerateNodeRequestPayload,
   GENERATE_NODE_ASPECT_RATIO_OPTIONS,
   GENERATE_NODE_ROUTING_STRATEGY_OPTIONS,
   getGenerateNodeAspectRatioSize,
@@ -382,5 +383,45 @@ describe('pickQuickParams', () => {
   test('non-array input degrades to empty list', () => {
     expect(pickQuickParams(undefined)).toEqual([])
     expect(pickQuickParams('nope' as any)).toEqual([])
+  })
+})
+
+describe('request payload size precedence', () => {
+  const basePayloadInput = {
+    id: 'node-1',
+    prompt: '画一只猫',
+    selectedKey: 3,
+    provider: 'cliproxyapi',
+    selectedModel: 'gemini-3.1-flash-image',
+    mode: 'text_to_image',
+    routingStrategy: 'balanced',
+    temperature: 0.7,
+    ratioSize: '1344*768',
+    selectedRolePrompt: 'role',
+  }
+
+  test('model param size wins over aspect-ratio size', () => {
+    const payload = buildGenerateNodeRequestPayload({
+      ...basePayloadInput,
+      params: { size: '1024*1024', n: 2 },
+    } as any)
+    expect(payload.params.size).toBe('1024*1024')
+    expect(payload.params.n).toBe(2)
+  })
+
+  test('aspect-ratio size fills in when the model has no size param', () => {
+    const payload = buildGenerateNodeRequestPayload({
+      ...basePayloadInput,
+      params: {},
+    } as any)
+    expect(payload.params.size).toBe('1344*768')
+  })
+
+  test('node-level temperature still wins over model param defaults', () => {
+    const payload = buildGenerateNodeRequestPayload({
+      ...basePayloadInput,
+      params: { temperature: 1.5 },
+    } as any)
+    expect(payload.params.temperature).toBe(0.7)
   })
 })

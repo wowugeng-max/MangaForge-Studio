@@ -79,7 +79,7 @@ export const BaseNode = memo((props: NodeProps & { onOpenConfig?: () => void }) 
           <ColorPicker size="small" value={nodeColor} onChangeComplete={color => updateNodeData(id, { customColor: color.toHexString() })}><div style={{ cursor: 'pointer', padding: 5, lineHeight: 0, background: 'rgba(0,0,0,0.04)', borderRadius: 6, border: '1px solid rgba(0,0,0,0.06)' }}><BgColorsOutlined style={{ color: '#64748b', fontSize: 12 }} /></div></ColorPicker>
         </div>
       </div>
-      {!collapsed && <div style={{ flex: 1, padding: 12, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden' }}><ConfigProvider theme={{ algorithm: theme.defaultAlgorithm, token: { colorPrimary: nodeColor, colorBgContainer: '#ffffff', colorBorder: '#cbd5e1', fontFamily: 'monospace' } }} getPopupContainer={triggerNode => triggerNode ? (triggerNode.parentNode as HTMLElement) || document.body : document.body}><div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>{children}</div></ConfigProvider></div>}
+      {!collapsed && <div style={{ flex: 1, padding: 12, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden' }}><ConfigProvider theme={{ algorithm: theme.defaultAlgorithm, token: { colorPrimary: nodeColor, colorBgContainer: '#ffffff', colorBorder: '#cbd5e1', fontFamily: 'monospace' } }}><div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>{children}</div></ConfigProvider></div>}
     </div>
   </>
 })

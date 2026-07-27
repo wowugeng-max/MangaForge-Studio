@@ -316,6 +316,8 @@ export function buildGenerateNodeRequestPayload(input: {
     finalPromptText || (incomingImages.length ? '描述这张图片' : '开始执行'),
     incomingText.length ? `[参考素材]:\n${incomingText.join('\n')}` : '',
   ].filter(Boolean).join('\n\n')
+  // 模型显式声明的 size 参数（快捷参数条）优先；比例系统的 ratioSize 只在模型没有 size 参数时兜底。
+  const hasParamSize = input.params?.size !== undefined && input.params.size !== null && input.params.size !== ''
   const payload: any = {
     api_key_id: Number(input.selectedKey) || undefined,
     provider: input.provider,
@@ -323,7 +325,7 @@ export function buildGenerateNodeRequestPayload(input: {
     type: input.mode,
     routing_strategy: input.routingStrategy,
     prompt: finalPromptText,
-    params: { ...input.params, temperature: input.temperature, size: input.ratioSize, client_id: input.id },
+    params: { ...input.params, temperature: input.temperature, ...(hasParamSize ? {} : { size: input.ratioSize }), client_id: input.id },
     messages: [{ role: 'system', content: activeSystemPrompt }],
   }
   if (normalizedIncomingAssets.length) payload.params.incoming_assets = normalizedIncomingAssets
