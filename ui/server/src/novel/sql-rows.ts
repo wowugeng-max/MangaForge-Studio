@@ -105,8 +105,8 @@ export function updateChapterSettingUsageRow(db: Database, u: NovelChapterSettin
 }
 
 export function updateRunRow(db: Database, r: NovelRunRecord) {
-  db.query('UPDATE runs SET project_id=?,run_type=?,step_name=?,status=?,input_ref=?,output_ref=?,duration_ms=?,error_message=?,pipeline_chapter_failure_count=?,pipeline_open_task_count=?,pipeline_task_count=?,created_at=? WHERE id=?').run(
-    r.project_id, r.run_type, r.step_name, r.status, r.input_ref || '', r.output_ref || '', r.duration_ms || 0, r.error_message || '', r.pipeline_chapter_failure_count ?? null, r.pipeline_open_task_count ?? null, r.pipeline_task_count ?? null, r.created_at || nowIso(), r.id,
+  db.query('UPDATE runs SET project_id=?,run_type=?,step_name=?,status=?,input_ref=?,output_ref=?,duration_ms=?,error_message=?,pipeline_chapter_failure_count=?,pipeline_open_task_count=?,pipeline_task_count=?,scope_key=?,updated_at=?,lease_owner=?,lease_expires_at=?,cancel_requested_at=?,created_at=? WHERE id=?').run(
+    r.project_id, r.run_type, r.step_name, r.status, r.input_ref || '', r.output_ref || '', r.duration_ms || 0, r.error_message || '', r.pipeline_chapter_failure_count ?? null, r.pipeline_open_task_count ?? null, r.pipeline_task_count ?? null, r.scope_key ?? null, r.updated_at ?? null, r.lease_owner ?? null, r.lease_expires_at ?? null, r.cancel_requested_at ?? null, r.created_at || nowIso(), r.id,
   )
 }
 

@@ -146,6 +146,7 @@ export function normalizeReviewRecord(data: Partial<NovelReviewRecord>, existing
 export function normalizeRunRecord(data: Partial<NovelRunRecord>, existing?: Partial<NovelRunRecord>): NovelRunRecord {
   const inputRef = compactPersistedText(data.input_ref ?? existing?.input_ref ?? '')
   const outputRef = compactPersistedText(data.output_ref ?? existing?.output_ref ?? '')
+  const createdAt = String(existing?.created_at ?? data.created_at ?? nowIso())
   return {
     id: Number(existing?.id || data.id || 0),
     project_id: Number(data.project_id ?? existing?.project_id ?? 0),
@@ -156,7 +157,12 @@ export function normalizeRunRecord(data: Partial<NovelRunRecord>, existing?: Par
     output_ref: outputRef,
     duration_ms: Number(data.duration_ms ?? existing?.duration_ms ?? 0),
     error_message: String(data.error_message ?? existing?.error_message ?? ''),
-    created_at: String(existing?.created_at ?? data.created_at ?? nowIso()),
+    scope_key: data.scope_key === undefined ? (existing?.scope_key ?? null) : (data.scope_key === null ? null : String(data.scope_key)),
+    updated_at: String(data.updated_at ?? (existing ? nowIso() : createdAt)),
+    lease_owner: data.lease_owner === undefined ? (existing?.lease_owner ?? null) : (data.lease_owner === null ? null : String(data.lease_owner)),
+    lease_expires_at: data.lease_expires_at === undefined ? (existing?.lease_expires_at ?? null) : (data.lease_expires_at === null ? null : String(data.lease_expires_at)),
+    cancel_requested_at: data.cancel_requested_at === undefined ? (existing?.cancel_requested_at ?? null) : (data.cancel_requested_at === null ? null : String(data.cancel_requested_at)),
+    created_at: createdAt,
     ...summarizeNovelRunPipelineRefs(inputRef, outputRef),
   }
 }

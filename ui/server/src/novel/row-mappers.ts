@@ -1,7 +1,7 @@
 import type {
   NovelProjectRecord, NovelWorldbuildingRecord, NovelCharacterRecord, NovelOutlineRecord,
   NovelChapterRecord, NovelChapterVersionRecord, NovelReviewRecord, NovelReviewSummaryRecord,
-  NovelRunSummaryRecord, NovelSettingEntityRecord, NovelChapterSettingUsageRecord, NovelProjectSeedDraftRecord,
+  NovelRunRecord, NovelRunSummaryRecord, NovelSettingEntityRecord, NovelChapterSettingUsageRecord, NovelProjectSeedDraftRecord,
 } from './types'
 import { parseDbJson, parseDbArray } from './json'
 import { nullableSqliteBoolean } from './db'
@@ -47,9 +47,20 @@ export function reviewSummaryFromRow(item: any): NovelReviewSummaryRecord {
   }
 }
 
-export function runSummaryFromRow(item: any): NovelRunSummaryRecord {
+export function runFromRow(item: any): NovelRunRecord {
   return {
     ...item,
+    scope_key: item.scope_key ?? null,
+    updated_at: item.updated_at ?? null,
+    lease_owner: item.lease_owner ?? null,
+    lease_expires_at: item.lease_expires_at ?? null,
+    cancel_requested_at: item.cancel_requested_at ?? null,
+  }
+}
+
+export function runSummaryFromRow(item: any): NovelRunSummaryRecord {
+  return {
+    ...runFromRow(item),
     chapter_id: item.chapter_id === null || item.chapter_id === undefined ? null : Number(item.chapter_id) || null,
     chapter_no: item.chapter_no === null || item.chapter_no === undefined ? null : Number(item.chapter_no) || null,
     input_bytes: Number(item.input_bytes || 0),

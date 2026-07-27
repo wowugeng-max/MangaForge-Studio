@@ -32,7 +32,7 @@ export type NovelReviewRecord = { id: number; project_id: number; chapter_id?: n
 
 export type NovelReviewSummaryRecord = Omit<NovelReviewRecord, 'issues' | 'payload'> & { issue_count: number; preview: string; score: number | null; passed: boolean | null; payload_bytes: number }
 
-export type NovelRunRecord = { id: number; project_id: number; run_type: string; step_name: string; status: string; input_ref?: string; output_ref?: string; duration_ms?: number; error_message?: string; created_at: string; pipeline_run_count?: number; pipeline_chapter_failure_count?: number; pipeline_open_task_count?: number; pipeline_task_count?: number }
+export type NovelRunRecord = { id: number; project_id: number; run_type: string; step_name: string; status: string; input_ref?: string; output_ref?: string; duration_ms?: number; error_message?: string; scope_key?: string | null; updated_at?: string | null; lease_owner?: string | null; lease_expires_at?: string | null; cancel_requested_at?: string | null; created_at: string; pipeline_run_count?: number; pipeline_chapter_failure_count?: number; pipeline_open_task_count?: number; pipeline_task_count?: number }
 
 export type NovelRunSummaryRecord = Omit<NovelRunRecord, 'input_ref' | 'output_ref'> & { chapter_id: number | null; chapter_no: number | null; input_bytes: number; output_bytes: number; admission_status: string; admission_warning_count: number; admission_warning_preview: string; story_state_status: string; story_state_pending: boolean; story_state_warning: string; post_commit_warning_count: number; post_commit_warning_preview: string }
 

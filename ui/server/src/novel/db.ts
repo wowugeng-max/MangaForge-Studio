@@ -162,6 +162,11 @@ CREATE TABLE IF NOT EXISTS runs (
   pipeline_chapter_failure_count INTEGER DEFAULT NULL,
   pipeline_open_task_count INTEGER DEFAULT NULL,
   pipeline_task_count INTEGER DEFAULT NULL,
+  scope_key TEXT DEFAULT NULL,
+  updated_at TEXT DEFAULT NULL,
+  lease_owner TEXT DEFAULT NULL,
+  lease_expires_at TEXT DEFAULT NULL,
+  cancel_requested_at TEXT DEFAULT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
@@ -242,7 +247,7 @@ CREATE INDEX IF NOT EXISTS idx_chapter_setting_usage_project_chapter ON chapter_
     outlines: [['beats', "TEXT DEFAULT '[]'"], ['target_length', "TEXT DEFAULT ''"], ['version', 'INTEGER DEFAULT 1'], ['raw_payload', "TEXT DEFAULT '{}'"], ['created_at', "TEXT DEFAULT ''"]],
     chapters: [['scene_list', "TEXT DEFAULT '[]'"], ['items_in_play', "TEXT DEFAULT '[]'"], ['foreshadowing', "TEXT DEFAULT '[]'"], ['timeline_note', "TEXT DEFAULT ''"], ['version', 'INTEGER DEFAULT 1'], ['published_at', 'TEXT DEFAULT NULL'], ['raw_payload', "TEXT DEFAULT '{}'"]],
     reviews: [['payload', "TEXT DEFAULT ''"], ['status', "TEXT DEFAULT 'ok'"]],
-    runs: [['pipeline_chapter_failure_count', 'INTEGER DEFAULT NULL'], ['pipeline_open_task_count', 'INTEGER DEFAULT NULL'], ['pipeline_task_count', 'INTEGER DEFAULT NULL']],
+    runs: [['pipeline_chapter_failure_count', 'INTEGER DEFAULT NULL'], ['pipeline_open_task_count', 'INTEGER DEFAULT NULL'], ['pipeline_task_count', 'INTEGER DEFAULT NULL'], ['scope_key', 'TEXT DEFAULT NULL'], ['updated_at', 'TEXT DEFAULT NULL'], ['lease_owner', 'TEXT DEFAULT NULL'], ['lease_expires_at', 'TEXT DEFAULT NULL'], ['cancel_requested_at', 'TEXT DEFAULT NULL']],
     project_seed_drafts: [['review_model', "TEXT DEFAULT '{}'"], ['diagnostics', "TEXT DEFAULT '{}'"], ['model_id', 'INTEGER DEFAULT NULL'], ['source', "TEXT DEFAULT 'deep_draft'"]],
     setting_entities: [['payload_json', "TEXT DEFAULT '{}'"], ['state_json', "TEXT DEFAULT '{}'"], ['constraints_json', "TEXT DEFAULT '{}'"]],
     chapter_setting_usage: [['expected_state_change', "TEXT DEFAULT '{}'"], ['actual_state_change', "TEXT DEFAULT '{}'"]],
@@ -250,6 +255,19 @@ CREATE INDEX IF NOT EXISTS idx_chapter_setting_usage_project_chapter ON chapter_
     if (!tableExists(db, table)) continue
     for (const [column, definition] of columns) addColumnIfMissing(db, table, column, definition)
   }
+  db.exec(`
+    UPDATE runs SET updated_at = created_at
+    WHERE updated_at IS NULL OR updated_at = '';
+
+    CREATE INDEX IF NOT EXISTS idx_runs_editor_revision_recovery
+    ON runs(run_type, status, lease_expires_at, updated_at);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_active_editor_revision_scope
+    ON runs(project_id, run_type, scope_key)
+    WHERE run_type = 'editor_revision'
+      AND scope_key IS NOT NULL
+      AND status IN ('queued', 'running', 'cancel_requested');
+  `)
   backfillNovelRunPipelineSummaries(db)
 }
 

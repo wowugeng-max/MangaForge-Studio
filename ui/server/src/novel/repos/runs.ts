@@ -3,7 +3,7 @@ import { openDb, ensureSqliteSchema } from '../db'
 import { ensureLegacyNovelStoreImportedForRead } from '../legacy-import'
 import { withNovelWorkspaceMutation } from '../lock'
 import { normalizeRunRecord } from '../normalize'
-import { runSummaryFromRow } from '../row-mappers'
+import { runFromRow, runSummaryFromRow } from '../row-mappers'
 import { withNovelDbWrite, updateRunRow } from '../sql-rows'
 
 
@@ -13,11 +13,12 @@ export async function listNovelRuns(activeWorkspace: string, projectId: number) 
   try {
     ensureSqliteSchema(db)
     return (db.query(`
-      SELECT id, project_id, run_type, step_name, status, input_ref, output_ref, duration_ms, error_message, created_at
+      SELECT id, project_id, run_type, step_name, status, input_ref, output_ref, duration_ms, error_message,
+        scope_key, updated_at, lease_owner, lease_expires_at, cancel_requested_at, created_at
       FROM runs
       WHERE project_id = ?
       ORDER BY created_at DESC
-    `).all(projectId) as NovelRunRecord[])
+    `).all(projectId) as any[]).map(runFromRow)
       .sort((a, b) => b.created_at.localeCompare(a.created_at))
   } finally {
     db.close()
@@ -48,6 +49,11 @@ export async function listNovelRunSummaries(activeWorkspace: string, projectId: 
         status,
         duration_ms,
         error_message,
+        scope_key,
+        updated_at,
+        lease_owner,
+        lease_expires_at,
+        cancel_requested_at,
         created_at,
         CASE WHEN json_valid(output_ref) THEN CAST(COALESCE(
           json_extract(output_ref, '$.chapter_id'),
@@ -179,11 +185,13 @@ export async function getNovelRun(activeWorkspace: string, runId: number, projec
   const db = openDb(activeWorkspace)
   try {
     ensureSqliteSchema(db)
-    return (db.query(`
-      SELECT id, project_id, run_type, step_name, status, input_ref, output_ref, duration_ms, error_message, created_at
+    const row = db.query(`
+      SELECT id, project_id, run_type, step_name, status, input_ref, output_ref, duration_ms, error_message,
+        scope_key, updated_at, lease_owner, lease_expires_at, cancel_requested_at, created_at
       FROM runs
       WHERE id = ? AND project_id = ?
-    `).get(runId, projectId) as NovelRunRecord | null) || null
+    `).get(runId, projectId) as any
+    return row ? runFromRow(row) : null
   } finally {
     db.close()
   }
@@ -195,7 +203,7 @@ export async function appendNovelRun(activeWorkspace: string, data: Partial<Nove
   const db = openDb(activeWorkspace)
   try {
     ensureSqliteSchema(db)
-    const result = db.query('INSERT INTO runs (project_id,run_type,step_name,status,input_ref,output_ref,duration_ms,error_message,pipeline_chapter_failure_count,pipeline_open_task_count,pipeline_task_count,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(
+    const result = db.query('INSERT INTO runs (project_id,run_type,step_name,status,input_ref,output_ref,duration_ms,error_message,pipeline_chapter_failure_count,pipeline_open_task_count,pipeline_task_count,scope_key,updated_at,lease_owner,lease_expires_at,cancel_requested_at,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(
       record.project_id,
       record.run_type,
       record.step_name,
@@ -207,6 +215,11 @@ export async function appendNovelRun(activeWorkspace: string, data: Partial<Nove
       record.pipeline_chapter_failure_count ?? 0,
       record.pipeline_open_task_count ?? 0,
       record.pipeline_task_count ?? 0,
+      record.scope_key ?? null,
+      record.updated_at ?? null,
+      record.lease_owner ?? null,
+      record.lease_expires_at ?? null,
+      record.cancel_requested_at ?? null,
       record.created_at,
     ) as any
     const id = Number(result?.lastInsertRowid || (db.query('SELECT last_insert_rowid() AS id').get() as any)?.id || 0)
