@@ -164,6 +164,17 @@ function validateEditorRevisionTransition(
       checkpointRegression(`editor revision checkpoint skipped incomplete phase: ${phase}`)
     }
   }
+  const currentPhaseStatus = next.phases[next.phase].status
+  if (options.status === 'failed') {
+    const errorCode = String(next.error?.code || '').trim()
+    const errorMessage = String(next.error?.message || '').trim()
+    if (currentPhaseStatus !== 'failed' || !errorCode || !errorMessage) {
+      throw revisionError('REVISION_CHECKPOINT_INVALID', 'failed run status requires a failed current phase and canonical error')
+    }
+  }
+  if (options.status === 'running' && (currentPhaseStatus === 'failed' || currentPhaseStatus === 'canceled')) {
+    throw revisionError('REVISION_CHECKPOINT_INVALID', 'running run status cannot contain a failed or canceled current phase')
+  }
   const checkpointCompleted = next.phase === 'completed' && next.phases.completed.status === 'completed'
   if ((options.status === 'completed') !== checkpointCompleted) {
     throw revisionError('REVISION_CHECKPOINT_INVALID', 'completed run status must match the completed checkpoint phase')

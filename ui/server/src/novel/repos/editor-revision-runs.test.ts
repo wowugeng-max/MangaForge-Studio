@@ -456,6 +456,76 @@ describe('editor revision run repository', () => {
     expect((await getEditorRevisionRun(workspace, project.id, incompleteRun.id))?.status).toBe('running')
   })
 
+  test('keeps failed and running run statuses coherent with the current checkpoint phase', async () => {
+    const { workspace, project, chapters } = await createFixture([1, 2, 3, 4, 5])
+    const claimedRuns = []
+    for (const chapter of chapters) {
+      const run = await createRun(workspace, project.id, chapter.id)
+      await claimEditorRevisionRun(workspace, {
+        runId: run.id,
+        owner: 'worker-a',
+        now: '2030-07-27T10:00:00.000Z',
+        leaseMs: 60_000,
+      })
+      claimedRuns.push(run)
+    }
+
+    const pendingFailure = initialCheckpoint()
+    pendingFailure.error = { code: 'REVISION_PROVIDER_FAILED', message: 'provider unavailable' }
+    await expect(writeEditorRevisionCheckpoint(workspace, {
+      runId: claimedRuns[0].id,
+      owner: 'worker-a',
+      status: 'failed',
+      phase: 'generate_candidate',
+      checkpoint: pendingFailure,
+    })).rejects.toMatchObject({ code: 'REVISION_CHECKPOINT_INVALID' })
+
+    const runningFailure = checkpointAt('generate_candidate', { generate_candidate: 'running' }, {
+      error: { code: 'REVISION_PROVIDER_FAILED', message: 'provider unavailable' },
+    })
+    await expect(writeEditorRevisionCheckpoint(workspace, {
+      runId: claimedRuns[1].id,
+      owner: 'worker-a',
+      status: 'failed',
+      phase: 'generate_candidate',
+      checkpoint: runningFailure,
+    })).rejects.toMatchObject({ code: 'REVISION_CHECKPOINT_INVALID' })
+
+    const failedPhase = checkpointAt('generate_candidate', { generate_candidate: 'failed' }, {
+      error: { code: 'REVISION_PROVIDER_FAILED', message: 'provider unavailable' },
+    })
+    await expect(writeEditorRevisionCheckpoint(workspace, {
+      runId: claimedRuns[2].id,
+      owner: 'worker-a',
+      status: 'running',
+      phase: 'generate_candidate',
+      checkpoint: failedPhase,
+    })).rejects.toMatchObject({ code: 'REVISION_CHECKPOINT_INVALID' })
+
+    const canceledPhase = checkpointAt('generate_candidate', { generate_candidate: 'canceled' })
+    await expect(writeEditorRevisionCheckpoint(workspace, {
+      runId: claimedRuns[3].id,
+      owner: 'worker-a',
+      status: 'running',
+      phase: 'generate_candidate',
+      checkpoint: canceledPhase,
+    })).rejects.toMatchObject({ code: 'REVISION_CHECKPOINT_INVALID' })
+
+    const validFailure = checkpointAt('generate_candidate', { generate_candidate: 'failed' }, {
+      error: { code: 'REVISION_PROVIDER_FAILED', message: 'provider unavailable', diagnostics: { attempt: 1 } },
+    })
+    const failed = await writeEditorRevisionCheckpoint(workspace, {
+      runId: claimedRuns[4].id,
+      owner: 'worker-a',
+      status: 'failed',
+      phase: 'generate_candidate',
+      checkpoint: validFailure,
+      errorMessage: 'REVISION_PROVIDER_FAILED',
+    })
+    expect(failed.status).toBe('failed')
+    expect(JSON.parse(failed.output_ref || '{}').error).toEqual(validFailure.error)
+  })
+
   test('persists cancellation and lets the lease owner make it terminal', async () => {
     const { workspace, project, chapters: [chapter] } = await createFixture()
     const run = await createRun(workspace, project.id, chapter.id)
@@ -479,7 +549,9 @@ describe('editor revision run repository', () => {
       owner: 'worker-a',
       status: 'failed',
       phase: 'generate_candidate',
-      checkpoint: checkpointAt('generate_candidate', { generate_candidate: 'failed' }),
+      checkpoint: checkpointAt('generate_candidate', { generate_candidate: 'failed' }, {
+        error: { code: 'MUST_NOT_OVERWRITE_CANCEL', message: 'must not overwrite cancellation' },
+      }),
       errorMessage: 'must-not-overwrite-cancel',
     }).then(() => null, caught => caught)
     expect(canceledWrite).toMatchObject({ code: 'REVISION_LEASE_OR_STATE_INVALID' })
