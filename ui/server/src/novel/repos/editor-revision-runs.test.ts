@@ -10,6 +10,7 @@ import { ensureSqliteSchema } from '../db'
 import { tempWorkspace, workspaces } from '../test-utils'
 import {
   appendNovelRun,
+  compactNovelStorage,
   createNovelChapter,
   createNovelProject,
   getNovelRun,
@@ -136,6 +137,135 @@ describe('editor revision run repository', () => {
     const other = await createRun(workspace, project.id, chapter2.id)
     expect(other.id).not.toBe(first.id)
     expect(other.scope_key).toBe(`chapter:${chapter2.id}`)
+  })
+
+  test('preserves the exact immutable source and bounded context input on create', async () => {
+    const { workspace, project, chapters: [chapter] } = await createFixture()
+    const inputRef = JSON.stringify({
+      schema_version: 1,
+      project_id: project.id,
+      chapter_id: chapter.id,
+      source_text: 'immutable-source'.repeat(6_000),
+      source_text_hash: 'source-hash',
+      context_package: {
+        chapter_target: { id: chapter.id, title: chapter.title },
+        continuity: { required_anchor: 'must-survive-byte-for-byte' },
+      },
+    })
+    const outputRef = runOutput()
+
+    const run = await createEditorRevisionRun(workspace, {
+      projectId: project.id,
+      chapterId: chapter.id,
+      inputRef,
+      outputRef,
+    })
+
+    expect(run.input_ref).toBe(inputRef)
+    expect(run.output_ref).toBe(outputRef)
+    expect((await getEditorRevisionRun(workspace, project.id, run.id))?.input_ref).toBe(inputRef)
+  })
+
+  test('keeps an admitted candidate checkpoint exact through persistence and maintenance compaction', async () => {
+    const { workspace, project, chapters: [chapter] } = await createFixture()
+    const inputRef = JSON.stringify({
+      schema_version: 1,
+      project_id: project.id,
+      chapter_id: chapter.id,
+      source_text: 'source'.repeat(12_000),
+      source_text_hash: 'source-hash',
+      context_package: { exact_receipt: 'bounded-context-must-survive' },
+    })
+    const run = await createEditorRevisionRun(workspace, {
+      projectId: project.id,
+      chapterId: chapter.id,
+      inputRef,
+      outputRef: runOutput(),
+    })
+    await claimEditorRevisionRun(workspace, {
+      runId: run.id,
+      owner: 'worker-a',
+      now: '2030-07-27T10:00:00.000Z',
+      leaseMs: 60_000,
+    })
+    const admitted = checkpointAt('persist_chapter', {
+      generate_candidate: 'completed',
+      admit_candidate: 'completed',
+      persist_chapter: 'running',
+    }, {
+      candidate: {
+        text: 'admitted-candidate'.repeat(5_000),
+        hash: 'candidate-hash',
+        char_count: 90_000,
+        applied_patches: [{ anchor: 'exact-patch-receipt' }],
+        diagnostics: { provider_receipt: 'exact-provider-receipt' },
+      },
+    })
+    const checkpointRef = JSON.stringify(admitted)
+
+    const written = await writeEditorRevisionCheckpoint(workspace, {
+      runId: run.id,
+      owner: 'worker-a',
+      status: 'running',
+      phase: 'persist_chapter',
+      checkpoint: admitted,
+    })
+    expect(written.output_ref).toBe(checkpointRef)
+
+    await compactNovelStorage(workspace, { vacuum: false, maxChars: 1_000 })
+    const after = await getEditorRevisionRun(workspace, project.id, run.id)
+    expect(after?.input_ref).toBe(inputRef)
+    expect(after?.output_ref).toBe(checkpointRef)
+    expect(JSON.parse(after?.output_ref || '{}')).toMatchObject({
+      phase: 'persist_chapter',
+      candidate: {
+        text: admitted.candidate?.text,
+        hash: 'candidate-hash',
+        applied_patches: [{ anchor: 'exact-patch-receipt' }],
+        diagnostics: { provider_receipt: 'exact-provider-receipt' },
+      },
+    })
+  })
+
+  test('enforces the active chapter scope across two concurrent Bun processes', async () => {
+    const { workspace, project, chapters: [chapter] } = await createFixture()
+    const repositoryModule = join(import.meta.dir, 'editor-revision-runs.ts')
+    const childSource = `
+      import { createEditorRevisionRun } from ${JSON.stringify(repositoryModule)}
+      try {
+        const run = await createEditorRevisionRun(process.argv[1], {
+          projectId: Number(process.argv[2]),
+          chapterId: Number(process.argv[3]),
+          inputRef: process.argv[4],
+          outputRef: process.argv[5],
+        })
+        console.log(JSON.stringify({ ok: true, id: run.id }))
+      } catch (error) {
+        console.log(JSON.stringify({ ok: false, code: error?.code, existingRunId: error?.existingRunId }))
+      }
+    `
+    const args = [workspace, String(project.id), String(chapter.id), runInput(chapter.id), runOutput()]
+    const children = [0, 1].map(() => Bun.spawn({
+      cmd: [process.execPath, '-e', childSource, ...args],
+      stdout: 'pipe',
+      stderr: 'pipe',
+    }))
+    const results = await Promise.all(children.map(async child => {
+      const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ])
+      expect(exitCode, stderr).toBe(0)
+      return JSON.parse(stdout.trim())
+    }))
+
+    expect(results.filter(result => result.ok)).toHaveLength(1)
+    expect(results.filter(result => !result.ok)).toHaveLength(1)
+    expect(results.find(result => !result.ok)).toMatchObject({
+      code: 'REVISION_ALREADY_ACTIVE',
+      existingRunId: results.find(result => result.ok).id,
+    })
   })
 
   test('does not translate unrelated database constraints into an active-run error', async () => {
@@ -271,6 +401,61 @@ describe('editor revision run repository', () => {
     expect(JSON.parse((await getEditorRevisionRun(workspace, project.id, run.id))?.output_ref || '{}').phase).toBe('admit_candidate')
   })
 
+  test('rejects admitted candidate mutation and incoherent completed run status', async () => {
+    const { workspace, project, chapters: [chapter1, chapter2] } = await createFixture([1, 2])
+    const admittedRun = await createRun(workspace, project.id, chapter1.id)
+    await claimEditorRevisionRun(workspace, {
+      runId: admittedRun.id,
+      owner: 'worker-a',
+      now: '2030-07-27T10:00:00.000Z',
+      leaseMs: 60_000,
+    })
+    const admitted = checkpointAt('persist_chapter', {
+      generate_candidate: 'completed',
+      admit_candidate: 'completed',
+      persist_chapter: 'running',
+    }, {
+      candidate: { text: 'accepted-text', hash: 'accepted-hash', char_count: 13, applied_patches: [], diagnostics: {} },
+    })
+    await writeEditorRevisionCheckpoint(workspace, {
+      runId: admittedRun.id,
+      owner: 'worker-a',
+      status: 'running',
+      phase: 'persist_chapter',
+      checkpoint: admitted,
+    })
+    const mutatedCandidate = JSON.parse(JSON.stringify(admitted)) as EditorRevisionCheckpoint
+    mutatedCandidate.candidate = { ...mutatedCandidate.candidate!, text: 'different-text', hash: 'different-hash' }
+
+    await expect(writeEditorRevisionCheckpoint(workspace, {
+      runId: admittedRun.id,
+      owner: 'worker-a',
+      status: 'running',
+      phase: 'persist_chapter',
+      checkpoint: mutatedCandidate,
+    })).rejects.toMatchObject({ code: 'REVISION_CHECKPOINT_REGRESSION' })
+    expect(JSON.parse((await getEditorRevisionRun(workspace, project.id, admittedRun.id))?.output_ref || '{}').candidate).toMatchObject({
+      text: 'accepted-text',
+      hash: 'accepted-hash',
+    })
+
+    const incompleteRun = await createRun(workspace, project.id, chapter2.id)
+    await claimEditorRevisionRun(workspace, {
+      runId: incompleteRun.id,
+      owner: 'worker-a',
+      now: '2030-07-27T10:00:00.000Z',
+      leaseMs: 60_000,
+    })
+    await expect(writeEditorRevisionCheckpoint(workspace, {
+      runId: incompleteRun.id,
+      owner: 'worker-a',
+      status: 'completed',
+      phase: 'generate_candidate',
+      checkpoint: initialCheckpoint(),
+    })).rejects.toMatchObject({ code: 'REVISION_CHECKPOINT_INVALID' })
+    expect((await getEditorRevisionRun(workspace, project.id, incompleteRun.id))?.status).toBe('running')
+  })
+
   test('persists cancellation and lets the lease owner make it terminal', async () => {
     const { workspace, project, chapters: [chapter] } = await createFixture()
     const run = await createRun(workspace, project.id, chapter.id)
@@ -334,6 +519,127 @@ describe('editor revision run repository', () => {
       checkpointAt('generate_candidate', { generate_candidate: 'canceled' }),
     )
     expect(canceled.status).toBe('canceled')
+  })
+
+  test('preserves committed evidence when cancellation happens after prose persistence', async () => {
+    const { workspace, project, chapters: [chapter] } = await createFixture()
+    const run = await createRun(workspace, project.id, chapter.id)
+    await claimEditorRevisionRun(workspace, {
+      runId: run.id,
+      owner: 'worker-a',
+      now: '2030-07-27T10:00:00.000Z',
+      leaseMs: 60_000,
+    })
+    const committed = checkpointAt('post_quality', {
+      generate_candidate: 'completed',
+      admit_candidate: 'completed',
+      persist_chapter: 'completed',
+      post_quality: 'running',
+    }, {
+      candidate: { text: 'committed-text', hash: 'committed-hash', char_count: 14, applied_patches: [], diagnostics: {} },
+      prose_persisted: true,
+      committed_chapter_updated_at: '2030-07-27T10:00:01.000Z',
+      editor_revision_review_id: 42,
+    })
+    await writeEditorRevisionCheckpoint(workspace, {
+      runId: run.id,
+      owner: 'worker-a',
+      status: 'running',
+      phase: 'post_quality',
+      checkpoint: committed,
+    })
+    await requestEditorRevisionCancel(workspace, project.id, run.id)
+
+    const destructiveCancellation = checkpointAt('post_quality', {
+      generate_candidate: 'completed',
+      admit_candidate: 'completed',
+      persist_chapter: 'completed',
+      post_quality: 'canceled',
+      sync_current_story_state: 'canceled',
+    })
+    await expect(finishEditorRevisionCancellation(workspace, run.id, 'worker-a', destructiveCancellation)).rejects.toMatchObject({
+      code: 'REVISION_CHECKPOINT_REGRESSION',
+    })
+
+    const validCancellation = JSON.parse(JSON.stringify(committed)) as EditorRevisionCheckpoint
+    validCancellation.phases.post_quality.status = 'canceled'
+    const canceled = await finishEditorRevisionCancellation(workspace, run.id, 'worker-a', validCancellation)
+    const canceledCheckpoint = JSON.parse(canceled.output_ref || '{}')
+    expect(canceledCheckpoint).toMatchObject({
+      phase: 'post_quality',
+      prose_persisted: true,
+      committed_chapter_updated_at: '2030-07-27T10:00:01.000Z',
+      editor_revision_review_id: 42,
+      candidate: { text: 'committed-text', hash: 'committed-hash' },
+      phases: {
+        persist_chapter: { status: 'completed' },
+        post_quality: { status: 'canceled' },
+        sync_current_story_state: { status: 'pending' },
+      },
+    })
+
+    const retried = await retryEditorRevisionRun(workspace, project.id, run.id)
+    const retriedCheckpoint = JSON.parse(retried.output_ref || '{}')
+    expect(retriedCheckpoint).toMatchObject({
+      phase: 'post_quality',
+      prose_persisted: true,
+      candidate: { text: 'committed-text', hash: 'committed-hash' },
+      phases: {
+        generate_candidate: { status: 'completed' },
+        admit_candidate: { status: 'completed' },
+        persist_chapter: { status: 'completed' },
+        post_quality: { status: 'pending' },
+      },
+    })
+  })
+
+  test('records commit evidence when cancellation lands before the persist checkpoint write', async () => {
+    const { workspace, project, chapters: [chapter] } = await createFixture()
+    const run = await createRun(workspace, project.id, chapter.id)
+    await claimEditorRevisionRun(workspace, {
+      runId: run.id,
+      owner: 'worker-a',
+      now: '2030-07-27T10:00:00.000Z',
+      leaseMs: 60_000,
+    })
+    const committing = checkpointAt('persist_chapter', {
+      generate_candidate: 'completed',
+      admit_candidate: 'completed',
+      persist_chapter: 'running',
+    }, {
+      candidate: { text: 'committed-text', hash: 'commit-gap-hash', char_count: 14, applied_patches: [], diagnostics: {} },
+    })
+    await writeEditorRevisionCheckpoint(workspace, {
+      runId: run.id,
+      owner: 'worker-a',
+      status: 'running',
+      phase: 'persist_chapter',
+      checkpoint: committing,
+    })
+    await requestEditorRevisionCancel(workspace, project.id, run.id)
+
+    const cancellationAfterCommit = JSON.parse(JSON.stringify(committing)) as EditorRevisionCheckpoint
+    cancellationAfterCommit.prose_persisted = true
+    cancellationAfterCommit.committed_chapter_updated_at = '2030-07-27T10:00:01.000Z'
+    cancellationAfterCommit.editor_revision_review_id = 43
+    cancellationAfterCommit.phases.persist_chapter.status = 'completed'
+    const canceled = await finishEditorRevisionCancellation(workspace, run.id, 'worker-a', cancellationAfterCommit)
+    expect(JSON.parse(canceled.output_ref || '{}')).toMatchObject({
+      phase: 'persist_chapter',
+      prose_persisted: true,
+      committed_chapter_updated_at: '2030-07-27T10:00:01.000Z',
+      editor_revision_review_id: 43,
+      candidate: { hash: 'commit-gap-hash' },
+      phases: { persist_chapter: { status: 'completed' } },
+    })
+
+    const retried = await retryEditorRevisionRun(workspace, project.id, run.id)
+    expect(JSON.parse(retried.output_ref || '{}')).toMatchObject({
+      phase: 'post_quality',
+      prose_persisted: true,
+      candidate: { hash: 'commit-gap-hash' },
+      phases: { post_quality: { status: 'pending' } },
+    })
   })
 
   test('retries failed runs in place from the correct durable resume point', async () => {
@@ -452,6 +758,36 @@ describe('editor revision run repository', () => {
       })
       expect((await getEditorRevisionRun(workspace, project.id, run.id))?.status).toBe('failed')
     }
+  })
+
+  test('translates retry collision with a newer active run into the stable active-run error', async () => {
+    const { workspace, project, chapters: [chapter] } = await createFixture()
+    const oldRun = await createRun(workspace, project.id, chapter.id)
+    await claimEditorRevisionRun(workspace, {
+      runId: oldRun.id,
+      owner: 'worker-a',
+      now: '2030-07-27T10:00:00.000Z',
+      leaseMs: 60_000,
+    })
+    const failed = checkpointAt('generate_candidate', { generate_candidate: 'failed' }, {
+      error: { code: 'REVISION_PROVIDER_FAILED', message: 'provider unavailable' },
+    })
+    await writeEditorRevisionCheckpoint(workspace, {
+      runId: oldRun.id,
+      owner: 'worker-a',
+      status: 'failed',
+      phase: 'generate_candidate',
+      checkpoint: failed,
+      errorMessage: 'REVISION_PROVIDER_FAILED',
+    })
+    const newer = await createRun(workspace, project.id, chapter.id)
+
+    await expect(retryEditorRevisionRun(workspace, project.id, oldRun.id)).rejects.toMatchObject({
+      code: 'REVISION_ALREADY_ACTIVE',
+      existingRunId: newer.id,
+      statusUrl: `/api/novel/editor-revisions/${newer.id}?project_id=${project.id}`,
+    })
+    expect((await getEditorRevisionRun(workspace, project.id, oldRun.id))?.status).toBe('failed')
   })
 
   test('migrates old run rows idempotently and backfills updated_at from created_at', async () => {

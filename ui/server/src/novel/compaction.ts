@@ -3,6 +3,21 @@ import { withNovelWorkspaceMutation } from './lock'
 import { compactPersistedText, compactReviewPayloadText, MAX_PERSISTED_DIAGNOSTIC_CHARS, summarizeNovelRunPipelineRefs } from './storage-compaction'
 
 
+function isCanonicalEditorRevisionRun(row: any) {
+  if (row.run_type !== 'editor_revision' || !row.scope_key) return false
+  try {
+    const checkpoint = JSON.parse(String(row.output_ref || ''))
+    return checkpoint?.schema_version === 1
+      && typeof checkpoint?.phase === 'string'
+      && checkpoint?.phases
+      && typeof checkpoint.phases === 'object'
+      && typeof checkpoint?.prose_persisted === 'boolean'
+  } catch {
+    return false
+  }
+}
+
+
 export async function compactNovelStorage(activeWorkspace: string, options: { vacuum?: boolean; maxChars?: number } = {}) {
   return withNovelWorkspaceMutation(activeWorkspace, async () => {
   const maxChars = Number(options.maxChars || MAX_PERSISTED_DIAGNOSTIC_CHARS)
@@ -18,7 +33,7 @@ export async function compactNovelStorage(activeWorkspace: string, options: { va
     db.exec('BEGIN')
 
     const runRows = db.query(`
-      SELECT id, input_ref, output_ref FROM runs
+      SELECT id, run_type, scope_key, input_ref, output_ref FROM runs
       WHERE length(coalesce(input_ref,'')) > ?
         OR length(coalesce(output_ref,'')) > ?
         OR input_ref LIKE ?
@@ -29,6 +44,7 @@ export async function compactNovelStorage(activeWorkspace: string, options: { va
     const updateRun = db.query('UPDATE runs SET input_ref=?, output_ref=?, pipeline_chapter_failure_count=?, pipeline_open_task_count=?, pipeline_task_count=? WHERE id=?')
     for (const row of runRows) {
       scanned += 1
+      if (isCanonicalEditorRevisionRun(row)) continue
       const nextInput = compactPersistedText(row.input_ref || '', maxChars)
       const nextOutput = compactPersistedText(row.output_ref || '', maxChars)
       if (nextInput !== String(row.input_ref || '') || nextOutput !== String(row.output_ref || '')) {
