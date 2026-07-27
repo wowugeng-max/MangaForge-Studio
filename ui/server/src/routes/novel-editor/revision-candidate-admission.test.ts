@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { EDITOR_REVISION_PHASES } from './editor-revision-contract'
 import {
   admitRevisionCandidate,
+  applySurgicalRevisionPatch,
   RevisionCandidateAdmissionError,
   revisionTextHash,
 } from './revision-candidate-admission'
@@ -64,11 +65,21 @@ describe('admitRevisionCandidate', () => {
     })
   })
 
-  test.each(['max_tokens', 'length', 'tool_calls'])('rejects %s transport completion', finishReason => {
-    expect(() => admitRevisionCandidate({
-      sourceText: '原文。'.repeat(400),
-      result: { ...completeResult('新文。'.repeat(400)), finish_reason: finishReason },
-    })).toThrow(/不能作为完整章节正文入库|输出被截断/)
+  test.each(['max_tokens', 'length', 'tool_calls'])('normalizes %s transport completion into a safe admission error', finishReason => {
+    const error = captureAdmissionError('原文。'.repeat(400), {
+      ...completeResult('不得出现在诊断中的新文。'.repeat(160)),
+      finish_reason: finishReason,
+    })
+
+    expect(error.code).toBe('PROSE_REVISION_TRUNCATED')
+    expect(error).toMatchObject({
+      admission_status: 'blocked_invalid',
+      admission_failure: { source: 'transport' },
+    })
+    expect(error.diagnostics).toMatchObject({ finish_reason: finishReason })
+    expect(error.diagnostics).not.toHaveProperty('content_preview')
+    expect(error).not.toHaveProperty('llm_diagnostics')
+    expect(JSON.stringify(error.diagnostics)).not.toContain('不得出现在诊断中的新文')
   })
 
   test.each([
@@ -96,11 +107,18 @@ describe('admitRevisionCandidate', () => {
   test.each([
     { incomplete_details: { reason: 'max_output_tokens' } },
     { raw: { response: { incompleteDetails: {} } } },
-  ])('rejects incomplete transport details', transport => {
-    expect(() => admitRevisionCandidate({
-      sourceText: '原正文。'.repeat(300),
-      result: { ...completeResult('修订正文。'.repeat(240)), ...transport },
-    })).toThrow(/不能作为完整章节正文入库|输出被截断/)
+  ])('normalizes incomplete transport details without retaining prose', transport => {
+    const error = captureAdmissionError('原正文。'.repeat(300), {
+      ...completeResult('不得进入诊断的修订正文。'.repeat(120)),
+      ...transport,
+    })
+
+    expect(error.code).toBe('PROSE_REVISION_TRUNCATED')
+    expect(error).toMatchObject({ admission_status: 'blocked_invalid' })
+    expect(error.diagnostics).toMatchObject({ incomplete_details_present: true })
+    expect(error.diagnostics).not.toHaveProperty('content_preview')
+    expect(error).not.toHaveProperty('llm_diagnostics')
+    expect(JSON.stringify(error.diagnostics)).not.toContain('不得进入诊断的修订正文')
   })
 
   test('rejects empty, reasoning-only, and tool-only results', () => {
@@ -198,7 +216,7 @@ describe('admitRevisionCandidate', () => {
 
     expect(error.code).toBe('REVISION_PATCH_INCOMPLETE')
     expect(error).not.toHaveProperty('chapterText')
-    expect(error.diagnostics).toMatchObject({ applied_patch_count: 1, unapplied_patch_count: 1 })
+    expect(error.diagnostics).toMatchObject({ applied_patch_count: 0, unapplied_patch_count: 1 })
   })
 
   test('rejects an opening rewrite whose explicit keep_from anchor is missing', () => {
@@ -208,7 +226,7 @@ describe('admitRevisionCandidate', () => {
       keep_from: '不存在的保留锚点。',
     }))
 
-    expect(error.code).toBe('REVISION_NO_APPLICABLE_PATCH')
+    expect(error.code).toBe('REVISION_PATCH_INCOMPLETE')
     expect(error.diagnostics).toMatchObject({
       applied_patch_count: 0,
       unapplied_patch_count: 1,
@@ -234,8 +252,25 @@ describe('admitRevisionCandidate', () => {
     for (const payload of cases) {
       const error = captureAdmissionError(repeated, completePatchResult(payload))
       expect(error.code).toBe('REVISION_PATCH_INCOMPLETE')
-      expect(error.diagnostics).toMatchObject({ unapplied_patch_count: 1 })
+      expect(error.diagnostics).toMatchObject({ applied_patch_count: 0, unapplied_patch_count: 1 })
     }
+  })
+
+  test('rejects a later anchor that exists only because an earlier patch created it', () => {
+    const sourceText = `${'前段推进。'.repeat(90)}旧锚点。${'后段推进。'.repeat(90)}`
+    const error = captureAdmissionError(sourceText, completePatchResult({
+      replacements: [
+        { find: '旧锚点。', replace: '模型新造锚点。' },
+        { find: '模型新造锚点。', replace: '不得基于补丁产物继续定位。' },
+      ],
+    }))
+
+    expect(error.code).toBe('REVISION_PATCH_INCOMPLETE')
+    expect(error.diagnostics).toMatchObject({
+      applied_patch_count: 0,
+      unapplied_patch_count: 1,
+      unapplied_patch_reasons: [{ type: 'replacement', reason: 'anchor_not_found' }],
+    })
   })
 
   test('returns a deterministic full SHA-256 candidate hash and compact admission diagnostics', () => {
@@ -256,5 +291,128 @@ describe('admitRevisionCandidate', () => {
         applied_patch_count: 1,
       },
     })
+  })
+})
+
+describe('source-fixed surgical revision assembly', () => {
+  test('does not resolve a later anchor from an earlier replacement result', () => {
+    const sourceText = '开头。原锚点。结尾。'
+    const patch = applySurgicalRevisionPatch(sourceText, {
+      replacements: [
+        { find: '原锚点。', replace: '新造锚点。' },
+        { find: '新造锚点。', replace: '非法二次修改。' },
+      ],
+    })
+
+    expect(patch.chapterText).toBe(sourceText)
+    expect(patch.applied).toEqual([])
+    expect(patch.unapplied).toEqual([
+      expect.objectContaining({ type: 'replacement', reason: 'anchor_not_found', find: '新造锚点。' }),
+    ])
+  })
+
+  test('keeps a later source anchor stable when an earlier edit creates another copy', () => {
+    const sourceText = '开头。第一锚点。中段。第二锚点。结尾。'
+    const patch = applySurgicalRevisionPatch(sourceText, {
+      replacements: [
+        { find: '第一锚点。', replace: '第二锚点。' },
+        { find: '第二锚点。', replace: '第二锚点已修订。' },
+      ],
+    })
+
+    expect(patch.chapterText).toBe('开头。第二锚点。中段。第二锚点已修订。结尾。')
+    expect(patch.applied).toHaveLength(2)
+    expect(patch.unapplied).toEqual([])
+  })
+
+  test('applies a later source anchor correctly after an earlier deletion shifts its offset', () => {
+    const sourceText = '开头。删除这一段。中段。后方锚点。结尾。'
+    const patch = applySurgicalRevisionPatch(sourceText, {
+      replacements: [
+        { find: '删除这一段。', replace: '' },
+        { find: '后方锚点。', replace: '后方锚点已修订。' },
+      ],
+    })
+
+    expect(patch.chapterText).toBe('开头。中段。后方锚点已修订。结尾。')
+    expect(patch.applied).toHaveLength(2)
+    expect(patch.unapplied).toEqual([])
+  })
+
+  test('rejects duplicate source anchors atomically', () => {
+    const sourceText = '开头。重复锚点。中段。重复锚点。结尾。'
+    const patch = applySurgicalRevisionPatch(sourceText, {
+      replacements: [{ find: '重复锚点。', replace: '不得猜测。' }],
+    })
+
+    expect(patch.chapterText).toBe(sourceText)
+    expect(patch.applied).toEqual([])
+    expect(patch.unapplied).toEqual([
+      expect.objectContaining({ type: 'replacement', reason: 'anchor_not_unique' }),
+    ])
+  })
+
+  test('rejects an exact anchor when a whitespace-equivalent duplicate also exists', () => {
+    const sourceText = '开头。唯一锚点。中段。唯一 锚点。结尾。'
+    const patch = applySurgicalRevisionPatch(sourceText, {
+      replacements: [{ find: '唯一锚点。', replace: '不得猜测。' }],
+    })
+
+    expect(patch.chapterText).toBe(sourceText)
+    expect(patch.applied).toEqual([])
+    expect(patch.unapplied).toEqual([
+      expect.objectContaining({ type: 'replacement', reason: 'anchor_not_unique' }),
+    ])
+  })
+
+  test('rejects overlapping source operations before applying either one', () => {
+    const sourceText = '开头。外层锚点包含内层锚点。结尾。'
+    const patch = applySurgicalRevisionPatch(sourceText, {
+      replacements: [
+        { find: '外层锚点包含内层锚点。', replace: '外层已修订。' },
+        { find: '内层锚点。', replace: '内层已修订。' },
+      ],
+    })
+
+    expect(patch.chapterText).toBe(sourceText)
+    expect(patch.applied).toEqual([])
+    expect(patch.unapplied).toEqual([
+      expect.objectContaining({ type: 'replacement', reason: 'anchor_overlap' }),
+      expect.objectContaining({ type: 'replacement', reason: 'anchor_overlap' }),
+    ])
+  })
+
+  test('rejects insertions from adjacent anchors that collide at the same source offset', () => {
+    const sourceText = '开头。左锚点。右锚点。结尾。'
+    const patch = applySurgicalRevisionPatch(sourceText, {
+      insertions: [
+        { anchor: '左锚点。', text: '左侧新增。', position: 'after' },
+        { anchor: '右锚点。', text: '右侧新增。', position: 'before' },
+      ],
+    })
+
+    expect(patch.chapterText).toBe(sourceText)
+    expect(patch.applied).toEqual([])
+    expect(patch.unapplied).toEqual([
+      expect.objectContaining({ type: 'insertion', reason: 'anchor_overlap' }),
+      expect.objectContaining({ type: 'insertion', reason: 'anchor_overlap' }),
+    ])
+  })
+
+  test('assembles multiple disjoint operations deterministically from source offsets', () => {
+    const sourceText = '开头。替换甲。中段。插入锚。尾段。删除乙。结束。'
+    const patch = applySurgicalRevisionPatch(sourceText, {
+      replacements: [
+        { find: '删除乙。', replace: '' },
+        { find: '替换甲。', replace: '新甲。' },
+      ],
+      insertions: [
+        { anchor: '插入锚。', text: '新增推进。', position: 'after' },
+      ],
+    })
+
+    expect(patch.chapterText).toBe('开头。新甲。中段。插入锚。\n\n新增推进。尾段。结束。')
+    expect(patch.applied).toHaveLength(3)
+    expect(patch.unapplied).toEqual([])
   })
 })

@@ -1,7 +1,7 @@
 import { createHash } from 'crypto'
 import { countProseChars } from '../../novel-writing/word-target'
 import { assertCompleteProseTransportResult } from '../../novel-writing-service/quality/prose-transport-admission'
-import { asArray, buildLLMResultDiagnostics, extractLLMText, getNovelPayload } from '../novel-route-utils'
+import { asArray, extractLLMText, getNovelPayload } from '../novel-route-utils'
 
 export type RevisionCandidateAdmission = {
   chapterText: string
@@ -30,6 +30,18 @@ type PatchAnchorMatch = {
   anchor: string
   match: 'exact' | 'trimmed' | 'normalized_whitespace' | 'none'
   reason?: 'anchor_not_found' | 'anchor_not_unique'
+}
+
+type PlannedPatchOperation = {
+  order: number
+  type: 'replacement' | 'insertion'
+  start: number
+  end: number
+  anchorStart?: number
+  anchorEnd?: number
+  replacementText: string
+  applied: Record<string, unknown>
+  failure: Record<string, unknown>
 }
 
 function firstPatchText(...values: any[]) {
@@ -87,9 +99,12 @@ function whitespaceInsensitiveIndex(source: string, anchor: string): PatchAnchor
 }
 
 function findPatchAnchor(source: string, anchor: string): PatchAnchorMatch {
+  const whitespaceMatch = whitespaceInsensitiveIndex(source, anchor)
   const exact = uniqueTextIndex(source, anchor)
   if (exact.index >= 0) {
-    if (!exact.unique) return { index: -1, anchor, match: 'none', reason: 'anchor_not_unique' }
+    if (!exact.unique || whitespaceMatch.reason === 'anchor_not_unique') {
+      return { index: -1, anchor, match: 'none', reason: 'anchor_not_unique' }
+    }
     return { index: exact.index, anchor, match: 'exact' }
   }
 
@@ -97,11 +112,37 @@ function findPatchAnchor(source: string, anchor: string): PatchAnchorMatch {
   if (trimmed && trimmed !== anchor) {
     const trimmedMatch = uniqueTextIndex(source, trimmed)
     if (trimmedMatch.index >= 0) {
-      if (!trimmedMatch.unique) return { index: -1, anchor: trimmed, match: 'none', reason: 'anchor_not_unique' }
+      if (!trimmedMatch.unique || whitespaceMatch.reason === 'anchor_not_unique') {
+        return { index: -1, anchor: trimmed, match: 'none', reason: 'anchor_not_unique' }
+      }
       return { index: trimmedMatch.index, anchor: trimmed, match: 'trimmed' }
     }
   }
-  return whitespaceInsensitiveIndex(source, anchor)
+  return whitespaceMatch
+}
+
+function plannedOperationsOverlap(left: PlannedPatchOperation, right: PlannedPatchOperation) {
+  if (left.start === left.end && right.start === right.end && left.start === right.start) return true
+  if (left.anchorStart !== undefined && left.anchorEnd !== undefined
+    && right.anchorStart !== undefined && right.anchorEnd !== undefined) {
+    return left.anchorStart < right.anchorEnd && right.anchorStart < left.anchorEnd
+  }
+  if (left.start === left.end) return left.start > right.start && left.start < right.end
+  if (right.start === right.end) return right.start > left.start && right.start < left.end
+  return left.start < right.end && right.start < left.end
+}
+
+function assemblePlannedPatches(source: string, operations: PlannedPatchOperation[]) {
+  let chapterText = source
+  const descending = [...operations].sort((left, right) => (
+    right.start - left.start
+    || right.end - left.end
+    || right.order - left.order
+  ))
+  for (const operation of descending) {
+    chapterText = `${chapterText.slice(0, operation.start)}${operation.replacementText}${chapterText.slice(operation.end)}`
+  }
+  return chapterText
 }
 
 export function applySurgicalRevisionPatch(originalText: string, payload: any) {
@@ -157,29 +198,37 @@ export function applySurgicalRevisionPatch(originalText: string, payload: any) {
     }
   }
 
-  let chapterText = String(originalText || '')
-  const applied: any[] = []
+  const source = String(originalText || '')
+  const planned: PlannedPatchOperation[] = []
   const unapplied: any[] = []
   const replacements = asArray(payload?.replacements || payload?.replace || payload?.patches)
-  for (const item of replacements) {
+  for (const [index, item] of replacements.entries()) {
     const find = firstAnchorText(item?.find, item?.old_text, item?.original, item?.target)
     const replace = firstReplacementText(item?.replace, item?.new_text, item?.replacement, item?.text)
     if (!find || replace === null) {
       unapplied.push({ type: 'replacement', reason: 'missing_find_or_replace', item })
       continue
     }
-    const match = findPatchAnchor(chapterText, find)
-    const index = match.index
-    if (index < 0) {
+    const match = findPatchAnchor(source, find)
+    if (match.index < 0) {
       unapplied.push({ type: 'replacement', reason: match.reason || 'anchor_not_found', find: find.slice(0, 120) })
       continue
     }
-    chapterText = `${chapterText.slice(0, index)}${replace}${chapterText.slice(index + match.anchor.length)}`
-    applied.push({ type: 'replacement', match: match.match, find: match.anchor.slice(0, 80), replace: replace.slice(0, 80) })
+    planned.push({
+      order: index,
+      type: 'replacement',
+      start: match.index,
+      end: match.index + match.anchor.length,
+      anchorStart: match.index,
+      anchorEnd: match.index + match.anchor.length,
+      replacementText: replace,
+      applied: { type: 'replacement', match: match.match, find: match.anchor.slice(0, 80), replace: replace.slice(0, 80) },
+      failure: { type: 'replacement', find: find.slice(0, 120) },
+    })
   }
 
   const insertions = asArray(payload?.insertions || payload?.insert)
-  for (const item of insertions) {
+  for (const [index, item] of insertions.entries()) {
     const text = firstPatchText(item?.text, item?.insert, item?.content)
     const anchor = firstPatchText(item?.anchor, item?.after, item?.before, item?.near)
     const position = String(item?.position || (item?.before ? 'before' : 'after')).toLowerCase()
@@ -188,24 +237,54 @@ export function applySurgicalRevisionPatch(originalText: string, payload: any) {
       continue
     }
     if (!anchor) {
-      if (position === 'start' || position === 'before') chapterText = `${text}\n\n${chapterText}`
-      else chapterText = `${chapterText}\n\n${text}`
-      applied.push({ type: 'insertion', position: 'append_or_prepend', text: text.slice(0, 80) })
+      const prepend = position === 'start' || position === 'before'
+      planned.push({
+        order: replacements.length + index,
+        type: 'insertion',
+        start: prepend ? 0 : source.length,
+        end: prepend ? 0 : source.length,
+        replacementText: prepend ? `${text}\n\n` : `\n\n${text}`,
+        applied: { type: 'insertion', position: 'append_or_prepend', text: text.slice(0, 80) },
+        failure: { type: 'insertion', text: text.slice(0, 120) },
+      })
       continue
     }
-    const match = findPatchAnchor(chapterText, anchor)
-    const index = match.index
-    if (index < 0) {
+    const match = findPatchAnchor(source, anchor)
+    if (match.index < 0) {
       unapplied.push({ type: 'insertion', reason: match.reason || 'anchor_not_found', anchor: anchor.slice(0, 120), text: text.slice(0, 120) })
       continue
     }
-    const offset = position === 'before' ? index : index + match.anchor.length
+    const offset = position === 'before' ? match.index : match.index + match.anchor.length
     const prefix = position === 'before' ? '' : '\n\n'
     const suffix = position === 'before' ? '\n\n' : ''
-    chapterText = `${chapterText.slice(0, offset)}${prefix}${text}${suffix}${chapterText.slice(offset)}`
-    applied.push({ type: 'insertion', position, match: match.match, anchor: match.anchor.slice(0, 80), text: text.slice(0, 80) })
+    planned.push({
+      order: replacements.length + index,
+      type: 'insertion',
+      start: offset,
+      end: offset,
+      anchorStart: match.index,
+      anchorEnd: match.index + match.anchor.length,
+      replacementText: `${prefix}${text}${suffix}`,
+      applied: { type: 'insertion', position, match: match.match, anchor: match.anchor.slice(0, 80), text: text.slice(0, 80) },
+      failure: { type: 'insertion', anchor: anchor.slice(0, 120), text: text.slice(0, 120) },
+    })
   }
 
+  const overlapping = new Set<number>()
+  for (let left = 0; left < planned.length; left += 1) {
+    for (let right = left + 1; right < planned.length; right += 1) {
+      if (!plannedOperationsOverlap(planned[left], planned[right])) continue
+      overlapping.add(left)
+      overlapping.add(right)
+    }
+  }
+  for (const index of [...overlapping].sort((left, right) => planned[left].order - planned[right].order)) {
+    unapplied.push({ ...planned[index].failure, reason: 'anchor_overlap' })
+  }
+
+  if (unapplied.length) return { chapterText: source, applied: [] as any[], unapplied }
+  const chapterText = assemblePlannedPatches(source, planned)
+  const applied = [...planned].sort((left, right) => left.order - right.order).map(operation => operation.applied)
   return { chapterText, applied, unapplied }
 }
 
@@ -217,14 +296,47 @@ function admissionError(code: string, message: string, diagnostics: Record<strin
   return new RevisionCandidateAdmissionError(code, message, diagnostics)
 }
 
-function compactTransportDiagnostics(result: any) {
-  const diagnostics = buildLLMResultDiagnostics(result)
+function compactTransportDiagnostics(result: any, error?: any) {
+  const raw = result?.raw && typeof result.raw === 'object' ? result.raw : null
+  const usageSource = result?.usage || raw?.usage || raw?.response?.usage
+  const usage = usageSource && typeof usageSource === 'object'
+    ? Object.fromEntries(
+      ['input_tokens', 'prompt_tokens', 'output_tokens', 'completion_tokens', 'total_tokens', 'cached_tokens']
+        .filter(key => Number.isFinite(Number(usageSource[key])) && Number(usageSource[key]) >= 0)
+        .map(key => [key, Math.floor(Number(usageSource[key]))]),
+    )
+    : null
+  const finishReason = String(
+    error?.finish_reason
+    || result?.finish_reason
+    || raw?.finish_reason
+    || raw?.stop_reason
+    || raw?.status
+    || raw?.choices?.[0]?.finish_reason
+    || '',
+  ).trim().toLowerCase()
   return {
-    finish_reason: diagnostics.finish_reason,
-    usage: diagnostics.usage,
-    content_length: diagnostics.content_length,
-    raw_keys: diagnostics.raw_keys,
+    finish_reason: finishReason,
+    incomplete_reason: error?.incomplete_reason || null,
+    incomplete_details_present: Boolean(error?.incomplete_details_present),
+    usage: usage && Object.keys(usage).length ? usage : null,
+    content_length: extractLLMText(result).length,
   }
+}
+
+function normalizeTransportAdmissionError(error: any, result: any) {
+  const code = String(error?.code || 'PROSE_REVISION_TRUNCATED')
+  const normalized = admissionError(
+    code,
+    '正文修订输出不完整，不能作为完整章节正文入库',
+    compactTransportDiagnostics(result, error),
+  ) as RevisionCandidateAdmissionError & {
+    admission_status?: unknown
+    admission_failure?: unknown
+  }
+  if (error?.admission_status !== undefined) normalized.admission_status = error.admission_status
+  if (error?.admission_failure !== undefined) normalized.admission_failure = error.admission_failure
+  return normalized
 }
 
 function providerTransportFailure(result: any) {
@@ -300,7 +412,11 @@ function assertCompleteRevisionEnding(chapterText: string) {
 }
 
 export function admitRevisionCandidate(input: { sourceText: string; result: any }): RevisionCandidateAdmission {
-  assertCompleteProseTransportResult(input.result, 'PROSE_REVISION_TRUNCATED')
+  try {
+    assertCompleteProseTransportResult(input.result, 'PROSE_REVISION_TRUNCATED')
+  } catch (error) {
+    throw normalizeTransportAdmissionError(error, input.result)
+  }
   const transportError = providerTransportFailure(input.result)
   if (transportError) throw transportError
   if (!hasUsableProseTransportBody(input.result)) {
@@ -321,11 +437,11 @@ export function admitRevisionCandidate(input: { sourceText: string; result: any 
       reason: String(item?.reason || ''),
     })),
   }
-  if (!patch.applied.length) {
-    throw admissionError('REVISION_NO_APPLICABLE_PATCH', '修订未返回可应用正文', patchDiagnostics)
-  }
   if (patch.unapplied.length) {
     throw admissionError('REVISION_PATCH_INCOMPLETE', '修订补丁未完整应用', patchDiagnostics)
+  }
+  if (!patch.applied.length) {
+    throw admissionError('REVISION_NO_APPLICABLE_PATCH', '修订未返回可应用正文', patchDiagnostics)
   }
 
   const sourceCharCount = countProseChars(input.sourceText)
