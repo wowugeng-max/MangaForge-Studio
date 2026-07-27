@@ -10,6 +10,7 @@ import {
   isGenerateNodeMuted,
   normalizeGenerateNodeGenerationPacket,
   normalizeSelectOptions,
+  pickQuickParams,
   normalizeGenerateNodeImageUrl,
   resolveGenerateNodePreviewMediaSrc,
   resolveGenerateNodeSourceAssetIds,
@@ -364,5 +365,22 @@ describe('normalizeSelectOptions', () => {
   test('non-array input degrades to empty list', () => {
     expect(normalizeSelectOptions(undefined)).toEqual([])
     expect(normalizeSelectOptions('1024*1024' as any)).toEqual([])
+  })
+})
+
+describe('pickQuickParams', () => {
+  test('promotes the first two select/number params', () => {
+    const params = [
+      { name: 'size', type: 'select', options: ['1024*1024'] },
+      { name: 'style', type: 'string' },
+      { name: 'n', type: 'number', default: 1 },
+      { name: 'steps', type: 'number', default: 20 },
+    ]
+    expect(pickQuickParams(params).map(p => p.name)).toEqual(['size', 'n'])
+  })
+
+  test('non-array input degrades to empty list', () => {
+    expect(pickQuickParams(undefined)).toEqual([])
+    expect(pickQuickParams('nope' as any)).toEqual([])
   })
 })

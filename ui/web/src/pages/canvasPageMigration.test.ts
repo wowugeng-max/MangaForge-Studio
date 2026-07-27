@@ -185,19 +185,20 @@ describe('ComfyForge canvas feature migration', () => {
     expect(generateNode).toContain('setUseRoleAsset(true)')
   })
 
-  test('generate node uses compact view with a floating config panel', () => {
+  test('generate node uses a node-following config toolbar with quick access layers', () => {
     const generateNode = [source('../components/nodes/generate-node-model.ts'), source('../components/nodes/GenerateNode.tsx')].join('\n')
 
-    expect(generateNode).toContain("import ReactDOM from 'react-dom'")
+    expect(generateNode).toContain("import { NodeConfigToolbar } from './NodeConfigToolbar'")
     expect(generateNode).toContain("import { BaseNode } from './BaseNode'")
     expect(generateNode).toContain('const [configOpen, setConfigOpen]')
-    expect(generateNode).toContain('const [panelPos, setPanelPos]')
-    expect(generateNode).toContain('ReactDOM.createPortal')
+    expect(generateNode).toContain('const [quickOpen, setQuickOpen]')
+    expect(generateNode).toContain('renderQuickParams()')
+    expect(generateNode).toContain('pickQuickParams')
     expect(generateNode).toContain('data-config-panel')
-    expect(generateNode).toContain('OUTPUT_PREVIEW')
     expect(generateNode).toContain('onOpenConfig={() =>')
     expect(generateNode).toContain('setConfigOpen(v => !v)')
-    expect(generateNode).toContain('document.querySelector')
+    expect(generateNode).not.toContain('ReactDOM.createPortal')
+    expect(generateNode).not.toContain('panelPos')
   })
 
   test('generate node listens for backend SSE generation results', () => {
@@ -326,14 +327,13 @@ describe('ComfyForge canvas feature migration', () => {
   })
 })
 
-describe('canvas config panel clamping', () => {
-  test('node config panels clamp to viewport', () => {
+describe('canvas config panel placement', () => {
+  test('node config panels follow their node via NodeToolbar', () => {
+    const toolbar = source('../components/nodes/NodeConfigToolbar.tsx')
     const generateNode = source('../components/nodes/GenerateNode.tsx')
-    const comfyNode = source('../components/nodes/ComfyUIEngineNode.tsx')
-    for (const code of [generateNode, comfyNode]) {
-      expect(code).toContain("import { clampToViewport } from '../../utils/viewportClamp'")
-      expect(code).toContain('clampToViewport({')
-    }
+    expect(toolbar).toContain("import { NodeToolbar, Position } from 'reactflow'")
+    expect(toolbar).toContain('data-config-panel')
+    expect(generateNode).toContain('NodeConfigToolbar')
   })
 })
 

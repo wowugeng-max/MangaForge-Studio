@@ -1,9 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import ReactDOM from 'react-dom'
 import { Position, type NodeProps, useReactFlow, useUpdateNodeInternals } from 'reactflow'
 import { useParams } from 'react-router-dom'
-import { Button, Checkbox, Input, InputNumber, Select, Space, Spin, Switch, Tag, Tooltip, Typography, message, Slider } from 'antd'
-import { CloseOutlined, PlayCircleOutlined, SaveOutlined, StopOutlined, StarFilled } from '@ant-design/icons'
+import { Button, Checkbox, Collapse, Input, InputNumber, Segmented, Select, Space, Spin, Switch, Tag, Tooltip, Typography, message, Slider } from 'antd'
+import { DownOutlined, PlayCircleOutlined, SaveOutlined, StopOutlined, StarFilled } from '@ant-design/icons'
 import apiClient from '../../api/client'
 import { nodeRegistry } from '../../utils/nodeRegistry'
 import { createSSEClient, type SSEClient, type SSEMessage } from '../../utils/sse'
@@ -14,8 +13,8 @@ import CameraMovement from '../CameraMovement'
 import { ASPECT_RATIOS as SHARED_ASPECT_RATIOS, getAspectRatioSize, type AspectRatioValue } from '../AspectRatioSelector'
 import { BaseNode } from './BaseNode'
 import { TypedHandle } from './TypedHandle'
+import { NodeConfigToolbar } from './NodeConfigToolbar'
 import { expandFissionAndDistribute } from '../../pages/canvasFission'
-import { clampToViewport } from '../../utils/viewportClamp'
 import { pickMediaResultContent } from '../../utils/mediaResult'
 import { buildAssetMediaUrl } from '../../utils/assetMedia'
 
@@ -32,6 +31,7 @@ import {
   isGenerateNodeMuted,
   normalizeGenerateNodeImageUrl,
   normalizeSelectOptions,
+  pickQuickParams,
   resolveGenerateNodePreviewMediaSrc,
   resolveGenerateNodeSourceAssetIds,
   resolveGenerateNodeSourceContent,
@@ -46,6 +46,7 @@ export {
   getGenerateNodeAspectRatioSize,
   normalizeGenerateNodeImageUrl,
   normalizeSelectOptions,
+  pickQuickParams,
   resolveGenerateNodePreviewMediaSrc,
   resolveGenerateNodeSourceContent,
   resolveGenerateNodeSourceAssetIds,
@@ -94,7 +95,7 @@ function GenerateNodeImpl(props: NodeProps) {
   const [temperature, setTemperature] = useState<number>(data?.temperature ?? 0.7)
   const [showPreview, setShowPreview] = useState(Boolean(data?.showPreview ?? true))
   const [configOpen, setConfigOpen] = useState(false)
-  const [panelPos, setPanelPos] = useState<{ top: number; left: number } | null>(null)
+  const [quickOpen, setQuickOpen] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [progressMsg, setProgressMsg] = useState('')
   const [result, setResult] = useState<any>(data?.result || null)
@@ -206,40 +207,19 @@ function GenerateNodeImpl(props: NodeProps) {
     sseClientRef.current = null
   }, [])
 
-  const updatePanelPos = () => {
-    if (!nodeRef.current) return
-    const nodeRect = nodeRef.current.closest('.react-flow__node')?.getBoundingClientRect() || nodeRef.current.getBoundingClientRect()
-    const clamped = clampToViewport({
-      x: nodeRect.left,
-      y: nodeRect.bottom + 8,
-      width: 560,
-      height: 520,
-      viewportWidth: window.innerWidth,
-      viewportHeight: window.innerHeight,
-      margin: 12,
-    })
-    setPanelPos({ top: clamped.y, left: clamped.x })
-  }
-
   useEffect(() => {
-    if (!configOpen || typeof document === 'undefined') return
-    updatePanelPos()
-    const canvas = document.querySelector('.react-flow__viewport')
-    const observer = typeof MutationObserver !== 'undefined' ? new MutationObserver(updatePanelPos) : null
-    if (canvas && observer) observer.observe(canvas, { attributes: true, attributeFilter: ['transform', 'style'] })
-    window.addEventListener('resize', updatePanelPos)
+    if ((!configOpen && !quickOpen) || typeof document === 'undefined') return
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as HTMLElement
       const insidePopup = target.closest('.ant-select-dropdown, .ant-tooltip, .ant-popover, .ant-dropdown, .ant-color-picker')
-      if (!target.closest('[data-config-panel]') && !target.closest('.react-flow__node') && !insidePopup) setConfigOpen(false)
+      if (!target.closest('[data-config-panel]') && !target.closest('.react-flow__node') && !insidePopup) {
+        setConfigOpen(false)
+        setQuickOpen(false)
+      }
     }
     document.addEventListener('mousedown', handleClickOutside)
-    return () => {
-      observer?.disconnect()
-      window.removeEventListener('resize', updatePanelPos)
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [configOpen])
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [configOpen, quickOpen])
 
   const resolveProvider = () => String(selectedKeyRecord?.provider || selectedKey || '')
 
@@ -509,6 +489,55 @@ function GenerateNodeImpl(props: NodeProps) {
     }
   }
 
+  const renderQuickParams = () => {
+    if (mode === 'chat' || mode === 'vision') {
+      return (
+        <>
+          <Tooltip title="温度">
+            <InputNumber size="small" value={temperature} min={0} max={2} step={0.1} style={{ width: 64 }} onChange={value => setTemperature(Number(value || 0))} />
+          </Tooltip>
+          <Tooltip title="裂变输出：LLM 返回 JSON 数组时自动裂变下游节点并发执行">
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#64748b' }}>
+              裂变<Switch size="small" checked={Boolean(data?._fissionEnabled)} onChange={checked => updateNodeData(id, { _fissionEnabled: checked })} />
+            </span>
+          </Tooltip>
+        </>
+      )
+    }
+    const quickParams = pickQuickParams(selectedModelRecord?.context_ui_params?.[mode])
+    if (quickParams.length === 0) {
+      return (
+        <Select
+          size="small"
+          value={aspectRatio}
+          style={{ width: 130 }}
+          onChange={value => setAspectRatio(value as AspectRatioValue)}
+          options={GENERATE_NODE_ASPECT_RATIO_OPTIONS.map(r => ({ value: r.value, label: r.size ? `${r.label} · ${r.size}` : r.label }))}
+        />
+      )
+    }
+    return quickParams.map(param => {
+      const value = params[param.name] !== undefined ? params[param.name] : param.default
+      const commit = (nextValue: any) => {
+        const nextParams = { ...params, [param.name]: nextValue }
+        setParams(nextParams)
+        updateNodeData(id, { params: nextParams })
+      }
+      if (param.type === 'select') {
+        return (
+          <Tooltip key={param.name} title={param.label || param.name}>
+            <Select size="small" value={value} options={normalizeSelectOptions(param.options)} style={{ width: 110 }} onChange={commit} />
+          </Tooltip>
+        )
+      }
+      return (
+        <Tooltip key={param.name} title={param.label || param.name}>
+          <InputNumber size="small" value={Number(value ?? param.default ?? 0)} min={param.min} max={param.max} step={param.step} style={{ width: 64 }} onChange={commit} />
+        </Tooltip>
+      )
+    })
+  }
+
   const nodeCollapsed = Boolean(data?._collapsed)
   const outType = mode === 'chat' || mode === 'vision' ? 'text'
     : mode === 'text_to_image' || mode === 'image_to_image' ? 'image'
@@ -541,54 +570,29 @@ function GenerateNodeImpl(props: NodeProps) {
     resultContent.match(/\.(mp4|webm|mov)(\?|$)/i)
   )
 
-  const configPanel = configOpen && panelPos && typeof document !== 'undefined' ? ReactDOM.createPortal(
-    <div
-      data-config-panel
-      className="nodrag nowheel"
-      style={{
-        position: 'fixed',
-        top: panelPos.top,
-        left: panelPos.left,
-        width: 560,
-        maxWidth: 'calc(100vw - 24px)',
-        maxHeight: 520,
-        overflow: 'auto',
-        background: '#fff',
-        borderRadius: 12,
-        boxShadow: '0 16px 48px rgba(15,23,42,0.18), 0 2px 10px rgba(15,23,42,0.08)',
-        border: '1px solid #e2e8f0',
-        zIndex: 1000,
-        padding: 14,
-      }}
-    >
-      <Space direction="vertical" size={10} style={{ width: '100%' }}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <Select value={mode} options={MODES} style={{ flex: 1 }} onChange={nextMode => { setMode(nextMode); setSelectedModel(''); setParams({}) }} />
-          <Tooltip title="关闭配置">
-            <Button type="text" size="small" icon={<CloseOutlined />} onClick={() => setConfigOpen(false)} />
-          </Tooltip>
-        </div>
-
-        <TextArea
-          className="nodrag nowheel"
-          value={prompt}
-          onChange={event => setPrompt(event.target.value)}
-          autoSize={{ minRows: 4, maxRows: 10 }}
-          placeholder="输入指令或连线输入素材..."
-          style={{ fontSize: 13, fontFamily: 'monospace', borderRadius: 8 }}
+  const quickPanel = (
+    <NodeConfigToolbar open={quickOpen} onClose={() => setQuickOpen(false)} title="模式与模型" width={340} position={Position.Bottom}>
+      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Segmented
+          size="small"
+          block
+          value={mode}
+          options={MODES}
+          onChange={nextMode => { setMode(nextMode as string); setSelectedModel(''); setParams({}) }}
         />
-
         <Space.Compact block>
           <Select
             value={selectedKey ?? undefined}
             placeholder="选择 Key"
-            style={{ width: 168 }}
+            size="small"
+            style={{ width: 120 }}
             options={keys.map(key => ({ label: key.description || key.provider || `Key ${key.id}`, value: Number(key.id) }))}
             onChange={value => { setSelectedKey(Number(value)); setSelectedModel(''); setParams({}) }}
           />
           <Select
             value={selectedModel || undefined}
             placeholder="选择模型"
+            size="small"
             loading={modelLoading}
             disabled={!selectedKey}
             style={{ flex: 1, minWidth: 0 }}
@@ -596,85 +600,106 @@ function GenerateNodeImpl(props: NodeProps) {
             onChange={selectModel}
           />
           <Tooltip title={showOnlyFavorites ? '显示全量模型' : '只看收藏模型'}>
-            <Button icon={<StarFilled />} type={showOnlyFavorites ? 'primary' : 'default'} onClick={() => setShowOnlyFavorites(value => !value)} />
+            <Button size="small" icon={<StarFilled />} type={showOnlyFavorites ? 'primary' : 'default'} onClick={() => setShowOnlyFavorites(value => !value)} />
           </Tooltip>
         </Space.Compact>
-
-        <Select
-          value={routingStrategy}
-          options={GENERATE_NODE_ROUTING_STRATEGY_OPTIONS}
-          onChange={setRoutingStrategy}
-          placeholder="Key 路由策略"
-        />
-
-        <Input value={systemPrompt} onChange={event => setSystemPrompt(event.target.value)} placeholder="System prompt" />
-
-        <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
-          <Select
-            value={aspectRatio}
-            onChange={nextValue => setAspectRatio(nextValue as AspectRatioValue)}
-            options={GENERATE_NODE_ASPECT_RATIO_OPTIONS.map(r => ({ value: r.value, label: r.size ? `${r.label} · ${r.size}` : r.label }))}
-          />
-          {aspectRatio === 'custom' ? (
-            <>
-              <InputNumber value={customWidth} min={1} onChange={value => setCustomWidth(Number(value || 0))} />
-              <InputNumber value={customHeight} min={1} onChange={value => setCustomHeight(Number(value || 0))} />
-            </>
-          ) : (
-            <Input value={ratioSize} disabled />
-          )}
-          <InputNumber value={temperature} min={0} max={2} step={0.1} onChange={value => setTemperature(Number(value || 0))} />
-        </div>
-
-        {(mode === 'chat' || mode === 'vision') && (
-          <div style={{ display: 'grid', gap: 8, padding: 10, borderRadius: 10, border: '1px solid #e2e8f0', background: '#f8fafc' }}>
-            <Checkbox checked={useRoleAsset} onChange={event => setUseRoleAsset(event.target.checked)}>Use role asset</Checkbox>
-            <Select value={roleAssetId ?? undefined} onChange={value => selectRoleAsset(value ?? null)} options={roleAssets.map(asset => ({ value: asset.id, label: asset.name }))} placeholder="SystemRole 资产" allowClear />
-            <Space size={6} wrap>
-              {PRESET_ROLES.map(preset => (
-                <Tag key={preset.name} color="orange" style={{ cursor: 'pointer', margin: 0 }} onClick={() => handleCreatePresetRole(preset)}>
-                  {preset.label}
-                </Tag>
-              ))}
-            </Space>
-          </div>
-        )}
-
-        {isImageVideoMode && (
-          <div style={{ display: 'grid', gap: 8, padding: 10, borderRadius: 10, border: '1px solid #e2e8f0', background: '#f8fafc' }}>
-            <CameraControl value={cameraParams} onChange={setCameraParams} open={cameraOpen} onOpenChange={setCameraOpen} customOptions={cameraCustomOptions} onCustomOptionsChange={setCameraCustomOptions} />
-            <CameraMovement onInsert={text => setPrompt(prev => prev ? `${prev}\n${text}` : text)} open={movementOpen} onOpenChange={setMovementOpen} customPresets={customMovements} onAddCustom={preset => setCustomMovements(prev => [...prev, preset])} onRemoveCustom={value => setCustomMovements(prev => prev.filter(item => item.value !== value))} />
-          </div>
-        )}
-
-        {renderParams()}
       </Space>
-    </div>,
-    document.body
-  ) : null
+    </NodeConfigToolbar>
+  )
+
+  const configPanel = (
+    <NodeConfigToolbar open={configOpen} onClose={() => setConfigOpen(false)} title="节点配置" width={400}>
+      <Collapse
+        size="small"
+        defaultActiveKey={['generation']}
+        items={[
+          {
+            key: 'generation',
+            label: '生成参数',
+            children: (
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
+                  <Select
+                    size="small"
+                    value={aspectRatio}
+                    onChange={nextValue => setAspectRatio(nextValue as AspectRatioValue)}
+                    options={GENERATE_NODE_ASPECT_RATIO_OPTIONS.map(r => ({ value: r.value, label: r.size ? `${r.label} · ${r.size}` : r.label }))}
+                  />
+                  {aspectRatio === 'custom' ? (
+                    <Space.Compact block>
+                      <InputNumber size="small" value={customWidth} min={1} onChange={value => setCustomWidth(Number(value || 0))} />
+                      <InputNumber size="small" value={customHeight} min={1} onChange={value => setCustomHeight(Number(value || 0))} />
+                    </Space.Compact>
+                  ) : (
+                    <Input size="small" value={ratioSize} disabled />
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>温度</Text>
+                  <InputNumber size="small" value={temperature} min={0} max={2} step={0.1} style={{ width: 90 }} onChange={value => setTemperature(Number(value || 0))} />
+                  <Select
+                    size="small"
+                    value={routingStrategy}
+                    options={GENERATE_NODE_ROUTING_STRATEGY_OPTIONS}
+                    onChange={setRoutingStrategy}
+                    style={{ flex: 1 }}
+                  />
+                </div>
+              </Space>
+            ),
+          },
+          ...(mode === 'chat' || mode === 'vision' ? [{
+            key: 'role',
+            label: '角色与提示',
+            children: (
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Input size="small" value={systemPrompt} onChange={event => setSystemPrompt(event.target.value)} placeholder="System prompt" />
+                <Checkbox checked={useRoleAsset} onChange={event => setUseRoleAsset(event.target.checked)}>使用角色资产</Checkbox>
+                <Select size="small" value={roleAssetId ?? undefined} onChange={value => selectRoleAsset(value ?? null)} options={roleAssets.map(asset => ({ value: asset.id, label: asset.name }))} placeholder="SystemRole 资产" allowClear style={{ width: '100%' }} />
+                <Space size={6} wrap>
+                  {PRESET_ROLES.map(preset => (
+                    <Tag key={preset.name} color="orange" style={{ cursor: 'pointer', margin: 0 }} onClick={() => handleCreatePresetRole(preset)}>
+                      {preset.label}
+                    </Tag>
+                  ))}
+                </Space>
+              </Space>
+            ),
+          }] : []),
+          ...(isImageVideoMode ? [{
+            key: 'camera',
+            label: '镜头控制',
+            children: (
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <CameraControl value={cameraParams} onChange={setCameraParams} open={cameraOpen} onOpenChange={setCameraOpen} customOptions={cameraCustomOptions} onCustomOptionsChange={setCameraCustomOptions} />
+                <CameraMovement onInsert={text => setPrompt(prev => prev ? `${prev}\n${text}` : text)} open={movementOpen} onOpenChange={setMovementOpen} customPresets={customMovements} onAddCustom={preset => setCustomMovements(prev => [...prev, preset])} onRemoveCustom={value => setCustomMovements(prev => prev.filter(item => item.value !== value))} />
+              </Space>
+            ),
+          }] : []),
+          {
+            key: 'advanced',
+            label: '高级参数',
+            children: renderParams() || <Text type="secondary" style={{ fontSize: 12 }}>当前模型没有暴露参数</Text>,
+          },
+        ]}
+      />
+    </NodeConfigToolbar>
+  )
 
   return (
     <>
       {renderDynamicHandles()}
       <BaseNode {...props} onOpenConfig={() => setConfigOpen(v => !v)}>
       <div ref={nodeRef} style={{ display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0, height: '100%' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <div
+          className="nodrag"
+          onClick={() => { setQuickOpen(v => !v); setConfigOpen(false) }}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, padding: '5px 8px', border: '1px solid #e2e8f0', borderRadius: 8, cursor: 'pointer', background: quickOpen ? '#eef2ff' : '#fff' }}
+        >
           <Tag color="#0ea5e9" style={{ margin: 0, fontWeight: 700, fontSize: 11, fontFamily: 'monospace' }}>{currentModeLabel}</Tag>
           <Text style={{ flex: 1, minWidth: 0, fontSize: 12, color: selectedModel ? '#1e293b' : '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={currentModelDisplay}>
             {currentModelDisplay}
           </Text>
-          {(mode === 'chat' || mode === 'vision') && (
-            <Tooltip title="裂变输出：LLM 返回 JSON 数组时自动裂变下游节点并发执行">
-              <Tag
-                className="nodrag"
-                color={data?._fissionEnabled ? '#f59e0b' : undefined}
-                style={{ margin: 0, cursor: 'pointer', fontSize: 11, userSelect: 'none' }}
-                onClick={() => updateNodeData(id, { _fissionEnabled: !data?._fissionEnabled })}
-              >
-                {data?._fissionEnabled ? '🔀 裂变' : '裂变'}
-              </Tag>
-            </Tooltip>
-          )}
           {data?._fissionEnabled && (
             <Tooltip title={expectedFissionCount !== null ? `裂变计数校验：期望 ${expectedFissionCount} 条，当前解析 ${parsedFissionCount} 条` : '裂变计数校验：未设置期望条数'}>
               <Tag style={{ margin: 0, fontSize: 11, userSelect: 'none' }} color={fissionCountHealthy ? 'green' : 'red'}>
@@ -682,6 +707,7 @@ function GenerateNodeImpl(props: NodeProps) {
               </Tag>
             </Tooltip>
           )}
+          <DownOutlined style={{ fontSize: 10, color: '#94a3b8', transform: quickOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
         </div>
 
         <TextArea
@@ -693,13 +719,24 @@ function GenerateNodeImpl(props: NodeProps) {
           style={{ fontSize: 13, fontFamily: 'monospace', borderRadius: 8, flexShrink: 0 }}
         />
 
-        <Button type="primary" danger={generating} block disabled={isMuted} icon={generating ? <StopOutlined /> : <PlayCircleOutlined />} onClick={generating ? handleInterrupt : handleRun} style={{ height: 36, fontSize: 13, fontWeight: 700, flexShrink: 0 }}>
-          {isMuted ? '已静音' : generating ? '强行中断' : '单点运行'}
-        </Button>
+        <div className="nodrag" style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          {renderQuickParams()}
+          <span style={{ flex: 1 }} />
+          <Button
+            type="primary"
+            danger={generating}
+            disabled={isMuted}
+            icon={generating ? <StopOutlined /> : <PlayCircleOutlined />}
+            onClick={generating ? handleInterrupt : handleRun}
+            style={{ height: 30, fontSize: 13, fontWeight: 700, borderRadius: 8, padding: '0 16px' }}
+          >
+            {isMuted ? '已静音' : generating ? '中断' : '运行'}
+          </Button>
+        </div>
 
         <div style={{ flex: showPreview ? 1 : '0 0 auto', display: 'flex', flexDirection: 'column', background: '#f8fafc', padding: 10, borderRadius: 8, border: '1px dashed #94a3b8', minHeight: showPreview ? 120 : 'auto', overflow: 'hidden' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-            <Text style={{ fontSize: 12, color: '#64748b', fontWeight: 700, fontFamily: 'monospace' }}>&gt; OUTPUT_PREVIEW</Text>
+            <Text style={{ fontSize: 12, color: '#64748b', fontWeight: 700 }}>生成结果</Text>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               {resultContent && (
                 <Tooltip title="携带溯源信息固化到资产库">
@@ -739,6 +776,7 @@ function GenerateNodeImpl(props: NodeProps) {
       </div>
       </BaseNode>
       <TypedHandle id="out" type="source" position={Position.Right} dataType={outType} label="生成结果" collapsed={nodeCollapsed} />
+      {quickPanel}
       {configPanel}
     </>
   )

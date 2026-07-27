@@ -353,3 +353,10 @@ export function normalizeSelectOptions(options: unknown): Array<{ label: string;
     return { label: String(option), value: option }
   })
 }
+
+export function pickQuickParams(uiParams: unknown, limit = 2): Array<Record<string, any>> {
+  if (!Array.isArray(uiParams)) return []
+  return uiParams
+    .filter(param => param && typeof param === 'object' && ((param as any).type === 'select' || (param as any).type === 'number'))
+    .slice(0, limit) as Array<Record<string, any>>
+}
