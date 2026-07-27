@@ -237,8 +237,9 @@ export async function prepareStoryStateUpdate(
       maxTokens,
       temperature: getStageTemperature(project, 'review', 0.15),
       skipMemory: true,
-      signal: options.abortSignal,
-      timeoutMs: options.llmTimeoutMs,
+      signal: options.signal ?? options.abortSignal,
+      timeoutMs: options.timeoutMs ?? options.llmTimeoutMs,
+      maxRetries: options.maxRetries,
     })
   }
 
@@ -311,4 +312,3 @@ export async function prepareStoryStateUpdate(
   }
   return prepared
 }
-

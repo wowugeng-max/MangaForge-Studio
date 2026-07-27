@@ -1,6 +1,37 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import { resolveAgentPreferredModelId } from './executor'
 import { buildAgentMessages } from './executor-helpers'
+
+const executorSource = readFileSync(join(import.meta.dir, 'executor.ts'), 'utf8')
+const executeNovelAgentBlock = executorSource.slice(
+  executorSource.indexOf('export async function executeNovelAgent('),
+  executorSource.indexOf('// ── Generate Novel Plan'),
+)
+const storyStatePrepareSource = readFileSync(
+  join(import.meta.dir, '../novel-writing-service/service/story-state-machine-prepare.ts'),
+  'utf8',
+)
+const storyStateRunAgentBlock = storyStatePrepareSource.slice(
+  storyStatePrepareSource.indexOf('const runAgentOnce = async'),
+  storyStatePrepareSource.indexOf('const primaryMaxTokens'),
+)
+
+describe('LLM execution option forwarding', () => {
+  test('executeNovelAgent exposes and forwards runtime execution bounds', () => {
+    expect(executeNovelAgentBlock).toContain('maxRetries?: number')
+    expect(executeNovelAgentBlock).toContain('signal: options.signal')
+    expect(executeNovelAgentBlock).toContain('timeoutMs: options.timeoutMs')
+    expect(executeNovelAgentBlock).toContain('maxRetries: options.maxRetries')
+  })
+
+  test('story state preparation forwards compatible execution bounds', () => {
+    expect(storyStateRunAgentBlock).toContain('maxRetries: options.maxRetries')
+    expect(storyStateRunAgentBlock).toContain('signal: options.signal ?? options.abortSignal')
+    expect(storyStateRunAgentBlock).toContain('timeoutMs: options.timeoutMs ?? options.llmTimeoutMs')
+  })
+})
 
 describe('resolveAgentPreferredModelId', () => {
   const project: any = {

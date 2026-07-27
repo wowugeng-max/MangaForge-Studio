@@ -105,6 +105,7 @@ export async function executeNovelAgent(
     skipMemory?: boolean
     signal?: AbortSignal
     timeoutMs?: number
+    maxRetries?: number
   } = {},
 ): Promise<LLMResponse> {
   const { modelId, activeWorkspace, temperature = 0.7, maxTokens = 4000, responseMode, skipMemory } = options
@@ -130,6 +131,7 @@ export async function executeNovelAgent(
     {
       signal: options.signal,
       timeoutMs: options.timeoutMs,
+      maxRetries: options.maxRetries,
     },
   )
 
