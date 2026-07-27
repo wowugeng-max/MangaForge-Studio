@@ -1,16 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import ReactDOM from 'react-dom'
 import { Position, type NodeProps, useReactFlow, useUpdateNodeInternals } from 'reactflow'
 import { useParams } from 'react-router-dom'
 import { useDrop } from 'react-dnd'
-import { Button, Input, Select, Space, Spin, Switch, Tag, Tooltip, Typography, message } from 'antd'
-import { ApiOutlined, CloseOutlined, PlayCircleOutlined, SaveOutlined, StopOutlined } from '@ant-design/icons'
+import { Button, Collapse, Input, Select, Space, Spin, Switch, Tag, Tooltip, Typography, message } from 'antd'
+import { DownOutlined, PlayCircleOutlined, SaveOutlined, StopOutlined } from '@ant-design/icons'
 import { providerApi } from '../../api/providers'
 import { keyApi } from '../../api/keys'
 import apiClient from '../../api/client'
 import { createSSEClient, type SSEClient, type SSEMessage } from '../../utils/sse'
 import { getTypeLabel, inferParamType } from '../../utils/handleTypes'
-import { clampToViewport } from '../../utils/viewportClamp'
 import { nodeRegistry } from '../../utils/nodeRegistry'
 import { DndItemTypes } from '../../constants/dnd'
 import { AspectRatioPanel, AspectRatioTrigger, getAspectRatioSize, type AspectRatioValue } from '../AspectRatioSelector'
@@ -20,6 +18,7 @@ import { useAssetLibraryStore } from '../../stores/assetLibraryStore'
 import { useCanvasStore } from '../../stores/canvasStore'
 import { BaseNode } from './BaseNode'
 import { TypedHandle } from './TypedHandle'
+import { NodeConfigToolbar } from './NodeConfigToolbar'
 import { pickMediaResultContent } from '../../utils/mediaResult'
 import { buildAssetMediaUrl } from '../../utils/assetMedia'
 
@@ -316,7 +315,7 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
   const [cameraParams, setCameraParams] = useState<Record<string, string>>(data?.cameraParams || {})
   const [customCameraOptions, setCustomCameraOptions] = useState<CustomCameraOptions>(data?.customCameraOptions || {})
   const [customMovements, setCustomMovements] = useState<CameraMovementPreset[]>(data?.customMovements || [])
-  const [panelPos, setPanelPos] = useState<{ top: number; left: number } | null>(null)
+  const [quickOpen, setQuickOpen] = useState(false)
   const [isRunning, setIsRunning] = useState(false)
   const [progressMsg, setProgressMsg] = useState('')
   const [showPreview, setShowPreview] = useState(Boolean(data?.showPreview ?? true))
@@ -437,40 +436,19 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
     sseClientRef.current = null
   }, [])
 
-  const updatePanelPos = () => {
-    if (!nodeRef.current) return
-    const nodeRect = nodeRef.current.closest('.react-flow__node')?.getBoundingClientRect() || nodeRef.current.getBoundingClientRect()
-    const clamped = clampToViewport({
-      x: nodeRect.left,
-      y: nodeRect.bottom + 8,
-      width: 560,
-      height: 520,
-      viewportWidth: window.innerWidth,
-      viewportHeight: window.innerHeight,
-      margin: 12,
-    })
-    setPanelPos({ top: clamped.y, left: clamped.x })
-  }
-
   useEffect(() => {
-    if (!configOpen || typeof document === 'undefined') return
-    updatePanelPos()
-    const canvas = document.querySelector('.react-flow__viewport')
-    const observer = typeof MutationObserver !== 'undefined' ? new MutationObserver(updatePanelPos) : null
-    if (canvas && observer) observer.observe(canvas, { attributes: true, attributeFilter: ['transform', 'style'] })
-    window.addEventListener('resize', updatePanelPos)
+    if ((!configOpen && !quickOpen) || typeof document === 'undefined') return
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as HTMLElement
       const insidePopup = target.closest('.ant-select-dropdown, .ant-tooltip, .ant-popover, .ant-dropdown, .ant-color-picker')
-      if (!target.closest('[data-config-panel]') && !target.closest('.react-flow__node') && !insidePopup) setConfigOpen(false)
+      if (!target.closest('[data-config-panel]') && !target.closest('.react-flow__node') && !insidePopup) {
+        setConfigOpen(false)
+        setQuickOpen(false)
+      }
     }
     document.addEventListener('mousedown', handleClickOutside)
-    return () => {
-      observer?.disconnect()
-      window.removeEventListener('resize', updatePanelPos)
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [configOpen])
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [configOpen, quickOpen])
 
   const findIncomingWorkflow = () => {
     const incoming = getEdges().find(edge => edge.target === id && edge.targetHandle === 'in')
@@ -653,157 +631,148 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
     })
   }
 
-  const configPanel = configOpen && panelPos && typeof document !== 'undefined' ? ReactDOM.createPortal(
-    <div
-      data-config-panel
-      className="nodrag nowheel"
-      style={{
-        position: 'fixed',
-        top: panelPos.top,
-        left: panelPos.left,
-        width: 560,
-        maxWidth: 'calc(100vw - 24px)',
-        maxHeight: 520,
-        overflow: 'auto',
-        background: '#fff',
-        borderRadius: 12,
-        boxShadow: '0 16px 48px rgba(15,23,42,0.18), 0 2px 10px rgba(15,23,42,0.08)',
-        border: '1px solid #e2e8f0',
-        zIndex: 1000,
-        padding: 14,
-      }}
-    >
-      <Space direction="vertical" size={10} style={{ width: '100%' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Text style={{ fontSize: 13, fontWeight: 800, color: '#1e293b', flex: 1 }}><ApiOutlined /> 算力引擎配置</Text>
-          <Tooltip title="关闭配置"><Button type="text" size="small" icon={<CloseOutlined />} onClick={() => setConfigOpen(false)} /></Tooltip>
-        </div>
-        <Space.Compact block>
-          <Select
-            value={selectedProvider || undefined}
-            placeholder="选择 ComfyUI 节点"
-            style={{ flex: 1 }}
-            options={providers.map(provider => ({ label: provider.display_name || provider.id, value: provider.id }))}
-            onChange={value => { setSelectedProvider(value); setSelectedKeyId(null); updateNodeData(id, { selectedProvider: value, selectedKeyId: null }) }}
-          />
-          <Select
-            value={selectedKeyId || undefined}
-            placeholder="选择执行凭证"
-            disabled={!selectedProvider}
-            style={{ width: 180 }}
-            options={availableKeys.map(key => ({ label: key.description || `Key ${key.id}`, value: Number(key.id) }))}
-            onChange={value => { setSelectedKeyId(Number(value)); updateNodeData(id, { selectedKeyId: Number(value) }) }}
-          />
-        </Space.Compact>
+  const quickPanel = (
+    <NodeConfigToolbar open={quickOpen} onClose={() => setQuickOpen(false)} title="算力与凭证" width={320} position={Position.Bottom}>
+      <Space.Compact block>
+        <Select
+          value={selectedProvider || undefined}
+          placeholder="选择 ComfyUI 节点"
+          size="small"
+          style={{ flex: 1 }}
+          options={providers.map(provider => ({ label: provider.display_name || provider.id, value: provider.id }))}
+          onChange={value => { setSelectedProvider(value); setSelectedKeyId(null); updateNodeData(id, { selectedProvider: value, selectedKeyId: null }) }}
+        />
+        <Select
+          value={selectedKeyId || undefined}
+          placeholder="执行凭证"
+          size="small"
+          disabled={!selectedProvider}
+          style={{ width: 130 }}
+          options={availableKeys.map(key => ({ label: key.description || `Key ${key.id}`, value: Number(key.id) }))}
+          onChange={value => { setSelectedKeyId(Number(value)); updateNodeData(id, { selectedKeyId: Number(value) }) }}
+        />
+      </Space.Compact>
+    </NodeConfigToolbar>
+  )
 
-        <div style={{ display: 'grid', gap: 8, padding: 10, borderRadius: 10, border: '1px solid #e2e8f0', background: '#f8fafc' }}>
-          <Text style={{ fontSize: 12, color: '#475569', fontWeight: 800 }}>云端代理参数（可选）</Text>
-          <Input
-            value={cloudBaseUrl}
-            onChange={event => setCloudBaseUrl(event.target.value)}
-            placeholder="RunningHub / 云端 ComfyUI Base URL"
-          />
-          <Input.Password
-            value={runninghubApiKey}
-            onChange={event => setRunninghubApiKey(event.target.value)}
-            placeholder="RunningHub API Key（Base URL 未含 key 时使用）"
-          />
-          <Input
-            value={comfyInputDir}
-            onChange={event => setComfyInputDir(event.target.value)}
-            placeholder="ComfyUI input 目录，用于本地素材映射"
-          />
-        </div>
-
-        <div>
-          <Text style={{ display: 'block', fontSize: 12, color: '#64748b', fontWeight: 700, marginBottom: 4 }}>Workflow JSON</Text>
-          <TextArea
-            className="nodrag nowheel"
-            value={workflowJson}
-            onChange={event => setWorkflowJson(event.target.value)}
-            autoSize={{ minRows: 6, maxRows: 12 }}
-            placeholder="粘贴 ComfyUI workflow JSON，或连入 workflow 资产到左侧紫色端口"
-            style={{ fontSize: 12, fontFamily: 'monospace', borderRadius: 8 }}
-          />
-        </div>
-
-        <div>
-          <Text style={{ display: 'block', fontSize: 12, color: '#64748b', fontWeight: 700, marginBottom: 4 }}>参数映射 JSON</Text>
-          <TextArea
-            className="nodrag nowheel"
-            value={parametersJson}
-            onChange={event => setParametersJson(event.target.value)}
-            autoSize={{ minRows: 4, maxRows: 8 }}
-            placeholder={'例如：{"positive_prompt":{"node_id":"6","field":"inputs/text"}}'}
-            style={{ fontSize: 12, fontFamily: 'monospace', borderRadius: 8 }}
-          />
-        </div>
-
-        <div style={{ display: 'grid', gap: 8, padding: 10, borderRadius: 10, border: '1px solid #e2e8f0', background: '#f8fafc' }}>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <AspectRatioTrigger value={aspectRatioValue} customWidth={customWidth} customHeight={customHeight} onClick={() => setActivePanel(activePanel === 'ratio' ? null : 'ratio')} />
-            <CameraTrigger value={cameraParams} onClick={() => setActivePanel(activePanel === 'camera' ? null : 'camera')} />
-            <CameraMovementTrigger onClick={() => setActivePanel(activePanel === 'movement' ? null : 'movement')} />
-          </div>
-          {activePanel === 'ratio' && (
-            <AspectRatioPanel
-              value={aspectRatioValue}
-              customWidth={customWidth}
-              customHeight={customHeight}
-              onChange={(next) => setAspectRatioValue(next)}
-              onCustomSizeChange={(width, height) => { setCustomWidth(width); setCustomHeight(height) }}
-              onClose={() => setActivePanel(null)}
-            />
-          )}
-          {activePanel === 'camera' && (
-            <CameraPanel
-              value={cameraParams}
-              onChange={setCameraParams}
-              onClose={() => setActivePanel(null)}
-              customOptions={customCameraOptions}
-              onCustomOptionsChange={setCustomCameraOptions}
-            />
-          )}
-          {activePanel === 'movement' && (
-            <CameraMovementPanel
-              onInsert={handleInsertMovement}
-              onClose={() => setActivePanel(null)}
-              customPresets={customMovements}
-              onAddCustom={(preset) => setCustomMovements(previous => [...previous, preset])}
-              onRemoveCustom={(value) => setCustomMovements(previous => previous.filter(item => item.value !== value))}
-            />
-          )}
-        </div>
-
-        {parameters && Object.keys(parameters).length > 0 && (
-          <div style={{ display: 'grid', gap: 8, padding: 10, borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc' }}>
-            <Text style={{ fontSize: 12, color: '#0f766e', fontWeight: 800 }}>暴露参数</Text>
-            {Object.keys(parameters).map(paramName => {
-              const paramType = inferParamType(paramName)
-              return (
-                <div key={paramName}>
-                  <Text style={{ fontSize: 11, color: '#334155', fontWeight: 700 }}>{paramName} <span style={{ color: '#94a3b8' }}>({getTypeLabel(paramType)})</span></Text>
-                  <TextArea
-                    className="nodrag nowheel"
-                    value={paramValues[paramName] || ''}
-                    onChange={event => {
-                      const next = { ...paramValues, [paramName]: event.target.value }
-                      setParamValues(next)
-                      updateNodeData(id, { paramValues: next })
-                    }}
-                    autoSize={{ minRows: 1, maxRows: 4 }}
-                    placeholder="可手填，也可由连线覆盖"
-                    style={{ marginTop: 4, fontSize: 12, borderRadius: 6 }}
-                  />
+  const configPanel = (
+    <NodeConfigToolbar open={configOpen} onClose={() => setConfigOpen(false)} title="算力引擎配置" width={400}>
+      <Collapse
+        size="small"
+        defaultActiveKey={['workflow']}
+        items={[
+          {
+            key: 'proxy',
+            label: '云端代理（可选）',
+            children: (
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Input size="small" value={cloudBaseUrl} onChange={event => setCloudBaseUrl(event.target.value)} placeholder="RunningHub / 云端 ComfyUI Base URL" />
+                <Input.Password size="small" value={runninghubApiKey} onChange={event => setRunninghubApiKey(event.target.value)} placeholder="RunningHub API Key（Base URL 未含 key 时使用）" />
+                <Input size="small" value={comfyInputDir} onChange={event => setComfyInputDir(event.target.value)} placeholder="ComfyUI input 目录，用于本地素材映射" />
+              </Space>
+            ),
+          },
+          {
+            key: 'workflow',
+            label: '工作流 JSON',
+            children: (
+              <TextArea
+                className="nodrag nowheel"
+                value={workflowJson}
+                onChange={event => setWorkflowJson(event.target.value)}
+                autoSize={{ minRows: 6, maxRows: 12 }}
+                placeholder="粘贴 ComfyUI workflow JSON，或连入 workflow 资产到左侧紫色端口"
+                style={{ fontSize: 12, fontFamily: 'monospace', borderRadius: 8 }}
+              />
+            ),
+          },
+          {
+            key: 'mapping',
+            label: '参数映射 JSON',
+            children: (
+              <TextArea
+                className="nodrag nowheel"
+                value={parametersJson}
+                onChange={event => setParametersJson(event.target.value)}
+                autoSize={{ minRows: 4, maxRows: 8 }}
+                placeholder={'例如：{"positive_prompt":{"node_id":"6","field":"inputs/text"}}'}
+                style={{ fontSize: 12, fontFamily: 'monospace', borderRadius: 8 }}
+              />
+            ),
+          },
+          {
+            key: 'camera',
+            label: '镜头与比例',
+            children: (
+              <div style={{ display: 'grid', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <AspectRatioTrigger value={aspectRatioValue} customWidth={customWidth} customHeight={customHeight} onClick={() => setActivePanel(activePanel === 'ratio' ? null : 'ratio')} />
+                  <CameraTrigger value={cameraParams} onClick={() => setActivePanel(activePanel === 'camera' ? null : 'camera')} />
+                  <CameraMovementTrigger onClick={() => setActivePanel(activePanel === 'movement' ? null : 'movement')} />
                 </div>
-              )
-            })}
-          </div>
-        )}
-      </Space>
-    </div>,
-    document.body
-  ) : null
+                {activePanel === 'ratio' && (
+                  <AspectRatioPanel
+                    value={aspectRatioValue}
+                    customWidth={customWidth}
+                    customHeight={customHeight}
+                    onChange={(next) => setAspectRatioValue(next)}
+                    onCustomSizeChange={(width, height) => { setCustomWidth(width); setCustomHeight(height) }}
+                    onClose={() => setActivePanel(null)}
+                  />
+                )}
+                {activePanel === 'camera' && (
+                  <CameraPanel
+                    value={cameraParams}
+                    onChange={setCameraParams}
+                    onClose={() => setActivePanel(null)}
+                    customOptions={customCameraOptions}
+                    onCustomOptionsChange={setCustomCameraOptions}
+                  />
+                )}
+                {activePanel === 'movement' && (
+                  <CameraMovementPanel
+                    onInsert={handleInsertMovement}
+                    onClose={() => setActivePanel(null)}
+                    customPresets={customMovements}
+                    onAddCustom={(preset) => setCustomMovements(previous => [...previous, preset])}
+                    onRemoveCustom={(value) => setCustomMovements(previous => previous.filter(item => item.value !== value))}
+                  />
+                )}
+              </div>
+            ),
+          },
+          ...(parameters && Object.keys(parameters).length > 0 ? [{
+            key: 'params',
+            label: '暴露参数',
+            children: (
+              <div style={{ display: 'grid', gap: 8 }}>
+                {Object.keys(parameters).map(paramName => {
+                  const paramType = inferParamType(paramName)
+                  return (
+                    <div key={paramName}>
+                      <Text style={{ fontSize: 11, color: '#334155', fontWeight: 700 }}>{paramName} <span style={{ color: '#94a3b8' }}>({getTypeLabel(paramType)})</span></Text>
+                      <TextArea
+                        className="nodrag nowheel"
+                        value={paramValues[paramName] || ''}
+                        onChange={event => {
+                          const next = { ...paramValues, [paramName]: event.target.value }
+                          setParamValues(next)
+                          updateNodeData(id, { paramValues: next })
+                        }}
+                        autoSize={{ minRows: 1, maxRows: 4 }}
+                        placeholder="可手填，也可由连线覆盖"
+                        style={{ marginTop: 4, fontSize: 12, borderRadius: 6 }}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+            ),
+          }] : []),
+        ]}
+      />
+    </NodeConfigToolbar>
+  )
 
   return (
     <>
@@ -824,11 +793,16 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
           transition: 'all 0.2s ease',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <div
+          className="nodrag"
+          onClick={() => { setQuickOpen(v => !v); setConfigOpen(false) }}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, padding: '5px 8px', border: '1px solid #e2e8f0', borderRadius: 8, cursor: 'pointer', background: quickOpen ? '#f5f3ff' : '#fff' }}
+        >
           <Tag color="#722ed1" style={{ margin: 0, fontWeight: 700, fontSize: 11, fontFamily: 'monospace' }}>COMFY</Tag>
           <Text style={{ flex: 1, minWidth: 0, fontSize: 12, color: selectedProvider ? '#1e293b' : '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={selectedProviderName}>
             {selectedProviderName}
           </Text>
+          <DownOutlined style={{ fontSize: 10, color: '#94a3b8', transform: quickOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
         </div>
 
         <div style={{ background: workflowJson ? '#f5f3ff' : '#f8fafc', borderRadius: 8, border: workflowJson ? '1px solid #ddd6fe' : '1px dashed #cbd5e1', padding: '8px 10px', flexShrink: 0 }}>
@@ -878,6 +852,7 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
       </div>
       </BaseNode>
       <TypedHandle id="out" type="source" position={Position.Right} dataType="image" label="渲染产物" color="#722ed1" collapsed={nodeCollapsed} />
+      {quickPanel}
       {configPanel}
     </>
   )
