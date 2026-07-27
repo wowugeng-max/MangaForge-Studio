@@ -111,8 +111,15 @@ export type CommitEditorRevisionChapterInput = {
   sourceTextHash: string
   candidateText: string
   candidateHash: string
-  chapterPatch: Partial<NovelChapterRecord>
+  chapterPatch: EditorRevisionChapterPatch
   reviewPayload: Record<string, unknown>
+}
+
+export type EditorRevisionChapterPatch = Partial<Pick<
+  NovelChapterRecord,
+  'chapter_goal' | 'chapter_summary' | 'conflict' | 'ending_hook'
+>> & {
+  raw_payload?: Record<string, unknown>
 }
 
 export type CommitEditorRevisionChapterResult = {

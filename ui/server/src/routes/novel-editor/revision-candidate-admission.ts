@@ -1,4 +1,4 @@
-import { createHash } from 'crypto'
+import { revisionTextHash } from '../../novel/revision-hash'
 import { countProseChars } from '../../novel-writing/word-target'
 import { assertCompleteProseTransportResult } from '../../novel-writing-service/quality/prose-transport-admission'
 import { asArray, extractLLMText, getNovelPayload } from '../novel-route-utils'
@@ -13,6 +13,8 @@ export type RevisionCandidateAdmission = {
   appliedPatches: unknown[]
   diagnostics: Record<string, unknown>
 }
+
+export { revisionTextHash }
 
 export class RevisionCandidateAdmissionError extends Error {
   constructor(
@@ -286,10 +288,6 @@ export function applySurgicalRevisionPatch(originalText: string, payload: any) {
   const chapterText = assemblePlannedPatches(source, planned)
   const applied = [...planned].sort((left, right) => left.order - right.order).map(operation => operation.applied)
   return { chapterText, applied, unapplied }
-}
-
-export function revisionTextHash(text: string) {
-  return createHash('sha256').update(String(text || '')).digest('hex')
 }
 
 function admissionError(code: string, message: string, diagnostics: Record<string, unknown> = {}) {

@@ -1,6 +1,7 @@
 import type {
   CommitEditorRevisionChapterInput,
   CommitEditorRevisionChapterResult,
+  EditorRevisionChapterPatch,
   NovelReviewRecord,
 } from '../types'
 import { createChapterVersionRecord, nextChapterVersionNo } from '../chapter-helpers'
@@ -12,7 +13,7 @@ import {
   updateChapterRow,
   withNovelDbWrite,
 } from '../sql-rows'
-import { revisionTextHash } from '../../routes/novel-editor/revision-candidate-admission'
+import { revisionTextHash } from '../revision-hash'
 
 const REVIEW_RECEIPT_SELECT = `
   SELECT
@@ -55,6 +56,33 @@ function currentChapterReviewPayload(payload: Record<string, unknown>, chapterId
   return scopeReceiptCollections(sanitizeJsonValue(payload), '', chapterId) as Record<string, unknown>
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
+function mergePlainObjects(base: unknown, patch: unknown): Record<string, unknown> {
+  const current = isPlainObject(base) ? base : {}
+  const sanitizedPatch = sanitizeJsonValue(patch)
+  if (!isPlainObject(sanitizedPatch)) return { ...current }
+  const merged: Record<string, unknown> = { ...current }
+  for (const [key, value] of Object.entries(sanitizedPatch)) {
+    merged[key] = isPlainObject(value) && isPlainObject(current[key])
+      ? mergePlainObjects(current[key], value)
+      : value
+  }
+  return merged
+}
+
+function currentPlanFields(patch: EditorRevisionChapterPatch) {
+  const allowed: Partial<EditorRevisionChapterPatch> = {}
+  for (const key of ['chapter_goal', 'chapter_summary', 'conflict', 'ending_hook'] as const) {
+    if (patch[key] !== undefined) allowed[key] = patch[key]
+  }
+  return allowed
+}
+
 export async function commitEditorRevisionChapter(
   workspace: string,
   input: CommitEditorRevisionChapterInput,
@@ -81,16 +109,13 @@ export async function commitEditorRevisionChapter(
         WHERE project_id = ?
           AND review_type = 'editor_revision'
           AND json_valid(payload)
-          AND CAST(COALESCE(
-            json_extract(payload, '$.source_run_id'),
-            json_extract(payload, '$.run_id')
-          ) AS INTEGER) = ?
+          AND CAST(json_extract(payload, '$.source_run_id') AS INTEGER) = ?
           AND CAST(json_extract(payload, '$.chapter_id') AS INTEGER) = ?
           AND CAST(json_extract(payload, '$.candidate_hash') AS TEXT) = ?
         ORDER BY id DESC
         LIMIT 1
       `).get(input.projectId, input.runId, input.chapterId, input.candidateHash) as any
-      if (!receiptRow) throw revisionCommitError('REVISION_COMMIT_RECEIPT_NOT_FOUND')
+      if (!receiptRow) throw revisionCommitError('REVISION_COMMIT_RECEIPT_MISSING')
       return {
         status: 'already_committed',
         chapter: current,
@@ -118,18 +143,13 @@ export async function commitEditorRevisionChapter(
     })
     insertChapterVersionRow(db, version)
 
-    const chapterPatchRaw = input.chapterPatch.raw_payload
+    const planFields = currentPlanFields(input.chapterPatch)
     const nextChapter = {
       ...current,
-      ...input.chapterPatch,
-      id: current.id,
-      project_id: current.project_id,
+      ...planFields,
       chapter_text: input.candidateText,
       raw_payload: {
-        ...(current.raw_payload || {}),
-        ...(chapterPatchRaw && typeof chapterPatchRaw === 'object' && !Array.isArray(chapterPatchRaw)
-          ? chapterPatchRaw
-          : {}),
+        ...mergePlainObjects(current.raw_payload, input.chapterPatch.raw_payload),
         editor_revision_commit: {
           run_id: input.runId,
           source_hash: input.sourceTextHash,
