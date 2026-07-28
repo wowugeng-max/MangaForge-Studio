@@ -641,7 +641,7 @@ export async function recoverEditorRevisionRuns(workspace: string, now?: string)
           checkpoint = null
         }
       }
-      if (!run.scope_key || !checkpoint) {
+      if (!run.scope_key) {
         if (!recoverable) continue
         const result = db.query(`
           UPDATE runs

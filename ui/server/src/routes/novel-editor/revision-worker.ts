@@ -728,13 +728,14 @@ export function createEditorRevisionWorker(
     controller: AbortController,
     lease: LeaseState,
   ) {
-    const loaded = await phaseCheckpoint(input, runId, controller, lease)
-    const checkpoint = loaded.checkpoint
+    if (!lease.valid) throw revisionError('REVISION_LEASE_LOST')
+    const fresh = await deps.getRun(activeWorkspace!, input.project_id, runId)
+    if (!fresh) throw revisionError('REVISION_RUN_NOT_FOUND')
+    const checkpoint = parseCheckpoint(fresh.output_ref, fresh.status)
     const chapter = await deps.getChapter(activeWorkspace!, input.chapter_id, input.project_id)
     if (!chapter) throw revisionError('CHAPTER_NOT_FOUND')
     const marker = chapter.raw_payload?.editor_revision_commit
     const markerRunId = Number(marker?.run_id || 0)
-    if (markerRunId > runId) throw revisionError('REVISION_RUN_SUPERSEDED')
     const liveCommitMatches = Boolean(
       checkpoint.candidate
       && markerRunId === runId
@@ -742,7 +743,38 @@ export function createEditorRevisionWorker(
       && String(marker?.candidate_hash || '') === checkpoint.candidate.hash
       && revisionTextHash(String(chapter.chapter_text || '')) === checkpoint.candidate.hash,
     )
-    if (checkpoint.prose_persisted) {
+    const wasPersisted = checkpoint.prose_persisted
+    if (liveCommitMatches && !wasPersisted) {
+      const reviews = await deps.listReviews(activeWorkspace!, input.project_id)
+      const receipt = reviews.find(review => {
+        if (review.review_type !== 'editor_revision') return false
+        const payload = parseReviewPayload(review)
+        return Number(payload.source_run_id || 0) === runId
+          && Number(payload.chapter_id || 0) === input.chapter_id
+          && String(payload.candidate_hash || '') === checkpoint.candidate!.hash
+      })
+      checkpoint.phase = 'persist_chapter'
+      checkpoint.prose_persisted = true
+      checkpoint.committed_chapter_updated_at = chapter.updated_at
+      if (receipt?.id) checkpoint.editor_revision_review_id = receipt.id
+      checkpoint.phases.persist_chapter = {
+        status: 'completed',
+        attempt: Math.max(1, Number(checkpoint.phases.persist_chapter.attempt || 0)),
+        completed_at: deps.now(),
+        summary: { commit_status: 'already_committed', recovered: true },
+      }
+    }
+    const cancellationRequested = fresh.status === 'cancel_requested' || Boolean(fresh.cancel_requested_at)
+    if (cancellationRequested) {
+      if (liveCommitMatches) {
+        await finishCanceled(input, runId, checkpoint)
+        throw new StopProcessingError(revisionError('REVISION_CANCELED', 'revision canceled'))
+      }
+      throw revisionError('REVISION_CANCELED', 'revision canceled')
+    }
+    throwIfRevisionCanceled(fresh, controller.signal)
+    if (markerRunId > runId) throw revisionError('REVISION_RUN_SUPERSEDED')
+    if (wasPersisted) {
       if (!liveCommitMatches) throw revisionError('REVISION_RUN_SUPERSEDED')
       return checkpoint
     }
@@ -750,30 +782,36 @@ export function createEditorRevisionWorker(
     if (!liveCommitMatches) {
       throw revisionError('REVISION_RUN_SUPERSEDED')
     }
-    const recovered = await deps.commitChapter(activeWorkspace!, {
-      projectId: input.project_id,
-      chapterId: input.chapter_id,
-      runId,
-      sourceTextHash: input.source_text_hash,
-      candidateText: checkpoint.candidate.text,
-      candidateHash: checkpoint.candidate.hash,
-      chapterPatch: {},
-      reviewPayload: { source_review_id: input.review_id },
-      workerLease: { owner: leaseOwner },
-    })
-    checkpoint.phase = 'persist_chapter'
-    checkpoint.prose_persisted = true
-    checkpoint.committed_chapter_updated_at = recovered.chapter.updated_at
-    checkpoint.editor_revision_review_id = recovered.review.id
-    checkpoint.phases.persist_chapter = {
-      status: 'completed',
-      attempt: Math.max(1, Number(checkpoint.phases.persist_chapter.attempt || 0)),
-      completed_at: deps.now(),
-      summary: { commit_status: recovered.status, recovered: true },
+    try {
+      const recovered = await deps.commitChapter(activeWorkspace!, {
+        projectId: input.project_id,
+        chapterId: input.chapter_id,
+        runId,
+        sourceTextHash: input.source_text_hash,
+        candidateText: checkpoint.candidate.text,
+        candidateHash: checkpoint.candidate.hash,
+        chapterPatch: {},
+        reviewPayload: { source_review_id: input.review_id },
+        workerLease: { owner: leaseOwner },
+      })
+      checkpoint.committed_chapter_updated_at = recovered.chapter.updated_at
+      checkpoint.editor_revision_review_id = recovered.review.id
+      checkpoint.phases.persist_chapter.summary = { commit_status: recovered.status, recovered: true }
+    } catch (error) {
+      if (errorCode(error) === 'REVISION_CANCELED') {
+        await finishCanceled(input, runId, checkpoint)
+        throw new StopProcessingError(error)
+      }
+      throw error
     }
     try {
       await writeCheckpoint(runId, 'persist_chapter', checkpoint, 'running', undefined, lease)
     } catch (error) {
+      const after = await deps.getRun(activeWorkspace!, input.project_id, runId).catch(() => null)
+      if (after?.status === 'cancel_requested' || after?.cancel_requested_at) {
+        await finishCanceled(input, runId, checkpoint)
+        throw new StopProcessingError(revisionError('REVISION_CANCELED', 'revision canceled'))
+      }
       throw new StopProcessingError(error)
     }
     return checkpoint

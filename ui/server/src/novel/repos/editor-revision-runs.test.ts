@@ -1093,10 +1093,11 @@ describe('editor revision run repository', () => {
     })
   })
 
-  test('recovery terminalizes incoherent state only when its worker lease is recoverable', async () => {
-    const { workspace, project, chapters: [liveChapter, expiredChapter] } = await createFixture([1, 2])
+  test('recovery queues scoped invalid checkpoints only when their worker lease is recoverable', async () => {
+    const { workspace, project, chapters: [liveChapter, incoherentChapter, malformedChapter] } = await createFixture([1, 2, 3])
     const live = await createRun(workspace, project.id, liveChapter.id)
-    const expired = await createRun(workspace, project.id, expiredChapter.id)
+    const incoherent = await createRun(workspace, project.id, incoherentChapter.id)
+    const malformed = await createRun(workspace, project.id, malformedChapter.id)
     await claimEditorRevisionRun(workspace, {
       runId: live.id,
       owner: 'live-worker',
@@ -1104,34 +1105,48 @@ describe('editor revision run repository', () => {
       leaseMs: 60_000,
     })
     await claimEditorRevisionRun(workspace, {
-      runId: expired.id,
+      runId: incoherent.id,
       owner: 'expired-worker',
       now: '2030-07-27T10:00:00.000Z',
       leaseMs: 5_000,
     })
-    const incoherent = JSON.stringify({ ...initialCheckpoint(), prose_persisted: true })
+    await claimEditorRevisionRun(workspace, {
+      runId: malformed.id,
+      owner: 'malformed-worker',
+      now: '2030-07-27T10:00:00.000Z',
+      leaseMs: 5_000,
+    })
+    const incoherentRef = JSON.stringify({ ...initialCheckpoint(), prose_persisted: true })
+    const malformedRef = '{'
     const db = new Database(join(workspace, 'novel.sqlite'))
     try {
-      db.query('UPDATE runs SET output_ref = ? WHERE id IN (?, ?)').run(incoherent, live.id, expired.id)
+      db.query('UPDATE runs SET output_ref = ? WHERE id IN (?, ?)').run(incoherentRef, live.id, incoherent.id)
+      db.query('UPDATE runs SET output_ref = ? WHERE id = ?').run(malformedRef, malformed.id)
     } finally {
       db.close()
     }
 
     const recovered = await recoverEditorRevisionRuns(workspace, '2030-07-27T10:00:10.000Z')
 
-    expect(recovered.failedLegacy).toEqual([expired.id])
-    expect(recovered.queued).toHaveLength(0)
+    expect(recovered.failedLegacy).toEqual([])
+    expect(recovered.queued).toEqual([incoherent.id, malformed.id])
     expect(await getEditorRevisionRun(workspace, project.id, live.id)).toMatchObject({
       status: 'running',
       lease_owner: 'live-worker',
       lease_expires_at: '2030-07-27T10:01:00.000Z',
-      output_ref: incoherent,
+      output_ref: incoherentRef,
     })
-    expect(await getEditorRevisionRun(workspace, project.id, expired.id)).toMatchObject({
-      status: 'failed',
-      error_message: 'LEGACY_REVISION_RUN_NOT_RESUMABLE',
+    expect(await getEditorRevisionRun(workspace, project.id, incoherent.id)).toMatchObject({
+      status: 'queued',
       lease_owner: null,
       lease_expires_at: null,
+      output_ref: incoherentRef,
+    })
+    expect(await getEditorRevisionRun(workspace, project.id, malformed.id)).toMatchObject({
+      status: 'queued',
+      lease_owner: null,
+      lease_expires_at: null,
+      output_ref: malformedRef,
     })
   })
 })
