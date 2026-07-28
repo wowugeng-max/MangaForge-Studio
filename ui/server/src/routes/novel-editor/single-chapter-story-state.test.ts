@@ -25,7 +25,11 @@ import { openDb } from '../../novel/core'
 import { setNovelMutationTestHook } from '../../novel-test-support'
 import { createStoryStateMachineMethods } from '../../novel-writing-service/service/story-state-machine'
 import { compactPreparedStoryStateForRecovery } from '../../novel-writing-service/service/story-state-machine-update'
-import { materializeStoryRelations, relationPairKey } from '../novel-setting-story-relations'
+import {
+  buildForeshadowLifecycleBoard,
+  materializeStoryRelations,
+  relationPairKey,
+} from '../novel-setting-story-relations'
 import { createProseQualityReview } from './builders'
 import { revisionTextHash } from './revision-candidate-admission'
 import {
@@ -301,6 +305,167 @@ test('recovery compaction preserves documented and Phase A semantic fields', () 
       }],
     },
   })
+})
+
+test('recovery compaction preserves authoritative relationship and foreshadow fields', () => {
+  const compacted: any = compactPreparedStoryStateForRecovery({
+    state_delta: {
+      character_relationships: {
+        '李玄-顾舟': {
+          party_a: '李玄',
+          party_b: '顾舟',
+          current_status: '有限结盟',
+          story_relation_type: '联盟',
+          emotion: '正面',
+          start_chapter_no: 3,
+          change_nodes: [{ chapter_no: 4, note: '共同发现旧印章', event_id: 'evt-4', kind: 'cooperation' }],
+        },
+        '林青禾-李玄': {
+          a: '林青禾',
+          b: '李玄',
+          status: '有限互信',
+          relation_type: '工作',
+          start: 5,
+        },
+      },
+      relationship_graph: {
+        '李玄↔王府管事': {
+          party_a: '李玄',
+          party_b: '王府管事',
+          status: '公开对立',
+          type: '冲突',
+        },
+      },
+      foreshadowing_status: {
+        '旧印章来历': {
+          summary: '旧臣见到印章后避开',
+          detail: '尚未揭示具体来历',
+          lifecycle: '已埋',
+          importance: '高',
+          plant_chapter_no: 3,
+          expected_resolve_chapter_no: 12,
+          resolve_chapter_no: null,
+          planted_at: '第3章',
+          due: '第12章',
+          resolved_at: null,
+        },
+      },
+    },
+    character_updates: [],
+    setting_updates: [],
+    storyline_updates: [],
+    sync_reports: {},
+    hard_failures: [],
+    payload: {},
+  } as any)
+
+  expect(compacted.state_delta).toEqual({
+    character_relationships: {
+      '李玄-顾舟': {
+        party_a: '李玄',
+        party_b: '顾舟',
+        current_status: '有限结盟',
+        story_relation_type: '联盟',
+        emotion: '正面',
+        start_chapter_no: 3,
+        change_nodes: [{ chapter_no: 4, note: '共同发现旧印章', event_id: 'evt-4', kind: 'cooperation' }],
+      },
+      '林青禾-李玄': {
+        a: '林青禾',
+        b: '李玄',
+        status: '有限互信',
+        relation_type: '工作',
+        start: 5,
+      },
+    },
+    relationship_graph: {
+      '李玄↔王府管事': {
+        party_a: '李玄',
+        party_b: '王府管事',
+        status: '公开对立',
+        type: '冲突',
+      },
+    },
+    foreshadowing_status: {
+      '旧印章来历': {
+        summary: '旧臣见到印章后避开',
+        detail: '尚未揭示具体来历',
+        lifecycle: '已埋',
+        importance: '高',
+        plant_chapter_no: 3,
+        expected_resolve_chapter_no: 12,
+        resolve_chapter_no: null,
+        planted_at: '第3章',
+        due: '第12章',
+        resolved_at: null,
+      },
+    },
+  })
+})
+
+test('recovery compaction validates dynamic keys and strips unknown canon prose', () => {
+  const paragraphKey = `这是一段不应被当作角色名的正文。${'他穿过长廊继续追查。'.repeat(12)}`
+  const compacted: any = compactPreparedStoryStateForRecovery({
+    state_delta: {
+      character_positions: {
+        '李玄': '旧码头',
+        [paragraphKey]: '不应保留',
+      },
+      canon_facts: [{ fact: '旧印章属于前朝密卫', description: 'CANON_DESCRIPTION_PROSE' }],
+      style_fingerprint: '文风指纹：目标句长带 18-36 字',
+    },
+    character_updates: [],
+    setting_updates: [],
+    storyline_updates: [],
+    sync_reports: {},
+    hard_failures: [],
+    payload: {},
+  } as any)
+  const serialized = JSON.stringify(compacted)
+
+  expect(compacted.state_delta.character_positions).toEqual({ '李玄': '旧码头' })
+  expect(compacted.state_delta.canon_facts).toEqual([{ fact: '旧印章属于前朝密卫' }])
+  expect(compacted.state_delta.style_fingerprint).toBe('文风指纹：目标句长带 18-36 字')
+  expect(serialized).not.toContain('CANON_DESCRIPTION_PROSE')
+  expect(serialized).not.toContain(paragraphKey)
+})
+
+test('recovery compaction drops arbitrary nested unknown fields from every persisted branch', () => {
+  const compacted: any = compactPreparedStoryStateForRecovery({
+    state_delta: {
+      canon_facts: [{ fact: '旧印章为真', description: { arbitrary_nested: 'ARBITRARY_STATE' } }],
+    },
+    character_updates: [{
+      name: '李玄',
+      current_state: { goals: { '追查旧印章': { status: { arbitrary_nested: 'ARBITRARY_CHARACTER' } } } },
+    }],
+    setting_updates: [{
+      name: '旧印章',
+      state_delta: { constraints: { '归属': { status: { arbitrary_nested: 'ARBITRARY_SETTING' } } } },
+    }],
+    storyline_updates: [{
+      name: '追查旧印章',
+      state_delta: { constraints: { '进展': { status: { arbitrary_nested: 'ARBITRARY_STORYLINE' } } } },
+    }],
+    sync_reports: {
+      state_delta_completeness: { missed: [{ key: 'timeline', evidence: { arbitrary_nested: 'ARBITRARY_SYNC' } }] },
+    },
+    hard_failures: [{
+      key: 'state_delta_completeness',
+      message: '状态不完整',
+      source: 'story_state',
+      details: [{ key: 'timeline', evidence: { arbitrary_nested: 'ARBITRARY_FAILURE' } }],
+    }],
+    payload: {
+      discovered_assets: [{ name: '铜钥匙', evidence: { arbitrary_nested: 'ARBITRARY_ASSET' } }],
+      ip_scene_candidates: [{ title: '门前对峙', summary: { arbitrary_nested: 'ARBITRARY_SCENE' } }],
+      foreshadowing_status: { '旧印章来历': { status: { arbitrary_nested: 'ARBITRARY_FORESHADOW' } } },
+    },
+  } as any)
+  const serialized = JSON.stringify(compacted)
+
+  expect(serialized).not.toContain('arbitrary_nested')
+  expect(serialized).not.toContain('ARBITRARY_')
 })
 
 function executeSql(workspace: string, sql: string) {
@@ -1851,11 +2016,111 @@ describe('single chapter Story State', () => {
     expect(storylineUsage?.actual_state_change?.constraints).toMatchObject({ delta_1: true, delta_2: true })
   }, 30_000)
 
+  test('first exact apply preserves authoritative relationship and foreshadow contracts', async () => {
+    const fixture = await storyFixture(1, async () => {
+      const payload = storyStatePayload('authoritative_contracts')
+      payload.state_delta.character_relationships = {
+        '李玄-顾舟': {
+          party_a: '李玄',
+          party_b: '顾舟',
+          current_status: '有限结盟',
+          story_relation_type: '联盟',
+          emotion: '正面',
+          start_chapter_no: 1,
+          change_nodes: [{ chapter_no: 1, note: '共同追查旧印章' }],
+        },
+      }
+      payload.state_delta.foreshadowing_status = {
+        '旧印章来历': {
+          summary: '旧臣见到印章后避开',
+          lifecycle: '已埋',
+          importance: '高',
+          plant_chapter_no: 1,
+          expected_resolve_chapter_no: 12,
+        },
+      }
+      return { parsed: payload, finish_reason: 'stop' }
+    })
+    await createNovelCharacter(workspace, { project_id: fixture.project.id, name: '顾舟' } as any)
+    const target = fixture.chapters[0]
+    const exactReceipt = receipt(target.id, revisionTextHash(String(target.chapter_text || '')), 60)
+    const preparedResult = await prepareSingleChapterStoryState(fixture.ctx, {
+      workspace,
+      projectId: fixture.project.id,
+      chapterId: target.id,
+      receipt: exactReceipt,
+    })
+
+    await applySingleChapterStoryState(fixture.ctx, {
+      workspace,
+      projectId: fixture.project.id,
+      chapterId: target.id,
+      receipt: exactReceipt,
+      prepared: preparedResult.prepared,
+    })
+
+    const storedProject = await getNovelProject(workspace, fixture.project.id)
+    const storyState = storedProject?.reference_config?.story_state
+    const relationship = (await listNovelSettingEntities(workspace, fixture.project.id))
+      .find(item => item.entity_type === 'relationship')
+    const foreshadow = buildForeshadowLifecycleBoard({ storyState }).rows
+      .find(item => item.name === '旧印章来历')
+
+    expect(storyState?.character_relationships?.['李玄-顾舟']).toEqual({
+      party_a: '李玄',
+      party_b: '顾舟',
+      current_status: '有限结盟',
+      story_relation_type: '联盟',
+      emotion: '正面',
+      start_chapter_no: 1,
+      change_nodes: [{ chapter_no: 1, note: '共同追查旧印章' }],
+    })
+    expect(relationship?.state_json).toMatchObject({
+      current_status: '有限结盟',
+      story_relation_type: '联盟',
+      emotion: '正面',
+      start_chapter_no: 1,
+      change_nodes: [{ chapter_no: 1, note: '共同追查旧印章' }],
+    })
+    expect(storyState?.foreshadowing_status?.['旧印章来历']).toMatchObject({
+      lifecycle: '已埋',
+      importance: '高',
+      plant_chapter_no: 1,
+      expected_resolve_chapter_no: 12,
+    })
+    expect(foreshadow).toMatchObject({
+      lifecycle: '已埋',
+      importance: '高',
+      plant_chapter_no: 1,
+      expected_resolve_chapter_no: 12,
+    })
+  }, 30_000)
+
   test('resumes state-applied derived materialization without another model call', async () => {
     const fixture = await storyFixture(3, async () => {
       const payload = storyStatePayload('semantic_recovery')
+      payload.state_delta.character_relationships = {
+        '李玄-顾舟': {
+          party_a: '李玄',
+          party_b: '顾舟',
+          current_status: '有限结盟',
+          relation_type: '联盟',
+          emotion: '正面',
+          start: 1,
+          change_nodes: [{ chapter_no: 1, note: '共同追查旧印章' }],
+        },
+      }
       payload.state_delta.foreshadowing_status = {
-        '旧印章来历': { payoff_status: 'paid', clue: '旧臣避开腰牌', triggered: true },
+        '旧印章来历': {
+          payoff_status: 'paid',
+          clue: '旧臣避开腰牌',
+          triggered: true,
+          lifecycle: '已回收',
+          importance: '高',
+          plant_chapter_no: 1,
+          expected_resolve_chapter_no: 12,
+          resolve_chapter_no: 3,
+        },
       }
       payload.character_updates[0].current_state.public_image = '公开作证后得罪会长'
       payload.setting_updates[0].state_delta = {
@@ -1941,8 +2206,28 @@ describe('single chapter Story State', () => {
     expect(recoveredPrepare.prepared?.receipt_binding).toMatchObject({ key: receiptKey })
     expect(recoveredPrepare.prepared).toMatchObject({
       state_delta: {
+        character_relationships: {
+          '李玄-顾舟': {
+            party_a: '李玄',
+            party_b: '顾舟',
+            current_status: '有限结盟',
+            relation_type: '联盟',
+            emotion: '正面',
+            start: 1,
+            change_nodes: [{ chapter_no: 1, note: '共同追查旧印章' }],
+          },
+        },
         foreshadowing_status: {
-          '旧印章来历': { payoff_status: 'paid', clue: '旧臣避开腰牌', triggered: true },
+          '旧印章来历': {
+            payoff_status: 'paid',
+            clue: '旧臣避开腰牌',
+            triggered: true,
+            lifecycle: '已回收',
+            importance: '高',
+            plant_chapter_no: 1,
+            expected_resolve_chapter_no: 12,
+            resolve_chapter_no: 3,
+          },
         },
       },
       character_updates: [{ current_state: { public_image: '公开作证后得罪会长' } }],

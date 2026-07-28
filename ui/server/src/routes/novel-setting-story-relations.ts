@@ -333,7 +333,10 @@ export function buildStoryRelationMaster(input: {
       party_a: pair.party_a,
       party_b: pair.party_b,
       current_status: status,
-      story_relation_type: typeof value === 'object' ? text((value as any)?.type || (value as any)?.relation_type, 20) : '',
+      story_relation_type: typeof value === 'object'
+        ? text((value as any)?.story_relation_type || (value as any)?.relation_type || (value as any)?.type, 20)
+        : '',
+      emotion: typeof value === 'object' ? (text((value as any)?.emotion, 8) as any) || undefined : undefined,
       start_chapter_no: typeof value === 'object' ? chapterNoFromText((value as any)?.start_chapter_no || (value as any)?.start) : null,
       change_nodes: typeof value === 'object' ? asArray((value as any)?.change_nodes) : [],
       source: 'story_state.character_relationships',

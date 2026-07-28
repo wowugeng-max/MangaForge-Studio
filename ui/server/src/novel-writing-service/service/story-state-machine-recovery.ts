@@ -170,7 +170,37 @@ const STORYLINE_STATE_RECOVERY_KEYS = [
 
 const FORESHADOWING_STATE_RECOVERY_KEYS = [
   ...STORYLINE_STATE_RECOVERY_KEYS,
+  'detail',
+  'lifecycle',
+  'importance',
+  'plant_chapter_no',
+  'planted_at',
+  'expected_resolve_chapter_no',
+  'due',
+  'resolve_chapter_no',
+  'resolved_at',
   'triggered',
+] as const
+
+const RELATIONSHIP_STATE_RECOVERY_KEYS = [
+  'party_a',
+  'party_b',
+  'a',
+  'b',
+  'current_status',
+  'status',
+  'state',
+  'story_relation_type',
+  'relation_type',
+  'type',
+  'emotion',
+  'start_chapter_no',
+  'start',
+  'change_nodes',
+  'cost',
+  'summary',
+  'progress',
+  'confidence',
 ] as const
 
 const DISCOVERED_ASSET_CONSTRAINT_RECOVERY_KEYS = [
@@ -185,17 +215,6 @@ const DISCOVERED_ASSET_STATE_RECOVERY_KEYS = [
   'current_state',
   'payoff_status',
   'clue',
-] as const
-
-const RECOVERY_NAMED_MAP_STATE_KEYS = [
-  'character_positions',
-  'character_relationships',
-  'relationship_graph',
-  'known_secrets',
-  'secret_visibility',
-  'item_ownership',
-  'resource_status',
-  'foreshadowing_status',
 ] as const
 
 const TIMELINE_RECOVERY_KEYS = ['event', 'time', 'current_time', 'location', 'chapter_no', 'sequence', 'status', 'source_excerpt', 'evidence'] as const
@@ -222,6 +241,7 @@ const ESTABLISHED_EVENT_RECOVERY_KEYS = [
   'id', 'chapter_no', 'kind', 'subject', 'predicate', 'fact', 'cause', 'mechanism', 'constraints',
   'aliases', 'source_excerpt', 'lock_level', 'status', 'mutable', 'confidence', 'last_seen_chapter', 'tags',
 ] as const
+const RELATION_CHANGE_NODE_RECOVERY_KEYS = ['chapter_no', 'note', 'event_id', 'kind'] as const
 const COMPLETENESS_ITEM_RECOVERY_KEYS = [
   'key', 'label', 'evidence', 'high_confidence_evidence', 'fix', 'blocking', 'confidence',
 ] as const
@@ -289,43 +309,32 @@ function recoveryCheckpointTooLarge(field: string) {
   })
 }
 
-function sanitizeAllowedRecoveryValue(
-  value: any,
-  field: string,
-  depth = 0,
-  budget: { nodes: number } = { nodes: RECOVERY_MAX_NODES_PER_FIELD },
-  seen = new WeakSet<object>(),
-): any {
+function sanitizeRecoveryScalar(value: any, field: string, budget: { nodes: number }): any {
   if (value === undefined) return undefined
-  if (depth > RECOVERY_MAX_DEPTH || budget.nodes <= 0) throw recoveryCheckpointTooLarge(field)
+  if (budget.nodes <= 0) throw recoveryCheckpointTooLarge(field)
   budget.nodes -= 1
   if (typeof value === 'string') {
     if (Array.from(value).length > RECOVERY_MAX_STRING_LENGTH) throw recoveryCheckpointTooLarge(field)
     return value
   }
   if (value === null || typeof value === 'number' || typeof value === 'boolean') return value
-  if (typeof value !== 'object') return undefined
-  if (seen.has(value)) throw recoveryCheckpointTooLarge(field)
-  seen.add(value)
-  try {
-    if (Array.isArray(value)) {
-      if (value.length > RECOVERY_MAX_ARRAY_ITEMS) throw recoveryCheckpointTooLarge(field)
-      return value
-        .map(item => sanitizeAllowedRecoveryValue(item, field, depth + 1, budget, seen))
-        .filter(item => item !== undefined)
-    }
-    const entries = Object.entries(value)
-      .filter(([key, item]) => item !== undefined && !forbiddenRecoveryKey(key))
-    if (entries.length > RECOVERY_MAX_OBJECT_KEYS) throw recoveryCheckpointTooLarge(field)
-    const output: Record<string, any> = {}
-    for (const [key, item] of entries) {
-      const sanitized = sanitizeAllowedRecoveryValue(item, field, depth + 1, budget, seen)
-      if (sanitized !== undefined) output[key] = sanitized
-    }
-    return output
-  } finally {
-    seen.delete(value)
-  }
+  return undefined
+}
+
+function sanitizeRecoveryScalarOrArray(value: any, field: string, budget: { nodes: number }): any {
+  if (!Array.isArray(value)) return sanitizeRecoveryScalar(value, field, budget)
+  if (value.length > RECOVERY_MAX_ARRAY_ITEMS) throw recoveryCheckpointTooLarge(field)
+  return value
+    .map(item => sanitizeRecoveryScalar(item, field, budget))
+    .filter(item => item !== undefined)
+}
+
+function validRecoveryDynamicKey(key: string) {
+  const value = String(key || '')
+  const characters = Array.from(value)
+  if (!value || value.trim() !== value || characters.length > 80 || forbiddenRecoveryKey(value)) return false
+  if (/[\r\n\t。，！？；：“”‘’]/u.test(value)) return false
+  return value.split(/\s+/).filter(Boolean).length <= 6
 }
 
 function firstOwnValue(source: Record<string, any>, keys: readonly string[]) {
@@ -349,7 +358,7 @@ function recoveryRecord(
     if (item === undefined) continue
     const sanitized = sanitizers[canonicalKey]
       ? sanitizers[canonicalKey](item, budget)
-      : sanitizeAllowedRecoveryValue(item, field, 1, budget)
+      : sanitizeRecoveryScalarOrArray(item, field, budget)
     if (sanitized !== undefined) output[canonicalKey] = sanitized
   }
   return output
@@ -360,18 +369,20 @@ function sanitizeRecoveryNamedMap(
   field: string,
   budget: { nodes: number },
   valueFields: readonly string[] = RECOVERY_DOMAIN_VALUE_KEYS,
+  objectSanitizer?: (value: any, budget: { nodes: number }) => any,
 ) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
   const entries = Object.entries(source)
-    .filter(([key, item]) => item !== undefined && !forbiddenRecoveryKey(key))
+    .filter(([key, item]) => item !== undefined && validRecoveryDynamicKey(key))
   if (entries.length > RECOVERY_MAX_OBJECT_KEYS) throw recoveryCheckpointTooLarge(field)
-  const domainFields = identityRecoveryFields(valueFields)
   const output: Record<string, any> = {}
   for (const [key, item] of entries) {
     if (item && typeof item === 'object' && !Array.isArray(item)) {
-      output[key] = recoveryRecord(item, domainFields, field, budget)
+      output[key] = objectSanitizer
+        ? objectSanitizer(item, budget)
+        : sanitizeRecoveryDomainStateRecord(item, field, budget, valueFields)
     } else {
-      const sanitized = sanitizeAllowedRecoveryValue(item, field, 1, budget)
+      const sanitized = sanitizeRecoveryScalarOrArray(item, field, budget)
       if (sanitized !== undefined) output[key] = sanitized
     }
   }
@@ -390,7 +401,7 @@ function sanitizeRecoveryStructuredArray(
   return source.map(item => (
     item && typeof item === 'object' && !Array.isArray(item)
       ? recoveryRecord(item, itemFields, field, budget)
-      : sanitizeAllowedRecoveryValue(item, field, 1, budget)
+      : sanitizeRecoveryScalar(item, field, budget)
   )).filter(item => item !== undefined)
 }
 
@@ -415,11 +426,13 @@ function sanitizeRecoveryDomainStateRecord(
       if (OPEN_DOMAIN_MAP_KEYS.has(key)) {
         output[key] = item && typeof item === 'object' && !Array.isArray(item)
           ? sanitizeRecoveryNamedMap(item, field, budget, valueFields)
-          : sanitizeAllowedRecoveryValue(item, field, depth + 1, budget, seen)
+          : sanitizeRecoveryScalarOrArray(item, field, budget)
+      } else if (Array.isArray(item)) {
+        output[key] = sanitizeRecoveryStructuredArray(item, valueFields, field, budget)
       } else if (item && typeof item === 'object' && !Array.isArray(item)) {
         output[key] = sanitizeRecoveryDomainStateRecord(item, field, budget, valueFields, depth + 1, seen)
       } else {
-        const sanitized = sanitizeAllowedRecoveryValue(item, field, depth + 1, budget, seen)
+        const sanitized = sanitizeRecoveryScalar(item, field, budget)
         if (sanitized !== undefined) output[key] = sanitized
       }
     }
@@ -437,7 +450,47 @@ function sanitizeRecoveryDomainContractValue(
 ) {
   if (Array.isArray(value)) return sanitizeRecoveryStructuredArray(value, valueFields, field, budget)
   if (value && typeof value === 'object') return sanitizeRecoveryDomainStateRecord(value, field, budget, valueFields)
-  return sanitizeAllowedRecoveryValue(value, field, 1, budget)
+  return sanitizeRecoveryScalar(value, field, budget)
+}
+
+function sanitizeRecoveryRelationshipValue(value: any, field: string, budget: { nodes: number }) {
+  return recoveryRecord(
+    value,
+    identityRecoveryFields(RELATIONSHIP_STATE_RECOVERY_KEYS),
+    field,
+    budget,
+    {
+      change_nodes: (item, itemBudget) => sanitizeRecoveryStructuredArray(
+        item, RELATION_CHANGE_NODE_RECOVERY_KEYS, field, itemBudget,
+      ),
+    },
+  )
+}
+
+function sanitizeRecoveryRelationshipMap(value: any, field: string, budget: { nodes: number }) {
+  return sanitizeRecoveryNamedMap(
+    value,
+    field,
+    budget,
+    RELATIONSHIP_STATE_RECOVERY_KEYS,
+    (item, itemBudget) => sanitizeRecoveryRelationshipValue(item, field, itemBudget),
+  )
+}
+
+function sanitizeRecoveryForeshadowMap(value: any, field: string, budget: { nodes: number }) {
+  return sanitizeRecoveryNamedMap(
+    value,
+    field,
+    budget,
+    FORESHADOWING_STATE_RECOVERY_KEYS,
+    (item, itemBudget) => recoveryRecord(
+      item, identityRecoveryFields(FORESHADOWING_STATE_RECOVERY_KEYS), field, itemBudget,
+    ),
+  )
+}
+
+function sanitizeRecoveryCanonFacts(value: any, field: string, budget: { nodes: number }) {
+  return sanitizeRecoveryStructuredArray(value, ESTABLISHED_EVENT_RECOVERY_KEYS, field, budget)
 }
 
 function sanitizeRecoveryLayeredMemory(value: any, field: string, budget: { nodes: number }) {
@@ -466,7 +519,7 @@ function recoveryArray(
   const source = Array.isArray(value) ? value : []
   if (source.length > RECOVERY_MAX_ARRAY_ITEMS) throw recoveryCheckpointTooLarge(field)
   const budget = { nodes: RECOVERY_MAX_NODES_PER_FIELD }
-  return source.map(entry => item(entry, budget))
+  return source.map(entry => item(entry, budget)).filter(entry => entry !== undefined)
 }
 
 function checkedRecoveryField<T>(field: keyof typeof RECOVERY_FIELD_BYTE_LIMITS, value: T): T {
@@ -544,20 +597,26 @@ export function sanitizeRecoveryValue(
 
 export function compactPreparedStoryStateForRecovery(prepared: PreparedStoryStateUpdate) {
   const payload = prepared.payload || {}
-  const namedMapFields: Record<string, readonly string[]> = {
-    character_positions: RECOVERY_DOMAIN_VALUE_KEYS,
-    character_relationships: STORYLINE_STATE_RECOVERY_KEYS,
-    relationship_graph: STORYLINE_STATE_RECOVERY_KEYS,
-    known_secrets: RECOVERY_DOMAIN_VALUE_KEYS,
-    secret_visibility: RECOVERY_DOMAIN_VALUE_KEYS,
-    item_ownership: SETTING_STATE_RECOVERY_KEYS,
-    resource_status: SETTING_STATE_RECOVERY_KEYS,
-    foreshadowing_status: FORESHADOWING_STATE_RECOVERY_KEYS,
+  const namedMapSanitizers: Record<string, (value: any, budget: { nodes: number }) => any> = {
+    character_positions: (value, budget) => sanitizeRecoveryNamedMap(
+      value, 'state_delta', budget, RECOVERY_DOMAIN_VALUE_KEYS,
+    ),
+    character_relationships: (value, budget) => sanitizeRecoveryRelationshipMap(value, 'state_delta', budget),
+    relationship_graph: (value, budget) => sanitizeRecoveryRelationshipMap(value, 'state_delta', budget),
+    known_secrets: (value, budget) => sanitizeRecoveryNamedMap(
+      value, 'state_delta', budget, RECOVERY_DOMAIN_VALUE_KEYS,
+    ),
+    secret_visibility: (value, budget) => sanitizeRecoveryNamedMap(
+      value, 'state_delta', budget, RECOVERY_DOMAIN_VALUE_KEYS,
+    ),
+    item_ownership: (value, budget) => sanitizeRecoveryNamedMap(
+      value, 'state_delta', budget, SETTING_STATE_RECOVERY_KEYS,
+    ),
+    resource_status: (value, budget) => sanitizeRecoveryNamedMap(
+      value, 'state_delta', budget, SETTING_STATE_RECOVERY_KEYS,
+    ),
+    foreshadowing_status: (value, budget) => sanitizeRecoveryForeshadowMap(value, 'state_delta', budget),
   }
-  const namedMapSanitizers: Record<string, (value: any, budget: { nodes: number }) => any> = Object.fromEntries(RECOVERY_NAMED_MAP_STATE_KEYS.map(key => [
-    key,
-    (value: any, budget: { nodes: number }) => sanitizeRecoveryNamedMap(value, 'state_delta', budget, namedMapFields[key]),
-  ]))
   Object.assign(namedMapSanitizers, {
     current_time: (value: any, budget: { nodes: number }) => sanitizeRecoveryDomainContractValue(value, 'state_delta', budget),
     timeline: (value: any, budget: { nodes: number }) => sanitizeRecoveryStructuredArray(value, TIMELINE_RECOVERY_KEYS, 'state_delta', budget),
@@ -592,6 +651,8 @@ export function compactPreparedStoryStateForRecovery(prepared: PreparedStoryStat
     established_events: (value: any, budget: { nodes: number }) => sanitizeRecoveryStructuredArray(
       value, ESTABLISHED_EVENT_RECOVERY_KEYS, 'state_delta', budget,
     ),
+    canon_facts: (value: any, budget: { nodes: number }) => sanitizeRecoveryCanonFacts(value, 'state_delta', budget),
+    style_fingerprint: (value: any, budget: { nodes: number }) => sanitizeRecoveryScalar(value, 'state_delta', budget),
     style_fingerprint_contract: (value: any, budget: { nodes: number }) => recoveryRecord(
       value, identityRecoveryFields(STYLE_CONTRACT_RECOVERY_KEYS), 'state_delta', budget,
     ),
@@ -694,11 +755,10 @@ export function compactPreparedStoryStateForRecovery(prepared: PreparedStoryStat
         'title', 'summary', 'visual_hook', 'adaptation_value', 'spread_point', 'evidence', 'source_excerpt', 'tags',
       ]), 'payload', budget),
     ),
-    foreshadowing_status: sanitizeRecoveryNamedMap(
+    foreshadowing_status: sanitizeRecoveryForeshadowMap(
       firstOwnValue(payload, ['foreshadowing_status', 'foreshadowingStatus']) || {},
       'payload',
       payloadBudget,
-      FORESHADOWING_STATE_RECOVERY_KEYS,
     ),
   }
   return {
