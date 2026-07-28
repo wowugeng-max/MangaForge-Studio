@@ -26,6 +26,11 @@ import { setNovelMutationTestHook } from '../../novel-test-support'
 import { createStoryStateMachineMethods } from '../../novel-writing-service/service/story-state-machine'
 import { compactPreparedStoryStateForRecovery } from '../../novel-writing-service/service/story-state-machine-update'
 import {
+  normalizeDiscoveredAssets,
+  normalizeIpSceneCandidates,
+} from '../../novel-writing-service/post-delivery/asset-banks'
+import { normalizeEstablishedEvent } from '../../novel-writing/established-event-canon'
+import {
   buildForeshadowLifecycleBoard,
   materializeStoryRelations,
   relationPairKey,
@@ -164,7 +169,7 @@ test('recovery compaction whitelists resumable state and strips prose-bearing ne
     storyline_updates: [{ name: '追查旧印章', state_delta: { active: true } }],
     sync_reports: { state_delta_completeness: { planned_count: 1, missed: [] } },
     payload: {
-      discovered_assets: [{ name: '铜钥匙', evidence: '可恢复证据' }],
+      discovered_assets: [{ name: '铜钥匙', evidence: '可恢复证据', source_excerpt: '可恢复证据' }],
       ip_scene_candidates: [{ title: '门前对峙', summary: '铜钥匙在众人面前暴露' }],
       foreshadowing_status: { seal: 'open' },
     },
@@ -466,6 +471,257 @@ test('recovery compaction drops arbitrary nested unknown fields from every persi
 
   expect(serialized).not.toContain('arbitrary_nested')
   expect(serialized).not.toContain('ARBITRARY_')
+})
+
+test('recovery compaction preserves every established-event normalizer alias contract', () => {
+  const fixtures = [
+    {
+      id: 'evt-canonical',
+      chapter_no: 2,
+      kind: 'promise',
+      subject: '李玄',
+      predicate: '承诺',
+      fact: '李玄承诺交还旧印章',
+      source_excerpt: '李玄收起印章，说会亲手交还。',
+      lock_level: 'hard',
+      last_seen_chapter: 3,
+      confidence: 0.9,
+      status: 'confirmed',
+      cause: '偿还旧臣人情',
+      mechanism: '当面承诺',
+      constraints: ['不得转交他人'],
+      aliases: ['归还印章'],
+      tags: ['promise'],
+    },
+    {
+      id: 'evt-camel',
+      chapterNo: 4,
+      kind: 'identity_reveal',
+      name: '顾舟',
+      aspect: '身份',
+      text: '顾舟是前朝密卫后人',
+      sourceExcerpt: '顾舟取出密卫铜牌。',
+      lockLevel: 'soft',
+      lastSeenChapter: 5,
+      confidence: 0.8,
+    },
+    {
+      id: 'evt-fallback',
+      chapter_no: 6,
+      kind: 'secret_known',
+      who: '林青禾',
+      predicate: '得知',
+      summary: '林青禾已知道旧印章来历',
+      evidence: '她看完密信，将印章推回桌上。',
+      lock_level: 'hard',
+      last_seen_chapter: 6,
+      confidence: 0.95,
+    },
+    {
+      id: 'evt-falsy-canonical',
+      chapter_no: 0,
+      chapterNo: 7,
+      kind: 'identity_reveal',
+      subject: '',
+      name: '沈烛',
+      predicate: null,
+      aspect: '身份',
+      fact: '',
+      text: '沈烛是旧案唯一的幸存者',
+      source_excerpt: null,
+      evidence: '沈烛从袖中取出当年的案卷。',
+      lock_level: '',
+      lockLevel: 'hard',
+      last_seen_chapter: 0,
+      lastSeenChapter: 7,
+      confidence: 0.92,
+    },
+  ]
+
+  for (const fixture of fixtures) {
+    const before = normalizeEstablishedEvent(fixture)
+    const compacted: any = compactPreparedStoryStateForRecovery({
+      state_delta: { established_events: [fixture] },
+      character_updates: [],
+      setting_updates: [],
+      storyline_updates: [],
+      sync_reports: {},
+      hard_failures: [],
+      payload: {},
+    } as any)
+    const after = normalizeEstablishedEvent(compacted.state_delta.established_events[0])
+    expect(after).toEqual(before)
+  }
+})
+
+test('recovery compaction preserves every discovered-asset normalizer alias contract', () => {
+  const fixtures = [
+    {
+      entity_type: 'item',
+      name: '铜钥匙',
+      summary: '可以打开旧院地库',
+      evidence: '李玄从夹层取出铜钥匙。',
+      source_excerpt: '夹层里躺着一枚铜钥匙。',
+      first_chapter_no: 3,
+      constraints_json: { owner_rule: '只能由李玄持有' },
+      state_json: { current_owner: '李玄' },
+    },
+    {
+      type: 'ability',
+      title: '听风辨位',
+      description: '可循风声定位暗门',
+      quote: '他闭眼听见墙后的回响。',
+      constraints: { rule: '必须保持安静' },
+      suggested_state: { available: true },
+    },
+    {
+      entity_type: 'character',
+      name: '秦建国',
+      role: '战略防卫局局长',
+      source_text: '秦建国从阴影中走出。',
+      source_excerpt: '秦建国从阴影中走出。',
+      state: { status: '首次出场' },
+    },
+    {
+      entity_type: 'character',
+      name: '陆遥',
+      role: '密档馆守门人',
+      source_text: '陆遥只在旧档案的合影中出现过。',
+      state_json: { status: '待确认' },
+    },
+    {
+      entity_type: 'item',
+      name: '旧档案编号',
+      summary: '指向密档馆的入库记录',
+      evidence: '编号与入库表一致。',
+      source_text: 'SHADOWED_ASSET_SOURCE_PROSE',
+    },
+    {
+      entity_type: 'location',
+      name: '旧码头',
+      effect: '潮水会掩盖脚印',
+      evidence: '涨潮正在吞没石阶。',
+      constraints_json: { advance_rule: '必须在涨潮前进入' },
+      state_json: { active: true },
+    },
+    {
+      entity_type: '',
+      type: 'item',
+      name: null,
+      title: '密库铁牌',
+      summary: '',
+      role: '可换取一次密库通行',
+      evidence: null,
+      quote: '守卫验过铁牌后让开通道。',
+      source_excerpt: '',
+      constraints_json: null,
+      constraints: { owner_rule: '只能由沈烛持有' },
+      state_json: null,
+      state: { current_owner: '沈烛' },
+    },
+  ]
+  const chapter = { id: 9, chapter_no: 3 }
+  const semantic = (value: any) => {
+    const { payload_json: _payloadJson, ...record } = value || {}
+    return record
+  }
+
+  for (const fixture of fixtures) {
+    const before = semantic(normalizeDiscoveredAssets([fixture], { chapter })[0])
+    const compacted: any = compactPreparedStoryStateForRecovery({
+      state_delta: {},
+      character_updates: [],
+      setting_updates: [],
+      storyline_updates: [],
+      sync_reports: {},
+      hard_failures: [],
+      payload: { discovered_assets: [fixture] },
+    } as any)
+    const after = semantic(normalizeDiscoveredAssets(compacted.payload.discovered_assets, { chapter })[0])
+    expect(after).toEqual(before)
+    expect(JSON.stringify(compacted)).not.toContain('SHADOWED_ASSET_SOURCE_PROSE')
+  }
+})
+
+test('recovery compaction preserves every IP-scene normalizer alias contract', () => {
+  const fixtures = [
+    {
+      title: '门前对峙',
+      summary: '李玄当众亮出旧印章',
+      visual_hook: '雨中印章反光',
+      adaptation_value: '短剧高冲突节点',
+      spread_point: '身份反转',
+      evidence: '李玄把印章按在门上。',
+      source_excerpt: '印章在雨幕里一闪。',
+      tags: ['反转'],
+    },
+    {
+      name: '密室开门',
+      description: '铜钥匙开启尘封密室',
+      visual: '石门缝隙漏出蓝光',
+      ip_value: '漫剧分镜高点',
+      comment_point: '钥匙来历引发讨论',
+      quote: '石门后的蓝光照亮了众人。',
+      excerpt: '一道蓝光从门缝中溢出。',
+      tags: ['密室'],
+    },
+    {
+      title: '码头追击',
+      summary: '涨潮前的最后追击',
+      image_hook: '潮水吞没灯火',
+      short_drama_value: '章末高压追读',
+      discussion_point: '顾舟是否叛变',
+      evidence: '顾舟独自跃上离岸快船。',
+    },
+    {
+      title: '门后回声',
+      summary: '所有人都听见密门后的脚步声',
+      quote: '第三声脚步落下，石门忽然开了一道缝。',
+    },
+    {
+      title: '档案对质',
+      summary: '沈烛用入库表逼问守门人',
+      evidence: '编号就写在入库表第一行。',
+      quote: 'SHADOWED_IP_QUOTE_PROSE',
+    },
+    {
+      title: '',
+      name: '钟楼揭面',
+      summary: null,
+      description: '沈烛当众公布真实身份',
+      visual_hook: '',
+      image_hook: '钟摆后的密门打开',
+      adaptation_value: null,
+      short_drama_value: '身份反转高点',
+      spread_point: 0,
+      discussion_point: '旧案真凶是谁',
+      evidence: '',
+      quote: '沈烛把案卷摊在钟楼前。',
+      source_excerpt: null,
+      excerpt: '钟声落下时，所有人都看见了他的脸。',
+    },
+  ]
+  const chapter = { id: 10, chapter_no: 4 }
+  const semantic = (value: any) => {
+    const { payload_json: _payloadJson, ...record } = value || {}
+    return record
+  }
+
+  for (const fixture of fixtures) {
+    const before = semantic(normalizeIpSceneCandidates([fixture], chapter)[0])
+    const compacted: any = compactPreparedStoryStateForRecovery({
+      state_delta: {},
+      character_updates: [],
+      setting_updates: [],
+      storyline_updates: [],
+      sync_reports: {},
+      hard_failures: [],
+      payload: { ip_scene_candidates: [fixture] },
+    } as any)
+    const after = semantic(normalizeIpSceneCandidates(compacted.payload.ip_scene_candidates, chapter)[0])
+    expect(after).toEqual(before)
+    expect(JSON.stringify(compacted)).not.toContain('SHADOWED_IP_QUOTE_PROSE')
+  }
 })
 
 function executeSql(workspace: string, sql: string) {
@@ -2039,6 +2295,34 @@ describe('single chapter Story State', () => {
           expected_resolve_chapter_no: 12,
         },
       }
+      payload.state_delta.established_events = [{
+        id: 'evt-alias-first-apply',
+        chapterNo: 1,
+        kind: 'promise',
+        name: '李玄',
+        aspect: '承诺',
+        text: '李玄承诺把旧印章交还顾舟',
+        sourceExcerpt: '李玄把印章推向顾舟，说会亲手归还。',
+        lockLevel: 'hard',
+        lastSeenChapter: 1,
+        confidence: 0.9,
+      }]
+      payload.discovered_assets = [{
+        type: 'item',
+        title: '别院铜钥匙',
+        description: '可以打开别院地库',
+        quote: '李玄从旧印章夹层取出铜钥匙。',
+        constraints: { owner_rule: '只能由李玄持有' },
+        suggested_state: { current_owner: '李玄' },
+      }]
+      payload.ip_scene_candidates = [{
+        name: '印章门前对峙',
+        description: '李玄当众亮出旧印章',
+        visual: '雨中印章反光',
+        ip_value: '短剧高冲突节点',
+        comment_point: '身份反转',
+        quote: '印章在雨幕里一闪。',
+      }]
       return { parsed: payload, finish_reason: 'stop' }
     })
     await createNovelCharacter(workspace, { project_id: fixture.project.id, name: '顾舟' } as any)
@@ -2051,7 +2335,7 @@ describe('single chapter Story State', () => {
       receipt: exactReceipt,
     })
 
-    await applySingleChapterStoryState(fixture.ctx, {
+    const applied = await applySingleChapterStoryState(fixture.ctx, {
       workspace,
       projectId: fixture.project.id,
       chapterId: target.id,
@@ -2080,7 +2364,10 @@ describe('single chapter Story State', () => {
       story_relation_type: '联盟',
       emotion: '正面',
       start_chapter_no: 1,
-      change_nodes: [{ chapter_no: 1, note: '共同追查旧印章' }],
+      change_nodes: expect.arrayContaining([
+        { chapter_no: 1, note: '共同追查旧印章' },
+        { chapter_no: 1, note: '李玄承诺把旧印章交还顾舟' },
+      ]),
     })
     expect(storyState?.foreshadowing_status?.['旧印章来历']).toMatchObject({
       lifecycle: '已埋',
@@ -2094,6 +2381,31 @@ describe('single chapter Story State', () => {
       plant_chapter_no: 1,
       expected_resolve_chapter_no: 12,
     })
+    expect(storyState?.established_events).toContainEqual(expect.objectContaining({
+      id: 'evt-alias-first-apply',
+      chapter_no: 1,
+      subject: '李玄',
+      predicate: '承诺',
+      fact: '李玄承诺把旧印章交还顾舟',
+      source_excerpt: '李玄把印章推向顾舟，说会亲手归还。',
+      lock_level: 'hard',
+    }))
+    expect(applied.update?.asset_intake?.discovered_assets).toContainEqual(expect.objectContaining({
+      entity_type: 'item',
+      name: '别院铜钥匙',
+      summary: '可以打开别院地库',
+      evidence: '李玄从旧印章夹层取出铜钥匙。',
+      constraints_json: { owner_rule: '只能由李玄持有' },
+      state_json: expect.objectContaining({ current_owner: '李玄' }),
+    }))
+    expect(applied.update?.ip_scene_intake?.ip_scene_candidates).toContainEqual(expect.objectContaining({
+      title: '印章门前对峙',
+      summary: '李玄当众亮出旧印章',
+      visual_hook: '雨中印章反光',
+      adaptation_value: '短剧高冲突节点',
+      spread_point: '身份反转',
+      evidence: '印章在雨幕里一闪。',
+    }))
   }, 30_000)
 
   test('resumes state-applied derived materialization without another model call', async () => {
@@ -2122,6 +2434,18 @@ describe('single chapter Story State', () => {
           resolve_chapter_no: 3,
         },
       }
+      payload.state_delta.established_events = [{
+        id: 'evt-alias-recovery',
+        chapterNo: 1,
+        kind: 'identity_reveal',
+        who: '顾舟',
+        aspect: '身份',
+        summary: '顾舟是前朝密卫后人',
+        evidence: '顾舟取出密卫铜牌。',
+        lockLevel: 'hard',
+        lastSeenChapter: 1,
+        confidence: 0.95,
+      }]
       payload.character_updates[0].current_state.public_image = '公开作证后得罪会长'
       payload.setting_updates[0].state_delta = {
         current_time: '子时',
@@ -2136,14 +2460,23 @@ describe('single chapter Story State', () => {
         leaked: true,
       }
       payload.discovered_assets = [{
-        name: '语义恢复铜钥匙',
-        entity_type: 'item',
-        evidence: '李玄收起铜钥匙。',
-        constraints_json: {
+        title: '语义恢复铜钥匙',
+        type: 'item',
+        description: '可以打开旧院密室',
+        quote: '李玄收起铜钥匙。',
+        constraints: {
           owner_rule: '只能由李玄持有',
           forbidden_reveal: '不得提前揭露钥匙来源',
         },
-        state_json: { current_owner: '李玄', triggered: false },
+        suggested_state: { current_owner: '李玄', triggered: false },
+      }]
+      payload.ip_scene_candidates = [{
+        name: '密室蓝光',
+        description: '铜钥匙开启尘封密室',
+        image_hook: '石门缝隙漏出蓝光',
+        short_drama_value: '章末高压追读',
+        discussion_point: '密室主人身份',
+        quote: '蓝光照亮了众人的脸。',
       }]
       return { parsed: payload, finish_reason: 'stop' }
     })
@@ -2206,6 +2539,15 @@ describe('single chapter Story State', () => {
     expect(recoveredPrepare.prepared?.receipt_binding).toMatchObject({ key: receiptKey })
     expect(recoveredPrepare.prepared).toMatchObject({
       state_delta: {
+        established_events: [expect.objectContaining({
+          id: 'evt-alias-recovery',
+          chapter_no: 1,
+          subject: '顾舟',
+          predicate: '身份',
+          fact: '顾舟是前朝密卫后人',
+          source_excerpt: '顾舟取出密卫铜牌。',
+          lock_level: 'hard',
+        })],
         character_relationships: {
           '李玄-顾舟': {
             party_a: '李玄',
@@ -2245,15 +2587,37 @@ describe('single chapter Story State', () => {
       }],
       payload: {
         discovered_assets: [{
+          entity_type: 'item',
+          name: '语义恢复铜钥匙',
+          summary: '可以打开旧院密室',
+          evidence: '李玄收起铜钥匙。',
+          source_excerpt: '李玄收起铜钥匙。',
           constraints_json: {
             owner_rule: '只能由李玄持有',
             forbidden_reveal: '不得提前揭露钥匙来源',
           },
           state_json: { current_owner: '李玄', triggered: false },
         }],
+        ip_scene_candidates: [expect.objectContaining({
+          title: '密室蓝光',
+          summary: '铜钥匙开启尘封密室',
+          visual_hook: '石门缝隙漏出蓝光',
+          adaptation_value: '章末高压追读',
+          spread_point: '密室主人身份',
+          quote: '蓝光照亮了众人的脸。',
+        })],
       },
     })
     expect(recoveredApply.reused).toBe(true)
+    expect(recoveredApply.update?.asset_intake?.discovered_assets).toContainEqual(expect.objectContaining({
+      entity_type: 'item',
+      name: '语义恢复铜钥匙',
+      summary: '可以打开旧院密室',
+    }))
+    expect(recoveredApply.update?.ip_scene_intake?.ip_scene_candidates).toContainEqual(expect.objectContaining({
+      title: '密室蓝光',
+      summary: '铜钥匙开启尘封密室',
+    }))
     expect(completed).toMatchObject({ status: 'completed', chapter_id: target.id })
     expect(completed?.prepared_for_recovery).toBeUndefined()
     expect(fixture.modelCalls).toHaveLength(1)

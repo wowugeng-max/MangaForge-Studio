@@ -237,10 +237,47 @@ const STYLE_CONTRACT_RECOVERY_KEYS = [
   'source', 'style_fingerprint', 'target_sentence_band', 'min_sentence_chars', 'max_sentence_chars',
   'policy', 'source_excerpt',
 ] as const
-const ESTABLISHED_EVENT_RECOVERY_KEYS = [
-  'id', 'chapter_no', 'kind', 'subject', 'predicate', 'fact', 'cause', 'mechanism', 'constraints',
-  'aliases', 'source_excerpt', 'lock_level', 'status', 'mutable', 'confidence', 'last_seen_chapter', 'tags',
-] as const
+const ESTABLISHED_EVENT_RECOVERY_FIELDS = {
+  id: ['id'],
+  chapter_no: ['chapter_no', 'chapterNo'],
+  kind: ['kind'],
+  subject: ['subject', 'name', 'who'],
+  predicate: ['predicate', 'aspect'],
+  fact: ['fact', 'text', 'summary'],
+  cause: ['cause'],
+  mechanism: ['mechanism'],
+  constraints: ['constraints'],
+  aliases: ['aliases'],
+  source_excerpt: ['source_excerpt', 'sourceExcerpt', 'evidence'],
+  lock_level: ['lock_level', 'lockLevel'],
+  status: ['status'],
+  mutable: ['mutable'],
+  confidence: ['confidence'],
+  last_seen_chapter: ['last_seen_chapter', 'lastSeenChapter'],
+  tags: ['tags'],
+} as const
+const DISCOVERED_ASSET_RECOVERY_FIELDS = {
+  entity_type: ['entity_type', 'type'],
+  name: ['name', 'title'],
+  summary: ['summary', 'description', 'role', 'effect'],
+  evidence: ['evidence', 'quote'],
+  source_text: ['source_text'],
+  source_excerpt: ['source_excerpt', 'quote', 'evidence'],
+  first_chapter_no: ['first_chapter_no'],
+  constraints_json: ['constraints_json', 'constraints'],
+  state_json: ['state_json', 'suggested_state', 'state'],
+} as const
+const IP_SCENE_RECOVERY_FIELDS = {
+  title: ['title', 'name'],
+  summary: ['summary', 'description'],
+  visual_hook: ['visual_hook', 'visual', 'image_hook'],
+  adaptation_value: ['adaptation_value', 'ip_value', 'short_drama_value'],
+  spread_point: ['spread_point', 'comment_point', 'discussion_point'],
+  evidence: ['evidence'],
+  quote: ['quote'],
+  source_excerpt: ['source_excerpt', 'excerpt', 'evidence'],
+  tags: ['tags'],
+} as const
 const RELATION_CHANGE_NODE_RECOVERY_KEYS = ['chapter_no', 'note', 'event_id', 'kind'] as const
 const COMPLETENESS_ITEM_RECOVERY_KEYS = [
   'key', 'label', 'evidence', 'high_confidence_evidence', 'fix', 'blocking', 'confidence',
@@ -344,17 +381,48 @@ function firstOwnValue(source: Record<string, any>, keys: readonly string[]) {
   return undefined
 }
 
+function firstTruthyAliasValue(source: Record<string, any>, keys: readonly string[]) {
+  if (keys.length === 1) return firstOwnValue(source, keys)
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(source, key) && source[key]) return source[key]
+  }
+  return undefined
+}
+
+function selectDiscoveredAssetRecoveryValue(
+  source: Record<string, any>,
+  keys: readonly string[],
+  canonicalKey: string,
+) {
+  if (canonicalKey === 'source_text') {
+    return !source.evidence && !source.quote && source.source_text
+      ? source.source_text
+      : undefined
+  }
+  return firstTruthyAliasValue(source, keys)
+}
+
+function selectIpSceneRecoveryValue(
+  source: Record<string, any>,
+  keys: readonly string[],
+  canonicalKey: string,
+) {
+  if (canonicalKey === 'quote') return !source.evidence && source.quote ? source.quote : undefined
+  return firstTruthyAliasValue(source, keys)
+}
+
 function recoveryRecord(
   value: any,
   fields: Record<string, readonly string[]>,
   field: string,
   budget: { nodes: number },
   sanitizers: Record<string, (value: any, budget: { nodes: number }) => any> = {},
+  selectValue: (source: Record<string, any>, keys: readonly string[], canonicalKey: string) => any = firstOwnValue,
 ) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
   const output: Record<string, any> = {}
   for (const [canonicalKey, aliases] of Object.entries(fields)) {
-    const item = firstOwnValue(source, aliases)
+    const item = selectValue(source, aliases, canonicalKey)
     if (item === undefined) continue
     const sanitized = sanitizers[canonicalKey]
       ? sanitizers[canonicalKey](item, budget)
@@ -401,6 +469,22 @@ function sanitizeRecoveryStructuredArray(
   return source.map(item => (
     item && typeof item === 'object' && !Array.isArray(item)
       ? recoveryRecord(item, itemFields, field, budget)
+      : sanitizeRecoveryScalar(item, field, budget)
+  )).filter(item => item !== undefined)
+}
+
+function sanitizeRecoveryMappedArray(
+  value: any,
+  fields: Record<string, readonly string[]>,
+  field: string,
+  budget: { nodes: number },
+  sanitizers: Record<string, (value: any, budget: { nodes: number }) => any> = {},
+) {
+  const source = Array.isArray(value) ? value : []
+  if (source.length > RECOVERY_MAX_ARRAY_ITEMS) throw recoveryCheckpointTooLarge(field)
+  return source.map(item => (
+    item && typeof item === 'object' && !Array.isArray(item)
+      ? recoveryRecord(item, fields, field, budget, sanitizers, firstTruthyAliasValue)
       : sanitizeRecoveryScalar(item, field, budget)
   )).filter(item => item !== undefined)
 }
@@ -490,7 +574,7 @@ function sanitizeRecoveryForeshadowMap(value: any, field: string, budget: { node
 }
 
 function sanitizeRecoveryCanonFacts(value: any, field: string, budget: { nodes: number }) {
-  return sanitizeRecoveryStructuredArray(value, ESTABLISHED_EVENT_RECOVERY_KEYS, field, budget)
+  return sanitizeRecoveryMappedArray(value, ESTABLISHED_EVENT_RECOVERY_FIELDS, field, budget)
 }
 
 function sanitizeRecoveryLayeredMemory(value: any, field: string, budget: { nodes: number }) {
@@ -648,8 +732,8 @@ export function compactPreparedStoryStateForRecovery(prepared: PreparedStoryStat
         ),
       },
     ),
-    established_events: (value: any, budget: { nodes: number }) => sanitizeRecoveryStructuredArray(
-      value, ESTABLISHED_EVENT_RECOVERY_KEYS, 'state_delta', budget,
+    established_events: (value: any, budget: { nodes: number }) => sanitizeRecoveryMappedArray(
+      value, ESTABLISHED_EVENT_RECOVERY_FIELDS, 'state_delta', budget,
     ),
     canon_facts: (value: any, budget: { nodes: number }) => sanitizeRecoveryCanonFacts(value, 'state_delta', budget),
     style_fingerprint: (value: any, budget: { nodes: number }) => sanitizeRecoveryScalar(value, 'state_delta', budget),
@@ -737,23 +821,28 @@ export function compactPreparedStoryStateForRecovery(prepared: PreparedStoryStat
     discovered_assets: recoveryArray(
       firstOwnValue(payload, ['discovered_assets', 'discoveredAssets']),
       'payload',
-      (asset, budget) => recoveryRecord(asset, identityRecoveryFields([
-        'entity_type', 'name', 'summary', 'evidence', 'source_excerpt', 'first_chapter_no', 'constraints_json', 'state_json',
-      ]), 'payload', budget, {
-        constraints_json: (value, itemBudget) => sanitizeRecoveryDomainStateRecord(
-          value, 'payload', itemBudget, DISCOVERED_ASSET_CONSTRAINT_RECOVERY_KEYS,
-        ),
-        state_json: (value, itemBudget) => sanitizeRecoveryDomainStateRecord(
-          value, 'payload', itemBudget, DISCOVERED_ASSET_STATE_RECOVERY_KEYS,
-        ),
-      }),
+      (asset, budget) => recoveryRecord(
+        asset,
+        DISCOVERED_ASSET_RECOVERY_FIELDS,
+        'payload',
+        budget,
+        {
+          constraints_json: (value, itemBudget) => sanitizeRecoveryDomainStateRecord(
+            value, 'payload', itemBudget, DISCOVERED_ASSET_CONSTRAINT_RECOVERY_KEYS,
+          ),
+          state_json: (value, itemBudget) => sanitizeRecoveryDomainStateRecord(
+            value, 'payload', itemBudget, DISCOVERED_ASSET_STATE_RECOVERY_KEYS,
+          ),
+        },
+        selectDiscoveredAssetRecoveryValue,
+      ),
     ),
     ip_scene_candidates: recoveryArray(
       firstOwnValue(payload, ['ip_scene_candidates', 'ipSceneCandidates']),
       'payload',
-      (candidate, budget) => recoveryRecord(candidate, identityRecoveryFields([
-        'title', 'summary', 'visual_hook', 'adaptation_value', 'spread_point', 'evidence', 'source_excerpt', 'tags',
-      ]), 'payload', budget),
+      (candidate, budget) => recoveryRecord(
+        candidate, IP_SCENE_RECOVERY_FIELDS, 'payload', budget, {}, selectIpSceneRecoveryValue,
+      ),
     ),
     foreshadowing_status: sanitizeRecoveryForeshadowMap(
       firstOwnValue(payload, ['foreshadowing_status', 'foreshadowingStatus']) || {},
