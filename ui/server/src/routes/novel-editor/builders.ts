@@ -238,6 +238,14 @@ function proseQualityResultFromSavedReview(saved: any, chapter: any) {
   }
 }
 
+function proseQualityClaimError(error: unknown, runId: number) {
+  const source = error && typeof error === 'object' ? error as Record<string, any> : null
+  const normalized = error instanceof Error
+    ? error
+    : Object.assign(new Error(String(source?.message || error || 'prose quality receipt failed')), source || {})
+  return Object.assign(normalized, { prose_quality_run_id: runId })
+}
+
 export async function createProseQualityReview(
   ctx: EditorRoutesContext,
   activeWorkspace: string,
@@ -265,12 +273,16 @@ export async function createProseQualityReview(
       allowFailedRetry: !observedWaiting,
     })
     if (claim.state === 'completed') {
-      const output = parseJsonLikePayload(claim.run.output_ref) || {}
-      const saved = await getNovelReview(activeWorkspace, Number(output.review_id || 0), Number(project.id))
-      if (!saved) throw new Error('completed prose quality receipt has no persisted review')
-      const chapters = await listNovelChapters(activeWorkspace, Number(project.id))
-      const currentChapter = chapters.find(item => Number(item.id) === Number(chapter.id)) || chapter
-      return proseQualityResultFromSavedReview(saved, currentChapter)
+      try {
+        const output = parseJsonLikePayload(claim.run.output_ref) || {}
+        const saved = await getNovelReview(activeWorkspace, Number(output.review_id || 0), Number(project.id))
+        if (!saved) throw new Error('completed prose quality receipt has no persisted review')
+        const chapters = await listNovelChapters(activeWorkspace, Number(project.id))
+        const currentChapter = chapters.find(item => Number(item.id) === Number(chapter.id)) || chapter
+        return proseQualityResultFromSavedReview(saved, currentChapter)
+      } catch (error) {
+        throw proseQualityClaimError(error, claim.run.id)
+      }
     }
     if (claim.state === 'claimed') {
       try {
@@ -291,24 +303,20 @@ export async function createProseQualityReview(
           owner,
           error,
         }).catch(() => null)
-        if (failedRun && error && typeof error === 'object') {
-          Object.assign(error, { prose_quality_run_id: failedRun.id })
-        }
-        throw error
+        throw proseQualityClaimError(error, failedRun?.id ?? claim.run.id)
       }
     }
     if (claim.state === 'failed') {
       const output = parseJsonLikePayload(claim.run.output_ref) || {}
-      throw Object.assign(new Error(String(output.error || claim.run.error_message || 'prose quality receipt failed')), {
+      throw proseQualityClaimError(Object.assign(new Error(String(output.error || claim.run.error_message || 'prose quality receipt failed')), {
         code: String(output.error_code || 'PROSE_QUALITY_FAILED'),
-        prose_quality_run_id: claim.run.id,
-      })
+      }), claim.run.id)
     }
     observedWaiting = true
     if (Date.now() >= deadline) {
-      throw Object.assign(new Error('timed out waiting for prose quality receipt owner'), {
+      throw proseQualityClaimError(Object.assign(new Error('timed out waiting for prose quality receipt owner'), {
         code: 'PROSE_QUALITY_RECEIPT_WAIT_TIMEOUT',
-      })
+      }), claim.run.id)
     }
     await new Promise(resolve => setTimeout(resolve, 10))
   }

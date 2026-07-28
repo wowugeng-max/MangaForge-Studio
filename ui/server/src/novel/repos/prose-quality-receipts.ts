@@ -8,6 +8,30 @@ import type { NovelChapterRecord, NovelReviewRecord, NovelRunRecord } from '../t
 
 const RECEIPT_RUN_TYPE = 'prose_quality'
 const RECEIPT_LEASE_MS = 10 * 60_000
+const RECEIPT_ERROR_MESSAGE_MAX_LENGTH = 1_000
+const RECEIPT_ERROR_CODE_MAX_LENGTH = 128
+const RECEIPT_FAILURE_HISTORY_MAX_ITEMS = 8
+const RECEIPT_FAILURE_HISTORY_MAX_BYTES = 16_000
+
+function boundedDiagnostic(value: unknown, maxLength: number, fallback: string) {
+  const text = String(value || fallback)
+  return Array.from(text).slice(0, maxLength).join('')
+}
+
+function boundedFailureHistory(values: any[]) {
+  const history = (Array.isArray(values) ? values : [])
+    .slice(-RECEIPT_FAILURE_HISTORY_MAX_ITEMS)
+    .map(item => ({
+      attempt: Math.max(1, Number(item?.attempt || 1)),
+      error: boundedDiagnostic(item?.error, RECEIPT_ERROR_MESSAGE_MAX_LENGTH, 'prose quality receipt failed'),
+      error_code: boundedDiagnostic(item?.error_code, RECEIPT_ERROR_CODE_MAX_LENGTH, 'PROSE_QUALITY_FAILED'),
+      failed_at: boundedDiagnostic(item?.failed_at, 64, ''),
+    }))
+  while (history.length && Buffer.byteLength(JSON.stringify(history), 'utf8') > RECEIPT_FAILURE_HISTORY_MAX_BYTES) {
+    history.shift()
+  }
+  return history
+}
 
 export type ProseQualityReceiptClaim = {
   state: 'claimed' | 'waiting' | 'completed' | 'failed'
@@ -150,21 +174,19 @@ export async function claimProseQualityReceipt(workspace: string, input: {
       if (existing.status === 'failed') {
         previousFailures.push({
           attempt: Math.max(1, Number(previousOutput.attempt || 1)),
-          error: String(previousOutput.error || existing.error_message || 'prose quality receipt failed'),
-          error_code: String(previousOutput.error_code || 'PROSE_QUALITY_FAILED'),
+          error: boundedDiagnostic(previousOutput.error || existing.error_message, RECEIPT_ERROR_MESSAGE_MAX_LENGTH, 'prose quality receipt failed'),
+          error_code: boundedDiagnostic(previousOutput.error_code, RECEIPT_ERROR_CODE_MAX_LENGTH, 'PROSE_QUALITY_FAILED'),
           failed_at: existing.updated_at || existing.created_at,
         })
       }
-      const { error: _error, error_code: _errorCode, ...retainedOutput } = previousOutput
       db.query(`
         UPDATE runs
         SET status = 'running', output_ref = ?, error_message = '', lease_owner = ?, lease_expires_at = ?, updated_at = ?
         WHERE id = ? AND run_type = ?
       `).run(
         JSON.stringify({
-          ...retainedOutput,
           attempt: Math.max(1, Number(previousOutput.attempt || 1)) + 1,
-          previous_failures: previousFailures,
+          previous_failures: boundedFailureHistory(previousFailures),
         }),
         owner,
         expiresAt,
@@ -341,11 +363,14 @@ export async function failProseQualityReceipt(workspace: string, input: {
   error?: unknown
 }) {
   return withNovelDbWrite(workspace, db => {
+    const timestamp = nowIso()
     const row = db.query(`
       SELECT * FROM runs
       WHERE id = ? AND run_type = ? AND status = 'running' AND lease_owner = ?
+        AND lease_expires_at IS NOT NULL
+        AND julianday(lease_expires_at) > julianday(?)
       LIMIT 1
-    `).get(input.claimRunId, RECEIPT_RUN_TYPE, input.owner) as any
+    `).get(input.claimRunId, RECEIPT_RUN_TYPE, input.owner, timestamp) as any
     if (!row) return null
     const run = runFromRow(row)
     let identity: Record<string, unknown> = {}
@@ -353,22 +378,23 @@ export async function failProseQualityReceipt(workspace: string, input: {
     let previousOutput: Record<string, unknown> = {}
     try { previousOutput = JSON.parse(String(run.output_ref || '{}')) } catch { previousOutput = {} }
     const error = input.error as any
-    const message = String(error?.message || error || 'prose quality receipt failed')
-    const errorCode = String(error?.code || 'PROSE_QUALITY_FAILED')
-    const timestamp = nowIso()
-    db.query(`
+    const message = boundedDiagnostic(error?.message || error, RECEIPT_ERROR_MESSAGE_MAX_LENGTH, 'prose quality receipt failed')
+    const errorCode = boundedDiagnostic(error?.code, RECEIPT_ERROR_CODE_MAX_LENGTH, 'PROSE_QUALITY_FAILED')
+    const updated = db.query(`
       UPDATE runs
       SET status = 'failed', output_ref = ?, error_message = ?, updated_at = ?,
         lease_owner = NULL, lease_expires_at = NULL
       WHERE id = ? AND run_type = ? AND status = 'running' AND lease_owner = ?
+        AND lease_expires_at IS NOT NULL
+        AND julianday(lease_expires_at) > julianday(?)
     `).run(
       JSON.stringify({
         ...previousOutput,
         ...identity,
         attempt: Math.max(1, Number((previousOutput as any).attempt || 1)),
-        previous_failures: Array.isArray((previousOutput as any).previous_failures)
+        previous_failures: boundedFailureHistory(Array.isArray((previousOutput as any).previous_failures)
           ? (previousOutput as any).previous_failures
-          : [],
+          : []),
         current_chapter_only: true,
         error: message,
         error_code: errorCode,
@@ -378,7 +404,9 @@ export async function failProseQualityReceipt(workspace: string, input: {
       input.claimRunId,
       RECEIPT_RUN_TYPE,
       input.owner,
-    )
+      timestamp,
+    ) as any
+    if (Number(updated.changes || 0) !== 1) return null
     const failed = db.query('SELECT * FROM runs WHERE id = ? LIMIT 1').get(input.claimRunId) as any
     return failed ? runFromRow(failed) : null
   }, 'fail-prose-quality-receipt')

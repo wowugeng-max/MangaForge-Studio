@@ -53,9 +53,9 @@ function storyStatePayload(key: string) {
       next_chapter_priorities: [`${key}-priority`],
       progress_summary: { notes: `${key}-complete` },
     },
-    character_updates: [{ name: '李玄', current_state: { [`seen_${key}`]: true } }],
-    setting_updates: [{ name: '旧印章', entity_type: 'item', state_delta: { [`state_${key}`]: true } }],
-    storyline_updates: [{ name: '追查旧印章', state_delta: { [`story_${key}`]: true } }],
+    character_updates: [{ name: '李玄', current_state: { goals: { [key]: true } } }],
+    setting_updates: [{ name: '旧印章', entity_type: 'item', state_delta: { constraints: { [key]: true } } }],
+    storyline_updates: [{ name: '追查旧印章', state_delta: { constraints: { [key]: true } } }],
     discovered_assets: [{ name: `${key}新物件`, entity_type: 'item', evidence: `${key}正文证据` }],
   }
 }
@@ -64,6 +64,36 @@ test('recovery compaction whitelists resumable state and strips prose-bearing ne
   const compacted: any = compactPreparedStoryStateForRecovery({
     state_delta: {
       current_time: 'night',
+      content: 'SHORT_UNKNOWN_STATE_PROSE',
+      relationship_graph: {
+        '李玄-顾舟': {
+          status: '有限结盟',
+          cost: '共同承担追查风险',
+          commentary: 'UNKNOWN_RELATION_COMMENTARY',
+        },
+      },
+      timeline: [{ event: '李玄抵达旧码头', source_excerpt: '他踏上旧码头。', commentary: 'UNKNOWN_TIMELINE_COMMENTARY' }],
+      progress_summary: {
+        last_completed_chapter: 1,
+        notes: '下一章继续追查铜钥匙',
+        commentary: 'UNKNOWN_PROGRESS_COMMENTARY',
+      },
+      daily_context_snapshot: {
+        current_chapter: 1,
+        current_scene: '旧码头',
+        pending_clues: ['铜钥匙'],
+        commentary: 'UNKNOWN_DAILY_COMMENTARY',
+      },
+      layered_memory_context: {
+        recent_chapter_details: [{ chapter_no: 1, event: '发现铜钥匙', commentary: 'UNKNOWN_MEMORY_COMMENTARY' }],
+        archive_refs: ['追踪/归档/第001-010章.md'],
+        commentary: 'UNKNOWN_LAYERED_COMMENTARY',
+      },
+      style_fingerprint_contract: {
+        source: 'existing_story_state',
+        policy: '保持中长句节奏',
+        commentary: 'UNKNOWN_STYLE_COMMENTARY',
+      },
       prose_style_fingerprint: { sentence_rhythm: 'short' },
       prose_status: 'accepted',
       prose: 'DIRECT_PROSE_SECRET',
@@ -86,14 +116,22 @@ test('recovery compaction whitelists resumable state and strips prose-bearing ne
       story_state: { current_time: 'must-not-copy-full-config' },
       story_state_sync_receipts: { older: { payload: 'EARLIER_RECEIPT_SECRET' } },
     },
-    character_updates: [{ name: '李玄', current_state: { awake: true, message: 'NESTED_MESSAGE_SECRET' } }],
-    setting_updates: [{ name: '旧印章', state_delta: { found: true } }],
-    storyline_updates: [{ name: '追查旧印章', state_delta: { active: true } }],
+    character_updates: [{
+      name: '李玄',
+      current_state: {
+        location: '旧码头',
+        items: ['铜钥匙'],
+        body: 'SHORT_UNKNOWN_CHARACTER_PROSE',
+        message: 'NESTED_MESSAGE_SECRET',
+      },
+    }],
+    setting_updates: [{ name: '旧印章', state_delta: { found: true, description: 'UNKNOWN_SETTING_DESCRIPTION' } }],
+    storyline_updates: [{ name: '追查旧印章', state_delta: { active: true, description: 'UNKNOWN_STORYLINE_DESCRIPTION' } }],
     sync_reports: { state_delta_completeness: { planned_count: 1, missed: [] } },
     hard_failures: [],
     payload: {
       discovered_assets: [{ name: '铜钥匙', evidence: '可恢复证据' }],
-      ip_scene_candidates: [{ label: '门前对峙' }],
+      ip_scene_candidates: [{ title: '门前对峙', summary: '铜钥匙在众人面前暴露' }],
       foreshadowing_status: { seal: 'open' },
       response: 'RESPONSE_SECRET',
     },
@@ -102,22 +140,31 @@ test('recovery compaction whitelists resumable state and strips prose-bearing ne
   } as any)
   const serialized = JSON.stringify(compacted)
 
-  expect(compacted).toMatchObject({
+  expect(compacted).toEqual({
     state_delta: {
       current_time: 'night',
-      prose_style_fingerprint: { sentence_rhythm: 'short' },
-      prose_status: 'accepted',
-      nested: { kept: true },
+      relationship_graph: {
+        '李玄-顾舟': { status: '有限结盟', cost: '共同承担追查风险' },
+      },
+      timeline: [{ event: '李玄抵达旧码头', source_excerpt: '他踏上旧码头。' }],
+      progress_summary: { last_completed_chapter: 1, notes: '下一章继续追查铜钥匙' },
+      daily_context_snapshot: { current_chapter: 1, current_scene: '旧码头', pending_clues: ['铜钥匙'] },
+      layered_memory_context: {
+        recent_chapter_details: [{ chapter_no: 1, event: '发现铜钥匙' }],
+        archive_refs: ['追踪/归档/第001-010章.md'],
+      },
+      style_fingerprint_contract: { source: 'existing_story_state', policy: '保持中长句节奏' },
     },
-    character_updates: [{ name: '李玄', current_state: { awake: true } }],
+    character_updates: [{ name: '李玄', current_state: { location: '旧码头', items: ['铜钥匙'] } }],
     setting_updates: [{ name: '旧印章', state_delta: { found: true } }],
     storyline_updates: [{ name: '追查旧印章', state_delta: { active: true } }],
     sync_reports: { state_delta_completeness: { planned_count: 1, missed: [] } },
     payload: {
       discovered_assets: [{ name: '铜钥匙', evidence: '可恢复证据' }],
-      ip_scene_candidates: [{ label: '门前对峙' }],
+      ip_scene_candidates: [{ title: '门前对峙', summary: '铜钥匙在众人面前暴露' }],
       foreshadowing_status: { seal: 'open' },
     },
+    hard_failures: [],
   })
   expect(compacted.next_reference_config).toBeUndefined()
   expect(compacted.receipt_binding).toBeUndefined()
@@ -127,40 +174,133 @@ test('recovery compaction whitelists resumable state and strips prose-bearing ne
     'CONTEXT_SECRET', 'PROVIDER_SECRET', 'PROMPT_SECRET', 'MESSAGE_SECRET',
     'RAW_SNAKE_SECRET', 'RAW_CAMEL_SECRET', 'OLD_RECEIPT_SECRET', 'EARLIER_RECEIPT_SECRET',
     'NESTED_MESSAGE_SECRET', 'RESPONSE_SECRET', 'must-remain-memory-only',
+    'SHORT_UNKNOWN_STATE_PROSE', 'SHORT_UNKNOWN_CHARACTER_PROSE',
+    'UNKNOWN_RELATION_COMMENTARY',
+    'UNKNOWN_TIMELINE_COMMENTARY', 'UNKNOWN_PROGRESS_COMMENTARY', 'UNKNOWN_DAILY_COMMENTARY',
+    'UNKNOWN_MEMORY_COMMENTARY', 'UNKNOWN_LAYERED_COMMENTARY', 'UNKNOWN_STYLE_COMMENTARY',
+    'UNKNOWN_SETTING_DESCRIPTION', 'UNKNOWN_STORYLINE_DESCRIPTION',
   ]) expect(serialized).not.toContain(secret)
-
-  const bounded: any = compactPreparedStoryStateForRecovery({
-    state_delta: { huge: 'x'.repeat(50_000) },
-    character_updates: Array.from({ length: 500 }, (_, index) => ({ name: `character-${index}`, current_state: { index } })),
-    setting_updates: [],
-    storyline_updates: [],
-    sync_reports: {},
-    hard_failures: [],
-    payload: {},
-  } as any)
-  expect(String(bounded.state_delta.huge).length).toBeLessThanOrEqual(2_000)
-  expect(bounded.character_updates.length).toBeLessThanOrEqual(128)
-  expect(JSON.stringify(bounded).length).toBeLessThan(256_000)
-
 })
 
-test('recovery compaction enforces a UTF-8 byte cap and preserves phase arrays', () => {
-  const utf8Bounded: any = compactPreparedStoryStateForRecovery({
+test('recovery compaction rejects allowed semantic state that exceeds its UTF-8 checkpoint quota', () => {
+  let error: any = null
+  try {
+    compactPreparedStoryStateForRecovery({
     state_delta: {
-      rows: Array.from({ length: 128 }, (_, index) => ({ index, value: '汉'.repeat(2_000) })),
+        current_time: '汉'.repeat(30_000),
+        next_chapter_priorities: Array.from({ length: 128 }, (_, index) => `优先事项${index}${'界'.repeat(1_000)}`),
     },
-    character_updates: Array.from({ length: 128 }, (_, index) => ({ name: `角色${index}`, current_state: { note: '状态'.repeat(1_000) } })),
+      character_updates: [],
     setting_updates: [],
     storyline_updates: [],
     sync_reports: {},
     hard_failures: [],
     payload: {},
   } as any)
-  expect(new TextEncoder().encode(JSON.stringify(utf8Bounded)).byteLength).toBeLessThan(256_000)
-  expect(Array.isArray(utf8Bounded.character_updates)).toBe(true)
-  expect(Array.isArray(utf8Bounded.setting_updates)).toBe(true)
-  expect(Array.isArray(utf8Bounded.storyline_updates)).toBe(true)
-  expect(Array.isArray(utf8Bounded.hard_failures)).toBe(true)
+  } catch (caught) {
+    error = caught
+  }
+  expect(error).toMatchObject({ code: 'STORY_STATE_RECOVERY_CHECKPOINT_TOO_LARGE' })
+})
+
+test('recovery compaction preserves documented and Phase A semantic fields', () => {
+  const compacted: any = compactPreparedStoryStateForRecovery({
+    state_delta: {
+      foreshadowing_status: {
+        '旧印章来历': { payoff_status: 'paid', clue: '旧臣避开腰牌', triggered: true },
+      },
+    },
+    character_updates: [{
+      name: '林青禾',
+      current_state: {
+        public_image: '公开作证后得罪会长',
+        relationship_attitudes: '有限互信',
+      },
+    }],
+    setting_updates: [{
+      name: '旧印章',
+      entity_type: 'item',
+      state_delta: {
+        current_time: '子时',
+        triggered: true,
+        current_owner: '李玄',
+      },
+      actual_state_change: { owner_rule: '只能由李玄持有' },
+    }],
+    storyline_updates: [{
+      name: '追查旧印章',
+      entity_type: 'mainline',
+      actual_state_change: {
+        current_state: '当众压住王府管事',
+        payoff_status: 'paid',
+        clue: '旧臣避开腰牌',
+        attitude_shift: '从旁观转为有限作证',
+        leaked: true,
+      },
+      summary: '追查继续推进',
+    }],
+    sync_reports: {},
+    hard_failures: [],
+    payload: {
+      foreshadowing_status: {
+        '旧印章来历': { payoff_status: 'paid', clue: '旧臣避开腰牌', triggered: true },
+      },
+      discovered_assets: [{
+        entity_type: 'item',
+        name: '铜钥匙',
+        first_chapter_no: 1,
+        constraints_json: {
+          owner_rule: '只能由李玄持有',
+          forbidden_reveal: '不得提前揭露钥匙来源',
+        },
+        state_json: {
+          first_seen_chapter: 1,
+          current_owner: '李玄',
+          triggered: false,
+        },
+      }],
+    },
+  } as any)
+
+  expect(compacted).toMatchObject({
+    state_delta: {
+      foreshadowing_status: {
+        '旧印章来历': { payoff_status: 'paid', clue: '旧臣避开腰牌', triggered: true },
+      },
+    },
+    character_updates: [{
+      name: '林青禾',
+      current_state: {
+        public_image: '公开作证后得罪会长',
+        relationship_attitudes: '有限互信',
+      },
+    }],
+    setting_updates: [{
+      state_delta: { current_time: '子时', triggered: true, current_owner: '李玄' },
+      actual_state_change: { owner_rule: '只能由李玄持有' },
+    }],
+    storyline_updates: [{
+      actual_state_change: {
+        current_state: '当众压住王府管事',
+        payoff_status: 'paid',
+        clue: '旧臣避开腰牌',
+        attitude_shift: '从旁观转为有限作证',
+        leaked: true,
+      },
+    }],
+    payload: {
+      foreshadowing_status: {
+        '旧印章来历': { payoff_status: 'paid', clue: '旧臣避开腰牌', triggered: true },
+      },
+      discovered_assets: [{
+        constraints_json: {
+          owner_rule: '只能由李玄持有',
+          forbidden_reveal: '不得提前揭露钥匙来源',
+        },
+        state_json: { first_seen_chapter: 1, current_owner: '李玄', triggered: false },
+      }],
+    },
+  })
 })
 
 function executeSql(workspace: string, sql: string) {
@@ -591,6 +731,199 @@ describe('single chapter quality review', () => {
     })
   })
 
+  test('quality lease takeover preserves the canonical run id without creating an unscoped fallback audit', async () => {
+    const { project, chapters } = await qualityFixture()
+    const candidateHash = revisionTextHash(String(chapters[1].chapter_text || ''))
+    let canonicalRunId = 0
+    const ctx: any = {
+      getStageModelId: () => 217,
+      getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+      executeAgent: async () => {
+        const [claimed] = (await listNovelRuns(workspace, project.id))
+          .filter(item => item.run_type === 'prose_quality' && item.status === 'running')
+        canonicalRunId = Number(claimed?.id || 0)
+        expect(canonicalRunId).toBeGreaterThan(0)
+        executeSql(workspace, `
+          UPDATE runs
+          SET lease_owner = 'takeover-owner', lease_expires_at = datetime('now', '+10 minutes')
+          WHERE id = ${canonicalRunId}
+        `)
+        throw Object.assign(new Error('old owner provider failure after takeover'), { code: 'PROVIDER_FAILED' })
+      },
+      buildChapterContextPackage: async () => ({}),
+    }
+
+    const error = await createProseQualityReview(ctx, workspace, project, chapters[1], {
+      source: 'post_revision',
+      source_run_id: 4532,
+      candidate_hash: candidateHash,
+      current_chapter_only: true,
+    }).then(() => null, caught => caught)
+    const runs = (await listNovelRuns(workspace, project.id)).filter(item => item.run_type === 'prose_quality')
+
+    expect(error).toMatchObject({
+      code: 'PROVIDER_FAILED',
+      prose_quality_run_id: canonicalRunId,
+    })
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toMatchObject({ id: canonicalRunId, status: 'running', lease_owner: 'takeover-owner' })
+    expect(runs.filter(item => !item.scope_key)).toHaveLength(0)
+  })
+
+  test('primitive quality failure is normalized with the canonical run id', async () => {
+    const { project, chapters } = await qualityFixture()
+    const candidateHash = revisionTextHash(String(chapters[1].chapter_text || ''))
+    const ctx: any = {
+      getStageModelId: () => 217,
+      getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+      executeAgent: async () => { throw 'primitive provider failure' },
+      buildChapterContextPackage: async () => ({}),
+    }
+
+    const error = await createProseQualityReview(ctx, workspace, project, chapters[1], {
+      source: 'post_revision',
+      source_run_id: 4534,
+      candidate_hash: candidateHash,
+      current_chapter_only: true,
+    }).then(() => null, caught => caught)
+    const [run] = (await listNovelRuns(workspace, project.id)).filter(item => item.run_type === 'prose_quality')
+
+    expect(error).toMatchObject({
+      message: 'primitive provider failure',
+      prose_quality_run_id: run.id,
+    })
+    expect(run).toMatchObject({ status: 'failed' })
+  })
+
+  test('corrupt completed quality receipt error retains the canonical run id', async () => {
+    const { project, chapters } = await qualityFixture()
+    const candidateHash = revisionTextHash(String(chapters[1].chapter_text || ''))
+    const claim = await claimProseQualityReceipt(workspace, {
+      projectId: project.id,
+      chapterId: chapters[1].id,
+      chapterNo: chapters[1].chapter_no,
+      sourceRunId: 4535,
+      candidateHash,
+      owner: 'corrupt-completed-owner',
+    })
+    executeSql(workspace, `
+      UPDATE runs
+      SET status = 'success', output_ref = '{"review_id":999999}', lease_owner = NULL, lease_expires_at = NULL
+      WHERE id = ${claim.run.id}
+    `)
+
+    const error = await createProseQualityReview({} as any, workspace, project, chapters[1], {
+      source: 'post_revision',
+      source_run_id: 4535,
+      candidate_hash: candidateHash,
+      current_chapter_only: true,
+    }).then(() => null, caught => caught)
+
+    expect(error).toMatchObject({
+      message: 'completed prose quality receipt has no persisted review',
+      prose_quality_run_id: claim.run.id,
+    })
+  })
+
+  test('waiting quality timeout retains the canonical run id', async () => {
+    const { project, chapters } = await qualityFixture()
+    const candidateHash = revisionTextHash(String(chapters[1].chapter_text || ''))
+    const claim = await claimProseQualityReceipt(workspace, {
+      projectId: project.id,
+      chapterId: chapters[1].id,
+      chapterNo: chapters[1].chapter_no,
+      sourceRunId: 4536,
+      candidateHash,
+      owner: 'active-waiting-owner',
+    })
+    const originalDateNow = Date.now
+    let syntheticNow = originalDateNow()
+    Date.now = () => {
+      syntheticNow += 31_000
+      return syntheticNow
+    }
+    let error: any = null
+    try {
+      error = await createProseQualityReview({} as any, workspace, project, chapters[1], {
+        source: 'post_revision',
+        source_run_id: 4536,
+        candidate_hash: candidateHash,
+        current_chapter_only: true,
+      }).then(() => null, caught => caught)
+    } finally {
+      Date.now = originalDateNow
+    }
+
+    expect(error).toMatchObject({
+      code: 'PROSE_QUALITY_RECEIPT_WAIT_TIMEOUT',
+      prose_quality_run_id: claim.run.id,
+    })
+  })
+
+  test('quality receipt bounds repeated failure diagnostics while preserving total attempts', async () => {
+    const { project, chapters } = await qualityFixture()
+    const input = {
+      projectId: project.id,
+      chapterId: chapters[1].id,
+      chapterNo: chapters[1].chapter_no,
+      sourceRunId: 4533,
+      candidateHash: revisionTextHash(String(chapters[1].chapter_text || '')),
+    }
+    for (let attempt = 1; attempt <= 20; attempt += 1) {
+      const claimed = await claimProseQualityReceipt(workspace, {
+        ...input,
+        owner: `failure-owner-${attempt}`,
+      })
+      expect(claimed.state).toBe('claimed')
+      await failProseQualityReceipt(workspace, {
+        claimRunId: claimed.run.id,
+        owner: `failure-owner-${attempt}`,
+        error: Object.assign(
+          new Error(`attempt-${attempt}:${'诊断'.repeat(5_000)}`),
+          { code: `PROVIDER_${attempt}_${'X'.repeat(1_000)}` },
+        ),
+      })
+    }
+
+    const [run] = (await listNovelRuns(workspace, project.id)).filter(item => item.run_type === 'prose_quality')
+    const output = parsedPayload(run?.output_ref)
+
+    expect(output.attempt).toBe(20)
+    expect(output.previous_failures.length).toBeLessThanOrEqual(8)
+    expect(String(output.error).length).toBeLessThanOrEqual(1_000)
+    expect(String(output.error_code).length).toBeLessThanOrEqual(128)
+    expect(String(run?.error_message || '').length).toBeLessThanOrEqual(1_000)
+    expect(new TextEncoder().encode(String(run?.output_ref || '')).byteLength).toBeLessThanOrEqual(32_000)
+  })
+
+  test('expired quality lease owner cannot fail the canonical run', async () => {
+    const { project, chapters } = await qualityFixture()
+    const claim = await claimProseQualityReceipt(workspace, {
+      projectId: project.id,
+      chapterId: chapters[1].id,
+      chapterNo: chapters[1].chapter_no,
+      sourceRunId: 4537,
+      candidateHash: revisionTextHash(String(chapters[1].chapter_text || '')),
+      owner: 'expired-failure-owner',
+      now: '2000-01-01T00:00:00.000Z',
+      leaseMs: 50,
+    })
+
+    const failed = await failProseQualityReceipt(workspace, {
+      claimRunId: claim.run.id,
+      owner: 'expired-failure-owner',
+      error: new Error('must not mutate after lease expiry'),
+    })
+    const [run] = (await listNovelRuns(workspace, project.id)).filter(item => item.run_type === 'prose_quality')
+
+    expect(failed).toBeNull()
+    expect(run).toMatchObject({
+      id: claim.run.id,
+      status: 'running',
+      lease_owner: 'expired-failure-owner',
+    })
+  })
+
   test('failed receipt-owned quality leaves current chapter plan metadata unchanged', async () => {
     const { project, chapters } = await qualityFixture()
     const target = chapters[1]
@@ -1002,6 +1335,44 @@ describe('single chapter Story State', () => {
     expect(await snapshot()).toEqual(before)
   })
 
+  test('oversized allowed recovery state fails before the state transaction and performs zero writes', async () => {
+    const fixture = await storyFixture(3)
+    const target = fixture.chapters[0]
+    const exactReceipt = receipt(target.id, revisionTextHash(String(target.chapter_text || '')), 5001)
+    const preparedResult = await prepareSingleChapterStoryState(fixture.ctx, {
+      workspace,
+      projectId: fixture.project.id,
+      chapterId: target.id,
+      receipt: exactReceipt,
+    })
+    const prepared = {
+      ...preparedResult.prepared,
+      state_delta: {
+        ...(preparedResult.prepared?.state_delta || {}),
+        current_time: '时'.repeat(30_000),
+      },
+    } as any
+    const snapshot = async () => ({
+      project: (await getNovelProject(workspace, fixture.project.id))?.reference_config,
+      characters: await listNovelCharacters(workspace, fixture.project.id),
+      settings: await listNovelSettingEntities(workspace, fixture.project.id),
+      chapter: (await listNovelChapters(workspace, fixture.project.id)).find(item => item.id === target.id)?.raw_payload,
+      reviews: await listNovelReviews(workspace, fixture.project.id),
+    })
+    const before = await snapshot()
+
+    const error = await applySingleChapterStoryState(fixture.ctx, {
+      workspace,
+      projectId: fixture.project.id,
+      chapterId: target.id,
+      receipt: exactReceipt,
+      prepared,
+    }).then(() => null, caught => caught)
+
+    expect(error).toMatchObject({ code: 'STORY_STATE_RECOVERY_CHECKPOINT_TOO_LARGE' })
+    expect(await snapshot()).toEqual(before)
+  })
+
   test('aborting exact Story State at transaction entry performs zero state or derived writes', async () => {
     const fixture = await storyFixture(3)
     const target = fixture.chapters[0]
@@ -1150,9 +1521,9 @@ describe('single chapter Story State', () => {
       chapter_1: 'chapter_1-location',
       chapter_2: 'chapter_2-location',
     })
-    expect(storedCharacter?.current_state).toMatchObject({ seen_chapter_1: true, seen_chapter_2: true })
-    expect(storedItem?.state_json).toMatchObject({ state_chapter_1: true, state_chapter_2: true })
-    expect(storedStoryline?.state_json).toMatchObject({ story_chapter_1: true, story_chapter_2: true })
+    expect(storedCharacter?.current_state?.goals).toMatchObject({ chapter_1: true, chapter_2: true })
+    expect(storedItem?.state_json?.constraints).toMatchObject({ chapter_1: true, chapter_2: true })
+    expect(storedStoryline?.state_json?.constraints).toMatchObject({ chapter_1: true, chapter_2: true })
     expect(Object.keys(stored?.reference_config?.story_state_sync_receipts || {})).toEqual(expect.arrayContaining([
       storyStateReceiptKey(firstReceipt),
       storyStateReceiptKey(secondReceipt),
@@ -1215,16 +1586,16 @@ describe('single chapter Story State', () => {
     const reviewsJson = JSON.stringify(await listNovelReviews(workspace, fixture.project.id))
 
     expect(['same_receipt_1', 'same_receipt_2']).toContain(canonicalKey)
-    expect(storedCharacter?.current_state?.[`seen_${canonicalKey}`]).toBe(true)
-    expect(storedCharacter?.current_state?.[`seen_${losingKey}`]).toBeUndefined()
-    expect(storedItem?.state_json?.[`state_${canonicalKey}`]).toBe(true)
-    expect(storedItem?.state_json?.[`state_${losingKey}`]).toBeUndefined()
-    expect(storedStoryline?.state_json?.[`story_${canonicalKey}`]).toBe(true)
-    expect(storedStoryline?.state_json?.[`story_${losingKey}`]).toBeUndefined()
-    expect(itemUsage?.actual_state_change?.[`state_${canonicalKey}`]).toBe(true)
-    expect(itemUsage?.actual_state_change?.[`state_${losingKey}`]).toBeUndefined()
-    expect(storylineUsage?.actual_state_change?.[`story_${canonicalKey}`]).toBe(true)
-    expect(storylineUsage?.actual_state_change?.[`story_${losingKey}`]).toBeUndefined()
+    expect(storedCharacter?.current_state?.goals?.[canonicalKey]).toBe(true)
+    expect(storedCharacter?.current_state?.goals?.[losingKey]).toBeUndefined()
+    expect(storedItem?.state_json?.constraints?.[canonicalKey]).toBe(true)
+    expect(storedItem?.state_json?.constraints?.[losingKey]).toBeUndefined()
+    expect(storedStoryline?.state_json?.constraints?.[canonicalKey]).toBe(true)
+    expect(storedStoryline?.state_json?.constraints?.[losingKey]).toBeUndefined()
+    expect(itemUsage?.actual_state_change?.constraints?.[canonicalKey]).toBe(true)
+    expect(itemUsage?.actual_state_change?.constraints?.[losingKey]).toBeUndefined()
+    expect(storylineUsage?.actual_state_change?.constraints?.[canonicalKey]).toBe(true)
+    expect(storylineUsage?.actual_state_change?.constraints?.[losingKey]).toBeUndefined()
     expect(JSON.stringify(completedReceipt?.payload || {})).toContain(`${canonicalKey}新物件`)
     expect(JSON.stringify(completedReceipt?.payload || {})).not.toContain(`${losingKey}新物件`)
     expect(reviewsJson).not.toContain(`${losingKey}新物件`)
@@ -1363,11 +1734,8 @@ describe('single chapter Story State', () => {
     let prepareCalls = 0
     const fixture = await storyFixture(3, async () => {
       prepareCalls += 1
-      const key = `receipt_${prepareCalls}`
+      const key = `delta_${prepareCalls}`
       const payload = storyStatePayload(key)
-      payload.character_updates[0].current_state.nested = { [key]: true }
-      payload.setting_updates[0].state_delta.nested = { [key]: true }
-      payload.storyline_updates[0].state_delta.nested = { [key]: true }
       return { parsed: payload, finish_reason: 'stop' }
     })
     const target = fixture.chapters[0]
@@ -1416,23 +1784,47 @@ describe('single chapter Story State', () => {
     const storylineUsage = storedUsage.find(item => item.entity_id === fixture.storyline.id)
 
     expect(stored?.reference_config?.story_state?.character_positions).toMatchObject({
-      receipt_1: 'receipt_1-location',
-      receipt_2: 'receipt_2-location',
+      delta_1: 'delta_1-location',
+      delta_2: 'delta_2-location',
     })
-    expect(storedCharacter?.current_state).toMatchObject({ seen_receipt_1: true, seen_receipt_2: true })
-    expect(storedItem?.state_json).toMatchObject({ state_receipt_1: true, state_receipt_2: true })
-    expect(storedStoryline?.state_json).toMatchObject({ story_receipt_1: true, story_receipt_2: true })
-    expect(itemUsage?.actual_state_change).toMatchObject({ state_receipt_1: true, state_receipt_2: true })
-    expect(storylineUsage?.actual_state_change).toMatchObject({ story_receipt_1: true, story_receipt_2: true })
-    expect(storedCharacter?.current_state?.nested).toMatchObject({ receipt_1: true, receipt_2: true })
-    expect(storedItem?.state_json?.nested).toMatchObject({ receipt_1: true, receipt_2: true })
-    expect(storedStoryline?.state_json?.nested).toMatchObject({ receipt_1: true, receipt_2: true })
-    expect(itemUsage?.actual_state_change?.nested).toMatchObject({ receipt_1: true, receipt_2: true })
-    expect(storylineUsage?.actual_state_change?.nested).toMatchObject({ receipt_1: true, receipt_2: true })
+    expect(storedCharacter?.current_state?.goals).toMatchObject({ delta_1: true, delta_2: true })
+    expect(storedItem?.state_json?.constraints).toMatchObject({ delta_1: true, delta_2: true })
+    expect(storedStoryline?.state_json?.constraints).toMatchObject({ delta_1: true, delta_2: true })
+    expect(itemUsage?.actual_state_change?.constraints).toMatchObject({ delta_1: true, delta_2: true })
+    expect(storylineUsage?.actual_state_change?.constraints).toMatchObject({ delta_1: true, delta_2: true })
   }, 30_000)
 
   test('resumes state-applied derived materialization without another model call', async () => {
-    const fixture = await storyFixture(3)
+    const fixture = await storyFixture(3, async () => {
+      const payload = storyStatePayload('semantic_recovery')
+      payload.state_delta.foreshadowing_status = {
+        '旧印章来历': { payoff_status: 'paid', clue: '旧臣避开腰牌', triggered: true },
+      }
+      payload.character_updates[0].current_state.public_image = '公开作证后得罪会长'
+      payload.setting_updates[0].state_delta = {
+        current_time: '子时',
+        triggered: true,
+        current_owner: '李玄',
+      }
+      payload.storyline_updates[0].actual_state_change = {
+        current_state: '当众压住王府管事',
+        payoff_status: 'paid',
+        clue: '旧臣避开腰牌',
+        attitude_shift: '从旁观转为有限作证',
+        leaked: true,
+      }
+      payload.discovered_assets = [{
+        name: '语义恢复铜钥匙',
+        entity_type: 'item',
+        evidence: '李玄收起铜钥匙。',
+        constraints_json: {
+          owner_rule: '只能由李玄持有',
+          forbidden_reveal: '不得提前揭露钥匙来源',
+        },
+        state_json: { current_owner: '李玄', triggered: false },
+      }]
+      return { parsed: payload, finish_reason: 'stop' }
+    })
     const target = fixture.chapters[0]
     const exactReceipt = receipt(target.id, revisionTextHash(String(target.chapter_text || '')), 61)
     const receiptKey = storyStateReceiptKey(exactReceipt)
@@ -1490,6 +1882,35 @@ describe('single chapter Story State', () => {
     expect(recoveredPrepare.reused).toBe(true)
     expect(recoveredPrepare.prepared).toBeTruthy()
     expect(recoveredPrepare.prepared?.receipt_binding).toMatchObject({ key: receiptKey })
+    expect(recoveredPrepare.prepared).toMatchObject({
+      state_delta: {
+        foreshadowing_status: {
+          '旧印章来历': { payoff_status: 'paid', clue: '旧臣避开腰牌', triggered: true },
+        },
+      },
+      character_updates: [{ current_state: { public_image: '公开作证后得罪会长' } }],
+      setting_updates: [{
+        state_delta: { current_time: '子时', triggered: true, current_owner: '李玄' },
+      }],
+      storyline_updates: [{
+        actual_state_change: {
+          current_state: '当众压住王府管事',
+          payoff_status: 'paid',
+          clue: '旧臣避开腰牌',
+          attitude_shift: '从旁观转为有限作证',
+          leaked: true,
+        },
+      }],
+      payload: {
+        discovered_assets: [{
+          constraints_json: {
+            owner_rule: '只能由李玄持有',
+            forbidden_reveal: '不得提前揭露钥匙来源',
+          },
+          state_json: { current_owner: '李玄', triggered: false },
+        }],
+      },
+    })
     expect(recoveredApply.reused).toBe(true)
     expect(completed).toMatchObject({ status: 'completed', chapter_id: target.id })
     expect(completed?.prepared_for_recovery).toBeUndefined()
