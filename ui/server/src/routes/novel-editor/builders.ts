@@ -14,6 +14,7 @@ import {
   listNovelRuns,
   listNovelWorldbuilding,
   updateNovelChapter,
+  withProseQualityReceiptLease,
 } from '../../novel'
 import { executeNovelAgent, previewNovelKnowledgeInjection } from '../../llm'
 import { asArray, buildLLMResultDiagnostics, clampScore, extractLLMText, getNovelPayload, getSafetyPolicy, normalizeIssue, parseJsonLikePayload, safeJsonStringify } from '../novel-route-utils'
@@ -271,15 +272,26 @@ export async function createProseQualityReview(
     }
     if (claim.state === 'claimed') {
       try {
-        return await createProseQualityReviewOnce(ctx, activeWorkspace, project, chapter, options, {
-          runId: claim.run.id,
-          owner,
-        })
-      } catch (error) {
-        await failProseQualityReceipt(activeWorkspace, {
+        return await withProseQualityReceiptLease(activeWorkspace, {
           claimRunId: claim.run.id,
           owner,
-        }).catch(() => false)
+          signal: options.signal,
+        }, signal => createProseQualityReviewOnce(ctx, activeWorkspace, project, chapter, {
+          ...options,
+          signal,
+        }, {
+          runId: claim.run.id,
+          owner,
+        }))
+      } catch (error) {
+        const failedRun = await failProseQualityReceipt(activeWorkspace, {
+          claimRunId: claim.run.id,
+          owner,
+          error,
+        }).catch(() => null)
+        if (failedRun && error && typeof error === 'object') {
+          Object.assign(error, { prose_quality_run_id: failedRun.id })
+        }
         throw error
       }
     }
@@ -335,6 +347,7 @@ async function createProseQualityReviewOnce(
   const contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, project, alignedChapter, contextChapters, worldbuilding, characters, outlines, reviews)
   const modelId = ctx.getStageModelId(project, 'review', Number(options.model_id || 0) || undefined)
   const executeAgent = ctx.executeAgent || executeNovelAgent
+  if (options.signal?.aborted) throw options.signal.reason || new Error('prose quality review aborted')
   const result = await executeAgent('review-agent', project, {
     task: buildProseQualityPrompt(project, contextPackage, alignedChapter.chapter_text || ''),
   }, {
@@ -348,6 +361,7 @@ async function createProseQualityReviewOnce(
     timeoutMs: options.timeoutMs,
     maxRetries: options.maxRetries,
   })
+  if (options.signal?.aborted) throw options.signal.reason || new Error('prose quality review aborted')
   if ((result as any).error) throw new Error(String((result as any).error))
   const reviewPayload = getNovelPayload(result)
   const modelReview = {
@@ -413,6 +427,7 @@ async function createProseQualityReviewOnce(
     output_ref: JSON.stringify({
       source_run_id: options.source_run_id ?? null,
       candidate_hash: options.candidate_hash || null,
+      current_chapter_only: options.current_chapter_only === true,
       score: normalizedReview.score,
       needs_revision: normalizedReview.needs_revision,
       delivery_link_count: normalizedReview.delivery_link?.source_count || 0,

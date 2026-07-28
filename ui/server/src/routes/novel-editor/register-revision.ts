@@ -329,7 +329,7 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRoute
             ok: false,
             error: String(error?.message || error),
           }
-          await appendNovelRun(activeWorkspace, {
+          if (!error?.prose_quality_run_id) await appendNovelRun(activeWorkspace, {
             project_id: projectId,
             run_type: 'prose_quality',
             step_name: `chapter-${chapter.chapter_no}`,
@@ -372,6 +372,23 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRoute
           receipt,
           prepared: prepared.prepared,
         })).catch(error => ({ ok: false, error: String(error?.message || error) }))
+      }
+      if (storyStateUpdate?.ok === false) {
+        await failRevisionRun({
+          stage: 'story_state',
+          error: storyStateUpdate.error,
+          prose_persisted: true,
+          chapter_id: updated.id,
+          quality_refresh: qualityRefresh,
+          story_state_update: storyStateUpdate,
+        })
+        return res.status(502).json({
+          ok: false,
+          chapter: updated,
+          review: saved,
+          quality_refresh: qualityRefresh,
+          story_state_update: storyStateUpdate,
+        })
       }
       const postRevisionReviews = await listNovelReviews(activeWorkspace, projectId)
       const postDeliveryRiskBrief = buildChapterDeliveryRiskBrief(updated, postRevisionReviews)

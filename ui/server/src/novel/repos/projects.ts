@@ -1,3 +1,4 @@
+import type { Database } from 'bun:sqlite'
 import type { NovelProjectRecord } from '../types'
 import { openDb, ensureSqliteSchema } from '../db'
 import { nowIso } from '../json'
@@ -5,6 +6,27 @@ import { ensureLegacyNovelStoreImportedForRead } from '../legacy-import'
 import { normalizeProjectRecord, dedupById } from '../normalize'
 import { projectFromRow } from '../row-mappers'
 import { withNovelDbWrite, nextTableId, insertProjectRow, updateProjectRow } from '../sql-rows'
+import { revisionTextHash } from '../revision-hash'
+
+type ReferenceConfigMutation<T> = {
+  projectId: number
+  operation: string
+  mutate: (currentConfig: Record<string, any>) => { referenceConfig: Record<string, any>; result: T }
+}
+
+function mutateProjectReferenceConfigRow<T>(db: Database, options: ReferenceConfigMutation<T>) {
+  const row = db.query('SELECT * FROM projects WHERE id = ? LIMIT 1').get(options.projectId) as any
+  if (!row) return null
+  const current = projectFromRow(row)
+  const mutation = options.mutate({ ...(current.reference_config || {}) })
+  const next = {
+    ...current,
+    reference_config: mutation.referenceConfig,
+    updated_at: nowIso(),
+  }
+  updateProjectRow(db, next)
+  return { project: next, result: mutation.result }
+}
 
 
 export async function listNovelProjects(activeWorkspace: string) {
@@ -52,25 +74,33 @@ export async function updateNovelProject(activeWorkspace: string, id: number, da
 
 export async function mutateNovelProjectReferenceConfig<T>(
   activeWorkspace: string,
+  options: ReferenceConfigMutation<T>,
+): Promise<{ project: NovelProjectRecord; result: T } | null> {
+  return withNovelDbWrite(activeWorkspace, db => mutateProjectReferenceConfigRow(db, options), options.operation)
+}
+
+export async function mutateNovelProjectReferenceConfigForChapterCandidate<T>(
+  activeWorkspace: string,
   options: {
     projectId: number
+    chapterId: number
+    candidateHash: string
     operation: string
     mutate: (currentConfig: Record<string, any>) => { referenceConfig: Record<string, any>; result: T }
   },
 ): Promise<{ project: NovelProjectRecord; result: T } | null> {
   return withNovelDbWrite(activeWorkspace, db => {
-    const row = db.query('SELECT * FROM projects WHERE id = ? LIMIT 1').get(options.projectId) as any
-    if (!row) return null
-    const current = projectFromRow(row)
-    const mutation = options.mutate({ ...(current.reference_config || {}) })
-    const timestamp = nowIso()
-    const next = {
-      ...current,
-      reference_config: mutation.referenceConfig,
-      updated_at: timestamp,
+    const chapter = db.query(`
+      SELECT chapter_text FROM chapters
+      WHERE id = ? AND project_id = ?
+      LIMIT 1
+    `).get(options.chapterId, options.projectId) as any
+    if (!chapter || revisionTextHash(String(chapter.chapter_text || '')) !== options.candidateHash) {
+      throw Object.assign(new Error('chapter text no longer matches Story State receipt'), {
+        code: 'STORY_STATE_CANDIDATE_STALE',
+      })
     }
-    updateProjectRow(db, next)
-    return { project: next, result: mutation.result }
+    return mutateProjectReferenceConfigRow(db, options)
   }, options.operation)
 }
 

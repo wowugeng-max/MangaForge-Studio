@@ -61,6 +61,18 @@ function receiptFromProject(project: any, receipt: SingleChapterStoryStateReceip
   return project?.reference_config?.story_state_sync_receipts?.[storyStateReceiptKey(receipt)] || null
 }
 
+function bindPreparedToReceipt(prepared: any, receipt: SingleChapterStoryStateReceipt) {
+  return {
+    ...prepared,
+    receipt_binding: {
+      key: storyStateReceiptKey(receipt),
+      chapter_id: receipt.chapter_id,
+      candidate_hash: receipt.candidate_hash,
+      source_run_id: receipt.source_run_id,
+    },
+  }
+}
+
 async function loadExactChapterContext(ctx: EditorRoutesContext, input: SingleChapterStoryStateInput, project: any) {
   const [chapters, worldbuilding, characters, outlines, reviews] = await Promise.all([
     listNovelChapters(input.workspace, input.projectId),
@@ -103,7 +115,7 @@ export async function prepareSingleChapterStoryState(
     return { reused: true, prepared: null, completedReceipt: existingReceipt }
   }
   if (existingReceipt?.status === 'state_applied' && existingReceipt.prepared_for_recovery) {
-    return { reused: true, prepared: existingReceipt.prepared_for_recovery }
+    return { reused: true, prepared: bindPreparedToReceipt(existingReceipt.prepared_for_recovery, input.receipt) }
   }
   const loaded = await loadExactChapterContext(ctx, input, project)
   assertCurrentCandidate(loaded.chapter, input.receipt)
@@ -130,15 +142,7 @@ export async function prepareSingleChapterStoryState(
   )
   return {
     reused: false,
-    prepared: {
-      ...prepared,
-      receipt_binding: {
-        key: storyStateReceiptKey(input.receipt),
-        chapter_id: input.receipt.chapter_id,
-        candidate_hash: input.receipt.candidate_hash,
-        source_run_id: input.receipt.source_run_id,
-      },
-    },
+    prepared: bindPreparedToReceipt(prepared, input.receipt),
   }
 }
 
@@ -154,7 +158,10 @@ export async function applySingleChapterStoryState(
   if (existingReceipt?.status === 'completed') {
     return { reused: true, update: existingReceipt.payload ?? null, receipt: existingReceipt }
   }
-  const prepared = input.prepared || existingReceipt?.prepared_for_recovery || null
+  const prepared = input.prepared
+    || (existingReceipt?.prepared_for_recovery
+      ? bindPreparedToReceipt(existingReceipt.prepared_for_recovery, input.receipt)
+      : null)
   if (!prepared) {
     throw storyStateError('STORY_STATE_PREPARED_REQUIRED', 'prepared Story State is required before apply')
   }

@@ -7,6 +7,8 @@ import {
   createNovelCharacter,
   createNovelProject,
   createNovelSettingEntity,
+  claimProseQualityReceipt,
+  failProseQualityReceipt,
   getNovelProject,
   listNovelChapterSettingUsage,
   listNovelCharacters,
@@ -17,8 +19,10 @@ import {
   mutateNovelProjectReferenceConfig,
   replaceNovelChapterSettingUsage,
   updateNovelChapter,
+  withProseQualityReceiptLease,
 } from '../../novel'
 import { openDb } from '../../novel/core'
+import { setNovelMutationTestHook } from '../../novel-test-support'
 import { createStoryStateMachineMethods } from '../../novel-writing-service/service/story-state-machine'
 import { createProseQualityReview } from './builders'
 import { revisionTextHash } from './revision-candidate-admission'
@@ -123,6 +127,7 @@ describe('single chapter quality review', () => {
   })
 
   afterEach(() => {
+    setNovelMutationTestHook(null)
     rmSync(workspace, { recursive: true, force: true })
   })
 
@@ -211,7 +216,11 @@ describe('single chapter quality review', () => {
     expect(second.saved.id).toBe(first.saved.id)
     expect(modelCalls).toBe(1)
     expect(payload).toMatchObject({ chapter_id: chapters[1].id, source_run_id: 44, candidate_hash: options.candidate_hash })
-    expect(runOutput).toMatchObject({ source_run_id: 44, candidate_hash: options.candidate_hash })
+    expect(runOutput).toMatchObject({
+      source_run_id: 44,
+      candidate_hash: options.candidate_hash,
+      current_chapter_only: true,
+    })
   })
 
   test('revision-owned quality serializes concurrent replay to one model call and review', async () => {
@@ -292,6 +301,89 @@ describe('single chapter quality review', () => {
     expect(runs.some(item => item.run_type === 'prose_quality_receipt')).toBe(false)
   }, 30_000)
 
+  test('quality receipt heartbeat prevents reclaim while the model outlives its initial lease', async () => {
+    const { project, chapters } = await qualityFixture()
+    const receiptInput = {
+      projectId: project.id,
+      chapterId: chapters[1].id,
+      chapterNo: chapters[1].chapter_no,
+      sourceRunId: 4511,
+      candidateHash: revisionTextHash(String(chapters[1].chapter_text || '')),
+      owner: 'quality-owner-a',
+      leaseMs: 120,
+    }
+    const claimed = await claimProseQualityReceipt(workspace, receiptInput)
+    expect(claimed.state).toBe('claimed')
+    let modelCalls = 0
+    const running = withProseQualityReceiptLease(workspace, {
+      claimRunId: claimed.run.id,
+      owner: receiptInput.owner,
+      leaseMs: 120,
+      heartbeatMs: 30,
+    }, async () => {
+      modelCalls += 1
+      await Bun.sleep(220)
+      return 'done'
+    })
+    await Bun.sleep(170)
+    const contender = await claimProseQualityReceipt(workspace, {
+      ...receiptInput,
+      owner: 'quality-owner-b',
+    })
+
+    expect(contender.state).toBe('waiting')
+    expect(await running).toBe('done')
+    expect(modelCalls).toBe(1)
+    await failProseQualityReceipt(workspace, {
+      claimRunId: claimed.run.id,
+      owner: receiptInput.owner,
+      error: Object.assign(new Error('test cleanup'), { code: 'TEST_CLEANUP' }),
+    })
+  })
+
+  test('quality receipt ignores an in-flight heartbeat after its operation commits success', async () => {
+    const { project, chapters } = await qualityFixture()
+    const claimed = await claimProseQualityReceipt(workspace, {
+      projectId: project.id,
+      chapterId: chapters[1].id,
+      chapterNo: chapters[1].chapter_no,
+      sourceRunId: 4512,
+      candidateHash: revisionTextHash(String(chapters[1].chapter_text || '')),
+      owner: 'quality-owner-success',
+      leaseMs: 120,
+    })
+    let heartbeatStarted!: () => void
+    let releaseHeartbeat!: () => void
+    let releaseOperation!: () => void
+    const heartbeatStart = new Promise<void>(resolve => { heartbeatStarted = resolve })
+    const heartbeatRelease = new Promise<void>(resolve => { releaseHeartbeat = resolve })
+    const operationRelease = new Promise<void>(resolve => { releaseOperation = resolve })
+    let blocked = false
+    setNovelMutationTestHook(async event => {
+      if (blocked || event.operation !== 'renew-prose-quality-receipt') return
+      blocked = true
+      heartbeatStarted()
+      await heartbeatRelease
+    })
+    const running = withProseQualityReceiptLease(workspace, {
+      claimRunId: claimed.run.id,
+      owner: 'quality-owner-success',
+      leaseMs: 120,
+      heartbeatMs: 20,
+    }, async () => {
+      await operationRelease
+      return 'committed'
+    })
+    await heartbeatStart
+    executeSql(workspace, `UPDATE runs SET status = 'success', lease_owner = NULL, lease_expires_at = NULL WHERE id = ${Number(claimed.run.id)}`)
+    releaseOperation()
+    await Bun.sleep(0)
+    releaseHeartbeat()
+
+    expect(await running).toBe('committed')
+    setNovelMutationTestHook(null)
+  })
+
   test('revision-owned quality rejects an edit made while the model is reviewing', async () => {
     const { project, chapters } = await qualityFixture()
     const ctx: any = {
@@ -313,7 +405,46 @@ describe('single chapter quality review', () => {
 
     expect(error).toMatchObject({ code: 'PROSE_QUALITY_CANDIDATE_STALE' })
     expect((await listNovelReviews(workspace, project.id)).filter(item => item.review_type === 'prose_quality')).toHaveLength(0)
-    expect((await listNovelRuns(workspace, project.id)).filter(item => item.run_type === 'prose_quality')).toHaveLength(0)
+    const failedRuns = (await listNovelRuns(workspace, project.id)).filter(item => item.run_type === 'prose_quality')
+    expect(failedRuns).toHaveLength(1)
+    expect(failedRuns[0]).toMatchObject({ status: 'failed' })
+    expect(parsedPayload(failedRuns[0].output_ref)).toMatchObject({
+      chapter_id: chapters[1].id,
+      source_run_id: 452,
+      current_chapter_only: true,
+    })
+  })
+
+  test('revision-owned quality keeps one durable failed audit when the provider rejects', async () => {
+    const { project, chapters } = await qualityFixture()
+    const candidateHash = revisionTextHash(String(chapters[1].chapter_text || ''))
+    const ctx: any = {
+      getStageModelId: () => 217,
+      getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+      executeAgent: async () => { throw Object.assign(new Error('injected quality provider failure'), { code: 'PROVIDER_FAILED' }) },
+      buildChapterContextPackage: async () => ({}),
+    }
+
+    const error = await createProseQualityReview(ctx, workspace, project, chapters[1], {
+      source: 'post_revision',
+      source_run_id: 453,
+      candidate_hash: candidateHash,
+      current_chapter_only: true,
+    }).then(() => null, caught => caught)
+    const reviews = (await listNovelReviews(workspace, project.id)).filter(item => item.review_type === 'prose_quality')
+    const runs = (await listNovelRuns(workspace, project.id)).filter(item => item.run_type === 'prose_quality')
+
+    expect(String(error?.message || '')).toContain('injected quality provider failure')
+    expect(reviews).toHaveLength(0)
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toMatchObject({ status: 'failed' })
+    expect(parsedPayload(runs[0].output_ref)).toMatchObject({
+      chapter_id: chapters[1].id,
+      source_run_id: 453,
+      candidate_hash: candidateHash,
+      current_chapter_only: true,
+      error_code: 'PROVIDER_FAILED',
+    })
   })
 
   test('revision-owned quality rejects a stale candidate receipt before the model call', async () => {
@@ -346,6 +477,7 @@ describe('single chapter Story State', () => {
   })
 
   afterEach(() => {
+    setNovelMutationTestHook(null)
     rmSync(workspace, { recursive: true, force: true })
   })
 
@@ -882,6 +1014,7 @@ describe('single chapter Story State', () => {
     expect(String(firstError?.message || '')).toContain('simulated derived review failure')
     expect(stateApplied).toMatchObject({ status: 'state_applied', chapter_id: target.id })
     expect(stateApplied?.prepared_for_recovery).toBeTruthy()
+    expect(stateApplied?.prepared_for_recovery?.receipt_binding).toBeUndefined()
     expect(fixture.modelCalls).toHaveLength(1)
 
     failDerivedReview = false
@@ -903,6 +1036,7 @@ describe('single chapter Story State', () => {
 
     expect(recoveredPrepare.reused).toBe(true)
     expect(recoveredPrepare.prepared).toBeTruthy()
+    expect(recoveredPrepare.prepared?.receipt_binding).toMatchObject({ key: receiptKey })
     expect(recoveredApply.reused).toBe(true)
     expect(completed).toMatchObject({ status: 'completed', chapter_id: target.id })
     expect(completed?.prepared_for_recovery).toBeUndefined()
@@ -1193,6 +1327,45 @@ describe('single chapter Story State', () => {
     }).then(() => null, caught => caught)
 
     expect(error).toMatchObject({ code: 'STORY_STATE_CANDIDATE_STALE' })
+  })
+
+  test('apply revalidates the candidate inside the project receipt transaction', async () => {
+    const fixture = await storyFixture(3)
+    const target = fixture.chapters[0]
+    const exactReceipt = receipt(target.id, revisionTextHash(String(target.chapter_text || '')), 681)
+    const preparedResult = await prepareSingleChapterStoryState(fixture.ctx, {
+      workspace,
+      projectId: fixture.project.id,
+      chapterId: target.id,
+      receipt: exactReceipt,
+    })
+    const beforeProject = await getNovelProject(workspace, fixture.project.id)
+    const beforeCharacters = await listNovelCharacters(workspace, fixture.project.id)
+    const beforeSettings = await listNovelSettingEntities(workspace, fixture.project.id)
+    const beforeReviews = await listNovelReviews(workspace, fixture.project.id)
+    let injected = false
+    setNovelMutationTestHook(event => {
+      if (injected || event.operation !== 'apply-exact-story-state') return
+      injected = true
+      executeSql(workspace, `UPDATE chapters SET chapter_text = 'EDITED_DURING_APPLY' WHERE id = ${Number(target.id)}`)
+    })
+
+    const error = await applySingleChapterStoryState(fixture.ctx, {
+      workspace,
+      projectId: fixture.project.id,
+      chapterId: target.id,
+      receipt: exactReceipt,
+      prepared: preparedResult.prepared,
+    }).then(() => null, caught => caught)
+    setNovelMutationTestHook(null)
+    const afterProject = await getNovelProject(workspace, fixture.project.id)
+
+    expect(injected).toBe(true)
+    expect(error).toMatchObject({ code: 'STORY_STATE_CANDIDATE_STALE' })
+    expect(afterProject?.reference_config).toEqual(beforeProject?.reference_config)
+    expect(await listNovelCharacters(workspace, fixture.project.id)).toEqual(beforeCharacters)
+    expect(await listNovelSettingEntities(workspace, fixture.project.id)).toEqual(beforeSettings)
+    expect(await listNovelReviews(workspace, fixture.project.id)).toEqual(beforeReviews)
   })
 
   test('apply requires prepared state when no completed receipt exists', async () => {

@@ -2,6 +2,7 @@ import {
   findOrCreateNovelReviewByReceipt,
   mergeNovelChapterRawPayload,
   mutateNovelProjectReferenceConfig,
+  mutateNovelProjectReferenceConfigForChapterCandidate,
   updateNovelProject,
 } from '../../novel'
 import {
@@ -53,7 +54,6 @@ export function compactPreparedStoryStateForRecovery(prepared: PreparedStoryStat
     sync_reports: sanitizeRecoveryValue(prepared.sync_reports || {}),
     hard_failures: sanitizeRecoveryValue(prepared.hard_failures || []),
     payload: sanitizeRecoveryValue(prepared.payload || {}),
-    receipt_binding: sanitizeRecoveryValue(prepared.receipt_binding || null),
   }) as PreparedStoryStateUpdate
 }
 
@@ -122,8 +122,10 @@ export async function updateStoryStateMachine(
   if (options.exactChapter) {
     if (!receipt?.key) throw new Error('exact Story State update requires idempotency receipt')
     const compactPrepared = compactPreparedStoryStateForRecovery(prepared)
-    const mutation = await mutateNovelProjectReferenceConfig(activeWorkspace, {
+    const mutation = await mutateNovelProjectReferenceConfigForChapterCandidate(activeWorkspace, {
       projectId: project.id,
+      chapterId: receipt.chapter_id,
+      candidateHash: receipt.candidate_hash,
       operation: 'apply-exact-story-state',
       mutate: currentConfig => {
         const receipts = { ...(currentConfig.story_state_sync_receipts || {}) }

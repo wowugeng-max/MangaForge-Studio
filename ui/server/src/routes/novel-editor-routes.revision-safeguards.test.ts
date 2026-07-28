@@ -245,6 +245,23 @@ describe('editor revision route safeguards', () => {
     expect(failureRunBlock).toContain('current_chapter_only: true')
   })
 
+  test('post-revision Story State failure stops before convergence and fails the revision run', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-editor/register-revision.ts'), 'utf8')
+    const routeStart = source.indexOf("app.post('/api/novel/reviews/:reviewId/apply-revision'")
+    const routeBlock = source.slice(routeStart)
+    const storyStateStart = routeBlock.indexOf('storyStateUpdate = await prepareSingleChapterStoryState')
+    const failureGuard = routeBlock.indexOf('if (storyStateUpdate?.ok === false)', storyStateStart)
+    const convergenceStart = routeBlock.indexOf('const convergenceReport = buildDeliveryRiskConvergenceReport', storyStateStart)
+    const failureBlock = routeBlock.slice(failureGuard, convergenceStart)
+
+    expect(storyStateStart).toBeGreaterThanOrEqual(0)
+    expect(failureGuard).toBeGreaterThan(storyStateStart)
+    expect(convergenceStart).toBeGreaterThan(failureGuard)
+    expect(failureBlock).toContain('failRevisionRun')
+    expect(failureBlock).toContain('prose_persisted: true')
+    expect(failureBlock).toContain('return res.status(502).json')
+  })
+
   test('persists editor workflow revision receipts for handoff tracking', async () => {
     const { readFileSync } = await import('fs')
     const { join } = await import('path')

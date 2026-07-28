@@ -15,6 +15,59 @@ export type ProseQualityReceiptClaim = {
   run: NovelRunRecord
 }
 
+export async function withProseQualityReceiptLease<T>(
+  workspace: string,
+  input: {
+    claimRunId: number
+    owner: string
+    signal?: AbortSignal
+    leaseMs?: number
+    heartbeatMs?: number
+  },
+  operation: (signal?: AbortSignal) => Promise<T>,
+) {
+  const leaseMs = Math.max(50, Number(input.leaseMs || RECEIPT_LEASE_MS))
+  const heartbeatMs = Math.max(10, Math.min(leaseMs - 1, Number(input.heartbeatMs || Math.floor(leaseMs / 3))))
+  const controller = new AbortController()
+  const forwardAbort = () => controller.abort(input.signal?.reason || new Error('prose quality review aborted'))
+  if (input.signal?.aborted) forwardAbort()
+  else input.signal?.addEventListener('abort', forwardAbort, { once: true })
+  let stopped = false
+  let operationCompleted = false
+  let renewal = Promise.resolve()
+  const timer = setInterval(() => {
+    renewal = renewal.then(async () => {
+      if (stopped || controller.signal.aborted) return
+      try {
+        const renewed = await renewProseQualityReceiptLease(workspace, {
+          claimRunId: input.claimRunId,
+          owner: input.owner,
+          leaseMs,
+        })
+        if (!renewed && !stopped && !operationCompleted) controller.abort(claimLostError())
+      } catch (error) {
+        controller.abort(error)
+      }
+    })
+  }, heartbeatMs)
+  ;(timer as any).unref?.()
+  try {
+    if (controller.signal.aborted) throw controller.signal.reason || claimLostError()
+    const result = await operation(controller.signal)
+    operationCompleted = true
+    stopped = true
+    clearInterval(timer)
+    await renewal
+    if (controller.signal.aborted) throw controller.signal.reason || claimLostError()
+    return result
+  } finally {
+    stopped = true
+    clearInterval(timer)
+    input.signal?.removeEventListener('abort', forwardAbort)
+    await renewal.catch(() => undefined)
+  }
+}
+
 function staleCandidateError() {
   return Object.assign(new Error('chapter text no longer matches prose quality receipt'), {
     code: 'PROSE_QUALITY_CANDIDATE_STALE',
@@ -144,6 +197,22 @@ export async function claimProseQualityReceipt(workspace: string, input: {
   }, 'claim-prose-quality-receipt')
 }
 
+export async function renewProseQualityReceiptLease(workspace: string, input: {
+  claimRunId: number
+  owner: string
+  now?: string
+  leaseMs?: number
+}) {
+  const timestamp = input.now || nowIso()
+  const expiresAt = new Date(new Date(timestamp).getTime() + Math.max(50, Number(input.leaseMs || RECEIPT_LEASE_MS))).toISOString()
+  return withNovelDbWrite(workspace, db => Number((db.query(`
+    UPDATE runs
+    SET lease_expires_at = ?, updated_at = ?
+    WHERE id = ? AND run_type = ? AND status = 'running' AND lease_owner = ?
+  `).run(expiresAt, timestamp, input.claimRunId, RECEIPT_RUN_TYPE, input.owner) as any)?.changes || 0) === 1,
+  'renew-prose-quality-receipt')
+}
+
 export async function commitProseQualityReceipt(workspace: string, input: {
   claimRunId: number
   owner: string
@@ -211,10 +280,36 @@ export async function commitProseQualityReceipt(workspace: string, input: {
 export async function failProseQualityReceipt(workspace: string, input: {
   claimRunId: number
   owner: string
+  error?: unknown
 }) {
-  return withNovelDbWrite(workspace, db => Number((db.query(`
-    DELETE FROM runs
-    WHERE id = ? AND run_type = ? AND status = 'running' AND lease_owner = ?
-  `).run(input.claimRunId, RECEIPT_RUN_TYPE, input.owner) as any)?.changes || 0) > 0,
-  'fail-prose-quality-receipt')
+  return withNovelDbWrite(workspace, db => {
+    const row = db.query(`
+      SELECT * FROM runs
+      WHERE id = ? AND run_type = ? AND status = 'running' AND lease_owner = ?
+      LIMIT 1
+    `).get(input.claimRunId, RECEIPT_RUN_TYPE, input.owner) as any
+    if (!row) return null
+    const run = runFromRow(row)
+    let identity: Record<string, unknown> = {}
+    try { identity = JSON.parse(String(run.input_ref || '{}')) } catch { identity = {} }
+    const error = input.error as any
+    const message = String(error?.message || error || 'prose quality receipt failed')
+    const errorCode = String(error?.code || 'PROSE_QUALITY_FAILED')
+    const timestamp = nowIso()
+    db.query(`
+      UPDATE runs
+      SET status = 'failed', output_ref = ?, error_message = ?, updated_at = ?,
+        lease_owner = NULL, lease_expires_at = NULL
+      WHERE id = ? AND run_type = ? AND status = 'running' AND lease_owner = ?
+    `).run(
+      JSON.stringify({ ...identity, current_chapter_only: true, error: message, error_code: errorCode }),
+      message,
+      timestamp,
+      input.claimRunId,
+      RECEIPT_RUN_TYPE,
+      input.owner,
+    )
+    const failed = db.query('SELECT * FROM runs WHERE id = ? LIMIT 1').get(input.claimRunId) as any
+    return failed ? runFromRow(failed) : null
+  }, 'fail-prose-quality-receipt')
 }
