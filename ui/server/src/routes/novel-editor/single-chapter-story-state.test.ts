@@ -1051,6 +1051,60 @@ describe('single chapter Story State', () => {
     expect(await snapshot()).toEqual(before)
   })
 
+  test('aborting exact Story State at completion transaction entry retains recovery receipt', async () => {
+    const fixture = await storyFixture(3)
+    const target = fixture.chapters[0]
+    const exactReceipt = receipt(target.id, revisionTextHash(String(target.chapter_text || '')), 502)
+    const receiptKey = storyStateReceiptKey(exactReceipt)
+    const preparedResult = await prepareSingleChapterStoryState(fixture.ctx, {
+      workspace,
+      projectId: fixture.project.id,
+      chapterId: target.id,
+      receipt: exactReceipt,
+    })
+    const controller = new AbortController()
+    let releaseCompletion!: () => void
+    let markCompletionBlocked!: () => void
+    const completionBlocked = new Promise<void>(resolve => { markCompletionBlocked = resolve })
+    const completionGate = new Promise<void>(resolve => { releaseCompletion = resolve })
+    let blocked = false
+    setNovelMutationTestHook(async event => {
+      if (blocked || event.phase !== 'before_full_store_write' || event.operation !== 'complete-exact-story-state') return
+      blocked = true
+      markCompletionBlocked()
+      await completionGate
+    })
+
+    const running = applySingleChapterStoryState(fixture.ctx, {
+      workspace,
+      projectId: fixture.project.id,
+      chapterId: target.id,
+      receipt: exactReceipt,
+      prepared: preparedResult.prepared,
+      signal: controller.signal,
+    })
+    await completionBlocked
+    const queuedReceipt = (await getNovelProject(workspace, fixture.project.id))
+      ?.reference_config?.story_state_sync_receipts?.[receiptKey]
+    controller.abort(Object.assign(new Error('Story State canceled before completion commit'), {
+      code: 'STORY_STATE_COMPLETION_ABORTED',
+    }))
+    releaseCompletion()
+    const error = await running.then(() => null, caught => caught)
+    setNovelMutationTestHook(null)
+    const durableReceipt = (await getNovelProject(workspace, fixture.project.id))
+      ?.reference_config?.story_state_sync_receipts?.[receiptKey]
+
+    expect(queuedReceipt).toMatchObject({ status: 'state_applied' })
+    expect(queuedReceipt?.prepared_for_recovery).toBeTruthy()
+    expect(error).toMatchObject({
+      code: 'STORY_STATE_COMPLETION_ABORTED',
+      message: 'Story State canceled before completion commit',
+    })
+    expect(durableReceipt).toMatchObject({ status: 'state_applied' })
+    expect(durableReceipt?.prepared_for_recovery).toBeTruthy()
+  })
+
   test('concurrent apply rebases two prepared deltas and retains both receipt keys', async () => {
     const fixture = await storyFixture(3)
     const firstReceipt = receipt(fixture.chapters[0].id, revisionTextHash(String(fixture.chapters[0].chapter_text || '')), 51)

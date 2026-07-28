@@ -406,6 +406,7 @@ export async function updateStoryStateMachine(
     await mutateNovelProjectReferenceConfig(activeWorkspace, {
       projectId: project.id,
       operation: 'complete-exact-story-state',
+      signal: options.signal,
       mutate: currentConfig => {
         const receipts = { ...(currentConfig.story_state_sync_receipts || {}) }
         const existing = receipts[receipt.key]

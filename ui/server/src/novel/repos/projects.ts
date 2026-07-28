@@ -11,6 +11,7 @@ import { revisionTextHash } from '../revision-hash'
 type ReferenceConfigMutation<T> = {
   projectId: number
   operation: string
+  signal?: AbortSignal
   mutate: (currentConfig: Record<string, any>) => { referenceConfig: Record<string, any>; result: T }
 }
 
@@ -76,7 +77,10 @@ export async function mutateNovelProjectReferenceConfig<T>(
   activeWorkspace: string,
   options: ReferenceConfigMutation<T>,
 ): Promise<{ project: NovelProjectRecord; result: T } | null> {
-  return withNovelDbWrite(activeWorkspace, db => mutateProjectReferenceConfigRow(db, options), options.operation)
+  return withNovelDbWrite(activeWorkspace, db => {
+    if (options.signal?.aborted) throw options.signal.reason || new Error('project reference-config mutation aborted')
+    return mutateProjectReferenceConfigRow(db, options)
+  }, options.operation)
 }
 
 export async function mutateNovelProjectReferenceConfigForChapterCandidate<T>(
