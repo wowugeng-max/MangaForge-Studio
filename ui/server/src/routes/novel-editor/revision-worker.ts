@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
 import {
+  assertEditorRevisionWorkerLease,
   claimEditorRevisionRun,
   commitEditorRevisionChapter,
   EDITOR_REVISION_LEASE_MS,
@@ -34,6 +35,7 @@ import {
   type EditorRoutesContext,
 } from './builders'
 import {
+  EDITOR_REVISION_PHASES,
   type EditorRevisionCheckpoint,
   type EditorRevisionPhase,
   type EditorRevisionRejectedCandidateEvidence,
@@ -54,6 +56,7 @@ import {
 const LLM_TIMEOUT_MS = 180_000
 const DIAGNOSTIC_CANDIDATE_LIMIT = 60_000
 const TERMINAL_PHASE_STATES = new Set(['completed', 'skipped'])
+const CHECKPOINT_PHASE_STATES = new Set(['pending', 'running', 'completed', 'skipped', 'failed', 'canceled'])
 
 type LeaseInput = { runId?: number; owner: string; leaseMs?: number }
 type RenewLeaseInput = { runId: number; owner: string; leaseMs?: number }
@@ -64,6 +67,71 @@ type CheckpointWrite = {
   phase: EditorRevisionPhase
   checkpoint: EditorRevisionCheckpoint
   errorMessage?: string
+}
+
+type InvalidStateTerminalization = {
+  projectId: number
+  runId: number
+  owner: string
+  checkpoint: EditorRevisionCheckpoint
+  errorCode: string
+  now: string
+}
+
+async function terminalizeInvalidEditorRevisionState(
+  workspace: string,
+  input: InvalidStateTerminalization,
+) {
+  return withNovelDbWrite(workspace, db => {
+    const current = db.query(`
+      SELECT cancel_requested_at FROM runs
+      WHERE id = ? AND project_id = ? AND run_type = 'editor_revision'
+        AND status = 'running'
+        AND lease_owner = ?
+        AND lease_expires_at IS NOT NULL
+        AND julianday(lease_expires_at) > julianday(?)
+      LIMIT 1
+    `).get(input.runId, input.projectId, input.owner, input.now) as any
+    if (!current) throw revisionError('REVISION_LEASE_LOST')
+    const canceled = Boolean(current.cancel_requested_at)
+    const checkpoint = canceled
+      ? canceledInvalidStateCheckpoint(input.checkpoint, input.now)
+      : input.checkpoint
+    const result = db.query(`
+      UPDATE runs
+      SET status = ?, output_ref = ?, error_message = ?, updated_at = ?,
+        lease_owner = NULL, lease_expires_at = NULL
+      WHERE id = ? AND project_id = ? AND run_type = 'editor_revision'
+        AND status = 'running'
+        AND lease_owner = ?
+        AND lease_expires_at IS NOT NULL
+        AND julianday(lease_expires_at) > julianday(?)
+    `).run(
+      canceled ? 'canceled' : 'failed',
+      JSON.stringify(checkpoint),
+      canceled ? '' : input.errorCode,
+      input.now,
+      input.runId,
+      input.projectId,
+      input.owner,
+      input.now,
+    )
+    if (!Number((result as any)?.changes || 0)) throw revisionError('REVISION_LEASE_LOST')
+  }, 'terminalize-invalid-editor-revision-state')
+}
+
+function canceledInvalidStateCheckpoint(checkpoint: EditorRevisionCheckpoint, completedAt: string) {
+  const next = structuredClone(checkpoint)
+  const current = next.phases[next.phase]
+  const { error: _error, error_code: _errorCode, ...preserved } = current
+  next.phases[next.phase] = {
+    ...preserved,
+    status: 'canceled',
+    attempt: Math.max(1, Number(current.attempt || 0)),
+    completed_at: completedAt,
+  }
+  delete next.error
+  return next
 }
 
 export type EditorRevisionWorkerDependencies = {
@@ -78,6 +146,7 @@ export type EditorRevisionWorkerDependencies = {
     owner: string,
     checkpoint: EditorRevisionCheckpoint,
   ) => Promise<NovelRunRecord>
+  terminalizeInvalidState: typeof terminalizeInvalidEditorRevisionState
   getChapter: (workspace: string, chapterId: number, projectId: number) => Promise<NovelChapterRecord | null>
   listChapters: (workspace: string, projectId: number) => Promise<NovelChapterRecord[]>
   listReviews: (workspace: string, projectId: number) => Promise<NovelReviewRecord[]>
@@ -122,6 +191,7 @@ export async function findOrCreateEditorRevisionReview(
   input: {
     data: Partial<NovelReviewRecord>
     receipt: EditorRevisionReviewReceipt
+    workerLease: { owner: string }
   },
 ) {
   return withNovelDbWrite(workspace, db => {
@@ -129,6 +199,11 @@ export async function findOrCreateEditorRevisionReview(
     if (record.review_type !== input.receipt.kind) {
       throw new Error('editor revision review receipt kind mismatch')
     }
+    assertEditorRevisionWorkerLease(db, {
+      projectId: record.project_id,
+      runId: input.receipt.sourceRunId,
+      owner: input.workerLease.owner,
+    })
     const select = `
       SELECT
         id,
@@ -209,20 +284,67 @@ function errorMessage(error: unknown) {
 }
 
 function parseCheckpoint(value: unknown): EditorRevisionCheckpoint {
-  const parsed = typeof value === 'string' ? JSON.parse(value) : value
-  if (!parsed || typeof parsed !== 'object' || (parsed as any).schema_version !== 1) {
+  let parsed = value
+  try {
+    parsed = typeof value === 'string' ? JSON.parse(value) : value
+  } catch {
     throw revisionError('REVISION_CHECKPOINT_INVALID', 'editor revision checkpoint is invalid')
+  }
+  if (!parsed || typeof parsed !== 'object' || (parsed as any).schema_version !== 1
+    || !EDITOR_REVISION_PHASES.includes((parsed as any).phase)
+    || !(parsed as any).phases || typeof (parsed as any).phases !== 'object'
+    || typeof (parsed as any).prose_persisted !== 'boolean'
+    || !Array.isArray((parsed as any).warnings)) {
+    throw revisionError('REVISION_CHECKPOINT_INVALID', 'editor revision checkpoint is invalid')
+  }
+  for (const phase of EDITOR_REVISION_PHASES) {
+    const state = (parsed as any).phases[phase]
+    if (!state || typeof state !== 'object' || !CHECKPOINT_PHASE_STATES.has(state.status)
+      || !Number.isFinite(Number(state.attempt)) || Number(state.attempt) < 0) {
+      throw revisionError('REVISION_CHECKPOINT_INVALID', 'editor revision checkpoint is invalid')
+    }
   }
   return structuredClone(parsed as EditorRevisionCheckpoint)
 }
 
 function parseInput(value: unknown): EditorRevisionRunInput {
-  const parsed = typeof value === 'string' ? JSON.parse(value) : value
+  let parsed = value
+  try {
+    parsed = typeof value === 'string' ? JSON.parse(value) : value
+  } catch {
+    throw revisionError('REVISION_INPUT_INVALID', 'editor revision input is invalid')
+  }
   if (!parsed || typeof parsed !== 'object' || (parsed as any).schema_version !== 1) {
     throw revisionError('REVISION_INPUT_INVALID', 'editor revision input is invalid')
   }
   const input = parsed as EditorRevisionRunInput
-  if (!Number.isInteger(input.project_id) || !Number.isInteger(input.chapter_id) || !input.source_text_hash) {
+  const integerFields = [
+    input.project_id,
+    input.chapter_id,
+    input.chapter_no,
+    input.review_id,
+    input.source_char_count,
+  ]
+  const stringFields = [
+    input.chapter_title,
+    input.source_chapter_updated_at,
+    input.source_text,
+    input.source_text_hash,
+    input.revision_mode,
+    input.revision_strategy,
+    input.user_prompt,
+    input.created_at,
+  ]
+  const objectFields = [input.source_review, input.report, input.context_package]
+  if (integerFields.some(field => !Number.isInteger(field))
+    || stringFields.some(field => typeof field !== 'string')
+    || objectFields.some(field => !field || typeof field !== 'object' || Array.isArray(field))
+    || !input.source_text || !input.source_text_hash
+    || revisionTextHash(input.source_text) !== input.source_text_hash
+    || countProseChars(input.source_text) !== input.source_char_count
+    || typeof input.auto_quality_check !== 'boolean'
+    || typeof input.auto_story_state !== 'boolean'
+    || (input.model_id !== undefined && !Number.isInteger(input.model_id))) {
     throw revisionError('REVISION_INPUT_INVALID', 'editor revision immutable source is incomplete')
   }
   return input
@@ -303,6 +425,7 @@ export function createEditorRevisionWorker(
     recoverRuns: recoverEditorRevisionRuns,
     writeCheckpoint: writeEditorRevisionCheckpoint,
     finishCancellation: finishEditorRevisionCancellation,
+    terminalizeInvalidState: terminalizeInvalidEditorRevisionState,
     getChapter: getNovelChapter,
     listChapters: listNovelChapters,
     listReviews: listNovelReviews,
@@ -469,12 +592,18 @@ export function createEditorRevisionWorker(
   ) {
     const fresh = await deps.getRun(activeWorkspace!, input.project_id, runId)
     if (!fresh) return
-    if (fresh.status === 'cancel_requested' || fresh.cancel_requested_at) {
-      await finishCanceled(input, runId)
+    if (['completed', 'failed', 'canceled'].includes(fresh.status)) return
+    let checkpoint: EditorRevisionCheckpoint
+    try {
+      checkpoint = parseCheckpoint(fresh.output_ref)
+    } catch (checkpointError) {
+      await terminalizeClaimedRun(fresh, checkpointError, input)
       return
     }
-    if (['completed', 'failed', 'canceled'].includes(fresh.status)) return
-    const checkpoint = parseCheckpoint(fresh.output_ref)
+    if (fresh.status === 'cancel_requested' || fresh.cancel_requested_at) {
+      await finishCanceled(input, runId, checkpoint)
+      return
+    }
     const phase = checkpoint.phase
     const code = errorCode(error)
     const message = errorMessage(error)
@@ -488,6 +617,98 @@ export function createEditorRevisionWorker(
     }
     checkpoint.error = { code, message, ...(diagnostics ? { diagnostics } : {}) }
     await writeCheckpoint(runId, phase, checkpoint, 'failed', code)
+  }
+
+  async function failedCheckpoint(
+    run: NovelRunRecord,
+    error: unknown,
+    input?: EditorRevisionRunInput,
+  ) {
+    let checkpoint: EditorRevisionCheckpoint
+    try {
+      checkpoint = parseCheckpoint(run.output_ref)
+    } catch {
+      checkpoint = {
+        schema_version: 1,
+        phase: 'generate_candidate',
+        phases: Object.fromEntries(EDITOR_REVISION_PHASES.map(phase => [
+          phase,
+          { status: 'pending', attempt: 0 },
+        ])) as EditorRevisionCheckpoint['phases'],
+        prose_persisted: false,
+        warnings: [],
+      }
+      if (input) {
+        const chapter = await deps.getChapter(activeWorkspace!, input.chapter_id, input.project_id).catch(() => null)
+        const marker = chapter?.raw_payload?.editor_revision_commit
+        const markerHash = String(marker?.candidate_hash || '')
+        const liveText = String(chapter?.chapter_text || '')
+        const liveHash = liveText ? revisionTextHash(liveText) : ''
+        const commitMatches = Number(marker?.run_id || 0) === run.id
+          && String(marker?.source_hash || '') === input.source_text_hash
+          && Boolean(markerHash)
+          && markerHash === liveHash
+        if (chapter && commitMatches) {
+          const completedAt = String(marker?.committed_at || chapter.updated_at || deps.now())
+          const reviews = await deps.listReviews(activeWorkspace!, input.project_id).catch(() => [])
+          const receipt = reviews.find(review => {
+            if (review.review_type !== 'editor_revision') return false
+            const payload = parseReviewPayload(review)
+            return Number(payload.source_run_id || 0) === run.id
+              && Number(payload.chapter_id || 0) === input.chapter_id
+              && String(payload.candidate_hash || '') === markerHash
+          })
+          checkpoint.phase = 'post_quality'
+          for (const phase of ['generate_candidate', 'admit_candidate', 'persist_chapter'] as const) {
+            checkpoint.phases[phase] = {
+              status: 'completed',
+              attempt: 1,
+              completed_at: completedAt,
+              summary: { recovered_from_commit_marker: true },
+            }
+          }
+          checkpoint.candidate = {
+            text: liveText,
+            hash: liveHash,
+            char_count: countProseChars(liveText),
+            applied_patches: [],
+            diagnostics: { recovered_from_commit_marker: true },
+          }
+          checkpoint.prose_persisted = true
+          checkpoint.committed_chapter_updated_at = chapter.updated_at
+          if (receipt?.id) checkpoint.editor_revision_review_id = receipt.id
+        }
+      }
+    }
+    const code = errorCode(error)
+    const message = errorMessage(error)
+    const phase = checkpoint.phase
+    checkpoint.phases[phase] = {
+      ...checkpoint.phases[phase],
+      status: 'failed',
+      attempt: Math.max(1, Number(checkpoint.phases[phase].attempt || 0)),
+      completed_at: deps.now(),
+      error_code: code,
+      error: message,
+    }
+    checkpoint.error = { code, message }
+    return checkpoint
+  }
+
+  async function terminalizeClaimedRun(
+    run: NovelRunRecord,
+    error: unknown,
+    input?: EditorRevisionRunInput,
+  ) {
+    const code = errorCode(error)
+    await deps.terminalizeInvalidState(activeWorkspace!, {
+      projectId: run.project_id,
+      runId: run.id,
+      owner: leaseOwner,
+      checkpoint: await failedCheckpoint(run, error, input),
+      errorCode: code,
+      now: deps.now(),
+    })
   }
 
   async function withLlmTimeout<T>(controller: AbortController, operation: () => Promise<T>): Promise<T> {
@@ -524,10 +745,18 @@ export function createEditorRevisionWorker(
     const marker = chapter.raw_payload?.editor_revision_commit
     const markerRunId = Number(marker?.run_id || 0)
     if (markerRunId > runId) throw revisionError('REVISION_RUN_SUPERSEDED')
-    if (checkpoint.prose_persisted || markerRunId !== runId) return checkpoint
-    if (!checkpoint.candidate
-      || String(marker?.candidate_hash || '') !== checkpoint.candidate.hash
-      || revisionTextHash(String(chapter.chapter_text || '')) !== checkpoint.candidate.hash) {
+    const liveCommitMatches = Boolean(
+      checkpoint.candidate
+      && markerRunId === runId
+      && String(marker?.candidate_hash || '') === checkpoint.candidate.hash
+      && revisionTextHash(String(chapter.chapter_text || '')) === checkpoint.candidate.hash,
+    )
+    if (checkpoint.prose_persisted) {
+      if (!liveCommitMatches) throw revisionError('REVISION_RUN_SUPERSEDED')
+      return checkpoint
+    }
+    if (markerRunId !== runId) return checkpoint
+    if (!liveCommitMatches) {
       throw revisionError('REVISION_RUN_SUPERSEDED')
     }
     const recovered = await deps.commitChapter(activeWorkspace!, {
@@ -539,6 +768,7 @@ export function createEditorRevisionWorker(
       candidateHash: checkpoint.candidate.hash,
       chapterPatch: {},
       reviewPayload: { source_review_id: input.review_id },
+      workerLease: { owner: leaseOwner },
     })
     checkpoint.phase = 'persist_chapter'
     checkpoint.prose_persisted = true
@@ -676,6 +906,7 @@ export function createEditorRevisionWorker(
         applied_patches: checkpoint.candidate.applied_patches,
         candidate_diagnostics: checkpoint.candidate.diagnostics,
       },
+      workerLease: { owner: leaseOwner },
     })
     checkpoint.phase = 'persist_chapter'
     checkpoint.prose_persisted = true
@@ -886,6 +1117,7 @@ export function createEditorRevisionWorker(
         candidateHash,
         chapterId: input.chapter_id,
       },
+      workerLease: { owner: leaseOwner },
     })
     return {
       review,
@@ -932,6 +1164,7 @@ export function createEditorRevisionWorker(
         kind: 'downstream_continuity_warning',
         sourceRunId: runId,
       },
+      workerLease: { owner: leaseOwner },
     })
   }
 
@@ -1005,7 +1238,12 @@ export function createEditorRevisionWorker(
     }, EDITOR_REVISION_LEASE_MS / 3)
     let input: EditorRevisionRunInput | null = null
     try {
-      input = parseInput(run.input_ref)
+      const parsedInput = parseInput(run.input_ref)
+      if (parsedInput.project_id !== run.project_id
+        || run.scope_key !== `chapter:${parsedInput.chapter_id}`) {
+        throw revisionError('REVISION_INPUT_INVALID', 'editor revision input does not match the claimed run scope')
+      }
+      input = parsedInput
       const project = await ctx.getProject(activeWorkspace!, input.project_id)
       if (!project) throw revisionError('PROJECT_NOT_FOUND')
       await recoverCommittedChapter(input, run.id, controller, lease)
@@ -1017,11 +1255,18 @@ export function createEditorRevisionWorker(
       await completeRun(input, run.id, controller, lease)
     } catch (error) {
       if (error instanceof StopProcessingError) return
-      if (!input) return
       const code = errorCode(error)
       if (code === 'REVISION_LEASE_LOST' || code === 'REVISION_WORKER_STOPPED') return
+      if (!input) {
+        await terminalizeClaimedRun(run, error).catch(() => {})
+        return
+      }
       if (code === 'REVISION_CANCELED') {
-        await finishCanceled(input, run.id).catch(() => {})
+        try {
+          await finishCanceled(input, run.id)
+        } catch (cancellationError) {
+          await terminalizeClaimedRun(run, cancellationError, input).catch(() => {})
+        }
         return
       }
       await failRun(input, run.id, error).catch(() => {})

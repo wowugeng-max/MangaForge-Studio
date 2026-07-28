@@ -1,3 +1,4 @@
+import type { Database } from 'bun:sqlite'
 import type {
   CommitEditorRevisionChapterInput,
   CommitEditorRevisionChapterResult,
@@ -32,6 +33,24 @@ const REVIEW_RECEIPT_SELECT = `
 
 function revisionCommitError(code: string) {
   return Object.assign(new Error(code), { code })
+}
+
+export function assertEditorRevisionWorkerLease(
+  db: Database,
+  input: { projectId: number; runId: number; owner: string; now?: string },
+) {
+  const timestamp = input.now || nowIso()
+  const lease = db.query(`
+    SELECT id FROM runs
+    WHERE id = ? AND project_id = ? AND run_type = 'editor_revision'
+      AND status = 'running'
+      AND cancel_requested_at IS NULL
+      AND lease_owner = ?
+      AND lease_expires_at IS NOT NULL
+      AND julianday(lease_expires_at) > julianday(?)
+    LIMIT 1
+  `).get(input.runId, input.projectId, input.owner, timestamp)
+  if (!lease) throw revisionCommitError('REVISION_LEASE_LOST')
 }
 
 function scopeReceiptCollections(value: any, key: string, chapterId: number): any {
@@ -89,6 +108,13 @@ export async function commitEditorRevisionChapter(
   input: CommitEditorRevisionChapterInput,
 ): Promise<CommitEditorRevisionChapterResult> {
   return withNovelDbWrite(workspace, db => {
+    if (input.workerLease) {
+      assertEditorRevisionWorkerLease(db, {
+        projectId: input.projectId,
+        runId: input.runId,
+        owner: input.workerLease.owner,
+      })
+    }
     const chapterRow = db.query(
       'SELECT * FROM chapters WHERE id = ? AND project_id = ? LIMIT 1',
     ).get(input.chapterId, input.projectId) as any

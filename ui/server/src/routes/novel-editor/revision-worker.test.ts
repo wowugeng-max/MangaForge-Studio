@@ -1,7 +1,17 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { rm } from 'fs/promises'
-import { createNovelProject, listNovelReviews } from '../../novel'
+import {
+  claimEditorRevisionRun,
+  createEditorRevisionRun,
+  createNovelProject,
+  getEditorRevisionRun,
+  listNovelReviews,
+  requestEditorRevisionCancel,
+} from '../../novel'
+import { openDb } from '../../novel/db'
+import { withNovelDbWrite } from '../../novel/sql-rows'
 import { tempWorkspace, workspaces } from '../../novel/test-utils'
+import { setNovelMutationTestHook } from '../../novel-test-support'
 import type { EditorRevisionCheckpoint, EditorRevisionPhase } from './editor-revision-contract'
 import { revisionTextHash } from './revision-candidate-admission'
 import { createEditorRevisionWorker, findOrCreateEditorRevisionReview } from './revision-worker'
@@ -11,6 +21,7 @@ const sourceText = `${'原正文推进。'.repeat(220)}。`
 const candidateText = `${'修订正文推进。'.repeat(190)}。`
 
 afterEach(async () => {
+  setNovelMutationTestHook(null)
   await Promise.all(workspaces.splice(0).map(path => rm(path, { recursive: true, force: true })))
 })
 
@@ -52,6 +63,30 @@ function clone<T>(value: T): T {
 
 function errorWithCode(code: string, message = code) {
   return Object.assign(new Error(message), { code })
+}
+
+function runDbMutation(workspacePath: string, sql: string, ...params: any[]) {
+  const db = openDb(workspacePath)
+  try {
+    db.query(sql).run(...params)
+  } finally {
+    db.close()
+  }
+}
+
+async function createClaimedReviewRun(
+  workspacePath: string,
+  projectId: number,
+  owner: string,
+) {
+  const run = await createEditorRevisionRun(workspacePath, {
+    projectId,
+    chapterId: 7,
+    inputRef: '{}',
+    outputRef: JSON.stringify(initialCheckpoint()),
+  })
+  await claimEditorRevisionRun(workspacePath, { runId: run.id, owner, leaseMs: 60_000 })
+  return run
 }
 
 async function eventually(predicate: () => boolean, message = 'condition was not reached') {
@@ -110,6 +145,7 @@ function createHarness(options: {
     status: 'queued',
     input_ref: JSON.stringify(input),
     output_ref: JSON.stringify(checkpoint),
+    scope_key: `chapter:${input.chapter_id}`,
     lease_owner: null,
     lease_expires_at: null,
     cancel_requested_at: null,
@@ -277,6 +313,29 @@ function createHarness(options: {
       events.push('canceled')
       return clone(run)
     },
+    terminalizeInvalidState: async (_workspace: string, terminal: any) => {
+      checkpoint = clone(terminal.checkpoint)
+      run.output_ref = JSON.stringify(checkpoint)
+      if (run.cancel_requested_at) {
+        const phase = checkpoint.phase
+        checkpoint.phases[phase] = {
+          ...checkpoint.phases[phase],
+          status: 'canceled',
+          completed_at: terminal.now,
+        }
+        delete checkpoint.error
+        run.output_ref = JSON.stringify(checkpoint)
+        run.status = 'canceled'
+        run.error_message = ''
+      } else {
+        run.status = 'failed'
+        run.error_message = terminal.errorCode
+      }
+      run.lease_owner = null
+      run.lease_expires_at = null
+      events.push(`terminal:${terminal.errorCode}`)
+      return clone(run)
+    },
     getChapter: async () => clone(chapter),
     listChapters: async () => [clone(chapter), ...clone(followers)],
     listReviews: async () => clone(reviews),
@@ -415,6 +474,265 @@ function installMatchingCommitMarker(harness: ReturnType<typeof createHarness>, 
 }
 
 describe('durable editor revision worker', () => {
+  test.each([
+    { label: 'malformed JSON', inputRef: '{' },
+    {
+      label: 'incomplete canonical object',
+      inputRef: JSON.stringify({
+        schema_version: 1,
+        project_id: 4,
+        chapter_id: 7,
+        source_text_hash: revisionTextHash(sourceText),
+      }),
+    },
+  ])('terminally fails claimed $label input without side effects', async ({ inputRef }) => {
+    const harness = createHarness()
+    harness.run.input_ref = inputRef
+    const worker = harness.worker()
+
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    expect(harness.run.status).toBe('failed')
+    expect(harness.run.error_message).toBe('REVISION_INPUT_INVALID')
+    expect(harness.checkpoint().error?.code).toBe('REVISION_INPUT_INVALID')
+    expect(harness.revisionCalls).toHaveLength(0)
+    expect(harness.commitCalls()).toBe(0)
+    expect(harness.qualityCalls).toHaveLength(0)
+    expect(harness.prepareCalls).toHaveLength(0)
+    expect(harness.applyCalls).toHaveLength(0)
+    expect(harness.reviews).toHaveLength(0)
+    expect(harness.chapter().chapter_text).toBe(sourceText)
+  })
+
+  test('terminally fails canonical input bound to another project without side effects', async () => {
+    const harness = createHarness()
+    harness.run.input_ref = JSON.stringify({
+      ...harness.input,
+      project_id: harness.run.project_id + 1,
+    })
+    const worker = harness.worker()
+
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    expect(harness.run.status).toBe('failed')
+    expect(harness.run.error_message).toBe('REVISION_INPUT_INVALID')
+    expect(harness.checkpoint().error?.code).toBe('REVISION_INPUT_INVALID')
+    expect(harness.revisionCalls).toHaveLength(0)
+    expect(harness.commitCalls()).toBe(0)
+    expect(harness.reviews).toHaveLength(0)
+    expect(harness.chapter().chapter_text).toBe(sourceText)
+  })
+
+  test('terminally fails canonical input bound to another chapter scope without side effects', async () => {
+    const harness = createHarness()
+    harness.run.input_ref = JSON.stringify({
+      ...harness.input,
+      chapter_id: harness.input.chapter_id + 1,
+    })
+    const worker = harness.worker()
+
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    expect(harness.run.status).toBe('failed')
+    expect(harness.run.error_message).toBe('REVISION_INPUT_INVALID')
+    expect(harness.checkpoint().error?.code).toBe('REVISION_INPUT_INVALID')
+    expect(harness.revisionCalls).toHaveLength(0)
+    expect(harness.commitCalls()).toBe(0)
+    expect(harness.reviews).toHaveLength(0)
+    expect(harness.chapter().chapter_text).toBe(sourceText)
+  })
+
+  test.each([
+    {
+      label: 'source hash',
+      mutate: (input: ReturnType<typeof createHarness>['input']) => ({
+        ...input,
+        source_text_hash: revisionTextHash(`${input.source_text}changed`),
+      }),
+    },
+    {
+      label: 'source character count',
+      mutate: (input: ReturnType<typeof createHarness>['input']) => ({
+        ...input,
+        source_char_count: input.source_char_count + 1,
+      }),
+    },
+  ])('terminally fails canonical input with a mismatched $label without side effects', async ({ mutate }) => {
+    const harness = createHarness()
+    harness.run.input_ref = JSON.stringify(mutate(harness.input))
+    const worker = harness.worker()
+
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    expect(harness.run.status).toBe('failed')
+    expect(harness.run.error_message).toBe('REVISION_INPUT_INVALID')
+    expect(harness.checkpoint().error?.code).toBe('REVISION_INPUT_INVALID')
+    expect(harness.revisionCalls).toHaveLength(0)
+    expect(harness.commitCalls()).toBe(0)
+    expect(harness.qualityCalls).toHaveLength(0)
+    expect(harness.prepareCalls).toHaveLength(0)
+    expect(harness.applyCalls).toHaveLength(0)
+    expect(harness.reviews).toHaveLength(0)
+    expect(harness.chapter().chapter_text).toBe(sourceText)
+  })
+
+  test.each([
+    { label: 'malformed JSON', outputRef: '{' },
+    {
+      label: 'noncanonical phase state',
+      outputRef: JSON.stringify({
+        ...initialCheckpoint(),
+        phases: {
+          ...initialCheckpoint().phases,
+          generate_candidate: { status: 'unknown', attempt: 0 },
+        },
+      }),
+    },
+  ])('terminally fails a corrupt claimed checkpoint with $label without side effects', async ({ outputRef }) => {
+    const harness = createHarness()
+    harness.run.output_ref = outputRef
+    const worker = harness.worker()
+
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    expect(harness.run.status).toBe('failed')
+    expect(harness.run.error_message).toBe('REVISION_CHECKPOINT_INVALID')
+    expect(harness.checkpoint().error?.code).toBe('REVISION_CHECKPOINT_INVALID')
+    expect(harness.revisionCalls).toHaveLength(0)
+    expect(harness.commitCalls()).toBe(0)
+    expect(harness.qualityCalls).toHaveLength(0)
+    expect(harness.prepareCalls).toHaveLength(0)
+    expect(harness.applyCalls).toHaveLength(0)
+    expect(harness.reviews).toHaveLength(0)
+    expect(harness.chapter().chapter_text).toBe(sourceText)
+  })
+
+  test('default invalid-state terminalizer atomically fails a claimed malformed run', async () => {
+    const activeWorkspace = await tempWorkspace()
+    const project = await createNovelProject(activeWorkspace, { title: 'invalid-state terminalization' })
+    const run = await createEditorRevisionRun(activeWorkspace, {
+      projectId: project.id,
+      chapterId: 7,
+      inputRef: '{}',
+      outputRef: JSON.stringify(initialCheckpoint()),
+    })
+    runDbMutation(activeWorkspace, 'UPDATE runs SET input_ref = ? WHERE id = ?', '{', run.id)
+    const worker = createEditorRevisionWorker({
+      getWorkspace: () => activeWorkspace,
+      getProject: async () => project,
+    } as any)
+
+    await worker.start(activeWorkspace)
+    await worker.waitForIdle()
+
+    const failed = await getEditorRevisionRun(activeWorkspace, project.id, run.id)
+    expect(failed).toMatchObject({
+      status: 'failed',
+      error_message: 'REVISION_INPUT_INVALID',
+      lease_owner: null,
+      lease_expires_at: null,
+    })
+    expect(parsed(failed?.output_ref).error?.code).toBe('REVISION_INPUT_INVALID')
+    expect(parsed(failed?.output_ref).phases.generate_candidate.status).toBe('failed')
+  })
+
+  test('default invalid-state terminalizer honors cancellation for malformed claimed input', async () => {
+    const activeWorkspace = await tempWorkspace()
+    const project = await createNovelProject(activeWorkspace, { title: 'invalid-state cancellation' })
+    const run = await createEditorRevisionRun(activeWorkspace, {
+      projectId: project.id,
+      chapterId: 7,
+      inputRef: '{}',
+      outputRef: JSON.stringify(initialCheckpoint()),
+    })
+    await requestEditorRevisionCancel(activeWorkspace, project.id, run.id)
+    const worker = createEditorRevisionWorker({
+      getWorkspace: () => activeWorkspace,
+      getProject: async () => project,
+    } as any)
+
+    await worker.start(activeWorkspace)
+    await worker.waitForIdle()
+
+    const canceled = await getEditorRevisionRun(activeWorkspace, project.id, run.id)
+    expect(canceled).toMatchObject({
+      status: 'canceled',
+      error_message: '',
+      lease_owner: null,
+      lease_expires_at: null,
+    })
+    expect(parsed(canceled?.output_ref).error).toBeUndefined()
+    expect(parsed(canceled?.output_ref).phases.generate_candidate.status).toBe('canceled')
+  })
+
+  test('corrupt claimed checkpoint honors a concurrent cancellation request', async () => {
+    const harness = createHarness()
+    harness.run.output_ref = '{'
+    harness.run.cancel_requested_at = '2030-01-01T00:00:00.000Z'
+    const worker = harness.worker()
+
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    expect(harness.run.status).toBe('canceled')
+    expect(harness.run.error_message).toBe('')
+    expect(harness.checkpoint().error).toBeUndefined()
+    expect(harness.checkpoint().phases.generate_candidate.status).toBe('canceled')
+    expect(harness.revisionCalls).toHaveLength(0)
+    expect(harness.commitCalls()).toBe(0)
+  })
+
+  test('corrupt checkpoint failure preserves a valid live commit marker and receipt', async () => {
+    const harness = createHarness()
+    harness.run.output_ref = '{'
+    const candidateHash = revisionTextHash(candidateText)
+    harness.setChapter({
+      ...harness.chapter(),
+      chapter_text: candidateText,
+      raw_payload: {
+        editor_revision_commit: {
+          run_id: harness.run.id,
+          source_hash: harness.input.source_text_hash,
+          candidate_hash: candidateHash,
+          committed_at: '2030-01-01T00:00:03.000Z',
+        },
+      },
+      updated_at: '2030-01-01T00:00:03.000Z',
+    })
+    harness.reviews.push({
+      id: 61,
+      project_id: harness.run.project_id,
+      review_type: 'editor_revision',
+      payload: JSON.stringify({
+        source_run_id: harness.run.id,
+        chapter_id: harness.input.chapter_id,
+        candidate_hash: candidateHash,
+      }),
+    })
+    const worker = harness.worker()
+
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    const checkpoint = harness.checkpoint()
+    expect(harness.run.status).toBe('failed')
+    expect(checkpoint.error?.code).toBe('REVISION_CHECKPOINT_INVALID')
+    expect(checkpoint.prose_persisted).toBe(true)
+    expect(checkpoint.candidate).toMatchObject({ text: candidateText, hash: candidateHash })
+    expect(checkpoint.phases.persist_chapter.status).toBe('completed')
+    expect(checkpoint.committed_chapter_updated_at).toBe('2030-01-01T00:00:03.000Z')
+    expect(checkpoint.editor_revision_review_id).toBe(61)
+    expect(harness.revisionCalls).toHaveLength(0)
+    expect(harness.commitCalls()).toBe(0)
+    expect(harness.qualityCalls).toHaveLength(0)
+    expect(harness.chapter().chapter_text).toBe(candidateText)
+  })
+
   test('durably writes every phase boundary before its mutation and completes', async () => {
     const harness = createHarness({ followers: [{ chapter_no: 2, chapter_text: '后续正文。' }] })
     const worker = harness.worker()
@@ -424,10 +742,15 @@ describe('durable editor revision worker', () => {
 
     expect(harness.checkpoint().phases.completed.status).toBe('completed')
     expect(harness.run.status).toBe('completed')
+    expect(harness.events.indexOf('checkpoint:generate_candidate:running')).toBeLessThan(harness.events.indexOf('execute_revision'))
     expect(harness.events.indexOf('checkpoint:persist_chapter:running')).toBeLessThan(harness.events.indexOf('commit'))
     expect(harness.events.indexOf('checkpoint:post_quality:running')).toBeLessThan(harness.events.indexOf('quality'))
     expect(harness.events.indexOf('checkpoint:sync_current_story_state:running')).toBeLessThan(harness.events.indexOf('prepare_story_state'))
     expect(harness.events.indexOf('prepare_story_state')).toBeLessThan(harness.events.indexOf('apply_story_state'))
+    expect(harness.events.indexOf('checkpoint:record_continuity_warning:running'))
+      .toBeLessThan(harness.events.indexOf('review:delivery_risk_convergence'))
+    expect(harness.events.indexOf('checkpoint:record_continuity_warning:running'))
+      .toBeLessThan(harness.events.indexOf('review:downstream_continuity_warning'))
     expect(harness.writes.some(item => item.story_state?.status === 'prepared')).toBe(true)
   })
 
@@ -619,6 +942,57 @@ describe('durable editor revision worker', () => {
     expect(harness.commitCalls()).toBe(0)
   })
 
+  test.each([
+    {
+      label: 'manually edited prose with the same marker',
+      mutate: (harness: ReturnType<typeof createHarness>) => {
+        installMatchingCommitMarker(harness)
+        harness.setChapter({ ...harness.chapter(), chapter_text: 'manual edit after persisted checkpoint' })
+      },
+    },
+    {
+      label: 'missing commit marker',
+      mutate: (harness: ReturnType<typeof createHarness>) => {
+        harness.setChapter({
+          ...harness.chapter(),
+          chapter_text: candidateText,
+          raw_payload: {},
+        })
+      },
+    },
+    {
+      label: 'mismatched commit marker hash',
+      mutate: (harness: ReturnType<typeof createHarness>) => {
+        installMatchingCommitMarker(harness)
+        harness.setChapter({
+          ...harness.chapter(),
+          raw_payload: {
+            editor_revision_commit: {
+              ...harness.chapter().raw_payload.editor_revision_commit,
+              candidate_hash: 'mismatched-marker-hash',
+            },
+          },
+        })
+      },
+    },
+  ])('supersedes persisted-prose recovery for $label before any post phase', async ({ mutate }) => {
+    const harness = createHarness({ checkpoint: persistedCheckpoint() })
+    mutate(harness)
+    const worker = harness.worker()
+
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    expect(harness.run.status).toBe('failed')
+    expect(harness.checkpoint().error?.code).toBe('REVISION_RUN_SUPERSEDED')
+    expect(harness.revisionCalls).toHaveLength(0)
+    expect(harness.commitCalls()).toBe(0)
+    expect(harness.qualityCalls).toHaveLength(0)
+    expect(harness.prepareCalls).toHaveLength(0)
+    expect(harness.applyCalls).toHaveLength(0)
+    expect(harness.reviews).toHaveLength(0)
+  })
+
   test('a post-quality retry resumes at post_quality and never regenerates or recommits prose', async () => {
     const checkpoint = persistedCheckpoint()
     const harness = createHarness({ checkpoint })
@@ -766,11 +1140,88 @@ describe('durable editor revision worker', () => {
     expect(harness.reviews).toHaveLength(0)
   })
 
+  test.each([
+    { kind: 'delivery_risk_convergence' as const, invalidate: 'expiry' as const },
+    { kind: 'downstream_continuity_warning' as const, invalidate: 'status' as const },
+  ])('rejects a queued $kind review after its worker lease loses valid $invalidate', async ({ kind, invalidate }) => {
+    const activeWorkspace = await tempWorkspace()
+    const project = await createNovelProject(activeWorkspace, { title: `fenced ${kind}` })
+    const owner = `worker-${kind}`
+    const run = await createClaimedReviewRun(activeWorkspace, project.id, owner)
+    const candidateHash = 'a'.repeat(64)
+    const receipt = kind === 'delivery_risk_convergence'
+      ? {
+          kind,
+          sourceRunId: run.id,
+          candidateHash,
+          chapterId: 7,
+        }
+      : {
+          kind,
+          sourceRunId: run.id,
+        }
+    const request = {
+      data: {
+        project_id: project.id,
+        review_type: kind,
+        status: kind === 'delivery_risk_convergence' ? 'ok' : 'warn',
+        summary: 'must remain absent after lease loss',
+        issues: [],
+        payload: JSON.stringify({
+          source_run_id: run.id,
+          chapter_id: 7,
+          candidate_hash: candidateHash,
+        }),
+      },
+      receipt,
+      workerLease: { owner },
+    }
+
+    let releaseLock!: () => void
+    let lockAcquired!: () => void
+    const acquired = new Promise<void>(resolve => { lockAcquired = resolve })
+    const release = new Promise<void>(resolve => { releaseLock = resolve })
+    setNovelMutationTestHook(async event => {
+      if (event.operation !== 'review-lease-fence-holder' || event.phase !== 'after_mutation_lock_acquired') return
+      lockAcquired()
+      await release
+    })
+    const holder = withNovelDbWrite(activeWorkspace, () => {}, 'review-lease-fence-holder')
+    await acquired
+    const writing = findOrCreateEditorRevisionReview(activeWorkspace, request as any)
+      .then(value => ({ value }), error => ({ error }))
+
+    if (invalidate === 'expiry') {
+      runDbMutation(
+        activeWorkspace,
+        'UPDATE runs SET lease_expires_at = ? WHERE id = ?',
+        '2000-01-01T00:00:00.000Z',
+        run.id,
+      )
+    } else {
+      runDbMutation(
+        activeWorkspace,
+        'UPDATE runs SET status = ?, cancel_requested_at = ? WHERE id = ?',
+        'cancel_requested',
+        '2030-01-01T00:00:00.000Z',
+        run.id,
+      )
+    }
+    releaseLock()
+    await holder
+    const result = await writing
+
+    expect(result).toMatchObject({ error: { code: 'REVISION_LEASE_LOST' } })
+    expect(await listNovelReviews(activeWorkspace, project.id)).toHaveLength(0)
+  })
+
   test('atomically reuses deterministic reviews without changing their exact payload', async () => {
     const activeWorkspace = await tempWorkspace()
     const project = await createNovelProject(activeWorkspace, { title: 'atomic worker review' })
+    const owner = 'atomic-review-worker'
+    const run = await createClaimedReviewRun(activeWorkspace, project.id, owner)
     const payload = {
-      source_run_id: 41,
+      source_run_id: run.id,
       candidate_hash: 'a'.repeat(64),
       chapter_id: 7,
       chapter_no: 1,
@@ -787,10 +1238,11 @@ describe('durable editor revision worker', () => {
       },
       receipt: {
         kind: 'delivery_risk_convergence' as const,
-        sourceRunId: 41,
+        sourceRunId: run.id,
         candidateHash: 'a'.repeat(64),
         chapterId: 7,
       },
+      workerLease: { owner },
     }
 
     const [first, replay] = await Promise.all([
@@ -805,7 +1257,7 @@ describe('durable editor revision worker', () => {
     expect(parsed(stored[0].payload)).toEqual(payload)
 
     const continuityPayload = {
-      source_run_id: 41,
+      source_run_id: run.id,
       chapter_id: 7,
       chapter_no: 1,
       source_hash: 'b'.repeat(64),
@@ -824,8 +1276,9 @@ describe('durable editor revision worker', () => {
       },
       receipt: {
         kind: 'downstream_continuity_warning' as const,
-        sourceRunId: 41,
+        sourceRunId: run.id,
       },
+      workerLease: { owner },
     }
     const [firstContinuity, replayContinuity] = await Promise.all([
       findOrCreateEditorRevisionReview(activeWorkspace, continuityRequest),
@@ -930,6 +1383,24 @@ describe('durable editor revision worker', () => {
         },
       },
     })
+  })
+
+  test('oversized rejected candidate evidence stores only bounded head and tail previews', async () => {
+    const rejected = `${'首'.repeat(30_001)}${'尾'.repeat(30_001)}`
+    const harness = createHarness({ executeRevision: async () => completeResult(rejected) })
+    const worker = harness.worker()
+
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    const evidence = (harness.checkpoint().error?.diagnostics as any)?.rejected_candidate
+    expect(harness.checkpoint().error?.code).toBe('REVISION_CANDIDATE_TOO_LONG')
+    expect(evidence.text).toBeUndefined()
+    expect(evidence.head_preview).toBe('首'.repeat(2_000))
+    expect(evidence.tail_preview).toBe('尾'.repeat(2_000))
+    expect(evidence.head_preview).toHaveLength(2_000)
+    expect(evidence.tail_preview).toHaveLength(2_000)
+    expect(evidence.char_count).toBe(rejected.length)
   })
 
   test('source conflict makes one candidate attempt and never retries or writes a version', async () => {

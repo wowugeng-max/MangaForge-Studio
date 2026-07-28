@@ -113,6 +113,11 @@ export type CommitEditorRevisionChapterInput = {
   candidateHash: string
   chapterPatch: EditorRevisionChapterPatch
   reviewPayload: Record<string, unknown>
+  workerLease?: EditorRevisionWorkerLease
+}
+
+export type EditorRevisionWorkerLease = {
+  owner: string
 }
 
 export type EditorRevisionChapterPatch = Partial<Pick<

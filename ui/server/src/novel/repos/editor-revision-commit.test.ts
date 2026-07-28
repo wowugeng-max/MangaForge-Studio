@@ -1,10 +1,14 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { rm } from 'fs/promises'
 import { openDb } from '../db'
+import { setNovelMutationTestHook } from '../../novel-test-support'
 import { revisionTextHash } from '../revision-hash'
+import { withNovelDbWrite } from '../sql-rows'
 import { tempWorkspace, workspaces } from '../test-utils'
 import {
   commitEditorRevisionChapter,
+  claimEditorRevisionRun,
+  createEditorRevisionRun,
   createNovelChapter,
   createNovelOutline,
   createNovelProject,
@@ -16,8 +20,27 @@ import {
 } from '../store'
 
 afterEach(async () => {
+  setNovelMutationTestHook(null)
   await Promise.all(workspaces.splice(0).map(workspace => rm(workspace, { recursive: true, force: true })))
 })
+
+function initialCheckpoint() {
+  return {
+    schema_version: 1,
+    phase: 'generate_candidate',
+    phases: {
+      generate_candidate: { status: 'pending', attempt: 0 },
+      admit_candidate: { status: 'pending', attempt: 0 },
+      persist_chapter: { status: 'pending', attempt: 0 },
+      post_quality: { status: 'pending', attempt: 0 },
+      sync_current_story_state: { status: 'pending', attempt: 0 },
+      record_continuity_warning: { status: 'pending', attempt: 0 },
+      completed: { status: 'pending', attempt: 0 },
+    },
+    prose_persisted: false,
+    warnings: [],
+  }
+}
 
 async function createFixture() {
   const workspace = await tempWorkspace()
@@ -90,6 +113,51 @@ function runDbMutation(workspace: string, sql: string, ...params: any[]) {
 }
 
 describe('commitEditorRevisionChapter', () => {
+  test('rejects a chapter commit whose worker lease is taken over while the mutation waits for the workspace lock', async () => {
+    const { workspace, project, chapter, input } = await createFixture()
+    const owner = 'worker-a'
+    const run = await createEditorRevisionRun(workspace, {
+      projectId: project.id,
+      chapterId: chapter.id,
+      inputRef: '{}',
+      outputRef: JSON.stringify(initialCheckpoint()),
+    })
+    await claimEditorRevisionRun(workspace, { runId: run.id, owner, leaseMs: 60_000 })
+
+    let releaseLock!: () => void
+    let lockAcquired!: () => void
+    const acquired = new Promise<void>(resolve => { lockAcquired = resolve })
+    const release = new Promise<void>(resolve => { releaseLock = resolve })
+    setNovelMutationTestHook(async event => {
+      if (event.operation !== 'lease-fence-holder' || event.phase !== 'after_mutation_lock_acquired') return
+      lockAcquired()
+      await release
+    })
+    const holder = withNovelDbWrite(workspace, () => {}, 'lease-fence-holder')
+    await acquired
+    const committing = commitEditorRevisionChapter(workspace, {
+      ...input,
+      runId: run.id,
+      workerLease: { owner },
+    }).then(value => ({ value }), error => ({ error }))
+
+    runDbMutation(
+      workspace,
+      `UPDATE runs SET lease_owner = ?, lease_expires_at = ? WHERE id = ?`,
+      'worker-b',
+      '2099-01-01T00:00:00.000Z',
+      run.id,
+    )
+    releaseLock()
+    await holder
+    const result = await committing
+
+    expect(result).toMatchObject({ error: { code: 'REVISION_LEASE_LOST' } })
+    expect(await listChapterVersions(workspace, chapter.id)).toHaveLength(0)
+    expect(await listNovelReviews(workspace, project.id)).toHaveLength(0)
+    expect((await getNovelChapter(workspace, chapter.id, project.id))?.chapter_text).toBe('source prose')
+  })
+
   test('atomically snapshots the source, writes the candidate and marker, and creates one exact receipt', async () => {
     const { workspace, project, chapter, follower, input } = await createFixture()
 
