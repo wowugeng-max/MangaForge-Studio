@@ -476,6 +476,17 @@ function createHarness(options: {
       events.push('claim')
       return clone(run)
     },
+    releaseClaim: async (_workspace: string, release: any) => {
+      const leaseExpiresAt = run.lease_expires_at ? new Date(run.lease_expires_at).getTime() : Number.NaN
+      const now = new Date(release.now || '2030-01-01T00:00:01.000Z').getTime()
+      if (run.lease_owner !== release.owner || !Number.isFinite(leaseExpiresAt) || leaseExpiresAt <= now) return false
+      if (!['running', 'cancel_requested'].includes(run.status)) return false
+      run.status = 'queued'
+      run.lease_owner = null
+      run.lease_expires_at = null
+      events.push('release')
+      return true
+    },
     renewLease: async (_workspace: string, renew: any) => {
       renewCalls.push(clone(renew))
       return options.renewLease ? options.renewLease(_workspace, renew) : true
@@ -1800,6 +1811,43 @@ describe('durable editor revision worker', () => {
     expect(harness.revisionCalls).toHaveLength(0)
     expect(harness.run.status).toBe('queued')
     expect(harness.timeoutRegistrations.filter(timer => timer !== recoveryTimer && !timer.cleared)).toHaveLength(0)
+  })
+
+  test('stop while claim is in flight requeues the claim without starting any mutation', async () => {
+    const harness = createHarness()
+    let claimEntered!: () => void
+    let releaseClaim!: () => void
+    const entered = new Promise<void>(resolve => { claimEntered = resolve })
+    const claimGate = new Promise<void>(resolve => { releaseClaim = resolve })
+    const worker = harness.worker({
+      claimRun: async (_workspace: string, claim: any) => {
+        claimEntered()
+        await claimGate
+        harness.run.status = 'running'
+        harness.run.lease_owner = claim.owner
+        harness.run.lease_expires_at = '2099-01-01T00:00:00.000Z'
+        harness.events.push('claim')
+        return clone(harness.run)
+      },
+    })
+
+    await worker.start(workspace)
+    await entered
+    const stopping = worker.stop()
+    releaseClaim()
+    await stopping
+
+    expect(harness.run.status).toBe('queued')
+    expect(harness.run.lease_owner).toBeNull()
+    expect(harness.run.lease_expires_at).toBeNull()
+    expect(harness.revisionCalls).toHaveLength(0)
+    expect(harness.writes).toHaveLength(0)
+    expect(harness.commitCalls()).toBe(0)
+    expect(harness.versionWrites()).toBe(0)
+    expect(harness.qualityCalls).toHaveLength(0)
+    expect(harness.prepareCalls).toHaveLength(0)
+    expect(harness.applyCalls).toHaveLength(0)
+    expect(harness.reviews).toHaveLength(0)
   })
 
   test('retries a transient claim failure without requiring recovery to rediscover the run', async () => {

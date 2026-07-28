@@ -10,6 +10,7 @@ import {
   listNovelChapters,
   listNovelReviews,
   recoverEditorRevisionRuns,
+  requeueEditorRevisionRun,
   requireCoherentEditorRevisionCheckpoint,
   renewEditorRevisionLease,
   writeEditorRevisionCheckpoint,
@@ -65,6 +66,7 @@ const TERMINAL_PHASE_STATES = new Set(['completed', 'skipped'])
 
 type LeaseInput = { runId?: number; owner: string; leaseMs?: number }
 type RenewLeaseInput = { runId: number; owner: string; leaseMs?: number }
+type ReleaseLeaseInput = { runId: number; owner: string; now?: string }
 type CheckpointWrite = {
   runId: number
   owner: string
@@ -141,6 +143,7 @@ function canceledInvalidStateCheckpoint(checkpoint: EditorRevisionCheckpoint, co
 
 export type EditorRevisionWorkerDependencies = {
   claimRun: (workspace: string, input: LeaseInput) => Promise<NovelRunRecord | null>
+  releaseClaim: (workspace: string, input: ReleaseLeaseInput) => Promise<boolean>
   renewLease: (workspace: string, input: RenewLeaseInput) => Promise<boolean>
   getRun: (workspace: string, projectId: number, runId: number) => Promise<NovelRunRecord | null>
   recoverRuns: (workspace: string) => Promise<{ queued: number[]; failedLegacy: number[] }>
@@ -407,6 +410,7 @@ export function createEditorRevisionWorker(
 ): EditorRevisionWorker {
   const deps: EditorRevisionWorkerDependencies = {
     claimRun: claimEditorRevisionRun,
+    releaseClaim: requeueEditorRevisionRun,
     renewLease: renewEditorRevisionLease,
     getRun: getEditorRevisionRun,
     recoverRuns: recoverEditorRevisionRuns,
@@ -1290,6 +1294,14 @@ export function createEditorRevisionWorker(
   }
 
   async function processClaim(run: NovelRunRecord) {
+    if (stopping) {
+      await deps.releaseClaim(activeWorkspace!, {
+        runId: run.id,
+        owner: leaseOwner,
+        now: deps.now(),
+      })
+      return
+    }
     const controller = new AbortController()
     const lease: LeaseState = { valid: true }
     controllers.set(run.id, controller)
@@ -1367,7 +1379,16 @@ export function createEditorRevisionWorker(
       }
       queue.delete(runId)
       claimRetryAttempts.delete(runId)
-      if (claimed) await processClaim(claimed)
+      if (!claimed) continue
+      if (stopping) {
+        await deps.releaseClaim(activeWorkspace!, {
+          runId: claimed.id,
+          owner: leaseOwner,
+          now: deps.now(),
+        })
+        continue
+      }
+      await processClaim(claimed)
     }
   }
 

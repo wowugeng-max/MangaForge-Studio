@@ -25,6 +25,7 @@ import {
   finishEditorRevisionCancellation,
   getEditorRevisionRun,
   recoverEditorRevisionRuns,
+  requeueEditorRevisionRun,
   renewEditorRevisionLease,
   requestEditorRevisionCancel,
   retryEditorRevisionRun,
@@ -371,6 +372,75 @@ describe('editor revision run repository', () => {
       status: 'running',
       lease_owner: 'worker-b',
       lease_expires_at: '2030-07-27T10:01:01.000Z',
+    })
+  })
+
+  test('requeues only a same-owner live claim and never clears a takeover or expired lease', async () => {
+    const { workspace, project, chapters: [chapter] } = await createFixture()
+    const run = await createRun(workspace, project.id, chapter.id)
+
+    await claimEditorRevisionRun(workspace, {
+      runId: run.id,
+      owner: 'worker-a',
+      now: '2030-07-27T10:00:00.000Z',
+      leaseMs: 30_000,
+    })
+    expect(await requeueEditorRevisionRun(workspace, {
+      runId: run.id,
+      owner: 'worker-b',
+      now: '2030-07-27T10:00:10.000Z',
+    })).toBe(false)
+    expect(await getEditorRevisionRun(workspace, project.id, run.id)).toMatchObject({
+      status: 'running',
+      lease_owner: 'worker-a',
+      lease_expires_at: '2030-07-27T10:00:30.000Z',
+    })
+
+    expect(await requeueEditorRevisionRun(workspace, {
+      runId: run.id,
+      owner: 'worker-a',
+      now: '2030-07-27T10:00:10.000Z',
+    })).toBe(true)
+    expect(await getEditorRevisionRun(workspace, project.id, run.id)).toMatchObject({
+      status: 'queued',
+      lease_owner: null,
+      lease_expires_at: null,
+    })
+
+    await claimEditorRevisionRun(workspace, {
+      runId: run.id,
+      owner: 'worker-a',
+      now: '2030-07-27T10:01:00.000Z',
+      leaseMs: 30_000,
+    })
+    await updateNovelRun(workspace, run.id, {
+      lease_owner: 'takeover-owner',
+      lease_expires_at: '2030-07-27T10:02:00.000Z',
+    })
+    expect(await requeueEditorRevisionRun(workspace, {
+      runId: run.id,
+      owner: 'worker-a',
+      now: '2030-07-27T10:01:10.000Z',
+    })).toBe(false)
+    expect(await getEditorRevisionRun(workspace, project.id, run.id)).toMatchObject({
+      status: 'running',
+      lease_owner: 'takeover-owner',
+      lease_expires_at: '2030-07-27T10:02:00.000Z',
+    })
+
+    await updateNovelRun(workspace, run.id, {
+      lease_owner: 'worker-a',
+      lease_expires_at: '2030-07-27T10:01:05.000Z',
+    })
+    expect(await requeueEditorRevisionRun(workspace, {
+      runId: run.id,
+      owner: 'worker-a',
+      now: '2030-07-27T10:01:10.000Z',
+    })).toBe(false)
+    expect(await getEditorRevisionRun(workspace, project.id, run.id)).toMatchObject({
+      status: 'running',
+      lease_owner: 'worker-a',
+      lease_expires_at: '2030-07-27T10:01:05.000Z',
     })
   })
 

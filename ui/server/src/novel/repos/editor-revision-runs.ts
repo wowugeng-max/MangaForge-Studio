@@ -451,6 +451,25 @@ export async function claimEditorRevisionRun(workspace: string, input: {
   }, 'claim-editor-revision-run')
 }
 
+export async function requeueEditorRevisionRun(workspace: string, input: {
+  runId: number
+  owner: string
+  now?: string
+}): Promise<boolean> {
+  const owner = String(input.owner || '').trim()
+  if (!owner) throw revisionError('REVISION_LEASE_OWNER_REQUIRED', 'editor revision lease owner is required')
+  const timestamp = normalizedNow(input.now)
+  return withNovelDbWrite(workspace, db => changed(db.query(`
+    UPDATE runs
+    SET status = 'queued', lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+    WHERE id = ? AND run_type = 'editor_revision'
+      AND status IN ('running', 'cancel_requested')
+      AND lease_owner = ?
+      AND lease_expires_at IS NOT NULL
+      AND julianday(lease_expires_at) > julianday(?)
+  `).run(timestamp, input.runId, owner, timestamp)), 'requeue-editor-revision-run')
+}
+
 export async function renewEditorRevisionLease(workspace: string, input: {
   runId: number
   owner: string
