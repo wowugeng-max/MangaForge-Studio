@@ -7,6 +7,7 @@ import type {
   EditorRevisionPhaseState,
 } from '../../routes/novel-editor/editor-revision-contract'
 import { ensureSqliteSchema } from '../db'
+import { revisionTextHash } from '../revision-hash'
 import { tempWorkspace, workspaces } from '../test-utils'
 import {
   appendNovelRun,
@@ -188,15 +189,16 @@ describe('editor revision run repository', () => {
       now: '2030-07-27T10:00:00.000Z',
       leaseMs: 60_000,
     })
+    const admittedCandidateText = 'admitted-candidate'.repeat(5_000)
     const admitted = checkpointAt('persist_chapter', {
       generate_candidate: 'completed',
       admit_candidate: 'completed',
       persist_chapter: 'running',
     }, {
       candidate: {
-        text: 'admitted-candidate'.repeat(5_000),
-        hash: 'candidate-hash',
-        char_count: 90_000,
+        text: admittedCandidateText,
+        hash: revisionTextHash(admittedCandidateText),
+        char_count: admittedCandidateText.length,
         applied_patches: [{ anchor: 'exact-patch-receipt' }],
         diagnostics: { provider_receipt: 'exact-provider-receipt' },
       },
@@ -220,11 +222,67 @@ describe('editor revision run repository', () => {
       phase: 'persist_chapter',
       candidate: {
         text: admitted.candidate?.text,
-        hash: 'candidate-hash',
+        hash: revisionTextHash(admittedCandidateText),
         applied_patches: [{ anchor: 'exact-patch-receipt' }],
         diagnostics: { provider_receipt: 'exact-provider-receipt' },
       },
     })
+  })
+
+  test.each([
+    {
+      label: 'candidate evidence before completed admission',
+      mutate: (checkpoint: EditorRevisionCheckpoint) => {
+        checkpoint.candidate = {
+          text: 'candidate text',
+          hash: revisionTextHash('candidate text'),
+          char_count: 13,
+          applied_patches: [],
+          diagnostics: {},
+        }
+      },
+    },
+    {
+      label: 'candidate hash mismatch',
+      mutate: (checkpoint: EditorRevisionCheckpoint) => {
+        checkpoint.phase = 'admit_candidate'
+        checkpoint.phases.generate_candidate = { status: 'completed', attempt: 1 }
+        checkpoint.phases.admit_candidate = { status: 'completed', attempt: 1 }
+        checkpoint.candidate = {
+          text: 'candidate text',
+          hash: revisionTextHash('different text'),
+          char_count: 13,
+          applied_patches: [],
+          diagnostics: {},
+        }
+      },
+    },
+    {
+      label: 'candidate character-count mismatch',
+      mutate: (checkpoint: EditorRevisionCheckpoint) => {
+        checkpoint.phase = 'admit_candidate'
+        checkpoint.phases.generate_candidate = { status: 'completed', attempt: 1 }
+        checkpoint.phases.admit_candidate = { status: 'completed', attempt: 1 }
+        checkpoint.candidate = {
+          text: 'candidate text',
+          hash: revisionTextHash('candidate text'),
+          char_count: 999,
+          applied_patches: [],
+          diagnostics: {},
+        }
+      },
+    },
+  ])('rejects $label in a canonical run checkpoint', async ({ mutate }) => {
+    const { workspace, project, chapters: [chapter] } = await createFixture()
+    const checkpoint = initialCheckpoint()
+    mutate(checkpoint)
+
+    await expect(createEditorRevisionRun(workspace, {
+      projectId: project.id,
+      chapterId: chapter.id,
+      inputRef: runInput(chapter.id),
+      outputRef: JSON.stringify(checkpoint),
+    })).rejects.toMatchObject({ code: 'REVISION_CHECKPOINT_INVALID' })
   })
 
   test('enforces the active chapter scope across two concurrent Bun processes', async () => {
@@ -415,7 +473,13 @@ describe('editor revision run repository', () => {
       admit_candidate: 'completed',
       persist_chapter: 'running',
     }, {
-      candidate: { text: 'accepted-text', hash: 'accepted-hash', char_count: 13, applied_patches: [], diagnostics: {} },
+      candidate: {
+        text: 'accepted-text',
+        hash: revisionTextHash('accepted-text'),
+        char_count: 13,
+        applied_patches: [],
+        diagnostics: {},
+      },
     })
     await writeEditorRevisionCheckpoint(workspace, {
       runId: admittedRun.id,
@@ -436,7 +500,7 @@ describe('editor revision run repository', () => {
     })).rejects.toMatchObject({ code: 'REVISION_CHECKPOINT_REGRESSION' })
     expect(JSON.parse((await getEditorRevisionRun(workspace, project.id, admittedRun.id))?.output_ref || '{}').candidate).toMatchObject({
       text: 'accepted-text',
-      hash: 'accepted-hash',
+      hash: revisionTextHash('accepted-text'),
     })
 
     const incompleteRun = await createRun(workspace, project.id, chapter2.id)
@@ -608,7 +672,13 @@ describe('editor revision run repository', () => {
       persist_chapter: 'completed',
       post_quality: 'running',
     }, {
-      candidate: { text: 'committed-text', hash: 'committed-hash', char_count: 14, applied_patches: [], diagnostics: {} },
+      candidate: {
+        text: 'committed-text',
+        hash: revisionTextHash('committed-text'),
+        char_count: 14,
+        applied_patches: [],
+        diagnostics: {},
+      },
       prose_persisted: true,
       committed_chapter_updated_at: '2030-07-27T10:00:01.000Z',
       editor_revision_review_id: 42,
@@ -642,7 +712,7 @@ describe('editor revision run repository', () => {
       prose_persisted: true,
       committed_chapter_updated_at: '2030-07-27T10:00:01.000Z',
       editor_revision_review_id: 42,
-      candidate: { text: 'committed-text', hash: 'committed-hash' },
+      candidate: { text: 'committed-text', hash: revisionTextHash('committed-text') },
       phases: {
         persist_chapter: { status: 'completed' },
         post_quality: { status: 'canceled' },
@@ -655,7 +725,7 @@ describe('editor revision run repository', () => {
     expect(retriedCheckpoint).toMatchObject({
       phase: 'post_quality',
       prose_persisted: true,
-      candidate: { text: 'committed-text', hash: 'committed-hash' },
+      candidate: { text: 'committed-text', hash: revisionTextHash('committed-text') },
       phases: {
         generate_candidate: { status: 'completed' },
         admit_candidate: { status: 'completed' },
@@ -679,7 +749,13 @@ describe('editor revision run repository', () => {
       admit_candidate: 'completed',
       persist_chapter: 'running',
     }, {
-      candidate: { text: 'committed-text', hash: 'commit-gap-hash', char_count: 14, applied_patches: [], diagnostics: {} },
+      candidate: {
+        text: 'committed-text',
+        hash: revisionTextHash('committed-text'),
+        char_count: 14,
+        applied_patches: [],
+        diagnostics: {},
+      },
     })
     await writeEditorRevisionCheckpoint(workspace, {
       runId: run.id,
@@ -701,7 +777,7 @@ describe('editor revision run repository', () => {
       prose_persisted: true,
       committed_chapter_updated_at: '2030-07-27T10:00:01.000Z',
       editor_revision_review_id: 43,
-      candidate: { hash: 'commit-gap-hash' },
+      candidate: { hash: revisionTextHash('committed-text') },
       phases: { persist_chapter: { status: 'completed' } },
     })
 
@@ -709,7 +785,7 @@ describe('editor revision run repository', () => {
     expect(JSON.parse(retried.output_ref || '{}')).toMatchObject({
       phase: 'post_quality',
       prose_persisted: true,
-      candidate: { hash: 'commit-gap-hash' },
+      candidate: { hash: revisionTextHash('committed-text') },
       phases: { post_quality: { status: 'pending' } },
     })
   })
@@ -723,7 +799,13 @@ describe('editor revision run repository', () => {
         persist_chapter: 'completed',
         post_quality: 'failed',
       }, {
-        candidate: { text: 'persisted', hash: 'hash-1', char_count: 9, applied_patches: [], diagnostics: {} },
+        candidate: {
+          text: 'persisted',
+          hash: revisionTextHash('persisted'),
+          char_count: 9,
+          applied_patches: [],
+          diagnostics: {},
+        },
         prose_persisted: true,
         committed_chapter_updated_at: '2030-07-27T10:00:01.000Z',
         error: { code: 'POST_QUALITY_FAILED', message: 'quality unavailable' },
@@ -733,14 +815,19 @@ describe('editor revision run repository', () => {
         admit_candidate: 'completed',
         persist_chapter: 'failed',
       }, {
-        candidate: { text: 'admitted', hash: 'hash-2', char_count: 8, applied_patches: [], diagnostics: {} },
+        candidate: {
+          text: 'admitted',
+          hash: revisionTextHash('admitted'),
+          char_count: 8,
+          applied_patches: [],
+          diagnostics: {},
+        },
         error: { code: 'PERSIST_FAILED', message: 'commit unavailable' },
       }),
       checkpointAt('admit_candidate', {
         generate_candidate: 'completed',
         admit_candidate: 'failed',
       }, {
-        candidate: { text: 'rejected', hash: 'hash-3', char_count: 8, applied_patches: [], diagnostics: {} },
         error: { code: 'REVISION_CANDIDATE_REJECTED', message: 'not admitted' },
       }),
     ]
@@ -770,7 +857,7 @@ describe('editor revision run repository', () => {
     expect(persistedCheckpoint).toMatchObject({
       phase: 'post_quality',
       prose_persisted: true,
-      candidate: { hash: 'hash-1' },
+      candidate: { hash: revisionTextHash('persisted') },
       phases: {
         persist_chapter: { status: 'completed' },
         post_quality: { status: 'pending' },
@@ -782,7 +869,7 @@ describe('editor revision run repository', () => {
     expect(admittedRetry.id).toBe(runs[1].id)
     expect(admittedCheckpoint).toMatchObject({
       phase: 'persist_chapter',
-      candidate: { hash: 'hash-2' },
+      candidate: { hash: revisionTextHash('admitted') },
       phases: {
         generate_candidate: { status: 'completed' },
         admit_candidate: { status: 'completed' },
@@ -813,7 +900,13 @@ describe('editor revision run repository', () => {
         admit_candidate: 'completed',
         persist_chapter: 'failed',
       }, {
-        candidate: { text: 'candidate', hash: `hash-${index}`, char_count: 9, applied_patches: [], diagnostics: {} },
+        candidate: {
+          text: 'candidate',
+          hash: revisionTextHash('candidate'),
+          char_count: 9,
+          applied_patches: [],
+          diagnostics: {},
+        },
         error: { code: errorCode, message: errorCode },
       })
       await writeEditorRevisionCheckpoint(workspace, {
@@ -993,6 +1086,48 @@ describe('editor revision run repository', () => {
       updated_at: '2020-01-01T00:01:00.000Z',
     })
     expect(await getEditorRevisionRun(workspace, project.id, legacy.id)).toMatchObject({
+      status: 'failed',
+      error_message: 'LEGACY_REVISION_RUN_NOT_RESUMABLE',
+      lease_owner: null,
+      lease_expires_at: null,
+    })
+  })
+
+  test('recovery terminalizes incoherent state only when its worker lease is recoverable', async () => {
+    const { workspace, project, chapters: [liveChapter, expiredChapter] } = await createFixture([1, 2])
+    const live = await createRun(workspace, project.id, liveChapter.id)
+    const expired = await createRun(workspace, project.id, expiredChapter.id)
+    await claimEditorRevisionRun(workspace, {
+      runId: live.id,
+      owner: 'live-worker',
+      now: '2030-07-27T10:00:00.000Z',
+      leaseMs: 60_000,
+    })
+    await claimEditorRevisionRun(workspace, {
+      runId: expired.id,
+      owner: 'expired-worker',
+      now: '2030-07-27T10:00:00.000Z',
+      leaseMs: 5_000,
+    })
+    const incoherent = JSON.stringify({ ...initialCheckpoint(), prose_persisted: true })
+    const db = new Database(join(workspace, 'novel.sqlite'))
+    try {
+      db.query('UPDATE runs SET output_ref = ? WHERE id IN (?, ?)').run(incoherent, live.id, expired.id)
+    } finally {
+      db.close()
+    }
+
+    const recovered = await recoverEditorRevisionRuns(workspace, '2030-07-27T10:00:10.000Z')
+
+    expect(recovered.failedLegacy).toEqual([expired.id])
+    expect(recovered.queued).toHaveLength(0)
+    expect(await getEditorRevisionRun(workspace, project.id, live.id)).toMatchObject({
+      status: 'running',
+      lease_owner: 'live-worker',
+      lease_expires_at: '2030-07-27T10:01:00.000Z',
+      output_ref: incoherent,
+    })
+    expect(await getEditorRevisionRun(workspace, project.id, expired.id)).toMatchObject({
       status: 'failed',
       error_message: 'LEGACY_REVISION_RUN_NOT_RESUMABLE',
       lease_owner: null,

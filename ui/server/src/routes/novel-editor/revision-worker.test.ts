@@ -3,7 +3,9 @@ import { rm } from 'fs/promises'
 import {
   claimEditorRevisionRun,
   createEditorRevisionRun,
+  createNovelChapter,
   createNovelProject,
+  createNovelReview,
   getEditorRevisionRun,
   listNovelReviews,
   requestEditorRevisionCancel,
@@ -46,6 +48,30 @@ function initialCheckpoint(): EditorRevisionCheckpoint {
 function completeResult(text = candidateText, extra: Record<string, unknown> = {}) {
   const output = { chapter_text: text, ...extra }
   return { finish_reason: 'stop', content: JSON.stringify(output), output }
+}
+
+function canonicalRunInput(projectId: number, chapter: { id: number; chapter_no: number; title: string; updated_at: string }) {
+  return {
+    schema_version: 1 as const,
+    project_id: projectId,
+    chapter_id: chapter.id,
+    chapter_no: chapter.chapter_no,
+    chapter_title: chapter.title,
+    review_id: 11,
+    source_chapter_updated_at: chapter.updated_at,
+    source_text: sourceText,
+    source_text_hash: revisionTextHash(sourceText),
+    source_char_count: sourceText.replace(/\s/g, '').length,
+    source_review: { id: 11, review_type: 'prose_quality', payload: '{}' },
+    report: { revision_strategy: 'surgical_patch', must_fix: ['收紧冲突'] },
+    context_package: { current_chapter: { chapter_no: chapter.chapter_no } },
+    revision_mode: 'from_report',
+    revision_strategy: 'surgical_patch',
+    user_prompt: '',
+    auto_quality_check: true,
+    auto_story_state: true,
+    created_at: '2030-01-01T00:00:00.000Z',
+  }
 }
 
 function parsed(value: unknown) {
@@ -455,6 +481,17 @@ function persistedCheckpoint(candidate = candidateText): EditorRevisionCheckpoin
   return checkpoint
 }
 
+function completedCheckpoint(): EditorRevisionCheckpoint {
+  const checkpoint = persistedCheckpoint()
+  checkpoint.phase = 'completed'
+  checkpoint.phases.post_quality = { status: 'completed', attempt: 1 }
+  checkpoint.phases.sync_current_story_state = { status: 'skipped', attempt: 1 }
+  checkpoint.phases.record_continuity_warning = { status: 'completed', attempt: 1 }
+  checkpoint.phases.completed = { status: 'completed', attempt: 1 }
+  checkpoint.completed_at = '2030-01-01T00:00:04.000Z'
+  return checkpoint
+}
+
 function installMatchingCommitMarker(harness: ReturnType<typeof createHarness>, runId = 41) {
   const checkpoint = harness.checkpoint()
   const candidate = checkpoint.candidate?.text || candidateText
@@ -612,6 +649,129 @@ describe('durable editor revision worker', () => {
     expect(harness.chapter().chapter_text).toBe(sourceText)
   })
 
+  test.each([
+    {
+      label: 'persisted prose without an admitted candidate',
+      checkpoint: { ...initialCheckpoint(), prose_persisted: true },
+    },
+    {
+      label: 'a post-quality phase with pending predecessors',
+      checkpoint: { ...initialCheckpoint(), phase: 'post_quality' as const },
+    },
+  ])('real worker terminally fails $label after claim', async ({ checkpoint }) => {
+    const activeWorkspace = await tempWorkspace()
+    const project = await createNovelProject(activeWorkspace, { title: 'incoherent claimed checkpoint' })
+    const chapter = await createNovelChapter(activeWorkspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: sourceText,
+    })
+    const run = await createEditorRevisionRun(activeWorkspace, {
+      projectId: project.id,
+      chapterId: chapter.id,
+      inputRef: JSON.stringify(canonicalRunInput(project.id, chapter)),
+      outputRef: JSON.stringify(initialCheckpoint()),
+    })
+    const worker = createEditorRevisionWorker({
+      getWorkspace: () => activeWorkspace,
+      getProject: async () => project,
+    } as any, {
+      claimRun: async (workspacePath, input) => {
+        const claimed = await claimEditorRevisionRun(workspacePath, input)
+        if (claimed) {
+          runDbMutation(workspacePath, 'UPDATE runs SET output_ref = ? WHERE id = ?', JSON.stringify(checkpoint), claimed.id)
+        }
+        return claimed
+      },
+    })
+
+    await worker.start(activeWorkspace)
+    await worker.waitForIdle()
+
+    const failed = await getEditorRevisionRun(activeWorkspace, project.id, run.id)
+    const terminalCheckpoint = parsed(failed?.output_ref)
+    expect(failed).toMatchObject({
+      status: 'failed',
+      error_message: 'REVISION_CHECKPOINT_INVALID',
+      lease_owner: null,
+      lease_expires_at: null,
+    })
+    expect(terminalCheckpoint.error?.code).toBe('REVISION_CHECKPOINT_INVALID')
+    expect(terminalCheckpoint.phases.generate_candidate.status).toBe('failed')
+    expect(await listNovelReviews(activeWorkspace, project.id)).toHaveLength(0)
+  })
+
+  test.each([
+    {
+      label: 'an already failed current phase',
+      checkpoint: () => {
+        const checkpoint = initialCheckpoint()
+        checkpoint.phases.generate_candidate = { status: 'failed', attempt: 1 }
+        checkpoint.error = { code: 'OLD_FAILURE', message: 'old failure' }
+        return checkpoint
+      },
+    },
+    {
+      label: 'an already canceled current phase',
+      checkpoint: () => {
+        const checkpoint = initialCheckpoint()
+        checkpoint.phases.generate_candidate = { status: 'canceled', attempt: 1 }
+        return checkpoint
+      },
+    },
+    {
+      label: 'a completed checkpoint on an active row',
+      checkpoint: completedCheckpoint,
+    },
+  ])('real worker terminalizes $label without automatic orchestration', async ({ checkpoint: buildCheckpoint }) => {
+    const activeWorkspace = await tempWorkspace()
+    const project = await createNovelProject(activeWorkspace, { title: 'active checkpoint context' })
+    const chapter = await createNovelChapter(activeWorkspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: sourceText,
+    })
+    const run = await createEditorRevisionRun(activeWorkspace, {
+      projectId: project.id,
+      chapterId: chapter.id,
+      inputRef: JSON.stringify(canonicalRunInput(project.id, chapter)),
+      outputRef: JSON.stringify(initialCheckpoint()),
+    })
+    let orchestrationCalls = 0
+    const checkpoint = buildCheckpoint()
+    const worker = createEditorRevisionWorker({
+      getWorkspace: () => activeWorkspace,
+      getProject: async () => project,
+    } as any, {
+      claimRun: async (workspacePath, input) => {
+        const claimed = await claimEditorRevisionRun(workspacePath, input)
+        if (claimed) {
+          runDbMutation(workspacePath, 'UPDATE runs SET output_ref = ? WHERE id = ?', JSON.stringify(checkpoint), claimed.id)
+        }
+        return claimed
+      },
+      executeRevision: async () => {
+        orchestrationCalls += 1
+        throw errorWithCode('UNEXPECTED_ORCHESTRATION')
+      },
+    })
+
+    await worker.start(activeWorkspace)
+    await worker.waitForIdle()
+
+    const failed = await getEditorRevisionRun(activeWorkspace, project.id, run.id)
+    expect(failed).toMatchObject({
+      status: 'failed',
+      error_message: 'REVISION_CHECKPOINT_INVALID',
+      lease_owner: null,
+      lease_expires_at: null,
+    })
+    expect(parsed(failed?.output_ref).error?.code).toBe('REVISION_CHECKPOINT_INVALID')
+    expect(orchestrationCalls).toBe(0)
+  })
+
   test('default invalid-state terminalizer atomically fails a claimed malformed run', async () => {
     const activeWorkspace = await tempWorkspace()
     const project = await createNovelProject(activeWorkspace, { title: 'invalid-state terminalization' })
@@ -668,6 +828,219 @@ describe('durable editor revision worker', () => {
     })
     expect(parsed(canceled?.output_ref).error).toBeUndefined()
     expect(parsed(canceled?.output_ref).phases.generate_candidate.status).toBe('canceled')
+  })
+
+  test('real invalid-state terminalizer honors cancellation immediately after lease claim', async () => {
+    const activeWorkspace = await tempWorkspace()
+    const project = await createNovelProject(activeWorkspace, { title: 'claimed invalid-state cancellation' })
+    const chapter = await createNovelChapter(activeWorkspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: sourceText,
+    })
+    const run = await createEditorRevisionRun(activeWorkspace, {
+      projectId: project.id,
+      chapterId: chapter.id,
+      inputRef: JSON.stringify(canonicalRunInput(project.id, chapter)),
+      outputRef: JSON.stringify(initialCheckpoint()),
+    })
+    runDbMutation(activeWorkspace, 'UPDATE runs SET input_ref = ? WHERE id = ?', '{', run.id)
+    const worker = createEditorRevisionWorker({
+      getWorkspace: () => activeWorkspace,
+      getProject: async () => project,
+    } as any, {
+      claimRun: async (workspacePath, input) => {
+        const claimed = await claimEditorRevisionRun(workspacePath, input)
+        if (claimed) await requestEditorRevisionCancel(workspacePath, project.id, claimed.id)
+        return claimed
+      },
+    })
+
+    await worker.start(activeWorkspace)
+    await worker.waitForIdle()
+
+    const canceled = await getEditorRevisionRun(activeWorkspace, project.id, run.id)
+    expect(canceled).toMatchObject({
+      status: 'canceled',
+      error_message: '',
+      lease_owner: null,
+      lease_expires_at: null,
+    })
+    expect(parsed(canceled?.output_ref).error).toBeUndefined()
+    expect(parsed(canceled?.output_ref).phases.generate_candidate.status).toBe('canceled')
+  })
+
+  test('real cancellation of a corrupt checkpoint preserves matching live commit evidence', async () => {
+    const activeWorkspace = await tempWorkspace()
+    const project = await createNovelProject(activeWorkspace, { title: 'claimed corrupt-state cancellation' })
+    const chapter = await createNovelChapter(activeWorkspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: sourceText,
+    })
+    const input = canonicalRunInput(project.id, chapter)
+    const run = await createEditorRevisionRun(activeWorkspace, {
+      projectId: project.id,
+      chapterId: chapter.id,
+      inputRef: JSON.stringify(input),
+      outputRef: JSON.stringify(initialCheckpoint()),
+    })
+    const candidateHash = revisionTextHash(candidateText)
+    const committedAt = '2030-01-01T00:00:03.000Z'
+    runDbMutation(
+      activeWorkspace,
+      'UPDATE chapters SET chapter_text = ?, raw_payload = ?, updated_at = ? WHERE id = ? AND project_id = ?',
+      candidateText,
+      JSON.stringify({
+        editor_revision_commit: {
+          run_id: run.id,
+          source_hash: input.source_text_hash,
+          candidate_hash: candidateHash,
+          committed_at: committedAt,
+        },
+      }),
+      committedAt,
+      chapter.id,
+      project.id,
+    )
+    const receipt = await createNovelReview(activeWorkspace, {
+      project_id: project.id,
+      review_type: 'editor_revision',
+      payload: JSON.stringify({
+        source_run_id: run.id,
+        chapter_id: chapter.id,
+        candidate_hash: candidateHash,
+      }),
+    })
+    const worker = createEditorRevisionWorker({
+      getWorkspace: () => activeWorkspace,
+      getProject: async () => project,
+    } as any, {
+      claimRun: async (workspacePath, claimInput) => {
+        const claimed = await claimEditorRevisionRun(workspacePath, claimInput)
+        if (claimed) {
+          runDbMutation(workspacePath, 'UPDATE runs SET output_ref = ? WHERE id = ?', '{', claimed.id)
+          await requestEditorRevisionCancel(workspacePath, project.id, claimed.id)
+        }
+        return claimed
+      },
+    })
+
+    await worker.start(activeWorkspace)
+    await worker.waitForIdle()
+
+    const canceled = await getEditorRevisionRun(activeWorkspace, project.id, run.id)
+    const checkpoint = parsed(canceled?.output_ref)
+    expect(canceled).toMatchObject({
+      status: 'canceled',
+      error_message: '',
+      lease_owner: null,
+      lease_expires_at: null,
+    })
+    expect(checkpoint.error).toBeUndefined()
+    expect(checkpoint.prose_persisted).toBe(true)
+    expect(checkpoint.candidate).toMatchObject({ text: candidateText, hash: candidateHash })
+    expect(checkpoint.phases.persist_chapter.status).toBe('completed')
+    expect(checkpoint.phases.post_quality.status).toBe('canceled')
+    expect(checkpoint.committed_chapter_updated_at).toBe(committedAt)
+    expect(checkpoint.editor_revision_review_id).toBe(receipt.id)
+  })
+
+  test('invalid-state cancellation preserves a completed persist boundary and cancels the first post phase', async () => {
+    const activeWorkspace = await tempWorkspace()
+    const project = await createNovelProject(activeWorkspace, { title: 'completed persist cancellation' })
+    const chapter = await createNovelChapter(activeWorkspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: sourceText,
+    })
+    const run = await createEditorRevisionRun(activeWorkspace, {
+      projectId: project.id,
+      chapterId: chapter.id,
+      inputRef: '{}',
+      outputRef: JSON.stringify(initialCheckpoint()),
+    })
+    const committed = persistedCheckpoint()
+    committed.phase = 'persist_chapter'
+    const worker = createEditorRevisionWorker({
+      getWorkspace: () => activeWorkspace,
+      getProject: async () => project,
+    } as any, {
+      claimRun: async (workspacePath, input) => {
+        const claimed = await claimEditorRevisionRun(workspacePath, input)
+        if (claimed) {
+          runDbMutation(workspacePath, 'UPDATE runs SET output_ref = ? WHERE id = ?', JSON.stringify(committed), claimed.id)
+          await requestEditorRevisionCancel(workspacePath, project.id, claimed.id)
+        }
+        return claimed
+      },
+    })
+
+    await worker.start(activeWorkspace)
+    await worker.waitForIdle()
+
+    const canceled = await getEditorRevisionRun(activeWorkspace, project.id, run.id)
+    const checkpoint = parsed(canceled?.output_ref)
+    expect(canceled).toMatchObject({
+      status: 'canceled',
+      error_message: '',
+      lease_owner: null,
+      lease_expires_at: null,
+    })
+    expect(checkpoint).toMatchObject({
+      phase: 'post_quality',
+      prose_persisted: true,
+      candidate: { hash: revisionTextHash(candidateText) },
+      committed_chapter_updated_at: committed.committed_chapter_updated_at,
+      editor_revision_review_id: committed.editor_revision_review_id,
+      phases: {
+        persist_chapter: { status: 'completed' },
+        post_quality: { status: 'canceled' },
+        sync_current_story_state: { status: 'pending' },
+      },
+    })
+    expect(checkpoint.error).toBeUndefined()
+  })
+
+  test('real invalid-state terminalizer cannot overwrite a taken-over lease', async () => {
+    const activeWorkspace = await tempWorkspace()
+    const project = await createNovelProject(activeWorkspace, { title: 'invalid-state lease takeover' })
+    const chapter = await createNovelChapter(activeWorkspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: sourceText,
+    })
+    const run = await createEditorRevisionRun(activeWorkspace, {
+      projectId: project.id,
+      chapterId: chapter.id,
+      inputRef: JSON.stringify(canonicalRunInput(project.id, chapter)),
+      outputRef: JSON.stringify(initialCheckpoint()),
+    })
+    runDbMutation(activeWorkspace, 'UPDATE runs SET input_ref = ? WHERE id = ?', '{', run.id)
+    const worker = createEditorRevisionWorker({
+      getWorkspace: () => activeWorkspace,
+      getProject: async () => project,
+    } as any, {
+      claimRun: async (workspacePath, input) => {
+        const claimed = await claimEditorRevisionRun(workspacePath, input)
+        if (claimed) runDbMutation(workspacePath, 'UPDATE runs SET lease_owner = ? WHERE id = ?', 'worker-takeover', claimed.id)
+        return claimed
+      },
+    })
+
+    await worker.start(activeWorkspace)
+    await worker.waitForIdle()
+
+    const owned = await getEditorRevisionRun(activeWorkspace, project.id, run.id)
+    expect(owned).toMatchObject({
+      status: 'running',
+      lease_owner: 'worker-takeover',
+    })
+    expect(parsed(owned?.output_ref)).toEqual(initialCheckpoint())
   })
 
   test('corrupt claimed checkpoint honors a concurrent cancellation request', async () => {
@@ -970,6 +1343,21 @@ describe('durable editor revision worker', () => {
             editor_revision_commit: {
               ...harness.chapter().raw_payload.editor_revision_commit,
               candidate_hash: 'mismatched-marker-hash',
+            },
+          },
+        })
+      },
+    },
+    {
+      label: 'mismatched commit marker source hash',
+      mutate: (harness: ReturnType<typeof createHarness>) => {
+        installMatchingCommitMarker(harness)
+        harness.setChapter({
+          ...harness.chapter(),
+          raw_payload: {
+            editor_revision_commit: {
+              ...harness.chapter().raw_payload.editor_revision_commit,
+              source_hash: revisionTextHash('different source snapshot'),
             },
           },
         })

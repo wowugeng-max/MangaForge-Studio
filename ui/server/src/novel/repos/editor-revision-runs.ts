@@ -9,6 +9,7 @@ import {
 import { ensureSqliteSchema, openDb } from '../db'
 import { nowIso } from '../json'
 import { normalizeRunRecord } from '../normalize'
+import { revisionTextHash } from '../revision-hash'
 import { runFromRow } from '../row-mappers'
 import { withNovelDbWrite } from '../sql-rows'
 import type { NovelRunRecord } from '../types'
@@ -73,6 +74,109 @@ function requireCanonicalCheckpoint(value: unknown): EditorRevisionCheckpoint {
   return checkpoint
 }
 
+function checkpointInvalid(message: string): never {
+  throw revisionError('REVISION_CHECKPOINT_INVALID', message)
+}
+
+export type EditorRevisionCheckpointContext = {
+  runStatus?: EditorRevisionRunStatus
+}
+
+export function assertEditorRevisionCheckpointCoherent(
+  checkpoint: EditorRevisionCheckpoint,
+  context: EditorRevisionCheckpointContext = {},
+) {
+  const currentIndex = phaseIndex(checkpoint.phase)
+  for (const phase of EDITOR_REVISION_PHASES.slice(0, currentIndex)) {
+    if (!TERMINAL_PHASE_STATES.has(checkpoint.phases[phase].status)) {
+      checkpointInvalid(`editor revision checkpoint skipped incomplete phase: ${phase}`)
+    }
+  }
+  for (const phase of EDITOR_REVISION_PHASES.slice(currentIndex + 1)) {
+    if (checkpoint.phases[phase].status !== 'pending') {
+      checkpointInvalid(`editor revision checkpoint has non-pending future phase: ${phase}`)
+    }
+  }
+  for (const phase of ['generate_candidate', 'admit_candidate', 'persist_chapter', 'completed'] as const) {
+    if (checkpoint.phases[phase].status === 'skipped') {
+      checkpointInvalid(`required editor revision phase cannot be skipped: ${phase}`)
+    }
+  }
+  for (const phase of EDITOR_REVISION_PHASES) {
+    const state = checkpoint.phases[phase]
+    if (state.status !== 'pending' && Number(state.attempt) < 1) {
+      checkpointInvalid(`non-pending editor revision phase requires an attempt: ${phase}`)
+    }
+  }
+
+  const candidate = checkpoint.candidate
+  if (candidate) {
+    if (typeof candidate.text !== 'string' || !candidate.text
+      || typeof candidate.hash !== 'string' || !candidate.hash
+      || !Number.isInteger(candidate.char_count) || candidate.char_count < 1
+      || !Array.isArray(candidate.applied_patches)
+      || !candidate.diagnostics || typeof candidate.diagnostics !== 'object' || Array.isArray(candidate.diagnostics)) {
+      checkpointInvalid('admitted editor revision candidate is not canonical')
+    }
+  }
+  const candidateAdmitted = checkpoint.phases.admit_candidate.status === 'completed'
+  if (Boolean(candidate) !== candidateAdmitted) {
+    checkpointInvalid('candidate evidence requires completed candidate admission')
+  }
+  if (candidate && (
+    revisionTextHash(candidate.text) !== candidate.hash
+    || candidate.text.replace(/\s/g, '').length !== candidate.char_count
+  )) {
+    checkpointInvalid('candidate hash and character count must match candidate text')
+  }
+  const persistCompleted = checkpoint.phases.persist_chapter.status === 'completed'
+  if (checkpoint.prose_persisted !== persistCompleted) {
+    checkpointInvalid('completed chapter persistence must match persisted prose evidence')
+  }
+  if (checkpoint.prose_persisted && !candidate) {
+    checkpointInvalid('persisted prose requires an admitted candidate')
+  }
+  if (!checkpoint.prose_persisted && (
+    checkpoint.committed_chapter_updated_at !== undefined
+    || checkpoint.editor_revision_review_id !== undefined
+  )) {
+    checkpointInvalid('chapter commit metadata requires persisted prose evidence')
+  }
+
+  const currentStatus = checkpoint.phases[checkpoint.phase].status
+  const errorCode = String(checkpoint.error?.code || '').trim()
+  const errorMessage = String(checkpoint.error?.message || '').trim()
+  if (currentStatus === 'failed') {
+    if (!errorCode || !errorMessage) checkpointInvalid('failed checkpoint requires a canonical error')
+  } else if (checkpoint.error !== undefined) {
+    checkpointInvalid('checkpoint error requires a failed current phase')
+  }
+
+  const completed = checkpoint.phase === 'completed' && currentStatus === 'completed'
+  if (context.runStatus && ['queued', 'running', 'cancel_requested'].includes(context.runStatus)) {
+    if (currentStatus === 'failed' || currentStatus === 'canceled' || completed) {
+      checkpointInvalid('active editor revision run has a terminal checkpoint state')
+    }
+  } else if (context.runStatus === 'failed' && currentStatus !== 'failed') {
+    checkpointInvalid('failed editor revision run requires a failed current phase')
+  } else if (context.runStatus === 'completed' && !completed) {
+    checkpointInvalid('completed editor revision run requires a completed checkpoint')
+  } else if (context.runStatus === 'canceled'
+    && currentStatus !== 'canceled'
+    && !TERMINAL_PHASE_STATES.has(currentStatus)) {
+    checkpointInvalid('canceled editor revision run requires a canceled or completed current phase')
+  }
+}
+
+export function requireCoherentEditorRevisionCheckpoint(
+  value: unknown,
+  context: EditorRevisionCheckpointContext = {},
+): EditorRevisionCheckpoint {
+  const checkpoint = requireCanonicalCheckpoint(value)
+  assertEditorRevisionCheckpointCoherent(checkpoint, context)
+  return checkpoint
+}
+
 function preserveEditorRevisionInputRef(value: string): string {
   try {
     const parsed = JSON.parse(value)
@@ -84,7 +188,7 @@ function preserveEditorRevisionInputRef(value: string): string {
 }
 
 function preserveEditorRevisionCheckpointRef(value: string): string {
-  requireCanonicalCheckpoint(value)
+  requireCoherentEditorRevisionCheckpoint(value, { runStatus: 'queued' })
   return value
 }
 
@@ -108,8 +212,13 @@ function checkpointRegression(message: string): never {
 function validateEditorRevisionTransition(
   previous: EditorRevisionCheckpoint,
   next: EditorRevisionCheckpoint,
-  options: { status: EditorRevisionRunStatus; cancellation?: boolean },
+  options: {
+    status: EditorRevisionRunStatus
+    previousStatus: EditorRevisionRunStatus
+    cancellation?: boolean
+  },
 ) {
+  assertEditorRevisionCheckpointCoherent(previous, { runStatus: options.previousStatus })
   if (previous.prose_persisted && !next.prose_persisted) checkpointRegression('persisted prose evidence cannot be erased')
   if (next.prose_persisted) {
     if (!next.candidate || next.phases.admit_candidate.status !== 'completed' || next.phases.persist_chapter.status !== 'completed') {
@@ -155,6 +264,7 @@ function validateEditorRevisionTransition(
         checkpointRegression(`cancellation cannot change a non-current phase: ${phase}`)
       }
     }
+    assertEditorRevisionCheckpointCoherent(next, { runStatus: options.status })
     return
   }
 
@@ -179,6 +289,7 @@ function validateEditorRevisionTransition(
   if ((options.status === 'completed') !== checkpointCompleted) {
     throw revisionError('REVISION_CHECKPOINT_INVALID', 'completed run status must match the completed checkpoint phase')
   }
+  assertEditorRevisionCheckpointCoherent(next, { runStatus: options.status })
 }
 
 function rowById(db: Database, runId: number): NovelRunRecord | null {
@@ -353,10 +464,14 @@ export async function writeEditorRevisionCheckpoint(workspace: string, input: {
   return withNovelDbWrite(workspace, db => {
     const current = rowById(db, input.runId)
     if (!current) throw leaseOrStateError()
-    const previousCheckpoint = requireCanonicalCheckpoint(current.output_ref)
+    const currentStatus = current.status as EditorRevisionRunStatus
+    const previousCheckpoint = requireCoherentEditorRevisionCheckpoint(current.output_ref, { runStatus: currentStatus })
     const nextCheckpoint = requireCanonicalCheckpoint(input.checkpoint)
     if (input.phase !== nextCheckpoint.phase) throw revisionError('REVISION_CHECKPOINT_INVALID', 'checkpoint phase does not match the write phase')
-    validateEditorRevisionTransition(previousCheckpoint, nextCheckpoint, { status: input.status })
+    validateEditorRevisionTransition(previousCheckpoint, nextCheckpoint, {
+      status: input.status,
+      previousStatus: currentStatus,
+    })
     const terminal = input.status === 'completed' || input.status === 'failed'
     const nextError = input.errorMessage ?? (input.status === 'failed' ? current.error_message || '' : '')
     const result = db.query(`
@@ -410,8 +525,13 @@ export async function finishEditorRevisionCancellation(
   return withNovelDbWrite(workspace, db => {
     const current = rowById(db, runId)
     if (!current) throw leaseOrStateError()
-    const previousCheckpoint = requireCanonicalCheckpoint(current.output_ref)
-    validateEditorRevisionTransition(previousCheckpoint, nextCheckpoint, { status: 'canceled', cancellation: true })
+    const currentStatus = current.status as EditorRevisionRunStatus
+    const previousCheckpoint = requireCoherentEditorRevisionCheckpoint(current.output_ref, { runStatus: currentStatus })
+    validateEditorRevisionTransition(previousCheckpoint, nextCheckpoint, {
+      status: 'canceled',
+      previousStatus: currentStatus,
+      cancellation: true,
+    })
     const result = db.query(`
       UPDATE runs
       SET status = 'canceled', output_ref = ?, error_message = '', updated_at = ?,
@@ -466,12 +586,15 @@ export async function retryEditorRevisionRun(workspace: string, projectId: numbe
     return await withNovelDbWrite(workspace, db => {
       const current = rowById(db, runId)
       if (!current || current.project_id !== projectId || !['failed', 'canceled'].includes(current.status)) throw leaseOrStateError()
-      const checkpoint = requireCanonicalCheckpoint(current.output_ref)
+      const checkpoint = requireCoherentEditorRevisionCheckpoint(current.output_ref, {
+        runStatus: current.status as EditorRevisionRunStatus,
+      })
       const failureCode = checkpoint.error?.code || current.error_message || ''
       if (RETRY_RESTART_ERRORS.has(failureCode)) {
         throw revisionError('REVISION_RESTART_REQUIRED', 'editor revision must restart from a fresh source snapshot')
       }
       const nextCheckpoint = retryCheckpoint(checkpoint)
+      assertEditorRevisionCheckpointCoherent(nextCheckpoint, { runStatus: 'queued' })
       const result = db.query(`
         UPDATE runs
         SET status = 'queued', output_ref = ?, error_message = '', updated_at = ?,
@@ -505,8 +628,21 @@ export async function recoverEditorRevisionRuns(workspace: string, now?: string)
     `).all() as any[]
     for (const raw of rows) {
       const run = runFromRow(raw)
-      const checkpoint = parseCanonicalCheckpoint(run.output_ref)
+      const expired = run.status !== 'queued'
+        && (!run.lease_expires_at || new Date(run.lease_expires_at).getTime() <= new Date(timestamp).getTime())
+      const recoverable = run.status === 'queued' || expired
+      let checkpoint = parseCanonicalCheckpoint(run.output_ref)
+      if (checkpoint) {
+        try {
+          assertEditorRevisionCheckpointCoherent(checkpoint, {
+            runStatus: run.status as EditorRevisionRunStatus,
+          })
+        } catch {
+          checkpoint = null
+        }
+      }
       if (!run.scope_key || !checkpoint) {
+        if (!recoverable) continue
         const result = db.query(`
           UPDATE runs
           SET status = 'failed', error_message = 'LEGACY_REVISION_RUN_NOT_RESUMABLE', updated_at = ?,
@@ -521,7 +657,6 @@ export async function recoverEditorRevisionRuns(workspace: string, now?: string)
         queued.push(run.id)
         continue
       }
-      const expired = !run.lease_expires_at || new Date(run.lease_expires_at).getTime() <= new Date(timestamp).getTime()
       if (!expired) continue
       const result = db.query(`
         UPDATE runs
