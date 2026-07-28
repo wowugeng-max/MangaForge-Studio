@@ -56,6 +56,14 @@ export type EditorRevisionRunInput = {
   created_at: string
 }
 
+export type EditorRevisionRejectedCandidateEvidence = {
+  hash: string
+  char_count: number
+  text?: string
+  head_preview?: string
+  tail_preview?: string
+}
+
 export type EditorRevisionCheckpoint = {
   schema_version: 1
   phase: EditorRevisionPhase

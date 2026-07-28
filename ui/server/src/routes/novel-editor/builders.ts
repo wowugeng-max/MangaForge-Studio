@@ -27,6 +27,8 @@ import {
 } from './builders-quality-receipt-helpers'
 import { editorJson } from './builders-json'
 import { revisionTextHash } from '../../novel/revision-hash'
+import type { EditorRevisionRunInput } from './editor-revision-contract'
+import { buildEditorRevisionPrompt } from './builders-revision-prompts'
 
 export type EditorRoutesContext = {
   getWorkspace: () => string
@@ -74,6 +76,54 @@ export type ProseQualityReviewOptions = {
 
 export const REVISION_MAX_TOKENS = 8000
 export const COMPACT_REVISION_RETRY_MAX_TOKENS = 5000
+
+export function buildEditorRevisionAgentRequest(
+  ctx: EditorRoutesContext,
+  project: any,
+  input: EditorRevisionRunInput,
+) {
+  const structuralRewrite = input.revision_strategy === 'structural_rewrite'
+  const openingStructuralPatch = input.revision_strategy === 'opening_structural_patch'
+  const sourceLength = input.source_text.length
+  const maxTokens = structuralRewrite
+    ? Math.min(28_000, Math.max(12_000, Math.ceil(sourceLength * 2.4) + 2_500))
+    : openingStructuralPatch
+      ? Math.max(REVISION_MAX_TOKENS, 6_000)
+      : REVISION_MAX_TOKENS
+  const temperature = ctx.getStageTemperature(
+    project,
+    'revise',
+    structuralRewrite || openingStructuralPatch ? 0.5 : 0.62,
+  )
+  const chapter = {
+    id: input.chapter_id,
+    project_id: input.project_id,
+    chapter_no: input.chapter_no,
+    title: input.chapter_title,
+    chapter_text: input.source_text,
+    updated_at: input.source_chapter_updated_at,
+  }
+  const sourceReview = input.source_review?.review_type
+    ? input.source_review
+    : {
+        review_type: 'prose_quality',
+        payload: JSON.stringify(input.source_review || {}),
+      }
+  const deliveryRiskBrief = buildChapterDeliveryRiskBrief(chapter, [sourceReview])
+  return {
+    prompt: buildEditorRevisionPrompt({
+      project,
+      chapter,
+      contextPackage: input.context_package,
+      report: input.report,
+      deliveryRiskBrief,
+      revisionMode: input.revision_mode,
+      userPrompt: input.user_prompt,
+    }),
+    maxTokens,
+    temperature,
+  }
+}
 
 
 export async function loadChapterBundle(ctx: EditorRoutesContext, projectId: number, chapterId: number) {
@@ -181,6 +231,7 @@ export { applySurgicalRevisionPatch } from './revision-candidate-admission'
 
 export * from './builders-json'
 import {
+  buildChapterDeliveryRiskBrief,
   findChapterReviewPayload,
 } from './builders-delivery-risk-brief'
 export * from './builders-delivery-risk-brief'
