@@ -28,7 +28,7 @@ type SingleChapterStoryStateInput = {
 }
 
 function throwIfCanceled(signal?: AbortSignal) {
-  if (signal?.aborted) throw Object.assign(new Error('Request canceled'), { code: 'REQUEST_CANCELED' })
+  if (signal?.aborted) throw signal.reason || Object.assign(new Error('Request canceled'), { code: 'REQUEST_CANCELED' })
 }
 
 function invalidReceipt(message: string) {

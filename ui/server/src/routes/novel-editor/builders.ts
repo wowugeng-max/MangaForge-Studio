@@ -252,6 +252,7 @@ export async function createProseQualityReview(
   if (!receiptOwned) return createProseQualityReviewOnce(ctx, activeWorkspace, project, chapter, options)
   const owner = randomUUID()
   const deadline = Date.now() + Math.max(30_000, Number(options.timeoutMs || 5 * 60_000))
+  let observedWaiting = false
   while (true) {
     if (options.signal?.aborted) throw options.signal.reason || new Error('prose quality review aborted')
     const claim = await claimProseQualityReceipt(activeWorkspace, {
@@ -261,6 +262,7 @@ export async function createProseQualityReview(
       sourceRunId: Number(options.source_run_id),
       candidateHash: String(options.candidate_hash),
       owner,
+      allowFailedRetry: !observedWaiting,
     })
     if (claim.state === 'completed') {
       const output = parseJsonLikePayload(claim.run.output_ref) || {}
@@ -295,6 +297,14 @@ export async function createProseQualityReview(
         throw error
       }
     }
+    if (claim.state === 'failed') {
+      const output = parseJsonLikePayload(claim.run.output_ref) || {}
+      throw Object.assign(new Error(String(output.error || claim.run.error_message || 'prose quality receipt failed')), {
+        code: String(output.error_code || 'PROSE_QUALITY_FAILED'),
+        prose_quality_run_id: claim.run.id,
+      })
+    }
+    observedWaiting = true
     if (Date.now() >= deadline) {
       throw Object.assign(new Error('timed out waiting for prose quality receipt owner'), {
         code: 'PROSE_QUALITY_RECEIPT_WAIT_TIMEOUT',
@@ -340,7 +350,9 @@ async function createProseQualityReviewOnce(
     reason: alignment.reason,
     following_count: 0,
   }
-  if ((alignment.rebuilt || Object.keys(alignment.patch || {}).length > 0) && Number(alignment.chapter_id) === Number(currentChapter.id)) {
+  const hasCurrentAlignmentPatch = (alignment.rebuilt || Object.keys(alignment.patch || {}).length > 0)
+    && Number(alignment.chapter_id) === Number(currentChapter.id)
+  if (hasCurrentAlignmentPatch && !receiptOwned) {
     alignedChapter = await updateNovelChapter(activeWorkspace, Number(currentChapter.id), alignment.patch as any, { createVersion: false }) || alignedChapter
   }
   const contextChapters = chapters.map(item => Number(item.id) === Number(alignedChapter.id) ? alignedChapter : item)
@@ -445,6 +457,8 @@ async function createProseQualityReviewOnce(
       candidateHash: String(options.candidate_hash),
       review: reviewRecord,
       auditRun: auditRunRecord,
+      chapterPatch: hasCurrentAlignmentPatch ? alignment.patch : undefined,
+      signal: options.signal,
     })
     saved = committed.saved
   } else {

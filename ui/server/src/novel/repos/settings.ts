@@ -81,7 +81,7 @@ function mergeNonEmptyValue(base: any, patch: any): any {
     }
     return next
   }
-  return emptyRelationshipValue(base) ? patch : base
+  return patch
 }
 
 function mergeCharacterRelationship(current: any[], relation: any) {

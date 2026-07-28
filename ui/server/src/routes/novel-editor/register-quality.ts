@@ -51,8 +51,8 @@ export function registerNovelEditorQualityRoutes(app: Express, ctx: EditorRoutes
       const modelId = ctx.getStageModelId(project, 'review', Number(req.body.model_id || 0) || undefined)
       const beforeBrief = buildChapterDeliveryRiskBrief(chapter, reviews)
       const receipt = {
-        source_run_id: req.body?.source_run_id == null ? null : Number(req.body.source_run_id),
-        candidate_hash: String(req.body?.candidate_hash || revisionTextHash(String(chapter.chapter_text || ''))),
+        source_run_id: null,
+        candidate_hash: revisionTextHash(String(chapter.chapter_text || '')),
         chapter_id: chapter.id,
       }
       const storyStateUpdate = await prepareSingleChapterStoryState(ctx, {
@@ -157,8 +157,8 @@ export function registerNovelEditorQualityRoutes(app: Express, ctx: EditorRoutes
         model_id: req.body.model_id,
         source: req.body.source || 'manual_refresh',
         source_review_id: req.body.source_review_id || null,
-        source_run_id: req.body.source_run_id == null ? null : Number(req.body.source_run_id),
-        candidate_hash: req.body.candidate_hash || revisionTextHash(String(chapter.chapter_text || '')),
+        source_run_id: null,
+        candidate_hash: revisionTextHash(String(chapter.chapter_text || '')),
         current_chapter_only: true,
         max_tokens: 3000,
       })

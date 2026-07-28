@@ -1,16 +1,16 @@
 import { randomUUID } from 'crypto'
 import { jsonText, nowIso } from '../json'
-import { normalizeReviewRecord, normalizeRunRecord } from '../normalize'
+import { normalizeChapterRecord, normalizeReviewRecord, normalizeRunRecord } from '../normalize'
 import { revisionTextHash } from '../revision-hash'
-import { reviewFromRow, runFromRow } from '../row-mappers'
-import { withNovelDbWrite } from '../sql-rows'
-import type { NovelReviewRecord, NovelRunRecord } from '../types'
+import { chapterFromRow, reviewFromRow, runFromRow } from '../row-mappers'
+import { updateChapterRow, withNovelDbWrite } from '../sql-rows'
+import type { NovelChapterRecord, NovelReviewRecord, NovelRunRecord } from '../types'
 
 const RECEIPT_RUN_TYPE = 'prose_quality'
 const RECEIPT_LEASE_MS = 10 * 60_000
 
 export type ProseQualityReceiptClaim = {
-  state: 'claimed' | 'waiting' | 'completed'
+  state: 'claimed' | 'waiting' | 'completed' | 'failed'
   owner: string
   run: NovelRunRecord
 }
@@ -124,6 +124,7 @@ export async function claimProseQualityReceipt(workspace: string, input: {
   owner?: string
   now?: string
   leaseMs?: number
+  allowFailedRetry?: boolean
 }): Promise<ProseQualityReceiptClaim> {
   const owner = String(input.owner || randomUUID())
   const timestamp = input.now || nowIso()
@@ -133,16 +134,44 @@ export async function claimProseQualityReceipt(workspace: string, input: {
     assertLiveCandidate(db, input)
     const existing = runByScope(db, input.projectId, scopeKey)
     if (existing?.status === 'success') return { state: 'completed', owner, run: existing }
+    if (existing?.status === 'failed' && input.allowFailedRetry === false) {
+      return { state: 'failed', owner, run: existing }
+    }
     const leaseActive = existing?.status === 'running'
       && existing.lease_expires_at
       && new Date(existing.lease_expires_at).getTime() > new Date(timestamp).getTime()
     if (leaseActive) return { state: 'waiting', owner, run: existing }
     if (existing) {
+      let previousOutput: Record<string, any> = {}
+      try { previousOutput = JSON.parse(String(existing.output_ref || '{}')) } catch { previousOutput = {} }
+      const previousFailures = Array.isArray(previousOutput.previous_failures)
+        ? [...previousOutput.previous_failures]
+        : []
+      if (existing.status === 'failed') {
+        previousFailures.push({
+          attempt: Math.max(1, Number(previousOutput.attempt || 1)),
+          error: String(previousOutput.error || existing.error_message || 'prose quality receipt failed'),
+          error_code: String(previousOutput.error_code || 'PROSE_QUALITY_FAILED'),
+          failed_at: existing.updated_at || existing.created_at,
+        })
+      }
+      const { error: _error, error_code: _errorCode, ...retainedOutput } = previousOutput
       db.query(`
         UPDATE runs
-        SET status = 'running', error_message = '', lease_owner = ?, lease_expires_at = ?, updated_at = ?
+        SET status = 'running', output_ref = ?, error_message = '', lease_owner = ?, lease_expires_at = ?, updated_at = ?
         WHERE id = ? AND run_type = ?
-      `).run(owner, expiresAt, timestamp, existing.id, RECEIPT_RUN_TYPE)
+      `).run(
+        JSON.stringify({
+          ...retainedOutput,
+          attempt: Math.max(1, Number(previousOutput.attempt || 1)) + 1,
+          previous_failures: previousFailures,
+        }),
+        owner,
+        expiresAt,
+        timestamp,
+        existing.id,
+        RECEIPT_RUN_TYPE,
+      )
       return { state: 'claimed', owner, run: runByScope(db, input.projectId, scopeKey)! }
     }
 
@@ -172,7 +201,7 @@ export async function claimProseQualityReceipt(workspace: string, input: {
         source_run_id: input.sourceRunId,
         candidate_hash: input.candidateHash,
       }),
-      output_ref: '',
+      output_ref: JSON.stringify({ attempt: 1, previous_failures: [] }),
       scope_key: scopeKey,
       updated_at: timestamp,
       lease_owner: owner,
@@ -221,8 +250,11 @@ export async function commitProseQualityReceipt(workspace: string, input: {
   candidateHash: string
   review: Partial<NovelReviewRecord>
   auditRun: Partial<NovelRunRecord>
+  chapterPatch?: Partial<NovelChapterRecord>
+  signal?: AbortSignal
 }) {
   return withNovelDbWrite(workspace, db => {
+    if (input.signal?.aborted) throw input.signal.reason || new Error('prose quality review aborted')
     const timestamp = nowIso()
     const claim = db.query(`
       SELECT * FROM runs
@@ -234,7 +266,31 @@ export async function commitProseQualityReceipt(workspace: string, input: {
     if (!claim) throw claimLostError()
     assertLiveCandidate(db, input)
 
-    const reviewRecord = normalizeReviewRecord(input.review)
+    let committedChapterUpdatedAt = ''
+    if (input.chapterPatch) {
+      const row = db.query('SELECT * FROM chapters WHERE id = ? AND project_id = ? LIMIT 1')
+        .get(input.chapterId, input.projectId) as any
+      if (!row) throw staleCandidateError()
+      const current = chapterFromRow(row)
+      const patch: Partial<NovelChapterRecord> = {}
+      for (const key of ['chapter_goal', 'chapter_summary', 'conflict', 'ending_hook', 'raw_payload'] as const) {
+        if (input.chapterPatch[key] !== undefined) (patch as any)[key] = input.chapterPatch[key]
+      }
+      const next = normalizeChapterRecord({ ...patch, updated_at: timestamp }, current)
+      updateChapterRow(db, next)
+      committedChapterUpdatedAt = next.updated_at
+    }
+
+    let reviewInput = input.review
+    if (committedChapterUpdatedAt) {
+      let payload: Record<string, any> = {}
+      try { payload = JSON.parse(String(input.review.payload || '{}')) } catch { payload = {} }
+      reviewInput = {
+        ...input.review,
+        payload: jsonText({ ...payload, chapter_updated_at: committedChapterUpdatedAt }, {}),
+      }
+    }
+    const reviewRecord = normalizeReviewRecord(reviewInput)
     const reviewResult = db.query(`
       INSERT INTO reviews (project_id, review_type, status, summary, issues, payload, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -250,13 +306,15 @@ export async function commitProseQualityReceipt(workspace: string, input: {
     const reviewId = Number(reviewResult.lastInsertRowid || 0)
     const saved = reviewFromRow(db.query('SELECT * FROM reviews WHERE id = ?').get(reviewId) as any)
 
+    let priorOutput: any = {}
+    try { priorOutput = JSON.parse(String(claim.output_ref || '{}')) } catch { priorOutput = {} }
     let auditOutput: any = {}
     try { auditOutput = JSON.parse(String(input.auditRun.output_ref || '{}')) } catch { auditOutput = {} }
     const auditRecord = normalizeRunRecord({
       ...input.auditRun,
       output_ref: JSON.stringify({ ...auditOutput, review_id: reviewId }),
     })
-    const outputRef = JSON.stringify({ ...auditOutput, review_id: reviewId })
+    const outputRef = JSON.stringify({ ...priorOutput, ...auditOutput, review_id: reviewId })
     const completed = db.query(`
       UPDATE runs
       SET step_name = ?, status = 'success', input_ref = ?, output_ref = ?, duration_ms = ?,
@@ -292,6 +350,8 @@ export async function failProseQualityReceipt(workspace: string, input: {
     const run = runFromRow(row)
     let identity: Record<string, unknown> = {}
     try { identity = JSON.parse(String(run.input_ref || '{}')) } catch { identity = {} }
+    let previousOutput: Record<string, unknown> = {}
+    try { previousOutput = JSON.parse(String(run.output_ref || '{}')) } catch { previousOutput = {} }
     const error = input.error as any
     const message = String(error?.message || error || 'prose quality receipt failed')
     const errorCode = String(error?.code || 'PROSE_QUALITY_FAILED')
@@ -302,7 +362,17 @@ export async function failProseQualityReceipt(workspace: string, input: {
         lease_owner = NULL, lease_expires_at = NULL
       WHERE id = ? AND run_type = ? AND status = 'running' AND lease_owner = ?
     `).run(
-      JSON.stringify({ ...identity, current_chapter_only: true, error: message, error_code: errorCode }),
+      JSON.stringify({
+        ...previousOutput,
+        ...identity,
+        attempt: Math.max(1, Number((previousOutput as any).attempt || 1)),
+        previous_failures: Array.isArray((previousOutput as any).previous_failures)
+          ? (previousOutput as any).previous_failures
+          : [],
+        current_chapter_only: true,
+        error: message,
+        error_code: errorCode,
+      }),
       message,
       timestamp,
       input.claimRunId,

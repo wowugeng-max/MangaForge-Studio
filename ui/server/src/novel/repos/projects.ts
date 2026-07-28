@@ -86,10 +86,12 @@ export async function mutateNovelProjectReferenceConfigForChapterCandidate<T>(
     chapterId: number
     candidateHash: string
     operation: string
+    signal?: AbortSignal
     mutate: (currentConfig: Record<string, any>) => { referenceConfig: Record<string, any>; result: T }
   },
 ): Promise<{ project: NovelProjectRecord; result: T } | null> {
   return withNovelDbWrite(activeWorkspace, db => {
+    if (options.signal?.aborted) throw options.signal.reason || new Error('Story State update aborted')
     const chapter = db.query(`
       SELECT chapter_text FROM chapters
       WHERE id = ? AND project_id = ?

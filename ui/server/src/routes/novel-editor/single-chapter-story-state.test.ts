@@ -24,6 +24,8 @@ import {
 import { openDb } from '../../novel/core'
 import { setNovelMutationTestHook } from '../../novel-test-support'
 import { createStoryStateMachineMethods } from '../../novel-writing-service/service/story-state-machine'
+import { compactPreparedStoryStateForRecovery } from '../../novel-writing-service/service/story-state-machine-update'
+import { materializeStoryRelations } from '../novel-setting-story-relations'
 import { createProseQualityReview } from './builders'
 import { revisionTextHash } from './revision-candidate-admission'
 import {
@@ -57,6 +59,109 @@ function storyStatePayload(key: string) {
     discovered_assets: [{ name: `${key}新物件`, entity_type: 'item', evidence: `${key}正文证据` }],
   }
 }
+
+test('recovery compaction whitelists resumable state and strips prose-bearing nested data', () => {
+  const compacted: any = compactPreparedStoryStateForRecovery({
+    state_delta: {
+      current_time: 'night',
+      prose_style_fingerprint: { sentence_rhythm: 'short' },
+      prose_status: 'accepted',
+      prose: 'DIRECT_PROSE_SECRET',
+      chapter_text: 'SNAKE_PROSE_SECRET',
+      chapterText: 'CAMEL_PROSE_SECRET',
+      source_text: 'SNAKE_SOURCE_SECRET',
+      sourceText: 'CAMEL_SOURCE_SECRET',
+      nested: {
+        kept: true,
+        contextPackage: { prose: 'CONTEXT_SECRET' },
+        providerMessages: [{ content: 'PROVIDER_SECRET' }],
+        prompt: 'PROMPT_SECRET',
+        messages: ['MESSAGE_SECRET'],
+        raw_response: 'RAW_SNAKE_SECRET',
+        rawResponse: 'RAW_CAMEL_SECRET',
+        story_state_sync_receipts: { old: { payload: 'OLD_RECEIPT_SECRET' } },
+      },
+    },
+    next_reference_config: {
+      story_state: { current_time: 'must-not-copy-full-config' },
+      story_state_sync_receipts: { older: { payload: 'EARLIER_RECEIPT_SECRET' } },
+    },
+    character_updates: [{ name: '李玄', current_state: { awake: true, message: 'NESTED_MESSAGE_SECRET' } }],
+    setting_updates: [{ name: '旧印章', state_delta: { found: true } }],
+    storyline_updates: [{ name: '追查旧印章', state_delta: { active: true } }],
+    sync_reports: { state_delta_completeness: { planned_count: 1, missed: [] } },
+    hard_failures: [],
+    payload: {
+      discovered_assets: [{ name: '铜钥匙', evidence: '可恢复证据' }],
+      ip_scene_candidates: [{ label: '门前对峙' }],
+      foreshadowing_status: { seal: 'open' },
+      response: 'RESPONSE_SECRET',
+    },
+    receipt_binding: { key: 'must-remain-memory-only' },
+    unrelated_top_level: { kept: false },
+  } as any)
+  const serialized = JSON.stringify(compacted)
+
+  expect(compacted).toMatchObject({
+    state_delta: {
+      current_time: 'night',
+      prose_style_fingerprint: { sentence_rhythm: 'short' },
+      prose_status: 'accepted',
+      nested: { kept: true },
+    },
+    character_updates: [{ name: '李玄', current_state: { awake: true } }],
+    setting_updates: [{ name: '旧印章', state_delta: { found: true } }],
+    storyline_updates: [{ name: '追查旧印章', state_delta: { active: true } }],
+    sync_reports: { state_delta_completeness: { planned_count: 1, missed: [] } },
+    payload: {
+      discovered_assets: [{ name: '铜钥匙', evidence: '可恢复证据' }],
+      ip_scene_candidates: [{ label: '门前对峙' }],
+      foreshadowing_status: { seal: 'open' },
+    },
+  })
+  expect(compacted.next_reference_config).toBeUndefined()
+  expect(compacted.receipt_binding).toBeUndefined()
+  expect(compacted.unrelated_top_level).toBeUndefined()
+  for (const secret of [
+    'DIRECT_PROSE_SECRET', 'SNAKE_PROSE_SECRET', 'CAMEL_PROSE_SECRET', 'SNAKE_SOURCE_SECRET', 'CAMEL_SOURCE_SECRET',
+    'CONTEXT_SECRET', 'PROVIDER_SECRET', 'PROMPT_SECRET', 'MESSAGE_SECRET',
+    'RAW_SNAKE_SECRET', 'RAW_CAMEL_SECRET', 'OLD_RECEIPT_SECRET', 'EARLIER_RECEIPT_SECRET',
+    'NESTED_MESSAGE_SECRET', 'RESPONSE_SECRET', 'must-remain-memory-only',
+  ]) expect(serialized).not.toContain(secret)
+
+  const bounded: any = compactPreparedStoryStateForRecovery({
+    state_delta: { huge: 'x'.repeat(50_000) },
+    character_updates: Array.from({ length: 500 }, (_, index) => ({ name: `character-${index}`, current_state: { index } })),
+    setting_updates: [],
+    storyline_updates: [],
+    sync_reports: {},
+    hard_failures: [],
+    payload: {},
+  } as any)
+  expect(String(bounded.state_delta.huge).length).toBeLessThanOrEqual(2_000)
+  expect(bounded.character_updates.length).toBeLessThanOrEqual(128)
+  expect(JSON.stringify(bounded).length).toBeLessThan(256_000)
+
+})
+
+test('recovery compaction enforces a UTF-8 byte cap and preserves phase arrays', () => {
+  const utf8Bounded: any = compactPreparedStoryStateForRecovery({
+    state_delta: {
+      rows: Array.from({ length: 128 }, (_, index) => ({ index, value: '汉'.repeat(2_000) })),
+    },
+    character_updates: Array.from({ length: 128 }, (_, index) => ({ name: `角色${index}`, current_state: { note: '状态'.repeat(1_000) } })),
+    setting_updates: [],
+    storyline_updates: [],
+    sync_reports: {},
+    hard_failures: [],
+    payload: {},
+  } as any)
+  expect(new TextEncoder().encode(JSON.stringify(utf8Bounded)).byteLength).toBeLessThan(256_000)
+  expect(Array.isArray(utf8Bounded.character_updates)).toBe(true)
+  expect(Array.isArray(utf8Bounded.setting_updates)).toBe(true)
+  expect(Array.isArray(utf8Bounded.storyline_updates)).toBe(true)
+  expect(Array.isArray(utf8Bounded.hard_failures)).toBe(true)
+})
 
 function executeSql(workspace: string, sql: string) {
   const db = openDb(workspace)
@@ -415,6 +520,45 @@ describe('single chapter quality review', () => {
     })
   })
 
+  test('quality abort at commit transaction entry writes no review or success receipt', async () => {
+    const { project, chapters } = await qualityFixture()
+    const controller = new AbortController()
+    let releaseCommit!: () => void
+    let markCommitBlocked!: () => void
+    const commitBlocked = new Promise<void>(resolve => { markCommitBlocked = resolve })
+    const commitGate = new Promise<void>(resolve => { releaseCommit = resolve })
+    let blocked = false
+    setNovelMutationTestHook(async event => {
+      if (blocked || event.phase !== 'before_full_store_write' || event.operation !== 'commit-prose-quality-receipt') return
+      blocked = true
+      markCommitBlocked()
+      await commitGate
+    })
+    const ctx: any = {
+      getStageModelId: () => 217,
+      getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+      executeAgent: async () => ({ parsed: { passed: true, score: 96, issues: [], revision_directives: [] }, finish_reason: 'stop' }),
+      buildChapterContextPackage: async () => ({}),
+    }
+
+    const running = createProseQualityReview(ctx, workspace, project, chapters[1], {
+      source: 'post_revision',
+      source_run_id: 4521,
+      candidate_hash: revisionTextHash(String(chapters[1].chapter_text || '')),
+      current_chapter_only: true,
+      signal: controller.signal,
+    })
+    await commitBlocked
+    controller.abort(Object.assign(new Error('quality canceled at commit'), { code: 'QUALITY_ABORTED' }))
+    releaseCommit()
+    const error = await running.then(() => null, caught => caught)
+    setNovelMutationTestHook(null)
+
+    expect(error).toMatchObject({ code: 'QUALITY_ABORTED' })
+    expect((await listNovelReviews(workspace, project.id)).filter(item => item.review_type === 'prose_quality')).toHaveLength(0)
+    expect((await listNovelRuns(workspace, project.id)).filter(item => item.run_type === 'prose_quality' && item.status === 'success')).toHaveLength(0)
+  })
+
   test('revision-owned quality keeps one durable failed audit when the provider rejects', async () => {
     const { project, chapters } = await qualityFixture()
     const candidateHash = revisionTextHash(String(chapters[1].chapter_text || ''))
@@ -446,6 +590,92 @@ describe('single chapter quality review', () => {
       error_code: 'PROVIDER_FAILED',
     })
   })
+
+  test('failed receipt-owned quality leaves current chapter plan metadata unchanged', async () => {
+    const { project, chapters } = await qualityFixture()
+    const target = chapters[1]
+    const before = (await listNovelChapters(workspace, project.id)).find(item => item.id === target.id)
+    const ctx: any = {
+      getStageModelId: () => 217,
+      getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+      executeAgent: async () => { throw Object.assign(new Error('quality provider failed'), { code: 'PROVIDER_FAILED' }) },
+      buildChapterContextPackage: async () => ({}),
+    }
+
+    await createProseQualityReview(ctx, workspace, project, target, {
+      source: 'post_revision',
+      source_run_id: 4531,
+      candidate_hash: revisionTextHash(String(target.chapter_text || '')),
+      current_chapter_only: true,
+    }).then(() => null, () => null)
+    const after = (await listNovelChapters(workspace, project.id)).find(item => item.id === target.id)
+
+    expect(after).toEqual(before)
+  })
+
+  test('waiting quality followers reuse the canonical failure while a later invocation may retry', async () => {
+    const { project, chapters } = await qualityFixture()
+    const candidateHash = revisionTextHash(String(chapters[1].chapter_text || ''))
+    let providerCalls = 0
+    let rejectOwner!: () => void
+    const ownerGate = new Promise<void>(resolve => { rejectOwner = resolve })
+    let retrySucceeds = false
+    const ctx: any = {
+      getStageModelId: () => 217,
+      getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+      executeAgent: async () => {
+        providerCalls += 1
+        if (!retrySucceeds) {
+          await ownerGate
+          throw Object.assign(new Error('canonical provider failure'), { code: 'PROVIDER_FAILED' })
+        }
+        return { parsed: { passed: true, score: 95, issues: [], revision_directives: [] }, finish_reason: 'stop' }
+      },
+      buildChapterContextPackage: async () => ({}),
+    }
+    const options = {
+      source: 'post_revision',
+      source_run_id: 454,
+      candidate_hash: candidateHash,
+      current_chapter_only: true,
+    }
+    const owner = createProseQualityReview(ctx, workspace, project, chapters[1], options)
+    while ((await listNovelRuns(workspace, project.id)).every(item => item.run_type !== 'prose_quality' || item.status !== 'running')) {
+      await Bun.sleep(5)
+    }
+    const follower = createProseQualityReview(ctx, workspace, project, chapters[1], options)
+    await Bun.sleep(30)
+    rejectOwner()
+
+    const [ownerResult, followerResult] = await Promise.allSettled([owner, follower])
+    const failedRuns = (await listNovelRuns(workspace, project.id)).filter(item => item.run_type === 'prose_quality')
+
+    expect(providerCalls).toBe(1)
+    expect(ownerResult.status).toBe('rejected')
+    expect(followerResult.status).toBe('rejected')
+    if (ownerResult.status === 'rejected' && followerResult.status === 'rejected') {
+      expect(ownerResult.reason).toMatchObject({ code: 'PROVIDER_FAILED', prose_quality_run_id: failedRuns[0]?.id })
+      expect(followerResult.reason).toMatchObject({ code: 'PROVIDER_FAILED', prose_quality_run_id: failedRuns[0]?.id })
+      expect(String(followerResult.reason.message)).toBe('canonical provider failure')
+    }
+    expect(failedRuns).toHaveLength(1)
+    expect(failedRuns[0]).toMatchObject({ status: 'failed' })
+
+    retrySucceeds = true
+    const retried = await createProseQualityReview(ctx, workspace, project, chapters[1], options)
+    const successfulRuns = (await listNovelRuns(workspace, project.id)).filter(item => item.run_type === 'prose_quality')
+    const retryAudit = parsedPayload(successfulRuns[0]?.output_ref)
+
+    expect(retried.reused).toBe(false)
+    expect(providerCalls).toBe(2)
+    expect(successfulRuns).toHaveLength(1)
+    expect(successfulRuns[0]).toMatchObject({ status: 'success' })
+    expect(retryAudit.attempt).toBe(2)
+    expect(retryAudit.previous_failures).toContainEqual(expect.objectContaining({
+      error: 'canonical provider failure',
+      error_code: 'PROVIDER_FAILED',
+    }))
+  }, 30_000)
 
   test('revision-owned quality rejects a stale candidate receipt before the model call', async () => {
     const { project, chapters } = await qualityFixture()
@@ -757,7 +987,7 @@ describe('single chapter Story State', () => {
     })
     const before = await snapshot()
     const controller = new AbortController()
-    controller.abort()
+    controller.abort(Object.assign(new Error('Story State canceled before apply'), { code: 'STORY_STATE_ABORTED' }))
 
     const error = await applySingleChapterStoryState(fixture.ctx, {
       workspace,
@@ -768,7 +998,56 @@ describe('single chapter Story State', () => {
       signal: controller.signal,
     }).then(() => null, caught => caught)
 
-    expect(error).not.toBeNull()
+    expect(error).toMatchObject({ code: 'STORY_STATE_ABORTED' })
+    expect(await snapshot()).toEqual(before)
+  })
+
+  test('aborting exact Story State at transaction entry performs zero state or derived writes', async () => {
+    const fixture = await storyFixture(3)
+    const target = fixture.chapters[0]
+    const exactReceipt = receipt(target.id, revisionTextHash(String(target.chapter_text || '')), 501)
+    const preparedResult = await prepareSingleChapterStoryState(fixture.ctx, {
+      workspace,
+      projectId: fixture.project.id,
+      chapterId: target.id,
+      receipt: exactReceipt,
+    })
+    const snapshot = async () => ({
+      project: (await getNovelProject(workspace, fixture.project.id))?.reference_config,
+      characters: await listNovelCharacters(workspace, fixture.project.id),
+      settings: await listNovelSettingEntities(workspace, fixture.project.id),
+      chapter: (await listNovelChapters(workspace, fixture.project.id)).find(item => item.id === target.id),
+      reviews: await listNovelReviews(workspace, fixture.project.id),
+    })
+    const before = await snapshot()
+    const controller = new AbortController()
+    let releaseApply!: () => void
+    let markApplyBlocked!: () => void
+    const applyBlocked = new Promise<void>(resolve => { markApplyBlocked = resolve })
+    const applyGate = new Promise<void>(resolve => { releaseApply = resolve })
+    let blocked = false
+    setNovelMutationTestHook(async event => {
+      if (blocked || event.phase !== 'before_full_store_write' || event.operation !== 'apply-exact-story-state') return
+      blocked = true
+      markApplyBlocked()
+      await applyGate
+    })
+
+    const running = applySingleChapterStoryState(fixture.ctx, {
+      workspace,
+      projectId: fixture.project.id,
+      chapterId: target.id,
+      receipt: exactReceipt,
+      prepared: preparedResult.prepared,
+      signal: controller.signal,
+    })
+    await applyBlocked
+    controller.abort(Object.assign(new Error('Story State canceled at commit'), { code: 'STORY_STATE_ABORTED' }))
+    releaseApply()
+    const error = await running.then(() => null, caught => caught)
+    setNovelMutationTestHook(null)
+
+    expect(error).toMatchObject({ code: 'STORY_STATE_ABORTED' })
     expect(await snapshot()).toEqual(before)
   })
 
@@ -826,6 +1105,77 @@ describe('single chapter Story State', () => {
     ]))
   }, 30_000)
 
+  test('concurrent divergent applies for one receipt materialize only canonical prepared state', async () => {
+    let preparationCount = 0
+    const fixture = await storyFixture(1, async () => {
+      preparationCount += 1
+      return { parsed: storyStatePayload(`same_receipt_${preparationCount}`), finish_reason: 'stop' }
+    })
+    const target = fixture.chapters[0]
+    const exactReceipt = receipt(target.id, revisionTextHash(String(target.chapter_text || '')), 511)
+    const receiptKey = storyStateReceiptKey(exactReceipt)
+    const [firstPrepared, secondPrepared] = await Promise.all([
+      prepareSingleChapterStoryState(fixture.ctx, {
+        workspace,
+        projectId: fixture.project.id,
+        chapterId: target.id,
+        receipt: exactReceipt,
+      }),
+      prepareSingleChapterStoryState(fixture.ctx, {
+        workspace,
+        projectId: fixture.project.id,
+        chapterId: target.id,
+        receipt: exactReceipt,
+      }),
+    ])
+    expect(fixture.modelCalls).toHaveLength(2)
+
+    await Promise.all([
+      applySingleChapterStoryState(fixture.ctx, {
+        workspace,
+        projectId: fixture.project.id,
+        chapterId: target.id,
+        receipt: exactReceipt,
+        prepared: firstPrepared.prepared,
+      }),
+      applySingleChapterStoryState(fixture.ctx, {
+        workspace,
+        projectId: fixture.project.id,
+        chapterId: target.id,
+        receipt: exactReceipt,
+        prepared: secondPrepared.prepared,
+      }),
+    ])
+
+    const storedProject = await getNovelProject(workspace, fixture.project.id)
+    const canonicalKey = String(storedProject?.reference_config?.story_state?.current_time || '').replace(/-time$/, '')
+    const losingKey = canonicalKey === 'same_receipt_1' ? 'same_receipt_2' : 'same_receipt_1'
+    const storedCharacter = (await listNovelCharacters(workspace, fixture.project.id)).find(item => item.id === fixture.character.id)
+    const storedSettings = await listNovelSettingEntities(workspace, fixture.project.id)
+    const storedItem = storedSettings.find(item => item.id === fixture.item.id)
+    const storedStoryline = storedSettings.find(item => item.id === fixture.storyline.id)
+    const usage = await listNovelChapterSettingUsage(workspace, fixture.project.id, target.id)
+    const itemUsage = usage.find(item => item.entity_id === fixture.item.id)
+    const storylineUsage = usage.find(item => item.entity_id === fixture.storyline.id)
+    const completedReceipt = storedProject?.reference_config?.story_state_sync_receipts?.[receiptKey]
+    const reviewsJson = JSON.stringify(await listNovelReviews(workspace, fixture.project.id))
+
+    expect(['same_receipt_1', 'same_receipt_2']).toContain(canonicalKey)
+    expect(storedCharacter?.current_state?.[`seen_${canonicalKey}`]).toBe(true)
+    expect(storedCharacter?.current_state?.[`seen_${losingKey}`]).toBeUndefined()
+    expect(storedItem?.state_json?.[`state_${canonicalKey}`]).toBe(true)
+    expect(storedItem?.state_json?.[`state_${losingKey}`]).toBeUndefined()
+    expect(storedStoryline?.state_json?.[`story_${canonicalKey}`]).toBe(true)
+    expect(storedStoryline?.state_json?.[`story_${losingKey}`]).toBeUndefined()
+    expect(itemUsage?.actual_state_change?.[`state_${canonicalKey}`]).toBe(true)
+    expect(itemUsage?.actual_state_change?.[`state_${losingKey}`]).toBeUndefined()
+    expect(storylineUsage?.actual_state_change?.[`story_${canonicalKey}`]).toBe(true)
+    expect(storylineUsage?.actual_state_change?.[`story_${losingKey}`]).toBeUndefined()
+    expect(JSON.stringify(completedReceipt?.payload || {})).toContain(`${canonicalKey}新物件`)
+    expect(JSON.stringify(completedReceipt?.payload || {})).not.toContain(`${losingKey}新物件`)
+    expect(reviewsJson).not.toContain(`${losingKey}新物件`)
+  }, 30_000)
+
   test('concurrent exact applies upsert one shared relationship entity', async () => {
     const fixture = await storyFixture(3, async (...args: any[]) => {
       const key = `relation_${String(args[2]?.task || '').match(/CHAPTER_(\d+)_TEXT/)?.[1] || 'unknown'}`
@@ -879,6 +1229,55 @@ describe('single chapter Story State', () => {
       .filter(item => item.entity_type === 'relationship')
     expect(relationships).toHaveLength(1)
   }, 30_000)
+
+  test('relationship materialization applies authoritative scalar transitions while preserving structured history', async () => {
+    const fixture = await storyFixture(1)
+    await createNovelCharacter(workspace, { project_id: fixture.project.id, name: '顾舟' } as any)
+    await materializeStoryRelations(workspace, fixture.project.id, {
+      rows: [{
+        party_a: '李玄',
+        party_b: '顾舟',
+        current_status: '敌对',
+        story_relation_type: '对立',
+        emotion: '负面',
+        change_nodes: [{ chapter_no: 1, note: '首次交锋' }],
+      }],
+    })
+    await materializeStoryRelations(workspace, fixture.project.id, {
+      rows: [{
+        party_a: '李玄',
+        party_b: '顾舟',
+        current_status: '结盟',
+        story_relation_type: '联盟',
+        emotion: '正面',
+        change_nodes: [
+          { chapter_no: 1, note: '首次交锋' },
+          { chapter_no: 2, note: '共同破局' },
+        ],
+      }],
+    })
+
+    const entity = (await listNovelSettingEntities(workspace, fixture.project.id))
+      .find(item => item.entity_type === 'relationship')
+    const characters = await listNovelCharacters(workspace, fixture.project.id)
+    const relationCards = characters
+      .flatMap(item => item.relationships || [])
+      .filter((item: any) => String(item?.name || item?.target || '') === (item?.name === '顾舟' ? '顾舟' : '李玄'))
+
+    expect(entity?.state_json).toMatchObject({
+      current_status: '结盟',
+      story_relation_type: '联盟',
+      emotion: '正面',
+      change_nodes: [
+        { chapter_no: 1, note: '首次交锋' },
+        { chapter_no: 2, note: '共同破局' },
+      ],
+    })
+    expect(relationCards).toHaveLength(2)
+    expect(relationCards).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: '结盟', type: '联盟', emotion: '正面' }),
+    ]))
+  })
 
   test('relationship materialization merges transaction-current character relationships across processes', async () => {
     const fixture = await storyFixture(1)
