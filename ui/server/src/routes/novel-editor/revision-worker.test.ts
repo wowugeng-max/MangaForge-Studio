@@ -244,6 +244,20 @@ function storyStateMutationSnapshot(activeWorkspace: string, projectId: number, 
   }
 }
 
+function chapterRawPayloadWriteSnapshot(activeWorkspace: string, projectId: number, chapterId: number) {
+  const db = openDb(activeWorkspace)
+  try {
+    return db.query(`
+      SELECT raw_payload, updated_at
+      FROM chapters
+      WHERE id = ? AND project_id = ?
+      LIMIT 1
+    `).get(chapterId, projectId) as { raw_payload: string; updated_at: string } | null
+  } finally {
+    db.close()
+  }
+}
+
 async function holdNovelMutationLock(activeWorkspace: string, operation: string) {
   let releaseLock!: () => void
   let lockAcquired!: () => void
@@ -2363,6 +2377,168 @@ describe('durable editor revision worker', () => {
     }
     await worker.stop()
   })
+
+  test.each([
+    { invalidation: 'cancellation' as const },
+    { invalidation: 'takeover' as const },
+  ])('fences the final Story State raw payload patch after phase B and parent $invalidation', async ({ invalidation }) => {
+    const activeWorkspace = await tempWorkspace()
+    const fixture = await createCommittedWorkerFixture(activeWorkspace, {
+      autoQuality: false,
+      autoStoryState: true,
+    })
+    const checkpoint = persistedCheckpoint()
+    checkpoint.phase = 'sync_current_story_state'
+    checkpoint.phases.post_quality = { status: 'skipped', attempt: 1 }
+    checkpoint.phases.sync_current_story_state = { status: 'running', attempt: 1 }
+    checkpoint.committed_chapter_updated_at = fixture.evidence.committedAt
+    checkpoint.editor_revision_review_id = fixture.evidence.receipt.id
+    checkpoint.story_state = {
+      status: 'prepared',
+      receipt: {
+        source_run_id: fixture.run.id,
+        candidate_hash: fixture.evidence.candidateHash,
+        chapter_id: fixture.chapter.id,
+      },
+      prepared: {
+        state_delta: { current_time: 'after-final-raw-payload-fence' },
+        character_updates: [],
+        setting_updates: [],
+        storyline_updates: [],
+        sync_reports: {},
+        hard_failures: [],
+        payload: {},
+      },
+    }
+    runDbMutation(activeWorkspace, 'UPDATE runs SET output_ref = ? WHERE id = ?', JSON.stringify(checkpoint), fixture.run.id)
+    const receiptKey = `${fixture.run.id}:${fixture.chapter.id}:${fixture.evidence.candidateHash}`
+    const methods = createStoryStateMachineMethods({
+      executeAgent: async () => { throw errorWithCode('UNEXPECTED_STORY_STATE_MODEL') },
+      getStageModelId: () => 217,
+      getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+      refreshFollowingChapterSerialStoryStateReadiness: async () => {},
+    })
+    const ctx: any = {
+      getWorkspace: () => activeWorkspace,
+      getProject: (_workspace: string, projectId: number) => getNovelProject(activeWorkspace, projectId),
+      getStageModelId: () => 217,
+      getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+      buildChapterContextPackage: async () => ({}),
+      updateStoryStateMachine: methods.updateStoryStateMachine,
+    }
+    let releaseRawPatch!: () => void
+    let markRawPatchBlocked!: () => void
+    const rawPatchBlocked = new Promise<void>(resolve => { markRawPatchBlocked = resolve })
+    const rawPatchGate = new Promise<void>(resolve => { releaseRawPatch = resolve })
+    let blocked = false
+    let phaseBChapter: ReturnType<typeof chapterRawPayloadWriteSnapshot> = null
+    setNovelMutationTestHook(async event => {
+      if (blocked
+        || event.activeWorkspace !== activeWorkspace
+        || event.phase !== 'after_mutation_lock_acquired') return
+      const db = openDb(activeWorkspace)
+      try {
+        const phaseBCommitted = Number((db.query(`
+          SELECT EXISTS(
+            SELECT 1
+            FROM reviews
+            WHERE project_id = ?
+              AND review_type = 'story_state'
+          ) AS committed
+        `).get(fixture.project.id) as any)?.committed || 0) === 1
+        if (!phaseBCommitted) return
+        const row = db.query(`
+          SELECT raw_payload, updated_at
+          FROM chapters
+          WHERE id = ? AND project_id = ?
+          LIMIT 1
+        `).get(fixture.chapter.id, fixture.project.id) as any
+        const rawPayload = parsed(row?.raw_payload)
+        const admission = rawPayload.prose_admission || rawPayload.proseAdmission || {}
+        if (admission.story_state_status === 'synced') return
+        blocked = true
+        phaseBChapter = row
+        markRawPatchBlocked()
+        await rawPatchGate
+      } finally {
+        db.close()
+      }
+    })
+    const worker = createEditorRevisionWorker(ctx, {
+      executeRevision: async () => { throw errorWithCode('UNEXPECTED_ORCHESTRATION') },
+      prepareStoryState: async () => { throw errorWithCode('UNEXPECTED_STORY_STATE_PREPARE') },
+    })
+
+    await worker.start(activeWorkspace)
+    await Promise.race([
+      rawPatchBlocked,
+      worker.waitForIdle().then(async () => {
+        const parent = await getEditorRevisionRun(activeWorkspace, fixture.project.id, fixture.run.id)
+        throw new Error(`worker stopped before the final raw payload patch: ${JSON.stringify(parent)}`)
+      }),
+    ])
+    expect(phaseBChapter).not.toBeNull()
+    const recoveryReceipt = (await getNovelProject(activeWorkspace, fixture.project.id))
+      ?.reference_config?.story_state_sync_receipts?.[receiptKey]
+    expect(recoveryReceipt).toMatchObject({
+      status: 'state_applied',
+      source_run_id: fixture.run.id,
+      candidate_hash: fixture.evidence.candidateHash,
+      chapter_id: fixture.chapter.id,
+    })
+    expect(recoveryReceipt?.prepared_for_recovery).toBeTruthy()
+    if (invalidation === 'cancellation') {
+      runDbMutation(
+        activeWorkspace,
+        'UPDATE runs SET status = ?, cancel_requested_at = ? WHERE id = ?',
+        'cancel_requested',
+        new Date().toISOString(),
+        fixture.run.id,
+      )
+    } else {
+      runDbMutation(
+        activeWorkspace,
+        'UPDATE runs SET lease_owner = ?, lease_expires_at = ? WHERE id = ?',
+        'takeover-owner',
+        '2099-01-01T00:00:00.000Z',
+        fixture.run.id,
+      )
+    }
+    releaseRawPatch()
+    await worker.waitForIdle()
+    setNovelMutationTestHook(null)
+
+    expect(chapterRawPayloadWriteSnapshot(activeWorkspace, fixture.project.id, fixture.chapter.id)).toEqual(phaseBChapter)
+    const parent = await getEditorRevisionRun(activeWorkspace, fixture.project.id, fixture.run.id)
+    const durableReceipt = (await getNovelProject(activeWorkspace, fixture.project.id))
+      ?.reference_config?.story_state_sync_receipts?.[receiptKey]
+    expect(durableReceipt).toEqual(recoveryReceipt)
+    if (invalidation === 'cancellation') {
+      expect(parent).toMatchObject({
+        status: 'canceled',
+        error_message: '',
+        lease_owner: null,
+        lease_expires_at: null,
+      })
+      expect(parsed(parent?.output_ref)).toMatchObject({
+        phase: 'sync_current_story_state',
+        phases: { sync_current_story_state: { status: 'canceled' } },
+        story_state: {
+          status: 'prepared',
+          receipt: {
+            source_run_id: fixture.run.id,
+            candidate_hash: fixture.evidence.candidateHash,
+            chapter_id: fixture.chapter.id,
+          },
+          prepared: { state_delta: { current_time: 'after-final-raw-payload-fence' } },
+        },
+      })
+    } else {
+      expect(parent).toMatchObject({ status: 'running', lease_owner: 'takeover-owner' })
+      expect(parsed(parent?.output_ref).story_state).toMatchObject({ status: 'prepared' })
+    }
+    await worker.stop()
+  }, 30_000)
 
   test('recovers a commit marker crash window without creating a second version', async () => {
     let crashOnce = true

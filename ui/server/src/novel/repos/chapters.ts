@@ -3,7 +3,6 @@ import { nextChapterVersionNo, createChapterVersionRecord, versionedChapterSnaps
 import { openDb, ensureSqliteSchema } from '../db'
 import { nowIso, jsonText, parseDbJson, sanitizeJsonValue, toAnyArray } from '../json'
 import { ensureLegacyNovelStoreImportedForRead } from '../legacy-import'
-import { withNovelWorkspaceMutation } from '../lock'
 import { normalizeOutlineRecord, normalizeChapterRecord, dedupById } from '../normalize'
 import { outlineFromRow, chapterFromRow, chapterVersionFromRow } from '../row-mappers'
 import { withNovelDbWrite, nextTableId, insertOutlineRow, updateOutlineRow, insertChapterRow, updateChapterRow, insertChapterVersionRow } from '../sql-rows'
@@ -267,18 +266,9 @@ export async function updateNovelChapter(activeWorkspace: string, chapterId: num
 }
 
 export async function mergeNovelChapterRawPayload(activeWorkspace: string, chapterId: number, patch: Record<string, any>) {
-  return withNovelWorkspaceMutation(activeWorkspace, async () => {
-  const db = openDb(activeWorkspace)
-  let committed = false
-  try {
-    ensureSqliteSchema(db)
-    db.exec('BEGIN IMMEDIATE')
+  return withNovelDbWrite(activeWorkspace, db => {
     const row = db.query('SELECT raw_payload FROM chapters WHERE id=?').get(chapterId) as any
-    if (!row) {
-      db.exec('COMMIT')
-      committed = true
-      return null
-    }
+    if (!row) return null
     const parsed = parseDbJson(row.raw_payload, {})
     const current = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? { ...parsed } : {}
     const sanitized = sanitizeJsonValue(patch && typeof patch === 'object' && !Array.isArray(patch) ? patch : {}) as Record<string, any>
@@ -289,17 +279,7 @@ export async function mergeNovelChapterRawPayload(activeWorkspace: string, chapt
     const merged = compactRawPayloadForStorage({ ...current, ...sanitized })
     for (const key of NESTED_STORAGE_KEYS) delete merged[key]
     db.query('UPDATE chapters SET raw_payload=?, updated_at=? WHERE id=?').run(jsonText(merged, {}), nowIso(), chapterId)
-    db.exec('COMMIT')
-    committed = true
     return merged
-  } catch (error) {
-    if (!committed) {
-      try { db.exec('ROLLBACK') } catch { /* transaction may already be closed */ }
-    }
-    throw error
-  } finally {
-    db.close()
-  }
   })
 }
 
