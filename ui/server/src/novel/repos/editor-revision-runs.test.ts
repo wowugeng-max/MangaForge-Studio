@@ -590,7 +590,7 @@ describe('editor revision run repository', () => {
     expect(JSON.parse(failed.output_ref || '{}').error).toEqual(validFailure.error)
   })
 
-  test('persists cancellation and lets the lease owner make it terminal', async () => {
+  test('reports same-owner live cancellation at the checkpoint fence and lets the lease owner make it terminal', async () => {
     const { workspace, project, chapters: [chapter] } = await createFixture()
     const run = await createRun(workspace, project.id, chapter.id)
     await claimEditorRevisionRun(workspace, {
@@ -618,7 +618,7 @@ describe('editor revision run repository', () => {
       }),
       errorMessage: 'must-not-overwrite-cancel',
     }).then(() => null, caught => caught)
-    expect(canceledWrite).toMatchObject({ code: 'REVISION_LEASE_OR_STATE_INVALID' })
+    expect(canceledWrite).toMatchObject({ code: 'REVISION_CANCELED' })
 
     const canceledCheckpoint = checkpointAt('generate_candidate', {
       generate_candidate: 'canceled',

@@ -1181,6 +1181,182 @@ describe('durable editor revision worker', () => {
     expect((await getNovelChapter(activeWorkspace, chapter.id, project.id))?.chapter_text).toBe(sourceText)
   })
 
+  test('real worker preserves a successful chapter commit when cancellation reaches its checkpoint fence', async () => {
+    const activeWorkspace = await tempWorkspace()
+    const project = await createNovelProject(activeWorkspace, { title: 'successful commit checkpoint cancellation' })
+    const chapter = await createNovelChapter(activeWorkspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: sourceText,
+    })
+    const input = {
+      ...canonicalRunInput(project.id, chapter),
+      auto_quality_check: false,
+      auto_story_state: false,
+    }
+    const run = await createEditorRevisionRun(activeWorkspace, {
+      projectId: project.id,
+      chapterId: chapter.id,
+      inputRef: JSON.stringify(input),
+      outputRef: JSON.stringify(admittedCheckpoint()),
+    })
+    let fenced = false
+    const worker = createEditorRevisionWorker({
+      getWorkspace: () => activeWorkspace,
+      getProject: async () => project,
+    } as any, {
+      executeRevision: async () => { throw errorWithCode('UNEXPECTED_ORCHESTRATION') },
+      writeCheckpoint: (workspacePath, checkpointInput) => {
+        if (!fenced
+          && checkpointInput.phase === 'persist_chapter'
+          && checkpointInput.checkpoint.prose_persisted) {
+          fenced = true
+          return cancelBeforeFencedMutation(
+            workspacePath,
+            run.id,
+            'worker-successful-commit-checkpoint-cancel-holder',
+            () => writeEditorRevisionCheckpoint(workspacePath, checkpointInput),
+          )
+        }
+        return writeEditorRevisionCheckpoint(workspacePath, checkpointInput)
+      },
+    })
+
+    await worker.start(activeWorkspace)
+    await worker.waitForIdle()
+
+    const canceled = await getEditorRevisionRun(activeWorkspace, project.id, run.id)
+    const checkpoint = parsed(canceled?.output_ref)
+    const committedChapter = await getNovelChapter(activeWorkspace, chapter.id, project.id)
+    const reviews = await listNovelReviews(activeWorkspace, project.id)
+    const revisionReviews = reviews.filter(review => review.review_type === 'editor_revision')
+    expect(fenced).toBe(true)
+    expect(canceled).toMatchObject({
+      status: 'canceled',
+      error_message: '',
+      lease_owner: null,
+      lease_expires_at: null,
+    })
+    expect(checkpoint).toMatchObject({
+      prose_persisted: true,
+      candidate: { text: candidateText, hash: revisionTextHash(candidateText) },
+      committed_chapter_updated_at: committedChapter?.updated_at,
+      editor_revision_review_id: revisionReviews[0]?.id,
+      phases: { persist_chapter: { status: 'completed' } },
+    })
+    expect(() => requireCoherentEditorRevisionCheckpoint(checkpoint, { runStatus: 'canceled' })).not.toThrow()
+    expect(await listChapterVersions(activeWorkspace, chapter.id)).toHaveLength(1)
+    expect(revisionReviews).toHaveLength(1)
+    expect(committedChapter?.chapter_text).toBe(candidateText)
+  })
+
+  test('real worker preserves prepared Story State when cancellation reaches its checkpoint fence', async () => {
+    const activeWorkspace = await tempWorkspace()
+    const project = await createNovelProject(activeWorkspace, { title: 'prepared Story State checkpoint cancellation' })
+    const chapter = await createNovelChapter(activeWorkspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: sourceText,
+    })
+    const input = {
+      ...canonicalRunInput(project.id, chapter),
+      auto_quality_check: false,
+      auto_story_state: true,
+    }
+    const run = await createEditorRevisionRun(activeWorkspace, {
+      projectId: project.id,
+      chapterId: chapter.id,
+      inputRef: JSON.stringify(input),
+      outputRef: JSON.stringify(initialCheckpoint()),
+    })
+    const evidence = await installCommitEvidence(
+      activeWorkspace,
+      project.id,
+      chapter.id,
+      run.id,
+      input.source_text_hash,
+    )
+    const startingCheckpoint = persistedCheckpoint()
+    startingCheckpoint.phase = 'sync_current_story_state'
+    startingCheckpoint.phases.post_quality = { status: 'skipped', attempt: 1 }
+    startingCheckpoint.committed_chapter_updated_at = evidence.committedAt
+    startingCheckpoint.editor_revision_review_id = evidence.receipt.id
+    runDbMutation(activeWorkspace, 'UPDATE runs SET output_ref = ? WHERE id = ?', JSON.stringify(startingCheckpoint), run.id)
+    let fenced = false
+    let prepareCalls = 0
+    let applyCalls = 0
+    const worker = createEditorRevisionWorker({
+      getWorkspace: () => activeWorkspace,
+      getProject: async () => project,
+    } as any, {
+      executeRevision: async () => { throw errorWithCode('UNEXPECTED_ORCHESTRATION') },
+      prepareStoryState: async () => {
+        prepareCalls += 1
+        return {
+          reused: false,
+          prepared: {
+            state_delta: { current_time: 'night' },
+            character_updates: [],
+            setting_updates: [],
+            storyline_updates: [],
+            sync_reports: {},
+            hard_failures: [],
+            payload: {},
+          },
+        }
+      },
+      applyStoryState: async () => {
+        applyCalls += 1
+        throw errorWithCode('UNEXPECTED_STORY_STATE_APPLY')
+      },
+      writeCheckpoint: (workspacePath, checkpointInput) => {
+        if (!fenced
+          && checkpointInput.phase === 'sync_current_story_state'
+          && checkpointInput.checkpoint.story_state?.status === 'prepared') {
+          fenced = true
+          return cancelBeforeFencedMutation(
+            workspacePath,
+            run.id,
+            'worker-prepared-story-state-checkpoint-cancel-holder',
+            () => writeEditorRevisionCheckpoint(workspacePath, checkpointInput),
+          )
+        }
+        return writeEditorRevisionCheckpoint(workspacePath, checkpointInput)
+      },
+    })
+
+    await worker.start(activeWorkspace)
+    await worker.waitForIdle()
+
+    const canceled = await getEditorRevisionRun(activeWorkspace, project.id, run.id)
+    const checkpoint = parsed(canceled?.output_ref)
+    expect(fenced).toBe(true)
+    expect(canceled).toMatchObject({
+      status: 'canceled',
+      error_message: '',
+      lease_owner: null,
+      lease_expires_at: null,
+    })
+    expect(checkpoint).toMatchObject({
+      phase: 'sync_current_story_state',
+      phases: { sync_current_story_state: { status: 'canceled' } },
+      story_state: {
+        status: 'prepared',
+        prepared: { state_delta: { current_time: 'night' } },
+        receipt: {
+          source_run_id: run.id,
+          candidate_hash: evidence.candidateHash,
+          chapter_id: chapter.id,
+        },
+      },
+    })
+    expect(() => requireCoherentEditorRevisionCheckpoint(checkpoint, { runStatus: 'canceled' })).not.toThrow()
+    expect(prepareCalls).toBe(1)
+    expect(applyCalls).toBe(0)
+  })
+
   test('real worker preserves matching commit evidence when cancellation reaches the replay fence', async () => {
     const activeWorkspace = await tempWorkspace()
     const project = await createNovelProject(activeWorkspace, { title: 'commit replay fence cancellation' })

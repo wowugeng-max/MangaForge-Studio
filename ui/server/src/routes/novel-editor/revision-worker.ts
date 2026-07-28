@@ -450,6 +450,7 @@ export function createEditorRevisionWorker(
   }
 
   async function writeCheckpoint(
+    input: EditorRevisionRunInput,
     runId: number,
     phase: EditorRevisionPhase,
     checkpoint: EditorRevisionCheckpoint,
@@ -458,14 +459,27 @@ export function createEditorRevisionWorker(
     lease?: LeaseState,
   ) {
     if (lease && !lease.valid) throw revisionError('REVISION_LEASE_LOST')
-    return deps.writeCheckpoint(activeWorkspace!, {
-      runId,
-      owner: leaseOwner,
-      status,
-      phase,
-      checkpoint,
-      errorMessage: error,
-    })
+    try {
+      return await deps.writeCheckpoint(activeWorkspace!, {
+        runId,
+        owner: leaseOwner,
+        status,
+        phase,
+        checkpoint,
+        errorMessage: error,
+      })
+    } catch (writeError) {
+      if (errorCode(writeError) !== 'REVISION_CANCELED') throw writeError
+      const fresh = await deps.getRun(activeWorkspace!, input.project_id, runId).catch(() => null)
+      const leaseExpiresAt = fresh?.lease_expires_at ? new Date(fresh.lease_expires_at).getTime() : Number.NaN
+      const ownedLiveLease = fresh?.lease_owner === leaseOwner
+        && Number.isFinite(leaseExpiresAt)
+        && leaseExpiresAt > new Date(deps.now()).getTime()
+      const cancellationRequested = fresh?.status === 'cancel_requested' || Boolean(fresh?.cancel_requested_at)
+      if (!ownedLiveLease || !cancellationRequested) throw writeError
+      await finishCanceled(input, runId, checkpoint)
+      throw new StopProcessingError(revisionError('REVISION_CANCELED', 'revision canceled'))
+    }
   }
 
   async function phaseCheckpoint(
@@ -494,7 +508,7 @@ export function createEditorRevisionWorker(
       attempt: phaseAttempt(checkpoint, phase),
       started_at: deps.now(),
     }
-    await writeCheckpoint(runId, phase, checkpoint, 'running', undefined, lease)
+    await writeCheckpoint(input, runId, phase, checkpoint, 'running', undefined, lease)
     return checkpoint
   }
 
@@ -520,7 +534,7 @@ export function createEditorRevisionWorker(
       ...(summary ? { summary } : {}),
     }
     if (phase === 'completed') checkpoint.completed_at = deps.now()
-    await writeCheckpoint(runId, phase, checkpoint, status, undefined, lease)
+    await writeCheckpoint(input, runId, phase, checkpoint, status, undefined, lease)
     return checkpoint
   }
 
@@ -542,7 +556,7 @@ export function createEditorRevisionWorker(
       completed_at: deps.now(),
       summary: { reason: 'disabled_by_request' },
     }
-    await writeCheckpoint(runId, phase, checkpoint, 'running', undefined, lease)
+    await writeCheckpoint(input, runId, phase, checkpoint, 'running', undefined, lease)
     return checkpoint
   }
 
@@ -599,7 +613,7 @@ export function createEditorRevisionWorker(
       error: message,
     }
     checkpoint.error = { code, message, ...(diagnostics ? { diagnostics } : {}) }
-    await writeCheckpoint(runId, phase, checkpoint, 'failed', code)
+    await writeCheckpoint(input, runId, phase, checkpoint, 'failed', code)
   }
 
   async function failedCheckpoint(
@@ -805,7 +819,7 @@ export function createEditorRevisionWorker(
       throw error
     }
     try {
-      await writeCheckpoint(runId, 'persist_chapter', checkpoint, 'running', undefined, lease)
+      await writeCheckpoint(input, runId, 'persist_chapter', checkpoint, 'running', undefined, lease)
     } catch (error) {
       const after = await deps.getRun(activeWorkspace!, input.project_id, runId).catch(() => null)
       if (after?.status === 'cancel_requested' || after?.cancel_requested_at) {
@@ -882,7 +896,7 @@ export function createEditorRevisionWorker(
       summary: admitted.diagnostics,
     }
     try {
-      await writeCheckpoint(runId, 'admit_candidate', checkpoint, 'running', undefined, lease)
+      await writeCheckpoint(input, runId, 'admit_candidate', checkpoint, 'running', undefined, lease)
     } catch (error) {
       const after = await deps.getRun(activeWorkspace!, input.project_id, runId).catch(() => null)
       const durable = after ? parseCheckpoint(after.output_ref, after.status) : null
@@ -954,7 +968,7 @@ export function createEditorRevisionWorker(
     try {
       const fresh = await deps.getRun(activeWorkspace!, input.project_id, runId)
       if (fresh) throwIfRevisionCanceled(fresh, controller.signal)
-      await writeCheckpoint(runId, 'persist_chapter', checkpoint, 'running', undefined, lease)
+      await writeCheckpoint(input, runId, 'persist_chapter', checkpoint, 'running', undefined, lease)
     } catch (error) {
       if (errorCode(error) === 'REVISION_CANCELED') {
         await finishCanceled(input, runId, checkpoint)
@@ -1067,7 +1081,7 @@ export function createEditorRevisionWorker(
         reused: reusedPrepare,
       }
       try {
-        await writeCheckpoint(runId, 'sync_current_story_state', checkpoint, 'running', undefined, lease)
+        await writeCheckpoint(input, runId, 'sync_current_story_state', checkpoint, 'running', undefined, lease)
       } catch (error) {
         throw new StopProcessingError(error)
       }

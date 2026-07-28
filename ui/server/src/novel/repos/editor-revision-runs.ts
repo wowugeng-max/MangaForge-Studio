@@ -305,6 +305,17 @@ function leaseOrStateError(): RevisionError {
   return revisionError('REVISION_LEASE_OR_STATE_INVALID', 'editor revision lease or state is no longer valid')
 }
 
+function checkpointFenceError(run: NovelRunRecord | null, owner: string, timestamp: string): RevisionError {
+  const leaseExpiresAt = run?.lease_expires_at ? new Date(run.lease_expires_at).getTime() : Number.NaN
+  const ownedLiveLease = run?.lease_owner === owner
+    && Number.isFinite(leaseExpiresAt)
+    && leaseExpiresAt > new Date(timestamp).getTime()
+  if (ownedLiveLease && (run?.status === 'cancel_requested' || run?.cancel_requested_at)) {
+    return revisionError('REVISION_CANCELED', 'editor revision canceled')
+  }
+  return leaseOrStateError()
+}
+
 function alreadyActiveError(existing: NovelRunRecord, projectId: number): RevisionError {
   return revisionError('REVISION_ALREADY_ACTIVE', 'an editor revision is already active for this chapter', {
     existingRunId: existing.id,
@@ -495,7 +506,7 @@ export async function writeEditorRevisionCheckpoint(workspace: string, input: {
       input.owner,
       timestamp,
     )
-    if (!changed(result)) throw leaseOrStateError()
+    if (!changed(result)) throw checkpointFenceError(rowById(db, input.runId), input.owner, timestamp)
     return rowById(db, input.runId)!
   }, 'write-editor-revision-checkpoint')
 }
