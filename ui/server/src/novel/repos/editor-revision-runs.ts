@@ -123,6 +123,14 @@ export function assertEditorRevisionCheckpointCoherent(
   if (Boolean(candidate) !== candidateAdmitted) {
     checkpointInvalid('candidate evidence requires completed candidate admission')
   }
+  const generationCompleted = checkpoint.phases.generate_candidate.status === 'completed'
+  const terminalAdmissionRejection = context.runStatus === 'failed'
+    && checkpoint.phase === 'admit_candidate'
+    && checkpoint.phases.admit_candidate.status === 'failed'
+    && Boolean(checkpoint.error?.code)
+  if (generationCompleted && !candidateAdmitted && !terminalAdmissionRejection) {
+    checkpointInvalid('completed candidate generation requires admitted candidate or terminal rejection evidence')
+  }
   if (candidate && (
     revisionTextHash(candidate.text) !== candidate.hash
     || candidate.text.replace(/\s/g, '').length !== candidate.char_count

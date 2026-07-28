@@ -418,9 +418,18 @@ describe('editor revision run repository', () => {
       now: '2030-07-27T10:00:00.000Z',
       leaseMs: 60_000,
     })
+    const candidateText = 'admitted candidate'
     const advanced = checkpointAt('admit_candidate', {
       generate_candidate: 'completed',
-      admit_candidate: 'running',
+      admit_candidate: 'completed',
+    }, {
+      candidate: {
+        text: candidateText,
+        hash: revisionTextHash(candidateText),
+        char_count: candidateText.replace(/\s/g, '').length,
+        applied_patches: [],
+        diagnostics: {},
+      },
     })
 
     const written = await writeEditorRevisionCheckpoint(workspace, {
@@ -434,8 +443,9 @@ describe('editor revision run repository', () => {
       phase: 'admit_candidate',
       phases: {
         generate_candidate: { status: 'completed' },
-        admit_candidate: { status: 'running' },
+        admit_candidate: { status: 'completed' },
       },
+      candidate: { text: candidateText, hash: revisionTextHash(candidateText) },
     })
 
     const wrongOwner = await writeEditorRevisionCheckpoint(workspace, {

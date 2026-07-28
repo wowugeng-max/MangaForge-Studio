@@ -7,18 +7,23 @@ import {
   createNovelChapter,
   createNovelProject,
   createNovelReview,
+  getNovelProject,
   getNovelChapter,
   getEditorRevisionRun,
   listChapterVersions,
   listNovelReviews,
+  listNovelRuns,
+  recoverEditorRevisionRuns,
   requireCoherentEditorRevisionCheckpoint,
   requestEditorRevisionCancel,
   writeEditorRevisionCheckpoint,
 } from '../../novel'
 import { openDb } from '../../novel/db'
+import { novelMutationKey, novelMutationLocks } from '../../novel/lock'
 import { withNovelDbWrite } from '../../novel/sql-rows'
 import { tempWorkspace, workspaces } from '../../novel/test-utils'
 import { setNovelMutationTestHook } from '../../novel-test-support'
+import { createStoryStateMachineMethods } from '../../novel-writing-service/service/story-state-machine'
 import type { EditorRevisionCheckpoint, EditorRevisionPhase } from './editor-revision-contract'
 import { revisionTextHash } from './revision-candidate-admission'
 import { createEditorRevisionWorker, findOrCreateEditorRevisionReview } from './revision-worker'
@@ -186,6 +191,78 @@ async function installCommitEvidence(
     }),
   })
   return { candidateHash, committedAt, receipt }
+}
+
+async function createCommittedWorkerFixture(
+  activeWorkspace: string,
+  options: { autoQuality: boolean; autoStoryState: boolean },
+) {
+  const project = await createNovelProject(activeWorkspace, {
+    title: 'parent transaction fence',
+    reference_config: { story_state: { current_time: 'before-fence' } },
+  })
+  const chapter = await createNovelChapter(activeWorkspace, {
+    project_id: project.id,
+    chapter_no: 1,
+    title: '第一章',
+    chapter_text: sourceText,
+  })
+  const input = {
+    ...canonicalRunInput(project.id, chapter),
+    auto_quality_check: options.autoQuality,
+    auto_story_state: options.autoStoryState,
+  }
+  const run = await createEditorRevisionRun(activeWorkspace, {
+    projectId: project.id,
+    chapterId: chapter.id,
+    inputRef: JSON.stringify(input),
+    outputRef: JSON.stringify(initialCheckpoint()),
+  })
+  const evidence = await installCommitEvidence(
+    activeWorkspace,
+    project.id,
+    chapter.id,
+    run.id,
+    input.source_text_hash,
+  )
+  return { project, chapter, input, run, evidence }
+}
+
+function storyStateMutationSnapshot(activeWorkspace: string, projectId: number, chapterId: number) {
+  const db = openDb(activeWorkspace)
+  try {
+    return {
+      project: db.query('SELECT reference_config FROM projects WHERE id = ?').get(projectId),
+      characters: db.query('SELECT id, current_state, relationship_graph, raw_payload FROM characters WHERE project_id = ? ORDER BY id').all(projectId),
+      settings: db.query('SELECT id, state_json, payload_json FROM setting_entities WHERE project_id = ? ORDER BY id').all(projectId),
+      usages: db.query('SELECT id, actual_state_change FROM chapter_setting_usage WHERE project_id = ? AND chapter_id = ? ORDER BY id').all(projectId, chapterId),
+      chapter: db.query('SELECT raw_payload FROM chapters WHERE id = ? AND project_id = ?').get(chapterId, projectId),
+      reviews: db.query('SELECT id, review_type, payload FROM reviews WHERE project_id = ? ORDER BY id').all(projectId),
+    }
+  } finally {
+    db.close()
+  }
+}
+
+async function holdNovelMutationLock(activeWorkspace: string, operation: string) {
+  let releaseLock!: () => void
+  let lockAcquired!: () => void
+  const acquired = new Promise<void>(resolve => { lockAcquired = resolve })
+  const release = new Promise<void>(resolve => { releaseLock = resolve })
+  setNovelMutationTestHook(async event => {
+    if (event.operation !== operation || event.phase !== 'after_mutation_lock_acquired') return
+    lockAcquired()
+    await release
+  })
+  const holder = withNovelDbWrite(activeWorkspace, () => {}, operation)
+  await acquired
+  return {
+    async release() {
+      releaseLock()
+      await holder
+      setNovelMutationTestHook(null)
+    },
+  }
 }
 
 async function createClaimedReviewRun(
@@ -1619,6 +1696,185 @@ describe('durable editor revision worker', () => {
     expect(reviews.filter(review => review.review_type === 'editor_revision')).toHaveLength(1)
   })
 
+  test('automatically rescans a live startup lease after expiry without enqueueing or regenerating', async () => {
+    const activeWorkspace = await tempWorkspace()
+    const project = await createNovelProject(activeWorkspace, { title: 'lease expiry recovery' })
+    const chapter = await createNovelChapter(activeWorkspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: sourceText,
+    })
+    const input = {
+      ...canonicalRunInput(project.id, chapter),
+      auto_quality_check: false,
+      auto_story_state: false,
+    }
+    const run = await createEditorRevisionRun(activeWorkspace, {
+      projectId: project.id,
+      chapterId: chapter.id,
+      inputRef: JSON.stringify(input),
+      outputRef: JSON.stringify(initialCheckpoint()),
+    })
+    await claimEditorRevisionRun(activeWorkspace, {
+      runId: run.id,
+      owner: 'crashed-worker',
+      now: '2030-01-01T00:00:00.000Z',
+      leaseMs: 30_000,
+    })
+    let clock = '2030-01-01T00:00:10.000Z'
+    const timers: Array<{ callback: () => any; ms: number; cleared: boolean }> = []
+    let revisionCalls = 0
+    const worker = createEditorRevisionWorker({
+      getWorkspace: () => activeWorkspace,
+      getProject: async () => project,
+      getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+    } as any, {
+      now: () => clock,
+      recoverRuns: (workspacePath) => recoverEditorRevisionRuns(workspacePath, clock),
+      claimRun: (workspacePath, claim) => claimEditorRevisionRun(workspacePath, { ...claim, now: clock }),
+      executeRevision: async () => {
+        revisionCalls += 1
+        return completeResult()
+      },
+      setTimeout: (callback, ms) => {
+        const timer = { callback, ms, cleared: false }
+        timers.push(timer)
+        return timer
+      },
+      clearTimeout: timer => { timer.cleared = true },
+    })
+
+    await worker.start(activeWorkspace)
+    await worker.waitForIdle()
+
+    expect(revisionCalls).toBe(0)
+    expect((await getEditorRevisionRun(activeWorkspace, project.id, run.id))?.lease_owner).toBe('crashed-worker')
+    const recoveryTimer = timers.find(timer => timer.ms < 30_000 && !timer.cleared)
+    expect(recoveryTimer).toBeDefined()
+
+    clock = '2030-01-01T00:00:31.000Z'
+    await recoveryTimer!.callback()
+    await worker.waitForIdle()
+
+    expect(revisionCalls).toBe(1)
+    expect((await getEditorRevisionRun(activeWorkspace, project.id, run.id))?.status).toBe('completed')
+    const nextRecoveryTimer = timers.find(timer => timer !== recoveryTimer && timer.ms < 30_000 && !timer.cleared)
+    expect(nextRecoveryTimer).toBeDefined()
+
+    await worker.stop()
+    expect(nextRecoveryTimer!.cleared).toBe(true)
+  })
+
+  test('does not enqueue recovery results that arrive after the worker stops', async () => {
+    const harness = createHarness({ autoQuality: false, autoStoryState: false })
+    let recoverCalls = 0
+    let recoveryEntered!: () => void
+    let releaseRecovery!: (value: { queued: number[]; failedLegacy: number[] }) => void
+    const entered = new Promise<void>(resolve => { recoveryEntered = resolve })
+    const pendingRecovery = new Promise<{ queued: number[]; failedLegacy: number[] }>(resolve => {
+      releaseRecovery = resolve
+    })
+    const worker = harness.worker({
+      recoverRuns: async () => {
+        recoverCalls += 1
+        if (recoverCalls === 1) return { queued: [], failedLegacy: [] }
+        recoveryEntered()
+        return pendingRecovery
+      },
+    })
+
+    await worker.start(workspace)
+    const recoveryTimer = harness.timeoutRegistrations.find(timer => !timer.cleared)
+    expect(recoveryTimer).toBeDefined()
+    const recovery = recoveryTimer!.callback()
+    await entered
+
+    await worker.stop()
+    releaseRecovery({ queued: [harness.run.id], failedLegacy: [] })
+    await recovery
+
+    let idle = false
+    void worker.waitForIdle().then(() => { idle = true })
+    await eventually(() => idle, 'stopped worker retained a recovered run in its idle queue')
+    expect(harness.revisionCalls).toHaveLength(0)
+    expect(harness.run.status).toBe('queued')
+    expect(harness.timeoutRegistrations.filter(timer => timer !== recoveryTimer && !timer.cleared)).toHaveLength(0)
+  })
+
+  test('retries a transient claim failure without requiring recovery to rediscover the run', async () => {
+    const harness = createHarness({ autoQuality: false, autoStoryState: false })
+    let recoverCalls = 0
+    let claimAttempts = 0
+    const worker = harness.worker({
+      recoverRuns: async () => ({
+        queued: recoverCalls++ === 0 ? [harness.run.id] : [],
+        failedLegacy: [],
+      }),
+      claimRun: async (_workspace: string, claim: any) => {
+        claimAttempts += 1
+        if (claimAttempts === 1) throw errorWithCode('SQLITE_BUSY')
+        if (harness.run.status !== 'queued') return null
+        harness.run.status = 'running'
+        harness.run.lease_owner = claim.owner
+        harness.run.lease_expires_at = '2099-01-01T00:00:00.000Z'
+        harness.events.push('claim')
+        return clone(harness.run)
+      },
+    })
+
+    await worker.start(workspace)
+    await worker.waitForIdle()
+    expect(claimAttempts).toBe(1)
+
+    const retryTimer = harness.timeoutRegistrations
+      .filter(timer => !timer.cleared)
+      .sort((left, right) => left.ms - right.ms)[0]
+    expect(retryTimer).toBeDefined()
+    await retryTimer.callback()
+    await worker.waitForIdle()
+
+    expect(claimAttempts).toBe(2)
+    expect(harness.revisionCalls).toHaveLength(1)
+    expect(harness.run.status).toBe('completed')
+  })
+
+  test('rolls back a failed start so the next concurrent start shares one recovery and queue loop', async () => {
+    const harness = createHarness({ autoQuality: false, autoStoryState: false })
+    let recoverAttempts = 0
+    const worker = harness.worker({
+      recoverRuns: async () => {
+        recoverAttempts += 1
+        if (recoverAttempts === 1) throw errorWithCode('SQLITE_BUSY')
+        return { queued: [harness.run.id], failedLegacy: [] }
+      },
+    })
+
+    await expect(worker.start(workspace)).rejects.toMatchObject({ code: 'SQLITE_BUSY' })
+    await Promise.all([worker.start(workspace), worker.start(workspace)])
+    await worker.waitForIdle()
+
+    expect(recoverAttempts).toBe(2)
+    expect(harness.events.filter(event => event === 'claim')).toHaveLength(1)
+    expect(harness.revisionCalls).toHaveLength(1)
+    expect(harness.run.status).toBe('completed')
+  })
+
+  test('keeps one workspace binding across idempotent start and stop calls', async () => {
+    const harness = createHarness({ autoQuality: false, autoStoryState: false })
+    const worker = harness.worker()
+
+    await Promise.all([worker.start(workspace), worker.start(workspace)])
+    await worker.waitForIdle()
+    await expect(worker.start('/tmp/different-editor-revision-workspace')).rejects.toMatchObject({
+      code: 'REVISION_WORKER_WORKSPACE_MISMATCH',
+    })
+    await Promise.all([worker.stop(), worker.stop()])
+
+    expect(harness.events.filter(event => event === 'claim')).toHaveLength(1)
+    expect(harness.timeoutRegistrations.filter(timer => !timer.cleared)).toHaveLength(0)
+  })
+
   test('corrupt claimed checkpoint honors a concurrent cancellation request', async () => {
     const harness = createHarness()
     harness.run.output_ref = '{'
@@ -1731,6 +1987,7 @@ describe('durable editor revision worker', () => {
     const worker = harness.worker()
     await worker.start(workspace)
     await eventually(() => harness.intervalRegistrations.length === 1)
+    await eventually(() => harness.revisionCalls.length === 1)
 
     const heartbeat = harness.intervalRegistrations[0]
     expect(heartbeat.ms).toBe(10_000)
@@ -1758,6 +2015,7 @@ describe('durable editor revision worker', () => {
     const worker = harness.worker()
     await worker.start(workspace)
     await eventually(() => harness.intervalRegistrations.length === 1)
+    await eventually(() => harness.revisionCalls.length === 1)
     await harness.intervalRegistrations[0].callback()
     await worker.waitForIdle()
 
@@ -1844,6 +2102,218 @@ describe('durable editor revision worker', () => {
     expect(harness.revisionCalls).toHaveLength(1)
     expect(harness.versionWrites()).toBe(1)
     expect(harness.run.status).toBe('completed')
+  })
+
+  test('never regenerates from a durable completed generation that has no candidate evidence', async () => {
+    const checkpoint = initialCheckpoint()
+    checkpoint.phase = 'admit_candidate'
+    checkpoint.phases.generate_candidate = { status: 'completed', attempt: 1 }
+    const harness = createHarness({ checkpoint })
+    const worker = harness.worker()
+
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    expect(harness.revisionCalls).toHaveLength(0)
+    expect(harness.commitCalls()).toBe(0)
+    expect(harness.versionWrites()).toBe(0)
+    expect(harness.run.status).toBe('failed')
+    expect(harness.run.error_message).toBe('REVISION_CHECKPOINT_INVALID')
+  })
+
+  test('checkpoints generation completion only together with admitted candidate evidence', async () => {
+    const harness = createHarness({ autoQuality: false, autoStoryState: false })
+    const worker = harness.worker()
+
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    const orphanedGeneration = harness.writes.find(checkpoint => (
+      checkpoint.phases.generate_candidate.status === 'completed'
+      && !checkpoint.candidate
+    ))
+    expect(orphanedGeneration).toBeUndefined()
+    expect(harness.revisionCalls).toHaveLength(1)
+    expect(harness.run.status).toBe('completed')
+  })
+
+  test.each([
+    { invalidation: 'cancellation' as const },
+    { invalidation: 'takeover' as const },
+  ])('fences a blocked post-quality commit after parent $invalidation', async ({ invalidation }) => {
+    const activeWorkspace = await tempWorkspace()
+    const fixture = await createCommittedWorkerFixture(activeWorkspace, {
+      autoQuality: true,
+      autoStoryState: false,
+    })
+    const checkpoint = persistedCheckpoint()
+    checkpoint.committed_chapter_updated_at = fixture.evidence.committedAt
+    checkpoint.editor_revision_review_id = fixture.evidence.receipt.id
+    runDbMutation(activeWorkspace, 'UPDATE runs SET output_ref = ? WHERE id = ?', JSON.stringify(checkpoint), fixture.run.id)
+    let qualityEntered!: () => void
+    let releaseQuality!: () => void
+    const entered = new Promise<void>(resolve => { qualityEntered = resolve })
+    const gate = new Promise<void>(resolve => { releaseQuality = resolve })
+    const ctx: any = {
+      getWorkspace: () => activeWorkspace,
+      getProject: (_workspace: string, projectId: number) => getNovelProject(activeWorkspace, projectId),
+      getStageModelId: () => 217,
+      getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+      buildChapterContextPackage: async () => ({}),
+      executeAgent: async () => {
+        qualityEntered()
+        await gate
+        return { parsed: { passed: true, score: 96, issues: [], revision_directives: [] }, finish_reason: 'stop' }
+      },
+    }
+    const worker = createEditorRevisionWorker(ctx, {
+      executeRevision: async () => { throw errorWithCode('UNEXPECTED_ORCHESTRATION') },
+    })
+
+    await worker.start(activeWorkspace)
+    await entered
+    const holder = await holdNovelMutationLock(activeWorkspace, `quality-parent-fence-${invalidation}`)
+    releaseQuality()
+    await eventually(
+      () => Boolean(novelMutationLocks.get(novelMutationKey(activeWorkspace))?.waiters.length),
+      'quality commit did not wait behind the held transaction lock',
+    )
+    if (invalidation === 'cancellation') {
+      runDbMutation(
+        activeWorkspace,
+        'UPDATE runs SET status = ?, cancel_requested_at = ? WHERE id = ?',
+        'cancel_requested',
+        new Date().toISOString(),
+        fixture.run.id,
+      )
+    } else {
+      runDbMutation(
+        activeWorkspace,
+        'UPDATE runs SET lease_owner = ?, lease_expires_at = ? WHERE id = ?',
+        'takeover-owner',
+        '2099-01-01T00:00:00.000Z',
+        fixture.run.id,
+      )
+    }
+    await holder.release()
+    await worker.waitForIdle()
+
+    const parent = await getEditorRevisionRun(activeWorkspace, fixture.project.id, fixture.run.id)
+    const reviews = await listNovelReviews(activeWorkspace, fixture.project.id)
+    const qualityRuns = (await listNovelRuns(activeWorkspace, fixture.project.id))
+      .filter(run => run.run_type === 'prose_quality')
+    expect(reviews.filter(review => review.review_type === 'prose_quality')).toHaveLength(0)
+    expect(qualityRuns.filter(run => run.status === 'success')).toHaveLength(0)
+    if (invalidation === 'cancellation') {
+      expect(parent?.status).toBe('canceled')
+      expect(parsed(parent?.output_ref).phases.post_quality.status).toBe('canceled')
+    } else {
+      expect(parent).toMatchObject({ status: 'running', lease_owner: 'takeover-owner' })
+    }
+    await worker.stop()
+  })
+
+  test.each([
+    { invalidation: 'cancellation' as const },
+    { invalidation: 'takeover' as const },
+  ])('fences blocked Story State apply writes after parent $invalidation', async ({ invalidation }) => {
+    const activeWorkspace = await tempWorkspace()
+    const fixture = await createCommittedWorkerFixture(activeWorkspace, {
+      autoQuality: false,
+      autoStoryState: true,
+    })
+    const checkpoint = persistedCheckpoint()
+    checkpoint.phase = 'sync_current_story_state'
+    checkpoint.phases.post_quality = { status: 'skipped', attempt: 1 }
+    checkpoint.phases.sync_current_story_state = { status: 'running', attempt: 1 }
+    checkpoint.committed_chapter_updated_at = fixture.evidence.committedAt
+    checkpoint.editor_revision_review_id = fixture.evidence.receipt.id
+    checkpoint.story_state = {
+      status: 'prepared',
+      receipt: {
+        source_run_id: fixture.run.id,
+        candidate_hash: fixture.evidence.candidateHash,
+        chapter_id: fixture.chapter.id,
+      },
+      prepared: {
+        state_delta: { current_time: 'after-fence', character_positions: { '主角': '旧码头' } },
+        character_updates: [],
+        setting_updates: [],
+        storyline_updates: [],
+        sync_reports: {},
+        hard_failures: [],
+        payload: {},
+      },
+    }
+    runDbMutation(activeWorkspace, 'UPDATE runs SET output_ref = ? WHERE id = ?', JSON.stringify(checkpoint), fixture.run.id)
+    const methods = createStoryStateMachineMethods({
+      executeAgent: async () => { throw errorWithCode('UNEXPECTED_STORY_STATE_MODEL') },
+      getStageModelId: () => 217,
+      getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+      refreshFollowingChapterSerialStoryStateReadiness: async () => {},
+    })
+    let applyEntered!: () => void
+    let releaseApply!: () => void
+    const entered = new Promise<void>(resolve => { applyEntered = resolve })
+    const gate = new Promise<void>(resolve => { releaseApply = resolve })
+    const ctx: any = {
+      getWorkspace: () => activeWorkspace,
+      getProject: (_workspace: string, projectId: number) => getNovelProject(activeWorkspace, projectId),
+      getStageModelId: () => 217,
+      getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+      buildChapterContextPackage: async () => ({}),
+      updateStoryStateMachine: async (...args: any[]) => {
+        applyEntered()
+        await gate
+        return (methods.updateStoryStateMachine as any)(...args)
+      },
+    }
+    const worker = createEditorRevisionWorker(ctx, {
+      executeRevision: async () => { throw errorWithCode('UNEXPECTED_ORCHESTRATION') },
+      prepareStoryState: async () => { throw errorWithCode('UNEXPECTED_STORY_STATE_PREPARE') },
+    })
+
+    await worker.start(activeWorkspace)
+    await entered
+    const before = storyStateMutationSnapshot(activeWorkspace, fixture.project.id, fixture.chapter.id)
+    const holder = await holdNovelMutationLock(activeWorkspace, `story-state-parent-fence-${invalidation}`)
+    releaseApply()
+    await eventually(
+      () => Boolean(novelMutationLocks.get(novelMutationKey(activeWorkspace))?.waiters.length),
+      'Story State apply did not wait behind the held transaction lock',
+    )
+    if (invalidation === 'cancellation') {
+      runDbMutation(
+        activeWorkspace,
+        'UPDATE runs SET status = ?, cancel_requested_at = ? WHERE id = ?',
+        'cancel_requested',
+        new Date().toISOString(),
+        fixture.run.id,
+      )
+    } else {
+      runDbMutation(
+        activeWorkspace,
+        'UPDATE runs SET lease_owner = ?, lease_expires_at = ? WHERE id = ?',
+        'takeover-owner',
+        '2099-01-01T00:00:00.000Z',
+        fixture.run.id,
+      )
+    }
+    await holder.release()
+    await worker.waitForIdle()
+
+    expect(storyStateMutationSnapshot(activeWorkspace, fixture.project.id, fixture.chapter.id)).toEqual(before)
+    const parent = await getEditorRevisionRun(activeWorkspace, fixture.project.id, fixture.run.id)
+    if (invalidation === 'cancellation') {
+      expect(parent?.status).toBe('canceled')
+      expect(parsed(parent?.output_ref)).toMatchObject({
+        phases: { sync_current_story_state: { status: 'canceled' } },
+        story_state: { status: 'prepared' },
+      })
+    } else {
+      expect(parent).toMatchObject({ status: 'running', lease_owner: 'takeover-owner' })
+    }
+    await worker.stop()
   })
 
   test('recovers a commit marker crash window without creating a second version', async () => {

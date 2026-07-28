@@ -57,6 +57,10 @@ import {
 
 const LLM_TIMEOUT_MS = 180_000
 const DIAGNOSTIC_CANDIDATE_LIMIT = 60_000
+const RECOVERY_POLL_MS = 1_000
+const RECOVERY_RETRY_MAX_MS = 30_000
+const CLAIM_RETRY_BASE_MS = 100
+const CLAIM_RETRY_MAX_MS = 5_000
 const TERMINAL_PHASE_STATES = new Set(['completed', 'skipped'])
 
 type LeaseInput = { runId?: number; owner: string; leaseMs?: number }
@@ -429,9 +433,14 @@ export function createEditorRevisionWorker(
   const leaseOwner = randomUUID()
   const controllers = new Map<number, AbortController>()
   const queue = new Set<number>()
+  const claimRetryAttempts = new Map<number, number>()
+  const claimRetryTimers = new Map<number, any>()
   const idleWaiters = new Set<() => void>()
   let activeWorkspace: string | null = null
   let drainPromise: Promise<void> | null = null
+  let recoveryTimer: any = null
+  let recoveryFailures = 0
+  let startPromise: Promise<void> | null = null
   let started = false
   let stopping = false
 
@@ -857,16 +866,7 @@ export function createEditorRevisionWorker(
       timeoutMs: LLM_TIMEOUT_MS,
       maxRetries: 1,
     }))
-    await markCompleted(
-      input,
-      runId,
-      'generate_candidate',
-      controller,
-      lease,
-      () => {},
-      { diagnostics: buildLLMResultDiagnostics(result) },
-    )
-    await markRunning(input, runId, 'admit_candidate', controller, lease)
+    const resultDiagnostics = buildLLMResultDiagnostics(result)
     let admitted: RevisionCandidateAdmission
     try {
       admitted = deps.admitCandidate({ sourceText: input.source_text, result })
@@ -876,12 +876,40 @@ export function createEditorRevisionWorker(
         ...((error as any)?.diagnostics || {}),
         ...(rejected ? { rejected_candidate: rejected } : {}),
       }
-      await failRun(input, runId, error, diagnostics)
+      loaded = await phaseCheckpoint(input, runId, controller, lease)
+      const checkpoint = loaded.checkpoint
+      const completedAt = deps.now()
+      const code = errorCode(error)
+      const message = errorMessage(error)
+      checkpoint.phase = 'admit_candidate'
+      checkpoint.phases.generate_candidate = {
+        ...checkpoint.phases.generate_candidate,
+        status: 'completed',
+        completed_at: completedAt,
+        summary: { diagnostics: resultDiagnostics },
+      }
+      checkpoint.phases.admit_candidate = {
+        status: 'failed',
+        attempt: phaseAttempt(checkpoint, 'admit_candidate'),
+        started_at: completedAt,
+        completed_at: completedAt,
+        error_code: code,
+        error: message,
+      }
+      checkpoint.error = { code, message, diagnostics }
+      await writeCheckpoint(input, runId, 'admit_candidate', checkpoint, 'failed', code, lease)
       throw new StopProcessingError(error)
     }
     loaded = await phaseCheckpoint(input, runId, controller, lease)
     const checkpoint = loaded.checkpoint
+    const completedAt = deps.now()
     checkpoint.phase = 'admit_candidate'
+    checkpoint.phases.generate_candidate = {
+      ...checkpoint.phases.generate_candidate,
+      status: 'completed',
+      completed_at: completedAt,
+      summary: { diagnostics: resultDiagnostics },
+    }
     checkpoint.candidate = {
       text: admitted.chapterText,
       hash: admitted.candidateHash,
@@ -890,9 +918,10 @@ export function createEditorRevisionWorker(
       diagnostics: admitted.diagnostics,
     }
     checkpoint.phases.admit_candidate = {
-      ...checkpoint.phases.admit_candidate,
       status: 'completed',
-      completed_at: deps.now(),
+      attempt: phaseAttempt(checkpoint, 'admit_candidate'),
+      started_at: completedAt,
+      completed_at: completedAt,
       summary: admitted.diagnostics,
     }
     try {
@@ -1003,6 +1032,7 @@ export function createEditorRevisionWorker(
       signal: controller.signal,
       timeoutMs: LLM_TIMEOUT_MS,
       maxRetries: 1,
+      workerLease: { runId, owner: leaseOwner },
     }))
     const needsRevision = quality?.review?.needs_revision === true
     return markCompleted(input, runId, 'post_quality', controller, lease, next => {
@@ -1102,6 +1132,7 @@ export function createEditorRevisionWorker(
       signal: controller.signal,
       timeoutMs: LLM_TIMEOUT_MS,
       maxRetries: 1,
+      workerLease: { runId, owner: leaseOwner },
     }))
     return markCompleted(input, runId, 'sync_current_story_state', controller, lease, next => {
       next.story_state = {
@@ -1322,14 +1353,43 @@ export function createEditorRevisionWorker(
   async function drain() {
     while (!stopping && queue.size) {
       const runId = queue.values().next().value as number
+      let claimed: NovelRunRecord | null
+      try {
+        claimed = await deps.claimRun(activeWorkspace!, {
+          runId,
+          owner: leaseOwner,
+          leaseMs: EDITOR_REVISION_LEASE_MS,
+        })
+      } catch {
+        queue.delete(runId)
+        scheduleClaimRetry(runId)
+        continue
+      }
       queue.delete(runId)
-      const claimed = await deps.claimRun(activeWorkspace!, {
-        runId,
-        owner: leaseOwner,
-        leaseMs: EDITOR_REVISION_LEASE_MS,
-      }).catch(() => null)
+      claimRetryAttempts.delete(runId)
       if (claimed) await processClaim(claimed)
     }
+  }
+
+  function clearClaimRetry(runId: number) {
+    const timer = claimRetryTimers.get(runId)
+    if (timer) deps.clearTimeout(timer)
+    claimRetryTimers.delete(runId)
+    claimRetryAttempts.delete(runId)
+  }
+
+  function scheduleClaimRetry(runId: number) {
+    if (stopping || claimRetryTimers.has(runId)) return
+    const attempt = (claimRetryAttempts.get(runId) || 0) + 1
+    claimRetryAttempts.set(runId, attempt)
+    const delay = Math.min(CLAIM_RETRY_MAX_MS, CLAIM_RETRY_BASE_MS * (2 ** Math.min(attempt - 1, 10)))
+    const timer = deps.setTimeout(() => {
+      claimRetryTimers.delete(runId)
+      if (stopping) return
+      queue.add(runId)
+      kick()
+    }, delay)
+    claimRetryTimers.set(runId, timer)
   }
 
   function kick() {
@@ -1341,19 +1401,62 @@ export function createEditorRevisionWorker(
     })
   }
 
+  function scheduleRecovery(delay = RECOVERY_POLL_MS) {
+    if (stopping || !started || recoveryTimer || !activeWorkspace) return
+    recoveryTimer = deps.setTimeout(async () => {
+      recoveryTimer = null
+      try {
+        const recovered = await deps.recoverRuns(activeWorkspace!)
+        if (stopping) return
+        recoveryFailures = 0
+        for (const runId of recovered.queued) queue.add(runId)
+        kick()
+      } catch {
+        recoveryFailures += 1
+      }
+      const retryDelay = recoveryFailures
+        ? Math.min(RECOVERY_RETRY_MAX_MS, RECOVERY_POLL_MS * (2 ** Math.min(recoveryFailures, 5)))
+        : RECOVERY_POLL_MS
+      scheduleRecovery(retryDelay)
+    }, delay)
+  }
+
+  function bindWorkspace(workspace: string) {
+    if (activeWorkspace && activeWorkspace !== workspace) {
+      throw revisionError('REVISION_WORKER_WORKSPACE_MISMATCH', 'editor revision worker cannot switch workspaces')
+    }
+    activeWorkspace = workspace
+  }
+
   const worker: EditorRevisionWorker = {
     async start(workspace) {
-      if (started) return
       if (stopping) return
-      started = true
-      activeWorkspace = workspace
-      const recovered = await deps.recoverRuns(workspace)
-      for (const runId of recovered.queued) queue.add(runId)
-      kick()
+      bindWorkspace(workspace)
+      if (started) return
+      if (startPromise) return startPromise
+      const pending = (async () => {
+        const recovered = await deps.recoverRuns(workspace)
+        if (stopping) return
+        for (const runId of recovered.queued) queue.add(runId)
+        recoveryFailures = 0
+        started = true
+        kick()
+        scheduleRecovery()
+      })()
+      startPromise = pending
+      try {
+        await pending
+      } catch (error) {
+        started = false
+        throw error
+      } finally {
+        if (startPromise === pending) startPromise = null
+      }
     },
     enqueue(runId) {
       if (stopping) return
-      if (!activeWorkspace) activeWorkspace = ctx.getWorkspace()
+      bindWorkspace(ctx.getWorkspace())
+      clearClaimRetry(runId)
       queue.add(runId)
       kick()
     },
@@ -1369,6 +1472,13 @@ export function createEditorRevisionWorker(
         return
       }
       stopping = true
+      if (recoveryTimer) {
+        deps.clearTimeout(recoveryTimer)
+        recoveryTimer = null
+      }
+      for (const timer of claimRetryTimers.values()) deps.clearTimeout(timer)
+      claimRetryTimers.clear()
+      claimRetryAttempts.clear()
       queue.clear()
       for (const controller of controllers.values()) {
         if (!controller.signal.aborted) {

@@ -8,6 +8,7 @@ import {
 import { executeNovelAgent } from '../../llm'
 import { prepareStoryStateUpdate } from '../../novel-writing-service/service/story-state-machine-prepare'
 import { revisionTextHash } from '../../novel/revision-hash'
+import { withEditorRevisionWorkerFence } from '../../novel/editor-revision-worker-fence'
 import type { EditorRoutesContext } from './builders'
 
 export type SingleChapterStoryStateReceipt = {
@@ -25,6 +26,7 @@ type SingleChapterStoryStateInput = {
   signal?: AbortSignal
   timeoutMs?: number
   maxRetries?: number
+  workerLease?: { runId: number; owner: string }
 }
 
 function throwIfCanceled(signal?: AbortSignal) {
@@ -171,22 +173,30 @@ export async function applySingleChapterStoryState(
   const loaded = await loadExactChapterContext(ctx, input, project)
   assertCurrentCandidate(loaded.chapter, input.receipt)
   throwIfCanceled(input.signal)
-  const update = await ctx.updateStoryStateMachine(
-    input.workspace,
-    loaded.project,
-    loaded.chapter,
-    loaded.contextPackage,
-    String(loaded.chapter.chapter_text || ''),
-    input.modelId,
-    {
-      prepared,
-      exactChapter: true,
-      idempotencyReceipt: { ...input.receipt, key: storyStateReceiptKey(input.receipt) },
-      signal: input.signal,
-      retryOnBlockedTransport: false,
-      allowDeterministicFallback: false,
-    },
-  )
+  const operation = () => ctx.updateStoryStateMachine(
+      input.workspace,
+      loaded.project,
+      loaded.chapter,
+      loaded.contextPackage,
+      String(loaded.chapter.chapter_text || ''),
+      input.modelId,
+      {
+        prepared,
+        exactChapter: true,
+        idempotencyReceipt: { ...input.receipt, key: storyStateReceiptKey(input.receipt) },
+        signal: input.signal,
+        retryOnBlockedTransport: false,
+        allowDeterministicFallback: false,
+      },
+    )
+  const update = input.workerLease
+    ? await withEditorRevisionWorkerFence({
+        workspace: input.workspace,
+        projectId: input.projectId,
+        runId: input.workerLease.runId,
+        owner: input.workerLease.owner,
+      }, operation)
+    : await operation()
   const freshProject = await ctx.getProject(input.workspace, input.projectId)
   const completedReceipt = receiptFromProject(freshProject, input.receipt) || input.receipt
   return {

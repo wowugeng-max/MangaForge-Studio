@@ -27,6 +27,7 @@ import {
 } from './builders-quality-receipt-helpers'
 import { editorJson } from './builders-json'
 import { revisionTextHash } from '../../novel/revision-hash'
+import { withEditorRevisionWorkerFence } from '../../novel/editor-revision-worker-fence'
 import type { EditorRevisionRunInput } from './editor-revision-contract'
 import { buildEditorRevisionPrompt } from './builders-revision-prompts'
 
@@ -72,6 +73,7 @@ export type ProseQualityReviewOptions = {
   signal?: AbortSignal
   timeoutMs?: number
   maxRetries?: number
+  workerLease?: { runId: number; owner: string }
 }
 
 export const REVISION_MAX_TOKENS = 8000
@@ -303,6 +305,23 @@ export async function createProseQualityReview(
   project: any,
   chapter: any,
   options: ProseQualityReviewOptions = {},
+) {
+  const operation = () => createProseQualityReviewWithReceipt(ctx, activeWorkspace, project, chapter, options)
+  if (!options.workerLease) return operation()
+  return withEditorRevisionWorkerFence({
+    workspace: activeWorkspace,
+    projectId: Number(project.id),
+    runId: options.workerLease.runId,
+    owner: options.workerLease.owner,
+  }, operation)
+}
+
+async function createProseQualityReviewWithReceipt(
+  ctx: EditorRoutesContext,
+  activeWorkspace: string,
+  project: any,
+  chapter: any,
+  options: ProseQualityReviewOptions,
 ) {
   const receiptOwned = options.current_chapter_only === true
     && options.source_run_id !== undefined

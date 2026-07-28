@@ -8,6 +8,7 @@ import { openDb, ensureSqliteSchema } from './db'
 import { withNovelWorkspaceMutation } from './lock'
 import { importLegacyNovelStoreIfNeeded } from './legacy-import'
 import { getNovelMutationTestHook } from '../novel-test-support'
+import { assertEditorRevisionWorkerFenceForWrite } from './editor-revision-worker-fence'
 import { jsonText, textValue, nowIso } from './json'
 
 export function nextTableId(db: Database, table: string): number {
@@ -120,6 +121,7 @@ export async function withNovelDbWrite<T>(activeWorkspace: string, writer: (db: 
     try {
       ensureSqliteSchema(db)
       db.exec('BEGIN IMMEDIATE')
+      assertEditorRevisionWorkerFenceForWrite(db, activeWorkspace)
       const result = writer(db)
       db.exec('COMMIT')
       committed = true
