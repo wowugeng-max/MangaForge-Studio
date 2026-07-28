@@ -689,6 +689,7 @@ export async function materializeStoryRelations(
     }
     const saved = await upsertNovelStoryRelationship(activeWorkspace, {
       projectId,
+      existingEntityId: prev?.id,
       entity: {
         name,
         summary: row.current_status,

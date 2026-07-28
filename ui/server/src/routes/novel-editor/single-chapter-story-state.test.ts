@@ -25,7 +25,7 @@ import { openDb } from '../../novel/core'
 import { setNovelMutationTestHook } from '../../novel-test-support'
 import { createStoryStateMachineMethods } from '../../novel-writing-service/service/story-state-machine'
 import { compactPreparedStoryStateForRecovery } from '../../novel-writing-service/service/story-state-machine-update'
-import { materializeStoryRelations } from '../novel-setting-story-relations'
+import { materializeStoryRelations, relationPairKey } from '../novel-setting-story-relations'
 import { createProseQualityReview } from './builders'
 import { revisionTextHash } from './revision-candidate-admission'
 import {
@@ -1654,6 +1654,63 @@ describe('single chapter Story State', () => {
       .filter(item => item.entity_type === 'relationship')
     expect(relationships).toHaveLength(1)
   }, 30_000)
+
+  test('relationship materialization reuses a legacy row matched by pair key', async () => {
+    const fixture = await storyFixture(1)
+    await createNovelCharacter(workspace, { project_id: fixture.project.id, name: '甲' } as any)
+    await createNovelCharacter(workspace, { project_id: fixture.project.id, name: '乙' } as any)
+    const pairKey = relationPairKey('甲', '乙')
+    const legacy = await createNovelSettingEntity(workspace, {
+      project_id: fixture.project.id,
+      entity_type: 'relationship',
+      name: '甲乙旧关系卡',
+      summary: '旧状态',
+      state_json: {
+        party_a: '甲',
+        party_b: '乙',
+        current_status: '旧状态',
+      },
+      payload_json: { pair_key: pairKey },
+    } as any)
+
+    const result = await materializeStoryRelations(workspace, fixture.project.id, {
+      rows: [{
+        party_a: '甲',
+        party_b: '乙',
+        current_status: '携手追查旧案',
+        story_relation_type: '联盟',
+        emotion: '正面',
+      }],
+    })
+
+    const relationships = (await listNovelSettingEntities(workspace, fixture.project.id))
+      .filter(item => item.entity_type === 'relationship')
+    const characters = await listNovelCharacters(workspace, fixture.project.id)
+    const characterRelations = characters
+      .filter(item => item.name === '甲' || item.name === '乙')
+      .flatMap(item => item.relationships || [])
+
+    expect(result.summary).toMatchObject({ created: 0, updated: 1, character_patches: 2 })
+    expect(result.updated[0]?.id).toBe(legacy.id)
+    expect(relationships).toHaveLength(1)
+    expect(relationships[0]).toMatchObject({
+      id: legacy.id,
+      name: pairKey,
+      summary: '携手追查旧案',
+      state_json: {
+        party_a: '甲',
+        party_b: '乙',
+        current_status: '携手追查旧案',
+        story_relation_type: '联盟',
+        emotion: '正面',
+      },
+    })
+    expect(characterRelations).toHaveLength(2)
+    expect(characterRelations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: '乙', status: '携手追查旧案', type: '联盟', emotion: '正面' }),
+      expect.objectContaining({ name: '甲', status: '携手追查旧案', type: '联盟', emotion: '正面' }),
+    ]))
+  })
 
   test('relationship materialization applies authoritative scalar transitions while preserving structured history', async () => {
     const fixture = await storyFixture(1)

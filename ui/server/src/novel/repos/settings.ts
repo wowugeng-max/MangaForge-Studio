@@ -103,15 +103,26 @@ function mergeCharacterRelationship(current: any[], relation: any) {
 
 export async function upsertNovelStoryRelationship(activeWorkspace: string, input: {
   projectId: number
+  existingEntityId?: number
   entity: Partial<NovelSettingEntityRecord> & { name: string }
   characterRelations: Array<{ characterName: string; relation: Record<string, any> }>
 }) {
   return withNovelDbWrite(activeWorkspace, db => {
-    const row = db.query(`
-      SELECT * FROM setting_entities
-      WHERE project_id = ? AND entity_type = 'relationship' AND name = ?
-      LIMIT 1
-    `).get(input.projectId, input.entity.name) as any
+    const existingEntityId = Number(input.existingEntityId || 0)
+    let row = Number.isInteger(existingEntityId) && existingEntityId > 0
+      ? db.query(`
+          SELECT * FROM setting_entities
+          WHERE id = ? AND project_id = ? AND entity_type = 'relationship'
+          LIMIT 1
+        `).get(existingEntityId, input.projectId) as any
+      : null
+    if (!row) {
+      row = db.query(`
+        SELECT * FROM setting_entities
+        WHERE project_id = ? AND entity_type = 'relationship' AND name = ?
+        LIMIT 1
+      `).get(input.projectId, input.entity.name) as any
+    }
     const current = row ? settingEntityFromRow(row) : null
     const entity = normalizeSettingEntityRecord({
       ...input.entity,
