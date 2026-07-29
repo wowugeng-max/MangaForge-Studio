@@ -938,6 +938,96 @@ describe('asynchronous editor revision API safeguards', () => {
     expect(storedTask).toEqual(sourceTask)
   })
 
+  test('allows a resolved recovery-evidence task to close without annotation fields and replays its acknowledgement', async () => {
+    const fixture = await createAsyncRevisionRouteFixture()
+    const annotationKey = 'recovery_evidence:12:governance-recheck'
+    const closureNote = 'governance recheck failed evidence cleared'
+    const sourceTask = {
+      task_type: 'repair_quality',
+      issue_type: 'recovery_evidence_mismatch',
+      severity: 'high',
+      chapter_id: fixture.chapter.id,
+      chapter_no: 12,
+      title: '第12章恢复依据缺口修复',
+      message: '单章交稿未继承治理复查记忆。',
+      action: '补回治理复查记忆并重新复检。',
+      task_status: 'open',
+      source: 'review_annotation_risk',
+      annotation_key: annotationKey,
+      annotation_source: 'governance_recheck_sync',
+      annotation_category: 'recovery_evidence',
+      recovery_evidence_review: {
+        status: 'warn',
+        missed_count: 1,
+        failed_evidence: ['第12章恢复依据尚未闭环'],
+        watch_items: [],
+      },
+    }
+    const sourceRun = await appendNovelRun(fixture.workspace, {
+      project_id: fixture.project.id,
+      run_type: 'longform_production_repair',
+      step_name: 'recovery-evidence-repair-task',
+      status: 'ready',
+      output_ref: JSON.stringify({ tasks: [sourceTask] }),
+    })
+    const applyRevision = fixture.handlers.get('POST /api/novel/reviews/:reviewId/apply-revision')
+    const created = await callRoute(applyRevision, {
+      params: { reviewId: String(fixture.review.id) },
+      body: {
+        project_id: fixture.project.id,
+        chapter_id: fixture.chapter.id,
+        repair_task_link: { run_id: sourceRun.id, task_index: 0, task: sourceTask },
+      },
+    })
+    await updateNovelRun(fixture.workspace, created.body.run_id, {
+      status: 'completed',
+      output_ref: JSON.stringify(completedRevisionCheckpoint()),
+    })
+
+    const updateTask = fixture.handlers.get('POST /api/novel/runs/:id/tasks/:taskIndex/status')
+    const taskClosure = await callRoute(updateTask, {
+      params: { id: String(sourceRun.id), taskIndex: '0' },
+      body: {
+        project_id: fixture.project.id,
+        status: 'resolved',
+        note: closureNote,
+        editor_revision_run_id: created.body.run_id,
+      },
+    })
+
+    expect(taskClosure.statusCode).toBe(200)
+    expect(taskClosure.body.task).toMatchObject({
+      annotation_key: annotationKey,
+      task_status: 'resolved',
+      status_note: closureNote,
+    })
+    const receipt = taskClosure.body.task.editor_revision_closure_receipts?.[String(created.body.run_id)]
+    expect(receipt).toMatchObject({
+      editor_revision_run_id: created.body.run_id,
+      repair_run_id: sourceRun.id,
+      task_index: 0,
+      task_status: 'resolved',
+      note: closureNote,
+      completed_at: expect.any(String),
+    })
+    expect(receipt.annotation_key).toBeUndefined()
+    expect(receipt.annotation_status).toBeUndefined()
+
+    const acknowledge = fixture.handlers.get('POST /api/novel/editor-revisions/:runId/linked-task-closure')
+    const completed = await callRoute(acknowledge, {
+      params: { runId: String(created.body.run_id) },
+      body: { project_id: fixture.project.id },
+    })
+    expect(completed.statusCode).toBe(200)
+    expect(completed.body.run.linked_task_closure).toMatchObject({ status: 'completed' })
+    const replay = await callRoute(acknowledge, {
+      params: { runId: String(created.body.run_id) },
+      body: { project_id: fixture.project.id },
+    })
+    expect(replay.statusCode).toBe(200)
+    expect(replay.body.run).toEqual(completed.body.run)
+  })
+
   test('rejects acknowledgement when a resolved durable annotation task has a legacy receipt without annotation fields', async () => {
     const fixture = await createAsyncRevisionRouteFixture()
     const annotationKey = 'reader_payoff_sync:12:legacy-ack-receipt'

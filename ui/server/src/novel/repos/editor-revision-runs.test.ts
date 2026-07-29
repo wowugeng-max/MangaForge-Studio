@@ -33,6 +33,7 @@ import {
   writeEditorRevisionCheckpoint,
 } from './editor-revision-runs'
 import * as editorRevisionRunRepository from './editor-revision-runs'
+import { requiredEditorRevisionTaskAnnotationKey } from './editor-revision-task-closure'
 
 const PHASES = [
   'generate_candidate',
@@ -122,6 +123,33 @@ afterEach(async () => {
 })
 
 describe('editor revision run repository', () => {
+  test('derives annotation requirements from durable task closure-owner semantics', () => {
+    const annotationKey = 'review_annotation:12:durable'
+    expect(requiredEditorRevisionTaskAnnotationKey({ annotation_key: annotationKey }, 'resolved')).toBe(annotationKey)
+    expect(requiredEditorRevisionTaskAnnotationKey({ annotation_key: annotationKey }, 'needs_review')).toBe('')
+    expect(requiredEditorRevisionTaskAnnotationKey({
+      annotation_key: annotationKey,
+      source: 'storyline_diff_decision',
+      decision_key: 'storyline_diff:12:42:missed:decision',
+    }, 'resolved')).toBe('')
+    expect(requiredEditorRevisionTaskAnnotationKey({
+      annotation_key: annotationKey,
+      issue_type: 'recovery_evidence_mismatch',
+    }, 'resolved')).toBe('')
+    expect(requiredEditorRevisionTaskAnnotationKey({
+      annotation_key: annotationKey,
+      issue_type: 'post_batch_quality_warning',
+    }, 'resolved')).toBe('')
+    expect(requiredEditorRevisionTaskAnnotationKey({
+      annotation_key: annotationKey,
+      post_delivery_quality: { status: 'warn' },
+    }, 'resolved')).toBe('')
+    expect(requiredEditorRevisionTaskAnnotationKey({
+      annotation_key: annotationKey,
+      post_delivery_quality: {},
+    }, 'resolved')).toBe(annotationKey)
+  })
+
   test('rejects linked task acknowledgement before prose and durable closure are committed', async () => {
     const { workspace, project, chapters: [chapter] } = await createFixture()
     const linkedCheckpoint = initialCheckpoint()

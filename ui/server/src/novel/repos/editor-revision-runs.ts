@@ -13,6 +13,7 @@ import { revisionTextHash } from '../revision-hash'
 import { runFromRow } from '../row-mappers'
 import { withNovelDbWrite } from '../sql-rows'
 import type { NovelRunRecord } from '../types'
+import { requiredEditorRevisionTaskAnnotationKey } from './editor-revision-task-closure'
 import { getNovelRun } from './runs'
 
 export const EDITOR_REVISION_LEASE_MS = 30_000
@@ -504,12 +505,10 @@ function requireDurableLinkedTaskClosure(
     linkedTaskClosureNotReady('linked repair task closure receipt is unavailable')
   }
 
-  const requiredAnnotationKey = String(task.annotation_key || '').trim()
+  const requiredAnnotationKey = requiredEditorRevisionTaskAnnotationKey(task, task.task_status)
   const annotationKey = String(receipt.annotation_key || '').trim()
   const annotationStatus = String(receipt.annotation_status || '').trim()
-  if (String(task.task_status || '') === 'resolved'
-    && String(receipt.task_status || '') === 'resolved'
-    && requiredAnnotationKey
+  if (requiredAnnotationKey
     && (annotationKey !== requiredAnnotationKey || annotationStatus !== 'resolved')) {
     linkedTaskClosureNotReady('linked annotation closure receipt is incomplete')
   }

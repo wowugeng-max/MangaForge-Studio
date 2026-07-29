@@ -6,6 +6,7 @@ import { nowIso, parseDbJson } from '../json'
 import { normalizeRunRecord } from '../normalize'
 import { runFromRow, runSummaryFromRow } from '../row-mappers'
 import { withNovelDbWrite, updateRunRow } from '../sql-rows'
+import { requiredEditorRevisionTaskAnnotationKey } from './editor-revision-task-closure'
 
 
 export async function listNovelRuns(activeWorkspace: string, projectId: number) {
@@ -364,8 +365,8 @@ export async function updateNovelRunTaskStatus(
     if ((annotationKey && !annotationStatus) || (!annotationKey && annotationStatus)) {
       throw runTaskStatusError('EDITOR_REVISION_TASK_CLOSURE_INVALID', 'annotation closure receipt is incomplete')
     }
-    const requiredAnnotationKey = revisionRunId && input.status === 'resolved'
-      ? String(currentTask.annotation_key || '').trim()
+    const requiredAnnotationKey = revisionRunId
+      ? requiredEditorRevisionTaskAnnotationKey(currentTask, input.status)
       : ''
     if (requiredAnnotationKey && (annotationKey !== requiredAnnotationKey || annotationStatus !== 'resolved')) {
       throw runTaskStatusError('EDITOR_REVISION_TASK_CLOSURE_INVALID', 'resolved task annotation closure receipt is required')
