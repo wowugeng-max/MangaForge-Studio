@@ -463,7 +463,8 @@ export async function requeueEditorRevisionRun(workspace: string, input: {
     UPDATE runs
     SET status = 'queued', lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
     WHERE id = ? AND run_type = 'editor_revision'
-      AND status IN ('running', 'cancel_requested')
+      AND status = 'running'
+      AND cancel_requested_at IS NULL
       AND lease_owner = ?
       AND lease_expires_at IS NOT NULL
       AND julianday(lease_expires_at) > julianday(?)

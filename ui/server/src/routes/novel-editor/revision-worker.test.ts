@@ -494,7 +494,7 @@ function createHarness(options: {
       const leaseExpiresAt = run.lease_expires_at ? new Date(run.lease_expires_at).getTime() : Number.NaN
       const now = new Date(release.now || '2030-01-01T00:00:01.000Z').getTime()
       if (run.lease_owner !== release.owner || !Number.isFinite(leaseExpiresAt) || leaseExpiresAt <= now) return false
-      if (!['running', 'cancel_requested'].includes(run.status)) return false
+      if (run.status !== 'running' || run.cancel_requested_at) return false
       run.status = 'queued'
       run.lease_owner = null
       run.lease_expires_at = null
@@ -2061,6 +2061,180 @@ describe('durable editor revision worker', () => {
     resolveRevision(completeResult())
     await worker.waitForIdle()
     expect(heartbeat.cleared).toBe(true)
+  })
+
+  test('serializes overlapping heartbeat ticks and aborts on renewal failure', async () => {
+    let renewalEntered!: () => void
+    let releaseRenewal!: () => void
+    const entered = new Promise<void>(resolve => { renewalEntered = resolve })
+    const renewalGate = new Promise<void>(resolve => { releaseRenewal = resolve })
+    let renewalAttempts = 0
+    let providerAborted = false
+    const harness = createHarness({
+      executeRevision: async (_agent, _project, _request, callOptions) => new Promise((_resolve, reject) => {
+        callOptions.signal.addEventListener('abort', () => {
+          providerAborted = true
+          reject(callOptions.signal.reason)
+        }, { once: true })
+      }),
+      renewLease: async () => {
+        renewalAttempts += 1
+        renewalEntered()
+        await renewalGate
+        throw errorWithCode('SQLITE_BUSY')
+      },
+    })
+    const worker = harness.worker()
+    await worker.start(workspace)
+    await eventually(() => harness.intervalRegistrations.length === 1)
+    await eventually(() => harness.revisionCalls.length === 1)
+
+    const heartbeat = harness.intervalRegistrations[0]
+    const first = Promise.resolve(heartbeat.callback())
+    const second = Promise.resolve(heartbeat.callback())
+    await entered
+    const attemptsWhileBlocked = renewalAttempts
+    releaseRenewal()
+    await Promise.all([first, second])
+    await worker.waitForIdle()
+
+    expect(attemptsWhileBlocked).toBe(1)
+    expect(renewalAttempts).toBe(1)
+    expect(providerAborted).toBe(true)
+    expect(harness.run.status).toBe('running')
+    expect(harness.commitCalls()).toBe(0)
+    expect(heartbeat.cleared).toBe(true)
+  })
+
+  test('stop awaits a gated real heartbeat before requeueing the live claim', async () => {
+    const activeWorkspace = await tempWorkspace()
+    const project = await createNovelProject(activeWorkspace, { title: 'heartbeat stop quiescence' })
+    const chapter = await createNovelChapter(activeWorkspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: sourceText,
+    })
+    const run = await createEditorRevisionRun(activeWorkspace, {
+      projectId: project.id,
+      chapterId: chapter.id,
+      inputRef: JSON.stringify(canonicalRunInput(project.id, chapter)),
+      outputRef: JSON.stringify(initialCheckpoint()),
+    })
+    const intervals: Array<{ callback: () => void | Promise<void>; ms: number; cleared: boolean }> = []
+    const timeouts: Array<{ callback: () => void; ms: number; cleared: boolean }> = []
+    let providerEntered!: () => void
+    let providerAborted!: () => void
+    const entered = new Promise<void>(resolve => { providerEntered = resolve })
+    const aborted = new Promise<void>(resolve => { providerAborted = resolve })
+    let modelCalls = 0
+    let qualityCalls = 0
+    let storyPrepareCalls = 0
+    let storyApplyCalls = 0
+    const worker = createEditorRevisionWorker({
+      getWorkspace: () => activeWorkspace,
+      getProject: async () => project,
+      getStageModelId: () => 19,
+      getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+    } as any, {
+      executeRevision: async (_agent, _project, _request, callOptions) => {
+        modelCalls += 1
+        providerEntered()
+        return new Promise((_resolve, reject) => {
+          callOptions.signal.addEventListener('abort', () => {
+            providerAborted()
+            reject(callOptions.signal.reason)
+          }, { once: true })
+        })
+      },
+      createQualityReview: async () => {
+        qualityCalls += 1
+        throw errorWithCode('UNEXPECTED_POST_STOP_QUALITY')
+      },
+      prepareStoryState: async () => {
+        storyPrepareCalls += 1
+        throw errorWithCode('UNEXPECTED_POST_STOP_STORY_PREPARE')
+      },
+      applyStoryState: async () => {
+        storyApplyCalls += 1
+        throw errorWithCode('UNEXPECTED_POST_STOP_STORY_APPLY')
+      },
+      setInterval: (callback, ms) => {
+        const interval = { callback, ms, cleared: false }
+        intervals.push(interval)
+        return interval
+      },
+      clearInterval: interval => { interval.cleared = true },
+      setTimeout: (callback, ms) => {
+        const timeout = { callback, ms, cleared: false }
+        timeouts.push(timeout)
+        return timeout
+      },
+      clearTimeout: timeout => { timeout.cleared = true },
+    })
+
+    await worker.start(activeWorkspace)
+    const providerStarted = await Promise.race([
+      entered.then(() => true),
+      worker.waitForIdle().then(() => false),
+    ])
+    if (!providerStarted) {
+      throw new Error(`provider did not enter: ${JSON.stringify(await getEditorRevisionRun(activeWorkspace, project.id, run.id))}`)
+    }
+    expect(intervals).toHaveLength(1)
+    const heartbeat = intervals[0]
+    const holder = await holdNovelMutationLock(activeWorkspace, 'heartbeat-stop-holder')
+    const renewal = Promise.resolve(heartbeat.callback())
+    const lockKey = novelMutationKey(activeWorkspace)
+    await eventually(
+      () => (novelMutationLocks.get(lockKey)?.waiters.length || 0) === 1,
+      'real heartbeat did not enter the workspace mutation lock queue',
+    )
+    let resolvedStops = 0
+    const stopping = Promise.all([
+      worker.stop().then(() => { resolvedStops += 1 }),
+      worker.stop().then(() => { resolvedStops += 1 }),
+    ])
+    await aborted
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const resolvedBeforeHeartbeat = resolvedStops
+
+    await holder.release()
+    await renewal
+    await stopping
+
+    expect(resolvedBeforeHeartbeat).toBe(0)
+    expect(resolvedStops).toBe(2)
+    expect(heartbeat.cleared).toBe(true)
+    const stoppedRun = await getEditorRevisionRun(activeWorkspace, project.id, run.id)
+    expect(stoppedRun).toMatchObject({
+      status: 'queued',
+      lease_owner: null,
+      lease_expires_at: null,
+    })
+    expect((await recoverEditorRevisionRuns(activeWorkspace)).queued).toContain(run.id)
+
+    const stoppedSnapshot = {
+      run: stoppedRun,
+      project: await getNovelProject(activeWorkspace, project.id),
+      chapter: await getNovelChapter(activeWorkspace, chapter.id, project.id),
+      versions: await listChapterVersions(activeWorkspace, chapter.id),
+      reviews: await listNovelReviews(activeWorkspace, project.id),
+    }
+    await heartbeat.callback()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect({
+      run: await getEditorRevisionRun(activeWorkspace, project.id, run.id),
+      project: await getNovelProject(activeWorkspace, project.id),
+      chapter: await getNovelChapter(activeWorkspace, chapter.id, project.id),
+      versions: await listChapterVersions(activeWorkspace, chapter.id),
+      reviews: await listNovelReviews(activeWorkspace, project.id),
+    }).toEqual(stoppedSnapshot)
+    expect(modelCalls).toBe(1)
+    expect(qualityCalls).toBe(0)
+    expect(storyPrepareCalls).toBe(0)
+    expect(storyApplyCalls).toBe(0)
+    expect(timeouts.filter(timeout => !timeout.cleared)).toHaveLength(0)
   })
 
   test('lease loss aborts the active provider and prevents every later mutation', async () => {

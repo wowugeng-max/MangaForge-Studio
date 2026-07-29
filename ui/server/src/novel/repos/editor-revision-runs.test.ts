@@ -444,6 +444,52 @@ describe('editor revision run repository', () => {
     })
   })
 
+  test('never requeues a cancel-requested claim', async () => {
+    const { workspace, project, chapters: [chapter] } = await createFixture()
+    const run = await createRun(workspace, project.id, chapter.id)
+    await claimEditorRevisionRun(workspace, {
+      runId: run.id,
+      owner: 'worker-a',
+      now: '2030-07-27T10:00:00.000Z',
+      leaseMs: 30_000,
+    })
+    const canceled = await requestEditorRevisionCancel(workspace, project.id, run.id)
+
+    expect(await requeueEditorRevisionRun(workspace, {
+      runId: run.id,
+      owner: 'worker-a',
+      now: '2030-07-27T10:00:10.000Z',
+    })).toBe(false)
+    expect(await getEditorRevisionRun(workspace, project.id, run.id)).toMatchObject({
+      status: 'cancel_requested',
+      cancel_requested_at: canceled.cancel_requested_at,
+      lease_owner: 'worker-a',
+      lease_expires_at: '2030-07-27T10:00:30.000Z',
+    })
+
+    expect(await claimEditorRevisionRun(workspace, {
+      runId: run.id,
+      owner: 'worker-b',
+      now: '2030-07-27T10:00:31.000Z',
+      leaseMs: 30_000,
+    })).toMatchObject({
+      status: 'running',
+      cancel_requested_at: canceled.cancel_requested_at,
+      lease_owner: 'worker-b',
+    })
+    expect(await requeueEditorRevisionRun(workspace, {
+      runId: run.id,
+      owner: 'worker-b',
+      now: '2030-07-27T10:00:40.000Z',
+    })).toBe(false)
+    expect(await getEditorRevisionRun(workspace, project.id, run.id)).toMatchObject({
+      status: 'running',
+      cancel_requested_at: canceled.cancel_requested_at,
+      lease_owner: 'worker-b',
+      lease_expires_at: '2030-07-27T10:01:01.000Z',
+    })
+  })
+
   test('renews only a current unexpired lease owner', async () => {
     const { workspace, project, chapters: [chapter] } = await createFixture()
     const run = await createRun(workspace, project.id, chapter.id)

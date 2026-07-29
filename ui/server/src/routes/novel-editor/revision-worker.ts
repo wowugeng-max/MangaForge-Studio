@@ -180,7 +180,11 @@ export type EditorRevisionWorker = {
   waitForIdle(): Promise<void>
 }
 
-type LeaseState = { valid: boolean }
+type LeaseState = {
+  valid: boolean
+  heartbeat: any | null
+  renewal: Promise<void> | null
+}
 
 export type EditorRevisionReviewReceipt =
   | {
@@ -436,6 +440,7 @@ export function createEditorRevisionWorker(
   }
   const leaseOwner = randomUUID()
   const controllers = new Map<number, AbortController>()
+  const activeLeases = new Map<number, LeaseState>()
   const queue = new Set<number>()
   const claimRetryAttempts = new Map<number, number>()
   const claimRetryTimers = new Map<number, any>()
@@ -452,6 +457,50 @@ export function createEditorRevisionWorker(
     if (queue.size || drainPromise) return
     for (const resolve of idleWaiters) resolve()
     idleWaiters.clear()
+  }
+
+  function invalidateLease(lease: LeaseState) {
+    lease.valid = false
+    if (lease.heartbeat !== null) {
+      deps.clearInterval(lease.heartbeat)
+      lease.heartbeat = null
+    }
+  }
+
+  async function awaitLeaseRenewal(lease: LeaseState) {
+    const renewal = lease.renewal
+    if (renewal) await renewal
+  }
+
+  function renewClaimLease(
+    runId: number,
+    controller: AbortController,
+    lease: LeaseState,
+  ): void | Promise<void> {
+    if (!lease.valid || controller.signal.aborted) return
+    if (lease.renewal) return lease.renewal
+    const renewal = (async () => {
+      try {
+        const renewed = await deps.renewLease(activeWorkspace!, {
+          runId,
+          owner: leaseOwner,
+          leaseMs: EDITOR_REVISION_LEASE_MS,
+        })
+        if (lease.valid && !renewed) {
+          lease.valid = false
+          controller.abort(revisionError('REVISION_LEASE_LOST'))
+        }
+      } catch (error) {
+        if (!lease.valid) return
+        lease.valid = false
+        controller.abort(revisionError('REVISION_LEASE_LOST', errorMessage(error)))
+      }
+    })()
+    lease.renewal = renewal
+    void renewal.then(() => {
+      if (lease.renewal === renewal) lease.renewal = null
+    })
+    return renewal
   }
 
   async function loadActiveRun(input: EditorRevisionRunInput, runId: number, controller: AbortController, lease: LeaseState) {
@@ -1303,25 +1352,13 @@ export function createEditorRevisionWorker(
       return
     }
     const controller = new AbortController()
-    const lease: LeaseState = { valid: true }
+    const lease: LeaseState = { valid: true, heartbeat: null, renewal: null }
     controllers.set(run.id, controller)
-    const heartbeat = deps.setInterval(async () => {
-      if (!lease.valid || controller.signal.aborted) return
-      try {
-        const renewed = await deps.renewLease(activeWorkspace!, {
-          runId: run.id,
-          owner: leaseOwner,
-          leaseMs: EDITOR_REVISION_LEASE_MS,
-        })
-        if (!renewed) {
-          lease.valid = false
-          controller.abort(revisionError('REVISION_LEASE_LOST'))
-        }
-      } catch (error) {
-        lease.valid = false
-        controller.abort(revisionError('REVISION_LEASE_LOST', errorMessage(error)))
-      }
-    }, EDITOR_REVISION_LEASE_MS / 3)
+    activeLeases.set(run.id, lease)
+    lease.heartbeat = deps.setInterval(
+      () => renewClaimLease(run.id, controller, lease),
+      EDITOR_REVISION_LEASE_MS / 3,
+    )
     let input: EditorRevisionRunInput | null = null
     try {
       const parsedInput = parseInput(run.input_ref)
@@ -1357,8 +1394,20 @@ export function createEditorRevisionWorker(
       }
       await failRun(input, run.id, error).catch(() => {})
     } finally {
-      deps.clearInterval(heartbeat)
-      controllers.delete(run.id)
+      invalidateLease(lease)
+      try {
+        await awaitLeaseRenewal(lease)
+        if (stopping) {
+          await deps.releaseClaim(activeWorkspace!, {
+            runId: run.id,
+            owner: leaseOwner,
+            now: deps.now(),
+          })
+        }
+      } finally {
+        activeLeases.delete(run.id)
+        controllers.delete(run.id)
+      }
     }
   }
 
@@ -1501,11 +1550,13 @@ export function createEditorRevisionWorker(
       claimRetryTimers.clear()
       claimRetryAttempts.clear()
       queue.clear()
+      for (const lease of activeLeases.values()) invalidateLease(lease)
       for (const controller of controllers.values()) {
         if (!controller.signal.aborted) {
           controller.abort(revisionError('REVISION_WORKER_STOPPED', 'editor revision worker stopped'))
         }
       }
+      await Promise.all([...activeLeases.values()].map(awaitLeaseRenewal))
       if (drainPromise) await drainPromise
       notifyIdle()
     },
