@@ -35,6 +35,7 @@ import { keyMonitorEnabledFromEnv, startKeyMonitor } from './key-monitor'
 import {
   attachServerCloseShutdownHandler,
   attachSignalShutdownHandlers,
+  closeHttpServer,
   createShutdownCoordinator,
   startServerLifecycle,
 } from './server-lifecycle'
@@ -109,17 +110,7 @@ registerFingerprintContractRoutes(app, getWorkspace)
 
 let shutdownRequested = false
 const shutdown = createShutdownCoordinator({
-  closeServer: () => new Promise<void>((resolve, reject) => {
-    const activeServer = server
-    if (!activeServer?.listening) {
-      resolve()
-      return
-    }
-    activeServer.close(error => {
-      if (error) reject(error)
-      else resolve()
-    })
-  }),
+  closeServer: () => closeHttpServer(server),
   stopKeyMonitor: () => { keyMonitor?.stop() },
   stopNovelLifecycle: () => novelLifecycle.stop(),
   onShutdownError: error => {

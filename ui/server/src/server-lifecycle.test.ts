@@ -1,11 +1,18 @@
 import { describe, expect, test } from 'bun:test'
+import { createServer } from 'node:http'
 import {
   attachServerCloseShutdownHandler,
   attachServerShutdownHandlers,
   attachSignalShutdownHandlers,
+  closeHttpServer,
   createShutdownCoordinator,
   startServerLifecycle,
 } from './server-lifecycle'
+
+type CloseableHttpServer = {
+  readonly listening: boolean
+  close(callback: (error?: Error) => void): void
+}
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void
@@ -200,6 +207,91 @@ describe('server lifecycle bootstrap', () => {
 })
 
 describe('server shutdown lifecycle', () => {
+  test('a signal closes a late-bound binding server before it can listen', async () => {
+    const bindGate = deferred()
+    const signalHandlers = new Map<string, () => void>()
+    let binding = true
+    let listening = false
+    let closeCalls = 0
+    const bindingServer: CloseableHttpServer = {
+      get listening() { return listening },
+      close(callback) {
+        closeCalls += 1
+        binding = false
+        callback()
+      },
+    }
+    let activeServer: CloseableHttpServer | null = null
+    const shutdown = createShutdownCoordinator({
+      closeServer: () => closeHttpServer(activeServer),
+      stopKeyMonitor: () => {},
+      stopNovelLifecycle: async () => {},
+      onShutdownError: () => {},
+    })
+    attachSignalShutdownHandlers({
+      signalSource: {
+        once: (event, handler) => { signalHandlers.set(event, handler) },
+      },
+      shutdown,
+    })
+    activeServer = bindingServer
+    const bindingAttempt = (async () => {
+      await bindGate.promise
+      if (binding) listening = true
+    })()
+
+    signalHandlers.get('SIGTERM')!()
+    await shutdown()
+    bindGate.resolve()
+    await bindingAttempt
+
+    expect(closeCalls).toBe(1)
+    expect(listening).toBe(false)
+  })
+
+  test('closes a real Bun HTTP server before its listening event', async () => {
+    const events: string[] = []
+    const server = createServer((_request, response) => { response.end('ok') })
+    server.once('listening', () => { events.push('listening') })
+    server.listen(0, '127.0.0.1')
+
+    expect(server.listening).toBe(false)
+    try {
+      await closeHttpServer(server)
+      await new Promise(resolve => setTimeout(resolve, 10))
+      expect(events).toEqual([])
+      expect(server.listening).toBe(false)
+    } finally {
+      if (server.listening) {
+        await new Promise<void>(resolve => { server.close(() => { resolve() }) })
+      }
+    }
+  })
+
+  test('an absent server remains a safe close no-op', async () => {
+    await expect(closeHttpServer(null)).resolves.toBeUndefined()
+  })
+
+  test.each(['callback', 'throw'] as const)(
+    'reports a non-null server %s close failure',
+    async failureMode => {
+      const failure = Object.assign(new Error('server was not running'), {
+        code: 'ERR_SERVER_NOT_RUNNING',
+      })
+      const server: CloseableHttpServer = {
+        listening: false,
+        close(callback) {
+          if (failureMode === 'throw') throw failure
+          callback(failure)
+        },
+      }
+
+      expect(await Promise.allSettled([closeHttpServer(server)])).toEqual([
+        { status: 'rejected', reason: failure },
+      ])
+    },
+  )
+
   test('early signal wiring closes a later server through the same coordinator once', async () => {
     const signalHandlers = new Map<string, () => void>()
     const serverHandlers = new Map<string, () => void>()

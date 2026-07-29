@@ -38,6 +38,24 @@ type ShutdownCoordinatorDependencies = {
   onShutdownError(error: unknown): void
 }
 
+type HttpServerCloseTarget = {
+  close(callback: (error?: Error) => void): unknown
+}
+
+export function closeHttpServer(server: HttpServerCloseTarget | null | undefined): Promise<void> {
+  if (!server) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    try {
+      server.close(error => {
+        if (error) reject(error)
+        else resolve()
+      })
+    } catch (error) {
+      reject(error)
+    }
+  })
+}
+
 export function createShutdownCoordinator(deps: ShutdownCoordinatorDependencies) {
   let shutdownPromise: Promise<void> | null = null
   return (options: ServerShutdownOptions = {}) => {
