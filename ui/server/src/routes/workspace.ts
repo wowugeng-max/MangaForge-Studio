@@ -1,7 +1,23 @@
 import type { Express } from 'express'
-import { ensureWorkspaceStructure, saveActiveWorkspace } from '../workspace'
+import {
+  WORKSPACE_SWITCH_RESTART_REQUIRED,
+  ensureWorkspaceStructure as defaultEnsureWorkspaceStructure,
+  saveActiveWorkspace as defaultSaveActiveWorkspace,
+} from '../workspace'
 
-export function registerWorkspaceRoutes(app: Express, getWorkspace: () => string, setWorkspace: (value: string) => void) {
+type WorkspaceRoutesDeps = {
+  ensureWorkspaceStructure?: typeof defaultEnsureWorkspaceStructure
+  saveActiveWorkspace?: typeof defaultSaveActiveWorkspace
+}
+
+export function registerWorkspaceRoutes(
+  app: Express,
+  getWorkspace: () => string,
+  setWorkspace: (value: string) => void,
+  deps: WorkspaceRoutesDeps = {},
+) {
+  const ensureWorkspaceStructure = deps.ensureWorkspaceStructure || defaultEnsureWorkspaceStructure
+  const saveActiveWorkspace = deps.saveActiveWorkspace || defaultSaveActiveWorkspace
   app.get('/api/workspace', async (_req, res) => {
     try {
       await ensureWorkspaceStructure(getWorkspace())
@@ -20,6 +36,12 @@ export function registerWorkspaceRoutes(app: Express, getWorkspace: () => string
       await saveActiveWorkspace(next)
       res.json({ ok: true, workspace: next })
     } catch (error) {
+      if ((error as any)?.code === WORKSPACE_SWITCH_RESTART_REQUIRED) {
+        return res.status(409).json({
+          error: String((error as any)?.message || error),
+          error_code: WORKSPACE_SWITCH_RESTART_REQUIRED,
+        })
+      }
       res.status(500).json({ error: String(error) })
     }
   })

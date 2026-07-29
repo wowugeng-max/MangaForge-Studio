@@ -2034,6 +2034,77 @@ describe('durable editor revision worker', () => {
     expect(harness.timeoutRegistrations.filter(timer => !timer.cleared)).toHaveLength(0)
   })
 
+  test('concurrent stop waits for in-flight initial recovery and prevents startup work', async () => {
+    const harness = createHarness({ autoQuality: false, autoStoryState: false })
+    let recoverEntered!: () => void
+    let releaseRecovery!: () => void
+    const entered = new Promise<void>(resolve => { recoverEntered = resolve })
+    const recoveryGate = new Promise<void>(resolve => { releaseRecovery = resolve })
+    let recoverCalls = 0
+    const worker = harness.worker({
+      recoverRuns: async () => {
+        recoverCalls += 1
+        recoverEntered()
+        await recoveryGate
+        return { queued: [harness.run.id], failedLegacy: [] }
+      },
+    })
+
+    const starting = worker.start(workspace)
+    await entered
+    let resolvedStops = 0
+    const firstStopRequest = worker.stop()
+    const secondStopRequest = worker.stop()
+    const sharedStop = firstStopRequest === secondStopRequest
+    const firstStop = firstStopRequest.then(() => { resolvedStops += 1 })
+    const secondStop = secondStopRequest.then(() => { resolvedStops += 1 })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const resolvedBeforeRecovery = resolvedStops
+    releaseRecovery()
+    await Promise.all([starting, firstStop, secondStop])
+
+    expect(sharedStop).toBe(true)
+    expect(resolvedBeforeRecovery).toBe(0)
+    expect(resolvedStops).toBe(2)
+    expect(recoverCalls).toBe(1)
+    expect(harness.events.filter(event => event === 'claim')).toHaveLength(0)
+    expect(harness.revisionCalls).toHaveLength(0)
+    expect(harness.timeoutRegistrations).toHaveLength(0)
+  })
+
+  test('stop contains initial recovery failure while preserving the start caller rejection', async () => {
+    const harness = createHarness({ autoQuality: false, autoStoryState: false })
+    const failure = errorWithCode('SQLITE_BUSY')
+    let recoverEntered!: () => void
+    let rejectRecovery!: () => void
+    const entered = new Promise<void>(resolve => { recoverEntered = resolve })
+    const recoveryGate = new Promise<void>((_resolve, reject) => {
+      rejectRecovery = () => reject(failure)
+    })
+    const worker = harness.worker({
+      recoverRuns: async () => {
+        recoverEntered()
+        await recoveryGate
+        return { queued: [], failedLegacy: [] }
+      },
+    })
+
+    const starting = worker.start(workspace)
+    await entered
+    let stopResolved = false
+    const stopping = worker.stop().then(() => { stopResolved = true })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const resolvedBeforeRecovery = stopResolved
+    rejectRecovery()
+
+    await expect(starting).rejects.toBe(failure)
+    await stopping
+    expect(resolvedBeforeRecovery).toBe(false)
+    expect(stopResolved).toBe(true)
+    expect(harness.events.filter(event => event === 'claim')).toHaveLength(0)
+    expect(harness.timeoutRegistrations).toHaveLength(0)
+  })
+
   test('corrupt claimed checkpoint honors a concurrent cancellation request', async () => {
     const harness = createHarness()
     harness.run.output_ref = '{'

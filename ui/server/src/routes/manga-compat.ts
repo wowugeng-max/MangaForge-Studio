@@ -6,7 +6,11 @@ import { runPlot as defaultRunPlot } from '../pipeline-plot'
 import { runStoryboard as defaultRunStoryboard } from '../pipeline-storyboard'
 import { runPromptPack as defaultRunPromptPack } from '../pipeline-promptpack'
 import { runExport as defaultRunExport } from '../pipeline-export'
-import { ensureWorkspaceStructure, saveActiveWorkspace } from '../workspace'
+import {
+  WORKSPACE_SWITCH_RESTART_REQUIRED,
+  ensureWorkspaceStructure as defaultEnsureWorkspaceStructure,
+  saveActiveWorkspace as defaultSaveActiveWorkspace,
+} from '../workspace'
 
 type MangaCompatDeps = {
   runInit?: (workspace: string) => Promise<any>
@@ -14,6 +18,8 @@ type MangaCompatDeps = {
   runStoryboard?: (workspace: string, payload: any) => Promise<any>
   runPromptPack?: (workspace: string, payload: any) => Promise<any>
   runExport?: (workspace: string, payload: any) => Promise<any>
+  ensureWorkspaceStructure?: typeof defaultEnsureWorkspaceStructure
+  saveActiveWorkspace?: typeof defaultSaveActiveWorkspace
 }
 
 type EpisodeFlags = {
@@ -71,7 +77,7 @@ function flagForEpisodeFile(filename: string): { episodeId: string; flag: keyof 
 }
 
 async function createStudioHomeStatus(workspace: string) {
-  await ensureWorkspaceStructure(workspace)
+  await defaultEnsureWorkspaceStructure(workspace)
   const storyRoot = join(workspace, '.story-project')
   const episodesDir = join(storyRoot, 'episodes')
   const storyFiles = await collectFiles(storyRoot)
@@ -187,6 +193,8 @@ export function registerMangaCompatRoutes(
   const runStoryboard = deps.runStoryboard || defaultRunStoryboard
   const runPromptPack = deps.runPromptPack || defaultRunPromptPack
   const runExport = deps.runExport || defaultRunExport
+  const ensureWorkspaceStructure = deps.ensureWorkspaceStructure || defaultEnsureWorkspaceStructure
+  const saveActiveWorkspace = deps.saveActiveWorkspace || defaultSaveActiveWorkspace
 
   app.get('/api/manga/status', async (_req, res) => {
     try {
@@ -212,6 +220,13 @@ export function registerMangaCompatRoutes(
       await saveActiveWorkspace(next)
       res.json({ ok: true, workspace: next })
     } catch (error) {
+      if ((error as any)?.code === WORKSPACE_SWITCH_RESTART_REQUIRED) {
+        res.status(409).json({
+          error: String((error as any)?.message || error),
+          error_code: WORKSPACE_SWITCH_RESTART_REQUIRED,
+        })
+        return
+      }
       res.status(500).json({ error: String(error) })
     }
   })

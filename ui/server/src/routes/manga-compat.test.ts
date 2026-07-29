@@ -2,6 +2,10 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdir, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import {
+  WORKSPACE_SWITCH_RESTART_REQUIRED,
+  createActiveWorkspaceState,
+} from '../workspace'
 
 let workspaces: string[] = []
 
@@ -79,6 +83,31 @@ describe('StudioHome manga compatibility routes', () => {
     expect(handlers.has('GET /api/manga/file')).toBe(true)
     expect(handlers.has('GET /api/manga/download')).toBe(true)
     expect(handlers.has('GET /api/manga/bundle')).toBe(true)
+  })
+
+  test('returns 409 before setup or persistence when revision recovery is bound to another workspace', async () => {
+    const state = createActiveWorkspaceState('/tmp/workspace-a')
+    state.bindRevisionWorkspace('/tmp/workspace-a')
+    let ensureCalls = 0
+    let saveCalls = 0
+    const { registerMangaCompatRoutes } = await import('./manga-compat')
+    const { app, handlers } = createRouteHarness()
+    registerMangaCompatRoutes(app as any, state.getWorkspace, state.setWorkspace, {
+      ensureWorkspaceStructure: async () => { ensureCalls += 1 },
+      saveActiveWorkspace: async () => { saveCalls += 1 },
+    })
+
+    const response = await call(handlers.get('POST /api/manga/workspace'), {
+      body: { workspace: '/tmp/workspace-b' },
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.body).toMatchObject({
+      error_code: WORKSPACE_SWITCH_RESTART_REQUIRED,
+    })
+    expect(state.getWorkspace()).toBe('/tmp/workspace-a')
+    expect(ensureCalls).toBe(0)
+    expect(saveCalls).toBe(0)
   })
 
   test('returns StudioHome status from the current story project files', async () => {

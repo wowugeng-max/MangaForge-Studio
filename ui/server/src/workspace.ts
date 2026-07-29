@@ -3,6 +3,37 @@ import { existsSync, readFileSync } from 'fs'
 import { join, resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
+export const WORKSPACE_SWITCH_RESTART_REQUIRED = 'WORKSPACE_SWITCH_RESTART_REQUIRED'
+
+export function createActiveWorkspaceState(initialWorkspace: string) {
+  let activeWorkspace = initialWorkspace
+  let revisionWorkspace: string | null = null
+
+  function assertCompatibleWorkspace(workspace: string) {
+    if (!revisionWorkspace || workspace === revisionWorkspace) return
+    throw Object.assign(
+      new Error('workspace switch requires a server restart while editor revision recovery is active'),
+      {
+        code: WORKSPACE_SWITCH_RESTART_REQUIRED,
+        statusCode: 409,
+      },
+    )
+  }
+
+  return {
+    getWorkspace: () => activeWorkspace,
+    setWorkspace: (workspace: string) => {
+      assertCompatibleWorkspace(workspace)
+      activeWorkspace = workspace
+    },
+    bindRevisionWorkspace: (workspace: string) => {
+      assertCompatibleWorkspace(workspace)
+      activeWorkspace = workspace
+      revisionWorkspace = workspace
+    },
+  }
+}
+
 export function getServerRoot() {
   // Use the actual file location instead of process.cwd(),
   // because bun/node resolves cwd from the shell, not from the script path.

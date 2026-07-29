@@ -450,6 +450,7 @@ export function createEditorRevisionWorker(
   let recoveryTimer: any = null
   let recoveryFailures = 0
   let startPromise: Promise<void> | null = null
+  let stopPromise: Promise<void> | null = null
   let started = false
   let stopping = false
 
@@ -1536,29 +1537,31 @@ export function createEditorRevisionWorker(
         controller.abort(revisionError('REVISION_CANCELED', 'revision canceled'))
       }
     },
-    async stop() {
-      if (stopping) {
-        if (drainPromise) await drainPromise
-        return
-      }
+    stop() {
+      if (stopPromise) return stopPromise
       stopping = true
-      if (recoveryTimer) {
-        deps.clearTimeout(recoveryTimer)
-        recoveryTimer = null
-      }
-      for (const timer of claimRetryTimers.values()) deps.clearTimeout(timer)
-      claimRetryTimers.clear()
-      claimRetryAttempts.clear()
-      queue.clear()
-      for (const lease of activeLeases.values()) invalidateLease(lease)
-      for (const controller of controllers.values()) {
-        if (!controller.signal.aborted) {
-          controller.abort(revisionError('REVISION_WORKER_STOPPED', 'editor revision worker stopped'))
+      const pendingStart = startPromise
+      stopPromise = (async () => {
+        if (recoveryTimer) {
+          deps.clearTimeout(recoveryTimer)
+          recoveryTimer = null
         }
-      }
-      await Promise.all([...activeLeases.values()].map(awaitLeaseRenewal))
-      if (drainPromise) await drainPromise
-      notifyIdle()
+        for (const timer of claimRetryTimers.values()) deps.clearTimeout(timer)
+        claimRetryTimers.clear()
+        claimRetryAttempts.clear()
+        queue.clear()
+        for (const lease of activeLeases.values()) invalidateLease(lease)
+        for (const controller of controllers.values()) {
+          if (!controller.signal.aborted) {
+            controller.abort(revisionError('REVISION_WORKER_STOPPED', 'editor revision worker stopped'))
+          }
+        }
+        await Promise.all([...activeLeases.values()].map(awaitLeaseRenewal))
+        if (drainPromise) await drainPromise
+        if (pendingStart) await pendingStart.catch(() => {})
+        notifyIdle()
+      })()
+      return stopPromise
     },
     async waitForIdle() {
       if (!queue.size && !drainPromise) return

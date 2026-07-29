@@ -1,7 +1,13 @@
 import express from 'express'
 import cors from 'cors'
 import { readFileSync } from 'fs'
-import { getDefaultWorkspace, ensureWorkspaceStructure, loadActiveWorkspace, saveActiveWorkspace } from './workspace'
+import {
+  createActiveWorkspaceState,
+  ensureWorkspaceStructure,
+  getDefaultWorkspace,
+  loadActiveWorkspace,
+  saveActiveWorkspace,
+} from './workspace'
 import { bootstrapMempalace } from './memory-service'
 import { registerProjectRoutes } from './routes/projects'
 import { registerAssetCrudRoutes } from './routes/assets-crud'
@@ -26,6 +32,11 @@ import { registerFingerprintContractRoutes } from './routes/fingerprint-contract
 import { registerRecommendationRoutes } from './routes/recommendation-rules'
 import { acceptWebSocketKey, sseManager, taskMessageManager, interruptRegisteredTask, webSocketManager, webSocketClientIdFromPath } from './ws-manager'
 import { keyMonitorEnabledFromEnv, startKeyMonitor } from './key-monitor'
+import {
+  attachServerShutdownHandlers,
+  createShutdownCoordinator,
+  startServerLifecycle,
+} from './server-lifecycle'
 
 // 加载 .env
 // 注意：模型配置（LLM_OPENAI_ENDPOINT / LLM_LOCAL_ENDPOINT / ANTHROPIC_BASE_URL 等）
@@ -67,9 +78,9 @@ const app = express()
 app.use(cors())
 app.use(express.json({ limit: '5mb' }))
 
-let activeWorkspace = getDefaultWorkspace()
-const getWorkspace = () => activeWorkspace
-const setWorkspace = (value: string) => { activeWorkspace = value }
+const workspaceState = createActiveWorkspaceState(getDefaultWorkspace())
+const getWorkspace = workspaceState.getWorkspace
+const setWorkspace = workspaceState.setWorkspace
 let keyMonitor: ReturnType<typeof startKeyMonitor> | null = null
 
 registerProjectRoutes(app, getWorkspace)
@@ -125,12 +136,7 @@ app.post(['/api/interrupt/:clientId', '/api/interrupt/:clientId/'], async (_req,
   res.json(result)
 })
 
-const server = app.listen(port, host, async () => {
-  activeWorkspace = await loadActiveWorkspace()
-  await ensureWorkspaceStructure(activeWorkspace)
-  await saveActiveWorkspace(activeWorkspace)
-  await novelLifecycle.start(activeWorkspace)
-
+async function startBackgroundServices() {
   // ── Memory Palace auto-bootstrapping ──
   try {
     const ok = await bootstrapMempalace()
@@ -151,41 +157,81 @@ const server = app.listen(port, host, async () => {
   if (keyMonitor.started) console.log('Key monitoring task started')
 
   console.log(`Manga UI server on http://${host}:${port}`)
-})
+}
 
-server.on('close', () => {
-  keyMonitor?.stop()
-  void novelLifecycle.stop()
-})
-
-server.on('upgrade', (req, socket) => {
-  const pathname = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`).pathname
-  if (!pathname.startsWith('/api/ws/')) {
-    socket.end('HTTP/1.1 404 Not Found\r\n\r\n')
-    return
-  }
-
-  const clientId = webSocketClientIdFromPath(pathname)
-  const key = String(req.headers['sec-websocket-key'] || '')
-  if (!clientId || !key) {
-    socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
-    return
-  }
-
-  socket.write([
-    'HTTP/1.1 101 Switching Protocols',
-    'Upgrade: websocket',
-    'Connection: Upgrade',
-    `Sec-WebSocket-Accept: ${acceptWebSocketKey(key)}`,
-    '',
-    '',
-  ].join('\r\n'))
-
-  webSocketManager.connect(clientId, socket)
-  socket.on('close', () => {
-    webSocketManager.disconnect(clientId, socket)
+function listen() {
+  const server = app.listen(port, host, () => {
+    void startBackgroundServices().catch(error => {
+      console.warn('Server background startup failed:', String(error).slice(0, 240))
+    })
   })
-  socket.on('error', () => {
-    webSocketManager.disconnect(clientId, socket)
+  const shutdown = createShutdownCoordinator({
+    closeServer: () => new Promise<void>((resolve, reject) => {
+      if (!server.listening) {
+        resolve()
+        return
+      }
+      server.close(error => {
+        if (error) reject(error)
+        else resolve()
+      })
+    }),
+    stopKeyMonitor: () => { keyMonitor?.stop() },
+    stopNovelLifecycle: () => novelLifecycle.stop(),
+    onShutdownError: error => {
+      process.exitCode = 1
+      console.error('Manga UI server shutdown failed:', String(error).slice(0, 400))
+    },
   })
+  attachServerShutdownHandlers({ signalSource: process, server, shutdown })
+
+  server.on('upgrade', (req, socket) => {
+    const pathname = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`).pathname
+    if (!pathname.startsWith('/api/ws/')) {
+      socket.end('HTTP/1.1 404 Not Found\r\n\r\n')
+      return
+    }
+
+    const clientId = webSocketClientIdFromPath(pathname)
+    const key = String(req.headers['sec-websocket-key'] || '')
+    if (!clientId || !key) {
+      socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
+      return
+    }
+
+    socket.write([
+      'HTTP/1.1 101 Switching Protocols',
+      'Upgrade: websocket',
+      'Connection: Upgrade',
+      `Sec-WebSocket-Accept: ${acceptWebSocketKey(key)}`,
+      '',
+      '',
+    ].join('\r\n'))
+
+    webSocketManager.connect(clientId, socket)
+    socket.on('close', () => {
+      webSocketManager.disconnect(clientId, socket)
+    })
+    socket.on('error', () => {
+      webSocketManager.disconnect(clientId, socket)
+    })
+  })
+
+  return server
+}
+
+void startServerLifecycle({
+  loadActiveWorkspace,
+  activateWorkspace: setWorkspace,
+  ensureWorkspaceStructure,
+  saveActiveWorkspace,
+  startNovelLifecycle: async workspace => {
+    await novelLifecycle.start(workspace)
+    workspaceState.bindRevisionWorkspace(workspace)
+  },
+  listen,
+  onStartupError: error => {
+    process.exitCode = 1
+    console.error('Manga UI server startup failed:', String(error).slice(0, 400))
+  },
 })
