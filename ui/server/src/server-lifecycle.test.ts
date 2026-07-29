@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  attachServerCloseShutdownHandler,
   attachServerShutdownHandlers,
+  attachSignalShutdownHandlers,
   createShutdownCoordinator,
   startServerLifecycle,
 } from './server-lifecycle'
@@ -119,10 +121,136 @@ describe('server lifecycle bootstrap', () => {
       expect(errors).toEqual([failure])
     },
   )
+
+  test('a pre-listen signal stops revision recovery and prevents the port from opening', async () => {
+    const revisionGate = deferred()
+    const signalHandlers = new Map<string, () => void>()
+    const events: string[] = []
+    const errors: unknown[] = []
+    let shutdownRequested = false
+    let stopCalls = 0
+    let listenCalls = 0
+    const shutdown = createShutdownCoordinator({
+      closeServer: async () => { events.push('server:unavailable') },
+      stopKeyMonitor: () => { events.push('monitor:stop') },
+      stopNovelLifecycle: async () => {
+        stopCalls += 1
+        events.push('revision:stop:start')
+        await revisionGate.promise
+        events.push('revision:stop:end')
+      },
+      onShutdownError: error => { errors.push(error) },
+    })
+    const requestShutdown = (options?: { serverAlreadyClosed?: boolean }) => {
+      shutdownRequested = true
+      return shutdown(options)
+    }
+    attachSignalShutdownHandlers({
+      signalSource: {
+        once: (event, handler) => { signalHandlers.set(event, handler) },
+      },
+      shutdown: requestShutdown,
+    })
+
+    const startup = startServerLifecycle({
+      loadActiveWorkspace: async () => '/tmp/loaded-server-workspace',
+      activateWorkspace: () => {},
+      ensureWorkspaceStructure: async () => {},
+      saveActiveWorkspace: async () => {},
+      startNovelLifecycle: async () => {
+        events.push('revision:start')
+        await revisionGate.promise
+        events.push('revision:started')
+      },
+      listen: () => {
+        listenCalls += 1
+        events.push('listen')
+        return { name: 'unexpected-server' }
+      },
+      onStartupError: error => { errors.push(error) },
+      shouldListen: () => !shutdownRequested,
+    })
+
+    await eventually(() => events.includes('revision:start'), 'revision recovery did not start')
+    signalHandlers.get('SIGINT')!()
+    signalHandlers.get('SIGTERM')!()
+    const sharedShutdown = shutdown()
+    await eventually(() => stopCalls > 0, 'revision stop did not start')
+
+    expect(listenCalls).toBe(0)
+    expect(stopCalls).toBe(1)
+    expect(errors).toEqual([])
+
+    revisionGate.resolve()
+    await sharedShutdown
+
+    expect(await startup).toBeNull()
+    expect(listenCalls).toBe(0)
+    expect(stopCalls).toBe(1)
+    expect(errors).toEqual([])
+    expect(events).toEqual([
+      'revision:start',
+      'server:unavailable',
+      'monitor:stop',
+      'revision:stop:start',
+      'revision:started',
+      'revision:stop:end',
+    ])
+  })
 })
 
 describe('server shutdown lifecycle', () => {
-  test('shares one async shutdown that closes intake before stopping monitor and revision work', async () => {
+  test('early signal wiring closes a later server through the same coordinator once', async () => {
+    const signalHandlers = new Map<string, () => void>()
+    const serverHandlers = new Map<string, () => void>()
+    let serverAvailable = false
+    let signalRegistrations = 0
+    let serverRegistrations = 0
+    let closeCalls = 0
+    let monitorStopCalls = 0
+    let revisionStopCalls = 0
+    const shutdown = createShutdownCoordinator({
+      closeServer: async () => {
+        if (serverAvailable) closeCalls += 1
+      },
+      stopKeyMonitor: () => { monitorStopCalls += 1 },
+      stopNovelLifecycle: async () => { revisionStopCalls += 1 },
+      onShutdownError: () => {},
+    })
+
+    attachSignalShutdownHandlers({
+      signalSource: {
+        once: (event, handler) => {
+          signalRegistrations += 1
+          signalHandlers.set(event, handler)
+        },
+      },
+      shutdown,
+    })
+    serverAvailable = true
+    attachServerCloseShutdownHandler({
+      server: {
+        once: (event, handler) => {
+          serverRegistrations += 1
+          serverHandlers.set(event, handler)
+        },
+      },
+      shutdown,
+    })
+
+    signalHandlers.get('SIGTERM')!()
+    serverHandlers.get('close')!()
+    await shutdown()
+
+    expect(signalRegistrations).toBe(2)
+    expect(serverRegistrations).toBe(1)
+    expect(closeCalls).toBe(1)
+    expect(monitorStopCalls).toBe(1)
+    expect(revisionStopCalls).toBe(1)
+  })
+
+  test('shares one async shutdown while HTTP drain and worker cleanup settle concurrently', async () => {
+    const closeGate = deferred()
     const revisionGate = deferred()
     const events: string[] = []
     let closeCalls = 0
@@ -131,7 +259,9 @@ describe('server shutdown lifecycle', () => {
     const shutdown = createShutdownCoordinator({
       closeServer: async () => {
         closeCalls += 1
-        events.push('server:close')
+        events.push('server:close:start')
+        await closeGate.promise
+        events.push('server:close:end')
       },
       stopKeyMonitor: () => {
         monitorStopCalls += 1
@@ -153,21 +283,56 @@ describe('server shutdown lifecycle', () => {
     void second.then(() => { settled += 1 })
     await eventually(() => revisionStopCalls > 0, 'revision stop did not start')
     await new Promise(resolve => setTimeout(resolve, 0))
+    const settledBeforeEitherGate = settled
+    closeGate.resolve()
+    await eventually(() => events.includes('server:close:end'), 'server close did not finish')
+    await new Promise(resolve => setTimeout(resolve, 0))
     const settledBeforeRevisionStop = settled
     revisionGate.resolve()
     await Promise.all([first, second])
 
     expect(first).toBe(second)
+    expect(settledBeforeEitherGate).toBe(0)
     expect(settledBeforeRevisionStop).toBe(0)
     expect(closeCalls).toBe(1)
     expect(monitorStopCalls).toBe(1)
     expect(revisionStopCalls).toBe(1)
     expect(events).toEqual([
-      'server:close',
+      'server:close:start',
       'monitor:stop',
       'revision:stop:start',
+      'server:close:end',
       'revision:stop:end',
     ])
+  })
+
+  test('handles worker-stop rejection while HTTP connections are still draining', async () => {
+    const closeGate = deferred()
+    const failure = new Error('revision stop failed during drain')
+    const errors: unknown[] = []
+    let settled = false
+    const shutdown = createShutdownCoordinator({
+      closeServer: async () => { await closeGate.promise },
+      stopKeyMonitor: () => {},
+      stopNovelLifecycle: async () => { throw failure },
+      onShutdownError: error => { errors.push(error) },
+    })
+
+    const pending = shutdown()
+    void pending.then(
+      () => { settled = true },
+      () => { settled = true },
+    )
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(settled).toBe(false)
+    expect(errors).toEqual([])
+
+    closeGate.resolve()
+    expect(await Promise.allSettled([pending])).toEqual([
+      { status: 'rejected', reason: failure },
+    ])
+    expect(errors).toEqual([failure])
   })
 
   test('external server close skips duplicate close and still awaits cleanup', async () => {

@@ -4,6 +4,7 @@ export type ServerLifecycleBootstrapDependencies<TServer> = {
   ensureWorkspaceStructure(workspace: string): Promise<void>
   saveActiveWorkspace(workspace: string): Promise<void>
   startNovelLifecycle(workspace: string): Promise<void>
+  shouldListen?(): boolean
   listen(): TServer
   onStartupError(error: unknown): void
 }
@@ -17,6 +18,7 @@ export async function startServerLifecycle<TServer>(
     await deps.ensureWorkspaceStructure(workspace)
     await deps.saveActiveWorkspace(workspace)
     await deps.startNovelLifecycle(workspace)
+    if (deps.shouldListen && !deps.shouldListen()) return null
     const server = deps.listen()
     return { workspace, server }
   } catch (error) {
@@ -41,9 +43,19 @@ export function createShutdownCoordinator(deps: ShutdownCoordinatorDependencies)
   return (options: ServerShutdownOptions = {}) => {
     if (shutdownPromise) return shutdownPromise
     const pending = Promise.resolve().then(async () => {
-      if (!options.serverAlreadyClosed) await deps.closeServer()
-      await deps.stopKeyMonitor()
-      await deps.stopNovelLifecycle()
+      const closePromise = options.serverAlreadyClosed
+        ? Promise.resolve()
+        : Promise.resolve().then(() => deps.closeServer())
+      const cleanupPromise = Promise.resolve().then(async () => {
+        await deps.stopKeyMonitor()
+        await deps.stopNovelLifecycle()
+      })
+      const [closeResult, cleanupResult] = await Promise.allSettled([
+        closePromise,
+        cleanupPromise,
+      ])
+      if (closeResult.status === 'rejected') throw closeResult.reason
+      if (cleanupResult.status === 'rejected') throw cleanupResult.reason
     })
     shutdownPromise = pending.catch(error => {
       deps.onShutdownError(error)
@@ -57,15 +69,34 @@ type ShutdownEventSource = {
   once(event: string, handler: () => void): unknown
 }
 
+type ShutdownHandler = (options?: ServerShutdownOptions) => Promise<void>
+
+function runHandledShutdown(shutdown: ShutdownHandler, options?: ServerShutdownOptions) {
+  void shutdown(options).catch(() => {})
+}
+
+export function attachSignalShutdownHandlers(input: {
+  signalSource: ShutdownEventSource
+  shutdown: ShutdownHandler
+}) {
+  input.signalSource.once('SIGINT', () => { runHandledShutdown(input.shutdown) })
+  input.signalSource.once('SIGTERM', () => { runHandledShutdown(input.shutdown) })
+}
+
+export function attachServerCloseShutdownHandler(input: {
+  server: ShutdownEventSource
+  shutdown: ShutdownHandler
+}) {
+  input.server.once('close', () => {
+    runHandledShutdown(input.shutdown, { serverAlreadyClosed: true })
+  })
+}
+
 export function attachServerShutdownHandlers(input: {
   signalSource: ShutdownEventSource
   server: ShutdownEventSource
-  shutdown(options?: ServerShutdownOptions): Promise<void>
+  shutdown: ShutdownHandler
 }) {
-  const runShutdown = (options?: ServerShutdownOptions) => {
-    void input.shutdown(options).catch(() => {})
-  }
-  input.signalSource.once('SIGINT', () => { runShutdown() })
-  input.signalSource.once('SIGTERM', () => { runShutdown() })
-  input.server.once('close', () => { runShutdown({ serverAlreadyClosed: true }) })
+  attachSignalShutdownHandlers(input)
+  attachServerCloseShutdownHandler(input)
 }

@@ -33,7 +33,8 @@ import { registerRecommendationRoutes } from './routes/recommendation-rules'
 import { acceptWebSocketKey, sseManager, taskMessageManager, interruptRegisteredTask, webSocketManager, webSocketClientIdFromPath } from './ws-manager'
 import { keyMonitorEnabledFromEnv, startKeyMonitor } from './key-monitor'
 import {
-  attachServerShutdownHandlers,
+  attachServerCloseShutdownHandler,
+  attachSignalShutdownHandlers,
   createShutdownCoordinator,
   startServerLifecycle,
 } from './server-lifecycle'
@@ -82,6 +83,7 @@ const workspaceState = createActiveWorkspaceState(getDefaultWorkspace())
 const getWorkspace = workspaceState.getWorkspace
 const setWorkspace = workspaceState.setWorkspace
 let keyMonitor: ReturnType<typeof startKeyMonitor> | null = null
+let server: ReturnType<typeof app.listen> | null = null
 
 registerProjectRoutes(app, getWorkspace)
 registerAssetCrudRoutes(app, getWorkspace)
@@ -104,6 +106,32 @@ registerRecommendationRoutes(app, getWorkspace)
 const novelLifecycle = registerNovelRoutes(app, getWorkspace)
 registerKnowledgeRoutes(app)
 registerFingerprintContractRoutes(app, getWorkspace)
+
+let shutdownRequested = false
+const shutdown = createShutdownCoordinator({
+  closeServer: () => new Promise<void>((resolve, reject) => {
+    const activeServer = server
+    if (!activeServer?.listening) {
+      resolve()
+      return
+    }
+    activeServer.close(error => {
+      if (error) reject(error)
+      else resolve()
+    })
+  }),
+  stopKeyMonitor: () => { keyMonitor?.stop() },
+  stopNovelLifecycle: () => novelLifecycle.stop(),
+  onShutdownError: error => {
+    process.exitCode = 1
+    console.error('Manga UI server shutdown failed:', String(error).slice(0, 400))
+  },
+})
+const requestShutdown = (options?: { serverAlreadyClosed?: boolean }) => {
+  shutdownRequested = true
+  return shutdown(options)
+}
+attachSignalShutdownHandlers({ signalSource: process, shutdown: requestShutdown })
 
 // ── SSE: Real-time task progress ──
 app.get('/api/sse/:clientId', (_req, res) => {
@@ -160,32 +188,15 @@ async function startBackgroundServices() {
 }
 
 function listen() {
-  const server = app.listen(port, host, () => {
+  const listeningServer = app.listen(port, host, () => {
     void startBackgroundServices().catch(error => {
       console.warn('Server background startup failed:', String(error).slice(0, 240))
     })
   })
-  const shutdown = createShutdownCoordinator({
-    closeServer: () => new Promise<void>((resolve, reject) => {
-      if (!server.listening) {
-        resolve()
-        return
-      }
-      server.close(error => {
-        if (error) reject(error)
-        else resolve()
-      })
-    }),
-    stopKeyMonitor: () => { keyMonitor?.stop() },
-    stopNovelLifecycle: () => novelLifecycle.stop(),
-    onShutdownError: error => {
-      process.exitCode = 1
-      console.error('Manga UI server shutdown failed:', String(error).slice(0, 400))
-    },
-  })
-  attachServerShutdownHandlers({ signalSource: process, server, shutdown })
+  server = listeningServer
+  attachServerCloseShutdownHandler({ server: listeningServer, shutdown: requestShutdown })
 
-  server.on('upgrade', (req, socket) => {
+  listeningServer.on('upgrade', (req, socket) => {
     const pathname = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`).pathname
     if (!pathname.startsWith('/api/ws/')) {
       socket.end('HTTP/1.1 404 Not Found\r\n\r\n')
@@ -217,7 +228,7 @@ function listen() {
     })
   })
 
-  return server
+  return listeningServer
 }
 
 void startServerLifecycle({
@@ -229,6 +240,7 @@ void startServerLifecycle({
     await novelLifecycle.start(workspace)
     workspaceState.bindRevisionWorkspace(workspace)
   },
+  shouldListen: () => !shutdownRequested,
   listen,
   onStartupError: error => {
     process.exitCode = 1
