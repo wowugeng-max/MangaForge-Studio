@@ -1,5 +1,6 @@
 import { requireCoherentEditorRevisionCheckpoint } from '../../novel/repos/editor-revision-runs'
 import type { NovelRunRecord } from '../../novel/types'
+import { countProseChars } from '../../novel-writing/word-target'
 import {
   EDITOR_REVISION_PHASE_LABELS,
   EDITOR_REVISION_PHASES,
@@ -9,6 +10,7 @@ import {
   type EditorRevisionRunInput,
   type EditorRevisionRunStatus,
 } from './editor-revision-contract'
+import { revisionTextHash } from './revision-candidate-admission'
 
 const EDITOR_REVISION_STATUSES = [
   'queued',
@@ -92,8 +94,12 @@ function parseRunInput(value: unknown): EditorRevisionRunInput | null {
     || typeof input.revision_mode !== 'string'
     || typeof input.revision_strategy !== 'string'
     || typeof input.user_prompt !== 'string'
+    || !input.source_text || !input.source_text_hash
+    || revisionTextHash(input.source_text) !== input.source_text_hash
+    || countProseChars(input.source_text) !== input.source_char_count
     || typeof input.auto_quality_check !== 'boolean'
     || typeof input.auto_story_state !== 'boolean'
+    || (input.model_id !== undefined && !Number.isInteger(input.model_id))
     || typeof input.created_at !== 'string') {
     return null
   }
@@ -357,7 +363,11 @@ function malformedView(run: NovelRunRecord): PublicEditorRevisionRun {
 export function buildPublicEditorRevisionRun(run: NovelRunRecord): PublicEditorRevisionRun {
   const status = parseRunStatus(run.status)
   const input = parseRunInput(run.input_ref)
-  if (run.run_type !== 'editor_revision' || !status || !input || input.project_id !== run.project_id) {
+  if (run.run_type !== 'editor_revision'
+    || !status
+    || !input
+    || input.project_id !== run.project_id
+    || run.scope_key !== `chapter:${input.chapter_id}`) {
     return malformedView(run)
   }
   const checkpoint = parseCheckpoint(run, status)

@@ -76,6 +76,7 @@ function runWithCheckpoint(
     input_ref: JSON.stringify(canonicalInput()),
     output_ref: JSON.stringify(checkpoint),
     error_message: '',
+    scope_key: 'chapter:7',
     created_at: '2030-01-01T00:00:00.000Z',
     updated_at: '2030-01-01T00:00:02.000Z',
   }
@@ -326,5 +327,90 @@ describe('editor revision public run view', () => {
     for (const secret of [SOURCE_TEXT, CANDIDATE_TEXT, FULL_CONTEXT, RENDERED_PROMPT, 'input_ref', 'output_ref']) {
       expect(serialized).not.toContain(secret)
     }
+  })
+
+  test.each([
+    {
+      label: 'source text hash mismatch',
+      mutate: (run: NovelRunRecord) => {
+        const input = JSON.parse(String(run.input_ref || '{}'))
+        input.source_text_hash = revisionTextHash(`${SOURCE_TEXT}已变更`)
+        run.input_ref = JSON.stringify(input)
+      },
+    },
+    {
+      label: 'source character count mismatch',
+      mutate: (run: NovelRunRecord) => {
+        const input = JSON.parse(String(run.input_ref || '{}'))
+        input.source_char_count += 1
+        run.input_ref = JSON.stringify(input)
+      },
+    },
+    {
+      label: 'empty immutable source text',
+      mutate: (run: NovelRunRecord) => {
+        const input = JSON.parse(String(run.input_ref || '{}'))
+        input.source_text = ''
+        input.source_text_hash = revisionTextHash('')
+        input.source_char_count = 0
+        run.input_ref = JSON.stringify(input)
+      },
+    },
+    {
+      label: 'non-integer model id',
+      mutate: (run: NovelRunRecord) => {
+        const input = JSON.parse(String(run.input_ref || '{}'))
+        input.model_id = 11.5
+        run.input_ref = JSON.stringify(input)
+      },
+    },
+    {
+      label: 'chapter scope mismatch',
+      mutate: (run: NovelRunRecord) => {
+        run.scope_key = 'chapter:999'
+      },
+    },
+  ])('fails safe for durable $label without exposing private revision data', ({ mutate }) => {
+    const run = runWithCandidate()
+    mutate(run)
+
+    const view = buildPublicEditorRevisionRun(run)
+    const diagnostics = buildEditorRevisionDiagnostics(run)
+
+    expect(view).toMatchObject({
+      status: 'failed',
+      chapter_id: 0,
+      progress: null,
+      can_cancel: false,
+      can_retry: false,
+      can_continue: false,
+      error: { code: 'REVISION_RUN_MALFORMED' },
+    })
+    expect(diagnostics).toMatchObject({
+      status: 'failed',
+      chapter_id: 0,
+      error: { code: 'REVISION_RUN_MALFORMED' },
+      rejected_candidate: null,
+      generation: null,
+      admission: null,
+    })
+    const serialized = JSON.stringify({ view, diagnostics })
+    for (const secret of [SOURCE_TEXT, CANDIDATE_TEXT, FULL_CONTEXT, RENDERED_PROMPT, 'input_ref', 'output_ref']) {
+      expect(serialized).not.toContain(secret)
+    }
+  })
+
+  test('keeps a valid revision input compatible when model id is omitted', () => {
+    const run = runWithCandidate()
+    const input = JSON.parse(String(run.input_ref || '{}'))
+    delete input.model_id
+    run.input_ref = JSON.stringify(input)
+
+    expect(buildPublicEditorRevisionRun(run)).toMatchObject({
+      status: 'running',
+      chapter_id: 7,
+      can_cancel: true,
+      error: null,
+    })
   })
 })
