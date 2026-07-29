@@ -68,6 +68,7 @@ export type ChapterActionBarHandlers = {
 export function ChapterActionBar({
   input,
   loading = false,
+  primaryDisabled = false,
   title,
   statusTags = [],
   wordCountLabel,
@@ -81,6 +82,7 @@ export function ChapterActionBar({
 }: {
   input?: ChapterWorkflowInput
   loading?: boolean
+  primaryDisabled?: boolean
   title?: React.ReactNode
   statusTags?: Array<{ key: string; label: string; color?: string; tooltip?: string }>
   wordCountLabel?: string
@@ -180,6 +182,7 @@ export function ChapterActionBar({
             type={primaryDanger ? 'primary' : 'default'}
             danger={primaryDanger}
             className={crystalClassForAction(String(presenter.primaryAction.key), presenter.primaryAction.kind)}
+            disabled={primaryDisabled}
             loading={loading}
             onClick={() => run(presenter.primaryAction.key)}
           >

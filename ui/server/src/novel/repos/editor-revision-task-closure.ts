@@ -19,6 +19,10 @@ function hasDurablePayload(value: unknown): boolean {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length)
 }
 
+export function isEditorRevisionTaskClosureStatus(value: unknown): boolean {
+  return value === 'resolved' || value === 'needs_review'
+}
+
 export function requiredEditorRevisionTaskAnnotationKey(taskValue: unknown, taskStatus: unknown): string {
   if (String(taskStatus || '').trim() !== 'resolved') return ''
 

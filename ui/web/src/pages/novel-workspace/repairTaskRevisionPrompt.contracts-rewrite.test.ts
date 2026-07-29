@@ -195,6 +195,67 @@ describe('buildRepairTaskRevisionPrompt contracts/rewrite-closure', () => {
     expect(failedQuality.note).toContain('自动复检未通过')
   })
 
+  test('keeps generic delivery-risk tasks open when convergence evidence is missing', () => {
+    const result = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'review_annotation_risk',
+        annotation_key: 'reader_payoff_sync:202:9:9:reader_payoff_debt:回报欠账 1',
+      },
+      {
+        quality_refresh: { ok: true, score: 88 },
+      },
+    )
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain('缺少 delivery_risk_convergence')
+  })
+
+  test('keeps generic delivery-risk tasks open when convergence residual count is malformed', () => {
+    const result = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'review_annotation_risk',
+        annotation_key: 'reader_payoff_sync:202:9:9:reader_payoff_debt:回报欠账 1',
+      },
+      {
+        quality_refresh: { ok: true, score: 88 },
+        delivery_risk_convergence: {
+          residual_count: 'n/a',
+          label: '残余计数不可用',
+        },
+      },
+    )
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain('残余计数无效')
+  })
+
+  test.each([
+    ['explicit non-passing', 'worse'],
+    ['whitespace-padded', ' cleared '],
+    ['non-string', ['cleared']],
+  ] as const)('keeps generic delivery-risk tasks open for a %s convergence status even when residual_count is zero', (_label, status) => {
+    const result = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'review_annotation_risk',
+        annotation_key: 'reader_payoff_sync:202:9:9:reader_payoff_debt:回报欠账 1',
+      },
+      {
+        quality_refresh: { ok: true, score: 88 },
+        delivery_risk_convergence: {
+          status,
+          residual_count: 0,
+          label: '显式状态未通过',
+        },
+      },
+    )
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain('显式状态未通过')
+  })
+
   test('closes oh-story post batch quality repair only when all warning checks clear', () => {
     const task = {
       source: 'auto_creation_safe_batch_risk',

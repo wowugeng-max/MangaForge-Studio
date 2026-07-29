@@ -5,7 +5,38 @@ import {
   buildRepairTaskRevisionPrompt,
   listQualityContractRequiredFields,
   listQualityContractRequiredFieldKeys,
+  qualityAuditCheckFailed,
+  qualityContractCheckFailed,
+  rawPassLikeStatusOutcome,
 } from './repairTaskRevisionPrompt'
+
+function buildAggregateSceneCardReceiptClosure(check: Record<string, unknown>) {
+  return buildDeliveryRiskRevisionClosurePlan(
+    {
+      source: 'review_annotation_risk',
+      issue_type: 'scene_card_receipts_gap',
+      annotation_key: 'prose_quality:202:12:12:scene_card_receipt:场景卡回执',
+    },
+    {
+      quality_refresh: {
+        ok: true,
+        score: 88,
+        review: {
+          quality_audit_checks: [
+            {
+              key: 'scene_card_receipts_sync_ok',
+              label: '场景卡回执',
+              status: 'pass',
+              receipt_count: 2,
+              ...check,
+            },
+          ],
+        },
+      },
+      delivery_risk_convergence: { status: 'cleared', residual_count: 0, label: '风险已清零' },
+    },
+  )
+}
 
 describe('buildRepairTaskRevisionPrompt contracts/open-until-clear a', () => {
   test('injects chapter hook quality evidence for page-turn repair tasks', () => {
@@ -130,7 +161,15 @@ describe('buildRepairTaskRevisionPrompt contracts/open-until-clear a', () => {
         quality_refresh: {
           ok: true,
           score: 86,
-          review: { issues: ['ok｜正文工艺｜已通过'] },
+          review: {
+            issues: [
+              {
+                key: 'scene_card_receipt_2_undelivered',
+                label: '场景卡回执证据复核',
+                status: 'ok',
+              },
+            ],
+          },
         },
         delivery_risk_convergence: { status: 'cleared', residual_count: 0, label: '风险已清零' },
       },
@@ -139,6 +178,82 @@ describe('buildRepairTaskRevisionPrompt contracts/open-until-clear a', () => {
     expect(cleared.taskStatus).toBe('resolved')
     expect(cleared.annotationStatus).toBe('resolved')
     expect(cleared.note).toContain('场景卡回执复检通过')
+  })
+
+  test.each([
+    ['specific scene-card receipt', 'scene_card_receipt_2_undelivered'],
+    ['aggregate scene-card receipt', 'scene_card_receipts_gap'],
+  ] as const)('closes a %s task from the explicit aggregate receipt-sync pass', (_label, issueType) => {
+    const result = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'review_annotation_risk',
+        issue_type: issueType,
+        annotation_key: 'prose_quality:202:12:12:scene_card_receipt:场景卡回执',
+      },
+      {
+        quality_refresh: {
+          ok: true,
+          score: 88,
+          review: {
+            quality_audit_checks: [
+              {
+                key: 'scene_card_receipts_sync_ok',
+                label: '场景卡回执',
+                status: 'pass',
+                missed_count: 0,
+                receipt_count: 2,
+              },
+            ],
+          },
+        },
+        delivery_risk_convergence: { status: 'cleared', residual_count: 0, label: '风险已清零' },
+      },
+    )
+
+    expect(result.taskStatus).toBe('resolved')
+    expect(result.annotationStatus).toBe('resolved')
+    expect(result.note).toContain('场景卡回执复检通过')
+  })
+
+  test('keeps aggregate scene-card receipt tasks open when missed_count is missing', () => {
+    const result = buildAggregateSceneCardReceiptClosure({})
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain('场景卡回执')
+  })
+
+  test('keeps aggregate scene-card receipt tasks open when missed_count is positive', () => {
+    const result = buildAggregateSceneCardReceiptClosure({
+      key: 'scene_card_receipts_sync',
+      missed_count: 1,
+    })
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain('场景卡回执')
+  })
+
+  test('closes aggregate scene-card receipt tasks for an actual camelCase zero missedCount', () => {
+    const result = buildAggregateSceneCardReceiptClosure({ missedCount: 0 })
+
+    expect(result.taskStatus).toBe('resolved')
+    expect(result.annotationStatus).toBe('resolved')
+    expect(result.note).toContain('场景卡回执复检通过')
+  })
+
+  test.each([
+    ['numeric string zero', '0'],
+    ['null', null],
+    ['negative number', -1],
+    ['NaN', Number.NaN],
+    ['positive infinity', Number.POSITIVE_INFINITY],
+  ] as const)('keeps aggregate scene-card receipt tasks open for a malformed %s missed_count', (_label, missedCount) => {
+    const result = buildAggregateSceneCardReceiptClosure({ missed_count: missedCount })
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain('场景卡回执')
   })
 
   test('keeps scene-card directive tasks open until execution checks clear', () => {
@@ -312,6 +427,320 @@ describe('buildRepairTaskRevisionPrompt contracts/open-until-clear a', () => {
     expect(cleared.annotationStatus).toBe('resolved')
     expect(cleared.note).toContain('质量诊断复检通过')
     expect(cleared.note).toContain('quality_audit_checks')
+  })
+
+  test.each([
+    ['unknown status', { status: 'unknown' }],
+    ['whitespace-padded result', { result: ' pass ' }],
+    ['uppercase state', { state: 'PASS' }],
+    ['non-string status', { status: ['pass'] }],
+  ] as const)('treats a quality-contract check with %s as failed', (_label, explicitStatus) => {
+    expect(qualityContractCheckFailed(explicitStatus)).toBe(true)
+  })
+
+  test('keeps exact quality-contract pass aliases and status-free boolean compatibility', () => {
+    expect(qualityContractCheckFailed({ status: 'pass' })).toBe(false)
+    expect(qualityContractCheckFailed({ result: 'ok' })).toBe(false)
+    expect(qualityContractCheckFailed({ state: 'done' })).toBe(false)
+    expect(qualityContractCheckFailed({ passed: true })).toBe(false)
+  })
+
+  test.each([
+    ['status pass wins over later severity', { status: 'pass', severity: 'high' }, true],
+    ['result ok wins over later severity when status is absent', { result: 'ok', severity: 'high' }, true],
+    ['status warn wins over later result pass', { status: 'warn', result: 'pass' }, false],
+    ['malformed status wins over later result pass', { status: ['pass'], result: 'pass' }, false],
+  ] as const)('uses the first owned raw outcome alias when %s', (_label, outcome, expected) => {
+    expect(rawPassLikeStatusOutcome(outcome, 'status', 'result', 'severity')).toBe(expected)
+  })
+
+  test('applies ordered raw outcome aliases to quality-contract checks', () => {
+    expect(qualityContractCheckFailed({ status: 'pass', result: 'warn' })).toBe(false)
+    expect(qualityContractCheckFailed({ result: 'ok', state: 'warn' })).toBe(false)
+    expect(qualityContractCheckFailed({ status: 'warn', result: 'pass' })).toBe(true)
+    expect(qualityContractCheckFailed({ status: ['pass'], result: 'pass' })).toBe(true)
+  })
+
+  test.each([
+    ['unknown', 'unknown'],
+    ['whitespace-padded', ' pass '],
+    ['uppercase', 'PASS'],
+    ['non-string', ['pass']],
+  ] as const)('treats a quality-audit check with a %s explicit status as failed even when score is high', (_label, status) => {
+    const check = {
+      key: 'purpose_tag_density_gap',
+      label: '目的词详略分配',
+      status,
+      strategy: 'rewrite',
+      purpose_tag: '爽点展开',
+      density_change: '爽点场景由一句摘要扩成动作、对白、余波三拍。',
+      conflict_bound_info: '信息只跟旧印审判冲突释放。',
+      changed_evidence: '“旧印压住案角，长老席第一次退了半步。”',
+      fix: '按目的词重排详略。',
+      remaining_risk: '',
+      score: 100,
+    }
+
+    expect(qualityAuditCheckFailed(check)).toBe(true)
+  })
+
+  test('allows a raw exact quality-audit pass status before score fallback', () => {
+    const check = {
+      key: 'purpose_tag_density_gap',
+      label: '目的词详略分配',
+      status: 'pass',
+      strategy: 'rewrite',
+      purpose_tag: '爽点展开',
+      density_change: '爽点场景由一句摘要扩成动作、对白、余波三拍。',
+      conflict_bound_info: '信息只跟旧印审判冲突释放。',
+      changed_evidence: '“旧印压住案角，长老席第一次退了半步。”',
+      fix: '按目的词重排详略。',
+      remaining_risk: '',
+      score: 0,
+    }
+
+    expect(qualityAuditCheckFailed(check)).toBe(false)
+  })
+
+  test('applies ordered raw outcome aliases to quality-audit checks', () => {
+    const completeCheck = {
+      key: 'purpose_tag_density_gap',
+      label: '目的词详略分配',
+      strategy: 'rewrite',
+      purpose_tag: '爽点展开',
+      density_change: '爽点场景由一句摘要扩成动作、对白、余波三拍。',
+      conflict_bound_info: '信息只跟旧印审判冲突释放。',
+      changed_evidence: '“旧印压住案角，长老席第一次退了半步。”',
+      fix: '按目的词重排详略。',
+      remaining_risk: '',
+      score: 100,
+    }
+
+    expect(qualityAuditCheckFailed({ ...completeCheck, status: 'pass', severity: 'high' })).toBe(false)
+    expect(qualityAuditCheckFailed({ ...completeCheck, status: 'pass', result: 'warn', severity: 'high' })).toBe(false)
+    expect(qualityAuditCheckFailed({ ...completeCheck, status: 'warn', result: 'pass' })).toBe(true)
+    expect(qualityAuditCheckFailed({ ...completeCheck, status: ['pass'], result: 'pass' })).toBe(true)
+  })
+
+  test('keeps scene-card receipt tasks open when receipt evidence is missing', () => {
+    const sceneCardReceipt = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'review_annotation_risk',
+        issue_type: 'scene_card_receipt_2_undelivered',
+        annotation_key: 'prose_quality:202:12:12:scene_card_receipt:场景卡回执',
+      },
+      {
+        quality_refresh: { ok: true, score: 88 },
+        delivery_risk_convergence: { status: 'cleared', residual_count: 0, label: '风险已清零' },
+      },
+    )
+
+    expect(sceneCardReceipt.taskStatus).toBe('needs_review')
+    expect(sceneCardReceipt.annotationStatus).toBe('')
+    expect(sceneCardReceipt.note).toContain('缺少 scene_card_receipt')
+  })
+
+  test('keeps scene-card receipt tasks open when only unrelated checks are present', () => {
+    const result = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'review_annotation_risk',
+        issue_type: 'scene_card_receipt_2_undelivered',
+        annotation_key: 'prose_quality:202:12:12:scene_card_receipt:场景卡回执',
+      },
+      {
+        quality_refresh: {
+          ok: true,
+          score: 88,
+          review: { issues: ['ok｜正文工艺｜已通过'] },
+        },
+        delivery_risk_convergence: { status: 'cleared', residual_count: 0, label: '风险已清零' },
+      },
+    )
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain('缺少 scene_card_receipt')
+  })
+
+  test('does not close a scene-card receipt task from another scene passing', () => {
+    const result = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'review_annotation_risk',
+        issue_type: 'scene_card_receipt_2_undelivered',
+        annotation_key: 'prose_quality:202:12:12:scene_card_receipt:场景卡回执',
+      },
+      {
+        quality_refresh: {
+          ok: true,
+          score: 88,
+          review: {
+            issues: [
+              {
+                key: 'scene_card_receipt_1_undelivered',
+                label: '场景1回执证据复核',
+                status: 'ok',
+              },
+            ],
+          },
+        },
+        delivery_risk_convergence: { status: 'cleared', residual_count: 0, label: '风险已清零' },
+      },
+    )
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain('缺少 scene_card_receipt_2_undelivered')
+  })
+
+  test('keeps a matching scene-card receipt task open without an explicit pass outcome', () => {
+    const result = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'review_annotation_risk',
+        issue_type: 'scene_card_receipt_2_undelivered',
+        annotation_key: 'prose_quality:202:12:12:scene_card_receipt:场景卡回执',
+      },
+      {
+        quality_refresh: {
+          ok: true,
+          score: 88,
+          review: {
+            issues: [
+              {
+                key: 'scene_card_receipt_2_undelivered',
+                label: '场景2回执证据复核',
+              },
+            ],
+          },
+        },
+        delivery_risk_convergence: { status: 'cleared', residual_count: 0, label: '风险已清零' },
+      },
+    )
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain('明确通过状态缺失')
+  })
+
+  test('keeps quality-audit tasks open when audit checks are missing', () => {
+    const qualityAudit = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'review_annotation_risk',
+        issue_type: 'purpose_tag_density_gap',
+        annotation_category: 'quality_audit',
+        annotation_key: 'prose_quality:202:12:12:purpose_tag_density_gap:质量诊断缺口 1',
+      },
+      {
+        quality_refresh: { ok: true, score: 88 },
+        delivery_risk_convergence: { status: 'cleared', residual_count: 0, label: '风险已清零' },
+      },
+    )
+
+    expect(qualityAudit.taskStatus).toBe('needs_review')
+    expect(qualityAudit.annotationStatus).toBe('')
+    expect(qualityAudit.note).toContain('缺少 quality_audit_checks')
+  })
+
+  test('keeps quality-audit tasks open when only unrelated audit checks are present', () => {
+    const result = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'review_annotation_risk',
+        issue_type: 'purpose_tag_density_gap',
+        annotation_category: 'quality_audit',
+        annotation_key: 'prose_quality:202:12:12:purpose_tag_density_gap:质量诊断缺口 1',
+      },
+      {
+        quality_refresh: {
+          ok: true,
+          score: 88,
+          review: {
+            quality_audit_checks: [
+              {
+                key: 'information_flow',
+                label: '信息传递',
+                status: 'pass',
+                strategy: 'compress',
+                purpose_tag: '信息跟冲突走',
+                density_change: '压缩过渡说明，把阵图线索放进对峙动作。',
+                conflict_bound_info: '阵图信息随长老席追问暴露。',
+                changed_evidence: '“他只露出半枚残印，长老席立刻追问内库阵图。”',
+                fix: '压缩说明，绑定冲突释放。',
+                remaining_risk: '',
+              },
+            ],
+          },
+        },
+        delivery_risk_convergence: { status: 'cleared', residual_count: 0, label: '风险已清零' },
+      },
+    )
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain('缺少 quality_audit_checks')
+    expect(result.note).toContain('purpose_tag_density_gap')
+  })
+
+  test('does not match a quality-audit task from unrelated check evidence prose', () => {
+    const result = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'review_annotation_risk',
+        issue_type: 'purpose_tag_density_gap',
+        annotation_category: 'quality_audit',
+        annotation_key: 'prose_quality:202:12:12:purpose_tag_density_gap:质量诊断缺口 1',
+      },
+      {
+        quality_refresh: {
+          ok: true,
+          score: 88,
+          review: {
+            quality_audit_checks: [
+              {
+                key: 'information_flow',
+                label: '信息传递',
+                status: 'pass',
+                strategy: 'compress',
+                purpose_tag: '信息跟冲突走',
+                density_change: '压缩过渡说明，把阵图线索放进对峙动作。',
+                conflict_bound_info: '阵图信息随长老席追问暴露。',
+                changed_evidence: '“他只露出半枚残印，长老席立刻追问内库阵图。”',
+                evidence: '关联说明提到 purpose_tag_density_gap 已由另一项检查处理。',
+                fix: '压缩说明，绑定冲突释放。',
+                remaining_risk: '',
+              },
+            ],
+          },
+        },
+        delivery_risk_convergence: { status: 'cleared', residual_count: 0, label: '风险已清零' },
+      },
+    )
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain('缺少 quality_audit_checks 中 purpose_tag_density_gap')
+  })
+
+  test('keeps a bare quality-audit issue string open without an explicit pass prefix', () => {
+    const result = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'review_annotation_risk',
+        issue_type: 'purpose_tag_density_gap',
+        annotation_category: 'quality_audit',
+        annotation_key: 'prose_quality:202:12:12:purpose_tag_density_gap:质量诊断缺口 1',
+      },
+      {
+        quality_refresh: {
+          ok: true,
+          score: 88,
+          review: {
+            quality_audit_checks: ['purpose_tag_density_gap'],
+          },
+        },
+        delivery_risk_convergence: { status: 'cleared', residual_count: 0, label: '风险已清零' },
+      },
+    )
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain('明确通过状态缺失')
   })
 
   test('keeps pre-draft execution repair tasks open until nested receipts clear', () => {

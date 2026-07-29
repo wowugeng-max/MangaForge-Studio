@@ -47,10 +47,24 @@ import { ChapterActionBar } from './workspace-center-chapter-action-bar'
 import { proseStreamControl } from './prose-stream-control'
 import { WorkspaceCenterChapterContext } from './workspace-center-chapter-context'
 import { WorkspaceCenterQualityRevisionPanel } from './workspace-center-quality-revision-panel'
+import {
+  isActiveEditorRevisionTask,
+  type EditorRevisionTask,
+} from './editorRevisionTasks'
 import { buildChapterWorkflowPresenter } from './chapter-workflow-presenter'
 import './WorkspaceCenter.css'
 
 const { Title, Text, Paragraph } = Typography
+
+export function dispatchWorkspaceDeliveryAction(
+  key: NovelDeliveryActionKey,
+  revisionActive: boolean,
+  onDeliveryAction?: (key: NovelDeliveryActionKey) => void,
+) {
+  if (key === 'apply_editor_revision' && revisionActive) return false
+  onDeliveryAction?.(key)
+  return true
+}
 
 export function WorkspaceCenter({
   isEmptyProject,
@@ -117,9 +131,13 @@ export function WorkspaceCenter({
   onFocusQualityPanel,
   proseQualityReports = [],
   editorRevisionReports = [],
+  editorRevisionTask = null,
   proseQualityLoading = false,
   onRefreshProseQuality,
   onApplyEditorRevision,
+  onCancelEditorRevision,
+  onRetryEditorRevision,
+  onLoadEditorRevisionDiagnostics,
   isImmersiveShell = false,
 }: {
   isEmptyProject: boolean
@@ -186,9 +204,13 @@ export function WorkspaceCenter({
   onFocusQualityPanel?: () => void
   proseQualityReports?: any[]
   editorRevisionReports?: any[]
+  editorRevisionTask?: EditorRevisionTask | null
   proseQualityLoading?: boolean
   onRefreshProseQuality?: () => void
   onApplyEditorRevision?: (report: any, options?: { revisionMode?: string; prompt?: string; skipConfirm?: boolean }) => void
+  onCancelEditorRevision?: (runId: number) => void | Promise<unknown>
+  onRetryEditorRevision?: (runId: number) => void | Promise<unknown>
+  onLoadEditorRevisionDiagnostics?: (runId: number) => Promise<Record<string, unknown>>
   isImmersiveShell?: boolean
 }) {
   const [editorDisplayPrefs, setEditorDisplayPrefs] = React.useState<EditorDisplayPrefs>(() => loadEditorDisplayPrefs())
@@ -216,6 +238,17 @@ export function WorkspaceCenter({
     outlineCount > 0 ? '大纲已备' : '缺大纲',
   ].join(' · ')
   const activeWordCount = chapterWordCount(activeChapter)
+  const revisionActive = Boolean(
+    editorRevisionTask
+    && Number(editorRevisionTask.chapter_id) === Number(activeChapter?.id || 0)
+    && isActiveEditorRevisionTask(editorRevisionTask),
+  )
+  const guardedDeliveryAction = (key: NovelDeliveryActionKey) => (
+    dispatchWorkspaceDeliveryAction(key, revisionActive, onDeliveryAction)
+  )
+  const revisionActionDisabled = (key?: NovelDeliveryActionKey | null) => (
+    Boolean(revisionActive && key === 'apply_editor_revision')
+  )
   const recommendedAction = writingRecommendation ?? buildNovelWritingRecommendation({
     materialReady,
     materialRecommendations,
@@ -386,7 +419,7 @@ export function WorkspaceCenter({
         : false
   const runQueueDeliveryAction = () => {
     if (deliverySummary.actionKey) {
-      onDeliveryAction?.(deliverySummary.actionKey)
+      guardedDeliveryAction(deliverySummary.actionKey)
       return
     }
     onOpenQualityCard()
@@ -450,6 +483,9 @@ export function WorkspaceCenter({
     canSyncStoryState: Boolean(deliverySummary.storyStateSyncAction || deliverySummary.storyStatePanel?.canSync),
     revisionAvailable: Boolean(chapterAcceptanceDesk?.acceptanceStatus === 'needs_revision'),
   })
+  const headerRevisionActive = Boolean(
+    revisionActive && chapterWorkflow.primaryAction.key === 'apply_editor_revision',
+  )
   const chapterActionLoading = Boolean(
     generatingProse || deliveryActionLoading || preDraftBriefLoading || editorReportLoading,
   )
@@ -491,7 +527,7 @@ export function WorkspaceCenter({
       return
     }
     if (key === 'refresh_current_quality' || key === 'create_editor_report' || key === 'apply_editor_revision' || key === 'sync_story_state' || key === 'accept_chapter_and_continue') {
-      onDeliveryAction?.(key as any)
+      guardedDeliveryAction(key as NovelDeliveryActionKey)
       return
     }
   }
@@ -556,7 +592,7 @@ export function WorkspaceCenter({
       generatingProse={generatingProse}
       generationTargetWordCount={generationTargetWordCount}
       ipSceneIntakeTooltip={ipSceneIntakeTooltip}
-      onDeliveryAction={onDeliveryAction}
+      onDeliveryAction={guardedDeliveryAction}
       onDisableStyleSamples={onDisableStyleSamples}
       onLockStyleSamples={onLockStyleSamples}
       onOpenStoryAssets={onOpenStoryAssets}
@@ -567,6 +603,7 @@ export function WorkspaceCenter({
       openChapterBlueprintEditor={openChapterBlueprintEditor}
       preDraftBriefLoading={preDraftBriefLoading}
       queueFocus={queueFocus}
+      revisionActionDisabled={revisionActionDisabled}
       runDraftBriefAction={runDraftBriefAction}
       saveChapterBlueprintEditor={saveChapterBlueprintEditor}
       sceneCardCount={sceneCards.length}
@@ -602,6 +639,7 @@ export function WorkspaceCenter({
             <ChapterActionBar
               presenter={chapterWorkflow}
               loading={chapterActionLoading}
+              primaryDisabled={headerRevisionActive}
               title={
                 <Title className="chapter-action-bar-title novel-editor-title" level={5}>
                   第{activeChapter.chapter_no}章《{displayValue(activeChapter.title) || '无标题'}》
@@ -744,10 +782,14 @@ export function WorkspaceCenter({
             activeChapter={activeChapter}
             proseQualityReports={proseQualityReports}
             editorRevisionReports={editorRevisionReports}
+            editorRevisionTask={editorRevisionTask}
             proseQualityLoading={proseQualityLoading}
             editorReportLoading={editorReportLoading}
             onRefreshProseQuality={onRefreshProseQuality}
             onApplyEditorRevision={onApplyEditorRevision}
+            onCancelEditorRevision={onCancelEditorRevision}
+            onRetryEditorRevision={onRetryEditorRevision}
+            onLoadEditorRevisionDiagnostics={onLoadEditorRevisionDiagnostics}
             onCreateEditorReport={onCreateEditorReport}
             onOpenSideQuality={onFocusQualityPanel}
           />

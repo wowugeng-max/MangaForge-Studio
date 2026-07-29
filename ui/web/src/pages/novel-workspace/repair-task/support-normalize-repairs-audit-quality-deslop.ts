@@ -12,6 +12,7 @@ import {
   genericClosureEvidenceDetail,
   preDraftExecutionReceiptSources,
   qualityContractMissingFields,
+  rawPassLikeStatusOutcome,
 } from './quality-contract'
 
 export function qualityAuditCheckLine(value: any) {
@@ -40,12 +41,11 @@ export function qualityAuditCheckLine(value: any) {
 export function qualityAuditCheckFailed(value: any) {
   if (typeof value === 'string') return /fail|failed|warn|warning|missing|missed|block|阻|缺|未/.test(value.toLowerCase())
   const item = objectValue(value)
-  const status = firstText(item.status, item.result, item.severity).toLowerCase()
+  const explicitStatusPassed = rawPassLikeStatusOutcome(item, 'status', 'result', 'severity')
   const score = Number(item.score)
   const missingFields = qualityContractMissingFields(item, 'quality_audit_checks')
   if (missingFields.length > 0) return true
-  if (['pass', 'passed', 'ok', 'done', 'true'].includes(status)) return false
-  if (['fail', 'failed', 'warn', 'warning', 'missing', 'missed', 'blocker', 'blocked', 'error'].includes(status)) return true
+  if (explicitStatusPassed !== null) return !explicitStatusPassed
   return Number.isFinite(score) && score < 78
 }
 
@@ -130,4 +130,3 @@ export function normalizeDeslopRepairReceiptRepair(task: AnyRecord) {
     nextActions,
   }
 }
-

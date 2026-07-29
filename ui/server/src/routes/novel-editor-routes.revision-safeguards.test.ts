@@ -22,6 +22,7 @@ import type {
 import { revisionTextHash } from './novel-editor/revision-candidate-admission'
 import { registerNovelEditorAnnotationRoutes } from './novel-editor/register-annotations'
 import { registerNovelEditorRevisionRoutes } from './novel-editor/register-revision'
+import { createEditorRevisionWorker } from './novel-editor/revision-worker'
 import { registerNovelRunRoutes } from './novel-run-routes'
 import {
   buildReviewAnnotations,
@@ -38,8 +39,10 @@ import {
   isRevisionOutputTruncated,
 } from './novel-editor-routes'
 
-const ROUTE_SOURCE_TEXT = '不可泄漏的路由源正文。'.repeat(80)
-const ROUTE_CANDIDATE_TEXT = '不可泄漏的路由候选正文。'.repeat(80)
+const ROUTE_SOURCE_SENTINEL = 'SOURCE_SENTINEL'
+const ROUTE_CANDIDATE_SENTINEL = 'CANDIDATE_SENTINEL'
+const ROUTE_SOURCE_TEXT = `${ROUTE_SOURCE_SENTINEL}不可泄漏的路由源正文。`.repeat(80)
+const ROUTE_CANDIDATE_TEXT = `${ROUTE_CANDIDATE_SENTINEL}不可泄漏的路由候选正文。`.repeat(80)
 const ROUTE_CONTEXT_SECRET = '完整 context package 秘密'
 const ROUTE_USER_PROMPT = '只修改章末钩子，不可泄漏。'
 const ROUTE_CLOSURE_SECRET = '不可泄漏的 linked closure 私密字段'
@@ -74,6 +77,20 @@ async function callRoute(handler: any, req: any = {}) {
   }
   await handler({ body: {}, query: {}, params: {}, ...req }, res)
   return res
+}
+
+async function withinOneSecond<T>(promise: Promise<T>, label: string) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out`)), 1_000)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 function initialRevisionCheckpoint(): EditorRevisionCheckpoint {
@@ -168,7 +185,10 @@ function completedRevisionCheckpoint(): EditorRevisionCheckpoint {
   return checkpoint
 }
 
-async function createAsyncRevisionRouteFixture() {
+async function createAsyncRevisionRouteFixture(options: {
+  useRealWorker?: boolean
+  executeAgent?: (...args: any[]) => Promise<any>
+} = {}) {
   const workspace = await tempWorkspace()
   const project = await createNovelProject(workspace, { title: '异步单章修订', reference_config: {} })
   const otherProject = await createNovelProject(workspace, { title: '其他项目', reference_config: {} })
@@ -193,6 +213,7 @@ async function createAsyncRevisionRouteFixture() {
     payload: JSON.stringify({
       chapter_id: chapter.id,
       report: {
+        chapter_id: chapter.id,
         revision_strategy: 'surgical_patch',
         must_fix: ['收紧章末钩子'],
       },
@@ -208,7 +229,7 @@ async function createAsyncRevisionRouteFixture() {
   const canceled: Array<{ runId: number; persistedStatus: string }> = []
   let revisionAgentCalls = 0
   let enqueueError: unknown = null
-  const worker = {
+  const notificationWorker = {
     enqueue(runId: number) {
       if (enqueueError) throw enqueueError
       enqueued.push(runId)
@@ -226,11 +247,11 @@ async function createAsyncRevisionRouteFixture() {
   const getProject = async (activeWorkspace: string, id: number) => (
     (await listNovelProjects(activeWorkspace)).find(item => item.id === id) || null
   )
-  const { app, handlers } = createRouteHarness()
-  registerNovelEditorRevisionRoutes(app as any, {
+  const ctx: any = {
     getWorkspace: () => workspace,
     getProject,
     buildChapterContextPackage: async () => ({
+      chapter_target: { chapter_id: chapter.id, id: chapter.id, chapter_no: chapter.chapter_no },
       continuity: {
         previous_chapter: '第11章尾名单第一次出现',
         next_chapter: '第13章开篇承接名单归属',
@@ -243,11 +264,21 @@ async function createAsyncRevisionRouteFixture() {
     buildStructuralSimilarityReport: () => ({}),
     buildReferenceMigrationDryPlan: () => ({}),
     diffTexts: () => ({}),
-    executeAgent: async () => {
+    executeAgent: async (...args: any[]) => {
       revisionAgentCalls += 1
-      return { parsed: { chapter_text: ROUTE_CANDIDATE_TEXT }, finish_reason: 'stop' } as any
+      return options.executeAgent
+        ? options.executeAgent(...args)
+        : { parsed: { chapter_text: ROUTE_CANDIDATE_TEXT }, finish_reason: 'stop' } as any
     },
     updateStoryStateMachine: async () => ({}),
+  }
+  const worker = options.useRealWorker
+    ? createEditorRevisionWorker(ctx)
+    : notificationWorker
+  if (options.useRealWorker) await worker.start(workspace)
+  const { app, handlers } = createRouteHarness()
+  registerNovelEditorRevisionRoutes(app as any, {
+    ...ctx,
     editorRevisionWorker: worker,
   } as any)
   registerNovelEditorAnnotationRoutes(app as any, {
@@ -270,6 +301,7 @@ async function createAsyncRevisionRouteFixture() {
     otherChapter,
     review,
     otherReview,
+    worker,
     enqueued,
     canceled,
     failEnqueue(error: unknown = new Error('worker enqueue failed')) {
@@ -277,6 +309,9 @@ async function createAsyncRevisionRouteFixture() {
     },
     get revisionAgentCalls() {
       return revisionAgentCalls
+    },
+    async stopWorker() {
+      if (options.useRealWorker) await worker.stop()
     },
     handlers,
   }
@@ -498,6 +533,49 @@ describe('asynchronous editor revision API safeguards', () => {
     expect(routeBlock).not.toContain('updateNovelChapter(')
     expect(routeBlock).not.toContain('createProseQualityReview(')
     expect(routeBlock).not.toContain('prepareSingleChapterStoryState(')
+  })
+
+  test('returns 202 before an unresolved provider and atomically conflicts concurrent same-chapter creates', async () => {
+    let markProviderEntered!: () => void
+    const providerEntered = new Promise<void>(resolve => { markProviderEntered = resolve })
+    const unresolvedProvider = new Promise<never>(() => {})
+    const fixture = await createAsyncRevisionRouteFixture({
+      useRealWorker: true,
+      executeAgent: async () => {
+        markProviderEntered()
+        return unresolvedProvider
+      },
+    })
+    const applyRevision = fixture.handlers.get('POST /api/novel/reviews/:reviewId/apply-revision')
+    const request = {
+      params: { reviewId: String(fixture.review.id) },
+      body: {
+        project_id: fixture.project.id,
+        chapter_id: fixture.chapter.id,
+        prompt: ROUTE_USER_PROMPT,
+      },
+    }
+
+    try {
+      const responses = await withinOneSecond(
+        Promise.all([callRoute(applyRevision, request), callRoute(applyRevision, request)]),
+        'concurrent apply-revision responses',
+      )
+      await withinOneSecond(providerEntered, 'revision provider entry')
+
+      expect(responses.map(response => response.statusCode).sort()).toEqual([202, 409])
+      expect(responses.find(response => response.statusCode === 202)?.body).toMatchObject({
+        ok: true,
+        status: 'queued',
+        chapter_id: fixture.chapter.id,
+      })
+      expect(responses.find(response => response.statusCode === 409)?.body).toMatchObject({
+        error_code: 'REVISION_ALREADY_ACTIVE',
+      })
+      expect(fixture.revisionAgentCalls).toBe(1)
+    } finally {
+      await fixture.stopWorker()
+    }
   })
 
   test('creates a queued immutable run, returns 202, and conflicts on the same active chapter', async () => {
@@ -725,6 +803,67 @@ describe('asynchronous editor revision API safeguards', () => {
     })
     expect(staleReplay.statusCode).toBe(409)
     expect(staleReplay.body).toMatchObject({ error_code: 'EDITOR_REVISION_TASK_CLOSURE_CONFLICT' })
+  })
+
+  test('rejects non-terminal editor-revision task closures without changing durable state', async () => {
+    const fixture = await createAsyncRevisionRouteFixture()
+    const sourceTask = { title: '关闭章末风险', task_status: 'open' }
+    const sourceRun = await appendNovelRun(fixture.workspace, {
+      project_id: fixture.project.id,
+      run_type: 'longform_production_repair',
+      step_name: 'non-terminal-linked-repair-task',
+      status: 'ready',
+      output_ref: JSON.stringify({ tasks: [sourceTask] }),
+    })
+    const applyRevision = fixture.handlers.get('POST /api/novel/reviews/:reviewId/apply-revision')
+    const created = await callRoute(applyRevision, {
+      params: { reviewId: String(fixture.review.id) },
+      body: {
+        project_id: fixture.project.id,
+        chapter_id: fixture.chapter.id,
+        repair_task_link: { run_id: sourceRun.id, task_index: 0, task: sourceTask },
+      },
+    })
+    await updateNovelRun(fixture.workspace, created.body.run_id, {
+      status: 'completed',
+      output_ref: JSON.stringify(completedRevisionCheckpoint()),
+    })
+    const updateTask = fixture.handlers.get('POST /api/novel/runs/:id/tasks/:taskIndex/status')
+
+    for (const status of ['open', 'in_progress']) {
+      const before = await listNovelRuns(fixture.workspace, fixture.project.id)
+      const rejected = await callRoute(updateTask, {
+        params: { id: String(sourceRun.id), taskIndex: '0' },
+        body: {
+          project_id: fixture.project.id,
+          status,
+          note: `${status} is not a terminal closure`,
+          editor_revision_run_id: created.body.run_id,
+        },
+      })
+      expect(rejected.statusCode).toBe(409)
+      expect(rejected.body).toMatchObject({ error_code: 'EDITOR_REVISION_TASK_CLOSURE_INVALID' })
+      expect(await listNovelRuns(fixture.workspace, fixture.project.id)).toEqual(before)
+    }
+
+    const legacyProgress = await callRoute(updateTask, {
+      params: { id: String(sourceRun.id), taskIndex: '0' },
+      body: {
+        project_id: fixture.project.id,
+        status: 'in_progress',
+        note: 'legacy non-editor update remains legal',
+      },
+    })
+    expect(legacyProgress.statusCode).toBe(200)
+    const legacyOpen = await callRoute(updateTask, {
+      params: { id: String(sourceRun.id), taskIndex: '0' },
+      body: {
+        project_id: fixture.project.id,
+        status: 'open',
+        note: 'legacy non-editor reopen remains legal',
+      },
+    })
+    expect(legacyOpen.statusCode).toBe(200)
   })
 
   test('rejects acknowledgement when a bulk update changes the current task note but preserves its receipt', async () => {
@@ -1529,7 +1668,9 @@ describe('asynchronous editor revision API safeguards', () => {
         generation: { provider_result_ref: 'provider-result://route-redaction' },
       },
     })
+    expect(JSON.stringify(diagnostics.body)).toContain(ROUTE_CANDIDATE_SENTINEL)
     expect(JSON.stringify(diagnostics.body)).not.toContain(ROUTE_SOURCE_TEXT)
+    expect(JSON.stringify(diagnostics.body)).not.toContain(ROUTE_SOURCE_SENTINEL)
     expect(JSON.stringify(diagnostics.body)).not.toContain(ROUTE_CONTEXT_SECRET)
 
     const genericCheckpoint = admittedRevisionCheckpoint()
@@ -1554,6 +1695,7 @@ describe('asynchronous editor revision API safeguards', () => {
     const runsRoute = fixture.handlers.get('GET /api/novel/runs')
     const detailRoute = fixture.handlers.get('GET /api/novel/runs/:id')
     const tasksRoute = fixture.handlers.get('GET /api/novel/projects/:id/tasks')
+    const statusRoute = fixture.handlers.get('GET /api/novel/editor-revisions/:runId')
     const pauseRoute = fixture.handlers.get('POST /api/novel/runs/:id/pause')
     const resumeRoute = fixture.handlers.get('POST /api/novel/runs/:id/resume')
 
@@ -1564,12 +1706,26 @@ describe('asynchronous editor revision API safeguards', () => {
       query: { project_id: String(fixture.project.id) },
     })
     const tasks = await callRoute(tasksRoute, { params: { id: String(fixture.project.id) } })
+    const status = await callRoute(statusRoute, {
+      params: { runId: String(runId) },
+      query: { project_id: String(fixture.project.id) },
+    })
     const fullRevision = full.body.find((item: any) => item.id === runId)
     const summaryRevision = summary.body.find((item: any) => item.id === runId)
     const task = tasks.body.tasks.find((item: any) => item.id === runId)
-    for (const response of [fullRevision, summaryRevision, detail.body, task]) {
+    for (const response of [status.body, fullRevision, summaryRevision, detail.body, task]) {
       const serialized = JSON.stringify(response)
-      for (const secret of [ROUTE_SOURCE_TEXT, ROUTE_CANDIDATE_TEXT, ROUTE_CONTEXT_SECRET, ROUTE_USER_PROMPT, ROUTE_CLOSURE_SECRET, 'input_ref', 'output_ref']) {
+      for (const secret of [
+        ROUTE_SOURCE_SENTINEL,
+        ROUTE_CANDIDATE_SENTINEL,
+        ROUTE_SOURCE_TEXT,
+        ROUTE_CANDIDATE_TEXT,
+        ROUTE_CONTEXT_SECRET,
+        ROUTE_USER_PROMPT,
+        ROUTE_CLOSURE_SECRET,
+        'input_ref',
+        'output_ref',
+      ]) {
         expect(serialized).not.toContain(secret)
       }
     }

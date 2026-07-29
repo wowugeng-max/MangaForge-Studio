@@ -27,7 +27,7 @@ function HandoffDetailCard({
 }
 
 export function WorkspaceChapterHandoffStrip(props: Record<string, any>) {
-  const { chapterHandoffDesk, deliveryActionLoading, onDeliveryAction } = props
+  const { chapterHandoffDesk, deliveryActionLoading, onDeliveryAction, revisionActionDisabled } = props
   if (!chapterHandoffDesk?.visible) return null
 
   const previousEnding = chapterHandoffDesk.previousEnding || '无明确章末钩子'
@@ -87,6 +87,7 @@ export function WorkspaceChapterHandoffStrip(props: Record<string, any>) {
         className="novel-chapter-handoff-action novel-btn-crystal novel-btn-crystal-display"
         type={chapterHandoffDesk.status === 'ready' ? 'primary' : 'default'}
         size="small"
+        disabled={revisionActionDisabled?.(chapterHandoffDesk.actionKey)}
         loading={deliveryActionLoading && chapterHandoffDesk.status !== 'ready'}
         onClick={() => onDeliveryAction?.(chapterHandoffDesk.actionKey)}
       >

@@ -17,6 +17,7 @@
     "test:novel-entry": "cd ui/web && bun test src/components/novel-entry/launchpadModel.test.ts src/components/novel-entry/deepDraftReviewModel.test.ts src/components/novel-entry/deepDraftFoundationScore.test.ts src/components/novel-entry/genreCatalogGuide.test.ts src/pages/novel-lobby/novelLobbyModel.test.ts",
     "test:planning-workspace": "cd ui/web && bun test src/pages/novel-workspace/planningWorkspaceModel.test.ts",
     "test:writing-cockpit": "cd ui/web && bun test src/pages/novel-workspace/payloadParseCache.test.ts src/pages/novel-workspace/useWorkspaceTasks.test.ts src/pages/novel-workspace/writingCockpitModel.test.ts src/pages/novel-workspace/writingRecommendationModel.test.ts src/pages/novel-workspace/autoCreationDirectorModel.test.ts src/pages/novel-workspace/repairTaskRevisionPrompt.test.ts src/pages/novel-workspace/TaskCenterDrawer.test.ts src/pages/novel-workspace/workspaceUiShell.test.ts src/pages/novel-workspace/writingBibleDefaults.test.ts src/pages/novel-workspace/outlineTreeModel.test.ts",
-    "validate:novel-prose-quality": "bun scripts/validate-novel-prose-quality-recovery.ts"
+    "validate:novel-prose-quality": "bun scripts/validate-novel-prose-quality-recovery.ts",
+    "audit:editor-revision-damage": "bun scripts/audit-editor-revision-damage.ts"
   }
 }

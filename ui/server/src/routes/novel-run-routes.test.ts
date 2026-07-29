@@ -6,6 +6,7 @@ import { join } from 'path'
 import { appendNovelRun, createNovelProject, createNovelReview, listNovelProjects, listNovelReviews, listNovelRuns, updateNovelRun } from '../novel'
 import { setNovelMutationTestHook } from '../novel-test-support'
 import { createNovelProductionService } from './novel-production-service'
+import { revisionTextHash } from './novel-editor/revision-candidate-admission'
 import { extractChapterRef, extractConfigTrace, extractMaterialTrace, extractModelTrace, registerNovelRunRoutes } from './novel-run-routes'
 
 let workspaces: string[] = []
@@ -348,6 +349,317 @@ describe('novel run task center source guards', () => {
     expect(invalidRuns.body).toMatchObject({ error_code: 'INVALID_VIEW' })
     expect(await listNovelReviews(workspace, project.id)).toEqual(fullReviews)
     expect(await listNovelRuns(workspace, project.id)).toEqual(fullRuns)
+  })
+
+  test('keeps editor_revision in run projections while redacting raw refs, source prose, and candidate prose', async () => {
+    const workspace = await tempWorkspace()
+    const production = createNovelProductionService()
+    const project = await createNovelProject(workspace, { title: '单章修订公开投影', reference_config: {} })
+    const sourceText = 'SOURCE_SENTINEL 不可公开源正文。'.repeat(40)
+    const candidateText = 'CANDIDATE_SENTINEL 不可公开候选正文。'.repeat(40)
+    const input = {
+      schema_version: 1,
+      project_id: project.id,
+      chapter_id: 701,
+      chapter_no: 1,
+      chapter_title: '第一章',
+      review_id: 9,
+      source_chapter_updated_at: '2030-01-01T00:00:00.000Z',
+      source_text: sourceText,
+      source_text_hash: revisionTextHash(sourceText),
+      source_char_count: sourceText.replace(/\s/g, '').length,
+      source_review: { id: 9, review_type: 'prose_quality' },
+      report: { chapter_id: 701, must_fix: ['只修第一章'] },
+      context_package: { current_chapter: { chapter_id: 701 } },
+      revision_mode: 'from_report',
+      revision_strategy: 'surgical_patch',
+      user_prompt: '不可公开 prompt',
+      auto_quality_check: true,
+      auto_story_state: true,
+      created_at: '2030-01-01T00:00:00.000Z',
+    }
+    const checkpoint = {
+      schema_version: 1,
+      phase: 'admit_candidate',
+      phases: {
+        generate_candidate: {
+          status: 'completed',
+          attempt: 1,
+          summary: { diagnostics: { finish_reason: 'stop', content_preview: candidateText } },
+        },
+        admit_candidate: {
+          status: 'completed',
+          attempt: 1,
+          summary: {
+            source_char_count: input.source_char_count,
+            candidate_char_count: candidateText.replace(/\s/g, '').length,
+            candidate_text: candidateText,
+          },
+        },
+        persist_chapter: { status: 'pending', attempt: 0 },
+        post_quality: { status: 'pending', attempt: 0 },
+        sync_current_story_state: { status: 'pending', attempt: 0 },
+        record_continuity_warning: { status: 'pending', attempt: 0 },
+        completed: { status: 'pending', attempt: 0 },
+      },
+      candidate: {
+        text: candidateText,
+        hash: revisionTextHash(candidateText),
+        char_count: candidateText.replace(/\s/g, '').length,
+        applied_patches: [{ replacement: candidateText }],
+        diagnostics: { candidate_text: candidateText },
+      },
+      prose_persisted: false,
+      warnings: [],
+    }
+    const run = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'editor_revision',
+      step_name: 'chapter-1',
+      status: 'running',
+      scope_key: 'chapter:701',
+      input_ref: JSON.stringify(input),
+      output_ref: JSON.stringify(checkpoint),
+    })
+    const stored = (await listNovelRuns(workspace, project.id)).find(item => item.id === run.id)!
+    expect(JSON.stringify(stored)).toContain('SOURCE_SENTINEL')
+    expect(JSON.stringify(stored)).toContain('CANDIDATE_SENTINEL')
+
+    const { app, handlers } = createRouteHarness()
+    registerNovelRunRoutes(app as any, {
+      getWorkspace: () => workspace,
+      getProject: async (_workspace: string, id: number) => (await listNovelProjects(_workspace)).find(item => item.id === id) || null,
+      runQueueWorkers: new Map(),
+      getProductionBudgetDecision: () => ({ blocked: false, reasons: [] }),
+      buildPipelineSteps: production.buildPipelineSteps,
+      executeChapterGroupRunRecord: async () => ({ status: 'not-used', processed: 0 }),
+    })
+    const runsRoute = handlers.get('GET /api/novel/runs')
+    const detailRoute = handlers.get('GET /api/novel/runs/:id')
+    const tasksRoute = handlers.get('GET /api/novel/projects/:id/tasks')
+    const full = await callRoute(runsRoute, { query: { project_id: String(project.id) } })
+    const summary = await callRoute(runsRoute, { query: { project_id: String(project.id), view: 'summary' } })
+    const detail = await callRoute(detailRoute, {
+      params: { id: String(run.id) },
+      query: { project_id: String(project.id) },
+    })
+    const tasks = await callRoute(tasksRoute, { params: { id: String(project.id) } })
+    const projections = [
+      full.body.find((item: any) => item.id === run.id),
+      summary.body.find((item: any) => item.id === run.id),
+      detail.body,
+      tasks.body.tasks.find((item: any) => item.id === run.id),
+    ]
+
+    for (const projection of projections) {
+      expect(projection).toMatchObject({
+        id: run.id,
+        run_type: 'editor_revision',
+        chapter_id: 701,
+        chapter_no: 1,
+        phase: 'admit_candidate',
+      })
+      expect(projection).not.toHaveProperty('input_ref')
+      expect(projection).not.toHaveProperty('output_ref')
+      expect(projection).not.toHaveProperty('source_text')
+      expect(projection).not.toHaveProperty('candidate')
+      const serialized = JSON.stringify(projection)
+      expect(serialized).not.toContain('SOURCE_SENTINEL')
+      expect(serialized).not.toContain('CANDIDATE_SENTINEL')
+      expect(serialized).not.toContain('"source_text"')
+      expect(serialized).not.toContain('"candidate":')
+    }
+  })
+
+  test('redacts revision-owned review prose from ordinary full and detail APIs', async () => {
+    const workspace = await tempWorkspace()
+    const production = createNovelProductionService()
+    const project = await createNovelProject(workspace, { title: '单章修订 review 脱敏', reference_config: {} })
+    const sourceExcerpt = 'SOURCE_REVIEW_SENTINEL 不可公开源文摘录'
+    const candidateExcerpt = 'CANDIDATE_REVIEW_SENTINEL 不可公开候选正文'
+    const contextExcerpt = 'CONTEXT_REVIEW_SENTINEL 不可公开上下文正文'
+    const candidateHash = revisionTextHash(candidateExcerpt)
+    const revisionReview = await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'editor_revision',
+      status: 'ok',
+      summary: '单章修订已提交',
+      issues: [],
+      payload: JSON.stringify({
+        chapter_id: 701,
+        chapter_no: 1,
+        source_review_id: 9,
+        source_run_id: 44,
+        candidate_hash: candidateHash,
+        requested_revision_mode: 'from_report',
+        revision_strategy: 'surgical_patch',
+        applied_patches: [{
+          type: 'replacement',
+          match: 'exact',
+          find: sourceExcerpt,
+          replace: candidateExcerpt,
+        }],
+        candidate_diagnostics: {
+          source_char_count: 5910,
+          candidate_char_count: 5900,
+          applied_patch_count: 1,
+          context_excerpt: contextExcerpt,
+        },
+      }),
+    })
+    const qualityReview = await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'prose_quality',
+      status: 'ok',
+      summary: '当前版本质检评分 88',
+      issues: [],
+      payload: JSON.stringify({
+        chapter_id: 701,
+        chapter_updated_at: '2030-01-01T00:00:01.000Z',
+        content_hash: candidateHash,
+        source: 'post_revision',
+        source_review_id: 9,
+        source_run_id: 44,
+        candidate_hash: candidateHash,
+        current_chapter_only: true,
+        context_package: {
+          chapter_target: { id: 701, chapter_no: 1 },
+          current_chapter: { chapter_text: contextExcerpt },
+          continuity: { previous_chapter: { chapter_text: sourceExcerpt } },
+        },
+        self_check: {
+          review: { passed: true, score: 88, issues: [], needs_revision: false },
+          revision: null,
+          final_text: candidateExcerpt,
+          revised: false,
+        },
+        delivery_link: { version: 'prose_quality_delivery_link_v1', source_count: 1 },
+        plan_alignment: { chapter_id: 701, rebuilt: true, reason: 'current_only' },
+      }),
+    })
+    const stored = await listNovelReviews(workspace, project.id)
+    expect(JSON.stringify(stored)).toContain(sourceExcerpt)
+    expect(JSON.stringify(stored)).toContain(candidateExcerpt)
+    expect(JSON.stringify(stored)).toContain(contextExcerpt)
+
+    const { app, handlers } = createRouteHarness()
+    registerNovelRunRoutes(app as any, {
+      getWorkspace: () => workspace,
+      getProject: async (_workspace: string, id: number) => (await listNovelProjects(_workspace)).find(item => item.id === id) || null,
+      runQueueWorkers: new Map(),
+      getProductionBudgetDecision: () => ({ blocked: false, reasons: [] }),
+      buildPipelineSteps: production.buildPipelineSteps,
+      executeChapterGroupRunRecord: async () => ({ status: 'not-used', processed: 0 }),
+    })
+    const reviewsRoute = handlers.get('GET /api/novel/projects/:id/reviews')
+    const detailRoute = handlers.get('GET /api/novel/reviews/:reviewId')
+    const full = await callRoute(reviewsRoute, { params: { id: String(project.id) }, query: {} })
+    const revisionDetail = await callRoute(detailRoute, {
+      params: { reviewId: String(revisionReview.id) },
+      query: { project_id: String(project.id) },
+    })
+    const qualityDetail = await callRoute(detailRoute, {
+      params: { reviewId: String(qualityReview.id) },
+      query: { project_id: String(project.id) },
+    })
+    const publicReviews = [
+      full.body.find((item: any) => item.id === revisionReview.id),
+      full.body.find((item: any) => item.id === qualityReview.id),
+      revisionDetail.body,
+      qualityDetail.body,
+    ]
+
+    for (const review of publicReviews) {
+      const serialized = JSON.stringify(review)
+      expect(serialized).not.toContain(sourceExcerpt)
+      expect(serialized).not.toContain(candidateExcerpt)
+      expect(serialized).not.toContain(contextExcerpt)
+      expect(serialized).not.toContain('context_package')
+      expect(serialized).not.toContain('final_text')
+      expect(serialized).not.toContain('"find"')
+      expect(serialized).not.toContain('"replace"')
+    }
+    expect(JSON.parse(revisionDetail.body.payload)).toMatchObject({
+      chapter_id: 701,
+      chapter_no: 1,
+      source_run_id: 44,
+      candidate_hash: candidateHash,
+      applied_patches: [{ type: 'replacement', match: 'exact' }],
+      candidate_diagnostics: {
+        source_char_count: 5910,
+        candidate_char_count: 5900,
+        applied_patch_count: 1,
+      },
+    })
+    expect(JSON.parse(qualityDetail.body.payload)).toMatchObject({
+      chapter_id: 701,
+      source: 'post_revision',
+      source_run_id: 44,
+      candidate_hash: candidateHash,
+      current_chapter_only: true,
+      self_check: {
+        review: { passed: true, score: 88, needs_revision: false },
+        revised: false,
+      },
+    })
+  })
+
+  test('preserves manual prose-quality review payloads in ordinary full and detail APIs', async () => {
+    const workspace = await tempWorkspace()
+    const production = createNovelProductionService()
+    const project = await createNovelProject(workspace, { title: '手动质检 review 兼容性', reference_config: {} })
+    const chapterText = 'MANUAL_REVIEW_SENTINEL 手动质检正文应保持原有接口形态'
+    const candidateHash = revisionTextHash(chapterText)
+    const manualReview = await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'prose_quality',
+      status: 'warn',
+      summary: '当前版本质检评分 76',
+      issues: ['medium｜需要人工调整'],
+      payload: JSON.stringify({
+        chapter_id: 702,
+        chapter_updated_at: '2030-01-01T00:00:02.000Z',
+        content_hash: candidateHash,
+        source: 'manual_refresh',
+        source_review_id: null,
+        source_run_id: null,
+        candidate_hash: candidateHash,
+        current_chapter_only: true,
+        context_package: {
+          chapter_target: { id: 702, chapter_no: 2 },
+          current_chapter: { chapter_text: chapterText },
+        },
+        self_check: {
+          review: { passed: false, score: 76, issues: ['需要人工调整'], needs_revision: true },
+          revision: null,
+          final_text: chapterText,
+          revised: false,
+        },
+        delivery_link: { version: 'prose_quality_delivery_link_v1', source_count: 0 },
+        plan_alignment: { chapter_id: 702, rebuilt: false, reason: 'already_aligned' },
+      }),
+    })
+    const storedReview = (await listNovelReviews(workspace, project.id)).find(item => item.id === manualReview.id)!
+
+    const { app, handlers } = createRouteHarness()
+    registerNovelRunRoutes(app as any, {
+      getWorkspace: () => workspace,
+      getProject: async (_workspace: string, id: number) => (await listNovelProjects(_workspace)).find(item => item.id === id) || null,
+      runQueueWorkers: new Map(),
+      getProductionBudgetDecision: () => ({ blocked: false, reasons: [] }),
+      buildPipelineSteps: production.buildPipelineSteps,
+      executeChapterGroupRunRecord: async () => ({ status: 'not-used', processed: 0 }),
+    })
+    const reviewsRoute = handlers.get('GET /api/novel/projects/:id/reviews')
+    const detailRoute = handlers.get('GET /api/novel/reviews/:reviewId')
+    const full = await callRoute(reviewsRoute, { params: { id: String(project.id) }, query: {} })
+    const detail = await callRoute(detailRoute, {
+      params: { reviewId: String(manualReview.id) },
+      query: { project_id: String(project.id) },
+    })
+
+    expect(full.body.find((item: any) => item.id === manualReview.id)).toEqual(storedReview)
+    expect(detail.body).toEqual(storedReview)
   })
 
   test('extracts model and config audit traces from runtime selection payloads', () => {

@@ -207,6 +207,76 @@ describe('editor revision run repository', () => {
     expect(await getEditorRevisionRun(workspace, project.id, run.id)).toEqual(before)
   })
 
+  test('rejects legacy non-terminal linked task closure receipts without mutating either run', async () => {
+    for (const taskStatus of ['open', 'in_progress']) {
+      const { workspace, project, chapters: [chapter] } = await createFixture()
+      const repairRun = await appendNovelRun(workspace, {
+        project_id: project.id,
+        run_type: 'longform_production_repair',
+        step_name: `legacy-${taskStatus}-linked-repair`,
+        status: 'ready',
+        output_ref: JSON.stringify({ tasks: [{ title: 'repair', task_status: 'open' }] }),
+      })
+      const completed = checkpointAt('completed', Object.fromEntries(PHASES.map(phase => [phase, 'completed'])) as any, {
+        candidate: {
+          text: `legacy-${taskStatus}-candidate`,
+          hash: revisionTextHash(`legacy-${taskStatus}-candidate`),
+          char_count: `legacy-${taskStatus}-candidate`.length,
+          applied_patches: [],
+          diagnostics: {},
+        },
+        prose_persisted: true,
+        linked_task_closure: { status: 'pending' },
+        completed_at: '2030-07-27T10:02:00.000Z',
+      })
+      const run = await createEditorRevisionRun(workspace, {
+        projectId: project.id,
+        chapterId: chapter.id,
+        inputRef: JSON.stringify({
+          schema_version: 1,
+          chapter_id: chapter.id,
+          repair_task_link: { run_id: repairRun.id, task_index: 0, task: { title: 'repair' } },
+        }),
+        outputRef: runOutput(initialCheckpoint()),
+      })
+      await updateNovelRun(workspace, run.id, {
+        status: 'completed',
+        output_ref: JSON.stringify(completed),
+      })
+      const note = `legacy ${taskStatus} receipt`
+      await updateNovelRun(workspace, repairRun.id, {
+        output_ref: JSON.stringify({
+          tasks: [{
+            title: 'repair',
+            task_status: taskStatus,
+            status_note: note,
+            editor_revision_closure_receipts: {
+              [String(run.id)]: {
+                editor_revision_run_id: run.id,
+                repair_run_id: repairRun.id,
+                task_index: 0,
+                task_status: taskStatus,
+                note,
+                completed_at: '2030-07-27T10:03:00.000Z',
+              },
+            },
+          }],
+        }),
+      })
+      const revisionBefore = await getEditorRevisionRun(workspace, project.id, run.id)
+      const repairBefore = await getNovelRun(workspace, repairRun.id, project.id)
+
+      await expect(markLinkedTaskClosure(
+        workspace,
+        project.id,
+        run.id,
+        '2030-07-27T10:04:00.000Z',
+      )).rejects.toMatchObject({ code: 'REVISION_LINKED_TASK_CLOSURE_NOT_READY' })
+      expect(await getEditorRevisionRun(workspace, project.id, run.id)).toEqual(revisionBefore)
+      expect(await getNovelRun(workspace, repairRun.id, project.id)).toEqual(repairBefore)
+    }
+  })
+
   test('preserves pending linked task closure when a failed run is retried', async () => {
     const { workspace, project, chapters: [chapter] } = await createFixture()
     const linkedCheckpoint = initialCheckpoint()

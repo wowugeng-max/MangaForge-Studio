@@ -13,7 +13,10 @@ import { revisionTextHash } from '../revision-hash'
 import { runFromRow } from '../row-mappers'
 import { withNovelDbWrite } from '../sql-rows'
 import type { NovelRunRecord } from '../types'
-import { requiredEditorRevisionTaskAnnotationKey } from './editor-revision-task-closure'
+import {
+  isEditorRevisionTaskClosureStatus,
+  requiredEditorRevisionTaskAnnotationKey,
+} from './editor-revision-task-closure'
 import { getNovelRun } from './runs'
 
 export const EDITOR_REVISION_LEASE_MS = 30_000
@@ -500,6 +503,8 @@ function requireDurableLinkedTaskClosure(
     || Number(receipt.repair_run_id) !== link.runId
     || Number(receipt.task_index) !== link.taskIndex
     || String(receipt.task_status || '') !== String(task.task_status || '')
+    || !isEditorRevisionTaskClosureStatus(task.task_status)
+    || !isEditorRevisionTaskClosureStatus(receipt.task_status)
     || String(receipt.note || '') !== String(task.status_note || '')
     || !validReceiptTimestamp(receipt.completed_at)) {
     linkedTaskClosureNotReady('linked repair task closure receipt is unavailable')

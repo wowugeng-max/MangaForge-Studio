@@ -14,6 +14,8 @@ import {
 } from './quality-contract-evidence'
 import { QUALITY_CONTRACT_REQUIRED_FIELDS } from './quality-contract-fields'
 
+const RAW_PASS_LIKE_STATUSES = ['pass', 'passed', 'ok', 'done', 'true']
+
 export function listQualityContractRequiredFieldKeys() {
   return Object.keys(QUALITY_CONTRACT_REQUIRED_FIELDS)
 }
@@ -26,6 +28,12 @@ export function listQualityContractRequiredFields() {
 
 export function camelFieldName(field: string) {
   return field.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())
+}
+
+export function rawPassLikeStatusOutcome(value: AnyRecord, ...keys: string[]): boolean | null {
+  const suppliedKey = keys.find(key => Object.prototype.hasOwnProperty.call(value, key))
+  if (!suppliedKey) return null
+  return RAW_PASS_LIKE_STATUSES.includes(value[suppliedKey])
 }
 
 export function hasContractField(check: AnyRecord, field: string) {
@@ -48,11 +56,11 @@ export function qualityContractMissingFields(item: any, snakeKey: string) {
 export function qualityContractCheckFailed(item: any, snakeKey = '') {
   if (typeof item === 'string') return true
   const check = objectValue(item)
-  const status = firstText(check.status, check.result, check.state).toLowerCase()
+  const explicitStatusPassed = rawPassLikeStatusOutcome(check, 'status', 'result', 'state')
   const remainingRisk = firstText(check.remaining_risk, check.remainingRisk, check.residual_risk, check.residualRisk)
   const missingFields = qualityContractMissingFields(item, snakeKey)
   const genericEvidenceDetail = genericClosureEvidenceDetail(item)
-  return ['fail', 'failed', 'warn', 'warning', 'missing', 'missed', 'blocked', 'error'].includes(status)
+  return explicitStatusPassed === false
     || check.ready === false
     || check.delivered === false
     || check.passed === false
@@ -186,21 +194,86 @@ export function deterministicProseCleanupResidualsFromQuality(value: any): strin
     .filter(Boolean)
 }
 
-export function sceneCardReceiptResidualsFromQuality(value: any): string[] {
+function sceneCardReceiptCheckKey(value: any) {
+  if (typeof value === 'string') return ''
+  const check = objectValue(value)
+  return firstText(check.key, check.type, check.check_key, check.checkKey, check.issue_type, check.issueType).toLowerCase()
+}
+
+function sceneCardReceiptCheckMatches(value: any, issueType: string) {
+  const normalizedIssueType = text(issueType).toLowerCase()
+  const specificIssueType = /^scene_card_receipt_\d+_/.test(normalizedIssueType)
+  if (typeof value === 'string') {
+    const normalizedValue = value.toLowerCase()
+    if (specificIssueType) return normalizedValue.split(/[^a-z0-9_]+/).includes(normalizedIssueType)
+    return normalizedValue.includes(normalizedIssueType || 'scene_card_receipt')
+  }
+  const checkKey = sceneCardReceiptCheckKey(value)
+  if (checkKey === 'scene_card_receipts_sync_ok' || checkKey === 'scene_card_receipts_sync') return true
+  if (specificIssueType) return checkKey === normalizedIssueType
+  return checkKey.includes(normalizedIssueType || 'scene_card_receipt')
+}
+
+function aggregateSceneCardReceiptCountCleared(check: AnyRecord, checkKey: string) {
+  if (checkKey !== 'scene_card_receipts_sync_ok' && checkKey !== 'scene_card_receipts_sync') return true
+  const countKey = ['missed_count', 'missedCount']
+    .find(key => Object.prototype.hasOwnProperty.call(check, key))
+  if (!countKey) return false
+  const missedCount = check[countKey]
+  return typeof missedCount === 'number'
+    && Number.isFinite(missedCount)
+    && missedCount >= 0
+    && missedCount === 0
+}
+
+function sceneCardReceiptCheckPassed(value: any) {
+  if (typeof value === 'string') {
+    const status = firstText(value.split(/[|｜]/, 1)[0]).toLowerCase()
+    return ['pass', 'passed', 'ok', 'done', 'true'].includes(status)
+  }
+  const check = objectValue(value)
+  const checkKey = sceneCardReceiptCheckKey(check)
+  const status = firstText(check.status, check.result, check.state).toLowerCase()
+  const affirmativeBoolean = check.passed === true
+    || check.ok === true
+    || check.delivered === true
+    || check.ready === true
+  return !qualityContractCheckFailed(value)
+    && aggregateSceneCardReceiptCountCleared(check, checkKey)
+    && (['pass', 'passed', 'ok', 'done', 'true'].includes(status) || affirmativeBoolean)
+}
+
+export function sceneCardReceiptResidualsFromQuality(value: any, issueType = ''): string[] {
   const quality = objectValue(value)
   const review = objectValue(quality.review)
   const payload = parseJsonValue(review.payload) || objectValue(review.payload)
+  const missingKey = text(issueType).toLowerCase() || 'scene_card_receipt'
   const candidates = [
     ...arrayValue(review.issues),
     ...arrayValue(quality.issues),
     ...arrayValue(payload.issues),
+    ...arrayValue(review.quality_audit_checks || review.qualityAuditChecks),
+    ...arrayValue(quality.quality_audit_checks || quality.qualityAuditChecks),
     ...arrayValue(payload.self_check?.review?.quality_audit_checks),
     ...arrayValue(payload.self_check?.quality_audit_checks),
     ...arrayValue(payload.quality_audit_checks),
   ]
-  return candidates
-    .map(item => summarizeEvidenceItem(item))
-    .filter(item => item.toLowerCase().includes('scene_card_receipt'))
+  if (candidates.length === 0) return [`缺少 ${missingKey} 复检结果`]
+  const matching = candidates
+    .map(item => {
+      return { item, line: summarizeEvidenceItem(item) }
+    })
+    .filter(candidate => sceneCardReceiptCheckMatches(candidate.item, issueType))
+  if (matching.length === 0) return [`缺少 ${missingKey} 复检结果`]
+  return matching
+    .filter(candidate => {
+      return !sceneCardReceiptCheckPassed(candidate.item)
+    })
+    .map(candidate => {
+      if (typeof candidate.item === 'string' || qualityContractCheckFailed(candidate.item)) return candidate.line
+      return `${candidate.line || missingKey}：明确通过状态缺失`
+    })
+    .filter(Boolean)
 }
 
 export function sceneCardDirectiveCheckText(value: any) {
@@ -261,4 +334,3 @@ export function sceneCardDirectiveResidualsFromQuality(value: any, issueType: st
     .map(item => qualityContractCheckLine(item, '场景卡执行禁令'))
     .filter(Boolean)
 }
-

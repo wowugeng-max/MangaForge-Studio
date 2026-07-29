@@ -6,6 +6,7 @@ import {
   createRepairTaskHandlers,
   type RepairTaskHandlerDeps,
 } from './shell/workspace-repair-task-handlers'
+import { buildDeliveryRiskRevisionClosurePlan } from './repairTaskRevisionPrompt'
 
 const originalMessageSuccess = message.success
 const originalMessageWarning = message.warning
@@ -171,6 +172,23 @@ const linkedProductionTasks = {
   }],
 }
 
+const linkedRevisionScopeProductionTasks = {
+  tasks: [{
+    id: 51,
+    run_type: 'longform_production_repair',
+    payload: {
+      tasks: [{
+        title: '修订幅度复检',
+        task_status: 'open',
+        source: 'review_annotation_risk',
+        issue_type: 'revision_scope_guard',
+        annotation_category: 'revision_scope_guard',
+        annotation_key: 'revision_scope_guard_sync:210:12:12:revision_scope_guard:修订幅度',
+      }],
+    },
+  }],
+}
+
 // Split into workspaceUiShell.a/b.test.ts; shared source helpers in workspaceUiShellSource.ts
 
 describe('commercial writing workspace UI shell monotest shim', () => {
@@ -178,6 +196,56 @@ describe('commercial writing workspace UI shell monotest shim', () => {
     expect(existsSync(join(import.meta.dir, 'workspaceUiShell.a.test.ts'))).toBe(true)
     expect(existsSync(join(import.meta.dir, 'workspaceUiShell.b.test.ts'))).toBe(true)
     expect(existsSync(join(import.meta.dir, 'workspaceUiShellSource.ts'))).toBe(true)
+  })
+
+  test('bridges all editor revision task fields from useWorkspaceTasks through the base model', async () => {
+    const source = await Bun.file(new URL('./shell/use-novel-workspace-base-model.tsx', import.meta.url)).text()
+    const useWorkspaceTasksEnd = source.indexOf('} = useWorkspaceTasks({')
+    const useWorkspaceTasksStart = source.lastIndexOf('const {', useWorkspaceTasksEnd)
+    const taskBridge = source.slice(useWorkspaceTasksStart, useWorkspaceTasksEnd)
+    const baseReturnStart = source.indexOf("return {\n    status: 'base' as const")
+    const baseReturn = source.slice(baseReturnStart)
+    const fields = [
+      'editorRevisionTasks',
+      'editorRevisionTasksProjectId',
+      'cancelEditorRevision',
+      'retryEditorRevision',
+      'loadEditorRevisionDiagnostics',
+    ]
+
+    expect(useWorkspaceTasksStart).toBeGreaterThanOrEqual(0)
+    expect(baseReturnStart).toBeGreaterThanOrEqual(0)
+    for (const field of fields) {
+      expect(taskBridge).toContain(`${field},`)
+      expect(baseReturn).toContain(`    ${field},`)
+    }
+  })
+
+  test('rejects stale-project editor revision snapshots at the ready-runtime bridge', async () => {
+    const runtimeModule = await import('./shell/build-novel-workspace-ready-runtime')
+    const selectCurrentTask = Reflect.get(runtimeModule, 'editorRevisionForReadyRuntime')
+    const source = await Bun.file(new URL('./shell/build-novel-workspace-ready-runtime.tsx', import.meta.url)).text()
+    expect(typeof selectCurrentTask).toBe('function')
+    if (typeof selectCurrentTask !== 'function') return
+
+    const task = terminalRevision({
+      status: 'running',
+      phase: 'generate_candidate',
+      phase_label: '生成候选',
+      can_cancel: true,
+      linked_task_closure: null,
+    })
+    const input = {
+      editorRevisionTasks: [task],
+      editorRevisionTasksProjectId: 3,
+      projectId: 3,
+      activeChapterId: 11,
+    }
+
+    expect(source).toContain('editorRevisionTasksProjectId,')
+    expect(source).toContain('editorRevisionForReadyRuntime({')
+    expect(selectCurrentTask(input)?.id).toBe(88)
+    expect(selectCurrentTask({ ...input, editorRevisionTasksProjectId: 2 })).toBeNull()
   })
 
   test('treats editor revision POST 202 as queued creation without premature closure or reload', async () => {
@@ -298,6 +366,42 @@ describe('commercial writing workspace UI shell monotest shim', () => {
     )
     expect(deps.acknowledgeLinkedTaskClosure).toHaveBeenCalledTimes(1)
   })
+
+  test('does not silently resolve specialized linked tasks from a redacted public revision summary', async () => {
+    const { createState, reconcile } = await loadReconciliationApi()
+    const state = createState(3)
+    const closurePlans: any[] = []
+    const closeRepairTaskAfterRevision = mock(async (sourceTask: any, _run: any, _taskIndex: number, result: any) => {
+      const plan = buildDeliveryRiskRevisionClosurePlan(sourceTask, result)
+      closurePlans.push(plan)
+      return plan
+    })
+    const deps = reconciliationDeps({ closeRepairTaskAfterRevision })
+    const task = terminalRevision()
+
+    await reconcile({
+      projectId: 3,
+      tasks: [task],
+      productionTasks: linkedRevisionScopeProductionTasks,
+      state,
+      ...deps,
+    })
+
+    expect(closeRepairTaskAfterRevision).toHaveBeenCalledTimes(1)
+    const publicClosureResult = closeRepairTaskAfterRevision.mock.calls[0][3]
+    expect(publicClosureResult.quality_refresh).toEqual(expect.objectContaining({ ok: true, score: 86 }))
+    expect(publicClosureResult.quality_refresh).not.toHaveProperty('revision_scope_guard_sync')
+    expect(publicClosureResult.delivery_risk_convergence).toEqual(expect.objectContaining({ status: 'cleared', residual_count: 0 }))
+    expect(closurePlans).toEqual([
+      expect.objectContaining({
+        taskStatus: 'needs_review',
+        annotationStatus: '',
+        annotationKey: 'revision_scope_guard_sync:210:12:12:revision_scope_guard:修订幅度',
+        note: expect.stringContaining('缺少 revision_scope_guard_sync'),
+      }),
+    ])
+    expect(deps.acknowledgeLinkedTaskClosure).toHaveBeenCalledTimes(1)
+  }, 10_000)
 
   test('does not replay terminal side effects after acknowledgement commits but its response is lost', async () => {
     const { createState, reconcile } = await loadReconciliationApi()

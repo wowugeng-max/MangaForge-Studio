@@ -2,6 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import express from 'express'
 import { rm } from 'fs/promises'
 import {
+  appendChapterVersion,
+  appendNovelRun,
   claimEditorRevisionRun,
   commitEditorRevisionChapter,
   createEditorRevisionRun,
@@ -703,7 +705,689 @@ function installMatchingCommitMarker(harness: ReturnType<typeof createHarness>, 
   })
 }
 
+function fixedScopeText(label: string, charCount: number) {
+  const prefix = `${label}:`
+  const bodyCount = Math.max(0, charCount - prefix.length)
+  if (!bodyCount) return prefix.slice(0, charCount)
+  if (bodyCount === 1) return `${prefix}。`
+  const prose = '本章冲突继续推进。'.repeat(Math.ceil(bodyCount / 8))
+  return `${prefix}${prose.slice(0, bodyCount - 1)}。`
+}
+
+async function createThirtyChapterScopeFixture(options: {
+  sourceText?: string
+  candidateText?: string
+} = {}) {
+  const activeWorkspace = await tempWorkspace()
+  const project = await createNovelProject(activeWorkspace, {
+    title: '三十章单章修订隔离',
+    reference_config: {
+      story_state: {
+        current_time: 'FIXTURE_STORY_STATE_BEFORE',
+        open_questions: ['FIXTURE_OPEN_QUESTION'],
+      },
+      fixture_sentinel: 'PROJECT_REFERENCE_SENTINEL',
+    },
+  })
+  const sourceChapterText = options.sourceText || fixedScopeText('CHAPTER_01_SOURCE_SENTINEL', 900)
+  const candidateChapterText = options.candidateText || fixedScopeText('CHAPTER_01_CANDIDATE_SENTINEL', 910)
+  const chapters = []
+  for (let chapterNo = 1; chapterNo <= 30; chapterNo += 1) {
+    const padded = String(chapterNo).padStart(2, '0')
+    chapters.push(await createNovelChapter(activeWorkspace, {
+      project_id: project.id,
+      chapter_no: chapterNo,
+      title: `第${padded}章 SCOPE_TITLE_${padded}`,
+      chapter_goal: `PLAN_GOAL_${padded}`,
+      chapter_summary: `PLAN_SUMMARY_${padded}`,
+      conflict: `PLAN_CONFLICT_${padded}`,
+      ending_hook: `PLAN_ENDING_HOOK_${padded}`,
+      chapter_text: chapterNo === 1
+        ? sourceChapterText
+        : fixedScopeText(`CHAPTER_${padded}_SOURCE_SENTINEL`, 900 + chapterNo),
+      scene_breakdown: [{ scene_id: `SCENE_BREAKDOWN_${padded}`, goal: `SCENE_GOAL_${padded}` }],
+      scene_list: [{ scene_id: `SCENE_LIST_${padded}`, beat: `SCENE_BEAT_${padded}` }],
+      continuity_notes: [`CONTINUITY_NOTE_${padded}`],
+      items_in_play: [`ITEM_IN_PLAY_${padded}`],
+      foreshadowing: [{ key: `FORESHADOW_${padded}`, status: 'open' }],
+      timeline_note: `TIMELINE_NOTE_${padded}`,
+      raw_payload: {
+        scope_sentinel: `RAW_PAYLOAD_CHAPTER_${padded}_SENTINEL`,
+        plan: {
+          chapter_goal: `RAW_PLAN_GOAL_${padded}`,
+          required_beats: [`RAW_PLAN_BEAT_${padded}`],
+        },
+        prose_admission: { story_state_status: 'pending' },
+      },
+    }))
+  }
+  return {
+    workspace: activeWorkspace,
+    project,
+    chapters,
+    sourceText: sourceChapterText,
+    candidateText: candidateChapterText,
+  }
+}
+
+type SnapshotChapterScope = { chapterId: number | null; hasScope: boolean }
+
+function snapshotScopeContainers(payload: any) {
+  const contextPackages = [payload.context_package, payload.contextPackage]
+    .filter(value => value && typeof value === 'object')
+  const reports = [payload.report]
+    .filter(value => value && typeof value === 'object')
+  const summaries = [
+    payload.summary,
+    ...contextPackages.map(value => value.summary),
+    ...reports.map(value => value.summary),
+  ].filter(value => value && typeof value === 'object')
+  const directTargets = [payload.chapter_target, payload.chapterTarget, payload.current_chapter, payload.currentChapter]
+    .filter(value => value && typeof value === 'object')
+  const nestedTargets = [...contextPackages, ...reports, ...summaries]
+    .flatMap(value => [value.chapter_target, value.chapterTarget, value.current_chapter, value.currentChapter])
+    .filter(value => value && typeof value === 'object')
+  return [
+    { value: payload, allowPlainId: false },
+    ...contextPackages.map(value => ({ value, allowPlainId: false })),
+    ...reports.map(value => ({ value, allowPlainId: false })),
+    ...summaries.map(value => ({ value, allowPlainId: false })),
+    ...directTargets.map(value => ({ value, allowPlainId: true })),
+    ...nestedTargets.map(value => ({ value, allowPlainId: true })),
+  ]
+}
+
+function payloadChapterScope(
+  value: unknown,
+  chapterIdSet: Set<number>,
+  chapterNoToId: Map<number, number>,
+): SnapshotChapterScope {
+  const payload = parsed(value)
+  let hasScope = false
+  for (const container of snapshotScopeContainers(payload)) {
+    for (const key of ['chapter_id', 'chapterId', ...(container.allowPlainId ? ['id'] : [])]) {
+      if (!Object.prototype.hasOwnProperty.call(container.value, key)) continue
+      hasScope = true
+      const chapterId = Number(container.value[key] || 0)
+      if (Number.isInteger(chapterId) && chapterIdSet.has(chapterId)) return { chapterId, hasScope: true }
+    }
+    for (const key of ['chapter_no', 'chapterNo']) {
+      if (!Object.prototype.hasOwnProperty.call(container.value, key)) continue
+      hasScope = true
+      const chapterNo = Number(container.value[key] || 0)
+      const chapterId = chapterNoToId.get(chapterNo) || null
+      if (chapterId) return { chapterId, hasScope: true }
+    }
+  }
+  return { chapterId: null, hasScope }
+}
+
+function runScopeKeyChapterScope(
+  value: unknown,
+  chapterIdSet: Set<number>,
+  chapterNoToId: Map<number, number>,
+): SnapshotChapterScope {
+  const scopeKey = String(value || '')
+  const idMatch = scopeKey.match(/^(?:chapter|chapter_id|chapterId):(\d+)$/)
+  if (idMatch) {
+    const chapterId = Number(idMatch[1])
+    return { chapterId: chapterIdSet.has(chapterId) ? chapterId : null, hasScope: true }
+  }
+  const noMatch = scopeKey.match(/^(?:chapter_no|chapterNo):(\d+)$/)
+  if (noMatch) {
+    return { chapterId: chapterNoToId.get(Number(noMatch[1])) || null, hasScope: true }
+  }
+  return { chapterId: null, hasScope: false }
+}
+
+function firstResolvedChapterScope(...scopes: SnapshotChapterScope[]) {
+  return {
+    chapterId: scopes.find(scope => scope.chapterId)?.chapterId || null,
+    hasScope: scopes.some(scope => scope.hasScope),
+  }
+}
+
+async function chapterMutationSnapshot(
+  activeWorkspace: string,
+  projectId: number,
+  chapterIds: number[],
+) {
+  const db = openDb(activeWorkspace)
+  try {
+    const chapterRows = db.query('SELECT * FROM chapters WHERE project_id = ? ORDER BY chapter_no, id').all(projectId) as any[]
+    const versionRows = db.query('SELECT * FROM chapter_versions WHERE project_id = ? ORDER BY chapter_id, version_no, id').all(projectId) as any[]
+    const reviewRows = db.query('SELECT * FROM reviews WHERE project_id = ? ORDER BY id').all(projectId) as any[]
+    const runRows = db.query('SELECT * FROM runs WHERE project_id = ? ORDER BY id').all(projectId) as any[]
+    const chapterIdSet = new Set(chapterIds)
+    const chapterNoToId = new Map(chapterRows
+      .filter(chapter => chapterIdSet.has(Number(chapter.id)))
+      .map(chapter => [Number(chapter.chapter_no), Number(chapter.id)]))
+    const reviewsByChapter = new Map<number, any[]>()
+    const runsByChapter = new Map<number, any[]>()
+    const tasksByChapter = new Map<number, any[]>()
+    for (const review of reviewRows) {
+      const chapterId = payloadChapterScope(review.payload, chapterIdSet, chapterNoToId).chapterId
+      if (!chapterId || !chapterIdSet.has(chapterId)) continue
+      reviewsByChapter.set(chapterId, [...(reviewsByChapter.get(chapterId) || []), review])
+    }
+    for (const run of runRows) {
+      const runScope = firstResolvedChapterScope(
+        runScopeKeyChapterScope(run.scope_key, chapterIdSet, chapterNoToId),
+        payloadChapterScope(run.input_ref, chapterIdSet, chapterNoToId),
+        payloadChapterScope(run.output_ref, chapterIdSet, chapterNoToId),
+      )
+      const runChapterId = runScope.chapterId
+      if (runChapterId && chapterIdSet.has(runChapterId)) {
+        runsByChapter.set(runChapterId, [...(runsByChapter.get(runChapterId) || []), run])
+      }
+      const output = parsed(run.output_ref)
+      const tasks = Array.isArray(output.tasks) ? output.tasks : []
+      tasks.forEach((task: any, taskIndex: number) => {
+        const taskScope = payloadChapterScope(task, chapterIdSet, chapterNoToId)
+        const taskChapterId = taskScope.chapterId || (!taskScope.hasScope ? runChapterId : null)
+        if (!taskChapterId || !chapterIdSet.has(taskChapterId)) return
+        tasksByChapter.set(taskChapterId, [
+          ...(tasksByChapter.get(taskChapterId) || []),
+          { run_id: run.id, task_index: taskIndex, task },
+        ])
+      })
+    }
+    return chapterIds.map(chapterId => ({
+      chapter: chapterRows.find(chapter => Number(chapter.id) === chapterId) || null,
+      versions: versionRows.filter(version => Number(version.chapter_id) === chapterId),
+      reviews: reviewsByChapter.get(chapterId) || [],
+      runs: runsByChapter.get(chapterId) || [],
+      tasks: tasksByChapter.get(chapterId) || [],
+    }))
+  } finally {
+    db.close()
+  }
+}
+
+function explicitModelChapterId(task: unknown) {
+  const match = String(task || '').match(/"chapter_id"\s*:\s*(\d+)/)
+  if (!match) throw new Error('MODEL_CALL_CHAPTER_ID_MISSING')
+  return Number(match[1])
+}
+
+async function createThirtyChapterWorkerFixture(options: {
+  sourceText?: string
+  candidateText?: string
+} = {}) {
+  const fixture = await createThirtyChapterScopeFixture(options)
+  const target = fixture.chapters[0]
+  const revisionCalls: number[] = []
+  const qualityCalls: number[] = []
+  const storyStateCalls: number[] = []
+  let followerRefreshCallCount = 0
+  const executeAgent = async (agent: string, _project: any, request: any) => {
+    const chapterId = explicitModelChapterId(request?.task)
+    if (agent === 'prose-agent') {
+      revisionCalls.push(chapterId)
+      return completeResult(fixture.candidateText, {
+        revision_scope_guard: { over_limit: false },
+        revision_receipts: [{ affected_chapters: [chapterId] }],
+      })
+    }
+    if (String(request?.task || '').includes('商用小说正文质检')) {
+      qualityCalls.push(chapterId)
+      return {
+        parsed: {
+          passed: true,
+          score: 96,
+          issues: [],
+          revision_directives: [],
+          craft_metrics: {},
+          focused_revision_modes: [],
+          needs_revision: false,
+        },
+        finish_reason: 'stop',
+      }
+    }
+    storyStateCalls.push(chapterId)
+    return {
+      parsed: {
+        state_delta: {
+          current_time: 'FIXTURE_STORY_STATE_AFTER',
+          open_questions: ['FIXTURE_OPEN_QUESTION_AFTER'],
+          next_chapter_priorities: ['FIXTURE_NEXT_PRIORITY'],
+        },
+        character_updates: [],
+        setting_updates: [],
+        storyline_updates: [],
+      },
+      finish_reason: 'stop',
+    }
+  }
+  const methods = createStoryStateMachineMethods({
+    executeAgent,
+    getStageModelId: () => 217,
+    getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+    refreshFollowingChapterSerialStoryStateReadiness: async () => { followerRefreshCallCount += 1 },
+  })
+  const buildChapterContextPackage = async (
+    _activeWorkspace: string,
+    _project: any,
+    chapter: any,
+  ) => ({
+    chapter_target: {
+      chapter_id: chapter.id,
+      id: chapter.id,
+      chapter_no: chapter.chapter_no,
+      title: chapter.title,
+      chapter_goal: chapter.chapter_goal,
+      conflict: chapter.conflict,
+      ending_hook: chapter.ending_hook,
+    },
+    continuity: {
+      previous_chapter: chapter.chapter_no > 1 ? `PREVIOUS_${chapter.chapter_no - 1}` : '',
+      next_chapter: chapter.chapter_no < 30 ? `NEXT_${chapter.chapter_no + 1}` : '',
+    },
+    story_state: { exact_chapter_id: chapter.id },
+  })
+  const ctx: any = {
+    getWorkspace: () => fixture.workspace,
+    getProject: (_activeWorkspace: string, projectId: number) => getNovelProject(fixture.workspace, projectId),
+    buildChapterContextPackage,
+    getStageModelId: () => 217,
+    getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+    buildReferenceUsageReport: async () => ({}),
+    buildStructuralSimilarityReport: () => ({}),
+    buildReferenceMigrationDryPlan: () => ({}),
+    diffTexts: () => ({}),
+    executeAgent,
+    updateStoryStateMachine: methods.updateStoryStateMachine,
+  }
+  const input = {
+    ...canonicalRunInput(fixture.project.id, target),
+    source_text: fixture.sourceText,
+    source_text_hash: revisionTextHash(fixture.sourceText),
+    source_char_count: fixture.sourceText.replace(/\s/g, '').length,
+    source_review: {
+      id: 11,
+      review_type: 'prose_quality',
+      payload: JSON.stringify({
+        chapter_id: target.id,
+        report: { chapter_id: target.id, must_fix: ['只修第一章'] },
+      }),
+    },
+    report: {
+      chapter_id: target.id,
+      revision_strategy: 'surgical_patch',
+      must_fix: ['只修第一章'],
+    },
+    context_package: await buildChapterContextPackage(fixture.workspace, fixture.project, target),
+  }
+  const run = await createEditorRevisionRun(fixture.workspace, {
+    projectId: fixture.project.id,
+    chapterId: target.id,
+    inputRef: JSON.stringify(input),
+    outputRef: JSON.stringify(initialCheckpoint()),
+  })
+  return {
+    ...fixture,
+    ctx,
+    input,
+    run,
+    worker: createEditorRevisionWorker(ctx),
+    revisionCalls,
+    qualityCalls,
+    storyStateCalls,
+    followerRefreshCalls: () => followerRefreshCallCount,
+  }
+}
+
+function snapshotWithoutRun(snapshot: any[], runId: number) {
+  return snapshot.map(item => ({
+    ...item,
+    runs: item.runs.filter((run: any) => Number(run.id) !== runId),
+  }))
+}
+
+function durableRunColumns(run: any) {
+  const durable = { ...run }
+  for (const key of [
+    'status',
+    'output_ref',
+    'error_message',
+    'updated_at',
+    'lease_owner',
+    'lease_expires_at',
+    'cancel_requested_at',
+  ]) delete durable[key]
+  return durable
+}
+
+function createRegisteredRouteHarness(): any {
+  const handlers = new Map<string, any>()
+  const register = (method: string, path: string, handler: any) => {
+    handlers.set(`${method.toUpperCase()} ${path}`, handler)
+    return app
+  }
+  const app = {
+    get: (path: string, handler: any) => register('GET', path, handler),
+    post: (path: string, handler: any) => register('POST', path, handler),
+    put: (path: string, handler: any) => register('PUT', path, handler),
+    delete: (path: string, handler: any) => register('DELETE', path, handler),
+  }
+  return { app, handlers }
+}
+
+async function callRegisteredRoute(handler: any, request: any = {}) {
+  const response: any = {
+    statusCode: 200,
+    body: null,
+    status(code: number) {
+      this.statusCode = code
+      return this
+    },
+    json(body: any) {
+      this.body = body
+      return this
+    },
+  }
+  await handler({ body: {}, query: {}, params: {}, ...request }, response)
+  return response
+}
+
 describe('durable editor revision worker', () => {
+  test('30 chapter mutation snapshots detect one deliberately changed follower', async () => {
+    const fixture = await createThirtyChapterScopeFixture()
+    const before = await chapterMutationSnapshot(
+      fixture.workspace,
+      fixture.project.id,
+      fixture.chapters.map((chapter: any) => chapter.id),
+    )
+
+    expect(fixture.chapters).toHaveLength(30)
+    expect(new Set(fixture.chapters.map((chapter: any) => chapter.chapter_text)).size).toBe(30)
+    const planSignatures = before.map(item => JSON.stringify({
+      chapter_goal: item.chapter.chapter_goal,
+      chapter_summary: item.chapter.chapter_summary,
+      conflict: item.chapter.conflict,
+      ending_hook: item.chapter.ending_hook,
+      scene_breakdown: item.chapter.scene_breakdown,
+      scene_list: item.chapter.scene_list,
+      timeline_note: item.chapter.timeline_note,
+    }))
+    const rawPayloadSentinels = before.map(item => parsed(item.chapter.raw_payload).scope_sentinel)
+    expect(before.every(item => [
+      item.chapter.chapter_goal,
+      item.chapter.chapter_summary,
+      item.chapter.conflict,
+      item.chapter.ending_hook,
+      item.chapter.scene_breakdown,
+      item.chapter.scene_list,
+      item.chapter.timeline_note,
+    ].every(value => String(value || '').trim().length > 0))).toBe(true)
+    expect(new Set(planSignatures).size).toBe(30)
+    expect(rawPayloadSentinels.every(Boolean)).toBe(true)
+    expect(new Set(rawPayloadSentinels).size).toBe(30)
+    expect(before.every(item => item.versions.length === 0 && item.reviews.length === 0)).toBe(true)
+
+    runDbMutation(
+      fixture.workspace,
+      'UPDATE chapters SET ending_hook = ? WHERE id = ? AND project_id = ?',
+      'DELIBERATE_FOLLOWER_MUTATION',
+      fixture.chapters[1].id,
+      fixture.project.id,
+    )
+    const after = await chapterMutationSnapshot(
+      fixture.workspace,
+      fixture.project.id,
+      fixture.chapters.map((chapter: any) => chapter.id),
+    )
+
+    expect(after[1]).not.toEqual(before[1])
+    expect(after[1].chapter.ending_hook).toBe('DELIBERATE_FOLLOWER_MUTATION')
+    expect(after.slice(2)).toEqual(before.slice(2))
+  })
+
+  test('30 chapter mutation snapshots attribute follower versions, chapter-no reviews, runs, and nested tasks', async () => {
+    const fixture = await createThirtyChapterScopeFixture()
+    const [first, second] = fixture.chapters
+    const chapterIds = fixture.chapters.map((chapter: any) => chapter.id)
+    const carrierRun = await appendNovelRun(fixture.workspace, {
+      project_id: fixture.project.id,
+      run_type: 'longform_production_repair',
+      step_name: 'first-chapter-carrier',
+      status: 'ready',
+      scope_key: `chapter:${first.id}`,
+      input_ref: JSON.stringify({ chapter_id: first.id, chapter_no: first.chapter_no }),
+      output_ref: JSON.stringify({
+        tasks: [{
+          title: 'FOLLOWER_TASK_CHAPTER_NO_ONLY',
+          chapter_no: second.chapter_no,
+          task_status: 'open',
+        }],
+      }),
+    })
+    const before = await chapterMutationSnapshot(fixture.workspace, fixture.project.id, chapterIds)
+
+    await appendChapterVersion(fixture.workspace, {
+      chapter_id: second.id,
+      project_id: fixture.project.id,
+      chapter_text: 'FOLLOWER_VERSION_SENTINEL',
+      scene_breakdown: [],
+      continuity_notes: [],
+      source: 'repair',
+    })
+    const followerReview = await createNovelReview(fixture.workspace, {
+      project_id: fixture.project.id,
+      review_type: 'scope_negative_control',
+      payload: JSON.stringify({ chapter_no: second.chapter_no, marker: 'FOLLOWER_REVIEW_SENTINEL' }),
+    })
+    const followerRun = await appendNovelRun(fixture.workspace, {
+      project_id: fixture.project.id,
+      run_type: 'quality_benchmark',
+      step_name: 'follower-chapter-no-run',
+      status: 'completed',
+      input_ref: JSON.stringify({
+        context_package: { chapter_target: { chapterNo: second.chapter_no } },
+        marker: 'FOLLOWER_RUN_SENTINEL',
+      }),
+      output_ref: '{}',
+    })
+    const after = await chapterMutationSnapshot(fixture.workspace, fixture.project.id, chapterIds)
+
+    expect(before[1].tasks).toEqual([{
+      run_id: carrierRun.id,
+      task_index: 0,
+      task: {
+        title: 'FOLLOWER_TASK_CHAPTER_NO_ONLY',
+        chapter_no: second.chapter_no,
+        task_status: 'open',
+      },
+    }])
+    expect(before[0].tasks).toEqual([])
+    expect(after[1].versions).toHaveLength(1)
+    expect(after[1].versions[0]).toMatchObject({ chapter_id: second.id, chapter_text: 'FOLLOWER_VERSION_SENTINEL' })
+    expect(after[1].reviews.map((review: any) => review.id)).toContain(followerReview.id)
+    expect(after[1].runs.map((run: any) => run.id)).toContain(followerRun.id)
+    expect(after[1].tasks).toEqual(before[1].tasks)
+    expect(after[0]).toEqual(before[0])
+    expect(after.slice(2)).toEqual(before.slice(2))
+  })
+
+  test('real worker revises chapter one in a 30 chapter project without mutating followers', async () => {
+    const fixture = await createThirtyChapterWorkerFixture()
+    const chapterIds = fixture.chapters.map((chapter: any) => chapter.id)
+    const before = await chapterMutationSnapshot(fixture.workspace, fixture.project.id, chapterIds)
+
+    expect(before.every(item => item.versions.length === 0 && item.reviews.length === 0)).toBe(true)
+    await fixture.worker.start(fixture.workspace)
+    await fixture.worker.waitForIdle()
+    await fixture.worker.stop()
+
+    const after = await chapterMutationSnapshot(fixture.workspace, fixture.project.id, chapterIds)
+    const completedRun = await getEditorRevisionRun(fixture.workspace, fixture.project.id, fixture.run.id)
+    const checkpoint = parsed(completedRun?.output_ref)
+    const commitMarker = parsed(after[0].chapter.raw_payload).editor_revision_commit
+    const warnings = (await listNovelReviews(fixture.workspace, fixture.project.id))
+      .filter(review => review.review_type === 'downstream_continuity_warning')
+
+    expect(completedRun).toMatchObject({ status: 'completed', error_message: '' })
+    expect(fixture.revisionCalls).toEqual([fixture.chapters[0].id])
+    expect(fixture.qualityCalls).toEqual([fixture.chapters[0].id])
+    expect(fixture.storyStateCalls).toEqual([fixture.chapters[0].id])
+    expect(fixture.followerRefreshCalls()).toBe(0)
+    expect(after.slice(1)).toEqual(before.slice(1))
+    expect(after[0].chapter.chapter_text).toBe(fixture.candidateText)
+    expect(after.flatMap(item => item.versions)).toHaveLength(1)
+    expect(after[0].versions).toHaveLength(1)
+    expect(after[0].versions[0]).toMatchObject({
+      chapter_id: fixture.chapters[0].id,
+      chapter_text: fixture.sourceText,
+      source: 'repair',
+    })
+    expect(checkpoint.candidate.hash).toBe(revisionTextHash(fixture.candidateText))
+    expect(commitMarker).toMatchObject({
+      run_id: fixture.run.id,
+      source_hash: revisionTextHash(fixture.sourceText),
+      candidate_hash: checkpoint.candidate.hash,
+    })
+    expect(warnings).toHaveLength(1)
+    expect(parsed(warnings[0].payload)).toMatchObject({
+      source_run_id: fixture.run.id,
+      chapter_id: fixture.chapters[0].id,
+      following_written_range: { first: 2, last: 30, count: 29 },
+    })
+    expect(after.slice(1).every(item => item.tasks.length === 0)).toBe(true)
+  }, 30_000)
+
+  test('real worker rejects a 5910 to 243 candidate without changing protected chapter or Story State data', async () => {
+    const source = fixedScopeText('REJECT_SOURCE_SENTINEL', 5910)
+    const candidate = fixedScopeText('REJECT_CANDIDATE_SENTINEL', 243)
+    const fixture = await createThirtyChapterWorkerFixture({ sourceText: source, candidateText: candidate })
+    const chapterIds = fixture.chapters.map((chapter: any) => chapter.id)
+    const before = await chapterMutationSnapshot(fixture.workspace, fixture.project.id, chapterIds)
+    const beforeRun = await getEditorRevisionRun(fixture.workspace, fixture.project.id, fixture.run.id)
+    const beforeStoryState = storyStateMutationSnapshot(
+      fixture.workspace,
+      fixture.project.id,
+      fixture.chapters[0].id,
+    )
+
+    await fixture.worker.start(fixture.workspace)
+    await fixture.worker.waitForIdle()
+    await fixture.worker.stop()
+
+    const after = await chapterMutationSnapshot(fixture.workspace, fixture.project.id, chapterIds)
+    const afterStoryState = storyStateMutationSnapshot(
+      fixture.workspace,
+      fixture.project.id,
+      fixture.chapters[0].id,
+    )
+    const failedRun = await getEditorRevisionRun(fixture.workspace, fixture.project.id, fixture.run.id)
+    const checkpoint = parsed(failedRun?.output_ref)
+
+    expect(source.replace(/\s/g, '')).toHaveLength(5910)
+    expect(candidate.replace(/\s/g, '')).toHaveLength(243)
+    expect(fixture.revisionCalls).toEqual([fixture.chapters[0].id])
+    expect(fixture.qualityCalls).toEqual([])
+    expect(fixture.storyStateCalls).toEqual([])
+    expect(snapshotWithoutRun(after, fixture.run.id)).toEqual(snapshotWithoutRun(before, fixture.run.id))
+    const afterWithInjectedFailedRunTask = after.map((item, index) => index === 0 ? {
+      ...item,
+      tasks: [...item.tasks, {
+        run_id: fixture.run.id,
+        task_index: 0,
+        task: {
+          title: 'FAILED_RUN_TASK_NEGATIVE_CONTROL',
+          chapter_id: fixture.chapters[0].id,
+          task_status: 'open',
+        },
+      }],
+    } : item)
+    expect(snapshotWithoutRun(afterWithInjectedFailedRunTask, fixture.run.id))
+      .not.toEqual(snapshotWithoutRun(before, fixture.run.id))
+    expect(afterStoryState).toEqual(beforeStoryState)
+    expect(beforeRun).not.toBeNull()
+    expect(failedRun).not.toBeNull()
+    expect(durableRunColumns(failedRun)).toEqual(durableRunColumns(beforeRun))
+    expect(failedRun).toMatchObject({ status: 'failed', error_message: 'REVISION_CANDIDATE_TOO_SHORT' })
+    expect(Object.keys(checkpoint).sort()).toEqual([
+      'error',
+      'phase',
+      'phases',
+      'prose_persisted',
+      'schema_version',
+      'warnings',
+    ])
+    expect(Object.keys(checkpoint.phases).sort()).toEqual([
+      'admit_candidate',
+      'completed',
+      'generate_candidate',
+      'persist_chapter',
+      'post_quality',
+      'record_continuity_warning',
+      'sync_current_story_state',
+    ])
+    expect(checkpoint.candidate).toBeUndefined()
+    expect(checkpoint.tasks).toBeUndefined()
+    expect(checkpoint.followers).toBeUndefined()
+    expect(checkpoint.follower_payload).toBeUndefined()
+    expect(checkpoint.following_written_range).toBeUndefined()
+    expect(Object.keys(checkpoint.error).sort()).toEqual(['code', 'diagnostics', 'message'])
+    expect(Object.keys(checkpoint.error.diagnostics).sort()).toEqual([
+      'applied_patch_count',
+      'candidate_char_count',
+      'maximum_char_count',
+      'minimum_char_count',
+      'rejected_candidate',
+      'source_char_count',
+      'unapplied_patch_count',
+      'unapplied_patch_reasons',
+    ])
+    expect(checkpoint.error).toEqual({
+      code: 'REVISION_CANDIDATE_TOO_SHORT',
+      message: 'REVISION_CANDIDATE_TOO_SHORT: 修订候选明显短于原文',
+      diagnostics: {
+        source_char_count: 5910,
+        candidate_char_count: 243,
+        minimum_char_count: 4137,
+        maximum_char_count: 7683,
+        applied_patch_count: 1,
+        unapplied_patch_count: 0,
+        unapplied_patch_reasons: [],
+        rejected_candidate: {
+          text: candidate,
+          hash: revisionTextHash(candidate),
+          char_count: 243,
+        },
+      },
+    })
+    expect(after.flatMap(item => item.versions)).toHaveLength(0)
+    expect(after.flatMap(item => item.reviews)).toHaveLength(0)
+  }, 30_000)
+
+  test('registered manual Story State sync writes only chapter one in the same 30 chapter fixture', async () => {
+    const fixture = await createThirtyChapterWorkerFixture()
+    const chapterIds = fixture.chapters.map((chapter: any) => chapter.id)
+    const before = await chapterMutationSnapshot(fixture.workspace, fixture.project.id, chapterIds)
+    const { app, handlers } = createRegisteredRouteHarness()
+    const lifecycle = registerNovelEditorRoutes(app as any, fixture.ctx)
+    const storyStateSync = handlers.get('POST /api/novel/chapters/:chapterId/story-state-sync')
+
+    const response = await callRegisteredRoute(storyStateSync, {
+      params: { chapterId: String(fixture.chapters[0].id) },
+      body: { project_id: fixture.project.id, source: 'task12_manual_scope_test' },
+    })
+    await lifecycle.stop()
+
+    const after = await chapterMutationSnapshot(fixture.workspace, fixture.project.id, chapterIds)
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toMatchObject({ ok: true, chapter_id: fixture.chapters[0].id })
+    expect(fixture.revisionCalls).toEqual([])
+    expect(fixture.qualityCalls).toEqual([])
+    expect(fixture.storyStateCalls).toEqual([fixture.chapters[0].id])
+    expect(fixture.followerRefreshCalls()).toBe(0)
+    expect(after.slice(1)).toEqual(before.slice(1))
+    expect(after[0].runs.filter((run: any) => run.run_type === 'story_state')).toHaveLength(1)
+    expect(after[0].reviews.filter((review: any) => review.review_type === 'delivery_risk_convergence')).toHaveLength(1)
+    expect(after.slice(1).every(item => item.tasks.length === 0)).toBe(true)
+  }, 30_000)
+
   test('novel route package returns and delegates one editor revision lifecycle', async () => {
     const defaultWorkspace = '/tmp/default-editor-revision-workspace'
     const activeWorkspace = '/tmp/loaded-editor-revision-workspace'

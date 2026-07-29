@@ -1,5 +1,5 @@
 import React from 'react'
-import { Button, Input, Space, Tag, Typography } from 'antd'
+import { Button, Input, Modal, Space, Spin, Tag, Typography } from 'antd'
 import {
   buildRevisionUsageMap,
   issueLabel,
@@ -11,6 +11,11 @@ import {
   timeValue,
 } from './reference-panel-helpers'
 import { chapterWordCount, displayValue } from './utils'
+import {
+  isActiveEditorRevisionTask,
+  type EditorRevisionTask,
+} from './editorRevisionTasks'
+import { editorRevisionPhaseLabel } from './task-center/drawer-run-summary-editor-revision'
 
 const { Text, Paragraph } = Typography
 
@@ -44,6 +49,42 @@ const CRAFT_METRIC_LABELS: Record<string, string> = {
   combat_process_score: '战斗过程',
   event_density_score: '事件密度',
   description_overuse_score: '描写过量',
+}
+
+type EditorRevisionTaskActionKey = 'cancel' | 'retry' | 'continue'
+type EditorRevisionPendingAction = {
+  runId: number
+  actionKey: EditorRevisionTaskActionKey
+}
+
+export async function runEditorRevisionTaskAction({
+  runId,
+  actionKey,
+  action,
+  inFlightRunIds,
+  setPendingAction,
+  onError,
+}: {
+  runId: number
+  actionKey: EditorRevisionTaskActionKey
+  action: (runId: number) => void | Promise<unknown>
+  inFlightRunIds: Set<number>
+  setPendingAction: (pending: EditorRevisionPendingAction | null) => void
+  onError: (error: unknown) => void
+}) {
+  if (inFlightRunIds.has(runId)) return false
+  inFlightRunIds.add(runId)
+  setPendingAction({ runId, actionKey })
+  try {
+    await action(runId)
+    return true
+  } catch (error) {
+    onError(error)
+    return false
+  } finally {
+    inFlightRunIds.delete(runId)
+    setPendingAction(null)
+  }
 }
 
 export function reportChapterId(report: any) {
@@ -96,24 +137,154 @@ function QualityRow({
   )
 }
 
+function EditorRevisionStatusStrip({
+  task,
+  onCancel,
+  onRetry,
+  onLoadDiagnostics,
+}: {
+  task: EditorRevisionTask
+  onCancel?: (runId: number) => void | Promise<unknown>
+  onRetry?: (runId: number) => void | Promise<unknown>
+  onLoadDiagnostics?: (runId: number) => Promise<Record<string, unknown>>
+}) {
+  const inFlightRunIdsRef = React.useRef(new Set<number>())
+  const [pendingAction, setPendingAction] = React.useState<EditorRevisionPendingAction | null>(null)
+  const active = isActiveEditorRevisionTask(task)
+  const statusLabel = task.status === 'completed'
+    ? '已完成'
+    : task.status === 'failed'
+      ? '失败'
+      : task.status === 'canceled'
+        ? '已取消'
+        : task.status === 'cancel_requested'
+          ? '取消中'
+          : task.status === 'queued'
+            ? '排队中'
+            : '运行中'
+  const statusColor = task.status === 'completed'
+    ? 'green'
+    : task.status === 'failed'
+      ? 'red'
+      : active
+        ? 'blue'
+        : undefined
+  const pendingForTask = pendingAction?.runId === task.id
+  const pendingActionKey = pendingForTask ? pendingAction.actionKey : null
+  const runTaskAction = (
+    actionKey: EditorRevisionTaskActionKey,
+    action: ((runId: number) => void | Promise<unknown>) | undefined,
+  ) => {
+    if (!action) return
+    const actionLabel = actionKey === 'cancel' ? '取消修订' : actionKey === 'continue' ? '继续后处理' : '重试'
+    void runEditorRevisionTaskAction({
+      runId: task.id,
+      actionKey,
+      action,
+      inFlightRunIds: inFlightRunIdsRef.current,
+      setPendingAction,
+      onError: error => {
+        Modal.error({
+          title: `${actionLabel}失败`,
+          content: String((error as any)?.message || error || '未知错误'),
+        })
+      },
+    })
+  }
+  const showDiagnostics = async () => {
+    if (!onLoadDiagnostics) return
+    try {
+      const diagnostics = await onLoadDiagnostics(task.id)
+      Modal.info({
+        title: `第${task.chapter_no}章修订诊断`,
+        width: 720,
+        content: (
+          <pre style={{ maxHeight: 420, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {JSON.stringify(diagnostics, null, 2)}
+          </pre>
+        ),
+      })
+    } catch (error: any) {
+      Modal.error({ title: '诊断加载失败', content: String(error?.message || error || '未知错误') })
+    }
+  }
+
+  return (
+    <div className="novel-editor-revision-status-strip">
+      <div className="novel-editor-revision-status-main">
+        <div className="novel-editor-revision-status-heading">
+          {active ? <Spin size="small" /> : null}
+          <Tag color={statusColor} bordered={false}>{statusLabel}</Tag>
+          <Text strong>{editorRevisionPhaseLabel(task.phase)}</Text>
+          <Text type="secondary">第{task.chapter_no}章《{task.chapter_title || '未命名'}》</Text>
+        </div>
+        {task.warnings.map((warning, index) => (
+          <Text key={`${warning.code}-${index}`} type="warning" className="novel-editor-revision-status-message">
+            {warning.message}
+          </Text>
+        ))}
+        {task.error ? <Text type="danger" className="novel-editor-revision-status-message">{task.error.message}</Text> : null}
+      </div>
+      <div className="novel-editor-revision-status-actions">
+        {task.can_cancel && onCancel ? (
+          <Button
+            size="small"
+            danger
+            disabled={pendingForTask}
+            loading={pendingActionKey === 'cancel'}
+            onClick={() => runTaskAction('cancel', onCancel)}
+          >取消修订</Button>
+        ) : null}
+        {task.can_retry && onRetry ? (
+          <Button
+            size="small"
+            type="primary"
+            disabled={pendingForTask}
+            loading={pendingActionKey === 'retry'}
+            onClick={() => runTaskAction('retry', onRetry)}
+          >重试</Button>
+        ) : null}
+        {task.can_continue && onRetry ? (
+          <Button
+            size="small"
+            type="primary"
+            disabled={pendingForTask}
+            loading={pendingActionKey === 'continue'}
+            onClick={() => runTaskAction('continue', onRetry)}
+          >继续后处理</Button>
+        ) : null}
+        {onLoadDiagnostics ? <Button size="small" type="link" onClick={() => { void showDiagnostics() }}>查看诊断</Button> : null}
+      </div>
+    </div>
+  )
+}
+
 export function WorkspaceCenterQualityRevisionPanel({
   activeChapter,
   proseQualityReports = [],
   editorRevisionReports = [],
+  editorRevisionTask = null,
   proseQualityLoading = false,
   editorReportLoading = false,
   onRefreshProseQuality,
   onApplyEditorRevision,
+  onCancelEditorRevision,
+  onRetryEditorRevision,
+  onLoadEditorRevisionDiagnostics,
   onCreateEditorReport,
   onOpenSideQuality,
 }: {
   activeChapter: any | null
   proseQualityReports?: any[]
   editorRevisionReports?: any[]
+  editorRevisionTask?: EditorRevisionTask | null
   proseQualityLoading?: boolean
   editorReportLoading?: boolean
   onRefreshProseQuality?: () => void
   onApplyEditorRevision?: (report: any, options?: { revisionMode?: string; prompt?: string; skipConfirm?: boolean }) => void
+  onCancelEditorRevision?: (runId: number) => void | Promise<unknown>
+  onRetryEditorRevision?: (runId: number) => void | Promise<unknown>
+  onLoadEditorRevisionDiagnostics?: (runId: number) => Promise<Record<string, unknown>>
   onCreateEditorReport?: () => void
   onOpenSideQuality?: () => void
 }) {
@@ -122,6 +293,8 @@ export function WorkspaceCenterQualityRevisionPanel({
   const hasProse = Boolean(chapterId && wordCount > 0)
   const [open, setOpen] = React.useState(true)
   const [customRevisionPrompt, setCustomRevisionPrompt] = React.useState('')
+  const currentEditorRevisionTask = editorRevisionTask?.chapter_id === chapterId ? editorRevisionTask : null
+  const revisionActive = Boolean(currentEditorRevisionTask && isActiveEditorRevisionTask(currentEditorRevisionTask))
 
   const chapterReports = React.useMemo(() => {
     if (!chapterId) return [] as any[]
@@ -180,13 +353,14 @@ export function WorkspaceCenterQualityRevisionPanel({
 
   if (!hasProse) return null
 
+  const canRevise = Boolean(latest && onApplyEditorRevision && !isStale && usedByRevisions.length === 0 && !revisionActive)
   const trimmedCustomPrompt = customRevisionPrompt.trim()
   const withCustomPrompt = (options: { revisionMode?: string; prompt?: string; skipConfirm?: boolean } = {}) => ({
     ...options,
     prompt: String(options.prompt || trimmedCustomPrompt || '').trim() || undefined,
   })
   const applyRevision = (options: { revisionMode?: string; prompt?: string; skipConfirm?: boolean } = {}) => {
-    if (!latest || !onApplyEditorRevision) return
+    if (!canRevise || revisionActive || !latest || !onApplyEditorRevision) return
     onApplyEditorRevision(latest, withCustomPrompt(options))
   }
 
@@ -201,7 +375,6 @@ export function WorkspaceCenterQualityRevisionPanel({
     usedByRevisions.length ? '已生成修订' : '',
   ].filter(Boolean)
 
-  const canRevise = Boolean(latest && onApplyEditorRevision && !isStale && usedByRevisions.length === 0)
   const busy = Boolean(proseQualityLoading || editorReportLoading)
   const craftRows = Object.entries(craftMetrics)
     .filter(([, value]) => value !== undefined && value !== null && value !== '')
@@ -230,6 +403,14 @@ export function WorkspaceCenterQualityRevisionPanel({
       </summary>
 
       <div className="novel-quality-revision-body">
+        {currentEditorRevisionTask ? (
+          <EditorRevisionStatusStrip
+            task={currentEditorRevisionTask}
+            onCancel={onCancelEditorRevision}
+            onRetry={onRetryEditorRevision}
+            onLoadDiagnostics={onLoadEditorRevisionDiagnostics}
+          />
+        ) : null}
         <div className="novel-quality-revision-actions">
           <Space wrap size={[6, 6]}>
             <Button

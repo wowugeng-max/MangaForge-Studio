@@ -7,6 +7,75 @@ import {
   listQualityContractRequiredFieldKeys,
 } from './repairTaskRevisionPrompt'
 
+const specializedSyncCases = [
+  [
+    'deslop repair receipt',
+    {
+      source: 'review_annotation_risk',
+      issue_type: 'deslop_repair_receipt',
+      annotation_category: 'deslop_repair_receipt',
+      annotation_key: 'deslop_repair_receipt_sync:208:12:12:deslop_repair_receipt:去AI味回执',
+    },
+    'deslop_repair_receipt_sync',
+  ],
+  [
+    'revision cascade impact',
+    {
+      source: 'review_annotation_risk',
+      issue_type: 'revision_cascade_impact',
+      annotation_category: 'revision_cascade_impact',
+      annotation_key: 'revision_cascade_impact_sync:209:12:12:revision_cascade_impact:级联修订',
+    },
+    'revision_cascade_impact_sync',
+  ],
+  [
+    'revision scope guard',
+    {
+      source: 'review_annotation_risk',
+      issue_type: 'revision_scope_guard',
+      annotation_category: 'revision_scope_guard',
+      annotation_key: 'revision_scope_guard_sync:210:12:12:revision_scope_guard:修订幅度',
+    },
+    'revision_scope_guard_sync',
+  ],
+  [
+    'revision context receipt',
+    {
+      source: 'review_annotation_risk',
+      issue_type: 'revision_context_receipts_sync',
+      annotation_category: 'revision_context_receipts',
+      annotation_key: 'revision_context_receipts_sync:212:12:12:revision_context_receipts:修订上下文',
+    },
+    'revision_context_receipts_sync',
+  ],
+  [
+    'prose revision receipt',
+    {
+      source: 'review_annotation_risk',
+      issue_type: 'prose_revision_receipt_sync',
+      annotation_category: 'prose_revision_receipt',
+      annotation_key: 'prose_revision_receipt_sync:211:12:12:prose_revision_receipt:修订回执',
+    },
+    'prose_revision_receipt_sync',
+  ],
+  [
+    'quality-audit repair receipt',
+    {
+      source: 'review_annotation_risk',
+      issue_type: 'quality_audit_repair_receipt',
+      annotation_category: 'quality_audit_repair_receipt',
+      annotation_key: 'quality_audit_repair_receipt_sync:207:12:12:quality_audit_repair_receipt:质量回执',
+    },
+    'quality_audit_repair_receipt_sync',
+  ],
+] as const
+
+const nonExactSpecializedSyncStatuses = [
+  ['uppercase', 'OK'],
+  ['whitespace-padded', ' ok '],
+  ['non-string', ['ok']],
+] as const
+
 describe('buildRepairTaskRevisionPrompt specialty/closure b', () => {
   test('keeps deslop repair receipt tasks open until receipt sync clears', () => {
     const residual = buildDeliveryRiskRevisionClosurePlan(
@@ -408,9 +477,9 @@ describe('buildRepairTaskRevisionPrompt specialty/closure b', () => {
       {
         quality_refresh: { ok: true, score: 82 },
         delivery_risk_convergence: {
-          status: 'improved',
+          status: 'cleared',
           residual_count: 2,
-          label: '风险收敛 1',
+          label: '入库阻断已解除，仍有其他风险 2',
           before: {
             total_count: 3,
             approval_blocker: { type: 'reference_safety_blocked', label: '仿写安全阻断' },
@@ -460,6 +529,85 @@ describe('buildRepairTaskRevisionPrompt specialty/closure b', () => {
     expect(residual.note).toContain('入库阻断仍未解除')
   })
 
+  test('keeps approval blocker tasks open when blocker convergence evidence is missing', () => {
+    const result = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'review_annotation_risk',
+        issue_type: 'approval_blocker',
+        annotation_category: 'approval_blocker',
+        annotation_key: 'prose_quality:21:3:approval_blocker:仿写安全阻断',
+        payload: {
+          type: 'reference_safety_blocked',
+          label: '仿写安全阻断',
+        },
+      },
+      {
+        quality_refresh: { ok: true, score: 88 },
+      },
+    )
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain('缺少 delivery_risk_convergence')
+  })
+
+  test('keeps approval blocker tasks open when convergence residual count is malformed', () => {
+    const result = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'review_annotation_risk',
+        issue_type: 'approval_blocker',
+        annotation_category: 'approval_blocker',
+        annotation_key: 'prose_quality:21:3:approval_blocker:仿写安全阻断',
+        payload: {
+          type: 'reference_safety_blocked',
+          label: '仿写安全阻断',
+        },
+      },
+      {
+        quality_refresh: { ok: true, score: 88 },
+        delivery_risk_convergence: {
+          residual_count: 'n/a',
+          label: '残余计数不可用',
+        },
+      },
+    )
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain('残余计数无效')
+  })
+
+  test.each([
+    ['explicit non-passing', 'worse'],
+    ['whitespace-padded', ' cleared '],
+    ['non-string', ['cleared']],
+  ] as const)('keeps approval blocker tasks open for a %s convergence status even when residual_count is zero', (_label, status) => {
+    const result = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'review_annotation_risk',
+        issue_type: 'approval_blocker',
+        annotation_category: 'approval_blocker',
+        annotation_key: 'prose_quality:21:3:approval_blocker:仿写安全阻断',
+        payload: {
+          type: 'reference_safety_blocked',
+          label: '仿写安全阻断',
+        },
+      },
+      {
+        quality_refresh: { ok: true, score: 88 },
+        delivery_risk_convergence: {
+          status,
+          residual_count: 0,
+          label: '显式状态未通过',
+        },
+      },
+    )
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain('显式状态未通过')
+  })
+
   test('closes recovery evidence mismatch tasks after recovery evidence recheck clears', () => {
     const cleared = buildDeliveryRiskRevisionClosurePlan(
       {
@@ -498,6 +646,100 @@ describe('buildRepairTaskRevisionPrompt specialty/closure b', () => {
     expect(residual.taskStatus).toBe('needs_review')
     expect(residual.note).toContain('恢复依据仍有失效项')
     expect(residual.note).toContain('第42章样章已重审')
+  })
+
+  test.each([
+    ['explicit non-passing', 'warn'],
+    ['whitespace-padded', ' ok '],
+    ['non-string', ['ok']],
+  ] as const)('keeps recovery evidence tasks open for a %s review status even when failed_evidence is empty', (_label, status) => {
+    const result = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'auto_creation_safe_batch_risk',
+        issue_type: 'recovery_evidence_mismatch',
+      },
+      {
+        quality_refresh: { ok: true, score: 88 },
+        recovery_evidence_review: {
+          status,
+          failed_evidence: [],
+          summary: '显式恢复复检状态未通过',
+        },
+      },
+    )
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain('显式恢复复检状态未通过')
+  })
+
+  test.each([
+    ['explicit non-passing', 'worse'],
+    ['whitespace-padded', ' cleared '],
+    ['non-string', ['cleared']],
+  ] as const)('keeps recovery evidence tasks open for a %s fallback convergence status even when residual_count is zero', (_label, status) => {
+    const result = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'auto_creation_safe_batch_risk',
+        issue_type: 'recovery_evidence_mismatch',
+      },
+      {
+        quality_refresh: { ok: true, score: 88 },
+        delivery_risk_convergence: {
+          status,
+          residual_count: 0,
+          summary: '显式收敛状态未通过',
+        },
+      },
+    )
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain('显式收敛状态未通过')
+  })
+
+  test('requires the status-free recovery review fallback array to be actually empty', () => {
+    const result = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'auto_creation_safe_batch_risk',
+        issue_type: 'recovery_evidence_mismatch',
+      },
+      {
+        quality_refresh: { ok: true, score: 88 },
+        recovery_evidence_review: {
+          failed_evidence: [null],
+          summary: '恢复复检数组仍含无效项',
+        },
+      },
+    )
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain('恢复复检数组仍含无效项')
+  })
+
+  test.each([
+    ['numeric string zero', '0'],
+    ['null', null],
+    ['negative number', -1],
+  ] as const)('rejects a status-free recovery convergence %s residual count', (_label, residualCount) => {
+    const result = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'auto_creation_safe_batch_risk',
+        issue_type: 'recovery_evidence_mismatch',
+      },
+      {
+        quality_refresh: { ok: true, score: 88 },
+        delivery_risk_convergence: {
+          residual_count: residualCount,
+          summary: '恢复收敛计数无效',
+        },
+      },
+    )
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain('恢复收敛计数无效')
   })
 
   test('uses governance recheck closure wording for single-chapter recovery evidence repairs', () => {
@@ -589,4 +831,214 @@ describe('buildRepairTaskRevisionPrompt specialty/closure b', () => {
     expect(residual.taskStatus).toBe('needs_review')
     expect(residual.note).toContain('剧情线仍有差异')
     expect(residual.note).toContain('额外推进 1')
-  })})
+  })
+
+  test('keeps storyline tasks open when storyline sync evidence is missing', () => {
+    const storyline = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'storyline_diff_decision',
+        decision_key: 'storyline_diff:7:203:missed:执事压迫升级没有兑现。',
+        decision: 'revise_prose',
+      },
+      {
+        quality_refresh: { ok: true, score: 88 },
+      },
+    )
+
+    expect(storyline.taskStatus).toBe('needs_review')
+    expect(storyline.annotationStatus).toBe('')
+    expect(storyline.note).toContain('缺少 storyline_sync')
+  })
+
+  test('keeps storyline tasks open when bounded difference fields are malformed', () => {
+    const storyline = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'storyline_diff_decision',
+        decision_key: 'storyline_diff:7:204:missed:执事压迫升级没有兑现。',
+        decision: 'revise_prose',
+      },
+      {
+        quality_refresh: { ok: true, score: 88 },
+        story_state_update: {
+          storyline_sync: {
+            status: 'ok',
+            missed: null,
+            unplanned: null,
+            forbidden_touched: null,
+          },
+        },
+      },
+    )
+
+    expect(storyline.taskStatus).toBe('needs_review')
+    expect(storyline.annotationStatus).toBe('')
+    expect(storyline.note).toContain('storyline_sync.missed/unplanned/forbidden_touched 必须为数组')
+  })
+
+  test.each([
+    ['explicit non-passing', 'warn'],
+    ['whitespace-padded', ' ok '],
+    ['non-string', ['ok']],
+  ] as const)('keeps storyline tasks open for a %s storyline status even when bounded difference arrays are empty', (_label, status) => {
+    const storyline = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'storyline_diff_decision',
+        decision_key: 'storyline_diff:7:205:missed:执事压迫升级没有兑现。',
+        decision: 'revise_prose',
+      },
+      {
+        quality_refresh: { ok: true, score: 88 },
+        story_state_update: {
+          storyline_sync: {
+            status,
+            missed: [],
+            unplanned: [],
+            forbidden_touched: [],
+            label: '显式状态未通过',
+          },
+        },
+      },
+    )
+
+    expect(storyline.taskStatus).toBe('needs_review')
+    expect(storyline.annotationStatus).toBe('')
+    expect(storyline.note).toContain('显式状态未通过')
+  })
+
+  test('keeps revision-scope tasks open when scope-guard evidence is missing', () => {
+    const revisionScope = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'review_annotation_risk',
+        issue_type: 'revision_scope_guard',
+        annotation_category: 'revision_scope_guard',
+        annotation_key: 'revision_scope_guard_sync:210:12:12:revision_scope_guard:修订幅度',
+      },
+      {
+        quality_refresh: { ok: true, score: 88 },
+        delivery_risk_convergence: { status: 'cleared', residual_count: 0, label: '风险已清零' },
+      },
+    )
+
+    expect(revisionScope.taskStatus).toBe('needs_review')
+    expect(revisionScope.annotationStatus).toBe('')
+    expect(revisionScope.note).toContain('缺少 revision_scope_guard_sync')
+  })
+
+  test('does not treat a generic result container as specialized sync evidence', () => {
+    const result = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'review_annotation_risk',
+        issue_type: 'revision_scope_guard',
+        annotation_category: 'revision_scope_guard',
+        annotation_key: 'revision_scope_guard_sync:210:12:12:revision_scope_guard:修订幅度',
+      },
+      {
+        quality_refresh: {
+          ok: true,
+          score: 88,
+          result: { status: 'ok', issues: [] },
+        },
+        delivery_risk_convergence: { status: 'cleared', residual_count: 0, label: '风险已清零' },
+      },
+    )
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain('缺少 revision_scope_guard_sync')
+  })
+
+  test.each(specializedSyncCases)('keeps %s tasks open when their specialized sync payload is missing', (_label, task, syncKey) => {
+    const result = buildDeliveryRiskRevisionClosurePlan(task, {
+      quality_refresh: { ok: true, score: 88 },
+      delivery_risk_convergence: { status: 'cleared', residual_count: 0, label: '风险已清零' },
+    })
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain(`缺少 ${syncKey}`)
+  })
+
+  test.each(specializedSyncCases)('keeps %s tasks open when the named sync payload has no affirmative outcome', (_label, task, syncKey) => {
+    const result = buildDeliveryRiskRevisionClosurePlan(task, {
+      quality_refresh: {
+        ok: true,
+        score: 88,
+        [syncKey]: { label: 'present but no outcome' },
+      },
+      delivery_risk_convergence: { status: 'cleared', residual_count: 0, label: '风险已清零' },
+    })
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain(`${syncKey} 明确闭环结果缺失`)
+  })
+
+  test.each(specializedSyncCases)('keeps %s tasks open when a warning status accompanies a zero residual count', (_label, task, syncKey) => {
+    const result = buildDeliveryRiskRevisionClosurePlan(task, {
+      quality_refresh: {
+        ok: true,
+        score: 88,
+        [syncKey]: {
+          status: 'warn',
+          missed_count: 0,
+          label: `${syncKey} remains warning`,
+        },
+      },
+      delivery_risk_convergence: { status: 'cleared', residual_count: 0, label: '风险已清零' },
+    })
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain(`${syncKey} remains warning`)
+  })
+
+  test.each(specializedSyncCases.flatMap(([branchLabel, task, syncKey]) => (
+    nonExactSpecializedSyncStatuses.map(([statusLabel, statusValue]) => (
+      [branchLabel, statusLabel, task, syncKey, statusValue] as const
+    ))
+  )))('keeps %s tasks open for a %s non-exact ok status', (_branchLabel, _statusLabel, task, syncKey, statusValue) => {
+    const result = buildDeliveryRiskRevisionClosurePlan(task, {
+      quality_refresh: {
+        ok: true,
+        score: 88,
+        [syncKey]: {
+          status: statusValue,
+          missed_count: 0,
+          label: `${syncKey} exact status required`,
+        },
+      },
+      delivery_risk_convergence: { status: 'cleared', residual_count: 0, label: '风险已清零' },
+    })
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain(`${syncKey} exact status required`)
+  })
+
+  test.each([
+    'missed_count',
+    'receipt_count',
+  ] as const)('does not treat an unscoped result.%s zero as revision-scope sync evidence', (countField) => {
+    const result = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'review_annotation_risk',
+        issue_type: 'revision_scope_guard',
+        annotation_category: 'revision_scope_guard',
+        annotation_key: 'revision_scope_guard_sync:210:12:12:revision_scope_guard:修订幅度',
+      },
+      {
+        quality_refresh: {
+          ok: true,
+          score: 88,
+          result: { [countField]: 0 },
+        },
+        delivery_risk_convergence: { status: 'cleared', residual_count: 0, label: '风险已清零' },
+      },
+    )
+
+    expect(result.taskStatus).toBe('needs_review')
+    expect(result.annotationStatus).toBe('')
+    expect(result.note).toContain('缺少 revision_scope_guard_sync')
+  })
+
+})

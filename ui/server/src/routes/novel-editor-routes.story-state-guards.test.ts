@@ -51,12 +51,24 @@ describe('story state sync route source guards', () => {
 
   test('manual Story State entry point uses the exact chapter receipt helper', () => {
     const qualitySource = readFileSync(join(import.meta.dir, 'novel-editor/register-quality.ts'), 'utf8')
+    const routeStart = qualitySource.indexOf("app.post('/api/novel/chapters/:chapterId/story-state-sync'")
+    const routeEnd = qualitySource.indexOf("app.post('/api/novel/chapters/:chapterId/prose-quality'", routeStart)
+    const routeBlock = qualitySource.slice(routeStart, routeEnd)
+    const exactHelperSource = readFileSync(join(import.meta.dir, 'novel-editor/single-chapter-story-state.ts'), 'utf8')
 
-    expect(qualitySource).toContain('prepareSingleChapterStoryState')
-    expect(qualitySource).toContain('applySingleChapterStoryState')
-    expect(qualitySource).toContain('revisionTextHash')
-    expect(qualitySource).toContain('chapter_id: chapter.id')
-    expect(qualitySource).not.toContain('last_synced_chapter')
+    expect(routeStart).toBeGreaterThanOrEqual(0)
+    expect(routeBlock).toContain('prepareSingleChapterStoryState')
+    expect(routeBlock).toContain('applySingleChapterStoryState')
+    expect(routeBlock).toContain('revisionTextHash')
+    expect(routeBlock).toContain('chapter_id: chapter.id')
+    for (const legacyRangeOrFollowerPath of [
+      'syncStoryStateFromChapter',
+      'refreshFollowingChapterSerialStoryStateReadiness',
+      'last_synced_chapter',
+      'followLimit',
+    ]) expect(routeBlock).not.toContain(legacyRangeOrFollowerPath)
+    expect(exactHelperSource).toContain('exactChapter: true')
+    expect(exactHelperSource).not.toContain('refreshFollowingChapterSerialStoryStateReadiness')
   })
 
   test('post-revision Story State worker uses the exact chapter receipt helper', () => {

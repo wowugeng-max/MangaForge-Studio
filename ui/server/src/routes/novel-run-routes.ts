@@ -16,6 +16,7 @@ import {
 } from '../novel'
 import { parseJsonLikePayload } from './novel-route-utils'
 import { buildPublicEditorRevisionRun } from './novel-editor/revision-run-view'
+import { buildPublicRevisionReview } from './novel-editor/revision-review-view'
 import {
   RunRoutesContext,
   buildAgentAudit,
@@ -40,7 +41,7 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
       if (limit === null) return
       res.json(view === 'summary'
         ? await listNovelReviewSummaries(ctx.getWorkspace(), Number(req.params.id), limit)
-        : await listNovelReviews(ctx.getWorkspace(), Number(req.params.id)))
+        : (await listNovelReviews(ctx.getWorkspace(), Number(req.params.id))).map(buildPublicRevisionReview))
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
@@ -52,7 +53,7 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
       if (projectId === null) return
       const review = await getNovelReview(ctx.getWorkspace(), Number(req.params.reviewId), projectId)
       if (!review) return res.status(404).json({ error: 'review not found' })
-      res.json(review)
+      res.json(buildPublicRevisionReview(review))
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

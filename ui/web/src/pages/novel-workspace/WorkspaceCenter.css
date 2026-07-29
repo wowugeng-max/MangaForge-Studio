@@ -4145,3 +4145,53 @@
 .novel-quality-revision-custom .ant-input {
   border-radius: 8px;
 }
+
+.novel-editor-revision-status-strip {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 10px;
+  border: 1px solid #dbe7fb;
+  border-radius: 8px;
+  background: #f7faff;
+}
+
+.novel-editor-revision-status-main {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.novel-editor-revision-status-heading,
+.novel-editor-revision-status-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.novel-editor-revision-status-actions {
+  justify-content: flex-end;
+}
+
+.novel-editor-revision-status-message {
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: normal;
+  word-break: break-word;
+}
+
+@media (max-width: 640px) {
+  .novel-editor-revision-status-strip {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .novel-editor-revision-status-actions {
+    justify-content: flex-start;
+  }
+}

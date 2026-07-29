@@ -7,7 +7,7 @@ import {
 const { Text } = Typography
 
 export function WorkspaceDeliveryStatusStrip(props: Record<string, any>) {
-  const { deliveryActionLoading, deliveryNeedsStorySync, deliveryNextStepText, deliveryQualityDetail, deliveryQualityPending, deliveryStoryDetail, deliverySummary, ipSceneIntakeTooltip, onDeliveryAction, onOpenStoryAssets } = props
+  const { deliveryActionLoading, deliveryNeedsStorySync, deliveryNextStepText, deliveryQualityDetail, deliveryQualityPending, deliveryStoryDetail, deliverySummary, ipSceneIntakeTooltip, onDeliveryAction, onOpenStoryAssets, revisionActionDisabled } = props
   return (
     <>
         {deliverySummary.visible && (
@@ -29,6 +29,7 @@ export function WorkspaceDeliveryStatusStrip(props: Record<string, any>) {
                       className="novel-delivery-status-action novel-btn-crystal novel-btn-crystal-model"
                       type="primary"
                       size="small"
+                      disabled={revisionActionDisabled?.(deliverySummary.actionKey)}
                       loading={deliveryActionLoading}
                       icon={deliverySummary.actionKey === 'sync_story_state' ? <SyncOutlined /> : undefined}
                       onClick={() => onDeliveryAction?.(deliverySummary.actionKey!)}
@@ -42,6 +43,7 @@ export function WorkspaceDeliveryStatusStrip(props: Record<string, any>) {
                     <Button
                       className="novel-delivery-status-action"
                       size="small"
+                      disabled={revisionActionDisabled?.(deliverySummary.storyStateSyncAction!.key)}
                       icon={<SyncOutlined />}
                       loading={deliveryActionLoading}
                       onClick={() => onDeliveryAction?.(deliverySummary.storyStateSyncAction!.key)}

@@ -38,6 +38,7 @@ export function WorkspaceCenterWritingSupport(props: Record<string, any>) {
     openChapterBlueprintEditor,
     preDraftBriefLoading,
     queueFocus,
+    revisionActionDisabled,
     runDraftBriefAction,
     saveChapterBlueprintEditor,
     sceneCardCount = 0,
@@ -72,6 +73,7 @@ export function WorkspaceCenterWritingSupport(props: Record<string, any>) {
         ipSceneIntakeTooltip={ipSceneIntakeTooltip}
         onDeliveryAction={onDeliveryAction}
         onOpenStoryAssets={onOpenStoryAssets}
+        revisionActionDisabled={revisionActionDisabled}
       />
       <DeslopGateDiagnosticsPanel
         diagnostics={deliverySummary?.deslopGateDiagnostics}
@@ -82,6 +84,7 @@ export function WorkspaceCenterWritingSupport(props: Record<string, any>) {
         chapterHandoffDesk={chapterHandoffDesk}
         deliveryActionLoading={deliveryActionLoading}
         onDeliveryAction={onDeliveryAction}
+        revisionActionDisabled={revisionActionDisabled}
       />
       <WorkspaceDraftBriefStrip
         draftBriefActionLoading={draftBriefActionLoading}

@@ -27,6 +27,10 @@ export type NovelWorkspaceAreaViewProps = {
   dashboardLoading: any
   diagnosticsLoading: any
   editorReportLoading: any
+  editorRevisionTask: any
+  cancelEditorRevision: any
+  retryEditorRevision: any
+  loadEditorRevisionDiagnostics: any
   generateCurrentChapterProse: any
   generateSceneCardsForActiveChapter: any
   generatingProse: any
@@ -133,6 +137,10 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
     dashboardLoading,
     diagnosticsLoading,
     editorReportLoading,
+    editorRevisionTask,
+    cancelEditorRevision,
+    retryEditorRevision,
+    loadEditorRevisionDiagnostics,
     generateCurrentChapterProse,
     generateSceneCardsForActiveChapter,
     generatingProse,
@@ -323,9 +331,13 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
         }}
         proseQualityReports={proseQualityReports}
         editorRevisionReports={editorRevisionReports}
+        editorRevisionTask={editorRevisionTask}
         proseQualityLoading={proseQualityLoading}
         onRefreshProseQuality={() => { void refreshActiveProseQuality?.('manual_refresh') }}
         onApplyEditorRevision={applyEditorRevision}
+        onCancelEditorRevision={cancelEditorRevision}
+        onRetryEditorRevision={retryEditorRevision}
+        onLoadEditorRevisionDiagnostics={loadEditorRevisionDiagnostics}
         isImmersiveShell={isImmersiveShell}
         onChapterTextChange={(next) => {
           const chapterId = activeChapterId

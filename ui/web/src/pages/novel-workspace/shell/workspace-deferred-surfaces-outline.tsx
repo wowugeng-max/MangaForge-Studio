@@ -42,6 +42,7 @@ export function NovelWorkspaceDeferredOutlineSurfaces(props: NovelWorkspaceDefer
     backupImportOpen,
     backupImportText,
     bulkUpdateRepairTaskStatus,
+    cancelEditorRevision,
     cancelKnowledgeIngestJob,
     chapterDrawerOpen,
     chapterGroupExecutingId,
@@ -90,6 +91,7 @@ export function NovelWorkspaceDeferredOutlineSurfaces(props: NovelWorkspaceDefer
     importBackupPackage,
     knowledgeIngestJobs,
     knowledgeJobsLoading,
+    loadEditorRevisionDiagnostics,
     loadKnowledgeIngestJobs,
     loadProductionTasks,
     loadProjectModules,
@@ -136,6 +138,7 @@ export function NovelWorkspaceDeferredOutlineSurfaces(props: NovelWorkspaceDefer
     releaseRepairExecutingId,
     restructurePanelOpen,
     resumeKnowledgeIngestJob,
+    retryEditorRevision,
     retryChapterGroupStage,
     reviewAnnotationsOpen,
     reviewStyleSampleAdjustmentPatch,
@@ -256,6 +259,9 @@ export function NovelWorkspaceDeferredOutlineSurfaces(props: NovelWorkspaceDefer
         onPauseKnowledgeJob={(jobId) => { void pauseKnowledgeIngestJob(jobId) }}
         onResumeKnowledgeJob={(jobId) => { void resumeKnowledgeIngestJob(jobId) }}
         onCancelKnowledgeJob={(jobId) => { void cancelKnowledgeIngestJob(jobId) }}
+        onCancelEditorRevision={(runId) => cancelEditorRevision(runId)}
+        onRetryEditorRevision={(runId) => retryEditorRevision(runId)}
+        onLoadEditorRevisionDiagnostics={(runId) => loadEditorRevisionDiagnostics(runId)}
         chapterGroupExecutingId={chapterGroupExecutingId}
         releaseRepairExecutingId={releaseRepairExecutingId}
         onExecuteChapterGroup={executeChapterGroupRun}

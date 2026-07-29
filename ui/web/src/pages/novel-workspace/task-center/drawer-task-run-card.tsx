@@ -1,5 +1,5 @@
 import React from 'react'
-import { Alert, Button, Card, Progress, Space, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Progress, Space, Spin, Tag, Typography } from 'antd'
 import { PauseCircleOutlined } from '@ant-design/icons'
 import {
   buildChapterAdmissionWarningCards,
@@ -10,6 +10,7 @@ import {
   runTypeLabel,
   safeJsonPreview,
 } from './drawer-model'
+import { editorRevisionPhaseLabel } from './drawer-run-summary-editor-revision'
 
 const { Text, Paragraph } = Typography
 
@@ -183,7 +184,9 @@ export function buildTaskRunCardModel(run: any, options: {
   const closure = taskRunClosure(run)
   const admissionWarnings = buildChapterAdmissionWarningCards(run)
   const explicitProgress = Number(run?.progress)
-  const progress = Number.isFinite(explicitProgress)
+  const progress = run?.progress === null
+    ? null
+    : Number.isFinite(explicitProgress)
     ? Math.max(0, Math.min(100, explicitProgress))
     : closure.total > 0
       ? Math.max(0, Math.min(100, Math.round((closure.resolved / closure.total) * 100)))
@@ -266,7 +269,18 @@ export function TaskRunCard({
           </Space>
           <Button size="small" type="link" onClick={onDetail}>详情</Button>
         </Space>
-        <Progress percent={Math.max(0, Math.min(100, Number(model.progress || 0)))} size="small" />
+        {model.progress === null && ['queued', 'running', 'cancel_requested'].includes(String(run?.status || '')) ? (
+          <Space size={6}>
+            <Spin size="small" />
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {run?.run_type === 'editor_revision'
+                ? editorRevisionPhaseLabel(String(run?.phase || ''))
+                : String(run?.phase_label || run?.phase || '处理中')}
+            </Text>
+          </Space>
+        ) : model.progress !== null ? (
+          <Progress percent={Math.max(0, Math.min(100, Number(model.progress || 0)))} size="small" />
+        ) : null}
         <Space wrap size={[6, 4]}>
           <Tag color={model.closure.pending ? 'gold' : 'default'} bordered={false}>待处理 {model.closure.pending}</Tag>
           <Tag color={model.closure.needsReview ? 'gold' : 'default'} bordered={false}>需复查 {model.closure.needsReview}</Tag>

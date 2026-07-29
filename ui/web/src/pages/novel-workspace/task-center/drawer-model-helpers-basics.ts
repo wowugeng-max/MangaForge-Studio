@@ -28,7 +28,7 @@ export function runTypeLabel(type?: string) {
     chapter_generation_pipeline: '章节流水线',
     chapter_group_generation: '章节群生成',
     original_incubation: '原创孵化',
-    editor_revision: '编辑修订',
+    editor_revision: '单章修订',
     book_review: '全书总检',
     quality_benchmark: '质量基准',
     mechanical_qa: '机械质检',
@@ -264,4 +264,3 @@ export const REPAIR_TASK_CATEGORY_ISSUE_TYPE_ALIASES: Record<string, string> = {
   style_sample: 'style_sample_gap',
   volume_beat: 'volume_beat_missed',
 }
-

@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import {
   buildRecoveryEvidenceAuditView,
   buildRecoveryEvidenceReviewActionFeedback,
@@ -22,10 +24,83 @@ import {
   chapterGroupRunActionState,
   recoveryEvidenceSourceRecheckAction,
   repairTaskActionLabel,
+  runTypeLabel,
   safeBatchRecoveryFocusMatchesTask,
+  TaskRunCard,
 } from './TaskCenterDrawer'
+import { buildNovelWorkspaceDeferredSurfacesProps } from './shell/workspace-view-props-deferred'
+
+function editorRevisionTask(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 81,
+    run_type: 'editor_revision',
+    status: 'running',
+    phase: 'admit_candidate',
+    phase_label: '不应直接信任的标签',
+    progress: null,
+    chapter_id: 7,
+    chapter_no: 7,
+    chapter_title: '雾港来信',
+    prose_persisted: false,
+    phases: {
+      admit_candidate: { status: 'running', attempt: 1 },
+    },
+    warnings: [{ code: 'QUALITY_CONTEXT_GAP', message: '缺少前章摘要' }],
+    error: null,
+    can_cancel: true,
+    can_retry: false,
+    can_continue: false,
+    repair_task_link: null,
+    created_at: '2026-07-29T08:00:00.000Z',
+    updated_at: '2026-07-29T08:00:02.000Z',
+    ...overrides,
+  }
+}
+
+async function loadEditorRevisionSummary() {
+  return import('./task-center/drawer-run-summary-editor-revision').catch(() => null)
+}
+
+function nodeText(node: any): string {
+  if (node === null || node === undefined || typeof node === 'boolean') return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(nodeText).join('')
+  if (React.isValidElement(node)) return nodeText((node.props as any).children)
+  return ''
+}
+
+function findClickable(node: any, label: string): React.ReactElement | null {
+  if (!React.isValidElement(node)) {
+    if (Array.isArray(node)) {
+      for (const child of node) {
+        const found = findClickable(child, label)
+        if (found) return found
+      }
+    }
+    return null
+  }
+  const props = node.props as any
+  if (typeof props.onClick === 'function' && nodeText(props.children).includes(label)) return node
+  return findClickable(props.children, label)
+}
 
 describe('buildTaskRunCardModel', () => {
+  test('uses the single-chapter label and preserves indeterminate editor revision progress', () => {
+    const run = editorRevisionTask()
+    const model = buildTaskRunCardModel(run)
+    const html = renderToStaticMarkup(React.createElement(TaskRunCard, {
+      run,
+      model,
+      onDetail: () => {},
+    }))
+
+    expect(runTypeLabel('editor_revision')).toBe('单章修订')
+    expect(model.progress).toBeNull()
+    expect(html).toContain('ant-spin')
+    expect(html).toContain('安全检查')
+    expect(html).not.toContain('ant-progress')
+  })
+
   test('summarizes repair runs with lifecycle, operation mode, timeline, closure and one primary action', () => {
     const model = buildTaskRunCardModel({
       id: 17,
@@ -223,6 +298,124 @@ describe('buildTaskRunCardModel', () => {
     expect(cards).toHaveLength(1)
     expect(cards[0]?.messages).toEqual(['Story State 同步待完成。'])
     expect(cards[0]?.chapterNos).toEqual([11, 12])
+  })
+})
+
+describe('EditorRevisionRunSummary', () => {
+  test('renders chapter, redacted phase, elapsed/update time, warnings and only legal running actions', async () => {
+    const module = await loadEditorRevisionSummary()
+    expect(module).not.toBeNull()
+    if (!module) return
+    const loadDiagnostics = () => { throw new Error('ordinary render must not load diagnostics') }
+
+    const html = renderToStaticMarkup(React.createElement(module.EditorRevisionRunSummary, {
+      run: editorRevisionTask(),
+      diagnostics: null,
+      diagnosticsLoading: false,
+      onCancel: () => {},
+      onRetry: () => {},
+      onContinue: () => {},
+      onOpenChapter: () => {},
+      onLoadDiagnostics: loadDiagnostics,
+    }))
+
+    expect(html).toContain('单章修订')
+    expect(html).toContain('第7章')
+    expect(html).toContain('雾港来信')
+    expect(html).toContain('安全检查')
+    expect(html).toContain('耗时 2秒')
+    expect(html).toContain('更新 2026-07-29 16:00')
+    expect(html).toContain('缺少前章摘要')
+    expect(html).toContain('取消修订')
+    expect(html).toContain('查看诊断')
+    expect(html).not.toContain('重试')
+    expect(html).not.toContain('继续后处理')
+  })
+
+  test('shows retry before commit and continue after commit without leaking illegal actions', async () => {
+    const module = await loadEditorRevisionSummary()
+    expect(module).not.toBeNull()
+    if (!module) return
+    const baseProps = {
+      diagnostics: null,
+      diagnosticsLoading: false,
+      onCancel: () => {},
+      onRetry: () => {},
+      onContinue: () => {},
+      onOpenChapter: () => {},
+      onLoadDiagnostics: () => {},
+    }
+
+    const retryHtml = renderToStaticMarkup(React.createElement(module.EditorRevisionRunSummary, {
+      ...baseProps,
+      run: editorRevisionTask({
+        status: 'failed',
+        phase: 'generate_candidate',
+        prose_persisted: false,
+        can_cancel: false,
+        can_retry: true,
+        error: { code: 'REVISION_FAILED', message: '候选生成失败' },
+      }),
+    }))
+    const continueHtml = renderToStaticMarkup(React.createElement(module.EditorRevisionRunSummary, {
+      ...baseProps,
+      run: editorRevisionTask({
+        status: 'canceled',
+        phase: 'sync_current_story_state',
+        prose_persisted: true,
+        can_cancel: false,
+        can_continue: true,
+        error: { code: 'POST_PROCESSING_FAILED', message: '后处理未完成' },
+      }),
+    }))
+
+    expect(retryHtml).toContain('候选生成失败')
+    expect(retryHtml.replace(/重\s+试/g, '重试')).toContain('重试')
+    expect(retryHtml).not.toContain('继续后处理')
+    expect(retryHtml).not.toContain('取消修订')
+    expect(continueHtml).toContain('继续后处理')
+    expect(continueHtml).not.toContain('重试')
+    expect(continueHtml).not.toContain('取消修订')
+  })
+
+  test('loads diagnostics only from the explicit diagnostics action', async () => {
+    const module = await loadEditorRevisionSummary()
+    expect(module).not.toBeNull()
+    if (!module) return
+    let diagnosticsCalls = 0
+    const summary = module.EditorRevisionRunSummary({
+      run: editorRevisionTask(),
+      diagnostics: null,
+      diagnosticsLoading: false,
+      onCancel: () => {},
+      onRetry: () => {},
+      onContinue: () => {},
+      onOpenChapter: () => {},
+      onLoadDiagnostics: () => { diagnosticsCalls += 1 },
+    })
+
+    expect(diagnosticsCalls).toBe(0)
+    const diagnosticsButton = findClickable(summary, '查看诊断')
+    expect(diagnosticsButton).not.toBeNull()
+    ;(diagnosticsButton?.props as any).onClick()
+    expect(diagnosticsCalls).toBe(1)
+  })
+})
+
+describe('editor revision Task Center callback plumbing', () => {
+  test('forwards cancel, retry and diagnostics callbacks to deferred surfaces', () => {
+    const cancelEditorRevision = () => {}
+    const retryEditorRevision = () => {}
+    const loadEditorRevisionDiagnostics = () => Promise.resolve({})
+    const props = buildNovelWorkspaceDeferredSurfacesProps({
+      cancelEditorRevision,
+      retryEditorRevision,
+      loadEditorRevisionDiagnostics,
+    })
+
+    expect(props.cancelEditorRevision).toBe(cancelEditorRevision)
+    expect(props.retryEditorRevision).toBe(retryEditorRevision)
+    expect(props.loadEditorRevisionDiagnostics).toBe(loadEditorRevisionDiagnostics)
   })
 })
 

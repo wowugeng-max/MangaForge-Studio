@@ -6,7 +6,10 @@ import { nowIso, parseDbJson } from '../json'
 import { normalizeRunRecord } from '../normalize'
 import { runFromRow, runSummaryFromRow } from '../row-mappers'
 import { withNovelDbWrite, updateRunRow } from '../sql-rows'
-import { requiredEditorRevisionTaskAnnotationKey } from './editor-revision-task-closure'
+import {
+  isEditorRevisionTaskClosureStatus,
+  requiredEditorRevisionTaskAnnotationKey,
+} from './editor-revision-task-closure'
 
 
 export async function listNovelRuns(activeWorkspace: string, projectId: number) {
@@ -358,6 +361,9 @@ export async function updateNovelRunTaskStatus(
     const revisionRunId = Number(input.editorRevisionRunId || 0)
     if (input.editorRevisionRunId !== undefined && !editorRevisionClosesExactTask(db, input)) {
       throw runTaskStatusError('EDITOR_REVISION_TASK_CLOSURE_NOT_READY', 'editor revision task closure is not ready')
+    }
+    if (revisionRunId && !isEditorRevisionTaskClosureStatus(input.status)) {
+      throw runTaskStatusError('EDITOR_REVISION_TASK_CLOSURE_INVALID', 'editor revision task closure status is invalid')
     }
     const currentTask = tasks[input.taskIndex] || {}
     const annotationKey = String(input.annotationKey || '').trim()

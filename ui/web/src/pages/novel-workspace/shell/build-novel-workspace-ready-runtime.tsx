@@ -6,6 +6,7 @@ import {
 import {
   chapterHasProse,
 } from '../utils'
+import { editorRevisionForChapter } from '../editorRevisionTasks'
 import {
   NovelWorkspaceAreaView,
 } from './workspace-area-view'
@@ -32,6 +33,21 @@ import type {
   PlanningLoadingKey,
 } from '../StoryPlanningWorkspace'
 
+export function editorRevisionForReadyRuntime({
+  editorRevisionTasks,
+  editorRevisionTasksProjectId,
+  projectId,
+  activeChapterId,
+}: {
+  editorRevisionTasks: unknown[]
+  editorRevisionTasksProjectId?: number | null
+  projectId?: number | null
+  activeChapterId?: number | null
+}) {
+  if (Number(editorRevisionTasksProjectId) !== Number(projectId)) return null
+  return editorRevisionForChapter(editorRevisionTasks, Number(activeChapterId || 0))
+}
+
 export function buildNovelWorkspaceReadyRuntime(base: Record<string, any>) {
   const {
     activeChapter,
@@ -49,6 +65,7 @@ export function buildNovelWorkspaceReadyRuntime(base: Record<string, any>) {
     backupImportText,
     bookReviewLoading,
     bookReviews,
+    cancelEditorRevision,
     cancelKnowledgeIngestJob,
     chapterDrawerOpen,
     chapterGroupExecutingId,
@@ -99,6 +116,8 @@ export function buildNovelWorkspaceReadyRuntime(base: Record<string, any>) {
     editorReportLoading,
     editorReports,
     editorRevisionReports,
+    editorRevisionTasks,
+    editorRevisionTasksProjectId,
     exportDeliveryOpen,
     extractStyleSampleCandidates,
     fillDefaultStyleSampleBank,
@@ -122,6 +141,7 @@ export function buildNovelWorkspaceReadyRuntime(base: Record<string, any>) {
     isImmersiveShell,
     knowledgeIngestJobs,
     knowledgeJobsLoading,
+    loadEditorRevisionDiagnostics,
     loadKnowledgeIngestJobs,
     loadProductionTasks,
     loadProjectModules,
@@ -171,6 +191,7 @@ export function buildNovelWorkspaceReadyRuntime(base: Record<string, any>) {
     repairContextAndGenerateCurrentChapter,
     restructurePanelOpen,
     resumeKnowledgeIngestJob,
+    retryEditorRevision,
     reviewAnnotationsOpen,
     reviewStyleSampleAdjustmentPatch,
     reviews,
@@ -276,6 +297,12 @@ export function buildNovelWorkspaceReadyRuntime(base: Record<string, any>) {
     return keys.includes(commercialToolLoading as PlanningLoadingKey) ? commercialToolLoading as PlanningLoadingKey : undefined
   })()
   const workspaceAreaTabs = WORKSPACE_AREA_TABS
+  const currentEditorRevisionTask = editorRevisionForReadyRuntime({
+    editorRevisionTasks,
+    editorRevisionTasksProjectId,
+    projectId,
+    activeChapterId,
+  })
 
   const actionHandlers = bindNovelWorkspaceActionHandlers({
     activeChapter,
@@ -384,6 +411,7 @@ export function buildNovelWorkspaceReadyRuntime(base: Record<string, any>) {
     backupImportText,
     bookReviewLoading,
     bookReviews,
+    cancelEditorRevision,
     cancelKnowledgeIngestJob,
     chapterDrawerOpen,
     chapterGroupExecutingId,
@@ -427,6 +455,7 @@ export function buildNovelWorkspaceReadyRuntime(base: Record<string, any>) {
     editorReportLoading,
     editorReports,
     editorRevisionReports,
+    editorRevisionTasks,
     exportDeliveryOpen,
     extractStyleSampleCandidates,
     fillDefaultStyleSampleBank,
@@ -447,6 +476,7 @@ export function buildNovelWorkspaceReadyRuntime(base: Record<string, any>) {
     isImmersiveShell,
     knowledgeIngestJobs,
     knowledgeJobsLoading,
+    loadEditorRevisionDiagnostics,
     loadKnowledgeIngestJobs,
     loadProductionTasks,
     loadProjectModules,
@@ -486,6 +516,7 @@ export function buildNovelWorkspaceReadyRuntime(base: Record<string, any>) {
     renderSerialPipeline,
     restructurePanelOpen,
     resumeKnowledgeIngestJob,
+    retryEditorRevision,
     reviewAnnotationsOpen,
     reviewStyleSampleAdjustmentPatch,
     reviews,
@@ -594,7 +625,13 @@ export function buildNovelWorkspaceReadyRuntime(base: Record<string, any>) {
   }
 
   const renderWorkspaceArea = () => (
-    <NovelWorkspaceAreaView {...buildNovelWorkspaceAreaViewProps(workspaceViewDeps)} />
+    <NovelWorkspaceAreaView
+      {...buildNovelWorkspaceAreaViewProps(workspaceViewDeps)}
+      editorRevisionTask={currentEditorRevisionTask}
+      cancelEditorRevision={cancelEditorRevision}
+      retryEditorRevision={retryEditorRevision}
+      loadEditorRevisionDiagnostics={loadEditorRevisionDiagnostics}
+    />
   )
   workspaceViewDeps.renderWorkspaceArea = renderWorkspaceArea
 

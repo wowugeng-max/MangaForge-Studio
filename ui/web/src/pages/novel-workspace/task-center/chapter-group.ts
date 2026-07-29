@@ -134,7 +134,7 @@ export type TaskRunCardModel = {
     failed: number
     summary: string
   }
-  progress: number
+  progress: number | null
   admissionWarnings: Array<{
     source: string
     title: string
@@ -146,4 +146,3 @@ export type TaskRunCardModel = {
     label: string
   }
 }
-

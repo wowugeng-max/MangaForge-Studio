@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Drawer, Empty, List, Modal, Popconfirm, Progress, Space, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Drawer, Empty, List, message, Modal, Popconfirm, Progress, Space, Tag, Typography } from 'antd'
 import { PauseCircleOutlined, PlayCircleOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
+import {
+  isEditorRevisionTask,
+  type EditorRevisionTask,
+} from '../editorRevisionTasks'
 import {
   chapterGroupActionState,
   chapterGroupRunActionState,
@@ -26,6 +30,7 @@ import {
   safeJsonPreview,
   statusTag,
 } from './drawer-model'
+import { EditorRevisionRunSummary } from './drawer-run-summary-editor-revision'
 
 const { Text, Paragraph } = Typography
 
@@ -52,6 +57,9 @@ export function TaskCenterDrawer({
   onPauseKnowledgeJob,
   onResumeKnowledgeJob,
   onCancelKnowledgeJob,
+  onCancelEditorRevision,
+  onRetryEditorRevision,
+  onLoadEditorRevisionDiagnostics,
   chapterGroupExecutingId,
   releaseRepairExecutingId,
   onExecuteChapterGroup,
@@ -86,6 +94,9 @@ export function TaskCenterDrawer({
   onPauseKnowledgeJob: (jobId: string) => void | Promise<void>
   onResumeKnowledgeJob: (jobId: string) => void | Promise<void>
   onCancelKnowledgeJob: (jobId: string) => void | Promise<void>
+  onCancelEditorRevision?: (runId: number) => EditorRevisionTask | void | Promise<EditorRevisionTask | void>
+  onRetryEditorRevision?: (runId: number) => EditorRevisionTask | void | Promise<EditorRevisionTask | void>
+  onLoadEditorRevisionDiagnostics?: (runId: number) => Promise<Record<string, unknown>>
   chapterGroupExecutingId?: number | null
   releaseRepairExecutingId?: number | null
   onExecuteChapterGroup?: (run: any) => void
@@ -109,8 +120,12 @@ export function TaskCenterDrawer({
 }) {
   const [detailRun, setDetailRun] = useState<any | null>(null)
   const [detailKnowledgeJob, setDetailKnowledgeJob] = useState<any | null>(null)
+  const [editorRevisionDiagnostics, setEditorRevisionDiagnostics] = useState<Record<number, Record<string, unknown>>>({})
+  const [editorRevisionDiagnosticsLoadingId, setEditorRevisionDiagnosticsLoadingId] = useState<number | null>(null)
   const sortedRuns = useMemo(() => (
-    [...runRecords].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+    [...runRecords]
+      .filter(run => String(run?.run_type || '') !== 'editor_revision')
+      .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
   ), [runRecords])
   const sortedKnowledgeJobs = useMemo(() => (
     [...knowledgeIngestJobs].sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')))
@@ -161,6 +176,26 @@ export function TaskCenterDrawer({
     const shouldRefreshRoadmap = status === 'resolved' && safeBatchRecoveryFocusMatchesTask(safeBatchRecoveryFocus, task)
     await Promise.resolve(onUpdateRepairTaskStatus?.(task, run, status, taskIndex))
     if (shouldRefreshRoadmap) await Promise.resolve(onRefresh())
+  }
+  const handleLoadEditorRevisionDiagnostics = async (run: EditorRevisionTask) => {
+    if (!onLoadEditorRevisionDiagnostics || editorRevisionDiagnosticsLoadingId === run.id) return
+    setEditorRevisionDiagnosticsLoadingId(run.id)
+    try {
+      const diagnostics = await onLoadEditorRevisionDiagnostics(run.id)
+      setEditorRevisionDiagnostics(current => ({ ...current, [run.id]: diagnostics }))
+    } catch (error: any) {
+      message.error(String(error?.message || error || '单章修订诊断加载失败'))
+    } finally {
+      setEditorRevisionDiagnosticsLoadingId(current => current === run.id ? null : current)
+    }
+  }
+  const runEditorRevisionAction = async (action?: () => void | EditorRevisionTask | Promise<void | EditorRevisionTask>) => {
+    if (!action) return
+    try {
+      await action()
+    } catch (error: any) {
+      message.error(String(error?.message || error || '单章修订操作失败'))
+    }
   }
 
   useEffect(() => {
@@ -226,6 +261,24 @@ export function TaskCenterDrawer({
               ) : (
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
                   {normalizedTasks.slice(0, 8).map((task: any) => {
+                    if (isEditorRevisionTask(task)) {
+                      return (
+                        <EditorRevisionRunSummary
+                          key={`editor_revision-${task.id}`}
+                          run={task}
+                          diagnostics={editorRevisionDiagnostics[task.id] || null}
+                          diagnosticsLoading={editorRevisionDiagnosticsLoadingId === task.id}
+                          onCancel={() => { void runEditorRevisionAction(onCancelEditorRevision ? () => onCancelEditorRevision(task.id) : undefined) }}
+                          onRetry={() => { void runEditorRevisionAction(onRetryEditorRevision ? () => onRetryEditorRevision(task.id) : undefined) }}
+                          onContinue={() => { void runEditorRevisionAction(onRetryEditorRevision ? () => onRetryEditorRevision(task.id) : undefined) }}
+                          onOpenChapter={(chapterId) => {
+                            if (onOpenChapterEditor) void Promise.resolve(onOpenChapterEditor(chapterId))
+                            else if (onSelectChapter) void Promise.resolve(onSelectChapter(chapterId))
+                          }}
+                          onLoadDiagnostics={() => { void handleLoadEditorRevisionDiagnostics(task) }}
+                        />
+                      )
+                    }
                     const runActionState = chapterGroupRunActionState(task)
                     const canResume = Boolean(task.can_resume && !runActionState.terminalAdmission && (task.run_type !== 'chapter_group_generation' || runActionState.canResume) && onResumeRun)
                     const canExecute = Boolean(

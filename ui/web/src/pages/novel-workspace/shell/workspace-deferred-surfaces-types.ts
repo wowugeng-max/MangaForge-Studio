@@ -11,6 +11,7 @@ export type NovelWorkspaceDeferredSurfacesProps = {
   backupImportOpen: any
   backupImportText: any
   bulkUpdateRepairTaskStatus: any
+  cancelEditorRevision: any
   cancelKnowledgeIngestJob: any
   chapterDrawerOpen: any
   chapterGroupExecutingId: any
@@ -59,6 +60,7 @@ export type NovelWorkspaceDeferredSurfacesProps = {
   importBackupPackage: any
   knowledgeIngestJobs: any
   knowledgeJobsLoading: any
+  loadEditorRevisionDiagnostics: any
   loadKnowledgeIngestJobs: any
   loadProductionTasks: any
   loadProjectModules: any
@@ -105,6 +107,7 @@ export type NovelWorkspaceDeferredSurfacesProps = {
   releaseRepairExecutingId: any
   restructurePanelOpen: any
   resumeKnowledgeIngestJob: any
+  retryEditorRevision: any
   retryChapterGroupStage: any
   reviewAnnotationsOpen: any
   reviewStyleSampleAdjustmentPatch: any

@@ -19,6 +19,24 @@ import {
   qualityAuditCheckLine,
 } from './support-normalize-repairs-audit-quality-deslop'
 
+const PASS_LIKE_QUALITY_AUDIT_STATUSES = ['pass', 'passed', 'ok', 'done', 'true']
+
+function qualityAuditStringTokens(value: string) {
+  return text(value).toLowerCase().split(/[^a-z0-9_]+/).filter(Boolean)
+}
+
+function qualityAuditCheckMatchesIssue(item: any, issueType: string) {
+  if (typeof item === 'string') return qualityAuditStringTokens(item).includes(issueType)
+  const check = objectValue(item)
+  const itemKey = firstText(check.key, check.type, check.check_key, check.checkKey).toLowerCase()
+  return itemKey === issueType
+}
+
+function qualityAuditStringExplicitlyPassed(value: string) {
+  const [status = ''] = qualityAuditStringTokens(value)
+  return PASS_LIKE_QUALITY_AUDIT_STATUSES.includes(status)
+}
+
 export function qualityAuditResidualsFromQuality(value: any, issueType = ''): string[] {
   const quality = objectValue(value)
   const review = objectValue(quality.review)
@@ -31,15 +49,20 @@ export function qualityAuditResidualsFromQuality(value: any, issueType = ''): st
     ...arrayValue(payload.self_check?.quality_audit_checks),
     ...arrayValue(payload.quality_audit_checks),
   ]
-  return candidates
-    .filter(item => {
-      if (!qualityAuditCheckFailed(item)) return false
-      if (!normalizedIssueType) return true
-      const itemKey = firstText(item?.key, item?.type).toLowerCase()
-      const itemText = qualityAuditCheckLine(item).toLowerCase()
-      return itemKey === normalizedIssueType || itemText.includes(normalizedIssueType)
+  if (candidates.length === 0) return ['缺少 quality_audit_checks 复检结果']
+  const matching = normalizedIssueType
+    ? candidates.filter(item => qualityAuditCheckMatchesIssue(item, normalizedIssueType))
+    : candidates
+  if (matching.length === 0) {
+    return [`缺少 quality_audit_checks 中 ${normalizedIssueType} 复检结果`]
+  }
+  return matching
+    .flatMap(item => {
+      if (typeof item !== 'string') return qualityAuditCheckFailed(item) ? [qualityAuditCheckLine(item)] : []
+      if (qualityAuditStringExplicitlyPassed(item)) return []
+      const line = qualityAuditCheckLine(item)
+      return [`${line || normalizedIssueType}｜明确通过状态缺失`]
     })
-    .map(qualityAuditCheckLine)
     .filter(Boolean)
 }
 
@@ -357,4 +380,3 @@ export function stateTrackingResidualsFromQuality(value: any): string[] {
     .map(stateTrackingCheckLine)
     .filter(Boolean)
 }
-
