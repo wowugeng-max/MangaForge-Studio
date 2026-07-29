@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import apiClient from '../../api/client'
 import type { WorkspaceActiveTask } from './TaskCenterDrawer'
+import {
+  isActiveEditorRevisionTask,
+  isEditorRevisionTask,
+  type EditorRevisionTask,
+} from './editorRevisionTasks'
 import { displayValue } from './utils'
 
-const ACTIVE_POLLING_STATUSES = new Set(['queued', 'ready', 'running', 'pending', 'in_progress', 'processing'])
+const ACTIVE_POLLING_STATUSES = new Set(['queued', 'ready', 'running', 'cancel_requested', 'pending', 'in_progress', 'processing'])
 
 export type WorkspaceTaskRefreshState<T> = {
   data: T
@@ -12,7 +17,10 @@ export type WorkspaceTaskRefreshState<T> = {
   failures: number
 }
 
-type WorkspaceTaskRequestKind = 'production' | 'knowledge'
+type WorkspaceTaskRequestKind = 'production'
+  | 'knowledge'
+  | `editor-revision-action:${number}`
+  | `editor-revision-diagnostics:${number}`
 type WorkspaceTaskRequest = {
   kind: WorkspaceTaskRequestKind
   projectId: number
@@ -42,6 +50,11 @@ export function createWorkspaceTaskRequestGate() {
       if (!request) return
       const current = active.get(request.kind)
       if (current?.token === request.token) active.delete(request.kind)
+    },
+    invalidateKind(kind: WorkspaceTaskRequestKind) {
+      const request = active.get(kind)
+      request?.controller.abort()
+      active.delete(kind)
     },
     invalidate() {
       epoch += 1
@@ -91,6 +104,7 @@ export function workspaceTaskPollingIntervalMs({
   productionTasks,
   knowledgeIngestJobs,
   hasLocalActiveTask,
+  hasActiveEditorRevision = false,
   productionRefreshConfirmed = true,
   knowledgeRefreshConfirmed = true,
   productionRefreshFailures = 0,
@@ -100,22 +114,47 @@ export function workspaceTaskPollingIntervalMs({
   productionTasks: any
   knowledgeIngestJobs: any[]
   hasLocalActiveTask: boolean
+  hasActiveEditorRevision?: boolean
   productionRefreshConfirmed?: boolean
   knowledgeRefreshConfirmed?: boolean
   productionRefreshFailures?: number
   knowledgeRefreshFailures?: number
 }) {
-  if (!taskCenterOpen) return null
-  const shouldPoll = !productionRefreshConfirmed
+  if (!taskCenterOpen && !hasActiveEditorRevision) return null
+  const shouldPoll = hasActiveEditorRevision
+    || !productionRefreshConfirmed
     || !knowledgeRefreshConfirmed
     || hasLocalActiveTask
     || workspaceHasLiveProductionTasks(productionTasks)
     || workspaceHasLiveKnowledgeJobs(knowledgeIngestJobs)
   if (!shouldPoll) return null
+  if (hasActiveEditorRevision) return 2000
   const failures = Math.max(Number(productionRefreshFailures || 0), Number(knowledgeRefreshFailures || 0))
   if (failures >= 2) return 30000
   if (failures >= 1) return 10000
   return 3500
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function mergeEditorRevisionTask(productionTasks: any, task: EditorRevisionTask) {
+  const current = isRecord(productionTasks) ? productionTasks : {}
+  const tasks = Array.isArray(current.tasks) ? current.tasks : []
+  const active = Array.isArray(current.active) ? current.active : []
+  const upsert = (items: any[]) => {
+    const index = items.findIndex(item => Number(item?.id) === task.id)
+    if (index < 0) return [...items, task]
+    return items.map((item, itemIndex) => itemIndex === index ? { ...item, ...task } : item)
+  }
+  return {
+    ...current,
+    tasks: upsert(tasks),
+    active: isActiveEditorRevisionTask(task)
+      ? upsert(active)
+      : active.filter(item => Number(item?.id) !== task.id),
+  }
 }
 
 export function useWorkspaceTasks({
@@ -173,6 +212,17 @@ export function useWorkspaceTasks({
   if (!requestGateRef.current) requestGateRef.current = createWorkspaceTaskRequestGate()
   const knowledgeIngestJobs = knowledgeRefresh.data
   const productionTasks = productionRefresh.data
+  const editorRevisionTasks = useMemo<EditorRevisionTask[]>(() => {
+    const candidates = [
+      ...(Array.isArray(productionTasks?.tasks) ? productionTasks.tasks : []),
+      ...(Array.isArray(productionTasks?.active) ? productionTasks.active : []),
+    ]
+    return [...new Map(candidates.filter(isEditorRevisionTask).map(task => [task.id, task])).values()]
+  }, [productionTasks])
+  const activeEditorRevisionTasks = useMemo(
+    () => editorRevisionTasks.filter(isActiveEditorRevisionTask),
+    [editorRevisionTasks],
+  )
 
   const loadProductionTasks = useCallback(async () => {
     if (!projectId) return
@@ -231,6 +281,64 @@ export function useWorkspaceTasks({
     await loadKnowledgeIngestJobs()
   }, [loadKnowledgeIngestJobs])
 
+  const runEditorRevisionAction = useCallback(async (runId: number, action: 'cancel' | 'retry') => {
+    if (!projectId) throw new Error('project is required')
+    const actionProjectId = projectId
+    const request = requestGateRef.current!.begin(`editor-revision-action:${runId}`, actionProjectId)
+    if (!request) throw new Error('editor revision action is already in progress')
+    try {
+      const res = await apiClient.post(
+        `/novel/editor-revisions/${runId}/${action}`,
+        { project_id: actionProjectId },
+        { signal: request.signal },
+      )
+      const task = res.data?.run
+      if (!isEditorRevisionTask(task)) throw new Error('invalid editor revision action response')
+      const requestGate = requestGateRef.current
+      if (requestGate?.isCurrent(request, actionProjectId)) {
+        setProductionRefresh(state => ({ ...state, data: mergeEditorRevisionTask(state.data, task) }))
+        requestGate.invalidateKind('production')
+        await loadProductionTasks()
+      }
+      return task
+    } finally {
+      requestGateRef.current?.finish(request)
+    }
+  }, [loadProductionTasks, projectId])
+
+  const cancelEditorRevision = useCallback(
+    (runId: number) => runEditorRevisionAction(runId, 'cancel'),
+    [runEditorRevisionAction],
+  )
+
+  const retryEditorRevision = useCallback(
+    (runId: number) => runEditorRevisionAction(runId, 'retry'),
+    [runEditorRevisionAction],
+  )
+
+  const loadEditorRevisionDiagnostics = useCallback(async (runId: number): Promise<Record<string, unknown>> => {
+    if (!projectId) throw new Error('project is required')
+    const diagnosticsProjectId = projectId
+    const request = requestGateRef.current!.begin(`editor-revision-diagnostics:${runId}`, diagnosticsProjectId)
+    if (!request) throw new Error('editor revision diagnostics are already loading')
+    try {
+      const res = await apiClient.get(`/novel/editor-revisions/${runId}/diagnostics`, {
+        params: { project_id: diagnosticsProjectId },
+        signal: request.signal,
+      })
+      const diagnostics = res.data?.diagnostics
+      if (!isRecord(diagnostics)) throw new Error('invalid editor revision diagnostics response')
+      return diagnostics
+    } finally {
+      requestGateRef.current?.finish(request)
+    }
+  }, [projectId])
+
+  const refreshWorkspaceTasks = useCallback(async () => {
+    await loadProductionTasks()
+    if (taskCenterOpen) await loadKnowledgeIngestJobs()
+  }, [loadKnowledgeIngestJobs, loadProductionTasks, taskCenterOpen])
+
   useEffect(() => {
     knowledgeRefreshRef.current = knowledgeRefresh
   }, [knowledgeRefresh])
@@ -250,11 +358,14 @@ export function useWorkspaceTasks({
 
   useEffect(() => {
     if (!taskCenterOpen) {
-      requestGateRef.current?.invalidate()
+      requestGateRef.current?.invalidateKind('knowledge')
       setKnowledgeJobsLoading(false)
-      setProductionTasksLoading(false)
     }
   }, [taskCenterOpen])
+
+  useEffect(() => {
+    void loadProductionTasks()
+  }, [loadProductionTasks])
 
   useEffect(() => {
     if (!taskCenterOpen) return
@@ -268,11 +379,13 @@ export function useWorkspaceTasks({
     || planning
     || executingAgents
     || generatingProse
+  const hasActiveEditorRevision = activeEditorRevisionTasks.length > 0
   const pollingIntervalMs = workspaceTaskPollingIntervalMs({
     taskCenterOpen,
     productionTasks,
     knowledgeIngestJobs,
     hasLocalActiveTask,
+    hasActiveEditorRevision,
     productionRefreshConfirmed: productionRefresh.confirmed,
     knowledgeRefreshConfirmed: knowledgeRefresh.confirmed,
     productionRefreshFailures: productionRefresh.failures,
@@ -284,11 +397,18 @@ export function useWorkspaceTasks({
     const timer = setInterval(() => {
       const knowledgeState = knowledgeRefreshRef.current
       const productionState = productionRefreshRef.current
-      if (!knowledgeState.confirmed || workspaceHasLiveKnowledgeJobs(knowledgeState.data)) void loadKnowledgeIngestJobs()
-      if (!productionState.confirmed || hasLocalActiveTask || workspaceHasLiveProductionTasks(productionState.data)) void loadProductionTasks()
+      if (taskCenterOpen && (!knowledgeState.confirmed || workspaceHasLiveKnowledgeJobs(knowledgeState.data))) {
+        void loadKnowledgeIngestJobs()
+      }
+      if (!productionState.confirmed
+        || hasLocalActiveTask
+        || hasActiveEditorRevision
+        || workspaceHasLiveProductionTasks(productionState.data)) {
+        void loadProductionTasks()
+      }
     }, pollingIntervalMs)
     return () => clearInterval(timer)
-  }, [hasLocalActiveTask, loadKnowledgeIngestJobs, loadProductionTasks, pollingIntervalMs])
+  }, [hasActiveEditorRevision, hasLocalActiveTask, loadKnowledgeIngestJobs, loadProductionTasks, pollingIntervalMs, taskCenterOpen])
 
   const activeTasks = useMemo<WorkspaceActiveTask[]>(() => {
     const tasks: WorkspaceActiveTask[] = []
@@ -363,6 +483,12 @@ export function useWorkspaceTasks({
     productionTasksLoading,
     productionTasksError: productionRefresh.error,
     loadProductionTasks,
+    refreshWorkspaceTasks,
+    editorRevisionTasks,
+    activeEditorRevisionTasks,
+    cancelEditorRevision,
+    retryEditorRevision,
+    loadEditorRevisionDiagnostics,
     knowledgeIngestJobs,
     knowledgeJobsLoading,
     knowledgeJobsError: knowledgeRefresh.error,
