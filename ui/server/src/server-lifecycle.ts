@@ -5,8 +5,8 @@ export type ServerLifecycleBootstrapDependencies<TServer> = {
   saveActiveWorkspace(workspace: string): Promise<void>
   startNovelLifecycle(workspace: string): Promise<void>
   shouldListen?(): boolean
-  listen(): TServer
-  onStartupError(error: unknown): void
+  listen(): TServer | Promise<TServer>
+  onStartupError(error: unknown): void | Promise<void>
 }
 
 export async function startServerLifecycle<TServer>(
@@ -19,10 +19,10 @@ export async function startServerLifecycle<TServer>(
     await deps.saveActiveWorkspace(workspace)
     await deps.startNovelLifecycle(workspace)
     if (deps.shouldListen && !deps.shouldListen()) return null
-    const server = deps.listen()
+    const server = await deps.listen()
     return { workspace, server }
   } catch (error) {
-    deps.onStartupError(error)
+    await deps.onStartupError(error)
     return null
   }
 }
@@ -33,13 +33,106 @@ export type ServerShutdownOptions = {
 
 type ShutdownCoordinatorDependencies = {
   closeServer(): Promise<void>
-  stopKeyMonitor(): void | Promise<void>
+  stopBackgroundServices(): void | Promise<void>
   stopNovelLifecycle(): Promise<void>
   onShutdownError(error: unknown): void
 }
 
+type BackgroundServiceMonitor = {
+  stop(): void | Promise<void>
+}
+
+type BackgroundServiceLifecycleDependencies<TMonitor extends BackgroundServiceMonitor> = {
+  bootstrap(signal: AbortSignal): Promise<void>
+  shouldStartMonitor(): boolean
+  startMonitor(): TMonitor
+}
+
+export function createBackgroundServiceLifecycle<TMonitor extends BackgroundServiceMonitor>(
+  deps: BackgroundServiceLifecycleDependencies<TMonitor>,
+) {
+  const controller = new AbortController()
+  let monitor: TMonitor | null = null
+  let startPromise: Promise<void> | null = null
+  let stopPromise: Promise<void> | null = null
+
+  return {
+    start() {
+      if (startPromise) return startPromise
+      startPromise = (async () => {
+        if (controller.signal.aborted) return
+        try {
+          await deps.bootstrap(controller.signal)
+        } catch (error) {
+          if (controller.signal.aborted) return
+          throw error
+        }
+        if (controller.signal.aborted || !deps.shouldStartMonitor()) return
+        monitor = deps.startMonitor()
+      })()
+      return startPromise
+    },
+    stop() {
+      if (stopPromise) return stopPromise
+      controller.abort()
+      stopPromise = (async () => {
+        if (startPromise) await startPromise
+        const activeMonitor = monitor
+        monitor = null
+        if (activeMonitor) await activeMonitor.stop()
+      })()
+      return stopPromise
+    },
+  }
+}
+
 type HttpServerCloseTarget = {
   close(callback: (error?: Error) => void): unknown
+}
+
+type HttpServerBindTarget = {
+  once(event: string, handler: (...args: any[]) => void): unknown
+  off(event: string, handler: (...args: any[]) => void): unknown
+}
+
+export function bindHttpServer<TServer extends HttpServerBindTarget>(deps: {
+  createServer(): TServer
+  onServer(server: TServer): void
+}): Promise<TServer> {
+  return new Promise((resolve, reject) => {
+    let server: TServer | null = null
+    const cleanup = () => {
+      if (!server) return
+      server.off('listening', onListening)
+      server.off('error', onError)
+      server.off('close', onClose)
+    }
+    const onListening = () => {
+      cleanup()
+      resolve(server!)
+    }
+    const onError = (error: unknown) => {
+      cleanup()
+      reject(error)
+    }
+    const onClose = () => {
+      cleanup()
+      reject(Object.assign(new Error('server closed before listening'), {
+        code: 'SERVER_BIND_CLOSED',
+      }))
+    }
+
+    try {
+      server = deps.createServer()
+      server.once('listening', onListening)
+      server.once('error', onError)
+      server.once('close', onClose)
+      deps.onServer(server)
+    } catch (error) {
+      cleanup()
+      reject(error)
+    }
+  })
 }
 
 export function closeHttpServer(server: HttpServerCloseTarget | null | undefined): Promise<void> {
@@ -64,16 +157,18 @@ export function createShutdownCoordinator(deps: ShutdownCoordinatorDependencies)
       const closePromise = options.serverAlreadyClosed
         ? Promise.resolve()
         : Promise.resolve().then(() => deps.closeServer())
-      const cleanupPromise = Promise.resolve().then(async () => {
-        await deps.stopKeyMonitor()
-        await deps.stopNovelLifecycle()
-      })
-      const [closeResult, cleanupResult] = await Promise.allSettled([
+      const backgroundStopPromise = Promise.resolve().then(() => deps.stopBackgroundServices())
+      const revisionStopPromise = Promise.resolve().then(() => deps.stopNovelLifecycle())
+      const results = await Promise.allSettled([
         closePromise,
-        cleanupPromise,
+        backgroundStopPromise,
+        revisionStopPromise,
       ])
-      if (closeResult.status === 'rejected') throw closeResult.reason
-      if (cleanupResult.status === 'rejected') throw cleanupResult.reason
+      const errors = results.flatMap(result => (
+        result.status === 'rejected' ? [result.reason] : []
+      ))
+      if (errors.length === 1) throw errors[0]
+      if (errors.length > 1) throw new AggregateError(errors, 'server shutdown failed')
     })
     shutdownPromise = pending.catch(error => {
       deps.onShutdownError(error)

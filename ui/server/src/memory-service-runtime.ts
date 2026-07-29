@@ -161,7 +161,7 @@ export function cachePythonPath(p: string): void {
 let _bootstrapDone = false
 let _mempalaceAvailable = false
 
-export async function bootstrapMempalace(): Promise<boolean> {
+export async function bootstrapMempalace(signal?: AbortSignal): Promise<boolean> {
   if (_bootstrapDone) return _mempalaceAvailable
   _bootstrapDone = true
 
@@ -177,6 +177,7 @@ export async function bootstrapMempalace(): Promise<boolean> {
       env: { ...process.env, MEMPALACE_DIR: PALACE_DIR_ENV },
       timeout: 360000,
       maxBuffer: 4 * 1024 * 1024,
+      signal,
     })
     const result: { ok: boolean; python?: string; error?: string } = JSON.parse(stdout.trim())
     if (result.ok) {
@@ -190,6 +191,7 @@ export async function bootstrapMempalace(): Promise<boolean> {
       console.warn('[memory-service] mempalace bootstrap failed:', result.error)
     }
   } catch (error) {
+    if (signal?.aborted) return false
     console.warn('[memory-service] mempalace bootstrap error:', String(error).slice(0, 200))
   }
 
@@ -565,4 +567,3 @@ export async function purgeMemoryPalaceProject(projectId: number, projectTitle?:
   removeProjectIndex(projectId)
   return { ok: true }
 }
-

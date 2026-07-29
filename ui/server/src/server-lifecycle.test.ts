@@ -1,10 +1,14 @@
 import { describe, expect, test } from 'bun:test'
+import { EventEmitter } from 'node:events'
 import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import {
   attachServerCloseShutdownHandler,
   attachServerShutdownHandlers,
   attachSignalShutdownHandlers,
+  bindHttpServer,
   closeHttpServer,
+  createBackgroundServiceLifecycle,
   createShutdownCoordinator,
   startServerLifecycle,
 } from './server-lifecycle'
@@ -12,6 +16,11 @@ import {
 type CloseableHttpServer = {
   readonly listening: boolean
   close(callback: (error?: Error) => void): void
+}
+
+type BindingHttpServer = CloseableHttpServer & {
+  once(event: string, handler: (error?: unknown) => void): unknown
+  off(event: string, handler: (error?: unknown) => void): unknown
 }
 
 function deferred<T = void>() {
@@ -31,6 +40,73 @@ async function eventually(predicate: () => boolean, message: string) {
   }
   throw new Error(message)
 }
+
+describe('server background lifecycle', () => {
+  test('shutdown aborts and awaits bootstrap without resurrecting the monitor', async () => {
+    const bootstrapGate = deferred()
+    let bootstrapSignal: AbortSignal | null = null
+    let monitorStartCalls = 0
+    let monitorStopCalls = 0
+    const backgrounds = createBackgroundServiceLifecycle({
+      bootstrap: async signal => {
+        bootstrapSignal = signal
+        await bootstrapGate.promise
+      },
+      shouldStartMonitor: () => true,
+      startMonitor: () => {
+        monitorStartCalls += 1
+        return { stop: () => { monitorStopCalls += 1 } }
+      },
+    })
+    const startup = backgrounds.start()
+    await eventually(() => bootstrapSignal !== null, 'background bootstrap did not start')
+    const shutdown = createShutdownCoordinator({
+      closeServer: async () => {},
+      stopBackgroundServices: () => backgrounds.stop(),
+      stopNovelLifecycle: async () => {},
+      onShutdownError: () => {},
+    })
+
+    let shutdownSettled = false
+    const pendingShutdown = shutdown()
+    void pendingShutdown.then(
+      () => { shutdownSettled = true },
+      () => { shutdownSettled = true },
+    )
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const abortedBeforeBootstrapSettled = bootstrapSignal!.aborted
+    const settledBeforeBootstrap = shutdownSettled
+
+    bootstrapGate.resolve()
+    await Promise.all([startup, pendingShutdown])
+
+    expect(abortedBeforeBootstrapSettled).toBe(true)
+    expect(settledBeforeBootstrap).toBe(false)
+    expect(monitorStartCalls).toBe(0)
+    expect(monitorStopCalls).toBe(0)
+  })
+
+  test('checks shutdown state immediately before creating the monitor', async () => {
+    const bootstrapGate = deferred()
+    let shutdownRequested = false
+    let monitorStartCalls = 0
+    const backgrounds = createBackgroundServiceLifecycle({
+      bootstrap: async () => { await bootstrapGate.promise },
+      shouldStartMonitor: () => !shutdownRequested,
+      startMonitor: () => {
+        monitorStartCalls += 1
+        return { stop: () => {} }
+      },
+    })
+
+    const startup = backgrounds.start()
+    shutdownRequested = true
+    bootstrapGate.resolve()
+    await startup
+
+    expect(monitorStartCalls).toBe(0)
+  })
+})
 
 describe('server lifecycle bootstrap', () => {
   test('does not listen until workspace setup and revision recovery have completed', async () => {
@@ -139,7 +215,7 @@ describe('server lifecycle bootstrap', () => {
     let listenCalls = 0
     const shutdown = createShutdownCoordinator({
       closeServer: async () => { events.push('server:unavailable') },
-      stopKeyMonitor: () => { events.push('monitor:stop') },
+      stopBackgroundServices: () => { events.push('monitor:stop') },
       stopNovelLifecycle: async () => {
         stopCalls += 1
         events.push('revision:stop:start')
@@ -204,9 +280,121 @@ describe('server lifecycle bootstrap', () => {
       'revision:stop:end',
     ])
   })
+
+  test('contains an asynchronous occupied-port bind failure through shared shutdown', async () => {
+    const occupiedServer = createServer((_request, response) => { response.end('occupied') })
+    await new Promise<void>((resolve, reject) => {
+      occupiedServer.once('error', reject)
+      occupiedServer.listen(0, '127.0.0.1', () => { resolve() })
+    })
+    const occupiedPort = (occupiedServer.address() as AddressInfo).port
+    const startupErrorGate = deferred()
+    const startupErrors: unknown[] = []
+    let observedBindError: unknown = null
+    let publishedServer: ReturnType<typeof createServer> | null = null
+    let shutdownFromStartupError: Promise<void> | null = null
+    let backgroundStopCalls = 0
+    let revisionStopCalls = 0
+    const shutdown = createShutdownCoordinator({
+      closeServer: async () => {},
+      stopBackgroundServices: () => { backgroundStopCalls += 1 },
+      stopNovelLifecycle: async () => { revisionStopCalls += 1 },
+      onShutdownError: () => {},
+    })
+
+    try {
+      const startup = startServerLifecycle({
+        loadActiveWorkspace: async () => '/tmp/occupied-port-workspace',
+        activateWorkspace: () => {},
+        ensureWorkspaceStructure: async () => {},
+        saveActiveWorkspace: async () => {},
+        startNovelLifecycle: async () => {},
+        listen: () => bindHttpServer({
+          createServer: () => {
+            const candidate = createServer((_request, response) => { response.end('unexpected') })
+            candidate.once('error', error => { observedBindError = error })
+            candidate.listen(occupiedPort, '127.0.0.1')
+            return candidate
+          },
+          onServer: candidate => { publishedServer = candidate },
+        }),
+        onStartupError: async error => {
+          startupErrors.push(error)
+          shutdownFromStartupError = shutdown()
+          await shutdownFromStartupError
+          await startupErrorGate.promise
+        },
+      })
+      let startupSettled = false
+      void startup.then(() => { startupSettled = true })
+
+      await eventually(() => observedBindError !== null, 'occupied port did not reject binding')
+      await new Promise(resolve => setTimeout(resolve, 0))
+      const errorsBeforeHandlerRelease = [...startupErrors]
+      const settledBeforeHandlerRelease = startupSettled
+      const backgroundStopsBeforeRelease = backgroundStopCalls
+      const revisionStopsBeforeRelease = revisionStopCalls
+      startupErrorGate.resolve()
+      const result = await startup
+
+      expect(result).toBeNull()
+      expect(publishedServer).not.toBeNull()
+      expect((observedBindError as NodeJS.ErrnoException).code).toBe('EADDRINUSE')
+      expect(errorsBeforeHandlerRelease).toEqual([observedBindError])
+      expect(settledBeforeHandlerRelease).toBe(false)
+      expect(backgroundStopsBeforeRelease).toBe(1)
+      expect(revisionStopsBeforeRelease).toBe(1)
+      expect(shutdownFromStartupError).toBe(shutdown())
+    } finally {
+      startupErrorGate.resolve()
+      if (publishedServer?.listening) await closeHttpServer(publishedServer)
+      await closeHttpServer(occupiedServer)
+    }
+  })
 })
 
 describe('server shutdown lifecycle', () => {
+  test('a signal closes the published binding server and rejects its bind promise', async () => {
+    const signalHandlers = new Map<string, () => void>()
+    const emitter = new EventEmitter()
+    let closeCalls = 0
+    const bindingServer = Object.assign(emitter, {
+      listening: false,
+      close(callback: (error?: Error) => void) {
+        closeCalls += 1
+        callback()
+        queueMicrotask(() => { emitter.emit('close') })
+      },
+    }) as BindingHttpServer
+    let publishedServer: BindingHttpServer | null = null
+    const binding = bindHttpServer({
+      createServer: () => bindingServer,
+      onServer: server => { publishedServer = server },
+    })
+    const shutdown = createShutdownCoordinator({
+      closeServer: () => closeHttpServer(publishedServer),
+      stopBackgroundServices: () => {},
+      stopNovelLifecycle: async () => {},
+      onShutdownError: () => {},
+    })
+    attachSignalShutdownHandlers({
+      signalSource: {
+        once: (event, handler) => { signalHandlers.set(event, handler) },
+      },
+      shutdown,
+    })
+
+    signalHandlers.get('SIGTERM')!()
+    await shutdown()
+    const [bindResult] = await Promise.allSettled([binding])
+
+    expect(closeCalls).toBe(1)
+    expect(bindResult.status).toBe('rejected')
+    if (bindResult.status === 'rejected') {
+      expect((bindResult.reason as { code?: string }).code).toBe('SERVER_BIND_CLOSED')
+    }
+  })
+
   test('a signal closes a late-bound binding server before it can listen', async () => {
     const bindGate = deferred()
     const signalHandlers = new Map<string, () => void>()
@@ -224,7 +412,7 @@ describe('server shutdown lifecycle', () => {
     let activeServer: CloseableHttpServer | null = null
     const shutdown = createShutdownCoordinator({
       closeServer: () => closeHttpServer(activeServer),
-      stopKeyMonitor: () => {},
+      stopBackgroundServices: () => {},
       stopNovelLifecycle: async () => {},
       onShutdownError: () => {},
     })
@@ -305,7 +493,7 @@ describe('server shutdown lifecycle', () => {
       closeServer: async () => {
         if (serverAvailable) closeCalls += 1
       },
-      stopKeyMonitor: () => { monitorStopCalls += 1 },
+      stopBackgroundServices: () => { monitorStopCalls += 1 },
       stopNovelLifecycle: async () => { revisionStopCalls += 1 },
       onShutdownError: () => {},
     })
@@ -355,7 +543,7 @@ describe('server shutdown lifecycle', () => {
         await closeGate.promise
         events.push('server:close:end')
       },
-      stopKeyMonitor: () => {
+      stopBackgroundServices: () => {
         monitorStopCalls += 1
         events.push('monitor:stop')
       },
@@ -405,7 +593,7 @@ describe('server shutdown lifecycle', () => {
     let settled = false
     const shutdown = createShutdownCoordinator({
       closeServer: async () => { await closeGate.promise },
-      stopKeyMonitor: () => {},
+      stopBackgroundServices: () => {},
       stopNovelLifecycle: async () => { throw failure },
       onShutdownError: error => { errors.push(error) },
     })
@@ -427,11 +615,75 @@ describe('server shutdown lifecycle', () => {
     expect(errors).toEqual([failure])
   })
 
+  test('still stops revision work when background monitor cleanup throws', async () => {
+    const failure = new Error('background monitor stop failed')
+    const errors: unknown[] = []
+    let revisionStopCalls = 0
+    const shutdown = createShutdownCoordinator({
+      closeServer: async () => {},
+      stopBackgroundServices: () => { throw failure },
+      stopNovelLifecycle: async () => { revisionStopCalls += 1 },
+      onShutdownError: error => { errors.push(error) },
+    })
+
+    const [result] = await Promise.allSettled([shutdown()])
+
+    expect(revisionStopCalls).toBe(1)
+    expect(result).toEqual({ status: 'rejected', reason: failure })
+    expect(errors).toEqual([failure])
+  })
+
+  test('aggregates close, background, and revision failures on the shared shutdown promise', async () => {
+    const closeFailure = new Error('close failed')
+    const backgroundFailure = new Error('background stop failed')
+    const revisionFailure = new Error('revision stop failed')
+    const reportedErrors: unknown[] = []
+    let closeCalls = 0
+    let backgroundStopCalls = 0
+    let revisionStopCalls = 0
+    const shutdown = createShutdownCoordinator({
+      closeServer: async () => {
+        closeCalls += 1
+        throw closeFailure
+      },
+      stopBackgroundServices: () => {
+        backgroundStopCalls += 1
+        throw backgroundFailure
+      },
+      stopNovelLifecycle: async () => {
+        revisionStopCalls += 1
+        throw revisionFailure
+      },
+      onShutdownError: error => { reportedErrors.push(error) },
+    })
+
+    const first = shutdown()
+    const second = shutdown()
+    const results = await Promise.allSettled([first, second])
+    const aggregate = results[0].status === 'rejected' ? results[0].reason : null
+
+    expect(first).toBe(second)
+    expect(closeCalls).toBe(1)
+    expect(backgroundStopCalls).toBe(1)
+    expect(revisionStopCalls).toBe(1)
+    expect(aggregate).toBeInstanceOf(AggregateError)
+    expect((aggregate as AggregateError).errors).toEqual([
+      closeFailure,
+      backgroundFailure,
+      revisionFailure,
+    ])
+    expect(results).toEqual([
+      { status: 'rejected', reason: aggregate },
+      { status: 'rejected', reason: aggregate },
+    ])
+    expect(reportedErrors).toEqual([aggregate])
+  })
+
   test('external server close skips duplicate close and still awaits cleanup', async () => {
     const events: string[] = []
     const shutdown = createShutdownCoordinator({
       closeServer: async () => { events.push('unexpected:close') },
-      stopKeyMonitor: () => { events.push('monitor:stop') },
+      stopBackgroundServices: () => { events.push('monitor:stop') },
       stopNovelLifecycle: async () => { events.push('revision:stop') },
       onShutdownError: () => {},
     })
@@ -446,7 +698,7 @@ describe('server shutdown lifecycle', () => {
     const errors: unknown[] = []
     const shutdown = createShutdownCoordinator({
       closeServer: async () => {},
-      stopKeyMonitor: () => {},
+      stopBackgroundServices: () => {},
       stopNovelLifecycle: async () => { throw failure },
       onShutdownError: error => { errors.push(error) },
     })

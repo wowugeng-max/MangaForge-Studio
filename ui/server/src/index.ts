@@ -35,7 +35,9 @@ import { keyMonitorEnabledFromEnv, startKeyMonitor } from './key-monitor'
 import {
   attachServerCloseShutdownHandler,
   attachSignalShutdownHandlers,
+  bindHttpServer,
   closeHttpServer,
+  createBackgroundServiceLifecycle,
   createShutdownCoordinator,
   startServerLifecycle,
 } from './server-lifecycle'
@@ -83,7 +85,6 @@ app.use(express.json({ limit: '5mb' }))
 const workspaceState = createActiveWorkspaceState(getDefaultWorkspace())
 const getWorkspace = workspaceState.getWorkspace
 const setWorkspace = workspaceState.setWorkspace
-let keyMonitor: ReturnType<typeof startKeyMonitor> | null = null
 let server: ReturnType<typeof app.listen> | null = null
 
 registerProjectRoutes(app, getWorkspace)
@@ -109,9 +110,31 @@ registerKnowledgeRoutes(app)
 registerFingerprintContractRoutes(app, getWorkspace)
 
 let shutdownRequested = false
+const backgroundServices = createBackgroundServiceLifecycle({
+  bootstrap: async signal => {
+    const ok = await bootstrapMempalace(signal)
+    if (signal.aborted || shutdownRequested) return
+    if (ok) {
+      console.log('🧠 Memory Palace (MemPalace) initialized and ready')
+    } else {
+      console.log('🧠 Memory Palace running in SQLite fallback mode (mempalace not installed)')
+    }
+  },
+  shouldStartMonitor: () => !shutdownRequested,
+  startMonitor: () => {
+    const monitor = startKeyMonitor(getWorkspace, {
+      enabled: keyMonitorEnabledFromEnv(process.env.KEY_MONITOR_ENABLED),
+      intervalMs: Number(process.env.KEY_MONITOR_INTERVAL_MS || 60 * 60 * 1000),
+      onError: error => console.warn('Key monitor error:', String(error).slice(0, 240)),
+    })
+    if (monitor.started) console.log('Key monitoring task started')
+    console.log(`Manga UI server on http://${host}:${port}`)
+    return monitor
+  },
+})
 const shutdown = createShutdownCoordinator({
   closeServer: () => closeHttpServer(server),
-  stopKeyMonitor: () => { keyMonitor?.stop() },
+  stopBackgroundServices: () => backgroundServices.stop(),
   stopNovelLifecycle: () => novelLifecycle.stop(),
   onShutdownError: error => {
     process.exitCode = 1
@@ -155,36 +178,17 @@ app.post(['/api/interrupt/:clientId', '/api/interrupt/:clientId/'], async (_req,
   res.json(result)
 })
 
-async function startBackgroundServices() {
-  // ── Memory Palace auto-bootstrapping ──
+async function listen() {
+  let listeningServer: ReturnType<typeof app.listen>
   try {
-    const ok = await bootstrapMempalace()
-    if (ok) {
-      console.log('🧠 Memory Palace (MemPalace) initialized and ready')
-    } else {
-      console.log('🧠 Memory Palace running in SQLite fallback mode (mempalace not installed)')
-    }
-  } catch (err) {
-    console.warn('⚠️  Memory Palace bootstrap failed, falling back to SQLite:', String(err).slice(0, 200))
-  }
-
-  keyMonitor = startKeyMonitor(getWorkspace, {
-    enabled: keyMonitorEnabledFromEnv(process.env.KEY_MONITOR_ENABLED),
-    intervalMs: Number(process.env.KEY_MONITOR_INTERVAL_MS || 60 * 60 * 1000),
-    onError: error => console.warn('Key monitor error:', String(error).slice(0, 240)),
-  })
-  if (keyMonitor.started) console.log('Key monitoring task started')
-
-  console.log(`Manga UI server on http://${host}:${port}`)
-}
-
-function listen() {
-  const listeningServer = app.listen(port, host, () => {
-    void startBackgroundServices().catch(error => {
-      console.warn('Server background startup failed:', String(error).slice(0, 240))
+    listeningServer = await bindHttpServer({
+      createServer: () => app.listen(port, host),
+      onServer: bindingServer => { server = bindingServer },
     })
-  })
-  server = listeningServer
+  } catch (error) {
+    server = null
+    throw error
+  }
   attachServerCloseShutdownHandler({ server: listeningServer, shutdown: requestShutdown })
 
   listeningServer.on('upgrade', (req, socket) => {
@@ -219,6 +223,10 @@ function listen() {
     })
   })
 
+  void backgroundServices.start().catch(error => {
+    console.warn('Server background startup failed:', String(error).slice(0, 240))
+  })
+
   return listeningServer
 }
 
@@ -233,7 +241,11 @@ void startServerLifecycle({
   },
   shouldListen: () => !shutdownRequested,
   listen,
-  onStartupError: error => {
+  onStartupError: async error => {
+    const expectedBindingClose = shutdownRequested
+      && (error as { code?: string } | null)?.code === 'SERVER_BIND_CLOSED'
+    await requestShutdown().catch(() => {})
+    if (expectedBindingClose) return
     process.exitCode = 1
     console.error('Manga UI server startup failed:', String(error).slice(0, 400))
   },
