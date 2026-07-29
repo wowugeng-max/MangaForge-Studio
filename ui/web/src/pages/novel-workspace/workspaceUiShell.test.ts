@@ -299,6 +299,38 @@ describe('commercial writing workspace UI shell monotest shim', () => {
     expect(deps.acknowledgeLinkedTaskClosure).toHaveBeenCalledTimes(1)
   })
 
+  test('does not replay terminal side effects after acknowledgement commits but its response is lost', async () => {
+    const { createState, reconcile } = await loadReconciliationApi()
+    const state = createState(3)
+    const acknowledge = mock(async () => {
+      throw new Error('ack response lost after server commit')
+    })
+    const deps = reconciliationDeps({ acknowledgeLinkedTaskClosure: acknowledge })
+    const pending = terminalRevision()
+    const acknowledged = terminalRevision({
+      linked_task_closure: { status: 'completed', completed_at: '2026-07-29T08:01:00.000Z' },
+      updated_at: '2026-07-29T08:01:00.000Z',
+    })
+
+    await reconcile({ projectId: 3, tasks: [pending], productionTasks: linkedProductionTasks, state, ...deps })
+    expect(deps.loadProjectModules).toHaveBeenCalledTimes(1)
+    expect(deps.setRightPanelOpen).toHaveBeenCalledTimes(1)
+    expect(deps.setRightPanelTab).toHaveBeenCalledTimes(1)
+    expect(deps.notifyTerminal).toHaveBeenCalledTimes(1)
+    expect(deps.closeRepairTaskAfterRevision).toHaveBeenCalledTimes(1)
+    expect(acknowledge).toHaveBeenCalledTimes(1)
+
+    await reconcile({ projectId: 3, tasks: [acknowledged], productionTasks: linkedProductionTasks, state, ...deps })
+    await reconcile({ projectId: 3, tasks: [acknowledged], productionTasks: linkedProductionTasks, state, ...deps })
+
+    expect(deps.loadProjectModules).toHaveBeenCalledTimes(1)
+    expect(deps.setRightPanelOpen).toHaveBeenCalledTimes(1)
+    expect(deps.setRightPanelTab).toHaveBeenCalledTimes(1)
+    expect(deps.notifyTerminal).toHaveBeenCalledTimes(1)
+    expect(deps.closeRepairTaskAfterRevision).toHaveBeenCalledTimes(1)
+    expect(acknowledge).toHaveBeenCalledTimes(1)
+  })
+
   test('baselines an acknowledged terminal revision on a fresh mount without replaying side effects', async () => {
     const { createState, reconcile } = await loadReconciliationApi()
     const state = createState(3)

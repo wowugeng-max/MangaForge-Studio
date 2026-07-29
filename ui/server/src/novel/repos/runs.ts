@@ -358,13 +358,19 @@ export async function updateNovelRunTaskStatus(
     if (input.editorRevisionRunId !== undefined && !editorRevisionClosesExactTask(db, input)) {
       throw runTaskStatusError('EDITOR_REVISION_TASK_CLOSURE_NOT_READY', 'editor revision task closure is not ready')
     }
+    const currentTask = tasks[input.taskIndex] || {}
     const annotationKey = String(input.annotationKey || '').trim()
     const annotationStatus = String(input.annotationStatus || '').trim()
     if ((annotationKey && !annotationStatus) || (!annotationKey && annotationStatus)) {
       throw runTaskStatusError('EDITOR_REVISION_TASK_CLOSURE_INVALID', 'annotation closure receipt is incomplete')
     }
+    const requiredAnnotationKey = revisionRunId && input.status === 'resolved'
+      ? String(currentTask.annotation_key || '').trim()
+      : ''
+    if (requiredAnnotationKey && (annotationKey !== requiredAnnotationKey || annotationStatus !== 'resolved')) {
+      throw runTaskStatusError('EDITOR_REVISION_TASK_CLOSURE_INVALID', 'resolved task annotation closure receipt is required')
+    }
 
-    const currentTask = tasks[input.taskIndex] || {}
     const receiptKey = String(revisionRunId)
     const currentReceipts = currentTask.editor_revision_closure_receipts
       && typeof currentTask.editor_revision_closure_receipts === 'object'

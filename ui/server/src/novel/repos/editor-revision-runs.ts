@@ -499,12 +499,20 @@ function requireDurableLinkedTaskClosure(
     || Number(receipt.repair_run_id) !== link.runId
     || Number(receipt.task_index) !== link.taskIndex
     || String(receipt.task_status || '') !== String(task.task_status || '')
+    || String(receipt.note || '') !== String(task.status_note || '')
     || !validReceiptTimestamp(receipt.completed_at)) {
     linkedTaskClosureNotReady('linked repair task closure receipt is unavailable')
   }
 
+  const requiredAnnotationKey = String(task.annotation_key || '').trim()
   const annotationKey = String(receipt.annotation_key || '').trim()
   const annotationStatus = String(receipt.annotation_status || '').trim()
+  if (String(task.task_status || '') === 'resolved'
+    && String(receipt.task_status || '') === 'resolved'
+    && requiredAnnotationKey
+    && (annotationKey !== requiredAnnotationKey || annotationStatus !== 'resolved')) {
+    linkedTaskClosureNotReady('linked annotation closure receipt is incomplete')
+  }
   if (!annotationKey && !annotationStatus) return
   if (!annotationKey || !annotationStatus) {
     linkedTaskClosureNotReady('linked annotation closure receipt is incomplete')

@@ -727,6 +727,75 @@ describe('asynchronous editor revision API safeguards', () => {
     expect(staleReplay.body).toMatchObject({ error_code: 'EDITOR_REVISION_TASK_CLOSURE_CONFLICT' })
   })
 
+  test('rejects acknowledgement when a bulk update changes the current task note but preserves its receipt', async () => {
+    const fixture = await createAsyncRevisionRouteFixture()
+    const sourceTask = { title: '关闭章末风险', task_status: 'open' }
+    const sourceRun = await appendNovelRun(fixture.workspace, {
+      project_id: fixture.project.id,
+      run_type: 'longform_production_repair',
+      step_name: 'bulk-note-drift-repair-task',
+      status: 'ready',
+      output_ref: JSON.stringify({ tasks: [sourceTask] }),
+    })
+    const applyRevision = fixture.handlers.get('POST /api/novel/reviews/:reviewId/apply-revision')
+    const created = await callRoute(applyRevision, {
+      params: { reviewId: String(fixture.review.id) },
+      body: {
+        project_id: fixture.project.id,
+        chapter_id: fixture.chapter.id,
+        repair_task_link: { run_id: sourceRun.id, task_index: 0, task: sourceTask },
+      },
+    })
+    await updateNovelRun(fixture.workspace, created.body.run_id, {
+      status: 'completed',
+      output_ref: JSON.stringify(completedRevisionCheckpoint()),
+    })
+    const updateTask = fixture.handlers.get('POST /api/novel/runs/:id/tasks/:taskIndex/status')
+    const taskClosure = await callRoute(updateTask, {
+      params: { id: String(sourceRun.id), taskIndex: '0' },
+      body: {
+        project_id: fixture.project.id,
+        status: 'resolved',
+        note: 'durable receipt note',
+        editor_revision_run_id: created.body.run_id,
+      },
+    })
+    expect(taskClosure.statusCode).toBe(200)
+    const bulkUpdate = fixture.handlers.get('POST /api/novel/runs/:id/tasks/status-bulk')
+    const drifted = await callRoute(bulkUpdate, {
+      params: { id: String(sourceRun.id) },
+      body: {
+        project_id: fixture.project.id,
+        task_indices: [0],
+        status: 'resolved',
+        note: 'bulk changed note',
+      },
+    })
+    expect(drifted.statusCode).toBe(200)
+    expect(drifted.body.task_status_summary).toMatchObject({ resolved: 1 })
+    const storedTask = JSON.parse(String((await listNovelRuns(fixture.workspace, fixture.project.id))
+      .find(run => run.id === sourceRun.id)?.output_ref || '{}')).tasks[0]
+    expect(storedTask).toMatchObject({
+      task_status: 'resolved',
+      status_note: 'bulk changed note',
+      editor_revision_closure_receipts: {
+        [String(created.body.run_id)]: { note: 'durable receipt note' },
+      },
+    })
+
+    const acknowledge = fixture.handlers.get('POST /api/novel/editor-revisions/:runId/linked-task-closure')
+    const revisionBefore = (await listNovelRuns(fixture.workspace, fixture.project.id))
+      .find(run => run.id === created.body.run_id)
+    const rejected = await callRoute(acknowledge, {
+      params: { runId: String(created.body.run_id) },
+      body: { project_id: fixture.project.id },
+    })
+    expect(rejected.statusCode).toBe(409)
+    expect(rejected.body).toMatchObject({ error_code: 'REVISION_LINKED_TASK_CLOSURE_NOT_READY' })
+    expect((await listNovelRuns(fixture.workspace, fixture.project.id))
+      .find(run => run.id === created.body.run_id)).toEqual(revisionBefore)
+  })
+
   test('upserts one stable annotation receipt when the committed response is replayed', async () => {
     const fixture = await createAsyncRevisionRouteFixture()
     const annotationKey = 'reader_payoff_sync:12:chapter_hook:durable'
@@ -820,6 +889,117 @@ describe('asynchronous editor revision API safeguards', () => {
         return payload.editor_revision_run_id === created.body.run_id
       })
     expect(receipts).toHaveLength(1)
+  })
+
+  test('rejects resolved editor-revision task closure when the durable task annotation is omitted', async () => {
+    const fixture = await createAsyncRevisionRouteFixture()
+    const annotationKey = 'reader_payoff_sync:12:required-by-task'
+    const sourceTask = {
+      title: '关闭必须同步的批注',
+      task_status: 'open',
+      source: 'review_annotation_risk',
+      annotation_key: annotationKey,
+    }
+    const sourceRun = await appendNovelRun(fixture.workspace, {
+      project_id: fixture.project.id,
+      run_type: 'longform_production_repair',
+      step_name: 'annotation-required-repair-task',
+      status: 'ready',
+      output_ref: JSON.stringify({ tasks: [sourceTask] }),
+    })
+    const applyRevision = fixture.handlers.get('POST /api/novel/reviews/:reviewId/apply-revision')
+    const created = await callRoute(applyRevision, {
+      params: { reviewId: String(fixture.review.id) },
+      body: {
+        project_id: fixture.project.id,
+        chapter_id: fixture.chapter.id,
+        repair_task_link: { run_id: sourceRun.id, task_index: 0, task: sourceTask },
+      },
+    })
+    await updateNovelRun(fixture.workspace, created.body.run_id, {
+      status: 'completed',
+      output_ref: JSON.stringify(completedRevisionCheckpoint()),
+    })
+    const updateTask = fixture.handlers.get('POST /api/novel/runs/:id/tasks/:taskIndex/status')
+    const omitted = await callRoute(updateTask, {
+      params: { id: String(sourceRun.id), taskIndex: '0' },
+      body: {
+        project_id: fixture.project.id,
+        status: 'resolved',
+        note: 'annotation fields omitted',
+        editor_revision_run_id: created.body.run_id,
+      },
+    })
+
+    expect(omitted.statusCode).toBe(409)
+    expect(omitted.body).toMatchObject({ error_code: 'EDITOR_REVISION_TASK_CLOSURE_INVALID' })
+    const storedTask = JSON.parse(String((await listNovelRuns(fixture.workspace, fixture.project.id))
+      .find(run => run.id === sourceRun.id)?.output_ref || '{}')).tasks[0]
+    expect(storedTask).toEqual(sourceTask)
+  })
+
+  test('rejects acknowledgement when a resolved durable annotation task has a legacy receipt without annotation fields', async () => {
+    const fixture = await createAsyncRevisionRouteFixture()
+    const annotationKey = 'reader_payoff_sync:12:legacy-ack-receipt'
+    const closureNote = 'legacy closure omitted annotation fields'
+    const sourceTask = {
+      title: '关闭历史批注风险',
+      task_status: 'open',
+      source: 'review_annotation_risk',
+      annotation_key: annotationKey,
+    }
+    const sourceRun = await appendNovelRun(fixture.workspace, {
+      project_id: fixture.project.id,
+      run_type: 'longform_production_repair',
+      step_name: 'legacy-annotation-receipt-repair-task',
+      status: 'ready',
+      output_ref: JSON.stringify({ tasks: [sourceTask] }),
+    })
+    const applyRevision = fixture.handlers.get('POST /api/novel/reviews/:reviewId/apply-revision')
+    const created = await callRoute(applyRevision, {
+      params: { reviewId: String(fixture.review.id) },
+      body: {
+        project_id: fixture.project.id,
+        chapter_id: fixture.chapter.id,
+        repair_task_link: { run_id: sourceRun.id, task_index: 0, task: sourceTask },
+      },
+    })
+    await updateNovelRun(fixture.workspace, created.body.run_id, {
+      status: 'completed',
+      output_ref: JSON.stringify(completedRevisionCheckpoint()),
+    })
+    await updateNovelRun(fixture.workspace, sourceRun.id, {
+      output_ref: JSON.stringify({
+        tasks: [{
+          ...sourceTask,
+          task_status: 'resolved',
+          status_note: closureNote,
+          editor_revision_closure_receipts: {
+            [String(created.body.run_id)]: {
+              editor_revision_run_id: created.body.run_id,
+              repair_run_id: sourceRun.id,
+              task_index: 0,
+              task_status: 'resolved',
+              note: closureNote,
+              completed_at: '2026-07-29T00:00:00.000Z',
+            },
+          },
+        }],
+      }),
+    })
+
+    const acknowledge = fixture.handlers.get('POST /api/novel/editor-revisions/:runId/linked-task-closure')
+    const revisionBefore = (await listNovelRuns(fixture.workspace, fixture.project.id))
+      .find(run => run.id === created.body.run_id)
+    const rejected = await callRoute(acknowledge, {
+      params: { runId: String(created.body.run_id) },
+      body: { project_id: fixture.project.id },
+    })
+
+    expect(rejected.statusCode).toBe(409)
+    expect(rejected.body).toMatchObject({ error_code: 'REVISION_LINKED_TASK_CLOSURE_NOT_READY' })
+    expect((await listNovelRuns(fixture.workspace, fixture.project.id))
+      .find(run => run.id === created.body.run_id)).toEqual(revisionBefore)
   })
 
   test('requires the durable annotation receipt before acknowledgement and replays a legal acknowledgement', async () => {

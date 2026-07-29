@@ -209,6 +209,10 @@ export async function reconcileEditorRevisionTasks({
       continue
     }
     const key = editorRevisionReconciliationKey(projectId, task)
+    if (task.linked_task_closure?.status === 'completed') {
+      markAcknowledgedKey(state, projectId, task)
+      continue
+    }
     if (state.completedKeys.has(key) || state.inFlightKeys.has(key)) continue
     state.inFlightKeys.add(key)
     try {
