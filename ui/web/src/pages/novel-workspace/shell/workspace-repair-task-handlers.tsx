@@ -178,16 +178,13 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
       if (!selectedModelId) return message.warning('请先选择模型')
       if (!await selectChapterForWriting(chapterId)) return
       if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
-      const revisionResult = await createEditorReportForChapter(chapterId, {
+      await createEditorReportForChapter(chapterId, {
         sourceTask: recheckTask,
         sourceRun: run,
         sourceTaskIndex: taskIndex,
         autoRevision: true,
         skipRevisionConfirm: true,
       })
-      if (revisionResult) {
-        await recheckRepairTaskConvergence(recheckTask, run, taskIndex, { keepTaskCenterOpen: true })
-      }
       return
     }
     if (actionKey === 'deep_repair_single_brief') {
@@ -442,24 +439,45 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
     run: any,
     taskIndex: number,
     revisionResult: any,
-    refreshOptions: { projectModules?: boolean; productionTasks?: boolean } = {},
+    refreshOptions: { projectModules?: boolean; productionTasks?: boolean; signal?: AbortSignal } = {},
   ) => {
     if (!run?.id || taskIndex < 0) return null
     const plan = buildDeliveryRiskRevisionClosurePlan(task, revisionResult || {})
-    await apiClient.post(`/novel/runs/${run.id}/tasks/${taskIndex}/status`, {
+    const requireActiveRequest = () => {
+      if (!refreshOptions.signal?.aborted) return
+      if (typeof refreshOptions.signal.throwIfAborted === 'function') refreshOptions.signal.throwIfAborted()
+      const error = new Error('repair task closure request is stale')
+      error.name = 'AbortError'
+      throw error
+    }
+    const post = (url: string, body: Record<string, unknown>) => refreshOptions.signal
+      ? apiClient.post(url, body, { signal: refreshOptions.signal })
+      : apiClient.post(url, body)
+    requireActiveRequest()
+    await post(`/novel/runs/${run.id}/tasks/${taskIndex}/status`, {
       project_id: projectId,
       status: plan.taskStatus,
       note: plan.note,
     })
+    requireActiveRequest()
     if (plan.annotationStatus && plan.annotationKey) {
-      await apiClient.post(`/novel/projects/${projectId}/review-annotations/status`, {
+      await post(`/novel/projects/${projectId}/review-annotations/status`, {
         annotation_key: plan.annotationKey,
         status: plan.annotationStatus,
         note: plan.note,
       })
+      requireActiveRequest()
     }
-    if (refreshOptions.projectModules !== false) await loadProjectModules()
-    if (refreshOptions.productionTasks !== false) await loadProductionTasks()
+    if (refreshOptions.projectModules !== false) {
+      requireActiveRequest()
+      await loadProjectModules()
+      requireActiveRequest()
+    }
+    if (refreshOptions.productionTasks !== false) {
+      requireActiveRequest()
+      await loadProductionTasks()
+      requireActiveRequest()
+    }
     return plan
   }
 

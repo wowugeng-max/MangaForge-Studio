@@ -400,6 +400,17 @@ function safeDeliveryRiskConvergence(value: unknown): Record<string, unknown> | 
   }
 }
 
+function safeLinkedTaskClosure(value: unknown): PublicEditorRevisionRun['linked_task_closure'] {
+  const closure = parseJsonObject(value)
+  if (!closure) return null
+  if (closure.status === 'pending') return { status: 'pending' }
+  if (closure.status !== 'completed') return null
+  const completedAt = safeString(closure.completed_at, 80)
+  const completedDate = new Date(completedAt)
+  if (!completedAt || !Number.isFinite(completedDate.getTime())) return null
+  return { status: 'completed', completed_at: completedDate.toISOString() }
+}
+
 function safeWarnings(value: unknown): Array<{ code: string; message: string }> {
   if (!Array.isArray(value)) return []
   return value.slice(0, 100).flatMap(item => {
@@ -513,7 +524,7 @@ export function buildPublicEditorRevisionRun(run: NovelRunRecord): PublicEditorR
     repair_task_link: input.repair_task_link
       ? { run_id: input.repair_task_link.run_id, task_index: input.repair_task_link.task_index }
       : null,
-    linked_task_closure: checkpoint.linked_task_closure || null,
+    linked_task_closure: safeLinkedTaskClosure(checkpoint.linked_task_closure),
     created_at: safeString(run.created_at, 80),
     updated_at: safeString(run.updated_at, 80) || safeString(run.created_at, 80),
   }

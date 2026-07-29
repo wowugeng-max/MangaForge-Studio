@@ -222,6 +222,7 @@ export function useWorkspaceTasks({
     error: null,
     failures: 0,
   })
+  const [productionTasksProjectId, setProductionTasksProjectId] = useState<number | null>(null)
   const [productionTasksLoading, setProductionTasksLoading] = useState(false)
   const knowledgeRefreshRef = useRef(knowledgeRefresh)
   const productionRefreshRef = useRef(productionRefresh)
@@ -250,6 +251,7 @@ export function useWorkspaceTasks({
     try {
       const res = await apiClient.get(`/novel/projects/${projectId}/tasks`, { signal: request.signal })
       if (requestGateRef.current?.isCurrent(request, projectId)) {
+        setProductionTasksProjectId(projectId)
         setProductionRefresh(state => workspaceTaskRefreshSucceeded(state, res.data || null))
       }
     } catch (error) {
@@ -312,6 +314,7 @@ export function useWorkspaceTasks({
       const requestGate = requireCurrentWorkspaceTaskRequest(requestGateRef.current, request, actionProjectId)
       const task = res.data?.run
       if (!isEditorRevisionTask(task)) throw new Error('invalid editor revision action response')
+      setProductionTasksProjectId(actionProjectId)
       setProductionRefresh(state => ({ ...state, data: mergeEditorRevisionTask(state.data, task) }))
       requestGate.invalidateKind('production')
       await loadProductionTasks()
@@ -369,6 +372,7 @@ export function useWorkspaceTasks({
     requestGateRef.current?.invalidate()
     setKnowledgeRefresh({ data: [], confirmed: false, error: null, failures: 0 })
     setProductionRefresh({ data: null, confirmed: false, error: null, failures: 0 })
+    setProductionTasksProjectId(null)
     setKnowledgeJobsLoading(false)
     setProductionTasksLoading(false)
     return () => requestGateRef.current?.invalidate()
@@ -503,6 +507,7 @@ export function useWorkspaceTasks({
     loadProductionTasks,
     refreshWorkspaceTasks,
     editorRevisionTasks,
+    editorRevisionTasksProjectId: productionTasksProjectId,
     activeEditorRevisionTasks,
     cancelEditorRevision,
     retryEditorRevision,

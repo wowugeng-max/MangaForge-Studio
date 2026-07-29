@@ -533,9 +533,10 @@ describe('useWorkspaceTasks editor revision lifecycle', () => {
       return { data: { jobs: [] } }
     }) as any
 
-    mountWorkspaceTasks(module, workspaceProps())
+    const mounted = mountWorkspaceTasks(module, workspaceProps())
     await flushPromises()
     expect(requests).toEqual(['/novel/projects/3/tasks'])
+    expect(mounted.harness.value.editorRevisionTasksProjectId).toBe(3)
 
     timers.advanceBy(2000)
     await flushPromises()
@@ -566,6 +567,7 @@ describe('useWorkspaceTasks editor revision lifecycle', () => {
     project4.resolve({ data: taskEnvelope([editorRevision({ id: 91, chapter_id: 21, chapter_title: '新项目' })]) })
     await flushPromises()
     expect(mounted.harness.value.editorRevisionTasks?.map((task: any) => task.id)).toEqual([91])
+    expect(mounted.harness.value.editorRevisionTasksProjectId).toBe(4)
 
     project3.resolve({ data: taskEnvelope([editorRevision({ id: 81 })]) })
     await flushPromises()

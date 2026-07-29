@@ -40,6 +40,7 @@ const ROUTE_SOURCE_TEXT = '不可泄漏的路由源正文。'.repeat(80)
 const ROUTE_CANDIDATE_TEXT = '不可泄漏的路由候选正文。'.repeat(80)
 const ROUTE_CONTEXT_SECRET = '完整 context package 秘密'
 const ROUTE_USER_PROMPT = '只修改章末钩子，不可泄漏。'
+const ROUTE_CLOSURE_SECRET = '不可泄漏的 linked closure 私密字段'
 
 function createRouteHarness() {
   const handlers = new Map<string, any>()
@@ -919,9 +920,15 @@ describe('asynchronous editor revision API safeguards', () => {
     expect(JSON.stringify(diagnostics.body)).not.toContain(ROUTE_SOURCE_TEXT)
     expect(JSON.stringify(diagnostics.body)).not.toContain(ROUTE_CONTEXT_SECRET)
 
+    const genericCheckpoint = admittedRevisionCheckpoint()
+    ;(genericCheckpoint as any).linked_task_closure = {
+      status: 'pending',
+      task: { secret: ROUTE_CLOSURE_SECRET },
+      arbitrary: ROUTE_CLOSURE_SECRET,
+    }
     await updateNovelRun(fixture.workspace, runId, {
       status: 'running',
-      output_ref: JSON.stringify(admittedRevisionCheckpoint()),
+      output_ref: JSON.stringify(genericCheckpoint),
       error_message: '',
     })
     const ordinary = await appendNovelRun(fixture.workspace, {
@@ -950,7 +957,7 @@ describe('asynchronous editor revision API safeguards', () => {
     const task = tasks.body.tasks.find((item: any) => item.id === runId)
     for (const response of [fullRevision, summaryRevision, detail.body, task]) {
       const serialized = JSON.stringify(response)
-      for (const secret of [ROUTE_SOURCE_TEXT, ROUTE_CANDIDATE_TEXT, ROUTE_CONTEXT_SECRET, ROUTE_USER_PROMPT, 'input_ref', 'output_ref']) {
+      for (const secret of [ROUTE_SOURCE_TEXT, ROUTE_CANDIDATE_TEXT, ROUTE_CONTEXT_SECRET, ROUTE_USER_PROMPT, ROUTE_CLOSURE_SECRET, 'input_ref', 'output_ref']) {
         expect(serialized).not.toContain(secret)
       }
     }

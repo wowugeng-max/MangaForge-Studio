@@ -212,6 +212,62 @@ describe('editor revision public run view', () => {
     expect(serialized).not.toContain('private_evidence')
   })
 
+  test('reconstructs linked closure acknowledgement without durable extra fields', () => {
+    const checkpoint = initialCheckpoint()
+    checkpoint.phase = 'completed'
+    for (const phase of Object.keys(checkpoint.phases) as EditorRevisionPhase[]) {
+      checkpoint.phases[phase] = { status: 'completed', attempt: 1 }
+    }
+    checkpoint.candidate = {
+      text: CANDIDATE_TEXT,
+      hash: revisionTextHash(CANDIDATE_TEXT),
+      char_count: CANDIDATE_TEXT.replace(/\s/g, '').length,
+      applied_patches: [],
+      diagnostics: {},
+    }
+    checkpoint.prose_persisted = true
+    checkpoint.completed_at = '2030-01-01T00:00:05.000Z'
+
+    for (const [closure, expected] of [
+      [
+        { status: 'pending', task: { secret: FULL_CONTEXT }, arbitrary: RENDERED_PROMPT },
+        { status: 'pending' },
+      ],
+      [
+        {
+          status: 'completed',
+          completed_at: '2030-01-01T00:00:06.000Z',
+          task: { secret: FULL_CONTEXT },
+          arbitrary: RENDERED_PROMPT,
+        },
+        { status: 'completed', completed_at: '2030-01-01T00:00:06.000Z' },
+      ],
+    ] as const) {
+      const withClosure = structuredClone(checkpoint)
+      ;(withClosure as any).linked_task_closure = closure
+      const run = runWithCheckpoint(withClosure, 'completed')
+      const view = buildPublicEditorRevisionRun(run)
+      const diagnostics = buildEditorRevisionDiagnostics(run)
+
+      expect(view.linked_task_closure).toEqual(expected)
+      const serialized = JSON.stringify({ view, diagnostics })
+      expect(serialized).not.toContain(FULL_CONTEXT)
+      expect(serialized).not.toContain(RENDERED_PROMPT)
+      expect(serialized).not.toContain('arbitrary')
+      expect(serialized).not.toContain('"task":')
+    }
+
+    const malformed = structuredClone(checkpoint)
+    ;(malformed as any).linked_task_closure = {
+      status: 'completed',
+      completed_at: 'not-a-date',
+      arbitrary: FULL_CONTEXT,
+    }
+    const malformedRun = runWithCheckpoint(malformed, 'completed')
+    expect(buildPublicEditorRevisionRun(malformedRun).linked_task_closure).toBeNull()
+    expect(JSON.stringify(buildEditorRevisionDiagnostics(malformedRun))).not.toContain(FULL_CONTEXT)
+  })
+
   test('publishes a bounded convergence summary for linked terminal reconciliation', () => {
     const checkpoint = initialCheckpoint()
     checkpoint.phase = 'completed'

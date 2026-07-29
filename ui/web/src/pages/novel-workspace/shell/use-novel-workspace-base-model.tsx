@@ -62,6 +62,8 @@ import {
 type AnyRecord = Record<string, any>
 
 export type EditorRevisionReconciliationState = {
+  projectId: number
+  controller: AbortController
   completedKeys: Set<string>
   inFlightKeys: Set<string>
   moduleReloadedKeys: Set<string>
@@ -69,14 +71,20 @@ export type EditorRevisionReconciliationState = {
   linkedTaskClosedKeys: Set<string>
 }
 
-export function createEditorRevisionReconciliationState(): EditorRevisionReconciliationState {
+export function createEditorRevisionReconciliationState(projectId: number): EditorRevisionReconciliationState {
   return {
+    projectId,
+    controller: new AbortController(),
     completedKeys: new Set(),
     inFlightKeys: new Set(),
     moduleReloadedKeys: new Set(),
     notifiedKeys: new Set(),
     linkedTaskClosedKeys: new Set(),
   }
+}
+
+export function invalidateEditorRevisionReconciliationState(state: EditorRevisionReconciliationState) {
+  state.controller.abort()
 }
 
 function editorRevisionReconciliationKey(projectId: number, task: EditorRevisionTask) {
@@ -133,6 +141,7 @@ function markAcknowledgedKey(
 
 export async function reconcileEditorRevisionTasks({
   projectId,
+  taskProjectId,
   tasks,
   productionTasks,
   state,
@@ -143,8 +152,10 @@ export async function reconcileEditorRevisionTasks({
   closeRepairTaskAfterRevision,
   acknowledgeLinkedTaskClosure,
   notifyTerminal,
+  isCurrent,
 }: {
   projectId: number
+  taskProjectId?: number | null
   tasks: EditorRevisionTask[]
   productionTasks: any
   state: EditorRevisionReconciliationState
@@ -152,12 +163,27 @@ export async function reconcileEditorRevisionTasks({
   loadProjectModules: () => Promise<unknown>
   setRightPanelOpen: (open: boolean) => void
   setRightPanelTab: (tab: string) => void
-  closeRepairTaskAfterRevision: (task: any, run: any, taskIndex: number, result: any) => Promise<unknown>
-  acknowledgeLinkedTaskClosure: (task: EditorRevisionTask) => Promise<EditorRevisionTask>
+  closeRepairTaskAfterRevision: (
+    task: any,
+    run: any,
+    taskIndex: number,
+    result: any,
+    options: { signal: AbortSignal },
+  ) => Promise<unknown>
+  acknowledgeLinkedTaskClosure: (task: EditorRevisionTask, signal: AbortSignal) => Promise<EditorRevisionTask>
   notifyTerminal: (terminal: NonNullable<ReturnType<typeof editorRevisionTerminalMessage>>, task: EditorRevisionTask) => void
+  isCurrent?: () => boolean
 }) {
-  if (!projectId) return
+  const signal = state.controller.signal
+  const snapshotProjectId = taskProjectId ?? state.projectId
+  const reconciliationIsCurrent = () => Boolean(projectId)
+    && state.projectId === projectId
+    && snapshotProjectId === projectId
+    && !signal.aborted
+    && (isCurrent?.() ?? true)
+  if (!reconciliationIsCurrent()) return
   for (const task of tasks) {
+    if (!reconciliationIsCurrent()) return
     if (isActiveEditorRevisionTask(task)) continue
     const key = editorRevisionReconciliationKey(projectId, task)
     if (state.completedKeys.has(key) || state.inFlightKeys.has(key)) continue
@@ -165,35 +191,44 @@ export async function reconcileEditorRevisionTasks({
     try {
       if (task.prose_persisted && !state.moduleReloadedKeys.has(key)) {
         await loadProjectModules()
+        if (!reconciliationIsCurrent()) return
         state.moduleReloadedKeys.add(key)
         const currentActiveChapterId = typeof activeChapterId === 'function'
           ? Number(activeChapterId())
           : Number(activeChapterId)
         if (task.chapter_id === currentActiveChapterId) {
+          if (!reconciliationIsCurrent()) return
           setRightPanelOpen(true)
+          if (!reconciliationIsCurrent()) return
           setRightPanelTab('proseQuality')
         }
       }
 
       if (!state.notifiedKeys.has(key)) {
+        if (!reconciliationIsCurrent()) return
         const terminal = editorRevisionTerminalMessage(task)
         if (terminal) notifyTerminal(terminal, task)
+        if (!reconciliationIsCurrent()) return
         state.notifiedKeys.add(key)
       }
 
       if (!task.prose_persisted) {
+        if (!reconciliationIsCurrent()) return
         state.completedKeys.add(key)
         continue
       }
       if (!task.repair_task_link || task.linked_task_closure?.status === 'completed') {
+        if (!reconciliationIsCurrent()) return
         state.completedKeys.add(key)
         continue
       }
       if (task.linked_task_closure?.status !== 'pending') {
+        if (!reconciliationIsCurrent()) return
         state.completedKeys.add(key)
         continue
       }
 
+      if (!reconciliationIsCurrent()) return
       const linked = linkedRepairTask(productionTasks, task)
       if (!linked) continue
       if (!state.linkedTaskClosedKeys.has(key)) {
@@ -202,10 +237,14 @@ export async function reconcileEditorRevisionTasks({
           linked.run,
           linked.taskIndex,
           repairClosureResult(task),
+          { signal },
         )
+        if (!reconciliationIsCurrent()) return
         state.linkedTaskClosedKeys.add(key)
       }
-      const acknowledged = await acknowledgeLinkedTaskClosure(task)
+      if (!reconciliationIsCurrent()) return
+      const acknowledged = await acknowledgeLinkedTaskClosure(task, signal)
+      if (!reconciliationIsCurrent()) return
       state.completedKeys.add(key)
       if (isEditorRevisionTask(acknowledged)) markAcknowledgedKey(state, projectId, acknowledged)
     } catch {
@@ -368,14 +407,24 @@ export function useNovelWorkspaceBaseModel() {
   })
   const activeChapterIdRef = useRef(Number(activeChapterId || activeChapter?.id || 0))
   activeChapterIdRef.current = Number(activeChapterId || activeChapter?.id || 0)
-  const editorRevisionReconciliationRef = useRef<EditorRevisionReconciliationState>(
-    createEditorRevisionReconciliationState(),
-  )
-  const editorRevisionReconciliationProjectRef = useRef(projectId)
-  if (editorRevisionReconciliationProjectRef.current !== projectId) {
-    editorRevisionReconciliationProjectRef.current = projectId
-    editorRevisionReconciliationRef.current = createEditorRevisionReconciliationState()
+  const currentProjectIdRef = useRef(projectId)
+  currentProjectIdRef.current = projectId
+  const editorRevisionReconciliationRef = useRef<EditorRevisionReconciliationState | null>(null)
+  if (!editorRevisionReconciliationRef.current || editorRevisionReconciliationRef.current.projectId !== projectId) {
+    if (editorRevisionReconciliationRef.current) {
+      invalidateEditorRevisionReconciliationState(editorRevisionReconciliationRef.current)
+    }
+    editorRevisionReconciliationRef.current = createEditorRevisionReconciliationState(projectId)
   }
+  useEffect(() => {
+    if (editorRevisionReconciliationRef.current?.controller.signal.aborted) {
+      editorRevisionReconciliationRef.current = createEditorRevisionReconciliationState(projectId)
+    }
+    const mountedState = editorRevisionReconciliationRef.current
+    return () => {
+      if (mountedState) invalidateEditorRevisionReconciliationState(mountedState)
+    }
+  }, [projectId])
 
   const activeChapterIdNumber = Number(activeChapter?.id || 0)
   const activeChapterUpdatedAt = activeChapter?.updated_at || null
@@ -482,6 +531,7 @@ export function useNovelWorkspaceBaseModel() {
     productionTasksLoading,
     loadProductionTasks,
     editorRevisionTasks,
+    editorRevisionTasksProjectId,
     knowledgeIngestJobs,
     knowledgeJobsLoading,
     loadKnowledgeIngestJobs,
@@ -748,31 +798,36 @@ export function useNovelWorkspaceBaseModel() {
   } = coreHandlers
 
   useEffect(() => {
+    const reconciliationState = editorRevisionReconciliationRef.current
+    if (!reconciliationState || editorRevisionTasksProjectId !== projectId) return
     void reconcileEditorRevisionTasks({
       projectId,
+      taskProjectId: editorRevisionTasksProjectId,
       tasks: editorRevisionTasks,
       productionTasks,
-      state: editorRevisionReconciliationRef.current,
+      state: reconciliationState,
       activeChapterId: () => activeChapterIdRef.current,
       loadProjectModules,
       setRightPanelOpen,
       setRightPanelTab,
-      closeRepairTaskAfterRevision: (task, run, taskIndex, result) => (
+      closeRepairTaskAfterRevision: (task, run, taskIndex, result, options) => (
         coreHandlers.closeRepairTaskAfterRevision(
           task,
           run,
           taskIndex,
           result,
-          { projectModules: false },
+          { projectModules: false, signal: options.signal },
         )
       ),
-      acknowledgeLinkedTaskClosure: async task => {
+      acknowledgeLinkedTaskClosure: async (task, signal) => {
         const res = await apiClient.post(`/novel/editor-revisions/${task.id}/linked-task-closure`, {
           project_id: projectId,
-        })
+        }, { signal })
+        if (signal.aborted) throw new DOMException('editor revision reconciliation is stale', 'AbortError')
         const acknowledged = res.data?.run
         if (!isEditorRevisionTask(acknowledged)) throw new Error('invalid linked task closure acknowledgement')
         await loadProductionTasks()
+        if (signal.aborted) throw new DOMException('editor revision reconciliation is stale', 'AbortError')
         return acknowledged
       },
       notifyTerminal: terminal => {
@@ -780,10 +835,13 @@ export function useNovelWorkspaceBaseModel() {
         else if (terminal.type === 'warning') message.warning(terminal.text)
         else message.error(terminal.text)
       },
+      isCurrent: () => editorRevisionReconciliationRef.current === reconciliationState
+        && currentProjectIdRef.current === projectId,
     })
   }, [
     coreHandlers,
     editorRevisionTasks,
+    editorRevisionTasksProjectId,
     loadProductionTasks,
     loadProjectModules,
     productionTasks,
