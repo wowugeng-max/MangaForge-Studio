@@ -365,9 +365,25 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRevis
         })
       }
       const before = buildPublicEditorRevisionRun(existing)
+      if (!before.can_retry && !before.can_continue) {
+        if (['SOURCE_VERSION_CHANGED', 'REVISION_RUN_SUPERSEDED'].includes(String(before.error?.code || ''))) {
+          return res.status(409).json({
+            error: 'editor revision must restart from a fresh source snapshot',
+            error_code: 'REVISION_RESTART_REQUIRED',
+          })
+        }
+        return res.status(409).json({
+          error: 'editor revision cannot be retried in the current state',
+          error_code: 'REVISION_ACTION_NOT_ALLOWED',
+        })
+      }
       const action = before.can_continue ? 'continue' : 'retry'
       const updated = await retryEditorRevisionRun(workspace, projectId, runId)
-      ctx.editorRevisionWorker.enqueue(runId)
+      try {
+        ctx.editorRevisionWorker.enqueue(runId)
+      } catch {
+        // The durable queued row remains discoverable by worker recovery.
+      }
       return res.json({ ok: true, action, run: buildPublicEditorRevisionRun(updated) })
     } catch (error: any) {
       return respondRevisionError(res, error)

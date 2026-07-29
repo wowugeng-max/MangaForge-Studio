@@ -1,6 +1,9 @@
 import { requireCoherentEditorRevisionCheckpoint } from '../../novel/repos/editor-revision-runs'
 import type { NovelRunRecord } from '../../novel/types'
-import { countProseChars } from '../../novel-writing/word-target'
+import {
+  countProseChars,
+  normalizeProseContractionFinishReason,
+} from '../../novel-writing/word-target'
 import {
   EDITOR_REVISION_PHASE_LABELS,
   EDITOR_REVISION_PHASES,
@@ -32,6 +35,52 @@ const POST_COMMIT_PHASES: EditorRevisionPhase[] = [
 ]
 const DIAGNOSTIC_CANDIDATE_LIMIT = 60_000
 const DIAGNOSTIC_PREVIEW_LIMIT = 2_000
+const PUBLIC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
+  REVISION_RUN_MALFORMED: 'editor revision run metadata is unavailable',
+  REVISION_FAILED: 'editor revision failed',
+  REVISION_WORKER_FAILED: 'editor revision failed',
+  REVISION_LLM_TIMEOUT: 'editor revision model call timed out',
+  REVISION_CANCELED: 'editor revision canceled',
+  REVISION_RUN_SUPERSEDED: 'editor revision was superseded by a newer revision',
+  SOURCE_VERSION_CHANGED: 'chapter source changed; start a new revision',
+  REVISION_RESTART_REQUIRED: 'editor revision must restart from a fresh source snapshot',
+  REVISION_INPUT_INVALID: 'editor revision input is invalid',
+  REVISION_CHECKPOINT_INVALID: 'editor revision checkpoint is invalid',
+  REVISION_CHECKPOINT_REGRESSION: 'editor revision checkpoint is invalid',
+  REVISION_CANDIDATE_MISSING: 'editor revision candidate is unavailable',
+  REVISION_CANDIDATE_CHECKPOINT_FAILED: 'editor revision candidate could not be saved',
+  REVISION_LEASE_LOST: 'editor revision worker lease was lost',
+  REVISION_RUN_NOT_FOUND: 'editor revision run was not found',
+  CHAPTER_NOT_FOUND: 'chapter was not found',
+  PROJECT_NOT_FOUND: 'project was not found',
+  PROVIDER_FAILED: 'editor revision provider failed',
+  QUALITY_FAILED: 'post-revision quality check failed',
+  PROSE_REVISION_TRUNCATED: '正文修订输出不完整，不能作为完整章节正文入库',
+  REVISION_NO_PROSE_BODY: '修订结果没有可用正文',
+  REVISION_PARTIAL_JSON_RECOVERY: '修订结果来自不完整 JSON 恢复',
+  REVISION_PATCH_INCOMPLETE: '修订补丁未完整应用',
+  REVISION_NO_APPLICABLE_PATCH: '修订未返回可应用正文',
+  REVISION_CANDIDATE_TOO_SHORT: '修订候选明显短于原文',
+  REVISION_CANDIDATE_TOO_LONG: '修订候选明显长于原文',
+  REVISION_OUTPUT_WRAPPER: '修订候选包含无效的输出外壳',
+  REVISION_INCOMPLETE_ENDING: '修订候选没有完整的正文结尾',
+}
+const PUBLIC_WARNING_MESSAGES: Readonly<Record<string, string>> = {
+  POST_QUALITY_NEEDS_REVISION: '修订后质检仍建议人工复查',
+}
+const PUBLIC_PHASE_REASONS = new Set(['disabled_by_request'])
+const PUBLIC_PATCH_TYPES = new Set(['replacement', 'insertion', 'opening_rewrite'])
+const PUBLIC_PATCH_REASONS = new Set([
+  'anchor_not_found',
+  'anchor_not_unique',
+  'anchor_overlap',
+  'keep_from_not_found',
+  'keep_from_not_unique',
+  'missing_find_or_replace',
+  'missing_text',
+])
+const PUBLIC_COMMIT_STATUSES = new Set(['committed', 'already_committed'])
+const PUBLIC_STORY_STATE_STATUSES = new Set(['prepared', 'completed'])
 
 export type PublicEditorRevisionRun = {
   id: number
@@ -128,6 +177,31 @@ function safeString(value: unknown, limit = 500): string {
   return typeof value === 'string' ? value.slice(0, limit) : ''
 }
 
+function safeEnumValue(value: unknown, allowed: Set<string>): string | undefined {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  return allowed.has(normalized) ? normalized : undefined
+}
+
+function publicRevisionError(value: unknown): { code: string; message: string } {
+  const requestedCode = typeof value === 'string' ? value : ''
+  const code = Object.prototype.hasOwnProperty.call(PUBLIC_ERROR_MESSAGES, requestedCode)
+    ? requestedCode
+    : 'REVISION_FAILED'
+  return { code, message: PUBLIC_ERROR_MESSAGES[code] }
+}
+
+function safeFinishReason(value: unknown): string | undefined {
+  return normalizeProseContractionFinishReason({ finish_reason: value }) || undefined
+}
+
+function safeIncompleteReason(value: unknown): string | undefined {
+  const reason = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  if (!reason) return undefined
+  if (['max_output_tokens', 'max_tokens', 'token_limit', 'length'].includes(reason)) return 'max_output_tokens'
+  if (['content_filter', 'safety'].includes(reason)) return 'content_filter'
+  return 'unknown'
+}
+
 function compactObject(entries: Array<[string, unknown]>): Record<string, unknown> | undefined {
   const object = Object.fromEntries(entries.filter(([, value]) => value !== undefined))
   return Object.keys(object).length ? object : undefined
@@ -150,12 +224,6 @@ function safeUsage(value: unknown): Record<string, number> | undefined {
   return entries.length ? Object.fromEntries(entries) : undefined
 }
 
-function safeStringArray(value: unknown, limit = 40): string[] | undefined {
-  if (!Array.isArray(value)) return undefined
-  const items = value.map(item => safeString(item, 120)).filter(Boolean).slice(0, limit)
-  return items.length ? items : undefined
-}
-
 function safeReceipt(value: unknown): Record<string, unknown> | undefined {
   const receipt = parseJsonObject(value)
   if (!receipt) return undefined
@@ -172,8 +240,8 @@ function safePatchReasons(value: unknown): Array<Record<string, string>> | undef
   const reasons = value.slice(0, 40).flatMap(item => {
     const record = parseJsonObject(item)
     if (!record) return []
-    const type = safeString(record.type, 80)
-    const reason = safeString(record.reason, 120)
+    const type = safeEnumValue(record.type, PUBLIC_PATCH_TYPES)
+    const reason = safeEnumValue(record.reason, PUBLIC_PATCH_REASONS)
     return type || reason ? [{ ...(type ? { type } : {}), ...(reason ? { reason } : {}) }] : []
   })
   return reasons.length ? reasons : undefined
@@ -183,27 +251,13 @@ function safeGenerationSummary(value: unknown, diagnostics = false): Record<stri
   const summary = parseJsonObject(value)
   const source = parseJsonObject(summary?.diagnostics) || summary
   if (!source) return undefined
-  const streamTail = diagnostics && Array.isArray(source.stream_tail)
-    ? source.stream_tail.slice(-5).flatMap((item: unknown) => {
-        const record = parseJsonObject(item)
-        if (!record) return []
-        const entry = compactObject([
-          ['type', safeString(record.type, 120) || undefined],
-          ['keys', safeStringArray(record.keys, 30)],
-          ['preview', safeString(record.preview, 500) || undefined],
-        ])
-        return entry ? [entry] : []
-      })
-    : undefined
   return compactObject([
-    ['finish_reason', safeString(source.finish_reason, 120) || undefined],
-    ['incomplete_reason', safeString(source.incomplete_reason, 240) || undefined],
+    ['finish_reason', safeFinishReason(source.finish_reason)],
+    ['incomplete_reason', safeIncompleteReason(source.incomplete_reason)],
     ['incomplete_details_present', typeof source.incomplete_details_present === 'boolean' ? source.incomplete_details_present : undefined],
     ['usage', safeUsage(source.usage)],
     ['content_length', finiteInteger(source.content_length) ?? undefined],
     ['content_preview', diagnostics ? safeString(source.content_preview, DIAGNOSTIC_PREVIEW_LIMIT) || undefined : undefined],
-    ['raw_keys', safeStringArray(source.raw_keys)],
-    ['stream_tail', streamTail?.length ? streamTail : undefined],
     ['provider_result_ref', diagnostics
       ? safeString(source.provider_result_ref || source.provider_result_reference || source.result_ref, 500) || undefined
       : undefined],
@@ -231,7 +285,7 @@ function safePhaseSummary(phase: EditorRevisionPhase, value: unknown): Record<st
   if (phase === 'admit_candidate') return safeAdmissionSummary(summary)
   if (phase === 'persist_chapter') {
     return compactObject([
-      ['commit_status', safeString(summary.commit_status, 120) || undefined],
+      ['commit_status', safeEnumValue(summary.commit_status, PUBLIC_COMMIT_STATUSES)],
       ['chapter_updated_at', safeString(summary.chapter_updated_at, 80) || undefined],
       ['review_id', finiteInteger(summary.review_id) ?? undefined],
       ['recovered', typeof summary.recovered === 'boolean' ? summary.recovered : undefined],
@@ -240,7 +294,7 @@ function safePhaseSummary(phase: EditorRevisionPhase, value: unknown): Record<st
   }
   if (phase === 'post_quality') {
     return compactObject([
-      ['reason', safeString(summary.reason, 160) || undefined],
+      ['reason', safeEnumValue(summary.reason, PUBLIC_PHASE_REASONS)],
       ['review_id', finiteInteger(summary.review_id) ?? undefined],
       ['score', finiteNumber(summary.score) ?? undefined],
       ['passed', typeof summary.passed === 'boolean' ? summary.passed : undefined],
@@ -250,34 +304,36 @@ function safePhaseSummary(phase: EditorRevisionPhase, value: unknown): Record<st
   }
   if (phase === 'sync_current_story_state') {
     return compactObject([
-      ['reason', safeString(summary.reason, 160) || undefined],
-      ['status', safeString(summary.status, 120) || undefined],
+      ['reason', safeEnumValue(summary.reason, PUBLIC_PHASE_REASONS)],
+      ['status', safeEnumValue(summary.status, PUBLIC_STORY_STATE_STATUSES)],
       ['reused', typeof summary.reused === 'boolean' ? summary.reused : undefined],
       ['receipt', safeReceipt(summary.receipt)],
     ])
   }
   if (phase === 'record_continuity_warning') {
     return compactObject([
-      ['reason', safeString(summary.reason, 160) || undefined],
+      ['reason', safeEnumValue(summary.reason, PUBLIC_PHASE_REASONS)],
       ['convergence_review_id', finiteInteger(summary.convergence_review_id) ?? undefined],
       ['continuity_warning_review_id', finiteInteger(summary.continuity_warning_review_id) ?? undefined],
     ])
   }
   return compactObject([
-    ['reason', safeString(summary.reason, 160) || undefined],
+    ['reason', safeEnumValue(summary.reason, PUBLIC_PHASE_REASONS)],
     ['prose_persisted', typeof summary.prose_persisted === 'boolean' ? summary.prose_persisted : undefined],
   ])
 }
 
 function safePhaseState(phase: EditorRevisionPhase, state: EditorRevisionPhaseState) {
   const summary = safePhaseSummary(phase, state.summary)
+  const publicError = state.error_code || state.error
+    ? publicRevisionError(state.error_code)
+    : null
   return {
     status: state.status,
     attempt: Math.max(0, finiteInteger(state.attempt) ?? 0),
     ...(state.started_at ? { started_at: safeString(state.started_at, 80) } : {}),
     ...(state.completed_at ? { completed_at: safeString(state.completed_at, 80) } : {}),
-    ...(state.error_code ? { error_code: safeString(state.error_code, 160) } : {}),
-    ...(state.error ? { error: safeString(state.error, 500) } : {}),
+    ...(publicError ? { error_code: publicError.code, error: publicError.message } : {}),
     ...(summary ? { summary } : {}),
   }
 }
@@ -298,7 +354,7 @@ function safeStoryState(value: unknown): Record<string, unknown> | null {
   const storyState = parseJsonObject(value)
   if (!storyState) return null
   return compactObject([
-    ['status', safeString(storyState.status, 120) || undefined],
+    ['status', safeEnumValue(storyState.status, PUBLIC_STORY_STATE_STATUSES)],
     ['reused', typeof storyState.reused === 'boolean' ? storyState.reused : undefined],
     ['receipt', safeReceipt(storyState.receipt)],
     ['completed_receipt', safeReceipt(storyState.completed_receipt)],
@@ -310,9 +366,9 @@ function safeWarnings(value: unknown): Array<{ code: string; message: string }> 
   return value.slice(0, 100).flatMap(item => {
     const warning = parseJsonObject(item)
     if (!warning) return []
-    const code = safeString(warning.code, 160)
-    const message = safeString(warning.message, 500)
-    return code && message ? [{ code, message }] : []
+    const code = typeof warning.code === 'string' ? warning.code : ''
+    const message = PUBLIC_WARNING_MESSAGES[code]
+    return message ? [{ code, message }] : []
   })
 }
 
@@ -378,9 +434,7 @@ export function buildPublicEditorRevisionRun(run: NovelRunRecord): PublicEditorR
   const failureCode = safeString(checkpoint.error?.code || run.error_message, 160)
   const restartRequired = RESTART_REQUIRED_ERRORS.has(failureCode)
   const retryable = RETRYABLE_STATUSES.has(status)
-  const error = checkpoint.error
-    ? { code: safeString(checkpoint.error.code, 160), message: safeString(checkpoint.error.message, 500) }
-    : null
+  const error = checkpoint.error ? publicRevisionError(checkpoint.error.code) : null
 
   return {
     id: run.id,

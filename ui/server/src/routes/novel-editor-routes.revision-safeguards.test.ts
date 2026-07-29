@@ -192,8 +192,10 @@ async function createAsyncRevisionRouteFixture() {
   const enqueued: number[] = []
   const canceled: Array<{ runId: number; persistedStatus: string }> = []
   let revisionAgentCalls = 0
+  let enqueueError: unknown = null
   const worker = {
     enqueue(runId: number) {
+      if (enqueueError) throw enqueueError
       enqueued.push(runId)
     },
     cancel(runId: number) {
@@ -251,6 +253,9 @@ async function createAsyncRevisionRouteFixture() {
     otherReview,
     enqueued,
     canceled,
+    failEnqueue(error: unknown = new Error('worker enqueue failed')) {
+      enqueueError = error
+    },
     get revisionAgentCalls() {
       return revisionAgentCalls
     },
@@ -681,6 +686,96 @@ describe('asynchronous editor revision API safeguards', () => {
     expect(restartRequired.statusCode).toBe(409)
     expect(restartRequired.body).toMatchObject({ error_code: 'REVISION_RESTART_REQUIRED' })
     expect(fixture.enqueued).toEqual([runId, runId, runId])
+  })
+
+  test.each([
+    {
+      label: 'malformed immutable input',
+      corrupt: (db: ReturnType<typeof openDb>, runId: number) => {
+        const row = db.query('SELECT input_ref FROM runs WHERE id = ?').get(runId) as any
+        const input = JSON.parse(String(row?.input_ref || '{}'))
+        input.source_text_hash = revisionTextHash(`${ROUTE_SOURCE_TEXT}已损坏`)
+        db.query('UPDATE runs SET input_ref = ? WHERE id = ?').run(JSON.stringify(input), runId)
+      },
+    },
+    {
+      label: 'mismatched chapter scope',
+      corrupt: (db: ReturnType<typeof openDb>, runId: number) => {
+        db.query('UPDATE runs SET scope_key = ? WHERE id = ?').run('chapter:999999', runId)
+      },
+    },
+  ])('rejects retry for $label before mutating the durable run', async ({ corrupt }) => {
+    const fixture = await createAsyncRevisionRouteFixture()
+    const applyRevision = fixture.handlers.get('POST /api/novel/reviews/:reviewId/apply-revision')
+    const retryRoute = fixture.handlers.get('POST /api/novel/editor-revisions/:runId/retry')
+    const created = await callRoute(applyRevision, {
+      params: { reviewId: String(fixture.review.id) },
+      body: { project_id: fixture.project.id, chapter_id: fixture.chapter.id },
+    })
+    const runId = created.body.run_id
+    const failedCheckpoint = failedRevisionCheckpoint('PROVIDER_FAILED')
+    await updateNovelRun(fixture.workspace, runId, {
+      status: 'failed',
+      output_ref: JSON.stringify(failedCheckpoint),
+      error_message: 'PROVIDER_FAILED',
+    })
+    const db = openDb(fixture.workspace)
+    try {
+      corrupt(db, runId)
+    } finally {
+      db.close()
+    }
+
+    const response = await callRoute(retryRoute, {
+      params: { runId: String(runId) },
+      body: { project_id: fixture.project.id },
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.body).toMatchObject({ error_code: 'REVISION_ACTION_NOT_ALLOWED' })
+    const persisted = (await listNovelRuns(fixture.workspace, fixture.project.id)).find(run => run.id === runId)
+    expect(persisted).toMatchObject({
+      id: runId,
+      status: 'failed',
+      output_ref: JSON.stringify(failedCheckpoint),
+      error_message: 'PROVIDER_FAILED',
+    })
+    expect(fixture.enqueued).toEqual([runId])
+  })
+
+  test('returns durable retry success when worker enqueue notification fails', async () => {
+    const fixture = await createAsyncRevisionRouteFixture()
+    const applyRevision = fixture.handlers.get('POST /api/novel/reviews/:reviewId/apply-revision')
+    const retryRoute = fixture.handlers.get('POST /api/novel/editor-revisions/:runId/retry')
+    const created = await callRoute(applyRevision, {
+      params: { reviewId: String(fixture.review.id) },
+      body: { project_id: fixture.project.id, chapter_id: fixture.chapter.id },
+    })
+    const runId = created.body.run_id
+    await updateNovelRun(fixture.workspace, runId, {
+      status: 'failed',
+      output_ref: JSON.stringify(failedRevisionCheckpoint('PROVIDER_FAILED')),
+      error_message: 'PROVIDER_FAILED',
+    })
+    fixture.failEnqueue(new Error('in-memory worker notification failed'))
+
+    const response = await callRoute(retryRoute, {
+      params: { runId: String(runId) },
+      body: { project_id: fixture.project.id },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toMatchObject({
+      ok: true,
+      action: 'retry',
+      run: { id: runId, status: 'queued', can_cancel: true },
+    })
+    expect((await listNovelRuns(fixture.workspace, fixture.project.id)).find(run => run.id === runId)).toMatchObject({
+      id: runId,
+      status: 'queued',
+      error_message: '',
+    })
+    expect(fixture.enqueued).toEqual([runId])
   })
 
   test('authorizes diagnostics while generic runs and project tasks use the redacted projection', async () => {

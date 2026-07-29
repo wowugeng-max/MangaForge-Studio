@@ -276,7 +276,7 @@ describe('editor revision public run view', () => {
     expect(diagnostics).toMatchObject({
       id: run.id,
       chapter_id: 7,
-      error: { code: 'REVISION_CANDIDATE_TOO_SHORT', message: 'candidate too short' },
+      error: { code: 'REVISION_CANDIDATE_TOO_SHORT', message: '修订候选明显短于原文' },
       rejected_candidate: {
         text: CANDIDATE_TEXT,
         hash: revisionTextHash(CANDIDATE_TEXT),
@@ -296,6 +296,136 @@ describe('editor revision public run view', () => {
     expect(serialized).not.toContain(RENDERED_PROMPT)
     expect(serialized).not.toContain('input_ref')
     expect(serialized).not.toContain('output_ref')
+  })
+
+  test('uses controlled public error, warning, and reason values for coherent failed runs', () => {
+    const checkpoint = initialCheckpoint()
+    checkpoint.phase = 'post_quality'
+    checkpoint.phases.generate_candidate = {
+      status: 'completed',
+      attempt: 1,
+      summary: {
+        diagnostics: {
+          finish_reason: 'max_tokens',
+          incomplete_reason: FULL_CONTEXT,
+          content_length: CANDIDATE_TEXT.length,
+          content_preview: '候选安全预览',
+          raw_keys: [SOURCE_TEXT],
+          stream_tail: [{
+            type: RENDERED_PROMPT,
+            keys: [FULL_CONTEXT],
+            preview: CANDIDATE_TEXT,
+          }],
+          provider_result_ref: 'provider-result://safe-41',
+        },
+      },
+    }
+    checkpoint.phases.admit_candidate = {
+      status: 'completed',
+      attempt: 1,
+      summary: {
+        source_char_count: SOURCE_TEXT.length,
+        candidate_char_count: CANDIDATE_TEXT.length,
+        applied_patch_count: 0,
+        unapplied_patch_count: 1,
+        unapplied_patch_reasons: [{
+          type: `replacement-${SOURCE_TEXT}`,
+          reason: `provider-${FULL_CONTEXT}`,
+        }],
+      },
+    }
+    checkpoint.phases.persist_chapter = {
+      status: 'completed',
+      attempt: 1,
+      summary: { commit_status: 'committed', review_id: 77 },
+    }
+    checkpoint.phases.post_quality = {
+      status: 'failed',
+      attempt: 1,
+      error_code: `PROVIDER_${SOURCE_TEXT}`,
+      error: `provider echoed ${RENDERED_PROMPT}`,
+      summary: {
+        reason: `provider-${SOURCE_TEXT}`,
+        review_id: 88,
+        score: 72,
+      },
+    }
+    checkpoint.candidate = {
+      text: CANDIDATE_TEXT,
+      hash: revisionTextHash(CANDIDATE_TEXT),
+      char_count: CANDIDATE_TEXT.replace(/\s/g, '').length,
+      applied_patches: [],
+      diagnostics: {},
+    }
+    checkpoint.prose_persisted = true
+    checkpoint.post_quality = { review_id: 88, score: 72 }
+    checkpoint.warnings = [
+      { code: 'POST_QUALITY_NEEDS_REVISION', message: `provider warning ${FULL_CONTEXT}` },
+      { code: `WARNING_${SOURCE_TEXT}`, message: `provider warning ${CANDIDATE_TEXT}` },
+    ]
+    checkpoint.error = {
+      code: 'REVISION_LLM_TIMEOUT',
+      message: `provider echoed ${CANDIDATE_TEXT}`,
+    }
+    const run = runWithCheckpoint(checkpoint, 'failed')
+
+    const view = buildPublicEditorRevisionRun(run)
+    const diagnostics = buildEditorRevisionDiagnostics(run)
+
+    expect(view).toMatchObject({
+      status: 'failed',
+      chapter_id: 7,
+      error: {
+        code: 'REVISION_LLM_TIMEOUT',
+        message: 'editor revision model call timed out',
+      },
+      warnings: [{
+        code: 'POST_QUALITY_NEEDS_REVISION',
+        message: '修订后质检仍建议人工复查',
+      }],
+      phases: {
+        generate_candidate: {
+          summary: {
+            finish_reason: 'max_tokens',
+            incomplete_reason: 'unknown',
+            content_length: CANDIDATE_TEXT.length,
+          },
+        },
+        post_quality: {
+          error_code: 'REVISION_FAILED',
+          error: 'editor revision failed',
+          summary: { review_id: 88, score: 72 },
+        },
+      },
+    })
+    expect(view.phases.post_quality.summary).not.toHaveProperty('reason')
+    expect(view.phases.admit_candidate.summary).not.toHaveProperty('unapplied_patch_reasons')
+    expect(diagnostics).toMatchObject({
+      error: {
+        code: 'REVISION_LLM_TIMEOUT',
+        message: 'editor revision model call timed out',
+      },
+      generation: {
+        finish_reason: 'max_tokens',
+        incomplete_reason: 'unknown',
+        content_preview: '候选安全预览',
+        provider_result_ref: 'provider-result://safe-41',
+      },
+      admission: {
+        source_char_count: SOURCE_TEXT.length,
+        candidate_char_count: CANDIDATE_TEXT.length,
+        unapplied_patch_count: 1,
+      },
+    })
+    expect(view.phases.generate_candidate.summary).not.toHaveProperty('raw_keys')
+    expect((diagnostics.generation as any)?.raw_keys).toBeUndefined()
+    expect((diagnostics.generation as any)?.stream_tail).toBeUndefined()
+    expect((diagnostics.admission as any)?.unapplied_patch_reasons).toBeUndefined()
+
+    const serialized = JSON.stringify({ view, diagnostics })
+    for (const protectedText of [SOURCE_TEXT, CANDIDATE_TEXT, RENDERED_PROMPT, FULL_CONTEXT]) {
+      expect(serialized).not.toContain(protectedText)
+    }
   })
 
   test('fails safe for malformed legacy refs without throwing or echoing them', () => {
