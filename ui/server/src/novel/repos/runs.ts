@@ -2,6 +2,7 @@ import type { NovelRunRecord, NovelRunSummaryRecord } from '../types'
 import { openDb, ensureSqliteSchema } from '../db'
 import { ensureLegacyNovelStoreImportedForRead } from '../legacy-import'
 import { withNovelWorkspaceMutation } from '../lock'
+import { nowIso, parseDbJson } from '../json'
 import { normalizeRunRecord } from '../normalize'
 import { runFromRow, runSummaryFromRow } from '../row-mappers'
 import { withNovelDbWrite, updateRunRow } from '../sql-rows'
@@ -238,4 +239,213 @@ export async function updateNovelRun(activeWorkspace: string, id: number, data: 
     updateRunRow(db, next)
     return next
   })
+}
+
+type NovelRunTaskStatus = 'open' | 'in_progress' | 'needs_review' | 'resolved'
+
+type UpdateNovelRunTaskStatusInput = {
+  projectId: number
+  runId: number
+  taskIndex: number
+  status: NovelRunTaskStatus
+  note?: string
+  editorRevisionRunId?: number
+  annotationKey?: string
+  annotationStatus?: string
+  now?: string
+}
+
+type UpdateNovelRunTasksStatusInput = {
+  projectId: number
+  runId: number
+  taskIndices?: number[]
+  status: NovelRunTaskStatus
+  note?: string
+  now?: string
+}
+
+function runTaskStatusError(code: string, message: string) {
+  return Object.assign(new Error(message), { code })
+}
+
+function taskStatusSummary(tasks: any[], timestamp: string) {
+  return {
+    total: tasks.length,
+    resolved: tasks.filter(task => task?.task_status === 'resolved').length,
+    needs_review: tasks.filter(task => task?.task_status === 'needs_review').length,
+    open: tasks.filter(task => !task?.task_status || task.task_status === 'open').length,
+    updated_at: timestamp,
+  }
+}
+
+function taskWithStatus(task: any, status: NovelRunTaskStatus, note: string, timestamp: string) {
+  return {
+    ...task,
+    task_status: status,
+    status_note: note,
+    updated_at: timestamp,
+    started_at: status === 'in_progress' ? timestamp : task.started_at,
+    needs_review_at: status === 'needs_review' ? timestamp : task.needs_review_at,
+    resolved_at: status === 'resolved' ? timestamp : task.resolved_at,
+  }
+}
+
+function persistNovelRunTasks(
+  db: import('bun:sqlite').Database,
+  input: { projectId: number; runId: number },
+  run: NovelRunRecord,
+  payload: any,
+  nextTasks: any[],
+  timestamp: string,
+) {
+  const summary = taskStatusSummary(nextTasks, timestamp)
+  const nextRunStatus = nextTasks.length > 0 && summary.resolved === nextTasks.length
+    ? 'completed'
+    : run.status === 'completed' ? 'ready' : run.status
+  db.query(`
+    UPDATE runs
+    SET status = ?, output_ref = ?, updated_at = ?
+    WHERE id = ? AND project_id = ?
+  `).run(
+    nextRunStatus,
+    JSON.stringify({ ...payload, tasks: nextTasks, task_status_summary: summary }),
+    timestamp,
+    input.runId,
+    input.projectId,
+  )
+  const updatedRow = db.query('SELECT * FROM runs WHERE id = ? AND project_id = ? LIMIT 1')
+    .get(input.runId, input.projectId) as any
+  return { run: runFromRow(updatedRow), task_status_summary: summary }
+}
+
+function editorRevisionClosesExactTask(db: import('bun:sqlite').Database, input: UpdateNovelRunTaskStatusInput) {
+  const revisionRunId = Number(input.editorRevisionRunId || 0)
+  if (!Number.isInteger(revisionRunId) || revisionRunId < 1) return false
+  const row = db.query(`
+    SELECT project_id, run_type, status, input_ref, output_ref
+    FROM runs
+    WHERE id = ? AND project_id = ?
+    LIMIT 1
+  `).get(revisionRunId, input.projectId) as any
+  if (!row || row.run_type !== 'editor_revision' || !['completed', 'failed', 'canceled'].includes(String(row.status || ''))) {
+    return false
+  }
+  const revisionInput = parseDbJson(row.input_ref, {})
+  const checkpoint = parseDbJson(row.output_ref, {})
+  const link = revisionInput?.repair_task_link
+  return checkpoint?.prose_persisted === true
+    && Number(link?.run_id) === input.runId
+    && Number(link?.task_index) === input.taskIndex
+}
+
+export async function updateNovelRunTaskStatus(
+  activeWorkspace: string,
+  input: UpdateNovelRunTaskStatusInput,
+) {
+  const timestamp = input.now ? new Date(input.now).toISOString() : nowIso()
+  return withNovelDbWrite(activeWorkspace, db => {
+    const row = db.query('SELECT * FROM runs WHERE id = ? AND project_id = ? LIMIT 1')
+      .get(input.runId, input.projectId) as any
+    if (!row) throw runTaskStatusError('NOVEL_RUN_NOT_FOUND', 'run not found')
+    const run = runFromRow(row)
+    const payload = parseDbJson(run.output_ref, {})
+    const tasks = Array.isArray(payload?.tasks) ? payload.tasks : []
+    if (!Number.isInteger(input.taskIndex) || input.taskIndex < 0 || input.taskIndex >= tasks.length) {
+      throw runTaskStatusError('NOVEL_RUN_TASK_NOT_FOUND', 'task not found')
+    }
+
+    const revisionRunId = Number(input.editorRevisionRunId || 0)
+    if (input.editorRevisionRunId !== undefined && !editorRevisionClosesExactTask(db, input)) {
+      throw runTaskStatusError('EDITOR_REVISION_TASK_CLOSURE_NOT_READY', 'editor revision task closure is not ready')
+    }
+    const annotationKey = String(input.annotationKey || '').trim()
+    const annotationStatus = String(input.annotationStatus || '').trim()
+    if ((annotationKey && !annotationStatus) || (!annotationKey && annotationStatus)) {
+      throw runTaskStatusError('EDITOR_REVISION_TASK_CLOSURE_INVALID', 'annotation closure receipt is incomplete')
+    }
+
+    const currentTask = tasks[input.taskIndex] || {}
+    const receiptKey = String(revisionRunId)
+    const currentReceipts = currentTask.editor_revision_closure_receipts
+      && typeof currentTask.editor_revision_closure_receipts === 'object'
+      && !Array.isArray(currentTask.editor_revision_closure_receipts)
+      ? currentTask.editor_revision_closure_receipts
+      : {}
+    if (revisionRunId && currentReceipts[receiptKey]) {
+      const existingReceipt = currentReceipts[receiptKey]
+      const sameRequest = Number(existingReceipt.editor_revision_run_id) === revisionRunId
+        && String(existingReceipt.task_status || '') === input.status
+        && String(existingReceipt.note ?? currentTask.status_note ?? '') === String(input.note || '')
+        && String(existingReceipt.annotation_key || '') === annotationKey
+        && String(existingReceipt.annotation_status || '') === annotationStatus
+      const currentMatchesReceipt = String(currentTask.task_status || '') === String(existingReceipt.task_status || '')
+        && String(currentTask.status_note || '') === String(existingReceipt.note || '')
+      if (!sameRequest || !currentMatchesReceipt) {
+        throw runTaskStatusError('EDITOR_REVISION_TASK_CLOSURE_CONFLICT', 'editor revision task closure receipt conflicts with the committed request')
+      }
+      return {
+        run,
+        task: currentTask,
+        task_status_summary: payload.task_status_summary || taskStatusSummary(tasks, timestamp),
+        replayed: true,
+      }
+    }
+
+    const receipt = revisionRunId ? {
+      editor_revision_run_id: revisionRunId,
+      repair_run_id: input.runId,
+      task_index: input.taskIndex,
+      task_status: input.status,
+      note: String(input.note || ''),
+      completed_at: timestamp,
+      ...(annotationKey ? { annotation_key: annotationKey, annotation_status: annotationStatus } : {}),
+    } : null
+    const nextTask = {
+      ...taskWithStatus(currentTask, input.status, String(input.note || ''), timestamp),
+      ...(receipt ? {
+        editor_revision_closure_receipts: {
+          ...currentReceipts,
+          [receiptKey]: receipt,
+        },
+      } : {}),
+    }
+    const nextTasks = tasks.map((task: any, index: number) => index === input.taskIndex ? nextTask : task)
+    const persisted = persistNovelRunTasks(db, input, run, payload, nextTasks, timestamp)
+    return {
+      run: persisted.run,
+      task: nextTask,
+      task_status_summary: persisted.task_status_summary,
+      replayed: false,
+    }
+  }, 'update-novel-run-task-status')
+}
+
+export async function updateNovelRunTasksStatus(
+  activeWorkspace: string,
+  input: UpdateNovelRunTasksStatusInput,
+) {
+  const timestamp = input.now ? new Date(input.now).toISOString() : nowIso()
+  return withNovelDbWrite(activeWorkspace, db => {
+    const row = db.query('SELECT * FROM runs WHERE id = ? AND project_id = ? LIMIT 1')
+      .get(input.runId, input.projectId) as any
+    if (!row) throw runTaskStatusError('NOVEL_RUN_NOT_FOUND', 'run not found')
+    const run = runFromRow(row)
+    const payload = parseDbJson(run.output_ref, {})
+    const tasks = Array.isArray(payload?.tasks) ? payload.tasks : []
+    const requested = Array.isArray(input.taskIndices) && input.taskIndices.length > 0
+      ? input.taskIndices.map(Number).filter(index => Number.isInteger(index) && index >= 0 && index < tasks.length)
+      : tasks.map((_: any, index: number) => index)
+    if (!requested.length) throw runTaskStatusError('NOVEL_RUN_TASKS_NOT_FOUND', 'no valid task indices')
+    const selected = new Set(requested)
+    const note = String(input.note || '')
+    const nextTasks = tasks.map((task: any, index: number) => selected.has(index)
+      ? taskWithStatus(task, input.status, note, timestamp)
+      : task)
+    const persisted = persistNovelRunTasks(db, input, run, payload, nextTasks, timestamp)
+    return {
+      run: persisted.run,
+      updated_count: requested.length,
+      task_status_summary: persisted.task_status_summary,
+    }
+  }, 'update-novel-run-tasks-status')
 }

@@ -436,20 +436,106 @@ export async function getEditorRevisionRun(workspace: string, projectId: number,
   return run?.run_type === 'editor_revision' ? run : null
 }
 
-function hasLinkedRepairTask(value: string): boolean {
+type LinkedRepairTask = {
+  runId: number
+  taskIndex: number
+}
+
+function linkedRepairTask(value: string): LinkedRepairTask | null {
   try {
     const input = JSON.parse(value)
     const link = input?.repair_task_link
-    return Boolean(link)
-      && Number.isInteger(Number(link.run_id))
-      && Number(link.run_id) > 0
-      && Number.isInteger(Number(link.task_index))
-      && Number(link.task_index) >= 0
-      && Boolean(link.task)
-      && typeof link.task === 'object'
-      && !Array.isArray(link.task)
+    if (!link
+      || !Number.isInteger(Number(link.run_id))
+      || Number(link.run_id) < 1
+      || !Number.isInteger(Number(link.task_index))
+      || Number(link.task_index) < 0
+      || !link.task
+      || typeof link.task !== 'object'
+      || Array.isArray(link.task)) return null
+    return { runId: Number(link.run_id), taskIndex: Number(link.task_index) }
   } catch {
-    return false
+    return null
+  }
+}
+
+function linkedTaskClosureNotReady(message: string): never {
+  throw revisionError('REVISION_LINKED_TASK_CLOSURE_NOT_READY', message)
+}
+
+function validReceiptTimestamp(value: unknown): value is string {
+  return typeof value === 'string' && Number.isFinite(new Date(value).getTime())
+}
+
+function requireDurableLinkedTaskClosure(
+  db: Database,
+  projectId: number,
+  editorRevisionRunId: number,
+  link: LinkedRepairTask,
+) {
+  const repairRow = db.query('SELECT * FROM runs WHERE id = ? AND project_id = ? LIMIT 1')
+    .get(link.runId, projectId) as any
+  const repairRun = repairRow ? runFromRow(repairRow) : null
+  if (!repairRun || repairRun.project_id !== projectId) {
+    linkedTaskClosureNotReady('linked repair run is unavailable')
+  }
+  let payload: any
+  try {
+    payload = JSON.parse(String(repairRun.output_ref || '{}'))
+  } catch {
+    linkedTaskClosureNotReady('linked repair run payload is invalid')
+  }
+  const tasks = Array.isArray(payload?.tasks) ? payload.tasks : []
+  const task = tasks[link.taskIndex]
+  if (!task || typeof task !== 'object' || Array.isArray(task)) {
+    linkedTaskClosureNotReady('linked repair task is unavailable')
+  }
+  const receipts = task.editor_revision_closure_receipts
+  const receipt = receipts && typeof receipts === 'object' && !Array.isArray(receipts)
+    ? receipts[String(editorRevisionRunId)]
+    : null
+  if (!receipt
+    || Number(receipt.editor_revision_run_id) !== editorRevisionRunId
+    || Number(receipt.repair_run_id) !== link.runId
+    || Number(receipt.task_index) !== link.taskIndex
+    || String(receipt.task_status || '') !== String(task.task_status || '')
+    || !validReceiptTimestamp(receipt.completed_at)) {
+    linkedTaskClosureNotReady('linked repair task closure receipt is unavailable')
+  }
+
+  const annotationKey = String(receipt.annotation_key || '').trim()
+  const annotationStatus = String(receipt.annotation_status || '').trim()
+  if (!annotationKey && !annotationStatus) return
+  if (!annotationKey || !annotationStatus) {
+    linkedTaskClosureNotReady('linked annotation closure receipt is incomplete')
+  }
+  const annotationRow = db.query(`
+    SELECT status, payload
+    FROM reviews
+    WHERE project_id = ?
+      AND review_type = 'review_annotation_status'
+      AND json_valid(payload)
+      AND json_extract(payload, '$.annotation_key') = ?
+      AND CAST(json_extract(payload, '$.editor_revision_run_id') AS INTEGER) = ?
+    ORDER BY id ASC
+    LIMIT 1
+  `).get(projectId, annotationKey, editorRevisionRunId) as any
+  let annotationPayload: any = null
+  try {
+    annotationPayload = annotationRow ? JSON.parse(String(annotationRow.payload || '{}')) : null
+  } catch {
+    annotationPayload = null
+  }
+  const annotationReceipt = annotationPayload?.editor_revision_annotation_receipt
+  if (!annotationRow
+    || String(annotationRow.status || '') !== annotationStatus
+    || String(annotationPayload?.status || '') !== annotationStatus
+    || String(annotationPayload?.note || '') !== String(receipt.note || '')
+    || Number(annotationReceipt?.editor_revision_run_id) !== editorRevisionRunId
+    || String(annotationReceipt?.annotation_key || '') !== annotationKey
+    || String(annotationReceipt?.status || '') !== annotationStatus
+    || !validReceiptTimestamp(annotationReceipt?.completed_at)) {
+    linkedTaskClosureNotReady('linked annotation closure receipt is unavailable')
   }
 }
 
@@ -462,16 +548,21 @@ export async function markEditorRevisionLinkedTaskClosure(
   const timestamp = normalizedNow(completedAt)
   return withNovelDbWrite(workspace, db => {
     const current = rowById(db, runId)
+    const link = current ? linkedRepairTask(String(current.input_ref || '')) : null
     if (!current
       || current.project_id !== projectId
       || !['completed', 'failed', 'canceled'].includes(current.status)
-      || !hasLinkedRepairTask(String(current.input_ref || ''))) {
+      || !link) {
       throw leaseOrStateError()
     }
     const checkpoint = requireCoherentEditorRevisionCheckpoint(current.output_ref, {
       runStatus: current.status as EditorRevisionRunStatus,
     })
     if (!checkpoint.linked_task_closure) throw leaseOrStateError()
+    if (!checkpoint.prose_persisted) {
+      linkedTaskClosureNotReady('editor revision prose has not been persisted')
+    }
+    requireDurableLinkedTaskClosure(db, projectId, runId, link)
     if (checkpoint.linked_task_closure.status === 'completed') return current
 
     const next = structuredClone(checkpoint)
@@ -684,6 +775,9 @@ function resetPhaseState(state: EditorRevisionPhaseState): EditorRevisionPhaseSt
 
 function retryCheckpoint(checkpoint: EditorRevisionCheckpoint): EditorRevisionCheckpoint {
   const next = JSON.parse(JSON.stringify(checkpoint)) as EditorRevisionCheckpoint
+  if (!next.prose_persisted && next.linked_task_closure?.status === 'completed') {
+    next.linked_task_closure = { status: 'pending' }
+  }
   let resumePhase: EditorRevisionPhase
   if (next.prose_persisted) {
     resumePhase = EDITOR_REVISION_PHASES.slice(phaseIndex('persist_chapter') + 1)

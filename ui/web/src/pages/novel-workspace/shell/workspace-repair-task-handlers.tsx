@@ -443,6 +443,10 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
   ) => {
     if (!run?.id || taskIndex < 0) return null
     const plan = buildDeliveryRiskRevisionClosurePlan(task, revisionResult || {})
+    const editorRevisionRunId = Number(revisionResult?.editor_revision_run_id || 0)
+    const durableRevisionReceipt = Number.isInteger(editorRevisionRunId) && editorRevisionRunId > 0
+      ? { editor_revision_run_id: editorRevisionRunId }
+      : {}
     const requireActiveRequest = () => {
       if (!refreshOptions.signal?.aborted) return
       if (typeof refreshOptions.signal.throwIfAborted === 'function') refreshOptions.signal.throwIfAborted()
@@ -458,6 +462,11 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
       project_id: projectId,
       status: plan.taskStatus,
       note: plan.note,
+      ...durableRevisionReceipt,
+      ...(editorRevisionRunId > 0 && plan.annotationStatus && plan.annotationKey ? {
+        annotation_key: plan.annotationKey,
+        annotation_status: plan.annotationStatus,
+      } : {}),
     })
     requireActiveRequest()
     if (plan.annotationStatus && plan.annotationKey) {
@@ -465,6 +474,7 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
         annotation_key: plan.annotationKey,
         status: plan.annotationStatus,
         note: plan.note,
+        ...durableRevisionReceipt,
       })
       requireActiveRequest()
     }

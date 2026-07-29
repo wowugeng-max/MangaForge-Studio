@@ -247,6 +247,7 @@ describe('commercial writing workspace UI shell monotest shim', () => {
       { id: 51 },
       0,
       {
+        editor_revision_run_id: 88,
         quality_refresh: { ok: true },
         delivery_risk_convergence: { status: 'cleared', residual_count: 0 },
       },
@@ -261,6 +262,12 @@ describe('commercial writing workspace UI shell monotest shim', () => {
     for (const call of fixture.apiPost.mock.calls) {
       expect(call[2]).toEqual({ signal: controller.signal })
     }
+    expect(fixture.apiPost.mock.calls[0][1]).toMatchObject({
+      editor_revision_run_id: 88,
+      annotation_key: 'reader_payoff_sync:202:9:9:reader_payoff_debt:回报欠账 1',
+      annotation_status: 'resolved',
+    })
+    expect(fixture.apiPost.mock.calls[1][1]).toMatchObject({ editor_revision_run_id: 88 })
   })
 
   test('reconciles a persisted terminal revision once and acknowledges its linked repair task', async () => {
@@ -290,6 +297,82 @@ describe('commercial writing workspace UI shell monotest shim', () => {
       { signal: expect.any(AbortSignal) },
     )
     expect(deps.acknowledgeLinkedTaskClosure).toHaveBeenCalledTimes(1)
+  })
+
+  test('baselines an acknowledged terminal revision on a fresh mount without replaying side effects', async () => {
+    const { createState, reconcile } = await loadReconciliationApi()
+    const state = createState(3)
+    const deps = reconciliationDeps()
+    const task = terminalRevision({
+      linked_task_closure: { status: 'completed', completed_at: '2026-07-29T08:01:00.000Z' },
+    })
+
+    await reconcile({ projectId: 3, tasks: [task], productionTasks: linkedProductionTasks, state, ...deps })
+
+    expect(deps.loadProjectModules).not.toHaveBeenCalled()
+    expect(deps.setRightPanelOpen).not.toHaveBeenCalled()
+    expect(deps.setRightPanelTab).not.toHaveBeenCalled()
+    expect(deps.notifyTerminal).not.toHaveBeenCalled()
+    expect(deps.closeRepairTaskAfterRevision).not.toHaveBeenCalled()
+    expect(deps.acknowledgeLinkedTaskClosure).not.toHaveBeenCalled()
+  })
+
+  test('baselines a historical unlinked terminal revision on a fresh mount without replaying side effects', async () => {
+    const { createState, reconcile } = await loadReconciliationApi()
+    const state = createState(3)
+    const deps = reconciliationDeps()
+    const task = terminalRevision({ repair_task_link: null, linked_task_closure: null })
+
+    await reconcile({ projectId: 3, tasks: [task], productionTasks: linkedProductionTasks, state, ...deps })
+
+    expect(deps.loadProjectModules).not.toHaveBeenCalled()
+    expect(deps.setRightPanelOpen).not.toHaveBeenCalled()
+    expect(deps.setRightPanelTab).not.toHaveBeenCalled()
+    expect(deps.notifyTerminal).not.toHaveBeenCalled()
+    expect(deps.closeRepairTaskAfterRevision).not.toHaveBeenCalled()
+    expect(deps.acknowledgeLinkedTaskClosure).not.toHaveBeenCalled()
+  })
+
+  test('reconciles an observed active revision after it becomes terminal', async () => {
+    const { createState, reconcile } = await loadReconciliationApi()
+    const state = createState(3)
+    const deps = reconciliationDeps()
+    const active = terminalRevision({
+      status: 'running',
+      phase: 'post_quality',
+      repair_task_link: null,
+      linked_task_closure: null,
+      updated_at: '2026-07-29T08:00:00.000Z',
+    })
+    const terminal = terminalRevision({
+      repair_task_link: null,
+      linked_task_closure: null,
+      updated_at: '2026-07-29T08:02:00.000Z',
+    })
+
+    await reconcile({ projectId: 3, tasks: [active], productionTasks: linkedProductionTasks, state, ...deps })
+    expect(deps.loadProjectModules).not.toHaveBeenCalled()
+    expect(deps.notifyTerminal).not.toHaveBeenCalled()
+
+    await reconcile({ projectId: 3, tasks: [terminal], productionTasks: linkedProductionTasks, state, ...deps })
+    await reconcile({ projectId: 3, tasks: [terminal], productionTasks: linkedProductionTasks, state, ...deps })
+
+    expect(deps.loadProjectModules).toHaveBeenCalledTimes(1)
+    expect(deps.notifyTerminal).toHaveBeenCalledTimes(1)
+  })
+
+  test('reconciles a terminal revision that appears after the initial baseline', async () => {
+    const { createState, reconcile } = await loadReconciliationApi()
+    const state = createState(3)
+    const deps = reconciliationDeps()
+    const terminal = terminalRevision({ repair_task_link: null, linked_task_closure: null })
+
+    await reconcile({ projectId: 3, tasks: [], productionTasks: linkedProductionTasks, state, ...deps })
+    await reconcile({ projectId: 3, tasks: [terminal], productionTasks: linkedProductionTasks, state, ...deps })
+    await reconcile({ projectId: 3, tasks: [terminal], productionTasks: linkedProductionTasks, state, ...deps })
+
+    expect(deps.loadProjectModules).toHaveBeenCalledTimes(1)
+    expect(deps.notifyTerminal).toHaveBeenCalledTimes(1)
   })
 
   test('does not reload or close a linked task when a revision fails before prose commit', async () => {
@@ -411,6 +494,7 @@ describe('commercial writing workspace UI shell monotest shim', () => {
     const deps = reconciliationDeps({ loadProjectModules: mock(() => reloadGate) })
     const task = terminalRevision({ repair_task_link: null, linked_task_closure: null })
 
+    await reconcile({ projectId: 3, tasks: [], productionTasks: linkedProductionTasks, state, ...deps })
     const first = reconcile({ projectId: 3, tasks: [task], productionTasks: linkedProductionTasks, state, ...deps })
     const second = reconcile({ projectId: 3, tasks: [task], productionTasks: linkedProductionTasks, state, ...deps })
     releaseReload()

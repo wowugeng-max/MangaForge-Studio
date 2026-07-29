@@ -10,6 +10,7 @@ import {
   listNovelReviews,
   listNovelRuns,
   listNovelWorldbuilding,
+  upsertNovelReviewAnnotationStatus,
   updateNovelChapter,
 } from '../../novel'
 import { executeNovelAgent, previewNovelKnowledgeInjection } from '../../llm'
@@ -124,21 +125,24 @@ export function registerNovelEditorAnnotationRoutes(app: Express, ctx: EditorRou
       const key = String(req.body?.annotation_key || req.body?.key || '').trim()
       if (!key) return res.status(400).json({ error: 'annotation_key required' })
       const status = String(req.body?.status || 'resolved')
-      const saved = await createNovelReview(activeWorkspace, {
-        project_id: project.id,
-        review_type: 'review_annotation_status',
+      const editorRevisionRunId = req.body?.editor_revision_run_id === undefined
+        ? undefined
+        : Number(req.body.editor_revision_run_id)
+      if (editorRevisionRunId !== undefined && (!Number.isInteger(editorRevisionRunId) || editorRevisionRunId < 1)) {
+        return res.status(400).json({ error: 'editor_revision_run_id is invalid' })
+      }
+      const saved = await upsertNovelReviewAnnotationStatus(activeWorkspace, {
+        projectId: project.id,
+        annotationKey: key,
         status,
-        summary: `${status === 'resolved' ? '已处理' : '已更新'}批注：${key.slice(0, 80)}`,
-        issues: [],
-        payload: JSON.stringify({
-          annotation_key: key,
-          status,
-          note: String(req.body?.note || ''),
-          resolved_at: status === 'resolved' ? new Date().toISOString() : null,
-        }),
+        note: String(req.body?.note || ''),
+        editorRevisionRunId,
       })
       res.json({ ok: true, status: saved })
-    } catch (error) {
+    } catch (error: any) {
+      if (['REVISION_ANNOTATION_STATUS_NOT_READY', 'REVISION_ANNOTATION_STATUS_CONFLICT'].includes(String(error?.code || ''))) {
+        return res.status(409).json({ error: String(error?.message || error), error_code: error.code })
+      }
       res.status(500).json({ error: String(error) })
     }
   })

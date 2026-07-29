@@ -69,6 +69,8 @@ export type EditorRevisionReconciliationState = {
   moduleReloadedKeys: Set<string>
   notifiedKeys: Set<string>
   linkedTaskClosedKeys: Set<string>
+  observedRunIds: Set<number>
+  baselineEstablished: boolean
 }
 
 export function createEditorRevisionReconciliationState(projectId: number): EditorRevisionReconciliationState {
@@ -80,6 +82,8 @@ export function createEditorRevisionReconciliationState(projectId: number): Edit
     moduleReloadedKeys: new Set(),
     notifiedKeys: new Set(),
     linkedTaskClosedKeys: new Set(),
+    observedRunIds: new Set(),
+    baselineEstablished: false,
   }
 }
 
@@ -115,6 +119,7 @@ function publicDeliveryRiskConvergence(task: EditorRevisionTask): Record<string,
 function repairClosureResult(task: EditorRevisionTask) {
   const quality = task.quality || null
   return {
+    editor_revision_run_id: task.id,
     quality_refresh: quality
       ? {
           ...quality,
@@ -182,9 +187,27 @@ export async function reconcileEditorRevisionTasks({
     && !signal.aborted
     && (isCurrent?.() ?? true)
   if (!reconciliationIsCurrent()) return
+  if (!state.baselineEstablished) {
+    state.baselineEstablished = true
+    for (const task of tasks) {
+      if (isActiveEditorRevisionTask(task)) {
+        state.observedRunIds.add(task.id)
+        continue
+      }
+      const pendingLinkedClosure = Boolean(task.repair_task_link)
+        && task.linked_task_closure?.status === 'pending'
+      if (pendingLinkedClosure) continue
+      const key = editorRevisionReconciliationKey(projectId, task)
+      if (task.linked_task_closure?.status === 'completed') markAcknowledgedKey(state, projectId, task)
+      else state.completedKeys.add(key)
+    }
+  }
   for (const task of tasks) {
     if (!reconciliationIsCurrent()) return
-    if (isActiveEditorRevisionTask(task)) continue
+    if (isActiveEditorRevisionTask(task)) {
+      state.observedRunIds.add(task.id)
+      continue
+    }
     const key = editorRevisionReconciliationKey(projectId, task)
     if (state.completedKeys.has(key) || state.inFlightKeys.has(key)) continue
     state.inFlightKeys.add(key)

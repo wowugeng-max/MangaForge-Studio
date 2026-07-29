@@ -137,6 +137,12 @@ function respondRevisionError(res: any, error: any) {
       error_code: code,
     })
   }
+  if (code === 'REVISION_LINKED_TASK_CLOSURE_NOT_READY') {
+    return res.status(409).json({
+      error: String(error?.message || 'linked repair task closure is not durably complete'),
+      error_code: code,
+    })
+  }
   if ([
     'REVISION_LEASE_OR_STATE_INVALID',
     'REVISION_CHECKPOINT_INVALID',

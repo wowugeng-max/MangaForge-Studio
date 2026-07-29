@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { appendNovelRun, createNovelProject, createNovelReview, listNovelProjects, listNovelReviews, listNovelRuns, updateNovelRun } from '../novel'
+import { setNovelMutationTestHook } from '../novel-test-support'
 import { createNovelProductionService } from './novel-production-service'
 import { extractChapterRef, extractConfigTrace, extractMaterialTrace, extractModelTrace, registerNovelRunRoutes } from './novel-run-routes'
 
@@ -60,11 +61,133 @@ function waitUntil(predicate: () => boolean | Promise<boolean>, timeoutMs = 1000
 }
 
 afterEach(async () => {
+  setNovelMutationTestHook(null)
   await Promise.all(workspaces.map(workspace => rm(workspace, { recursive: true, force: true })))
   workspaces = []
 })
 
 describe('novel run task center source guards', () => {
+  test('preserves different task-index updates when status requests interleave', async () => {
+    const workspace = await tempWorkspace()
+    const production = createNovelProductionService()
+    const project = await createNovelProject(workspace, { title: '并发任务关闭', reference_config: {} })
+    const run = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'longform_production_repair',
+      step_name: 'two-task-repair',
+      status: 'ready',
+      output_ref: JSON.stringify({
+        tasks: [
+          { title: '修复第一项', task_status: 'open' },
+          { title: '修复第二项', task_status: 'open' },
+        ],
+      }),
+    })
+    const { app, handlers } = createRouteHarness()
+    registerNovelRunRoutes(app as any, {
+      getWorkspace: () => workspace,
+      getProject: async (_workspace: string, id: number) => (await listNovelProjects(_workspace)).find(item => item.id === id) || null,
+      runQueueWorkers: new Map(),
+      getProductionBudgetDecision: () => ({ blocked: false, reasons: [] }),
+      buildPipelineSteps: production.buildPipelineSteps,
+      executeChapterGroupRunRecord: async () => ({ status: 'not-used', processed: 0 }),
+    })
+    const updateStatus = handlers.get('POST /api/novel/runs/:id/tasks/:taskIndex/status')
+    let releaseFirstWrite!: () => void
+    let firstWriteEntered!: () => void
+    const firstWriteGate = new Promise<void>(resolve => { releaseFirstWrite = resolve })
+    const firstWriteStarted = new Promise<void>(resolve => { firstWriteEntered = resolve })
+    let held = false
+    setNovelMutationTestHook(async event => {
+      if (held || event.phase !== 'before_full_store_write') return
+      held = true
+      firstWriteEntered()
+      await firstWriteGate
+    })
+
+    const first = callRoute(updateStatus, {
+      params: { id: String(run.id), taskIndex: '0' },
+      body: { project_id: project.id, status: 'resolved', note: 'first' },
+    })
+    await firstWriteStarted
+    const second = callRoute(updateStatus, {
+      params: { id: String(run.id), taskIndex: '1' },
+      body: { project_id: project.id, status: 'resolved', note: 'second' },
+    })
+    await new Promise(resolve => setTimeout(resolve, 10))
+    releaseFirstWrite()
+    const responses = await Promise.all([first, second])
+    setNovelMutationTestHook(null)
+
+    expect(responses.map(response => response.statusCode)).toEqual([200, 200])
+    const stored = (await listNovelRuns(workspace, project.id)).find(item => item.id === run.id)!
+    const payload = JSON.parse(String(stored.output_ref || '{}'))
+    expect(payload.tasks.map((task: any) => task.task_status)).toEqual(['resolved', 'resolved'])
+    expect(payload.task_status_summary).toMatchObject({ total: 2, resolved: 2, open: 0 })
+    expect(stored.status).toBe('completed')
+  })
+
+  test('preserves an exact-index update when a bulk status request reads concurrently', async () => {
+    const workspace = await tempWorkspace()
+    const production = createNovelProductionService()
+    const project = await createNovelProject(workspace, { title: '并发批量任务关闭', reference_config: {} })
+    const run = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'longform_production_repair',
+      step_name: 'exact-and-bulk-repair',
+      status: 'ready',
+      output_ref: JSON.stringify({
+        tasks: [
+          { title: '修复第一项', task_status: 'open' },
+          { title: '修复第二项', task_status: 'open' },
+        ],
+      }),
+    })
+    const { app, handlers } = createRouteHarness()
+    registerNovelRunRoutes(app as any, {
+      getWorkspace: () => workspace,
+      getProject: async (_workspace: string, id: number) => (await listNovelProjects(_workspace)).find(item => item.id === id) || null,
+      runQueueWorkers: new Map(),
+      getProductionBudgetDecision: () => ({ blocked: false, reasons: [] }),
+      buildPipelineSteps: production.buildPipelineSteps,
+      executeChapterGroupRunRecord: async () => ({ status: 'not-used', processed: 0 }),
+    })
+    const updateStatus = handlers.get('POST /api/novel/runs/:id/tasks/:taskIndex/status')
+    const bulkUpdateStatus = handlers.get('POST /api/novel/runs/:id/tasks/status-bulk')
+    let releaseExactWrite!: () => void
+    let exactWriteEntered!: () => void
+    const exactWriteGate = new Promise<void>(resolve => { releaseExactWrite = resolve })
+    const exactWriteStarted = new Promise<void>(resolve => { exactWriteEntered = resolve })
+    let held = false
+    setNovelMutationTestHook(async event => {
+      if (held || event.phase !== 'before_full_store_write') return
+      held = true
+      exactWriteEntered()
+      await exactWriteGate
+    })
+
+    const exact = callRoute(updateStatus, {
+      params: { id: String(run.id), taskIndex: '0' },
+      body: { project_id: project.id, status: 'resolved', note: 'exact' },
+    })
+    await exactWriteStarted
+    const bulk = callRoute(bulkUpdateStatus, {
+      params: { id: String(run.id) },
+      body: { project_id: project.id, task_indices: [1], status: 'resolved', note: 'bulk' },
+    })
+    await new Promise(resolve => setTimeout(resolve, 10))
+    releaseExactWrite()
+    const responses = await Promise.all([exact, bulk])
+    setNovelMutationTestHook(null)
+
+    expect(responses.map(response => response.statusCode)).toEqual([200, 200])
+    const stored = (await listNovelRuns(workspace, project.id)).find(item => item.id === run.id)!
+    const payload = JSON.parse(String(stored.output_ref || '{}'))
+    expect(payload.tasks.map((task: any) => task.task_status)).toEqual(['resolved', 'resolved'])
+    expect(payload.task_status_summary).toMatchObject({ total: 2, resolved: 2, open: 0 })
+    expect(stored.status).toBe('completed')
+  })
+
   test('keeps full review and run contracts by default while summary views stay below ten percent and detail rows are exact', async () => {
     const workspace = await tempWorkspace()
     const production = createNovelProductionService()

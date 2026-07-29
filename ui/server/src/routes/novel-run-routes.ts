@@ -11,6 +11,8 @@ import {
   listNovelRuns,
   updateNovelProject,
   updateNovelRun,
+  updateNovelRunTaskStatus,
+  updateNovelRunTasksStatus,
 } from '../novel'
 import { parseJsonLikePayload } from './novel-route-utils'
 import { buildPublicEditorRevisionRun } from './novel-editor/revision-run-view'
@@ -612,47 +614,38 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
     try {
       const activeWorkspace = ctx.getWorkspace()
       const projectId = Number(req.body.project_id || req.query.project_id || 0)
-      const runs = await listNovelRuns(activeWorkspace, projectId)
-      const run = runs.find(item => item.id === Number(req.params.id))
-      if (!run) return res.status(404).json({ error: 'run not found' })
-      const payload = parseJsonLikePayload(run.output_ref) || {}
-      const tasks = Array.isArray(payload.tasks) ? payload.tasks : []
       const taskIndex = Number(req.params.taskIndex)
-      if (!Number.isInteger(taskIndex) || taskIndex < 0 || taskIndex >= tasks.length) {
-        return res.status(404).json({ error: 'task not found' })
-      }
+      if (!Number.isInteger(taskIndex) || taskIndex < 0) return res.status(404).json({ error: 'task not found' })
       const status = String(req.body.status || 'needs_review')
       const allowed = new Set(['open', 'in_progress', 'needs_review', 'resolved'])
       if (!allowed.has(status)) return res.status(400).json({ error: 'invalid task status' })
-      const now = new Date().toISOString()
-      const nextTasks = tasks.map((task: any, index: number) => index === taskIndex ? {
-        ...task,
-        task_status: status,
-        status_note: String(req.body.note || ''),
-        updated_at: now,
-        started_at: status === 'in_progress' ? now : task.started_at,
-        needs_review_at: status === 'needs_review' ? now : task.needs_review_at,
-        resolved_at: status === 'resolved' ? now : task.resolved_at,
-      } : task)
-      const resolvedCount = nextTasks.filter((task: any) => task.task_status === 'resolved').length
-      const needsReviewCount = nextTasks.filter((task: any) => task.task_status === 'needs_review').length
-      const nextRunStatus = nextTasks.length > 0 && resolvedCount === nextTasks.length ? 'completed' : run.status === 'completed' ? 'ready' : run.status
-      const updated = await updateNovelRun(activeWorkspace, run.id, {
-        status: nextRunStatus,
-        output_ref: JSON.stringify({
-          ...payload,
-          tasks: nextTasks,
-          task_status_summary: {
-            total: nextTasks.length,
-            resolved: resolvedCount,
-            needs_review: needsReviewCount,
-            open: nextTasks.filter((task: any) => !task.task_status || task.task_status === 'open').length,
-            updated_at: now,
-          },
-        }),
+      const editorRevisionRunId = req.body.editor_revision_run_id === undefined
+        ? undefined
+        : Number(req.body.editor_revision_run_id)
+      if (editorRevisionRunId !== undefined && (!Number.isInteger(editorRevisionRunId) || editorRevisionRunId < 1)) {
+        return res.status(400).json({ error: 'editor_revision_run_id is invalid' })
+      }
+      const updated = await updateNovelRunTaskStatus(activeWorkspace, {
+        projectId,
+        runId: Number(req.params.id),
+        taskIndex,
+        status: status as 'open' | 'in_progress' | 'needs_review' | 'resolved',
+        note: String(req.body.note || ''),
+        editorRevisionRunId,
+        annotationKey: req.body.annotation_key,
+        annotationStatus: req.body.annotation_status,
       })
-      res.json({ ok: true, run: updated, task: nextTasks[taskIndex], task_status_summary: parseJsonLikePayload(updated?.output_ref)?.task_status_summary })
-    } catch (error) {
+      res.json({ ok: true, run: updated.run, task: updated.task, task_status_summary: updated.task_status_summary })
+    } catch (error: any) {
+      if (error?.code === 'NOVEL_RUN_NOT_FOUND') return res.status(404).json({ error: 'run not found' })
+      if (error?.code === 'NOVEL_RUN_TASK_NOT_FOUND') return res.status(404).json({ error: 'task not found' })
+      if ([
+        'EDITOR_REVISION_TASK_CLOSURE_NOT_READY',
+        'EDITOR_REVISION_TASK_CLOSURE_INVALID',
+        'EDITOR_REVISION_TASK_CLOSURE_CONFLICT',
+      ].includes(String(error?.code || ''))) {
+        return res.status(409).json({ error: String(error?.message || error), error_code: error.code })
+      }
       res.status(500).json({ error: String(error) })
     }
   })
@@ -661,52 +654,26 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
     try {
       const activeWorkspace = ctx.getWorkspace()
       const projectId = Number(req.body.project_id || req.query.project_id || 0)
-      const runs = await listNovelRuns(activeWorkspace, projectId)
-      const run = runs.find(item => item.id === Number(req.params.id))
-      if (!run) return res.status(404).json({ error: 'run not found' })
-      const payload = parseJsonLikePayload(run.output_ref) || {}
-      const tasks = Array.isArray(payload.tasks) ? payload.tasks : []
       const rawIndices = Array.isArray(req.body.task_indices) ? req.body.task_indices : []
-      const taskIndices = rawIndices.length ? rawIndices.map(Number).filter((index: number) => Number.isInteger(index) && index >= 0 && index < tasks.length) : tasks.map((_: any, index: number) => index)
-      if (!taskIndices.length) return res.status(400).json({ error: 'no valid task indices' })
       const status = String(req.body.status || 'resolved')
       const allowed = new Set(['open', 'in_progress', 'needs_review', 'resolved'])
       if (!allowed.has(status)) return res.status(400).json({ error: 'invalid task status' })
-      const selected = new Set(taskIndices)
-      const now = new Date().toISOString()
-      const nextTasks = tasks.map((task: any, index: number) => selected.has(index) ? {
-        ...task,
-        task_status: status,
-        status_note: String(req.body.note || ''),
-        updated_at: now,
-        started_at: status === 'in_progress' ? now : task.started_at,
-        needs_review_at: status === 'needs_review' ? now : task.needs_review_at,
-        resolved_at: status === 'resolved' ? now : task.resolved_at,
-      } : task)
-      const resolvedCount = nextTasks.filter((task: any) => task.task_status === 'resolved').length
-      const needsReviewCount = nextTasks.filter((task: any) => task.task_status === 'needs_review').length
-      const nextRunStatus = nextTasks.length > 0 && resolvedCount === nextTasks.length ? 'completed' : run.status === 'completed' ? 'ready' : run.status
-      const updated = await updateNovelRun(activeWorkspace, run.id, {
-        status: nextRunStatus,
-        output_ref: JSON.stringify({
-          ...payload,
-          tasks: nextTasks,
-          task_status_summary: {
-            total: nextTasks.length,
-            resolved: resolvedCount,
-            needs_review: needsReviewCount,
-            open: nextTasks.filter((task: any) => !task.task_status || task.task_status === 'open').length,
-            updated_at: now,
-          },
-        }),
+      const updated = await updateNovelRunTasksStatus(activeWorkspace, {
+        projectId,
+        runId: Number(req.params.id),
+        taskIndices: rawIndices,
+        status: status as 'open' | 'in_progress' | 'needs_review' | 'resolved',
+        note: String(req.body.note || ''),
       })
       res.json({
         ok: true,
-        run: updated,
-        updated_count: taskIndices.length,
-        task_status_summary: parseJsonLikePayload(updated?.output_ref)?.task_status_summary,
+        run: updated.run,
+        updated_count: updated.updated_count,
+        task_status_summary: updated.task_status_summary,
       })
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.code === 'NOVEL_RUN_NOT_FOUND') return res.status(404).json({ error: 'run not found' })
+      if (error?.code === 'NOVEL_RUN_TASKS_NOT_FOUND') return res.status(400).json({ error: 'no valid task indices' })
       res.status(500).json({ error: String(error) })
     }
   })
