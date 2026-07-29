@@ -78,6 +78,22 @@ function checkpointInvalid(message: string): never {
   throw revisionError('REVISION_CHECKPOINT_INVALID', message)
 }
 
+function assertLinkedTaskClosureCoherent(checkpoint: EditorRevisionCheckpoint) {
+  const closure = checkpoint.linked_task_closure
+  if (closure === undefined) return
+  if (!closure || !['pending', 'completed'].includes(closure.status)) {
+    checkpointInvalid('linked repair task closure is not canonical')
+  }
+  if (closure.status === 'pending' && closure.completed_at !== undefined) {
+    checkpointInvalid('pending linked repair task closure cannot have a completion timestamp')
+  }
+  if (closure.status === 'completed') {
+    if (typeof closure.completed_at !== 'string' || !Number.isFinite(new Date(closure.completed_at).getTime())) {
+      checkpointInvalid('completed linked repair task closure requires a valid completion timestamp')
+    }
+  }
+}
+
 export type EditorRevisionCheckpointContext = {
   runStatus?: EditorRevisionRunStatus
 }
@@ -86,6 +102,7 @@ export function assertEditorRevisionCheckpointCoherent(
   checkpoint: EditorRevisionCheckpoint,
   context: EditorRevisionCheckpointContext = {},
 ) {
+  assertLinkedTaskClosureCoherent(checkpoint)
   const currentIndex = phaseIndex(checkpoint.phase)
   for (const phase of EDITOR_REVISION_PHASES.slice(0, currentIndex)) {
     if (!TERMINAL_PHASE_STATES.has(checkpoint.phases[phase].status)) {
@@ -246,6 +263,10 @@ function validateEditorRevisionTransition(
     if (previous[field] !== undefined && canonicalJson(previous[field]) !== canonicalJson(next[field])) {
       checkpointRegression(`committed editor revision evidence cannot change: ${field}`)
     }
+  }
+  if (previous.linked_task_closure !== undefined
+    && canonicalJson(previous.linked_task_closure) !== canonicalJson(next.linked_task_closure)) {
+    checkpointRegression('linked repair task closure cannot change during revision execution')
   }
   for (const phase of EDITOR_REVISION_PHASES) {
     if (TERMINAL_PHASE_STATES.has(previous.phases[phase].status)
@@ -413,6 +434,76 @@ export async function createEditorRevisionRun(workspace: string, input: {
 export async function getEditorRevisionRun(workspace: string, projectId: number, runId: number): Promise<NovelRunRecord | null> {
   const run = await getNovelRun(workspace, runId, projectId)
   return run?.run_type === 'editor_revision' ? run : null
+}
+
+function hasLinkedRepairTask(value: string): boolean {
+  try {
+    const input = JSON.parse(value)
+    const link = input?.repair_task_link
+    return Boolean(link)
+      && Number.isInteger(Number(link.run_id))
+      && Number(link.run_id) > 0
+      && Number.isInteger(Number(link.task_index))
+      && Number(link.task_index) >= 0
+      && Boolean(link.task)
+      && typeof link.task === 'object'
+      && !Array.isArray(link.task)
+  } catch {
+    return false
+  }
+}
+
+export async function markEditorRevisionLinkedTaskClosure(
+  workspace: string,
+  projectId: number,
+  runId: number,
+  completedAt = nowIso(),
+): Promise<NovelRunRecord> {
+  const timestamp = normalizedNow(completedAt)
+  return withNovelDbWrite(workspace, db => {
+    const current = rowById(db, runId)
+    if (!current
+      || current.project_id !== projectId
+      || !['completed', 'failed', 'canceled'].includes(current.status)
+      || !hasLinkedRepairTask(String(current.input_ref || ''))) {
+      throw leaseOrStateError()
+    }
+    const checkpoint = requireCoherentEditorRevisionCheckpoint(current.output_ref, {
+      runStatus: current.status as EditorRevisionRunStatus,
+    })
+    if (!checkpoint.linked_task_closure) throw leaseOrStateError()
+    if (checkpoint.linked_task_closure.status === 'completed') return current
+
+    const next = structuredClone(checkpoint)
+    next.linked_task_closure = { status: 'completed', completed_at: timestamp }
+    assertEditorRevisionCheckpointCoherent(next, {
+      runStatus: current.status as EditorRevisionRunStatus,
+    })
+    const result = db.query(`
+      UPDATE runs
+      SET output_ref = ?, updated_at = ?
+      WHERE id = ? AND project_id = ? AND run_type = 'editor_revision'
+        AND status = ? AND output_ref = ?
+    `).run(
+      JSON.stringify(next),
+      timestamp,
+      runId,
+      projectId,
+      current.status,
+      current.output_ref || '',
+    )
+    if (!changed(result)) {
+      const replay = rowById(db, runId)
+      if (replay?.project_id === projectId && ['completed', 'failed', 'canceled'].includes(replay.status)) {
+        const replayCheckpoint = requireCoherentEditorRevisionCheckpoint(replay.output_ref, {
+          runStatus: replay.status as EditorRevisionRunStatus,
+        })
+        if (replayCheckpoint.linked_task_closure?.status === 'completed') return replay
+      }
+      throw leaseOrStateError()
+    }
+    return rowById(db, runId)!
+  }, 'mark-editor-revision-linked-task-closure')
 }
 
 export async function claimEditorRevisionRun(workspace: string, input: {
@@ -609,7 +700,6 @@ function retryCheckpoint(checkpoint: EditorRevisionCheckpoint): EditorRevisionCh
     delete next.story_state
     delete next.continuity_warning_review_id
     delete next.delivery_risk_convergence
-    delete next.linked_task_closure
   }
   const resumeIndex = phaseIndex(resumePhase)
   for (const phase of EDITOR_REVISION_PHASES.slice(resumeIndex)) next.phases[phase] = resetPhaseState(next.phases[phase])

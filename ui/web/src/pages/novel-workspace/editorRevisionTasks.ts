@@ -18,12 +18,15 @@ export type EditorRevisionTask = {
   chapter_title: string
   prose_persisted: boolean
   quality?: EditorRevisionQuality | null
+  story_state?: Record<string, unknown> | null
+  phases?: Record<string, { summary?: Record<string, unknown> }>
   warnings: Array<{ code: string; message: string }>
   error: { code: string; message: string } | null
   can_cancel: boolean
   can_retry: boolean
   can_continue: boolean
   repair_task_link?: { run_id: number; task_index: number } | null
+  linked_task_closure?: { status: 'pending' | 'completed'; completed_at?: string } | null
   updated_at: string
 }
 
@@ -78,8 +81,17 @@ function isError(value: unknown): value is NonNullable<EditorRevisionTask['error
 
 function isRepairTaskLink(value: unknown): value is NonNullable<EditorRevisionTask['repair_task_link']> {
   return isRecord(value)
+    && Object.keys(value).every(key => key === 'run_id' || key === 'task_index')
     && isInteger(value.run_id, 1)
     && isInteger(value.task_index, 0)
+}
+
+function isLinkedTaskClosure(value: unknown): value is NonNullable<EditorRevisionTask['linked_task_closure']> {
+  if (!isRecord(value) || Object.keys(value).some(key => !['status', 'completed_at'].includes(key))) return false
+  if (value.status === 'pending') return value.completed_at === undefined
+  return value.status === 'completed'
+    && typeof value.completed_at === 'string'
+    && Number.isFinite(Date.parse(value.completed_at))
 }
 
 function isQuality(value: unknown): value is EditorRevisionQuality {
@@ -107,6 +119,8 @@ export function isEditorRevisionTask(value: unknown): value is EditorRevisionTas
     && typeof value.chapter_title === 'string'
     && typeof value.prose_persisted === 'boolean'
     && (value.quality === undefined || value.quality === null || isQuality(value.quality))
+    && (value.story_state === undefined || value.story_state === null || isRecord(value.story_state))
+    && (value.phases === undefined || isRecord(value.phases))
     && Array.isArray(value.warnings)
     && value.warnings.every(isWarning)
     && (value.error === null || isError(value.error))
@@ -114,6 +128,7 @@ export function isEditorRevisionTask(value: unknown): value is EditorRevisionTas
     && typeof value.can_retry === 'boolean'
     && typeof value.can_continue === 'boolean'
     && (value.repair_task_link === undefined || value.repair_task_link === null || isRepairTaskLink(value.repair_task_link))
+    && (value.linked_task_closure === undefined || value.linked_task_closure === null || isLinkedTaskClosure(value.linked_task_closure))
     && typeof value.updated_at === 'string'
     && value.updated_at.length > 0
 }

@@ -553,6 +553,76 @@ describe('asynchronous editor revision API safeguards', () => {
     expect(fixture.enqueued).toEqual([created.body.run_id])
   })
 
+  test('stores a linked repair task privately and acknowledges its closure without mutating that task', async () => {
+    const fixture = await createAsyncRevisionRouteFixture()
+    const sourceRun = await appendNovelRun(fixture.workspace, {
+      project_id: fixture.project.id,
+      run_type: 'longform_production_repair',
+      step_name: 'linked-repair-task',
+      status: 'ready',
+      output_ref: JSON.stringify({ tasks: [{ title: '不可泄漏的源任务', task_status: 'open' }] }),
+    })
+    const applyRevision = fixture.handlers.get('POST /api/novel/reviews/:reviewId/apply-revision')
+    const created = await callRoute(applyRevision, {
+      params: { reviewId: String(fixture.review.id) },
+      body: {
+        project_id: fixture.project.id,
+        chapter_id: fixture.chapter.id,
+        repair_task_link: {
+          run_id: sourceRun.id,
+          task_index: 0,
+          task: { title: '不可泄漏的源任务', private_evidence: ROUTE_CONTEXT_SECRET },
+        },
+      },
+    })
+    expect(created.statusCode).toBe(202)
+
+    const stored = (await listNovelRuns(fixture.workspace, fixture.project.id))
+      .find(run => run.id === created.body.run_id)!
+    expect(JSON.parse(String(stored.input_ref || '{}')).repair_task_link).toMatchObject({
+      run_id: sourceRun.id,
+      task_index: 0,
+      task: { title: '不可泄漏的源任务' },
+    })
+    expect(JSON.parse(String(stored.output_ref || '{}')).linked_task_closure).toEqual({ status: 'pending' })
+
+    const failed = failedRevisionCheckpoint('PROVIDER_FAILED')
+    failed.linked_task_closure = { status: 'pending' }
+    await updateNovelRun(fixture.workspace, created.body.run_id, {
+      status: 'failed',
+      output_ref: JSON.stringify(failed),
+      error_message: 'PROVIDER_FAILED',
+    })
+
+    const acknowledge = fixture.handlers.get('POST /api/novel/editor-revisions/:runId/linked-task-closure')
+    expect(typeof acknowledge).toBe('function')
+    const acknowledged = await callRoute(acknowledge, {
+      params: { runId: String(created.body.run_id) },
+      body: { project_id: fixture.project.id },
+    })
+    expect(acknowledged.statusCode).toBe(200)
+    expect(acknowledged.body).toMatchObject({
+      ok: true,
+      run: {
+        id: created.body.run_id,
+        repair_task_link: { run_id: sourceRun.id, task_index: 0 },
+        linked_task_closure: { status: 'completed' },
+      },
+    })
+    const serialized = JSON.stringify(acknowledged.body)
+    expect(serialized).not.toContain('不可泄漏的源任务')
+    expect(serialized).not.toContain(ROUTE_CONTEXT_SECRET)
+
+    const sourceAfter = (await listNovelRuns(fixture.workspace, fixture.project.id))
+      .find(run => run.id === sourceRun.id)
+    expect(sourceAfter).toMatchObject({
+      id: sourceRun.id,
+      status: sourceRun.status,
+      output_ref: sourceRun.output_ref,
+      updated_at: sourceRun.updated_at,
+    })
+  })
+
   test('validates project, review, chapter ownership, and immutable source before creating a run', async () => {
     const fixture = await createAsyncRevisionRouteFixture()
     const applyRevision = fixture.handlers.get('POST /api/novel/reviews/:reviewId/apply-revision')

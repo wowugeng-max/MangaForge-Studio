@@ -8,6 +8,7 @@ import {
   listNovelOutlines,
   listNovelReviews,
   listNovelWorldbuilding,
+  markEditorRevisionLinkedTaskClosure,
   requestEditorRevisionCancel,
   retryEditorRevisionRun,
 } from '../../novel'
@@ -40,7 +41,7 @@ export type EditorRevisionRoutesContext = EditorRoutesContext & {
   editorRevisionWorker: Pick<EditorRevisionWorker, 'enqueue' | 'cancel'>
 }
 
-function initialEditorRevisionCheckpoint(): EditorRevisionCheckpoint {
+function initialEditorRevisionCheckpoint(hasRepairTaskLink = false): EditorRevisionCheckpoint {
   return {
     schema_version: 1,
     phase: 'generate_candidate',
@@ -57,6 +58,7 @@ function initialEditorRevisionCheckpoint(): EditorRevisionCheckpoint {
       attempt: 0,
     }])) as Record<EditorRevisionPhase, EditorRevisionPhaseState>,
     prose_persisted: false,
+    ...(hasRepairTaskLink ? { linked_task_closure: { status: 'pending' as const } } : {}),
     warnings: [],
   }
 }
@@ -285,7 +287,7 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRevis
         projectId,
         chapterId: chapter.id,
         inputRef: JSON.stringify(input),
-        outputRef: JSON.stringify(initialEditorRevisionCheckpoint()),
+        outputRef: JSON.stringify(initialEditorRevisionCheckpoint(Boolean(link))),
       })
       try {
         ctx.editorRevisionWorker.enqueue(run.id)
@@ -345,6 +347,21 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRevis
       const updated = await requestEditorRevisionCancel(workspace, projectId, runId)
       ctx.editorRevisionWorker.cancel(runId)
       return res.json({ ok: true, action: 'cancel', run: buildPublicEditorRevisionRun(updated) })
+    } catch (error: any) {
+      return respondRevisionError(res, error)
+    }
+  })
+
+  app.post('/api/novel/editor-revisions/:runId/linked-task-closure', async (req, res) => {
+    try {
+      const projectId = requireActionProjectId(req, res)
+      if (!projectId) return
+      const workspace = ctx.getWorkspace()
+      const runId = Number(req.params.runId)
+      const existing = await getEditorRevisionRun(workspace, projectId, runId)
+      if (!existing) return res.status(404).json({ error: 'editor revision not found' })
+      const updated = await markEditorRevisionLinkedTaskClosure(workspace, projectId, runId)
+      return res.json({ ok: true, run: buildPublicEditorRevisionRun(updated) })
     } catch (error: any) {
       return respondRevisionError(res, error)
     }

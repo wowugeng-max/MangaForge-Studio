@@ -30,6 +30,12 @@ import {
   useWorkspaceTasks,
 } from '../useWorkspaceTasks'
 import {
+  editorRevisionTerminalMessage,
+  isActiveEditorRevisionTask,
+  isEditorRevisionTask,
+  type EditorRevisionTask,
+} from '../editorRevisionTasks'
+import {
   chapterHasProse,
 } from '../utils'
 import {
@@ -54,6 +60,161 @@ import {
 } from './use-workspace-domain-models'
 
 type AnyRecord = Record<string, any>
+
+export type EditorRevisionReconciliationState = {
+  completedKeys: Set<string>
+  inFlightKeys: Set<string>
+  moduleReloadedKeys: Set<string>
+  notifiedKeys: Set<string>
+  linkedTaskClosedKeys: Set<string>
+}
+
+export function createEditorRevisionReconciliationState(): EditorRevisionReconciliationState {
+  return {
+    completedKeys: new Set(),
+    inFlightKeys: new Set(),
+    moduleReloadedKeys: new Set(),
+    notifiedKeys: new Set(),
+    linkedTaskClosedKeys: new Set(),
+  }
+}
+
+function editorRevisionReconciliationKey(projectId: number, task: EditorRevisionTask) {
+  return `${projectId}:${task.id}:${task.updated_at}`
+}
+
+function linkedRepairTask(productionTasks: any, task: EditorRevisionTask) {
+  const link = task.repair_task_link
+  if (!link) return null
+  const runs = [
+    ...(Array.isArray(productionTasks?.tasks) ? productionTasks.tasks : []),
+    ...(Array.isArray(productionTasks?.active) ? productionTasks.active : []),
+  ]
+  const run = runs.find(item => Number(item?.id) === link.run_id)
+  const repairTasks = Array.isArray(run?.payload?.tasks) ? run.payload.tasks : []
+  const sourceTask = repairTasks[link.task_index]
+  return run && sourceTask ? { run, task: sourceTask, taskIndex: link.task_index } : null
+}
+
+function publicDeliveryRiskConvergence(task: EditorRevisionTask): Record<string, unknown> {
+  const summary = task.phases?.record_continuity_warning?.summary
+  const convergence = summary?.delivery_risk_convergence
+  return convergence && typeof convergence === 'object' && !Array.isArray(convergence)
+    ? convergence as Record<string, unknown>
+    : {}
+}
+
+function repairClosureResult(task: EditorRevisionTask) {
+  const quality = task.quality || null
+  return {
+    quality_refresh: quality
+      ? {
+          ...quality,
+          ok: quality.passed === true && quality.needs_revision !== true,
+        }
+      : { ok: false, error: 'revision quality summary is unavailable' },
+    story_state_update: task.story_state || null,
+    delivery_risk_convergence: publicDeliveryRiskConvergence(task),
+    warnings: task.warnings,
+  }
+}
+
+function markAcknowledgedKey(
+  state: EditorRevisionReconciliationState,
+  projectId: number,
+  task: EditorRevisionTask,
+) {
+  const key = editorRevisionReconciliationKey(projectId, task)
+  state.completedKeys.add(key)
+  state.moduleReloadedKeys.add(key)
+  state.notifiedKeys.add(key)
+  state.linkedTaskClosedKeys.add(key)
+}
+
+export async function reconcileEditorRevisionTasks({
+  projectId,
+  tasks,
+  productionTasks,
+  state,
+  activeChapterId,
+  loadProjectModules,
+  setRightPanelOpen,
+  setRightPanelTab,
+  closeRepairTaskAfterRevision,
+  acknowledgeLinkedTaskClosure,
+  notifyTerminal,
+}: {
+  projectId: number
+  tasks: EditorRevisionTask[]
+  productionTasks: any
+  state: EditorRevisionReconciliationState
+  activeChapterId: number | (() => number)
+  loadProjectModules: () => Promise<unknown>
+  setRightPanelOpen: (open: boolean) => void
+  setRightPanelTab: (tab: string) => void
+  closeRepairTaskAfterRevision: (task: any, run: any, taskIndex: number, result: any) => Promise<unknown>
+  acknowledgeLinkedTaskClosure: (task: EditorRevisionTask) => Promise<EditorRevisionTask>
+  notifyTerminal: (terminal: NonNullable<ReturnType<typeof editorRevisionTerminalMessage>>, task: EditorRevisionTask) => void
+}) {
+  if (!projectId) return
+  for (const task of tasks) {
+    if (isActiveEditorRevisionTask(task)) continue
+    const key = editorRevisionReconciliationKey(projectId, task)
+    if (state.completedKeys.has(key) || state.inFlightKeys.has(key)) continue
+    state.inFlightKeys.add(key)
+    try {
+      if (task.prose_persisted && !state.moduleReloadedKeys.has(key)) {
+        await loadProjectModules()
+        state.moduleReloadedKeys.add(key)
+        const currentActiveChapterId = typeof activeChapterId === 'function'
+          ? Number(activeChapterId())
+          : Number(activeChapterId)
+        if (task.chapter_id === currentActiveChapterId) {
+          setRightPanelOpen(true)
+          setRightPanelTab('proseQuality')
+        }
+      }
+
+      if (!state.notifiedKeys.has(key)) {
+        const terminal = editorRevisionTerminalMessage(task)
+        if (terminal) notifyTerminal(terminal, task)
+        state.notifiedKeys.add(key)
+      }
+
+      if (!task.prose_persisted) {
+        state.completedKeys.add(key)
+        continue
+      }
+      if (!task.repair_task_link || task.linked_task_closure?.status === 'completed') {
+        state.completedKeys.add(key)
+        continue
+      }
+      if (task.linked_task_closure?.status !== 'pending') {
+        state.completedKeys.add(key)
+        continue
+      }
+
+      const linked = linkedRepairTask(productionTasks, task)
+      if (!linked) continue
+      if (!state.linkedTaskClosedKeys.has(key)) {
+        await closeRepairTaskAfterRevision(
+          linked.task,
+          linked.run,
+          linked.taskIndex,
+          repairClosureResult(task),
+        )
+        state.linkedTaskClosedKeys.add(key)
+      }
+      const acknowledged = await acknowledgeLinkedTaskClosure(task)
+      state.completedKeys.add(key)
+      if (isEditorRevisionTask(acknowledged)) markAcknowledgedKey(state, projectId, acknowledged)
+    } catch {
+      // Keep unfinished reconciliation stages retryable on the next task refresh.
+    } finally {
+      state.inFlightKeys.delete(key)
+    }
+  }
+}
 
 export function useNovelWorkspaceBaseModel() {
   const navigate = useNavigate()
@@ -205,6 +366,16 @@ export function useNovelWorkspaceBaseModel() {
     chapterStatusFilter,
     chapterSortMode,
   })
+  const activeChapterIdRef = useRef(Number(activeChapterId || activeChapter?.id || 0))
+  activeChapterIdRef.current = Number(activeChapterId || activeChapter?.id || 0)
+  const editorRevisionReconciliationRef = useRef<EditorRevisionReconciliationState>(
+    createEditorRevisionReconciliationState(),
+  )
+  const editorRevisionReconciliationProjectRef = useRef(projectId)
+  if (editorRevisionReconciliationProjectRef.current !== projectId) {
+    editorRevisionReconciliationProjectRef.current = projectId
+    editorRevisionReconciliationRef.current = createEditorRevisionReconciliationState()
+  }
 
   const activeChapterIdNumber = Number(activeChapter?.id || 0)
   const activeChapterUpdatedAt = activeChapter?.updated_at || null
@@ -310,6 +481,7 @@ export function useNovelWorkspaceBaseModel() {
     productionTasks,
     productionTasksLoading,
     loadProductionTasks,
+    editorRevisionTasks,
     knowledgeIngestJobs,
     knowledgeJobsLoading,
     loadKnowledgeIngestJobs,
@@ -574,6 +746,51 @@ export function useNovelWorkspaceBaseModel() {
     syncStoryStateForChapter,
     undoStyleSampleAdjustmentPatch,
   } = coreHandlers
+
+  useEffect(() => {
+    void reconcileEditorRevisionTasks({
+      projectId,
+      tasks: editorRevisionTasks,
+      productionTasks,
+      state: editorRevisionReconciliationRef.current,
+      activeChapterId: () => activeChapterIdRef.current,
+      loadProjectModules,
+      setRightPanelOpen,
+      setRightPanelTab,
+      closeRepairTaskAfterRevision: (task, run, taskIndex, result) => (
+        coreHandlers.closeRepairTaskAfterRevision(
+          task,
+          run,
+          taskIndex,
+          result,
+          { projectModules: false },
+        )
+      ),
+      acknowledgeLinkedTaskClosure: async task => {
+        const res = await apiClient.post(`/novel/editor-revisions/${task.id}/linked-task-closure`, {
+          project_id: projectId,
+        })
+        const acknowledged = res.data?.run
+        if (!isEditorRevisionTask(acknowledged)) throw new Error('invalid linked task closure acknowledgement')
+        await loadProductionTasks()
+        return acknowledged
+      },
+      notifyTerminal: terminal => {
+        if (terminal.type === 'success') message.success(terminal.text)
+        else if (terminal.type === 'warning') message.warning(terminal.text)
+        else message.error(terminal.text)
+      },
+    })
+  }, [
+    coreHandlers,
+    editorRevisionTasks,
+    loadProductionTasks,
+    loadProjectModules,
+    productionTasks,
+    projectId,
+    setRightPanelOpen,
+    setRightPanelTab,
+  ])
 
   /* ── streaming scroll ──────────────────────────────────────────── */
   useEffect(() => {

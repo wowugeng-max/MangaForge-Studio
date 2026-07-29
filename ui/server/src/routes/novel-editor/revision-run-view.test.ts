@@ -141,6 +141,8 @@ describe('editor revision public run view', () => {
       can_cancel: true,
       can_retry: false,
       can_continue: false,
+      repair_task_link: null,
+      linked_task_closure: null,
       created_at: '2030-01-01T00:00:00.000Z',
       updated_at: '2030-01-01T00:00:02.000Z',
     })
@@ -154,12 +156,14 @@ describe('editor revision public run view', () => {
       'created_at',
       'error',
       'id',
+      'linked_task_closure',
       'phase',
       'phase_label',
       'phases',
       'progress',
       'prose_persisted',
       'quality',
+      'repair_task_link',
       'run_type',
       'status',
       'story_state',
@@ -178,6 +182,82 @@ describe('editor revision public run view', () => {
       source_char_count: SOURCE_TEXT.length,
       candidate_char_count: CANDIDATE_TEXT.length,
     })
+  })
+
+  test('exposes only linked repair task identity and closure acknowledgement state', () => {
+    const run = runWithCandidate()
+    const input = JSON.parse(String(run.input_ref || '{}'))
+    input.repair_task_link = {
+      run_id: 77,
+      task_index: 2,
+      task: {
+        title: '不可泄漏的修复任务',
+        private_evidence: FULL_CONTEXT,
+      },
+    }
+    run.input_ref = JSON.stringify(input)
+    const checkpoint = JSON.parse(String(run.output_ref || '{}'))
+    checkpoint.linked_task_closure = { status: 'pending' }
+    run.output_ref = JSON.stringify(checkpoint)
+
+    const view = buildPublicEditorRevisionRun(run)
+
+    expect(view).toMatchObject({
+      repair_task_link: { run_id: 77, task_index: 2 },
+      linked_task_closure: { status: 'pending' },
+    })
+    const serialized = JSON.stringify(view)
+    expect(serialized).not.toContain('不可泄漏的修复任务')
+    expect(serialized).not.toContain(FULL_CONTEXT)
+    expect(serialized).not.toContain('private_evidence')
+  })
+
+  test('publishes a bounded convergence summary for linked terminal reconciliation', () => {
+    const checkpoint = initialCheckpoint()
+    checkpoint.phase = 'completed'
+    for (const phase of Object.keys(checkpoint.phases) as EditorRevisionPhase[]) {
+      checkpoint.phases[phase] = { status: 'completed', attempt: 1 }
+    }
+    checkpoint.phases.record_continuity_warning.summary = {
+      convergence_review_id: 93,
+    }
+    checkpoint.candidate = {
+      text: CANDIDATE_TEXT,
+      hash: revisionTextHash(CANDIDATE_TEXT),
+      char_count: CANDIDATE_TEXT.replace(/\s/g, '').length,
+      applied_patches: [],
+      diagnostics: {},
+    }
+    checkpoint.prose_persisted = true
+    checkpoint.delivery_risk_convergence = {
+      review_id: 93,
+      status: 'cleared',
+      label: '风险已清零',
+      before_count: 2,
+      after_count: 0,
+      resolved_count: 2,
+      residual_count: 0,
+      added_count: 0,
+      next_actions: [FULL_CONTEXT],
+    }
+    checkpoint.completed_at = '2030-01-01T00:00:05.000Z'
+
+    const view = buildPublicEditorRevisionRun(runWithCheckpoint(checkpoint, 'completed'))
+
+    expect(view.phases.record_continuity_warning.summary).toMatchObject({
+      convergence_review_id: 93,
+      delivery_risk_convergence: {
+        status: 'cleared',
+        label: '风险已清零',
+        before_count: 2,
+        after_count: 0,
+        resolved_count: 2,
+        residual_count: 0,
+        added_count: 0,
+      },
+    })
+    expect(JSON.stringify(view)).not.toContain(FULL_CONTEXT)
+    expect(JSON.stringify(view)).not.toContain('next_actions')
   })
 
   test('derives retry, continue, cancel, and restart-required actions from durable state', () => {

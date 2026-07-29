@@ -309,6 +309,33 @@ function mountWorkspaceTasks(module: any, initialProps: Record<string, unknown>)
 }
 
 describe('workspace task polling policy', () => {
+  test('validates linked task closure acknowledgement state on public revision tasks', async () => {
+    const taskModule = await loadEditorRevisionModule()
+    expect(taskModule).toBeTruthy()
+    expect(taskModule!.isEditorRevisionTask(editorRevision({
+      status: 'completed',
+      phase: 'completed',
+      phase_label: '完成',
+      prose_persisted: true,
+      can_cancel: false,
+      repair_task_link: { run_id: 51, task_index: 2 },
+      linked_task_closure: { status: 'pending' },
+    }))).toBe(true)
+    expect(taskModule!.isEditorRevisionTask(editorRevision({
+      status: 'completed',
+      phase: 'completed',
+      phase_label: '完成',
+      prose_persisted: true,
+      can_cancel: false,
+      repair_task_link: { run_id: 51, task_index: 2 },
+      linked_task_closure: { status: 'completed' },
+    }))).toBe(false)
+    expect(taskModule!.isEditorRevisionTask(editorRevision({
+      repair_task_link: { run_id: 51, task_index: 2, task: { title: 'private task' } },
+      linked_task_closure: { status: 'pending' },
+    }))).toBe(false)
+  })
+
   test('does not schedule an interval while the drawer is closed without an active revision or all tasks are idle', async () => {
     const module = await loadPollingModule()
     expect(module).not.toBeNull()

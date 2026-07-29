@@ -31,6 +31,7 @@ import {
   retryEditorRevisionRun,
   writeEditorRevisionCheckpoint,
 } from './editor-revision-runs'
+import * as editorRevisionRunRepository from './editor-revision-runs'
 
 const PHASES = [
   'generate_candidate',
@@ -103,12 +104,125 @@ async function createRun(workspace: string, projectId: number, chapterId: number
   })
 }
 
+async function markLinkedTaskClosure(
+  workspace: string,
+  projectId: number,
+  runId: number,
+  completedAt: string,
+) {
+  const mutation = Reflect.get(editorRevisionRunRepository, 'markEditorRevisionLinkedTaskClosure')
+  expect(typeof mutation).toBe('function')
+  return mutation(workspace, projectId, runId, completedAt)
+}
+
 afterEach(async () => {
   const { rm } = await import('fs/promises')
   await Promise.all(workspaces.splice(0).map(workspace => rm(workspace, { recursive: true, force: true })))
 })
 
 describe('editor revision run repository', () => {
+  test('acknowledges a linked task only on an owned terminal run and replays idempotently', async () => {
+    const { workspace, project, chapters: [chapter] } = await createFixture()
+    const linkedCheckpoint = initialCheckpoint()
+    linkedCheckpoint.linked_task_closure = { status: 'pending' }
+    const run = await createEditorRevisionRun(workspace, {
+      projectId: project.id,
+      chapterId: chapter.id,
+      inputRef: JSON.stringify({
+        schema_version: 1,
+        chapter_id: chapter.id,
+        repair_task_link: { run_id: 51, task_index: 3, task: { title: 'repair' } },
+      }),
+      outputRef: runOutput(linkedCheckpoint),
+    })
+
+    await expect(markLinkedTaskClosure(
+      workspace,
+      project.id,
+      run.id,
+      '2030-07-27T10:00:00.000Z',
+    )).rejects.toMatchObject({ code: 'REVISION_LEASE_OR_STATE_INVALID' })
+    await expect(markLinkedTaskClosure(
+      workspace,
+      project.id + 1,
+      run.id,
+      '2030-07-27T10:00:00.000Z',
+    )).rejects.toMatchObject({ code: 'REVISION_LEASE_OR_STATE_INVALID' })
+
+    await claimEditorRevisionRun(workspace, {
+      runId: run.id,
+      owner: 'worker-a',
+      now: '2030-07-27T09:59:00.000Z',
+      leaseMs: 120_000,
+    })
+    const failed = checkpointAt('generate_candidate', { generate_candidate: 'failed' }, {
+      linked_task_closure: { status: 'pending' },
+      error: { code: 'PROVIDER_FAILED', message: 'provider unavailable' },
+    })
+    await writeEditorRevisionCheckpoint(workspace, {
+      runId: run.id,
+      owner: 'worker-a',
+      status: 'failed',
+      phase: 'generate_candidate',
+      checkpoint: failed,
+      errorMessage: 'PROVIDER_FAILED',
+    })
+
+    const completed = await markLinkedTaskClosure(
+      workspace,
+      project.id,
+      run.id,
+      '2030-07-27T10:00:00.000Z',
+    )
+    expect(completed.updated_at).toBe('2030-07-27T10:00:00.000Z')
+    expect(JSON.parse(completed.output_ref || '{}').linked_task_closure).toEqual({
+      status: 'completed',
+      completed_at: '2030-07-27T10:00:00.000Z',
+    })
+
+    const replayed = await markLinkedTaskClosure(
+      workspace,
+      project.id,
+      run.id,
+      '2030-07-27T11:00:00.000Z',
+    )
+    expect(replayed).toEqual(completed)
+  })
+
+  test('preserves pending linked task closure when a failed run is retried', async () => {
+    const { workspace, project, chapters: [chapter] } = await createFixture()
+    const linkedCheckpoint = initialCheckpoint()
+    linkedCheckpoint.linked_task_closure = { status: 'pending' }
+    const run = await createEditorRevisionRun(workspace, {
+      projectId: project.id,
+      chapterId: chapter.id,
+      inputRef: runInput(chapter.id),
+      outputRef: runOutput(linkedCheckpoint),
+    })
+    await claimEditorRevisionRun(workspace, {
+      runId: run.id,
+      owner: 'worker-a',
+      now: '2030-07-27T10:00:00.000Z',
+      leaseMs: 60_000,
+    })
+    const failed = checkpointAt('generate_candidate', { generate_candidate: 'failed' }, {
+      linked_task_closure: { status: 'pending' },
+      error: { code: 'PROVIDER_FAILED', message: 'provider unavailable' },
+    })
+    await writeEditorRevisionCheckpoint(workspace, {
+      runId: run.id,
+      owner: 'worker-a',
+      status: 'failed',
+      phase: 'generate_candidate',
+      checkpoint: failed,
+      errorMessage: 'PROVIDER_FAILED',
+    })
+
+    const retried = await retryEditorRevisionRun(workspace, project.id, run.id)
+
+    expect(JSON.parse(retried.output_ref || '{}').linked_task_closure).toEqual({ status: 'pending' })
+  })
+
   test('creates one active run per chapter while allowing different chapter scopes', async () => {
     const { workspace, project, chapters: [chapter1, chapter2] } = await createFixture([3, 4])
 

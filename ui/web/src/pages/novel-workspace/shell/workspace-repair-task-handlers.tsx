@@ -437,7 +437,13 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
     await refreshActiveProseQuality(source, chapter)
   }
 
-  const closeRepairTaskAfterRevision = async (task: any, run: any, taskIndex: number, revisionResult: any) => {
+  const closeRepairTaskAfterRevision = async (
+    task: any,
+    run: any,
+    taskIndex: number,
+    revisionResult: any,
+    refreshOptions: { projectModules?: boolean; productionTasks?: boolean } = {},
+  ) => {
     if (!run?.id || taskIndex < 0) return null
     const plan = buildDeliveryRiskRevisionClosurePlan(task, revisionResult || {})
     await apiClient.post(`/novel/runs/${run.id}/tasks/${taskIndex}/status`, {
@@ -452,8 +458,8 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
         note: plan.note,
       })
     }
-    await loadProjectModules()
-    await loadProductionTasks()
+    if (refreshOptions.projectModules !== false) await loadProjectModules()
+    if (refreshOptions.productionTasks !== false) await loadProductionTasks()
     return plan
   }
 
@@ -548,6 +554,19 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
     const customPrompt = String(options.prompt || '').trim()
     const runRevision = async () => {
       try {
+        const sourceRunId = Number(options.sourceRun?.id)
+        const sourceTaskIndex = Number(options.sourceTaskIndex)
+        const repairTaskLink = options.sourceTask
+          && Number.isInteger(sourceRunId)
+          && sourceRunId > 0
+          && Number.isInteger(sourceTaskIndex)
+          && sourceTaskIndex >= 0
+          ? {
+              run_id: sourceRunId,
+              task_index: sourceTaskIndex,
+              task: options.sourceTask,
+            }
+          : undefined
         const res = await apiClient.post(`/novel/reviews/${report.id}/apply-revision`, {
           project_id: projectId,
           chapter_id: resolveEditorRevisionChapterId(report, activeChapter?.id, options.targetChapterId),
@@ -557,33 +576,21 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
           source: options.source || undefined,
           auto_quality_check: true,
           auto_story_state: options.autoStoryState !== false,
+          ...(repairTaskLink ? { repair_task_link: repairTaskLink } : {}),
         })
-        if (res.data?.chapter) {
-          setChapters(prev => prev.map(c => c.id === res.data.chapter.id ? res.data.chapter : c))
+        const runId = Number(res.data?.run_id)
+        if (res.status !== 202 || !Number.isInteger(runId) || runId < 1 || res.data?.status !== 'queued') {
+          throw new Error('invalid editor revision creation response')
         }
-        await loadProjectModules()
-        let closurePlan: any = null
-        if (options.sourceTask && options.sourceRun && typeof options.sourceTaskIndex === 'number') {
-          closurePlan = await closeRepairTaskAfterRevision(options.sourceTask, options.sourceRun, options.sourceTaskIndex, res.data)
+        const created = {
+          run_id: runId,
+          status: 'queued' as const,
+          chapter_id: Number(res.data?.chapter_id) || 0,
+          status_url: String(res.data?.status_url || ''),
         }
-        setRightPanelOpen(true)
-        setRightPanelTab('proseQuality')
-        const closureSuffix = closurePlan
-          ? closurePlan.taskStatus === 'resolved'
-            ? '；风险任务已自动关闭'
-            : '；风险任务已转入需复查'
-          : ''
-        if (res.data?.quality_refresh?.ok) {
-          const syncedTo = res.data?.story_state_update?.last_synced_chapter
-          message.success(`${revisionLabels[revisionMode] || '修订稿'}已入库，并已复检当前版本，评分 ${res.data.quality_refresh.score ?? '-'}${syncedTo ? `；状态机已同步至第${syncedTo}章` : ''}${closureSuffix}`)
-        } else if (res.data?.quality_refresh?.ok === false) {
-          message.warning(`修订稿已入库，但自动复检失败：${res.data.quality_refresh.error || '未知错误'}。可在正文质检里手动复检。${closureSuffix}`)
-        } else if (res.data?.story_state_update?.last_synced_chapter) {
-          message.success(`修订稿已入库，状态机已同步至第${res.data.story_state_update.last_synced_chapter}章${closureSuffix}`)
-        } else {
-          message.success(`修订稿已入库${closureSuffix}`)
-        }
-        return res.data
+        await loadProductionTasks()
+        message.success('单章修订任务已创建')
+        return created
       } catch (error: any) {
         message.error(error?.response?.data?.error || error?.message || '修订失败')
         return null

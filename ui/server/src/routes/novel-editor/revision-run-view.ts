@@ -81,6 +81,7 @@ const PUBLIC_PATCH_REASONS = new Set([
 ])
 const PUBLIC_COMMIT_STATUSES = new Set(['committed', 'already_committed'])
 const PUBLIC_STORY_STATE_STATUSES = new Set(['prepared', 'completed'])
+const PUBLIC_CONVERGENCE_STATUSES = new Set(['cleared', 'improved', 'worse', 'unchanged'])
 
 export type PublicEditorRevisionRun = {
   id: number
@@ -101,6 +102,8 @@ export type PublicEditorRevisionRun = {
   can_cancel: boolean
   can_retry: boolean
   can_continue: boolean
+  repair_task_link: { run_id: number; task_index: number } | null
+  linked_task_closure: { status: 'pending' | 'completed'; completed_at?: string } | null
   created_at: string
   updated_at: string
 }
@@ -149,6 +152,14 @@ function parseRunInput(value: unknown): EditorRevisionRunInput | null {
     || typeof input.auto_quality_check !== 'boolean'
     || typeof input.auto_story_state !== 'boolean'
     || (input.model_id !== undefined && !Number.isInteger(input.model_id))
+    || (input.repair_task_link !== undefined && (
+      !parseJsonObject(input.repair_task_link)
+      || !Number.isInteger(input.repair_task_link.run_id)
+      || input.repair_task_link.run_id < 1
+      || !Number.isInteger(input.repair_task_link.task_index)
+      || input.repair_task_link.task_index < 0
+      || !parseJsonObject(input.repair_task_link.task)
+    ))
     || typeof input.created_at !== 'string') {
     return null
   }
@@ -361,6 +372,34 @@ function safeStoryState(value: unknown): Record<string, unknown> | null {
   ]) || null
 }
 
+function safeDeliveryRiskConvergence(value: unknown): Record<string, unknown> | null {
+  const convergence = parseJsonObject(value)
+  if (!convergence) return null
+  const status = safeEnumValue(convergence.status, PUBLIC_CONVERGENCE_STATUSES)
+  if (!status) return null
+  const beforeCount = Math.max(0, finiteInteger(convergence.before_count) ?? 0)
+  const afterCount = Math.max(0, finiteInteger(convergence.after_count) ?? 0)
+  const resolvedCount = Math.max(0, finiteInteger(convergence.resolved_count) ?? 0)
+  const residualCount = Math.max(0, finiteInteger(convergence.residual_count) ?? afterCount)
+  const addedCount = Math.max(0, finiteInteger(convergence.added_count) ?? 0)
+  const label = status === 'cleared'
+    ? '风险已清零'
+    : status === 'improved'
+      ? `风险收敛 ${resolvedCount}`
+      : status === 'worse'
+        ? `新增风险 ${addedCount}`
+        : `仍有残留 ${residualCount}`
+  return {
+    status,
+    label,
+    before_count: beforeCount,
+    after_count: afterCount,
+    resolved_count: resolvedCount,
+    residual_count: residualCount,
+    added_count: addedCount,
+  }
+}
+
 function safeWarnings(value: unknown): Array<{ code: string; message: string }> {
   if (!Array.isArray(value)) return []
   return value.slice(0, 100).flatMap(item => {
@@ -411,6 +450,8 @@ function malformedView(run: NovelRunRecord): PublicEditorRevisionRun {
     can_cancel: false,
     can_retry: false,
     can_continue: false,
+    repair_task_link: null,
+    linked_task_closure: null,
     created_at: createdAt,
     updated_at: safeString(run.updated_at, 80) || createdAt,
   }
@@ -435,6 +476,20 @@ export function buildPublicEditorRevisionRun(run: NovelRunRecord): PublicEditorR
   const restartRequired = RESTART_REQUIRED_ERRORS.has(failureCode)
   const retryable = RETRYABLE_STATUSES.has(status)
   const error = checkpoint.error ? publicRevisionError(checkpoint.error.code) : null
+  const phases = Object.fromEntries(EDITOR_REVISION_PHASES.map(phase => [
+    phase,
+    safePhaseState(phase, checkpoint.phases[phase]),
+  ])) as PublicEditorRevisionRun['phases']
+  const convergence = safeDeliveryRiskConvergence(checkpoint.delivery_risk_convergence)
+  if (convergence) {
+    phases.record_continuity_warning = {
+      ...phases.record_continuity_warning,
+      summary: {
+        ...(phases.record_continuity_warning.summary || {}),
+        delivery_risk_convergence: convergence,
+      },
+    }
+  }
 
   return {
     id: run.id,
@@ -442,10 +497,7 @@ export function buildPublicEditorRevisionRun(run: NovelRunRecord): PublicEditorR
     status,
     phase: checkpoint.phase,
     phase_label: EDITOR_REVISION_PHASE_LABELS[checkpoint.phase],
-    phases: Object.fromEntries(EDITOR_REVISION_PHASES.map(phase => [
-      phase,
-      safePhaseState(phase, checkpoint.phases[phase]),
-    ])) as PublicEditorRevisionRun['phases'],
+    phases,
     chapter_id: input.chapter_id,
     chapter_no: input.chapter_no,
     chapter_title: input.chapter_title,
@@ -458,6 +510,10 @@ export function buildPublicEditorRevisionRun(run: NovelRunRecord): PublicEditorR
     can_cancel: active && (status === 'queued' || status === 'running'),
     can_retry: retryable && !postCommitIncomplete && !restartRequired,
     can_continue: retryable && postCommitIncomplete && !restartRequired,
+    repair_task_link: input.repair_task_link
+      ? { run_id: input.repair_task_link.run_id, task_index: input.repair_task_link.task_index }
+      : null,
+    linked_task_closure: checkpoint.linked_task_closure || null,
     created_at: safeString(run.created_at, 80),
     updated_at: safeString(run.updated_at, 80) || safeString(run.created_at, 80),
   }
