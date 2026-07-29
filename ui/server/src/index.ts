@@ -90,7 +90,7 @@ registerGenerateRoutes(app, getWorkspace)
 registerVideoLoopRoutes(app, getWorkspace)
 registerDirectTaskRoutes(app, getWorkspace)
 registerRecommendationRoutes(app, getWorkspace)
-registerNovelRoutes(app, getWorkspace)
+const novelLifecycle = registerNovelRoutes(app, getWorkspace)
 registerKnowledgeRoutes(app)
 registerFingerprintContractRoutes(app, getWorkspace)
 
@@ -129,6 +129,7 @@ const server = app.listen(port, host, async () => {
   activeWorkspace = await loadActiveWorkspace()
   await ensureWorkspaceStructure(activeWorkspace)
   await saveActiveWorkspace(activeWorkspace)
+  await novelLifecycle.start(activeWorkspace)
 
   // ── Memory Palace auto-bootstrapping ──
   try {
@@ -154,6 +155,7 @@ const server = app.listen(port, host, async () => {
 
 server.on('close', () => {
   keyMonitor?.stop()
+  void novelLifecycle.stop()
 })
 
 server.on('upgrade', (req, socket) => {

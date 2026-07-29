@@ -9,11 +9,25 @@ import {
 import {
   registerNovelEditorQualityRoutes,
 } from './register-quality'
-import { createEditorRevisionWorker } from './revision-worker'
+import { createEditorRevisionWorker, type EditorRevisionWorker } from './revision-worker'
 
-export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext) {
+export type NovelEditorRoutesLifecycle = {
+  start(workspace: string): Promise<void>
+  stop(): Promise<void>
+  editorRevisionWorker: EditorRevisionWorker
+}
+
+export function registerNovelEditorRoutes(
+  app: Express,
+  ctx: EditorRoutesContext,
+): NovelEditorRoutesLifecycle {
   const editorRevisionWorker = createEditorRevisionWorker(ctx)
   registerNovelEditorAnnotationRoutes(app, ctx)
   registerNovelEditorRevisionRoutes(app, { ...ctx, editorRevisionWorker })
   registerNovelEditorQualityRoutes(app, ctx)
+  return {
+    start: (workspace: string) => editorRevisionWorker.start(workspace),
+    stop: () => editorRevisionWorker.stop(),
+    editorRevisionWorker,
+  }
 }

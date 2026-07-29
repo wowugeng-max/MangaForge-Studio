@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import express from 'express'
 import { rm } from 'fs/promises'
 import {
   claimEditorRevisionRun,
@@ -24,8 +25,10 @@ import { withNovelDbWrite } from '../../novel/sql-rows'
 import { tempWorkspace, workspaces } from '../../novel/test-utils'
 import { setNovelMutationTestHook } from '../../novel-test-support'
 import { createStoryStateMachineMethods } from '../../novel-writing-service/service/story-state-machine'
+import { registerNovelRoutes } from '../novel'
 import type { EditorRevisionCheckpoint, EditorRevisionPhase } from './editor-revision-contract'
 import { revisionTextHash } from './revision-candidate-admission'
+import { registerNovelEditorRoutes } from './register'
 import { createEditorRevisionWorker, findOrCreateEditorRevisionReview } from './revision-worker'
 
 const workspace = '/tmp/editor-revision-worker-test'
@@ -701,6 +704,100 @@ function installMatchingCommitMarker(harness: ReturnType<typeof createHarness>, 
 }
 
 describe('durable editor revision worker', () => {
+  test('novel route package returns and delegates one editor revision lifecycle', async () => {
+    const defaultWorkspace = '/tmp/default-editor-revision-workspace'
+    const activeWorkspace = '/tmp/loaded-editor-revision-workspace'
+    const lifecycle = registerNovelRoutes(express(), () => defaultWorkspace)
+    const startCalls: string[] = []
+    let stopCalls = 0
+
+    expect(lifecycle.editorRevisionWorker).toBeDefined()
+    lifecycle.editorRevisionWorker.start = async workspacePath => { startCalls.push(workspacePath) }
+    lifecycle.editorRevisionWorker.stop = async () => { stopCalls += 1 }
+
+    await lifecycle.start(activeWorkspace)
+    await lifecycle.stop()
+
+    expect(startCalls).toEqual([activeWorkspace])
+    expect(stopCalls).toBe(1)
+  })
+
+  test('editor route lifecycle recovers only the loaded workspace and stops active work idempotently', async () => {
+    const defaultWorkspace = await tempWorkspace()
+    const activeWorkspace = await tempWorkspace()
+    const createQueuedRun = async (workspacePath: string, title: string) => {
+      const project = await createNovelProject(workspacePath, { title })
+      const chapter = await createNovelChapter(workspacePath, {
+        project_id: project.id,
+        chapter_no: 1,
+        title: '第一章',
+        chapter_text: sourceText,
+      })
+      const input = {
+        ...canonicalRunInput(project.id, chapter),
+        auto_quality_check: false,
+        auto_story_state: false,
+      }
+      const run = await createEditorRevisionRun(workspacePath, {
+        projectId: project.id,
+        chapterId: chapter.id,
+        inputRef: JSON.stringify(input),
+        outputRef: JSON.stringify(initialCheckpoint()),
+      })
+      return { project, run }
+    }
+    const defaultFixture = await createQueuedRun(defaultWorkspace, 'default workspace project')
+    const activeFixture = await createQueuedRun(activeWorkspace, 'active workspace project')
+    const projectWorkspaceCalls: string[] = []
+    const activeSignals: AbortSignal[] = []
+    const lifecycle = registerNovelEditorRoutes(express(), {
+      getWorkspace: () => defaultWorkspace,
+      getProject: async (workspacePath, projectId) => {
+        projectWorkspaceCalls.push(workspacePath)
+        return getNovelProject(workspacePath, projectId)
+      },
+      buildChapterContextPackage: async () => ({}),
+      getStageModelId: () => 19,
+      getStageTemperature: (_project, _stage, fallback) => fallback,
+      buildReferenceUsageReport: async () => ({}),
+      buildStructuralSimilarityReport: () => ({}),
+      buildReferenceMigrationDryPlan: () => ({}),
+      diffTexts: () => ({}),
+      executeAgent: async (_agentId, _project, _context, options) => {
+        const signal = options.signal!
+        activeSignals.push(signal)
+        return new Promise<never>((_resolve, reject) => {
+          if (signal.aborted) {
+            reject(signal.reason)
+            return
+          }
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+        })
+      },
+      updateStoryStateMachine: async () => ({}),
+    })
+
+    expect(lifecycle.editorRevisionWorker).toBeDefined()
+    await Promise.all([
+      lifecycle.start(activeWorkspace),
+      lifecycle.start(activeWorkspace),
+    ])
+    await eventually(() => activeSignals.length === 1, 'loaded workspace revision did not start')
+
+    expect(projectWorkspaceCalls).toEqual([activeWorkspace])
+    expect((await getEditorRevisionRun(defaultWorkspace, defaultFixture.project.id, defaultFixture.run.id))?.status).toBe('queued')
+    expect((await getEditorRevisionRun(activeWorkspace, activeFixture.project.id, activeFixture.run.id))?.status).toBe('running')
+
+    await Promise.all([
+      lifecycle.stop(),
+      lifecycle.stop(),
+    ])
+
+    expect(activeSignals).toHaveLength(1)
+    expect(activeSignals.every(signal => signal.aborted)).toBe(true)
+    expect((await getEditorRevisionRun(activeWorkspace, activeFixture.project.id, activeFixture.run.id))?.status).toBe('queued')
+  })
+
   test.each([
     { label: 'malformed JSON', inputRef: '{' },
     {

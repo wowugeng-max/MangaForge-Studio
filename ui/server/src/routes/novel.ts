@@ -153,7 +153,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     ensureChapterPlanningForRange,
   })
 
-  registerNovelEditorRoutes(app, {
+  const editorLifecycle = registerNovelEditorRoutes(app, {
     getWorkspace,
     getProject,
     buildChapterContextPackage: writingService.buildChapterContextPackage,
@@ -194,4 +194,10 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     getWorkspace,
     getProject,
   })
+
+  return {
+    start: (workspace: string) => editorLifecycle.start(workspace),
+    stop: () => editorLifecycle.stop(),
+    editorRevisionWorker: editorLifecycle.editorRevisionWorker,
+  }
 }
