@@ -10,6 +10,16 @@ export const EDITOR_REVISION_PHASES = [
 
 export type EditorRevisionPhase = typeof EDITOR_REVISION_PHASES[number]
 
+export const EDITOR_REVISION_PHASE_LABELS = {
+  generate_candidate: '生成候选',
+  admit_candidate: '安全检查',
+  persist_chapter: '保存版本',
+  post_quality: '当前章质检',
+  sync_current_story_state: '当前章状态更新',
+  record_continuity_warning: '记录连续性提示',
+  completed: '完成',
+} as const satisfies Record<EditorRevisionPhase, string>
+
 export type EditorRevisionRunStatus =
   | 'queued'
   | 'running'

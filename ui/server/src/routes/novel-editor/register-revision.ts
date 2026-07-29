@@ -1,50 +1,154 @@
 import type { Express } from 'express'
 import {
-  appendNovelRun,
+  createEditorRevisionRun,
   createNovelReview,
-  listChapterVersions,
+  getEditorRevisionRun,
   listNovelCharacters,
   listNovelChapters,
   listNovelOutlines,
   listNovelReviews,
-  listNovelRuns,
   listNovelWorldbuilding,
-  updateNovelChapter,
-  updateNovelRun,
+  requestEditorRevisionCancel,
+  retryEditorRevisionRun,
 } from '../../novel'
-import { executeNovelAgent, previewNovelKnowledgeInjection } from '../../llm'
-import { asArray, buildLLMResultDiagnostics, clampScore, extractLLMText, getNovelPayload, getSafetyPolicy, normalizeIssue, parseJsonLikePayload, safeJsonStringify } from '../novel-route-utils'
-import { mergeProseQualityWithDeliveryRisks } from '../../novel-writing/prose-quality-delivery-link'
-import { buildCurrentChapterPlanAlignment } from '../../novel-writing/chapter-plan-from-prose'
-import { buildLiveContractChapterPatch, collectClosedBeatFamiliesFromChapters } from '../../novel-writing/closed-beat-canon'
+import { executeNovelAgent } from '../../llm'
+import { countProseChars } from '../../novel-writing/word-target'
+import { asArray, getNovelPayload, parseJsonLikePayload } from '../novel-route-utils'
 import {
-  COMPACT_REVISION_RETRY_MAX_TOKENS,
   type EditorRoutesContext,
-  REVISION_MAX_TOKENS,
-  applySurgicalRevisionPatch,
   buildChapterDeliveryRiskBrief,
-  buildChapterQualityCard,
-  buildCompactEditorRevisionPrompt,
-  buildDeliveryRiskConvergenceReport,
   buildEditorReportPrompt,
-  buildEditorRevisionPrompt,
   buildProseQualityRevisionReport,
-  buildReviewAnnotationRepairTasks,
-  buildReviewAnnotations,
-  buildStorylineDiffDecisionRepairTasks,
-  buildStorylineDiffDecisionReviewPayload,
   buildWorkflowRevisionContextBrief,
-  createProseQualityReview,
   editorJson,
-  focusDeliveryRiskBriefForRevision,
-  isRevisionOutputTruncated,
   loadChapterBundle,
-  shouldRetryRevisionPatch,
 } from './builders'
+import type {
+  EditorRevisionCheckpoint,
+  EditorRevisionPhase,
+  EditorRevisionPhaseState,
+  EditorRevisionRunInput,
+} from './editor-revision-contract'
 import { revisionTextHash } from './revision-candidate-admission'
-import { applySingleChapterStoryState, prepareSingleChapterStoryState } from './single-chapter-story-state'
+import {
+  buildEditorRevisionDiagnostics,
+  buildPublicEditorRevisionRun,
+} from './revision-run-view'
+import type { EditorRevisionWorker } from './revision-worker'
 
-export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRoutesContext) {
+export type EditorRevisionRoutesContext = EditorRoutesContext & {
+  editorRevisionWorker: Pick<EditorRevisionWorker, 'enqueue' | 'cancel'>
+}
+
+function initialEditorRevisionCheckpoint(): EditorRevisionCheckpoint {
+  return {
+    schema_version: 1,
+    phase: 'generate_candidate',
+    phases: Object.fromEntries([
+      'generate_candidate',
+      'admit_candidate',
+      'persist_chapter',
+      'post_quality',
+      'sync_current_story_state',
+      'record_continuity_warning',
+      'completed',
+    ].map(phase => [phase, {
+      status: 'pending',
+      attempt: 0,
+    }])) as Record<EditorRevisionPhase, EditorRevisionPhaseState>,
+    prose_persisted: false,
+    warnings: [],
+  }
+}
+
+function positiveInteger(value: unknown): number | null {
+  const numberValue = Number(value)
+  return Number.isInteger(numberValue) && numberValue > 0 ? numberValue : null
+}
+
+function nonNegativeInteger(value: unknown): number | null {
+  const numberValue = Number(value)
+  return Number.isInteger(numberValue) && numberValue >= 0 ? numberValue : null
+}
+
+function plainObject(value: unknown): Record<string, any> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, any>
+    : null
+}
+
+function requireActionProjectId(req: any, res: any): number | null {
+  const projectId = positiveInteger(req.body?.project_id ?? req.query?.project_id)
+  if (!projectId) {
+    res.status(400).json({ error: 'project_id is required', error_code: 'PROJECT_ID_REQUIRED' })
+    return null
+  }
+  return projectId
+}
+
+function sourceReviewSnapshot(review: any, payload: Record<string, any>, chapterId: number) {
+  const selfCheckReview = plainObject(payload.self_check?.review)
+  const report = plainObject(payload.report)
+  return {
+    id: review.id,
+    review_type: String(review.review_type || ''),
+    status: String(review.status || ''),
+    summary: String(review.summary || ''),
+    issues: asArray(review.issues).map((item: unknown) => String(item || '')).filter(Boolean),
+    payload: {
+      chapter_id: chapterId,
+      ...(selfCheckReview ? { self_check: { review: selfCheckReview } } : {}),
+      ...(report ? { report } : {}),
+    },
+    created_at: String(review.created_at || ''),
+  }
+}
+
+function repairTaskLink(value: unknown): EditorRevisionRunInput['repair_task_link'] | undefined {
+  if (value === undefined || value === null) return undefined
+  const link = plainObject(value)
+  const runId = positiveInteger(link?.run_id)
+  const taskIndex = nonNegativeInteger(link?.task_index)
+  const task = plainObject(link?.task)
+  if (!link || !runId || taskIndex === null || !task) return undefined
+  return { run_id: runId, task_index: taskIndex, task }
+}
+
+function revisionStatusUrl(runId: number, projectId: number) {
+  return `/api/novel/editor-revisions/${runId}?project_id=${projectId}`
+}
+
+function respondRevisionError(res: any, error: any) {
+  const code = String(error?.code || '')
+  if (code === 'REVISION_ALREADY_ACTIVE') {
+    const runId = positiveInteger(error?.existingRunId) || 0
+    return res.status(409).json({
+      error: String(error?.message || 'an editor revision is already active for this chapter'),
+      error_code: code,
+      run_id: runId,
+      status_url: String(error?.statusUrl || ''),
+    })
+  }
+  if (code === 'REVISION_RESTART_REQUIRED') {
+    return res.status(409).json({
+      error: String(error?.message || 'editor revision must restart from a fresh source snapshot'),
+      error_code: code,
+    })
+  }
+  if ([
+    'REVISION_LEASE_OR_STATE_INVALID',
+    'REVISION_CHECKPOINT_INVALID',
+    'REVISION_INPUT_INVALID',
+  ].includes(code)) {
+    return res.status(409).json({
+      error: 'editor revision action is not allowed in the current state',
+      error_code: 'REVISION_ACTION_NOT_ALLOWED',
+    })
+  }
+  return res.status(500).json({ error: String(error?.message || error) })
+}
+
+export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRevisionRoutesContext) {
   app.post('/api/novel/chapters/:chapterId/editor-report', async (req, res) => {
     try {
       const loaded = await loadChapterBundle(ctx, Number(req.body.project_id || 0), Number(req.params.chapterId))
@@ -81,348 +185,192 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRoute
   app.post('/api/novel/reviews/:reviewId/apply-revision', async (req, res) => {
     try {
       const activeWorkspace = ctx.getWorkspace()
-      const projectId = Number(req.body.project_id || 0)
+      const projectId = positiveInteger(req.body?.project_id)
+      if (!projectId) return res.status(400).json({ error: 'project_id is required', error_code: 'PROJECT_ID_REQUIRED' })
       const project = await ctx.getProject(activeWorkspace, projectId)
       if (!project) return res.status(404).json({ error: 'project not found' })
+
       const reviews = await listNovelReviews(activeWorkspace, projectId)
       const review = reviews.find(item => item.id === Number(req.params.reviewId))
       if (!review) return res.status(404).json({ error: 'review not found' })
       const payload = parseJsonLikePayload(review.payload) || {}
-      const selfCheckReview = payload.self_check?.review || {}
-      const report = payload.report || (review.review_type === 'prose_quality'
-        ? buildProseQualityRevisionReport(selfCheckReview)
-        : {})
-      const chapterId = Number(payload.chapter_id || req.body.chapter_id || 0)
+      const requestedChapterId = positiveInteger(req.body?.chapter_id)
+      const reviewChapterId = positiveInteger(
+        payload.chapter_id
+        || payload.report?.chapter_id
+        || payload.context_package?.chapter_target?.id,
+      )
+      if (requestedChapterId && reviewChapterId && requestedChapterId !== reviewChapterId) {
+        return res.status(400).json({
+          error: 'review does not belong to the requested chapter',
+          error_code: 'REVISION_REVIEW_CHAPTER_MISMATCH',
+        })
+      }
+      const chapterId = reviewChapterId || requestedChapterId
+      if (!chapterId) return res.status(400).json({ error: 'chapter_id is required', error_code: 'REVISION_CHAPTER_REQUIRED' })
       const chapters = await listNovelChapters(activeWorkspace, projectId)
       const chapter = chapters.find(item => item.id === chapterId)
       if (!chapter) return res.status(404).json({ error: 'chapter not found' })
+
+      const sourceText = String(chapter.chapter_text || '')
+      if (!sourceText.trim()) {
+        return res.status(400).json({
+          error: 'chapter source text is required',
+          error_code: 'REVISION_SOURCE_TEXT_REQUIRED',
+        })
+      }
+      const sourceUpdatedAt = String(chapter.updated_at || '')
+      if (!sourceUpdatedAt || !Number.isFinite(new Date(sourceUpdatedAt).getTime())) {
+        return res.status(409).json({
+          error: 'chapter source snapshot is invalid',
+          error_code: 'REVISION_SOURCE_SNAPSHOT_INVALID',
+        })
+      }
+
       const [worldbuilding, characters, outlines] = await Promise.all([
         listNovelWorldbuilding(activeWorkspace, projectId),
         listNovelCharacters(activeWorkspace, projectId),
         listNovelOutlines(activeWorkspace, projectId),
       ])
-      const contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
-      const revisionMode = String(req.body.revision_mode || 'from_report')
-      const deliveryRiskBrief = focusDeliveryRiskBriefForRevision(
-        buildChapterDeliveryRiskBrief(chapter, reviews),
-        report,
-      )
-      const revisionStrategy = String(report?.revision_strategy || 'surgical_patch')
-      const structuralRewrite = revisionStrategy === 'structural_rewrite'
-      const openingStructuralPatch = revisionStrategy === 'opening_structural_patch'
-      const originalChapterChars = String(chapter.chapter_text || '').length
-      // Full structural rewrite needs ~2x chapter chars in tokens once JSON-escaped; opening patch stays small.
-      const revisionMaxTokens = structuralRewrite
-        ? Math.min(28000, Math.max(12000, Math.ceil(originalChapterChars * 2.4) + 2500))
-        : openingStructuralPatch
-          ? Math.max(REVISION_MAX_TOKENS, 6000)
-          : REVISION_MAX_TOKENS
-      const prompt = buildEditorRevisionPrompt({
+      const contextPackage = await ctx.buildChapterContextPackage(
+        activeWorkspace,
         project,
         chapter,
-        contextPackage,
+        chapters,
+        worldbuilding,
+        characters,
+        outlines,
+        reviews,
+      )
+      const selfCheckReview = plainObject(payload.self_check?.review) || {}
+      const report = plainObject(payload.report)
+        || (review.review_type === 'prose_quality' ? buildProseQualityRevisionReport(selfCheckReview) : {})
+      const revisionMode = String(req.body?.revision_mode || 'from_report')
+      const revisionStrategy = String(report.revision_strategy || 'surgical_patch')
+      const preferredModelId = positiveInteger(req.body?.model_id) || undefined
+      const modelId = ctx.getStageModelId(project, 'revise', preferredModelId)
+      const linkValue = req.body?.repair_task_link
+      const link = repairTaskLink(linkValue)
+      if (linkValue !== undefined && !link) {
+        return res.status(400).json({
+          error: 'repair_task_link is invalid',
+          error_code: 'REVISION_REPAIR_TASK_LINK_INVALID',
+        })
+      }
+      const createdAt = new Date().toISOString()
+      const input: EditorRevisionRunInput = {
+        schema_version: 1,
+        project_id: projectId,
+        chapter_id: chapter.id,
+        chapter_no: chapter.chapter_no,
+        chapter_title: String(chapter.title || ''),
+        review_id: review.id,
+        source_chapter_updated_at: sourceUpdatedAt,
+        source_text: sourceText,
+        source_text_hash: revisionTextHash(sourceText),
+        source_char_count: countProseChars(sourceText),
+        source_review: sourceReviewSnapshot(review, payload, chapter.id),
         report,
-        deliveryRiskBrief,
-        revisionMode,
-        userPrompt: req.body.prompt,
-      })
-      const modelId = ctx.getStageModelId(project, 'revise', Number(req.body.model_id || 0) || undefined)
-      const revisionRun = await appendNovelRun(activeWorkspace, {
-        project_id: projectId,
-        run_type: 'editor_revision',
-        step_name: `chapter-${chapter.chapter_no}`,
-        status: 'running',
-        input_ref: JSON.stringify({
-          chapter_id: chapter.id,
-          review_id: review.id,
-          revision_strategy: report?.revision_strategy || 'surgical_patch',
-        }),
-        output_ref: JSON.stringify({ stage: 'revision_model' }),
-      })
-      const failRevisionRun = async (output: Record<string, unknown>) => updateNovelRun(activeWorkspace, revisionRun.id, {
-        status: 'failed',
-        output_ref: JSON.stringify(output),
-        error_message: String(output.error || output.error_code || 'editor revision failed'),
+        context_package: buildWorkflowRevisionContextBrief(contextPackage, chapter) || {},
+        revision_mode: revisionMode,
+        revision_strategy: revisionStrategy,
+        user_prompt: String(req.body?.prompt || ''),
+        ...(Number.isInteger(modelId) ? { model_id: modelId } : {}),
+        auto_quality_check: req.body?.auto_quality_check !== false,
+        auto_story_state: req.body?.auto_story_state !== false,
+        ...(link ? { repair_task_link: link } : {}),
+        created_at: createdAt,
+      }
+      const run = await createEditorRevisionRun(activeWorkspace, {
+        projectId,
+        chapterId: chapter.id,
+        inputRef: JSON.stringify(input),
+        outputRef: JSON.stringify(initialEditorRevisionCheckpoint()),
       })
       try {
-      let result = await executeNovelAgent('prose-agent', project, { task: prompt }, {
-        activeWorkspace,
-        modelId: modelId ? String(modelId) : undefined,
-        maxTokens: revisionMaxTokens,
-        temperature: ctx.getStageTemperature(project, 'revise', (structuralRewrite || openingStructuralPatch) ? 0.5 : 0.62),
-        responseMode: 'stream',
-        skipMemory: true,
+        ctx.editorRevisionWorker.enqueue(run.id)
+      } catch {
+        // The durable queued row remains discoverable by worker recovery.
+      }
+      return res.status(202).json({
+        ok: true,
+        run_id: run.id,
+        status: 'queued',
+        chapter_id: chapter.id,
+        status_url: revisionStatusUrl(run.id, projectId),
       })
-      if ((result as any).error) {
-        await failRevisionRun({ error: (result as any).error, stage: 'initial_llm' }).catch(() => null)
-        return res.status(502).json({ error: (result as any).error, result })
-      }
-      let resultPayload = getNovelPayload(result)
-      let patchResult = applySurgicalRevisionPatch(String(chapter.chapter_text || ''), resultPayload)
-      let nextText = patchResult.chapterText
-      if (!nextText || (!patchResult.applied.length && !resultPayload?.chapter_text && !resultPayload?.prose_chapters?.[0]?.chapter_text)) {
-        if (shouldRetryRevisionPatch(resultPayload, patchResult, result) || structuralRewrite || openingStructuralPatch) {
-          const retryReason = isRevisionOutputTruncated(result) ? 'initial_output_truncated' : 'initial_patch_not_applicable'
-          const retryReport = (structuralRewrite && isRevisionOutputTruncated(result))
-            ? { ...report, revision_strategy: 'opening_structural_patch' }
-            : report
-          const retryPrompt = buildCompactEditorRevisionPrompt({
-            project,
-            chapter,
-            report: retryReport,
-            deliveryRiskBrief,
-            revisionMode,
-            userPrompt: req.body.prompt,
-            previousOutputPreview: extractLLMText(result),
-          })
-          const retryResult = await executeNovelAgent('prose-agent', project, { task: retryPrompt }, {
-            activeWorkspace,
-            modelId: modelId ? String(modelId) : undefined,
-            maxTokens: structuralRewrite
-              ? Math.min(16000, Math.max(COMPACT_REVISION_RETRY_MAX_TOKENS, Math.ceil(originalChapterChars * 1.2) + 2000))
-              : Math.max(COMPACT_REVISION_RETRY_MAX_TOKENS, openingStructuralPatch ? 6000 : COMPACT_REVISION_RETRY_MAX_TOKENS),
-            temperature: (structuralRewrite || openingStructuralPatch) ? 0.35 : 0.15,
-            responseMode: 'stream',
-            skipMemory: true,
-          })
-          if (!(retryResult as any).error) {
-            const retryPayload = getNovelPayload(retryResult)
-            const retryPatchResult = applySurgicalRevisionPatch(String(chapter.chapter_text || ''), retryPayload)
-            const retryNextText = retryPatchResult.chapterText
-            if (retryNextText && (retryPatchResult.applied.length || retryPayload?.chapter_text || retryPayload?.prose_chapters?.[0]?.chapter_text)) {
-              result = {
-                ...(retryResult as any),
-                revision_retry: {
-                  reason: retryReason,
-                  source_finish_reason: (result as any)?.finish_reason || (result as any)?.raw?.finish_reason || (result as any)?.raw?.stop_reason || '',
-                },
-              }
-              resultPayload = retryPayload
-              patchResult = {
-                ...retryPatchResult,
-                retry: 'revision_retry',
-              }
-              nextText = retryNextText
-            } else {
-              await failRevisionRun({
-                error_code: isRevisionOutputTruncated(retryResult) ? 'REVISION_RETRY_OUTPUT_TRUNCATED' : 'REVISION_RETRY_NO_APPLICABLE_PATCH',
-                patch_applied: retryPatchResult?.applied?.length || 0,
-              }).catch(() => null)
-              return res.status(502).json({
-                error: isRevisionOutputTruncated(retryResult) ? '修订重试输出仍被截断，未形成完整 JSON 补丁' : '修订重试未返回可应用补丁',
-                error_code: isRevisionOutputTruncated(retryResult) ? 'REVISION_RETRY_OUTPUT_TRUNCATED' : 'REVISION_RETRY_NO_APPLICABLE_PATCH',
-                result,
-                retry_result: retryResult,
-                llm_diagnostics: buildLLMResultDiagnostics(result),
-                retry_llm_diagnostics: buildLLMResultDiagnostics(retryResult),
-                patch_result: retryPatchResult,
-              })
-            }
-          } else {
-            await failRevisionRun({ error: (retryResult as any).error, stage: 'revision_retry' }).catch(() => null)
-            return res.status(502).json({ error: (retryResult as any).error, result, retry_result: retryResult })
-          }
-        }
-      }
-      if (!nextText || (!patchResult.applied.length && !resultPayload?.chapter_text && !resultPayload?.prose_chapters?.[0]?.chapter_text)) {
-        if (isRevisionOutputTruncated(result)) {
-          await failRevisionRun({
-            error_code: 'REVISION_OUTPUT_TRUNCATED',
-            patch_applied: patchResult?.applied?.length || 0,
-            patch_unapplied: patchResult?.unapplied?.length || 0,
-          }).catch(() => null)
-          return res.status(502).json({
-            error: '修订输出被截断，未形成完整 JSON 补丁',
-            error_code: 'REVISION_OUTPUT_TRUNCATED',
-            result,
-            llm_diagnostics: buildLLMResultDiagnostics(result),
-            patch_result: patchResult,
-          })
-        }
-        await failRevisionRun({
-          error_code: 'REVISION_NO_APPLICABLE_PATCH',
-          patch_applied: patchResult?.applied?.length || 0,
-          patch_unapplied: patchResult?.unapplied?.length || 0,
-        }).catch(() => null)
-          return res.status(502).json({ error: '修订未返回可应用补丁', result, patch_result: patchResult })
-      }
-      let updated = await updateNovelChapter(activeWorkspace, chapter.id, {
-        chapter_text: nextText,
-        continuity_notes: resultPayload?.continuity_notes || resultPayload?.prose_chapters?.[0]?.continuity_notes || chapter.continuity_notes || [],
-        raw_payload: {
-          ...(chapter.raw_payload || {}),
-          generated_scene_breakdown: resultPayload?.scene_breakdown || resultPayload?.prose_chapters?.[0]?.scene_breakdown || [],
-        },
-        status: 'draft',
-      }, { versionSource: 'repair' })
-      let planAlignment: any = null
-      try {
-        const allChapters = await listNovelChapters(activeWorkspace, projectId)
-        const alignment = buildCurrentChapterPlanAlignment(allChapters, updated, {
-          force: true,
-          source: structuralRewrite ? 'post_structural_revision' : 'post_editor_revision',
-        })
-        planAlignment = {
-          rebuilt: alignment.rebuilt,
-          reason: alignment.reason,
-          following_count: 0,
-          patches: alignment.patch && Object.keys(alignment.patch).length
-            ? [{ chapter_id: alignment.chapter_id, kind: 'current' }]
-            : [],
-        }
-        if (alignment.patch && Object.keys(alignment.patch).length) {
-          updated = await updateNovelChapter(activeWorkspace, alignment.chapter_id, alignment.patch as any, { createVersion: false })
-        } else if (alignment.alignedChapter) {
-          updated = alignment.alignedChapter
-        }
-      } catch (error: any) {
-        planAlignment = { rebuilt: false, error: String(error?.message || error) }
-      }
-      const saved = await createNovelReview(activeWorkspace, {
-        project_id: projectId,
-        review_type: 'editor_revision',
-        status: 'ok',
-        summary: `已根据编辑报告 ${review.id} 生成修订稿`,
-        issues: [],
-        payload: editorJson({
-          chapter_id: chapter.id,
-          source_review_id: review.id,
-          requested_revision_mode: revisionMode,
-          revision_summary: resultPayload?.revision_summary || '',
-          revision_mode: resultPayload?.revision_mode || 'patch',
-          applied_patches: patchResult.applied,
-          unapplied_patches: patchResult.unapplied,
-          revision_context_receipts: resultPayload?.revision_context_receipts || resultPayload?.prose_chapters?.[0]?.revision_context_receipts || [],
-          revision_receipts: resultPayload?.revision_receipts || resultPayload?.prose_chapters?.[0]?.revision_receipts || [],
-          revision_scope_guard: resultPayload?.revision_scope_guard || resultPayload?.prose_chapters?.[0]?.revision_scope_guard || null,
-          cascade_impacts: [
-            ...asArray(resultPayload?.cascade_impacts || resultPayload?.cascadeImpacts),
-            ...asArray(resultPayload?.prose_chapters?.[0]?.cascade_impacts || resultPayload?.prose_chapters?.[0]?.cascadeImpacts),
-            ...asArray(resultPayload?.revision_receipts || resultPayload?.prose_chapters?.[0]?.revision_receipts)
-              .flatMap((receipt: any) => asArray(receipt?.cascade_impacts || receipt?.cascadeImpacts)),
-          ],
-          workflow_revision_context: buildWorkflowRevisionContextBrief(contextPackage, chapter),
-          delivery_risk_brief: deliveryRiskBrief,
-          plan_alignment: planAlignment,
-        }),
-      })
-      let qualityRefresh: any = null
-      if (req.body?.auto_quality_check !== false) {
-        try {
-          const quality = await createProseQualityReview(ctx, activeWorkspace, project, updated, {
-            model_id: req.body.model_id,
-            source: 'post_revision',
-            source_review_id: review.id,
-            source_run_id: revisionRun.id,
-            candidate_hash: revisionTextHash(String(updated.chapter_text || '')),
-            current_chapter_only: true,
-            max_tokens: 3000,
-          })
-          qualityRefresh = {
-            ok: true,
-            review: quality.saved,
-            score: quality.review.score,
-            status: quality.saved.status,
-          }
-        } catch (error: any) {
-          qualityRefresh = {
-            ok: false,
-            error: String(error?.message || error),
-          }
-          if (!error?.prose_quality_run_id) await appendNovelRun(activeWorkspace, {
-            project_id: projectId,
-            run_type: 'prose_quality',
-            step_name: `chapter-${chapter.chapter_no}`,
-            status: 'failed',
-            input_ref: JSON.stringify({
-              chapter_id: chapter.id,
-              source: 'post_revision',
-              source_review_id: review.id,
-              source_run_id: revisionRun.id,
-              candidate_hash: revisionTextHash(String(updated.chapter_text || '')),
-              current_chapter_only: true,
-            }),
-            output_ref: JSON.stringify({
-              error: qualityRefresh.error,
-              source_run_id: revisionRun.id,
-              candidate_hash: revisionTextHash(String(updated.chapter_text || '')),
-              current_chapter_only: true,
-            }),
-          })
-        }
-      }
-      let storyStateUpdate: any = null
-      if (req.body?.auto_story_state !== false) {
-        const receipt = {
-          source_run_id: revisionRun.id,
-          candidate_hash: revisionTextHash(String(updated.chapter_text || '')),
-          chapter_id: updated.id,
-        }
-        storyStateUpdate = await prepareSingleChapterStoryState(ctx, {
-          workspace: activeWorkspace,
-          projectId,
-          chapterId: updated.id,
-          modelId,
-          receipt,
-        }).then(prepared => applySingleChapterStoryState(ctx, {
-          workspace: activeWorkspace,
-          projectId,
-          chapterId: updated.id,
-          modelId,
-          receipt,
-          prepared: prepared.prepared,
-        })).catch(error => ({ ok: false, error: String(error?.message || error) }))
-      }
-      if (storyStateUpdate?.ok === false) {
-        await failRevisionRun({
-          stage: 'story_state',
-          error: storyStateUpdate.error,
-          prose_persisted: true,
-          chapter_id: updated.id,
-          quality_refresh: qualityRefresh,
-          story_state_update: storyStateUpdate,
-        })
-        return res.status(502).json({
-          ok: false,
-          chapter: updated,
-          review: saved,
-          quality_refresh: qualityRefresh,
-          story_state_update: storyStateUpdate,
-        })
-      }
-      const postRevisionReviews = await listNovelReviews(activeWorkspace, projectId)
-      const postDeliveryRiskBrief = buildChapterDeliveryRiskBrief(updated, postRevisionReviews)
-      const convergenceReport = buildDeliveryRiskConvergenceReport({
-        chapter: updated,
-        sourceReviewId: saved.id,
-        before: deliveryRiskBrief,
-        after: postDeliveryRiskBrief,
-      })
-      const convergenceReview = await createNovelReview(activeWorkspace, {
-        project_id: projectId,
-        review_type: 'delivery_risk_convergence',
-        status: convergenceReport.status === 'cleared' || convergenceReport.status === 'improved' ? 'ok' : 'warn',
-        summary: `${convergenceReport.label}，残留 ${convergenceReport.residual_count}`,
-        issues: convergenceReport.next_actions,
-        payload: JSON.stringify({
-          chapter_id: updated.id,
-          chapter_no: updated.chapter_no,
-          delivery_risk_convergence: convergenceReport,
-        }),
-      })
-      await updateNovelRun(activeWorkspace, revisionRun.id, {
-        status: 'success',
-        output_ref: JSON.stringify({ review: saved, modelName: (result as any).modelName, applied_patches: patchResult.applied.length, unapplied_patches: patchResult.unapplied.length, quality_refresh: qualityRefresh, story_state_update: storyStateUpdate, delivery_risk_convergence: convergenceReport }),
-      })
-      res.json({
-        plan_alignment: planAlignment, ok: true, chapter: updated, review: saved, result, patch_result: patchResult, quality_refresh: qualityRefresh, story_state_update: storyStateUpdate, delivery_risk_convergence: convergenceReport, delivery_risk_convergence_review: convergenceReview })
-      } catch (error: any) {
-        await failRevisionRun({ error: String(error?.message || error), stage: 'revision_workflow' }).catch(() => null)
-        throw error
-      }
-    } catch (error) {
-      res.status(500).json({ error: String(error) })
+    } catch (error: any) {
+      return respondRevisionError(res, error)
     }
   })
 
+  app.get('/api/novel/editor-revisions/:runId', async (req, res) => {
+    try {
+      const projectId = requireActionProjectId(req, res)
+      if (!projectId) return
+      const run = await getEditorRevisionRun(ctx.getWorkspace(), projectId, Number(req.params.runId))
+      if (!run) return res.status(404).json({ error: 'editor revision not found' })
+      return res.json(buildPublicEditorRevisionRun(run))
+    } catch (error: any) {
+      return respondRevisionError(res, error)
+    }
+  })
+
+  app.get('/api/novel/editor-revisions/:runId/diagnostics', async (req, res) => {
+    try {
+      const projectId = requireActionProjectId(req, res)
+      if (!projectId) return
+      const run = await getEditorRevisionRun(ctx.getWorkspace(), projectId, Number(req.params.runId))
+      if (!run) return res.status(404).json({ error: 'editor revision not found' })
+      return res.json({ ok: true, diagnostics: buildEditorRevisionDiagnostics(run) })
+    } catch (error: any) {
+      return respondRevisionError(res, error)
+    }
+  })
+
+  app.post('/api/novel/editor-revisions/:runId/cancel', async (req, res) => {
+    try {
+      const projectId = requireActionProjectId(req, res)
+      if (!projectId) return
+      const workspace = ctx.getWorkspace()
+      const runId = Number(req.params.runId)
+      const existing = await getEditorRevisionRun(workspace, projectId, runId)
+      if (!existing) return res.status(404).json({ error: 'editor revision not found' })
+      if (!['queued', 'running'].includes(existing.status)) {
+        return res.status(409).json({
+          error: 'editor revision cannot be canceled in the current state',
+          error_code: 'REVISION_ACTION_NOT_ALLOWED',
+        })
+      }
+      const updated = await requestEditorRevisionCancel(workspace, projectId, runId)
+      ctx.editorRevisionWorker.cancel(runId)
+      return res.json({ ok: true, action: 'cancel', run: buildPublicEditorRevisionRun(updated) })
+    } catch (error: any) {
+      return respondRevisionError(res, error)
+    }
+  })
+
+  app.post('/api/novel/editor-revisions/:runId/retry', async (req, res) => {
+    try {
+      const projectId = requireActionProjectId(req, res)
+      if (!projectId) return
+      const workspace = ctx.getWorkspace()
+      const runId = Number(req.params.runId)
+      const existing = await getEditorRevisionRun(workspace, projectId, runId)
+      if (!existing) return res.status(404).json({ error: 'editor revision not found' })
+      if (!['failed', 'canceled'].includes(existing.status)) {
+        return res.status(409).json({
+          error: 'editor revision cannot be retried in the current state',
+          error_code: 'REVISION_ACTION_NOT_ALLOWED',
+        })
+      }
+      const before = buildPublicEditorRevisionRun(existing)
+      const action = before.can_continue ? 'continue' : 'retry'
+      const updated = await retryEditorRevisionRun(workspace, projectId, runId)
+      ctx.editorRevisionWorker.enqueue(runId)
+      return res.json({ ok: true, action, run: buildPublicEditorRevisionRun(updated) })
+    } catch (error: any) {
+      return respondRevisionError(res, error)
+    }
+  })
 }

@@ -13,6 +13,7 @@ import {
   updateNovelRun,
 } from '../novel'
 import { parseJsonLikePayload } from './novel-route-utils'
+import { buildPublicEditorRevisionRun } from './novel-editor/revision-run-view'
 import {
   RunRoutesContext,
   buildAgentAudit,
@@ -61,9 +62,21 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
       if (!['full', 'summary'].includes(view)) return rejectInvalidQueryView(res, view, ['full', 'summary'])
       const limit = view === 'summary' ? optionalSummaryLimit(req, res) : undefined
       if (limit === null) return
-      res.json(view === 'summary'
-        ? await listNovelRunSummaries(ctx.getWorkspace(), Number(req.query.project_id || 0), limit)
-        : await listNovelRuns(ctx.getWorkspace(), Number(req.query.project_id || 0)))
+      const workspace = ctx.getWorkspace()
+      const projectId = Number(req.query.project_id || 0)
+      if (view === 'summary') {
+        const summaries = await listNovelRunSummaries(workspace, projectId, limit)
+        if (!summaries.some(run => run.run_type === 'editor_revision')) return res.json(summaries)
+        const fullRuns = await listNovelRuns(workspace, projectId)
+        const fullById = new Map(fullRuns.map(run => [run.id, run]))
+        return res.json(summaries.map(run => run.run_type === 'editor_revision'
+          ? buildPublicEditorRevisionRun(fullById.get(run.id) || run as any)
+          : run))
+      }
+      const runs = await listNovelRuns(workspace, projectId)
+      return res.json(runs.map(run => run.run_type === 'editor_revision'
+        ? buildPublicEditorRevisionRun(run)
+        : run))
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
@@ -75,7 +88,7 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
       if (projectId === null) return
       const run = await getNovelRun(ctx.getWorkspace(), Number(req.params.id), projectId)
       if (!run) return res.status(404).json({ error: 'run not found' })
-      res.json(run)
+      res.json(run.run_type === 'editor_revision' ? buildPublicEditorRevisionRun(run) : run)
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
@@ -119,6 +132,14 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
           : project.reference_config?.run_queue_worker)
         || { status: 'idle' }
       const normalizeRun = (run: any) => {
+        if (run.run_type === 'editor_revision') {
+          const publicRun = buildPublicEditorRevisionRun(run)
+          return {
+            ...publicRun,
+            type_label: '单章修订',
+            step_name: `第${publicRun.chapter_no}章 ${publicRun.chapter_title}`.trim(),
+          }
+        }
         const payload = parseJsonLikePayload(run.output_ref) || {}
         const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
         const terminalAdmission = Boolean(findTerminalAdmissionResumeGuard(payload))
@@ -229,9 +250,10 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
           'future_100_skeleton',
           'future_100_skeleton_apply',
           'longform_production_repair',
+          'editor_revision',
         ].includes(run.run_type))
         .map(normalizeRun)
-      const active = tasks.filter(task => ['queued', 'ready', 'running', 'paused', 'needs_approval'].includes(task.status))
+      const active = tasks.filter(task => ['queued', 'ready', 'running', 'cancel_requested', 'paused', 'needs_approval'].includes(task.status))
       res.json({
         ok: true,
         worker,
@@ -519,6 +541,13 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
       const runs = await listNovelRuns(activeWorkspace, Number(req.body.project_id || req.query.project_id || 0))
       const run = runs.find(item => item.id === Number(req.params.id))
       if (!run) return res.status(404).json({ error: 'run not found' })
+      if (run.run_type === 'editor_revision') {
+        return res.status(400).json({
+          error: 'editor revisions use their dedicated cancel/retry actions',
+          error_code: 'EDITOR_REVISION_ACTION_REQUIRED',
+          action: 'pause',
+        })
+      }
       const payload = parseJsonLikePayload(run.output_ref) || {}
       const updated = await updateNovelRun(activeWorkspace, run.id, {
         status: 'paused',
@@ -536,6 +565,13 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
       const runs = await listNovelRuns(activeWorkspace, Number(req.body.project_id || req.query.project_id || 0))
       const run = runs.find(item => item.id === Number(req.params.id))
       if (!run) return res.status(404).json({ error: 'run not found' })
+      if (run.run_type === 'editor_revision') {
+        return res.status(400).json({
+          error: 'editor revisions use their dedicated cancel/retry actions',
+          error_code: 'EDITOR_REVISION_ACTION_REQUIRED',
+          action: 'resume',
+        })
+      }
       const payload = parseJsonLikePayload(run.output_ref) || {}
       const terminalAdmissionGuard = findTerminalAdmissionResumeGuard(payload)
       if (terminalAdmissionGuard) return res.status(409).json(terminalAdmissionGuard)

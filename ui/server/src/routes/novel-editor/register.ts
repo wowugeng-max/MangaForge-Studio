@@ -9,9 +9,11 @@ import {
 import {
   registerNovelEditorQualityRoutes,
 } from './register-quality'
+import { createEditorRevisionWorker } from './revision-worker'
 
 export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext) {
+  const editorRevisionWorker = createEditorRevisionWorker(ctx)
   registerNovelEditorAnnotationRoutes(app, ctx)
-  registerNovelEditorRevisionRoutes(app, ctx)
+  registerNovelEditorRevisionRoutes(app, { ...ctx, editorRevisionWorker })
   registerNovelEditorQualityRoutes(app, ctx)
 }
