@@ -42,6 +42,11 @@ describe('editor revision task contract', () => {
       payload: { source_text: '不应进入前端任务模型的正文' },
     }))).toBe(false)
     expect(module.isEditorRevisionTask(revisionTask({ input_ref: '{"api_key":"secret"}' }))).toBe(false)
+    expect(module.isEditorRevisionTask(revisionTask({
+      quality: { review_id: 88, score: 92, passed: true, needs_revision: false, reused: false },
+    }))).toBe(true)
+    expect(module.isEditorRevisionTask(revisionTask({ quality: { passed: 'yes' } }))).toBe(false)
+    expect(module.isEditorRevisionTask(revisionTask({ quality: { passed: true, payload: { prose: 'secret' } } }))).toBe(false)
   })
 
   test('treats queued, running, and cancel_requested as active only', async () => {
@@ -109,8 +114,28 @@ describe('editor revision terminal messages', () => {
       status: 'completed',
       phase: 'completed',
       prose_persisted: true,
+      quality: { review_id: 88, score: 92, passed: true, needs_revision: false, reused: false },
     }))
     expect(message).toEqual({ type: 'success', text: '当前章修订和复检完成' })
+  })
+
+  test('does not claim recheck success when completed quality evidence is missing or skipped', async () => {
+    const module = await loadTaskModule()
+    expect(module).not.toBeNull()
+    if (!module) return
+
+    const expected = { type: 'warning', text: '新版本已保存，当前章仍需人工复查' }
+    expect(module.editorRevisionTerminalMessage(revisionTask({
+      status: 'completed',
+      phase: 'completed',
+      prose_persisted: true,
+      quality: null,
+    }))).toEqual(expected)
+    expect(module.editorRevisionTerminalMessage(revisionTask({
+      status: 'completed',
+      phase: 'completed',
+      prose_persisted: true,
+    }))).toEqual(expected)
   })
 
   test('reports a saved revision that still needs review verbatim', async () => {
@@ -122,6 +147,7 @@ describe('editor revision terminal messages', () => {
       status: 'completed',
       phase: 'completed',
       prose_persisted: true,
+      quality: { review_id: 88, score: 72, passed: false, needs_revision: true, reused: false },
       warnings: [{ code: 'POST_QUALITY_NEEDS_REVISION', message: '修订后质检仍建议人工复查' }],
     }))
     expect(message).toEqual({ type: 'warning', text: '新版本已保存，当前章仍需人工复查' })

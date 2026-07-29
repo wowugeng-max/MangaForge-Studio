@@ -1,3 +1,11 @@
+export type EditorRevisionQuality = {
+  review_id?: number
+  score?: number
+  passed?: boolean
+  needs_revision?: boolean
+  reused?: boolean
+}
+
 export type EditorRevisionTask = {
   id: number
   run_type: 'editor_revision'
@@ -9,6 +17,7 @@ export type EditorRevisionTask = {
   chapter_no: number
   chapter_title: string
   prose_persisted: boolean
+  quality?: EditorRevisionQuality | null
   warnings: Array<{ code: string; message: string }>
   error: { code: string; message: string } | null
   can_cancel: boolean
@@ -43,6 +52,13 @@ const PRIVATE_TASK_FIELDS = [
   'api_key',
   'authorization',
 ] as const
+const QUALITY_FIELDS = new Set<keyof EditorRevisionQuality>([
+  'review_id',
+  'score',
+  'passed',
+  'needs_revision',
+  'reused',
+])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -66,6 +82,17 @@ function isRepairTaskLink(value: unknown): value is NonNullable<EditorRevisionTa
     && isInteger(value.task_index, 0)
 }
 
+function isQuality(value: unknown): value is EditorRevisionQuality {
+  if (!isRecord(value)) return false
+  const keys = Object.keys(value)
+  if (!keys.length || keys.some(key => !QUALITY_FIELDS.has(key as keyof EditorRevisionQuality))) return false
+  return (value.review_id === undefined || isInteger(value.review_id, 1))
+    && (value.score === undefined || (typeof value.score === 'number' && Number.isFinite(value.score)))
+    && (value.passed === undefined || typeof value.passed === 'boolean')
+    && (value.needs_revision === undefined || typeof value.needs_revision === 'boolean')
+    && (value.reused === undefined || typeof value.reused === 'boolean')
+}
+
 export function isEditorRevisionTask(value: unknown): value is EditorRevisionTask {
   if (!isRecord(value)) return false
   if (PRIVATE_TASK_FIELDS.some(field => Object.prototype.hasOwnProperty.call(value, field))) return false
@@ -79,6 +106,7 @@ export function isEditorRevisionTask(value: unknown): value is EditorRevisionTas
     && isInteger(value.chapter_no, 1)
     && typeof value.chapter_title === 'string'
     && typeof value.prose_persisted === 'boolean'
+    && (value.quality === undefined || value.quality === null || isQuality(value.quality))
     && Array.isArray(value.warnings)
     && value.warnings.every(isWarning)
     && (value.error === null || isError(value.error))
@@ -122,7 +150,8 @@ export function editorRevisionTerminalMessage(task: EditorRevisionTask): {
     return { type: 'error', text: '修订未入库，当前正文保持不变' }
   }
   if (task.status === 'completed') {
-    if (task.warnings.length > 0) {
+    const qualityPassed = task.quality?.passed === true && task.quality.needs_revision !== true
+    if (task.warnings.length > 0 || !qualityPassed) {
       return { type: 'warning', text: '新版本已保存，当前章仍需人工复查' }
     }
     return { type: 'success', text: '当前章修订和复检完成' }

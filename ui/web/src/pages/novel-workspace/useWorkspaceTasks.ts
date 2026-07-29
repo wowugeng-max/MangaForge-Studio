@@ -64,6 +64,23 @@ export function createWorkspaceTaskRequestGate() {
   }
 }
 
+function staleWorkspaceTaskRequestError() {
+  const message = 'workspace task request is stale'
+  if (typeof DOMException === 'function') return new DOMException(message, 'AbortError')
+  const error = new Error(message)
+  error.name = 'AbortError'
+  return error
+}
+
+function requireCurrentWorkspaceTaskRequest(
+  gate: ReturnType<typeof createWorkspaceTaskRequestGate> | null,
+  request: WorkspaceTaskRequest,
+  projectId: number,
+) {
+  if (!gate?.isCurrent(request, projectId)) throw staleWorkspaceTaskRequestError()
+  return gate
+}
+
 export function workspaceTaskRefreshStarted<T>(state: WorkspaceTaskRefreshState<T>): WorkspaceTaskRefreshState<T> {
   return { ...state, confirmed: false }
 }
@@ -292,14 +309,13 @@ export function useWorkspaceTasks({
         { project_id: actionProjectId },
         { signal: request.signal },
       )
+      const requestGate = requireCurrentWorkspaceTaskRequest(requestGateRef.current, request, actionProjectId)
       const task = res.data?.run
       if (!isEditorRevisionTask(task)) throw new Error('invalid editor revision action response')
-      const requestGate = requestGateRef.current
-      if (requestGate?.isCurrent(request, actionProjectId)) {
-        setProductionRefresh(state => ({ ...state, data: mergeEditorRevisionTask(state.data, task) }))
-        requestGate.invalidateKind('production')
-        await loadProductionTasks()
-      }
+      setProductionRefresh(state => ({ ...state, data: mergeEditorRevisionTask(state.data, task) }))
+      requestGate.invalidateKind('production')
+      await loadProductionTasks()
+      requireCurrentWorkspaceTaskRequest(requestGateRef.current, request, actionProjectId)
       return task
     } finally {
       requestGateRef.current?.finish(request)
@@ -326,8 +342,10 @@ export function useWorkspaceTasks({
         params: { project_id: diagnosticsProjectId },
         signal: request.signal,
       })
+      requireCurrentWorkspaceTaskRequest(requestGateRef.current, request, diagnosticsProjectId)
       const diagnostics = res.data?.diagnostics
       if (!isRecord(diagnostics)) throw new Error('invalid editor revision diagnostics response')
+      requireCurrentWorkspaceTaskRequest(requestGateRef.current, request, diagnosticsProjectId)
       return diagnostics
     } finally {
       requestGateRef.current?.finish(request)

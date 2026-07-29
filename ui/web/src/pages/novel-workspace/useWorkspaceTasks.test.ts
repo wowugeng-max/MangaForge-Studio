@@ -749,6 +749,78 @@ describe('useWorkspaceTasks editor revision lifecycle', () => {
     expect(getRequests.filter(request => request.url === '/novel/projects/3/tasks')).toHaveLength(2)
   })
 
+  test('rejects diagnostics that resolve after the workspace switched projects', async () => {
+    const module = await loadPollingModule()
+    expect(module).not.toBeNull()
+    if (!module) return
+    const staleDiagnostics = deferred<any>()
+    let diagnosticsSignal: AbortSignal | undefined
+    apiClient.get = mock((url: string, config?: { signal?: AbortSignal }) => {
+      if (url.endsWith('/diagnostics')) {
+        diagnosticsSignal = config?.signal
+        return staleDiagnostics.promise
+      }
+      if (url === '/novel/projects/4/tasks') {
+        return Promise.resolve({ data: taskEnvelope([editorRevision({ id: 94, chapter_id: 21, chapter_title: '新项目' })]) })
+      }
+      return Promise.resolve({ data: taskEnvelope([editorRevision()]) })
+    }) as any
+
+    const mounted = mountWorkspaceTasks(module, workspaceProps())
+    await flushPromises()
+    const diagnostics = mounted.harness.value.loadEditorRevisionDiagnostics(81)
+    mounted.update(workspaceProps({ projectId: 4, activeChapter: { id: 21, chapter_no: 1, title: '新项目' } }))
+    await flushPromises()
+    expect(diagnosticsSignal?.aborted).toBe(true)
+
+    staleDiagnostics.resolve({ data: { ok: true, diagnostics: { phase: 'post_quality', project: 3 } } })
+    await expect(diagnostics).rejects.toMatchObject({ name: 'AbortError' })
+    expect(mounted.harness.value.editorRevisionTasks.map((task: any) => task.id)).toEqual([94])
+  })
+
+  test('rejects an action when its forced refresh finishes after the workspace switched projects', async () => {
+    const module = await loadPollingModule()
+    expect(module).not.toBeNull()
+    if (!module) return
+    const staleRefresh = deferred<any>()
+    let project3Requests = 0
+    let staleRefreshSignal: AbortSignal | undefined
+    apiClient.get = mock((url: string, config?: { signal?: AbortSignal }) => {
+      if (url === '/novel/projects/3/tasks') {
+        project3Requests += 1
+        if (project3Requests === 1) return Promise.resolve({ data: taskEnvelope([editorRevision()]) })
+        staleRefreshSignal = config?.signal
+        return staleRefresh.promise
+      }
+      if (url === '/novel/projects/4/tasks') {
+        return Promise.resolve({ data: taskEnvelope([editorRevision({ id: 94, chapter_id: 21, chapter_title: '新项目' })]) })
+      }
+      return Promise.resolve({ data: { jobs: [] } })
+    }) as any
+    apiClient.post = mock(async () => ({
+      data: {
+        ok: true,
+        action: 'cancel',
+        run: editorRevision({ status: 'cancel_requested', can_cancel: false }),
+      },
+    })) as any
+
+    const mounted = mountWorkspaceTasks(module, workspaceProps())
+    await flushPromises()
+    const action = mounted.harness.value.cancelEditorRevision(81)
+    await flushPromises()
+    expect(project3Requests).toBe(2)
+
+    mounted.update(workspaceProps({ projectId: 4, activeChapter: { id: 21, chapter_no: 1, title: '新项目' } }))
+    await flushPromises()
+    expect(staleRefreshSignal?.aborted).toBe(true)
+    expect(mounted.harness.value.editorRevisionTasks.map((task: any) => task.id)).toEqual([94])
+
+    staleRefresh.resolve({ data: taskEnvelope([editorRevision({ status: 'cancel_requested' })]) })
+    await expect(action).rejects.toMatchObject({ name: 'AbortError' })
+    expect(mounted.harness.value.editorRevisionTasks.map((task: any) => task.id)).toEqual([94])
+  })
+
   test('does not let a stale action response or follow-up refresh corrupt the new project', async () => {
     const module = await loadPollingModule()
     expect(module).not.toBeNull()
@@ -777,7 +849,7 @@ describe('useWorkspaceTasks editor revision lifecycle', () => {
     expect(mounted.harness.value.editorRevisionTasks.map((task: any) => task.id)).toEqual([94])
 
     staleAction.resolve({ data: { ok: true, action: 'cancel', run: editorRevision({ status: 'cancel_requested' }) } })
-    await action.catch(() => null)
+    await expect(action).rejects.toMatchObject({ name: 'AbortError' })
     await flushPromises()
     expect(mounted.harness.value.editorRevisionTasks.map((task: any) => task.id)).toEqual([94])
     expect(getRequests.filter(url => url === '/novel/projects/3/tasks')).toHaveLength(1)
