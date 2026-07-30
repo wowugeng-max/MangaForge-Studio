@@ -5,8 +5,10 @@ import { readMcpServers } from '../../mcp/server-store'
 import { hasMcpAdapter } from '../../mcp/adapters/registry'
 import { listNovelProjects } from '../../novel'
 
+const SOURCE_VERSION = 'prose_generation_source_v1' as const
+
 export type ModelProseGenerationSourceConfig = {
-  version: 'prose_generation_source_v1'
+  version: typeof SOURCE_VERSION
   type: 'model'
 }
 
@@ -18,7 +20,7 @@ export type McpProjectBinding = {
 }
 
 export type McpProseGenerationSourceConfig = {
-  version: 'prose_generation_source_v1'
+  version: typeof SOURCE_VERSION
   type: 'mcp'
   mcp: McpProjectBinding
 }
@@ -26,7 +28,7 @@ export type McpProseGenerationSourceConfig = {
 export type ProseGenerationSourceConfig = ModelProseGenerationSourceConfig | McpProseGenerationSourceConfig
 
 export const MODEL_PROSE_GENERATION_SOURCE: ModelProseGenerationSourceConfig = Object.freeze({
-  version: 'prose_generation_source_v1',
+  version: SOURCE_VERSION,
   type: 'model',
 })
 
@@ -51,21 +53,44 @@ export function normalizeMcpProjectBinding(value: any): McpProjectBinding {
   return binding
 }
 
-export function normalizeProseGenerationSource(value: any): ProseGenerationSourceConfig {
-  const type = String(value?.type || 'model').toLowerCase()
-  if (type === 'model') return { ...MODEL_PROSE_GENERATION_SOURCE }
-  if (type !== 'mcp') throw new McpError('MCP_BINDING_INVALID', `不支持的正文生成来源：${type}`)
+export function normalizeProseGenerationSource(value: unknown): ProseGenerationSourceConfig {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new McpError('MCP_BINDING_INVALID', '正文生成来源配置必须是对象')
+  }
+  const record = value as Record<string, unknown>
+  if (record.version !== SOURCE_VERSION) {
+    throw new McpError('MCP_BINDING_INVALID', '正文生成来源版本缺失或不受支持')
+  }
+  if (record.type === 'model') return { ...MODEL_PROSE_GENERATION_SOURCE }
+  if (record.type !== 'mcp') {
+    throw new McpError('MCP_BINDING_INVALID', '正文生成来源类型缺失或不受支持')
+  }
   return {
-    version: 'prose_generation_source_v1',
+    version: SOURCE_VERSION,
     type: 'mcp',
-    mcp: normalizeMcpProjectBinding(value?.mcp),
+    mcp: normalizeMcpProjectBinding(record.mcp),
   }
 }
 
 export function resolveProseGenerationSource(project: any): ProseGenerationSourceConfig {
-  const stored = project?.reference_config?.prose_generation_source
-  if (!stored) return { ...MODEL_PROSE_GENERATION_SOURCE }
-  return normalizeProseGenerationSource(stored)
+  const config = project?.reference_config
+  if (!config || !Object.prototype.hasOwnProperty.call(config, 'prose_generation_source')) {
+    return { ...MODEL_PROSE_GENERATION_SOURCE }
+  }
+  return normalizeProseGenerationSource(config.prose_generation_source)
+}
+
+export function proseGenerationSourceFingerprint(source: ProseGenerationSourceConfig) {
+  return source.type === 'model'
+    ? [source.version, source.type].join('\u0000')
+    : [
+        source.version,
+        source.type,
+        source.mcp.server_id,
+        String(source.mcp.key_id),
+        source.mcp.adapter_id,
+        source.mcp.agent_id,
+      ].join('\u0000')
 }
 
 export async function validateMcpCredentialSelection(activeWorkspace: string, input: {

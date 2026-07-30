@@ -61,6 +61,7 @@ describe('novel MCP prose-source binding routes', () => {
     expect(initial.body.source.type).toBe('model')
 
     const source = {
+      version: 'prose_generation_source_v1',
       type: 'mcp',
       mcp: { server_id: 'buda', key_id: key.id, adapter_id: 'buda', agent_id: 'agent-1' },
     }
@@ -74,6 +75,7 @@ describe('novel MCP prose-source binding routes', () => {
     const { key, first, second, handlers } = await fixture()
     const path = '/api/novel/projects/:id/prose-generation-source'
     const source = {
+      version: 'prose_generation_source_v1',
       type: 'mcp',
       mcp: { server_id: 'buda', key_id: key.id, adapter_id: 'buda', agent_id: 'agent-1' },
     }

@@ -39,6 +39,7 @@ describe('GenerationSource resolver', () => {
     const mcpProject = {
       reference_config: {
         prose_generation_source: {
+          version: 'prose_generation_source_v1',
           type: 'mcp',
           mcp: { server_id: 'buda', key_id: 3, adapter_id: 'buda', agent_id: 'agent-1' },
         },
