@@ -1317,7 +1317,10 @@ describe('durable editor revision worker', () => {
       'schema_version',
       'warnings',
     ])
-    expect(checkpoint.runtime_config).toEqual({ llm_timeout_ms: 600_000 })
+    expect(checkpoint.runtime_config).toEqual({
+      llm_timeout_ms: 600_000,
+      story_state_max_tokens: 9_000,
+    })
     expect(Object.keys(checkpoint.phases).sort()).toEqual([
       'admit_candidate',
       'completed',
@@ -3743,14 +3746,26 @@ describe('durable editor revision worker', () => {
         return null
       },
     })
+    harness.project.reference_config = {
+      editor_revision: { timeout_seconds: 420, story_state_max_tokens: 12_000 },
+    }
     installMatchingCommitMarker(harness)
     const first = harness.worker()
     await first.start(workspace)
     await first.waitForIdle()
     expect(harness.prepareCalls).toHaveLength(1)
     expect(harness.applyCalls).toHaveLength(0)
+    expect(harness.checkpoint().runtime_config).toEqual({
+      llm_timeout_ms: 420_000,
+      story_state_max_tokens: 12_000,
+    })
+    expect(harness.prepareCalls[0][1].maxTokens).toBe(12_000)
     expect(JSON.stringify(harness.checkpoint().story_state)).not.toContain('memory-only')
 
+    harness.project.reference_config.editor_revision = {
+      timeout_seconds: 600,
+      story_state_max_tokens: 64_000,
+    }
     harness.requeue()
     harness.setWriteCrash(undefined)
     const restarted = harness.worker()
@@ -3759,6 +3774,10 @@ describe('durable editor revision worker', () => {
 
     expect(harness.prepareCalls).toHaveLength(1)
     expect(harness.applyCalls).toHaveLength(1)
+    expect(harness.checkpoint().runtime_config).toEqual({
+      llm_timeout_ms: 420_000,
+      story_state_max_tokens: 12_000,
+    })
     expect(harness.applyCalls[0][1].prepared.receipt_binding.key).toContain(`${harness.run.id}:${harness.input.chapter_id}`)
   })
 
@@ -4069,35 +4088,51 @@ describe('durable editor revision worker', () => {
     expect(harness.revisionCalls[0][3]).toMatchObject({ timeoutMs: 600_000, maxRetries: 1 })
   })
 
-  test('uses one project timeout for every revision LLM phase and checkpoints it', async () => {
-    const harness = createHarness()
-    harness.project.reference_config = { editor_revision: { timeout_seconds: 420 } }
+  test('snapshots the project runtime config and forwards the exact Story State budget and model', async () => {
+    const harness = createHarness({ modelId: 73 })
+    harness.project.reference_config = {
+      editor_revision: { timeout_seconds: 420, story_state_max_tokens: 12_000 },
+    }
     const worker = harness.worker()
 
     await worker.start(workspace)
     await worker.waitForIdle()
 
-    expect(harness.checkpoint().runtime_config).toEqual({ llm_timeout_ms: 420_000 })
+    expect(harness.checkpoint().runtime_config).toEqual({
+      llm_timeout_ms: 420_000,
+      story_state_max_tokens: 12_000,
+    })
     expect(harness.revisionCalls[0][3]).toMatchObject({ timeoutMs: 420_000, maxRetries: 1 })
     expect(harness.qualityCalls[0].at(-1)).toMatchObject({ timeoutMs: 420_000, maxRetries: 1 })
-    expect(harness.prepareCalls[0][1]).toMatchObject({ timeoutMs: 420_000, maxRetries: 1 })
+    expect(harness.prepareCalls[0][1]).toMatchObject({
+      timeoutMs: 420_000,
+      maxRetries: 1,
+      maxTokens: 12_000,
+      modelId: harness.input.model_id,
+    })
     expect(harness.applyCalls[0][1]).toMatchObject({ timeoutMs: 420_000, maxRetries: 1 })
     expect(harness.timeoutRegistrations.filter(item => item.ms === 420_000)).toHaveLength(4)
   })
 
-  test('reuses a durable timeout snapshot instead of rereading changed project config', async () => {
+  test('preserves a legacy timeout snapshot and only fills its missing Story State budget', async () => {
     const checkpoint = initialCheckpoint()
     checkpoint.runtime_config = { llm_timeout_ms: 240_000 }
     const harness = createHarness({ checkpoint })
-    harness.project.reference_config = { editor_revision: { timeout_seconds: 420 } }
+    harness.project.reference_config = {
+      editor_revision: { timeout_seconds: 420, story_state_max_tokens: 12_000 },
+    }
     const worker = harness.worker()
 
     await worker.start(workspace)
     await worker.waitForIdle()
 
-    expect(harness.checkpoint().runtime_config).toEqual({ llm_timeout_ms: 240_000 })
+    expect(harness.checkpoint().runtime_config).toEqual({
+      llm_timeout_ms: 240_000,
+      story_state_max_tokens: 12_000,
+    })
     expect(harness.revisionCalls[0][3].timeoutMs).toBe(240_000)
     expect(harness.qualityCalls[0].at(-1).timeoutMs).toBe(240_000)
+    expect(harness.prepareCalls[0][1]).toMatchObject({ timeoutMs: 240_000, maxTokens: 12_000 })
   })
 
   test('keeps committed prose when post-quality reaches the configured timeout', async () => {

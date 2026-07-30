@@ -2976,6 +2976,30 @@ describe('single chapter Story State', () => {
     expect(fixture.modelCalls).toHaveLength(1)
   })
 
+  test('exact prepare forwards the configured Story State output budget to one model call', async () => {
+    const fixture = await storyFixture(3)
+    const target = fixture.chapters[0]
+    await prepareSingleChapterStoryState(fixture.ctx, {
+      workspace,
+      projectId: fixture.project.id,
+      chapterId: target.id,
+      maxTokens: 12_000,
+      receipt: receipt(target.id, revisionTextHash(String(target.chapter_text || ''))),
+    })
+
+    expect(fixture.modelCalls).toHaveLength(1)
+    expect(fixture.modelCalls[0][3]).toEqual({
+      activeWorkspace: workspace,
+      modelId: '217',
+      maxTokens: 12_000,
+      temperature: 0.15,
+      skipMemory: true,
+      signal: undefined,
+      timeoutMs: 180_000,
+      maxRetries: 1,
+    })
+  })
+
   test('replay keeps character, setting, usage, raw payload, relation and asset-derived reviews idempotent', async () => {
     const fixture = await storyFixture(3)
     const target = fixture.chapters[0]

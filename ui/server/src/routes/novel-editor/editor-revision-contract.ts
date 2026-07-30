@@ -80,6 +80,7 @@ export type EditorRevisionCheckpoint = {
   phases: Record<EditorRevisionPhase, EditorRevisionPhaseState>
   runtime_config?: {
     llm_timeout_ms: number
+    story_state_max_tokens?: number
   }
   candidate?: {
     text: string

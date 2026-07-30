@@ -15,7 +15,9 @@ import { withNovelDbWrite } from '../sql-rows'
 import type { NovelRunRecord } from '../types'
 import {
   MAX_EDITOR_REVISION_TIMEOUT_SECONDS,
+  MAX_EDITOR_REVISION_STORY_STATE_MAX_TOKENS,
   MIN_EDITOR_REVISION_TIMEOUT_SECONDS,
+  MIN_EDITOR_REVISION_STORY_STATE_MAX_TOKENS,
 } from '../editor-revision-runtime-config'
 import {
   isEditorRevisionTaskClosureStatus,
@@ -106,12 +108,18 @@ function assertRuntimeConfigCoherent(checkpoint: EditorRevisionCheckpoint) {
   const runtime = checkpoint.runtime_config as any
   if (runtime === undefined) return
   const timeoutMs = runtime?.llm_timeout_ms
+  const storyStateMaxTokens = runtime?.story_state_max_tokens
   if (!runtime
     || typeof runtime !== 'object'
     || !Number.isInteger(timeoutMs)
     || timeoutMs % 1_000 !== 0
     || timeoutMs < MIN_EDITOR_REVISION_TIMEOUT_SECONDS * 1_000
-    || timeoutMs > MAX_EDITOR_REVISION_TIMEOUT_SECONDS * 1_000) {
+    || timeoutMs > MAX_EDITOR_REVISION_TIMEOUT_SECONDS * 1_000
+    || (storyStateMaxTokens !== undefined && (
+      !Number.isInteger(storyStateMaxTokens)
+      || storyStateMaxTokens < MIN_EDITOR_REVISION_STORY_STATE_MAX_TOKENS
+      || storyStateMaxTokens > MAX_EDITOR_REVISION_STORY_STATE_MAX_TOKENS
+    ))) {
     checkpointInvalid('editor revision checkpoint runtime config is not canonical')
   }
 }

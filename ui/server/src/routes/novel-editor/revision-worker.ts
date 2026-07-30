@@ -26,7 +26,7 @@ import { executeNovelAgent } from '../../llm'
 import { buildCurrentChapterPlanAlignment } from '../../novel-writing/chapter-plan-from-prose'
 import { countProseChars } from '../../novel-writing/word-target'
 import { compactPreparedStoryStateForRecovery } from '../../novel-writing-service/service/story-state-machine-update'
-import { resolveEditorRevisionTimeoutMs } from '../../novel/editor-revision-runtime-config'
+import { resolveEditorRevisionRuntimeConfig } from '../../novel/editor-revision-runtime-config'
 import { buildLLMResultDiagnostics, extractLLMText, getNovelPayload } from '../novel-route-utils'
 import {
   buildChapterDeliveryRiskBrief,
@@ -555,7 +555,7 @@ export function createEditorRevisionWorker(
     return { fresh, checkpoint: parseCheckpoint(fresh.output_ref, fresh.status) }
   }
 
-  async function resolveRunLlmTimeoutMs(
+  async function resolveRunRuntimeConfig(
     input: EditorRevisionRunInput,
     runId: number,
     project: any,
@@ -563,10 +563,20 @@ export function createEditorRevisionWorker(
     lease: LeaseState,
   ) {
     const loaded = await phaseCheckpoint(input, runId, controller, lease)
-    const stored = loaded.checkpoint.runtime_config?.llm_timeout_ms
-    if (stored !== undefined) return stored
-    const llmTimeoutMs = resolveEditorRevisionTimeoutMs(project)
-    loaded.checkpoint.runtime_config = { llm_timeout_ms: llmTimeoutMs }
+    const stored = loaded.checkpoint.runtime_config
+    if (stored?.story_state_max_tokens !== undefined) {
+      return {
+        llmTimeoutMs: stored.llm_timeout_ms,
+        storyStateMaxTokens: stored.story_state_max_tokens,
+      }
+    }
+    const projectRuntime = resolveEditorRevisionRuntimeConfig(project)
+    const llmTimeoutMs = stored?.llm_timeout_ms ?? projectRuntime.timeout_seconds * 1_000
+    const storyStateMaxTokens = projectRuntime.story_state_max_tokens
+    loaded.checkpoint.runtime_config = {
+      llm_timeout_ms: llmTimeoutMs,
+      story_state_max_tokens: storyStateMaxTokens,
+    }
     await writeCheckpoint(
       input,
       runId,
@@ -576,7 +586,7 @@ export function createEditorRevisionWorker(
       undefined,
       lease,
     )
-    return llmTimeoutMs
+    return { llmTimeoutMs, storyStateMaxTokens }
   }
 
   async function markRunning(
@@ -1159,6 +1169,7 @@ export function createEditorRevisionWorker(
     controller: AbortController,
     lease: LeaseState,
     llmTimeoutMs: number,
+    storyStateMaxTokens: number,
   ) {
     let checkpoint = (await phaseCheckpoint(input, runId, controller, lease)).checkpoint
     if (TERMINAL_PHASE_STATES.has(checkpoint.phases.sync_current_story_state.status)) return checkpoint
@@ -1183,6 +1194,7 @@ export function createEditorRevisionWorker(
         signal: controller.signal,
         timeoutMs: llmTimeoutMs,
         maxRetries: 1,
+        maxTokens: storyStateMaxTokens,
       }))
       reusedPrepare = preparedResult.reused
       completedReceipt = preparedResult.completedReceipt || null
@@ -1406,11 +1418,12 @@ export function createEditorRevisionWorker(
       const project = await ctx.getProject(activeWorkspace!, input.project_id)
       if (!project) throw revisionError('PROJECT_NOT_FOUND')
       await recoverCommittedChapter(input, run.id, controller, lease)
-      const llmTimeoutMs = await resolveRunLlmTimeoutMs(input, run.id, project, controller, lease)
+      const runtimeConfig = await resolveRunRuntimeConfig(input, run.id, project, controller, lease)
+      const { llmTimeoutMs, storyStateMaxTokens } = runtimeConfig
       await generateAndAdmit(input, run.id, project, controller, lease, llmTimeoutMs)
       await persistChapter(input, run.id, controller, lease)
       await runPostQuality(input, run.id, project, controller, lease, llmTimeoutMs)
-      await runStoryState(input, run.id, controller, lease, llmTimeoutMs)
+      await runStoryState(input, run.id, controller, lease, llmTimeoutMs, storyStateMaxTokens)
       await recordDeterministicReviews(input, run.id, controller, lease)
       await completeRun(input, run.id, controller, lease)
     } catch (error) {

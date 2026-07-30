@@ -26,6 +26,7 @@ type SingleChapterStoryStateInput = {
   signal?: AbortSignal
   timeoutMs?: number
   maxRetries?: number
+  maxTokens?: number
   workerLease?: { runId: number; owner: string }
 }
 
@@ -133,6 +134,7 @@ export async function prepareSingleChapterStoryState(
       signal: input.signal,
       timeoutMs: input.timeoutMs ?? 180_000,
       maxRetries: input.maxRetries ?? 1,
+      maxTokens: input.maxTokens,
       retryOnBlockedTransport: false,
       allowDeterministicFallback: false,
     },

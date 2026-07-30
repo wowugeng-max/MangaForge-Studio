@@ -15,7 +15,7 @@ import {
 } from './editor-revision-runtime-config'
 import { requireCoherentEditorRevisionCheckpoint } from './repos/editor-revision-runs'
 
-function initialCheckpoint(runtimeConfig?: { llm_timeout_ms: number }) {
+function initialCheckpoint(runtimeConfig?: { llm_timeout_ms: number; story_state_max_tokens?: number }) {
   return {
     schema_version: 1 as const,
     phase: 'generate_candidate' as const,
@@ -73,10 +73,13 @@ describe('editor revision runtime config', () => {
     })).toBe(64_000)
   })
 
-  test('accepts an absent or canonical millisecond timeout snapshot', () => {
+  test('accepts absent, legacy timeout-only, and canonical runtime snapshots', () => {
     expect(() => requireCoherentEditorRevisionCheckpoint(initialCheckpoint())).not.toThrow()
     expect(() => requireCoherentEditorRevisionCheckpoint(
       initialCheckpoint({ llm_timeout_ms: 420_000 }),
+    )).not.toThrow()
+    expect(() => requireCoherentEditorRevisionCheckpoint(
+      initialCheckpoint({ llm_timeout_ms: 420_000, story_state_max_tokens: 12_000 }),
     )).not.toThrow()
   })
 
@@ -86,6 +89,28 @@ describe('editor revision runtime config', () => {
       expect(() => requireCoherentEditorRevisionCheckpoint(
         initialCheckpoint({ llm_timeout_ms: llmTimeoutMs }),
       )).toThrow('editor revision checkpoint runtime config is not canonical')
+    },
+  )
+
+  test.each([999, 262_145, 12_000.5])(
+    'rejects persisted non-canonical Story State token snapshot %p',
+    storyStateMaxTokens => {
+      expect(() => requireCoherentEditorRevisionCheckpoint(JSON.stringify(
+        initialCheckpoint({
+          llm_timeout_ms: 420_000,
+          story_state_max_tokens: storyStateMaxTokens,
+        }),
+      ))).toThrow('editor revision checkpoint runtime config is not canonical')
+    },
+  )
+
+  test.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    'rejects direct non-finite Story State token snapshot %p',
+    storyStateMaxTokens => {
+      expect(() => requireCoherentEditorRevisionCheckpoint(initialCheckpoint({
+        llm_timeout_ms: 420_000,
+        story_state_max_tokens: storyStateMaxTokens,
+      }))).toThrow('editor revision checkpoint runtime config is not canonical')
     },
   )
 })
