@@ -10,6 +10,14 @@ import {
   listNovelOutlines,
 } from '../novel'
 
+const planningRouteSource = [
+  'novel-planning/builders.ts',
+  'novel-planning/register.ts',
+  'novel-planning/register-reviews.ts',
+  'novel-planning/register-ab.ts',
+  'novel-planning/register-planning-ops.ts',
+].map(file => readFileSync(join(import.meta.dir, file), 'utf8')).join('\n')
+
 let workspaces: string[] = []
 
 async function tempWorkspace() {
@@ -25,7 +33,7 @@ afterEach(async () => {
 
 describe('novel rolling planning routes', () => {
   test('rolling plan prompt preserves batch brief repair intent', () => {
-    const source = [readFileSync(join(import.meta.dir, 'novel-planning/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-planning/register.ts'), 'utf8')].join('\n')
+    const source = planningRouteSource
 
     expect(source).toContain('const rollingPlanIntent = req.body.rolling_plan_intent || req.body.rollingPlanIntent || null')
     expect(source).toContain('【滚动规划意图】')
@@ -35,7 +43,7 @@ describe('novel rolling planning routes', () => {
   })
 
   test('rolling plan prompt preserves recent fatigue repair intent', () => {
-    const source = [readFileSync(join(import.meta.dir, 'novel-planning/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-planning/register.ts'), 'utf8')].join('\n')
+    const source = planningRouteSource
 
     expect(source).toContain("rollingPlanIntent?.source === 'recent_fatigue_repair'")
     expect(source).toContain('本次是近10章疲劳修复')
@@ -47,7 +55,7 @@ describe('novel rolling planning routes', () => {
   })
 
   test('rolling plan prompt turns IP scene coverage gaps into concrete scene repair obligations', () => {
-    const source = [readFileSync(join(import.meta.dir, 'novel-planning/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-planning/register.ts'), 'utf8')].join('\n')
+    const source = planningRouteSource
 
     expect(source).toContain('IP场面覆盖')
     expect(source).toContain('标志性场面补位')
@@ -58,7 +66,7 @@ describe('novel rolling planning routes', () => {
   })
 
   test('rolling plan writes generated chapters into chapter outlines', () => {
-    const source = [readFileSync(join(import.meta.dir, 'novel-planning/builders.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-planning/register.ts'), 'utf8')].join('\n')
+    const source = planningRouteSource
 
     expect(source).toContain('function normalizeRollingPlanPayload')
     expect(source).toContain('function rollingPlanOutlineData')
