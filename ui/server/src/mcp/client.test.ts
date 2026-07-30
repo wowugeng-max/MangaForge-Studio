@@ -1,0 +1,132 @@
+import { describe, expect, test } from 'bun:test'
+import { McpError } from './errors'
+import { buildMcpHeaders, createMcpClient, type McpSdkFactory } from './client'
+import { BUDA_MCP_SERVER_TEMPLATE } from './server-store'
+import type { McpKeyRecord, McpServerRecord } from './types'
+
+const key: McpKeyRecord = {
+  id: 7,
+  mcp_server_id: 'buda',
+  key: 'sk_test_secret',
+  description: '测试账号',
+  is_active: true,
+  priority: 0,
+  success_count: 0,
+  failure_count: 0,
+}
+
+function fakeSdkFactory(options: { toolError?: boolean } = {}) {
+  const capture: any = { calls: [] }
+  const sdk = {
+    async connect(transport: unknown, requestOptions: unknown) {
+      capture.connect = { transport, requestOptions }
+    },
+    async listTools(_params?: unknown, requestOptions?: unknown) {
+      capture.listOptions = requestOptions
+      return {
+        tools: [
+          { name: 'allowed', description: 'Allowed tool', inputSchema: { type: 'object' } },
+          { name: 'hidden', inputSchema: { type: 'object' } },
+        ],
+      }
+    },
+    async callTool(params: unknown, requestOptions?: unknown) {
+      capture.calls.push({ params, requestOptions })
+      return {
+        content: [{ type: 'text', text: options.toolError ? 'bad' : 'ok' }],
+        structuredContent: { ok: !options.toolError },
+        isError: Boolean(options.toolError),
+        _meta: { trace: 'trace-1' },
+      }
+    },
+    getServerVersion: () => ({ name: 'fake-server', version: '1.0.0' }),
+    getServerCapabilities: () => ({ tools: {} }),
+    getInstructions: () => 'fake instructions',
+    async close() { capture.closed = true },
+  }
+  const transport = {
+    async terminateSession() { capture.terminated = true },
+  }
+  const factory: McpSdkFactory = {
+    createClient: () => sdk as any,
+    createTransport: (url, transportOptions) => {
+      capture.url = url.toString()
+      capture.transportOptions = transportOptions
+      return transport as any
+    },
+  }
+  return { capture, factory }
+}
+
+describe('generic MCP client', () => {
+  test('builds isolated authentication headers without mutating server headers', () => {
+    const server: McpServerRecord = {
+      ...BUDA_MCP_SERVER_TEMPLATE,
+      custom_headers: { 'X-Workspace': 'novel' },
+    }
+    expect(buildMcpHeaders(server, key)).toEqual({
+      'X-Workspace': 'novel',
+      Authorization: 'Bearer sk_test_secret',
+    })
+    expect(server.custom_headers).toEqual({ 'X-Workspace': 'novel' })
+    expect(buildMcpHeaders({ ...server, auth_type: 'none' }, key)).toEqual({ 'X-Workspace': 'novel' })
+  })
+
+  test('connects, filters tools, preserves results, diagnostics, timeout, and signal', async () => {
+    const { capture, factory } = fakeSdkFactory()
+    const server = { ...BUDA_MCP_SERVER_TEMPLATE, enabled_tools: ['allowed'] }
+    const client = createMcpClient({ server, key, sdkFactory: factory })
+    const signal = new AbortController().signal
+
+    expect(client.state).toBe('Closed')
+    await client.connect(signal)
+    expect(client.state).toBe('Ready')
+    expect(capture.url).toBe('https://buda.im/api/mcp')
+    expect(capture.transportOptions.requestInit.headers.Authorization).toBe('Bearer sk_test_secret')
+    expect(capture.connect.requestOptions).toMatchObject({ timeout: 15_000, signal })
+    expect((await client.listTools(signal)).map(tool => tool.name)).toEqual(['allowed'])
+
+    const result = await client.callTool('allowed', { value: 1 }, { signal })
+    expect(result).toEqual({
+      content: [{ type: 'text', text: 'ok' }],
+      structuredContent: { ok: true },
+      isError: false,
+      _meta: { trace: 'trace-1' },
+    })
+    expect(capture.calls[0]).toMatchObject({
+      params: { name: 'allowed', arguments: { value: 1 } },
+      requestOptions: { timeout: 60_000, maxTotalTimeout: 60_000, signal },
+    })
+    expect(client.diagnostics()).toMatchObject({
+      state: 'Ready',
+      server_id: 'buda',
+      key_id: 7,
+      server_info: { name: 'fake-server' },
+      capabilities: { tools: {} },
+      instructions: 'fake instructions',
+    })
+  })
+
+  test('blocks undiscovered tools and maps tool-level failures to a stable error', async () => {
+    const normal = createMcpClient({ server: BUDA_MCP_SERVER_TEMPLATE, key, sdkFactory: fakeSdkFactory().factory })
+    await normal.connect()
+    await expect(normal.callTool('missing', {})).rejects.toMatchObject({ code: 'MCP_CAPABILITY_MISSING' })
+
+    const failing = createMcpClient({ server: BUDA_MCP_SERVER_TEMPLATE, key, sdkFactory: fakeSdkFactory({ toolError: true }).factory })
+    await failing.connect()
+    await expect(failing.callTool('allowed', {})).rejects.toEqual(expect.objectContaining({
+      code: 'MCP_TOOL_ERROR',
+      details: expect.objectContaining({ tool_name: 'allowed' }),
+    }))
+  })
+
+  test('terminates the transport session and closes the SDK client', async () => {
+    const { capture, factory } = fakeSdkFactory()
+    const client = createMcpClient({ server: BUDA_MCP_SERVER_TEMPLATE, key, sdkFactory: factory })
+    await client.connect()
+    await client.close()
+    expect(client.state).toBe('Closed')
+    expect(capture.terminated).toBe(true)
+    expect(capture.closed).toBe(true)
+  })
+})

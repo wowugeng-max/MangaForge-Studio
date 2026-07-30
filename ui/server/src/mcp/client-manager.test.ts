@@ -1,0 +1,57 @@
+import { describe, expect, test } from 'bun:test'
+import { McpClientManager } from './client-manager'
+
+describe('McpClientManager', () => {
+  test('isolates cache entries by workspace, Server ID, and Key ID', async () => {
+    const created: any[] = []
+    const manager = new McpClientManager({
+      createClient: input => {
+        const client = {
+          input,
+          state: 'Closed',
+          connectCalls: 0,
+          closeCalls: 0,
+          async connect() { this.state = 'Ready'; this.connectCalls += 1 },
+          async close() { this.state = 'Closed'; this.closeCalls += 1 },
+        }
+        created.push(client)
+        return client as any
+      },
+    })
+    const server = { id: 'buda' } as any
+    const key1 = { id: 1 } as any
+    const key2 = { id: 2 } as any
+
+    const first = await manager.get('/workspace/a', server, key1)
+    expect(await manager.get('/workspace/a', server, key1)).toBe(first)
+    expect(await manager.get('/workspace/a', server, key2)).not.toBe(first)
+    expect(await manager.get('/workspace/b', server, key1)).not.toBe(first)
+    expect(created).toHaveLength(3)
+    expect((first as any).connectCalls).toBe(1)
+  })
+
+  test('invalidates one credential connection and closes all remaining clients', async () => {
+    const clients: any[] = []
+    const manager = new McpClientManager({
+      createClient: () => {
+        const client = {
+          state: 'Closed',
+          closeCalls: 0,
+          async connect() { this.state = 'Ready' },
+          async close() { this.state = 'Closed'; this.closeCalls += 1 },
+        }
+        clients.push(client)
+        return client as any
+      },
+    })
+    const server = { id: 'buda' } as any
+    await manager.get('/workspace/a', server, { id: 1 } as any)
+    await manager.get('/workspace/a', server, { id: 2 } as any)
+
+    await manager.invalidate('/workspace/a', 'buda', 1)
+    expect(clients[0].closeCalls).toBe(1)
+    expect(clients[1].closeCalls).toBe(0)
+    await manager.closeAll()
+    expect(clients[1].closeCalls).toBe(1)
+  })
+})
