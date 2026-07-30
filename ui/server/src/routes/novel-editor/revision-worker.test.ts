@@ -1332,6 +1332,7 @@ describe('durable editor revision worker', () => {
     expect(Object.keys(checkpoint.error.diagnostics).sort()).toEqual([
       'applied_patch_count',
       'candidate_char_count',
+      'complete_malformed_json_recovered',
       'maximum_char_count',
       'minimum_char_count',
       'rejected_candidate',
@@ -1347,6 +1348,7 @@ describe('durable editor revision worker', () => {
         candidate_char_count: 243,
         minimum_char_count: 4137,
         maximum_char_count: 7683,
+        complete_malformed_json_recovered: false,
         applied_patch_count: 1,
         unapplied_patch_count: 0,
         unapplied_patch_reasons: [],

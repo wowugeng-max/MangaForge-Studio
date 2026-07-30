@@ -27,6 +27,21 @@ function completePatchResult(payload: Record<string, unknown>) {
   }
 }
 
+function malformedFencedResult(chapterText: string, options: {
+  finishReason?: string
+  closeEnvelope?: boolean
+  closeString?: boolean
+} = {}) {
+  const finishReason = options.finishReason || 'end_turn'
+  const json = options.closeString === false
+    ? `{"chapter_text":"${chapterText}`
+    : `{"chapter_text":"${chapterText}","continuity_notes":[]${options.closeEnvelope === false ? '' : '}'}`
+  return {
+    finish_reason: finishReason,
+    content: `\`\`\`json\n${json}\n\`\`\``,
+  }
+}
+
 function captureAdmissionError(sourceText: string, result: any) {
   try {
     admitRevisionCandidate({ sourceText, result })
@@ -102,6 +117,46 @@ describe('admitRevisionCandidate', () => {
       completeResult('修订正文。'.repeat(240), recoveryFlag),
     )
     expect(error.code).toBe('REVISION_PARTIAL_JSON_RECOVERY')
+  })
+
+  test('admits a normally completed full JSON envelope recovered from unescaped prose quotes', () => {
+    const sourceText = `${'甲'.repeat(1199)}。`
+    const candidate = `${'乙段推进。'.repeat(100)}"现在行动。"${'丙段推进。'.repeat(100)}`
+    const admission = admitRevisionCandidate({
+      sourceText,
+      result: malformedFencedResult(candidate),
+    })
+
+    expect(admission.chapterText).toBe(candidate)
+    expect(admission.diagnostics).toMatchObject({ complete_malformed_json_recovered: true })
+  })
+
+  test('admits an exact JSON Markdown fence around an otherwise valid payload', () => {
+    const sourceText = `${'甲'.repeat(1199)}。`
+    const candidate = `${'乙'.repeat(899)}。`
+    const result = {
+      finish_reason: 'end_turn',
+      content: `\`\`\`json\n${JSON.stringify({ chapter_text: candidate })}\n\`\`\``,
+    }
+
+    expect(admitRevisionCandidate({ sourceText, result }).chapterText).toBe(candidate)
+  })
+
+  test('still rejects truncated, open-string, and unclosed malformed JSON recovery', () => {
+    const sourceText = `${'甲'.repeat(1199)}。`
+    const candidate = `${'乙段推进。'.repeat(100)}"现在行动。"${'丙段推进。'.repeat(100)}`
+    const openCandidate = `${'开放字符串仍在推进。'.repeat(100)}尚未结束`
+
+    expect(captureAdmissionError(sourceText, malformedFencedResult(candidate, {
+      finishReason: 'max_tokens',
+    })).code).toBe('PROSE_REVISION_TRUNCATED')
+    expect(captureAdmissionError(sourceText, malformedFencedResult(openCandidate, {
+      closeString: false,
+      closeEnvelope: false,
+    })).code).toBe('REVISION_PARTIAL_JSON_RECOVERY')
+    expect(captureAdmissionError(sourceText, malformedFencedResult(candidate, {
+      closeEnvelope: false,
+    })).code).toBe('REVISION_PARTIAL_JSON_RECOVERY')
   })
 
   test.each([

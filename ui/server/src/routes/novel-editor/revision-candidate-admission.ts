@@ -388,13 +388,41 @@ function hasUsableProseTransportBody(result: any) {
   return Boolean(extractLLMText(result).trim())
 }
 
+function unwrapExactJsonFence(rawText: string) {
+  const raw = String(rawText || '').trim()
+  const match = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(raw)
+  return {
+    text: String(match?.[1] ?? raw).trim(),
+    exactJsonFence: Boolean(match),
+  }
+}
+
+function isCompleteMalformedRevisionEnvelope(result: any, payload: any) {
+  if (payload?.recovered_from_partial_json !== true) return false
+  if (payload?.partial_json_open_string_recovered === true) return false
+  const envelope = unwrapExactJsonFence(extractLLMText(result)).text
+  if (!envelope.startsWith('{') || !envelope.endsWith('}')) return false
+  try {
+    JSON.parse(envelope)
+    return false
+  } catch {
+    return true
+  }
+}
+
 function assertNoRevisionWrapper(chapterText: string, rawText: string) {
   const prose = String(chapterText || '').trim()
   const raw = String(rawText || '').trim()
+  const rawEnvelope = unwrapExactJsonFence(raw)
   const leadingChatWrapper = /^(?:以下(?:是|为)?(?:修订稿|修订结果)|(?:修订稿|修订结果)(?:如下所示|如下)?)/
   const codeFence = /```/
+  const unexpectedRawFence = codeFence.test(raw) && !rawEnvelope.exactJsonFence
   const jsonProseShell = (/^\{[\s\S]*\}$/.test(prose) || /^\[[\s\S]*\]$/.test(prose))
-  if (codeFence.test(prose) || codeFence.test(raw) || leadingChatWrapper.test(prose) || leadingChatWrapper.test(raw) || jsonProseShell) {
+  if (codeFence.test(prose)
+    || unexpectedRawFence
+    || leadingChatWrapper.test(prose)
+    || leadingChatWrapper.test(rawEnvelope.text)
+    || jsonProseShell) {
     throw admissionError('REVISION_OUTPUT_WRAPPER', '修订候选包含代码块、聊天说明或 JSON 正文外壳')
   }
 }
@@ -422,7 +450,9 @@ export function admitRevisionCandidate(input: { sourceText: string; result: any 
   }
 
   const payload = getNovelPayload(input.result)
-  if (payload.recovered_from_partial_json || payload.partial_json_open_string_recovered) {
+  const completeMalformedJsonRecovered = isCompleteMalformedRevisionEnvelope(input.result, payload)
+  if (payload.partial_json_open_string_recovered
+    || (payload.recovered_from_partial_json && !completeMalformedJsonRecovered)) {
     throw admissionError('REVISION_PARTIAL_JSON_RECOVERY', '修订结果来自不完整 JSON 恢复')
   }
 
@@ -451,6 +481,7 @@ export function admitRevisionCandidate(input: { sourceText: string; result: any 
     candidate_char_count: candidateCharCount,
     minimum_char_count: minimumCharCount,
     maximum_char_count: maximumCharCount,
+    complete_malformed_json_recovered: completeMalformedJsonRecovered,
     ...patchDiagnostics,
   }
   if (candidateCharCount < minimumCharCount) {

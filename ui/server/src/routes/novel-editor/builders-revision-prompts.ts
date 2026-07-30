@@ -145,6 +145,7 @@ export function composeRevisionPromptHint({
 }
 
 const REVISION_LANGUAGE_HARD_RULE = '语言硬约束：中文网文正文禁止夹杂英文粘连词、拼音碎片、葡萄牙语或整段外语；若报告或人工指令要求清英文/清外语，必须逐处替换为自然简体中文，必要专名除外，并在 revision_receipts 给出改写证据。'
+const REVISION_JSON_OUTPUT_HARD_RULE = 'JSON 格式硬约束：只输出一个可直接 JSON.parse 的 JSON object，不要输出 Markdown 代码围栏或解释；正文对白优先使用中文引号“”；若必须使用英文双引号，英文双引号必须转义并遵守 JSON 规则。'
 
 export function buildEditorRevisionPrompt({
   project,
@@ -182,6 +183,7 @@ export function buildEditorRevisionPrompt({
       `本次修订模式：${revisionMode}。opening_structural_patch = 只重写开篇，其余正文尽量保留。`,
       `原文长度：${originalLength} 字。不要为了修开篇而重写整章。`,
       REVISION_LANGUAGE_HARD_RULE,
+      REVISION_JSON_OUTPUT_HARD_RULE,
       '硬优先级（只修这些）：',
       ...mustFixLines.map((item, index) => `${index + 1}. ${item}`),
       '推荐输出方式（二选一，优先 A）：',
@@ -214,6 +216,7 @@ export function buildEditorRevisionPrompt({
       `本次修订模式：${revisionMode}。结构修订允许较大改动，不只是润色。`,
       `原文长度：${originalLength} 字。若因消除回放导致字数变化超过 30%，revision_scope_guard.over_limit=true，但仍应完成本次结构修复。`,
       REVISION_LANGUAGE_HARD_RULE,
+      REVISION_JSON_OUTPUT_HARD_RULE,
       '硬优先级（只修这些，不要同时处理全部交稿标签）：',
       ...mustFixLines.map((item, index) => `${index + 1}. ${item}`),
       '正文工艺硬约束：动作链完整；不要用环境描写替代推进；章末必须留下未解决钩子。',
@@ -251,6 +254,7 @@ export function buildEditorRevisionPrompt({
     '要求：保留当前章节整体结构、节奏、章末钩子和可用文气；只修复报告指出的问题；不得照搬参考作品。',
     `本次修订模式：${revisionMode}。${REVISION_MODE_GUIDE[revisionMode] || REVISION_MODE_GUIDE.from_report}`,
     REVISION_LANGUAGE_HARD_RULE,
+    REVISION_JSON_OUTPUT_HARD_RULE,
     `oh-story workflow-revision：本次属于已写章节大修/回炉；修订前按 Step 2 做上下文对照，修订后按 Step 4 做级联检查和 Step 5 质量检查。`,
     `原文长度：${originalLength} 字；修订后字数差异超过原文 30% 或超过 800 字（取较大值）时，必须在 revision_scope_guard 标记 over_limit=true 并说明是否需要拆成局部二修。`,
     'workflow-revision 上下文对照：必须逐项核对 previous_chapter、current_chapter、next_chapter 或下一章细纲、foreshadowing、character_cards、timeline、setting_context、资产归属和关系边界；缺来源时 status=warn/fail，不得假设已经一致。',
@@ -324,6 +328,7 @@ export function buildCompactEditorRevisionPrompt({
       resumeHint ? '【可保留接续锚点候选】' : '',
       resumeHint || '',
       REVISION_LANGUAGE_HARD_RULE,
+      REVISION_JSON_OUTPUT_HARD_RULE,
       '【修订提示】',
       revisionPromptHint,
       previousOutputPreview ? '【上次失败输出预览】' : '',
@@ -337,6 +342,7 @@ export function buildCompactEditorRevisionPrompt({
     `项目：${project.title}`,
     `本次修订模式：${revisionMode}。${REVISION_MODE_GUIDE[revisionMode] || REVISION_MODE_GUIDE.from_report}`,
     REVISION_LANGUAGE_HARD_RULE,
+    REVISION_JSON_OUTPUT_HARD_RULE,
     '硬性格式：只输出一个 JSON object，字段只允许 revision_mode, replacements, insertions, continuity_notes, revision_summary。',
     '硬性限制：禁止输出 chapter_text。最多 6 条 replacements，最多 3 条 insertions。',
     'replacement 限制：find 控制在 20-160 字，必须从原文精确复制且能唯一定位；replace 控制在 0-900 字。删除时 replace 用空字符串。不要把整段长正文塞进 find 或 replace。',
@@ -472,4 +478,3 @@ export function focusDeliveryRiskBriefForRevision(brief: any = {}, report: any =
     revision_strategy: strategy || 'surgical_patch',
   }
 }
-

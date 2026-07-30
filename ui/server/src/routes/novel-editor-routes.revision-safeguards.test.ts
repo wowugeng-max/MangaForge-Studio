@@ -410,6 +410,11 @@ describe('editor revision route safeguards', () => {
     expect(prompt).toContain('报告必修项')
     expect(prompt).toContain('修订后要同步下一章名单伏笔')
     expect(prompt).toContain('语言硬约束')
+    expect(prompt).toContain('JSON 格式硬约束')
+    expect(prompt).toContain('可直接 JSON.parse')
+    expect(prompt).toContain('中文引号')
+    expect(prompt).toContain('英文双引号')
+    expect(prompt).toContain('必须转义')
   })
 
   test('prioritizes custom revision directives without dropping report must_fix', () => {
@@ -515,6 +520,11 @@ describe('editor revision route safeguards', () => {
     expect(prompt).toContain('禁止输出 chapter_text')
     expect(prompt).toContain('find 控制在 20-160 字')
     expect(prompt).toContain('replace 控制在 0-900 字')
+    expect(prompt).toContain('JSON 格式硬约束')
+    expect(prompt).toContain('可直接 JSON.parse')
+    expect(prompt).toContain('中文引号')
+    expect(prompt).toContain('英文双引号')
+    expect(prompt).toContain('必须转义')
   })
 
 })

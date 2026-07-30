@@ -687,6 +687,22 @@ describe('prose word target a', () => {
     expect(payload.recovered_from_partial_json).toBe(true)
   })
 
+  test('recovers the full closed chapter text when an unescaped ascii quote appears after 200 characters', () => {
+    const prefix = '分析局的冷白灯照着每个人，所有人都在等待第三次直播。'.repeat(18)
+    const suffix = '走廊尽头的灯管开始闪烁，江哲仍然没有停下脚步。'.repeat(18)
+    const chapterText = `${prefix}"第三位天选者，今晚就会被选中。"${suffix}`
+    const payload = getNovelPayload({
+      content: `\`\`\`json\n{"chapter_text":"${chapterText}","continuity_notes":[]}\n\`\`\``,
+      finish_reason: 'end_turn',
+    })
+
+    expect(prefix.replace(/\s/g, '').length).toBeGreaterThan(200)
+    expect(payload.chapter_text).toBe(chapterText)
+    expect(payload.prose_chapters?.[0]?.chapter_text).toBe(chapterText)
+    expect(payload.recovered_from_partial_json).toBe(true)
+    expect(payload.partial_json_open_string_recovered).toBe(false)
+  })
+
 
   test('defaults normal chapters to roughly 4200 Chinese characters', () => {
     const target = resolveChapterWordTarget({ length_target: 'epic' }, { chapter_no: 1 }, {})

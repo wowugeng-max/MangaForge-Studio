@@ -80,14 +80,10 @@ function recoverPartialProseJsonPayload(value: any) {
   })
   for (const candidate of candidates) {
     let partialJsonOpenStringRecovered = false
-    let chapterText = readClosedJsonStringField(candidate, 'chapter_text')
-    // Closed parse can stop early on unescaped quotes; only then use structural end markers.
-    if (compactLen(chapterText) < 200) {
-      chapterText = pickLongestText([
-        chapterText,
-        recoverStructuredJsonStringField(candidate, 'chapter_text'),
-      ])
-    }
+    let chapterText = pickLongestText([
+      readClosedJsonStringField(candidate, 'chapter_text'),
+      recoverStructuredJsonStringField(candidate, 'chapter_text'),
+    ])
     if (compactLen(chapterText) < 200) {
       const openText = readOpenJsonStringField(candidate, 'chapter_text')
       if (compactLen(openText) > compactLen(chapterText)) {
@@ -477,4 +473,3 @@ export function deepMergeObjects(base: any, override: any): any {
   }
   return merge(base, override)
 }
-
