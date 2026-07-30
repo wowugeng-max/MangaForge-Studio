@@ -117,15 +117,6 @@ describe('storyline sync a a', () => {
     expect(acceptanceBlock).toContain('usage_updates: acceptanceUsageUpdates')
   })
 
-  test('does not mask a binding change rejected by atomic acceptance', () => {
-    const pipelineSource = readGenerateChapterPipelineSource()
-    const acceptanceStart = pipelineSource.indexOf('acceptance = await commitNovelChapterAcceptance(')
-    const acceptanceEnd = pipelineSource.indexOf('const updated = acceptance.chapter', acceptanceStart)
-    const acceptanceBlock = pipelineSource.slice(acceptanceStart, acceptanceEnd)
-
-    expect(acceptanceBlock).toContain("isMcpError(error) && error.code === 'MCP_BINDING_CHANGED'")
-  })
-
   test('detects missing state delta records when prose visibly changes chapter state', () => {
     const chapterText = [
       '子时前，李玄潜入禁库，把第二本账册从暗格里取出来。',

@@ -36,6 +36,18 @@ function boundedScrubbedId(
   return scrubber.scrubText(value).slice(0, PROVENANCE_ID_MAX_CHARS)
 }
 
+function scrubbedProvenance(
+  scrubber: ReturnType<typeof createMcpSecretScrubber>,
+  value: Record<string, unknown>,
+  bindingFingerprint: string,
+) {
+  return {
+    ...scrubber.scrubValue(value),
+    receipt_authority: MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY,
+    binding_fingerprint: bindingFingerprint,
+  }
+}
+
 async function readBindingCredentialSnapshot(activeWorkspace: string, binding: {
   server_id: string
   key_id: number
@@ -146,7 +158,7 @@ export class McpGenerationSource implements GenerationSource {
       key_id: binding.key_id,
       adapter_id: boundedScrubbedId(scrubber, binding.adapter_id),
       agent_id: boundedScrubbedId(scrubber, binding.agent_id),
-      binding_fingerprint: boundedScrubbedId(scrubber, bindingFingerprint),
+      binding_fingerprint: bindingFingerprint,
     }
     const receipt = await appendNovelRun(request.activeWorkspace, {
       project_id: Number(request.project?.id || 0),
@@ -227,12 +239,12 @@ export class McpGenerationSource implements GenerationSource {
           await request.onProgress?.(safeEvent)
         },
       })
-      const output = scrubber.scrubValue({
+      const output = scrubbedProvenance(scrubber, {
         ...progressProvenance,
         session_id: boundedScrubbedId(scrubber, result.session_id),
         snapshot_hash: boundedScrubbedId(scrubber, result.snapshot_hash),
         status: 'success',
-      })
+      }, bindingFingerprint)
       await updateNovelRun(request.activeWorkspace, receipt.id, {
         status: 'success',
         output_ref: JSON.stringify(output),
@@ -256,7 +268,11 @@ export class McpGenerationSource implements GenerationSource {
           detail: scrubber.scrubText(scrubbedError.message).slice(0, 240),
         })).catch(() => {})
       }
-      const output = scrubber.scrubValue(errorReceipt(scrubbedError, progressProvenance))
+      const output = scrubbedProvenance(
+        scrubber,
+        errorReceipt(scrubbedError, progressProvenance),
+        bindingFingerprint,
+      )
       await updateNovelRun(request.activeWorkspace, receipt.id, {
         status: 'failed',
         output_ref: JSON.stringify(output),

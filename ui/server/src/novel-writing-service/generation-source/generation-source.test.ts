@@ -10,6 +10,7 @@ import { createGenerationSourceResolver } from './create-generation-source'
 import { McpGenerationSource } from './mcp-generation-source'
 import { ModelGenerationSource } from './model-generation-source'
 import { proseGenerationSourceFingerprint } from './source-config'
+import { acceptanceBindingFingerprintFromGenerationSource } from './types'
 
 const workspaces: string[] = []
 afterEach(async () => Promise.all(workspaces.splice(0).map(path => rm(path, { recursive: true, force: true }))))
@@ -153,6 +154,148 @@ describe('McpGenerationSource', () => {
     expect(receiptJson).not.toContain('sk_source')
     expect(receiptJson).not.toContain(paragraphTask)
     expect(receiptJson).not.toContain('MCP 正文')
+  })
+
+  test('preserves the authoritative fingerprint while scrubbing short Key and Header substrings', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-source-short-secret-'))
+    workspaces.push(workspace)
+    const server = {
+      ...BUDA_MCP_SERVER_TEMPLATE,
+      custom_headers: { 'X-Space': 'sha' },
+    }
+    await writeMcpServers(workspace, [server])
+    const key = await createMcpKey(workspace, { mcp_server_id: server.id, key: 'a', description: '账号' })
+    const project = await createNovelProject(workspace, {
+      title: '短凭据指纹测试',
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: { server_id: server.id, key_id: key.id, adapter_id: server.adapter_id, agent_id: 'agent-1' },
+        },
+      },
+    })
+    const expectedFingerprint = proseGenerationSourceFingerprint(
+      project.reference_config!.prose_generation_source as any,
+    )
+    let runningFingerprint = ''
+    const progress: any[] = []
+    const adapter = {
+      listAgents: async () => {
+        const [runningReceipt] = (await listNovelRuns(workspace, project.id))
+          .filter(run => run.run_type === 'mcp_generate_prose')
+        runningFingerprint = JSON.parse(runningReceipt!.output_ref!).binding_fingerprint
+        return [{ id: 'agent-1', name: '正文 Agent' }]
+      },
+      generateProse: async (input: any) => {
+        await input.onProgress?.({
+          stage: 'mcp_session_wait',
+          status: 'running',
+          session_id: 'session-a',
+          detail: { key_echo: 'a', header_echo: 'sha' },
+        })
+        return {
+          prose_chapters: [{ chapter_no: 12, chapter_text: '短凭据正文原样保留。' }],
+          source: 'mcp',
+          adapter_id: server.adapter_id,
+          agent_id: 'agent-1',
+          session_id: 'session-a',
+          snapshot_hash: 'snapshot-sha-a',
+          binding_fingerprint: `sha256:${'f'.repeat(64)}`,
+          raw: { key_echo: 'a', header_echo: 'sha' },
+          completed: true,
+        }
+      },
+    }
+    const source = new McpGenerationSource({
+      listAgents: async () => { throw new Error('Agent validation must use the pinned adapter') },
+      getAdapterForKey: async (...args: any[]) => ({ ...args[3], adapter }),
+    } as any)
+
+    const result = await source.generateProse(sourceRequest({
+      activeWorkspace: workspace,
+      project,
+      requestId: 'request-a',
+      onProgress: (event: any) => { progress.push(event) },
+    }))
+
+    const [receipt] = (await listNovelRuns(workspace, project.id)).filter(run => run.run_type === 'mcp_generate_prose')
+    const storedOutput = JSON.parse(receipt!.output_ref!)
+    const returnedReceipt = (result as any).source_receipt
+    for (const fingerprint of [runningFingerprint, storedOutput.binding_fingerprint, returnedReceipt.binding_fingerprint]) {
+      expect(fingerprint).toBe(expectedFingerprint)
+      expect(fingerprint).toMatch(/^sha256:[0-9a-f]{64}$/)
+    }
+    expect(acceptanceBindingFingerprintFromGenerationSource({
+      resolved_type: 'mcp',
+      ...returnedReceipt,
+    })).toBe(expectedFingerprint)
+    expect(returnedReceipt).toMatchObject({
+      server_id: 'bud[REDACTED]',
+      adapter_id: 'bud[REDACTED]',
+      agent_id: '[REDACTED]gent-1',
+      request_id: 'request-[REDACTED]',
+      session_id: 'session-[REDACTED]',
+      snapshot_hash: 'sn[REDACTED]pshot-[REDACTED]-[REDACTED]',
+    })
+    expect((result as any).raw).toEqual({ key_echo: '[REDACTED]', header_echo: '[REDACTED]' })
+    expect(progress.find(event => event.session_id)).toMatchObject({
+      session_id: 'session-[REDACTED]',
+      detail: { key_echo: '[REDACTED]', header_echo: '[REDACTED]' },
+    })
+  })
+
+  test('preserves the authoritative fingerprint in failed receipts with short secrets', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-source-short-secret-failure-'))
+    workspaces.push(workspace)
+    const server = {
+      ...BUDA_MCP_SERVER_TEMPLATE,
+      custom_headers: { 'X-Space': 'sha' },
+    }
+    await writeMcpServers(workspace, [server])
+    const key = await createMcpKey(workspace, { mcp_server_id: server.id, key: 'a', description: '账号' })
+    const project = await createNovelProject(workspace, {
+      title: '短凭据失败指纹测试',
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: { server_id: server.id, key_id: key.id, adapter_id: server.adapter_id, agent_id: 'agent-a' },
+        },
+      },
+    })
+    const expectedFingerprint = proseGenerationSourceFingerprint(
+      project.reference_config!.prose_generation_source as any,
+    )
+    const progress: any[] = []
+    const source = new McpGenerationSource({
+      listAgents: async () => { throw new Error('Agent validation must use the pinned adapter') },
+      getAdapterForKey: async (...args: any[]) => ({
+        ...args[3],
+        adapter: { listAgents: async () => [] },
+      }),
+    } as any)
+
+    await expect(source.generateProse(sourceRequest({
+      activeWorkspace: workspace,
+      project,
+      onProgress: (event: any) => { progress.push(event) },
+    }))).rejects.toMatchObject({ code: 'MCP_BINDING_INVALID' })
+
+    const [receipt] = (await listNovelRuns(workspace, project.id)).filter(run => run.run_type === 'mcp_generate_prose')
+    const storedOutput = JSON.parse(receipt!.output_ref!)
+    expect(storedOutput).toMatchObject({
+      receipt_authority: 'mcp_generation_source_v1',
+      binding_fingerprint: expectedFingerprint,
+      agent_id: '[REDACTED]gent-[REDACTED]',
+    })
+    expect(storedOutput.binding_fingerprint).toMatch(/^sha256:[0-9a-f]{64}$/)
+    expect(acceptanceBindingFingerprintFromGenerationSource({
+      resolved_type: 'mcp',
+      ...storedOutput,
+    })).toBe(expectedFingerprint)
+    expect(receipt?.error_message).not.toContain('agent-a')
+    expect(progress.find(event => event.status === 'failed')?.detail).not.toContain('agent-a')
   })
 
   test('preserves the MCP error and stores a bounded failed receipt when live validation fails', async () => {

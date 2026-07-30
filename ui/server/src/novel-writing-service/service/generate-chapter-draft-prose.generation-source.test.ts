@@ -2,7 +2,17 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { rm } from 'fs/promises'
 import { createMcpKey } from '../../mcp/key-store'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from '../../mcp/server-store'
-import { listNovelChapters, updateNovelProject } from '../../novel'
+import {
+  listChapterVersions,
+  listNovelChapterSettingUsage,
+  listNovelChapters,
+  listNovelCharacters,
+  listNovelReviews,
+  listNovelSettingEntities,
+  listNovelWorldbuilding,
+  updateNovelProject,
+} from '../../novel'
+import { withMcpWorkspaceMutation } from '../../mcp/workspace-coordinator'
 import { buildPipelineProse, createProsePipelineHarness } from '../../routes/novel-writing-service.test-support'
 import { createNovelWritingService } from './create-novel-writing-service'
 import { acceptanceBindingFingerprintFromGenerationSource } from '../generation-source/types'
@@ -156,7 +166,7 @@ describe('chapter draft GenerationSource integration', () => {
     }
   })
 
-  for (const productionMode of ['draft_only', 'draft_review']) {
+  for (const productionMode of ['draft_only', 'draft_review', 'draft_review_revise_store']) {
     test(`rejects a changed MCP binding before ${productionMode} acceptance`, async () => {
       const draftText = buildPipelineProse('红灯同时亮起，江澈撞开铁门。', '主动打乱包围并夺取通讯器')
       let adapter: any
@@ -205,8 +215,16 @@ describe('chapter draft GenerationSource integration', () => {
       await updateNovelProject(harness.workspace, harness.project.id, {
         reference_config: harness.project.reference_config,
       } as any)
-      const beforeChapter = (await listNovelChapters(harness.workspace, harness.project.id))
-        .find(item => item.id === harness.chapter.id)
+      const beforeAcceptance = {
+        chapter: (await listNovelChapters(harness.workspace, harness.project.id))
+          .find(item => item.id === harness.chapter.id),
+        versions: await listChapterVersions(harness.workspace, harness.chapter.id),
+        reviews: await listNovelReviews(harness.workspace, harness.project.id),
+        characters: await listNovelCharacters(harness.workspace, harness.project.id),
+        worldbuilding: await listNovelWorldbuilding(harness.workspace, harness.project.id),
+        settings: await listNovelSettingEntities(harness.workspace, harness.project.id),
+        usage: await listNovelChapterSettingUsage(harness.workspace, harness.project.id, harness.chapter.id),
+      }
       let exposedError: any
 
       try {
@@ -224,10 +242,20 @@ describe('chapter draft GenerationSource integration', () => {
         name: 'McpError',
         code: 'MCP_BINDING_CHANGED',
         error_code: 'MCP_BINDING_CHANGED',
+        details: { reason: 'binding_changed' },
       })
-      const afterChapter = (await listNovelChapters(harness.workspace, harness.project.id))
-        .find(item => item.id === harness.chapter.id)
-      expect(afterChapter?.chapter_text).toBe(beforeChapter?.chapter_text)
+      const afterAcceptance = {
+        chapter: (await listNovelChapters(harness.workspace, harness.project.id))
+          .find(item => item.id === harness.chapter.id),
+        versions: await listChapterVersions(harness.workspace, harness.chapter.id),
+        reviews: await listNovelReviews(harness.workspace, harness.project.id),
+        characters: await listNovelCharacters(harness.workspace, harness.project.id),
+        worldbuilding: await listNovelWorldbuilding(harness.workspace, harness.project.id),
+        settings: await listNovelSettingEntities(harness.workspace, harness.project.id),
+        usage: await listNovelChapterSettingUsage(harness.workspace, harness.project.id, harness.chapter.id),
+      }
+      expect(afterAcceptance).toEqual(beforeAcceptance)
+      await expect(withMcpWorkspaceMutation(harness.workspace, async () => 'released')).resolves.toBe('released')
     })
   }
 })
