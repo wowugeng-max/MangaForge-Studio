@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, rm } from 'fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { createMcpKey, readMcpKeys } from '../mcp/key-store'
+import { McpError } from '../mcp/errors'
+import { createMcpKey, getMcpKeysPath, readMcpKeys } from '../mcp/key-store'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from '../mcp/server-store'
 import * as mcpServerStore from '../mcp/server-store'
 import { registerMcpRoutes } from './mcp-routes'
@@ -233,5 +234,104 @@ describe('MCP routes', () => {
     expect((await call(handlers.get('GET /api/mcp/keys/:id/agents'), { params: { id: '3' } })).body.agents).toHaveLength(1)
     expect((await call(handlers.get('POST /api/mcp/keys/:id/agents'), { params: { id: '3' }, body: { name: 'MangaForge Agent' } })).body.agent.id).toBe('agent-2')
     expect(calls).toEqual(['diagnostics', 'listAgents', 'createAgent'])
+  })
+
+  test('scrubs submitted Key and Header values from create and update errors', async () => {
+    const workspace = await temporaryWorkspace()
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const submittedKey = 'synthetic-submitted-route-key'
+    const keyBody: any = { key: submittedKey }
+    Object.defineProperty(keyBody, 'mcp_server_id', {
+      enumerable: true,
+      get() { throw new Error(`request parser reflected ${submittedKey}`) },
+    })
+    const submittedHeader = 'synthetic-submitted-route-header'
+    const { app, handlers } = createRouteHarness()
+    registerMcpRoutes(app, () => workspace, {
+      invalidateServer: async () => { throw new Error(`update hook reflected X-Space=${submittedHeader}`) },
+    } as any)
+
+    const createFailure = await call(handlers.get('POST /api/mcp/keys'), { body: keyBody })
+    expect(createFailure.statusCode).toBe(500)
+    expect(JSON.stringify(createFailure.body)).not.toContain(submittedKey)
+    expect(createFailure.body.error).toContain('[REDACTED]')
+
+    const updateFailure = await call(handlers.get('PUT /api/mcp/servers/:id'), {
+      params: { id: 'buda' },
+      body: { custom_headers: { 'X-Space': submittedHeader } },
+    })
+    expect(updateFailure.statusCode).toBe(500)
+    expect(JSON.stringify(updateFailure.body)).not.toContain(submittedHeader)
+    expect(updateFailure.body.error).toContain('[REDACTED]')
+  })
+
+  test('scrubs stored credentials from runtime errors and diagnostics', async () => {
+    const workspace = await temporaryWorkspace()
+    const storedHeader = 'synthetic-stored-route-header'
+    const storedCookie = 'session=synthetic-stored-cookie'
+    await writeMcpServers(workspace, [{
+      ...BUDA_MCP_SERVER_TEMPLATE,
+      custom_headers: { 'X-Space': storedHeader, Cookie: storedCookie },
+    }])
+    const storedKey = 'sk_test_stored_route_key'
+    const keyRecord = await createMcpKey(workspace, {
+      mcp_server_id: 'buda',
+      key: storedKey,
+      description: '账号',
+    })
+    const runtime = {
+      testKey: async () => {
+        throw new McpError('MCP_TOOL_ERROR', `upstream reflected ${storedKey} and ${storedHeader}`, {
+          authorization: `Bearer ${storedKey}`,
+          nested: { cookie: storedCookie },
+          key_id: keyRecord.id,
+        })
+      },
+      diagnostics: async () => ({
+        state: 'Ready',
+        server_id: 'buda',
+        key_id: keyRecord.id,
+        tools: [{ name: 'safe-tool', description: `${storedHeader} Cookie: ${storedCookie}` }],
+      }),
+    }
+    const { app, handlers } = createRouteHarness()
+    registerMcpRoutes(app, () => workspace, runtime as any)
+
+    const testFailure = await call(handlers.get('POST /api/mcp/keys/:id/test'), {
+      params: { id: String(keyRecord.id) },
+    })
+    expect(testFailure.statusCode).toBe(502)
+    expect(testFailure.body).toMatchObject({ error_code: 'MCP_TOOL_ERROR' })
+    expect(JSON.stringify(testFailure.body)).not.toContain(storedKey)
+    expect(JSON.stringify(testFailure.body)).not.toContain(storedHeader)
+    expect(JSON.stringify(testFailure.body)).not.toContain('synthetic-stored-cookie')
+
+    const diagnostics = await call(handlers.get('GET /api/mcp/servers/:id/diagnostics'), {
+      params: { id: 'buda' },
+      query: { key_id: String(keyRecord.id) },
+    })
+    expect(diagnostics.body).toMatchObject({ state: 'Ready', server_id: 'buda', key_id: keyRecord.id })
+    expect(JSON.stringify(diagnostics.body)).not.toContain(storedKey)
+    expect(JSON.stringify(diagnostics.body)).not.toContain(storedHeader)
+    expect(JSON.stringify(diagnostics.body)).not.toContain('synthetic-stored-cookie')
+  })
+
+  test('preserves a corrupt Store and its stable public error while building route scrubbers', async () => {
+    const workspace = await temporaryWorkspace()
+    const path = getMcpKeysPath(workspace)
+    const corrupt = '{not-valid-json synthetic-corrupt-store-value'
+    await writeFile(path, corrupt, 'utf8')
+    const { app, handlers } = createRouteHarness()
+    registerMcpRoutes(app, () => workspace, {} as any)
+
+    const response = await call(handlers.get('GET /api/mcp/keys'))
+
+    expect(response.statusCode).toBe(502)
+    expect(response.body).toMatchObject({
+      error_code: 'MCP_STORE_CORRUPT',
+      error: 'MCP 配置文件损坏：mcp-keys.json',
+    })
+    expect(JSON.stringify(response.body)).not.toContain('synthetic-corrupt-store-value')
+    expect(await readFile(path, 'utf8')).toBe(corrupt)
   })
 })

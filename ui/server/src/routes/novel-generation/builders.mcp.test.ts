@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  buildStandaloneProseServiceErrorPayload,
   buildStandaloneProseServiceOptions,
   standaloneProseServiceErrorStatus,
   standaloneProseServiceStageLabel,
@@ -20,5 +21,46 @@ describe('MCP standalone prose route helpers', () => {
     expect(standaloneProseServiceErrorStatus({ code: 'MCP_BINDING_INVALID' })).toBe(412)
     expect(standaloneProseServiceErrorStatus({ code: 'MCP_AGENT_BUSY' })).toBe(409)
     expect(standaloneProseServiceErrorStatus({ code: 'MCP_GENERATION_TIMEOUT' })).toBe(504)
+  })
+
+  test('scrubs reflected MCP credentials from bounded standalone HTTP and SSE error payloads', () => {
+    const reflectedKey = 'sk_test_builder_reflection'
+    const reflectedHeader = 'synthetic-builder-header-value'
+    const residualText = '受保护的终止残余正文。'.repeat(40)
+    const pipeline = [{ stage: 'mcp_session_wait', status: 'failed', agent_id: 'agent-1' }]
+    const configSnapshot = { generation_source: 'mcp', server_id: 'buda', key_id: 17 }
+    const payload = buildStandaloneProseServiceErrorPayload({
+      code: 'MCP_SESSION_FAILED',
+      message: `Authorization: Bearer ${reflectedKey}`,
+      admission_status: 'blocked_invalid',
+      details: {
+        authorization: reflectedHeader,
+        receipt: {
+          error: `Cookie: session=synthetic-builder-cookie`,
+          nested: `Authorization=${reflectedHeader}`,
+          adapter_id: 'buda',
+        },
+        chapter_text: residualText,
+      },
+    }, pipeline, configSnapshot, { chapter_id: 91, chapter_no: 12 })
+
+    const serialized = JSON.stringify(payload)
+    expect(serialized).not.toContain(reflectedKey)
+    expect(serialized).not.toContain(reflectedHeader)
+    expect(serialized).not.toContain('synthetic-builder-cookie')
+    expect(payload).toMatchObject({
+      error_code: 'MCP_SESSION_FAILED',
+      admission_status: 'blocked_invalid',
+      chapter_id: 91,
+      chapter_no: 12,
+      chapter_text: residualText,
+      finalText: residualText,
+      details: {
+        chapter_text: residualText,
+        receipt: { adapter_id: 'buda' },
+      },
+      pipeline,
+      config_snapshot: configSnapshot,
+    })
   })
 })

@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { createMcpKey } from '../../mcp/key-store'
+import { McpError } from '../../mcp/errors'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from '../../mcp/server-store'
 import { createNovelProject, listNovelRuns } from '../../novel'
 import { createGenerationSourceResolver } from './create-generation-source'
@@ -160,5 +161,114 @@ describe('McpGenerationSource', () => {
     expect(receipts).toHaveLength(1)
     expect(receipts[0]).toMatchObject({ status: 'failed' })
     expect(receipts[0]?.output_ref).not.toContain('完整段落任务')
+  })
+
+  test('scrubs selected credentials from progress, exposed errors, and durable failed receipts', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-source-scrub-'))
+    workspaces.push(workspace)
+    const selectedKey = 'sk_test_generation_reflection'
+    const selectedHeader = 'synthetic-generation-header-value'
+    const selectedCookie = 'session=synthetic-generation-cookie'
+    const server = {
+      ...BUDA_MCP_SERVER_TEMPLATE,
+      custom_headers: { 'X-Space': selectedHeader, Cookie: selectedCookie },
+    }
+    await writeMcpServers(workspace, [server])
+    const key = await createMcpKey(workspace, {
+      mcp_server_id: 'buda',
+      key: selectedKey,
+      description: '账号',
+    })
+    const project = await createNovelProject(workspace, {
+      title: '反射失败测试',
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: { server_id: 'buda', key_id: key.id, adapter_id: 'buda', agent_id: 'agent-1' },
+        },
+      },
+    })
+    const adapter = {
+      generateProse: async (input: any) => {
+        await input.onProgress?.({
+          stage: 'mcp_session_wait',
+          status: 'failed',
+          session_id: 'session-safe-1',
+          snapshot_hash: 'snapshot-safe-1',
+          detail: {
+            message: `Authorization: Bearer ${selectedKey}`,
+            nested: [`X-Space=${selectedHeader}`, `Cookie: ${selectedCookie}`],
+            agent_id: 'agent-1',
+          },
+        })
+        throw new McpError(
+          'MCP_SESSION_FAILED',
+          `upstream reflected ${selectedKey} and ${selectedHeader}`,
+          {
+            authorization: `Bearer ${selectedKey}`,
+            nested: { message: selectedHeader, cookie: selectedCookie },
+            adapter_id: 'buda',
+            agent_id: 'agent-1',
+          },
+        )
+      },
+    }
+    const source = new McpGenerationSource({
+      listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }],
+      getAdapterForKey: async () => ({ server, key, adapter }),
+    } as any)
+    const progress: any[] = []
+    const paragraphTask = 'synthetic prose prompt that must only be represented by its hash'
+    let exposedError: any
+
+    try {
+      await source.generateProse(sourceRequest({
+        activeWorkspace: workspace,
+        project,
+        paragraphTask,
+        onProgress: (event: any) => { progress.push(event) },
+      }))
+    } catch (error) {
+      exposedError = error
+    }
+
+    expect(exposedError).toMatchObject({
+      code: 'MCP_SESSION_FAILED',
+      error_code: 'MCP_SESSION_FAILED',
+      details: { adapter_id: 'buda', agent_id: 'agent-1' },
+    })
+    expect(JSON.stringify({ message: exposedError?.message, details: exposedError?.details })).not.toContain(selectedKey)
+    expect(JSON.stringify({ message: exposedError?.message, details: exposedError?.details })).not.toContain(selectedHeader)
+    expect(JSON.stringify({ message: exposedError?.message, details: exposedError?.details })).not.toContain('synthetic-generation-cookie')
+
+    const reflectedProgress = progress.find(event => event.stage === 'mcp_session_wait')
+    expect(reflectedProgress).toMatchObject({
+      session_id: 'session-safe-1',
+      snapshot_hash: 'snapshot-safe-1',
+      detail: { agent_id: 'agent-1' },
+    })
+    expect(JSON.stringify(reflectedProgress)).not.toContain(selectedKey)
+    expect(JSON.stringify(reflectedProgress)).not.toContain(selectedHeader)
+    expect(JSON.stringify(reflectedProgress)).not.toContain('synthetic-generation-cookie')
+
+    const receipts = (await listNovelRuns(workspace, project.id)).filter(run => run.run_type === 'mcp_generate_prose')
+    expect(receipts).toHaveLength(1)
+    expect(receipts[0]).toMatchObject({ status: 'failed' })
+    const durable = JSON.stringify({ output_ref: receipts[0]?.output_ref, error_message: receipts[0]?.error_message })
+    expect(durable).not.toContain(selectedKey)
+    expect(durable).not.toContain(selectedHeader)
+    expect(durable).not.toContain('synthetic-generation-cookie')
+    expect(durable).not.toContain(paragraphTask)
+    expect(JSON.parse(receipts[0]!.output_ref!)).toMatchObject({
+      server_id: 'buda',
+      key_id: key.id,
+      adapter_id: 'buda',
+      agent_id: 'agent-1',
+      session_id: 'session-safe-1',
+      snapshot_hash: 'snapshot-safe-1',
+      status: 'failed',
+      error_code: 'MCP_SESSION_FAILED',
+    })
   })
 })

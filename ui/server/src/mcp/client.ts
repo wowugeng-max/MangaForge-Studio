@@ -4,7 +4,8 @@ import {
   type CallToolResult,
   type StreamableHTTPClientTransportOptions,
 } from '@modelcontextprotocol/client'
-import { McpError, asMcpError } from './errors'
+import { McpError } from './errors'
+import { createMcpSecretScrubber } from './secret-scrubber'
 import type {
   McpClientState,
   McpDiagnostics,
@@ -50,7 +51,7 @@ function errorMessage(error: unknown) {
   return String((error as any)?.message || error || 'MCP 操作失败')
 }
 
-function mapConnectionError(error: unknown) {
+function mapConnectionError(error: unknown, scrubText: (value: unknown) => string) {
   const message = errorMessage(error)
   if (/\b(401|403)\b|unauthori[sz]ed|forbidden|authentication/i.test(message)) {
     return new McpError('MCP_AUTH_FAILED', 'MCP 身份验证失败')
@@ -58,7 +59,7 @@ function mapConnectionError(error: unknown) {
   if (/timeout|timed out|aborted/i.test(message)) {
     return new McpError('MCP_CONNECT_TIMEOUT', '连接 MCP 服务超时')
   }
-  return new McpError('MCP_TOOL_ERROR', `连接 MCP 服务失败：${message.slice(0, 240)}`)
+  return new McpError('MCP_TOOL_ERROR', `连接 MCP 服务失败：${scrubText(message).slice(0, 240)}`)
 }
 
 function normalizeToolResult(result: CallToolResult): McpToolResult {
@@ -75,12 +76,26 @@ export class GenericMcpClient {
   private sdk?: SdkClientLike
   private transport?: TransportLike
   private tools: McpToolDescriptor[] = []
+  private readonly scrubber: ReturnType<typeof createMcpSecretScrubber>
 
   constructor(private readonly options: {
     server: McpServerRecord
     key: McpKeyRecord
     sdkFactory: McpSdkFactory
-  }) {}
+  }) {
+    this.scrubber = createMcpSecretScrubber({
+      keys: [options.key.key],
+      headerValues: Object.values(options.server.custom_headers),
+    })
+  }
+
+  private scrubMcpError(error: McpError) {
+    return new McpError(
+      error.code,
+      this.scrubber.scrubText(error.message),
+      error.details ? this.scrubber.scrubValue(error.details) : undefined,
+    )
+  }
 
   async connect(signal?: AbortSignal) {
     if (this.state === 'Ready') return this
@@ -110,7 +125,7 @@ export class GenericMcpClient {
     } catch (error) {
       this.state = 'Closed'
       await this.close().catch(() => {})
-      throw mapConnectionError(error)
+      throw mapConnectionError(error, this.scrubber.scrubText)
     }
   }
 
@@ -141,7 +156,7 @@ export class GenericMcpClient {
       ...(tool.outputSchema ? { outputSchema: tool.outputSchema as Record<string, unknown> } : {}),
       ...(tool.annotations ? { annotations: tool.annotations as Record<string, unknown> } : {}),
     }))
-    this.tools = this.allowedTools(tools)
+    this.tools = this.allowedTools(this.scrubber.scrubValue(tools) as McpToolDescriptor[])
     return this.tools
   }
 
@@ -169,12 +184,12 @@ export class GenericMcpClient {
       if (result.isError) {
         throw new McpError('MCP_TOOL_ERROR', `MCP 工具执行失败：${name}`, {
           tool_name: name,
-          content: result.content.slice(0, 3),
+          content: this.scrubber.scrubValue(result.content.slice(0, 3)),
         })
       }
       return result
     } catch (error) {
-      if (error instanceof McpError) throw error
+      if (error instanceof McpError) throw this.scrubMcpError(error)
       if (options.signal?.aborted || /abort/i.test(errorMessage(error))) {
         throw new McpError('MCP_CANCELLED', 'MCP 工具调用已取消', { tool_name: name })
       }
@@ -182,12 +197,12 @@ export class GenericMcpClient {
       if (/\b(401|403)\b|unauthori[sz]ed|forbidden/i.test(message)) {
         throw new McpError('MCP_AUTH_FAILED', 'MCP 身份验证失败', { tool_name: name })
       }
-      throw new McpError('MCP_TOOL_ERROR', `MCP 工具调用失败：${message.slice(0, 240)}`, { tool_name: name })
+      throw new McpError('MCP_TOOL_ERROR', `MCP 工具调用失败：${this.scrubber.scrubText(message).slice(0, 240)}`, { tool_name: name })
     }
   }
 
   diagnostics(): McpDiagnostics {
-    return {
+    return this.scrubber.scrubValue({
       state: this.state,
       server_id: this.options.server.id,
       key_id: this.options.key.id,
@@ -196,7 +211,7 @@ export class GenericMcpClient {
       ...(this.sdk?.getInstructions() ? { instructions: this.sdk.getInstructions() } : {}),
       tools: this.tools.map(tool => ({ ...tool })),
       adapter_id: this.options.server.adapter_id,
-    }
+    }) as McpDiagnostics
   }
 
   async close() {

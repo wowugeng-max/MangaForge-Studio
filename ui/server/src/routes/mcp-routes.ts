@@ -1,6 +1,7 @@
 import type { Express } from 'express'
 import { listNovelProjects } from '../novel'
 import { McpError, isMcpError } from '../mcp/errors'
+import { createMcpSecretScrubber } from '../mcp/secret-scrubber'
 import {
   createMcpKey,
   deleteMcpKey,
@@ -42,7 +43,35 @@ export const findMcpProjectReferences: FindProjectReferences = async (activeWork
   }).map(project => ({ id: project.id, title: project.title }))
 }
 
-function routeError(error: unknown) {
+type McpSecretScrubber = ReturnType<typeof createMcpSecretScrubber>
+
+async function createRouteSecretScrubber(req: any, getWorkspace: () => string) {
+  const keys: string[] = []
+  const headerValues: string[] = []
+  try {
+    if (req.body?.key !== undefined) keys.push(String(req.body.key))
+  } catch {}
+  try {
+    const submittedHeaders = req.body?.custom_headers
+    if (submittedHeaders && typeof submittedHeaders === 'object' && !Array.isArray(submittedHeaders)) {
+      headerValues.push(...Object.values(submittedHeaders).map(String))
+    }
+  } catch {}
+  try {
+    const activeWorkspace = getWorkspace()
+    const [storedKeys, storedServers] = await Promise.allSettled([
+      readMcpKeys(activeWorkspace),
+      readMcpServers(activeWorkspace),
+    ])
+    if (storedKeys.status === 'fulfilled') keys.push(...storedKeys.value.map(item => item.key))
+    if (storedServers.status === 'fulfilled') {
+      headerValues.push(...storedServers.value.flatMap(item => Object.values(item.custom_headers)))
+    }
+  } catch {}
+  return createMcpSecretScrubber({ keys, headerValues })
+}
+
+function routeError(error: unknown, scrubber: McpSecretScrubber) {
   if (isMcpError(error)) {
     const originChanged = error.code === 'MCP_BINDING_INVALID' && error.details?.reason === 'server_origin_changed'
     const status = originChanged ? 409
@@ -51,17 +80,17 @@ function routeError(error: unknown) {
         : error.code === 'MCP_CAPABILITY_MISSING' ? 422
           : error.code === 'MCP_AGENT_BUSY' ? 409
             : 502
-    return {
+    return scrubber.scrubValue({
       status,
       body: {
-        error: error.message,
-        detail: error.message,
+        error: scrubber.scrubText(error.message),
+        detail: scrubber.scrubText(error.message),
         error_code: originChanged ? 'MCP_SERVER_ORIGIN_CHANGE_REQUIRES_NEW_CREDENTIAL' : error.code,
       },
-    }
+    })
   }
-  const message = String((error as any)?.message || error || 'MCP 操作失败')
-  return { status: 500, body: { error: message.slice(0, 400), detail: message.slice(0, 400) } }
+  const message = scrubber.scrubText((error as any)?.message || error || 'MCP 操作失败')
+  return scrubber.scrubValue({ status: 500, body: { error: message.slice(0, 400), detail: message.slice(0, 400) } })
 }
 
 function requireHttpServer(input: any) {
@@ -81,9 +110,18 @@ export function registerMcpRoutes(
 ) {
   const findReferences = options.findProjectReferences || findMcpProjectReferences
   const safely = (handler: (req: any, res: any) => Promise<any>) => async (req: any, res: any) => {
-    try { await handler(req, res) } catch (error) {
-      const failure = routeError(error)
+    const scrubber = await createRouteSecretScrubber(req, getWorkspace)
+    const originalJson = res.json
+    res.json = function json(body: unknown) {
+      return originalJson.call(this, scrubber.scrubValue(body))
+    }
+    try {
+      await handler(req, res)
+    } catch (error) {
+      const failure = routeError(error, scrubber)
       res.status(failure.status).json(failure.body)
+    } finally {
+      res.json = originalJson
     }
   }
 

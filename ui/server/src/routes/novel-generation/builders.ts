@@ -15,6 +15,7 @@ import { asArray, buildLLMResultDiagnostics, compactText, getNovelPayload, norma
 import { applyChapterWordTargetToContext, countProseChars, normalizeDeliveryRiskReceipts, resolveChapterWordTarget } from '../novel-writing-service'
 import { compactProseGenerationOverride } from '../../novel-writing/prose-generation-contract'
 import { applyZhuqueFastPathOptions } from '../../novel-writing/zhuque-fast-path'
+import { createMcpSecretScrubber } from '../../mcp/secret-scrubber'
 
 export function stringifyNovelGenerationPayload(value: any) {
   return safeJsonStringify(value, undefined, 0)
@@ -313,7 +314,7 @@ export function buildStandaloneProseServiceErrorPayload(serviceError: any, pipel
   const residualText = blockedInvalid
     ? residualCandidates.find((item: any) => typeof item === 'string' && item.trim().length > 200)
     : undefined
-  return {
+  const payload = {
     error: String(serviceError?.message || serviceError),
     error_code: serviceError?.code || serviceError?.error_code || (blockedInvalid ? 'PROSE_ADMISSION_BLOCKED_INVALID' : 'PROSE_GENERATION_FAILED'),
     ...(blockedInvalid ? {
@@ -337,6 +338,13 @@ export function buildStandaloneProseServiceErrorPayload(serviceError: any, pipel
     quality_loop: compactStandaloneQualityLoop(serviceError?.qualityLoop || serviceError?.quality_loop),
     config_snapshot: configSnapshot,
   }
+  const scrubbed = createMcpSecretScrubber().scrubValue(payload)
+  if (typeof residualText === 'string') {
+    scrubbed.chapter_text = residualText
+    scrubbed.finalText = residualText
+    if (scrubbed.details && typeof scrubbed.details === 'object') scrubbed.details.chapter_text = residualText
+  }
+  return scrubbed
 }
 
 export function compactStandaloneProseProgressStage(stage: any = {}) {

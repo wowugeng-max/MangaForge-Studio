@@ -1,6 +1,8 @@
 import { createHash } from 'crypto'
 import { appendNovelRun, updateNovelRun } from '../../novel'
 import type { McpRuntime } from '../../mcp/runtime'
+import { McpError, isMcpError } from '../../mcp/errors'
+import { createMcpSecretScrubber } from '../../mcp/secret-scrubber'
 import { resolveProseGenerationSource, validateMcpProjectBinding } from './source-config'
 import type { GenerationSource, ProseGenerationRequest, ProseGenerationResult } from './types'
 
@@ -20,6 +22,31 @@ function errorReceipt(error: any, provenance: Record<string, unknown>) {
     error_code: String(error?.code || error?.error_code || 'MCP_GENERATION_FAILED'),
     error: String(error?.message || error || 'MCP 正文生成失败').slice(0, 500),
   }
+}
+
+function scrubGenerationError(
+  error: unknown,
+  scrubber: ReturnType<typeof createMcpSecretScrubber>,
+) {
+  const message = scrubber.scrubText((error as any)?.message || error || 'MCP 正文生成失败')
+  if (isMcpError(error)) {
+    return new McpError(
+      error.code,
+      message,
+      error.details ? scrubber.scrubValue(error.details) : undefined,
+    )
+  }
+  const scrubbed = new Error(message)
+  scrubbed.name = scrubber.scrubText((error as any)?.name || 'Error')
+  const metadata = error && typeof error === 'object'
+    ? scrubber.scrubValue({
+        ...((error as any)?.code !== undefined ? { code: (error as any).code } : {}),
+        ...((error as any)?.error_code !== undefined ? { error_code: (error as any).error_code } : {}),
+        ...((error as any)?.details !== undefined ? { details: (error as any).details } : {}),
+      })
+    : {}
+  Object.assign(scrubbed, metadata)
+  return scrubbed
 }
 
 export class McpGenerationSource implements GenerationSource {
@@ -51,6 +78,7 @@ export class McpGenerationSource implements GenerationSource {
     })
     let progressProvenance: Record<string, unknown> = { ...baseProvenance }
     let connected = false
+    let scrubber = createMcpSecretScrubber()
     try {
       await request.onProgress?.({ stage: 'mcp_connect', status: 'running' })
       await validateMcpProjectBinding(request.activeWorkspace, request.project, binding, {
@@ -58,6 +86,10 @@ export class McpGenerationSource implements GenerationSource {
         signal: request.signal,
       })
       const resolved = await this.runtime.getAdapterForKey(binding.key_id, binding.server_id, request.signal)
+      scrubber = createMcpSecretScrubber({
+        keys: [resolved.key.key],
+        headerValues: Object.values(resolved.server.custom_headers),
+      })
       await request.onProgress?.({ stage: 'mcp_connect', status: 'success' })
       connected = true
       const continuity = request.contextPackage?.continuity || {}
@@ -80,20 +112,21 @@ export class McpGenerationSource implements GenerationSource {
         },
         signal: request.signal,
         onProgress: async event => {
+          const scrubbedEvent = scrubber.scrubValue(event)
           progressProvenance = {
             ...progressProvenance,
-            ...(event.session_id ? { session_id: event.session_id } : {}),
-            ...(event.snapshot_hash ? { snapshot_hash: event.snapshot_hash } : {}),
+            ...(scrubbedEvent.session_id ? { session_id: scrubbedEvent.session_id } : {}),
+            ...(scrubbedEvent.snapshot_hash ? { snapshot_hash: scrubbedEvent.snapshot_hash } : {}),
           }
-          await request.onProgress?.(event)
+          await request.onProgress?.(scrubbedEvent)
         },
       })
-      const output = {
+      const output = scrubber.scrubValue({
         ...progressProvenance,
         session_id: result.session_id,
         snapshot_hash: result.snapshot_hash,
         status: 'success',
-      }
+      })
       await updateNovelRun(request.activeWorkspace, receipt.id, {
         status: 'success',
         output_ref: JSON.stringify(output),
@@ -107,20 +140,21 @@ export class McpGenerationSource implements GenerationSource {
         },
       }
     } catch (error) {
+      const scrubbedError = scrubGenerationError(error, scrubber)
       if (!connected) {
         await Promise.resolve(request.onProgress?.({
           stage: 'mcp_connect',
           status: 'failed',
-          detail: String((error as any)?.message || error).slice(0, 240),
+          detail: scrubber.scrubText(scrubbedError.message).slice(0, 240),
         })).catch(() => {})
       }
-      const output = errorReceipt(error, progressProvenance)
+      const output = scrubber.scrubValue(errorReceipt(scrubbedError, progressProvenance))
       await updateNovelRun(request.activeWorkspace, receipt.id, {
         status: 'failed',
         output_ref: JSON.stringify(output),
-        error_message: String((error as any)?.message || error).slice(0, 500),
+        error_message: scrubber.scrubText(scrubbedError.message).slice(0, 500),
       }).catch(() => {})
-      throw error
+      throw scrubbedError
     }
   }
 }
