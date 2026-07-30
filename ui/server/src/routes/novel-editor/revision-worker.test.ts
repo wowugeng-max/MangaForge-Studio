@@ -312,6 +312,7 @@ type WriteCrash = (input: any) => 'before' | 'after' | null
 function createHarness(options: {
   autoQuality?: boolean
   autoStoryState?: boolean
+  modelId?: number
   sourceReview?: Record<string, unknown>
   followers?: Array<{ chapter_no: number; chapter_text: string }>
   checkpoint?: EditorRevisionCheckpoint
@@ -342,6 +343,7 @@ function createHarness(options: {
     revision_mode: 'from_report',
     revision_strategy: 'surgical_patch',
     user_prompt: '',
+    model_id: options.modelId,
     auto_quality_check: options.autoQuality ?? true,
     auto_story_state: options.autoStoryState ?? true,
     created_at: '2030-01-01T00:00:00.000Z',
@@ -3693,6 +3695,19 @@ describe('durable editor revision worker', () => {
     expect(harness.commitCalls()).toBe(0)
     expect(harness.qualityCalls).toHaveLength(1)
     expect(harness.checkpoint().phases.post_quality.status).toBe('completed')
+  })
+
+  test('forwards the selected revision model to post-quality review', async () => {
+    const checkpoint = persistedCheckpoint()
+    const harness = createHarness({ checkpoint, modelId: 36 })
+    installMatchingCommitMarker(harness)
+    const worker = harness.worker()
+
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    expect(harness.qualityCalls).toHaveLength(1)
+    expect(harness.qualityCalls[0].at(-1)).toMatchObject({ model_id: 36 })
   })
 
   test('needs_revision is a warning and never triggers a second rewrite or rollback', async () => {

@@ -1116,6 +1116,7 @@ export function createEditorRevisionWorker(
       source_run_id: runId,
       candidate_hash: checkpoint.candidate!.hash,
       current_chapter_only: true,
+      model_id: input.model_id,
       signal: controller.signal,
       timeoutMs: llmTimeoutMs,
       maxRetries: 1,
