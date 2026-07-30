@@ -4,7 +4,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { McpError } from '../mcp/errors'
 import { createMcpKey, getMcpKeysPath, readMcpKeys } from '../mcp/key-store'
-import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from '../mcp/server-store'
+import { BUDA_MCP_SERVER_TEMPLATE, readMcpServers, writeMcpServers } from '../mcp/server-store'
 import * as mcpServerStore from '../mcp/server-store'
 import { assertMcpWorkspaceMutationHeld } from '../mcp/workspace-coordinator'
 import { registerMcpRoutes } from './mcp-routes'
@@ -314,6 +314,49 @@ describe('MCP routes', () => {
     expect(missingServer).toMatchObject({ statusCode: 404, body: { error: 'MCP Server 不存在' } })
     expect(missingKey).toMatchObject({ statusCode: 404, body: { error: 'MCP Key 不存在' } })
     expect(referenceChecks).toBe(0)
+  })
+
+  test('reads and converts a deletable Server ID inside the coordinator', async () => {
+    const workspace = await temporaryWorkspace()
+    const serverId = 'scoped-server'
+    await writeMcpServers(workspace, [{
+      ...BUDA_MCP_SERVER_TEMPLATE,
+      id: serverId,
+      display_name: 'Scoped Server',
+    }])
+    const referenceTargets: Array<{ serverId?: string; keyId?: number }> = []
+    const invalidated: string[] = []
+    const { app, handlers } = createRouteHarness()
+    registerMcpRoutes(app, () => workspace, {
+      invalidateServer: async (id: string) => { invalidated.push(id) },
+    } as any, {
+      findProjectReferences: async (activeWorkspace, target) => {
+        assertMcpWorkspaceMutationHeld(activeWorkspace)
+        referenceTargets.push(target)
+        return []
+      },
+    })
+    const scopedId = {
+      [Symbol.toPrimitive]() {
+        assertMcpWorkspaceMutationHeld(workspace)
+        return serverId
+      },
+    }
+    const scopedParams: Record<string, unknown> = {}
+    Object.defineProperty(scopedParams, 'id', {
+      enumerable: true,
+      get() {
+        assertMcpWorkspaceMutationHeld(workspace)
+        return scopedId
+      },
+    })
+
+    const response = await call(handlers.get('DELETE /api/mcp/servers/:id'), { params: scopedParams })
+
+    expect(response.statusCode).toBe(200)
+    expect(referenceTargets).toEqual([{ serverId }])
+    expect(invalidated).toEqual([serverId])
+    expect((await readMcpServers(workspace).then(servers => servers.map(server => server.id)))).toEqual([])
   })
 
   test('parses and rejects invalid Key delete IDs inside the coordinator without scanning references', async () => {

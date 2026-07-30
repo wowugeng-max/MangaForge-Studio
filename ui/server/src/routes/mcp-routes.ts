@@ -195,8 +195,8 @@ export function registerMcpRoutes(
 
   app.delete(['/api/mcp/servers/:id', '/api/mcp/servers/:id/'], safely(async (req, res) => {
     const activeWorkspace = getWorkspace()
-    const id = String(req.params.id)
     const result = await withMcpWorkspaceMutation(activeWorkspace, async () => {
+      const id = String(req.params.id)
       const previous = (await readMcpServers(activeWorkspace)).find(item => item.id === id)
       if (!previous) return null
       const keys = await readMcpKeys(activeWorkspace)
@@ -204,11 +204,11 @@ export function registerMcpRoutes(
       if (references.length) throwReferencedRecordConflict('该 MCP Server 仍被小说项目引用', references)
       if (keys.some(key => key.mcp_server_id === id)) return { error: '请先删除该 Server 下的 MCP Key' }
       await deleteMcpServer(activeWorkspace, id)
-      return { previous }
+      return { id, previous }
     })
     if (!result) return res.status(404).json({ error: 'MCP Server 不存在' })
     if ('error' in result) return res.status(409).json(result)
-    await runtime.invalidateServer?.(id)
+    await runtime.invalidateServer?.(result.id)
     res.json({ ok: true })
   }))
 
