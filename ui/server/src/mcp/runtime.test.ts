@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdtemp, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { createMcpKey, readMcpKeys } from './key-store'
+import { createMcpKey, readMcpKeys, updateMcpKey } from './key-store'
 import { createMcpRuntime } from './runtime'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from './server-store'
 
@@ -38,5 +38,41 @@ describe('MCP runtime', () => {
     const key = await createMcpKey(workspace, { mcp_server_id: 'other', key: 'sk_runtime', description: '账号' })
     const runtime = createMcpRuntime(() => workspace)
     await expect(runtime.getAdapterForKey(key.id)).rejects.toMatchObject({ code: 'MCP_BINDING_INVALID' })
+  })
+
+  test('uses an explicitly pinned credential snapshot after the stored key rotates', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-pinned-'))
+    workspaces.push(workspace)
+    const initialKey = 'credential-before-runtime-rotation'
+    const rotatedKey = 'credential-after-runtime-rotation'
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const created = await createMcpKey(workspace, { mcp_server_id: 'buda', key: initialKey, description: '账号' })
+    const pinnedKey = (await readMcpKeys(workspace)).find(item => item.id === created.id)!
+    await updateMcpKey(workspace, created.id, { key: rotatedKey })
+    let connectedKey = ''
+    const client = { listTools: async () => [], callTool: async () => ({ content: [] }) }
+    const manager = {
+      get: async (_workspace: string, _server: any, key: any) => {
+        connectedKey = key.key
+        return client
+      },
+      invalidate: async () => {},
+      invalidateServer: async () => {},
+      closeAll: async () => {},
+    }
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: manager as any,
+      adapterFactory: () => ({ listAgents: async () => [] }) as any,
+    })
+
+    const resolved = await runtime.getAdapterForKey(
+      created.id,
+      BUDA_MCP_SERVER_TEMPLATE.id,
+      undefined,
+      { server: BUDA_MCP_SERVER_TEMPLATE, key: pinnedKey },
+    )
+
+    expect(connectedKey).toBe(initialKey)
+    expect(resolved.key.key).toBe(initialKey)
   })
 })

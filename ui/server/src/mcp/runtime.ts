@@ -15,6 +15,8 @@ export type ResolvedMcpCredential = {
   adapter: ProseMcpAdapter
 }
 
+type PinnedMcpCredential = Pick<ResolvedMcpCredential, 'server' | 'key'>
+
 export function createMcpRuntime(
   getWorkspace: () => string,
   options: {
@@ -27,17 +29,26 @@ export function createMcpRuntime(
   const adapterFactory = options.adapterFactory || createMcpAdapter
   const now = options.now || Date.now
 
-  const getAdapterForKey = async (keyId: number, expectedServerId?: string, signal?: AbortSignal): Promise<ResolvedMcpCredential> => {
+  const getAdapterForKey = async (
+    keyId: number,
+    expectedServerId?: string,
+    signal?: AbortSignal,
+    pinnedCredential?: PinnedMcpCredential,
+  ): Promise<ResolvedMcpCredential> => {
     const activeWorkspace = getWorkspace()
-    const [servers, keys] = await Promise.all([readMcpServers(activeWorkspace), readMcpKeys(activeWorkspace)])
-    const key = keys.find(item => item.id === Number(keyId))
+    const stored = pinnedCredential
+      ? null
+      : await Promise.all([readMcpServers(activeWorkspace), readMcpKeys(activeWorkspace)])
+    const key = pinnedCredential?.key || stored?.[1].find(item => item.id === Number(keyId))
     if (!key) throw new McpError('MCP_BINDING_INVALID', `MCP Key 不存在：${keyId}`)
+    if (key.id !== Number(keyId)) throw new McpError('MCP_BINDING_INVALID', '固定 MCP Key 与请求不一致')
     if (!key.is_active) throw new McpError('MCP_BINDING_INVALID', `MCP Key 已禁用：${keyId}`)
     if (expectedServerId && key.mcp_server_id !== expectedServerId) {
       throw new McpError('MCP_BINDING_INVALID', 'MCP Key 不属于项目绑定的 Server')
     }
-    const server = servers.find(item => item.id === key.mcp_server_id)
+    const server = pinnedCredential?.server || stored?.[0].find(item => item.id === key.mcp_server_id)
     if (!server) throw new McpError('MCP_BINDING_INVALID', `MCP Server 不存在：${key.mcp_server_id}`)
+    if (server.id !== key.mcp_server_id) throw new McpError('MCP_BINDING_INVALID', '固定 MCP Server 与 Key 不一致')
     if (!server.is_active) throw new McpError('MCP_BINDING_INVALID', `MCP Server 已禁用：${server.id}`)
     if (server.transport !== 'streamable_http') throw new McpError('MCP_BINDING_INVALID', '首期正文生成只支持 Streamable HTTP')
     const client = await manager.get(activeWorkspace, server, key, signal) as ResolvedMcpCredential['client']

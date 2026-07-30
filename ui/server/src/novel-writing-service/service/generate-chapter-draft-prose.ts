@@ -44,6 +44,32 @@ import {
   selectProseForChapter,
 } from './runtime-helpers'
 import type { createGenerationSourceResolver } from '../generation-source/create-generation-source'
+import { MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY } from '../generation-source/types'
+
+const MCP_RECEIPT_FIELDS = [
+  'receipt_authority',
+  'request_id',
+  'receipt_run_id',
+  'server_id',
+  'key_id',
+  'adapter_id',
+  'agent_id',
+  'binding_fingerprint',
+  'session_id',
+  'snapshot_hash',
+  'status',
+] as const
+
+function trustedMcpGenerationReceipt(sourceResolution: any, draftResult: any) {
+  const receipt = draftResult?.source_receipt
+  if (
+    sourceResolution?.resolved_type !== 'mcp'
+    || receipt?.receipt_authority !== MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY
+  ) return {}
+  return Object.fromEntries(MCP_RECEIPT_FIELDS
+    .filter(field => Object.prototype.hasOwnProperty.call(receipt, field))
+    .map(field => [field, receipt[field]]))
+}
 
 export async function runGenerateChapterDraftProse(args: {
   activeWorkspace: string
@@ -159,14 +185,10 @@ assertCompleteProseTransportResult(draftResult, 'PROSE_DRAFT_TRUNCATED')
 const draftPromptDiagnostics = {
   ...compiledPrompt.diagnostics,
   generation_source: {
+    ...trustedMcpGenerationReceipt(sourceResolution, draftResult),
     configured_type: sourceResolution.configured_type,
     resolved_type: sourceResolution.resolved_type,
     override: sourceResolution.override,
-    ...((draftResult as any)?.source_receipt || {}),
-    adapter_id: (draftResult as any)?.adapter_id || null,
-    agent_id: (draftResult as any)?.agent_id || null,
-    session_id: (draftResult as any)?.session_id || null,
-    snapshot_hash: (draftResult as any)?.snapshot_hash || null,
   },
   model_usage: (draftResult as any)?.prose_prompt_diagnostics?.model_usage
     || (draftResult as any)?.usage

@@ -91,8 +91,9 @@ describe('prose generation source config', () => {
       .toThrow(expect.objectContaining({ code: 'MCP_BINDING_INVALID' }))
   })
 
-  test('computes a stable canonical fingerprint from every binding identity field', () => {
+  test('computes a stable opaque bounded fingerprint from every binding identity field', () => {
     const rawKey = 'synthetic-sensitive-value'
+    const headerLikeIdentity = 'synthetic-generation-header-value'
     const source = normalizeProseGenerationSource({
       version: 'prose_generation_source_v1',
       type: 'mcp',
@@ -100,7 +101,7 @@ describe('prose generation source config', () => {
         server_id: 'buda',
         key_id: 3,
         adapter_id: 'buda',
-        agent_id: 'agent-1',
+        agent_id: headerLikeIdentity,
         key: rawKey,
       },
     })
@@ -108,7 +109,11 @@ describe('prose generation source config', () => {
 
     const fingerprint = proseGenerationSourceFingerprint(source)
     expect(fingerprint).toBe(proseGenerationSourceFingerprint(structuredClone(source)))
-    expect(fingerprint).not.toContain(rawKey)
+    expect(fingerprint).toMatch(/^sha256:[0-9a-f]{64}$/)
+    expect(fingerprint).toHaveLength(71)
+    for (const identity of [source.version, source.type, source.mcp.server_id, source.mcp.adapter_id, source.mcp.agent_id, rawKey]) {
+      expect(fingerprint).not.toContain(identity)
+    }
 
     for (const mcp of [
       { ...source.mcp, server_id: 'other' },

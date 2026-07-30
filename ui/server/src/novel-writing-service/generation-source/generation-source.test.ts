@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdtemp, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { createMcpKey } from '../../mcp/key-store'
+import { createMcpKey, updateMcpKey } from '../../mcp/key-store'
 import { McpError } from '../../mcp/errors'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from '../../mcp/server-store'
 import { createNovelProject, listNovelRuns } from '../../novel'
@@ -62,7 +62,15 @@ describe('ModelGenerationSource', () => {
     let captured: any[] = []
     const source = new ModelGenerationSource(async (...args: any[]) => {
       captured = args
-      return { parsed: { prose_chapters: [{ chapter_no: 12, chapter_text: '模型正文' }] }, modelName: 'model-a' }
+      return {
+        parsed: { prose_chapters: [{ chapter_no: 12, chapter_text: '模型正文' }] },
+        modelName: 'model-a',
+        source_receipt: {
+          receipt_authority: 'mcp_generation_source_v1',
+          binding_fingerprint: `sha256:${'a'.repeat(64)}`,
+          server_id: 'attacker-controlled',
+        },
+      }
     })
     const request = sourceRequest()
     const result = await source.generateProse(request)
@@ -70,6 +78,7 @@ describe('ModelGenerationSource', () => {
     expect(captured[2].paragraphTask).toBe(request.paragraphTask)
     expect(captured[3]).toMatchObject({ activeWorkspace: '/workspace/a', modelId: '217', skipMemoryStore: true })
     expect(result).toMatchObject({ source: 'model', modelName: 'model-a' })
+    expect(result).not.toHaveProperty('source_receipt')
   })
 })
 
@@ -91,6 +100,7 @@ describe('McpGenerationSource', () => {
     })
     let captured: any = null
     const adapter = {
+      listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }],
       generateProse: async (input: any) => {
         captured = input
         await input.onProgress?.({ stage: 'mcp_drive_sync', status: 'success', snapshot_hash: 'snapshot-1' })
@@ -120,6 +130,7 @@ describe('McpGenerationSource', () => {
       session_id: 'session-1',
       snapshot_hash: 'snapshot-1',
       source_receipt: {
+        receipt_authority: 'mcp_generation_source_v1',
         request_id: 'request-12',
         server_id: 'buda',
         key_id: key.id,
@@ -161,7 +172,10 @@ describe('McpGenerationSource', () => {
     })
     const source = new McpGenerationSource({
       listAgents: async () => [],
-      getAdapterForKey: async () => { throw new Error('must not resolve an invalid binding') },
+      getAdapterForKey: async (...args: any[]) => ({
+        ...args[3],
+        adapter: { listAgents: async () => [] },
+      }),
     } as any)
 
     await expect(source.generateProse(sourceRequest({
@@ -180,6 +194,238 @@ describe('McpGenerationSource', () => {
       ),
       status: 'failed',
     })
+  })
+
+  test('scrubs stored credentials before an Agent-validation failure can persist colliding binding identifiers', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-source-pre-scrub-'))
+    workspaces.push(workspace)
+    const selectedHeader = 'synthetic-generation-header-value'
+    const selectedKey = 'credential-value-before-remote-validation'
+    const server = {
+      ...BUDA_MCP_SERVER_TEMPLATE,
+      custom_headers: { 'X-Space': selectedHeader },
+    }
+    await writeMcpServers(workspace, [server])
+    const key = await createMcpKey(workspace, {
+      mcp_server_id: server.id,
+      key: selectedKey,
+      description: '账号',
+    })
+    const project = await createNovelProject(workspace, {
+      title: '早期校验凭据碰撞',
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: {
+            server_id: server.id,
+            key_id: key.id,
+            adapter_id: server.adapter_id,
+            agent_id: selectedHeader,
+          },
+        },
+      },
+    })
+    let adapterResolved = false
+    let runningDurable = ''
+    const source = new McpGenerationSource({
+      listAgents: async () => { throw new Error('Agent validation must use the pinned adapter') },
+      getAdapterForKey: async (...args: any[]) => {
+        adapterResolved = true
+        return {
+          ...args[3],
+          adapter: {
+            listAgents: async () => {
+              const [runningReceipt] = (await listNovelRuns(workspace, project.id))
+                .filter(run => run.run_type === 'mcp_generate_prose')
+              expect(runningReceipt).toMatchObject({ status: 'running' })
+              runningDurable = JSON.stringify({
+                input_ref: runningReceipt?.input_ref,
+                output_ref: runningReceipt?.output_ref,
+              })
+              return []
+            },
+          },
+        }
+      },
+    } as any)
+    const progress: any[] = []
+    let exposedError: any
+
+    try {
+      await source.generateProse(sourceRequest({
+        activeWorkspace: workspace,
+        project,
+        onProgress: (event: any) => { progress.push(event) },
+      }))
+    } catch (error) {
+      exposedError = error
+    }
+
+    expect(adapterResolved).toBe(true)
+    const [receipt] = (await listNovelRuns(workspace, project.id)).filter(run => run.run_type === 'mcp_generate_prose')
+    expect(receipt).toMatchObject({ status: 'failed' })
+    const durable = JSON.stringify({ output_ref: receipt?.output_ref, error_message: receipt?.error_message })
+    const exposed = JSON.stringify({ message: exposedError?.message, details: exposedError?.details })
+    const failedProgress = JSON.stringify(progress.find(event => event.stage === 'mcp_connect' && event.status === 'failed'))
+    for (const secret of [selectedHeader, selectedKey]) {
+      expect(runningDurable).not.toContain(secret)
+      expect(durable).not.toContain(secret)
+      expect(exposed).not.toContain(secret)
+      expect(failedProgress).not.toContain(secret)
+    }
+    const storedOutput = JSON.parse(receipt!.output_ref!)
+    expect(storedOutput.binding_fingerprint).toMatch(/^sha256:[0-9a-f]{64}$/)
+    expect(storedOutput.binding_fingerprint).not.toContain(selectedHeader)
+    expect(JSON.parse(JSON.parse(runningDurable).output_ref).binding_fingerprint)
+      .toMatch(/^sha256:[0-9a-f]{64}$/)
+  })
+
+  test('pins the scrubbed credential snapshot across Agent validation when the stored key rotates', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-source-rotation-'))
+    workspaces.push(workspace)
+    const initialKey = 'credential-before-agent-validation'
+    const rotatedKey = 'credential-after-agent-validation'
+    const server = { ...BUDA_MCP_SERVER_TEMPLATE }
+    await writeMcpServers(workspace, [server])
+    const key = await createMcpKey(workspace, {
+      mcp_server_id: server.id,
+      key: initialKey,
+      description: '账号',
+    })
+    const project = await createNovelProject(workspace, {
+      title: '凭据轮换快照',
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: {
+            server_id: server.id,
+            key_id: key.id,
+            adapter_id: server.adapter_id,
+            agent_id: 'agent-1',
+          },
+        },
+      },
+    })
+    let unpinnedListAgentsCalls = 0
+    let pinnedCredential: any
+    const source = new McpGenerationSource({
+      listAgents: async () => {
+        unpinnedListAgentsCalls += 1
+        await updateMcpKey(workspace, key.id, { key: rotatedKey })
+        throw new McpError('MCP_RUNTIME_ERROR', `remote reflected ${rotatedKey}`, { echo: rotatedKey })
+      },
+      getAdapterForKey: async (...args: any[]) => {
+        pinnedCredential = args[3]
+        await updateMcpKey(workspace, key.id, { key: rotatedKey })
+        const reflected = String(pinnedCredential?.key?.key || initialKey)
+        return {
+          server: pinnedCredential?.server || server,
+          key: pinnedCredential?.key || key,
+          adapter: {
+            listAgents: async () => {
+              throw new McpError('MCP_RUNTIME_ERROR', `remote reflected ${reflected}`, { echo: reflected })
+            },
+          },
+        }
+      },
+    } as any)
+    let exposedError: any
+
+    try {
+      await source.generateProse(sourceRequest({ activeWorkspace: workspace, project }))
+    } catch (error) {
+      exposedError = error
+    }
+
+    const [receipt] = (await listNovelRuns(workspace, project.id)).filter(run => run.run_type === 'mcp_generate_prose')
+    expect(receipt).toMatchObject({ status: 'failed' })
+    const durable = JSON.stringify({ output_ref: receipt?.output_ref, error_message: receipt?.error_message })
+    const exposed = JSON.stringify({ message: exposedError?.message, details: exposedError?.details })
+    for (const secret of [initialKey, rotatedKey]) {
+      expect(durable).not.toContain(secret)
+      expect(exposed).not.toContain(secret)
+    }
+    expect(unpinnedListAgentsCalls).toBe(0)
+    expect(pinnedCredential).toMatchObject({
+      server: { id: server.id },
+      key: { id: key.id, key: initialKey },
+    })
+  })
+
+  test('bounds scrubbed receipt identifiers after successful credential resolution', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-source-bounded-'))
+    workspaces.push(workspace)
+    const selectedHeader = 'synthetic-bounded-header-value'
+    const selectedKey = 'credential-value-for-bounded-success'
+    const serverId = `server-${'s'.repeat(320)}`
+    const agentId = `agent-${'a'.repeat(320)}`
+    const sessionId = `session-${'x'.repeat(640)}`
+    const snapshotHash = `snapshot-${'y'.repeat(640)}`
+    const paragraphTask = 'bounded receipt prompt must remain hash-only'
+    const proseText = 'bounded receipt prose must never be durable'
+    const server = {
+      ...BUDA_MCP_SERVER_TEMPLATE,
+      id: serverId,
+      display_name: 'Bounded Test Server',
+      custom_headers: { 'X-Space': selectedHeader },
+    }
+    await writeMcpServers(workspace, [server])
+    const key = await createMcpKey(workspace, {
+      mcp_server_id: server.id,
+      key: selectedKey,
+      description: '账号',
+    })
+    const project = await createNovelProject(workspace, {
+      title: '有界成功回执',
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: {
+            server_id: server.id,
+            key_id: key.id,
+            adapter_id: server.adapter_id,
+            agent_id: agentId,
+          },
+        },
+      },
+    })
+    const adapter = {
+      listAgents: async () => [{ id: agentId, name: 'Long Agent' }],
+      generateProse: async () => ({
+        prose_chapters: [{ chapter_no: 12, chapter_text: proseText }],
+        source: 'mcp',
+        adapter_id: server.adapter_id,
+        agent_id: agentId,
+        session_id: sessionId,
+        snapshot_hash: snapshotHash,
+        completed: true,
+      }),
+    }
+    const source = new McpGenerationSource({
+      listAgents: async () => [{ id: agentId, name: 'Long Agent' }],
+      getAdapterForKey: async () => ({ server, key, adapter }),
+    } as any)
+
+    const result = await source.generateProse(sourceRequest({
+      activeWorkspace: workspace,
+      project,
+      paragraphTask,
+    }))
+
+    const [receipt] = (await listNovelRuns(workspace, project.id)).filter(run => run.run_type === 'mcp_generate_prose')
+    const storedOutput = JSON.parse(receipt!.output_ref!)
+    const returnedReceipt = (result as any).source_receipt
+    for (const field of ['server_id', 'adapter_id', 'agent_id', 'session_id', 'snapshot_hash', 'binding_fingerprint']) {
+      expect(String(storedOutput[field] || '').length).toBeLessThanOrEqual(160)
+      expect(String(returnedReceipt[field] || '').length).toBeLessThanOrEqual(160)
+    }
+    const durable = JSON.stringify({ input_ref: receipt?.input_ref, output_ref: receipt?.output_ref, error_message: receipt?.error_message })
+    for (const forbidden of [selectedHeader, selectedKey, paragraphTask, proseText]) {
+      expect(durable).not.toContain(forbidden)
+    }
   })
 
   test('scrubs selected credentials from progress, exposed errors, and durable failed receipts', async () => {
@@ -209,6 +455,7 @@ describe('McpGenerationSource', () => {
       },
     })
     const adapter = {
+      listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }],
       generateProse: async (input: any) => {
         await input.onProgress?.({
           stage: 'mcp_session_wait',
@@ -319,6 +566,7 @@ describe('McpGenerationSource', () => {
     })
     const proseText = `正文中的字面量必须原样保留：${selectedKey} / ${selectedHeader} / ${selectedCookie}`
     const adapter = {
+      listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }],
       generateProse: async () => ({
         prose_chapters: [{ chapter_no: 12, title: '原样正文', chapter_text: proseText }],
         source: 'mcp',
@@ -407,6 +655,7 @@ describe('McpGenerationSource', () => {
     })
     const residualText = `${'受保护的 blocked-invalid 残余正文必须逐字保留。'.repeat(20)} ${selectedKey} ${selectedHeader}`
     const adapter = {
+      listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }],
       generateProse: async () => {
         const failure: any = new Error(`adapter reflected ${selectedKey} and ${selectedHeader}`)
         failure.name = 'AdapterBlockedError'

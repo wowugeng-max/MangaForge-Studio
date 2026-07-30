@@ -3,6 +3,7 @@ import {
   listNovelChapters,
 } from '../../novel'
 import { isMcpError } from '../../mcp/errors'
+import { acceptanceBindingFingerprintFromGenerationSource } from '../generation-source/types'
 import {
   buildChapterProseStoragePatch,
   resolveChapterProseVersionSource,
@@ -356,9 +357,9 @@ export async function runFullProductionAdmissionAndStore(args: {
   const acceptanceUsageUpdates = acceptancePrep.acceptanceUsageUpdates
   const settingConsistencyReview = acceptancePrep.settingConsistencyReview
   throwIfChapterGenerationAborted()
-  const bindingFingerprint = typeof draftPromptDiagnostics?.generation_source?.binding_fingerprint === 'string'
-    ? draftPromptDiagnostics.generation_source.binding_fingerprint.trim()
-    : ''
+  const bindingFingerprint = acceptanceBindingFingerprintFromGenerationSource(
+    draftPromptDiagnostics?.generation_source,
+  )
   let acceptance: Awaited<ReturnType<typeof commitNovelChapterAcceptance>>
   try {
     acceptance = await commitNovelChapterAcceptance(activeWorkspace, {

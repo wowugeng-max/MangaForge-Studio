@@ -1,6 +1,7 @@
 import {
   commitNovelChapterAcceptance,
 } from '../../novel'
+import { isMcpError } from '../../mcp/errors'
 import {
   buildChapterProseStoragePatch,
   resolveChapterProseVersionSource,
@@ -42,6 +43,7 @@ import {
 import {
   isAbortError,
 } from './runtime-helpers'
+import { acceptanceBindingFingerprintFromGenerationSource } from '../generation-source/types'
 import {
   storeDraftModeSyncReviews,
 } from './generate-chapter-draft-sync-reviews'
@@ -343,9 +345,15 @@ export async function runDraftModeAdmissionAndStore(args: {
     await onStage('store', { status: 'running' })
     await runtime?.hooks?.beforeChapterStore?.({ chapterId: chapter.id, finalText })
     throwIfChapterGenerationAborted()
+    const bindingFingerprint = acceptanceBindingFingerprintFromGenerationSource(
+      draftPromptDiagnostics?.generation_source,
+    )
     const draftAcceptance = await commitNovelChapterAcceptance(activeWorkspace, {
       chapter_id: chapter.id,
       chapter_patch: draftModeChapterPatch,
+      ...(bindingFingerprint ? {
+        expected_prose_generation_source_fingerprint: bindingFingerprint,
+      } : {}),
       version_source: resolveChapterProseVersionSource({ editorRewrite }),
       reviews: [
         ...pendingGeneratedReviews,
@@ -367,6 +375,7 @@ export async function runDraftModeAdmissionAndStore(args: {
     updatedReviewedDraft = draftAcceptance.chapter
   } catch (error) {
     if (isAbortError(error)) throw error
+    if (isMcpError(error) && error.code === 'MCP_BINDING_CHANGED') throw error
     throw markBlockedInvalidError(error, {
       code: 'atomic_acceptance_failed',
       source: 'atomic',

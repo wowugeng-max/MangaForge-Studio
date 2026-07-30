@@ -1,8 +1,10 @@
+import { createHash } from 'crypto'
 import { McpError } from '../../mcp/errors'
 import { readMcpKeys } from '../../mcp/key-store'
 import type { McpRuntime } from '../../mcp/runtime'
 import { readMcpServers } from '../../mcp/server-store'
 import { hasMcpAdapter } from '../../mcp/adapters/registry'
+import type { McpKeyRecord, McpServerRecord } from '../../mcp/types'
 import { listNovelProjects } from '../../novel'
 
 const SOURCE_VERSION = 'prose_generation_source_v1' as const
@@ -92,16 +94,40 @@ export function resolveProseGenerationSource(project: any): ProseGenerationSourc
 }
 
 export function proseGenerationSourceFingerprint(source: ProseGenerationSourceConfig) {
-  return source.type === 'model'
-    ? JSON.stringify([source.version, source.type])
-    : JSON.stringify([
+  const identity = source.type === 'model'
+    ? [source.version, source.type]
+    : [
         source.version,
         source.type,
         source.mcp.server_id,
         source.mcp.key_id,
         source.mcp.adapter_id,
         source.mcp.agent_id,
-      ])
+      ]
+  return `sha256:${createHash('sha256').update(JSON.stringify(identity), 'utf8').digest('hex')}`
+}
+
+type McpCredentialSnapshot = {
+  servers: McpServerRecord[]
+  keys: McpKeyRecord[]
+}
+
+export function validateMcpCredentialSelectionSnapshot(snapshot: McpCredentialSnapshot, input: {
+  serverId: string
+  keyId: number
+  adapterId?: string
+}) {
+  const server = snapshot.servers.find(item => item.id === input.serverId)
+  if (!server) throw new McpError('MCP_BINDING_INVALID', `MCP Server 不存在：${input.serverId}`)
+  if (!server.is_active) throw new McpError('MCP_BINDING_INVALID', `MCP Server 已禁用：${server.id}`)
+  if (server.transport !== 'streamable_http') throw new McpError('MCP_BINDING_INVALID', '首期正文生成只支持 Streamable HTTP')
+  const key = snapshot.keys.find(item => item.id === input.keyId)
+  if (!key) throw new McpError('MCP_BINDING_INVALID', `MCP Key 不存在：${input.keyId}`)
+  if (!key.is_active) throw new McpError('MCP_BINDING_INVALID', `MCP Key 已禁用：${input.keyId}`)
+  if (key.mcp_server_id !== server.id) throw new McpError('MCP_BINDING_INVALID', 'MCP Key 不属于所选 Server')
+  if (input.adapterId && input.adapterId !== server.adapter_id) throw new McpError('MCP_BINDING_INVALID', '项目 Adapter 与 Server Adapter 不一致')
+  if (!hasMcpAdapter(server.adapter_id)) throw new McpError('MCP_BINDING_INVALID', `本地未注册 Adapter：${server.adapter_id}`)
+  return { server, key }
 }
 
 export async function validateMcpCredentialSelection(activeWorkspace: string, input: {
@@ -110,17 +136,7 @@ export async function validateMcpCredentialSelection(activeWorkspace: string, in
   adapterId?: string
 }) {
   const [servers, keys] = await Promise.all([readMcpServers(activeWorkspace), readMcpKeys(activeWorkspace)])
-  const server = servers.find(item => item.id === input.serverId)
-  if (!server) throw new McpError('MCP_BINDING_INVALID', `MCP Server 不存在：${input.serverId}`)
-  if (!server.is_active) throw new McpError('MCP_BINDING_INVALID', `MCP Server 已禁用：${server.id}`)
-  if (server.transport !== 'streamable_http') throw new McpError('MCP_BINDING_INVALID', '首期正文生成只支持 Streamable HTTP')
-  const key = keys.find(item => item.id === input.keyId)
-  if (!key) throw new McpError('MCP_BINDING_INVALID', `MCP Key 不存在：${input.keyId}`)
-  if (!key.is_active) throw new McpError('MCP_BINDING_INVALID', `MCP Key 已禁用：${input.keyId}`)
-  if (key.mcp_server_id !== server.id) throw new McpError('MCP_BINDING_INVALID', 'MCP Key 不属于所选 Server')
-  if (input.adapterId && input.adapterId !== server.adapter_id) throw new McpError('MCP_BINDING_INVALID', '项目 Adapter 与 Server Adapter 不一致')
-  if (!hasMcpAdapter(server.adapter_id)) throw new McpError('MCP_BINDING_INVALID', `本地未注册 Adapter：${server.adapter_id}`)
-  return { server, key }
+  return validateMcpCredentialSelectionSnapshot({ servers, keys }, input)
 }
 
 export async function validateMcpProjectBinding(
@@ -130,15 +146,19 @@ export async function validateMcpProjectBinding(
   options: {
     runtime: Pick<McpRuntime, 'listAgents'>
     listProjects?: typeof listNovelProjects
+    credentialSnapshot?: McpCredentialSnapshot
     signal?: AbortSignal
   },
 ) {
   const binding = normalizeMcpProjectBinding(input)
-  const { server, key } = await validateMcpCredentialSelection(activeWorkspace, {
+  const selectionInput = {
     serverId: binding.server_id,
     keyId: binding.key_id,
     adapterId: binding.adapter_id,
-  })
+  }
+  const { server, key } = options.credentialSnapshot
+    ? validateMcpCredentialSelectionSnapshot(options.credentialSnapshot, selectionInput)
+    : await validateMcpCredentialSelection(activeWorkspace, selectionInput)
   const agents = await options.runtime.listAgents(binding.key_id, options.signal)
   const agent = agents.find(item => String(item.id) === binding.agent_id)
   if (!agent) throw new McpError('MCP_BINDING_INVALID', `所选 Agent 不存在或当前账号不可见：${binding.agent_id}`)

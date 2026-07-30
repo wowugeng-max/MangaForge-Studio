@@ -23,6 +23,7 @@ export class ModelGenerationSource implements GenerationSource {
         skipMemoryStore: true,
       },
     )
-    return { ...(result || {}), source: 'model' }
+    const { source_receipt: _untrustedSourceReceipt, ...safeResult } = result || {}
+    return { ...safeResult, source: 'model' }
   }
 }

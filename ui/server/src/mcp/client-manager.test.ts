@@ -80,4 +80,34 @@ describe('McpClientManager', () => {
     expect(await first).toBe(client)
     expect(await second).toBe(client)
   })
+
+  test('does not reuse a ready client across Key and Header rotation for the same IDs', async () => {
+    const created: any[] = []
+    const manager = new McpClientManager({
+      createClient: input => {
+        const client = {
+          input,
+          state: 'Closed',
+          async connect() { this.state = 'Ready' },
+          async close() { this.state = 'Closed' },
+        }
+        created.push(client)
+        return client as any
+      },
+    })
+    const rotatedServer = { id: 'buda', custom_headers: { 'X-Space': 'header-after-rotation' } } as any
+    const rotatedKey = { id: 1, key: 'key-after-rotation' } as any
+    const pinnedServer = { id: 'buda', custom_headers: { 'X-Space': 'header-before-rotation' } } as any
+    const pinnedKey = { id: 1, key: 'key-before-rotation' } as any
+
+    const rotatedClient = await manager.get('/workspace/a', rotatedServer, rotatedKey)
+    const pinnedClient = await manager.get('/workspace/a', pinnedServer, pinnedKey)
+
+    expect(pinnedClient).not.toBe(rotatedClient)
+    expect(created).toHaveLength(2)
+    expect((pinnedClient as any).input).toMatchObject({
+      server: { custom_headers: { 'X-Space': 'header-before-rotation' } },
+      key: { key: 'key-before-rotation' },
+    })
+  })
 })

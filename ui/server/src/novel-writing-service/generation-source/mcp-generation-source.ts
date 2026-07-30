@@ -1,10 +1,24 @@
 import { createHash } from 'crypto'
 import { appendNovelRun, updateNovelRun } from '../../novel'
+import { readMcpKeys } from '../../mcp/key-store'
 import type { McpRuntime } from '../../mcp/runtime'
 import { McpError, isMcpError } from '../../mcp/errors'
 import { createMcpSecretScrubber } from '../../mcp/secret-scrubber'
-import { proseGenerationSourceFingerprint, resolveProseGenerationSource, validateMcpProjectBinding } from './source-config'
-import type { GenerationSource, ProseGenerationRequest, ProseGenerationResult } from './types'
+import { readMcpServers } from '../../mcp/server-store'
+import {
+  proseGenerationSourceFingerprint,
+  resolveProseGenerationSource,
+  validateMcpCredentialSelectionSnapshot,
+  validateMcpProjectBinding,
+} from './source-config'
+import {
+  MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY,
+  type GenerationSource,
+  type ProseGenerationRequest,
+  type ProseGenerationResult,
+} from './types'
+
+const PROVENANCE_ID_MAX_CHARS = 160
 
 function sha256(value: string) {
   return createHash('sha256').update(value, 'utf8').digest('hex')
@@ -15,11 +29,42 @@ function driveText(value: unknown) {
   return `${JSON.stringify(value ?? {}, null, 2)}\n`
 }
 
+function boundedScrubbedId(
+  scrubber: ReturnType<typeof createMcpSecretScrubber>,
+  value: unknown,
+) {
+  return scrubber.scrubText(value).slice(0, PROVENANCE_ID_MAX_CHARS)
+}
+
+async function readBindingCredentialSnapshot(activeWorkspace: string, binding: {
+  server_id: string
+  key_id: number
+}) {
+  const [servers, keys] = await Promise.all([
+    readMcpServers(activeWorkspace),
+    readMcpKeys(activeWorkspace),
+  ])
+  const selectedKeys = keys.filter(item => item.id === binding.key_id)
+  const serverIds = new Set([
+    binding.server_id,
+    ...selectedKeys.map(item => item.mcp_server_id),
+  ])
+  return {
+    records: { servers, keys },
+    secrets: {
+      keys: selectedKeys.map(item => item.key),
+      headerValues: servers
+        .filter(item => serverIds.has(item.id))
+        .flatMap(item => Object.values(item.custom_headers)),
+    },
+  }
+}
+
 function errorReceipt(error: any, provenance: Record<string, unknown>) {
   return {
     ...provenance,
     status: 'failed',
-    error_code: String(error?.code || error?.error_code || 'MCP_GENERATION_FAILED'),
+    error_code: String(error?.code || error?.error_code || 'MCP_GENERATION_FAILED').slice(0, 80),
     error: String(error?.message || error || 'MCP 正文生成失败').slice(0, 500),
   }
 }
@@ -93,12 +138,15 @@ export class McpGenerationSource implements GenerationSource {
     if (source.type !== 'mcp') throw new Error('MCP GenerationSource 需要完整的项目 MCP 绑定')
     const binding = source.mcp
     const bindingFingerprint = proseGenerationSourceFingerprint(source)
+    const credentialSnapshot = await readBindingCredentialSnapshot(request.activeWorkspace, binding)
+    let scrubber = createMcpSecretScrubber(credentialSnapshot.secrets)
     const baseProvenance = {
-      server_id: binding.server_id,
+      receipt_authority: MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY,
+      server_id: boundedScrubbedId(scrubber, binding.server_id),
       key_id: binding.key_id,
-      adapter_id: binding.adapter_id,
-      agent_id: binding.agent_id,
-      binding_fingerprint: bindingFingerprint,
+      adapter_id: boundedScrubbedId(scrubber, binding.adapter_id),
+      agent_id: boundedScrubbedId(scrubber, binding.agent_id),
+      binding_fingerprint: boundedScrubbedId(scrubber, bindingFingerprint),
     }
     const receipt = await appendNovelRun(request.activeWorkspace, {
       project_id: Number(request.project?.id || 0),
@@ -106,7 +154,7 @@ export class McpGenerationSource implements GenerationSource {
       step_name: `chapter-${request.chapterNo}`,
       status: 'running',
       input_ref: JSON.stringify({
-        request_id: request.requestId,
+        request_id: boundedScrubbedId(scrubber, request.requestId),
         project_id: Number(request.project?.id || 0),
         chapter_id: Number(request.chapter?.id || 0),
         chapter_no: request.chapterNo,
@@ -116,17 +164,32 @@ export class McpGenerationSource implements GenerationSource {
     })
     let progressProvenance: Record<string, unknown> = { ...baseProvenance }
     let connected = false
-    let scrubber = createMcpSecretScrubber()
     try {
       await request.onProgress?.({ stage: 'mcp_connect', status: 'running' })
-      await validateMcpProjectBinding(request.activeWorkspace, request.project, binding, {
-        runtime: this.runtime,
-        signal: request.signal,
+      const pinnedCredential = validateMcpCredentialSelectionSnapshot(credentialSnapshot.records, {
+        serverId: binding.server_id,
+        keyId: binding.key_id,
+        adapterId: binding.adapter_id,
       })
-      const resolved = await this.runtime.getAdapterForKey(binding.key_id, binding.server_id, request.signal)
+      const resolved = await this.runtime.getAdapterForKey(
+        binding.key_id,
+        binding.server_id,
+        request.signal,
+        pinnedCredential,
+      )
       scrubber = createMcpSecretScrubber({
-        keys: [resolved.key.key],
-        headerValues: Object.values(resolved.server.custom_headers),
+        keys: [...credentialSnapshot.secrets.keys, resolved.key.key],
+        headerValues: [
+          ...credentialSnapshot.secrets.headerValues,
+          ...Object.values(resolved.server.custom_headers),
+        ],
+      })
+      await validateMcpProjectBinding(request.activeWorkspace, request.project, binding, {
+        runtime: {
+          listAgents: async (_keyId, signal) => resolved.adapter.listAgents(signal),
+        },
+        credentialSnapshot: credentialSnapshot.records,
+        signal: request.signal,
       })
       await request.onProgress?.({ stage: 'mcp_connect', status: 'success' })
       connected = true
@@ -151,18 +214,23 @@ export class McpGenerationSource implements GenerationSource {
         signal: request.signal,
         onProgress: async event => {
           const scrubbedEvent = scrubber.scrubValue(event)
+          const safeEvent = {
+            ...scrubbedEvent,
+            ...(scrubbedEvent.session_id ? { session_id: boundedScrubbedId(scrubber, scrubbedEvent.session_id) } : {}),
+            ...(scrubbedEvent.snapshot_hash ? { snapshot_hash: boundedScrubbedId(scrubber, scrubbedEvent.snapshot_hash) } : {}),
+          }
           progressProvenance = {
             ...progressProvenance,
-            ...(scrubbedEvent.session_id ? { session_id: scrubbedEvent.session_id } : {}),
-            ...(scrubbedEvent.snapshot_hash ? { snapshot_hash: scrubbedEvent.snapshot_hash } : {}),
+            ...(safeEvent.session_id ? { session_id: safeEvent.session_id } : {}),
+            ...(safeEvent.snapshot_hash ? { snapshot_hash: safeEvent.snapshot_hash } : {}),
           }
-          await request.onProgress?.(scrubbedEvent)
+          await request.onProgress?.(safeEvent)
         },
       })
       const output = scrubber.scrubValue({
         ...progressProvenance,
-        session_id: result.session_id,
-        snapshot_hash: result.snapshot_hash,
+        session_id: boundedScrubbedId(scrubber, result.session_id),
+        snapshot_hash: boundedScrubbedId(scrubber, result.snapshot_hash),
         status: 'success',
       })
       await updateNovelRun(request.activeWorkspace, receipt.id, {
@@ -174,7 +242,7 @@ export class McpGenerationSource implements GenerationSource {
         ...scrubber.scrubValue(resultMetadata),
         ...(proseChapters !== undefined ? { prose_chapters: proseChapters } : {}),
         source_receipt: {
-          request_id: request.requestId,
+          request_id: boundedScrubbedId(scrubber, request.requestId),
           receipt_run_id: receipt.id,
           ...output,
         },

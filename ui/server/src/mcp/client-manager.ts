@@ -1,8 +1,30 @@
+import { createHash } from 'crypto'
 import { createMcpClient, type GenericMcpClient } from './client'
 import type { McpKeyRecord, McpServerRecord } from './types'
 
-function connectionKey(activeWorkspace: string, serverId: string, keyId: number) {
+function connectionPrefix(activeWorkspace: string, serverId: string, keyId: number) {
   return `${activeWorkspace}\u0000${serverId}\u0000${keyId}`
+}
+
+function connectionKey(activeWorkspace: string, server: McpServerRecord, key: McpKeyRecord) {
+  const configuration = JSON.stringify({
+    server: {
+      transport: server.transport,
+      url: server.url,
+      auth_type: server.auth_type,
+      adapter_id: server.adapter_id,
+      startup_timeout_ms: server.startup_timeout_ms,
+      tool_timeout_ms: server.tool_timeout_ms,
+      generation_timeout_ms: server.generation_timeout_ms,
+      poll_initial_ms: server.poll_initial_ms,
+      poll_max_ms: server.poll_max_ms,
+      enabled_tools: [...(server.enabled_tools || [])].sort(),
+      custom_headers: Object.entries(server.custom_headers || {}).sort(([left], [right]) => left.localeCompare(right)),
+    },
+    key: key.key,
+  })
+  const fingerprint = createHash('sha256').update(configuration, 'utf8').digest('hex')
+  return `${connectionPrefix(activeWorkspace, server.id, key.id)}\u0000${fingerprint}`
 }
 
 export class McpClientManager {
@@ -15,7 +37,7 @@ export class McpClientManager {
   }
 
   async get(activeWorkspace: string, server: McpServerRecord, key: McpKeyRecord, signal?: AbortSignal) {
-    const cacheKey = connectionKey(activeWorkspace, server.id, key.id)
+    const cacheKey = connectionKey(activeWorkspace, server, key)
     let client = this.clients.get(cacheKey)
     if (!client) {
       client = this.createClient({ server, key })
@@ -40,13 +62,13 @@ export class McpClientManager {
   }
 
   async invalidate(activeWorkspace: string, serverId: string, keyId: number) {
-    const cacheKey = connectionKey(activeWorkspace, serverId, keyId)
-    const client = this.clients.get(cacheKey)
-    this.clients.delete(cacheKey)
-    const connection = this.connecting.get(cacheKey)
-    this.connecting.delete(cacheKey)
-    await connection?.catch(() => {})
-    await client?.close()
+    const prefix = `${connectionPrefix(activeWorkspace, serverId, keyId)}\u0000`
+    const clients = [...this.clients.entries()].filter(([key]) => key.startsWith(prefix))
+    for (const [key] of clients) this.clients.delete(key)
+    const connections = [...this.connecting.entries()].filter(([key]) => key.startsWith(prefix))
+    for (const [key] of connections) this.connecting.delete(key)
+    await Promise.all(connections.map(([, connection]) => connection.catch(() => {})))
+    await Promise.all(clients.map(([, client]) => client.close()))
   }
 
   async invalidateServer(activeWorkspace: string, serverId: string) {
