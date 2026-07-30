@@ -54,4 +54,30 @@ describe('McpClientManager', () => {
     await manager.closeAll()
     expect(clients[1].closeCalls).toBe(1)
   })
+
+  test('shares one in-flight connection for concurrent callers of the same credential', async () => {
+    let connectCalls = 0
+    let releaseConnect!: () => void
+    const connectGate = new Promise<void>(resolve => { releaseConnect = resolve })
+    const client = {
+      state: 'Closed',
+      async connect() {
+        connectCalls += 1
+        await connectGate
+        this.state = 'Ready'
+      },
+      async close() { this.state = 'Closed' },
+    }
+    const manager = new McpClientManager({ createClient: () => client as any })
+    const server = { id: 'buda' } as any
+    const key = { id: 1 } as any
+
+    const first = manager.get('/workspace/a', server, key)
+    const second = manager.get('/workspace/a', server, key)
+    await Promise.resolve()
+    expect(connectCalls).toBe(1)
+    releaseConnect()
+    expect(await first).toBe(client)
+    expect(await second).toBe(client)
+  })
 })

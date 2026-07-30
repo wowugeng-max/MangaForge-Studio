@@ -33,4 +33,22 @@ describe('Buda tool discovery', () => {
       { name: 'apiClaw.listApiAgents', inputSchema: {} },
     ] as any)).toThrow(expect.objectContaining({ code: 'MCP_CAPABILITY_MISSING' }))
   })
+
+  test('does not require Agent creation capability for normal generation', () => {
+    const tools = [
+      'apiClaw.listApiAgents',
+      'apiClaw.listApiAgentDriveFiles',
+      'apiClaw.upsertApiAgentDriveFile',
+      'apiClaw.apiAgentDriveText',
+      'apiClaw.createApiAgentSession',
+      'apiClaw.getApiAgentSession',
+      'apiClaw.postApiAgentSessionMessage',
+      'apiClaw.cancelApiAgentSessionRun',
+    ].map(name => ({ name, inputSchema: { type: 'object' } }))
+
+    expect(resolveBudaTools(tools as any)).not.toHaveProperty('createAgent')
+    expect(() => resolveBudaTools(tools as any, { requireCreateAgent: true })).toThrow(expect.objectContaining({
+      code: 'MCP_CAPABILITY_MISSING',
+    }))
+  })
 })

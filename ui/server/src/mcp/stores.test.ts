@@ -87,6 +87,9 @@ describe('MCP key store', () => {
     await updateMcpKey(workspace, created.id, { description: '改名账号' })
     expect((await readMcpKeys(workspace))[0]).toMatchObject({ key: 'sk_original', description: '改名账号' })
 
+    await updateMcpKey(workspace, created.id, { key: '   ' })
+    expect((await readMcpKeys(workspace))[0]?.key).toBe('sk_original')
+
     await updateMcpKey(workspace, created.id, { key: 'sk_replaced' })
     expect((await readMcpKeys(workspace))[0]?.key).toBe('sk_replaced')
   })

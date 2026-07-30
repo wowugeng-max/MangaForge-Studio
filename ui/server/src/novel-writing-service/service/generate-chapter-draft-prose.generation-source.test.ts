@@ -62,6 +62,11 @@ describe('chapter draft GenerationSource integration', () => {
       adapter_id: 'buda',
       agent_id: 'agent-1',
       session_id: 'session-1',
+      server_id: 'buda',
+      key_id: key.id,
+      request_id: expect.any(String),
+      receipt_run_id: expect.any(Number),
+      status: 'success',
     })
   })
 })

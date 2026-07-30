@@ -109,12 +109,25 @@ describe('McpGenerationSource', () => {
 
     expect(captured.paragraphTask).toBe(paragraphTask)
     expect(captured.drive).toMatchObject({ writingBible: expect.stringContaining('克制'), storyState: { place: '北城' } })
-    expect(result).toMatchObject({ source: 'mcp', session_id: 'session-1', snapshot_hash: 'snapshot-1' })
+    expect(result).toMatchObject({
+      source: 'mcp',
+      session_id: 'session-1',
+      snapshot_hash: 'snapshot-1',
+      source_receipt: {
+        request_id: 'request-12',
+        server_id: 'buda',
+        key_id: key.id,
+        adapter_id: 'buda',
+        agent_id: 'agent-1',
+        status: 'success',
+      },
+    })
     const receipts = (await listNovelRuns(workspace, project.id)).filter(run => run.run_type === 'mcp_generate_prose')
     expect(receipts).toHaveLength(1)
     expect(receipts[0]).toMatchObject({ status: 'success' })
     expect(receipts[0]?.input_ref).not.toContain(paragraphTask)
     expect(receipts[0]?.output_ref).not.toContain('MCP 正文')
+    expect(JSON.stringify((result as any).source_receipt)).not.toContain(paragraphTask)
   })
 
   test('preserves the MCP error and stores a bounded failed receipt when live validation fails', async () => {

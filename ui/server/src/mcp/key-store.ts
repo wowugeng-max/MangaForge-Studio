@@ -66,7 +66,7 @@ export async function updateMcpKey(activeWorkspace: string, id: number, input: P
     ...previous,
     ...input,
     id,
-    key: input.key === undefined || input.key === '' ? previous.key : input.key,
+    key: input.key === undefined || String(input.key).trim() === '' ? previous.key : input.key,
   })
   keys[index] = record
   await writeMcpKeys(activeWorkspace, keys)

@@ -162,6 +162,7 @@ const draftPromptDiagnostics = {
     configured_type: sourceResolution.configured_type,
     resolved_type: sourceResolution.resolved_type,
     override: sourceResolution.override,
+    ...((draftResult as any)?.source_receipt || {}),
     adapter_id: (draftResult as any)?.adapter_id || null,
     agent_id: (draftResult as any)?.agent_id || null,
     session_id: (draftResult as any)?.session_id || null,

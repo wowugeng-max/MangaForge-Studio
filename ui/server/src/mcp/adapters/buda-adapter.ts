@@ -102,8 +102,8 @@ export class BudaAdapter implements ProseMcpAdapter {
 
   constructor(private readonly client: McpClientPort) {}
 
-  private async resolveTools(signal?: AbortSignal) {
-    this.tools = resolveBudaTools(await this.client.listTools(signal))
+  private async resolveTools(signal?: AbortSignal, requireCreateAgent = false) {
+    this.tools = resolveBudaTools(await this.client.listTools(signal), { requireCreateAgent })
     return this.tools
   }
 
@@ -115,14 +115,14 @@ export class BudaAdapter implements ProseMcpAdapter {
   }
 
   async createAgent(input: { name: string; spaceId?: string; instructions?: string }, signal?: AbortSignal) {
-    const tools = this.tools || await this.resolveTools(signal)
+    const tools = this.tools?.createAgent ? this.tools : await this.resolveTools(signal, true)
     let spaceId = String(input.spaceId || '')
     if (!spaceId) {
       const existing = await this.listAgents(signal)
       spaceId = String(existing.find(item => (item.raw as any)?.spaceId)?.raw?.spaceId || '')
     }
     if (!spaceId) throw new McpError('MCP_BINDING_INVALID', '创建 Buda Agent 需要 spaceId；请先在 Buda 中创建空间')
-    const data = mcpResultData(await this.client.callTool(tools.createAgent, {
+    const data = mcpResultData(await this.client.callTool(tools.createAgent!, {
       spaceId,
       name: String(input.name || 'MangaForge 小说正文 Agent'),
       emoji: '✍️',

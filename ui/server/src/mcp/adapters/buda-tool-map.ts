@@ -12,7 +12,7 @@ export type BudaLogicalOperation =
   | 'sendSessionMessage'
   | 'cancelSession'
 
-export type BudaToolMap = Record<BudaLogicalOperation, string>
+export type BudaToolMap = Omit<Record<BudaLogicalOperation, string>, 'createAgent'> & { createAgent?: string }
 
 export const BUDA_TOOL_ALIASES: Record<BudaLogicalOperation, readonly string[]> = {
   listAgents: ['apiClaw.listApiAgents', 'listApiAgents'],
@@ -63,13 +63,19 @@ function resolveOne(operation: BudaLogicalOperation, tools: McpToolDescriptor[])
   return ''
 }
 
-export function resolveBudaTools(tools: McpToolDescriptor[]): BudaToolMap {
+export function resolveBudaTools(
+  tools: McpToolDescriptor[],
+  options: { requireCreateAgent?: boolean } = {},
+): BudaToolMap {
   const output = {} as BudaToolMap
   const missing: BudaLogicalOperation[] = []
   for (const operation of Object.keys(BUDA_TOOL_ALIASES) as BudaLogicalOperation[]) {
     const name = resolveOne(operation, tools)
-    if (!name) missing.push(operation)
-    else output[operation] = name
+    if (!name) {
+      if (operation !== 'createAgent' || options.requireCreateAgent) missing.push(operation)
+      continue
+    }
+    output[operation] = name
   }
   if (missing.length) {
     throw new McpError('MCP_CAPABILITY_MISSING', `Buda MCP 缺少必要能力：${missing.join(', ')}`, {

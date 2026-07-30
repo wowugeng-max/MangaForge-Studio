@@ -98,7 +98,14 @@ export class McpGenerationSource implements GenerationSource {
         status: 'success',
         output_ref: JSON.stringify(output),
       })
-      return result
+      return {
+        ...result,
+        source_receipt: {
+          request_id: request.requestId,
+          receipt_run_id: receipt.id,
+          ...output,
+        },
+      }
     } catch (error) {
       if (!connected) {
         await Promise.resolve(request.onProgress?.({
