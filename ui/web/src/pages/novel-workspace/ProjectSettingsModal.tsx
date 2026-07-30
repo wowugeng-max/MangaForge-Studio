@@ -35,12 +35,14 @@ export function ProjectSettingsModal({
 }) {
   const [timeoutSeconds, setTimeoutSeconds] = useState<number | null>(DEFAULT_TIMEOUT_SECONDS)
   const [loading, setLoading] = useState(false)
+  const [loadFailed, setLoadFailed] = useState(false)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (!open || !projectId) return
     let active = true
     setTimeoutSeconds(DEFAULT_TIMEOUT_SECONDS)
+    setLoadFailed(false)
     setLoading(true)
     apiClient.get(`/novel/projects/${projectId}/editor-revision-config`)
       .then(response => {
@@ -51,7 +53,10 @@ export function ProjectSettingsModal({
         }
       })
       .catch(error => {
-        if (active) message.error(error?.response?.data?.error || '项目设置加载失败')
+        if (active) {
+          setLoadFailed(true)
+          message.error(error?.response?.data?.error || '项目设置加载失败')
+        }
       })
       .finally(() => {
         if (active) setLoading(false)
@@ -62,7 +67,7 @@ export function ProjectSettingsModal({
   }, [open, projectId])
 
   const save = async () => {
-    if (!isEditorRevisionTimeoutValid(timeoutSeconds)) return
+    if (loadFailed || !isEditorRevisionTimeoutValid(timeoutSeconds)) return
     setSaving(true)
     try {
       await apiClient.put(
@@ -90,7 +95,7 @@ export function ProjectSettingsModal({
           key="save"
           type="primary"
           loading={saving}
-          disabled={loading || !isEditorRevisionTimeoutValid(timeoutSeconds)}
+          disabled={loading || loadFailed || !isEditorRevisionTimeoutValid(timeoutSeconds)}
           onClick={save}
         >
           保存
@@ -109,7 +114,7 @@ export function ProjectSettingsModal({
             value={timeoutSeconds}
             onChange={value => setTimeoutSeconds(value)}
             addonAfter="秒"
-            disabled={loading}
+            disabled={loading || loadFailed}
           />
         </Space>
         <Text type="secondary">

@@ -159,6 +159,30 @@ describe('admitRevisionCandidate', () => {
     })).code).toBe('REVISION_PARTIAL_JSON_RECOVERY')
   })
 
+  test('rejects malformed recovery when a nested JSON container is still open', () => {
+    const sourceText = `${'甲'.repeat(1199)}。`
+    const candidate = `${'乙段推进。'.repeat(180)}收束。`
+    const result = {
+      finish_reason: 'end_turn',
+      content: `{"chapter_text":"${candidate}","continuity_notes":[}`,
+    }
+
+    expect(captureAdmissionError(sourceText, result).code)
+      .toBe('REVISION_PARTIAL_JSON_RECOVERY')
+  })
+
+  test('rejects a non-JSON language fence around a revision envelope', () => {
+    const sourceText = `${'甲'.repeat(1199)}。`
+    const candidate = `${'乙'.repeat(899)}。`
+    const result = {
+      finish_reason: 'end_turn',
+      content: `\`\`\`javascript\n${JSON.stringify({ chapter_text: candidate })}\n\`\`\``,
+    }
+
+    expect(captureAdmissionError(sourceText, result).code)
+      .toBe('REVISION_OUTPUT_WRAPPER')
+  })
+
   test.each([
     { incomplete_details: { reason: 'max_output_tokens' } },
     { raw: { response: { incompleteDetails: {} } } },

@@ -2,7 +2,11 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { createNovelProject, getNovelProject } from '../novel'
+import {
+  createNovelProject,
+  getNovelProject,
+  mutateNovelProjectReferenceConfig,
+} from '../novel'
 import { registerNovelProjectConfigRoutes } from './novel-project-config-routes'
 
 const workspaces: string[] = []
@@ -95,6 +99,43 @@ describe('editor revision project config routes', () => {
       references: [{ project_title: '参考书' }],
       story_state: { current_time: 'night' },
       editor_revision: { timeout_seconds: 600 },
+    })
+  })
+
+  test('preserves a concurrent reference config update after the route reads the project', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'revision-config-route-'))
+    workspaces.push(workspace)
+    const project = await createNovelProject(workspace, {
+      title: 'concurrent-merge',
+      reference_config: { story_state: { current_time: 'night' } },
+    })
+    const { app, handlers } = routeHarness()
+    const routeContext = context(workspace)
+    routeContext.getProject = async (_workspace: string, id: number) => {
+      const stale = await getNovelProject(_workspace, id)
+      await mutateNovelProjectReferenceConfig(_workspace, {
+        projectId: id,
+        operation: 'test concurrent config update',
+        mutate: current => ({
+          referenceConfig: { ...current, concurrent_sibling: { preserved: true } },
+          result: null,
+        }),
+      })
+      return stale
+    }
+    registerNovelProjectConfigRoutes(app, routeContext as any)
+
+    const response = await callRoute(
+      handlers.get('PUT /api/novel/projects/:id/editor-revision-config'),
+      { params: { id: String(project.id) }, body: { config: { timeout_seconds: 420 } } },
+    )
+    const stored = await getNovelProject(workspace, project.id)
+
+    expect(response.statusCode).toBe(200)
+    expect(stored?.reference_config).toMatchObject({
+      story_state: { current_time: 'night' },
+      concurrent_sibling: { preserved: true },
+      editor_revision: { timeout_seconds: 420 },
     })
   })
 

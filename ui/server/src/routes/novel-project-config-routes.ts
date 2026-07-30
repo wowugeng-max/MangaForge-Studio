@@ -1,5 +1,9 @@
 import type { Express } from 'express'
-import { listNovelRuns, updateNovelProject } from '../novel'
+import {
+  listNovelRuns,
+  mutateNovelProjectReferenceConfig,
+  updateNovelProject,
+} from '../novel'
 import {
   normalizeEditorRevisionTimeoutSeconds,
   resolveEditorRevisionRuntimeConfig,
@@ -38,16 +42,22 @@ export function registerNovelProjectConfigRoutes(app: Express, ctx: ProjectConfi
         return res.status(400).json({ error: 'timeout_seconds must be a finite number' })
       }
       const config = { timeout_seconds: normalizeEditorRevisionTimeoutSeconds(rawTimeout) }
-      const updated = await updateNovelProject(activeWorkspace, project.id, {
-        reference_config: {
-          ...(project.reference_config || {}),
-          editor_revision: {
-            ...(project.reference_config?.editor_revision || {}),
-            ...config,
+      const mutation = await mutateNovelProjectReferenceConfig(activeWorkspace, {
+        projectId: project.id,
+        operation: 'update-editor-revision-config',
+        mutate: currentConfig => ({
+          referenceConfig: {
+            ...currentConfig,
+            editor_revision: {
+              ...(currentConfig.editor_revision || {}),
+              ...config,
+            },
           },
-        },
-      } as any)
-      res.json({ ok: true, config, project: updated })
+          result: config,
+        }),
+      })
+      if (!mutation) return res.status(404).json({ error: 'project not found' })
+      res.json({ ok: true, config: mutation.result, project: mutation.project })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

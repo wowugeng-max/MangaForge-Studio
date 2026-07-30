@@ -390,11 +390,31 @@ function hasUsableProseTransportBody(result: any) {
 
 function unwrapExactJsonFence(rawText: string) {
   const raw = String(rawText || '').trim()
-  const match = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(raw)
+  const match = /^```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n?```$/i.exec(raw)
   return {
     text: String(match?.[1] ?? raw).trim(),
     exactJsonFence: Boolean(match),
   }
+}
+
+function repairedRevisionEnvelope(envelope: string, chapterText: string) {
+  const field = /"chapter_text"\s*:\s*"/g
+  let match: RegExpExecArray | null
+  while ((match = field.exec(envelope))) {
+    const valueStart = match.index + match[0].length
+    const rest = envelope.slice(valueStart)
+    const terminator = /"(?:\s*,\s*"(?:scene_breakdown|continuity_notes|expansion_blueprint_patch|chapter_summary|chapter_no|title|chapter_text)"|\s*\}\s*(?:,|\]|$)|\s*\]\s*(?:,|\}|$))/.exec(rest)
+    if (!terminator) continue
+    const valueEnd = valueStart + terminator.index + 1
+    const repaired = `${envelope.slice(0, valueStart - 1)}${JSON.stringify(chapterText)}${envelope.slice(valueEnd)}`
+    try {
+      JSON.parse(repaired)
+      return repaired
+    } catch {
+      // Try another chapter_text field when the response contains multiple chapters.
+    }
+  }
+  return ''
 }
 
 function isCompleteMalformedRevisionEnvelope(result: any, payload: any) {
@@ -406,7 +426,7 @@ function isCompleteMalformedRevisionEnvelope(result: any, payload: any) {
     JSON.parse(envelope)
     return false
   } catch {
-    return true
+    return Boolean(repairedRevisionEnvelope(envelope, String(payload?.chapter_text || '')))
   }
 }
 

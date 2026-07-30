@@ -35,4 +35,11 @@ describe('project settings editor revision timeout', () => {
     expect(modal).toContain('min={60}')
     expect(modal).toContain('max={600}')
   })
+
+  test('keeps save disabled when the current project setting fails to load', () => {
+    const modal = readFileSync(join(import.meta.dir, 'ProjectSettingsModal.tsx'), 'utf8')
+    expect(modal).toContain('const [loadFailed, setLoadFailed]')
+    expect(modal).toContain('setLoadFailed(true)')
+    expect(modal).toContain('disabled={loading || loadFailed ||')
+  })
 })
