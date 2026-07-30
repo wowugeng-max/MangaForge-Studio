@@ -21,6 +21,7 @@ const NovelProjectWorkspace = lazy(() => import('./pages/NovelProjectWorkspace')
 const NovelProductionDesk = lazy(() => import('./pages/NovelProductionDesk'))
 const ModelManager = lazy(() => import('./pages/ModelManager'))
 const FingerprintContracts = lazy(() => import('./pages/FingerprintContracts'))
+const McpServices = lazy(() => import('./pages/McpServices'))
 
 function PageFallback() {
   return (
@@ -56,6 +57,7 @@ const router = createBrowserRouter([
       { path: 'canvas', element: page(<CanvasPage />) },
       { path: 'providers', element: page(<ProviderManager />) },
       { path: 'fingerprint-contracts', element: page(<FingerprintContracts />) },
+      { path: 'mcp-services', element: page(<McpServices />) },
       {
         path: 'novel',
         element: (

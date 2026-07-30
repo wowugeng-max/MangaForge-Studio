@@ -16,6 +16,7 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   ExperimentOutlined,
+  CloudServerOutlined,
 } from '@ant-design/icons'
 import './Layout.css'
 
@@ -71,6 +72,7 @@ export default function Layout() {
     if (path.startsWith('/models')) return 'models'
     if (path.startsWith('/providers')) return 'providers'
     if (path.startsWith('/fingerprint-contracts')) return 'fingerprint-contracts'
+    if (path.startsWith('/mcp-services')) return 'mcp-services'
     if (path.startsWith('/rules')) return 'rules'
     if (path.startsWith('/pipeline')) return 'pipeline'
     if (path.startsWith('/novel')) return 'novel'
@@ -178,6 +180,7 @@ export default function Layout() {
                 { key: 'keys', icon: <KeyOutlined />, label: <Link to="/keys">Key 管理</Link> },
                 { key: 'models', icon: <DatabaseOutlined />, label: <Link to="/models">模型管理</Link> },
                 { key: 'providers', icon: <BlockOutlined />, label: <Link to="/providers">厂商中枢</Link> },
+                { key: 'mcp-services', icon: <CloudServerOutlined />, label: <Link to="/mcp-services">MCP Services</Link> },
                 { key: 'fingerprint-contracts', icon: <ExperimentOutlined />, label: <Link to="/fingerprint-contracts">指纹合同</Link> },
                 { key: 'rules', icon: <SettingOutlined />, label: <Link to="/rules">推荐规则</Link> },
               ]}
