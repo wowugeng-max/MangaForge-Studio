@@ -1,3 +1,48 @@
+function repairBareQuotesInJsonStrings(value: string): string {
+  const text = String(value || '').trim()
+  if (!text || !['{', '['].includes(text[0]) || !text.includes('"')) return ''
+
+  let repaired = ''
+  let inString = false
+  let escaped = false
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+    if (!inString) {
+      repaired += char
+      if (char === '"') inString = true
+      continue
+    }
+    if (escaped) {
+      repaired += char
+      escaped = false
+      continue
+    }
+    if (char === '\\') {
+      repaired += char
+      escaped = true
+      continue
+    }
+    if (char !== '"') {
+      repaired += char
+      continue
+    }
+
+    let lookahead = index + 1
+    while (lookahead < text.length && /\s/.test(text[lookahead])) lookahead += 1
+    const next = text[lookahead] || ''
+    if (!next || [':', ',', '}', ']'].includes(next)) {
+      repaired += char
+      inString = false
+    } else {
+      repaired += '\\"'
+    }
+  }
+
+  if (inString || escaped || repaired === text) return ''
+  return repaired
+}
+
 export function parseJsonLikePayload(value: any) {
   if (!value) return null
   if (Array.isArray(value)) {
@@ -26,6 +71,15 @@ export function parseJsonLikePayload(value: any) {
       return JSON.parse(candidate)
     } catch {
       // try next candidate
+    }
+  }
+  for (const candidate of candidates) {
+    const repaired = repairBareQuotesInJsonStrings(candidate)
+    if (!repaired) continue
+    try {
+      return JSON.parse(repaired)
+    } catch {
+      // Quote repair never makes an otherwise incomplete envelope admissible.
     }
   }
   return null

@@ -79,6 +79,21 @@ describe('prepareStoryStateUpdate', () => {
     runtime: { executeAgent: async () => result },
   })
 
+  const bareQuoteStoryState = `\`\`\`json
+{
+  "state_delta": {
+    "open_questions": ["第二双脚步声属于谁"],
+    "timeline": [{
+      "event": "楚弦触发隐藏死律",
+      "source_excerpt": "他触犯了"绝对不能在非整点下车"的隐藏死律。"
+    }]
+  },
+  "character_updates": [],
+  "setting_updates": [],
+  "storyline_updates": []
+}
+\`\`\``
+
   test('returns a normalized prepared update without persistence', async () => {
     let memoryCalls = 0
     const project = await createNovelProject(workspace, { title: '准备阶段边界', reference_config: { story_state: { open_questions: ['旧问题'] } } })
@@ -135,6 +150,39 @@ describe('prepareStoryStateUpdate', () => {
     }, { id: 13, chapter_no: 13, title: '断流' }, {}, '文本')
 
     expect(prepared.hard_failures).toContainEqual(expect.objectContaining({ key: 'story_state_transport_incomplete' }))
+  })
+
+  test('recovers a complete Story State payload containing bare prose quotes', async () => {
+    const prepared = await createService({ content: bareQuoteStoryState, finish_reason: 'stop' })
+      .prepareStoryStateUpdate(
+        workspace,
+        { id: 99, reference_config: { story_state: {} } },
+        { id: 20, chapter_no: 20 },
+        {},
+        '楚弦触发隐藏死律，章末传来第二双脚步声。',
+      )
+
+    expect(prepared.state_delta.open_questions).toEqual(['第二双脚步声属于谁'])
+    expect(prepared.state_delta.timeline[0].source_excerpt)
+      .toBe('他触犯了"绝对不能在非整点下车"的隐藏死律。')
+    expect(prepared.hard_failures.some((item: any) => item.key === 'story_state_invalid_payload')).toBe(false)
+    expect(prepared.hard_failures.some((item: any) => item.key === 'story_state_transport_incomplete')).toBe(false)
+  })
+
+  test('still blocks a repaired Story State payload when transport hit max tokens', async () => {
+    const prepared = await createService({ content: bareQuoteStoryState, finish_reason: 'max_tokens' })
+      .prepareStoryStateUpdate(
+        workspace,
+        { id: 100, reference_config: { story_state: {} } },
+        { id: 21, chapter_no: 21 },
+        {},
+        '楚弦触发隐藏死律，章末传来第二双脚步声。',
+      )
+
+    expect(prepared.state_delta.open_questions).toEqual(['第二双脚步声属于谁'])
+    expect(prepared.hard_failures).toContainEqual(expect.objectContaining({
+      key: 'story_state_transport_incomplete',
+    }))
   })
 
   test('detects nested rejected finish reasons and non-null incomplete details', async () => {
