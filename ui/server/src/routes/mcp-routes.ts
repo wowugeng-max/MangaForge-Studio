@@ -224,17 +224,22 @@ export function registerMcpRoutes(
 
   app.post(['/api/mcp/keys', '/api/mcp/keys/'], safely(async (req, res) => {
     const activeWorkspace = getWorkspace()
-    const serverId = String(req.body?.mcp_server_id || '')
-    if (!(await readMcpServers(activeWorkspace)).some(item => item.id === serverId)) {
-      throw new McpError('MCP_BINDING_INVALID', 'MCP Server 不存在')
-    }
-    if (!String(req.body?.key || '').trim()) throw new McpError('MCP_AUTH_FAILED', 'MCP Key 不能为空')
-    const record = await createMcpKey(activeWorkspace, {
-      ...req.body,
-      mcp_server_id: serverId,
-      key: String(req.body.key),
+    const publicRecord = await withMcpWorkspaceMutation(activeWorkspace, async () => {
+      const body = req.body || {}
+      const serverId = String(body.mcp_server_id || '')
+      if (!(await readMcpServers(activeWorkspace)).some(item => item.id === serverId)) {
+        throw new McpError('MCP_BINDING_INVALID', 'MCP Server 不存在')
+      }
+      const submittedKey = String(body.key || '')
+      if (!submittedKey.trim()) throw new McpError('MCP_AUTH_FAILED', 'MCP Key 不能为空')
+      const record = await createMcpKey(activeWorkspace, {
+        ...body,
+        mcp_server_id: serverId,
+        key: submittedKey,
+      })
+      return toPublicMcpKey(record)
     })
-    res.status(201).json({ ok: true, key: toPublicMcpKey(record) })
+    res.status(201).json({ ok: true, key: publicRecord })
   }))
 
   app.put(['/api/mcp/keys/:id', '/api/mcp/keys/:id/'], safely(async (req, res) => {

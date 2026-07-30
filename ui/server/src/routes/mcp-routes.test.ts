@@ -6,7 +6,7 @@ import { McpError } from '../mcp/errors'
 import { createMcpKey, getMcpKeysPath, readMcpKeys } from '../mcp/key-store'
 import { BUDA_MCP_SERVER_TEMPLATE, readMcpServers, writeMcpServers } from '../mcp/server-store'
 import * as mcpServerStore from '../mcp/server-store'
-import { assertMcpWorkspaceMutationHeld } from '../mcp/workspace-coordinator'
+import { assertMcpWorkspaceMutationHeld, withMcpWorkspaceMutation } from '../mcp/workspace-coordinator'
 import { registerMcpRoutes } from './mcp-routes'
 
 const workspaces: string[] = []
@@ -196,6 +196,136 @@ describe('MCP routes', () => {
       body: { description: '改名账号' },
     })
     expect((await readMcpKeys(workspace))[0]).toMatchObject({ key: 'sk_original', description: '改名账号' })
+  })
+
+  test('does not create an orphan Key behind a queued Server delete', async () => {
+    const workspace = await temporaryWorkspace()
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    let signalBlockerEntered!: () => void
+    let releaseBlocker!: () => void
+    const blockerEntered = new Promise<void>(resolve => { signalBlockerEntered = resolve })
+    const blockerMayFinish = new Promise<void>(resolve => { releaseBlocker = resolve })
+    const blocker = withMcpWorkspaceMutation(workspace, async () => {
+      signalBlockerEntered()
+      await blockerMayFinish
+    })
+    await blockerEntered
+
+    let signalDeleteHandlerEntered!: () => void
+    const deleteHandlerEntered = new Promise<void>(resolve => { signalDeleteHandlerEntered = resolve })
+    let deleteWorkspaceReads = 0
+    const deleteHarness = createRouteHarness()
+    registerMcpRoutes(deleteHarness.app, () => {
+      deleteWorkspaceReads += 1
+      if (deleteWorkspaceReads === 2) signalDeleteHandlerEntered()
+      return workspace
+    }, {} as any)
+    const deleting = call(deleteHarness.handlers.get('DELETE /api/mcp/servers/:id'), {
+      params: { id: 'buda' },
+    })
+    await deleteHandlerEntered
+
+    const secret = 'sk_no_orphan'
+    let secretReads = 0
+    let blockerReleased = false
+    const releaseBlockerOnce = () => {
+      if (blockerReleased) return
+      blockerReleased = true
+      releaseBlocker()
+    }
+    const keyBody: Record<string, unknown> = {
+      mcp_server_id: 'buda',
+      description: '并发账号',
+    }
+    Object.defineProperty(keyBody, 'key', {
+      enumerable: true,
+      get() {
+        secretReads += 1
+        if (secretReads === 3) releaseBlockerOnce()
+        return secret
+      },
+    })
+    const keyHarness = createRouteHarness()
+    registerMcpRoutes(keyHarness.app, () => workspace, {} as any)
+    let releaseTimer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const posting = call(keyHarness.handlers.get('POST /api/mcp/keys'), { body: keyBody })
+      releaseTimer = setTimeout(releaseBlockerOnce, 100)
+      const [deleteResponse, postResponse] = await Promise.all([deleting, posting, blocker])
+
+      expect(deleteResponse.statusCode).toBe(200)
+      expect(postResponse.statusCode).toBe(400)
+      expect(postResponse.body.error_code).toBe('MCP_BINDING_INVALID')
+      expect(JSON.stringify(postResponse.body)).not.toContain(secret)
+      expect(await readMcpServers(workspace)).toEqual([])
+      expect(await readMcpKeys(workspace)).toEqual([])
+    } finally {
+      if (releaseTimer) clearTimeout(releaseTimer)
+      releaseBlockerOnce()
+      await blocker
+    }
+  })
+
+  test('creates the Key before a getter-triggered origin update can cross the credential fence', async () => {
+    const workspace = await temporaryWorkspace()
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const invalidatedServers: string[] = []
+    const { app, handlers } = createRouteHarness()
+    registerMcpRoutes(app, () => workspace, {
+      invalidateServer: async (id: string) => { invalidatedServers.push(id) },
+    } as any)
+    let releaseOriginUpdate!: () => void
+    const originUpdateMayRun = new Promise<void>(resolve => { releaseOriginUpdate = resolve })
+    let originReleased = false
+    const releaseOriginOnce = () => {
+      if (originReleased) return
+      originReleased = true
+      releaseOriginUpdate()
+    }
+    const secret = 'sk_origin_race'
+    let secretReads = 0
+    let originUpdating: Promise<any> | undefined
+    const keyBody: Record<string, unknown> = {
+      mcp_server_id: 'buda',
+      description: '来源围栏账号',
+    }
+    Object.defineProperty(keyBody, 'key', {
+      enumerable: true,
+      get() {
+        secretReads += 1
+        if (secretReads === 3) {
+          originUpdating = withMcpWorkspaceMutation(workspace, async () => {
+            await originUpdateMayRun
+            return call(handlers.get('PUT /api/mcp/servers/:id'), {
+              params: { id: 'buda' },
+              body: { url: 'https://attacker.example/mcp' },
+            })
+          })
+        }
+        return secret
+      },
+    })
+
+    let releaseTimer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const posting = call(handlers.get('POST /api/mcp/keys'), { body: keyBody })
+      void posting.then(releaseOriginOnce, releaseOriginOnce)
+      releaseTimer = setTimeout(releaseOriginOnce, 100)
+      const postResponse = await posting
+      const originResponse = await originUpdating
+
+      expect(postResponse.statusCode).toBe(201)
+      expect(JSON.stringify(postResponse.body)).not.toContain(secret)
+      expect(originResponse?.statusCode).toBe(409)
+      expect(originResponse?.body.error_code).toBe('MCP_SERVER_ORIGIN_CHANGE_REQUIRES_NEW_CREDENTIAL')
+      expect((await readMcpServers(workspace))[0]?.url).toBe(BUDA_MCP_SERVER_TEMPLATE.url)
+      expect((await readMcpKeys(workspace))[0]).toMatchObject({ mcp_server_id: 'buda', key: secret })
+      expect(invalidatedServers).toEqual([])
+    } finally {
+      if (releaseTimer) clearTimeout(releaseTimer)
+      releaseOriginOnce()
+      if (originUpdating) await originUpdating
+    }
   })
 
   test('rejects unsupported stdio servers', async () => {

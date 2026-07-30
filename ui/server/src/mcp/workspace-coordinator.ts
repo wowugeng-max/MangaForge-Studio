@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { resolve } from 'node:path'
 import { isNovelWorkspaceMutationHeld } from '../novel/lock'
+import { canonicalFilesystemIdentity } from '../workspace-identity'
 
 type Waiter = {
   resolve(release: () => void): void
@@ -19,7 +19,7 @@ const locks = new Map<string, WorkspaceLock>()
 const held = new AsyncLocalStorage<Map<string, WorkspaceLease>>()
 
 function keyForWorkspace(activeWorkspace: string) {
-  return resolve(activeWorkspace)
+  return canonicalFilesystemIdentity(activeWorkspace)
 }
 
 async function acquire(key: string) {

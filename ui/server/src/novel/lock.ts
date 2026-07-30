@@ -1,13 +1,18 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { getNovelMutationTestHook } from '../novel-test-support'
+import { canonicalFilesystemIdentity } from '../workspace-identity'
 import { dbPathFromEnv, getNovelDbPath, mutationLockTimeoutMs } from './paths'
 
 
 export const novelMutationLocks = new Map<string, NovelMutationLock>()
 
-export const novelMutationContext = new AsyncLocalStorage<Set<string>>()
+type NovelWorkspaceLease = { active: boolean }
 
-export function novelMutationKey(activeWorkspace: string) { return dbPathFromEnv() || getNovelDbPath(activeWorkspace) }
+export const novelMutationContext = new AsyncLocalStorage<Map<string, NovelWorkspaceLease>>()
+
+export function novelMutationKey(activeWorkspace: string) {
+  return canonicalFilesystemIdentity(dbPathFromEnv() || getNovelDbPath(activeWorkspace))
+}
 
 export function releaseNovelMutationLock(key: string, lock: NovelMutationLock) {
   const next = lock.waiters.shift()
@@ -47,22 +52,24 @@ export function acquireNovelMutationLock(key: string) {
 
 export async function withNovelWorkspaceMutation<T>(activeWorkspace: string, mutation: () => Promise<T>, operation = 'mutation'): Promise<T> {
   const key = novelMutationKey(activeWorkspace)
-  const activeKeys = novelMutationContext.getStore()
-  if (activeKeys?.has(key)) return mutation()
+  const active = novelMutationContext.getStore()
+  if (active?.get(key)?.active) return mutation()
   const release = await acquireNovelMutationLock(key)
-  const nextKeys = new Set(activeKeys || [])
-  nextKeys.add(key)
+  const lease = { active: true }
+  const next = new Map(active || [])
+  next.set(key, lease)
   try {
     const testHook = getNovelMutationTestHook()
     if (testHook) await testHook({ activeWorkspace, phase: 'after_mutation_lock_acquired', operation })
-    return await novelMutationContext.run(nextKeys, mutation)
+    return await novelMutationContext.run(next, mutation)
   } finally {
+    lease.active = false
     release()
   }
 }
 
 export function isNovelWorkspaceMutationHeld(activeWorkspace: string) {
-  return Boolean(novelMutationContext.getStore()?.has(novelMutationKey(activeWorkspace)))
+  return Boolean(novelMutationContext.getStore()?.get(novelMutationKey(activeWorkspace))?.active)
 }
 
 export function assertNovelWorkspaceMutationHeld(activeWorkspace: string) {

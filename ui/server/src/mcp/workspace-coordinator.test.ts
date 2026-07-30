@@ -1,5 +1,11 @@
 import { expect, test } from 'bun:test'
-import { withNovelWorkspaceMutation } from '../novel/lock'
+import { relative, resolve } from 'node:path'
+import {
+  assertNovelWorkspaceMutationHeld,
+  isNovelWorkspaceMutationHeld,
+  novelMutationKey,
+  withNovelWorkspaceMutation,
+} from '../novel/lock'
 import { assertMcpWorkspaceMutationHeld, withMcpWorkspaceMutation } from './workspace-coordinator'
 
 test('serializes mutations for the same workspace', async () => {
@@ -129,4 +135,102 @@ test('invalidates ownership inherited by a detached async descendant after relea
     'second finished',
     'detached entered',
   ])
+})
+
+test('invalidates novel ownership inherited by a detached descendant and lets MCP queue normally', async () => {
+  const workspace = '/tmp/novel-coordinator-detached-test'
+  let openDetachedGate!: () => void
+  let signalDetachedChecked!: () => void
+  let signalHolderEntered!: () => void
+  let releaseHolder!: () => void
+  const detachedGate = new Promise<void>(resolve => { openDetachedGate = resolve })
+  const detachedChecked = new Promise<void>(resolve => { signalDetachedChecked = resolve })
+  const holderEntered = new Promise<void>(resolve => { signalHolderEntered = resolve })
+  const holderMayFinish = new Promise<void>(resolve => { releaseHolder = resolve })
+  let inheritedHeld = true
+  let inheritedAssertionRejected = false
+  let detachedMcpEntered = false
+  let detachedMcpError: unknown
+  let detached!: Promise<void>
+
+  await withNovelWorkspaceMutation(workspace, async () => {
+    detached = (async () => {
+      await detachedGate
+      inheritedHeld = isNovelWorkspaceMutationHeld(workspace)
+      try {
+        assertNovelWorkspaceMutationHeld(workspace)
+      } catch {
+        inheritedAssertionRejected = true
+      }
+      signalDetachedChecked()
+      try {
+        await withMcpWorkspaceMutation(workspace, async () => {
+          detachedMcpEntered = true
+        })
+      } catch (error) {
+        detachedMcpError = error
+      }
+    })()
+  })
+
+  const holder = withMcpWorkspaceMutation(workspace, async () => {
+    signalHolderEntered()
+    await holderMayFinish
+  })
+  await holderEntered
+  openDetachedGate()
+  await detachedChecked
+  await Promise.resolve()
+  const enteredBeforeHolderRelease = detachedMcpEntered
+
+  releaseHolder()
+  await Promise.all([holder, detached])
+
+  expect(inheritedHeld).toBe(false)
+  expect(inheritedAssertionRejected).toBe(true)
+  expect(enteredBeforeHolderRelease).toBe(false)
+  expect(detachedMcpEntered).toBe(true)
+  expect(detachedMcpError).toBeUndefined()
+})
+
+test('treats relative and absolute aliases as the same workspace without conflating distinct workspaces', async () => {
+  const previousSqlite = process.env.SQLITE_DATABASE_URL
+  const previousDatabase = process.env.DATABASE_URL
+  delete process.env.SQLITE_DATABASE_URL
+  delete process.env.DATABASE_URL
+  try {
+    const absoluteWorkspace = resolve('/tmp/mcp-coordinator-workspace-alias')
+    const relativeWorkspace = relative(process.cwd(), absoluteWorkspace)
+    const distinctWorkspace = resolve('/tmp/mcp-coordinator-distinct-workspace')
+
+    await withNovelWorkspaceMutation(relativeWorkspace, async () => {
+      await expect(withMcpWorkspaceMutation(absoluteWorkspace, async () => 'unreachable'))
+        .rejects.toThrow('MCP coordinator must be acquired before novel mutation lock')
+      await expect(withMcpWorkspaceMutation(distinctWorkspace, async () => 'ok')).resolves.toBe('ok')
+    })
+  } finally {
+    if (previousSqlite === undefined) delete process.env.SQLITE_DATABASE_URL
+    else process.env.SQLITE_DATABASE_URL = previousSqlite
+    if (previousDatabase === undefined) delete process.env.DATABASE_URL
+    else process.env.DATABASE_URL = previousDatabase
+  }
+})
+
+test('canonicalizes relative SQLite database paths from either supported environment variable', () => {
+  const previousSqlite = process.env.SQLITE_DATABASE_URL
+  const previousDatabase = process.env.DATABASE_URL
+  try {
+    process.env.SQLITE_DATABASE_URL = 'relative/sqlite-database.sqlite'
+    delete process.env.DATABASE_URL
+    expect(novelMutationKey('/tmp/ignored-workspace')).toBe(resolve('relative/sqlite-database.sqlite'))
+
+    delete process.env.SQLITE_DATABASE_URL
+    process.env.DATABASE_URL = 'file:relative/database-url.sqlite?mode=rwc'
+    expect(novelMutationKey('/tmp/ignored-workspace')).toBe(resolve('relative/database-url.sqlite'))
+  } finally {
+    if (previousSqlite === undefined) delete process.env.SQLITE_DATABASE_URL
+    else process.env.SQLITE_DATABASE_URL = previousSqlite
+    if (previousDatabase === undefined) delete process.env.DATABASE_URL
+    else process.env.DATABASE_URL = previousDatabase
+  }
 })
