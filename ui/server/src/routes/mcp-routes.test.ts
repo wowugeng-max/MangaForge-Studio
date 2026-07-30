@@ -96,10 +96,12 @@ describe('MCP routes', () => {
   test('merges Header replacements, blank preservation, and explicit removals', () => {
     const mergeMcpCustomHeaders = (mcpServerStore as any).mergeMcpCustomHeaders
     expect(mergeMcpCustomHeaders(
-      { 'X-Keep': 'old', 'X-Replace': 'old', 'X-Remove': 'old' },
+      { '': 'test-empty', '   ': 'test-whitespace', 'X-Keep': 'old', 'X-Replace': 'old', 'X-Remove': 'old' },
       { 'X-Keep': '   ', 'X-Replace': 'new' },
-      ['X-Remove'],
+      ['', '   ', '  X-Remove  '],
     )).toEqual({
+      '': 'test-empty',
+      '   ': 'test-whitespace',
       'X-Keep': 'old',
       'X-Replace': 'new',
     })

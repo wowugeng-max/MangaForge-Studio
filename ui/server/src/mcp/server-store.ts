@@ -51,7 +51,10 @@ export function mergeMcpCustomHeaders(
   removals: unknown,
 ) {
   const next = { ...previous }
-  for (const name of Array.isArray(removals) ? removals.map(String) : []) delete next[name]
+  for (const rawName of Array.isArray(removals) ? removals : []) {
+    const name = String(rawName).trim()
+    if (name) delete next[name]
+  }
   if (replacements && typeof replacements === 'object' && !Array.isArray(replacements)) {
     for (const [rawName, rawValue] of Object.entries(replacements)) {
       const name = rawName.trim()
