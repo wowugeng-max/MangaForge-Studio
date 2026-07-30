@@ -118,10 +118,12 @@ export function composeRevisionPromptHint({
   userPrompt,
   report,
   mustFixLines = [],
+  includeReceipts = true,
 }: {
   userPrompt?: string
   report?: any
   mustFixLines?: string[]
+  includeReceipts?: boolean
 }) {
   const custom = String(userPrompt || '').replace(/\s+/g, ' ').trim()
   const systemHint = String(report?.one_click_revision_prompt || asArray(mustFixLines).join('；') || '').replace(/\s+/g, ' ').trim()
@@ -131,20 +133,24 @@ export function composeRevisionPromptHint({
       custom,
       '【报告必修项（仍须覆盖，不得因人工指令被整体忽略）】',
       systemHint,
-      '执行要求：先完成人工强制指令，再覆盖报告必修项；不得只做无关润色；revision_receipts 必须写明人工指令的落实证据。',
+      includeReceipts
+        ? '执行要求：先完成人工强制指令，再覆盖报告必修项；不得只做无关润色；revision_receipts 必须写明人工指令的落实证据。'
+        : '执行要求：先完成人工强制指令，再覆盖报告必修项；不得只做无关润色；只在修订正文中落实，不要追加回执字段。',
     ].join('\n')
   }
   if (custom) {
     return [
       '【人工强制修订指令（最高优先级，必须先兑现）】',
       custom,
-      '执行要求：必须先兑现人工强制指令，并在 revision_summary / revision_receipts 写明落实证据。',
+      includeReceipts
+        ? '执行要求：必须先兑现人工强制指令，并在 revision_summary / revision_receipts 写明落实证据。'
+        : '执行要求：必须先兑现人工强制指令；只在修订正文中落实，不要追加回执字段。',
     ].join('\n')
   }
   return systemHint
 }
 
-const REVISION_LANGUAGE_HARD_RULE = '语言硬约束：中文网文正文禁止夹杂英文粘连词、拼音碎片、葡萄牙语或整段外语；若报告或人工指令要求清英文/清外语，必须逐处替换为自然简体中文，必要专名除外，并在 revision_receipts 给出改写证据。'
+const REVISION_LANGUAGE_HARD_RULE = '语言硬约束：中文网文正文禁止夹杂英文粘连词、拼音碎片、葡萄牙语或整段外语；若报告或人工指令要求清英文/清外语，必须逐处替换为自然简体中文，必要专名除外。'
 const REVISION_JSON_OUTPUT_HARD_RULE = 'JSON 格式硬约束：只输出一个可直接 JSON.parse 的 JSON object，不要输出 Markdown 代码围栏或解释；正文对白优先使用中文引号“”；若必须使用英文双引号，英文双引号必须转义并遵守 JSON 规则。'
 
 export function buildEditorRevisionPrompt({
@@ -172,7 +178,12 @@ export function buildEditorRevisionPrompt({
   const openingStructural = strategy === 'opening_structural_patch'
   const focusedRiskBrief = focusDeliveryRiskBriefForRevision(deliveryRiskBrief || {}, report || {})
   const mustFixLines = uniqueRevisionTexts(report?.must_fix || report?.one_click_revision_prompt, 6)
-  const revisionPromptHint = composeRevisionPromptHint({ userPrompt, report, mustFixLines })
+  const revisionPromptHint = composeRevisionPromptHint({
+    userPrompt,
+    report,
+    mustFixLines,
+    includeReceipts: !structural,
+  })
   if (openingStructural) {
     const replaceableOpening = originalText.slice(0, Math.min(1400, Math.max(700, Math.floor(originalLength * 0.24))))
     const resumeHint = originalText.slice(replaceableOpening.length, replaceableOpening.length + 180).trim()
@@ -214,14 +225,14 @@ export function buildEditorRevisionPrompt({
       `项目：${project.title}`,
       '要求：优先消除进度回放、章首承接失败、章末交接缺口；可以改写开篇与中段冲突，但必须承接上一章已兑现事实，不得重演已打完的高潮。',
       `本次修订模式：${revisionMode}。结构修订允许较大改动，不只是润色。`,
-      `原文长度：${originalLength} 字。若因消除回放导致字数变化超过 30%，revision_scope_guard.over_limit=true，但仍应完成本次结构修复。`,
+      `原文长度：${originalLength} 字。修订后应保留完整章节，字数尽量控制在原文的 70%-130%。`,
       REVISION_LANGUAGE_HARD_RULE,
       REVISION_JSON_OUTPUT_HARD_RULE,
       '硬优先级（只修这些，不要同时处理全部交稿标签）：',
       ...mustFixLines.map((item, index) => `${index + 1}. ${item}`),
       '正文工艺硬约束：动作链完整；不要用环境描写替代推进；章末必须留下未解决钩子。',
       '禁止把“无需修改/处理得精彩”之类低优先级意见覆盖高优先级回放修复。',
-      '输出策略：优先输出完整 chapter_text；只有改动极少时才改用 replacements。',
+      '输出策略：只输出完整 chapter_text；禁止输出 replacements、insertions 或其他补丁字段。',
       '【必修项】',
       editorJson({ must_fix: mustFixLines, revision_strategy: 'structural_rewrite', overall_score: report?.overall_score }, 4000),
       '【聚焦交稿风险】',
@@ -238,13 +249,10 @@ export function buildEditorRevisionPrompt({
       '【原章节正文】',
       originalText.slice(0, 14000),
       '输出 JSON：',
+      '字段只允许 revision_mode 和 chapter_text；正文结束后立刻闭合 JSON，不要追加回执、说明或其他字段。',
       '{',
       '  "revision_mode": "structural_rewrite",',
-      '  "chapter_text": "完整修订后正文",',
-      '  "continuity_notes": ["修订后的连续性说明"],',
-      '  "revision_scope_guard": {"original_word_count": 0, "revised_word_count": 0, "word_delta": 0, "over_limit": false, "action": "结构修订"},',
-      '  "revision_receipts": [{"required_action": "对应必修项", "repair_segment": "opening|middle|ending|global", "applied_fix": "实际改法", "changed_evidence": "修后正文短句"}],',
-      '  "revision_summary": "简述如何消除回放并承接上一章"',
+      '  "chapter_text": "完整修订后正文"',
       '}',
     ].filter(Boolean).join('\n')
   }
@@ -254,6 +262,7 @@ export function buildEditorRevisionPrompt({
     '要求：保留当前章节整体结构、节奏、章末钩子和可用文气；只修复报告指出的问题；不得照搬参考作品。',
     `本次修订模式：${revisionMode}。${REVISION_MODE_GUIDE[revisionMode] || REVISION_MODE_GUIDE.from_report}`,
     REVISION_LANGUAGE_HARD_RULE,
+    '语言改写证据必须写入 revision_receipts，并引用修订后正文中的可定位短句。',
     REVISION_JSON_OUTPUT_HARD_RULE,
     `oh-story workflow-revision：本次属于已写章节大修/回炉；修订前按 Step 2 做上下文对照，修订后按 Step 4 做级联检查和 Step 5 质量检查。`,
     `原文长度：${originalLength} 字；修订后字数差异超过原文 30% 或超过 800 字（取较大值）时，必须在 revision_scope_guard 标记 over_limit=true 并说明是否需要拆成局部二修。`,
