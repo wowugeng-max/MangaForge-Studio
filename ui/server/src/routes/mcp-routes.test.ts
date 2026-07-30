@@ -6,6 +6,7 @@ import { McpError } from '../mcp/errors'
 import { createMcpKey, getMcpKeysPath, readMcpKeys } from '../mcp/key-store'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from '../mcp/server-store'
 import * as mcpServerStore from '../mcp/server-store'
+import { assertMcpWorkspaceMutationHeld } from '../mcp/workspace-coordinator'
 import { registerMcpRoutes } from './mcp-routes'
 
 const workspaces: string[] = []
@@ -197,25 +198,127 @@ describe('MCP routes', () => {
     expect((await readMcpKeys(workspace))[0]).toMatchObject({ key: 'sk_original', description: '改名账号' })
   })
 
-  test('rejects unsupported stdio servers and protects referenced records from deletion', async () => {
+  test('rejects unsupported stdio servers', async () => {
     const workspace = await temporaryWorkspace()
     await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
-    const key = await createMcpKey(workspace, { mcp_server_id: 'buda', key: 'sk_x', description: '账号' })
     const { app, handlers } = createRouteHarness()
-    registerMcpRoutes(app, () => workspace, {} as any, {
-      findProjectReferences: async () => [{ id: 9, title: '绑定小说' }],
-    })
+    registerMcpRoutes(app, () => workspace, {} as any)
 
     const stdio = await call(handlers.get('POST /api/mcp/servers'), {
       body: { id: 'local', transport: 'stdio', display_name: 'Local', url: 'stdio', adapter_id: 'buda' },
     })
     expect(stdio.statusCode).toBe(400)
     expect(stdio.body.error_code).toBe('MCP_BINDING_INVALID')
+  })
 
-    const serverDelete = await call(handlers.get('DELETE /api/mcp/servers/:id'), { params: { id: 'buda' } })
-    const keyDelete = await call(handlers.get('DELETE /api/mcp/keys/:id'), { params: { id: String(key.id) } })
-    expect(serverDelete.statusCode).toBe(409)
-    expect(keyDelete.statusCode).toBe(409)
+  test('blocks destructive changes to precisely referenced normalized records inside the coordinator', async () => {
+    const workspace = await temporaryWorkspace()
+    await writeMcpServers(workspace, [
+      BUDA_MCP_SERVER_TEMPLATE,
+      {
+        ...BUDA_MCP_SERVER_TEMPLATE,
+        id: 'buda-other',
+        display_name: 'Buda Other',
+        url: 'https://other.buda.im/api/mcp',
+      },
+    ])
+    const referencedKey = await createMcpKey(workspace, {
+      mcp_server_id: 'buda',
+      key: 'sk_referenced',
+      description: '引用账号',
+    })
+    const unrelatedKey = await createMcpKey(workspace, {
+      mcp_server_id: 'buda',
+      key: 'sk_unrelated',
+      description: '无关账号',
+    })
+    const references = [{ id: 9, title: '绑定小说' }]
+    const findProjectReferences = async (
+      activeWorkspace: string,
+      target: { serverId?: string; keyId?: number },
+    ) => {
+      assertMcpWorkspaceMutationHeld(activeWorkspace)
+      return target.keyId === referencedKey.id || target.serverId === 'buda' ? references : []
+    }
+    const { app, handlers } = createRouteHarness()
+    registerMcpRoutes(app, () => workspace, {
+      invalidateKey: async () => {},
+      invalidateServer: async () => {},
+    } as any, { findProjectReferences })
+
+    const expectReferencedConflict = (response: any) => {
+      expect(response.statusCode).toBe(409)
+      expect(response.body).toMatchObject({
+        error_code: 'MCP_REFERENCED_RECORD_CONFLICT',
+        references,
+      })
+      expect(response.body.error).toBeString()
+    }
+
+    expectReferencedConflict(await call(handlers.get('PUT /api/mcp/keys/:id'), {
+      params: { id: String(referencedKey.id) },
+      body: { is_active: 'false' },
+    }))
+    expectReferencedConflict(await call(handlers.get('PUT /api/mcp/keys/:id'), {
+      params: { id: String(referencedKey.id) },
+      body: { mcp_server_id: 'buda-other' },
+    }))
+    expectReferencedConflict(await call(handlers.get('PUT /api/mcp/keys/:id'), {
+      params: { id: String(referencedKey.id) },
+      body: { is_active: false, allow_referenced_disable: true },
+    }))
+    expectReferencedConflict(await call(handlers.get('DELETE /api/mcp/keys/:id'), {
+      params: { id: String(referencedKey.id) },
+    }))
+    expectReferencedConflict(await call(handlers.get('PUT /api/mcp/servers/:id'), {
+      params: { id: 'buda' },
+      body: { is_active: 'false', allow_referenced_disable: true },
+    }))
+    expectReferencedConflict(await call(handlers.get('DELETE /api/mcp/servers/:id'), {
+      params: { id: 'buda' },
+    }))
+
+    const descriptionUpdate = await call(handlers.get('PUT /api/mcp/keys/:id'), {
+      params: { id: String(unrelatedKey.id) },
+      body: { description: '允许修改' },
+    })
+    expect(descriptionUpdate.statusCode).toBe(200)
+    expect(descriptionUpdate.body.key).toMatchObject({ id: unrelatedKey.id, description: '允许修改' })
+    expect(descriptionUpdate.body.key).not.toHaveProperty('key')
+
+    const unrelatedDelete = await call(handlers.get('DELETE /api/mcp/keys/:id'), {
+      params: { id: String(unrelatedKey.id) },
+    })
+    expect(unrelatedDelete.statusCode).toBe(200)
+    expect((await readMcpKeys(workspace)).map(key => key.id)).toEqual([referencedKey.id])
+  })
+
+  test('returns 404 without scanning references when deleting missing or invalid records', async () => {
+    const workspace = await temporaryWorkspace()
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    let referenceChecks = 0
+    const { app, handlers } = createRouteHarness()
+    registerMcpRoutes(app, () => workspace, {} as any, {
+      findProjectReferences: async () => {
+        referenceChecks += 1
+        return [{ id: 9, title: '不应泄露的绑定小说' }]
+      },
+    })
+
+    const missingServer = await call(handlers.get('DELETE /api/mcp/servers/:id'), {
+      params: { id: 'missing' },
+    })
+    const missingKey = await call(handlers.get('DELETE /api/mcp/keys/:id'), {
+      params: { id: '999' },
+    })
+    const invalidKey = await call(handlers.get('DELETE /api/mcp/keys/:id'), {
+      params: { id: 'not-a-number' },
+    })
+
+    expect(missingServer).toMatchObject({ statusCode: 404, body: { error: 'MCP Server 不存在' } })
+    expect(missingKey).toMatchObject({ statusCode: 404, body: { error: 'MCP Key 不存在' } })
+    expect(invalidKey).toMatchObject({ statusCode: 404, body: { error: 'MCP Key 不存在' } })
+    expect(referenceChecks).toBe(0)
   })
 
   test('exposes diagnostics, Agent listing, and explicit Agent creation through runtime actions', async () => {

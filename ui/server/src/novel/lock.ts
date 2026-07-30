@@ -61,8 +61,12 @@ export async function withNovelWorkspaceMutation<T>(activeWorkspace: string, mut
   }
 }
 
+export function isNovelWorkspaceMutationHeld(activeWorkspace: string) {
+  return Boolean(novelMutationContext.getStore()?.has(novelMutationKey(activeWorkspace)))
+}
+
 export function assertNovelWorkspaceMutationHeld(activeWorkspace: string) {
-  if (!novelMutationContext.getStore()?.has(novelMutationKey(activeWorkspace))) {
+  if (!isNovelWorkspaceMutationHeld(activeWorkspace)) {
     throw new Error('novel store write attempted outside workspace mutation lock')
   }
 }

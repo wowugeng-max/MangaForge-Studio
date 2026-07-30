@@ -8,7 +8,7 @@ export function getMcpKeysPath(activeWorkspace: string) {
   return join(activeWorkspace, 'mcp-keys.json')
 }
 
-function normalizeMcpKey(raw: Partial<McpKeyRecord> & Record<string, unknown>): McpKeyRecord {
+export function normalizeMcpKey(raw: Partial<McpKeyRecord> & Record<string, unknown>): McpKeyRecord {
   return {
     id: Number(raw.id || 0),
     mcp_server_id: String(raw.mcp_server_id ?? (raw as any).mcpServerId ?? '').trim(),

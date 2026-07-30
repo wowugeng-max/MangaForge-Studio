@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { resolve } from 'node:path'
+import { isNovelWorkspaceMutationHeld } from '../novel/lock'
 
 type Waiter = {
   resolve(release: () => void): void
@@ -49,6 +50,9 @@ export async function withMcpWorkspaceMutation<T>(
   const key = keyForWorkspace(activeWorkspace)
   const active = held.getStore()
   if (active?.get(key)?.active) return mutation()
+  if (isNovelWorkspaceMutationHeld(activeWorkspace)) {
+    throw new Error('MCP coordinator must be acquired before novel mutation lock')
+  }
   const release = await acquire(key)
   const lease = { active: true }
   const next = new Map(active || [])

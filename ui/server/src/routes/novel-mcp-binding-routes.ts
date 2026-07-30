@@ -2,6 +2,7 @@ import type { Express } from 'express'
 import { mutateNovelProjectReferenceConfig } from '../novel'
 import { isMcpError, McpError } from '../mcp/errors'
 import type { McpRuntime } from '../mcp/runtime'
+import { withMcpWorkspaceMutation } from '../mcp/workspace-coordinator'
 import {
   normalizeProseGenerationSource,
   resolveProseGenerationSource,
@@ -52,31 +53,43 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
   }))
 
   app.put(base, safely(async (req, res) => {
-    const resolved = await requireProject(req, res)
-    if (!resolved) return
-    const source = normalizeProseGenerationSource(req.body?.source || req.body)
-    let validation: any = null
-    if (source.type === 'mcp') {
-      validation = await validateMcpProjectBinding(
-        resolved.activeWorkspace,
-        resolved.project,
-        source.mcp,
-        { runtime: ctx.mcpRuntime, signal: req.signal },
-      )
-    }
-    const mutation = await mutateNovelProjectReferenceConfig(resolved.activeWorkspace, {
-      projectId: resolved.project.id,
-      operation: 'update-prose-generation-source',
-      mutate: current => ({
-        referenceConfig: { ...current, prose_generation_source: source },
-        result: source,
-      }),
+    const activeWorkspace = ctx.getWorkspace()
+    const result = await withMcpWorkspaceMutation(activeWorkspace, async () => {
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return null
+      const source = normalizeProseGenerationSource(req.body?.source || req.body)
+      let validation: any = null
+      if (source.type === 'mcp') {
+        validation = await validateMcpProjectBinding(
+          activeWorkspace,
+          project,
+          source.mcp,
+          { runtime: ctx.mcpRuntime, signal: req.signal },
+        )
+      }
+      const mutation = await mutateNovelProjectReferenceConfig(activeWorkspace, {
+        projectId: project.id,
+        operation: 'update-prose-generation-source',
+        mutate: current => ({
+          referenceConfig: { ...current, prose_generation_source: source },
+          result: source,
+        }),
+      })
+      if (!mutation) return null
+      return { source, validation, mutation }
     })
+    if (!result) return res.status(404).json({ error: 'project not found' })
     res.json({
       ok: true,
-      source,
-      project: mutation?.project,
-      ...(validation ? { validation: { server_id: validation.server.id, key_id: validation.key.id, agent: validation.agent } } : {}),
+      source: result.source,
+      project: result.mutation?.project,
+      ...(result.validation ? {
+        validation: {
+          server_id: result.validation.server.id,
+          key_id: result.validation.key.id,
+          agent: result.validation.agent,
+        },
+      } : {}),
     })
   }))
 

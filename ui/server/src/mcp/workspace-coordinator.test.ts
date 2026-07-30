@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test'
+import { withNovelWorkspaceMutation } from '../novel/lock'
 import { assertMcpWorkspaceMutationHeld, withMcpWorkspaceMutation } from './workspace-coordinator'
 
 test('serializes mutations for the same workspace', async () => {
@@ -48,6 +49,19 @@ test('allows nested mutations for the same workspace without deadlock', async ()
   })
 
   expect(events).toEqual(['outer entered', 'nested entered', 'outer finished'])
+})
+
+test('allows MCP then novel locking and rejects the reverse lock order', async () => {
+  const workspace = '/tmp/mcp-coordinator-lock-order-test'
+
+  const result = await withMcpWorkspaceMutation(workspace, () => (
+    withNovelWorkspaceMutation(workspace, async () => 'ok')
+  ))
+  expect(result).toBe('ok')
+
+  await expect(withNovelWorkspaceMutation(workspace, () => (
+    withMcpWorkspaceMutation(workspace, async () => 'unreachable')
+  ))).rejects.toThrow('MCP coordinator must be acquired before novel mutation lock')
 })
 
 test('invalidates ownership inherited by a detached async descendant after release', async () => {

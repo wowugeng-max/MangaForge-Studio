@@ -5,6 +5,7 @@ import { createMcpSecretScrubber } from '../mcp/secret-scrubber'
 import {
   createMcpKey,
   deleteMcpKey,
+  normalizeMcpKey,
   readMcpKeys,
   toPublicMcpKey,
   updateMcpKey,
@@ -74,7 +75,8 @@ async function createRouteSecretScrubber(req: any, getWorkspace: () => string) {
 function routeError(error: unknown, scrubber: McpSecretScrubber) {
   if (isMcpError(error)) {
     const originChanged = error.code === 'MCP_BINDING_INVALID' && error.details?.reason === 'server_origin_changed'
-    const status = originChanged ? 409
+    const referencedRecordConflict = error.code === 'MCP_REFERENCED_RECORD_CONFLICT'
+    const status = originChanged || referencedRecordConflict ? 409
       : error.code === 'MCP_BINDING_INVALID' ? 400
       : error.code === 'MCP_AUTH_FAILED' ? 401
         : error.code === 'MCP_CAPABILITY_MISSING' ? 422
@@ -86,6 +88,9 @@ function routeError(error: unknown, scrubber: McpSecretScrubber) {
         error: scrubber.scrubText(error.message),
         detail: scrubber.scrubText(error.message),
         error_code: originChanged ? 'MCP_SERVER_ORIGIN_CHANGE_REQUIRES_NEW_CREDENTIAL' : error.code,
+        ...(referencedRecordConflict && Array.isArray(error.details?.references)
+          ? { references: error.details.references }
+          : {}),
       },
     })
   }
@@ -100,6 +105,10 @@ function requireHttpServer(input: any) {
   if (!/^https?:\/\//i.test(server.url)) throw new McpError('MCP_BINDING_INVALID', 'MCP Server URL 必须是 HTTP(S) 地址')
   if (!server.adapter_id) throw new McpError('MCP_BINDING_INVALID', 'MCP Adapter 不能为空')
   return server
+}
+
+function throwReferencedRecordConflict(message: string, references: ProjectReference[]): never {
+  throw new McpError('MCP_REFERENCED_RECORD_CONFLICT', message, { references })
 }
 
 export function registerMcpRoutes(
@@ -172,17 +181,14 @@ export function registerMcpRoutes(
           )
         }
       }
-      if (!server.is_active && previous.is_active && req.body?.allow_referenced_disable !== true) {
+      if (!server.is_active) {
         const references = await findReferences(activeWorkspace, { serverId: server.id })
-        if (references.length) return { references }
+        if (references.length) throwReferencedRecordConflict('该 MCP Server 仍被小说项目引用', references)
       }
       await upsertMcpServer(activeWorkspace, server)
       return { server }
     })
     if (!result) return res.status(404).json({ error: 'MCP Server 不存在' })
-    if ('references' in result) {
-      return res.status(409).json({ error: '该 MCP Server 仍被小说项目引用', references: result.references })
-    }
     await runtime.invalidateServer?.(result.server.id)
     res.json({ ok: true, server: toPublicMcpServer(result.server) })
   }))
@@ -190,15 +196,18 @@ export function registerMcpRoutes(
   app.delete(['/api/mcp/servers/:id', '/api/mcp/servers/:id/'], safely(async (req, res) => {
     const activeWorkspace = getWorkspace()
     const id = String(req.params.id)
-    const conflict = await withMcpWorkspaceMutation(activeWorkspace, async () => {
-      const references = await findReferences(activeWorkspace, { serverId: id })
-      if (references.length) return { error: '该 MCP Server 仍被小说项目引用', references }
+    const result = await withMcpWorkspaceMutation(activeWorkspace, async () => {
+      const previous = (await readMcpServers(activeWorkspace)).find(item => item.id === id)
+      if (!previous) return null
       const keys = await readMcpKeys(activeWorkspace)
+      const references = await findReferences(activeWorkspace, { serverId: id })
+      if (references.length) throwReferencedRecordConflict('该 MCP Server 仍被小说项目引用', references)
       if (keys.some(key => key.mcp_server_id === id)) return { error: '请先删除该 Server 下的 MCP Key' }
       await deleteMcpServer(activeWorkspace, id)
-      return null
+      return { previous }
     })
-    if (conflict) return res.status(409).json(conflict)
+    if (!result) return res.status(404).json({ error: 'MCP Server 不存在' })
+    if ('error' in result) return res.status(409).json(result)
     await runtime.invalidateServer?.(id)
     res.json({ ok: true })
   }))
@@ -231,29 +240,46 @@ export function registerMcpRoutes(
   app.put(['/api/mcp/keys/:id', '/api/mcp/keys/:id/'], safely(async (req, res) => {
     const activeWorkspace = getWorkspace()
     const id = Number(req.params.id)
-    const previous = (await readMcpKeys(activeWorkspace)).find(item => item.id === id)
-    if (!previous) return res.status(404).json({ error: 'MCP Key 不存在' })
-    const serverId = String(req.body?.mcp_server_id || previous.mcp_server_id)
-    if (!(await readMcpServers(activeWorkspace)).some(item => item.id === serverId)) {
-      throw new McpError('MCP_BINDING_INVALID', 'MCP Server 不存在')
-    }
-    if (req.body?.is_active === false && previous.is_active && req.body?.allow_referenced_disable !== true) {
-      const refs = await findReferences(activeWorkspace, { keyId: id })
-      if (refs.length) return res.status(409).json({ error: '该 MCP Key 仍被小说项目引用', references: refs })
-    }
-    const updated = await updateMcpKey(activeWorkspace, id, { ...req.body, mcp_server_id: serverId })
-    await runtime.invalidateKey?.(id, previous.mcp_server_id)
-    res.json({ ok: true, key: toPublicMcpKey(updated!) })
+    const result = await withMcpWorkspaceMutation(activeWorkspace, async () => {
+      const previous = (await readMcpKeys(activeWorkspace)).find(item => item.id === id)
+      if (!previous) return null
+      const submittedKey = req.body?.key
+      const prospective = normalizeMcpKey({
+        ...previous,
+        ...(req.body || {}),
+        id,
+        key: submittedKey === undefined || String(submittedKey).trim() === '' ? previous.key : submittedKey,
+        mcp_server_id: req.body?.mcp_server_id ?? previous.mcp_server_id,
+      })
+      if (!(await readMcpServers(activeWorkspace)).some(item => item.id === prospective.mcp_server_id)) {
+        throw new McpError('MCP_BINDING_INVALID', 'MCP Server 不存在')
+      }
+      if (!prospective.is_active || prospective.mcp_server_id !== previous.mcp_server_id) {
+        const references = await findReferences(activeWorkspace, { keyId: id })
+        if (references.length) throwReferencedRecordConflict('该 MCP Key 仍被小说项目引用', references)
+      }
+      const updated = await updateMcpKey(activeWorkspace, id, prospective)
+      return { previous, updated: updated! }
+    })
+    if (!result) return res.status(404).json({ error: 'MCP Key 不存在' })
+    await runtime.invalidateKey?.(id, result.previous.mcp_server_id)
+    res.json({ ok: true, key: toPublicMcpKey(result.updated) })
   }))
 
   app.delete(['/api/mcp/keys/:id', '/api/mcp/keys/:id/'], safely(async (req, res) => {
     const activeWorkspace = getWorkspace()
     const id = Number(req.params.id)
-    const previous = (await readMcpKeys(activeWorkspace)).find(item => item.id === id)
-    const refs = await findReferences(activeWorkspace, { keyId: id })
-    if (refs.length) return res.status(409).json({ error: '该 MCP Key 仍被小说项目引用', references: refs })
-    await deleteMcpKey(activeWorkspace, id)
-    if (previous) await runtime.invalidateKey?.(id, previous.mcp_server_id)
+    const previous = await withMcpWorkspaceMutation(activeWorkspace, async () => {
+      if (!Number.isInteger(id) || id <= 0) return null
+      const record = (await readMcpKeys(activeWorkspace)).find(item => item.id === id)
+      if (!record) return null
+      const references = await findReferences(activeWorkspace, { keyId: id })
+      if (references.length) throwReferencedRecordConflict('该 MCP Key 仍被小说项目引用', references)
+      await deleteMcpKey(activeWorkspace, id)
+      return record
+    })
+    if (!previous) return res.status(404).json({ error: 'MCP Key 不存在' })
+    await runtime.invalidateKey?.(id, previous.mcp_server_id)
     res.json({ ok: true })
   }))
 

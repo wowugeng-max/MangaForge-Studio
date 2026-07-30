@@ -4,7 +4,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { createMcpKey } from '../mcp/key-store'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from '../mcp/server-store'
-import { createNovelProject, getNovelProject } from '../novel'
+import { createNovelProject, deleteNovelProject, getNovelProject, listNovelProjects } from '../novel'
 import { registerNovelMcpBindingRoutes } from './novel-mcp-binding-routes'
 
 const workspaces: string[] = []
@@ -50,7 +50,7 @@ async function fixture() {
     getProject: getNovelProject,
     mcpRuntime: runtime as any,
   })
-  return { workspace, key, first, second, handlers }
+  return { workspace, key, first, second, handlers, runtime }
 }
 
 describe('novel MCP prose-source binding routes', () => {
@@ -83,6 +83,73 @@ describe('novel MCP prose-source binding routes', () => {
     const conflict = await call(handlers.get(`PUT ${path}`), { params: { id: String(second.id) }, body: { source } })
     expect(conflict.statusCode).toBe(409)
     expect(conflict.body.error_code).toBe('MCP_BINDING_INVALID')
+  })
+
+  test('serializes concurrent saves of the same Server Key Adapter Agent tuple', async () => {
+    const { workspace, key, first, second, handlers, runtime } = await fixture()
+    const path = '/api/novel/projects/:id/prose-generation-source'
+    const source = {
+      version: 'prose_generation_source_v1',
+      type: 'mcp',
+      mcp: { server_id: 'buda', key_id: key.id, adapter_id: 'buda', agent_id: 'agent-1' },
+    }
+    let arrivals = 0
+    let release!: () => void
+    const barrier = new Promise<void>(resolve => { release = resolve })
+    let releaseTimer: ReturnType<typeof setTimeout> | undefined
+    runtime.listAgents = async () => {
+      arrivals += 1
+      if (arrivals === 1) releaseTimer = setTimeout(release, 0)
+      else release()
+      await barrier
+      return [{ id: 'agent-1', name: '正文 Agent' }, { id: 'agent-2', name: '正文 Agent 2' }]
+    }
+
+    try {
+      const responses = await Promise.all([
+        call(handlers.get(`PUT ${path}`), { params: { id: String(first.id) }, body: { source } }),
+        call(handlers.get(`PUT ${path}`), { params: { id: String(second.id) }, body: { source } }),
+      ])
+
+      expect(responses.map(response => response.statusCode).sort()).toEqual([200, 409])
+      const boundProjects = (await listNovelProjects(workspace)).filter(project => (
+        project.reference_config?.prose_generation_source?.type === 'mcp'
+      ))
+      expect(boundProjects).toHaveLength(1)
+    } finally {
+      if (releaseTimer) clearTimeout(releaseTimer)
+    }
+  })
+
+  test('returns 404 when the project is deleted during live MCP validation', async () => {
+    const { workspace, key, first, handlers, runtime } = await fixture()
+    const path = '/api/novel/projects/:id/prose-generation-source'
+    const source = {
+      version: 'prose_generation_source_v1',
+      type: 'mcp',
+      mcp: { server_id: 'buda', key_id: key.id, adapter_id: 'buda', agent_id: 'agent-1' },
+    }
+    let signalValidationEntered!: () => void
+    let releaseValidation!: () => void
+    const validationEntered = new Promise<void>(resolve => { signalValidationEntered = resolve })
+    const validationMayFinish = new Promise<void>(resolve => { releaseValidation = resolve })
+    runtime.listAgents = async () => {
+      signalValidationEntered()
+      await validationMayFinish
+      return [{ id: 'agent-1', name: '正文 Agent' }]
+    }
+
+    const saving = call(handlers.get(`PUT ${path}`), {
+      params: { id: String(first.id) },
+      body: { source },
+    })
+    await validationEntered
+    expect(await deleteNovelProject(workspace, first.id)).toBe(true)
+    releaseValidation()
+
+    const response = await saving
+    expect(response.statusCode).toBe(404)
+    expect(response.body.error).toBe('project not found')
   })
 
   test('lists and explicitly creates Agents for a selected key without changing the binding', async () => {

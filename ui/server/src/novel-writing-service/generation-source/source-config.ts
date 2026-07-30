@@ -150,6 +150,7 @@ export async function validateMcpProjectBinding(
     return other
       && String(other.server_id) === binding.server_id
       && Number(other.key_id) === binding.key_id
+      && String(other.adapter_id) === binding.adapter_id
       && String(other.agent_id) === binding.agent_id
   })
   if (conflict) {
