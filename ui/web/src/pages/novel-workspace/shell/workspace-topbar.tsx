@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Badge, Button, Dropdown, Select, Tag, Tooltip, Typography } from 'antd'
 import {
   ArrowLeftOutlined,
@@ -11,8 +11,10 @@ import {
   ReloadOutlined,
   RocketOutlined,
   SafetyOutlined,
+  SettingOutlined,
   ToolOutlined,
 } from '@ant-design/icons'
+import { ProjectSettingsModal } from '../ProjectSettingsModal'
 import {
   primaryTabForArea,
   WORKSPACE_TOOL_MENU_DEFS,
@@ -70,6 +72,7 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
     workspaceAreaTabs,
   } = props
 
+  const [projectSettingsOpen, setProjectSettingsOpen] = useState(false)
   const activePrimary = primaryTabForArea(workspaceArea as WorkspaceArea)
   const moreMenuItems = [
     {
@@ -107,6 +110,12 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
           label: item.label,
           onClick: () => setWorkspaceArea(item.key),
         })),
+    },
+    {
+      key: 'projectSettings',
+      icon: <SettingOutlined />,
+      label: '项目设置',
+      onClick: () => setProjectSettingsOpen(true),
     },
     { type: 'divider' as const },
     {
@@ -198,6 +207,11 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
           </Dropdown>
         </div>
       </div>
+      <ProjectSettingsModal
+        open={projectSettingsOpen}
+        projectId={Number(selectedProject?.id || 0)}
+        onClose={() => setProjectSettingsOpen(false)}
+      />
     </>
   )
 }
