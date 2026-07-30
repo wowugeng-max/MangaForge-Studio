@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, readFile, rm } from 'fs/promises'
+import { access, mkdtemp, readFile, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -16,6 +16,21 @@ async function tempDir(prefix: string) {
   const dir = await mkdtemp(join(tmpdir(), prefix))
   workspaces.push(dir)
   return dir
+}
+
+async function pathExists(path: string) {
+  try {
+    await access(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+const mcpProseGenerationSource = {
+  version: 'prose_generation_source_v1',
+  type: 'mcp',
+  mcp: { server_id: 'buda', key_id: 1, adapter_id: 'buda', agent_id: 'agent-1' },
 }
 
 function createRouteHarness() {
@@ -112,18 +127,13 @@ describe('prose generation source mutation guard', () => {
       mutate: () => ({ referenceConfig: {}, result: null }),
     })
     expect((await getNovelProject(workspace, project.id))?.reference_config).toEqual({})
-    const source = {
-      version: 'prose_generation_source_v1',
-      type: 'mcp',
-      mcp: { server_id: 'buda', key_id: 1, adapter_id: 'buda', agent_id: 'agent-1' },
-    }
     const { app, handlers } = createRouteHarness()
     registerNovelCoreRoutes(app as any, () => workspace)
 
     const createResponse = await callRoute(handlers.get('POST /api/novel/projects'), {
       body: {
         title: '不应创建的绕过项目',
-        reference_config: { prose_generation_source: source },
+        reference_config: { prose_generation_source: mcpProseGenerationSource },
       },
     })
     expect(createResponse.statusCode).toBe(400)
@@ -135,7 +145,7 @@ describe('prose generation source mutation guard', () => {
 
     const updateResponse = await callRoute(handlers.get('PUT /api/novel/projects/:id'), {
       params: { id: String(project.id) },
-      body: { reference_config: { prose_generation_source: source } },
+      body: { reference_config: { prose_generation_source: mcpProseGenerationSource } },
     })
     expect(updateResponse.statusCode).toBe(400)
     expect(updateResponse.body.error_code).toBe('MCP_BINDING_INVALID')
@@ -143,11 +153,91 @@ describe('prose generation source mutation guard', () => {
 
     const referenceConfigResponse = await callRoute(handlers.get('PUT /api/novel/projects/:id/reference-config'), {
       params: { id: String(project.id) },
-      body: { prose_generation_source: source },
+      body: { prose_generation_source: mcpProseGenerationSource },
     })
     expect(referenceConfigResponse.statusCode).toBe(400)
     expect(referenceConfigResponse.body.error_code).toBe('MCP_BINDING_INVALID')
     expect((await getNovelProject(workspace, project.id))?.reference_config).toEqual({})
+  })
+
+  test('rejects prose generation source on create before creating the workspace', async () => {
+    const parent = await tempDir('mangaforge-novel-source-guard-parent-')
+    const workspace = join(parent, 'missing-workspace')
+    const { registerNovelCoreRoutes } = await import('./novel-core-routes')
+    const { app, handlers } = createRouteHarness()
+    registerNovelCoreRoutes(app as any, () => workspace)
+    expect(await pathExists(workspace)).toBe(false)
+
+    const response = await callRoute(handlers.get('POST /api/novel/projects'), {
+      body: {
+        title: '不应初始化 workspace 的项目',
+        reference_config: { prose_generation_source: mcpProseGenerationSource },
+      },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.body.error_code).toBe('MCP_BINDING_INVALID')
+    expect(await pathExists(workspace)).toBe(false)
+  })
+
+  test('preserves an existing prose generation source when generic project update omits it', async () => {
+    const workspace = await tempDir('mangaforge-novel-source-project-update-')
+    const { createNovelProject, getNovelProject, mutateNovelProjectReferenceConfig } = await import('../novel')
+    const { registerNovelCoreRoutes } = await import('./novel-core-routes')
+    const project = await createNovelProject(workspace, { title: '保留绑定的项目' })
+    await mutateNovelProjectReferenceConfig(workspace, {
+      projectId: project.id,
+      operation: 'test-existing-prose-generation-source',
+      mutate: current => ({
+        referenceConfig: { ...current, prose_generation_source: mcpProseGenerationSource },
+        result: null,
+      }),
+    })
+    const { app, handlers } = createRouteHarness()
+    registerNovelCoreRoutes(app as any, () => workspace)
+
+    const response = await callRoute(handlers.get('PUT /api/novel/projects/:id'), {
+      params: { id: String(project.id) },
+      body: {
+        title: '通用项目更新后的标题',
+        reference_config: { notes: '通用项目更新保存的备注' },
+      },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body.title).toBe('通用项目更新后的标题')
+    expect(response.body.reference_config.notes).toBe('通用项目更新保存的备注')
+    expect(response.body.reference_config.prose_generation_source).toEqual(mcpProseGenerationSource)
+    expect((await getNovelProject(workspace, project.id))?.reference_config?.prose_generation_source)
+      .toEqual(mcpProseGenerationSource)
+  })
+
+  test('preserves an existing prose generation source when reference config update omits it', async () => {
+    const workspace = await tempDir('mangaforge-novel-source-config-update-')
+    const { createNovelProject, getNovelProject, mutateNovelProjectReferenceConfig } = await import('../novel')
+    const { registerNovelCoreRoutes } = await import('./novel-core-routes')
+    const project = await createNovelProject(workspace, { title: '保留 reference config 绑定的项目' })
+    await mutateNovelProjectReferenceConfig(workspace, {
+      projectId: project.id,
+      operation: 'test-existing-prose-generation-source',
+      mutate: current => ({
+        referenceConfig: { ...current, prose_generation_source: mcpProseGenerationSource },
+        result: null,
+      }),
+    })
+    const { app, handlers } = createRouteHarness()
+    registerNovelCoreRoutes(app as any, () => workspace)
+
+    const response = await callRoute(handlers.get('PUT /api/novel/projects/:id/reference-config'), {
+      params: { id: String(project.id) },
+      body: { notes: 'reference config 更新保存的备注' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body.notes).toBe('reference config 更新保存的备注')
+    expect(response.body.prose_generation_source).toEqual(mcpProseGenerationSource)
+    expect((await getNovelProject(workspace, project.id))?.reference_config?.prose_generation_source)
+      .toEqual(mcpProseGenerationSource)
   })
 })
 
@@ -726,4 +816,3 @@ describe('novel project seed prompt b', () => {
     expect(afterDelete.body.drafts).toHaveLength(0)
   })
 })
-
