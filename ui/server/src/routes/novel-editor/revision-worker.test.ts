@@ -3700,6 +3700,49 @@ describe('durable editor revision worker', () => {
     expect(harness.checkpoint().phases.post_quality.status).toBe('completed')
   })
 
+  test('a refreshed Story State retry uses the current budget without repeating committed work', async () => {
+    const checkpoint = persistedCheckpoint()
+    checkpoint.phase = 'sync_current_story_state'
+    checkpoint.phases.post_quality = { status: 'completed', attempt: 1 }
+    checkpoint.phases.sync_current_story_state = { status: 'pending', attempt: 1 }
+    checkpoint.runtime_config = { llm_timeout_ms: 600_000 }
+    const harness = createHarness({ checkpoint })
+    harness.project.reference_config = {
+      editor_revision: { timeout_seconds: 420, story_state_max_tokens: 12_000 },
+    }
+    installMatchingCommitMarker(harness)
+    const committedChapter = harness.chapter()
+    const worker = harness.worker()
+
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    expect(harness.prepareCalls).toHaveLength(1)
+    expect(harness.prepareCalls[0][1]).toMatchObject({
+      projectId: harness.run.project_id,
+      chapterId: harness.input.chapter_id,
+      maxTokens: 12_000,
+      receipt: {
+        source_run_id: harness.run.id,
+        chapter_id: harness.input.chapter_id,
+        candidate_hash: checkpoint.candidate?.hash,
+      },
+    })
+    expect(harness.checkpoint().runtime_config).toEqual({
+      llm_timeout_ms: 600_000,
+      story_state_max_tokens: 12_000,
+    })
+    expect(harness.revisionCalls).toHaveLength(0)
+    expect(harness.qualityCalls).toHaveLength(0)
+    expect(harness.commitCalls()).toBe(0)
+    expect(harness.versionWrites()).toBe(0)
+    expect(harness.chapter()).toEqual(committedChapter)
+    expect(harness.chapter().raw_payload.editor_revision_commit).toMatchObject({
+      run_id: harness.run.id,
+      candidate_hash: checkpoint.candidate?.hash,
+    })
+  })
+
   test('forwards the selected revision model to post-quality review', async () => {
     const checkpoint = persistedCheckpoint()
     const harness = createHarness({ checkpoint, modelId: 36 })

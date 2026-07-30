@@ -812,7 +812,20 @@ function resetPhaseState(state: EditorRevisionPhaseState): EditorRevisionPhaseSt
   return { status: 'pending', attempt: Number(state.attempt || 0) }
 }
 
-function retryCheckpoint(checkpoint: EditorRevisionCheckpoint): EditorRevisionCheckpoint {
+const REFRESHABLE_STORY_STATE_FAILURES = new Set([
+  'story_state_invalid_payload',
+  'story_state_transport_incomplete',
+])
+
+function hasRefreshablePreparedStoryStateFailure(checkpoint: EditorRevisionCheckpoint): boolean {
+  const storyState = checkpoint.story_state as any
+  const hardFailures = storyState?.prepared?.hard_failures
+  return storyState?.status === 'prepared'
+    && Array.isArray(hardFailures)
+    && hardFailures.some(failure => REFRESHABLE_STORY_STATE_FAILURES.has(failure?.key))
+}
+
+function retryCheckpoint(checkpoint: EditorRevisionCheckpoint, failedRun: boolean): EditorRevisionCheckpoint {
   const next = JSON.parse(JSON.stringify(checkpoint)) as EditorRevisionCheckpoint
   if (!next.prose_persisted && next.linked_task_closure?.status === 'completed') {
     next.linked_task_closure = { status: 'pending' }
@@ -833,6 +846,12 @@ function retryCheckpoint(checkpoint: EditorRevisionCheckpoint): EditorRevisionCh
     delete next.story_state
     delete next.continuity_warning_review_id
     delete next.delivery_risk_convergence
+  }
+  if (failedRun
+    && resumePhase === 'sync_current_story_state'
+    && hasRefreshablePreparedStoryStateFailure(next)) {
+    delete next.story_state
+    if (next.runtime_config) delete next.runtime_config.story_state_max_tokens
   }
   const resumeIndex = phaseIndex(resumePhase)
   for (const phase of EDITOR_REVISION_PHASES.slice(resumeIndex)) next.phases[phase] = resetPhaseState(next.phases[phase])
@@ -855,7 +874,7 @@ export async function retryEditorRevisionRun(workspace: string, projectId: numbe
       if (RETRY_RESTART_ERRORS.has(failureCode)) {
         throw revisionError('REVISION_RESTART_REQUIRED', 'editor revision must restart from a fresh source snapshot')
       }
-      const nextCheckpoint = retryCheckpoint(checkpoint)
+      const nextCheckpoint = retryCheckpoint(checkpoint, current.status === 'failed')
       assertEditorRevisionCheckpointCoherent(nextCheckpoint, { runStatus: 'queued' })
       const result = db.query(`
         UPDATE runs

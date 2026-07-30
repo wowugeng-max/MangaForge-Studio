@@ -1310,6 +1310,228 @@ describe('editor revision run repository', () => {
     expect(rejectedCheckpoint.phases.generate_candidate.status).toBe('pending')
   })
 
+  test('refreshes only invalid prepared Story State when a failed sync is explicitly retried', async () => {
+    const { workspace, project, chapters: [chapter] } = await createFixture()
+    const candidateText = 'committed-story-state-candidate'
+    const run = await createRun(workspace, project.id, chapter.id)
+    await claimEditorRevisionRun(workspace, {
+      runId: run.id,
+      owner: 'worker-a',
+      now: '2030-07-27T10:00:00.000Z',
+      leaseMs: 60_000,
+    })
+    const failed = checkpointAt('sync_current_story_state', {
+      generate_candidate: 'completed',
+      admit_candidate: 'completed',
+      persist_chapter: 'completed',
+      post_quality: 'completed',
+      sync_current_story_state: 'failed',
+    }, {
+      runtime_config: { llm_timeout_ms: 600_000, story_state_max_tokens: 4_500 },
+      candidate: {
+        text: candidateText,
+        hash: revisionTextHash(candidateText),
+        char_count: candidateText.length,
+        applied_patches: [{ type: 'full_text' }],
+        diagnostics: { admission: 'preserved' },
+      },
+      prose_persisted: true,
+      committed_chapter_updated_at: '2030-07-27T10:00:01.000Z',
+      editor_revision_review_id: 42,
+      post_quality: { status: 'completed', score: 94 },
+      story_state: {
+        status: 'prepared',
+        receipt: { source_run_id: run.id, chapter_id: chapter.id },
+        prepared: {
+          hard_failures: [
+            { key: 'story_state_invalid_payload', message: 'invalid JSON' },
+            { key: 'story_state_transport_incomplete', message: 'truncated response' },
+          ],
+          receipt_binding: { key: `${run.id}:${chapter.id}` },
+        },
+      },
+      error: { code: 'STORY_STATE_SYNC_FAILED', message: 'Story State sync failed' },
+    })
+    await writeEditorRevisionCheckpoint(workspace, {
+      runId: run.id,
+      owner: 'worker-a',
+      status: 'failed',
+      phase: 'sync_current_story_state',
+      checkpoint: failed,
+      errorMessage: 'STORY_STATE_SYNC_FAILED',
+    })
+
+    const retried = await retryEditorRevisionRun(workspace, project.id, run.id)
+    const checkpoint = JSON.parse(retried.output_ref || '{}')
+
+    expect(retried).toMatchObject({ id: run.id, status: 'queued', error_message: '' })
+    expect(checkpoint).toMatchObject({
+      phase: 'sync_current_story_state',
+      runtime_config: { llm_timeout_ms: 600_000 },
+      candidate: {
+        text: candidateText,
+        hash: revisionTextHash(candidateText),
+        diagnostics: { admission: 'preserved' },
+      },
+      prose_persisted: true,
+      committed_chapter_updated_at: '2030-07-27T10:00:01.000Z',
+      editor_revision_review_id: 42,
+      post_quality: { status: 'completed', score: 94 },
+      phases: {
+        generate_candidate: { status: 'completed' },
+        admit_candidate: { status: 'completed' },
+        persist_chapter: { status: 'completed' },
+        post_quality: { status: 'completed' },
+        sync_current_story_state: { status: 'pending' },
+      },
+    })
+    expect(checkpoint.runtime_config).toEqual({ llm_timeout_ms: 600_000 })
+    expect(checkpoint.story_state).toBeUndefined()
+    expect(checkpoint.error).toBeUndefined()
+  })
+
+  test.each([
+    {
+      label: 'valid prepared receipt',
+      storyState: {
+        status: 'prepared',
+        prepared: { hard_failures: [], receipt_binding: { key: 'valid' } },
+      },
+    },
+    {
+      label: 'unrelated prepared hard failure',
+      storyState: {
+        status: 'prepared',
+        prepared: { hard_failures: [{ key: 'story_state_policy_warning' }], receipt_binding: { key: 'unrelated' } },
+      },
+    },
+    {
+      label: 'already applied receipt',
+      storyState: {
+        status: 'completed',
+        prepared: { hard_failures: [{ key: 'story_state_invalid_payload' }] },
+        receipt: { status: 'completed' },
+      },
+    },
+  ])('preserves $label and its Story State budget on explicit retry', async ({ storyState }) => {
+    const { workspace, project, chapters: [chapter] } = await createFixture()
+    const candidateText = 'preserved-story-state-candidate'
+    const run = await createRun(workspace, project.id, chapter.id)
+    await claimEditorRevisionRun(workspace, {
+      runId: run.id,
+      owner: 'worker-a',
+      now: '2030-07-27T10:00:00.000Z',
+      leaseMs: 60_000,
+    })
+    const failed = checkpointAt('sync_current_story_state', {
+      generate_candidate: 'completed',
+      admit_candidate: 'completed',
+      persist_chapter: 'completed',
+      post_quality: 'completed',
+      sync_current_story_state: 'failed',
+    }, {
+      runtime_config: { llm_timeout_ms: 600_000, story_state_max_tokens: 4_500 },
+      candidate: {
+        text: candidateText,
+        hash: revisionTextHash(candidateText),
+        char_count: candidateText.length,
+        applied_patches: [],
+        diagnostics: {},
+      },
+      prose_persisted: true,
+      committed_chapter_updated_at: '2030-07-27T10:00:01.000Z',
+      editor_revision_review_id: 42,
+      post_quality: { status: 'completed' },
+      story_state: storyState,
+      error: { code: 'STORY_STATE_SYNC_FAILED', message: 'Story State sync failed' },
+    })
+    await writeEditorRevisionCheckpoint(workspace, {
+      runId: run.id,
+      owner: 'worker-a',
+      status: 'failed',
+      phase: 'sync_current_story_state',
+      checkpoint: failed,
+      errorMessage: 'STORY_STATE_SYNC_FAILED',
+    })
+
+    const retried = await retryEditorRevisionRun(workspace, project.id, run.id)
+    const checkpoint = JSON.parse(retried.output_ref || '{}')
+
+    expect(checkpoint.story_state).toEqual(storyState)
+    expect(checkpoint.runtime_config).toEqual({
+      llm_timeout_ms: 600_000,
+      story_state_max_tokens: 4_500,
+    })
+  })
+
+  test.each([
+    {
+      label: 'a canceled run',
+      runStatus: 'canceled' as const,
+      phase: 'sync_current_story_state' as const,
+      statuses: {
+        generate_candidate: 'completed',
+        admit_candidate: 'completed',
+        persist_chapter: 'completed',
+        post_quality: 'completed',
+        sync_current_story_state: 'canceled',
+      } as const,
+    },
+    {
+      label: 'a different failed resume phase',
+      runStatus: 'failed' as const,
+      phase: 'post_quality' as const,
+      statuses: {
+        generate_candidate: 'completed',
+        admit_candidate: 'completed',
+        persist_chapter: 'completed',
+        post_quality: 'failed',
+      } as const,
+    },
+  ])('preserves invalid prepared Story State for $label', async ({ runStatus, phase, statuses }) => {
+    const { workspace, project, chapters: [chapter] } = await createFixture()
+    const candidateText = 'non-refreshing-story-state-candidate'
+    const run = await createRun(workspace, project.id, chapter.id)
+    const storyState = {
+      status: 'prepared',
+      prepared: {
+        hard_failures: [{ key: 'story_state_invalid_payload' }],
+        receipt_binding: { key: 'must-stay' },
+      },
+    }
+    const checkpoint = checkpointAt(phase, statuses, {
+      runtime_config: { llm_timeout_ms: 600_000, story_state_max_tokens: 4_500 },
+      candidate: {
+        text: candidateText,
+        hash: revisionTextHash(candidateText),
+        char_count: candidateText.length,
+        applied_patches: [],
+        diagnostics: {},
+      },
+      prose_persisted: true,
+      committed_chapter_updated_at: '2030-07-27T10:00:01.000Z',
+      editor_revision_review_id: 42,
+      story_state: storyState,
+      ...(runStatus === 'failed'
+        ? { error: { code: 'POST_QUALITY_FAILED', message: 'post quality failed' } }
+        : {}),
+    })
+    await updateNovelRun(workspace, run.id, {
+      status: runStatus,
+      output_ref: JSON.stringify(checkpoint),
+      error_message: runStatus === 'failed' ? 'POST_QUALITY_FAILED' : '',
+    })
+
+    const retried = await retryEditorRevisionRun(workspace, project.id, run.id)
+    const retriedCheckpoint = JSON.parse(retried.output_ref || '{}')
+
+    expect(retriedCheckpoint.story_state).toEqual(storyState)
+    expect(retriedCheckpoint.runtime_config).toEqual({
+      llm_timeout_ms: 600_000,
+      story_state_max_tokens: 4_500,
+    })
+  })
+
   test('requires a fresh run after source conflict or supersession', async () => {
     const { workspace, project, chapters } = await createFixture([1, 2])
     for (const [index, errorCode] of ['SOURCE_VERSION_CHANGED', 'REVISION_RUN_SUPERSEDED'].entries()) {
