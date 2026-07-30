@@ -82,15 +82,15 @@ export function resolveProseGenerationSource(project: any): ProseGenerationSourc
 
 export function proseGenerationSourceFingerprint(source: ProseGenerationSourceConfig) {
   return source.type === 'model'
-    ? [source.version, source.type].join('\u0000')
-    : [
+    ? JSON.stringify([source.version, source.type])
+    : JSON.stringify([
         source.version,
         source.type,
         source.mcp.server_id,
-        String(source.mcp.key_id),
+        source.mcp.key_id,
         source.mcp.adapter_id,
         source.mcp.agent_id,
-      ].join('\u0000')
+      ])
 }
 
 export async function validateMcpCredentialSelection(activeWorkspace: string, input: {

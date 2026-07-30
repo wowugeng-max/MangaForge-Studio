@@ -136,6 +136,32 @@ describe('prose generation source config', () => {
     expect(proseGenerationSourceFingerprint(model)).not.toBe(proseGenerationSourceFingerprint(mcp))
   })
 
+  test('distinguishes MCP identity fields containing the fingerprint delimiter', () => {
+    const first = normalizeProseGenerationSource({
+      version: 'prose_generation_source_v1',
+      type: 'mcp',
+      mcp: {
+        server_id: 'buda',
+        key_id: 3,
+        adapter_id: 'adapter\u0000agent',
+        agent_id: 'tail',
+      },
+    })
+    const second = normalizeProseGenerationSource({
+      version: 'prose_generation_source_v1',
+      type: 'mcp',
+      mcp: {
+        server_id: 'buda',
+        key_id: 3,
+        adapter_id: 'adapter',
+        agent_id: 'agent\u0000tail',
+      },
+    })
+
+    expect(first).not.toEqual(second)
+    expect(proseGenerationSourceFingerprint(first)).not.toBe(proseGenerationSourceFingerprint(second))
+  })
+
   test('validates active credentials, a live Agent, and tuple uniqueness', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-binding-'))
     workspaces.push(workspace)
