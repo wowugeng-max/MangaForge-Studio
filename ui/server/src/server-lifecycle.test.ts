@@ -354,6 +354,20 @@ describe('server lifecycle bootstrap', () => {
 })
 
 describe('server shutdown lifecycle', () => {
+  test('closes MCP connections together with HTTP, background, and novel lifecycles', async () => {
+    const events: string[] = []
+    const shutdown = createShutdownCoordinator({
+      closeServer: async () => { events.push('http') },
+      stopBackgroundServices: async () => { events.push('background') },
+      stopNovelLifecycle: async () => { events.push('novel') },
+      stopMcpRuntime: async () => { events.push('mcp') },
+      onShutdownError: () => {},
+    })
+
+    await shutdown()
+    expect(events.sort()).toEqual(['background', 'http', 'mcp', 'novel'])
+  })
+
   test('a signal closes the published binding server and rejects its bind promise', async () => {
     const signalHandlers = new Map<string, () => void>()
     const emitter = new EventEmitter()

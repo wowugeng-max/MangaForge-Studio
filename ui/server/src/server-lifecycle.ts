@@ -35,6 +35,7 @@ type ShutdownCoordinatorDependencies = {
   closeServer(): Promise<void>
   stopBackgroundServices(): void | Promise<void>
   stopNovelLifecycle(): Promise<void>
+  stopMcpRuntime?(): void | Promise<void>
   onShutdownError(error: unknown): void
 }
 
@@ -159,11 +160,13 @@ export function createShutdownCoordinator(deps: ShutdownCoordinatorDependencies)
         : Promise.resolve().then(() => deps.closeServer())
       const backgroundStopPromise = Promise.resolve().then(() => deps.stopBackgroundServices())
       const revisionStopPromise = Promise.resolve().then(() => deps.stopNovelLifecycle())
-      const results = await Promise.allSettled([
+      const operations = [
         closePromise,
         backgroundStopPromise,
         revisionStopPromise,
-      ])
+      ]
+      if (deps.stopMcpRuntime) operations.push(Promise.resolve().then(() => deps.stopMcpRuntime!()))
+      const results = await Promise.allSettled(operations)
       const errors = results.flatMap(result => (
         result.status === 'rejected' ? [result.reason] : []
       ))

@@ -30,6 +30,8 @@ import { registerNovelRoutes } from './routes/novel'
 import { registerKnowledgeRoutes } from './routes/knowledge'
 import { registerFingerprintContractRoutes } from './routes/fingerprint-contracts'
 import { registerRecommendationRoutes } from './routes/recommendation-rules'
+import { registerMcpRoutes } from './routes/mcp-routes'
+import { createMcpRuntime } from './mcp/runtime'
 import { acceptWebSocketKey, sseManager, taskMessageManager, interruptRegisteredTask, webSocketManager, webSocketClientIdFromPath } from './ws-manager'
 import { keyMonitorEnabledFromEnv, startKeyMonitor } from './key-monitor'
 import {
@@ -105,6 +107,8 @@ registerGenerateRoutes(app, getWorkspace)
 registerVideoLoopRoutes(app, getWorkspace)
 registerDirectTaskRoutes(app, getWorkspace)
 registerRecommendationRoutes(app, getWorkspace)
+const mcpRuntime = createMcpRuntime(getWorkspace)
+registerMcpRoutes(app, getWorkspace, mcpRuntime)
 const novelLifecycle = registerNovelRoutes(app, getWorkspace)
 registerKnowledgeRoutes(app)
 registerFingerprintContractRoutes(app, getWorkspace)
@@ -136,6 +140,7 @@ const shutdown = createShutdownCoordinator({
   closeServer: () => closeHttpServer(server),
   stopBackgroundServices: () => backgroundServices.stop(),
   stopNovelLifecycle: () => novelLifecycle.stop(),
+  stopMcpRuntime: () => mcpRuntime.close(),
   onShutdownError: error => {
     process.exitCode = 1
     console.error('Manga UI server shutdown failed:', String(error).slice(0, 400))
