@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Alert, Button, Card, Divider, Empty, Input, InputNumber, Modal, Progress, Radio, Select, Space, Switch, Tag, Typography, message } from 'antd'
 import { PlusOutlined, DeleteOutlined, EyeOutlined, ToolOutlined } from '@ant-design/icons'
 import apiClient from '../../api/client'
+import { buildGenericReferenceConfigWritePayload } from './mcpGenerationSourceModel'
 
 const { Paragraph, Text } = Typography
 const defaultAvoid = ['人名', '专有设定', '原剧情顺序', '原文表达']
@@ -256,9 +257,10 @@ export function ReferenceConfigModal({
 
   const save = async () => {
     const nextConfig = buildConfig()
+    const referenceConfigWritePayload = buildGenericReferenceConfigWritePayload(nextConfig)
     setSaving(true)
     try {
-      const res = await apiClient.put(`/novel/projects/${projectId}/reference-config`, nextConfig)
+      const res = await apiClient.put(`/novel/projects/${projectId}/reference-config`, referenceConfigWritePayload)
       message.success('参考作品配置已保存')
       onSaved(res.data || nextConfig)
       onClose()

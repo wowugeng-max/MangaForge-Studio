@@ -4,6 +4,7 @@ import {
   mergeCommercialWebNovelStyleDefaults,
   mergeCommercialWebNovelStyleSampleDefaults,
 } from '../writingBibleDefaults'
+import { buildGenericReferenceConfigWritePayload } from '../mcpGenerationSourceModel'
 import { parseListField } from './workspace-editor-fields'
 import { renderStyleSamplePatchPreviewContentView } from './workspace-commercial-result'
 
@@ -427,7 +428,8 @@ export function createWritingBibleHandlers(deps: WritingBibleHandlerDeps) {
         style_sample_bank: Array.isArray(styleSampleBank) ? styleSampleBank : [],
         chapter_benchmark_sample_bank: Array.isArray(chapterBenchmarkSampleBank) ? chapterBenchmarkSampleBank : [],
       }
-      const configRes = await apiClient.put(`/novel/projects/${projectId}/reference-config`, nextReferenceConfig)
+      const referenceConfigWritePayload = buildGenericReferenceConfigWritePayload(nextReferenceConfig)
+      const configRes = await apiClient.put(`/novel/projects/${projectId}/reference-config`, referenceConfigWritePayload)
       setSelectedProject((prev: any) => res.data?.project
         ? { ...res.data.project, reference_config: configRes.data || nextReferenceConfig }
         : (prev ? { ...prev, reference_config: configRes.data || nextReferenceConfig } : prev))
