@@ -282,10 +282,109 @@ describe('generic MCP client', () => {
     }
   })
 
+  test('maps an ECONNRESET error code with a generic message to connection loss', async () => {
+    const callError = Object.assign(new Error('read failed with sk_test_secret'), { code: 'ECONNRESET' })
+    const { capture, factory } = fakeSdkFactory({ callError })
+    const client = createMcpClient({
+      server: { ...BUDA_MCP_SERVER_TEMPLATE, enabled_tools: ['allowed'] },
+      key,
+      sdkFactory: factory,
+    })
+    await client.connect()
+
+    let mappedError: McpError | undefined
+    try {
+      await client.callTool('allowed', {}, { operation: 'read_safe' })
+    } catch (error) {
+      mappedError = error as McpError
+    }
+    await Promise.resolve()
+
+    expect(mappedError).toMatchObject({
+      code: 'MCP_CONNECTION_LOST',
+      message: 'MCP 连接已失效',
+      details: { tool_name: 'allowed' },
+    })
+    expect(Object.keys(mappedError?.details || {})).toEqual(['tool_name'])
+    const serializedError = JSON.stringify({
+      message: mappedError?.message,
+      code: mappedError?.code,
+      details: mappedError?.details,
+    })
+    expect(serializedError).not.toContain('read failed with sk_test_secret')
+    expect(serializedError).not.toContain('ECONNRESET')
+    expect(client.state).toBe('Closed')
+    expect(client.diagnostics().tools).toEqual([])
+    expect(capture.terminated).toBe(true)
+    expect(capture.closed).toBe(true)
+  })
+
+  test('maps a transport-looking MCP tool error to connection loss', async () => {
+    const callError = new McpError('MCP_TOOL_ERROR', 'transport closed unexpectedly with sk_test_secret', {
+      tool_name: 'allowed',
+      reflected_secret: 'sk_test_secret',
+    })
+    const { capture, factory } = fakeSdkFactory({ callError })
+    const client = createMcpClient({
+      server: { ...BUDA_MCP_SERVER_TEMPLATE, enabled_tools: ['allowed'] },
+      key,
+      sdkFactory: factory,
+    })
+    await client.connect()
+
+    let mappedError: McpError | undefined
+    try {
+      await client.callTool('allowed', {}, { operation: 'read_safe' })
+    } catch (error) {
+      mappedError = error as McpError
+    }
+    await Promise.resolve()
+
+    expect(mappedError).toMatchObject({
+      code: 'MCP_CONNECTION_LOST',
+      message: 'MCP 连接已失效',
+      details: { tool_name: 'allowed' },
+    })
+    expect(Object.keys(mappedError?.details || {})).toEqual(['tool_name'])
+    expect(JSON.stringify({
+      message: mappedError?.message,
+      code: mappedError?.code,
+      details: mappedError?.details,
+    })).not.toContain('sk_test_secret')
+    expect(client.state).toBe('Closed')
+    expect(client.diagnostics().tools).toEqual([])
+    expect(capture.terminated).toBe(true)
+    expect(capture.closed).toBe(true)
+  })
+
+  test('keeps an ordinary MCP tool error without closing the client', async () => {
+    const { capture, factory } = fakeSdkFactory({
+      callError: new McpError('MCP_TOOL_ERROR', 'ordinary validation failed', { tool_name: 'allowed' }),
+    })
+    const client = createMcpClient({
+      server: { ...BUDA_MCP_SERVER_TEMPLATE, enabled_tools: ['allowed'] },
+      key,
+      sdkFactory: factory,
+    })
+    await client.connect()
+
+    await expect(client.callTool('allowed', {}, { operation: 'read_safe' })).rejects.toMatchObject({
+      code: 'MCP_TOOL_ERROR',
+      message: 'ordinary validation failed',
+    })
+    expect(client.state).toBe('Ready')
+    expect(client.diagnostics().tools.map(tool => tool.name)).toEqual(['allowed'])
+    expect(capture.terminated).toBeUndefined()
+    expect(capture.closed).toBeUndefined()
+  })
+
   test('caller cancellation takes priority over a transport-looking SDK error', async () => {
     const controller = new AbortController()
     const { capture, factory } = fakeSdkFactory({
-      callError: new McpError('MCP_TOOL_ERROR', 'transport closed unexpectedly'),
+      callError: Object.assign(
+        new McpError('MCP_TOOL_ERROR', 'transport closed unexpectedly'),
+        { errno: 'ECONNRESET' },
+      ),
     })
     const client = createMcpClient({
       server: { ...BUDA_MCP_SERVER_TEMPLATE, enabled_tools: ['allowed'] },

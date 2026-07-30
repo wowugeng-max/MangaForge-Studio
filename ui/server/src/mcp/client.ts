@@ -57,6 +57,29 @@ function isBrokenTransportMessage(message: string) {
     .test(message)
 }
 
+function errorStringField(error: unknown, field: 'code' | 'errno') {
+  if (!error || typeof error !== 'object') return ''
+  try {
+    const value = Reflect.get(error, field)
+    return typeof value === 'string' ? value : ''
+  } catch {
+    return ''
+  }
+}
+
+function isBrokenTransportError(
+  error: unknown,
+  scrubbedMessage: string,
+  scrubText: (value: unknown) => string,
+) {
+  const transportCodes = [
+    scrubText(errorStringField(error, 'code')),
+    scrubText(errorStringField(error, 'errno')),
+  ]
+  return transportCodes.some(code => code.toUpperCase() === 'ECONNRESET')
+    || isBrokenTransportMessage(scrubbedMessage)
+}
+
 function mapConnectionError(error: unknown, scrubText: (value: unknown) => string) {
   const message = errorMessage(error)
   if (/\b(401|403)\b|unauthori[sz]ed|forbidden|authentication/i.test(message)) {
@@ -201,15 +224,16 @@ export class GenericMcpClient {
       if (options.signal?.aborted) {
         throw new McpError('MCP_CANCELLED', 'MCP 工具调用已取消', { tool_name: name })
       }
-      if (error instanceof McpError) throw this.scrubMcpError(error)
       const message = this.scrubber.scrubText(errorMessage(error))
-      if (/\b(401|403)\b|unauthori[sz]ed|forbidden/i.test(message)) {
+      if (!(error instanceof McpError) && /\b(401|403)\b|unauthori[sz]ed|forbidden/i.test(message)) {
         throw new McpError('MCP_AUTH_FAILED', 'MCP 身份验证失败', { tool_name: name })
       }
-      if (isBrokenTransportMessage(message)) {
+      const canBeBrokenTransport = !(error instanceof McpError) || error.code === 'MCP_TOOL_ERROR'
+      if (canBeBrokenTransport && isBrokenTransportError(error, message, this.scrubber.scrubText)) {
         void this.close().catch(() => {})
         throw new McpError('MCP_CONNECTION_LOST', 'MCP 连接已失效', { tool_name: name })
       }
+      if (error instanceof McpError) throw this.scrubMcpError(error)
       if (/abort/i.test(message)) {
         throw new McpError('MCP_CANCELLED', 'MCP 工具调用已取消', { tool_name: name })
       }
