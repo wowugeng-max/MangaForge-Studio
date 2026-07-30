@@ -14,6 +14,10 @@ import { runFromRow } from '../row-mappers'
 import { withNovelDbWrite } from '../sql-rows'
 import type { NovelRunRecord } from '../types'
 import {
+  MAX_EDITOR_REVISION_TIMEOUT_SECONDS,
+  MIN_EDITOR_REVISION_TIMEOUT_SECONDS,
+} from '../editor-revision-runtime-config'
+import {
   isEditorRevisionTaskClosureStatus,
   requiredEditorRevisionTaskAnnotationKey,
 } from './editor-revision-task-closure'
@@ -98,6 +102,20 @@ function assertLinkedTaskClosureCoherent(checkpoint: EditorRevisionCheckpoint) {
   }
 }
 
+function assertRuntimeConfigCoherent(checkpoint: EditorRevisionCheckpoint) {
+  const runtime = checkpoint.runtime_config as any
+  if (runtime === undefined) return
+  const timeoutMs = runtime?.llm_timeout_ms
+  if (!runtime
+    || typeof runtime !== 'object'
+    || !Number.isInteger(timeoutMs)
+    || timeoutMs % 1_000 !== 0
+    || timeoutMs < MIN_EDITOR_REVISION_TIMEOUT_SECONDS * 1_000
+    || timeoutMs > MAX_EDITOR_REVISION_TIMEOUT_SECONDS * 1_000) {
+    checkpointInvalid('editor revision checkpoint runtime config is not canonical')
+  }
+}
+
 export type EditorRevisionCheckpointContext = {
   runStatus?: EditorRevisionRunStatus
 }
@@ -106,6 +124,7 @@ export function assertEditorRevisionCheckpointCoherent(
   checkpoint: EditorRevisionCheckpoint,
   context: EditorRevisionCheckpointContext = {},
 ) {
+  assertRuntimeConfigCoherent(checkpoint)
   assertLinkedTaskClosureCoherent(checkpoint)
   const currentIndex = phaseIndex(checkpoint.phase)
   for (const phase of EDITOR_REVISION_PHASES.slice(0, currentIndex)) {

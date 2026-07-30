@@ -78,6 +78,9 @@ export type EditorRevisionCheckpoint = {
   schema_version: 1
   phase: EditorRevisionPhase
   phases: Record<EditorRevisionPhase, EditorRevisionPhaseState>
+  runtime_config?: {
+    llm_timeout_ms: number
+  }
   candidate?: {
     text: string
     hash: string
