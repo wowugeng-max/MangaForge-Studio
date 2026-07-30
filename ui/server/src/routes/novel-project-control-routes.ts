@@ -3,6 +3,8 @@ import { registerNovelProjectBibleRoutes } from './novel-project-bible-routes'
 import { registerNovelProjectConfigRoutes } from './novel-project-config-routes'
 import { registerNovelProjectDeliveryRoutes } from './novel-project-delivery-routes'
 import { registerNovelProjectInsightRoutes } from './novel-project-insight-routes'
+import { registerNovelMcpBindingRoutes } from './novel-mcp-binding-routes'
+import type { McpRuntime } from '../mcp/runtime'
 
 type ProjectControlRoutesContext = {
   getWorkspace: () => string
@@ -21,6 +23,7 @@ type ProjectControlRoutesContext = {
   buildChapterContextPackage: (workspace: string, project: any, chapter: any, chapters: any[], worldbuilding: any[], characters: any[], outlines: any[], reviews: any[]) => Promise<any>
   buildReferenceUsageReport: (workspace: string, project: any, taskType: string, generatedText?: string) => Promise<any>
   buildStructuralSimilarityReport: (chapter: any, referenceReport: any) => any
+  mcpRuntime?: McpRuntime
 }
 
 export function registerNovelProjectControlRoutes(app: Express, ctx: ProjectControlRoutesContext) {
@@ -28,4 +31,5 @@ export function registerNovelProjectControlRoutes(app: Express, ctx: ProjectCont
   registerNovelProjectBibleRoutes(app, ctx)
   registerNovelProjectInsightRoutes(app, ctx)
   registerNovelProjectConfigRoutes(app, ctx)
+  if (ctx.mcpRuntime) registerNovelMcpBindingRoutes(app, { ...ctx, mcpRuntime: ctx.mcpRuntime })
 }

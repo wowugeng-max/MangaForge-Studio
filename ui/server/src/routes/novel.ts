@@ -26,8 +26,9 @@ import { registerNovelSettingRoutes } from './novel-setting-routes'
 import { getQualityGate, getStoryState } from './novel-route-utils'
 import { registerNovelTruthRoutes } from './novel-truth-routes'
 import { createNovelWritingService } from './novel-writing-service'
+import type { McpRuntime } from '../mcp/runtime'
 
-export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
+export function registerNovelRoutes(app: Express, getWorkspace: () => string, options: { mcpRuntime?: McpRuntime } = {}) {
   registerNovelCoreRoutes(app, getWorkspace)
   registerNovelModuleRoutes(app)
   registerNovelMemoryRoutes(app)
@@ -98,6 +99,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     buildChapterContextPackage: writingService.buildChapterContextPackage,
     buildReferenceUsageReport: referenceService.buildReferenceUsageReport,
     buildStructuralSimilarityReport: referenceService.buildStructuralSimilarityReport,
+    mcpRuntime: options.mcpRuntime,
   })
 
   registerNovelReferenceRoutes(app, {

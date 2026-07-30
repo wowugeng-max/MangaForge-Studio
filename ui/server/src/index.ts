@@ -109,7 +109,7 @@ registerDirectTaskRoutes(app, getWorkspace)
 registerRecommendationRoutes(app, getWorkspace)
 const mcpRuntime = createMcpRuntime(getWorkspace)
 registerMcpRoutes(app, getWorkspace, mcpRuntime)
-const novelLifecycle = registerNovelRoutes(app, getWorkspace)
+const novelLifecycle = registerNovelRoutes(app, getWorkspace, { mcpRuntime })
 registerKnowledgeRoutes(app)
 registerFingerprintContractRoutes(app, getWorkspace)
 
