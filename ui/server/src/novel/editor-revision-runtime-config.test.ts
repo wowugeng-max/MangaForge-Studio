@@ -1,11 +1,16 @@
 import { describe, expect, test } from 'bun:test'
 import { EDITOR_REVISION_PHASES } from '../routes/novel-editor/editor-revision-contract'
 import {
+  DEFAULT_EDITOR_REVISION_STORY_STATE_MAX_TOKENS,
   DEFAULT_EDITOR_REVISION_TIMEOUT_SECONDS,
+  MAX_EDITOR_REVISION_STORY_STATE_MAX_TOKENS,
   MAX_EDITOR_REVISION_TIMEOUT_SECONDS,
+  MIN_EDITOR_REVISION_STORY_STATE_MAX_TOKENS,
   MIN_EDITOR_REVISION_TIMEOUT_SECONDS,
+  normalizeEditorRevisionStoryStateMaxTokens,
   normalizeEditorRevisionTimeoutSeconds,
   resolveEditorRevisionRuntimeConfig,
+  resolveEditorRevisionStoryStateMaxTokens,
   resolveEditorRevisionTimeoutMs,
 } from './editor-revision-runtime-config'
 import { requireCoherentEditorRevisionCheckpoint } from './repos/editor-revision-runs'
@@ -31,7 +36,10 @@ describe('editor revision runtime config', () => {
     expect(normalizeEditorRevisionTimeoutSeconds('600')).toBe(600)
     expect(normalizeEditorRevisionTimeoutSeconds(Number.NaN)).toBe(600)
     expect(normalizeEditorRevisionTimeoutSeconds(Number.POSITIVE_INFINITY)).toBe(600)
-    expect(resolveEditorRevisionRuntimeConfig({ reference_config: {} })).toEqual({ timeout_seconds: 600 })
+    expect(resolveEditorRevisionRuntimeConfig({ reference_config: {} })).toEqual({
+      timeout_seconds: 600,
+      story_state_max_tokens: 9_000,
+    })
   })
 
   test('truncates finite values and clamps them to 60 through 600 seconds', () => {
@@ -42,10 +50,27 @@ describe('editor revision runtime config', () => {
     expect(normalizeEditorRevisionTimeoutSeconds(601)).toBe(600)
     expect(resolveEditorRevisionRuntimeConfig({
       reference_config: { editor_revision: { timeout_seconds: 275 } },
-    })).toEqual({ timeout_seconds: 275 })
+    })).toEqual({ timeout_seconds: 275, story_state_max_tokens: 9_000 })
     expect(resolveEditorRevisionTimeoutMs({
       reference_config: { editor_revision: { timeout_seconds: 275 } },
     })).toBe(275_000)
+  })
+
+  test('defaults and clamps exact Story State output tokens', () => {
+    expect(DEFAULT_EDITOR_REVISION_STORY_STATE_MAX_TOKENS).toBe(9_000)
+    expect(MIN_EDITOR_REVISION_STORY_STATE_MAX_TOKENS).toBe(1_000)
+    expect(MAX_EDITOR_REVISION_STORY_STATE_MAX_TOKENS).toBe(262_144)
+    expect(normalizeEditorRevisionStoryStateMaxTokens(undefined)).toBe(9_000)
+    expect(normalizeEditorRevisionStoryStateMaxTokens('12000')).toBe(9_000)
+    expect(normalizeEditorRevisionStoryStateMaxTokens(Number.NaN)).toBe(9_000)
+    expect(normalizeEditorRevisionStoryStateMaxTokens(Number.POSITIVE_INFINITY)).toBe(9_000)
+    expect(normalizeEditorRevisionStoryStateMaxTokens(Number.NEGATIVE_INFINITY)).toBe(9_000)
+    expect(normalizeEditorRevisionStoryStateMaxTokens(999)).toBe(1_000)
+    expect(normalizeEditorRevisionStoryStateMaxTokens(12_345.9)).toBe(12_345)
+    expect(normalizeEditorRevisionStoryStateMaxTokens(300_000)).toBe(262_144)
+    expect(resolveEditorRevisionStoryStateMaxTokens({
+      reference_config: { editor_revision: { story_state_max_tokens: 64_000 } },
+    })).toBe(64_000)
   })
 
   test('accepts an absent or canonical millisecond timeout snapshot', () => {
