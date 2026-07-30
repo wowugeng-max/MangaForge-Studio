@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { withMcpWorkspaceMutation } from './workspace-coordinator'
+import { assertMcpWorkspaceMutationHeld, withMcpWorkspaceMutation } from './workspace-coordinator'
 
 test('serializes mutations for the same workspace', async () => {
   const events: string[] = []
@@ -48,4 +48,71 @@ test('allows nested mutations for the same workspace without deadlock', async ()
   })
 
   expect(events).toEqual(['outer entered', 'nested entered', 'outer finished'])
+})
+
+test('invalidates ownership inherited by a detached async descendant after release', async () => {
+  const workspace = '/tmp/mcp-coordinator-detached-test'
+  const events: string[] = []
+  let openDetachedGate!: () => void
+  let signalDetachedChecked!: () => void
+  let signalSecondEntered!: () => void
+  let releaseSecond!: () => void
+  const detachedGate = new Promise<void>(resolve => {
+    openDetachedGate = resolve
+  })
+  const detachedChecked = new Promise<void>(resolve => {
+    signalDetachedChecked = resolve
+  })
+  const secondEntered = new Promise<void>(resolve => {
+    signalSecondEntered = resolve
+  })
+  const secondMayFinish = new Promise<void>(resolve => {
+    releaseSecond = resolve
+  })
+  let detached!: Promise<void>
+  let staleAuthorizationRejected = false
+  let detachedEntered = false
+
+  await withMcpWorkspaceMutation(workspace, async () => {
+    events.push('first entered')
+    detached = (async () => {
+      await detachedGate
+      try {
+        assertMcpWorkspaceMutationHeld(workspace)
+      } catch {
+        staleAuthorizationRejected = true
+      }
+      signalDetachedChecked()
+      await withMcpWorkspaceMutation(workspace, async () => {
+        detachedEntered = true
+        events.push('detached entered')
+      })
+    })()
+    events.push('first finished')
+  })
+
+  const second = withMcpWorkspaceMutation(workspace, async () => {
+    events.push('second entered')
+    signalSecondEntered()
+    await secondMayFinish
+    events.push('second finished')
+  })
+  await secondEntered
+
+  openDetachedGate()
+  await detachedChecked
+  const detachedEnteredBeforeSecondRelease = detachedEntered
+
+  releaseSecond()
+  await Promise.all([second, detached])
+
+  expect(staleAuthorizationRejected).toBe(true)
+  expect(detachedEnteredBeforeSecondRelease).toBe(false)
+  expect(events).toEqual([
+    'first entered',
+    'first finished',
+    'second entered',
+    'second finished',
+    'detached entered',
+  ])
 })

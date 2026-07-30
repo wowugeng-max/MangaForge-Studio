@@ -10,8 +10,12 @@ type WorkspaceLock = {
   waiters: Waiter[]
 }
 
+type WorkspaceLease = {
+  active: boolean
+}
+
 const locks = new Map<string, WorkspaceLock>()
-const held = new AsyncLocalStorage<Set<string>>()
+const held = new AsyncLocalStorage<Map<string, WorkspaceLease>>()
 
 function keyForWorkspace(activeWorkspace: string) {
   return resolve(activeWorkspace)
@@ -44,19 +48,21 @@ export async function withMcpWorkspaceMutation<T>(
 ): Promise<T> {
   const key = keyForWorkspace(activeWorkspace)
   const active = held.getStore()
-  if (active?.has(key)) return mutation()
+  if (active?.get(key)?.active) return mutation()
   const release = await acquire(key)
-  const next = new Set(active || [])
-  next.add(key)
+  const lease = { active: true }
+  const next = new Map(active || [])
+  next.set(key, lease)
   try {
     return await held.run(next, mutation)
   } finally {
+    lease.active = false
     release()
   }
 }
 
 export function assertMcpWorkspaceMutationHeld(activeWorkspace: string) {
-  if (!held.getStore()?.has(keyForWorkspace(activeWorkspace))) {
+  if (!held.getStore()?.get(keyForWorkspace(activeWorkspace))?.active) {
     throw new Error('MCP workspace mutation coordinator is not held')
   }
 }
