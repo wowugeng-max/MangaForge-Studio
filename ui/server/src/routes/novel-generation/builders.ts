@@ -632,6 +632,13 @@ export function standaloneProseServiceStageLabel(key: string) {
     humanize_postprocess: 'R76人味后处理',
     opening_handoff_bridge: '开篇强交接桥接',
     zhuque_fast: '朱雀验证快路径',
+    mcp_connect: '连接 MCP 服务',
+    mcp_capabilities: '检查 MCP 工具能力',
+    mcp_drive_sync: '同步 Agent Drive',
+    mcp_session_create: '创建远端章节 Session',
+    mcp_session_wait: '等待远端 Agent',
+    mcp_extract: '提取候选正文',
+    quality_pipeline: '进入 MangaForge 质检',
   }
   return labels[key] || key
 }
@@ -653,6 +660,11 @@ export function standaloneProseServiceStageDetail(payload: any = {}) {
 export function standaloneProseServiceErrorStatus(error: any) {
   const code = String(error?.code || error?.error_code || '')
   const message = String(error?.message || error || '')
+  if (code === 'MCP_AUTH_FAILED') return 401
+  if (code === 'MCP_BINDING_INVALID') return 412
+  if (code === 'MCP_AGENT_BUSY') return 409
+  if (code === 'MCP_INPUT_REQUIRED') return 422
+  if (code === 'MCP_GENERATION_TIMEOUT' || code === 'MCP_CONNECT_TIMEOUT') return 504
   if (code.includes('PREFLIGHT') || code.includes('LAUNCH_GATE') || code.includes('SCENE_CARDS')) return 412
   if (code.includes('REFERENCE_SAFETY') || code.includes('QUALITY') || code.includes('APPROVAL')) return 409
   if (message.includes('project not found') || message.includes('chapter not found')) return 404
@@ -678,4 +690,3 @@ export function buildStandaloneProseServiceOptions(body: any = {}, runtime: {
   // production_mode=zhuque_fast | draft_humanize_store | zhuque_validate or zhuque_fast:true
   return applyZhuqueFastPathOptions(merged)
 }
-

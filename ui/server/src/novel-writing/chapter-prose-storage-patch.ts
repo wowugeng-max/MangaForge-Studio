@@ -8,6 +8,7 @@ export type ChapterProseStoragePatchInput = {
   finalSceneBreakdown: any
   ohStoryDeliveryReceipts: any
   postDraftDirector?: any
+  generationSourceProvenance?: any
   proseAdmission?: {
     status: 'accepted' | 'accepted_with_warnings'
     quality_score: number | null
@@ -223,6 +224,9 @@ export function buildChapterProseStoragePatch(input: ChapterProseStoragePatchInp
   if (input.postDraftDirector !== undefined) {
     rawPayload.oh_story_director = input.postDraftDirector
     rawPayload.ohStoryDirector = input.postDraftDirector
+  }
+  if (input.generationSourceProvenance !== undefined) {
+    rawPayload.prose_generation_source = input.generationSourceProvenance
   }
   if (input.proseAdmission !== undefined) {
     rawPayload.prose_admission = input.proseAdmission

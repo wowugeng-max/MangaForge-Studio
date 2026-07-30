@@ -284,7 +284,7 @@ export function createGenerateChapterForGroupMethods(deps: {
   explainReferenceSafety: (...args: any[]) => any
   getReferenceMigrationPlanForChapter: (...args: any[]) => any
   getReferenceSafetyDecision: (...args: any[]) => any
-  generateNovelChapterProse: (...args: any[]) => any
+  generationSourceResolver: { resolve: (project: any, options?: any) => any }
   storeChapterProseMemory: (...args: any[]) => any
   mergeChapterRawPayload: (...args: any[]) => any
   buildChapterContextPackage: (...args: any[]) => any
@@ -312,7 +312,7 @@ export function createGenerateChapterForGroupMethods(deps: {
   const explainReferenceSafety = deps.explainReferenceSafety
   const getReferenceMigrationPlanForChapter = deps.getReferenceMigrationPlanForChapter
   const getReferenceSafetyDecision = deps.getReferenceSafetyDecision
-  const generateNovelChapterProse = deps.generateNovelChapterProse
+  const generationSourceResolver = deps.generationSourceResolver
   const storeChapterProseMemory = deps.storeChapterProseMemory
   const mergeChapterRawPayload = deps.mergeChapterRawPayload
   const buildChapterContextPackage = deps.buildChapterContextPackage
@@ -470,7 +470,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     preferredModelId,
     options,
     getStageModelId,
-    generateNovelChapterProse,
+    generationSourceResolver,
     getReferenceMigrationPlanForChapter,
     throwIfChapterGenerationAborted,
     onStage,

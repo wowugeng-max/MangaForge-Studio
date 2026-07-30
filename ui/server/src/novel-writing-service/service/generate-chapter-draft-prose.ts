@@ -43,6 +43,7 @@ import {
 import {
   selectProseForChapter,
 } from './runtime-helpers'
+import type { createGenerationSourceResolver } from '../generation-source/create-generation-source'
 
 export async function runGenerateChapterDraftProse(args: {
   activeWorkspace: string
@@ -58,7 +59,7 @@ export async function runGenerateChapterDraftProse(args: {
   preferredModelId: any
   options: any
   getStageModelId: (...a: any[]) => any
-  generateNovelChapterProse: (...a: any[]) => any
+  generationSourceResolver: ReturnType<typeof createGenerationSourceResolver>
   getReferenceMigrationPlanForChapter: (...a: any[]) => any
   throwIfChapterGenerationAborted: () => void
   onStage: (...a: any[]) => any
@@ -87,7 +88,7 @@ export async function runGenerateChapterDraftProse(args: {
     preferredModelId,
     options,
     getStageModelId,
-    generateNovelChapterProse,
+    generationSourceResolver,
     getReferenceMigrationPlanForChapter,
     throwIfChapterGenerationAborted,
     onStage,
@@ -114,43 +115,66 @@ const generationContractWithFamily = generationContract?.version === 'prose_gene
     }
   : attachModelFamilyToContextPackage(generationContract || contextPackageWithFamily, runtimeModel)
 const compiledPrompt = compileParagraphProseContext(project, generationContractWithFamily, migrationPlan, chapter)
+const sourceResolution = generationSourceResolver.resolve(project, options)
 await onStage('draft', {
   status: 'running',
   prompt_diagnostics: compiledPrompt.diagnostics,
   model_family: modelFamilyStrategy.family,
   model_write_mode: modelFamilyStrategy.write_mode,
   model_name: runtimeModel.model_name || null,
+  generation_source: sourceResolution.resolved_type,
 })
-const draftResult = await generateNovelChapterProse(project, chapter, {
-  worldbuilding,
-  characters,
-  outline: outlines,
-  prompt: String(options.prompt || ''),
-  prevChapters,
-  contextPackage: contextPackageWithFamily,
-  migrationPlan,
+const draftResult = await sourceResolution.source.generateProse({
+  requestId: String(options.request_id || options.requestId || crypto.randomUUID()),
+  activeWorkspace,
+  project,
+  chapter,
+  chapterNo: Number(chapter.chapter_no || 0),
   paragraphTask: compiledPrompt.prompt,
   promptDiagnostics: compiledPrompt.diagnostics,
-  boundedProseContract: true,
+  contextPackage: contextPackageWithFamily,
+  modelContext: {
+    worldbuilding,
+    characters,
+    outline: outlines,
+    prompt: String(options.prompt || ''),
+    prevChapters,
+    migrationPlan,
+    modelFamilyStrategy,
+    llmTimeoutMs: options.llmTimeoutMs,
+  },
+  modelId: draftModelId,
   maxTokens: proseMaxTokensForModelFamily(wordTarget, modelFamilyStrategy),
   temperature: modelFamilyStrategy.temperature,
-  modelFamilyStrategy,
-  abortSignal: options.abortSignal,
-  llmTimeoutMs: options.llmTimeoutMs,
-} as any, {
-  activeWorkspace,
-  modelId: String(draftModelId || ''),
-  skipMemoryStore: true,
+  signal: options.abortSignal,
+  onProgress: async event => {
+    const { stage, ...payload } = event
+    await onStage(stage, payload)
+  },
 })
+if (sourceResolution.resolved_type === 'mcp') {
+  await onStage('quality_pipeline', { status: 'success', source: 'mcp' })
+}
 assertCompleteProseTransportResult(draftResult, 'PROSE_DRAFT_TRUNCATED')
 const draftPromptDiagnostics = {
   ...compiledPrompt.diagnostics,
+  generation_source: {
+    configured_type: sourceResolution.configured_type,
+    resolved_type: sourceResolution.resolved_type,
+    override: sourceResolution.override,
+    adapter_id: (draftResult as any)?.adapter_id || null,
+    agent_id: (draftResult as any)?.agent_id || null,
+    session_id: (draftResult as any)?.session_id || null,
+    snapshot_hash: (draftResult as any)?.snapshot_hash || null,
+  },
   model_usage: (draftResult as any)?.prose_prompt_diagnostics?.model_usage
     || (draftResult as any)?.usage
     || (draftResult as any)?.raw?.usage
     || null,
 }
-const resultPayload = getNovelPayload(draftResult)
+const resultPayload = Array.isArray((draftResult as any)?.prose_chapters)
+  ? draftResult
+  : getNovelPayload(draftResult)
 const draftProseChapters = Array.isArray(resultPayload?.prose_chapters)
   ? resultPayload.prose_chapters
   : Array.isArray(resultPayload?.proseChapters)

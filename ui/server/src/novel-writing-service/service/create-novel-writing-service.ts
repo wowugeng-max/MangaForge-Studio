@@ -12,6 +12,10 @@ import {
 } from '../../novel'
 import type { NovelProductionService } from '../../routes/novel-production-service'
 import type { NovelReferenceService } from '../../routes/novel-reference-service'
+import type { McpRuntime } from '../../mcp/runtime'
+import { createGenerationSourceResolver } from '../generation-source/create-generation-source'
+import { McpGenerationSource } from '../generation-source/mcp-generation-source'
+import { ModelGenerationSource } from '../generation-source/model-generation-source'
 import { formatAdmissionError } from '../quality/admission-error'
 import { refreshFollowingChapterSerialStoryStateReadiness } from '../quality/state-tracking-contracts'
 import { createAutoRepairChapterPreflightMethods } from './auto-repair-preflight-methods'
@@ -58,6 +62,7 @@ export function createNovelWritingService(ctx: {
   production: NovelProductionService
   reference: NovelReferenceService
   runtime?: NovelWritingRuntime
+  mcpRuntime?: McpRuntime
 }) {
   const trustedWordTargetContractionBudgets = new WeakSet<object>()
   const executeAgent = ctx.runtime?.executeAgent || executeNovelAgent
@@ -119,6 +124,10 @@ export function createNovelWritingService(ctx: {
 
 
   const generateNovelChapterProse = ctx.runtime?.generateChapterProse || defaultGenerateNovelChapterProse
+  const generationSourceResolver = createGenerationSourceResolver({
+    modelSource: new ModelGenerationSource(generateNovelChapterProse),
+    ...(ctx.mcpRuntime ? { mcpSource: new McpGenerationSource(ctx.mcpRuntime) } : {}),
+  })
   const storeChapterProseMemory = ctx.runtime?.storeChapterProseMemory || defaultStoreNovelChapterProseMemory
   const mergeChapterRawPayload = ctx.runtime?.mergeChapterRawPayload || mergeNovelChapterRawPayload
   const buildParagraphProseContext = buildParagraphProseContextFromModule
@@ -160,7 +169,7 @@ export function createNovelWritingService(ctx: {
     explainReferenceSafety: (...args: any[]) => ctx.reference.explainReferenceSafety(...args),
     getReferenceMigrationPlanForChapter: (...args: any[]) => ctx.reference.getReferenceMigrationPlanForChapter(...args),
     getReferenceSafetyDecision: (...args: any[]) => ctx.reference.getReferenceSafetyDecision(...args),
-    generateNovelChapterProse,
+    generationSourceResolver,
     storeChapterProseMemory,
     mergeChapterRawPayload,
     buildChapterContextPackage,

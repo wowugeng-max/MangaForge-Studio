@@ -15,6 +15,7 @@ export type GenerationSourceProgress = {
   detail?: string
   elapsed_ms?: number
   session_id?: string
+  snapshot_hash?: string
 }
 
 export type BudaDriveInput = {

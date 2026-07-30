@@ -159,7 +159,13 @@ export class BudaAdapter implements ProseMcpAdapter {
         recentChapters: input.drive.recentChapters,
       })
       const sync = await syncBudaDriveSnapshot({ client: this.client, tools, agentId: input.agentId, snapshot, signal: input.signal })
-      await progress('mcp_drive_sync', 'success', `已同步 ${sync.uploaded_paths.length} 个权威快照文件`)
+      await input.onProgress?.({
+        stage: 'mcp_drive_sync',
+        status: 'success',
+        detail: `已同步 ${sync.uploaded_paths.length} 个权威快照文件`,
+        elapsed_ms: Date.now() - startedAt,
+        snapshot_hash: snapshot.snapshotHash,
+      })
 
       await progress('mcp_session_create')
       const created = mcpResultData(await this.client.callTool(tools.createSession, {

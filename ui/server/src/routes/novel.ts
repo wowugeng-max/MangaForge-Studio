@@ -42,6 +42,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string, op
     getProject,
     production: productionService,
     reference: referenceService,
+    mcpRuntime: options.mcpRuntime,
   })
   const runExecutionService = createNovelRunExecutionService({
     getProject,
