@@ -342,7 +342,10 @@ export function buildStandaloneProseServiceErrorPayload(serviceError: any, pipel
   if (typeof residualText === 'string') {
     scrubbed.chapter_text = residualText
     scrubbed.finalText = residualText
-    if (scrubbed.details && typeof scrubbed.details === 'object') scrubbed.details.chapter_text = residualText
+    if (scrubbed.details && typeof scrubbed.details === 'object') {
+      scrubbed.details.chapter_text = residualText
+      if (serviceError?.details?.chapterText === residualText) scrubbed.details.chapterText = residualText
+    }
   }
   return scrubbed
 }

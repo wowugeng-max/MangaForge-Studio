@@ -68,4 +68,43 @@ describe('MCP standalone prose route helpers', () => {
       config_snapshot: configSnapshot,
     })
   })
+
+  test('preserves the exact eligible details.chapterText residual alias without restoring unrelated secrets', () => {
+    const residualLiteral = 'sk_test_eligible_residual_alias_literal'
+    const residualText = `${'仅 blocked-invalid 恢复可保留的残余正文。'.repeat(24)} ${residualLiteral}`
+    const unrelatedSecret = 'sk_test_unrelated_builder_metadata'
+    const payload = buildStandaloneProseServiceErrorPayload({
+      code: 'MCP_SESSION_FAILED',
+      message: `Authorization: Bearer ${unrelatedSecret}`,
+      admission_status: 'blocked_invalid',
+      details: {
+        chapterText: residualText,
+        unrelated: `Cookie: session=synthetic-unrelated-builder-cookie`,
+        nested: { authorization: unrelatedSecret, safe: 'keep-nested' },
+        safe: 'keep-details',
+      },
+    }, [{ stage: 'mcp_extract', status: 'failed' }], { generation_source: 'mcp' }, {
+      chapter_id: 92,
+      chapter_no: 13,
+    })
+
+    expect(payload.chapter_text).toBe(residualText)
+    expect(payload.finalText).toBe(residualText)
+    expect(payload.details.chapter_text).toBe(residualText)
+    expect(payload.details.safe).toBe('keep-details')
+    expect(payload.details.nested.safe).toBe('keep-nested')
+    const metadataOnly = {
+      ...payload,
+      chapter_text: '[PROSE]',
+      finalText: '[PROSE]',
+      details: {
+        ...payload.details,
+        chapter_text: '[PROSE]',
+        chapterText: '[PROSE]',
+      },
+    }
+    expect(JSON.stringify(metadataOnly)).not.toContain(unrelatedSecret)
+    expect(JSON.stringify(metadataOnly)).not.toContain('synthetic-unrelated-builder-cookie')
+    expect(payload.details.chapterText).toBe(residualText)
+  })
 })
