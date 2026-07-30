@@ -2,6 +2,12 @@ import express from 'express'
 import cors from 'cors'
 import { readFileSync } from 'fs'
 import {
+  assertLoopbackListenHost,
+  createLocalOriginGuard,
+  isTrustedLocalOrigin,
+  localCorsOptions,
+} from './local-http-security'
+import {
   createActiveWorkspaceState,
   ensureWorkspaceStructure,
   getDefaultWorkspace,
@@ -78,10 +84,11 @@ function loadEnvFile(path: string) {
 loadEnvFile('/Users/ruiyaosong/MangaForge-Studio/ui/server/.env')
 
 const port = Number(process.env.PORT || 8787)
-const host = process.env.HOST || 'localhost'
+const host = assertLoopbackListenHost(process.env.HOST || 'localhost')
 
 const app = express()
-app.use(cors())
+app.use(createLocalOriginGuard())
+app.use(cors(localCorsOptions))
 app.use(express.json({ limit: '5mb' }))
 
 const workspaceState = createActiveWorkspaceState(getDefaultWorkspace())
@@ -197,6 +204,11 @@ async function listen() {
   attachServerCloseShutdownHandler({ server: listeningServer, shutdown: requestShutdown })
 
   listeningServer.on('upgrade', (req, socket) => {
+    const origin = typeof req.headers.origin === 'string' ? req.headers.origin : undefined
+    if (!isTrustedLocalOrigin(origin)) {
+      socket.end('HTTP/1.1 403 Forbidden\r\n\r\n')
+      return
+    }
     const pathname = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`).pathname
     if (!pathname.startsWith('/api/ws/')) {
       socket.end('HTTP/1.1 404 Not Found\r\n\r\n')
