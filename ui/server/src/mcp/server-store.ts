@@ -1,7 +1,8 @@
-import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { coerceBoolean } from '../boolean-utils'
+import { readJsonArrayFailClosed, writeJsonArrayAtomic } from './atomic-json-store'
 import type { McpServerRecord } from './types'
+import { assertMcpWorkspaceMutationHeld, withMcpWorkspaceMutation } from './workspace-coordinator'
 
 export const BUDA_MCP_SERVER_TEMPLATE: McpServerRecord = Object.freeze({
   id: 'buda',
@@ -64,31 +65,36 @@ export function normalizeMcpServer(raw: Partial<McpServerRecord> & Record<string
 }
 
 export async function readMcpServers(activeWorkspace: string): Promise<McpServerRecord[]> {
-  try {
-    const parsed = JSON.parse(await readFile(getMcpServersPath(activeWorkspace), 'utf8'))
-    return Array.isArray(parsed) ? parsed.map(item => normalizeMcpServer(item || {})).filter(item => item.id) : []
-  } catch {
-    return []
-  }
+  const parsed = await readJsonArrayFailClosed(getMcpServersPath(activeWorkspace))
+  return parsed.map(item => normalizeMcpServer((item || {}) as any)).filter(item => item.id)
 }
 
-export async function writeMcpServers(activeWorkspace: string, servers: McpServerRecord[]) {
-  await writeFile(getMcpServersPath(activeWorkspace), `${JSON.stringify(servers.map(item => normalizeMcpServer(item)), null, 2)}\n`, 'utf8')
+async function writeMcpServersUnlocked(activeWorkspace: string, servers: McpServerRecord[]) {
+  assertMcpWorkspaceMutationHeld(activeWorkspace)
+  await writeJsonArrayAtomic(getMcpServersPath(activeWorkspace), servers.map(item => normalizeMcpServer(item)))
 }
 
-export async function upsertMcpServer(activeWorkspace: string, input: Partial<McpServerRecord> & Record<string, unknown>) {
-  const server = normalizeMcpServer(input)
-  const servers = await readMcpServers(activeWorkspace)
-  const index = servers.findIndex(item => item.id === server.id)
-  if (index >= 0) servers[index] = server
-  else servers.push(server)
-  await writeMcpServers(activeWorkspace, servers)
-  return server
+export function writeMcpServers(activeWorkspace: string, servers: McpServerRecord[]) {
+  return withMcpWorkspaceMutation(activeWorkspace, () => writeMcpServersUnlocked(activeWorkspace, servers))
 }
 
-export async function deleteMcpServer(activeWorkspace: string, id: string) {
-  const servers = await readMcpServers(activeWorkspace)
-  const next = servers.filter(item => item.id !== id)
-  await writeMcpServers(activeWorkspace, next)
-  return next.length !== servers.length
+export function upsertMcpServer(activeWorkspace: string, input: Partial<McpServerRecord> & Record<string, unknown>) {
+  return withMcpWorkspaceMutation(activeWorkspace, async () => {
+    const server = normalizeMcpServer(input)
+    const servers = await readMcpServers(activeWorkspace)
+    const index = servers.findIndex(item => item.id === server.id)
+    if (index >= 0) servers[index] = server
+    else servers.push(server)
+    await writeMcpServersUnlocked(activeWorkspace, servers)
+    return server
+  })
+}
+
+export function deleteMcpServer(activeWorkspace: string, id: string) {
+  return withMcpWorkspaceMutation(activeWorkspace, async () => {
+    const servers = await readMcpServers(activeWorkspace)
+    const next = servers.filter(item => item.id !== id)
+    await writeMcpServersUnlocked(activeWorkspace, next)
+    return next.length !== servers.length
+  })
 }

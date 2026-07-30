@@ -1,7 +1,8 @@
-import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { coerceBoolean } from '../boolean-utils'
+import { readJsonArrayFailClosed, writeJsonArrayAtomic } from './atomic-json-store'
 import type { McpKeyRecord, PublicMcpKeyRecord } from './types'
+import { assertMcpWorkspaceMutationHeld, withMcpWorkspaceMutation } from './workspace-coordinator'
 
 export function getMcpKeysPath(activeWorkspace: string) {
   return join(activeWorkspace, 'mcp-keys.json')
@@ -36,46 +37,52 @@ export function toPublicMcpKey(record: McpKeyRecord): PublicMcpKeyRecord {
 }
 
 export async function readMcpKeys(activeWorkspace: string): Promise<McpKeyRecord[]> {
-  try {
-    const parsed = JSON.parse(await readFile(getMcpKeysPath(activeWorkspace), 'utf8'))
-    return Array.isArray(parsed) ? parsed.map(item => normalizeMcpKey(item || {})).filter(item => item.id > 0) : []
-  } catch {
-    return []
-  }
+  const parsed = await readJsonArrayFailClosed(getMcpKeysPath(activeWorkspace))
+  return parsed.map(item => normalizeMcpKey((item || {}) as any)).filter(item => item.id > 0)
 }
 
-export async function writeMcpKeys(activeWorkspace: string, keys: McpKeyRecord[]) {
-  await writeFile(getMcpKeysPath(activeWorkspace), `${JSON.stringify(keys.map(normalizeMcpKey), null, 2)}\n`, 'utf8')
+async function writeMcpKeysUnlocked(activeWorkspace: string, keys: McpKeyRecord[]) {
+  assertMcpWorkspaceMutationHeld(activeWorkspace)
+  await writeJsonArrayAtomic(getMcpKeysPath(activeWorkspace), keys.map(normalizeMcpKey))
 }
 
-export async function createMcpKey(activeWorkspace: string, input: Partial<McpKeyRecord> & Pick<McpKeyRecord, 'mcp_server_id' | 'key'>) {
-  const keys = await readMcpKeys(activeWorkspace)
-  const nextId = keys.reduce((maximum, item) => Math.max(maximum, item.id), 0) + 1
-  const record = normalizeMcpKey({ ...input, id: nextId })
-  keys.push(record)
-  await writeMcpKeys(activeWorkspace, keys)
-  return record
+export function writeMcpKeys(activeWorkspace: string, keys: McpKeyRecord[]) {
+  return withMcpWorkspaceMutation(activeWorkspace, () => writeMcpKeysUnlocked(activeWorkspace, keys))
 }
 
-export async function updateMcpKey(activeWorkspace: string, id: number, input: Partial<McpKeyRecord>) {
-  const keys = await readMcpKeys(activeWorkspace)
-  const index = keys.findIndex(item => item.id === id)
-  if (index < 0) return null
-  const previous = keys[index]!
-  const record = normalizeMcpKey({
-    ...previous,
-    ...input,
-    id,
-    key: input.key === undefined || String(input.key).trim() === '' ? previous.key : input.key,
+export function createMcpKey(activeWorkspace: string, input: Partial<McpKeyRecord> & Pick<McpKeyRecord, 'mcp_server_id' | 'key'>) {
+  return withMcpWorkspaceMutation(activeWorkspace, async () => {
+    const keys = await readMcpKeys(activeWorkspace)
+    const nextId = keys.reduce((maximum, item) => Math.max(maximum, item.id), 0) + 1
+    const record = normalizeMcpKey({ ...input, id: nextId })
+    await writeMcpKeysUnlocked(activeWorkspace, [...keys, record])
+    return record
   })
-  keys[index] = record
-  await writeMcpKeys(activeWorkspace, keys)
-  return record
 }
 
-export async function deleteMcpKey(activeWorkspace: string, id: number) {
-  const keys = await readMcpKeys(activeWorkspace)
-  const next = keys.filter(item => item.id !== id)
-  await writeMcpKeys(activeWorkspace, next)
-  return next.length !== keys.length
+export function updateMcpKey(activeWorkspace: string, id: number, input: Partial<McpKeyRecord>) {
+  return withMcpWorkspaceMutation(activeWorkspace, async () => {
+    const keys = await readMcpKeys(activeWorkspace)
+    const index = keys.findIndex(item => item.id === id)
+    if (index < 0) return null
+    const previous = keys[index]!
+    const record = normalizeMcpKey({
+      ...previous,
+      ...input,
+      id,
+      key: input.key === undefined || String(input.key).trim() === '' ? previous.key : input.key,
+    })
+    keys[index] = record
+    await writeMcpKeysUnlocked(activeWorkspace, keys)
+    return record
+  })
+}
+
+export function deleteMcpKey(activeWorkspace: string, id: number) {
+  return withMcpWorkspaceMutation(activeWorkspace, async () => {
+    const keys = await readMcpKeys(activeWorkspace)
+    const next = keys.filter(item => item.id !== id)
+    await writeMcpKeysUnlocked(activeWorkspace, next)
+    return next.length !== keys.length
+  })
 }

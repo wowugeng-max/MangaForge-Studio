@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, readFile, rm } from 'fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import type { McpError } from './errors'
 import {
   createMcpKey,
   readMcpKeys,
@@ -12,6 +13,7 @@ import {
   BUDA_MCP_SERVER_TEMPLATE,
   normalizeMcpServer,
   readMcpServers,
+  upsertMcpServer,
   writeMcpServers,
 } from './server-store'
 
@@ -50,6 +52,16 @@ describe('MCP server store', () => {
 
     expect(await readMcpServers(workspace)).toEqual([BUDA_MCP_SERVER_TEMPLATE])
     expect(JSON.parse(await readFile(join(workspace, 'mcp-servers.json'), 'utf8'))).toHaveLength(1)
+  })
+
+  test('preserves all concurrent server upserts', async () => {
+    const workspace = await temporaryWorkspace()
+    await Promise.all(Array.from({ length: 12 }, (_, index) => upsertMcpServer(workspace, {
+      ...BUDA_MCP_SERVER_TEMPLATE,
+      id: 'server-' + index,
+      display_name: 'Server ' + index,
+    })))
+    expect(await readMcpServers(workspace)).toHaveLength(12)
   })
 })
 
@@ -92,5 +104,32 @@ describe('MCP key store', () => {
 
     await updateMcpKey(workspace, created.id, { key: 'sk_replaced' })
     expect((await readMcpKeys(workspace))[0]?.key).toBe('sk_replaced')
+  })
+
+  test('serializes concurrent key allocation without duplicate IDs or lost records', async () => {
+    const workspace = await temporaryWorkspace()
+    const created = await Promise.all(Array.from({ length: 20 }, (_, index) => createMcpKey(workspace, {
+      mcp_server_id: 'buda',
+      key: 'sk_concurrent_' + index,
+      description: '账号' + index,
+    })))
+    expect(new Set(created.map(item => item.id)).size).toBe(20)
+    expect(await readMcpKeys(workspace)).toHaveLength(20)
+  })
+
+  test('reports corrupt JSON and never replaces it with an empty collection', async () => {
+    const workspace = await temporaryWorkspace()
+    const path = join(workspace, 'mcp-keys.json')
+    await writeFile(path, '{broken', 'utf8')
+
+    await expect(readMcpKeys(workspace)).rejects.toMatchObject({
+      code: 'MCP_STORE_CORRUPT',
+    } satisfies Partial<McpError>)
+    await expect(createMcpKey(workspace, {
+      mcp_server_id: 'buda',
+      key: 'sk_must_not_write',
+      description: '不得覆盖',
+    })).rejects.toMatchObject({ code: 'MCP_STORE_CORRUPT' })
+    expect(await readFile(path, 'utf8')).toBe('{broken')
   })
 })

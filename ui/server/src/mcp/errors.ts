@@ -12,6 +12,8 @@ export type McpErrorCode =
   | 'MCP_GENERATION_TIMEOUT'
   | 'MCP_CANCELLED'
   | 'MCP_EMPTY_PROSE'
+  | 'MCP_STORE_CORRUPT'
+  | 'MCP_STORE_IO_FAILED'
 
 export class McpError extends Error {
   readonly error_code: McpErrorCode
