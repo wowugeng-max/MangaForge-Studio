@@ -26,6 +26,7 @@ import { executeNovelAgent } from '../../llm'
 import { buildCurrentChapterPlanAlignment } from '../../novel-writing/chapter-plan-from-prose'
 import { countProseChars } from '../../novel-writing/word-target'
 import { compactPreparedStoryStateForRecovery } from '../../novel-writing-service/service/story-state-machine-update'
+import { resolveEditorRevisionTimeoutMs } from '../../novel/editor-revision-runtime-config'
 import { buildLLMResultDiagnostics, extractLLMText, getNovelPayload } from '../novel-route-utils'
 import {
   buildChapterDeliveryRiskBrief,
@@ -56,7 +57,6 @@ import {
   type SingleChapterStoryStateReceipt,
 } from './single-chapter-story-state'
 
-const LLM_TIMEOUT_MS = 180_000
 const DIAGNOSTIC_CANDIDATE_LIMIT = 60_000
 const RECOVERY_POLL_MS = 1_000
 const RECOVERY_RETRY_MAX_MS = 30_000
@@ -555,6 +555,30 @@ export function createEditorRevisionWorker(
     return { fresh, checkpoint: parseCheckpoint(fresh.output_ref, fresh.status) }
   }
 
+  async function resolveRunLlmTimeoutMs(
+    input: EditorRevisionRunInput,
+    runId: number,
+    project: any,
+    controller: AbortController,
+    lease: LeaseState,
+  ) {
+    const loaded = await phaseCheckpoint(input, runId, controller, lease)
+    const stored = loaded.checkpoint.runtime_config?.llm_timeout_ms
+    if (stored !== undefined) return stored
+    const llmTimeoutMs = resolveEditorRevisionTimeoutMs(project)
+    loaded.checkpoint.runtime_config = { llm_timeout_ms: llmTimeoutMs }
+    await writeCheckpoint(
+      input,
+      runId,
+      loaded.checkpoint.phase,
+      loaded.checkpoint,
+      'running',
+      undefined,
+      lease,
+    )
+    return llmTimeoutMs
+  }
+
   async function markRunning(
     input: EditorRevisionRunInput,
     runId: number,
@@ -778,7 +802,11 @@ export function createEditorRevisionWorker(
     })
   }
 
-  async function withLlmTimeout<T>(controller: AbortController, operation: () => Promise<T>): Promise<T> {
+  async function withLlmTimeout<T>(
+    controller: AbortController,
+    timeoutMs: number,
+    operation: () => Promise<T>,
+  ): Promise<T> {
     if (controller.signal.aborted) throw signalReason(controller.signal)
     let removeAbortListener = () => {}
     const aborted = new Promise<never>((_resolve, reject) => {
@@ -788,9 +816,12 @@ export function createEditorRevisionWorker(
     })
     const timer = deps.setTimeout(() => {
       if (!controller.signal.aborted) {
-        controller.abort(revisionError('REVISION_LLM_TIMEOUT', 'editor revision model call timed out'))
+        controller.abort(revisionError(
+          'REVISION_LLM_TIMEOUT',
+          `editor revision model call timed out after ${Math.trunc(timeoutMs / 1_000)} seconds`,
+        ))
       }
-    }, LLM_TIMEOUT_MS)
+    }, timeoutMs)
     try {
       return await Promise.race([operation(), aborted])
     } finally {
@@ -900,6 +931,7 @@ export function createEditorRevisionWorker(
     project: any,
     controller: AbortController,
     lease: LeaseState,
+    llmTimeoutMs: number,
   ) {
     let loaded = await phaseCheckpoint(input, runId, controller, lease)
     if (loaded.checkpoint.candidate && loaded.checkpoint.phases.admit_candidate.status === 'completed') {
@@ -907,7 +939,7 @@ export function createEditorRevisionWorker(
     }
     await markRunning(input, runId, 'generate_candidate', controller, lease)
     const request = buildEditorRevisionAgentRequest(ctx, project, input)
-    const result = await withLlmTimeout(controller, () => deps.executeRevision('prose-agent', project, {
+    const result = await withLlmTimeout(controller, llmTimeoutMs, () => deps.executeRevision('prose-agent', project, {
       task: request.prompt,
     }, {
       activeWorkspace: activeWorkspace!,
@@ -917,7 +949,7 @@ export function createEditorRevisionWorker(
       responseMode: 'stream',
       skipMemory: true,
       signal: controller.signal,
-      timeoutMs: LLM_TIMEOUT_MS,
+      timeoutMs: llmTimeoutMs,
       maxRetries: 1,
     }))
     const resultDiagnostics = buildLLMResultDiagnostics(result)
@@ -1069,6 +1101,7 @@ export function createEditorRevisionWorker(
     project: any,
     controller: AbortController,
     lease: LeaseState,
+    llmTimeoutMs: number,
   ) {
     const current = (await phaseCheckpoint(input, runId, controller, lease)).checkpoint
     if (TERMINAL_PHASE_STATES.has(current.phases.post_quality.status)) return current
@@ -1077,14 +1110,14 @@ export function createEditorRevisionWorker(
     if (!checkpoint.candidate) throw revisionError('REVISION_CANDIDATE_MISSING')
     const chapter = await deps.getChapter(activeWorkspace!, input.chapter_id, input.project_id)
     if (!chapter) throw revisionError('CHAPTER_NOT_FOUND')
-    const quality = await withLlmTimeout(controller, () => deps.createQualityReview(ctx, activeWorkspace!, project, chapter, {
+    const quality = await withLlmTimeout(controller, llmTimeoutMs, () => deps.createQualityReview(ctx, activeWorkspace!, project, chapter, {
       source: 'post_revision',
       source_review_id: input.review_id,
       source_run_id: runId,
       candidate_hash: checkpoint.candidate!.hash,
       current_chapter_only: true,
       signal: controller.signal,
-      timeoutMs: LLM_TIMEOUT_MS,
+      timeoutMs: llmTimeoutMs,
       maxRetries: 1,
       workerLease: { runId, owner: leaseOwner },
     }))
@@ -1124,6 +1157,7 @@ export function createEditorRevisionWorker(
     runId: number,
     controller: AbortController,
     lease: LeaseState,
+    llmTimeoutMs: number,
   ) {
     let checkpoint = (await phaseCheckpoint(input, runId, controller, lease)).checkpoint
     if (TERMINAL_PHASE_STATES.has(checkpoint.phases.sync_current_story_state.status)) return checkpoint
@@ -1139,14 +1173,14 @@ export function createEditorRevisionWorker(
     let completedReceipt = (checkpoint.story_state as any)?.completed_receipt || null
     let reusedPrepare = Boolean(prepared || completedReceipt)
     if (!prepared && !completedReceipt) {
-      const preparedResult = await withLlmTimeout(controller, () => deps.prepareStoryState(ctx, {
+      const preparedResult = await withLlmTimeout(controller, llmTimeoutMs, () => deps.prepareStoryState(ctx, {
         workspace: activeWorkspace!,
         projectId: input.project_id,
         chapterId: input.chapter_id,
         modelId: input.model_id,
         receipt,
         signal: controller.signal,
-        timeoutMs: LLM_TIMEOUT_MS,
+        timeoutMs: llmTimeoutMs,
         maxRetries: 1,
       }))
       reusedPrepare = preparedResult.reused
@@ -1176,7 +1210,7 @@ export function createEditorRevisionWorker(
       }, { status: 'completed', reused: true })
     }
     await loadActiveRun(input, runId, controller, lease)
-    const applied = await withLlmTimeout(controller, () => deps.applyStoryState(ctx, {
+    const applied = await withLlmTimeout(controller, llmTimeoutMs, () => deps.applyStoryState(ctx, {
       workspace: activeWorkspace!,
       projectId: input.project_id,
       chapterId: input.chapter_id,
@@ -1184,7 +1218,7 @@ export function createEditorRevisionWorker(
       receipt,
       prepared: preparedForApply(prepared, receipt),
       signal: controller.signal,
-      timeoutMs: LLM_TIMEOUT_MS,
+      timeoutMs: llmTimeoutMs,
       maxRetries: 1,
       workerLease: { runId, owner: leaseOwner },
     }))
@@ -1371,10 +1405,11 @@ export function createEditorRevisionWorker(
       const project = await ctx.getProject(activeWorkspace!, input.project_id)
       if (!project) throw revisionError('PROJECT_NOT_FOUND')
       await recoverCommittedChapter(input, run.id, controller, lease)
-      await generateAndAdmit(input, run.id, project, controller, lease)
+      const llmTimeoutMs = await resolveRunLlmTimeoutMs(input, run.id, project, controller, lease)
+      await generateAndAdmit(input, run.id, project, controller, lease, llmTimeoutMs)
       await persistChapter(input, run.id, controller, lease)
-      await runPostQuality(input, run.id, project, controller, lease)
-      await runStoryState(input, run.id, controller, lease)
+      await runPostQuality(input, run.id, project, controller, lease, llmTimeoutMs)
+      await runStoryState(input, run.id, controller, lease, llmTimeoutMs)
       await recordDeterministicReviews(input, run.id, controller, lease)
       await completeRun(input, run.id, controller, lease)
     } catch (error) {

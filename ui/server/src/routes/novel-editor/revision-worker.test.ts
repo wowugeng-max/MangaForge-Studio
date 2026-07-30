@@ -1311,9 +1311,11 @@ describe('durable editor revision worker', () => {
       'phase',
       'phases',
       'prose_persisted',
+      'runtime_config',
       'schema_version',
       'warnings',
     ])
+    expect(checkpoint.runtime_config).toEqual({ llm_timeout_ms: 600_000 })
     expect(Object.keys(checkpoint.phases).sort()).toEqual([
       'admit_candidate',
       'completed',
@@ -4004,7 +4006,7 @@ describe('durable editor revision worker', () => {
     expect(harness.prepareCalls).toHaveLength(0)
   })
 
-  test('aborts a never-resolving revision call at exactly 180 seconds', async () => {
+  test('aborts a never-resolving revision call at the default 600 seconds', async () => {
     let providerAborted = false
     const harness = createHarness({
       executeRevision: async (_agent, _project, _request, callOptions) => new Promise((_resolve, reject) => {
@@ -4016,14 +4018,20 @@ describe('durable editor revision worker', () => {
     })
     const worker = harness.worker()
     await worker.start(workspace)
-    await eventually(() => harness.timeoutRegistrations.some(item => item.ms === 180_000))
-    const timeout = harness.timeoutRegistrations.find(item => item.ms === 180_000)!
+    await eventually(() => harness.timeoutRegistrations.some(item => item.ms === 600_000))
+    const timeout = harness.timeoutRegistrations.find(item => item.ms === 600_000)!
     timeout.callback()
     await worker.waitForIdle()
 
     expect(providerAborted).toBe(true)
     expect(harness.run.status).toBe('failed')
-    expect(harness.checkpoint().error?.code).toBe('REVISION_LLM_TIMEOUT')
+    expect(harness.checkpoint()).toMatchObject({
+      runtime_config: { llm_timeout_ms: 600_000 },
+      error: {
+        code: 'REVISION_LLM_TIMEOUT',
+        message: 'editor revision model call timed out after 600 seconds',
+      },
+    })
     expect(harness.commitCalls()).toBe(0)
   })
 
@@ -4043,7 +4051,63 @@ describe('durable editor revision worker', () => {
 
     expect(providerAttempts).toBe(2)
     expect(harness.revisionCalls).toHaveLength(1)
-    expect(harness.revisionCalls[0][3]).toMatchObject({ timeoutMs: 180_000, maxRetries: 1 })
+    expect(harness.revisionCalls[0][3]).toMatchObject({ timeoutMs: 600_000, maxRetries: 1 })
+  })
+
+  test('uses one project timeout for every revision LLM phase and checkpoints it', async () => {
+    const harness = createHarness()
+    harness.project.reference_config = { editor_revision: { timeout_seconds: 420 } }
+    const worker = harness.worker()
+
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    expect(harness.checkpoint().runtime_config).toEqual({ llm_timeout_ms: 420_000 })
+    expect(harness.revisionCalls[0][3]).toMatchObject({ timeoutMs: 420_000, maxRetries: 1 })
+    expect(harness.qualityCalls[0].at(-1)).toMatchObject({ timeoutMs: 420_000, maxRetries: 1 })
+    expect(harness.prepareCalls[0][1]).toMatchObject({ timeoutMs: 420_000, maxRetries: 1 })
+    expect(harness.applyCalls[0][1]).toMatchObject({ timeoutMs: 420_000, maxRetries: 1 })
+    expect(harness.timeoutRegistrations.filter(item => item.ms === 420_000)).toHaveLength(4)
+  })
+
+  test('reuses a durable timeout snapshot instead of rereading changed project config', async () => {
+    const checkpoint = initialCheckpoint()
+    checkpoint.runtime_config = { llm_timeout_ms: 240_000 }
+    const harness = createHarness({ checkpoint })
+    harness.project.reference_config = { editor_revision: { timeout_seconds: 420 } }
+    const worker = harness.worker()
+
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    expect(harness.checkpoint().runtime_config).toEqual({ llm_timeout_ms: 240_000 })
+    expect(harness.revisionCalls[0][3].timeoutMs).toBe(240_000)
+    expect(harness.qualityCalls[0].at(-1).timeoutMs).toBe(240_000)
+  })
+
+  test('keeps committed prose when post-quality reaches the configured timeout', async () => {
+    const harness = createHarness({ quality: async () => new Promise(() => {}) })
+    const worker = harness.worker()
+    await worker.start(workspace)
+    await eventually(() => harness.qualityCalls.length === 1)
+    const timer = harness.timeoutRegistrations.find(item => item.ms === 600_000 && !item.cleared)
+    expect(timer).toBeDefined()
+
+    timer!.callback()
+    await worker.waitForIdle()
+
+    expect(harness.run.status).toBe('failed')
+    expect(harness.checkpoint()).toMatchObject({
+      phase: 'post_quality',
+      prose_persisted: true,
+      runtime_config: { llm_timeout_ms: 600_000 },
+      error: {
+        code: 'REVISION_LLM_TIMEOUT',
+        message: 'editor revision model call timed out after 600 seconds',
+      },
+    })
+    expect(harness.commitCalls()).toBe(1)
+    expect(harness.chapter().chapter_text).toBe(candidateText)
   })
 
   test('truncation makes one application-level attempt and stops before commit', async () => {
