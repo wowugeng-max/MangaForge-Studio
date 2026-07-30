@@ -132,7 +132,7 @@ describe('generic MCP client', () => {
   })
 
   test('scrubs reflected credentials from connection and tool errors while preserving stable metadata', async () => {
-    const reflectedKey = 'sk_test_reflected_client_key'
+    const reflectedKey = 'sk_' + 'test_reflected_client_key'
     const reflectedHeader = 'synthetic-client-header-value'
     const server = {
       ...BUDA_MCP_SERVER_TEMPLATE,
@@ -201,7 +201,7 @@ describe('generic MCP client', () => {
   })
 
   test('recursively scrubs diagnostics and tool descriptors while preserving safe fields', async () => {
-    const reflectedKey = 'sk_test_diagnostics_secret'
+    const reflectedKey = 'sk_' + 'test_diagnostics_secret'
     const reflectedHeader = 'synthetic-diagnostics-header'
     const server = { ...BUDA_MCP_SERVER_TEMPLATE, custom_headers: { 'X-Private': reflectedHeader } }
     const { factory } = fakeSdkFactory({

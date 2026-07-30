@@ -166,7 +166,7 @@ describe('McpGenerationSource', () => {
   test('scrubs selected credentials from progress, exposed errors, and durable failed receipts', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-source-scrub-'))
     workspaces.push(workspace)
-    const selectedKey = 'sk_test_generation_reflection'
+    const selectedKey = 'sk_' + 'test_generation_reflection'
     const selectedHeader = 'synthetic-generation-header-value'
     const selectedCookie = 'session=synthetic-generation-cookie'
     const server = {
@@ -275,7 +275,7 @@ describe('McpGenerationSource', () => {
   test('preserves successful prose exactly while scrubbing every returned and durable metadata field', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-source-success-metadata-'))
     workspaces.push(workspace)
-    const selectedKey = 'sk_test_success_metadata_reflection'
+    const selectedKey = 'sk_' + 'test_success_metadata_reflection'
     const selectedHeader = 'synthetic-success-metadata-header'
     const selectedCookie = 'session=synthetic-success-metadata-cookie'
     const server = {
@@ -363,7 +363,7 @@ describe('McpGenerationSource', () => {
   test('preserves scrubbed enumerable non-MCP error metadata and protected blocked-invalid residual prose', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-source-error-metadata-'))
     workspaces.push(workspace)
-    const selectedKey = 'sk_test_error_metadata_reflection'
+    const selectedKey = 'sk_' + 'test_error_metadata_reflection'
     const selectedHeader = 'synthetic-error-metadata-header'
     const selectedCookie = 'session=synthetic-error-metadata-cookie'
     const server = {

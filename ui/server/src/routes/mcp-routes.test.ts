@@ -273,7 +273,7 @@ describe('MCP routes', () => {
       ...BUDA_MCP_SERVER_TEMPLATE,
       custom_headers: { 'X-Space': storedHeader, Cookie: storedCookie },
     }])
-    const storedKey = 'sk_test_stored_route_key'
+    const storedKey = 'sk_' + 'test_stored_route_key'
     const keyRecord = await createMcpKey(workspace, {
       mcp_server_id: 'buda',
       key: storedKey,

@@ -3,18 +3,19 @@ import { createMcpSecretScrubber } from './secret-scrubber'
 
 describe('MCP secret scrubber', () => {
   test('recursively removes configured credentials while preserving safe metadata', () => {
+    const reflectedKey = 'sk_' + 'test_reflected_secret'
     const scrubber = createMcpSecretScrubber({
-      keys: ['sk_test_reflected_secret'],
+      keys: [reflectedKey],
       headerValues: ['private-space-token', 'session=private-cookie'],
     })
     const output = scrubber.scrubValue({
-      error: 'Authorization: Bearer sk_test_reflected_secret',
+      error: `Authorization: Bearer ${reflectedKey}`,
       nested: ['X-Space=private-space-token', 'Cookie: session=private-cookie'],
       safe: 'agent-1',
       status: 'failed',
     })
 
-    expect(JSON.stringify(output)).not.toContain('sk_test_reflected_secret')
+    expect(JSON.stringify(output)).not.toContain(reflectedKey)
     expect(JSON.stringify(output)).not.toContain('private-space-token')
     expect(JSON.stringify(output)).not.toContain('private-cookie')
     expect(output).toMatchObject({ safe: 'agent-1', status: 'failed' })

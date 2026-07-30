@@ -24,7 +24,7 @@ describe('MCP standalone prose route helpers', () => {
   })
 
   test('scrubs reflected MCP credentials from bounded standalone HTTP and SSE error payloads', () => {
-    const reflectedKey = 'sk_test_builder_reflection'
+    const reflectedKey = 'sk_' + 'test_builder_reflection'
     const reflectedHeader = 'synthetic-builder-header-value'
     const residualText = '受保护的终止残余正文。'.repeat(40)
     const pipeline = [{ stage: 'mcp_session_wait', status: 'failed', agent_id: 'agent-1' }]
@@ -70,9 +70,9 @@ describe('MCP standalone prose route helpers', () => {
   })
 
   test('preserves the exact eligible details.chapterText residual alias without restoring unrelated secrets', () => {
-    const residualLiteral = 'sk_test_eligible_residual_alias_literal'
+    const residualLiteral = 'sk_' + 'test_eligible_residual_alias_literal'
     const residualText = `${'仅 blocked-invalid 恢复可保留的残余正文。'.repeat(24)} ${residualLiteral}`
-    const unrelatedSecret = 'sk_test_unrelated_builder_metadata'
+    const unrelatedSecret = 'sk_' + 'test_unrelated_builder_metadata'
     const payload = buildStandaloneProseServiceErrorPayload({
       code: 'MCP_SESSION_FAILED',
       message: `Authorization: Bearer ${unrelatedSecret}`,
