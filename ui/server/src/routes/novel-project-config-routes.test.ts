@@ -71,7 +71,10 @@ describe('editor revision project config routes', () => {
     )
 
     expect(response.statusCode).toBe(200)
-    expect(response.body).toEqual({ ok: true, config: { timeout_seconds: 600 } })
+    expect(response.body).toEqual({
+      ok: true,
+      config: { timeout_seconds: 600, story_state_max_tokens: 9000 },
+    })
   })
 
   test('clamps and merges timeout without overwriting sibling reference config', async () => {
@@ -94,11 +97,42 @@ describe('editor revision project config routes', () => {
     const stored = await getNovelProject(workspace, project.id)
 
     expect(response.statusCode).toBe(200)
-    expect(response.body.config).toEqual({ timeout_seconds: 600 })
+    expect(response.body.config).toEqual({ timeout_seconds: 600, story_state_max_tokens: 9000 })
     expect(stored?.reference_config).toMatchObject({
       references: [{ project_title: '参考书' }],
       story_state: { current_time: 'night' },
-      editor_revision: { timeout_seconds: 600 },
+      editor_revision: { timeout_seconds: 600, story_state_max_tokens: 9000 },
+    })
+  })
+
+  test('updates only the story state budget without replacing existing reference config', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'revision-config-route-'))
+    workspaces.push(workspace)
+    const project = await createNovelProject(workspace, {
+      title: 'story-state-only',
+      reference_config: {
+        story_state: { current_time: 'night' },
+        editor_revision: { timeout_seconds: 420, custom: 'keep' },
+      },
+    })
+    const { app, handlers } = routeHarness()
+    registerNovelProjectConfigRoutes(app, context(workspace) as any)
+
+    const response = await callRoute(
+      handlers.get('PUT /api/novel/projects/:id/editor-revision-config'),
+      { params: { id: String(project.id) }, body: { config: { story_state_max_tokens: 262144 } } },
+    )
+    const stored = await getNovelProject(workspace, project.id)
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body.config).toEqual({ timeout_seconds: 420, story_state_max_tokens: 262144 })
+    expect(stored?.reference_config).toMatchObject({
+      story_state: { current_time: 'night' },
+      editor_revision: {
+        timeout_seconds: 420,
+        story_state_max_tokens: 262144,
+        custom: 'keep',
+      },
     })
   })
 
@@ -139,7 +173,31 @@ describe('editor revision project config routes', () => {
     })
   })
 
-  test('rejects a non-numeric request and returns 404 for a missing project', async () => {
+  test('accepts legacy timeout-only, budget-only, and combined requests', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'revision-config-route-'))
+    workspaces.push(workspace)
+    const project = await createNovelProject(workspace, { title: 'compatible', reference_config: {} })
+    const { app, handlers } = routeHarness()
+    registerNovelProjectConfigRoutes(app, context(workspace) as any)
+    const put = handlers.get('PUT /api/novel/projects/:id/editor-revision-config')
+
+    const timeoutOnly = await callRoute(put, {
+      params: { id: String(project.id) }, body: { timeout_seconds: 420 },
+    })
+    const budgetOnly = await callRoute(put, {
+      params: { id: String(project.id) }, body: { story_state_max_tokens: 12000 },
+    })
+    const combined = await callRoute(put, {
+      params: { id: String(project.id) },
+      body: { config: { timeout_seconds: 300, story_state_max_tokens: 15000 } },
+    })
+
+    expect(timeoutOnly.body.config).toEqual({ timeout_seconds: 420, story_state_max_tokens: 9000 })
+    expect(budgetOnly.body.config).toEqual({ timeout_seconds: 420, story_state_max_tokens: 12000 })
+    expect(combined.body.config).toEqual({ timeout_seconds: 300, story_state_max_tokens: 15000 })
+  })
+
+  test('rejects invalid present settings and returns 404 for a missing project', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'revision-config-route-'))
     workspaces.push(workspace)
     const project = await createNovelProject(workspace, { title: 'validation', reference_config: {} })
@@ -147,16 +205,33 @@ describe('editor revision project config routes', () => {
     registerNovelProjectConfigRoutes(app, context(workspace) as any)
     const put = handlers.get('PUT /api/novel/projects/:id/editor-revision-config')
 
-    const invalid = await callRoute(put, {
+    const invalidTimeout = await callRoute(put, {
       params: { id: String(project.id) },
       body: { config: { timeout_seconds: '600' } },
+    })
+    const invalidBudget = await callRoute(put, {
+      params: { id: String(project.id) },
+      body: { config: { story_state_max_tokens: '9000' } },
+    })
+    const nonFinite = await callRoute(put, {
+      params: { id: String(project.id) },
+      body: { config: { story_state_max_tokens: Number.POSITIVE_INFINITY } },
+    })
+    const empty = await callRoute(put, {
+      params: { id: String(project.id) }, body: { config: {} },
     })
     const missing = await callRoute(put, {
       params: { id: '999999' },
       body: { config: { timeout_seconds: 600 } },
     })
 
-    expect(invalid.statusCode).toBe(400)
+    expect(invalidTimeout.statusCode).toBe(400)
+    expect(invalidBudget.statusCode).toBe(400)
+    expect(nonFinite.statusCode).toBe(400)
+    expect(empty).toMatchObject({
+      statusCode: 400,
+      body: { error: 'at least one editor revision setting is required' },
+    })
     expect(missing.statusCode).toBe(404)
   })
 })

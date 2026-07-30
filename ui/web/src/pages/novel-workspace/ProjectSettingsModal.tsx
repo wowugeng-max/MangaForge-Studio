@@ -6,6 +6,9 @@ const { Text } = Typography
 const MIN_TIMEOUT_SECONDS = 60
 const MAX_TIMEOUT_SECONDS = 600
 const DEFAULT_TIMEOUT_SECONDS = 600
+const MIN_STORY_STATE_MAX_TOKENS = 1000
+const MAX_STORY_STATE_MAX_TOKENS = 262144
+const DEFAULT_STORY_STATE_MAX_TOKENS = 9000
 
 export function normalizeProjectEditorRevisionTimeout(value: unknown) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_TIMEOUT_SECONDS
@@ -19,9 +22,27 @@ export function isEditorRevisionTimeoutValid(value: unknown): value is number {
     && value <= MAX_TIMEOUT_SECONDS
 }
 
-export function buildEditorRevisionConfigPayload(value: unknown) {
-  if (!isEditorRevisionTimeoutValid(value)) throw new Error('invalid editor revision timeout')
-  return { config: { timeout_seconds: value } }
+export function normalizeProjectStoryStateMaxTokens(value: unknown) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_STORY_STATE_MAX_TOKENS
+  return Math.min(MAX_STORY_STATE_MAX_TOKENS, Math.max(MIN_STORY_STATE_MAX_TOKENS, Math.trunc(value)))
+}
+
+export function isStoryStateMaxTokensValid(value: unknown): value is number {
+  return typeof value === 'number'
+    && Number.isInteger(value)
+    && value >= MIN_STORY_STATE_MAX_TOKENS
+    && value <= MAX_STORY_STATE_MAX_TOKENS
+}
+
+export function buildEditorRevisionConfigPayload(timeoutSeconds: unknown, storyStateMaxTokens: unknown) {
+  if (!isEditorRevisionTimeoutValid(timeoutSeconds)) throw new Error('invalid editor revision timeout')
+  if (!isStoryStateMaxTokensValid(storyStateMaxTokens)) throw new Error('invalid story state max tokens')
+  return {
+    config: {
+      timeout_seconds: timeoutSeconds,
+      story_state_max_tokens: storyStateMaxTokens,
+    },
+  }
 }
 
 export function ProjectSettingsModal({
@@ -34,6 +55,7 @@ export function ProjectSettingsModal({
   onClose: () => void
 }) {
   const [timeoutSeconds, setTimeoutSeconds] = useState<number | null>(DEFAULT_TIMEOUT_SECONDS)
+  const [storyStateMaxTokens, setStoryStateMaxTokens] = useState<number | null>(DEFAULT_STORY_STATE_MAX_TOKENS)
   const [loading, setLoading] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -42,6 +64,7 @@ export function ProjectSettingsModal({
     if (!open || !projectId) return
     let active = true
     setTimeoutSeconds(DEFAULT_TIMEOUT_SECONDS)
+    setStoryStateMaxTokens(DEFAULT_STORY_STATE_MAX_TOKENS)
     setLoadFailed(false)
     setLoading(true)
     apiClient.get(`/novel/projects/${projectId}/editor-revision-config`)
@@ -49,6 +72,9 @@ export function ProjectSettingsModal({
         if (active) {
           setTimeoutSeconds(normalizeProjectEditorRevisionTimeout(
             response.data?.config?.timeout_seconds,
+          ))
+          setStoryStateMaxTokens(normalizeProjectStoryStateMaxTokens(
+            response.data?.config?.story_state_max_tokens,
           ))
         }
       })
@@ -67,12 +93,16 @@ export function ProjectSettingsModal({
   }, [open, projectId])
 
   const save = async () => {
-    if (loadFailed || !isEditorRevisionTimeoutValid(timeoutSeconds)) return
+    if (
+      loadFailed
+      || !isEditorRevisionTimeoutValid(timeoutSeconds)
+      || !isStoryStateMaxTokensValid(storyStateMaxTokens)
+    ) return
     setSaving(true)
     try {
       await apiClient.put(
         `/novel/projects/${projectId}/editor-revision-config`,
-        buildEditorRevisionConfigPayload(timeoutSeconds),
+        buildEditorRevisionConfigPayload(timeoutSeconds, storyStateMaxTokens),
       )
       message.success('项目设置已保存')
       onClose()
@@ -95,7 +125,7 @@ export function ProjectSettingsModal({
           key="save"
           type="primary"
           loading={saving}
-          disabled={loading || loadFailed || !isEditorRevisionTimeoutValid(timeoutSeconds)}
+          disabled={loading || loadFailed || !isEditorRevisionTimeoutValid(timeoutSeconds) || !isStoryStateMaxTokensValid(storyStateMaxTokens)}
           onClick={save}
         >
           保存
@@ -119,6 +149,26 @@ export function ProjectSettingsModal({
         </Space>
         <Text type="secondary">
           每个模型阶段最多等待该时长；一次修订包含多个阶段，总耗时可能更长。
+        </Text>
+        <Space align="center" wrap>
+          <Text>故事状态输出上限</Text>
+          <InputNumber
+            aria-label="故事状态输出上限"
+            min={1000}
+            max={262144}
+            step={512}
+            precision={0}
+            value={storyStateMaxTokens}
+            onChange={value => setStoryStateMaxTokens(value)}
+            addonAfter="token"
+            disabled={loading || loadFailed}
+          />
+        </Space>
+        {storyStateMaxTokens !== null && storyStateMaxTokens > 64_000 && (
+          <Text type="warning">较高预算可能增加调用耗时与成本。</Text>
+        )}
+        <Text type="secondary">
+          只控制修订后当前章故事状态同步的单次模型输出预算，不控制正文长度，也不会扩展到全部章节。
         </Text>
       </Space>
     </Modal>

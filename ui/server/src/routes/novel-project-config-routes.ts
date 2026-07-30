@@ -5,6 +5,7 @@ import {
   updateNovelProject,
 } from '../novel'
 import {
+  normalizeEditorRevisionStoryStateMaxTokens,
   normalizeEditorRevisionTimeoutSeconds,
   resolveEditorRevisionRuntimeConfig,
 } from '../novel/editor-revision-runtime-config'
@@ -37,24 +38,45 @@ export function registerNovelProjectConfigRoutes(app: Express, ctx: ProjectConfi
       const activeWorkspace = ctx.getWorkspace()
       const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
       if (!project) return res.status(404).json({ error: 'project not found' })
-      const rawTimeout = req.body?.config?.timeout_seconds ?? req.body?.timeout_seconds
-      if (typeof rawTimeout !== 'number' || !Number.isFinite(rawTimeout)) {
+      const requestConfig = req.body?.config || req.body || {}
+      const hasTimeout = requestConfig.timeout_seconds !== undefined
+      const hasStoryStateMaxTokens = requestConfig.story_state_max_tokens !== undefined
+      if (!hasTimeout && !hasStoryStateMaxTokens) {
+        return res.status(400).json({ error: 'at least one editor revision setting is required' })
+      }
+      if (hasTimeout && (typeof requestConfig.timeout_seconds !== 'number' || !Number.isFinite(requestConfig.timeout_seconds))) {
         return res.status(400).json({ error: 'timeout_seconds must be a finite number' })
       }
-      const config = { timeout_seconds: normalizeEditorRevisionTimeoutSeconds(rawTimeout) }
+      if (hasStoryStateMaxTokens && (
+        typeof requestConfig.story_state_max_tokens !== 'number'
+        || !Number.isFinite(requestConfig.story_state_max_tokens)
+      )) {
+        return res.status(400).json({ error: 'story_state_max_tokens must be a finite number' })
+      }
       const mutation = await mutateNovelProjectReferenceConfig(activeWorkspace, {
         projectId: project.id,
         operation: 'update-editor-revision-config',
-        mutate: currentConfig => ({
-          referenceConfig: {
-            ...currentConfig,
-            editor_revision: {
-              ...(currentConfig.editor_revision || {}),
-              ...config,
+        mutate: currentConfig => {
+          const current = resolveEditorRevisionRuntimeConfig({ reference_config: currentConfig })
+          const config = {
+            timeout_seconds: hasTimeout
+              ? normalizeEditorRevisionTimeoutSeconds(requestConfig.timeout_seconds)
+              : current.timeout_seconds,
+            story_state_max_tokens: hasStoryStateMaxTokens
+              ? normalizeEditorRevisionStoryStateMaxTokens(requestConfig.story_state_max_tokens)
+              : current.story_state_max_tokens,
+          }
+          return {
+            referenceConfig: {
+              ...currentConfig,
+              editor_revision: {
+                ...(currentConfig.editor_revision || {}),
+                ...config,
+              },
             },
-          },
-          result: config,
-        }),
+            result: config,
+          }
+        },
       })
       if (!mutation) return res.status(404).json({ error: 'project not found' })
       res.json({ ok: true, config: mutation.result, project: mutation.project })
