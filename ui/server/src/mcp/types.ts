@@ -68,6 +68,14 @@ export type McpToolResult = {
 
 export type McpClientState = 'Connecting' | 'Ready' | 'Closed'
 
+export type McpOperationKind = 'read_safe' | 'mutation'
+
+export type McpOperationOptions = {
+  signal?: AbortSignal
+  timeoutMs?: number
+  operation: McpOperationKind
+}
+
 export type McpAgentSummary = {
   id: string
   name: string

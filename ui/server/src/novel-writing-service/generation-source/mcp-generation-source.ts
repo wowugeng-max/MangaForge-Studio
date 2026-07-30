@@ -198,7 +198,7 @@ export class McpGenerationSource implements GenerationSource {
       })
       await validateMcpProjectBinding(request.activeWorkspace, request.project, binding, {
         runtime: {
-          listAgents: async (_keyId, signal) => resolved.adapter.listAgents(signal),
+          listAgents: async (_keyId, signal) => resolved.adapter.listAgents({ signal }),
         },
         credentialSnapshot: credentialSnapshot.records,
         signal: request.signal,

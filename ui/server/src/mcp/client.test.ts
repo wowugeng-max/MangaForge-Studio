@@ -95,9 +95,9 @@ describe('generic MCP client', () => {
     expect(capture.url).toBe('https://buda.im/api/mcp')
     expect(capture.transportOptions.requestInit.headers.Authorization).toBe('Bearer sk_test_secret')
     expect(capture.connect.requestOptions).toMatchObject({ timeout: 15_000, signal })
-    expect((await client.listTools(signal)).map(tool => tool.name)).toEqual(['allowed'])
+    expect((await client.listTools({ signal })).map(tool => tool.name)).toEqual(['allowed'])
 
-    const result = await client.callTool('allowed', { value: 1 }, { signal })
+    const result = await client.callTool('allowed', { value: 1 }, { signal, operation: 'read_safe' })
     expect(result).toEqual({
       content: [{ type: 'text', text: 'ok' }],
       structuredContent: { ok: true },
@@ -121,11 +121,11 @@ describe('generic MCP client', () => {
   test('blocks undiscovered tools and maps tool-level failures to a stable error', async () => {
     const normal = createMcpClient({ server: BUDA_MCP_SERVER_TEMPLATE, key, sdkFactory: fakeSdkFactory().factory })
     await normal.connect()
-    await expect(normal.callTool('missing', {})).rejects.toMatchObject({ code: 'MCP_CAPABILITY_MISSING' })
+    await expect(normal.callTool('missing', {}, { operation: 'read_safe' })).rejects.toMatchObject({ code: 'MCP_CAPABILITY_MISSING' })
 
     const failing = createMcpClient({ server: BUDA_MCP_SERVER_TEMPLATE, key, sdkFactory: fakeSdkFactory({ toolError: true }).factory })
     await failing.connect()
-    await expect(failing.callTool('allowed', {})).rejects.toEqual(expect.objectContaining({
+    await expect(failing.callTool('allowed', {}, { operation: 'read_safe' })).rejects.toEqual(expect.objectContaining({
       code: 'MCP_TOOL_ERROR',
       details: expect.objectContaining({ tool_name: 'allowed' }),
     }))
@@ -166,7 +166,7 @@ describe('generic MCP client', () => {
     })
     await toolFailure.connect()
     let mappedToolError: any
-    try { await toolFailure.callTool('allowed', {}) } catch (error) { mappedToolError = error }
+    try { await toolFailure.callTool('allowed', {}, { operation: 'read_safe' }) } catch (error) { mappedToolError = error }
     const serializedToolError = JSON.stringify({
       message: mappedToolError?.message,
       code: mappedToolError?.code,
@@ -188,12 +188,12 @@ describe('generic MCP client', () => {
       }).factory,
     })
     await thrownToolError.connect()
-    await expect(thrownToolError.callTool('allowed', {})).rejects.toMatchObject({
+    await expect(thrownToolError.callTool('allowed', {}, { operation: 'read_safe' })).rejects.toMatchObject({
       code: 'MCP_TOOL_ERROR',
       details: { tool_name: 'allowed' },
     })
     try {
-      await thrownToolError.callTool('allowed', {})
+      await thrownToolError.callTool('allowed', {}, { operation: 'read_safe' })
     } catch (error: any) {
       expect(JSON.stringify({ message: error.message, details: error.details })).not.toContain(reflectedKey)
       expect(JSON.stringify({ message: error.message, details: error.details })).not.toContain(reflectedHeader)

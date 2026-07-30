@@ -4,6 +4,7 @@ import { resolveBudaTools, type BudaToolMap } from './buda-tool-map'
 import type {
   BudaProseGenerationInput,
   BudaProseGenerationResult,
+  McpAdapterOperationOptions,
   McpClientPort,
   ProseMcpAdapter,
 } from './types'
@@ -20,6 +21,19 @@ function cleanAgent(item: any) {
     ...(item?.status ? { status: String(item.status) } : {}),
     ...(spaceId ? { raw: { spaceId } } : {}),
   }
+}
+
+export function normalizeBudaAgentList(data: any) {
+  const agents = Array.isArray(data?.apiAgents)
+    ? data.apiAgents
+    : Array.isArray(data?.agents)
+      ? data.agents
+      : Array.isArray(data?.items)
+        ? data.items
+        : Array.isArray(data)
+          ? data
+          : []
+  return agents.map(cleanAgent).filter(item => item.id)
 }
 
 function sessionStatus(data: any) {
@@ -102,23 +116,22 @@ export class BudaAdapter implements ProseMcpAdapter {
 
   constructor(private readonly client: McpClientPort) {}
 
-  private async resolveTools(signal?: AbortSignal, requireCreateAgent = false) {
-    this.tools = resolveBudaTools(await this.client.listTools(signal), { requireCreateAgent })
+  private async resolveTools(options: McpAdapterOperationOptions, requireCreateAgent = false) {
+    this.tools = resolveBudaTools(await this.client.listTools(options), { requireCreateAgent })
     return this.tools
   }
 
-  async listAgents(signal?: AbortSignal) {
-    const tools = this.tools || await this.resolveTools(signal)
-    const data = mcpResultData(await this.client.callTool(tools.listAgents, {}, { signal }))
-    const agents = Array.isArray(data?.agents) ? data.agents : Array.isArray(data) ? data : []
-    return agents.map(cleanAgent).filter(item => item.id)
+  async listAgents(options: McpAdapterOperationOptions = {}) {
+    const tools = this.tools || await this.resolveTools(options)
+    const data = mcpResultData(await this.client.callTool(tools.listAgents, {}, { ...options, operation: 'read_safe' }))
+    return normalizeBudaAgentList(data)
   }
 
-  async createAgent(input: { name: string; spaceId?: string; instructions?: string }, signal?: AbortSignal) {
-    const tools = this.tools?.createAgent ? this.tools : await this.resolveTools(signal, true)
+  async createAgent(input: { name: string; spaceId?: string; instructions?: string }, options: McpAdapterOperationOptions = {}) {
+    const tools = this.tools?.createAgent ? this.tools : await this.resolveTools(options, true)
     let spaceId = String(input.spaceId || '')
     if (!spaceId) {
-      const existing = await this.listAgents(signal)
+      const existing = await this.listAgents(options)
       spaceId = String(existing.find(item => (item.raw as any)?.spaceId)?.raw?.spaceId || '')
     }
     if (!spaceId) throw new McpError('MCP_BINDING_INVALID', '创建 Buda Agent 需要 spaceId；请先在 Buda 中创建空间')
@@ -127,7 +140,7 @@ export class BudaAdapter implements ProseMcpAdapter {
       name: String(input.name || 'MangaForge 小说正文 Agent'),
       emoji: '✍️',
       instructions: String(input.instructions || MANGAFORGE_BUDA_AGENT_INSTRUCTIONS),
-    }, { signal }))
+    }, { ...options, operation: 'mutation' }))
     const agent = cleanAgent(data?.agent || data)
     if (!agent.id) throw new McpError('MCP_TOOL_ERROR', 'Buda 未返回新 Agent 标识')
     return { id: agent.id, name: agent.name }
@@ -146,7 +159,7 @@ export class BudaAdapter implements ProseMcpAdapter {
     try {
       if (input.signal?.aborted) throw new McpError('MCP_CANCELLED', 'MCP 正文生成已取消')
       await progress('mcp_capabilities')
-      tools = await this.resolveTools(input.signal)
+      tools = await this.resolveTools({ signal: input.signal })
       await progress('mcp_capabilities', 'success')
 
       await progress('mcp_drive_sync')
@@ -174,7 +187,7 @@ export class BudaAdapter implements ProseMcpAdapter {
         title: `MangaForge 第${input.chapterNo}章 ${input.requestId}`,
         mode: 'agent',
         startRun: false,
-      }, { signal: input.signal }))
+      }, { signal: input.signal, operation: 'mutation' }))
       activeSessionId = sessionId(created)
       if (!activeSessionId) throw new McpError('MCP_SESSION_FAILED', 'Buda 未返回 Session 标识')
       const message = buildBudaExecutionEnvelope({
@@ -189,7 +202,7 @@ export class BudaAdapter implements ProseMcpAdapter {
         message,
         mode: 'agent',
         startRun: true,
-      }, { signal: input.signal })
+      }, { signal: input.signal, operation: 'mutation' })
       await progress('mcp_session_create', 'success')
 
       await progress('mcp_session_wait')
@@ -202,7 +215,7 @@ export class BudaAdapter implements ProseMcpAdapter {
         const sessionData = mcpResultData(await this.client.callTool(tools.getSession, {
           agentId: input.agentId,
           sessionId: activeSessionId,
-        }, { signal: input.signal }))
+        }, { signal: input.signal, operation: 'read_safe' }))
         const status = sessionStatus(sessionData)
         if (status === 'pending' || status === 'in_progress') {
           await progress('mcp_session_wait', 'running', status)
@@ -235,7 +248,7 @@ export class BudaAdapter implements ProseMcpAdapter {
         await this.client.callTool(tools.cancelSession, {
           agentId: input.agentId,
           sessionId: activeSessionId,
-        }).catch(() => {})
+        }, { operation: 'mutation' }).catch(() => {})
         throw new McpError('MCP_CANCELLED', 'MCP 正文生成已取消', { session_id: activeSessionId })
       }
       throw error

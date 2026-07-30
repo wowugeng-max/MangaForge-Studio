@@ -1,11 +1,19 @@
-import type { McpServerRecord, McpToolDescriptor, McpToolResult } from '../types'
+import type {
+  McpAgentSummary,
+  McpOperationOptions,
+  McpServerRecord,
+  McpToolDescriptor,
+  McpToolResult,
+} from '../types'
+
+export type McpAdapterOperationOptions = Omit<McpOperationOptions, 'operation'>
 
 export type McpClientPort = {
-  listTools(signal?: AbortSignal): Promise<McpToolDescriptor[]>
+  listTools(options: McpAdapterOperationOptions): Promise<McpToolDescriptor[]>
   callTool(
     name: string,
     args: Record<string, unknown>,
-    options?: { signal?: AbortSignal; timeoutMs?: number },
+    options: McpOperationOptions,
   ): Promise<McpToolResult>
 }
 
@@ -57,7 +65,7 @@ export type BudaProseGenerationResult = {
 
 export interface ProseMcpAdapter {
   readonly id: string
-  listAgents(signal?: AbortSignal): Promise<Array<{ id: string; name: string; description?: string; status?: string; raw?: Record<string, unknown> }>>
-  createAgent(input: { name: string; spaceId?: string; instructions?: string }, signal?: AbortSignal): Promise<{ id: string; name: string }>
+  listAgents(options: McpAdapterOperationOptions): Promise<McpAgentSummary[]>
+  createAgent(input: { name: string; spaceId?: string; instructions?: string }, options: McpAdapterOperationOptions): Promise<McpAgentSummary>
   generateProse(input: BudaProseGenerationInput): Promise<BudaProseGenerationResult>
 }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { BudaAdapter, buildBudaExecutionEnvelope, extractBudaProse } from './buda-adapter'
+import { BudaAdapter, buildBudaExecutionEnvelope, extractBudaProse, normalizeBudaAgentList } from './buda-adapter'
 import { BUDA_MCP_SERVER_TEMPLATE } from '../server-store'
 
 const toolNames = [
@@ -19,16 +19,22 @@ function structured(data: Record<string, unknown>) {
 }
 
 function createFakeClient(statuses: string[] = ['completed']) {
-  const calls: Array<{ name: string; args: any }> = []
+  const calls: Array<{ name: string; args: any; options: any }> = []
+  const listToolOptions: any[] = []
   const remote = new Map<string, string>()
   let statusIndex = 0
   return {
     calls,
+    listToolOptions,
     client: {
-      async listTools() { return toolNames.map(name => ({ name, inputSchema: { type: 'object' } })) },
-      async callTool(name: string, args: any) {
-        calls.push({ name, args })
-        if (name.endsWith('listApiAgents')) return structured({ agents: [{ id: 'agent-1', name: '正文 Agent', spaceId: 'space-1' }] })
+      async listTools(options: any) {
+        listToolOptions.push(options)
+        return toolNames.map(name => ({ name, inputSchema: { type: 'object' } }))
+      },
+      async callTool(name: string, args: any, options: any) {
+        calls.push({ name, args, options })
+        if (name.endsWith('listApiAgents')) return structured({ apiAgents: [{ id: 'agent-1', name: '正文 Agent', spaceId: 'space-1' }], total: 1 })
+        if (name.endsWith('createApiAgent')) return structured({ agent: { id: 'agent-2', name: args.name, spaceId: args.spaceId } })
         if (name.endsWith('listApiAgentDriveFiles')) return structured({ files: [...remote.keys()].map(path => ({ path, type: 'file' })) })
         if (name.endsWith('upsertApiAgentDriveFile')) { remote.set(args.path, args.content); return structured({ ok: true }) }
         if (name.endsWith('apiAgentDriveText')) return structured({ content: remote.get(args.filePath) || '' })
@@ -66,11 +72,33 @@ function generationInput(overrides: Record<string, unknown> = {}) {
   } as any
 }
 
+function expectBudaOperations(calls: Array<{ name: string; options: any }>) {
+  for (const call of calls) {
+    const readSafe = call.name.endsWith('listApiAgents')
+      || call.name.endsWith('listApiAgentDriveFiles')
+      || call.name.endsWith('apiAgentDriveText')
+      || call.name.endsWith('getApiAgentSession')
+    expect(call.options.operation).toBe(readSafe ? 'read_safe' : 'mutation')
+  }
+}
+
 describe('BudaAdapter', () => {
   test('lists existing Agents and preserves only bounded summary fields', async () => {
     const fake = createFakeClient()
     const adapter = new BudaAdapter(fake.client as any)
     expect(await adapter.listAgents()).toEqual([{ id: 'agent-1', name: '正文 Agent', raw: { spaceId: 'space-1' } }])
+    expect(fake.listToolOptions).toEqual([{}])
+    expect(fake.calls.find(call => call.name.endsWith('listApiAgents'))?.options.operation).toBe('read_safe')
+    expectBudaOperations(fake.calls)
+  })
+
+  test('classifies Agent creation as a mutation', async () => {
+    const fake = createFakeClient()
+    const adapter = new BudaAdapter(fake.client as any)
+
+    expect(await adapter.createAgent({ name: '新 Agent', spaceId: 'space-1' })).toEqual({ id: 'agent-2', name: '新 Agent' })
+    expect(fake.calls.find(call => call.name.endsWith('createApiAgent'))?.options.operation).toBe('mutation')
+    expectBudaOperations(fake.calls)
   })
 
   test('sends the complete paragraph task after Drive sync and extracts final assistant prose', async () => {
@@ -91,13 +119,18 @@ describe('BudaAdapter', () => {
       prose_chapters: [{ chapter_no: 12, chapter_text: '这是完整的本章正文。' }],
     }))
     expect(progress).toEqual(expect.arrayContaining(['mcp_capabilities', 'mcp_drive_sync', 'mcp_session_create', 'mcp_session_wait', 'mcp_extract']))
+    expectBudaOperations(fake.calls)
   })
 
   test('maps waiting_for_input and failed terminal states without fallback', async () => {
-    await expect(new BudaAdapter(createFakeClient(['waiting_for_input']).client as any).generateProse(generationInput()))
+    const waiting = createFakeClient(['waiting_for_input'])
+    await expect(new BudaAdapter(waiting.client as any).generateProse(generationInput()))
       .rejects.toMatchObject({ code: 'MCP_INPUT_REQUIRED' })
-    await expect(new BudaAdapter(createFakeClient(['failed']).client as any).generateProse(generationInput()))
+    expectBudaOperations(waiting.calls)
+    const failed = createFakeClient(['failed'])
+    await expect(new BudaAdapter(failed.client as any).generateProse(generationInput()))
       .rejects.toMatchObject({ code: 'MCP_SESSION_FAILED' })
+    expectBudaOperations(failed.calls)
   })
 
   test('rejects concurrent generation for the same workspace Server Key and Agent tuple', async () => {
@@ -105,9 +138,9 @@ describe('BudaAdapter', () => {
     const gate = new Promise<void>(resolve => { release = resolve })
     const fake = createFakeClient(['pending', 'completed'])
     const original = fake.client.callTool
-    fake.client.callTool = async (name: string, args: any) => {
+    fake.client.callTool = async (name: string, args: any, options: any) => {
       if (name.endsWith('getApiAgentSession')) await gate
-      return original(name, args)
+      return original(name, args, options)
     }
     const adapter = new BudaAdapter(fake.client as any)
     const first = adapter.generateProse(generationInput())
@@ -115,6 +148,7 @@ describe('BudaAdapter', () => {
     await expect(adapter.generateProse(generationInput())).rejects.toMatchObject({ code: 'MCP_AGENT_BUSY' })
     release()
     await first
+    expectBudaOperations(fake.calls)
   })
 
   test('cancels an active remote Session best-effort when aborted', async () => {
@@ -124,11 +158,28 @@ describe('BudaAdapter', () => {
     const generation = adapter.generateProse(generationInput({ signal: controller.signal }))
     setTimeout(() => controller.abort(), 5)
     await expect(generation).rejects.toMatchObject({ code: 'MCP_CANCELLED' })
-    expect(fake.calls.some(call => call.name.endsWith('cancelApiAgentSessionRun'))).toBe(true)
+    const cancel = fake.calls.find(call => call.name.endsWith('cancelApiAgentSessionRun'))
+    expect(cancel?.options.operation).toBe('mutation')
+    expectBudaOperations(fake.calls)
   })
 })
 
 describe('Buda result normalization', () => {
+  test('keeps compatibility with the agents list shape', () => {
+    expect(normalizeBudaAgentList({ agents: [{ id: 'agent-1', name: 'Agent 1' }] }))
+      .toEqual([{ id: 'agent-1', name: 'Agent 1' }])
+  })
+
+  test('keeps compatibility with the items list shape', () => {
+    expect(normalizeBudaAgentList({ items: [{ agentId: 'agent-2', title: 'Agent 2' }] }))
+      .toEqual([{ id: 'agent-2', name: 'Agent 2' }])
+  })
+
+  test('keeps compatibility with a raw Agent array', () => {
+    expect(normalizeBudaAgentList([{ id: 'agent-3', name: 'Agent 3' }]))
+      .toEqual([{ id: 'agent-3', name: 'Agent 3' }])
+  })
+
   test('prefers a structured chapter payload over text content', () => {
     expect(extractBudaProse({
       prose_chapters: [{ chapter_no: 4, title: '标题', chapter_text: '结构化正文' }],

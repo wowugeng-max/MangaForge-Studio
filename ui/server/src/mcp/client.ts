@@ -10,6 +10,7 @@ import type {
   McpClientState,
   McpDiagnostics,
   McpKeyRecord,
+  McpOperationOptions,
   McpServerRecord,
   McpToolDescriptor,
   McpToolResult,
@@ -120,7 +121,7 @@ export class GenericMcpClient {
         maxTotalTimeout: this.options.server.startup_timeout_ms,
       })
       this.state = 'Ready'
-      await this.refreshTools(signal)
+      await this.refreshTools({ signal })
       return this
     } catch (error) {
       this.state = 'Closed'
@@ -141,12 +142,13 @@ export class GenericMcpClient {
     return tools.filter(tool => allowed.has(tool.name))
   }
 
-  private async refreshTools(signal?: AbortSignal) {
+  private async refreshTools(options: Omit<McpOperationOptions, 'operation'>) {
     const sdk = this.requireReady()
+    const timeout = options.timeoutMs || this.options.server.tool_timeout_ms
     const listed = await sdk.listTools(undefined, {
-      signal,
-      timeout: this.options.server.tool_timeout_ms,
-      maxTotalTimeout: this.options.server.tool_timeout_ms,
+      signal: options.signal,
+      timeout,
+      maxTotalTimeout: timeout,
       cacheMode: 'refresh',
     })
     const tools = (listed.tools || []).map(tool => ({
@@ -160,16 +162,16 @@ export class GenericMcpClient {
     return this.tools
   }
 
-  async listTools(signal?: AbortSignal) {
+  async listTools(options: Omit<McpOperationOptions, 'operation'>) {
     this.requireReady()
-    if (!this.tools.length) return this.refreshTools(signal)
+    if (!this.tools.length) return this.refreshTools(options)
     return this.tools.map(tool => ({ ...tool }))
   }
 
   async callTool(
     name: string,
     args: Record<string, unknown>,
-    options: { signal?: AbortSignal; timeoutMs?: number } = {},
+    options: McpOperationOptions,
   ): Promise<McpToolResult> {
     const sdk = this.requireReady()
     if (!this.tools.some(tool => tool.name === name)) {

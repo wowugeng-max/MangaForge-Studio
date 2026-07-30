@@ -58,7 +58,7 @@ export function createMcpRuntime(
 
   const listAgents = async (keyId: number, signal?: AbortSignal) => {
     const resolved = await getAdapterForKey(keyId, undefined, signal)
-    return resolved.adapter.listAgents(signal)
+    return resolved.adapter.listAgents({ signal })
   }
 
   return {
@@ -66,11 +66,11 @@ export function createMcpRuntime(
     listAgents,
     async createAgent(keyId: number, input: { name: string; spaceId?: string; instructions?: string }, signal?: AbortSignal) {
       const resolved = await getAdapterForKey(keyId, undefined, signal)
-      return resolved.adapter.createAgent(input, signal)
+      return resolved.adapter.createAgent(input, { signal })
     },
     async diagnostics(serverId: string, keyId: number, signal?: AbortSignal) {
       const resolved = await getAdapterForKey(keyId, serverId, signal)
-      const agents = await resolved.adapter.listAgents(signal)
+      const agents = await resolved.adapter.listAgents({ signal })
       return {
         ...((resolved.client.diagnostics?.() || {}) as Record<string, unknown>),
         adapter_id: resolved.server.adapter_id,
