@@ -4,6 +4,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { createMcpKey, readMcpKeys } from '../mcp/key-store'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from '../mcp/server-store'
+import * as mcpServerStore from '../mcp/server-store'
 import { registerMcpRoutes } from './mcp-routes'
 
 const workspaces: string[] = []
@@ -42,6 +43,93 @@ afterEach(async () => {
 })
 
 describe('MCP routes', () => {
+  test('never returns raw custom Header values', async () => {
+    const workspace = await temporaryWorkspace()
+    await writeMcpServers(workspace, [{
+      ...BUDA_MCP_SERVER_TEMPLATE,
+      custom_headers: { 'X-Space': 'private-space', Cookie: 'session=private' },
+    }])
+    const { app, handlers } = createRouteHarness()
+    registerMcpRoutes(app, () => workspace, {} as any)
+
+    const response = await call(handlers.get('GET /api/mcp/servers'))
+    expect(response.body[0].custom_headers).toEqual([
+      { name: 'Cookie', configured: true },
+      { name: 'X-Space', configured: true },
+    ])
+    expect(JSON.stringify(response.body)).not.toContain('private-space')
+    expect(JSON.stringify(response.body)).not.toContain('session=private')
+  })
+
+  test('returns public Server DTOs after create and update', async () => {
+    const workspace = await temporaryWorkspace()
+    const { app, handlers } = createRouteHarness()
+    registerMcpRoutes(app, () => workspace, { invalidateServer: async () => {} } as any)
+
+    const created = await call(handlers.get('POST /api/mcp/servers'), {
+      body: {
+        id: 'custom',
+        display_name: 'Custom',
+        transport: 'streamable_http',
+        url: 'https://example.test/mcp',
+        adapter_id: 'buda',
+        custom_headers: { 'X-Token': 'create-private' },
+      },
+    })
+    expect(created.statusCode).toBe(201)
+    expect(created.body.server.custom_headers).toEqual([{ name: 'X-Token', configured: true }])
+    expect(JSON.stringify(created.body)).not.toContain('create-private')
+
+    const updated = await call(handlers.get('PUT /api/mcp/servers/:id'), {
+      params: { id: 'custom' },
+      body: { custom_headers: { 'X-Token': 'update-private', 'X-Other': 'other-private' } },
+    })
+    expect(updated.statusCode).toBe(200)
+    expect(updated.body.server.custom_headers).toEqual([
+      { name: 'X-Other', configured: true },
+      { name: 'X-Token', configured: true },
+    ])
+    expect(JSON.stringify(updated.body)).not.toContain('update-private')
+    expect(JSON.stringify(updated.body)).not.toContain('other-private')
+  })
+
+  test('merges Header replacements, blank preservation, and explicit removals', () => {
+    const mergeMcpCustomHeaders = (mcpServerStore as any).mergeMcpCustomHeaders
+    expect(mergeMcpCustomHeaders(
+      { 'X-Keep': 'old', 'X-Replace': 'old', 'X-Remove': 'old' },
+      { 'X-Keep': '   ', 'X-Replace': 'new' },
+      ['X-Remove'],
+    )).toEqual({
+      'X-Keep': 'old',
+      'X-Replace': 'new',
+    })
+  })
+
+  test('allows same-origin URL edits and rejects cross-origin edits while a Key exists', async () => {
+    const workspace = await temporaryWorkspace()
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    await createMcpKey(workspace, { mcp_server_id: 'buda', key: 'sk_origin_bound', description: '账号' })
+    const invalidated: string[] = []
+    const { app, handlers } = createRouteHarness()
+    registerMcpRoutes(app, () => workspace, {
+      invalidateServer: async (id: string) => { invalidated.push(id) },
+    } as any)
+
+    const sameOrigin = await call(handlers.get('PUT /api/mcp/servers/:id'), {
+      params: { id: 'buda' },
+      body: { url: 'https://buda.im/api/mcp/v2' },
+    })
+    expect(sameOrigin.statusCode).toBe(200)
+
+    const changedOrigin = await call(handlers.get('PUT /api/mcp/servers/:id'), {
+      params: { id: 'buda' },
+      body: { url: 'https://attacker.example/mcp' },
+    })
+    expect(changedOrigin.statusCode).toBe(409)
+    expect(changedOrigin.body.error_code).toBe('MCP_SERVER_ORIGIN_CHANGE_REQUIRES_NEW_CREDENTIAL')
+    expect(invalidated).toEqual(['buda'])
+  })
+
   test('lists public key records without exposing raw secrets', async () => {
     const workspace = await temporaryWorkspace()
     await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])

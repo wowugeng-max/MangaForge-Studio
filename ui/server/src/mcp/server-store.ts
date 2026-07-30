@@ -1,7 +1,7 @@
 import { join } from 'path'
 import { coerceBoolean } from '../boolean-utils'
 import { readJsonArrayFailClosed, writeJsonArrayAtomic } from './atomic-json-store'
-import type { McpServerRecord } from './types'
+import type { McpServerRecord, PublicMcpServerRecord } from './types'
 import { assertMcpWorkspaceMutationHeld, withMcpWorkspaceMutation } from './workspace-coordinator'
 
 export const BUDA_MCP_SERVER_TEMPLATE: McpServerRecord = Object.freeze({
@@ -33,6 +33,33 @@ function finitePositive(value: unknown, fallback: number) {
 function objectStrings(value: unknown): Record<string, string> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, String(item)]))
+}
+
+export function toPublicMcpServer(record: McpServerRecord): PublicMcpServerRecord {
+  const { custom_headers, ...safe } = record
+  return {
+    ...safe,
+    custom_headers: Object.keys(custom_headers)
+      .sort((left, right) => left.localeCompare(right))
+      .map(name => ({ name, configured: Boolean(custom_headers[name]) })),
+  }
+}
+
+export function mergeMcpCustomHeaders(
+  previous: Record<string, string>,
+  replacements: unknown,
+  removals: unknown,
+) {
+  const next = { ...previous }
+  for (const name of Array.isArray(removals) ? removals.map(String) : []) delete next[name]
+  if (replacements && typeof replacements === 'object' && !Array.isArray(replacements)) {
+    for (const [rawName, rawValue] of Object.entries(replacements)) {
+      const name = rawName.trim()
+      const value = String(rawValue ?? '').trim()
+      if (name && value) next[name] = value
+    }
+  }
+  return next
 }
 
 export function normalizeMcpServer(raw: Partial<McpServerRecord> & Record<string, unknown>): McpServerRecord {

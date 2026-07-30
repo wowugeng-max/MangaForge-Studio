@@ -5,6 +5,7 @@ import {
   defaultBudaServerForm,
   summarizeMcpDiagnostics,
 } from './mcpServicesModel'
+import * as mcpServicesModel from './mcpServicesModel'
 
 describe('MCP Services UI model', () => {
   test('provides the approved Buda Streamable HTTP defaults', () => {
@@ -42,15 +43,43 @@ describe('MCP Services UI model', () => {
     expect(buildMcpKeyPayload({ mcp_server_id: 'buda', key: 'sk_new' })).toMatchObject({ key: 'sk_new' })
   })
 
-  test('normalizes headers and enabled tools without empty entries', () => {
-    expect(buildMcpServerPayload({
+  test('builds overwrite-only Header edits with explicit deletion and preserves enabled tools', () => {
+    const existing = {
       ...defaultBudaServerForm(),
-      custom_headers_list: [{ key: 'X-Space', value: 'fiction' }, { key: '', value: 'ignored' }],
+      custom_headers: [
+        { name: 'X-Keep', configured: true },
+        { name: 'X-Replace', configured: true },
+        { name: 'X-Remove', configured: true },
+      ],
+    } as any
+
+    const payload = buildMcpServerPayload({
+      ...defaultBudaServerForm(),
+      custom_headers_list: [
+        { name: 'X-Keep', value: '' },
+        { name: 'X-Replace', value: 'new-value' },
+        { name: 'X-New', value: 'new-header' },
+        { name: '', value: 'ignored' },
+      ],
       enabled_tools_text: 'listApiAgents\n\ncreateApiAgentSession',
-    })).toMatchObject({
-      custom_headers: { 'X-Space': 'fiction' },
+    }, existing)
+
+    expect(payload).toMatchObject({
+      custom_headers: { 'X-Replace': 'new-value', 'X-New': 'new-header' },
+      remove_custom_headers: ['X-Remove'],
       enabled_tools: ['listApiAgents', 'createApiAgentSession'],
     })
+    expect(payload.custom_headers).not.toHaveProperty('X-Keep')
+  })
+
+  test('formats stable MCP service failure codes without losing fallback behavior', () => {
+    const formatMcpServiceFailure = (mcpServicesModel as any).formatMcpServiceFailure
+    expect(formatMcpServiceFailure({ error_code: 'MCP_STORE_CORRUPT' }, 'fallback')).toContain('没有覆盖原文件')
+    expect(formatMcpServiceFailure({ error_code: 'MCP_STORE_IO_FAILED' }, 'fallback')).toContain('工作区权限和磁盘状态')
+    expect(formatMcpServiceFailure({ error_code: 'MCP_SERVER_ORIGIN_CHANGE_REQUIRES_NEW_CREDENTIAL' }, 'fallback')).toContain('不能直接更换来源站点')
+    expect(formatMcpServiceFailure({ error_code: 'MCP_REFERENCED_RECORD_CONFLICT' }, 'fallback')).toContain('小说项目引用')
+    expect(formatMcpServiceFailure({ error: 'server detail' }, 'fallback')).toBe('server detail')
+    expect(formatMcpServiceFailure({}, 'fallback')).toBe('fallback')
   })
 
   test('builds a bounded diagnostics summary', () => {

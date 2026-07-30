@@ -18,6 +18,20 @@ export type McpServerRecord = {
   custom_headers: Record<string, string>
 }
 
+export type PublicMcpHeader = {
+  name: string
+  configured: boolean
+}
+
+export type PublicMcpServerRecord = Omit<McpServerRecord, 'custom_headers'> & {
+  custom_headers: PublicMcpHeader[]
+}
+
+export type McpServerUpdateInput = Partial<Omit<McpServerRecord, 'id' | 'custom_headers'>> & {
+  custom_headers?: Record<string, string>
+  remove_custom_headers?: string[]
+}
+
 export type McpKeyRecord = {
   id: number
   mcp_server_id: string

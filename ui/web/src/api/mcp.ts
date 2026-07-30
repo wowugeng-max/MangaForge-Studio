@@ -14,7 +14,12 @@ export type McpServerRecord = {
   poll_initial_ms: number
   poll_max_ms: number
   enabled_tools: string[]
-  custom_headers: Record<string, string>
+  custom_headers: Array<{ name: string; configured: boolean }>
+}
+
+export type McpServerPayload = Partial<Omit<McpServerRecord, 'custom_headers'>> & {
+  custom_headers?: Record<string, string>
+  remove_custom_headers?: string[]
 }
 
 export type McpPublicKey = {
@@ -54,8 +59,8 @@ export type ProseGenerationSourceConfig =
 
 export const mcpApi = {
   listServers: () => apiClient.get<McpServerRecord[]>('/mcp/servers'),
-  createServer: (data: Partial<McpServerRecord>) => apiClient.post<{ ok: true; server: McpServerRecord }>('/mcp/servers', data),
-  updateServer: (id: string, data: Partial<McpServerRecord>) => apiClient.put<{ ok: true; server: McpServerRecord }>(`/mcp/servers/${encodeURIComponent(id)}`, data),
+  createServer: (data: McpServerPayload) => apiClient.post<{ ok: true; server: McpServerRecord }>('/mcp/servers', data),
+  updateServer: (id: string, data: McpServerPayload) => apiClient.put<{ ok: true; server: McpServerRecord }>(`/mcp/servers/${encodeURIComponent(id)}`, data),
   deleteServer: (id: string) => apiClient.delete(`/mcp/servers/${encodeURIComponent(id)}`),
   listKeys: () => apiClient.get<McpPublicKey[]>('/mcp/keys'),
   createKey: (data: McpKeyPayload) => apiClient.post<{ ok: true; key: McpPublicKey }>('/mcp/keys', data),

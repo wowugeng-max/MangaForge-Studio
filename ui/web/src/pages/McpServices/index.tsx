@@ -30,12 +30,12 @@ import {
   RobotOutlined,
 } from '@ant-design/icons'
 import { mcpApi, type McpAgentSummary, type McpPublicKey, type McpServerRecord } from '../../api/mcp'
-import { buildMcpKeyPayload, buildMcpServerPayload, defaultBudaServerForm, summarizeMcpDiagnostics } from './mcpServicesModel'
+import { buildMcpKeyPayload, buildMcpServerPayload, defaultBudaServerForm, formatMcpServiceFailure, summarizeMcpDiagnostics } from './mcpServicesModel'
 
 const { Title, Text, Paragraph } = Typography
 
 function failureMessage(error: any, fallback: string) {
-  return String(error?.response?.data?.error || error?.response?.data?.detail || error?.message || fallback)
+  return formatMcpServiceFailure(error?.response?.data, String(error?.message || fallback))
 }
 
 export default function McpServices() {
@@ -81,7 +81,11 @@ export default function McpServices() {
       serverForm.setFieldsValue({
         ...server,
         enabled_tools_text: (server.enabled_tools || []).join('\n'),
-        custom_headers_list: Object.entries(server.custom_headers || {}).map(([key, value]) => ({ key, value })),
+        custom_headers_list: (server.custom_headers || []).map(header => ({
+          name: header.name,
+          value: '',
+          configured: header.configured,
+        })),
       })
     } else {
       serverForm.setFieldsValue(defaultBudaServerForm())
@@ -91,7 +95,7 @@ export default function McpServices() {
 
   const saveServer = async () => {
     try {
-      const payload = buildMcpServerPayload(await serverForm.validateFields())
+      const payload = buildMcpServerPayload(await serverForm.validateFields(), editingServer || undefined)
       if (editingServer) await mcpApi.updateServer(editingServer.id, payload)
       else await mcpApi.createServer(payload)
       message.success(editingServer ? 'MCP Server 已更新' : 'MCP Server 已创建')
@@ -230,10 +234,11 @@ export default function McpServices() {
       <Form form={serverForm} layout="vertical">
         <Space align="start" style={{ width: '100%' }}><Form.Item name="id" label="Server ID" rules={[{ required: true }]}><Input disabled={!!editingServer} /></Form.Item><Form.Item name="display_name" label="显示名称" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="adapter_id" label="Adapter" rules={[{ required: true }]}><Input /></Form.Item></Space>
         <Form.Item name="url" label="Streamable HTTP URL" rules={[{ required: true, type: 'url' }]}><Input /></Form.Item>
+        <Alert type="warning" showIcon message="Server 来源与凭据绑定" description="更改协议、主机或端口时，请新建 Server 或重新配置凭据。" style={{ marginBottom: 16 }} />
         <Space align="start" wrap><Form.Item name="transport" label="Transport"><Select style={{ width: 180 }} options={[{ value: 'streamable_http', label: 'Streamable HTTP' }]} /></Form.Item><Form.Item name="auth_type" label="认证"><Select style={{ width: 150 }} options={[{ value: 'bearer', label: 'Bearer' }, { value: 'none', label: 'None' }]} /></Form.Item><Form.Item name="is_active" label="启用" valuePropName="checked"><Switch /></Form.Item></Space>
         <Space align="start" wrap><Form.Item name="startup_timeout_ms" label="启动超时 ms"><InputNumber min={1} /></Form.Item><Form.Item name="tool_timeout_ms" label="工具超时 ms"><InputNumber min={1} /></Form.Item><Form.Item name="generation_timeout_ms" label="生成总超时 ms"><InputNumber min={1} /></Form.Item><Form.Item name="poll_initial_ms" label="初始轮询 ms"><InputNumber min={1} /></Form.Item><Form.Item name="poll_max_ms" label="最大轮询 ms"><InputNumber min={1} /></Form.Item></Space>
         <Form.Item name="enabled_tools_text" label="工具白名单" extra="每行一个；留空表示使用 Adapter 所需工具"><Input.TextArea rows={3} /></Form.Item>
-        <Form.List name="custom_headers_list">{(fields, { add, remove }) => <Space direction="vertical" style={{ width: '100%' }}>{fields.map(field => <Space key={field.key}><Form.Item {...field} name={[field.name, 'key']} noStyle><Input placeholder="Header" /></Form.Item><Form.Item {...field} name={[field.name, 'value']} noStyle><Input placeholder="Value" /></Form.Item><Button danger onClick={() => remove(field.name)}>删除</Button></Space>)}<Button onClick={() => add({ key: '', value: '' })}>添加自定义 Header</Button></Space>}</Form.List>
+        <Form.List name="custom_headers_list">{(fields, { add, remove }) => <Space direction="vertical" style={{ width: '100%' }}>{fields.map(field => <Space key={field.key} align="start"><Form.Item {...field} name={[field.name, 'name']}><Input placeholder="Header" /></Form.Item><Form.Item {...field} name={[field.name, 'value']} extra={serverForm.getFieldValue(['custom_headers_list', field.name, 'configured']) ? '已配置；留空保持不变' : undefined}><Input placeholder="Value" /></Form.Item><Button danger onClick={() => remove(field.name)}>删除</Button></Space>)}<Button onClick={() => add({ name: '', value: '', configured: false })}>添加自定义 Header</Button></Space>}</Form.List>
       </Form>
     </Modal>
 
