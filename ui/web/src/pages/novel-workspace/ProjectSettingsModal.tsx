@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
-import { Button, InputNumber, Modal, Space, Typography, message } from 'antd'
+import { Button, Divider, InputNumber, Modal, Space, Typography, message } from 'antd'
 import apiClient from '../../api/client'
+import { McpGenerationSourcePanel } from './McpGenerationSourcePanel'
 
 const { Text } = Typography
 const MIN_TIMEOUT_SECONDS = 60
@@ -131,6 +132,7 @@ export function ProjectSettingsModal({
           保存
         </Button>,
       ]}
+      width={780}
     >
       <Space direction="vertical" size={8} style={{ width: '100%' }}>
         <Text strong>质检与修订</Text>
@@ -171,6 +173,8 @@ export function ProjectSettingsModal({
           只控制修订后当前章故事状态同步的单次模型输出预算，不控制正文长度，也不会扩展到全部章节。
         </Text>
       </Space>
+      <Divider />
+      <McpGenerationSourcePanel open={open} projectId={projectId} />
     </Modal>
   )
 }

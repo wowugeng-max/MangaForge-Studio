@@ -48,6 +48,10 @@ export type McpKeyPayload = {
   priority?: number
 }
 
+export type ProseGenerationSourceConfig =
+  | { version: 'prose_generation_source_v1'; type: 'model' }
+  | { version: 'prose_generation_source_v1'; type: 'mcp'; mcp: { server_id: string; key_id: number; adapter_id: string; agent_id: string } }
+
 export const mcpApi = {
   listServers: () => apiClient.get<McpServerRecord[]>('/mcp/servers'),
   createServer: (data: Partial<McpServerRecord>) => apiClient.post<{ ok: true; server: McpServerRecord }>('/mcp/servers', data),
@@ -61,4 +65,9 @@ export const mcpApi = {
   listAgents: (id: number) => apiClient.get<{ agents: McpAgentSummary[] }>(`/mcp/keys/${id}/agents`),
   createAgent: (id: number, data: { name: string; space_id?: string }) => apiClient.post<{ ok: true; agent: McpAgentSummary }>(`/mcp/keys/${id}/agents`, data),
   diagnostics: (serverId: string, keyId: number) => apiClient.get<Record<string, any>>(`/mcp/servers/${encodeURIComponent(serverId)}/diagnostics`, { params: { key_id: keyId } }),
+  getProjectSource: (projectId: number) => apiClient.get<{ ok: true; source: ProseGenerationSourceConfig }>(`/novel/projects/${projectId}/prose-generation-source`),
+  saveProjectSource: (projectId: number, source: ProseGenerationSourceConfig) => apiClient.put(`/novel/projects/${projectId}/prose-generation-source`, { source }),
+  testProjectSource: (projectId: number, source: ProseGenerationSourceConfig) => apiClient.post(`/novel/projects/${projectId}/prose-generation-source/test`, { source }),
+  listProjectAgents: (projectId: number, serverId: string, keyId: number) => apiClient.get<{ agents: McpAgentSummary[] }>(`/novel/projects/${projectId}/prose-generation-source/agents`, { params: { server_id: serverId, key_id: keyId } }),
+  createProjectAgent: (projectId: number, data: { server_id: string; key_id: number; name: string; space_id?: string }) => apiClient.post<{ ok: true; agent: McpAgentSummary }>(`/novel/projects/${projectId}/prose-generation-source/agents`, data),
 }

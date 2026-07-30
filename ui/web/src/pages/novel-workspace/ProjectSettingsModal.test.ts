@@ -57,4 +57,16 @@ describe('project settings editor revision timeout', () => {
     expect(modal).toContain('setLoadFailed(true)')
     expect(modal).toContain('disabled={loading || loadFailed ||')
   })
+
+  test('mounts MCP source settings as an independently loaded and saved section', () => {
+    const modal = readFileSync(join(import.meta.dir, 'ProjectSettingsModal.tsx'), 'utf8')
+    const panel = readFileSync(join(import.meta.dir, 'McpGenerationSourcePanel.tsx'), 'utf8')
+    expect(modal).toContain('<McpGenerationSourcePanel')
+    expect(panel).toContain('/prose-generation-source')
+    expect(panel).toContain('测试绑定')
+    expect(panel).toContain('保存正文来源')
+    expect(panel).toContain('新建 MangaForge Agent')
+    expect(panel).toContain('Popconfirm')
+    expect(panel).toContain('MCP 区域加载失败')
+  })
 })
