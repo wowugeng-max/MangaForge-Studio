@@ -268,18 +268,19 @@ export function registerMcpRoutes(
 
   app.delete(['/api/mcp/keys/:id', '/api/mcp/keys/:id/'], safely(async (req, res) => {
     const activeWorkspace = getWorkspace()
-    const id = Number(req.params.id)
-    const previous = await withMcpWorkspaceMutation(activeWorkspace, async () => {
-      if (!Number.isInteger(id) || id <= 0) return null
+    const result = await withMcpWorkspaceMutation(activeWorkspace, async () => {
+      const id = Number(req.params.id)
+      if (!Number.isInteger(id) || id <= 0) return { kind: 'invalid' as const }
       const record = (await readMcpKeys(activeWorkspace)).find(item => item.id === id)
-      if (!record) return null
+      if (!record) return { kind: 'missing' as const }
       const references = await findReferences(activeWorkspace, { keyId: id })
       if (references.length) throwReferencedRecordConflict('该 MCP Key 仍被小说项目引用', references)
       await deleteMcpKey(activeWorkspace, id)
-      return record
+      return { kind: 'deleted' as const, id, record }
     })
-    if (!previous) return res.status(404).json({ error: 'MCP Key 不存在' })
-    await runtime.invalidateKey?.(id, previous.mcp_server_id)
+    if (result.kind === 'invalid') return res.status(400).json({ error: 'MCP Key ID 无效' })
+    if (result.kind === 'missing') return res.status(404).json({ error: 'MCP Key 不存在' })
+    await runtime.invalidateKey?.(result.id, result.record.mcp_server_id)
     res.json({ ok: true })
   }))
 

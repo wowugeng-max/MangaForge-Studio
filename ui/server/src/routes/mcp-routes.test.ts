@@ -293,7 +293,7 @@ describe('MCP routes', () => {
     expect((await readMcpKeys(workspace)).map(key => key.id)).toEqual([referencedKey.id])
   })
 
-  test('returns 404 without scanning references when deleting missing or invalid records', async () => {
+  test('returns 404 without scanning references when deleting missing records', async () => {
     const workspace = await temporaryWorkspace()
     await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
     let referenceChecks = 0
@@ -311,13 +311,46 @@ describe('MCP routes', () => {
     const missingKey = await call(handlers.get('DELETE /api/mcp/keys/:id'), {
       params: { id: '999' },
     })
-    const invalidKey = await call(handlers.get('DELETE /api/mcp/keys/:id'), {
-      params: { id: 'not-a-number' },
-    })
-
     expect(missingServer).toMatchObject({ statusCode: 404, body: { error: 'MCP Server 不存在' } })
     expect(missingKey).toMatchObject({ statusCode: 404, body: { error: 'MCP Key 不存在' } })
-    expect(invalidKey).toMatchObject({ statusCode: 404, body: { error: 'MCP Key 不存在' } })
+    expect(referenceChecks).toBe(0)
+  })
+
+  test('parses and rejects invalid Key delete IDs inside the coordinator without scanning references', async () => {
+    const workspace = await temporaryWorkspace()
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    let referenceChecks = 0
+    const { app, handlers } = createRouteHarness()
+    registerMcpRoutes(app, () => workspace, {} as any, {
+      findProjectReferences: async () => {
+        referenceChecks += 1
+        return [{ id: 9, title: '不应泄露的绑定小说' }]
+      },
+    })
+    const scopedParams: Record<string, unknown> = {}
+    const scopedInvalidId = {
+      [Symbol.toPrimitive]() {
+        assertMcpWorkspaceMutationHeld(workspace)
+        return '0'
+      },
+    }
+    Object.defineProperty(scopedParams, 'id', {
+      enumerable: true,
+      get() {
+        assertMcpWorkspaceMutationHeld(workspace)
+        return scopedInvalidId
+      },
+    })
+
+    const responses = await Promise.all([
+      call(handlers.get('DELETE /api/mcp/keys/:id'), { params: { id: 'not-a-number' } }),
+      call(handlers.get('DELETE /api/mcp/keys/:id'), { params: scopedParams }),
+      call(handlers.get('DELETE /api/mcp/keys/:id'), { params: { id: '-1' } }),
+      call(handlers.get('DELETE /api/mcp/keys/:id'), { params: { id: '1.5' } }),
+    ])
+
+    expect(responses.map(response => response.statusCode)).toEqual([400, 400, 400, 400])
+    for (const response of responses) expect(response.body.error).toBe('MCP Key ID 无效')
     expect(referenceChecks).toBe(0)
   })
 
