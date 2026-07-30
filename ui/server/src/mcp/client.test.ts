@@ -245,4 +245,62 @@ describe('generic MCP client', () => {
     expect(capture.terminated).toBe(true)
     expect(capture.closed).toBe(true)
   })
+
+  test('maps broken transports to connection loss and closes the unusable client', async () => {
+    const messages = [
+      'MCP session expired',
+      'MCP session closed',
+      'MCP session not found',
+      'transport closed unexpectedly after sk_test_secret',
+      'transport terminated',
+      'read ECONNRESET',
+      'socket hang up',
+    ]
+
+    for (const message of messages) {
+      const { capture, factory } = fakeSdkFactory({ callError: new Error(message) })
+      const client = createMcpClient({
+        server: { ...BUDA_MCP_SERVER_TEMPLATE, enabled_tools: ['allowed'] },
+        key,
+        sdkFactory: factory,
+      })
+      await client.connect()
+      expect(client.diagnostics().tools.map(tool => tool.name)).toEqual(['allowed'])
+
+      await expect(client.callTool('allowed', {}, { operation: 'read_safe' })).rejects.toMatchObject({
+        code: 'MCP_CONNECTION_LOST',
+        error_code: 'MCP_CONNECTION_LOST',
+        message: 'MCP 连接已失效',
+        details: { tool_name: 'allowed' },
+      })
+      await Promise.resolve()
+
+      expect(client.state).toBe('Closed')
+      expect(client.diagnostics().tools).toEqual([])
+      expect(capture.terminated).toBe(true)
+      expect(capture.closed).toBe(true)
+    }
+  })
+
+  test('caller cancellation takes priority over a transport-looking SDK error', async () => {
+    const controller = new AbortController()
+    const { capture, factory } = fakeSdkFactory({
+      callError: new McpError('MCP_TOOL_ERROR', 'transport closed unexpectedly'),
+    })
+    const client = createMcpClient({
+      server: { ...BUDA_MCP_SERVER_TEMPLATE, enabled_tools: ['allowed'] },
+      key,
+      sdkFactory: factory,
+    })
+    await client.connect()
+    controller.abort()
+
+    await expect(client.callTool('allowed', {}, {
+      signal: controller.signal,
+      operation: 'read_safe',
+    })).rejects.toMatchObject({ code: 'MCP_CANCELLED' })
+    expect(client.state).toBe('Ready')
+    expect(capture.terminated).toBeUndefined()
+    expect(capture.closed).toBeUndefined()
+  })
 })

@@ -6,7 +6,7 @@ import { createMcpAdapter } from './adapters/registry'
 import type { McpKeyRecord, McpServerRecord } from './types'
 import type { McpClientPort, ProseMcpAdapter } from './adapters/types'
 
-type RuntimeManager = Pick<McpClientManager, 'get' | 'invalidate' | 'invalidateServer' | 'closeAll'>
+type RuntimeManager = Pick<McpClientManager, 'get' | 'invalidate' | 'invalidateIfCurrent' | 'invalidateServer' | 'closeAll'>
 
 export type ResolvedMcpCredential = {
   server: McpServerRecord
@@ -51,7 +51,48 @@ export function createMcpRuntime(
     if (server.id !== key.mcp_server_id) throw new McpError('MCP_BINDING_INVALID', '固定 MCP Server 与 Key 不一致')
     if (!server.is_active) throw new McpError('MCP_BINDING_INVALID', `MCP Server 已禁用：${server.id}`)
     if (server.transport !== 'streamable_http') throw new McpError('MCP_BINDING_INVALID', '首期正文生成只支持 Streamable HTTP')
-    const client = await manager.get(activeWorkspace, server, key, signal) as ResolvedMcpCredential['client']
+    let currentClient = await manager.get(activeWorkspace, server, key, signal)
+    const reacquire = async (operationSignal?: AbortSignal) => {
+      currentClient = await manager.get(activeWorkspace, server, key, operationSignal)
+      return currentClient
+    }
+    const invalidateLostClient = async (client: typeof currentClient) => {
+      await manager.invalidateIfCurrent(activeWorkspace, server.id, key.id, client).catch(() => {})
+    }
+    const readSafe = async <T>(
+      operationSignal: AbortSignal | undefined,
+      operation: (client: typeof currentClient) => Promise<T>,
+    ) => {
+      const firstClient = await reacquire(operationSignal)
+      try {
+        return await operation(firstClient)
+      } catch (error) {
+        if (!(error instanceof McpError) || error.code !== 'MCP_CONNECTION_LOST') throw error
+        await invalidateLostClient(firstClient)
+        return operation(await reacquire(operationSignal))
+      }
+    }
+    const client: ResolvedMcpCredential['client'] = {
+      listTools: options => readSafe(options.signal, activeClient => activeClient.listTools(options)),
+      async callTool(name, args, operationOptions) {
+        if (operationOptions.operation === 'read_safe') {
+          return readSafe(
+            operationOptions.signal,
+            activeClient => activeClient.callTool(name, args, operationOptions),
+          )
+        }
+        const activeClient = await reacquire(operationOptions.signal)
+        try {
+          return await activeClient.callTool(name, args, operationOptions)
+        } catch (error) {
+          if (error instanceof McpError && error.code === 'MCP_CONNECTION_LOST') {
+            await invalidateLostClient(activeClient)
+          }
+          throw error
+        }
+      },
+      diagnostics: () => currentClient.diagnostics(),
+    }
     const adapter = adapterFactory(server.adapter_id, client)
     return { server, key, client, adapter }
   }

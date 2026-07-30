@@ -52,6 +52,11 @@ function errorMessage(error: unknown) {
   return String((error as any)?.message || error || 'MCP 操作失败')
 }
 
+function isBrokenTransportMessage(message: string) {
+  return /\b(?:ECONNRESET|EPIPE)\b|socket hang up|connection reset by peer|\b(?:session|transport|connection|channel|stream)\b.{0,80}\b(?:expired|closed|terminated|not found|disconnected|lost)\b/i
+    .test(message)
+}
+
 function mapConnectionError(error: unknown, scrubText: (value: unknown) => string) {
   const message = errorMessage(error)
   if (/\b(401|403)\b|unauthori[sz]ed|forbidden|authentication/i.test(message)) {
@@ -120,8 +125,8 @@ export class GenericMcpClient {
         timeout: this.options.server.startup_timeout_ms,
         maxTotalTimeout: this.options.server.startup_timeout_ms,
       })
+      await this.refreshTools({ signal }, sdk)
       this.state = 'Ready'
-      await this.refreshTools({ signal })
       return this
     } catch (error) {
       this.state = 'Closed'
@@ -142,8 +147,10 @@ export class GenericMcpClient {
     return tools.filter(tool => allowed.has(tool.name))
   }
 
-  private async refreshTools(options: Omit<McpOperationOptions, 'operation'>) {
-    const sdk = this.requireReady()
+  private async refreshTools(
+    options: Omit<McpOperationOptions, 'operation'>,
+    sdk: SdkClientLike = this.requireReady(),
+  ) {
     const timeout = options.timeoutMs || this.options.server.tool_timeout_ms
     const listed = await sdk.listTools(undefined, {
       signal: options.signal,
@@ -191,15 +198,22 @@ export class GenericMcpClient {
       }
       return result
     } catch (error) {
-      if (error instanceof McpError) throw this.scrubMcpError(error)
-      if (options.signal?.aborted || /abort/i.test(errorMessage(error))) {
+      if (options.signal?.aborted) {
         throw new McpError('MCP_CANCELLED', 'MCP 工具调用已取消', { tool_name: name })
       }
-      const message = errorMessage(error)
+      if (error instanceof McpError) throw this.scrubMcpError(error)
+      const message = this.scrubber.scrubText(errorMessage(error))
       if (/\b(401|403)\b|unauthori[sz]ed|forbidden/i.test(message)) {
         throw new McpError('MCP_AUTH_FAILED', 'MCP 身份验证失败', { tool_name: name })
       }
-      throw new McpError('MCP_TOOL_ERROR', `MCP 工具调用失败：${this.scrubber.scrubText(message).slice(0, 240)}`, { tool_name: name })
+      if (isBrokenTransportMessage(message)) {
+        void this.close().catch(() => {})
+        throw new McpError('MCP_CONNECTION_LOST', 'MCP 连接已失效', { tool_name: name })
+      }
+      if (/abort/i.test(message)) {
+        throw new McpError('MCP_CANCELLED', 'MCP 工具调用已取消', { tool_name: name })
+      }
+      throw new McpError('MCP_TOOL_ERROR', `MCP 工具调用失败：${message.slice(0, 240)}`, { tool_name: name })
     }
   }
 

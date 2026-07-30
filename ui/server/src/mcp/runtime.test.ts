@@ -2,12 +2,17 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdtemp, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { McpError } from './errors'
 import { createMcpKey, readMcpKeys, updateMcpKey } from './key-store'
 import { createMcpRuntime } from './runtime'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from './server-store'
 
 const workspaces: string[] = []
 afterEach(async () => Promise.all(workspaces.splice(0).map(path => rm(path, { recursive: true, force: true }))))
+
+function connectionLostError() {
+  return new McpError('MCP_CONNECTION_LOST', 'connection lost')
+}
 
 describe('MCP runtime', () => {
   test('resolves an active Server and matching Key and records a safe key test receipt', async () => {
@@ -74,5 +79,135 @@ describe('MCP runtime', () => {
 
     expect(connectedKey).toBe(initialKey)
     expect(resolved.key.key).toBe(initialKey)
+  })
+
+  test('reconnects once and replays a read-safe call after connection loss', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-read-recovery-'))
+    workspaces.push(workspace)
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const key = await createMcpKey(workspace, { mcp_server_id: 'buda', key: 'sk_runtime', description: '账号' })
+    let firstCalls = 0
+    let secondCalls = 0
+    const connectionLost = connectionLostError()
+    const firstClient = {
+      listTools: async () => [],
+      async callTool() {
+        firstCalls += 1
+        throw connectionLost
+      },
+    }
+    const secondClient = {
+      listTools: async () => [],
+      async callTool() {
+        secondCalls += 1
+        return { content: [{ type: 'text', text: 'ok' }] }
+      },
+    }
+    let current = firstClient
+    const invalidated: unknown[] = []
+    const manager = {
+      get: async () => current,
+      async invalidateIfCurrent(_workspace: string, _serverId: string, _keyId: number, client: unknown) {
+        invalidated.push(client)
+        if (current === client) current = secondClient as typeof firstClient
+      },
+      invalidate: async () => {},
+      invalidateServer: async () => {},
+      closeAll: async () => {},
+    }
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: manager as any,
+      adapterFactory: () => ({ listAgents: async () => [] }) as any,
+    })
+
+    const resolved = await runtime.getAdapterForKey(key.id)
+    const result = await resolved.client.callTool('read', {}, { operation: 'read_safe' })
+
+    expect(result).toEqual({ content: [{ type: 'text', text: 'ok' }] })
+    expect(firstCalls + secondCalls).toBe(2)
+    expect(firstCalls).toBe(1)
+    expect(secondCalls).toBe(1)
+    expect(invalidated).toEqual([firstClient])
+  })
+
+  test('reconnects once when the read-safe tool list loses its connection', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-list-recovery-'))
+    workspaces.push(workspace)
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const key = await createMcpKey(workspace, { mcp_server_id: 'buda', key: 'sk_runtime', description: '账号' })
+    let firstCalls = 0
+    let secondCalls = 0
+    const firstClient = {
+      async listTools() {
+        firstCalls += 1
+        throw connectionLostError()
+      },
+      callTool: async () => ({ content: [] }),
+    }
+    const secondClient = {
+      async listTools() {
+        secondCalls += 1
+        return [{ name: 'read' }]
+      },
+      callTool: async () => ({ content: [] }),
+    }
+    let current: typeof firstClient | typeof secondClient = firstClient
+    const invalidated: unknown[] = []
+    const manager = {
+      get: async () => current,
+      async invalidateIfCurrent(_workspace: string, _serverId: string, _keyId: number, client: unknown) {
+        invalidated.push(client)
+        if (current === client) current = secondClient
+      },
+      invalidate: async () => {},
+      invalidateServer: async () => {},
+      closeAll: async () => {},
+    }
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: manager as any,
+      adapterFactory: () => ({ listAgents: async () => [] }) as any,
+    })
+
+    const resolved = await runtime.getAdapterForKey(key.id)
+    expect(await resolved.client.listTools({})).toEqual([{ name: 'read' }])
+    expect(firstCalls + secondCalls).toBe(2)
+    expect(invalidated).toEqual([firstClient])
+  })
+
+  test('invalidates but never replays a mutation after connection loss', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-mutation-recovery-'))
+    workspaces.push(workspace)
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const key = await createMcpKey(workspace, { mcp_server_id: 'buda', key: 'sk_runtime', description: '账号' })
+    let calls = 0
+    const connectionLost = connectionLostError()
+    const client = {
+      listTools: async () => [],
+      async callTool() {
+        calls += 1
+        throw connectionLost
+      },
+    }
+    const invalidated: unknown[] = []
+    const manager = {
+      get: async () => client,
+      async invalidateIfCurrent(_workspace: string, _serverId: string, _keyId: number, current: unknown) {
+        invalidated.push(current)
+      },
+      invalidate: async () => {},
+      invalidateServer: async () => {},
+      closeAll: async () => {},
+    }
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: manager as any,
+      adapterFactory: () => ({ listAgents: async () => [] }) as any,
+    })
+
+    const resolved = await runtime.getAdapterForKey(key.id)
+    await expect(resolved.client.callTool('write', {}, { operation: 'mutation' }))
+      .rejects.toMatchObject({ code: 'MCP_CONNECTION_LOST' })
+
+    expect(calls).toBe(1)
+    expect(invalidated).toEqual([client])
   })
 })
