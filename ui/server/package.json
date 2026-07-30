@@ -10,6 +10,7 @@
     "smoke:novel:local": "node ../../scripts/run-novel-smoke-local.mjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/client": "^2.0.0",
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "jszip": "^3.10.1",
