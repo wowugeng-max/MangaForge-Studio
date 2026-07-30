@@ -297,8 +297,8 @@ function compactStandaloneQualityLoop(value: any) {
 export function buildStandaloneProseServiceErrorPayload(serviceError: any, pipeline: any[], configSnapshot: any, chapterIdentity: any = {}) {
   const admissionStatus = String(serviceError?.admission_status || serviceError?.admissionStatus || '')
   const blockedInvalid = admissionStatus === 'blocked_invalid'
-  // Keep residual prose for Zhuque/export even when admission blocks storage.
-  // Progress compaction drops chapter_text from pipeline stages; recover it here.
+  // Keep residual prose for explicit recovery only when invalid admission blocks storage.
+  // All ordinary generation and quality errors must remain bounded and text-free.
   const residualCandidates = [
     serviceError?.chapter_text,
     serviceError?.chapterText,
@@ -310,7 +310,9 @@ export function buildStandaloneProseServiceErrorPayload(serviceError: any, pipel
     serviceError?.admission_failure?.details?.chapter_text,
     serviceError?.admission_failure?.details?.chapterText,
   ]
-  const residualText = residualCandidates.find((item: any) => typeof item === 'string' && item.trim().length > 200)
+  const residualText = blockedInvalid
+    ? residualCandidates.find((item: any) => typeof item === 'string' && item.trim().length > 200)
+    : undefined
   return {
     error: String(serviceError?.message || serviceError),
     error_code: serviceError?.code || serviceError?.error_code || (blockedInvalid ? 'PROSE_ADMISSION_BLOCKED_INVALID' : 'PROSE_GENERATION_FAILED'),

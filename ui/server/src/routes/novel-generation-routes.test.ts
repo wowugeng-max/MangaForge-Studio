@@ -274,9 +274,11 @@ describe('novel generate prose route source guards', () => {
   })
 
   test('persists standalone blocked invalid admission identity for workspace recovery', () => {
+    const residualText = '无效正文仍需供显式恢复。'.repeat(30)
     const serviceError = Object.assign(new Error('正文为空或结构无效'), {
       admission_status: 'blocked_invalid',
       admission_failure: { source: 'structural', code: 'invalid_prose' },
+      chapter_text: residualText,
     })
 
     const payload = buildStandaloneProseServiceErrorPayload(
@@ -292,6 +294,9 @@ describe('novel generate prose route source guards', () => {
       admission_status: 'blocked_invalid',
       chapter_id: 102,
       chapter_no: 2,
+      chapter_text: residualText,
+      finalText: residualText,
+      details: { chapter_text: residualText },
     })
   })
 
