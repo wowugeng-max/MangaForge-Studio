@@ -1,5 +1,9 @@
 import type { Express } from 'express'
 import { listNovelRuns, updateNovelProject } from '../novel'
+import {
+  normalizeEditorRevisionTimeoutSeconds,
+  resolveEditorRevisionRuntimeConfig,
+} from '../novel/editor-revision-runtime-config'
 
 type ProjectConfigRoutesContext = {
   getWorkspace: () => string
@@ -13,6 +17,42 @@ type ProjectConfigRoutesContext = {
 }
 
 export function registerNovelProjectConfigRoutes(app: Express, ctx: ProjectConfigRoutesContext) {
+  app.get('/api/novel/projects/:id/editor-revision-config', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      res.json({ ok: true, config: resolveEditorRevisionRuntimeConfig(project) })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.put('/api/novel/projects/:id/editor-revision-config', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const rawTimeout = req.body?.config?.timeout_seconds ?? req.body?.timeout_seconds
+      if (typeof rawTimeout !== 'number' || !Number.isFinite(rawTimeout)) {
+        return res.status(400).json({ error: 'timeout_seconds must be a finite number' })
+      }
+      const config = { timeout_seconds: normalizeEditorRevisionTimeoutSeconds(rawTimeout) }
+      const updated = await updateNovelProject(activeWorkspace, project.id, {
+        reference_config: {
+          ...(project.reference_config || {}),
+          editor_revision: {
+            ...(project.reference_config?.editor_revision || {}),
+            ...config,
+          },
+        },
+      } as any)
+      res.json({ ok: true, config, project: updated })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
   app.get('/api/novel/projects/:id/approval-policy', async (req, res) => {
     try {
       const activeWorkspace = ctx.getWorkspace()
