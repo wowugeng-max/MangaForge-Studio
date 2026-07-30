@@ -107,6 +107,37 @@ describe('MCP routes', () => {
     })
   })
 
+  test('replaces Header identities case-insensitively without changing blank preservation', () => {
+    const mergeMcpCustomHeaders = (mcpServerStore as any).mergeMcpCustomHeaders
+    expect(mergeMcpCustomHeaders(
+      { Authorization: 'old', 'X-Keep': 'keep' },
+      { authorization: 'new' },
+      [],
+    )).toEqual({
+      authorization: 'new',
+      'X-Keep': 'keep',
+    })
+    expect(mergeMcpCustomHeaders(
+      { Authorization: 'old', 'X-Keep': 'keep' },
+      { authorization: '   ' },
+      [],
+    )).toEqual({
+      Authorization: 'old',
+      'X-Keep': 'keep',
+    })
+  })
+
+  test('removes every case variant of a normalized Header identity', () => {
+    const mergeMcpCustomHeaders = (mcpServerStore as any).mergeMcpCustomHeaders
+    expect(mergeMcpCustomHeaders(
+      { Cookie: 'old', cookie: 'duplicate', 'X-Keep': 'keep' },
+      undefined,
+      [' COOKIE '],
+    )).toEqual({
+      'X-Keep': 'keep',
+    })
+  })
+
   test('allows same-origin URL edits and rejects cross-origin edits while a Key exists', async () => {
     const workspace = await temporaryWorkspace()
     await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])

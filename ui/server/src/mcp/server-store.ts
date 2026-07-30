@@ -51,15 +51,23 @@ export function mergeMcpCustomHeaders(
   removals: unknown,
 ) {
   const next = { ...previous }
+  const deleteHeaderIdentity = (identity: string) => {
+    for (const name of Object.keys(next)) {
+      if (name.trim().toLowerCase() === identity) delete next[name]
+    }
+  }
   for (const rawName of Array.isArray(removals) ? removals : []) {
-    const name = String(rawName).trim()
-    if (name) delete next[name]
+    const identity = String(rawName).trim().toLowerCase()
+    if (identity) deleteHeaderIdentity(identity)
   }
   if (replacements && typeof replacements === 'object' && !Array.isArray(replacements)) {
     for (const [rawName, rawValue] of Object.entries(replacements)) {
       const name = rawName.trim()
       const value = String(rawValue ?? '').trim()
-      if (name && value) next[name] = value
+      if (name && value) {
+        deleteHeaderIdentity(name.toLowerCase())
+        next[name] = value
+      }
     }
   }
   return next

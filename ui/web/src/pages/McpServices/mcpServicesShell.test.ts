@@ -31,6 +31,7 @@ describe('MCP Services page wiring', () => {
   test('hydrates configured Headers safely and submits overwrite-only edits', () => {
     const page = readFileSync(join(import.meta.dir, 'index.tsx'), 'utf8')
     const api = readFileSync(join(import.meta.dir, '../../api/mcp.ts'), 'utf8')
+    const configuredHeaderFlag = "serverForm.getFieldValue(['custom_headers_list', field.name, 'configured'])"
 
     expect(api).toContain('custom_headers: Array<{ name: string; configured: boolean }>')
     expect(api).toContain('remove_custom_headers?: string[]')
@@ -39,7 +40,10 @@ describe('MCP Services page wiring', () => {
     expect(page).toContain("value: ''")
     expect(page).toContain('configured: header.configured')
     expect(page).not.toContain('Object.entries(server.custom_headers')
-    expect(page).toContain('已配置；留空保持不变')
+    expect(page).toContain(`<Input placeholder="Header" disabled={Boolean(${configuredHeaderFlag})} />`)
+    expect(page).toContain(`<Input placeholder="Value" />`)
+    expect(page).toContain(`extra={${configuredHeaderFlag} ? '已配置；留空保持不变' : undefined}`)
+    expect(page).toContain("add({ name: '', value: '', configured: false })")
     expect(page).toContain('remove(field.name)')
     expect(page).toContain('buildMcpServerPayload(await serverForm.validateFields(), editingServer || undefined)')
     expect(page).toContain('更改协议、主机或端口')
