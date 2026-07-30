@@ -1,5 +1,7 @@
 import type { Express } from 'express'
 import { ensureWorkspaceStructure } from '../../workspace'
+import { isMcpError } from '../../mcp/errors'
+import { assertNoProseGenerationSourceMutation } from '../../novel-writing-service/generation-source/source-config'
 import {
   appendNovelRun,
   createNovelChapter,
@@ -84,6 +86,15 @@ import {
   stripLocalScaffoldOutlines,
 } from './builders'
 
+function genericGenerationSourceMutationError(error: unknown) {
+  if (
+    !isMcpError(error)
+    || error.code !== 'MCP_BINDING_INVALID'
+    || error.details?.reason !== 'dedicated_binding_route_required'
+  ) return null
+  return { error: error.message, detail: error.message, error_code: error.code }
+}
+
 export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string) {
   app.get('/api/novel/projects', async (_req, res) => {
     try {
@@ -99,6 +110,7 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
     try {
       const activeWorkspace = getWorkspace()
       await ensureWorkspaceStructure(activeWorkspace)
+      assertNoProseGenerationSourceMutation(req.body?.reference_config)
       const project = await createNovelProject(activeWorkspace, req.body)
       const seed = req.body?.reference_config?.project_seed
       if (seed && req.body?.auto_materialize_seed !== false) {
@@ -108,6 +120,8 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
       }
       res.json(project)
     } catch (error) {
+      const mutationError = genericGenerationSourceMutationError(error)
+      if (mutationError) return res.status(400).json(mutationError)
       res.status(500).json({ error: String(error) })
     }
   })
@@ -551,10 +565,15 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
   app.put('/api/novel/projects/:id', async (req, res) => {
     try {
       const activeWorkspace = getWorkspace()
+      if (req.body?.reference_config !== undefined) {
+        assertNoProseGenerationSourceMutation(req.body.reference_config)
+      }
       const updated = await updateNovelProject(activeWorkspace, Number(req.params.id), req.body)
       if (!updated) return res.status(404).json({ error: 'project not found' })
       res.json(updated)
     } catch (error) {
+      const mutationError = genericGenerationSourceMutationError(error)
+      if (mutationError) return res.status(400).json(mutationError)
       res.status(500).json({ error: String(error) })
     }
   })
@@ -573,10 +592,13 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
   app.put('/api/novel/projects/:id/reference-config', async (req, res) => {
     try {
       const activeWorkspace = getWorkspace()
+      assertNoProseGenerationSourceMutation(req.body)
       const updated = await updateNovelProject(activeWorkspace, Number(req.params.id), { reference_config: req.body || {} } as any)
       if (!updated) return res.status(404).json({ error: 'project not found' })
       res.json(updated.reference_config || { references: [], notes: '' })
     } catch (error) {
+      const mutationError = genericGenerationSourceMutationError(error)
+      if (mutationError) return res.status(400).json(mutationError)
       res.status(500).json({ error: String(error) })
     }
   })

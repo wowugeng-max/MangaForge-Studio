@@ -92,6 +92,65 @@ afterEach(async () => {
   workspaces = []
 })
 
+describe('prose generation source mutation guard', () => {
+  test('rejects prose generation source writes through every generic project route', async () => {
+    const workspace = await tempDir('mangaforge-novel-source-guard-')
+    const {
+      createNovelProject,
+      getNovelProject,
+      listNovelProjects,
+      mutateNovelProjectReferenceConfig,
+    } = await import('../novel')
+    const { registerNovelCoreRoutes } = await import('./novel-core-routes')
+    const project = await createNovelProject(workspace, {
+      title: '专用绑定保护项目',
+      reference_config: {},
+    })
+    await mutateNovelProjectReferenceConfig(workspace, {
+      projectId: project.id,
+      operation: 'test-empty-reference-config',
+      mutate: () => ({ referenceConfig: {}, result: null }),
+    })
+    expect((await getNovelProject(workspace, project.id))?.reference_config).toEqual({})
+    const source = {
+      version: 'prose_generation_source_v1',
+      type: 'mcp',
+      mcp: { server_id: 'buda', key_id: 1, adapter_id: 'buda', agent_id: 'agent-1' },
+    }
+    const { app, handlers } = createRouteHarness()
+    registerNovelCoreRoutes(app as any, () => workspace)
+
+    const createResponse = await callRoute(handlers.get('POST /api/novel/projects'), {
+      body: {
+        title: '不应创建的绕过项目',
+        reference_config: { prose_generation_source: source },
+      },
+    })
+    expect(createResponse.statusCode).toBe(400)
+    expect(createResponse.body.error_code).toBe('MCP_BINDING_INVALID')
+    const projectsAfterRejectedCreate = await listNovelProjects(workspace)
+    expect(projectsAfterRejectedCreate).toHaveLength(1)
+    expect(projectsAfterRejectedCreate[0].id).toBe(project.id)
+    expect(projectsAfterRejectedCreate.map(item => item.title)).not.toContain('不应创建的绕过项目')
+
+    const updateResponse = await callRoute(handlers.get('PUT /api/novel/projects/:id'), {
+      params: { id: String(project.id) },
+      body: { reference_config: { prose_generation_source: source } },
+    })
+    expect(updateResponse.statusCode).toBe(400)
+    expect(updateResponse.body.error_code).toBe('MCP_BINDING_INVALID')
+    expect((await getNovelProject(workspace, project.id))?.reference_config).toEqual({})
+
+    const referenceConfigResponse = await callRoute(handlers.get('PUT /api/novel/projects/:id/reference-config'), {
+      params: { id: String(project.id) },
+      body: { prose_generation_source: source },
+    })
+    expect(referenceConfigResponse.statusCode).toBe(400)
+    expect(referenceConfigResponse.body.error_code).toBe('MCP_BINDING_INVALID')
+    expect((await getNovelProject(workspace, project.id))?.reference_config).toEqual({})
+  })
+})
+
 describe('novel core project deletion', () => {
   test('purges memory palace data when deleting a novel project', async () => {
     const workspace = await tempDir('mangaforge-novel-route-')
@@ -667,5 +726,4 @@ describe('novel project seed prompt b', () => {
     expect(afterDelete.body.drafts).toHaveLength(0)
   })
 })
-
 

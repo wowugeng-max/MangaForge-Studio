@@ -32,6 +32,17 @@ export const MODEL_PROSE_GENERATION_SOURCE: ModelProseGenerationSourceConfig = O
   type: 'model',
 })
 
+export function assertNoProseGenerationSourceMutation(referenceConfig: unknown) {
+  if (!referenceConfig || typeof referenceConfig !== 'object' || Array.isArray(referenceConfig)) return
+  if (Object.prototype.hasOwnProperty.call(referenceConfig, 'prose_generation_source')) {
+    throw new McpError(
+      'MCP_BINDING_INVALID',
+      'prose_generation_source 只能通过专用正文来源接口修改',
+      { reason: 'dedicated_binding_route_required' },
+    )
+  }
+}
+
 export function normalizeMcpProjectBinding(value: any): McpProjectBinding {
   const binding = {
     server_id: String(value?.server_id ?? value?.serverId ?? '').trim(),
