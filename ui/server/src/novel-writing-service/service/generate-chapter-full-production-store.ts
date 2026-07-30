@@ -2,6 +2,7 @@ import {
   commitNovelChapterAcceptance,
   listNovelChapters,
 } from '../../novel'
+import { isMcpError } from '../../mcp/errors'
 import {
   buildChapterProseStoragePatch,
   resolveChapterProseVersionSource,
@@ -355,11 +356,17 @@ export async function runFullProductionAdmissionAndStore(args: {
   const acceptanceUsageUpdates = acceptancePrep.acceptanceUsageUpdates
   const settingConsistencyReview = acceptancePrep.settingConsistencyReview
   throwIfChapterGenerationAborted()
+  const bindingFingerprint = typeof draftPromptDiagnostics?.generation_source?.binding_fingerprint === 'string'
+    ? draftPromptDiagnostics.generation_source.binding_fingerprint.trim()
+    : ''
   let acceptance: Awaited<ReturnType<typeof commitNovelChapterAcceptance>>
   try {
     acceptance = await commitNovelChapterAcceptance(activeWorkspace, {
       chapter_id: chapter.id,
       chapter_patch: chapterPatch,
+      ...(bindingFingerprint ? {
+        expected_prose_generation_source_fingerprint: bindingFingerprint,
+      } : {}),
       version_source: resolveChapterProseVersionSource({ revisionEligible: true, selfCheck, editorRewrite }),
       ...(storyStateStatus === 'synced' ? {
         next_reference_config: preparedStoryStateUpdate.next_reference_config,
@@ -397,6 +404,7 @@ export async function runFullProductionAdmissionAndStore(args: {
     })
   } catch (error) {
     if (isAbortError(error)) throw error
+    if (isMcpError(error) && error.code === 'MCP_BINDING_CHANGED') throw error
     throw markBlockedInvalidError(error, {
       code: 'atomic_acceptance_failed',
       source: 'atomic',

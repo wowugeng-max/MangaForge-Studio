@@ -9,6 +9,7 @@ import { createNovelProject, listNovelRuns } from '../../novel'
 import { createGenerationSourceResolver } from './create-generation-source'
 import { McpGenerationSource } from './mcp-generation-source'
 import { ModelGenerationSource } from './model-generation-source'
+import { proseGenerationSourceFingerprint } from './source-config'
 
 const workspaces: string[] = []
 afterEach(async () => Promise.all(workspaces.splice(0).map(path => rm(path, { recursive: true, force: true }))))
@@ -108,6 +109,9 @@ describe('McpGenerationSource', () => {
     const source = new McpGenerationSource(runtime as any)
     const paragraphTask = '完整段落任务：前因、当前冲突、后果与输出合同。'
     const result = await source.generateProse(sourceRequest({ activeWorkspace: workspace, project, paragraphTask }))
+    const expectedFingerprint = proseGenerationSourceFingerprint(
+      project.reference_config!.prose_generation_source as any,
+    )
 
     expect(captured.paragraphTask).toBe(paragraphTask)
     expect(captured.drive).toMatchObject({ writingBible: expect.stringContaining('克制'), storyState: { place: '北城' } })
@@ -121,6 +125,7 @@ describe('McpGenerationSource', () => {
         key_id: key.id,
         adapter_id: 'buda',
         agent_id: 'agent-1',
+        binding_fingerprint: expectedFingerprint,
         status: 'success',
       },
     })
@@ -129,7 +134,14 @@ describe('McpGenerationSource', () => {
     expect(receipts[0]).toMatchObject({ status: 'success' })
     expect(receipts[0]?.input_ref).not.toContain(paragraphTask)
     expect(receipts[0]?.output_ref).not.toContain('MCP 正文')
-    expect(JSON.stringify((result as any).source_receipt)).not.toContain(paragraphTask)
+    expect(JSON.parse(receipts[0]!.output_ref!)).toMatchObject({
+      binding_fingerprint: expectedFingerprint,
+      status: 'success',
+    })
+    const receiptJson = JSON.stringify((result as any).source_receipt)
+    expect(receiptJson).not.toContain('sk_source')
+    expect(receiptJson).not.toContain(paragraphTask)
+    expect(receiptJson).not.toContain('MCP 正文')
   })
 
   test('preserves the MCP error and stores a bounded failed receipt when live validation fails', async () => {
@@ -162,6 +174,12 @@ describe('McpGenerationSource', () => {
     expect(receipts).toHaveLength(1)
     expect(receipts[0]).toMatchObject({ status: 'failed' })
     expect(receipts[0]?.output_ref).not.toContain('完整段落任务')
+    expect(JSON.parse(receipts[0]!.output_ref!)).toMatchObject({
+      binding_fingerprint: proseGenerationSourceFingerprint(
+        project.reference_config!.prose_generation_source as any,
+      ),
+      status: 'failed',
+    })
   })
 
   test('scrubs selected credentials from progress, exposed errors, and durable failed receipts', async () => {

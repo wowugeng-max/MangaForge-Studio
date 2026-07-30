@@ -91,6 +91,7 @@ export type NovelChapterAcceptanceUpdate = {
 export type NovelChapterAcceptanceInput = {
   chapter_id: number
   chapter_patch: Partial<NovelChapterRecord>
+  expected_prose_generation_source_fingerprint?: string
   version_source?: NovelChapterVersionSource
   project_patch?: Partial<NovelProjectRecord>
   next_reference_config?: NovelReferenceConfig

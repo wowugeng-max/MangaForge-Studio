@@ -28,6 +28,7 @@ import { buildSkippedPostDeliveryStoryStateUpdate } from '../novel-writing/post-
 
 const readPostDeliveryStoryStateUpdateSource = () => readFileSync(join(import.meta.dir, '../novel-writing/post-delivery-story-state-update.ts'), 'utf8')
 const readPostDeliverySyncReviewRecordSource = () => readFileSync(join(import.meta.dir, '../novel-writing/post-delivery-sync-review-record.ts'), 'utf8')
+const readMcpGenerationSource = () => readFileSync(join(import.meta.dir, '../novel-writing-service/generation-source/mcp-generation-source.ts'), 'utf8')
 
 const readGenerateChapterPipelineSource = () => {
   const serviceDir = join(import.meta.dir, '../novel-writing-service/service')
@@ -115,6 +116,19 @@ describe('storyline sync a a', () => {
     expect(acceptanceBlock).toContain('character_updates: acceptanceCharacterUpdates')
     expect(acceptanceBlock).toContain('setting_updates: acceptanceSettingUpdates')
     expect(acceptanceBlock).toContain('usage_updates: acceptanceUsageUpdates')
+  })
+
+  test('records the MCP binding fingerprint and fences atomic acceptance without masking binding changes', () => {
+    const generationSource = readMcpGenerationSource()
+    const pipelineSource = readGenerateChapterPipelineSource()
+    const acceptanceStart = pipelineSource.indexOf('acceptance = await commitNovelChapterAcceptance(')
+    const acceptanceEnd = pipelineSource.indexOf('const updated = acceptance.chapter', acceptanceStart)
+    const acceptanceBlock = pipelineSource.slice(acceptanceStart, acceptanceEnd)
+
+    expect(generationSource).toContain('binding_fingerprint: bindingFingerprint')
+    expect(pipelineSource).toContain('draftPromptDiagnostics?.generation_source?.binding_fingerprint')
+    expect(acceptanceBlock).toContain('expected_prose_generation_source_fingerprint: bindingFingerprint')
+    expect(acceptanceBlock).toContain("isMcpError(error) && error.code === 'MCP_BINDING_CHANGED'")
   })
 
   test('detects missing state delta records when prose visibly changes chapter state', () => {

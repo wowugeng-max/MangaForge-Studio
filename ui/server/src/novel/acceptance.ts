@@ -1,4 +1,7 @@
-import type { NovelChapterAcceptanceInput } from './types'
+import { McpError } from '../mcp/errors'
+import { withMcpWorkspaceMutation } from '../mcp/workspace-coordinator'
+import { proseGenerationSourceFingerprint, resolveProseGenerationSource } from '../novel-writing-service/generation-source/source-config'
+import type { NovelChapterAcceptanceInput, NovelReferenceConfig } from './types'
 import { loadAcceptanceWorkingSet, persistNovelChapterAcceptanceDelta } from './acceptance-helpers'
 import { nextChapterVersionNo, createChapterVersionRecord, versionedChapterSnapshotChanged } from './chapter-helpers'
 import { openDb, ensureSqliteSchema } from './db'
@@ -8,9 +11,20 @@ import { withNovelWorkspaceMutation } from './lock'
 import { normalizeProjectRecord, normalizeWorldbuildingRecord, normalizeCharacterRecord, normalizeChapterRecord, normalizeReviewRecord, normalizeSettingEntityRecord, normalizeChapterSettingUsageRecord } from './normalize'
 import { nextTableId } from './sql-rows'
 
+export function mergeAcceptanceReferenceConfig(
+  current: NovelReferenceConfig = {},
+  prepared?: NovelReferenceConfig,
+) {
+  if (prepared === undefined) return current
+  const next = { ...current }
+  if (Object.prototype.hasOwnProperty.call(prepared, 'story_state')) {
+    next.story_state = prepared.story_state
+  }
+  return next
+}
 
 export async function commitNovelChapterAcceptance(activeWorkspace: string, input: NovelChapterAcceptanceInput) {
-  return withNovelWorkspaceMutation(activeWorkspace, async () => {
+  return withMcpWorkspaceMutation(activeWorkspace, () => withNovelWorkspaceMutation(activeWorkspace, async () => {
   await importLegacyNovelStoreIfNeeded(activeWorkspace)
   const db = openDb(activeWorkspace)
   let committed = false
@@ -20,11 +34,24 @@ export async function commitNovelChapterAcceptance(activeWorkspace: string, inpu
   const working = loadAcceptanceWorkingSet(db, Number(input.chapter_id || 0))
   if (!working) throw new Error(`chapter reference not found: ${input.chapter_id}`)
   const store = working.store
-  const beforeStore = structuredClone(store)
   const chapterIndex = working.chapterIndex
   const projectIndex = working.projectIndex
   const currentChapter = store.chapters[chapterIndex]
   const currentProject = store.projects[projectIndex]
+  const expectedFingerprint = typeof input.expected_prose_generation_source_fingerprint === 'string'
+    ? input.expected_prose_generation_source_fingerprint.trim()
+    : ''
+  if (expectedFingerprint) {
+    const currentFingerprint = proseGenerationSourceFingerprint(resolveProseGenerationSource(currentProject))
+    if (currentFingerprint !== expectedFingerprint) {
+      throw new McpError(
+        'MCP_BINDING_CHANGED',
+        '项目正文来源已在生成期间变更；旧请求结果不会入库',
+        { reason: 'binding_changed' },
+      )
+    }
+  }
+  const beforeStore = structuredClone(store)
   const validateImmutablePatchReferences = (
     patch: any,
     references: Array<[key: string, expected: number]>,
@@ -226,9 +253,12 @@ export async function commitNovelChapterAcceptance(activeWorkspace: string, inpu
   }
   store.chapters[chapterIndex] = nextChapter
 
+  const { reference_config: _ignoredReferenceConfig, ...safeProjectPatch } = input.project_patch || {}
   const projectPatch = {
-    ...(input.project_patch || {}),
-    ...(input.next_reference_config === undefined ? {} : { reference_config: input.next_reference_config }),
+    ...safeProjectPatch,
+    ...(input.next_reference_config === undefined ? {} : {
+      reference_config: mergeAcceptanceReferenceConfig(currentProject.reference_config, input.next_reference_config),
+    }),
   }
   if (Object.keys(projectPatch).length > 0) {
     const normalizedProject = normalizeProjectRecord(projectPatch, { ...currentProject, id: currentProject.id, updated_at: nowIso() })
@@ -275,5 +305,5 @@ export async function commitNovelChapterAcceptance(activeWorkspace: string, inpu
   } finally {
     db.close()
   }
-  }, 'acceptance')
+  }, 'acceptance'))
 }

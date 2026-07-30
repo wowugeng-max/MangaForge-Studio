@@ -3,7 +3,7 @@ import { appendNovelRun, updateNovelRun } from '../../novel'
 import type { McpRuntime } from '../../mcp/runtime'
 import { McpError, isMcpError } from '../../mcp/errors'
 import { createMcpSecretScrubber } from '../../mcp/secret-scrubber'
-import { resolveProseGenerationSource, validateMcpProjectBinding } from './source-config'
+import { proseGenerationSourceFingerprint, resolveProseGenerationSource, validateMcpProjectBinding } from './source-config'
 import type { GenerationSource, ProseGenerationRequest, ProseGenerationResult } from './types'
 
 function sha256(value: string) {
@@ -92,11 +92,13 @@ export class McpGenerationSource implements GenerationSource {
     const source = resolveProseGenerationSource(request.project)
     if (source.type !== 'mcp') throw new Error('MCP GenerationSource 需要完整的项目 MCP 绑定')
     const binding = source.mcp
+    const bindingFingerprint = proseGenerationSourceFingerprint(source)
     const baseProvenance = {
       server_id: binding.server_id,
       key_id: binding.key_id,
       adapter_id: binding.adapter_id,
       agent_id: binding.agent_id,
+      binding_fingerprint: bindingFingerprint,
     }
     const receipt = await appendNovelRun(request.activeWorkspace, {
       project_id: Number(request.project?.id || 0),

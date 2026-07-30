@@ -21,8 +21,10 @@ import {
   listNovelWorldbuilding,
   replaceNovelChapterSettingUsage,
   updateNovelChapter,
+  updateNovelProject,
 } from '../novel'
 import { setNovelMutationTestHook } from '../novel-test-support'
+import { proseGenerationSourceFingerprint } from '../novel-writing-service/generation-source/source-config'
 import {
   workspaces,
   tempWorkspace,
@@ -356,6 +358,146 @@ describe('commitNovelChapterAcceptance', () => {
     expect(await listNovelReviews(workspace, project.id)).toEqual([
       expect.objectContaining({ review_type: 'prose_quality', status: 'warn' }),
     ])
+  })
+
+  test('rejects every acceptance write when the MCP binding changed after generation started', async () => {
+    const workspace = await tempWorkspace()
+    const originalSource = {
+      version: 'prose_generation_source_v1' as const,
+      type: 'mcp' as const,
+      mcp: { server_id: 'buda', key_id: 7, adapter_id: 'buda', agent_id: 'agent-1' },
+    }
+    const project = await createNovelProject(workspace, {
+      title: '绑定变更原子拒绝',
+      reference_config: {
+        prose_generation_source: originalSource,
+        notes: '生成准备时备注',
+        story_state: { open_questions: ['旧问题'] },
+      },
+    })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: '旧正文',
+    })
+    await updateNovelProject(workspace, project.id, {
+      reference_config: {
+        ...project.reference_config,
+        prose_generation_source: {
+          ...originalSource,
+          mcp: { ...originalSource.mcp, agent_id: 'agent-2' },
+        },
+      },
+    })
+    const before = await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)
+
+    const error = await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { chapter_text: '绝不能落库的新正文' },
+      version_source: 'agent_execute',
+      expected_prose_generation_source_fingerprint: proseGenerationSourceFingerprint(originalSource),
+      next_reference_config: {
+        prose_generation_source: originalSource,
+        notes: '生成准备时备注',
+        story_state: { open_questions: ['绝不能落库'] },
+      },
+      character_creates: [{ project_id: project.id, name: '绝不能落库的新角色' }],
+      reviews: [{ review_type: 'prose_quality', status: 'ok', summary: '绝不能落库' }],
+    }).then(() => null, caught => caught)
+
+    expect(error).toMatchObject({ code: 'MCP_BINDING_CHANGED' })
+    expect(await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)).toBe(before)
+    expect((await getNovelProject(workspace, project.id))?.reference_config?.prose_generation_source)
+      .toMatchObject({ mcp: { agent_id: 'agent-2' } })
+  })
+
+  test('merges prepared Story State into the latest reference config without restoring stale fields', async () => {
+    const workspace = await tempWorkspace()
+    const source = {
+      version: 'prose_generation_source_v1' as const,
+      type: 'mcp' as const,
+      mcp: { server_id: 'buda', key_id: 7, adapter_id: 'buda', agent_id: 'agent-1' },
+    }
+    const project = await createNovelProject(workspace, {
+      title: '验收合并最新配置',
+      reference_config: {
+        prose_generation_source: source,
+        notes: '准备时备注',
+        unrelated: { revision: '准备时旧值' },
+        story_state: { open_questions: ['旧问题'] },
+      },
+    })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: '旧正文',
+    })
+    const latestProject = await updateNovelProject(workspace, project.id, {
+      reference_config: {
+        prose_generation_source: source,
+        notes: '验收时最新备注',
+        unrelated: { revision: '验收时最新值' },
+        story_state: { open_questions: ['旧问题'] },
+      },
+    })
+
+    const accepted = await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { chapter_text: '验收新正文' },
+      project_patch: {
+        synopsis: '其他 project patch 仍可写入',
+        reference_config: { notes: 'project patch 不得绕过合并' },
+      },
+      expected_prose_generation_source_fingerprint: proseGenerationSourceFingerprint(source),
+      next_reference_config: {
+        prose_generation_source: source,
+        notes: '准备时备注',
+        unrelated: { revision: '准备时旧值' },
+        story_state: { open_questions: ['新问题'], last_updated_chapter: 1 },
+      },
+    })
+
+    expect(accepted.chapter.chapter_text).toBe('验收新正文')
+    expect(accepted.project.synopsis).toBe('其他 project patch 仍可写入')
+    expect(accepted.project.reference_config).toEqual({
+      ...latestProject!.reference_config,
+      story_state: { open_questions: ['新问题'], last_updated_chapter: 1 },
+    })
+  })
+
+  test('keeps acceptance compatible when no generation-source fingerprint was recorded', async () => {
+    const workspace = await tempWorkspace()
+    const source = {
+      version: 'prose_generation_source_v1' as const,
+      type: 'mcp' as const,
+      mcp: { server_id: 'buda', key_id: 7, adapter_id: 'buda', agent_id: 'agent-1' },
+    }
+    const project = await createNovelProject(workspace, {
+      title: '无 fingerprint 兼容验收',
+      reference_config: { prose_generation_source: source },
+    })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: '旧正文',
+    })
+    await updateNovelProject(workspace, project.id, {
+      reference_config: {
+        prose_generation_source: { ...source, mcp: { ...source.mcp, agent_id: 'agent-2' } },
+      },
+    })
+
+    const accepted = await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { chapter_text: '兼容验收正文' },
+    })
+
+    expect(accepted.chapter.chapter_text).toBe('兼容验收正文')
+    expect(accepted.project.reference_config?.prose_generation_source)
+      .toMatchObject({ mcp: { agent_id: 'agent-2' } })
   })
 
   test('atomically stores accepted prose, old version, story state, entity changes, usage, and reviews', async () => {
@@ -799,4 +941,3 @@ describe('commitNovelChapterAcceptance', () => {
     expect(usage.find(record => record.entity_id === item.id)?.actual_state_change).toEqual({})
   })
 })
-
