@@ -21,6 +21,14 @@ describe('local HTTP security', () => {
     expect(assertLoopbackListenHost(host)).toBe(host)
   })
 
+  test.each(['[localhost]', '[127.0.0.1]'])('rejects bracketed non-IPv6 listen host %s', host => {
+    expect(() => assertLoopbackListenHost(host)).toThrow('loopback')
+  })
+
+  test('canonicalizes a bracketed IPv6 listen host', () => {
+    expect(assertLoopbackListenHost('[::1]')).toBe('::1')
+  })
+
   test.each(['0.0.0.0', '192.168.1.20', 'mangaforge.local'])('rejects non-loopback listen host %s', host => {
     expect(() => assertLoopbackListenHost(host)).toThrow('loopback')
   })

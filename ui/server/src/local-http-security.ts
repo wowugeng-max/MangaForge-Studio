@@ -12,8 +12,9 @@ export function isLoopbackHostname(value: string) {
 }
 
 export function assertLoopbackListenHost(value: string) {
-  const host = String(value || '').trim()
-  if (!isLoopbackHostname(host)) {
+  const input = String(value || '').trim()
+  const host = input === '[::1]' ? '::1' : input
+  if (!LOOPBACK_HOSTS.has(host.toLowerCase())) {
     throw new Error('MangaForge server HOST must be loopback-only; received ' + (host || '(empty)'))
   }
   return host
