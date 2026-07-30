@@ -60,6 +60,20 @@ describe('MCP secret scrubber', () => {
     expect(output).not.toContain('reflected-cookie-value')
   })
 
+  test('redacts complete Cookie and Set-Cookie lines without consuming the next safe line', () => {
+    const output = createMcpSecretScrubber().scrubText([
+      'Cookie: first=secret-one; second=secret-two; third=secret-three',
+      'Set-Cookie: fourth=secret-four; Path=/; HttpOnly',
+      'Safe: keep-me',
+    ].join('\n'))
+
+    expect(output).not.toContain('secret-one')
+    expect(output).not.toContain('secret-two')
+    expect(output).not.toContain('secret-three')
+    expect(output).not.toContain('secret-four')
+    expect(output).toContain('Safe: keep-me')
+  })
+
   test('handles nested arrays, circular objects, and Error messages without mutation', () => {
     const secret = 'synthetic-circular-secret'
     const source: any = { id: 'session-1', nested: [{ text: secret }] }
@@ -89,5 +103,19 @@ describe('MCP secret scrubber', () => {
 
     expect(scrubber.scrubText('private-space-token-extended private-space-token'))
       .toBe('[REDACTED] [REDACTED]')
+  })
+
+  test('clones shared references independently while still marking true ancestor cycles', () => {
+    const shared = { status: 'ready', nested: { id: 'agent-1' } }
+    const source: any = { left: shared, right: shared }
+    source.self = source
+
+    const output = createMcpSecretScrubber().scrubValue(source)
+
+    expect(output.left).toEqual({ status: 'ready', nested: { id: 'agent-1' } })
+    expect(output.right).toEqual({ status: 'ready', nested: { id: 'agent-1' } })
+    expect(output.left).not.toBe('[Circular]')
+    expect(output.right).not.toBe('[Circular]')
+    expect(output.self).toBe('[Circular]')
   })
 })

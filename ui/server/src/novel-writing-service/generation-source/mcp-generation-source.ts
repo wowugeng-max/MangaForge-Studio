@@ -24,29 +24,65 @@ function errorReceipt(error: any, provenance: Record<string, unknown>) {
   }
 }
 
+function blockedInvalidResidual(error: any) {
+  const admissionStatus = String(error?.admission_status || error?.admissionStatus || '')
+  if (admissionStatus !== 'blocked_invalid') return undefined
+  return [
+    error?.chapter_text,
+    error?.chapterText,
+    error?.finalText,
+    error?.final_text,
+    error?.text,
+    error?.details?.chapter_text,
+    error?.details?.chapterText,
+    error?.admission_failure?.details?.chapter_text,
+    error?.admission_failure?.details?.chapterText,
+  ].find(item => typeof item === 'string' && item.trim().length > 200) as string | undefined
+}
+
+function enumerableErrorMetadata(error: unknown, excluded: Set<string>) {
+  if (!error || typeof error !== 'object') return {}
+  return Object.fromEntries(Object.entries(error).filter(([key]) => !excluded.has(key)))
+}
+
+function restoreBlockedInvalidResidual(error: any, residualText?: string) {
+  if (typeof residualText !== 'string') return error
+  error.chapter_text = residualText
+  error.finalText = residualText
+  error.details = {
+    ...(error.details && typeof error.details === 'object' ? error.details : {}),
+    chapter_text: residualText,
+  }
+  return error
+}
+
 function scrubGenerationError(
   error: unknown,
   scrubber: ReturnType<typeof createMcpSecretScrubber>,
 ) {
   const message = scrubber.scrubText((error as any)?.message || error || 'MCP 正文生成失败')
+  const residualText = blockedInvalidResidual(error)
   if (isMcpError(error)) {
-    return new McpError(
+    const scrubbed = new McpError(
       error.code,
       message,
       error.details ? scrubber.scrubValue(error.details) : undefined,
     )
+    scrubbed.name = scrubber.scrubText(error.name || 'McpError')
+    Object.assign(scrubbed, scrubber.scrubValue(enumerableErrorMetadata(
+      error,
+      new Set(['stack', 'name', 'message', 'code', 'error_code', 'details']),
+    )))
+    return restoreBlockedInvalidResidual(scrubbed, residualText)
   }
   const scrubbed = new Error(message)
   scrubbed.name = scrubber.scrubText((error as any)?.name || 'Error')
-  const metadata = error && typeof error === 'object'
-    ? scrubber.scrubValue({
-        ...((error as any)?.code !== undefined ? { code: (error as any).code } : {}),
-        ...((error as any)?.error_code !== undefined ? { error_code: (error as any).error_code } : {}),
-        ...((error as any)?.details !== undefined ? { details: (error as any).details } : {}),
-      })
-    : {}
+  const metadata = scrubber.scrubValue(enumerableErrorMetadata(
+    error,
+    new Set(['stack', 'name', 'message']),
+  ))
   Object.assign(scrubbed, metadata)
-  return scrubbed
+  return restoreBlockedInvalidResidual(scrubbed, residualText)
 }
 
 export class McpGenerationSource implements GenerationSource {
@@ -131,8 +167,10 @@ export class McpGenerationSource implements GenerationSource {
         status: 'success',
         output_ref: JSON.stringify(output),
       })
+      const { prose_chapters: proseChapters, ...resultMetadata } = result
       return {
-        ...result,
+        ...scrubber.scrubValue(resultMetadata),
+        ...(proseChapters !== undefined ? { prose_chapters: proseChapters } : {}),
         source_receipt: {
           request_id: request.requestId,
           receipt_run_id: receipt.id,

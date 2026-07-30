@@ -31,12 +31,16 @@ describe('MCP standalone prose route helpers', () => {
     const configSnapshot = { generation_source: 'mcp', server_id: 'buda', key_id: 17 }
     const payload = buildStandaloneProseServiceErrorPayload({
       code: 'MCP_SESSION_FAILED',
-      message: `Authorization: Bearer ${reflectedKey}`,
+      message: [
+        `Authorization: Bearer ${reflectedKey}`,
+        'Cookie: first=synthetic-builder-cookie-one; second=synthetic-builder-cookie-two; third=synthetic-builder-cookie-three',
+        'Safe: keep-builder-line',
+      ].join('\n'),
       admission_status: 'blocked_invalid',
       details: {
         authorization: reflectedHeader,
         receipt: {
-          error: `Cookie: session=synthetic-builder-cookie`,
+          error: 'Cookie: session=synthetic-builder-cookie',
           nested: `Authorization=${reflectedHeader}`,
           adapter_id: 'buda',
         },
@@ -48,6 +52,7 @@ describe('MCP standalone prose route helpers', () => {
     expect(serialized).not.toContain(reflectedKey)
     expect(serialized).not.toContain(reflectedHeader)
     expect(serialized).not.toContain('synthetic-builder-cookie')
+    expect(payload.error).toContain('Safe: keep-builder-line')
     expect(payload).toMatchObject({
       error_code: 'MCP_SESSION_FAILED',
       admission_status: 'blocked_invalid',

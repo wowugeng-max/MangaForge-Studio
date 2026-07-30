@@ -271,4 +271,191 @@ describe('McpGenerationSource', () => {
       error_code: 'MCP_SESSION_FAILED',
     })
   })
+
+  test('preserves successful prose exactly while scrubbing every returned and durable metadata field', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-source-success-metadata-'))
+    workspaces.push(workspace)
+    const selectedKey = 'sk_test_success_metadata_reflection'
+    const selectedHeader = 'synthetic-success-metadata-header'
+    const selectedCookie = 'session=synthetic-success-metadata-cookie'
+    const server = {
+      ...BUDA_MCP_SERVER_TEMPLATE,
+      custom_headers: { 'X-Space': selectedHeader, Cookie: selectedCookie },
+    }
+    await writeMcpServers(workspace, [server])
+    const key = await createMcpKey(workspace, {
+      mcp_server_id: 'buda',
+      key: selectedKey,
+      description: '账号',
+    })
+    const project = await createNovelProject(workspace, {
+      title: '成功元数据反射测试',
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: { server_id: 'buda', key_id: key.id, adapter_id: 'buda', agent_id: 'agent-1' },
+        },
+      },
+    })
+    const proseText = `正文中的字面量必须原样保留：${selectedKey} / ${selectedHeader} / ${selectedCookie}`
+    const adapter = {
+      generateProse: async () => ({
+        prose_chapters: [{ chapter_no: 12, title: '原样正文', chapter_text: proseText }],
+        source: 'mcp',
+        adapter_id: 'buda',
+        agent_id: 'agent-1',
+        session_id: `session-${selectedKey}`,
+        snapshot_hash: `snapshot-${selectedHeader}`,
+        completed: true,
+        raw: {
+          request_id: 'request-12',
+          session_status: 'completed',
+          reflected_cookie: selectedCookie,
+          safe: 'raw-safe',
+        },
+        usage: {
+          output_tokens: 321,
+          nested: { reflected_key: selectedKey, safe: 'usage-safe' },
+        },
+        extra_metadata: { reflected_header: selectedHeader, status: 'complete' },
+      }),
+    }
+    const source = new McpGenerationSource({
+      listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }],
+      getAdapterForKey: async () => ({ server, key, adapter }),
+    } as any)
+
+    const result = await source.generateProse(sourceRequest({ activeWorkspace: workspace, project }))
+
+    expect(result.prose_chapters).toEqual([{ chapter_no: 12, title: '原样正文', chapter_text: proseText }])
+    const { prose_chapters: _proseChapters, ...returnedMetadata } = result
+    const serializedMetadata = JSON.stringify(returnedMetadata)
+    expect(serializedMetadata).not.toContain(selectedKey)
+    expect(serializedMetadata).not.toContain(selectedHeader)
+    expect(serializedMetadata).not.toContain('synthetic-success-metadata-cookie')
+    expect(returnedMetadata).toMatchObject({
+      source: 'mcp',
+      adapter_id: 'buda',
+      agent_id: 'agent-1',
+      completed: true,
+      raw: { request_id: 'request-12', session_status: 'completed', safe: 'raw-safe' },
+      usage: { output_tokens: 321, nested: { safe: 'usage-safe' } },
+      extra_metadata: { status: 'complete' },
+      source_receipt: {
+        server_id: 'buda',
+        key_id: key.id,
+        adapter_id: 'buda',
+        agent_id: 'agent-1',
+        status: 'success',
+      },
+    })
+
+    const receipts = (await listNovelRuns(workspace, project.id)).filter(run => run.run_type === 'mcp_generate_prose')
+    expect(receipts).toHaveLength(1)
+    expect(receipts[0]).toMatchObject({ status: 'success' })
+    expect(receipts[0]?.output_ref).not.toContain(selectedKey)
+    expect(receipts[0]?.output_ref).not.toContain(selectedHeader)
+    expect(receipts[0]?.output_ref).not.toContain('synthetic-success-metadata-cookie')
+    expect(receipts[0]?.output_ref).not.toContain(proseText)
+  })
+
+  test('preserves scrubbed enumerable non-MCP error metadata and protected blocked-invalid residual prose', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-source-error-metadata-'))
+    workspaces.push(workspace)
+    const selectedKey = 'sk_test_error_metadata_reflection'
+    const selectedHeader = 'synthetic-error-metadata-header'
+    const selectedCookie = 'session=synthetic-error-metadata-cookie'
+    const server = {
+      ...BUDA_MCP_SERVER_TEMPLATE,
+      custom_headers: { 'X-Space': selectedHeader, Cookie: selectedCookie },
+    }
+    await writeMcpServers(workspace, [server])
+    const key = await createMcpKey(workspace, {
+      mcp_server_id: 'buda',
+      key: selectedKey,
+      description: '账号',
+    })
+    const project = await createNovelProject(workspace, {
+      title: '错误元数据反射测试',
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: { server_id: 'buda', key_id: key.id, adapter_id: 'buda', agent_id: 'agent-1' },
+        },
+      },
+    })
+    const residualText = `${'受保护的 blocked-invalid 残余正文必须逐字保留。'.repeat(20)} ${selectedKey} ${selectedHeader}`
+    const adapter = {
+      generateProse: async () => {
+        const failure: any = new Error(`adapter reflected ${selectedKey} and ${selectedHeader}`)
+        failure.name = 'AdapterBlockedError'
+        failure.code = 'MCP_SESSION_FAILED'
+        failure.error_code = 'MCP_SESSION_FAILED'
+        failure.admission_status = 'blocked_invalid'
+        failure.retry_after_ms = 750
+        failure.status = 'failed'
+        failure.chapter_id = 22
+        failure.chapter_no = 12
+        failure.provenance = { server_id: 'buda', agent_id: 'agent-1', reflected: selectedHeader }
+        failure.chapter_text = residualText
+        failure.finalText = residualText
+        failure.details = {
+          chapter_text: residualText,
+          cookie: selectedCookie,
+          safe: 'details-safe',
+          nested: { reflected_key: selectedKey, status: 'failed' },
+        }
+        Object.defineProperty(failure, 'stack', { value: `stack reflected ${selectedKey}`, enumerable: true })
+        throw failure
+      },
+    }
+    const source = new McpGenerationSource({
+      listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }],
+      getAdapterForKey: async () => ({ server, key, adapter }),
+    } as any)
+    let exposedError: any
+
+    try {
+      await source.generateProse(sourceRequest({ activeWorkspace: workspace, project }))
+    } catch (error) {
+      exposedError = error
+    }
+
+    expect(exposedError).toMatchObject({
+      name: 'AdapterBlockedError',
+      code: 'MCP_SESSION_FAILED',
+      error_code: 'MCP_SESSION_FAILED',
+      admission_status: 'blocked_invalid',
+      retry_after_ms: 750,
+      status: 'failed',
+      chapter_id: 22,
+      chapter_no: 12,
+      provenance: { server_id: 'buda', agent_id: 'agent-1' },
+      details: { safe: 'details-safe', nested: { status: 'failed' } },
+    })
+    expect(exposedError.chapter_text).toBe(residualText)
+    expect(exposedError.finalText).toBe(residualText)
+    expect(exposedError.details.chapter_text).toBe(residualText)
+    expect(Object.prototype.propertyIsEnumerable.call(exposedError, 'stack')).toBe(false)
+    const { chapter_text: _chapterText, finalText: _finalText, details, ...metadata } = exposedError
+    const { chapter_text: _detailsChapterText, ...detailsMetadata } = details
+    const serializedMetadata = JSON.stringify({
+      ...metadata,
+      message: exposedError.message,
+      details: detailsMetadata,
+    })
+    expect(serializedMetadata).not.toContain(selectedKey)
+    expect(serializedMetadata).not.toContain(selectedHeader)
+    expect(serializedMetadata).not.toContain('synthetic-error-metadata-cookie')
+
+    const receipts = (await listNovelRuns(workspace, project.id)).filter(run => run.run_type === 'mcp_generate_prose')
+    expect(receipts).toHaveLength(1)
+    const durable = JSON.stringify({ output_ref: receipts[0]?.output_ref, error_message: receipts[0]?.error_message })
+    expect(durable).not.toContain(selectedKey)
+    expect(durable).not.toContain(selectedHeader)
+    expect(durable).not.toContain('synthetic-error-metadata-cookie')
+    expect(durable).not.toContain(residualText)
+  })
 })
