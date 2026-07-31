@@ -76,5 +76,9 @@ export interface ProseMcpAdapter {
   readonly id: string
   listAgents(options: McpAdapterOperationOptions): Promise<McpAgentSummary[]>
   createAgent(input: { name: string; spaceId?: string; instructions?: string }, options: McpAdapterOperationOptions): Promise<McpAgentSummary>
+  inspectSession(
+    input: { agentId: string; sessionId: string },
+    options: McpAdapterOperationOptions,
+  ): Promise<{ status: string; terminal: boolean }>
   generateProse(input: BudaProseGenerationInput): Promise<BudaProseGenerationResult>
 }

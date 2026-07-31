@@ -235,7 +235,7 @@ describe('novel generate prose route source guards', () => {
     expect(payload).toMatchObject({
       error: '章节硬质量门禁未通过，正文未入库',
       error_code: 'PROSE_QUALITY_GATE_BLOCKED',
-      pipeline,
+      pipeline: [{ stage: 'review', status: 'failed' }],
       config_snapshot: configSnapshot,
       prompt_diagnostics: {
         prompt_chars: 46_820,

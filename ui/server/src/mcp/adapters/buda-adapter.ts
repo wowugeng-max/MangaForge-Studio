@@ -51,6 +51,15 @@ function sessionStatus(data: any) {
   return String(data?.session?.status || data?.run?.status || data?.status || '')
 }
 
+const PUBLIC_SESSION_STATUSES = new Set([
+  'completed', 'failed', 'cancelled', 'waiting_for_input', 'pending', 'in_progress',
+])
+
+function publicSessionStatus(data: any) {
+  const status = sessionStatus(data)
+  return PUBLIC_SESSION_STATUSES.has(status) ? status : 'unknown'
+}
+
 function sessionId(data: any) {
   return String(data?.session?.id || data?.sessionId || data?.id || '')
 }
@@ -216,6 +225,22 @@ export class BudaAdapter implements ProseMcpAdapter {
     const agent = cleanAgent(data?.agent || data)
     if (!agent.id) throw new McpError('MCP_TOOL_ERROR', 'Buda 未返回新 Agent 标识')
     return { id: agent.id, name: agent.name }
+  }
+
+  async inspectSession(
+    input: { agentId: string; sessionId: string },
+    options: McpAdapterOperationOptions = {},
+  ) {
+    const tools = this.tools || await this.resolveTools(options)
+    const data = mcpResultData(await this.client.callTool(tools.getSession, {
+      agentId: input.agentId,
+      sessionId: input.sessionId,
+    }, operationOptions(options, 'read_safe')))
+    const status = publicSessionStatus(data)
+    return {
+      status,
+      terminal: status === 'completed' || status === 'failed' || status === 'cancelled',
+    }
   }
 
   async generateProse(input: BudaProseGenerationInput): Promise<BudaProseGenerationResult> {

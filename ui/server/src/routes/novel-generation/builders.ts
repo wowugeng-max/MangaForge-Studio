@@ -295,9 +295,75 @@ function compactStandaloneQualityLoop(value: any) {
   })
 }
 
+const STANDALONE_ERROR_PIPELINE_MAX_STAGES = 32
+const STANDALONE_ERROR_PIPELINE_MAX_CHARS = 16_384
+const STANDALONE_ERROR_PIPELINE_MAX_SLUG = 64
+const STANDALONE_ERROR_PIPELINE_STATUSES = new Set([
+  'pending', 'running', 'success', 'failed', 'warn', 'warning', 'blocked',
+  'skipped', 'cancelled', 'timed_out', 'completed', 'in_progress',
+])
+const STANDALONE_ERROR_PIPELINE_STAGES = new Set([
+  'context', 'material_repair', 'scene_cards', 'migration_plan', 'draft',
+  'word_target', 'editor', 'meme_polish', 'review', 'revise',
+  'readability_review', 'safety', 'store', 'story_state', 'humanize_postprocess',
+  'opening_handoff_bridge', 'zhuque_fast', 'mcp_connect', 'mcp_capabilities',
+  'mcp_drive_sync', 'mcp_session_create', 'mcp_session_wait', 'mcp_extract',
+  'session_created', 'quality_pipeline',
+])
+
+function boundedPipelineSlug(value: unknown, maxLength = STANDALONE_ERROR_PIPELINE_MAX_SLUG) {
+  if (typeof value !== 'string') return undefined
+  const slug = value.trim()
+  return slug.length > 0 && slug.length <= maxLength && /^[a-z0-9][a-z0-9_-]*$/.test(slug)
+    ? slug
+    : undefined
+}
+
+function boundedPipelineNumber(value: unknown, minimum: number, maximum: number, integer = false) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  const bounded = Math.min(maximum, Math.max(minimum, value))
+  return integer ? Math.trunc(bounded) : bounded
+}
+
+function compactStandaloneErrorPipeline(value: unknown) {
+  if (!Array.isArray(value)) return []
+  const compacted: Array<Record<string, string | number | boolean>> = []
+  for (const raw of value) {
+    if (compacted.length === STANDALONE_ERROR_PIPELINE_MAX_STAGES) break
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+    const item = raw as Record<string, unknown>
+    const stage = [item.key, item.stage]
+      .map(value => boundedPipelineSlug(value))
+      .find(value => value && STANDALONE_ERROR_PIPELINE_STAGES.has(value))
+    const status = boundedPipelineSlug(item.status)
+    const elapsedMs = boundedPipelineNumber(item.elapsed_ms, 0, 86_400_000, true)
+    const percent = boundedPipelineNumber(item.percent, 0, 100)
+    const wordCount = boundedPipelineNumber(item.word_count, 0, 10_000_000, true)
+    const score = boundedPipelineNumber(item.score, 0, 100)
+    const round = boundedPipelineNumber(item.round, 0, 1_000, true)
+    const candidate = {
+      ...(stage ? { stage } : {}),
+      ...(status && STANDALONE_ERROR_PIPELINE_STATUSES.has(status) ? { status } : {}),
+      ...(elapsedMs !== undefined ? { elapsed_ms: elapsedMs } : {}),
+      ...(percent !== undefined ? { percent } : {}),
+      ...(wordCount !== undefined ? { word_count: wordCount } : {}),
+      ...(score !== undefined ? { score } : {}),
+      ...(round !== undefined ? { round } : {}),
+      ...(typeof item.accepted === 'boolean' ? { accepted: item.accepted } : {}),
+    }
+    if (Object.keys(candidate).length === 0) continue
+    if (JSON.stringify([...compacted, candidate]).length > STANDALONE_ERROR_PIPELINE_MAX_CHARS) break
+    compacted.push(candidate)
+  }
+  return compacted
+}
+
 export function buildStandaloneProseServiceErrorPayload(serviceError: any, pipeline: any[], configSnapshot: any, chapterIdentity: any = {}) {
   const admissionStatus = String(serviceError?.admission_status || serviceError?.admissionStatus || '')
   const blockedInvalid = admissionStatus === 'blocked_invalid'
+  const receiptStatus = [serviceError?.details?.receipt_status, serviceError?.receipt_status]
+    .map(value => String(value || ''))
+    .find(value => value === 'send_unknown' || value === 'remote_cancel_unknown')
   // Keep residual prose for explicit recovery only when invalid admission blocks storage.
   // All ordinary generation and quality errors must remain bounded and text-free.
   const residualCandidates = [
@@ -317,6 +383,7 @@ export function buildStandaloneProseServiceErrorPayload(serviceError: any, pipel
   const payload = {
     error: String(serviceError?.message || serviceError),
     error_code: serviceError?.code || serviceError?.error_code || (blockedInvalid ? 'PROSE_ADMISSION_BLOCKED_INVALID' : 'PROSE_GENERATION_FAILED'),
+    ...(receiptStatus ? { receipt_status: receiptStatus } : {}),
     ...(blockedInvalid ? {
       admission_status: 'blocked_invalid',
       chapter_id: chapterIdentity?.chapter_id ?? chapterIdentity?.chapterId ?? serviceError?.chapter_id ?? serviceError?.chapterId ?? null,
@@ -330,7 +397,7 @@ export function buildStandaloneProseServiceErrorPayload(serviceError: any, pipel
         chapter_text: residualText,
       },
     } : {}),
-    pipeline,
+    pipeline: compactStandaloneErrorPipeline(pipeline),
     launch_gate_blocker: serviceError?.launchGateBlocker || serviceError?.launch_gate_blocker,
     reference_report: serviceError?.referenceReport || serviceError?.reference_report,
     safety_decision: serviceError?.safetyDecision || serviceError?.safety_decision,
@@ -675,7 +742,8 @@ export function standaloneProseServiceErrorStatus(error: any) {
   const message = String(error?.message || error || '')
   if (code === 'MCP_AUTH_FAILED') return 401
   if (code === 'MCP_BINDING_INVALID') return 412
-  if (code === 'MCP_AGENT_BUSY') return 409
+  if (code === 'MCP_BINDING_CHANGED' || code === 'MCP_AGENT_BUSY' || code === 'MCP_AGENT_QUARANTINED') return 409
+  if (code === 'MCP_SEND_UNKNOWN') return 502
   if (code === 'MCP_INPUT_REQUIRED') return 422
   if (code === 'MCP_GENERATION_TIMEOUT' || code === 'MCP_CONNECT_TIMEOUT') return 504
   if (code.includes('PREFLIGHT') || code.includes('LAUNCH_GATE') || code.includes('SCENE_CARDS')) return 412

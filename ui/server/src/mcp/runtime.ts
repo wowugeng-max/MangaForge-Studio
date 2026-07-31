@@ -3,9 +3,15 @@ import { McpError } from './errors'
 import { readMcpKeys, updateMcpKey } from './key-store'
 import { readMcpServers } from './server-store'
 import { createMcpAdapter } from './adapters/registry'
-import type { McpKeyRecord, McpServerRecord } from './types'
+import type {
+  McpAgentQuarantineRecord,
+  McpKeyRecord,
+  McpServerRecord,
+  PublicMcpAgentQuarantineRecord,
+} from './types'
 import type { McpAdapterOperationOptions, McpClientPort, ProseMcpAdapter } from './adapters/types'
 import { McpAgentLeaseRegistry } from './agent-lease'
+import { withMcpWorkspaceMutation } from './workspace-coordinator'
 
 type RuntimeManager = Pick<McpClientManager, 'get' | 'invalidate' | 'invalidateIfCurrent' | 'invalidateServer' | 'closeAll'>
 
@@ -17,6 +23,30 @@ export type ResolvedMcpCredential = {
 }
 
 type PinnedMcpCredential = Pick<ResolvedMcpCredential, 'server' | 'key'>
+
+const PUBLIC_SESSION_STATUSES = new Set([
+  'completed', 'failed', 'cancelled', 'waiting_for_input', 'pending', 'in_progress', 'unknown',
+])
+
+function toPublicAgentQuarantine(record: McpAgentQuarantineRecord): PublicMcpAgentQuarantineRecord {
+  return {
+    id: record.id,
+    server_id: record.server_id,
+    key_id: record.key_id,
+    agent_id: record.agent_id,
+    session_id: record.session_id,
+    reason: record.reason,
+    created_at: record.created_at,
+  }
+}
+
+function boundedSessionInspection(value: { status?: unknown; terminal?: unknown }) {
+  const candidate = String(value?.status || '')
+  const status = PUBLIC_SESSION_STATUSES.has(candidate) ? candidate : 'unknown'
+  const terminal = value?.terminal === true
+    && (status === 'completed' || status === 'failed' || status === 'cancelled')
+  return { status, terminal }
+}
 
 function operationOptions(options?: AbortSignal | McpAdapterOperationOptions): McpAdapterOperationOptions {
   if (options && typeof (options as AbortSignal).addEventListener === 'function') {
@@ -38,12 +68,12 @@ export function createMcpRuntime(
   const now = options.now || Date.now
   const agentLeases = new McpAgentLeaseRegistry()
 
-  const resolveCredentialConfig = async (
+  const resolveCredentialConfigInWorkspace = async (
+    activeWorkspace: string,
     keyId: number,
     expectedServerId?: string,
     pinnedCredential?: PinnedMcpCredential,
   ): Promise<PinnedMcpCredential> => {
-    const activeWorkspace = getWorkspace()
     const stored = pinnedCredential
       ? null
       : await Promise.all([readMcpServers(activeWorkspace), readMcpKeys(activeWorkspace)])
@@ -62,14 +92,25 @@ export function createMcpRuntime(
     return { server, key }
   }
 
-  const getAdapterForKey = async (
+  const resolveCredentialConfig = (
+    keyId: number,
+    expectedServerId?: string,
+    pinnedCredential?: PinnedMcpCredential,
+  ) => resolveCredentialConfigInWorkspace(getWorkspace(), keyId, expectedServerId, pinnedCredential)
+
+  const getAdapterForWorkspace = async (
+    activeWorkspace: string,
     keyId: number,
     expectedServerId?: string,
     options?: AbortSignal | McpAdapterOperationOptions,
     pinnedCredential?: PinnedMcpCredential,
   ): Promise<ResolvedMcpCredential> => {
-    const activeWorkspace = getWorkspace()
-    const resolvedConfig = await resolveCredentialConfig(keyId, expectedServerId, pinnedCredential)
+    const resolvedConfig = await resolveCredentialConfigInWorkspace(
+      activeWorkspace,
+      keyId,
+      expectedServerId,
+      pinnedCredential,
+    )
     const { server, key } = resolvedConfig
     const initialOptions = operationOptions(options)
     let currentClient = await manager.get(activeWorkspace, server, key, initialOptions)
@@ -118,6 +159,13 @@ export function createMcpRuntime(
     return { server, key, client, adapter }
   }
 
+  const getAdapterForKey = (
+    keyId: number,
+    expectedServerId?: string,
+    options?: AbortSignal | McpAdapterOperationOptions,
+    pinnedCredential?: PinnedMcpCredential,
+  ) => getAdapterForWorkspace(getWorkspace(), keyId, expectedServerId, options, pinnedCredential)
+
   const listAgents = async (keyId: number, options?: AbortSignal | McpAdapterOperationOptions) => {
     const remoteOptions = operationOptions(options)
     const resolved = await getAdapterForKey(keyId, undefined, remoteOptions)
@@ -131,11 +179,43 @@ export function createMcpRuntime(
     isAgentLeaseActive(activeWorkspace: string, binding: Parameters<McpAgentLeaseRegistry['isActive']>[1]) {
       return agentLeases.isActive(activeWorkspace, binding)
     },
-    listAgentQuarantines(activeWorkspace: string) {
-      return agentLeases.list(activeWorkspace)
+    async listAgentQuarantines(activeWorkspace: string) {
+      return (await agentLeases.list(activeWorkspace)).map(toPublicAgentQuarantine)
     },
     clearAgentQuarantine(activeWorkspace: string, quarantineId: string) {
       return agentLeases.clear(activeWorkspace, quarantineId)
+    },
+    async reconcileAgentQuarantine(
+      activeWorkspace: string,
+      quarantineId: string,
+      options?: AbortSignal | McpAdapterOperationOptions,
+    ) {
+      return withMcpWorkspaceMutation(activeWorkspace, async () => {
+        const record = (await agentLeases.list(activeWorkspace)).find(item => item.id === quarantineId)
+        if (!record) return null
+        const remoteOptions = operationOptions(options)
+        const resolved = await getAdapterForWorkspace(
+          activeWorkspace,
+          record.key_id,
+          record.server_id,
+          remoteOptions,
+        )
+        const inspection = boundedSessionInspection(await resolved.adapter.inspectSession({
+          agentId: record.agent_id,
+          sessionId: record.session_id,
+        }, remoteOptions))
+        const quarantine = toPublicAgentQuarantine(record)
+        if (!inspection.terminal) {
+          return { quarantine, ...inspection, cleared: false, outcome: 'nonterminal' as const }
+        }
+        const cleared = await agentLeases.clear(activeWorkspace, record.id, record)
+        return {
+          quarantine,
+          ...inspection,
+          cleared,
+          outcome: cleared ? 'cleared' as const : 'conflict' as const,
+        }
+      })
     },
     resolveCredentialConfig,
     getAdapterForKey,
@@ -145,17 +225,41 @@ export function createMcpRuntime(
       const resolved = await getAdapterForKey(keyId, undefined, remoteOptions)
       return resolved.adapter.createAgent(input, remoteOptions)
     },
-    async diagnostics(serverId: string, keyId: number, signal?: AbortSignal) {
-      const remoteOptions = operationOptions(signal)
-      const resolved = await getAdapterForKey(keyId, serverId, remoteOptions)
-      const agents = await resolved.adapter.listAgents(remoteOptions)
-      return {
-        ...((resolved.client.diagnostics?.() || {}) as Record<string, unknown>),
-        adapter_id: resolved.server.adapter_id,
-        adapter_ready: true,
-        agent_count: agents.length,
-        agents,
-      }
+    async diagnostics(activeWorkspace: string, serverId: string, keyId: number, signal?: AbortSignal) {
+      return withMcpWorkspaceMutation(activeWorkspace, async () => {
+        const remoteOptions = operationOptions(signal)
+        const resolved = await getAdapterForWorkspace(activeWorkspace, keyId, serverId, remoteOptions)
+        const agents = await resolved.adapter.listAgents(remoteOptions)
+        const matchingQuarantines = (await agentLeases.list(activeWorkspace)).filter(record => (
+          record.server_id === serverId && record.key_id === keyId
+        ))
+        const inspections = await Promise.all(matchingQuarantines.map(async record => ({
+          record,
+          inspection: boundedSessionInspection(await resolved.adapter.inspectSession({
+            agentId: record.agent_id,
+            sessionId: record.session_id,
+          }, remoteOptions)),
+        })))
+        const quarantines = []
+        for (const { record, inspection } of inspections) {
+          const cleared = inspection.terminal
+            ? await agentLeases.clear(activeWorkspace, record.id, record)
+            : false
+          quarantines.push({
+            quarantine: toPublicAgentQuarantine(record),
+            ...inspection,
+            cleared,
+          })
+        }
+        return {
+          ...((resolved.client.diagnostics?.() || {}) as Record<string, unknown>),
+          adapter_id: resolved.server.adapter_id,
+          adapter_ready: true,
+          agent_count: agents.length,
+          agents,
+          quarantines,
+        }
+      })
     },
     async testKey(keyId: number, signal?: AbortSignal) {
       const activeWorkspace = getWorkspace()

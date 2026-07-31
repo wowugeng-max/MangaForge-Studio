@@ -237,19 +237,15 @@ export class McpGenerationSource implements GenerationSource {
       await lease.release()
     }
     try {
-      const selectedCredential = validateMcpCredentialSelectionSnapshot(credentialSnapshot.records, {
-        serverId: binding.server_id,
-        keyId: binding.key_id,
-        adapterId: binding.adapter_id,
-      })
-      const pinnedCredential = await this.runtime.resolveCredentialConfig(
-        binding.key_id,
-        binding.server_id,
-        selectedCredential,
-      )
-      deadline = this.createDeadline(pinnedCredential.server.generation_timeout_ms, request.signal)
-      deadline.throwIfAborted()
-      lease = await withMcpWorkspaceMutation(request.activeWorkspace, async () => {
+      const admitted = await withMcpWorkspaceMutation(request.activeWorkspace, async () => {
+        const currentCredentialSnapshot = await readBindingCredentialSnapshot(request.activeWorkspace, binding)
+        scrubber = createMcpSecretScrubber({
+          keys: [...credentialSnapshot.secrets.keys, ...currentCredentialSnapshot.secrets.keys],
+          headerValues: [
+            ...credentialSnapshot.secrets.headerValues,
+            ...currentCredentialSnapshot.secrets.headerValues,
+          ],
+        })
         const latestProject = await getNovelProject(request.activeWorkspace, Number(request.project?.id || 0))
         let latestFingerprint = ''
         try {
@@ -260,12 +256,28 @@ export class McpGenerationSource implements GenerationSource {
         if (latestFingerprint !== bindingFingerprint) {
           throw new McpError('MCP_BINDING_CHANGED', '项目 MCP 正文生成绑定已变化，请重新发起生成')
         }
-        return this.runtime.acquireAgentLease(request.activeWorkspace, {
+        const selectedCredential = validateMcpCredentialSelectionSnapshot(currentCredentialSnapshot.records, {
+          serverId: binding.server_id,
+          keyId: binding.key_id,
+          adapterId: binding.adapter_id,
+        })
+        const pinnedCredential = await this.runtime.resolveCredentialConfig(
+          binding.key_id,
+          binding.server_id,
+          selectedCredential,
+        )
+        const acquiredLease = await this.runtime.acquireAgentLease(request.activeWorkspace, {
           serverId: binding.server_id,
           keyId: binding.key_id,
           agentId: binding.agent_id,
         })
+        return { lease: acquiredLease, pinnedCredential, currentCredentialSnapshot }
       })
+      lease = admitted.lease
+      const pinnedCredential = admitted.pinnedCredential
+      const currentCredentialSnapshot = admitted.currentCredentialSnapshot
+      deadline = this.createDeadline(pinnedCredential.server.generation_timeout_ms, request.signal)
+      deadline.throwIfAborted()
       const remoteOptions = (configuredMs: number) => ({
         signal: deadline!.signal,
         get timeoutMs() { return deadline!.timeoutMs(configuredMs) },
@@ -278,9 +290,14 @@ export class McpGenerationSource implements GenerationSource {
         pinnedCredential,
       )
       scrubber = createMcpSecretScrubber({
-        keys: [...credentialSnapshot.secrets.keys, resolved.key.key],
+        keys: [
+          ...credentialSnapshot.secrets.keys,
+          ...currentCredentialSnapshot.secrets.keys,
+          resolved.key.key,
+        ],
         headerValues: [
           ...credentialSnapshot.secrets.headerValues,
+          ...currentCredentialSnapshot.secrets.headerValues,
           ...Object.values(resolved.server.custom_headers),
         ],
       })
@@ -289,7 +306,7 @@ export class McpGenerationSource implements GenerationSource {
         runtime: {
           listAgents: async (_keyId, options) => resolved.adapter.listAgents(options),
         },
-        credentialSnapshot: credentialSnapshot.records,
+        credentialSnapshot: currentCredentialSnapshot.records,
         signal: validationOptions.signal,
         get timeoutMs() { return validationOptions.timeoutMs },
       })

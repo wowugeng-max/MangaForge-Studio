@@ -8,6 +8,12 @@ import {
 } from './quarantine-store'
 import { withMcpWorkspaceMutation } from './workspace-coordinator'
 import type { McpAgentQuarantineRecord } from './types'
+import {
+  addMcpActiveBinding,
+  deleteMcpActiveBinding,
+  hasMcpActiveBinding,
+  mcpActiveBindingKey,
+} from './identity-mutation-fence'
 
 export type McpAgentLeaseBinding = { serverId: string; keyId: number; agentId: string }
 const FULL_ID_MAX_CHARS = 16_384
@@ -45,12 +51,7 @@ function normalizedBinding(binding: McpAgentLeaseBinding): McpAgentLeaseBinding 
   return normalized
 }
 
-function tupleKey(activeWorkspace: string, binding: McpAgentLeaseBinding) {
-  return JSON.stringify([canonicalFilesystemIdentity(activeWorkspace), binding.serverId, binding.keyId, binding.agentId])
-}
-
 export class McpAgentLeaseRegistry {
-  private readonly active = new Set<string>()
   private readonly store: McpAgentLeaseStore
 
   constructor(store: Partial<McpAgentLeaseStore> = {}) {
@@ -64,7 +65,7 @@ export class McpAgentLeaseRegistry {
   async acquire(activeWorkspaceInput: string, input: McpAgentLeaseBinding): Promise<McpAgentLease> {
     const activeWorkspace = canonicalFilesystemIdentity(activeWorkspaceInput)
     const binding = normalizedBinding(input)
-    const key = tupleKey(activeWorkspace, binding)
+    const key = mcpActiveBindingKey(activeWorkspace, binding)
     return withMcpWorkspaceMutation(activeWorkspace, async () => {
       const quarantine = (await this.store.read(activeWorkspace)).find(item => (
         item.server_id === binding.serverId && item.key_id === binding.keyId && item.agent_id === binding.agentId
@@ -75,8 +76,10 @@ export class McpAgentLeaseRegistry {
           session_id: quarantine.session_id.slice(0, 160),
         })
       }
-      if (this.active.has(key)) throw new McpError('MCP_AGENT_BUSY', '该 Buda Agent 正在生成另一章正文')
-      this.active.add(key)
+      if (hasMcpActiveBinding(activeWorkspace, binding)) {
+        throw new McpError('MCP_AGENT_BUSY', '该 Buda Agent 正在生成另一章正文')
+      }
+      addMcpActiveBinding(activeWorkspace, binding)
       const closedServerId = binding.serverId
       const closedKeyId = binding.keyId
       const closedAgentId = binding.agentId
@@ -151,7 +154,7 @@ export class McpAgentLeaseRegistry {
             await operationTail
             if (releaseBlocked) return
             await withMcpWorkspaceMutation(activeWorkspace, async () => {
-              this.active.delete(key)
+              deleteMcpActiveBinding(activeWorkspace, binding)
             })
           })()
           return releasePromise
@@ -162,27 +165,44 @@ export class McpAgentLeaseRegistry {
 
   async isActive(activeWorkspaceInput: string, input: McpAgentLeaseBinding) {
     const activeWorkspace = canonicalFilesystemIdentity(activeWorkspaceInput)
-    const key = tupleKey(activeWorkspace, normalizedBinding(input))
-    return withMcpWorkspaceMutation(activeWorkspace, async () => this.active.has(key))
+    const binding = normalizedBinding(input)
+    return withMcpWorkspaceMutation(activeWorkspace, async () => hasMcpActiveBinding(activeWorkspace, binding))
   }
 
   list(activeWorkspace: string) {
     return this.store.read(canonicalFilesystemIdentity(activeWorkspace))
   }
 
-  clear(activeWorkspaceInput: string, quarantineId: string) {
+  clear(
+    activeWorkspaceInput: string,
+    quarantineId: string,
+    expected?: McpAgentQuarantineRecord,
+  ) {
     const activeWorkspace = canonicalFilesystemIdentity(activeWorkspaceInput)
     return withMcpWorkspaceMutation(activeWorkspace, async () => {
       const id = typeof quarantineId === 'string' ? quarantineId.trim() : ''
       if (!id) return false
       const record = (await this.store.read(activeWorkspace)).find(item => item.id === id)
       if (!record) return false
-      const key = tupleKey(activeWorkspace, {
+      if (expected && (
+        record.id !== expected.id
+        || record.workspace_key !== expected.workspace_key
+        || record.server_id !== expected.server_id
+        || record.key_id !== expected.key_id
+        || record.agent_id !== expected.agent_id
+        || record.request_id !== expected.request_id
+        || record.session_id !== expected.session_id
+        || record.reason !== expected.reason
+        || record.created_at !== expected.created_at
+      )) return false
+      const binding = {
         serverId: record.server_id,
         keyId: record.key_id,
         agentId: record.agent_id,
-      })
-      if (this.active.has(key)) throw new McpError('MCP_AGENT_BUSY', '该 Buda Agent 正在生成另一章正文')
+      }
+      if (hasMcpActiveBinding(activeWorkspace, binding)) {
+        throw new McpError('MCP_AGENT_BUSY', '该 Buda Agent 正在生成另一章正文')
+      }
       return this.store.clear(activeWorkspace, record.id)
     })
   }

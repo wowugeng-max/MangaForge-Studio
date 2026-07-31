@@ -3,6 +3,7 @@ import { coerceBoolean } from '../boolean-utils'
 import { readJsonArrayFailClosed, writeJsonArrayAtomic } from './atomic-json-store'
 import type { McpKeyRecord, PublicMcpKeyRecord } from './types'
 import { assertMcpWorkspaceMutationHeld, withMcpWorkspaceMutation } from './workspace-coordinator'
+import { assertMcpIdentityMutationAllowed } from './identity-mutation-fence'
 
 export function getMcpKeysPath(activeWorkspace: string) {
   return join(activeWorkspace, 'mcp-keys.json')
@@ -46,8 +47,31 @@ async function writeMcpKeysUnlocked(activeWorkspace: string, keys: McpKeyRecord[
   await writeJsonArrayAtomic(getMcpKeysPath(activeWorkspace), keys.map(normalizeMcpKey))
 }
 
+function keyIdentityChanged(previous: McpKeyRecord, next: McpKeyRecord) {
+  return previous.mcp_server_id !== next.mcp_server_id
+    || previous.key !== next.key
+    || previous.is_active !== next.is_active
+}
+
+async function assertKeyIdentityMutationsAllowed(
+  activeWorkspace: string,
+  previous: McpKeyRecord[],
+  next: McpKeyRecord[],
+) {
+  const nextById = new Map(next.map(item => [item.id, item]))
+  const keyIds = previous
+    .filter(item => !nextById.has(item.id) || keyIdentityChanged(item, nextById.get(item.id)!))
+    .map(item => item.id)
+  await assertMcpIdentityMutationAllowed(activeWorkspace, { keyIds })
+}
+
 export function writeMcpKeys(activeWorkspace: string, keys: McpKeyRecord[]) {
-  return withMcpWorkspaceMutation(activeWorkspace, () => writeMcpKeysUnlocked(activeWorkspace, keys))
+  return withMcpWorkspaceMutation(activeWorkspace, async () => {
+    const previous = await readMcpKeys(activeWorkspace)
+    const next = keys.map(normalizeMcpKey)
+    await assertKeyIdentityMutationsAllowed(activeWorkspace, previous, next)
+    await writeMcpKeysUnlocked(activeWorkspace, next)
+  })
 }
 
 export function createMcpKey(activeWorkspace: string, input: Partial<McpKeyRecord> & Pick<McpKeyRecord, 'mcp_server_id' | 'key'>) {
@@ -73,6 +97,7 @@ export function updateMcpKey(activeWorkspace: string, id: number, input: Partial
       key: input.key === undefined || String(input.key).trim() === '' ? previous.key : input.key,
     })
     keys[index] = record
+    await assertKeyIdentityMutationsAllowed(activeWorkspace, [previous], [record])
     await writeMcpKeysUnlocked(activeWorkspace, keys)
     return record
   })
@@ -82,6 +107,7 @@ export function deleteMcpKey(activeWorkspace: string, id: number) {
   return withMcpWorkspaceMutation(activeWorkspace, async () => {
     const keys = await readMcpKeys(activeWorkspace)
     const next = keys.filter(item => item.id !== id)
+    await assertKeyIdentityMutationsAllowed(activeWorkspace, keys, next)
     await writeMcpKeysUnlocked(activeWorkspace, next)
     return next.length !== keys.length
   })

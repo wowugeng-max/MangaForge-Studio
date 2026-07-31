@@ -45,6 +45,24 @@ export type McpAgentSummary = {
   status?: string
 }
 
+export type McpAgentQuarantine = {
+  id: string
+  server_id: string
+  key_id: number
+  agent_id: string
+  session_id: string
+  reason: 'send_unknown' | 'remote_cancel_unknown'
+  created_at: string
+}
+
+export type McpQuarantineReconciliation = {
+  quarantine: McpAgentQuarantine
+  status: 'completed' | 'failed' | 'cancelled' | 'waiting_for_input' | 'pending' | 'in_progress' | 'unknown'
+  terminal: boolean
+  cleared: boolean
+  outcome: 'nonterminal' | 'cleared' | 'conflict'
+}
+
 export type McpKeyPayload = {
   mcp_server_id?: string
   key?: string
@@ -58,6 +76,9 @@ export type ProseGenerationSourceConfig =
   | { version: 'prose_generation_source_v1'; type: 'mcp'; mcp: { server_id: string; key_id: number; adapter_id: string; agent_id: string } }
 
 export const mcpApi = {
+  listQuarantines: () => apiClient.get<McpAgentQuarantine[]>('/mcp/quarantines'),
+  reconcileQuarantine: (id: string) => apiClient.post<McpQuarantineReconciliation>(`/mcp/quarantines/${encodeURIComponent(id)}/reconcile`),
+  forceClearQuarantine: (id: string) => apiClient.delete(`/mcp/quarantines/${encodeURIComponent(id)}`, { data: { acknowledge_remote_work_may_continue: true } }),
   listServers: () => apiClient.get<McpServerRecord[]>('/mcp/servers'),
   createServer: (data: McpServerPayload) => apiClient.post<{ ok: true; server: McpServerRecord }>('/mcp/servers', data),
   updateServer: (id: string, data: McpServerPayload) => apiClient.put<{ ok: true; server: McpServerRecord }>(`/mcp/servers/${encodeURIComponent(id)}`, data),

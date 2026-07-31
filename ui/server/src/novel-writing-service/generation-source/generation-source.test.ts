@@ -15,6 +15,7 @@ import {
   upsertMcpAgentQuarantine,
 } from '../../mcp/quarantine-store'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from '../../mcp/server-store'
+import { withMcpWorkspaceMutation } from '../../mcp/workspace-coordinator'
 import { createNovelProject, listNovelRuns, updateNovelProject } from '../../novel'
 import { createGenerationSourceResolver } from './create-generation-source'
 import { McpGenerationSource } from './mcp-generation-source'
@@ -1946,7 +1947,7 @@ describe('McpGenerationSource', () => {
       .toMatch(/^sha256:[0-9a-f]{64}$/)
   })
 
-  test('pins the scrubbed credential snapshot across Agent validation when the stored key rotates', async () => {
+  test('pins the latest scrubbed credential after rotation between the early receipt and lease acquisition', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-source-rotation-'))
     workspaces.push(workspace)
     const initialKey = 'credential-before-agent-validation'
@@ -1976,14 +1977,10 @@ describe('McpGenerationSource', () => {
     let unpinnedListAgentsCalls = 0
     let pinnedCredential: any
     const source = new McpGenerationSource({
-      resolveCredentialConfig: async (...args: any[]) => {
-        await updateMcpKey(workspace, key.id, { key: rotatedKey })
-        return args[2] || { server, key: { ...key, key: rotatedKey } }
-      },
+      resolveCredentialConfig: async (...args: any[]) => args[2] || { server, key: { ...key, key: rotatedKey } },
       acquireAgentLease: acquireFakeAgentLease,
       listAgents: async () => {
         unpinnedListAgentsCalls += 1
-        await updateMcpKey(workspace, key.id, { key: rotatedKey })
         throw new McpError('MCP_RUNTIME_ERROR', `remote reflected ${rotatedKey}`, { echo: rotatedKey })
       },
       getAdapterForKey: async (...args: any[]) => {
@@ -2000,13 +1997,33 @@ describe('McpGenerationSource', () => {
         }
       },
     } as any)
+    let signalBlockerEntered!: () => void
+    let signalRotation!: () => void
+    const blockerEntered = new Promise<void>(resolve => { signalBlockerEntered = resolve })
+    const rotateWhileHeld = new Promise<void>(resolve => { signalRotation = resolve })
+    const blocker = withMcpWorkspaceMutation(workspace, async () => {
+      signalBlockerEntered()
+      await rotateWhileHeld
+      await updateMcpKey(workspace, key.id, { key: rotatedKey })
+    })
+    await blockerEntered
     let exposedError: any
-
-    try {
-      await source.generateProse(sourceRequest({ activeWorkspace: workspace, project }))
-    } catch (error) {
-      exposedError = error
+    const generation = source.generateProse(sourceRequest({ activeWorkspace: workspace, project }))
+    const generationOutcome = generation.then(
+      () => undefined,
+      error => { exposedError = error },
+    )
+    let runningReceipt
+    for (let attempts = 0; attempts < 100 && !runningReceipt; attempts += 1) {
+      runningReceipt = (await listNovelRuns(workspace, project.id))
+        .find(run => run.run_type === 'mcp_generate_prose' && run.status === 'running')
+      if (!runningReceipt) await new Promise(resolve => setTimeout(resolve, 0))
     }
+    expect(runningReceipt).toBeDefined()
+    signalRotation()
+    await blocker
+
+    await generationOutcome
 
     const [receipt] = (await listNovelRuns(workspace, project.id)).filter(run => run.run_type === 'mcp_generate_prose')
     expect(receipt).toMatchObject({ status: 'failed' })
@@ -2019,7 +2036,7 @@ describe('McpGenerationSource', () => {
     expect(unpinnedListAgentsCalls).toBe(0)
     expect(pinnedCredential).toMatchObject({
       server: { id: server.id },
-      key: { id: key.id, key: initialKey },
+      key: { id: key.id, key: rotatedKey },
     })
   })
 

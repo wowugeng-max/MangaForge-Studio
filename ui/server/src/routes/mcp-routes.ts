@@ -23,6 +23,7 @@ import type { McpServerUpdateInput } from '../mcp/types'
 import { withMcpWorkspaceMutation } from '../mcp/workspace-coordinator'
 
 type ProjectReference = { id: number; title?: string }
+const QUARANTINE_ID_MAX_CHARS = 16_384
 type FindProjectReferences = (
   activeWorkspace: string,
   target: { serverId?: string; keyId?: number },
@@ -77,10 +78,10 @@ function routeError(error: unknown, scrubber: McpSecretScrubber) {
     const originChanged = error.code === 'MCP_BINDING_INVALID' && error.details?.reason === 'server_origin_changed'
     const referencedRecordConflict = error.code === 'MCP_REFERENCED_RECORD_CONFLICT'
     const status = originChanged || referencedRecordConflict ? 409
-      : error.code === 'MCP_BINDING_INVALID' ? 400
+      : error.code === 'MCP_BINDING_INVALID' || error.code === 'MCP_QUARANTINE_ACK_REQUIRED' ? 400
       : error.code === 'MCP_AUTH_FAILED' ? 401
         : error.code === 'MCP_CAPABILITY_MISSING' ? 422
-          : error.code === 'MCP_AGENT_BUSY' ? 409
+          : error.code === 'MCP_AGENT_BUSY' || error.code === 'MCP_AGENT_QUARANTINED' ? 409
             : 502
     return scrubber.scrubValue({
       status,
@@ -111,6 +112,14 @@ function throwReferencedRecordConflict(message: string, references: ProjectRefer
   throw new McpError('MCP_REFERENCED_RECORD_CONFLICT', message, { references })
 }
 
+function quarantineId(input: unknown) {
+  const id = typeof input === 'string' ? input.trim() : ''
+  if (!id || id.length > QUARANTINE_ID_MAX_CHARS) {
+    throw new McpError('MCP_BINDING_INVALID', 'MCP 隔离记录 ID 无效')
+  }
+  return id
+}
+
 export function registerMcpRoutes(
   app: Express,
   getWorkspace: () => string,
@@ -133,6 +142,41 @@ export function registerMcpRoutes(
       res.json = originalJson
     }
   }
+
+  app.get(['/api/mcp/quarantines', '/api/mcp/quarantines/'], safely(async (_req, res) => {
+    const activeWorkspace = getWorkspace()
+    res.json(await runtime.listAgentQuarantines(activeWorkspace))
+  }))
+
+  app.post(['/api/mcp/quarantines/:id/reconcile', '/api/mcp/quarantines/:id/reconcile/'], safely(async (req, res) => {
+    const activeWorkspace = getWorkspace()
+    const id = quarantineId(req.params?.id)
+    const result = await runtime.reconcileAgentQuarantine(activeWorkspace, id, req.signal)
+    if (!result) return res.status(404).json({ error: 'MCP 隔离记录不存在' })
+    if (!result.cleared) {
+      return res.status(409).json({
+        ...result,
+        error_code: 'MCP_AGENT_QUARANTINED',
+        error: result.terminal
+          ? '隔离记录在核对期间发生变化，未解除隔离；请重新检查远端状态'
+          : '远端 Session 尚未终止，隔离记录已保留；请稍后再次检查',
+      })
+    }
+    res.json({ ok: true, ...result })
+  }))
+
+  app.delete(['/api/mcp/quarantines/:id', '/api/mcp/quarantines/:id/'], safely(async (req, res) => {
+    const id = quarantineId(req.params?.id)
+    if (req.body?.acknowledge_remote_work_may_continue !== true) {
+      throw new McpError(
+        'MCP_QUARANTINE_ACK_REQUIRED',
+        '强制解除隔离前必须确认远端 Agent 可能仍在工作',
+      )
+    }
+    const cleared = await runtime.clearAgentQuarantine(getWorkspace(), id)
+    if (!cleared) return res.status(404).json({ error: 'MCP 隔离记录不存在' })
+    res.json({ ok: true, cleared: true, id })
+  }))
 
   app.get(['/api/mcp/servers', '/api/mcp/servers/'], safely(async (_req, res) => {
     res.json((await readMcpServers(getWorkspace())).map(toPublicMcpServer))
@@ -310,6 +354,7 @@ export function registerMcpRoutes(
   app.get(['/api/mcp/servers/:id/diagnostics', '/api/mcp/servers/:id/diagnostics/'], safely(async (req, res) => {
     const keyId = Number(req.query?.key_id || 0)
     if (!keyId) throw new McpError('MCP_BINDING_INVALID', '诊断需要选择 MCP Key')
-    res.json(await runtime.diagnostics(String(req.params.id), keyId, req.signal))
+    const activeWorkspace = getWorkspace()
+    res.json(await runtime.diagnostics(activeWorkspace, String(req.params.id), keyId, req.signal))
   }))
 }

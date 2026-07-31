@@ -92,6 +92,39 @@ function expectBudaOperations(calls: Array<{ name: string; options: any }>) {
 }
 
 describe('BudaAdapter', () => {
+  test('inspects a Session with one read-safe getSession call and only trusts exact terminal states', async () => {
+    const cases = [
+      ['completed', 'completed', true],
+      ['failed', 'failed', true],
+      ['cancelled', 'cancelled', true],
+      ['waiting_for_input', 'waiting_for_input', false],
+      ['pending', 'pending', false],
+      ['in_progress', 'in_progress', false],
+      ['Completed', 'unknown', false],
+      [' completed ', 'unknown', false],
+      ['unexpected remote prose', 'unknown', false],
+    ] as const
+
+    for (const [status, publicStatus, terminal] of cases) {
+      const fake = createFakeClient([status])
+      const adapter = new BudaAdapter(fake.client as any)
+      const signal = new AbortController().signal
+
+      expect(await adapter.inspectSession(
+        { agentId: 'agent-1', sessionId: 'session-1' },
+        { signal, timeoutMs: 4321 },
+      )).toEqual({ status: publicStatus, terminal })
+
+      const getSessionCalls = fake.calls.filter(call => call.name.endsWith('getApiAgentSession'))
+      expect(getSessionCalls).toHaveLength(1)
+      expect(getSessionCalls[0]).toMatchObject({
+        args: { agentId: 'agent-1', sessionId: 'session-1' },
+        options: { signal, timeoutMs: 4321, operation: 'read_safe' },
+      })
+      expect(fake.calls.filter(call => call.options.operation === 'mutation')).toHaveLength(0)
+    }
+  })
+
   test('lists existing Agents and preserves only bounded summary fields', async () => {
     const fake = createFakeClient()
     const adapter = new BudaAdapter(fake.client as any)

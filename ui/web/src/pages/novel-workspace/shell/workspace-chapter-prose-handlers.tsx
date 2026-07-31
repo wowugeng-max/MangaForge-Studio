@@ -3,6 +3,18 @@ import { message, Modal } from 'antd'
 import { chapterHasProse, displayValue } from '../utils'
 import { renderGenerationResultDiffContentView } from './workspace-commercial-ops-views'
 import { isAbortError, proseStreamControl } from '../prose-stream-control'
+import { formatMcpGenerationFailure } from '../mcpGenerationSourceModel'
+
+export function buildMcpGenerationFailureError(payload: any, fallback: string) {
+  const error = new Error(
+    formatMcpGenerationFailure(payload)
+      || String(payload?.error || fallback || '正文生成失败'),
+  )
+  return Object.assign(error, {
+    error_code: payload?.error_code,
+    payload,
+  })
+}
 
 /**
  * Shared streaming UI state (streamingChapterId/generatingProse/progress) may only be written by
@@ -134,7 +146,7 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
             onRepairComplete: () => { void generateCurrentChapterProse({ ...options, allowIncomplete: false, forceSceneCards: true, targetChapterId: targetChapter.id }) },
           })
         }
-        throw new Error(payload?.error || raw || `HTTP ${resp.status}`)
+        throw buildMcpGenerationFailureError(payload, raw || `HTTP ${resp.status}`)
       }
       const reader = resp.body.getReader()
       const dec = new TextDecoder('utf-8')
@@ -159,7 +171,7 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
                 onRepairComplete: () => { void generateCurrentChapterProse({ ...options, allowIncomplete: false, forceSceneCards: true, targetChapterId: targetChapter.id }) },
               })
             }
-            throw new Error(p.error || '正文生成失败')
+            throw buildMcpGenerationFailureError(p, p.error || '正文生成失败')
           }
         }
       }
@@ -323,7 +335,7 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
             if (data?.error_code === 'PROSE_PREFLIGHT_BLOCKED' || data?.error_code === 'REFERENCE_SAFETY_BLOCKED') {
               showGenerationBlockedModal(data, undefined, { targetChapterId: ch.id })
             }
-            throw new Error(data?.error || data?.detail || raw || `HTTP ${resp.status}`)
+            throw buildMcpGenerationFailureError(data, raw || `HTTP ${resp.status}`)
           }
           success += 1
           const score = data?.self_check?.review?.score

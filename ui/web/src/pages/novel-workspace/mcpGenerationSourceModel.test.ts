@@ -8,8 +8,59 @@ import {
   isCompleteMcpSource,
   sourceFormFromConfig,
 } from './mcpGenerationSourceModel'
+import * as generationSourceModel from './mcpGenerationSourceModel'
 
 describe('project MCP generation source model', () => {
+  test('formats stable MCP generation failures without suggesting a model fallback', () => {
+    const formatMcpGenerationFailure = Reflect.get(generationSourceModel, 'formatMcpGenerationFailure')
+    expect(typeof formatMcpGenerationFailure).toBe('function')
+    if (typeof formatMcpGenerationFailure !== 'function') return
+    const cases = [
+      [{ error_code: 'MCP_BINDING_CHANGED', error: 'binding changed' }, '正文来源已变更'],
+      [{ error_code: 'MCP_AGENT_BUSY', error: 'busy' }, '仍在处理'],
+      [{ error_code: 'MCP_SEND_UNKNOWN', error: 'unknown send', receipt_status: 'send_unknown' }, '不要重新发送'],
+      [{ error_code: 'MCP_AGENT_QUARANTINED', error: 'quarantined' }, '连接诊断'],
+      [{ error_code: 'MCP_CANCELLED', error: 'cancelled', receipt_status: 'remote_cancel_unknown' }, '远端可能仍在运行'],
+      [{ error_code: 'MCP_GENERATION_TIMEOUT', error: 'timeout', receipt_status: 'remote_cancel_unknown' }, '远端可能仍在运行'],
+    ] as const
+    for (const [payload, expected] of cases) {
+      const formatted = formatMcpGenerationFailure(payload)
+      expect(formatted).toContain(expected)
+      expect(formatted).not.toContain('切换模型')
+      expect(formatted).not.toContain('自动重试')
+    }
+    expect(formatMcpGenerationFailure({ error_code: 'UNKNOWN', error: '原始失败消息' })).toBe('原始失败消息')
+    expect(formatMcpGenerationFailure({ message: 'fallback message' })).toBe('fallback message')
+  })
+
+  test('prioritizes authoritative receipt safety across MCP failure codes', () => {
+    const formatMcpGenerationFailure = Reflect.get(generationSourceModel, 'formatMcpGenerationFailure')
+    expect(typeof formatMcpGenerationFailure).toBe('function')
+    if (typeof formatMcpGenerationFailure !== 'function') return
+
+    const remoteCancelUnknown = formatMcpGenerationFailure({
+      error_code: 'MCP_SESSION_FAILED',
+      error: '远端 Session 失败',
+      receipt_status: 'remote_cancel_unknown',
+    })
+    expect(remoteCancelUnknown).toContain('远端可能仍在运行')
+    expect(remoteCancelUnknown).toContain('MCP Services')
+
+    const sendUnknown = formatMcpGenerationFailure({
+      error_code: 'MCP_STORE_IO_FAILED',
+      error: '本地存储失败',
+      receipt_status: 'send_unknown',
+    })
+    expect(sendUnknown).toContain('不要重新发送')
+    expect(sendUnknown).toContain('MCP Services')
+
+    expect(formatMcpGenerationFailure({
+      error_code: 'MCP_SESSION_FAILED',
+      error: '原始失败消息',
+      receipt_status: 'remote_status_untrusted',
+    })).toBe('原始失败消息')
+  })
+
   test('builds explicit model and complete MCP source payloads', () => {
     expect(buildSourcePayload({ type: 'model' })).toEqual({
       source: { version: 'prose_generation_source_v1', type: 'model' },

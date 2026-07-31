@@ -29,7 +29,13 @@ import {
   ReloadOutlined,
   RobotOutlined,
 } from '@ant-design/icons'
-import { mcpApi, type McpAgentSummary, type McpPublicKey, type McpServerRecord } from '../../api/mcp'
+import {
+  mcpApi,
+  type McpAgentQuarantine,
+  type McpAgentSummary,
+  type McpPublicKey,
+  type McpServerRecord,
+} from '../../api/mcp'
 import { buildMcpKeyPayload, buildMcpServerPayload, defaultBudaServerForm, formatMcpServiceFailure, summarizeMcpDiagnostics } from './mcpServicesModel'
 
 const { Title, Text, Paragraph } = Typography
@@ -41,6 +47,8 @@ function failureMessage(error: any, fallback: string) {
 export default function McpServices() {
   const [servers, setServers] = useState<McpServerRecord[]>([])
   const [keys, setKeys] = useState<McpPublicKey[]>([])
+  const [quarantines, setQuarantines] = useState<McpAgentQuarantine[]>([])
+  const [quarantineWarnings, setQuarantineWarnings] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(false)
   const [serverModalOpen, setServerModalOpen] = useState(false)
   const [editingServer, setEditingServer] = useState<McpServerRecord | null>(null)
@@ -62,9 +70,14 @@ export default function McpServices() {
   const loadData = async () => {
     setLoading(true)
     try {
-      const [serverResponse, keyResponse] = await Promise.all([mcpApi.listServers(), mcpApi.listKeys()])
+      const [serverResponse, keyResponse, quarantineResponse] = await Promise.all([
+        mcpApi.listServers(),
+        mcpApi.listKeys(),
+        mcpApi.listQuarantines(),
+      ])
       setServers(serverResponse.data)
       setKeys(keyResponse.data)
+      setQuarantines(quarantineResponse.data)
     } catch (error) {
       message.error(failureMessage(error, 'MCP 配置加载失败'))
     } finally {
@@ -158,6 +171,7 @@ export default function McpServices() {
       const { data } = await mcpApi.diagnostics(record.mcp_server_id, record.id)
       setDiagnostics(data)
       setDiagnosticsOpen(true)
+      await loadData()
     } catch (error) {
       message.error(failureMessage(error, '诊断失败'))
     } finally {
@@ -194,6 +208,49 @@ export default function McpServices() {
     }
   }
 
+  const reconcileQuarantine = async (record: McpAgentQuarantine) => {
+    setBusy(`reconcile-quarantine-${record.id}`)
+    try {
+      await mcpApi.reconcileQuarantine(record.id)
+      setQuarantineWarnings(previous => {
+        const next = { ...previous }
+        delete next[record.id]
+        return next
+      })
+      message.success('远端 Session 已终止，隔离已解除')
+      await loadData()
+    } catch (error: any) {
+      if (error?.response?.status === 409) {
+        const warning = failureMessage(error, '远端状态尚未确认；请稍后再次检查。')
+        setQuarantineWarnings(previous => ({ ...previous, [record.id]: warning }))
+        message.warning(warning)
+        await loadData()
+      } else {
+        message.error(failureMessage(error, '远端状态检查失败'))
+      }
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const forceClearQuarantine = async (record: McpAgentQuarantine) => {
+    setBusy(`clear-quarantine-${record.id}`)
+    try {
+      await mcpApi.forceClearQuarantine(record.id)
+      setQuarantineWarnings(previous => {
+        const next = { ...previous }
+        delete next[record.id]
+        return next
+      })
+      message.success('隔离已强制解除')
+      await loadData()
+    } catch (error) {
+      message.error(failureMessage(error, '强制解除隔离失败'))
+    } finally {
+      setBusy('')
+    }
+  }
+
   const serverColumns = [
     { title: '服务', render: (_: any, record: McpServerRecord) => <Space direction="vertical" size={0}><Text strong>{record.display_name}</Text><Text code>{record.id}</Text></Space> },
     { title: '连接', render: (_: any, record: McpServerRecord) => <Space direction="vertical" size={0}><Text>{record.url}</Text><Text type="secondary">Streamable HTTP · {record.auth_type}</Text></Space> },
@@ -220,6 +277,38 @@ export default function McpServices() {
       </div>
 
       <Alert type="info" showIcon message="Key 当前存储为明文配置" description="界面和诊断只显示掩码；密钥加密会在项目后期统一加入。请使用 MCP API Key，不要填写网站登录密码。" />
+
+      {quarantines.map(record => {
+        const server = servers.find(item => item.id === record.server_id)
+        const key = keys.find(item => item.id === record.key_id)
+        return <Alert
+          key={record.id}
+          type="error"
+          showIcon
+          message={`远端 Agent 已隔离 · ${server?.display_name || record.server_id} (${record.server_id})`}
+          description={<Space direction="vertical" size={4}>
+            <Text>账号：{key?.masked_key || `Key #${record.key_id}`}（ID {record.key_id}）</Text>
+            <Text>Agent ID：<Text code>{record.agent_id}</Text></Text>
+            <Text>Session ID：<Text code>{record.session_id}</Text></Text>
+            <Text>原因：{record.reason} · 创建时间：{new Date(record.created_at).toLocaleString()}</Text>
+            {quarantineWarnings[record.id] ? <Text type="warning">{quarantineWarnings[record.id]}</Text> : null}
+          </Space>}
+          action={<Space wrap>
+            <Button
+              loading={busy === `reconcile-quarantine-${record.id}`}
+              onClick={() => reconcileQuarantine(record)}
+            >检查远端状态</Button>
+            <Popconfirm
+              title="强制解除隔离？"
+              description="远端 Agent 可能仍在工作；解除后可能与新的生成任务并发。请确认已知晓风险。"
+              okText="确认强制解除"
+              onConfirm={() => forceClearQuarantine(record)}
+            >
+              <Button danger loading={busy === `clear-quarantine-${record.id}`}>强制解除隔离</Button>
+            </Popconfirm>
+          </Space>}
+        />
+      })}
 
       <Card title={<Space><CloudServerOutlined />MCP Servers</Space>} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => openServer()}>新增 Server</Button>}>
         <Table rowKey="id" loading={loading} dataSource={servers} columns={serverColumns} pagination={false} scroll={{ x: 900 }} />

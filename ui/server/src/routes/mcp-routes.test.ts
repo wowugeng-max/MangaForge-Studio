@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { McpError } from '../mcp/errors'
+import { McpAgentLeaseRegistry } from '../mcp/agent-lease'
 import { createMcpKey, getMcpKeysPath, readMcpKeys } from '../mcp/key-store'
 import { BUDA_MCP_SERVER_TEMPLATE, readMcpServers, writeMcpServers } from '../mcp/server-store'
 import * as mcpServerStore from '../mcp/server-store'
@@ -45,6 +46,82 @@ afterEach(async () => {
 })
 
 describe('MCP routes', () => {
+  test('exposes public quarantine list, terminal-only reconcile, and acknowledged forced clear', async () => {
+    const workspace = await temporaryWorkspace()
+    const publicRecord = {
+      id: 'quarantine-1', server_id: 'buda', key_id: 3, agent_id: 'agent-1',
+      session_id: 'session-1', reason: 'send_unknown', created_at: '2026-07-31T00:00:00.000Z',
+    }
+    const calls: any[] = []
+    const runtime = {
+      listAgentQuarantines: async (activeWorkspace: string) => {
+        calls.push(['list', activeWorkspace])
+        return [publicRecord]
+      },
+      reconcileAgentQuarantine: async (activeWorkspace: string, id: string) => {
+        calls.push(['reconcile', activeWorkspace, id])
+        if (id === 'missing-quarantine') return null
+        if (id === 'quarantine-1') return {
+          quarantine: publicRecord, status: 'in_progress', terminal: false, cleared: false, outcome: 'nonterminal',
+        }
+        return {
+          quarantine: { ...publicRecord, id }, status: 'completed', terminal: true, cleared: true, outcome: 'cleared',
+        }
+      },
+      clearAgentQuarantine: async (activeWorkspace: string, id: string) => {
+        calls.push(['clear', activeWorkspace, id])
+        return id !== 'missing-quarantine'
+      },
+    }
+    const { app, handlers } = createRouteHarness()
+    registerMcpRoutes(app, () => workspace, runtime as any)
+
+    const listed = await call(handlers.get('GET /api/mcp/quarantines'))
+    expect(listed.body).toEqual([publicRecord])
+    expect(Object.keys(listed.body[0]).sort()).toEqual([
+      'agent_id', 'created_at', 'id', 'key_id', 'reason', 'server_id', 'session_id',
+    ])
+
+    const nonterminal = await call(handlers.get('POST /api/mcp/quarantines/:id/reconcile'), { params: { id: 'quarantine-1' } })
+    expect(nonterminal.statusCode).toBe(409)
+    expect(nonterminal.body).toMatchObject({
+      error_code: 'MCP_AGENT_QUARANTINED', status: 'in_progress', terminal: false, cleared: false,
+    })
+    const terminal = await call(handlers.get('POST /api/mcp/quarantines/:id/reconcile'), { params: { id: 'quarantine-terminal' } })
+    expect(terminal.statusCode).toBe(200)
+    expect(terminal.body).toMatchObject({ ok: true, status: 'completed', terminal: true, cleared: true })
+    const durableLongId = `quarantine-${'x'.repeat(200)}`
+    const longId = await call(handlers.get('POST /api/mcp/quarantines/:id/reconcile'), { params: { id: durableLongId } })
+    expect(longId.statusCode).toBe(200)
+    expect(longId.body.quarantine.id).toBe(durableLongId)
+    const missing = await call(handlers.get('POST /api/mcp/quarantines/:id/reconcile'), { params: { id: 'missing-quarantine' } })
+    expect(missing.statusCode).toBe(404)
+    const invalid = await call(handlers.get('POST /api/mcp/quarantines/:id/reconcile'), { params: { id: '' } })
+    expect(invalid.statusCode).toBe(400)
+
+    for (const acknowledge of [undefined, false]) {
+      const rejected = await call(handlers.get('DELETE /api/mcp/quarantines/:id'), {
+        params: { id: 'quarantine-1' }, body: acknowledge === undefined ? {} : { acknowledge_remote_work_may_continue: acknowledge },
+      })
+      expect(rejected.statusCode).toBe(400)
+      expect(rejected.body.error_code).toBe('MCP_QUARANTINE_ACK_REQUIRED')
+    }
+    const cleared = await call(handlers.get('DELETE /api/mcp/quarantines/:id'), {
+      params: { id: 'quarantine-1' }, body: { acknowledge_remote_work_may_continue: true },
+    })
+    expect(cleared.statusCode).toBe(200)
+    expect(cleared.body).toEqual({ ok: true, cleared: true, id: 'quarantine-1' })
+    const missingClear = await call(handlers.get('DELETE /api/mcp/quarantines/:id'), {
+      params: { id: 'missing-quarantine' }, body: { acknowledge_remote_work_may_continue: true },
+    })
+    expect(missingClear.statusCode).toBe(404)
+
+    expect(calls.filter(call => call[0] === 'clear')).toEqual([
+      ['clear', workspace, 'quarantine-1'],
+      ['clear', workspace, 'missing-quarantine'],
+    ])
+  })
+
   test('never returns raw custom Header values', async () => {
     const workspace = await temporaryWorkspace()
     await writeMcpServers(workspace, [{
@@ -196,6 +273,52 @@ describe('MCP routes', () => {
       body: { description: '改名账号' },
     })
     expect((await readMcpKeys(workspace))[0]).toMatchObject({ key: 'sk_original', description: '改名账号' })
+  })
+
+  test('returns conflicts for active and quarantined identity edits while allowing metadata edits', async () => {
+    const workspace = await temporaryWorkspace()
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const key = await createMcpKey(workspace, {
+      mcp_server_id: 'buda', key: 'sk_route_fenced', description: '账号',
+    })
+    const registry = new McpAgentLeaseRegistry()
+    const lease = await registry.acquire(workspace, {
+      serverId: 'buda', keyId: key.id, agentId: 'agent-1',
+    })
+    const invalidatedKeys: number[] = []
+    const invalidatedServers: string[] = []
+    const { app, handlers } = createRouteHarness()
+    registerMcpRoutes(app, () => workspace, {
+      invalidateKey: async (id: number) => { invalidatedKeys.push(id) },
+      invalidateServer: async (id: string) => { invalidatedServers.push(id) },
+    } as any)
+
+    try {
+      const metadata = await call(handlers.get('PUT /api/mcp/keys/:id'), {
+        params: { id: String(key.id) }, body: { description: '仅更新显示信息' },
+      })
+      expect(metadata.statusCode).toBe(200)
+
+      const busy = await call(handlers.get('PUT /api/mcp/keys/:id'), {
+        params: { id: String(key.id) }, body: { key: 'sk_route_rotated' },
+      })
+      expect(busy).toMatchObject({ statusCode: 409, body: { error_code: 'MCP_AGENT_BUSY' } })
+
+      await lease.quarantine({
+        requestId: 'request-route', sessionId: 'session-route', reason: 'send_unknown',
+      })
+    } finally {
+      await lease.release()
+    }
+
+    const quarantined = await call(handlers.get('PUT /api/mcp/servers/:id'), {
+      params: { id: 'buda' }, body: { custom_headers: { 'X-Space': 'rotated' } },
+    })
+    expect(quarantined).toMatchObject({
+      statusCode: 409, body: { error_code: 'MCP_AGENT_QUARANTINED' },
+    })
+    expect(invalidatedKeys).toEqual([key.id])
+    expect(invalidatedServers).toEqual([])
   })
 
   test('does not create an orphan Key behind a queued Server delete', async () => {

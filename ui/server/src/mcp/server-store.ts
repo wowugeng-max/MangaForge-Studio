@@ -3,6 +3,7 @@ import { coerceBoolean } from '../boolean-utils'
 import { readJsonArrayFailClosed, writeJsonArrayAtomic } from './atomic-json-store'
 import type { McpServerRecord, PublicMcpServerRecord } from './types'
 import { assertMcpWorkspaceMutationHeld, withMcpWorkspaceMutation } from './workspace-coordinator'
+import { assertMcpIdentityMutationAllowed } from './identity-mutation-fence'
 
 export const BUDA_MCP_SERVER_TEMPLATE: McpServerRecord = Object.freeze({
   id: 'buda',
@@ -112,8 +113,40 @@ async function writeMcpServersUnlocked(activeWorkspace: string, servers: McpServ
   await writeJsonArrayAtomic(getMcpServersPath(activeWorkspace), servers.map(item => normalizeMcpServer(item)))
 }
 
+function sortedRecordEntries(value: Record<string, string>) {
+  return Object.entries(value).sort(([left], [right]) => left.localeCompare(right))
+}
+
+function serverIdentityChanged(previous: McpServerRecord, next: McpServerRecord) {
+  return previous.transport !== next.transport
+    || previous.url !== next.url
+    || previous.auth_type !== next.auth_type
+    || previous.adapter_id !== next.adapter_id
+    || previous.is_active !== next.is_active
+    || JSON.stringify(previous.enabled_tools) !== JSON.stringify(next.enabled_tools)
+    || JSON.stringify(sortedRecordEntries(previous.custom_headers))
+      !== JSON.stringify(sortedRecordEntries(next.custom_headers))
+}
+
+async function assertServerIdentityMutationsAllowed(
+  activeWorkspace: string,
+  previous: McpServerRecord[],
+  next: McpServerRecord[],
+) {
+  const nextById = new Map(next.map(item => [item.id, item]))
+  const serverIds = previous
+    .filter(item => !nextById.has(item.id) || serverIdentityChanged(item, nextById.get(item.id)!))
+    .map(item => item.id)
+  await assertMcpIdentityMutationAllowed(activeWorkspace, { serverIds })
+}
+
 export function writeMcpServers(activeWorkspace: string, servers: McpServerRecord[]) {
-  return withMcpWorkspaceMutation(activeWorkspace, () => writeMcpServersUnlocked(activeWorkspace, servers))
+  return withMcpWorkspaceMutation(activeWorkspace, async () => {
+    const previous = await readMcpServers(activeWorkspace)
+    const next = servers.map(normalizeMcpServer)
+    await assertServerIdentityMutationsAllowed(activeWorkspace, previous, next)
+    await writeMcpServersUnlocked(activeWorkspace, next)
+  })
 }
 
 export function upsertMcpServer(activeWorkspace: string, input: Partial<McpServerRecord> & Record<string, unknown>) {
@@ -121,7 +154,10 @@ export function upsertMcpServer(activeWorkspace: string, input: Partial<McpServe
     const server = normalizeMcpServer(input)
     const servers = await readMcpServers(activeWorkspace)
     const index = servers.findIndex(item => item.id === server.id)
-    if (index >= 0) servers[index] = server
+    if (index >= 0) {
+      await assertServerIdentityMutationsAllowed(activeWorkspace, [servers[index]!], [server])
+      servers[index] = server
+    }
     else servers.push(server)
     await writeMcpServersUnlocked(activeWorkspace, servers)
     return server
@@ -132,6 +168,7 @@ export function deleteMcpServer(activeWorkspace: string, id: string) {
   return withMcpWorkspaceMutation(activeWorkspace, async () => {
     const servers = await readMcpServers(activeWorkspace)
     const next = servers.filter(item => item.id !== id)
+    await assertServerIdentityMutationsAllowed(activeWorkspace, servers, next)
     await writeMcpServersUnlocked(activeWorkspace, next)
     return next.length !== servers.length
   })

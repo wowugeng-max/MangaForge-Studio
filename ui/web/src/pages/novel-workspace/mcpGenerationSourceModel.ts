@@ -8,6 +8,31 @@ export type GenerationSourceForm = {
   agentId?: string
 }
 
+export function formatMcpGenerationFailure(payload: any) {
+  const code = String(payload?.error_code || payload?.code || '')
+  const fallback = String(payload?.error || payload?.message || '')
+  const receiptStatus = payload?.receipt_status
+  if (receiptStatus === 'send_unknown') {
+    return `${fallback || '正文生成失败'}：发送结果无法确认，请不要重新发送；先到 MCP Services 检查远端状态。`
+  }
+  if (receiptStatus === 'remote_cancel_unknown') {
+    return `${fallback || '正文生成失败'}：远端可能仍在运行，请先到 MCP Services 检查远端状态。`
+  }
+  if (code === 'MCP_BINDING_CHANGED') {
+    return `${fallback || '正文生成失败'}：正文来源已变更，请重新确认项目的 MCP 绑定后再生成。`
+  }
+  if (code === 'MCP_AGENT_BUSY') {
+    return `${fallback || '正文生成失败'}：远端 Agent 仍在处理上一项任务，请稍后再试。`
+  }
+  if (code === 'MCP_SEND_UNKNOWN') {
+    return `${fallback || '正文生成失败'}：发送结果无法确认，请不要重新发送；先到 MCP Services 检查远端状态。`
+  }
+  if (code === 'MCP_AGENT_QUARANTINED') {
+    return `${fallback || '正文生成失败'}：该 Agent 已被安全隔离，请到 MCP Services 执行连接诊断。`
+  }
+  return fallback
+}
+
 export function isCompleteMcpSource(form: GenerationSourceForm) {
   return form.type === 'mcp'
     && Boolean(String(form.serverId || '').trim())

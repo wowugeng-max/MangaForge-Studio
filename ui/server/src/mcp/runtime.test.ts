@@ -15,7 +15,402 @@ function connectionLostError() {
   return new McpError('MCP_CONNECTION_LOST', 'connection lost')
 }
 
+function inspectionGate(result: { status: string; terminal: boolean }) {
+  let signalStarted!: () => void
+  let releaseInspection!: () => void
+  const started = new Promise<void>(resolve => { signalStarted = resolve })
+  const mayFinish = new Promise<void>(resolve => { releaseInspection = resolve })
+  return {
+    started,
+    release: releaseInspection,
+    inspect: async () => {
+      signalStarted()
+      await mayFinish
+      return result
+    },
+  }
+}
+
 describe('MCP runtime', () => {
+  async function seedQuarantine(
+    runtime: ReturnType<typeof createMcpRuntime>,
+    workspace: string,
+    binding: { serverId: string; keyId: number; agentId: string },
+    input: { requestId: string; sessionId: string; reason?: 'send_unknown' | 'remote_cancel_unknown' },
+  ) {
+    const lease = await runtime.acquireAgentLease(workspace, binding)
+    await lease.quarantine({ ...input, reason: input.reason || 'send_unknown' })
+    await lease.release()
+    return (await runtime.listAgentQuarantines(workspace)).find(item => item.session_id === input.sessionId)!
+  }
+
+  test('lists only public quarantine fields and reconciles through the explicitly pinned workspace', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-reconcile-a-'))
+    const ambientWorkspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-reconcile-b-'))
+    workspaces.push(workspace, ambientWorkspace)
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const key = await createMcpKey(workspace, { mcp_server_id: 'buda', key: 'sk_reconcile', description: '账号' })
+    let ambient = workspace
+    const inspections: any[] = []
+    const runtime = createMcpRuntime(() => ambient, {
+      manager: {
+        get: async () => ({ diagnostics: () => ({ state: 'Ready' }), listTools: async () => [], callTool: async () => ({ content: [] }) }),
+        invalidate: async () => {}, invalidateIfCurrent: async () => {}, invalidateServer: async () => {}, closeAll: async () => {},
+      } as any,
+      adapterFactory: () => ({
+        listAgents: async () => [],
+        inspectSession: async (input: any, options: any) => {
+          inspections.push({ input, options })
+          return { status: 'in_progress', terminal: false }
+        },
+      }) as any,
+    })
+    const record = await seedQuarantine(runtime, workspace, {
+      serverId: 'buda', keyId: key.id, agentId: 'agent-public',
+    }, { requestId: 'request-private', sessionId: 'session-public' })
+
+    expect(Object.keys(record).sort()).toEqual([
+      'agent_id', 'created_at', 'id', 'key_id', 'reason', 'server_id', 'session_id',
+    ])
+    expect(record).not.toHaveProperty('workspace_key')
+    expect(record).not.toHaveProperty('request_id')
+
+    ambient = ambientWorkspace
+    const result = await runtime.reconcileAgentQuarantine(workspace, record.id)
+
+    expect(result).toMatchObject({
+      quarantine: record,
+      status: 'in_progress',
+      terminal: false,
+      cleared: false,
+      outcome: 'nonterminal',
+    })
+    expect(inspections).toEqual([{
+      input: { agentId: 'agent-public', sessionId: 'session-public' },
+      options: {},
+    }])
+    expect(await runtime.listAgentQuarantines(workspace)).toEqual([record])
+  })
+
+  test('clears a terminal quarantine exactly once without touching another record', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-terminal-'))
+    workspaces.push(workspace)
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const key = await createMcpKey(workspace, { mcp_server_id: 'buda', key: 'sk_terminal', description: '账号' })
+    const inspected: string[] = []
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: {
+        get: async () => ({ diagnostics: () => ({ state: 'Ready' }), listTools: async () => [], callTool: async () => ({ content: [] }) }),
+        invalidate: async () => {}, invalidateIfCurrent: async () => {}, invalidateServer: async () => {}, closeAll: async () => {},
+      } as any,
+      adapterFactory: () => ({
+        listAgents: async () => [],
+        inspectSession: async ({ sessionId }: any) => {
+          inspected.push(sessionId)
+          return sessionId === 'session-terminal'
+            ? { status: 'completed', terminal: true }
+            : { status: 'Completed', terminal: true }
+        },
+      }) as any,
+    })
+    const target = await seedQuarantine(runtime, workspace, {
+      serverId: 'buda', keyId: key.id, agentId: 'agent-terminal',
+    }, { requestId: 'request-terminal', sessionId: 'session-terminal' })
+    const other = await seedQuarantine(runtime, workspace, {
+      serverId: 'buda', keyId: key.id, agentId: 'agent-other',
+    }, { requestId: 'request-other', sessionId: 'session-other' })
+
+    expect(await runtime.reconcileAgentQuarantine(workspace, target.id)).toMatchObject({
+      quarantine: target,
+      status: 'completed',
+      terminal: true,
+      cleared: true,
+      outcome: 'cleared',
+    })
+    expect(await runtime.reconcileAgentQuarantine(workspace, other.id)).toMatchObject({
+      quarantine: other,
+      status: 'unknown',
+      terminal: false,
+      cleared: false,
+      outcome: 'nonterminal',
+    })
+    expect(inspected).toEqual(['session-terminal', 'session-other'])
+    expect(await runtime.listAgentQuarantines(workspace)).toEqual([other])
+  })
+
+  test('diagnostics inspects only matching Server and Key quarantines and clears only terminal Sessions', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-diagnostics-quarantine-'))
+    workspaces.push(workspace)
+    const otherServer = { ...BUDA_MCP_SERVER_TEMPLATE, id: 'buda-other', display_name: 'Buda Other' }
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE, otherServer])
+    const key = await createMcpKey(workspace, { mcp_server_id: 'buda', key: 'sk_diagnostics_one', description: '账号一' })
+    const otherKey = await createMcpKey(workspace, { mcp_server_id: 'buda', key: 'sk_diagnostics_two', description: '账号二' })
+    const crossServerKey = await createMcpKey(workspace, { mcp_server_id: 'buda-other', key: 'sk_diagnostics_three', description: '账号三' })
+    const inspected: string[] = []
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: {
+        get: async () => ({ diagnostics: () => ({ state: 'Ready' }), listTools: async () => [], callTool: async () => ({ content: [] }) }),
+        invalidate: async () => {}, invalidateIfCurrent: async () => {}, invalidateServer: async () => {}, closeAll: async () => {},
+      } as any,
+      adapterFactory: () => ({
+        listAgents: async () => [{ id: 'agent-visible' }],
+        inspectSession: async ({ sessionId }: any) => {
+          inspected.push(sessionId)
+          return sessionId === 'session-terminal'
+            ? { status: 'failed', terminal: true }
+            : { status: 'waiting_for_input', terminal: false }
+        },
+      }) as any,
+    })
+    const waiting = await seedQuarantine(runtime, workspace, {
+      serverId: 'buda', keyId: key.id, agentId: 'agent-waiting',
+    }, { requestId: 'request-waiting', sessionId: 'session-waiting' })
+    const terminal = await seedQuarantine(runtime, workspace, {
+      serverId: 'buda', keyId: key.id, agentId: 'agent-terminal',
+    }, { requestId: 'request-terminal', sessionId: 'session-terminal' })
+    const otherKeyRecord = await seedQuarantine(runtime, workspace, {
+      serverId: 'buda', keyId: otherKey.id, agentId: 'agent-other-key',
+    }, { requestId: 'request-other-key', sessionId: 'session-other-key' })
+    const otherServerRecord = await seedQuarantine(runtime, workspace, {
+      serverId: 'buda-other', keyId: crossServerKey.id, agentId: 'agent-other-server',
+    }, { requestId: 'request-other-server', sessionId: 'session-other-server' })
+
+    const diagnostics = await runtime.diagnostics(workspace, 'buda', key.id)
+
+    expect(inspected.sort()).toEqual(['session-terminal', 'session-waiting'])
+    expect(diagnostics.quarantines).toEqual(expect.arrayContaining([
+      expect.objectContaining({ quarantine: waiting, status: 'waiting_for_input', terminal: false, cleared: false }),
+      expect.objectContaining({ quarantine: terminal, status: 'failed', terminal: true, cleared: true }),
+    ]))
+    expect(await runtime.listAgentQuarantines(workspace)).toEqual(expect.arrayContaining([
+      waiting, otherKeyRecord, otherServerRecord,
+    ]))
+    expect(await runtime.listAgentQuarantines(workspace)).not.toContainEqual(terminal)
+  })
+
+  test('diagnostics durably clears every terminal quarantine for the same Server and Key', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-diagnostics-multi-clear-'))
+    workspaces.push(workspace)
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const key = await createMcpKey(workspace, { mcp_server_id: 'buda', key: 'sk_diagnostics_multi', description: '账号' })
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: {
+        get: async () => ({ diagnostics: () => ({ state: 'Ready' }), listTools: async () => [], callTool: async () => ({ content: [] }) }),
+        invalidate: async () => {}, invalidateIfCurrent: async () => {}, invalidateServer: async () => {}, closeAll: async () => {},
+      } as any,
+      adapterFactory: () => ({
+        listAgents: async () => [],
+        inspectSession: async () => ({ status: 'failed', terminal: true }),
+      }) as any,
+    })
+    const first = await seedQuarantine(runtime, workspace, {
+      serverId: 'buda', keyId: key.id, agentId: 'agent-terminal-one',
+    }, { requestId: 'request-terminal-one', sessionId: 'session-terminal-one' })
+    const second = await seedQuarantine(runtime, workspace, {
+      serverId: 'buda', keyId: key.id, agentId: 'agent-terminal-two',
+    }, { requestId: 'request-terminal-two', sessionId: 'session-terminal-two' })
+
+    const diagnostics = await runtime.diagnostics(workspace, 'buda', key.id)
+
+    expect(diagnostics.quarantines).toEqual([
+      expect.objectContaining({ quarantine: first, status: 'failed', terminal: true, cleared: true }),
+      expect.objectContaining({ quarantine: second, status: 'failed', terminal: true, cleared: true }),
+    ])
+    expect(await runtime.listAgentQuarantines(workspace)).toEqual([])
+  })
+
+  test('keeps a terminal diagnostics credential rotation queued until inspect and CAS clear finish', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-diagnostics-terminal-race-'))
+    workspaces.push(workspace)
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const key = await createMcpKey(workspace, { mcp_server_id: 'buda', key: 'fixture-key-diagnostics-terminal-before', description: '账号' })
+    const binding = { serverId: 'buda', keyId: key.id, agentId: 'agent-terminal' }
+    const gate = inspectionGate({ status: 'failed', terminal: true })
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: {
+        get: async () => ({ diagnostics: () => ({ state: 'Ready' }), listTools: async () => [], callTool: async () => ({ content: [] }) }),
+        invalidate: async () => {}, invalidateIfCurrent: async () => {}, invalidateServer: async () => {}, closeAll: async () => {},
+      } as any,
+      adapterFactory: () => ({
+        listAgents: async () => [{ id: 'agent-terminal' }],
+        inspectSession: gate.inspect,
+      }) as any,
+    })
+    const original = await seedQuarantine(runtime, workspace, binding, {
+      requestId: 'request-terminal', sessionId: 'session-terminal',
+    })
+
+    const diagnosing = runtime.diagnostics(workspace, 'buda', key.id)
+    await gate.started
+    let rotationSettled = false
+    let rotationError: any
+    const rotating = updateMcpKey(workspace, key.id, { key: 'fixture-key-diagnostics-terminal-after' }).then(
+      () => { rotationSettled = true },
+      error => { rotationSettled = true; rotationError = error },
+    )
+    await new Promise(resolve => setTimeout(resolve, 5))
+    const pendingDuringInspection = !rotationSettled
+    gate.release()
+    const diagnostics = await diagnosing
+    await rotating
+
+    expect(pendingDuringInspection).toBe(true)
+    expect(rotationError).toBeUndefined()
+    expect(diagnostics.quarantines).toEqual([
+      expect.objectContaining({ quarantine: original, status: 'failed', terminal: true, cleared: true }),
+    ])
+    expect(await runtime.listAgentQuarantines(workspace)).toEqual([])
+    expect((await readMcpKeys(workspace))[0]?.key).toBe('fixture-key-diagnostics-terminal-after')
+  })
+
+  test('keeps a nonterminal diagnostics credential rotation queued then rejects it against quarantine', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-diagnostics-nonterminal-race-'))
+    workspaces.push(workspace)
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const key = await createMcpKey(workspace, { mcp_server_id: 'buda', key: 'fixture-key-diagnostics-nonterminal-before', description: '账号' })
+    const binding = { serverId: 'buda', keyId: key.id, agentId: 'agent-waiting' }
+    const gate = inspectionGate({ status: 'waiting_for_input', terminal: false })
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: {
+        get: async () => ({ diagnostics: () => ({ state: 'Ready' }), listTools: async () => [], callTool: async () => ({ content: [] }) }),
+        invalidate: async () => {}, invalidateIfCurrent: async () => {}, invalidateServer: async () => {}, closeAll: async () => {},
+      } as any,
+      adapterFactory: () => ({
+        listAgents: async () => [{ id: 'agent-waiting' }],
+        inspectSession: gate.inspect,
+      }) as any,
+    })
+    const original = await seedQuarantine(runtime, workspace, binding, {
+      requestId: 'request-waiting', sessionId: 'session-waiting',
+    })
+
+    const diagnosing = runtime.diagnostics(workspace, 'buda', key.id)
+    await gate.started
+    let rotationSettled = false
+    let rotationError: any
+    const rotating = updateMcpKey(workspace, key.id, { key: 'sk_must_not_rotate' }).then(
+      () => { rotationSettled = true },
+      error => { rotationSettled = true; rotationError = error },
+    )
+    await new Promise(resolve => setTimeout(resolve, 5))
+    const pendingDuringInspection = !rotationSettled
+    gate.release()
+    const diagnostics = await diagnosing
+    await rotating
+
+    expect(pendingDuringInspection).toBe(true)
+    expect(rotationError).toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    expect(diagnostics.quarantines).toEqual([
+      expect.objectContaining({ quarantine: original, status: 'waiting_for_input', terminal: false, cleared: false }),
+    ])
+    expect(await runtime.listAgentQuarantines(workspace)).toEqual([original])
+    expect((await readMcpKeys(workspace))[0]?.key).toBe('fixture-key-diagnostics-nonterminal-before')
+  })
+
+  test('keeps a terminal reconciliation credential rotation queued until inspect and CAS clear finish', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-reconcile-race-'))
+    workspaces.push(workspace)
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const key = await createMcpKey(workspace, { mcp_server_id: 'buda', key: 'sk_race', description: '账号' })
+    const binding = { serverId: 'buda', keyId: key.id, agentId: 'agent-race' }
+    const gate = inspectionGate({ status: 'completed', terminal: true })
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: {
+        get: async () => ({ diagnostics: () => ({ state: 'Ready' }), listTools: async () => [], callTool: async () => ({ content: [] }) }),
+        invalidate: async () => {}, invalidateIfCurrent: async () => {}, invalidateServer: async () => {}, closeAll: async () => {},
+      } as any,
+      adapterFactory: () => ({
+        listAgents: async () => [],
+        inspectSession: gate.inspect,
+      }) as any,
+    })
+    const original = await seedQuarantine(runtime, workspace, binding, {
+      requestId: 'request-old', sessionId: 'session-old',
+    })
+
+    const reconciling = runtime.reconcileAgentQuarantine(workspace, original.id)
+    await gate.started
+    let rotationSettled = false
+    let rotationError: any
+    const rotating = updateMcpKey(workspace, key.id, { key: 'fixture-key-reconciliation-terminal-after' }).then(
+      () => { rotationSettled = true },
+      error => { rotationSettled = true; rotationError = error },
+    )
+    await new Promise(resolve => setTimeout(resolve, 5))
+    const pendingDuringInspection = !rotationSettled
+    gate.release()
+    const result = await reconciling
+    await rotating
+
+    expect(pendingDuringInspection).toBe(true)
+    expect(rotationError).toBeUndefined()
+    expect(result).toMatchObject({ cleared: true, outcome: 'cleared', terminal: true })
+    expect(await runtime.listAgentQuarantines(workspace)).toEqual([])
+    expect((await readMcpKeys(workspace))[0]?.key).toBe('fixture-key-reconciliation-terminal-after')
+  })
+
+  test('keeps a nonterminal reconciliation credential rotation queued then rejects it against quarantine', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-reconcile-nonterminal-race-'))
+    workspaces.push(workspace)
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const key = await createMcpKey(workspace, { mcp_server_id: 'buda', key: 'sk_nonterminal_race', description: '账号' })
+    const binding = { serverId: 'buda', keyId: key.id, agentId: 'agent-race' }
+    const gate = inspectionGate({ status: 'in_progress', terminal: false })
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: {
+        get: async () => ({ diagnostics: () => ({ state: 'Ready' }), listTools: async () => [], callTool: async () => ({ content: [] }) }),
+        invalidate: async () => {}, invalidateIfCurrent: async () => {}, invalidateServer: async () => {}, closeAll: async () => {},
+      } as any,
+      adapterFactory: () => ({ listAgents: async () => [], inspectSession: gate.inspect }) as any,
+    })
+    const original = await seedQuarantine(runtime, workspace, binding, {
+      requestId: 'request-old', sessionId: 'session-old',
+    })
+
+    const reconciling = runtime.reconcileAgentQuarantine(workspace, original.id)
+    await gate.started
+    let rotationSettled = false
+    let rotationError: any
+    const rotating = updateMcpKey(workspace, key.id, { key: 'sk_must_not_rotate' }).then(
+      () => { rotationSettled = true },
+      error => { rotationSettled = true; rotationError = error },
+    )
+    await new Promise(resolve => setTimeout(resolve, 5))
+    const pendingDuringInspection = !rotationSettled
+    gate.release()
+    const result = await reconciling
+    await rotating
+
+    expect(pendingDuringInspection).toBe(true)
+    expect(rotationError).toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    expect(result).toMatchObject({ cleared: false, outcome: 'nonterminal', terminal: false })
+    expect(await runtime.listAgentQuarantines(workspace)).toEqual([original])
+    expect((await readMcpKeys(workspace))[0]?.key).toBe('sk_nonterminal_race')
+  })
+
+  test('does not claim a terminal quarantine is cleared while its lease remains active', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-reconcile-active-'))
+    workspaces.push(workspace)
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const key = await createMcpKey(workspace, { mcp_server_id: 'buda', key: 'sk_active_reconcile', description: '账号' })
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: {
+        get: async () => ({ diagnostics: () => ({ state: 'Ready' }), listTools: async () => [], callTool: async () => ({ content: [] }) }),
+        invalidate: async () => {}, invalidateIfCurrent: async () => {}, invalidateServer: async () => {}, closeAll: async () => {},
+      } as any,
+      adapterFactory: () => ({ listAgents: async () => [], inspectSession: async () => ({ status: 'cancelled', terminal: true }) }) as any,
+    })
+    const binding = { serverId: 'buda', keyId: key.id, agentId: 'agent-active' }
+    const lease = await runtime.acquireAgentLease(workspace, binding)
+    await lease.stageSessionFence({ requestId: 'request-active', sessionId: 'session-active' })
+    const [record] = await runtime.listAgentQuarantines(workspace)
+
+    await expect(runtime.reconcileAgentQuarantine(workspace, record!.id))
+      .rejects.toMatchObject({ code: 'MCP_AGENT_BUSY' })
+    expect(await runtime.listAgentQuarantines(workspace)).toEqual([record])
+    await lease.release()
+  })
+
   test('pins Agent lease operations to the explicit workspace when the ambient workspace drifts', async () => {
     const firstWorkspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-pinned-a-'))
     const secondWorkspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-pinned-b-'))

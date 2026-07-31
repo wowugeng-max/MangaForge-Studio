@@ -108,6 +108,9 @@ export type McpAgentQuarantineRecord = {
   created_at: string
 }
 
+export type PublicMcpAgentQuarantineRecord = Pick<McpAgentQuarantineRecord,
+  'id' | 'server_id' | 'key_id' | 'agent_id' | 'session_id' | 'reason' | 'created_at'>
+
 export type McpDiagnostics = {
   state: McpClientState
   server_id: string
