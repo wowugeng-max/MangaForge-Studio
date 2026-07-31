@@ -44,7 +44,8 @@ import {
   selectProseForChapter,
 } from './runtime-helpers'
 import type { createGenerationSourceResolver } from '../generation-source/create-generation-source'
-import { MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY } from '../generation-source/types'
+import { takeProductionLease } from '../generation-source/production-lease'
+import { MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY, type ProseGenerationLeaseBundle } from '../generation-source/types'
 
 const MCP_RECEIPT_FIELDS = [
   'receipt_authority',
@@ -89,7 +90,7 @@ export async function runGenerateChapterDraftProse(args: {
   getReferenceMigrationPlanForChapter: (...a: any[]) => any
   throwIfChapterGenerationAborted: () => void
   onStage: (...a: any[]) => any
-}): Promise<{
+}): Promise<ProseGenerationLeaseBundle & {
   finalText: string
   finalSceneBreakdown: any
   finalContinuityNotes: any
@@ -178,6 +179,9 @@ const draftResult = await sourceResolution.source.generateProse({
     await onStage(stage, payload)
   },
 })
+let generationLease: ProseGenerationLeaseBundle['generationLease']
+try {
+generationLease = takeProductionLease(draftResult)
 if (sourceResolution.resolved_type === 'mcp') {
   await onStage('quality_pipeline', { status: 'success', source: 'mcp' })
 }
@@ -319,5 +323,10 @@ let finalContinuityNotes = targetProse?.continuity_notes || targetProse?.continu
     editorRewrite,
     memePolish,
     readabilityReview,
+    generationLease,
   }
+} catch (error) {
+  await generationLease?.release()
+  throw error
+}
 }

@@ -19,6 +19,7 @@ type NovelMcpBindingRoutesContext = {
 function bindingError(error: unknown) {
   if (isMcpError(error)) {
     const status = error.details?.reason === 'binding_conflict' ? 409
+      : error.code === 'MCP_AGENT_BUSY' ? 409
       : error.code === 'MCP_AUTH_FAILED' ? 401
         : error.code === 'MCP_CAPABILITY_MISSING' ? 422
           : 400
@@ -58,6 +59,18 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
       const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
       if (!project) return null
       const source = normalizeProseGenerationSource(req.body?.source || req.body)
+      const currentSource = resolveProseGenerationSource(project)
+      for (const candidate of [currentSource, source]) {
+        if (candidate.type !== 'mcp') continue
+        const active = await ctx.mcpRuntime.isAgentLeaseActive(activeWorkspace, {
+          serverId: candidate.mcp.server_id,
+          keyId: candidate.mcp.key_id,
+          agentId: candidate.mcp.agent_id,
+        })
+        if (active) {
+          throw new McpError('MCP_AGENT_BUSY', '该 MCP Agent 正在完成正文生产，暂不能修改绑定')
+        }
+      }
       let validation: any = null
       if (source.type === 'mcp') {
         validation = await validateMcpProjectBinding(

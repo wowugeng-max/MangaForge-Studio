@@ -1,4 +1,5 @@
 import type { GenerationSourceProgress } from '../../mcp/adapters/types'
+import type { ProductionLease } from './production-lease'
 
 export const MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY = 'mcp_generation_source_v1' as const
 
@@ -43,6 +44,11 @@ export type ProseGenerationResult = {
   }
   raw?: unknown
   [key: string]: any
+}
+
+/** Internal service bundle only; never persist or expose this field in a transport payload. */
+export type ProseGenerationLeaseBundle = {
+  generationLease?: ProductionLease
 }
 
 export interface GenerationSource {

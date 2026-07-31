@@ -43,6 +43,7 @@ async function fixture() {
   const runtime = {
     listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }, { id: 'agent-2', name: '正文 Agent 2' }],
     createAgent: async () => ({ id: 'agent-new', name: 'MangaForge Agent' }),
+    isAgentLeaseActive: async () => false,
   }
   const { app, handlers } = createRouteHarness()
   registerNovelMcpBindingRoutes(app, {
@@ -69,6 +70,72 @@ describe('novel MCP prose-source binding routes', () => {
     expect(saved.statusCode).toBe(200)
     expect(saved.body.source).toMatchObject({ version: 'prose_generation_source_v1', type: 'mcp' })
     expect((await getNovelProject(workspace, first.id))?.reference_config?.prose_generation_source).toEqual(saved.body.source)
+  })
+
+  test('rejects changing away from the current MCP tuple while its production lease is active', async () => {
+    const { workspace, key, first, handlers, runtime } = await fixture()
+    const path = '/api/novel/projects/:id/prose-generation-source'
+    const currentSource = {
+      version: 'prose_generation_source_v1',
+      type: 'mcp',
+      mcp: { server_id: 'buda', key_id: key.id, adapter_id: 'buda', agent_id: 'agent-1' },
+    }
+    await call(handlers.get(`PUT ${path}`), {
+      params: { id: String(first.id) },
+      body: { source: currentSource },
+    })
+    const before = structuredClone(await getNovelProject(workspace, first.id))
+    let liveValidationCalls = 0
+    runtime.listAgents = async () => {
+      liveValidationCalls += 1
+      return [{ id: 'agent-1', name: '正文 Agent' }]
+    }
+    runtime.isAgentLeaseActive = async (_activeWorkspace: string, binding: any) => (
+      binding.serverId === 'buda'
+      && binding.keyId === key.id
+      && binding.agentId === 'agent-1'
+    )
+
+    const response = await call(handlers.get(`PUT ${path}`), {
+      params: { id: String(first.id) },
+      body: { source: { version: 'prose_generation_source_v1', type: 'model' } },
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.body.error_code).toBe('MCP_AGENT_BUSY')
+    expect(await getNovelProject(workspace, first.id)).toEqual(before)
+    expect(liveValidationCalls).toBe(0)
+  })
+
+  test('rejects changing to a proposed MCP tuple while its production lease is active', async () => {
+    const { workspace, key, first, handlers, runtime } = await fixture()
+    const path = '/api/novel/projects/:id/prose-generation-source'
+    const proposedSource = {
+      version: 'prose_generation_source_v1',
+      type: 'mcp',
+      mcp: { server_id: 'buda', key_id: key.id, adapter_id: 'buda', agent_id: 'agent-2' },
+    }
+    const before = structuredClone(await getNovelProject(workspace, first.id))
+    let liveValidationCalls = 0
+    runtime.listAgents = async () => {
+      liveValidationCalls += 1
+      return [{ id: 'agent-2', name: '正文 Agent 2' }]
+    }
+    runtime.isAgentLeaseActive = async (_activeWorkspace: string, binding: any) => (
+      binding.serverId === 'buda'
+      && binding.keyId === key.id
+      && binding.agentId === 'agent-2'
+    )
+
+    const response = await call(handlers.get(`PUT ${path}`), {
+      params: { id: String(first.id) },
+      body: { source: proposedSource },
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.body.error_code).toBe('MCP_AGENT_BUSY')
+    expect(await getNovelProject(workspace, first.id)).toEqual(before)
+    expect(liveValidationCalls).toBe(0)
   })
 
   test('rejects the same Server Key Agent tuple for a second project', async () => {

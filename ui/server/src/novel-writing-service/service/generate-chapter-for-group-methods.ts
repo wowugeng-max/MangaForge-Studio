@@ -475,6 +475,9 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     throwIfChapterGenerationAborted,
     onStage,
   })
+  let generationLease: Awaited<ReturnType<typeof runGenerateChapterDraftProse>>['generationLease']
+  try {
+  generationLease = draftResultBundle.generationLease
   let finalText = draftResultBundle.finalText
   let finalSceneBreakdown = draftResultBundle.finalSceneBreakdown
   let finalContinuityNotes = draftResultBundle.finalContinuityNotes
@@ -811,6 +814,9 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     deterministicProseCleanup,
     configSnapshot,
   })
+  } finally {
+    await generationLease?.release()
+  }
 
 }
 

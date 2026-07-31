@@ -21,6 +21,7 @@ import {
   type ProseGenerationRequest,
   type ProseGenerationResult,
 } from './types'
+import { attachProductionLease } from './production-lease'
 
 const PROVENANCE_ID_MAX_CHARS = 160
 
@@ -372,8 +373,7 @@ export class McpGenerationSource implements GenerationSource {
         },
       }
       await lease.clearSessionFence()
-      await releaseLease()
-      return response
+      return attachProductionLease(response, lease)
     } catch (error) {
       let exposedError = error
       if (deadline?.signal.aborted && isAbortRelatedError(error, deadline.signal)) {
