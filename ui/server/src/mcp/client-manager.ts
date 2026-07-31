@@ -8,6 +8,9 @@ type ConnectionEntry = {
   controller: AbortController
   promise: Promise<GenericMcpClient>
   waiters: number
+  settled: boolean
+  closePromise?: Promise<void>
+  retirement?: Promise<void>
 }
 
 function connectionPrefix(activeWorkspace: string, serverId: string, keyId: number) {
@@ -38,6 +41,7 @@ function connectionKey(activeWorkspace: string, server: McpServerRecord, key: Mc
 export class McpClientManager {
   private readonly clients = new Map<string, GenericMcpClient>()
   private readonly connecting = new Map<string, ConnectionEntry>()
+  private readonly retired = new Map<string, Set<ConnectionEntry>>()
   private readonly createClient: typeof createMcpClient
 
   constructor(options: { createClient?: typeof createMcpClient } = {}) {
@@ -62,6 +66,7 @@ export class McpClientManager {
         controller,
         promise: Promise.resolve(connectingClient),
         waiters: 0,
+        settled: false,
       }
       const connection = (async () => {
         try {
@@ -71,16 +76,49 @@ export class McpClientManager {
           if (this.clients.get(cacheKey) === connectingClient) this.clients.delete(cacheKey)
           throw error
         } finally {
+          entry.settled = true
           if (this.connecting.get(cacheKey) === entry) this.connecting.delete(cacheKey)
         }
       })()
       entry.promise = connection
       this.connecting.set(cacheKey, entry)
     }
-    return this.waitForConnection(entry, signal)
+    return this.waitForConnection(cacheKey, entry, signal)
   }
 
-  private async waitForConnection(entry: ConnectionEntry, signal?: AbortSignal) {
+  private closeConnection(entry: ConnectionEntry) {
+    entry.closePromise ||= entry.client.close().catch(() => {})
+    return entry.closePromise
+  }
+
+  private forgetRetired(cacheKey: string, entry: ConnectionEntry) {
+    const entries = this.retired.get(cacheKey)
+    if (!entries) return
+    entries.delete(entry)
+    if (entries.size === 0) this.retired.delete(cacheKey)
+  }
+
+  private retireConnection(cacheKey: string, entry: ConnectionEntry) {
+    if (this.connecting.get(cacheKey) === entry) this.connecting.delete(cacheKey)
+    if (this.clients.get(cacheKey) === entry.client) this.clients.delete(cacheKey)
+    if (entry.settled || entry.retirement) return
+
+    let entries = this.retired.get(cacheKey)
+    if (!entries) {
+      entries = new Set()
+      this.retired.set(cacheKey, entries)
+    }
+    entries.add(entry)
+    entry.retirement = entry.promise
+      .then(
+        () => this.closeConnection(entry),
+        () => this.closeConnection(entry),
+      )
+      .finally(() => this.forgetRetired(cacheKey, entry))
+    entry.controller.abort()
+  }
+
+  private async waitForConnection(cacheKey: string, entry: ConnectionEntry, signal?: AbortSignal) {
     if (signal?.aborted) throw new McpError('MCP_CANCELLED', 'MCP 连接等待已取消')
     entry.waiters += 1
     let onAbort: (() => void) | undefined
@@ -94,7 +132,9 @@ export class McpClientManager {
     } finally {
       if (onAbort && signal) signal.removeEventListener('abort', onAbort)
       entry.waiters -= 1
-      if (entry.waiters === 0 && entry.client.state !== 'Ready') entry.controller.abort()
+      if (entry.waiters === 0 && !entry.settled && entry.client.state !== 'Ready') {
+        this.retireConnection(cacheKey, entry)
+      }
     }
   }
 
@@ -105,17 +145,22 @@ export class McpClientManager {
     const clients = [...this.clients.entries()].filter(([cacheKey, client]) => matchesClient(cacheKey, client))
     const connections = [...this.connecting.entries()]
       .filter(([cacheKey, entry]) => matchesConnection(cacheKey, entry))
-    for (const [, entry] of connections) entry.controller.abort()
+    const retiredConnections = [...this.retired.entries()]
+      .flatMap(([cacheKey, entries]) => [...entries].map(entry => [cacheKey, entry] as const))
+      .filter(([cacheKey, entry]) => matchesConnection(cacheKey, entry))
+    const allConnections = [...connections, ...retiredConnections]
+    for (const [, entry] of allConnections) entry.controller.abort()
     for (const [cacheKey, client] of clients) {
       if (this.clients.get(cacheKey) === client) this.clients.delete(cacheKey)
     }
     for (const [cacheKey, entry] of connections) {
       if (this.connecting.get(cacheKey) === entry) this.connecting.delete(cacheKey)
     }
-    await Promise.all(connections.map(([, entry]) => entry.promise.catch(() => {})))
+    await Promise.all(allConnections.map(([, entry]) => entry.promise.catch(() => {})))
+    await Promise.all(allConnections.map(([, entry]) => this.closeConnection(entry)))
+    const connectionClients = new Set(allConnections.map(([, entry]) => entry.client))
     const clientsToClose = new Set([
-      ...clients.map(([, client]) => client),
-      ...connections.map(([, entry]) => entry.client),
+      ...clients.map(([, client]) => client).filter(client => !connectionClients.has(client)),
     ])
     await Promise.all([...clientsToClose].map(client => client.close().catch(() => {})))
   }
@@ -151,12 +196,18 @@ export class McpClientManager {
 
   async closeAll() {
     const clients = [...this.clients.values()]
-    const connections = [...this.connecting.values()]
+    const connections = new Set([
+      ...this.connecting.values(),
+      ...[...this.retired.values()].flatMap(entries => [...entries]),
+    ])
     for (const entry of connections) entry.controller.abort()
     this.clients.clear()
     this.connecting.clear()
-    await Promise.all(connections.map(entry => entry.promise.catch(() => {})))
-    const clientsToClose = new Set([...clients, ...connections.map(entry => entry.client)])
+    this.retired.clear()
+    await Promise.all([...connections].map(entry => entry.promise.catch(() => {})))
+    await Promise.all([...connections].map(entry => this.closeConnection(entry)))
+    const connectionClients = new Set([...connections].map(entry => entry.client))
+    const clientsToClose = new Set(clients.filter(client => !connectionClients.has(client)))
     await Promise.all([...clientsToClose].map(client => client.close().catch(() => {})))
   }
 }

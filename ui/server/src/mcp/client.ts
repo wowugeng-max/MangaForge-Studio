@@ -53,9 +53,16 @@ function errorMessage(error: unknown) {
 }
 
 function isBrokenTransportMessage(message: string) {
-  return /\b(?:ECONNRESET|EPIPE)\b|socket hang up|connection reset by peer|\b(?:session|transport|connection|channel|stream)\b.{0,80}\b(?:expired|closed|terminated|not found|disconnected|lost)\b/i
+  return /\b(?:ECONNRESET|EPIPE)\b|\bnot connected\b|socket hang up|connection reset by peer|\b(?:session|transport|connection|channel|stream)\b.{0,80}\b(?:expired|closed|terminated|not found|disconnected|lost)\b/i
     .test(message)
 }
+
+const BROKEN_TRANSPORT_CODES = new Set([
+  'ECONNRESET',
+  'EPIPE',
+  'NOT_CONNECTED',
+  'CONNECTION_CLOSED',
+])
 
 function errorStringField(error: unknown, field: 'code' | 'errno') {
   if (!error || typeof error !== 'object') return ''
@@ -70,13 +77,12 @@ function errorStringField(error: unknown, field: 'code' | 'errno') {
 function isBrokenTransportError(
   error: unknown,
   scrubbedMessage: string,
-  scrubText: (value: unknown) => string,
 ) {
   const transportCodes = [
-    scrubText(errorStringField(error, 'code')),
-    scrubText(errorStringField(error, 'errno')),
+    errorStringField(error, 'code'),
+    errorStringField(error, 'errno'),
   ]
-  return transportCodes.some(code => code.toUpperCase() === 'ECONNRESET')
+  return transportCodes.some(code => BROKEN_TRANSPORT_CODES.has(code.toUpperCase()))
     || isBrokenTransportMessage(scrubbedMessage)
 }
 
@@ -229,7 +235,7 @@ export class GenericMcpClient {
         throw new McpError('MCP_AUTH_FAILED', 'MCP 身份验证失败', { tool_name: name })
       }
       const canBeBrokenTransport = !(error instanceof McpError) || error.code === 'MCP_TOOL_ERROR'
-      if (canBeBrokenTransport && isBrokenTransportError(error, message, this.scrubber.scrubText)) {
+      if (canBeBrokenTransport && isBrokenTransportError(error, message)) {
         void this.close().catch(() => {})
         throw new McpError('MCP_CONNECTION_LOST', 'MCP 连接已失效', { tool_name: name })
       }

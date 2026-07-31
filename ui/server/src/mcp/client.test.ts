@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { SdkError, SdkErrorCode } from '@modelcontextprotocol/client'
 import { McpError } from './errors'
 import { buildMcpHeaders, createMcpClient, type McpSdkFactory } from './client'
 import { BUDA_MCP_SERVER_TEMPLATE } from './server-store'
@@ -357,6 +358,61 @@ describe('generic MCP client', () => {
     expect(capture.closed).toBe(true)
   })
 
+  for (const { label, callError } of [
+    { label: 'SDK NOT_CONNECTED', callError: new SdkError(SdkErrorCode.NotConnected, 'Not connected') },
+    { label: 'SDK CONNECTION_CLOSED', callError: new SdkError(SdkErrorCode.ConnectionClosed, 'request failed') },
+    { label: 'Node EPIPE', callError: Object.assign(new Error('write failed'), { code: 'EPIPE', errno: 'EPIPE' }) },
+    { label: 'not-connected message', callError: new Error('Not connected') },
+  ]) {
+    test(`maps ${label} to connection loss`, async () => {
+      const { capture, factory } = fakeSdkFactory({ callError })
+      const client = createMcpClient({
+        server: { ...BUDA_MCP_SERVER_TEMPLATE, enabled_tools: ['allowed'] },
+        key,
+        sdkFactory: factory,
+      })
+      await client.connect()
+
+      let mappedError: McpError | undefined
+      try {
+        await client.callTool('allowed', {}, { operation: 'read_safe' })
+      } catch (error) {
+        mappedError = error as McpError
+      }
+      await Promise.resolve()
+
+      expect(mappedError).toMatchObject({
+        code: 'MCP_CONNECTION_LOST',
+        message: 'MCP 连接已失效',
+        details: { tool_name: 'allowed' },
+      })
+      expect(Object.keys(mappedError?.details || {})).toEqual(['tool_name'])
+      expect(client.state).toBe('Closed')
+      expect(client.diagnostics().tools).toEqual([])
+      expect(capture.terminated).toBe(true)
+      expect(capture.closed).toBe(true)
+    })
+  }
+
+  test('classifies an exact structured disconnect code before credential scrubbing', async () => {
+    const { factory } = fakeSdkFactory({
+      callError: Object.assign(new Error('write failed'), { code: 'EPIPE' }),
+    })
+    const client = createMcpClient({
+      server: { ...BUDA_MCP_SERVER_TEMPLATE, enabled_tools: ['allowed'] },
+      key: { ...key, key: 'EPIPE' },
+      sdkFactory: factory,
+    })
+    await client.connect()
+
+    await expect(client.callTool('allowed', {}, { operation: 'read_safe' })).rejects.toMatchObject({
+      code: 'MCP_CONNECTION_LOST',
+      message: 'MCP 连接已失效',
+      details: { tool_name: 'allowed' },
+    })
+    expect(client.state).toBe('Closed')
+  })
+
   test('keeps an ordinary MCP tool error without closing the client', async () => {
     const { capture, factory } = fakeSdkFactory({
       callError: new McpError('MCP_TOOL_ERROR', 'ordinary validation failed', { tool_name: 'allowed' }),
@@ -378,13 +434,9 @@ describe('generic MCP client', () => {
     expect(capture.closed).toBeUndefined()
   })
 
-  test('caller cancellation takes priority over a transport-looking SDK error', async () => {
-    const controller = new AbortController()
+  test('keeps an ordinary MCP SDK error without closing the client', async () => {
     const { capture, factory } = fakeSdkFactory({
-      callError: Object.assign(
-        new McpError('MCP_TOOL_ERROR', 'transport closed unexpectedly'),
-        { errno: 'ECONNRESET' },
-      ),
+      callError: new SdkError(SdkErrorCode.InvalidResult, 'invalid tool response'),
     })
     const client = createMcpClient({
       server: { ...BUDA_MCP_SERVER_TEMPLATE, enabled_tools: ['allowed'] },
@@ -392,14 +444,46 @@ describe('generic MCP client', () => {
       sdkFactory: factory,
     })
     await client.connect()
-    controller.abort()
 
-    await expect(client.callTool('allowed', {}, {
-      signal: controller.signal,
-      operation: 'read_safe',
-    })).rejects.toMatchObject({ code: 'MCP_CANCELLED' })
+    await expect(client.callTool('allowed', {}, { operation: 'read_safe' })).rejects.toMatchObject({
+      code: 'MCP_TOOL_ERROR',
+      message: expect.stringContaining('invalid tool response'),
+    })
     expect(client.state).toBe('Ready')
+    expect(client.diagnostics().tools.map(tool => tool.name)).toEqual(['allowed'])
     expect(capture.terminated).toBeUndefined()
     expect(capture.closed).toBeUndefined()
+  })
+
+  test('caller cancellation takes priority over SDK disconnect codes and errnos', async () => {
+    const disconnectErrors = [
+      new SdkError(SdkErrorCode.NotConnected, 'Not connected'),
+      new SdkError(SdkErrorCode.ConnectionClosed, 'request failed'),
+      Object.assign(new Error('write failed'), { code: 'EPIPE', errno: 'EPIPE' }),
+      Object.assign(
+        new McpError('MCP_TOOL_ERROR', 'transport closed unexpectedly'),
+        { errno: 'ECONNRESET' },
+      ),
+    ]
+
+    for (const callError of disconnectErrors) {
+      const controller = new AbortController()
+      const { capture, factory } = fakeSdkFactory({ callError })
+      const client = createMcpClient({
+        server: { ...BUDA_MCP_SERVER_TEMPLATE, enabled_tools: ['allowed'] },
+        key,
+        sdkFactory: factory,
+      })
+      await client.connect()
+      controller.abort()
+
+      await expect(client.callTool('allowed', {}, {
+        signal: controller.signal,
+        operation: 'read_safe',
+      })).rejects.toMatchObject({ code: 'MCP_CANCELLED' })
+      expect(client.state).toBe('Ready')
+      expect(capture.terminated).toBeUndefined()
+      expect(capture.closed).toBeUndefined()
+    }
   })
 })

@@ -196,6 +196,153 @@ describe('McpClientManager', () => {
     expect(managerSignalWasAborted).toBe(true)
   })
 
+  test('the last cancelled waiter retires an aborted setup before it settles', async () => {
+    const firstGate = deferred()
+    const secondGate = deferred()
+    const firstStarted = deferred()
+    const secondStarted = deferred()
+    const firstSettled = deferred()
+    const created: any[] = []
+    let firstSignal: AbortSignal | undefined
+    const manager = new McpClientManager({
+      createClient: () => {
+        const index = created.length
+        const client = {
+          state: 'Closed',
+          closeCalls: 0,
+          async connect(signal?: AbortSignal) {
+            this.state = 'Connecting'
+            if (index === 0) {
+              firstSignal = signal
+              firstStarted.resolve()
+              try {
+                await firstGate.promise
+              } finally {
+                firstSettled.resolve()
+              }
+              return
+            }
+            secondStarted.resolve()
+            await secondGate.promise
+            this.state = 'Ready'
+          },
+          async close() { this.state = 'Closed'; this.closeCalls += 1 },
+        }
+        created.push(client)
+        return client as any
+      },
+    })
+    const server = { id: 'buda' } as any
+    const key = { id: 1 } as any
+    const caller = new AbortController()
+
+    const first = manager.get('/workspace/a', server, key, caller.signal)
+      .then(value => ({ value }), error => ({ error }))
+    await firstStarted.promise
+    caller.abort()
+    const firstOutcome = await first
+    const managerSignalWasAborted = Boolean(firstSignal?.aborted)
+
+    const replacementPending = manager.get('/workspace/a', server, key)
+      .then(value => ({ value }), error => ({ error }))
+    const createCountBeforeFirstSettled = created.length
+    let replacementOutcome: { value?: any, error?: any }
+    if (createCountBeforeFirstSettled === 2) {
+      await secondStarted.promise
+      secondGate.resolve()
+      replacementOutcome = await replacementPending
+      firstGate.reject(new Error('retired setup failed late'))
+    } else {
+      firstGate.reject(new Error('retired setup failed late'))
+      replacementOutcome = await replacementPending
+    }
+    await firstSettled.promise
+    await Promise.resolve()
+
+    let current = replacementOutcome.value
+    if (!current) {
+      const recovery = manager.get('/workspace/a', server, key)
+      await secondStarted.promise
+      secondGate.resolve()
+      current = await recovery
+    }
+    const later = await manager.get('/workspace/a', server, key)
+    const retiredCloseCalls = created[0].closeCalls
+    const replacementCloseCallsBeforeCleanup = created[1].closeCalls
+    await manager.closeAll()
+
+    expect(firstOutcome.error).toMatchObject({ code: 'MCP_CANCELLED' })
+    expect(managerSignalWasAborted).toBe(true)
+    expect(createCountBeforeFirstSettled).toBe(2)
+    expect(replacementOutcome).toEqual({ value: created[1] })
+    expect(later).toBe(current)
+    expect(created).toHaveLength(2)
+    expect(retiredCloseCalls).toBe(1)
+    expect(replacementCloseCallsBeforeCleanup).toBe(0)
+    expect(created[1].closeCalls).toBe(1)
+  })
+
+  for (const cleanup of ['invalidate', 'closeAll'] as const) {
+    test(`${cleanup} waits for and closes a still-pending retired setup`, async () => {
+      const firstGate = deferred()
+      const firstStarted = deferred()
+      const created: any[] = []
+      let firstSignal: AbortSignal | undefined
+      const manager = new McpClientManager({
+        createClient: () => {
+          const index = created.length
+          const client = {
+            state: 'Closed',
+            closeCalls: 0,
+            async connect(signal?: AbortSignal) {
+              this.state = 'Connecting'
+              if (index === 0) {
+                firstSignal = signal
+                firstStarted.resolve()
+                await firstGate.promise
+              }
+              this.state = 'Ready'
+            },
+            async close() { this.state = 'Closed'; this.closeCalls += 1 },
+          }
+          created.push(client)
+          return client as any
+        },
+      })
+      const server = { id: 'buda' } as any
+      const key = { id: 1 } as any
+      const caller = new AbortController()
+
+      const first = manager.get('/workspace/a', server, key, caller.signal)
+        .then(value => ({ value }), error => ({ error }))
+      await firstStarted.promise
+      caller.abort()
+      const firstOutcome = await first
+      const replacement = await manager.get('/workspace/a', server, key)
+
+      let cleanupSettled = false
+      const pendingCleanup = (cleanup === 'invalidate'
+        ? manager.invalidate('/workspace/a', 'buda', 1)
+        : manager.closeAll())
+        .then(() => { cleanupSettled = true })
+      const firstToSettle = await Promise.race([
+        pendingCleanup.then(() => 'cleanup' as const),
+        new Promise<'next-turn'>(resolve => setTimeout(() => resolve('next-turn'), 0)),
+      ])
+      const waitedForRetiredSetup = firstToSettle === 'next-turn' && !cleanupSettled
+      firstGate.resolve()
+      await pendingCleanup
+
+      expect(firstOutcome.error).toMatchObject({ code: 'MCP_CANCELLED' })
+      expect(firstSignal?.aborted).toBe(true)
+      expect(replacement).toBe(created[1])
+      expect(waitedForRetiredSetup).toBe(true)
+      expect(created).toHaveLength(2)
+      expect(created[0].closeCalls).toBe(1)
+      expect(created[1].closeCalls).toBe(1)
+    })
+  }
+
   test('invalidate aborts an in-flight manager-owned setup and rejects its waiter', async () => {
     const setupGate = deferred()
     const connectStarted = deferred()
