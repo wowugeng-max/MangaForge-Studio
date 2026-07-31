@@ -149,12 +149,14 @@ export async function importBackupAsNewProject(activeWorkspace: string, backup: 
   }
   const sourceProject = backup.project || {}
   const titleSuffix = options.keep_title ? '' : '（导入）'
+  const sanitizedReferenceConfig = { ...(sourceProject.reference_config || {}) }
+  delete sanitizedReferenceConfig.prose_generation_source
   const project = await createNovelProject(activeWorkspace, {
     ...sourceProject,
     id: undefined,
     title: String(options.title || `${sourceProject.title || '未命名项目'}${titleSuffix}`),
     reference_config: {
-      ...(sourceProject.reference_config || {}),
+      ...sanitizedReferenceConfig,
       imported_from_backup: {
         source_project_id: sourceProject.id,
         source_title: sourceProject.title || '',
@@ -215,4 +217,3 @@ export async function importBackupAsNewProject(activeWorkspace: string, backup: 
   })
   return { project, manifest }
 }
-
