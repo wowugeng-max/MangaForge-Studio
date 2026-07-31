@@ -72,10 +72,22 @@ export class McpGenerationDeadline {
   }
 
   cleanupSignal(timeoutMs = 5_000) {
+    return this.createCleanupDeadline(timeoutMs).signal
+  }
+
+  createCleanupDeadline(timeoutMs = 5_000) {
     const controller = new AbortController()
     const handle = this.clock.setTimeout(() => controller.abort(), Math.max(1, Number(timeoutMs) || 0))
     ;(handle as any)?.unref?.()
-    return controller.signal
+    let closed = false
+    return {
+      signal: controller.signal,
+      close: () => {
+        if (closed) return
+        closed = true
+        this.clock.clearTimeout(handle)
+      },
+    }
   }
 
   close() {

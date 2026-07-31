@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
+import { mkdtemp, open, readFile, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import type { McpError } from './errors'
+import { readJsonArrayFailClosed } from './atomic-json-store'
 import {
   createMcpKey,
   readMcpKeys,
@@ -131,5 +132,20 @@ describe('MCP key store', () => {
       description: '不得覆盖',
     })).rejects.toMatchObject({ code: 'MCP_STORE_CORRUPT' })
     expect(await readFile(path, 'utf8')).toBe('{broken')
+  })
+})
+
+describe('atomic JSON store resource bounds', () => {
+  test('reads the bounded snapshot from one file descriptor and rejects maxBytes plus one', async () => {
+    const workspace = await temporaryWorkspace()
+    const visiblePath = join(workspace, 'visible.json')
+    const expandedPath = join(workspace, 'expanded.json')
+    await writeFile(visiblePath, '[]', 'utf8')
+    await writeFile(expandedPath, `["${'x'.repeat(64)}"]`, 'utf8')
+
+    await expect(readJsonArrayFailClosed(visiblePath, {
+      maxBytes: 16,
+      openFile: async () => open(expandedPath, 'r'),
+    } as any)).rejects.toMatchObject({ code: 'MCP_STORE_CORRUPT' })
   })
 })

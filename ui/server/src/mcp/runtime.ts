@@ -5,6 +5,7 @@ import { readMcpServers } from './server-store'
 import { createMcpAdapter } from './adapters/registry'
 import type { McpKeyRecord, McpServerRecord } from './types'
 import type { McpAdapterOperationOptions, McpClientPort, ProseMcpAdapter } from './adapters/types'
+import { McpAgentLeaseRegistry } from './agent-lease'
 
 type RuntimeManager = Pick<McpClientManager, 'get' | 'invalidate' | 'invalidateIfCurrent' | 'invalidateServer' | 'closeAll'>
 
@@ -35,6 +36,7 @@ export function createMcpRuntime(
   const manager = options.manager || new McpClientManager()
   const adapterFactory = options.adapterFactory || createMcpAdapter
   const now = options.now || Date.now
+  const agentLeases = new McpAgentLeaseRegistry()
 
   const resolveCredentialConfig = async (
     keyId: number,
@@ -123,6 +125,18 @@ export function createMcpRuntime(
   }
 
   return {
+    acquireAgentLease(activeWorkspace: string, binding: Parameters<McpAgentLeaseRegistry['acquire']>[1]) {
+      return agentLeases.acquire(activeWorkspace, binding)
+    },
+    isAgentLeaseActive(activeWorkspace: string, binding: Parameters<McpAgentLeaseRegistry['isActive']>[1]) {
+      return agentLeases.isActive(activeWorkspace, binding)
+    },
+    listAgentQuarantines(activeWorkspace: string) {
+      return agentLeases.list(activeWorkspace)
+    },
+    clearAgentQuarantine(activeWorkspace: string, quarantineId: string) {
+      return agentLeases.clear(activeWorkspace, quarantineId)
+    },
     resolveCredentialConfig,
     getAdapterForKey,
     listAgents,

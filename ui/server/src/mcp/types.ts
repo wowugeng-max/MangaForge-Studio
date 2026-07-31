@@ -84,6 +84,30 @@ export type McpAgentSummary = {
   raw?: Record<string, unknown>
 }
 
+export type McpAgentQuarantineReason = 'send_unknown' | 'remote_cancel_unknown'
+
+export type McpGenerationReceiptStatus =
+  | 'running'
+  | 'session_created'
+  | 'success'
+  | 'cancelled'
+  | 'timed_out'
+  | 'send_unknown'
+  | 'remote_cancel_unknown'
+  | 'failed'
+
+export type McpAgentQuarantineRecord = {
+  id: string
+  workspace_key: string
+  server_id: string
+  key_id: number
+  agent_id: string
+  request_id: string
+  session_id: string
+  reason: McpAgentQuarantineReason
+  created_at: string
+}
+
 export type McpDiagnostics = {
   state: McpClientState
   server_id: string

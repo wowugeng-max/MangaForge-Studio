@@ -10,6 +10,8 @@ export type McpErrorCode =
   | 'MCP_DRIVE_SYNC_FAILED'
   | 'MCP_INPUT_TOO_LARGE'
   | 'MCP_AGENT_BUSY'
+  | 'MCP_AGENT_QUARANTINED'
+  | 'MCP_SEND_UNKNOWN'
   | 'MCP_SESSION_FAILED'
   | 'MCP_INPUT_REQUIRED'
   | 'MCP_GENERATION_TIMEOUT'
@@ -17,6 +19,7 @@ export type McpErrorCode =
   | 'MCP_EMPTY_PROSE'
   | 'MCP_STORE_CORRUPT'
   | 'MCP_STORE_IO_FAILED'
+  | 'MCP_RUNTIME_ERROR'
 
 export class McpError extends Error {
   readonly error_code: McpErrorCode

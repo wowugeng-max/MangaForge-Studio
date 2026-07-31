@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test'
+import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { relative, resolve } from 'node:path'
 import {
   assertNovelWorkspaceMutationHeld,
@@ -232,5 +234,19 @@ test('canonicalizes relative SQLite database paths from either supported environ
     else process.env.SQLITE_DATABASE_URL = previousSqlite
     if (previousDatabase === undefined) delete process.env.DATABASE_URL
     else process.env.DATABASE_URL = previousDatabase
+  }
+})
+
+test('canonicalizes a nonexistent database leaf beneath a symlinked physical parent', async () => {
+  const root = await mkdtemp(resolve(tmpdir(), 'mangaforge-lock-symlink-'))
+  try {
+    const realWorkspace = resolve(root, 'real')
+    const aliasWorkspace = resolve(root, 'alias')
+    await mkdir(realWorkspace)
+    await symlink(realWorkspace, aliasWorkspace, 'dir')
+
+    expect(novelMutationKey(realWorkspace)).toBe(novelMutationKey(aliasWorkspace))
+  } finally {
+    await rm(root, { recursive: true, force: true })
   }
 })

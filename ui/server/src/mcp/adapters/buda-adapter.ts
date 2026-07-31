@@ -5,12 +5,11 @@ import type { McpOperationKind, McpOperationOptions } from '../types'
 import type {
   BudaProseGenerationInput,
   BudaProseGenerationResult,
+  BudaRemoteCleanupDetails,
   McpAdapterOperationOptions,
   McpClientPort,
   ProseMcpAdapter,
 } from './types'
-
-const activeAgentRuns = new Set<string>()
 
 function operationOptions(options: McpAdapterOperationOptions, operation: McpOperationKind) {
   const result: McpOperationOptions = { signal: options.signal, operation }
@@ -54,6 +53,52 @@ function sessionStatus(data: any) {
 
 function sessionId(data: any) {
   return String(data?.session?.id || data?.sessionId || data?.id || '')
+}
+
+function sendMayHaveSucceeded(error: unknown) {
+  if (error instanceof McpError) return error.code === 'MCP_CONNECTION_LOST'
+  if (!error || typeof error !== 'object') return false
+  const code = String((error as any).code || (error as any).errno || '').toUpperCase()
+  return code === 'ECONNRESET' || code === 'EPIPE'
+}
+
+function withRemoteCleanupDetails(error: unknown, details: BudaRemoteCleanupDetails) {
+  const safeGet = (value: unknown, key: string) => {
+    try { return value && typeof value === 'object' ? (value as any)[key] : undefined } catch { return undefined }
+  }
+  if (error instanceof McpError) {
+    return new McpError(error.code, error.message, { ...details })
+  }
+  const originalMessage = safeGet(error, 'message')
+  const message = String(originalMessage ?? (typeof error === 'string' ? error : 'Buda Session 执行失败')).slice(0, 500)
+  const wrapped = new Error(message)
+  const originalName = safeGet(error, 'name')
+  if (typeof originalName === 'string' && originalName) wrapped.name = originalName.slice(0, 80)
+  const originalCode = safeGet(error, 'code')
+  if (typeof originalCode === 'string' || typeof originalCode === 'number') {
+    Object.assign(wrapped, { code: String(originalCode).slice(0, 80) })
+  }
+  Object.assign(wrapped, { details: { ...details } })
+  Object.defineProperty(wrapped, 'cause', { value: error, enumerable: false })
+  return wrapped
+}
+
+function waitWithSignal<T>(signal: AbortSignal, operation: () => Promise<T>) {
+  if (signal.aborted) return Promise.reject(signal.reason || new Error('cleanup deadline exceeded'))
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason || new Error('cleanup deadline exceeded'))
+    signal.addEventListener('abort', abort, { once: true })
+    operation().then(
+      value => {
+        signal.removeEventListener('abort', abort)
+        resolve(value)
+      },
+      error => {
+        signal.removeEventListener('abort', abort)
+        reject(error)
+      },
+    )
+  })
 }
 
 function parseJsonText(value: string) {
@@ -174,11 +219,9 @@ export class BudaAdapter implements ProseMcpAdapter {
   }
 
   async generateProse(input: BudaProseGenerationInput): Promise<BudaProseGenerationResult> {
-    const lockKey = `${input.activeWorkspace}\u0000${input.server.id}\u0000${input.keyId}\u0000${input.agentId}`
-    if (activeAgentRuns.has(lockKey)) throw new McpError('MCP_AGENT_BUSY', '该 Buda Agent 正在生成另一章正文')
-    activeAgentRuns.add(lockKey)
     const startedAt = Date.now()
     let activeSessionId = ''
+    let terminalSeen = false
     let tools: BudaToolMap | undefined
     const progress = async (stage: string, status: 'running' | 'success' | 'warn' | 'failed' = 'running', detail?: string) => {
       await input.onProgress?.({ stage, status, detail, elapsed_ms: Date.now() - startedAt, ...(activeSessionId ? { session_id: activeSessionId } : {}) })
@@ -247,13 +290,20 @@ export class BudaAdapter implements ProseMcpAdapter {
         snapshot_hash: snapshot.snapshotHash,
       })
       input.deadline.throwIfAborted()
-      await this.client.callTool(tools.sendSessionMessage, {
-        agentId: input.agentId,
-        sessionId: activeSessionId,
-        message,
-        mode: 'agent',
-        startRun: true,
-      }, callOptions('mutation'))
+      try {
+        await this.client.callTool(tools.sendSessionMessage, {
+          agentId: input.agentId,
+          sessionId: activeSessionId,
+          message,
+          mode: 'agent',
+          startRun: true,
+        }, callOptions('mutation'))
+      } catch (error) {
+        if (!sendMayHaveSucceeded(error)) throw error
+        throw new McpError('MCP_SEND_UNKNOWN', 'Buda 正文任务发送结果无法确认', {
+          session_id: activeSessionId.slice(0, 160),
+        })
+      }
       input.deadline.throwIfAborted()
       await progress('mcp_session_create', 'success')
 
@@ -265,9 +315,10 @@ export class BudaAdapter implements ProseMcpAdapter {
           agentId: input.agentId,
           sessionId: activeSessionId,
         }, callOptions('read_safe'))
-        input.deadline.throwIfAborted()
         const sessionData = mcpResultData(sessionResult)
         const status = sessionStatus(sessionData)
+        terminalSeen = status === 'completed' || status === 'failed' || status === 'cancelled'
+        input.deadline.throwIfAborted()
         if (status === 'pending' || status === 'in_progress') {
           await progress('mcp_session_wait', 'running', status)
           await abortableDelay(interval, input)
@@ -297,23 +348,48 @@ export class BudaAdapter implements ProseMcpAdapter {
         }
       }
     } catch (error) {
-      let deadlineCause: unknown
+      let primaryError = error
       if (input.deadline.signal.aborted && isAbortRelatedError(error, input.deadline.signal)) {
-        try { input.deadline.throwIfAborted() } catch (cause) { deadlineCause = cause }
+        try { input.deadline.throwIfAborted() } catch (cause) { primaryError = cause }
       }
-      const cancelled = (deadlineCause instanceof McpError && deadlineCause.code === 'MCP_CANCELLED')
-        || (!deadlineCause && error instanceof McpError && error.code === 'MCP_CANCELLED')
-      if (cancelled && activeSessionId && tools) {
-        await this.client.callTool(tools.cancelSession, {
-          agentId: input.agentId,
-          sessionId: activeSessionId,
-        }, { operation: 'mutation' }).catch(() => {})
-        throw new McpError('MCP_CANCELLED', 'MCP 正文生成已取消', { session_id: activeSessionId })
+      if (!activeSessionId || !tools) throw primaryError
+
+      const cleanupDeadline = input.deadline.createCleanupDeadline(5_000)
+      const cleanupSignal = cleanupDeadline.signal
+      const cleanupOptions = (operation: McpOperationKind): McpOperationOptions => ({
+        signal: cleanupSignal,
+        timeoutMs: 5_000,
+        operation,
+      })
+      try {
+        let remoteCancelConfirmed = terminalSeen
+        try {
+          const cancelResult = await waitWithSignal(cleanupSignal, () => this.client.callTool(tools!.cancelSession, {
+            agentId: input.agentId,
+            sessionId: activeSessionId,
+          }, cleanupOptions('mutation')))
+          remoteCancelConfirmed = remoteCancelConfirmed || mcpResultData(cancelResult)?.cancelled === true
+        } catch {}
+        if (!remoteCancelConfirmed && !cleanupSignal.aborted) {
+          try {
+            const statusResult = await waitWithSignal(cleanupSignal, () => this.client.callTool(tools!.getSession, {
+              agentId: input.agentId,
+              sessionId: activeSessionId,
+            }, cleanupOptions('read_safe')))
+            remoteCancelConfirmed = ['completed', 'failed', 'cancelled'].includes(sessionStatus(mcpResultData(statusResult)))
+          } catch {}
+        }
+        const sendWasAmbiguous = primaryError instanceof McpError && primaryError.code === 'MCP_SEND_UNKNOWN'
+        throw withRemoteCleanupDetails(primaryError, {
+          session_id: activeSessionId.slice(0, 160),
+          remote_cancel_confirmed: remoteCancelConfirmed,
+          ...(!remoteCancelConfirmed ? {
+            receipt_status: sendWasAmbiguous ? 'send_unknown' : 'remote_cancel_unknown',
+          } : {}),
+        })
+      } finally {
+        cleanupDeadline.close()
       }
-      if (deadlineCause) throw deadlineCause
-      throw error
-    } finally {
-      activeAgentRuns.delete(lockKey)
     }
   }
 }

@@ -13,11 +13,16 @@ import {
   updateNovelProject,
 } from '../../novel'
 import { withMcpWorkspaceMutation } from '../../mcp/workspace-coordinator'
+import { McpAgentLeaseRegistry } from '../../mcp/agent-lease'
 import { buildPipelineProse, createProsePipelineHarness } from '../../routes/novel-writing-service.test-support'
 import { createNovelWritingService } from './create-novel-writing-service'
 import { acceptanceBindingFingerprintFromGenerationSource } from '../generation-source/types'
 
 const workspaces: string[] = []
+const fakeAgentLeases = new McpAgentLeaseRegistry()
+const acquireFakeAgentLease = (activeWorkspace: string, binding: any) =>
+  fakeAgentLeases.acquire(activeWorkspace, binding)
+
 afterEach(async () => Promise.all(workspaces.splice(0).map(path => rm(path, { recursive: true, force: true }))))
 
 describe('chapter draft GenerationSource integration', () => {
@@ -28,6 +33,7 @@ describe('chapter draft GenerationSource integration', () => {
     let adapter: any
     const mcpRuntime = {
       resolveCredentialConfig: async (_keyId: number, _serverId: string, snapshot: unknown) => snapshot,
+      acquireAgentLease: acquireFakeAgentLease,
       listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }],
       getAdapterForKey: async () => ({ server: BUDA_MCP_SERVER_TEMPLATE, key: { id: 1 }, adapter }),
     }
@@ -175,6 +181,7 @@ describe('chapter draft GenerationSource integration', () => {
       let bindingChanged = false
       const mcpRuntime = {
         resolveCredentialConfig: async (_keyId: number, _serverId: string, snapshot: unknown) => snapshot,
+        acquireAgentLease: acquireFakeAgentLease,
         listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }],
         getAdapterForKey: async (...args: any[]) => ({ ...args[3], adapter }),
       }

@@ -108,6 +108,20 @@ describe('McpGenerationDeadline', () => {
     expect(cleanup.aborted).toBe(true)
   })
 
+  test('clears an independent cleanup timer when work finishes early', () => {
+    const time = manualTime()
+    const deadline = new McpGenerationDeadline(100, undefined, time)
+    const cleanup = deadline.createCleanupDeadline(50)
+
+    expect(time.timerCount()).toBe(2)
+    cleanup.close()
+    cleanup.close()
+    expect(time.timerCount()).toBe(1)
+    time.advance(50)
+    expect(cleanup.signal.aborted).toBe(false)
+    deadline.close()
+  })
+
   test('handles a timer that fires synchronously during construction without retaining it', () => {
     const cleared: unknown[] = []
     const deadline = new McpGenerationDeadline(10, undefined, {

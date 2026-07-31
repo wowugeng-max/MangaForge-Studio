@@ -1,5 +1,6 @@
 import type {
   McpAgentSummary,
+  McpGenerationReceiptStatus,
   McpOperationOptions,
   McpServerRecord,
   McpToolDescriptor,
@@ -32,6 +33,12 @@ export type BudaDriveInput = {
   storyState: unknown
   continuity: string
   recentChapters: string
+}
+
+export type BudaRemoteCleanupDetails = {
+  session_id: string
+  remote_cancel_confirmed: boolean
+  receipt_status?: Extract<McpGenerationReceiptStatus, 'send_unknown' | 'remote_cancel_unknown'>
 }
 
 export type BudaProseGenerationInput = {

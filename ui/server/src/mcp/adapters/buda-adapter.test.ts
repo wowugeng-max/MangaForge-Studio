@@ -168,6 +168,8 @@ describe('BudaAdapter', () => {
     }))).rejects.toThrow('receipt write failed')
 
     expect(fake.calls.filter(call => call.name.endsWith('postApiAgentSessionMessage'))).toHaveLength(0)
+    expect(fake.calls.filter(call => call.name.endsWith('cancelApiAgentSessionRun'))).toHaveLength(1)
+    expect(fake.calls.filter(call => call.name.endsWith('getApiAgentSession'))).toHaveLength(0)
   })
 
   test('preserves a session receipt failure when caller cancellation arrives later', async () => {
@@ -176,7 +178,7 @@ describe('BudaAdapter', () => {
     const fake = createFakeClient()
     const adapter = new BudaAdapter(fake.client as any)
 
-    await expect(adapter.generateProse(generationInput({
+    const caught = await adapter.generateProse(generationInput({
       signal: caller.signal,
       onProgress: async (event: any) => {
         if (event.stage !== 'session_created') return
@@ -184,8 +186,12 @@ describe('BudaAdapter', () => {
         await Promise.resolve()
         throw storeError
       },
-    }))).rejects.toBe(storeError)
+    })).catch(error => error)
 
+    expect(caught).toMatchObject({
+      code: 'MCP_STORE_IO_FAILED',
+      details: { session_id: 'session-1', remote_cancel_confirmed: true },
+    })
     expect(caller.signal.aborted).toBe(true)
     expect(fake.calls.filter(call => call.name.endsWith('postApiAgentSessionMessage'))).toHaveLength(0)
   })
@@ -209,6 +215,42 @@ describe('BudaAdapter', () => {
     await expect(adapter.generateProse(generationInput({ deadline })))
       .rejects.toMatchObject({ code: 'MCP_GENERATION_TIMEOUT' })
   })
+
+  for (const terminalStatus of ['completed', 'failed', 'cancelled']) {
+    test(`trusts an exact-deadline ${terminalStatus} response even when independent cleanup fails`, async () => {
+      let now = 0
+      const deadline = new McpGenerationDeadline(100, undefined, {
+        now: () => now,
+        setTimeout: () => 1,
+        clearTimeout: () => {},
+      })
+      const fake = createFakeClient([terminalStatus])
+      const original = fake.client.callTool
+      fake.client.callTool = async (name: string, args: any, options: any) => {
+        if (name.endsWith('cancelApiAgentSessionRun')) {
+          fake.calls.push({ name, args, options })
+          throw new Error('cleanup cancel failed')
+        }
+        if (name.endsWith('getApiAgentSession') && options.signal !== deadline.signal) {
+          fake.calls.push({ name, args, options })
+          throw new Error('cleanup read failed')
+        }
+        const result = await original(name, args, options)
+        if (name.endsWith('getApiAgentSession')) now = 100
+        return result
+      }
+
+      const caught = await new BudaAdapter(fake.client as any)
+        .generateProse(generationInput({ deadline }))
+        .catch(error => error)
+
+      expect(caught).toMatchObject({
+        code: 'MCP_GENERATION_TIMEOUT',
+        details: { session_id: 'session-1', remote_cancel_confirmed: true },
+      })
+      expect(caught.details).not.toHaveProperty('receipt_status')
+    })
+  }
 
   test('receipts a Session created at the exact deadline before rejecting without send', async () => {
     let now = 0
@@ -236,6 +278,7 @@ describe('BudaAdapter', () => {
 
     expect(receipts).toEqual(['session-1'])
     expect(fake.calls.filter(call => call.name.endsWith('postApiAgentSessionMessage'))).toHaveLength(0)
+    expect(fake.calls.filter(call => call.name.endsWith('cancelApiAgentSessionRun'))).toHaveLength(1)
   })
 
   test('uses one deadline signal and shrinking per-call timeouts across discovery, Drive, Session, and polling', async () => {
@@ -285,34 +328,325 @@ describe('BudaAdapter', () => {
     expectBudaOperations(failed.calls)
   })
 
-  test('rejects concurrent generation for the same workspace Server Key and Agent tuple', async () => {
-    let release!: () => void
-    const gate = new Promise<void>(resolve => { release = resolve })
-    const fake = createFakeClient(['pending', 'completed'])
+  for (const terminal of [
+    { status: 'failed', code: 'MCP_SESSION_FAILED' },
+    { status: 'cancelled', code: 'MCP_CANCELLED' },
+  ]) {
+    test(`preserves observed ${terminal.status} terminal evidence when independent cleanup fails`, async () => {
+      const fake = createFakeClient([terminal.status])
+      const input = generationInput()
+      const original = fake.client.callTool
+      fake.client.callTool = async (name: string, args: any, options: any) => {
+        if (name.endsWith('cancelApiAgentSessionRun')) {
+          fake.calls.push({ name, args, options })
+          throw new Error('cleanup cancel failed')
+        }
+        if (name.endsWith('getApiAgentSession') && options.signal !== input.deadline.signal) {
+          fake.calls.push({ name, args, options })
+          throw new Error('cleanup read failed')
+        }
+        return original(name, args, options)
+      }
+
+      await expect(new BudaAdapter(fake.client as any).generateProse(input)).rejects.toMatchObject({
+        code: terminal.code,
+        details: { session_id: 'session-1', remote_cancel_confirmed: true },
+      })
+    })
+  }
+
+  test('preserves observed completed evidence when prose extraction fails and cleanup fails', async () => {
+    const fake = createFakeClient(['completed'])
+    const input = generationInput()
     const original = fake.client.callTool
     fake.client.callTool = async (name: string, args: any, options: any) => {
-      if (name.endsWith('getApiAgentSession')) await gate
-      return original(name, args, options)
+      if (name.endsWith('cancelApiAgentSessionRun')) {
+        fake.calls.push({ name, args, options })
+        throw new Error('cleanup cancel failed')
+      }
+      if (name.endsWith('getApiAgentSession') && options.signal !== input.deadline.signal) {
+        fake.calls.push({ name, args, options })
+        throw new Error('cleanup read failed')
+      }
+      const result = await original(name, args, options)
+      if (name.endsWith('getApiAgentSession')) return structured({ session: { id: 'session-1', status: 'completed' }, messages: [] })
+      return result
     }
-    const adapter = new BudaAdapter(fake.client as any)
-    const first = adapter.generateProse(generationInput())
-    await new Promise(resolve => setTimeout(resolve, 5))
-    await expect(adapter.generateProse(generationInput())).rejects.toMatchObject({ code: 'MCP_AGENT_BUSY' })
-    release()
-    await first
-    expectBudaOperations(fake.calls)
+
+    await expect(new BudaAdapter(fake.client as any).generateProse(input)).rejects.toMatchObject({
+      code: 'MCP_EMPTY_PROSE',
+      details: { session_id: 'session-1', remote_cancel_confirmed: true },
+    })
   })
 
-  test('cancels an active remote Session best-effort when aborted', async () => {
+  test('preserves observed completed evidence when later progress fails and cleanup fails', async () => {
+    const progressError = new McpError('MCP_STORE_IO_FAILED', 'progress write failed')
+    const fake = createFakeClient(['completed'])
+    const input = generationInput({
+      onProgress: (event: any) => {
+        if (event.stage === 'mcp_session_wait' && event.status === 'success') throw progressError
+      },
+    })
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('cancelApiAgentSessionRun')) {
+        fake.calls.push({ name, args, options })
+        throw new Error('cleanup cancel failed')
+      }
+      if (name.endsWith('getApiAgentSession') && options.signal !== input.deadline.signal) {
+        fake.calls.push({ name, args, options })
+        throw new Error('cleanup read failed')
+      }
+      return original(name, args, options)
+    }
+
+    await expect(new BudaAdapter(fake.client as any).generateProse(input)).rejects.toMatchObject({
+      code: 'MCP_STORE_IO_FAILED',
+      details: { session_id: 'session-1', remote_cancel_confirmed: true },
+    })
+  })
+
+  test('does not treat waiting_for_input as trusted terminal evidence', async () => {
+    const fake = createFakeClient(['waiting_for_input'])
+    const input = generationInput()
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('cancelApiAgentSessionRun') || (name.endsWith('getApiAgentSession') && options.signal !== input.deadline.signal)) {
+        fake.calls.push({ name, args, options })
+        throw new Error('cleanup unavailable')
+      }
+      return original(name, args, options)
+    }
+
+    await expect(new BudaAdapter(fake.client as any).generateProse(input)).rejects.toMatchObject({
+      code: 'MCP_INPUT_REQUIRED',
+      details: { remote_cancel_confirmed: false, receipt_status: 'remote_cancel_unknown' },
+    })
+  })
+
+  test('confirms caller cancellation with an independent cleanup signal', async () => {
     const controller = new AbortController()
     const fake = createFakeClient(['in_progress'])
     const adapter = new BudaAdapter(fake.client as any)
     const generation = adapter.generateProse(generationInput({ signal: controller.signal }))
     setTimeout(() => controller.abort(), 5)
-    await expect(generation).rejects.toMatchObject({ code: 'MCP_CANCELLED' })
+    await expect(generation).rejects.toMatchObject({
+      code: 'MCP_CANCELLED',
+      details: { session_id: 'session-1', remote_cancel_confirmed: true },
+    })
     const cancel = fake.calls.find(call => call.name.endsWith('cancelApiAgentSessionRun'))
     expect(cancel?.options.operation).toBe('mutation')
+    expect(cancel?.options.signal).not.toBe(controller.signal)
+    expect(cancel?.options.signal.aborted).toBe(false)
     expectBudaOperations(fake.calls)
+  })
+
+  test('marks an ambiguous send unknown without replay when cleanup cannot confirm termination', async () => {
+    const fake = createFakeClient(['in_progress'])
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('postApiAgentSessionMessage')) {
+        fake.calls.push({ name, args, options })
+        throw new McpError('MCP_CONNECTION_LOST', 'connection lost after send')
+      }
+      if (name.endsWith('cancelApiAgentSessionRun')) {
+        fake.calls.push({ name, args, options })
+        return structured({ ok: true, cancelled: false })
+      }
+      return original(name, args, options)
+    }
+    const adapter = new BudaAdapter(fake.client as any)
+
+    await expect(adapter.generateProse(generationInput())).rejects.toMatchObject({
+      code: 'MCP_SEND_UNKNOWN',
+      details: {
+        session_id: 'session-1',
+        remote_cancel_confirmed: false,
+        receipt_status: 'send_unknown',
+      },
+    })
+
+    expect(fake.calls.filter(call => call.name.endsWith('postApiAgentSessionMessage'))).toHaveLength(1)
+    expect(fake.calls.filter(call => call.name.endsWith('cancelApiAgentSessionRun'))).toHaveLength(1)
+    expect(fake.calls.filter(call => call.name.endsWith('getApiAgentSession'))).toHaveLength(1)
+    expectBudaOperations(fake.calls)
+  })
+
+  test('preserves an ordinary post-Session failure and marks remote cancellation unknown', async () => {
+    const storeError = new McpError('MCP_STORE_IO_FAILED', 'receipt persistence failed')
+    const fake = createFakeClient(['in_progress'])
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('cancelApiAgentSessionRun')) {
+        fake.calls.push({ name, args, options })
+        return structured({ ok: true })
+      }
+      return original(name, args, options)
+    }
+
+    await expect(new BudaAdapter(fake.client as any).generateProse(generationInput({
+      onProgress: (event: any) => {
+        if (event.stage === 'session_created') throw storeError
+      },
+    }))).rejects.toMatchObject({
+      code: 'MCP_STORE_IO_FAILED',
+      details: {
+        session_id: 'session-1',
+        remote_cancel_confirmed: false,
+        receipt_status: 'remote_cancel_unknown',
+      },
+    })
+    expect(fake.calls.filter(call => call.name.endsWith('cancelApiAgentSessionRun'))).toHaveLength(1)
+    expect(fake.calls.filter(call => call.name.endsWith('getApiAgentSession'))).toHaveLength(1)
+  })
+
+  for (const throwable of [
+    'primitive failure',
+    Object.freeze(new Error('frozen failure')),
+    Object.defineProperty(new Error('getter failure'), 'details', {
+      enumerable: true,
+      get() { throw new Error('details getter exploded') },
+    }),
+  ]) {
+    test(`attaches authoritative cleanup details without mutating ${typeof throwable === 'string' ? 'a primitive' : throwable.message}`, async () => {
+      const fake = createFakeClient(['in_progress'])
+      const input = generationInput()
+      const original = fake.client.callTool
+      fake.client.callTool = async (name: string, args: any, options: any) => {
+        if (name.endsWith('getApiAgentSession') && options.signal === input.deadline.signal) throw throwable
+        if (name.endsWith('cancelApiAgentSessionRun') || name.endsWith('getApiAgentSession')) {
+          fake.calls.push({ name, args, options })
+          throw new Error('cleanup failed')
+        }
+        return original(name, args, options)
+      }
+
+      const caught = await new BudaAdapter(fake.client as any).generateProse(input).catch(error => error)
+
+      expect(caught).toBeInstanceOf(Error)
+      expect(Object.prototype.hasOwnProperty.call(caught, 'details')).toBe(true)
+      expect(Object.prototype.propertyIsEnumerable.call(caught, 'details')).toBe(true)
+      expect(caught.details).toMatchObject({
+        session_id: 'session-1',
+        remote_cancel_confirmed: false,
+        receipt_status: 'remote_cancel_unknown',
+      })
+      expect(caught).not.toBe(throwable)
+    })
+  }
+
+  test('does not copy untrusted throwable details into the cleanup wrapper', async () => {
+    const unsafe = new McpError('MCP_TOOL_ERROR', 'remote failure', {
+      token: 'untrusted-secret-metadata',
+      nested: { prompt: 'untrusted-prompt' },
+    })
+    const fake = createFakeClient(['in_progress'])
+    const input = generationInput()
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('getApiAgentSession') && options.signal === input.deadline.signal) throw unsafe
+      if (name.endsWith('cancelApiAgentSessionRun') || name.endsWith('getApiAgentSession')) {
+        fake.calls.push({ name, args, options })
+        throw new Error('cleanup failed')
+      }
+      return original(name, args, options)
+    }
+
+    const caught = await new BudaAdapter(fake.client as any).generateProse(input).catch(error => error)
+
+    expect(caught).toBeInstanceOf(McpError)
+    expect(caught).not.toBe(unsafe)
+    expect(caught.details).toEqual({
+      session_id: 'session-1',
+      remote_cancel_confirmed: false,
+      receipt_status: 'remote_cancel_unknown',
+    })
+    expect(JSON.stringify(caught)).not.toContain('untrusted-secret-metadata')
+    expect(JSON.stringify(caught)).not.toContain('untrusted-prompt')
+  })
+
+  test('closes the independent cleanup deadline after early confirmation', async () => {
+    const fake = createFakeClient(['failed'])
+    const input = generationInput()
+    let cleanupClosed = 0
+    ;(input.deadline as any).createCleanupDeadline = () => ({
+      signal: new AbortController().signal,
+      close: () => { cleanupClosed += 1 },
+    })
+
+    await expect(new BudaAdapter(fake.client as any).generateProse(input))
+      .rejects.toMatchObject({ code: 'MCP_SESSION_FAILED' })
+    expect(cleanupClosed).toBe(1)
+  })
+
+  test('accepts only exact terminal status from the single cleanup read', async () => {
+    const controller = new AbortController()
+    const fake = createFakeClient(['in_progress', 'cancelled'])
+    const input = generationInput({ signal: controller.signal })
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('cancelApiAgentSessionRun')) {
+        fake.calls.push({ name, args, options })
+        return structured({ ok: true, cancelled: false })
+      }
+      const result = await original(name, args, options)
+      if (name.endsWith('getApiAgentSession') && options.signal === input.deadline.signal) controller.abort()
+      return result
+    }
+    const generation = new BudaAdapter(fake.client as any).generateProse(input)
+
+    await expect(generation).rejects.toMatchObject({
+      code: 'MCP_CANCELLED',
+      details: { remote_cancel_confirmed: true },
+    })
+    expect(fake.calls.filter(call => call.name.endsWith('getApiAgentSession') && call.options.signal !== input.deadline.signal))
+      .toHaveLength(1)
+  })
+
+  test('bounds cleanup with its own signal without replacing an earlier typed failure', async () => {
+    const storeError = new McpError('MCP_STORE_IO_FAILED', 'receipt persistence failed')
+    const cleanupController = new AbortController()
+    const baseDeadline = new McpGenerationDeadline(60_000)
+    const deadline = Object.create(baseDeadline)
+    deadline.createCleanupDeadline = (timeoutMs: number) => {
+      expect(timeoutMs).toBe(5_000)
+      queueMicrotask(() => cleanupController.abort())
+      return { signal: cleanupController.signal, close: () => {} }
+    }
+    const fake = createFakeClient()
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('cancelApiAgentSessionRun') || name.endsWith('getApiAgentSession')) {
+        fake.calls.push({ name, args, options })
+        return new Promise((_resolve, reject) => {
+          options.signal.addEventListener('abort', () => reject(options.signal.reason || new Error('cleanup timeout')), { once: true })
+        })
+      }
+      return original(name, args, options)
+    }
+
+    await expect(new BudaAdapter(fake.client as any).generateProse(generationInput({
+      deadline,
+      onProgress: (event: any) => {
+        if (event.stage === 'session_created') throw storeError
+      },
+    }))).rejects.toMatchObject({
+      code: 'MCP_STORE_IO_FAILED',
+      details: { remote_cancel_confirmed: false, receipt_status: 'remote_cancel_unknown' },
+    })
+    expect(fake.calls.filter(call => call.name.endsWith('cancelApiAgentSessionRun'))).toHaveLength(1)
+    expect(fake.calls.filter(call => call.name.endsWith('getApiAgentSession'))).toHaveLength(0)
+    baseDeadline.close()
+  })
+
+  test('does not clean up or mark an ordinary failure before Session creation', async () => {
+    const fake = createFakeClient()
+    fake.client.listTools = async () => { throw new McpError('MCP_CAPABILITY_MISSING', 'missing tools') }
+
+    await expect(new BudaAdapter(fake.client as any).generateProse(generationInput()))
+      .rejects.toMatchObject({ code: 'MCP_CAPABILITY_MISSING' })
+    expect(fake.calls.filter(call => call.name.endsWith('cancelApiAgentSessionRun'))).toHaveLength(0)
+    expect(fake.calls.filter(call => call.name.endsWith('getApiAgentSession'))).toHaveLength(0)
   })
 })
 

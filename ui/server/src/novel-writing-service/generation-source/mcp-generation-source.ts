@@ -1,9 +1,12 @@
 import { createHash } from 'crypto'
-import { appendNovelRun, updateNovelRun } from '../../novel'
+import { appendNovelRun, getNovelProject, updateNovelRun } from '../../novel'
 import { readMcpKeys } from '../../mcp/key-store'
 import type { McpRuntime } from '../../mcp/runtime'
 import { isAbortRelatedError, McpError, isMcpError } from '../../mcp/errors'
 import { McpGenerationDeadline } from '../../mcp/deadline'
+import type { McpAgentLease } from '../../mcp/agent-lease'
+import type { McpGenerationReceiptStatus } from '../../mcp/types'
+import { withMcpWorkspaceMutation } from '../../mcp/workspace-coordinator'
 import { createMcpSecretScrubber } from '../../mcp/secret-scrubber'
 import { readMcpServers } from '../../mcp/server-store'
 import {
@@ -73,13 +76,50 @@ async function readBindingCredentialSnapshot(activeWorkspace: string, binding: {
   }
 }
 
-function errorReceipt(error: any, provenance: Record<string, unknown>) {
+function errorReceipt(
+  error: any,
+  provenance: Record<string, unknown>,
+  status: McpGenerationReceiptStatus,
+) {
   return {
     ...provenance,
-    status: 'failed',
+    status,
     error_code: String(error?.code || error?.error_code || 'MCP_GENERATION_FAILED').slice(0, 80),
     error: String(error?.message || error || 'MCP 正文生成失败').slice(0, 500),
   }
+}
+
+function receiptStatusForError(error: any): McpGenerationReceiptStatus {
+  const explicit = String(error?.details?.receipt_status || '')
+  if (error?.details?.remote_cancel_confirmed === false
+    && (explicit === 'send_unknown' || explicit === 'remote_cancel_unknown')) {
+    return explicit
+  }
+  if (error?.code === 'MCP_SEND_UNKNOWN') return 'send_unknown'
+  if (error?.code === 'MCP_CANCELLED') return 'cancelled'
+  if (error?.code === 'MCP_GENERATION_TIMEOUT') return 'timed_out'
+  return 'failed'
+}
+
+function unresolvedStoreError(
+  storeError: Error,
+  causeError: unknown,
+  receiptStatus: Extract<McpGenerationReceiptStatus, 'send_unknown' | 'remote_cancel_unknown'>,
+  sessionId: string,
+) {
+  const causeCode = isMcpError(causeError)
+    ? causeError.code
+    : String((causeError as any)?.code || 'MCP_RUNTIME_ERROR').slice(0, 80)
+  return new McpError(
+    isMcpError(storeError) ? storeError.code : 'MCP_STORE_IO_FAILED',
+    storeError.message,
+    {
+      cause_code: causeCode,
+      receipt_status: receiptStatus,
+      session_id: sessionId,
+      remote_cancel_confirmed: false,
+    },
+  )
 }
 
 function blockedInvalidResidual(error: any) {
@@ -147,7 +187,8 @@ export class McpGenerationSource implements GenerationSource {
   private readonly createDeadline: (totalMs: number, signal?: AbortSignal) => McpGenerationDeadline
 
   constructor(
-    private readonly runtime: Pick<McpRuntime, 'resolveCredentialConfig' | 'listAgents' | 'getAdapterForKey'>,
+    private readonly runtime: Pick<McpRuntime,
+      'resolveCredentialConfig' | 'listAgents' | 'getAdapterForKey' | 'acquireAgentLease'>,
     options: {
       createDeadline?: (totalMs: number, signal?: AbortSignal) => McpGenerationDeadline
     } = {},
@@ -187,6 +228,13 @@ export class McpGenerationSource implements GenerationSource {
     let progressProvenance: Record<string, unknown> = { ...baseProvenance }
     let connected = false
     let deadline: McpGenerationDeadline | undefined
+    let lease: McpAgentLease | undefined
+    let releaseAttempted = false
+    const releaseLease = async () => {
+      if (!lease || releaseAttempted) return
+      releaseAttempted = true
+      await lease.release()
+    }
     try {
       const selectedCredential = validateMcpCredentialSelectionSnapshot(credentialSnapshot.records, {
         serverId: binding.server_id,
@@ -200,6 +248,23 @@ export class McpGenerationSource implements GenerationSource {
       )
       deadline = this.createDeadline(pinnedCredential.server.generation_timeout_ms, request.signal)
       deadline.throwIfAborted()
+      lease = await withMcpWorkspaceMutation(request.activeWorkspace, async () => {
+        const latestProject = await getNovelProject(request.activeWorkspace, Number(request.project?.id || 0))
+        let latestFingerprint = ''
+        try {
+          latestFingerprint = latestProject
+            ? proseGenerationSourceFingerprint(resolveProseGenerationSource(latestProject))
+            : ''
+        } catch {}
+        if (latestFingerprint !== bindingFingerprint) {
+          throw new McpError('MCP_BINDING_CHANGED', '项目 MCP 正文生成绑定已变化，请重新发起生成')
+        }
+        return this.runtime.acquireAgentLease(request.activeWorkspace, {
+          serverId: binding.server_id,
+          keyId: binding.key_id,
+          agentId: binding.agent_id,
+        })
+      })
       const remoteOptions = (configuredMs: number) => ({
         signal: deadline!.signal,
         get timeoutMs() { return deadline!.timeoutMs(configuredMs) },
@@ -275,6 +340,10 @@ export class McpGenerationSource implements GenerationSource {
             if (!updated) {
               throw new McpError('MCP_STORE_IO_FAILED', 'MCP Session 创建回执持久化失败')
             }
+            await lease!.stageSessionFence({
+              requestId: boundedScrubbedId(scrubber, request.requestId),
+              sessionId: String(safeEvent.session_id || ''),
+            })
           }
           await request.onProgress?.(safeEvent)
         },
@@ -286,13 +355,14 @@ export class McpGenerationSource implements GenerationSource {
         snapshot_hash: boundedScrubbedId(scrubber, result.snapshot_hash),
         status: 'success',
       }, bindingFingerprint)
-      await updateNovelRun(request.activeWorkspace, receipt.id, {
+      const updated = await updateNovelRun(request.activeWorkspace, receipt.id, {
         status: 'success',
         output_ref: JSON.stringify(output),
       })
+      if (!updated) throw new McpError('MCP_STORE_IO_FAILED', 'MCP 成功回执持久化失败')
       deadline.throwIfAborted()
       const { prose_chapters: proseChapters, ...resultMetadata } = result
-      return {
+      const response = {
         ...scrubber.scrubValue(resultMetadata),
         ...(proseChapters !== undefined ? { prose_chapters: proseChapters } : {}),
         source_receipt: {
@@ -301,12 +371,21 @@ export class McpGenerationSource implements GenerationSource {
           ...output,
         },
       }
+      await lease.clearSessionFence()
+      await releaseLease()
+      return response
     } catch (error) {
       let exposedError = error
       if (deadline?.signal.aborted && isAbortRelatedError(error, deadline.signal)) {
-        try { deadline.throwIfAborted() } catch (cause) { exposedError = cause }
+        try {
+          deadline.throwIfAborted()
+        } catch (cause) {
+          const sameTypedCause = isMcpError(error) && isMcpError(cause) && error.code === cause.code
+          if (!sameTypedCause) exposedError = cause
+        }
       }
       const scrubbedError = scrubGenerationError(exposedError, scrubber)
+      const receiptStatus = receiptStatusForError(scrubbedError)
       if (!connected) {
         await Promise.resolve(request.onProgress?.({
           stage: 'mcp_connect',
@@ -316,15 +395,60 @@ export class McpGenerationSource implements GenerationSource {
       }
       const output = scrubbedProvenance(
         scrubber,
-        errorReceipt(scrubbedError, progressProvenance),
+        errorReceipt(scrubbedError, progressProvenance, receiptStatus),
         bindingFingerprint,
       )
-      await updateNovelRun(request.activeWorkspace, receipt.id, {
-        status: 'failed',
-        output_ref: JSON.stringify(output),
-        error_message: scrubber.scrubText(scrubbedError.message).slice(0, 500),
-      }).catch(() => {})
-      throw scrubbedError
+      let finalError: unknown = scrubbedError
+      let receiptPersistenceError: Error | undefined
+      try {
+        const updated = await updateNovelRun(request.activeWorkspace, receipt.id, {
+          status: receiptStatus,
+          output_ref: JSON.stringify(output),
+          error_message: scrubber.scrubText(scrubbedError.message).slice(0, 500),
+        })
+        if (!updated) throw new McpError('MCP_STORE_IO_FAILED', 'MCP 失败回执持久化失败')
+      } catch (receiptError) {
+        receiptPersistenceError = scrubGenerationError(receiptError, scrubber)
+        finalError = receiptPersistenceError
+      }
+      if (lease && (scrubbedError as any)?.details?.remote_cancel_confirmed !== true
+        && (receiptStatus === 'send_unknown' || receiptStatus === 'remote_cancel_unknown')) {
+        const sessionId = boundedScrubbedId(
+          scrubber,
+          (scrubbedError as any)?.details?.session_id || progressProvenance.session_id || '',
+        )
+        try {
+          await lease.quarantine({
+            requestId: boundedScrubbedId(scrubber, request.requestId),
+            sessionId,
+            reason: receiptStatus,
+          })
+          if (receiptPersistenceError) {
+            finalError = unresolvedStoreError(
+              receiptPersistenceError,
+              scrubbedError,
+              receiptStatus,
+              sessionId,
+            )
+          }
+        } catch (quarantineError) {
+          const persistenceError = scrubGenerationError(quarantineError, scrubber)
+          finalError = unresolvedStoreError(
+            persistenceError,
+            scrubbedError,
+            receiptStatus,
+            sessionId,
+          )
+        }
+      } else if (lease) {
+        try {
+          await lease.clearSessionFence()
+        } catch (clearError) {
+          finalError = scrubGenerationError(clearError, scrubber)
+        }
+      }
+      await releaseLease()
+      throw finalError
     } finally {
       deadline?.close()
     }
