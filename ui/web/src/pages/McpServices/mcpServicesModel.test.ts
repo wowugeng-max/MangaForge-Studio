@@ -92,4 +92,14 @@ describe('MCP Services UI model', () => {
       instructions: 'remote instructions',
     })).toEqual({ state: 'Ready', adapter_id: 'buda', adapter_ready: true, agent_count: 2, tool_count: 2 })
   })
+
+  test('builds an empty diagnostics summary before a connection is selected', () => {
+    expect(summarizeMcpDiagnostics(null)).toEqual({
+      state: 'Unknown',
+      adapter_id: '',
+      adapter_ready: false,
+      agent_count: 0,
+      tool_count: 0,
+    })
+  })
 })

@@ -2,7 +2,7 @@ import { createHash } from 'crypto'
 import { McpError } from '../errors'
 import type { McpGenerationDeadline } from '../deadline'
 import type { McpToolResult } from '../types'
-import type { BudaToolMap } from './buda-tool-map'
+import { buildBudaToolArguments, type BudaToolMap } from './buda-tool-map'
 import type { McpClientPort } from './types'
 
 export type BudaDriveSnapshot = {
@@ -78,6 +78,22 @@ function driveText(result: McpToolResult) {
   return String(data?.content ?? data?.text ?? data?.file?.content ?? '')
 }
 
+function driveFileState(result: McpToolResult) {
+  const data = mcpResultData(result)
+  return {
+    content: driveText(result),
+    exists: typeof data?.exists === 'boolean' ? data.exists : true,
+  }
+}
+
+function isLiveBudaNotInitialized(toolName: string, error: unknown) {
+  return toolName.startsWith('api_claw_')
+    && (
+      (error instanceof McpError && error.details?.reason === 'buda_server_not_initialized')
+      || /\bServer not initialized\b/i.test(String((error as any)?.message || error || ''))
+    )
+}
+
 export async function syncBudaDriveSnapshot(input: {
   client: McpClientPort
   tools: Pick<BudaToolMap, 'listDriveFiles' | 'upsertDriveFile' | 'readDriveText'>
@@ -93,46 +109,72 @@ export async function syncBudaDriveSnapshot(input: {
       get timeoutMs() { return deadline.timeoutMs(input.toolTimeoutMs) },
       operation,
     })
-    const listed = mcpResultData(await client.callTool(tools.listDriveFiles, { agentId, path: '/mangaforge' }, callOptions('read_safe')))
-    const remotePaths = new Set((Array.isArray(listed?.files) ? listed.files : [])
-      .filter((item: any) => item?.type !== 'folder')
-      .map((item: any) => String(item?.path || item?.filePath || ''))
-      .filter(Boolean))
+    const probeFilesDirectly = tools.listDriveFiles.startsWith('api_claw_')
+    const remotePaths = new Set<string>()
+    if (!probeFilesDirectly) {
+      const listed = mcpResultData(await client.callTool(
+        tools.listDriveFiles,
+        buildBudaToolArguments('listDriveFiles', tools.listDriveFiles, { agentId, path: '/mangaforge' }),
+        callOptions('read_safe'),
+      ))
+      for (const item of Array.isArray(listed?.files) ? listed.files : []) {
+        if (item?.type === 'folder') continue
+        const path = String(item?.path || item?.filePath || '')
+        if (path) remotePaths.add(path)
+      }
+    }
     const changed: string[] = []
     for (const [path, content] of Object.entries(snapshot.files)) {
-      if (!remotePaths.has(path)) {
+      if (!probeFilesDirectly && !remotePaths.has(path)) {
         changed.push(path)
         continue
       }
-      const remote = driveText(await client.callTool(tools.readDriveText, { agentId, filePath: path, maxBytes: 5_000_000 }, callOptions('read_safe')))
-      if (sha256(remote) !== snapshot.hashes[path]) changed.push(path)
+      const remote = driveFileState(await client.callTool(
+        tools.readDriveText,
+        buildBudaToolArguments('readDriveText', tools.readDriveText, { agentId, filePath: path, maxBytes: 5_000_000 }),
+        callOptions('read_safe'),
+      ))
+      if (!remote.exists || sha256(remote.content) !== snapshot.hashes[path]) changed.push(path)
     }
     const ordered = changed
       .filter(path => path !== '/mangaforge/manifest.json')
       .concat(changed.includes('/mangaforge/manifest.json') ? ['/mangaforge/manifest.json'] : [])
     for (const path of ordered) {
       const content = snapshot.files[path]!
-      try {
-        await client.callTool(tools.upsertDriveFile, {
-          agentId,
-          path,
-          content,
-          mimeType: path.endsWith('.json') ? 'application/json' : 'text/markdown',
-        }, callOptions('mutation'))
-      } catch (writeError) {
-        let reconciled = false
+      const upsertArgs = buildBudaToolArguments('upsertDriveFile', tools.upsertDriveFile, {
+        agentId,
+        path,
+        content,
+        mimeType: path.endsWith('.json') ? 'application/json' : 'text/markdown',
+      })
+      for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
-          const remote = driveText(await client.callTool(tools.readDriveText, {
-            agentId,
-            filePath: path,
-            maxBytes: 5_000_000,
-          }, callOptions('read_safe')))
-          reconciled = remote === content
-        } catch { /* preserve the original ambiguous mutation error */ }
-        deadline.throwIfAborted()
-        if (!reconciled) throw writeError
+          await client.callTool(tools.upsertDriveFile, upsertArgs, callOptions('mutation'))
+          break
+        } catch (writeError) {
+          let reconciled = false
+          let reconciliationReadSucceeded = false
+          try {
+            const remote = driveText(await client.callTool(tools.readDriveText, buildBudaToolArguments('readDriveText', tools.readDriveText, {
+              agentId,
+              filePath: path,
+              maxBytes: 5_000_000,
+            }), callOptions('read_safe')))
+            reconciliationReadSucceeded = true
+            reconciled = remote === content
+          } catch { /* preserve the original ambiguous mutation error */ }
+          deadline.throwIfAborted()
+          if (reconciled) break
+          if (!reconciliationReadSucceeded) throw writeError
+          if (attempt === 0 && isLiveBudaNotInitialized(tools.upsertDriveFile, writeError)) continue
+          throw writeError
+        }
       }
-      const verified = driveText(await client.callTool(tools.readDriveText, { agentId, filePath: path, maxBytes: 5_000_000 }, callOptions('read_safe')))
+      const verified = driveText(await client.callTool(
+        tools.readDriveText,
+        buildBudaToolArguments('readDriveText', tools.readDriveText, { agentId, filePath: path, maxBytes: 5_000_000 }),
+        callOptions('read_safe'),
+      ))
       if (verified !== content) {
         throw new McpError('MCP_DRIVE_SYNC_FAILED', `Buda Drive 文件校验失败：${path}`, { path })
       }

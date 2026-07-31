@@ -69,6 +69,7 @@ export function formatMcpServiceFailure(payload: any, fallback: string) {
 }
 
 export function summarizeMcpDiagnostics(value: any = {}) {
+  value = value || {}
   return {
     state: String(value.state || 'Unknown'),
     adapter_id: String(value.adapter_id || ''),

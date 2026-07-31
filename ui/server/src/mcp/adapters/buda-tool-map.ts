@@ -15,15 +15,59 @@ export type BudaLogicalOperation =
 export type BudaToolMap = Omit<Record<BudaLogicalOperation, string>, 'createAgent'> & { createAgent?: string }
 
 export const BUDA_TOOL_ALIASES: Record<BudaLogicalOperation, readonly string[]> = {
-  listAgents: ['apiClaw.listApiAgents', 'listApiAgents'],
-  createAgent: ['apiClaw.createApiAgent', 'createApiAgent'],
-  listDriveFiles: ['apiClaw.listApiAgentDriveFiles', 'listApiAgentDriveFiles'],
-  upsertDriveFile: ['apiClaw.upsertApiAgentDriveFile', 'upsertApiAgentDriveFile'],
-  readDriveText: ['apiClaw.apiAgentDriveText', 'apiAgentDriveText'],
-  createSession: ['apiClaw.createApiAgentSession', 'createApiAgentSession'],
-  getSession: ['apiClaw.getApiAgentSession', 'getApiAgentSession'],
-  sendSessionMessage: ['apiClaw.postApiAgentSessionMessage', 'postApiAgentSessionMessage'],
-  cancelSession: ['apiClaw.cancelApiAgentSessionRun', 'cancelApiAgentSessionRun'],
+  listAgents: ['api_claw_list_api_agents', 'apiClaw.listApiAgents', 'listApiAgents'],
+  createAgent: ['api_claw_create_api_agent', 'apiClaw.createApiAgent', 'createApiAgent'],
+  listDriveFiles: ['api_claw_list_api_agent_drive_files', 'apiClaw.listApiAgentDriveFiles', 'listApiAgentDriveFiles'],
+  upsertDriveFile: ['api_claw_upsert_api_agent_drive_file', 'apiClaw.upsertApiAgentDriveFile', 'upsertApiAgentDriveFile'],
+  readDriveText: ['api_claw_api_agent_drive_text', 'apiClaw.apiAgentDriveText', 'apiAgentDriveText'],
+  createSession: ['api_claw_create_api_agent_session', 'apiClaw.createApiAgentSession', 'createApiAgentSession'],
+  getSession: ['api_claw_get_api_agent_session', 'apiClaw.getApiAgentSession', 'getApiAgentSession'],
+  sendSessionMessage: ['api_claw_post_api_agent_session_message', 'apiClaw.postApiAgentSessionMessage', 'postApiAgentSessionMessage'],
+  cancelSession: ['api_claw_cancel_api_agent_session_run', 'apiClaw.cancelApiAgentSessionRun', 'cancelApiAgentSessionRun'],
+}
+
+function selectedArguments(args: Record<string, unknown>, names: string[]) {
+  return Object.fromEntries(names
+    .filter(name => args[name] !== undefined)
+    .map(name => [name, args[name]]))
+}
+
+export function buildBudaToolArguments(
+  operation: BudaLogicalOperation,
+  toolName: string,
+  args: Record<string, unknown>,
+) {
+  if (!toolName.startsWith('api_claw_')) return args
+  switch (operation) {
+    case 'listAgents': return {}
+    case 'createAgent': return {
+      body: selectedArguments(args, ['spaceId', 'name', 'emoji', 'instructions', 'storageType']),
+    }
+    case 'listDriveFiles': return {
+      params: selectedArguments(args, ['agentId']),
+      query: selectedArguments(args, ['path']),
+    }
+    case 'upsertDriveFile': return {
+      params: selectedArguments(args, ['agentId']),
+      body: selectedArguments(args, ['path', 'content', 'mimeType']),
+    }
+    case 'readDriveText': return {
+      params: selectedArguments(args, ['agentId']),
+      body: selectedArguments(args, ['filePath', 'maxBytes']),
+    }
+    case 'createSession': return {
+      params: selectedArguments(args, ['agentId']),
+      body: selectedArguments(args, ['message', 'title', 'mode', 'model', 'startRun', 'attachments']),
+    }
+    case 'getSession':
+    case 'cancelSession': return {
+      params: selectedArguments(args, ['agentId', 'sessionId']),
+    }
+    case 'sendSessionMessage': return {
+      params: selectedArguments(args, ['agentId', 'sessionId']),
+      body: selectedArguments(args, ['message', 'title', 'mode', 'model', 'startRun', 'attachments']),
+    }
+  }
 }
 
 function schemaProperties(tool: McpToolDescriptor) {

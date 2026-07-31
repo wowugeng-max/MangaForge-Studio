@@ -60,7 +60,10 @@ function fakeSdkFactory(options: {
   toolError?: boolean
   toolErrorContent?: unknown[]
   connectError?: Error
+  listError?: Error
+  onList?: () => void
   callError?: Error
+  callErrors?: Array<Error | undefined>
   onCall?: () => void
   tools?: any[]
   serverVersion?: Record<string, unknown>
@@ -75,6 +78,8 @@ function fakeSdkFactory(options: {
     },
     async listTools(_params?: unknown, requestOptions?: unknown) {
       capture.listOptions = requestOptions
+      options.onList?.()
+      if (options.listError) throw options.listError
       return {
         tools: options.tools || [
           { name: 'allowed', description: 'Allowed tool', inputSchema: { type: 'object' } },
@@ -85,6 +90,8 @@ function fakeSdkFactory(options: {
     async callTool(params: unknown, requestOptions?: unknown) {
       capture.calls.push({ params, requestOptions })
       options.onCall?.()
+      const sequencedError = options.callErrors?.[capture.calls.length - 1]
+      if (sequencedError) throw sequencedError
       if (options.callError) throw options.callError
       return {
         content: options.toolErrorContent || [{ type: 'text', text: options.toolError ? 'bad' : 'ok' }],
@@ -340,6 +347,211 @@ describe('generic MCP client', () => {
       details: { reason: 'response_too_large' },
     })
     expect(cancels).toBe(1)
+  })
+
+  test('connects to Buda without sending the initialized notification its MCP endpoint rejects', async () => {
+    const methods: string[] = []
+    const budaFetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const message = JSON.parse(String(init?.body || '{}'))
+      methods.push(String(message.method || ''))
+      if (message.method === 'initialize') {
+        return Response.json({
+          jsonrpc: '2.0',
+          id: message.id,
+          result: {
+            protocolVersion: '2025-06-18',
+            capabilities: { tools: {} },
+            serverInfo: { name: 'Buda MCP', version: '0.1.0' },
+          },
+        }, { headers: { 'Mcp-Session-Id': 'buda-session' } })
+      }
+      if (message.method === 'notifications/initialized') {
+        return Response.json({
+          jsonrpc: '2.0',
+          id: null,
+          error: { code: -32000, message: 'Bad Request: Server not initialized' },
+        }, { status: 400 })
+      }
+      if (message.method === 'tools/list') {
+        return Response.json({
+          jsonrpc: '2.0',
+          id: message.id,
+          result: { tools: [{ name: 'api_claw_list_api_agents', inputSchema: { type: 'object' } }] },
+        })
+      }
+      throw new Error(`unexpected MCP method: ${message.method}`)
+    }
+    const client = createMcpClient({
+      server: BUDA_MCP_SERVER_TEMPLATE,
+      key,
+      fetch: budaFetch as typeof fetch,
+    })
+
+    await client.connect()
+
+    expect(client.state).toBe('Ready')
+    expect(methods).toEqual(['initialize', 'tools/list'])
+  })
+
+  test('retries Buda tool discovery while its initialized Session is briefly unavailable', async () => {
+    let toolListAttempts = 0
+    const budaFetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const message = JSON.parse(String(init?.body || '{}'))
+      if (message.method === 'initialize') {
+        return Response.json({
+          jsonrpc: '2.0',
+          id: message.id,
+          result: {
+            protocolVersion: '2025-06-18',
+            capabilities: { tools: {} },
+            serverInfo: { name: 'Buda MCP', version: '0.1.0' },
+          },
+        }, { headers: { 'Mcp-Session-Id': 'buda-session' } })
+      }
+      if (message.method === 'tools/list') {
+        toolListAttempts += 1
+        if (toolListAttempts === 1) {
+          return Response.json({
+            jsonrpc: '2.0',
+            id: null,
+            error: { code: -32000, message: 'Bad Request: Server not initialized' },
+          }, { status: 400 })
+        }
+        return Response.json({
+          jsonrpc: '2.0',
+          id: message.id,
+          result: { tools: [{ name: 'api_claw_list_api_agents', inputSchema: { type: 'object' } }] },
+        })
+      }
+      throw new Error(`unexpected MCP method: ${message.method}`)
+    }
+    const client = createMcpClient({
+      server: {
+        ...BUDA_MCP_SERVER_TEMPLATE,
+        startup_timeout_ms: 100,
+        poll_initial_ms: 1,
+        poll_max_ms: 1,
+      },
+      key,
+      fetch: budaFetch as typeof fetch,
+    })
+
+    await client.connect()
+
+    expect(client.state).toBe('Ready')
+    expect(toolListAttempts).toBe(2)
+  })
+
+  test('maps exhausted Buda startup retries to a connection timeout', async () => {
+    const transient = new Error('Error POSTing to endpoint: Bad Request: Server not initialized')
+    const { factory } = fakeSdkFactory({ listError: transient })
+    const client = createMcpClient({
+      server: {
+        ...BUDA_MCP_SERVER_TEMPLATE,
+        startup_timeout_ms: 10,
+        poll_initial_ms: 1,
+        poll_max_ms: 1,
+      },
+      key,
+      sdkFactory: factory,
+    })
+
+    await expect(client.connect()).rejects.toMatchObject({ code: 'MCP_CONNECT_TIMEOUT' })
+  })
+
+  test('preserves a typed caller cancellation while waiting to retry Buda startup', async () => {
+    const transient = new Error('Error POSTing to endpoint: Bad Request: Server not initialized')
+    const controller = new AbortController()
+    const cancellation = new McpError('MCP_CANCELLED', 'MCP 启动已取消', { stage: 'startup_retry' })
+    let listAttempts = 0
+    const { factory } = fakeSdkFactory({
+      listError: transient,
+      onList() {
+        listAttempts += 1
+        if (listAttempts === 1) setTimeout(() => controller.abort(cancellation), 1)
+      },
+    })
+    const client = createMcpClient({
+      server: {
+        ...BUDA_MCP_SERVER_TEMPLATE,
+        startup_timeout_ms: 1_000,
+        poll_initial_ms: 100,
+        poll_max_ms: 100,
+      },
+      key,
+      sdkFactory: factory,
+    })
+
+    await expect(client.connect(controller.signal)).rejects.toMatchObject({
+      code: 'MCP_CANCELLED',
+      details: { stage: 'startup_retry' },
+    })
+    expect(listAttempts).toBe(1)
+  })
+
+  test('maps a standard caller abort while waiting to retry Buda startup to cancellation', async () => {
+    const transient = new Error('Error POSTing to endpoint: Bad Request: Server not initialized')
+    const controller = new AbortController()
+    let listAttempts = 0
+    const { factory } = fakeSdkFactory({
+      listError: transient,
+      onList() {
+        listAttempts += 1
+        if (listAttempts === 1) setTimeout(() => controller.abort(), 1)
+      },
+    })
+    const client = createMcpClient({
+      server: {
+        ...BUDA_MCP_SERVER_TEMPLATE,
+        startup_timeout_ms: 1_000,
+        poll_initial_ms: 100,
+        poll_max_ms: 100,
+      },
+      key,
+      sdkFactory: factory,
+    })
+
+    await expect(client.connect(controller.signal)).rejects.toMatchObject({ code: 'MCP_CANCELLED' })
+    expect(listAttempts).toBe(1)
+  })
+
+  test('retries an exact transient Buda not-initialized error for read-safe tool calls', async () => {
+    const transient = new Error('Error POSTing to endpoint: Bad Request: Server not initialized')
+    const { capture, factory } = fakeSdkFactory({ callErrors: [transient, transient, undefined] })
+    const client = createMcpClient({
+      server: {
+        ...BUDA_MCP_SERVER_TEMPLATE,
+        tool_timeout_ms: 100,
+        poll_initial_ms: 1,
+        poll_max_ms: 1,
+      },
+      key,
+      sdkFactory: factory,
+    })
+    await client.connect()
+
+    await expect(client.callTool('allowed', {}, { operation: 'read_safe' }))
+      .resolves.toMatchObject({ structuredContent: { ok: true } })
+    expect(capture.calls).toHaveLength(3)
+  })
+
+  test('invalidates the Buda Session without replaying a mutation after a not-initialized tool error', async () => {
+    const transient = new Error('Error POSTing to endpoint: Bad Request: Server not initialized')
+    const { capture, factory } = fakeSdkFactory({ callErrors: [transient, undefined] })
+    const client = createMcpClient({
+      server: { ...BUDA_MCP_SERVER_TEMPLATE, poll_initial_ms: 1, poll_max_ms: 1 },
+      key,
+      sdkFactory: factory,
+    })
+    await client.connect()
+
+    await expect(client.callTool('allowed', {}, { operation: 'mutation' }))
+      .rejects.toMatchObject({
+        code: 'MCP_CONNECTION_LOST',
+        details: { tool_name: 'allowed', reason: 'buda_server_not_initialized' },
+      })
+    expect(capture.calls).toHaveLength(1)
+    expect(client.state).toBe('Closed')
   })
 
   test('connects, filters tools, preserves results, diagnostics, timeout, and signal', async () => {

@@ -1,7 +1,7 @@
 import { types } from 'node:util'
 import { isAbortRelatedError, McpError } from '../errors'
 import { mcpResultData, buildBudaDriveSnapshot, syncBudaDriveSnapshot } from './buda-drive'
-import { resolveBudaTools, type BudaToolMap } from './buda-tool-map'
+import { buildBudaToolArguments, resolveBudaTools, type BudaToolMap } from './buda-tool-map'
 import type { McpOperationKind, McpOperationOptions, McpToolResult } from '../types'
 import type {
   BudaProseGenerationInput,
@@ -285,7 +285,7 @@ export class BudaAdapter implements ProseMcpAdapter {
     const tools = this.tools || await this.resolveTools(options)
     const data = agentResultData(await this.client.callTool(
       tools.listAgents,
-      {},
+      buildBudaToolArguments('listAgents', tools.listAgents, {}),
       operationOptions(options, 'read_safe'),
     ))
     return normalizeBudaAgentList(data)
@@ -299,12 +299,12 @@ export class BudaAdapter implements ProseMcpAdapter {
       spaceId = String(existing.find(item => (item.raw as any)?.spaceId)?.raw?.spaceId || '')
     }
     if (!spaceId) throw new McpError('MCP_BINDING_INVALID', '创建 Buda Agent 需要 spaceId；请先在 Buda 中创建空间')
-    const data = agentResultData(await this.client.callTool(tools.createAgent!, {
+    const data = agentResultData(await this.client.callTool(tools.createAgent!, buildBudaToolArguments('createAgent', tools.createAgent!, {
       spaceId,
       name: String(input.name || 'MangaForge 小说正文 Agent'),
       emoji: '✍️',
       instructions: String(input.instructions || MANGAFORGE_BUDA_AGENT_INSTRUCTIONS),
-    }, operationOptions(options, 'mutation')))
+    }), operationOptions(options, 'mutation')))
     const nestedAgent = ownDataValue(data, 'agent')
     const agent = cleanAgent(nestedAgent && typeof nestedAgent === 'object' ? nestedAgent : data)
     if (!agent.id) throw new McpError('MCP_TOOL_ERROR', 'Buda 未返回新 Agent 标识')
@@ -316,10 +316,10 @@ export class BudaAdapter implements ProseMcpAdapter {
     options: McpAdapterOperationOptions = {},
   ) {
     const tools = this.tools || await this.resolveTools(options)
-    const data = mcpResultData(await this.client.callTool(tools.getSession, {
+    const data = mcpResultData(await this.client.callTool(tools.getSession, buildBudaToolArguments('getSession', tools.getSession, {
       agentId: input.agentId,
       sessionId: input.sessionId,
-    }, operationOptions(options, 'read_safe')))
+    }), operationOptions(options, 'read_safe')))
     const status = publicSessionStatus(data)
     return {
       status,
@@ -380,13 +380,13 @@ export class BudaAdapter implements ProseMcpAdapter {
         chapterTitle: input.chapter?.title,
         paragraphTask: input.paragraphTask,
       })
-      const createResult = await this.client.callTool(tools.createSession, {
+      const createResult = await this.client.callTool(tools.createSession, buildBudaToolArguments('createSession', tools.createSession, {
         agentId: input.agentId,
         message: `MangaForge 请求 ${input.requestId} 已建立；请等待同一 Session 的完整章节任务。`,
         title: `MangaForge 第${input.chapterNo}章 ${input.requestId}`,
         mode: 'agent',
         startRun: false,
-      }, callOptions('mutation'))
+      }), callOptions('mutation'))
       const created = mcpResultData(createResult)
       activeSessionId = sessionId(created)
       if (!activeSessionId) throw new McpError('MCP_SESSION_FAILED', 'Buda 未返回 Session 标识')
@@ -400,13 +400,13 @@ export class BudaAdapter implements ProseMcpAdapter {
       })
       input.deadline.throwIfAborted()
       try {
-        await this.client.callTool(tools.sendSessionMessage, {
+        await this.client.callTool(tools.sendSessionMessage, buildBudaToolArguments('sendSessionMessage', tools.sendSessionMessage, {
           agentId: input.agentId,
           sessionId: activeSessionId,
           message,
           mode: 'agent',
           startRun: true,
-        }, callOptions('mutation'))
+        }), callOptions('mutation'))
       } catch (error) {
         if (!sendMayHaveSucceeded(error)) throw error
         throw new McpError('MCP_SEND_UNKNOWN', 'Buda 正文任务发送结果无法确认', {
@@ -420,10 +420,10 @@ export class BudaAdapter implements ProseMcpAdapter {
       let interval = Math.max(1, input.server.poll_initial_ms)
       while (true) {
         input.deadline.throwIfAborted()
-        const sessionResult = await this.client.callTool(tools.getSession, {
+        const sessionResult = await this.client.callTool(tools.getSession, buildBudaToolArguments('getSession', tools.getSession, {
           agentId: input.agentId,
           sessionId: activeSessionId,
-        }, callOptions('read_safe'))
+        }), callOptions('read_safe'))
         const sessionData = mcpResultData(sessionResult)
         const status = sessionStatus(sessionData)
         terminalSeen = status === 'completed' || status === 'failed' || status === 'cancelled'
@@ -473,18 +473,18 @@ export class BudaAdapter implements ProseMcpAdapter {
       try {
         let remoteCancelConfirmed = terminalSeen
         try {
-          const cancelResult = await waitWithSignal(cleanupSignal, () => this.client.callTool(tools!.cancelSession, {
+          const cancelResult = await waitWithSignal(cleanupSignal, () => this.client.callTool(tools!.cancelSession, buildBudaToolArguments('cancelSession', tools!.cancelSession, {
             agentId: input.agentId,
             sessionId: activeSessionId,
-          }, cleanupOptions('mutation')))
+          }), cleanupOptions('mutation')))
           remoteCancelConfirmed = remoteCancelConfirmed || mcpResultData(cancelResult)?.cancelled === true
         } catch {}
         if (!remoteCancelConfirmed && !cleanupSignal.aborted) {
           try {
-            const statusResult = await waitWithSignal(cleanupSignal, () => this.client.callTool(tools!.getSession, {
+            const statusResult = await waitWithSignal(cleanupSignal, () => this.client.callTool(tools!.getSession, buildBudaToolArguments('getSession', tools!.getSession, {
               agentId: input.agentId,
               sessionId: activeSessionId,
-            }, cleanupOptions('read_safe')))
+            }), cleanupOptions('read_safe')))
             remoteCancelConfirmed = ['completed', 'failed', 'cancelled'].includes(sessionStatus(mcpResultData(statusResult)))
           } catch {}
         }

@@ -1,5 +1,6 @@
 import {
   Client,
+  isInitializedNotification,
   ProtocolError,
   SdkError,
   SdkErrorCode,
@@ -34,12 +35,29 @@ type TransportLike = Pick<StreamableHTTPClientTransport, 'terminateSession'>
 
 export type McpSdkFactory = {
   createClient: () => SdkClientLike
-  createTransport: (url: URL, options: StreamableHTTPClientTransportOptions) => TransportLike
+  createTransport: (
+    url: URL,
+    options: StreamableHTTPClientTransportOptions,
+    server?: McpServerRecord,
+  ) => TransportLike
+}
+
+class BudaStreamableHTTPClientTransport extends StreamableHTTPClientTransport {
+  async send(
+    message: Parameters<StreamableHTTPClientTransport['send']>[0],
+    options?: Parameters<StreamableHTTPClientTransport['send']>[1],
+  ) {
+    const messages = Array.isArray(message) ? message : [message]
+    if (messages.length && messages.every(candidate => isInitializedNotification(candidate))) return
+    return super.send(message, options)
+  }
 }
 
 const defaultSdkFactory: McpSdkFactory = {
   createClient: () => new Client({ name: 'mangaforge-studio', version: '1.0.0' }),
-  createTransport: (url, options) => new StreamableHTTPClientTransport(url, options),
+  createTransport: (url, options, server) => server?.adapter_id === 'buda'
+    ? new BudaStreamableHTTPClientTransport(url, options)
+    : new StreamableHTTPClientTransport(url, options),
 }
 
 export const MCP_RESPONSE_BYTE_LIMIT = 16 * 1024 * 1024
@@ -182,6 +200,25 @@ function errorMessage(error: unknown) {
   return String((error as any)?.message || error || 'MCP 操作失败')
 }
 
+function isBudaSessionNotReady(server: McpServerRecord, error: unknown) {
+  return server.adapter_id === 'buda' && /\bServer not initialized\b/i.test(errorMessage(error))
+}
+
+function waitForMcpRetry(ms: number, signal?: AbortSignal) {
+  if (signal?.aborted) return Promise.reject(signal.reason || new Error('MCP connection aborted'))
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(signal?.reason || new Error('MCP connection aborted'))
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 function isBrokenTransportMessage(message: string) {
   return /\b(?:ECONNRESET|EPIPE)\b|^\s*not connected\s*$|socket hang up|connection reset by peer|\b(?:session|transport|connection|channel|stream)\b.{0,80}\b(?:expired|closed|terminated|not found|disconnected|lost)\b/i
     .test(message)
@@ -291,25 +328,51 @@ export class GenericMcpClient {
         this.options.fetch || globalThis.fetch.bind(globalThis),
         this.options.responseBudgets,
       ),
-    })
+    }, this.options.server)
     this.sdk = sdk
     this.transport = transport
     const startupTimeout = Math.max(1, Math.min(
       this.options.server.startup_timeout_ms,
       timeoutMs ?? this.options.server.startup_timeout_ms,
     ))
+    const startupStartedAt = Date.now()
     try {
       await sdk.connect(transport as any, {
         signal,
         timeout: startupTimeout,
         maxTotalTimeout: startupTimeout,
       })
-      await this.refreshTools({ signal, timeoutMs: startupTimeout }, sdk)
+      let retryDelay = Math.max(1, this.options.server.poll_initial_ms)
+      while (true) {
+        const remaining = Math.max(1, startupTimeout - (Date.now() - startupStartedAt))
+        try {
+          await this.refreshTools({ signal, timeoutMs: remaining }, sdk)
+          break
+        } catch (error) {
+          const retryBudget = startupTimeout - (Date.now() - startupStartedAt)
+          if (!isBudaSessionNotReady(this.options.server, error)) throw error
+          if (retryBudget <= 0) {
+            throw new McpError('MCP_CONNECT_TIMEOUT', '连接 MCP 服务超时', {
+              reason: 'buda_server_not_initialized',
+            })
+          }
+          await waitForMcpRetry(Math.min(retryDelay, retryBudget), signal)
+          retryDelay = Math.min(
+            Math.max(1, this.options.server.poll_max_ms),
+            Math.max(retryDelay + 1, retryDelay * 2),
+          )
+        }
+      }
       this.state = 'Ready'
       return this
     } catch (error) {
       this.state = 'Closed'
       await this.close().catch(() => {})
+      if (signal?.aborted && isAbortRelatedError(error, signal)) {
+        if (signal.reason instanceof McpError) throw this.scrubMcpError(signal.reason)
+        throw new McpError('MCP_CANCELLED', 'MCP 连接已取消')
+      }
+      if (error instanceof McpError) throw this.scrubMcpError(error)
       throw mapConnectionError(error, this.scrubber.scrubText)
     }
   }
@@ -369,10 +432,30 @@ export class GenericMcpClient {
     }
     const timeout = options.timeoutMs || this.options.server.tool_timeout_ms
     try {
-      const result = normalizeToolResult(await sdk.callTool(
-        { name, arguments: args },
-        { signal: options.signal, timeout, maxTotalTimeout: timeout },
-      ))
+      const startedAt = Date.now()
+      let retryDelay = Math.max(1, this.options.server.poll_initial_ms)
+      let result: McpToolResult
+      while (true) {
+        const remaining = Math.max(1, timeout - (Date.now() - startedAt))
+        try {
+          result = normalizeToolResult(await sdk.callTool(
+            { name, arguments: args },
+            { signal: options.signal, timeout: remaining, maxTotalTimeout: remaining },
+          ))
+          break
+        } catch (error) {
+          const retryBudget = timeout - (Date.now() - startedAt)
+          const retryable = options.operation === 'read_safe'
+            && isBudaSessionNotReady(this.options.server, error)
+          const waitMs = Math.min(retryDelay, Math.max(0, retryBudget - 1))
+          if (!retryable || waitMs <= 0) throw error
+          await waitForMcpRetry(waitMs, options.signal)
+          retryDelay = Math.min(
+            Math.max(1, this.options.server.poll_max_ms),
+            Math.max(retryDelay + 1, retryDelay * 2),
+          )
+        }
+      }
       if (result.isError) {
         throw new McpError('MCP_TOOL_ERROR', `MCP 工具执行失败：${name}`, {
           tool_name: name,
@@ -384,6 +467,13 @@ export class GenericMcpClient {
       if (options.signal?.aborted && isAbortRelatedError(error, options.signal)) {
         if (options.signal.reason instanceof McpError) throw options.signal.reason
         throw new McpError('MCP_CANCELLED', 'MCP 工具调用已取消', { tool_name: name })
+      }
+      if (isBudaSessionNotReady(this.options.server, error)) {
+        void this.close().catch(() => {})
+        throw new McpError('MCP_CONNECTION_LOST', 'MCP 连接已失效', {
+          tool_name: name,
+          reason: 'buda_server_not_initialized',
+        })
       }
       const rawMessage = errorMessage(error)
       const message = this.scrubber.scrubText(rawMessage)
