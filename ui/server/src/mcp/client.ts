@@ -145,7 +145,7 @@ export class GenericMcpClient {
     )
   }
 
-  async connect(signal?: AbortSignal) {
+  async connect(signal?: AbortSignal, timeoutMs?: number) {
     if (this.state === 'Ready') return this
     if (this.options.server.transport !== 'streamable_http') {
       throw new McpError('MCP_BINDING_INVALID', '首期正文生成只支持 Streamable HTTP MCP 服务')
@@ -161,13 +161,17 @@ export class GenericMcpClient {
     })
     this.sdk = sdk
     this.transport = transport
+    const startupTimeout = Math.max(1, Math.min(
+      this.options.server.startup_timeout_ms,
+      timeoutMs ?? this.options.server.startup_timeout_ms,
+    ))
     try {
       await sdk.connect(transport as any, {
         signal,
-        timeout: this.options.server.startup_timeout_ms,
-        maxTotalTimeout: this.options.server.startup_timeout_ms,
+        timeout: startupTimeout,
+        maxTotalTimeout: startupTimeout,
       })
-      await this.refreshTools({ signal }, sdk)
+      await this.refreshTools({ signal, timeoutMs: startupTimeout }, sdk)
       this.state = 'Ready'
       return this
     } catch (error) {
@@ -241,6 +245,7 @@ export class GenericMcpClient {
       return result
     } catch (error) {
       if (options.signal?.aborted) {
+        if (options.signal.reason instanceof McpError) throw options.signal.reason
         throw new McpError('MCP_CANCELLED', 'MCP 工具调用已取消', { tool_name: name })
       }
       const rawMessage = errorMessage(error)

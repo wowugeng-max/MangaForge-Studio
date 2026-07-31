@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { BudaAdapter, buildBudaExecutionEnvelope, extractBudaProse, normalizeBudaAgentList } from './buda-adapter'
 import { BUDA_MCP_SERVER_TEMPLATE } from '../server-store'
+import { McpGenerationDeadline } from '../deadline'
 
 const toolNames = [
   'apiClaw.listApiAgents',
@@ -56,6 +57,12 @@ function createFakeClient(statuses: string[] = ['completed']) {
 }
 
 function generationInput(overrides: Record<string, unknown> = {}) {
+  const callerSignal = overrides.signal as AbortSignal | undefined
+  const deadline = overrides.deadline || new McpGenerationDeadline(60_000, callerSignal, {
+    now: Date.now,
+    setTimeout: () => 1,
+    clearTimeout: () => {},
+  })
   return {
     activeWorkspace: '/workspace/a',
     server: { ...BUDA_MCP_SERVER_TEMPLATE, poll_initial_ms: 1, poll_max_ms: 2 },
@@ -68,6 +75,7 @@ function generationInput(overrides: Record<string, unknown> = {}) {
     paragraphTask: '完整段落任务：前因、当前目标、后果与输出合同。',
     promptDiagnostics: { prompt_chars: 28 },
     drive: { writingBible: '# 圣经', storyState: {}, continuity: '连续性', recentChapters: '第11章摘要' },
+    deadline,
     ...overrides,
   } as any
 }
@@ -120,6 +128,81 @@ describe('BudaAdapter', () => {
     }))
     expect(progress).toEqual(expect.arrayContaining(['mcp_capabilities', 'mcp_drive_sync', 'mcp_session_create', 'mcp_session_wait', 'mcp_extract']))
     expectBudaOperations(fake.calls)
+  })
+
+  test('awaits the durable session-created receipt immediately before sending the prose task', async () => {
+    const fake = createFakeClient()
+    const events: string[] = []
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('postApiAgentSessionMessage')) events.push('send')
+      return original(name, args, options)
+    }
+    const adapter = new BudaAdapter(fake.client as any)
+
+    await adapter.generateProse(generationInput({
+      onProgress: async (event: any) => {
+        if (event.stage !== 'session_created') return
+        expect(event).toMatchObject({
+          status: 'running',
+          session_id: 'session-1',
+          snapshot_hash: expect.any(String),
+        })
+        await Promise.resolve()
+        events.push('receipt')
+      },
+    }))
+
+    expect(events).toEqual(['receipt', 'send'])
+  })
+
+  test('does not send a prose task when the durable session-created receipt fails', async () => {
+    const fake = createFakeClient()
+    const adapter = new BudaAdapter(fake.client as any)
+
+    await expect(adapter.generateProse(generationInput({
+      onProgress: async (event: any) => {
+        if (event.stage === 'session_created') throw new Error('receipt write failed')
+      },
+    }))).rejects.toThrow('receipt write failed')
+
+    expect(fake.calls.filter(call => call.name.endsWith('postApiAgentSessionMessage'))).toHaveLength(0)
+  })
+
+  test('uses one deadline signal and shrinking per-call timeouts across discovery, Drive, Session, and polling', async () => {
+    let now = 0
+    const deadline = new McpGenerationDeadline(10_000, undefined, {
+      now: () => now,
+      setTimeout: () => 1,
+      clearTimeout: () => {},
+    })
+    const fake = createFakeClient()
+    const observedOptions: any[] = []
+    const originalListTools = fake.client.listTools
+    fake.client.listTools = async (options: any) => {
+      observedOptions.push({ signal: options.signal, timeoutMs: options.timeoutMs })
+      const result = await originalListTools(options)
+      now += 100
+      return result
+    }
+    const originalCallTool = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      observedOptions.push({ signal: options.signal, timeoutMs: options.timeoutMs })
+      const result = await originalCallTool(name, args, options)
+      now += 100
+      return result
+    }
+    const adapter = new BudaAdapter(fake.client as any)
+
+    await adapter.generateProse(generationInput({
+      deadline,
+      server: { ...BUDA_MCP_SERVER_TEMPLATE, tool_timeout_ms: 60_000 },
+    }))
+
+    expect(observedOptions.every(item => item.signal === deadline.signal)).toBe(true)
+    expect(observedOptions.every(item => item.timeoutMs > 0 && item.timeoutMs <= 10_000)).toBe(true)
+    expect(Math.min(...observedOptions.map(item => item.timeoutMs)))
+      .toBeLessThan(Math.max(...observedOptions.map(item => item.timeoutMs)))
   })
 
   test('maps waiting_for_input and failed terminal states without fallback', async () => {

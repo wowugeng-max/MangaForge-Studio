@@ -137,6 +137,23 @@ describe('generic MCP client', () => {
     }))
   })
 
+  test('preserves a typed total-deadline reason when an SDK tool call aborts', async () => {
+    const controller = new AbortController()
+    const deadlineError = new McpError('MCP_GENERATION_TIMEOUT', 'MCP 正文生成超过总时限')
+    const client = createMcpClient({
+      server: BUDA_MCP_SERVER_TEMPLATE,
+      key,
+      sdkFactory: fakeSdkFactory({ callError: new Error('aborted') }).factory,
+    })
+    await client.connect()
+    controller.abort(deadlineError)
+
+    await expect(client.callTool('allowed', {}, {
+      operation: 'read_safe',
+      signal: controller.signal,
+    })).rejects.toBe(deadlineError)
+  })
+
   test('scrubs reflected credentials from connection and tool errors while preserving stable metadata', async () => {
     const reflectedKey = 'sk_' + 'test_reflected_client_key'
     const reflectedHeader = 'synthetic-client-header-value'

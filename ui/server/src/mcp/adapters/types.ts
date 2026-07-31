@@ -5,6 +5,7 @@ import type {
   McpToolDescriptor,
   McpToolResult,
 } from '../types'
+import type { McpGenerationDeadline } from '../deadline'
 
 export type McpAdapterOperationOptions = Omit<McpOperationOptions, 'operation'>
 
@@ -45,6 +46,7 @@ export type BudaProseGenerationInput = {
   paragraphTask: string
   promptDiagnostics?: unknown
   drive: BudaDriveInput
+  deadline: McpGenerationDeadline
   signal?: AbortSignal
   onProgress?: (event: GenerationSourceProgress) => Promise<void> | void
 }

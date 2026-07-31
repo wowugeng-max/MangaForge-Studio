@@ -3,6 +3,7 @@ import { appendNovelRun, updateNovelRun } from '../../novel'
 import { readMcpKeys } from '../../mcp/key-store'
 import type { McpRuntime } from '../../mcp/runtime'
 import { McpError, isMcpError } from '../../mcp/errors'
+import { McpGenerationDeadline } from '../../mcp/deadline'
 import { createMcpSecretScrubber } from '../../mcp/secret-scrubber'
 import { readMcpServers } from '../../mcp/server-store'
 import {
@@ -143,7 +144,16 @@ function scrubGenerationError(
 }
 
 export class McpGenerationSource implements GenerationSource {
-  constructor(private readonly runtime: Pick<McpRuntime, 'listAgents' | 'getAdapterForKey'>) {}
+  private readonly createDeadline: (totalMs: number, signal?: AbortSignal) => McpGenerationDeadline
+
+  constructor(
+    private readonly runtime: Pick<McpRuntime, 'resolveCredentialConfig' | 'listAgents' | 'getAdapterForKey'>,
+    options: {
+      createDeadline?: (totalMs: number, signal?: AbortSignal) => McpGenerationDeadline
+    } = {},
+  ) {
+    this.createDeadline = options.createDeadline || ((totalMs, signal) => new McpGenerationDeadline(totalMs, signal))
+  }
 
   async generateProse(request: ProseGenerationRequest): Promise<ProseGenerationResult> {
     const source = resolveProseGenerationSource(request.project)
@@ -176,17 +186,29 @@ export class McpGenerationSource implements GenerationSource {
     })
     let progressProvenance: Record<string, unknown> = { ...baseProvenance }
     let connected = false
+    let deadline: McpGenerationDeadline | undefined
     try {
-      await request.onProgress?.({ stage: 'mcp_connect', status: 'running' })
-      const pinnedCredential = validateMcpCredentialSelectionSnapshot(credentialSnapshot.records, {
+      const selectedCredential = validateMcpCredentialSelectionSnapshot(credentialSnapshot.records, {
         serverId: binding.server_id,
         keyId: binding.key_id,
         adapterId: binding.adapter_id,
       })
+      const pinnedCredential = await this.runtime.resolveCredentialConfig(
+        binding.key_id,
+        binding.server_id,
+        selectedCredential,
+      )
+      deadline = this.createDeadline(pinnedCredential.server.generation_timeout_ms, request.signal)
+      deadline.throwIfAborted()
+      const remoteOptions = (configuredMs: number) => ({
+        signal: deadline!.signal,
+        get timeoutMs() { return deadline!.timeoutMs(configuredMs) },
+      })
+      await request.onProgress?.({ stage: 'mcp_connect', status: 'running' })
       const resolved = await this.runtime.getAdapterForKey(
         binding.key_id,
         binding.server_id,
-        request.signal,
+        remoteOptions(pinnedCredential.server.startup_timeout_ms),
         pinnedCredential,
       )
       scrubber = createMcpSecretScrubber({
@@ -196,12 +218,14 @@ export class McpGenerationSource implements GenerationSource {
           ...Object.values(resolved.server.custom_headers),
         ],
       })
+      const validationOptions = remoteOptions(resolved.server.tool_timeout_ms)
       await validateMcpProjectBinding(request.activeWorkspace, request.project, binding, {
         runtime: {
-          listAgents: async (_keyId, signal) => resolved.adapter.listAgents({ signal }),
+          listAgents: async (_keyId, options) => resolved.adapter.listAgents(options),
         },
         credentialSnapshot: credentialSnapshot.records,
-        signal: request.signal,
+        signal: validationOptions.signal,
+        get timeoutMs() { return validationOptions.timeoutMs },
       })
       await request.onProgress?.({ stage: 'mcp_connect', status: 'success' })
       connected = true
@@ -223,7 +247,8 @@ export class McpGenerationSource implements GenerationSource {
           continuity: driveText(continuity),
           recentChapters: driveText(continuity?.previous_prose_chapters || []),
         },
-        signal: request.signal,
+        deadline,
+        signal: deadline.signal,
         onProgress: async event => {
           const scrubbedEvent = scrubber.scrubValue(event)
           const safeEvent = {
@@ -235,6 +260,21 @@ export class McpGenerationSource implements GenerationSource {
             ...progressProvenance,
             ...(safeEvent.session_id ? { session_id: safeEvent.session_id } : {}),
             ...(safeEvent.snapshot_hash ? { snapshot_hash: safeEvent.snapshot_hash } : {}),
+          }
+          if (safeEvent.stage === 'session_created') {
+            const sessionReceipt = scrubbedProvenance(scrubber, {
+              ...progressProvenance,
+              request_id: boundedScrubbedId(scrubber, request.requestId),
+              receipt_run_id: receipt.id,
+              status: 'session_created',
+            }, bindingFingerprint)
+            const updated = await updateNovelRun(request.activeWorkspace, receipt.id, {
+              status: 'session_created',
+              output_ref: JSON.stringify(sessionReceipt),
+            })
+            if (!updated) {
+              throw new McpError('MCP_STORE_IO_FAILED', 'MCP Session 创建回执持久化失败')
+            }
           }
           await request.onProgress?.(safeEvent)
         },
@@ -260,7 +300,11 @@ export class McpGenerationSource implements GenerationSource {
         },
       }
     } catch (error) {
-      const scrubbedError = scrubGenerationError(error, scrubber)
+      let exposedError = error
+      if (deadline?.signal.aborted) {
+        try { deadline.throwIfAborted() } catch (cause) { exposedError = cause }
+      }
+      const scrubbedError = scrubGenerationError(exposedError, scrubber)
       if (!connected) {
         await Promise.resolve(request.onProgress?.({
           stage: 'mcp_connect',
@@ -279,6 +323,8 @@ export class McpGenerationSource implements GenerationSource {
         error_message: scrubber.scrubText(scrubbedError.message).slice(0, 500),
       }).catch(() => {})
       throw scrubbedError
+    } finally {
+      deadline?.close()
     }
   }
 }

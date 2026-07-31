@@ -1,6 +1,7 @@
 import { McpError } from '../errors'
 import { mcpResultData, buildBudaDriveSnapshot, syncBudaDriveSnapshot } from './buda-drive'
 import { resolveBudaTools, type BudaToolMap } from './buda-tool-map'
+import type { McpOperationKind, McpOperationOptions } from '../types'
 import type {
   BudaProseGenerationInput,
   BudaProseGenerationResult,
@@ -10,6 +11,17 @@ import type {
 } from './types'
 
 const activeAgentRuns = new Set<string>()
+
+function operationOptions(options: McpAdapterOperationOptions, operation: McpOperationKind) {
+  const result: McpOperationOptions = { signal: options.signal, operation }
+  if (options.timeoutMs !== undefined) {
+    Object.defineProperty(result, 'timeoutMs', {
+      enumerable: true,
+      get: () => options.timeoutMs,
+    })
+  }
+  return result
+}
 
 function cleanAgent(item: any) {
   const id = String(item?.id || item?.agentId || '')
@@ -88,18 +100,33 @@ export function buildBudaExecutionEnvelope(input: {
   ].join('\n')
 }
 
-function abortableDelay(ms: number, signal?: AbortSignal) {
-  if (signal?.aborted) return Promise.reject(new McpError('MCP_CANCELLED', 'MCP 正文生成已取消'))
+function abortableDelay(ms: number, input: BudaProseGenerationInput) {
+  const { deadline } = input
+  deadline.throwIfAborted()
+  const waitMs = Math.min(Math.max(1, ms), deadline.remainingMs())
+  if (waitMs <= 0) {
+    deadline.throwIfAborted()
+    return Promise.resolve()
+  }
   return new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', abort)
-      resolve()
-    }, ms)
+      deadline.signal.removeEventListener('abort', abort)
+      try {
+        deadline.throwIfAborted()
+        resolve()
+      } catch (error) {
+        reject(error)
+      }
+    }, waitMs)
     const abort = () => {
       clearTimeout(timer)
-      reject(new McpError('MCP_CANCELLED', 'MCP 正文生成已取消'))
+      try {
+        deadline.throwIfAborted()
+      } catch (error) {
+        reject(error)
+      }
     }
-    signal?.addEventListener('abort', abort, { once: true })
+    deadline.signal.addEventListener('abort', abort, { once: true })
   })
 }
 
@@ -123,7 +150,7 @@ export class BudaAdapter implements ProseMcpAdapter {
 
   async listAgents(options: McpAdapterOperationOptions = {}) {
     const tools = this.tools || await this.resolveTools(options)
-    const data = mcpResultData(await this.client.callTool(tools.listAgents, {}, { ...options, operation: 'read_safe' }))
+    const data = mcpResultData(await this.client.callTool(tools.listAgents, {}, operationOptions(options, 'read_safe')))
     return normalizeBudaAgentList(data)
   }
 
@@ -140,7 +167,7 @@ export class BudaAdapter implements ProseMcpAdapter {
       name: String(input.name || 'MangaForge 小说正文 Agent'),
       emoji: '✍️',
       instructions: String(input.instructions || MANGAFORGE_BUDA_AGENT_INSTRUCTIONS),
-    }, { ...options, operation: 'mutation' }))
+    }, operationOptions(options, 'mutation')))
     const agent = cleanAgent(data?.agent || data)
     if (!agent.id) throw new McpError('MCP_TOOL_ERROR', 'Buda 未返回新 Agent 标识')
     return { id: agent.id, name: agent.name }
@@ -157,9 +184,14 @@ export class BudaAdapter implements ProseMcpAdapter {
       await input.onProgress?.({ stage, status, detail, elapsed_ms: Date.now() - startedAt, ...(activeSessionId ? { session_id: activeSessionId } : {}) })
     }
     try {
-      if (input.signal?.aborted) throw new McpError('MCP_CANCELLED', 'MCP 正文生成已取消')
+      const remoteOptions = () => ({
+        signal: input.deadline.signal,
+        get timeoutMs() { return input.deadline.timeoutMs(input.server.tool_timeout_ms) },
+      })
+      const callOptions = (operation: McpOperationKind) => operationOptions(remoteOptions(), operation)
+      input.deadline.throwIfAborted()
       await progress('mcp_capabilities')
-      tools = await this.resolveTools({ signal: input.signal })
+      tools = await this.resolveTools(remoteOptions())
       await progress('mcp_capabilities', 'success')
 
       await progress('mcp_drive_sync')
@@ -171,7 +203,14 @@ export class BudaAdapter implements ProseMcpAdapter {
         continuity: input.drive.continuity,
         recentChapters: input.drive.recentChapters,
       })
-      const sync = await syncBudaDriveSnapshot({ client: this.client, tools, agentId: input.agentId, snapshot, signal: input.signal })
+      const sync = await syncBudaDriveSnapshot({
+        client: this.client,
+        tools,
+        agentId: input.agentId,
+        snapshot,
+        deadline: input.deadline,
+        toolTimeoutMs: input.server.tool_timeout_ms,
+      })
       await input.onProgress?.({
         stage: 'mcp_drive_sync',
         status: 'success',
@@ -181,20 +220,28 @@ export class BudaAdapter implements ProseMcpAdapter {
       })
 
       await progress('mcp_session_create')
+      const message = buildBudaExecutionEnvelope({
+        requestId: input.requestId,
+        chapterNo: input.chapterNo,
+        chapterTitle: input.chapter?.title,
+        paragraphTask: input.paragraphTask,
+      })
       const created = mcpResultData(await this.client.callTool(tools.createSession, {
         agentId: input.agentId,
         message: `MangaForge 请求 ${input.requestId} 已建立；请等待同一 Session 的完整章节任务。`,
         title: `MangaForge 第${input.chapterNo}章 ${input.requestId}`,
         mode: 'agent',
         startRun: false,
-      }, { signal: input.signal, operation: 'mutation' }))
+      }, callOptions('mutation')))
       activeSessionId = sessionId(created)
       if (!activeSessionId) throw new McpError('MCP_SESSION_FAILED', 'Buda 未返回 Session 标识')
-      const message = buildBudaExecutionEnvelope({
-        requestId: input.requestId,
-        chapterNo: input.chapterNo,
-        chapterTitle: input.chapter?.title,
-        paragraphTask: input.paragraphTask,
+      await input.onProgress?.({
+        stage: 'session_created',
+        status: 'running',
+        detail: 'Buda Session 已创建，等待持久化后发送正文任务',
+        elapsed_ms: Date.now() - startedAt,
+        session_id: activeSessionId,
+        snapshot_hash: snapshot.snapshotHash,
       })
       await this.client.callTool(tools.sendSessionMessage, {
         agentId: input.agentId,
@@ -202,24 +249,22 @@ export class BudaAdapter implements ProseMcpAdapter {
         message,
         mode: 'agent',
         startRun: true,
-      }, { signal: input.signal, operation: 'mutation' })
+      }, callOptions('mutation'))
       await progress('mcp_session_create', 'success')
 
       await progress('mcp_session_wait')
       let interval = Math.max(1, input.server.poll_initial_ms)
       while (true) {
-        if (input.signal?.aborted) throw new McpError('MCP_CANCELLED', 'MCP 正文生成已取消')
-        if (Date.now() - startedAt > input.server.generation_timeout_ms) {
-          throw new McpError('MCP_GENERATION_TIMEOUT', 'Buda 正文生成超过总时限')
-        }
+        input.deadline.throwIfAborted()
         const sessionData = mcpResultData(await this.client.callTool(tools.getSession, {
           agentId: input.agentId,
           sessionId: activeSessionId,
-        }, { signal: input.signal, operation: 'read_safe' }))
+        }, callOptions('read_safe')))
         const status = sessionStatus(sessionData)
         if (status === 'pending' || status === 'in_progress') {
           await progress('mcp_session_wait', 'running', status)
-          await abortableDelay(interval, input.signal)
+          await abortableDelay(interval, input)
+          input.deadline.throwIfAborted()
           interval = Math.min(Math.max(interval + 1, Math.round(interval * 1.5)), Math.max(interval, input.server.poll_max_ms))
           continue
         }
@@ -243,7 +288,12 @@ export class BudaAdapter implements ProseMcpAdapter {
         }
       }
     } catch (error) {
-      const cancelled = input.signal?.aborted || (error instanceof McpError && error.code === 'MCP_CANCELLED')
+      let deadlineCause: unknown
+      if (input.deadline.signal.aborted) {
+        try { input.deadline.throwIfAborted() } catch (cause) { deadlineCause = cause }
+      }
+      const cancelled = (deadlineCause instanceof McpError && deadlineCause.code === 'MCP_CANCELLED')
+        || (!deadlineCause && error instanceof McpError && error.code === 'MCP_CANCELLED')
       if (cancelled && activeSessionId && tools) {
         await this.client.callTool(tools.cancelSession, {
           agentId: input.agentId,
@@ -251,6 +301,7 @@ export class BudaAdapter implements ProseMcpAdapter {
         }, { operation: 'mutation' }).catch(() => {})
         throw new McpError('MCP_CANCELLED', 'MCP 正文生成已取消', { session_id: activeSessionId })
       }
+      if (deadlineCause) throw deadlineCause
       throw error
     } finally {
       activeAgentRuns.delete(lockKey)

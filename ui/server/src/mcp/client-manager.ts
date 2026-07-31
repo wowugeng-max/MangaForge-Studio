@@ -13,6 +13,24 @@ type ConnectionEntry = {
   retirement?: Promise<void>
 }
 
+type ConnectionWaitOptions = {
+  signal?: AbortSignal
+  timeoutMs?: number
+}
+
+function normalizeWaitOptions(options?: AbortSignal | ConnectionWaitOptions): ConnectionWaitOptions {
+  if (options && typeof (options as AbortSignal).addEventListener === 'function') {
+    return { signal: options as AbortSignal }
+  }
+  return options || {}
+}
+
+function cancellationReason(signal: AbortSignal) {
+  return signal.reason instanceof McpError
+    ? signal.reason
+    : new McpError('MCP_CANCELLED', 'MCP 连接等待已取消')
+}
+
 function connectionPrefix(activeWorkspace: string, serverId: string, keyId: number) {
   return `${activeWorkspace}\u0000${serverId}\u0000${keyId}`
 }
@@ -48,8 +66,14 @@ export class McpClientManager {
     this.createClient = options.createClient || createMcpClient
   }
 
-  async get(activeWorkspace: string, server: McpServerRecord, key: McpKeyRecord, signal?: AbortSignal) {
-    if (signal?.aborted) throw new McpError('MCP_CANCELLED', 'MCP 连接等待已取消')
+  async get(
+    activeWorkspace: string,
+    server: McpServerRecord,
+    key: McpKeyRecord,
+    waitOptions?: AbortSignal | ConnectionWaitOptions,
+  ) {
+    const { signal, timeoutMs } = normalizeWaitOptions(waitOptions)
+    if (signal?.aborted) throw cancellationReason(signal)
     const cacheKey = connectionKey(activeWorkspace, server, key)
     let client = this.clients.get(cacheKey)
     if (client?.state === 'Ready') return client
@@ -83,7 +107,7 @@ export class McpClientManager {
       entry.promise = connection
       this.connecting.set(cacheKey, entry)
     }
-    return this.waitForConnection(cacheKey, entry, signal)
+    return this.waitForConnection(cacheKey, entry, signal, timeoutMs)
   }
 
   private closeConnection(entry: ConnectionEntry) {
@@ -118,18 +142,35 @@ export class McpClientManager {
     entry.controller.abort()
   }
 
-  private async waitForConnection(cacheKey: string, entry: ConnectionEntry, signal?: AbortSignal) {
-    if (signal?.aborted) throw new McpError('MCP_CANCELLED', 'MCP 连接等待已取消')
+  private async waitForConnection(
+    cacheKey: string,
+    entry: ConnectionEntry,
+    signal?: AbortSignal,
+    timeoutMs?: number,
+  ) {
+    if (signal?.aborted) throw cancellationReason(signal)
     entry.waiters += 1
     let onAbort: (() => void) | undefined
+    let timeout: ReturnType<typeof setTimeout> | undefined
     try {
-      if (!signal) return await entry.promise
-      const cancelled = new Promise<never>((_, reject) => {
-        onAbort = () => reject(new McpError('MCP_CANCELLED', 'MCP 连接等待已取消'))
-        signal.addEventListener('abort', onAbort, { once: true })
-      })
-      return await Promise.race([entry.promise, cancelled])
+      const waiters: Promise<GenericMcpClient>[] = [entry.promise]
+      if (signal) {
+        waiters.push(new Promise<never>((_, reject) => {
+          onAbort = () => reject(cancellationReason(signal))
+          signal.addEventListener('abort', onAbort, { once: true })
+        }))
+      }
+      if (timeoutMs !== undefined) {
+        waiters.push(new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => {
+            reject(new McpError('MCP_CONNECT_TIMEOUT', '连接 MCP 服务超时'))
+          }, Math.max(1, timeoutMs))
+          timeout.unref?.()
+        }))
+      }
+      return await Promise.race(waiters)
     } finally {
+      if (timeout) clearTimeout(timeout)
       if (onAbort && signal) signal.removeEventListener('abort', onAbort)
       entry.waiters -= 1
       if (entry.waiters === 0 && !entry.settled && entry.client.state !== 'Ready') {

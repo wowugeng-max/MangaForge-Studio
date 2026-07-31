@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import { Database } from 'bun:sqlite'
 import { mkdtemp, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { createMcpKey, updateMcpKey } from '../../mcp/key-store'
 import { McpError } from '../../mcp/errors'
+import { McpGenerationDeadline } from '../../mcp/deadline'
+import { BudaAdapter } from '../../mcp/adapters/buda-adapter'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from '../../mcp/server-store'
 import { createNovelProject, listNovelRuns } from '../../novel'
 import { createGenerationSourceResolver } from './create-generation-source'
@@ -84,6 +87,255 @@ describe('ModelGenerationSource', () => {
 })
 
 describe('McpGenerationSource', () => {
+  test('persists a bounded session-created receipt before allowing the Adapter to send', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-session-receipt-'))
+    workspaces.push(workspace)
+    const server = { ...BUDA_MCP_SERVER_TEMPLATE }
+    await writeMcpServers(workspace, [server])
+    const key = await createMcpKey(workspace, { mcp_server_id: server.id, key: 'sk_session_receipt', description: '账号' })
+    const project = await createNovelProject(workspace, {
+      title: 'Session receipt',
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: { server_id: server.id, key_id: key.id, adapter_id: server.adapter_id, agent_id: 'agent-1' },
+        },
+      },
+    })
+    const events: string[] = []
+    const adapter = {
+      listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }],
+      generateProse: async (input: any) => {
+        await input.onProgress({
+          stage: 'session_created',
+          status: 'running',
+          session_id: 'session-1',
+          snapshot_hash: 'snapshot-1',
+        })
+        const [receipt] = (await listNovelRuns(workspace, project.id))
+          .filter(run => run.run_type === 'mcp_generate_prose')
+        const output = JSON.parse(receipt!.output_ref!)
+        expect(receipt).toMatchObject({ status: 'session_created' })
+        expect(output).toMatchObject({
+          status: 'session_created',
+          request_id: 'request-12',
+          receipt_run_id: receipt!.id,
+          session_id: 'session-1',
+          snapshot_hash: 'snapshot-1',
+        })
+        expect(receipt!.output_ref).not.toContain('sk_session_receipt')
+        expect(receipt!.output_ref).not.toContain(input.paragraphTask)
+        events.push('receipt')
+        events.push('send')
+        return {
+          prose_chapters: [{ chapter_no: 12, chapter_text: 'MCP 正文' }],
+          source: 'mcp', adapter_id: 'buda', agent_id: 'agent-1', session_id: 'session-1', snapshot_hash: 'snapshot-1', completed: true,
+          raw: { request_id: 'request-12', session_status: 'completed' },
+        }
+      },
+    }
+    const source = new McpGenerationSource({
+      resolveCredentialConfig: async () => ({ server, key }),
+      listAgents: async () => { throw new Error('must use pinned adapter') },
+      getAdapterForKey: async () => ({ server, key, adapter }),
+    } as any)
+
+    await source.generateProse(sourceRequest({ activeWorkspace: workspace, project }))
+
+    expect(events).toEqual(['receipt', 'send'])
+  })
+
+  test('prevents send when the session-created durable receipt cannot be updated', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-session-receipt-failure-'))
+    workspaces.push(workspace)
+    const server = { ...BUDA_MCP_SERVER_TEMPLATE }
+    await writeMcpServers(workspace, [server])
+    const key = await createMcpKey(workspace, { mcp_server_id: server.id, key: 'sk_session_failure', description: '账号' })
+    const project = await createNovelProject(workspace, {
+      title: 'Session receipt failure',
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: { server_id: server.id, key_id: key.id, adapter_id: server.adapter_id, agent_id: 'agent-1' },
+        },
+      },
+    })
+    const events: string[] = []
+    const adapter = {
+      listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }],
+      generateProse: async (input: any) => {
+        const db = new Database(join(workspace, 'novel.sqlite'))
+        db.run("DELETE FROM runs WHERE run_type = 'mcp_generate_prose'")
+        db.close()
+        await input.onProgress({
+          stage: 'session_created',
+          status: 'running',
+          session_id: 'session-1',
+          snapshot_hash: 'snapshot-1',
+        })
+        events.push('send')
+        throw new Error('send should not be reached')
+      },
+    }
+    const source = new McpGenerationSource({
+      resolveCredentialConfig: async () => ({ server, key }),
+      listAgents: async () => { throw new Error('must use pinned adapter') },
+      getAdapterForKey: async () => ({ server, key, adapter }),
+    } as any)
+
+    await expect(source.generateProse(sourceRequest({ activeWorkspace: workspace, project }))).rejects.toThrow()
+
+    expect(events).toEqual([])
+  })
+
+  test('starts the total deadline before remote connection and tool discovery', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-discovery-deadline-'))
+    workspaces.push(workspace)
+    const server = { ...BUDA_MCP_SERVER_TEMPLATE, generation_timeout_ms: 100 }
+    await writeMcpServers(workspace, [server])
+    const key = await createMcpKey(workspace, { mcp_server_id: server.id, key: 'sk_discovery_timeout', description: '账号' })
+    const project = await createNovelProject(workspace, {
+      title: 'Discovery timeout',
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: { server_id: server.id, key_id: key.id, adapter_id: server.adapter_id, agent_id: 'agent-1' },
+        },
+      },
+    })
+    let now = 0
+    let expire = () => {}
+    const toolCalls: string[] = []
+    const adapter = new BudaAdapter({
+      listTools: async (options: any) => {
+        const signal: AbortSignal | undefined = options?.signal
+        if (!signal) throw new Error('deadline signal missing before tool discovery')
+        queueMicrotask(expire)
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+        })
+      },
+      callTool: async (name: string) => {
+        toolCalls.push(name)
+        return { content: [] }
+      },
+    } as any)
+    const runtime = {
+      resolveCredentialConfig: async () => ({ server, key }),
+      listAgents: async () => { throw new Error('unreachable') },
+      getAdapterForKey: async (_keyId: number, _serverId: string, options: any) => {
+        if (!options?.signal) throw new Error('deadline signal missing before connection discovery')
+        return { server, key, adapter }
+      },
+    }
+    const source = new McpGenerationSource(runtime as any, {
+      createDeadline: (totalMs: number, signal?: AbortSignal) => new McpGenerationDeadline(totalMs, signal, {
+        now: () => now,
+        setTimeout: callback => { expire = () => { now = totalMs; callback() }; return 1 },
+        clearTimeout: () => {},
+      }),
+    } as any)
+
+    await expect(source.generateProse(sourceRequest({ activeWorkspace: workspace, project })))
+      .rejects.toMatchObject({ code: 'MCP_GENERATION_TIMEOUT' })
+
+    expect(toolCalls).toEqual([])
+  })
+
+  test('preserves caller cancellation as distinct from total timeout at the public boundary', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-caller-cancel-'))
+    workspaces.push(workspace)
+    const server = { ...BUDA_MCP_SERVER_TEMPLATE }
+    await writeMcpServers(workspace, [server])
+    const key = await createMcpKey(workspace, { mcp_server_id: server.id, key: 'sk_caller_cancel', description: '账号' })
+    const project = await createNovelProject(workspace, {
+      title: 'Caller cancel',
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: { server_id: server.id, key_id: key.id, adapter_id: server.adapter_id, agent_id: 'agent-1' },
+        },
+      },
+    })
+    const caller = new AbortController()
+    caller.abort()
+    const source = new McpGenerationSource({
+      resolveCredentialConfig: async () => ({ server, key }),
+      listAgents: async () => [],
+      getAdapterForKey: async () => { throw new Error('remote discovery must not start') },
+    } as any)
+
+    await expect(source.generateProse(sourceRequest({
+      activeWorkspace: workspace,
+      project,
+      signal: caller.signal,
+    }))).rejects.toMatchObject({ code: 'MCP_CANCELLED' })
+  })
+
+  test('passes one shrinking deadline through adapter discovery and binding validation', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-shared-deadline-'))
+    workspaces.push(workspace)
+    const server = { ...BUDA_MCP_SERVER_TEMPLATE, startup_timeout_ms: 5_000, tool_timeout_ms: 60_000, generation_timeout_ms: 100_000 }
+    await writeMcpServers(workspace, [server])
+    const key = await createMcpKey(workspace, { mcp_server_id: server.id, key: 'sk_shared_deadline', description: '账号' })
+    const project = await createNovelProject(workspace, {
+      title: 'Shared deadline',
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: { server_id: server.id, key_id: key.id, adapter_id: server.adapter_id, agent_id: 'agent-1' },
+        },
+      },
+    })
+    let now = 50_000
+    let deadline!: McpGenerationDeadline
+    const observed: any[] = []
+    const adapter = {
+      listAgents: async (options: any) => {
+        observed.push(options)
+        now += 1_000
+        return [{ id: 'agent-1', name: '正文 Agent' }]
+      },
+      generateProse: async (input: any) => {
+        observed.push({ signal: input.deadline.signal, timeoutMs: input.deadline.timeoutMs(server.tool_timeout_ms) })
+        return {
+          prose_chapters: [{ chapter_no: 12, chapter_text: 'MCP 正文' }],
+          source: 'mcp', adapter_id: 'buda', agent_id: 'agent-1', session_id: 'session-1', snapshot_hash: 'snapshot-1', completed: true,
+          raw: { request_id: 'request-12', session_status: 'completed' },
+        }
+      },
+    }
+    const runtime = {
+      resolveCredentialConfig: async () => ({ server, key }),
+      listAgents: async () => { throw new Error('must use pinned adapter') },
+      getAdapterForKey: async (_keyId: number, _serverId: string, options: any) => {
+        observed.push(options)
+        now += 1_000
+        return { server, key, adapter }
+      },
+    }
+    const source = new McpGenerationSource(runtime as any, {
+      createDeadline: (totalMs: number, signal?: AbortSignal) => {
+        deadline = new McpGenerationDeadline(totalMs, signal, {
+          now: () => now,
+          setTimeout: () => 1,
+          clearTimeout: () => {},
+        })
+        return deadline
+      },
+    } as any)
+
+    await source.generateProse(sourceRequest({ activeWorkspace: workspace, project }))
+
+    expect(observed.every(options => options.signal === deadline.signal)).toBe(true)
+    expect(observed.map(options => options.timeoutMs)).toEqual([5_000, 60_000, 60_000])
+  })
+
   test('sends the exact compiled task, stores bounded receipt provenance, and never calls a model', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-source-'))
     workspaces.push(workspace)
@@ -114,6 +366,7 @@ describe('McpGenerationSource', () => {
       },
     }
     const runtime = {
+      resolveCredentialConfig: async () => ({ server: BUDA_MCP_SERVER_TEMPLATE, key }),
       listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }],
       getAdapterForKey: async () => ({ server: BUDA_MCP_SERVER_TEMPLATE, key: { id: key.id }, adapter }),
     }
@@ -208,6 +461,7 @@ describe('McpGenerationSource', () => {
       },
     }
     const source = new McpGenerationSource({
+      resolveCredentialConfig: async () => ({ server, key }),
       listAgents: async () => { throw new Error('Agent validation must use the pinned adapter') },
       getAdapterForKey: async (...args: any[]) => ({ ...args[3], adapter }),
     } as any)
@@ -269,6 +523,7 @@ describe('McpGenerationSource', () => {
     )
     const progress: any[] = []
     const source = new McpGenerationSource({
+      resolveCredentialConfig: async () => ({ server, key }),
       listAgents: async () => { throw new Error('Agent validation must use the pinned adapter') },
       getAdapterForKey: async (...args: any[]) => ({
         ...args[3],
@@ -314,6 +569,7 @@ describe('McpGenerationSource', () => {
       },
     })
     const source = new McpGenerationSource({
+      resolveCredentialConfig: async () => ({ server: BUDA_MCP_SERVER_TEMPLATE, key }),
       listAgents: async () => [],
       getAdapterForKey: async (...args: any[]) => ({
         ...args[3],
@@ -372,6 +628,7 @@ describe('McpGenerationSource', () => {
     let adapterResolved = false
     let runningDurable = ''
     const source = new McpGenerationSource({
+      resolveCredentialConfig: async () => ({ server, key }),
       listAgents: async () => { throw new Error('Agent validation must use the pinned adapter') },
       getAdapterForKey: async (...args: any[]) => {
         adapterResolved = true
@@ -454,6 +711,10 @@ describe('McpGenerationSource', () => {
     let unpinnedListAgentsCalls = 0
     let pinnedCredential: any
     const source = new McpGenerationSource({
+      resolveCredentialConfig: async (...args: any[]) => {
+        await updateMcpKey(workspace, key.id, { key: rotatedKey })
+        return args[2] || { server, key: { ...key, key: rotatedKey } }
+      },
       listAgents: async () => {
         unpinnedListAgentsCalls += 1
         await updateMcpKey(workspace, key.id, { key: rotatedKey })
@@ -461,7 +722,6 @@ describe('McpGenerationSource', () => {
       },
       getAdapterForKey: async (...args: any[]) => {
         pinnedCredential = args[3]
-        await updateMcpKey(workspace, key.id, { key: rotatedKey })
         const reflected = String(pinnedCredential?.key?.key || initialKey)
         return {
           server: pinnedCredential?.server || server,
@@ -548,6 +808,7 @@ describe('McpGenerationSource', () => {
       }),
     }
     const source = new McpGenerationSource({
+      resolveCredentialConfig: async () => ({ server, key }),
       listAgents: async () => [{ id: agentId, name: 'Long Agent' }],
       getAdapterForKey: async () => ({ server, key, adapter }),
     } as any)
@@ -624,6 +885,7 @@ describe('McpGenerationSource', () => {
       },
     }
     const source = new McpGenerationSource({
+      resolveCredentialConfig: async () => ({ server, key }),
       listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }],
       getAdapterForKey: async () => ({ server, key, adapter }),
     } as any)
@@ -732,6 +994,7 @@ describe('McpGenerationSource', () => {
       }),
     }
     const source = new McpGenerationSource({
+      resolveCredentialConfig: async () => ({ server, key }),
       listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }],
       getAdapterForKey: async () => ({ server, key, adapter }),
     } as any)
@@ -823,6 +1086,7 @@ describe('McpGenerationSource', () => {
       },
     }
     const source = new McpGenerationSource({
+      resolveCredentialConfig: async () => ({ server, key }),
       listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }],
       getAdapterForKey: async () => ({ server, key, adapter }),
     } as any)

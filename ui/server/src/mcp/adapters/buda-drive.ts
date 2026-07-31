@@ -1,5 +1,6 @@
 import { createHash } from 'crypto'
 import { McpError } from '../errors'
+import type { McpGenerationDeadline } from '../deadline'
 import type { McpToolResult } from '../types'
 import type { BudaToolMap } from './buda-tool-map'
 import type { McpClientPort } from './types'
@@ -82,11 +83,17 @@ export async function syncBudaDriveSnapshot(input: {
   tools: Pick<BudaToolMap, 'listDriveFiles' | 'upsertDriveFile' | 'readDriveText'>
   agentId: string
   snapshot: BudaDriveSnapshot
-  signal?: AbortSignal
+  deadline: McpGenerationDeadline
+  toolTimeoutMs: number
 }) {
-  const { client, tools, agentId, snapshot, signal } = input
+  const { client, tools, agentId, snapshot, deadline } = input
   try {
-    const listed = mcpResultData(await client.callTool(tools.listDriveFiles, { agentId, path: '/mangaforge' }, { signal, operation: 'read_safe' }))
+    const callOptions = (operation: 'read_safe' | 'mutation') => ({
+      signal: deadline.signal,
+      get timeoutMs() { return deadline.timeoutMs(input.toolTimeoutMs) },
+      operation,
+    })
+    const listed = mcpResultData(await client.callTool(tools.listDriveFiles, { agentId, path: '/mangaforge' }, callOptions('read_safe')))
     const remotePaths = new Set((Array.isArray(listed?.files) ? listed.files : [])
       .filter((item: any) => item?.type !== 'folder')
       .map((item: any) => String(item?.path || item?.filePath || ''))
@@ -97,7 +104,7 @@ export async function syncBudaDriveSnapshot(input: {
         changed.push(path)
         continue
       }
-      const remote = driveText(await client.callTool(tools.readDriveText, { agentId, filePath: path, maxBytes: 5_000_000 }, { signal, operation: 'read_safe' }))
+      const remote = driveText(await client.callTool(tools.readDriveText, { agentId, filePath: path, maxBytes: 5_000_000 }, callOptions('read_safe')))
       if (sha256(remote) !== snapshot.hashes[path]) changed.push(path)
     }
     const ordered = changed
@@ -111,7 +118,7 @@ export async function syncBudaDriveSnapshot(input: {
           path,
           content,
           mimeType: path.endsWith('.json') ? 'application/json' : 'text/markdown',
-        }, { signal, operation: 'mutation' })
+        }, callOptions('mutation'))
       } catch (writeError) {
         let reconciled = false
         try {
@@ -119,19 +126,20 @@ export async function syncBudaDriveSnapshot(input: {
             agentId,
             filePath: path,
             maxBytes: 5_000_000,
-          }, { signal, operation: 'read_safe' }))
+          }, callOptions('read_safe')))
           reconciled = remote === content
         } catch { /* preserve the original ambiguous mutation error */ }
+        deadline.throwIfAborted()
         if (!reconciled) throw writeError
       }
-      const verified = driveText(await client.callTool(tools.readDriveText, { agentId, filePath: path, maxBytes: 5_000_000 }, { signal, operation: 'read_safe' }))
+      const verified = driveText(await client.callTool(tools.readDriveText, { agentId, filePath: path, maxBytes: 5_000_000 }, callOptions('read_safe')))
       if (verified !== content) {
         throw new McpError('MCP_DRIVE_SYNC_FAILED', `Buda Drive 文件校验失败：${path}`, { path })
       }
     }
     return { snapshot_hash: snapshot.snapshotHash, uploaded_paths: ordered }
   } catch (error) {
-    if (error instanceof McpError && error.code === 'MCP_DRIVE_SYNC_FAILED') throw error
+    if (error instanceof McpError && ['MCP_DRIVE_SYNC_FAILED', 'MCP_GENERATION_TIMEOUT', 'MCP_CANCELLED'].includes(error.code)) throw error
     throw new McpError('MCP_DRIVE_SYNC_FAILED', `Buda Drive 同步失败：${String((error as any)?.message || error).slice(0, 240)}`)
   }
 }

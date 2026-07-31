@@ -148,6 +148,7 @@ export async function validateMcpProjectBinding(
     listProjects?: typeof listNovelProjects
     credentialSnapshot?: McpCredentialSnapshot
     signal?: AbortSignal
+    timeoutMs?: number
   },
 ) {
   const binding = normalizeMcpProjectBinding(input)
@@ -159,7 +160,10 @@ export async function validateMcpProjectBinding(
   const { server, key } = options.credentialSnapshot
     ? validateMcpCredentialSelectionSnapshot(options.credentialSnapshot, selectionInput)
     : await validateMcpCredentialSelection(activeWorkspace, selectionInput)
-  const agents = await options.runtime.listAgents(binding.key_id, options.signal)
+  const agents = await options.runtime.listAgents(binding.key_id, {
+    signal: options.signal,
+    get timeoutMs() { return options.timeoutMs },
+  })
   const agent = agents.find(item => String(item.id) === binding.agent_id)
   if (!agent) throw new McpError('MCP_BINDING_INVALID', `所选 Agent 不存在或当前账号不可见：${binding.agent_id}`)
   const projects = await (options.listProjects || listNovelProjects)(activeWorkspace)

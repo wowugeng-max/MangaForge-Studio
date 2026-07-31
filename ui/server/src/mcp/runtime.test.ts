@@ -15,6 +15,72 @@ function connectionLostError() {
 }
 
 describe('MCP runtime', () => {
+  test('resolves credential configuration locally without starting a connection', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-config-'))
+    workspaces.push(workspace)
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const key = await createMcpKey(workspace, { mcp_server_id: 'buda', key: 'sk_runtime_config', description: '账号' })
+    let connectionCalls = 0
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: {
+        get: async () => { connectionCalls += 1; throw new Error('must stay local') },
+        invalidate: async () => {},
+        invalidateIfCurrent: async () => {},
+        invalidateServer: async () => {},
+        closeAll: async () => {},
+      } as any,
+    })
+
+    const resolved = await runtime.resolveCredentialConfig(key.id, BUDA_MCP_SERVER_TEMPLATE.id)
+
+    expect(resolved.server).toMatchObject({ id: 'buda', generation_timeout_ms: 600_000 })
+    expect(resolved.key).toMatchObject({ id: key.id, mcp_server_id: 'buda' })
+    expect(connectionCalls).toBe(0)
+  })
+
+  test('passes operation options to connection and Agent discovery without changing credential identity', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-options-'))
+    workspaces.push(workspace)
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const created = await createMcpKey(workspace, { mcp_server_id: 'buda', key: 'sk_runtime_options', description: '账号' })
+    const pinned = await readMcpKeys(workspace)
+    const signal = new AbortController().signal
+    const connectionOptions: any[] = []
+    const adapterOptions: any[] = []
+    const client = { listTools: async () => [], callTool: async () => ({ content: [] }) }
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: {
+        get: async (_workspace: string, server: any, key: any, options: any) => {
+          connectionOptions.push({ server, key, options })
+          return client
+        },
+        invalidate: async () => {},
+        invalidateIfCurrent: async () => {},
+        invalidateServer: async () => {},
+        closeAll: async () => {},
+      } as any,
+      adapterFactory: () => ({
+        listAgents: async (options: any) => { adapterOptions.push(options); return [{ id: 'agent-1' }] },
+      }) as any,
+    })
+
+    const options = { signal, timeoutMs: 321 }
+    const resolved = await runtime.getAdapterForKey(
+      created.id,
+      BUDA_MCP_SERVER_TEMPLATE.id,
+      options,
+      { server: BUDA_MCP_SERVER_TEMPLATE, key: pinned[0]! },
+    )
+    await resolved.adapter.listAgents(options)
+    await runtime.listAgents(created.id, options)
+
+    expect(connectionOptions).toEqual([
+      { server: BUDA_MCP_SERVER_TEMPLATE, key: pinned[0], options },
+      { server: BUDA_MCP_SERVER_TEMPLATE, key: pinned[0], options },
+    ])
+    expect(adapterOptions).toEqual([options, options])
+  })
+
   test('resolves an active Server and matching Key and records a safe key test receipt', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-'))
     workspaces.push(workspace)

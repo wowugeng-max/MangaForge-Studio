@@ -4,7 +4,7 @@ import { readMcpKeys, updateMcpKey } from './key-store'
 import { readMcpServers } from './server-store'
 import { createMcpAdapter } from './adapters/registry'
 import type { McpKeyRecord, McpServerRecord } from './types'
-import type { McpClientPort, ProseMcpAdapter } from './adapters/types'
+import type { McpAdapterOperationOptions, McpClientPort, ProseMcpAdapter } from './adapters/types'
 
 type RuntimeManager = Pick<McpClientManager, 'get' | 'invalidate' | 'invalidateIfCurrent' | 'invalidateServer' | 'closeAll'>
 
@@ -16,6 +16,13 @@ export type ResolvedMcpCredential = {
 }
 
 type PinnedMcpCredential = Pick<ResolvedMcpCredential, 'server' | 'key'>
+
+function operationOptions(options?: AbortSignal | McpAdapterOperationOptions): McpAdapterOperationOptions {
+  if (options && typeof (options as AbortSignal).addEventListener === 'function') {
+    return { signal: options as AbortSignal }
+  }
+  return options || {}
+}
 
 export function createMcpRuntime(
   getWorkspace: () => string,
@@ -29,12 +36,11 @@ export function createMcpRuntime(
   const adapterFactory = options.adapterFactory || createMcpAdapter
   const now = options.now || Date.now
 
-  const getAdapterForKey = async (
+  const resolveCredentialConfig = async (
     keyId: number,
     expectedServerId?: string,
-    signal?: AbortSignal,
     pinnedCredential?: PinnedMcpCredential,
-  ): Promise<ResolvedMcpCredential> => {
+  ): Promise<PinnedMcpCredential> => {
     const activeWorkspace = getWorkspace()
     const stored = pinnedCredential
       ? null
@@ -51,37 +57,50 @@ export function createMcpRuntime(
     if (server.id !== key.mcp_server_id) throw new McpError('MCP_BINDING_INVALID', '固定 MCP Server 与 Key 不一致')
     if (!server.is_active) throw new McpError('MCP_BINDING_INVALID', `MCP Server 已禁用：${server.id}`)
     if (server.transport !== 'streamable_http') throw new McpError('MCP_BINDING_INVALID', '首期正文生成只支持 Streamable HTTP')
-    let currentClient = await manager.get(activeWorkspace, server, key, signal)
-    const reacquire = async (operationSignal?: AbortSignal) => {
-      currentClient = await manager.get(activeWorkspace, server, key, operationSignal)
+    return { server, key }
+  }
+
+  const getAdapterForKey = async (
+    keyId: number,
+    expectedServerId?: string,
+    options?: AbortSignal | McpAdapterOperationOptions,
+    pinnedCredential?: PinnedMcpCredential,
+  ): Promise<ResolvedMcpCredential> => {
+    const activeWorkspace = getWorkspace()
+    const resolvedConfig = await resolveCredentialConfig(keyId, expectedServerId, pinnedCredential)
+    const { server, key } = resolvedConfig
+    const initialOptions = operationOptions(options)
+    let currentClient = await manager.get(activeWorkspace, server, key, initialOptions)
+    const reacquire = async (remoteOptions: McpAdapterOperationOptions = {}) => {
+      currentClient = await manager.get(activeWorkspace, server, key, remoteOptions)
       return currentClient
     }
     const invalidateLostClient = async (client: typeof currentClient) => {
       await manager.invalidateIfCurrent(activeWorkspace, server.id, key.id, client).catch(() => {})
     }
     const readSafe = async <T>(
-      operationSignal: AbortSignal | undefined,
+      remoteOptions: McpAdapterOperationOptions,
       operation: (client: typeof currentClient) => Promise<T>,
     ) => {
-      const firstClient = await reacquire(operationSignal)
+      const firstClient = await reacquire(remoteOptions)
       try {
         return await operation(firstClient)
       } catch (error) {
         if (!(error instanceof McpError) || error.code !== 'MCP_CONNECTION_LOST') throw error
         await invalidateLostClient(firstClient)
-        return operation(await reacquire(operationSignal))
+        return operation(await reacquire(remoteOptions))
       }
     }
     const client: ResolvedMcpCredential['client'] = {
-      listTools: options => readSafe(options.signal, activeClient => activeClient.listTools(options)),
+      listTools: options => readSafe(options, activeClient => activeClient.listTools(options)),
       async callTool(name, args, operationOptions) {
         if (operationOptions.operation === 'read_safe') {
           return readSafe(
-            operationOptions.signal,
+            operationOptions,
             activeClient => activeClient.callTool(name, args, operationOptions),
           )
         }
-        const activeClient = await reacquire(operationOptions.signal)
+        const activeClient = await reacquire(operationOptions)
         try {
           return await activeClient.callTool(name, args, operationOptions)
         } catch (error) {
@@ -97,21 +116,25 @@ export function createMcpRuntime(
     return { server, key, client, adapter }
   }
 
-  const listAgents = async (keyId: number, signal?: AbortSignal) => {
-    const resolved = await getAdapterForKey(keyId, undefined, signal)
-    return resolved.adapter.listAgents({ signal })
+  const listAgents = async (keyId: number, options?: AbortSignal | McpAdapterOperationOptions) => {
+    const remoteOptions = operationOptions(options)
+    const resolved = await getAdapterForKey(keyId, undefined, remoteOptions)
+    return resolved.adapter.listAgents(remoteOptions)
   }
 
   return {
+    resolveCredentialConfig,
     getAdapterForKey,
     listAgents,
     async createAgent(keyId: number, input: { name: string; spaceId?: string; instructions?: string }, signal?: AbortSignal) {
-      const resolved = await getAdapterForKey(keyId, undefined, signal)
-      return resolved.adapter.createAgent(input, { signal })
+      const remoteOptions = operationOptions(signal)
+      const resolved = await getAdapterForKey(keyId, undefined, remoteOptions)
+      return resolved.adapter.createAgent(input, remoteOptions)
     },
     async diagnostics(serverId: string, keyId: number, signal?: AbortSignal) {
-      const resolved = await getAdapterForKey(keyId, serverId, signal)
-      const agents = await resolved.adapter.listAgents({ signal })
+      const remoteOptions = operationOptions(signal)
+      const resolved = await getAdapterForKey(keyId, serverId, remoteOptions)
+      const agents = await resolved.adapter.listAgents(remoteOptions)
       return {
         ...((resolved.client.diagnostics?.() || {}) as Record<string, unknown>),
         adapter_id: resolved.server.adapter_id,

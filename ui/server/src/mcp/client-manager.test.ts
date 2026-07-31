@@ -30,6 +30,51 @@ async function waitForGateOrAbort(gate: Promise<void>, signal?: AbortSignal) {
 }
 
 describe('McpClientManager', () => {
+  test('keeps caller-bounded startup timeouts on independent waiters, not the shared setup', async () => {
+    let captured: any
+    const client = {
+      state: 'Closed',
+      async connect(signal?: AbortSignal, timeoutMs?: number) {
+        captured = { signal, timeoutMs }
+        this.state = 'Ready'
+      },
+      async close() { this.state = 'Closed' },
+    }
+    const manager = new McpClientManager({ createClient: () => client as any })
+    const callerSignal = new AbortController().signal
+
+    await manager.get('/workspace/a', { id: 'buda' } as any, { id: 1 } as any, {
+      signal: callerSignal,
+      timeoutMs: 321,
+    })
+
+    expect(captured.timeoutMs).toBeUndefined()
+    expect(captured.signal).not.toBe(callerSignal)
+  })
+
+  test('preserves a typed deadline reason for an independently cancelled waiter', async () => {
+    const setup = deferred()
+    const started = deferred()
+    const client = {
+      state: 'Closed',
+      async connect() { started.resolve(); await setup.promise },
+      async close() { this.state = 'Closed' },
+    }
+    const manager = new McpClientManager({ createClient: () => client as any })
+    const caller = new AbortController()
+    const deadlineError = new McpError('MCP_GENERATION_TIMEOUT', 'MCP 正文生成超过总时限')
+    const pending = manager.get('/workspace/a', { id: 'buda' } as any, { id: 1 } as any, {
+      signal: caller.signal,
+      timeoutMs: 1_000,
+    })
+    await started.promise
+    caller.abort(deadlineError)
+
+    await expect(pending).rejects.toBe(deadlineError)
+    setup.resolve()
+    await manager.closeAll()
+  })
+
   test('isolates cache entries by workspace, Server ID, and Key ID', async () => {
     const created: any[] = []
     const manager = new McpClientManager({

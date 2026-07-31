@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { McpGenerationDeadline } from '../deadline'
 import { buildBudaDriveSnapshot, syncBudaDriveSnapshot } from './buda-drive'
 
 function result(structuredContent: Record<string, unknown>) {
@@ -15,6 +16,17 @@ function snapshotFixture() {
     recentChapters: '最近章节',
     generatedAt: '2026-07-30T12:00:00.000Z',
   })
+}
+
+function deadlineOptions() {
+  return {
+    deadline: new McpGenerationDeadline(60_000, undefined, {
+      now: () => 0,
+      setTimeout: () => 1,
+      clearTimeout: () => {},
+    }),
+    toolTimeoutMs: 30_000,
+  }
 }
 
 function expectDriveOperations(calls: Array<{ name: string; options: any }>) {
@@ -89,6 +101,7 @@ describe('Buda Drive authority snapshot', () => {
     }
 
     const synced = await syncBudaDriveSnapshot({
+      ...deadlineOptions(),
       client: client as any,
       tools: { listDriveFiles: 'listDrive', readDriveText: 'readDrive', upsertDriveFile: 'writeDrive' } as any,
       agentId: 'agent-1',
@@ -122,6 +135,7 @@ describe('Buda Drive authority snapshot', () => {
     }
 
     const synced = await syncBudaDriveSnapshot({
+      ...deadlineOptions(),
       client: client as any,
       tools: { listDriveFiles: 'list', readDriveText: 'read', upsertDriveFile: 'write' } as any,
       agentId: 'agent-1',
@@ -154,6 +168,7 @@ describe('Buda Drive authority snapshot', () => {
     }
 
     await expect(syncBudaDriveSnapshot({
+      ...deadlineOptions(),
       client: client as any,
       tools: { listDriveFiles: 'list', readDriveText: 'read', upsertDriveFile: 'write' } as any,
       agentId: 'agent-1',
@@ -187,6 +202,7 @@ describe('Buda Drive authority snapshot', () => {
     }
 
     await syncBudaDriveSnapshot({
+      ...deadlineOptions(),
       client: client as any,
       tools: { listDriveFiles: 'list', readDriveText: 'read', upsertDriveFile: 'write' } as any,
       agentId: 'agent-1',
@@ -212,6 +228,7 @@ describe('Buda Drive authority snapshot', () => {
       },
     }
     await expect(syncBudaDriveSnapshot({
+      ...deadlineOptions(),
       client: client as any,
       tools: { listDriveFiles: 'list', readDriveText: 'read', upsertDriveFile: 'write' } as any,
       agentId: 'agent-1',
