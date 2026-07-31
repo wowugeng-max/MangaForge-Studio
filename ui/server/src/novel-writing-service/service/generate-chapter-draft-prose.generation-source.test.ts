@@ -119,7 +119,7 @@ async function createLeasedMcpPipeline(options: {
   await writeMcpServers(harness.workspace, [BUDA_MCP_SERVER_TEMPLATE])
   const key = await createMcpKey(harness.workspace, {
     mcp_server_id: 'buda',
-    key: 'sk_pipeline_production_lease',
+    key: 'fixture-key-production-lease',
     description: '账号',
   })
   const binding = { serverId: 'buda', keyId: key.id, agentId: 'agent-1' }
