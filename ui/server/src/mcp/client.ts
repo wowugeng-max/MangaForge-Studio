@@ -1,5 +1,8 @@
 import {
   Client,
+  ProtocolError,
+  SdkError,
+  SdkErrorCode,
   StreamableHTTPClientTransport,
   type CallToolResult,
   type StreamableHTTPClientTransportOptions,
@@ -53,22 +56,25 @@ function errorMessage(error: unknown) {
 }
 
 function isBrokenTransportMessage(message: string) {
-  return /\b(?:ECONNRESET|EPIPE)\b|\bnot connected\b|socket hang up|connection reset by peer|\b(?:session|transport|connection|channel|stream)\b.{0,80}\b(?:expired|closed|terminated|not found|disconnected|lost)\b/i
+  return /\b(?:ECONNRESET|EPIPE)\b|^\s*not connected\s*$|socket hang up|connection reset by peer|\b(?:session|transport|connection|channel|stream)\b.{0,80}\b(?:expired|closed|terminated|not found|disconnected|lost)\b/i
     .test(message)
 }
 
-const BROKEN_TRANSPORT_CODES = new Set([
-  'ECONNRESET',
-  'EPIPE',
-  'NOT_CONNECTED',
-  'CONNECTION_CLOSED',
+const BROKEN_SDK_CODES = new Set<string>([
+  SdkErrorCode.NotConnected,
+  SdkErrorCode.ConnectionClosed,
 ])
 
-function errorStringField(error: unknown, field: 'code' | 'errno') {
+const BROKEN_SYSTEM_CODES = new Set([
+  'ECONNRESET',
+  'EPIPE',
+])
+
+function errorCodeField(error: unknown, field: 'code' | 'errno') {
   if (!error || typeof error !== 'object') return ''
   try {
     const value = Reflect.get(error, field)
-    return typeof value === 'string' ? value : ''
+    return typeof value === 'string' || typeof value === 'number' ? value : ''
   } catch {
     return ''
   }
@@ -76,14 +82,21 @@ function errorStringField(error: unknown, field: 'code' | 'errno') {
 
 function isBrokenTransportError(
   error: unknown,
-  scrubbedMessage: string,
+  message: string,
 ) {
-  const transportCodes = [
-    errorStringField(error, 'code'),
-    errorStringField(error, 'errno'),
-  ]
-  return transportCodes.some(code => BROKEN_TRANSPORT_CODES.has(code.toUpperCase()))
-    || isBrokenTransportMessage(scrubbedMessage)
+  if (error instanceof ProtocolError || error instanceof McpError) return false
+  if (error instanceof SdkError) return BROKEN_SDK_CODES.has(error.code)
+
+  const structuredCodes = [
+    errorCodeField(error, 'code'),
+    errorCodeField(error, 'errno'),
+  ].filter(code => code !== '')
+  if (structuredCodes.length > 0) {
+    return structuredCodes.some(code => (
+      typeof code === 'string' && BROKEN_SYSTEM_CODES.has(code.toUpperCase())
+    ))
+  }
+  return isBrokenTransportMessage(message)
 }
 
 function mapConnectionError(error: unknown, scrubText: (value: unknown) => string) {
@@ -230,16 +243,19 @@ export class GenericMcpClient {
       if (options.signal?.aborted) {
         throw new McpError('MCP_CANCELLED', 'MCP 工具调用已取消', { tool_name: name })
       }
-      const message = this.scrubber.scrubText(errorMessage(error))
-      if (!(error instanceof McpError) && /\b(401|403)\b|unauthori[sz]ed|forbidden/i.test(message)) {
+      const rawMessage = errorMessage(error)
+      const message = this.scrubber.scrubText(rawMessage)
+      if (error instanceof ProtocolError) {
+        throw new McpError('MCP_TOOL_ERROR', `MCP 工具调用失败：${message.slice(0, 240)}`, { tool_name: name })
+      }
+      if (error instanceof McpError) throw this.scrubMcpError(error)
+      if (/\b(401|403)\b|unauthori[sz]ed|forbidden/i.test(message)) {
         throw new McpError('MCP_AUTH_FAILED', 'MCP 身份验证失败', { tool_name: name })
       }
-      const canBeBrokenTransport = !(error instanceof McpError) || error.code === 'MCP_TOOL_ERROR'
-      if (canBeBrokenTransport && isBrokenTransportError(error, message)) {
+      if (isBrokenTransportError(error, rawMessage)) {
         void this.close().catch(() => {})
         throw new McpError('MCP_CONNECTION_LOST', 'MCP 连接已失效', { tool_name: name })
       }
-      if (error instanceof McpError) throw this.scrubMcpError(error)
       if (/abort/i.test(message)) {
         throw new McpError('MCP_CANCELLED', 'MCP 工具调用已取消', { tool_name: name })
       }

@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { SdkError, SdkErrorCode } from '@modelcontextprotocol/client'
+import {
+  INTERNAL_ERROR,
+  ProtocolError,
+  SdkError,
+  SdkErrorCode,
+} from '@modelcontextprotocol/client'
 import { McpError } from './errors'
 import { buildMcpHeaders, createMcpClient, type McpSdkFactory } from './client'
 import { BUDA_MCP_SERVER_TEMPLATE } from './server-store'
@@ -320,7 +325,7 @@ describe('generic MCP client', () => {
     expect(capture.closed).toBe(true)
   })
 
-  test('maps a transport-looking MCP tool error to connection loss', async () => {
+  test('does not reinterpret a transport-looking MCP tool error as connection loss', async () => {
     const callError = new McpError('MCP_TOOL_ERROR', 'transport closed unexpectedly with sk_test_secret', {
       tool_name: 'allowed',
       reflected_secret: 'sk_test_secret',
@@ -341,22 +346,104 @@ describe('generic MCP client', () => {
     }
     await Promise.resolve()
 
-    expect(mappedError).toMatchObject({
-      code: 'MCP_CONNECTION_LOST',
-      message: 'MCP 连接已失效',
-      details: { tool_name: 'allowed' },
-    })
-    expect(Object.keys(mappedError?.details || {})).toEqual(['tool_name'])
+    expect(mappedError).toMatchObject({ code: 'MCP_TOOL_ERROR' })
     expect(JSON.stringify({
       message: mappedError?.message,
       code: mappedError?.code,
       details: mappedError?.details,
     })).not.toContain('sk_test_secret')
-    expect(client.state).toBe('Closed')
-    expect(client.diagnostics().tools).toEqual([])
-    expect(capture.terminated).toBe(true)
-    expect(capture.closed).toBe(true)
+    expect(client.state).toBe('Ready')
+    expect(client.diagnostics().tools.map(tool => tool.name)).toEqual(['allowed'])
+    expect(capture.terminated).toBeUndefined()
+    expect(capture.closed).toBeUndefined()
   })
+
+  for (const message of [
+    'database not connected',
+    'session not found',
+    'session closed by policy',
+  ]) {
+    test(`keeps ProtocolError '${message}' on the tool-error path`, async () => {
+      const callError = new ProtocolError(INTERNAL_ERROR, message, {
+        reflected_secret: 'sk_test_secret',
+      })
+      const { capture, factory } = fakeSdkFactory({ callError })
+      const client = createMcpClient({
+        server: { ...BUDA_MCP_SERVER_TEMPLATE, enabled_tools: ['allowed'] },
+        key,
+        sdkFactory: factory,
+      })
+      await client.connect()
+
+      let mappedError: McpError | undefined
+      try {
+        await client.callTool('allowed', {}, { operation: 'read_safe' })
+      } catch (error) {
+        mappedError = error as McpError
+      }
+
+      expect(mappedError).toMatchObject({
+        code: 'MCP_TOOL_ERROR',
+        message: expect.stringContaining(message),
+        details: { tool_name: 'allowed' },
+      })
+      expect(Object.keys(mappedError?.details || {})).toEqual(['tool_name'])
+      expect(JSON.stringify(mappedError)).not.toContain('sk_test_secret')
+      expect(client.state).toBe('Ready')
+      expect(client.diagnostics().tools.map(tool => tool.name)).toEqual(['allowed'])
+      expect(capture.terminated).toBeUndefined()
+      expect(capture.closed).toBeUndefined()
+    })
+  }
+
+  test('does not let a non-transport SdkError code fall through to message heuristics', async () => {
+    const { capture, factory } = fakeSdkFactory({
+      callError: new SdkError(
+        SdkErrorCode.RequestTimeout,
+        'transport closed while request timed out',
+      ),
+    })
+    const client = createMcpClient({
+      server: { ...BUDA_MCP_SERVER_TEMPLATE, enabled_tools: ['allowed'] },
+      key,
+      sdkFactory: factory,
+    })
+    await client.connect()
+
+    await expect(client.callTool('allowed', {}, { operation: 'read_safe' })).rejects.toMatchObject({
+      code: 'MCP_TOOL_ERROR',
+      message: expect.stringContaining('request timed out'),
+    })
+    expect(client.state).toBe('Ready')
+    expect(client.diagnostics().tools.map(tool => tool.name)).toEqual(['allowed'])
+    expect(capture.terminated).toBeUndefined()
+    expect(capture.closed).toBeUndefined()
+  })
+
+  for (const structuredCode of ['EVALIDATION', 422]) {
+    test(`does not let structured code ${structuredCode} fall through to message heuristics`, async () => {
+      const { capture, factory } = fakeSdkFactory({
+        callError: Object.assign(new Error('transport closed after validation failed'), {
+          code: structuredCode,
+        }),
+      })
+      const client = createMcpClient({
+        server: { ...BUDA_MCP_SERVER_TEMPLATE, enabled_tools: ['allowed'] },
+        key,
+        sdkFactory: factory,
+      })
+      await client.connect()
+
+      await expect(client.callTool('allowed', {}, { operation: 'read_safe' })).rejects.toMatchObject({
+        code: 'MCP_TOOL_ERROR',
+        message: expect.stringContaining('validation failed'),
+      })
+      expect(client.state).toBe('Ready')
+      expect(client.diagnostics().tools.map(tool => tool.name)).toEqual(['allowed'])
+      expect(capture.terminated).toBeUndefined()
+      expect(capture.closed).toBeUndefined()
+    })
+  }
 
   for (const { label, callError } of [
     { label: 'SDK NOT_CONNECTED', callError: new SdkError(SdkErrorCode.NotConnected, 'Not connected') },
@@ -401,6 +488,23 @@ describe('generic MCP client', () => {
     const client = createMcpClient({
       server: { ...BUDA_MCP_SERVER_TEMPLATE, enabled_tools: ['allowed'] },
       key: { ...key, key: 'EPIPE' },
+      sdkFactory: factory,
+    })
+    await client.connect()
+
+    await expect(client.callTool('allowed', {}, { operation: 'read_safe' })).rejects.toMatchObject({
+      code: 'MCP_CONNECTION_LOST',
+      message: 'MCP 连接已失效',
+      details: { tool_name: 'allowed' },
+    })
+    expect(client.state).toBe('Closed')
+  })
+
+  test('classifies an unstructured disconnect message before credential scrubbing', async () => {
+    const { factory } = fakeSdkFactory({ callError: new Error('Not connected') })
+    const client = createMcpClient({
+      server: { ...BUDA_MCP_SERVER_TEMPLATE, enabled_tools: ['allowed'] },
+      key: { ...key, key: 'Not connected' },
       sdkFactory: factory,
     })
     await client.connect()
