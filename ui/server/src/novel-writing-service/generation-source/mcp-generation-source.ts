@@ -264,7 +264,7 @@ export class McpGenerationSource implements GenerationSource {
         const pinnedCredential = await this.runtime.resolveCredentialConfig(
           binding.key_id,
           binding.server_id,
-          selectedCredential,
+          { ...selectedCredential, activeWorkspace: request.activeWorkspace },
         )
         const acquiredLease = await this.runtime.acquireAgentLease(request.activeWorkspace, {
           serverId: binding.server_id,

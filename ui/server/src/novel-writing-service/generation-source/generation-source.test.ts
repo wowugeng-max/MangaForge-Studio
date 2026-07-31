@@ -1007,7 +1007,10 @@ describe('McpGenerationSource quarantine outcomes', () => {
       },
     }
     const runtime = {
-      resolveCredentialConfig: async () => ({ server, key }),
+      resolveCredentialConfig: async (_keyId: number, _serverId: string, pinned: any) => {
+        expect(pinned.activeWorkspace).toBe(workspace)
+        return { server, key, activeWorkspace: pinned.activeWorkspace }
+      },
       listAgents: async () => { throw new Error('must use pinned adapter') },
       getAdapterForKey: async () => ({ server, key, adapter }),
       acquireAgentLease: (...args: any[]) => args.length === 2

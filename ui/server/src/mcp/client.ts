@@ -5,10 +5,11 @@ import {
   SdkErrorCode,
   StreamableHTTPClientTransport,
   type CallToolResult,
+  type FetchLike,
   type StreamableHTTPClientTransportOptions,
 } from '@modelcontextprotocol/client'
 import { isAbortRelatedError, McpError } from './errors'
-import { createMcpSecretScrubber } from './secret-scrubber'
+import { createMcpSecretScrubber, safeMcpHeaderEntries } from './secret-scrubber'
 import type {
   McpClientState,
   McpDiagnostics,
@@ -41,8 +42,134 @@ const defaultSdkFactory: McpSdkFactory = {
   createTransport: (url, options) => new StreamableHTTPClientTransport(url, options),
 }
 
+export const MCP_RESPONSE_BYTE_LIMIT = 16 * 1024 * 1024
+export const MCP_SSE_EVENT_BYTE_LIMIT = 16 * 1024 * 1024
+
+export type McpResponseBudgets = {
+  responseBytes?: number
+  sseEventBytes?: number
+}
+
+function responseTooLarge() {
+  return new McpError('MCP_TOOL_ERROR', 'MCP 服务响应超过安全上限', {
+    reason: 'response_too_large',
+  })
+}
+
+function positiveBudget(value: number | undefined, fallback: number) {
+  return Number.isSafeInteger(value) && (value || 0) > 0 ? value! : fallback
+}
+
+function contentLengthExceeds(value: string | null, limit: number) {
+  const candidate = value?.trim() || ''
+  if (!/^\d+$/.test(candidate)) return false
+  try { return BigInt(candidate) > BigInt(limit) } catch { return false }
+}
+
+export function createBoundedMcpFetch(
+  upstreamFetch: FetchLike,
+  budgets: McpResponseBudgets = {},
+): FetchLike {
+  const responseByteLimit = positiveBudget(budgets.responseBytes, MCP_RESPONSE_BYTE_LIMIT)
+  const sseEventByteLimit = positiveBudget(budgets.sseEventBytes, MCP_SSE_EVENT_BYTE_LIMIT)
+  return async (input, init) => {
+    const response = await upstreamFetch(input, init)
+    const isEventStream = response.headers.get('content-type')
+      ?.split(';', 1)[0]?.trim().toLowerCase() === 'text/event-stream'
+    if (!isEventStream && contentLengthExceeds(response.headers.get('content-length'), responseByteLimit)) {
+      const error = responseTooLarge()
+      await response.body?.cancel(error).catch(() => {})
+      throw error
+    }
+    if (!response.body) return response
+
+    const reader = response.body.getReader()
+    let responseBytes = 0
+    let eventBytes = 0
+    let pendingCarriageReturn = false
+    let pendingLineEndingBytes = 0
+    const acceptLineEnding = (bytes: number) => {
+      if (pendingLineEndingBytes) {
+        eventBytes = 0
+        pendingLineEndingBytes = 0
+      } else {
+        pendingLineEndingBytes = bytes
+      }
+    }
+    const acceptEventByte = () => {
+      eventBytes += pendingLineEndingBytes + 1
+      pendingLineEndingBytes = 0
+      return eventBytes > sseEventByteLimit
+    }
+    const acceptSseByte = (byte: number) => {
+      if (pendingCarriageReturn) {
+        pendingCarriageReturn = false
+        if (byte === 10) {
+          acceptLineEnding(2)
+          return false
+        }
+        acceptLineEnding(1)
+      }
+      if (byte === 13) {
+        pendingCarriageReturn = true
+        return false
+      }
+      if (byte === 10) {
+        acceptLineEnding(1)
+        return false
+      }
+      return acceptEventByte()
+    }
+    const boundedBody = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        try {
+          const { done, value } = await reader.read()
+          if (done) {
+            if (isEventStream) {
+              if (pendingCarriageReturn) acceptLineEnding(1)
+              if (eventBytes + pendingLineEndingBytes > sseEventByteLimit) {
+                controller.error(responseTooLarge())
+                return
+              }
+            }
+            controller.close()
+            return
+          }
+          let overflow = false
+          if (isEventStream) {
+            for (const byte of value) {
+              if (acceptSseByte(byte)) {
+                overflow = true
+                break
+              }
+            }
+          } else {
+            responseBytes += value.byteLength
+            overflow = responseBytes > responseByteLimit
+          }
+          if (overflow) {
+            const error = responseTooLarge()
+            await reader.cancel(error).catch(() => {})
+            controller.error(error)
+            return
+          }
+          controller.enqueue(value)
+        } catch (error) {
+          controller.error(error)
+        }
+      },
+      cancel(reason) { return reader.cancel(reason) },
+    })
+    return new Response(boundedBody, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    })
+  }
+}
+
 export function buildMcpHeaders(server: McpServerRecord, key: McpKeyRecord) {
-  const headers: Record<string, string> = { ...server.custom_headers }
+  const headers: Record<string, string> = Object.fromEntries(safeMcpHeaderEntries(server.custom_headers))
   if (server.auth_type === 'bearer') {
     headers.Authorization = key.key.toLowerCase().startsWith('bearer ')
       ? key.key
@@ -130,10 +257,12 @@ export class GenericMcpClient {
     server: McpServerRecord
     key: McpKeyRecord
     sdkFactory: McpSdkFactory
+    fetch?: FetchLike
+    responseBudgets?: McpResponseBudgets
   }) {
     this.scrubber = createMcpSecretScrubber({
       keys: [options.key.key],
-      headerValues: Object.values(options.server.custom_headers),
+      headers: options.server.custom_headers,
     })
   }
 
@@ -158,6 +287,10 @@ export class GenericMcpClient {
     const sdk = this.options.sdkFactory.createClient()
     const transport = this.options.sdkFactory.createTransport(new URL(this.options.server.url), {
       requestInit: { headers: buildMcpHeaders(this.options.server, this.options.key) },
+      fetch: createBoundedMcpFetch(
+        this.options.fetch || globalThis.fetch.bind(globalThis),
+        this.options.responseBudgets,
+      ),
     })
     this.sdk = sdk
     this.transport = transport
@@ -301,6 +434,8 @@ export function createMcpClient(options: {
   server: McpServerRecord
   key: McpKeyRecord
   sdkFactory?: McpSdkFactory
+  fetch?: FetchLike
+  responseBudgets?: McpResponseBudgets
 }) {
   return new GenericMcpClient({ ...options, sdkFactory: options.sdkFactory || defaultSdkFactory })
 }

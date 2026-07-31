@@ -140,6 +140,69 @@ describe('MCP routes', () => {
     expect(JSON.stringify(response.body)).not.toContain('session=private')
   })
 
+  test('does not execute behavioral submitted Header records while building the route scrubber', async () => {
+    const workspace = await temporaryWorkspace()
+    let proxyTraps = 0
+    const proxyHeaders = new Proxy({ Authorization: 'Basic proxy-secret' }, {
+      ownKeys() { proxyTraps += 1; return ['Authorization'] },
+      getOwnPropertyDescriptor() { proxyTraps += 1; return { enumerable: true, configurable: true, value: 'Basic proxy-secret' } },
+      get() { proxyTraps += 1; return 'Basic proxy-secret' },
+    })
+    let getterCalls = 0
+    const getterHeaders: Record<string, string> = {}
+    Object.defineProperty(getterHeaders, 'Authorization', {
+      enumerable: true,
+      get() { getterCalls += 1; return 'Basic getter-secret' },
+    })
+    const { app, handlers } = createRouteHarness()
+    registerMcpRoutes(app, () => workspace, {} as any)
+
+    expect((await call(handlers.get('GET /api/mcp/servers'), {
+      body: { custom_headers: proxyHeaders },
+    })).statusCode).toBe(200)
+    expect((await call(handlers.get('GET /api/mcp/servers'), {
+      body: { custom_headers: getterHeaders },
+    })).statusCode).toBe(200)
+    expect(proxyTraps).toBe(0)
+    expect(getterCalls).toBe(0)
+  })
+
+  test('rejects behavioral Header records on Server create and update without executing traps', async () => {
+    const workspace = await temporaryWorkspace()
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    let proxyTraps = 0
+    const proxyHeaders = new Proxy({ Authorization: 'Basic proxy-secret' }, {
+      ownKeys() { proxyTraps += 1; return ['Authorization'] },
+      getOwnPropertyDescriptor() { proxyTraps += 1; return { enumerable: true, configurable: true, value: 'Basic proxy-secret' } },
+      get() { proxyTraps += 1; return 'Basic proxy-secret' },
+    })
+    let getterCalls = 0
+    const getterHeaders: Record<string, string> = {}
+    Object.defineProperty(getterHeaders, 'Authorization', {
+      enumerable: true,
+      get() { getterCalls += 1; return 'Basic getter-secret' },
+    })
+    const { app, handlers } = createRouteHarness()
+    registerMcpRoutes(app, () => workspace, { invalidateServer: async () => {} } as any)
+
+    const created = await call(handlers.get('POST /api/mcp/servers'), {
+      body: {
+        id: 'proxy-server', display_name: 'Proxy', transport: 'streamable_http',
+        url: 'https://example.test/mcp', adapter_id: 'buda', custom_headers: proxyHeaders,
+      },
+    })
+    const updated = await call(handlers.get('PUT /api/mcp/servers/:id'), {
+      params: { id: 'buda' }, body: { custom_headers: getterHeaders },
+    })
+
+    expect(created.statusCode).toBe(400)
+    expect(created.body.error_code).toBe('MCP_BINDING_INVALID')
+    expect(updated.statusCode).toBe(400)
+    expect(updated.body.error_code).toBe('MCP_BINDING_INVALID')
+    expect(proxyTraps).toBe(0)
+    expect(getterCalls).toBe(0)
+  })
+
   test('returns public Server DTOs after create and update', async () => {
     const workspace = await temporaryWorkspace()
     const { app, handlers } = createRouteHarness()
@@ -170,6 +233,64 @@ describe('MCP routes', () => {
     ])
     expect(JSON.stringify(updated.body)).not.toContain('update-private')
     expect(JSON.stringify(updated.body)).not.toContain('other-private')
+  })
+
+  test('passes the captured workspace to Server and Key invalidation after ambient drift', async () => {
+    const workspaceA = await temporaryWorkspace()
+    const workspaceB = await temporaryWorkspace()
+    const deletableServer = { ...BUDA_MCP_SERVER_TEMPLATE, id: 'delete-server', display_name: 'Delete Server' }
+    await writeMcpServers(workspaceA, [BUDA_MCP_SERVER_TEMPLATE, deletableServer])
+    const updatedKey = await createMcpKey(workspaceA, {
+      mcp_server_id: 'buda', key: 'fixture-update-key', description: '更新',
+    })
+    const deletedKey = await createMcpKey(workspaceA, {
+      mcp_server_id: 'buda', key: 'fixture-delete-key', description: '删除',
+    })
+    let ambientWorkspace = workspaceA
+    const invalidations: any[] = []
+    const runtime = {
+      invalidateServer: async (serverId: string, activeWorkspace?: string) => {
+        invalidations.push(['server', serverId, activeWorkspace])
+      },
+      invalidateKey: async (keyId: number, serverId?: string, activeWorkspace?: string) => {
+        invalidations.push(['key', keyId, serverId, activeWorkspace])
+      },
+    }
+    const findProjectReferences = async () => {
+      ambientWorkspace = workspaceB
+      await Promise.resolve()
+      return []
+    }
+    const { app, handlers } = createRouteHarness()
+    registerMcpRoutes(app, () => ambientWorkspace, runtime as any, { findProjectReferences })
+
+    const operations = [
+      () => call(handlers.get('PUT /api/mcp/servers/:id'), {
+        params: { id: 'buda' }, body: { is_active: false },
+      }),
+      () => call(handlers.get('DELETE /api/mcp/servers/:id'), {
+        params: { id: 'delete-server' },
+      }),
+      () => call(handlers.get('PUT /api/mcp/keys/:id'), {
+        params: { id: String(updatedKey.id) }, body: { is_active: false },
+      }),
+      () => call(handlers.get('DELETE /api/mcp/keys/:id'), {
+        params: { id: String(deletedKey.id) },
+      }),
+    ]
+    for (const operation of operations) {
+      ambientWorkspace = workspaceA
+      const response = await operation()
+      expect(response.statusCode).toBe(200)
+      expect(ambientWorkspace).toBe(workspaceB)
+    }
+
+    expect(invalidations).toEqual([
+      ['server', 'buda', workspaceA],
+      ['server', 'delete-server', workspaceA],
+      ['key', updatedKey.id, 'buda', workspaceA],
+      ['key', deletedKey.id, 'buda', workspaceA],
+    ])
   })
 
   test('merges Header replacements, blank preservation, and explicit removals', () => {

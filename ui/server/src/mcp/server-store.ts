@@ -7,6 +7,7 @@ import type { McpServerRecord, PublicMcpServerRecord } from './types'
 import { assertMcpWorkspaceMutationHeld, withMcpWorkspaceMutation } from './workspace-coordinator'
 import { assertMcpIdentityMutationAllowed } from './identity-mutation-fence'
 import { StrictJsonBudget } from './strict-json-budget'
+import { safeMcpHeaderEntries } from './secret-scrubber'
 
 // Config snapshots are intentionally bounded: enough for many accounts while keeping RMW predictable.
 export const MCP_SERVER_STORE_MAX_BYTES = 1024 * 1024
@@ -53,8 +54,7 @@ function finitePositive(value: unknown, fallback: number) {
 }
 
 function objectStrings(value: unknown): Record<string, string> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, String(item)]))
+  return Object.fromEntries(safeMcpHeaderEntries(value))
 }
 
 export function toPublicMcpServer(record: McpServerRecord): PublicMcpServerRecord {
@@ -72,7 +72,7 @@ export function mergeMcpCustomHeaders(
   replacements: unknown,
   removals: unknown,
 ) {
-  const next = { ...previous }
+  const next = Object.fromEntries(safeMcpHeaderEntries(previous))
   const deleteHeaderIdentity = (identity: string) => {
     for (const name of Object.keys(next)) {
       if (name.trim().toLowerCase() === identity) delete next[name]
@@ -82,14 +82,12 @@ export function mergeMcpCustomHeaders(
     const identity = String(rawName).trim().toLowerCase()
     if (identity) deleteHeaderIdentity(identity)
   }
-  if (replacements && typeof replacements === 'object' && !Array.isArray(replacements)) {
-    for (const [rawName, rawValue] of Object.entries(replacements)) {
-      const name = rawName.trim()
-      const value = String(rawValue ?? '').trim()
-      if (name && value) {
-        deleteHeaderIdentity(name.toLowerCase())
-        next[name] = value
-      }
+  for (const [rawName, rawValue] of safeMcpHeaderEntries(replacements)) {
+    const name = rawName.trim()
+    const value = rawValue.trim()
+    if (name && value) {
+      deleteHeaderIdentity(name.toLowerCase())
+      next[name] = value
     }
   }
   return next

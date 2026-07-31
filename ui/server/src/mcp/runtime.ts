@@ -22,7 +22,9 @@ export type ResolvedMcpCredential = {
   adapter: ProseMcpAdapter
 }
 
-type PinnedMcpCredential = Pick<ResolvedMcpCredential, 'server' | 'key'>
+export type PinnedMcpCredential = Pick<ResolvedMcpCredential, 'server' | 'key'> & {
+  activeWorkspace?: string
+}
 
 const PUBLIC_SESSION_STATUSES = new Set([
   'completed', 'failed', 'cancelled', 'waiting_for_input', 'pending', 'in_progress', 'unknown',
@@ -74,6 +76,9 @@ export function createMcpRuntime(
     expectedServerId?: string,
     pinnedCredential?: PinnedMcpCredential,
   ): Promise<PinnedMcpCredential> => {
+    if (pinnedCredential?.activeWorkspace && pinnedCredential.activeWorkspace !== activeWorkspace) {
+      throw new McpError('MCP_BINDING_INVALID', '固定 MCP 凭据与请求 Workspace 不一致')
+    }
     const stored = pinnedCredential
       ? null
       : await Promise.all([readMcpServers(activeWorkspace), readMcpKeys(activeWorkspace)])
@@ -89,14 +94,17 @@ export function createMcpRuntime(
     if (server.id !== key.mcp_server_id) throw new McpError('MCP_BINDING_INVALID', '固定 MCP Server 与 Key 不一致')
     if (!server.is_active) throw new McpError('MCP_BINDING_INVALID', `MCP Server 已禁用：${server.id}`)
     if (server.transport !== 'streamable_http') throw new McpError('MCP_BINDING_INVALID', '首期正文生成只支持 Streamable HTTP')
-    return { server, key }
+    return { server, key, activeWorkspace }
   }
 
   const resolveCredentialConfig = (
     keyId: number,
     expectedServerId?: string,
     pinnedCredential?: PinnedMcpCredential,
-  ) => resolveCredentialConfigInWorkspace(getWorkspace(), keyId, expectedServerId, pinnedCredential)
+  ) => {
+    const activeWorkspace = pinnedCredential?.activeWorkspace ?? getWorkspace()
+    return resolveCredentialConfigInWorkspace(activeWorkspace, keyId, expectedServerId, pinnedCredential)
+  }
 
   const getAdapterForWorkspace = async (
     activeWorkspace: string,
@@ -164,11 +172,21 @@ export function createMcpRuntime(
     expectedServerId?: string,
     options?: AbortSignal | McpAdapterOperationOptions,
     pinnedCredential?: PinnedMcpCredential,
-  ) => getAdapterForWorkspace(getWorkspace(), keyId, expectedServerId, options, pinnedCredential)
+  ) => getAdapterForWorkspace(
+    pinnedCredential?.activeWorkspace ?? getWorkspace(),
+    keyId,
+    expectedServerId,
+    options,
+    pinnedCredential,
+  )
 
-  const listAgents = async (keyId: number, options?: AbortSignal | McpAdapterOperationOptions) => {
+  const listAgents = async (
+    keyId: number,
+    options?: AbortSignal | McpAdapterOperationOptions,
+    pinnedCredential?: PinnedMcpCredential,
+  ) => {
     const remoteOptions = operationOptions(options)
-    const resolved = await getAdapterForKey(keyId, undefined, remoteOptions)
+    const resolved = await getAdapterForKey(keyId, undefined, remoteOptions, pinnedCredential)
     return resolved.adapter.listAgents(remoteOptions)
   }
 
@@ -220,9 +238,14 @@ export function createMcpRuntime(
     resolveCredentialConfig,
     getAdapterForKey,
     listAgents,
-    async createAgent(keyId: number, input: { name: string; spaceId?: string; instructions?: string }, signal?: AbortSignal) {
+    async createAgent(
+      keyId: number,
+      input: { name: string; spaceId?: string; instructions?: string },
+      signal?: AbortSignal,
+      pinnedCredential?: PinnedMcpCredential,
+    ) {
       const remoteOptions = operationOptions(signal)
-      const resolved = await getAdapterForKey(keyId, undefined, remoteOptions)
+      const resolved = await getAdapterForKey(keyId, undefined, remoteOptions, pinnedCredential)
       return resolved.adapter.createAgent(input, remoteOptions)
     },
     async diagnostics(activeWorkspace: string, serverId: string, keyId: number, signal?: AbortSignal) {
@@ -287,11 +310,11 @@ export function createMcpRuntime(
         throw error
       }
     },
-    invalidateKey(keyId: number, serverId?: string) {
-      return manager.invalidate(getWorkspace(), serverId || '', keyId)
+    invalidateKey(keyId: number, serverId?: string, activeWorkspace = getWorkspace()) {
+      return manager.invalidate(activeWorkspace, serverId || '', keyId)
     },
-    invalidateServer(serverId: string) {
-      return manager.invalidateServer(getWorkspace(), serverId)
+    invalidateServer(serverId: string, activeWorkspace = getWorkspace()) {
+      return manager.invalidateServer(activeWorkspace, serverId)
     },
     close() {
       return manager.closeAll()

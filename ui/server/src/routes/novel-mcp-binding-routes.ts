@@ -1,7 +1,10 @@
 import type { Express } from 'express'
+import { types } from 'node:util'
 import { mutateNovelProjectReferenceConfig } from '../novel'
 import { isMcpError, McpError } from '../mcp/errors'
 import type { McpRuntime } from '../mcp/runtime'
+import { createMcpSecretScrubber } from '../mcp/secret-scrubber'
+import type { McpKeyRecord, McpServerRecord } from '../mcp/types'
 import { withMcpWorkspaceMutation } from '../mcp/workspace-coordinator'
 import {
   normalizeProseGenerationSource,
@@ -14,6 +17,105 @@ type NovelMcpBindingRoutesContext = {
   getWorkspace: () => string
   getProject: (workspace: string, id: number) => Promise<any>
   mcpRuntime: McpRuntime
+}
+
+const PUBLIC_AGENT_STRING_LIMITS = {
+  id: 16_384,
+  name: 4_096,
+  description: 4_096,
+  status: 160,
+  spaceId: 16_384,
+} as const
+const PUBLIC_AGENT_LIST_LIMIT = 100
+const PUBLIC_AGENT_LIST_SERIALIZED_CHAR_LIMIT = 128 * 1_024
+const TRUNCATED_AGENT_FIELD = '[TRUNCATED]'
+
+function ownDataValue(value: unknown, key: string) {
+  if (!value || typeof value !== 'object' || types.isProxy(value)) return undefined
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    return descriptor && 'value' in descriptor ? descriptor.value : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function ownString(value: unknown, key: string) {
+  const candidate = ownDataValue(value, key)
+  return typeof candidate === 'string' ? candidate : undefined
+}
+
+function publicAgentProjector(selection: { server: McpServerRecord; key: McpKeyRecord }) {
+  const scrubber = createMcpSecretScrubber({
+    keys: [selection.key.key],
+    headers: selection.server.custom_headers || {},
+  })
+  const bounded = (value: string, limit: number) => (
+    value.length > limit ? TRUNCATED_AGENT_FIELD : scrubber.scrubText(value).slice(0, limit)
+  )
+  return (agent: unknown) => {
+    const description = ownString(agent, 'description')
+    const status = ownString(agent, 'status')
+    const raw = ownDataValue(agent, 'raw')
+    const spaceId = ownString(agent, 'spaceId')
+      ?? ownString(agent, 'space_id')
+      ?? ownString(raw, 'spaceId')
+      ?? ownString(raw, 'space_id')
+    return {
+      id: bounded(ownString(agent, 'id') || '', PUBLIC_AGENT_STRING_LIMITS.id),
+      name: bounded(ownString(agent, 'name') || '', PUBLIC_AGENT_STRING_LIMITS.name),
+      ...(description !== undefined ? {
+        description: bounded(description, PUBLIC_AGENT_STRING_LIMITS.description),
+      } : {}),
+      ...(status !== undefined ? {
+        status: bounded(status, PUBLIC_AGENT_STRING_LIMITS.status),
+      } : {}),
+      ...(spaceId !== undefined ? {
+        spaceId: bounded(spaceId, PUBLIC_AGENT_STRING_LIMITS.spaceId),
+      } : {}),
+    }
+  }
+}
+
+function publicAgentList(agents: unknown, projectAgent: ReturnType<typeof publicAgentProjector>) {
+  if (!agents || typeof agents !== 'object' || types.isProxy(agents) || !Array.isArray(agents)) return []
+  const projected: ReturnType<typeof projectAgent>[] = []
+  let serializedChars = '{"agents":[]}'.length
+  const count = Math.min(agents.length, PUBLIC_AGENT_LIST_LIMIT)
+  for (let index = 0; index < count; index += 1) {
+    const sourceAgent = ownDataValue(agents, String(index))
+    if (sourceAgent === undefined) continue
+    const agent = projectAgent(sourceAgent)
+    const agentChars = JSON.stringify(agent).length + (projected.length ? 1 : 0)
+    if (serializedChars + agentChars > PUBLIC_AGENT_LIST_SERIALIZED_CHAR_LIMIT) break
+    projected.push(agent)
+    serializedChars += agentChars
+  }
+  return projected
+}
+
+async function validatePinnedMcpProjectBinding(
+  ctx: NovelMcpBindingRoutesContext,
+  activeWorkspace: string,
+  project: any,
+  binding: Parameters<typeof validateMcpProjectBinding>[2],
+  signal?: AbortSignal,
+) {
+  const selection = await validateMcpCredentialSelection(activeWorkspace, {
+    serverId: binding.server_id,
+    keyId: binding.key_id,
+    adapterId: binding.adapter_id,
+  })
+  return validateMcpProjectBinding(activeWorkspace, project, binding, {
+    credentialSnapshot: { servers: [selection.server], keys: [selection.key] },
+    runtime: {
+      listAgents: (keyId, options) => ctx.mcpRuntime.listAgents(keyId, options, {
+        ...selection,
+        activeWorkspace,
+      }),
+    },
+    signal,
+  })
 }
 
 function bindingError(error: unknown) {
@@ -73,11 +175,12 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
       }
       let validation: any = null
       if (source.type === 'mcp') {
-        validation = await validateMcpProjectBinding(
+        validation = await validatePinnedMcpProjectBinding(
+          ctx,
           activeWorkspace,
           project,
           source.mcp,
-          { runtime: ctx.mcpRuntime, signal: req.signal },
+          req.signal,
         )
       }
       const mutation = await mutateNovelProjectReferenceConfig(activeWorkspace, {
@@ -100,7 +203,7 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
         validation: {
           server_id: result.validation.server.id,
           key_id: result.validation.key.id,
-          agent: result.validation.agent,
+          agent: publicAgentProjector(result.validation)(result.validation.agent),
         },
       } : {}),
     })
@@ -113,13 +216,19 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
       ? normalizeProseGenerationSource(req.body.source)
       : resolveProseGenerationSource(resolved.project)
     if (source.type !== 'mcp') throw new McpError('MCP_BINDING_INVALID', '当前项目未选择 MCP 正文来源')
-    const validation = await validateMcpProjectBinding(
+    const validation = await validatePinnedMcpProjectBinding(
+      ctx,
       resolved.activeWorkspace,
       resolved.project,
       source.mcp,
-      { runtime: ctx.mcpRuntime, signal: req.signal },
+      req.signal,
     )
-    res.json({ ok: true, server_id: validation.server.id, key_id: validation.key.id, agent: validation.agent })
+    res.json({
+      ok: true,
+      server_id: validation.server.id,
+      key_id: validation.key.id,
+      agent: publicAgentProjector(validation)(validation.agent),
+    })
   }))
 
   app.get(`${base}/agents`, safely(async (req, res) => {
@@ -129,8 +238,13 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
     const serverId = String(req.query?.server_id || (stored.type === 'mcp' ? stored.mcp.server_id : ''))
     const keyId = Number(req.query?.key_id || (stored.type === 'mcp' ? stored.mcp.key_id : 0))
     if (!serverId || !keyId) throw new McpError('MCP_BINDING_INVALID', '请选择 MCP Server 和 Key')
-    await validateMcpCredentialSelection(resolved.activeWorkspace, { serverId, keyId })
-    res.json({ agents: await ctx.mcpRuntime.listAgents(keyId, req.signal) })
+    const selection = await validateMcpCredentialSelection(resolved.activeWorkspace, { serverId, keyId })
+    const projectAgent = publicAgentProjector(selection)
+    const agents = await ctx.mcpRuntime.listAgents(keyId, req.signal, {
+      ...selection,
+      activeWorkspace: resolved.activeWorkspace,
+    })
+    res.json({ agents: publicAgentList(agents, projectAgent) })
   }))
 
   app.post(`${base}/agents`, safely(async (req, res) => {
@@ -139,11 +253,11 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
     const serverId = String(req.body?.server_id || '')
     const keyId = Number(req.body?.key_id || 0)
     if (!serverId || !keyId) throw new McpError('MCP_BINDING_INVALID', '请选择 MCP Server 和 Key')
-    await validateMcpCredentialSelection(resolved.activeWorkspace, { serverId, keyId })
+    const selection = await validateMcpCredentialSelection(resolved.activeWorkspace, { serverId, keyId })
     const agent = await ctx.mcpRuntime.createAgent(keyId, {
       name: String(req.body?.name || 'MangaForge 小说正文 Agent'),
       ...(req.body?.space_id ? { spaceId: String(req.body.space_id) } : {}),
-    }, req.signal)
-    res.json({ ok: true, agent })
+    }, req.signal, { ...selection, activeWorkspace: resolved.activeWorkspace })
+    res.json({ ok: true, agent: publicAgentProjector(selection)(agent) })
   }))
 }

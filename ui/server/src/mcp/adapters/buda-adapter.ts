@@ -1,7 +1,8 @@
+import { types } from 'node:util'
 import { isAbortRelatedError, McpError } from '../errors'
 import { mcpResultData, buildBudaDriveSnapshot, syncBudaDriveSnapshot } from './buda-drive'
 import { resolveBudaTools, type BudaToolMap } from './buda-tool-map'
-import type { McpOperationKind, McpOperationOptions } from '../types'
+import type { McpOperationKind, McpOperationOptions, McpToolResult } from '../types'
 import type {
   BudaProseGenerationInput,
   BudaProseGenerationResult,
@@ -22,29 +23,107 @@ function operationOptions(options: McpAdapterOperationOptions, operation: McpOpe
   return result
 }
 
-function cleanAgent(item: any) {
-  const id = String(item?.id || item?.agentId || '')
-  const spaceId = String(item?.spaceId || item?.space_id || '')
+const BUDA_AGENT_LIST_LIMIT = 100
+const BUDA_AGENT_TEXT_RESULT_LIMIT = 256 * 1_024
+const BUDA_AGENT_TEXT_BLOCK_LIMIT = 32
+const BUDA_AGENT_STRING_LIMITS = {
+  id: 16_384,
+  name: 4_096,
+  description: 4_096,
+  status: 160,
+  spaceId: 16_384,
+} as const
+const TRUNCATED_AGENT_FIELD = '[TRUNCATED]'
+
+function ownDataValue(value: unknown, key: string) {
+  if (!value || typeof value !== 'object' || types.isProxy(value)) return undefined
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    return descriptor && 'value' in descriptor ? descriptor.value : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function boundedOwnString(
+  value: unknown,
+  keys: string[],
+  limit: number,
+  oversized: string = TRUNCATED_AGENT_FIELD,
+) {
+  for (const key of keys) {
+    const candidate = ownDataValue(value, key)
+    if (typeof candidate !== 'string' || !candidate) continue
+    return candidate.length > limit ? oversized : candidate
+  }
+  return ''
+}
+
+function cleanAgent(item: unknown) {
+  const id = boundedOwnString(item, ['id', 'agentId'], BUDA_AGENT_STRING_LIMITS.id, '')
+  const name = boundedOwnString(item, ['name', 'title'], BUDA_AGENT_STRING_LIMITS.name) || id
+  const description = boundedOwnString(item, ['description'], BUDA_AGENT_STRING_LIMITS.description)
+  const status = boundedOwnString(item, ['status'], BUDA_AGENT_STRING_LIMITS.status)
+  const spaceId = boundedOwnString(item, ['spaceId', 'space_id'], BUDA_AGENT_STRING_LIMITS.spaceId, '')
   return {
     id,
-    name: String(item?.name || item?.title || id),
-    ...(item?.description ? { description: String(item.description) } : {}),
-    ...(item?.status ? { status: String(item.status) } : {}),
+    name,
+    ...(description ? { description } : {}),
+    ...(status ? { status } : {}),
     ...(spaceId ? { raw: { spaceId } } : {}),
   }
 }
 
-export function normalizeBudaAgentList(data: any) {
-  const agents = Array.isArray(data?.apiAgents)
-    ? data.apiAgents
-    : Array.isArray(data?.agents)
-      ? data.agents
-      : Array.isArray(data?.items)
-        ? data.items
-        : Array.isArray(data)
-          ? data
-          : []
-  return agents.map(cleanAgent).filter(item => item.id)
+function agentArray(data: unknown) {
+  if (data && typeof data === 'object' && types.isProxy(data)) return []
+  if (Array.isArray(data)) return data
+  for (const key of ['apiAgents', 'agents', 'items']) {
+    const candidate = ownDataValue(data, key)
+    if (candidate && typeof candidate === 'object' && types.isProxy(candidate)) continue
+    if (Array.isArray(candidate)) return candidate
+  }
+  return []
+}
+
+export function normalizeBudaAgentList(data: unknown) {
+  const agents = agentArray(data)
+  const output: ReturnType<typeof cleanAgent>[] = []
+  const count = Math.min(agents.length, BUDA_AGENT_LIST_LIMIT)
+  for (let index = 0; index < count; index += 1) {
+    const item = ownDataValue(agents, String(index))
+    const agent = cleanAgent(item)
+    if (agent.id) output.push(agent)
+  }
+  return output
+}
+
+function oversizedAgentResult(): never {
+  throw new McpError('MCP_TOOL_ERROR', 'Buda Agent 返回数据超过安全上限', {
+    reason: 'agent_result_too_large',
+  })
+}
+
+function agentResultData(result: McpToolResult) {
+  const structuredContent = ownDataValue(result, 'structuredContent')
+  if (structuredContent !== undefined) return structuredContent
+  const content = ownDataValue(result, 'content')
+  if (!Array.isArray(content)) return ''
+  if (content.length > BUDA_AGENT_TEXT_BLOCK_LIMIT) oversizedAgentResult()
+  const texts: string[] = []
+  let totalChars = 0
+  for (let index = 0; index < content.length; index += 1) {
+    const block = ownDataValue(content, String(index))
+    if (ownDataValue(block, 'type') !== 'text') continue
+    const text = ownDataValue(block, 'text')
+    if (typeof text !== 'string' || !text) continue
+    totalChars += text.length + (texts.length ? 1 : 0)
+    if (totalChars > BUDA_AGENT_TEXT_RESULT_LIMIT) oversizedAgentResult()
+    texts.push(text)
+  }
+  for (const text of texts) {
+    try { return JSON.parse(text) } catch { /* plain text remains a valid result */ }
+  }
+  return texts.join('\n')
 }
 
 function sessionStatus(data: any) {
@@ -204,7 +283,11 @@ export class BudaAdapter implements ProseMcpAdapter {
 
   async listAgents(options: McpAdapterOperationOptions = {}) {
     const tools = this.tools || await this.resolveTools(options)
-    const data = mcpResultData(await this.client.callTool(tools.listAgents, {}, operationOptions(options, 'read_safe')))
+    const data = agentResultData(await this.client.callTool(
+      tools.listAgents,
+      {},
+      operationOptions(options, 'read_safe'),
+    ))
     return normalizeBudaAgentList(data)
   }
 
@@ -216,13 +299,14 @@ export class BudaAdapter implements ProseMcpAdapter {
       spaceId = String(existing.find(item => (item.raw as any)?.spaceId)?.raw?.spaceId || '')
     }
     if (!spaceId) throw new McpError('MCP_BINDING_INVALID', '创建 Buda Agent 需要 spaceId；请先在 Buda 中创建空间')
-    const data = mcpResultData(await this.client.callTool(tools.createAgent!, {
+    const data = agentResultData(await this.client.callTool(tools.createAgent!, {
       spaceId,
       name: String(input.name || 'MangaForge 小说正文 Agent'),
       emoji: '✍️',
       instructions: String(input.instructions || MANGAFORGE_BUDA_AGENT_INSTRUCTIONS),
     }, operationOptions(options, 'mutation')))
-    const agent = cleanAgent(data?.agent || data)
+    const nestedAgent = ownDataValue(data, 'agent')
+    const agent = cleanAgent(nestedAgent && typeof nestedAgent === 'object' ? nestedAgent : data)
     if (!agent.id) throw new McpError('MCP_TOOL_ERROR', 'Buda 未返回新 Agent 标识')
     return { id: agent.id, name: agent.name }
   }

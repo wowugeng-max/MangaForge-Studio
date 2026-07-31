@@ -7,6 +7,7 @@ import {
 } from '@modelcontextprotocol/client'
 import { McpError } from './errors'
 import { buildMcpHeaders, createMcpClient, type McpSdkFactory } from './client'
+import * as clientModule from './client'
 import { BUDA_MCP_SERVER_TEMPLATE } from './server-store'
 import type { McpKeyRecord, McpServerRecord } from './types'
 
@@ -19,6 +20,40 @@ const key: McpKeyRecord = {
   priority: 0,
   success_count: 0,
   failure_count: 0,
+}
+
+function testBoundedFetch(
+  upstreamFetch: typeof fetch,
+  budgets: { responseBytes: number; sseEventBytes: number },
+) {
+  const factory = (clientModule as any).createBoundedMcpFetch
+  return typeof factory === 'function' ? factory(upstreamFetch, budgets) : upstreamFetch
+}
+
+function streamedResponse(
+  chunks: string[],
+  input: {
+    headers?: Record<string, string>
+    status?: number
+    statusText?: string
+    onPull?: () => void
+    onCancel?: () => void
+  } = {},
+) {
+  const encoder = new TextEncoder()
+  let index = 0
+  return new Response(new ReadableStream<Uint8Array>({
+    pull(controller) {
+      input.onPull?.()
+      if (index >= chunks.length) return controller.close()
+      controller.enqueue(encoder.encode(chunks[index++]!))
+    },
+    cancel() { input.onCancel?.() },
+  }), {
+    status: input.status,
+    statusText: input.statusText,
+    headers: input.headers,
+  })
 }
 
 function fakeSdkFactory(options: {
@@ -89,6 +124,222 @@ describe('generic MCP client', () => {
     })
     expect(server.custom_headers).toEqual({ 'X-Workspace': 'novel' })
     expect(buildMcpHeaders({ ...server, auth_type: 'none' }, key)).toEqual({ 'X-Workspace': 'novel' })
+  })
+
+  test('rejects behavioral named-header records without executing Proxy or getter traps', () => {
+    let proxyTraps = 0
+    const proxyHeaders = new Proxy({ 'X-Unsafe': 'proxy-value' }, {
+      ownKeys() { proxyTraps += 1; return ['X-Unsafe'] },
+      getOwnPropertyDescriptor() { proxyTraps += 1; return { enumerable: true, configurable: true, value: 'proxy-value' } },
+      get() { proxyTraps += 1; return 'proxy-value' },
+    })
+    expect(buildMcpHeaders({ ...BUDA_MCP_SERVER_TEMPLATE, custom_headers: proxyHeaders }, key)).toEqual({
+      Authorization: 'Bearer sk_test_secret',
+    })
+    expect(proxyTraps).toBe(0)
+
+    let getterCalls = 0
+    const getterHeaders: Record<string, string> = {}
+    Object.defineProperty(getterHeaders, 'X-Unsafe', {
+      enumerable: true,
+      get() { getterCalls += 1; return 'getter-value' },
+    })
+    expect(buildMcpHeaders({ ...BUDA_MCP_SERVER_TEMPLATE, custom_headers: getterHeaders }, key)).toEqual({
+      Authorization: 'Bearer sk_test_secret',
+    })
+    expect(getterCalls).toBe(0)
+
+    const inheritedHeaders = Object.create({ 'X-Inherited': 'inherited-value' })
+    inheritedHeaders['X-Own'] = 'own-value'
+    expect(buildMcpHeaders({ ...BUDA_MCP_SERVER_TEMPLATE, custom_headers: inheritedHeaders }, key)).toEqual({
+      Authorization: 'Bearer sk_test_secret',
+    })
+
+    const symbolHeaders: any = { 'X-Own': 'own-value' }
+    symbolHeaders[Symbol('hidden')] = 'symbol-value'
+    expect(buildMcpHeaders({ ...BUDA_MCP_SERVER_TEMPLATE, custom_headers: symbolHeaders }, key)).toEqual({
+      Authorization: 'Bearer sk_test_secret',
+    })
+  })
+
+  test('accepts a null-prototype own-data string header record', () => {
+    const headers = Object.create(null)
+    headers['X-Workspace'] = 'novel'
+    expect(buildMcpHeaders({ ...BUDA_MCP_SERVER_TEMPLATE, custom_headers: headers }, key)).toEqual({
+      'X-Workspace': 'novel',
+      Authorization: 'Bearer sk_test_secret',
+    })
+  })
+
+  test('rejects an oversized trustworthy Content-Length before reading and cancels upstream', async () => {
+    let pulls = 0
+    let cancels = 0
+    const upstreamResponse = streamedResponse(['small', 'unread'], {
+      headers: { 'Content-Length': '9', 'Content-Type': 'application/json' },
+      onPull: () => { pulls += 1 },
+      onCancel: () => { cancels += 1 },
+    })
+    await Promise.resolve()
+    const pullsBeforeFetch = pulls
+    const boundedFetch = testBoundedFetch(async () => upstreamResponse, { responseBytes: 8, sseEventBytes: 8 })
+
+    await expect(boundedFetch('https://mcp.invalid')).rejects.toMatchObject({
+      code: 'MCP_TOOL_ERROR',
+      details: { reason: 'response_too_large' },
+    })
+    expect(pulls).toBe(pullsBeforeFetch)
+    expect(cancels).toBe(1)
+  })
+
+  for (const contentLength of [undefined, '2']) {
+    test(`counts actual ordinary response bytes with ${contentLength ? 'forged' : 'missing'} Content-Length and cancels overflow`, async () => {
+      let cancels = 0
+      const headers = {
+        'Content-Type': 'application/json',
+        ...(contentLength ? { 'Content-Length': contentLength } : {}),
+      }
+      const boundedFetch = testBoundedFetch(async () => streamedResponse(['123456789', 'unread'], {
+        headers,
+        onCancel: () => { cancels += 1 },
+      }), { responseBytes: 8, sseEventBytes: 8 })
+
+      const response = await boundedFetch('https://mcp.invalid')
+      await expect(response.text()).rejects.toMatchObject({
+        code: 'MCP_TOOL_ERROR',
+        details: { reason: 'response_too_large' },
+      })
+      expect(cancels).toBe(1)
+    })
+  }
+
+  test('rejects one oversized never-delimited SSE event and cancels upstream', async () => {
+    let cancels = 0
+    const boundedFetch = testBoundedFetch(async () => streamedResponse(['data: 12345678901', 'unread'], {
+      headers: { 'Content-Type': 'text/event-stream; charset=utf-8' },
+      onCancel: () => { cancels += 1 },
+    }), { responseBytes: 16, sseEventBytes: 16 })
+
+    const response = await boundedFetch('https://mcp.invalid')
+    await expect(response.text()).rejects.toMatchObject({
+      code: 'MCP_TOOL_ERROR',
+      details: { reason: 'response_too_large' },
+    })
+    expect(cancels).toBe(1)
+  })
+
+  test('resets the SSE budget at LF and cross-chunk CRLF delimiters without a lifetime cap', async () => {
+    const body = 'data: one\n\ndata: two\r\n\r\ndata: six\n\n'
+    const boundedFetch = testBoundedFetch(async () => streamedResponse([
+      'data: one\n', '\n', 'data: two\r', '\n\r', '\n', 'data: six\n\n',
+    ], { headers: { 'Content-Type': 'text/event-stream' } }), {
+      responseBytes: 16,
+      sseEventBytes: 16,
+    })
+
+    const response = await boundedFetch('https://mcp.invalid')
+    expect(await response.text()).toBe(body)
+  })
+
+  for (const { name, chunks, body } of [
+    {
+      name: 'bare CR',
+      chunks: ['data:1\r\rdata:2\r\r:'],
+      body: 'data:1\r\rdata:2\r\r:',
+    },
+    {
+      name: 'CRLF then LF',
+      chunks: ['data:1\r\n', '\ndata:2\r', '\n\n'],
+      body: 'data:1\r\n\ndata:2\r\n\n',
+    },
+    {
+      name: 'LF then CRLF',
+      chunks: ['data:1\n\r', '\ndata:2\n', '\r\n'],
+      body: 'data:1\n\r\ndata:2\n\r\n',
+    },
+    {
+      name: 'bare CR split at chunk boundaries',
+      chunks: ['data:1\r', '\rdata:2\r', '\r'],
+      body: 'data:1\r\rdata:2\r\r',
+    },
+  ]) {
+    test(`resets the exact-limit SSE budget across ${name} event delimiters`, async () => {
+      const boundedFetch = testBoundedFetch(async () => streamedResponse(chunks, {
+        headers: { 'Content-Type': 'text/event-stream' },
+      }), { responseBytes: 6, sseEventBytes: 6 })
+
+      const response = await boundedFetch('https://mcp.invalid')
+      expect(await response.text()).toBe(body)
+    })
+  }
+
+  test('rejects an oversized SSE event before a bare CR delimiter and cancels upstream', async () => {
+    let cancels = 0
+    const boundedFetch = testBoundedFetch(async () => streamedResponse(['data:12\r\r', 'unread'], {
+      headers: { 'Content-Type': 'text/event-stream' },
+      onCancel: () => { cancels += 1 },
+    }), { responseBytes: 6, sseEventBytes: 6 })
+
+    const response = await boundedFetch('https://mcp.invalid')
+    await expect(response.text()).rejects.toMatchObject({
+      code: 'MCP_TOOL_ERROR',
+      details: { reason: 'response_too_large' },
+    })
+    expect(cancels).toBe(1)
+  })
+
+  for (const { name, chunks, body } of [
+    { name: 'LF', chunks: ['12345678\n', '\n'], body: '12345678\n\n' },
+    { name: 'CRLF', chunks: ['12345678\r', '\n\r', '\n'], body: '12345678\r\n\r\n' },
+  ]) {
+    test(`accepts an exact-limit SSE event before a split ${name} delimiter`, async () => {
+      const boundedFetch = testBoundedFetch(async () => streamedResponse(chunks, {
+        headers: { 'Content-Type': 'text/event-stream' },
+      }), { responseBytes: 8, sseEventBytes: 8 })
+
+      const response = await boundedFetch('https://mcp.invalid')
+      expect(await response.text()).toBe(body)
+    })
+  }
+
+  test('preserves legal JSON, longer prose, and response metadata byte-exactly', async () => {
+    const prose = `{"chapter":"${'正文。'.repeat(2_048)}"}`
+    const boundedFetch = testBoundedFetch(async () => streamedResponse([prose.slice(0, 2_000), prose.slice(2_000)], {
+      status: 202,
+      statusText: 'Accepted',
+      headers: { 'Content-Type': 'application/json', 'X-Trace': 'safe' },
+    }), { responseBytes: new TextEncoder().encode(prose).byteLength, sseEventBytes: 16 })
+
+    const response = await boundedFetch('https://mcp.invalid')
+    expect(response.status).toBe(202)
+    expect(response.statusText).toBe('Accepted')
+    expect(response.headers.get('X-Trace')).toBe('safe')
+    expect(await response.text()).toBe(prose)
+  })
+
+  test('installs the bounded fetch on the actual SDK transport', async () => {
+    let cancels = 0
+    const upstreamFetch = async () => streamedResponse(['123456789', 'unread'], {
+      headers: { 'Content-Type': 'application/json' },
+      onCancel: () => { cancels += 1 },
+    })
+    const { capture, factory } = fakeSdkFactory()
+    const client = createMcpClient({
+      server: BUDA_MCP_SERVER_TEMPLATE,
+      key,
+      sdkFactory: factory,
+      fetch: upstreamFetch as typeof fetch,
+      responseBudgets: { responseBytes: 8, sseEventBytes: 8 },
+    })
+    await client.connect()
+
+    expect(typeof capture.transportOptions.fetch).toBe('function')
+    expect(capture.transportOptions.fetch).not.toBe(upstreamFetch)
+    const response = await capture.transportOptions.fetch('https://mcp.invalid')
+    await expect(response.text()).rejects.toMatchObject({
+      code: 'MCP_TOOL_ERROR',
+      details: { reason: 'response_too_large' },
+    })
+    expect(cancels).toBe(1)
   })
 
   test('connects, filters tools, preserves results, diagnostics, timeout, and signal', async () => {

@@ -106,6 +106,99 @@ describe('MCP secret scrubber', () => {
       .toBe('[REDACTED] [REDACTED]')
   })
 
+  test('removes prefix-stripped authentication and cookie payloads without hiding unrelated fragments', () => {
+    const scrubber = createMcpSecretScrubber({
+      keys: ['Bearer configured-key-payload'],
+      headers: {
+        Authorization: 'Basic configured-auth-payload',
+        'Proxy-Authorization': 'Bearer configured-proxy-payload',
+        Cookie: 'sid=configured-cookie-payload; ui=xyz',
+        'Set-Cookie': 'session=configured-set-cookie-payload; Path=/; HttpOnly; SameSite=Lax',
+      },
+    })
+
+    const output = scrubber.scrubText([
+      'configured-key-payload',
+      'configured-auth-payload',
+      'configured-proxy-payload',
+      'configured-cookie-payload',
+      'configured-set-cookie-payload',
+      'normal agent-id abc xyz sid Path HttpOnly SameSite Lax',
+    ].join('\n'))
+
+    for (const secret of [
+      'configured-key-payload',
+      'configured-auth-payload',
+      'configured-proxy-payload',
+      'configured-cookie-payload',
+      'configured-set-cookie-payload',
+    ]) expect(output).not.toContain(secret)
+    expect(output).toContain('normal agent-id abc')
+    expect(output).not.toContain('xyz')
+    expect(output).toContain('sid Path HttpOnly SameSite Lax')
+  })
+
+  test('derives short, quoted, and attribute-named credentials with Cookie and Set-Cookie semantics', () => {
+    const scrubber = createMcpSecretScrubber({
+      keys: ['Bearer k1'],
+      headers: {
+        Authorization: 'Basic a2',
+        Cookie: 'Path=p3; sid="q4"; Secure=s5',
+        'Set-Cookie': 'Path=t6; Secure=u7; HttpOnly; SameSite=Lax',
+      },
+    })
+
+    const output = scrubber.scrubText('k1 a2 p3 "q4" q4 s5 t6 u7 ordinary')
+
+    for (const secret of ['k1', 'a2', 'p3', 'q4', 's5', 't6']) {
+      expect(output).not.toContain(secret)
+    }
+    expect(output).toContain('u7 ordinary')
+  })
+
+  test('replaces all configured secrets in one pass without reprocessing the placeholder', () => {
+    const scrubber = createMcpSecretScrubber({
+      headers: Object.fromEntries(['x', '[', 'R', 'E', 'D', 'A', 'C', 'T', ']']
+        .map((value, index) => [`X-Test-${index}`, value])),
+    })
+    const input = 'x'.repeat(64)
+    const output = scrubber.scrubText(input)
+
+    expect(output).toBe('[REDACTED]'.repeat(input.length))
+    expect(output.length).toBeLessThanOrEqual(input.length * '[REDACTED]'.length)
+  })
+
+  test('rejects Proxy, accessor, symbol, and inherited named-header records without executing behavior', () => {
+    let proxyTraps = 0
+    const proxyHeaders = new Proxy({ Authorization: 'Basic proxy-secret' }, {
+      ownKeys() { proxyTraps += 1; return ['Authorization'] },
+      getOwnPropertyDescriptor() { proxyTraps += 1; return { enumerable: true, configurable: true, value: 'Basic proxy-secret' } },
+      get() { proxyTraps += 1; return 'Basic proxy-secret' },
+    })
+    const proxyScrubber = createMcpSecretScrubber({ headers: proxyHeaders })
+    expect(proxyScrubber.scrubText('proxy-secret')).toBe('proxy-secret')
+    expect(proxyTraps).toBe(0)
+
+    let getterCalls = 0
+    const getterHeaders: Record<string, string> = {}
+    Object.defineProperty(getterHeaders, 'Authorization', {
+      enumerable: true,
+      get() { getterCalls += 1; return 'Basic getter-secret' },
+    })
+    expect(createMcpSecretScrubber({ headers: getterHeaders }).scrubText('getter-secret')).toBe('getter-secret')
+    expect(getterCalls).toBe(0)
+
+    const symbolHeaders: any = { Authorization: 'Basic own-secret' }
+    symbolHeaders[Symbol('hidden')] = 'symbol-secret'
+    expect(createMcpSecretScrubber({ headers: symbolHeaders }).scrubText('own-secret')).toBe('own-secret')
+
+    const inheritedHeaders = Object.create({ Authorization: 'Basic inherited-secret' })
+    inheritedHeaders['X-Own'] = 'own-header-secret'
+    const inheritedScrubber = createMcpSecretScrubber({ headers: inheritedHeaders })
+    expect(inheritedScrubber.scrubText('inherited-secret own-header-secret'))
+      .toBe('inherited-secret own-header-secret')
+  })
+
   test('clones shared references independently while still marking true ancestor cycles', () => {
     const shared = { status: 'ready', nested: { id: 'agent-1' } }
     const source: any = { left: shared, right: shared }

@@ -143,6 +143,29 @@ describe('BudaAdapter', () => {
     expectBudaOperations(fake.calls)
   })
 
+  for (const operation of ['list', 'create'] as const) {
+    test(`rejects an oversized textual Agent ${operation} result before JSON parsing`, async () => {
+      const fake = createFakeClient()
+      fake.client.callTool = async (name: string, args: any, options: any) => {
+        fake.calls.push({ name, args, options })
+        const data = operation === 'list'
+          ? { apiAgents: [{ id: 'agent-large', name: 'n'.repeat(300_000) }] }
+          : { agent: { id: 'agent-large', name: 'n'.repeat(300_000) } }
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] }
+      }
+      const adapter = new BudaAdapter(fake.client as any)
+
+      const result = operation === 'list'
+        ? adapter.listAgents()
+        : adapter.createAgent({ name: 'Agent', spaceId: 'space-1' })
+
+      await expect(result).rejects.toMatchObject({
+        code: 'MCP_TOOL_ERROR',
+        details: { reason: 'agent_result_too_large' },
+      })
+    })
+  }
+
   test('sends the complete paragraph task after Drive sync and extracts final assistant prose', async () => {
     const fake = createFakeClient(['pending', 'in_progress', 'completed'])
     const adapter = new BudaAdapter(fake.client as any)
@@ -684,6 +707,55 @@ describe('BudaAdapter', () => {
 })
 
 describe('Buda result normalization', () => {
+  test('caps structured Agent lists before normalizing later entries', () => {
+    let beyondLimitCalls = 0
+    const apiAgents: any[] = Array.from({ length: 100 }, (_, index) => ({
+      id: `agent-${index}`,
+      name: `Agent ${index}`,
+    }))
+    Object.defineProperty(apiAgents, '100', {
+      enumerable: true,
+      get() { beyondLimitCalls += 1; return { id: 'agent-100', name: 'Agent 100' } },
+    })
+    apiAgents.length = 180
+
+    expect(normalizeBudaAgentList({ apiAgents })).toHaveLength(100)
+    expect(beyondLimitCalls).toBe(0)
+  })
+
+  test('rejects Proxy Agent arrays and values without executing traps', () => {
+    let arrayTraps = 0
+    const proxiedArray = new Proxy([{ id: 'agent-1', name: 'Agent 1' }], {
+      get() { arrayTraps += 1; return 1 },
+      getOwnPropertyDescriptor() { arrayTraps += 1; return undefined },
+    })
+    expect(normalizeBudaAgentList({ apiAgents: proxiedArray })).toEqual([])
+    expect(arrayTraps).toBe(0)
+
+    let agentTraps = 0
+    const proxiedAgent = new Proxy({ id: 'agent-1', name: 'Agent 1' }, {
+      get() { agentTraps += 1; return 'trap-value' },
+      getOwnPropertyDescriptor() { agentTraps += 1; return undefined },
+    })
+    expect(normalizeBudaAgentList({ apiAgents: [proxiedAgent] })).toEqual([])
+    expect(agentTraps).toBe(0)
+  })
+
+  test('does not invoke Agent accessors or object coercion while normalizing fields', () => {
+    let getterCalls = 0
+    let toStringCalls = 0
+    const coercible = { toString() { toStringCalls += 1; return 'coerced' } }
+    const agent: any = { id: coercible, name: 'safe-name' }
+    Object.defineProperty(agent, 'description', {
+      enumerable: true,
+      get() { getterCalls += 1; return 'getter-description' },
+    })
+
+    expect(normalizeBudaAgentList({ apiAgents: [agent] })).toEqual([])
+    expect(getterCalls).toBe(0)
+    expect(toStringCalls).toBe(0)
+  })
+
   test('keeps compatibility with the agents list shape', () => {
     expect(normalizeBudaAgentList({ agents: [{ id: 'agent-1', name: 'Agent 1' }] }))
       .toEqual([{ id: 'agent-1', name: 'Agent 1' }])

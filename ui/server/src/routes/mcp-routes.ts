@@ -1,7 +1,11 @@
 import type { Express } from 'express'
 import { listNovelProjects } from '../novel'
 import { McpError, isMcpError } from '../mcp/errors'
-import { createMcpSecretScrubber } from '../mcp/secret-scrubber'
+import {
+  createMcpSecretScrubber,
+  isSafeMcpHeaderRecord,
+  safeMcpHeaderEntries,
+} from '../mcp/secret-scrubber'
 import {
   createMcpKey,
   deleteMcpKey,
@@ -55,9 +59,7 @@ async function createRouteSecretScrubber(req: any, getWorkspace: () => string) {
   } catch {}
   try {
     const submittedHeaders = req.body?.custom_headers
-    if (submittedHeaders && typeof submittedHeaders === 'object' && !Array.isArray(submittedHeaders)) {
-      headerValues.push(...Object.values(submittedHeaders).map(String))
-    }
+    headerValues.push(...safeMcpHeaderEntries(submittedHeaders).map(([, value]) => value))
   } catch {}
   try {
     const activeWorkspace = getWorkspace()
@@ -67,7 +69,9 @@ async function createRouteSecretScrubber(req: any, getWorkspace: () => string) {
     ])
     if (storedKeys.status === 'fulfilled') keys.push(...storedKeys.value.map(item => item.key))
     if (storedServers.status === 'fulfilled') {
-      headerValues.push(...storedServers.value.flatMap(item => Object.values(item.custom_headers)))
+      headerValues.push(...storedServers.value.flatMap(item => (
+        safeMcpHeaderEntries(item.custom_headers).map(([, value]) => value)
+      )))
     }
   } catch {}
   return createMcpSecretScrubber({ keys, headerValues })
@@ -106,6 +110,17 @@ function requireHttpServer(input: any) {
   if (!/^https?:\/\//i.test(server.url)) throw new McpError('MCP_BINDING_INVALID', 'MCP Server URL 必须是 HTTP(S) 地址')
   if (!server.adapter_id) throw new McpError('MCP_BINDING_INVALID', 'MCP Adapter 不能为空')
   return server
+}
+
+function assertSubmittedHeaderRecords(input: unknown) {
+  if (!input || typeof input !== 'object') return
+  for (const name of ['custom_headers', 'customHeaders']) {
+    const descriptor = Object.getOwnPropertyDescriptor(input, name)
+    if (!descriptor) continue
+    if (!('value' in descriptor) || !isSafeMcpHeaderRecord(descriptor.value)) {
+      throw new McpError('MCP_BINDING_INVALID', 'MCP 自定义 Header 必须是纯字符串字段')
+    }
+  }
 }
 
 function throwReferencedRecordConflict(message: string, references: ProjectReference[]): never {
@@ -184,6 +199,7 @@ export function registerMcpRoutes(
 
   app.post(['/api/mcp/servers', '/api/mcp/servers/'], safely(async (req, res) => {
     const activeWorkspace = getWorkspace()
+    assertSubmittedHeaderRecords(req.body)
     const server = requireHttpServer(req.body || {})
     const created = await withMcpWorkspaceMutation(activeWorkspace, async () => {
       if ((await readMcpServers(activeWorkspace)).some(item => item.id === server.id)) return null
@@ -198,6 +214,7 @@ export function registerMcpRoutes(
 
   app.put(['/api/mcp/servers/:id', '/api/mcp/servers/:id/'], safely(async (req, res) => {
     const activeWorkspace = getWorkspace()
+    assertSubmittedHeaderRecords(req.body)
     const input: McpServerUpdateInput = req.body || {}
     const result = await withMcpWorkspaceMutation(activeWorkspace, async () => {
       const previous = (await readMcpServers(activeWorkspace)).find(item => item.id === String(req.params.id))
@@ -233,7 +250,7 @@ export function registerMcpRoutes(
       return { server }
     })
     if (!result) return res.status(404).json({ error: 'MCP Server 不存在' })
-    await runtime.invalidateServer?.(result.server.id)
+    await runtime.invalidateServer?.(result.server.id, activeWorkspace)
     res.json({ ok: true, server: toPublicMcpServer(result.server) })
   }))
 
@@ -252,7 +269,7 @@ export function registerMcpRoutes(
     })
     if (!result) return res.status(404).json({ error: 'MCP Server 不存在' })
     if ('error' in result) return res.status(409).json(result)
-    await runtime.invalidateServer?.(result.id)
+    await runtime.invalidateServer?.(result.id, activeWorkspace)
     res.json({ ok: true })
   }))
 
@@ -311,7 +328,7 @@ export function registerMcpRoutes(
       return { previous, updated: updated! }
     })
     if (!result) return res.status(404).json({ error: 'MCP Key 不存在' })
-    await runtime.invalidateKey?.(id, result.previous.mcp_server_id)
+    await runtime.invalidateKey?.(id, result.previous.mcp_server_id, activeWorkspace)
     res.json({ ok: true, key: toPublicMcpKey(result.updated) })
   }))
 
@@ -329,7 +346,7 @@ export function registerMcpRoutes(
     })
     if (result.kind === 'invalid') return res.status(400).json({ error: 'MCP Key ID 无效' })
     if (result.kind === 'missing') return res.status(404).json({ error: 'MCP Key 不存在' })
-    await runtime.invalidateKey?.(result.id, result.record.mcp_server_id)
+    await runtime.invalidateKey?.(result.id, result.record.mcp_server_id, activeWorkspace)
     res.json({ ok: true })
   }))
 

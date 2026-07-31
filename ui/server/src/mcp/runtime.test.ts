@@ -494,6 +494,36 @@ describe('MCP runtime', () => {
     expect(connectionCalls).toBe(0)
   })
 
+  test('pins explicit invalidation workspaces while preserving ambient-call compatibility', async () => {
+    let ambientWorkspace = 'workspace-b'
+    const calls: any[] = []
+    const runtime = createMcpRuntime(() => ambientWorkspace, {
+      manager: {
+        get: async () => { throw new Error('not used') },
+        invalidate: async (workspace: string, serverId: string, keyId: number) => {
+          calls.push(['key', workspace, serverId, keyId])
+        },
+        invalidateIfCurrent: async () => {},
+        invalidateServer: async (workspace: string, serverId: string) => {
+          calls.push(['server', workspace, serverId])
+        },
+        closeAll: async () => {},
+      } as any,
+    })
+
+    await runtime.invalidateKey(7, 'buda', 'workspace-a')
+    await runtime.invalidateServer('buda', 'workspace-a')
+    await runtime.invalidateKey(8, 'other')
+    await runtime.invalidateServer('other')
+
+    expect(calls).toEqual([
+      ['key', 'workspace-a', 'buda', 7],
+      ['server', 'workspace-a', 'buda'],
+      ['key', 'workspace-b', 'other', 8],
+      ['server', 'workspace-b', 'other'],
+    ])
+  })
+
   test('passes operation options to connection and Agent discovery without changing credential identity', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-options-'))
     workspaces.push(workspace)
@@ -601,6 +631,107 @@ describe('MCP runtime', () => {
 
     expect(connectedKey).toBe(initialKey)
     expect(resolved.key.key).toBe(initialKey)
+  })
+
+  test('uses one explicitly pinned credential for public Agent list and create calls after store rotation', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-agent-pinned-'))
+    workspaces.push(workspace)
+    const initialServer = {
+      ...BUDA_MCP_SERVER_TEMPLATE,
+      custom_headers: { 'X-Fake': 'header-before-rotation' },
+    }
+    const rotatedServer = {
+      ...BUDA_MCP_SERVER_TEMPLATE,
+      custom_headers: { 'X-Fake': 'header-after-rotation' },
+    }
+    await writeMcpServers(workspace, [initialServer])
+    const created = await createMcpKey(workspace, {
+      mcp_server_id: 'buda', key: 'key-before-rotation', description: '账号',
+    })
+    const connected: Array<{ key: string; header: string }> = []
+    const client = { listTools: async () => [], callTool: async () => ({ content: [] }) }
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: {
+        get: async (_workspace: string, server: any, key: any) => {
+          connected.push({ key: key.key, header: server.custom_headers['X-Fake'] })
+          return client
+        },
+        invalidate: async () => {},
+        invalidateIfCurrent: async () => {},
+        invalidateServer: async () => {},
+        closeAll: async () => {},
+      } as any,
+      adapterFactory: () => ({
+        listAgents: async () => [{ id: 'agent-1', name: 'Agent' }],
+        createAgent: async () => ({ id: 'agent-2', name: 'Agent 2' }),
+      }) as any,
+    })
+    const pinned = await runtime.resolveCredentialConfig(created.id, initialServer.id)
+    await writeMcpServers(workspace, [rotatedServer])
+    await updateMcpKey(workspace, created.id, { key: 'key-after-rotation' })
+
+    await runtime.listAgents(created.id, undefined, pinned)
+    await runtime.createAgent(created.id, { name: 'Agent 2' }, undefined, pinned)
+
+    expect(connected).toEqual([
+      { key: 'key-before-rotation', header: 'header-before-rotation' },
+      { key: 'key-before-rotation', header: 'header-before-rotation' },
+    ])
+  })
+
+  test('keeps pinned Agent connections and connection-loss invalidation in the captured workspace after ambient drift', async () => {
+    const firstWorkspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-credential-workspace-a-'))
+    const secondWorkspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-credential-workspace-b-'))
+    workspaces.push(firstWorkspace, secondWorkspace)
+    await writeMcpServers(firstWorkspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const key = await createMcpKey(firstWorkspace, {
+      mcp_server_id: 'buda', key: 'workspace-a-key', description: '账号',
+    })
+    let ambientWorkspace = firstWorkspace
+    const managerWorkspaces: string[] = []
+    const invalidationWorkspaces: string[] = []
+    let activeClient: any = {
+      listTools: async () => [],
+      callTool: async () => { throw connectionLostError() },
+    }
+    const recoveredClient = {
+      listTools: async () => [],
+      callTool: async () => ({ content: [] }),
+    }
+    const runtime = createMcpRuntime(() => ambientWorkspace, {
+      manager: {
+        async get(workspace: string) {
+          managerWorkspaces.push(workspace)
+          return activeClient
+        },
+        async invalidateIfCurrent(workspace: string, _serverId: string, _keyId: number, client: unknown) {
+          invalidationWorkspaces.push(workspace)
+          if (client === activeClient) activeClient = recoveredClient
+        },
+        invalidate: async () => {},
+        invalidateServer: async () => {},
+        closeAll: async () => {},
+      } as any,
+      adapterFactory: (_adapterId, client) => ({
+        async listAgents(options: any) {
+          await client.callTool('list-agents', {}, { ...options, operation: 'read_safe' })
+          return []
+        },
+        async createAgent(_input: any, options: any) {
+          await client.callTool('create-agent', {}, { ...options, operation: 'mutation' })
+          return { id: 'agent-2', name: 'Agent 2' }
+        },
+      }) as any,
+    })
+    const pinned = await runtime.resolveCredentialConfig(key.id, 'buda')
+
+    ambientWorkspace = secondWorkspace
+    await runtime.listAgents(key.id, undefined, pinned)
+    await runtime.createAgent(key.id, { name: 'Agent 2' }, undefined, pinned)
+
+    expect(managerWorkspaces.length).toBeGreaterThan(0)
+    expect(new Set(managerWorkspaces)).toEqual(new Set([firstWorkspace]))
+    expect(invalidationWorkspaces).toEqual([firstWorkspace])
   })
 
   test('reconnects once and replays a read-safe call after connection loss', async () => {
