@@ -26,6 +26,7 @@ function fakeSdkFactory(options: {
   toolErrorContent?: unknown[]
   connectError?: Error
   callError?: Error
+  onCall?: () => void
   tools?: any[]
   serverVersion?: Record<string, unknown>
   capabilities?: Record<string, unknown>
@@ -48,6 +49,7 @@ function fakeSdkFactory(options: {
     },
     async callTool(params: unknown, requestOptions?: unknown) {
       capture.calls.push({ params, requestOptions })
+      options.onCall?.()
       if (options.callError) throw options.callError
       return {
         content: options.toolErrorContent || [{ type: 'text', text: options.toolError ? 'bad' : 'ok' }],
@@ -143,7 +145,7 @@ describe('generic MCP client', () => {
     const client = createMcpClient({
       server: BUDA_MCP_SERVER_TEMPLATE,
       key,
-      sdkFactory: fakeSdkFactory({ callError: new Error('aborted') }).factory,
+      sdkFactory: fakeSdkFactory({ callError: new DOMException('aborted', 'AbortError') }).factory,
     })
     await client.connect()
     controller.abort(deadlineError)
@@ -152,6 +154,30 @@ describe('generic MCP client', () => {
       operation: 'read_safe',
       signal: controller.signal,
     })).rejects.toBe(deadlineError)
+  })
+
+  test('preserves an earlier ProtocolError when the deadline aborts in a later microtask', async () => {
+    const controller = new AbortController()
+    const deadlineError = new McpError('MCP_GENERATION_TIMEOUT', 'MCP 正文生成超过总时限')
+    const callError = new ProtocolError(INTERNAL_ERROR, 'invalid session state')
+    const client = createMcpClient({
+      server: BUDA_MCP_SERVER_TEMPLATE,
+      key,
+      sdkFactory: fakeSdkFactory({
+        callError,
+        onCall: () => queueMicrotask(() => controller.abort(deadlineError)),
+      }).factory,
+    })
+    await client.connect()
+
+    await expect(client.callTool('allowed', {}, {
+      operation: 'read_safe',
+      signal: controller.signal,
+    })).rejects.toMatchObject({
+      code: 'MCP_TOOL_ERROR',
+      message: expect.stringContaining('invalid session state'),
+    })
+    expect(controller.signal.aborted).toBe(true)
   })
 
   test('scrubs reflected credentials from connection and tool errors while preserving stable metadata', async () => {

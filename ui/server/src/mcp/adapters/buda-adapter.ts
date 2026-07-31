@@ -1,4 +1,4 @@
-import { McpError } from '../errors'
+import { isAbortRelatedError, McpError } from '../errors'
 import { mcpResultData, buildBudaDriveSnapshot, syncBudaDriveSnapshot } from './buda-drive'
 import { resolveBudaTools, type BudaToolMap } from './buda-tool-map'
 import type { McpOperationKind, McpOperationOptions } from '../types'
@@ -192,6 +192,7 @@ export class BudaAdapter implements ProseMcpAdapter {
       input.deadline.throwIfAborted()
       await progress('mcp_capabilities')
       tools = await this.resolveTools(remoteOptions())
+      input.deadline.throwIfAborted()
       await progress('mcp_capabilities', 'success')
 
       await progress('mcp_drive_sync')
@@ -211,6 +212,7 @@ export class BudaAdapter implements ProseMcpAdapter {
         deadline: input.deadline,
         toolTimeoutMs: input.server.tool_timeout_ms,
       })
+      input.deadline.throwIfAborted()
       await input.onProgress?.({
         stage: 'mcp_drive_sync',
         status: 'success',
@@ -226,13 +228,14 @@ export class BudaAdapter implements ProseMcpAdapter {
         chapterTitle: input.chapter?.title,
         paragraphTask: input.paragraphTask,
       })
-      const created = mcpResultData(await this.client.callTool(tools.createSession, {
+      const createResult = await this.client.callTool(tools.createSession, {
         agentId: input.agentId,
         message: `MangaForge 请求 ${input.requestId} 已建立；请等待同一 Session 的完整章节任务。`,
         title: `MangaForge 第${input.chapterNo}章 ${input.requestId}`,
         mode: 'agent',
         startRun: false,
-      }, callOptions('mutation')))
+      }, callOptions('mutation'))
+      const created = mcpResultData(createResult)
       activeSessionId = sessionId(created)
       if (!activeSessionId) throw new McpError('MCP_SESSION_FAILED', 'Buda 未返回 Session 标识')
       await input.onProgress?.({
@@ -243,6 +246,7 @@ export class BudaAdapter implements ProseMcpAdapter {
         session_id: activeSessionId,
         snapshot_hash: snapshot.snapshotHash,
       })
+      input.deadline.throwIfAborted()
       await this.client.callTool(tools.sendSessionMessage, {
         agentId: input.agentId,
         sessionId: activeSessionId,
@@ -250,16 +254,19 @@ export class BudaAdapter implements ProseMcpAdapter {
         mode: 'agent',
         startRun: true,
       }, callOptions('mutation'))
+      input.deadline.throwIfAborted()
       await progress('mcp_session_create', 'success')
 
       await progress('mcp_session_wait')
       let interval = Math.max(1, input.server.poll_initial_ms)
       while (true) {
         input.deadline.throwIfAborted()
-        const sessionData = mcpResultData(await this.client.callTool(tools.getSession, {
+        const sessionResult = await this.client.callTool(tools.getSession, {
           agentId: input.agentId,
           sessionId: activeSessionId,
-        }, callOptions('read_safe')))
+        }, callOptions('read_safe'))
+        input.deadline.throwIfAborted()
+        const sessionData = mcpResultData(sessionResult)
         const status = sessionStatus(sessionData)
         if (status === 'pending' || status === 'in_progress') {
           await progress('mcp_session_wait', 'running', status)
@@ -273,9 +280,11 @@ export class BudaAdapter implements ProseMcpAdapter {
         if (status === 'cancelled') throw new McpError('MCP_CANCELLED', 'Buda Session 已取消')
         if (status !== 'completed') throw new McpError('MCP_SESSION_FAILED', `Buda Session 返回未知状态：${status || 'empty'}`)
         await progress('mcp_session_wait', 'success', status)
+        input.deadline.throwIfAborted()
         await progress('mcp_extract')
         const proseChapters = extractBudaProse(sessionData, input.chapterNo)
         await progress('mcp_extract', 'success')
+        input.deadline.throwIfAborted()
         return {
           prose_chapters: proseChapters,
           source: 'mcp',
@@ -289,7 +298,7 @@ export class BudaAdapter implements ProseMcpAdapter {
       }
     } catch (error) {
       let deadlineCause: unknown
-      if (input.deadline.signal.aborted) {
+      if (input.deadline.signal.aborted && isAbortRelatedError(error, input.deadline.signal)) {
         try { input.deadline.throwIfAborted() } catch (cause) { deadlineCause = cause }
       }
       const cancelled = (deadlineCause instanceof McpError && deadlineCause.code === 'MCP_CANCELLED')

@@ -2,7 +2,7 @@ import { createHash } from 'crypto'
 import { appendNovelRun, updateNovelRun } from '../../novel'
 import { readMcpKeys } from '../../mcp/key-store'
 import type { McpRuntime } from '../../mcp/runtime'
-import { McpError, isMcpError } from '../../mcp/errors'
+import { isAbortRelatedError, McpError, isMcpError } from '../../mcp/errors'
 import { McpGenerationDeadline } from '../../mcp/deadline'
 import { createMcpSecretScrubber } from '../../mcp/secret-scrubber'
 import { readMcpServers } from '../../mcp/server-store'
@@ -279,6 +279,7 @@ export class McpGenerationSource implements GenerationSource {
           await request.onProgress?.(safeEvent)
         },
       })
+      deadline.throwIfAborted()
       const output = scrubbedProvenance(scrubber, {
         ...progressProvenance,
         session_id: boundedScrubbedId(scrubber, result.session_id),
@@ -289,6 +290,7 @@ export class McpGenerationSource implements GenerationSource {
         status: 'success',
         output_ref: JSON.stringify(output),
       })
+      deadline.throwIfAborted()
       const { prose_chapters: proseChapters, ...resultMetadata } = result
       return {
         ...scrubber.scrubValue(resultMetadata),
@@ -301,7 +303,7 @@ export class McpGenerationSource implements GenerationSource {
       }
     } catch (error) {
       let exposedError = error
-      if (deadline?.signal.aborted) {
+      if (deadline?.signal.aborted && isAbortRelatedError(error, deadline.signal)) {
         try { deadline.throwIfAborted() } catch (cause) { exposedError = cause }
       }
       const scrubbedError = scrubGenerationError(exposedError, scrubber)

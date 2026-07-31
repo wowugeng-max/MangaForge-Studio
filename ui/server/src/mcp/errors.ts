@@ -36,6 +36,15 @@ export function isMcpError(error: unknown): error is McpError {
   return error instanceof McpError
 }
 
+export function isAbortRelatedError(error: unknown, signal?: AbortSignal) {
+  if (signal && error === signal.reason) return true
+  if (isMcpError(error)) {
+    return error.code === 'MCP_CANCELLED' || error.code === 'MCP_GENERATION_TIMEOUT'
+  }
+  if (!error || typeof error !== 'object') return false
+  return (error as any).name === 'AbortError' || (error as any).code === 'ABORT_ERR'
+}
+
 export function asMcpError(error: unknown, fallbackCode: McpErrorCode = 'MCP_TOOL_ERROR') {
   if (isMcpError(error)) return error
   return new McpError(fallbackCode, String((error as any)?.message || error || 'MCP 操作失败'))

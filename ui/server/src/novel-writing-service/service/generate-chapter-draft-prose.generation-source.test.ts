@@ -27,6 +27,7 @@ describe('chapter draft GenerationSource integration', () => {
     let remotePrompt = ''
     let adapter: any
     const mcpRuntime = {
+      resolveCredentialConfig: async (_keyId: number, _serverId: string, snapshot: unknown) => snapshot,
       listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }],
       getAdapterForKey: async () => ({ server: BUDA_MCP_SERVER_TEMPLATE, key: { id: 1 }, adapter }),
     }
@@ -173,6 +174,7 @@ describe('chapter draft GenerationSource integration', () => {
       let harness: Awaited<ReturnType<typeof createProsePipelineHarness>>
       let bindingChanged = false
       const mcpRuntime = {
+        resolveCredentialConfig: async (_keyId: number, _serverId: string, snapshot: unknown) => snapshot,
         listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }],
         getAdapterForKey: async (...args: any[]) => ({ ...args[3], adapter }),
       }

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { BudaAdapter, buildBudaExecutionEnvelope, extractBudaProse, normalizeBudaAgentList } from './buda-adapter'
 import { BUDA_MCP_SERVER_TEMPLATE } from '../server-store'
 import { McpGenerationDeadline } from '../deadline'
+import { McpError } from '../errors'
 
 const toolNames = [
   'apiClaw.listApiAgents',
@@ -166,6 +167,74 @@ describe('BudaAdapter', () => {
       },
     }))).rejects.toThrow('receipt write failed')
 
+    expect(fake.calls.filter(call => call.name.endsWith('postApiAgentSessionMessage'))).toHaveLength(0)
+  })
+
+  test('preserves a session receipt failure when caller cancellation arrives later', async () => {
+    const caller = new AbortController()
+    const storeError = new McpError('MCP_STORE_IO_FAILED', 'session receipt write failed')
+    const fake = createFakeClient()
+    const adapter = new BudaAdapter(fake.client as any)
+
+    await expect(adapter.generateProse(generationInput({
+      signal: caller.signal,
+      onProgress: async (event: any) => {
+        if (event.stage !== 'session_created') return
+        queueMicrotask(() => caller.abort())
+        await Promise.resolve()
+        throw storeError
+      },
+    }))).rejects.toBe(storeError)
+
+    expect(caller.signal.aborted).toBe(true)
+    expect(fake.calls.filter(call => call.name.endsWith('postApiAgentSessionMessage'))).toHaveLength(0)
+  })
+
+  test('rejects a completed final response when the clock reaches the exact deadline before its timer fires', async () => {
+    let now = 0
+    const deadline = new McpGenerationDeadline(100, undefined, {
+      now: () => now,
+      setTimeout: () => 1,
+      clearTimeout: () => {},
+    })
+    const fake = createFakeClient(['completed'])
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      const result = await original(name, args, options)
+      if (name.endsWith('getApiAgentSession')) now = 100
+      return result
+    }
+    const adapter = new BudaAdapter(fake.client as any)
+
+    await expect(adapter.generateProse(generationInput({ deadline })))
+      .rejects.toMatchObject({ code: 'MCP_GENERATION_TIMEOUT' })
+  })
+
+  test('receipts a Session created at the exact deadline before rejecting without send', async () => {
+    let now = 0
+    const deadline = new McpGenerationDeadline(100, undefined, {
+      now: () => now,
+      setTimeout: () => 1,
+      clearTimeout: () => {},
+    })
+    const fake = createFakeClient()
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      const result = await original(name, args, options)
+      if (name.endsWith('createApiAgentSession')) now = 100
+      return result
+    }
+    const receipts: string[] = []
+    const adapter = new BudaAdapter(fake.client as any)
+
+    await expect(adapter.generateProse(generationInput({
+      deadline,
+      onProgress: async (event: any) => {
+        if (event.stage === 'session_created') receipts.push(event.session_id)
+      },
+    }))).rejects.toMatchObject({ code: 'MCP_GENERATION_TIMEOUT' })
+
+    expect(receipts).toEqual(['session-1'])
     expect(fake.calls.filter(call => call.name.endsWith('postApiAgentSessionMessage'))).toHaveLength(0)
   })
 

@@ -18,6 +18,16 @@ type ConnectionWaitOptions = {
   timeoutMs?: number
 }
 
+type ManagerTimers = {
+  setTimeout: (callback: () => void, delayMs: number) => unknown
+  clearTimeout: (handle: unknown) => void
+}
+
+const systemTimers: ManagerTimers = {
+  setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
+  clearTimeout: handle => clearTimeout(handle as ReturnType<typeof setTimeout>),
+}
+
 function normalizeWaitOptions(options?: AbortSignal | ConnectionWaitOptions): ConnectionWaitOptions {
   if (options && typeof (options as AbortSignal).addEventListener === 'function') {
     return { signal: options as AbortSignal }
@@ -61,9 +71,11 @@ export class McpClientManager {
   private readonly connecting = new Map<string, ConnectionEntry>()
   private readonly retired = new Map<string, Set<ConnectionEntry>>()
   private readonly createClient: typeof createMcpClient
+  private readonly timers: ManagerTimers
 
-  constructor(options: { createClient?: typeof createMcpClient } = {}) {
+  constructor(options: { createClient?: typeof createMcpClient, timers?: ManagerTimers } = {}) {
     this.createClient = options.createClient || createMcpClient
+    this.timers = options.timers || systemTimers
   }
 
   async get(
@@ -151,7 +163,7 @@ export class McpClientManager {
     if (signal?.aborted) throw cancellationReason(signal)
     entry.waiters += 1
     let onAbort: (() => void) | undefined
-    let timeout: ReturnType<typeof setTimeout> | undefined
+    let timeout: unknown
     try {
       const waiters: Promise<GenericMcpClient>[] = [entry.promise]
       if (signal) {
@@ -162,15 +174,15 @@ export class McpClientManager {
       }
       if (timeoutMs !== undefined) {
         waiters.push(new Promise<never>((_, reject) => {
-          timeout = setTimeout(() => {
+          timeout = this.timers.setTimeout(() => {
             reject(new McpError('MCP_CONNECT_TIMEOUT', '连接 MCP 服务超时'))
           }, Math.max(1, timeoutMs))
-          timeout.unref?.()
+          ;(timeout as any)?.unref?.()
         }))
       }
       return await Promise.race(waiters)
     } finally {
-      if (timeout) clearTimeout(timeout)
+      if (timeout !== undefined) this.timers.clearTimeout(timeout)
       if (onAbort && signal) signal.removeEventListener('abort', onAbort)
       entry.waiters -= 1
       if (entry.waiters === 0 && !entry.settled && entry.client.state !== 'Ready') {

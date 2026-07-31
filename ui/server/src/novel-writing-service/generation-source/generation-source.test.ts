@@ -163,18 +163,25 @@ describe('McpGenerationSource', () => {
       },
     })
     const events: string[] = []
+    const caller = new AbortController()
     const adapter = {
       listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }],
       generateProse: async (input: any) => {
         const db = new Database(join(workspace, 'novel.sqlite'))
         db.run("DELETE FROM runs WHERE run_type = 'mcp_generate_prose'")
         db.close()
-        await input.onProgress({
-          stage: 'session_created',
-          status: 'running',
-          session_id: 'session-1',
-          snapshot_hash: 'snapshot-1',
-        })
+        try {
+          await input.onProgress({
+            stage: 'session_created',
+            status: 'running',
+            session_id: 'session-1',
+            snapshot_hash: 'snapshot-1',
+          })
+        } catch (error) {
+          queueMicrotask(() => caller.abort())
+          await Promise.resolve()
+          throw error
+        }
         events.push('send')
         throw new Error('send should not be reached')
       },
@@ -185,9 +192,14 @@ describe('McpGenerationSource', () => {
       getAdapterForKey: async () => ({ server, key, adapter }),
     } as any)
 
-    await expect(source.generateProse(sourceRequest({ activeWorkspace: workspace, project }))).rejects.toThrow()
+    await expect(source.generateProse(sourceRequest({
+      activeWorkspace: workspace,
+      project,
+      signal: caller.signal,
+    }))).rejects.toMatchObject({ code: 'MCP_STORE_IO_FAILED' })
 
     expect(events).toEqual([])
+    expect(caller.signal.aborted).toBe(true)
   })
 
   test('starts the total deadline before remote connection and tool discovery', async () => {
@@ -276,10 +288,57 @@ describe('McpGenerationSource', () => {
     }))).rejects.toMatchObject({ code: 'MCP_CANCELLED' })
   })
 
+  test('does not commit success when the Adapter returns at the exact total deadline', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-final-deadline-'))
+    workspaces.push(workspace)
+    const server = { ...BUDA_MCP_SERVER_TEMPLATE, generation_timeout_ms: 100 }
+    await writeMcpServers(workspace, [server])
+    const key = await createMcpKey(workspace, { mcp_server_id: server.id, key: 'sk_final_deadline', description: '账号' })
+    const project = await createNovelProject(workspace, {
+      title: 'Final deadline',
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: { server_id: server.id, key_id: key.id, adapter_id: server.adapter_id, agent_id: 'agent-1' },
+        },
+      },
+    })
+    let now = 0
+    const adapter = {
+      listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }],
+      generateProse: async () => {
+        now = 100
+        return {
+          prose_chapters: [{ chapter_no: 12, chapter_text: 'late prose' }],
+          source: 'mcp', adapter_id: 'buda', agent_id: 'agent-1', session_id: 'session-1', snapshot_hash: 'snapshot-1', completed: true,
+          raw: { request_id: 'request-12', session_status: 'completed' },
+        }
+      },
+    }
+    const source = new McpGenerationSource({
+      resolveCredentialConfig: async () => ({ server, key }),
+      listAgents: async () => [],
+      getAdapterForKey: async () => ({ server, key, adapter }),
+    } as any, {
+      createDeadline: (totalMs: number, signal?: AbortSignal) => new McpGenerationDeadline(totalMs, signal, {
+        now: () => now,
+        setTimeout: () => 1,
+        clearTimeout: () => {},
+      }),
+    })
+
+    await expect(source.generateProse(sourceRequest({ activeWorkspace: workspace, project })))
+      .rejects.toMatchObject({ code: 'MCP_GENERATION_TIMEOUT' })
+
+    const [receipt] = (await listNovelRuns(workspace, project.id)).filter(run => run.run_type === 'mcp_generate_prose')
+    expect(receipt).toMatchObject({ status: 'failed' })
+  })
+
   test('passes one shrinking deadline through adapter discovery and binding validation', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-shared-deadline-'))
     workspaces.push(workspace)
-    const server = { ...BUDA_MCP_SERVER_TEMPLATE, startup_timeout_ms: 5_000, tool_timeout_ms: 60_000, generation_timeout_ms: 100_000 }
+    const server = { ...BUDA_MCP_SERVER_TEMPLATE, startup_timeout_ms: 5_000, tool_timeout_ms: 100_000, generation_timeout_ms: 100_000 }
     await writeMcpServers(workspace, [server])
     const key = await createMcpKey(workspace, { mcp_server_id: server.id, key: 'sk_shared_deadline', description: '账号' })
     const project = await createNovelProject(workspace, {
@@ -294,10 +353,10 @@ describe('McpGenerationSource', () => {
     })
     let now = 50_000
     let deadline!: McpGenerationDeadline
-    const observed: any[] = []
+    const observed: Array<{ signal: AbortSignal, timeoutMs: number }> = []
     const adapter = {
       listAgents: async (options: any) => {
-        observed.push(options)
+        observed.push({ signal: options.signal, timeoutMs: options.timeoutMs })
         now += 1_000
         return [{ id: 'agent-1', name: '正文 Agent' }]
       },
@@ -314,7 +373,7 @@ describe('McpGenerationSource', () => {
       resolveCredentialConfig: async () => ({ server, key }),
       listAgents: async () => { throw new Error('must use pinned adapter') },
       getAdapterForKey: async (_keyId: number, _serverId: string, options: any) => {
-        observed.push(options)
+        observed.push({ signal: options.signal, timeoutMs: options.timeoutMs })
         now += 1_000
         return { server, key, adapter }
       },
@@ -333,7 +392,7 @@ describe('McpGenerationSource', () => {
     await source.generateProse(sourceRequest({ activeWorkspace: workspace, project }))
 
     expect(observed.every(options => options.signal === deadline.signal)).toBe(true)
-    expect(observed.map(options => options.timeoutMs)).toEqual([5_000, 60_000, 60_000])
+    expect(observed.map(options => options.timeoutMs)).toEqual([5_000, 99_000, 98_000])
   })
 
   test('sends the exact compiled task, stores bounded receipt provenance, and never calls a model', async () => {

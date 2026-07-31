@@ -7,7 +7,7 @@ import {
   type CallToolResult,
   type StreamableHTTPClientTransportOptions,
 } from '@modelcontextprotocol/client'
-import { McpError } from './errors'
+import { isAbortRelatedError, McpError } from './errors'
 import { createMcpSecretScrubber } from './secret-scrubber'
 import type {
   McpClientState,
@@ -230,6 +230,10 @@ export class GenericMcpClient {
     if (!this.tools.some(tool => tool.name === name)) {
       throw new McpError('MCP_CAPABILITY_MISSING', `MCP 工具不可用：${name}`, { tool_name: name })
     }
+    if (options.signal?.aborted) {
+      if (options.signal.reason instanceof McpError) throw options.signal.reason
+      throw new McpError('MCP_CANCELLED', 'MCP 工具调用已取消', { tool_name: name })
+    }
     const timeout = options.timeoutMs || this.options.server.tool_timeout_ms
     try {
       const result = normalizeToolResult(await sdk.callTool(
@@ -244,7 +248,7 @@ export class GenericMcpClient {
       }
       return result
     } catch (error) {
-      if (options.signal?.aborted) {
+      if (options.signal?.aborted && isAbortRelatedError(error, options.signal)) {
         if (options.signal.reason instanceof McpError) throw options.signal.reason
         throw new McpError('MCP_CANCELLED', 'MCP 工具调用已取消', { tool_name: name })
       }

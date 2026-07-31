@@ -15,6 +15,30 @@ function deferred<T = void>() {
   return { promise, resolve, reject }
 }
 
+function manualTimers() {
+  let now = 0
+  let nextId = 1
+  const timers = new Map<number, { at: number, callback: () => void }>()
+  return {
+    setTimeout(callback: () => void, delayMs: number) {
+      const id = nextId++
+      timers.set(id, { at: now + delayMs, callback })
+      return id
+    },
+    clearTimeout(handle: unknown) { timers.delete(Number(handle)) },
+    advance(ms: number) {
+      now += ms
+      for (const [id, timer] of [...timers]) {
+        if (timer.at <= now) {
+          timers.delete(id)
+          timer.callback()
+        }
+      }
+    },
+    count: () => timers.size,
+  }
+}
+
 async function waitForGateOrAbort(gate: Promise<void>, signal?: AbortSignal) {
   if (!signal) return gate
   if (signal.aborted) throw new McpError('MCP_CANCELLED', '连接已取消')
@@ -72,6 +96,44 @@ describe('McpClientManager', () => {
 
     await expect(pending).rejects.toBe(deadlineError)
     setup.resolve()
+    await manager.closeAll()
+  })
+
+  test('times out one waiter without affecting a longer waiter or leaving a late timer rejection', async () => {
+    const setup = deferred()
+    const started = deferred()
+    let managerSignal: AbortSignal | undefined
+    const client = {
+      state: 'Closed',
+      async connect(signal?: AbortSignal) {
+        managerSignal = signal
+        started.resolve()
+        await setup.promise
+        this.state = 'Ready'
+      },
+      async close() { this.state = 'Closed' },
+    }
+    const timers = manualTimers()
+    const manager = new McpClientManager({ createClient: () => client as any, timers })
+    const server = { id: 'buda' } as any
+    const key = { id: 1 } as any
+    const first = manager.get('/workspace/a', server, key, { timeoutMs: 10 })
+      .then(value => ({ value }), error => ({ error }))
+    const second = manager.get('/workspace/a', server, key, { timeoutMs: 100 })
+      .then(value => ({ value }), error => ({ error }))
+    await started.promise
+
+    timers.advance(10)
+    await Promise.resolve()
+    setup.resolve()
+    const [firstOutcome, secondOutcome] = await Promise.all([first, second])
+    timers.advance(100)
+    await Promise.resolve()
+
+    expect(firstOutcome.error).toMatchObject({ code: 'MCP_CONNECT_TIMEOUT' })
+    expect(secondOutcome).toEqual({ value: client })
+    expect(managerSignal?.aborted).toBe(false)
+    expect(timers.count()).toBe(0)
     await manager.closeAll()
   })
 
