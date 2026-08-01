@@ -19,6 +19,7 @@ export type McpProjectBinding = {
   key_id: number
   adapter_id: string
   agent_id: string
+  model: string
 }
 
 export type McpProseGenerationSourceConfig = {
@@ -46,13 +47,23 @@ export function assertNoProseGenerationSourceMutation(referenceConfig: unknown) 
 }
 
 export function normalizeMcpProjectBinding(value: any): McpProjectBinding {
+  const model = String(value?.model ?? '').trim()
+  if (model.length > 160) {
+    throw new McpError('MCP_BINDING_INVALID', 'MCP model 最多 160 个字符')
+  }
   const binding = {
     server_id: String(value?.server_id ?? value?.serverId ?? '').trim(),
     key_id: Number(value?.key_id ?? value?.keyId ?? 0),
     adapter_id: String(value?.adapter_id ?? value?.adapterId ?? '').trim(),
     agent_id: String(value?.agent_id ?? value?.agentId ?? '').trim(),
+    model,
   }
-  const missing = Object.entries(binding)
+  const missing = Object.entries({
+    server_id: binding.server_id,
+    key_id: binding.key_id,
+    adapter_id: binding.adapter_id,
+    agent_id: binding.agent_id,
+  })
     .filter(([, item]) => !item)
     .map(([key]) => key)
   if (missing.length) {
@@ -103,6 +114,7 @@ export function proseGenerationSourceFingerprint(source: ProseGenerationSourceCo
         source.mcp.key_id,
         source.mcp.adapter_id,
         source.mcp.agent_id,
+        source.mcp.model,
       ]
   return `sha256:${createHash('sha256').update(JSON.stringify(identity), 'utf8').digest('hex')}`
 }

@@ -6,6 +6,7 @@ export type GenerationSourceForm = {
   keyId?: number
   adapterId?: string
   agentId?: string
+  model?: string
 }
 
 export function formatMcpGenerationFailure(payload: any) {
@@ -56,6 +57,7 @@ export function buildSourcePayload(form: GenerationSourceForm): { source: ProseG
         key_id: Number(form.keyId),
         adapter_id: String(form.adapterId),
         agent_id: String(form.agentId),
+        model: String(form.model || '').trim(),
       },
     },
   }
@@ -70,9 +72,10 @@ export function sourceFormFromConfig(source?: Partial<ProseGenerationSourceConfi
       keyId: Number(binding.key_id || 0),
       adapterId: String(binding.adapter_id || ''),
       agentId: String(binding.agent_id || ''),
+      model: String(binding.model || '').trim(),
     }
   }
-  return { type: 'model', serverId: '', keyId: 0, adapterId: '', agentId: '' }
+  return { type: 'model', serverId: '', keyId: 0, adapterId: '', agentId: '', model: '' }
 }
 
 export function filterKeysForServer(keys: McpPublicKey[], serverId: string) {
@@ -81,7 +84,7 @@ export function filterKeysForServer(keys: McpPublicKey[], serverId: string) {
 
 export function bindingFingerprint(form: GenerationSourceForm) {
   if (!isCompleteMcpSource(form)) return ''
-  return [form.serverId, Number(form.keyId), form.adapterId, form.agentId].join('\u0000')
+  return [form.serverId, Number(form.keyId), form.adapterId, form.agentId, String(form.model || '').trim()].join('\u0000')
 }
 
 export function canSaveGenerationSource(form: GenerationSourceForm, testedFingerprint: string) {

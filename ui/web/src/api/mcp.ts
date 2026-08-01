@@ -73,7 +73,7 @@ export type McpKeyPayload = {
 
 export type ProseGenerationSourceConfig =
   | { version: 'prose_generation_source_v1'; type: 'model' }
-  | { version: 'prose_generation_source_v1'; type: 'mcp'; mcp: { server_id: string; key_id: number; adapter_id: string; agent_id: string } }
+  | { version: 'prose_generation_source_v1'; type: 'mcp'; mcp: { server_id: string; key_id: number; adapter_id: string; agent_id: string; model?: string } }
 
 export const mcpApi = {
   listQuarantines: () => apiClient.get<McpAgentQuarantine[]>('/mcp/quarantines'),

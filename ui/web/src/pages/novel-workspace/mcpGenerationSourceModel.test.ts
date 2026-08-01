@@ -69,13 +69,23 @@ describe('project MCP generation source model', () => {
       source: {
         version: 'prose_generation_source_v1',
         type: 'mcp',
-        mcp: { server_id: 'buda', key_id: 3, adapter_id: 'buda', agent_id: 'agent_1' },
+        mcp: { server_id: 'buda', key_id: 3, adapter_id: 'buda', agent_id: 'agent_1', model: '' },
       },
+    })
+    expect(buildSourcePayload({
+      type: 'mcp',
+      serverId: 'buda',
+      keyId: 3,
+      adapterId: 'buda',
+      agentId: 'agent_1',
+      model: '  model-x  ',
+    })).toMatchObject({
+      source: { type: 'mcp', mcp: { model: 'model-x' } },
     })
   })
 
   test('requires a complete tested binding before MCP save', () => {
-    const form = { type: 'mcp' as const, serverId: 'buda', keyId: 3, adapterId: 'buda', agentId: 'agent_1' }
+    const form = { type: 'mcp' as const, serverId: 'buda', keyId: 3, adapterId: 'buda', agentId: 'agent_1', model: '' }
     expect(isCompleteMcpSource(form)).toBe(true)
     expect(canSaveGenerationSource(form, '')).toBe(false)
     expect(canSaveGenerationSource(form, bindingFingerprint(form))).toBe(true)
@@ -96,9 +106,27 @@ describe('project MCP generation source model', () => {
     expect(sourceFormFromConfig({
       type: 'mcp',
       mcp: { server_id: 'buda', key_id: 8, adapter_id: 'buda', agent_id: 'agent-x' },
-    })).toEqual({ type: 'mcp', serverId: 'buda', keyId: 8, adapterId: 'buda', agentId: 'agent-x' })
-    expect(sourceFormFromConfig(undefined)).toEqual({ type: 'model', serverId: '', keyId: 0, adapterId: '', agentId: '' })
+    })).toEqual({ type: 'mcp', serverId: 'buda', keyId: 8, adapterId: 'buda', agentId: 'agent-x', model: '' })
+    expect(sourceFormFromConfig({
+      type: 'mcp',
+      mcp: { server_id: 'buda', key_id: 8, adapter_id: 'buda', agent_id: 'agent-x', model: ' model-x ' },
+    })).toMatchObject({ model: 'model-x' })
+    expect(sourceFormFromConfig(undefined)).toEqual({ type: 'model', serverId: '', keyId: 0, adapterId: '', agentId: '', model: '' })
     expect(buildTemporaryModelOverride()).toEqual({ generation_source_override: 'model' })
+  })
+
+  test('includes the Buda model in the tested binding identity', () => {
+    const form = {
+      type: 'mcp' as const,
+      serverId: 'buda',
+      keyId: 3,
+      adapterId: 'buda',
+      agentId: 'agent_1',
+    }
+    expect(bindingFingerprint({ ...form, model: 'model-y' }))
+      .not.toBe(bindingFingerprint({ ...form, model: 'model-x' }))
+    expect(bindingFingerprint({ ...form, model: '  model-x  ' }))
+      .toBe(bindingFingerprint({ ...form, model: 'model-x' }))
   })
 
   test('builds immutable generic reference-config write payloads without dedicated sources', async () => {

@@ -6,6 +6,7 @@ import { createNovelProject } from '../../novel'
 import { createMcpKey } from '../../mcp/key-store'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from '../../mcp/server-store'
 import {
+  normalizeMcpProjectBinding,
   normalizeProseGenerationSource,
   proseGenerationSourceFingerprint,
   resolveProseGenerationSource,
@@ -81,8 +82,30 @@ describe('prose generation source config', () => {
     })).toEqual({
       version: 'prose_generation_source_v1',
       type: 'mcp',
-      mcp: { server_id: 'buda', key_id: 3, adapter_id: 'buda', agent_id: 'agent-1' },
+      mcp: { server_id: 'buda', key_id: 3, adapter_id: 'buda', agent_id: 'agent-1', model: '' },
     })
+    expect(normalizeProseGenerationSource({
+      version: 'prose_generation_source_v1',
+      type: 'mcp',
+      mcp: {
+        server_id: 'buda',
+        key_id: 3,
+        adapter_id: 'buda',
+        agent_id: 'agent-1',
+        model: '  model-x  ',
+      },
+    })).toEqual({
+      version: 'prose_generation_source_v1',
+      type: 'mcp',
+      mcp: { server_id: 'buda', key_id: 3, adapter_id: 'buda', agent_id: 'agent-1', model: 'model-x' },
+    })
+    expect(() => normalizeMcpProjectBinding({
+      server_id: 'buda',
+      key_id: 3,
+      adapter_id: 'buda',
+      agent_id: 'agent-1',
+      model: 'x'.repeat(161),
+    })).toThrow(expect.objectContaining({ code: 'MCP_BINDING_INVALID' }))
     expect(() => normalizeProseGenerationSource({
       version: 'prose_generation_source_v1',
       type: 'mcp',
@@ -120,6 +143,7 @@ describe('prose generation source config', () => {
       { ...source.mcp, key_id: 4 },
       { ...source.mcp, adapter_id: 'other' },
       { ...source.mcp, agent_id: 'agent-2' },
+      { ...source.mcp, model: 'model-x' },
     ]) {
       expect(proseGenerationSourceFingerprint({ ...source, mcp })).not.toBe(fingerprint)
     }
