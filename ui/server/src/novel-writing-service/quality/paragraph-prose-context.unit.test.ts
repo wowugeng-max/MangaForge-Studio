@@ -7,6 +7,28 @@ import {
 } from './paragraph-prose-context'
 
 describe('projectSceneCardForProseCorePrompt clip', () => {
+  test('keeps longer agency and expected-state facts that share an explicit-field prefix', () => {
+    const action = '江澈撞进第二层封锁线'
+    const agency = `${action}，再主动砸断路灯制造盲区${'并迫使追兵改道'.repeat(40)}`
+    const stateDelta = '追捕方失去统一指挥'
+    const expectedState = `${stateDelta}，并因备用频道暴露而开始内讧${'同时撤回外围岗哨'.repeat(40)}`
+    const card = projectSceneCardForProseCorePrompt({
+      action,
+      protagonist_agency_action: agency,
+      state_delta: stateDelta,
+      expected_state_change: expectedState,
+    })
+
+    expect(card.action).toBe(action)
+    expect(card.protagonist_agency_action).toBeDefined()
+    expect(String(card.protagonist_agency_action).length).toBe(280)
+    expect(String(card.protagonist_agency_action).endsWith('…')).toBe(true)
+    expect(card.state_delta).toBe(stateDelta)
+    expect(card.expected_state_change).toBeDefined()
+    expect(String(card.expected_state_change).length).toBe(280)
+    expect(String(card.expected_state_change).endsWith('…')).toBe(true)
+  })
+
   test('deduplicates identical action and state aliases under their explicit labels', () => {
     const action = 'ACTION_ALIAS_SENTINEL：撞进第二层封锁线'
     const state = 'STATE_ALIAS_SENTINEL：追捕方失去统一指挥'

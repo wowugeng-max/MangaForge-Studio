@@ -166,15 +166,10 @@ function requiredProseDedupeText(value: any) {
 }
 
 function isDuplicateRequiredProseText(left: any, right: any) {
-  const leftRaw = requiredProsePromptText(left)
-  const rightRaw = requiredProsePromptText(right)
-  if (!leftRaw || !rightRaw) return false
-  const leftText = requiredProseDedupeText(leftRaw)
-  const rightText = requiredProseDedupeText(rightRaw)
+  const leftText = requiredProseDedupeText(left)
+  const rightText = requiredProseDedupeText(right)
   if (!leftText || !rightText) return false
-  if (leftText === rightText) return true
-  return (leftRaw.endsWith('…') || rightRaw.endsWith('…'))
-    && (leftText.startsWith(rightText) || rightText.startsWith(leftText))
+  return leftText === rightText
 }
 
 function uniqueRequiredProseTexts(values: any[], maxItems = PROSE_CORE_SCENE_LIST_MAX, maxText = PROSE_CORE_SCENE_TEXT_MAX) {
@@ -219,19 +214,28 @@ function compactRequiredProseValue(value: any, depth = 0): any {
 
 export function projectSceneCardForProseCorePrompt(card: any) {
   if (!card || typeof card !== 'object') return {}
-  const action = clipRequiredProseText(
-    firstRequiredProseText(card.action, card.beat, card.protagonist_action, card.protagonistAction),
+  const actionSource = firstRequiredProseText(
+    card.action,
+    card.beat,
+    card.protagonist_action,
+    card.protagonistAction,
   )
+  const action = clipRequiredProseText(actionSource)
   const turn = clipRequiredProseText(
     card.turn || card.turning_point || card.turningPoint,
   )
   const payoff = clipRequiredProseText(
     card.payoff || card.reader_payoff || card.readerPayoff,
   )
-  const stateDelta = clipRequiredProseText(card.state_delta || card.stateDelta)
-  const protagonistAgencyAction = clipRequiredProseText(
-    card.protagonist_agency_action || card.protagonistAgencyAction || card.agency_action || card.agencyAction,
+  const stateDeltaSource = firstRequiredProseText(card.state_delta, card.stateDelta)
+  const stateDelta = clipRequiredProseText(stateDeltaSource)
+  const protagonistAgencyActionSource = firstRequiredProseText(
+    card.protagonist_agency_action,
+    card.protagonistAgencyAction,
+    card.agency_action,
+    card.agencyAction,
   )
+  const protagonistAgencyAction = clipRequiredProseText(protagonistAgencyActionSource)
   const goal = clipRequiredProseText(firstRequiredProseText(
     card.goal,
     card.scene_goal,
@@ -246,14 +250,14 @@ export function projectSceneCardForProseCorePrompt(card: any) {
     card.opposing_force,
     card.opposingForce,
   ))
-  const explicitExpectedStateChange = clipRequiredProseText(firstRequiredProseText(
+  const explicitExpectedStateChangeSource = firstRequiredProseText(
     card.expected_state_change,
     card.expectedStateChange,
-  ))
-  const eventValueChange = clipRequiredProseText(firstRequiredProseText(
+  )
+  const eventValueChangeSource = firstRequiredProseText(
     card.event_value_change,
     card.eventValueChange,
-  ))
+  )
   const characters = uniqueRequiredProseTexts(
     asArray(card.characters || card.cast || card.character_names || card.characterNames)
       .map((item: any) => (typeof item === 'string' ? item : item?.name || item?.title || item?.label)),
@@ -269,28 +273,27 @@ export function projectSceneCardForProseCorePrompt(card: any) {
     6,
     220,
   )
-  const rawStateChanges = uniqueRequiredProseTexts(
-    asArray(card.state_changes_expected || card.stateChangesExpected),
-    6,
-    220,
-  )
-  let expectedStateChange = ''
-  const stateChanges: string[] = []
-  for (const candidate of [explicitExpectedStateChange, eventValueChange]) {
-    if (!candidate || isDuplicateRequiredProseText(candidate, stateDelta)) continue
-    if (!expectedStateChange) {
-      expectedStateChange = candidate
+  const rawStateChangeSources = asArray(card.state_changes_expected || card.stateChangesExpected)
+    .map(requiredProsePromptText)
+    .filter(Boolean)
+  let expectedStateChangeSource = ''
+  const stateChangeSources: string[] = []
+  for (const candidate of [explicitExpectedStateChangeSource, eventValueChangeSource]) {
+    if (!candidate || isDuplicateRequiredProseText(candidate, stateDeltaSource)) continue
+    if (!expectedStateChangeSource) {
+      expectedStateChangeSource = candidate
       continue
     }
-    const listCandidate = clipRequiredProseText(candidate, 220)
-    if (!isDuplicateRequiredProseText(listCandidate, expectedStateChange)) stateChanges.push(listCandidate)
+    if (!isDuplicateRequiredProseText(candidate, expectedStateChangeSource)) stateChangeSources.push(candidate)
   }
-  for (const candidate of rawStateChanges) {
-    if (stateChanges.length >= PROSE_CORE_SCENE_LIST_MAX) break
-    if ([stateDelta, expectedStateChange, ...stateChanges]
+  for (const candidate of rawStateChangeSources) {
+    if (stateChangeSources.length >= PROSE_CORE_SCENE_LIST_MAX) break
+    if ([stateDeltaSource, expectedStateChangeSource, ...stateChangeSources]
       .some(existing => isDuplicateRequiredProseText(candidate, existing))) continue
-    stateChanges.push(candidate)
+    stateChangeSources.push(candidate)
   }
+  const expectedStateChange = clipRequiredProseText(expectedStateChangeSource)
+  const stateChanges = stateChangeSources.map(candidate => clipRequiredProseText(candidate, 220))
   const projected: Record<string, any> = {
     scene_no: card.scene_no ?? card.sceneNo,
     title: clipRequiredProseText(card.title, 80),
@@ -301,7 +304,7 @@ export function projectSceneCardForProseCorePrompt(card: any) {
     payoff,
     state_delta: stateDelta,
     characters: characters.length ? characters : undefined,
-    protagonist_agency_action: isDuplicateRequiredProseText(protagonistAgencyAction, action)
+    protagonist_agency_action: isDuplicateRequiredProseText(protagonistAgencyActionSource, actionSource)
       ? undefined
       : protagonistAgencyAction,
     no_exit_reason: clipRequiredProseText(card.no_exit_reason || card.noExitReason),
