@@ -431,11 +431,41 @@
 }
 
 .novel-workspace-topbar-meta,
+.novel-workspace-source-status,
 .novel-workspace-task-entry,
 .novel-unattended-topbar-entry,
 .novel-workspace-shell-toggle,
 .novel-workspace-topbar-more {
   flex: 0 0 auto;
+}
+
+.novel-workspace-source-status.ant-btn {
+  max-width: 300px;
+  height: var(--novel-control-height-sm) !important;
+  padding-inline: 9px !important;
+  border-radius: var(--novel-radius-pill) !important;
+  border: 1px solid rgba(22, 119, 255, 0.18);
+  color: #0958d9;
+  background: rgba(22, 119, 255, 0.06);
+}
+
+.novel-workspace-source-status.ant-btn > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.novel-workspace-source-status.is-mcp.ant-btn {
+  border-color: rgba(114, 46, 209, 0.2);
+  color: #531dab;
+  background: rgba(114, 46, 209, 0.07);
+}
+
+.novel-workspace-source-status.is-unavailable.ant-btn {
+  border-color: rgba(212, 136, 6, 0.24);
+  color: #ad6800;
+  background: rgba(250, 173, 20, 0.09);
 }
 
 .novel-workspace-shell-toggle.ant-btn {
@@ -642,6 +672,10 @@
     width: 112px !important;
     flex-basis: 112px;
     min-width: 112px;
+  }
+
+  .novel-workspace-source-status.ant-btn {
+    max-width: 190px;
   }
 
   .novel-workspace-area-tabs {

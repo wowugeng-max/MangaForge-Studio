@@ -17,7 +17,15 @@ function failureMessage(error: any, fallback: string) {
   return String(error?.response?.data?.error || error?.response?.data?.detail || error?.message || fallback)
 }
 
-export function McpGenerationSourcePanel({ open, projectId }: { open: boolean; projectId: number }) {
+export function McpGenerationSourcePanel({
+  open,
+  projectId,
+  onSaved,
+}: {
+  open: boolean
+  projectId: number
+  onSaved?: () => void
+}) {
   const sourceEndpoint = `/novel/projects/${projectId}/prose-generation-source`
   const [servers, setServers] = useState<McpServerRecord[]>([])
   const [keys, setKeys] = useState<McpPublicKey[]>([])
@@ -128,6 +136,7 @@ export function McpGenerationSourcePanel({ open, projectId }: { open: boolean; p
       const payload = buildSourcePayload(form)
       await mcpApi.saveProjectSource(projectId, payload.source)
       message.success(form.type === 'mcp' ? 'MCP 正文来源已绑定' : '正文来源已切换为模型')
+      onSaved?.()
     } catch (error) {
       setBindingError(failureMessage(error, '正文来源保存失败'))
     } finally {
@@ -176,6 +185,20 @@ export function McpGenerationSourcePanel({ open, projectId }: { open: boolean; p
           <Space align="end" wrap>
             <Space direction="vertical" size={4}><Text strong>项目专属 Agent</Text><Select loading={agentLoading} style={{ width: 330 }} value={form.agentId || undefined} disabled={!form.keyId} onChange={agentId => updateForm({ agentId })} options={agents.map(agent => ({ value: agent.id, label: `${agent.name} (${agent.id})` }))} /></Space>
             <Button icon={<ReloadOutlined />} disabled={!form.serverId || !form.keyId} loading={agentLoading} onClick={() => fetchAgents(form.serverId, form.keyId, form.agentId)}>刷新 Agents</Button>
+          </Space>
+          <Space direction="vertical" size={4} style={{ width: '100%' }}>
+            <Text strong>Buda 模型</Text>
+            <Input
+              value={form.model}
+              onChange={event => updateForm({ model: event.target.value })}
+              maxLength={160}
+              allowClear
+              placeholder="例如：账号支持的模型标识"
+              addonBefore={form.model.trim() ? '指定模型' : 'Auto'}
+            />
+            <Text type="secondary">
+              留空即 Auto（Buda / Agent 默认）。Buda 当前未提供模型列表 MCP 工具，请填写账号实际支持的模型标识；无效值会由 Buda 拒绝，不会自动回退。
+            </Text>
           </Space>
           <Divider style={{ margin: '4px 0' }} />
           <Text type="secondary">只有在确实需要新 Agent 时执行以下远端操作。免费 Buda 账号通常最多两个 Agent。</Text>

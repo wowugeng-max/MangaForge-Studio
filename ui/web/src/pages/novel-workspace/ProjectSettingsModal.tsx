@@ -50,10 +50,12 @@ export function ProjectSettingsModal({
   open,
   projectId,
   onClose,
+  onGenerationSourceSaved,
 }: {
   open: boolean
   projectId: number
   onClose: () => void
+  onGenerationSourceSaved?: () => void
 }) {
   const [timeoutSeconds, setTimeoutSeconds] = useState<number | null>(DEFAULT_TIMEOUT_SECONDS)
   const [storyStateMaxTokens, setStoryStateMaxTokens] = useState<number | null>(DEFAULT_STORY_STATE_MAX_TOKENS)
@@ -174,7 +176,11 @@ export function ProjectSettingsModal({
         </Text>
       </Space>
       <Divider />
-      <McpGenerationSourcePanel open={open} projectId={projectId} />
+      <McpGenerationSourcePanel
+        open={open}
+        projectId={projectId}
+        onSaved={onGenerationSourceSaved}
+      />
     </Modal>
   )
 }

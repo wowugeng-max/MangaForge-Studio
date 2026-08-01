@@ -15,6 +15,7 @@ import {
   ToolOutlined,
 } from '@ant-design/icons'
 import { ProjectSettingsModal } from '../ProjectSettingsModal'
+import { McpGenerationSourceStatus } from '../McpGenerationSourceStatus'
 import {
   primaryTabForArea,
   WORKSPACE_TOOL_MENU_DEFS,
@@ -73,6 +74,7 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
   } = props
 
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false)
+  const [sourceRefreshKey, setSourceRefreshKey] = useState(0)
   const activePrimary = primaryTabForArea(workspaceArea as WorkspaceArea)
   const moreMenuItems = [
     {
@@ -180,6 +182,13 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
             </>
           )}
 
+          <McpGenerationSourceStatus
+            projectId={Number(selectedProject?.id || 0)}
+            initialSource={selectedProject?.reference_config?.prose_generation_source}
+            refreshKey={sourceRefreshKey}
+            onOpenSettings={() => setProjectSettingsOpen(true)}
+          />
+
           {workspaceArea === 'chapterWriting' && (
             <Button
               className="novel-workspace-shell-toggle"
@@ -211,6 +220,7 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
         open={projectSettingsOpen}
         projectId={Number(selectedProject?.id || 0)}
         onClose={() => setProjectSettingsOpen(false)}
+        onGenerationSourceSaved={() => setSourceRefreshKey(current => current + 1)}
       />
     </>
   )
