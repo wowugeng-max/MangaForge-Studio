@@ -495,7 +495,7 @@ describe('novel writing service prose quality wiring b a', () => {
     expect(harness.storyStateCalls).toBe(0)
     expect(harness.memoryTexts).toHaveLength(0)
   })
-  test('rejects a truncated quality revision before any production-path persistence', async () => {
+  test('rejects a truncated quality revision candidate and stores pre-revision authority', async () => {
     const draftText = buildPipelineProse(
       '倒数压到最后三秒，江澈停在围墙阴影里等待。',
       '只看着追捕队继续收紧包围',
@@ -519,29 +519,59 @@ describe('novel writing service prose quality wiring b a', () => {
         }],
       }],
       revisionResults: [{
-        parsed: { chapter_text: revisedText },
+        parsed: {
+          chapter_text: revisedText,
+          scene_breakdown: [{ title: '不应采用的截断 revision 场景' }],
+          continuity_notes: ['不应采用的截断 revision 连续性'],
+        },
         raw: { choices: [{ finish_reason: 'max_tokens' }] },
         modelName: 'fake-truncated-reviser',
       }],
     })
+    const stages: Array<{ name: string; payload: any }> = []
 
-    const error = await harness.service.generateChapterForGroup(
+    const result = await harness.service.generateChapterForGroup(
       harness.workspace,
       harness.project.id,
       harness.chapter.id,
-      { model_id: 217, target_word_count: 1000, quality_threshold: 78, auto_repair_quality_gate: true },
-    ).then(() => null, (caught: any) => caught)
+      {
+        model_id: 217,
+        target_word_count: 1000,
+        quality_threshold: 78,
+        auto_repair_quality_gate: true,
+        onStage: async (name: string, payload: any) => stages.push({ name, payload }),
+      },
+    )
     const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+    const finalCandidate = result.chapter?.chapter_text || ''
 
-    expect(error).toMatchObject({
-      code: 'PROSE_REVISION_TRUNCATED',
-      admission_status: 'blocked_invalid',
-      admission_failure: { source: 'transport' },
-    })
-    expect(stored?.chapter_text || '').toBe('')
-    expect(harness.storeCalls).toBe(0)
-    expect(harness.storyStateCalls).toBe(0)
-    expect(harness.memoryTexts).toHaveLength(0)
+    expect(finalCandidate).toContain('倒数压到最后三秒')
+    expect(finalCandidate).toContain('只看着追捕队继续收紧包围')
+    expect(finalCandidate).not.toContain('江澈踏碎路面')
+    expect(finalCandidate).not.toContain('借自己制造的盲区夺下通讯器')
+    expect(result.chapter?.continuity_notes || []).not.toContain('不应采用的截断 revision 连续性')
+    expect(result.chapter?.raw_payload?.generated_scene_breakdown || []).not.toContainEqual(expect.objectContaining({ title: '不应采用的截断 revision 场景' }))
+    expect(stored?.chapter_text).toBe(finalCandidate)
+    expect(harness.storeCalls).toBe(1)
+    expect(harness.storeTexts).toEqual([finalCandidate])
+    expect(harness.storyStateTexts).toEqual([finalCandidate])
+    expect(harness.memoryTexts).toEqual([finalCandidate])
+    expect(harness.modelCalls.revision).toBe(2)
+    expect(result.quality_warnings).not.toContainEqual(expect.objectContaining({ source: 'transport' }))
+    expect(result.quality_loop?.rounds).toEqual([
+      { round: 1, accepted: false, reason: '' },
+      { round: 2, accepted: true, reason: '' },
+    ])
+    expect(result.quality_loop?.decision?.passed).toBe(true)
+    expect(stages).toContainEqual(expect.objectContaining({
+      name: 'revise',
+      payload: expect.objectContaining({
+        status: 'warn',
+        phase: 'quality_revision_truncated_fallback',
+        round: 1,
+        detail: expect.stringContaining('保留修订前正文'),
+      }),
+    }))
   })
   test('rejects complete drafts with empty incomplete-details metadata across transport paths', async () => {
     const draftText = buildPipelineProse(
@@ -632,7 +662,7 @@ describe('novel writing service prose quality wiring b a', () => {
 
     expect(finalCandidates).toHaveLength(transportCases.length)
   })
-  test('rejects complete quality revisions when nested rejected finish reasons are masked at top level', async () => {
+  test('rejects quality revision candidates with masked nested truncation and stores pre-revision authority', async () => {
     const draftText = buildPipelineProse(
       '倒数压到最后三秒，江澈停在围墙阴影里等待。',
       '只看着追捕队继续收紧包围',
@@ -645,8 +675,6 @@ describe('novel writing service prose quality wiring b a', () => {
       { finish_reason: 'stop', raw: { choices: [{ finish_reason: 'max_tokens' }] } },
       { finish_reason: 'provider-controlled-value', raw: { response: { stop_reason: 'length' } } },
     ]
-    const outcomes: any[] = []
-
     for (const transport of transportCases) {
       const harness = await createProsePipelineHarness(createNovelWritingService, {
         draftText,
@@ -663,33 +691,58 @@ describe('novel writing service prose quality wiring b a', () => {
           }],
         }],
         revisionResults: [{
-          parsed: { chapter_text: revisedText },
+          parsed: {
+            chapter_text: revisedText,
+            scene_breakdown: [{ title: '不应采用的 masked revision 场景' }],
+            continuity_notes: ['不应采用的 masked revision 连续性'],
+          },
           modelName: 'fake-masked-truncated-reviser',
           ...transport,
         }],
       })
-      const error = await harness.service.generateChapterForGroup(
+      const stages: Array<{ name: string; payload: any }> = []
+      const result = await harness.service.generateChapterForGroup(
         harness.workspace,
         harness.project.id,
         harness.chapter.id,
-        { model_id: 217, target_word_count: 1000, quality_threshold: 78, auto_repair_quality_gate: true },
-      ).then(() => null, (caught: any) => caught)
+        {
+          model_id: 217,
+          target_word_count: 1000,
+          quality_threshold: 78,
+          auto_repair_quality_gate: true,
+          onStage: async (name: string, payload: any) => stages.push({ name, payload }),
+        },
+      )
       const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
-      outcomes.push({
-        code: error?.code || null,
-        stored_text: stored?.chapter_text || '',
-        store_calls: harness.storeCalls,
-        story_state_calls: harness.storyStateCalls,
-        memory_calls: harness.memoryTexts.length,
-      })
-    }
+      const finalCandidate = result.chapter?.chapter_text || ''
 
-    expect(outcomes).toEqual(transportCases.map(() => ({
-      code: 'PROSE_REVISION_TRUNCATED',
-      stored_text: '',
-      store_calls: 0,
-      story_state_calls: 0,
-      memory_calls: 0,
-    })))
+      expect(finalCandidate).toContain('倒数压到最后三秒')
+      expect(finalCandidate).toContain('只看着追捕队继续收紧包围')
+      expect(finalCandidate).not.toContain('江澈踏碎路面')
+      expect(finalCandidate).not.toContain('借自己制造的盲区夺下通讯器')
+      expect(result.chapter?.continuity_notes || []).not.toContain('不应采用的 masked revision 连续性')
+      expect(result.chapter?.raw_payload?.generated_scene_breakdown || []).not.toContainEqual(expect.objectContaining({ title: '不应采用的 masked revision 场景' }))
+      expect(stored?.chapter_text).toBe(finalCandidate)
+      expect(harness.storeCalls).toBe(1)
+      expect(harness.storeTexts).toEqual([finalCandidate])
+      expect(harness.storyStateTexts).toEqual([finalCandidate])
+      expect(harness.memoryTexts).toEqual([finalCandidate])
+      expect(harness.modelCalls.revision).toBe(2)
+      expect(result.quality_warnings).not.toContainEqual(expect.objectContaining({ source: 'transport' }))
+      expect(result.quality_loop?.rounds).toEqual([
+        { round: 1, accepted: false, reason: '' },
+        { round: 2, accepted: true, reason: '' },
+      ])
+      expect(result.quality_loop?.decision?.passed).toBe(true)
+      expect(stages).toContainEqual(expect.objectContaining({
+        name: 'revise',
+        payload: expect.objectContaining({
+          status: 'warn',
+          phase: 'quality_revision_truncated_fallback',
+          round: 1,
+          detail: expect.stringContaining('保留修订前正文'),
+        }),
+      }))
+    }
   })
 })
