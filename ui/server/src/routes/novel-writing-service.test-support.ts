@@ -21,6 +21,38 @@ export const proseQualityScores = {
   fact_setting_safety: 8,
 }
 
+export type ProsePipelineTaskKind =
+  | 'scene_cards'
+  | 'contraction'
+  | 'expansion'
+  | 'meme'
+  | 'editor'
+  | 'quality_review'
+  | 'structured_review'
+  | 'quality_revision'
+  | 'humanize'
+  | 'story_state'
+  | 'other'
+
+export function classifyProsePipelineTask(agent: string, taskInput: string): ProsePipelineTaskKind {
+  const task = String(taskInput || '')
+  if (agent === 'outline-agent' && task.startsWith('任务：为当前章节生成可人工确认的场景卡')) return 'scene_cards'
+  if (agent === 'prose-agent' && task.startsWith('任务：将本章正文压缩')) return 'contraction'
+  if (agent === 'prose-agent' && task.startsWith('任务：将本章正文扩写')) return 'expansion'
+  if (agent === 'prose-agent' && task.startsWith('任务：克制型网感润色')) return 'meme'
+  if (agent === 'prose-agent' && task.includes('商业主编')) return 'editor'
+  if (agent === 'review-agent' && (task.startsWith('任务：独立审查小说正文') || task.startsWith('任务：对刚生成的小说章节进行章节级自检'))) return 'quality_review'
+  if (agent === 'review-agent' && task.startsWith('任务：只补缺失的 oh-story 结构化自检字段')) return 'structured_review'
+  if (agent === 'prose-agent' && (task.startsWith('任务：执行第') || task.startsWith('任务：根据自检结果修订本章正文'))) return 'quality_revision'
+  if (agent === 'prose-agent' && (
+    task.startsWith('任务：对小说正文片段执行 Humanize Pass')
+    || task.startsWith('任务：对人工特征不足窗口做')
+    || task.startsWith('任务：对高风险正文窗口做')
+  )) return 'humanize'
+  if (agent === 'review-agent' && task.startsWith('任务：从刚入库的章节正文中提取故事状态机增量')) return 'story_state'
+  return 'other'
+}
+
 /** Matches harness previous-chapter ending so opening continuity admission can pass. */
 export const PIPELINE_HANDOFF_CONTINUATION =
   '红灯同时亮起，追捕队从四面压进旧巷。江澈听见耳机里的倒数，立刻撞开铁门。'
@@ -226,7 +258,8 @@ export async function createProsePipelineHarness(
 
   const executeAgent = async (_agent: string, _project: any, input: any) => {
     const task = String(input?.task || '')
-    if (task.startsWith('任务：为当前章节生成可人工确认的场景卡')) {
+    const taskKind = classifyProsePipelineTask(_agent, task)
+    if (taskKind === 'scene_cards') {
       modelCalls.scene_cards += 1
       return {
         parsed: {
@@ -246,22 +279,22 @@ export async function createProsePipelineHarness(
         modelName: 'fake-scene-cards',
       } as any
     }
-    if (task.startsWith('任务：将本章正文压缩')) {
+    if (taskKind === 'contraction') {
       modelCalls.contraction += 1
       if (options.contractionError) throw options.contractionError
       return { parsed: {}, finish_reason: 'stop', modelName: 'fake-contraction' } as any
     }
-    if (task.startsWith('任务：将本章正文扩写')) {
+    if (taskKind === 'expansion') {
       modelCalls.expansion += 1
       if (options.expansionError) throw options.expansionError
       return { parsed: {}, finish_reason: 'stop', modelName: 'fake-expansion' } as any
     }
-    if (task.startsWith('任务：克制型网感润色')) {
+    if (taskKind === 'meme') {
       modelCalls.meme += 1
       if (options.memeResult !== undefined) return options.memeResult
       return { parsed: { chapter_text: options.memeText || draftText, meme_polish_report: { changed_plot: false } }, modelName: 'fake-meme' } as any
     }
-    if (task.includes('商业主编')) {
+    if (taskKind === 'editor') {
       modelCalls.editor += 1
       if (options.editorResult !== undefined) return options.editorResult
       return {
@@ -274,7 +307,7 @@ export async function createProsePipelineHarness(
         modelName: 'fake-editor',
       } as any
     }
-    if (task.startsWith('任务：独立审查小说正文') || task.startsWith('任务：对刚生成的小说章节进行章节级自检')) {
+    if (taskKind === 'quality_review') {
       modelCalls.review += 1
       qualityReviewCalls += 1
       if (options.recheckError && qualityReviewCalls > 1) throw options.recheckError
@@ -286,13 +319,13 @@ export async function createProsePipelineHarness(
       }
       return { parsed: payload, modelName: 'fake-reviewer' } as any
     }
-    if (task.startsWith('任务：执行第') || task.startsWith('任务：根据自检结果修订本章正文')) {
+    if (taskKind === 'quality_revision') {
       modelCalls.revision += 1
       if (revisionResults.length) return revisionResults.shift()
       const text = revisionTexts.shift() || draftText
       return { parsed: { chapter_text: text, revision_receipts: [{ key: 'agency', changed_evidence: text.slice(0, 80) }] }, modelName: 'fake-reviser' } as any
     }
-    if (task.includes('state_delta')) {
+    if (taskKind === 'story_state') {
       modelCalls.story_state += 1
       if (options.storyStateError) throw options.storyStateError
       return { parsed: options.storyStatePayload || { state_delta: { open_questions: ['幕后指挥者为何知道江澈旧名'] }, character_updates: [], setting_updates: [], storyline_updates: [] }, modelName: 'fake-state' } as any
