@@ -135,17 +135,24 @@ export function buildChapterAcceptancePrep(args: {
       ?? stagedContextUsageReplacement
       ?? chapterSettingUsage,
   )
+  const candidateSettings = [
+    ...asArray(settings),
+    ...asArray(stagedPreflightRepair?.staged_setting_creates),
+  ]
   const resolveCandidateSettingId = (reference: any) => {
     const directId = Number(reference?.entity_id || reference?.entityId || reference?.id || 0)
     if (directId) return directId
     const name = String(reference?.entity_name || reference?.name || '').trim()
     const entityType = String(reference?.entity_type || reference?.entityType || '').trim()
     if (!name) return 0
-    const matches = asArray(settings).filter((setting: any) => (
-      String(setting?.name || '').trim() === name
-      && (!entityType || String(setting?.entity_type || '').trim() === entityType)
-    ))
-    return matches.length === 1 ? Number(matches[0]?.id || 0) : 0
+    const matchingIds = [...new Set(candidateSettings
+      .filter((setting: any) => (
+        String(setting?.name || '').trim() === name
+        && (!entityType || String(setting?.entity_type || '').trim() === entityType)
+      ))
+      .map((setting: any) => Number(setting?.id || 0))
+      .filter((id: number) => id !== 0))]
+    return matchingIds.length === 1 ? matchingIds[0] : 0
   }
   const finalCandidateUsageEntityIds = new Set(
     finalCandidateChapterUsage
