@@ -551,8 +551,8 @@ describe('novel writing service prose quality wiring b b', () => {
     expect(harness.storyStateCalls).toBe(1)
     expect(harness.storyStateTexts).toEqual([authoritativeFinalText])
     expect(harness.modelCalls.draft).toBe(1)
-    expect(harness.modelCalls.revision).toBeGreaterThan(0)
-    expect(harness.modelCalls.review).toBeGreaterThanOrEqual(2)
+    expect(harness.modelCalls.revision).toBe(3)
+    expect(harness.modelCalls.review).toBe(2)
     expect(result.humanize_postprocess?.candidate_provenance).toMatchObject({
       scope: 'pre_quality',
       stage: 'pre_quality',

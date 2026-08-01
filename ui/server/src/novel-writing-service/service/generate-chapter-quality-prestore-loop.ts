@@ -316,7 +316,7 @@ await onStage('review', { status: 'running' })
 finalText = normalizeProseForStorage(finalText)
 
 let qualityLoop: any
-// Zhuque fast path: skip LLM review/revise entirely (scan + sanitize only).
+// Zhuque fast path: the common finalizer already sanitized; scan its exact candidate without another rewrite.
 if (isZhuqueFast) {
   ;({ qualityLoop, finalText } = await runZhuqueFastQualityLoop({
     finalText,

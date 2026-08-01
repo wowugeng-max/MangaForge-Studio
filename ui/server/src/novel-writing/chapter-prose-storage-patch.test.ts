@@ -19,6 +19,75 @@ function expectOnlyNewlinesInserted(source: string, result: string) {
 }
 
 describe('chapter prose storage patch builders', () => {
+  test('stores only a bounded JSON-safe allowlist from humanize reports', () => {
+    const providerUrl = 'https://provider.example/v1/humanize?api_key=SECRET_QUERY'
+    const cycle: any = { label: 'cycle' }
+    cycle.self = cycle
+    const humanizePostprocess: any = {
+      version: 'humanize_postprocess_v4',
+      enabled: true,
+      accepted: false,
+      error: `humanize unavailable ${providerUrl} Authorization: Bearer SECRET_BEARER`,
+      candidate_provenance: {
+        scope: 'pre_quality',
+        stage: 'pre_quality',
+        humanize_input_hash: 'a'.repeat(64),
+        humanize_output_hash: 'b'.repeat(64),
+        final_candidate_hash: 'c'.repeat(64),
+        superseded_by_quality_revision: true,
+        raw_text: 'SECRET_RAW_PROSE',
+      },
+      stages: Array.from({ length: 80 }, (_, index) => ({
+        stage: `risk_window_${index}`,
+        reason: `Bearer SECRET_STAGE_${index}`,
+        windows: Array.from({ length: 80 }, (__, windowIndex) => ({
+          id: `window-${windowIndex}`,
+          score: windowIndex,
+          reasons: [`api_key=SECRET_WINDOW_${windowIndex}`],
+          chars: 20,
+          raw_text: 'SECRET_WINDOW_RAW',
+        })),
+        raw: cycle,
+        callback: () => 'SECRET_CALLBACK',
+      })),
+      raw: cycle,
+      provider_payload: { authorization: 'Bearer SECRET_OBJECT' },
+    }
+    humanizePostprocess.self = humanizePostprocess
+
+    const patch = buildChapterProseStoragePatch({
+      chapter: { raw_payload: {} },
+      generatedTitlePatch: {},
+      finalText: '正文内容。',
+      finalContinuityNotes: [],
+      finalSceneBreakdown: [],
+      ohStoryDeliveryReceipts: {},
+      humanizePostprocess,
+    })
+    const stored = patch.raw_payload.humanize_postprocess
+    const serialized = JSON.stringify(stored)
+
+    expect(serialized).not.toContain('provider.example')
+    expect(serialized).not.toContain('SECRET_')
+    expect(stored.error).toContain('humanize unavailable')
+    expect(stored.error.length).toBeLessThanOrEqual(240)
+    expect(stored.stages.length).toBeLessThanOrEqual(64)
+    expect(stored.stages[0].windows.length).toBeLessThanOrEqual(32)
+    expect(stored).not.toHaveProperty('raw')
+    expect(stored).not.toHaveProperty('provider_payload')
+    expect(stored).not.toHaveProperty('self')
+    expect(stored.stages[0]).not.toHaveProperty('raw')
+    expect(stored.stages[0]).not.toHaveProperty('callback')
+    expect(stored.candidate_provenance).toEqual({
+      scope: 'pre_quality',
+      stage: 'pre_quality',
+      humanize_input_hash: 'a'.repeat(64),
+      humanize_output_hash: 'b'.repeat(64),
+      final_candidate_hash: 'c'.repeat(64),
+      superseded_by_quality_revision: true,
+    })
+  })
+
   test('builds the shared draft storage patch without post-draft director fields', () => {
     const patch = buildChapterProseStoragePatch({
       chapter: { raw_payload: { existing: true } },

@@ -2,9 +2,6 @@ import {
   evaluateHumanWebnovelResistance,
 } from '../../novel-writing/human-webnovel-resistance'
 import {
-  applyR76PreStoreSanitize,
-} from '../../novel-writing/r76-zhuque-stack'
-import {
   scanProseForQualityLoop,
 } from '../quality/prose-quality-entry'
 
@@ -19,25 +16,18 @@ export async function runZhuqueFastQualityLoop(args: {
   onStage: (...a: any[]) => any
 }): Promise<{ finalText: string; qualityLoop: any }> {
   const {
-    project,
     contextPackage,
     wordTarget,
     wordTargetCompatibility,
     qualityThreshold,
-    isZhuqueFast,
     onStage,
   } = args
-  const finalText = applyR76PreStoreSanitize(String(args.finalText || ''), {
-    project,
-    contextPackage,
-    skip_mid_monologue_densify: isZhuqueFast,
-    skipMidMonologueDensify: isZhuqueFast,
-  })
+  const finalText = String(args.finalText || '')
 
   await onStage('review', {
     status: 'skipped',
     reason: 'zhuque_fast_path',
-    detail: '朱雀验证快路径：跳过多轮质检/修订 LLM，仅确定性扫描 + R76 sanitize/humanize',
+    detail: '朱雀验证快路径：跳过多轮质检/修订 LLM；沿用公共终稿器已完成的 R76 sanitize/humanize，仅执行确定性扫描',
   })
   await onStage('revise', {
     status: 'skipped',

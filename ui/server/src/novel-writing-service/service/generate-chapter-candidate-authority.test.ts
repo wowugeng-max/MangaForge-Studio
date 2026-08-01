@@ -168,4 +168,77 @@ describe('generateChapterForGroup final candidate authority', () => {
     })
     expect(stored?.raw_payload?.humanize_postprocess).toEqual(result.humanize_postprocess)
   })
+
+  test('redacts a secret-bearing humanize failure from returned and stored reports', async () => {
+    const providerUrl = 'https://provider.example/v1/humanize?api_key=SECRET_QUERY'
+    const draftText = repairedProse()
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText,
+      humanizeResult: () => {
+        throw new Error(`humanize unavailable ${providerUrl} Authorization: Bearer SECRET_BEARER`)
+      },
+    })
+
+    const result = await harness.service.generateChapterForGroup(
+      harness.workspace,
+      harness.project.id,
+      harness.chapter.id,
+      {
+        model_id: 217,
+        target_word_count: 1000,
+        max_quality_revision_rounds: 0,
+        production_mode: 'draft_only',
+        skip_mid_monologue_densify: true,
+      },
+    )
+    const stored = (await listNovelChapters(harness.workspace, harness.project.id))
+      .find(item => item.id === harness.chapter.id)
+    const observable = JSON.stringify({
+      returned: result.humanize_postprocess,
+      returnedChapter: result.chapter?.raw_payload?.humanize_postprocess,
+      stored: stored?.raw_payload?.humanize_postprocess,
+    })
+
+    expect(observable).not.toContain('provider.example')
+    expect(observable).not.toContain('SECRET_QUERY')
+    expect(observable).not.toContain('SECRET_BEARER')
+    expect(result.humanize_postprocess?.error).toContain('humanize unavailable')
+    expect(result.humanize_postprocess?.error.length).toBeLessThanOrEqual(240)
+    expect(stored?.raw_payload?.humanize_postprocess).toEqual(result.humanize_postprocess)
+  })
+
+  test('keeps the common finalizer candidate exact in zhuque-fast mode', async () => {
+    const draftText = repairedProse()
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText,
+      humanizeResult: (sourceText: string) => ({
+        final_text: sourceText,
+        report: { accepted: true, before_chars: sourceText.length, after_chars: sourceText.length },
+      }),
+    })
+
+    const result = await harness.service.generateChapterForGroup(
+      harness.workspace,
+      harness.project.id,
+      harness.chapter.id,
+      {
+        model_id: 217,
+        target_word_count: 1000,
+        production_mode: 'zhuque_fast',
+      },
+    )
+    const returnedText = String(result.chapter?.chapter_text || '')
+    const finalHash = revisionTextHash(returnedText)
+
+    expect(harness.modelCalls.review).toBe(0)
+    expect(harness.modelCalls.revision).toBe(0)
+    expect(harness.qualityReviewTasks).toEqual([])
+    expect(harness.storeTexts).toEqual([returnedText])
+    expect(revisionTextHash(String(harness.storeTexts[0] || ''))).toBe(finalHash)
+    expect(result.humanize_postprocess?.candidate_provenance).toMatchObject({
+      humanize_output_hash: finalHash,
+      final_candidate_hash: finalHash,
+      superseded_by_quality_revision: false,
+    })
+  })
 })

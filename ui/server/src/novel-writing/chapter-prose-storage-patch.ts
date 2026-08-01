@@ -19,6 +19,287 @@ export type ChapterProseStoragePatchInput = {
   }
 }
 
+export type PersistedHumanizeCandidateProvenance = {
+  scope: 'pre_quality'
+  stage: 'pre_quality'
+  humanize_input_hash: string
+  humanize_output_hash: string
+  final_candidate_hash: string
+  superseded_by_quality_revision: boolean
+}
+
+export type PersistedHumanizeStageWindow = {
+  id?: string
+  score?: number
+  reasons?: string[]
+  chars?: number
+}
+
+export type PersistedHumanizeStageRepair = {
+  from?: string
+  to?: string
+  count?: number
+  reason?: string
+}
+
+export type PersistedHumanizePostprocessStage = {
+  stage?: string
+  version?: string
+  id?: string
+  reason?: string
+  kept?: string
+  humanize_mode?: string
+  humanize_reason?: string
+  fingerprint_reason?: string
+  risk_segment_version?: string
+  skip_reason?: string
+  chunk_count?: number
+  chars?: number
+  ratio?: number
+  paragraph_count?: number
+  high_risk_count?: number
+  total_score?: number
+  window_count?: number
+  before_chars?: number
+  after_chars?: number
+  score?: number
+  before_pure?: number
+  after_pure?: number
+  before_hard?: number
+  after_hard?: number
+  before_clinical?: number
+  after_clinical?: number
+  before_count?: number
+  after_count?: number
+  injected?: number
+  accepted?: boolean
+  applied?: boolean
+  changed?: boolean
+  pass_b_enabled?: boolean
+  humanize_accepted?: boolean
+  fingerprint_accepted?: boolean
+  used_deterministic_fallback?: boolean
+  windows?: PersistedHumanizeStageWindow[]
+  repairs?: PersistedHumanizeStageRepair[]
+  zones?: string[]
+}
+
+export type PersistedHumanizePostprocessReport = {
+  version?: string
+  dual_pass_version?: string
+  enabled?: boolean
+  skipped?: boolean
+  reason?: string
+  error?: string
+  before_chars?: number
+  after_chars?: number
+  chunk_count?: number
+  pass_a_applied?: boolean
+  pass_b_applied?: boolean
+  deterministic_shells?: boolean
+  accepted?: boolean
+  reject_reason?: string
+  stages?: PersistedHumanizePostprocessStage[]
+  r76_zhuque_stack?: string
+  candidate_provenance?: PersistedHumanizeCandidateProvenance
+}
+
+const PERSISTED_HUMANIZE_MAX_STRING = 240
+const PERSISTED_HUMANIZE_MAX_STAGES = 64
+const PERSISTED_HUMANIZE_MAX_NESTED_ITEMS = 32
+
+function normalizePersistedHumanizeString(value: unknown, maxLength = PERSISTED_HUMANIZE_MAX_STRING) {
+  if (typeof value !== 'string') return undefined
+  return value
+    .replace(/\bhttps?:\/\/[^\s,;]+/gi, '[REDACTED_URL]')
+    .replace(/([?&](?:api[_-]?key|token|access[_-]?token|auth|authorization)=)[^&\s]*/gi, '$1[REDACTED]')
+    .replace(/\b(Bearer)\s+[^\s,;]+/gi, '$1 [REDACTED]')
+    .replace(/\b(api[_-]?key|token|access[_-]?token|auth|authorization)\s*[:=]\s*["']?[^\s,"';}&]+/gi, '$1=[REDACTED]')
+    .slice(0, Math.max(1, Math.min(PERSISTED_HUMANIZE_MAX_STRING, maxLength)))
+}
+
+function normalizePersistedHumanizeNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function normalizePersistedHumanizeBoolean(value: unknown) {
+  return typeof value === 'boolean' ? value : undefined
+}
+
+const PERSISTED_HUMANIZE_STAGE_STRING_FIELDS = [
+  'stage',
+  'version',
+  'id',
+  'reason',
+  'kept',
+  'humanize_mode',
+  'humanize_reason',
+  'fingerprint_reason',
+  'risk_segment_version',
+  'skip_reason',
+] as const
+
+const PERSISTED_HUMANIZE_STAGE_NUMBER_FIELDS = [
+  'chunk_count',
+  'chars',
+  'ratio',
+  'paragraph_count',
+  'high_risk_count',
+  'total_score',
+  'window_count',
+  'before_chars',
+  'after_chars',
+  'score',
+  'before_pure',
+  'after_pure',
+  'before_hard',
+  'after_hard',
+  'before_clinical',
+  'after_clinical',
+  'before_count',
+  'after_count',
+  'injected',
+] as const
+
+const PERSISTED_HUMANIZE_STAGE_BOOLEAN_FIELDS = [
+  'accepted',
+  'applied',
+  'changed',
+  'pass_b_enabled',
+  'humanize_accepted',
+  'fingerprint_accepted',
+  'used_deterministic_fallback',
+] as const
+
+function normalizePersistedHumanizeWindow(value: unknown): PersistedHumanizeStageWindow | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const input = value as Record<string, unknown>
+  const output: PersistedHumanizeStageWindow = {}
+  const id = normalizePersistedHumanizeString(input.id)
+  const score = normalizePersistedHumanizeNumber(input.score)
+  const chars = normalizePersistedHumanizeNumber(input.chars)
+  if (id !== undefined) output.id = id
+  if (score !== undefined) output.score = score
+  if (chars !== undefined) output.chars = chars
+  if (Array.isArray(input.reasons)) {
+    output.reasons = input.reasons
+      .slice(0, PERSISTED_HUMANIZE_MAX_NESTED_ITEMS)
+      .map(item => normalizePersistedHumanizeString(item))
+      .filter((item): item is string => item !== undefined)
+  }
+  return output
+}
+
+function normalizePersistedHumanizeRepair(value: unknown): PersistedHumanizeStageRepair | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const input = value as Record<string, unknown>
+  const output: PersistedHumanizeStageRepair = {}
+  const from = normalizePersistedHumanizeString(input.from)
+  const to = normalizePersistedHumanizeString(input.to)
+  const count = normalizePersistedHumanizeNumber(input.count)
+  const reason = normalizePersistedHumanizeString(input.reason)
+  if (from !== undefined) output.from = from
+  if (to !== undefined) output.to = to
+  if (count !== undefined) output.count = count
+  if (reason !== undefined) output.reason = reason
+  return output
+}
+
+function normalizePersistedHumanizeStage(value: unknown): PersistedHumanizePostprocessStage | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const input = value as Record<string, unknown>
+  const output: Record<string, unknown> = {}
+  for (const field of PERSISTED_HUMANIZE_STAGE_STRING_FIELDS) {
+    const normalized = normalizePersistedHumanizeString(input[field])
+    if (normalized !== undefined) output[field] = normalized
+  }
+  for (const field of PERSISTED_HUMANIZE_STAGE_NUMBER_FIELDS) {
+    const normalized = normalizePersistedHumanizeNumber(input[field])
+    if (normalized !== undefined) output[field] = normalized
+  }
+  for (const field of PERSISTED_HUMANIZE_STAGE_BOOLEAN_FIELDS) {
+    const normalized = normalizePersistedHumanizeBoolean(input[field])
+    if (normalized !== undefined) output[field] = normalized
+  }
+  if (Array.isArray(input.windows)) {
+    output.windows = input.windows
+      .slice(0, PERSISTED_HUMANIZE_MAX_NESTED_ITEMS)
+      .map(normalizePersistedHumanizeWindow)
+      .filter((item): item is PersistedHumanizeStageWindow => item !== undefined)
+  }
+  if (Array.isArray(input.repairs)) {
+    output.repairs = input.repairs
+      .slice(0, PERSISTED_HUMANIZE_MAX_NESTED_ITEMS)
+      .map(normalizePersistedHumanizeRepair)
+      .filter((item): item is PersistedHumanizeStageRepair => item !== undefined)
+  }
+  if (Array.isArray(input.zones)) {
+    output.zones = input.zones
+      .slice(0, PERSISTED_HUMANIZE_MAX_NESTED_ITEMS)
+      .map(item => normalizePersistedHumanizeString(item))
+      .filter((item): item is string => item !== undefined)
+  }
+  return output as PersistedHumanizePostprocessStage
+}
+
+function normalizePersistedHumanizeProvenance(value: unknown): PersistedHumanizeCandidateProvenance | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const input = value as Record<string, unknown>
+  const humanizeInputHash = normalizePersistedHumanizeString(input.humanize_input_hash, 64)
+  const humanizeOutputHash = normalizePersistedHumanizeString(input.humanize_output_hash, 64)
+  const finalCandidateHash = normalizePersistedHumanizeString(input.final_candidate_hash, 64)
+  const superseded = normalizePersistedHumanizeBoolean(input.superseded_by_quality_revision)
+  if (
+    input.scope !== 'pre_quality'
+    || input.stage !== 'pre_quality'
+    || !/^[a-f0-9]{64}$/i.test(humanizeInputHash || '')
+    || !/^[a-f0-9]{64}$/i.test(humanizeOutputHash || '')
+    || !/^[a-f0-9]{64}$/i.test(finalCandidateHash || '')
+    || superseded === undefined
+  ) return undefined
+  return {
+    scope: 'pre_quality',
+    stage: 'pre_quality',
+    humanize_input_hash: humanizeInputHash!,
+    humanize_output_hash: humanizeOutputHash!,
+    final_candidate_hash: finalCandidateHash!,
+    superseded_by_quality_revision: superseded,
+  }
+}
+
+export function normalizeHumanizePostprocessForStorage(
+  value: unknown,
+): PersistedHumanizePostprocessReport | null | undefined {
+  if (value === null) return null
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const input = value as Record<string, unknown>
+  const output: PersistedHumanizePostprocessReport = {}
+  const stringFields = ['version', 'dual_pass_version', 'reason', 'error', 'reject_reason', 'r76_zhuque_stack'] as const
+  const numberFields = ['before_chars', 'after_chars', 'chunk_count'] as const
+  const booleanFields = ['enabled', 'skipped', 'pass_a_applied', 'pass_b_applied', 'deterministic_shells', 'accepted'] as const
+  for (const field of stringFields) {
+    const normalized = normalizePersistedHumanizeString(input[field])
+    if (normalized !== undefined) output[field] = normalized
+  }
+  for (const field of numberFields) {
+    const normalized = normalizePersistedHumanizeNumber(input[field])
+    if (normalized !== undefined) output[field] = normalized
+  }
+  for (const field of booleanFields) {
+    const normalized = normalizePersistedHumanizeBoolean(input[field])
+    if (normalized !== undefined) output[field] = normalized
+  }
+  if (Array.isArray(input.stages)) {
+    output.stages = input.stages
+      .slice(0, PERSISTED_HUMANIZE_MAX_STAGES)
+      .map(normalizePersistedHumanizeStage)
+      .filter((item): item is PersistedHumanizePostprocessStage => item !== undefined)
+  }
+  const provenance = normalizePersistedHumanizeProvenance(input.candidate_provenance)
+  if (provenance) output.candidate_provenance = provenance
+  return output
+}
+
 export type ChapterProseVersionSourceInput = {
   revisionEligible?: boolean
   editorRewrite?: any
@@ -230,7 +511,8 @@ export function buildChapterProseStoragePatch(input: ChapterProseStoragePatchInp
     rawPayload.prose_generation_source = input.generationSourceProvenance
   }
   if (input.humanizePostprocess !== undefined) {
-    rawPayload.humanize_postprocess = input.humanizePostprocess
+    const humanizePostprocess = normalizeHumanizePostprocessForStorage(input.humanizePostprocess)
+    if (humanizePostprocess !== undefined) rawPayload.humanize_postprocess = humanizePostprocess
   }
   if (input.proseAdmission !== undefined) {
     rawPayload.prose_admission = input.proseAdmission

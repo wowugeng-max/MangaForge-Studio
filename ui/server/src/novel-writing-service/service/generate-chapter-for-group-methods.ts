@@ -11,6 +11,7 @@ import {
 import {
   buildChapterProseStoragePatch,
   normalizeProseForStorage,
+  normalizeHumanizePostprocessForStorage,
   resolveChapterProseVersionSource,
   } from '../../novel-writing/chapter-prose-storage-patch'
 import {
@@ -560,6 +561,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   })
   finalText = qualityPrestoreResult.finalText
   humanizePostprocess = reconcileHumanizeFinalCandidateProvenance(humanizePostprocess, finalText)
+  humanizePostprocess = normalizeHumanizePostprocessForStorage(humanizePostprocess) ?? null
   finalSceneBreakdown = qualityPrestoreResult.finalSceneBreakdown
   finalContinuityNotes = qualityPrestoreResult.finalContinuityNotes
   const qualityLoop = qualityPrestoreResult.qualityLoop

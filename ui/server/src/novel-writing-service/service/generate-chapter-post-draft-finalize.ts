@@ -13,6 +13,7 @@ import {
   buildR76HumanizeDefaultOptions,
   R76_ZHUQUE_STACK_VERSION,
 } from '../../novel-writing/r76-zhuque-stack'
+import { formatAdmissionError } from '../quality/admission-error'
 
 function buildHandoffContext(contextPackage: any) {
   return enrichContextWithProgressResync(enrichContextWithStrongHandoff(contextPackage))
@@ -129,7 +130,7 @@ export async function runPostDraftHumanizeAndOpeningHandoff(args: {
       accepted: false,
       skipped: false,
       reason: 'humanize_postprocess_failed',
-      error: String(error?.message || error || 'unknown').slice(0, 240),
+      error: formatAdmissionError(error, 240),
       r76_zhuque_stack: R76_ZHUQUE_STACK_VERSION,
     }
     await onStage('humanize_postprocess', {
