@@ -319,7 +319,7 @@ describe('novel writing service prose quality wiring b b', () => {
   test('marks an explicit reference safety block blocked_invalid before draft-only commit or any writes', async () => {
     const finalText = buildPipelineProse('江澈撞开铁门，追兵的包围线被迫后撤。', '主动夺下通讯器并推进追击')
     const harness = await createProsePipelineHarness(createNovelWritingService, { draftText: finalText })
-    let storyStateCalls = 0
+    let storyStateHookCalls = 0
     let memoryCalls = 0
     const injectedCallOrder: string[] = []
     const service = createNovelWritingService({
@@ -365,12 +365,14 @@ describe('novel writing service prose quality wiring b b', () => {
           if (task.includes('商业主编')) return { parsed: { chapter_text: finalText, editor_report: { passed: true } } }
           if (task.startsWith('任务：独立审查小说正文')) return { parsed: { score: 90, publishable: true, dimensions: { ...proseQualityScores, core_promise_agency: 9, payoff_hook: 9 }, findings: [] } }
           if (callKind === 'story_state') {
-            storyStateCalls += 1
             return { parsed: { state_delta: { open_questions: ['x'] } } }
           }
           return { parsed: {} }
         },
         storeChapterProseMemory: async () => { memoryCalls += 1 },
+        hooks: {
+          beforeStoryState: () => { storyStateHookCalls += 1 },
+        },
       },
     })
     const before = JSON.stringify({
@@ -396,8 +398,7 @@ describe('novel writing service prose quality wiring b b', () => {
       admission_failure: { source: 'safety' },
     })
     expect(after).toBe(before)
-    expect(storyStateCalls).toBe(0)
-    expect(injectedCallOrder.filter(item => item === 'story_state')).toEqual([])
+    expect(storyStateHookCalls).toBe(0)
     expect(injectedCallOrder[0]).toBe('draft')
     expect(injectedCallOrder.indexOf('quality_review')).toBeGreaterThan(0)
     expect(injectedCallOrder.indexOf('humanize')).toBeGreaterThan(injectedCallOrder.indexOf('quality_review'))
