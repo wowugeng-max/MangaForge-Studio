@@ -43,19 +43,23 @@ function repairBareQuotesInJsonStrings(value: string): string {
   return repaired
 }
 
-export function parseJsonLikePayload(value: any) {
-  if (!value) return null
+type JsonLikePayloadParseMode = 'direct' | 'json' | 'bare_quotes' | 'none'
+
+function parseJsonLikePayloadWithMode(value: any): { payload: any; mode: JsonLikePayloadParseMode } {
+  if (!value) return { payload: null, mode: 'none' }
   if (Array.isArray(value)) {
     const text = textFromOutputParts(value)
-    return text ? parseJsonLikePayload(text) : value
+    return text ? parseJsonLikePayloadWithMode(text) : { payload: value, mode: 'direct' }
   }
   if (typeof value === 'object') {
     const text = textFromContentValue(value)
-    const parsedText = text ? parseJsonLikePayload(text) : null
-    return parsedText && typeof parsedText === 'object' && !Array.isArray(parsedText) ? parsedText : value
+    const parsedText = text ? parseJsonLikePayloadWithMode(text) : { payload: null, mode: 'none' as const }
+    return parsedText.payload && typeof parsedText.payload === 'object' && !Array.isArray(parsedText.payload)
+      ? parsedText
+      : { payload: value, mode: 'direct' }
   }
   const raw = String(value || '').trim()
-  if (!raw) return null
+  if (!raw) return { payload: null, mode: 'none' }
   const baseCandidates = [
     raw,
     raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, ''),
@@ -68,7 +72,7 @@ export function parseJsonLikePayload(value: any) {
   })
   for (const candidate of candidates) {
     try {
-      return JSON.parse(candidate)
+      return { payload: JSON.parse(candidate), mode: 'json' }
     } catch {
       // try next candidate
     }
@@ -77,12 +81,16 @@ export function parseJsonLikePayload(value: any) {
     const repaired = repairBareQuotesInJsonStrings(candidate)
     if (!repaired) continue
     try {
-      return JSON.parse(repaired)
+      return { payload: JSON.parse(repaired), mode: 'bare_quotes' }
     } catch {
       // Quote repair never makes an otherwise incomplete envelope admissible.
     }
   }
-  return null
+  return { payload: null, mode: 'none' }
+}
+
+export function parseJsonLikePayload(value: any) {
+  return parseJsonLikePayloadWithMode(value).payload
 }
 
 function decodeEscapedJsonCandidate(value: string) {
@@ -110,14 +118,36 @@ export function getNovelPayload(result: any) {
     extractLLMText(result),
   ]
   for (const candidate of candidates) {
-    const payload = parseJsonLikePayload(candidate)
-    if (payload && typeof payload === 'object' && !Array.isArray(payload)) return payload
+    const parsed = parseJsonLikePayloadWithMode(candidate)
+    const payload = parsed.payload
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+      if (parsed.mode === 'bare_quotes') {
+        const recovered = recoverPartialProseJsonPayload(candidate)
+        if (recovered) return mergeRecoveredProsePayload(payload, recovered)
+      }
+      return payload
+    }
   }
   for (const candidate of candidates) {
     const payload = recoverPartialProseJsonPayload(candidate)
     if (payload) return payload
   }
   return {}
+}
+
+function mergeRecoveredProsePayload(payload: any, recovered: any) {
+  const parsedChapters = Array.isArray(payload?.prose_chapters) ? payload.prose_chapters : []
+  const recoveredChapter = Array.isArray(recovered?.prose_chapters) ? recovered.prose_chapters[0] : null
+  const proseChapters = recoveredChapter
+    ? parsedChapters.length > 0
+      ? [{ ...parsedChapters[0], ...recoveredChapter }, ...parsedChapters.slice(1)]
+      : [recoveredChapter]
+    : parsedChapters
+  return {
+    ...payload,
+    ...recovered,
+    ...(proseChapters.length > 0 ? { prose_chapters: proseChapters } : {}),
+  }
 }
 
 function recoverPartialProseJsonPayload(value: any) {
