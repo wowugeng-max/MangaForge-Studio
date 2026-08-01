@@ -30,10 +30,8 @@ import {
 const readChapterProseStoragePatchSource = () => readFileSync(join(import.meta.dir, '../novel-writing/chapter-prose-storage-patch.ts'), 'utf8')
 const readWritingServiceLeaf = (name: string) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')
 const readDraftReceiptSource = () => readWritingServiceLeaf('generate-chapter-draft-prose.ts')
-const readReceiptStoreSource = () => [
-  readWritingServiceLeaf('generate-chapter-draft-mode-store.ts'),
-  readWritingServiceLeaf('generate-chapter-full-production-store.ts'),
-].join('\n')
+const readDraftModeReceiptStoreSource = () => readWritingServiceLeaf('generate-chapter-draft-mode-store.ts')
+const readFullProductionReceiptStoreSource = () => readWritingServiceLeaf('generate-chapter-full-production-store.ts')
 const readFinalReceiptRefreshSource = () => {
   const source = readWritingServiceLeaf('generate-chapter-quality-prestore-finalize.ts')
   const start = source.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')
@@ -293,12 +291,15 @@ describe('story unit sync report', () => {
 
   test('prose generation stores oh-story delivery receipts in every chapter store branch', () => {
     const draftSource = readDraftReceiptSource()
-    const storeSource = readReceiptStoreSource()
+    const draftModeStoreSource = readDraftModeReceiptStoreSource()
+    const fullProductionStoreSource = readFullProductionReceiptStoreSource()
     const storagePatchSource = readChapterProseStoragePatchSource()
 
     expect(draftSource).toContain('let ohStoryDeliveryReceipts = normalizeStoredOhStoryDeliveryReceipts')
-    expect(storeSource.match(/buildChapterProseStoragePatch\(/g)?.length || 0).toBeGreaterThanOrEqual(2)
-    expect(storeSource.match(/ohStoryDeliveryReceipts,/g)?.length || 0).toBeGreaterThanOrEqual(2)
+    expect(draftModeStoreSource).toContain('buildChapterProseStoragePatch(')
+    expect(draftModeStoreSource).toContain('ohStoryDeliveryReceipts,')
+    expect(fullProductionStoreSource).toContain('buildChapterProseStoragePatch(')
+    expect(fullProductionStoreSource).toContain('ohStoryDeliveryReceipts,')
     expect(storagePatchSource).toContain('oh_story_delivery_receipts: input.ohStoryDeliveryReceipts')
     expect(storagePatchSource).toContain('chapter_blueprint: receipts?.chapter_blueprint')
     expect(storagePatchSource).toContain('scene_card_receipts: receipts?.scene_card_receipts')
