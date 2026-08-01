@@ -8,7 +8,10 @@ import {
   type McpServerRecord,
   type ProseGenerationSourceConfig,
 } from '../../api/mcp'
-import { buildMcpSourceStatus } from './mcpGenerationSourceStatusModel'
+import {
+  buildMcpSourceStatus,
+  loadMcpSourceStatusSnapshot,
+} from './mcpGenerationSourceStatusModel'
 
 export function McpGenerationSourceStatus({
   projectId,
@@ -35,28 +38,34 @@ export function McpGenerationSourceStatus({
     if (!projectId) return
     let active = true
     setLoadFailed(false)
+    setServers([])
+    setKeys([])
+    setAgents([])
 
-    void Promise.all([
-      mcpApi.getProjectSource(projectId),
-      mcpApi.listServers(),
-      mcpApi.listKeys(),
-    ]).then(async ([sourceResponse, serverResponse, keyResponse]) => {
-      if (!active) return
-      const nextSource = sourceResponse.data.source
-      let nextAgents: McpAgentSummary[] = []
-      if (nextSource.type === 'mcp') {
-        const agentResponse = await mcpApi.listProjectAgents(
+    void loadMcpSourceStatusSnapshot({
+      projectId,
+      isActive: () => active,
+      onSource: nextSource => setSource(nextSource),
+      loadSource: async nextProjectId => (
+        await mcpApi.getProjectSource(nextProjectId)
+      ).data.source,
+      loadServers: async () => (await mcpApi.listServers()).data || [],
+      loadKeys: async () => (await mcpApi.listKeys()).data || [],
+      loadAgents: async nextSource => {
+        if (nextSource.type !== 'mcp') return []
+        const response = await mcpApi.listProjectAgents(
           projectId,
           nextSource.mcp.server_id,
           nextSource.mcp.key_id,
         )
-        nextAgents = agentResponse.data.agents || []
-      }
-      if (!active) return
-      setSource(nextSource)
-      setServers(serverResponse.data || [])
-      setKeys(keyResponse.data || [])
-      setAgents(nextAgents)
+        return response.data.agents || []
+      },
+    }).then(snapshot => {
+      if (!snapshot || !active) return
+      setServers(snapshot.servers)
+      setKeys(snapshot.keys)
+      setAgents(snapshot.agents)
+      setLoadFailed(snapshot.loadFailed)
     }).catch(() => {
       if (active) setLoadFailed(true)
     })

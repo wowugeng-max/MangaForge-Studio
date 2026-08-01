@@ -12,6 +12,43 @@ export type McpSourceStatus = {
   available: boolean
 }
 
+export type McpSourceStatusLoadSnapshot = {
+  source: ProseGenerationSourceConfig
+  servers: McpServerRecord[]
+  keys: McpPublicKey[]
+  agents: McpAgentSummary[]
+  loadFailed: boolean
+}
+
+export async function loadMcpSourceStatusSnapshot(input: {
+  projectId: number
+  isActive: () => boolean
+  onSource: (source: ProseGenerationSourceConfig) => void
+  loadSource: (projectId: number) => Promise<ProseGenerationSourceConfig>
+  loadServers: () => Promise<McpServerRecord[]>
+  loadKeys: () => Promise<McpPublicKey[]>
+  loadAgents: (source: ProseGenerationSourceConfig) => Promise<McpAgentSummary[]>
+}): Promise<McpSourceStatusLoadSnapshot | null> {
+  const source = await input.loadSource(input.projectId)
+  if (!input.isActive()) return null
+  input.onSource(source)
+
+  const [serverResult, keyResult, agentResult] = await Promise.allSettled([
+    input.loadServers(),
+    input.loadKeys(),
+    source.type === 'mcp' ? input.loadAgents(source) : Promise.resolve([]),
+  ])
+  if (!input.isActive()) return null
+
+  return {
+    source,
+    servers: serverResult.status === 'fulfilled' ? serverResult.value : [],
+    keys: keyResult.status === 'fulfilled' ? keyResult.value : [],
+    agents: agentResult.status === 'fulfilled' ? agentResult.value : [],
+    loadFailed: [serverResult, keyResult, agentResult].some(result => result.status === 'rejected'),
+  }
+}
+
 export function buildMcpSourceStatus(input: {
   source?: ProseGenerationSourceConfig | null
   servers?: McpServerRecord[]

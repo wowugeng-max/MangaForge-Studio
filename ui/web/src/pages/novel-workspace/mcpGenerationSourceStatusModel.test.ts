@@ -68,4 +68,105 @@ describe('MCP generation source workspace status', () => {
       available: false,
     })
   })
+
+  test('commits the authoritative source before optional metadata settles', async () => {
+    const module = await import('./mcpGenerationSourceStatusModel')
+    const loadMcpSourceStatusSnapshot = Reflect.get(module, 'loadMcpSourceStatusSnapshot')
+    expect(typeof loadMcpSourceStatusSnapshot).toBe('function')
+    if (typeof loadMcpSourceStatusSnapshot !== 'function') return
+
+    const source = {
+      version: 'prose_generation_source_v1' as const,
+      type: 'mcp' as const,
+      mcp: {
+        server_id: 'buda',
+        key_id: 3,
+        adapter_id: 'buda',
+        agent_id: 'agent-2',
+        model: 'model-new',
+      },
+    }
+    const committed: unknown[] = []
+    let rejectServers: (error: Error) => void = () => {}
+    const servers = new Promise<never>((_resolve, reject) => {
+      rejectServers = reject
+    })
+
+    const loading = loadMcpSourceStatusSnapshot({
+      projectId: 5,
+      isActive: () => true,
+      onSource: (nextSource: unknown) => committed.push(nextSource),
+      loadSource: async () => source,
+      loadServers: () => servers,
+      loadKeys: async () => [],
+      loadAgents: async () => [],
+    })
+
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(committed).toEqual([source])
+
+    rejectServers(new Error('metadata unavailable'))
+    expect(await loading).toEqual({
+      source,
+      servers: [],
+      keys: [],
+      agents: [],
+      loadFailed: true,
+    })
+  })
+
+  test('does not commit a superseded project load after switching projects', async () => {
+    const module = await import('./mcpGenerationSourceStatusModel')
+    const loadMcpSourceStatusSnapshot = Reflect.get(module, 'loadMcpSourceStatusSnapshot')
+    expect(typeof loadMcpSourceStatusSnapshot).toBe('function')
+    if (typeof loadMcpSourceStatusSnapshot !== 'function') return
+
+    const firstSource = {
+      version: 'prose_generation_source_v1' as const,
+      type: 'mcp' as const,
+      mcp: {
+        server_id: 'buda',
+        key_id: 3,
+        adapter_id: 'buda',
+        agent_id: 'agent-old',
+        model: 'model-old',
+      },
+    }
+    const secondSource = {
+      version: 'prose_generation_source_v1' as const,
+      type: 'model' as const,
+    }
+    const committed: unknown[] = []
+    let firstActive = true
+    let resolveFirst: (source: typeof firstSource) => void = () => {}
+    const delayedFirst = new Promise<typeof firstSource>(resolve => {
+      resolveFirst = resolve
+    })
+    const common = {
+      loadServers: async () => [],
+      loadKeys: async () => [],
+      loadAgents: async () => [],
+      onSource: (source: unknown) => committed.push(source),
+    }
+
+    const firstLoad = loadMcpSourceStatusSnapshot({
+      ...common,
+      projectId: 5,
+      isActive: () => firstActive,
+      loadSource: async () => delayedFirst,
+    })
+    firstActive = false
+    const secondLoad = loadMcpSourceStatusSnapshot({
+      ...common,
+      projectId: 6,
+      isActive: () => true,
+      loadSource: async () => secondSource,
+    })
+
+    expect(await secondLoad).toMatchObject({ source: secondSource, loadFailed: false })
+    resolveFirst(firstSource)
+    expect(await firstLoad).toBeNull()
+    expect(committed).toEqual([secondSource])
+  })
 })
