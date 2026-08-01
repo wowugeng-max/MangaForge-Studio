@@ -165,6 +165,17 @@ describe('prose generation source config', () => {
     expect(proseGenerationSourceFingerprint(model)).not.toBe(proseGenerationSourceFingerprint(mcp))
   })
 
+  test('fingerprints a historical binding identically before and after normalization', () => {
+    const historical = {
+      version: 'prose_generation_source_v1' as const,
+      type: 'mcp' as const,
+      mcp: { server_id: 'buda', key_id: 3, adapter_id: 'buda', agent_id: 'agent-1' },
+    }
+    expect(proseGenerationSourceFingerprint(historical as any)).toBe(
+      proseGenerationSourceFingerprint(normalizeProseGenerationSource(historical)),
+    )
+  })
+
   test('distinguishes MCP identity fields containing the fingerprint delimiter', () => {
     const first = normalizeProseGenerationSource({
       version: 'prose_generation_source_v1',

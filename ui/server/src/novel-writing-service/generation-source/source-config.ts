@@ -105,16 +105,17 @@ export function resolveProseGenerationSource(project: any): ProseGenerationSourc
 }
 
 export function proseGenerationSourceFingerprint(source: ProseGenerationSourceConfig) {
-  const identity = source.type === 'model'
-    ? [source.version, source.type]
+  const normalized = normalizeProseGenerationSource(source)
+  const identity = normalized.type === 'model'
+    ? [normalized.version, normalized.type]
     : [
-        source.version,
-        source.type,
-        source.mcp.server_id,
-        source.mcp.key_id,
-        source.mcp.adapter_id,
-        source.mcp.agent_id,
-        source.mcp.model,
+        normalized.version,
+        normalized.type,
+        normalized.mcp.server_id,
+        normalized.mcp.key_id,
+        normalized.mcp.adapter_id,
+        normalized.mcp.agent_id,
+        normalized.mcp.model,
       ]
   return `sha256:${createHash('sha256').update(JSON.stringify(identity), 'utf8').digest('hex')}`
 }
