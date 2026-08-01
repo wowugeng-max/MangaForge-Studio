@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
+import { planningWorkspaceSource } from './workspaceUiShellSource'
 
 async function loadCacheModule() {
   return import('./payloadParseCache').catch(() => null)
@@ -117,7 +118,7 @@ describe('workspace payload parse cache', () => {
 
   test('routes the planning, writing, and auto director payload hotspots through the shared cache', () => {
     const source = (name: string) => readFileSync(join(import.meta.dir, name), 'utf8')
-    const planning = [source('planning/model/planning-workspace-model.ts'), source('planning/model/planning-workspace-builder.ts')].join('\n')
+    const planning = planningWorkspaceSource()
     const writing = [
       source('writingCockpitModel.ts'),
       source('writing-cockpit/model/cockpit-basics.ts'),
