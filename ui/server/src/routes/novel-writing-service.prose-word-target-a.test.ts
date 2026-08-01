@@ -273,9 +273,9 @@ describe('prose word target a', () => {
     expect(evaluation.passed).toBe(false)
     expect(evaluation.too_short).toBe(true)
     expect(evaluation.actual).toBe(1732)
-    expect(evaluation.deficit).toBe(1468)
-    expect(evaluation.min).toBe(3200)
-    expect(evaluateProseWordTarget('字'.repeat(3200), target).passed).toBe(true)
+    expect(evaluation.deficit).toBe(target.min - evaluation.actual)
+    expect(evaluation.min).toBe(target.min)
+    expect(evaluateProseWordTarget('字'.repeat(target.min), target).passed).toBe(true)
   })
 
   test('rejects a standard chapter draft above the maximum word target', () => {
@@ -285,22 +285,24 @@ describe('prose word target a', () => {
     expect(evaluation.passed).toBe(false)
     expect(evaluation.too_long).toBe(true)
     expect(evaluation.actual).toBe(12389)
-    expect(evaluation.max).toBe(5200)
+    expect(evaluation.max).toBe(target.max)
   })
 
   test('contracts over-target prose before returning the best complete candidate with a warning', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/prose-word-target-methods.ts'), 'utf8')
     const ensureStart = source.indexOf('const ensureProseMeetsWordTarget =')
     const ensureEnd = source.indexOf('return {\n    ensureProseMeetsWordTarget,', ensureStart)
-    const ensureBlock = source.slice(ensureStart, ensureEnd > ensureStart ? ensureEnd : source.length)
+    const ensureBlock = source.slice(ensureStart, ensureEnd)
     const tooLongStart = ensureBlock.indexOf('if (evaluation.too_long && options.contract !== false)')
     const contractionStart = ensureBlock.indexOf('const maxContractionAttempts', tooLongStart)
     const expansionStart = ensureBlock.indexOf('const maxExpansionAttempts')
     const contractionBlock = ensureBlock.slice(contractionStart, expansionStart)
-    const softCapStart = ensureBlock.indexOf('applyProseWordTargetSoftCap(evaluateProseWordTarget(chapterText, wordTarget))')
+    const softCapStart = ensureBlock.indexOf('let evaluation = applyProseWordTargetSoftCap(hardEvaluation)')
 
     expect(ensureStart).toBeGreaterThanOrEqual(0)
-    expect(ensureBlock.match(/applyProseWordTargetSoftCap\(evaluateProseWordTarget/g)).toHaveLength(3)
+    expect(ensureEnd).toBeGreaterThan(ensureStart)
+    expect(ensureBlock.match(/applyProseWordTargetSoftCap\(evaluateProseWordTarget/g)).toHaveLength(5)
+    expect(softCapStart).toBeGreaterThanOrEqual(0)
     expect(softCapStart).toBeLessThan(tooLongStart)
     expect(tooLongStart).toBeGreaterThanOrEqual(0)
     expect(contractionStart).toBeGreaterThan(tooLongStart)
@@ -361,10 +363,10 @@ describe('prose word target a', () => {
     )
 
     expect(prompt).toContain('当前正文约 1732 字')
-    expect(prompt).toContain('目标 4200 字')
-    expect(prompt).toContain('至少 3200 字')
+    expect(prompt).toContain(`目标 ${target.target} 字`)
+    expect(prompt).toContain(`至少 ${target.min} 字`)
     expect(prompt).toContain('不得删改已有效内容')
-    expect(prompt).toContain('扩写动作过程、选择代价、对话交锋、章末钩子铺垫')
+    expect(prompt).toContain('先按场景/情节点预算补当前章必须交付点，再补动作过程、选择代价、对话交锋、章末钩子铺垫')
   })
 
   test('uses compact context snapshots for expansion prompts without leaking circular context', () => {
@@ -513,7 +515,7 @@ describe('prose word target a', () => {
     )
 
     expect(prompt).toContain('第 2 轮补写')
-    expect(prompt).toContain('仍缺至少 646 字')
+    expect(prompt).toContain(`仍缺至少 ${evaluation.deficit} 字`)
     expect(prompt).toContain('本轮必须优先补足缺口')
     expect(prompt).toContain('返回扩写后的完整正文')
   })
@@ -709,8 +711,9 @@ describe('prose word target a', () => {
 
     expect(target.mode).toBe('standard')
     expect(target.target).toBe(4200)
-    expect(target.min).toBe(3200)
-    expect(target.max).toBe(5200)
+    expect(target.min).toBe(3780)
+    expect(target.max).toBe(4620)
+    expect(target.rangeText).toBe('3780-4620 字')
     expect(target.label).toContain('标准章')
   })
 
@@ -748,9 +751,9 @@ describe('prose word target a', () => {
 
     expect(target.mode).toBe('long')
     expect(target.target).toBe(10000)
-    expect(prompt).toContain('本章目标字数：约 10000 字')
-    expect(prompt).toContain('可接受范围：9000-11000 字')
-    expect(prompt).toContain('每个场景分配明确字数预算')
+    expect(prompt).toContain('全章硬目标：10000 字')
+    expect(prompt).toContain('落点范围 9000-11000 字')
+    expect(prompt).toContain('场景字数分配：')
     expect(proseMaxTokensForWordTarget(target)).toBeGreaterThan(14000)
   })
 

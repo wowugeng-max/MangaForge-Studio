@@ -588,23 +588,20 @@ describe('normalizeSceneCardsPayload quality a a', () => {
     expect(reviewBlock.indexOf('quality_audit_checks')).toBeLessThan(reviewBlock.indexOf('...deterministicSceneCardReceiptChecks'))
   })
   test('passes the authoritative generation contract into the prose quality loop', () => {
-    const source = readWritingServicePackageSource()
-    const helperSource = [
-      readFileSync(join(import.meta.dir, '../novel-writing-service/post-delivery/core-handoff-sync-reports.ts'), 'utf8'),
-      readFileSync(join(import.meta.dir, '../novel-writing-service/post-delivery/core-handoff-sync-reports-core.ts'), 'utf8'),
-      readFileSync(join(import.meta.dir, '../novel-writing-service/post-delivery/core-handoff-sync-reports-extended.ts'), 'utf8'),
-    ].join('\n')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore-loop.ts'), 'utf8')
+    const helperSource = readFileSync(join(import.meta.dir, '../novel-writing-service/post-delivery/core-handoff-sync-reports-extended.ts'), 'utf8')
     const helperStart = helperSource.indexOf('export function buildProseReviewContextPackage')
-    const helperBlock = helperSource.slice(
-      helperStart,
-      helperSource.indexOf('\nexport function', helperStart + 1),
-    )
-    const generationBlock = source.slice(
-      source.indexOf('let qualityLoop: Awaited<ReturnType<typeof runProseQualityLoop>>'),
-      source.indexOf('const initialReviewDecision = getQualityGateDecision'),
-    )
+    const helperEnd = helperSource.indexOf('\nexport function', helperStart + 1)
+    const helperBlock = helperSource.slice(helperStart, helperEnd)
+    const generationStart = source.indexOf('let qualityLoop: any')
+    const generationEnd = source.indexOf('const initialReviewDecision = getQualityGateDecision', generationStart)
+    const generationBlock = source.slice(generationStart, generationEnd)
 
+    expect(helperStart).toBeGreaterThanOrEqual(0)
+    expect(helperEnd).toBeGreaterThan(helperStart)
     expect(helperBlock).toContain('generated_scene_breakdown')
+    expect(generationStart).toBeGreaterThanOrEqual(0)
+    expect(generationEnd).toBeGreaterThan(generationStart)
     expect(generationBlock).toContain('coreContract: buildFocusedQualityCoreContract(generationContract)')
     expect(generationBlock).toContain('scan: text => scanProseForQualityLoop(text, contextPackage, wordTarget, wordTargetCompatibility ? {')
     expect(generationBlock).toContain('word_target_compatibility_pass: true')
