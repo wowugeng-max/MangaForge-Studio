@@ -98,7 +98,6 @@ import {
 import {
   applyChapterWordTargetToContext,
   countProseChars,
-  evaluateProseWordTarget,
   proseMaxTokensForWordTarget,
   resolveChapterWordTarget,
 } from '../../novel-writing/word-target'
@@ -263,6 +262,17 @@ import {
   runZhuqueFastQualityLoop,
 } from './generate-chapter-quality-prestore-fast-path'
 
+export function prepareSanitizedQualityRevisionCandidate(
+  revisedText: any,
+  methods: {
+    normalize: (value: any) => string
+    sanitize: (value: string) => string
+  },
+) {
+  const normalized = methods.normalize(revisedText)
+  return methods.sanitize(normalized)
+}
+
 export async function runQualityLoopPhase(args: QualityPrestoreSetupArgs): Promise<Record<string, any>> {
   let {
     options,
@@ -424,22 +434,19 @@ try {
         || payload?.chapter_text
         || payload?.chapterText
         || extractPlainProseFallback(result, 800)
-      const normalizedRevisedText = normalizeProseForStorage(revisedText)
-      const sanitizedRevisedText = applyR76PreStoreSanitize(normalizedRevisedText, {
-        project,
-        contextPackage,
-        skip_mid_monologue_densify: isZhuqueFast,
-        skipMidMonologueDensify: isZhuqueFast,
+      const sanitizedRevisedText = prepareSanitizedQualityRevisionCandidate(revisedText, {
+        normalize: normalizeProseForStorage,
+        sanitize: text => applyR76PreStoreSanitize(text, {
+          project,
+          contextPackage,
+          skip_mid_monologue_densify: isZhuqueFast,
+          skipMidMonologueDensify: isZhuqueFast,
+        }),
       })
-      const normalizedWordTarget = evaluateProseWordTarget(normalizedRevisedText, wordTarget)
-      const sanitizedWordTarget = evaluateProseWordTarget(sanitizedRevisedText, wordTarget)
-      const decisionCandidateText = normalizedWordTarget.passed && !sanitizedWordTarget.passed
-        ? normalizedRevisedText
-        : sanitizedRevisedText
       return {
         ...payload,
         ...revised,
-        final_text: decisionCandidateText,
+        final_text: sanitizedRevisedText,
       }
     },
   })
