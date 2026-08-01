@@ -840,12 +840,12 @@ describe('normalizeSceneCardsPayload quality b', () => {
   test('detects over-fragmented short narration lines as prose craft risks', () => {
     const checks = scanParagraphFragmentationRisks([
       '第4章 旧楼走廊',
-      '门开了。',
-      '风进来。',
-      '灯灭了。',
-      '李辰停住。',
-      '没人说话。',
-      '水迹停在脚边。',
+      '门开了',
+      '风进来',
+      '灯灭了',
+      '李辰停住',
+      '没人说话',
+      '水迹停在脚边',
       '"别动。"',
     ].join('\n'))
 
@@ -854,8 +854,8 @@ describe('normalizeSceneCardsPayload quality b', () => {
     expect(checks[0].label).toBe('段落碎片化扫描')
     expect(checks[0].evidence).toContain('门开了')
     expect(checks[0].evidence).toContain('水迹停在脚边')
-    expect(checks[0].fix).toContain('合并')
-    expect(checks[0].fix).toContain('戏剧单元')
+    expect(checks[0].fix).toContain('完整短句')
+    expect(checks[0].fix).toContain('并入')
   })
   test('wires deterministic paragraph fragmentation risks into prose craft self review', () => {
     const source = ['prose-self-review-methods.ts','prose-self-review-prompts.ts','prose-self-review-policy.ts','prose-self-review-run-deterministic.ts','prose-self-review-run-normalize.ts','prose-self-review-run-revision.ts','prose-self-review-run.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')

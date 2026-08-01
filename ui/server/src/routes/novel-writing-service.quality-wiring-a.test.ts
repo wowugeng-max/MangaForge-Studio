@@ -292,7 +292,7 @@ describe('novel writing service prose quality wiring a', () => {
     }
   })
   test('keeps a real low-risk style hit advisory when the review repeats the same evidence', () => {
-    const prose = '江澈推开仓门，铜锁坠在地上。如同一枚刚落下的铁钉，回声穿过空仓。他没有停步，抬手按住总闸，灯光依次亮起。'
+    const prose = '江澈推开仓门，铜锁坠在地上。\n\n如同一枚刚落下的铁钉，回声穿过空仓。他没有停步，抬手按住总闸，灯光依次亮起。'
     const scan = scanProseForQualityLoop(prose, {}, { target: 0, min: 0, max: 0 })
     const evidence = scan.advisory_findings.find((item: any) => item.pattern === '如同')?.evidence
     const decision = buildProseQualityDecision({
@@ -441,7 +441,7 @@ describe('novel writing service prose quality wiring a', () => {
     expect(decision.advisory_failures.join('｜')).toContain('style_scene_template')
   })
   test('downgrades a summary advisory whose regex consumes a sentence boundary', () => {
-    const prose = '门开了。这一刻，他终于明白真相。江澈把账册推到灯下，指向新出现的签名。'
+    const prose = '门开了。这一刻，他终于明白真相。江澈把账册推到灯下，指向新出现的签名。\n\n灯下还压着一张收据。纸角沾着新鲜的蓝墨。'
     const scan = scanProseForQualityLoop(prose, {}, { target: 0, min: 0, max: 0 })
     const summaryAdvisory = scan.advisory_findings.find((item: any) => item.pattern === '总结句式')
     const decision = buildProseQualityDecision({
