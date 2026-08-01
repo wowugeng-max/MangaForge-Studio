@@ -36,27 +36,43 @@ export type ProsePipelineTaskKind =
 
 export function classifyProsePipelineTask(agent: string, taskInput: string): ProsePipelineTaskKind {
   const task = String(taskInput || '')
-  const taskLines = task.split(/\r?\n/)
-  const hasTaskLine = (prefix: string) => taskLines.some(line => line.startsWith(prefix))
-  if (agent === 'outline-agent' && task.startsWith('任务：为当前章节生成可人工确认的场景卡')) return 'scene_cards'
-  if (agent === 'prose-agent' && hasTaskLine('任务：将本章正文压缩')) return 'contraction'
-  if (agent === 'prose-agent' && hasTaskLine('任务：将本章正文扩写')) return 'expansion'
-  if (agent === 'prose-agent' && hasTaskLine('任务：克制型网感润色')) return 'meme'
-  if (agent === 'prose-agent' && task.includes('商业主编')) return 'editor'
-  if (agent === 'review-agent' && (task.startsWith('任务：独立审查小说正文') || task.startsWith('任务：对刚生成的小说章节进行章节级自检'))) return 'quality_review'
-  if (agent === 'review-agent' && task.startsWith('任务：只补缺失的 oh-story 结构化自检字段')) return 'structured_review'
-  if (agent === 'prose-agent' && (
-    task.startsWith('任务：执行第')
-    || task.startsWith('任务：根据自检结果修订本章正文')
-    || task.includes('\n任务：执行第')
-    || task.includes('\n任务：根据自检结果修订本章正文')
-  )) return 'quality_revision'
-  if (agent === 'prose-agent' && (
-    task.startsWith('任务：对小说正文片段执行 Humanize Pass')
-    || task.startsWith('任务：对人工特征不足窗口做')
-    || task.startsWith('任务：对高风险正文窗口做')
-  )) return 'humanize'
-  if (agent === 'review-agent' && task.startsWith('任务：从刚入库的章节正文中提取故事状态机增量')) return 'story_state'
+  const payloadSeparators = [
+    '【结构化上下文包】',
+    '【当前过短正文】',
+    '【当前过长正文】',
+    '【待改稿正文】',
+    '【待润色正文】',
+    '【最终正文】',
+    '【原文片段】',
+    '【原文窗口】',
+    '【章节正文】',
+    '【待审校正文】',
+    '【初稿正文】',
+  ]
+  for (const rawLine of task.split(/\r\n?|\n/)) {
+    const line = rawLine.trimStart()
+    if (payloadSeparators.some(separator => line.startsWith(separator))) break
+    if (agent === 'outline-agent' && line.startsWith('任务：为当前章节生成可人工确认的场景卡')) return 'scene_cards'
+    if (agent === 'prose-agent' && line.startsWith('任务：将本章正文压缩')) return 'contraction'
+    if (agent === 'prose-agent' && line.startsWith('任务：将本章正文扩写')) return 'expansion'
+    if (agent === 'prose-agent' && line.startsWith('任务：克制型网感润色')) return 'meme'
+    if (agent === 'prose-agent' && line.startsWith('任务：商业主编改稿')) return 'editor'
+    if (agent === 'review-agent' && (
+      line.startsWith('任务：独立审查小说正文')
+      || line.startsWith('任务：对刚生成的小说章节进行章节级自检')
+    )) return 'quality_review'
+    if (agent === 'review-agent' && line.startsWith('任务：只补缺失的 oh-story 结构化自检字段')) return 'structured_review'
+    if (agent === 'prose-agent' && (
+      line.startsWith('任务：执行第')
+      || line.startsWith('任务：根据自检结果修订本章正文')
+    )) return 'quality_revision'
+    if (agent === 'prose-agent' && (
+      line.startsWith('任务：对小说正文片段执行 Humanize Pass')
+      || line.startsWith('任务：对人工特征不足窗口做')
+      || line.startsWith('任务：对高风险正文窗口做')
+    )) return 'humanize'
+    if (agent === 'review-agent' && line.startsWith('任务：从刚入库的章节正文中提取故事状态机增量')) return 'story_state'
+  }
   return 'other'
 }
 

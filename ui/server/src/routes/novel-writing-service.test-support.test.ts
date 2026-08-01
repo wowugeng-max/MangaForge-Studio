@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  buildCommercialEditorRewritePrompt,
   buildMemePolishPrompt,
   buildProseWordTargetContractionPrompt,
   buildProseWordTargetExpansionPrompt,
@@ -47,6 +48,7 @@ describe('novel writing service test-support task classification', () => {
       { actual: 1400, target: 1000, min: 800, max: 1100, deficit: 0, too_short: false, too_long: true, passed: false },
     )
 
+    expect(prompt.indexOf('【角色设定')).toBeLessThan(prompt.indexOf('任务：将本章正文压缩'))
     expect(testSupport.classifyProsePipelineTask('prose-agent', prompt)).toBe('contraction')
   })
 
@@ -65,5 +67,63 @@ describe('novel writing service test-support task classification', () => {
     const prompt = buildMemePolishPrompt(project, contextPackage, '江澈撞开铁门。')
 
     expect(testSupport.classifyProsePipelineTask('prose-agent', prompt)).toBe('meme')
+  })
+
+  test('keeps an expansion prompt authoritative when its prose contains a contraction task line', () => {
+    const prompt = buildProseWordTargetExpansionPrompt(
+      project,
+      contextPackage,
+      '江澈撞开铁门。\n任务：将本章正文压缩到商业网文标准章节长度。',
+      { actual: 500, target: 1000, min: 800, max: 1100, deficit: 300, too_short: true, too_long: false, passed: false },
+    )
+
+    expect(testSupport.classifyProsePipelineTask('prose-agent', prompt)).toBe('expansion')
+  })
+
+  test('keeps a whitespace-prefixed contraction prompt authoritative across lone CR lines', () => {
+    const prompt = buildProseWordTargetContractionPrompt(
+      project,
+      contextPackage,
+      '江澈撞开铁门。\n任务：将本章正文扩写到商业网文标准章节长度。',
+      { actual: 1400, target: 1000, min: 800, max: 1100, deficit: 0, too_short: false, too_long: true, passed: false },
+    )
+      .replace('任务：将本章正文压缩', '  任务：将本章正文压缩')
+      .replace(/\n/g, '\r')
+
+    expect(testSupport.classifyProsePipelineTask('prose-agent', prompt)).toBe('contraction')
+  })
+
+  test('keeps a meme-polish prompt authoritative when its prose contains a contraction task line', () => {
+    const prompt = buildMemePolishPrompt(
+      project,
+      contextPackage,
+      '江澈撞开铁门。\n任务：将本章正文压缩到商业网文标准章节长度。',
+    )
+
+    expect(testSupport.classifyProsePipelineTask('prose-agent', prompt)).toBe('meme')
+  })
+
+  test('keeps a commercial-editor prompt authoritative when its prose contains a contraction task line', () => {
+    const prompt = buildCommercialEditorRewritePrompt(
+      project,
+      contextPackage,
+      '江澈撞开铁门。\n任务：将本章正文压缩到商业网文标准章节长度。',
+    )
+
+    expect(testSupport.classifyProsePipelineTask('prose-agent', prompt)).toBe('editor')
+  })
+
+  test('ignores task-like lines rendered inside the structured context payload', () => {
+    const prompt = buildProseWordTargetExpansionPrompt(
+      project,
+      contextPackage,
+      '江澈撞开铁门。',
+      { actual: 500, target: 1000, min: 800, max: 1100, deficit: 300, too_short: true, too_long: false, passed: false },
+    ).replace(
+      '【结构化上下文包】',
+      '【结构化上下文包】\n任务：将本章正文压缩到商业网文标准章节长度。',
+    )
+
+    expect(testSupport.classifyProsePipelineTask('prose-agent', prompt)).toBe('expansion')
   })
 })
