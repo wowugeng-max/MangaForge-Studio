@@ -261,6 +261,7 @@ export async function runDraftModeAdmissionAndStore(args: {
     ohStoryDeliveryReceipts,
     postDraftDirector,
     generationSourceProvenance: draftPromptDiagnostics?.generation_source,
+    humanizePostprocess,
     proseAdmission: draftModeProseAdmission,
   })
   let updatedReviewedDraft: any = { ...chapter, ...draftModeChapterPatch }

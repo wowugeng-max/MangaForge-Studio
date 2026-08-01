@@ -4,6 +4,7 @@ import {
 import {
   enrichContextWithProgressResync,
 } from '../../novel-writing/chapter-progress-ledger'
+import { revisionTextHash } from '../../novel/revision-hash'
 import { ensureOpeningHandoffBridge, extractPrimaryEndingHooks } from '../../novel-writing/chapter-continuity-guard'
 import type { ProseAdmissionHardFailure } from '../../novel-writing/prose-admission-policy'
 import { assessInitialProseOpeningContinuity } from '../../novel-writing/prose-candidate-continuity'
@@ -15,6 +16,40 @@ import {
 
 function buildHandoffContext(contextPackage: any) {
   return enrichContextWithProgressResync(enrichContextWithStrongHandoff(contextPackage))
+}
+
+export function attachPreQualityHumanizeProvenance(
+  report: any,
+  humanizeInputText: string,
+  humanizeOutputText: string,
+) {
+  if (!report || typeof report !== 'object') return report
+  const humanizeOutputHash = revisionTextHash(humanizeOutputText)
+  return {
+    ...report,
+    candidate_provenance: {
+      scope: 'pre_quality',
+      stage: 'pre_quality',
+      humanize_input_hash: revisionTextHash(humanizeInputText),
+      humanize_output_hash: humanizeOutputHash,
+      final_candidate_hash: humanizeOutputHash,
+      superseded_by_quality_revision: false,
+    },
+  }
+}
+
+export function reconcileHumanizeFinalCandidateProvenance(report: any, finalCandidateText: string) {
+  if (!report || typeof report !== 'object' || !report.candidate_provenance) return report
+  const finalCandidateHash = revisionTextHash(finalCandidateText)
+  const humanizeOutputHash = String(report.candidate_provenance.humanize_output_hash || '')
+  return {
+    ...report,
+    candidate_provenance: {
+      ...report.candidate_provenance,
+      final_candidate_hash: finalCandidateHash,
+      superseded_by_quality_revision: finalCandidateHash !== humanizeOutputHash,
+    },
+  }
 }
 
 export function collectFinalOpeningContinuityFailures(

@@ -246,6 +246,14 @@ export type HumanizePostProcessReport = {
   stages: Array<Record<string, any>>
   /** Locked default anti-AIGC stack id (R76 high-water baseline). */
   r76_zhuque_stack?: string
+  candidate_provenance?: {
+    scope: 'pre_quality'
+    stage: 'pre_quality'
+    humanize_input_hash: string
+    humanize_output_hash: string
+    final_candidate_hash: string
+    superseded_by_quality_revision: boolean
+  }
 }
 
 export function buildEmptyHumanizePostProcessReport(

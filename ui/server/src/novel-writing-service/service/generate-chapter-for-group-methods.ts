@@ -123,7 +123,9 @@ import {
   runQualityLoopAndPrestoreSetup,
 } from './generate-chapter-quality-prestore'
 import {
+  attachPreQualityHumanizeProvenance,
   collectFinalOpeningContinuityFailures,
+  reconcileHumanizeFinalCandidateProvenance,
   runPostDraftHumanizeAndOpeningHandoff,
 } from './generate-chapter-post-draft-finalize'
 import {
@@ -499,6 +501,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   let qualityWarningCandidates = editorMemeResult.qualityWarningCandidates
   const wordTargetExpansionPatches = editorMemeResult.wordTargetExpansionPatches
   const wordTargetCompatibility = editorMemeResult.wordTargetCompatibility
+  const humanizeInputText = finalText
   const postDraftFinalizeResult = await runPostDraftHumanizeAndOpeningHandoff({
     activeWorkspace,
     project,
@@ -513,7 +516,11 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     onStage,
   })
   finalText = normalizeProseForStorage(postDraftFinalizeResult.finalText)
-  const humanizePostprocess = postDraftFinalizeResult.humanizePostprocess
+  let humanizePostprocess = attachPreQualityHumanizeProvenance(
+    postDraftFinalizeResult.humanizePostprocess,
+    humanizeInputText,
+    finalText,
+  )
 
   const qualityPrestoreResult = await runQualityLoopAndPrestoreSetup({
     options,
@@ -552,6 +559,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     onStage,
   })
   finalText = qualityPrestoreResult.finalText
+  humanizePostprocess = reconcileHumanizeFinalCandidateProvenance(humanizePostprocess, finalText)
   finalSceneBreakdown = qualityPrestoreResult.finalSceneBreakdown
   finalContinuityNotes = qualityPrestoreResult.finalContinuityNotes
   const qualityLoop = qualityPrestoreResult.qualityLoop

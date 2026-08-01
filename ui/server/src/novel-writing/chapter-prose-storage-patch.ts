@@ -9,6 +9,7 @@ export type ChapterProseStoragePatchInput = {
   ohStoryDeliveryReceipts: any
   postDraftDirector?: any
   generationSourceProvenance?: any
+  humanizePostprocess?: unknown
   proseAdmission?: {
     status: 'accepted' | 'accepted_with_warnings'
     quality_score: number | null
@@ -227,6 +228,9 @@ export function buildChapterProseStoragePatch(input: ChapterProseStoragePatchInp
   }
   if (input.generationSourceProvenance !== undefined) {
     rawPayload.prose_generation_source = input.generationSourceProvenance
+  }
+  if (input.humanizePostprocess !== undefined) {
+    rawPayload.humanize_postprocess = input.humanizePostprocess
   }
   if (input.proseAdmission !== undefined) {
     rawPayload.prose_admission = input.proseAdmission

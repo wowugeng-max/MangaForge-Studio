@@ -31,12 +31,14 @@ import { createStoryStateMachineMethods } from './story-state-machine'
 import { createStructuredReviewFillMethods } from './structured-review-fill-methods'
 import { getStoredOrBuiltWritingBible as getStoredOrBuiltWritingBibleCore } from './writing-bible'
 
+type RunHumanizePostProcess = ReturnType<typeof createProseHumanizePostprocessMethods>['runHumanizePostProcess']
+
 export type NovelWritingRuntime = {
   generateChapterProse?: typeof defaultGenerateNovelChapterProse
   storeChapterProseMemory?: typeof defaultStoreNovelChapterProseMemory
   mergeChapterRawPayload?: typeof mergeNovelChapterRawPayload
   executeAgent?: typeof executeNovelAgent
-  runHumanizePostProcess?: (...args: any[]) => any
+  runHumanizePostProcess?: RunHumanizePostProcess
   buildChapterContext?: (input: {
     workspace: string
     project: any

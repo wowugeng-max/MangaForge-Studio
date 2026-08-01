@@ -331,6 +331,7 @@ export async function runFullProductionAdmissionAndStore(args: {
     ohStoryDeliveryReceipts,
     postDraftDirector,
     generationSourceProvenance: draftPromptDiagnostics?.generation_source,
+    humanizePostprocess,
     proseAdmission,
   })
   const acceptancePrep = buildChapterAcceptancePrep({

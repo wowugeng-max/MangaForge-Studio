@@ -1,6 +1,6 @@
 /**
  * LLM-backed dual-pass humanize postprocess for finished chapter prose.
- * Runs after quality loop / before store admission.
+ * Runs after draft/editor/meme and before the quality loop and store admission.
  *
  * Default path (post-R67):
  *   sanitize → risk heatmap → rewrite high-risk segments only (≤2 rounds)

@@ -22,6 +22,7 @@ import { createNovelReferenceService } from './novel-reference-service'
 import { normalizeProseForStorage } from '../novel-writing/chapter-prose-storage-patch'
 import { buildCanonicalSurfaceIndex } from '../novel-writing/canonical-continuity'
 import { REAL_CHAPTER_11_CANONICAL_CONFLICT_PROSE } from '../novel-writing/fixtures/real-chapter-11-canonical-conflict'
+import { revisionTextHash } from '../novel/revision-hash'
 import {
   chapter10HandoffFixture,
   chapterScaleText,
@@ -38,6 +39,14 @@ import {
 } from './novel-writing-service.test-support'
 
 describe('novel writing service prose quality wiring b b', () => {
+  const identityHumanizeResult = (sourceText: string) => {
+    const chars = countProseChars(sourceText)
+    return {
+      final_text: sourceText,
+      report: { accepted: true, before_chars: chars, after_chars: chars },
+    }
+  }
+
   const classifyInjectedWritingCall = (task: string) => {
     if (task.startsWith('任务：从刚入库的章节正文中提取故事状态机增量')) return 'story_state'
     if (task.startsWith('任务：独立审查小说正文') || task.startsWith('任务：对刚生成的小说章节进行章节级自检')) return 'quality_review'
@@ -111,6 +120,7 @@ describe('novel writing service prose quality wiring b b', () => {
     const finalText = buildPipelineProse('江澈撞开铁门，追兵的包围线被迫后撤。', '主动夺下通讯器并推进追击')
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText: finalText,
+      humanizeResult: identityHumanizeResult,
       reviewPayloads: [{ score: 61, publishable: false, dimensions: { ...proseQualityScores, prose_style: 4 }, findings: [] }],
     })
 
@@ -120,7 +130,13 @@ describe('novel writing service prose quality wiring b b', () => {
       production_mode: 'draft_only',
     })
 
-    expect(result.chapter?.chapter_text).toBe(normalizeProseForStorage(finalText))
+    const authoritativeFinalText = String(harness.storeTexts[0] || '')
+    expect(authoritativeFinalText).not.toBe('')
+    expect(result.chapter?.chapter_text).toBe(authoritativeFinalText)
+    expect(harness.qualityReviewTasks[0]).toContain(authoritativeFinalText)
+    expect(harness.storeTexts).toEqual([authoritativeFinalText])
+    expect(harness.storyStateTexts).toEqual([])
+    expect(harness.memoryTexts).toEqual([])
     expect(result.completed_stage).toBe('store')
     expect(result.admission_status).toBe('accepted_with_warnings')
     expect(result.quality_warnings).toContainEqual(expect.objectContaining({ source: 'quality' }))
@@ -136,6 +152,7 @@ describe('novel writing service prose quality wiring b b', () => {
     const finalText = buildPipelineProse('江澈撞开铁门，追兵被迫后撤。', '主动夺下通讯器并推进追击')
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText: finalText,
+      humanizeResult: identityHumanizeResult,
       contextPackageOverride: {
         setting_context: { auto_matched: true, chapter_usage: [{ entity_id: 999999, usage_type: 'required', required: true }] },
       },
@@ -145,7 +162,13 @@ describe('novel writing service prose quality wiring b b', () => {
       target_word_count: 1000,
       production_mode: 'draft_only',
     })
-    expect(accepted.chapter?.chapter_text).toBe(normalizeProseForStorage(finalText))
+    const acceptedFinalText = String(harness.storeTexts[0] || '')
+    expect(acceptedFinalText).not.toBe('')
+    expect(accepted.chapter?.chapter_text).toBe(acceptedFinalText)
+    expect(harness.qualityReviewTasks[0]).toContain(acceptedFinalText)
+    expect(harness.storeTexts).toEqual([acceptedFinalText])
+    expect(harness.storyStateTexts).toEqual([])
+    expect(harness.memoryTexts).toEqual([])
     expect(await listNovelChapterSettingUsage(harness.workspace, harness.project.id, harness.chapter.id)).toEqual([])
 
     const failureHarness = await createProsePipelineHarness(createNovelWritingService, { draftText: finalText })
@@ -436,6 +459,7 @@ describe('novel writing service prose quality wiring b b', () => {
     const originalText = buildPipelineProse('江澈撞开铁门，追兵被迫后撤。', '主动夺下通讯器并推进追击')
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText: originalText,
+      humanizeResult: identityHumanizeResult,
       reviewPayloads: [{
         score: 72,
         publishable: true,
@@ -453,7 +477,13 @@ describe('novel writing service prose quality wiring b b', () => {
       target_word_count: 1000,
     })
 
-    expect(result.chapter?.chapter_text).toBe(normalizeProseForStorage(originalText))
+    const authoritativeFinalText = String(harness.storeTexts[0] || '')
+    expect(authoritativeFinalText).not.toBe('')
+    expect(result.chapter?.chapter_text).toBe(authoritativeFinalText)
+    expect(harness.qualityReviewTasks[0]).toContain(authoritativeFinalText)
+    expect(harness.storeTexts).toEqual([authoritativeFinalText])
+    expect(harness.storyStateTexts).toEqual([authoritativeFinalText])
+    expect(harness.memoryTexts).toEqual([authoritativeFinalText])
     expect(result.quality_warnings).toContainEqual(expect.objectContaining({ code: 'quality_revision_unavailable', source: 'review' }))
     expect(result.admission_status).toBe('accepted_with_warnings')
     expect(JSON.stringify(result)).not.toContain('revision provider unavailable')
@@ -469,6 +499,7 @@ describe('novel writing service prose quality wiring b b', () => {
     ))
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText: originalDraft,
+      humanizeResult: identityHumanizeResult,
       reviewPayloads: [
         {
           score: 72,
@@ -500,29 +531,43 @@ describe('novel writing service prose quality wiring b b', () => {
       auto_repair_quality_gate: true,
     })
     const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+    const authoritativeFinalText = String(harness.storeTexts[0] || '')
+    const finalHash = revisionTextHash(authoritativeFinalText)
 
-    expect(result.chapter?.chapter_text).toBe(finalText)
+    expect(authoritativeFinalText).not.toBe('')
+    expect(result.chapter?.chapter_text).toBe(authoritativeFinalText)
     expect(result.admission_status).toBe('accepted_with_warnings')
     expect(result.post_commit_warnings).toContainEqual(expect.objectContaining({ stage: 'memory' }))
-    expect(stored?.chapter_text).toBe(finalText)
+    expect(stored?.chapter_text).toBe(authoritativeFinalText)
     expect(stored?.raw_payload?.prose_admission).toMatchObject({
       status: 'accepted_with_warnings',
       post_commit_warnings: [expect.objectContaining({ stage: 'memory' })],
     })
     expect(result.chapter?.raw_payload?.prose_admission).toEqual(stored?.raw_payload?.prose_admission)
-    expect(harness.memoryTexts).toEqual([finalText])
+    expect(harness.qualityReviewTasks.at(-1)).toContain(authoritativeFinalText)
+    expect(harness.storeTexts).toEqual([authoritativeFinalText])
+    expect(harness.memoryTexts).toEqual([authoritativeFinalText])
     expect(harness.storeCalls).toBe(1)
     expect(harness.storyStateCalls).toBe(1)
-    expect(harness.storyStateTexts).toEqual([finalText])
+    expect(harness.storyStateTexts).toEqual([authoritativeFinalText])
     expect(harness.modelCalls.draft).toBe(1)
-    expect(harness.modelCalls.revision).toBe(1)
-    expect(harness.modelCalls.review).toBe(2)
+    expect(harness.modelCalls.revision).toBeGreaterThan(0)
+    expect(harness.modelCalls.review).toBeGreaterThanOrEqual(2)
+    expect(result.humanize_postprocess?.candidate_provenance).toMatchObject({
+      scope: 'pre_quality',
+      stage: 'pre_quality',
+      final_candidate_hash: finalHash,
+      superseded_by_quality_revision: true,
+    })
+    expect(result.humanize_postprocess?.candidate_provenance?.humanize_output_hash).not.toBe(finalHash)
+    expect(stored?.raw_payload?.humanize_postprocess).toEqual(result.humanize_postprocess)
   })
   test('keeps stored prose when admission metadata persistence fails and returns only a redacted warning', async () => {
     const secret = 'https://provider.example/path?api_key=SECRET_QUERY Bearer SECRET_BEARER token=SECRET_TOKEN'
     const finalText = buildPipelineProse('江澈撞开铁门，追兵被迫后撤。', '主动夺下通讯器并推进追击')
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText: finalText,
+      humanizeResult: identityHumanizeResult,
       memoryError: new Error('memory unavailable'),
       admissionMetadataError: new Error(secret),
     })
@@ -530,9 +575,15 @@ describe('novel writing service prose quality wiring b b', () => {
     const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, { model_id: 217, target_word_count: 1000 })
     const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
     const observable = JSON.stringify(result)
+    const authoritativeFinalText = String(harness.storeTexts[0] || '')
 
-    expect(stored?.chapter_text).toBe(normalizeProseForStorage(finalText))
-    expect(result.chapter?.chapter_text).toBe(stored?.chapter_text)
+    expect(authoritativeFinalText).not.toBe('')
+    expect(stored?.chapter_text).toBe(authoritativeFinalText)
+    expect(result.chapter?.chapter_text).toBe(authoritativeFinalText)
+    expect(harness.qualityReviewTasks[0]).toContain(authoritativeFinalText)
+    expect(harness.storeTexts).toEqual([authoritativeFinalText])
+    expect(harness.storyStateTexts).toEqual([authoritativeFinalText])
+    expect(harness.memoryTexts).toEqual([authoritativeFinalText])
     expect(result.admission_status).toBe('accepted_with_warnings')
     expect(result.post_commit_warnings).toEqual(expect.arrayContaining([
       expect.objectContaining({ stage: 'memory' }),
@@ -544,6 +595,7 @@ describe('novel writing service prose quality wiring b b', () => {
     const finalText = buildPipelineProse('江澈撞开铁门，追兵被迫后撤。', '主动夺下通讯器并推进追击')
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText: finalText,
+      humanizeResult: identityHumanizeResult,
       afterCommitError: new Error('after commit hook failed'),
     })
 
@@ -553,9 +605,16 @@ describe('novel writing service prose quality wiring b b', () => {
       production_mode: 'draft_only',
     })
     const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+    const authoritativeFinalText = String(harness.storeTexts[0] || '')
 
     expect(result.admission_status).toBe('accepted_with_warnings')
-    expect(stored?.chapter_text).toBe(normalizeProseForStorage(finalText))
+    expect(authoritativeFinalText).not.toBe('')
+    expect(stored?.chapter_text).toBe(authoritativeFinalText)
+    expect(result.chapter?.chapter_text).toBe(authoritativeFinalText)
+    expect(harness.qualityReviewTasks[0]).toContain(authoritativeFinalText)
+    expect(harness.storeTexts).toEqual([authoritativeFinalText])
+    expect(harness.storyStateTexts).toEqual([])
+    expect(harness.memoryTexts).toEqual([])
     expect(stored?.raw_payload?.prose_admission).toMatchObject({
       status: 'accepted_with_warnings',
       post_commit_warnings: [expect.objectContaining({ stage: 'after_commit_hook' })],

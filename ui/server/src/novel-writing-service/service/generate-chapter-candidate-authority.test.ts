@@ -34,7 +34,7 @@ describe('generateChapterForGroup final candidate authority', () => {
     const humanizedText = `${draftText}\n\n“东线退开。”\n\n江澈抬手截断频道，鞋底压住碎灯。`
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText,
-      humanizeResult: { final_text: humanizedText, report: { accepted: true } },
+      humanizeResult: { final_text: humanizedText, report: { accepted: true, before_chars: 901, after_chars: 977 } },
     })
     const stages: Array<{ stage: string; payload: any }> = []
 
@@ -66,6 +66,16 @@ describe('generateChapterForGroup final candidate authority', () => {
     expect(harness.storyStateTexts).toEqual([storedText])
     expect(harness.memoryTexts).toEqual([storedText])
     expect(revisionTextHash(String(result.chapter?.chapter_text || ''))).toBe(finalizerOutputHash)
+    expect(result.humanize_postprocess).toMatchObject({ before_chars: 901, after_chars: 977 })
+    expect(result.humanize_postprocess?.candidate_provenance).toEqual({
+      scope: 'pre_quality',
+      stage: 'pre_quality',
+      humanize_input_hash: finalizerInputHash,
+      humanize_output_hash: finalizerOutputHash,
+      final_candidate_hash: finalizerOutputHash,
+      superseded_by_quality_revision: false,
+    })
+    expect(stored?.raw_payload?.humanize_postprocess).toEqual(result.humanize_postprocess)
   })
 
   test('keeps one overlong post-finalizer candidate authoritative when a truncated revision is rejected', async () => {
@@ -122,5 +132,40 @@ describe('generateChapterForGroup final candidate authority', () => {
     expect(harness.storyStateTexts).toEqual([storedText])
     expect(harness.memoryTexts).toEqual([storedText])
     expect(revisionTextHash(String(result.chapter?.chapter_text || ''))).toBe(storedHash)
+  })
+
+  test('returns and stores unchanged pre-quality provenance in draft mode', async () => {
+    const draftText = repairedProse()
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText,
+      humanizeResult: { final_text: draftText, report: { accepted: true, before_chars: 701, after_chars: 733 } },
+    })
+
+    const result = await harness.service.generateChapterForGroup(
+      harness.workspace,
+      harness.project.id,
+      harness.chapter.id,
+      {
+        model_id: 217,
+        target_word_count: 1000,
+        max_quality_revision_rounds: 0,
+        production_mode: 'draft_only',
+        skip_mid_monologue_densify: true,
+      },
+    )
+    const stored = (await listNovelChapters(harness.workspace, harness.project.id))
+      .find(item => item.id === harness.chapter.id)
+    const finalHash = revisionTextHash(String(stored?.chapter_text || ''))
+
+    expect(result.humanize_postprocess).toMatchObject({ before_chars: 701, after_chars: 733 })
+    expect(result.humanize_postprocess?.candidate_provenance).toEqual({
+      scope: 'pre_quality',
+      stage: 'pre_quality',
+      humanize_input_hash: revisionTextHash(String(harness.humanizeTexts[0] || '')),
+      humanize_output_hash: finalHash,
+      final_candidate_hash: finalHash,
+      superseded_by_quality_revision: false,
+    })
+    expect(stored?.raw_payload?.humanize_postprocess).toEqual(result.humanize_postprocess)
   })
 })
