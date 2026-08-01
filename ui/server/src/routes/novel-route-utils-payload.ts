@@ -137,15 +137,25 @@ export function getNovelPayload(result: any) {
 
 function mergeRecoveredProsePayload(payload: any, recovered: any) {
   const parsedChapters = Array.isArray(payload?.prose_chapters) ? payload.prose_chapters : []
-  const recoveredChapter = Array.isArray(recovered?.prose_chapters) ? recovered.prose_chapters[0] : null
-  const proseChapters = recoveredChapter
-    ? parsedChapters.length > 0
-      ? [{ ...parsedChapters[0], ...recoveredChapter }, ...parsedChapters.slice(1)]
-      : [recoveredChapter]
-    : parsedChapters
+  const parsedFirstChapter = parsedChapters[0] && typeof parsedChapters[0] === 'object'
+    ? parsedChapters[0]
+    : null
+  const parsedTopLevelText = String(payload?.chapter_text || '')
+  const proseChapters = parsedChapters.length > 0
+    ? parsedChapters
+    : parsedTopLevelText
+      ? [{
+          ...(payload?.chapter_no ? { chapter_no: payload.chapter_no } : {}),
+          ...(payload?.title ? { title: payload.title } : {}),
+          chapter_text: parsedTopLevelText,
+        }]
+      : []
   return {
     ...payload,
-    ...recovered,
+    recovered_from_partial_json: recovered?.recovered_from_partial_json === true,
+    partial_json_open_string_recovered: recovered?.partial_json_open_string_recovered === true,
+    ...(!payload?.chapter_text && parsedFirstChapter?.chapter_text ? { chapter_text: parsedFirstChapter.chapter_text } : {}),
+    ...(!payload?.title && parsedFirstChapter?.title ? { title: parsedFirstChapter.title } : {}),
     ...(proseChapters.length > 0 ? { prose_chapters: proseChapters } : {}),
   }
 }

@@ -74,6 +74,37 @@ describe('getNovelPayload prose recovery precedence', () => {
     expect(payload.partial_json_open_string_recovered).toBe(false)
   })
 
+  test('keeps the parsed chapter title authoritative over a longer scene title', () => {
+    const chapterText = '第一章正文里的屏幕写着"CN-001"，他没有停步。'.repeat(16)
+    const sceneTitle = '这是一个明显比章节标题更长的场景标题'
+    const payload = getNovelPayload({
+      content: `{"prose_chapters":[{"chapter_no":13,"title":"盟友入局","chapter_text":"${chapterText}","scene_breakdown":[{"scene_no":1,"title":"${sceneTitle}"}]}]}`,
+    })
+
+    expect(payload.prose_chapters?.[0]).toMatchObject({
+      chapter_no: 13,
+      title: '盟友入局',
+      chapter_text: chapterText,
+      scene_breakdown: [{ scene_no: 1, title: sceneTitle }],
+    })
+    expect(payload.title).toBe('盟友入局')
+    expect(payload.chapter_text).toBe(chapterText)
+  })
+
+  test('keeps parsed multi-chapter ordering instead of overlaying the later longest prose', () => {
+    const firstText = '第一章正文里的屏幕写着"CN-001"，他没有停步。'.repeat(16)
+    const secondText = '第二章更长正文写着"SECOND"，走廊灯光继续闪烁。'.repeat(24)
+    const payload = getNovelPayload({
+      content: `{"prose_chapters":[{"chapter_no":1,"title":"第一章","chapter_text":"${firstText}"},{"chapter_no":2,"title":"第二章更长的正式标题","chapter_text":"${secondText}"}]}`,
+    })
+
+    expect(payload.prose_chapters).toHaveLength(2)
+    expect(payload.prose_chapters?.[0]).toMatchObject({ chapter_no: 1, title: '第一章', chapter_text: firstText })
+    expect(payload.prose_chapters?.[1]).toMatchObject({ chapter_no: 2, title: '第二章更长的正式标题', chapter_text: secondText })
+    expect(payload.title).toBe('第一章')
+    expect(payload.chapter_text).toBe(firstText)
+  })
+
   test('keeps invalid payloads without recoverable prose fail-closed', () => {
     expect(getNovelPayload({
       content: '```json\n{"state_delta":{"open_questions":["未闭合"]}\n',
