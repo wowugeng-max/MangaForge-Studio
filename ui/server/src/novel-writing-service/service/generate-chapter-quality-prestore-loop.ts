@@ -256,43 +256,14 @@ import {
 import {
   attachQualityLoopFailureDiagnostics,
 } from './generate-chapter-quality-helpers'
+import type {
+  QualityPrestoreSetupArgs,
+} from './generate-chapter-quality-prestore-contract'
+import {
+  runZhuqueFastQualityLoop,
+} from './generate-chapter-quality-prestore-fast-path'
 
-export async function runQualityLoopPhase(args: {
-  options: any
-  project: any
-  chapter: any
-  projectId: number
-  activeWorkspace: string
-  preferredModelId: any
-  llmControlOptions: any
-  qualityRepairTimeoutMs: number
-  qualityThreshold: number
-  isDraftOnly: boolean
-  isDraftReviewOnly: boolean
-  isZhuqueFast?: boolean
-  generationContract: any
-  contextPackage: any
-  wordTarget: any
-  wordTargetCompatibility: any
-  wordTargetExpansionPatches: any[]
-  finalText: string
-  finalSceneBreakdown: any
-  finalContinuityNotes: any
-  ohStoryDeliveryReceipts: any
-  qualityWarningCandidates: any[]
-  editorRewrite: any
-  memePolish: any
-  readabilityReview: any
-  draftPromptDiagnostics: any
-  productionMode: any
-  configSnapshot: any
-  qualityGateProject: any
-  executeAgent: (...a: any[]) => any
-  getStageModelId: (...a: any[]) => any
-  runReadabilityReview: (...a: any[]) => any
-  throwIfChapterGenerationAborted: () => void
-  onStage: (...a: any[]) => any
-}): Promise<Record<string, any>> {
+export async function runQualityLoopPhase(args: QualityPrestoreSetupArgs): Promise<Record<string, any>> {
   let {
     options,
     project,
@@ -342,49 +313,16 @@ finalText = applyR76PreStoreSanitize(normalizeProseForStorage(finalText), {
 let qualityLoop: any
 // Zhuque fast path: skip LLM review/revise entirely (scan + sanitize only).
 if (isZhuqueFast) {
-  await onStage('review', {
-    status: 'skipped',
-    reason: 'zhuque_fast_path',
-    detail: '朱雀验证快路径：跳过多轮质检/修订 LLM，仅确定性扫描 + R76 sanitize/humanize',
-  })
-  await onStage('revise', {
-    status: 'skipped',
-    reason: 'zhuque_fast_path',
-  })
-  const scan = scanProseForQualityLoop(finalText, contextPackage, wordTarget, wordTargetCompatibility ? {
-    word_target_compatibility_pass: true,
-    compatibility_ceiling: wordTargetCompatibility.compatibility_ceiling,
-  } : {})
-  const resistanceProbe = evaluateHumanWebnovelResistance(finalText)
-  const hardFailures = Array.isArray(resistanceProbe?.hard_failures) ? resistanceProbe.hard_failures : []
-  qualityLoop = {
-    final_text: finalText,
-    final_scan: scan,
-    final_review: { score: 0, findings: [], dimensions: {}, source: 'zhuque_fast_scan_only' },
-    decision: {
-      passed: hardFailures.length === 0,
-      approvable: hardFailures.length === 0,
-      score: 0,
-      min_score: qualityThreshold,
-      hard_failures: hardFailures,
-      advisory_failures: ['zhuque_fast_path: skipped LLM quality review/revise'],
-    },
-    rounds: [],
-    quality_warning: {
-      code: 'zhuque_fast_path',
-      source: 'review',
-      message: '朱雀验证快路径：已跳过多轮质检修订 LLM',
-      details: { version: 'zhuque-fast-v1', hard_failures: hardFailures.length },
-    },
-  }
-  // Jump to residual sanitize + finalize setup by reusing post-loop assignment path.
-  finalText = applyR76PreStoreSanitize(String(qualityLoop.final_text || ''), {
+  ;({ qualityLoop, finalText } = await runZhuqueFastQualityLoop({
+    finalText,
     project,
     contextPackage,
-    skip_mid_monologue_densify: isZhuqueFast,
-    skipMidMonologueDensify: isZhuqueFast,
-  })
-  // Continue with residual resistance re-scan block below by skipping the try/catch LLM loop.
+    wordTarget,
+    wordTargetCompatibility,
+    qualityThreshold,
+    isZhuqueFast,
+    onStage,
+  }))
 } else {
 // System-wide detector resistance: even draft_only gets one minimal revise when pure-AI hard classes hit.
 // This is not chapter-specific tuning; full quality revise still stays off for pure draft modes when clean.
