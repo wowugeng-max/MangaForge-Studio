@@ -10,6 +10,7 @@ describe('novel writing service test-support task classification', () => {
     expect(classify?.('prose-agent', `任务：对高风险正文窗口做减负结构重写。${embeddedContract}`)).toBe('humanize')
     expect(classify?.('review-agent', `任务：独立审查小说正文。${embeddedContract}`)).toBe('quality_review')
     expect(classify?.('prose-agent', `任务：执行第 1 轮正文定向修订，返回完整章节正文。${embeddedContract}`)).toBe('quality_revision')
+    expect(classify?.('prose-agent', `【角色设定 · 资深网文作者】\n任务：执行第 1 轮正文定向修订，返回完整章节正文。${embeddedContract}`)).toBe('quality_revision')
   })
 
   test('routes the canonical Story State prompt independently of embedded contract fields', () => {

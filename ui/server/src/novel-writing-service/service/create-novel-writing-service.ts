@@ -36,6 +36,7 @@ export type NovelWritingRuntime = {
   storeChapterProseMemory?: typeof defaultStoreNovelChapterProseMemory
   mergeChapterRawPayload?: typeof mergeNovelChapterRawPayload
   executeAgent?: typeof executeNovelAgent
+  runHumanizePostProcess?: (...args: any[]) => any
   buildChapterContext?: (input: {
     workspace: string
     project: any
@@ -89,7 +90,8 @@ export function createNovelWritingService(ctx: {
     getStageModelId: (project: any, stage: any, modelId?: any) => ctx.production.getStageModelId(project, stage, modelId),
     getStageTemperature: (project: any, stage: any, fallback?: any) => ctx.production.getStageTemperature(project, stage, fallback),
   })
-  const runHumanizePostProcess = humanizePostprocessMethods.runHumanizePostProcess
+  const runHumanizePostProcess = ctx.runtime?.runHumanizePostProcess
+    || humanizePostprocessMethods.runHumanizePostProcess
   const sceneCardsMethods = createSceneCardsMethods({
     executeAgent,
     getStageModelId: (project: any, stage: any, modelId?: any) => ctx.production.getStageModelId(project, stage, modelId),

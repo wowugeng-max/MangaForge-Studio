@@ -499,6 +499,22 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   let qualityWarningCandidates = editorMemeResult.qualityWarningCandidates
   const wordTargetExpansionPatches = editorMemeResult.wordTargetExpansionPatches
   const wordTargetCompatibility = editorMemeResult.wordTargetCompatibility
+  const postDraftFinalizeResult = await runPostDraftHumanizeAndOpeningHandoff({
+    activeWorkspace,
+    project,
+    contextPackage,
+    characters,
+    finalText,
+    preferredModelId,
+    llmControlOptions,
+    options,
+    isZhuqueFast,
+    runHumanizePostProcess,
+    onStage,
+  })
+  finalText = normalizeProseForStorage(postDraftFinalizeResult.finalText)
+  const humanizePostprocess = postDraftFinalizeResult.humanizePostprocess
+
   const qualityPrestoreResult = await runQualityLoopAndPrestoreSetup({
     options,
     project,
@@ -565,22 +581,6 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   const postDraftDirector = qualityPrestoreResult.postDraftDirector
   const draftQualityDecision = qualityPrestoreResult.draftQualityDecision
   const buildProseQualityReview = qualityPrestoreResult.buildProseQualityReview
-
-  const postDraftFinalizeResult = await runPostDraftHumanizeAndOpeningHandoff({
-    activeWorkspace,
-    project,
-    contextPackage,
-    characters,
-    finalText,
-    preferredModelId,
-    llmControlOptions,
-    options,
-    isZhuqueFast,
-    runHumanizePostProcess,
-    onStage,
-  })
-  finalText = postDraftFinalizeResult.finalText
-  const humanizePostprocess = postDraftFinalizeResult.humanizePostprocess
 
   await storePreStoreReceiptSyncReviews({
     storeGeneratedReviewRecord,

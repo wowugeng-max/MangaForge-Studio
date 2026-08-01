@@ -27,6 +27,12 @@ export async function runZhuqueFastQualityLoop(args: {
     isZhuqueFast,
     onStage,
   } = args
+  const finalText = applyR76PreStoreSanitize(String(args.finalText || ''), {
+    project,
+    contextPackage,
+    skip_mid_monologue_densify: isZhuqueFast,
+    skipMidMonologueDensify: isZhuqueFast,
+  })
 
   await onStage('review', {
     status: 'skipped',
@@ -37,14 +43,14 @@ export async function runZhuqueFastQualityLoop(args: {
     status: 'skipped',
     reason: 'zhuque_fast_path',
   })
-  const scan = scanProseForQualityLoop(args.finalText, contextPackage, wordTarget, wordTargetCompatibility ? {
+  const scan = scanProseForQualityLoop(finalText, contextPackage, wordTarget, wordTargetCompatibility ? {
     word_target_compatibility_pass: true,
     compatibility_ceiling: wordTargetCompatibility.compatibility_ceiling,
   } : {})
-  const resistanceProbe = evaluateHumanWebnovelResistance(args.finalText)
+  const resistanceProbe = evaluateHumanWebnovelResistance(finalText)
   const hardFailures = Array.isArray(resistanceProbe?.hard_failures) ? resistanceProbe.hard_failures : []
   const qualityLoop = {
-    final_text: args.finalText,
+    final_text: finalText,
     final_scan: scan,
     final_review: { score: 0, findings: [], dimensions: {}, source: 'zhuque_fast_scan_only' },
     decision: {
@@ -66,11 +72,6 @@ export async function runZhuqueFastQualityLoop(args: {
 
   return {
     qualityLoop,
-    finalText: applyR76PreStoreSanitize(String(qualityLoop.final_text || ''), {
-      project,
-      contextPackage,
-      skip_mid_monologue_densify: isZhuqueFast,
-      skipMidMonologueDensify: isZhuqueFast,
-    }),
+    finalText,
   }
 }

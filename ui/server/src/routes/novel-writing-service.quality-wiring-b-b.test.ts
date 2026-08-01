@@ -43,7 +43,12 @@ describe('novel writing service prose quality wiring b b', () => {
     if (task.startsWith('任务：独立审查小说正文') || task.startsWith('任务：对刚生成的小说章节进行章节级自检')) return 'quality_review'
     if (task.startsWith('任务：只补缺失的 oh-story 结构化自检字段')) return 'structured_review'
     if (task.startsWith('任务：执行第') || task.startsWith('任务：根据自检结果修订本章正文')) return 'quality_revision'
-    if (task.startsWith('任务：对小说正文片段执行 Humanize Pass') || task.startsWith('任务：对人工特征不足窗口做') || task.startsWith('任务：对高风险正文窗口做')) return 'humanize'
+    const humanizeMarkers = [
+      '任务：对小说正文片段执行 Humanize Pass',
+      '任务：对人工特征不足窗口做',
+      '任务：对高风险正文窗口做',
+    ]
+    if (humanizeMarkers.some(marker => task.startsWith(marker) || task.includes(`\n${marker}`))) return 'humanize'
     if (task.startsWith('任务：克制型网感润色')) return 'meme'
     if (task.includes('商业主编')) return 'editor'
     return 'other'
@@ -300,6 +305,7 @@ describe('novel writing service prose quality wiring b b', () => {
         model_id: 217,
         target_word_count: 1000,
         auto_repair_quality_gate: true,
+        max_quality_revision_rounds: 0,
       },
     )
 
@@ -358,6 +364,12 @@ describe('novel writing service prose quality wiring b b', () => {
           injectedCallOrder.push('draft')
           return { parsed: { chapter_no: 10, chapter_text: finalText }, finish_reason: 'stop' }
         },
+        runHumanizePostProcess: async (_workspace: string, _project: any, _context: any, sourceText: string) => {
+          injectedCallOrder.push(classifyInjectedWritingCall(
+            '【角色设定 · 资深网文作者】\n任务：对小说正文片段执行 Humanize Pass A（结构重写）。只输出改写后正文。',
+          ))
+          return { final_text: sourceText, report: { accepted: true } }
+        },
         executeAgent: async (_agent: string, _project: any, input: any) => {
           const task = String(input?.task || '')
           const callKind = classifyInjectedWritingCall(task)
@@ -400,8 +412,8 @@ describe('novel writing service prose quality wiring b b', () => {
     expect(after).toBe(before)
     expect(storyStateHookCalls).toBe(0)
     expect(injectedCallOrder[0]).toBe('draft')
-    expect(injectedCallOrder.indexOf('quality_review')).toBeGreaterThan(0)
-    expect(injectedCallOrder.indexOf('humanize')).toBeGreaterThan(injectedCallOrder.indexOf('quality_review'))
+    expect(injectedCallOrder.indexOf('humanize')).toBeGreaterThan(0)
+    expect(injectedCallOrder.indexOf('quality_review')).toBeGreaterThan(injectedCallOrder.indexOf('humanize'))
     expect(memoryCalls).toBe(0)
   })
   test('stores complete prose when the structured quality review is unavailable', async () => {

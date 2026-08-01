@@ -303,12 +303,7 @@ export async function runQualityLoopPhase(args: QualityPrestoreSetupArgs): Promi
 
 throwIfChapterGenerationAborted()
 await onStage('review', { status: 'running' })
-finalText = applyR76PreStoreSanitize(normalizeProseForStorage(finalText), {
-  project,
-  contextPackage,
-  skip_mid_monologue_densify: isZhuqueFast,
-  skipMidMonologueDensify: isZhuqueFast,
-})
+finalText = normalizeProseForStorage(finalText)
 
 let qualityLoop: any
 // Zhuque fast path: skip LLM review/revise entirely (scan + sanitize only).
@@ -429,22 +424,29 @@ try {
         || payload?.chapter_text
         || payload?.chapterText
         || extractPlainProseFallback(result, 800)
+      const normalizedRevisedText = normalizeProseForStorage(revisedText)
+      const sanitizedRevisedText = applyR76PreStoreSanitize(normalizedRevisedText, {
+        project,
+        contextPackage,
+        skip_mid_monologue_densify: isZhuqueFast,
+        skipMidMonologueDensify: isZhuqueFast,
+      })
+      const normalizedWordTarget = evaluateProseWordTarget(normalizedRevisedText, wordTarget)
+      const sanitizedWordTarget = evaluateProseWordTarget(sanitizedRevisedText, wordTarget)
+      const decisionCandidateText = normalizedWordTarget.passed && !sanitizedWordTarget.passed
+        ? normalizedRevisedText
+        : sanitizedRevisedText
       return {
         ...payload,
         ...revised,
-        final_text: normalizeProseForStorage(revisedText),
+        final_text: decisionCandidateText,
       }
     },
   })
 } catch (error: any) {
   throw attachQualityLoopFailureDiagnostics(error, { draftPromptDiagnostics, qualityThreshold })
 }
-finalText = applyR76PreStoreSanitize(String(qualityLoop.final_text || ''), {
-  project,
-  contextPackage,
-  skip_mid_monologue_densify: isZhuqueFast,
-  skipMidMonologueDensify: isZhuqueFast,
-})
+finalText = String(qualityLoop.final_text || '')
 } // end !isZhuqueFast
 // Re-scan after sanitize; residual hard risks stay on decision for admission/store block.
 {

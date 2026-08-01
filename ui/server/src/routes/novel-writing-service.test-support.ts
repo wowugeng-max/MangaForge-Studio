@@ -43,7 +43,12 @@ export function classifyProsePipelineTask(agent: string, taskInput: string): Pro
   if (agent === 'prose-agent' && task.includes('商业主编')) return 'editor'
   if (agent === 'review-agent' && (task.startsWith('任务：独立审查小说正文') || task.startsWith('任务：对刚生成的小说章节进行章节级自检'))) return 'quality_review'
   if (agent === 'review-agent' && task.startsWith('任务：只补缺失的 oh-story 结构化自检字段')) return 'structured_review'
-  if (agent === 'prose-agent' && (task.startsWith('任务：执行第') || task.startsWith('任务：根据自检结果修订本章正文'))) return 'quality_revision'
+  if (agent === 'prose-agent' && (
+    task.startsWith('任务：执行第')
+    || task.startsWith('任务：根据自检结果修订本章正文')
+    || task.includes('\n任务：执行第')
+    || task.includes('\n任务：根据自检结果修订本章正文')
+  )) return 'quality_revision'
   if (agent === 'prose-agent' && (
     task.startsWith('任务：对小说正文片段执行 Humanize Pass')
     || task.startsWith('任务：对人工特征不足窗口做')
@@ -133,6 +138,7 @@ type ProsePipelineHarnessOptions = {
   repairedContextPackageOverride?: any
   requireStagedContextCandidates?: boolean
   referenceService?: any
+  humanizeResult?: any | ((sourceText: string) => any)
 }
 
 export async function createProsePipelineHarness(
@@ -205,6 +211,10 @@ export async function createProsePipelineHarness(
   const revisionResults = [...(options.revisionResults || [])]
   const modelCalls = { scene_cards: 0, draft: 0, review: 0, revision: 0, editor: 0, meme: 0, contraction: 0, expansion: 0, story_state: 0, other: 0 }
   const storyStateTexts: string[] = []
+  const humanizeTexts: string[] = []
+  const qualityReviewTasks: string[] = []
+  const qualityRevisionTasks: string[] = []
+  const storeTexts: string[] = []
   const memoryTexts: string[] = []
   const commitOrder: string[] = []
   const draftOptions: any[] = []
@@ -309,6 +319,7 @@ export async function createProsePipelineHarness(
     }
     if (taskKind === 'quality_review') {
       modelCalls.review += 1
+      qualityReviewTasks.push(task)
       qualityReviewCalls += 1
       if (options.recheckError && qualityReviewCalls > 1) throw options.recheckError
       const payload = reviewPayloads.shift() || {
@@ -321,6 +332,7 @@ export async function createProsePipelineHarness(
     }
     if (taskKind === 'quality_revision') {
       modelCalls.revision += 1
+      qualityRevisionTasks.push(task)
       if (revisionResults.length) return revisionResults.shift()
       const text = revisionTexts.shift() || draftText
       return { parsed: { chapter_text: text, revision_receipts: [{ key: 'agency', changed_evidence: text.slice(0, 80) }] }, modelName: 'fake-reviser' } as any
@@ -371,6 +383,14 @@ export async function createProsePipelineHarness(
           ? options.draftResult
           : { parsed: { chapter_no: 10, chapter_text: draftText }, modelName: 'fake-draft', usage: { input_tokens: 100, output_tokens: 200 } } as any
       },
+      runHumanizePostProcess: options.humanizeResult === undefined
+        ? undefined
+        : async (_workspace: string, _project: any, _context: any, sourceText: string) => {
+            humanizeTexts.push(sourceText)
+            return typeof options.humanizeResult === 'function'
+              ? options.humanizeResult(sourceText)
+              : options.humanizeResult
+          },
       storeChapterProseMemory: async (_project: any, _chapterNo: number, finalText: string) => {
         commitOrder.push('memory')
         memoryTexts.push(finalText)
@@ -383,6 +403,7 @@ export async function createProsePipelineHarness(
       hooks: {
         beforeChapterStore: ({ finalText }) => {
           storeCalls += 1
+          storeTexts.push(finalText)
           if (!finalText) throw new Error('empty final text')
         },
         beforeStoryState: ({ finalText }) => {
@@ -407,6 +428,10 @@ export async function createProsePipelineHarness(
     service,
     modelCalls,
     storyStateTexts,
+    humanizeTexts,
+    qualityReviewTasks,
+    qualityRevisionTasks,
+    storeTexts,
     memoryTexts,
     commitOrder,
     draftOptions,
