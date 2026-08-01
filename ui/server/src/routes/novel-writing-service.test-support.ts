@@ -36,10 +36,12 @@ export type ProsePipelineTaskKind =
 
 export function classifyProsePipelineTask(agent: string, taskInput: string): ProsePipelineTaskKind {
   const task = String(taskInput || '')
+  const taskLines = task.split(/\r?\n/)
+  const hasTaskLine = (prefix: string) => taskLines.some(line => line.startsWith(prefix))
   if (agent === 'outline-agent' && task.startsWith('任务：为当前章节生成可人工确认的场景卡')) return 'scene_cards'
-  if (agent === 'prose-agent' && task.startsWith('任务：将本章正文压缩')) return 'contraction'
-  if (agent === 'prose-agent' && task.startsWith('任务：将本章正文扩写')) return 'expansion'
-  if (agent === 'prose-agent' && task.startsWith('任务：克制型网感润色')) return 'meme'
+  if (agent === 'prose-agent' && hasTaskLine('任务：将本章正文压缩')) return 'contraction'
+  if (agent === 'prose-agent' && hasTaskLine('任务：将本章正文扩写')) return 'expansion'
+  if (agent === 'prose-agent' && hasTaskLine('任务：克制型网感润色')) return 'meme'
   if (agent === 'prose-agent' && task.includes('商业主编')) return 'editor'
   if (agent === 'review-agent' && (task.startsWith('任务：独立审查小说正文') || task.startsWith('任务：对刚生成的小说章节进行章节级自检'))) return 'quality_review'
   if (agent === 'review-agent' && task.startsWith('任务：只补缺失的 oh-story 结构化自检字段')) return 'structured_review'
