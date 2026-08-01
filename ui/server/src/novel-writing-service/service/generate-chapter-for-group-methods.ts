@@ -9,27 +9,15 @@ import {
   updateNovelChapter,
   } from '../../novel'
 import {
-  enrichContextWithStrongHandoff,
-  } from '../../novel-writing/chapter-handoff-basics'
-import {
-  enrichContextWithProgressResync,
-  } from '../../novel-writing/chapter-progress-ledger'
-import {
   buildChapterProseStoragePatch,
   normalizeProseForStorage,
   resolveChapterProseVersionSource,
   } from '../../novel-writing/chapter-prose-storage-patch'
 import {
-  applyR76PreStoreSanitize,
-  buildR76HumanizeDefaultOptions,
-  R76_ZHUQUE_STACK_VERSION,
-} from '../../novel-writing/r76-zhuque-stack'
-import {
   applyZhuqueFastPathOptions,
   isZhuqueFastProductionMode,
   ZHUQUE_FAST_PATH_VERSION,
 } from '../../novel-writing/zhuque-fast-path'
-import { ensureOpeningHandoffBridge, extractPrimaryEndingHooks } from '../../novel-writing/chapter-continuity-guard'
 import {
   buildDeterministicProseCleanupReport,
   buildQualityGateReviewWithDeterministicCleanup,
@@ -57,13 +45,6 @@ import {
   markBlockedInvalidError,
   validateMinimalChapterProse,
 } from '../../novel-writing/prose-admission-policy'
-import type {
-  ProseAdmissionHardFailure,
-  ProseAdmissionWarning,
-} from '../../novel-writing/prose-admission-policy'
-import {
-  assessInitialProseOpeningContinuity,
-} from '../../novel-writing/prose-candidate-continuity'
 import {
   resolveStrictPreflightReadiness,
 } from '../../novel-writing/prose-generation-contract'
@@ -141,6 +122,10 @@ import {
 import {
   runQualityLoopAndPrestoreSetup,
 } from './generate-chapter-quality-prestore'
+import {
+  collectFinalOpeningContinuityFailures,
+  runPostDraftHumanizeAndOpeningHandoff,
+} from './generate-chapter-post-draft-finalize'
 import {
   buildOhStoryDirectorForPostDraft,
 } from '../../routes/novel-oh-story-director'
@@ -581,98 +566,21 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   const draftQualityDecision = qualityPrestoreResult.draftQualityDecision
   const buildProseQualityReview = qualityPrestoreResult.buildProseQualityReview
 
-  // R76 Zhuque stack default: risk_segment humanize + pre-store stock sanitize (not chapter-tuned).
-  await onStage('humanize_postprocess', {
-    status: 'running',
-    version: 'humanize_postprocess_v3',
-    r76_zhuque_stack: R76_ZHUQUE_STACK_VERSION,
-  })
-  let humanizePostprocess: any = null
-  try {
-    const humanizeResult = await runHumanizePostProcess(
-      activeWorkspace,
-      project,
-      contextPackage,
-      finalText,
-      preferredModelId,
-      buildR76HumanizeDefaultOptions({
-        ...llmControlOptions,
-        skip_humanize_postprocess: options.skip_humanize_postprocess ?? options.skipHumanizePostprocess,
-        skipHumanizePostprocess: options.skip_humanize_postprocess ?? options.skipHumanizePostprocess,
-        enable_humanize_postprocess: options.enable_humanize_postprocess ?? options.enableHumanizePostprocess,
-        enableHumanizePostprocess: options.enable_humanize_postprocess ?? options.enableHumanizePostprocess,
-      }),
-    )
-    finalText = String(humanizeResult?.final_text || finalText)
-    humanizePostprocess = humanizeResult?.report || null
-    if (humanizePostprocess && typeof humanizePostprocess === 'object') {
-      humanizePostprocess = {
-        ...humanizePostprocess,
-        r76_zhuque_stack: humanizePostprocess.r76_zhuque_stack || R76_ZHUQUE_STACK_VERSION,
-      }
-    }
-    await onStage('humanize_postprocess', {
-      status: humanizePostprocess?.skipped ? 'skipped' : (humanizePostprocess?.accepted ? 'success' : 'warn'),
-      report: humanizePostprocess,
-      chars: (finalText || '').length,
-      r76_zhuque_stack: R76_ZHUQUE_STACK_VERSION,
-    })
-  } catch (error: any) {
-    humanizePostprocess = {
-      version: 'humanize_postprocess_v3',
-      enabled: true,
-      accepted: false,
-      skipped: false,
-      reason: 'humanize_postprocess_failed',
-      error: String(error?.message || error || 'unknown').slice(0, 240),
-      r76_zhuque_stack: R76_ZHUQUE_STACK_VERSION,
-    }
-    await onStage('humanize_postprocess', {
-      status: 'failed',
-      report: humanizePostprocess,
-      r76_zhuque_stack: R76_ZHUQUE_STACK_VERSION,
-    })
-    // Non-blocking: keep quality-loop text if postprocess throws.
-  }
-  // Always apply R76 pre-store sanitize (even if humanize skipped/failed).
-  finalText = applyR76PreStoreSanitize(finalText, {
+  const postDraftFinalizeResult = await runPostDraftHumanizeAndOpeningHandoff({
+    activeWorkspace,
     project,
     contextPackage,
     characters,
-    skip_mid_monologue_densify: options.skip_mid_monologue_densify === true || options.skipMidMonologueDensify === true || isZhuqueFast,
-    skipMidMonologueDensify: options.skip_mid_monologue_densify === true || options.skipMidMonologueDensify === true || isZhuqueFast,
+    finalText,
+    preferredModelId,
+    llmControlOptions,
+    options,
+    isZhuqueFast,
+    runHumanizePostProcess,
+    onStage,
   })
-
-  // System-level opening handoff bridge: if draft misses hard primary ending hook, prepend a short bridge.
-  // This keeps continuity admission honest while preventing flaky model openings from hard-blocking every chapter.
-  {
-    const handoffContext = enrichContextWithProgressResync(enrichContextWithStrongHandoff(contextPackage))
-    const previousChapter = (
-      handoffContext?.continuity?.previous_chapter
-      || handoffContext?.continuity?.previousChapter
-      || contextPackage?.continuity?.previous_chapter
-      || contextPackage?.continuity?.previousChapter
-      || contextPackage?.previous_chapter
-      || contextPackage?.previousChapter
-      || null
-    )
-    const bridge = ensureOpeningHandoffBridge(finalText, previousChapter)
-    if (bridge.bridged) {
-      finalText = applyR76PreStoreSanitize(bridge.text, {
-        project,
-        contextPackage,
-        characters,
-        skip_mid_monologue_densify: options.skip_mid_monologue_densify === true || options.skipMidMonologueDensify === true || isZhuqueFast,
-        skipMidMonologueDensify: options.skip_mid_monologue_densify === true || options.skipMidMonologueDensify === true || isZhuqueFast,
-      })
-      await onStage('opening_handoff_bridge', {
-        status: 'success',
-        reason: bridge.reason,
-        bridge: bridge.bridge || '',
-        primary_hooks: extractPrimaryEndingHooks(previousChapter).map((item: any) => item.key),
-      })
-    }
-  }
+  finalText = postDraftFinalizeResult.finalText
+  const humanizePostprocess = postDraftFinalizeResult.humanizePostprocess
 
   await storePreStoreReceiptSyncReviews({
     storeGeneratedReviewRecord,
@@ -692,10 +600,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     cleanupRepairPunctuationNormalization,
     cleanupRepairDeslopTermNormalization,
   })
-  const openingContinuityAssessment = assessInitialProseOpeningContinuity(finalText, enrichContextWithProgressResync(enrichContextWithStrongHandoff(contextPackage)))
-  const openingContinuityFailures: ProseAdmissionHardFailure[] = openingContinuityAssessment.failure
-    ? [openingContinuityAssessment.failure]
-    : []
+  const openingContinuityFailures = collectFinalOpeningContinuityFailures(finalText, contextPackage)
   if ((isDraftOnly || isDraftReviewOnly) && !isZhuqueFast) {
     return await runDraftModeAdmissionAndStore({
       isDraftOnly,

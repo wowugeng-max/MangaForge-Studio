@@ -133,6 +133,7 @@ const SOFT_BASELINES: Record<string, number> = {
   'routes/novel-commercial-ops/register-oh-story.ts': 100,
   'routes/novel-commercial-ops/register-ops.ts': 300,
   'novel-writing-service/service/generate-chapter-for-group-methods.ts': 750,
+  'novel-writing-service/service/generate-chapter-post-draft-finalize.ts': 150,
   'novel-writing-service/post-delivery/scene-card-delivery-risk.ts': 20,
   'routes/novel-editor/builders-annotations.ts': 800,
   'routes/novel-editor/register.ts': 80,
