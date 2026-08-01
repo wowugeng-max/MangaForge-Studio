@@ -84,11 +84,11 @@ describe('prose prompt builders', () => {
 
     expect(prompt).toContain('压缩到商业网文标准章节长度')
     expect(prompt).toContain('当前正文约 7200 字')
-    expect(prompt).toContain('可接受范围 3200-5200 字')
-    expect(prompt).toContain('建议落在 3200-4700 字')
+    expect(prompt).toContain('可接受范围 3780-4620 字')
+    expect(prompt).toContain('建议落在 3780-4410 字')
     expect(prompt).toContain('去掉所有空白字符后的程序字符数')
-    expect(prompt).toContain('本轮至少净删 2500 个字符')
-    expect(prompt).toContain('绝不能超过 5200 字')
+    expect(prompt).toContain('本轮至少净删 2790 个字符')
+    expect(prompt).toContain('绝不能超过 4620 字')
     expect(prompt).toContain('不得删主线事实、角色状态、章末钩子')
     expect(prompt).toContain('scene_card_receipts')
     expect(prompt).toContain('oh-story 压缩守恒')
@@ -111,7 +111,7 @@ describe('prose prompt builders', () => {
     expect(prompt).toContain('上一轮仍超上限')
     expect(prompt).toContain('改用场景功能保真的重构式压缩')
     expect(prompt).toContain('每个场景只保留一条完整行动链')
-    expect(prompt).toContain('本轮至少净删 1393 个字符')
+    expect(prompt).toContain('本轮至少净删 1683 个字符')
   })
 
   test('keeps the complete over-target chapter including its ending hook', () => {

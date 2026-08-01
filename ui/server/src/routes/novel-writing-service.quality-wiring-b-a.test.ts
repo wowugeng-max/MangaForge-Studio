@@ -59,12 +59,14 @@ describe('novel writing service prose quality wiring b a', () => {
     },
   })
 
-  test('restores earned-compatible prose when optional meme polish exceeds the compatibility ceiling', async () => {
-    const draftText = buildPipelineProse('江澈撞断路灯，切入铁门。', '主动夺取通讯器').repeat(7).slice(0, 6596)
+  test('restores earned-compatible prose when an invalid optional meme rewrite exceeds the compatibility ceiling', async () => {
+    const draftText = buildPipelineProse('江澈撞断路灯，切入铁门。', '主动夺取通讯器').repeat(7).slice(0, 6006)
+    const overCeilingMemeText = JSON.stringify({ chapter_text: draftText.slice(0, -18) })
+    expect(countProseChars(overCeilingMemeText)).toBe(6007)
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText,
       editorText: draftText,
-      memeText: '润'.repeat(7000),
+      memeText: overCeilingMemeText,
       enableMemePolish: true,
       chapterWordTarget: { mode: 'standard' },
       contextPackageOverride: withoutOpeningHandoffGuard(),
@@ -73,7 +75,18 @@ describe('novel writing service prose quality wiring b a', () => {
     const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, { model_id: 217, onStage: async (_name: string, payload: any) => stages.push(payload) })
     expect(result.admission_status).toBe('accepted_with_warnings')
     expect(harness.modelCalls.review).toBeGreaterThan(0)
-    expect(stages).toEqual(expect.arrayContaining([expect.objectContaining({ phase: 'post_meme_polish', fallback: 'pre_meme', compatibility_pass: true })]))
+    expect(countProseChars(result.chapter?.chapter_text || '')).toBe(6006)
+    expect(result.meme_polish).toMatchObject({
+      polished: false,
+      discarded: true,
+      discard_reason: 'post_meme_word_target_failed',
+    })
+    expect(stages).toEqual(expect.arrayContaining([expect.objectContaining({
+      phase: 'post_meme_polish',
+      fallback: 'pre_meme',
+      compatibility_pass: true,
+      compatibility_ceiling: 6006,
+    })]))
   })
   test('returns complete standard overlong prose with a warning after unusable contractions', async () => {
     const originalText = '原'.repeat(6761)

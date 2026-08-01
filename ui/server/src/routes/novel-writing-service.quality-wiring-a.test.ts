@@ -61,17 +61,17 @@ describe('novel writing service prose quality wiring a', () => {
 
   test('applies the prose word-target soft cap inside the quality-loop scanner', () => {
     const target = resolveChapterWordTarget({}, { chapter_no: 1 }, {})
-    const softCapScan = scanProseForQualityLoop('字'.repeat(5219), {}, target)
-    const overTargetScan = scanProseForQualityLoop('字'.repeat(5700), {}, target)
+    const softCapScan = scanProseForQualityLoop('字'.repeat(4759), {}, target)
+    const overTargetScan = scanProseForQualityLoop('字'.repeat(4760), {}, target)
 
     expect(softCapScan.word_target).toMatchObject({
-      actual: 5219,
+      actual: 4759,
       passed: true,
       soft_cap: true,
     })
     expect(softCapScan.hard_failures.some((item: any) => item.key === 'word_target')).toBe(false)
     expect(overTargetScan.word_target).toMatchObject({
-      actual: 5700,
+      actual: 4760,
       passed: false,
       soft_cap: false,
     })
@@ -79,10 +79,24 @@ describe('novel writing service prose quality wiring a', () => {
   })
   test('only suppresses standard word-target failure when an earned compatibility policy is supplied', () => {
     const standard = resolveChapterWordTarget({}, {}, {})
-    expect(scanProseForQualityLoop('字'.repeat(6596), {}, standard).hard_failures).toEqual(expect.arrayContaining([expect.objectContaining({ key: 'word_target' })]))
-    expect(scanProseForQualityLoop('字'.repeat(6596), {}, standard, { word_target_compatibility_pass: true, compatibility_ceiling: 6760 }).hard_failures.some((item: any) => item.key === 'word_target')).toBe(false)
-    expect(scanProseForQualityLoop('字'.repeat(6761), {}, standard, { word_target_compatibility_pass: true, compatibility_ceiling: 6760 }).hard_failures).toEqual(expect.arrayContaining([expect.objectContaining({ key: 'word_target' })]))
-    expect(scanProseForQualityLoop('字'.repeat(6761), {}, standard, { word_target_compatibility_pass: true, compatibility_ceiling: 99999 }).hard_failures).toEqual(expect.arrayContaining([expect.objectContaining({ key: 'word_target' })]))
+    const hasWordTargetFailure = (actual: number, compatibilityCeiling?: number) => scanProseForQualityLoop(
+      '字'.repeat(actual),
+      {},
+      standard,
+      compatibilityCeiling === undefined ? {} : {
+        word_target_compatibility_pass: true,
+        compatibility_ceiling: compatibilityCeiling,
+      },
+    ).hard_failures.some((item: any) => item.key === 'word_target')
+
+    for (const actual of [5900, 6006]) {
+      expect(hasWordTargetFailure(actual)).toBe(true)
+      expect(hasWordTargetFailure(actual, 6006)).toBe(false)
+    }
+    for (const actual of [6007, 6100]) {
+      expect(hasWordTargetFailure(actual, 6006)).toBe(true)
+      expect(hasWordTargetFailure(actual, 99999)).toBe(true)
+    }
   })
   test('wires canonical proper-noun continuity conflicts into deterministic hard failures', () => {
     const prose = '导航终点亮起：【江城市第一人民医院】。这正是旧档案里的那家医院。'
@@ -655,17 +669,31 @@ describe('novel writing service prose quality wiring a', () => {
       expect(result.contraction?.attempts?.[0]?.candidate_rejected).toBe(true)
     }
   })
-  test('preserves a 6596-character standard original after three unusable contractions', async () => {
-    const originalText = '原'.repeat(6596)
-    let calls = 0
-    const service = createNovelWritingService({ getProject: async () => null, production: { getStageModelId: (_p: any, _s: string, f?: number) => f || 217, getStageTemperature: (_p: any, _s: string, f: number) => f } as any, reference: {} as any, runtime: { executeAgent: async () => { calls++; return { parsed: {}, finish_reason: calls === 1 ? 'stop' : 'length' } } } })
-    const standard = { mode: 'standard', label: '标准章', target: 4200, min: 3200, max: 5200, rangeText: '3200-5200 字' }
-    const result = await service.ensureProseMeetsWordTarget('/tmp/compat', { id: 1 }, { chapter_target: { word_target: standard } }, originalText, 217)
-    expect(calls).toBe(3)
-    expect(result.final_text).toBe(originalText)
-    expect(result).toMatchObject({ contracted: false, word_target_compatibility_pass: true, compatibility_ceiling: 6760 })
-    expect(result.word_target_warning).toBeUndefined()
-    expect(result.contraction.attempts).toHaveLength(3)
+  test('only earns standard compatibility through the current 6006-character ceiling after unusable contractions', async () => {
+    const standard = resolveChapterWordTarget({}, {}, {})
+    for (const { actual, compatible } of [
+      { actual: 5900, compatible: true },
+      { actual: 6006, compatible: true },
+      { actual: 6007, compatible: false },
+      { actual: 6100, compatible: false },
+    ]) {
+      const originalText = '原'.repeat(actual)
+      let calls = 0
+      const service = createNovelWritingService({ getProject: async () => null, production: { getStageModelId: (_p: any, _s: string, f?: number) => f || 217, getStageTemperature: (_p: any, _s: string, f: number) => f } as any, reference: {} as any, runtime: { executeAgent: async () => { calls++; return { parsed: {}, finish_reason: calls === 1 ? 'stop' : 'length' } } } })
+      const result = await service.ensureProseMeetsWordTarget('/tmp/compat', { id: 1 }, { chapter_target: { word_target: standard } }, originalText, 217)
+
+      expect(calls).toBe(3)
+      expect(result.final_text).toBe(originalText)
+      expect(result.contracted).toBe(false)
+      expect(result.contraction.attempts).toHaveLength(3)
+      if (compatible) {
+        expect(result).toMatchObject({ word_target_compatibility_pass: true, compatibility_ceiling: 6006 })
+        expect(result.word_target_warning).toBeUndefined()
+      } else {
+        expect(result.word_target_compatibility_pass).not.toBe(true)
+        expect(result.word_target_warning?.code).toBe('word_target_long')
+      }
+    }
   })
   test('never admits a passing contraction without an explicit completion finish reason', async () => {
     const originalText = '原'.repeat(1400)
@@ -864,12 +892,14 @@ describe('novel writing service prose quality wiring a', () => {
     expect(memeResult.chapter?.chapter_text).toBe(normalizeProseForStorage(draftText))
     expect(memeResult.quality_warnings).toContainEqual(expect.objectContaining({ code: 'meme_polish_unavailable' }))
   })
-  test('restores earned-compatible prose when editor exceeds the compatibility ceiling', async () => {
-    const draftText = buildPipelineProse('江澈撞断路灯，切入铁门。', '主动夺取通讯器').repeat(7).slice(0, 6596)
+  test('restores earned-compatible prose when an invalid editor rewrite exceeds the compatibility ceiling', async () => {
+    const draftText = buildPipelineProse('江澈撞断路灯，切入铁门。', '主动夺取通讯器').repeat(7).slice(0, 6006)
+    const overCeilingEditorText = JSON.stringify({ chapter_text: draftText.slice(0, -18) })
+    expect(countProseChars(overCeilingEditorText)).toBe(6007)
     // Disable opening-handoff regression so the invalid overlong editor payload reaches the word-target restore path.
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText,
-      editorText: '编'.repeat(7000),
+      editorText: overCeilingEditorText,
       chapterWordTarget: { mode: 'standard' },
       contextPackageOverride: withoutOpeningHandoffGuard(),
     })
@@ -877,6 +907,17 @@ describe('novel writing service prose quality wiring a', () => {
     const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, { model_id: 217, onStage: async (_name: string, payload: any) => stages.push(payload) })
     expect(result.admission_status).toBe('accepted_with_warnings')
     expect(harness.modelCalls.review).toBeGreaterThan(0)
-    expect(stages).toEqual(expect.arrayContaining([expect.objectContaining({ phase: 'post_editor', fallback: 'pre_editor', compatibility_pass: true })]))
+    expect(countProseChars(result.chapter?.chapter_text || '')).toBe(6006)
+    expect(result.editor_rewrite).toMatchObject({
+      edited: false,
+      discarded: true,
+      discard_reason: 'post_editor_word_target_failed',
+    })
+    expect(stages).toEqual(expect.arrayContaining([expect.objectContaining({
+      phase: 'post_editor',
+      fallback: 'pre_editor',
+      compatibility_pass: true,
+      compatibility_ceiling: 6006,
+    })]))
   })
 })
