@@ -22,7 +22,6 @@ import {
   updateNovelProject,
 } from '../novel'
 import { buildPipelineProse, createProsePipelineHarness } from './novel-writing-service.test-support'
-import { normalizeProseForStorage } from '../novel-writing/chapter-prose-storage-patch'
 
 function acceptedQualityReviewPayload() {
   return {
@@ -444,7 +443,6 @@ describe('prepareStoryStateUpdate', () => {
       '江澈踏碎路面，飞石逼退第一排追兵，铁门前终于露出缺口。',
       '借自己制造的盲区夺下通讯器，继续迫使追捕队后撤',
     )
-    const expectedText = normalizeProseForStorage(finalText)
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText: finalText,
       qualityGateEnabled: false,
@@ -466,9 +464,14 @@ describe('prepareStoryStateUpdate', () => {
     const storedProject = await getNovelProject(harness.workspace, harness.project.id)
     const storedChapter = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
     const storedCharacter = (await listNovelCharacters(harness.workspace, harness.project.id)).find(item => item.name === '江澈')
+    const finalCandidate = result.chapter?.chapter_text || ''
 
-    expect(result.chapter?.chapter_text).toBe(expectedText)
-    expect(storedChapter?.chapter_text).toBe(expectedText)
+    expect(storedChapter?.chapter_text).toBe(finalCandidate)
+    expect(finalCandidate).toContain('江澈踏碎路面')
+    expect(finalCandidate).toContain('借自己制造的盲区夺下通讯器')
+    expect(harness.storeTexts).toEqual([finalCandidate])
+    expect(harness.storyStateTexts).toEqual([finalCandidate])
+    expect(harness.memoryTexts).toEqual([finalCandidate])
     expect(storedProject?.reference_config?.story_state).toMatchObject({
       open_questions: ['幕后指挥者为何知道江澈旧名'],
       last_updated_chapter: harness.chapter.chapter_no,
@@ -731,7 +734,16 @@ describe('prepareStoryStateUpdate', () => {
 
     expect(result.story_state_status).toBe('pending')
     expect(after).toBe(before)
-    expect((await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)?.chapter_text).toBe(normalizeProseForStorage(finalText))
+    const storedChapter = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+    const finalCandidate = result.chapter?.chapter_text || ''
+    expect(storedChapter?.chapter_text).toBe(finalCandidate)
+    expect(finalCandidate).toContain('江澈撞开铁门')
+    expect(finalCandidate).toContain('主动夺下通讯器并推进追击')
+    expect(harness.storeTexts).toEqual([finalCandidate])
+    expect(harness.storyStateTexts).toEqual([finalCandidate])
+    expect(harness.memoryTexts).toEqual([finalCandidate])
+    expect(harness.modelCalls.story_state).toBe(1)
+    expect(harness.commitOrder).toEqual(['commit', 'memory'])
     expect(await listChapterVersions(harness.workspace, harness.chapter.id)).toEqual([
       expect.objectContaining({ source: expect.any(String) }),
     ])

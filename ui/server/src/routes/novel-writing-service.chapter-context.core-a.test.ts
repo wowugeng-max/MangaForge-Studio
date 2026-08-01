@@ -277,7 +277,7 @@ const readChapterProseStoragePatchSource = () => readFileSync(join(import.meta.d
 const readPostDeliverySyncReviewRecordSource = () => readFileSync(join(import.meta.dir, '../novel-writing/post-delivery-sync-review-record.ts'), 'utf8')
 const readDraftSyncReviewRecordSource = () => readFileSync(join(import.meta.dir, '../novel-writing/draft-sync-review-record.ts'), 'utf8')
 
-test('keeps the connected draft with warnings when a quality revision drops the opening handoff', async () => {
+test('keeps one connected final candidate when later quality revisions are rejected', async () => {
   const initialDraft = buildPipelineProse(
     '倒数压到最后三秒，江澈停在围墙阴影里等待。',
     '只看着追捕队继续收紧包围',
@@ -332,23 +332,29 @@ test('keeps the connected draft with warnings when a quality revision drops the 
       decision: { passed: false },
     },
   })
-  expect(result.quality_loop?.rounds).toContainEqual(expect.objectContaining({
-    round: 1,
-    accepted: false,
-    reason: expect.stringContaining('承接'),
-  }))
+  expect(result.quality_loop?.rounds).toEqual(expect.arrayContaining([
+    expect.objectContaining({ round: 1, accepted: true, reason: '' }),
+    expect.objectContaining({ accepted: false, reason: expect.stringContaining('回退') }),
+  ]))
   expect(result.quality_warnings).toContainEqual(expect.objectContaining({ source: 'quality' }))
   expect(result.prompt_diagnostics?.prompt_chars).toBeGreaterThan(0)
   expect(JSON.stringify(result.quality_loop)).not.toContain(firstRevision.slice(0, 80))
   expect(JSON.stringify(result.quality_loop)).not.toContain(secondRevision.slice(0, 80))
 
   const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
-  expect(stored?.chapter_text).toBe(normalizeProseForStorage(initialDraft))
+  const finalCandidate = result.chapter?.chapter_text || ''
+  expect(stored?.chapter_text).toBe(finalCandidate)
+  expect(finalCandidate).toContain('倒数压到最后三秒')
+  expect(finalCandidate).toContain('跟着顾遥留下的手势挪动')
+  expect(finalCandidate).not.toContain('第二轮改稿里')
+  expect(finalCandidate).not.toContain('守在原地听取指令')
   expect(harness.storeCalls).toBe(1)
+  expect(harness.storeTexts).toEqual([finalCandidate])
   expect(harness.storyStateCalls).toBe(1)
-  expect(harness.memoryTexts).toEqual([normalizeProseForStorage(initialDraft)])
-  expect(harness.modelCalls.review).toBe(1)
-  expect(harness.modelCalls.revision).toBe(1)
+  expect(harness.storyStateTexts).toEqual([finalCandidate])
+  expect(harness.memoryTexts).toEqual([finalCandidate])
+  expect(harness.modelCalls.review).toBe(2)
+  expect(harness.modelCalls.revision).toBe(result.quality_loop.rounds.length)
 })
 test('stores revised prose with warnings when the independent quality recheck is unavailable', async () => {
   const revisedText = buildPipelineProse(
@@ -385,7 +391,6 @@ test('stores revised prose with warnings when the independent quality recheck is
     quality_loop: {
       decision: {
         passed: false,
-        hard_failures: [],
       },
       rounds: [{ round: 1, accepted: true, reason: '' }],
     },
@@ -398,14 +403,20 @@ test('stores revised prose with warnings when the independent quality recheck is
   expect(harness.storeCalls).toBe(1)
   expect(harness.storyStateCalls).toBe(1)
   const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
-  expect(stored?.chapter_text).toBe(normalizeProseForStorage(revisedText))
+  const finalCandidate = result.chapter?.chapter_text || ''
+  expect(stored?.chapter_text).toBe(finalCandidate)
+  expect(finalCandidate).toContain('江澈撞断路灯')
+  expect(finalCandidate).toContain('沿着自己砸出的缺口向前压进')
+  expect(harness.storeTexts).toEqual([finalCandidate])
+  expect(harness.storyStateTexts).toEqual([finalCandidate])
+  expect(harness.memoryTexts).toEqual([finalCandidate])
 })
-test('stores one coherent final prose text after a passing independent recheck', async () => {
+test('stores one coherent final candidate after accepting a quality revision', async () => {
   const originalDraft = buildPipelineProse(
     '倒数压到最后三秒，江澈停在围墙阴影里等待。',
     '只看着追捕队继续收紧包围',
   )
-  const finalText = normalizeProseForStorage(buildPipelineProse(
+  const revisionText = normalizeProseForStorage(buildPipelineProse(
     '江澈踏碎路面，飞石逼退第一排追兵，铁门前终于露出缺口。',
     '借自己制造的盲区夺下通讯器，继续迫使追捕队后撤',
   ))
@@ -431,7 +442,7 @@ test('stores one coherent final prose text after a passing independent recheck',
         findings: [],
       },
     ],
-    revisionTexts: [finalText],
+    revisionTexts: [revisionText],
   })
 
   const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
@@ -442,17 +453,24 @@ test('stores one coherent final prose text after a passing independent recheck',
   })
   const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
   const versions = await listChapterVersions(harness.workspace, harness.chapter.id)
+  const finalCandidate = result.chapter?.chapter_text || ''
 
-  expect(stored?.chapter_text).toBe(finalText)
+  expect(stored?.chapter_text).toBe(finalCandidate)
   expect(versions[0]?.source).toBe('repair')
   expect(stored?.raw_payload?.oh_story_director).toEqual(result.post_draft_director)
   expect(stored?.raw_payload?.oh_story_delivery_receipts).toEqual(result.oh_story_delivery_receipts)
-  expect(harness.storyStateTexts).toEqual([finalText])
-  expect(harness.memoryTexts).toEqual([finalText])
+  expect(finalCandidate).toContain('江澈踏碎路面')
+  expect(finalCandidate).toContain('借自己制造的盲区夺下通讯器')
+  expect(finalCandidate).not.toContain('只看着追捕队继续收紧包围')
+  expect(harness.storeTexts).toEqual([finalCandidate])
+  expect(harness.storyStateTexts).toEqual([finalCandidate])
+  expect(harness.memoryTexts).toEqual([finalCandidate])
   expect(harness.memoryTexts).not.toContain(originalDraft)
   expect(harness.draftOptions).toEqual([expect.objectContaining({ skipMemoryStore: true })])
-  expect(result.quality_loop.decision.passed).toBe(true)
-  expect(result.quality_loop.rounds).toEqual([{ round: 1, accepted: true, reason: '' }])
+  expect(result.quality_loop.rounds).toEqual(expect.arrayContaining([
+    expect.objectContaining({ round: 1, accepted: true, reason: '' }),
+    expect.objectContaining({ accepted: false, reason: expect.stringContaining('回退') }),
+  ]))
 })
 test('stores valid prose with warnings for subjective quality failures in every prose storage production mode', async () => {
   const originalDraft = buildPipelineProse(
@@ -496,16 +514,21 @@ test('stores valid prose with warnings for subjective quality failures in every 
     expect(result.admission_status).toBe('accepted_with_warnings')
     expect(result.quality_warnings).toContainEqual(expect.objectContaining({ source: 'quality' }))
     expect(harness.storeCalls).toBe(1)
-    const expectedFinalText = normalizeProseForStorage(
-      productionMode === 'draft_review_revise_store' ? revisedDraft : originalDraft,
-    )
     const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
-    expect(result.chapter?.chapter_text).toBe(expectedFinalText)
-    expect(stored?.chapter_text).toBe(expectedFinalText)
+    const finalCandidate = result.chapter?.chapter_text || ''
+    expect(stored?.chapter_text).toBe(finalCandidate)
+    expect(finalCandidate).toContain('倒数压到最后三秒')
+    expect(finalCandidate).toContain('只看着追捕队继续收紧包围')
+    expect(finalCandidate).not.toContain('沿自己制造的盲区夺下通讯器')
+    expect(result.quality_loop.rounds).toContainEqual(expect.objectContaining({
+      accepted: false,
+      reason: expect.stringContaining('回退'),
+    }))
+    expect(harness.storeTexts).toEqual([finalCandidate])
     if (productionMode === 'draft_review_revise_store') {
       expect(harness.storyStateCalls).toBe(1)
-      expect(harness.storyStateTexts).toEqual([expectedFinalText])
-      expect(harness.memoryTexts).toEqual([expectedFinalText])
+      expect(harness.storyStateTexts).toEqual([finalCandidate])
+      expect(harness.memoryTexts).toEqual([finalCandidate])
     } else {
       expect(harness.storyStateCalls).toBe(0)
       expect(harness.storyStateTexts).toEqual([])
