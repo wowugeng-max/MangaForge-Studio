@@ -156,6 +156,27 @@ function clipRequiredProseText(value: any, max = PROSE_CORE_SCENE_TEXT_MAX) {
   return `${clipped}…`
 }
 
+function requiredProseDedupeText(value: any) {
+  let text = requiredProsePromptText(value).normalize('NFKC')
+  const labeled = text.match(/^(?:(?:[A-Za-z][A-Za-z0-9_ -]{1,63})|(?:动作|行动|主角行动|场景动作|状态变化|状态增量|预期状态变化|事件价值变化)):\s*(.+)$/)
+  if (labeled?.[1]) text = labeled[1]
+  return text
+    .replace(/[\s。！？!?；;，,…]+$/g, '')
+    .toLowerCase()
+}
+
+function isDuplicateRequiredProseText(left: any, right: any) {
+  const leftRaw = requiredProsePromptText(left)
+  const rightRaw = requiredProsePromptText(right)
+  if (!leftRaw || !rightRaw) return false
+  const leftText = requiredProseDedupeText(leftRaw)
+  const rightText = requiredProseDedupeText(rightRaw)
+  if (!leftText || !rightText) return false
+  if (leftText === rightText) return true
+  return (leftRaw.endsWith('…') || rightRaw.endsWith('…'))
+    && (leftText.startsWith(rightText) || rightText.startsWith(leftText))
+}
+
 function uniqueRequiredProseTexts(values: any[], maxItems = PROSE_CORE_SCENE_LIST_MAX, maxText = PROSE_CORE_SCENE_TEXT_MAX) {
   const seen = new Set<string>()
   const rows: string[] = []
@@ -199,7 +220,7 @@ function compactRequiredProseValue(value: any, depth = 0): any {
 export function projectSceneCardForProseCorePrompt(card: any) {
   if (!card || typeof card !== 'object') return {}
   const action = clipRequiredProseText(
-    card.action || card.protagonist_action || card.protagonistAction,
+    firstRequiredProseText(card.action, card.beat, card.protagonist_action, card.protagonistAction),
   )
   const turn = clipRequiredProseText(
     card.turn || card.turning_point || card.turningPoint,
@@ -208,6 +229,9 @@ export function projectSceneCardForProseCorePrompt(card: any) {
     card.payoff || card.reader_payoff || card.readerPayoff,
   )
   const stateDelta = clipRequiredProseText(card.state_delta || card.stateDelta)
+  const protagonistAgencyAction = clipRequiredProseText(
+    card.protagonist_agency_action || card.protagonistAgencyAction || card.agency_action || card.agencyAction,
+  )
   const goal = clipRequiredProseText(firstRequiredProseText(
     card.goal,
     card.scene_goal,
@@ -222,9 +246,11 @@ export function projectSceneCardForProseCorePrompt(card: any) {
     card.opposing_force,
     card.opposingForce,
   ))
-  const expectedStateChange = clipRequiredProseText(firstRequiredProseText(
+  const explicitExpectedStateChange = clipRequiredProseText(firstRequiredProseText(
     card.expected_state_change,
     card.expectedStateChange,
+  ))
+  const eventValueChange = clipRequiredProseText(firstRequiredProseText(
     card.event_value_change,
     card.eventValueChange,
   ))
@@ -243,11 +269,28 @@ export function projectSceneCardForProseCorePrompt(card: any) {
     6,
     220,
   )
-  const stateChanges = uniqueRequiredProseTexts(
+  const rawStateChanges = uniqueRequiredProseTexts(
     asArray(card.state_changes_expected || card.stateChangesExpected),
     6,
     220,
   )
+  let expectedStateChange = ''
+  const stateChanges: string[] = []
+  for (const candidate of [explicitExpectedStateChange, eventValueChange]) {
+    if (!candidate || isDuplicateRequiredProseText(candidate, stateDelta)) continue
+    if (!expectedStateChange) {
+      expectedStateChange = candidate
+      continue
+    }
+    const listCandidate = clipRequiredProseText(candidate, 220)
+    if (!isDuplicateRequiredProseText(listCandidate, expectedStateChange)) stateChanges.push(listCandidate)
+  }
+  for (const candidate of rawStateChanges) {
+    if (stateChanges.length >= PROSE_CORE_SCENE_LIST_MAX) break
+    if ([stateDelta, expectedStateChange, ...stateChanges]
+      .some(existing => isDuplicateRequiredProseText(candidate, existing))) continue
+    stateChanges.push(candidate)
+  }
   const projected: Record<string, any> = {
     scene_no: card.scene_no ?? card.sceneNo,
     title: clipRequiredProseText(card.title, 80),
@@ -258,14 +301,11 @@ export function projectSceneCardForProseCorePrompt(card: any) {
     payoff,
     state_delta: stateDelta,
     characters: characters.length ? characters : undefined,
-    protagonist_agency_action: clipRequiredProseText(
-      card.protagonist_agency_action || card.protagonistAgencyAction || card.agency_action || card.agencyAction,
-    ),
+    protagonist_agency_action: isDuplicateRequiredProseText(protagonistAgencyAction, action)
+      ? undefined
+      : protagonistAgencyAction,
     no_exit_reason: clipRequiredProseText(card.no_exit_reason || card.noExitReason),
-    expected_state_change: expectedStateChange
-      && !(stateDelta && (stateDelta.includes(expectedStateChange) || expectedStateChange.includes(stateDelta)))
-      ? expectedStateChange
-      : undefined,
+    expected_state_change: expectedStateChange || undefined,
     state_changes_expected: stateChanges.length ? stateChanges : undefined,
     transition_from_previous: clipRequiredProseText(
       card.transition_from_previous || card.transitionFromPrevious,

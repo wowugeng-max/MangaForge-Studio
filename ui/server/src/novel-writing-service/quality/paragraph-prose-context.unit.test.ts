@@ -1,8 +1,107 @@
 import { describe, expect, test } from 'bun:test'
-import { projectSceneCardForProseCorePrompt } from './paragraph-prose-context'
+import { buildProseGenerationContract } from '../../novel-writing/prose-generation-contract'
 import { normalizeSceneCardsPayload } from '../post-delivery/scene-cards'
+import {
+  compileParagraphProseContext,
+  projectSceneCardForProseCorePrompt,
+} from './paragraph-prose-context'
 
 describe('projectSceneCardForProseCorePrompt clip', () => {
+  test('deduplicates identical action and state aliases under their explicit labels', () => {
+    const action = 'ACTION_ALIAS_SENTINEL：撞进第二层封锁线'
+    const state = 'STATE_ALIAS_SENTINEL：追捕方失去统一指挥'
+    const card = projectSceneCardForProseCorePrompt({
+      scene_no: 1,
+      title: '破围',
+      goal: '夺下通讯器',
+      action,
+      beat: action,
+      protagonist_action: action,
+      protagonist_agency_action: action,
+      state_delta: state,
+      expected_state_change: state,
+      event_value_change: state,
+      state_changes_expected: [state, state],
+    })
+
+    expect(card.action).toBe(action)
+    expect(card.protagonist_agency_action).toBeUndefined()
+    expect(card.state_delta).toBe(state)
+    expect(card.expected_state_change).toBeUndefined()
+    expect(card.state_changes_expected).toBeUndefined()
+    const serialized = JSON.stringify(card)
+    expect(serialized.match(/ACTION_ALIAS_SENTINEL/g)).toHaveLength(1)
+    expect(serialized.match(/STATE_ALIAS_SENTINEL/g)).toHaveLength(1)
+  })
+
+  test('deduplicates compiled scene causality without dropping complementary agency or state facts', () => {
+    const duplicateAction = 'COMPILED_ACTION_ALIAS_SENTINEL：撞进第二层封锁线'
+    const duplicateState = 'COMPILED_STATE_ALIAS_SENTINEL：追捕方失去统一指挥'
+    const uniqueAction = 'UNIQUE_ACTION_SENTINEL：切断备用频道'
+    const uniqueAgency = 'UNIQUE_AGENCY_SENTINEL：主动砸断路灯制造盲区'
+    const uniqueStateDelta = 'UNIQUE_STATE_DELTA_SENTINEL：备用频道中断'
+    const uniqueExpectedState = 'UNIQUE_EXPECTED_STATE_SENTINEL：幕后频道暴露'
+    const uniqueEventState = 'UNIQUE_EVENT_STATE_SENTINEL：追捕队开始内讧'
+    const uniqueListState = 'UNIQUE_LIST_STATE_SENTINEL：主角取得通讯器'
+    const duplicateSceneCard = {
+      scene_no: 1,
+      title: '破围',
+      goal: '夺下通讯器',
+      action: duplicateAction,
+      beat: duplicateAction,
+      protagonist_agency_action: duplicateAction,
+      state_delta: duplicateState,
+      expected_state_change: duplicateState,
+      event_value_change: duplicateState,
+      state_changes_expected: [duplicateState],
+    }
+    const complementarySceneCard = {
+      scene_no: 2,
+      title: '反锁',
+      goal: '切断备用频道',
+      action: uniqueAction,
+      protagonist_agency_action: uniqueAgency,
+      state_delta: uniqueStateDelta,
+      expected_state_change: uniqueExpectedState,
+      event_value_change: uniqueEventState,
+      state_changes_expected: [uniqueListState],
+    }
+    const projected = projectSceneCardForProseCorePrompt(complementarySceneCard)
+
+    expect(projected).toMatchObject({
+      action: uniqueAction,
+      protagonist_agency_action: uniqueAgency,
+      state_delta: uniqueStateDelta,
+      expected_state_change: uniqueExpectedState,
+      state_changes_expected: [uniqueEventState, uniqueListState],
+    })
+
+    const contract = buildProseGenerationContract({
+      chapter_target: {
+        chapter_no: 1,
+        title: '破围',
+        goal: '夺下通讯器',
+        scene_cards: [duplicateSceneCard, complementarySceneCard],
+      },
+      preflight: { ready: true, strict_ready: true, checks: [] },
+      oh_story_director: { readiness: 'ready', selected_contracts: [] },
+    })
+    const prompt = compileParagraphProseContext({ title: '追捕夜' }, contract).prompt
+    const sceneCausality = prompt.split('【场景卡因果链】')[1]?.split('【开写门禁通过快照】')[0] || ''
+    for (const sentinel of [
+      'COMPILED_ACTION_ALIAS_SENTINEL',
+      'COMPILED_STATE_ALIAS_SENTINEL',
+      'UNIQUE_ACTION_SENTINEL',
+      'UNIQUE_AGENCY_SENTINEL',
+      'UNIQUE_STATE_DELTA_SENTINEL',
+      'UNIQUE_EXPECTED_STATE_SENTINEL',
+      'UNIQUE_EVENT_STATE_SENTINEL',
+      'UNIQUE_LIST_STATE_SENTINEL',
+    ]) {
+      expect(sceneCausality.match(new RegExp(sentinel, 'g'))).toHaveLength(1)
+    }
+  })
+
   test('keeps explicit causal labels through normalized production cards in source order', () => {
     const normalized = normalizeSceneCardsPayload({
       scene_cards: [
