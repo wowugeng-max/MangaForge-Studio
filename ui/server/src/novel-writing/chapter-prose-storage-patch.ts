@@ -1,5 +1,6 @@
 import { resolveOutgoingChapterHandoff } from './chapter-handoff-basics'
 import { resolveChapterProgressLedger } from './chapter-progress-ledger'
+import { redactAndBoundCredentialText } from './credential-redaction'
 export type ChapterProseStoragePatchInput = {
   chapter: any
   generatedTitlePatch: Record<string, any>
@@ -110,12 +111,7 @@ const PERSISTED_HUMANIZE_MAX_NESTED_ITEMS = 32
 
 function normalizePersistedHumanizeString(value: unknown, maxLength = PERSISTED_HUMANIZE_MAX_STRING) {
   if (typeof value !== 'string') return undefined
-  return value
-    .replace(/\bhttps?:\/\/[^\s,;]+/gi, '[REDACTED_URL]')
-    .replace(/([?&](?:api[_-]?key|token|access[_-]?token|auth|authorization)=)[^&\s]*/gi, '$1[REDACTED]')
-    .replace(/\b(Bearer)\s+[^\s,;]+/gi, '$1 [REDACTED]')
-    .replace(/\b(api[_-]?key|token|access[_-]?token|auth|authorization)\s*[:=]\s*["']?[^\s,"';}&]+/gi, '$1=[REDACTED]')
-    .slice(0, Math.max(1, Math.min(PERSISTED_HUMANIZE_MAX_STRING, maxLength)))
+  return redactAndBoundCredentialText(value, Math.min(PERSISTED_HUMANIZE_MAX_STRING, maxLength))
 }
 
 function normalizePersistedHumanizeNumber(value: unknown) {

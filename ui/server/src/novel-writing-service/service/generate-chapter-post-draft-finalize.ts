@@ -4,6 +4,7 @@ import {
 import {
   enrichContextWithProgressResync,
 } from '../../novel-writing/chapter-progress-ledger'
+import { normalizeHumanizePostprocessForStorage } from '../../novel-writing/chapter-prose-storage-patch'
 import { revisionTextHash } from '../../novel/revision-hash'
 import { ensureOpeningHandoffBridge, extractPrimaryEndingHooks } from '../../novel-writing/chapter-continuity-guard'
 import type { ProseAdmissionHardFailure } from '../../novel-writing/prose-admission-policy'
@@ -117,6 +118,7 @@ export async function runPostDraftHumanizeAndOpeningHandoff(args: {
         r76_zhuque_stack: humanizePostprocess.r76_zhuque_stack || R76_ZHUQUE_STACK_VERSION,
       }
     }
+    humanizePostprocess = normalizeHumanizePostprocessForStorage(humanizePostprocess) ?? null
     await onStage('humanize_postprocess', {
       status: humanizePostprocess?.skipped ? 'skipped' : (humanizePostprocess?.accepted ? 'success' : 'warn'),
       report: humanizePostprocess,
@@ -124,7 +126,7 @@ export async function runPostDraftHumanizeAndOpeningHandoff(args: {
       r76_zhuque_stack: R76_ZHUQUE_STACK_VERSION,
     })
   } catch (error: any) {
-    humanizePostprocess = {
+    humanizePostprocess = normalizeHumanizePostprocessForStorage({
       version: 'humanize_postprocess_v3',
       enabled: true,
       accepted: false,
@@ -132,7 +134,7 @@ export async function runPostDraftHumanizeAndOpeningHandoff(args: {
       reason: 'humanize_postprocess_failed',
       error: formatAdmissionError(error, 240),
       r76_zhuque_stack: R76_ZHUQUE_STACK_VERSION,
-    }
+    }) ?? null
     await onStage('humanize_postprocess', {
       status: 'failed',
       report: humanizePostprocess,

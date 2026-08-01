@@ -109,4 +109,40 @@ describe('post-draft humanize and opening-handoff finalization', () => {
       ['humanize_postprocess', 'failed'],
     ])
   })
+
+  test('normalizes a cyclic terminal humanize report before the stage callback', async () => {
+    const credential = 'dXNlcjpwYXNzd29yZA=='
+    const report: any = {
+      accepted: false,
+      reason: `Authorization: Basic ${credential}`,
+      raw: { provider_response: credential },
+    }
+    report.self = report
+    const terminalReports: any[] = []
+
+    await runPostDraftHumanizeAndOpeningHandoff({
+      activeWorkspace: '/tmp/novel',
+      project: { id: 7 },
+      contextPackage: {},
+      characters: [],
+      finalText: '林序把门带上，沿着走廊继续往前。',
+      preferredModelId: undefined,
+      llmControlOptions: {},
+      options: { skip_mid_monologue_densify: true },
+      isZhuqueFast: false,
+      runHumanizePostProcess: async (workspace: string, project: any, context: any, sourceText: string) => ({
+        final_text: sourceText,
+        report,
+      }),
+      onStage: async (stage: string, payload: any) => {
+        if (stage === 'humanize_postprocess' && payload?.status !== 'running') terminalReports.push(payload.report)
+      },
+    })
+
+    expect(terminalReports).toHaveLength(1)
+    expect(() => JSON.stringify(terminalReports[0])).not.toThrow()
+    expect(JSON.stringify(terminalReports[0]).includes(credential)).toBe(false)
+    expect(terminalReports[0]).not.toHaveProperty('raw')
+    expect(terminalReports[0]).not.toHaveProperty('self')
+  })
 })

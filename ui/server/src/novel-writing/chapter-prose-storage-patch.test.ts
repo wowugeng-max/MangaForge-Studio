@@ -88,6 +88,59 @@ describe('chapter prose storage patch builders', () => {
     })
   })
 
+  test('redacts credential headers, cookies, and credential key values in allowed report strings', () => {
+    const credentials = {
+      basic: 'dXNlcjpwYXNzd29yZA==',
+      proxyBasic: 'cHJveHk6cGFzc3dvcmQ=',
+      cookie: 'cookie-session-value',
+      setCookie: 'set-cookie-value',
+      clientSecret: 'client-secret-value',
+      password: 'password-value',
+      session: 'session-value',
+      access: 'access-token-value',
+      refresh: 'refresh-token-value',
+    }
+    const sensitiveValues = Object.values(credentials)
+    const patch = buildChapterProseStoragePatch({
+      chapter: { raw_payload: {} },
+      generatedTitlePatch: {},
+      finalText: '正文内容。',
+      finalContinuityNotes: [],
+      finalSceneBreakdown: [],
+      ohStoryDeliveryReceipts: {},
+      humanizePostprocess: {
+        version: 'humanize_postprocess_v4',
+        enabled: true,
+        accepted: false,
+        error: [
+          'ordinary secret remains context',
+          `Authorization: Basic ${credentials.basic}`,
+          `Cookie: sid=${credentials.cookie}`,
+          `client_secret=${credentials.clientSecret}`,
+          `password=${credentials.password}`,
+          `session_id=${credentials.session}`,
+          `access_token=${credentials.access}`,
+          `refresh_token=${credentials.refresh}`,
+        ].join('\n'),
+        stages: [
+          { stage: 'proxy_failure', reason: `Proxy-Authorization: Basic ${credentials.proxyBasic}` },
+          { stage: 'cookie_failure', reason: `Set-Cookie: sid=${credentials.setCookie}` },
+          { stage: 'client_failure', reason: `client-secret=${credentials.clientSecret}` },
+          { stage: 'password_failure', reason: `password=${credentials.password}` },
+          { stage: 'session_failure', reason: `session=${credentials.session}` },
+          { stage: 'access_failure', reason: `access-token=${credentials.access}` },
+          { stage: 'refresh_failure', reason: `refresh_token=${credentials.refresh}` },
+        ],
+      },
+    })
+    const serialized = JSON.stringify(patch.raw_payload.humanize_postprocess)
+
+    expect(sensitiveValues.some(value => serialized.includes(value))).toBe(false)
+    expect(serialized.includes('ordinary secret remains context')).toBe(true)
+    expect(patch.raw_payload.humanize_postprocess.error.length).toBeLessThanOrEqual(240)
+    expect(patch.raw_payload.humanize_postprocess.stages[0].reason.length).toBeLessThanOrEqual(240)
+  })
+
   test('builds the shared draft storage patch without post-draft director fields', () => {
     const patch = buildChapterProseStoragePatch({
       chapter: { raw_payload: { existing: true } },

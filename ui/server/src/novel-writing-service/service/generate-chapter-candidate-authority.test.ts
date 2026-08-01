@@ -170,12 +170,34 @@ describe('generateChapterForGroup final candidate authority', () => {
   })
 
   test('redacts a secret-bearing humanize failure from returned and stored reports', async () => {
-    const providerUrl = 'https://provider.example/v1/humanize?api_key=SECRET_QUERY'
+    const credentials = {
+      query: 'query-value-private',
+      basic: 'dXNlcjpwYXNzd29yZA==',
+      cookie: 'cookie-session-value',
+      clientSecret: 'client-secret-value',
+      password: 'password-value',
+      session: 'session-value',
+      access: 'access-token-value',
+      refresh: 'refresh-token-value',
+    }
+    const sensitiveValues = Object.values(credentials)
+    const providerUrl = `https://provider.example/v1/humanize?api_key=${credentials.query}`
+    const terminalHumanizeReports: any[] = []
     const draftText = repairedProse()
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText,
       humanizeResult: () => {
-        throw new Error(`humanize unavailable ${providerUrl} Authorization: Bearer SECRET_BEARER`)
+        throw new Error([
+          'humanize unavailable ordinary secret remains context',
+          providerUrl,
+          `Authorization: Basic ${credentials.basic}`,
+          `Cookie: sid=${credentials.cookie}`,
+          `client_secret=${credentials.clientSecret}`,
+          `password=${credentials.password}`,
+          `session_id=${credentials.session}`,
+          `access_token=${credentials.access}`,
+          `refresh_token=${credentials.refresh}`,
+        ].join('\n'))
       },
     })
 
@@ -189,6 +211,11 @@ describe('generateChapterForGroup final candidate authority', () => {
         max_quality_revision_rounds: 0,
         production_mode: 'draft_only',
         skip_mid_monologue_densify: true,
+        onStage: async (stage: string, payload: any) => {
+          if (stage === 'humanize_postprocess' && payload?.status !== 'running') {
+            terminalHumanizeReports.push(payload?.report)
+          }
+        },
       },
     )
     const stored = (await listNovelChapters(harness.workspace, harness.project.id))
@@ -197,11 +224,14 @@ describe('generateChapterForGroup final candidate authority', () => {
       returned: result.humanize_postprocess,
       returnedChapter: result.chapter?.raw_payload?.humanize_postprocess,
       stored: stored?.raw_payload?.humanize_postprocess,
+      terminalHumanizeReports,
     })
 
-    expect(observable).not.toContain('provider.example')
-    expect(observable).not.toContain('SECRET_QUERY')
-    expect(observable).not.toContain('SECRET_BEARER')
+    expect(sensitiveValues.some(value => observable.includes(value))).toBe(false)
+    expect(observable.includes('provider.example')).toBe(false)
+    expect(observable.includes('ordinary secret remains context')).toBe(true)
+    expect(terminalHumanizeReports).toHaveLength(1)
+    expect(() => JSON.stringify(terminalHumanizeReports[0])).not.toThrow()
     expect(result.humanize_postprocess?.error).toContain('humanize unavailable')
     expect(result.humanize_postprocess?.error.length).toBeLessThanOrEqual(240)
     expect(stored?.raw_payload?.humanize_postprocess).toEqual(result.humanize_postprocess)
