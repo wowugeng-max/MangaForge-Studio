@@ -326,7 +326,7 @@ export function listProjectSeedGapTargets(seed: any, hints: string[] = []): Seed
   return targets
 }
 
-function compactJson(value: any, max = 18000) {
+export function compactJson(value: any, max = 18000) {
   try {
     const text = JSON.stringify(value, null, 2)
     return text.length > max ? `${text.slice(0, max)}\n/* truncated */` : text
@@ -334,4 +334,3 @@ function compactJson(value: any, max = 18000) {
     return '{}'
   }
 }
-

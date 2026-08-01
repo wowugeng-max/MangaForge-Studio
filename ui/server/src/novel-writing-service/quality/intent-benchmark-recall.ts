@@ -85,7 +85,7 @@ export function benchmarkRecallHasGap(gaps: any[], pattern: RegExp) {
   return asArray(gaps).some((gap: any) => pattern.test(assetText(gap)))
 }
 
-const OH_STORY_NO_BENCHMARK_INTENT_NOTE = '无对标参考：按本书设定、章节合同和默认 Gates 写作，不读不存在的文风样章，不把缺少对标当作阻塞或警告。'
+export const OH_STORY_NO_BENCHMARK_INTENT_NOTE = '无对标参考：按本书设定、章节合同和默认 Gates 写作，不读不存在的文风样章，不把缺少对标当作阻塞或警告。'
 
 export function benchmarkRecallIsNoBenchmark(gaps: any[]) {
   return benchmarkRecallHasGap(gaps, /no_benchmark|无对标参考|无对标项目|没有对标/i)
@@ -608,4 +608,3 @@ export function buildBenchmarkRecallBrief(contextPackage: any = {}, options: any
     ],
   }
 }
-

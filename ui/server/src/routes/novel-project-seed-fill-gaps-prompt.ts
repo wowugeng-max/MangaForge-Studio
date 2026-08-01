@@ -2,10 +2,14 @@ import {
   asArray,
   asObject,
   firstText,
+  isEmptyValue,
+  isPlainObject,
+  seedValueRichness,
   type AnyRecord,
   type SeedGapTarget,
 } from './novel-project-seed-fill-gaps-merge'
 import {
+  compactJson,
   listProjectSeedGapTargets,
 } from './novel-project-seed-fill-gaps-targets'
 
