@@ -573,21 +573,21 @@ describe('chapter context handoff b', () => {
   })
 
   test('draft review quality decision excludes post-delivery receipt sync advisories from the hard gate', () => {
-    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-context-scene-cards.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-prose.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-editor-meme-polish.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore-loop.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore-finalize.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-prestore-receipt-reviews.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-sync-reviews.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-mode-store.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-full-production-store.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/post-delivery/post-commit-sync-bundle.ts'), 'utf8')].join('\n')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const postDeliveryCheckStart = source.indexOf('const postDeliveryReceiptChecks =', groupStart)
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore-finalize.ts'), 'utf8')
+    const groupSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+    const postDeliveryCheckStart = source.indexOf('const postDeliveryReceiptChecks =')
     const postDeliveryAdvisoryStart = source.indexOf('qualityGateReview.post_delivery_receipt_checks = postDeliveryReceiptChecks', postDeliveryCheckStart)
-    const draftQualityDecisionStart = source.indexOf('const draftQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', groupStart)
-    const draftReviewOnlyStart = source.indexOf('if (isDraftOnly || isDraftReviewOnly)', groupStart)
-    const draftModeStoreStart = source.indexOf('return await runDraftModeAdmissionAndStore', groupStart)
+    const draftQualityDecisionStart = source.indexOf('const draftQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', postDeliveryCheckStart)
+    const draftReviewOnlyStart = groupSource.indexOf('if ((isDraftOnly || isDraftReviewOnly) && !isZhuqueFast)')
+    const draftModeStoreStart = groupSource.indexOf('return await runDraftModeAdmissionAndStore', draftReviewOnlyStart)
     const advisoryBlock = source.slice(postDeliveryCheckStart, draftQualityDecisionStart)
 
-    expect(postDeliveryCheckStart).toBeGreaterThan(groupStart)
+    expect(postDeliveryCheckStart).toBeGreaterThanOrEqual(0)
     expect(postDeliveryAdvisoryStart).toBeGreaterThan(postDeliveryCheckStart)
     expect(draftQualityDecisionStart).toBeGreaterThan(postDeliveryAdvisoryStart)
-    expect(draftReviewOnlyStart).toBeGreaterThan(groupStart)
-    expect(draftModeStoreStart).toBeGreaterThan(groupStart)
-    expect(source).toContain("runQualityLoopAndPrestoreSetup")
+    expect(draftReviewOnlyStart).toBeGreaterThanOrEqual(0)
+    expect(draftModeStoreStart).toBeGreaterThan(draftReviewOnlyStart)
+    expect(groupSource).toContain("runQualityLoopAndPrestoreSetup")
     expect(advisoryBlock).toContain("status: 'warn'")
     expect(advisoryBlock).toContain('qualityGateReview.post_delivery_receipt_checks = postDeliveryReceiptChecks')
     expect(advisoryBlock).not.toContain('qualityGateReview.quality_audit_checks =')
@@ -848,11 +848,11 @@ describe('chapter context handoff b', () => {
   })
 
   test('stores common post-delivery sync reviews through the shared record builder', () => {
-    const source = ['story-state-machine.ts','story-state-machine-prepare.ts','story-state-machine-update.ts','story-state-machine-update-phase-a.ts','story-state-machine-update-phase-b.ts'].map((name) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')).join('\n')
+    const source = ['story-state-machine-update-phase-a.ts', 'story-state-machine-update-phase-b.ts']
+      .map(name => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8'))
+      .join('\n')
     const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
-    const updateStoryStateStart = source.indexOf('export async function updateStoryStateMachine')
-    const updateStoryStateEnd = source.indexOf('return {', updateStoryStateStart)
-    const updateStoryStateBlock = source.slice(updateStoryStateStart, updateStoryStateEnd > updateStoryStateStart ? updateStoryStateEnd : source.length)
+    const updateStoryStateBlock = source
 
     expect(updateStoryStateBlock).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: chapterHandoffSync, reviewType: 'chapter_handoff_sync'")
     expect(updateStoryStateBlock).toContain('sync: readerExpectationSync')

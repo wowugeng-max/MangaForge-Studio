@@ -732,10 +732,15 @@ describe('novel pipeline snapshot', () => {
   })
 
   test('uses one bounded projection per required table and never reads versions or full rows', async () => {
-    const source = await readFile(join(import.meta.dir, '../novel.ts'), 'utf8')
-    const start = source.indexOf('export async function getNovelPipelineSnapshot')
-    const end = source.indexOf('\nexport async function', start + 1)
-    const block = source.slice(start, end)
+    const snapshotSource = await readFile(join(import.meta.dir, '../novel/pipeline-snapshot.ts'), 'utf8')
+    const helperSource = [
+      await readFile(join(import.meta.dir, '../novel/pipeline-sql.ts'), 'utf8'),
+      await readFile(join(import.meta.dir, '../novel/storage-compaction.ts'), 'utf8'),
+    ].join('\n')
+    const source = `${snapshotSource}\n${helperSource}`
+    const start = snapshotSource.indexOf('export async function getNovelPipelineSnapshot')
+    const end = snapshotSource.length
+    const block = snapshotSource.slice(start, end)
 
     expect(start).toBeGreaterThanOrEqual(0)
     expect(block).not.toContain('SELECT *')

@@ -71,7 +71,7 @@ describe('upstream WebSocket compatibility manager', () => {
   test('server entry exposes the upstream /api/ws/:clientId compatibility endpoint', () => {
     const source = readFileSync(join(import.meta.dir, 'index.ts'), 'utf8')
 
-    expect(source).toContain("server.on('upgrade'")
+    expect(source).toContain("listeningServer.on('upgrade'")
     expect(source).toContain('/api/ws/')
     expect(source).toContain('acceptWebSocketKey')
     expect(source).toContain('webSocketManager.connect(clientId, socket)')

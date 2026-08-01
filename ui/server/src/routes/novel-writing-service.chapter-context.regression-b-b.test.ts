@@ -824,16 +824,20 @@ describe('chapter context regression b b', () => {
   })
 
   test('reports review stage status from quality gate decisions', () => {
-    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-context-scene-cards.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-prose.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-editor-meme-polish.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore-loop.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore-finalize.ts'), 'utf8')].join('\n')
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore-loop.ts'), 'utf8')
     const reviewStart = source.indexOf("await onStage('review', { status: 'running' })")
-    const qualityGateStart = source.indexOf('let qualityGateReview = buildQualityGateReviewWithDeterministicCleanup')
-    const reviewBlock = source.slice(reviewStart, qualityGateStart)
+    const reviewEnd = source.indexOf('\n  return {', reviewStart)
+    const reviewBlock = source.slice(reviewStart, reviewEnd)
+
+    expect(reviewStart).toBeGreaterThanOrEqual(0)
+    expect(reviewEnd).toBeGreaterThan(reviewStart)
 
     expect(reviewBlock).toContain('const initialReviewDecision = getQualityGateDecision(qualityGateProject')
     expect(reviewBlock).toContain("status: initialReviewDecision.passed ? 'success' : 'warn'")
     expect(reviewBlock).toContain("phase: round > 0 ? 'quality_recheck' : 'quality_review'")
     expect(reviewBlock).toContain("await onStage('revise', { status: 'running', phase: 'quality_revision', round })")
-    expect(reviewBlock).toContain('maxRevisionRounds: isDraftReviewOnly || isDraftOnly ? 0 : 1')
+    expect(reviewBlock).toContain(': ((isDraftReviewOnly || isDraftOnly) ? defaultDraftRounds : defaultFullRounds)')
+    expect(reviewBlock).toContain('maxRevisionRounds: qualityRevisionRounds')
     expect(reviewBlock).toContain('qualityWarningCandidates.push(')
     expect(reviewBlock).not.toContain('assertProseQualityCanStore')
   })

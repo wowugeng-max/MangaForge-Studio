@@ -2,17 +2,18 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, test } from 'bun:test'
 
-const readServiceSource = () => readFileSync(join(import.meta.dir, '../novel-writing-service/monolith.ts'), 'utf8')
+const readServiceLeaf = (name: string) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')
+const readQualityLeaf = (name: string) => readFileSync(join(import.meta.dir, '../novel-writing-service/quality', name), 'utf8')
 const readProseQualityReviewRecordSource = () => readFileSync(join(import.meta.dir, '../novel-writing/prose-quality-review-record.ts'), 'utf8')
 
 describe('novel writing service quality contract wiring', () => {
   test('prose quality review payloads store latest generated scene breakdown context', () => {
-    const source = readServiceSource()
+    const source = readServiceLeaf('generate-chapter-quality-prestore-finalize.ts')
     const reviewRecordSource = readProseQualityReviewRecordSource()
     const finalReviewContextStart = source.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage')
     const qualityReviewStorageBlock = source.slice(
       finalReviewContextStart,
-      source.indexOf('const settingViolations = Array.isArray', finalReviewContextStart),
+      source.indexOf('\n  return {', finalReviewContextStart),
     )
 
     expect(finalReviewContextStart).toBeGreaterThanOrEqual(0)
@@ -23,14 +24,13 @@ describe('novel writing service quality contract wiring', () => {
   })
 
   test('quality gates include revision cascade evidence failures before storing prose', () => {
-    const source = readServiceSource()
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const cascadeCheckStart = source.indexOf('const revisionCascadeImpactChecks =', groupStart)
-    const gateReviewStart = source.indexOf('const qualityGateReview =', cascadeCheckStart)
-    const preStoreStart = source.indexOf('const preStoreQualityDecision =', gateReviewStart)
+    const source = readServiceLeaf('generate-chapter-quality-prestore-finalize.ts')
+    const cascadeCheckStart = source.indexOf('const revisionCascadeImpactChecks =')
+    const gateReviewStart = source.indexOf('let qualityGateReview =', cascadeCheckStart)
+    const preStoreStart = source.indexOf('const revisionDeliveryReceipts =', gateReviewStart)
     const gateBlock = source.slice(cascadeCheckStart, preStoreStart)
 
-    expect(cascadeCheckStart).toBeGreaterThan(groupStart)
+    expect(cascadeCheckStart).toBeGreaterThanOrEqual(0)
     expect(gateReviewStart).toBeGreaterThan(cascadeCheckStart)
     expect(preStoreStart).toBeGreaterThan(gateReviewStart)
     expect(gateBlock).toContain('revisionCascadeImpactSync.evidence_missing')
@@ -41,14 +41,13 @@ describe('novel writing service quality contract wiring', () => {
   })
 
   test('quality gates include structural sync failures before storing prose', () => {
-    const source = readServiceSource()
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const syncStart = source.indexOf('const preStoreStructuralSyncChecks = buildPreStoreStructuralSyncChecks', groupStart)
-    const qualityGateStart = source.indexOf('const qualityGateReview = buildQualityGateReviewWithDeterministicCleanup', groupStart)
-    const preStoreStart = source.indexOf('const preStoreQualityDecision =', qualityGateStart)
+    const source = readServiceLeaf('generate-chapter-quality-prestore-finalize.ts')
+    const syncStart = source.indexOf('const preStoreStructuralSyncChecks = buildPreStoreStructuralSyncChecks')
+    const qualityGateStart = source.indexOf('let qualityGateReview = buildQualityGateReviewWithDeterministicCleanup', syncStart)
+    const preStoreStart = source.indexOf('const revisionDeliveryReceipts =', qualityGateStart)
     const gateBlock = source.slice(syncStart, preStoreStart)
 
-    expect(syncStart).toBeGreaterThan(groupStart)
+    expect(syncStart).toBeGreaterThanOrEqual(0)
     expect(syncStart).toBeLessThan(qualityGateStart)
     expect(gateBlock).toContain('chapterBlueprintSync')
     expect(gateBlock).toContain('benchmarkRecallSync')
@@ -59,25 +58,26 @@ describe('novel writing service quality contract wiring', () => {
   })
 
   test('blocks hard chapter launch gate before drafting prose', () => {
-    const source = readServiceSource()
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const sceneCardsStart = source.indexOf("await onStage('scene_cards'", groupStart)
-    const draftStart = source.indexOf("await onStage('draft'", groupStart)
-    const blockerStart = source.indexOf('const launchGateBlocker = getChapterLaunchGateBlocker', groupStart)
-    const blockerBlock = source.slice(blockerStart, sceneCardsStart)
+    const source = readServiceLeaf('generate-chapter-context-scene-cards.ts')
+    const orchestratorSource = readServiceLeaf('generate-chapter-for-group-methods.ts')
+    const firstGateStart = source.indexOf('await enforcePreparedGate(false)')
+    const sceneCardsStart = source.indexOf("await onStage('scene_cards'", firstGateStart)
+    const finalGateStart = source.indexOf('await enforcePreparedGate(true)', sceneCardsStart)
+    const contextCallStart = orchestratorSource.indexOf('const contextSceneResult = await runGenerateChapterContextAndSceneCards')
+    const draftCallStart = orchestratorSource.indexOf('const draftResultBundle = await runGenerateChapterDraftProse', contextCallStart)
 
-    expect(blockerStart).toBeGreaterThan(groupStart)
-    expect(blockerStart).toBeLessThan(sceneCardsStart)
-    expect(blockerStart).toBeLessThan(draftStart)
-    expect(blockerBlock).toContain('chapterLaunchGateFromContext(contextPackage')
-    expect(blockerBlock).toContain("code: 'PROSE_LAUNCH_GATE_BLOCKED'")
-    expect(blockerBlock).toContain('PROSE_LAUNCH_GATE_BLOCKED')
+    expect(source).toContain('await preparedGeneration.runAfterGate(async () => undefined, requireSceneCards)')
+    expect(firstGateStart).toBeGreaterThanOrEqual(0)
+    expect(sceneCardsStart).toBeGreaterThan(firstGateStart)
+    expect(finalGateStart).toBeGreaterThan(sceneCardsStart)
+    expect(contextCallStart).toBeGreaterThanOrEqual(0)
+    expect(draftCallStart).toBeGreaterThan(contextCallStart)
   })
 
   test('prose revision parser falls back to plain prose and records diagnostics', () => {
-    const source = readServiceSource()
+    const source = readServiceLeaf('prose-self-review-run-revision.ts')
     const revisionStart = source.indexOf('const revisionPayload = getNovelPayload(revisionResult)')
-    const revisionEnd = source.indexOf('const runCommercialEditorRewrite', revisionStart)
+    const revisionEnd = source.length
     const revisionBlock = source.slice(revisionStart, revisionEnd)
 
     expect(revisionStart).toBeGreaterThanOrEqual(0)
@@ -88,10 +88,10 @@ describe('novel writing service quality contract wiring', () => {
   })
 
   test('prose revision uses expanded output budget for quality-gate repair', () => {
-    const source = readServiceSource()
+    const source = readServiceLeaf('prose-self-review-run.ts')
     const runStart = source.indexOf('const runProseSelfReviewAndRevision = async')
     const revisionStart = source.indexOf('const revisionMaxTokens', runStart)
-    const revisionEnd = source.indexOf('const revisionPayload = getNovelPayload(revisionResult)', revisionStart)
+    const revisionEnd = source.indexOf('} catch (revisionError)', revisionStart)
     const revisionBlock = source.slice(revisionStart, revisionEnd)
 
     expect(revisionStart).toBeGreaterThan(runStart)
@@ -102,7 +102,7 @@ describe('novel writing service quality contract wiring', () => {
   })
 
   test('prose self-review uses expanded output budget for oh-story structured checks', () => {
-    const source = readServiceSource()
+    const source = readServiceLeaf('prose-self-review-run.ts')
     const reviewStart = source.indexOf('const runProseSelfReviewAndRevision = async')
     const reviewEnd = source.indexOf('const reviewPayload = getNovelPayload(reviewResult)', reviewStart)
     const reviewBlock = source.slice(reviewStart, reviewEnd)
@@ -115,7 +115,9 @@ describe('novel writing service quality contract wiring', () => {
   })
 
   test('prose self-review runs a compact follow-up when oh-story structured checks are omitted', () => {
-    const source = readServiceSource()
+    const source = readServiceLeaf('prose-self-review-run.ts')
+    const fillSource = readServiceLeaf('structured-review-fill-methods.ts')
+    const fillPromptSource = readQualityLeaf('paragraph-prose-context.ts')
     const reviewStart = source.indexOf('const runProseSelfReviewAndRevision = async')
     const repairStart = source.indexOf('const structuredFillReview = await fillMissingStructuredReviewChecks', reviewStart)
     const concernStart = source.indexOf('const hasDeliveryRiskReceiptConcern =', reviewStart)
@@ -127,24 +129,19 @@ describe('novel writing service quality contract wiring', () => {
     expect(repairStart).toBeLessThan(concernStart)
     expect(repairStart).toBeLessThan(revisionPromptStart)
     expect(reviewBlock).toContain('fillMissingStructuredReviewChecks(activeWorkspace, project, contextPackage, chapterText, normalizedReview, modelId, options)')
-    expect(source).toContain('chunkStructuredReviewFields(missingFields')
+    expect(fillSource).toContain('chunkStructuredReviewFields(missingFields')
     expect(reviewBlock).toContain('mergeStructuredReviewFillPayload')
-    expect(source).toContain('只补缺失的 oh-story 结构化自检字段')
+    expect(fillPromptSource).toContain('只补缺失的 oh-story 结构化自检字段')
   })
 
   test('prose generation and revision prompts hard-lock simplified Chinese chapter text', () => {
-    const source = readServiceSource()
-    const draftPromptStart = source.indexOf('return buildBoundedProsePrompt([')
-    const draftPromptEnd = source.indexOf('const buildStoryStatePrompt =', draftPromptStart)
-    const draftPromptBlock = source.slice(draftPromptStart, draftPromptEnd)
-    const revisionPromptStart = source.indexOf('const buildProseRevisionPrompt =')
-    const revisionPromptEnd = source.indexOf('const nextChapterQualityPlanNeedsRepair =', revisionPromptStart)
-    const revisionPromptBlock = source.slice(revisionPromptStart, revisionPromptEnd)
+    const draftPromptBlock = readServiceLeaf('paragraph-prose-context-sections-lead.ts')
+    const revisionPromptBlock = readServiceLeaf('prose-self-review-prompts.ts')
+    const draftPromptStart = draftPromptBlock.indexOf('硬性语言要求：chapter_text 必须使用简体中文')
+    const revisionPromptStart = revisionPromptBlock.indexOf('export const buildProseRevisionPrompt =')
 
     expect(draftPromptStart).toBeGreaterThanOrEqual(0)
-    expect(draftPromptEnd).toBeGreaterThan(draftPromptStart)
     expect(revisionPromptStart).toBeGreaterThanOrEqual(0)
-    expect(revisionPromptEnd).toBeGreaterThan(revisionPromptStart)
     expect(draftPromptBlock).toContain('chapter_text 必须使用简体中文')
     expect(draftPromptBlock).toContain('不得输出葡萄牙语、英语或拼音正文')
     expect(revisionPromptBlock).toContain('chapter_text 必须使用简体中文')
@@ -152,9 +149,9 @@ describe('novel writing service quality contract wiring', () => {
   })
 
   test('structured review fill cannot overwrite overall quality score from compact batches', () => {
-    const source = readServiceSource()
+    const source = readQualityLeaf('review-fill.ts')
     const mergeStart = source.indexOf('function mergeStructuredReviewFillPayload')
-    const mergeEnd = source.indexOf('function buildMissingStructuredReviewChecksPrompt', mergeStart)
+    const mergeEnd = source.length
     const mergeBlock = source.slice(mergeStart, mergeEnd)
 
     expect(mergeStart).toBeGreaterThanOrEqual(0)
@@ -167,9 +164,9 @@ describe('novel writing service quality contract wiring', () => {
   })
 
   test('structured review fill considers every omitted oh-story check field instead of truncating at 24', () => {
-    const source = readServiceSource()
+    const source = readQualityLeaf('review-merge.ts')
     const missingStart = source.indexOf('function missingStructuredReviewCheckFields')
-    const missingEnd = source.indexOf('function chunkStructuredReviewFields', missingStart)
+    const missingEnd = source.indexOf('function structuredReviewCheckStableKey', missingStart)
     const missingBlock = source.slice(missingStart, missingEnd)
 
     expect(missingStart).toBeGreaterThanOrEqual(0)

@@ -310,9 +310,10 @@ describe('chapter context contracts b a', () => {
       source.indexOf('const normalizedReview = {'),
       source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
     )
-    const riskSource = proseQualityRisksSource()
+    const riskSource = readFileSync(join(import.meta.dir, '../novel-writing-service/quality/prose-quality-risks-specialty.ts'), 'utf8')
     const riskStart = riskSource.indexOf('export function proseQualityAssetLinkageRisks')
-    const riskCarryOverBlock = riskSource.slice(riskStart, riskSource.indexOf('\nexport function', riskStart + 1))
+    const nextRiskStart = riskSource.indexOf('\nexport function', riskStart + 1)
+    const riskCarryOverBlock = riskSource.slice(riskStart, nextRiskStart >= 0 ? nextRiskStart : riskSource.length)
 
     expect(reviewPrompt).toContain('chapter_target.asset_linkage_contract')
     expect(reviewPrompt).toContain('asset_linkage_checks')

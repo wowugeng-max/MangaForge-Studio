@@ -576,18 +576,16 @@ describe('chapter context word-target a', () => {
   })
 
   test('passes compact previous chapter handoffs into prose draft generation', () => {
-    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-context-scene-cards.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-prose.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-editor-meme-polish.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore-loop.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore-finalize.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-mode-store.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-full-production-store.ts'), 'utf8')].join('\n')
-    const utilsSource = [readFileSync(join(import.meta.dir, 'novel-route-utils.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-route-utils-payload.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-route-utils-quality.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-route-utils-preflight.ts'), 'utf8')].join('\n')
-    const groupStart = source.indexOf('const generateChapterForGroup = async')
-    const prevChaptersStart = source.indexOf('const prevChapters = compactPreviousChaptersForProse', groupStart)
-    const draftCallStart = source.indexOf('const draftResult = await generateNovelChapterProse', prevChaptersStart)
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-prose.ts'), 'utf8')
+    const utilsSource = readFileSync(join(import.meta.dir, 'novel-route-utils-payload.ts'), 'utf8')
+    const prevChaptersStart = source.indexOf('const prevChapters = compactPreviousChaptersForProse')
+    const draftCallStart = source.indexOf('const draftResult = await sourceResolution.source.generateProse', prevChaptersStart)
     const previousChapterBlock = source.slice(prevChaptersStart, draftCallStart)
-    const draftCallBlock = source.slice(draftCallStart, source.indexOf('const resultPayload = getNovelPayload', draftCallStart))
+    const draftCallBlock = source.slice(draftCallStart, source.indexOf('const resultPayload = Array.isArray', draftCallStart))
     const helperStart = utilsSource.indexOf('export function compactPreviousChaptersForProse')
     const helperBlock = utilsSource.slice(helperStart, utilsSource.indexOf('export const COMMERCIAL_WEB_NOVEL_STYLE_LOCK_DEFAULTS', helperStart))
 
-    expect(groupStart).toBeGreaterThanOrEqual(0)
-    expect(prevChaptersStart).toBeGreaterThan(groupStart)
+    expect(prevChaptersStart).toBeGreaterThanOrEqual(0)
     expect(draftCallStart).toBeGreaterThan(prevChaptersStart)
     expect(helperStart).toBeGreaterThanOrEqual(0)
     expect(previousChapterBlock).toContain('compactPreviousChaptersForProse')
@@ -597,7 +595,7 @@ describe('chapter context word-target a', () => {
     expect(helperBlock).not.toContain('chapter_text: chapter.chapter_text')
     expect(draftCallBlock).toContain('prevChapters')
     expect(draftCallBlock).toContain('paragraphTask: compiledPrompt.prompt')
-    expect(draftCallBlock).toContain('boundedProseContract: true')
+    expect(draftCallBlock).toContain('contextPackage: contextPackageWithFamily')
   })
 
   test('checks abort signal between expensive chapter prose pipeline stages', () => {
@@ -628,16 +626,12 @@ describe('chapter context word-target a', () => {
   })
 
   test('defers non-blocking readability review without weakening core oh-story gates', () => {
-    const source = [readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-context-scene-cards.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-prose.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-editor-meme-polish.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore-loop.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore-finalize.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-mode-store.ts'), 'utf8'), readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-full-production-store.ts'), 'utf8')].join('\n')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const selfReviewStart = source.indexOf('let qualityLoop: Awaited<ReturnType<typeof runProseQualityLoop>>', groupStart)
-    const readabilityStart = source.indexOf('if (shouldRunSynchronousReadabilityReview(options, project))', selfReviewStart)
-    const qualityGateStart = source.indexOf('const preStoreQualityDecision = getQualityGateDecision', selfReviewStart)
+    const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore-finalize.ts'), 'utf8')
+    const readabilityStart = source.indexOf('if (shouldRunSynchronousReadabilityReview(options, project))')
+    const qualityGateStart = source.indexOf('const draftQualityDecision = getQualityGateDecision', readabilityStart)
     const readabilityBlock = source.slice(readabilityStart, source.indexOf('let proseRevisionReceiptSync', readabilityStart))
 
-    expect(groupStart).toBeGreaterThanOrEqual(0)
-    expect(selfReviewStart).toBeGreaterThan(groupStart)
-    expect(readabilityStart).toBeGreaterThan(selfReviewStart)
+    expect(readabilityStart).toBeGreaterThanOrEqual(0)
     expect(qualityGateStart).toBeGreaterThan(readabilityStart)
     expect(readabilityBlock).toContain('shouldRunSynchronousReadabilityReview(options, project)')
     expect(readabilityBlock).toContain("status: 'skipped'")
@@ -694,13 +688,8 @@ describe('chapter context word-target a', () => {
   })
 
   test('disables unattended quality regeneration so warnings can advance without retry loops', () => {
-    const routeSource = [
-      readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8'),
-      readFileSync(join(import.meta.dir, 'novel-generation/register.ts'), 'utf8'),
-      readFileSync(join(import.meta.dir, 'novel-generation/register-chapter-groups.ts'), 'utf8'),
-      readFileSync(join(import.meta.dir, 'novel-generation/builders.ts'), 'utf8'),
-    ].join('\n')
-    const productionSource = [readFileSync(join(import.meta.dir, 'novel-production-service.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-production/run-state.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-production/post-delivery-quality.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-production/post-delivery-quality-core.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-production/post-delivery-quality-batch.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'novel-production/post-delivery-quality-repair.ts'), 'utf8')].join('\n')
+    const routeSource = readFileSync(join(import.meta.dir, 'novel-generation/register-chapter-groups-unattended.ts'), 'utf8')
+    const productionSource = readFileSync(join(import.meta.dir, 'novel-production-service.ts'), 'utf8')
     const unattendedStart = routeSource.indexOf("mode: 'unattended_goal'")
     const unattendedBlock = routeSource.slice(unattendedStart, routeSource.indexOf('const run = await appendNovelRun', unattendedStart))
     const executeStart = productionSource.indexOf('const chapterResult = await ctx.generateChapterForGroup')

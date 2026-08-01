@@ -28,6 +28,19 @@ import {
 } from '../novel-writing/post-delivery-sync-review-record'
 
 const readChapterProseStoragePatchSource = () => readFileSync(join(import.meta.dir, '../novel-writing/chapter-prose-storage-patch.ts'), 'utf8')
+const readWritingServiceLeaf = (name: string) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')
+const readDraftReceiptSource = () => readWritingServiceLeaf('generate-chapter-draft-prose.ts')
+const readReceiptStoreSource = () => [
+  readWritingServiceLeaf('generate-chapter-draft-mode-store.ts'),
+  readWritingServiceLeaf('generate-chapter-full-production-store.ts'),
+].join('\n')
+const readFinalReceiptRefreshSource = () => {
+  const source = readWritingServiceLeaf('generate-chapter-quality-prestore-finalize.ts')
+  const start = source.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')
+  const end = source.indexOf('const nextChapterQualityPlanReceiptSync =', start)
+  if (start < 0 || end <= start) throw new Error('Unable to locate final receipt refresh source block')
+  return source.slice(start, end)
+}
 
 
 const writingServicePackageCache = new Map<string, string>()
@@ -279,16 +292,13 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation stores oh-story delivery receipts in every chapter store branch', () => {
-    const source = writingServiceSource()
+    const draftSource = readDraftReceiptSource()
+    const storeSource = readReceiptStoreSource()
     const storagePatchSource = readChapterProseStoragePatchSource()
-    const generationBlock = source.slice(
-      source.indexOf('const draftResult = await generateNovelChapterProse'),
-      source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
-    )
 
-    expect(generationBlock).toContain('let ohStoryDeliveryReceipts = normalizeStoredOhStoryDeliveryReceipts')
-    expect(generationBlock.match(/buildChapterProseStoragePatch\(/g)?.length || 0).toBeGreaterThanOrEqual(2)
-    expect(generationBlock.match(/ohStoryDeliveryReceipts,/g)?.length || 0).toBeGreaterThanOrEqual(2)
+    expect(draftSource).toContain('let ohStoryDeliveryReceipts = normalizeStoredOhStoryDeliveryReceipts')
+    expect(storeSource.match(/buildChapterProseStoragePatch\(/g)?.length || 0).toBeGreaterThanOrEqual(2)
+    expect(storeSource.match(/ohStoryDeliveryReceipts,/g)?.length || 0).toBeGreaterThanOrEqual(2)
     expect(storagePatchSource).toContain('oh_story_delivery_receipts: input.ohStoryDeliveryReceipts')
     expect(storagePatchSource).toContain('chapter_blueprint: receipts?.chapter_blueprint')
     expect(storagePatchSource).toContain('scene_card_receipts: receipts?.scene_card_receipts')
@@ -336,38 +346,27 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation preserves pre-draft execution receipts for write-preparation diagnostics', () => {
-    const source = writingServiceSource()
+    const draftSource = readDraftReceiptSource()
+    const finalReceiptBlock = readFinalReceiptRefreshSource()
     const carryOverSource = deliveryRiskCarryOverSource()
     const storagePatchSource = readChapterProseStoragePatchSource()
     const normalizeBlock = carryOverSource.slice(
       carryOverSource.indexOf('export function normalizeStoredOhStoryDeliveryReceipts'),
       carryOverSource.indexOf('\nexport function', carryOverSource.indexOf('export function normalizeStoredOhStoryDeliveryReceipts') + 1),
     )
-    const generationBlock = source.slice(
-      source.indexOf('const draftResult = await generateNovelChapterProse'),
-      source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
-    )
-
     expect(normalizeBlock).toContain('pre_draft_execution_receipts')
     expect(normalizeBlock).toContain('preDraftExecutionReceipts')
     expect(storagePatchSource).toContain('pre_draft_execution_receipts: receipts?.pre_draft_execution_receipts')
-    expect(generationBlock).toContain('resultPayload?.pre_draft_execution_receipts')
-    expect(generationBlock).toContain('targetProse?.pre_draft_execution_receipts')
-    expect(generationBlock).toContain('revisionDeliveryReceipts?.pre_draft_execution_receipts')
+    expect(draftSource).toContain('resultPayload?.pre_draft_execution_receipts')
+    expect(draftSource).toContain('targetProse?.pre_draft_execution_receipts')
+    expect(finalReceiptBlock).toContain('revisionDeliveryReceipts?.pre_draft_execution_receipts')
   })
 
   test('prose generation refreshes stored oh-story receipts from the final reviewed draft before storage', () => {
-    const source = writingServiceSource()
-    const generationBlock = source.slice(
-      source.indexOf('const draftResult = await generateNovelChapterProse'),
-      source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
-    )
-    const finalReceiptBlock = generationBlock.slice(
-      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
-      generationBlock.indexOf("if (isDraftOnly || isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
-    )
+    const draftSource = readDraftReceiptSource()
+    const finalReceiptBlock = readFinalReceiptRefreshSource()
 
-    expect(generationBlock).toContain('let ohStoryDeliveryReceipts = normalizeStoredOhStoryDeliveryReceipts')
+    expect(draftSource).toContain('let ohStoryDeliveryReceipts = normalizeStoredOhStoryDeliveryReceipts')
     expect(finalReceiptBlock).toContain('ohStoryDeliveryReceipts = normalizeStoredOhStoryDeliveryReceipts')
     expect(finalReceiptBlock).toContain('finalSceneBreakdown')
     expect(finalReceiptBlock).toContain('selfCheck?.review')
@@ -376,15 +375,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation refreshes stored oh-story receipts from nested revision delivery receipts', () => {
-    const source = writingServiceSource()
-    const generationBlock = source.slice(
-      source.indexOf('const draftResult = await generateNovelChapterProse'),
-      source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
-    )
-    const finalReceiptBlock = generationBlock.slice(
-      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
-      generationBlock.indexOf("if (isDraftOnly || isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
-    )
+    const finalReceiptBlock = readFinalReceiptRefreshSource()
 
     expect(finalReceiptBlock).toContain('const revisionDeliveryReceipts = selfCheck?.revision?.oh_story_delivery_receipts')
     expect(finalReceiptBlock).toContain('revisionDeliveryReceipts?.scene_card_receipts')
@@ -393,15 +384,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation preserves nested deslop and quality repair receipts in stored oh-story receipts', () => {
-    const source = writingServiceSource()
-    const generationBlock = source.slice(
-      source.indexOf('const draftResult = await generateNovelChapterProse'),
-      source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
-    )
-    const finalReceiptBlock = generationBlock.slice(
-      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
-      generationBlock.indexOf("if (isDraftOnly || isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
-    )
+    const finalReceiptBlock = readFinalReceiptRefreshSource()
 
     expect(finalReceiptBlock).toContain('deslop_repair_receipts')
     expect(finalReceiptBlock).toContain('revisionDeliveryReceipts?.deslop_repair_receipts')
@@ -410,15 +393,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation deduplicates final delivery risk receipts before storage', () => {
-    const source = writingServiceSource()
-    const generationBlock = source.slice(
-      source.indexOf('const draftResult = await generateNovelChapterProse'),
-      source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
-    )
-    const finalReceiptBlock = generationBlock.slice(
-      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
-      generationBlock.indexOf("if (isDraftOnly || isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
-    )
+    const finalReceiptBlock = readFinalReceiptRefreshSource()
 
     const deliveryRiskCoreSource = readFileSync(join(import.meta.dir, '../novel-writing-service/post-delivery/delivery-risk-core.ts'), 'utf8')
     expect(deliveryRiskCoreSource).toContain('export function uniqueDeliveryRiskReceipts')
@@ -426,15 +401,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation prefers nested revision scene-card receipts over stale final scene breakdown receipts', () => {
-    const source = writingServiceSource()
-    const generationBlock = source.slice(
-      source.indexOf('const draftResult = await generateNovelChapterProse'),
-      source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
-    )
-    const finalReceiptBlock = generationBlock.slice(
-      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
-      generationBlock.indexOf("if (isDraftOnly || isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
-    )
+    const finalReceiptBlock = readFinalReceiptRefreshSource()
 
     const sceneReceiptMergeBlock = finalReceiptBlock.slice(
       finalReceiptBlock.indexOf('scene_card_receipts: ['),
@@ -445,15 +412,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation prefers nested revision scene-card receipts over stale draft delivery receipts', () => {
-    const source = writingServiceSource()
-    const generationBlock = source.slice(
-      source.indexOf('const draftResult = await generateNovelChapterProse'),
-      source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
-    )
-    const finalReceiptBlock = generationBlock.slice(
-      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
-      generationBlock.indexOf("if (isDraftOnly || isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
-    )
+    const finalReceiptBlock = readFinalReceiptRefreshSource()
     const sceneReceiptMergeBlock = finalReceiptBlock.slice(
       finalReceiptBlock.indexOf('scene_card_receipts: ['),
       finalReceiptBlock.indexOf('delivery_risk_receipts:', finalReceiptBlock.indexOf('scene_card_receipts: [')),
@@ -463,15 +422,7 @@ describe('story unit sync report', () => {
   })
 
   test('prose generation prefers nested revision receipts over stale draft delivery receipts', () => {
-    const source = writingServiceSource()
-    const generationBlock = source.slice(
-      source.indexOf('const draftResult = await generateNovelChapterProse'),
-      source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
-    )
-    const finalReceiptBlock = generationBlock.slice(
-      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
-      generationBlock.indexOf("if (isDraftOnly || isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
-    )
+    const finalReceiptBlock = readFinalReceiptRefreshSource()
     const revisionReceiptMergeBlock = finalReceiptBlock.slice(
       finalReceiptBlock.indexOf('revision_receipts: ['),
       finalReceiptBlock.indexOf('],', finalReceiptBlock.indexOf('revision_receipts: [')),
