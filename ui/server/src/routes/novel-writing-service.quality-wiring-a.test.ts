@@ -695,20 +695,13 @@ describe('novel writing service prose quality wiring a', () => {
       }
     }
   })
-  test('never admits a passing contraction without an explicit completion finish reason', async () => {
+  test('accepts clean passing contractions with missing or provider-unknown finish reasons', async () => {
     const originalText = '原'.repeat(1400)
-    const explicitlyComplete = '完'.repeat(1200)
-    const unknownPassingCandidate = '疑'.repeat(1000)
-    for (const incompleteFinish of [{}, { finish_reason: 'mystery' }]) {
-      const results = [
-        { parsed: { chapter_text: explicitlyComplete }, finish_reason: 'stop' },
-        { parsed: { chapter_text: unknownPassingCandidate }, ...incompleteFinish },
-      ]
-      const service = createNovelWritingService({
-        getProject: async () => null,
-        production: { getStageModelId: (_p: any, _s: string, f?: number) => f || 217, getStageTemperature: (_p: any, _s: string, f: number) => f } as any,
-        reference: {} as any,
-        runtime: { executeAgent: async () => results.shift() },
+    const passingCandidate = '疑'.repeat(1000)
+    for (const cleanFinish of [{}, { finish_reason: 'mystery' }]) {
+      const service = createContractionService({
+        parsed: { chapter_text: passingCandidate },
+        ...cleanFinish,
       })
 
       const result = await service.ensureProseMeetsWordTarget(
@@ -717,16 +710,19 @@ describe('novel writing service prose quality wiring a', () => {
         { chapter_target: { word_target: contractionWordTarget } },
         originalText,
         217,
-        { maxContractionAttempts: 2 },
+        { maxContractionAttempts: 1 },
       )
 
-      expect(result.final_text).toBe(explicitlyComplete)
-      expect(result.final_text).not.toBe(unknownPassingCandidate)
-      expect(result.word_target_warning?.code).toBe('word_target_long')
-      expect(result.contraction.attempts[1]).toMatchObject({ candidate_rejected: true })
-      expect(result.contraction.attempts[1].rejection_reason).toContain(
-        incompleteFinish.finish_reason ? 'finish_reason_unknown' : 'finish_reason_missing',
-      )
+      expect(result.final_text).toBe(passingCandidate)
+      expect(result.final_evaluation).toMatchObject({ actual: 1000, passed: true })
+      expect(result.contracted).toBe(true)
+      expect(result.word_target_warning).toBeUndefined()
+      expect(result.contraction.attempts).toHaveLength(1)
+      expect(result.contraction.attempts[0]).toMatchObject({
+        returned_text: true,
+        contracted_count: 1000,
+        candidate_rejected: false,
+      })
     }
   })
   test('keeps direct ensure calls independently bounded when an external budget object is untrusted', async () => {

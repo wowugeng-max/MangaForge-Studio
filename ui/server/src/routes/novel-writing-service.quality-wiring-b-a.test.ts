@@ -277,18 +277,18 @@ describe('novel writing service prose quality wiring b a', () => {
       candidate_rejected: false,
     })
   })
-  test('does not bridge mildly short candidates without an explicit completion finish reason', async () => {
+  test('rejects explicit incomplete finishes but bridges clean missing or provider-unknown candidates', async () => {
     const originalText = '原'.repeat(1400)
     const contractedText = '缩'.repeat(750)
-    const cases = [
+    const expandedText = '扩'.repeat(900)
+    const rejectedFinishes = [
       { finish_reason: 'incomplete', raw: { incomplete_details: { reason: 'max_output_tokens' } } },
       { finish_reason: 'max_output_tokens' },
       { finish_reason: 'error' },
       { finish_reason: 'content_filter' },
-      {},
     ]
 
-    for (const finish of cases) {
+    for (const finish of rejectedFinishes) {
       const service = createContractionService({
         parsed: { prose_chapters: [{ chapter_no: 1, chapter_text: contractedText }] },
         ...finish,
@@ -304,7 +304,51 @@ describe('novel writing service prose quality wiring b a', () => {
 
       expect(result.final_text).toBe(originalText)
       expect(result.word_target_warning?.code).toBe('word_target_long')
-      expect(result.contraction?.attempts?.[0]?.bridge_to_expansion).toBe(false)
+      expect(result.contraction?.attempts?.[0]).toMatchObject({
+        candidate_rejected: true,
+        bridge_to_expansion: false,
+      })
+    }
+
+    for (const cleanFinish of [{}, { finish_reason: 'mystery' }]) {
+      const results = [
+        {
+          parsed: { prose_chapters: [{ chapter_no: 1, chapter_text: contractedText }] },
+          ...cleanFinish,
+        },
+        {
+          parsed: { prose_chapters: [{ chapter_no: 1, chapter_text: expandedText }] },
+          finish_reason: 'stop',
+        },
+      ]
+      const service = createNovelWritingService({
+        getProject: async () => null,
+        production: {
+          getStageModelId: (_project: any, _stage: string, fallback?: number) => fallback || 217,
+          getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+        } as any,
+        reference: {} as any,
+        runtime: { executeAgent: async () => results.shift() },
+      })
+
+      const result = await service.ensureProseMeetsWordTarget(
+        '/tmp/mangaforge-contraction-expansion-clean-finish',
+        { id: 1, title: '测试作品' },
+        { chapter_target: { chapter_no: 1, word_target: contractionWordTarget } },
+        originalText,
+        217,
+        { maxContractionAttempts: 1, maxExpansionAttempts: 1 },
+      )
+
+      expect(result.final_text).toBe(expandedText)
+      expect(result.final_evaluation).toMatchObject({ actual: 900, passed: true })
+      expect(result).toMatchObject({ contracted: true, expanded: true })
+      expect(result.contraction?.attempts).toHaveLength(1)
+      expect(result.contraction?.attempts[0]).toMatchObject({
+        contracted_count: 750,
+        candidate_rejected: false,
+        bridge_to_expansion: true,
+      })
     }
   })
   test('does not bridge a mildly short contraction when expansion is disabled', async () => {
