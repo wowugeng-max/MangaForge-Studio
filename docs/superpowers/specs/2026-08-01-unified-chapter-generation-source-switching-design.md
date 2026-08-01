@@ -1,7 +1,7 @@
 # Unified Chapter Generation Source Switching Design
 
 Date: 2026-08-01
-Status: approved in conversation; awaiting written-spec review
+Status: approved
 Scope: one project-level source for the chapter production chain, with explicit API/MCP activation and retained inactive configuration
 
 ## Problem
@@ -96,15 +96,19 @@ The server introduces a task-scoped `ChapterGenerationSource` instead of resolvi
 ```text
 beginChapterTask
   ├─ draft
+  ├─ word_target_repair
+  ├─ commercial_editor_rewrite
+  ├─ meme_polish / readability_review / humanize
   ├─ quality_review / manual_recheck
   ├─ structured_review_fill
+  ├─ quality_repair
   ├─ revision
   ├─ post_revision_review
   └─ story_state_sync
 endChapterTask
 ```
 
-The list covers every model-driven stage in the chapter production chain. Deterministic scanners, validators, normalization, quality decisions, database writes, and memory updates remain local and do not become remote generation stages.
+The list covers every model-driven stage after pre-draft materials and scene cards are ready. It includes word-target expansion/contraction, commercial editing, polish, readability, humanization, quality-loop repairs, editor reports, and their manual equivalents even when an optimized production mode skips some stages. Pre-draft planning, outline work, scene-card generation, and deterministic scanners, validators, normalization, quality decisions, database writes, and memory updates remain outside the task source and stay local or on their existing planning path.
 
 ### Task-scoped execution handle
 
@@ -316,8 +320,8 @@ Raw Keys, authorization headers, cookies, and other credentials remain excluded.
 
 ### Unified routing
 
-- API tasks route draft, review, structured fill, revision, post-revision review, and story-state sync through the same captured model ID.
-- MCP tasks route those stages through the same Agent, Buda model, and task Session.
+- API tasks route draft, word-target repair, editor rewrite, polish, readability, humanization, review, structured fill, quality repair, revision, post-revision review, and story-state sync through the same captured model ID.
+- MCP tasks route every one of those covered stages through the same Agent, Buda model, and task Session.
 - A later manual task creates a new MCP Session.
 - No covered stage bypasses the task execution handle to call a different source.
 - Any MCP stage failure produces no ordinary model call.
