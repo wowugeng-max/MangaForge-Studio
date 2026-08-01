@@ -19,7 +19,6 @@ import {
   scanProseForQualityLoop,
 } from './novel-writing-service'
 import { createNovelReferenceService } from './novel-reference-service'
-import { normalizeProseForStorage } from '../novel-writing/chapter-prose-storage-patch'
 import { buildCanonicalSurfaceIndex } from '../novel-writing/canonical-continuity'
 import { validateMinimalChapterProse } from '../novel-writing/prose-admission-policy'
 import { REAL_CHAPTER_11_CANONICAL_CONFLICT_PROSE } from '../novel-writing/fixtures/real-chapter-11-canonical-conflict'
@@ -329,7 +328,7 @@ describe('novel writing service prose quality wiring b a', () => {
     expect(result.word_target_warning?.code).toBe('word_target_short')
     expect(result.contraction?.attempts?.[0]?.bridge_to_expansion).toBe(false)
   })
-  test('restores the valid pre-editor prose when optional editor output cannot meet the word target', async () => {
+  test('keeps the valid pre-editor prose when optional editor output cannot meet the word target', async () => {
     const draftText = buildPipelineProse(
       '江澈踏碎路面，飞石逼退第一排追兵，铁门前终于露出缺口。',
       '借自己制造的盲区夺下通讯器，继续迫使追捕队后撤',
@@ -349,6 +348,7 @@ describe('novel writing service prose quality wiring b a', () => {
       editorSceneBreakdown,
       editorContinuityNotes: ['不应保留的 editor 连续性'],
     })
+    const stages: Array<{ name: string; payload: any }> = []
 
     const result = await harness.service.generateChapterForGroup(
       harness.workspace,
@@ -359,18 +359,34 @@ describe('novel writing service prose quality wiring b a', () => {
         target_word_count: 1000,
         quality_threshold: 78,
         auto_repair_quality_gate: true,
+        onStage: async (name: string, payload: any) => stages.push({ name, payload }),
       },
     )
 
-    const expectedStoredText = normalizeProseForStorage(editorText)
+    const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+    const finalCandidate = result.chapter?.chapter_text || ''
     expect(countProseChars(editorText)).toBeGreaterThan(1100)
-    expect(result.chapter.chapter_text).toBe(expectedStoredText)
-    expect(result.chapter.chapter_text).toContain('商业主编增加的冗余解释')
-    expect(result.chapter.continuity_notes || []).toContain('不应保留的 editor 连续性')
-    expect(result.chapter.raw_payload?.generated_scene_breakdown || []).toContainEqual(expect.objectContaining({ title: '不应保留的 editor 场景回执' }))
-    expect(result.quality_warnings).toContainEqual(expect.objectContaining({ code: 'word_target_long', source: 'word_target' }))
+    expect(stored?.chapter_text).toBe(finalCandidate)
+    expect(finalCandidate).toContain('江澈踏碎路面')
+    expect(finalCandidate).toContain('借自己制造的盲区夺下通讯器')
+    expect(finalCandidate).not.toContain('商业主编增加的冗余解释')
+    expect(result.chapter.continuity_notes || []).not.toContain('不应保留的 editor 连续性')
+    expect(result.chapter.raw_payload?.generated_scene_breakdown || []).not.toContainEqual(expect.objectContaining({ title: '不应保留的 editor 场景回执' }))
+    expect(result.editor_rewrite).toMatchObject({ edited: false })
+    expect(result.editor_rewrite?.final_text).toContain('江澈踏碎路面')
+    expect(result.editor_rewrite?.final_text).not.toContain('商业主编增加的冗余解释')
+    expect(result.editor_rewrite?.editor_report?.original_word_count).toBeGreaterThan(0)
+    expect(result.editor_rewrite?.editor_report?.edited_word_count).toBe(countProseChars(editorText))
+    expect(result.editor_rewrite?.revision?.continuity_notes || []).toContain('不应保留的 editor 连续性')
+    expect(result.editor_rewrite?.revision?.scene_breakdown || []).toContainEqual(expect.objectContaining({ title: '不应保留的 editor 场景回执' }))
+    expect(result.editor_rewrite?.discarded).not.toBe(true)
+    expect(result.quality_warnings).not.toContainEqual(expect.objectContaining({ code: 'word_target_long', source: 'word_target' }))
+    expect(stages.some(item => item.payload?.phase === 'post_editor' && item.payload?.fallback === 'pre_editor')).toBe(false)
     expect(harness.storeCalls).toBe(1)
-    expect(harness.storyStateTexts).toEqual([expectedStoredText])
+    expect(harness.storeTexts).toEqual([finalCandidate])
+    expect(harness.storyStateTexts).toEqual([finalCandidate])
+    expect(harness.memoryTexts).toEqual([finalCandidate])
+    expect(harness.modelCalls.editor).toBe(1)
   })
   test('does not restore a pre-editor draft that only passed the word-target soft cap', async () => {
     const baseText = buildPipelineProse(
@@ -533,12 +549,11 @@ describe('novel writing service prose quality wiring b a', () => {
       '江澈踏碎路面，飞石逼退第一排追兵，铁门前终于露出缺口。',
       '借自己制造的盲区夺下通讯器，继续迫使追捕队后撤',
     )
-    const expectedText = normalizeProseForStorage(draftText)
     const transportCases = [
       { status: 'completed', incomplete_details: null },
       { status: 'completed', raw: { response: { incompleteDetails: null } } },
     ]
-    const outcomes: any[] = []
+    const finalCandidates: string[] = []
 
     for (const transport of transportCases) {
       const harness = await createProsePipelineHarness(createNovelWritingService, {
@@ -556,24 +571,22 @@ describe('novel writing service prose quality wiring b a', () => {
         { model_id: 217, target_word_count: 1000, quality_threshold: 78, auto_repair_quality_gate: true },
       ).then((value: any) => ({ value, error: null }), (error: any) => ({ value: null, error }))
       const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
-      outcomes.push({
-        code: result.error?.code || null,
-        result_text: result.value?.chapter?.chapter_text || '',
-        stored_text: stored?.chapter_text || '',
-        store_calls: harness.storeCalls,
-        story_state_calls: harness.storyStateCalls,
-        memory_calls: harness.memoryTexts.length,
-      })
+      const finalCandidate = result.value?.chapter?.chapter_text || ''
+      finalCandidates.push(finalCandidate)
+
+      expect(result.error).toBeNull()
+      expect(finalCandidate).toContain('江澈踏碎路面')
+      expect(finalCandidate).toContain('借自己制造的盲区夺下通讯器')
+      expect(stored?.chapter_text).toBe(finalCandidate)
+      expect(harness.storeCalls).toBe(1)
+      expect(harness.storeTexts).toEqual([finalCandidate])
+      expect(harness.storyStateCalls).toBe(1)
+      expect(harness.storyStateTexts).toEqual([finalCandidate])
+      expect(harness.memoryTexts).toEqual([finalCandidate])
+      expect(harness.modelCalls.draft).toBe(1)
     }
 
-    expect(outcomes).toEqual(transportCases.map(() => ({
-      code: null,
-      result_text: expectedText,
-      stored_text: expectedText,
-      store_calls: 1,
-      story_state_calls: 1,
-      memory_calls: 1,
-    })))
+    expect(finalCandidates).toHaveLength(transportCases.length)
   })
   test('rejects complete quality revisions when nested rejected finish reasons are masked at top level', async () => {
     const draftText = buildPipelineProse(

@@ -19,7 +19,6 @@ import {
   scanProseForQualityLoop,
 } from './novel-writing-service'
 import { createNovelReferenceService } from './novel-reference-service'
-import { normalizeProseForStorage } from '../novel-writing/chapter-prose-storage-patch'
 import { buildCanonicalSurfaceIndex } from '../novel-writing/canonical-continuity'
 import { validateMinimalChapterProse } from '../novel-writing/prose-admission-policy'
 import { REAL_CHAPTER_11_CANONICAL_CONFLICT_PROSE } from '../novel-writing/fixtures/real-chapter-11-canonical-conflict'
@@ -809,10 +808,17 @@ describe('novel writing service prose quality wiring a', () => {
       production_mode: 'draft_only',
     })
     const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+    const finalCandidate = result.chapter?.chapter_text || ''
 
     expect(result.admission_status).toBe('accepted_with_warnings')
     expect(result.quality_warnings).toContainEqual(expect.objectContaining({ source: 'word_target', code: 'word_target_long' }))
-    expect(stored?.chapter_text).toBe(normalizeProseForStorage(draftText))
+    expect(stored?.chapter_text).toBe(finalCandidate)
+    expect(finalCandidate).toContain('江澈撞断路灯')
+    expect(finalCandidate).toContain('主动夺取追捕队的通讯器')
+    expect(finalCandidate).not.toContain('optional contraction provider unavailable')
+    expect(harness.storeTexts).toEqual([finalCandidate])
+    expect(harness.storyStateTexts).toEqual([])
+    expect(harness.memoryTexts).toEqual([])
     expect(harness.modelCalls.contraction).toBe(1)
   })
   test('stores complete short prose when optional expansion transport throws', async () => {
@@ -828,50 +834,104 @@ describe('novel writing service prose quality wiring a', () => {
       production_mode: 'draft_only',
     })
     const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+    const finalCandidate = result.chapter?.chapter_text || ''
 
     expect(result.admission_status).toBe('accepted_with_warnings')
     expect(result.quality_warnings).toContainEqual(expect.objectContaining({ source: 'word_target', code: 'word_target_short' }))
-    expect(stored?.chapter_text).toBe(normalizeProseForStorage(draftText))
+    expect(stored?.chapter_text).toBe(finalCandidate)
+    expect(finalCandidate).toContain('江澈撞开铁门')
+    expect(finalCandidate).toContain('主动夺下通讯器并推进追击')
+    expect(finalCandidate).not.toContain('optional expansion provider unavailable')
+    expect(harness.storeTexts).toEqual([finalCandidate])
+    expect(harness.storyStateTexts).toEqual([])
+    expect(harness.memoryTexts).toEqual([])
     expect(harness.modelCalls.expansion).toBe(1)
   })
   test('keeps complete prose when editor returns a long-enough but transport-truncated rewrite', async () => {
     const draftText = buildPipelineProse('江澈撞开铁门，追兵的包围线被迫后撤。', '主动夺下通讯器并推进追击')
-    const truncatedEditorText = draftText.slice(0, Math.floor(draftText.length * 0.9))
+    const truncatedEditorText = `${draftText.slice(0, Math.floor(draftText.length * 0.9))}\n截断主编独有片段。`
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText,
-      editorResult: { parsed: { chapter_text: truncatedEditorText, editor_report: { passed: true } }, finish_reason: 'length', modelName: 'fake-editor' },
+      editorResult: {
+        parsed: {
+          chapter_text: truncatedEditorText,
+          scene_breakdown: [{ title: '截断 editor 场景' }],
+          continuity_notes: ['截断 editor 连续性'],
+          editor_report: { passed: true },
+        },
+        finish_reason: 'length',
+        modelName: 'fake-editor',
+      },
     })
 
     const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, { model_id: 217, target_word_count: 1000 })
+    const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+    const finalCandidate = result.chapter?.chapter_text || ''
 
-    expect(result.chapter?.chapter_text).toBe(normalizeProseForStorage(draftText))
+    expect(stored?.chapter_text).toBe(finalCandidate)
+    expect(finalCandidate).toContain('江澈撞开铁门')
+    expect(finalCandidate).toContain('主动夺下通讯器并推进追击')
+    expect(finalCandidate).not.toContain('截断主编独有片段')
+    expect(result.chapter?.continuity_notes || []).not.toContain('截断 editor 连续性')
+    expect(result.chapter?.raw_payload?.generated_scene_breakdown || []).not.toContainEqual(expect.objectContaining({ title: '截断 editor 场景' }))
     expect(result.admission_status).toBe('accepted_with_warnings')
     expect(result.quality_warnings).toContainEqual(expect.objectContaining({ code: 'editor_unavailable', source: 'review' }))
+    expect(result.editor_rewrite).toMatchObject({ edited: false })
+    expect(harness.storeTexts).toEqual([finalCandidate])
+    expect(harness.storyStateTexts).toEqual([finalCandidate])
+    expect(harness.memoryTexts).toEqual([finalCandidate])
     expect(harness.modelCalls.editor).toBe(1)
   })
   test('keeps complete prose when meme polish returns a long-enough but transport-truncated rewrite', async () => {
     const draftText = buildPipelineProse('江澈撞开铁门，追兵的包围线被迫后撤。', '主动夺下通讯器并推进追击')
-    const truncatedMemeText = draftText.slice(0, Math.floor(draftText.length * 0.95))
+    const truncatedMemeText = `${draftText.slice(0, Math.floor(draftText.length * 0.95))}\n截断网感独有片段。`
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText,
       editorText: draftText,
       enableMemePolish: true,
-      memeResult: { parsed: { chapter_text: truncatedMemeText, meme_polish_report: { changed_plot: false } }, raw: { choices: [{ finish_reason: 'length' }] }, modelName: 'fake-meme' },
+      memeResult: {
+        parsed: {
+          chapter_text: truncatedMemeText,
+          scene_breakdown: [{ title: '截断 meme 场景' }],
+          continuity_notes: ['截断 meme 连续性'],
+          meme_polish_report: { changed_plot: false },
+        },
+        raw: { choices: [{ finish_reason: 'length' }] },
+        modelName: 'fake-meme',
+      },
     })
 
     const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, { model_id: 217, target_word_count: 1000 })
+    const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
+    const finalCandidate = result.chapter?.chapter_text || ''
 
-    expect(result.chapter?.chapter_text).toBe(normalizeProseForStorage(draftText))
+    expect(stored?.chapter_text).toBe(finalCandidate)
+    expect(finalCandidate).toContain('江澈撞开铁门')
+    expect(finalCandidate).toContain('主动夺下通讯器并推进追击')
+    expect(finalCandidate).not.toContain('截断网感独有片段')
+    expect(result.chapter?.continuity_notes || []).not.toContain('截断 meme 连续性')
+    expect(result.chapter?.raw_payload?.generated_scene_breakdown || []).not.toContainEqual(expect.objectContaining({ title: '截断 meme 场景' }))
     expect(result.admission_status).toBe('accepted_with_warnings')
     expect(result.quality_warnings).toContainEqual(expect.objectContaining({ code: 'meme_polish_unavailable', source: 'review' }))
+    expect(result.meme_polish).toMatchObject({ polished: false })
+    expect(harness.storeTexts).toEqual([finalCandidate])
+    expect(harness.storyStateTexts).toEqual([finalCandidate])
+    expect(harness.memoryTexts).toEqual([finalCandidate])
     expect(harness.modelCalls.meme).toBe(1)
   })
   test('keeps complete prose when editor and meme rewrites carry incomplete details above length guards', async () => {
     const draftText = buildPipelineProse('江澈撞开铁门，追兵的包围线被迫后撤。', '主动夺下通讯器并推进追击')
+    const incompleteEditorText = `${draftText.slice(0, Math.floor(draftText.length * 0.9))}\n不完整主编独有片段。`
+    const incompleteMemeText = `${draftText.slice(0, Math.floor(draftText.length * 0.95))}\n不完整网感独有片段。`
     const editorHarness = await createProsePipelineHarness(createNovelWritingService, {
       draftText,
       editorResult: {
-        parsed: { chapter_text: draftText.slice(0, Math.floor(draftText.length * 0.9)), editor_report: { passed: true } },
+        parsed: {
+          chapter_text: incompleteEditorText,
+          scene_breakdown: [{ title: '不完整 editor 场景' }],
+          continuity_notes: ['不完整 editor 连续性'],
+          editor_report: { passed: true },
+        },
         incomplete_details: { reason: 'max_output_tokens' },
       },
     })
@@ -880,18 +940,49 @@ describe('novel writing service prose quality wiring a', () => {
       editorText: draftText,
       enableMemePolish: true,
       memeResult: {
-        parsed: { chapter_text: draftText.slice(0, Math.floor(draftText.length * 0.95)), meme_polish_report: { changed_plot: false } },
+        parsed: {
+          chapter_text: incompleteMemeText,
+          scene_breakdown: [{ title: '不完整 meme 场景' }],
+          continuity_notes: ['不完整 meme 连续性'],
+          meme_polish_report: { changed_plot: false },
+        },
         raw: { response: { incompleteDetails: {} } },
       },
     })
 
     const editorResult = await editorHarness.service.generateChapterForGroup(editorHarness.workspace, editorHarness.project.id, editorHarness.chapter.id, { model_id: 217, target_word_count: 1000 })
     const memeResult = await memeHarness.service.generateChapterForGroup(memeHarness.workspace, memeHarness.project.id, memeHarness.chapter.id, { model_id: 217, target_word_count: 1000 })
+    const storedEditor = (await listNovelChapters(editorHarness.workspace, editorHarness.project.id)).find(item => item.id === editorHarness.chapter.id)
+    const storedMeme = (await listNovelChapters(memeHarness.workspace, memeHarness.project.id)).find(item => item.id === memeHarness.chapter.id)
+    const editorFinalCandidate = editorResult.chapter?.chapter_text || ''
+    const memeFinalCandidate = memeResult.chapter?.chapter_text || ''
 
-    expect(editorResult.chapter?.chapter_text).toBe(normalizeProseForStorage(draftText))
-    expect(editorResult.quality_warnings).toContainEqual(expect.objectContaining({ code: 'editor_unavailable' }))
-    expect(memeResult.chapter?.chapter_text).toBe(normalizeProseForStorage(draftText))
-    expect(memeResult.quality_warnings).toContainEqual(expect.objectContaining({ code: 'meme_polish_unavailable' }))
+    expect(storedEditor?.chapter_text).toBe(editorFinalCandidate)
+    expect(editorFinalCandidate).toContain('江澈撞开铁门')
+    expect(editorFinalCandidate).toContain('主动夺下通讯器并推进追击')
+    expect(editorFinalCandidate).not.toContain('不完整主编独有片段')
+    expect(editorResult.chapter?.continuity_notes || []).not.toContain('不完整 editor 连续性')
+    expect(editorResult.chapter?.raw_payload?.generated_scene_breakdown || []).not.toContainEqual(expect.objectContaining({ title: '不完整 editor 场景' }))
+    expect(editorResult.quality_warnings).toContainEqual(expect.objectContaining({ code: 'editor_unavailable', source: 'review' }))
+    expect(editorResult.editor_rewrite).toMatchObject({ edited: false })
+    expect(editorHarness.storeTexts).toEqual([editorFinalCandidate])
+    expect(editorHarness.storyStateTexts).toEqual([editorFinalCandidate])
+    expect(editorHarness.memoryTexts).toEqual([editorFinalCandidate])
+    expect(editorHarness.modelCalls.editor).toBe(1)
+
+    expect(storedMeme?.chapter_text).toBe(memeFinalCandidate)
+    expect(memeFinalCandidate).toContain('江澈撞开铁门')
+    expect(memeFinalCandidate).toContain('主动夺下通讯器并推进追击')
+    expect(memeFinalCandidate).not.toContain('不完整网感独有片段')
+    expect(memeResult.chapter?.continuity_notes || []).not.toContain('不完整 meme 连续性')
+    expect(memeResult.chapter?.raw_payload?.generated_scene_breakdown || []).not.toContainEqual(expect.objectContaining({ title: '不完整 meme 场景' }))
+    expect(memeResult.quality_warnings).toContainEqual(expect.objectContaining({ code: 'meme_polish_unavailable', source: 'review' }))
+    expect(memeResult.meme_polish).toMatchObject({ polished: false })
+    expect(memeHarness.storeTexts).toEqual([memeFinalCandidate])
+    expect(memeHarness.storyStateTexts).toEqual([memeFinalCandidate])
+    expect(memeHarness.memoryTexts).toEqual([memeFinalCandidate])
+    expect(memeHarness.modelCalls.editor).toBe(1)
+    expect(memeHarness.modelCalls.meme).toBe(1)
   })
   test('keeps a valid 6007-character editor rewrite with a warning instead of restoring pre-editor prose', async () => {
     const draftText = buildPipelineProse('江澈撞断路灯，切入铁门。', '主动夺取通讯器').repeat(7).slice(0, 6006)
