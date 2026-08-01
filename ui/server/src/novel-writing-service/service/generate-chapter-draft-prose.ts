@@ -55,6 +55,7 @@ const MCP_RECEIPT_FIELDS = [
   'key_id',
   'adapter_id',
   'agent_id',
+  'model',
   'binding_fingerprint',
   'session_id',
   'snapshot_hash',

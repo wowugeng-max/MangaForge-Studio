@@ -380,11 +380,14 @@ export class BudaAdapter implements ProseMcpAdapter {
         chapterTitle: input.chapter?.title,
         paragraphTask: input.paragraphTask,
       })
+      const selectedModel = String(input.model || '').trim()
+      const modelArguments = selectedModel ? { model: selectedModel } : {}
       const createResult = await this.client.callTool(tools.createSession, buildBudaToolArguments('createSession', tools.createSession, {
         agentId: input.agentId,
         message: `MangaForge 请求 ${input.requestId} 已建立；请等待同一 Session 的完整章节任务。`,
         title: `MangaForge 第${input.chapterNo}章 ${input.requestId}`,
         mode: 'agent',
+        ...modelArguments,
         startRun: false,
       }), callOptions('mutation'))
       const created = mcpResultData(createResult)
@@ -405,6 +408,7 @@ export class BudaAdapter implements ProseMcpAdapter {
           sessionId: activeSessionId,
           message,
           mode: 'agent',
+          ...modelArguments,
           startRun: true,
         }), callOptions('mutation'))
       } catch (error) {

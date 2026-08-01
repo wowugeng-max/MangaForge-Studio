@@ -528,6 +528,7 @@ describe('chapter draft GenerationSource integration', () => {
     const draftText = buildPipelineProse('红灯同时亮起，江澈撞开铁门。', '主动打乱包围并夺取通讯器')
     let remoteCalls = 0
     let remotePrompt = ''
+    let remoteModel = ''
     let adapter: any
     const mcpRuntime = {
       resolveCredentialConfig: async (_keyId: number, _serverId: string, snapshot: unknown) => snapshot,
@@ -548,6 +549,7 @@ describe('chapter draft GenerationSource integration', () => {
       generateProse: async (input: any) => {
         remoteCalls += 1
         remotePrompt = input.paragraphTask
+        remoteModel = input.model
         return {
           prose_chapters: [{ chapter_no: 10, chapter_text: draftText }],
           source: 'mcp', adapter_id: 'buda', agent_id: 'agent-1', session_id: 'session-1', snapshot_hash: 'snapshot-1', completed: true,
@@ -558,7 +560,7 @@ describe('chapter draft GenerationSource integration', () => {
     harness.project.reference_config.prose_generation_source = {
       version: 'prose_generation_source_v1',
       type: 'mcp',
-      mcp: { server_id: 'buda', key_id: key.id, adapter_id: 'buda', agent_id: 'agent-1' },
+      mcp: { server_id: 'buda', key_id: key.id, adapter_id: 'buda', agent_id: 'agent-1', model: 'model-x' },
     }
     await updateNovelProject(harness.workspace, harness.project.id, { reference_config: harness.project.reference_config } as any)
 
@@ -571,6 +573,7 @@ describe('chapter draft GenerationSource integration', () => {
     expect(result).toBeTruthy()
     expect(remoteCalls).toBe(1)
     expect(remotePrompt.length).toBeGreaterThan(100)
+    expect(remoteModel).toBe('model-x')
     expect(harness.modelCalls.draft).toBe(0)
     expect(harness.modelCalls.review).toBeGreaterThan(0)
     expect(result.chapter.raw_payload.prose_generation_source).toMatchObject({
@@ -580,6 +583,7 @@ describe('chapter draft GenerationSource integration', () => {
       binding_fingerprint: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
       adapter_id: 'buda',
       agent_id: 'agent-1',
+      model: 'model-x',
       session_id: 'session-1',
       server_id: 'buda',
       key_id: key.id,

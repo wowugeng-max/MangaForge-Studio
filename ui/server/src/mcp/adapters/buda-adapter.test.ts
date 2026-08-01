@@ -187,6 +187,20 @@ describe('BudaAdapter', () => {
     expectBudaOperations(fake.calls)
   })
 
+  test('routes one explicit model to Session creation and message send while Auto omits it', async () => {
+    const explicit = createFakeClient()
+    await new BudaAdapter(explicit.client as any).generateProse(generationInput({ model: 'model-x' }))
+
+    expect(explicit.calls.find(call => call.name.endsWith('createApiAgentSession'))?.args.model).toBe('model-x')
+    expect(explicit.calls.find(call => call.name.endsWith('postApiAgentSessionMessage'))?.args.model).toBe('model-x')
+
+    const automatic = createFakeClient()
+    await new BudaAdapter(automatic.client as any).generateProse(generationInput({ model: '' }))
+
+    expect(automatic.calls.find(call => call.name.endsWith('createApiAgentSession'))?.args).not.toHaveProperty('model')
+    expect(automatic.calls.find(call => call.name.endsWith('postApiAgentSessionMessage'))?.args).not.toHaveProperty('model')
+  })
+
   test('awaits the durable session-created receipt immediately before sending the prose task', async () => {
     const fake = createFakeClient()
     const events: string[] = []

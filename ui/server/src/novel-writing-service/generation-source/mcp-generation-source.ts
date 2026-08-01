@@ -210,6 +210,7 @@ export class McpGenerationSource implements GenerationSource {
       key_id: binding.key_id,
       adapter_id: boundedScrubbedId(scrubber, binding.adapter_id),
       agent_id: boundedScrubbedId(scrubber, binding.agent_id),
+      model: boundedScrubbedId(scrubber, binding.model || 'Auto'),
       binding_fingerprint: bindingFingerprint,
     }
     const receipt = await appendNovelRun(request.activeWorkspace, {
@@ -318,6 +319,7 @@ export class McpGenerationSource implements GenerationSource {
         server: resolved.server,
         keyId: binding.key_id,
         agentId: binding.agent_id,
+        model: binding.model,
         requestId: request.requestId,
         project: request.project,
         chapter: request.chapter,

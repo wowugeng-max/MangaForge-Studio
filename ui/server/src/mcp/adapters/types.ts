@@ -46,6 +46,7 @@ export type BudaProseGenerationInput = {
   server: McpServerRecord
   keyId: number
   agentId: string
+  model?: string
   requestId: string
   project: Record<string, any>
   chapter: Record<string, any>
