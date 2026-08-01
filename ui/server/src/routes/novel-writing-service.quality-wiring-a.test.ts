@@ -21,6 +21,7 @@ import {
 import { createNovelReferenceService } from './novel-reference-service'
 import { normalizeProseForStorage } from '../novel-writing/chapter-prose-storage-patch'
 import { buildCanonicalSurfaceIndex } from '../novel-writing/canonical-continuity'
+import { validateMinimalChapterProse } from '../novel-writing/prose-admission-policy'
 import { REAL_CHAPTER_11_CANONICAL_CONFLICT_PROSE } from '../novel-writing/fixtures/real-chapter-11-canonical-conflict'
 import {
   chapter10HandoffFixture,
@@ -892,10 +893,44 @@ describe('novel writing service prose quality wiring a', () => {
     expect(memeResult.chapter?.chapter_text).toBe(normalizeProseForStorage(draftText))
     expect(memeResult.quality_warnings).toContainEqual(expect.objectContaining({ code: 'meme_polish_unavailable' }))
   })
+  test('keeps a valid 6007-character editor rewrite with a warning instead of restoring pre-editor prose', async () => {
+    const draftText = buildPipelineProse('江澈撞断路灯，切入铁门。', '主动夺取通讯器').repeat(7).slice(0, 6006)
+    const overCeilingEditorText = `${draftText.slice(0, -1)}编。`
+    expect(countProseChars(draftText)).toBe(6006)
+    expect(countProseChars(overCeilingEditorText)).toBe(6007)
+    expect(validateMinimalChapterProse(overCeilingEditorText).valid).toBe(true)
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText,
+      editorText: overCeilingEditorText,
+      chapterWordTarget: { mode: 'standard' },
+      contextPackageOverride: withoutOpeningHandoffGuard(),
+    })
+    const stages: Array<{ name: string; payload: any }> = []
+    const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+      model_id: 217,
+      onStage: async (name: string, payload: any) => stages.push({ name, payload }),
+    })
+
+    expect(result.admission_status).toBe('accepted_with_warnings')
+    expect(countProseChars(result.chapter?.chapter_text || '')).toBe(6007)
+    expect(result.quality_warnings).toContainEqual(expect.objectContaining({
+      code: 'word_target_long',
+      source: 'word_target',
+    }))
+    expect(result.editor_rewrite).toMatchObject({ edited: true })
+    expect(result.editor_rewrite?.discarded).not.toBe(true)
+    expect(countProseChars(result.editor_rewrite?.final_text || '')).toBe(6007)
+    expect(stages).toEqual(expect.arrayContaining([expect.objectContaining({
+      name: 'editor',
+      payload: expect.objectContaining({ status: 'success', edited: true, word_count: 6007 }),
+    })]))
+    expect(stages.some(item => item.payload?.phase === 'post_editor' && item.payload?.fallback === 'pre_editor')).toBe(false)
+  })
   test('restores earned-compatible prose when an invalid editor rewrite exceeds the compatibility ceiling', async () => {
     const draftText = buildPipelineProse('江澈撞断路灯，切入铁门。', '主动夺取通讯器').repeat(7).slice(0, 6006)
     const overCeilingEditorText = JSON.stringify({ chapter_text: draftText.slice(0, -18) })
     expect(countProseChars(overCeilingEditorText)).toBe(6007)
+    expect(validateMinimalChapterProse(overCeilingEditorText).valid).toBe(false)
     // Disable opening-handoff regression so the invalid overlong editor payload reaches the word-target restore path.
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText,

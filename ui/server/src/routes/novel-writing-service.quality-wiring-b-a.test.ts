@@ -21,6 +21,7 @@ import {
 import { createNovelReferenceService } from './novel-reference-service'
 import { normalizeProseForStorage } from '../novel-writing/chapter-prose-storage-patch'
 import { buildCanonicalSurfaceIndex } from '../novel-writing/canonical-continuity'
+import { validateMinimalChapterProse } from '../novel-writing/prose-admission-policy'
 import { REAL_CHAPTER_11_CANONICAL_CONFLICT_PROSE } from '../novel-writing/fixtures/real-chapter-11-canonical-conflict'
 import {
   chapter10HandoffFixture,
@@ -59,10 +60,50 @@ describe('novel writing service prose quality wiring b a', () => {
     },
   })
 
+  test('keeps a valid 6007-character optional meme rewrite with a warning instead of restoring pre-meme prose', async () => {
+    const draftText = buildPipelineProse('江澈撞断路灯，切入铁门。', '主动夺取通讯器').repeat(7).slice(0, 6006)
+    const overCeilingMemeText = `${draftText.slice(0, -1)}润。`
+    expect(countProseChars(draftText)).toBe(6006)
+    expect(countProseChars(overCeilingMemeText)).toBe(6007)
+    expect(validateMinimalChapterProse(overCeilingMemeText).valid).toBe(true)
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText,
+      editorText: draftText,
+      memeText: overCeilingMemeText,
+      enableMemePolish: true,
+      chapterWordTarget: { mode: 'standard' },
+      contextPackageOverride: withoutOpeningHandoffGuard(),
+    })
+    const stages: Array<{ name: string; payload: any }> = []
+    const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+      model_id: 217,
+      onStage: async (name: string, payload: any) => stages.push({ name, payload }),
+    })
+
+    expect(result.admission_status).toBe('accepted_with_warnings')
+    expect(countProseChars(result.chapter?.chapter_text || '')).toBe(6007)
+    expect(result.quality_warnings).toContainEqual(expect.objectContaining({
+      code: 'word_target_long',
+      source: 'word_target',
+    }))
+    expect(result.meme_polish).toMatchObject({ polished: true })
+    expect(result.meme_polish?.discarded).not.toBe(true)
+    expect(countProseChars(result.meme_polish?.final_text || '')).toBe(6007)
+    expect(stages).toEqual(expect.arrayContaining([expect.objectContaining({
+      name: 'meme_polish',
+      payload: expect.objectContaining({
+        status: 'success',
+        polished: true,
+        meme_polish_report: expect.objectContaining({ polished_word_count: 6007 }),
+      }),
+    })]))
+    expect(stages.some(item => item.payload?.phase === 'post_meme_polish' && item.payload?.fallback === 'pre_meme')).toBe(false)
+  })
   test('restores earned-compatible prose when an invalid optional meme rewrite exceeds the compatibility ceiling', async () => {
     const draftText = buildPipelineProse('江澈撞断路灯，切入铁门。', '主动夺取通讯器').repeat(7).slice(0, 6006)
     const overCeilingMemeText = JSON.stringify({ chapter_text: draftText.slice(0, -18) })
     expect(countProseChars(overCeilingMemeText)).toBe(6007)
+    expect(validateMinimalChapterProse(overCeilingMemeText).valid).toBe(false)
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText,
       editorText: draftText,
