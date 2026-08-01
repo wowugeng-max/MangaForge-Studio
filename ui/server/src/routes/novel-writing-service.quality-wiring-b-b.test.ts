@@ -38,6 +38,17 @@ import {
 } from './novel-writing-service.test-support'
 
 describe('novel writing service prose quality wiring b b', () => {
+  const classifyInjectedWritingCall = (task: string) => {
+    if (task.startsWith('任务：从刚入库的章节正文中提取故事状态机增量')) return 'story_state'
+    if (task.startsWith('任务：独立审查小说正文') || task.startsWith('任务：对刚生成的小说章节进行章节级自检')) return 'quality_review'
+    if (task.startsWith('任务：只补缺失的 oh-story 结构化自检字段')) return 'structured_review'
+    if (task.startsWith('任务：执行第') || task.startsWith('任务：根据自检结果修订本章正文')) return 'quality_revision'
+    if (task.startsWith('任务：对小说正文片段执行 Humanize Pass') || task.startsWith('任务：对人工特征不足窗口做') || task.startsWith('任务：对高风险正文窗口做')) return 'humanize'
+    if (task.startsWith('任务：克制型网感润色')) return 'meme'
+    if (task.includes('商业主编')) return 'editor'
+    return 'other'
+  }
+
   const contractionWordTarget = {
     mode: 'custom',
     target: 1000,
@@ -310,6 +321,7 @@ describe('novel writing service prose quality wiring b b', () => {
     const harness = await createProsePipelineHarness(createNovelWritingService, { draftText: finalText })
     let storyStateCalls = 0
     let memoryCalls = 0
+    const injectedCallOrder: string[] = []
     const service = createNovelWritingService({
       getProject: async () => harness.project,
       production: {
@@ -342,12 +354,17 @@ describe('novel writing service prose quality wiring b b', () => {
           },
           continuity: { previous_chapter: { chapter_no: 9, ending_excerpt: '追兵封住旧巷。' } },
         }),
-        generateChapterProse: async () => ({ parsed: { chapter_no: 10, chapter_text: finalText }, finish_reason: 'stop' }),
+        generateChapterProse: async () => {
+          injectedCallOrder.push('draft')
+          return { parsed: { chapter_no: 10, chapter_text: finalText }, finish_reason: 'stop' }
+        },
         executeAgent: async (_agent: string, _project: any, input: any) => {
           const task = String(input?.task || '')
+          const callKind = classifyInjectedWritingCall(task)
+          injectedCallOrder.push(callKind)
           if (task.includes('商业主编')) return { parsed: { chapter_text: finalText, editor_report: { passed: true } } }
           if (task.startsWith('任务：独立审查小说正文')) return { parsed: { score: 90, publishable: true, dimensions: { ...proseQualityScores, core_promise_agency: 9, payoff_hook: 9 }, findings: [] } }
-          if (task.includes('state_delta')) {
+          if (callKind === 'story_state') {
             storyStateCalls += 1
             return { parsed: { state_delta: { open_questions: ['x'] } } }
           }
@@ -380,6 +397,10 @@ describe('novel writing service prose quality wiring b b', () => {
     })
     expect(after).toBe(before)
     expect(storyStateCalls).toBe(0)
+    expect(injectedCallOrder.filter(item => item === 'story_state')).toEqual([])
+    expect(injectedCallOrder[0]).toBe('draft')
+    expect(injectedCallOrder.indexOf('quality_review')).toBeGreaterThan(0)
+    expect(injectedCallOrder.indexOf('humanize')).toBeGreaterThan(injectedCallOrder.indexOf('quality_review'))
     expect(memoryCalls).toBe(0)
   })
   test('stores complete prose when the structured quality review is unavailable', async () => {
