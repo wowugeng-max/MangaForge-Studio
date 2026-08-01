@@ -4,6 +4,7 @@ import { describe, expect, test } from 'bun:test'
 
 const readServiceLeaf = (name: string) => readFileSync(join(import.meta.dir, '../novel-writing-service/service', name), 'utf8')
 const readQualityLeaf = (name: string) => readFileSync(join(import.meta.dir, '../novel-writing-service/quality', name), 'utf8')
+const readNovelWritingLeaf = (name: string) => readFileSync(join(import.meta.dir, '../novel-writing', name), 'utf8')
 const readProseQualityReviewRecordSource = () => readFileSync(join(import.meta.dir, '../novel-writing/prose-quality-review-record.ts'), 'utf8')
 
 describe('novel writing service quality contract wiring', () => {
@@ -11,12 +12,14 @@ describe('novel writing service quality contract wiring', () => {
     const source = readServiceLeaf('generate-chapter-quality-prestore-finalize.ts')
     const reviewRecordSource = readProseQualityReviewRecordSource()
     const finalReviewContextStart = source.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage')
-    const qualityReviewStorageBlock = source.slice(
-      finalReviewContextStart,
-      source.indexOf('\n  return {', finalReviewContextStart),
-    )
+    const qualityReviewStorageEnd = source.indexOf('\n  return {', finalReviewContextStart)
+    if (finalReviewContextStart < 0 || qualityReviewStorageEnd <= finalReviewContextStart) {
+      throw new Error('Unable to locate prose quality review storage source block')
+    }
+    const qualityReviewStorageBlock = source.slice(finalReviewContextStart, qualityReviewStorageEnd)
 
     expect(finalReviewContextStart).toBeGreaterThanOrEqual(0)
+    expect(qualityReviewStorageEnd).toBeGreaterThan(finalReviewContextStart)
     expect(qualityReviewStorageBlock).toContain('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')
     expect(qualityReviewStorageBlock).toContain('contextPackage: finalReviewContextPackage')
     expect(reviewRecordSource).toContain('context_package: input.contextPackage')
@@ -60,11 +63,28 @@ describe('novel writing service quality contract wiring', () => {
   test('blocks hard chapter launch gate before drafting prose', () => {
     const source = readServiceLeaf('generate-chapter-context-scene-cards.ts')
     const orchestratorSource = readServiceLeaf('generate-chapter-for-group-methods.ts')
+    const contextSource = readQualityLeaf('core-contract-radar.ts')
+    const blockerSource = readNovelWritingLeaf('prose-quality-contracts.ts')
+    const decisionSource = readNovelWritingLeaf('prose-generation-contract.ts')
+    const entrySource = readQualityLeaf('prose-quality-entry.ts')
     const firstGateStart = source.indexOf('await enforcePreparedGate(false)')
     const sceneCardsStart = source.indexOf("await onStage('scene_cards'", firstGateStart)
     const finalGateStart = source.indexOf('await enforcePreparedGate(true)', sceneCardsStart)
     const contextCallStart = orchestratorSource.indexOf('const contextSceneResult = await runGenerateChapterContextAndSceneCards')
     const draftCallStart = orchestratorSource.indexOf('const draftResultBundle = await runGenerateChapterDraftProse', contextCallStart)
+    const contextStart = contextSource.indexOf('export function chapterLaunchGateFromContext')
+    const contextEnd = contextSource.indexOf('\nexport function normalizeCoreContractRadar', contextStart)
+    const contextBlock = contextSource.slice(contextStart, contextEnd)
+    const blockerStart = blockerSource.indexOf('export function getChapterLaunchGateBlocker')
+    const blockerEnd = blockerSource.indexOf('\nexport function selectUsableRevisionText', blockerStart)
+    const blockerBlock = blockerSource.slice(blockerStart, blockerEnd)
+    const decisionStart = decisionSource.indexOf('export function evaluateProsePreDraftGate')
+    const decisionLaunchStart = decisionSource.indexOf('const launchBlocker = getChapterLaunchGateBlocker', decisionStart)
+    const decisionLaunchEnd = decisionSource.indexOf('const directorReadiness =', decisionLaunchStart)
+    const decisionBlock = decisionSource.slice(decisionLaunchStart, decisionLaunchEnd)
+    const entryGateStart = entrySource.indexOf('const gateDecision = evaluateProsePreDraftGate')
+    const entryGateEnd = entrySource.indexOf('const toxicDebtGate =', entryGateStart)
+    const entryGateBlock = entrySource.slice(entryGateStart, entryGateEnd)
 
     expect(source).toContain('await preparedGeneration.runAfterGate(async () => undefined, requireSceneCards)')
     expect(firstGateStart).toBeGreaterThanOrEqual(0)
@@ -72,6 +92,28 @@ describe('novel writing service quality contract wiring', () => {
     expect(finalGateStart).toBeGreaterThan(sceneCardsStart)
     expect(contextCallStart).toBeGreaterThanOrEqual(0)
     expect(draftCallStart).toBeGreaterThan(contextCallStart)
+    expect(contextStart).toBeGreaterThanOrEqual(0)
+    expect(contextEnd).toBeGreaterThan(contextStart)
+    expect(contextBlock).toContain('target.chapter_launch_gate')
+    expect(contextBlock).toContain('brief.chapter_launch_gate')
+    expect(blockerStart).toBeGreaterThanOrEqual(0)
+    expect(blockerEnd).toBeGreaterThan(blockerStart)
+    expect(blockerBlock).toContain('if (blockedChecks.length === 0) return null')
+    expect(blockerBlock).toContain("code: 'PROSE_LAUNCH_GATE_BLOCKED'")
+    expect(decisionStart).toBeGreaterThanOrEqual(0)
+    expect(decisionLaunchStart).toBeGreaterThan(decisionStart)
+    expect(decisionLaunchEnd).toBeGreaterThan(decisionLaunchStart)
+    expect(decisionBlock).toContain('const launchBlocker = getChapterLaunchGateBlocker(launchGate')
+    expect(decisionBlock).toContain('if (launchBlocker)')
+    expect(decisionBlock).toContain('passed: false')
+    expect(decisionBlock).toContain("code: 'PROSE_LAUNCH_GATE_BLOCKED'")
+    expect(decisionBlock).toContain('details: launchBlocker')
+    expect(entryGateStart).toBeGreaterThanOrEqual(0)
+    expect(entryGateEnd).toBeGreaterThan(entryGateStart)
+    expect(entryGateBlock).toContain('if (!gateDecision.passed)')
+    expect(entryGateBlock).toContain('throw Object.assign(')
+    expect(entryGateBlock).toContain('code: gateDecision.code')
+    expect(entryGateBlock).toContain('gateDecision,')
   })
 
   test('prose revision parser falls back to plain prose and records diagnostics', () => {
