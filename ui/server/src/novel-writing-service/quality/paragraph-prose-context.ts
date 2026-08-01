@@ -198,6 +198,16 @@ function compactRequiredProseValue(value: any, depth = 0): any {
 
 export function projectSceneCardForProseCorePrompt(card: any) {
   if (!card || typeof card !== 'object') return {}
+  const action = clipRequiredProseText(
+    card.action || card.protagonist_action || card.protagonistAction,
+  )
+  const turn = clipRequiredProseText(
+    card.turn || card.turning_point || card.turningPoint,
+  )
+  const payoff = clipRequiredProseText(
+    card.payoff || card.reader_payoff || card.readerPayoff,
+  )
+  const stateDelta = clipRequiredProseText(card.state_delta || card.stateDelta)
   const goal = clipRequiredProseText(firstRequiredProseText(
     card.goal,
     card.scene_goal,
@@ -243,12 +253,19 @@ export function projectSceneCardForProseCorePrompt(card: any) {
     title: clipRequiredProseText(card.title, 80),
     goal,
     conflict,
+    action,
+    turn,
+    payoff,
+    state_delta: stateDelta,
     characters: characters.length ? characters : undefined,
     protagonist_agency_action: clipRequiredProseText(
       card.protagonist_agency_action || card.protagonistAgencyAction || card.agency_action || card.agencyAction,
     ),
     no_exit_reason: clipRequiredProseText(card.no_exit_reason || card.noExitReason),
-    expected_state_change: expectedStateChange || undefined,
+    expected_state_change: expectedStateChange
+      && !(stateDelta && (stateDelta.includes(expectedStateChange) || expectedStateChange.includes(stateDelta)))
+      ? expectedStateChange
+      : undefined,
     state_changes_expected: stateChanges.length ? stateChanges : undefined,
     transition_from_previous: clipRequiredProseText(
       card.transition_from_previous || card.transitionFromPrevious,
