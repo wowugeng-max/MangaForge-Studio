@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, rm } from 'fs/promises'
+import { EventEmitter } from 'node:events'
+import { mkdir, mkdtemp, rm, symlink } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { createMcpKey, updateMcpKey } from '../mcp/key-store'
@@ -7,7 +8,13 @@ import { McpError } from '../mcp/errors'
 import { createMcpRuntime } from '../mcp/runtime'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from '../mcp/server-store'
 import { withMcpWorkspaceMutation } from '../mcp/workspace-coordinator'
-import { createNovelProject, deleteNovelProject, getNovelProject, listNovelProjects } from '../novel'
+import {
+  createNovelProject,
+  deleteNovelProject,
+  getNovelProject,
+  listNovelProjects,
+  updateNovelProject,
+} from '../novel'
 import { ChapterSourceLeaseRegistry } from '../novel-writing-service/generation-source/chapter-source-lease'
 import { registerNovelMcpBindingRoutes } from './novel-mcp-binding-routes'
 import { registerNovelProjectControlRoutes } from './novel-project-control-routes'
@@ -40,14 +47,30 @@ function createRouteHarness() {
   return { app, handlers }
 }
 
-async function call(handler: any, req: any = {}) {
-  const res: any = {
+function createMockResponse() {
+  return Object.assign(new EventEmitter(), {
     statusCode: 200,
-    body: null,
+    body: null as any,
     status(code: number) { this.statusCode = code; return this },
-    json(body: any) { this.body = body; return this },
-  }
-  await handler({ params: {}, query: {}, body: {}, ...req }, res)
+    json(body: any) {
+      this.body = body
+      this.finished = true
+      this.writableEnded = true
+      this.emit('finish')
+      return this
+    },
+  })
+}
+
+async function call(handler: any, req: any = {}, providedRes?: any) {
+  const request: any = req && typeof req.on === 'function' ? req : Object.assign(new EventEmitter(), req)
+  request.params ??= {}
+  request.query ??= {}
+  request.body ??= {}
+  if (!Object.prototype.hasOwnProperty.call(request, 'complete')) request.complete = true
+  if (!Object.prototype.hasOwnProperty.call(request, 'readableEnded')) request.readableEnded = true
+  const res: any = providedRes || createMockResponse()
+  await handler(request, res)
   return res
 }
 
@@ -62,6 +85,7 @@ async function fixture(input: {
   authorization?: string
   cookie?: string
   customHeaders?: Record<string, string>
+  mcpValidationTimeoutMs?: number
 } = {}) {
   const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-binding-route-'))
   workspaces.push(workspace)
@@ -95,6 +119,7 @@ async function fixture(input: {
     getProject: getNovelProject,
     mcpRuntime: runtime as any,
     chapterSourceLeases,
+    mcpValidationTimeoutMs: input.mcpValidationTimeoutMs,
   })
   return { workspace, key, first, second, handlers, runtime, adapter, chapterSourceLeases }
 }
@@ -470,6 +495,503 @@ describe('explicit chapter generation source routes', () => {
     await expectViewReadBack(handlers, first.id, activated)
   })
 
+  test('releases the workspace coordinator while remote MCP validation is pending', async () => {
+    const { workspace, key, first, second, handlers, runtime, chapterSourceLeases } = await fixture()
+    let validationEntered!: () => void
+    let releaseValidation!: () => void
+    const entered = new Promise<void>(resolve => { validationEntered = resolve })
+    const mayFinish = new Promise<void>(resolve => { releaseValidation = resolve })
+    runtime.listAgents = async () => {
+      validationEntered()
+      await mayFinish
+      return [{ id: 'agent-1', name: '正文 Agent' }]
+    }
+
+    const saving = call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+      params: { id: String(first.id) },
+      body: { mcp: binding(key.id) },
+    })
+    await entered
+
+    let lease: Awaited<ReturnType<ChapterSourceLeaseRegistry['acquire']>> | undefined
+    let leaseAcquired = false
+    const acquiringLease = chapterSourceLeases.acquire(workspace, second.id, 'other-project-task')
+      .then(value => {
+        lease = value
+        leaseAcquired = true
+      })
+    await new Promise(resolve => setTimeout(resolve, 25))
+    const acquiredWhileRemoteWasPending = leaseAcquired
+    releaseValidation()
+    await Promise.all([saving, acquiringLease])
+    expect(acquiredWhileRemoteWasPending).toBe(true)
+    await lease?.release()
+  })
+
+  for (const scenario of [
+    {
+      name: 'request aborted',
+      expectedStatus: 499,
+      request: () => Object.assign(new EventEmitter(), {
+        params: {}, body: {}, query: {}, complete: false, readableEnded: false, aborted: false,
+      }),
+      trigger: (req: any) => { req.aborted = true; req.emit('aborted') },
+    },
+    {
+      name: 'abnormal request close',
+      expectedStatus: 499,
+      request: () => Object.assign(new EventEmitter(), {
+        params: {}, body: {}, query: {}, complete: false, readableEnded: false, aborted: false,
+      }),
+      trigger: (req: any) => req.emit('close'),
+    },
+    {
+      name: 'existing request signal',
+      expectedStatus: 499,
+      request: () => {
+        const controller = new AbortController()
+        return Object.assign(new EventEmitter(), {
+          params: {}, body: {}, query: {}, complete: true, readableEnded: true,
+          signal: controller.signal,
+          abortUpstream: () => controller.abort(),
+        })
+      },
+      trigger: (req: any) => req.abortUpstream(),
+    },
+    {
+      name: 'response close',
+      expectedStatus: 499,
+      request: () => Object.assign(new EventEmitter(), {
+        params: {}, body: {}, query: {}, complete: true, readableEnded: true,
+      }),
+      trigger: (_req: any, res: any) => res.emit('close'),
+    },
+    {
+      name: 'normal completed request close',
+      expectedStatus: 200,
+      request: () => Object.assign(new EventEmitter(), {
+        params: {}, body: {}, query: {}, complete: true, readableEnded: true,
+      }),
+      trigger: (req: any) => req.emit('close'),
+    },
+  ]) {
+    test(`handles ${scenario.name} during remote validation without a stale commit`, async () => {
+      const { workspace, key, first, handlers, runtime } = await fixture()
+      let validationEntered!: () => void
+      let releaseValidation!: () => void
+      const entered = new Promise<void>(resolve => { validationEntered = resolve })
+      const mayFinish = new Promise<void>(resolve => { releaseValidation = resolve })
+      let remoteSignal: AbortSignal | undefined
+      runtime.listAgents = async (_keyId: number, options: any) => {
+        remoteSignal = options?.signal
+        validationEntered()
+        await mayFinish
+        return [{ id: 'agent-1', name: '正文 Agent' }]
+      }
+      const req: any = scenario.request()
+      req.params = { id: String(first.id) }
+      req.body = { mcp: binding(key.id) }
+      const res = createMockResponse()
+      const saving = call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), req, res)
+      await entered
+
+      scenario.trigger(req, res)
+      const shouldCancel = scenario.expectedStatus === 499
+      expect(remoteSignal).toBeInstanceOf(AbortSignal)
+      expect(remoteSignal?.aborted).toBe(shouldCancel)
+      releaseValidation()
+      const response = await saving
+
+      expect(response.statusCode).toBe(scenario.expectedStatus)
+      const stored = await getNovelProject(workspace, first.id)
+      if (shouldCancel) {
+        expect(stored?.reference_config?.chapter_generation_source).toBeUndefined()
+      } else {
+        expect(stored?.reference_config?.chapter_generation_source?.mcp).toEqual(binding(key.id))
+      }
+    })
+  }
+
+  test('times out remote validation with a bounded signal and never commits afterward', async () => {
+    const { workspace, key, first, second, handlers, runtime, chapterSourceLeases } = await fixture({
+      mcpValidationTimeoutMs: 10,
+    })
+    let validationEntered!: () => void
+    let releaseValidation!: () => void
+    const entered = new Promise<void>(resolve => { validationEntered = resolve })
+    const mayFinish = new Promise<void>(resolve => { releaseValidation = resolve })
+    let remoteOptions: any
+    runtime.listAgents = async (_keyId: number, options: any) => {
+      remoteOptions = options
+      validationEntered()
+      await mayFinish
+      return [{ id: 'agent-1', name: '正文 Agent' }]
+    }
+
+    const saving = call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+      params: { id: String(first.id) }, body: { mcp: binding(key.id) },
+    })
+    await entered
+    const responseBeforeRelease = await Promise.race([
+      saving,
+      new Promise<null>(resolve => setTimeout(() => resolve(null), 100)),
+    ])
+    releaseValidation()
+    const response = responseBeforeRelease || await saving
+
+    expect(remoteOptions?.timeoutMs).toBeGreaterThan(0)
+    expect(remoteOptions?.timeoutMs).toBeLessThanOrEqual(10)
+    expect(remoteOptions?.signal).toBeInstanceOf(AbortSignal)
+    expect(remoteOptions?.signal.aborted).toBe(true)
+    expect(response).toMatchObject({ statusCode: 504, body: { error_code: 'MCP_CONNECT_TIMEOUT' } })
+    expect((await getNovelProject(workspace, first.id))?.reference_config?.chapter_generation_source).toBeUndefined()
+    const lease = await chapterSourceLeases.acquire(workspace, second.id, 'after-timeout')
+    await lease.release()
+  })
+
+  test('linearizes same-project source writes while remote validation is pending', async () => {
+    const { key, first, handlers, runtime } = await fixture()
+    let validationEntered!: () => void
+    let releaseValidation!: () => void
+    const entered = new Promise<void>(resolve => { validationEntered = resolve })
+    const mayFinish = new Promise<void>(resolve => { releaseValidation = resolve })
+    runtime.listAgents = async () => {
+      validationEntered()
+      await mayFinish
+      return [{ id: 'agent-1', name: '正文 Agent' }]
+    }
+
+    const mcpSaving = call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+      params: { id: String(first.id) }, body: { mcp: binding(key.id) },
+    })
+    await entered
+    let modelSettled = false
+    const modelSaving = call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+      params: { id: String(first.id) }, body: { model_id: 217 },
+    }).then(response => {
+      modelSettled = true
+      return response
+    })
+    await new Promise(resolve => setTimeout(resolve, 25))
+    const modelSettledDuringRemote = modelSettled
+    releaseValidation()
+    const [mcpSaved, modelSaved] = await Promise.all([mcpSaving, modelSaving])
+
+    expect(modelSettledDuringRemote).toBe(false)
+    expect(mcpSaved.statusCode).toBe(200)
+    expect(modelSaved.statusCode).toBe(200)
+    expect(modelSaved.body.source).toMatchObject({
+      model: { model_id: 217 },
+      mcp: binding(key.id),
+    })
+  })
+
+  test('keeps later same-project writes queued when an intermediate waiter is cancelled', async () => {
+    const { key, first, handlers, runtime } = await fixture()
+    let validationEntered!: () => void
+    let releaseValidation!: () => void
+    const entered = new Promise<void>(resolve => { validationEntered = resolve })
+    const mayFinish = new Promise<void>(resolve => { releaseValidation = resolve })
+    runtime.listAgents = async () => {
+      validationEntered()
+      await mayFinish
+      return [{ id: 'agent-1', name: '正文 Agent' }]
+    }
+    const mcpSaving = call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+      params: { id: String(first.id) }, body: { mcp: binding(key.id) },
+    })
+    await entered
+
+    const queuedController = new AbortController()
+    const cancelledWaiter = call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+      params: { id: String(first.id) },
+      body: { model_id: 217 },
+      signal: queuedController.signal,
+    })
+    queuedController.abort()
+    expect((await cancelledWaiter).statusCode).toBe(499)
+
+    let laterSettled = false
+    const laterWrite = call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+      params: { id: String(first.id) }, body: { model_id: 218 },
+    }).then(response => {
+      laterSettled = true
+      return response
+    })
+    await new Promise(resolve => setTimeout(resolve, 25))
+    const settledBeforeFirstOperationFinished = laterSettled
+    releaseValidation()
+    const [mcpSaved, modelSaved] = await Promise.all([mcpSaving, laterWrite])
+
+    expect(settledBeforeFirstOperationFinished).toBe(false)
+    expect(mcpSaved.statusCode).toBe(200)
+    expect(modelSaved.statusCode).toBe(200)
+    expect(modelSaved.body.source).toMatchObject({
+      model: { model_id: 218 },
+      mcp: binding(key.id),
+    })
+  })
+
+  test('returns a source conflict after bounded retries cannot reach a stable commit point', async () => {
+    const { workspace, key, first, handlers, runtime } = await fixture()
+    let remoteCalls = 0
+    runtime.listAgents = async () => {
+      remoteCalls += 1
+      const project = await getNovelProject(workspace, first.id)
+      if (!project) throw new Error('project missing during retry test')
+      await updateNovelProject(workspace, first.id, {
+        reference_config: {
+          ...project.reference_config,
+          chapter_generation_source: {
+            version: 'chapter_generation_source_v1',
+            active: 'model',
+            model: { model_id: 300 + remoteCalls },
+          },
+        },
+      })
+      return [{ id: 'agent-1', name: '正文 Agent' }]
+    }
+
+    const response = await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+      params: { id: String(first.id) }, body: { mcp: binding(key.id) },
+    })
+
+    expect(remoteCalls).toBe(3)
+    expect(response).toMatchObject({
+      statusCode: 409,
+      body: { error_code: 'GENERATION_SOURCE_CHANGED' },
+    })
+    expect((await getNovelProject(workspace, first.id))?.reference_config?.chapter_generation_source?.mcp)
+      .toBeUndefined()
+  })
+
+  test('retries when only retained inactive source configuration changes during remote validation', async () => {
+    const { workspace, key, first, handlers, runtime } = await fixture()
+    await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+      params: { id: String(first.id) }, body: { model_id: 217 },
+    })
+    await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+      params: { id: String(first.id) }, body: { mcp: binding(key.id) },
+    })
+
+    let remoteCalls = 0
+    runtime.listAgents = async () => {
+      remoteCalls += 1
+      if (remoteCalls === 1) {
+        const project = await getNovelProject(workspace, first.id)
+        if (!project) throw new Error('project missing during retained-source retry test')
+        const current = project.reference_config?.chapter_generation_source
+        await updateNovelProject(workspace, first.id, {
+          reference_config: {
+            ...project.reference_config,
+            chapter_generation_source: {
+              ...current,
+              mcp: binding(key.id, 'agent-2'),
+            },
+          },
+        })
+      }
+      return [
+        { id: 'agent-1', name: '正文 Agent' },
+        { id: 'agent-2', name: '正文 Agent 2' },
+      ]
+    }
+
+    const response = await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+      params: { id: String(first.id) }, body: { mcp: binding(key.id) },
+    })
+
+    expect(remoteCalls).toBe(2)
+    expect(response.statusCode).toBe(200)
+    expect(response.body.source).toMatchObject({
+      active: 'model',
+      model: { model_id: 217 },
+      mcp: binding(key.id),
+    })
+  })
+
+  test('fails closed when the pinned credential changes during remote validation', async () => {
+    const { workspace, key, first, handlers, runtime } = await fixture()
+    runtime.listAgents = async () => {
+      await updateMcpKey(workspace, key.id, { key: ROTATED_KEY })
+      return [{ id: 'agent-1', name: '正文 Agent' }]
+    }
+
+    const response = await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+      params: { id: String(first.id) }, body: { mcp: binding(key.id) },
+    })
+
+    expect(response).toMatchObject({
+      statusCode: 409,
+      body: { error_code: 'GENERATION_SOURCE_CHANGED' },
+    })
+    expect((await getNovelProject(workspace, first.id))?.reference_config?.chapter_generation_source)
+      .toBeUndefined()
+  })
+
+  test('rechecks tuple ownership after remote validation so the first remote arrival cannot overwrite a winner', async () => {
+    const { key, first, second, handlers, runtime } = await fixture()
+    let firstValidationEntered!: () => void
+    let releaseFirstValidation!: () => void
+    const entered = new Promise<void>(resolve => { firstValidationEntered = resolve })
+    const firstMayFinish = new Promise<void>(resolve => { releaseFirstValidation = resolve })
+    let remoteCalls = 0
+    runtime.listAgents = async () => {
+      remoteCalls += 1
+      if (remoteCalls === 1) {
+        firstValidationEntered()
+        await firstMayFinish
+      }
+      return [{ id: 'agent-1', name: '正文 Agent' }]
+    }
+    const route = routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`)
+    const firstSaving = call(route, {
+      params: { id: String(first.id) }, body: { mcp: binding(key.id) },
+    })
+    await entered
+    const secondSaving = call(route, {
+      params: { id: String(second.id) }, body: { mcp: binding(key.id) },
+    })
+    const secondResponse = await secondSaving
+    releaseFirstValidation()
+    const firstResponse = await firstSaving
+
+    expect(secondResponse.statusCode).toBe(200)
+    expect(firstResponse).toMatchObject({
+      statusCode: 409,
+      body: { error_code: 'MCP_BINDING_INVALID' },
+    })
+  })
+
+  test('fails a queued write if its workspace symlink is retargeted before the coordinator callback', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mangaforge-source-workspace-drift-'))
+    workspaces.push(root)
+    const workspaceA = join(root, 'workspace-a')
+    const workspaceB = join(root, 'workspace-b')
+    const activeAlias = join(root, 'active-workspace')
+    await Promise.all([mkdir(workspaceA), mkdir(workspaceB)])
+    await symlink(workspaceA, activeAlias, 'dir')
+    const projectA = await createNovelProject(workspaceA, { title: '工作区 A', reference_config: {} })
+    const projectB = await createNovelProject(workspaceB, { title: '工作区 B', reference_config: {} })
+    expect(projectB.id).toBe(projectA.id)
+
+    const { app, handlers } = createRouteHarness()
+    registerNovelMcpBindingRoutes(app, {
+      getWorkspace: () => activeAlias,
+      getProject: getNovelProject,
+      chapterSourceLeases: new ChapterSourceLeaseRegistry(),
+    })
+    let coordinatorHeld!: () => void
+    let releaseCoordinator!: () => void
+    const held = new Promise<void>(resolve => { coordinatorHeld = resolve })
+    const mayFinish = new Promise<void>(resolve => { releaseCoordinator = resolve })
+    const blocker = withMcpWorkspaceMutation(activeAlias, async () => {
+      coordinatorHeld()
+      await mayFinish
+    })
+    await held
+
+    const saving = call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+      params: { id: String(projectA.id) }, body: { model_id: 217 },
+    })
+    await Promise.resolve()
+    await rm(activeAlias)
+    await symlink(workspaceB, activeAlias, 'dir')
+    releaseCoordinator()
+    await blocker
+
+    const response = await saving
+    expect(response).toMatchObject({
+      statusCode: 409,
+      body: { error_code: 'GENERATION_SOURCE_CHANGED' },
+    })
+    expect((await getNovelProject(workspaceB, projectB.id))?.reference_config?.chapter_generation_source)
+      .toBeUndefined()
+  })
+
+  test('requires explicit source fields to be own data properties without invoking getters or Proxy traps', async () => {
+    const { workspace, key, first, handlers } = await fixture()
+    await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+      params: { id: String(first.id) }, body: { model_id: 217 },
+    })
+    const before = JSON.stringify((await getNovelProject(workspace, first.id))?.reference_config)
+    const fields = [
+      { field: 'active', route: `POST ${CHAPTER_SOURCE_BASE}/activate`, value: 'model' },
+      { field: 'model_id', route: `PUT ${CHAPTER_SOURCE_BASE}/model`, value: 218 },
+      { field: 'mcp', route: `PUT ${CHAPTER_SOURCE_BASE}/mcp`, value: binding(key.id) },
+    ]
+
+    for (const { field, route, value } of fields) {
+      let accessorReads = 0
+      const accessorBody = {}
+      Object.defineProperty(accessorBody, field, {
+        get() { accessorReads += 1; return value },
+      })
+      const inheritedBody = Object.create({ [field]: value })
+      let proxyReads = 0
+      const proxyBody = new Proxy({}, {
+        get() { proxyReads += 1; return value },
+      })
+      for (const body of [accessorBody, inheritedBody, proxyBody]) {
+        const response = await call(routeHandler(handlers, route), {
+          params: { id: String(first.id) }, body,
+        })
+        expect(response).toMatchObject({
+          statusCode: 400,
+          body: { error_code: 'MCP_BINDING_INVALID' },
+        })
+      }
+      expect(accessorReads).toBe(0)
+      expect(proxyReads).toBe(0)
+    }
+    expect(JSON.stringify((await getNovelProject(workspace, first.id))?.reference_config)).toBe(before)
+  })
+
+  test('rejects revoked Proxy bodies and MCP values as controlled binding errors', async () => {
+    const { key, first, handlers } = await fixture()
+    const revokedBody = Proxy.revocable({}, {})
+    revokedBody.revoke()
+    const revokedMcp = Proxy.revocable(binding(key.id), {})
+    revokedMcp.revoke()
+
+    const bodyResponse = await call(routeHandler(handlers, `POST ${CHAPTER_SOURCE_BASE}/activate`), {
+      params: { id: String(first.id) }, body: revokedBody.proxy,
+    })
+    const mcpResponse = await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+      params: { id: String(first.id) }, body: { mcp: revokedMcp.proxy },
+    })
+
+    expect(bodyResponse).toMatchObject({
+      statusCode: 400,
+      body: { error_code: 'MCP_BINDING_INVALID' },
+    })
+    expect(mcpResponse).toMatchObject({
+      statusCode: 400,
+      body: { error_code: 'MCP_BINDING_INVALID' },
+    })
+  })
+
+  test('maps infrastructure MCP failures to stable statuses without reflecting remote secrets', async () => {
+    const { key, first, handlers, runtime } = await fixture()
+    for (const [code, status] of [
+      ['MCP_STORE_IO_FAILED', 500],
+      ['MCP_RUNTIME_ERROR', 503],
+      ['MCP_CONNECTION_LOST', 503],
+      ['MCP_CONNECT_TIMEOUT', 504],
+      ['MCP_CANCELLED', 499],
+    ] as const) {
+      runtime.listAgents = async () => {
+        throw new McpError(code, `remote reflected ${FAKE_KEY} ${FAKE_HEADER}`)
+      }
+      const response = await call(routeHandler(handlers, `POST ${CHAPTER_SOURCE_BASE}/mcp/test`), {
+        params: { id: String(first.id) }, body: { mcp: binding(key.id) },
+      })
+      expect(response).toMatchObject({ statusCode: status, body: { error_code: code } })
+      expect(JSON.stringify(response.body)).not.toContain(FAKE_KEY)
+      expect(JSON.stringify(response.body)).not.toContain(FAKE_HEADER)
+    }
+  })
+
   test('maps malformed, conflict, and authentication failures without exposing secrets', async () => {
     const { key, first, second, handlers, runtime } = await fixture()
     const malformed = await call(routeHandler(handlers, `POST ${CHAPTER_SOURCE_BASE}/activate`), {
@@ -818,6 +1340,40 @@ describe('novel MCP prose-source binding routes', () => {
     const response = await saving
     expect(response.statusCode).toBe(404)
     expect(response.body.error).toBe('project not found')
+  })
+
+  test('does not write into a replacement project that reuses the deleted project id', async () => {
+    const { workspace, key, second, handlers, runtime } = await fixture()
+    let validationEntered!: () => void
+    let releaseValidation!: () => void
+    const entered = new Promise<void>(resolve => { validationEntered = resolve })
+    const mayFinish = new Promise<void>(resolve => { releaseValidation = resolve })
+    runtime.listAgents = async () => {
+      validationEntered()
+      await mayFinish
+      return [{ id: 'agent-1', name: '正文 Agent' }]
+    }
+
+    const saving = call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+      params: { id: String(second.id) },
+      body: { mcp: binding(key.id) },
+    })
+    await entered
+    expect(await deleteNovelProject(workspace, second.id)).toBe(true)
+    const replacement = await createNovelProject(workspace, {
+      title: '复用 ID 的替换项目',
+      created_at: second.created_at,
+      updated_at: second.updated_at,
+      reference_config: {},
+    })
+    expect(replacement.id).toBe(second.id)
+    releaseValidation()
+
+    const response = await saving
+    expect([404, 409]).toContain(response.statusCode)
+    const storedReplacement = await getNovelProject(workspace, replacement.id)
+    expect(storedReplacement?.title).toBe('复用 ID 的替换项目')
+    expect(storedReplacement?.reference_config?.chapter_generation_source).toBeUndefined()
   })
 
   test('lists and explicitly creates Agents for a selected key without changing the binding', async () => {

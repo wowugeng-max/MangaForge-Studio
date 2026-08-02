@@ -5,6 +5,7 @@ import { tmpdir } from 'os'
 import { createNovelProject } from '../../novel'
 import { createMcpKey } from '../../mcp/key-store'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from '../../mcp/server-store'
+import * as sourceConfig from './source-config'
 import {
   CHAPTER_GENERATION_SOURCE_VERSION,
   chapterGenerationSourceFingerprint,
@@ -328,6 +329,51 @@ describe('prose generation source config', () => {
       runtime: { listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }] } as any,
       listProjects: async () => [inaccessibleProject] as any,
     })).rejects.toBe(scanFailure)
+  })
+
+  test('separates local credential and ownership checks from remote Agent validation', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-validation-phases-'))
+    workspaces.push(workspace)
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const key = await createMcpKey(workspace, {
+      mcp_server_id: 'buda', key: 'sk_validation_phases', description: '账号',
+    })
+    const project = await createNovelProject(workspace, { title: '两阶段校验', reference_config: {} })
+    const candidate = {
+      server_id: 'buda', key_id: key.id, adapter_id: 'buda', agent_id: 'agent-1', model: '',
+    }
+    let projectScans = 0
+    const validateLocal = (sourceConfig as any).validateMcpProjectBindingLocally
+    const validateRemote = (sourceConfig as any).validateMcpProjectBindingAgent
+    expect(validateLocal).toBeFunction()
+    expect(validateRemote).toBeFunction()
+
+    const local = await validateLocal(workspace, project, candidate, {
+      listProjects: async () => {
+        projectScans += 1
+        return [project]
+      },
+    })
+    expect(projectScans).toBe(1)
+
+    let remoteCalls = 0
+    const validation = await validateRemote(local, {
+      runtime: {
+        listAgents: async () => {
+          remoteCalls += 1
+          return [{ id: 'agent-1', name: '正文 Agent' }]
+        },
+      },
+      timeoutMs: 1234,
+    })
+    expect(remoteCalls).toBe(1)
+    expect(projectScans).toBe(1)
+    expect(validation).toMatchObject({
+      binding: candidate,
+      server: { id: 'buda' },
+      key: { id: key.id },
+      agent: { id: 'agent-1' },
+    })
   })
 })
 

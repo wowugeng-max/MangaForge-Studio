@@ -302,9 +302,15 @@ export function toLegacyProseGenerationSource(state: ChapterGenerationSourceStat
   return { ...MODEL_PROSE_GENERATION_SOURCE }
 }
 
-type McpCredentialSnapshot = {
+export type McpCredentialSnapshot = {
   servers: McpServerRecord[]
   keys: McpKeyRecord[]
+}
+
+export type LocalMcpProjectBindingValidation = {
+  binding: McpProjectBinding
+  server: McpServerRecord
+  key: McpKeyRecord
 }
 
 export function validateMcpCredentialSelectionSnapshot(snapshot: McpCredentialSnapshot, input: {
@@ -334,18 +340,15 @@ export async function validateMcpCredentialSelection(activeWorkspace: string, in
   return validateMcpCredentialSelectionSnapshot({ servers, keys }, input)
 }
 
-export async function validateMcpProjectBinding(
+export async function validateMcpProjectBindingLocally(
   activeWorkspace: string,
   project: any,
   input: McpProjectBinding,
   options: {
-    runtime: Pick<McpRuntime, 'listAgents'>
     listProjects?: typeof listNovelProjects
     credentialSnapshot?: McpCredentialSnapshot
-    signal?: AbortSignal
-    timeoutMs?: number
-  },
-) {
+  } = {},
+): Promise<LocalMcpProjectBindingValidation> {
   const binding = normalizeMcpProjectBinding(input)
   const selectionInput = {
     serverId: binding.server_id,
@@ -355,12 +358,6 @@ export async function validateMcpProjectBinding(
   const { server, key } = options.credentialSnapshot
     ? validateMcpCredentialSelectionSnapshot(options.credentialSnapshot, selectionInput)
     : await validateMcpCredentialSelection(activeWorkspace, selectionInput)
-  const agents = await options.runtime.listAgents(binding.key_id, {
-    signal: options.signal,
-    get timeoutMs() { return options.timeoutMs },
-  })
-  const agent = agents.find(item => String(item.id) === binding.agent_id)
-  if (!agent) throw new McpError('MCP_BINDING_INVALID', `所选 Agent 不存在或当前账号不可见：${binding.agent_id}`)
   const projects = await (options.listProjects || listNovelProjects)(activeWorkspace)
   const conflict = projects.find(item => {
     if (Number(item.id) === Number(project?.id)) return false
@@ -384,5 +381,43 @@ export async function validateMcpProjectBinding(
       project_title: conflict.title,
     })
   }
-  return { binding, server, key, agent }
+  return { binding, server, key }
+}
+
+export async function validateMcpProjectBindingAgent(
+  local: LocalMcpProjectBindingValidation,
+  options: {
+    runtime: Pick<McpRuntime, 'listAgents'>
+    signal?: AbortSignal
+    timeoutMs?: number
+  },
+) {
+  const agents = await options.runtime.listAgents(local.binding.key_id, {
+    signal: options.signal,
+    timeoutMs: options.timeoutMs,
+  })
+  const agent = agents.find(item => String(item.id) === local.binding.agent_id)
+  if (!agent) {
+    throw new McpError(
+      'MCP_BINDING_INVALID',
+      `所选 Agent 不存在或当前账号不可见：${local.binding.agent_id}`,
+    )
+  }
+  return { ...local, agent }
+}
+
+export async function validateMcpProjectBinding(
+  activeWorkspace: string,
+  project: any,
+  input: McpProjectBinding,
+  options: {
+    runtime: Pick<McpRuntime, 'listAgents'>
+    listProjects?: typeof listNovelProjects
+    credentialSnapshot?: McpCredentialSnapshot
+    signal?: AbortSignal
+    timeoutMs?: number
+  },
+) {
+  const local = await validateMcpProjectBindingLocally(activeWorkspace, project, input, options)
+  return validateMcpProjectBindingAgent(local, options)
 }

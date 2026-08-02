@@ -12,14 +12,23 @@ type ReferenceConfigMutation<T> = {
   projectId: number
   operation: string
   signal?: AbortSignal
+  assertCurrentProject?: (current: NovelProjectRecord) => void
   mutate: (currentConfig: Record<string, any>) => { referenceConfig: Record<string, any>; result: T }
+}
+
+function throwIfMutationAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw signal.reason || new Error('project reference-config mutation aborted')
 }
 
 function mutateProjectReferenceConfigRow<T>(db: Database, options: ReferenceConfigMutation<T>) {
   const row = db.query('SELECT * FROM projects WHERE id = ? LIMIT 1').get(options.projectId) as any
   if (!row) return null
   const current = projectFromRow(row)
+  throwIfMutationAborted(options.signal)
+  options.assertCurrentProject?.(current)
+  throwIfMutationAborted(options.signal)
   const mutation = options.mutate({ ...(current.reference_config || {}) })
+  throwIfMutationAborted(options.signal)
   const next = {
     ...current,
     reference_config: mutation.referenceConfig,
@@ -78,7 +87,7 @@ export async function mutateNovelProjectReferenceConfig<T>(
   options: ReferenceConfigMutation<T>,
 ): Promise<{ project: NovelProjectRecord; result: T } | null> {
   return withNovelDbWrite(activeWorkspace, db => {
-    if (options.signal?.aborted) throw options.signal.reason || new Error('project reference-config mutation aborted')
+    throwIfMutationAborted(options.signal)
     return mutateProjectReferenceConfigRow(db, options)
   }, options.operation)
 }

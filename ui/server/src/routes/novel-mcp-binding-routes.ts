@@ -1,4 +1,5 @@
 import type { Express } from 'express'
+import { createHash } from 'node:crypto'
 import { types } from 'node:util'
 import { mutateNovelProjectReferenceConfig } from '../novel'
 import { isMcpError, McpError } from '../mcp/errors'
@@ -6,6 +7,7 @@ import type { McpRuntime } from '../mcp/runtime'
 import { createMcpSecretScrubber } from '../mcp/secret-scrubber'
 import type { McpKeyRecord, McpServerRecord } from '../mcp/types'
 import { withMcpWorkspaceMutation } from '../mcp/workspace-coordinator'
+import { canonicalFilesystemIdentity } from '../workspace-identity'
 import { ChapterSourceLeaseRegistry } from '../novel-writing-service/generation-source/chapter-source-lease'
 import {
   ChapterGenerationSourceError,
@@ -19,8 +21,10 @@ import {
   normalizeProseGenerationSource,
   resolveChapterGenerationSource,
   toLegacyProseGenerationSource,
+  type LocalMcpProjectBindingValidation,
   validateMcpCredentialSelection,
-  validateMcpProjectBinding,
+  validateMcpProjectBindingAgent,
+  validateMcpProjectBindingLocally,
 } from '../novel-writing-service/generation-source/source-config'
 
 type NovelMcpBindingRoutesContext = {
@@ -28,6 +32,18 @@ type NovelMcpBindingRoutesContext = {
   getProject: (workspace: string, id: number) => Promise<any>
   mcpRuntime?: McpRuntime
   chapterSourceLeases?: ChapterSourceLeaseRegistry
+  mcpValidationTimeoutMs?: number
+}
+
+const DEFAULT_MCP_VALIDATION_TIMEOUT_MS = 30_000
+const MAX_SOURCE_MUTATION_ATTEMPTS = 3
+const projectMutationTails = new Map<string, Promise<void>>()
+
+class RetryChapterSourceMutation extends Error {
+  constructor() {
+    super('chapter source changed during optimistic mutation')
+    this.name = 'RetryChapterSourceMutation'
+  }
 }
 
 const PUBLIC_AGENT_STRING_LIMITS = {
@@ -48,6 +64,227 @@ function ownDataValue(value: unknown, key: string) {
     return descriptor && 'value' in descriptor ? descriptor.value : undefined
   } catch {
     return undefined
+  }
+}
+
+function invalidExplicitBody() {
+  return new McpError('MCP_BINDING_INVALID', '请求体必须使用自有数据字段')
+}
+
+function explicitBodyDataValue(body: unknown, key: string) {
+  if (!body || typeof body !== 'object' || types.isProxy(body) || Array.isArray(body)) {
+    throw invalidExplicitBody()
+  }
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(body, key)
+    if (!descriptor || !('value' in descriptor)) throw invalidExplicitBody()
+    return descriptor.value
+  } catch (error) {
+    if (isMcpError(error)) throw error
+    throw invalidExplicitBody()
+  }
+}
+
+function explicitMcpBindingValue(body: unknown) {
+  const value = explicitBodyDataValue(body, 'mcp')
+  if (!value || typeof value !== 'object' || types.isProxy(value) || Array.isArray(value)) {
+    throw invalidExplicitBody()
+  }
+  const snapshot: Record<string, unknown> = {}
+  for (const field of ['server_id', 'key_id', 'adapter_id', 'agent_id', 'model']) {
+    snapshot[field] = explicitBodyDataValue(value, field)
+  }
+  return snapshot
+}
+
+function opaqueFingerprint(value: unknown) {
+  return `sha256:${createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex')}`
+}
+
+function completeChapterSourceFingerprint(source: ChapterGenerationSourceState) {
+  const normalized = normalizeChapterGenerationSource(source)
+  return opaqueFingerprint([
+    normalized.version,
+    normalized.active,
+    normalized.model.model_id ?? null,
+    normalized.mcp?.server_id ?? null,
+    normalized.mcp?.key_id ?? null,
+    normalized.mcp?.adapter_id ?? null,
+    normalized.mcp?.agent_id ?? null,
+    normalized.mcp?.model ?? null,
+  ])
+}
+
+function projectRowFingerprint(project: any) {
+  return opaqueFingerprint([
+    Number(project?.id || 0),
+    String(project?.created_at || ''),
+    String(project?.updated_at || ''),
+    String(project?.title || ''),
+    String(project?.genre || ''),
+    project?.sub_genres || [],
+    String(project?.synopsis || ''),
+    String(project?.length_target || ''),
+    String(project?.target_audience || ''),
+    project?.style_tags || [],
+    project?.commercial_tags || [],
+    String(project?.status || ''),
+    project?.reference_config || {},
+  ])
+}
+
+function stableProjectIdentityFingerprint(project: any) {
+  const referenceConfig = { ...(project?.reference_config || {}) }
+  delete referenceConfig.prose_generation_source
+  delete referenceConfig.chapter_generation_source
+  return opaqueFingerprint([
+    Number(project?.id || 0),
+    String(project?.created_at || ''),
+    String(project?.title || ''),
+    String(project?.genre || ''),
+    project?.sub_genres || [],
+    String(project?.synopsis || ''),
+    String(project?.length_target || ''),
+    String(project?.target_audience || ''),
+    project?.style_tags || [],
+    project?.commercial_tags || [],
+    String(project?.status || ''),
+    referenceConfig,
+  ])
+}
+
+function credentialSelectionFingerprint(selection: LocalMcpProjectBindingValidation) {
+  const { server, key } = selection
+  return opaqueFingerprint([
+    server.id,
+    server.display_name,
+    server.transport,
+    server.url,
+    server.auth_type,
+    server.adapter_id,
+    server.is_active,
+    server.startup_timeout_ms,
+    server.tool_timeout_ms,
+    server.generation_timeout_ms,
+    server.poll_initial_ms,
+    server.poll_max_ms,
+    server.enabled_tools,
+    Object.entries(server.custom_headers || {}).sort(([left], [right]) => left.localeCompare(right)),
+    key.id,
+    key.mcp_server_id,
+    key.key,
+    key.description,
+    key.is_active,
+    key.priority,
+    key.success_count,
+    key.failure_count,
+    key.last_checked ?? null,
+    key.last_used ?? null,
+    key.avg_latency ?? null,
+  ])
+}
+
+function generationSourceChanged(reason: 'workspace_identity_changed' | 'project_changed' | 'source_changed' | 'credential_changed') {
+  return new ChapterGenerationSourceError(
+    'GENERATION_SOURCE_CHANGED',
+    '章节来源状态已变化，请重试',
+    { reason },
+  )
+}
+
+type RequestLifecycle = ReturnType<typeof createRequestLifecycle>
+
+function createRequestLifecycle(req: any, res: any) {
+  const controller = new AbortController()
+  let responseFinished = false
+  const cancel = () => {
+    if (!controller.signal.aborted) {
+      controller.abort(new McpError('MCP_CANCELLED', 'MCP 请求已取消'))
+    }
+  }
+  const onRequestAborted = () => cancel()
+  const onRequestClose = () => {
+    if (req.aborted === true || (req.complete === false && req.readableEnded !== true)) cancel()
+  }
+  const onResponseFinish = () => { responseFinished = true }
+  const onResponseClose = () => {
+    if (!responseFinished && res.finished !== true && res.writableEnded !== true) cancel()
+  }
+  const upstreamSignal = req.signal as AbortSignal | undefined
+  const onUpstreamAbort = () => cancel()
+  req.on?.('aborted', onRequestAborted)
+  req.on?.('close', onRequestClose)
+  res.on?.('finish', onResponseFinish)
+  res.on?.('close', onResponseClose)
+  upstreamSignal?.addEventListener?.('abort', onUpstreamAbort, { once: true })
+  if (upstreamSignal?.aborted || req.aborted === true) cancel()
+
+  const throwIfAborted = () => {
+    if (controller.signal.aborted) throw controller.signal.reason
+  }
+  const waitFor = async <T>(operation: Promise<T>) => {
+    throwIfAborted()
+    let onAbort: (() => void) | undefined
+    const aborted = new Promise<never>((_, reject) => {
+      onAbort = () => reject(controller.signal.reason)
+      controller.signal.addEventListener('abort', onAbort, { once: true })
+    })
+    try {
+      return await Promise.race([operation, aborted])
+    } finally {
+      if (onAbort) controller.signal.removeEventListener('abort', onAbort)
+    }
+  }
+  const runRemote = async <T>(timeoutMs: number, operation: (signal: AbortSignal) => Promise<T>) => {
+    throwIfAborted()
+    const remoteController = new AbortController()
+    const relayRequestAbort = () => remoteController.abort(controller.signal.reason)
+    controller.signal.addEventListener('abort', relayRequestAbort, { once: true })
+    const timer = setTimeout(() => {
+      remoteController.abort(new McpError('MCP_CONNECT_TIMEOUT', 'MCP 连接校验超时'))
+    }, timeoutMs)
+    let rejectAbort: (() => void) | undefined
+    const aborted = new Promise<never>((_, reject) => {
+      rejectAbort = () => reject(remoteController.signal.reason)
+      remoteController.signal.addEventListener('abort', rejectAbort, { once: true })
+    })
+    try {
+      return await Promise.race([operation(remoteController.signal), aborted])
+    } finally {
+      clearTimeout(timer)
+      controller.signal.removeEventListener('abort', relayRequestAbort)
+      if (rejectAbort) remoteController.signal.removeEventListener('abort', rejectAbort)
+    }
+  }
+  const cleanup = () => {
+    req.off?.('aborted', onRequestAborted)
+    req.off?.('close', onRequestClose)
+    res.off?.('finish', onResponseFinish)
+    res.off?.('close', onResponseClose)
+    upstreamSignal?.removeEventListener?.('abort', onUpstreamAbort)
+  }
+  return { signal: controller.signal, throwIfAborted, waitFor, runRemote, cleanup }
+}
+
+async function withProjectMutationQueue<T>(
+  key: string,
+  lifecycle: RequestLifecycle,
+  operation: () => Promise<T>,
+) {
+  const previous = projectMutationTails.get(key) || Promise.resolve()
+  let releaseOperation!: () => void
+  const operationFinished = new Promise<void>(resolve => { releaseOperation = resolve })
+  const current = previous.catch(() => {}).then(() => operationFinished)
+  projectMutationTails.set(key, current)
+  void current.then(() => {
+    if (projectMutationTails.get(key) === current) projectMutationTails.delete(key)
+  })
+  try {
+    await lifecycle.waitFor(previous)
+    lifecycle.throwIfAborted()
+    return await operation()
+  } finally {
+    releaseOperation()
   }
 }
 
@@ -105,32 +342,28 @@ function publicAgentList(agents: unknown, projectAgent: ReturnType<typeof public
   return projected
 }
 
-async function validatePinnedMcpProjectBinding(
+async function validatePinnedMcpProjectBindingAgent(
   ctx: NovelMcpBindingRoutesContext,
   activeWorkspace: string,
-  project: any,
-  binding: Parameters<typeof validateMcpProjectBinding>[2],
-  signal?: AbortSignal,
+  local: LocalMcpProjectBindingValidation,
+  lifecycle: RequestLifecycle,
+  timeoutMs: number,
 ) {
   const mcpRuntime = ctx.mcpRuntime
   if (!mcpRuntime) {
     throw new McpError('MCP_CAPABILITY_MISSING', '服务端未配置 MCP Runtime')
   }
-  const selection = await validateMcpCredentialSelection(activeWorkspace, {
-    serverId: binding.server_id,
-    keyId: binding.key_id,
-    adapterId: binding.adapter_id,
-  })
-  return validateMcpProjectBinding(activeWorkspace, project, binding, {
-    credentialSnapshot: { servers: [selection.server], keys: [selection.key] },
+  return lifecycle.runRemote(timeoutMs, signal => validateMcpProjectBindingAgent(local, {
     runtime: {
       listAgents: (keyId, options) => mcpRuntime.listAgents(keyId, options, {
-        ...selection,
+        server: local.server,
+        key: local.key,
         activeWorkspace,
       }),
     },
     signal,
-  })
+    timeoutMs,
+  }))
 }
 
 function publicMcpErrorMessage(error: McpError) {
@@ -160,7 +393,11 @@ function bindingError(error: unknown) {
       : error.code === 'MCP_AGENT_BUSY' ? 409
       : error.code === 'MCP_AUTH_FAILED' ? 401
         : error.code === 'MCP_CAPABILITY_MISSING' ? 422
-          : 400
+          : error.code === 'MCP_CANCELLED' ? 499
+            : error.code === 'MCP_CONNECT_TIMEOUT' ? 504
+              : error.code === 'MCP_RUNTIME_ERROR' || error.code === 'MCP_CONNECTION_LOST' ? 503
+                : error.code === 'MCP_STORE_IO_FAILED' ? 500
+                  : 400
     const message = publicMcpErrorMessage(error)
     return { status, body: { error: message, detail: message, error_code: error.code } }
   }
@@ -183,10 +420,15 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
   const legacyBase = '/api/novel/projects/:id/prose-generation-source'
   const chapterBase = '/api/novel/projects/:id/chapter-generation-source'
   const chapterSourceLeases = ctx.chapterSourceLeases || new ChapterSourceLeaseRegistry()
-  const safely = (handler: (req: any, res: any) => Promise<any>) => async (req: any, res: any) => {
-    try { await handler(req, res) } catch (error) {
+  const safely = (handler: (req: any, res: any, lifecycle: RequestLifecycle) => Promise<any>) => async (req: any, res: any) => {
+    const lifecycle = createRequestLifecycle(req, res)
+    try {
+      await handler(req, res, lifecycle)
+    } catch (error) {
       const failure = bindingError(error)
       res.status(failure.status).json(failure.body)
+    } finally {
+      lifecycle.cleanup()
     }
   }
   const projectIdFromRequest = (req: any) => {
@@ -205,7 +447,7 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
     }
     return { activeWorkspace, project }
   }
-  const publicValidation = (validation: Awaited<ReturnType<typeof validatePinnedMcpProjectBinding>>) => ({
+  const publicValidation = (validation: Awaited<ReturnType<typeof validatePinnedMcpProjectBindingAgent>>) => ({
     server_id: validation.server.id,
     key_id: validation.key.id,
     agent: publicAgentProjector(validation)(validation.agent),
@@ -232,64 +474,218 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
     },
   })
 
-  type MutationValidation = Awaited<ReturnType<typeof validatePinnedMcpProjectBinding>> | null
+  const captureWorkspace = () => {
+    const lexical = ctx.getWorkspace()
+    return { lexical, canonical: canonicalFilesystemIdentity(lexical) }
+  }
+  const withCheckedWorkspace = async <T>(
+    workspace: ReturnType<typeof captureWorkspace>,
+    lifecycle: RequestLifecycle,
+    operation: (activeWorkspace: string) => Promise<T>,
+  ) => {
+    lifecycle.throwIfAborted()
+    if (canonicalFilesystemIdentity(workspace.lexical) !== workspace.canonical) {
+      throw generationSourceChanged('workspace_identity_changed')
+    }
+    return withMcpWorkspaceMutation(workspace.canonical, async () => {
+      lifecycle.throwIfAborted()
+      if (canonicalFilesystemIdentity(workspace.lexical) !== workspace.canonical) {
+        throw generationSourceChanged('workspace_identity_changed')
+      }
+      return operation(workspace.canonical)
+    })
+  }
+  const configuredValidationTimeout = Number(ctx.mcpValidationTimeoutMs ?? DEFAULT_MCP_VALIDATION_TIMEOUT_MS)
+  const validationTimeoutMs = Number.isFinite(configuredValidationTimeout) && configuredValidationTimeout > 0
+    ? Math.min(configuredValidationTimeout, DEFAULT_MCP_VALIDATION_TIMEOUT_MS)
+    : DEFAULT_MCP_VALIDATION_TIMEOUT_MS
+  const remainingValidationBudget = (deadline: number) => {
+    const remaining = Math.ceil(deadline - Date.now())
+    if (remaining <= 0) throw new McpError('MCP_CONNECT_TIMEOUT', 'MCP 连接校验超时')
+    return remaining
+  }
+  const assertStableProjectIdentity = (project: any, snapshot: {
+    projectId: number
+    stableProjectFingerprint: string
+  }) => {
+    if (Number(project?.id) !== snapshot.projectId
+      || !String(project?.created_at || '')
+      || stableProjectIdentityFingerprint(project) !== snapshot.stableProjectFingerprint) {
+      throw generationSourceChanged('project_changed')
+    }
+  }
+  const assertExactProjectSnapshot = (project: any, snapshot: {
+    projectId: number
+    stableProjectFingerprint: string
+    projectFingerprint: string
+    sourceFingerprint: string
+  }) => {
+    assertStableProjectIdentity(project, snapshot)
+    if (completeChapterSourceFingerprint(resolveChapterGenerationSource(project)) !== snapshot.sourceFingerprint) {
+      throw new RetryChapterSourceMutation()
+    }
+    if (projectRowFingerprint(project) !== snapshot.projectFingerprint) {
+      throw generationSourceChanged('project_changed')
+    }
+  }
+  const assertChapterSourceLeaseAvailable = (activeWorkspace: string, projectId: number) => {
+    if (chapterSourceLeases.isActive(activeWorkspace, projectId)) {
+      throw new ChapterGenerationSourceError(
+        'GENERATION_SOURCE_BUSY',
+        '当前章节任务正在运行，结束后可切换来源',
+        { project_id: projectId },
+      )
+    }
+  }
+
+  type MutationValidation = Awaited<ReturnType<typeof validatePinnedMcpProjectBindingAgent>> | null
   const mutateChapterSource = async (input: {
     req: any
+    lifecycle: RequestLifecycle
     operation: string
     mutate: (current: ChapterGenerationSourceState) => ChapterGenerationSourceState
-    beforePersist?: (input: {
+    bindingForValidation?: (input: {
+      current: ChapterGenerationSourceState
+      source: ChapterGenerationSourceState
+    }) => McpProjectBinding | null
+    assertLocal?: (input: {
       activeWorkspace: string
       project: any
       current: ChapterGenerationSourceState
       source: ChapterGenerationSourceState
-    }) => Promise<MutationValidation>
+    }) => Promise<void>
   }) => {
-    const activeWorkspace = ctx.getWorkspace()
+    const workspace = captureWorkspace()
     const projectId = projectIdFromRequest(input.req)
-    return withMcpWorkspaceMutation(activeWorkspace, async () => {
-      const project = await ctx.getProject(activeWorkspace, projectId)
-      if (!project) return null
-      if (chapterSourceLeases.isActive(activeWorkspace, project.id)) {
-        throw new ChapterGenerationSourceError(
-          'GENERATION_SOURCE_BUSY',
-          '当前章节任务正在运行，结束后可切换来源',
-          { project_id: project.id },
-        )
+    const validationDeadline = Date.now() + validationTimeoutMs
+    return withProjectMutationQueue(
+      `${workspace.canonical}\u0000${projectId}`,
+      input.lifecycle,
+      async () => {
+        for (let attempt = 1; attempt <= MAX_SOURCE_MUTATION_ATTEMPTS; attempt += 1) {
+          try {
+            const phaseOne = await withCheckedWorkspace(workspace, input.lifecycle, async activeWorkspace => {
+              const project = await ctx.getProject(activeWorkspace, projectId)
+              if (!project) return null
+              if (Number(project.id) !== projectId || !String(project.created_at || '')) {
+                throw generationSourceChanged('project_changed')
+              }
+              assertChapterSourceLeaseAvailable(activeWorkspace, project.id)
+              const current = resolveChapterGenerationSource(project)
+              const source = normalizeChapterGenerationSource(input.mutate(current))
+              await input.assertLocal?.({ activeWorkspace, project, current, source })
+              const binding = input.bindingForValidation?.({ current, source }) || null
+              if (binding && !ctx.mcpRuntime) {
+                throw new McpError('MCP_CAPABILITY_MISSING', '服务端未配置 MCP Runtime')
+              }
+              const localValidation = binding
+                ? await validateMcpProjectBindingLocally(activeWorkspace, project, binding)
+                : null
+              return {
+                activeWorkspace,
+                projectId,
+                stableProjectFingerprint: stableProjectIdentityFingerprint(project),
+                projectFingerprint: projectRowFingerprint(project),
+                sourceFingerprint: completeChapterSourceFingerprint(current),
+                source,
+                localValidation,
+                credentialFingerprint: localValidation ? credentialSelectionFingerprint(localValidation) : null,
+              }
+            })
+            if (!phaseOne) return null
+            input.lifecycle.throwIfAborted()
+            const validation: MutationValidation = phaseOne.localValidation
+              ? await validatePinnedMcpProjectBindingAgent(
+                  ctx,
+                  phaseOne.activeWorkspace,
+                  phaseOne.localValidation,
+                  input.lifecycle,
+                  remainingValidationBudget(validationDeadline),
+                )
+              : null
+            input.lifecycle.throwIfAborted()
+
+            return await withCheckedWorkspace(workspace, input.lifecycle, async activeWorkspace => {
+              const project = await ctx.getProject(activeWorkspace, projectId)
+              if (!project) return null
+              assertStableProjectIdentity(project, phaseOne)
+              assertChapterSourceLeaseAvailable(activeWorkspace, project.id)
+              const current = resolveChapterGenerationSource(project)
+              await input.assertLocal?.({ activeWorkspace, project, current, source: phaseOne.source })
+              const binding = phaseOne.localValidation?.binding || null
+              const localValidation = binding
+                ? await validateMcpProjectBindingLocally(activeWorkspace, project, binding)
+                : null
+              if ((localValidation ? credentialSelectionFingerprint(localValidation) : null)
+                !== phaseOne.credentialFingerprint) {
+                throw generationSourceChanged('credential_changed')
+              }
+              assertExactProjectSnapshot(project, phaseOne)
+              input.lifecycle.throwIfAborted()
+              const mutation = await mutateNovelProjectReferenceConfig(activeWorkspace, {
+                projectId: project.id,
+                operation: input.operation,
+                signal: input.lifecycle.signal,
+                assertCurrentProject: currentProject => {
+                  input.lifecycle.throwIfAborted()
+                  assertExactProjectSnapshot(currentProject, phaseOne)
+                  assertChapterSourceLeaseAvailable(activeWorkspace, currentProject.id)
+                },
+                mutate: referenceConfig => ({
+                  referenceConfig: { ...referenceConfig, chapter_generation_source: phaseOne.source },
+                  result: phaseOne.source,
+                }),
+              })
+              if (!mutation) return null
+              return {
+                activeWorkspace,
+                project: mutation.project,
+                source: mutation.result,
+                validation,
+              }
+            })
+          } catch (error) {
+            if (!(error instanceof RetryChapterSourceMutation)) throw error
+            if (attempt === MAX_SOURCE_MUTATION_ATTEMPTS) {
+              throw generationSourceChanged('source_changed')
+            }
+          }
+        }
+        throw generationSourceChanged('source_changed')
       }
-      const current = resolveChapterGenerationSource(project)
-      const source = normalizeChapterGenerationSource(input.mutate(current))
-      const validation = await input.beforePersist?.({ activeWorkspace, project, current, source }) || null
-      const mutation = await mutateNovelProjectReferenceConfig(activeWorkspace, {
-        projectId: project.id,
-        operation: input.operation,
-        signal: input.req.signal,
-        mutate: referenceConfig => ({
-          referenceConfig: { ...referenceConfig, chapter_generation_source: source },
-          result: source,
-        }),
-      })
-      if (!mutation) return null
-      return {
-        activeWorkspace,
-        project: mutation.project,
-        source: mutation.result,
-        validation,
-      }
-    })
+    )
   }
 
-  const validateBinding = async (input: {
-    activeWorkspace: string
-    project: any
-    binding: McpProjectBinding
-    signal?: AbortSignal
-  }) => validatePinnedMcpProjectBinding(
-    ctx,
-    input.activeWorkspace,
-    input.project,
-    input.binding,
-    input.signal,
-  )
+  const validateBindingReadOnly = async (input: {
+    req: any
+    lifecycle: RequestLifecycle
+    bindingForProject: (project: any) => McpProjectBinding
+  }) => {
+    const workspace = captureWorkspace()
+    const projectId = projectIdFromRequest(input.req)
+    const validationDeadline = Date.now() + validationTimeoutMs
+    const local = await withCheckedWorkspace(workspace, input.lifecycle, async activeWorkspace => {
+      const project = await ctx.getProject(activeWorkspace, projectId)
+      if (!project) return null
+      const binding = input.bindingForProject(project)
+      if (!ctx.mcpRuntime) {
+        throw new McpError('MCP_CAPABILITY_MISSING', '服务端未配置 MCP Runtime')
+      }
+      const validation = await validateMcpProjectBindingLocally(activeWorkspace, project, binding)
+      return { activeWorkspace, project, validation }
+    })
+    if (!local) return null
+    input.lifecycle.throwIfAborted()
+    const validation = await validatePinnedMcpProjectBindingAgent(
+      ctx,
+      local.activeWorkspace,
+      local.validation,
+      input.lifecycle,
+      remainingValidationBudget(validationDeadline),
+    )
+    input.lifecycle.throwIfAborted()
+    return { ...local, validation }
+  }
 
   const assertLegacyAgentLeasesAvailable = async (
     activeWorkspace: string,
@@ -325,12 +721,13 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
     res.json(chapterSourceView(resolved.activeWorkspace, resolved.project, source))
   }))
 
-  app.post(`${chapterBase}/activate`, safely(async (req, res) => {
+  app.post(`${chapterBase}/activate`, safely(async (req, res, lifecycle) => {
+    const target = explicitBodyDataValue(req.body, 'active')
     const result = await mutateChapterSource({
       req,
+      lifecycle,
       operation: 'activate-chapter-generation-source',
       mutate: current => {
-        const target = req.body?.active
         if (target !== 'model' && target !== 'mcp') {
           throw new McpError('MCP_BINDING_INVALID', 'active 必须是 model 或 mcp')
         }
@@ -339,22 +736,19 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
         }
         return { ...current, active: target }
       },
-      beforePersist: async ({ activeWorkspace, project, source }) => (
-        source.active === 'mcp'
-          ? validateBinding({ activeWorkspace, project, binding: source.mcp!, signal: req.signal })
-          : null
-      ),
+      bindingForValidation: ({ source }) => source.active === 'mcp' ? source.mcp! : null,
     })
     if (!result) return res.status(404).json({ error: 'project not found' })
     res.json(chapterSourceView(result.activeWorkspace, result.project, result.source))
   }))
 
-  app.put(`${chapterBase}/model`, safely(async (req, res) => {
+  app.put(`${chapterBase}/model`, safely(async (req, res, lifecycle) => {
+    const modelId = explicitBodyDataValue(req.body, 'model_id')
     const result = await mutateChapterSource({
       req,
+      lifecycle,
       operation: 'update-chapter-generation-model',
       mutate: current => {
-        const modelId = req.body?.model_id
         if (!Number.isSafeInteger(modelId) || modelId <= 0) {
           throw new ChapterGenerationSourceError('CHAPTER_MODEL_REQUIRED', '请选择有效的章节模型')
         }
@@ -365,42 +759,39 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
     res.json(chapterSourceView(result.activeWorkspace, result.project, result.source))
   }))
 
-  app.post(`${chapterBase}/mcp/test`, safely(async (req, res) => {
-    const resolved = await requireProject(req, res)
-    if (!resolved) return
-    const current = resolveChapterGenerationSource(resolved.project)
-    const candidate = normalizeChapterGenerationSource({
-      ...current,
-      active: 'mcp',
-      mcp: req.body?.mcp,
+  app.post(`${chapterBase}/mcp/test`, safely(async (req, res, lifecycle) => {
+    const requestedMcp = explicitMcpBindingValue(req.body)
+    const resolved = await validateBindingReadOnly({
+      req,
+      lifecycle,
+      bindingForProject: project => {
+        const current = resolveChapterGenerationSource(project)
+        return normalizeChapterGenerationSource({
+          ...current,
+          active: 'mcp',
+          mcp: requestedMcp,
+        }).mcp!
+      },
     })
-    const validation = await validateBinding({
-      activeWorkspace: resolved.activeWorkspace,
-      project: resolved.project,
-      binding: candidate.mcp!,
-      signal: req.signal,
-    })
-    res.json({ ok: true, validation: publicValidation(validation) })
+    if (!resolved) return res.status(404).json({ error: 'project not found' })
+    res.json({ ok: true, validation: publicValidation(resolved.validation) })
   }))
 
-  app.put(`${chapterBase}/mcp`, safely(async (req, res) => {
+  app.put(`${chapterBase}/mcp`, safely(async (req, res, lifecycle) => {
+    const requestedMcp = explicitMcpBindingValue(req.body)
     const result = await mutateChapterSource({
       req,
+      lifecycle,
       operation: 'update-chapter-generation-mcp',
       mutate: current => {
         const candidate = normalizeChapterGenerationSource({
           ...current,
           active: 'mcp',
-          mcp: req.body?.mcp,
+          mcp: requestedMcp,
         })
         return { ...candidate, active: current.active }
       },
-      beforePersist: ({ activeWorkspace, project, source }) => validateBinding({
-        activeWorkspace,
-        project,
-        binding: source.mcp!,
-        signal: req.signal,
-      }),
+      bindingForValidation: ({ source }) => source.mcp!,
     })
     if (!result) return res.status(404).json({ error: 'project not found' })
     res.json(chapterSourceView(result.activeWorkspace, result.project, result.source))
@@ -412,24 +803,19 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
     res.json({ ok: true, source: toLegacyProseGenerationSource(resolveChapterGenerationSource(resolved.project)) })
   }))
 
-  app.put(legacyBase, safely(async (req, res) => {
-    let requestedLegacy: ReturnType<typeof normalizeProseGenerationSource> | undefined
+  app.put(legacyBase, safely(async (req, res, lifecycle) => {
+    const requestedLegacy = normalizeProseGenerationSource(req.body?.source || req.body)
     const result = await mutateChapterSource({
       req,
+      lifecycle,
       operation: 'update-prose-generation-source',
-      mutate: current => {
-        requestedLegacy = normalizeProseGenerationSource(req.body?.source || req.body)
-        return requestedLegacy.type === 'mcp'
-          ? { ...current, active: 'mcp', mcp: requestedLegacy.mcp }
-          : { ...current, active: 'model' }
-      },
-      beforePersist: async ({ activeWorkspace, project, current, source }) => {
-        if (!requestedLegacy) throw new McpError('MCP_BINDING_INVALID', '正文生成来源配置缺失')
-        await assertLegacyAgentLeasesAvailable(activeWorkspace, current, source)
-        return requestedLegacy.type === 'mcp'
-          ? validateBinding({ activeWorkspace, project, binding: source.mcp!, signal: req.signal })
-          : null
-      },
+      mutate: current => requestedLegacy.type === 'mcp'
+        ? { ...current, active: 'mcp', mcp: requestedLegacy.mcp }
+        : { ...current, active: 'model' },
+      bindingForValidation: ({ source }) => requestedLegacy.type === 'mcp' ? source.mcp! : null,
+      assertLocal: ({ activeWorkspace, current, source }) => (
+        assertLegacyAgentLeasesAvailable(activeWorkspace, current, source)
+      ),
     })
     if (!result) return res.status(404).json({ error: 'project not found' })
     res.json({
@@ -440,29 +826,28 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
     })
   }))
 
-  app.post(`${legacyBase}/test`, safely(async (req, res) => {
-    const resolved = await requireProject(req, res)
-    if (!resolved) return
-    const retained = resolveChapterGenerationSource(resolved.project).mcp
+  app.post(`${legacyBase}/test`, safely(async (req, res, lifecycle) => {
     const requestedSource = req.body?.source
-    const source = requestedSource
-      ? normalizeProseGenerationSource(requestedSource)
-      : retained
-        ? { version: 'prose_generation_source_v1' as const, type: 'mcp' as const, mcp: retained }
-        : null
-    if (!source || source.type !== 'mcp') {
-      throw new McpError('MCP_BINDING_INVALID', '当前项目未保留 MCP 正文来源')
-    }
-    const validation = await validateBinding({
-      activeWorkspace: resolved.activeWorkspace,
-      project: resolved.project,
-      binding: source.mcp,
-      signal: req.signal,
+    const requested = requestedSource ? normalizeProseGenerationSource(requestedSource) : null
+    const resolved = await validateBindingReadOnly({
+      req,
+      lifecycle,
+      bindingForProject: project => {
+        const retained = resolveChapterGenerationSource(project).mcp
+        const source = requested || (retained
+          ? { version: 'prose_generation_source_v1' as const, type: 'mcp' as const, mcp: retained }
+          : null)
+        if (!source || source.type !== 'mcp') {
+          throw new McpError('MCP_BINDING_INVALID', '当前项目未保留 MCP 正文来源')
+        }
+        return source.mcp
+      },
     })
-    res.json({ ok: true, ...publicValidation(validation) })
+    if (!resolved) return res.status(404).json({ error: 'project not found' })
+    res.json({ ok: true, ...publicValidation(resolved.validation) })
   }))
 
-  app.get(`${legacyBase}/agents`, safely(async (req, res) => {
+  app.get(`${legacyBase}/agents`, safely(async (req, res, lifecycle) => {
     const resolved = await requireProject(req, res)
     if (!resolved) return
     if (!ctx.mcpRuntime) throw new McpError('MCP_CAPABILITY_MISSING', '服务端未配置 MCP Runtime')
@@ -472,14 +857,14 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
     if (!serverId || !keyId) throw new McpError('MCP_BINDING_INVALID', '请选择 MCP Server 和 Key')
     const selection = await validateMcpCredentialSelection(resolved.activeWorkspace, { serverId, keyId })
     const projectAgent = publicAgentProjector(selection)
-    const agents = await ctx.mcpRuntime.listAgents(keyId, req.signal, {
+    const agents = await ctx.mcpRuntime.listAgents(keyId, lifecycle.signal, {
       ...selection,
       activeWorkspace: resolved.activeWorkspace,
     })
     res.json({ agents: publicAgentList(agents, projectAgent) })
   }))
 
-  app.post(`${legacyBase}/agents`, safely(async (req, res) => {
+  app.post(`${legacyBase}/agents`, safely(async (req, res, lifecycle) => {
     const resolved = await requireProject(req, res)
     if (!resolved) return
     if (!ctx.mcpRuntime) throw new McpError('MCP_CAPABILITY_MISSING', '服务端未配置 MCP Runtime')
@@ -491,7 +876,7 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
     const agent = await ctx.mcpRuntime.createAgent(keyId, {
       name: String(req.body?.name || 'MangaForge 小说正文 Agent'),
       ...(req.body?.space_id ? { spaceId: String(req.body.space_id) } : {}),
-    }, req.signal, { ...selection, activeWorkspace: resolved.activeWorkspace })
+    }, lifecycle.signal, { ...selection, activeWorkspace: resolved.activeWorkspace })
     res.json({ ok: true, agent: publicAgentProjector(selection)(agent) })
   }))
 }
