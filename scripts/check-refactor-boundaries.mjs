@@ -83,15 +83,18 @@ function scriptKindForFile(file) {
 
 function extractRelativeModuleSpecifiers(text, file) {
   const specifiers = []
-  const addStringLiteral = (node) => {
-    if (node && ts.isStringLiteral(node) && node.text.startsWith('.')) specifiers.push(node.text)
+  const addModuleSpecifierLiteral = (node) => {
+    const isStaticLiteral = node && (
+      ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)
+    )
+    if (isStaticLiteral && node.text.startsWith('.')) specifiers.push(node.text)
   }
   let sourceFile
   try {
     sourceFile = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false, scriptKindForFile(file))
   } catch (error) {
     if (error instanceof RangeError) {
-      throw new ModuleSyntaxScanError(`template nesting exceeds ${maxTemplateNesting}`)
+      throw new ModuleSyntaxScanError('TypeScript parser nesting limit exceeded')
     }
     throw error
   }
@@ -107,13 +110,15 @@ function extractRelativeModuleSpecifiers(text, file) {
     }
 
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
-      addStringLiteral(node.moduleSpecifier)
+      addModuleSpecifierLiteral(node.moduleSpecifier)
     } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
-      addStringLiteral(node.moduleReference.expression)
+      addModuleSpecifierLiteral(node.moduleReference.expression)
+    } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
+      addModuleSpecifierLiteral(node.argument.literal)
     } else if (ts.isCallExpression(node)) {
       const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword
       const isBareRequire = ts.isIdentifier(node.expression) && node.expression.text === 'require'
-      if (isDynamicImport || isBareRequire) addStringLiteral(node.arguments[0])
+      if (isDynamicImport || isBareRequire) addModuleSpecifierLiteral(node.arguments[0])
     }
 
     ts.forEachChild(node, child => {

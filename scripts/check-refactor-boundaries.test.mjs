@@ -36,6 +36,10 @@ function nestedTemplateExpression(depth, expression) {
   return `${'\`\${'.repeat(depth)}${expression}${'}\`'.repeat(depth)}`
 }
 
+function nestedParenthesizedExpression(depth, expression) {
+  return `${'('.repeat(depth)}${expression}${')'.repeat(depth)}`
+}
+
 afterEach(() => {
   while (tempRoots.length) {
     fs.rmSync(tempRoots.pop(), { recursive: true, force: true })
@@ -298,6 +302,49 @@ describe('check-refactor-boundaries', () => {
     expect(result.stdout).toContain('[refactor-boundaries] ok')
   })
 
+  test('detects no-substitution template specifiers only for direct imports and requires', () => {
+    const root = makeTempRepo()
+    writeFile(root, 'refactor-boundaries.json', JSON.stringify({
+      scan_roots: ['src'],
+      legacy_imports: [{ target: 'src/legacy-service.ts', allowed_importers: [] }],
+    }))
+    writeFile(root, 'src/legacy-service.ts', 'export const legacy = true\n')
+    writeFile(root, 'src/dynamic-template.ts', 'const legacy = import(`./legacy-service`)\n')
+    writeFile(root, 'src/required-template.ts', 'const legacy = require(`./legacy-service`)\n')
+    writeFile(root, 'src/member-template.ts', [
+      'loader.require(`./legacy-service`)',
+      'loader?.require(`./legacy-service`)',
+      'loader.require?.(`./legacy-service`)',
+      'const raw = `import(\\`./legacy-service\\`) require(\\`./legacy-service\\`)`',
+    ].join('\n'))
+
+    const result = runBoundaryCheck(root)
+    const output = `${result.stdout}\n${result.stderr}`
+
+    expect(result.status).toBe(1)
+    expect(output).toContain('src/dynamic-template.ts imports ./legacy-service')
+    expect(output).toContain('src/required-template.ts imports ./legacy-service')
+    expect(output).not.toContain('src/member-template.ts imports')
+  })
+
+  test('detects inline import type specifiers', () => {
+    const root = makeTempRepo()
+    writeFile(root, 'refactor-boundaries.json', JSON.stringify({
+      scan_roots: ['src'],
+      legacy_imports: [{ target: 'src/legacy-service.ts', allowed_importers: [] }],
+    }))
+    writeFile(root, 'src/legacy-service.ts', 'export type Legacy = true\n')
+    writeFile(root, 'src/import-type.ts', 'type Legacy = import("./legacy-service").Legacy\n')
+    writeFile(root, 'src/typeof-import-type.ts', 'type LegacyModule = typeof import("./legacy-service")\n')
+
+    const result = runBoundaryCheck(root)
+    const output = `${result.stdout}\n${result.stderr}`
+
+    expect(result.status).toBe(1)
+    expect(output).toContain('src/import-type.ts imports ./legacy-service')
+    expect(output).toContain('src/typeof-import-type.ts imports ./legacy-service')
+  })
+
   test('ignores module-like text inside regular expression literals', () => {
     const root = makeTempRepo()
     writeFile(root, 'refactor-boundaries.json', JSON.stringify({
@@ -381,13 +428,31 @@ describe('check-refactor-boundaries', () => {
       legacy_imports: [{ target: 'src/legacy-service.ts', allowed_importers: [] }],
     }))
     writeFile(root, 'src/legacy-service.ts', 'export const legacy = true\n')
-    writeFile(root, 'src/too-deep.ts', `const nested = ${nestedTemplateExpression(100_000, 'null')}\n`)
+    writeFile(root, 'src/too-deep.ts', `const nested = ${nestedTemplateExpression(129, 'null')}\n`)
 
     const result = runBoundaryCheck(root)
     const output = `${result.stdout}\n${result.stderr}`
 
     expect(result.status).toBe(1)
     expect(output).toContain('src/too-deep.ts could not be scanned: template nesting exceeds 128')
+    expect(output).not.toContain('RangeError')
+  })
+
+  test('reports parser nesting failures without mislabeling them as template nesting', () => {
+    const root = makeTempRepo()
+    writeFile(root, 'refactor-boundaries.json', JSON.stringify({
+      scan_roots: ['src'],
+      legacy_imports: [{ target: 'src/legacy-service.ts', allowed_importers: [] }],
+    }))
+    writeFile(root, 'src/legacy-service.ts', 'export const legacy = true\n')
+    writeFile(root, 'src/parser-too-deep.ts', `const nested = ${nestedParenthesizedExpression(100_000, 'null')}\n`)
+
+    const result = runBoundaryCheck(root)
+    const output = `${result.stdout}\n${result.stderr}`
+
+    expect(result.status).toBe(1)
+    expect(output).toContain('src/parser-too-deep.ts could not be scanned: TypeScript parser nesting limit exceeded')
+    expect(output).not.toContain('template nesting exceeds')
     expect(output).not.toContain('RangeError')
   })
 
