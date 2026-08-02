@@ -205,17 +205,40 @@ describe('continuity-safe prose candidate selection', () => {
     const skipped = chapterScaleText('江哲一路来到重症监护室。里面躺着一个浑身长满肿瘤的怨憎级怪物，他准备开始物理治疗。')
     const surfaceOnly = chapterScaleText('档案里记录着保安诡异狞笑着举起电击棍砸下。那已经是多年前的旧事。江哲此刻直接进入重症监护室。')
     const singleActorOnly = chapterScaleText('保安诡异站在走廊里。江哲直接进入重症监护室。')
+    const overlappingActorOnly = chapterScaleText('巡逻保安诡异站在走廊里。江哲直接进入重症监护室。')
     const dreamOnly = chapterScaleText('梦境中，保安诡异狞笑着举起电击棍砸下。江哲醒来后直接进入重症监护室。')
     const pastOnly = chapterScaleText('多年前，保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
-    const disconnectedResults = [surfaceOnly, singleActorOnly, dreamOnly, pastOnly]
+    const splitDreamOnly = chapterScaleText('梦境中。保安诡异狞笑着举起电击棍砸下。江哲醒来后直接进入重症监护室。')
+    const splitPastOnly = chapterScaleText('多年前。保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
+    const splitArchiveOnly = chapterScaleText('旧档案。内容记载着保安诡异狞笑着举起电击棍砸下。此刻江哲直接进入重症监护室。')
+    const disconnectedResults = [
+      surfaceOnly,
+      singleActorOnly,
+      overlappingActorOnly,
+      dreamOnly,
+      pastOnly,
+      splitDreamOnly,
+      splitPastOnly,
+      splitArchiveOnly,
+    ]
       .map(text => assessInitialProseOpeningContinuity(text, hospitalCorridorContext))
       .map(result => ({ required: result.required, passed: result.passed }))
-    expect(disconnectedResults).toEqual([
-      { required: true, passed: false },
-      { required: true, passed: false },
-      { required: true, passed: false },
-      { required: true, passed: false },
-    ])
+    expect(disconnectedResults).toEqual(Array.from(
+      { length: 8 },
+      () => ({ required: true, passed: false }),
+    ))
+
+    const tailBoundedContext = {
+      ...hospitalCorridorContext,
+      continuity: {
+        previous_chapter: {
+          ending_hook: '空气里传来一声异响，未知威胁正在逼近。',
+          ending_excerpt: `${'墙上的灰尘纹丝不动。'.repeat(500)}保安诡异狞笑着举起电击棍砸下。墙边警铃突然爆响。`,
+        },
+      },
+    }
+    const tailConnected = chapterScaleText('保安诡异狞笑着挥下电击棍。墙边警铃跟着爆响。')
+    expect(assessInitialProseOpeningContinuity(tailConnected, tailBoundedContext)).toMatchObject({ required: true, passed: true, failure: null })
     expect(assessInitialProseOpeningContinuity(connected, hospitalCorridorContext)).toMatchObject({ required: true, passed: true, failure: null })
     expect(assessInitialProseOpeningContinuity(skipped, hospitalCorridorContext)).toMatchObject({ required: true, passed: false })
   })

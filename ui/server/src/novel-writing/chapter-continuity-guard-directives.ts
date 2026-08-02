@@ -57,18 +57,44 @@ export type ContinuityDirective = {
 /** Opening misses the previous chapter's primary ending hook(s). */
 
 /** Free-text ending hook continuity: opening must surface ending_hook / last-line anchors. */
-const NON_CURRENT_FREE_TEXT_SENTENCE_PATTERN = /照片|相片|旧照|消息里|短信里|来信里|档案里|记录里|梦里|梦中|梦境|(?:多|几|数|[一二三四五六七八九十百千万两\d]+)年前|旧事|往事|已经是.{0,16}(?:年前|过去|往事|旧事)|成了过去/u
+const FREE_TEXT_RAW_SOURCE_LIMIT = 1200
+const FREE_TEXT_CHAPTER_TAIL_LIMIT = FREE_TEXT_RAW_SOURCE_LIMIT * 3
+const NON_CURRENT_FREE_TEXT_SENTENCE_PATTERN = /照片|相片|旧照|消息里|短信里|来信里|旧档案|档案里|档案中|档案内|记录里|梦里|梦中|梦境|(?:多|几|数|[一二三四五六七八九十百千万两\d]+)年前|旧事|往事|已经是.{0,16}(?:年前|过去|往事|旧事)|成了过去/u
+const CURRENT_ACTION_FREE_TEXT_TRANSITION_PATTERN = /此刻|现在|眼下|这时|醒来后|回过神|现实中/u
 
 function currentActionFreeTextOpening(value: any) {
-  return String(value || '')
+  const sentences = String(value || '')
     .slice(0, 900)
     .split(/(?<=[。！？!?；;\n])/u)
-    .filter(sentence => !NON_CURRENT_FREE_TEXT_SENTENCE_PATTERN.test(sentence))
-    .join('')
+  const currentSentences: string[] = []
+  let nonCurrentScope = false
+  for (const sentence of sentences) {
+    let currentPart = sentence
+    if (nonCurrentScope) {
+      const transition = currentPart.match(CURRENT_ACTION_FREE_TEXT_TRANSITION_PATTERN)
+      if (!transition) continue
+      currentPart = currentPart.slice(transition.index || 0)
+      nonCurrentScope = false
+    }
+    const marker = currentPart.match(NON_CURRENT_FREE_TEXT_SENTENCE_PATTERN)
+    if (!marker) {
+      currentSentences.push(currentPart)
+      continue
+    }
+    const afterMarker = currentPart.slice((marker.index || 0) + marker[0].length)
+    const transition = afterMarker.match(CURRENT_ACTION_FREE_TEXT_TRANSITION_PATTERN)
+    if (transition) {
+      currentSentences.push(afterMarker.slice(transition.index || 0))
+    } else {
+      nonCurrentScope = true
+    }
+  }
+  return currentSentences.join('')
 }
 
 function compactHanText(value: any, limit: number) {
-  return (String(value || '').match(/\p{Script=Han}/gu) || [])
+  const bounded = String(value || '').slice(0, FREE_TEXT_RAW_SOURCE_LIMIT)
+  return (bounded.match(/\p{Script=Han}/gu) || [])
     .join('')
     .slice(0, Math.max(0, limit))
 }
@@ -86,30 +112,43 @@ function longestSharedHanFragment(source: any, opening: any) {
   return ''
 }
 
-function independentSharedHanFragments(fragments: string[]) {
-  const independent: string[] = []
+function independentSharedHanFragments(fragments: string[], opening: string) {
+  const boundedOpening = compactHanText(opening, 900)
+  const independent: Array<{ fragment: string; start: number; end: number }> = []
   const ranked = fragments
     .filter(fragment => fragment.length >= 3)
     .sort((left, right) => right.length - left.length)
   for (const fragment of ranked) {
+    const start = boundedOpening.indexOf(fragment)
+    const end = start + fragment.length
     const dependsOnSelected = independent.some(selected => {
-      for (let index = 0; index + 3 <= fragment.length; index += 1) {
-        if (selected.includes(fragment.slice(index, index + 3))) return true
+      for (let index = 0; index + 2 <= fragment.length; index += 1) {
+        if (selected.fragment.includes(fragment.slice(index, index + 2))) return true
       }
-      return false
+      return start >= 0 && selected.start >= 0 && start < selected.end && selected.start < end
     })
-    if (!dependsOnSelected) independent.push(fragment)
+    if (!dependsOnSelected) independent.push({ fragment, start, end })
   }
-  return independent
+  return independent.map(item => item.fragment)
 }
 
-function freeTextEventClauseHit(opening: string, sources: any[]) {
+function freeTextEventClauseHit(
+  opening: string,
+  sources: Array<{ value: any; tailAware?: boolean }>,
+) {
   const clauses = uniqueTexts(
-    sources.flatMap(source => String(source || '').split(/[，,。！？!?；;：:“”"'‘’「」『』《》\n]+/u)),
+    sources.flatMap(source => {
+      const raw = String(source?.value || '')
+      const bounded = source?.tailAware
+        ? raw.slice(-FREE_TEXT_RAW_SOURCE_LIMIT)
+        : raw.slice(0, FREE_TEXT_RAW_SOURCE_LIMIT)
+      return bounded.split(/[，,。！？!?；;：:“”"'‘’「」『』《》\n]+/u)
+    }),
     40,
   )
   const fragments = independentSharedHanFragments(
     clauses.map(clause => longestSharedHanFragment(clause, opening)),
+    opening,
   )
   return fragments.length >= 2 && fragments.some(fragment => fragment.length >= 4)
 }
@@ -120,6 +159,7 @@ export function freeTextEndingHookHit(opening: string, previousChapter: any = {}
   const endingHook = endingHookOf(previousChapter)
   const text = chapterTextOf(previousChapter)
   const lastLines = String(text || '')
+    .slice(-FREE_TEXT_CHAPTER_TAIL_LIMIT)
     .split(/\n+/)
     .map((line) => line.trim())
     .filter(Boolean)
@@ -145,10 +185,10 @@ export function freeTextEndingHookHit(opening: string, previousChapter: any = {}
   }
   // Conservative event paraphrase: require two independently shared clauses, one strong.
   if (freeTextEventClauseHit(open, [
-    endingHook,
-    primary?.evidence,
-    lastLine,
-    ...lastLines.slice(-3),
+    { value: endingHook },
+    { value: primary?.evidence },
+    { value: lastLine, tailAware: true },
+    ...lastLines.slice(-3).map(value => ({ value, tailAware: true })),
   ])) return true
   // Keyword overlap: need >=2 content words from ending hook / last line
   const source = compactText([endingHook, lastLine, primary?.evidence].filter(Boolean).join('。'), 160)
