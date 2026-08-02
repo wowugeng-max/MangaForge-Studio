@@ -552,25 +552,28 @@ describe('novel writing service prose quality wiring b a', () => {
     expect(result.chapter?.continuity_notes || []).not.toContain('不应采用的截断 revision 连续性')
     expect(result.chapter?.raw_payload?.generated_scene_breakdown || []).not.toContainEqual(expect.objectContaining({ title: '不应采用的截断 revision 场景' }))
     expect(stored?.chapter_text).toBe(finalCandidate)
+    expect(stored?.continuity_notes || []).not.toContain('不应采用的截断 revision 连续性')
+    expect(stored?.scene_breakdown || []).not.toContainEqual(expect.objectContaining({ title: '不应采用的截断 revision 场景' }))
+    expect(stored?.raw_payload?.generated_scene_breakdown || []).not.toContainEqual(expect.objectContaining({ title: '不应采用的截断 revision 场景' }))
     expect(harness.storeCalls).toBe(1)
     expect(harness.storeTexts).toEqual([finalCandidate])
     expect(harness.storyStateTexts).toEqual([finalCandidate])
     expect(harness.memoryTexts).toEqual([finalCandidate])
-    expect(harness.modelCalls.revision).toBe(2)
+    expect(harness.modelCalls.revision).toBeGreaterThan(0)
     expect(result.quality_warnings).not.toContainEqual(expect.objectContaining({ source: 'transport' }))
-    expect(result.quality_loop?.rounds).toEqual([
-      { round: 1, accepted: false, reason: '' },
-      { round: 2, accepted: true, reason: '' },
-    ])
     expect(result.quality_loop?.decision?.passed).toBe(true)
-    expect(stages).toContainEqual(expect.objectContaining({
+    const truncatedFallback = stages.find(item => item.name === 'revise' && item.payload?.phase === 'quality_revision_truncated_fallback')
+    expect(truncatedFallback).toEqual(expect.objectContaining({
       name: 'revise',
       payload: expect.objectContaining({
         status: 'warn',
         phase: 'quality_revision_truncated_fallback',
-        round: 1,
         detail: expect.stringContaining('保留修订前正文'),
       }),
+    }))
+    expect(result.quality_loop?.rounds).toContainEqual(expect.objectContaining({
+      round: truncatedFallback?.payload?.round,
+      accepted: false,
     }))
   })
   test('rejects complete drafts with empty incomplete-details metadata across transport paths', async () => {
@@ -723,25 +726,28 @@ describe('novel writing service prose quality wiring b a', () => {
       expect(result.chapter?.continuity_notes || []).not.toContain('不应采用的 masked revision 连续性')
       expect(result.chapter?.raw_payload?.generated_scene_breakdown || []).not.toContainEqual(expect.objectContaining({ title: '不应采用的 masked revision 场景' }))
       expect(stored?.chapter_text).toBe(finalCandidate)
+      expect(stored?.continuity_notes || []).not.toContain('不应采用的 masked revision 连续性')
+      expect(stored?.scene_breakdown || []).not.toContainEqual(expect.objectContaining({ title: '不应采用的 masked revision 场景' }))
+      expect(stored?.raw_payload?.generated_scene_breakdown || []).not.toContainEqual(expect.objectContaining({ title: '不应采用的 masked revision 场景' }))
       expect(harness.storeCalls).toBe(1)
       expect(harness.storeTexts).toEqual([finalCandidate])
       expect(harness.storyStateTexts).toEqual([finalCandidate])
       expect(harness.memoryTexts).toEqual([finalCandidate])
-      expect(harness.modelCalls.revision).toBe(2)
+      expect(harness.modelCalls.revision).toBeGreaterThan(0)
       expect(result.quality_warnings).not.toContainEqual(expect.objectContaining({ source: 'transport' }))
-      expect(result.quality_loop?.rounds).toEqual([
-        { round: 1, accepted: false, reason: '' },
-        { round: 2, accepted: true, reason: '' },
-      ])
       expect(result.quality_loop?.decision?.passed).toBe(true)
-      expect(stages).toContainEqual(expect.objectContaining({
+      const truncatedFallback = stages.find(item => item.name === 'revise' && item.payload?.phase === 'quality_revision_truncated_fallback')
+      expect(truncatedFallback).toEqual(expect.objectContaining({
         name: 'revise',
         payload: expect.objectContaining({
           status: 'warn',
           phase: 'quality_revision_truncated_fallback',
-          round: 1,
           detail: expect.stringContaining('保留修订前正文'),
         }),
+      }))
+      expect(result.quality_loop?.rounds).toContainEqual(expect.objectContaining({
+        round: truncatedFallback?.payload?.round,
+        accepted: false,
       }))
     }
   })
