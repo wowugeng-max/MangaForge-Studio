@@ -6,52 +6,52 @@
   "files": [
     {
       "path": "ui/server/src/routes/novel-writing-service.ts",
-      "max_lines": 46329,
-      "max_exported_declarations": 231
+      "max_lines": 2,
+      "max_exported_declarations": 0
     },
     {
       "path": "ui/server/src/routes/novel-writing-service.test.ts",
-      "max_lines": 61175,
+      "max_lines": 8,
       "max_exported_declarations": 0
     },
     {
       "path": "ui/web/src/pages/novel-workspace/autoCreationDirectorModel.ts",
-      "max_lines": 16893,
-      "max_exported_declarations": 93
+      "max_lines": 2,
+      "max_exported_declarations": 0
     },
     {
       "path": "ui/web/src/pages/novel-workspace/autoCreationDirectorModel.test.ts",
-      "max_lines": 17746,
+      "max_lines": 2,
       "max_exported_declarations": 0
     },
     {
       "path": "ui/web/src/pages/novel-workspace/repairTaskRevisionPrompt.ts",
-      "max_lines": 7816,
-      "max_exported_declarations": 4
+      "max_lines": 2,
+      "max_exported_declarations": 0
     },
     {
       "path": "ui/web/src/pages/novel-workspace/repairTaskRevisionPrompt.test.ts",
-      "max_lines": 11211,
+      "max_lines": 2,
       "max_exported_declarations": 0
     },
     {
       "path": "ui/web/src/pages/novel-workspace/writingCockpitModel.ts",
-      "max_lines": 5887,
-      "max_exported_declarations": 29
+      "max_lines": 410,
+      "max_exported_declarations": 2
     },
     {
       "path": "ui/web/src/pages/novel-workspace/writingCockpitModel.test.ts",
-      "max_lines": 6183,
+      "max_lines": 14,
       "max_exported_declarations": 0
     },
     {
       "path": "ui/web/src/pages/novel-workspace/TaskCenterDrawer.tsx",
-      "max_lines": 6131,
-      "max_exported_declarations": 60
+      "max_lines": 8,
+      "max_exported_declarations": 0
     },
     {
       "path": "ui/web/src/pages/novel-workspace/TaskCenterDrawer.test.ts",
-      "max_lines": 4128,
+      "max_lines": 14,
       "max_exported_declarations": 0
     }
   ],
@@ -60,12 +60,9 @@
       "module": "./novel-writing-service",
       "allowed_importers": [
         "ui/server/src/routes/novel.ts",
-        "ui/server/src/routes/novel-generation-routes.ts",
         "ui/server/src/routes/novel-chapter-context-routes.ts",
         "ui/server/src/routes/novel-project-bible-routes.ts",
-        "ui/server/src/routes/novel-writing-delivery-risk-contracts.test.ts",
-        "ui/server/src/routes/novel-writing-service.quality-wiring.test.ts",
-        "ui/server/src/routes/novel-writing-service.test.ts"
+        "ui/server/src/routes/novel-writing-delivery-risk-contracts.test.ts"
       ]
     }
   ]

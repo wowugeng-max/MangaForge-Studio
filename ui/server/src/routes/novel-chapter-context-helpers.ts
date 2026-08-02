@@ -11,7 +11,7 @@ import {
 } from '../novel'
 import { executeNovelAgent } from '../llm'
 import { asArray, getNovelPayload } from './novel-route-utils'
-import { applyStyleSampleStrategyAuthorAction, buildChapterPreDraftBrief } from './novel-writing-service'
+import { applyStyleSampleStrategyAuthorAction, buildChapterPreDraftBrief } from '../novel-writing-service'
 
 type ChapterContextRoutesContext = {
   getWorkspace: () => string

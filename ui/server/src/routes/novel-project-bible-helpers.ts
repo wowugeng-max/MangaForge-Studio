@@ -19,7 +19,7 @@ import {
   safeJsonStringify,
   stableTextHash,
 } from './novel-route-utils'
-import { normalizeStyleSampleBank } from './novel-writing-service'
+import { normalizeStyleSampleBank } from '../novel-writing-service'
 
 export type ProjectBibleRoutesContext = {
   getWorkspace: () => string

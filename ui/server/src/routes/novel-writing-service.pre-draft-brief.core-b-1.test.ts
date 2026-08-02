@@ -248,7 +248,7 @@ import {
   mergeFinalRepairPreDraftRawPayload,
   repairBenchmarkRecallSourcePathState,
   resolveChapterWordTarget,
-} from './novel-writing-service'
+} from '../novel-writing-service'
 import { buildLLMResultDiagnostics, buildPreflightChecks, deepMergeObjects, extractPlainProseFallback, formatReviewIssueForStorage, getNovelPayload, getQualityGateDecision, getStyleLock, normalizeIssue } from './novel-route-utils'
 import { buildProseGenerationContract } from '../novel-writing/prose-generation-contract'
 import { buildProsePromptContextSnapshot } from '../novel-writing/prose-prompt-context'
@@ -391,7 +391,7 @@ describe('chapter pre-draft brief core b 1', () => {
     expect(prompt.indexOf('【状态筛选合同】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
   })
   test('chapter 1 pre-draft brief derives foreshadowing and world constraints from seed materials', async () => {
-    const { buildChapterPreDraftBrief } = await import('./novel-writing-service')
+    const { buildChapterPreDraftBrief } = await import('../novel-writing-service')
     const contextPackage = {
       chapter_target: {
         chapter_no: 1,
@@ -430,7 +430,7 @@ describe('chapter pre-draft brief core b 1', () => {
     expect(brief.state_tracking_contract.world_constraints.join('｜')).toMatch(/回声|规则|代价|力量/)
     expect(brief.state_tracking_contract.source_readiness.some((item: any) => item.key === 'foreshadowing_history' && item.status === 'ready')).toBe(true)
     expect(brief.state_tracking_contract.source_readiness.some((item: any) => item.key === 'world_constraints' && item.status === 'ready')).toBe(true)
-    const checks = (await import('./novel-writing-service')).buildSourceReadinessPreflightChecks({
+    const checks = (await import('../novel-writing-service')).buildSourceReadinessPreflightChecks({
       chapter_target: {
         ...contextPackage.chapter_target,
         state_tracking_contract: brief.state_tracking_contract,

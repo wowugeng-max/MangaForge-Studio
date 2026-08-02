@@ -234,7 +234,7 @@ describe('architecture modularization contracts', () => {
   })
 
   test('writing-service public entry still exports core symbols', async () => {
-    const mod = await import('./novel-writing-service')
+    const mod = await import('./novel-writing-service/index')
     expect(typeof (mod as any).formatAdmissionError).toBe('function')
     expect(typeof (mod as any).createNovelWritingService).toBe('function')
     expect(typeof (mod as any).hasFailingReviewChecks).toBe('function')

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { createNovelWritingService } from './novel-writing-service'
+import { createNovelWritingService } from '../novel-writing-service'
 import { createNovelReferenceService } from './novel-reference-service'
 import {
   createNovelCharacter,

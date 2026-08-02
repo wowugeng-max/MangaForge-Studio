@@ -249,7 +249,7 @@ import {
   mergeFinalRepairPreDraftRawPayload,
   repairBenchmarkRecallSourcePathState,
   resolveChapterWordTarget,
-} from './novel-writing-service'
+} from '../novel-writing-service'
 import { buildLLMResultDiagnostics, buildPreflightChecks, deepMergeObjects, extractPlainProseFallback, formatReviewIssueForStorage, getNovelPayload, getQualityGateDecision, getStyleLock, normalizeIssue } from './novel-route-utils'
 import { buildProseGenerationContract } from '../novel-writing/prose-generation-contract'
 import { buildProsePromptContextSnapshot } from '../novel-writing/prose-prompt-context'
@@ -409,7 +409,7 @@ describe('chapter context contracts b b', () => {
     expect(generationReturnBlock).toContain('core_contract_sync')
   })
   test('builds a plot special topics sync report from contract checks and prose evidence', async () => {
-    const { buildPlotSpecialTopicsSyncReport } = await import('./novel-writing-service')
+    const { buildPlotSpecialTopicsSyncReport } = await import('../novel-writing-service')
     expect(typeof buildPlotSpecialTopicsSyncReport).toBe('function')
 
     const report = buildPlotSpecialTopicsSyncReport(

@@ -19,7 +19,7 @@ import {
   normalizeDiscoveredAssets,
   normalizeIpSceneCandidates,
   uniqueDeliveryRiskReceipts,
-} from './novel-writing-service'
+} from '../novel-writing-service'
 import { getStyleLock } from './novel-route-utils'
 import {
   buildAssetIntakeReviewRecord,

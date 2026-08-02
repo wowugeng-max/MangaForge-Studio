@@ -17,7 +17,7 @@ import {
   formatAdmissionError,
   resolveChapterWordTarget,
   scanProseForQualityLoop,
-} from './novel-writing-service'
+} from '../novel-writing-service'
 import { createNovelReferenceService } from './novel-reference-service'
 import { normalizeProseForStorage } from '../novel-writing/chapter-prose-storage-patch'
 import { buildCanonicalSurfaceIndex } from '../novel-writing/canonical-continuity'
