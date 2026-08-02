@@ -10,7 +10,10 @@ import {
   extractDeliveredClimaxLandings,
   extractPrimaryEndingHooks,
   ensureOpeningHandoffBridge,
+  freeTextEndingHookHit as rootFreeTextEndingHookHit,
 } from './chapter-continuity-guard'
+import { freeTextEndingHookHit as directivesFreeTextEndingHookHit } from './chapter-continuity-guard-directives'
+import { freeTextEndingHookHit as leafFreeTextEndingHookHit } from './chapter-continuity-guard-free-text'
 import {
   detectProgressReplayDirective,
   mergeProseQualityWithDeliveryRisks,
@@ -78,6 +81,11 @@ const CH15_SEED_POLLUTED = {
 }
 
 describe('chapter continuity guard', () => {
+  test('keeps the free-text ending hook export identical across continuity guard surfaces', () => {
+    expect(rootFreeTextEndingHookHit).toBe(directivesFreeTextEndingHookHit)
+    expect(directivesFreeTextEndingHookHit).toBe(leafFreeTextEndingHookHit)
+  })
+
   test('extracts property ending hook over mid-chapter TV parallel from ch14-like prose', () => {
     const hooks = extractPrimaryEndingHooks({
       chapter_text: CH14_PROSE,

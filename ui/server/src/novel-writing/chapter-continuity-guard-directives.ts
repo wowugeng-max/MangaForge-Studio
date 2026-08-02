@@ -56,8 +56,6 @@ export type ContinuityDirective = {
   }
 }
 
-/** Opening misses the previous chapter's primary ending hook(s). */
-
 /** Deterministic opening bridge when draft misses a hard primary ending hook. System-wide, not chapter-tuned. */
 export function buildOpeningHandoffBridgeParagraph(previousChapter: any = {}, primary: any = {}) {
   const hook = endingHookOf(previousChapter) || compactText(primary?.evidence || '', 48)
@@ -124,6 +122,7 @@ export function ensureOpeningHandoffBridge(chapterText: string, previousChapter:
   return { text, bridged: false as const, reason: 'bridge_insufficient', bridge }
 }
 
+/** Opening misses the previous chapter's primary ending hook(s). */
 export function detectOpeningHookMissDirective(input: {
   chapter?: any
   previousChapter?: any
