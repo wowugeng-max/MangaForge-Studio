@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   buildChapterProseStoragePatch,
+  ensureWebnovelParagraphBreaks,
   normalizeProseForStorage,
   resolveChapterProseVersionSource,
 } from './chapter-prose-storage-patch'
@@ -19,6 +20,23 @@ function expectOnlyNewlinesInserted(source: string, result: string) {
 }
 
 describe('chapter prose storage patch builders', () => {
+  const singleNewlineDraftRows = Array.from(
+    { length: 12 },
+    (_, index) => `第${index + 1}段继续推进情节。`,
+  )
+
+  test('converts abnormal single-newline drafts without inventing a terminal newline', () => {
+    const source = singleNewlineDraftRows.join('\r')
+
+    expect(ensureWebnovelParagraphBreaks(source)).toBe(singleNewlineDraftRows.join('\n\n'))
+  })
+
+  test('converts abnormal single-newline drafts while preserving an existing terminal newline', () => {
+    const source = `${singleNewlineDraftRows.join('\r\n')}\r\n`
+
+    expect(ensureWebnovelParagraphBreaks(source)).toBe(`${singleNewlineDraftRows.join('\n\n')}\n`)
+  })
+
   test('stores only a bounded JSON-safe allowlist from humanize reports', () => {
     const providerUrl = 'https://provider.example/v1/humanize?api_key=SECRET_QUERY'
     const cycle: any = { label: 'cycle' }

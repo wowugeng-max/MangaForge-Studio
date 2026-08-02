@@ -461,12 +461,12 @@ export function ensureWebnovelParagraphBreaks(value: any) {
   if (!body.trim()) return body
   const doubleCount = (body.match(/\n\n/g) || []).length
   const lines = body.split('\n').map((line) => line.trim()).filter(Boolean)
-  if (lines.length < 12) return body.endsWith('\n') ? body : `${body}\n`
+  if (lines.length < 12) return body
   // Healthy webnovel draft usually has blank lines between most paragraphs.
   if (doubleCount >= Math.max(8, Math.floor(lines.length * 0.35))) {
-    return body.endsWith('\n') ? body : `${body}\n`
+    return body
   }
-  return `${lines.join('\n\n')}\n`
+  return `${lines.join('\n\n')}${body.endsWith('\n') ? '\n' : ''}`
 }
 
 export function normalizeProseForStorage(value: any) {
