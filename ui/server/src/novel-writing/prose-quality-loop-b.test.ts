@@ -99,7 +99,7 @@ describe('bounded prose quality loop', () => {
     const scans: string[] = []
     const reviews: string[] = []
     const result = await runProseQualityLoop({
-      initialText: '初稿：江澈站着等。'.repeat(80),
+      initialText: '初稿：追兵围住江澈，他站在门边没有动作。',
       minScore: 78,
       coreContract: { chapter_no: 10, reader_promise: '主角主动破局' },
       scan: text => {
@@ -120,7 +120,7 @@ describe('bounded prose quality loop', () => {
                 key: 'agency',
                 severity: 'S2',
                 dimension: 'core_promise_agency',
-                evidence: '江澈站着等。',
+                evidence: '江澈，他站在门边没有动作。',
                 required_change: '让江澈主动破围',
                 acceptance_test: '包围因主角动作改变',
               }],
@@ -133,7 +133,7 @@ describe('bounded prose quality loop', () => {
             }
       },
       revise: async () => ({
-        final_text: '修订：江澈踏碎路面，借飞石逼退第一排追兵。'.repeat(80),
+        final_text: '江澈撞翻油灯，火舌封住门口。他趁追兵偏头，一脚踹开后窗，先把顾遥送出去，自己再扯落窗框挡住刀锋。',
       }),
     })
 
@@ -444,8 +444,10 @@ describe('bounded prose quality loop', () => {
   test('normalizes safe repair residue before the fresh scan and independent recheck', async () => {
     const scans: string[] = []
     let reviewCalls = 0
+    const rawRevision = '他用纯肉身力量 and 借力卸力踩碎规则。手臂微微鼓胀，没有一丝多余的颤音。他缓缓收手，轻轻敲击袖口，灯光犹如实质的毒液。顾遥从门边拉走伤员。'
+    const normalizedRevision = '他用纯肉身力量和借力卸力踩碎规则。手臂鼓胀，没有多余的颤音。他收手，敲击袖口，灯光像泼下的毒液。顾遥从门边拉走伤员。'
     const result = await runProseQualityLoop({
-      initialText: '初稿问题。'.repeat(120),
+      initialText: '初稿问题，追兵围住江澈，他站在门边没有动作。',
       minScore: 78,
       coreContract: { chapter_no: 10 },
       scan: text => {
@@ -465,7 +467,7 @@ describe('bounded prose quality loop', () => {
                 key: 'style',
                 severity: 'S2',
                 dimension: 'prose_style',
-                evidence: '初稿问题。',
+                evidence: '初稿问题',
                 required_change: '改成可见动作',
                 acceptance_test: '不再出现原句',
               }],
@@ -488,13 +490,15 @@ describe('bounded prose quality loop', () => {
           : { score: 88, dimensions: sixDimensionScores, publishable: true, findings: [] }
       },
       revise: async () => ({
-        final_text: '他用纯肉身力量 and 借力卸力踩碎规则。手臂微微鼓胀，没有一丝多余的颤音。他缓缓收手，轻轻敲击袖口，灯光犹如实质的毒液。'.repeat(40),
+        final_text: rawRevision,
       }),
     })
 
     expect(scans).toHaveLength(2)
     expect(scans[1]).not.toMatch(/\band\b|微微|一丝|缓缓|轻轻|犹如/)
+    expect(result.rounds[0]?.selection).toMatchObject({ accepted: true, text: normalizedRevision })
     expect(result.final_text).toBe(scans[1])
+    expect(result.final_text).toBe(normalizedRevision)
     expect(result.decision.passed).toBe(true)
   })
 
@@ -502,7 +506,7 @@ describe('bounded prose quality loop', () => {
     const reviewAttempts: Array<{ round: number; attempt: number | undefined }> = []
     let recheckCalls = 0
     const result = await runProseQualityLoop({
-      initialText: '初稿问题。'.repeat(120),
+      initialText: '初稿问题，追兵围住江澈，他站在门边没有动作。',
       minScore: 78,
       coreContract: { chapter_no: 10 },
       scan: () => ({ hard_failures: [] }),
@@ -516,7 +520,7 @@ describe('bounded prose quality loop', () => {
               key: 'agency',
               severity: 'S2',
               dimension: 'core_promise_agency',
-              evidence: '初稿问题。',
+              evidence: '初稿问题',
               required_change: '让主角主动破局',
               acceptance_test: '主角行动改变结果',
             }],
@@ -527,7 +531,9 @@ describe('bounded prose quality loop', () => {
           ? {}
           : { score: 88, score_scale: '0-100', dimensions: sixDimensionScores, publishable: true, findings: [] }
       },
-      revise: async () => ({ final_text: '修订正文让主角主动击穿包围并夺回线索。'.repeat(120) }),
+      revise: async () => ({
+        final_text: '江澈先扯断吊灯绳，铜架砸散门口的追兵。他抄起账册撞开侧窗，把顾遥推出包围，落地时又夺回了藏在线轴里的钥匙。',
+      }),
     })
 
     expect(result.decision.passed).toBe(true)

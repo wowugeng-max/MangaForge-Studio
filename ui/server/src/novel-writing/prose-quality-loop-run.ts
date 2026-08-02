@@ -371,7 +371,18 @@ export async function runProseQualityLoop(input: {
       })
       break
     }
-    const usableSelection = selectUsableRevisionText(finalText, revision, {
+    const rawRevisionText = String(
+      revision?.final_text
+        || revision?.finalText
+        || revision?.chapter_text
+        || revision?.chapterText
+        || '',
+    )
+    const residueNormalization = normalizeProseQualityRepairResidue(rawRevisionText)
+    const usableSelection = selectUsableRevisionText(finalText, {
+      ...revision,
+      final_text: residueNormalization.text,
+    }, {
       chapterNo: Number(input.coreContract?.chapter_no || input.coreContract?.chapterNo || 0),
       blockingFindings,
       candidateStage: 'quality_revision',
@@ -385,19 +396,14 @@ export async function runProseQualityLoop(input: {
     const selection = continuitySelection?.accepted === false
       ? { ...usableSelection, accepted: false, reason: 'opening_continuity_regression', text: finalText, warning: continuitySelection.warning }
       : usableSelection
-    const residueNormalization = selection.accepted
-      ? normalizeProseQualityRepairResidue(selection.text)
-      : null
     rounds.push({
       round,
       revision,
       selection,
-      normalization: residueNormalization
-        ? {
-            change_count: residueNormalization.change_count || 0,
-            rules: residueNormalization.rules || [],
-          }
-        : null,
+      normalization: {
+        change_count: residueNormalization.change_count || 0,
+        rules: residueNormalization.rules || [],
+      },
     })
     if (!selection.accepted) {
       if (selection.warning) {
@@ -410,7 +416,7 @@ export async function runProseQualityLoop(input: {
       continue
     }
 
-    finalText = residueNormalization?.text || selection.text
+    finalText = selection.text
     scan = await input.scan(finalText)
     try {
       const recheckPayload = await requestUsableProseQualityReview(input.review, {
