@@ -219,6 +219,10 @@ describe('continuity-safe prose candidate selection', () => {
     const strongThenArchive = chapterScaleText('梦境中，江哲醒来后翻开旧档案，档案里记着保安诡异狞笑着举起电击棍砸下。此刻他直接进入重症监护室。')
     const strongThenDream = chapterScaleText('旧档案中，江哲回过神后又跌入梦境，保安诡异狞笑着举起电击棍砸下。现实中他直接进入重症监护室。')
     const strongThenPast = chapterScaleText('梦境中，江哲回过神，随后想起多年前，保安诡异狞笑着举起电击棍砸下。现在他直接进入重症监护室。')
+    const quotedArchiveAwake = chapterScaleText('旧档案中写着：“江哲醒来后，保安诡异狞笑着举起电击棍砸下。”此刻江哲直接进入重症监护室。')
+    const dreamRealityNoun = chapterScaleText('梦境中，现实中的保安诡异狞笑着举起电击棍砸下。江哲醒来后直接进入重症监护室。')
+    const quotedWeakTransition = chapterScaleText('梦境中。“现在保安诡异狞笑着举起电击棍砸下。”江哲醒来后直接进入重症监护室。')
+    const sameSentenceDreamAwake = chapterScaleText('梦境中，醒来后保安诡异狞笑着举起电击棍砸下。此刻江哲直接进入重症监护室。')
     const disconnectedOpenings = [
       surfaceOnly,
       singleActorOnly,
@@ -236,12 +240,28 @@ describe('continuity-safe prose candidate selection', () => {
       strongThenArchive,
       strongThenDream,
       strongThenPast,
+      quotedArchiveAwake,
+      dreamRealityNoun,
+      quotedWeakTransition,
+      sameSentenceDreamAwake,
     ]
     const disconnectedResults = disconnectedOpenings
       .map(text => assessInitialProseOpeningContinuity(text, hospitalCorridorContext))
       .map(result => ({ required: result.required, passed: result.passed }))
     expect(disconnectedResults).toEqual(disconnectedOpenings.map(
       () => ({ required: true, passed: false }),
+    ))
+
+    const recoveredOpenings = [
+      chapterScaleText('梦境中。醒来后，保安诡异狞笑着举起电击棍砸下。'),
+      chapterScaleText('多年前。现在保安诡异狞笑着举起电击棍砸下。'),
+      chapterScaleText('旧档案。此刻保安诡异狞笑着举起电击棍砸下。'),
+    ]
+    const recoveredResults = recoveredOpenings
+      .map(text => assessInitialProseOpeningContinuity(text, hospitalCorridorContext))
+      .map(result => ({ required: result.required, passed: result.passed }))
+    expect(recoveredResults).toEqual(recoveredOpenings.map(
+      () => ({ required: true, passed: true }),
     ))
 
     const uniqueLongTailFiller = Array.from(
