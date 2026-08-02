@@ -204,7 +204,18 @@ describe('continuity-safe prose candidate selection', () => {
     const connected = chapterScaleText('保安诡异狞笑着举起电击棍砸下。江哲单手握住电击棍，将高压电吸入体内，顺手把保安扔进垃圾桶。')
     const skipped = chapterScaleText('江哲一路来到重症监护室。里面躺着一个浑身长满肿瘤的怨憎级怪物，他准备开始物理治疗。')
     const surfaceOnly = chapterScaleText('档案里记录着保安诡异狞笑着举起电击棍砸下。那已经是多年前的旧事。江哲此刻直接进入重症监护室。')
-    expect(assessInitialProseOpeningContinuity(surfaceOnly, hospitalCorridorContext)).toMatchObject({ required: true, passed: false })
+    const singleActorOnly = chapterScaleText('保安诡异站在走廊里。江哲直接进入重症监护室。')
+    const dreamOnly = chapterScaleText('梦境中，保安诡异狞笑着举起电击棍砸下。江哲醒来后直接进入重症监护室。')
+    const pastOnly = chapterScaleText('多年前，保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
+    const disconnectedResults = [surfaceOnly, singleActorOnly, dreamOnly, pastOnly]
+      .map(text => assessInitialProseOpeningContinuity(text, hospitalCorridorContext))
+      .map(result => ({ required: result.required, passed: result.passed }))
+    expect(disconnectedResults).toEqual([
+      { required: true, passed: false },
+      { required: true, passed: false },
+      { required: true, passed: false },
+      { required: true, passed: false },
+    ])
     expect(assessInitialProseOpeningContinuity(connected, hospitalCorridorContext)).toMatchObject({ required: true, passed: true, failure: null })
     expect(assessInitialProseOpeningContinuity(skipped, hospitalCorridorContext)).toMatchObject({ required: true, passed: false })
   })

@@ -57,7 +57,7 @@ export type ContinuityDirective = {
 /** Opening misses the previous chapter's primary ending hook(s). */
 
 /** Free-text ending hook continuity: opening must surface ending_hook / last-line anchors. */
-const NON_CURRENT_FREE_TEXT_SENTENCE_PATTERN = /照片|相片|旧照|消息里|短信里|来信里|档案里|记录里|梦里|梦中|已经是.{0,16}(?:年前|过去|往事|旧事)|成了过去/u
+const NON_CURRENT_FREE_TEXT_SENTENCE_PATTERN = /照片|相片|旧照|消息里|短信里|来信里|档案里|记录里|梦里|梦中|梦境|(?:多|几|数|[一二三四五六七八九十百千万两\d]+)年前|旧事|往事|已经是.{0,16}(?:年前|过去|往事|旧事)|成了过去/u
 
 function currentActionFreeTextOpening(value: any) {
   return String(value || '')
@@ -86,15 +86,32 @@ function longestSharedHanFragment(source: any, opening: any) {
   return ''
 }
 
+function independentSharedHanFragments(fragments: string[]) {
+  const independent: string[] = []
+  const ranked = fragments
+    .filter(fragment => fragment.length >= 3)
+    .sort((left, right) => right.length - left.length)
+  for (const fragment of ranked) {
+    const dependsOnSelected = independent.some(selected => {
+      for (let index = 0; index + 3 <= fragment.length; index += 1) {
+        if (selected.includes(fragment.slice(index, index + 3))) return true
+      }
+      return false
+    })
+    if (!dependsOnSelected) independent.push(fragment)
+  }
+  return independent
+}
+
 function freeTextEventClauseHit(opening: string, sources: any[]) {
   const clauses = uniqueTexts(
     sources.flatMap(source => String(source || '').split(/[，,。！？!?；;：:“”"'‘’「」『』《》\n]+/u)),
     40,
   )
-  const strengths = clauses
-    .map(clause => longestSharedHanFragment(clause, opening).length)
-    .filter(strength => strength >= 3)
-  return strengths.length >= 2 && strengths.some(strength => strength >= 4)
+  const fragments = independentSharedHanFragments(
+    clauses.map(clause => longestSharedHanFragment(clause, opening)),
+  )
+  return fragments.length >= 2 && fragments.some(fragment => fragment.length >= 4)
 }
 
 export function freeTextEndingHookHit(opening: string, previousChapter: any = {}, primary: any = {}) {
