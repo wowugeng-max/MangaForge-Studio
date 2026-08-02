@@ -226,6 +226,11 @@ describe('continuity-safe prose candidate selection', () => {
     const recoveredThenArchive = chapterScaleText('梦境中。醒来后，江哲翻开旧档案，档案里记着保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
     const recoveredThenDream = chapterScaleText('旧档案。此刻江哲又跌入梦境，保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
     const recoveredThenPast = chapterScaleText('梦境中。回过神来，江哲想起多年前，保安诡异狞笑着举起电击棍砸下。眼下江哲直接进入重症监护室。')
+    const archiveCarriesEvent = chapterScaleText('档案记载着保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
+    const recordCarriesEvent = chapterScaleText('记录显示保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
+    const messageCarriesEvent = chapterScaleText('短信写着保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
+    const standaloneArchive = chapterScaleText('档案。保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
+    const standaloneRecord = chapterScaleText('记录。保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
     const disconnectedOpenings = [
       surfaceOnly,
       singleActorOnly,
@@ -250,6 +255,11 @@ describe('continuity-safe prose candidate selection', () => {
       recoveredThenArchive,
       recoveredThenDream,
       recoveredThenPast,
+      archiveCarriesEvent,
+      recordCarriesEvent,
+      messageCarriesEvent,
+      standaloneArchive,
+      standaloneRecord,
     ]
     const disconnectedResults = disconnectedOpenings
       .map(text => assessInitialProseOpeningContinuity(text, hospitalCorridorContext))
@@ -269,6 +279,8 @@ describe('continuity-safe prose candidate selection', () => {
     expect(recoveredResults).toEqual(recoveredOpenings.map(
       () => ({ required: true, passed: true }),
     ))
+    const currentRecordingAction = chapterScaleText('江哲记录下来眼前变化：保安诡异狞笑着举起电击棍砸下。')
+    expect(assessInitialProseOpeningContinuity(currentRecordingAction, hospitalCorridorContext)).toMatchObject({ required: true, passed: true, failure: null })
 
     const uniqueLongTailFiller = Array.from(
       { length: 60 },
