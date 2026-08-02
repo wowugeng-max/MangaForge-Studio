@@ -33,6 +33,13 @@ const mcpProseGenerationSource = {
   mcp: { server_id: 'buda', key_id: 1, adapter_id: 'buda', agent_id: 'agent-1' },
 }
 
+const retainedChapterGenerationSource = {
+  version: 'chapter_generation_source_v1',
+  active: 'model',
+  model: { model_id: 217 },
+  mcp: { ...mcpProseGenerationSource.mcp, model: '' },
+}
+
 function createRouteHarness() {
   const handlers = new Map<string, any>()
   const register = (method: string, path: string, handler: any) => {
@@ -180,7 +187,102 @@ describe('prose generation source mutation guard', () => {
     expect(await pathExists(workspace)).toBe(false)
   })
 
-  test('preserves an existing prose generation source when generic project update omits it', async () => {
+  test('rejects either own dedicated source through every generic route and reports the field', async () => {
+    const workspace = await tempDir('mangaforge-novel-dedicated-source-guard-')
+    const { createNovelProject, getNovelProject, listNovelProjects } = await import('../novel')
+    const { registerNovelCoreRoutes } = await import('./novel-core-routes')
+    const project = await createNovelProject(workspace, {
+      title: '新旧专用字段保护项目',
+      reference_config: {},
+    })
+    const originalReferenceConfig = structuredClone(project.reference_config)
+    const { app, handlers } = createRouteHarness()
+    registerNovelCoreRoutes(app as any, () => workspace)
+
+    for (const [field, source] of [
+      ['prose_generation_source', mcpProseGenerationSource],
+      ['chapter_generation_source', retainedChapterGenerationSource],
+    ] as const) {
+      const createResponse = await callRoute(handlers.get('POST /api/novel/projects'), {
+        body: {
+          title: `不应创建-${field}`,
+          reference_config: { [field]: source },
+        },
+      })
+      expect(createResponse).toMatchObject({
+        statusCode: 400,
+        body: { error_code: 'MCP_BINDING_INVALID', field },
+      })
+
+      const updateResponse = await callRoute(handlers.get('PUT /api/novel/projects/:id'), {
+        params: { id: String(project.id) },
+        body: { reference_config: { [field]: source } },
+      })
+      expect(updateResponse).toMatchObject({
+        statusCode: 400,
+        body: { error_code: 'MCP_BINDING_INVALID', field },
+      })
+
+      const referenceConfigResponse = await callRoute(handlers.get('PUT /api/novel/projects/:id/reference-config'), {
+        params: { id: String(project.id) },
+        body: { [field]: source },
+      })
+      expect(referenceConfigResponse).toMatchObject({
+        statusCode: 400,
+        body: { error_code: 'MCP_BINDING_INVALID', field },
+      })
+    }
+
+    expect((await getNovelProject(workspace, project.id))?.reference_config).toEqual(originalReferenceConfig)
+    expect((await listNovelProjects(workspace)).map(item => item.title)).toEqual(['新旧专用字段保护项目'])
+  })
+
+  test('ignores inherited dedicated fields without invoking their getters', async () => {
+    const workspace = await tempDir('mangaforge-novel-inherited-source-guard-')
+    const { createNovelProject } = await import('../novel')
+    const { registerNovelCoreRoutes } = await import('./novel-core-routes')
+    const project = await createNovelProject(workspace, { title: '继承字段保护项目', reference_config: {} })
+    const { app, handlers } = createRouteHarness()
+    registerNovelCoreRoutes(app as any, () => workspace)
+    let getterReads = 0
+    const referenceConfig = (notes: string) => Object.assign(
+      Object.create(Object.defineProperties({}, {
+        prose_generation_source: {
+          get() {
+            getterReads += 1
+            throw new Error('inherited prose source must not be read')
+          },
+        },
+        chapter_generation_source: {
+          get() {
+            getterReads += 1
+            throw new Error('inherited chapter source must not be read')
+          },
+        },
+      })),
+      { notes },
+    )
+
+    const createResponse = await callRoute(handlers.get('POST /api/novel/projects'), {
+      body: { title: '允许继承字段的创建', reference_config: referenceConfig('创建') },
+    })
+    expect(createResponse.statusCode).toBe(200)
+
+    const updateResponse = await callRoute(handlers.get('PUT /api/novel/projects/:id'), {
+      params: { id: String(project.id) },
+      body: { reference_config: referenceConfig('项目更新') },
+    })
+    expect(updateResponse.statusCode).toBe(200)
+
+    const referenceConfigResponse = await callRoute(handlers.get('PUT /api/novel/projects/:id/reference-config'), {
+      params: { id: String(project.id) },
+      body: referenceConfig('配置更新'),
+    })
+    expect(referenceConfigResponse.statusCode).toBe(200)
+    expect(getterReads).toBe(0)
+  })
+
+  test('preserves existing dedicated generation sources when generic project update omits them', async () => {
     const workspace = await tempDir('mangaforge-novel-source-project-update-')
     const { createNovelProject, getNovelProject, mutateNovelProjectReferenceConfig } = await import('../novel')
     const { registerNovelCoreRoutes } = await import('./novel-core-routes')
@@ -189,7 +291,11 @@ describe('prose generation source mutation guard', () => {
       projectId: project.id,
       operation: 'test-existing-prose-generation-source',
       mutate: current => ({
-        referenceConfig: { ...current, prose_generation_source: mcpProseGenerationSource },
+        referenceConfig: {
+          ...current,
+          prose_generation_source: mcpProseGenerationSource,
+          chapter_generation_source: retainedChapterGenerationSource,
+        },
         result: null,
       }),
     })
@@ -208,11 +314,14 @@ describe('prose generation source mutation guard', () => {
     expect(response.body.title).toBe('通用项目更新后的标题')
     expect(response.body.reference_config.notes).toBe('通用项目更新保存的备注')
     expect(response.body.reference_config.prose_generation_source).toEqual(mcpProseGenerationSource)
+    expect(response.body.reference_config.chapter_generation_source).toEqual(retainedChapterGenerationSource)
     expect((await getNovelProject(workspace, project.id))?.reference_config?.prose_generation_source)
       .toEqual(mcpProseGenerationSource)
+    expect((await getNovelProject(workspace, project.id))?.reference_config?.chapter_generation_source)
+      .toEqual(retainedChapterGenerationSource)
   })
 
-  test('preserves an existing prose generation source when reference config update omits it', async () => {
+  test('preserves existing dedicated generation sources when reference config update omits them', async () => {
     const workspace = await tempDir('mangaforge-novel-source-config-update-')
     const { createNovelProject, getNovelProject, mutateNovelProjectReferenceConfig } = await import('../novel')
     const { registerNovelCoreRoutes } = await import('./novel-core-routes')
@@ -221,7 +330,11 @@ describe('prose generation source mutation guard', () => {
       projectId: project.id,
       operation: 'test-existing-prose-generation-source',
       mutate: current => ({
-        referenceConfig: { ...current, prose_generation_source: mcpProseGenerationSource },
+        referenceConfig: {
+          ...current,
+          prose_generation_source: mcpProseGenerationSource,
+          chapter_generation_source: retainedChapterGenerationSource,
+        },
         result: null,
       }),
     })
@@ -236,8 +349,11 @@ describe('prose generation source mutation guard', () => {
     expect(response.statusCode).toBe(200)
     expect(response.body.notes).toBe('reference config 更新保存的备注')
     expect(response.body.prose_generation_source).toEqual(mcpProseGenerationSource)
+    expect(response.body.chapter_generation_source).toEqual(retainedChapterGenerationSource)
     expect((await getNovelProject(workspace, project.id))?.reference_config?.prose_generation_source)
       .toEqual(mcpProseGenerationSource)
+    expect((await getNovelProject(workspace, project.id))?.reference_config?.chapter_generation_source)
+      .toEqual(retainedChapterGenerationSource)
   })
 })
 

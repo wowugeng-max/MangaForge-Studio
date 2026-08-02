@@ -2,7 +2,7 @@ import type { Express } from 'express'
 import { ensureWorkspaceStructure } from '../../workspace'
 import { isMcpError } from '../../mcp/errors'
 import { withNovelWorkspaceMutation } from '../../novel/lock'
-import { assertNoProseGenerationSourceMutation } from '../../novel-writing-service/generation-source/source-config'
+import { assertNoGenerationSourceMutation } from '../../novel-writing-service/generation-source/source-config'
 import {
   appendNovelRun,
   createNovelChapter,
@@ -93,18 +93,24 @@ function genericGenerationSourceMutationError(error: unknown) {
     || error.code !== 'MCP_BINDING_INVALID'
     || error.details?.reason !== 'dedicated_binding_route_required'
   ) return null
-  return { error: error.message, detail: error.message, error_code: error.code }
+  return {
+    error: error.message,
+    detail: error.message,
+    error_code: error.code,
+    field: error.details.field,
+  }
 }
 
-function preserveExistingProseGenerationSource(currentConfig: any, replacementConfig: unknown) {
-  if (!Object.prototype.hasOwnProperty.call(currentConfig, 'prose_generation_source')) return replacementConfig
+function preserveExistingGenerationSources(currentConfig: any, replacementConfig: unknown) {
   const replacement = replacementConfig && typeof replacementConfig === 'object'
     ? replacementConfig
     : {}
-  return {
-    ...replacement,
-    prose_generation_source: currentConfig.prose_generation_source,
+  const preserved = { ...replacement }
+  for (const field of ['prose_generation_source', 'chapter_generation_source']) {
+    if (!Object.prototype.hasOwnProperty.call(currentConfig, field)) continue
+    preserved[field] = currentConfig[field]
   }
+  return preserved
 }
 
 export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string) {
@@ -120,7 +126,7 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
 
   app.post('/api/novel/projects', async (req, res) => {
     try {
-      assertNoProseGenerationSourceMutation(req.body?.reference_config)
+      assertNoGenerationSourceMutation(req.body?.reference_config)
       const activeWorkspace = getWorkspace()
       await ensureWorkspaceStructure(activeWorkspace)
       const project = await createNovelProject(activeWorkspace, req.body)
@@ -576,7 +582,7 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
 
   app.put('/api/novel/projects/:id', async (req, res) => {
     try {
-      assertNoProseGenerationSourceMutation(req.body?.reference_config)
+      assertNoGenerationSourceMutation(req.body?.reference_config)
       const activeWorkspace = getWorkspace()
       const projectId = Number(req.params.id)
       const updated = req.body?.reference_config === undefined
@@ -590,7 +596,7 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
               ...req.body,
               reference_config: requestedConfig === null
                 ? currentConfig
-                : preserveExistingProseGenerationSource(currentConfig, requestedConfig),
+                : preserveExistingGenerationSources(currentConfig, requestedConfig),
             })
           }, 'update-novel-project-preserving-prose-generation-source')
       if (!updated) return res.status(404).json({ error: 'project not found' })
@@ -615,7 +621,7 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
 
   app.put('/api/novel/projects/:id/reference-config', async (req, res) => {
     try {
-      assertNoProseGenerationSourceMutation(req.body)
+      assertNoGenerationSourceMutation(req.body)
       const activeWorkspace = getWorkspace()
       const projectId = Number(req.params.id)
       const requestedConfig = req.body || {}
@@ -623,7 +629,7 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
         const current = await getNovelProject(activeWorkspace, projectId)
         if (!current) return null
         return updateNovelProject(activeWorkspace, projectId, {
-          reference_config: preserveExistingProseGenerationSource(
+          reference_config: preserveExistingGenerationSources(
             current.reference_config || {},
             requestedConfig,
           ),

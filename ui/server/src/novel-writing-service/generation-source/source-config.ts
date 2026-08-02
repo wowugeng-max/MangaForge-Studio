@@ -45,13 +45,14 @@ export const MODEL_PROSE_GENERATION_SOURCE: ModelProseGenerationSourceConfig = O
   type: 'model',
 })
 
-export function assertNoProseGenerationSourceMutation(referenceConfig: unknown) {
+export function assertNoGenerationSourceMutation(referenceConfig: unknown) {
   if (!referenceConfig || typeof referenceConfig !== 'object' || Array.isArray(referenceConfig)) return
-  if (Object.prototype.hasOwnProperty.call(referenceConfig, 'prose_generation_source')) {
+  for (const field of ['prose_generation_source', 'chapter_generation_source']) {
+    if (!Object.prototype.hasOwnProperty.call(referenceConfig, field)) continue
     throw new McpError(
       'MCP_BINDING_INVALID',
-      'prose_generation_source 只能通过专用正文来源接口修改',
-      { reason: 'dedicated_binding_route_required' },
+      `${field} 只能通过专用章节来源接口修改`,
+      { reason: 'dedicated_binding_route_required', field },
     )
   }
 }
@@ -347,13 +348,17 @@ export async function validateMcpProjectBinding(
   const projects = await (options.listProjects || listNovelProjects)(activeWorkspace)
   const conflict = projects.find(item => {
     if (Number(item.id) === Number(project?.id)) return false
-    const source = item?.reference_config?.prose_generation_source
-    const other = source?.type === 'mcp' ? source.mcp : null
-    return other
-      && String(other.server_id) === binding.server_id
-      && Number(other.key_id) === binding.key_id
-      && String(other.adapter_id) === binding.adapter_id
-      && String(other.agent_id) === binding.agent_id
+    let other: McpProjectBinding | undefined
+    try {
+      other = resolveChapterGenerationSource(item).mcp
+    } catch {
+      return false
+    }
+    return Boolean(other
+      && other.server_id === binding.server_id
+      && other.key_id === binding.key_id
+      && other.adapter_id === binding.adapter_id
+      && other.agent_id === binding.agent_id)
   })
   if (conflict) {
     throw new McpError('MCP_BINDING_INVALID', `该 Agent 已绑定项目《${conflict.title || conflict.id}》`, {

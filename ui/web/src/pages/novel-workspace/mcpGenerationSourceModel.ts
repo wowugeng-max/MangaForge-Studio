@@ -99,10 +99,9 @@ export function buildTemporaryModelOverride() {
 
 export function buildGenericReferenceConfigWritePayload<T extends Record<string, unknown>>(
   referenceConfig: T,
-): Omit<T, 'prose_generation_source'> {
-  const payload = { ...referenceConfig }
-  if (Object.prototype.hasOwnProperty.call(referenceConfig, 'prose_generation_source')) {
-    delete payload.prose_generation_source
-  }
-  return payload
+): Omit<T, 'prose_generation_source' | 'chapter_generation_source'> {
+  const payload = { ...referenceConfig } as Record<string, unknown>
+  delete payload.prose_generation_source
+  delete payload.chapter_generation_source
+  return payload as Omit<T, 'prose_generation_source' | 'chapter_generation_source'>
 }

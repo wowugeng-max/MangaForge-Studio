@@ -227,7 +227,10 @@ describe('prose generation source config', () => {
 
     await expect(validateMcpProjectBinding(workspace, second, {
       server_id: 'buda', key_id: key.id, adapter_id: 'buda', agent_id: 'agent-1',
-    }, { runtime: runtime as any })).rejects.toMatchObject({ code: 'MCP_BINDING_INVALID' })
+    }, { runtime: runtime as any })).rejects.toMatchObject({
+      code: 'MCP_BINDING_INVALID',
+      details: { reason: 'binding_conflict' },
+    })
 
     await expect(validateMcpProjectBinding(workspace, second, {
       server_id: 'buda', key_id: key.id, adapter_id: 'buda', agent_id: 'agent-2',
@@ -238,6 +241,68 @@ describe('prose generation source config', () => {
     await expect(validateMcpProjectBinding(workspace, first, {
       server_id: 'buda', key_id: key.id, adapter_id: 'buda', agent_id: 'missing',
     }, { runtime: runtime as any })).rejects.toMatchObject({ code: 'MCP_BINDING_INVALID' })
+  })
+
+  test('keeps an inactive retained MCP tuple exclusive while ignoring malformed projects', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-retained-mcp-ownership-'))
+    workspaces.push(workspace)
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const key = await createMcpKey(workspace, { mcp_server_id: 'buda', key: 'sk_retained', description: '账号' })
+    const first = await createNovelProject(workspace, {
+      title: '保留未启用 MCP 的项目',
+      reference_config: {
+        chapter_generation_source: {
+          version: CHAPTER_GENERATION_SOURCE_VERSION,
+          active: 'model',
+          model: { model_id: 217 },
+          mcp: {
+            server_id: 'buda',
+            key_id: key.id,
+            adapter_id: 'buda',
+            agent_id: 'agent-1',
+            model: '',
+          },
+        },
+      },
+    })
+    await createNovelProject(workspace, {
+      title: '损坏来源记录',
+      reference_config: { chapter_generation_source: { version: 'broken' } },
+    })
+    const second = await createNovelProject(workspace, { title: '待绑定项目', reference_config: {} })
+    const runtime = {
+      listAgents: async () => [
+        { id: 'agent-1', name: '正文 Agent' },
+        { id: 'agent-2', name: '正文 Agent 2' },
+      ],
+    }
+    const retainedBinding = {
+      server_id: 'buda',
+      key_id: key.id,
+      adapter_id: 'buda',
+      agent_id: 'agent-1',
+      model: '',
+    }
+
+    await expect(validateMcpProjectBinding(workspace, second, retainedBinding, {
+      runtime: runtime as any,
+    })).rejects.toMatchObject({
+      code: 'MCP_BINDING_INVALID',
+      details: { reason: 'binding_conflict', project_id: first.id },
+    })
+
+    await expect(validateMcpProjectBinding(workspace, second, {
+      ...retainedBinding,
+      agent_id: 'agent-2',
+    }, { runtime: runtime as any })).resolves.toEqual(expect.objectContaining({
+      binding: expect.objectContaining({ agent_id: 'agent-2' }),
+    }))
+
+    await expect(validateMcpProjectBinding(workspace, first, retainedBinding, {
+      runtime: runtime as any,
+    })).resolves.toEqual(expect.objectContaining({
+      binding: retainedBinding,
+    }))
   })
 })
 

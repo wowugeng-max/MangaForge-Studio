@@ -149,6 +149,11 @@ describe('project MCP generation source model', () => {
         notes: '保留参考备注',
         writing_bible: { reader_promise: '每章推进边境谜案' },
         prose_generation_source: proseGenerationSource,
+        chapter_generation_source: {
+          version: 'chapter_generation_source_v1',
+          active: 'model',
+          model: { model_id: 217 },
+        },
       }
       const originalSnapshot = structuredClone(referenceConfig)
 
@@ -156,6 +161,7 @@ describe('project MCP generation source model', () => {
 
       expect(payload).not.toBe(referenceConfig)
       expect(Object.prototype.hasOwnProperty.call(payload, 'prose_generation_source')).toBe(false)
+      expect(Object.prototype.hasOwnProperty.call(payload, 'chapter_generation_source')).toBe(false)
       expect(payload).toEqual({
         references: referenceConfig.references,
         notes: referenceConfig.notes,
@@ -163,11 +169,17 @@ describe('project MCP generation source model', () => {
       })
       expect(referenceConfig).toEqual(originalSnapshot)
       expect(Object.prototype.hasOwnProperty.call(referenceConfig, 'prose_generation_source')).toBe(true)
+      expect(Object.prototype.hasOwnProperty.call(referenceConfig, 'chapter_generation_source')).toBe(true)
     }
 
     const inheritedSourceConfig = Object.assign(
-      Object.create(Object.defineProperty({}, 'prose_generation_source', {
-        get: () => { throw new Error('inherited source must not be read') },
+      Object.create(Object.defineProperties({}, {
+        prose_generation_source: {
+          get: () => { throw new Error('inherited prose source must not be read') },
+        },
+        chapter_generation_source: {
+          get: () => { throw new Error('inherited chapter source must not be read') },
+        },
       })),
       { notes: '只保留 own 字段' },
     )
