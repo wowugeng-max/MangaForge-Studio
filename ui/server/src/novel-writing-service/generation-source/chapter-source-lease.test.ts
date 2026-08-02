@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, mkdir, rm, symlink } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, symlink, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { withMcpWorkspaceMutation } from '../../mcp/workspace-coordinator'
+import { withNovelWorkspaceMutation } from '../../novel/lock'
 import {
   ChapterGenerationSourceError,
   type ChapterGenerationSourceErrorCode,
@@ -119,6 +120,58 @@ describe('ChapterSourceLeaseRegistry', () => {
     await lease.release()
   })
 
+  test('keeps a nonexistent lexical workspace locked after it becomes a symlink', async () => {
+    const { root, workspace: physical } = await createWorkspace('physical')
+    const lateAlias = join(root, 'late-alias')
+    const otherAlias = join(root, 'other-alias')
+    const registry = new ChapterSourceLeaseRegistry()
+    const lease = await registry.acquire(lateAlias, 12, 'pre-symlink-task')
+
+    expect(registry.isActive(lateAlias, 12)).toBe(true)
+    await symlink(physical, lateAlias, 'dir')
+    await symlink(physical, otherAlias, 'dir')
+
+    expect(registry.isActive(lateAlias, 12)).toBe(true)
+    expect(registry.isActive(physical, 12)).toBe(true)
+    expect(registry.isActive(otherAlias, 12)).toBe(true)
+    await expect(registry.acquire(physical, 12, 'physical-bypass')).rejects.toMatchObject({
+      code: 'GENERATION_SOURCE_BUSY',
+    })
+
+    await lease.release()
+    expect(registry.isActive(lateAlias, 12)).toBe(false)
+    expect(registry.isActive(physical, 12)).toBe(false)
+  })
+
+  test('conservatively locks the lexical path and both physical targets after symlink retargeting', async () => {
+    const { root, workspace: oldPhysical } = await createWorkspace('old-physical')
+    const newPhysical = join(root, 'new-physical')
+    const movingAlias = join(root, 'moving-alias')
+    const oldAlias = join(root, 'old-alias')
+    const newAlias = join(root, 'new-alias')
+    await mkdir(newPhysical)
+    await symlink(oldPhysical, movingAlias, 'dir')
+    await symlink(oldPhysical, oldAlias, 'dir')
+    await symlink(newPhysical, newAlias, 'dir')
+    const registry = new ChapterSourceLeaseRegistry()
+    const lease = await registry.acquire(movingAlias, 14, 'retargeted-task')
+
+    await unlink(movingAlias)
+    await symlink(newPhysical, movingAlias, 'dir')
+
+    for (const workspace of [movingAlias, oldPhysical, oldAlias, newPhysical, newAlias]) {
+      expect(registry.isActive(workspace, 14)).toBe(true)
+      await expect(registry.acquire(workspace, 14, `bypass:${workspace}`)).rejects.toMatchObject({
+        code: 'GENERATION_SOURCE_BUSY',
+      })
+    }
+
+    await lease.release()
+    for (const workspace of [movingAlias, oldPhysical, oldAlias, newPhysical, newAlias]) {
+      expect(registry.isActive(workspace, 14)).toBe(false)
+    }
+  })
+
   test('serializes release through the workspace coordinator and caches one release promise', async () => {
     const { workspace } = await createWorkspace()
     const registry = new ChapterSourceLeaseRegistry()
@@ -146,6 +199,29 @@ describe('ChapterSourceLeaseRegistry', () => {
     expect(released).toBe(true)
     expect(registry.isActive(workspace, 13)).toBe(false)
     expect(lease.release()).toBe(firstRelease)
+  })
+
+  test('allows release to retry after an invalid lock-order rejection', async () => {
+    const { workspace } = await createWorkspace()
+    const registry = new ChapterSourceLeaseRegistry()
+    const lease = await registry.acquire(workspace, 15, 'retry-release')
+    let rejectedRelease!: Promise<void>
+
+    await withNovelWorkspaceMutation(workspace, async () => {
+      rejectedRelease = lease.release()
+      expect(lease.release()).toBe(rejectedRelease)
+      await expect(rejectedRelease).rejects.toThrow(
+        'MCP coordinator must be acquired before novel mutation lock',
+      )
+    })
+
+    expect(registry.isActive(workspace, 15)).toBe(true)
+    const retriedRelease = lease.release()
+    expect(retriedRelease).not.toBe(rejectedRelease)
+    expect(lease.release()).toBe(retriedRelease)
+    await retriedRelease
+    expect(registry.isActive(workspace, 15)).toBe(false)
+    expect(lease.release()).toBe(retriedRelease)
   })
 
   test('an old released lease cannot release a later lease for the same project', async () => {
@@ -182,6 +258,30 @@ describe('ChapterSourceLeaseRegistry', () => {
     const replacement = await registry.acquire(workspace, 19, 'replacement')
     expect(registry.isActive(workspace, 19)).toBe(true)
     await replacement.release()
+  })
+
+  test('does not publish active state when freezing the completed lease fails', async () => {
+    const { workspace } = await createWorkspace()
+    const registry = new ChapterSourceLeaseRegistry()
+    const originalFreeze = Object.freeze
+    Object.freeze = ((value: any) => {
+      if (value?.taskId === 'freeze-failure' && value?.projectId === 21) {
+        throw new Error('injected Object.freeze failure')
+      }
+      return originalFreeze(value)
+    }) as typeof Object.freeze
+
+    try {
+      await expect(registry.acquire(workspace, 21, 'freeze-failure')).rejects.toThrow(
+        'injected Object.freeze failure',
+      )
+    } finally {
+      Object.freeze = originalFreeze
+    }
+
+    expect(registry.isActive(workspace, 21)).toBe(false)
+    const lease = await registry.acquire(workspace, 21, 'after-freeze-failure')
+    await lease.release()
   })
 
   test('reports active state synchronously without entering the workspace coordinator', async () => {

@@ -1,3 +1,4 @@
+import { resolve } from 'node:path'
 import { canonicalFilesystemIdentity } from '../../workspace-identity'
 import { withMcpWorkspaceMutation } from '../../mcp/workspace-coordinator'
 import { ChapterGenerationSourceError } from './errors'
@@ -14,44 +15,86 @@ function assertProjectId(projectId: number) {
   }
 }
 
-function activeKey(canonicalWorkspace: string, projectId: number) {
-  return `${canonicalWorkspace}\0${projectId}`
+type WorkspaceIdentities = {
+  lexical: string
+  canonical: string
+}
+
+type ActiveChapterSourceLease = {
+  readonly token: symbol
+  readonly projectId: number
+  readonly lexicalWorkspace: string
+  readonly canonicalWorkspaceAtAcquire: string
+}
+
+function workspaceIdentities(workspaceInput: string): WorkspaceIdentities {
+  const lexical = resolve(workspaceInput)
+  return {
+    lexical,
+    canonical: canonicalFilesystemIdentity(lexical),
+  }
+}
+
+function identitiesOverlap(candidate: WorkspaceIdentities, active: ActiveChapterSourceLease) {
+  const currentCanonical = canonicalFilesystemIdentity(active.lexicalWorkspace)
+  return candidate.lexical === active.lexicalWorkspace
+    || candidate.lexical === active.canonicalWorkspaceAtAcquire
+    || candidate.lexical === currentCanonical
+    || candidate.canonical === active.lexicalWorkspace
+    || candidate.canonical === active.canonicalWorkspaceAtAcquire
+    || candidate.canonical === currentCanonical
 }
 
 export class ChapterSourceLeaseRegistry {
-  private readonly active = new Set<string>()
+  private readonly active = new Map<symbol, ActiveChapterSourceLease>()
+
+  private findActive(workspace: WorkspaceIdentities, projectId: number) {
+    for (const active of this.active.values()) {
+      if (active.projectId === projectId && identitiesOverlap(workspace, active)) return active
+    }
+    return undefined
+  }
 
   isActive(workspaceInput: string, projectId: number): boolean {
     assertProjectId(projectId)
-    const canonicalWorkspace = canonicalFilesystemIdentity(workspaceInput)
-    const key = activeKey(canonicalWorkspace, projectId)
-    return this.active.has(key)
+    return Boolean(this.findActive(workspaceIdentities(workspaceInput), projectId))
   }
 
   async acquire(workspaceInput: string, projectId: number, taskId: string): Promise<ChapterSourceLease> {
     assertProjectId(projectId)
-    const canonicalWorkspace = canonicalFilesystemIdentity(workspaceInput)
-    const key = activeKey(canonicalWorkspace, projectId)
-    return withMcpWorkspaceMutation(canonicalWorkspace, async () => {
-      if (this.active.has(key)) {
+    const initialWorkspace = workspaceIdentities(workspaceInput)
+    return withMcpWorkspaceMutation(initialWorkspace.canonical, async () => {
+      const acquiredWorkspace = workspaceIdentities(initialWorkspace.lexical)
+      if (this.findActive(acquiredWorkspace, projectId)) {
         throw new ChapterGenerationSourceError(
           'GENERATION_SOURCE_BUSY',
           '当前章节任务正在运行，结束后可切换来源',
           { project_id: projectId },
         )
       }
-      this.active.add(key)
 
+      const token = Symbol('chapter-source-lease')
       let releasePromise: Promise<void> | undefined
       const release = () => {
         if (releasePromise) return releasePromise
-        releasePromise = withMcpWorkspaceMutation(canonicalWorkspace, async () => {
-          this.active.delete(key)
+        const operation = withMcpWorkspaceMutation(acquiredWorkspace.canonical, async () => {
+          this.active.delete(token)
+        })
+        releasePromise = operation.catch(error => {
+          if (this.active.has(token)) releasePromise = undefined
+          throw error
         })
         return releasePromise
       }
 
-      return Object.freeze({ taskId, projectId, release })
+      const lease = Object.freeze({ taskId, projectId, release })
+      this.active.set(token, {
+        token,
+        projectId,
+        lexicalWorkspace: acquiredWorkspace.lexical,
+        canonicalWorkspaceAtAcquire: acquiredWorkspace.canonical,
+      })
+      return lease
     })
   }
 }
