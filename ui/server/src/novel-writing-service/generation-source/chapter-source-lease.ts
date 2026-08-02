@@ -21,11 +21,11 @@ function activeKey(canonicalWorkspace: string, projectId: number) {
 export class ChapterSourceLeaseRegistry {
   private readonly active = new Set<string>()
 
-  async isActive(workspaceInput: string, projectId: number): Promise<boolean> {
+  isActive(workspaceInput: string, projectId: number): boolean {
     assertProjectId(projectId)
     const canonicalWorkspace = canonicalFilesystemIdentity(workspaceInput)
     const key = activeKey(canonicalWorkspace, projectId)
-    return withMcpWorkspaceMutation(canonicalWorkspace, async () => this.active.has(key))
+    return this.active.has(key)
   }
 
   async acquire(workspaceInput: string, projectId: number, taskId: string): Promise<ChapterSourceLease> {
