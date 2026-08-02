@@ -331,9 +331,12 @@ describe('ChapterSourceLeaseRegistry', () => {
   })
 
   test('fails closed when workspace identity changes while acquire waits for its initial coordinator', async () => {
-    const { root, workspace: oldPhysical } = await createWorkspace('identity-old')
-    const newPhysical = join(root, 'identity-new')
-    const movingAlias = join(root, 'identity-moving-alias')
+    const oldDirectorySentinel = 'private-user-alice-old-directory-SENTINEL'
+    const newDirectorySentinel = 'private-user-alice-new-directory-SENTINEL'
+    const aliasSentinel = 'private-user-alice-moving-alias-SENTINEL'
+    const { root, workspace: oldPhysical } = await createWorkspace(oldDirectorySentinel)
+    const newPhysical = join(root, newDirectorySentinel)
+    const movingAlias = join(root, aliasSentinel)
     await mkdir(newPhysical)
     await symlink(oldPhysical, movingAlias, 'dir')
     const registry = new ChapterSourceLeaseRegistry()
@@ -375,12 +378,26 @@ describe('ChapterSourceLeaseRegistry', () => {
         code: 'GENERATION_SOURCE_CHANGED',
         error_code: 'GENERATION_SOURCE_CHANGED',
         message: '章节来源工作区身份已变化，请重试',
+        details: {
+          project_id: 30,
+          reason: 'workspace_identity_changed',
+        },
       })
-      const details = (outcome.error as ChapterGenerationSourceError).details || {}
-      expect(String(details.initial_workspace_identity || '').length).toBeGreaterThan(0)
-      expect(String(details.initial_workspace_identity || '').length).toBeLessThanOrEqual(512)
-      expect(String(details.current_workspace_identity || '').length).toBeGreaterThan(0)
-      expect(String(details.current_workspace_identity || '').length).toBeLessThanOrEqual(512)
+      const sourceError = outcome.error as ChapterGenerationSourceError
+      expect(sourceError.details).toEqual({
+        project_id: 30,
+        reason: 'workspace_identity_changed',
+      })
+      const exposedErrorJson = JSON.stringify({
+        message: sourceError.message,
+        details: sourceError.details,
+        error: sourceError,
+      })
+      for (const sentinel of [oldDirectorySentinel, newDirectorySentinel, aliasSentinel]) {
+        expect(sourceError.message).not.toContain(sentinel)
+        expect(JSON.stringify(sourceError.details)).not.toContain(sentinel)
+        expect(exposedErrorJson).not.toContain(sentinel)
+      }
       expect(registry.isActive(movingAlias, 30)).toBe(false)
       expect(registry.isActive(oldPhysical, 30)).toBe(false)
       expect(registry.isActive(newPhysical, 30)).toBe(false)
