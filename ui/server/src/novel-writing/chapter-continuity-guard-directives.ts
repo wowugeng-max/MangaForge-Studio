@@ -59,7 +59,11 @@ export type ContinuityDirective = {
 /** Free-text ending hook continuity: opening must surface ending_hook / last-line anchors. */
 const FREE_TEXT_RAW_SOURCE_LIMIT = 1200
 const FREE_TEXT_CHAPTER_TAIL_LIMIT = FREE_TEXT_RAW_SOURCE_LIMIT * 3
-const NON_CURRENT_FREE_TEXT_SENTENCE_PATTERN = /照片|相片|旧照|旧档案|(?:消息|短信|来信|档案|记录)(?:里|中|内|上|显示|写着|写道|记载着?|记着|提到|称|指出|说明|表明)|(?:档案|记录)\s*(?=[。！？!?；;\n]|$)|梦里|梦中|梦境|(?:多|几|数|[一二三四五六七八九十百千万两\d]+)年前|旧事|往事|已经是.{0,16}(?:年前|过去|往事|旧事)|成了过去/u
+const NON_CURRENT_FREE_TEXT_CONTENT_CARRIER_PATTERN = /(?:消息|短信|来信|档案|记录)\s*(?:(?:里|中|内|上)|(?:(?:内容|正文|原文|条目)\s*)?(?:显示|写着|写道|记载着?|记着|提到|称|指出|说明|表明|说(?:道)?|载明|注明|标明)|(?:内容|正文|原文|条目)\s*(?:为|是)|(?:内容|正文|原文|条目)?\s*(?=[：:,，。！？!?；;“”"'‘’「」『』《》\n]|$))/u
+const NON_CURRENT_FREE_TEXT_SENTENCE_PATTERN = new RegExp(
+  `${NON_CURRENT_FREE_TEXT_CONTENT_CARRIER_PATTERN.source}|照片|相片|旧照|旧档案|梦里|梦中|梦境|(?:多|几|数|[一二三四五六七八九十百千万两0-9]+)年前|旧事|往事|已经是.{0,16}(?:年前|过去|往事|旧事)|成了过去`,
+  'u',
+)
 const CURRENT_ACTION_FREE_TEXT_SENTENCE_START_PATTERN = /^\s*(醒来后|回过神来?|此刻|现在|眼下|这时)/u
 
 function currentActionFreeTextOpening(value: any) {

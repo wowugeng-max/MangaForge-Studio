@@ -231,6 +231,12 @@ describe('continuity-safe prose candidate selection', () => {
     const messageCarriesEvent = chapterScaleText('短信写着保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
     const standaloneArchive = chapterScaleText('档案。保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
     const standaloneRecord = chapterScaleText('记录。保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
+    const messageLabel = chapterScaleText('消息：保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
+    const smsQuoteLabel = chapterScaleText('短信：“保安诡异狞笑着举起电击棍砸下。”现在江哲直接进入重症监护室。')
+    const letterSays = chapterScaleText('来信说保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
+    const archiveStates = chapterScaleText('档案载明保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
+    const recordContent = chapterScaleText('记录内容为：保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
+    const numericPast = chapterScaleText('3年前，保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
     const disconnectedOpenings = [
       surfaceOnly,
       singleActorOnly,
@@ -260,6 +266,12 @@ describe('continuity-safe prose candidate selection', () => {
       messageCarriesEvent,
       standaloneArchive,
       standaloneRecord,
+      messageLabel,
+      smsQuoteLabel,
+      letterSays,
+      archiveStates,
+      recordContent,
+      numericPast,
     ]
     const disconnectedResults = disconnectedOpenings
       .map(text => assessInitialProseOpeningContinuity(text, hospitalCorridorContext))
