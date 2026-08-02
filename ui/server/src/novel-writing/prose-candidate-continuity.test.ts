@@ -228,12 +228,17 @@ describe('continuity-safe prose candidate selection', () => {
       () => ({ required: true, passed: false }),
     ))
 
+    const uniqueLongTailFiller = Array.from(
+      { length: 60 },
+      (_, index) => `第${index + 1}份无关清单逐项标注石阶苔痕窗框锈迹纸页折角以及一串没有意义的普通编号。`,
+    ).join('')
+    expect(uniqueLongTailFiller.length).toBeGreaterThan(2000)
     const tailBoundedContext = {
       ...hospitalCorridorContext,
       continuity: {
         previous_chapter: {
           ending_hook: '空气里传来一声异响，未知威胁正在逼近。',
-          ending_excerpt: `${'墙上的灰尘纹丝不动。'.repeat(500)}保安诡异狞笑着举起电击棍砸下。墙边警铃突然爆响。`,
+          ending_excerpt: `${uniqueLongTailFiller}保安诡异狞笑着举起电击棍砸下。墙边警铃突然爆响。`,
         },
       },
     }
