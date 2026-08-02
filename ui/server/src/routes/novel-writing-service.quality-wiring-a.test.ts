@@ -221,6 +221,10 @@ describe('novel writing service prose quality wiring a', () => {
       chapterWordTarget: { mode: 'custom', target: 4000, min: 3000, max: 5000 },
       initialSceneCards: sceneCards,
       contextPackageOverride: {
+        continuity: {
+          previous_chapter: null,
+          previousChapter: null,
+        },
         chapter_target: {
           id: 10,
           chapter_no: 11,
@@ -246,6 +250,7 @@ describe('novel writing service prose quality wiring a', () => {
       code: 'opening_handoff_disconnected',
       source: 'canonical_continuity',
     })
+    expect(harness.modelCalls.draft).toBe(1)
     expect(harness.modelCalls.review).toBe(0)
     expect(harness.modelCalls.revision).toBe(0)
     expect(harness.modelCalls.editor).toBe(0)
@@ -266,21 +271,28 @@ describe('novel writing service prose quality wiring a', () => {
     const cases = [
       {
         draftText: REAL_CHAPTER_11_CANONICAL_CONFLICT_PROSE,
+        chapterWordTarget: { mode: 'custom', target: 5000 },
         contextPackageOverride: withoutOpeningHandoffGuard({
           canonical_surface_index: canonicalSurfaceIndex,
           canonicalSurfaceIndex,
         }),
+        expectedCode: 'PROSE_QUALITY_GATE_BLOCKED',
+        expectedFailureCode: 'canonical_proper_noun_conflict',
         expectedSource: 'canonical_continuity',
       },
       {
         draftText: '第十章：生成失败',
+        chapterWordTarget: undefined,
         contextPackageOverride: withoutOpeningHandoffGuard(),
+        expectedCode: 'PROSE_INVALID',
+        expectedFailureCode: 'prose_too_short',
         expectedSource: 'prose_shape',
       },
     ]
     for (const item of cases) {
       const harness = await createProsePipelineHarness(createNovelWritingService, {
         draftText: item.draftText,
+        chapterWordTarget: item.chapterWordTarget,
         contextPackageOverride: item.contextPackageOverride,
       })
       const before = JSON.stringify({
@@ -290,7 +302,6 @@ describe('novel writing service prose quality wiring a', () => {
       })
       const error = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
         model_id: 217,
-        target_word_count: 1000,
         production_mode: 'draft_only',
       }).then(() => null, (caught: any) => caught)
       const after = JSON.stringify({
@@ -299,10 +310,14 @@ describe('novel writing service prose quality wiring a', () => {
         reviews: await listNovelReviews(harness.workspace, harness.project.id),
       })
 
+      expect(error?.code).toBe(item.expectedCode)
       expect(error?.admission_status).toBe('blocked_invalid')
+      expect(error?.admission_failure?.code).toBe(item.expectedFailureCode)
       expect(error?.admission_failure?.source).toBe(item.expectedSource)
       expect(after).toBe(before)
-      expect(harness.memoryTexts).toEqual([])
+      expect(harness.storeCalls).toBe(0)
+      expect(harness.storyStateCalls).toBe(0)
+      expect(harness.memoryTexts).toHaveLength(0)
     }
   })
   test('keeps a real low-risk style hit advisory when the review repeats the same evidence', () => {
