@@ -8,6 +8,7 @@ import type { McpKeyRecord, McpServerRecord } from '../../mcp/types'
 import { listNovelProjects } from '../../novel'
 
 const SOURCE_VERSION = 'prose_generation_source_v1' as const
+export const CHAPTER_GENERATION_SOURCE_VERSION = 'chapter_generation_source_v1' as const
 
 export type ModelProseGenerationSourceConfig = {
   version: typeof SOURCE_VERSION
@@ -29,6 +30,15 @@ export type McpProseGenerationSourceConfig = {
 }
 
 export type ProseGenerationSourceConfig = ModelProseGenerationSourceConfig | McpProseGenerationSourceConfig
+
+export type ChapterGenerationSourceState = {
+  version: typeof CHAPTER_GENERATION_SOURCE_VERSION
+  active: 'model' | 'mcp'
+  model: {
+    model_id?: number
+  }
+  mcp?: McpProjectBinding
+}
 
 export const MODEL_PROSE_GENERATION_SOURCE: ModelProseGenerationSourceConfig = Object.freeze({
   version: SOURCE_VERSION,
@@ -118,6 +128,89 @@ export function proseGenerationSourceFingerprint(source: ProseGenerationSourceCo
         normalized.mcp.model,
       ]
   return `sha256:${createHash('sha256').update(JSON.stringify(identity), 'utf8').digest('hex')}`
+}
+
+export function normalizeChapterGenerationSource(value: unknown): ChapterGenerationSourceState {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new McpError('MCP_BINDING_INVALID', '章节生成来源配置必须是对象')
+  }
+  const record = value as Record<string, unknown>
+  if (record.version !== CHAPTER_GENERATION_SOURCE_VERSION) {
+    throw new McpError('MCP_BINDING_INVALID', '章节生成来源版本缺失或不受支持')
+  }
+  if (record.active !== 'model' && record.active !== 'mcp') {
+    throw new McpError('MCP_BINDING_INVALID', '章节生成活动来源缺失或不受支持')
+  }
+  if (!record.model || typeof record.model !== 'object' || Array.isArray(record.model)) {
+    throw new McpError('MCP_BINDING_INVALID', '章节生成模型配置必须是对象')
+  }
+
+  const rawModelId = (record.model as Record<string, unknown>).model_id
+  if (rawModelId !== undefined && (!Number.isInteger(rawModelId) || Number(rawModelId) <= 0)) {
+    throw new McpError('MCP_BINDING_INVALID', '章节生成 model_id 必须是正整数')
+  }
+  const model = rawModelId === undefined ? {} : { model_id: Number(rawModelId) }
+  const mcp = record.mcp === undefined ? undefined : normalizeMcpProjectBinding(record.mcp)
+  if (record.active === 'mcp' && !mcp) {
+    throw new McpError('MCP_BINDING_INVALID', 'MCP 章节生成来源缺少项目绑定')
+  }
+
+  return {
+    version: CHAPTER_GENERATION_SOURCE_VERSION,
+    active: record.active,
+    model,
+    ...(mcp ? { mcp } : {}),
+  }
+}
+
+export function resolveChapterGenerationSource(project: any): ChapterGenerationSourceState {
+  const config = project?.reference_config
+  if (config && Object.prototype.hasOwnProperty.call(config, 'chapter_generation_source')) {
+    return normalizeChapterGenerationSource(config.chapter_generation_source)
+  }
+
+  const legacy = resolveProseGenerationSource(project)
+  if (legacy.type === 'mcp') {
+    return {
+      version: CHAPTER_GENERATION_SOURCE_VERSION,
+      active: 'mcp',
+      model: {},
+      mcp: legacy.mcp,
+    }
+  }
+  return {
+    version: CHAPTER_GENERATION_SOURCE_VERSION,
+    active: 'model',
+    model: {},
+  }
+}
+
+export function chapterGenerationSourceFingerprint(state: ChapterGenerationSourceState) {
+  const normalized = normalizeChapterGenerationSource(state)
+  const identity = normalized.active === 'model'
+    ? [normalized.version, normalized.active, normalized.model.model_id ?? null]
+    : [
+        normalized.version,
+        normalized.active,
+        normalized.mcp!.server_id,
+        normalized.mcp!.key_id,
+        normalized.mcp!.adapter_id,
+        normalized.mcp!.agent_id,
+        normalized.mcp!.model,
+      ]
+  return `sha256:${createHash('sha256').update(JSON.stringify(identity), 'utf8').digest('hex')}`
+}
+
+export function toLegacyProseGenerationSource(state: ChapterGenerationSourceState): ProseGenerationSourceConfig {
+  const normalized = normalizeChapterGenerationSource(state)
+  if (normalized.active === 'mcp') {
+    return {
+      version: SOURCE_VERSION,
+      type: 'mcp',
+      mcp: normalized.mcp!,
+    }
+  }
+  return { ...MODEL_PROSE_GENERATION_SOURCE }
 }
 
 type McpCredentialSnapshot = {

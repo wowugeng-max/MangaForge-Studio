@@ -6,10 +6,15 @@ import { createNovelProject } from '../../novel'
 import { createMcpKey } from '../../mcp/key-store'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from '../../mcp/server-store'
 import {
+  CHAPTER_GENERATION_SOURCE_VERSION,
+  chapterGenerationSourceFingerprint,
   normalizeMcpProjectBinding,
+  normalizeChapterGenerationSource,
   normalizeProseGenerationSource,
   proseGenerationSourceFingerprint,
+  resolveChapterGenerationSource,
   resolveProseGenerationSource,
+  toLegacyProseGenerationSource,
   validateMcpProjectBinding,
 } from './source-config'
 
@@ -233,5 +238,216 @@ describe('prose generation source config', () => {
     await expect(validateMcpProjectBinding(workspace, first, {
       server_id: 'buda', key_id: key.id, adapter_id: 'buda', agent_id: 'missing',
     }, { runtime: runtime as any })).rejects.toMatchObject({ code: 'MCP_BINDING_INVALID' })
+  })
+})
+
+describe('retained chapter generation source state', () => {
+  const mcp = {
+    server_id: 'buda',
+    key_id: 3,
+    adapter_id: 'buda',
+    agent_id: 'agent-1',
+    model: 'buda-model',
+  }
+
+  test('read-only migrates missing and legacy model source records', () => {
+    const missing = { reference_config: { untouched: true } }
+    const legacy = {
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'model',
+        },
+      },
+    }
+    const missingBefore = structuredClone(missing)
+    const legacyBefore = structuredClone(legacy)
+
+    expect(resolveChapterGenerationSource(missing)).toEqual({
+      version: CHAPTER_GENERATION_SOURCE_VERSION,
+      active: 'model',
+      model: {},
+    })
+    expect(resolveChapterGenerationSource(legacy)).toEqual({
+      version: CHAPTER_GENERATION_SOURCE_VERSION,
+      active: 'model',
+      model: {},
+    })
+    expect(missing).toEqual(missingBefore)
+    expect(legacy).toEqual(legacyBefore)
+  })
+
+  test('read-only migrates a legacy MCP source with its complete normalized binding', () => {
+    const project = {
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: { ...mcp, model: '  buda-model  ' },
+        },
+      },
+    }
+    const before = structuredClone(project)
+
+    expect(resolveChapterGenerationSource(project)).toEqual({
+      version: CHAPTER_GENERATION_SOURCE_VERSION,
+      active: 'mcp',
+      model: {},
+      mcp,
+    })
+    expect(project).toEqual(before)
+  })
+
+  test('prefers and strictly normalizes an own retained source record', () => {
+    const project = {
+      reference_config: {
+        chapter_generation_source: {
+          version: CHAPTER_GENERATION_SOURCE_VERSION,
+          active: 'model',
+          model: { model_id: 217 },
+          mcp: { ...mcp, model: '  buda-model  ' },
+        },
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: { ...mcp, agent_id: 'legacy-agent' },
+        },
+      },
+    }
+
+    expect(resolveChapterGenerationSource(project)).toEqual({
+      version: CHAPTER_GENERATION_SOURCE_VERSION,
+      active: 'model',
+      model: { model_id: 217 },
+      mcp,
+    })
+
+    const inherited = Object.create({
+      chapter_generation_source: {
+        version: CHAPTER_GENERATION_SOURCE_VERSION,
+        active: 'mcp',
+        model: {},
+        mcp,
+      },
+    })
+    expect(resolveChapterGenerationSource({ reference_config: inherited })).toEqual({
+      version: CHAPTER_GENERATION_SOURCE_VERSION,
+      active: 'model',
+      model: {},
+    })
+  })
+
+  test('retains inactive configuration while fingerprinting only the active model', () => {
+    const state = normalizeChapterGenerationSource({
+      version: CHAPTER_GENERATION_SOURCE_VERSION,
+      active: 'model',
+      model: { model_id: 217 },
+      mcp,
+    })
+
+    expect(state).toEqual({
+      version: CHAPTER_GENERATION_SOURCE_VERSION,
+      active: 'model',
+      model: { model_id: 217 },
+      mcp,
+    })
+    expect(chapterGenerationSourceFingerprint({
+      ...state,
+      mcp: { ...mcp, key_id: 4, agent_id: 'inactive-agent', model: 'inactive-model' },
+    })).toBe(chapterGenerationSourceFingerprint(state))
+    expect(chapterGenerationSourceFingerprint({
+      ...state,
+      model: { model_id: 218 },
+    })).not.toBe(chapterGenerationSourceFingerprint(state))
+  })
+
+  test('fingerprints only the active MCP binding and ignores retained model configuration', () => {
+    const state = normalizeChapterGenerationSource({
+      version: CHAPTER_GENERATION_SOURCE_VERSION,
+      active: 'mcp',
+      model: { model_id: 217 },
+      mcp,
+    })
+    const fingerprint = chapterGenerationSourceFingerprint(state)
+
+    expect(fingerprint).toMatch(/^sha256:[0-9a-f]{64}$/)
+    expect(chapterGenerationSourceFingerprint({
+      ...state,
+      model: { model_id: 218 },
+    })).toBe(fingerprint)
+    for (const changedBinding of [
+      { ...mcp, server_id: 'other' },
+      { ...mcp, key_id: 4 },
+      { ...mcp, adapter_id: 'other' },
+      { ...mcp, agent_id: 'agent-2' },
+      { ...mcp, model: 'other-model' },
+    ]) {
+      expect(chapterGenerationSourceFingerprint({
+        ...state,
+        mcp: changedBinding,
+      })).not.toBe(fingerprint)
+    }
+  })
+
+  test('converts retained state to the legacy prose source contract', () => {
+    expect(toLegacyProseGenerationSource({
+      version: CHAPTER_GENERATION_SOURCE_VERSION,
+      active: 'model',
+      model: { model_id: 217 },
+      mcp,
+    })).toEqual({
+      version: 'prose_generation_source_v1',
+      type: 'model',
+    })
+    expect(toLegacyProseGenerationSource({
+      version: CHAPTER_GENERATION_SOURCE_VERSION,
+      active: 'mcp',
+      model: { model_id: 217 },
+      mcp,
+    })).toEqual({
+      version: 'prose_generation_source_v1',
+      type: 'mcp',
+      mcp,
+    })
+  })
+
+  test('rejects malformed retained source records', () => {
+    for (const source of [
+      undefined,
+      null,
+      [],
+      'model',
+      1,
+      true,
+      {},
+      { version: 'wrong', active: 'model', model: {} },
+      { version: CHAPTER_GENERATION_SOURCE_VERSION, active: 'both', model: {} },
+      { version: CHAPTER_GENERATION_SOURCE_VERSION, active: 'model' },
+      { version: CHAPTER_GENERATION_SOURCE_VERSION, active: 'model', model: null },
+      { version: CHAPTER_GENERATION_SOURCE_VERSION, active: 'model', model: [] },
+      { version: CHAPTER_GENERATION_SOURCE_VERSION, active: 'model', model: { model_id: 1.5 } },
+      { version: CHAPTER_GENERATION_SOURCE_VERSION, active: 'model', model: { model_id: 0 } },
+      { version: CHAPTER_GENERATION_SOURCE_VERSION, active: 'model', model: { model_id: -1 } },
+      { version: CHAPTER_GENERATION_SOURCE_VERSION, active: 'model', model: { model_id: '217' } },
+      { version: CHAPTER_GENERATION_SOURCE_VERSION, active: 'mcp', model: {} },
+      { version: CHAPTER_GENERATION_SOURCE_VERSION, active: 'mcp', model: {}, mcp: { server_id: 'buda' } },
+    ]) {
+      expect(() => normalizeChapterGenerationSource(source))
+        .toThrow(expect.objectContaining({ code: 'MCP_BINDING_INVALID' }))
+    }
+  })
+
+  test('rejects malformed present retained records instead of falling back to legacy state', () => {
+    for (const source of [undefined, null, [], {}, { version: 'wrong', active: 'model', model: {} }]) {
+      expect(() => resolveChapterGenerationSource({
+        reference_config: {
+          chapter_generation_source: source,
+          prose_generation_source: {
+            version: 'prose_generation_source_v1',
+            type: 'model',
+          },
+        },
+      })).toThrow(expect.objectContaining({ code: 'MCP_BINDING_INVALID' }))
+    }
   })
 })
