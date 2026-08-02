@@ -82,6 +82,7 @@ const SOFT_BASELINES: Record<string, number> = {
   'novel-writing-service/quality/structured-review-required-fields-extended.ts': 450,
   'novel-writing/chapter-continuity-guard.ts': 50,
   'novel-writing/chapter-continuity-guard-basics.ts': 360,
+  'novel-writing/chapter-continuity-guard-free-text.ts': 150,
   'novel-writing/chapter-continuity-guard-directives.ts': 580,
   'novel-writing-service/post-delivery/quality-sync-reports-benchmark-blueprint.ts': 50,
   'novel-writing-service/post-delivery/quality-sync-reports-benchmark-blueprint-core.ts': 650,
