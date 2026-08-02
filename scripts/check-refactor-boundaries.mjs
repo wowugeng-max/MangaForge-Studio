@@ -39,6 +39,7 @@ function countLines(text) {
 }
 
 function countExportedDeclarations(text) {
+  // This ratchet counts direct declarations only; re-exported surface area is intentionally out of scope.
   return text
     .split(/\r?\n/)
     .filter(line => /^\s*export\s+(?:async\s+)?(?:function|const|let|var|class|interface|type|enum)\s+/.test(line))
@@ -60,9 +61,169 @@ function walkSourceFiles(root, relativeDir, output) {
   }
 }
 
-function importPattern(moduleName) {
-  const escaped = moduleName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return new RegExp(`(?:from\\s*['"]${escaped}['"]|import\\s*\\(\\s*['"]${escaped}['"]|require\\s*\\(\\s*['"]${escaped}['"])`)
+function readStringToken(text, start) {
+  const quote = text[start]
+  let value = ''
+  let index = start + 1
+  while (index < text.length) {
+    const char = text[index]
+    if (char === quote) return { token: { type: 'string', value }, end: index + 1 }
+    if (char === '\n' || char === '\r') return { token: null, end: index + 1 }
+    if (char !== '\\') {
+      value += char
+      index += 1
+      continue
+    }
+
+    index += 1
+    if (index >= text.length) return { token: null, end: index }
+    const escaped = text[index]
+    const simpleEscapes = {
+      b: '\b',
+      f: '\f',
+      n: '\n',
+      r: '\r',
+      t: '\t',
+      v: '\v',
+      0: '\0',
+    }
+    if (Object.hasOwn(simpleEscapes, escaped)) {
+      value += simpleEscapes[escaped]
+      index += 1
+      continue
+    }
+    if (escaped === '\n') {
+      index += 1
+      continue
+    }
+    if (escaped === '\r') {
+      index += text[index + 1] === '\n' ? 2 : 1
+      continue
+    }
+    value += escaped
+    index += 1
+  }
+  return { token: null, end: index }
+}
+
+function tokenizeModuleSyntax(text) {
+  const tokens = []
+  let index = 0
+  while (index < text.length) {
+    const char = text[index]
+    if (/\s/.test(char)) {
+      index += 1
+      continue
+    }
+    if (char === '/' && text[index + 1] === '/') {
+      index = text.indexOf('\n', index + 2)
+      if (index === -1) break
+      continue
+    }
+    if (char === '/' && text[index + 1] === '*') {
+      const end = text.indexOf('*/', index + 2)
+      index = end === -1 ? text.length : end + 2
+      continue
+    }
+    if (char === '"' || char === "'") {
+      const result = readStringToken(text, index)
+      if (result.token) tokens.push(result.token)
+      index = result.end
+      continue
+    }
+    if (char === '`') {
+      index += 1
+      while (index < text.length) {
+        if (text[index] === '\\') {
+          index += 2
+          continue
+        }
+        if (text[index] === '`') {
+          index += 1
+          break
+        }
+        index += 1
+      }
+      continue
+    }
+    if (/[A-Za-z_$]/.test(char)) {
+      const start = index
+      index += 1
+      while (index < text.length && /[A-Za-z0-9_$]/.test(text[index])) index += 1
+      tokens.push({ type: 'identifier', value: text.slice(start, index) })
+      continue
+    }
+    tokens.push({ type: 'punctuation', value: char })
+    index += 1
+  }
+  return tokens
+}
+
+function extractRelativeModuleSpecifiers(text) {
+  const tokens = tokenizeModuleSyntax(text)
+  const specifiers = []
+  const addStringToken = (token) => {
+    if (token?.type === 'string' && token.value.startsWith('.')) specifiers.push(token.value)
+  }
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]
+    if (token.type !== 'identifier') continue
+
+    if (token.value === 'require') {
+      if (tokens[index + 1]?.value === '(' && tokens[index + 2]?.type === 'string') {
+        addStringToken(tokens[index + 2])
+      }
+      continue
+    }
+
+    if (token.value !== 'import' && token.value !== 'export') continue
+    if (token.value === 'import' && tokens[index + 1]?.value === '(') {
+      addStringToken(tokens[index + 2])
+      continue
+    }
+    if (token.value === 'import' && tokens[index + 1]?.type === 'string') {
+      addStringToken(tokens[index + 1])
+      continue
+    }
+
+    for (let cursor = index + 1; cursor < tokens.length; cursor += 1) {
+      const candidate = tokens[cursor]
+      if (candidate.value === ';') break
+      if (cursor > index + 1 && candidate.type === 'identifier' && (candidate.value === 'import' || candidate.value === 'export')) break
+      if (candidate.type === 'identifier' && candidate.value === 'from' && tokens[cursor + 1]?.type === 'string') {
+        addStringToken(tokens[cursor + 1])
+        break
+      }
+    }
+  }
+  return specifiers
+}
+
+function canonicalExistingPath(filePath) {
+  try {
+    return fs.realpathSync(filePath)
+  } catch {
+    return null
+  }
+}
+
+function resolveRelativeSource(root, importer, specifier) {
+  if (!specifier.startsWith('.')) return null
+  const basePath = path.resolve(root, path.dirname(importer), specifier)
+  const candidates = []
+  if (sourceExtensions.has(path.extname(basePath))) {
+    candidates.push(basePath)
+  } else {
+    candidates.push(basePath)
+    for (const extension of sourceExtensions) candidates.push(`${basePath}${extension}`)
+    for (const extension of sourceExtensions) candidates.push(path.join(basePath, `index${extension}`))
+  }
+  for (const candidate of candidates) {
+    const canonical = canonicalExistingPath(candidate)
+    if (canonical && fs.statSync(canonical).isFile()) return canonical
+  }
+  return null
 }
 
 function checkFileBoundaries(root, config) {
@@ -103,14 +264,20 @@ function checkLegacyImports(root, config) {
   }
 
   for (const rule of legacyImports) {
-    const moduleName = String(rule.module || '')
-    if (!moduleName) continue
+    const target = normalizeRelative(String(rule.target || ''))
+    if (!target) continue
+    const canonicalTarget = canonicalExistingPath(path.join(root, target))
+    if (!canonicalTarget) {
+      failures.push(`legacy import target ${target} is missing`)
+      continue
+    }
     const allowed = new Set((rule.allowed_importers || rule.allowedImporters || []).map((item) => normalizeRelative(String(item))))
-    const pattern = importPattern(moduleName)
     for (const file of files) {
       const text = fs.readFileSync(path.join(root, file), 'utf8')
-      if (!pattern.test(text) || allowed.has(file)) continue
-      failures.push(`${file} imports ${moduleName}; allowed importers: ${Array.from(allowed).join(', ') || '(none)'}`)
+      const specifier = extractRelativeModuleSpecifiers(text)
+        .find((item) => resolveRelativeSource(root, file, item) === canonicalTarget)
+      if (!specifier || allowed.has(file)) continue
+      failures.push(`${file} imports ${specifier}, which resolves to legacy target ${target}; allowed importers: ${Array.from(allowed).join(', ') || '(none)'}`)
     }
   }
   return failures

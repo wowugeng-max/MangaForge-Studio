@@ -39,7 +39,7 @@ afterEach(() => {
 })
 
 describe('check-refactor-boundaries', () => {
-  test('passes when monitored files stay within line/export/import boundaries', () => {
+  test('passes within boundaries and excludes re-exports from the direct declaration count', () => {
     const root = makeTempRepo()
     writeFile(root, 'refactor-boundaries.json', JSON.stringify({
       files: [
@@ -51,7 +51,7 @@ describe('check-refactor-boundaries', () => {
       ],
       legacy_imports: [
         {
-          module: './legacy-service',
+          target: 'src/legacy-service.ts',
           allowed_importers: ['src/legacy-service.test.ts'],
         },
       ],
@@ -59,8 +59,10 @@ describe('check-refactor-boundaries', () => {
     writeFile(root, 'src/legacy-service.ts', [
       'export function first() {}',
       'export type Second = string',
+      "export * from './canonical-service'",
       'const hidden = 1',
     ].join('\n'))
+    writeFile(root, 'src/canonical-service.ts', 'export const canonical = true\n')
     writeFile(root, 'src/legacy-service.test.ts', "import { first } from './legacy-service'\n")
 
     const result = runBoundaryCheck(root)
@@ -81,7 +83,7 @@ describe('check-refactor-boundaries', () => {
       ],
       legacy_imports: [
         {
-          module: './legacy-service',
+          target: 'src/legacy-service.ts',
           allowed_importers: ['src/legacy-service.test.ts'],
         },
       ],
@@ -100,5 +102,67 @@ describe('check-refactor-boundaries', () => {
     expect(output).toContain('src/legacy-service.ts has 3 lines, max 2')
     expect(output).toContain('src/legacy-service.ts has 2 exported declarations, max 1')
     expect(output).toContain('src/new-route.ts imports ./legacy-service')
+  })
+
+  test('resolves literal relative module specifiers to one legacy target', () => {
+    const root = makeTempRepo()
+    writeFile(root, 'refactor-boundaries.json', JSON.stringify({
+      scan_roots: ['src'],
+      legacy_imports: [
+        {
+          target: 'src/routes/legacy-service.ts',
+          allowed_importers: [],
+        },
+      ],
+    }))
+    writeFile(root, 'src/routes/legacy-service.ts', 'export const legacy = true\n')
+    writeFile(root, 'src/routes/same-level.ts', "import { legacy } from './legacy-service'\n")
+    writeFile(root, 'src/routes/nested/parent.ts', "import { legacy } from '../legacy-service'\n")
+    writeFile(root, 'src/routes/explicit-extension.ts', "import { legacy } from './legacy-service.ts'\n")
+    writeFile(root, 'src/routes/dynamic.ts', "const legacy = await import('./legacy-service')\n")
+    writeFile(root, 'src/routes/required.cjs', "const legacy = require('./legacy-service')\n")
+    writeFile(root, 'src/routes/export-from.ts', "export { legacy } from './legacy-service'\n")
+    writeFile(root, 'src/routes/side-effect.ts', "import './legacy-service'\n")
+
+    const result = runBoundaryCheck(root)
+    const output = `${result.stdout}\n${result.stderr}`
+
+    expect(result.status).toBe(1)
+    for (const importer of [
+      'src/routes/same-level.ts',
+      'src/routes/nested/parent.ts',
+      'src/routes/explicit-extension.ts',
+      'src/routes/dynamic.ts',
+      'src/routes/required.cjs',
+      'src/routes/export-from.ts',
+      'src/routes/side-effect.ts',
+    ]) {
+      expect(output).toContain(`${importer} imports`)
+    }
+  })
+
+  test('ignores the same basename when it resolves to another package or ordinary text', () => {
+    const root = makeTempRepo()
+    writeFile(root, 'refactor-boundaries.json', JSON.stringify({
+      scan_roots: ['src'],
+      legacy_imports: [
+        {
+          target: 'src/routes/legacy-service.ts',
+          allowed_importers: [],
+        },
+      ],
+    }))
+    writeFile(root, 'src/routes/legacy-service.ts', 'export const legacy = true\n')
+    writeFile(root, 'src/legacy-service/index.ts', 'export const canonical = true\n')
+    writeFile(root, 'src/package-consumer.ts', [
+      "import { canonical } from './legacy-service'",
+      "const documentation = \"import './routes/legacy-service'\"",
+      "// import './routes/legacy-service'",
+    ].join('\n'))
+
+    const result = runBoundaryCheck(root)
+
+    expect(result.status).toBe(0)
+    expect(result.stdout).toContain('[refactor-boundaries] ok')
   })
 })

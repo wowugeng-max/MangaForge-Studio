@@ -8,7 +8,7 @@ import {
   mergeProseGenerationRequestOverrides,
 } from './prose-generation-contract'
 import { selectOhStoryDirectorContracts } from '../routes/novel-oh-story-director'
-import { compileParagraphProseContext } from '../routes/novel-writing-service'
+import { compileParagraphProseContext } from '../novel-writing-service'
 
 const requiredSections = [
   { key: 'task', text: 'CORE_TASK' },

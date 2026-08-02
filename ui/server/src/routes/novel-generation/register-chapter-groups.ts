@@ -13,7 +13,7 @@ import {
 } from '../../novel'
 import { buildMaterialScore } from '../novel-chapter-context-routes'
 import { asArray, buildLLMResultDiagnostics, compactText, getNovelPayload, normalizeSceneProduction, parseJsonLikePayload, safeJsonStringify } from '../novel-route-utils'
-import { applyChapterWordTargetToContext, countProseChars, normalizeDeliveryRiskReceipts, resolveChapterWordTarget } from '../novel-writing-service'
+import { applyChapterWordTargetToContext, countProseChars, normalizeDeliveryRiskReceipts, resolveChapterWordTarget } from '../../novel-writing-service'
 import { compactProseGenerationOverride } from '../../novel-writing/prose-generation-contract'
 import type {
   GenerationRoutesContext,

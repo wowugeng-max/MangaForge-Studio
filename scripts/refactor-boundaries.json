@@ -57,7 +57,7 @@
   ],
   "legacy_imports": [
     {
-      "module": "./novel-writing-service",
+      "target": "ui/server/src/routes/novel-writing-service.ts",
       "allowed_importers": [
         "ui/server/src/routes/novel.ts",
         "ui/server/src/routes/novel-chapter-context-routes.ts",

@@ -4,8 +4,19 @@ import {
   normalizeDeliveryRiskCarryOverContext,
   normalizeDeliveryRiskReceipts,
 } from './novel-writing-service'
+import {
+  buildFallbackNextChapterQualityPlan as canonicalBuildFallbackNextChapterQualityPlan,
+  normalizeDeliveryRiskCarryOverContext as canonicalNormalizeDeliveryRiskCarryOverContext,
+  normalizeDeliveryRiskReceipts as canonicalNormalizeDeliveryRiskReceipts,
+} from '../novel-writing-service'
 
 describe('novel writing delivery-risk contracts', () => {
+  test('compatibility shim preserves canonical delivery-risk live bindings', () => {
+    expect(buildFallbackNextChapterQualityPlan).toBe(canonicalBuildFallbackNextChapterQualityPlan)
+    expect(normalizeDeliveryRiskCarryOverContext).toBe(canonicalNormalizeDeliveryRiskCarryOverContext)
+    expect(normalizeDeliveryRiskReceipts).toBe(canonicalNormalizeDeliveryRiskReceipts)
+  })
+
   test('normalizes recursive delivery-risk carry-over into bounded actionable tasks', () => {
     const carryOver = normalizeDeliveryRiskCarryOverContext({
       total_count: 200,
