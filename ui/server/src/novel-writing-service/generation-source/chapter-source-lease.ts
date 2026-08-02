@@ -9,6 +9,8 @@ export type ChapterSourceLease = {
   release(): Promise<void>
 }
 
+const WORKSPACE_IDENTITY_DETAIL_MAX_CHARS = 512
+
 function assertProjectId(projectId: number) {
   if (!Number.isSafeInteger(projectId) || projectId <= 0) {
     throw new RangeError('projectId 必须是正安全整数')
@@ -33,6 +35,10 @@ function workspaceIdentities(workspaceInput: string): WorkspaceIdentities {
     lexical,
     canonical: canonicalFilesystemIdentity(lexical),
   }
+}
+
+function boundedWorkspaceIdentity(identity: string) {
+  return identity.slice(0, WORKSPACE_IDENTITY_DETAIL_MAX_CHARS)
 }
 
 function identitiesOverlap(candidate: WorkspaceIdentities, active: ActiveChapterSourceLease) {
@@ -65,6 +71,16 @@ export class ChapterSourceLeaseRegistry {
     const initialWorkspace = workspaceIdentities(workspaceInput)
     return withMcpWorkspaceMutation(initialWorkspace.canonical, async () => {
       const acquiredWorkspace = workspaceIdentities(initialWorkspace.lexical)
+      if (acquiredWorkspace.canonical !== initialWorkspace.canonical) {
+        throw new ChapterGenerationSourceError(
+          'GENERATION_SOURCE_CHANGED',
+          '章节来源工作区身份已变化，请重试',
+          {
+            initial_workspace_identity: boundedWorkspaceIdentity(initialWorkspace.canonical),
+            current_workspace_identity: boundedWorkspaceIdentity(acquiredWorkspace.canonical),
+          },
+        )
+      }
       if (this.findActive(acquiredWorkspace, projectId)) {
         throw new ChapterGenerationSourceError(
           'GENERATION_SOURCE_BUSY',

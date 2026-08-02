@@ -330,6 +330,76 @@ describe('ChapterSourceLeaseRegistry', () => {
     await lease.release()
   })
 
+  test('fails closed when workspace identity changes while acquire waits for its initial coordinator', async () => {
+    const { root, workspace: oldPhysical } = await createWorkspace('identity-old')
+    const newPhysical = join(root, 'identity-new')
+    const movingAlias = join(root, 'identity-moving-alias')
+    await mkdir(newPhysical)
+    await symlink(oldPhysical, movingAlias, 'dir')
+    const registry = new ChapterSourceLeaseRegistry()
+    const oldEntered = deferred()
+    const newEntered = deferred()
+    const unblockOld = deferred()
+    const unblockNew = deferred()
+    const oldBlocker = withMcpWorkspaceMutation(oldPhysical, async () => {
+      oldEntered.resolve()
+      await unblockOld.promise
+    })
+    const newBlocker = withMcpWorkspaceMutation(newPhysical, async () => {
+      newEntered.resolve()
+      await unblockNew.promise
+    })
+    await Promise.all([oldEntered.promise, newEntered.promise])
+
+    const acquisition = registry.acquire(movingAlias, 30, 'identity-drift')
+    let outcome:
+      | { status: 'fulfilled'; lease: Awaited<typeof acquisition> }
+      | { status: 'rejected'; error: unknown }
+      | undefined
+    acquisition.then(
+      lease => { outcome = { status: 'fulfilled', lease } },
+      error => { outcome = { status: 'rejected', error } },
+    )
+    await unlink(movingAlias)
+    await symlink(newPhysical, movingAlias, 'dir')
+
+    let newReleased = false
+    try {
+      unblockOld.resolve()
+      await oldBlocker
+      await new Promise<void>(resolveImmediate => setImmediate(resolveImmediate))
+
+      expect(outcome?.status).toBe('rejected')
+      if (outcome?.status !== 'rejected') throw new Error('expected identity drift rejection')
+      expect(outcome.error).toMatchObject({
+        code: 'GENERATION_SOURCE_CHANGED',
+        error_code: 'GENERATION_SOURCE_CHANGED',
+        message: '章节来源工作区身份已变化，请重试',
+      })
+      const details = (outcome.error as ChapterGenerationSourceError).details || {}
+      expect(String(details.initial_workspace_identity || '').length).toBeGreaterThan(0)
+      expect(String(details.initial_workspace_identity || '').length).toBeLessThanOrEqual(512)
+      expect(String(details.current_workspace_identity || '').length).toBeGreaterThan(0)
+      expect(String(details.current_workspace_identity || '').length).toBeLessThanOrEqual(512)
+      expect(registry.isActive(movingAlias, 30)).toBe(false)
+      expect(registry.isActive(oldPhysical, 30)).toBe(false)
+      expect(registry.isActive(newPhysical, 30)).toBe(false)
+
+      unblockNew.resolve()
+      await newBlocker
+      newReleased = true
+      const retry = await registry.acquire(movingAlias, 30, 'identity-retry')
+      expect(registry.isActive(newPhysical, 30)).toBe(true)
+      await retry.release()
+    } finally {
+      if (!newReleased) {
+        unblockNew.resolve()
+        await newBlocker
+      }
+      if (outcome?.status === 'fulfilled') await outcome.lease.release()
+    }
+  })
+
   test('admits exactly one winner when the same key is acquired concurrently', async () => {
     const { workspace } = await createWorkspace()
     const registry = new ChapterSourceLeaseRegistry()
