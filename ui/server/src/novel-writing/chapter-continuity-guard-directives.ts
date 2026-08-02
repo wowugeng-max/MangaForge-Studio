@@ -60,7 +60,22 @@ export type ContinuityDirective = {
 const FREE_TEXT_RAW_SOURCE_LIMIT = 1200
 const FREE_TEXT_CHAPTER_TAIL_LIMIT = FREE_TEXT_RAW_SOURCE_LIMIT * 3
 const NON_CURRENT_FREE_TEXT_SENTENCE_PATTERN = /照片|相片|旧照|消息里|短信里|来信里|旧档案|档案里|档案中|档案内|记录里|梦里|梦中|梦境|(?:多|几|数|[一二三四五六七八九十百千万两\d]+)年前|旧事|往事|已经是.{0,16}(?:年前|过去|往事|旧事)|成了过去/u
-const CURRENT_ACTION_FREE_TEXT_TRANSITION_PATTERN = /此刻|现在|眼下|这时|醒来后|回过神|现实中/u
+const STRONG_CURRENT_ACTION_FREE_TEXT_TRANSITION_PATTERN = /醒来后|回过神|现实中/u
+const WEAK_CURRENT_ACTION_FREE_TEXT_TRANSITION_PATTERN = /^[\s“”"'‘’「」『』]*(此刻|现在|眼下|这时)/u
+
+function currentTransitionIndex(sentence: string, cursor: number, allowWeakAtSentenceStart: boolean) {
+  const remaining = sentence.slice(cursor)
+  const strong = remaining.match(STRONG_CURRENT_ACTION_FREE_TEXT_TRANSITION_PATTERN)
+  let transitionIndex = strong ? cursor + (strong.index || 0) : -1
+  if (allowWeakAtSentenceStart && cursor === 0) {
+    const weak = sentence.match(WEAK_CURRENT_ACTION_FREE_TEXT_TRANSITION_PATTERN)
+    if (weak) {
+      const weakIndex = weak[0].length - weak[1].length
+      if (transitionIndex < 0 || weakIndex < transitionIndex) transitionIndex = weakIndex
+    }
+  }
+  return transitionIndex
+}
 
 function currentActionFreeTextOpening(value: any) {
   const sentences = String(value || '')
@@ -69,24 +84,28 @@ function currentActionFreeTextOpening(value: any) {
   const currentSentences: string[] = []
   let nonCurrentScope = false
   for (const sentence of sentences) {
-    let currentPart = sentence
-    if (nonCurrentScope) {
-      const transition = currentPart.match(CURRENT_ACTION_FREE_TEXT_TRANSITION_PATTERN)
-      if (!transition) continue
-      currentPart = currentPart.slice(transition.index || 0)
-      nonCurrentScope = false
-    }
-    const marker = currentPart.match(NON_CURRENT_FREE_TEXT_SENTENCE_PATTERN)
-    if (!marker) {
-      currentSentences.push(currentPart)
-      continue
-    }
-    const afterMarker = currentPart.slice((marker.index || 0) + marker[0].length)
-    const transition = afterMarker.match(CURRENT_ACTION_FREE_TEXT_TRANSITION_PATTERN)
-    if (transition) {
-      currentSentences.push(afterMarker.slice(transition.index || 0))
-    } else {
+    let cursor = 0
+    let allowWeakAtSentenceStart = nonCurrentScope
+    for (let step = 0; cursor < sentence.length && step <= sentence.length; step += 1) {
+      if (nonCurrentScope) {
+        const transitionIndex = currentTransitionIndex(sentence, cursor, allowWeakAtSentenceStart)
+        if (transitionIndex < 0) break
+        cursor = transitionIndex
+        nonCurrentScope = false
+        allowWeakAtSentenceStart = false
+        continue
+      }
+      const currentPart = sentence.slice(cursor)
+      const marker = currentPart.match(NON_CURRENT_FREE_TEXT_SENTENCE_PATTERN)
+      if (!marker) {
+        currentSentences.push(currentPart)
+        break
+      }
+      const markerIndex = cursor + (marker.index || 0)
+      if (markerIndex > cursor) currentSentences.push(sentence.slice(cursor, markerIndex))
+      cursor = markerIndex + marker[0].length
       nonCurrentScope = true
+      allowWeakAtSentenceStart = false
     }
   }
   return currentSentences.join('')

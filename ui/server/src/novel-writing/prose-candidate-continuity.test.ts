@@ -211,7 +211,15 @@ describe('continuity-safe prose candidate selection', () => {
     const splitDreamOnly = chapterScaleText('梦境中。保安诡异狞笑着举起电击棍砸下。江哲醒来后直接进入重症监护室。')
     const splitPastOnly = chapterScaleText('多年前。保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
     const splitArchiveOnly = chapterScaleText('旧档案。内容记载着保安诡异狞笑着举起电击棍砸下。此刻江哲直接进入重症监护室。')
-    const disconnectedResults = [
+    const sameSentenceDreamThisTime = chapterScaleText('梦境中，这时保安诡异狞笑着举起电击棍砸下。江哲醒来后直接进入重症监护室。')
+    const sameSentenceDreamNow = chapterScaleText('梦境中，现在保安诡异狞笑着举起电击棍砸下。江哲醒来后直接进入重症监护室。')
+    const sameSentenceArchiveNow = chapterScaleText('旧档案中，现在保安诡异狞笑着举起电击棍砸下。此刻江哲直接进入重症监护室。')
+    const sameSentencePastNow = chapterScaleText('多年前，眼下保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
+    const midSentenceWeakTransition = chapterScaleText('梦境中。走廊里的钟到了这时，保安诡异狞笑着举起电击棍砸下。江哲醒来后直接进入重症监护室。')
+    const strongThenArchive = chapterScaleText('梦境中，江哲醒来后翻开旧档案，档案里记着保安诡异狞笑着举起电击棍砸下。此刻他直接进入重症监护室。')
+    const strongThenDream = chapterScaleText('旧档案中，江哲回过神后又跌入梦境，保安诡异狞笑着举起电击棍砸下。现实中他直接进入重症监护室。')
+    const strongThenPast = chapterScaleText('梦境中，江哲回过神，随后想起多年前，保安诡异狞笑着举起电击棍砸下。现在他直接进入重症监护室。')
+    const disconnectedOpenings = [
       surfaceOnly,
       singleActorOnly,
       overlappingActorOnly,
@@ -220,11 +228,19 @@ describe('continuity-safe prose candidate selection', () => {
       splitDreamOnly,
       splitPastOnly,
       splitArchiveOnly,
+      sameSentenceDreamThisTime,
+      sameSentenceDreamNow,
+      sameSentenceArchiveNow,
+      sameSentencePastNow,
+      midSentenceWeakTransition,
+      strongThenArchive,
+      strongThenDream,
+      strongThenPast,
     ]
+    const disconnectedResults = disconnectedOpenings
       .map(text => assessInitialProseOpeningContinuity(text, hospitalCorridorContext))
       .map(result => ({ required: result.required, passed: result.passed }))
-    expect(disconnectedResults).toEqual(Array.from(
-      { length: 8 },
+    expect(disconnectedResults).toEqual(disconnectedOpenings.map(
       () => ({ required: true, passed: false }),
     ))
 
