@@ -57,8 +57,48 @@ export type ContinuityDirective = {
 /** Opening misses the previous chapter's primary ending hook(s). */
 
 /** Free-text ending hook continuity: opening must surface ending_hook / last-line anchors. */
+const NON_CURRENT_FREE_TEXT_SENTENCE_PATTERN = /照片|相片|旧照|消息里|短信里|来信里|档案里|记录里|梦里|梦中|已经是.{0,16}(?:年前|过去|往事|旧事)|成了过去/u
+
+function currentActionFreeTextOpening(value: any) {
+  return String(value || '')
+    .slice(0, 900)
+    .split(/(?<=[。！？!?；;\n])/u)
+    .filter(sentence => !NON_CURRENT_FREE_TEXT_SENTENCE_PATTERN.test(sentence))
+    .join('')
+}
+
+function compactHanText(value: any, limit: number) {
+  return (String(value || '').match(/\p{Script=Han}/gu) || [])
+    .join('')
+    .slice(0, Math.max(0, limit))
+}
+
+function longestSharedHanFragment(source: any, opening: any) {
+  const boundedSource = compactHanText(source, 80)
+  const boundedOpening = compactHanText(opening, 900)
+  const maxLength = Math.min(12, boundedSource.length)
+  for (let length = maxLength; length >= 3; length -= 1) {
+    for (let index = 0; index + length <= boundedSource.length; index += 1) {
+      const fragment = boundedSource.slice(index, index + length)
+      if (boundedOpening.includes(fragment)) return fragment
+    }
+  }
+  return ''
+}
+
+function freeTextEventClauseHit(opening: string, sources: any[]) {
+  const clauses = uniqueTexts(
+    sources.flatMap(source => String(source || '').split(/[，,。！？!?；;：:“”"'‘’「」『』《》\n]+/u)),
+    40,
+  )
+  const strengths = clauses
+    .map(clause => longestSharedHanFragment(clause, opening).length)
+    .filter(strength => strength >= 3)
+  return strengths.length >= 2 && strengths.some(strength => strength >= 4)
+}
+
 export function freeTextEndingHookHit(opening: string, previousChapter: any = {}, primary: any = {}) {
-  const open = String(opening || '').slice(0, 900)
+  const open = currentActionFreeTextOpening(opening)
   if (!open.trim()) return false
   const endingHook = endingHookOf(previousChapter)
   const text = chapterTextOf(previousChapter)
@@ -86,6 +126,13 @@ export function freeTextEndingHookHit(opening: string, previousChapter: any = {}
       }
     }
   }
+  // Conservative event paraphrase: require two independently shared clauses, one strong.
+  if (freeTextEventClauseHit(open, [
+    endingHook,
+    primary?.evidence,
+    lastLine,
+    ...lastLines.slice(-3),
+  ])) return true
   // Keyword overlap: need >=2 content words from ending hook / last line
   const source = compactText([endingHook, lastLine, primary?.evidence].filter(Boolean).join('。'), 160)
   const words = (source.match(/[\u4e00-\u9fff]{2,}/g) || []).filter((w) => !/然后|接着|于是|自己|他们|一个/.test(w))

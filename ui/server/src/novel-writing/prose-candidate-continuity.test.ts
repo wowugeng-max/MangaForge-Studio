@@ -181,6 +181,8 @@ describe('continuity-safe prose candidate selection', () => {
     }
     const connected = chapterScaleText('江哲一脚仍踩在融化的护士头上，冷冷问医生办公室的钥匙在哪。护士颤着交出钥匙，身体还在冒白烟。')
     const skipped = chapterScaleText('江哲握着钥匙扫过《医生守则》，决定今晚去治愈重症患者，反客为主。')
+    const surfaceOnly = chapterScaleText('旧照片里的江哲一脚踩着融化的护士，旁边写着医生办公室的钥匙。那只是旧档案。此刻他已经翻开《医生守则》。')
+    expect(assessInitialProseOpeningContinuity(surfaceOnly, hospitalContext)).toMatchObject({ required: true, passed: false })
     expect(assessInitialProseOpeningContinuity(connected, hospitalContext)).toMatchObject({ required: true, passed: true, failure: null })
     expect(assessInitialProseOpeningContinuity(skipped, hospitalContext)).toMatchObject({ required: true, passed: false })
   })
@@ -201,6 +203,8 @@ describe('continuity-safe prose candidate selection', () => {
     }
     const connected = chapterScaleText('保安诡异狞笑着举起电击棍砸下。江哲单手握住电击棍，将高压电吸入体内，顺手把保安扔进垃圾桶。')
     const skipped = chapterScaleText('江哲一路来到重症监护室。里面躺着一个浑身长满肿瘤的怨憎级怪物，他准备开始物理治疗。')
+    const surfaceOnly = chapterScaleText('档案里记录着保安诡异狞笑着举起电击棍砸下。那已经是多年前的旧事。江哲此刻直接进入重症监护室。')
+    expect(assessInitialProseOpeningContinuity(surfaceOnly, hospitalCorridorContext)).toMatchObject({ required: true, passed: false })
     expect(assessInitialProseOpeningContinuity(connected, hospitalCorridorContext)).toMatchObject({ required: true, passed: true, failure: null })
     expect(assessInitialProseOpeningContinuity(skipped, hospitalCorridorContext)).toMatchObject({ required: true, passed: false })
   })
