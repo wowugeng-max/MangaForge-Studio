@@ -550,7 +550,7 @@ test('uses the injected writing runtime for service model calls', async () => {
         calls.push(args)
         return {
           parsed: {
-            chapter_text: '江澈抬手截住落下的铁门，追兵的脚步被迫分成两路。',
+            chapter_text: '江澈截住落下的铁门。',
             editor_report: { passed: true },
           },
           modelName: 'fake-editor',
