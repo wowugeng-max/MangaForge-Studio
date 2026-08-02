@@ -24,7 +24,7 @@ type ActiveChapterSourceLease = {
   readonly token: symbol
   readonly projectId: number
   readonly lexicalWorkspace: string
-  readonly canonicalWorkspaceAtAcquire: string
+  readonly observedCanonicalWorkspaces: Set<string>
 }
 
 function workspaceIdentities(workspaceInput: string): WorkspaceIdentities {
@@ -36,19 +36,19 @@ function workspaceIdentities(workspaceInput: string): WorkspaceIdentities {
 }
 
 function identitiesOverlap(candidate: WorkspaceIdentities, active: ActiveChapterSourceLease) {
-  const currentCanonical = canonicalFilesystemIdentity(active.lexicalWorkspace)
   return candidate.lexical === active.lexicalWorkspace
-    || candidate.lexical === active.canonicalWorkspaceAtAcquire
-    || candidate.lexical === currentCanonical
+    || active.observedCanonicalWorkspaces.has(candidate.lexical)
     || candidate.canonical === active.lexicalWorkspace
-    || candidate.canonical === active.canonicalWorkspaceAtAcquire
-    || candidate.canonical === currentCanonical
+    || active.observedCanonicalWorkspaces.has(candidate.canonical)
 }
 
 export class ChapterSourceLeaseRegistry {
   private readonly active = new Map<symbol, ActiveChapterSourceLease>()
 
   private findActive(workspace: WorkspaceIdentities, projectId: number) {
+    for (const active of this.active.values()) {
+      active.observedCanonicalWorkspaces.add(canonicalFilesystemIdentity(active.lexicalWorkspace))
+    }
     for (const active of this.active.values()) {
       if (active.projectId === projectId && identitiesOverlap(workspace, active)) return active
     }
@@ -102,7 +102,7 @@ export class ChapterSourceLeaseRegistry {
         token,
         projectId,
         lexicalWorkspace: acquiredWorkspace.lexical,
-        canonicalWorkspaceAtAcquire: acquiredWorkspace.canonical,
+        observedCanonicalWorkspaces: new Set([acquiredWorkspace.canonical]),
       })
       return lease
     })

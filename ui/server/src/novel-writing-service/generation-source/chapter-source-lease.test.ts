@@ -143,6 +143,36 @@ describe('ChapterSourceLeaseRegistry', () => {
     expect(registry.isActive(physical, 12)).toBe(false)
   })
 
+  test('remembers an observed physical identity across missing-to-A-to-B retargeting until release', async () => {
+    const { root, workspace: physicalA } = await createWorkspace('missing-history-a')
+    const physicalB = join(root, 'missing-history-b')
+    const movingAlias = join(root, 'missing-history-alias')
+    await mkdir(physicalB)
+    const registry = new ChapterSourceLeaseRegistry()
+    const lease = await registry.acquire(movingAlias, 12, 'missing-history')
+
+    await symlink(physicalA, movingAlias, 'dir')
+    expect(registry.isActive(physicalA, 12)).toBe(true)
+    await unlink(movingAlias)
+    await symlink(physicalB, movingAlias, 'dir')
+
+    for (const workspace of [movingAlias, physicalA, physicalB]) {
+      expect(registry.isActive(workspace, 12)).toBe(true)
+    }
+    await expect(registry.acquire(physicalA, 12, 'forgotten-a-bypass')).rejects.toMatchObject({
+      code: 'GENERATION_SOURCE_BUSY',
+    })
+
+    await lease.release()
+    for (const workspace of [movingAlias, physicalA, physicalB]) {
+      expect(registry.isActive(workspace, 12)).toBe(false)
+    }
+
+    const nextB = await registry.acquire(physicalB, 12, 'new-b-token')
+    const independentA = await registry.acquire(physicalA, 12, 'independent-a-token')
+    await Promise.all([nextB.release(), independentA.release()])
+  })
+
   test('conservatively locks the lexical path and both physical targets after symlink retargeting', async () => {
     const { root, workspace: oldPhysical } = await createWorkspace('old-physical')
     const newPhysical = join(root, 'new-physical')
@@ -169,6 +199,36 @@ describe('ChapterSourceLeaseRegistry', () => {
     await lease.release()
     for (const workspace of [movingAlias, oldPhysical, oldAlias, newPhysical, newAlias]) {
       expect(registry.isActive(workspace, 14)).toBe(false)
+    }
+  })
+
+  test('remembers every observed physical identity across A-to-B-to-C retargeting until release', async () => {
+    const { root, workspace: physicalA } = await createWorkspace('retarget-history-a')
+    const physicalB = join(root, 'retarget-history-b')
+    const physicalC = join(root, 'retarget-history-c')
+    const movingAlias = join(root, 'retarget-history-alias')
+    await mkdir(physicalB)
+    await mkdir(physicalC)
+    await symlink(physicalA, movingAlias, 'dir')
+    const registry = new ChapterSourceLeaseRegistry()
+    const lease = await registry.acquire(movingAlias, 16, 'retarget-history')
+
+    await unlink(movingAlias)
+    await symlink(physicalB, movingAlias, 'dir')
+    expect(registry.isActive(physicalB, 16)).toBe(true)
+    await unlink(movingAlias)
+    await symlink(physicalC, movingAlias, 'dir')
+
+    for (const workspace of [movingAlias, physicalA, physicalB, physicalC]) {
+      expect(registry.isActive(workspace, 16)).toBe(true)
+    }
+    await expect(registry.acquire(physicalB, 16, 'forgotten-b-bypass')).rejects.toMatchObject({
+      code: 'GENERATION_SOURCE_BUSY',
+    })
+
+    await lease.release()
+    for (const workspace of [movingAlias, physicalA, physicalB, physicalC]) {
+      expect(registry.isActive(workspace, 16)).toBe(false)
     }
   })
 
