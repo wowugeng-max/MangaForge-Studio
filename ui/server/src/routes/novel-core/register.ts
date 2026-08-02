@@ -1,6 +1,7 @@
 import type { Express } from 'express'
+import { types as utilTypes } from 'node:util'
 import { ensureWorkspaceStructure } from '../../workspace'
-import { isMcpError } from '../../mcp/errors'
+import { isMcpError, McpError } from '../../mcp/errors'
 import { withNovelWorkspaceMutation } from '../../novel/lock'
 import { assertNoGenerationSourceMutation } from '../../novel-writing-service/generation-source/source-config'
 import {
@@ -88,17 +89,80 @@ import {
 } from './builders'
 
 function genericGenerationSourceMutationError(error: unknown) {
+  const reason = isMcpError(error) ? error.details?.reason : undefined
   if (
     !isMcpError(error)
     || error.code !== 'MCP_BINDING_INVALID'
-    || error.details?.reason !== 'dedicated_binding_route_required'
+    || (reason !== 'dedicated_binding_route_required' && reason !== 'unsafe_generic_mutation_input')
   ) return null
   return {
     error: error.message,
     detail: error.message,
     error_code: error.code,
-    field: error.details.field,
+    field: error.details?.field,
   }
+}
+
+function unsafeGenericMutationInput() {
+  return new McpError(
+    'MCP_BINDING_INVALID',
+    '无法安全读取通用项目写入请求',
+    { reason: 'unsafe_generic_mutation_input' },
+  )
+}
+
+function readRequestBodyOnce(req: any) {
+  try {
+    return req.body
+  } catch {
+    throw unsafeGenericMutationInput()
+  }
+}
+
+function snapshotOwnEnumerableValue(value: unknown): any {
+  if (!value || typeof value !== 'object') return value
+  if (utilTypes.isProxy(value)) throw unsafeGenericMutationInput()
+  try {
+    const snapshot: any = Array.isArray(value) ? [] : {}
+    for (const key of Reflect.ownKeys(value)) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(value, key)
+      if (!descriptor?.enumerable) continue
+      const fieldValue = Object.prototype.hasOwnProperty.call(descriptor, 'value')
+        ? descriptor.value
+        : Reflect.get(value, key)
+      Object.defineProperty(snapshot, key, {
+        configurable: true,
+        enumerable: true,
+        value: fieldValue,
+        writable: true,
+      })
+    }
+    return snapshot
+  } catch {
+    throw unsafeGenericMutationInput()
+  }
+}
+
+function snapshotGenericProjectMutationBody(req: any) {
+  const bodySnapshot = snapshotOwnEnumerableValue(readRequestBodyOnce(req))
+  const bodyIsObject = Boolean(bodySnapshot && typeof bodySnapshot === 'object')
+  const hasReferenceConfig = bodyIsObject
+    && Object.prototype.hasOwnProperty.call(bodySnapshot, 'reference_config')
+  const rawReferenceConfig = hasReferenceConfig ? bodySnapshot.reference_config : undefined
+  assertNoGenerationSourceMutation(rawReferenceConfig)
+  const referenceConfig = snapshotOwnEnumerableValue(rawReferenceConfig)
+  return {
+    body: hasReferenceConfig
+      ? { ...bodySnapshot, reference_config: referenceConfig }
+      : bodySnapshot,
+    referenceConfig,
+  }
+}
+
+function snapshotGenericReferenceConfigMutationBody(req: any) {
+  const rawReferenceConfig = readRequestBodyOnce(req)
+  assertNoGenerationSourceMutation(rawReferenceConfig)
+  return snapshotOwnEnumerableValue(rawReferenceConfig)
 }
 
 function preserveExistingGenerationSources(currentConfig: any, replacementConfig: unknown) {
@@ -126,13 +190,13 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
 
   app.post('/api/novel/projects', async (req, res) => {
     try {
-      assertNoGenerationSourceMutation(req.body?.reference_config)
+      const { body, referenceConfig } = snapshotGenericProjectMutationBody(req)
       const activeWorkspace = getWorkspace()
       await ensureWorkspaceStructure(activeWorkspace)
-      const project = await createNovelProject(activeWorkspace, req.body)
-      const seed = req.body?.reference_config?.project_seed
-      if (seed && req.body?.auto_materialize_seed !== false) {
-        const repairedSeed = repairProjectSeedGaps(seed, req.body?.raw_idea || seed.raw_idea || '')
+      const project = await createNovelProject(activeWorkspace, body)
+      const seed = referenceConfig?.project_seed
+      if (seed && body?.auto_materialize_seed !== false) {
+        const repairedSeed = repairProjectSeedGaps(seed, body?.raw_idea || seed.raw_idea || '')
         const materialized = await materializeProjectSeed(activeWorkspace, project, repairedSeed)
         return res.json({ ...(materialized.project || project), seed_materialization: materialized.created })
       }
@@ -582,18 +646,18 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
 
   app.put('/api/novel/projects/:id', async (req, res) => {
     try {
-      assertNoGenerationSourceMutation(req.body?.reference_config)
+      const { body, referenceConfig } = snapshotGenericProjectMutationBody(req)
       const activeWorkspace = getWorkspace()
       const projectId = Number(req.params.id)
-      const updated = req.body?.reference_config === undefined
-        ? await updateNovelProject(activeWorkspace, projectId, req.body)
+      const updated = referenceConfig === undefined
+        ? await updateNovelProject(activeWorkspace, projectId, body)
         : await withNovelWorkspaceMutation(activeWorkspace, async () => {
             const current = await getNovelProject(activeWorkspace, projectId)
             if (!current) return null
             const currentConfig = current.reference_config || {}
-            const requestedConfig = req.body.reference_config
+            const requestedConfig = referenceConfig
             return updateNovelProject(activeWorkspace, projectId, {
-              ...req.body,
+              ...body,
               reference_config: requestedConfig === null
                 ? currentConfig
                 : preserveExistingGenerationSources(currentConfig, requestedConfig),
@@ -621,10 +685,9 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
 
   app.put('/api/novel/projects/:id/reference-config', async (req, res) => {
     try {
-      assertNoGenerationSourceMutation(req.body)
+      const requestedConfig = snapshotGenericReferenceConfigMutationBody(req) || {}
       const activeWorkspace = getWorkspace()
       const projectId = Number(req.params.id)
-      const requestedConfig = req.body || {}
       const updated = await withNovelWorkspaceMutation(activeWorkspace, async () => {
         const current = await getNovelProject(activeWorkspace, projectId)
         if (!current) return null

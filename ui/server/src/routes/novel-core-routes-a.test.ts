@@ -282,6 +282,182 @@ describe('prose generation source mutation guard', () => {
     expect(getterReads).toBe(0)
   })
 
+  test('snapshots changing request getters once before every generic write', async () => {
+    const workspace = await tempDir('mangaforge-novel-source-single-read-')
+    const { createNovelProject, getNovelProject } = await import('../novel')
+    const { registerNovelCoreRoutes } = await import('./novel-core-routes')
+    const existing = await createNovelProject(workspace, { title: '单次读取项目', reference_config: {} })
+    const { app, handlers } = createRouteHarness()
+    registerNovelCoreRoutes(app as any, () => workspace)
+
+    const changingBody = (title: string, notes: string) => {
+      let titleReads = 0
+      let referenceConfigReads = 0
+      let notesReads = 0
+      const safeConfig = {
+        get notes() {
+          notesReads += 1
+          return notes
+        },
+      }
+      return {
+        body: {
+          get title() {
+            titleReads += 1
+            return title
+          },
+          get reference_config() {
+            referenceConfigReads += 1
+            return referenceConfigReads === 1
+              ? safeConfig
+              : { chapter_generation_source: retainedChapterGenerationSource }
+          },
+        },
+        reads: () => ({ titleReads, referenceConfigReads, notesReads }),
+      }
+    }
+
+    const createInput = changingBody('单次读取创建', '创建快照')
+    const createResponse = await callRoute(handlers.get('POST /api/novel/projects'), {
+      body: createInput.body,
+    })
+    expect(createResponse.statusCode).toBe(200)
+    expect(createInput.reads()).toEqual({ titleReads: 1, referenceConfigReads: 1, notesReads: 1 })
+    expect(createResponse.body.reference_config.notes).toBe('创建快照')
+    expect(Object.prototype.hasOwnProperty.call(createResponse.body.reference_config, 'chapter_generation_source')).toBe(false)
+
+    const updateInput = changingBody('单次读取更新', '项目更新快照')
+    const updateResponse = await callRoute(handlers.get('PUT /api/novel/projects/:id'), {
+      params: { id: String(existing.id) },
+      body: updateInput.body,
+    })
+    expect(updateResponse.statusCode).toBe(200)
+    expect(updateInput.reads()).toEqual({ titleReads: 1, referenceConfigReads: 1, notesReads: 1 })
+    expect(updateResponse.body.reference_config.notes).toBe('项目更新快照')
+    expect(Object.prototype.hasOwnProperty.call(updateResponse.body.reference_config, 'chapter_generation_source')).toBe(false)
+
+    let requestBodyReads = 0
+    let referenceNotesReads = 0
+    const safeReferenceConfig = {
+      get notes() {
+        referenceNotesReads += 1
+        return '配置更新快照'
+      },
+    }
+    const referenceConfigResponse = await callRoute(handlers.get('PUT /api/novel/projects/:id/reference-config'), {
+      params: { id: String(existing.id) },
+      get body() {
+        requestBodyReads += 1
+        return requestBodyReads === 1
+          ? safeReferenceConfig
+          : { chapter_generation_source: retainedChapterGenerationSource }
+      },
+    })
+    expect(referenceConfigResponse.statusCode).toBe(200)
+    expect({ requestBodyReads, referenceNotesReads }).toEqual({ requestBodyReads: 1, referenceNotesReads: 1 })
+    expect(referenceConfigResponse.body.notes).toBe('配置更新快照')
+    expect(Object.prototype.hasOwnProperty.call(referenceConfigResponse.body, 'chapter_generation_source')).toBe(false)
+    expect(Object.prototype.hasOwnProperty.call(
+      (await getNovelProject(workspace, existing.id))?.reference_config,
+      'chapter_generation_source',
+    )).toBe(false)
+  })
+
+  test('rejects Proxy request inputs with a controlled error before any write', async () => {
+    const parent = await tempDir('mangaforge-novel-source-proxy-parent-')
+    const missingWorkspace = join(parent, 'missing-workspace')
+    const { createNovelProject, getNovelProject, listNovelProjects } = await import('../novel')
+    const { McpError } = await import('../mcp/errors')
+    const { registerNovelCoreRoutes } = await import('./novel-core-routes')
+    const trapMessage = 'synthetic private proxy trap detail'
+    let trapCalls = 0
+    const trappedProxy = () => new Proxy({}, {
+      get() {
+        trapCalls += 1
+        throw new Error(trapMessage)
+      },
+      ownKeys() {
+        trapCalls += 1
+        throw new Error(trapMessage)
+      },
+      getOwnPropertyDescriptor() {
+        trapCalls += 1
+        throw new Error(trapMessage)
+      },
+    })
+
+    const createHarness = createRouteHarness()
+    registerNovelCoreRoutes(createHarness.app as any, () => missingWorkspace)
+    for (const body of [
+      trappedProxy(),
+      { title: '不应创建', reference_config: trappedProxy() },
+      {
+        get title() {
+          throw new McpError('MCP_BINDING_INVALID', trapMessage, { reason: 'synthetic_untrusted_reason' })
+        },
+      },
+    ]) {
+      const response = await callRoute(createHarness.handlers.get('POST /api/novel/projects'), { body })
+      expect(response.statusCode).toBe(400)
+      expect(response.body.error_code).toBe('MCP_BINDING_INVALID')
+      expect(JSON.stringify(response.body)).not.toContain(trapMessage)
+      expect(await pathExists(missingWorkspace)).toBe(false)
+    }
+
+    const workspace = await tempDir('mangaforge-novel-source-proxy-write-')
+    const project = await createNovelProject(workspace, { title: 'Proxy 拦截项目', reference_config: {} })
+    const before = structuredClone(await getNovelProject(workspace, project.id))
+    const { app, handlers } = createRouteHarness()
+    registerNovelCoreRoutes(app as any, () => workspace)
+
+    const updateResponse = await callRoute(handlers.get('PUT /api/novel/projects/:id'), {
+      params: { id: String(project.id) },
+      body: trappedProxy(),
+    })
+    expect(updateResponse.statusCode).toBe(400)
+    expect(updateResponse.body.error_code).toBe('MCP_BINDING_INVALID')
+    expect(JSON.stringify(updateResponse.body)).not.toContain(trapMessage)
+
+    const referenceConfigResponse = await callRoute(handlers.get('PUT /api/novel/projects/:id/reference-config'), {
+      params: { id: String(project.id) },
+      body: trappedProxy(),
+    })
+    expect(referenceConfigResponse.statusCode).toBe(400)
+    expect(referenceConfigResponse.body.error_code).toBe('MCP_BINDING_INVALID')
+    expect(JSON.stringify(referenceConfigResponse.body)).not.toContain(trapMessage)
+    expect(trapCalls).toBe(0)
+    expect(await getNovelProject(workspace, project.id)).toEqual(before)
+    expect(await listNovelProjects(workspace)).toHaveLength(1)
+  })
+
+  test('rejects own dedicated accessors without executing them', async () => {
+    const parent = await tempDir('mangaforge-novel-source-accessor-parent-')
+    const workspace = join(parent, 'missing-workspace')
+    const { registerNovelCoreRoutes } = await import('./novel-core-routes')
+    const { app, handlers } = createRouteHarness()
+    registerNovelCoreRoutes(app as any, () => workspace)
+    let getterReads = 0
+    const referenceConfig = { notes: '不应写入' }
+    Object.defineProperty(referenceConfig, 'chapter_generation_source', {
+      enumerable: true,
+      get() {
+        getterReads += 1
+        throw new Error('dedicated source accessor must not run')
+      },
+    })
+
+    const response = await callRoute(handlers.get('POST /api/novel/projects'), {
+      body: { title: '不应创建', reference_config: referenceConfig },
+    })
+
+    expect(response).toMatchObject({
+      statusCode: 400,
+      body: { error_code: 'MCP_BINDING_INVALID', field: 'chapter_generation_source' },
+    })
+    expect(getterReads).toBe(0)
+    expect(await pathExists(workspace)).toBe(false)
+  })
+
   test('preserves existing dedicated generation sources when generic project update omits them', async () => {
     const workspace = await tempDir('mangaforge-novel-source-project-update-')
     const { createNovelProject, getNovelProject, mutateNovelProjectReferenceConfig } = await import('../novel')

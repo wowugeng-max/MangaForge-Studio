@@ -304,6 +304,31 @@ describe('prose generation source config', () => {
       binding: retainedBinding,
     }))
   })
+
+  test('fails closed when ownership scanning raises a non-validation error', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-ownership-scan-'))
+    workspaces.push(workspace)
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const key = await createMcpKey(workspace, { mcp_server_id: 'buda', key: 'sk_scan', description: '账号' })
+    const scanFailure = new Error('synthetic ownership storage failure')
+    const inaccessibleProject = { id: 99, title: '不可读项目' }
+    Object.defineProperty(inaccessibleProject, 'reference_config', {
+      get() {
+        throw scanFailure
+      },
+    })
+
+    await expect(validateMcpProjectBinding(workspace, { id: 1 }, {
+      server_id: 'buda',
+      key_id: key.id,
+      adapter_id: 'buda',
+      agent_id: 'agent-1',
+      model: '',
+    }, {
+      runtime: { listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }] } as any,
+      listProjects: async () => [inaccessibleProject] as any,
+    })).rejects.toBe(scanFailure)
+  })
 })
 
 describe('retained chapter generation source state', () => {

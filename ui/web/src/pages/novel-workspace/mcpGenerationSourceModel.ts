@@ -100,8 +100,24 @@ export function buildTemporaryModelOverride() {
 export function buildGenericReferenceConfigWritePayload<T extends Record<string, unknown>>(
   referenceConfig: T,
 ): Omit<T, 'prose_generation_source' | 'chapter_generation_source'> {
-  const payload = { ...referenceConfig } as Record<string, unknown>
-  delete payload.prose_generation_source
-  delete payload.chapter_generation_source
-  return payload as Omit<T, 'prose_generation_source' | 'chapter_generation_source'>
+  try {
+    const payload: Record<PropertyKey, unknown> = {}
+    for (const key of Reflect.ownKeys(referenceConfig)) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(referenceConfig, key)
+      if (!descriptor?.enumerable) continue
+      if (key === 'prose_generation_source' || key === 'chapter_generation_source') continue
+      const value = Object.prototype.hasOwnProperty.call(descriptor, 'value')
+        ? descriptor.value
+        : Reflect.get(referenceConfig, key)
+      Object.defineProperty(payload, key, {
+        configurable: true,
+        enumerable: true,
+        value,
+        writable: true,
+      })
+    }
+    return payload as Omit<T, 'prose_generation_source' | 'chapter_generation_source'>
+  } catch {
+    throw new Error('无法安全读取通用参考配置')
+  }
 }

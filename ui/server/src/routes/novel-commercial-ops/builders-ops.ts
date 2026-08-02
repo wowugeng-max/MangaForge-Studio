@@ -151,6 +151,7 @@ export async function importBackupAsNewProject(activeWorkspace: string, backup: 
   const titleSuffix = options.keep_title ? '' : '（导入）'
   const sanitizedReferenceConfig = { ...(sourceProject.reference_config || {}) }
   delete sanitizedReferenceConfig.prose_generation_source
+  delete sanitizedReferenceConfig.chapter_generation_source
   const project = await createNovelProject(activeWorkspace, {
     ...sourceProject,
     id: undefined,

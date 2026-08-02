@@ -1,4 +1,5 @@
 import { createHash } from 'crypto'
+import { types as utilTypes } from 'node:util'
 import { McpError } from '../../mcp/errors'
 import { readMcpKeys } from '../../mcp/key-store'
 import type { McpRuntime } from '../../mcp/runtime'
@@ -45,15 +46,30 @@ export const MODEL_PROSE_GENERATION_SOURCE: ModelProseGenerationSourceConfig = O
   type: 'model',
 })
 
+function unsafeGenerationSourceMutationInput() {
+  return new McpError(
+    'MCP_BINDING_INVALID',
+    '无法安全检查通用项目写入中的章节来源字段',
+    { reason: 'unsafe_generic_mutation_input' },
+  )
+}
+
 export function assertNoGenerationSourceMutation(referenceConfig: unknown) {
-  if (!referenceConfig || typeof referenceConfig !== 'object' || Array.isArray(referenceConfig)) return
-  for (const field of ['prose_generation_source', 'chapter_generation_source']) {
-    if (!Object.prototype.hasOwnProperty.call(referenceConfig, field)) continue
-    throw new McpError(
-      'MCP_BINDING_INVALID',
-      `${field} 只能通过专用章节来源接口修改`,
-      { reason: 'dedicated_binding_route_required', field },
-    )
+  if (!referenceConfig || typeof referenceConfig !== 'object') return
+  if (utilTypes.isProxy(referenceConfig)) throw unsafeGenerationSourceMutationInput()
+  try {
+    if (Array.isArray(referenceConfig)) return
+    for (const field of ['prose_generation_source', 'chapter_generation_source']) {
+      if (!Object.prototype.hasOwnProperty.call(referenceConfig, field)) continue
+      throw new McpError(
+        'MCP_BINDING_INVALID',
+        `${field} 只能通过专用章节来源接口修改`,
+        { reason: 'dedicated_binding_route_required', field },
+      )
+    }
+  } catch (error) {
+    if (error instanceof McpError) throw error
+    throw unsafeGenerationSourceMutationInput()
   }
 }
 
@@ -351,8 +367,9 @@ export async function validateMcpProjectBinding(
     let other: McpProjectBinding | undefined
     try {
       other = resolveChapterGenerationSource(item).mcp
-    } catch {
-      return false
+    } catch (error) {
+      if (error instanceof McpError && error.code === 'MCP_BINDING_INVALID') return false
+      throw error
     }
     return Boolean(other
       && other.server_id === binding.server_id

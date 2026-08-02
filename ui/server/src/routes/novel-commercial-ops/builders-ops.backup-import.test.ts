@@ -3,7 +3,10 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createNovelProject, getNovelProject, listNovelProjects } from '../../novel'
-import { resolveProseGenerationSource } from '../../novel-writing-service/generation-source/source-config'
+import {
+  resolveChapterGenerationSource,
+  resolveProseGenerationSource,
+} from '../../novel-writing-service/generation-source/source-config'
 import { importBackupAsNewProject } from './builders-ops'
 
 const workspaces: string[] = []
@@ -26,10 +29,17 @@ describe('novel backup imports', () => {
         agent_id: 'backup-agent',
       },
     }
+    const chapterSource = {
+      version: 'chapter_generation_source_v1' as const,
+      active: 'model' as const,
+      model: { model_id: 217 },
+      mcp: { ...source.mcp, model: '' },
+    }
     const original = await createNovelProject(workspace, {
       title: '绑定源项目',
       reference_config: {
         prose_generation_source: source,
+        chapter_generation_source: chapterSource,
         references: [{ project_title: '普通参考项目', weight: 0.8, use_for: ['节奏'] }],
         strength: 'strong',
         notes: '保留普通参考配置',
@@ -53,6 +63,7 @@ describe('novel backup imports', () => {
           ...structuredClone(original),
           // An abnormal outer copy must not override the sanitized reference_config payload.
           prose_generation_source: structuredClone(source),
+          chapter_generation_source: structuredClone(chapterSource),
         },
         outlines: [],
         worldbuilding: [],
@@ -62,7 +73,9 @@ describe('novel backup imports', () => {
       const stored = await getNovelProject(workspace, result.project.id)
 
       expect(Object.prototype.hasOwnProperty.call(result.project.reference_config, 'prose_generation_source')).toBe(false)
+      expect(Object.prototype.hasOwnProperty.call(result.project.reference_config, 'chapter_generation_source')).toBe(false)
       expect(Object.prototype.hasOwnProperty.call(stored?.reference_config, 'prose_generation_source')).toBe(false)
+      expect(Object.prototype.hasOwnProperty.call(stored?.reference_config, 'chapter_generation_source')).toBe(false)
       expect(resolveProseGenerationSource(result.project)).toEqual({
         version: 'prose_generation_source_v1',
         type: 'model',
@@ -70,6 +83,16 @@ describe('novel backup imports', () => {
       expect(resolveProseGenerationSource(stored)).toEqual({
         version: 'prose_generation_source_v1',
         type: 'model',
+      })
+      expect(resolveChapterGenerationSource(result.project)).toEqual({
+        version: 'chapter_generation_source_v1',
+        active: 'model',
+        model: {},
+      })
+      expect(resolveChapterGenerationSource(stored)).toEqual({
+        version: 'chapter_generation_source_v1',
+        active: 'model',
+        model: {},
       })
       expect(stored?.reference_config).toMatchObject({
         references: [{ project_title: '普通参考项目', weight: 0.8, use_for: ['节奏'] }],

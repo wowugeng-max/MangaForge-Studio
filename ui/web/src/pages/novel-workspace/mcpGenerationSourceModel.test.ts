@@ -186,6 +186,77 @@ describe('project MCP generation source model', () => {
     expect(buildGenericReferenceConfigWritePayload(inheritedSourceConfig)).toEqual({ notes: '只保留 own 字段' })
   })
 
+  test('omits dedicated accessors without reading them and safely preserves other own keys', async () => {
+    const model = await import('./mcpGenerationSourceModel')
+    const buildGenericReferenceConfigWritePayload = Reflect.get(model, 'buildGenericReferenceConfigWritePayload')
+    expect(typeof buildGenericReferenceConfigWritePayload).toBe('function')
+    if (typeof buildGenericReferenceConfigWritePayload !== 'function') return
+    const symbolKey = Symbol('reference-config-symbol')
+    let sourceGetterReads = 0
+    const referenceConfig: Record<PropertyKey, unknown> = { notes: '保留普通字段' }
+    referenceConfig[symbolKey] = '保留 symbol'
+    Object.defineProperty(referenceConfig, '__proto__', {
+      configurable: true,
+      enumerable: true,
+      value: '安全的 own __proto__',
+      writable: true,
+    })
+    for (const field of ['prose_generation_source', 'chapter_generation_source']) {
+      Object.defineProperty(referenceConfig, field, {
+        configurable: true,
+        enumerable: true,
+        get() {
+          sourceGetterReads += 1
+          throw new Error(`${field} accessor must not run`)
+        },
+      })
+    }
+
+    const payload = buildGenericReferenceConfigWritePayload(referenceConfig)
+
+    expect(sourceGetterReads).toBe(0)
+    expect(payload).not.toBe(referenceConfig)
+    expect(payload.notes).toBe('保留普通字段')
+    expect(payload[symbolKey]).toBe('保留 symbol')
+    expect(Object.prototype.hasOwnProperty.call(payload, '__proto__')).toBe(true)
+    expect(payload.__proto__).toBe('安全的 own __proto__')
+    expect(Object.getPrototypeOf(payload)).toBe(Object.prototype)
+    expect(Object.prototype.hasOwnProperty.call(payload, 'prose_generation_source')).toBe(false)
+    expect(Object.prototype.hasOwnProperty.call(payload, 'chapter_generation_source')).toBe(false)
+    expect(Object.prototype.hasOwnProperty.call(referenceConfig, 'prose_generation_source')).toBe(true)
+    expect(Object.prototype.hasOwnProperty.call(referenceConfig, 'chapter_generation_source')).toBe(true)
+  })
+
+  test('fails closed with a stable message when Proxy key or descriptor inspection fails', async () => {
+    const model = await import('./mcpGenerationSourceModel')
+    const buildGenericReferenceConfigWritePayload = Reflect.get(model, 'buildGenericReferenceConfigWritePayload')
+    expect(typeof buildGenericReferenceConfigWritePayload).toBe('function')
+    if (typeof buildGenericReferenceConfigWritePayload !== 'function') return
+    const trapMessage = 'synthetic private reference config trap'
+    const ownKeysProxy = new Proxy({}, {
+      ownKeys() {
+        throw new Error(trapMessage)
+      },
+    })
+    const descriptorProxy = new Proxy({ notes: '保留' }, {
+      getOwnPropertyDescriptor() {
+        throw new Error(trapMessage)
+      },
+    })
+
+    for (const value of [ownKeysProxy, descriptorProxy]) {
+      let failure: unknown
+      try {
+        buildGenericReferenceConfigWritePayload(value)
+      } catch (error) {
+        failure = error
+      }
+      expect(failure).toBeInstanceOf(Error)
+      expect(String((failure as Error).message)).toBe('无法安全读取通用参考配置')
+      expect(String((failure as Error).message)).not.toContain(trapMessage)
+    }
+  })
+
   test('wires both generic reference-config saves through the dedicated-source omission helper', async () => {
     const modalSource = await Bun.file(new URL('./ReferenceConfigModal.tsx', import.meta.url)).text()
     const modalSaveStart = modalSource.indexOf('  const save = async () => {')
