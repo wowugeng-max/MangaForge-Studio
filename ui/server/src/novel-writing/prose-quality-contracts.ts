@@ -183,6 +183,16 @@ export function getChapterLaunchGateBlocker(gate: any, options: { writePreparati
   }
 }
 
+export function resolveRevisionCandidateText(revisionLike: any = {}) {
+  return String(
+    revisionLike?.final_text
+      || revisionLike?.finalText
+      || revisionLike?.chapter_text
+      || revisionLike?.chapterText
+      || '',
+  )
+}
+
 export function selectUsableRevisionText(
   currentText: string,
   revisionLike: any = {},
@@ -197,13 +207,7 @@ export function selectUsableRevisionText(
   } = {},
 ) {
   const current = String(currentText || '')
-  const rawCandidate = String(
-    revisionLike?.final_text
-      || revisionLike?.finalText
-      || revisionLike?.chapter_text
-      || revisionLike?.chapterText
-      || '',
-  )
+  const rawCandidate = resolveRevisionCandidateText(revisionLike)
   const stripped = stripProseEngineeringAppendix(rawCandidate)
   const candidate = stripped.text
   const strict = Number(options.chapterNo || 0) > 0 || Array.isArray(options.blockingFindings)

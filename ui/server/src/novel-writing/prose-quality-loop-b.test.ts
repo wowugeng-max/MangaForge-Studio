@@ -443,6 +443,7 @@ describe('bounded prose quality loop', () => {
 
   test('normalizes safe repair residue before the fresh scan and independent recheck', async () => {
     const scans: string[] = []
+    const reviews: string[] = []
     let reviewCalls = 0
     const rawRevision = '他用纯肉身力量 and 借力卸力踩碎规则。手臂微微鼓胀，没有一丝多余的颤音。他缓缓收手，轻轻敲击袖口，灯光犹如实质的毒液。顾遥从门边拉走伤员。'
     const normalizedRevision = '他用纯肉身力量和借力卸力踩碎规则。手臂鼓胀，没有多余的颤音。他收手，敲击袖口，灯光像泼下的毒液。顾遥从门边拉走伤员。'
@@ -458,6 +459,7 @@ describe('bounded prose quality loop', () => {
         return { hard_failures: hardFailures }
       },
       review: async ({ text }) => {
+        reviews.push(text)
         reviewCalls += 1
         if (reviewCalls === 1) {
           return {
@@ -495,9 +497,11 @@ describe('bounded prose quality loop', () => {
     })
 
     expect(scans).toHaveLength(2)
-    expect(scans[1]).not.toMatch(/\band\b|微微|一丝|缓缓|轻轻|犹如/)
-    expect(result.rounds[0]?.selection).toMatchObject({ accepted: true, text: normalizedRevision })
-    expect(result.final_text).toBe(scans[1])
+    expect(reviews).toHaveLength(2)
+    expect(scans[1]).toBe(normalizedRevision)
+    expect(reviews[1]).toBe(normalizedRevision)
+    expect(result.rounds[0]?.selection?.accepted).toBe(true)
+    expect(result.rounds[0]?.selection?.text).toBe(normalizedRevision)
     expect(result.final_text).toBe(normalizedRevision)
     expect(result.decision.passed).toBe(true)
   })

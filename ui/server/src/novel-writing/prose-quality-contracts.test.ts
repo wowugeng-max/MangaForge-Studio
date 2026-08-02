@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   compactDeliveryRiskCarryOverText,
   getChapterLaunchGateBlocker,
+  resolveRevisionCandidateText,
   selectUsableRevisionText,
   shouldRunSynchronousReadabilityReview,
 } from './prose-quality-contracts'
@@ -11,6 +12,19 @@ import {
 } from './fixtures/chapter-10-11-handoff'
 
 describe('prose quality contracts', () => {
+  test('resolves revision candidate aliases in selector priority order', () => {
+    expect(resolveRevisionCandidateText({
+      final_text: '一级候选',
+      finalText: '二级候选',
+      chapter_text: '三级候选',
+      chapterText: '四级候选',
+    })).toBe('一级候选')
+    expect(resolveRevisionCandidateText({ final_text: '', finalText: '二级候选' })).toBe('二级候选')
+    expect(resolveRevisionCandidateText({ chapter_text: '三级候选', chapterText: '四级候选' })).toBe('三级候选')
+    expect(resolveRevisionCandidateText({ chapterText: '四级候选' })).toBe('四级候选')
+    expect(resolveRevisionCandidateText(null)).toBe('')
+  })
+
   test('defers auxiliary readability review unless explicitly requested', () => {
     expect(shouldRunSynchronousReadabilityReview()).toBe(false)
     expect(shouldRunSynchronousReadabilityReview({ auxiliary_review_mode: 'deferred' })).toBe(false)

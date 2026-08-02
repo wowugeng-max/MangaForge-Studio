@@ -371,13 +371,7 @@ export async function runProseQualityLoop(input: {
       })
       break
     }
-    const rawRevisionText = String(
-      revision?.final_text
-        || revision?.finalText
-        || revision?.chapter_text
-        || revision?.chapterText
-        || '',
-    )
+    const rawRevisionText = resolveRevisionCandidateText(revision)
     const residueNormalization = normalizeProseQualityRepairResidue(rawRevisionText)
     const usableSelection = selectUsableRevisionText(finalText, {
       ...revision,
@@ -472,5 +466,5 @@ export async function runProseQualityLoop(input: {
     ...(qualityWarning ? { quality_warning: qualityWarning } : {}),
   }
 }
-import { selectUsableRevisionText } from './prose-quality-contracts'
+import { resolveRevisionCandidateText, selectUsableRevisionText } from './prose-quality-contracts'
 import { normalizeProseQualityRepairResidue } from './prose-format'
