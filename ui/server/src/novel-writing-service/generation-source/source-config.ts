@@ -130,36 +130,108 @@ export function proseGenerationSourceFingerprint(source: ProseGenerationSourceCo
   return `sha256:${createHash('sha256').update(JSON.stringify(identity), 'utf8').digest('hex')}`
 }
 
-export function normalizeChapterGenerationSource(value: unknown): ChapterGenerationSourceState {
+function ownChapterField(record: Record<string, unknown>, field: string, message: string) {
+  if (!Object.prototype.hasOwnProperty.call(record, field)) {
+    throw new McpError('MCP_BINDING_INVALID', message)
+  }
+  return record[field]
+}
+
+function normalizeStrictChapterMcpBinding(value: unknown): McpProjectBinding {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new McpError('MCP_BINDING_INVALID', '章节生成 MCP 绑定必须是对象')
+  }
+  const record = value as Record<string, unknown>
+  const rawServerId = ownChapterField(record, 'server_id', '章节生成 MCP 绑定缺少 server_id')
+  const rawKeyId = ownChapterField(record, 'key_id', '章节生成 MCP 绑定缺少 key_id')
+  const rawAdapterId = ownChapterField(record, 'adapter_id', '章节生成 MCP 绑定缺少 adapter_id')
+  const rawAgentId = ownChapterField(record, 'agent_id', '章节生成 MCP 绑定缺少 agent_id')
+  const rawModel = ownChapterField(record, 'model', '章节生成 MCP 绑定缺少 model')
+
+  if (typeof rawServerId !== 'string'
+    || typeof rawAdapterId !== 'string'
+    || typeof rawAgentId !== 'string'
+    || typeof rawModel !== 'string') {
+    throw new McpError('MCP_BINDING_INVALID', '章节生成 MCP 文本字段必须是字符串')
+  }
+  if (!Number.isSafeInteger(rawKeyId) || Number(rawKeyId) <= 0) {
+    throw new McpError('MCP_BINDING_INVALID', '章节生成 MCP key_id 必须是正安全整数')
+  }
+
+  const binding = {
+    server_id: rawServerId.trim(),
+    key_id: Number(rawKeyId),
+    adapter_id: rawAdapterId.trim(),
+    agent_id: rawAgentId.trim(),
+    model: rawModel.trim(),
+  }
+  const missing = Object.entries({
+    server_id: binding.server_id,
+    adapter_id: binding.adapter_id,
+    agent_id: binding.agent_id,
+  })
+    .filter(([, item]) => !item)
+    .map(([key]) => key)
+  if (missing.length) {
+    throw new McpError('MCP_BINDING_INVALID', `章节生成 MCP 绑定不完整：缺少 ${missing.join(', ')}`, {
+      missing_fields: missing,
+    })
+  }
+  if (binding.model.length > 160) {
+    throw new McpError('MCP_BINDING_INVALID', 'MCP model 最多 160 个字符')
+  }
+  return binding
+}
+
+function normalizeChapterGenerationSourceUnchecked(value: unknown): ChapterGenerationSourceState {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new McpError('MCP_BINDING_INVALID', '章节生成来源配置必须是对象')
   }
   const record = value as Record<string, unknown>
-  if (record.version !== CHAPTER_GENERATION_SOURCE_VERSION) {
+  const version = ownChapterField(record, 'version', '章节生成来源版本缺失或不受支持')
+  const active = ownChapterField(record, 'active', '章节生成活动来源缺失或不受支持')
+  const rawModel = ownChapterField(record, 'model', '章节生成模型配置必须是对象')
+  const rawMcp = Object.prototype.hasOwnProperty.call(record, 'mcp') ? record.mcp : undefined
+
+  if (version !== CHAPTER_GENERATION_SOURCE_VERSION) {
     throw new McpError('MCP_BINDING_INVALID', '章节生成来源版本缺失或不受支持')
   }
-  if (record.active !== 'model' && record.active !== 'mcp') {
+  if (active !== 'model' && active !== 'mcp') {
     throw new McpError('MCP_BINDING_INVALID', '章节生成活动来源缺失或不受支持')
   }
-  if (!record.model || typeof record.model !== 'object' || Array.isArray(record.model)) {
+  if (!rawModel || typeof rawModel !== 'object' || Array.isArray(rawModel)) {
     throw new McpError('MCP_BINDING_INVALID', '章节生成模型配置必须是对象')
   }
 
-  const rawModelId = (record.model as Record<string, unknown>).model_id
-  if (rawModelId !== undefined && (!Number.isInteger(rawModelId) || Number(rawModelId) <= 0)) {
-    throw new McpError('MCP_BINDING_INVALID', '章节生成 model_id 必须是正整数')
+  const modelRecord = rawModel as Record<string, unknown>
+  const hasOwnModelId = Object.prototype.hasOwnProperty.call(modelRecord, 'model_id')
+  if (!hasOwnModelId && 'model_id' in modelRecord) {
+    throw new McpError('MCP_BINDING_INVALID', '章节生成 model_id 必须是自有字段')
   }
-  const model = rawModelId === undefined ? {} : { model_id: Number(rawModelId) }
-  const mcp = record.mcp === undefined ? undefined : normalizeMcpProjectBinding(record.mcp)
-  if (record.active === 'mcp' && !mcp) {
+  const rawModelId = hasOwnModelId ? modelRecord.model_id : undefined
+  if (hasOwnModelId && (!Number.isSafeInteger(rawModelId) || Number(rawModelId) <= 0)) {
+    throw new McpError('MCP_BINDING_INVALID', '章节生成 model_id 必须是正安全整数')
+  }
+  const model = hasOwnModelId ? { model_id: Number(rawModelId) } : {}
+  const mcp = rawMcp === undefined ? undefined : normalizeStrictChapterMcpBinding(rawMcp)
+  if (active === 'mcp' && !mcp) {
     throw new McpError('MCP_BINDING_INVALID', 'MCP 章节生成来源缺少项目绑定')
   }
 
   return {
     version: CHAPTER_GENERATION_SOURCE_VERSION,
-    active: record.active,
+    active,
     model,
     ...(mcp ? { mcp } : {}),
+  }
+}
+
+export function normalizeChapterGenerationSource(value: unknown): ChapterGenerationSourceState {
+  try {
+    return normalizeChapterGenerationSourceUnchecked(value)
+  } catch (error) {
+    if (error instanceof McpError && error.code === 'MCP_BINDING_INVALID') throw error
+    throw new McpError('MCP_BINDING_INVALID', '章节生成来源配置无效')
   }
 }
 
@@ -171,12 +243,12 @@ export function resolveChapterGenerationSource(project: any): ChapterGenerationS
 
   const legacy = resolveProseGenerationSource(project)
   if (legacy.type === 'mcp') {
-    return {
+    return normalizeChapterGenerationSource({
       version: CHAPTER_GENERATION_SOURCE_VERSION,
       active: 'mcp',
       model: {},
       mcp: legacy.mcp,
-    }
+    })
   }
   return {
     version: CHAPTER_GENERATION_SOURCE_VERSION,

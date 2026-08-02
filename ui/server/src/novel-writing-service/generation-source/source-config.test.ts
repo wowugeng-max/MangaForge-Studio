@@ -298,6 +298,60 @@ describe('retained chapter generation source state', () => {
     expect(project).toEqual(before)
   })
 
+  test('keeps legacy prose MCP coercion while migrating its canonical binding', () => {
+    const migrated = resolveChapterGenerationSource({
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: {
+            serverId: '  buda  ',
+            keyId: '3',
+            adapterId: '  buda  ',
+            agentId: '  agent-1  ',
+            model: 217,
+          },
+        },
+      },
+    })
+    expect(migrated).toEqual({
+      version: CHAPTER_GENERATION_SOURCE_VERSION,
+      active: 'mcp',
+      model: {},
+      mcp: {
+        server_id: 'buda',
+        key_id: 3,
+        adapter_id: 'buda',
+        agent_id: 'agent-1',
+        model: '217',
+      },
+    })
+    expect(chapterGenerationSourceFingerprint(migrated)).toMatch(/^sha256:[0-9a-f]{64}$/)
+    expect(toLegacyProseGenerationSource(migrated)).toEqual({
+      version: 'prose_generation_source_v1',
+      type: 'mcp',
+      mcp: migrated.mcp,
+    })
+  })
+
+  test('rejects a legacy MCP identity that cannot form canonical retained state', () => {
+    expect(() => resolveChapterGenerationSource({
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: {
+            serverId: 'buda',
+            keyId: String(Number.MAX_SAFE_INTEGER + 1),
+            adapterId: 'buda',
+            agentId: 'agent-1',
+            model: '',
+          },
+        },
+      },
+    })).toThrow(expect.objectContaining({ name: 'McpError', code: 'MCP_BINDING_INVALID' }))
+  })
+
   test('prefers and strictly normalizes an own retained source record', () => {
     const project = {
       reference_config: {
@@ -428,6 +482,11 @@ describe('retained chapter generation source state', () => {
       { version: CHAPTER_GENERATION_SOURCE_VERSION, active: 'model', model: { model_id: 1.5 } },
       { version: CHAPTER_GENERATION_SOURCE_VERSION, active: 'model', model: { model_id: 0 } },
       { version: CHAPTER_GENERATION_SOURCE_VERSION, active: 'model', model: { model_id: -1 } },
+      { version: CHAPTER_GENERATION_SOURCE_VERSION, active: 'model', model: { model_id: null } },
+      { version: CHAPTER_GENERATION_SOURCE_VERSION, active: 'model', model: { model_id: undefined } },
+      { version: CHAPTER_GENERATION_SOURCE_VERSION, active: 'model', model: { model_id: Number.NaN } },
+      { version: CHAPTER_GENERATION_SOURCE_VERSION, active: 'model', model: { model_id: Number.POSITIVE_INFINITY } },
+      { version: CHAPTER_GENERATION_SOURCE_VERSION, active: 'model', model: { model_id: Number.MAX_SAFE_INTEGER + 1 } },
       { version: CHAPTER_GENERATION_SOURCE_VERSION, active: 'model', model: { model_id: '217' } },
       { version: CHAPTER_GENERATION_SOURCE_VERSION, active: 'mcp', model: {} },
       { version: CHAPTER_GENERATION_SOURCE_VERSION, active: 'mcp', model: {}, mcp: { server_id: 'buda' } },
@@ -435,6 +494,154 @@ describe('retained chapter generation source state', () => {
       expect(() => normalizeChapterGenerationSource(source))
         .toThrow(expect.objectContaining({ code: 'MCP_BINDING_INVALID' }))
     }
+  })
+
+  test('requires own root fields and rejects an inherited model_id', () => {
+    const valid = {
+      version: CHAPTER_GENERATION_SOURCE_VERSION,
+      active: 'model',
+      model: {},
+    }
+    for (const inheritedField of ['version', 'active', 'model'] as const) {
+      const source = Object.create({ [inheritedField]: valid[inheritedField] })
+      for (const field of ['version', 'active', 'model'] as const) {
+        if (field !== inheritedField) source[field] = valid[field]
+      }
+      expect(() => normalizeChapterGenerationSource(source))
+        .toThrow(expect.objectContaining({ name: 'McpError', code: 'MCP_BINDING_INVALID' }))
+    }
+
+    expect(() => normalizeChapterGenerationSource({
+      ...valid,
+      model: Object.create({ model_id: 217 }),
+    })).toThrow(expect.objectContaining({ name: 'McpError', code: 'MCP_BINDING_INVALID' }))
+  })
+
+  test('strictly requires own snake_case MCP fields with primitive values', () => {
+    const strictState = (binding: unknown) => ({
+      version: CHAPTER_GENERATION_SOURCE_VERSION,
+      active: 'mcp',
+      model: {},
+      mcp: binding,
+    })
+    const validBinding = { ...mcp }
+
+    for (const inheritedField of ['server_id', 'key_id', 'adapter_id', 'agent_id', 'model'] as const) {
+      const binding: Record<string, unknown> = Object.create({ [inheritedField]: validBinding[inheritedField] })
+      for (const field of ['server_id', 'key_id', 'adapter_id', 'agent_id', 'model'] as const) {
+        if (field !== inheritedField) binding[field] = validBinding[field]
+      }
+      expect(() => normalizeChapterGenerationSource(strictState(binding)))
+        .toThrow(expect.objectContaining({ name: 'McpError', code: 'MCP_BINDING_INVALID' }))
+    }
+
+    for (const binding of [
+      { serverId: 'buda', keyId: 3, adapterId: 'buda', agentId: 'agent-1', model: 'buda-model' },
+      { ...validBinding, server_id: null },
+      { ...validBinding, server_id: undefined },
+      { ...validBinding, server_id: 1 },
+      { ...validBinding, server_id: { toString: () => 'buda' } },
+      { ...validBinding, adapter_id: 1 },
+      { ...validBinding, agent_id: 1 },
+      { ...validBinding, model: 217 },
+      { ...validBinding, key_id: '3' },
+      { ...validBinding, key_id: null },
+      { ...validBinding, key_id: undefined },
+      { ...validBinding, key_id: 0 },
+      { ...validBinding, key_id: -1 },
+      { ...validBinding, key_id: 1.5 },
+      { ...validBinding, key_id: Number.NaN },
+      { ...validBinding, key_id: Number.POSITIVE_INFINITY },
+      { ...validBinding, key_id: Number.MAX_SAFE_INTEGER + 1 },
+    ]) {
+      expect(() => normalizeChapterGenerationSource(strictState(binding)))
+        .toThrow(expect.objectContaining({ name: 'McpError', code: 'MCP_BINDING_INVALID' }))
+    }
+  })
+
+  test('snapshots each retained field once before validation and normalization', () => {
+    const reads: Record<string, number> = {}
+    const counted = (target: object, field: string, value: unknown, label: string) => {
+      Object.defineProperty(target, field, {
+        enumerable: true,
+        get() {
+          reads[label] = (reads[label] || 0) + 1
+          return value
+        },
+      })
+    }
+    const modelConfig = {}
+    counted(modelConfig, 'model_id', 217, 'model.model_id')
+    const mcpConfig = {}
+    for (const field of ['server_id', 'key_id', 'adapter_id', 'agent_id', 'model'] as const) {
+      counted(mcpConfig, field, mcp[field], `mcp.${field}`)
+    }
+    const source = {}
+    counted(source, 'version', CHAPTER_GENERATION_SOURCE_VERSION, 'version')
+    counted(source, 'active', 'mcp', 'active')
+    counted(source, 'model', modelConfig, 'model')
+    counted(source, 'mcp', mcpConfig, 'mcp')
+
+    expect(normalizeChapterGenerationSource(source)).toEqual({
+      version: CHAPTER_GENERATION_SOURCE_VERSION,
+      active: 'mcp',
+      model: { model_id: 217 },
+      mcp,
+    })
+    expect(reads).toEqual({
+      version: 1,
+      active: 1,
+      model: 1,
+      mcp: 1,
+      'model.model_id': 1,
+      'mcp.server_id': 1,
+      'mcp.key_id': 1,
+      'mcp.adapter_id': 1,
+      'mcp.agent_id': 1,
+      'mcp.model': 1,
+    })
+  })
+
+  test('does not let changing getters escape validation or leak native errors', () => {
+    let activeReads = 0
+    const changingActive = {
+      version: CHAPTER_GENERATION_SOURCE_VERSION,
+      get active() {
+        activeReads += 1
+        return activeReads === 1 ? 'model' : 'both'
+      },
+      model: {},
+    }
+    expect(normalizeChapterGenerationSource(changingActive)).toEqual({
+      version: CHAPTER_GENERATION_SOURCE_VERSION,
+      active: 'model',
+      model: {},
+    })
+    expect(activeReads).toBe(1)
+
+    const throwingModel = {
+      version: CHAPTER_GENERATION_SOURCE_VERSION,
+      active: 'model',
+      get model(): unknown {
+        throw new TypeError('synthetic getter failure')
+      },
+    }
+    expect(() => normalizeChapterGenerationSource(throwingModel))
+      .toThrow(expect.objectContaining({ name: 'McpError', code: 'MCP_BINDING_INVALID' }))
+
+    const throwingMcp = { ...mcp }
+    Object.defineProperty(throwingMcp, 'server_id', {
+      enumerable: true,
+      get() {
+        throw new TypeError('synthetic nested getter failure')
+      },
+    })
+    expect(() => normalizeChapterGenerationSource({
+      version: CHAPTER_GENERATION_SOURCE_VERSION,
+      active: 'mcp',
+      model: {},
+      mcp: throwingMcp,
+    })).toThrow(expect.objectContaining({ name: 'McpError', code: 'MCP_BINDING_INVALID' }))
   })
 
   test('rejects malformed present retained records instead of falling back to legacy state', () => {
