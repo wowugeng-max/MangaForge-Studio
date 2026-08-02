@@ -3,7 +3,12 @@ import path from 'node:path'
 
 const repoRoot = path.resolve(new URL('..', import.meta.url).pathname)
 const defaultConfigPath = path.join(repoRoot, 'scripts', 'refactor-boundaries.json')
-const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'])
+const sourceExtensions = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'])
+const runtimeExtensionRemaps = new Map([
+  ['.js', ['.ts', '.tsx']],
+  ['.jsx', ['.tsx']],
+  ['.mjs', ['.mts']],
+])
 const ignoredDirs = new Set(['.git', '.worktrees', 'node_modules', 'dist', 'build', 'coverage', 'vendor'])
 
 function parseArgs(argv) {
@@ -39,10 +44,10 @@ function countLines(text) {
 }
 
 function countExportedDeclarations(text) {
-  // This ratchet counts direct declarations only; re-exported surface area is intentionally out of scope.
+  // This line ratchet counts directly named declarations; export {}, export type {}, and export * are re-exports.
   return text
     .split(/\r?\n/)
-    .filter(line => /^\s*export\s+(?:async\s+)?(?:function|const|let|var|class|interface|type|enum)\s+/.test(line))
+    .filter(line => /^\s*export\s+(?:async\s+)?(?:function|const|let|var|class|interface|type|enum)\s+[A-Za-z_$][A-Za-z0-9_$]*/.test(line))
     .length
 }
 
@@ -64,10 +69,11 @@ function walkSourceFiles(root, relativeDir, output) {
 function readStringToken(text, start) {
   const quote = text[start]
   let value = ''
+  let valid = true
   let index = start + 1
   while (index < text.length) {
     const char = text[index]
-    if (char === quote) return { token: { type: 'string', value }, end: index + 1 }
+    if (char === quote) return { token: valid ? { type: 'string', value } : null, end: index + 1 }
     if (char === '\n' || char === '\r') return { token: null, end: index + 1 }
     if (char !== '\\') {
       value += char
@@ -100,6 +106,29 @@ function readStringToken(text, start) {
       index += text[index + 1] === '\n' ? 2 : 1
       continue
     }
+    if (escaped === 'x') {
+      const digits = text.slice(index + 1, index + 3)
+      if (/^[0-9A-Fa-f]{2}$/.test(digits)) value += String.fromCodePoint(Number.parseInt(digits, 16))
+      else valid = false
+      index += 3
+      continue
+    }
+    if (escaped === 'u' && text[index + 1] === '{') {
+      const endBrace = text.indexOf('}', index + 2)
+      const digits = endBrace === -1 ? '' : text.slice(index + 2, endBrace)
+      const codePoint = /^[0-9A-Fa-f]{1,6}$/.test(digits) ? Number.parseInt(digits, 16) : Number.NaN
+      if (Number.isInteger(codePoint) && codePoint <= 0x10FFFF) value += String.fromCodePoint(codePoint)
+      else valid = false
+      index = endBrace === -1 ? index + 2 : endBrace + 1
+      continue
+    }
+    if (escaped === 'u') {
+      const digits = text.slice(index + 1, index + 5)
+      if (/^[0-9A-Fa-f]{4}$/.test(digits)) value += String.fromCodePoint(Number.parseInt(digits, 16))
+      else valid = false
+      index += 5
+      continue
+    }
     value += escaped
     index += 1
   }
@@ -108,54 +137,80 @@ function readStringToken(text, start) {
 
 function tokenizeModuleSyntax(text) {
   const tokens = []
-  let index = 0
-  while (index < text.length) {
-    const char = text[index]
-    if (/\s/.test(char)) {
-      index += 1
-      continue
-    }
-    if (char === '/' && text[index + 1] === '/') {
-      index = text.indexOf('\n', index + 2)
-      if (index === -1) break
-      continue
-    }
-    if (char === '/' && text[index + 1] === '*') {
-      const end = text.indexOf('*/', index + 2)
-      index = end === -1 ? text.length : end + 2
-      continue
-    }
-    if (char === '"' || char === "'") {
-      const result = readStringToken(text, index)
-      if (result.token) tokens.push(result.token)
-      index = result.end
-      continue
-    }
-    if (char === '`') {
-      index += 1
-      while (index < text.length) {
-        if (text[index] === '\\') {
-          index += 2
-          continue
-        }
-        if (text[index] === '`') {
-          index += 1
-          break
-        }
-        index += 1
+
+  function scanTemplate(start) {
+    let index = start + 1
+    while (index < text.length) {
+      if (text[index] === '\\') {
+        index += 2
+        continue
       }
-      continue
-    }
-    if (/[A-Za-z_$]/.test(char)) {
-      const start = index
+      if (text[index] === '`') return index + 1
+      if (text[index] === '$' && text[index + 1] === '{') {
+        index = scanCode(index + 2, true)
+        continue
+      }
       index += 1
-      while (index < text.length && /[A-Za-z0-9_$]/.test(text[index])) index += 1
-      tokens.push({ type: 'identifier', value: text.slice(start, index) })
-      continue
     }
-    tokens.push({ type: 'punctuation', value: char })
-    index += 1
+    return index
   }
+
+  function scanCode(start, stopAtTemplateBrace = false) {
+    let braceDepth = 0
+    let index = start
+    while (index < text.length) {
+      const char = text[index]
+      if (/\s/.test(char)) {
+        index += 1
+        continue
+      }
+      if (char === '/' && text[index + 1] === '/') {
+        index = text.indexOf('\n', index + 2)
+        if (index === -1) return text.length
+        continue
+      }
+      if (char === '/' && text[index + 1] === '*') {
+        const end = text.indexOf('*/', index + 2)
+        index = end === -1 ? text.length : end + 2
+        continue
+      }
+      if (char === '"' || char === "'") {
+        const result = readStringToken(text, index)
+        if (result.token) tokens.push(result.token)
+        index = result.end
+        continue
+      }
+      if (char === '`') {
+        index = scanTemplate(index)
+        continue
+      }
+      if (char === '{') {
+        braceDepth += 1
+        tokens.push({ type: 'punctuation', value: char })
+        index += 1
+        continue
+      }
+      if (char === '}') {
+        if (stopAtTemplateBrace && braceDepth === 0) return index + 1
+        braceDepth = Math.max(0, braceDepth - 1)
+        tokens.push({ type: 'punctuation', value: char })
+        index += 1
+        continue
+      }
+      if (/[A-Za-z_$]/.test(char)) {
+        const identifierStart = index
+        index += 1
+        while (index < text.length && /[A-Za-z0-9_$]/.test(text[index])) index += 1
+        tokens.push({ type: 'identifier', value: text.slice(identifierStart, index) })
+        continue
+      }
+      tokens.push({ type: 'punctuation', value: char })
+      index += 1
+    }
+    return index
+  }
+
+  scanCode(0)
   return tokens
 }
 
@@ -169,6 +224,7 @@ function extractRelativeModuleSpecifiers(text) {
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index]
     if (token.type !== 'identifier') continue
+    if (tokens[index - 1]?.value === '.') continue
 
     if (token.value === 'require') {
       if (tokens[index + 1]?.value === '(' && tokens[index + 2]?.type === 'string') {
@@ -208,12 +264,51 @@ function canonicalExistingPath(filePath) {
   }
 }
 
+function isPathInside(root, candidate) {
+  const relative = path.relative(root, candidate)
+  return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`))
+}
+
+function resolveLegacyTarget(root, rule) {
+  const rawTarget = typeof rule?.target === 'string' ? rule.target.trim() : ''
+  const label = rawTarget || '(missing target)'
+  if (!rawTarget) return { error: `invalid legacy import target ${label}: target must be a non-empty relative path` }
+  if (path.isAbsolute(rawTarget)) return { error: `invalid legacy import target ${label}: absolute paths are not allowed` }
+
+  const lexicalRoot = path.resolve(root)
+  const lexicalTarget = path.resolve(lexicalRoot, rawTarget)
+  if (!isPathInside(lexicalRoot, lexicalTarget)) {
+    return { error: `invalid legacy import target ${label}: path escapes repository root` }
+  }
+
+  const canonicalRoot = canonicalExistingPath(lexicalRoot)
+  const canonicalTarget = canonicalExistingPath(lexicalTarget)
+  if (!canonicalRoot || !canonicalTarget) {
+    return { error: `invalid legacy import target ${label}: target must be an existing regular file` }
+  }
+  if (!isPathInside(canonicalRoot, canonicalTarget)) {
+    return { error: `invalid legacy import target ${label}: real path escapes repository root` }
+  }
+  if (!fs.statSync(canonicalTarget).isFile()) {
+    return { error: `invalid legacy import target ${label}: target must be an existing regular file` }
+  }
+  return {
+    canonicalTarget,
+    target: normalizeRelative(rawTarget),
+  }
+}
+
 function resolveRelativeSource(root, importer, specifier) {
   if (!specifier.startsWith('.')) return null
   const basePath = path.resolve(root, path.dirname(importer), specifier)
   const candidates = []
-  if (sourceExtensions.has(path.extname(basePath))) {
+  const requestedExtension = path.extname(basePath)
+  if (sourceExtensions.has(requestedExtension)) {
     candidates.push(basePath)
+    const remappedBase = basePath.slice(0, -requestedExtension.length)
+    for (const extension of runtimeExtensionRemaps.get(requestedExtension) || []) {
+      candidates.push(`${remappedBase}${extension}`)
+    }
   } else {
     candidates.push(basePath)
     for (const extension of sourceExtensions) candidates.push(`${basePath}${extension}`)
@@ -264,13 +359,12 @@ function checkLegacyImports(root, config) {
   }
 
   for (const rule of legacyImports) {
-    const target = normalizeRelative(String(rule.target || ''))
-    if (!target) continue
-    const canonicalTarget = canonicalExistingPath(path.join(root, target))
-    if (!canonicalTarget) {
-      failures.push(`legacy import target ${target} is missing`)
+    const resolvedTarget = resolveLegacyTarget(root, rule)
+    if (resolvedTarget.error) {
+      failures.push(resolvedTarget.error)
       continue
     }
+    const { canonicalTarget, target } = resolvedTarget
     const allowed = new Set((rule.allowed_importers || rule.allowedImporters || []).map((item) => normalizeRelative(String(item))))
     for (const file of files) {
       const text = fs.readFileSync(path.join(root, file), 'utf8')

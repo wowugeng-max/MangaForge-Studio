@@ -37,7 +37,7 @@
     {
       "path": "ui/web/src/pages/novel-workspace/writingCockpitModel.ts",
       "max_lines": 410,
-      "max_exported_declarations": 2
+      "max_exported_declarations": 1
     },
     {
       "path": "ui/web/src/pages/novel-workspace/writingCockpitModel.test.ts",
