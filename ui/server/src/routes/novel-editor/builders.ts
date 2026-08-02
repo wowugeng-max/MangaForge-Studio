@@ -30,6 +30,7 @@ import { revisionTextHash } from '../../novel/revision-hash'
 import { withEditorRevisionWorkerFence } from '../../novel/editor-revision-worker-fence'
 import type { EditorRevisionRunInput } from './editor-revision-contract'
 import { buildEditorRevisionPrompt } from './builders-revision-prompts'
+import type { ChapterSourceLeaseRegistry } from '../../novel-writing-service/generation-source/chapter-source-lease'
 
 export type EditorRoutesContext = {
   getWorkspace: () => string
@@ -51,6 +52,7 @@ export type EditorRoutesContext = {
   buildReferenceMigrationDryPlan: (project: any, chapter: any, preview: any, safety: any) => any
   diffTexts: (before: string, after: string) => any
   executeAgent?: typeof executeNovelAgent
+  chapterSourceLeases?: ChapterSourceLeaseRegistry
   updateStoryStateMachine: (
     workspace: string,
     project: any,

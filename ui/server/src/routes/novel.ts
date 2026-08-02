@@ -27,6 +27,7 @@ import { getQualityGate, getStoryState } from './novel-route-utils'
 import { registerNovelTruthRoutes } from './novel-truth-routes'
 import { createNovelWritingService } from './novel-writing-service'
 import type { McpRuntime } from '../mcp/runtime'
+import { ChapterSourceLeaseRegistry } from '../novel-writing-service/generation-source/chapter-source-lease'
 
 export function registerNovelRoutes(app: Express, getWorkspace: () => string, options: { mcpRuntime?: McpRuntime } = {}) {
   registerNovelCoreRoutes(app, getWorkspace)
@@ -38,11 +39,13 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string, op
   const productionService = createNovelProductionService()
   const dashboardService = createNovelDashboardService()
   const incubatorService = createNovelOriginalIncubatorService()
+  const chapterSourceLeases = new ChapterSourceLeaseRegistry()
   const writingService = createNovelWritingService({
     getProject,
     production: productionService,
     reference: referenceService,
     mcpRuntime: options.mcpRuntime,
+    chapterSourceLeases,
   })
   const runExecutionService = createNovelRunExecutionService({
     getProject,
@@ -101,6 +104,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string, op
     buildReferenceUsageReport: referenceService.buildReferenceUsageReport,
     buildStructuralSimilarityReport: referenceService.buildStructuralSimilarityReport,
     mcpRuntime: options.mcpRuntime,
+    chapterSourceLeases,
   })
 
   registerNovelReferenceRoutes(app, {
@@ -167,6 +171,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string, op
     buildReferenceMigrationDryPlan: referenceService.buildReferenceMigrationDryPlan,
     diffTexts: referenceService.diffTexts,
     updateStoryStateMachine: writingService.updateStoryStateMachine,
+    chapterSourceLeases,
   })
 
   registerNovelRunRoutes(app, {

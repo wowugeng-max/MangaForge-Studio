@@ -3,10 +3,14 @@ import { mkdtemp, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { createMcpKey, updateMcpKey } from '../mcp/key-store'
+import { McpError } from '../mcp/errors'
 import { createMcpRuntime } from '../mcp/runtime'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from '../mcp/server-store'
+import { withMcpWorkspaceMutation } from '../mcp/workspace-coordinator'
 import { createNovelProject, deleteNovelProject, getNovelProject, listNovelProjects } from '../novel'
+import { ChapterSourceLeaseRegistry } from '../novel-writing-service/generation-source/chapter-source-lease'
 import { registerNovelMcpBindingRoutes } from './novel-mcp-binding-routes'
+import { registerNovelProjectControlRoutes } from './novel-project-control-routes'
 
 const workspaces: string[] = []
 const FAKE_KEY = 'fake-key'
@@ -20,6 +24,8 @@ const ROTATED_COOKIE = 'rotated-cookie'
 const PREFIX_KEY_PAYLOAD = 'prefix-key-payload'
 const PREFIX_AUTH_PAYLOAD = 'prefix-auth-payload'
 const PREFIX_COOKIE_PAYLOAD = 'prefix-cookie-payload'
+const CHAPTER_SOURCE_BASE = '/api/novel/projects/:id/chapter-generation-source'
+const LEGACY_SOURCE_BASE = '/api/novel/projects/:id/prose-generation-source'
 afterEach(async () => Promise.all(workspaces.splice(0).map(path => rm(path, { recursive: true, force: true }))))
 
 function createRouteHarness() {
@@ -43,6 +49,12 @@ async function call(handler: any, req: any = {}) {
   }
   await handler({ params: {}, query: {}, body: {}, ...req }, res)
   return res
+}
+
+function routeHandler(handlers: Map<string, any>, route: string) {
+  const handler = handlers.get(route)
+  expect(handler).toBeFunction()
+  return handler
 }
 
 async function fixture(input: {
@@ -76,13 +88,15 @@ async function fixture(input: {
     createAgent: () => adapter.createAgent(),
     isAgentLeaseActive: async () => false,
   }
+  const chapterSourceLeases = new ChapterSourceLeaseRegistry()
   const { app, handlers } = createRouteHarness()
   registerNovelMcpBindingRoutes(app, {
     getWorkspace: () => workspace,
     getProject: getNovelProject,
     mcpRuntime: runtime as any,
+    chapterSourceLeases,
   })
-  return { workspace, key, first, second, handlers, runtime, adapter }
+  return { workspace, key, first, second, handlers, runtime, adapter, chapterSourceLeases }
 }
 
 function maliciousAgent(credentials = {
@@ -217,14 +231,424 @@ async function rotatingCredentialFixture() {
       return baseRuntime.createAgent(keyId, input, signal, pinnedCredential)
     },
   }
+  const chapterSourceLeases = new ChapterSourceLeaseRegistry()
   const { app, handlers } = createRouteHarness()
   registerNovelMcpBindingRoutes(app, {
     getWorkspace: () => workspace,
     getProject: getNovelProject,
     mcpRuntime: runtime as any,
+    chapterSourceLeases,
   })
   return { key, project, handlers, usedCredentials }
 }
+
+function binding(keyId: number, agentId = 'agent-1') {
+  return {
+    server_id: 'buda',
+    key_id: keyId,
+    adapter_id: 'buda',
+    agent_id: agentId,
+    model: '',
+  }
+}
+
+async function expectViewReadBack(handlers: Map<string, any>, projectId: number, response: any) {
+  expect(response.statusCode).toBe(200)
+  const readBack = await call(routeHandler(handlers, `GET ${CHAPTER_SOURCE_BASE}`), {
+    params: { id: String(projectId) },
+  })
+  expect(readBack.statusCode).toBe(200)
+  expect(readBack.body).toEqual(response.body)
+  return readBack.body
+}
+
+describe('explicit chapter generation source routes', () => {
+  test('stores retained model and MCP configurations while activation only changes active', async () => {
+    const { workspace, key, first, handlers } = await fixture()
+
+    const modelSaved = await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+      params: { id: String(first.id) }, body: { model_id: 217 },
+    })
+    const modelView = await expectViewReadBack(handlers, first.id, modelSaved)
+    expect(modelView).toEqual({
+      ok: true,
+      source: {
+        version: 'chapter_generation_source_v1',
+        active: 'model',
+        model: { model_id: 217 },
+      },
+      fingerprint: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+      locked: false,
+      display: { active: 'model', model_id: 217, mcp: null },
+    })
+
+    const mcp = binding(key.id)
+    const bindingSaved = await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+      params: { id: String(first.id) }, body: { mcp },
+    })
+    const bindingView = await expectViewReadBack(handlers, first.id, bindingSaved)
+    expect(bindingView.source).toEqual({
+      version: 'chapter_generation_source_v1',
+      active: 'model',
+      model: { model_id: 217 },
+      mcp,
+    })
+    expect(bindingView.display).toEqual({ active: 'model', model_id: 217, mcp })
+
+    const activated = await call(routeHandler(handlers, `POST ${CHAPTER_SOURCE_BASE}/activate`), {
+      params: { id: String(first.id) }, body: { active: 'mcp' },
+    })
+    const activatedView = await expectViewReadBack(handlers, first.id, activated)
+    expect(activatedView.source).toEqual({ ...bindingView.source, active: 'mcp' })
+    expect(activatedView.display).toEqual({ active: 'mcp', model_id: 217, mcp })
+    expect((await getNovelProject(workspace, first.id))?.reference_config).toMatchObject({
+      chapter_generation_source: activatedView.source,
+    })
+  })
+
+  test('requires a raw positive safe model id and makes same-target activation idempotent', async () => {
+    const { first, handlers } = await fixture()
+    const activateWithoutModel = await call(routeHandler(handlers, `POST ${CHAPTER_SOURCE_BASE}/activate`), {
+      params: { id: String(first.id) }, body: { active: 'model' },
+    })
+    expect(activateWithoutModel).toMatchObject({
+      statusCode: 422,
+      body: { error_code: 'CHAPTER_MODEL_REQUIRED' },
+    })
+
+    for (const model_id of [undefined, '217', 1.5, 0, Number.MAX_SAFE_INTEGER + 1]) {
+      const response = await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+        params: { id: String(first.id) }, body: { model_id },
+      })
+      expect(response).toMatchObject({
+        statusCode: 422,
+        body: { error_code: 'CHAPTER_MODEL_REQUIRED' },
+      })
+    }
+
+    await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+      params: { id: String(first.id) }, body: { model_id: 217 },
+    })
+    const firstActivation = await call(routeHandler(handlers, `POST ${CHAPTER_SOURCE_BASE}/activate`), {
+      params: { id: String(first.id) }, body: { active: 'model' },
+    })
+    const secondActivation = await call(routeHandler(handlers, `POST ${CHAPTER_SOURCE_BASE}/activate`), {
+      params: { id: String(first.id) }, body: { active: 'model' },
+    })
+    expect(secondActivation.body).toEqual(firstActivation.body)
+    await expectViewReadBack(handlers, first.id, secondActivation)
+  })
+
+  test('live MCP test never saves and MCP save never implicitly activates', async () => {
+    const { workspace, key, first, handlers } = await fixture()
+    await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+      params: { id: String(first.id) }, body: { model_id: 217 },
+    })
+    const before = structuredClone((await getNovelProject(workspace, first.id))?.reference_config)
+    const mcp = binding(key.id)
+
+    const tested = await call(routeHandler(handlers, `POST ${CHAPTER_SOURCE_BASE}/mcp/test`), {
+      params: { id: String(first.id) }, body: { mcp },
+    })
+    expect(tested.statusCode).toBe(200)
+    expect(tested.body).toEqual({
+      ok: true,
+      validation: {
+        server_id: 'buda',
+        key_id: key.id,
+        agent: { id: 'agent-1', name: '正文 Agent' },
+      },
+    })
+    expect((await getNovelProject(workspace, first.id))?.reference_config).toEqual(before)
+
+    const saved = await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+      params: { id: String(first.id) }, body: { mcp },
+    })
+    expect(saved.body.source).toMatchObject({ active: 'model', model: { model_id: 217 }, mcp })
+    await expectViewReadBack(handlers, first.id, saved)
+  })
+
+  test('failed MCP save and activation validation leave source storage byte-identical', async () => {
+    const { workspace, key, first, handlers, runtime } = await fixture()
+    await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+      params: { id: String(first.id) }, body: { model_id: 217 },
+    })
+    await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+      params: { id: String(first.id) }, body: { mcp: binding(key.id) },
+    })
+    const before = JSON.stringify((await getNovelProject(workspace, first.id))?.reference_config)
+    runtime.listAgents = async () => []
+
+    const failedSave = await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+      params: { id: String(first.id) }, body: { mcp: binding(key.id, 'agent-2') },
+    })
+    expect(failedSave.statusCode).toBe(400)
+    expect(JSON.stringify((await getNovelProject(workspace, first.id))?.reference_config)).toBe(before)
+
+    const failedActivation = await call(routeHandler(handlers, `POST ${CHAPTER_SOURCE_BASE}/activate`), {
+      params: { id: String(first.id) }, body: { active: 'mcp' },
+    })
+    expect(failedActivation.statusCode).toBe(400)
+    expect(JSON.stringify((await getNovelProject(workspace, first.id))?.reference_config)).toBe(before)
+  })
+
+  test('rejects every source mutation during a project lease and reports the lock on GET', async () => {
+    const { workspace, key, first, handlers, chapterSourceLeases } = await fixture()
+    await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+      params: { id: String(first.id) }, body: { model_id: 217 },
+    })
+    await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+      params: { id: String(first.id) }, body: { mcp: binding(key.id) },
+    })
+    const before = JSON.stringify((await getNovelProject(workspace, first.id))?.reference_config)
+    const lease = await chapterSourceLeases.acquire(workspace, first.id, 'task-running')
+    try {
+      const locked = await call(routeHandler(handlers, `GET ${CHAPTER_SOURCE_BASE}`), {
+        params: { id: String(first.id) },
+      })
+      expect(locked.body.locked).toBe(true)
+      for (const [route, body] of [
+        [`POST ${CHAPTER_SOURCE_BASE}/activate`, { active: 'mcp' }],
+        [`PUT ${CHAPTER_SOURCE_BASE}/model`, { model_id: 218 }],
+        [`PUT ${CHAPTER_SOURCE_BASE}/mcp`, { mcp: binding(key.id, 'agent-2') }],
+        [`PUT ${LEGACY_SOURCE_BASE}`, { source: { version: 'prose_generation_source_v1', type: 'model' } }],
+      ] as const) {
+        const response = await call(routeHandler(handlers, route), {
+          params: { id: String(first.id) }, body,
+        })
+        expect(response).toMatchObject({
+          statusCode: 409,
+          body: { error_code: 'GENERATION_SOURCE_BUSY' },
+        })
+      }
+      expect(JSON.stringify((await getNovelProject(workspace, first.id))?.reference_config)).toBe(before)
+    } finally {
+      await lease.release()
+    }
+    const unlocked = await call(routeHandler(handlers, `GET ${CHAPTER_SOURCE_BASE}`), {
+      params: { id: String(first.id) },
+    })
+    expect(unlocked.body.locked).toBe(false)
+  })
+
+  test('serializes concurrent model, binding, and activation writes with per-commit views', async () => {
+    const { workspace, key, first, handlers } = await fixture()
+    let releaseCoordinator!: () => void
+    let coordinatorHeld!: () => void
+    const held = new Promise<void>(resolve => { coordinatorHeld = resolve })
+    const gate = new Promise<void>(resolve => { releaseCoordinator = resolve })
+    const blocker = withMcpWorkspaceMutation(workspace, async () => {
+      coordinatorHeld()
+      await gate
+    })
+    await held
+
+    const requests = [
+      call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+        params: { id: String(first.id) }, body: { model_id: 217 },
+      }),
+      call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+        params: { id: String(first.id) }, body: { mcp: binding(key.id) },
+      }),
+      call(routeHandler(handlers, `POST ${CHAPTER_SOURCE_BASE}/activate`), {
+        params: { id: String(first.id) }, body: { active: 'mcp' },
+      }),
+    ]
+    releaseCoordinator()
+    await blocker
+    const [modelSaved, bindingSaved, activated] = await Promise.all(requests)
+
+    expect(modelSaved.body.source).toEqual({
+      version: 'chapter_generation_source_v1', active: 'model', model: { model_id: 217 },
+    })
+    expect(bindingSaved.body.source).toEqual({
+      ...modelSaved.body.source, mcp: binding(key.id),
+    })
+    expect(activated.body.source).toEqual({
+      ...bindingSaved.body.source, active: 'mcp',
+    })
+    await expectViewReadBack(handlers, first.id, activated)
+  })
+
+  test('maps malformed, conflict, and authentication failures without exposing secrets', async () => {
+    const { key, first, second, handlers, runtime } = await fixture()
+    const malformed = await call(routeHandler(handlers, `POST ${CHAPTER_SOURCE_BASE}/activate`), {
+      params: { id: String(first.id) }, body: { active: 'both' },
+    })
+    expect(malformed).toMatchObject({ statusCode: 400, body: { error_code: 'MCP_BINDING_INVALID' } })
+    for (const route of [`POST ${CHAPTER_SOURCE_BASE}/mcp/test`, `PUT ${CHAPTER_SOURCE_BASE}/mcp`]) {
+      const missingBinding = await call(routeHandler(handlers, route), {
+        params: { id: String(first.id) }, body: {},
+      })
+      expect(missingBinding).toMatchObject({
+        statusCode: 400,
+        body: { error_code: 'MCP_BINDING_INVALID' },
+      })
+    }
+
+    await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+      params: { id: String(first.id) }, body: { mcp: binding(key.id) },
+    })
+    const conflict = await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+      params: { id: String(second.id) }, body: { mcp: binding(key.id) },
+    })
+    expect(conflict).toMatchObject({ statusCode: 409, body: { error_code: 'MCP_BINDING_INVALID' } })
+
+    runtime.listAgents = async () => {
+      throw new McpError('MCP_AUTH_FAILED', `remote reflected ${FAKE_KEY} ${FAKE_HEADER}`)
+    }
+    const authentication = await call(routeHandler(handlers, `POST ${CHAPTER_SOURCE_BASE}/mcp/test`), {
+      params: { id: String(second.id) }, body: { mcp: binding(key.id, 'agent-2') },
+    })
+    expect(authentication).toMatchObject({ statusCode: 401, body: { error_code: 'MCP_AUTH_FAILED' } })
+    expect(JSON.stringify(authentication.body)).not.toContain(FAKE_KEY)
+    expect(JSON.stringify(authentication.body)).not.toContain(FAKE_HEADER)
+  })
+
+  test('keeps legacy adapters compatible and uses retained MCP while model is active', async () => {
+    const { key, first, handlers, runtime } = await fixture()
+    await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+      params: { id: String(first.id) }, body: { model_id: 217 },
+    })
+    await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+      params: { id: String(first.id) }, body: { mcp: binding(key.id) },
+    })
+    const legacyModel = await call(routeHandler(handlers, `GET ${LEGACY_SOURCE_BASE}`), {
+      params: { id: String(first.id) },
+    })
+    expect(legacyModel.body.source).toEqual({ version: 'prose_generation_source_v1', type: 'model' })
+
+    let listCalls = 0
+    let createCalls = 0
+    runtime.listAgents = async () => { listCalls += 1; return [{ id: 'agent-1', name: '正文 Agent' }] }
+    runtime.createAgent = async () => { createCalls += 1; return { id: 'agent-new', name: '新 Agent' } }
+    expect((await call(routeHandler(handlers, `POST ${LEGACY_SOURCE_BASE}/test`), {
+      params: { id: String(first.id) }, body: {},
+    })).statusCode).toBe(200)
+    expect((await call(routeHandler(handlers, `GET ${LEGACY_SOURCE_BASE}/agents`), {
+      params: { id: String(first.id) }, query: {},
+    })).statusCode).toBe(200)
+    expect((await call(routeHandler(handlers, `POST ${LEGACY_SOURCE_BASE}/agents`), {
+      params: { id: String(first.id) }, body: { name: '新 Agent' },
+    })).statusCode).toBe(200)
+    expect(listCalls).toBeGreaterThanOrEqual(2)
+    expect(createCalls).toBe(1)
+
+    const legacyMcp = {
+      version: 'prose_generation_source_v1',
+      type: 'mcp',
+      mcp: binding(key.id, 'agent-1'),
+    }
+    const activatedMcp = await call(routeHandler(handlers, `PUT ${LEGACY_SOURCE_BASE}`), {
+      params: { id: String(first.id) }, body: { source: legacyMcp },
+    })
+    expect(activatedMcp.body.source).toEqual(legacyMcp)
+    const retainedMcpState = (await call(routeHandler(handlers, `GET ${CHAPTER_SOURCE_BASE}`), {
+      params: { id: String(first.id) },
+    })).body.source
+    expect(retainedMcpState).toMatchObject({ active: 'mcp', model: { model_id: 217 }, mcp: binding(key.id) })
+
+    await call(routeHandler(handlers, `PUT ${LEGACY_SOURCE_BASE}`), {
+      params: { id: String(first.id) },
+      body: { source: { version: 'prose_generation_source_v1', type: 'model' } },
+    })
+    const retainedAfterModel = (await call(routeHandler(handlers, `GET ${CHAPTER_SOURCE_BASE}`), {
+      params: { id: String(first.id) },
+    })).body.source
+    expect(retainedAfterModel).toEqual({ ...retainedMcpState, active: 'model' })
+  })
+
+  test('snapshots a legacy source request once before validation and persistence', async () => {
+    const { key, first, handlers } = await fixture()
+    let sourceReads = 0
+    const body: Record<string, unknown> = {}
+    Object.defineProperty(body, 'source', {
+      enumerable: true,
+      get() {
+        sourceReads += 1
+        if (sourceReads > 1) throw new Error('legacy source request was read more than once')
+        return {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: binding(key.id),
+        }
+      },
+    })
+
+    const response = await call(routeHandler(handlers, `PUT ${LEGACY_SOURCE_BASE}`), {
+      params: { id: String(first.id) }, body,
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(sourceReads).toBe(1)
+    expect(response.body.source).toMatchObject({ type: 'mcp', mcp: binding(key.id) })
+
+    let testSourceReads = 0
+    const testBody: Record<string, unknown> = {}
+    Object.defineProperty(testBody, 'source', {
+      enumerable: true,
+      get() {
+        testSourceReads += 1
+        if (testSourceReads > 1) throw new Error('legacy test source was read more than once')
+        return {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: binding(key.id),
+        }
+      },
+    })
+    const tested = await call(routeHandler(handlers, `POST ${LEGACY_SOURCE_BASE}/test`), {
+      params: { id: String(first.id) }, body: testBody,
+    })
+    expect(tested.statusCode).toBe(200)
+    expect(testSourceReads).toBe(1)
+  })
+
+  test('registers model routes without an MCP runtime and controls unavailable MCP operations', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-model-only-source-route-'))
+    workspaces.push(workspace)
+    const project = await createNovelProject(workspace, { title: '纯 API 项目', reference_config: {} })
+    const chapterSourceLeases = new ChapterSourceLeaseRegistry()
+    const { app, handlers } = createRouteHarness()
+    registerNovelProjectControlRoutes(app, {
+      getWorkspace: () => workspace,
+      getProject: getNovelProject,
+      chapterSourceLeases,
+    } as any)
+
+    const initial = await call(routeHandler(handlers, `GET ${CHAPTER_SOURCE_BASE}`), {
+      params: { id: String(project.id) },
+    })
+    expect(initial.body.source.active).toBe('model')
+    const saved = await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+      params: { id: String(project.id) }, body: { model_id: 217 },
+    })
+    expect(saved.body.source.model).toEqual({ model_id: 217 })
+    const activated = await call(routeHandler(handlers, `POST ${CHAPTER_SOURCE_BASE}/activate`), {
+      params: { id: String(project.id) }, body: { active: 'model' },
+    })
+    expect(activated.statusCode).toBe(200)
+    const unavailable = await call(routeHandler(handlers, `POST ${CHAPTER_SOURCE_BASE}/mcp/test`), {
+      params: { id: String(project.id) }, body: { mcp: binding(1) },
+    })
+    expect(unavailable).toMatchObject({
+      statusCode: 422,
+      body: { error_code: 'MCP_CAPABILITY_MISSING' },
+    })
+  })
+
+  test('returns 404 for missing projects and 400 for invalid project ids', async () => {
+    const { first, handlers } = await fixture()
+    const missing = await call(routeHandler(handlers, `GET ${CHAPTER_SOURCE_BASE}`), {
+      params: { id: String(first.id + 1000) },
+    })
+    expect(missing.statusCode).toBe(404)
+    const invalid = await call(routeHandler(handlers, `GET ${CHAPTER_SOURCE_BASE}`), {
+      params: { id: 'not-an-id' },
+    })
+    expect(invalid).toMatchObject({ statusCode: 400, body: { error_code: 'MCP_BINDING_INVALID' } })
+  })
+})
 
 describe('novel MCP prose-source binding routes', () => {
   test('returns model for an unconfigured project and persists a validated MCP binding', async () => {
@@ -241,7 +665,12 @@ describe('novel MCP prose-source binding routes', () => {
     const saved = await call(handlers.get(`PUT ${path}`), { params: { id: String(first.id) }, body: { source } })
     expect(saved.statusCode).toBe(200)
     expect(saved.body.source).toMatchObject({ version: 'prose_generation_source_v1', type: 'mcp' })
-    expect((await getNovelProject(workspace, first.id))?.reference_config?.prose_generation_source).toEqual(saved.body.source)
+    expect((await getNovelProject(workspace, first.id))?.reference_config?.chapter_generation_source).toEqual({
+      version: 'chapter_generation_source_v1',
+      active: 'mcp',
+      model: {},
+      mcp: { ...source.mcp, model: '' },
+    })
   })
 
   test('rejects changing away from the current MCP tuple while its production lease is active', async () => {
@@ -352,7 +781,7 @@ describe('novel MCP prose-source binding routes', () => {
 
       expect(responses.map(response => response.statusCode).sort()).toEqual([200, 409])
       const boundProjects = (await listNovelProjects(workspace)).filter(project => (
-        project.reference_config?.prose_generation_source?.type === 'mcp'
+        project.reference_config?.chapter_generation_source?.active === 'mcp'
       ))
       expect(boundProjects).toHaveLength(1)
     } finally {

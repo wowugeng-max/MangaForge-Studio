@@ -13,6 +13,7 @@ import {
 import type { NovelProductionService } from '../../routes/novel-production-service'
 import type { NovelReferenceService } from '../../routes/novel-reference-service'
 import type { McpRuntime } from '../../mcp/runtime'
+import type { ChapterSourceLeaseRegistry } from '../generation-source/chapter-source-lease'
 import { createGenerationSourceResolver } from '../generation-source/create-generation-source'
 import { McpGenerationSource } from '../generation-source/mcp-generation-source'
 import { ModelGenerationSource } from '../generation-source/model-generation-source'
@@ -66,6 +67,7 @@ export function createNovelWritingService(ctx: {
   reference: NovelReferenceService
   runtime?: NovelWritingRuntime
   mcpRuntime?: McpRuntime
+  chapterSourceLeases?: ChapterSourceLeaseRegistry
 }) {
   const trustedWordTargetContractionBudgets = new WeakSet<object>()
   const executeAgent = ctx.runtime?.executeAgent || executeNovelAgent

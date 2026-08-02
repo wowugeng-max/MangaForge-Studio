@@ -5,6 +5,7 @@ import { registerNovelProjectDeliveryRoutes } from './novel-project-delivery-rou
 import { registerNovelProjectInsightRoutes } from './novel-project-insight-routes'
 import { registerNovelMcpBindingRoutes } from './novel-mcp-binding-routes'
 import type { McpRuntime } from '../mcp/runtime'
+import type { ChapterSourceLeaseRegistry } from '../novel-writing-service/generation-source/chapter-source-lease'
 
 type ProjectControlRoutesContext = {
   getWorkspace: () => string
@@ -24,6 +25,7 @@ type ProjectControlRoutesContext = {
   buildReferenceUsageReport: (workspace: string, project: any, taskType: string, generatedText?: string) => Promise<any>
   buildStructuralSimilarityReport: (chapter: any, referenceReport: any) => any
   mcpRuntime?: McpRuntime
+  chapterSourceLeases: ChapterSourceLeaseRegistry
 }
 
 export function registerNovelProjectControlRoutes(app: Express, ctx: ProjectControlRoutesContext) {
@@ -31,5 +33,5 @@ export function registerNovelProjectControlRoutes(app: Express, ctx: ProjectCont
   registerNovelProjectBibleRoutes(app, ctx)
   registerNovelProjectInsightRoutes(app, ctx)
   registerNovelProjectConfigRoutes(app, ctx)
-  if (ctx.mcpRuntime) registerNovelMcpBindingRoutes(app, { ...ctx, mcpRuntime: ctx.mcpRuntime })
+  registerNovelMcpBindingRoutes(app, ctx)
 }
