@@ -1,15 +1,22 @@
 import fs from 'node:fs'
+import { createRequire } from 'node:module'
 import path from 'node:path'
 
 const repoRoot = path.resolve(new URL('..', import.meta.url).pathname)
+const requireFromWeb = createRequire(new URL('../ui/web/package.json', import.meta.url))
+const ts = requireFromWeb('typescript')
 const defaultConfigPath = path.join(repoRoot, 'scripts', 'refactor-boundaries.json')
 const sourceExtensions = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'])
+const extensionlessResolutionOrder = ['.tsx', '.jsx', '.mts', '.ts', '.mjs', '.js', '.cts', '.cjs']
 const runtimeExtensionRemaps = new Map([
   ['.js', ['.ts', '.tsx']],
   ['.jsx', ['.tsx']],
   ['.mjs', ['.mts']],
 ])
 const ignoredDirs = new Set(['.git', '.worktrees', 'node_modules', 'dist', 'build', 'coverage', 'vendor'])
+const maxTemplateNesting = 128
+
+class ModuleSyntaxScanError extends Error {}
 
 function parseArgs(argv) {
   const args = { root: repoRoot, config: defaultConfigPath }
@@ -66,192 +73,52 @@ function walkSourceFiles(root, relativeDir, output) {
   }
 }
 
-function readStringToken(text, start) {
-  const quote = text[start]
-  let value = ''
-  let valid = true
-  let index = start + 1
-  while (index < text.length) {
-    const char = text[index]
-    if (char === quote) return { token: valid ? { type: 'string', value } : null, end: index + 1 }
-    if (char === '\n' || char === '\r') return { token: null, end: index + 1 }
-    if (char !== '\\') {
-      value += char
-      index += 1
-      continue
-    }
-
-    index += 1
-    if (index >= text.length) return { token: null, end: index }
-    const escaped = text[index]
-    const simpleEscapes = {
-      b: '\b',
-      f: '\f',
-      n: '\n',
-      r: '\r',
-      t: '\t',
-      v: '\v',
-      0: '\0',
-    }
-    if (Object.hasOwn(simpleEscapes, escaped)) {
-      value += simpleEscapes[escaped]
-      index += 1
-      continue
-    }
-    if (escaped === '\n') {
-      index += 1
-      continue
-    }
-    if (escaped === '\r') {
-      index += text[index + 1] === '\n' ? 2 : 1
-      continue
-    }
-    if (escaped === 'x') {
-      const digits = text.slice(index + 1, index + 3)
-      if (/^[0-9A-Fa-f]{2}$/.test(digits)) value += String.fromCodePoint(Number.parseInt(digits, 16))
-      else valid = false
-      index += 3
-      continue
-    }
-    if (escaped === 'u' && text[index + 1] === '{') {
-      const endBrace = text.indexOf('}', index + 2)
-      const digits = endBrace === -1 ? '' : text.slice(index + 2, endBrace)
-      const codePoint = /^[0-9A-Fa-f]{1,6}$/.test(digits) ? Number.parseInt(digits, 16) : Number.NaN
-      if (Number.isInteger(codePoint) && codePoint <= 0x10FFFF) value += String.fromCodePoint(codePoint)
-      else valid = false
-      index = endBrace === -1 ? index + 2 : endBrace + 1
-      continue
-    }
-    if (escaped === 'u') {
-      const digits = text.slice(index + 1, index + 5)
-      if (/^[0-9A-Fa-f]{4}$/.test(digits)) value += String.fromCodePoint(Number.parseInt(digits, 16))
-      else valid = false
-      index += 5
-      continue
-    }
-    value += escaped
-    index += 1
-  }
-  return { token: null, end: index }
+function scriptKindForFile(file) {
+  const extension = path.extname(file)
+  if (extension === '.tsx') return ts.ScriptKind.TSX
+  if (extension === '.jsx') return ts.ScriptKind.JSX
+  if (['.js', '.mjs', '.cjs'].includes(extension)) return ts.ScriptKind.JS
+  return ts.ScriptKind.TS
 }
 
-function tokenizeModuleSyntax(text) {
-  const tokens = []
-
-  function scanTemplate(start) {
-    let index = start + 1
-    while (index < text.length) {
-      if (text[index] === '\\') {
-        index += 2
-        continue
-      }
-      if (text[index] === '`') return index + 1
-      if (text[index] === '$' && text[index + 1] === '{') {
-        index = scanCode(index + 2, true)
-        continue
-      }
-      index += 1
-    }
-    return index
-  }
-
-  function scanCode(start, stopAtTemplateBrace = false) {
-    let braceDepth = 0
-    let index = start
-    while (index < text.length) {
-      const char = text[index]
-      if (/\s/.test(char)) {
-        index += 1
-        continue
-      }
-      if (char === '/' && text[index + 1] === '/') {
-        index = text.indexOf('\n', index + 2)
-        if (index === -1) return text.length
-        continue
-      }
-      if (char === '/' && text[index + 1] === '*') {
-        const end = text.indexOf('*/', index + 2)
-        index = end === -1 ? text.length : end + 2
-        continue
-      }
-      if (char === '"' || char === "'") {
-        const result = readStringToken(text, index)
-        if (result.token) tokens.push(result.token)
-        index = result.end
-        continue
-      }
-      if (char === '`') {
-        index = scanTemplate(index)
-        continue
-      }
-      if (char === '{') {
-        braceDepth += 1
-        tokens.push({ type: 'punctuation', value: char })
-        index += 1
-        continue
-      }
-      if (char === '}') {
-        if (stopAtTemplateBrace && braceDepth === 0) return index + 1
-        braceDepth = Math.max(0, braceDepth - 1)
-        tokens.push({ type: 'punctuation', value: char })
-        index += 1
-        continue
-      }
-      if (/[A-Za-z_$]/.test(char)) {
-        const identifierStart = index
-        index += 1
-        while (index < text.length && /[A-Za-z0-9_$]/.test(text[index])) index += 1
-        tokens.push({ type: 'identifier', value: text.slice(identifierStart, index) })
-        continue
-      }
-      tokens.push({ type: 'punctuation', value: char })
-      index += 1
-    }
-    return index
-  }
-
-  scanCode(0)
-  return tokens
-}
-
-function extractRelativeModuleSpecifiers(text) {
-  const tokens = tokenizeModuleSyntax(text)
+function extractRelativeModuleSpecifiers(text, file) {
   const specifiers = []
-  const addStringToken = (token) => {
-    if (token?.type === 'string' && token.value.startsWith('.')) specifiers.push(token.value)
+  const addStringLiteral = (node) => {
+    if (node && ts.isStringLiteral(node) && node.text.startsWith('.')) specifiers.push(node.text)
+  }
+  let sourceFile
+  try {
+    sourceFile = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false, scriptKindForFile(file))
+  } catch (error) {
+    if (error instanceof RangeError) {
+      throw new ModuleSyntaxScanError(`template nesting exceeds ${maxTemplateNesting}`)
+    }
+    throw error
   }
 
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index]
-    if (token.type !== 'identifier') continue
-    if (tokens[index - 1]?.value === '.') continue
-
-    if (token.value === 'require') {
-      if (tokens[index + 1]?.value === '(' && tokens[index + 2]?.type === 'string') {
-        addStringToken(tokens[index + 2])
-      }
-      continue
+  const stack = [{ node: sourceFile, templateDepth: 0 }]
+  while (stack.length) {
+    const { node, templateDepth } = stack.pop()
+    const nextTemplateDepth = templateDepth + (
+      ts.isTemplateExpression(node) || ts.isNoSubstitutionTemplateLiteral(node) ? 1 : 0
+    )
+    if (nextTemplateDepth > maxTemplateNesting) {
+      throw new ModuleSyntaxScanError(`template nesting exceeds ${maxTemplateNesting}`)
     }
 
-    if (token.value !== 'import' && token.value !== 'export') continue
-    if (token.value === 'import' && tokens[index + 1]?.value === '(') {
-      addStringToken(tokens[index + 2])
-      continue
-    }
-    if (token.value === 'import' && tokens[index + 1]?.type === 'string') {
-      addStringToken(tokens[index + 1])
-      continue
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      addStringLiteral(node.moduleSpecifier)
+    } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
+      addStringLiteral(node.moduleReference.expression)
+    } else if (ts.isCallExpression(node)) {
+      const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword
+      const isBareRequire = ts.isIdentifier(node.expression) && node.expression.text === 'require'
+      if (isDynamicImport || isBareRequire) addStringLiteral(node.arguments[0])
     }
 
-    for (let cursor = index + 1; cursor < tokens.length; cursor += 1) {
-      const candidate = tokens[cursor]
-      if (candidate.value === ';') break
-      if (cursor > index + 1 && candidate.type === 'identifier' && (candidate.value === 'import' || candidate.value === 'export')) break
-      if (candidate.type === 'identifier' && candidate.value === 'from' && tokens[cursor + 1]?.type === 'string') {
-        addStringToken(tokens[cursor + 1])
-        break
-      }
-    }
+    ts.forEachChild(node, child => {
+      stack.push({ node: child, templateDepth: nextTemplateDepth })
+    })
   }
   return specifiers
 }
@@ -311,8 +178,8 @@ function resolveRelativeSource(root, importer, specifier) {
     }
   } else {
     candidates.push(basePath)
-    for (const extension of sourceExtensions) candidates.push(`${basePath}${extension}`)
-    for (const extension of sourceExtensions) candidates.push(path.join(basePath, `index${extension}`))
+    for (const extension of extensionlessResolutionOrder) candidates.push(`${basePath}${extension}`)
+    for (const extension of extensionlessResolutionOrder) candidates.push(path.join(basePath, `index${extension}`))
   }
   for (const candidate of candidates) {
     const canonical = canonicalExistingPath(candidate)
@@ -357,6 +224,21 @@ function checkLegacyImports(root, config) {
   for (const scanRoot of scanRoots) {
     walkSourceFiles(root, scanRoot, files)
   }
+  const specifierCache = new Map()
+
+  function readModuleSpecifiers(file) {
+    if (specifierCache.has(file)) return specifierCache.get(file)
+    try {
+      const specifiers = extractRelativeModuleSpecifiers(fs.readFileSync(path.join(root, file), 'utf8'), file)
+      specifierCache.set(file, specifiers)
+      return specifiers
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      failures.push(`${file} could not be scanned: ${message}`)
+      specifierCache.set(file, null)
+      return null
+    }
+  }
 
   for (const rule of legacyImports) {
     const resolvedTarget = resolveLegacyTarget(root, rule)
@@ -367,8 +249,9 @@ function checkLegacyImports(root, config) {
     const { canonicalTarget, target } = resolvedTarget
     const allowed = new Set((rule.allowed_importers || rule.allowedImporters || []).map((item) => normalizeRelative(String(item))))
     for (const file of files) {
-      const text = fs.readFileSync(path.join(root, file), 'utf8')
-      const specifier = extractRelativeModuleSpecifiers(text)
+      const specifiers = readModuleSpecifiers(file)
+      if (!specifiers) continue
+      const specifier = specifiers
         .find((item) => resolveRelativeSource(root, file, item) === canonicalTarget)
       if (!specifier || allowed.has(file)) continue
       failures.push(`${file} imports ${specifier}, which resolves to legacy target ${target}; allowed importers: ${Array.from(allowed).join(', ') || '(none)'}`)

@@ -32,6 +32,10 @@ function runBoundaryCheck(root, configPath = 'refactor-boundaries.json') {
   })
 }
 
+function nestedTemplateExpression(depth, expression) {
+  return `${'\`\${'.repeat(depth)}${expression}${'}\`'.repeat(depth)}`
+}
+
 afterEach(() => {
   while (tempRoots.length) {
     fs.rmSync(tempRoots.pop(), { recursive: true, force: true })
@@ -282,6 +286,9 @@ describe('check-refactor-boundaries', () => {
     writeFile(root, 'src/consumer.ts', [
       "loader.import('./legacy-service')",
       "loader.require('./legacy-service')",
+      "loader?.import('./legacy-service')",
+      "loader?.require('./legacy-service')",
+      "loader.require?.('./legacy-service')",
       "const raw = `import('./legacy-service')`",
     ].join('\n'))
 
@@ -289,6 +296,150 @@ describe('check-refactor-boundaries', () => {
 
     expect(result.status).toBe(0)
     expect(result.stdout).toContain('[refactor-boundaries] ok')
+  })
+
+  test('ignores module-like text inside regular expression literals', () => {
+    const root = makeTempRepo()
+    writeFile(root, 'refactor-boundaries.json', JSON.stringify({
+      scan_roots: ['src'],
+      legacy_imports: [{ target: 'src/legacy-service.ts', allowed_importers: [] }],
+    }))
+    writeFile(root, 'src/legacy-service.ts', 'export const legacy = true\n')
+    writeFile(root, 'src/consumer.ts', [
+      'const requirePattern = /require(".\\/legacy-service")/gi',
+      "const importPattern = /import('.\\/legacy-service')/",
+      'const arrowPattern = () => /require(".\\/legacy-service")/',
+      'if (enabled) /require(".\\/legacy-service")/.test(text)',
+      'const comparison = value < /require(".\\/legacy-service")/.test(text)',
+    ].join('\n'))
+
+    const result = runBoundaryCheck(root)
+
+    expect(result.status).toBe(0)
+    expect(result.stdout).toContain('[refactor-boundaries] ok')
+  })
+
+  test('skips regex syntax in template expressions but still detects real imports and division-adjacent requires', () => {
+    const root = makeTempRepo()
+    writeFile(root, 'refactor-boundaries.json', JSON.stringify({
+      scan_roots: ['src'],
+      legacy_imports: [{ target: 'src/legacy-service.ts', allowed_importers: [] }],
+    }))
+    writeFile(root, 'src/legacy-service.ts', 'export const legacy = true\n')
+    writeFile(root, 'src/template-expression.ts', [
+      'const loaded = `${/[}\\/]/.test("}")',
+      '  ? import("./legacy-service")',
+      '  : /require(".\\/legacy-service")/.test("no")}`',
+    ].join('\n'))
+    writeFile(root, 'src/division.ts', "const quotient = foo / require('./legacy-service')\n")
+    writeFile(root, 'src/postfix-division.ts', "const quotient = value++ / require('./legacy-service')\n")
+    writeFile(root, 'src/non-null-division.ts', "const quotient = value! / require('./legacy-service')\n")
+    writeFile(root, 'src/property-division.ts', "const quotient = loader.return / require('./legacy-service')\n")
+    writeFile(root, 'src/optional-require.ts', "const legacy = require?.('./legacy-service')\n")
+
+    const result = runBoundaryCheck(root)
+    const output = `${result.stdout}\n${result.stderr}`
+
+    expect(result.status).toBe(1)
+    expect(output).toContain('src/template-expression.ts imports ./legacy-service')
+    expect(output).toContain('src/division.ts imports ./legacy-service')
+    expect(output).toContain('src/postfix-division.ts imports ./legacy-service')
+    expect(output).toContain('src/non-null-division.ts imports ./legacy-service')
+    expect(output).toContain('src/property-division.ts imports ./legacy-service')
+    expect(output).toContain('src/optional-require.ts imports ./legacy-service')
+  })
+
+  test('does not mistake JSX closing tags for unterminated regex literals', () => {
+    const root = makeTempRepo()
+    writeFile(root, 'refactor-boundaries.json', JSON.stringify({
+      scan_roots: ['src'],
+      legacy_imports: [{ target: 'src/legacy-service.ts', allowed_importers: [] }],
+    }))
+    writeFile(root, 'src/legacy-service.ts', 'export const legacy = true\n')
+    writeFile(root, 'src/consumer.tsx', [
+      'export function Consumer() {',
+      '  return (',
+      '    <section>',
+      '      已有内容不会被空值或缺失/偏薄字段覆盖。',
+      '    </section>',
+      '  )',
+      '}',
+    ].join('\n'))
+
+    const result = runBoundaryCheck(root)
+    const output = `${result.stdout}\n${result.stderr}`
+
+    expect(result.status).toBe(0)
+    expect(output).not.toContain('could not be scanned')
+    expect(result.stdout).toContain('[refactor-boundaries] ok')
+  })
+
+  test('fails readably instead of overflowing on excessive template nesting', () => {
+    const root = makeTempRepo()
+    writeFile(root, 'refactor-boundaries.json', JSON.stringify({
+      scan_roots: ['src'],
+      legacy_imports: [{ target: 'src/legacy-service.ts', allowed_importers: [] }],
+    }))
+    writeFile(root, 'src/legacy-service.ts', 'export const legacy = true\n')
+    writeFile(root, 'src/too-deep.ts', `const nested = ${nestedTemplateExpression(100_000, 'null')}\n`)
+
+    const result = runBoundaryCheck(root)
+    const output = `${result.stdout}\n${result.stderr}`
+
+    expect(result.status).toBe(1)
+    expect(output).toContain('src/too-deep.ts could not be scanned: template nesting exceeds 128')
+    expect(output).not.toContain('RangeError')
+  })
+
+  test('scans imports within the template nesting limit while ignoring raw template text', () => {
+    const root = makeTempRepo()
+    writeFile(root, 'refactor-boundaries.json', JSON.stringify({
+      scan_roots: ['src'],
+      legacy_imports: [{ target: 'src/legacy-service.ts', allowed_importers: [] }],
+    }))
+    writeFile(root, 'src/legacy-service.ts', 'export const legacy = true\n')
+    writeFile(root, 'src/within-limit.ts', `const nested = ${nestedTemplateExpression(128, 'import("./legacy-service")')}\n`)
+    writeFile(root, 'src/raw-text.ts', 'const nested = `import("./legacy-service")`\n')
+
+    const result = runBoundaryCheck(root)
+    const output = `${result.stdout}\n${result.stderr}`
+
+    expect(result.status).toBe(1)
+    expect(output).toContain('src/within-limit.ts imports ./legacy-service')
+    expect(output).not.toContain('src/raw-text.ts imports')
+  })
+
+  test('matches Bun extensionless resolution when tsx shadows a ts legacy target', () => {
+    const root = makeTempRepo()
+    writeFile(root, 'refactor-boundaries.json', JSON.stringify({
+      scan_roots: ['src'],
+      legacy_imports: [{ target: 'src/legacy-service.ts', allowed_importers: [] }],
+    }))
+    writeFile(root, 'src/legacy-service.ts', 'export const legacy = "ts"\n')
+    writeFile(root, 'src/legacy-service.tsx', 'export const legacy = "tsx"\n')
+    writeFile(root, 'src/consumer.ts', "import { legacy } from './legacy-service'\n")
+
+    const result = runBoundaryCheck(root)
+
+    expect(result.status).toBe(0)
+    expect(result.stdout).toContain('[refactor-boundaries] ok')
+  })
+
+  test('matches Bun extensionless resolution when tsx is the legacy target', () => {
+    const root = makeTempRepo()
+    writeFile(root, 'refactor-boundaries.json', JSON.stringify({
+      scan_roots: ['src'],
+      legacy_imports: [{ target: 'src/legacy-service.tsx', allowed_importers: [] }],
+    }))
+    writeFile(root, 'src/legacy-service.ts', 'export const legacy = "ts"\n')
+    writeFile(root, 'src/legacy-service.tsx', 'export const legacy = "tsx"\n')
+    writeFile(root, 'src/consumer.ts', "import { legacy } from './legacy-service'\n")
+
+    const result = runBoundaryCheck(root)
+    const output = `${result.stdout}\n${result.stderr}`
+
+    expect(result.status).toBe(1)
+    expect(output).toContain('src/consumer.ts imports ./legacy-service')
   })
 
   test('decodes escaped relative literals and scans dynamic imports in template expressions', () => {
