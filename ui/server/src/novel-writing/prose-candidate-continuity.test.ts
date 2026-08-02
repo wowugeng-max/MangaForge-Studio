@@ -223,6 +223,9 @@ describe('continuity-safe prose candidate selection', () => {
     const dreamRealityNoun = chapterScaleText('梦境中，现实中的保安诡异狞笑着举起电击棍砸下。江哲醒来后直接进入重症监护室。')
     const quotedWeakTransition = chapterScaleText('梦境中。“现在保安诡异狞笑着举起电击棍砸下。”江哲醒来后直接进入重症监护室。')
     const sameSentenceDreamAwake = chapterScaleText('梦境中，醒来后保安诡异狞笑着举起电击棍砸下。此刻江哲直接进入重症监护室。')
+    const recoveredThenArchive = chapterScaleText('梦境中。醒来后，江哲翻开旧档案，档案里记着保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
+    const recoveredThenDream = chapterScaleText('旧档案。此刻江哲又跌入梦境，保安诡异狞笑着举起电击棍砸下。现在江哲直接进入重症监护室。')
+    const recoveredThenPast = chapterScaleText('梦境中。回过神来，江哲想起多年前，保安诡异狞笑着举起电击棍砸下。眼下江哲直接进入重症监护室。')
     const disconnectedOpenings = [
       surfaceOnly,
       singleActorOnly,
@@ -244,6 +247,9 @@ describe('continuity-safe prose candidate selection', () => {
       dreamRealityNoun,
       quotedWeakTransition,
       sameSentenceDreamAwake,
+      recoveredThenArchive,
+      recoveredThenDream,
+      recoveredThenPast,
     ]
     const disconnectedResults = disconnectedOpenings
       .map(text => assessInitialProseOpeningContinuity(text, hospitalCorridorContext))
