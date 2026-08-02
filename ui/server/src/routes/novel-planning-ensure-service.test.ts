@@ -213,8 +213,16 @@ describe('createChapterPlanningEnsureService', () => {
     expect(worldbuilding).toHaveLength(1)
     expect(worldbuilding[0].world_summary).toContain('九州城邦')
     expect(characters.map(character => character.name)).toEqual(['林照'])
-    expect(outlines.map(outline => outline.outline_type).sort()).toEqual(['foreshadowing', 'master', 'volume'])
+    expect(outlines.map(outline => outline.outline_type).sort()).toEqual(['chapter', 'foreshadowing', 'master', 'volume'])
     expect(outlines.find(outline => outline.outline_type === 'master')?.summary).toContain('第一轮反击')
+    const chapterOutline = outlines.find(outline => outline.outline_type === 'chapter' && Number(outline.raw_payload?.chapter_no || 0) === 1)
+    expect(chapterOutline).toMatchObject({
+      title: '第1章 账本入城',
+      summary: '目标：主角带账本入城。\n摘要：主角带账本入城。',
+      conflict_points: ['守门人盘查'],
+      hook: '夹层露出名单',
+      raw_payload: { chapter_no: 1 },
+    })
     expect(chapters[0]).toMatchObject({
       chapter_no: 1,
       title: '账本入城',
@@ -222,6 +230,7 @@ describe('createChapterPlanningEnsureService', () => {
       conflict: '守门人盘查',
       ending_hook: '夹层露出名单',
     })
+    expect(chapters[0].outline_id).toBe(chapterOutline?.id)
     expect(reviews).toHaveLength(1)
     expect(reviews[0]).toMatchObject({ review_type: 'continuity', status: 'ok' })
     expect(storedProject).toMatchObject({
