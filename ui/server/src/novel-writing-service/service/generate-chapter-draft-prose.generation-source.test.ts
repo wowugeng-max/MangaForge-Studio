@@ -8,6 +8,7 @@ import {
   buildPipelineProse,
   classifyProsePipelineTask,
   createProsePipelineHarness,
+  proseQualityScores,
 } from '../../routes/novel-writing-service.test-support'
 import { createNovelWritingService } from './create-novel-writing-service'
 import { runGenerateChapterDraftProse } from './generate-chapter-draft-prose'
@@ -21,9 +22,13 @@ import {
 
 const workspaces: string[] = []
 const originalModelClose = ModelGenerationSource.prototype.close
+const originalModelGenerateDraft = ModelGenerationSource.prototype.generateDraft
+const originalModelExecuteAgent = ModelGenerationSource.prototype.executeAgent
 
 afterEach(async () => {
   ModelGenerationSource.prototype.close = originalModelClose
+  ModelGenerationSource.prototype.generateDraft = originalModelGenerateDraft
+  ModelGenerationSource.prototype.executeAgent = originalModelExecuteAgent
   await Promise.all(workspaces.splice(0).map(path => rm(path, { recursive: true, force: true })))
 })
 
@@ -32,8 +37,12 @@ type LifecycleHarnessOptions = {
   stageFailureKind?: ReturnType<typeof classifyProsePipelineTask>
   stageFailure?: Error
   draftFailure?: Error
+  abortBeforeDraftFailure?: AbortController
   closeFailure?: Error
   enableMemePolish?: boolean
+  reviewPayloads?: any[]
+  revisionTexts?: string[]
+  contextPackageOverride?: any
 }
 
 async function createLifecycleHarness(options: LifecycleHarnessOptions = {}) {
@@ -59,9 +68,33 @@ async function createLifecycleHarness(options: LifecycleHarnessOptions = {}) {
 
   ModelGenerationSource.prototype.close = async function close(outcome) {
     closeOutcomes.push(outcome)
-    events.push('source-close')
+    events.push('source-close-start')
     if (options.closeFailure) throw options.closeFailure
     await originalModelClose.call(this, outcome)
+    events.push('source-close')
+  }
+  ModelGenerationSource.prototype.generateDraft = async function generateDraft(request) {
+    events.push(`stage:draft:${this.taskId}`)
+    return originalModelGenerateDraft.call(this, request)
+  }
+  ModelGenerationSource.prototype.executeAgent = async function executeAgent(
+    stage,
+    responseContract,
+    agentId,
+    project,
+    context,
+    runtimeOptions,
+  ) {
+    events.push(`stage:${stage}:${this.taskId}`)
+    return originalModelExecuteAgent.call(
+      this,
+      stage,
+      responseContract,
+      agentId,
+      project,
+      context,
+      runtimeOptions,
+    )
   }
 
   const draftText = buildPipelineProse(
@@ -85,6 +118,7 @@ async function createLifecycleHarness(options: LifecycleHarnessOptions = {}) {
           return executeAgent(agentId, project, context, runtimeOptions)
         },
         generateChapterProse: async (...args: any[]) => {
+          options.abortBeforeDraftFailure?.abort()
           if (options.draftFailure) throw options.draftFailure
           return generateChapterProse(...args)
         },
@@ -115,6 +149,9 @@ async function createLifecycleHarness(options: LifecycleHarnessOptions = {}) {
     draftText,
     initialSceneCards: options.initialSceneCards,
     enableMemePolish: options.enableMemePolish,
+    reviewPayloads: options.reviewPayloads,
+    revisionTexts: options.revisionTexts,
+    contextPackageOverride: options.contextPackageOverride,
   })
   workspaces.push(harness.workspace)
   harness.project.reference_config.chapter_generation_source = {
@@ -195,16 +232,133 @@ describe('automatic chapter task lifecycle', () => {
     expect(new Set(receipts.map(receipt => receipt.task_id)).size).toBe(1)
     expect(new Set(receipts.map(receipt => receipt.source_fingerprint)).size).toBe(1)
     expect(new Set(receipts.map(receipt => receipt.model_id))).toEqual(new Set([217]))
-    expect(result.chapter.raw_payload.prose_generation_source).toMatchObject({
+    expect(result.chapter.raw_payload.chapter_generation_source).toMatchObject({
       receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
       task_id: receipts[0].task_id,
       source: 'model',
       source_fingerprint: receipts[0].source_fingerprint,
       model_id: 217,
     })
-    const storedProvenance = JSON.stringify(result.chapter.raw_payload.prose_generation_source)
+    expect(result.chapter.raw_payload).not.toHaveProperty('prose_generation_source')
+    const storedProvenance = JSON.stringify(result.chapter.raw_payload.chapter_generation_source)
     expect(storedProvenance).not.toContain('paragraphTask')
     expect(storedProvenance).not.toContain('raw')
+  })
+
+  test('emits one ordered task pipeline through optional full-production stages and close', async () => {
+    const repairedText = buildPipelineProse(
+      '红灯再次亮起，江澈迎着包围向前一步，先切断了追捕队的备用频道。',
+      '改写包围规则并夺下备用通讯器',
+    )
+    const harness = await createLifecycleHarness({
+      initialSceneCards: [],
+      enableMemePolish: true,
+      reviewPayloads: [
+        {
+          score: 72,
+          dimensions: proseQualityScores,
+          findings: [{
+            key: 'agency',
+            severity: 'S2',
+            dimension: 'core_promise_agency',
+            evidence: '主动打乱包围并夺取通讯器',
+            required_change: '让江澈主动切断备用频道并迫使追捕队改变阵型。',
+            acceptance_test: '备用频道因江澈的可见动作失效。',
+          }],
+        },
+        {
+          score: 90,
+          publishable: true,
+          dimensions: {
+            continuity: 9,
+            core_promise_agency: 9,
+            conflict_causality: 9,
+            payoff_hook: 9,
+            prose_style: 9,
+            fact_setting_safety: 9,
+          },
+          findings: [],
+        },
+      ],
+      revisionTexts: [repairedText],
+    })
+
+    await harness.service.generateChapterForGroup(
+      harness.workspace,
+      harness.project.id,
+      harness.chapter.id,
+      {
+        ...automaticOptions,
+        skip_humanize_postprocess: false,
+        enable_humanize_postprocess: true,
+        full_pass_a: true,
+        run_readability_review: true,
+        max_quality_revision_rounds: 1,
+      },
+    )
+
+    const ordered = harness.events.filter((event) => {
+      if (event === 'scene-cards-finished'
+        || event === 'task-begin'
+        || event === 'db-commit-finished'
+        || event === 'source-close') return true
+      return event.startsWith('stage:')
+    })
+    const stages = ordered.map(event => event.split(':').slice(0, 2).join(':'))
+    expect(stages).toEqual([
+      'scene-cards-finished',
+      'task-begin',
+      'stage:draft',
+      'stage:word_target_repair',
+      'stage:word_target_repair',
+      'stage:word_target_repair',
+      'stage:commercial_editor_rewrite',
+      'stage:word_target_repair',
+      'stage:word_target_repair',
+      'stage:word_target_repair',
+      'stage:meme_polish',
+      'stage:word_target_repair',
+      'stage:word_target_repair',
+      'stage:word_target_repair',
+      'stage:quality_review',
+      'stage:quality_repair',
+      'stage:quality_recheck',
+      'stage:humanize',
+      'stage:humanize',
+      'stage:readability_review',
+      'stage:story_state_sync',
+      'db-commit-finished',
+      'source-close',
+    ])
+    const taskIds = ordered
+      .filter(event => event.startsWith('stage:'))
+      .map(event => event.split(':')[2])
+    expect(new Set(taskIds).size).toBe(1)
+    expect(harness.closeOutcomes).toEqual([{ status: 'success' }])
+  })
+
+  test('keeps conditional post-editor word repairs on the same task execution', async () => {
+    const harness = await createLifecycleHarness({ enableMemePolish: true })
+
+    await harness.service.generateChapterForGroup(
+      harness.workspace,
+      harness.project.id,
+      harness.chapter.id,
+      automaticOptions,
+    )
+
+    const stageEvents = harness.events.filter(event => event.startsWith('stage:'))
+    const editorIndex = stageEvents.findIndex(event => event.startsWith('stage:commercial_editor_rewrite:'))
+    const qualityIndex = stageEvents.findIndex(event => event.startsWith('stage:quality_review:'))
+    const conditionalRepairs = stageEvents
+      .slice(editorIndex + 1, qualityIndex)
+      .filter(event => event.startsWith('stage:word_target_repair:'))
+    const taskIds = stageEvents.map(event => event.split(':')[2])
+
+    expect(editorIndex).toBeGreaterThan(-1)
+    expect(qualityIndex).toBeGreaterThan(editorIndex)
+    expect(conditionalRepairs.length).toBeGreaterThan(0)
+    expect(new Set(taskIds).size).toBe(1)
   })
 
   test('propagates a task stage failure without fallback and closes failed exactly once', async () => {
@@ -217,23 +371,57 @@ describe('automatic chapter task lifecycle', () => {
       harness.chapter.id,
       automaticOptions,
     )).rejects.toBe(stageFailure)
+    harness.events.push('caller-observed-failure')
 
     expect(harness.closeOutcomes).toEqual([{ status: 'failed', error: stageFailure }])
     expect(harness.releaseCalls).toBe(1)
+    expect(harness.events.slice(-3)).toEqual([
+      'source-close',
+      'project-source-release',
+      'caller-observed-failure',
+    ])
   })
 
-  test('classifies abort as cancelled and closes exactly once', async () => {
-    const abort = Object.assign(new Error('generation aborted'), { name: 'AbortError' })
-    const harness = await createLifecycleHarness({ draftFailure: abort })
+  test('uses the aborted task signal to close cancelled for an ordinary downstream error', async () => {
+    const controller = new AbortController()
+    const failure = new Error('ordinary downstream failure')
+    const harness = await createLifecycleHarness({
+      draftFailure: failure,
+      abortBeforeDraftFailure: controller,
+    })
 
     await expect(harness.service.generateChapterForGroup(
       harness.workspace,
       harness.project.id,
       harness.chapter.id,
-      automaticOptions,
-    )).rejects.toBe(abort)
+      { ...automaticOptions, abortSignal: controller.signal },
+    )).rejects.toBe(failure)
+    harness.events.push('caller-observed-cancellation')
 
-    expect(harness.closeOutcomes).toEqual([{ status: 'cancelled', error: abort }])
+    expect(controller.signal.aborted).toBe(true)
+    expect(harness.closeOutcomes).toEqual([{ status: 'cancelled', error: failure }])
+    expect(harness.releaseCalls).toBe(1)
+    expect(harness.events.slice(-3)).toEqual([
+      'source-close',
+      'project-source-release',
+      'caller-observed-cancellation',
+    ])
+  })
+
+  test('does not infer cancellation from an abort-like message when the task signal is not aborted', async () => {
+    const controller = new AbortController()
+    const failure = new Error('ordinary provider abort marker without cancellation')
+    const harness = await createLifecycleHarness({ draftFailure: failure })
+
+    await expect(harness.service.generateChapterForGroup(
+      harness.workspace,
+      harness.project.id,
+      harness.chapter.id,
+      { ...automaticOptions, abortSignal: controller.signal },
+    )).rejects.toBe(failure)
+
+    expect(controller.signal.aborted).toBe(false)
+    expect(harness.closeOutcomes).toEqual([{ status: 'failed', error: failure }])
     expect(harness.releaseCalls).toBe(1)
   })
 
@@ -252,6 +440,51 @@ describe('automatic chapter task lifecycle', () => {
     expect(exposed).toBeInstanceOf(AggregateError)
     expect(exposed.errors).toEqual([primary, cleanup])
     expect(harness.closeOutcomes).toEqual([{ status: 'failed', error: primary }])
+    expect(harness.releaseCalls).toBe(1)
+  })
+
+  test('passes the execution fingerprint to acceptance even when the draft returns forged provenance', async () => {
+    const harness = await createLifecycleHarness()
+    ModelGenerationSource.prototype.generateDraft = async function generateDraft(request) {
+      const result = await originalModelGenerateDraft.call(this, request)
+      await updateNovelProject(harness.workspace, harness.project.id, {
+        reference_config: {
+          ...harness.project.reference_config,
+          chapter_generation_source: {
+            version: 'chapter_generation_source_v1',
+            active: 'model',
+            model: { model_id: 218 },
+          },
+        },
+      })
+      return {
+        ...result,
+        source_receipt: {
+          receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
+          task_id: 'forged-provider-task',
+          project_id: harness.project.id,
+          chapter_id: harness.chapter.id,
+          source: 'model',
+          source_fingerprint: `sha256:${'f'.repeat(64)}`,
+          context_version: `sha256:${'0'.repeat(64)}`,
+          model_id: 999,
+        },
+      }
+    }
+
+    const exposed: any = await harness.service.generateChapterForGroup(
+      harness.workspace,
+      harness.project.id,
+      harness.chapter.id,
+      {
+        ...automaticOptions,
+        production_mode: 'draft_only',
+      },
+    ).catch((error: unknown) => error)
+
+    expect(exposed).toMatchObject({ code: 'GENERATION_SOURCE_CHANGED' })
+    expect(harness.modelCalls.draft).toBe(1)
+    expect(harness.closeOutcomes).toEqual([{ status: 'failed', error: exposed }])
     expect(harness.releaseCalls).toBe(1)
   })
 })
@@ -320,6 +553,105 @@ describe('chapter draft task execution', () => {
       ...provenance,
     })
     expect(result).not.toHaveProperty('generationLease')
+  })
+
+  test('derives bounded provenance from the execution handle when draft receipts are missing or forged', async () => {
+    const fingerprint = `sha256:${'d'.repeat(64)}`
+    const contextVersion = `sha256:${'e'.repeat(64)}`
+    const oversizedSession = 'remote-session-'.repeat(50)
+    const provenance = {
+      task_id: 'task-local-authority-1',
+      project_id: 1,
+      chapter_id: 10,
+      source: 'mcp' as const,
+      source_fingerprint: fingerprint,
+      context_version: contextVersion,
+      server_id: 'server-local',
+      key_id: 7,
+      adapter_id: 'adapter-local',
+      agent_id: 'agent-local',
+      session_id: oversizedSession,
+      untrusted_extra: 'must not persist',
+    }
+    const receiptCases = [
+      undefined,
+      {
+        receipt_authority: 'wrong-authority',
+        ...provenance,
+      },
+      {
+        receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
+        task_id: 'forged-task',
+        project_id: 999,
+        chapter_id: 999,
+        source: 'model',
+        source_fingerprint: `sha256:${'f'.repeat(64)}`,
+        context_version: `sha256:${'0'.repeat(64)}`,
+        model_id: 999,
+        session_id: 'forged-session',
+      },
+    ]
+
+    for (const [index, sourceReceipt] of receiptCases.entries()) {
+      let draftCalls = 0
+      let ordinaryAgentCalls = 0
+      const execution = {
+        taskId: provenance.task_id,
+        source: 'mcp',
+        fingerprint,
+        contextVersion,
+        provenance: () => provenance,
+        generateDraft: async () => {
+          draftCalls += 1
+          return {
+            prose_chapters: [{ chapter_no: 10, chapter_text: '江澈撞开铁门，立刻夺下追兵的通讯器。' }],
+            source: 'mcp' as const,
+            ...(sourceReceipt === undefined ? {} : { source_receipt: sourceReceipt }),
+          }
+        },
+        executeAgent: async () => {
+          ordinaryAgentCalls += 1
+          throw new Error('draft must not invoke the ordinary Agent port')
+        },
+      } as unknown as ChapterTaskExecution
+
+      const result = await runGenerateChapterDraftProse({
+        activeWorkspace: `/tmp/chapter-task-local-authority-${index}`,
+        project: { id: 1, reference_config: {} },
+        chapter: { id: 10, chapter_no: 10, title: '第十章' },
+        chapters: [],
+        worldbuilding: {},
+        characters: [],
+        outlines: [],
+        contextPackage: {},
+        generationContract: {},
+        wordTarget: { target: 1000 },
+        options: { request_id: `chapter-task-local-authority-${index}` },
+        chapterTaskExecution: execution,
+        getReferenceMigrationPlanForChapter: async () => ({}),
+        throwIfChapterGenerationAborted: () => {},
+        onStage: async () => {},
+      } as any)
+
+      expect(draftCalls).toBe(1)
+      expect(ordinaryAgentCalls).toBe(0)
+      expect(result.draftPromptDiagnostics.generation_source).toMatchObject({
+        receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
+        task_id: provenance.task_id,
+        project_id: provenance.project_id,
+        chapter_id: provenance.chapter_id,
+        source: provenance.source,
+        source_fingerprint: fingerprint,
+        context_version: contextVersion,
+        server_id: provenance.server_id,
+        key_id: provenance.key_id,
+        adapter_id: provenance.adapter_id,
+        agent_id: provenance.agent_id,
+      })
+      expect(result.draftPromptDiagnostics.generation_source.session_id).toMatch(/^sha256:[0-9a-f]{64}$/)
+      expect(result.draftPromptDiagnostics.generation_source).not.toHaveProperty('untrusted_extra')
+      expect(JSON.stringify(result.draftPromptDiagnostics.generation_source)).not.toContain('forged')
+    }
   })
 
   test('acceptance fingerprint reader supports chapter receipts and trusted history only', () => {

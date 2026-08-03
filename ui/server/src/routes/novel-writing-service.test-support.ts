@@ -28,6 +28,7 @@ export type ProsePipelineTaskKind =
   | 'meme'
   | 'editor'
   | 'quality_review'
+  | 'readability_review'
   | 'structured_review'
   | 'quality_revision'
   | 'humanize'
@@ -61,6 +62,7 @@ export function classifyProsePipelineTask(agent: string, taskInput: string): Pro
       line.startsWith('任务：独立审查小说正文')
       || line.startsWith('任务：对刚生成的小说章节进行章节级自检')
     )) return 'quality_review'
+    if (agent === 'review-agent' && line.startsWith('任务：对最终章节做可读性/网感复检')) return 'readability_review'
     if (agent === 'review-agent' && line.startsWith('任务：只补缺失的 oh-story 结构化自检字段')) return 'structured_review'
     if (agent === 'prose-agent' && (
       line.startsWith('任务：执行第')
@@ -231,6 +233,7 @@ export async function createProsePipelineHarness(
   const storyStateTexts: string[] = []
   const humanizeTexts: string[] = []
   const qualityReviewTasks: string[] = []
+  const readabilityReviewTasks: string[] = []
   const qualityRevisionTasks: string[] = []
   const storeTexts: string[] = []
   const memoryTexts: string[] = []
@@ -348,6 +351,18 @@ export async function createProsePipelineHarness(
       }
       return { parsed: payload, modelName: 'fake-reviewer' } as any
     }
+    if (taskKind === 'readability_review') {
+      readabilityReviewTasks.push(task)
+      return {
+        parsed: {
+          readability_score: 92,
+          passed: true,
+          opening_hook_score: 90,
+          ending_hook_score: 91,
+        },
+        modelName: 'fake-readability-reviewer',
+      } as any
+    }
     if (taskKind === 'quality_revision') {
       modelCalls.revision += 1
       qualityRevisionTasks.push(task)
@@ -448,6 +463,7 @@ export async function createProsePipelineHarness(
     storyStateTexts,
     humanizeTexts,
     qualityReviewTasks,
+    readabilityReviewTasks,
     qualityRevisionTasks,
     storeTexts,
     memoryTexts,

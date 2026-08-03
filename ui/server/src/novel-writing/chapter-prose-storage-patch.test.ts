@@ -2,9 +2,11 @@ import { describe, expect, test } from 'bun:test'
 import {
   buildChapterProseStoragePatch,
   ensureWebnovelParagraphBreaks,
+  normalizeHumanizePostprocessForStorage,
   normalizeProseForStorage,
   resolveChapterProseVersionSource,
 } from './chapter-prose-storage-patch'
+import { CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY } from '../novel-writing-service/generation-source/types'
 
 function expectOnlyNewlinesInserted(source: string, result: string) {
   const sourceChars = Array.from(source)
@@ -35,6 +37,129 @@ describe('chapter prose storage patch builders', () => {
     const source = `${singleNewlineDraftRows.join('\r\n')}\r\n`
 
     expect(ensureWebnovelParagraphBreaks(source)).toBe(`${singleNewlineDraftRows.join('\n\n')}\n`)
+  })
+
+  test('stores new task provenance under chapter_generation_source and removes stale legacy provenance', () => {
+    const staleLegacyProvenance = {
+      receipt_authority: 'mcp_generation_source_v1',
+      binding_fingerprint: `sha256:${'1'.repeat(64)}`,
+    }
+    const chapterProvenance = {
+      receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
+      task_id: 'task-authoritative-1',
+      project_id: 1,
+      chapter_id: 10,
+      source: 'model',
+      source_fingerprint: `sha256:${'2'.repeat(64)}`,
+      context_version: `sha256:${'3'.repeat(64)}`,
+      model_id: 217,
+    }
+
+    const patch = buildChapterProseStoragePatch({
+      chapter: {
+        raw_payload: {
+          existing: true,
+          prose_generation_source: staleLegacyProvenance,
+        },
+      },
+      generatedTitlePatch: {},
+      finalText: '正文内容。',
+      finalContinuityNotes: [],
+      finalSceneBreakdown: [],
+      ohStoryDeliveryReceipts: {},
+      generationSourceProvenance: chapterProvenance,
+    })
+
+    expect(patch.raw_payload.chapter_generation_source).toEqual(chapterProvenance)
+    expect(patch.raw_payload).not.toHaveProperty('prose_generation_source')
+    expect(patch.raw_payload.existing).toBe(true)
+  })
+
+  test('keeps historical legacy provenance under prose_generation_source', () => {
+    const legacyProvenance = {
+      receipt_authority: 'mcp_generation_source_v1',
+      binding_fingerprint: `sha256:${'4'.repeat(64)}`,
+    }
+
+    const patch = buildChapterProseStoragePatch({
+      chapter: { raw_payload: {} },
+      generatedTitlePatch: {},
+      finalText: '历史正文。',
+      finalContinuityNotes: [],
+      finalSceneBreakdown: [],
+      ohStoryDeliveryReceipts: {},
+      generationSourceProvenance: legacyProvenance,
+    })
+
+    expect(patch.raw_payload.prose_generation_source).toEqual(legacyProvenance)
+    expect(patch.raw_payload).not.toHaveProperty('chapter_generation_source')
+  })
+
+  test('accepts and preserves historical pre-quality humanize provenance', () => {
+    const normalized = normalizeHumanizePostprocessForStorage({
+      accepted: true,
+      candidate_provenance: {
+        scope: 'pre_quality',
+        stage: 'pre_quality',
+        humanize_input_hash: 'a'.repeat(64),
+        humanize_output_hash: 'b'.repeat(64),
+        final_candidate_hash: 'c'.repeat(64),
+        superseded_by_quality_revision: true,
+      },
+    })
+
+    expect(normalized?.candidate_provenance).toEqual({
+      scope: 'pre_quality',
+      stage: 'pre_quality',
+      humanize_input_hash: 'a'.repeat(64),
+      humanize_output_hash: 'b'.repeat(64),
+      final_candidate_hash: 'c'.repeat(64),
+      superseded_by_quality_revision: true,
+    })
+  })
+
+  test('accepts and preserves canonical post-quality humanize provenance', () => {
+    const normalized = normalizeHumanizePostprocessForStorage({
+      accepted: true,
+      candidate_provenance: {
+        scope: 'post_quality',
+        stage: 'post_quality',
+        humanize_input_hash: 'd'.repeat(64),
+        humanize_output_hash: 'e'.repeat(64),
+        final_candidate_hash: 'f'.repeat(64),
+        superseded_by_quality_revision: false,
+      },
+    })
+
+    expect(normalized?.candidate_provenance).toEqual({
+      scope: 'post_quality',
+      stage: 'post_quality',
+      humanize_input_hash: 'd'.repeat(64),
+      humanize_output_hash: 'e'.repeat(64),
+      final_candidate_hash: 'f'.repeat(64),
+      superseded_by_quality_revision: false,
+    })
+  })
+
+  test('rejects mismatched humanize provenance scope and stage pairs', () => {
+    const common = {
+      humanize_input_hash: 'a'.repeat(64),
+      humanize_output_hash: 'b'.repeat(64),
+      final_candidate_hash: 'c'.repeat(64),
+      superseded_by_quality_revision: false,
+    }
+
+    for (const candidateProvenance of [
+      { ...common, scope: 'pre_quality', stage: 'post_quality' },
+      { ...common, scope: 'post_quality', stage: 'pre_quality' },
+    ]) {
+      const normalized = normalizeHumanizePostprocessForStorage({
+        accepted: true,
+        candidate_provenance: candidateProvenance,
+      })
+
+      expect(normalized).not.toHaveProperty('candidate_provenance')
+    }
   })
 
   test('stores only a bounded JSON-safe allowlist from humanize reports', () => {

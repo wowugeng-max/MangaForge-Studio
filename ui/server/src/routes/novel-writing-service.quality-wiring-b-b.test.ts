@@ -87,8 +87,9 @@ describe('novel writing service prose quality wiring b b', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore-loop.ts'), 'utf8')
     const orchestratorSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const qualityLoopStart = source.indexOf('let qualityLoop: any')
-    const qualitySetupStart = orchestratorSource.indexOf('const qualityPrestoreResult = await runQualityLoopAndPrestoreSetup')
-    const gateStart = orchestratorSource.indexOf('return await runFullProductionAdmissionAndStore', qualitySetupStart)
+    const qualityLoopPhaseStart = orchestratorSource.indexOf('const qualityLoopState = await runQualityLoopPhase')
+    const qualityFinalizeStart = orchestratorSource.indexOf('const qualityPrestoreResult = await runQualityPrestoreFinalize', qualityLoopPhaseStart)
+    const gateStart = orchestratorSource.indexOf('return await runFullProductionAdmissionAndStore', qualityFinalizeStart)
     const reviewCallbackStart = source.indexOf('review: async ({ prompt, round, attempt }) => {', qualityLoopStart)
     const reviseCallbackStart = source.indexOf('revise: async ({ prompt, round }) => {', reviewCallbackStart)
     const qualityLoopEnd = source.indexOf('} catch (error: any) {', reviseCallbackStart)
@@ -97,8 +98,9 @@ describe('novel writing service prose quality wiring b b', () => {
     const reviseBlock = source.slice(reviseCallbackStart, qualityLoopEnd)
 
     expect(qualityLoopStart).toBeGreaterThanOrEqual(0)
-    expect(qualitySetupStart).toBeGreaterThanOrEqual(0)
-    expect(gateStart).toBeGreaterThan(qualitySetupStart)
+    expect(qualityLoopPhaseStart).toBeGreaterThanOrEqual(0)
+    expect(qualityFinalizeStart).toBeGreaterThan(qualityLoopPhaseStart)
+    expect(gateStart).toBeGreaterThan(qualityFinalizeStart)
     expect(reviewCallbackStart).toBeGreaterThan(qualityLoopStart)
     expect(reviseCallbackStart).toBeGreaterThan(reviewCallbackStart)
     expect(qualityLoopEnd).toBeGreaterThan(reviseCallbackStart)
@@ -133,7 +135,7 @@ describe('novel writing service prose quality wiring b b', () => {
     const authoritativeFinalText = String(harness.storeTexts[0] || '')
     expect(authoritativeFinalText).not.toBe('')
     expect(result.chapter?.chapter_text).toBe(authoritativeFinalText)
-    expect(harness.qualityReviewTasks[0]).toContain(authoritativeFinalText)
+    expect(harness.qualityReviewTasks[0]).toContain(String(harness.humanizeTexts[0] || ''))
     expect(harness.storeTexts).toEqual([authoritativeFinalText])
     expect(harness.storyStateTexts).toEqual([])
     expect(harness.memoryTexts).toEqual([])
@@ -165,7 +167,7 @@ describe('novel writing service prose quality wiring b b', () => {
     const acceptedFinalText = String(harness.storeTexts[0] || '')
     expect(acceptedFinalText).not.toBe('')
     expect(accepted.chapter?.chapter_text).toBe(acceptedFinalText)
-    expect(harness.qualityReviewTasks[0]).toContain(acceptedFinalText)
+    expect(harness.qualityReviewTasks[0]).toContain(String(harness.humanizeTexts[0] || ''))
     expect(harness.storeTexts).toEqual([acceptedFinalText])
     expect(harness.storyStateTexts).toEqual([])
     expect(harness.memoryTexts).toEqual([])
@@ -436,7 +438,8 @@ describe('novel writing service prose quality wiring b b', () => {
     expect(storyStateHookCalls).toBe(0)
     expect(injectedCallOrder[0]).toBe('draft')
     expect(injectedCallOrder.indexOf('humanize')).toBeGreaterThan(0)
-    expect(injectedCallOrder.indexOf('quality_review')).toBeGreaterThan(injectedCallOrder.indexOf('humanize'))
+    expect(injectedCallOrder.indexOf('quality_review')).toBeGreaterThan(injectedCallOrder.indexOf('draft'))
+    expect(injectedCallOrder.indexOf('humanize')).toBeGreaterThan(injectedCallOrder.indexOf('quality_review'))
     expect(memoryCalls).toBe(0)
   })
   test('stores complete prose when the structured quality review is unavailable', async () => {
@@ -480,7 +483,7 @@ describe('novel writing service prose quality wiring b b', () => {
     const authoritativeFinalText = String(harness.storeTexts[0] || '')
     expect(authoritativeFinalText).not.toBe('')
     expect(result.chapter?.chapter_text).toBe(authoritativeFinalText)
-    expect(harness.qualityReviewTasks[0]).toContain(authoritativeFinalText)
+    expect(harness.qualityReviewTasks[0]).toContain(String(harness.humanizeTexts[0] || ''))
     expect(harness.storeTexts).toEqual([authoritativeFinalText])
     expect(harness.storyStateTexts).toEqual([authoritativeFinalText])
     expect(harness.memoryTexts).toEqual([authoritativeFinalText])
@@ -544,7 +547,8 @@ describe('novel writing service prose quality wiring b b', () => {
       post_commit_warnings: [expect.objectContaining({ stage: 'memory' })],
     })
     expect(result.chapter?.raw_payload?.prose_admission).toEqual(stored?.raw_payload?.prose_admission)
-    expect(harness.qualityReviewTasks.at(-1)).toContain(authoritativeFinalText)
+    expect(harness.qualityReviewTasks.at(-1)).toContain(String(harness.humanizeTexts[0] || ''))
+    expect(harness.qualityReviewTasks.at(-1)).not.toContain(authoritativeFinalText)
     expect(harness.storeTexts).toEqual([authoritativeFinalText])
     expect(harness.memoryTexts).toEqual([authoritativeFinalText])
     expect(harness.storeCalls).toBe(1)
@@ -554,12 +558,12 @@ describe('novel writing service prose quality wiring b b', () => {
     expect(harness.modelCalls.revision).toBe(3)
     expect(harness.modelCalls.review).toBe(2)
     expect(result.humanize_postprocess?.candidate_provenance).toMatchObject({
-      scope: 'pre_quality',
-      stage: 'pre_quality',
+      scope: 'post_quality',
+      stage: 'post_quality',
       final_candidate_hash: finalHash,
-      superseded_by_quality_revision: true,
+      superseded_by_quality_revision: false,
     })
-    expect(result.humanize_postprocess?.candidate_provenance?.humanize_output_hash).not.toBe(finalHash)
+    expect(result.humanize_postprocess?.candidate_provenance?.humanize_output_hash).toBe(finalHash)
     expect(stored?.raw_payload?.humanize_postprocess).toEqual(result.humanize_postprocess)
   })
   test('keeps stored prose when admission metadata persistence fails and returns only a redacted warning', async () => {
@@ -580,7 +584,7 @@ describe('novel writing service prose quality wiring b b', () => {
     expect(authoritativeFinalText).not.toBe('')
     expect(stored?.chapter_text).toBe(authoritativeFinalText)
     expect(result.chapter?.chapter_text).toBe(authoritativeFinalText)
-    expect(harness.qualityReviewTasks[0]).toContain(authoritativeFinalText)
+    expect(harness.qualityReviewTasks[0]).toContain(String(harness.humanizeTexts[0] || ''))
     expect(harness.storeTexts).toEqual([authoritativeFinalText])
     expect(harness.storyStateTexts).toEqual([authoritativeFinalText])
     expect(harness.memoryTexts).toEqual([authoritativeFinalText])
@@ -611,7 +615,7 @@ describe('novel writing service prose quality wiring b b', () => {
     expect(authoritativeFinalText).not.toBe('')
     expect(stored?.chapter_text).toBe(authoritativeFinalText)
     expect(result.chapter?.chapter_text).toBe(authoritativeFinalText)
-    expect(harness.qualityReviewTasks[0]).toContain(authoritativeFinalText)
+    expect(harness.qualityReviewTasks[0]).toContain(String(harness.humanizeTexts[0] || ''))
     expect(harness.storeTexts).toEqual([authoritativeFinalText])
     expect(harness.storyStateTexts).toEqual([])
     expect(harness.memoryTexts).toEqual([])

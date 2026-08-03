@@ -229,6 +229,19 @@ export function buildHumanizePostProcessStageBrief(): string[] {
   ]
 }
 
+export type HumanizeCandidateProvenance = ({
+  scope: 'pre_quality'
+  stage: 'pre_quality'
+} | {
+  scope: 'post_quality'
+  stage: 'post_quality'
+}) & {
+  humanize_input_hash: string
+  humanize_output_hash: string
+  final_candidate_hash: string
+  superseded_by_quality_revision: boolean
+}
+
 export type HumanizePostProcessReport = {
   version: string
   dual_pass_version: string
@@ -246,14 +259,7 @@ export type HumanizePostProcessReport = {
   stages: Array<Record<string, any>>
   /** Locked default anti-AIGC stack id (R76 high-water baseline). */
   r76_zhuque_stack?: string
-  candidate_provenance?: {
-    scope: 'pre_quality'
-    stage: 'pre_quality'
-    humanize_input_hash: string
-    humanize_output_hash: string
-    final_candidate_hash: string
-    superseded_by_quality_revision: boolean
-  }
+  candidate_provenance?: HumanizeCandidateProvenance
 }
 
 export function buildEmptyHumanizePostProcessReport(

@@ -2058,6 +2058,10 @@ describe('McpGenerationSource task execution', () => {
       headerValue?: string
       taskId?: string
       agentId?: string
+      ordinaryModelPorts?: {
+        generateChapterProse: (...args: any[]) => Promise<any>
+        executeAgent: (...args: any[]) => Promise<any>
+      }
     } = {},
   ) {
     const activeWorkspace = await mkdtemp(join(tmpdir(), prefix))
@@ -2194,8 +2198,30 @@ describe('McpGenerationSource task execution', () => {
     const resolver = createGenerationSourceResolver({
       chapterSourceLeases: projectLeases,
       readProject: (workspace, projectId) => getNovelProject(workspace, projectId),
-      createModelExecution: () => {
+      createModelExecution: input => {
         counters.modelCreations += 1
+        if (options.ordinaryModelPorts) {
+          const provenance = {
+            task_id: input.taskId,
+            project_id: input.project.id,
+            chapter_id: input.chapter.id,
+            source: 'model' as const,
+            source_fingerprint: input.fingerprint,
+            context_version: input.contextVersion,
+            model_id: input.modelId,
+          }
+          return new ModelGenerationSource({
+            modelId: input.modelId,
+            provenance,
+            generateChapterProse: options.ordinaryModelPorts.generateChapterProse,
+            executeAgent: options.ordinaryModelPorts.executeAgent,
+            recordStage: createChapterStageRecorder({
+              activeWorkspace: input.activeWorkspace,
+              provenance: () => provenance,
+            }),
+            assertCurrent: input.assertCurrent,
+          })
+        }
         throw new Error('API fallback forbidden')
       },
       mcpSource: {
@@ -3778,8 +3804,20 @@ describe('McpGenerationSource task execution', () => {
       session_id: 'neutral-session-1',
       remote_cancel_confirmed: true,
     })
+    let ordinaryGenerateCalls = 0
+    let ordinaryExecuteAgentCalls = 0
     const fixture = await neutralTaskFixture('mangaforge-mcp-task-no-fallback-', {
       runStage: async () => { throw remoteFailure },
+      ordinaryModelPorts: {
+        generateChapterProse: async () => {
+          ordinaryGenerateCalls += 1
+          return { prose_chapters: [] }
+        },
+        executeAgent: async () => {
+          ordinaryExecuteAgentCalls += 1
+          return { parsed: {} }
+        },
+      },
     })
     const execution = await fixture.begin()
 
@@ -3800,6 +3838,8 @@ describe('McpGenerationSource task execution', () => {
       createAgent: 0,
       modelCreations: 0,
     })
+    expect(ordinaryGenerateCalls).toBe(0)
+    expect(ordinaryExecuteAgentCalls).toBe(0)
     expect(fixture.projectLeases.isActive(fixture.activeWorkspace, fixture.durableProject.id)).toBe(false)
     expect(await fixture.agentLeases.isActive(fixture.activeWorkspace, {
       serverId: fixture.server.id,

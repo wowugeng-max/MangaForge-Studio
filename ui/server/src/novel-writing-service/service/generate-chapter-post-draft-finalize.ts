@@ -4,7 +4,11 @@ import {
 import {
   enrichContextWithProgressResync,
 } from '../../novel-writing/chapter-progress-ledger'
-import { normalizeHumanizePostprocessForStorage } from '../../novel-writing/chapter-prose-storage-patch'
+import {
+  normalizeHumanizePostprocessForStorage,
+  type PersistedHumanizeCandidateProvenance,
+  type PersistedHumanizePostprocessReport,
+} from '../../novel-writing/chapter-prose-storage-patch'
 import { revisionTextHash } from '../../novel/revision-hash'
 import { ensureOpeningHandoffBridge, extractPrimaryEndingHooks } from '../../novel-writing/chapter-continuity-guard'
 import type { ProseAdmissionHardFailure } from '../../novel-writing/prose-admission-policy'
@@ -20,27 +24,31 @@ function buildHandoffContext(contextPackage: any) {
   return enrichContextWithProgressResync(enrichContextWithStrongHandoff(contextPackage))
 }
 
-export function attachPreQualityHumanizeProvenance(
-  report: any,
+export function attachPostQualityHumanizeProvenance(
+  report: PersistedHumanizePostprocessReport | null | undefined,
   humanizeInputText: string,
   humanizeOutputText: string,
-) {
+): PersistedHumanizePostprocessReport | null | undefined {
   if (!report || typeof report !== 'object') return report
   const humanizeOutputHash = revisionTextHash(humanizeOutputText)
+  const candidateProvenance: Extract<PersistedHumanizeCandidateProvenance, { scope: 'post_quality' }> = {
+    scope: 'post_quality',
+    stage: 'post_quality',
+    humanize_input_hash: revisionTextHash(humanizeInputText),
+    humanize_output_hash: humanizeOutputHash,
+    final_candidate_hash: humanizeOutputHash,
+    superseded_by_quality_revision: false,
+  }
   return {
     ...report,
-    candidate_provenance: {
-      scope: 'pre_quality',
-      stage: 'pre_quality',
-      humanize_input_hash: revisionTextHash(humanizeInputText),
-      humanize_output_hash: humanizeOutputHash,
-      final_candidate_hash: humanizeOutputHash,
-      superseded_by_quality_revision: false,
-    },
+    candidate_provenance: candidateProvenance,
   }
 }
 
-export function reconcileHumanizeFinalCandidateProvenance(report: any, finalCandidateText: string) {
+export function reconcileHumanizeFinalCandidateProvenance(
+  report: PersistedHumanizePostprocessReport | null | undefined,
+  finalCandidateText: string,
+): PersistedHumanizePostprocessReport | null | undefined {
   if (!report || typeof report !== 'object' || !report.candidate_provenance) return report
   const finalCandidateHash = revisionTextHash(finalCandidateText)
   const humanizeOutputHash = String(report.candidate_provenance.humanize_output_hash || '')
@@ -74,7 +82,7 @@ export async function runPostDraftHumanizeAndOpeningHandoff(args: {
   isZhuqueFast: boolean
   runHumanizePostProcess: (...args: any[]) => any
   onStage: (...args: any[]) => any
-}): Promise<{ finalText: string; humanizePostprocess: any }> {
+}): Promise<{ finalText: string; humanizePostprocess: PersistedHumanizePostprocessReport | null }> {
   const {
     activeWorkspace,
     project,
@@ -94,7 +102,7 @@ export async function runPostDraftHumanizeAndOpeningHandoff(args: {
     version: 'humanize_postprocess_v3',
     r76_zhuque_stack: R76_ZHUQUE_STACK_VERSION,
   })
-  let humanizePostprocess: any = null
+  let humanizePostprocess: PersistedHumanizePostprocessReport | null = null
   try {
     const humanizeResult = await runHumanizePostProcess(
       activeWorkspace,
@@ -108,6 +116,10 @@ export async function runPostDraftHumanizeAndOpeningHandoff(args: {
         skipHumanizePostprocess: options.skip_humanize_postprocess ?? options.skipHumanizePostprocess,
         enable_humanize_postprocess: options.enable_humanize_postprocess ?? options.enableHumanizePostprocess,
         enableHumanizePostprocess: options.enable_humanize_postprocess ?? options.enableHumanizePostprocess,
+        full_pass_a: options.full_pass_a ?? options.fullPassA,
+        fullPassA: options.full_pass_a ?? options.fullPassA,
+        humanize_mode: options.humanize_mode ?? options.humanizeMode,
+        humanizeMode: options.humanize_mode ?? options.humanizeMode,
       }),
     )
     finalText = String(humanizeResult?.final_text || finalText)

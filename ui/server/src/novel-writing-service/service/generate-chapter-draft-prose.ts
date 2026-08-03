@@ -49,16 +49,8 @@ import {
 } from '../generation-source/types'
 import { projectChapterTaskProvenance } from '../generation-source/stage-receipts'
 
-function trustedChapterGenerationReceipt(execution: ChapterTaskExecution, draftResult: any) {
-  const receipt = draftResult?.source_receipt
-  if (receipt?.receipt_authority !== CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY) return {}
+function authoritativeChapterGenerationReceipt(execution: ChapterTaskExecution) {
   const provenance = projectChapterTaskProvenance(execution.provenance())
-  if (
-    receipt?.task_id !== provenance.task_id
-    || receipt?.source !== provenance.source
-    || receipt?.source_fingerprint !== provenance.source_fingerprint
-    || receipt?.context_version !== provenance.context_version
-  ) return {}
   return {
     receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
     ...provenance,
@@ -173,7 +165,7 @@ if (chapterTaskExecution.source === 'mcp') {
 assertCompleteProseTransportResult(draftResult, 'PROSE_DRAFT_TRUNCATED')
 const draftPromptDiagnostics = {
   ...compiledPrompt.diagnostics,
-  generation_source: trustedChapterGenerationReceipt(chapterTaskExecution, draftResult),
+  generation_source: authoritativeChapterGenerationReceipt(chapterTaskExecution),
   model_usage: (draftResult as any)?.prose_prompt_diagnostics?.model_usage
     || (draftResult as any)?.usage
     || (draftResult as any)?.raw?.usage

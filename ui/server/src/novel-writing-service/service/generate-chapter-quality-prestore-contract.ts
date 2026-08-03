@@ -31,6 +31,7 @@ export type QualityPrestoreSetupArgs = {
   executeAgent: (...a: any[]) => any
   getStageModelId: (...a: any[]) => any
   runReadabilityReview: (...a: any[]) => any
+  storeGeneratedReviewRecord: (...a: any[]) => any
   throwIfChapterGenerationAborted: () => void
   onStage: (...a: any[]) => any
 }

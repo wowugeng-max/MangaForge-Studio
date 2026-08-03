@@ -308,6 +308,7 @@ export async function runQualityLoopPhase(args: QualityPrestoreSetupArgs): Promi
     executeAgent,
     getStageModelId,
     runReadabilityReview,
+    storeGeneratedReviewRecord,
     throwIfChapterGenerationAborted,
     onStage,
   } = args
@@ -611,6 +612,7 @@ if (selfCheck.revised && selfCheck.revision) {
     revisionStageStatus,
     runReadabilityReview,
     selfCheck,
+    storeGeneratedReviewRecord,
     throwIfChapterGenerationAborted,
     wordTarget,
     wordTargetCompatibility,

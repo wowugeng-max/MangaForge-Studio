@@ -39,6 +39,14 @@ import {
 } from './novel-writing-service.test-support'
 
 describe('novel writing service prose quality wiring b a', () => {
+  const identityHumanizeResult = (sourceText: string) => ({
+    final_text: sourceText,
+    report: {
+      accepted: true,
+      before_chars: countProseChars(sourceText),
+      after_chars: countProseChars(sourceText),
+    },
+  })
   const contractionWordTarget = {
     mode: 'custom',
     target: 1000,
@@ -69,6 +77,7 @@ describe('novel writing service prose quality wiring b a', () => {
       draftText,
       editorText: draftText,
       memeText: overCeilingMemeText,
+      humanizeResult: identityHumanizeResult,
       enableMemePolish: true,
       chapterWordTarget: { mode: 'standard' },
       contextPackageOverride: withoutOpeningHandoffGuard(),
@@ -76,11 +85,12 @@ describe('novel writing service prose quality wiring b a', () => {
     const stages: Array<{ name: string; payload: any }> = []
     const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
       model_id: 217,
+      max_quality_revision_rounds: 0,
       onStage: async (name: string, payload: any) => stages.push({ name, payload }),
     })
 
     expect(result.admission_status).toBe('accepted_with_warnings')
-    expect(countProseChars(result.chapter?.chapter_text || '')).toBe(6007)
+    expect(countProseChars(harness.humanizeTexts[0] || '')).toBe(6007)
     expect(result.quality_warnings).toContainEqual(expect.objectContaining({
       code: 'word_target_long',
       source: 'word_target',
@@ -107,15 +117,16 @@ describe('novel writing service prose quality wiring b a', () => {
       draftText,
       editorText: draftText,
       memeText: overCeilingMemeText,
+      humanizeResult: identityHumanizeResult,
       enableMemePolish: true,
       chapterWordTarget: { mode: 'standard' },
       contextPackageOverride: withoutOpeningHandoffGuard(),
     })
     const stages: any[] = []
-    const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, { model_id: 217, onStage: async (_name: string, payload: any) => stages.push(payload) })
+    const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, { model_id: 217, max_quality_revision_rounds: 0, onStage: async (_name: string, payload: any) => stages.push(payload) })
     expect(result.admission_status).toBe('accepted_with_warnings')
     expect(harness.modelCalls.review).toBeGreaterThan(0)
-    expect(countProseChars(result.chapter?.chapter_text || '')).toBe(6006)
+    expect(countProseChars(harness.humanizeTexts[0] || '')).toBe(6006)
     expect(result.meme_polish).toMatchObject({
       polished: false,
       discarded: true,

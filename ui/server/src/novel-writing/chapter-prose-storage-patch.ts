@@ -1,6 +1,8 @@
 import { resolveOutgoingChapterHandoff } from './chapter-handoff-basics'
 import { resolveChapterProgressLedger } from './chapter-progress-ledger'
 import { redactAndBoundCredentialText } from './credential-redaction'
+import { CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY } from '../novel-writing-service/generation-source/types'
+import type { HumanizeCandidateProvenance } from './humanize-postprocess'
 export type ChapterProseStoragePatchInput = {
   chapter: any
   generatedTitlePatch: Record<string, any>
@@ -20,14 +22,7 @@ export type ChapterProseStoragePatchInput = {
   }
 }
 
-export type PersistedHumanizeCandidateProvenance = {
-  scope: 'pre_quality'
-  stage: 'pre_quality'
-  humanize_input_hash: string
-  humanize_output_hash: string
-  final_candidate_hash: string
-  superseded_by_quality_revision: boolean
-}
+export type PersistedHumanizeCandidateProvenance = HumanizeCandidateProvenance
 
 export type PersistedHumanizeStageWindow = {
   id?: string
@@ -245,22 +240,24 @@ function normalizePersistedHumanizeProvenance(value: unknown): PersistedHumanize
   const humanizeOutputHash = normalizePersistedHumanizeString(input.humanize_output_hash, 64)
   const finalCandidateHash = normalizePersistedHumanizeString(input.final_candidate_hash, 64)
   const superseded = normalizePersistedHumanizeBoolean(input.superseded_by_quality_revision)
+  const hasCanonicalScope = input.scope === 'post_quality' && input.stage === 'post_quality'
+  const hasHistoricalScope = input.scope === 'pre_quality' && input.stage === 'pre_quality'
   if (
-    input.scope !== 'pre_quality'
-    || input.stage !== 'pre_quality'
+    (!hasCanonicalScope && !hasHistoricalScope)
     || !/^[a-f0-9]{64}$/i.test(humanizeInputHash || '')
     || !/^[a-f0-9]{64}$/i.test(humanizeOutputHash || '')
     || !/^[a-f0-9]{64}$/i.test(finalCandidateHash || '')
     || superseded === undefined
   ) return undefined
-  return {
-    scope: 'pre_quality',
-    stage: 'pre_quality',
+  const common = {
     humanize_input_hash: humanizeInputHash!,
     humanize_output_hash: humanizeOutputHash!,
     final_candidate_hash: finalCandidateHash!,
     superseded_by_quality_revision: superseded,
   }
+  return hasCanonicalScope
+    ? { scope: 'post_quality', stage: 'post_quality', ...common }
+    : { scope: 'pre_quality', stage: 'pre_quality', ...common }
 }
 
 export function normalizeHumanizePostprocessForStorage(
@@ -504,7 +501,12 @@ export function buildChapterProseStoragePatch(input: ChapterProseStoragePatchInp
     rawPayload.ohStoryDirector = input.postDraftDirector
   }
   if (input.generationSourceProvenance !== undefined) {
-    rawPayload.prose_generation_source = input.generationSourceProvenance
+    if (input.generationSourceProvenance?.receipt_authority === CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY) {
+      rawPayload.chapter_generation_source = input.generationSourceProvenance
+      delete rawPayload.prose_generation_source
+    } else {
+      rawPayload.prose_generation_source = input.generationSourceProvenance
+    }
   }
   if (input.humanizePostprocess !== undefined) {
     const humanizePostprocess = normalizeHumanizePostprocessForStorage(input.humanizePostprocess)

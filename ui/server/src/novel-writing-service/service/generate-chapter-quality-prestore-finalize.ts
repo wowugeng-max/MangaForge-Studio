@@ -286,6 +286,7 @@ export async function runQualityPrestoreFinalize(state: Record<string, any>): Pr
     revisionStageStatus,
     runReadabilityReview,
     selfCheck,
+    storeGeneratedReviewRecord,
     throwIfChapterGenerationAborted,
     wordTarget,
     wordTargetCompatibility,

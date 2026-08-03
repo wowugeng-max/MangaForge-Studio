@@ -121,10 +121,11 @@ import {
   runPostDraftEditorAndMemePolish,
 } from './generate-chapter-editor-meme-polish'
 import {
-  runQualityLoopAndPrestoreSetup,
+  runQualityLoopPhase,
+  runQualityPrestoreFinalize,
 } from './generate-chapter-quality-prestore'
 import {
-  attachPreQualityHumanizeProvenance,
+  attachPostQualityHumanizeProvenance,
   collectFinalOpeningContinuityFailures,
   reconcileHumanizeFinalCandidateProvenance,
   runPostDraftHumanizeAndOpeningHandoff,
@@ -252,7 +253,6 @@ import {
   buildSourceReadinessSyncReport,
 } from '../quality/state-tracking-contracts'
 import {
-  isAbortError,
   selectProseForChapter,
   throwIfAborted,
 } from './runtime-helpers'
@@ -320,13 +320,14 @@ export function createGenerateChapterForGroupMethods(deps: {
 const generateChapterForGroup = async (activeWorkspace: string, projectId: number, chapterId: number, options: any = {}) => {
   const preferredModelId = Number(options.model_id || 0) || undefined
   const onStage = typeof options.onStage === 'function' ? options.onStage : async () => {}
+  const chapterTaskAbortSignal = options.abortSignal
   // Zhuque validation fast path: draft + sparse humanize + store (skip editor/multi-round review).
   // Must rebind BEFORE snapshotting llmControlOptions so expand:false reaches word-target repair.
   options = applyZhuqueFastPathOptions(options || {})
   const llmControlOptions = {
     abortSignal: options.abortSignal,
     llmTimeoutMs: options.llmTimeoutMs,
-    signal: options.abortSignal,
+    signal: chapterTaskAbortSignal,
     timeoutMs: options.llmTimeoutMs,
     // Allow callers to skip hard word-target expand (e.g. slow Claude proxy 524 on long rewrites).
     expand: options.expand,
@@ -522,28 +523,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   let qualityWarningCandidates = editorMemeResult.qualityWarningCandidates
   const wordTargetExpansionPatches = editorMemeResult.wordTargetExpansionPatches
   const wordTargetCompatibility = editorMemeResult.wordTargetCompatibility
-  const humanizeInputText = finalText
-  const postDraftFinalizeResult = await runPostDraftHumanizeAndOpeningHandoff({
-    activeWorkspace,
-    project,
-    contextPackage,
-    characters,
-    finalText,
-    preferredModelId,
-    llmControlOptions,
-    options,
-    isZhuqueFast,
-    runHumanizePostProcess,
-    onStage,
-  })
-  finalText = normalizeProseForStorage(postDraftFinalizeResult.finalText)
-  let humanizePostprocess = attachPreQualityHumanizeProvenance(
-    postDraftFinalizeResult.humanizePostprocess,
-    humanizeInputText,
-    finalText,
-  )
-
-  const qualityPrestoreResult = await runQualityLoopAndPrestoreSetup({
+  const qualityLoopState = await runQualityLoopPhase({
     options,
     project,
     chapter,
@@ -576,8 +556,34 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     executeAgent,
     getStageModelId,
     runReadabilityReview,
+    storeGeneratedReviewRecord,
     throwIfChapterGenerationAborted,
     onStage,
+  })
+  finalText = qualityLoopState.finalText
+  const humanizeInputText = finalText
+  const postDraftFinalizeResult = await runPostDraftHumanizeAndOpeningHandoff({
+    activeWorkspace,
+    project,
+    contextPackage,
+    characters,
+    finalText,
+    preferredModelId,
+    llmControlOptions,
+    options,
+    isZhuqueFast,
+    runHumanizePostProcess,
+    onStage,
+  })
+  finalText = normalizeProseForStorage(postDraftFinalizeResult.finalText)
+  let humanizePostprocess = attachPostQualityHumanizeProvenance(
+    postDraftFinalizeResult.humanizePostprocess,
+    humanizeInputText,
+    finalText,
+  )
+  const qualityPrestoreResult = await runQualityPrestoreFinalize({
+    ...qualityLoopState,
+    finalText,
   })
   finalText = qualityPrestoreResult.finalText
   humanizePostprocess = reconcileHumanizeFinalCandidateProvenance(humanizePostprocess, finalText)
@@ -758,7 +764,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   if (automaticFailed) {
     try {
       await chapterTaskExecution.close({
-        status: isAbortError(automaticFailure) ? 'cancelled' : 'failed',
+        status: chapterTaskAbortSignal?.aborted === true ? 'cancelled' : 'failed',
         error: automaticFailure,
       })
     } catch (closeError) {
