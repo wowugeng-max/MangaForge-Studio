@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Give each novel project one persistent API-or-MCP chapter source and route every model-driven chapter-production stage through one task-scoped source, model/binding snapshot, and Buda Session.
+**Goal:** Give each novel project one persistent API-or-MCP chapter source and route every model-driven chapter-production stage through one task-scoped source, model/binding snapshot, and provider-neutral MCP task Session.
 
-**Architecture:** Store a versioned `chapter_generation_source` state that retains both configurations while selecting exactly one active source. A project lease freezes that state for a task; a `ChapterTaskExecution` captures the active model or MCP binding and is threaded through draft, repair, review, revision, and story-state calls. The MCP implementation lazily opens one Buda Session per task, reuses it for all stages, preserves the current Agent lease/quarantine/receipt safeguards, and never falls back to the API source.
+**Architecture:** Store a versioned `chapter_generation_source` state that retains both configurations while selecting exactly one active source. A project lease freezes that state for a task; a `ChapterTaskExecution` captures the active model or MCP binding and is threaded through draft, repair, review, revision, and story-state calls. The MCP core depends only on a provider-neutral task Session port selected by `adapter_id`; Buda-specific Drive, tool, run-correlation, and cleanup behavior remains inside `BudaAdapter`. One Adapter Session is reused for all stages, the current Agent lease/quarantine/receipt safeguards remain intact, and MCP never falls back to the API source.
 
 **Tech Stack:** TypeScript, Bun test runner, Express, React 18, Ant Design, Axios, MCP Streamable HTTP, Buda MCP adapter, SQLite-backed novel repositories.
 
@@ -20,9 +20,9 @@ Server source authority and lifecycle:
 - `ui/server/src/novel-writing-service/generation-source/types.ts`: stage, response-contract, begin-task, execution-handle, and provenance types.
 - `ui/server/src/novel-writing-service/generation-source/stage-receipts.ts`: bounded stage provenance shared by API and MCP.
 - `ui/server/src/novel-writing-service/generation-source/model-generation-source.ts`: API execution using one captured model ID.
-- `ui/server/src/novel-writing-service/generation-source/mcp-generation-source.ts`: MCP execution using one binding, Agent lease, and lazy Buda task Session.
+- `ui/server/src/novel-writing-service/generation-source/mcp-generation-source.ts`: provider-neutral MCP execution using one binding, Agent lease, and lazy Adapter task Session.
 - `ui/server/src/novel-writing-service/generation-source/create-generation-source.ts`: task-start resolver and exactly-once cleanup composition.
-- `ui/server/src/mcp/adapters/types.ts`: reusable remote chapter-task Session port.
+- `ui/server/src/mcp/adapters/types.ts`: provider-neutral remote chapter-task Session and Adapter ports; no Buda protocol fields.
 - `ui/server/src/mcp/adapters/buda-adapter.ts`: Buda Session creation, repeated stage messages, polling, extraction, and remote cleanup.
 - `ui/server/src/routes/novel-mcp-binding-routes.ts`: new chapter-source endpoints plus legacy prose-source compatibility adapters.
 
@@ -1461,29 +1461,146 @@ git commit -m "feat(mcp): reuse one Buda session across chapter stages"
 
 **Files:**
 
+- Modify: `ui/server/src/mcp/adapters/types.ts`
+- Modify: `ui/server/src/mcp/adapters/buda-adapter.ts`
+- Modify: `ui/server/src/mcp/adapters/buda-adapter.test.ts`
+- Modify: `ui/server/src/mcp/adapters/registry.ts`
+- Modify: `ui/server/src/mcp/runtime.ts`
+- Modify: `ui/server/src/mcp/runtime.test.ts`
 - Modify: `ui/server/src/novel-writing-service/generation-source/mcp-generation-source.ts`
 - Modify: `ui/server/src/novel-writing-service/generation-source/create-generation-source.ts`
 - Modify: `ui/server/src/novel-writing-service/generation-source/types.ts`
 - Modify: `ui/server/src/novel-writing-service/generation-source/generation-source.test.ts`
 - Modify: `ui/server/src/mcp/agent-lease.test.ts`
 
-- [ ] **Step 1: Write failing multi-stage MCP execution tests**
+- [ ] **Step 1a: Write failing provider-neutral Adapter contract tests**
 
-Extend the test imports with `getNovelProject`, `ChapterSourceLeaseRegistry`, and the type-only `BudaChapterStageInput`, `BudaChapterTaskInput`, and `BudaChapterTaskSession` imports.
+Rename the shared chapter-task imports and fixtures to `McpChapterStageInput`, `McpChapterTaskInput`, and `McpChapterTaskSession`. Add a fake non-Buda Adapter with `id: 'test-session-provider'` to `runtime.test.ts` and prove that `getAdapterForKey` returns it through the same registry/factory boundary without any Buda tool names or payloads. In `generation-source.test.ts`, type the multi-stage fixture only against the provider-neutral port and assert that its Adapter ID is preserved in provenance.
+
+The shared contract in `adapters/types.ts` must use these provider-neutral names:
+
+```ts
+export type McpChapterContextSnapshot = {
+  writingBible: string
+  storyState: unknown
+  continuity: string
+  recentChapters: string
+}
+
+export type McpChapterStageInput = {
+  requestId: string
+  stage: ChapterTaskStage
+  responseContract: ChapterStageResponseContract
+  prompt: string
+}
+
+export type McpChapterTaskInput = {
+  activeWorkspace: string
+  server: McpServerRecord
+  keyId: number
+  agentId: string
+  model?: string
+  taskId: string
+  project: Record<string, any>
+  chapter: Record<string, any>
+  chapterNo: number
+  context: McpChapterContextSnapshot
+  deadline: McpGenerationDeadline
+  signal?: AbortSignal
+  onProgress?: (event: GenerationSourceProgress) => Promise<void> | void
+}
+
+export type McpChapterStageResult = {
+  content: string
+  session_id: string
+  snapshot_hash: string
+  status: 'completed'
+}
+
+export interface McpChapterTaskSession {
+  readonly sessionId: string
+  readonly snapshotHash: string
+  runStage(input: McpChapterStageInput): Promise<McpChapterStageResult>
+  close(): Promise<void>
+}
+
+export type McpProseGenerationInput = {
+  activeWorkspace: string
+  server: McpServerRecord
+  keyId: number
+  agentId: string
+  model?: string
+  requestId: string
+  project: Record<string, any>
+  chapter: Record<string, any>
+  chapterNo: number
+  paragraphTask: string
+  promptDiagnostics?: unknown
+  context: McpChapterContextSnapshot
+  deadline: McpGenerationDeadline
+  signal?: AbortSignal
+  onProgress?: (event: GenerationSourceProgress) => Promise<void> | void
+}
+
+export type McpProseGenerationResult = {
+  prose_chapters: Array<{ chapter_no: number; title?: string; chapter_text: string }>
+  source: 'mcp'
+  adapter_id: string
+  agent_id: string
+  session_id: string
+  snapshot_hash: string
+  completed: true
+  raw: { request_id: string; session_status: string }
+}
+
+export interface McpGenerationAdapter {
+  readonly id: string
+  listAgents(options: McpAdapterOperationOptions): Promise<McpAgentSummary[]>
+  createAgent(input: { name: string; spaceId?: string; instructions?: string }, options: McpAdapterOperationOptions): Promise<McpAgentSummary>
+  inspectSession(input: { agentId: string; sessionId: string }, options: McpAdapterOperationOptions): Promise<{ status: string; terminal: boolean }>
+  openChapterTask(input: McpChapterTaskInput): Promise<McpChapterTaskSession>
+  generateProse(input: McpProseGenerationInput): Promise<McpProseGenerationResult>
+}
+```
+
+Also rename the shared one-shot compatibility inputs/results from `BudaProseGeneration*` to `McpProseGeneration*`, use `context: McpChapterContextSnapshot` instead of `drive`, and type `adapter_id` as a bounded string rather than the literal `'buda'`. This method remains only for the legacy compatibility path until Task 9 removes that call site; it must contain no provider wire fields.
+
+`BudaAdapter` implements this contract and maps `input.context` to its private Drive synchronization. Buda run/message IDs, status projection, tool mapping, stage envelope, and cleanup correlation remain private to `buda-adapter.ts`.
+
+- [ ] **Step 1b: Run the provider-neutral contract tests and verify RED**
+
+Run:
+
+```bash
+bun run --cwd ui/server check
+bun test ui/server/src/mcp/adapters/buda-adapter.test.ts ui/server/src/mcp/runtime.test.ts ui/server/src/novel-writing-service/generation-source/generation-source.test.ts
+```
+
+Expected: the server check FAILS to typecheck because the shared port is still named `BudaChapterTask*`, exposes `drive`, and the runtime is typed as `ProseMcpAdapter`. Record whether the runtime tests already pass; pre-existing runtime behavior does not replace the required type-contract RED.
+
+- [ ] **Step 1c: Implement the provider-neutral port without changing Buda wire behavior**
+
+Rename every shared `Buda*` type and `ProseMcpAdapter` to the provider-neutral contracts above, update the runtime/registry types, and update `BudaAdapter` to consume `input.context`. Do not move Buda correlation, tool names, payload fields, or Drive paths into the shared contract. The one-shot wrapper consumes the generic compatibility input and performs Buda-specific translation internally.
+
+Run both commands from Step 1b and require GREEN before adding MCP task execution behavior.
+
+- [ ] **Step 1d: Write failing multi-stage MCP execution tests**
+
+Extend the test imports with `getNovelProject`, `ChapterSourceLeaseRegistry`, and the type-only `McpChapterStageInput`, `McpChapterTaskInput`, and `McpChapterTaskSession` imports.
 
 Keep the new test inside the existing MCP outcome describe so it can reuse `harness` and `runtimeWithAdapter`. Add this exact adapter fixture:
 
 ```ts
 function multiStageTaskAdapter() {
   const openCalls: any[] = []
-  const stageCalls: Array<BudaChapterStageInput & { sessionId: string }> = []
+  const stageCalls: Array<McpChapterStageInput & { sessionId: string }> = []
   let sessionNumber = 0
   return {
     openCalls,
     stageCalls,
     adapter: {
       listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }],
-      async openChapterTask(input: BudaChapterTaskInput): Promise<BudaChapterTaskSession> {
+      async openChapterTask(input: McpChapterTaskInput): Promise<McpChapterTaskSession> {
         openCalls.push(input)
         const sessionId = `session-${++sessionNumber}`
         return {
@@ -1606,18 +1723,18 @@ function compileAgentPrompt(agentId: string, project: any, context: Record<strin
 }
 ```
 
-`executeAgent` must call the shared stage recorder, send the compiled prompt to `session.runStage`, assert the fingerprint, and return an `LLMResponse` compatible object:
+`executeAgent` must call the shared stage recorder, send the compiled prompt to `session.runStage`, assert the fingerprint, and return an `LLMResponse` compatible object. This file must not import `buda-adapter.ts` or any `Buda*` type:
 
 ```ts
 const response = {
   content: result.content,
   finish_reason: 'stop',
-  modelName: this.binding.model || 'Buda Auto',
+  modelName: this.binding.model || 'MCP Auto',
 }
 return { ...response, output: parseAgentOutput(response as any) }
 ```
 
-`generateDraft` sends `paragraphTask` with `draft_prose`, converts the content through `extractBudaProse`, and returns the trusted chapter source receipt.
+`generateDraft` sends `paragraphTask` with `draft_prose`, parses the provider-neutral response contract in the generation-source layer, and returns the trusted chapter source receipt. Buda's concrete one-shot `extractBudaProse` compatibility helper must not be imported by the generation source.
 
 - [ ] **Step 5a: Implement confirmed-terminal cleanup**
 
@@ -1636,7 +1753,7 @@ Expected: PASS with the existing security, quarantine, credential rotation, and 
 - [ ] **Step 7: Commit MCP task execution**
 
 ```bash
-git add ui/server/src/novel-writing-service/generation-source/mcp-generation-source.ts ui/server/src/novel-writing-service/generation-source/create-generation-source.ts ui/server/src/novel-writing-service/generation-source/types.ts ui/server/src/novel-writing-service/generation-source/generation-source.test.ts ui/server/src/mcp/agent-lease.test.ts
+git add ui/server/src/mcp/adapters/types.ts ui/server/src/mcp/adapters/buda-adapter.ts ui/server/src/mcp/adapters/buda-adapter.test.ts ui/server/src/mcp/adapters/registry.ts ui/server/src/mcp/runtime.ts ui/server/src/mcp/runtime.test.ts ui/server/src/novel-writing-service/generation-source/mcp-generation-source.ts ui/server/src/novel-writing-service/generation-source/create-generation-source.ts ui/server/src/novel-writing-service/generation-source/types.ts ui/server/src/novel-writing-service/generation-source/generation-source.test.ts ui/server/src/mcp/agent-lease.test.ts
 git commit -m "feat(mcp): execute complete chapter tasks through one source"
 ```
 

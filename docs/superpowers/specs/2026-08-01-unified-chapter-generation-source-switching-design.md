@@ -21,6 +21,7 @@ Switching the current configuration back to `type: model` also discards the MCP 
 - Allow an explicit, persistent source switch from the workspace top bar and project settings.
 - Prevent source, model, or binding changes while a chapter task is running.
 - Keep MangaForge authoritative for prompts, context, validation, quality gates, persistence, and memory.
+- Keep the chapter-production core provider-neutral so another session-capable MCP service can be added by registering an Adapter rather than changing the chapter workflow.
 - Preserve historical `prose_generation_source_v1` projects without requiring manual rebinding.
 
 ## Non-goals
@@ -31,6 +32,7 @@ Switching the current configuration back to `type: model` also discards the MCP 
 - Discovering a Buda model catalog; Buda still exposes no model-list MCP tool.
 - Encrypting MCP Keys in this phase.
 - Replacing MangaForge canonical memory with Buda Agent memory.
+- Automatically inferring chapter-generation semantics from arbitrary MCP tool names or schemas. A service must have a registered Adapter that satisfies the common chapter-task contract.
 
 ## Chosen approach
 
@@ -132,14 +134,30 @@ Every model-driven stage receives this handle. A stage cannot independently reso
 - Stage-specific temperature, token limits, prompts, and response contracts remain under MangaForge control.
 - Planning and setting workflows continue using their existing model strategies.
 
+### Provider-neutral MCP boundary
+
+The chapter-production core depends on a provider-neutral MCP Adapter contract. Shared types use `McpChapterTask`, `McpChapterStage`, `McpChapterContextSnapshot`, and `McpGenerationAdapter` terminology; they do not expose Buda Drive paths, Buda tool names, Buda run payloads, or Buda status/correlation rules.
+
+The common contract owns only these semantics:
+
+- open one task-scoped remote execution using the captured Server, Key, Adapter, Agent, and model binding;
+- receive one canonical MangaForge context snapshot and ordered stage prompts;
+- return bounded stage content plus opaque remote Session/context identifiers;
+- serialize stages, close idempotently, and surface generic confirmed-terminal versus ambiguous-remote outcomes;
+- list/create bound Agents and inspect quarantined Sessions through provider-neutral results.
+
+Each registered Adapter owns its provider protocol: tool discovery and mapping, context materialization, Session creation, message transport, model forwarding, run/message correlation, output extraction, polling, cancellation, and remote cleanup. The Buda Adapter may use Drive files and Buda-specific run/message evidence internally, but neither `McpGenerationSource` nor any chapter service may import those details. `adapter_id` selects the implementation through the Adapter registry. Adding another compliant MCP provider may add a new Adapter and registry entry, but must not require changes to chapter-stage routing, prompt compilation, receipts, leases, or quality gates.
+
+This is intentionally a semantic Adapter architecture rather than automatic schema guessing. MCP standardizes transport and tool invocation, not the meaning of a provider's Agent, Session, context store, terminal state, or cancellation guarantees.
+
 ### MCP behavior
 
-- All chapter stages use the same Server, Key, Adapter, Agent, and configured Buda model snapshot.
-- One user-triggered chapter task creates one Buda Session lazily and reuses it for every MCP stage in that task.
+- All chapter stages use the same Server, Key, Adapter, Agent, and configured provider model snapshot.
+- One user-triggered chapter task lazily opens one Adapter task Session and reuses it for every MCP stage in that task.
 - A later manual recheck or revision is a new task and therefore creates a new Session.
 - The same Agent is retained across tasks, while each new task receives MangaForge's latest complete canonical context.
-- Auto omits the Buda `model` field; an explicit model is sent on Session creation and every stage message operation where Buda accepts it.
-- A Buda failure never invokes the ordinary model source as a fallback.
+- Auto/model forwarding is normalized by the shared binding and implemented according to each Adapter's provider contract. For Buda, Auto omits the `model` field and an explicit model is sent on Session creation and every supported stage message.
+- An MCP Adapter failure never invokes the ordinary model source as a fallback.
 
 ## Stage protocol
 

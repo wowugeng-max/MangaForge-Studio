@@ -351,6 +351,139 @@ describe('BudaAdapter', () => {
     await task.close()
   })
 
+  for (const topLevelKey of ['content', 'text'] as const) {
+    test(`extracts run-matched top-level ${topLevelKey} across reused Session stages`, async () => {
+      const fake = createFakeClient()
+      let activeRun = 0
+      const original = fake.client.callTool
+      fake.client.callTool = async (name: string, args: any, options: any) => {
+        if (name.endsWith('postApiAgentSessionMessage')) {
+          activeRun += 1
+          fake.calls.push({ name, args, options })
+          return structured({
+            session: { id: 'session-1' },
+            run: { id: `run-${activeRun}`, started: true },
+          })
+        }
+        if (name.endsWith('getApiAgentSession')) {
+          fake.calls.push({ name, args, options })
+          return structured({
+            session: { id: 'session-1', status: 'completed' },
+            run: { id: `run-${activeRun}`, status: 'completed' },
+            [topLevelKey]: `stage ${activeRun} output`,
+          })
+        }
+        return original(name, args, options)
+      }
+      const task = await openChapterTask(new BudaAdapter(fake.client as any))
+
+      await expect(task.runStage(stageInput('request-a', 'draft', 'draft_prose')))
+        .resolves.toMatchObject({ content: 'stage 1 output' })
+      await expect(task.runStage(stageInput('request-b', 'revision', 'revision_prose')))
+        .resolves.toMatchObject({ content: 'stage 2 output' })
+      await task.close()
+    })
+  }
+
+  test('does not accept stale top-level content from a mismatched run', async () => {
+    const controller = new AbortController()
+    const deadline = new McpGenerationDeadline(60_000, controller.signal, {
+      now: Date.now,
+      setTimeout: () => 1,
+      clearTimeout: () => {},
+    })
+    const fake = createFakeClient()
+    let posts = 0
+    let staleGets = 0
+    let releaseStalePoll!: () => void
+    let stalePollBlocked!: () => void
+    const stalePoll = new Promise<void>(resolve => { stalePollBlocked = resolve })
+    const stalePollGate = new Promise<void>(resolve => { releaseStalePoll = resolve })
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('postApiAgentSessionMessage')) {
+        posts += 1
+        fake.calls.push({ name, args, options })
+        return structured({ session: { id: 'session-1' }, run: { id: `run-${posts}`, started: true } })
+      }
+      if (name.endsWith('cancelApiAgentSessionRun')) {
+        fake.calls.push({ name, args, options })
+        return structured({ ok: true, cancelled: false })
+      }
+      if (name.endsWith('getApiAgentSession')) {
+        fake.calls.push({ name, args, options })
+        if (posts === 2) {
+          staleGets += 1
+          if (staleGets === 2) {
+            stalePollBlocked()
+            await stalePollGate
+          }
+        }
+        return structured({
+          session: { id: 'session-1', status: 'completed' },
+          run: { id: 'run-1', status: 'completed' },
+          content: 'stage 1 stale output',
+        })
+      }
+      return original(name, args, options)
+    }
+    const task = await openChapterTask(
+      new BudaAdapter(fake.client as any),
+      chapterTaskInput({ deadline, signal: controller.signal }),
+    )
+    await expect(task.runStage(stageInput('request-a', 'draft', 'draft_prose')))
+      .resolves.toMatchObject({ content: 'stage 1 stale output' })
+
+    const staleStage = task.runStage(stageInput('request-b', 'revision', 'revision_prose'))
+    await stalePoll
+    controller.abort()
+    releaseStalePoll()
+    const staleError = await staleStage.catch((error: unknown) => error) as any
+
+    expect(staleError).toMatchObject({
+      code: 'MCP_CANCELLED',
+      details: { remote_cancel_confirmed: false },
+    })
+    expect(staleGets).toBeGreaterThanOrEqual(2)
+    await task.close()
+  })
+
+  test('does not fall back to an old assistant when a matched run has no output', async () => {
+    const fake = createFakeClient()
+    let activeRun = 0
+    const oldMessages = [{ role: 'assistant', content: 'stage 1 assistant output' }]
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('postApiAgentSessionMessage')) {
+        activeRun += 1
+        fake.calls.push({ name, args, options })
+        return structured({
+          session: { id: 'session-1' },
+          run: { id: `run-${activeRun}`, started: true },
+        })
+      }
+      if (name.endsWith('getApiAgentSession')) {
+        fake.calls.push({ name, args, options })
+        return structured({
+          session: { id: 'session-1', status: 'completed' },
+          run: { id: `run-${activeRun}`, status: 'completed' },
+          messages: oldMessages,
+        })
+      }
+      return original(name, args, options)
+    }
+    const task = await openChapterTask(new BudaAdapter(fake.client as any))
+    await expect(task.runStage(stageInput('request-a', 'draft', 'draft_prose')))
+      .resolves.toMatchObject({ content: 'stage 1 assistant output' })
+
+    await expect(task.runStage(stageInput('request-b', 'revision', 'revision_prose')))
+      .rejects.toMatchObject({
+        code: 'MCP_TOOL_ERROR',
+        details: { remote_cancel_confirmed: true },
+      })
+    await task.close()
+  })
+
   test('fails closed when polling never advances beyond the previous assistant snapshot', async () => {
     const controller = new AbortController()
     const fake = createFakeClient()

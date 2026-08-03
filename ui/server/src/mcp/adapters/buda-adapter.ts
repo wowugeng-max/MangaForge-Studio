@@ -332,13 +332,19 @@ function assistantContents(data: unknown) {
   return contents
 }
 
-export function extractBudaStageContent(data: unknown) {
-  const assistant = assistantContents(data).at(-1)
-  if (assistant) return assistant
+function extractBudaTopLevelStageContent(data: unknown) {
   for (const key of ['content', 'text']) {
     const content = stageContent(ownDataValue(data, key))
     if (content) return content
   }
+  return ''
+}
+
+export function extractBudaStageContent(data: unknown) {
+  const assistant = assistantContents(data).at(-1)
+  if (assistant) return assistant
+  const topLevelContent = extractBudaTopLevelStageContent(data)
+  if (topLevelContent) return topLevelContent
   throw new McpError('MCP_TOOL_ERROR', 'Buda Stage 已完成但没有返回内容')
 }
 
@@ -614,6 +620,7 @@ class BudaChapterTaskSessionImpl implements BudaChapterTaskSession {
         const content = correlation.allowInitialTerminal
           ? extractBudaStageContent(sessionData)
           : evidence.currentOutput
+            || (evidence.runIdMatches ? extractBudaTopLevelStageContent(sessionData) : '')
         if (!content) throw new McpError('MCP_TOOL_ERROR', 'Buda Stage 已完成但没有返回内容')
         await this.progress('mcp_extract', 'success')
         this.task.deadline.throwIfAborted()
