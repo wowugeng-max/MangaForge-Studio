@@ -7,6 +7,12 @@ import { McpGenerationDeadline } from './deadline'
 import { createMcpKey, readMcpKeys, updateMcpKey } from './key-store'
 import { createMcpRuntime } from './runtime'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from './server-store'
+import type {
+  McpChapterStageInput,
+  McpChapterTaskInput,
+  McpChapterTaskSession,
+  McpGenerationAdapter,
+} from './adapters/types'
 
 const workspaces: string[] = []
 afterEach(async () => Promise.all(workspaces.splice(0).map(path => rm(path, { recursive: true, force: true }))))
@@ -43,6 +49,107 @@ describe('MCP runtime', () => {
     await lease.release()
     return (await runtime.listAgentQuarantines(workspace)).find(item => item.session_id === input.sessionId)!
   }
+
+  test('resolves a non-Buda session provider through the shared Adapter port', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-provider-neutral-'))
+    workspaces.push(workspace)
+    const server = {
+      ...BUDA_MCP_SERVER_TEMPLATE,
+      id: 'test-session-server',
+      display_name: 'Test Session Provider',
+      adapter_id: 'test-session-provider',
+    }
+    await writeMcpServers(workspace, [server])
+    const key = await createMcpKey(workspace, {
+      mcp_server_id: server.id,
+      key: 'sk_provider_neutral',
+      description: '通用 Adapter',
+    })
+    const opened: McpChapterTaskInput[] = []
+    const stages: McpChapterStageInput[] = []
+    const session: McpChapterTaskSession = {
+      sessionId: 'test-session-1',
+      snapshotHash: 'test-snapshot-1',
+      async runStage(input) {
+        stages.push(input)
+        return {
+          content: `provider:${input.prompt}`,
+          session_id: this.sessionId,
+          snapshot_hash: this.snapshotHash,
+          status: 'completed',
+        }
+      },
+      async close() {},
+    }
+    let factoryAdapterId = ''
+    const adapter: McpGenerationAdapter = {
+      id: 'test-session-provider',
+      async listAgents() { return [{ id: 'agent-1', name: 'Provider Agent' }] },
+      async createAgent(input) { return { id: 'agent-2', name: input.name } },
+      async inspectSession() { return { status: 'completed', terminal: true } },
+      async openChapterTask(input) { opened.push(input); return session },
+      async generateProse(input) {
+        return {
+          prose_chapters: [{ chapter_no: input.chapterNo, chapter_text: input.paragraphTask }],
+          source: 'mcp',
+          adapter_id: this.id,
+          agent_id: input.agentId,
+          session_id: session.sessionId,
+          snapshot_hash: session.snapshotHash,
+          completed: true,
+          raw: { request_id: input.requestId, session_status: 'completed' },
+        }
+      },
+    }
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: {
+        get: async () => ({
+          diagnostics: () => ({ state: 'Ready' }),
+          listTools: async () => [],
+          callTool: async () => ({ content: [] }),
+        }),
+        invalidate: async () => {}, invalidateIfCurrent: async () => {},
+        invalidateServer: async () => {}, closeAll: async () => {},
+      } as any,
+      adapterFactory(adapterId) {
+        factoryAdapterId = adapterId
+        return adapter
+      },
+    })
+
+    const resolved = await runtime.getAdapterForKey(key.id, server.id)
+    const deadline = new McpGenerationDeadline(60_000)
+    const taskInput: McpChapterTaskInput = {
+      activeWorkspace: workspace,
+      server,
+      keyId: key.id,
+      agentId: 'agent-1',
+      taskId: 'task-provider-1',
+      project: { id: 1 },
+      chapter: { id: 2 },
+      chapterNo: 3,
+      context: { writingBible: '', storyState: {}, continuity: '', recentChapters: '' },
+      deadline,
+    }
+    const task = await resolved.adapter.openChapterTask(taskInput)
+    const result = await task.runStage({
+      requestId: 'request-provider-1',
+      stage: 'draft',
+      responseContract: 'draft_prose',
+      prompt: '供应商无关正文任务',
+    })
+    deadline.close()
+
+    expect(factoryAdapterId).toBe('test-session-provider')
+    expect(resolved.adapter.id).toBe('test-session-provider')
+    expect(opened).toEqual([taskInput])
+    expect(stages.map(item => item.stage)).toEqual(['draft'])
+    expect(result).toMatchObject({
+      content: 'provider:供应商无关正文任务',
+      session_id: 'test-session-1',
+      snapshot_hash: 'test-snapshot-1',
+    })
+  })
 
   test('lists only public quarantine fields and reconciles through the explicitly pinned workspace', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-reconcile-a-'))
@@ -899,6 +1006,9 @@ describe('MCP runtime', () => {
     const firstClient = {
       listTools: async () => toolNames.map(name => ({ name, inputSchema: { type: 'object' } })),
       async callTool(name: string, args: any, options: any) {
+        if (name.endsWith('listApiAgents')) {
+          return structured({ apiAgents: [{ id: 'agent-1', name: '正文 Agent' }], total: 1 })
+        }
         if (name.endsWith('listApiAgentDriveFiles')) {
           return structured({ files: [...remote.keys()].map(path => ({ path, type: 'file' })) })
         }
@@ -972,7 +1082,7 @@ describe('MCP runtime', () => {
       chapterNo: 12,
       paragraphTask: '完整段落任务。',
       promptDiagnostics: { prompt_chars: 7 },
-      drive: {
+      context: {
         writingBible: '# 圣经', storyState: {}, continuity: '连续性', recentChapters: '第11章摘要',
       },
       deadline,

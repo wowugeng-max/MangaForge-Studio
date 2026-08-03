@@ -89,7 +89,7 @@ function generationInput(overrides: Record<string, unknown> = {}) {
     chapterNo: 12,
     paragraphTask: '完整段落任务：前因、当前目标、后果与输出合同。',
     promptDiagnostics: { prompt_chars: 28 },
-    drive: { writingBible: '# 圣经', storyState: {}, continuity: '连续性', recentChapters: '第11章摘要' },
+    context: { writingBible: '# 圣经', storyState: {}, continuity: '连续性', recentChapters: '第11章摘要' },
     deadline,
     ...overrides,
   } as any

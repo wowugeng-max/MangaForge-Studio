@@ -6,6 +6,7 @@ import type {
   ChapterTaskProvenance,
   ChapterTaskStage,
 } from './types'
+import { CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY } from './types'
 
 const ERROR_CODE_LIMIT = 80
 const ERROR_MESSAGE_LIMIT = 500
@@ -158,6 +159,7 @@ export function createChapterStageRecorder(input: {
       step_name: stage,
       status: 'running',
       input_ref: JSON.stringify({
+        receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
         ...initialProvenance,
         stage,
         response_contract: request.responseContract,
@@ -181,6 +183,7 @@ export function createChapterStageRecorder(input: {
           status: 'failed',
           error_message: failure.message,
           output_ref: JSON.stringify({
+            receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
             ...currentProvenance(),
             stage,
             status: 'failed',
@@ -199,6 +202,7 @@ export function createChapterStageRecorder(input: {
     await finalizeStageRun(input.activeWorkspace, run.id, {
       status: 'success',
       output_ref: JSON.stringify({
+        receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
         ...currentProvenance(),
         stage,
         status: 'success',

@@ -91,6 +91,28 @@ describe('McpAgentLeaseRegistry', () => {
     await expect(registry.acquire(activeWorkspace, binding)).resolves.toBeDefined()
   })
 
+  test('keeps busy and quarantine diagnostics provider-neutral', async () => {
+    const activeWorkspace = await workspace()
+    const registry = new McpAgentLeaseRegistry()
+    const lease = await registry.acquire(activeWorkspace, binding)
+
+    const busy: any = await registry.acquire(activeWorkspace, binding).catch(error => error)
+    expect(busy).toMatchObject({ code: 'MCP_AGENT_BUSY' })
+    expect(busy.message).toContain('MCP Agent')
+    expect(busy.message).not.toContain('Buda')
+    await lease.quarantine({
+      requestId: 'neutral-diagnostic-request',
+      sessionId: 'neutral-diagnostic-session',
+      reason: 'send_unknown',
+    })
+    await lease.release()
+
+    const quarantined: any = await registry.acquire(activeWorkspace, binding).catch(error => error)
+    expect(quarantined).toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    expect(quarantined.message).toContain('MCP Agent')
+    expect(quarantined.message).not.toContain('Buda')
+  })
+
   test('freezes public binding and never lets staged input redirect the closed tuple', async () => {
     const activeWorkspace = await workspace()
     const registry = new McpAgentLeaseRegistry()

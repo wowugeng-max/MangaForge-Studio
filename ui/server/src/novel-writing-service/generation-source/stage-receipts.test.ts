@@ -46,15 +46,21 @@ describe('chapter generation stage receipts', () => {
     const input = JSON.parse(run.input_ref!)
     const receiptOutput = JSON.parse(run.output_ref!)
     expect(input).toEqual({
+      receipt_authority: 'chapter_generation_stage_v1',
       ...provenance,
       stage: 'draft',
       response_contract: 'draft_prose',
       prompt_hash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
     })
-    expect(receiptOutput).toMatchObject({ ...provenance, stage: 'draft', status: 'success' })
+    expect(receiptOutput).toMatchObject({
+      receipt_authority: 'chapter_generation_stage_v1',
+      ...provenance,
+      stage: 'draft',
+      status: 'success',
+    })
     expect(Object.keys(receiptOutput).sort()).toEqual([
       'chapter_id', 'context_version', 'elapsed_ms', 'model_id', 'project_id', 'source',
-      'source_fingerprint', 'stage', 'status', 'task_id',
+      'source_fingerprint', 'stage', 'status', 'task_id', 'receipt_authority',
     ].sort())
     const serialized = JSON.stringify(run)
     for (const secret of [prompt, '机密正文', 'prompt-secret', 'sk_prompt_secret', 'sk_output_secret', 'output-secret']) {
@@ -125,7 +131,7 @@ describe('chapter generation stage receipts', () => {
     expect(run.error_message!.length).toBeLessThanOrEqual(500)
     expect(Object.keys(output).sort()).toEqual([
       'chapter_id', 'context_version', 'elapsed_ms', 'error_code', 'model_id', 'project_id',
-      'source', 'source_fingerprint', 'stage', 'status', 'task_id',
+      'source', 'source_fingerprint', 'stage', 'status', 'task_id', 'receipt_authority',
     ].sort())
     const serialized = JSON.stringify(run)
     for (const secret of ['auth-secret', 'cookie-secret', 'sk_api_secret', '不得持久的详情', 'responseBody']) {
@@ -208,9 +214,9 @@ describe('chapter generation stage receipts', () => {
     expect(receiptOutput.task_id).toBe(exactTaskId)
     expect(receiptInput.server_id.length).toBeLessThanOrEqual(512)
     expect(receiptInput).not.toHaveProperty('arbitrary_detail')
-    expect(receiptInput).not.toHaveProperty('receipt_authority')
+    expect(receiptInput.receipt_authority).toBe('chapter_generation_stage_v1')
     expect(receiptOutput).not.toHaveProperty('arbitrary_detail')
-    expect(receiptOutput).not.toHaveProperty('receipt_authority')
+    expect(receiptOutput.receipt_authority).toBe('chapter_generation_stage_v1')
     expect(JSON.stringify(run)).not.toContain('sk_provenance_secret')
   })
 

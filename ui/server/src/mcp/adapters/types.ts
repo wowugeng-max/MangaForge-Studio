@@ -32,20 +32,20 @@ export type GenerationSourceProgress = {
   snapshot_hash?: string
 }
 
-export type BudaDriveInput = {
+export type McpChapterContextSnapshot = {
   writingBible: string
   storyState: unknown
   continuity: string
   recentChapters: string
 }
 
-export type BudaRemoteCleanupDetails = {
+export type McpRemoteCleanupDetails = {
   session_id: string
   remote_cancel_confirmed: boolean
   receipt_status?: Extract<McpGenerationReceiptStatus, 'send_unknown' | 'remote_cancel_unknown'>
 }
 
-export type BudaProseGenerationInput = {
+export type McpProseGenerationInput = {
   activeWorkspace: string
   server: McpServerRecord
   keyId: number
@@ -57,16 +57,16 @@ export type BudaProseGenerationInput = {
   chapterNo: number
   paragraphTask: string
   promptDiagnostics?: unknown
-  drive: BudaDriveInput
+  context: McpChapterContextSnapshot
   deadline: McpGenerationDeadline
   signal?: AbortSignal
   onProgress?: (event: GenerationSourceProgress) => Promise<void> | void
 }
 
-export type BudaProseGenerationResult = {
+export type McpProseGenerationResult = {
   prose_chapters: Array<{ chapter_no: number; title?: string; chapter_text: string }>
   source: 'mcp'
-  adapter_id: 'buda'
+  adapter_id: string
   agent_id: string
   session_id: string
   snapshot_hash: string
@@ -77,14 +77,14 @@ export type BudaProseGenerationResult = {
   }
 }
 
-export type BudaChapterStageInput = {
+export type McpChapterStageInput = {
   requestId: string
   stage: ChapterTaskStage
   responseContract: ChapterStageResponseContract
   prompt: string
 }
 
-export type BudaChapterTaskInput = {
+export type McpChapterTaskInput = {
   activeWorkspace: string
   server: McpServerRecord
   keyId: number
@@ -94,27 +94,27 @@ export type BudaChapterTaskInput = {
   project: Record<string, any>
   chapter: Record<string, any>
   chapterNo: number
-  drive: BudaDriveInput
+  context: McpChapterContextSnapshot
   deadline: McpGenerationDeadline
   signal?: AbortSignal
   onProgress?: (event: GenerationSourceProgress) => Promise<void> | void
 }
 
-export type BudaChapterStageResult = {
+export type McpChapterStageResult = {
   content: string
   session_id: string
   snapshot_hash: string
   status: 'completed'
 }
 
-export interface BudaChapterTaskSession {
+export interface McpChapterTaskSession {
   readonly sessionId: string
   readonly snapshotHash: string
-  runStage(input: BudaChapterStageInput): Promise<BudaChapterStageResult>
+  runStage(input: McpChapterStageInput): Promise<McpChapterStageResult>
   close(): Promise<void>
 }
 
-export interface ProseMcpAdapter {
+export interface McpGenerationAdapter {
   readonly id: string
   listAgents(options: McpAdapterOperationOptions): Promise<McpAgentSummary[]>
   createAgent(input: { name: string; spaceId?: string; instructions?: string }, options: McpAdapterOperationOptions): Promise<McpAgentSummary>
@@ -122,6 +122,6 @@ export interface ProseMcpAdapter {
     input: { agentId: string; sessionId: string },
     options: McpAdapterOperationOptions,
   ): Promise<{ status: string; terminal: boolean }>
-  openChapterTask(input: BudaChapterTaskInput): Promise<BudaChapterTaskSession>
-  generateProse(input: BudaProseGenerationInput): Promise<BudaProseGenerationResult>
+  openChapterTask(input: McpChapterTaskInput): Promise<McpChapterTaskSession>
+  generateProse(input: McpProseGenerationInput): Promise<McpProseGenerationResult>
 }

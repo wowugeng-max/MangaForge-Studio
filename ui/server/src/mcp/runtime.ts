@@ -9,7 +9,7 @@ import type {
   McpServerRecord,
   PublicMcpAgentQuarantineRecord,
 } from './types'
-import type { McpAdapterOperationOptions, McpClientPort, ProseMcpAdapter } from './adapters/types'
+import type { McpAdapterOperationOptions, McpClientPort, McpGenerationAdapter } from './adapters/types'
 import { McpAgentLeaseRegistry } from './agent-lease'
 import { withMcpWorkspaceMutation } from './workspace-coordinator'
 
@@ -19,7 +19,7 @@ export type ResolvedMcpCredential = {
   server: McpServerRecord
   key: McpKeyRecord
   client: McpClientPort & { diagnostics?: () => unknown }
-  adapter: ProseMcpAdapter
+  adapter: McpGenerationAdapter
 }
 
 export type PinnedMcpCredential = Pick<ResolvedMcpCredential, 'server' | 'key'> & {
@@ -61,7 +61,7 @@ export function createMcpRuntime(
   getWorkspace: () => string,
   options: {
     manager?: RuntimeManager
-    adapterFactory?: (adapterId: string, client: McpClientPort) => ProseMcpAdapter
+    adapterFactory?: (adapterId: string, client: McpClientPort) => McpGenerationAdapter
     now?: () => number
   } = {},
 ) {

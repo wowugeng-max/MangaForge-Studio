@@ -4,16 +4,16 @@ import { mcpResultData, buildBudaDriveSnapshot, syncBudaDriveSnapshot } from './
 import { buildBudaToolArguments, resolveBudaTools, type BudaToolMap } from './buda-tool-map'
 import type { McpOperationKind, McpOperationOptions, McpToolResult } from '../types'
 import type {
-  BudaChapterStageInput,
-  BudaChapterStageResult,
-  BudaChapterTaskInput,
-  BudaChapterTaskSession,
-  BudaProseGenerationInput,
-  BudaProseGenerationResult,
-  BudaRemoteCleanupDetails,
+  McpChapterStageInput,
+  McpChapterStageResult,
+  McpChapterTaskInput,
+  McpChapterTaskSession,
+  McpProseGenerationInput,
+  McpProseGenerationResult,
+  McpRemoteCleanupDetails,
   McpAdapterOperationOptions,
   McpClientPort,
-  ProseMcpAdapter,
+  McpGenerationAdapter,
 } from './types'
 
 function operationOptions(options: McpAdapterOperationOptions, operation: McpOperationKind) {
@@ -207,7 +207,7 @@ function sendMayHaveSucceeded(error: unknown) {
   return code === 'ECONNRESET' || code === 'EPIPE'
 }
 
-function withRemoteCleanupDetails(error: unknown, details: BudaRemoteCleanupDetails) {
+function withRemoteCleanupDetails(error: unknown, details: McpRemoteCleanupDetails) {
   const safeGet = (value: unknown, key: string) => {
     try { return value && typeof value === 'object' ? (value as any)[key] : undefined } catch { return undefined }
   }
@@ -290,7 +290,7 @@ export function buildBudaExecutionEnvelope(input: {
   ].join('\n')
 }
 
-export function buildBudaStageEnvelope(input: BudaChapterStageInput) {
+export function buildBudaStageEnvelope(input: McpChapterStageInput) {
   return [
     '【MangaForge 章节任务阶段】',
     `request_id: ${input.requestId}`,
@@ -348,7 +348,7 @@ export function extractBudaStageContent(data: unknown) {
   throw new McpError('MCP_TOOL_ERROR', 'Buda Stage 已完成但没有返回内容')
 }
 
-function withIndependentTaskSignal(input: BudaChapterTaskInput) {
+function withIndependentTaskSignal(input: McpChapterTaskInput) {
   if (!input.signal || input.signal === input.deadline.signal) return input
   const base = input.deadline
   const callerSignal = input.signal
@@ -368,11 +368,11 @@ function withIndependentTaskSignal(input: BudaChapterTaskInput) {
     cleanupSignal: (timeoutMs?: number) => base.cleanupSignal(timeoutMs),
     createCleanupDeadline: (timeoutMs?: number) => base.createCleanupDeadline(timeoutMs),
     close: () => {},
-  } as BudaChapterTaskInput['deadline']
+  } as McpChapterTaskInput['deadline']
   return { ...input, deadline }
 }
 
-function abortableDelay(ms: number, input: Pick<BudaChapterTaskInput, 'deadline'>) {
+function abortableDelay(ms: number, input: Pick<McpChapterTaskInput, 'deadline'>) {
   const { deadline } = input
   deadline.throwIfAborted()
   const waitMs = Math.min(Math.max(1, ms), deadline.remainingMs())
@@ -413,7 +413,7 @@ export const MANGAFORGE_BUDA_AGENT_INSTRUCTIONS = [
 async function cleanupBudaSession(input: {
   client: McpClientPort
   tools: BudaToolMap
-  task: BudaChapterTaskInput
+  task: McpChapterTaskInput
   sessionId: string
   terminalSeen: boolean
   primaryError: unknown
@@ -429,7 +429,7 @@ async function cleanupBudaSession(input: {
       } : {}),
     })
   }
-  let cleanupDeadline: ReturnType<BudaChapterTaskInput['deadline']['createCleanupDeadline']>
+  let cleanupDeadline: ReturnType<McpChapterTaskInput['deadline']['createCleanupDeadline']>
   try {
     cleanupDeadline = input.task.deadline.createCleanupDeadline(5_000)
   } catch {
@@ -480,7 +480,7 @@ async function cleanupBudaSession(input: {
   }
 }
 
-class BudaChapterTaskSessionImpl implements BudaChapterTaskSession {
+class BudaChapterTaskSessionImpl implements McpChapterTaskSession {
   private tail: Promise<void> = Promise.resolve()
   private closed = false
   private closePromise?: Promise<void>
@@ -492,7 +492,7 @@ class BudaChapterTaskSessionImpl implements BudaChapterTaskSession {
   constructor(
     private readonly client: McpClientPort,
     private readonly tools: BudaToolMap,
-    private readonly task: BudaChapterTaskInput,
+    private readonly task: McpChapterTaskInput,
     readonly sessionId: string,
     readonly snapshotHash: string,
     private readonly selectedModel: string,
@@ -526,7 +526,7 @@ class BudaChapterTaskSessionImpl implements BudaChapterTaskSession {
     })
   }
 
-  private async executeStage(input: BudaChapterStageInput): Promise<BudaChapterStageResult> {
+  private async executeStage(input: McpChapterStageInput): Promise<McpChapterStageResult> {
     let terminalSeen = false
     const correlation: BudaRunCorrelation = {
       assistantBaseline: [...this.assistantBaseline],
@@ -650,7 +650,7 @@ class BudaChapterTaskSessionImpl implements BudaChapterTaskSession {
     }
   }
 
-  runStage(input: BudaChapterStageInput): Promise<BudaChapterStageResult> {
+  runStage(input: McpChapterStageInput): Promise<McpChapterStageResult> {
     if (this.poisonedError) return Promise.reject(this.poisonedError)
     if (this.closed) return Promise.reject(new McpError('MCP_SESSION_FAILED', 'Buda Chapter Task Session 已关闭'))
     const operation = this.tail.then(() => {
@@ -669,7 +669,7 @@ class BudaChapterTaskSessionImpl implements BudaChapterTaskSession {
   }
 }
 
-export class BudaAdapter implements ProseMcpAdapter {
+export class BudaAdapter implements McpGenerationAdapter {
   readonly id = 'buda'
   private tools?: BudaToolMap
 
@@ -726,7 +726,7 @@ export class BudaAdapter implements ProseMcpAdapter {
     }
   }
 
-  async openChapterTask(input: BudaChapterTaskInput): Promise<BudaChapterTaskSession> {
+  async openChapterTask(input: McpChapterTaskInput): Promise<McpChapterTaskSession> {
     input = withIndependentTaskSignal(input)
     const startedAt = Date.now()
     let activeSessionId = ''
@@ -765,10 +765,10 @@ export class BudaAdapter implements ProseMcpAdapter {
       const snapshot = buildBudaDriveSnapshot({
         project: input.project,
         chapter: input.chapter,
-        writingBible: input.drive.writingBible,
-        storyState: input.drive.storyState,
-        continuity: input.drive.continuity,
-        recentChapters: input.drive.recentChapters,
+        writingBible: input.context.writingBible,
+        storyState: input.context.storyState,
+        continuity: input.context.continuity,
+        recentChapters: input.context.recentChapters,
       })
       const sync = await syncBudaDriveSnapshot({
         client: this.client,
@@ -842,8 +842,8 @@ export class BudaAdapter implements ProseMcpAdapter {
     }
   }
 
-  async generateProse(input: BudaProseGenerationInput): Promise<BudaProseGenerationResult> {
-    let task: BudaChapterTaskSession | undefined
+  async generateProse(input: McpProseGenerationInput): Promise<McpProseGenerationResult> {
+    let task: McpChapterTaskSession | undefined
     let failed = false
     try {
       task = await this.openChapterTask({
@@ -856,12 +856,12 @@ export class BudaAdapter implements ProseMcpAdapter {
         project: input.project,
         chapter: input.chapter,
         chapterNo: input.chapterNo,
-        drive: input.drive,
+        context: input.context,
         deadline: input.deadline,
         ...(input.signal ? { signal: input.signal } : {}),
         ...(input.onProgress ? { onProgress: input.onProgress } : {}),
       })
-      let stage: BudaChapterStageResult
+      let stage: McpChapterStageResult
       try {
         stage = await task.runStage({
           requestId: input.requestId,

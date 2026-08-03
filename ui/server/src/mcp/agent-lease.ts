@@ -71,13 +71,13 @@ export class McpAgentLeaseRegistry {
         item.server_id === binding.serverId && item.key_id === binding.keyId && item.agent_id === binding.agentId
       ))
       if (quarantine) {
-        throw new McpError('MCP_AGENT_QUARANTINED', '该 Buda Agent 存在未确认终止的远端 Session', {
+        throw new McpError('MCP_AGENT_QUARANTINED', '该 MCP Agent 存在未确认终止的远端 Session', {
           quarantine_id: quarantine.id.slice(0, 160),
           session_id: quarantine.session_id.slice(0, 160),
         })
       }
       if (hasMcpActiveBinding(activeWorkspace, binding)) {
-        throw new McpError('MCP_AGENT_BUSY', '该 Buda Agent 正在生成另一章正文')
+        throw new McpError('MCP_AGENT_BUSY', '该 MCP Agent 正在生成另一章正文')
       }
       addMcpActiveBinding(activeWorkspace, binding)
       const closedServerId = binding.serverId
@@ -201,7 +201,7 @@ export class McpAgentLeaseRegistry {
         agentId: record.agent_id,
       }
       if (hasMcpActiveBinding(activeWorkspace, binding)) {
-        throw new McpError('MCP_AGENT_BUSY', '该 Buda Agent 正在生成另一章正文')
+        throw new McpError('MCP_AGENT_BUSY', '该 MCP Agent 正在生成另一章正文')
       }
       return this.store.clear(activeWorkspace, record.id)
     })
