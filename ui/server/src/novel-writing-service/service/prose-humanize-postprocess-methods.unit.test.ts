@@ -3,6 +3,7 @@ import { createProseHumanizePostprocessMethods } from './prose-humanize-postproc
 import { countProseChars } from '../../novel-writing/word-target'
 import { sanitizeDetectorHostileStock } from '../../novel-writing/human-webnovel-resistance'
 import { sanitizeRemoveAiFlavorShells } from '../../novel-writing/humanize-postprocess'
+import type { ChapterTaskExecution } from '../generation-source/types'
 
 function extractWindowText(task: string): string {
   const at = task.indexOf('【原文窗口】')
@@ -19,6 +20,37 @@ function makeMethods(onWindow: (windowText: string, call: number) => string) {
     getStageModelId: () => undefined,
     getStageTemperature: (_project: any, _stage: any, fallback: number) => fallback,
   })
+}
+
+function extractHumanizeInput(task: string): string {
+  for (const marker of ['【原文窗口】', '【原文片段】']) {
+    const at = task.indexOf(marker)
+    if (at >= 0) return task.slice(at + marker.length).trim()
+  }
+  return ''
+}
+
+function makeRoutingMethods(onInput: (inputText: string, call: number) => string) {
+  const calls: Array<{ stage: string; contract: string; agentId: string; project: any; context: any; options: any }> = []
+  let fallbackCalls = 0
+  const chapterTaskExecution = {
+    executeAgent: async (stage: string, contract: string, agentId: string, project: any, context: any, options: any) => {
+      calls.push({ stage, contract, agentId, project, context, options })
+      return {
+        text: onInput(extractHumanizeInput(String(context?.task || '')), calls.length),
+        finish_reason: 'stop',
+      }
+    },
+  } as unknown as ChapterTaskExecution
+  const methods = createProseHumanizePostprocessMethods({
+    executeAgent: async () => {
+      fallbackCalls += 1
+      throw new Error('legacy fallback must not run')
+    },
+    getStageModelId: () => { throw new Error('task path must not resolve a stage model') },
+    getStageTemperature: (_project: any, _stage: any, fallback: number) => fallback,
+  })
+  return { methods, chapterTaskExecution, calls, getFallbackCalls: () => fallbackCalls }
 }
 
 function sanitizeBaseline(text: string): string {
@@ -135,5 +167,59 @@ describe('prose humanize postprocess methods (risk_segment service path)', () =>
     expect(res.final_text).not.toBe(SMOOTH_SOURCE)
     expect(res.final_text).toContain(rewriteBase.slice(0, 6))
     expect(res.report.stages.some((s) => s.stage === 'force_packaging_strip_on_noop')).toBe(false)
+  })
+})
+
+describe('chapter task stage routing for humanize postprocess', () => {
+  test('routes a risk-segment rewrite through the humanize prose contract', async () => {
+    const rewritten = '他伸手挡住门，门弹回半寸。“先救人。”他把平车拽出来，钥匙硌在口袋里，没再看名单。'
+    const { methods, chapterTaskExecution, calls, getFallbackCalls } = makeRoutingMethods(() => rewritten)
+
+    await methods.runHumanizePostProcess('/tmp/ws', {}, {}, PACKAGING_SOURCE, undefined, {
+      ...BASE_OPTIONS,
+      chapterTaskExecution,
+      abortSignal: AbortSignal.timeout(5000),
+      llmTimeoutMs: 34567,
+    })
+
+    expect(calls.length).toBeGreaterThan(0)
+    expect(calls.every(call => call.stage === 'humanize')).toBe(true)
+    expect(calls.every(call => call.contract === 'humanize_prose')).toBe(true)
+    expect(calls.every(call => call.agentId === 'prose-agent')).toBe(true)
+    expect(calls.every(call => call.options.modelId === undefined)).toBe(true)
+    expect(calls.every(call => call.options.timeoutMs === 34567)).toBe(true)
+    expect(getFallbackCalls()).toBe(0)
+  })
+
+  test('routes every full-pass chunk through the same task execution', async () => {
+    const chunkedSource = Array.from({ length: 90 }, (_, index) => (
+      `江澈把巡检表翻到第${index + 1}页，指腹压住纸角，先核对阀门编号，再把读数写进对应栏位。`
+    )).join('\n\n')
+    expect(countProseChars(chunkedSource)).toBeGreaterThan(1900)
+    const { methods, chapterTaskExecution, calls, getFallbackCalls } = makeRoutingMethods(inputText => inputText)
+
+    await methods.runHumanizePostProcess('/tmp/ws', {}, {}, chunkedSource, undefined, {
+      ...BASE_OPTIONS,
+      chapterTaskExecution,
+      full_pass_a: true,
+    })
+
+    expect(calls.length).toBeGreaterThan(1)
+    expect(calls.every(call => call.stage === 'humanize' && call.contract === 'humanize_prose')).toBe(true)
+    expect(getFallbackCalls()).toBe(0)
+  })
+
+  test('keeps repeated risk-rewrite rounds on the humanize task execution', async () => {
+    const { methods, chapterTaskExecution, calls, getFallbackCalls } = makeRoutingMethods(inputText => `${inputText}\n\n${FRICTION_PAD.slice(0, 72)}`)
+
+    await methods.runHumanizePostProcess('/tmp/ws', {}, {}, SMOOTH_SOURCE, undefined, {
+      ...BASE_OPTIONS,
+      chapterTaskExecution,
+      risk_rewrite_rounds: 2,
+    })
+
+    expect(calls.length).toBeGreaterThanOrEqual(2)
+    expect(calls.every(call => call.stage === 'humanize' && call.contract === 'humanize_prose')).toBe(true)
+    expect(getFallbackCalls()).toBe(0)
   })
 })

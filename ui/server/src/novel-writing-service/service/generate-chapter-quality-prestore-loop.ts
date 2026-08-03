@@ -261,6 +261,7 @@ import type {
 import {
   runZhuqueFastQualityLoop,
 } from './generate-chapter-quality-prestore-fast-path'
+import { executeChapterStage } from '../generation-source/types'
 
 export function prepareSanitizedQualityRevisionCandidate(
   revisedText: any,
@@ -343,6 +344,8 @@ const defaultFullRounds = resistanceNeedsRevise ? 3 : 2
 const qualityRevisionRounds = Number.isFinite(explicitRevisionCap)
   ? Math.max(0, Math.min(5, Math.floor(explicitRevisionCap)))
   : ((isDraftReviewOnly || isDraftOnly) ? defaultDraftRounds : defaultFullRounds)
+let chapterTaskExecutionFailed = false
+let chapterTaskExecutionFailure: unknown
 try {
   qualityLoop = await runProseQualityLoop({
     initialText: finalText,
@@ -361,15 +364,35 @@ try {
       const reviewPrompt = attempt > 1
         ? `${prompt}\n上一次审查没有返回可用的完整六维 JSON。本次必须完整输出 score、score_scale=\"0-100\"、六个 dimensions 和 findings，不得省略或截断。`
         : prompt
-      const result = await executeAgent('review-agent', project, { task: reviewPrompt }, {
-        activeWorkspace,
-        modelId: String(getStageModelId(project, 'review', preferredModelId) || ''),
-        maxTokens: proseQualityReviewMaxTokensForAttempt(attempt),
-        temperature: 0.15,
-        skipMemory: true,
-        signal: options.abortSignal,
-        timeoutMs: qualityRepairTimeoutMs,
-      })
+      let result: any
+      try {
+        result = await executeChapterStage({
+          execution: options.chapterTaskExecution,
+          fallback: executeAgent,
+          stage: round > 0 ? 'quality_recheck' : 'quality_review',
+          responseContract: 'quality_review_json',
+          agentId: 'review-agent',
+          project,
+          context: { task: reviewPrompt },
+          options: {
+            activeWorkspace,
+            modelId: options.chapterTaskExecution
+              ? undefined
+              : String(getStageModelId(project, 'review', preferredModelId) || ''),
+            maxTokens: proseQualityReviewMaxTokensForAttempt(attempt),
+            temperature: 0.15,
+            skipMemory: true,
+            signal: options.abortSignal,
+            timeoutMs: qualityRepairTimeoutMs,
+          },
+        })
+      } catch (error) {
+        if (options.chapterTaskExecution) {
+          chapterTaskExecutionFailed = true
+          chapterTaskExecutionFailure = error
+        }
+        throw error
+      }
       if ((result as any)?.error) {
         throw Object.assign(new Error(String((result as any).error)), {
           code: round > 0 ? 'PROSE_QUALITY_RECHECK_UNAVAILABLE' : 'PROSE_REVIEW_FAILED',
@@ -392,15 +415,35 @@ try {
       await onStage('revise', { status: 'running', phase: 'quality_revision', round })
       // Flash/Gemini: full-chapter revise often hits output ceiling; give extra headroom vs draft.
       const reviseMaxTokens = Math.min(48000, Math.max(24000, proseMaxTokensForWordTarget(wordTarget) + 6000))
-      const result = await executeAgent('prose-agent', project, { task: prompt }, {
-        activeWorkspace,
-        modelId: String(getStageModelId(project, 'review', preferredModelId) || ''),
-        maxTokens: reviseMaxTokens,
-        temperature: 0.25,
-        skipMemory: true,
-        signal: options.abortSignal,
-        timeoutMs: qualityRepairTimeoutMs,
-      })
+      let result: any
+      try {
+        result = await executeChapterStage({
+          execution: options.chapterTaskExecution,
+          fallback: executeAgent,
+          stage: 'quality_repair',
+          responseContract: 'revision_prose',
+          agentId: 'prose-agent',
+          project,
+          context: { task: prompt },
+          options: {
+            activeWorkspace,
+            modelId: options.chapterTaskExecution
+              ? undefined
+              : String(getStageModelId(project, 'review', preferredModelId) || ''),
+            maxTokens: reviseMaxTokens,
+            temperature: 0.25,
+            skipMemory: true,
+            signal: options.abortSignal,
+            timeoutMs: qualityRepairTimeoutMs,
+          },
+        })
+      } catch (error) {
+        if (options.chapterTaskExecution) {
+          chapterTaskExecutionFailed = true
+          chapterTaskExecutionFailure = error
+        }
+        throw error
+      }
       try {
         assertCompleteProseTransportResult(result, 'PROSE_REVISION_TRUNCATED')
       } catch (error: any) {
@@ -451,8 +494,10 @@ try {
     },
   })
 } catch (error: any) {
+  if (chapterTaskExecutionFailed && chapterTaskExecutionFailure === error) throw error
   throw attachQualityLoopFailureDiagnostics(error, { draftPromptDiagnostics, qualityThreshold })
 }
+if (chapterTaskExecutionFailed) throw chapterTaskExecutionFailure
 finalText = String(qualityLoop.final_text || '')
 } // end !isZhuqueFast
 // Re-scan after sanitize; residual hard risks stay on decision for admission/store block.

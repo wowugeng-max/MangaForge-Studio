@@ -31,6 +31,7 @@ import {
   throwIfAborted,
 } from './runtime-helpers'
 import { selectFingerprintSafeProse } from '../../novel-writing/human-webnovel-resistance'
+import { executeChapterStage } from '../generation-source/types'
 
 export function createProseWordTargetMethods(deps: {
   executeAgent: (...args: any[]) => any
@@ -66,7 +67,7 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
     dialogue_para_ratio: dialogueRatio,
     dialogue_min_ratio: DIALOGUE_EXPAND_MIN_RATIO,
   })
-  const reviseModelId = getStageModelId(project, 'revise', modelId)
+  const reviseModelId = options.chapterTaskExecution ? undefined : getStageModelId(project, 'revise', modelId)
   let currentText = String(chapterText || '')
   // Expansion decisions use hard range + dialogue texture; soft floor never zeros deficit.
   let currentEvaluation = needsHardExpand
@@ -260,19 +261,29 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
       if (sharedBudget) sharedBudget.used = globalAttempt
       let contractionResult: any
       try {
-        contractionResult = await executeAgent('prose-agent', project, {
-          task: buildProseWordTargetContractionPrompt(project, contextPackage, currentText, currentEvaluation, { attempt: globalAttempt, maxAttempts: configuredMaxContractionAttempts }),
-          upstreamContext: contextPackage,
-        }, {
-          activeWorkspace,
-          modelId: reviseModelId ? String(reviseModelId) : undefined,
-          maxTokens: proseContractionMaxTokensForAttempt(wordTarget, globalAttempt),
-          temperature: Math.min(0.55, getStageTemperature(project, 'revise', 0.55)),
-          skipMemory: true,
-          signal: options.abortSignal,
-          timeoutMs: options.llmTimeoutMs,
+        contractionResult = await executeChapterStage({
+          execution: options.chapterTaskExecution,
+          fallback: executeAgent,
+          stage: 'word_target_repair',
+          responseContract: 'word_target_prose',
+          agentId: 'prose-agent',
+          project,
+          context: {
+            task: buildProseWordTargetContractionPrompt(project, contextPackage, currentText, currentEvaluation, { attempt: globalAttempt, maxAttempts: configuredMaxContractionAttempts }),
+            upstreamContext: contextPackage,
+          },
+          options: {
+            activeWorkspace,
+            modelId: reviseModelId ? String(reviseModelId) : undefined,
+            maxTokens: proseContractionMaxTokensForAttempt(wordTarget, globalAttempt),
+            temperature: Math.min(0.55, getStageTemperature(project, 'revise', 0.55)),
+            skipMemory: true,
+            signal: options.abortSignal,
+            timeoutMs: options.llmTimeoutMs,
+          },
         })
       } catch (error) {
+        if (options.chapterTaskExecution) throw error
         if (isAbortError(error)) throw error
         contractionAttempts.push({
           attempt: globalAttempt,
@@ -503,25 +514,35 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
     throwIfAborted(options)
     let expansionResult: any
     try {
-      expansionResult = await executeAgent('prose-agent', project, {
-        task: buildProseWordTargetExpansionPrompt(project, contextPackage, currentText, currentEvaluation, {
-          attempt,
-          maxAttempts: maxExpansionAttempts,
-          force_dialogue_expand: dialogueDeficit || Number((currentEvaluation as any)?.dialogue_para_ratio || 1) < DIALOGUE_EXPAND_MIN_RATIO,
-          dialogue_para_ratio: measureDialogueParaRatio(currentText),
-          dialogue_min_ratio: DIALOGUE_EXPAND_MIN_RATIO,
-        }),
-        upstreamContext: contextPackage,
-      }, {
-        activeWorkspace,
-        modelId: reviseModelId ? String(reviseModelId) : undefined,
-        maxTokens: proseMaxTokensForWordTarget(wordTarget),
-        temperature: getStageTemperature(project, 'revise', 0.65),
-        skipMemory: true,
-        signal: options.abortSignal,
-        timeoutMs: options.llmTimeoutMs,
+      expansionResult = await executeChapterStage({
+        execution: options.chapterTaskExecution,
+        fallback: executeAgent,
+        stage: 'word_target_repair',
+        responseContract: 'word_target_prose',
+        agentId: 'prose-agent',
+        project,
+        context: {
+          task: buildProseWordTargetExpansionPrompt(project, contextPackage, currentText, currentEvaluation, {
+            attempt,
+            maxAttempts: maxExpansionAttempts,
+            force_dialogue_expand: dialogueDeficit || Number((currentEvaluation as any)?.dialogue_para_ratio || 1) < DIALOGUE_EXPAND_MIN_RATIO,
+            dialogue_para_ratio: measureDialogueParaRatio(currentText),
+            dialogue_min_ratio: DIALOGUE_EXPAND_MIN_RATIO,
+          }),
+          upstreamContext: contextPackage,
+        },
+        options: {
+          activeWorkspace,
+          modelId: reviseModelId ? String(reviseModelId) : undefined,
+          maxTokens: proseMaxTokensForWordTarget(wordTarget),
+          temperature: getStageTemperature(project, 'revise', 0.65),
+          skipMemory: true,
+          signal: options.abortSignal,
+          timeoutMs: options.llmTimeoutMs,
+        },
       })
     } catch (error) {
+      if (options.chapterTaskExecution) throw error
       if (isAbortError(error)) throw error
       attempts.push({
         attempt,

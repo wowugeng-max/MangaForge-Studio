@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { countProseChars } from '../../novel-writing/word-target'
+import type { ChapterTaskExecution } from '../generation-source/types'
 import { createProseWordTargetMethods } from './prose-word-target-methods'
 
 const wordTarget = { mode: 'standard', label: '标准章', target: 4200, min: 3780, max: 4620, rangeText: '3780-4620 字' }
@@ -62,6 +63,28 @@ function makeMethods(fakeExec: (call: number) => any) {
     trustedWordTargetContractionBudgets: new WeakSet<object>(),
   })
   return { methods, getCalls: () => calls }
+}
+
+function makeRoutingMethods(resultForStage: (stage: string) => any) {
+  const calls: Array<{ stage: string; contract: string; agentId: string; project: any; context: any; options: any }> = []
+  let fallbackCalls = 0
+  const chapterTaskExecution = {
+    executeAgent: async (stage: string, contract: string, agentId: string, callProject: any, context: any, options: any) => {
+      calls.push({ stage, contract, agentId, project: callProject, context, options })
+      return resultForStage(stage)
+    },
+  } as unknown as ChapterTaskExecution
+  const methods = createProseWordTargetMethods({
+    executeAgent: async () => {
+      fallbackCalls += 1
+      throw new Error('legacy fallback must not run')
+    },
+    formatAdmissionError: (error: any) => String(error?.message || error).slice(0, 200),
+    getStageModelId: () => { throw new Error('task path must not resolve a stage model') },
+    getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+    trustedWordTargetContractionBudgets: new WeakSet<object>(),
+  })
+  return { methods, chapterTaskExecution, calls, getFallbackCalls: () => fallbackCalls }
 }
 
 describe('ensureProseMeetsWordTarget dialogue-forced expansion', () => {
@@ -136,5 +159,70 @@ describe('ensureProseMeetsWordTarget dialogue-forced expansion', () => {
     expect(result.final_evaluation.too_short).toBe(true)
     expect(result.final_evaluation.passed).toBe(false)
     expect(result.word_target_warning?.code).toBe('word_target_short')
+  })
+
+  test('routes expansion through the chapter task execution with the word-target contract', async () => {
+    const shortDraft = buildText(3000, 5)
+    const expanded = buildText(4200, 5)
+    const { methods, chapterTaskExecution, calls, getFallbackCalls } = makeRoutingMethods(() => ({
+      parsed: { chapter_text: expanded },
+      finish_reason: 'stop',
+    }))
+
+    await methods.ensureProseMeetsWordTarget('ws', project, contextPackage, shortDraft, undefined, {
+      chapterTaskExecution,
+      abortSignal: AbortSignal.timeout(5000),
+      llmTimeoutMs: 12345,
+    })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({
+      stage: 'word_target_repair',
+      contract: 'word_target_prose',
+      agentId: 'prose-agent',
+      project,
+      context: { upstreamContext: contextPackage },
+      options: {
+        activeWorkspace: 'ws',
+        skipMemory: true,
+        timeoutMs: 12345,
+      },
+    })
+    expect(calls[0].context.task).toBeTruthy()
+    expect(calls[0].options.signal).toBeInstanceOf(AbortSignal)
+    expect(getFallbackCalls()).toBe(0)
+  })
+
+  test('routes contraction through the same chapter-stage mapping without legacy fallback', async () => {
+    const longDraft = buildText(5000, 5)
+    const contracted = buildText(4200, 5)
+    const { methods, chapterTaskExecution, calls, getFallbackCalls } = makeRoutingMethods(() => ({
+      parsed: { chapter_text: contracted },
+      finish_reason: 'stop',
+    }))
+
+    await methods.ensureProseMeetsWordTarget('ws', project, contextPackage, longDraft, undefined, {
+      chapterTaskExecution,
+      maxContractionAttempts: 1,
+    })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({
+      stage: 'word_target_repair',
+      contract: 'word_target_prose',
+      agentId: 'prose-agent',
+    })
+    expect(getFallbackCalls()).toBe(0)
+  })
+
+  test('propagates task-scoped word repair rejection without legacy fallback', async () => {
+    const rejection = new Error('task word repair rejected')
+    const shortDraft = buildText(3000, 5)
+    const { methods, chapterTaskExecution, getFallbackCalls } = makeRoutingMethods(() => Promise.reject(rejection))
+
+    await expect(methods.ensureProseMeetsWordTarget('ws', project, contextPackage, shortDraft, undefined, {
+      chapterTaskExecution,
+    })).rejects.toBe(rejection)
+    expect(getFallbackCalls()).toBe(0)
   })
 })

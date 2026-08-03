@@ -37,6 +37,7 @@ import {
 import {
   resolveProseRevisionOutcome,
 } from './prose-self-review-run-revision'
+import { executeChapterStage } from '../generation-source/types'
 
 export function createProseSelfReviewRunner(deps: {
   executeAgent: (...args: any[]) => any
@@ -50,8 +51,8 @@ export function createProseSelfReviewRunner(deps: {
   const fillMissingStructuredReviewChecks = deps.fillMissingStructuredReviewChecks
 
 const runProseSelfReviewAndRevision = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
-  const reviewModelId = getStageModelId(project, 'review', modelId)
-  const reviseModelId = getStageModelId(project, 'revise', modelId)
+  const reviewModelId = options.chapterTaskExecution ? undefined : getStageModelId(project, 'review', modelId)
+  const reviseModelId = options.chapterTaskExecution ? undefined : getStageModelId(project, 'revise', modelId)
   const emitReviewProgress = async (phase: string, payload: any = {}) => {
     const callback = typeof options.onReviewProgress === 'function' ? options.onReviewProgress : null
     if (!callback) return
@@ -77,16 +78,25 @@ const runProseSelfReviewAndRevision = async (activeWorkspace: string, project: a
     repair_mode: Boolean(options.quality_gate_repair || options.deterministic_cleanup_repair),
     review_llm_timeout_ms: reviewLlmTimeoutMs,
   })
-  const reviewResult = await executeAgent('review-agent', project, {
-    task: buildProseReviewPrompt(project, contextPackage, chapterText),
-  }, {
-    activeWorkspace,
-    modelId: reviewModelId ? String(reviewModelId) : undefined,
-    maxTokens: reviewMaxTokens,
-    temperature: getStageTemperature(project, 'review', 0.2),
-    skipMemory: true,
-    signal: options.abortSignal,
-    timeoutMs: reviewLlmTimeoutMs,
+  const reviewResult = await executeChapterStage({
+    execution: options.chapterTaskExecution,
+    fallback: executeAgent,
+    stage: 'quality_review',
+    responseContract: 'quality_review_json',
+    agentId: 'review-agent',
+    project,
+    context: {
+      task: buildProseReviewPrompt(project, contextPackage, chapterText),
+    },
+    options: {
+      activeWorkspace,
+      modelId: reviewModelId ? String(reviewModelId) : undefined,
+      maxTokens: reviewMaxTokens,
+      temperature: getStageTemperature(project, 'review', 0.2),
+      skipMemory: true,
+      signal: options.abortSignal,
+      timeoutMs: reviewLlmTimeoutMs,
+    },
   })
   if ((reviewResult as any).error) {
     await emitReviewProgress('self_review_llm', {
@@ -170,19 +180,29 @@ const runProseSelfReviewAndRevision = async (activeWorkspace: string, project: a
   })
   let revisionResult: any
   try {
-    revisionResult = await executeAgent('prose-agent', project, {
-      task: buildProseRevisionPrompt(project, contextPackage, chapterText, normalizedReview),
-      upstreamContext: contextPackage,
-    }, {
-      activeWorkspace,
-      modelId: reviseModelId ? String(reviseModelId) : undefined,
-      maxTokens: revisionMaxTokens,
-      temperature: getStageTemperature(project, 'revise', 0.65),
-      skipMemory: true,
-      signal: options.abortSignal,
-      timeoutMs: revisionLlmTimeoutMs,
+    revisionResult = await executeChapterStage({
+      execution: options.chapterTaskExecution,
+      fallback: executeAgent,
+      stage: 'quality_repair',
+      responseContract: 'revision_prose',
+      agentId: 'prose-agent',
+      project,
+      context: {
+        task: buildProseRevisionPrompt(project, contextPackage, chapterText, normalizedReview),
+        upstreamContext: contextPackage,
+      },
+      options: {
+        activeWorkspace,
+        modelId: reviseModelId ? String(reviseModelId) : undefined,
+        maxTokens: revisionMaxTokens,
+        temperature: getStageTemperature(project, 'revise', 0.65),
+        skipMemory: true,
+        signal: options.abortSignal,
+        timeoutMs: revisionLlmTimeoutMs,
+      },
     })
   } catch (revisionError) {
+    if (options.chapterTaskExecution) throw revisionError
     if (isAbortError(revisionError)) throw revisionError
     const revisionErrorMessage = String((revisionError as any)?.message || revisionError || '修订请求失败')
     await emitReviewProgress('revision_llm', {

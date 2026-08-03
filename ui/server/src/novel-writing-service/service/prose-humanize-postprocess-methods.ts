@@ -59,6 +59,7 @@ import {
 import {
   throwIfAborted,
 } from './runtime-helpers'
+import { executeChapterStage } from '../generation-source/types'
 
 function extractChapterText(payload: any): string {
   const chapters = Array.isArray(payload?.prose_chapters)
@@ -141,24 +142,33 @@ async function rewriteChunkWithAgent(input: {
     options,
   } = input
   throwIfAborted(options)
-  const reviseModelId = getStageModelId(project, 'revise', modelId)
+  const reviseModelId = options.chapterTaskExecution ? undefined : getStageModelId(project, 'revise', modelId)
   const task = buildHumanizePostProcessPassPrompt({
     pass,
     chunk,
     totalChunks,
     project,
   })
-  const result = await executeAgent('prose-agent', project, {
-    task,
-    upstreamContext: contextPackage,
-  }, {
-    activeWorkspace,
-    modelId: reviseModelId ? String(reviseModelId) : undefined,
-    maxTokens: Math.max(1200, Math.min(3500, proseMaxTokensForWordTarget({ min: countProseChars(chunk.text), max: countProseChars(chunk.text) + 200 }) || 2000)),
-    temperature: getStageTemperature(project, 'revise', pass === 'A' ? 0.4 : 0.25),
-    skipMemory: true,
-    signal: options.abortSignal,
-    timeoutMs: options.llmTimeoutMs || 180000,
+  const result = await executeChapterStage({
+    execution: options.chapterTaskExecution,
+    fallback: executeAgent,
+    stage: 'humanize',
+    responseContract: 'humanize_prose',
+    agentId: 'prose-agent',
+    project,
+    context: {
+      task,
+      upstreamContext: contextPackage,
+    },
+    options: {
+      activeWorkspace,
+      modelId: reviseModelId ? String(reviseModelId) : undefined,
+      maxTokens: Math.max(1200, Math.min(3500, proseMaxTokensForWordTarget({ min: countProseChars(chunk.text), max: countProseChars(chunk.text) + 200 }) || 2000)),
+      temperature: getStageTemperature(project, 'revise', pass === 'A' ? 0.4 : 0.25),
+      skipMemory: true,
+      signal: options.abortSignal,
+      timeoutMs: options.llmTimeoutMs || 180000,
+    },
   })
   try {
     assertCompleteProseTransportResult(result, 'PROSE_REVISION_TRUNCATED')
@@ -209,23 +219,32 @@ async function rewriteRiskWindowWithAgent(input: {
     options,
   } = input
   throwIfAborted(options)
-  const reviseModelId = getStageModelId(project, 'revise', modelId)
+  const reviseModelId = options.chapterTaskExecution ? undefined : getStageModelId(project, 'revise', modelId)
   const task = buildHighRiskSegmentRewritePrompt({
     window,
     round,
     project,
   })
-  const result = await executeAgent('prose-agent', project, {
-    task,
-    upstreamContext: contextPackage,
-  }, {
-    activeWorkspace,
-    modelId: reviseModelId ? String(reviseModelId) : undefined,
-    maxTokens: Math.max(1000, Math.min(3200, proseMaxTokensForWordTarget({ min: countProseChars(window.text), max: countProseChars(window.text) + 180 }) || 1800)),
-    temperature: getStageTemperature(project, 'revise', 0.35),
-    skipMemory: true,
-    signal: options.abortSignal,
-    timeoutMs: options.llmTimeoutMs || 180000,
+  const result = await executeChapterStage({
+    execution: options.chapterTaskExecution,
+    fallback: executeAgent,
+    stage: 'humanize',
+    responseContract: 'humanize_prose',
+    agentId: 'prose-agent',
+    project,
+    context: {
+      task,
+      upstreamContext: contextPackage,
+    },
+    options: {
+      activeWorkspace,
+      modelId: reviseModelId ? String(reviseModelId) : undefined,
+      maxTokens: Math.max(1000, Math.min(3200, proseMaxTokensForWordTarget({ min: countProseChars(window.text), max: countProseChars(window.text) + 180 }) || 1800)),
+      temperature: getStageTemperature(project, 'revise', 0.35),
+      skipMemory: true,
+      signal: options.abortSignal,
+      timeoutMs: options.llmTimeoutMs || 180000,
+    },
   })
   try {
     assertCompleteProseTransportResult(result, 'PROSE_REVISION_TRUNCATED')

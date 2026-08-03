@@ -126,9 +126,14 @@ import {
   normalizeStoryStateDeltaForStorage,
 } from './story-state-helpers'
 import type { PreparedStoryStateUpdate } from '../../novel-writing/prepared-story-state'
+import {
+  executeChapterStage,
+  type ChapterTaskExecution,
+} from '../generation-source/types'
 
 
 export type PrepareStoryStateUpdateOptions = {
+  chapterTaskExecution?: ChapterTaskExecution
   signal?: AbortSignal
   abortSignal?: AbortSignal
   timeoutMs?: number
@@ -158,7 +163,7 @@ export async function prepareStoryStateUpdate(
   const getStageModelId = deps.getStageModelId
   const getStageTemperature = deps.getStageTemperature
 
-  const stageModelId = getStageModelId(project, 'review', modelId)
+  const stageModelId = options.chapterTaskExecution ? undefined : getStageModelId(project, 'review', modelId)
   const buildFromAgentResult = async (result: any): Promise<PreparedStoryStateUpdate> => {
     const payload = getNovelPayload(result)
     const diagnostics = buildLLMResultDiagnostics(result)
@@ -242,17 +247,26 @@ export async function prepareStoryStateUpdate(
 
   const runAgentOnce = async (maxTokens: number) => {
     throwIfAborted(options)
-    return executeAgent('review-agent', project, {
-      task: buildStoryStatePromptFromBuilder(project, contextPackage, chapterText),
-    }, {
-      activeWorkspace,
-      modelId: stageModelId ? String(stageModelId) : undefined,
-      maxTokens,
-      temperature: getStageTemperature(project, 'review', 0.15),
-      skipMemory: true,
-      signal: options.signal ?? options.abortSignal,
-      timeoutMs: options.timeoutMs ?? options.llmTimeoutMs,
-      maxRetries: options.maxRetries,
+    return executeChapterStage({
+      execution: options.chapterTaskExecution,
+      fallback: executeAgent,
+      stage: 'story_state_sync',
+      responseContract: 'story_state_json',
+      agentId: 'review-agent',
+      project,
+      context: {
+        task: buildStoryStatePromptFromBuilder(project, contextPackage, chapterText),
+      },
+      options: {
+        activeWorkspace,
+        modelId: stageModelId ? String(stageModelId) : undefined,
+        maxTokens,
+        temperature: getStageTemperature(project, 'review', 0.15),
+        skipMemory: true,
+        signal: options.signal ?? options.abortSignal,
+        timeoutMs: options.timeoutMs ?? options.llmTimeoutMs,
+        maxRetries: options.maxRetries,
+      },
     })
   }
 

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { countProseChars } from '../../novel-writing/word-target'
+import type { ChapterTaskExecution } from '../generation-source/types'
 import { createProsePolishMethods } from './prose-polish-methods'
 
 const wordTarget = { mode: 'standard', label: '标准章', target: 4200, min: 3780, max: 4620, rangeText: '3780-4620 字' }
@@ -66,6 +67,26 @@ function makeMethods(fakeResult: any) {
   return { methods, getCalls: () => calls }
 }
 
+function makeRoutingMethods(resultForStage: (stage: string) => any) {
+  const calls: Array<{ stage: string; contract: string; agentId: string; project: any; context: any; options: any }> = []
+  let fallbackCalls = 0
+  const chapterTaskExecution = {
+    executeAgent: async (stage: string, contract: string, agentId: string, callProject: any, context: any, options: any) => {
+      calls.push({ stage, contract, agentId, project: callProject, context, options })
+      return resultForStage(stage)
+    },
+  } as unknown as ChapterTaskExecution
+  const methods = createProsePolishMethods({
+    executeAgent: async () => {
+      fallbackCalls += 1
+      throw new Error('legacy fallback must not run')
+    },
+    getStageModelId: () => { throw new Error('task path must not resolve a stage model') },
+    getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+  })
+  return { methods, chapterTaskExecution, calls, getFallbackCalls: () => fallbackCalls }
+}
+
 describe('runCommercialEditorRewrite edited flag', () => {
   const contextPackage = { chapter_target: { word_target: wordTarget } }
 
@@ -124,5 +145,57 @@ describe('runMemePolish polished flag', () => {
 
     expect(result.final_text).toBe(chapterText)
     expect(result.polished).toBe(false)
+  })
+})
+
+describe('chapter task stage routing for prose polish', () => {
+  const contextPackage = {
+    chapter_target: {
+      word_target: wordTarget,
+      meme_strategy: { intensity: '低', meme_bank: ['稳住'] },
+    },
+  }
+
+  test('routes editor, meme, and readability calls with their exact stage contracts', async () => {
+    const { methods, chapterTaskExecution, calls, getFallbackCalls } = makeRoutingMethods(stage => {
+      if (stage === 'readability_review') {
+        return { parsed: { readability_score: 88, passed: true }, modelName: 'fixed-task-model' }
+      }
+      const report = stage === 'commercial_editor_rewrite'
+        ? { editor_report: { passed: true } }
+        : { meme_polish_report: { changed_plot: false } }
+      return { parsed: { chapter_text: chapterText, ...report }, finish_reason: 'stop', modelName: 'fixed-task-model' }
+    })
+    const options = {
+      chapterTaskExecution,
+      abortSignal: AbortSignal.timeout(5000),
+      llmTimeoutMs: 23456,
+    }
+
+    await methods.runCommercialEditorRewrite('ws', project, contextPackage, chapterText, undefined, options)
+    await methods.runMemePolish('ws', project, contextPackage, chapterText, undefined, options)
+    await methods.runReadabilityReview('ws', project, contextPackage, chapterText, undefined, options)
+
+    expect(calls.map(({ stage, contract, agentId }) => ({ stage, contract, agentId }))).toEqual([
+      { stage: 'commercial_editor_rewrite', contract: 'editor_rewrite_prose', agentId: 'prose-agent' },
+      { stage: 'meme_polish', contract: 'meme_polish_prose', agentId: 'prose-agent' },
+      { stage: 'readability_review', contract: 'readability_json', agentId: 'review-agent' },
+    ])
+    expect(calls.every(call => call.project === project)).toBe(true)
+    expect(calls.every(call => Boolean(call.context.task))).toBe(true)
+    expect(calls.every(call => call.options.activeWorkspace === 'ws')).toBe(true)
+    expect(calls.every(call => call.options.timeoutMs === 23456)).toBe(true)
+    expect(calls.every(call => call.options.signal === options.abortSignal)).toBe(true)
+    expect(getFallbackCalls()).toBe(0)
+  })
+
+  test('propagates task execution rejection without attempting legacy fallback', async () => {
+    const rejection = new Error('task execution rejected')
+    const { methods, chapterTaskExecution, getFallbackCalls } = makeRoutingMethods(() => Promise.reject(rejection))
+
+    await expect(methods.runReadabilityReview('ws', project, contextPackage, chapterText, undefined, {
+      chapterTaskExecution,
+    })).rejects.toBe(rejection)
+    expect(getFallbackCalls()).toBe(0)
   })
 })

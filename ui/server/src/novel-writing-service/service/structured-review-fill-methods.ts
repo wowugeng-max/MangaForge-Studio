@@ -17,6 +17,7 @@ import {
 import {
   throwIfAborted,
 } from './runtime-helpers'
+import { executeChapterStage } from '../generation-source/types'
 
 export function createStructuredReviewFillMethods(deps: {
   executeAgent: (...args: any[]) => any
@@ -38,7 +39,7 @@ const fillMissingStructuredReviewChecks = async (
 ) => {
   const missingFields = missingStructuredReviewCheckFields(review)
   if (!missingFields.length || options.fill_missing_structured_checks === false) return null
-  const reviewModelId = getStageModelId(project, 'review', modelId)
+  const reviewModelId = options.chapterTaskExecution ? undefined : getStageModelId(project, 'review', modelId)
   const batches = chunkStructuredReviewFields(missingFields, options.structuredReviewBatchSize || options.structured_review_batch_size || 4)
   const structuredReviewLlmTimeoutMs = Math.max(30000, Math.min(
     Number(options.llmTimeoutMs || options.timeoutMs || 600000) || 600000,
@@ -49,16 +50,25 @@ const fillMissingStructuredReviewChecks = async (
   let modelName = ''
   for (const batchFields of batches) {
     throwIfAborted(options)
-    const result = await executeAgent('review-agent', project, {
-      task: buildMissingStructuredReviewChecksPrompt(project, contextPackage, chapterText, review, batchFields),
-    }, {
-      activeWorkspace,
-      modelId: reviewModelId ? String(reviewModelId) : undefined,
-      maxTokens: Math.max(8000, Math.min(14000, Number(options.structuredReviewMaxTokens || options.structured_review_max_tokens || 12000))),
-      temperature: getStageTemperature(project, 'review', 0.15),
-      skipMemory: true,
-      signal: options.abortSignal,
-      timeoutMs: structuredReviewLlmTimeoutMs,
+    const result = await executeChapterStage({
+      execution: options.chapterTaskExecution,
+      fallback: executeAgent,
+      stage: 'structured_review_fill',
+      responseContract: 'structured_review_json',
+      agentId: 'review-agent',
+      project,
+      context: {
+        task: buildMissingStructuredReviewChecksPrompt(project, contextPackage, chapterText, review, batchFields),
+      },
+      options: {
+        activeWorkspace,
+        modelId: reviewModelId ? String(reviewModelId) : undefined,
+        maxTokens: Math.max(8000, Math.min(14000, Number(options.structuredReviewMaxTokens || options.structured_review_max_tokens || 12000))),
+        temperature: getStageTemperature(project, 'review', 0.15),
+        skipMemory: true,
+        signal: options.abortSignal,
+        timeoutMs: structuredReviewLlmTimeoutMs,
+      },
     })
     if ((result as any).error) {
       diagnostics.push({

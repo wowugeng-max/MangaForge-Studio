@@ -13,10 +13,11 @@ import {
 import type { NovelProductionService } from '../../routes/novel-production-service'
 import type { NovelReferenceService } from '../../routes/novel-reference-service'
 import type { McpRuntime } from '../../mcp/runtime'
-import type { ChapterSourceLeaseRegistry } from '../generation-source/chapter-source-lease'
+import { ChapterSourceLeaseRegistry } from '../generation-source/chapter-source-lease'
 import { createGenerationSourceResolver } from '../generation-source/create-generation-source'
 import { McpGenerationSource } from '../generation-source/mcp-generation-source'
 import { ModelGenerationSource } from '../generation-source/model-generation-source'
+import { createChapterStageRecorder } from '../generation-source/stage-receipts'
 import { formatAdmissionError } from '../quality/admission-error'
 import { refreshFollowingChapterSerialStoryStateReadiness } from '../quality/state-tracking-contracts'
 import { createAutoRepairChapterPreflightMethods } from './auto-repair-preflight-methods'
@@ -130,10 +131,39 @@ export function createNovelWritingService(ctx: {
 
 
   const generateNovelChapterProse = ctx.runtime?.generateChapterProse || defaultGenerateNovelChapterProse
+  const mcpGenerationSource = ctx.mcpRuntime ? new McpGenerationSource(ctx.mcpRuntime) : undefined
   const generationSourceResolver = createGenerationSourceResolver({
     modelSource: new ModelGenerationSource(generateNovelChapterProse),
-    ...(ctx.mcpRuntime ? { mcpSource: new McpGenerationSource(ctx.mcpRuntime) } : {}),
+    ...(mcpGenerationSource ? { mcpSource: mcpGenerationSource } : {}),
   })
+  const chapterGenerationSource = createGenerationSourceResolver({
+    chapterSourceLeases: ctx.chapterSourceLeases || new ChapterSourceLeaseRegistry(),
+    readProject: ctx.getProject,
+    createModelExecution: input => {
+      const provenance = {
+        task_id: input.taskId,
+        project_id: input.project.id,
+        chapter_id: input.chapter.id,
+        source: 'model' as const,
+        source_fingerprint: input.fingerprint,
+        context_version: input.contextVersion,
+        model_id: input.modelId,
+      }
+      return new ModelGenerationSource({
+        modelId: input.modelId,
+        provenance,
+        generateChapterProse: generateNovelChapterProse,
+        executeAgent,
+        recordStage: createChapterStageRecorder({
+          activeWorkspace: input.activeWorkspace,
+          provenance: () => provenance,
+        }),
+        assertCurrent: input.assertCurrent,
+      })
+    },
+    ...(mcpGenerationSource ? { mcpSource: mcpGenerationSource } : {}),
+  })
+  const beginChapterTask = (input: Parameters<typeof chapterGenerationSource.beginTask>[0]) => chapterGenerationSource.beginTask(input)
   const storeChapterProseMemory = ctx.runtime?.storeChapterProseMemory || defaultStoreNovelChapterProseMemory
   const mergeChapterRawPayload = ctx.runtime?.mergeChapterRawPayload || mergeNovelChapterRawPayload
   const buildParagraphProseContext = buildParagraphProseContextFromModule
@@ -192,6 +222,7 @@ export function createNovelWritingService(ctx: {
   const generateChapterForGroup = generateChapterForGroupMethods.generateChapterForGroup
 
   return {
+    beginChapterTask,
     buildParagraphProseContext,
     buildChapterContextPackage,
     autoRepairChapterPreflightGaps,

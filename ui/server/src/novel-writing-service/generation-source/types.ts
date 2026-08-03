@@ -146,6 +146,29 @@ export interface ChapterTaskExecution {
   close(outcome?: { status: 'success' | 'failed' | 'cancelled'; error?: unknown }): Promise<void>
 }
 
+export function executeChapterStage<T = any>(input: {
+  execution?: ChapterTaskExecution
+  fallback: (agentId: string, project: any, context: Record<string, any>, options?: Record<string, any>) => T
+  stage: ChapterTaskStage
+  responseContract: ChapterStageResponseContract
+  agentId: string
+  project: any
+  context: Record<string, any>
+  options?: Record<string, any>
+}): T | Promise<T> {
+  if (input.execution) {
+    return input.execution.executeAgent(
+      input.stage,
+      input.responseContract,
+      input.agentId,
+      input.project,
+      input.context,
+      input.options,
+    )
+  }
+  return input.fallback(input.agentId, input.project, input.context, input.options)
+}
+
 export interface ChapterGenerationSource {
   beginTask(input: BeginChapterTaskInput): Promise<ChapterTaskExecution>
 }

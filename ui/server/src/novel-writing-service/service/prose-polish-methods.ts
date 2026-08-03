@@ -25,6 +25,7 @@ import {
 import {
   throwIfAborted,
 } from './runtime-helpers'
+import { executeChapterStage } from '../generation-source/types'
 
 export function createProsePolishMethods(deps: {
   executeAgent: (...args: any[]) => any
@@ -36,19 +37,28 @@ export function createProsePolishMethods(deps: {
   const getStageTemperature = deps.getStageTemperature
 
 const runCommercialEditorRewrite = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
-  const editorModelId = getStageModelId(project, 'editor', modelId)
+  const editorModelId = options.chapterTaskExecution ? undefined : getStageModelId(project, 'editor', modelId)
   throwIfAborted(options)
-  const editorResult = await executeAgent('prose-agent', project, {
-    task: buildCommercialEditorRewritePrompt(project, contextPackage, chapterText, options),
-    upstreamContext: contextPackage,
-  }, {
-    activeWorkspace,
-    modelId: editorModelId ? String(editorModelId) : undefined,
-    maxTokens: proseMaxTokensForWordTarget(contextPackage?.chapter_target?.word_target),
-    temperature: getStageTemperature(project, 'editor', 0.5),
-    skipMemory: true,
-    signal: options.abortSignal,
-    timeoutMs: options.llmTimeoutMs,
+  const editorResult = await executeChapterStage({
+    execution: options.chapterTaskExecution,
+    fallback: executeAgent,
+    stage: 'commercial_editor_rewrite',
+    responseContract: 'editor_rewrite_prose',
+    agentId: 'prose-agent',
+    project,
+    context: {
+      task: buildCommercialEditorRewritePrompt(project, contextPackage, chapterText, options),
+      upstreamContext: contextPackage,
+    },
+    options: {
+      activeWorkspace,
+      modelId: editorModelId ? String(editorModelId) : undefined,
+      maxTokens: proseMaxTokensForWordTarget(contextPackage?.chapter_target?.word_target),
+      temperature: getStageTemperature(project, 'editor', 0.5),
+      skipMemory: true,
+      signal: options.abortSignal,
+      timeoutMs: options.llmTimeoutMs,
+    },
   })
   assertCompleteProseTransportResult(editorResult, 'PROSE_REVISION_TRUNCATED')
   const payload = getNovelPayload(editorResult)
@@ -108,19 +118,28 @@ const runMemePolish = async (activeWorkspace: string, project: any, contextPacka
   if (String(memeStrategy?.intensity || '无') === '无' && !asArray(memeStrategy?.meme_bank).length) {
     return { final_text: chapterText, polished: false, meme_polish_report: { skipped: true, reason: '未配置网感策略或素材池' }, revision: null }
   }
-  const polishModelId = getStageModelId(project, 'revise', modelId)
+  const polishModelId = options.chapterTaskExecution ? undefined : getStageModelId(project, 'revise', modelId)
   throwIfAborted(options)
-  const polishResult = await executeAgent('prose-agent', project, {
-    task: buildMemePolishPrompt(project, contextPackage, chapterText),
-    upstreamContext: contextPackage,
-  }, {
-    activeWorkspace,
-    modelId: polishModelId ? String(polishModelId) : undefined,
-    maxTokens: proseMaxTokensForWordTarget(contextPackage?.chapter_target?.word_target),
-    temperature: getStageTemperature(project, 'revise', 0.45),
-    skipMemory: true,
-    signal: options.abortSignal,
-    timeoutMs: options.llmTimeoutMs,
+  const polishResult = await executeChapterStage({
+    execution: options.chapterTaskExecution,
+    fallback: executeAgent,
+    stage: 'meme_polish',
+    responseContract: 'meme_polish_prose',
+    agentId: 'prose-agent',
+    project,
+    context: {
+      task: buildMemePolishPrompt(project, contextPackage, chapterText),
+      upstreamContext: contextPackage,
+    },
+    options: {
+      activeWorkspace,
+      modelId: polishModelId ? String(polishModelId) : undefined,
+      maxTokens: proseMaxTokensForWordTarget(contextPackage?.chapter_target?.word_target),
+      temperature: getStageTemperature(project, 'revise', 0.45),
+      skipMemory: true,
+      signal: options.abortSignal,
+      timeoutMs: options.llmTimeoutMs,
+    },
   })
   assertCompleteProseTransportResult(polishResult, 'PROSE_REVISION_TRUNCATED')
   const payload = getNovelPayload(polishResult)
@@ -182,18 +201,27 @@ const runMemePolish = async (activeWorkspace: string, project: any, contextPacka
 }
 
 const runReadabilityReview = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
-  const reviewModelId = getStageModelId(project, 'review', modelId)
+  const reviewModelId = options.chapterTaskExecution ? undefined : getStageModelId(project, 'review', modelId)
   throwIfAborted(options)
-  const reviewResult = await executeAgent('review-agent', project, {
-    task: buildReadabilityReviewPrompt(project, contextPackage, chapterText),
-  }, {
-    activeWorkspace,
-    modelId: reviewModelId ? String(reviewModelId) : undefined,
-    maxTokens: 2500,
-    temperature: getStageTemperature(project, 'review', 0.2),
-    skipMemory: true,
-    signal: options.abortSignal,
-    timeoutMs: options.llmTimeoutMs,
+  const reviewResult = await executeChapterStage({
+    execution: options.chapterTaskExecution,
+    fallback: executeAgent,
+    stage: 'readability_review',
+    responseContract: 'readability_json',
+    agentId: 'review-agent',
+    project,
+    context: {
+      task: buildReadabilityReviewPrompt(project, contextPackage, chapterText),
+    },
+    options: {
+      activeWorkspace,
+      modelId: reviewModelId ? String(reviewModelId) : undefined,
+      maxTokens: 2500,
+      temperature: getStageTemperature(project, 'review', 0.2),
+      skipMemory: true,
+      signal: options.abortSignal,
+      timeoutMs: options.llmTimeoutMs,
+    },
   })
   const payload = getNovelPayload(reviewResult)
   return {
