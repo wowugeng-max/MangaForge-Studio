@@ -26,6 +26,10 @@ function createFakeClient(statuses: string[] = ['completed']) {
   const listToolOptions: any[] = []
   const remote = new Map<string, string>()
   let statusIndex = 0
+  let runSequence = 0
+  let activeRunId = ''
+  const completedRuns = new Set<string>()
+  const assistantHistory: Array<{ role: 'assistant'; content: string }> = []
   return {
     calls,
     listToolOptions,
@@ -42,13 +46,22 @@ function createFakeClient(statuses: string[] = ['completed']) {
         if (name.endsWith('upsertApiAgentDriveFile')) { remote.set(args.path, args.content); return structured({ ok: true }) }
         if (name.endsWith('apiAgentDriveText')) return structured({ content: remote.get(args.filePath) || '' })
         if (name.endsWith('createApiAgentSession')) return structured({ session: { id: 'session-1', status: 'pending' }, run: { started: false } })
-        if (name.endsWith('postApiAgentSessionMessage')) return structured({ session: { id: 'session-1' }, run: { started: true } })
+        if (name.endsWith('postApiAgentSessionMessage')) {
+          activeRunId = `run-${++runSequence}`
+          return structured({ session: { id: 'session-1' }, run: { id: activeRunId, started: true } })
+        }
         if (name.endsWith('getApiAgentSession')) {
           const status = statuses[Math.min(statusIndex++, statuses.length - 1)]!
+          if (status === 'completed' && activeRunId && !completedRuns.has(activeRunId)) {
+            completedRuns.add(activeRunId)
+            assistantHistory.push({ role: 'assistant', content: '这是完整的本章正文。' })
+          }
           return structured({
             session: { id: 'session-1', status },
-            run: { status },
-            messages: status === 'completed' ? [{ role: 'assistant', content: '这是完整的本章正文。' }] : [],
+            run: { ...(activeRunId ? { id: activeRunId } : {}), status },
+            messages: status === 'completed'
+              ? activeRunId ? [...assistantHistory] : [{ role: 'assistant', content: '这是完整的本章正文。' }]
+              : [],
           })
         }
         if (name.endsWith('cancelApiAgentSessionRun')) return structured({ ok: true, cancelled: true })
@@ -251,6 +264,201 @@ describe('BudaAdapter', () => {
     await expect(task.runStage(stageInput('request-current-run', 'revision', 'revision_prose')))
       .resolves.toMatchObject({ content: 'current stage output' })
     expect(gets).toBe(2)
+    await task.close()
+  })
+
+  test('does not accept a previous stage terminal output after a new stage post', async () => {
+    const fake = createFakeClient()
+    let posts = 0
+    let secondStageGets = 0
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('postApiAgentSessionMessage')) posts += 1
+      if (name.endsWith('getApiAgentSession')) {
+        fake.calls.push({ name, args, options })
+        if (posts === 1) {
+          return structured({
+            session: { id: 'session-1', status: 'completed' },
+            run: { status: 'completed' },
+            messages: [{ role: 'assistant', content: 'stage A output' }],
+          })
+        }
+        secondStageGets += 1
+        return structured(secondStageGets === 1 ? {
+          session: { id: 'session-1', status: 'completed' },
+          run: { status: 'completed' },
+          messages: [{ role: 'assistant', content: 'stage A output' }],
+        } : {
+          session: { id: 'session-1', status: 'completed' },
+          run: { status: 'completed' },
+          messages: [
+            { role: 'assistant', content: 'stage A output' },
+            { role: 'assistant', content: 'stage B output' },
+          ],
+        })
+      }
+      return original(name, args, options)
+    }
+    const task = await openChapterTask(new BudaAdapter(fake.client as any))
+
+    await expect(task.runStage(stageInput('request-a', 'draft', 'draft_prose')))
+      .resolves.toMatchObject({ content: 'stage A output' })
+    await expect(task.runStage(stageInput('request-b', 'revision', 'revision_prose')))
+      .resolves.toMatchObject({ content: 'stage B output' })
+    expect(secondStageGets).toBe(2)
+    await task.close()
+  })
+
+  test('accepts identical assistant content only after the message sequence advances', async () => {
+    const fake = createFakeClient()
+    let posts = 0
+    let secondStageGets = 0
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('postApiAgentSessionMessage')) {
+        posts += 1
+        fake.calls.push({ name, args, options })
+        return structured({ session: { id: 'session-1' }, run: { started: true } })
+      }
+      if (name.endsWith('getApiAgentSession')) {
+        fake.calls.push({ name, args, options })
+        const previous = [{ role: 'assistant', content: 'same output' }]
+        if (posts === 1) {
+          return structured({
+            session: { id: 'session-1', status: 'completed' },
+            run: { status: 'completed' },
+            messages: previous,
+          })
+        }
+        secondStageGets += 1
+        return structured({
+          session: { id: 'session-1', status: 'completed' },
+          run: { status: 'completed' },
+          messages: secondStageGets === 1
+            ? previous
+            : [...previous, { role: 'assistant', content: 'same output' }],
+        })
+      }
+      return original(name, args, options)
+    }
+    const task = await openChapterTask(new BudaAdapter(fake.client as any))
+
+    await expect(task.runStage(stageInput('request-a', 'draft', 'draft_prose')))
+      .resolves.toMatchObject({ content: 'same output' })
+    await expect(task.runStage(stageInput('request-b', 'revision', 'revision_prose')))
+      .resolves.toMatchObject({ content: 'same output' })
+    expect(secondStageGets).toBe(2)
+    await task.close()
+  })
+
+  test('fails closed when polling never advances beyond the previous assistant snapshot', async () => {
+    const controller = new AbortController()
+    const fake = createFakeClient()
+    const deadline = new McpGenerationDeadline(60_000, controller.signal, {
+      now: Date.now,
+      setTimeout: () => 1,
+      clearTimeout: () => {},
+    })
+    const input = chapterTaskInput({ deadline, signal: controller.signal })
+    let posts = 0
+    let secondStageGets = 0
+    let releaseStalePoll!: () => void
+    let stalePollBlocked!: () => void
+    const stalePoll = new Promise<void>(resolve => { stalePollBlocked = resolve })
+    const stalePollGate = new Promise<void>(resolve => { releaseStalePoll = resolve })
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('postApiAgentSessionMessage')) {
+        posts += 1
+        fake.calls.push({ name, args, options })
+        return structured({ session: { id: 'session-1' }, run: { started: true } })
+      }
+      if (name.endsWith('cancelApiAgentSessionRun')) {
+        fake.calls.push({ name, args, options })
+        return structured({ ok: true, cancelled: false })
+      }
+      if (name.endsWith('getApiAgentSession')) {
+        fake.calls.push({ name, args, options })
+        if (posts === 2) {
+          secondStageGets += 1
+          if (secondStageGets === 2) {
+            stalePollBlocked()
+            await stalePollGate
+          }
+        }
+        return structured({
+          session: { id: 'session-1', status: 'completed' },
+          run: { status: 'completed' },
+          messages: [{ role: 'assistant', content: 'stage A output' }],
+        })
+      }
+      return original(name, args, options)
+    }
+    const task = await openChapterTask(new BudaAdapter(fake.client as any), input)
+    await task.runStage(stageInput('request-a', 'draft', 'draft_prose'))
+
+    const staleStage = task.runStage(stageInput('request-b', 'revision', 'revision_prose'))
+    await stalePoll
+    controller.abort()
+    releaseStalePoll()
+    const staleError = await staleStage.catch((error: unknown) => error) as any
+
+    expect(staleError).toMatchObject({
+      code: 'MCP_CANCELLED',
+      details: {
+        remote_cancel_confirmed: false,
+        receipt_status: 'remote_cancel_unknown',
+      },
+    })
+    const poisoned = await task.runStage(stageInput('request-c', 'story_state_sync', 'story_state_json'))
+      .catch((error: unknown) => error)
+    expect(poisoned).toBe(staleError)
+    expect(fake.calls.filter(call => call.name.endsWith('postApiAgentSessionMessage'))).toHaveLength(2)
+    await task.close()
+  })
+
+  test('does not confirm an ambiguous later send from a stale previous terminal snapshot', async () => {
+    const fake = createFakeClient()
+    let posts = 0
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('postApiAgentSessionMessage')) {
+        posts += 1
+        if (posts > 1) {
+          fake.calls.push({ name, args, options })
+          throw new McpError('MCP_CONNECTION_LOST', 'accepted remotely, response lost')
+        }
+      }
+      if (name.endsWith('cancelApiAgentSessionRun')) {
+        fake.calls.push({ name, args, options })
+        return structured({ ok: true, cancelled: false })
+      }
+      if (name.endsWith('getApiAgentSession')) {
+        fake.calls.push({ name, args, options })
+        return structured({
+          session: { id: 'session-1', status: 'completed' },
+          run: { status: 'completed' },
+          messages: [{ role: 'assistant', content: 'stage A output' }],
+        })
+      }
+      return original(name, args, options)
+    }
+    const task = await openChapterTask(new BudaAdapter(fake.client as any))
+    await task.runStage(stageInput('request-a', 'draft', 'draft_prose'))
+
+    const ambiguous = await task.runStage(stageInput('request-b', 'revision', 'revision_prose'))
+      .catch((error: unknown) => error) as any
+    expect(ambiguous).toMatchObject({
+      code: 'MCP_SEND_UNKNOWN',
+      details: {
+        remote_cancel_confirmed: false,
+        receipt_status: 'send_unknown',
+      },
+    })
+    const poisoned = await task.runStage(stageInput('request-c', 'story_state_sync', 'story_state_json'))
+      .catch((error: unknown) => error)
+    expect(poisoned).toBe(ambiguous)
+    expect(fake.calls.filter(call => call.name.endsWith('postApiAgentSessionMessage'))).toHaveLength(2)
     await task.close()
   })
 

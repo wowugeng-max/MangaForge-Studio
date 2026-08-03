@@ -152,6 +152,54 @@ function sessionId(data: unknown) {
     || boundedOwnString(data, ['sessionId', 'id'], BUDA_AGENT_STRING_LIMITS.id, '')
 }
 
+function boundedOwnId(value: unknown, keys: string[]) {
+  for (const key of keys) {
+    const candidate = ownDataValue(value, key)
+    if (typeof candidate === 'string' && candidate && candidate.length <= BUDA_AGENT_STRING_LIMITS.id) return candidate
+    if (typeof candidate === 'number' && Number.isSafeInteger(candidate)) return String(candidate)
+  }
+  return ''
+}
+
+function runId(data: unknown) {
+  return boundedOwnId(ownDataValue(data, 'run'), ['id', 'runId', 'run_id'])
+    || boundedOwnId(data, ['runId', 'run_id'])
+}
+
+type BudaRunCorrelation = {
+  assistantBaseline: string[]
+  priorTerminalStatus: string
+  allowInitialTerminal: boolean
+  expectedRunId: string
+  currentRunObserved: boolean
+}
+
+function runCorrelationEvidence(data: unknown, correlation: BudaRunCorrelation) {
+  const currentAssistant = assistantContents(data)
+  const sameAssistant = currentAssistant.length === correlation.assistantBaseline.length
+    && currentAssistant.every((content, index) => content === correlation.assistantBaseline[index])
+  const currentRunId = runId(data)
+  const runIdMismatch = Boolean(
+    correlation.expectedRunId
+    && currentRunId
+    && correlation.expectedRunId !== currentRunId,
+  )
+  return {
+    currentAssistant,
+    currentOutput: !sameAssistant ? currentAssistant.at(-1) || '' : '',
+    runIdMatches: Boolean(correlation.expectedRunId && currentRunId === correlation.expectedRunId),
+    runIdMismatch,
+  }
+}
+
+function terminalBelongsToRun(status: string, evidence: ReturnType<typeof runCorrelationEvidence>, correlation: BudaRunCorrelation) {
+  if (evidence.runIdMismatch) return false
+  return correlation.allowInitialTerminal
+    || evidence.runIdMatches
+    || Boolean(evidence.currentOutput)
+    || (correlation.currentRunObserved && status !== correlation.priorTerminalStatus)
+}
+
 function sendMayHaveSucceeded(error: unknown) {
   if (error instanceof McpError) return error.code === 'MCP_CONNECTION_LOST'
   if (!error || typeof error !== 'object') return false
@@ -255,16 +303,18 @@ export function buildBudaStageEnvelope(input: BudaChapterStageInput) {
   ].join('\n')
 }
 
-export function extractBudaStageContent(data: unknown) {
-  const stageContent = (content: unknown) => {
-    if (typeof content !== 'string') return ''
-    if (content.length > BUDA_STAGE_CONTENT_LIMIT) {
-      throw new McpError('MCP_TOOL_ERROR', 'Buda Stage 返回数据超过安全上限', {
-        reason: 'stage_result_too_large',
-      })
-    }
-    return content.trim()
+function stageContent(content: unknown) {
+  if (typeof content !== 'string') return ''
+  if (content.length > BUDA_STAGE_CONTENT_LIMIT) {
+    throw new McpError('MCP_TOOL_ERROR', 'Buda Stage 返回数据超过安全上限', {
+      reason: 'stage_result_too_large',
+    })
   }
+  return content.trim()
+}
+
+function assistantContents(data: unknown) {
+  const contents: string[] = []
   const messages = ownDataValue(data, 'messages')
   if (messages && typeof messages === 'object' && !types.isProxy(messages) && Array.isArray(messages)) {
     if (messages.length > BUDA_STAGE_MESSAGE_LIMIT) {
@@ -276,9 +326,15 @@ export function extractBudaStageContent(data: unknown) {
       const message = ownDataValue(messages, String(index))
       if (ownDataValue(message, 'role') !== 'assistant') continue
       const content = stageContent(ownDataValue(message, 'content'))
-      if (content) return content
+      if (content) contents.unshift(content)
     }
   }
+  return contents
+}
+
+export function extractBudaStageContent(data: unknown) {
+  const assistant = assistantContents(data).at(-1)
+  if (assistant) return assistant
   for (const key of ['content', 'text']) {
     const content = stageContent(ownDataValue(data, key))
     if (content) return content
@@ -355,6 +411,7 @@ async function cleanupBudaSession(input: {
   sessionId: string
   terminalSeen: boolean
   primaryError: unknown
+  correlation?: BudaRunCorrelation
 }) {
   const cleanupError = (remoteCancelConfirmed: boolean) => {
     const sendWasAmbiguous = input.primaryError instanceof McpError && input.primaryError.code === 'MCP_SEND_UNKNOWN'
@@ -401,7 +458,14 @@ async function cleanupBudaSession(input: {
           }),
           cleanupOptions('read_safe'),
         ))
-        remoteCancelConfirmed = ['completed', 'failed', 'cancelled'].includes(sessionStatus(mcpResultData(statusResult)))
+        const statusData = mcpResultData(statusResult)
+        const status = sessionStatus(statusData)
+        remoteCancelConfirmed = ['completed', 'failed', 'cancelled'].includes(status)
+          && (!input.correlation || terminalBelongsToRun(
+            status,
+            runCorrelationEvidence(statusData, input.correlation),
+            input.correlation,
+          ))
       } catch {}
     }
     return { error: cleanupError(remoteCancelConfirmed), remoteCancelConfirmed }
@@ -415,6 +479,9 @@ class BudaChapterTaskSessionImpl implements BudaChapterTaskSession {
   private closed = false
   private closePromise?: Promise<void>
   private poisonedError?: unknown
+  private assistantBaseline: string[] = []
+  private priorTerminalStatus = ''
+  private runAttempted = false
 
   constructor(
     private readonly client: McpClientPort,
@@ -455,11 +522,20 @@ class BudaChapterTaskSessionImpl implements BudaChapterTaskSession {
 
   private async executeStage(input: BudaChapterStageInput): Promise<BudaChapterStageResult> {
     let terminalSeen = false
+    const correlation: BudaRunCorrelation = {
+      assistantBaseline: [...this.assistantBaseline],
+      priorTerminalStatus: this.priorTerminalStatus,
+      allowInitialTerminal: !this.runAttempted,
+      expectedRunId: '',
+      currentRunObserved: false,
+    }
+    this.runAttempted = true
     try {
       this.task.deadline.throwIfAborted()
       const modelArguments = this.selectedModel ? { model: this.selectedModel } : {}
+      let sendResult: McpToolResult
       try {
-        await this.client.callTool(
+        sendResult = await this.client.callTool(
           this.tools.sendSessionMessage,
           buildBudaToolArguments('sendSessionMessage', this.tools.sendSessionMessage, {
             agentId: this.task.agentId,
@@ -477,6 +553,7 @@ class BudaChapterTaskSessionImpl implements BudaChapterTaskSession {
           session_id: this.sessionId.slice(0, 160),
         })
       }
+      correlation.expectedRunId = runId(mcpResultData(sendResult))
       this.task.deadline.throwIfAborted()
       await this.progress('mcp_session_create', 'success')
       await this.progress('mcp_session_wait')
@@ -493,10 +570,32 @@ class BudaChapterTaskSessionImpl implements BudaChapterTaskSession {
         )
         const sessionData = mcpResultData(sessionResult)
         const status = sessionStatus(sessionData)
-        terminalSeen = status === 'completed' || status === 'failed' || status === 'cancelled'
+        const evidence = runCorrelationEvidence(sessionData, correlation)
+        const knownTerminal = status === 'completed'
+          || status === 'failed'
+          || status === 'cancelled'
+          || status === 'waiting_for_input'
+        const correlatedTerminal = knownTerminal
+          && terminalBelongsToRun(status, evidence, correlation)
+        if (correlatedTerminal) {
+          terminalSeen = status === 'completed' || status === 'failed' || status === 'cancelled'
+          this.assistantBaseline = evidence.currentAssistant
+          this.priorTerminalStatus = status
+        }
         this.task.deadline.throwIfAborted()
         if (status === 'pending' || status === 'in_progress') {
+          if (!evidence.runIdMismatch) correlation.currentRunObserved = true
           await this.progress('mcp_session_wait', 'running', status)
+          await abortableDelay(interval, this.task)
+          this.task.deadline.throwIfAborted()
+          interval = Math.min(
+            Math.max(interval + 1, Math.round(interval * 1.5)),
+            Math.max(interval, this.task.server.poll_max_ms),
+          )
+          continue
+        }
+        if (knownTerminal && !correlatedTerminal) {
+          await this.progress('mcp_session_wait', 'running', `stale_${status}`)
           await abortableDelay(interval, this.task)
           this.task.deadline.throwIfAborted()
           interval = Math.min(
@@ -512,7 +611,10 @@ class BudaChapterTaskSessionImpl implements BudaChapterTaskSession {
         await this.progress('mcp_session_wait', 'success', status)
         this.task.deadline.throwIfAborted()
         await this.progress('mcp_extract')
-        const content = extractBudaStageContent(sessionData)
+        const content = correlation.allowInitialTerminal
+          ? extractBudaStageContent(sessionData)
+          : evidence.currentOutput
+        if (!content) throw new McpError('MCP_TOOL_ERROR', 'Buda Stage 已完成但没有返回内容')
         await this.progress('mcp_extract', 'success')
         this.task.deadline.throwIfAborted()
         return {
@@ -534,6 +636,7 @@ class BudaChapterTaskSessionImpl implements BudaChapterTaskSession {
         sessionId: this.sessionId,
         terminalSeen,
         primaryError,
+        correlation,
       })
       if (!cleanup.remoteCancelConfirmed) this.poisonedError = cleanup.error
       throw cleanup.error
