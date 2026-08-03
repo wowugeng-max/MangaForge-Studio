@@ -2266,7 +2266,7 @@ Create `chapterGenerationSourceModel.test.ts`:
 
 ```ts
 test('hydrates the stored chapter model and keeps one exact active source', () => {
-  const source = normalizeChapterSourceView({
+  const view = normalizeChapterSourceView({
     ok: true,
     source: {
       version: 'chapter_generation_source_v1',
@@ -2280,19 +2280,25 @@ test('hydrates the stored chapter model and keeps one exact active source', () =
     fingerprint: 'sha256:' + 'a'.repeat(64),
     locked: false,
   })
-  expect(source.active).toBe('mcp')
-  expect(source.model.model_id).toBe(217)
-  expect(source.mcp?.agent_id).toBe('agent-1')
+  expect(view.source.active).toBe('mcp')
+  expect(view.source.model.model_id).toBe(217)
+  expect(view.source.mcp?.agent_id).toBe('agent-1')
 })
 
 test('keeps confirmed state when activation receives an HTTP error', async () => {
   const confirmed = modelSourceView(217)
-  const result = await commitConfirmedSource({
+  const expected = httpError(409, 'GENERATION_SOURCE_BUSY')
+  let reads = 0
+  await expect(commitConfirmedSource({
     current: confirmed,
-    request: async () => { throw httpError(409, 'GENERATION_SOURCE_BUSY') },
-    readAuthoritative: async () => { throw new Error('GET must not run for a definite HTTP response') },
-  }).catch(error => ({ error, source: confirmed }))
-  expect(result.source).toBe(confirmed)
+    request: async () => { throw expected },
+    readAuthoritative: async () => {
+      reads += 1
+      throw new Error('GET must not run for a definite HTTP response')
+    },
+    assertCurrent: () => {},
+  })).rejects.toBe(expected)
+  expect(reads).toBe(0)
 })
 
 test('reconciles a no-response activation through authoritative GET without retrying', async () => {
@@ -2322,13 +2328,70 @@ test('reconciles a no-response activation through authoritative GET without retr
       reads += 1
       return committed
     },
+    assertCurrent: () => {},
   })
   expect(result).toMatchObject({ previous: confirmed, source: committed, reconciled: true })
   expect({ activationCalls, reads }).toEqual({ activationCalls: 1, reads: 1 })
 })
+
+test('enters authority unknown when the single reconciliation GET also fails', async () => {
+  const confirmed = modelSourceView(217)
+  const mutationError = transportError('ECONNRESET: private mutation detail')
+  const readError = new Error('private authority read detail')
+  let reads = 0
+  const operation = commitConfirmedSource({
+    current: confirmed,
+    request: async () => { throw mutationError },
+    readAuthoritative: async () => { reads += 1; throw readError },
+    assertCurrent: () => {},
+  })
+  await expect(operation).rejects.toMatchObject({
+    code: 'CHAPTER_SOURCE_AUTHORITY_UNKNOWN',
+    previous: confirmed,
+    mutationTransportError: mutationError,
+    authorityReadError: readError,
+    message: '章节来源权威状态暂时无法确认',
+  })
+  expect(reads).toBe(1)
+})
+
+test('keeps authority unknown after a failed controlled refresh and clears it after a later successful GET', async () => {
+  const previous = modelSourceView(217)
+  const recovered = mcpSourceView(217)
+  const unknown = authorityUnknownState(previous, authorityUnknownError(previous))
+  const stillUnknown = await refreshChapterSourceAuthority({
+    current: unknown,
+    readAuthoritative: async () => { throw new Error('still offline') },
+    assertCurrent: () => {},
+  })
+  expect(stillUnknown.state).toBe(unknown)
+  expect(await refreshChapterSourceAuthority({
+    current: stillUnknown.state,
+    readAuthoritative: async () => recovered,
+    assertCurrent: () => {},
+  })).toEqual({
+    state: confirmedAuthorityState(recovered),
+    readError: null,
+  })
+})
+
+test.each(['mutation_success', 'reconcile_success', 'reconcile_failure'] as const)(
+  'fences late project A %s from project B', async scenario => {
+    const fixture = startGuardedSourceScenario(scenario, { projectId: 1, loadEpoch: 101 })
+    const projectB = {
+      authority: confirmedAuthorityState(modelSourceView(301)),
+      disabled: false,
+      settingsOpen: false,
+    }
+    fixture.switchProject(2, 102, projectB)
+    fixture.settleProjectA()
+    await expect(fixture.operation).rejects.toBeInstanceOf(StaleChapterSourceOperationError)
+    expect(fixture.ui).toEqual(projectB)
+  },
+)
 ```
 
-Extend the workspace data test so a late source response for project A cannot overwrite project B, and stored model ID wins over transient previous-project selection.
+`startGuardedSourceScenario` is a test fixture that runs the real `commitConfirmedSource`, asserts the captured token before every test setter/error side effect, and settles either the mutation or its reconciliation GET only after the project switch. Extend the workspace data test so a late initial source response for project A cannot overwrite project B, a mutation invalidates an earlier initial-GET token, and stored model ID wins over transient previous-project selection. Add the same pure fence case for a stale definite HTTP error: it cannot open settings or change B's error/disabled state.
 
 - [ ] **Step 2: Run web model tests and verify RED**
 
@@ -2383,7 +2446,7 @@ Keep legacy `mcpApi` methods only for compatibility tests and old callers until 
 
 - [ ] **Step 4: Implement pure state and error helpers**
 
-Implement the two fixtures used by Step 1 and make the normalizer reject every non-exact server payload:
+Implement the model/MCP view fixtures used by Step 1 and make the normalizer reject every non-exact server payload:
 
 ```ts
 export function normalizeChapterSourceView(value: unknown): ChapterGenerationSourceView {
@@ -2450,53 +2513,158 @@ export function modelSourceView(modelId: number): ChapterGenerationSourceView {
     display: { active: 'model', model_id: modelId, mcp: null },
   })
 }
+
 ```
 
 Add focused rejection tests for a wrong version, `active: 'both'`, a fractional/zero model ID, and active MCP without a binding. Metadata enrichment may fail later, but the normalizer above always retains the stable Server/Key/Adapter/Agent/model identifiers already present in `source.mcp`.
 
 Format `GENERATION_SOURCE_BUSY`, `CHAPTER_MODEL_REQUIRED`, and `MCP_BINDING_INVALID` without recommending fallback.
 
-Define the confirmed-commit helper used by controls and tests. Only a no-response/transport error is reconciled; a definite HTTP error remains an ordinary rejected operation:
+Define the authority state, operation fence, and confirmed-commit helper used by controls and tests. A definite HTTP error remains the original rejected object and performs zero authority reads. Only a no-response/transport error is reconciled:
 
 ```ts
+export class ChapterSourceAuthorityUnknownError extends Error {
+  readonly code = 'CHAPTER_SOURCE_AUTHORITY_UNKNOWN' as const
+
+  constructor(
+    readonly previous: ChapterGenerationSourceView,
+    readonly mutationTransportError: unknown,
+    readonly authorityReadError: unknown,
+  ) {
+    super('章节来源权威状态暂时无法确认')
+    this.name = 'ChapterSourceAuthorityUnknownError'
+  }
+}
+
+export class StaleChapterSourceOperationError extends Error {}
+
+export type ChapterSourceAuthorityState =
+  | { source: ChapterGenerationSourceView | null; authorityUnknown: false; reconciliationRequired: false; diagnostic: null }
+  | { source: ChapterGenerationSourceView; authorityUnknown: true; reconciliationRequired: true; diagnostic: ChapterSourceAuthorityUnknownError }
+
+export function confirmedAuthorityState(source: ChapterGenerationSourceView | null): ChapterSourceAuthorityState {
+  return { source, authorityUnknown: false, reconciliationRequired: false, diagnostic: null }
+}
+
+export function authorityUnknownState(
+  previous: ChapterGenerationSourceView,
+  diagnostic: ChapterSourceAuthorityUnknownError,
+): ChapterSourceAuthorityState {
+  return { source: previous, authorityUnknown: true, reconciliationRequired: true, diagnostic }
+}
+
+export type ChapterSourceOperationToken = Readonly<{
+  projectId: number
+  loadEpoch: number
+  operationEpoch: number
+}>
+
+export function createChapterSourceOperationFence() {
+  let projectId = 0
+  let loadEpoch = 0
+  let operationEpoch = 0
+  let mounted = true
+  const rejectStale = () => { throw new StaleChapterSourceOperationError() }
+  return {
+    enterProject(nextProjectId: number, nextLoadEpoch: number) {
+      mounted = true
+      projectId = nextProjectId
+      loadEpoch = nextLoadEpoch
+      operationEpoch += 1
+    },
+    begin(nextProjectId: number, nextLoadEpoch: number): ChapterSourceOperationToken {
+      if (!mounted || nextProjectId !== projectId || nextLoadEpoch !== loadEpoch) rejectStale()
+      operationEpoch += 1
+      return Object.freeze({ projectId, loadEpoch, operationEpoch })
+    },
+    assertCurrent(token: ChapterSourceOperationToken) {
+      if (!mounted || token.projectId !== projectId || token.loadEpoch !== loadEpoch
+        || token.operationEpoch !== operationEpoch) rejectStale()
+    },
+    unmount() { mounted = false; operationEpoch += 1 },
+  }
+}
+
 export async function commitConfirmedSource(input: {
   current: ChapterGenerationSourceView
   request: () => Promise<ChapterGenerationSourceView>
   readAuthoritative: () => Promise<ChapterGenerationSourceView>
+  assertCurrent: () => void
 }) {
   try {
     const source = await input.request()
+    input.assertCurrent()
     return { previous: input.current, source, reconciled: false }
   } catch (error) {
-    if (!isNoResponseTransportError(error)) throw error
-    const source = await input.readAuthoritative()
+    if (!isNoResponseTransportError(error)) {
+      input.assertCurrent()
+      throw error
+    }
+    input.assertCurrent()
+    let source: ChapterGenerationSourceView
+    try {
+      source = await input.readAuthoritative()
+    } catch (authorityReadError) {
+      input.assertCurrent()
+      throw new ChapterSourceAuthorityUnknownError(
+        input.current,
+        error,
+        authorityReadError,
+      )
+    }
+    input.assertCurrent()
     return { previous: input.current, source, reconciled: true }
+  }
+}
+
+export async function refreshChapterSourceAuthority(input: {
+  current: ChapterSourceAuthorityState
+  readAuthoritative: () => Promise<ChapterGenerationSourceView>
+  assertCurrent: () => void
+}) {
+  try {
+    const source = await input.readAuthoritative()
+    input.assertCurrent()
+    return { state: confirmedAuthorityState(source), readError: null }
+  } catch (readError) {
+    input.assertCurrent()
+    return { state: input.current, readError }
   }
 }
 ```
 
-`isNoResponseTransportError` must reject classification when any HTTP response/status is present. Reconciliation performs exactly one GET, never repeats the mutation automatically, and surfaces a dedicated reconciliation failure if GET also fails.
+`isNoResponseTransportError` must reject classification when any HTTP response/status is present. Reconciliation performs exactly one GET and never repeats the mutation automatically. If the GET fails, catch `ChapterSourceAuthorityUnknownError`, assert the token once more at the setter boundary, and store `authorityUnknownState(error.previous, error)`. Its two underlying causes are diagnostic-only: UI formatters use the fixed public message `章节来源权威状态暂时无法确认，请重新获取`, never stringify, serialize, or interpolate those causes.
+
+While `authorityUnknown` is true, activation, model save, MCP test/save, and every binding mutation must reject before issuing a request. `refreshChapterSourceAuthority` is invoked only by one explicit refresh action or one existing controlled workspace refresh. It performs one GET per invocation; a failed read returns the same unknown state without scheduling another read, while a successful read is the only transition that clears `authorityUnknown` and `reconciliationRequired`.
+
+All mutation callers create a token before calling `activate`, `saveModel`, or `saveMcp`, pass its assertion to both helpers, and assert it again immediately before any React setter, notification, error formatter, or `onOpenSettings` call. A stale operation is silently discarded. The same fence instance is shared with the initial chapter-source GET, so the ordinary workspace `loadEpoch` protects all module loads while `operationEpoch` orders initial source load, mutations, reconciliation, and explicit authority refresh within that project.
 
 Remove `buildTemporaryModelOverride` and its test. Change the MCP form payload builder to return `{ mcp }`, never an active source record.
 
 - [ ] **Step 5: Load source with project modules and hydrate the selected chapter model**
 
-Add the source request to the existing abort/epoch-protected `Promise.all` in `useNovelWorkspaceData.ts`. Commit `chapterGenerationSource` only when the epoch is current. Set `selectedModelId` from `source.model.model_id` when present; otherwise use `resolveSelectedWorkspaceModelId` for legacy projects. Reset both on project switch.
+Create one `ChapterSourceOperationFence` in `useNovelWorkspaceData.ts` and share it with all chapter-source controls. The existing workspace `loadEpoch` remains the outer fence for every project module. Immediately when a new project load starts—and before clearing the previous source—call `enterProject(projectId, loadEpoch)`, then call `begin(projectId, loadEpoch)` for the initial chapter-source GET. Add that GET to the existing abort-protected `Promise.all`.
 
-Return:
+After the initial GET resolves, require both the existing workspace epoch check and `chapterSourceFence.assertCurrent(sourceToken)` before committing `confirmedAuthorityState(source)`. A later activation, model save, MCP save, reconciliation GET, or controlled authority refresh calls `begin` again and therefore invalidates that initial token. Project switch changes `loadEpoch` and calls `enterProject` before any new request; unmount calls `unmount`. Do not use a separate mutation counter that can remain valid after the workspace load epoch changes.
+
+Set `selectedModelId` from `authority.source?.source.model.model_id` when present; otherwise use `resolveSelectedWorkspaceModelId` for legacy projects. Reset the authority state and selected model on project switch only after invalidating the old token. Return guarded callbacks that capture the current project/load pair rather than letting UI components invent epochs:
 
 ```ts
-chapterGenerationSource,
-setChapterGenerationSource,
+chapterGenerationSourceAuthority,
+setChapterGenerationSourceAuthority,
+beginChapterSourceOperation,
+assertChapterSourceOperationCurrent,
 selectedModelId,
 setSelectedModelId,
 ```
+
+`beginChapterSourceOperation()` returns a token containing the selected `projectId`, current `loadEpoch`, and new `operationEpoch`. `assertChapterSourceOperationCurrent(token)` checks all three fields. Every setter exposed to Task 13 remains caller-guarded: the caller must assert immediately before committing source/unknown state, selected model, notification state, or settings visibility.
 
 - [ ] **Step 6: Run web model tests and verify GREEN**
 
 Run: `bun test ui/web/src/pages/novel-workspace/chapterGenerationSourceModel.test.ts ui/web/src/pages/novel-workspace/useNovelWorkspaceData.test.ts ui/web/src/pages/novel-workspace/mcpGenerationSourceModel.test.ts`
 
-Expected: PASS with authoritative project-switch behavior and no temporary override helper.
+Expected: PASS with authoritative project-switch behavior, shared initial-load/mutation epoch fencing, authority-unknown recovery, and no temporary override helper.
 
 - [ ] **Step 7: Commit web source state**
 
@@ -2534,9 +2702,56 @@ Cover these exact states in `ChapterGenerationSourceControl.test.tsx`:
 - pending activation: no optimistic active-segment change before the response.
 - definite HTTP activation failure: confirmed source remains displayed, and only an explicit incomplete-MCP error requests opening settings.
 - activation transport failure with no HTTP response: keep the control pending while one authoritative GET runs, then display the GET result without automatically retrying activation.
+- reconciliation GET failure: keep the last-known source visible with `章节来源权威状态暂时无法确认，请重新获取`, set `authorityUnknown`/`reconciliationRequired`, and disable activation, model, MCP test/save, and binding controls.
+- controlled recovery: one click on `重新获取` performs one GET; failure schedules no loop and remains disabled, while success replaces the source and re-enables controls subject to ordinary busy/lock state.
+- project fencing: late project A mutation success, HTTP-error side effects, reconciliation success, and reconciliation failure cannot change project B's source, selected model, disabled/unknown state, notification, or settings visibility.
 - normal mode: both retained configuration details visible.
 - immersive mode: compact segment and only active detail visible.
 - partial metadata failure: stable server/key/agent/model identifiers remain visible.
+
+Add these interaction tests, and run the first test for activation, model save, and MCP save entry points:
+
+```tsx
+test.each(['activate', 'saveModel', 'saveMcp'] as const)(
+  '%s disables on unknown authority and recovers only through one explicit GET',
+  async mutation => {
+    const previous = modelSourceView(217)
+    const recovered = modelSourceView(301)
+    mockAmbiguousMutation(mutation)
+    chapterSourceApi.get.mockRejectedValueOnce(new Error('private')).mockResolvedValueOnce(recovered)
+    renderSourceHarness({ projectId: 1, authority: confirmedAuthorityState(previous) })
+
+    await triggerMutation(mutation)
+    expect(await screen.findByText('章节来源权威状态暂时无法确认，请重新获取')).toBeVisible()
+    expect(screen.queryByText(/private/)).not.toBeInTheDocument()
+    expectLastKnownSource(previous)
+    expectEverySourceMutationDisabled()
+    expect(chapterSourceApi.get).toHaveBeenCalledTimes(1)
+    await flushPromises()
+    expect(chapterSourceApi.get).toHaveBeenCalledTimes(1)
+
+    await userEvent.click(screen.getByRole('button', { name: '重新获取' }))
+    await waitFor(() => expectAuthoritativeSource(recovered))
+    expectEverySourceMutationEnabledExceptOrdinaryInactiveOrLockedControls()
+    expect(chapterSourceApi[mutation]).toHaveBeenCalledTimes(1)
+    expect(chapterSourceApi.get).toHaveBeenCalledTimes(2)
+  },
+)
+
+test.each([
+  'mutation_success', 'http_error', 'reconcile_success', 'reconcile_failure',
+] as const)('discards late project A %s after switching to B', async scenario => {
+  const harness = renderProjectRaceHarness(scenario, { projectId: 1, source: modelSourceView(217) })
+  await harness.startA()
+  harness.switchProject({ projectId: 2, source: modelSourceView(301) })
+  await harness.settleA()
+  expectProjectBSourceAndControlsUnchanged(301)
+  expect(harness.openSettings).not.toHaveBeenCalled()
+  expect(screen.queryByText('章节来源权威状态暂时无法确认，请重新获取')).not.toBeInTheDocument()
+})
+```
+
+The race harness is a test fixture, not a production shortcut. `reconcile_success` and `reconcile_failure` both reject the mutation as transport-ambiguous, wait until the A-scoped GET is pending, switch to B, and only then settle that GET. All scenarios use real controlled props/rerender and assert source, selected model, disabled/unknown state, notifications, and settings callbacks together.
 
 - [ ] **Step 2: Run UI tests and verify RED**
 
@@ -2546,23 +2761,35 @@ Expected: FAIL because the top bar still has an independent model select and MCP
 
 - [ ] **Step 3: Implement the controlled top-bar component**
 
-The component receives confirmed state and mutations:
+The component receives the authority state and the shared operation fence:
 
 ```ts
 export type ChapterGenerationSourceControlProps = {
   projectId: number
-  source: ChapterGenerationSourceView | null
+  authority: ChapterSourceAuthorityState
   modelOptions: Array<{ value: number; label: React.ReactNode }>
   selectedModelId?: number
   compact: boolean
   locallyBusy: boolean
-  onConfirmed: (source: ChapterGenerationSourceView) => void
+  beginSourceOperation: () => ChapterSourceOperationToken
+  assertSourceOperationCurrent: (token: ChapterSourceOperationToken) => void
+  onAuthorityChange: (state: ChapterSourceAuthorityState) => void
   onSelectedModelConfirmed: (modelId: number) => void
   onOpenSettings: () => void
 }
 ```
 
-Use an Ant Design `Segmented` or button group with only `model` and `mcp`. Activation calls `chapterSourceApi.activate` and commits the returned state only after success. If the call has no HTTP response, run `chapterSourceApi.get(projectId)` once and commit that authoritative view; do not restore the previous source blindly and do not retry activation. A definite HTTP error keeps the last confirmed view. Model selection and MCP binding save use the same reconciliation rule. Model selection calls `saveModel` before committing the visible value. `source.locked || locallyBusy || pending` disables all mutation controls, including during reconciliation GET.
+Use an Ant Design `Segmented` or button group with only `model` and `mcp`. At the start of activation, capture `const operationProjectId = projectId` and `const token = beginSourceOperation()`. Call `commitConfirmedSource` with `chapterSourceApi.activate(operationProjectId, active)`, one `chapterSourceApi.get(operationProjectId)`, and `assertCurrent: () => assertSourceOperationCurrent(token)`. After the helper returns, assert the token again immediately before `onAuthorityChange(confirmedAuthorityState(result.source))` or `onSelectedModelConfirmed`. Do not restore the previous source blindly and do not retry activation.
+
+Handle each rejected class explicitly:
+
+- `StaleChapterSourceOperationError`: discard without notification, setter, disabled-state change, or settings callback.
+- `ChapterSourceAuthorityUnknownError`: assert the token at the setter boundary, store `authorityUnknownState(error.previous, error)`, and show only `章节来源权威状态暂时无法确认，请重新获取`.
+- definite HTTP error: assert the token before formatting or notifying; retain the confirmed authority state, and call `onOpenSettings` only for the current token's explicit incomplete/invalid MCP code.
+
+Render `重新获取` only for `authority.authorityUnknown`. Its click captures a new token and calls `refreshChapterSourceAuthority` with exactly one `chapterSourceApi.get(operationProjectId)`. Assert before storing the returned state. A failed refresh keeps the same unknown state and does not trigger a `useEffect`, timer, mutation replay, or another GET; a successful refresh replaces the source and clears the warning.
+
+Model selection and MCP binding save use the identical project/token capture, confirmed-commit, reconciliation, and setter-side assertion. Model selection calls `saveModel` before committing the visible value. `authority.source?.locked || locallyBusy || pending || authority.authorityUnknown` disables all activation, model, MCP test/save, and binding controls, including during the one reconciliation GET. The refresh button is the only source action left available in authority-unknown state.
 
 - [ ] **Step 4: Make MCP status controlled by authoritative source**
 
@@ -2578,28 +2805,34 @@ At the top of `ProjectSettingsModal`, render `当前章节来源` using the same
 - save through `/mcp`;
 - display `保存绑定不会启用 MCP；章节来源需单独切换`;
 - keep the tested fingerprint requirement;
-- disable all controls when `source.locked`;
-- call `onSaved(returnedSource)` without activating MCP.
+- disable all controls when `authority.source?.locked`, `authority.authorityUnknown`, or a guarded source operation is pending;
+- capture the same `operationProjectId` and operation token for save, run `saveMcp` through `commitConfirmedSource`, and assert current before authority/error/settings setters;
+- on reconciliation GET failure, store authority unknown and leave only `重新获取` available; never repeat `saveMcp` automatically;
+- call `onSaved(returnedSource)` only after the token assertion and without activating MCP.
 
-- [ ] **Step 6: Wire confirmed state and local task busy status through the shell**
+- [ ] **Step 6: Wire authority state, the project fence, and local task busy status through the shell**
 
-Pass source state and setters from `useNovelWorkspaceData` through the base model, ready runtime, and top-bar prop builder. Derive `locallyBusy` from `generatingProse` plus active `editor_revision`, manual quality, and story-state tasks. Server 409 remains authoritative if local task data is stale.
+Pass authority state, its setter, and `beginChapterSourceOperation`/`assertChapterSourceOperationCurrent` from `useNovelWorkspaceData` through the base model, ready runtime, top-bar prop builder, and project-settings path. The top bar and MCP panel must share the same fence instance; separate component-local counters do not protect cross-surface races. Derive `locallyBusy` from `generatingProse` plus active `editor_revision`, manual quality, and story-state tasks. Server 409 remains authoritative if local task data is stale.
 
 Replace the standalone select and status in `workspace-topbar.tsx` with:
 
 ```tsx
 <ChapterGenerationSourceControl
   projectId={Number(selectedProject?.id || 0)}
-  source={chapterGenerationSource}
+  authority={chapterGenerationSourceAuthority}
   modelOptions={modelOptions}
   selectedModelId={selectedModelId}
   compact={isImmersiveShell}
   locallyBusy={chapterSourceLocallyBusy}
-  onConfirmed={setChapterGenerationSource}
+  beginSourceOperation={beginChapterSourceOperation}
+  assertSourceOperationCurrent={assertChapterSourceOperationCurrent}
+  onAuthorityChange={setChapterGenerationSourceAuthority}
   onSelectedModelConfirmed={setSelectedModelId}
   onOpenSettings={() => setProjectSettingsOpen(true)}
 />
 ```
+
+Project switch must invalidate the old project/load token before closing or opening settings and before resetting pending/unknown UI state. Each async branch still asserts its captured token immediately before calling the callbacks above, so a late A result cannot change project B even though React props have already rerendered.
 
 - [ ] **Step 7: Add active/inactive/busy/compact styles**
 
@@ -2620,7 +2853,7 @@ Preserve current responsive top-bar truncation rules and the existing 440-pixel 
 
 Run: `bun test ui/web/src/pages/novel-workspace/ChapterGenerationSourceControl.test.tsx ui/web/src/pages/novel-workspace/mcpGenerationSourceStatusModel.test.ts ui/web/src/pages/novel-workspace/ProjectSettingsModal.test.ts ui/web/src/pages/novel-workspace/workspaceUiShell.a-a.test.ts`
 
-Expected: PASS for API/MCP mutual exclusion, retained inactive display, busy lock, confirmed transitions, no-response GET reconciliation without mutation retry, and immersive mode.
+Expected: PASS for API/MCP mutual exclusion, retained inactive display, busy/authority-unknown locks, confirmed transitions, single-GET reconciliation and controlled recovery without mutation retry, project/epoch race isolation, and immersive mode.
 
 - [ ] **Step 9: Commit the UI**
 

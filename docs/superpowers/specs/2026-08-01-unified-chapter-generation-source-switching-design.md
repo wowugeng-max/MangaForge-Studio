@@ -232,7 +232,19 @@ The web client therefore distinguishes two outcomes:
 - a received HTTP success or error response is handled according to that response;
 - no HTTP response, a connection reset, or another transport error triggers an authoritative `GET /api/novel/projects/:id/chapter-generation-source` before the UI changes state or decides whether another mutation is needed.
 
-The client must not blindly retry an ambiguous mutation. The GET result replaces the previously confirmed UI state, even when it shows that the first request committed. Server code must not depend on Bun private symbols or fabricate a request signal to strengthen this contract.
+The client must not blindly retry an ambiguous mutation. The first authoritative GET is part of reconciliation and runs exactly once. A successful GET replaces the previously confirmed UI state, even when it shows that the first request committed.
+
+If that GET also fails, the client enters an explicit `authority_unknown` state. The previous confirmed source remains visible only as last-known information; it is not treated as current authority. Activation, model save, MCP test/save, and all binding mutations are disabled, and the UI shows a scrubbed recovery message without interpolating either transport error. The internal `ChapterSourceAuthorityUnknownError` retains the previous view, the mutation transport error, and the read error for local diagnostics, but those causes are never rendered or serialized to a public response.
+
+`authority_unknown` can be cleared only by a later successful authoritative GET. Reconciliation failure does not start a timer, effect loop, or another automatic GET. The user may request one explicit refresh, or an existing bounded workspace refresh may perform one controlled read; a failed refresh leaves the state unknown, while a successful refresh replaces the source and re-enables mutations subject to the ordinary task lock. No recovery path automatically replays the mutation. Server code must not depend on Bun private symbols or fabricate a request signal to strengthen this contract.
+
+### Project and source-operation fencing
+
+Every chapter-source read or mutation is fenced by an immutable token containing `projectId`, the workspace `loadEpoch`, and a monotonically increasing source-operation epoch. The ordinary project-module load keeps its existing `loadEpoch`; its chapter-source GET additionally captures the current source-operation epoch. Activation, model save, MCP save, the one reconciliation GET, and an explicit authority refresh all use the same source-operation epoch domain.
+
+Selecting another project increments the workspace load epoch and invalidates every source token before clearing the old view. Starting any later source operation increments the source-operation epoch, so a late initial GET cannot overwrite a newer mutation and a late mutation cannot overwrite a newer refresh. Unmount invalidates the current token. The source-operation epoch is reset only as an implementation detail after the project epoch changes; equality requires all three token fields, so reset values cannot make an old token current again.
+
+After every awaited boundary, the caller must assert that the token still matches the current project and both epochs before it may commit a source, set or clear `authority_unknown`, change disabled state, format an HTTP error, or open project settings. This guard applies equally to ordinary mutation success, definite HTTP failure, reconciliation success, and reconciliation failure. A stale completion is discarded without UI side effects.
 
 ## Source ownership and locking
 
@@ -275,8 +287,10 @@ The top bar adds one mutually exclusive source control next to both retained con
 - The control stays pending until the mutation response or a reconciliation GET confirms the authoritative state.
 - A received HTTP error keeps the last confirmed source displayed and explains the server-reported reason.
 - A transport error with no HTTP response leaves the mutation outcome ambiguous; the control first reloads the authoritative source, displays that result, and only then reports whether another user action is needed.
+- If the one reconciliation GET fails, the last-known source remains visible with an authority-unknown warning, all source/configuration mutations stay disabled, and only an explicit or otherwise controlled authoritative refresh may recover the control.
 - Ambiguous activation, model-save, and MCP-binding-save requests are never retried automatically.
 - A definite incomplete or invalid MCP HTTP error opens project settings; an ambiguous transport error does not infer that diagnosis.
+- Every success, error, settings-open decision, unknown-state transition, and recovery is project/epoch fenced; a late operation for project A cannot affect project B.
 - While a chapter task is running, activation and configuration controls are disabled with the message: `当前章节任务正在运行，结束后可切换来源`.
 - Normal workspace mode displays both configuration details.
 - Immersive mode displays the compact source switch plus the active source detail.
@@ -295,6 +309,8 @@ Saving MCP configuration never silently activates it.
 - `MCP_BINDING_INVALID`: MCP cannot be activated; retained configuration remains available for repair.
 - Observable request cancellation or deadline expiry: rollback before commit and return the corresponding typed failure when the transport still permits a response.
 - Body-complete Bun/Express disconnect: the server may atomically commit without a response; clients must GET the authoritative source before deciding the outcome.
+- Reconciliation GET failure: retain the last-known view in `authority_unknown`, expose only a scrubbed recovery message, disable every source mutation, and require a later successful authoritative GET.
+- Stale project/operation completion: discard it without changing source, disabled state, error state, or settings visibility.
 - MCP structured output mismatch: the current stage fails without API fallback.
 - Buda send or cancellation uncertainty: preserve the existing receipt, quarantine, reconciliation, and manual-check behavior.
 - Source fingerprint mismatch: reject result acceptance and leave canonical chapter/state data unchanged.
@@ -349,7 +365,9 @@ Raw Keys, authorization headers, cookies, and other credentials remain excluded.
 - Disable the inactive model selector while retaining its value.
 - Retain and display disabled MCP identity.
 - Persist successful activation and keep the previous confirmed view for explicit HTTP failures.
-- Reconcile transport errors through authoritative GET before rendering or retrying.
+- Reconcile a transport error with exactly one authoritative GET and never replay the mutation automatically.
+- On reconciliation read failure, show last-known state as authority unknown, disable every mutation, and recover only after a controlled GET succeeds.
+- Fence initial loads, mutation results, error side effects, reconciliation, and recovery by project/load/source-operation epochs.
 - Lock controls during active tasks.
 - Keep authoritative source identity on partial metadata failure and project switching.
 - Verify normal and immersive layouts.
@@ -374,4 +392,5 @@ The feature is complete when:
 6. no failure silently crosses from one source to the other;
 7. historical projects continue to run and can adopt the new state without manual rebinding;
 8. receipts prove the same source fingerprint was used throughout the task;
-9. planning and setting workflows remain unchanged.
+9. planning and setting workflows remain unchanged;
+10. an unknown client-side source authority cannot be mutated, and no late project operation can alter the current project's source or controls.
