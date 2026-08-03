@@ -2245,6 +2245,7 @@ describe('McpGenerationSource task execution', () => {
     const source = new McpGenerationSource(runtime as any, {
       ...(options.createDeadline ? { createDeadline: options.createDeadline } : {}),
     })
+    let coreExecution: any
     const projectLeases = new ChapterSourceLeaseRegistry()
     const resolver = createGenerationSourceResolver({
       chapterSourceLeases: projectLeases,
@@ -2253,11 +2254,14 @@ describe('McpGenerationSource task execution', () => {
         counters.modelCreations += 1
         throw new Error('API fallback forbidden')
       },
-      mcpSource: options.taskId
-        ? {
-            beginResolvedTask: input => source.beginResolvedTask({ ...input, taskId: options.taskId! }),
-          } as any
-        : source,
+      mcpSource: {
+        beginResolvedTask: async input => {
+          coreExecution = await source.beginResolvedTask(options.taskId
+            ? { ...input, taskId: options.taskId }
+            : input)
+          return coreExecution
+        },
+      } as any,
     })
     const begin = () => resolver.beginTask({
       activeWorkspace,
@@ -2294,6 +2298,7 @@ describe('McpGenerationSource task execution', () => {
       projectLeases,
       begin,
       request,
+      coreExecution: () => coreExecution,
     }
   }
 
@@ -2335,6 +2340,24 @@ describe('McpGenerationSource task execution', () => {
     })
     if (shape === 'revoked-proxy') revocable.revoke()
     return revocable.proxy
+  }
+
+  function runDirectRemoteStage(
+    execution: any,
+    requestId: string,
+    stage: McpChapterStageInput['stage'] = 'quality_review',
+  ) {
+    return execution.runRemoteStage({
+      requestId,
+      stage,
+      responseContract: stage === 'revision' ? 'revision_prose' : 'quality_review_json',
+      prompt: `direct ${stage} stage`,
+    }) as Promise<{
+      content: string
+      session_id: string
+      snapshot_hash: string
+      status: string
+    }>
   }
 
   test('runs a complete multi-stage task through one provider-neutral Session and releases both leases', async () => {
@@ -2864,6 +2887,265 @@ describe('McpGenerationSource task execution', () => {
     expect(releases).toBe(1)
     expect(deadlineCloses).toBe(1)
     expect(fixture.counters).toMatchObject({ generateProse: 0, modelCreations: 0 })
+  })
+
+  test('admits a later sibling stage only after the earlier stage succeeds', async () => {
+    const reached = deferredValue()
+    const release = deferredValue()
+    const adapterOrder: string[] = []
+    let phase: 'warmup' | 'siblings' = 'warmup'
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-stage-tail-success-', {
+      runStage: async (input, session) => {
+        if (phase === 'warmup') {
+          return {
+            content: '通用正文。',
+            session_id: session.sessionId,
+            snapshot_hash: session.snapshotHash,
+            status: 'completed',
+          }
+        }
+        adapterOrder.push(input.requestId)
+        if (input.requestId === 'tail-success-a') {
+          reached.resolve()
+          await release.promise
+        }
+        return {
+          content: '{}',
+          session_id: session.sessionId,
+          snapshot_hash: session.snapshotHash,
+          status: 'completed',
+        }
+      },
+    })
+    const execution = await fixture.begin()
+    await execution.generateDraft(fixture.request({ requestId: 'tail-success-warmup' }))
+    phase = 'siblings'
+
+    const core = fixture.coreExecution()
+    const earlier = runDirectRemoteStage(core, 'tail-success-a')
+    await reached.promise
+    let currentChecks = 0
+    core.input.assertCurrent = async () => { currentChecks += 1 }
+    const later = runDirectRemoteStage(core, 'tail-success-b', 'revision')
+    const laterChecksBeforeRelease = currentChecks
+    release.resolve()
+    const outcomes = await Promise.allSettled([earlier, later])
+    await execution.close({ status: 'success' })
+
+    expect(laterChecksBeforeRelease).toBe(0)
+    expect(outcomes.every(outcome => outcome.status === 'fulfilled')).toBe(true)
+    expect(adapterOrder).toEqual(['tail-success-a', 'tail-success-b'])
+    expect(fixture.counters).toMatchObject({ runStage: 3, close: 1, generateProse: 0, modelCreations: 0 })
+  })
+
+  test('does not send a queued sibling after the active stage fails', async () => {
+    const reached = deferredValue()
+    const release = deferredValue()
+    const firstFailure = new McpError('MCP_SESSION_FAILED', 'first sibling failed', {
+      session_id: 'neutral-session-1',
+      remote_cancel_confirmed: true,
+    })
+    let phase: 'warmup' | 'siblings' = 'warmup'
+    let laterCalls = 0
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-stage-tail-first-fail-', {
+      runStage: async (input, session) => {
+        if (phase === 'warmup') {
+          return {
+            content: '通用正文。',
+            session_id: session.sessionId,
+            snapshot_hash: session.snapshotHash,
+            status: 'completed',
+          }
+        }
+        if (input.requestId === 'tail-first-fail-a') {
+          reached.resolve()
+          await release.promise
+          throw new Error('unreachable after rejected barrier')
+        }
+        laterCalls += 1
+        return {
+          content: 'LATE_SUCCESS',
+          session_id: session.sessionId,
+          snapshot_hash: session.snapshotHash,
+          status: 'completed',
+        }
+      },
+    })
+    const execution = await fixture.begin()
+    await execution.generateDraft(fixture.request({ requestId: 'tail-first-fail-warmup' }))
+    phase = 'siblings'
+
+    const core = fixture.coreExecution()
+    const earlier = runDirectRemoteStage(core, 'tail-first-fail-a')
+    await reached.promise
+    let currentChecks = 0
+    core.input.assertCurrent = async () => { currentChecks += 1 }
+    const later = runDirectRemoteStage(core, 'tail-first-fail-b', 'revision')
+    const laterChecksBeforeFailure = currentChecks
+    release.reject(firstFailure)
+    const outcomes = await Promise.allSettled([earlier, later])
+    await execution.close({ status: 'failed', error: firstFailure }).catch(() => {})
+
+    expect(laterChecksBeforeFailure).toBe(0)
+    expect(outcomes).toEqual([
+      expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ code: 'MCP_SESSION_FAILED' }) }),
+      expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ code: 'MCP_SESSION_FAILED' }) }),
+    ])
+    expect(laterCalls).toBe(0)
+    expect(fixture.counters).toMatchObject({ runStage: 2, close: 1, generateProse: 0, modelCreations: 0 })
+  })
+
+  test('never returns a concurrent sibling after an ambiguous or ordinary terminal failure', async () => {
+    for (const variant of [
+      {
+        name: 'ambiguous',
+        code: 'MCP_SEND_UNKNOWN',
+        error: new McpError('MCP_SEND_UNKNOWN', 'sibling send outcome unknown', {
+          receipt_status: 'send_unknown',
+          session_id: 'neutral-session-1',
+          remote_cancel_confirmed: false,
+        }),
+      },
+      {
+        name: 'ordinary',
+        code: 'MCP_SESSION_FAILED',
+        error: new McpError('MCP_SESSION_FAILED', 'ordinary sibling failure', {
+          session_id: 'neutral-session-1',
+          remote_cancel_confirmed: true,
+        }),
+      },
+    ] as const) {
+      const failedStageReached = deferredValue()
+      let phase: 'warmup' | 'siblings' = 'warmup'
+      let checksWhenFailureReached = 0
+      let lateCalls = 0
+      const fixture = await neutralTaskFixture(`mangaforge-mcp-task-stage-tail-${variant.name}-`, {
+        runStage: async (input, session) => {
+          if (phase === 'warmup') {
+            return {
+              content: '通用正文。',
+              session_id: session.sessionId,
+              snapshot_hash: session.snapshotHash,
+              status: 'completed',
+            }
+          }
+          if (input.requestId === `tail-${variant.name}-failure`) {
+            checksWhenFailureReached = currentChecks
+            failedStageReached.resolve()
+            throw variant.error
+          }
+          lateCalls += 1
+          return {
+            content: 'LATE_SUCCESS',
+            session_id: session.sessionId,
+            snapshot_hash: session.snapshotHash,
+            status: 'completed',
+          }
+        },
+      })
+      const execution = await fixture.begin()
+      await execution.generateDraft(fixture.request({ requestId: `tail-${variant.name}-warmup` }))
+      phase = 'siblings'
+      let currentChecks = 0
+      const core = fixture.coreExecution()
+      core.input.assertCurrent = async () => { currentChecks += 1 }
+
+      const failure = runDirectRemoteStage(core, `tail-${variant.name}-failure`)
+      const late = runDirectRemoteStage(core, `tail-${variant.name}-late`, 'revision')
+      await failedStageReached.promise
+      const outcomes = await Promise.allSettled([failure, late])
+      await execution.close({ status: 'failed', error: variant.error }).catch(() => {})
+
+      expect(checksWhenFailureReached).toBe(1)
+      expect(outcomes).toEqual([
+        expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ code: variant.code }) }),
+        expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ code: variant.code }) }),
+      ])
+      expect(lateCalls).toBe(0)
+      expect(fixture.counters).toMatchObject({ runStage: 2, close: 1, generateProse: 0, modelCreations: 0 })
+    }
+  })
+
+  test('waits queued sibling stages on close without a cleanup promise cycle', async () => {
+    const reached = deferredValue()
+    const release = deferredValue<{
+      content: string
+      session_id: string
+      snapshot_hash: string
+      status: 'completed'
+    }>()
+    let phase: 'warmup' | 'siblings' = 'warmup'
+    let laterCalls = 0
+    let staged = 0
+    let clears = 0
+    let releases = 0
+    let deadlineCloses = 0
+    const lease = {
+      tupleKey: 'queued-close-stage-tail',
+      binding: { serverId: 'neutral-task-server', keyId: 1, agentId: 'neutral-agent-1' },
+      stageSessionFence: async () => { staged += 1 },
+      quarantine: async () => {},
+      clearSessionFence: async () => { clears += 1 },
+      release: async () => { releases += 1 },
+    }
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-stage-tail-close-', {
+      acquireAgentLease: async () => lease,
+      runStage: (input, session) => {
+        if (phase === 'warmup') {
+          return Promise.resolve({
+            content: '通用正文。',
+            session_id: session.sessionId,
+            snapshot_hash: session.snapshotHash,
+            status: 'completed',
+          })
+        }
+        if (input.requestId === 'tail-close-a') {
+          reached.resolve()
+          return release.promise
+        }
+        laterCalls += 1
+        return Promise.resolve({
+          content: 'LATE_SUCCESS',
+          session_id: session.sessionId,
+          snapshot_hash: session.snapshotHash,
+          status: 'completed',
+        })
+      },
+      createDeadline: (totalMs, signal) => {
+        const deadline = new McpGenerationDeadline(totalMs, signal)
+        const close = deadline.close.bind(deadline)
+        deadline.close = () => { deadlineCloses += 1; close() }
+        return deadline
+      },
+    })
+    const execution = await fixture.begin()
+    await execution.generateDraft(fixture.request({ requestId: 'tail-close-warmup' }))
+    phase = 'siblings'
+
+    const core = fixture.coreExecution()
+    const earlier = runDirectRemoteStage(core, 'tail-close-a')
+    await reached.promise
+    const later = runDirectRemoteStage(core, 'tail-close-b', 'revision')
+    let closeSettled = false
+    const closing = execution.close({ status: 'cancelled' }).finally(() => { closeSettled = true })
+    await Promise.resolve()
+    expect(closeSettled).toBe(false)
+    release.resolve({
+      content: '{}',
+      session_id: 'neutral-session-1',
+      snapshot_hash: 'neutral-snapshot-1',
+      status: 'completed',
+    })
+    const outcomes = await Promise.allSettled([earlier, later, closing])
+
+    expect(outcomes.every(outcome => outcome.status === 'rejected')).toBe(true)
+    expect(laterCalls).toBe(0)
+    expect(staged).toBe(1)
+    expect(fixture.counters.close).toBe(1)
+    expect(clears).toBe(1)
+    expect(releases).toBe(1)
+    expect(deadlineCloses).toBe(1)
+    expect(fixture.counters).toMatchObject({ runStage: 2, generateProse: 0, modelCreations: 0 })
   })
 
   test('opens a new task and a new Session after the previous task closes', async () => {
@@ -3768,6 +4050,98 @@ describe('McpGenerationSource task execution', () => {
     const taskReceipt = (await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
       .find(run => run.run_type === 'mcp_chapter_task')
     expect(taskReceipt).toMatchObject({ status: 'send_unknown' })
+  })
+
+  test('latches unknown termination first observed while closing a successful Session', async () => {
+    const unknownClose = new McpError('MCP_SESSION_FAILED', 'neutral close outcome unknown', {
+      receipt_status: 'remote_cancel_unknown',
+      session_id: 'neutral-session-1',
+      remote_cancel_confirmed: false,
+    })
+    const registry = new McpAgentLeaseRegistry()
+    const events: string[] = []
+    let staged = 0
+    let quarantines = 0
+    let clears = 0
+    let releases = 0
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-close-origin-unknown-', {
+      closeSession: async () => {
+        events.push('session_close')
+        throw unknownClose
+      },
+      acquireAgentLease: async (activeWorkspace, binding) => {
+        const acquired = await registry.acquire(activeWorkspace, binding)
+        return {
+          ...acquired,
+          stageSessionFence: async (input: any) => {
+            staged += 1
+            events.push('stage')
+            await acquired.stageSessionFence(input)
+          },
+          quarantine: async (input: any) => {
+            quarantines += 1
+            events.push('quarantine')
+            await acquired.quarantine(input)
+          },
+          clearSessionFence: async () => {
+            clears += 1
+            events.push('clear')
+            await acquired.clearSessionFence()
+          },
+          release: async () => {
+            releases += 1
+            events.push('release')
+            await acquired.release()
+          },
+        }
+      },
+    })
+    const execution = await fixture.begin()
+    const result = await execution.generateDraft(fixture.request())
+
+    const exposed: any = await execution.close({ status: 'success' }).catch(error => error)
+
+    expect(result.prose_chapters?.[0]?.chapter_text).toBe('通用正文。')
+    expect(exposed).toMatchObject({
+      code: 'MCP_SESSION_FAILED',
+      details: {
+        receipt_status: 'remote_cancel_unknown',
+        session_id: 'neutral-session-1',
+        remote_cancel_confirmed: false,
+      },
+    })
+    expect(staged).toBe(1)
+    expect(quarantines).toBe(1)
+    expect(clears).toBe(0)
+    expect(releases).toBe(1)
+    expect(events).toEqual(['stage', 'session_close', 'quarantine', 'release'])
+    expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([
+      expect.objectContaining({
+        session_id: 'neutral-session-1',
+        reason: 'remote_cancel_unknown',
+      }),
+    ])
+    expect(await registry.isActive(fixture.activeWorkspace, {
+      serverId: fixture.server.id,
+      keyId: fixture.key.id,
+      agentId: 'neutral-agent-1',
+    })).toBe(false)
+
+    const retry = await fixture.begin()
+    await expect(retry.generateDraft(fixture.request({ requestId: 'retry-after-close-unknown' })))
+      .rejects.toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    await expect(retry.close({ status: 'failed' }))
+      .rejects.toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    expect(fixture.counters).toMatchObject({
+      open: 1,
+      runStage: 1,
+      getAdapter: 1,
+      generateProse: 0,
+      modelCreations: 0,
+    })
+    const taskReceipt = (await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
+      .find(run => run.run_type === 'mcp_chapter_task')
+    expect(taskReceipt).toMatchObject({ status: 'remote_cancel_unknown' })
   })
 
   test('quarantines remote-cancel-unknown after a stage failure and retains its durable fence', async () => {

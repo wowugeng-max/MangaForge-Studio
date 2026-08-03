@@ -620,6 +620,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
   private deadlineClosed = false
   private closeRequested = false
   private readonly activeOperations = new Set<Promise<void>>()
+  private stageTail: Promise<void> = Promise.resolve()
   private releasePromise?: Promise<void>
   private cleanupPromise?: Promise<void>
   private terminalError?: Error
@@ -996,7 +997,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     try {
       await this.persistTaskReceipt(receiptStatus, terminalError)
     } catch (receiptError) {
-      receiptPersistenceError = scrubGenerationError(receiptError, this.scrubber)
+      receiptPersistenceError = this.latchTerminalFailure(receiptError)
       terminalError = receiptPersistenceError
     }
     if (this.session) {
@@ -1009,10 +1010,19 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
         await pendingClose
       } catch (closeError) {
         const scrubbedCloseError = scrubGenerationError(closeError, this.scrubber)
+        this.latchTerminalFailure(scrubbedCloseError)
         if (this.ambiguousError && this.ambiguousStatus) {
           primaryError = this.ambiguousError
           terminalError = primaryError
-          receiptStatus = this.ambiguousStatus
+          if (receiptStatus !== this.ambiguousStatus) {
+            receiptStatus = this.ambiguousStatus
+            try {
+              await this.persistTaskReceipt(receiptStatus, primaryError)
+            } catch (receiptError) {
+              receiptPersistenceError = this.latchTerminalFailure(receiptError)
+              terminalError = receiptPersistenceError
+            }
+          }
         } else {
           primaryError = scrubbedCloseError
           terminalError = primaryError
@@ -1020,11 +1030,16 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
           try {
             await this.persistTaskReceipt(receiptStatus, primaryError)
           } catch (receiptError) {
-            receiptPersistenceError = scrubGenerationError(receiptError, this.scrubber)
+            receiptPersistenceError = this.latchTerminalFailure(receiptError)
             terminalError = receiptPersistenceError
           }
         }
       }
+    }
+    if (this.ambiguousError && this.ambiguousStatus) {
+      primaryError = this.ambiguousError
+      receiptStatus = this.ambiguousStatus
+      if (!receiptPersistenceError) terminalError = primaryError
     }
     const ambiguous = this.lease && this.ambiguousError && this.ambiguousStatus
     if (ambiguous) {
@@ -1140,9 +1155,22 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
   }
 
   private runRemoteStage(input: McpChapterStageInput): Promise<McpChapterStageResult> {
+    if (this.failurePromise) return this.failurePromise
     if (this.closeRequested) return this.failRemote(this.closedError())
-    const operation = this.trackActiveOperation(this.performRemoteStage(input))
-    return operation.catch(error => this.failRemote(error))
+    const operation = this.stageTail.then(async () => {
+      if (this.failurePromise) return this.failurePromise
+      if (this.closeRequested) return this.failRemote(this.closedError())
+      try {
+        return await this.performRemoteStage(input)
+      } catch (error) {
+        return this.failRemote(error)
+      }
+    })
+    this.stageTail = operation.then(
+      () => undefined,
+      () => undefined,
+    )
+    return this.trackActiveOperation(operation)
   }
 
   async generateDraft(request: ProseGenerationRequest): Promise<ProseGenerationResult> {
