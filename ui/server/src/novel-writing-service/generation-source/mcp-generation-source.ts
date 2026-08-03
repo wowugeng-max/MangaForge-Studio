@@ -615,9 +615,17 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
   private remoteSessionId = ''
   private remoteSnapshotHash = ''
   private sessionFenceStaged = false
+  private sessionFencePromise?: Promise<void>
   private stageSequence = 0
   private deadlineClosed = false
+  private closeRequested = false
+  private readonly activeOperations = new Set<Promise<void>>()
   private releasePromise?: Promise<void>
+  private cleanupPromise?: Promise<void>
+  private terminalError?: Error
+  private terminalStatus?: string
+  private ambiguousError?: Error
+  private ambiguousStatus?: Extract<McpGenerationReceiptStatus, 'send_unknown' | 'remote_cancel_unknown'>
   private failurePromise?: Promise<never>
   private closePromise?: Promise<void>
 
@@ -692,6 +700,50 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     }
   }
 
+  private closedError() {
+    return new McpError('MCP_CANCELLED', 'MCP 章节任务已经关闭', {
+      remote_cancel_confirmed: true,
+    })
+  }
+
+  private throwIfCloseRequested() {
+    if (this.closeRequested) throw this.closedError()
+  }
+
+  private trackActiveOperation<T>(operation: Promise<T>) {
+    const settled = operation.then(
+      () => undefined,
+      () => undefined,
+    )
+    this.activeOperations.add(settled)
+    void settled.finally(() => this.activeOperations.delete(settled))
+    return operation
+  }
+
+  private latchTerminalFailure(error: unknown, requestedStatus?: string) {
+    const scrubbed = scrubGenerationError(error, this.scrubber)
+    const receiptStatus = receiptStatusForError(scrubbed)
+    const ambiguous = !remoteCancelConfirmed(scrubbed)
+      && (receiptStatus === 'send_unknown' || receiptStatus === 'remote_cancel_unknown')
+    if (ambiguous && !this.ambiguousError) {
+      this.ambiguousError = scrubbed
+      this.ambiguousStatus = receiptStatus
+      this.terminalError = scrubbed
+      this.terminalStatus = receiptStatus
+    } else if (!this.terminalError) {
+      this.terminalError = scrubbed
+      this.terminalStatus = requestedStatus || receiptStatus
+    }
+    return scrubbed
+  }
+
+  private ensureTerminalCleanup(error?: unknown, status = 'failed') {
+    if (error !== undefined) this.latchTerminalFailure(error, status)
+    else if (!this.terminalStatus) this.terminalStatus = status
+    if (!this.cleanupPromise) this.cleanupPromise = this.terminalCleanup()
+    return this.cleanupPromise
+  }
+
   private taskReceiptOutput(status: string, error?: unknown) {
     const provenance = this.provenance()
     const scrubbed = error ? scrubGenerationError(error, this.scrubber) : undefined
@@ -720,11 +772,16 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
   }
 
   private async onSessionProgress(event: unknown) {
+    this.throwIfCloseRequested()
     const projectedEvent = projectedRecord(event)
     const rawSessionId = ownDataValue(event, 'session_id')
     const rawSnapshotHash = ownDataValue(event, 'snapshot_hash')
     if (rawSessionId !== undefined) {
-      this.remoteSessionId = acceptRemoteId(rawSessionId, 'Session 标识')
+      const acceptedSessionId = acceptRemoteId(rawSessionId, 'Session 标识')
+      if (this.remoteSessionId && acceptedSessionId !== this.remoteSessionId) {
+        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter Session 标识在任务期间发生变化')
+      }
+      this.remoteSessionId = acceptedSessionId
       defineEnumerableData(
         projectedEvent,
         'session_id',
@@ -732,7 +789,11 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
       )
     }
     if (rawSnapshotHash !== undefined) {
-      this.remoteSnapshotHash = acceptRemoteId(rawSnapshotHash, 'snapshot fingerprint')
+      const acceptedSnapshotHash = acceptRemoteId(rawSnapshotHash, 'snapshot fingerprint')
+      if (this.remoteSnapshotHash && acceptedSnapshotHash !== this.remoteSnapshotHash) {
+        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter snapshot fingerprint 在任务期间发生变化')
+      }
+      this.remoteSnapshotHash = acceptedSnapshotHash
       defineEnumerableData(
         projectedEvent,
         'snapshot_hash',
@@ -748,24 +809,37 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
       : ''
     if (scrubbedEvent?.stage === 'session_created') {
       if (!this.remoteSessionId) throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 未提供 Session 标识')
+      await this.ensureSessionFence()
+    }
+    await this.input.onProgress?.(scrubbedEvent)
+  }
+
+  private ensureSessionFence() {
+    if (this.sessionFencePromise) return this.sessionFencePromise
+    this.sessionFencePromise = (async () => {
+      this.throwIfCloseRequested()
       await this.persistTaskReceipt('session_created')
+      this.throwIfCloseRequested()
       await this.lease!.stageSessionFence({
         requestId: safeOutboundRequestId(this.scrubber, this.taskId),
         sessionId: this.sessionId,
       })
       this.sessionFenceStaged = true
-    }
-    await this.input.onProgress?.(scrubbedEvent)
+    })()
+    return this.sessionFencePromise
   }
 
   private async openSession() {
     return withMcpWorkspaceMutation(this.input.activeWorkspace, async () => {
+      this.throwIfCloseRequested()
       const currentSnapshot = await readBindingCredentialSnapshot(this.input.activeWorkspace, this.binding)
+      this.throwIfCloseRequested()
       this.rotateScrubber(currentSnapshot)
       const latestProject = await getNovelProject(
         this.input.activeWorkspace,
         Number(this.input.project?.id || 0),
       )
+      this.throwIfCloseRequested()
       let currentFingerprint = ''
       try {
         currentFingerprint = latestProject
@@ -781,11 +855,14 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
         this.binding.server_id,
         { ...selected, activeWorkspace: this.input.activeWorkspace },
       )
-      this.lease = await this.runtime.acquireAgentLease(this.input.activeWorkspace, {
+      this.throwIfCloseRequested()
+      const lease = await this.runtime.acquireAgentLease(this.input.activeWorkspace, {
         serverId: this.binding.server_id,
         keyId: this.binding.key_id,
         agentId: this.binding.agent_id,
       })
+      this.lease = lease
+      this.throwIfCloseRequested()
       this.deadline = this.createDeadline(pinnedCredential.server.generation_timeout_ms, this.input.signal)
       this.deadline.throwIfAborted()
       const resolved = await this.runtime.getAdapterForKey(
@@ -794,6 +871,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
         this.remoteOptions(pinnedCredential.server.startup_timeout_ms),
         pinnedCredential,
       )
+      this.throwIfCloseRequested()
       this.rotateScrubber(currentSnapshot, resolved)
       if (resolved.server.adapter_id !== this.binding.adapter_id
         || resolved.adapter.id !== this.binding.adapter_id) {
@@ -804,6 +882,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
       )
       assertSafeAwaitable(pendingAgents, invalidAgentList)
       const agentIds = projectAgentIds(await pendingAgents)
+      this.throwIfCloseRequested()
       if (!agentIds.includes(this.binding.agent_id)) {
         throw new McpError('MCP_BINDING_INVALID', '项目绑定的 MCP Agent 不存在或不可访问')
       }
@@ -820,6 +899,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
         output_ref: JSON.stringify(this.taskReceiptOutput('running')),
       })
       this.taskReceiptId = taskRun.id
+      this.throwIfCloseRequested()
       const continuity = this.input.contextPackage?.continuity || {}
       const pendingSession = resolved.adapter.openChapterTask({
         activeWorkspace: this.input.activeWorkspace,
@@ -850,6 +930,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
       const rawSession = await pendingSession
       const sessionPort = projectChapterTaskSessionPort(rawSession)
       this.session = sessionPort
+      this.throwIfCloseRequested()
       const returnedRemoteSessionId = acceptRemoteId(
         ownDataValue(rawSession, 'sessionId'),
         'Session 标识',
@@ -875,19 +956,15 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
       }
       this.session = session
       if (!this.sessionFenceStaged) {
-        await this.persistTaskReceipt('session_created')
-        await this.lease.stageSessionFence({
-          requestId: safeOutboundRequestId(this.scrubber, this.taskId),
-          sessionId: this.sessionId,
-        })
-        this.sessionFenceStaged = true
+        await this.ensureSessionFence()
       }
+      this.throwIfCloseRequested()
       return session
     })
   }
 
   private getSession() {
-    if (this.closePromise || this.failurePromise) {
+    if (this.closeRequested || this.closePromise || this.failurePromise) {
       return Promise.reject(new McpError('MCP_RUNTIME_ERROR', 'MCP 章节任务已经终止'))
     }
     if (this.sessionPromise) return this.sessionPromise
@@ -911,11 +988,11 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     this.deadline?.close()
   }
 
-  private async terminalCleanup(error?: unknown, status = 'failed') {
-    let primaryError = error ? scrubGenerationError(error, this.scrubber) : undefined
+  private async terminalCleanup() {
+    let primaryError = this.ambiguousError || this.terminalError
     let terminalError = primaryError
     let receiptPersistenceError: Error | undefined
-    let receiptStatus = error ? receiptStatusForError(primaryError) : status
+    let receiptStatus = this.ambiguousStatus || this.terminalStatus || 'failed'
     try {
       await this.persistTaskReceipt(receiptStatus, terminalError)
     } catch (receiptError) {
@@ -924,22 +1001,32 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     }
     if (this.session) {
       try {
-        await this.session.close()
+        const pendingClose = this.session.close()
+        assertSafeAwaitable(
+          pendingClose,
+          () => new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的 Session close 结果'),
+        )
+        await pendingClose
       } catch (closeError) {
-        primaryError = scrubGenerationError(closeError, this.scrubber)
-        terminalError = primaryError
-        receiptStatus = receiptStatusForError(primaryError)
-        try {
-          await this.persistTaskReceipt(receiptStatus, primaryError)
-        } catch (receiptError) {
-          receiptPersistenceError = scrubGenerationError(receiptError, this.scrubber)
-          terminalError = receiptPersistenceError
+        const scrubbedCloseError = scrubGenerationError(closeError, this.scrubber)
+        if (this.ambiguousError && this.ambiguousStatus) {
+          primaryError = this.ambiguousError
+          terminalError = primaryError
+          receiptStatus = this.ambiguousStatus
+        } else {
+          primaryError = scrubbedCloseError
+          terminalError = primaryError
+          receiptStatus = receiptStatusForError(primaryError)
+          try {
+            await this.persistTaskReceipt(receiptStatus, primaryError)
+          } catch (receiptError) {
+            receiptPersistenceError = scrubGenerationError(receiptError, this.scrubber)
+            terminalError = receiptPersistenceError
+          }
         }
       }
     }
-    const ambiguous = this.lease
-      && !remoteCancelConfirmed(primaryError)
-      && (receiptStatus === 'send_unknown' || receiptStatus === 'remote_cancel_unknown')
+    const ambiguous = this.lease && this.ambiguousError && this.ambiguousStatus
     if (ambiguous) {
       try {
         await this.lease!.quarantine({
@@ -948,7 +1035,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
             this.scrubber,
             errorSessionId(primaryError) || this.sessionId,
           ),
-          reason: receiptStatus as 'send_unknown' | 'remote_cancel_unknown',
+          reason: this.ambiguousStatus!,
         })
       } catch (quarantineError) {
         this.closeDeadline()
@@ -956,7 +1043,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
         throw unresolvedStoreError(
           persistenceError,
           primaryError,
-          receiptStatus as 'send_unknown' | 'remote_cancel_unknown',
+          this.ambiguousStatus!,
           boundedScrubbedId(
             this.scrubber,
             errorSessionId(primaryError) || this.sessionId,
@@ -974,7 +1061,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
         terminalError = unresolvedStoreError(
           receiptPersistenceError,
           primaryError,
-          receiptStatus as 'send_unknown' | 'remote_cancel_unknown',
+          this.ambiguousStatus,
           boundedScrubbedId(
             this.scrubber,
             errorSessionId(primaryError) || this.sessionId,
@@ -1011,42 +1098,51 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
 
   private failRemote(error: unknown): Promise<never> {
     if (this.failurePromise) return this.failurePromise
-    this.failurePromise = this.terminalCleanup(error, receiptStatusForError(error)).then(
-      () => { throw scrubGenerationError(error, this.scrubber) },
+    const scrubbed = this.latchTerminalFailure(error)
+    this.failurePromise = this.ensureTerminalCleanup().then(
+      () => { throw scrubbed },
       cleanupError => { throw cleanupError },
     )
     return this.failurePromise
   }
 
-  private async runRemoteStage(input: McpChapterStageInput): Promise<McpChapterStageResult> {
-    try {
-      await this.input.assertCurrent()
-      this.deadline?.throwIfAborted()
-      const session = await this.getSession()
-      this.deadline?.throwIfAborted()
-      const pendingResult = session.runStage({
-        ...input,
-        requestId: safeOutboundRequestId(this.scrubber, input.requestId),
-      })
-      assertSafeAwaitable(
-        pendingResult,
-        () => new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的 stage 结果'),
-      )
-      const result = projectMcpChapterStageResult(await pendingResult)
-      this.deadline?.throwIfAborted()
-      if (result.session_id !== this.remoteSessionId
-        || result.snapshot_hash !== this.remoteSnapshotHash) {
-        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了不属于当前任务 Session 的 stage 结果')
-      }
-      await this.input.assertCurrent()
-      return {
-        ...result,
-        session_id: boundedScrubbedId(this.scrubber, result.session_id),
-        snapshot_hash: boundedScrubbedId(this.scrubber, result.snapshot_hash),
-      }
-    } catch (error) {
-      return this.failRemote(error)
+  private async performRemoteStage(input: McpChapterStageInput): Promise<McpChapterStageResult> {
+    this.throwIfCloseRequested()
+    await this.input.assertCurrent()
+    this.throwIfCloseRequested()
+    this.deadline?.throwIfAborted()
+    const session = await this.getSession()
+    this.throwIfCloseRequested()
+    this.deadline?.throwIfAborted()
+    const pendingResult = session.runStage({
+      ...input,
+      requestId: safeOutboundRequestId(this.scrubber, input.requestId),
+    })
+    assertSafeAwaitable(
+      pendingResult,
+      () => new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的 stage 结果'),
+    )
+    const rawResult = await pendingResult
+    this.throwIfCloseRequested()
+    const result = projectMcpChapterStageResult(rawResult)
+    this.deadline?.throwIfAborted()
+    if (result.session_id !== this.remoteSessionId
+      || result.snapshot_hash !== this.remoteSnapshotHash) {
+      throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了不属于当前任务 Session 的 stage 结果')
     }
+    await this.input.assertCurrent()
+    this.throwIfCloseRequested()
+    return {
+      ...result,
+      session_id: boundedScrubbedId(this.scrubber, result.session_id),
+      snapshot_hash: boundedScrubbedId(this.scrubber, result.snapshot_hash),
+    }
+  }
+
+  private runRemoteStage(input: McpChapterStageInput): Promise<McpChapterStageResult> {
+    if (this.closeRequested) return this.failRemote(this.closedError())
+    const operation = this.trackActiveOperation(this.performRemoteStage(input))
+    return operation.catch(error => this.failRemote(error))
   }
 
   async generateDraft(request: ProseGenerationRequest): Promise<ProseGenerationResult> {
@@ -1114,11 +1210,15 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
   }
 
   close(outcome: { status: 'success' | 'failed' | 'cancelled'; error?: unknown } = { status: 'success' }) {
-    if (this.failurePromise) return this.failurePromise.then(() => {})
+    this.closeRequested = true
     if (this.closePromise) return this.closePromise
-    this.closePromise = this.sessionPromise || this.session
-      ? this.terminalCleanup(outcome.error, outcome.status)
-      : Promise.resolve()
+    const active = [...this.activeOperations]
+    const opening = this.sessionPromise
+    this.closePromise = (async () => {
+      if (active.length) await Promise.all(active)
+      else if (opening) await opening.catch(() => {})
+      await this.ensureTerminalCleanup(outcome.error, outcome.status)
+    })()
     return this.closePromise
   }
 }
