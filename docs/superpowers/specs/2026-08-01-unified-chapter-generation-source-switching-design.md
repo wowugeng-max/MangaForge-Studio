@@ -221,6 +221,19 @@ MCP test and save operations remain separate from activation. They validate Serv
 
 The existing prose-source endpoints remain compatibility adapters for this implementation phase. They translate historical requests into the new state without deleting a retained binding. Removing those adapters is outside this phase. New workspace code uses only chapter-source endpoints.
 
+### Mutation transport outcome contract
+
+Source mutation rollback is guaranteed when the server can observe cancellation before commit: an upstream `AbortSignal`, an abnormal request/response lifecycle event exposed by the HTTP runtime, or the absolute validation deadline. Those paths abort remote validation and recheck the same signal/deadline at the transaction commit boundary.
+
+An HTTP client disconnect is not itself a portable rollback protocol. In the production Bun + Express compatibility stack, `express.json()` can consume a complete request body and close the Node-style request stream normally. If the peer disconnects afterward while live validation is pending, Bun may expose no later `req`, `res`, or socket cancellation event. The mutation is then allowed to finish atomically even though the client receives no HTTP response. Its outcome is **ambiguous to the client**, not a confirmed failure.
+
+The web client therefore distinguishes two outcomes:
+
+- a received HTTP success or error response is handled according to that response;
+- no HTTP response, a connection reset, or another transport error triggers an authoritative `GET /api/novel/projects/:id/chapter-generation-source` before the UI changes state or decides whether another mutation is needed.
+
+The client must not blindly retry an ambiguous mutation. The GET result replaces the previously confirmed UI state, even when it shows that the first request committed. Server code must not depend on Bun private symbols or fabricate a request signal to strengthen this contract.
+
 ## Source ownership and locking
 
 A project-level chapter-source lease is required for every covered task, including API tasks and standalone manual review, revision, or story-state synchronization. The lease is distinct from, and composes with, the MCP Agent lease.
@@ -259,9 +272,11 @@ The top bar adds one mutually exclusive source control next to both retained con
 ### Switching behavior
 
 - Only the mutually exclusive source control activates a source.
-- The control shows a pending state until the server confirms the switch.
-- On failure, the confirmed server state remains displayed and the error explains the reason.
-- Attempting to activate an incomplete or invalid MCP binding opens project settings after the error.
+- The control stays pending until the mutation response or a reconciliation GET confirms the authoritative state.
+- A received HTTP error keeps the last confirmed source displayed and explains the server-reported reason.
+- A transport error with no HTTP response leaves the mutation outcome ambiguous; the control first reloads the authoritative source, displays that result, and only then reports whether another user action is needed.
+- Ambiguous activation, model-save, and MCP-binding-save requests are never retried automatically.
+- A definite incomplete or invalid MCP HTTP error opens project settings; an ambiguous transport error does not infer that diagnosis.
 - While a chapter task is running, activation and configuration controls are disabled with the message: `当前章节任务正在运行，结束后可切换来源`.
 - Normal workspace mode displays both configuration details.
 - Immersive mode displays the compact source switch plus the active source detail.
@@ -278,6 +293,8 @@ Saving MCP configuration never silently activates it.
 - `GENERATION_SOURCE_BUSY`: a covered task currently holds the project lease; no source state changes.
 - `CHAPTER_MODEL_REQUIRED`: API activation or execution has no valid model.
 - `MCP_BINDING_INVALID`: MCP cannot be activated; retained configuration remains available for repair.
+- Observable request cancellation or deadline expiry: rollback before commit and return the corresponding typed failure when the transport still permits a response.
+- Body-complete Bun/Express disconnect: the server may atomically commit without a response; clients must GET the authoritative source before deciding the outcome.
 - MCP structured output mismatch: the current stage fails without API fallback.
 - Buda send or cancellation uncertainty: preserve the existing receipt, quarantine, reconciliation, and manual-check behavior.
 - Source fingerprint mismatch: reject result acceptance and leave canonical chapter/state data unchanged.
@@ -331,7 +348,8 @@ Raw Keys, authorization headers, cookies, and other credentials remain excluded.
 - Show exactly one active segment.
 - Disable the inactive model selector while retaining its value.
 - Retain and display disabled MCP identity.
-- Persist successful activation and roll back failed visual transitions.
+- Persist successful activation and keep the previous confirmed view for explicit HTTP failures.
+- Reconcile transport errors through authoritative GET before rendering or retrying.
 - Lock controls during active tasks.
 - Keep authoritative source identity on partial metadata failure and project switching.
 - Verify normal and immersive layouts.

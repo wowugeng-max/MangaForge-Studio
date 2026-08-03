@@ -216,14 +216,18 @@ function createRequestLifecycle(req: any, res: any) {
   const onResponseClose = () => {
     if (!responseFinished && res.finished !== true && res.writableEnded !== true) cancel()
   }
-  const upstreamSignal = req.signal as AbortSignal | undefined
+  // Request cancellation can be acted on only through signals/events this runtime exposes.
+  // Bun's Express compatibility layer may report a normal req close after express.json() has
+  // consumed the complete body, then expose no later peer disconnect. Do not infer cancellation
+  // from req.destroyed or private Bun handles; a no-response client must re-read source authority.
+  const observableUpstreamSignal = req.signal as AbortSignal | undefined
   const onUpstreamAbort = () => cancel()
   req.on?.('aborted', onRequestAborted)
   req.on?.('close', onRequestClose)
   res.on?.('finish', onResponseFinish)
   res.on?.('close', onResponseClose)
-  upstreamSignal?.addEventListener?.('abort', onUpstreamAbort, { once: true })
-  if (upstreamSignal?.aborted || req.aborted === true) cancel()
+  observableUpstreamSignal?.addEventListener?.('abort', onUpstreamAbort, { once: true })
+  if (observableUpstreamSignal?.aborted || req.aborted === true) cancel()
 
   const throwIfAborted = () => {
     if (controller.signal.aborted) throw controller.signal.reason
@@ -275,7 +279,7 @@ function createRequestLifecycle(req: any, res: any) {
     req.off?.('close', onRequestClose)
     res.off?.('finish', onResponseFinish)
     res.off?.('close', onResponseClose)
-    upstreamSignal?.removeEventListener?.('abort', onUpstreamAbort)
+    observableUpstreamSignal?.removeEventListener?.('abort', onUpstreamAbort)
   }
   return { signal: controller.signal, throwIfAborted, waitForUntil, runRemote, cleanup }
 }

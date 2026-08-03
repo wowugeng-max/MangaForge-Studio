@@ -586,20 +586,21 @@ Also assert:
 - new API activation is idempotent;
 - API activation without `model.model_id` returns `CHAPTER_MODEL_REQUIRED`;
 - MCP activation validates the live binding before persisting `active`;
-- a failed validation leaves the previous state byte-for-byte unchanged;
+- a failed validation that returns a definite HTTP error leaves the previous state byte-for-byte unchanged;
 - MCP test and save do not activate MCP while API is active;
 - old GET returns the active source as `prose_generation_source_v1`;
 - old PUT `model` retains the stored MCP binding;
 - old PUT `mcp` updates the binding and activates MCP;
 - GET reports `locked: true` while a lease is held;
 - concurrent activation/model/binding writes serialize and return only committed state;
-- model-only GET and PUT work when `mcpRuntime` is absent.
+- model-only GET and PUT work when `mcpRuntime` is absent;
+- a real Bun + Express request whose complete JSON body reaches remote validation may still commit after a raw Node `http.request` client disconnects; the client-side result is transport-ambiguous, and a later authoritative GET returns the atomically committed source.
 
 - [ ] **Step 2: Run the route test and verify RED**
 
 Run: `bun test ui/server/src/routes/novel-mcp-binding-routes.test.ts`
 
-Expected: FAIL because the new paths and project lease are not registered.
+Expected for the original five endpoint tests: FAIL because the new paths and project lease are not registered. The later body-complete disconnect characterization may be GREEN immediately on Bun/Express; record that result honestly rather than presenting it as a rollback RED.
 
 - [ ] **Step 3: Add normalized state persistence helpers in the route module**
 
@@ -770,6 +771,8 @@ Pass it to the writing service, project control routes, and editor routes. In `r
 Run: `bun test ui/server/src/routes/novel-mcp-binding-routes.test.ts ui/server/src/routes/novel-core-routes-a.test.ts`
 
 Expected: PASS, including legacy compatibility and no-runtime model state.
+
+The body-complete disconnect case is a characterization test for the production transport, not a rollback RED. It must use a condition gate proving remote validation was entered before the Node client destroys the socket, release that gate only after the client observes no HTTP response, and use GET/DB condition reads to prove the final atomic state. A test deadline may bound cleanup failure, but fixed sleeps must not decide correctness. Observable `AbortSignal`, abnormal request/response close, and deadline tests continue to require rollback.
 
 - [ ] **Step 8: Commit the API boundary**
 
@@ -2282,13 +2285,46 @@ test('hydrates the stored chapter model and keeps one exact active source', () =
   expect(source.mcp?.agent_id).toBe('agent-1')
 })
 
-test('keeps confirmed state when activation fails', async () => {
+test('keeps confirmed state when activation receives an HTTP error', async () => {
   const confirmed = modelSourceView(217)
   const result = await commitConfirmedSource({
     current: confirmed,
-    request: async () => { throw new Error('activation failed') },
+    request: async () => { throw httpError(409, 'GENERATION_SOURCE_BUSY') },
+    readAuthoritative: async () => { throw new Error('GET must not run for a definite HTTP response') },
   }).catch(error => ({ error, source: confirmed }))
   expect(result.source).toBe(confirmed)
+})
+
+test('reconciles a no-response activation through authoritative GET without retrying', async () => {
+  const confirmed = modelSourceView(217)
+  const committed = normalizeChapterSourceView({
+    ok: true,
+    source: {
+      version: 'chapter_generation_source_v1', active: 'mcp', model: { model_id: 217 },
+      mcp: { server_id: 'buda', key_id: 3, adapter_id: 'buda', agent_id: 'agent-1', model: '' },
+    },
+    fingerprint: 'sha256:' + 'b'.repeat(64),
+    locked: false,
+    display: {
+      active: 'mcp', model_id: 217,
+      mcp: { server_id: 'buda', key_id: 3, adapter_id: 'buda', agent_id: 'agent-1', model: '' },
+    },
+  })
+  let activationCalls = 0
+  let reads = 0
+  const result = await commitConfirmedSource({
+    current: confirmed,
+    request: async () => {
+      activationCalls += 1
+      throw transportError('ECONNRESET')
+    },
+    readAuthoritative: async () => {
+      reads += 1
+      return committed
+    },
+  })
+  expect(result).toMatchObject({ previous: confirmed, source: committed, reconciled: true })
+  expect({ activationCalls, reads }).toEqual({ activationCalls: 1, reads: 1 })
 })
 ```
 
@@ -2420,17 +2456,26 @@ Add focused rejection tests for a wrong version, `active: 'both'`, a fractional/
 
 Format `GENERATION_SOURCE_BUSY`, `CHAPTER_MODEL_REQUIRED`, and `MCP_BINDING_INVALID` without recommending fallback.
 
-Define the confirmed-commit helper used by controls and tests:
+Define the confirmed-commit helper used by controls and tests. Only a no-response/transport error is reconciled; a definite HTTP error remains an ordinary rejected operation:
 
 ```ts
 export async function commitConfirmedSource(input: {
   current: ChapterGenerationSourceView
   request: () => Promise<ChapterGenerationSourceView>
+  readAuthoritative: () => Promise<ChapterGenerationSourceView>
 }) {
-  const source = await input.request()
-  return { previous: input.current, source }
+  try {
+    const source = await input.request()
+    return { previous: input.current, source, reconciled: false }
+  } catch (error) {
+    if (!isNoResponseTransportError(error)) throw error
+    const source = await input.readAuthoritative()
+    return { previous: input.current, source, reconciled: true }
+  }
 }
 ```
+
+`isNoResponseTransportError` must reject classification when any HTTP response/status is present. Reconciliation performs exactly one GET, never repeats the mutation automatically, and surfaces a dedicated reconciliation failure if GET also fails.
 
 Remove `buildTemporaryModelOverride` and its test. Change the MCP form payload builder to return `{ mcp }`, never an active source record.
 
@@ -2487,7 +2532,8 @@ Cover these exact states in `ChapterGenerationSourceControl.test.tsx`:
 - MCP active: MCP segment selected, model visible/disabled with the tooltip `章节生产链当前由 MCP Agent 执行`.
 - busy: source segments, model, test/save, and binding controls disabled with `当前章节任务正在运行，结束后可切换来源`.
 - pending activation: no optimistic active-segment change before the response.
-- failed activation: confirmed source remains displayed and an incomplete MCP failure requests opening settings.
+- definite HTTP activation failure: confirmed source remains displayed, and only an explicit incomplete-MCP error requests opening settings.
+- activation transport failure with no HTTP response: keep the control pending while one authoritative GET runs, then display the GET result without automatically retrying activation.
 - normal mode: both retained configuration details visible.
 - immersive mode: compact segment and only active detail visible.
 - partial metadata failure: stable server/key/agent/model identifiers remain visible.
@@ -2516,7 +2562,7 @@ export type ChapterGenerationSourceControlProps = {
 }
 ```
 
-Use an Ant Design `Segmented` or button group with only `model` and `mcp`. Activation calls `chapterSourceApi.activate` and commits the returned state only after success. Model selection calls `saveModel` before committing the visible value. `source.locked || locallyBusy || pending` disables all mutation controls.
+Use an Ant Design `Segmented` or button group with only `model` and `mcp`. Activation calls `chapterSourceApi.activate` and commits the returned state only after success. If the call has no HTTP response, run `chapterSourceApi.get(projectId)` once and commit that authoritative view; do not restore the previous source blindly and do not retry activation. A definite HTTP error keeps the last confirmed view. Model selection and MCP binding save use the same reconciliation rule. Model selection calls `saveModel` before committing the visible value. `source.locked || locallyBusy || pending` disables all mutation controls, including during reconciliation GET.
 
 - [ ] **Step 4: Make MCP status controlled by authoritative source**
 
@@ -2574,7 +2620,7 @@ Preserve current responsive top-bar truncation rules and the existing 440-pixel 
 
 Run: `bun test ui/web/src/pages/novel-workspace/ChapterGenerationSourceControl.test.tsx ui/web/src/pages/novel-workspace/mcpGenerationSourceStatusModel.test.ts ui/web/src/pages/novel-workspace/ProjectSettingsModal.test.ts ui/web/src/pages/novel-workspace/workspaceUiShell.a-a.test.ts`
 
-Expected: PASS for API/MCP mutual exclusion, retained inactive display, busy lock, confirmed transitions, and immersive mode.
+Expected: PASS for API/MCP mutual exclusion, retained inactive display, busy lock, confirmed transitions, no-response GET reconciliation without mutation retry, and immersive mode.
 
 - [ ] **Step 9: Commit the UI**
 

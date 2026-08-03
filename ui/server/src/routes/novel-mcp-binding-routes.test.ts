@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
+import express from 'express'
+import { spawn } from 'node:child_process'
 import { realpathSync } from 'node:fs'
 import { EventEmitter } from 'node:events'
 import { mkdir, mkdtemp, rm, symlink } from 'fs/promises'
@@ -35,6 +37,109 @@ const PREFIX_AUTH_PAYLOAD = 'prefix-auth-payload'
 const PREFIX_COOKIE_PAYLOAD = 'prefix-cookie-payload'
 const CHAPTER_SOURCE_BASE = '/api/novel/projects/:id/chapter-generation-source'
 const LEGACY_SOURCE_BASE = '/api/novel/projects/:id/prose-generation-source'
+
+const NODE_HTTP_DISCONNECT_CLIENT = String.raw`
+import http from 'node:http'
+
+const port = Number(process.argv[1])
+const path = process.argv[2]
+const body = process.argv[3]
+const emit = event => process.stdout.write(JSON.stringify(event) + '\n')
+let settled = false
+const finish = event => {
+  if (settled) return
+  settled = true
+  emit(event)
+  process.stdin.destroy()
+}
+const request = http.request({
+  host: '127.0.0.1',
+  port,
+  path,
+  method: 'PUT',
+  headers: {
+    'content-type': 'application/json',
+    'content-length': Buffer.byteLength(body),
+  },
+}, response => {
+  response.resume()
+  finish({ event: 'http_response', status: response.statusCode })
+})
+request.on('error', error => {
+  finish({ event: 'transport_error', code: String(error.code || error.name || 'UNKNOWN') })
+})
+process.stdin.setEncoding('utf8')
+process.stdin.once('data', () => request.destroy())
+request.end(body)
+emit({ event: 'body_sent' })
+`
+
+function withTestDeadline<T>(promise: Promise<T>, message: string, timeoutMs = 3_000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs)
+  })
+  return Promise.race([promise, deadline]).finally(() => {
+    if (timer) clearTimeout(timer)
+  })
+}
+
+function waitForChildOutcome(child: ReturnType<typeof spawn>) {
+  return new Promise<{ event: string; status?: number; code?: string }>((resolve, reject) => {
+    let settled = false
+    let buffered = ''
+    const fail = (error: Error) => {
+      if (settled) return
+      settled = true
+      reject(error)
+    }
+    child.on('error', fail)
+    child.on('exit', code => {
+      if (!settled) fail(new Error(`node:http client exited before an outcome (${code})`))
+    })
+    child.stdout?.on('data', chunk => {
+      buffered += String(chunk)
+      while (buffered.includes('\n')) {
+        const newline = buffered.indexOf('\n')
+        const line = buffered.slice(0, newline)
+        buffered = buffered.slice(newline + 1)
+        if (!line) continue
+        let event: { event: string; status?: number; code?: string }
+        try {
+          event = JSON.parse(line)
+        } catch {
+          fail(new Error('node:http client emitted invalid event data'))
+          return
+        }
+        if (event.event === 'body_sent') continue
+        if (!settled) {
+          settled = true
+          resolve(event)
+        }
+      }
+    })
+  })
+}
+
+async function closeTestServer(server: ReturnType<ReturnType<typeof express>['listen']>) {
+  try {
+    await withTestDeadline(new Promise<void>((resolve, reject) => {
+      server.close(error => error ? reject(error) : resolve())
+    }), 'Express test server did not close')
+  } catch (error) {
+    server.closeAllConnections?.()
+    throw error
+  }
+}
+
+async function stopTestChild(child: ReturnType<typeof spawn>) {
+  child.stdin?.destroy()
+  if (child.exitCode !== null) return
+  const exited = new Promise<void>(resolve => child.once('exit', () => resolve()))
+  child.kill()
+  await withTestDeadline(exited, 'node:http test client did not exit')
+}
+
 afterEach(async () => Promise.all(workspaces.splice(0).map(path => rm(path, { recursive: true, force: true }))))
 
 function createRouteHarness() {
@@ -352,6 +457,89 @@ async function expectViewReadBack(handlers: Map<string, any>, projectId: number,
 }
 
 describe('explicit chapter generation source routes', () => {
+  test('treats a body-complete Bun transport disconnect as ambiguous and recovers from authoritative GET', async () => {
+    const { workspace, key, first, runtime, chapterSourceLeases } = await fixture()
+    let validationEntered!: () => void
+    let releaseValidation!: () => void
+    const entered = new Promise<void>(resolve => { validationEntered = resolve })
+    const mayFinish = new Promise<void>(resolve => { releaseValidation = resolve })
+    let released = false
+    let remoteSignal: AbortSignal | undefined
+    runtime.listAgents = async (_keyId: number, options: any) => {
+      remoteSignal = options?.signal
+      validationEntered()
+      await mayFinish
+      return [{ id: 'agent-1', name: '正文 Agent' }]
+    }
+
+    const app = express()
+    app.use(express.json({ limit: '5mb' }))
+    registerNovelMcpBindingRoutes(app, {
+      getWorkspace: () => workspace,
+      getProject: getNovelProject,
+      mcpRuntime: runtime as any,
+      chapterSourceLeases,
+    })
+    const server = await withTestDeadline(new Promise<ReturnType<typeof app.listen>>((resolve, reject) => {
+      const candidate = app.listen(0, '127.0.0.1', () => resolve(candidate))
+      candidate.once('error', reject)
+    }), 'Express test server did not listen')
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('Express test server has no TCP port')
+    const path = `/api/novel/projects/${first.id}/chapter-generation-source/mcp`
+    const child = spawn('node', [
+      '--input-type=module',
+      '--eval',
+      NODE_HTTP_DISCONNECT_CLIENT,
+      String(address.port),
+      path,
+      JSON.stringify({ mcp: binding(key.id) }),
+    ], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    const clientOutcome = waitForChildOutcome(child)
+    const authorityReadController = new AbortController()
+
+    try {
+      await withTestDeadline(entered, 'remote validation was never entered')
+      child.stdin?.end('disconnect\n')
+      const ambiguous = await withTestDeadline(clientOutcome, 'node:http client did not observe disconnect')
+      expect(ambiguous).toEqual({ event: 'transport_error', code: 'ECONNRESET' })
+      expect(remoteSignal).toBeInstanceOf(AbortSignal)
+      expect(remoteSignal?.aborted).toBe(false)
+
+      released = true
+      releaseValidation()
+      const authoritative = await withTestDeadline((async () => {
+        for (;;) {
+          const response = await fetch(
+            `http://127.0.0.1:${address.port}/api/novel/projects/${first.id}/chapter-generation-source`,
+            { headers: { connection: 'close' }, signal: authorityReadController.signal },
+          )
+          if (response.ok) {
+            const view = await response.json() as any
+            if (view?.source?.mcp?.agent_id === 'agent-1') return view
+          }
+          await new Promise<void>(resolve => setImmediate(resolve))
+        }
+      })(), 'authoritative chapter source was not committed')
+
+      expect(authoritative.source).toEqual({
+        version: 'chapter_generation_source_v1',
+        active: 'model',
+        model: {},
+        mcp: binding(key.id),
+      })
+      expect((await getNovelProject(workspace, first.id))?.reference_config?.chapter_generation_source)
+        .toEqual(authoritative.source)
+    } finally {
+      authorityReadController.abort()
+      if (!released) releaseValidation()
+      await stopTestChild(child)
+      await closeTestServer(server)
+    }
+  })
+
   test('stores retained model and MCP configurations while activation only changes active', async () => {
     const { workspace, key, first, handlers } = await fixture()
 
@@ -578,18 +766,20 @@ describe('explicit chapter generation source routes', () => {
     await entered
 
     let lease: Awaited<ReturnType<ChapterSourceLeaseRegistry['acquire']>> | undefined
-    let leaseAcquired = false
-    const acquiringLease = chapterSourceLeases.acquire(workspace, second.id, 'other-project-task')
-      .then(value => {
-        lease = value
-        leaseAcquired = true
-      })
-    await new Promise(resolve => setTimeout(resolve, 25))
-    const acquiredWhileRemoteWasPending = leaseAcquired
-    releaseValidation()
-    await Promise.all([saving, acquiringLease])
-    expect(acquiredWhileRemoteWasPending).toBe(true)
-    await lease?.release()
+    let validationReleased = false
+    try {
+      lease = await withTestDeadline(
+        chapterSourceLeases.acquire(workspace, second.id, 'other-project-task'),
+        'unrelated project lease was blocked by remote validation',
+      )
+      expect(lease).toBeDefined()
+      validationReleased = true
+      releaseValidation()
+      await saving
+    } finally {
+      if (!validationReleased) releaseValidation()
+      await lease?.release()
+    }
   })
 
   for (const scenario of [
@@ -1094,6 +1284,7 @@ describe('explicit chapter generation source routes', () => {
       modelSettled = true
       return response
     })
+    // Bounded negative assertion only: the remote release condition intentionally remains closed.
     await new Promise(resolve => setTimeout(resolve, 25))
     const modelSettledDuringRemote = modelSettled
     releaseValidation()
@@ -1140,6 +1331,7 @@ describe('explicit chapter generation source routes', () => {
       laterSettled = true
       return response
     })
+    // Bounded negative assertion only: the first operation's release condition remains closed.
     await new Promise(resolve => setTimeout(resolve, 25))
     const settledBeforeFirstOperationFinished = laterSettled
     releaseValidation()
