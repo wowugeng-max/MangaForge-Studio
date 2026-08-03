@@ -105,8 +105,46 @@ function activeSourceChanged() {
   )
 }
 
+function projectIdentityChanged() {
+  return new ChapterGenerationSourceError(
+    'GENERATION_SOURCE_CHANGED',
+    '章节生成项目已变化，请重试',
+    { reason: 'project_changed' },
+  )
+}
+
 function positiveModelId(value: unknown) {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
+}
+
+function ownProjectId(value: unknown) {
+  if (!value || typeof value !== 'object' || types.isProxy(value)) return undefined
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, 'id')
+    return descriptor && 'value' in descriptor ? positiveModelId(descriptor.value) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function assertProjectIdentity(value: unknown, expectedProjectId: number) {
+  if (ownProjectId(value) !== expectedProjectId) throw projectIdentityChanged()
+  return value
+}
+
+async function readMatchingProject(
+  readProject: GenerationSourceResolverInput['readProject'],
+  activeWorkspace: string,
+  projectId: number,
+) {
+  let currentProject: any
+  try {
+    currentProject = await readProject(activeWorkspace, projectId)
+  } catch {
+    throw projectIdentityChanged()
+  }
+  assertProjectIdentity(currentProject, projectId)
+  return currentProject
 }
 
 function wrapExecution(
@@ -153,7 +191,8 @@ function createTaskResolver(input: GenerationSourceResolverInput): TaskGeneratio
     async beginTask(beginInput) {
       assertNoGenerationSourceOverride(beginInput.options)
       const taskId = randomUUID()
-      const projectId = Number(beginInput.project?.id)
+      const projectId = ownProjectId(beginInput.project)
+      if (projectId === undefined) throw projectIdentityChanged()
       const projectLease = await input.chapterSourceLeases.acquire(
         beginInput.activeWorkspace,
         projectId,
@@ -162,8 +201,11 @@ function createTaskResolver(input: GenerationSourceResolverInput): TaskGeneratio
 
       try {
         const snapshot = await withMcpWorkspaceMutation(beginInput.activeWorkspace, async () => {
-          const currentProject = await input.readProject(beginInput.activeWorkspace, projectId)
-          if (!currentProject) throw new Error('project not found')
+          const currentProject = await readMatchingProject(
+            input.readProject,
+            beginInput.activeWorkspace,
+            projectId,
+          )
           const sourceState = freezeSourceState(resolveChapterGenerationSource(currentProject))
           return {
             currentProject,
@@ -175,8 +217,11 @@ function createTaskResolver(input: GenerationSourceResolverInput): TaskGeneratio
         const contextVersion = chapterContextVersion(beginInput.contextPackage)
         const assertCurrent = async () => {
           const currentFingerprint = await withMcpWorkspaceMutation(beginInput.activeWorkspace, async () => {
-            const latestProject = await input.readProject(beginInput.activeWorkspace, projectId)
-            if (!latestProject) throw activeSourceChanged()
+            const latestProject = await readMatchingProject(
+              input.readProject,
+              beginInput.activeWorkspace,
+              projectId,
+            )
             try {
               return chapterGenerationSourceFingerprint(resolveChapterGenerationSource(latestProject))
             } catch {

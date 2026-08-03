@@ -25,11 +25,10 @@ export type ModelGenerationSourceInput = {
 }
 
 function positiveModelId(value: unknown) {
-  const modelId = Number(value)
-  if (!Number.isSafeInteger(modelId) || modelId <= 0) {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
     throw new RangeError('modelId must be a positive safe integer')
   }
-  return modelId
+  return value
 }
 
 export class ModelGenerationSource implements GenerationSource, ChapterTaskExecution {
@@ -148,7 +147,9 @@ export class ModelGenerationSource implements GenerationSource, ChapterTaskExecu
         modelId: String(this.modelId),
       })
       await this.assertCurrent()
-      return result
+      if (!result || typeof result !== 'object') return result
+      const { source_receipt: _untrustedSourceReceipt, ...safeResult } = result
+      return safeResult
     })
   }
 

@@ -18,6 +18,7 @@ function scrubDiagnostic(value: unknown, limit: number) {
     .replace(/Authorization\s*:\s*[^\r\n,;]+/gi, 'Authorization: [REDACTED]')
     .replace(/Bearer\s+[^\s,;]+/gi, 'Bearer [REDACTED]')
     .replace(/\bsk_[A-Za-z0-9._-]+/g, '[REDACTED]')
+    .replace(/\bsk-(?:(?:proj|live)-)?(?=[A-Za-z0-9_]{8})[A-Za-z0-9_-]{8,}\b/gi, '[REDACTED]')
     .replace(/Cookie\s*:\s*[^\r\n,;]+/gi, 'Cookie: [REDACTED]')
     .replace(/(?:X-Api-Key|Api-Key)\s*:\s*[^\r\n,;]+/gi, 'Api-Key: [REDACTED]')
     .slice(0, limit)

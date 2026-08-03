@@ -355,7 +355,7 @@ describe('GenerationSource resolver', () => {
       createModelExecution: () => { throw new Error('deleted project must not create an execution') },
     })
     await expect(neverCreate.beginTask(beginInput({ project: unconfiguredProject })))
-      .rejects.toThrow('project not found')
+      .rejects.toMatchObject({ code: 'GENERATION_SOURCE_CHANGED' })
     expect(chapterSourceLeases.isActive(workspace, project.id)).toBe(false)
 
     let reads = 0
@@ -377,6 +377,95 @@ describe('GenerationSource resolver', () => {
     const execution = await resolver.beginTask(beginInput({ project: unconfiguredProject, requestedModelId: 217 }))
     await expect(resolved.assertCurrent()).rejects.toMatchObject({ code: 'GENERATION_SOURCE_CHANGED' })
     await execution.close({ status: 'failed' })
+  })
+
+  test('rejects unsafe or mismatched project identities before resolving the initial source', async () => {
+    const chapterSourceLeases = new ChapterSourceLeaseRegistry()
+    let traps = 0
+    let getters = 0
+    let constructions = 0
+    const proxiedProject = new Proxy(project, {
+      get: (_target, field) => {
+        if (field === 'then') return undefined
+        traps += 1
+        throw new Error('project Proxy get trap')
+      },
+      getOwnPropertyDescriptor: () => { traps += 1; throw new Error('project Proxy descriptor trap') },
+    })
+    const accessorProject = { ...project }
+    Object.defineProperty(accessorProject, 'id', {
+      configurable: true,
+      get() { getters += 1; return project.id },
+    })
+
+    for (const unsafeProject of [{ ...project, id: 999 }, proxiedProject, accessorProject, null]) {
+      const resolver = createGenerationSourceResolver({
+        chapterSourceLeases,
+        readProject: async () => unsafeProject,
+        createModelExecution: () => { constructions += 1; throw new Error('must not construct') },
+      })
+      await expect(resolver.beginTask(beginInput())).rejects.toMatchObject({
+        code: 'GENERATION_SOURCE_CHANGED',
+      })
+      expect(chapterSourceLeases.isActive(workspace, project.id)).toBe(false)
+    }
+
+    const unsafeInput = createGenerationSourceResolver({
+      chapterSourceLeases,
+      readProject: async () => project,
+      createModelExecution: () => { constructions += 1; throw new Error('must not construct') },
+    })
+    await expect(unsafeInput.beginTask(beginInput({ project: proxiedProject })))
+      .rejects.toMatchObject({ code: 'GENERATION_SOURCE_CHANGED' })
+    expect(chapterSourceLeases.isActive(workspace, project.id)).toBe(false)
+    expect(constructions).toBe(0)
+    expect(traps).toBe(0)
+    expect(getters).toBe(0)
+  })
+
+  test('fences mismatched and unsafe project identities on every current check', async () => {
+    const chapterSourceLeases = new ChapterSourceLeaseRegistry()
+    let reads = 0
+    let traps = 0
+    let getters = 0
+    let resolved!: ResolvedChapterTaskInput
+    const proxiedProject = new Proxy(project, {
+      get: (_target, field) => {
+        if (field === 'then') return undefined
+        traps += 1
+        throw new Error('current Proxy get trap')
+      },
+      getOwnPropertyDescriptor: () => { traps += 1; throw new Error('current Proxy descriptor trap') },
+    })
+    const accessorProject = { ...project }
+    Object.defineProperty(accessorProject, 'id', {
+      configurable: true,
+      get() { getters += 1; return project.id },
+    })
+    const currentProjects = [project, { ...project, id: 999 }, proxiedProject, accessorProject, null]
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases,
+      readProject: async () => currentProjects[Math.min(reads++, currentProjects.length - 1)],
+      createModelExecution: input => {
+        resolved = input
+        return {
+          taskId: input.taskId, source: 'model', modelId: input.modelId,
+          fingerprint: input.fingerprint, contextVersion: input.contextVersion,
+          provenance: () => ({ task_id: input.taskId, project_id: 5, chapter_id: 12, source: 'model', source_fingerprint: input.fingerprint, context_version: input.contextVersion }),
+          generateDraft: async () => ({ source: 'model' }), executeAgent: async () => ({}),
+          assertCurrent: input.assertCurrent, close: async () => {},
+        }
+      },
+    })
+
+    const execution = await resolver.beginTask(beginInput())
+    for (let index = 0; index < currentProjects.length - 1; index += 1) {
+      await expect(resolved.assertCurrent()).rejects.toMatchObject({ code: 'GENERATION_SOURCE_CHANGED' })
+    }
+    expect(traps).toBe(0)
+    expect(getters).toBe(0)
+    await execution.close({ status: 'failed' })
+    expect(chapterSourceLeases.isActive(workspace, project.id)).toBe(false)
   })
 })
 
@@ -1518,13 +1607,22 @@ describe('ModelGenerationSource', () => {
         draftCalls.push(args)
         return { prose_chapters: [], source_receipt: { receipt_authority: 'mcp_generation_source_v1', secret: 'attacker' } }
       },
-      executeAgent: async (...args: any[]) => { agentCalls.push(args); return { content: '{}', parsed: {} } },
+      executeAgent: async (...args: any[]) => {
+        agentCalls.push(args)
+        return {
+          content: '{}', parsed: {}, preserved: true,
+          source_receipt: {
+            receipt_authority: 'mcp_generation_source_v1',
+            secret: 'sk-agent-receipt-secret',
+          },
+        }
+      },
       assertCurrent: async () => { currentChecks.push('checked') },
       recordStage: async (_stage, _request, operation) => operation(),
     })
 
     const draft = await source.generateDraft(draftRequest({ modelId: 999 }))
-    await source.executeAgent('quality_review', 'quality_review_json', 'review-agent', project, { task: '审查' }, {
+    const reviewResult = await source.executeAgent('quality_review', 'quality_review_json', 'review-agent', project, { task: '审查' }, {
       modelId: '999', temperature: 0.2, maxTokens: 321, timeoutMs: 1234, responseMode: 'non_stream',
     })
     await source.executeAgent('revision', 'revision_prose', 'prose-agent', project, { task: '修订' }, {})
@@ -1534,6 +1632,9 @@ describe('ModelGenerationSource', () => {
     expect(agentCalls[0][3]).toMatchObject({
       temperature: 0.2, maxTokens: 321, timeoutMs: 1234, responseMode: 'non_stream',
     })
+    expect(reviewResult).toMatchObject({ content: '{}', parsed: {}, preserved: true })
+    expect(reviewResult).not.toHaveProperty('source_receipt')
+    expect(JSON.stringify(reviewResult)).not.toContain('sk-agent-receipt-secret')
     expect(currentChecks).toHaveLength(3)
     expect(draft.source_receipt).toMatchObject({
       receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
@@ -1547,6 +1648,29 @@ describe('ModelGenerationSource', () => {
       'source', 'source_fingerprint', 'task_id',
     ].sort())
     await Promise.all([source.close(), source.close({ status: 'failed' })])
+  })
+
+  test('rejects non-number model IDs without invoking hostile coercion', () => {
+    let coercions = 0
+    const hostileModelId = {
+      valueOf() { coercions += 1; return 217 },
+      toString() { coercions += 1; return '217' },
+    }
+    const createSource = (modelId: unknown) => new ModelGenerationSource({
+      modelId: modelId as number,
+      provenance: {
+        task_id: 'task-strict-model', project_id: 5, chapter_id: 12,
+        source: 'model', source_fingerprint: `sha256:${'a'.repeat(64)}`,
+        context_version: `sha256:${'b'.repeat(64)}`,
+      },
+      generateChapterProse: async () => ({}),
+      executeAgent: async () => ({}),
+      recordStage: async (_stage, _request, operation) => operation(),
+    })
+
+    expect(() => createSource('217')).toThrow(RangeError)
+    expect(() => createSource(hostileModelId)).toThrow(RangeError)
+    expect(coercions).toBe(0)
   })
 })
 

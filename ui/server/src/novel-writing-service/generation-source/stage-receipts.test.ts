@@ -183,4 +183,45 @@ describe('chapter generation stage receipts', () => {
     expect(run.error_message).toBe('Chapter stage failed')
     expect(JSON.parse(run.output_ref!).error_code).toBe('CHAPTER_STAGE_FAILED')
   })
+
+  test('scrubs hyphenated API keys across default, custom, and provenance diagnostics', async () => {
+    const { activeWorkspace, provenance } = await fixture()
+    const defaultKey = 'sk-proj-ABC123SECRET'
+    const customKey = 'sk-live-LIVE123456SECRET'
+    const provenanceKey = 'sk-GENERIC1234567890'
+    const defaultRecorder = createChapterStageRecorder({
+      activeWorkspace,
+      provenance: () => provenance,
+    })
+    await expect(defaultRecorder('quality_recheck', {
+      prompt: '复审', responseContract: 'quality_review_json',
+    }, async () => { throw new Error(`provider ${defaultKey} transport-safe-path`) }))
+      .rejects.toThrow(defaultKey)
+
+    const customRecorder = createChapterStageRecorder({
+      activeWorkspace,
+      provenance: () => provenance,
+      scrubError: () => ({ code: 'PROVIDER_FAILED', message: `custom ${customKey} retry-safe-path` }),
+    })
+    await expect(customRecorder('quality_repair', {
+      prompt: '修复', responseContract: 'revision_prose',
+    }, async () => { throw new Error('custom failure') })).rejects.toThrow('custom failure')
+
+    const provenanceRecorder = createChapterStageRecorder({
+      activeWorkspace,
+      provenance: () => ({
+        ...provenance,
+        server_id: `provider ${provenanceKey} task-step-name`,
+      }),
+    })
+    await provenanceRecorder('post_revision_review', {
+      prompt: '修订后审查', responseContract: 'quality_review_json',
+    }, async () => ({ ok: true }))
+
+    const serialized = JSON.stringify(await listNovelRuns(activeWorkspace, provenance.project_id))
+    for (const secret of [defaultKey, customKey, provenanceKey]) expect(serialized).not.toContain(secret)
+    for (const normalText of ['transport-safe-path', 'retry-safe-path', 'task-step-name']) {
+      expect(serialized).toContain(normalText)
+    }
+  })
 })
