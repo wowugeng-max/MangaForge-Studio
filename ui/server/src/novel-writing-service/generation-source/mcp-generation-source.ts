@@ -42,6 +42,7 @@ import { createChapterStageRecorder, projectChapterTaskProvenance } from './stag
 
 const PROVENANCE_ID_MAX_CHARS = 160
 const STAGE_CONTENT_MAX_BYTES = 256 * 1024
+const AGENT_LIST_MAX_ITEMS = 256
 const ERROR_PROJECTION_MAX_DEPTH = 6
 const ERROR_PROJECTION_MAX_PROPERTIES = 96
 const ERROR_PROJECTION_MAX_STRING_CHARS = 256 * 1024
@@ -245,6 +246,49 @@ function acceptRemoteId(value: unknown, label: string) {
     throw new McpError('MCP_SESSION_FAILED', `MCP Adapter 返回了无效的 ${label}`)
   }
   return value
+}
+
+function invalidAgentList() {
+  return new McpError('MCP_BINDING_INVALID', 'MCP Adapter 返回了无效的 Agent 列表')
+}
+
+function assertSafeAwaitable(value: unknown, invalid: () => Error) {
+  if (!value || (typeof value !== 'object' && typeof value !== 'function')) return
+  let current: object | null = value as object
+  for (let depth = 0; current; depth += 1) {
+    if (depth >= 64 || unsafeProxy(current)) throw invalid()
+    try {
+      const descriptor = Object.getOwnPropertyDescriptor(current, 'then')
+      if (descriptor && !('value' in descriptor)) throw invalid()
+      current = Object.getPrototypeOf(current)
+    } catch {
+      throw invalid()
+    }
+  }
+}
+
+function projectAgentIds(value: unknown) {
+  if (!value || typeof value !== 'object' || unsafeProxy(value) || !Array.isArray(value)) {
+    throw invalidAgentList()
+  }
+  const length = ownDataValue(value, 'length')
+  if (typeof length !== 'number'
+    || !Number.isSafeInteger(length)
+    || length < 0
+    || length > AGENT_LIST_MAX_ITEMS) {
+    throw invalidAgentList()
+  }
+  const ids: string[] = []
+  for (let index = 0; index < length; index += 1) {
+    const entry = ownDataValue(value, String(index))
+    if (!entry || typeof entry !== 'object' || unsafeProxy(entry)) throw invalidAgentList()
+    const id = ownDataValue(entry, 'id')
+    if (typeof id !== 'string' || !id.trim() || id.length > PROVENANCE_ID_MAX_CHARS) {
+      throw invalidAgentList()
+    }
+    ids.push(id)
+  }
+  return ids
 }
 
 function dataMethod(value: unknown, field: string) {
@@ -755,10 +799,12 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
         || resolved.adapter.id !== this.binding.adapter_id) {
         throw new McpError('MCP_BINDING_INVALID', 'Runtime 返回的 MCP Adapter 与项目绑定不一致')
       }
-      const agents = await resolved.adapter.listAgents(
+      const pendingAgents = resolved.adapter.listAgents(
         this.remoteOptions(resolved.server.tool_timeout_ms),
       )
-      if (!agents.some(agent => String(agent.id) === this.binding.agent_id)) {
+      assertSafeAwaitable(pendingAgents, invalidAgentList)
+      const agentIds = projectAgentIds(await pendingAgents)
+      if (!agentIds.includes(this.binding.agent_id)) {
         throw new McpError('MCP_BINDING_INVALID', '项目绑定的 MCP Agent 不存在或不可访问')
       }
       const taskRun = await appendNovelRun(this.input.activeWorkspace, {
@@ -797,9 +843,10 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
         signal: this.deadline.signal,
         onProgress: event => this.onSessionProgress(event),
       })
-      if (unsafeProxy(pendingSession)) {
-        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的任务 Session')
-      }
+      assertSafeAwaitable(
+        pendingSession,
+        () => new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的任务 Session'),
+      )
       const rawSession = await pendingSession
       const sessionPort = projectChapterTaskSessionPort(rawSession)
       this.session = sessionPort
@@ -981,9 +1028,10 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
         ...input,
         requestId: safeOutboundRequestId(this.scrubber, input.requestId),
       })
-      if (unsafeProxy(pendingResult)) {
-        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的 stage 结果')
-      }
+      assertSafeAwaitable(
+        pendingResult,
+        () => new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的 stage 结果'),
+      )
       const result = projectMcpChapterStageResult(await pendingResult)
       this.deadline?.throwIfAborted()
       if (result.session_id !== this.remoteSessionId
