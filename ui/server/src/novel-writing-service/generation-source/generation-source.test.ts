@@ -1769,6 +1769,81 @@ describe('ModelGenerationSource', () => {
     await expect(ordinaryFailureSource.executeAgent(
       'revision', 'revision_prose', 'prose-agent', project, { task: '修订' },
     )).rejects.toBe(providerFailure)
+
+    const synchronousFailure = Object.assign(new Error('synchronous provider failure'), {
+      code: 'SYNCHRONOUS_PROVIDER_FAILURE',
+    })
+    const synchronousFailureSource = new ModelGenerationSource({
+      modelId: 217,
+      provenance: {
+        task_id: 'task-synchronous-failure', project_id: 5, chapter_id: 12,
+        source: 'model', source_fingerprint: `sha256:${'a'.repeat(64)}`,
+        context_version: `sha256:${'b'.repeat(64)}`,
+      },
+      generateChapterProse: (() => { throw synchronousFailure }) as any,
+      executeAgent: (() => { throw synchronousFailure }) as any,
+      recordStage: async (_stage, _request, operation) => operation(),
+    })
+    await expect(synchronousFailureSource.generateDraft(draftRequest())).rejects.toBe(synchronousFailure)
+    await expect(synchronousFailureSource.executeAgent(
+      'revision', 'revision_prose', 'prose-agent', project, { task: '修订' },
+    )).rejects.toBe(synchronousFailure)
+  })
+
+  test('preflights direct Proxy and revoked Proxy port results before Promise assimilation', async () => {
+    let trapCalls = 0
+    const trappedResult = (stage: string) => new Proxy({ content: '{}', parsed: {} }, {
+      get() {
+        trapCalls += 1
+        throw Object.assign(new Error(`${stage} SECRET_TRAP_MESSAGE`), { code: 'SECRET_TRAP' })
+      },
+    })
+    const directSource = new ModelGenerationSource({
+      modelId: 217,
+      provenance: {
+        task_id: 'task-direct-proxy-result', project_id: 5, chapter_id: 12,
+        source: 'model', source_fingerprint: `sha256:${'a'.repeat(64)}`,
+        context_version: `sha256:${'b'.repeat(64)}`,
+      },
+      generateChapterProse: (() => trappedResult('draft')) as any,
+      executeAgent: (() => trappedResult('agent')) as any,
+      recordStage: async (_stage, _request, operation) => operation(),
+    })
+
+    const draftFailure: any = await directSource.generateDraft(draftRequest()).catch(error => error)
+    const agentFailure: any = await directSource.executeAgent(
+      'revision', 'revision_prose', 'prose-agent', project, { task: '修订' },
+    ).catch(error => error)
+    for (const failure of [draftFailure, agentFailure]) {
+      expect(failure).toMatchObject({
+        code: 'CHAPTER_STAGE_RESULT_INVALID',
+        message: 'Invalid chapter stage result',
+      })
+      expect(JSON.stringify({ code: failure.code, message: failure.message })).not.toContain('SECRET_TRAP')
+    }
+    expect(trapCalls).toBe(0)
+
+    const revokedDraft = Proxy.revocable({ content: '{}', parsed: {} }, {})
+    const revokedAgent = Proxy.revocable({ content: '{}', parsed: {} }, {})
+    revokedDraft.revoke()
+    revokedAgent.revoke()
+    const revokedSource = new ModelGenerationSource({
+      modelId: 217,
+      provenance: {
+        task_id: 'task-direct-revoked-result', project_id: 5, chapter_id: 12,
+        source: 'model', source_fingerprint: `sha256:${'a'.repeat(64)}`,
+        context_version: `sha256:${'b'.repeat(64)}`,
+      },
+      generateChapterProse: (() => revokedDraft.proxy) as any,
+      executeAgent: (() => revokedAgent.proxy) as any,
+      recordStage: async (_stage, _request, operation) => operation(),
+    })
+    await expect(revokedSource.generateDraft(draftRequest())).rejects.toMatchObject({
+      code: 'CHAPTER_STAGE_RESULT_INVALID',
+    })
+    await expect(revokedSource.executeAgent(
+      'revision', 'revision_prose', 'prose-agent', project, { task: '修订' },
+    )).rejects.toMatchObject({ code: 'CHAPTER_STAGE_RESULT_INVALID' })
   })
 })
 

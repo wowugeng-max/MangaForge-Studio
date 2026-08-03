@@ -52,8 +52,13 @@ function isRevokedProxyAssimilationError(error: unknown) {
 }
 
 async function awaitStageResult(operation: () => Promise<any>) {
+  const candidate = operation()
+  if (candidate && (typeof candidate === 'object' || typeof candidate === 'function')
+    && types.isProxy(candidate)) {
+    throw invalidStageResult()
+  }
   try {
-    return await operation()
+    return await candidate
   } catch (error) {
     if (isRevokedProxyAssimilationError(error)) throw invalidStageResult()
     throw error
@@ -138,7 +143,7 @@ export class ModelGenerationSource implements GenerationSource, ChapterTaskExecu
     return this.provenanceSnapshot
   }
 
-  private async generateWithModel(request: ProseGenerationRequest, modelId: string) {
+  private generateWithModel(request: ProseGenerationRequest, modelId: string) {
     return this.generateChapterProse(
       request.project,
       request.chapter,
