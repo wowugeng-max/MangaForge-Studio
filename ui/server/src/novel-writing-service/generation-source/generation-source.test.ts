@@ -2088,13 +2088,14 @@ describe('McpGenerationSource task execution', () => {
   async function neutralTaskFixture(
     prefix: string,
     options: {
-      runStage?: (input: McpChapterStageInput, session: McpChapterTaskSession) => Promise<any>
+      runStage?: (input: McpChapterStageInput, session: McpChapterTaskSession) => any
       openChapterTask?: (input: McpChapterTaskInput, ordinal: number) => Promise<McpChapterTaskSession>
       onGetAdapter?: () => Promise<void> | void
       acquireAgentLease?: (workspace: string, binding: any) => Promise<any>
       createDeadline?: (totalMs: number, signal?: AbortSignal) => McpGenerationDeadline
       keyValue?: string
       headerValue?: string
+      taskId?: string
     } = {},
   ) {
     const activeWorkspace = await mkdtemp(join(tmpdir(), prefix))
@@ -2177,16 +2178,16 @@ describe('McpGenerationSource task execution', () => {
         const session: McpChapterTaskSession = {
           sessionId,
           snapshotHash: `neutral-snapshot-${counters.open}`,
-          async runStage(stageInput) {
+          runStage(stageInput) {
             counters.runStage += 1
             stageInputs.push(stageInput)
             if (options.runStage) return options.runStage(stageInput, session)
-            return {
+            return Promise.resolve({
               content: stageInput.stage === 'draft' ? '通用正文。' : '{}',
               session_id: sessionId,
               snapshot_hash: session.snapshotHash,
               status: 'completed',
-            }
+            })
           },
           async close() { counters.close += 1 },
         }
@@ -2224,7 +2225,11 @@ describe('McpGenerationSource task execution', () => {
         counters.modelCreations += 1
         throw new Error('API fallback forbidden')
       },
-      mcpSource: source,
+      mcpSource: options.taskId
+        ? {
+            beginResolvedTask: input => source.beginResolvedTask({ ...input, taskId: options.taskId! }),
+          } as any
+        : source,
     })
     const begin = () => resolver.beginTask({
       activeWorkspace,
@@ -2562,6 +2567,174 @@ describe('McpGenerationSource task execution', () => {
     })
   })
 
+  test('bounds every outbound Adapter stage request identifier to 160 characters', async () => {
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-request-id-bound-', {
+      taskId: 'generated-task-'.repeat(24),
+    })
+    const execution = await fixture.begin()
+
+    await execution.generateDraft(fixture.request({ requestId: 'draft-request-'.repeat(20) }))
+    await execution.executeAgent(
+      'quality_review',
+      'quality_review_json',
+      'neutral-agent-1',
+      fixture.durableProject,
+      { task: '检查正文。' },
+    )
+    await execution.close({ status: 'success' })
+
+    expect(fixture.stageInputs).toHaveLength(2)
+    expect(fixture.stageInputs[0]?.requestId.length).toBeLessThanOrEqual(160)
+    expect(fixture.stageInputs[1]?.requestId.length).toBeLessThanOrEqual(160)
+    expect(fixture.counters).toMatchObject({ runStage: 2, generateProse: 0, modelCreations: 0 })
+  })
+
+  test('rejects empty, oversized, and non-string Session identities before running a stage', async () => {
+    const invalidIdentities = [
+      { name: 'empty session id', sessionId: '', snapshotHash: 'valid-snapshot' },
+      { name: 'oversized session id', sessionId: 's'.repeat(161), snapshotHash: 'valid-snapshot' },
+      { name: 'non-string session id', sessionId: 17, snapshotHash: 'valid-snapshot' },
+      { name: 'empty snapshot hash', sessionId: 'valid-session', snapshotHash: '' },
+      { name: 'oversized snapshot hash', sessionId: 'valid-session', snapshotHash: 'h'.repeat(161) },
+      { name: 'non-string snapshot hash', sessionId: 'valid-session', snapshotHash: 23 },
+    ]
+    for (const identity of invalidIdentities) {
+      let runStages = 0
+      let closes = 0
+      const fixture = await neutralTaskFixture(`mangaforge-mcp-task-invalid-open-${identity.name.replaceAll(' ', '-')}-`, {
+        openChapterTask: async () => ({
+          sessionId: identity.sessionId,
+          snapshotHash: identity.snapshotHash,
+          runStage: async () => {
+            runStages += 1
+            return {
+              content: '不得解析或返回的正文。',
+              session_id: identity.sessionId,
+              snapshot_hash: identity.snapshotHash,
+              status: 'completed',
+            }
+          },
+          close: async () => { closes += 1 },
+        } as any),
+      })
+      const execution = await fixture.begin()
+
+      const exposed: any = await execution.generateDraft(fixture.request()).catch(error => error)
+      await execution.close({ status: 'failed', error: exposed }).catch(() => {})
+
+      expect(exposed).toMatchObject({ code: 'MCP_SESSION_FAILED' })
+      expect(exposed).not.toHaveProperty('prose_chapters')
+      expect(runStages).toBe(0)
+      expect(closes).toBe(1)
+      expect(fixture.counters).toMatchObject({ generateProse: 0, modelCreations: 0 })
+    }
+  })
+
+  test('rejects invalid stage identities and content before parsing or returning them', async () => {
+    const contentLimit = 256 * 1024
+    const cases = [
+      { name: 'empty session id', sessionId: 'valid-session', snapshotHash: 'valid-snapshot', result: { session_id: '' } },
+      { name: 'oversized colliding session id', sessionId: 's'.repeat(160), snapshotHash: 'valid-snapshot', result: { session_id: 's'.repeat(161) } },
+      { name: 'non-string session id', sessionId: 'valid-session', snapshotHash: 'valid-snapshot', result: { session_id: 17 } },
+      { name: 'empty snapshot hash', sessionId: 'valid-session', snapshotHash: 'valid-snapshot', result: { snapshot_hash: '' } },
+      { name: 'oversized colliding snapshot hash', sessionId: 'valid-session', snapshotHash: 'h'.repeat(160), result: { snapshot_hash: 'h'.repeat(161) } },
+      { name: 'non-string snapshot hash', sessionId: 'valid-session', snapshotHash: 'valid-snapshot', result: { snapshot_hash: 23 } },
+      { name: 'oversized content', sessionId: 'valid-session', snapshotHash: 'valid-snapshot', result: { content: '文'.repeat(contentLimit + 1) } },
+      { name: 'non-string content', sessionId: 'valid-session', snapshotHash: 'valid-snapshot', result: { content: 29 } },
+    ]
+    for (const item of cases) {
+      let runStages = 0
+      let closes = 0
+      const fixture = await neutralTaskFixture(`mangaforge-mcp-task-invalid-stage-${item.name.replaceAll(' ', '-')}-`, {
+        openChapterTask: async input => {
+          await input.onProgress?.({
+            stage: 'session_created',
+            status: 'running',
+            session_id: item.sessionId,
+            snapshot_hash: item.snapshotHash,
+          })
+          return {
+            sessionId: item.sessionId,
+            snapshotHash: item.snapshotHash,
+            runStage: () => {
+              runStages += 1
+              return Promise.resolve({
+                content: '不得解析或返回的正文。',
+                session_id: item.sessionId,
+                snapshot_hash: item.snapshotHash,
+                status: 'completed',
+                ...item.result,
+              } as any)
+            },
+            close: async () => { closes += 1 },
+          }
+        },
+      })
+      const execution = await fixture.begin()
+
+      const exposed: any = await execution.generateDraft(fixture.request()).catch(error => error)
+      await execution.close({ status: 'failed', error: exposed }).catch(() => {})
+
+      expect(exposed).toMatchObject({ code: 'MCP_SESSION_FAILED' })
+      expect(exposed).not.toHaveProperty('prose_chapters')
+      expect(runStages).toBe(1)
+      expect(closes).toBe(1)
+      expect(fixture.counters).toMatchObject({ generateProse: 0, modelCreations: 0 })
+    }
+  })
+
+  test('rejects accessor and Proxy stage results without executing their traps', async () => {
+    const trapSecret = 'hostile-stage-result-secret'
+    for (const shape of ['accessor', 'proxy', 'revoked-proxy'] as const) {
+      let getterCalls = 0
+      let proxyTraps = 0
+      let result: unknown
+      if (shape === 'accessor') {
+        result = Object.defineProperties({}, {
+          content: { enumerable: true, get() { getterCalls += 1; return trapSecret } },
+          session_id: { enumerable: true, get() { getterCalls += 1; return 'neutral-session-1' } },
+          snapshot_hash: { enumerable: true, get() { getterCalls += 1; return 'neutral-snapshot-1' } },
+          status: { enumerable: true, get() { getterCalls += 1; return 'completed' } },
+        })
+      } else {
+        const revocable = Proxy.revocable({
+          content: trapSecret,
+          session_id: 'neutral-session-1',
+          snapshot_hash: 'neutral-snapshot-1',
+          status: 'completed',
+        }, {
+          get() { proxyTraps += 1; throw new Error(`proxy get ${trapSecret}`) },
+          ownKeys() { proxyTraps += 1; throw new Error(`proxy keys ${trapSecret}`) },
+          getOwnPropertyDescriptor() {
+            proxyTraps += 1
+            throw new Error(`proxy descriptor ${trapSecret}`)
+          },
+        })
+        if (shape === 'revoked-proxy') revocable.revoke()
+        result = revocable.proxy
+      }
+      const fixture = await neutralTaskFixture(`mangaforge-mcp-task-hostile-stage-${shape}-`, {
+        runStage: () => result,
+      })
+      const execution = await fixture.begin()
+
+      const exposed: any = await execution.generateDraft(fixture.request()).catch(error => error)
+      await execution.close({ status: 'failed', error: exposed }).catch(() => {})
+
+      expect(exposed).toMatchObject({ code: 'MCP_SESSION_FAILED' })
+      expect(exposed).not.toHaveProperty('prose_chapters')
+      expect(getterCalls).toBe(0)
+      expect(proxyTraps).toBe(0)
+      expect(fixture.counters).toMatchObject({
+        runStage: 1,
+        close: 1,
+        generateProse: 0,
+        modelCreations: 0,
+      })
+      expect(JSON.stringify({ message: exposed.message, details: exposed.details })).not.toContain(trapSecret)
+    }
+  })
+
   test('fails one remote stage without API generation, Agent creation, or cross-source fallback', async () => {
     const remoteFailure = new McpError('MCP_SESSION_FAILED', 'neutral provider stage failed', {
       session_id: 'neutral-session-1',
@@ -2776,6 +2949,147 @@ describe('McpGenerationSource task execution', () => {
     })
   })
 
+  test('scrubs blocked-invalid residual text with both credential generations before reattaching it', async () => {
+    const initialKey = 'blocked-residual-key-before-rotation'
+    const rotatedKey = 'blocked-residual-key-after-rotation'
+    const initialHeader = 'blocked-residual-header-before-rotation'
+    const rotatedHeader = 'blocked-residual-header-after-rotation'
+    const secrets = [initialKey, rotatedKey, initialHeader, rotatedHeader]
+    const semanticText = '受保护正文语义：主角仍然守在北城门。'.repeat(20)
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-blocked-residual-', {
+      keyValue: initialKey,
+      headerValue: initialHeader,
+      runStage: async () => {
+        const failure: any = new Error('blocked invalid response')
+        failure.code = 'MCP_SESSION_FAILED'
+        failure.error_code = 'MCP_SESSION_FAILED'
+        failure.admission_status = 'blocked_invalid'
+        failure.chapter_text = `${semanticText} ${initialKey}`
+        failure.finalText = `${semanticText} ${rotatedKey}`
+        failure.details = {
+          chapter_text: `${semanticText} ${initialHeader}`,
+          nested: { residual: `${semanticText} ${rotatedHeader}` },
+          session_id: 'neutral-session-1',
+          remote_cancel_confirmed: true,
+        }
+        throw failure
+      },
+    })
+    const execution = await fixture.begin()
+    await updateMcpKey(fixture.activeWorkspace, fixture.key.id, { key: rotatedKey })
+    await writeMcpServers(fixture.activeWorkspace, [{
+      ...fixture.server,
+      custom_headers: { 'X-Neutral-Auth': rotatedHeader },
+    }])
+
+    const exposed: any = await execution.generateDraft(fixture.request()).catch(error => error)
+    await expect(execution.close({ status: 'failed', error: exposed })).rejects.toMatchObject({
+      code: 'MCP_SESSION_FAILED',
+      admission_status: 'blocked_invalid',
+    })
+
+    expect(exposed.chapter_text).toContain('受保护正文语义')
+    expect(exposed.finalText).toContain('受保护正文语义')
+    expect(exposed.details.chapter_text).toContain('受保护正文语义')
+    const exposedJson = JSON.stringify(exposed)
+    const receiptsJson = JSON.stringify(await listNovelRuns(
+      fixture.activeWorkspace,
+      fixture.durableProject.id,
+    ))
+    for (const secret of secrets) {
+      expect(exposedJson).not.toContain(secret)
+      expect(receiptsJson).not.toContain(secret)
+    }
+  })
+
+  test('never executes hostile throwable traps and still completes confirmed cleanup exactly once', async () => {
+    const trapSecret = 'hostile-throwable-secret-must-not-leak'
+    for (const shape of ['accessor', 'proxy', 'revoked-proxy'] as const) {
+      let getterCalls = 0
+      let proxyTraps = 0
+      let coercions = 0
+      let staged = 0
+      let clears = 0
+      let releases = 0
+      let quarantines = 0
+      let deadlineCloses = 0
+      let throwable: unknown
+      if (shape === 'accessor') {
+        throwable = Object.defineProperties({
+          toString() { coercions += 1; return trapSecret },
+          valueOf() { coercions += 1; return trapSecret },
+          [Symbol.toPrimitive]() { coercions += 1; return trapSecret },
+        }, {
+          name: { enumerable: true, get() { getterCalls += 1; return trapSecret } },
+          message: { enumerable: true, get() { getterCalls += 1; return trapSecret } },
+          code: { enumerable: true, get() { getterCalls += 1; return trapSecret } },
+          details: { enumerable: true, get() { getterCalls += 1; return { secret: trapSecret } } },
+          admission_status: { enumerable: true, get() { getterCalls += 1; return 'blocked_invalid' } },
+          chapter_text: { enumerable: true, get() { getterCalls += 1; return trapSecret.repeat(30) } },
+        })
+      } else {
+        const revocable = Proxy.revocable({
+          message: trapSecret,
+          code: 'MCP_SESSION_FAILED',
+          details: { remote_cancel_confirmed: true, secret: trapSecret },
+        }, {
+          get() { proxyTraps += 1; throw new Error('proxy get trap executed') },
+          ownKeys() { proxyTraps += 1; throw new Error('proxy ownKeys trap executed') },
+          getOwnPropertyDescriptor() {
+            proxyTraps += 1
+            throw new Error('proxy descriptor trap executed')
+          },
+        })
+        if (shape === 'revoked-proxy') revocable.revoke()
+        throwable = revocable.proxy
+      }
+      const lease = {
+        tupleKey: `hostile-${shape}`,
+        binding: { serverId: 'neutral-task-server', keyId: 1, agentId: 'neutral-agent-1' },
+        stageSessionFence: async () => { staged += 1 },
+        quarantine: async () => { quarantines += 1 },
+        clearSessionFence: async () => { clears += 1 },
+        release: async () => { releases += 1 },
+      }
+      const fixture = await neutralTaskFixture(`mangaforge-mcp-task-hostile-${shape}-`, {
+        runStage: async () => { throw throwable },
+        acquireAgentLease: async () => lease,
+        createDeadline: (totalMs, signal) => {
+          const deadline = new McpGenerationDeadline(totalMs, signal)
+          const close = deadline.close.bind(deadline)
+          deadline.close = () => { deadlineCloses += 1; close() }
+          return deadline
+        },
+      })
+      const execution = await fixture.begin()
+
+      const exposed: any = await execution.generateDraft(fixture.request()).catch(error => error)
+      await execution.close({ status: 'failed', error: exposed }).catch(() => {})
+
+      expect(getterCalls).toBe(0)
+      expect(proxyTraps).toBe(0)
+      expect(coercions).toBe(0)
+      expect(staged).toBe(1)
+      expect(fixture.counters.close).toBe(1)
+      expect(clears).toBe(1)
+      expect(releases).toBe(1)
+      expect(quarantines).toBe(0)
+      expect(deadlineCloses).toBe(1)
+      const publicJson = JSON.stringify({
+        name: exposed?.name,
+        message: exposed?.message,
+        code: exposed?.code,
+        details: exposed?.details,
+      })
+      const receipts = await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id)
+      expect(publicJson).not.toContain(trapSecret)
+      expect(JSON.stringify(receipts)).not.toContain(trapSecret)
+      for (const run of receipts) {
+        if (run.error_message) expect(run.error_message.length).toBeLessThanOrEqual(500)
+      }
+    }
+  })
+
   test('releases the project and Agent leases exactly once after confirmed cancellation', async () => {
     const cancelled = new McpError('MCP_CANCELLED', 'neutral task cancelled', {
       session_id: 'neutral-session-1',
@@ -2873,7 +3187,11 @@ describe('McpGenerationSource task execution', () => {
     let clears = 0
     let releases = 0
     let deadlineCloses = 0
-    const clearFailure = new McpError('MCP_STORE_IO_FAILED', 'terminal fence clear failed')
+    const reflectedCredential = 'terminal-fence-clear-reflected-credential'
+    const clearFailure = new McpError(
+      'MCP_STORE_IO_FAILED',
+      `terminal fence clear failed ${reflectedCredential}`,
+    )
     const lease = {
       tupleKey: 'neutral-terminal-fence',
       binding: { serverId: 'neutral-task-server', keyId: 1, agentId: 'neutral-agent-1' },
@@ -2883,6 +3201,7 @@ describe('McpGenerationSource task execution', () => {
       release: async () => { releases += 1 },
     }
     const fixture = await neutralTaskFixture('mangaforge-mcp-task-terminal-fence-fail-', {
+      keyValue: reflectedCredential,
       acquireAgentLease: async () => lease,
       createDeadline: (totalMs, signal) => {
         const deadline = new McpGenerationDeadline(totalMs, signal)
@@ -2897,7 +3216,11 @@ describe('McpGenerationSource task execution', () => {
     const firstClose = execution.close({ status: 'success' })
     const secondClose = execution.close({ status: 'success' })
     expect(secondClose).toBe(firstClose)
-    await expect(firstClose).rejects.toBe(clearFailure)
+    const exposed: any = await firstClose.catch(error => error)
+    expect(exposed).toMatchObject({ code: 'MCP_STORE_IO_FAILED' })
+    expect(exposed).not.toBe(clearFailure)
+    expect(JSON.stringify({ message: exposed.message, details: exposed.details }))
+      .not.toContain(reflectedCredential)
 
     expect(staged).toBe(1)
     expect(clears).toBe(1)
@@ -4084,9 +4407,12 @@ describe('McpGenerationSource', () => {
       provenance: { server_id: 'buda', agent_id: 'agent-1' },
       details: { safe: 'details-safe', nested: { status: 'failed' } },
     })
-    expect(exposedError.chapter_text).toBe(residualText)
-    expect(exposedError.finalText).toBe(residualText)
-    expect(exposedError.details.chapter_text).toBe(residualText)
+    const scrubbedResidualText = residualText
+      .replaceAll(selectedKey, '[REDACTED]')
+      .replaceAll(selectedHeader, '[REDACTED]')
+    expect(exposedError.chapter_text).toBe(scrubbedResidualText)
+    expect(exposedError.finalText).toBe(scrubbedResidualText)
+    expect(exposedError.details.chapter_text).toBe(scrubbedResidualText)
     expect(Object.prototype.propertyIsEnumerable.call(exposedError, 'stack')).toBe(false)
     const { chapter_text: _chapterText, finalText: _finalText, details, ...metadata } = exposedError
     const { chapter_text: _detailsChapterText, ...detailsMetadata } = details

@@ -1,10 +1,12 @@
 import { createHash } from 'crypto'
+import { types } from 'node:util'
 import { buildAgentMessages, parseAgentOutput } from '../../llm/executor-helpers'
 import { stringifyLLMMessageTextContent, type LLMResponse } from '../../llm/types'
 import { appendNovelRun, getNovelProject, updateNovelRun } from '../../novel'
 import { readMcpKeys } from '../../mcp/key-store'
 import type { McpRuntime } from '../../mcp/runtime'
-import { isAbortRelatedError, McpError, isMcpError } from '../../mcp/errors'
+import { McpError } from '../../mcp/errors'
+import type { McpErrorCode } from '../../mcp/errors'
 import { McpGenerationDeadline } from '../../mcp/deadline'
 import type { McpAgentLease } from '../../mcp/agent-lease'
 import type { McpGenerationReceiptStatus } from '../../mcp/types'
@@ -39,6 +41,181 @@ import { attachProductionLease } from './production-lease'
 import { createChapterStageRecorder, projectChapterTaskProvenance } from './stage-receipts'
 
 const PROVENANCE_ID_MAX_CHARS = 160
+const STAGE_CONTENT_MAX_BYTES = 256 * 1024
+const ERROR_PROJECTION_MAX_DEPTH = 6
+const ERROR_PROJECTION_MAX_PROPERTIES = 96
+const ERROR_PROJECTION_MAX_STRING_CHARS = 256 * 1024
+const MCP_ERROR_CODES = new Set<McpErrorCode>([
+  'MCP_BINDING_INVALID',
+  'MCP_BINDING_CHANGED',
+  'MCP_REFERENCED_RECORD_CONFLICT',
+  'MCP_AUTH_FAILED',
+  'MCP_CONNECT_TIMEOUT',
+  'MCP_CONNECTION_LOST',
+  'MCP_CAPABILITY_MISSING',
+  'MCP_TOOL_ERROR',
+  'MCP_DRIVE_SYNC_FAILED',
+  'MCP_INPUT_TOO_LARGE',
+  'MCP_AGENT_BUSY',
+  'MCP_AGENT_QUARANTINED',
+  'MCP_QUARANTINE_ACK_REQUIRED',
+  'MCP_SEND_UNKNOWN',
+  'MCP_SESSION_FAILED',
+  'MCP_INPUT_REQUIRED',
+  'MCP_GENERATION_TIMEOUT',
+  'MCP_CANCELLED',
+  'MCP_EMPTY_PROSE',
+  'MCP_STORE_CORRUPT',
+  'MCP_STORE_IO_FAILED',
+  'MCP_RUNTIME_ERROR',
+])
+
+function unsafeProxy(value: unknown) {
+  if (!value || (typeof value !== 'object' && typeof value !== 'function')) return false
+  try {
+    return types.isProxy(value)
+  } catch {
+    return true
+  }
+}
+
+function ownDataValue(value: unknown, field: string) {
+  if (!value || (typeof value !== 'object' && typeof value !== 'function') || unsafeProxy(value)) {
+    return undefined
+  }
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, field)
+    return descriptor && 'value' in descriptor ? descriptor.value : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function primitiveString(value: unknown) {
+  return typeof value === 'string' ? value : undefined
+}
+
+function ownString(value: unknown, field: string) {
+  return primitiveString(ownDataValue(value, field))
+}
+
+function ownPathValue(value: unknown, path: readonly string[]) {
+  let current = value
+  for (const field of path) {
+    current = ownDataValue(current, field)
+    if (current === undefined) return undefined
+  }
+  return current
+}
+
+function defineEnumerableData(target: object, key: string, value: unknown) {
+  if (key === '__proto__' || key === 'prototype' || key === 'constructor') return
+  Object.defineProperty(target, key, {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    value,
+  })
+}
+
+function projectEnumerableData(
+  value: unknown,
+  options: { excluded?: ReadonlySet<string> } = {},
+) {
+  const seen = new WeakSet<object>()
+  const budget = { properties: ERROR_PROJECTION_MAX_PROPERTIES }
+  const project = (candidate: unknown, depth: number): any => {
+    if (typeof candidate === 'string') return candidate.slice(0, ERROR_PROJECTION_MAX_STRING_CHARS)
+    if (candidate === null || typeof candidate === 'boolean' || typeof candidate === 'number') {
+      return candidate
+    }
+    if (!candidate || typeof candidate !== 'object' || unsafeProxy(candidate)) return undefined
+    if (depth > ERROR_PROJECTION_MAX_DEPTH) return '[Truncated]'
+    if (seen.has(candidate)) return '[Circular]'
+    seen.add(candidate)
+    try {
+      const output: any[] | Record<string, unknown> = Array.isArray(candidate)
+        ? []
+        : Object.create(null)
+      let keys: Array<string | symbol>
+      try {
+        keys = Reflect.ownKeys(candidate)
+      } catch {
+        return undefined
+      }
+      for (const key of keys) {
+        if (budget.properties <= 0 || typeof key !== 'string' || options.excluded?.has(key)) continue
+        let descriptor: PropertyDescriptor | undefined
+        try {
+          descriptor = Object.getOwnPropertyDescriptor(candidate, key)
+        } catch {
+          return undefined
+        }
+        if (!descriptor?.enumerable || !('value' in descriptor)) continue
+        if (Array.isArray(output) && !/^(0|[1-9]\d*)$/.test(key)) continue
+        const projected = project(descriptor.value, depth + 1)
+        if (projected === undefined) continue
+        budget.properties -= 1
+        if (Array.isArray(output)) output.push(projected)
+        else defineEnumerableData(output, key, projected)
+      }
+      return output
+    } finally {
+      seen.delete(candidate)
+    }
+  }
+  return project(value, 0)
+}
+
+function projectedRecord(value: unknown, excluded?: ReadonlySet<string>) {
+  const projected = projectEnumerableData(value, { excluded })
+  return projected && typeof projected === 'object' && !Array.isArray(projected)
+    ? projected as Record<string, unknown>
+    : {}
+}
+
+function defineProjectedMetadata(target: object, value: unknown) {
+  const metadata = projectedRecord(value)
+  for (const key of Object.keys(metadata)) {
+    defineEnumerableData(target, key, ownDataValue(metadata, key))
+  }
+}
+
+function directMcpError(value: unknown) {
+  if (!value || typeof value !== 'object' || unsafeProxy(value)) return false
+  try {
+    return Object.getPrototypeOf(value) === McpError.prototype
+  } catch {
+    return false
+  }
+}
+
+function mcpErrorCode(value: unknown, fallback: McpErrorCode) {
+  const code = ownString(value, 'code')
+  return code && MCP_ERROR_CODES.has(code as McpErrorCode) ? code as McpErrorCode : fallback
+}
+
+function errorDetails(value: unknown) {
+  const details = ownDataValue(value, 'details')
+  return details && typeof details === 'object' && !unsafeProxy(details) ? details : undefined
+}
+
+function errorSessionId(value: unknown) {
+  return ownString(errorDetails(value), 'session_id')
+}
+
+function remoteCancelConfirmed(value: unknown) {
+  return ownDataValue(errorDetails(value), 'remote_cancel_confirmed') === true
+}
+
+function safeAbortRelatedError(error: unknown, signal?: AbortSignal) {
+  if (signal && error === signal.reason) return true
+  const code = ownString(error, 'code')
+  if (code === 'MCP_CANCELLED' || code === 'MCP_GENERATION_TIMEOUT' || code === 'ABORT_ERR') {
+    return true
+  }
+  return ownString(error, 'name') === 'AbortError'
+}
 
 function sha256(value: string) {
   return createHash('sha256').update(value, 'utf8').digest('hex')
@@ -53,7 +230,77 @@ function boundedScrubbedId(
   scrubber: ReturnType<typeof createMcpSecretScrubber>,
   value: unknown,
 ) {
-  return scrubber.scrubText(value).slice(0, PROVENANCE_ID_MAX_CHARS)
+  return scrubber.scrubText(primitiveString(value) || '').slice(0, PROVENANCE_ID_MAX_CHARS)
+}
+
+function safeOutboundRequestId(
+  scrubber: ReturnType<typeof createMcpSecretScrubber>,
+  value: unknown,
+) {
+  return boundedScrubbedId(scrubber, value)
+}
+
+function acceptRemoteId(value: unknown, label: string) {
+  if (typeof value !== 'string' || !value.trim() || value.length > PROVENANCE_ID_MAX_CHARS) {
+    throw new McpError('MCP_SESSION_FAILED', `MCP Adapter 返回了无效的 ${label}`)
+  }
+  return value
+}
+
+function dataMethod(value: unknown, field: string) {
+  if (!value || (typeof value !== 'object' && typeof value !== 'function')) return undefined
+  let current: object | null = value as object
+  for (let depth = 0; current && depth < 8; depth += 1) {
+    if (unsafeProxy(current)) return undefined
+    try {
+      const descriptor = Object.getOwnPropertyDescriptor(current, field)
+      if (descriptor) return 'value' in descriptor && typeof descriptor.value === 'function'
+        ? descriptor.value as (...args: any[]) => any
+        : undefined
+      current = Object.getPrototypeOf(current)
+    } catch {
+      return undefined
+    }
+  }
+  return undefined
+}
+
+function projectChapterTaskSessionPort(value: unknown): McpChapterTaskSession {
+  if (!value || typeof value !== 'object' || unsafeProxy(value)) {
+    throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的任务 Session')
+  }
+  const runStage = dataMethod(value, 'runStage')
+  const close = dataMethod(value, 'close')
+  if (!runStage || !close) {
+    throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的任务 Session')
+  }
+  return {
+    sessionId: '',
+    snapshotHash: '',
+    runStage: input => Reflect.apply(runStage, value, [input]),
+    close: () => Reflect.apply(close, value, []),
+  }
+}
+
+function projectMcpChapterStageResult(value: unknown) {
+  if (!value || typeof value !== 'object' || unsafeProxy(value)) {
+    throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的 stage 结果')
+  }
+  const content = ownDataValue(value, 'content')
+  const sessionId = acceptRemoteId(ownDataValue(value, 'session_id'), 'Session 标识')
+  const snapshotHash = acceptRemoteId(ownDataValue(value, 'snapshot_hash'), 'snapshot fingerprint')
+  const status = ownDataValue(value, 'status')
+  if (typeof content !== 'string'
+    || Buffer.byteLength(content, 'utf8') > STAGE_CONTENT_MAX_BYTES
+    || status !== 'completed') {
+    throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的 stage 结果')
+  }
+  return Object.freeze({
+    content,
+    session_id: sessionId,
+    snapshot_hash: snapshotHash,
+    status: 'completed' as const,
+  })
 }
 
 function scrubbedProvenance(
@@ -93,42 +340,46 @@ async function readBindingCredentialSnapshot(activeWorkspace: string, binding: {
 }
 
 function errorReceipt(
-  error: any,
+  error: unknown,
   provenance: Record<string, unknown>,
   status: McpGenerationReceiptStatus,
 ) {
+  const code = ownString(error, 'code') || ownString(error, 'error_code') || 'MCP_GENERATION_FAILED'
+  const message = ownString(error, 'message')
+    || (typeof error === 'string' ? error : 'MCP 正文生成失败')
   return {
     ...provenance,
     status,
-    error_code: String(error?.code || error?.error_code || 'MCP_GENERATION_FAILED').slice(0, 80),
-    error: String(error?.message || error || 'MCP 正文生成失败').slice(0, 500),
+    error_code: code.slice(0, 80),
+    error: message.slice(0, 500),
   }
 }
 
-function receiptStatusForError(error: any): McpGenerationReceiptStatus {
-  const explicit = String(error?.details?.receipt_status || '')
-  if (error?.details?.remote_cancel_confirmed === false
+function receiptStatusForError(error: unknown): McpGenerationReceiptStatus {
+  const details = errorDetails(error)
+  const explicit = ownString(details, 'receipt_status') || ''
+  if (ownDataValue(details, 'remote_cancel_confirmed') === false
     && (explicit === 'send_unknown' || explicit === 'remote_cancel_unknown')) {
     return explicit
   }
-  if (error?.code === 'MCP_SEND_UNKNOWN') return 'send_unknown'
-  if (error?.code === 'MCP_CANCELLED') return 'cancelled'
-  if (error?.code === 'MCP_GENERATION_TIMEOUT') return 'timed_out'
+  const code = ownString(error, 'code')
+  if (code === 'MCP_SEND_UNKNOWN') return 'send_unknown'
+  if (code === 'MCP_CANCELLED') return 'cancelled'
+  if (code === 'MCP_GENERATION_TIMEOUT') return 'timed_out'
   return 'failed'
 }
 
 function unresolvedStoreError(
-  storeError: Error,
+  storeError: unknown,
   causeError: unknown,
   receiptStatus: Extract<McpGenerationReceiptStatus, 'send_unknown' | 'remote_cancel_unknown'>,
   sessionId: string,
 ) {
-  const causeCode = isMcpError(causeError)
-    ? causeError.code
-    : String((causeError as any)?.code || 'MCP_RUNTIME_ERROR').slice(0, 80)
+  const causeCode = (ownString(causeError, 'code') || 'MCP_RUNTIME_ERROR').slice(0, 80)
+  const storeMessage = ownString(storeError, 'message') || 'MCP 持久化失败'
   return new McpError(
-    isMcpError(storeError) ? storeError.code : 'MCP_STORE_IO_FAILED',
-    storeError.message,
+    mcpErrorCode(storeError, 'MCP_STORE_IO_FAILED'),
+    storeMessage,
     {
       cause_code: causeCode,
       receipt_status: receiptStatus,
@@ -138,35 +389,34 @@ function unresolvedStoreError(
   )
 }
 
-function blockedInvalidResidual(error: any) {
-  const admissionStatus = String(error?.admission_status || error?.admissionStatus || '')
+function blockedInvalidResidual(error: unknown) {
+  const admissionStatus = ownString(error, 'admission_status') || ownString(error, 'admissionStatus') || ''
   if (admissionStatus !== 'blocked_invalid') return undefined
   return [
-    error?.chapter_text,
-    error?.chapterText,
-    error?.finalText,
-    error?.final_text,
-    error?.text,
-    error?.details?.chapter_text,
-    error?.details?.chapterText,
-    error?.admission_failure?.details?.chapter_text,
-    error?.admission_failure?.details?.chapterText,
+    ownDataValue(error, 'chapter_text'),
+    ownDataValue(error, 'chapterText'),
+    ownDataValue(error, 'finalText'),
+    ownDataValue(error, 'final_text'),
+    ownDataValue(error, 'text'),
+    ownPathValue(error, ['details', 'chapter_text']),
+    ownPathValue(error, ['details', 'chapterText']),
+    ownPathValue(error, ['admission_failure', 'details', 'chapter_text']),
+    ownPathValue(error, ['admission_failure', 'details', 'chapterText']),
   ].find(item => typeof item === 'string' && item.trim().length > 200) as string | undefined
 }
 
 function enumerableErrorMetadata(error: unknown, excluded: Set<string>) {
-  if (!error || typeof error !== 'object') return {}
-  return Object.fromEntries(Object.entries(error).filter(([key]) => !excluded.has(key)))
+  return projectedRecord(error, excluded)
 }
 
-function restoreBlockedInvalidResidual(error: any, residualText?: string) {
+function restoreBlockedInvalidResidual(error: Error, residualText?: string) {
   if (typeof residualText !== 'string') return error
-  error.chapter_text = residualText
-  error.finalText = residualText
-  error.details = {
-    ...(error.details && typeof error.details === 'object' ? error.details : {}),
-    chapter_text: residualText,
-  }
+  defineEnumerableData(error, 'chapter_text', residualText)
+  defineEnumerableData(error, 'finalText', residualText)
+  const details: Record<string, unknown> = {}
+  defineProjectedMetadata(details, ownDataValue(error, 'details'))
+  defineEnumerableData(details, 'chapter_text', residualText)
+  defineEnumerableData(error, 'details', details)
   return error
 }
 
@@ -174,29 +424,43 @@ function scrubGenerationError(
   error: unknown,
   scrubber: ReturnType<typeof createMcpSecretScrubber>,
 ) {
-  const message = scrubber.scrubText((error as any)?.message || error || 'MCP 正文生成失败')
-  const residualText = blockedInvalidResidual(error)
-  if (isMcpError(error)) {
-    const scrubbed = new McpError(
-      error.code,
-      message,
-      error.details ? scrubber.scrubValue(error.details) : undefined,
-    )
-    scrubbed.name = scrubber.scrubText(error.name || 'McpError')
-    Object.assign(scrubbed, scrubber.scrubValue(enumerableErrorMetadata(
+  try {
+    const rawMessage = ownString(error, 'message')
+      || (typeof error === 'string' ? error : 'MCP 正文生成失败')
+    const message = scrubber.scrubText(rawMessage)
+    const residualText = blockedInvalidResidual(error)
+    const scrubbedResidualText = typeof residualText === 'string'
+      ? scrubber.scrubText(residualText)
+      : undefined
+    const rawDetails = errorDetails(error)
+    const safeDetails = rawDetails ? projectEnumerableData(rawDetails) : undefined
+    const scrubbedDetails = safeDetails && typeof safeDetails === 'object' && !Array.isArray(safeDetails)
+      ? scrubber.scrubValue(safeDetails) as Record<string, unknown>
+      : undefined
+    if (directMcpError(error)) {
+      const scrubbed = new McpError(
+        mcpErrorCode(error, 'MCP_RUNTIME_ERROR'),
+        message,
+        scrubbedDetails,
+      )
+      scrubbed.name = scrubber.scrubText(ownString(error, 'name') || 'McpError')
+      defineProjectedMetadata(scrubbed, scrubber.scrubValue(enumerableErrorMetadata(
+        error,
+        new Set(['stack', 'name', 'message', 'code', 'error_code', 'details']),
+      )))
+      return restoreBlockedInvalidResidual(scrubbed, scrubbedResidualText)
+    }
+    const scrubbed = new Error(message)
+    scrubbed.name = scrubber.scrubText(ownString(error, 'name') || 'Error')
+    const metadata = scrubber.scrubValue(enumerableErrorMetadata(
       error,
-      new Set(['stack', 'name', 'message', 'code', 'error_code', 'details']),
-    )))
-    return restoreBlockedInvalidResidual(scrubbed, residualText)
+      new Set(['stack', 'name', 'message']),
+    ))
+    defineProjectedMetadata(scrubbed, metadata)
+    return restoreBlockedInvalidResidual(scrubbed, scrubbedResidualText)
+  } catch {
+    return new McpError('MCP_RUNTIME_ERROR', 'MCP 正文生成失败')
   }
-  const scrubbed = new Error(message)
-  scrubbed.name = scrubber.scrubText((error as any)?.name || 'Error')
-  const metadata = scrubber.scrubValue(enumerableErrorMetadata(
-    error,
-    new Set(['stack', 'name', 'message']),
-  ))
-  Object.assign(scrubbed, metadata)
-  return restoreBlockedInvalidResidual(scrubbed, residualText)
 }
 
 function compileMcpAgentPrompt(
@@ -304,6 +568,8 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
   private taskReceiptId?: number
   private sessionId = ''
   private snapshotHash = ''
+  private remoteSessionId = ''
+  private remoteSnapshotHash = ''
   private sessionFenceStaged = false
   private stageSequence = 0
   private deadlineClosed = false
@@ -331,8 +597,8 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
       scrubError: error => {
         const scrubbed = scrubGenerationError(error, this.scrubber)
         return {
-          code: String((scrubbed as any)?.code || (scrubbed as any)?.error_code || 'MCP_STAGE_FAILED'),
-          message: this.scrubber.scrubText((scrubbed as any)?.message || scrubbed || 'MCP stage failed').slice(0, 500),
+          code: (ownString(scrubbed, 'code') || ownString(scrubbed, 'error_code') || 'MCP_STAGE_FAILED').slice(0, 80),
+          message: this.scrubber.scrubText(ownString(scrubbed, 'message') || 'MCP stage failed').slice(0, 500),
         }
       },
     })
@@ -392,8 +658,8 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
       ...(this.snapshotHash ? { snapshot_hash: boundedScrubbedId(this.scrubber, this.snapshotHash) } : {}),
       status,
       ...(scrubbed ? {
-        error_code: String((scrubbed as any)?.code || (scrubbed as any)?.error_code || 'MCP_STAGE_FAILED').slice(0, 80),
-        error: this.scrubber.scrubText((scrubbed as any)?.message || scrubbed).slice(0, 500),
+        error_code: (ownString(scrubbed, 'code') || ownString(scrubbed, 'error_code') || 'MCP_STAGE_FAILED').slice(0, 80),
+        error: this.scrubber.scrubText(ownString(scrubbed, 'message') || 'MCP stage failed').slice(0, 500),
       } : {}),
     }
   }
@@ -409,19 +675,38 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     if (!updated) throw new McpError('MCP_STORE_IO_FAILED', 'MCP 章节任务回执持久化失败')
   }
 
-  private async onSessionProgress(event: any) {
-    const scrubbedEvent = this.scrubber.scrubValue(event)
-    if (scrubbedEvent?.session_id) {
-      this.sessionId = boundedScrubbedId(this.scrubber, scrubbedEvent.session_id)
+  private async onSessionProgress(event: unknown) {
+    const projectedEvent = projectedRecord(event)
+    const rawSessionId = ownDataValue(event, 'session_id')
+    const rawSnapshotHash = ownDataValue(event, 'snapshot_hash')
+    if (rawSessionId !== undefined) {
+      this.remoteSessionId = acceptRemoteId(rawSessionId, 'Session 标识')
+      defineEnumerableData(
+        projectedEvent,
+        'session_id',
+        boundedScrubbedId(this.scrubber, this.remoteSessionId),
+      )
     }
-    if (scrubbedEvent?.snapshot_hash) {
-      this.snapshotHash = boundedScrubbedId(this.scrubber, scrubbedEvent.snapshot_hash)
+    if (rawSnapshotHash !== undefined) {
+      this.remoteSnapshotHash = acceptRemoteId(rawSnapshotHash, 'snapshot fingerprint')
+      defineEnumerableData(
+        projectedEvent,
+        'snapshot_hash',
+        boundedScrubbedId(this.scrubber, this.remoteSnapshotHash),
+      )
     }
+    const scrubbedEvent = this.scrubber.scrubValue(projectedEvent)
+    this.sessionId = this.remoteSessionId
+      ? boundedScrubbedId(this.scrubber, this.remoteSessionId)
+      : ''
+    this.snapshotHash = this.remoteSnapshotHash
+      ? boundedScrubbedId(this.scrubber, this.remoteSnapshotHash)
+      : ''
     if (scrubbedEvent?.stage === 'session_created') {
-      if (!this.sessionId) throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 未提供 Session 标识')
+      if (!this.remoteSessionId) throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 未提供 Session 标识')
       await this.persistTaskReceipt('session_created')
       await this.lease!.stageSessionFence({
-        requestId: boundedScrubbedId(this.scrubber, this.taskId),
+        requestId: safeOutboundRequestId(this.scrubber, this.taskId),
         sessionId: this.sessionId,
       })
       this.sessionFenceStaged = true
@@ -490,13 +775,13 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
       })
       this.taskReceiptId = taskRun.id
       const continuity = this.input.contextPackage?.continuity || {}
-      const session = await resolved.adapter.openChapterTask({
+      const pendingSession = resolved.adapter.openChapterTask({
         activeWorkspace: this.input.activeWorkspace,
         server: resolved.server,
         keyId: this.binding.key_id,
         agentId: this.binding.agent_id,
         ...(this.binding.model ? { model: this.binding.model } : {}),
-        taskId: this.taskId,
+        taskId: safeOutboundRequestId(this.scrubber, this.taskId),
         project: this.input.project,
         chapter: this.input.chapter,
         chapterNo: Number(this.input.chapter?.chapter_no || 0),
@@ -512,21 +797,40 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
         signal: this.deadline.signal,
         onProgress: event => this.onSessionProgress(event),
       })
-      this.session = session
-      const returnedSessionId = boundedScrubbedId(this.scrubber, session.sessionId)
-      const returnedSnapshotHash = boundedScrubbedId(this.scrubber, session.snapshotHash)
-      if (this.sessionId && this.sessionId !== returnedSessionId) {
+      if (unsafeProxy(pendingSession)) {
+        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的任务 Session')
+      }
+      const rawSession = await pendingSession
+      const sessionPort = projectChapterTaskSessionPort(rawSession)
+      this.session = sessionPort
+      const returnedRemoteSessionId = acceptRemoteId(
+        ownDataValue(rawSession, 'sessionId'),
+        'Session 标识',
+      )
+      const returnedRemoteSnapshotHash = acceptRemoteId(
+        ownDataValue(rawSession, 'snapshotHash'),
+        'snapshot fingerprint',
+      )
+      if (this.remoteSessionId && this.remoteSessionId !== returnedRemoteSessionId) {
         throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter Session 标识在创建期间发生变化')
       }
-      if (this.snapshotHash && this.snapshotHash !== returnedSnapshotHash) {
+      if (this.remoteSnapshotHash && this.remoteSnapshotHash !== returnedRemoteSnapshotHash) {
         throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter snapshot fingerprint 在创建期间发生变化')
       }
-      this.sessionId = returnedSessionId
-      this.snapshotHash = returnedSnapshotHash
+      this.remoteSessionId = returnedRemoteSessionId
+      this.remoteSnapshotHash = returnedRemoteSnapshotHash
+      this.sessionId = boundedScrubbedId(this.scrubber, returnedRemoteSessionId)
+      this.snapshotHash = boundedScrubbedId(this.scrubber, returnedRemoteSnapshotHash)
+      const session: McpChapterTaskSession = {
+        ...sessionPort,
+        sessionId: this.sessionId,
+        snapshotHash: this.snapshotHash,
+      }
+      this.session = session
       if (!this.sessionFenceStaged) {
         await this.persistTaskReceipt('session_created')
         await this.lease.stageSessionFence({
-          requestId: boundedScrubbedId(this.scrubber, this.taskId),
+          requestId: safeOutboundRequestId(this.scrubber, this.taskId),
           sessionId: this.sessionId,
         })
         this.sessionFenceStaged = true
@@ -587,7 +891,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
       }
     }
     const ambiguous = this.lease
-      && (primaryError as any)?.details?.remote_cancel_confirmed !== true
+      && !remoteCancelConfirmed(primaryError)
       && (receiptStatus === 'send_unknown' || receiptStatus === 'remote_cancel_unknown')
     if (ambiguous) {
       try {
@@ -595,7 +899,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
           requestId: boundedScrubbedId(this.scrubber, this.taskId),
           sessionId: boundedScrubbedId(
             this.scrubber,
-            (primaryError as any)?.details?.session_id || this.sessionId,
+            errorSessionId(primaryError) || this.sessionId,
           ),
           reason: receiptStatus as 'send_unknown' | 'remote_cancel_unknown',
         })
@@ -608,12 +912,14 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
           receiptStatus as 'send_unknown' | 'remote_cancel_unknown',
           boundedScrubbedId(
             this.scrubber,
-            (primaryError as any)?.details?.session_id || this.sessionId,
+            errorSessionId(primaryError) || this.sessionId,
           ),
         )
       }
       try {
         await this.releaseLease()
+      } catch (releaseError) {
+        throw scrubGenerationError(releaseError, this.scrubber)
       } finally {
         this.closeDeadline()
       }
@@ -624,7 +930,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
           receiptStatus as 'send_unknown' | 'remote_cancel_unknown',
           boundedScrubbedId(
             this.scrubber,
-            (primaryError as any)?.details?.session_id || this.sessionId,
+            errorSessionId(primaryError) || this.sessionId,
           ),
         )
       }
@@ -642,12 +948,14 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
         releaseError = error
       }
       if (clearError && releaseError) {
+        const scrubbedClearError = scrubGenerationError(clearError, this.scrubber)
+        const scrubbedReleaseError = scrubGenerationError(releaseError, this.scrubber)
         terminalError = new AggregateError(
-          [clearError, releaseError],
+          [scrubbedClearError, scrubbedReleaseError],
           'MCP Agent fence clear and lease release both failed',
         )
       } else if (clearError || releaseError) {
-        terminalError = (clearError || releaseError) as Error
+        terminalError = scrubGenerationError(clearError || releaseError, this.scrubber)
       }
     }
     this.closeDeadline()
@@ -669,15 +977,25 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
       this.deadline?.throwIfAborted()
       const session = await this.getSession()
       this.deadline?.throwIfAborted()
-      const result = await session.runStage(input)
+      const pendingResult = session.runStage({
+        ...input,
+        requestId: safeOutboundRequestId(this.scrubber, input.requestId),
+      })
+      if (unsafeProxy(pendingResult)) {
+        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的 stage 结果')
+      }
+      const result = projectMcpChapterStageResult(await pendingResult)
       this.deadline?.throwIfAborted()
-      if (result.status !== 'completed'
-        || boundedScrubbedId(this.scrubber, result.session_id) !== this.sessionId
-        || boundedScrubbedId(this.scrubber, result.snapshot_hash) !== this.snapshotHash) {
+      if (result.session_id !== this.remoteSessionId
+        || result.snapshot_hash !== this.remoteSnapshotHash) {
         throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了不属于当前任务 Session 的 stage 结果')
       }
       await this.input.assertCurrent()
-      return result
+      return {
+        ...result,
+        session_id: boundedScrubbedId(this.scrubber, result.session_id),
+        snapshot_hash: boundedScrubbedId(this.scrubber, result.snapshot_hash),
+      }
     } catch (error) {
       return this.failRemote(error)
     }
@@ -689,7 +1007,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
       responseContract: 'draft_prose',
     }, async () => {
       const stage = await this.runRemoteStage({
-        requestId: request.requestId,
+        requestId: safeOutboundRequestId(this.scrubber, request.requestId),
         stage: 'draft',
         responseContract: 'draft_prose',
         prompt: request.paragraphTask,
@@ -726,7 +1044,10 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     const prompt = compileMcpAgentPrompt(agentId, project, context)
     return this.recordStage(stage, { prompt, responseContract }, async () => {
       const result = await this.runRemoteStage({
-        requestId: `${this.taskId}:${stage}:${++this.stageSequence}`,
+        requestId: safeOutboundRequestId(
+          this.scrubber,
+          `${this.taskId}:${stage}:${++this.stageSequence}`,
+        ),
         stage,
         responseContract,
         prompt,
@@ -906,7 +1227,7 @@ export class McpGenerationSource implements GenerationSource {
         keyId: binding.key_id,
         agentId: binding.agent_id,
         model: binding.model,
-        requestId: request.requestId,
+        requestId: safeOutboundRequestId(scrubber, request.requestId),
         project: request.project,
         chapter: request.chapter,
         chapterNo: request.chapterNo,
@@ -981,11 +1302,13 @@ export class McpGenerationSource implements GenerationSource {
       return attachProductionLease(response, lease)
     } catch (error) {
       let exposedError = error
-      if (deadline?.signal.aborted && isAbortRelatedError(error, deadline.signal)) {
+      if (deadline?.signal.aborted && safeAbortRelatedError(error, deadline.signal)) {
         try {
           deadline.throwIfAborted()
         } catch (cause) {
-          const sameTypedCause = isMcpError(error) && isMcpError(cause) && error.code === cause.code
+          const sameTypedCause = directMcpError(error)
+            && directMcpError(cause)
+            && ownString(error, 'code') === ownString(cause, 'code')
           if (!sameTypedCause) exposedError = cause
         }
       }
