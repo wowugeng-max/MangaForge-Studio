@@ -866,9 +866,21 @@ describe('BudaAdapter', () => {
   test('confirms caller cancellation with an independent cleanup signal', async () => {
     const controller = new AbortController()
     const fake = createFakeClient(['in_progress'])
+    let resolvePollingStarted!: () => void
+    const pollingStarted = new Promise<void>(resolve => { resolvePollingStarted = resolve })
+    let primaryPollSeen = false
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('getApiAgentSession') && !primaryPollSeen) {
+        primaryPollSeen = true
+        resolvePollingStarted()
+      }
+      return original(name, args, options)
+    }
     const adapter = new BudaAdapter(fake.client as any)
     const generation = adapter.generateProse(generationInput({ signal: controller.signal }))
-    setTimeout(() => controller.abort(), 5)
+    await pollingStarted
+    controller.abort()
     await expect(generation).rejects.toMatchObject({
       code: 'MCP_CANCELLED',
       details: { session_id: 'session-1', remote_cancel_confirmed: true },
