@@ -39,6 +39,10 @@ const DEFAULT_MCP_VALIDATION_TIMEOUT_MS = 30_000
 const MAX_SOURCE_MUTATION_ATTEMPTS = 3
 const projectMutationTails = new Map<string, Promise<void>>()
 
+function projectMutationKey(canonicalWorkspace: string, projectId: number) {
+  return `${canonicalWorkspace}\u0000${projectId}`
+}
+
 function remainingValidationBudget(deadline: number) {
   const remaining = Math.ceil(deadline - Date.now())
   if (remaining <= 0) throw new McpError('MCP_CONNECT_TIMEOUT', 'MCP 连接校验超时')
@@ -516,6 +520,24 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
     const lexical = ctx.getWorkspace()
     return { lexical, canonical: canonicalFilesystemIdentity(lexical) }
   }
+  const readChapterSourceAuthority = async (req: any, lifecycle: RequestLifecycle) => {
+    const workspace = captureWorkspace()
+    const projectId = projectIdFromRequest(req)
+    const capturedMutation = projectMutationTails.get(projectMutationKey(workspace.canonical, projectId))
+    if (capturedMutation) await lifecycle.waitForUntil(capturedMutation)
+    lifecycle.throwIfAborted()
+    if (canonicalFilesystemIdentity(workspace.lexical) !== workspace.canonical) {
+      throw generationSourceChanged('workspace_identity_changed')
+    }
+    lifecycle.throwIfAborted()
+    const project = await ctx.getProject(workspace.canonical, projectId)
+    lifecycle.throwIfAborted()
+    if (!project) return null
+    if (Number(project.id) !== projectId || !String(project.created_at || '')) {
+      throw generationSourceChanged('project_changed')
+    }
+    return { activeWorkspace: workspace.canonical, project }
+  }
   const withCheckedWorkspace = async <T>(
     workspace: ReturnType<typeof captureWorkspace>,
     lifecycle: RequestLifecycle,
@@ -601,7 +623,7 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
     const workspace = captureWorkspace()
     const projectId = projectIdFromRequest(input.req)
     return withProjectMutationQueue(
-      `${workspace.canonical}\u0000${projectId}`,
+      projectMutationKey(workspace.canonical, projectId),
       input.lifecycle,
       validationDeadline,
       async () => {
@@ -781,9 +803,9 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
     }
   }
 
-  app.get(chapterBase, safely(async (req, res) => {
-    const resolved = await requireProject(req, res)
-    if (!resolved) return
+  app.get(chapterBase, safely(async (req, res, lifecycle) => {
+    const resolved = await readChapterSourceAuthority(req, lifecycle)
+    if (!resolved) return res.status(404).json({ error: 'project not found' })
     const source = resolveChapterGenerationSource(resolved.project)
     res.json(chapterSourceView(resolved.activeWorkspace, resolved.project, source))
   }))

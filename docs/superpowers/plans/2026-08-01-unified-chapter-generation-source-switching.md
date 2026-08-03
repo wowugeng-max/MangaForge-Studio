@@ -594,7 +594,7 @@ Also assert:
 - GET reports `locked: true` while a lease is held;
 - concurrent activation/model/binding writes serialize and return only committed state;
 - model-only GET and PUT work when `mcpRuntime` is absent;
-- a real Bun + Express request whose complete JSON body reaches remote validation may still commit after a raw Node `http.request` client disconnects; the client-side result is transport-ambiguous, and a later authoritative GET returns the atomically committed source.
+- a real Bun + Express request whose complete JSON body reaches remote validation may still commit after a raw Node `http.request` client disconnects; one later authoritative GET waits the same-project mutation tail captured at GET start and returns the atomically committed source with no polling.
 
 - [ ] **Step 2: Run the route test and verify RED**
 
@@ -687,16 +687,32 @@ expect(readBack.body).toEqual(activated.body)
 
 Use this assertion after model save, MCP save, and activation. This locks GET and every successful mutation to the same `ChapterGenerationSourceView` contract.
 
-- [ ] **Step 4a: Register the authoritative read handler**
+- [ ] **Step 4a: Register the single-read authoritative handler**
 
 ```ts
-app.get(base, safely(async (req, res) => {
-  const resolved = await requireProject(req, res)
-  if (!resolved) return
+async function readChapterSourceAuthority(req, lifecycle) {
+  const workspace = captureWorkspace()
+  const projectId = projectIdFromRequest(req)
+  const captured = projectMutationTails.get(projectMutationKey(workspace.canonical, projectId))
+  if (captured) await lifecycle.waitForUntil(captured)
+  lifecycle.throwIfAborted()
+  if (canonicalFilesystemIdentity(workspace.lexical) !== workspace.canonical) {
+    throw generationSourceChanged('workspace_identity_changed')
+  }
+  const project = await ctx.getProject(workspace.canonical, projectId)
+  lifecycle.throwIfAborted()
+  return project ? { activeWorkspace: workspace.canonical, project } : null
+}
+
+app.get(base, safely(async (req, res, lifecycle) => {
+  const resolved = await readChapterSourceAuthority(req, lifecycle)
+  if (!resolved) return res.status(404).json({ error: 'project not found' })
   const source = resolveChapterGenerationSource(resolved.project)
   res.json(chapterSourceView(resolved.activeWorkspace, resolved.project, source))
 }))
 ```
+
+Capture only the Promise already stored for the canonical workspace/project key when GET begins. Do not append a read tail, loop, poll, or wait for another project's mutation. The captured mutation already has the bounded absolute validation deadline; GET adds no MCP deadline, but its lifecycle abort must interrupt the wait. After the wait, revalidate the workspace identity and project ID, then call `getProject` exactly once. A later same-project mutation may linearize on either side of that final read.
 
 - [ ] **Step 4b: Register the activation handler**
 
@@ -772,7 +788,7 @@ Run: `bun test ui/server/src/routes/novel-mcp-binding-routes.test.ts ui/server/s
 
 Expected: PASS, including legacy compatibility and no-runtime model state.
 
-The body-complete disconnect case is a characterization test for the production transport, not a rollback RED. It must use a condition gate proving remote validation was entered before the Node client destroys the socket, release that gate only after the client observes no HTTP response, and use GET/DB condition reads to prove the final atomic state. A test deadline may bound cleanup failure, but fixed sleeps must not decide correctness. Observable `AbortSignal`, abnormal request/response close, and deadline tests continue to require rollback.
+The body-complete disconnect case is a characterization test for the production transport, not a rollback RED. It must use condition gates proving remote validation was entered before the Node client destroys the socket and that exactly one authority GET reached the route while validation remained closed. Before release, that GET must remain unsettled and perform no final project read. After release, the same Promise must return the committed view, and DB must match; loops and polling are forbidden. A route-harness test also proves another project is not blocked, observable GET abort exits the wait, and the successful GET performs one final committed-source read. Test deadlines may bound cleanup failure, but fixed sleeps must not decide correctness. Observable mutation `AbortSignal`, abnormal request/response close, and deadline tests continue to require rollback.
 
 - [ ] **Step 8: Commit the API boundary**
 
@@ -2633,7 +2649,7 @@ export async function refreshChapterSourceAuthority(input: {
 }
 ```
 
-`isNoResponseTransportError` must reject classification when any HTTP response/status is present. Reconciliation performs exactly one GET and never repeats the mutation automatically. If the GET fails, catch `ChapterSourceAuthorityUnknownError`, assert the token once more at the setter boundary, and store `authorityUnknownState(error.previous, error)`. Its two underlying causes are diagnostic-only: UI formatters use the fixed public message `章节来源权威状态暂时无法确认，请重新获取`, never stringify, serialize, or interpolate those causes.
+`isNoResponseTransportError` must reject classification when any HTTP response/status is present. Reconciliation performs exactly one GET and never repeats the mutation automatically. The server-side authority handler waits the same-project mutation tail captured at GET start and performs one final read, so the client must not poll. If the GET fails, catch `ChapterSourceAuthorityUnknownError`, assert the token once more at the setter boundary, and store `authorityUnknownState(error.previous, error)`. Its two underlying causes are diagnostic-only: UI formatters use the fixed public message `章节来源权威状态暂时无法确认，请重新获取`, never stringify, serialize, or interpolate those causes.
 
 While `authorityUnknown` is true, activation, model save, MCP test/save, and every binding mutation must reject before issuing a request. `refreshChapterSourceAuthority` is invoked only by one explicit refresh action or one existing controlled workspace refresh. It performs one GET per invocation; a failed read returns the same unknown state without scheduling another read, while a successful read is the only transition that clears `authorityUnknown` and `reconciliationRequired`.
 

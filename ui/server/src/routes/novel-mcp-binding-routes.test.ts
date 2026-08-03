@@ -252,6 +252,7 @@ async function fixture(input: {
   customHeaders?: Record<string, string>
   mcpValidationTimeoutMs?: number
   onGetProject?: () => void
+  onProjectRead?: (project: any) => void
 } = {}) {
   const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-binding-route-'))
   workspaces.push(workspace)
@@ -284,7 +285,9 @@ async function fixture(input: {
     getWorkspace: () => workspace,
     getProject: async (activeWorkspace, id) => {
       input.onGetProject?.()
-      return getNovelProject(activeWorkspace, id)
+      const project = await getNovelProject(activeWorkspace, id)
+      input.onProjectRead?.(project)
+      return project
     },
     mcpRuntime: runtime as any,
     chapterSourceLeases,
@@ -474,9 +477,25 @@ describe('explicit chapter generation source routes', () => {
 
     const app = express()
     app.use(express.json({ limit: '5mb' }))
+    const authorityPath = `/api/novel/projects/${first.id}/chapter-generation-source`
+    let authorityGetRequests = 0
+    let authorityRouteArrived!: () => void
+    const authorityArrived = new Promise<void>(resolve => { authorityRouteArrived = resolve })
+    app.use((req, _res, next) => {
+      if (req.method !== 'GET' || req.path !== authorityPath) return next()
+      authorityGetRequests += 1
+      next()
+      // Express invokes the async route synchronously through its first await. Signalling after
+      // next() proves the route has either entered its captured-tail wait or started a project read.
+      authorityRouteArrived()
+    })
+    let projectReads = 0
     registerNovelMcpBindingRoutes(app, {
       getWorkspace: () => workspace,
-      getProject: getNovelProject,
+      getProject: async (activeWorkspace, id) => {
+        projectReads += 1
+        return getNovelProject(activeWorkspace, id)
+      },
       mcpRuntime: runtime as any,
       chapterSourceLeases,
     })
@@ -486,7 +505,7 @@ describe('explicit chapter generation source routes', () => {
     }), 'Express test server did not listen')
     const address = server.address()
     if (!address || typeof address === 'string') throw new Error('Express test server has no TCP port')
-    const path = `/api/novel/projects/${first.id}/chapter-generation-source/mcp`
+    const path = `${authorityPath}/mcp`
     const child = spawn('node', [
       '--input-type=module',
       '--eval',
@@ -499,6 +518,7 @@ describe('explicit chapter generation source routes', () => {
     })
     const clientOutcome = waitForChildOutcome(child)
     const authorityReadController = new AbortController()
+    let authorityRead: Promise<any> | undefined
 
     try {
       await withTestDeadline(entered, 'remote validation was never entered')
@@ -508,21 +528,26 @@ describe('explicit chapter generation source routes', () => {
       expect(remoteSignal).toBeInstanceOf(AbortSignal)
       expect(remoteSignal?.aborted).toBe(false)
 
+      const readsBeforeAuthority = projectReads
+      let authoritySettled = false
+      authorityRead = fetch(`http://127.0.0.1:${address.port}${authorityPath}`, {
+        headers: { connection: 'close' },
+        signal: authorityReadController.signal,
+      }).then(async response => {
+        expect(response.ok).toBe(true)
+        return response.json()
+      }).finally(() => { authoritySettled = true })
+      await withTestDeadline(authorityArrived, 'authoritative GET never reached its route')
+      expect(authorityGetRequests).toBe(1)
+      expect(projectReads).toBe(readsBeforeAuthority)
+      expect(authoritySettled).toBe(false)
+
       released = true
       releaseValidation()
-      const authoritative = await withTestDeadline((async () => {
-        for (;;) {
-          const response = await fetch(
-            `http://127.0.0.1:${address.port}/api/novel/projects/${first.id}/chapter-generation-source`,
-            { headers: { connection: 'close' }, signal: authorityReadController.signal },
-          )
-          if (response.ok) {
-            const view = await response.json() as any
-            if (view?.source?.mcp?.agent_id === 'agent-1') return view
-          }
-          await new Promise<void>(resolve => setImmediate(resolve))
-        }
-      })(), 'authoritative chapter source was not committed')
+      const authoritative = await withTestDeadline(
+        authorityRead,
+        'single authoritative GET did not return the committed chapter source',
+      )
 
       expect(authoritative.source).toEqual({
         version: 'chapter_generation_source_v1',
@@ -535,8 +560,77 @@ describe('explicit chapter generation source routes', () => {
     } finally {
       authorityReadController.abort()
       if (!released) releaseValidation()
+      await authorityRead?.catch(() => {})
       await stopTestChild(child)
       await closeTestServer(server)
+    }
+  })
+
+  test('authority GET waits one captured same-project tail without blocking another project and honors abort', async () => {
+    let projectReads = 0
+    let committedSourceReads = 0
+    const { key, first, second, handlers, runtime } = await fixture({
+      onGetProject: () => { projectReads += 1 },
+      onProjectRead: project => {
+        if (project?.reference_config?.chapter_generation_source?.mcp?.agent_id === 'agent-1') {
+          committedSourceReads += 1
+        }
+      },
+    })
+    let validationEntered!: () => void
+    let releaseValidation!: () => void
+    const entered = new Promise<void>(resolve => { validationEntered = resolve })
+    const mayFinish = new Promise<void>(resolve => { releaseValidation = resolve })
+    let released = false
+    runtime.listAgents = async () => {
+      validationEntered()
+      await mayFinish
+      return [{ id: 'agent-1', name: '正文 Agent' }]
+    }
+
+    const saving = call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+      params: { id: String(first.id) },
+      body: { mcp: binding(key.id) },
+    })
+    try {
+      await withTestDeadline(entered, 'remote validation was never entered')
+
+      const unrelated = await withTestDeadline(
+        call(routeHandler(handlers, `GET ${CHAPTER_SOURCE_BASE}`), {
+          params: { id: String(second.id) },
+        }),
+        'another project authority GET was blocked',
+      )
+      expect(unrelated.statusCode).toBe(200)
+      const readsBeforeSameProject = projectReads
+
+      const controller = new AbortController()
+      const abortedRead = call(routeHandler(handlers, `GET ${CHAPTER_SOURCE_BASE}`), {
+        params: { id: String(first.id) },
+        signal: controller.signal,
+      })
+      expect(projectReads).toBe(readsBeforeSameProject)
+      controller.abort()
+      const aborted = await withTestDeadline(abortedRead, 'authority GET did not honor observable abort')
+      expect(aborted).toMatchObject({ statusCode: 499, body: { error_code: 'MCP_CANCELLED' } })
+      expect(projectReads).toBe(readsBeforeSameProject)
+
+      const authoritativeRead = call(routeHandler(handlers, `GET ${CHAPTER_SOURCE_BASE}`), {
+        params: { id: String(first.id) },
+      })
+      expect(projectReads).toBe(readsBeforeSameProject)
+
+      released = true
+      releaseValidation()
+      const [saved, authoritative] = await Promise.all([saving, authoritativeRead])
+      expect(saved.statusCode).toBe(200)
+      expect(authoritative.statusCode).toBe(200)
+      expect(authoritative.body.source.mcp).toEqual(binding(key.id))
+      expect(projectReads).toBe(readsBeforeSameProject + 2)
+      expect(committedSourceReads).toBe(1)
+    } finally {
+      if (!released) releaseValidation()
+      await saving
     }
   })
 

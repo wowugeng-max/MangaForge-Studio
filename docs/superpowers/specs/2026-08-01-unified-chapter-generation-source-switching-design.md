@@ -234,6 +234,8 @@ The web client therefore distinguishes two outcomes:
 
 The client must not blindly retry an ambiguous mutation. The first authoritative GET is part of reconciliation and runs exactly once. A successful GET replaces the previously confirmed UI state, even when it shows that the first request committed.
 
+The authority endpoint makes that single read reliable by snapshotting the same-project source-mutation tail that exists when the GET begins. If a tail exists, the GET waits for that captured Promise through its observable request lifecycle, without joining the write queue or adding a separate MCP deadline. It then rechecks cancellation and canonical workspace identity and reads the project exactly once. The snapshot never includes another project's mutation, and a later same-project mutation may linearize either before or after that one final read. An observable GET cancellation exits the wait without changing the captured mutation.
+
 If that GET also fails, the client enters an explicit `authority_unknown` state. The previous confirmed source remains visible only as last-known information; it is not treated as current authority. Activation, model save, MCP test/save, and all binding mutations are disabled, and the UI shows a scrubbed recovery message without interpolating either transport error. The internal `ChapterSourceAuthorityUnknownError` retains the previous view, the mutation transport error, and the read error for local diagnostics, but those causes are never rendered or serialized to a public response.
 
 `authority_unknown` can be cleared only by a later successful authoritative GET. Reconciliation failure does not start a timer, effect loop, or another automatic GET. The user may request one explicit refresh, or an existing bounded workspace refresh may perform one controlled read; a failed refresh leaves the state unknown, while a successful refresh replaces the source and re-enables mutations subject to the ordinary task lock. No recovery path automatically replays the mutation. Server code must not depend on Bun private symbols or fabricate a request signal to strengthen this contract.
@@ -366,6 +368,7 @@ Raw Keys, authorization headers, cookies, and other credentials remain excluded.
 - Retain and display disabled MCP identity.
 - Persist successful activation and keep the previous confirmed view for explicit HTTP failures.
 - Reconcile a transport error with exactly one authoritative GET and never replay the mutation automatically.
+- Verify that this single GET waits only the same-project mutation already present at request start, performs one final project read, and never polls.
 - On reconciliation read failure, show last-known state as authority unknown, disable every mutation, and recover only after a controlled GET succeeds.
 - Fence initial loads, mutation results, error side effects, reconciliation, and recovery by project/load/source-operation epochs.
 - Lock controls during active tasks.
