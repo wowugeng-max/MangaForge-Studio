@@ -90,6 +90,34 @@ describe('Buda tool discovery', () => {
     })).toEqual({ body: { spaceId: 'space-1', name: 'Writer', emoji: '✍️', instructions: 'Write novels.' } })
   })
 
+  for (const model of ['claude-sonnet', ''] as const) {
+    test(`${model ? 'preserves an explicit model' : 'fully omits Auto model'} in live Session envelopes`, () => {
+      const modelArguments = model ? { model } : {}
+      const created = buildBudaToolArguments('createSession', 'api_claw_create_api_agent_session', {
+        agentId: 'agent-1',
+        message: 'prepare',
+        mode: 'agent',
+        ...modelArguments,
+        startRun: false,
+      })
+      const posted = buildBudaToolArguments('sendSessionMessage', 'api_claw_post_api_agent_session_message', {
+        agentId: 'agent-1',
+        sessionId: 'session-1',
+        message: 'stage',
+        mode: 'agent',
+        ...modelArguments,
+        startRun: true,
+      })
+
+      expect(Object.prototype.hasOwnProperty.call(created.body, 'model')).toBe(Boolean(model))
+      expect(Object.prototype.hasOwnProperty.call(posted.body, 'model')).toBe(Boolean(model))
+      if (model) {
+        expect(created.body.model).toBe(model)
+        expect(posted.body.model).toBe(model)
+      }
+    })
+  }
+
   test('keeps legacy Buda tool arguments flat', () => {
     const args = { agentId: 'agent-1', sessionId: 'session-1' }
     expect(buildBudaToolArguments('getSession', 'apiClaw.getApiAgentSession', args)).toEqual(args)

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { BudaAdapter, buildBudaExecutionEnvelope, extractBudaProse, normalizeBudaAgentList } from './buda-adapter'
+import * as budaAdapterModule from './buda-adapter'
 import { BUDA_MCP_SERVER_TEMPLATE } from '../server-store'
 import { McpGenerationDeadline } from '../deadline'
 import { McpError } from '../errors'
@@ -81,6 +82,28 @@ function generationInput(overrides: Record<string, unknown> = {}) {
   } as any
 }
 
+function chapterTaskInput(overrides: Record<string, unknown> = {}) {
+  return {
+    ...generationInput(),
+    taskId: 'task-12',
+    ...overrides,
+  } as any
+}
+
+async function openChapterTask(adapter: BudaAdapter, input: any = chapterTaskInput()) {
+  expect(typeof (adapter as any).openChapterTask).toBe('function')
+  return (adapter as any).openChapterTask(input)
+}
+
+function stageInput(
+  requestId: string,
+  stage: string,
+  responseContract: string,
+  prompt = `${stage} prompt`,
+) {
+  return { requestId, stage, responseContract, prompt } as any
+}
+
 function expectBudaOperations(calls: Array<{ name: string; options: any }>) {
   for (const call of calls) {
     const readSafe = call.name.endsWith('listApiAgents')
@@ -92,6 +115,292 @@ function expectBudaOperations(calls: Array<{ name: string; options: any }>) {
 }
 
 describe('BudaAdapter', () => {
+  test('opens one reusable Chapter Task Session and runs ordered stages in it', async () => {
+    const fake = createFakeClient()
+    const stageOutputs = ['质量审查结果', '修订正文', '故事状态同步结果']
+    let activeStage = -1
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('postApiAgentSessionMessage')) activeStage += 1
+      if (name.endsWith('getApiAgentSession')) {
+        fake.calls.push({ name, args, options })
+        return structured({
+          session: { id: 'session-1', status: 'completed' },
+          run: { status: 'completed' },
+          messages: [{ role: 'assistant', content: stageOutputs[activeStage] }],
+        })
+      }
+      return original(name, args, options)
+    }
+    const task = await openChapterTask(new BudaAdapter(fake.client as any))
+
+    const results = await Promise.all([
+      task.runStage(stageInput('request-quality', 'quality_review', 'quality_review_json')),
+      task.runStage(stageInput('request-revision', 'revision', 'revision_prose')),
+      task.runStage(stageInput('request-state', 'story_state_sync', 'story_state_json')),
+    ])
+    await task.close()
+
+    expect(results.map((result: any) => result.content)).toEqual(stageOutputs)
+    expect(results.every((result: any) => result.session_id === 'session-1' && result.status === 'completed')).toBe(true)
+    expect(fake.calls.filter(call => call.name.endsWith('createApiAgentSession'))).toHaveLength(1)
+    const posts = fake.calls.filter(call => call.name.endsWith('postApiAgentSessionMessage'))
+    expect(posts).toHaveLength(3)
+    expect(posts.map(call => call.args.message.match(/request_id: ([^\n]+)/)?.[1])).toEqual([
+      'request-quality',
+      'request-revision',
+      'request-state',
+    ])
+    expect(posts.map(call => call.args.message.match(/stage: ([^\n]+)/)?.[1])).toEqual([
+      'quality_review',
+      'revision',
+      'story_state_sync',
+    ])
+  })
+
+  for (const model of ['claude-sonnet', ''] as const) {
+    test(`${model ? 'routes an explicit model' : 'omits Auto model'} on Session creation and every stage`, async () => {
+      const fake = createFakeClient()
+      const task = await openChapterTask(new BudaAdapter(fake.client as any), chapterTaskInput({ model }))
+
+      expect(fake.calls.filter(call => call.name.endsWith('postApiAgentSessionMessage'))).toHaveLength(0)
+      const create = fake.calls.find(call => call.name.endsWith('createApiAgentSession'))!
+      expect(create.args.startRun).toBe(false)
+      expect(Object.prototype.hasOwnProperty.call(create.args, 'model')).toBe(Boolean(model))
+      if (model) expect(create.args.model).toBe(model)
+
+      await task.runStage(stageInput('request-a', 'draft', 'draft_prose'))
+      await task.runStage(stageInput('request-b', 'revision', 'revision_prose'))
+      const posts = fake.calls.filter(call => call.name.endsWith('postApiAgentSessionMessage'))
+      expect(posts).toHaveLength(2)
+      for (const post of posts) {
+        expect(post.args.startRun).toBe(true)
+        expect(Object.prototype.hasOwnProperty.call(post.args, 'model')).toBe(Boolean(model))
+        if (model) expect(post.args.model).toBe(model)
+      }
+      await task.close()
+    })
+  }
+
+  test('serializes concurrent stages and close waits for the queued tail', async () => {
+    const fake = createFakeClient()
+    let releaseFirst!: () => void
+    let firstGetStarted!: () => void
+    const firstGet = new Promise<void>(resolve => { firstGetStarted = resolve })
+    const gate = new Promise<void>(resolve => { releaseFirst = resolve })
+    let getCount = 0
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('getApiAgentSession')) {
+        fake.calls.push({ name, args, options })
+        getCount += 1
+        if (getCount === 1) {
+          firstGetStarted()
+          await gate
+        }
+        return structured({
+          session: { id: 'session-1', status: 'completed' },
+          messages: [{ role: 'assistant', content: `stage-${getCount}` }],
+        })
+      }
+      return original(name, args, options)
+    }
+    const task = await openChapterTask(new BudaAdapter(fake.client as any))
+    const first = task.runStage(stageInput('request-1', 'quality_review', 'quality_review_json'))
+    const second = task.runStage(stageInput('request-2', 'revision', 'revision_prose'))
+    let closeResolved = false
+    const closing = Promise.all([task.close(), task.close()]).then(() => { closeResolved = true })
+
+    await firstGet
+    expect(fake.calls.filter(call => call.name.endsWith('postApiAgentSessionMessage'))).toHaveLength(1)
+    expect(closeResolved).toBe(false)
+    releaseFirst()
+
+    await expect(first).resolves.toMatchObject({ content: 'stage-1' })
+    await expect(second).resolves.toMatchObject({ content: 'stage-2' })
+    await closing
+    expect(fake.calls.filter(call => call.name.endsWith('postApiAgentSessionMessage'))
+      .map(call => call.args.message.match(/request_id: ([^\n]+)/)?.[1]))
+      .toEqual(['request-1', 'request-2'])
+    expect(closeResolved).toBe(true)
+  })
+
+  test('polls the current run status before a reused Session status', async () => {
+    const fake = createFakeClient()
+    let gets = 0
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('getApiAgentSession')) {
+        fake.calls.push({ name, args, options })
+        gets += 1
+        return structured({
+          session: { id: 'session-1', status: 'completed' },
+          run: { status: gets === 1 ? 'in_progress' : 'completed' },
+          messages: gets === 1
+            ? [{ role: 'assistant', content: 'previous stage output' }]
+            : [
+                { role: 'assistant', content: 'previous stage output' },
+                { role: 'assistant', content: 'current stage output' },
+              ],
+        })
+      }
+      return original(name, args, options)
+    }
+    const task = await openChapterTask(new BudaAdapter(fake.client as any))
+
+    await expect(task.runStage(stageInput('request-current-run', 'revision', 'revision_prose')))
+      .resolves.toMatchObject({ content: 'current stage output' })
+    expect(gets).toBe(2)
+    await task.close()
+  })
+
+  test('advances the stage tail after a confirmed terminal failure', async () => {
+    const fake = createFakeClient()
+    let getCount = 0
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('getApiAgentSession')) {
+        fake.calls.push({ name, args, options })
+        getCount += 1
+        const status = getCount === 1 ? 'failed' : 'completed'
+        return structured({
+          session: { id: 'session-1', status },
+          messages: status === 'completed' ? [{ role: 'assistant', content: 'recovered stage' }] : [],
+        })
+      }
+      return original(name, args, options)
+    }
+    const task = await openChapterTask(new BudaAdapter(fake.client as any))
+
+    await expect(task.runStage(stageInput('request-fail', 'quality_review', 'quality_review_json')))
+      .rejects.toMatchObject({ code: 'MCP_SESSION_FAILED', details: { remote_cancel_confirmed: true } })
+    await expect(task.runStage(stageInput('request-next', 'revision', 'revision_prose')))
+      .resolves.toMatchObject({ content: 'recovered stage' })
+    expect(fake.calls.filter(call => call.name.endsWith('postApiAgentSessionMessage'))).toHaveLength(2)
+    await task.close()
+  })
+
+  test('poisons the Session after uncertain remote cleanup and never sends later stages', async () => {
+    const fake = createFakeClient(['in_progress'])
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('postApiAgentSessionMessage')) {
+        fake.calls.push({ name, args, options })
+        throw new McpError('MCP_CONNECTION_LOST', 'connection lost after send')
+      }
+      if (name.endsWith('cancelApiAgentSessionRun')) {
+        fake.calls.push({ name, args, options })
+        return structured({ ok: true, cancelled: false })
+      }
+      return original(name, args, options)
+    }
+    const task = await openChapterTask(new BudaAdapter(fake.client as any))
+
+    const firstError = await task.runStage(stageInput('request-unknown', 'draft', 'draft_prose')).catch((error: unknown) => error)
+    expect(firstError).toMatchObject({
+      code: 'MCP_SEND_UNKNOWN',
+      details: { remote_cancel_confirmed: false, receipt_status: 'send_unknown' },
+    })
+    const nextError = await task.runStage(stageInput('request-never-send', 'revision', 'revision_prose')).catch((error: unknown) => error)
+    expect(nextError).toBe(firstError)
+    expect(fake.calls.filter(call => call.name.endsWith('postApiAgentSessionMessage'))).toHaveLength(1)
+    await task.close()
+  })
+
+  test('poisons the Session when independent cleanup setup fails', async () => {
+    const fake = createFakeClient()
+    const input = chapterTaskInput()
+    ;(input.deadline as any).createCleanupDeadline = () => { throw new Error('cleanup setup failed') }
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('getApiAgentSession')) {
+        fake.calls.push({ name, args, options })
+        throw new Error('stage polling failed')
+      }
+      return original(name, args, options)
+    }
+    const task = await openChapterTask(new BudaAdapter(fake.client as any), input)
+
+    const firstError = await task.runStage(stageInput('request-cleanup-fail', 'draft', 'draft_prose'))
+      .catch((error: unknown) => error) as any
+    expect(firstError).toMatchObject({
+      details: { remote_cancel_confirmed: false, receipt_status: 'remote_cancel_unknown' },
+    })
+    const nextError = await task.runStage(stageInput('request-never-send', 'revision', 'revision_prose'))
+      .catch((error: unknown) => error)
+    expect(nextError).toBe(firstError)
+    expect(fake.calls.filter(call => call.name.endsWith('postApiAgentSessionMessage'))).toHaveLength(1)
+    await task.close()
+  })
+
+  test('generateProse delegates one draft stage and always closes its task Session', async () => {
+    const fake = createFakeClient()
+    const adapter = new BudaAdapter(fake.client as any)
+    const stages: any[] = []
+    let closes = 0
+    ;(adapter as any).openChapterTask = async () => ({
+      sessionId: 'session-wrapper',
+      snapshotHash: 'snapshot-wrapper',
+      runStage: async (input: any) => {
+        stages.push(input)
+        return { content: 'wrapper 正文', session_id: 'session-wrapper', snapshot_hash: 'snapshot-wrapper', status: 'completed' }
+      },
+      close: async () => { closes += 1 },
+    })
+
+    const result = await adapter.generateProse(generationInput())
+    expect(stages).toEqual([expect.objectContaining({
+      requestId: 'request-12',
+      stage: 'draft',
+      responseContract: 'draft_prose',
+      prompt: '完整段落任务：前因、当前目标、后果与输出合同。',
+    })])
+    expect(result).toMatchObject({
+      session_id: 'session-wrapper',
+      snapshot_hash: 'snapshot-wrapper',
+      prose_chapters: [{ chapter_no: 12, chapter_text: 'wrapper 正文' }],
+      raw: { request_id: 'request-12', session_status: 'completed' },
+    })
+    expect(closes).toBe(1)
+
+    ;(adapter as any).openChapterTask = async () => ({
+      sessionId: 'session-wrapper',
+      snapshotHash: 'snapshot-wrapper',
+      runStage: async () => { throw new Error('stage failed') },
+      close: async () => { closes += 1 },
+    })
+    await expect(adapter.generateProse(generationInput())).rejects.toThrow('stage failed')
+    expect(closes).toBe(2)
+  })
+
+  test('generateProse preserves a stage failure over a simultaneous close failure', async () => {
+    const fake = createFakeClient()
+    const adapter = new BudaAdapter(fake.client as any)
+    const stageError = new McpError('MCP_SESSION_FAILED', 'primary stage failure')
+    const closeError = new Error('secondary close failure')
+    ;(adapter as any).openChapterTask = async () => ({
+      sessionId: 'session-wrapper',
+      snapshotHash: 'snapshot-wrapper',
+      runStage: async () => { throw stageError },
+      close: async () => { throw closeError },
+    })
+
+    await expect(adapter.generateProse(generationInput())).rejects.toBe(stageError)
+
+    ;(adapter as any).openChapterTask = async () => ({
+      sessionId: 'session-wrapper',
+      snapshotHash: 'snapshot-wrapper',
+      runStage: async () => ({
+        content: 'successful stage',
+        session_id: 'session-wrapper',
+        snapshot_hash: 'snapshot-wrapper',
+        status: 'completed',
+      }),
+      close: async () => { throw closeError },
+    })
+    await expect(adapter.generateProse(generationInput())).rejects.toBe(closeError)
+  })
+
   test('inspects a Session with one read-safe getSession call and only trusts exact terminal states', async () => {
     const cases = [
       ['completed', 'completed', true],
@@ -123,6 +432,65 @@ describe('BudaAdapter', () => {
       })
       expect(fake.calls.filter(call => call.options.operation === 'mutation')).toHaveLength(0)
     }
+  })
+
+  test('does not execute remote Proxy traps while inspecting Session status', async () => {
+    const fake = createFakeClient()
+    let traps = 0
+    const remote = new Proxy({ session: { status: 'completed' } }, {
+      get() { traps += 1; return { status: 'completed' } },
+      getOwnPropertyDescriptor() { traps += 1; return undefined },
+    })
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      fake.calls.push({ name, args, options })
+      if (name.endsWith('getApiAgentSession')) return { content: [], structuredContent: remote }
+      throw new Error(`unexpected tool ${name}`)
+    }
+
+    await expect(new BudaAdapter(fake.client as any).inspectSession({
+      agentId: 'agent-1',
+      sessionId: 'session-1',
+    })).resolves.toEqual({ status: 'unknown', terminal: false })
+    expect(traps).toBe(0)
+  })
+
+  test('does not execute a remote Session id getter during open', async () => {
+    const fake = createFakeClient()
+    let getters = 0
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('createApiAgentSession')) {
+        fake.calls.push({ name, args, options })
+        const created: any = {}
+        Object.defineProperty(created, 'session', {
+          enumerable: true,
+          get() { getters += 1; return { id: 'session-from-getter' } },
+        })
+        return structured(created)
+      }
+      return original(name, args, options)
+    }
+
+    await expect(openChapterTask(new BudaAdapter(fake.client as any)))
+      .rejects.toMatchObject({ code: 'MCP_SESSION_FAILED' })
+    expect(getters).toBe(0)
+    expect(fake.calls.filter(call => call.name.endsWith('cancelApiAgentSessionRun'))).toHaveLength(0)
+  })
+
+  test('honors an independent task signal during capability discovery', async () => {
+    const caller = new AbortController()
+    const fake = createFakeClient()
+    const originalListTools = fake.client.listTools
+    fake.client.listTools = async (options: any) => {
+      caller.abort()
+      return originalListTools(options)
+    }
+
+    await expect(openChapterTask(
+      new BudaAdapter(fake.client as any),
+      chapterTaskInput({ signal: caller.signal }),
+    )).rejects.toMatchObject({ code: 'MCP_CANCELLED' })
+    expect(fake.calls).toHaveLength(0)
   })
 
   test('lists existing Agents and preserves only bounded summary fields', async () => {
@@ -174,7 +542,8 @@ describe('BudaAdapter', () => {
 
     const messageCall = fake.calls.find(call => call.name.endsWith('postApiAgentSessionMessage'))
     expect(messageCall?.args.message).toContain('完整段落任务：前因、当前目标、后果与输出合同。')
-    expect(messageCall?.args.message).toContain('当前章节请求与 paragraphTask 优先级最高')
+    expect(messageCall?.args.message).toContain('stage: draft')
+    expect(messageCall?.args.message).toContain('response_contract: draft_prose')
     expect(output).toEqual(expect.objectContaining({
       source: 'mcp',
       adapter_id: 'buda',
@@ -654,13 +1023,17 @@ describe('BudaAdapter', () => {
     const fake = createFakeClient(['in_progress', 'cancelled'])
     const input = generationInput({ signal: controller.signal })
     const original = fake.client.callTool
+    let primaryGetSeen = false
     fake.client.callTool = async (name: string, args: any, options: any) => {
       if (name.endsWith('cancelApiAgentSessionRun')) {
         fake.calls.push({ name, args, options })
         return structured({ ok: true, cancelled: false })
       }
       const result = await original(name, args, options)
-      if (name.endsWith('getApiAgentSession') && options.signal === input.deadline.signal) controller.abort()
+      if (name.endsWith('getApiAgentSession') && !primaryGetSeen) {
+        primaryGetSeen = true
+        controller.abort()
+      }
       return result
     }
     const generation = new BudaAdapter(fake.client as any).generateProse(input)
@@ -669,7 +1042,9 @@ describe('BudaAdapter', () => {
       code: 'MCP_CANCELLED',
       details: { remote_cancel_confirmed: true },
     })
-    expect(fake.calls.filter(call => call.name.endsWith('getApiAgentSession') && call.options.signal !== input.deadline.signal))
+    const cleanupSignal = fake.calls.find(call => call.name.endsWith('cancelApiAgentSessionRun'))?.options.signal
+    expect(cleanupSignal).toBeDefined()
+    expect(fake.calls.filter(call => call.name.endsWith('getApiAgentSession') && call.options.signal === cleanupSignal))
       .toHaveLength(1)
   })
 
@@ -721,6 +1096,100 @@ describe('BudaAdapter', () => {
 })
 
 describe('Buda result normalization', () => {
+  test('builds the exact current-stage envelope without changing the prompt', () => {
+    expect(typeof (budaAdapterModule as any).buildBudaStageEnvelope).toBe('function')
+    const prompt = '只修订这一段，不得提前同步状态。'
+    expect((budaAdapterModule as any).buildBudaStageEnvelope({
+      requestId: 'request-stage',
+      stage: 'revision',
+      responseContract: 'revision_prose',
+      prompt,
+    })).toBe([
+      '【MangaForge 章节任务阶段】',
+      'request_id: request-stage',
+      'stage: revision',
+      'response_contract: revision_prose',
+      '只执行当前 stage。不得自行开始下一阶段，不得用 Agent 旧记忆覆盖本次提示。',
+      '严格按 response_contract 返回，不要附加流程说明。',
+      '',
+      prompt,
+    ].join('\n'))
+  })
+
+  test('extracts the last non-empty assistant stage content with safe own-data fallbacks', () => {
+    expect(typeof (budaAdapterModule as any).extractBudaStageContent).toBe('function')
+    const extract = (budaAdapterModule as any).extractBudaStageContent
+    expect(extract({
+      messages: [
+        { role: 'assistant', content: 'first' },
+        { role: 'user', content: 'ignore' },
+        { role: 'assistant', content: '   ' },
+        { role: 'assistant', content: ' final stage output ' },
+      ],
+      content: 'fallback',
+    })).toBe('final stage output')
+    expect(extract({ content: ' content fallback ' })).toBe('content fallback')
+    expect(extract({ text: ' text fallback ' })).toBe('text fallback')
+    expect(extract({
+      messages: [
+        ...Array.from({ length: 40 }, () => ({ role: 'user', content: 'context' })),
+        { role: 'assistant', content: 'latest bounded output' },
+      ],
+    })).toBe('latest bounded output')
+    expect(extract({
+      messages: [
+        { role: 'assistant', content: 'earlier but still last assistant' },
+        ...Array.from({ length: 40 }, () => ({ role: 'user', content: 'later context' })),
+      ],
+    })).toBe('earlier but still last assistant')
+    expect(() => extract({ messages: [] })).toThrow(expect.objectContaining({ code: 'MCP_TOOL_ERROR' }))
+  })
+
+  test('does not execute Proxy traps or accessors while extracting stage content', () => {
+    expect(typeof (budaAdapterModule as any).extractBudaStageContent).toBe('function')
+    const extract = (budaAdapterModule as any).extractBudaStageContent
+    let traps = 0
+    const proxy = new Proxy({ messages: [] }, {
+      get() { traps += 1; return 'secret' },
+      getOwnPropertyDescriptor() { traps += 1; return undefined },
+    })
+    expect(() => extract(proxy)).toThrow(expect.objectContaining({ code: 'MCP_TOOL_ERROR' }))
+    expect(traps).toBe(0)
+
+    const revoked = Proxy.revocable([], {})
+    revoked.revoke()
+    expect(extract({ messages: revoked.proxy, text: 'revoked fallback' })).toBe('revoked fallback')
+
+    let getters = 0
+    const unsafe: any = { text: 'safe fallback' }
+    Object.defineProperty(unsafe, 'messages', {
+      enumerable: true,
+      get() { getters += 1; return [{ role: 'assistant', content: 'secret' }] },
+    })
+    expect(extract(unsafe)).toBe('safe fallback')
+    expect(getters).toBe(0)
+  })
+
+  test('rejects oversized assistant and fallback stage content without exposing it', () => {
+    expect(typeof (budaAdapterModule as any).extractBudaStageContent).toBe('function')
+    const extract = (budaAdapterModule as any).extractBudaStageContent
+    const oversized = 'stage-secret-'.repeat(30_000)
+    for (const data of [
+      { messages: [{ role: 'assistant', content: oversized }] },
+      { text: oversized },
+      { messages: Array.from({ length: 257 }, () => ({ role: 'user', content: 'bounded' })) },
+    ]) {
+      const caught = (() => {
+        try { extract(data) } catch (error) { return error }
+      })() as any
+      expect(caught).toMatchObject({
+        code: 'MCP_TOOL_ERROR',
+        details: { reason: 'stage_result_too_large' },
+      })
+      expect(JSON.stringify(caught)).not.toContain('stage-secret-')
+    }
+  })
+
   test('caps structured Agent lists before normalizing later entries', () => {
     let beyondLimitCalls = 0
     const apiAgents: any[] = Array.from({ length: 100 }, (_, index) => ({

@@ -7,6 +7,10 @@ import type {
   McpToolResult,
 } from '../types'
 import type { McpGenerationDeadline } from '../deadline'
+import type {
+  ChapterStageResponseContract,
+  ChapterTaskStage,
+} from '../../novel-writing-service/generation-source/types'
 
 export type McpAdapterOperationOptions = Omit<McpOperationOptions, 'operation'>
 
@@ -73,6 +77,43 @@ export type BudaProseGenerationResult = {
   }
 }
 
+export type BudaChapterStageInput = {
+  requestId: string
+  stage: ChapterTaskStage
+  responseContract: ChapterStageResponseContract
+  prompt: string
+}
+
+export type BudaChapterTaskInput = {
+  activeWorkspace: string
+  server: McpServerRecord
+  keyId: number
+  agentId: string
+  model?: string
+  taskId: string
+  project: Record<string, any>
+  chapter: Record<string, any>
+  chapterNo: number
+  drive: BudaDriveInput
+  deadline: McpGenerationDeadline
+  signal?: AbortSignal
+  onProgress?: (event: GenerationSourceProgress) => Promise<void> | void
+}
+
+export type BudaChapterStageResult = {
+  content: string
+  session_id: string
+  snapshot_hash: string
+  status: 'completed'
+}
+
+export interface BudaChapterTaskSession {
+  readonly sessionId: string
+  readonly snapshotHash: string
+  runStage(input: BudaChapterStageInput): Promise<BudaChapterStageResult>
+  close(): Promise<void>
+}
+
 export interface ProseMcpAdapter {
   readonly id: string
   listAgents(options: McpAdapterOperationOptions): Promise<McpAgentSummary[]>
@@ -81,5 +122,6 @@ export interface ProseMcpAdapter {
     input: { agentId: string; sessionId: string },
     options: McpAdapterOperationOptions,
   ): Promise<{ status: string; terminal: boolean }>
+  openChapterTask(input: BudaChapterTaskInput): Promise<BudaChapterTaskSession>
   generateProse(input: BudaProseGenerationInput): Promise<BudaProseGenerationResult>
 }

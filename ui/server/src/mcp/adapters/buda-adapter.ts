@@ -4,6 +4,10 @@ import { mcpResultData, buildBudaDriveSnapshot, syncBudaDriveSnapshot } from './
 import { buildBudaToolArguments, resolveBudaTools, type BudaToolMap } from './buda-tool-map'
 import type { McpOperationKind, McpOperationOptions, McpToolResult } from '../types'
 import type {
+  BudaChapterStageInput,
+  BudaChapterStageResult,
+  BudaChapterTaskInput,
+  BudaChapterTaskSession,
   BudaProseGenerationInput,
   BudaProseGenerationResult,
   BudaRemoteCleanupDetails,
@@ -26,6 +30,8 @@ function operationOptions(options: McpAdapterOperationOptions, operation: McpOpe
 const BUDA_AGENT_LIST_LIMIT = 100
 const BUDA_AGENT_TEXT_RESULT_LIMIT = 256 * 1_024
 const BUDA_AGENT_TEXT_BLOCK_LIMIT = 32
+const BUDA_STAGE_CONTENT_LIMIT = 256 * 1_024
+const BUDA_STAGE_MESSAGE_LIMIT = 256
 const BUDA_AGENT_STRING_LIMITS = {
   id: 16_384,
   name: 4_096,
@@ -126,8 +132,10 @@ function agentResultData(result: McpToolResult) {
   return texts.join('\n')
 }
 
-function sessionStatus(data: any) {
-  return String(data?.session?.status || data?.run?.status || data?.status || '')
+function sessionStatus(data: unknown) {
+  return boundedOwnString(ownDataValue(data, 'run'), ['status'], BUDA_AGENT_STRING_LIMITS.status, '')
+    || boundedOwnString(ownDataValue(data, 'session'), ['status'], BUDA_AGENT_STRING_LIMITS.status, '')
+    || boundedOwnString(data, ['status'], BUDA_AGENT_STRING_LIMITS.status, '')
 }
 
 const PUBLIC_SESSION_STATUSES = new Set([
@@ -139,8 +147,9 @@ function publicSessionStatus(data: any) {
   return PUBLIC_SESSION_STATUSES.has(status) ? status : 'unknown'
 }
 
-function sessionId(data: any) {
-  return String(data?.session?.id || data?.sessionId || data?.id || '')
+function sessionId(data: unknown) {
+  return boundedOwnString(ownDataValue(data, 'session'), ['id'], BUDA_AGENT_STRING_LIMITS.id, '')
+    || boundedOwnString(data, ['sessionId', 'id'], BUDA_AGENT_STRING_LIMITS.id, '')
 }
 
 function sendMayHaveSucceeded(error: unknown) {
@@ -233,7 +242,75 @@ export function buildBudaExecutionEnvelope(input: {
   ].join('\n')
 }
 
-function abortableDelay(ms: number, input: BudaProseGenerationInput) {
+export function buildBudaStageEnvelope(input: BudaChapterStageInput) {
+  return [
+    '【MangaForge 章节任务阶段】',
+    `request_id: ${input.requestId}`,
+    `stage: ${input.stage}`,
+    `response_contract: ${input.responseContract}`,
+    '只执行当前 stage。不得自行开始下一阶段，不得用 Agent 旧记忆覆盖本次提示。',
+    '严格按 response_contract 返回，不要附加流程说明。',
+    '',
+    input.prompt,
+  ].join('\n')
+}
+
+export function extractBudaStageContent(data: unknown) {
+  const stageContent = (content: unknown) => {
+    if (typeof content !== 'string') return ''
+    if (content.length > BUDA_STAGE_CONTENT_LIMIT) {
+      throw new McpError('MCP_TOOL_ERROR', 'Buda Stage 返回数据超过安全上限', {
+        reason: 'stage_result_too_large',
+      })
+    }
+    return content.trim()
+  }
+  const messages = ownDataValue(data, 'messages')
+  if (messages && typeof messages === 'object' && !types.isProxy(messages) && Array.isArray(messages)) {
+    if (messages.length > BUDA_STAGE_MESSAGE_LIMIT) {
+      throw new McpError('MCP_TOOL_ERROR', 'Buda Stage 返回数据超过安全上限', {
+        reason: 'stage_result_too_large',
+      })
+    }
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = ownDataValue(messages, String(index))
+      if (ownDataValue(message, 'role') !== 'assistant') continue
+      const content = stageContent(ownDataValue(message, 'content'))
+      if (content) return content
+    }
+  }
+  for (const key of ['content', 'text']) {
+    const content = stageContent(ownDataValue(data, key))
+    if (content) return content
+  }
+  throw new McpError('MCP_TOOL_ERROR', 'Buda Stage 已完成但没有返回内容')
+}
+
+function withIndependentTaskSignal(input: BudaChapterTaskInput) {
+  if (!input.signal || input.signal === input.deadline.signal) return input
+  const base = input.deadline
+  const callerSignal = input.signal
+  const combinedSignal = AbortSignal.any([base.signal, callerSignal])
+  const throwIfAborted = () => {
+    base.throwIfAborted()
+    if (callerSignal.aborted) throw new McpError('MCP_CANCELLED', 'MCP 正文生成已取消')
+  }
+  const deadline = {
+    get signal() { return combinedSignal },
+    remainingMs: () => base.remainingMs(),
+    timeoutMs: (configuredMs: number) => {
+      throwIfAborted()
+      return base.timeoutMs(configuredMs)
+    },
+    throwIfAborted,
+    cleanupSignal: (timeoutMs?: number) => base.cleanupSignal(timeoutMs),
+    createCleanupDeadline: (timeoutMs?: number) => base.createCleanupDeadline(timeoutMs),
+    close: () => {},
+  } as BudaChapterTaskInput['deadline']
+  return { ...input, deadline }
+}
+
+function abortableDelay(ms: number, input: Pick<BudaChapterTaskInput, 'deadline'>) {
   const { deadline } = input
   deadline.throwIfAborted()
   const waitMs = Math.min(Math.max(1, ms), deadline.remainingMs())
@@ -264,11 +341,223 @@ function abortableDelay(ms: number, input: BudaProseGenerationInput) {
 }
 
 export const MANGAFORGE_BUDA_AGENT_INSTRUCTIONS = [
-  '你是 MangaForge 专用长篇小说正文执行 Agent。',
+  '你是 MangaForge 专用长篇小说章节任务 Agent。',
   '当前请求与 MangaForge Drive 中的最新 Story State 是权威事实，远端历史记忆不得覆盖它们。',
   '输入材料不足时不得擅自补造正史，应明确返回缺失信息。',
-  '每次只完成请求指定的章节正文，不主动扩展生产流程。',
+  '每条消息只执行其明确指定的 stage，并严格服从 response_contract。',
+  '完成当前 stage 后等待下一条消息，不得自行开始后续阶段或附加流程说明。',
 ].join('\n')
+
+async function cleanupBudaSession(input: {
+  client: McpClientPort
+  tools: BudaToolMap
+  task: BudaChapterTaskInput
+  sessionId: string
+  terminalSeen: boolean
+  primaryError: unknown
+}) {
+  const cleanupError = (remoteCancelConfirmed: boolean) => {
+    const sendWasAmbiguous = input.primaryError instanceof McpError && input.primaryError.code === 'MCP_SEND_UNKNOWN'
+    return withRemoteCleanupDetails(input.primaryError, {
+      session_id: input.sessionId.slice(0, 160),
+      remote_cancel_confirmed: remoteCancelConfirmed,
+      ...(!remoteCancelConfirmed ? {
+        receipt_status: sendWasAmbiguous ? 'send_unknown' : 'remote_cancel_unknown',
+      } : {}),
+    })
+  }
+  let cleanupDeadline: ReturnType<BudaChapterTaskInput['deadline']['createCleanupDeadline']>
+  try {
+    cleanupDeadline = input.task.deadline.createCleanupDeadline(5_000)
+  } catch {
+    return { error: cleanupError(false), remoteCancelConfirmed: false }
+  }
+  const cleanupSignal = cleanupDeadline.signal
+  const cleanupOptions = (operation: McpOperationKind): McpOperationOptions => ({
+    signal: cleanupSignal,
+    timeoutMs: 5_000,
+    operation,
+  })
+  try {
+    let remoteCancelConfirmed = input.terminalSeen
+    try {
+      const cancelResult = await waitWithSignal(cleanupSignal, () => input.client.callTool(
+        input.tools.cancelSession,
+        buildBudaToolArguments('cancelSession', input.tools.cancelSession, {
+          agentId: input.task.agentId,
+          sessionId: input.sessionId,
+        }),
+        cleanupOptions('mutation'),
+      ))
+      remoteCancelConfirmed = remoteCancelConfirmed || ownDataValue(mcpResultData(cancelResult), 'cancelled') === true
+    } catch {}
+    if (!remoteCancelConfirmed && !cleanupSignal.aborted) {
+      try {
+        const statusResult = await waitWithSignal(cleanupSignal, () => input.client.callTool(
+          input.tools.getSession,
+          buildBudaToolArguments('getSession', input.tools.getSession, {
+            agentId: input.task.agentId,
+            sessionId: input.sessionId,
+          }),
+          cleanupOptions('read_safe'),
+        ))
+        remoteCancelConfirmed = ['completed', 'failed', 'cancelled'].includes(sessionStatus(mcpResultData(statusResult)))
+      } catch {}
+    }
+    return { error: cleanupError(remoteCancelConfirmed), remoteCancelConfirmed }
+  } finally {
+    try { cleanupDeadline.close() } catch {}
+  }
+}
+
+class BudaChapterTaskSessionImpl implements BudaChapterTaskSession {
+  private tail: Promise<void> = Promise.resolve()
+  private closed = false
+  private closePromise?: Promise<void>
+  private poisonedError?: unknown
+
+  constructor(
+    private readonly client: McpClientPort,
+    private readonly tools: BudaToolMap,
+    private readonly task: BudaChapterTaskInput,
+    readonly sessionId: string,
+    readonly snapshotHash: string,
+    private readonly selectedModel: string,
+    private readonly startedAt: number,
+  ) {}
+
+  private remoteOptions(): McpAdapterOperationOptions {
+    const task = this.task
+    return {
+      signal: task.deadline.signal,
+      get timeoutMs() { return task.deadline.timeoutMs(task.server.tool_timeout_ms) },
+    }
+  }
+
+  private callOptions(operation: McpOperationKind) {
+    return operationOptions(this.remoteOptions(), operation)
+  }
+
+  private async progress(
+    stage: string,
+    status: 'running' | 'success' | 'warn' | 'failed' = 'running',
+    detail?: string,
+  ) {
+    await this.task.onProgress?.({
+      stage,
+      status,
+      detail,
+      elapsed_ms: Date.now() - this.startedAt,
+      session_id: this.sessionId,
+      snapshot_hash: this.snapshotHash,
+    })
+  }
+
+  private async executeStage(input: BudaChapterStageInput): Promise<BudaChapterStageResult> {
+    let terminalSeen = false
+    try {
+      this.task.deadline.throwIfAborted()
+      const modelArguments = this.selectedModel ? { model: this.selectedModel } : {}
+      try {
+        await this.client.callTool(
+          this.tools.sendSessionMessage,
+          buildBudaToolArguments('sendSessionMessage', this.tools.sendSessionMessage, {
+            agentId: this.task.agentId,
+            sessionId: this.sessionId,
+            message: buildBudaStageEnvelope(input),
+            mode: 'agent',
+            ...modelArguments,
+            startRun: true,
+          }),
+          this.callOptions('mutation'),
+        )
+      } catch (error) {
+        if (!sendMayHaveSucceeded(error)) throw error
+        throw new McpError('MCP_SEND_UNKNOWN', 'Buda 阶段任务发送结果无法确认', {
+          session_id: this.sessionId.slice(0, 160),
+        })
+      }
+      this.task.deadline.throwIfAborted()
+      await this.progress('mcp_session_create', 'success')
+      await this.progress('mcp_session_wait')
+      let interval = Math.max(1, this.task.server.poll_initial_ms)
+      while (true) {
+        this.task.deadline.throwIfAborted()
+        const sessionResult = await this.client.callTool(
+          this.tools.getSession,
+          buildBudaToolArguments('getSession', this.tools.getSession, {
+            agentId: this.task.agentId,
+            sessionId: this.sessionId,
+          }),
+          this.callOptions('read_safe'),
+        )
+        const sessionData = mcpResultData(sessionResult)
+        const status = sessionStatus(sessionData)
+        terminalSeen = status === 'completed' || status === 'failed' || status === 'cancelled'
+        this.task.deadline.throwIfAborted()
+        if (status === 'pending' || status === 'in_progress') {
+          await this.progress('mcp_session_wait', 'running', status)
+          await abortableDelay(interval, this.task)
+          this.task.deadline.throwIfAborted()
+          interval = Math.min(
+            Math.max(interval + 1, Math.round(interval * 1.5)),
+            Math.max(interval, this.task.server.poll_max_ms),
+          )
+          continue
+        }
+        if (status === 'waiting_for_input') throw new McpError('MCP_INPUT_REQUIRED', 'Buda Agent 正在等待额外输入')
+        if (status === 'failed') throw new McpError('MCP_SESSION_FAILED', 'Buda Session 执行失败')
+        if (status === 'cancelled') throw new McpError('MCP_CANCELLED', 'Buda Session 已取消')
+        if (status !== 'completed') throw new McpError('MCP_SESSION_FAILED', `Buda Session 返回未知状态：${status || 'empty'}`)
+        await this.progress('mcp_session_wait', 'success', status)
+        this.task.deadline.throwIfAborted()
+        await this.progress('mcp_extract')
+        const content = extractBudaStageContent(sessionData)
+        await this.progress('mcp_extract', 'success')
+        this.task.deadline.throwIfAborted()
+        return {
+          content,
+          session_id: this.sessionId,
+          snapshot_hash: this.snapshotHash,
+          status: 'completed',
+        }
+      }
+    } catch (error) {
+      let primaryError = error
+      if (this.task.deadline.signal.aborted && isAbortRelatedError(error, this.task.deadline.signal)) {
+        try { this.task.deadline.throwIfAborted() } catch (cause) { primaryError = cause }
+      }
+      const cleanup = await cleanupBudaSession({
+        client: this.client,
+        tools: this.tools,
+        task: this.task,
+        sessionId: this.sessionId,
+        terminalSeen,
+        primaryError,
+      })
+      if (!cleanup.remoteCancelConfirmed) this.poisonedError = cleanup.error
+      throw cleanup.error
+    }
+  }
+
+  runStage(input: BudaChapterStageInput): Promise<BudaChapterStageResult> {
+    if (this.poisonedError) return Promise.reject(this.poisonedError)
+    if (this.closed) return Promise.reject(new McpError('MCP_SESSION_FAILED', 'Buda Chapter Task Session 已关闭'))
+    const operation = this.tail.then(() => {
+      if (this.poisonedError) throw this.poisonedError
+      return this.executeStage(input)
+    })
+    this.tail = operation.then(() => undefined, () => undefined)
+    return operation
+  }
+
+  close(): Promise<void> {
+    if (this.closePromise) return this.closePromise
+    this.closed = true
+    this.closePromise = this.tail.then(() => undefined)
+    return this.closePromise
+  }
+}
 
 export class BudaAdapter implements ProseMcpAdapter {
   readonly id = 'buda'
@@ -327,23 +616,38 @@ export class BudaAdapter implements ProseMcpAdapter {
     }
   }
 
-  async generateProse(input: BudaProseGenerationInput): Promise<BudaProseGenerationResult> {
+  async openChapterTask(input: BudaChapterTaskInput): Promise<BudaChapterTaskSession> {
+    input = withIndependentTaskSignal(input)
     const startedAt = Date.now()
     let activeSessionId = ''
-    let terminalSeen = false
     let tools: BudaToolMap | undefined
-    const progress = async (stage: string, status: 'running' | 'success' | 'warn' | 'failed' = 'running', detail?: string) => {
-      await input.onProgress?.({ stage, status, detail, elapsed_ms: Date.now() - startedAt, ...(activeSessionId ? { session_id: activeSessionId } : {}) })
-    }
-    try {
-      const remoteOptions = () => ({
-        signal: input.deadline.signal,
-        get timeoutMs() { return input.deadline.timeoutMs(input.server.tool_timeout_ms) },
+    const progress = async (
+      stage: string,
+      status: 'running' | 'success' | 'warn' | 'failed' = 'running',
+      detail?: string,
+    ) => {
+      await input.onProgress?.({
+        stage,
+        status,
+        detail,
+        elapsed_ms: Date.now() - startedAt,
+        ...(activeSessionId ? { session_id: activeSessionId } : {}),
       })
-      const callOptions = (operation: McpOperationKind) => operationOptions(remoteOptions(), operation)
+    }
+    const remoteOptions = () => ({
+      signal: input.deadline.signal,
+      get timeoutMs() { return input.deadline.timeoutMs(input.server.tool_timeout_ms) },
+    })
+    const callOptions = (operation: McpOperationKind) => operationOptions(remoteOptions(), operation)
+    try {
       input.deadline.throwIfAborted()
       await progress('mcp_capabilities')
       tools = await this.resolveTools(remoteOptions())
+      input.deadline.throwIfAborted()
+      const agents = await this.listAgents(remoteOptions())
+      if (!agents.some(agent => agent.id === input.agentId)) {
+        throw new McpError('MCP_BINDING_INVALID', 'Buda 绑定的 Agent 不存在或不可访问')
+      }
       input.deadline.throwIfAborted()
       await progress('mcp_capabilities', 'success')
 
@@ -374,134 +678,114 @@ export class BudaAdapter implements ProseMcpAdapter {
       })
 
       await progress('mcp_session_create')
-      const message = buildBudaExecutionEnvelope({
-        requestId: input.requestId,
-        chapterNo: input.chapterNo,
-        chapterTitle: input.chapter?.title,
-        paragraphTask: input.paragraphTask,
-      })
       const selectedModel = String(input.model || '').trim()
       const modelArguments = selectedModel ? { model: selectedModel } : {}
-      const createResult = await this.client.callTool(tools.createSession, buildBudaToolArguments('createSession', tools.createSession, {
-        agentId: input.agentId,
-        message: `MangaForge 请求 ${input.requestId} 已建立；请等待同一 Session 的完整章节任务。`,
-        title: `MangaForge 第${input.chapterNo}章 ${input.requestId}`,
-        mode: 'agent',
-        ...modelArguments,
-        startRun: false,
-      }), callOptions('mutation'))
+      const createResult = await this.client.callTool(
+        tools.createSession,
+        buildBudaToolArguments('createSession', tools.createSession, {
+          agentId: input.agentId,
+          message: `MangaForge 章节任务 ${input.taskId} 已建立；请等待当前 Session 的 stage 指令。`,
+          title: `MangaForge 第${input.chapterNo}章 ${input.taskId}`,
+          mode: 'agent',
+          ...modelArguments,
+          startRun: false,
+        }),
+        callOptions('mutation'),
+      )
       const created = mcpResultData(createResult)
       activeSessionId = sessionId(created)
       if (!activeSessionId) throw new McpError('MCP_SESSION_FAILED', 'Buda 未返回 Session 标识')
       await input.onProgress?.({
         stage: 'session_created',
         status: 'running',
-        detail: 'Buda Session 已创建，等待持久化后发送正文任务',
+        detail: 'Buda Session 已创建，等待当前章节任务的 stage 指令',
         elapsed_ms: Date.now() - startedAt,
         session_id: activeSessionId,
         snapshot_hash: snapshot.snapshotHash,
       })
       input.deadline.throwIfAborted()
-      try {
-        await this.client.callTool(tools.sendSessionMessage, buildBudaToolArguments('sendSessionMessage', tools.sendSessionMessage, {
-          agentId: input.agentId,
-          sessionId: activeSessionId,
-          message,
-          mode: 'agent',
-          ...modelArguments,
-          startRun: true,
-        }), callOptions('mutation'))
-      } catch (error) {
-        if (!sendMayHaveSucceeded(error)) throw error
-        throw new McpError('MCP_SEND_UNKNOWN', 'Buda 正文任务发送结果无法确认', {
-          session_id: activeSessionId.slice(0, 160),
-        })
-      }
-      input.deadline.throwIfAborted()
       await progress('mcp_session_create', 'success')
-
-      await progress('mcp_session_wait')
-      let interval = Math.max(1, input.server.poll_initial_ms)
-      while (true) {
-        input.deadline.throwIfAborted()
-        const sessionResult = await this.client.callTool(tools.getSession, buildBudaToolArguments('getSession', tools.getSession, {
-          agentId: input.agentId,
-          sessionId: activeSessionId,
-        }), callOptions('read_safe'))
-        const sessionData = mcpResultData(sessionResult)
-        const status = sessionStatus(sessionData)
-        terminalSeen = status === 'completed' || status === 'failed' || status === 'cancelled'
-        input.deadline.throwIfAborted()
-        if (status === 'pending' || status === 'in_progress') {
-          await progress('mcp_session_wait', 'running', status)
-          await abortableDelay(interval, input)
-          input.deadline.throwIfAborted()
-          interval = Math.min(Math.max(interval + 1, Math.round(interval * 1.5)), Math.max(interval, input.server.poll_max_ms))
-          continue
-        }
-        if (status === 'waiting_for_input') throw new McpError('MCP_INPUT_REQUIRED', 'Buda Agent 正在等待额外输入')
-        if (status === 'failed') throw new McpError('MCP_SESSION_FAILED', 'Buda Session 执行失败')
-        if (status === 'cancelled') throw new McpError('MCP_CANCELLED', 'Buda Session 已取消')
-        if (status !== 'completed') throw new McpError('MCP_SESSION_FAILED', `Buda Session 返回未知状态：${status || 'empty'}`)
-        await progress('mcp_session_wait', 'success', status)
-        input.deadline.throwIfAborted()
-        await progress('mcp_extract')
-        const proseChapters = extractBudaProse(sessionData, input.chapterNo)
-        await progress('mcp_extract', 'success')
-        input.deadline.throwIfAborted()
-        return {
-          prose_chapters: proseChapters,
-          source: 'mcp',
-          adapter_id: 'buda',
-          agent_id: input.agentId,
-          session_id: activeSessionId,
-          snapshot_hash: snapshot.snapshotHash,
-          completed: true,
-          raw: { request_id: input.requestId, session_status: status },
-        }
-      }
+      return new BudaChapterTaskSessionImpl(
+        this.client,
+        tools,
+        input,
+        activeSessionId,
+        snapshot.snapshotHash,
+        selectedModel,
+        startedAt,
+      )
     } catch (error) {
       let primaryError = error
       if (input.deadline.signal.aborted && isAbortRelatedError(error, input.deadline.signal)) {
         try { input.deadline.throwIfAborted() } catch (cause) { primaryError = cause }
       }
       if (!activeSessionId || !tools) throw primaryError
-
-      const cleanupDeadline = input.deadline.createCleanupDeadline(5_000)
-      const cleanupSignal = cleanupDeadline.signal
-      const cleanupOptions = (operation: McpOperationKind): McpOperationOptions => ({
-        signal: cleanupSignal,
-        timeoutMs: 5_000,
-        operation,
+      const cleanup = await cleanupBudaSession({
+        client: this.client,
+        tools,
+        task: input,
+        sessionId: activeSessionId,
+        terminalSeen: false,
+        primaryError,
       })
+      throw cleanup.error
+    }
+  }
+
+  async generateProse(input: BudaProseGenerationInput): Promise<BudaProseGenerationResult> {
+    let task: BudaChapterTaskSession | undefined
+    let failed = false
+    try {
+      task = await this.openChapterTask({
+        activeWorkspace: input.activeWorkspace,
+        server: input.server,
+        keyId: input.keyId,
+        agentId: input.agentId,
+        ...(input.model !== undefined ? { model: input.model } : {}),
+        taskId: input.requestId,
+        project: input.project,
+        chapter: input.chapter,
+        chapterNo: input.chapterNo,
+        drive: input.drive,
+        deadline: input.deadline,
+        ...(input.signal ? { signal: input.signal } : {}),
+        ...(input.onProgress ? { onProgress: input.onProgress } : {}),
+      })
+      let stage: BudaChapterStageResult
       try {
-        let remoteCancelConfirmed = terminalSeen
-        try {
-          const cancelResult = await waitWithSignal(cleanupSignal, () => this.client.callTool(tools!.cancelSession, buildBudaToolArguments('cancelSession', tools!.cancelSession, {
-            agentId: input.agentId,
-            sessionId: activeSessionId,
-          }), cleanupOptions('mutation')))
-          remoteCancelConfirmed = remoteCancelConfirmed || mcpResultData(cancelResult)?.cancelled === true
-        } catch {}
-        if (!remoteCancelConfirmed && !cleanupSignal.aborted) {
-          try {
-            const statusResult = await waitWithSignal(cleanupSignal, () => this.client.callTool(tools!.getSession, buildBudaToolArguments('getSession', tools!.getSession, {
-              agentId: input.agentId,
-              sessionId: activeSessionId,
-            }), cleanupOptions('read_safe')))
-            remoteCancelConfirmed = ['completed', 'failed', 'cancelled'].includes(sessionStatus(mcpResultData(statusResult)))
-          } catch {}
-        }
-        const sendWasAmbiguous = primaryError instanceof McpError && primaryError.code === 'MCP_SEND_UNKNOWN'
-        throw withRemoteCleanupDetails(primaryError, {
-          session_id: activeSessionId.slice(0, 160),
-          remote_cancel_confirmed: remoteCancelConfirmed,
-          ...(!remoteCancelConfirmed ? {
-            receipt_status: sendWasAmbiguous ? 'send_unknown' : 'remote_cancel_unknown',
-          } : {}),
+        stage = await task.runStage({
+          requestId: input.requestId,
+          stage: 'draft',
+          responseContract: 'draft_prose',
+          prompt: input.paragraphTask,
         })
-      } finally {
-        cleanupDeadline.close()
+      } catch (error) {
+        if (error instanceof McpError && error.code === 'MCP_TOOL_ERROR' && error.message === 'Buda Stage 已完成但没有返回内容') {
+          throw new McpError('MCP_EMPTY_PROSE', 'Buda Session 已完成但没有返回正文', error.details)
+        }
+        throw error
+      }
+      const proseChapters = extractBudaProse({
+        messages: [{ role: 'assistant', content: stage.content }],
+      }, input.chapterNo)
+      return {
+        prose_chapters: proseChapters,
+        source: 'mcp',
+        adapter_id: 'buda',
+        agent_id: input.agentId,
+        session_id: stage.session_id,
+        snapshot_hash: stage.snapshot_hash,
+        completed: true,
+        raw: { request_id: input.requestId, session_status: stage.status },
+      }
+    } catch (error) {
+      failed = true
+      throw error
+    } finally {
+      try {
+        await task?.close()
+      } catch (closeError) {
+        if (!failed) throw closeError
       }
     }
   }
