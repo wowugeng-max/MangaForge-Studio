@@ -21,7 +21,6 @@ import { chapterContextVersion, createGenerationSourceResolver } from './create-
 import { ChapterSourceLeaseRegistry } from './chapter-source-lease'
 import { McpGenerationSource } from './mcp-generation-source'
 import { ModelGenerationSource } from './model-generation-source'
-import { attachProductionLease, takeProductionLease } from './production-lease'
 import { chapterGenerationSourceFingerprint, proseGenerationSourceFingerprint } from './source-config'
 import { createChapterStageRecorder } from './stage-receipts'
 import {
@@ -101,12 +100,6 @@ function deferredValue<T = void>() {
     reject = rejectPromise
   })
   return { promise, resolve, reject }
-}
-
-async function releaseTransferredProductionLease(result: any) {
-  const lease = takeProductionLease(result)
-  expect(lease).toBeDefined()
-  await lease!.release()
 }
 
 afterEach(async () => Promise.all(workspaces.splice(0).map(path => rm(path, { recursive: true, force: true }))))
@@ -634,42 +627,6 @@ describe('GenerationSource resolver', () => {
   })
 })
 
-describe('production lease capability', () => {
-  test('is non-enumerable, JSON-invisible, and one-shot without polluting model results', async () => {
-    const lease = { release: async () => {} }
-    const mcpResult = { source: 'mcp', source_receipt: { status: 'success' } }
-    const modelResult = { source: 'model', modelName: 'local-model' }
-
-    expect(attachProductionLease(mcpResult, lease)).toBe(mcpResult)
-    expect(Object.keys(mcpResult)).toEqual(['source', 'source_receipt'])
-    expect(JSON.stringify(mcpResult)).toBe('{"source":"mcp","source_receipt":{"status":"success"}}')
-    expect(Object.getOwnPropertySymbols(mcpResult)).toHaveLength(1)
-    expect(takeProductionLease(mcpResult)).toBe(lease)
-    expect(takeProductionLease(mcpResult)).toBeUndefined()
-    expect(Object.getOwnPropertySymbols(mcpResult)).toHaveLength(0)
-    expect(takeProductionLease(modelResult)).toBeUndefined()
-    expect(Object.keys(modelResult)).toEqual(['source', 'modelName'])
-    expect(JSON.stringify(modelResult)).toBe('{"source":"model","modelName":"local-model"}')
-  })
-
-  test('logically consumes a lease when a Proxy prevents physical capability deletion', async () => {
-    let releases = 0
-    const lease = { release: async () => { releases += 1 } }
-    const target = attachProductionLease({ source: 'mcp' }, lease)
-    const protectedResult = new Proxy(target, {
-      deleteProperty: () => { throw new Error('capability delete blocked') },
-    })
-
-    const transferred = takeProductionLease(protectedResult)
-
-    expect(transferred).toBe(lease)
-    expect(takeProductionLease(protectedResult)).toBeUndefined()
-    expect(Object.getOwnPropertySymbols(target)).toHaveLength(1)
-    await transferred?.release()
-    expect(releases).toBe(1)
-  })
-})
-
 describe('McpGenerationSource quarantine outcomes', () => {
   async function harness(prefix: string) {
     const workspace = await mkdtemp(join(tmpdir(), prefix))
@@ -808,7 +765,6 @@ describe('McpGenerationSource quarantine outcomes', () => {
     expect(JSON.parse(receipts.find(run => run.status === 'cancelled')!.output_ref!)).toMatchObject({
       status: 'cancelled', session_id: 'session-1', snapshot_hash: 'snapshot-1',
     })
-    await releaseTransferredProductionLease(retryResult)
   })
 
   test('stages a durable Session fence before send and survives a simulated process crash', async () => {
@@ -846,7 +802,6 @@ describe('McpGenerationSource quarantine outcomes', () => {
     const generationResult = await generation
     expect(generationResult).toMatchObject({ session_id: 'session-crash' })
     expect(await readMcpAgentQuarantines(workspace)).toEqual([])
-    await releaseTransferredProductionLease(generationResult)
     const released = await new McpAgentLeaseRegistry().acquire(workspace, {
       serverId: server.id, keyId: key.id, agentId: 'agent-1',
     })
@@ -1191,7 +1146,6 @@ describe('McpGenerationSource quarantine outcomes', () => {
     expect(retryResult).toMatchObject({ session_id: 'session-2' })
     const receipts = (await listNovelRuns(workspace, project.id)).filter(run => run.run_type === 'mcp_generate_prose')
     expect(receipts.map(run => run.status)).toEqual(['success', 'timed_out'])
-    await releaseTransferredProductionLease(retryResult)
   })
 
   test('keeps an exact-deadline completed Session trusted through receipt and lease outcomes', async () => {
@@ -1278,7 +1232,6 @@ describe('McpGenerationSource quarantine outcomes', () => {
       activeWorkspace: workspace, project, requestId: 'request-exact-retry',
     }))
     expect(retryResult).toMatchObject({ session_id: 'session-exact' })
-    await releaseTransferredProductionLease(retryResult)
   })
 
   test('quarantines an unresolved total timeout and blocks retry before remote work', async () => {
@@ -1366,12 +1319,10 @@ describe('McpGenerationSource quarantine outcomes', () => {
     }
     const firstResult = await first
     expect(firstResult).toMatchObject({ session_id: 'session-1' })
-    await releaseTransferredProductionLease(firstResult)
     const retryResult = await source.generateProse(sourceRequest({
       activeWorkspace: workspace, project, requestId: 'request-busy-3',
     }))
     expect(retryResult).toMatchObject({ session_id: 'session-2' })
-    await releaseTransferredProductionLease(retryResult)
   })
 
   test('allows the same tuple to generate concurrently in two explicit workspaces', async () => {
@@ -1413,9 +1364,6 @@ describe('McpGenerationSource quarantine outcomes', () => {
     const settled = await Promise.allSettled(generations)
     expect(reachedBoth).toBe(true)
     expect(settled.map(result => result.status)).toEqual(['fulfilled', 'fulfilled'])
-    for (const result of settled) {
-      if (result.status === 'fulfilled') await releaseTransferredProductionLease(result.value)
-    }
   })
 
   test('keeps long Agent IDs distinct through GenerationSource quarantine admission', async () => {
@@ -1470,7 +1418,6 @@ describe('McpGenerationSource quarantine outcomes', () => {
       activeWorkspace: workspace, project: allowedProject, requestId: 'request-long-allowed',
     }))
     expect(allowedResult).toMatchObject({ session_id: 'session-long-allowed' })
-    await releaseTransferredProductionLease(allowedResult)
   })
 
   test('keeps trusted terminal evidence out of quarantine at the GenerationSource boundary', async () => {
@@ -1506,7 +1453,6 @@ describe('McpGenerationSource quarantine outcomes', () => {
       activeWorkspace: workspace, project, requestId: 'request-terminal-2',
     }))
     expect(retryResult).toMatchObject({ session_id: 'session-terminal-2' })
-    await releaseTransferredProductionLease(retryResult)
   })
 
   test('persists remote_cancel_unknown after the receipt and blocks all later remote work', async () => {
@@ -1639,7 +1585,6 @@ describe('McpGenerationSource quarantine outcomes', () => {
     expect(retryResult).toMatchObject({ session_id: 'session-2' })
     const receipt = (await listNovelRuns(workspace, project.id)).find(run => run.status === 'send_unknown')
     expect(receipt).toBeDefined()
-    await releaseTransferredProductionLease(retryResult)
   })
 
   test('records an ordinary pre-Session failure without quarantine and allows retry', async () => {
@@ -1663,7 +1608,6 @@ describe('McpGenerationSource quarantine outcomes', () => {
     expect(retryResult).toMatchObject({ session_id: 'session-success' })
     const receipts = (await listNovelRuns(workspace, project.id)).filter(run => run.run_type === 'mcp_generate_prose')
     expect(receipts.map(run => run.status)).toEqual(['success', 'failed'])
-    await releaseTransferredProductionLease(retryResult)
   })
 
   test('fails closed when quarantine persistence fails after persisting the unresolved receipt', async () => {
@@ -2572,7 +2516,7 @@ describe('McpGenerationSource task execution', () => {
       modelName: 'remote-neutral-model',
       prose_chapters: [{ chapter_no: 12, chapter_text: '第一版正文：雨夜的城门缓缓开启。' }],
       source_receipt: {
-        receipt_authority: MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY,
+        receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
         task_id: execution.taskId,
         source: 'mcp',
         source_fingerprint: execution.fingerprint,
@@ -4510,14 +4454,14 @@ describe('McpGenerationSource task execution', () => {
 })
 
 describe('McpGenerationSource', () => {
-  test('clears the session fence before transferring a JSON-invisible production lease', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-production-lease-'))
+  test('clears the session fence and releases the one-shot lease before returning', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-one-shot-release-'))
     workspaces.push(workspace)
     const server = { ...BUDA_MCP_SERVER_TEMPLATE }
     await writeMcpServers(workspace, [server])
-    const key = await createMcpKey(workspace, { mcp_server_id: server.id, key: 'sk_production_lease', description: '账号' })
+    const key = await createMcpKey(workspace, { mcp_server_id: server.id, key: 'sk_one_shot_release', description: '账号' })
     const project = await createNovelProject(workspace, {
-      title: 'Production lease transfer',
+      title: 'One-shot source release',
       reference_config: {
         prose_generation_source: {
           version: 'prose_generation_source_v1',
@@ -4528,7 +4472,7 @@ describe('McpGenerationSource', () => {
     })
     const events: string[] = []
     const lease = {
-      tupleKey: 'production-lease',
+      tupleKey: 'one-shot-release',
       binding: { serverId: server.id, keyId: key.id, agentId: 'agent-1' },
       stageSessionFence: async () => { events.push('stage') },
       quarantine: async () => { events.push('quarantine') },
@@ -4542,8 +4486,8 @@ describe('McpGenerationSource', () => {
         source: 'mcp',
         adapter_id: server.adapter_id,
         agent_id: 'agent-1',
-        session_id: 'session-production-lease',
-        snapshot_hash: 'snapshot-production-lease',
+        session_id: 'session-one-shot-release',
+        snapshot_hash: 'snapshot-one-shot-release',
         completed: true,
       }),
     }
@@ -4556,14 +4500,9 @@ describe('McpGenerationSource', () => {
 
     const result = await source.generateProse(sourceRequest({ activeWorkspace: workspace, project }))
 
-    expect(events).toEqual(['clear'])
-    expect(Object.keys(result)).not.toContain('generationLease')
-    expect(JSON.stringify(result)).not.toContain('mcp-production-lease')
-    expect(JSON.stringify((result as any).source_receipt)).not.toContain('mcp-production-lease')
-    const transferred = takeProductionLease(result)
-    expect(transferred).toBe(lease)
-    await transferred?.release()
     expect(events).toEqual(['clear', 'release'])
+    expect(Object.keys(result)).not.toContain('generationLease')
+    expect(Object.getOwnPropertySymbols(result)).toEqual([])
   })
 
   test('persists a bounded session-created receipt before allowing the Adapter to send', async () => {
@@ -4624,7 +4563,6 @@ describe('McpGenerationSource', () => {
     const result = await source.generateProse(sourceRequest({ activeWorkspace: workspace, project }))
 
     expect(events).toEqual(['receipt', 'send'])
-    await releaseTransferredProductionLease(result)
   })
 
   test('prevents send when the session-created durable receipt cannot be updated', async () => {
@@ -4879,7 +4817,6 @@ describe('McpGenerationSource', () => {
 
     expect(observed.every(options => options.signal === deadline.signal)).toBe(true)
     expect(observed.map(options => options.timeoutMs)).toEqual([5_000, 99_000, 98_000])
-    await releaseTransferredProductionLease(result)
   })
 
   test('sends the exact compiled task, stores bounded receipt provenance, and never calls a model', async () => {
@@ -4954,7 +4891,6 @@ describe('McpGenerationSource', () => {
     expect(receiptJson).not.toContain('sk_source')
     expect(receiptJson).not.toContain(paragraphTask)
     expect(receiptJson).not.toContain('MCP 正文')
-    await releaseTransferredProductionLease(result)
   })
 
   test('preserves the authoritative fingerprint while scrubbing short Key and Header substrings', async () => {
@@ -5046,7 +4982,6 @@ describe('McpGenerationSource', () => {
       session_id: 'session-[REDACTED]',
       detail: { key_echo: '[REDACTED]', header_echo: '[REDACTED]' },
     })
-    await releaseTransferredProductionLease(result)
   })
 
   test('preserves the authoritative fingerprint in failed receipts with short secrets', async () => {
@@ -5401,7 +5336,6 @@ describe('McpGenerationSource', () => {
     for (const forbidden of [selectedHeader, selectedKey, paragraphTask, proseText]) {
       expect(durable).not.toContain(forbidden)
     }
-    await releaseTransferredProductionLease(result)
   })
 
   test('scrubs selected credentials from progress, exposed errors, and durable failed receipts', async () => {
@@ -5605,7 +5539,6 @@ describe('McpGenerationSource', () => {
     expect(receipts[0]?.output_ref).not.toContain(selectedHeader)
     expect(receipts[0]?.output_ref).not.toContain('synthetic-success-metadata-cookie')
     expect(receipts[0]?.output_ref).not.toContain(proseText)
-    await releaseTransferredProductionLease(result)
   })
 
   test('preserves scrubbed enumerable non-MCP error metadata and protected blocked-invalid residual prose', async () => {

@@ -7,11 +7,14 @@ import {
 } from './builders'
 
 describe('MCP standalone prose route helpers', () => {
-  test('preserves an explicit temporary model override as a distinct option', () => {
-    expect(buildStandaloneProseServiceOptions(
+  test('does not carry a temporary generation-source override into automatic production', () => {
+    const options = buildStandaloneProseServiceOptions(
       { generation_source_override: 'model' },
       { modelId: 217, autoRepairQualityGate: false, onStage: async () => {}, abortSignal: new AbortController().signal },
-    )).toMatchObject({ generation_source_override: 'model', model_id: 217 })
+    )
+
+    expect(options).toMatchObject({ model_id: 217 })
+    expect(options).not.toHaveProperty('generation_source_override')
   })
 
   test('labels MCP stages and maps stable MCP errors to useful HTTP statuses', () => {

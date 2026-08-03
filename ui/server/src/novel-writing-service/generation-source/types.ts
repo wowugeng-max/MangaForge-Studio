@@ -1,5 +1,4 @@
 import type { GenerationSourceProgress } from '../../mcp/adapters/types'
-import type { ProductionLease } from './production-lease'
 import type { ChapterGenerationSourceState } from './source-config'
 
 export const MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY = 'mcp_generation_source_v1' as const
@@ -56,12 +55,24 @@ export type ChapterTaskProvenance = {
 }
 
 export function acceptanceBindingFingerprintFromGenerationSource(generationSource: any) {
+  const chapterFingerprint = acceptanceChapterGenerationSourceFingerprintFromGenerationSource(generationSource)
+  if (chapterFingerprint) return chapterFingerprint
   if (
     generationSource?.resolved_type !== 'mcp'
     || generationSource?.receipt_authority !== MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY
     || typeof generationSource?.binding_fingerprint !== 'string'
   ) return ''
   const fingerprint = generationSource.binding_fingerprint.trim()
+  return /^sha256:[0-9a-f]{64}$/.test(fingerprint) ? fingerprint : ''
+}
+
+export function acceptanceChapterGenerationSourceFingerprintFromGenerationSource(generationSource: any) {
+  if (
+    generationSource?.receipt_authority !== CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY
+    || (generationSource?.source !== 'model' && generationSource?.source !== 'mcp')
+    || typeof generationSource?.source_fingerprint !== 'string'
+  ) return ''
+  const fingerprint = generationSource.source_fingerprint.trim()
   return /^sha256:[0-9a-f]{64}$/.test(fingerprint) ? fingerprint : ''
 }
 
@@ -96,11 +107,6 @@ export type ProseGenerationResult = {
   }
   raw?: unknown
   [key: string]: any
-}
-
-/** Internal service bundle only; never persist or expose this field in a transport payload. */
-export type ProseGenerationLeaseBundle = {
-  generationLease?: ProductionLease
 }
 
 export interface GenerationSource {

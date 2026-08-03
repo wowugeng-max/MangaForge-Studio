@@ -27,6 +27,7 @@ import {
   validateMcpProjectBinding,
 } from './source-config'
 import {
+  CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
   MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY,
   type ChapterStageResponseContract,
   type ChapterTaskExecution,
@@ -37,7 +38,6 @@ import {
   type ProseGenerationResult,
   type ResolvedChapterTaskInput,
 } from './types'
-import { attachProductionLease } from './production-lease'
 import { createChapterStageRecorder, projectChapterTaskProvenance } from './stage-receipts'
 
 const PROVENANCE_ID_MAX_CHARS = 160
@@ -1194,10 +1194,9 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
         completed: true,
         modelName: this.binding.model || 'MCP Auto',
         source_receipt: {
-          receipt_authority: MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY,
+          receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
           request_id: boundedScrubbedId(this.scrubber, request.requestId),
           ...this.provenance(),
-          binding_fingerprint: this.fingerprint,
           snapshot_hash: boundedScrubbedId(this.scrubber, stage.snapshot_hash),
           status: 'success',
         },
@@ -1475,7 +1474,8 @@ export class McpGenerationSource implements GenerationSource {
         },
       }
       await lease.clearSessionFence()
-      return attachProductionLease(response, lease)
+      await releaseLease()
+      return response
     } catch (error) {
       let exposedError = error
       if (deadline?.signal.aborted && safeAbortRelatedError(error, deadline.signal)) {

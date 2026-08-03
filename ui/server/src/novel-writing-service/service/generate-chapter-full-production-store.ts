@@ -3,7 +3,11 @@ import {
   listNovelChapters,
 } from '../../novel'
 import { isMcpError } from '../../mcp/errors'
-import { acceptanceBindingFingerprintFromGenerationSource } from '../generation-source/types'
+import {
+  acceptanceBindingFingerprintFromGenerationSource,
+  acceptanceChapterGenerationSourceFingerprintFromGenerationSource,
+} from '../generation-source/types'
+import { isChapterGenerationSourceError } from '../generation-source/errors'
 import {
   buildChapterProseStoragePatch,
   resolveChapterProseVersionSource,
@@ -359,14 +363,20 @@ export async function runFullProductionAdmissionAndStore(args: {
   const acceptanceUsageUpdates = acceptancePrep.acceptanceUsageUpdates
   const settingConsistencyReview = acceptancePrep.settingConsistencyReview
   throwIfChapterGenerationAborted()
-  const bindingFingerprint = acceptanceBindingFingerprintFromGenerationSource(
+  const chapterSourceFingerprint = acceptanceChapterGenerationSourceFingerprintFromGenerationSource(
     draftPromptDiagnostics?.generation_source,
   )
+  const bindingFingerprint = chapterSourceFingerprint
+    ? ''
+    : acceptanceBindingFingerprintFromGenerationSource(draftPromptDiagnostics?.generation_source)
   let acceptance: Awaited<ReturnType<typeof commitNovelChapterAcceptance>>
   try {
     acceptance = await commitNovelChapterAcceptance(activeWorkspace, {
       chapter_id: chapter.id,
       chapter_patch: chapterPatch,
+      ...(chapterSourceFingerprint ? {
+        expected_chapter_generation_source_fingerprint: chapterSourceFingerprint,
+      } : {}),
       ...(bindingFingerprint ? {
         expected_prose_generation_source_fingerprint: bindingFingerprint,
       } : {}),
@@ -407,6 +417,7 @@ export async function runFullProductionAdmissionAndStore(args: {
     })
   } catch (error) {
     if (isAbortError(error)) throw error
+    if (isChapterGenerationSourceError(error) && error.code === 'GENERATION_SOURCE_CHANGED') throw error
     if (isMcpError(error) && error.code === 'MCP_BINDING_CHANGED') throw error
     throw markBlockedInvalidError(error, {
       code: 'atomic_acceptance_failed',

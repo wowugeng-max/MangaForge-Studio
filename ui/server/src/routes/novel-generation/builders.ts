@@ -758,8 +758,9 @@ export function buildStandaloneProseServiceOptions(body: any = {}, runtime: {
   onStage: (key: string, payload?: any) => Promise<void>
   abortSignal: AbortSignal
 }) {
+  const { generation_source_override: _ignoredGenerationSourceOverride, ...bodyOptions } = body || {}
   const merged = {
-    ...(body || {}),
+    ...bodyOptions,
     ...(runtime.modelId ? { model_id: runtime.modelId } : {}),
     auto_repair_quality_gate: runtime.autoRepairQualityGate,
     // Match unattended writing: auto-fill local/model materials before hard-blocking the cockpit generate path.

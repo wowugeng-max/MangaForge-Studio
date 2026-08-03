@@ -1,6 +1,12 @@
 import { McpError } from '../mcp/errors'
 import { withMcpWorkspaceMutation } from '../mcp/workspace-coordinator'
-import { proseGenerationSourceFingerprint, resolveProseGenerationSource } from '../novel-writing-service/generation-source/source-config'
+import {
+  chapterGenerationSourceFingerprint,
+  proseGenerationSourceFingerprint,
+  resolveChapterGenerationSource,
+  resolveProseGenerationSource,
+} from '../novel-writing-service/generation-source/source-config'
+import { ChapterGenerationSourceError } from '../novel-writing-service/generation-source/errors'
 import type { NovelChapterAcceptanceInput, NovelReferenceConfig } from './types'
 import { loadAcceptanceWorkingSet, persistNovelChapterAcceptanceDelta } from './acceptance-helpers'
 import { nextChapterVersionNo, createChapterVersionRecord, versionedChapterSnapshotChanged } from './chapter-helpers'
@@ -38,6 +44,24 @@ export async function commitNovelChapterAcceptance(activeWorkspace: string, inpu
   const projectIndex = working.projectIndex
   const currentChapter = store.chapters[chapterIndex]
   const currentProject = store.projects[projectIndex]
+  const expectedChapterFingerprint = typeof input.expected_chapter_generation_source_fingerprint === 'string'
+    ? input.expected_chapter_generation_source_fingerprint.trim()
+    : ''
+  if (expectedChapterFingerprint) {
+    let currentChapterFingerprint = ''
+    try {
+      currentChapterFingerprint = chapterGenerationSourceFingerprint(resolveChapterGenerationSource(currentProject))
+    } catch {
+      currentChapterFingerprint = ''
+    }
+    if (currentChapterFingerprint !== expectedChapterFingerprint) {
+      throw new ChapterGenerationSourceError(
+        'GENERATION_SOURCE_CHANGED',
+        '项目章节生成来源已在任务期间变更；旧任务结果不会入库',
+        { reason: 'source_changed' },
+      )
+    }
+  }
   const expectedFingerprint = typeof input.expected_prose_generation_source_fingerprint === 'string'
     ? input.expected_prose_generation_source_fingerprint.trim()
     : ''

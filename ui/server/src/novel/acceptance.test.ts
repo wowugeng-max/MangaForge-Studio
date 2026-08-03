@@ -24,7 +24,10 @@ import {
   updateNovelProject,
 } from '../novel'
 import { setNovelMutationTestHook } from '../novel-test-support'
-import { proseGenerationSourceFingerprint } from '../novel-writing-service/generation-source/source-config'
+import {
+  chapterGenerationSourceFingerprint,
+  proseGenerationSourceFingerprint,
+} from '../novel-writing-service/generation-source/source-config'
 import {
   workspaces,
   tempWorkspace,
@@ -410,6 +413,53 @@ describe('commitNovelChapterAcceptance', () => {
     expect(await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)).toBe(before)
     expect((await getNovelProject(workspace, project.id))?.reference_config?.prose_generation_source)
       .toMatchObject({ mcp: { agent_id: 'agent-2' } })
+  })
+
+  test('rejects every acceptance write when the chapter generation source changed', async () => {
+    const workspace = await tempWorkspace()
+    const originalSource = {
+      version: 'chapter_generation_source_v1' as const,
+      active: 'model' as const,
+      model: { model_id: 217 },
+    }
+    const project = await createNovelProject(workspace, {
+      title: '章节来源变更原子拒绝',
+      reference_config: {
+        chapter_generation_source: originalSource,
+        notes: '生成准备时备注',
+      },
+    })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: '旧正文',
+    })
+    await updateNovelProject(workspace, project.id, {
+      reference_config: {
+        ...project.reference_config,
+        chapter_generation_source: {
+          ...originalSource,
+          model: { model_id: 218 },
+        },
+      },
+    })
+    const before = await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)
+
+    const error = await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { chapter_text: '绝不能落库的新正文' },
+      expected_chapter_generation_source_fingerprint: chapterGenerationSourceFingerprint(originalSource),
+      next_reference_config: {
+        ...project.reference_config,
+        story_state: { open_questions: ['绝不能落库'] },
+      },
+      character_creates: [{ project_id: project.id, name: '绝不能落库的新角色' }],
+      reviews: [{ review_type: 'prose_quality', status: 'ok', summary: '绝不能落库' }],
+    } as any).then(() => null, caught => caught)
+
+    expect(error).toMatchObject({ code: 'GENERATION_SOURCE_CHANGED' })
+    expect(await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)).toBe(before)
   })
 
   test('merges prepared Story State into the latest reference config without restoring stale fields', async () => {

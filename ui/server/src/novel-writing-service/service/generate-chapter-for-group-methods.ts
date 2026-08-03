@@ -256,6 +256,7 @@ import {
   selectProseForChapter,
   throwIfAborted,
 } from './runtime-helpers'
+import type { ChapterTaskExecution } from '../generation-source/types'
 
 export function createGenerateChapterForGroupMethods(deps: {
   executeAgent: (...args: any[]) => any
@@ -272,7 +273,9 @@ export function createGenerateChapterForGroupMethods(deps: {
   explainReferenceSafety: (...args: any[]) => any
   getReferenceMigrationPlanForChapter: (...args: any[]) => any
   getReferenceSafetyDecision: (...args: any[]) => any
-  generationSourceResolver: { resolve: (project: any, options?: any) => any }
+  generationSourceResolver: {
+    beginTask: (input: any) => Promise<ChapterTaskExecution>
+  }
   storeChapterProseMemory: (...args: any[]) => any
   mergeChapterRawPayload: (...args: any[]) => any
   buildChapterContextPackage: (...args: any[]) => any
@@ -417,6 +420,28 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   let generationContract = contextSceneResult.generationContract
   const strictPreflightReadiness = contextSceneResult.strictPreflightReadiness
 
+  const chapterTaskExecution = await generationSourceResolver.beginTask({
+    activeWorkspace,
+    project,
+    chapter,
+    contextPackage,
+    requestedModelId: preferredModelId,
+    options,
+    signal: options.abortSignal,
+    onProgress: async (event: any) => {
+      const { stage, ...payload } = event || {}
+      if (stage) await onStage(stage, payload)
+    },
+  })
+  options = { ...options, chapterTaskExecution }
+  llmControlOptions.chapterTaskExecution = chapterTaskExecution
+
+  let automaticResult: any
+  let automaticFailure: unknown
+  let automaticFailed = false
+  try {
+    automaticResult = await (async () => {
+
   const configuredQualityThreshold = [
     options.quality_threshold,
     options.qualityThreshold,
@@ -455,17 +480,12 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     contextPackage,
     generationContract,
     wordTarget,
-    preferredModelId,
     options,
-    getStageModelId,
-    generationSourceResolver,
+    chapterTaskExecution,
     getReferenceMigrationPlanForChapter,
     throwIfChapterGenerationAborted,
     onStage,
   })
-  let generationLease: Awaited<ReturnType<typeof runGenerateChapterDraftProse>>['generationLease']
-  try {
-  generationLease = draftResultBundle.generationLease
   let finalText = draftResultBundle.finalText
   let finalSceneBreakdown = draftResultBundle.finalSceneBreakdown
   let finalContinuityNotes = draftResultBundle.finalContinuityNotes
@@ -729,9 +749,29 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     deterministicProseCleanup,
     configSnapshot,
   })
-  } finally {
-    await generationLease?.release()
+    })()
+  } catch (error) {
+    automaticFailed = true
+    automaticFailure = error
   }
+
+  if (automaticFailed) {
+    try {
+      await chapterTaskExecution.close({
+        status: isAbortError(automaticFailure) ? 'cancelled' : 'failed',
+        error: automaticFailure,
+      })
+    } catch (closeError) {
+      throw new AggregateError(
+        [automaticFailure, closeError],
+        'Automatic chapter production and task close both failed',
+      )
+    }
+    throw automaticFailure
+  }
+
+  await chapterTaskExecution.close({ status: 'success' })
+  return automaticResult
 
 }
 

@@ -132,10 +132,6 @@ export function createNovelWritingService(ctx: {
 
   const generateNovelChapterProse = ctx.runtime?.generateChapterProse || defaultGenerateNovelChapterProse
   const mcpGenerationSource = ctx.mcpRuntime ? new McpGenerationSource(ctx.mcpRuntime) : undefined
-  const generationSourceResolver = createGenerationSourceResolver({
-    modelSource: new ModelGenerationSource(generateNovelChapterProse),
-    ...(mcpGenerationSource ? { mcpSource: mcpGenerationSource } : {}),
-  })
   const chapterGenerationSource = createGenerationSourceResolver({
     chapterSourceLeases: ctx.chapterSourceLeases || new ChapterSourceLeaseRegistry(),
     readProject: ctx.getProject,
@@ -205,7 +201,7 @@ export function createNovelWritingService(ctx: {
     explainReferenceSafety: (...args: any[]) => ctx.reference.explainReferenceSafety(...args),
     getReferenceMigrationPlanForChapter: (...args: any[]) => ctx.reference.getReferenceMigrationPlanForChapter(...args),
     getReferenceSafetyDecision: (...args: any[]) => ctx.reference.getReferenceSafetyDecision(...args),
-    generationSourceResolver,
+    generationSourceResolver: chapterGenerationSource,
     storeChapterProseMemory,
     mergeChapterRawPayload,
     buildChapterContextPackage,

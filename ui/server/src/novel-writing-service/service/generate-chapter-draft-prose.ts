@@ -43,34 +43,26 @@ import {
 import {
   selectProseForChapter,
 } from './runtime-helpers'
-import type { createGenerationSourceResolver } from '../generation-source/create-generation-source'
-import { takeProductionLease } from '../generation-source/production-lease'
-import { MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY, type ProseGenerationLeaseBundle } from '../generation-source/types'
+import {
+  CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
+  type ChapterTaskExecution,
+} from '../generation-source/types'
+import { projectChapterTaskProvenance } from '../generation-source/stage-receipts'
 
-const MCP_RECEIPT_FIELDS = [
-  'receipt_authority',
-  'request_id',
-  'receipt_run_id',
-  'server_id',
-  'key_id',
-  'adapter_id',
-  'agent_id',
-  'model',
-  'binding_fingerprint',
-  'session_id',
-  'snapshot_hash',
-  'status',
-] as const
-
-function trustedMcpGenerationReceipt(sourceResolution: any, draftResult: any) {
+function trustedChapterGenerationReceipt(execution: ChapterTaskExecution, draftResult: any) {
   const receipt = draftResult?.source_receipt
+  if (receipt?.receipt_authority !== CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY) return {}
+  const provenance = projectChapterTaskProvenance(execution.provenance())
   if (
-    sourceResolution?.resolved_type !== 'mcp'
-    || receipt?.receipt_authority !== MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY
+    receipt?.task_id !== provenance.task_id
+    || receipt?.source !== provenance.source
+    || receipt?.source_fingerprint !== provenance.source_fingerprint
+    || receipt?.context_version !== provenance.context_version
   ) return {}
-  return Object.fromEntries(MCP_RECEIPT_FIELDS
-    .filter(field => Object.prototype.hasOwnProperty.call(receipt, field))
-    .map(field => [field, receipt[field]]))
+  return {
+    receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
+    ...provenance,
+  }
 }
 
 export async function runGenerateChapterDraftProse(args: {
@@ -84,14 +76,12 @@ export async function runGenerateChapterDraftProse(args: {
   contextPackage: any
   generationContract: any
   wordTarget: any
-  preferredModelId: any
   options: any
-  getStageModelId: (...a: any[]) => any
-  generationSourceResolver: ReturnType<typeof createGenerationSourceResolver>
+  chapterTaskExecution: ChapterTaskExecution
   getReferenceMigrationPlanForChapter: (...a: any[]) => any
   throwIfChapterGenerationAborted: () => void
   onStage: (...a: any[]) => any
-}): Promise<ProseGenerationLeaseBundle & {
+}): Promise<{
   finalText: string
   finalSceneBreakdown: any
   finalContinuityNotes: any
@@ -113,10 +103,8 @@ export async function runGenerateChapterDraftProse(args: {
     contextPackage,
     generationContract,
     wordTarget,
-    preferredModelId,
     options,
-    getStageModelId,
-    generationSourceResolver,
+    chapterTaskExecution,
     getReferenceMigrationPlanForChapter,
     throwIfChapterGenerationAborted,
     onStage,
@@ -128,7 +116,7 @@ await onStage('migration_plan', { status: 'running' })
 const migrationPlan = await getReferenceMigrationPlanForChapter(activeWorkspace, project, chapter).catch(error => ({ error: String(error) }))
 await onStage('migration_plan', { status: (migrationPlan as any)?.error ? 'warn' : 'success', active_reference_count: (migrationPlan as any)?.chapter_specific_plan?.active_reference_count || 0 })
 throwIfChapterGenerationAborted()
-const draftModelId = getStageModelId(project, 'draft', preferredModelId)
+const draftModelId = chapterTaskExecution.modelId
 const runtimeModel = resolveModelRuntimeIdentity({
   activeWorkspace,
   modelId: draftModelId,
@@ -143,16 +131,15 @@ const generationContractWithFamily = generationContract?.version === 'prose_gene
     }
   : attachModelFamilyToContextPackage(generationContract || contextPackageWithFamily, runtimeModel)
 const compiledPrompt = compileParagraphProseContext(project, generationContractWithFamily, migrationPlan, chapter)
-const sourceResolution = generationSourceResolver.resolve(project, options)
 await onStage('draft', {
   status: 'running',
   prompt_diagnostics: compiledPrompt.diagnostics,
   model_family: modelFamilyStrategy.family,
   model_write_mode: modelFamilyStrategy.write_mode,
   model_name: runtimeModel.model_name || null,
-  generation_source: sourceResolution.resolved_type,
+  generation_source: chapterTaskExecution.source,
 })
-const draftResult = await sourceResolution.source.generateProse({
+const draftResult = await chapterTaskExecution.generateDraft({
   requestId: String(options.request_id || options.requestId || crypto.randomUUID()),
   activeWorkspace,
   project,
@@ -180,21 +167,13 @@ const draftResult = await sourceResolution.source.generateProse({
     await onStage(stage, payload)
   },
 })
-let generationLease: ProseGenerationLeaseBundle['generationLease']
-try {
-generationLease = takeProductionLease(draftResult)
-if (sourceResolution.resolved_type === 'mcp') {
+if (chapterTaskExecution.source === 'mcp') {
   await onStage('quality_pipeline', { status: 'success', source: 'mcp' })
 }
 assertCompleteProseTransportResult(draftResult, 'PROSE_DRAFT_TRUNCATED')
 const draftPromptDiagnostics = {
   ...compiledPrompt.diagnostics,
-  generation_source: {
-    ...trustedMcpGenerationReceipt(sourceResolution, draftResult),
-    configured_type: sourceResolution.configured_type,
-    resolved_type: sourceResolution.resolved_type,
-    override: sourceResolution.override,
-  },
+  generation_source: trustedChapterGenerationReceipt(chapterTaskExecution, draftResult),
   model_usage: (draftResult as any)?.prose_prompt_diagnostics?.model_usage
     || (draftResult as any)?.usage
     || (draftResult as any)?.raw?.usage
@@ -324,10 +303,5 @@ let finalContinuityNotes = targetProse?.continuity_notes || targetProse?.continu
     editorRewrite,
     memePolish,
     readabilityReview,
-    generationLease,
   }
-} catch (error) {
-  await generationLease?.release()
-  throw error
-}
 }

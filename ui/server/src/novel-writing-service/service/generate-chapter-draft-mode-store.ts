@@ -43,7 +43,11 @@ import {
 import {
   isAbortError,
 } from './runtime-helpers'
-import { acceptanceBindingFingerprintFromGenerationSource } from '../generation-source/types'
+import {
+  acceptanceBindingFingerprintFromGenerationSource,
+  acceptanceChapterGenerationSourceFingerprintFromGenerationSource,
+} from '../generation-source/types'
+import { isChapterGenerationSourceError } from '../generation-source/errors'
 import {
   storeDraftModeSyncReviews,
 } from './generate-chapter-draft-sync-reviews'
@@ -346,12 +350,18 @@ export async function runDraftModeAdmissionAndStore(args: {
     await onStage('store', { status: 'running' })
     await runtime?.hooks?.beforeChapterStore?.({ chapterId: chapter.id, finalText })
     throwIfChapterGenerationAborted()
-    const bindingFingerprint = acceptanceBindingFingerprintFromGenerationSource(
+    const chapterSourceFingerprint = acceptanceChapterGenerationSourceFingerprintFromGenerationSource(
       draftPromptDiagnostics?.generation_source,
     )
+    const bindingFingerprint = chapterSourceFingerprint
+      ? ''
+      : acceptanceBindingFingerprintFromGenerationSource(draftPromptDiagnostics?.generation_source)
     const draftAcceptance = await commitNovelChapterAcceptance(activeWorkspace, {
       chapter_id: chapter.id,
       chapter_patch: draftModeChapterPatch,
+      ...(chapterSourceFingerprint ? {
+        expected_chapter_generation_source_fingerprint: chapterSourceFingerprint,
+      } : {}),
       ...(bindingFingerprint ? {
         expected_prose_generation_source_fingerprint: bindingFingerprint,
       } : {}),
@@ -376,6 +386,7 @@ export async function runDraftModeAdmissionAndStore(args: {
     updatedReviewedDraft = draftAcceptance.chapter
   } catch (error) {
     if (isAbortError(error)) throw error
+    if (isChapterGenerationSourceError(error) && error.code === 'GENERATION_SOURCE_CHANGED') throw error
     if (isMcpError(error) && error.code === 'MCP_BINDING_CHANGED') throw error
     throw markBlockedInvalidError(error, {
       code: 'atomic_acceptance_failed',
