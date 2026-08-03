@@ -195,7 +195,7 @@ describe('chapter generation stage receipts', () => {
     })
     await expect(defaultRecorder('quality_recheck', {
       prompt: '复审', responseContract: 'quality_review_json',
-    }, async () => { throw new Error(`provider ${defaultKey} transport-safe-path`) }))
+    }, async () => { throw new Error(`provider ${defaultKey} sk-scheduler sk-scheduler-configuration transport-safe-path`) }))
       .rejects.toThrow(defaultKey)
 
     const customRecorder = createChapterStageRecorder({
@@ -220,7 +220,10 @@ describe('chapter generation stage receipts', () => {
 
     const serialized = JSON.stringify(await listNovelRuns(activeWorkspace, provenance.project_id))
     for (const secret of [defaultKey, customKey, provenanceKey]) expect(serialized).not.toContain(secret)
-    for (const normalText of ['transport-safe-path', 'retry-safe-path', 'task-step-name']) {
+    for (const normalText of [
+      'sk-scheduler', 'sk-scheduler-configuration',
+      'transport-safe-path', 'retry-safe-path', 'task-step-name',
+    ]) {
       expect(serialized).toContain(normalText)
     }
   })

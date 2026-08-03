@@ -1672,6 +1672,104 @@ describe('ModelGenerationSource', () => {
     expect(() => createSource(hostileModelId)).toThrow(RangeError)
     expect(coercions).toBe(0)
   })
+
+  test('projects draft and agent results without invoking receipt or inherited accessors', async () => {
+    let getterCalls = 0
+    const capability = Symbol('untrusted-capability')
+    const draftResult: Record<PropertyKey, any> = { parsed: { prose_chapters: [] }, preserved: 'draft-data' }
+    Object.defineProperties(draftResult, {
+      source_receipt: {
+        enumerable: true,
+        get() { getterCalls += 1; throw new Error('draft receipt getter') },
+      },
+      computed: {
+        enumerable: true,
+        get() { getterCalls += 1; throw new Error('draft computed getter') },
+      },
+      [capability]: { enumerable: true, value: { release: () => {} } },
+    })
+    const inherited = Object.create({
+      get source_receipt() { getterCalls += 1; throw new Error('inherited receipt getter') },
+      get inherited_value() { getterCalls += 1; throw new Error('inherited value getter') },
+    })
+    inherited.content = '{}'
+    inherited.parsed = {}
+    inherited.preserved = 'agent-data'
+    const source = new ModelGenerationSource({
+      modelId: 217,
+      provenance: {
+        task_id: 'task-safe-result', project_id: 5, chapter_id: 12,
+        source: 'model', source_fingerprint: `sha256:${'a'.repeat(64)}`,
+        context_version: `sha256:${'b'.repeat(64)}`,
+      },
+      generateChapterProse: async () => draftResult,
+      executeAgent: async () => inherited,
+      recordStage: async (_stage, _request, operation) => operation(),
+    })
+
+    const draft = await source.generateDraft(draftRequest())
+    const agent = await source.executeAgent(
+      'quality_review', 'quality_review_json', 'review-agent', project, { task: '审查' },
+    )
+
+    expect(getterCalls).toBe(0)
+    expect(draft).toMatchObject({ preserved: 'draft-data', source: 'model' })
+    expect(draft).not.toHaveProperty('computed')
+    expect(Object.getOwnPropertySymbols(draft)).toEqual([])
+    expect(agent).toEqual({ content: '{}', parsed: {}, preserved: 'agent-data' })
+    expect(Object.getOwnPropertySymbols(agent)).toEqual([])
+  })
+
+  test('fails closed on Proxy and revoked Proxy stage results without invoking result traps', async () => {
+    let traps = 0
+    const proxiedResult = new Proxy({ content: '{}', parsed: {} }, {
+      get(target, field, receiver) {
+        if (field === 'then') return undefined
+        traps += 1
+        throw new Error('result get trap')
+      },
+      ownKeys() { traps += 1; throw new Error('result ownKeys trap') },
+      getOwnPropertyDescriptor() { traps += 1; throw new Error('result descriptor trap') },
+    })
+    const revoked = Proxy.revocable({ content: '{}', parsed: {} }, {})
+    revoked.revoke()
+    const source = new ModelGenerationSource({
+      modelId: 217,
+      provenance: {
+        task_id: 'task-proxy-result', project_id: 5, chapter_id: 12,
+        source: 'model', source_fingerprint: `sha256:${'a'.repeat(64)}`,
+        context_version: `sha256:${'b'.repeat(64)}`,
+      },
+      generateChapterProse: async () => proxiedResult,
+      executeAgent: async () => revoked.proxy,
+      recordStage: async (_stage, _request, operation) => operation(),
+    })
+
+    await expect(source.generateDraft(draftRequest())).rejects.toMatchObject({
+      code: 'CHAPTER_STAGE_RESULT_INVALID',
+    })
+    await expect(source.executeAgent(
+      'revision', 'revision_prose', 'prose-agent', project, { task: '修订' },
+    )).rejects.toMatchObject({ code: 'CHAPTER_STAGE_RESULT_INVALID' })
+    expect(traps).toBe(0)
+
+    const providerFailure = new TypeError('ordinary provider failure')
+    const ordinaryFailureSource = new ModelGenerationSource({
+      modelId: 217,
+      provenance: {
+        task_id: 'task-provider-failure', project_id: 5, chapter_id: 12,
+        source: 'model', source_fingerprint: `sha256:${'a'.repeat(64)}`,
+        context_version: `sha256:${'b'.repeat(64)}`,
+      },
+      generateChapterProse: async () => { throw providerFailure },
+      executeAgent: async () => { throw providerFailure },
+      recordStage: async (_stage, _request, operation) => operation(),
+    })
+    await expect(ordinaryFailureSource.generateDraft(draftRequest())).rejects.toBe(providerFailure)
+    await expect(ordinaryFailureSource.executeAgent(
+      'revision', 'revision_prose', 'prose-agent', project, { task: '修订' },
+    )).rejects.toBe(providerFailure)
+  })
 })
 
 describe('McpGenerationSource', () => {

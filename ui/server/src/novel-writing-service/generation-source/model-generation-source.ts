@@ -1,3 +1,4 @@
+import { types } from 'node:util'
 import type {
   ChapterStageResponseContract,
   ChapterTaskExecution,
@@ -29,6 +30,58 @@ function positiveModelId(value: unknown) {
     throw new RangeError('modelId must be a positive safe integer')
   }
   return value
+}
+
+function invalidStageResult() {
+  return Object.assign(new TypeError('Invalid chapter stage result'), {
+    code: 'CHAPTER_STAGE_RESULT_INVALID',
+    error_code: 'CHAPTER_STAGE_RESULT_INVALID',
+  })
+}
+
+function isRevokedProxyAssimilationError(error: unknown) {
+  if (!types.isNativeError(error) || types.isProxy(error)) return false
+  try {
+    const message = Object.getOwnPropertyDescriptor(error, 'message')
+    return Object.getPrototypeOf(error) === TypeError.prototype
+      && (message?.value === "Cannot perform 'get' on a proxy that has been revoked"
+        || message?.value === 'Proxy has already been revoked. No more operations are allowed to be performed on it')
+  } catch {
+    return false
+  }
+}
+
+async function awaitStageResult(operation: () => Promise<any>) {
+  try {
+    return await operation()
+  } catch (error) {
+    if (isRevokedProxyAssimilationError(error)) throw invalidStageResult()
+    throw error
+  }
+}
+
+function projectStageResult(result: any) {
+  if (!result || (typeof result !== 'object' && typeof result !== 'function')) return result
+  if (types.isProxy(result)) throw invalidStageResult()
+
+  let descriptors: PropertyDescriptorMap
+  try {
+    descriptors = Object.getOwnPropertyDescriptors(result)
+  } catch {
+    throw invalidStageResult()
+  }
+
+  const projected: Record<string, any> = {}
+  for (const [field, descriptor] of Object.entries(descriptors)) {
+    if (field === 'source_receipt' || !descriptor.enumerable || !('value' in descriptor)) continue
+    Object.defineProperty(projected, field, {
+      configurable: true,
+      enumerable: true,
+      value: descriptor.value,
+      writable: true,
+    })
+  }
+  return projected
 }
 
 export class ModelGenerationSource implements GenerationSource, ChapterTaskExecution {
@@ -113,9 +166,11 @@ export class ModelGenerationSource implements GenerationSource, ChapterTaskExecu
       prompt: request.paragraphTask,
       responseContract: 'draft_prose',
     }, async () => {
-      const result = await this.generateWithModel(request, String(this.modelId))
+      const result = await awaitStageResult(
+        () => this.generateWithModel(request, String(this.modelId)),
+      )
       await this.assertCurrent()
-      const { source_receipt: _untrustedSourceReceipt, ...safeResult } = result || {}
+      const safeResult = projectStageResult(result)
       return {
         ...safeResult,
         source: 'model',
@@ -142,14 +197,14 @@ export class ModelGenerationSource implements GenerationSource, ChapterTaskExecu
       prompt: String(context.task || ''),
       responseContract,
     }, async () => {
-      const result = await this.executeAgentPort!(agentId, project, context, {
-        ...options,
-        modelId: String(this.modelId),
-      })
+      const result = await awaitStageResult(
+        () => this.executeAgentPort!(agentId, project, context, {
+          ...options,
+          modelId: String(this.modelId),
+        }),
+      )
       await this.assertCurrent()
-      if (!result || typeof result !== 'object') return result
-      const { source_receipt: _untrustedSourceReceipt, ...safeResult } = result
-      return safeResult
+      return projectStageResult(result)
     })
   }
 
@@ -164,8 +219,10 @@ export class ModelGenerationSource implements GenerationSource, ChapterTaskExecu
 
   async generateProse(request: ProseGenerationRequest): Promise<ProseGenerationResult> {
     if (!this.legacy) return this.generateDraft(request)
-    const result = await this.generateWithModel(request, String(request.modelId || ''))
-    const { source_receipt: _untrustedSourceReceipt, ...safeResult } = result || {}
+    const result = await awaitStageResult(
+      () => this.generateWithModel(request, String(request.modelId || '')),
+    )
+    const safeResult = projectStageResult(result)
     return { ...safeResult, source: 'model' }
   }
 }
