@@ -126,6 +126,7 @@ export async function runPostDraftHumanizeAndOpeningHandoff(args: {
       r76_zhuque_stack: R76_ZHUQUE_STACK_VERSION,
     })
   } catch (error: any) {
+    if (llmControlOptions?.chapterTaskExecution) throw error
     humanizePostprocess = normalizeHumanizePostprocessForStorage({
       version: 'humanize_postprocess_v3',
       enabled: true,

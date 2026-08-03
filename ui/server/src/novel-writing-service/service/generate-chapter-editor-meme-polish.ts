@@ -119,6 +119,7 @@ if (!isDraftOnly) {
     editor_report: editorRewrite.editor_report,
   })
 } catch (editorError) {
+  if (llmControlOptions?.chapterTaskExecution) throw editorError
   if (isAbortError(editorError)) throw editorError
   const editorErrorMessage = formatAdmissionError(editorError, 300)
   editorRewrite = { error: editorErrorMessage, edited: false }
@@ -206,6 +207,7 @@ try {
     meme_polish_report: memePolish.meme_polish_report,
   })
 } catch (memeError) {
+  if (llmControlOptions?.chapterTaskExecution) throw memeError
   if (isAbortError(memeError)) throw memeError
   const memeErrorMessage = formatAdmissionError(memeError, 300)
   memePolish = { error: memeErrorMessage, polished: false }

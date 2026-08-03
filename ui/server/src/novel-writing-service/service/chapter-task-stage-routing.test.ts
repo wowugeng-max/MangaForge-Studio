@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import type { ChapterTaskExecution } from '../generation-source/types'
+import {
+  executeChapterStage,
+  type ChapterTaskExecution,
+} from '../generation-source/types'
 import { ChapterSourceLeaseRegistry } from '../generation-source/chapter-source-lease'
 import { createNovelWritingService } from './create-novel-writing-service'
 import { runQualityLoopPhase } from './generate-chapter-quality-prestore-loop'
@@ -343,5 +346,21 @@ describe('chapter task service capability', () => {
     expect(execution).toMatchObject({ source: 'model', modelId: 217 })
     await execution.close({ status: 'cancelled' })
     expect(chapterSourceLeases.isActive('/tmp/mangaforge-task-routing', configuredProject.id)).toBe(false)
+  })
+})
+
+describe('chapter stage helper async contract', () => {
+  test('returns a Promise even when the legacy fallback is synchronous', async () => {
+    const pending: Promise<string> = executeChapterStage<string>({
+      fallback: () => 'legacy result',
+      stage: 'quality_review',
+      responseContract: 'quality_review_json',
+      agentId: 'review-agent',
+      project: {},
+      context: {},
+    })
+
+    expect(pending).toBeInstanceOf(Promise)
+    await expect(pending).resolves.toBe('legacy result')
   })
 })

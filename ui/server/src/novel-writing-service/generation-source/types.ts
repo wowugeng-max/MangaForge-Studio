@@ -146,16 +146,16 @@ export interface ChapterTaskExecution {
   close(outcome?: { status: 'success' | 'failed' | 'cancelled'; error?: unknown }): Promise<void>
 }
 
-export function executeChapterStage<T = any>(input: {
+export async function executeChapterStage<T = any>(input: {
   execution?: ChapterTaskExecution
-  fallback: (agentId: string, project: any, context: Record<string, any>, options?: Record<string, any>) => T
+  fallback: (agentId: string, project: any, context: Record<string, any>, options?: Record<string, any>) => T | Promise<T>
   stage: ChapterTaskStage
   responseContract: ChapterStageResponseContract
   agentId: string
   project: any
   context: Record<string, any>
   options?: Record<string, any>
-}): T | Promise<T> {
+}): Promise<T> {
   if (input.execution) {
     return input.execution.executeAgent(
       input.stage,

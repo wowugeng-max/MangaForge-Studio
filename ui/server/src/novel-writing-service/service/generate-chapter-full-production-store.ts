@@ -295,6 +295,7 @@ export async function runFullProductionAdmissionAndStore(args: {
       })
     }
   } catch (error) {
+    if (llmControlOptions?.chapterTaskExecution) throw error
     if (isAbortError(error)) throw error
     storyStateStatus = 'pending'
     const failures: PreparedStoryStateFailure[] = [{

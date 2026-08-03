@@ -4,6 +4,7 @@ import {
   collectFinalOpeningContinuityFailures,
   runPostDraftHumanizeAndOpeningHandoff,
 } from './generate-chapter-post-draft-finalize'
+import type { ChapterTaskExecution } from '../generation-source/types'
 
 describe('post-draft humanize and opening-handoff finalization', () => {
   test('runs humanize before sanitize and opening-handoff repair while preserving option aliases', async () => {
@@ -108,6 +109,24 @@ describe('post-draft humanize and opening-handoff finalization', () => {
       ['humanize_postprocess', 'running'],
       ['humanize_postprocess', 'failed'],
     ])
+  })
+
+  test('propagates humanize task rejection by identity instead of recording a bounded failure', async () => {
+    const rejection = new Error('humanize task rejected')
+
+    await expect(runPostDraftHumanizeAndOpeningHandoff({
+      activeWorkspace: '/tmp/novel',
+      project: { id: 7 },
+      contextPackage: {},
+      characters: [],
+      finalText: '林序把门带上，沿着走廊继续往前。',
+      preferredModelId: undefined,
+      llmControlOptions: { chapterTaskExecution: {} as ChapterTaskExecution },
+      options: { skip_mid_monologue_densify: true },
+      isZhuqueFast: false,
+      runHumanizePostProcess: async () => { throw rejection },
+      onStage: async () => {},
+    })).rejects.toBe(rejection)
   })
 
   test('normalizes a cyclic terminal humanize report before the stage callback', async () => {

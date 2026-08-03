@@ -306,6 +306,7 @@ if (shouldRunSynchronousReadabilityReview(options, project)) {
     }))
     await onStage('readability_review', { status: 'success', score: readabilityReview.readability_score, meme_sense: readabilityReview.meme_sense })
   } catch (readabilityError) {
+    if (llmControlOptions?.chapterTaskExecution) throw readabilityError
     if (isAbortError(readabilityError)) throw readabilityError
     const readabilityErrorMessage = formatAdmissionError(readabilityError, 300)
     readabilityReview = { error: readabilityErrorMessage }
