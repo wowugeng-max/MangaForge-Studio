@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import { realpathSync } from 'node:fs'
 import { EventEmitter } from 'node:events'
 import { mkdir, mkdtemp, rm, symlink } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { createMcpKey, updateMcpKey } from '../mcp/key-store'
-import { McpError } from '../mcp/errors'
+import { McpError, type McpErrorCode } from '../mcp/errors'
 import { createMcpRuntime } from '../mcp/runtime'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from '../mcp/server-store'
 import { withMcpWorkspaceMutation } from '../mcp/workspace-coordinator'
@@ -80,12 +81,44 @@ function routeHandler(handlers: Map<string, any>, route: string) {
   return handler
 }
 
+async function holdWorkspaceCoordinator(workspace: string) {
+  let signalHeld!: () => void
+  let release!: () => void
+  const held = new Promise<void>(resolve => { signalHeld = resolve })
+  const mayFinish = new Promise<void>(resolve => { release = resolve })
+  const done = withMcpWorkspaceMutation(workspace, async () => {
+    signalHeld()
+    await mayFinish
+  })
+  await held
+  return { release, done }
+}
+
+async function releaseAndDrainWorkspaceCoordinator(
+  workspace: string,
+  blocker: Awaited<ReturnType<typeof holdWorkspaceCoordinator>>,
+) {
+  const unhandled: unknown[] = []
+  const onUnhandled = (reason: unknown) => { unhandled.push(reason) }
+  process.on('unhandledRejection', onUnhandled)
+  try {
+    blocker.release()
+    await blocker.done
+    await withMcpWorkspaceMutation(workspace, async () => {})
+    await new Promise<void>(resolve => setImmediate(resolve))
+    return unhandled
+  } finally {
+    process.off('unhandledRejection', onUnhandled)
+  }
+}
+
 async function fixture(input: {
   keyValue?: string
   authorization?: string
   cookie?: string
   customHeaders?: Record<string, string>
   mcpValidationTimeoutMs?: number
+  onGetProject?: () => void
 } = {}) {
   const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-binding-route-'))
   workspaces.push(workspace)
@@ -116,7 +149,10 @@ async function fixture(input: {
   const { app, handlers } = createRouteHarness()
   registerNovelMcpBindingRoutes(app, {
     getWorkspace: () => workspace,
-    getProject: getNovelProject,
+    getProject: async (activeWorkspace, id) => {
+      input.onGetProject?.()
+      return getNovelProject(activeWorkspace, id)
+    },
     mcpRuntime: runtime as any,
     chapterSourceLeases,
     mcpValidationTimeoutMs: input.mcpValidationTimeoutMs,
@@ -614,7 +650,7 @@ describe('explicit chapter generation source routes', () => {
 
   test('times out remote validation with a bounded signal and never commits afterward', async () => {
     const { workspace, key, first, second, handlers, runtime, chapterSourceLeases } = await fixture({
-      mcpValidationTimeoutMs: 10,
+      mcpValidationTimeoutMs: 100,
     })
     let validationEntered!: () => void
     let releaseValidation!: () => void
@@ -631,22 +667,325 @@ describe('explicit chapter generation source routes', () => {
     const saving = call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
       params: { id: String(first.id) }, body: { mcp: binding(key.id) },
     })
-    await entered
+    const enteredBeforeDeadline = await Promise.race([
+      entered.then(() => true),
+      new Promise<false>(resolve => setTimeout(() => resolve(false), 200)),
+    ])
+    if (!enteredBeforeDeadline) {
+      releaseValidation()
+      await saving
+    }
+    expect(enteredBeforeDeadline).toBe(true)
     const responseBeforeRelease = await Promise.race([
       saving,
-      new Promise<null>(resolve => setTimeout(() => resolve(null), 100)),
+      new Promise<null>(resolve => setTimeout(() => resolve(null), 250)),
     ])
     releaseValidation()
     const response = responseBeforeRelease || await saving
 
     expect(remoteOptions?.timeoutMs).toBeGreaterThan(0)
-    expect(remoteOptions?.timeoutMs).toBeLessThanOrEqual(10)
+    expect(remoteOptions?.timeoutMs).toBeLessThanOrEqual(100)
     expect(remoteOptions?.signal).toBeInstanceOf(AbortSignal)
     expect(remoteOptions?.signal.aborted).toBe(true)
     expect(response).toMatchObject({ statusCode: 504, body: { error_code: 'MCP_CONNECT_TIMEOUT' } })
     expect((await getNovelProject(workspace, first.id))?.reference_config?.chapter_generation_source).toBeUndefined()
     const lease = await chapterSourceLeases.acquire(workspace, second.id, 'after-timeout')
     await lease.release()
+  })
+
+  test('aborts immediately while phase one is waiting for the workspace coordinator', async () => {
+    let getProjectCalls = 0
+    const { workspace, first, handlers } = await fixture({
+      onGetProject: () => { getProjectCalls += 1 },
+    })
+    const blocker = await holdWorkspaceCoordinator(workspace)
+    const controller = new AbortController()
+    const saving = call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+      params: { id: String(first.id) },
+      body: { model_id: 217 },
+      signal: controller.signal,
+    })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    controller.abort()
+
+    const responseBeforeRelease = await Promise.race([
+      saving,
+      new Promise<null>(resolve => setTimeout(() => resolve(null), 50)),
+    ])
+    const response = responseBeforeRelease || await saving
+    const getProjectCallsBeforeDrain = getProjectCalls
+    const unhandled = await releaseAndDrainWorkspaceCoordinator(workspace, blocker)
+    expect(responseBeforeRelease).not.toBeNull()
+    expect(response).toMatchObject({
+      statusCode: 499,
+      body: { error_code: 'MCP_CANCELLED' },
+    })
+    expect((await getNovelProject(workspace, first.id))?.reference_config?.chapter_generation_source)
+      .toBeUndefined()
+    expect(getProjectCallsBeforeDrain).toBe(0)
+    expect(getProjectCalls).toBe(getProjectCallsBeforeDrain)
+    expect(unhandled).toEqual([])
+    const retry = await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+      params: { id: String(first.id) }, body: { model_id: 218 },
+    })
+    expect(retry.statusCode).toBe(200)
+  })
+
+  test('times out immediately while phase one is waiting for the workspace coordinator', async () => {
+    let getProjectCalls = 0
+    const { workspace, first, handlers } = await fixture({
+      mcpValidationTimeoutMs: 100,
+      onGetProject: () => { getProjectCalls += 1 },
+    })
+    const blocker = await holdWorkspaceCoordinator(workspace)
+    const saving = call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+      params: { id: String(first.id) }, body: { model_id: 217 },
+    })
+
+    const responseBeforeRelease = await Promise.race([
+      saving,
+      new Promise<null>(resolve => setTimeout(() => resolve(null), 200)),
+    ])
+    const response = responseBeforeRelease || await saving
+    const getProjectCallsBeforeDrain = getProjectCalls
+    const unhandled = await releaseAndDrainWorkspaceCoordinator(workspace, blocker)
+    expect(responseBeforeRelease).not.toBeNull()
+    expect(response).toMatchObject({
+      statusCode: 504,
+      body: { error_code: 'MCP_CONNECT_TIMEOUT' },
+    })
+    expect((await getNovelProject(workspace, first.id))?.reference_config?.chapter_generation_source)
+      .toBeUndefined()
+    expect(getProjectCallsBeforeDrain).toBe(0)
+    expect(getProjectCalls).toBe(getProjectCallsBeforeDrain)
+    expect(unhandled).toEqual([])
+    const retry = await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+      params: { id: String(first.id) }, body: { model_id: 218 },
+    })
+    expect(retry.statusCode).toBe(200)
+  })
+
+  test('starts the absolute deadline before initial workspace identity resolution', async () => {
+    const observed: Array<Record<string, unknown>> = []
+    for (const scenario of [
+      { route: `PUT ${CHAPTER_SOURCE_BASE}/model`, body: { model_id: 217 } },
+      { route: `POST ${CHAPTER_SOURCE_BASE}/mcp/test`, body: null },
+    ]) {
+      let getProjectCalls = 0
+      const { workspace, key, first, handlers } = await fixture({
+        mcpValidationTimeoutMs: 1_000,
+        onGetProject: () => { getProjectCalls += 1 },
+      })
+      const blocker = await holdWorkspaceCoordinator(workspace)
+      const originalNow = Date.now
+      const originalRealpathNative = realpathSync.native
+      let fakeNow = 100_000
+      let canonicalCalls = 0
+      let saving: ReturnType<typeof call> | undefined
+      let responseBeforeNextTurn: Awaited<ReturnType<typeof call>> | null = null
+      try {
+        Date.now = () => fakeNow
+        ;(realpathSync as any).native = (...args: any[]) => {
+          const physical = originalRealpathNative(...args)
+          canonicalCalls += 1
+          if (canonicalCalls === 1) fakeNow += 1_001
+          return physical
+        }
+        saving = call(routeHandler(handlers, scenario.route), {
+          params: { id: String(first.id) },
+          body: scenario.body || { mcp: binding(key.id) },
+        })
+        responseBeforeNextTurn = await Promise.race([
+          saving,
+          new Promise<null>(resolve => setImmediate(() => resolve(null))),
+        ])
+      } finally {
+        Date.now = originalNow
+        ;(realpathSync as any).native = originalRealpathNative
+      }
+
+      const unhandled = await releaseAndDrainWorkspaceCoordinator(workspace, blocker)
+      const response = responseBeforeNextTurn || await saving!
+      observed.push({
+        route: scenario.route,
+        canonicalized: canonicalCalls >= 1,
+        completedBeforeNextTurn: responseBeforeNextTurn !== null,
+        statusCode: response.statusCode,
+        errorCode: response.body?.error_code,
+        getProjectCalls,
+        unhandledCount: unhandled.length,
+        wroteSource: Boolean(
+          (await getNovelProject(workspace, first.id))?.reference_config?.chapter_generation_source,
+        ),
+      })
+    }
+    expect(observed).toEqual([
+      {
+        route: `PUT ${CHAPTER_SOURCE_BASE}/model`,
+        canonicalized: true,
+        completedBeforeNextTurn: true,
+        statusCode: 504,
+        errorCode: 'MCP_CONNECT_TIMEOUT',
+        getProjectCalls: 0,
+        unhandledCount: 0,
+        wroteSource: false,
+      },
+      {
+        route: `POST ${CHAPTER_SOURCE_BASE}/mcp/test`,
+        canonicalized: true,
+        completedBeforeNextTurn: true,
+        statusCode: 504,
+        errorCode: 'MCP_CONNECT_TIMEOUT',
+        getProjectCalls: 0,
+        unhandledCount: 0,
+        wroteSource: false,
+      },
+    ])
+  })
+
+  test('does not add synchronous workspace identity time back to the absolute deadline', async () => {
+    let getProjectCalls = 0
+    const { workspace, first, handlers } = await fixture({
+      mcpValidationTimeoutMs: 1_000,
+      onGetProject: () => { getProjectCalls += 1 },
+    })
+    const blocker = await holdWorkspaceCoordinator(workspace)
+    const originalNow = Date.now
+    const originalRealpathNative = realpathSync.native
+    let fakeNow = 100_000
+    let canonicalCalls = 0
+    let saving: ReturnType<typeof call> | undefined
+    let responseBeforeNextTurn: Awaited<ReturnType<typeof call>> | null = null
+    try {
+      Date.now = () => fakeNow
+      ;(realpathSync as any).native = (...args: any[]) => {
+        const physical = originalRealpathNative(...args)
+        canonicalCalls += 1
+        if (canonicalCalls === 2) fakeNow += 1_001
+        return physical
+      }
+      saving = call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+        params: { id: String(first.id) }, body: { model_id: 217 },
+      })
+      responseBeforeNextTurn = await Promise.race([
+        saving,
+        new Promise<null>(resolve => setImmediate(() => resolve(null))),
+      ])
+    } finally {
+      Date.now = originalNow
+      ;(realpathSync as any).native = originalRealpathNative
+    }
+
+    const unhandled = await releaseAndDrainWorkspaceCoordinator(workspace, blocker)
+    const response = responseBeforeNextTurn || await saving!
+    expect(canonicalCalls).toBeGreaterThanOrEqual(2)
+    expect(responseBeforeNextTurn).not.toBeNull()
+    expect(response).toMatchObject({
+      statusCode: 504,
+      body: { error_code: 'MCP_CONNECT_TIMEOUT' },
+    })
+    expect(getProjectCalls).toBe(0)
+    expect(unhandled).toEqual([])
+    expect((await getNovelProject(workspace, first.id))?.reference_config?.chapter_generation_source)
+      .toBeUndefined()
+  })
+
+  test('aborts immediately while phase two is waiting for the workspace coordinator', async () => {
+    let getProjectCalls = 0
+    let remoteCalls = 0
+    const { workspace, key, first, handlers, runtime } = await fixture({
+      onGetProject: () => { getProjectCalls += 1 },
+    })
+    let phaseTwoBlocked!: () => void
+    const blocked = new Promise<void>(resolve => { phaseTwoBlocked = resolve })
+    let blocker: Awaited<ReturnType<typeof holdWorkspaceCoordinator>> | undefined
+    runtime.listAgents = async () => {
+      remoteCalls += 1
+      blocker = await holdWorkspaceCoordinator(workspace)
+      phaseTwoBlocked()
+      return [{ id: 'agent-1', name: '正文 Agent' }]
+    }
+    const controller = new AbortController()
+    const saving = call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+      params: { id: String(first.id) },
+      body: { mcp: binding(key.id) },
+      signal: controller.signal,
+    })
+    await blocked
+    await new Promise(resolve => setTimeout(resolve, 0))
+    controller.abort()
+
+    const responseBeforeRelease = await Promise.race([
+      saving,
+      new Promise<null>(resolve => setTimeout(() => resolve(null), 50)),
+    ])
+    const response = responseBeforeRelease || await saving
+    const getProjectCallsBeforeDrain = getProjectCalls
+    const remoteCallsBeforeDrain = remoteCalls
+    const unhandled = await releaseAndDrainWorkspaceCoordinator(workspace, blocker!)
+    expect(responseBeforeRelease).not.toBeNull()
+    expect(response).toMatchObject({
+      statusCode: 499,
+      body: { error_code: 'MCP_CANCELLED' },
+    })
+    expect((await getNovelProject(workspace, first.id))?.reference_config?.chapter_generation_source)
+      .toBeUndefined()
+    expect(getProjectCallsBeforeDrain).toBe(1)
+    expect(getProjectCalls).toBe(getProjectCallsBeforeDrain)
+    expect(remoteCallsBeforeDrain).toBe(1)
+    expect(remoteCalls).toBe(remoteCallsBeforeDrain)
+    expect(unhandled).toEqual([])
+    const retry = await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+      params: { id: String(first.id) }, body: { model_id: 218 },
+    })
+    expect(retry.statusCode).toBe(200)
+  })
+
+  test('times out immediately while phase two is waiting for the workspace coordinator', async () => {
+    let getProjectCalls = 0
+    let remoteCalls = 0
+    const { workspace, key, first, handlers, runtime } = await fixture({
+      mcpValidationTimeoutMs: 100,
+      onGetProject: () => { getProjectCalls += 1 },
+    })
+    let phaseTwoBlocked!: () => void
+    const blocked = new Promise<void>(resolve => { phaseTwoBlocked = resolve })
+    let blocker: Awaited<ReturnType<typeof holdWorkspaceCoordinator>> | undefined
+    runtime.listAgents = async () => {
+      remoteCalls += 1
+      blocker = await holdWorkspaceCoordinator(workspace)
+      phaseTwoBlocked()
+      return [{ id: 'agent-1', name: '正文 Agent' }]
+    }
+    const saving = call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
+      params: { id: String(first.id) }, body: { mcp: binding(key.id) },
+    })
+    await blocked
+
+    const responseBeforeRelease = await Promise.race([
+      saving,
+      new Promise<null>(resolve => setTimeout(() => resolve(null), 200)),
+    ])
+    const response = responseBeforeRelease || await saving
+    const getProjectCallsBeforeDrain = getProjectCalls
+    const remoteCallsBeforeDrain = remoteCalls
+    const unhandled = await releaseAndDrainWorkspaceCoordinator(workspace, blocker!)
+    expect(responseBeforeRelease).not.toBeNull()
+    expect(response).toMatchObject({
+      statusCode: 504,
+      body: { error_code: 'MCP_CONNECT_TIMEOUT' },
+    })
+    expect((await getNovelProject(workspace, first.id))?.reference_config?.chapter_generation_source)
+      .toBeUndefined()
+    expect(getProjectCallsBeforeDrain).toBe(1)
+    expect(getProjectCalls).toBe(getProjectCallsBeforeDrain)
+    expect(remoteCallsBeforeDrain).toBe(1)
+    expect(remoteCalls).toBe(remoteCallsBeforeDrain)
+    expect(unhandled).toEqual([])
+    const retry = await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+      params: { id: String(first.id) }, body: { model_id: 218 },
+    })
+    expect(retry.statusCode).toBe(200)
   })
 
   test('linearizes same-project source writes while remote validation is pending', async () => {
@@ -971,25 +1310,46 @@ describe('explicit chapter generation source routes', () => {
     })
   })
 
-  test('maps infrastructure MCP failures to stable statuses without reflecting remote secrets', async () => {
+  test('maps every MCP error code to a stable status without reflecting remote secrets', async () => {
     const { key, first, handlers, runtime } = await fixture()
-    for (const [code, status] of [
-      ['MCP_STORE_IO_FAILED', 500],
-      ['MCP_RUNTIME_ERROR', 503],
-      ['MCP_CONNECTION_LOST', 503],
-      ['MCP_CONNECT_TIMEOUT', 504],
-      ['MCP_CANCELLED', 499],
-    ] as const) {
+    const expectedStatuses = {
+      MCP_BINDING_INVALID: 400,
+      MCP_BINDING_CHANGED: 409,
+      MCP_REFERENCED_RECORD_CONFLICT: 409,
+      MCP_AUTH_FAILED: 401,
+      MCP_CONNECT_TIMEOUT: 504,
+      MCP_CONNECTION_LOST: 503,
+      MCP_CAPABILITY_MISSING: 422,
+      MCP_TOOL_ERROR: 502,
+      MCP_DRIVE_SYNC_FAILED: 502,
+      MCP_INPUT_TOO_LARGE: 413,
+      MCP_AGENT_BUSY: 409,
+      MCP_AGENT_QUARANTINED: 409,
+      MCP_QUARANTINE_ACK_REQUIRED: 400,
+      MCP_SEND_UNKNOWN: 502,
+      MCP_SESSION_FAILED: 502,
+      MCP_INPUT_REQUIRED: 422,
+      MCP_GENERATION_TIMEOUT: 504,
+      MCP_CANCELLED: 499,
+      MCP_EMPTY_PROSE: 502,
+      MCP_STORE_CORRUPT: 500,
+      MCP_STORE_IO_FAILED: 500,
+      MCP_RUNTIME_ERROR: 503,
+    } satisfies Record<McpErrorCode, number>
+    const actualStatuses = {} as Record<McpErrorCode, number>
+    for (const code of Object.keys(expectedStatuses) as McpErrorCode[]) {
       runtime.listAgents = async () => {
         throw new McpError(code, `remote reflected ${FAKE_KEY} ${FAKE_HEADER}`)
       }
       const response = await call(routeHandler(handlers, `POST ${CHAPTER_SOURCE_BASE}/mcp/test`), {
         params: { id: String(first.id) }, body: { mcp: binding(key.id) },
       })
-      expect(response).toMatchObject({ statusCode: status, body: { error_code: code } })
+      actualStatuses[code] = response.statusCode
+      expect(response.body).toMatchObject({ error_code: code })
       expect(JSON.stringify(response.body)).not.toContain(FAKE_KEY)
       expect(JSON.stringify(response.body)).not.toContain(FAKE_HEADER)
     }
+    expect(actualStatuses).toEqual(expectedStatuses)
   })
 
   test('maps malformed, conflict, and authentication failures without exposing secrets', async () => {

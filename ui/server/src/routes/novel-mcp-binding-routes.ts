@@ -2,7 +2,7 @@ import type { Express } from 'express'
 import { createHash } from 'node:crypto'
 import { types } from 'node:util'
 import { mutateNovelProjectReferenceConfig } from '../novel'
-import { isMcpError, McpError } from '../mcp/errors'
+import { isMcpError, McpError, type McpErrorCode } from '../mcp/errors'
 import type { McpRuntime } from '../mcp/runtime'
 import { createMcpSecretScrubber } from '../mcp/secret-scrubber'
 import type { McpKeyRecord, McpServerRecord } from '../mcp/types'
@@ -38,6 +38,12 @@ type NovelMcpBindingRoutesContext = {
 const DEFAULT_MCP_VALIDATION_TIMEOUT_MS = 30_000
 const MAX_SOURCE_MUTATION_ATTEMPTS = 3
 const projectMutationTails = new Map<string, Promise<void>>()
+
+function remainingValidationBudget(deadline: number) {
+  const remaining = Math.ceil(deadline - Date.now())
+  if (remaining <= 0) throw new McpError('MCP_CONNECT_TIMEOUT', 'MCP 连接校验超时')
+  return remaining
+}
 
 class RetryChapterSourceMutation extends Error {
   constructor() {
@@ -222,16 +228,24 @@ function createRequestLifecycle(req: any, res: any) {
   const throwIfAborted = () => {
     if (controller.signal.aborted) throw controller.signal.reason
   }
-  const waitFor = async <T>(operation: Promise<T>) => {
+  const waitForUntil = async <T>(operation: Promise<T>, deadline?: number) => {
+    void operation.catch(() => {})
     throwIfAborted()
     let onAbort: (() => void) | undefined
-    const aborted = new Promise<never>((_, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const interrupted = new Promise<never>((_, reject) => {
       onAbort = () => reject(controller.signal.reason)
       controller.signal.addEventListener('abort', onAbort, { once: true })
+      if (deadline !== undefined) {
+        timer = setTimeout(() => {
+          reject(new McpError('MCP_CONNECT_TIMEOUT', 'MCP 连接校验超时'))
+        }, remainingValidationBudget(deadline))
+      }
     })
     try {
-      return await Promise.race([operation, aborted])
+      return await Promise.race([operation, interrupted])
     } finally {
+      if (timer) clearTimeout(timer)
       if (onAbort) controller.signal.removeEventListener('abort', onAbort)
     }
   }
@@ -263,12 +277,13 @@ function createRequestLifecycle(req: any, res: any) {
     res.off?.('close', onResponseClose)
     upstreamSignal?.removeEventListener?.('abort', onUpstreamAbort)
   }
-  return { signal: controller.signal, throwIfAborted, waitFor, runRemote, cleanup }
+  return { signal: controller.signal, throwIfAborted, waitForUntil, runRemote, cleanup }
 }
 
 async function withProjectMutationQueue<T>(
   key: string,
   lifecycle: RequestLifecycle,
+  validationDeadline: number,
   operation: () => Promise<T>,
 ) {
   const previous = projectMutationTails.get(key) || Promise.resolve()
@@ -280,8 +295,9 @@ async function withProjectMutationQueue<T>(
     if (projectMutationTails.get(key) === current) projectMutationTails.delete(key)
   })
   try {
-    await lifecycle.waitFor(previous)
+    await lifecycle.waitForUntil(previous, validationDeadline)
     lifecycle.throwIfAborted()
+    remainingValidationBudget(validationDeadline)
     return await operation()
   } finally {
     releaseOperation()
@@ -378,6 +394,31 @@ function publicMcpErrorMessage(error: McpError) {
   return 'MCP 操作失败'
 }
 
+const MCP_BINDING_ERROR_STATUSES = {
+  MCP_BINDING_INVALID: 400,
+  MCP_BINDING_CHANGED: 409,
+  MCP_REFERENCED_RECORD_CONFLICT: 409,
+  MCP_AUTH_FAILED: 401,
+  MCP_CONNECT_TIMEOUT: 504,
+  MCP_CONNECTION_LOST: 503,
+  MCP_CAPABILITY_MISSING: 422,
+  MCP_TOOL_ERROR: 502,
+  MCP_DRIVE_SYNC_FAILED: 502,
+  MCP_INPUT_TOO_LARGE: 413,
+  MCP_AGENT_BUSY: 409,
+  MCP_AGENT_QUARANTINED: 409,
+  MCP_QUARANTINE_ACK_REQUIRED: 400,
+  MCP_SEND_UNKNOWN: 502,
+  MCP_SESSION_FAILED: 502,
+  MCP_INPUT_REQUIRED: 422,
+  MCP_GENERATION_TIMEOUT: 504,
+  MCP_CANCELLED: 499,
+  MCP_EMPTY_PROSE: 502,
+  MCP_STORE_CORRUPT: 500,
+  MCP_STORE_IO_FAILED: 500,
+  MCP_RUNTIME_ERROR: 503,
+} satisfies Record<McpErrorCode, number>
+
 function bindingError(error: unknown) {
   if (isChapterGenerationSourceError(error)) {
     const status = error.code === 'GENERATION_SOURCE_BUSY' ? 409
@@ -390,14 +431,7 @@ function bindingError(error: unknown) {
   }
   if (isMcpError(error)) {
     const status = error.details?.reason === 'binding_conflict' ? 409
-      : error.code === 'MCP_AGENT_BUSY' ? 409
-      : error.code === 'MCP_AUTH_FAILED' ? 401
-        : error.code === 'MCP_CAPABILITY_MISSING' ? 422
-          : error.code === 'MCP_CANCELLED' ? 499
-            : error.code === 'MCP_CONNECT_TIMEOUT' ? 504
-              : error.code === 'MCP_RUNTIME_ERROR' || error.code === 'MCP_CONNECTION_LOST' ? 503
-                : error.code === 'MCP_STORE_IO_FAILED' ? 500
-                  : 400
+      : MCP_BINDING_ERROR_STATUSES[error.code] ?? 500
     const message = publicMcpErrorMessage(error)
     return { status, body: { error: message, detail: message, error_code: error.code } }
   }
@@ -481,29 +515,33 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
   const withCheckedWorkspace = async <T>(
     workspace: ReturnType<typeof captureWorkspace>,
     lifecycle: RequestLifecycle,
+    validationDeadline: number,
     operation: (activeWorkspace: string) => Promise<T>,
   ) => {
     lifecycle.throwIfAborted()
+    remainingValidationBudget(validationDeadline)
     if (canonicalFilesystemIdentity(workspace.lexical) !== workspace.canonical) {
       throw generationSourceChanged('workspace_identity_changed')
     }
-    return withMcpWorkspaceMutation(workspace.canonical, async () => {
+    lifecycle.throwIfAborted()
+    remainingValidationBudget(validationDeadline)
+    const coordinated = withMcpWorkspaceMutation(workspace.canonical, async () => {
       lifecycle.throwIfAborted()
+      remainingValidationBudget(validationDeadline)
       if (canonicalFilesystemIdentity(workspace.lexical) !== workspace.canonical) {
         throw generationSourceChanged('workspace_identity_changed')
       }
-      return operation(workspace.canonical)
+      const result = await operation(workspace.canonical)
+      lifecycle.throwIfAborted()
+      remainingValidationBudget(validationDeadline)
+      return result
     })
+    return lifecycle.waitForUntil(coordinated, validationDeadline)
   }
   const configuredValidationTimeout = Number(ctx.mcpValidationTimeoutMs ?? DEFAULT_MCP_VALIDATION_TIMEOUT_MS)
   const validationTimeoutMs = Number.isFinite(configuredValidationTimeout) && configuredValidationTimeout > 0
     ? Math.min(configuredValidationTimeout, DEFAULT_MCP_VALIDATION_TIMEOUT_MS)
     : DEFAULT_MCP_VALIDATION_TIMEOUT_MS
-  const remainingValidationBudget = (deadline: number) => {
-    const remaining = Math.ceil(deadline - Date.now())
-    if (remaining <= 0) throw new McpError('MCP_CONNECT_TIMEOUT', 'MCP 连接校验超时')
-    return remaining
-  }
   const assertStableProjectIdentity = (project: any, snapshot: {
     projectId: number
     stableProjectFingerprint: string
@@ -555,17 +593,20 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
       source: ChapterGenerationSourceState
     }) => Promise<void>
   }) => {
+    const validationDeadline = Date.now() + validationTimeoutMs
     const workspace = captureWorkspace()
     const projectId = projectIdFromRequest(input.req)
-    const validationDeadline = Date.now() + validationTimeoutMs
     return withProjectMutationQueue(
       `${workspace.canonical}\u0000${projectId}`,
       input.lifecycle,
+      validationDeadline,
       async () => {
         for (let attempt = 1; attempt <= MAX_SOURCE_MUTATION_ATTEMPTS; attempt += 1) {
           try {
-            const phaseOne = await withCheckedWorkspace(workspace, input.lifecycle, async activeWorkspace => {
+            const phaseOne = await withCheckedWorkspace(workspace, input.lifecycle, validationDeadline, async activeWorkspace => {
               const project = await ctx.getProject(activeWorkspace, projectId)
+              input.lifecycle.throwIfAborted()
+              remainingValidationBudget(validationDeadline)
               if (!project) return null
               if (Number(project.id) !== projectId || !String(project.created_at || '')) {
                 throw generationSourceChanged('project_changed')
@@ -574,6 +615,8 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
               const current = resolveChapterGenerationSource(project)
               const source = normalizeChapterGenerationSource(input.mutate(current))
               await input.assertLocal?.({ activeWorkspace, project, current, source })
+              input.lifecycle.throwIfAborted()
+              remainingValidationBudget(validationDeadline)
               const binding = input.bindingForValidation?.({ current, source }) || null
               if (binding && !ctx.mcpRuntime) {
                 throw new McpError('MCP_CAPABILITY_MISSING', '服务端未配置 MCP Runtime')
@@ -581,6 +624,8 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
               const localValidation = binding
                 ? await validateMcpProjectBindingLocally(activeWorkspace, project, binding)
                 : null
+              input.lifecycle.throwIfAborted()
+              remainingValidationBudget(validationDeadline)
               return {
                 activeWorkspace,
                 projectId,
@@ -605,29 +650,37 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
               : null
             input.lifecycle.throwIfAborted()
 
-            return await withCheckedWorkspace(workspace, input.lifecycle, async activeWorkspace => {
+            return await withCheckedWorkspace(workspace, input.lifecycle, validationDeadline, async activeWorkspace => {
               const project = await ctx.getProject(activeWorkspace, projectId)
+              input.lifecycle.throwIfAborted()
+              remainingValidationBudget(validationDeadline)
               if (!project) return null
               assertStableProjectIdentity(project, phaseOne)
               assertChapterSourceLeaseAvailable(activeWorkspace, project.id)
               const current = resolveChapterGenerationSource(project)
               await input.assertLocal?.({ activeWorkspace, project, current, source: phaseOne.source })
+              input.lifecycle.throwIfAborted()
+              remainingValidationBudget(validationDeadline)
               const binding = phaseOne.localValidation?.binding || null
               const localValidation = binding
                 ? await validateMcpProjectBindingLocally(activeWorkspace, project, binding)
                 : null
+              input.lifecycle.throwIfAborted()
+              remainingValidationBudget(validationDeadline)
               if ((localValidation ? credentialSelectionFingerprint(localValidation) : null)
                 !== phaseOne.credentialFingerprint) {
                 throw generationSourceChanged('credential_changed')
               }
               assertExactProjectSnapshot(project, phaseOne)
               input.lifecycle.throwIfAborted()
+              remainingValidationBudget(validationDeadline)
               const mutation = await mutateNovelProjectReferenceConfig(activeWorkspace, {
                 projectId: project.id,
                 operation: input.operation,
                 signal: input.lifecycle.signal,
                 assertCurrentProject: currentProject => {
                   input.lifecycle.throwIfAborted()
+                  remainingValidationBudget(validationDeadline)
                   assertExactProjectSnapshot(currentProject, phaseOne)
                   assertChapterSourceLeaseAvailable(activeWorkspace, currentProject.id)
                 },
@@ -636,6 +689,8 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
                   result: phaseOne.source,
                 }),
               })
+              input.lifecycle.throwIfAborted()
+              remainingValidationBudget(validationDeadline)
               if (!mutation) return null
               return {
                 activeWorkspace,
@@ -661,17 +716,21 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
     lifecycle: RequestLifecycle
     bindingForProject: (project: any) => McpProjectBinding
   }) => {
+    const validationDeadline = Date.now() + validationTimeoutMs
     const workspace = captureWorkspace()
     const projectId = projectIdFromRequest(input.req)
-    const validationDeadline = Date.now() + validationTimeoutMs
-    const local = await withCheckedWorkspace(workspace, input.lifecycle, async activeWorkspace => {
+    const local = await withCheckedWorkspace(workspace, input.lifecycle, validationDeadline, async activeWorkspace => {
       const project = await ctx.getProject(activeWorkspace, projectId)
+      input.lifecycle.throwIfAborted()
+      remainingValidationBudget(validationDeadline)
       if (!project) return null
       const binding = input.bindingForProject(project)
       if (!ctx.mcpRuntime) {
         throw new McpError('MCP_CAPABILITY_MISSING', '服务端未配置 MCP Runtime')
       }
       const validation = await validateMcpProjectBindingLocally(activeWorkspace, project, binding)
+      input.lifecycle.throwIfAborted()
+      remainingValidationBudget(validationDeadline)
       return { activeWorkspace, project, validation }
     })
     if (!local) return null
