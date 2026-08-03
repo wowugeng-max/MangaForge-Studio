@@ -1,10 +1,93 @@
-import type { GenerationSource, ProseGenerationRequest, ProseGenerationResult } from './types'
+import type {
+  ChapterStageResponseContract,
+  ChapterTaskExecution,
+  ChapterTaskProvenance,
+  ChapterTaskStage,
+  GenerationSource,
+  ProseGenerationRequest,
+  ProseGenerationResult,
+} from './types'
+import { CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY } from './types'
+import { projectChapterTaskProvenance } from './stage-receipts'
 
-export class ModelGenerationSource implements GenerationSource {
-  constructor(private readonly generator: (...args: any[]) => Promise<any>) {}
+type StageRecorder = <T>(stage: ChapterTaskStage, request: {
+  prompt: string
+  responseContract: ChapterStageResponseContract
+}, operation: () => Promise<T>) => Promise<T>
 
-  async generateProse(request: ProseGenerationRequest): Promise<ProseGenerationResult> {
-    const result = await this.generator(
+export type ModelGenerationSourceInput = {
+  modelId: number
+  provenance: ChapterTaskProvenance
+  generateChapterProse: (...args: any[]) => Promise<any>
+  executeAgent: (...args: any[]) => Promise<any>
+  recordStage: StageRecorder
+  assertCurrent?: () => Promise<void>
+}
+
+function positiveModelId(value: unknown) {
+  const modelId = Number(value)
+  if (!Number.isSafeInteger(modelId) || modelId <= 0) {
+    throw new RangeError('modelId must be a positive safe integer')
+  }
+  return modelId
+}
+
+export class ModelGenerationSource implements GenerationSource, ChapterTaskExecution {
+  readonly taskId: string
+  readonly source = 'model' as const
+  readonly modelId?: number
+  readonly fingerprint: string
+  readonly contextVersion: string
+
+  private readonly provenanceSnapshot: ChapterTaskProvenance
+  private readonly generateChapterProse: (...args: any[]) => Promise<any>
+  private readonly executeAgentPort?: (...args: any[]) => Promise<any>
+  private readonly recordStage: StageRecorder
+  private readonly assertCurrentPort: () => Promise<void>
+  private readonly legacy: boolean
+  private closePromise?: Promise<void>
+
+  constructor(input: ModelGenerationSourceInput | ((...args: any[]) => Promise<any>)) {
+    if (typeof input === 'function') {
+      this.legacy = true
+      this.taskId = ''
+      this.modelId = undefined
+      this.fingerprint = ''
+      this.contextVersion = ''
+      this.provenanceSnapshot = Object.freeze({
+        task_id: '', project_id: 0, chapter_id: 0, source: 'model',
+        source_fingerprint: '', context_version: '',
+      })
+      this.generateChapterProse = input
+      this.recordStage = async (_stage, _request, operation) => operation()
+      this.assertCurrentPort = async () => {}
+      return
+    }
+
+    const modelId = positiveModelId(input.modelId)
+    this.legacy = false
+    this.modelId = modelId
+    const projectedProvenance = projectChapterTaskProvenance(input.provenance)
+    this.provenanceSnapshot = Object.freeze({
+      ...projectedProvenance,
+      source: 'model',
+      model_id: modelId,
+    })
+    this.taskId = this.provenanceSnapshot.task_id
+    this.fingerprint = this.provenanceSnapshot.source_fingerprint
+    this.contextVersion = this.provenanceSnapshot.context_version
+    this.generateChapterProse = input.generateChapterProse
+    this.executeAgentPort = input.executeAgent
+    this.recordStage = input.recordStage
+    this.assertCurrentPort = input.assertCurrent || (async () => {})
+  }
+
+  provenance() {
+    return this.provenanceSnapshot
+  }
+
+  private async generateWithModel(request: ProseGenerationRequest, modelId: string) {
+    return this.generateChapterProse(
       request.project,
       request.chapter,
       {
@@ -19,10 +102,68 @@ export class ModelGenerationSource implements GenerationSource {
       },
       {
         activeWorkspace: request.activeWorkspace,
-        modelId: String(request.modelId || ''),
+        modelId,
         skipMemoryStore: true,
       },
     )
+  }
+
+  async generateDraft(request: ProseGenerationRequest): Promise<ProseGenerationResult> {
+    if (this.legacy || this.modelId === undefined) return this.generateProse(request)
+    return this.recordStage('draft', {
+      prompt: request.paragraphTask,
+      responseContract: 'draft_prose',
+    }, async () => {
+      const result = await this.generateWithModel(request, String(this.modelId))
+      await this.assertCurrent()
+      const { source_receipt: _untrustedSourceReceipt, ...safeResult } = result || {}
+      return {
+        ...safeResult,
+        source: 'model',
+        source_receipt: {
+          ...this.provenanceSnapshot,
+          receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
+        },
+      }
+    })
+  }
+
+  async executeAgent(
+    stage: ChapterTaskStage,
+    responseContract: ChapterStageResponseContract,
+    agentId: string,
+    project: any,
+    context: Record<string, any>,
+    options: Record<string, any> = {},
+  ) {
+    if (this.legacy || this.modelId === undefined || !this.executeAgentPort) {
+      throw new Error('Task-scoped executeAgent is unavailable on a legacy model source')
+    }
+    return this.recordStage(stage, {
+      prompt: String(context.task || ''),
+      responseContract,
+    }, async () => {
+      const result = await this.executeAgentPort!(agentId, project, context, {
+        ...options,
+        modelId: String(this.modelId),
+      })
+      await this.assertCurrent()
+      return result
+    })
+  }
+
+  async assertCurrent() {
+    await this.assertCurrentPort()
+  }
+
+  close(_outcome?: { status: 'success' | 'failed' | 'cancelled'; error?: unknown }) {
+    if (!this.closePromise) this.closePromise = Promise.resolve()
+    return this.closePromise
+  }
+
+  async generateProse(request: ProseGenerationRequest): Promise<ProseGenerationResult> {
+    if (!this.legacy) return this.generateDraft(request)
+    const result = await this.generateWithModel(request, String(request.modelId || ''))
     const { source_receipt: _untrustedSourceReceipt, ...safeResult } = result || {}
     return { ...safeResult, source: 'model' }
   }

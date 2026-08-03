@@ -15,14 +15,70 @@ import {
   upsertMcpAgentQuarantine,
 } from '../../mcp/quarantine-store'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from '../../mcp/server-store'
-import { withMcpWorkspaceMutation } from '../../mcp/workspace-coordinator'
+import { assertMcpWorkspaceMutationHeld, withMcpWorkspaceMutation } from '../../mcp/workspace-coordinator'
 import { createNovelProject, listNovelRuns, updateNovelProject } from '../../novel'
-import { createGenerationSourceResolver } from './create-generation-source'
+import { chapterContextVersion, createGenerationSourceResolver } from './create-generation-source'
+import { ChapterSourceLeaseRegistry } from './chapter-source-lease'
 import { McpGenerationSource } from './mcp-generation-source'
 import { ModelGenerationSource } from './model-generation-source'
 import { attachProductionLease, takeProductionLease } from './production-lease'
-import { proseGenerationSourceFingerprint } from './source-config'
-import { acceptanceBindingFingerprintFromGenerationSource } from './types'
+import { chapterGenerationSourceFingerprint, proseGenerationSourceFingerprint } from './source-config'
+import {
+  acceptanceBindingFingerprintFromGenerationSource,
+  CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
+  type BeginChapterTaskInput,
+  type ProseGenerationRequest,
+  type ResolvedChapterTaskInput,
+} from './types'
+
+const workspace = '/workspace/a'
+const project = {
+  id: 5,
+  title: '统一来源测试',
+  reference_config: {
+    chapter_generation_source: {
+      version: 'chapter_generation_source_v1',
+      active: 'model',
+      model: { model_id: 217 },
+    },
+  },
+}
+const chapter = { id: 12, project_id: 5, chapter_no: 1, title: '第一章' }
+const contextPackage = {
+  writing_bible: { voice: '克制' },
+  story_state: { current_place: '北城' },
+  continuity: { previous_chapter: null },
+}
+
+function beginInput(overrides: Partial<BeginChapterTaskInput> = {}): BeginChapterTaskInput {
+  return {
+    activeWorkspace: workspace,
+    project,
+    chapter,
+    contextPackage,
+    requestedModelId: 217,
+    options: {},
+    ...overrides,
+  }
+}
+
+function draftRequest(overrides: Partial<ProseGenerationRequest> = {}): ProseGenerationRequest {
+  return {
+    requestId: 'draft-request-1',
+    activeWorkspace: workspace,
+    project,
+    chapter,
+    chapterNo: chapter.chapter_no,
+    paragraphTask: '写出完整第一章。',
+    promptDiagnostics: { prompt_chars: 8 },
+    contextPackage,
+    modelContext: { worldbuilding: [], characters: [], prevChapters: [] },
+    modelId: 217,
+    maxTokens: 8_000,
+    temperature: 0.7,
+    ...overrides,
+  }
+}
 
 const workspaces: string[] = []
 const fakeAgentLeases = new McpAgentLeaseRegistry()
@@ -56,27 +112,271 @@ function sourceRequest(overrides: Record<string, unknown> = {}) {
 }
 
 describe('GenerationSource resolver', () => {
-  test('defaults to model and does not let ordinary model_id bypass an MCP binding', () => {
+  test('keeps the temporary model override only on the lease-free legacy resolver', () => {
     const model = { generateProse: async () => ({ source: 'model' }) } as any
     const mcp = { generateProse: async () => ({ source: 'mcp' }) } as any
     const resolver = createGenerationSourceResolver({ modelSource: model, mcpSource: mcp })
-    const mcpProject = {
+    const legacyMcpProject = {
       reference_config: {
         prose_generation_source: {
-          version: 'prose_generation_source_v1',
-          type: 'mcp',
-          mcp: { server_id: 'buda', key_id: 3, adapter_id: 'buda', agent_id: 'agent-1' },
+          version: 'prose_generation_source_v1', type: 'mcp',
+          mcp: { server_id: 'buda', key_id: 3, adapter_id: 'buda', agent_id: 'agent-1', model: '' },
         },
       },
     }
 
-    expect(resolver.resolve({ reference_config: {} }, {})).toMatchObject({ source: model, configured_type: 'model' })
-    expect(resolver.resolve(mcpProject, { model_id: 217 })).toMatchObject({ source: mcp, configured_type: 'mcp', override: null })
-    expect(resolver.resolve(mcpProject, { generation_source_override: 'model', model_id: 217 })).toMatchObject({
-      source: model,
-      configured_type: 'mcp',
-      override: 'model',
+    expect(resolver.resolve(legacyMcpProject, { generation_source_override: 'model' })).toMatchObject({
+      source: model, configured_type: 'mcp', resolved_type: 'model', override: 'model',
     })
+  })
+
+  test('rejects request-level source override before acquiring a task', async () => {
+    const chapterSourceLeases = new ChapterSourceLeaseRegistry()
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases,
+      readProject: async () => project,
+      createModelExecution: () => { throw new Error('execution must not be created') },
+    })
+
+    await expect(resolver.beginTask(beginInput({
+      options: { generation_source_override: 'model' },
+    }))).rejects.toMatchObject({ code: 'GENERATION_SOURCE_OVERRIDE_FORBIDDEN' })
+    expect(chapterSourceLeases.isActive(workspace, project.id)).toBe(false)
+  })
+
+  test('rejects Proxy and accessor override inputs without invoking traps or acquiring a task', async () => {
+    const chapterSourceLeases = new ChapterSourceLeaseRegistry()
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases,
+      readProject: async () => project,
+      createModelExecution: () => { throw new Error('execution must not be created') },
+    })
+    let traps = 0
+    const proxiedOptions = new Proxy({}, {
+      getOwnPropertyDescriptor: () => { traps += 1; throw new Error('must not invoke proxy trap') },
+      get: () => { traps += 1; throw new Error('must not invoke proxy trap') },
+    })
+    let getterCalls = 0
+    const accessorOptions = Object.defineProperty({}, 'generation_source_override', {
+      get() { getterCalls += 1; return 'model' },
+    })
+
+    for (const options of [proxiedOptions, accessorOptions]) {
+      await expect(resolver.beginTask(beginInput({ options })))
+        .rejects.toMatchObject({ code: 'GENERATION_SOURCE_OVERRIDE_FORBIDDEN' })
+      expect(chapterSourceLeases.isActive(workspace, project.id)).toBe(false)
+    }
+    expect(traps).toBe(0)
+    expect(getterCalls).toBe(0)
+  })
+
+  test('resolves one frozen model snapshot under the coordinator and closes source before lease once', async () => {
+    const events: string[] = []
+    let resolved!: ResolvedChapterTaskInput & { modelId: number }
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases: {
+        acquire: async (_workspace: string, _projectId: number, taskId: string) => ({
+          taskId,
+          projectId: project.id,
+          release: async () => { events.push('lease.release') },
+        }),
+      } as any,
+      readProject: async (activeWorkspace) => {
+        assertMcpWorkspaceMutationHeld(activeWorkspace)
+        return project
+      },
+      createModelExecution: input => {
+        resolved = input
+        return {
+          taskId: input.taskId,
+          source: 'model',
+          modelId: input.modelId,
+          fingerprint: input.fingerprint,
+          contextVersion: input.contextVersion,
+          provenance: () => ({
+            task_id: input.taskId, project_id: 5, chapter_id: 12, source: 'model',
+            source_fingerprint: input.fingerprint, context_version: input.contextVersion,
+            model_id: input.modelId,
+          }),
+          generateDraft: async () => ({ source: 'model' }),
+          executeAgent: async () => ({}),
+          assertCurrent: input.assertCurrent,
+          close: async () => { events.push('source.close') },
+        }
+      },
+    })
+
+    const execution = await resolver.beginTask(beginInput({ requestedModelId: 999 }))
+    expect(execution.taskId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(execution.modelId).toBe(217)
+    expect(resolved.modelId).toBe(217)
+    expect(resolved.project).toBe(project)
+    expect(resolved.fingerprint).toBe(chapterGenerationSourceFingerprint(project.reference_config.chapter_generation_source as any))
+    expect(resolved.contextVersion).toBe(chapterContextVersion(contextPackage))
+    expect(Object.isFrozen(resolved.sourceState)).toBe(true)
+    expect(Object.isFrozen(resolved.sourceState.model)).toBe(true)
+
+    await Promise.all([execution.close({ status: 'success' }), execution.close({ status: 'failed' }), execution.close()])
+    expect(events).toEqual(['source.close', 'lease.release'])
+  })
+
+  test('uses the requested model only as the legacy fallback and requires a positive model', async () => {
+    const chapterSourceLeases = new ChapterSourceLeaseRegistry()
+    const projectWithoutModel = {
+      ...project,
+      reference_config: {
+        chapter_generation_source: {
+          version: 'chapter_generation_source_v1', active: 'model', model: {},
+        },
+      },
+    }
+    let capturedModelId = 0
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases,
+      readProject: async () => projectWithoutModel,
+      createModelExecution: input => {
+        capturedModelId = input.modelId
+        return {
+          taskId: input.taskId, source: 'model', modelId: input.modelId,
+          fingerprint: input.fingerprint, contextVersion: input.contextVersion,
+          provenance: () => ({ task_id: input.taskId, project_id: 5, chapter_id: 12, source: 'model', source_fingerprint: input.fingerprint, context_version: input.contextVersion }),
+          generateDraft: async () => ({ source: 'model' }), executeAgent: async () => ({}),
+          assertCurrent: input.assertCurrent, close: async () => {},
+        }
+      },
+    })
+
+    const fallback = await resolver.beginTask(beginInput({ project: projectWithoutModel, requestedModelId: 333 }))
+    expect(capturedModelId).toBe(333)
+    await fallback.close()
+    await expect(resolver.beginTask(beginInput({ project: projectWithoutModel, requestedModelId: undefined })))
+      .rejects.toMatchObject({ code: 'CHAPTER_MODEL_REQUIRED' })
+    expect(chapterSourceLeases.isActive(workspace, project.id)).toBe(false)
+  })
+
+  test('routes an active MCP task without creating or falling back to a model execution', async () => {
+    const chapterSourceLeases = new ChapterSourceLeaseRegistry()
+    const mcpProject = {
+      ...project,
+      reference_config: {
+        chapter_generation_source: {
+          version: 'chapter_generation_source_v1', active: 'mcp', model: { model_id: 217 },
+          mcp: { server_id: 'buda', key_id: 3, adapter_id: 'buda', agent_id: 'agent-1', model: 'remote-model' },
+        },
+      },
+    }
+    let modelCreations = 0
+    let mcpBegins = 0
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases,
+      readProject: async () => mcpProject,
+      createModelExecution: () => { modelCreations += 1; throw new Error('model fallback forbidden') },
+      mcpSource: {
+        beginResolvedTask: async input => {
+          mcpBegins += 1
+          return {
+            taskId: input.taskId, source: 'mcp',
+            fingerprint: input.fingerprint, contextVersion: input.contextVersion,
+            provenance: () => ({
+              task_id: input.taskId, project_id: 5, chapter_id: 12, source: 'mcp',
+              source_fingerprint: input.fingerprint, context_version: input.contextVersion,
+            }),
+            generateDraft: async () => ({ source: 'mcp' }), executeAgent: async () => ({}),
+            assertCurrent: input.assertCurrent, close: async () => {},
+          }
+        },
+      },
+    })
+
+    const execution = await resolver.beginTask(beginInput({ project: mcpProject }))
+    expect(execution.source).toBe('mcp')
+    expect(modelCreations).toBe(0)
+    expect(mcpBegins).toBe(1)
+    await execution.close({ status: 'success' })
+    expect(chapterSourceLeases.isActive(workspace, project.id)).toBe(false)
+
+    const missingMcp = createGenerationSourceResolver({
+      chapterSourceLeases,
+      readProject: async () => mcpProject,
+      createModelExecution: () => { throw new Error('model fallback forbidden') },
+    })
+    await expect(missingMcp.beginTask(beginInput({ project: mcpProject })))
+      .rejects.toMatchObject({ code: 'MCP_BINDING_INVALID' })
+    expect(chapterSourceLeases.isActive(workspace, project.id)).toBe(false)
+  })
+
+  test('fences a changed active fingerprint and releases the lease when construction fails', async () => {
+    const chapterSourceLeases = new ChapterSourceLeaseRegistry()
+    let reads = 0
+    let resolved!: ResolvedChapterTaskInput
+    const changed = {
+      ...project,
+      reference_config: {
+        chapter_generation_source: {
+          version: 'chapter_generation_source_v1', active: 'model', model: { model_id: 218 },
+        },
+      },
+    }
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases,
+      readProject: async () => (++reads === 1 ? project : changed),
+      createModelExecution: input => {
+        resolved = input
+        return {
+          taskId: input.taskId, source: 'model', modelId: input.modelId,
+          fingerprint: input.fingerprint, contextVersion: input.contextVersion,
+          provenance: () => ({ task_id: input.taskId, project_id: 5, chapter_id: 12, source: 'model', source_fingerprint: input.fingerprint, context_version: input.contextVersion }),
+          generateDraft: async () => ({ source: 'model' }), executeAgent: async () => ({}),
+          assertCurrent: input.assertCurrent, close: async () => {},
+        }
+      },
+    })
+
+    const execution = await resolver.beginTask(beginInput())
+    await expect(resolved.assertCurrent()).rejects.toMatchObject({ code: 'GENERATION_SOURCE_CHANGED' })
+    await execution.close({ status: 'failed' })
+    expect(chapterSourceLeases.isActive(workspace, project.id)).toBe(false)
+
+    const failing = createGenerationSourceResolver({
+      chapterSourceLeases,
+      readProject: async () => project,
+      createModelExecution: () => { throw new Error('constructor failed') },
+    })
+    await expect(failing.beginTask(beginInput())).rejects.toThrow('constructor failed')
+    expect(chapterSourceLeases.isActive(workspace, project.id)).toBe(false)
+  })
+
+  test('does not treat a deleted project as a valid default model at begin or current-check time', async () => {
+    const chapterSourceLeases = new ChapterSourceLeaseRegistry()
+    const unconfiguredProject = { ...project, reference_config: {} }
+    const neverCreate = createGenerationSourceResolver({
+      chapterSourceLeases,
+      readProject: async () => null,
+      createModelExecution: () => { throw new Error('deleted project must not create an execution') },
+    })
+    await expect(neverCreate.beginTask(beginInput({ project: unconfiguredProject })))
+      .rejects.toThrow('project not found')
+    expect(chapterSourceLeases.isActive(workspace, project.id)).toBe(false)
+
+    let reads = 0
+    let resolved!: ResolvedChapterTaskInput
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases,
+      readProject: async () => (++reads === 1 ? unconfiguredProject : null),
+      createModelExecution: input => {
+        resolved = input
+        return {
+          taskId: input.taskId, source: 'model', modelId: input.modelId,
+          fingerprint: input.fingerprint, contextVersion: input.contextVersion,
+          provenance: () => ({ task_id: input.taskId, project_id: 5, chapter_id: 12, source: 'model', source_fingerprint: input.fingerprint, context_version: input.contextVersion }),
+          generateDraft: async () => ({ source: 'model' }), executeAgent: async () => ({}),
+          assertCurrent: input.assertCurrent, close: async () => {},
+        }
+      },
+    })
+    const execution = await resolver.beginTask(beginInput({ project: unconfiguredProject, requestedModelId: 217 }))
+    await expect(resolved.assertCurrent()).rejects.toMatchObject({ code: 'GENERATION_SOURCE_CHANGED' })
+    await execution.close({ status: 'failed' })
   })
 })
 
@@ -1201,27 +1501,52 @@ describe('McpGenerationSource quarantine outcomes', () => {
 })
 
 describe('ModelGenerationSource', () => {
-  test('delegates to the existing model prose generator without changing the full task', async () => {
-    let captured: any[] = []
-    const source = new ModelGenerationSource(async (...args: any[]) => {
-      captured = args
-      return {
-        parsed: { prose_chapters: [{ chapter_no: 12, chapter_text: '模型正文' }] },
-        modelName: 'model-a',
-        source_receipt: {
-          receipt_authority: 'mcp_generation_source_v1',
-          binding_fingerprint: `sha256:${'a'.repeat(64)}`,
-          server_id: 'attacker-controlled',
-        },
-      }
+  test('captures one API model and forces it on every stage', async () => {
+    const agentCalls: any[] = []
+    const draftCalls: any[] = []
+    const currentChecks: string[] = []
+    const source = new ModelGenerationSource({
+      modelId: 217,
+      provenance: {
+        task_id: 'task-1', project_id: 5, chapter_id: 12,
+        source: 'model', source_fingerprint: `sha256:${'a'.repeat(64)}`,
+        context_version: `sha256:${'b'.repeat(64)}`, model_id: 217,
+        receipt_authority: 'mcp_generation_source_v1',
+        arbitrary_detail: 'sk_model_provenance_secret',
+      } as any,
+      generateChapterProse: async (...args: any[]) => {
+        draftCalls.push(args)
+        return { prose_chapters: [], source_receipt: { receipt_authority: 'mcp_generation_source_v1', secret: 'attacker' } }
+      },
+      executeAgent: async (...args: any[]) => { agentCalls.push(args); return { content: '{}', parsed: {} } },
+      assertCurrent: async () => { currentChecks.push('checked') },
+      recordStage: async (_stage, _request, operation) => operation(),
     })
-    const request = sourceRequest()
-    const result = await source.generateProse(request)
 
-    expect(captured[2].paragraphTask).toBe(request.paragraphTask)
-    expect(captured[3]).toMatchObject({ activeWorkspace: '/workspace/a', modelId: '217', skipMemoryStore: true })
-    expect(result).toMatchObject({ source: 'model', modelName: 'model-a' })
-    expect(result).not.toHaveProperty('source_receipt')
+    const draft = await source.generateDraft(draftRequest({ modelId: 999 }))
+    await source.executeAgent('quality_review', 'quality_review_json', 'review-agent', project, { task: '审查' }, {
+      modelId: '999', temperature: 0.2, maxTokens: 321, timeoutMs: 1234, responseMode: 'non_stream',
+    })
+    await source.executeAgent('revision', 'revision_prose', 'prose-agent', project, { task: '修订' }, {})
+
+    expect(draftCalls[0][3].modelId).toBe('217')
+    expect(agentCalls.map(call => call[3].modelId)).toEqual(['217', '217'])
+    expect(agentCalls[0][3]).toMatchObject({
+      temperature: 0.2, maxTokens: 321, timeoutMs: 1234, responseMode: 'non_stream',
+    })
+    expect(currentChecks).toHaveLength(3)
+    expect(draft.source_receipt).toMatchObject({
+      receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
+      task_id: 'task-1', source: 'model', model_id: 217,
+    })
+    expect(JSON.stringify(draft.source_receipt)).not.toContain('attacker')
+    expect(JSON.stringify(source.provenance())).not.toContain('sk_model_provenance_secret')
+    expect(JSON.stringify(draft.source_receipt)).not.toContain('sk_model_provenance_secret')
+    expect(Object.keys(draft.source_receipt!).sort()).toEqual([
+      'chapter_id', 'context_version', 'model_id', 'project_id', 'receipt_authority',
+      'source', 'source_fingerprint', 'task_id',
+    ].sort())
+    await Promise.all([source.close(), source.close({ status: 'failed' })])
   })
 })
 
