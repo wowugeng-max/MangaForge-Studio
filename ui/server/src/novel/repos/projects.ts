@@ -13,6 +13,7 @@ type ReferenceConfigMutation<T> = {
   operation: string
   signal?: AbortSignal
   assertCurrentProject?: (current: NovelProjectRecord) => void
+  assertMutationCanCommit?: (next: NovelProjectRecord) => void
   mutate: (currentConfig: Record<string, any>) => { referenceConfig: Record<string, any>; result: T }
 }
 
@@ -35,6 +36,9 @@ function mutateProjectReferenceConfigRow<T>(db: Database, options: ReferenceConf
     updated_at: nowIso(),
   }
   updateProjectRow(db, next)
+  throwIfMutationAborted(options.signal)
+  options.assertMutationCanCommit?.(next)
+  throwIfMutationAborted(options.signal)
   return { project: next, result: mutation.result }
 }
 

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import { Database } from 'bun:sqlite'
 import { realpathSync } from 'node:fs'
 import { EventEmitter } from 'node:events'
 import { mkdir, mkdtemp, rm, symlink } from 'fs/promises'
@@ -109,6 +110,33 @@ async function releaseAndDrainWorkspaceCoordinator(
     return unhandled
   } finally {
     process.off('unhandledRejection', onUnhandled)
+  }
+}
+
+function interceptNextProjectUpdate(afterUpdate: () => void) {
+  const originalQuery = Database.prototype.query
+  let updateCount = 0
+  ;(Database.prototype as any).query = function (sql: string, ...args: any[]) {
+    const statement = originalQuery.call(this, sql, ...args)
+    if (typeof sql !== 'string' || !sql.startsWith('UPDATE projects SET')) return statement
+    return new Proxy(statement as any, {
+      get(target, property) {
+        if (property === 'run') {
+          return (...runArgs: any[]) => {
+            const result = target.run(...runArgs)
+            updateCount += 1
+            afterUpdate()
+            return result
+          }
+        }
+        const value = target[property]
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+  }
+  return {
+    updateCount: () => updateCount,
+    restore: () => { (Database.prototype as any).query = originalQuery },
   }
 }
 
@@ -888,6 +916,61 @@ describe('explicit chapter generation source routes', () => {
     expect(unhandled).toEqual([])
     expect((await getNovelProject(workspace, first.id))?.reference_config?.chapter_generation_source)
       .toBeUndefined()
+  })
+
+  test('rolls back when the absolute deadline expires after UPDATE and before COMMIT', async () => {
+    const { workspace, first, handlers } = await fixture({ mcpValidationTimeoutMs: 1_000 })
+    const before = await getNovelProject(workspace, first.id)
+    const beforeReferenceConfig = JSON.stringify(before?.reference_config)
+    const originalNow = Date.now
+    let fakeNow = 100_000
+    const intercepted = interceptNextProjectUpdate(() => { fakeNow += 1_001 })
+    let response: any
+    try {
+      Date.now = () => fakeNow
+      response = await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+        params: { id: String(first.id) }, body: { model_id: 217 },
+      })
+    } finally {
+      Date.now = originalNow
+      intercepted.restore()
+    }
+
+    const after = await getNovelProject(workspace, first.id)
+    expect(intercepted.updateCount()).toBe(1)
+    expect(response).toMatchObject({
+      statusCode: 504,
+      body: { error_code: 'MCP_CONNECT_TIMEOUT' },
+    })
+    expect(JSON.stringify(after?.reference_config)).toBe(beforeReferenceConfig)
+    expect(after?.updated_at).toBe(before?.updated_at)
+  })
+
+  test('rolls back when the request aborts after UPDATE and before COMMIT', async () => {
+    const { workspace, first, handlers } = await fixture()
+    const before = await getNovelProject(workspace, first.id)
+    const beforeReferenceConfig = JSON.stringify(before?.reference_config)
+    const controller = new AbortController()
+    const intercepted = interceptNextProjectUpdate(() => { controller.abort() })
+    let response: any
+    try {
+      response = await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
+        params: { id: String(first.id) },
+        body: { model_id: 217 },
+        signal: controller.signal,
+      })
+    } finally {
+      intercepted.restore()
+    }
+
+    const after = await getNovelProject(workspace, first.id)
+    expect(intercepted.updateCount()).toBe(1)
+    expect(response).toMatchObject({
+      statusCode: 499,
+      body: { error_code: 'MCP_CANCELLED' },
+    })
+    expect(JSON.stringify(after?.reference_config)).toBe(beforeReferenceConfig)
+    expect(after?.updated_at).toBe(before?.updated_at)
   })
 
   test('aborts immediately while phase two is waiting for the workspace coordinator', async () => {

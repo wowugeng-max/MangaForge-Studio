@@ -684,6 +684,10 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
                   assertExactProjectSnapshot(currentProject, phaseOne)
                   assertChapterSourceLeaseAvailable(activeWorkspace, currentProject.id)
                 },
+                assertMutationCanCommit: () => {
+                  input.lifecycle.throwIfAborted()
+                  remainingValidationBudget(validationDeadline)
+                },
                 mutate: referenceConfig => ({
                   referenceConfig: { ...referenceConfig, chapter_generation_source: phaseOne.source },
                   result: phaseOne.source,
