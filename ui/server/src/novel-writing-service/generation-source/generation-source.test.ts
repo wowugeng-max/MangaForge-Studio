@@ -23,6 +23,7 @@ import { McpGenerationSource } from './mcp-generation-source'
 import { ModelGenerationSource } from './model-generation-source'
 import { attachProductionLease, takeProductionLease } from './production-lease'
 import { chapterGenerationSourceFingerprint, proseGenerationSourceFingerprint } from './source-config'
+import { createChapterStageRecorder } from './stage-receipts'
 import {
   acceptanceBindingFingerprintFromGenerationSource,
   CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
@@ -220,6 +221,106 @@ describe('GenerationSource resolver', () => {
     expect(events).toEqual(['source.close', 'lease.release'])
   })
 
+  test('retries a failed project lease release without closing the source again', async () => {
+    const releaseFailure = new Error('lease release failed once')
+    let sourceCloses = 0
+    let releases = 0
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases: {
+        acquire: async (_workspace: string, _projectId: number, taskId: string) => ({
+          taskId,
+          projectId: project.id,
+          release: async () => {
+            releases += 1
+            if (releases === 1) throw releaseFailure
+          },
+        }),
+      } as any,
+      readProject: async () => project,
+      createModelExecution: input => ({
+        taskId: input.taskId, source: 'model', modelId: input.modelId,
+        fingerprint: input.fingerprint, contextVersion: input.contextVersion,
+        provenance: () => ({
+          task_id: input.taskId, project_id: project.id, chapter_id: chapter.id, source: 'model',
+          source_fingerprint: input.fingerprint, context_version: input.contextVersion,
+        }),
+        generateDraft: async () => ({ source: 'model' }), executeAgent: async () => ({}),
+        assertCurrent: input.assertCurrent,
+        close: async () => { sourceCloses += 1 },
+      }),
+    })
+    const execution = await resolver.beginTask(beginInput())
+
+    await expect(execution.close({ status: 'success' })).rejects.toBe(releaseFailure)
+    await expect(execution.close({ status: 'success' })).resolves.toBeUndefined()
+    await expect(execution.close({ status: 'failed' })).resolves.toBeUndefined()
+    expect(sourceCloses).toBe(1)
+    expect(releases).toBe(2)
+  })
+
+  test('preserves simultaneous source and lease close failures while retrying only the lease', async () => {
+    const sourceFailure = new Error('source close failed')
+    const releaseFailure = new Error('lease release failed')
+    let sourceCloses = 0
+    let releases = 0
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases: {
+        acquire: async (_workspace: string, _projectId: number, taskId: string) => ({
+          taskId,
+          projectId: project.id,
+          release: async () => {
+            releases += 1
+            if (releases === 1) throw releaseFailure
+          },
+        }),
+      } as any,
+      readProject: async () => project,
+      createModelExecution: input => ({
+        taskId: input.taskId, source: 'model', modelId: input.modelId,
+        fingerprint: input.fingerprint, contextVersion: input.contextVersion,
+        provenance: () => ({
+          task_id: input.taskId, project_id: project.id, chapter_id: chapter.id, source: 'model',
+          source_fingerprint: input.fingerprint, context_version: input.contextVersion,
+        }),
+        generateDraft: async () => ({ source: 'model' }), executeAgent: async () => ({}),
+        assertCurrent: input.assertCurrent,
+        close: async () => { sourceCloses += 1; throw sourceFailure },
+      }),
+    })
+    const execution = await resolver.beginTask(beginInput())
+
+    const firstFailure: any = await execution.close({ status: 'failed' }).catch(error => error)
+    expect(firstFailure).toBeInstanceOf(AggregateError)
+    expect(firstFailure.errors).toEqual([sourceFailure, releaseFailure])
+    const terminalClose = execution.close({ status: 'failed' })
+    await expect(terminalClose).rejects.toBe(sourceFailure)
+    expect(execution.close({ status: 'success' })).toBe(terminalClose)
+    expect(sourceCloses).toBe(1)
+    expect(releases).toBe(2)
+  })
+
+  test('preserves construction and lease cleanup failures together', async () => {
+    const constructionFailure = new Error('model construction failed')
+    const cleanupFailure = new Error('construction lease cleanup failed')
+    let releases = 0
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases: {
+        acquire: async (_workspace: string, _projectId: number, taskId: string) => ({
+          taskId,
+          projectId: project.id,
+          release: async () => { releases += 1; throw cleanupFailure },
+        }),
+      } as any,
+      readProject: async () => project,
+      createModelExecution: () => { throw constructionFailure },
+    })
+
+    const caught: any = await resolver.beginTask(beginInput()).catch(error => error)
+    expect(caught).toBeInstanceOf(AggregateError)
+    expect(caught.errors).toEqual([constructionFailure, cleanupFailure])
+    expect(releases).toBe(1)
+  })
+
   test('uses the requested model only as the legacy fallback and requires a positive model', async () => {
     const chapterSourceLeases = new ChapterSourceLeaseRegistry()
     const projectWithoutModel = {
@@ -377,6 +478,53 @@ describe('GenerationSource resolver', () => {
     const execution = await resolver.beginTask(beginInput({ project: unconfiguredProject, requestedModelId: 217 }))
     await expect(resolved.assertCurrent()).rejects.toMatchObject({ code: 'GENERATION_SOURCE_CHANGED' })
     await execution.close({ status: 'failed' })
+  })
+
+  test('preserves project storage errors at begin while releasing the lease', async () => {
+    const chapterSourceLeases = new ChapterSourceLeaseRegistry()
+    const beginStorageFailure = new Error('project storage unavailable at begin')
+    const failingBegin = createGenerationSourceResolver({
+      chapterSourceLeases,
+      readProject: async () => { throw beginStorageFailure },
+      createModelExecution: () => { throw new Error('must not construct after storage failure') },
+    })
+
+    await expect(failingBegin.beginTask(beginInput())).rejects.toBe(beginStorageFailure)
+    expect(chapterSourceLeases.isActive(workspace, project.id)).toBe(false)
+  })
+
+  test('preserves project storage errors during current checks until the caller releases the lease', async () => {
+    const chapterSourceLeases = new ChapterSourceLeaseRegistry()
+    const currentStorageFailure = new Error('project storage unavailable during current check')
+    let reads = 0
+    let resolved!: ResolvedChapterTaskInput
+    const failingCurrent = createGenerationSourceResolver({
+      chapterSourceLeases,
+      readProject: async () => {
+        reads += 1
+        if (reads === 1) return project
+        throw currentStorageFailure
+      },
+      createModelExecution: input => {
+        resolved = input
+        return {
+          taskId: input.taskId, source: 'model', modelId: input.modelId,
+          fingerprint: input.fingerprint, contextVersion: input.contextVersion,
+          provenance: () => ({
+            task_id: input.taskId, project_id: project.id, chapter_id: chapter.id, source: 'model',
+            source_fingerprint: input.fingerprint, context_version: input.contextVersion,
+          }),
+          generateDraft: async () => ({ source: 'model' }), executeAgent: async () => ({}),
+          assertCurrent: input.assertCurrent, close: async () => {},
+        }
+      },
+    })
+    const execution = await failingCurrent.beginTask(beginInput())
+
+    await expect(resolved.assertCurrent()).rejects.toBe(currentStorageFailure)
+    expect(chapterSourceLeases.isActive(workspace, project.id)).toBe(true)
+    await execution.close({ status: 'failed' })
+    expect(chapterSourceLeases.isActive(workspace, project.id)).toBe(false)
   })
 
   test('rejects unsafe or mismatched project identities before resolving the initial source', async () => {
@@ -1635,7 +1783,7 @@ describe('ModelGenerationSource', () => {
     expect(reviewResult).toMatchObject({ content: '{}', parsed: {}, preserved: true })
     expect(reviewResult).not.toHaveProperty('source_receipt')
     expect(JSON.stringify(reviewResult)).not.toContain('sk-agent-receipt-secret')
-    expect(currentChecks).toHaveLength(3)
+    expect(currentChecks).toHaveLength(6)
     expect(draft.source_receipt).toMatchObject({
       receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
       task_id: 'task-1', source: 'model', model_id: 217,
@@ -1671,6 +1819,88 @@ describe('ModelGenerationSource', () => {
     expect(() => createSource('217')).toThrow(RangeError)
     expect(() => createSource(hostileModelId)).toThrow(RangeError)
     expect(coercions).toBe(0)
+  })
+
+  test('preserves exact task identity and rejects oversized task identity in the constructor', () => {
+    const exactTaskId = 'task-sk-ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGH'
+    const createSource = (taskId: string) => new ModelGenerationSource({
+      modelId: 217,
+      provenance: {
+        task_id: taskId, project_id: project.id, chapter_id: chapter.id,
+        source: 'model', source_fingerprint: `sha256:${'a'.repeat(64)}`,
+        context_version: `sha256:${'b'.repeat(64)}`,
+      },
+      generateChapterProse: async () => ({}),
+      executeAgent: async () => ({}),
+      recordStage: async (_stage, _request, operation) => operation(),
+    })
+
+    const source = createSource(exactTaskId)
+    expect(source.taskId).toBe(exactTaskId)
+    expect(source.provenance().task_id).toBe(exactTaskId)
+    expect(() => createSource('t'.repeat(513))).toThrow('Invalid chapter task provenance')
+  })
+
+  test('records failed stages when the precheck fences draft and agent ports', async () => {
+    const activeWorkspace = await mkdtemp(join(tmpdir(), 'mangaforge-model-precheck-'))
+    workspaces.push(activeWorkspace)
+    const durableProject = await createNovelProject(activeWorkspace, { title: '模型前置围栏' })
+    const precheckFailure = Object.assign(new Error('source precheck failed'), {
+      code: 'GENERATION_SOURCE_CHANGED',
+    })
+    let currentChecks = 0
+    let draftCalls = 0
+    let agentCalls = 0
+    const provenance = {
+      task_id: 'task-model-precheck', project_id: durableProject.id, chapter_id: chapter.id,
+      source: 'model' as const, source_fingerprint: `sha256:${'a'.repeat(64)}`,
+      context_version: `sha256:${'b'.repeat(64)}`, model_id: 217,
+    }
+    const source = new ModelGenerationSource({
+      modelId: 217,
+      provenance,
+      generateChapterProse: async () => { draftCalls += 1; return { prose_chapters: [] } },
+      executeAgent: async () => { agentCalls += 1; return { content: '{}', parsed: {} } },
+      assertCurrent: async () => { currentChecks += 1; throw precheckFailure },
+      recordStage: createChapterStageRecorder({ activeWorkspace, provenance: () => provenance }),
+    })
+
+    await expect(source.generateDraft(draftRequest({ activeWorkspace, project: durableProject })))
+      .rejects.toBe(precheckFailure)
+    await expect(source.executeAgent(
+      'quality_review', 'quality_review_json', 'review-agent', durableProject, { task: '审查' },
+    )).rejects.toBe(precheckFailure)
+
+    expect({ currentChecks, draftCalls, agentCalls }).toEqual({ currentChecks: 2, draftCalls: 0, agentCalls: 0 })
+    const runs = await listNovelRuns(activeWorkspace, durableProject.id)
+    expect(runs.map(run => run.status)).toEqual(['failed', 'failed'])
+    expect(runs.map(run => run.step_name).sort()).toEqual(['draft', 'quality_review'])
+  })
+
+  test('checks current source before and after each draft and agent port call', async () => {
+    const events: string[] = []
+    const source = new ModelGenerationSource({
+      modelId: 217,
+      provenance: {
+        task_id: 'task-model-check-order', project_id: project.id, chapter_id: chapter.id,
+        source: 'model', source_fingerprint: `sha256:${'a'.repeat(64)}`,
+        context_version: `sha256:${'b'.repeat(64)}`,
+      },
+      generateChapterProse: async () => { events.push('draft-port'); return { prose_chapters: [] } },
+      executeAgent: async () => { events.push('agent-port'); return { content: '{}', parsed: {} } },
+      assertCurrent: async () => { events.push('check') },
+      recordStage: async (_stage, _request, operation) => operation(),
+    })
+
+    await source.generateDraft(draftRequest())
+    await source.executeAgent(
+      'quality_review', 'quality_review_json', 'review-agent', project, { task: '审查' },
+    )
+
+    expect(events).toEqual([
+      'check', 'draft-port', 'check',
+      'check', 'agent-port', 'check',
+    ])
   })
 
   test('projects draft and agent results without invoking receipt or inherited accessors', async () => {

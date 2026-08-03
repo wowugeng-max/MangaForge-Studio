@@ -11,6 +11,7 @@ const ERROR_CODE_LIMIT = 80
 const ERROR_MESSAGE_LIMIT = 500
 const PROVENANCE_TEXT_LIMIT = 512
 const SHA256_FINGERPRINT = /^sha256:[0-9a-f]{64}$/
+const TASK_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/
 
 function scrubDiagnostic(value: unknown, limit: number) {
   if (typeof value !== 'string') return ''
@@ -19,7 +20,7 @@ function scrubDiagnostic(value: unknown, limit: number) {
     .replace(/Bearer\s+[^\s,;]+/gi, 'Bearer [REDACTED]')
     .replace(/\bsk_[A-Za-z0-9._-]+/g, '[REDACTED]')
     .replace(/\bsk-(?:proj|live)-(?=[A-Za-z0-9_]{8})[A-Za-z0-9_-]{8,}\b/gi, '[REDACTED]')
-    .replace(/\bsk-(?=[A-Za-z0-9_-]{16,}\b)(?=[A-Za-z0-9_-]*[A-Za-z])(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]+\b/gi, '[REDACTED]')
+    .replace(/\bsk-[A-Za-z0-9_]{16,}(?![A-Za-z0-9_-])/gi, '[REDACTED]')
     .replace(/Cookie\s*:\s*[^\r\n,;]+/gi, 'Cookie: [REDACTED]')
     .replace(/(?:X-Api-Key|Api-Key)\s*:\s*[^\r\n,;]+/gi, 'Api-Key: [REDACTED]')
     .slice(0, limit)
@@ -65,8 +66,38 @@ function positiveSafeInteger(value: unknown) {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
 }
 
+function exactTaskId(value: unknown) {
+  return typeof value === 'string' && TASK_ID.test(value) ? value : undefined
+}
+
+function receiptPersistenceError(cause?: unknown) {
+  const error = Object.assign(new Error('Chapter stage receipt persistence failed'), {
+    code: 'CHAPTER_STAGE_RECEIPT_PERSIST_FAILED',
+    error_code: 'CHAPTER_STAGE_RECEIPT_PERSIST_FAILED',
+  })
+  if (cause !== undefined) {
+    Object.defineProperty(error, 'cause', { configurable: true, value: cause })
+  }
+  return error
+}
+
+async function finalizeStageRun(
+  activeWorkspace: string,
+  runId: number,
+  data: Parameters<typeof updateNovelRun>[2],
+) {
+  let updated: Awaited<ReturnType<typeof updateNovelRun>>
+  try {
+    updated = await updateNovelRun(activeWorkspace, runId, data)
+  } catch (error) {
+    throw receiptPersistenceError(error)
+  }
+  if (ownDataValue(updated, 'id') !== runId) throw receiptPersistenceError()
+  return updated
+}
+
 export function projectChapterTaskProvenance(value: unknown): ChapterTaskProvenance {
-  const taskId = boundedProvenanceText(ownDataValue(value, 'task_id'))
+  const taskId = exactTaskId(ownDataValue(value, 'task_id'))
   const projectId = positiveSafeInteger(ownDataValue(value, 'project_id'))
   const chapterId = positiveSafeInteger(ownDataValue(value, 'chapter_id'))
   const source = ownDataValue(value, 'source')
@@ -133,18 +164,9 @@ export function createChapterStageRecorder(input: {
       }),
       output_ref: '',
     })
+    let result: T
     try {
-      const result = await operation()
-      await updateNovelRun(input.activeWorkspace, run.id, {
-        status: 'success',
-        output_ref: JSON.stringify({
-          ...currentProvenance(),
-          stage,
-          status: 'success',
-          elapsed_ms: Date.now() - startedAt,
-        }),
-      })
-      return result
+      result = await operation()
     } catch (error) {
       let scrubbed: unknown
       try {
@@ -153,18 +175,35 @@ export function createChapterStageRecorder(input: {
         scrubbed = error
       }
       const failure = boundedFailure(scrubbed)
-      await updateNovelRun(input.activeWorkspace, run.id, {
-        status: 'failed',
-        error_message: failure.message,
-        output_ref: JSON.stringify({
-          ...currentProvenance(),
-          stage,
+      try {
+        await finalizeStageRun(input.activeWorkspace, run.id, {
           status: 'failed',
-          elapsed_ms: Date.now() - startedAt,
-          error_code: failure.code,
-        }),
-      })
+          error_message: failure.message,
+          output_ref: JSON.stringify({
+            ...currentProvenance(),
+            stage,
+            status: 'failed',
+            elapsed_ms: Date.now() - startedAt,
+            error_code: failure.code,
+          }),
+        })
+      } catch (finalizeError) {
+        throw new AggregateError(
+          [error, finalizeError],
+          'Chapter stage operation and failure receipt persistence both failed',
+        )
+      }
       throw error
     }
+    await finalizeStageRun(input.activeWorkspace, run.id, {
+      status: 'success',
+      output_ref: JSON.stringify({
+        ...currentProvenance(),
+        stage,
+        status: 'success',
+        elapsed_ms: Date.now() - startedAt,
+      }),
+    })
+    return result
   }
 }

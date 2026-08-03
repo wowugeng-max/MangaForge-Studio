@@ -137,12 +137,7 @@ async function readMatchingProject(
   activeWorkspace: string,
   projectId: number,
 ) {
-  let currentProject: any
-  try {
-    currentProject = await readProject(activeWorkspace, projectId)
-  } catch {
-    throw projectIdentityChanged()
-  }
+  const currentProject = await readProject(activeWorkspace, projectId)
   assertProjectIdentity(currentProject, projectId)
   return currentProject
 }
@@ -152,7 +147,11 @@ function wrapExecution(
   resolved: ResolvedChapterTaskInput,
   projectLease: Awaited<ReturnType<ChapterSourceLeaseRegistry['acquire']>>,
 ): ChapterTaskExecution {
-  let closePromise: Promise<void> | undefined
+  let sourceClosePromise: Promise<void> | undefined
+  let sourceCloseFailed = false
+  let sourceCloseError: unknown
+  let closeAttempt: Promise<void> | undefined
+  let terminalClose: Promise<void> | undefined
   return {
     taskId: resolved.taskId,
     source: execution.source,
@@ -165,23 +164,41 @@ function wrapExecution(
       execution.executeAgent(stage, responseContract, agentId, project, context, options),
     assertCurrent: () => execution.assertCurrent(),
     close(outcome) {
-      if (!closePromise) {
-        closePromise = (async () => {
-          let sourceError: unknown
-          try {
-            await execution.close(outcome)
-          } catch (error) {
-            sourceError = error
-          }
-          try {
-            await projectLease.release()
-          } catch (error) {
-            if (!sourceError) throw error
-          }
-          if (sourceError) throw sourceError
-        })()
+      if (terminalClose) return terminalClose
+      if (closeAttempt) return closeAttempt
+      if (!sourceClosePromise) {
+        sourceClosePromise = Promise.resolve().then(() => execution.close(outcome))
       }
-      return closePromise
+      let releaseSucceeded = false
+      const attempt = (async () => {
+        try {
+          await sourceClosePromise
+        } catch (error) {
+          sourceCloseFailed = true
+          sourceCloseError = error
+        }
+        try {
+          await projectLease.release()
+          releaseSucceeded = true
+        } catch (releaseError) {
+          if (sourceCloseFailed) {
+            throw new AggregateError(
+              [sourceCloseError, releaseError],
+              'Chapter task source close and project lease release both failed',
+            )
+          }
+          throw releaseError
+        }
+        if (sourceCloseFailed) throw sourceCloseError
+      })()
+      closeAttempt = attempt
+      void attempt.then(
+        () => { terminalClose = attempt },
+        () => { if (releaseSucceeded) terminalClose = attempt },
+      ).finally(() => {
+        if (closeAttempt === attempt) closeAttempt = undefined
+      })
+      return attempt
     },
   }
 }
@@ -257,7 +274,14 @@ function createTaskResolver(input: GenerationSourceResolverInput): TaskGeneratio
         }
         return wrapExecution(execution, resolved, projectLease)
       } catch (error) {
-        await projectLease.release()
+        try {
+          await projectLease.release()
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [error, cleanupError],
+            'Chapter task construction and project lease cleanup both failed',
+          )
+        }
         throw error
       }
     },

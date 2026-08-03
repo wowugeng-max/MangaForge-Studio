@@ -171,6 +171,7 @@ export class ModelGenerationSource implements GenerationSource, ChapterTaskExecu
       prompt: request.paragraphTask,
       responseContract: 'draft_prose',
     }, async () => {
+      await this.assertCurrent()
       const result = await awaitStageResult(
         () => this.generateWithModel(request, String(this.modelId)),
       )
@@ -202,6 +203,7 @@ export class ModelGenerationSource implements GenerationSource, ChapterTaskExecu
       prompt: String(context.task || ''),
       responseContract,
     }, async () => {
+      await this.assertCurrent()
       const result = await awaitStageResult(
         () => this.executeAgentPort!(agentId, project, context, {
           ...options,

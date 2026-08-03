@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import { Database } from 'bun:sqlite'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -20,6 +21,15 @@ async function fixture() {
     model_id: 217,
   }
   return { activeWorkspace, provenance }
+}
+
+function deleteStageRuns(activeWorkspace: string) {
+  const db = new Database(join(activeWorkspace, 'novel.sqlite'))
+  try {
+    db.run("DELETE FROM runs WHERE run_type = 'chapter_generation_stage'")
+  } finally {
+    db.close()
+  }
 }
 
 describe('chapter generation stage receipts', () => {
@@ -50,6 +60,48 @@ describe('chapter generation stage receipts', () => {
     for (const secret of [prompt, '机密正文', 'prompt-secret', 'sk_prompt_secret', 'sk_output_secret', 'output-secret']) {
       expect(serialized).not.toContain(secret)
     }
+  })
+
+  test('does not return provider success when durable receipt finalization loses the run', async () => {
+    const { activeWorkspace, provenance } = await fixture()
+    const recordStage = createChapterStageRecorder({ activeWorkspace, provenance: () => provenance })
+    const providerResult = { ok: true }
+
+    const caught: any = await recordStage('draft', {
+      prompt: '正文', responseContract: 'draft_prose',
+    }, async () => {
+      deleteStageRuns(activeWorkspace)
+      return providerResult
+    }).catch(error => error)
+
+    expect(caught).not.toBe(providerResult)
+    expect(caught).toMatchObject({
+      code: 'CHAPTER_STAGE_RECEIPT_PERSIST_FAILED',
+      message: 'Chapter stage receipt persistence failed',
+    })
+  })
+
+  test('preserves provider and durable failure-finalization errors together', async () => {
+    const { activeWorkspace, provenance } = await fixture()
+    const recordStage = createChapterStageRecorder({ activeWorkspace, provenance: () => provenance })
+    const providerFailure = Object.assign(new Error('provider secret must remain in memory'), {
+      code: 'PROVIDER_SECRET_FAILURE',
+    })
+
+    const caught: any = await recordStage('quality_review', {
+      prompt: '审查', responseContract: 'quality_review_json',
+    }, async () => {
+      deleteStageRuns(activeWorkspace)
+      throw providerFailure
+    }).catch(error => error)
+
+    expect(caught).toBeInstanceOf(AggregateError)
+    expect(caught.errors[0]).toBe(providerFailure)
+    expect(caught.errors[1]).toMatchObject({
+      code: 'CHAPTER_STAGE_RECEIPT_PERSIST_FAILED',
+      message: 'Chapter stage receipt persistence failed',
+    })
+    expect(Object.keys(caught)).toEqual([])
   })
 
   test('scrubs and bounds failure diagnostics without persisting arbitrary details', async () => {
@@ -132,9 +184,10 @@ describe('chapter generation stage receipts', () => {
 
   test('projects and bounds provenance instead of persisting excess runtime fields', async () => {
     const { activeWorkspace, provenance } = await fixture()
+    const exactTaskId = 'task-sk-ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGH'
     const untrustedProvenance = {
       ...provenance,
-      task_id: 'task-'.repeat(300),
+      task_id: exactTaskId,
       server_id: 'server-'.repeat(300),
       arbitrary_detail: 'sk_provenance_secret',
       receipt_authority: 'mcp_generation_source_v1',
@@ -151,13 +204,32 @@ describe('chapter generation stage receipts', () => {
     const [run] = await listNovelRuns(activeWorkspace, provenance.project_id)
     const receiptInput = JSON.parse(run.input_ref!)
     const receiptOutput = JSON.parse(run.output_ref!)
-    expect(receiptInput.task_id.length).toBeLessThanOrEqual(512)
+    expect(receiptInput.task_id).toBe(exactTaskId)
+    expect(receiptOutput.task_id).toBe(exactTaskId)
     expect(receiptInput.server_id.length).toBeLessThanOrEqual(512)
     expect(receiptInput).not.toHaveProperty('arbitrary_detail')
     expect(receiptInput).not.toHaveProperty('receipt_authority')
     expect(receiptOutput).not.toHaveProperty('arbitrary_detail')
     expect(receiptOutput).not.toHaveProperty('receipt_authority')
     expect(JSON.stringify(run)).not.toContain('sk_provenance_secret')
+  })
+
+  test('rejects oversized task identity before appending a run or invoking the operation', async () => {
+    const { activeWorkspace, provenance } = await fixture()
+    let operationCalls = 0
+    const recordStage = createChapterStageRecorder({
+      activeWorkspace,
+      provenance: () => ({ ...provenance, task_id: 't'.repeat(513) }),
+    })
+
+    await expect(recordStage('draft', {
+      prompt: '正文', responseContract: 'draft_prose',
+    }, async () => { operationCalls += 1; return { ok: true } })).rejects.toThrow(
+      'Invalid chapter task provenance',
+    )
+
+    expect(operationCalls).toBe(0)
+    expect(await listNovelRuns(activeWorkspace, provenance.project_id)).toEqual([])
   })
 
   test('does not coerce hostile scrubber data values or leave the durable run running', async () => {
@@ -189,13 +261,14 @@ describe('chapter generation stage receipts', () => {
     const defaultKey = 'sk-proj-ABC123SECRET'
     const customKey = 'sk-live-LIVE123456SECRET'
     const provenanceKey = 'sk-GENERIC1234567890'
+    const genericAlphabeticKey = 'sk-ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGH'
     const defaultRecorder = createChapterStageRecorder({
       activeWorkspace,
       provenance: () => provenance,
     })
     await expect(defaultRecorder('quality_recheck', {
       prompt: '复审', responseContract: 'quality_review_json',
-    }, async () => { throw new Error(`provider ${defaultKey} sk-scheduler sk-scheduler-configuration transport-safe-path`) }))
+    }, async () => { throw new Error(`provider ${defaultKey} ${genericAlphabeticKey} sk-scheduler sk-scheduler-configuration transport-safe-path`) }))
       .rejects.toThrow(defaultKey)
 
     const customRecorder = createChapterStageRecorder({
@@ -219,7 +292,9 @@ describe('chapter generation stage receipts', () => {
     }, async () => ({ ok: true }))
 
     const serialized = JSON.stringify(await listNovelRuns(activeWorkspace, provenance.project_id))
-    for (const secret of [defaultKey, customKey, provenanceKey]) expect(serialized).not.toContain(secret)
+    for (const secret of [defaultKey, customKey, provenanceKey, genericAlphabeticKey]) {
+      expect(serialized).not.toContain(secret)
+    }
     for (const normalText of [
       'sk-scheduler', 'sk-scheduler-configuration',
       'transport-safe-path', 'retry-safe-path', 'task-step-name',
