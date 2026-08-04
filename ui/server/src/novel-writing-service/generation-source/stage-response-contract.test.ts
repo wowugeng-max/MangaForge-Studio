@@ -94,6 +94,12 @@ describe('MCP stage response contracts', () => {
     expect(validateMcpStageResponse('quality_review', 'quality_review_json', {
       content: JSON.stringify({ score: 88, passed: true, issues: [] }),
     }).output).toEqual({ score: 88, passed: true, issues: [] })
+    expect(validateMcpStageResponse('quality_review', 'quality_review_json', {
+      content: JSON.stringify({ score: 88, publishable: true, passed: true, issues: [] }),
+    }).output).toEqual({ score: 88, publishable: true, passed: true, issues: [] })
+    expect(validateMcpStageResponse('quality_review', 'quality_review_json', {
+      content: JSON.stringify({ score: 12, publishable: false, passed: false, issues: [] }),
+    }).output).toEqual({ score: 12, publishable: false, passed: false, issues: [] })
     expect(validateMcpStageResponse('story_state_sync', 'story_state_json', {
       content: JSON.stringify({ stateDelta: { nextChapterPriorities: [] } }),
     }).output).toEqual({ stateDelta: { nextChapterPriorities: [] } })
@@ -191,6 +197,8 @@ describe('MCP stage response contracts', () => {
       { score: 88, publishable: 'yes' },
       { score: 88, findings: [] },
       { score: 88, passed: 'yes', issues: [] },
+      { score: 88, publishable: true, passed: false, issues: [] },
+      { score: 88, publishable: false, passed: true, issues: [] },
       { score: 88, passed: true, issues: {} },
       { score: 88, publishable: true, findings: {} },
       { score: 88, publishable: true, blocking_findings: 'none' },
@@ -238,6 +246,13 @@ describe('MCP stage response contracts', () => {
       { current_time: '子时' },
       { progress_summary: { notes: '本章已完成' } },
     ]) expectInvalid('story_state_json', JSON.stringify(invalid), 'story_state_sync')
+  })
+
+  test('rejects simultaneous Story State aliases before an empty snake envelope can shadow camel data', () => {
+    expectInvalid('story_state_json', JSON.stringify({
+      state_delta: {},
+      stateDelta: { currentTime: '子时' },
+    }), 'story_state_sync')
   })
 
   test('rejects recognized Story State fields with invalid semantic types', () => {

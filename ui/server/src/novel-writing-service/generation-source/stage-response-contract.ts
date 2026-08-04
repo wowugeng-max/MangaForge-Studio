@@ -109,7 +109,8 @@ function validateQualityReview(content: string) {
   if (!finiteScore(ownDataValue(value, 'score'))
     || (publishable !== undefined && typeof publishable !== 'boolean')
     || (passed !== undefined && typeof passed !== 'boolean')
-    || (typeof publishable !== 'boolean' && typeof passed !== 'boolean')) {
+    || (typeof publishable !== 'boolean' && typeof passed !== 'boolean')
+    || (typeof publishable === 'boolean' && typeof passed === 'boolean' && publishable !== passed)) {
     throw new TypeError('quality verdict required')
   }
   for (const field of ['issues', 'findings', 'blocking_findings', 'advisory_findings']) {
@@ -258,6 +259,9 @@ function validateStoryState(content: string) {
   const camelDelta = ownDataValue(value, 'stateDelta')
   if (snakeDelta === undefined && camelDelta === undefined) {
     throw new TypeError('Story State delta object required')
+  }
+  if (snakeDelta !== undefined && camelDelta !== undefined) {
+    throw new TypeError('Story State delta aliases are ambiguous')
   }
   if ((snakeDelta !== undefined && !plainObject(snakeDelta))
     || (camelDelta !== undefined && !plainObject(camelDelta))) {
