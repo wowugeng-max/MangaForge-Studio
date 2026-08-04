@@ -18,6 +18,12 @@ export type SingleChapterStoryStateReceipt = {
   chapter_id: number
 }
 
+export type SingleChapterStoryStateExactContext = {
+  project: any
+  chapter: any
+  contextPackage: any
+}
+
 export type SingleChapterStoryStateInput = {
   workspace: string
   projectId: number
@@ -30,6 +36,7 @@ export type SingleChapterStoryStateInput = {
   maxTokens?: number
   workerLease?: { runId: number; owner: string }
   chapterTaskExecution?: ChapterTaskExecution
+  exactContext?: SingleChapterStoryStateExactContext
 }
 
 function throwIfCanceled(signal?: AbortSignal) {
@@ -101,6 +108,23 @@ async function loadExactChapterContext(ctx: EditorRoutesContext, input: SingleCh
   return { project, chapter, contextPackage }
 }
 
+async function loadExactChapter(input: SingleChapterStoryStateInput) {
+  const chapters = await listNovelChapters(input.workspace, input.projectId)
+  const chapter = chapters.find(item => Number(item.id) === Number(input.chapterId))
+  if (!chapter || Number(chapter.project_id) !== Number(input.projectId)) throw new Error('chapter not found')
+  return chapter
+}
+
+function assertExactContextScope(input: SingleChapterStoryStateInput, exactContext: SingleChapterStoryStateExactContext) {
+  if (
+    Number(exactContext.project?.id) !== Number(input.projectId)
+    || Number(exactContext.chapter?.id) !== Number(input.chapterId)
+    || Number(exactContext.chapter?.project_id) !== Number(input.projectId)
+  ) {
+    throw storyStateError('STORY_STATE_CONTEXT_SCOPE_MISMATCH', 'Story State context does not match target chapter')
+  }
+}
+
 function assertCurrentCandidate(chapter: any, receipt: SingleChapterStoryStateReceipt) {
   if (revisionTextHash(String(chapter?.chapter_text || '')) !== receipt.candidate_hash) {
     throw storyStateError('STORY_STATE_CANDIDATE_STALE', 'chapter text no longer matches Story State receipt')
@@ -122,8 +146,15 @@ export async function prepareSingleChapterStoryState(
   if (existingReceipt?.status === 'state_applied' && existingReceipt.prepared_for_recovery) {
     return { reused: true, prepared: bindPreparedToReceipt(existingReceipt.prepared_for_recovery, input.receipt) }
   }
-  const loaded = await loadExactChapterContext(ctx, input, project)
-  assertCurrentCandidate(loaded.chapter, input.receipt)
+  let loaded: SingleChapterStoryStateExactContext
+  if (input.exactContext) {
+    assertExactContextScope(input, input.exactContext)
+    assertCurrentCandidate(await loadExactChapter(input), input.receipt)
+    loaded = input.exactContext
+  } else {
+    loaded = await loadExactChapterContext(ctx, input, project)
+    assertCurrentCandidate(loaded.chapter, input.receipt)
+  }
   throwIfCanceled(input.signal)
   const prepared = await prepareStoryStateUpdate(
     input.workspace,
@@ -175,8 +206,15 @@ export async function applySingleChapterStoryState(
   if (prepared?.receipt_binding?.key !== storyStateReceiptKey(input.receipt)) {
     throw storyStateError('STORY_STATE_PREPARED_RECEIPT_MISMATCH', 'prepared Story State belongs to another receipt')
   }
-  const loaded = await loadExactChapterContext(ctx, input, project)
-  assertCurrentCandidate(loaded.chapter, input.receipt)
+  let loaded: SingleChapterStoryStateExactContext
+  if (input.exactContext) {
+    assertExactContextScope(input, input.exactContext)
+    assertCurrentCandidate(await loadExactChapter(input), input.receipt)
+    loaded = input.exactContext
+  } else {
+    loaded = await loadExactChapterContext(ctx, input, project)
+    assertCurrentCandidate(loaded.chapter, input.receipt)
+  }
   throwIfCanceled(input.signal)
   const operation = () => ctx.updateStoryStateMachine(
       input.workspace,

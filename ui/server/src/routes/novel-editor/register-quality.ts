@@ -61,6 +61,7 @@ export function registerNovelEditorQualityRoutes(app: Express, ctx: EditorRoutes
         outlines,
         reviews,
       )
+      const exactContext = { project, chapter, contextPackage }
       const modelId = ctx.getStageModelId(project, 'review', Number(req.body.model_id || 0) || undefined)
       const signal = req.signal as AbortSignal | undefined
       const responseBody = await withChapterTaskExecution(ctx, {
@@ -87,6 +88,7 @@ export function registerNovelEditorQualityRoutes(app: Express, ctx: EditorRoutes
             receipt,
             signal,
             chapterTaskExecution,
+            exactContext,
           })
           storyStateUpdate = await applySingleChapterStoryState(ctx, {
             workspace: activeWorkspace,
@@ -97,6 +99,7 @@ export function registerNovelEditorQualityRoutes(app: Express, ctx: EditorRoutes
             prepared: preparedStoryState.prepared,
             signal,
             chapterTaskExecution,
+            exactContext,
           })
         } catch (error) {
           stageFailure = error

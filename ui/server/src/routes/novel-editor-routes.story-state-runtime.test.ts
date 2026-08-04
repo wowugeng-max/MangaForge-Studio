@@ -130,6 +130,154 @@ describe('novel editor Story State route runtime', () => {
     expect(closeOutcomes[0].error).toBe(providerError)
   })
 
+  test('manual Story State binds begin, model prompt, and apply to one prepared context snapshot', async () => {
+    workspace = mkdtempSync(join(tmpdir(), 'mangaforge-story-state-context-snapshot-'))
+    const project = await createNovelProject(workspace, { title: '状态路由上下文快照', reference_config: {} } as any)
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: '同一次同步必须使用同一个上下文快照。',
+    } as any)
+    const builtContexts: any[] = []
+    let beginContext: any
+    let modelPrompt = ''
+    let applyContext: any
+    let applyChapter: any
+    const { app, handlers } = createRouteHarness()
+    registerNovelEditorQualityRoutes(app, {
+      getWorkspace: () => workspace,
+      getProject: (_activeWorkspace: string, id: number) => getNovelProject(workspace, id),
+      getStageModelId: () => 217,
+      getStageTemperature: (_activeProject: any, _stage: string, fallback: number) => fallback,
+      buildChapterContextPackage: async () => {
+        const context = { exact_context_marker: `SNAPSHOT_${builtContexts.length + 1}` }
+        builtContexts.push(context)
+        return context
+      },
+      beginChapterTask: async (input: any) => {
+        beginContext = input.contextPackage
+        return {
+          taskId: 'manual-story-state-context-snapshot',
+          source: 'mcp',
+          fingerprint: 'story-fingerprint',
+          contextVersion: 'story-context',
+          provenance: () => ({}),
+          generateDraft: async () => { throw new Error('not used') },
+          assertCurrent: async () => {},
+          executeAgent: async (_stage: string, _responseContract: string, _agentId: string, _project: any, context: any) => {
+            modelPrompt = String(context?.task || '')
+            return {
+              parsed: {
+                state_delta: { current_time: 'snapshot-sync', progress_summary: { notes: 'snapshot-sync' } },
+                character_updates: [],
+                setting_updates: [],
+                storyline_updates: [],
+                discovered_assets: [],
+              },
+              finish_reason: 'stop',
+            }
+          },
+          close: async () => {},
+        }
+      },
+      executeAgent: async () => { throw new Error('ordinary model fallback must not run') },
+      updateStoryStateMachine: async (
+        _activeWorkspace: string,
+        _project: any,
+        exactChapter: any,
+        contextPackage: any,
+      ) => {
+        applyChapter = exactChapter
+        applyContext = contextPackage
+        return { current_time: 'snapshot-sync' }
+      },
+    } as any)
+
+    const response = await call(
+      handlers.get('POST /api/novel/chapters/:chapterId/story-state-sync'),
+      {
+        params: { chapterId: String(chapter.id) },
+        query: {},
+        body: { project_id: project.id },
+      },
+    )
+
+    expect(response.statusCode).toBe(200)
+    expect(builtContexts).toHaveLength(1)
+    expect(beginContext).toBe(builtContexts[0])
+    expect(modelPrompt).toContain('SNAPSHOT_1')
+    expect(applyContext).toBe(beginContext)
+    expect(applyChapter).toBeDefined()
+    expect(Number(applyChapter.id)).toBe(chapter.id)
+  })
+
+  test('manual Story State re-reads the chapter before apply when using a prepared context snapshot', async () => {
+    workspace = mkdtempSync(join(tmpdir(), 'mangaforge-story-state-context-stale-'))
+    const project = await createNovelProject(workspace, { title: '状态路由快照候选校验', reference_config: {} } as any)
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: '模型开始时的正文。',
+    } as any)
+    let applyCalls = 0
+    let buildContextCalls = 0
+    const { app, handlers } = createRouteHarness()
+    registerNovelEditorQualityRoutes(app, {
+      getWorkspace: () => workspace,
+      getProject: (_activeWorkspace: string, id: number) => getNovelProject(workspace, id),
+      getStageModelId: () => 217,
+      getStageTemperature: (_activeProject: any, _stage: string, fallback: number) => fallback,
+      buildChapterContextPackage: async () => {
+        buildContextCalls += 1
+        return { exact_context_marker: 'STALE_CHECK_SNAPSHOT' }
+      },
+      beginChapterTask: async () => ({
+        taskId: 'manual-story-state-context-stale',
+        source: 'mcp',
+        fingerprint: 'story-fingerprint',
+        contextVersion: 'story-context',
+        provenance: () => ({}),
+        generateDraft: async () => { throw new Error('not used') },
+        assertCurrent: async () => {},
+        executeAgent: async () => {
+          await updateNovelChapter(workspace, chapter.id, { chapter_text: '模型返回前已被人工改写。' } as any)
+          return {
+            parsed: {
+              state_delta: { current_time: 'stale-sync', progress_summary: { notes: 'stale-sync' } },
+              character_updates: [],
+              setting_updates: [],
+              storyline_updates: [],
+              discovered_assets: [],
+            },
+            finish_reason: 'stop',
+          }
+        },
+        close: async () => {},
+      }),
+      executeAgent: async () => { throw new Error('ordinary model fallback must not run') },
+      updateStoryStateMachine: async () => {
+        applyCalls += 1
+        return {}
+      },
+    } as any)
+
+    const response = await call(
+      handlers.get('POST /api/novel/chapters/:chapterId/story-state-sync'),
+      {
+        params: { chapterId: String(chapter.id) },
+        query: {},
+        body: { project_id: project.id },
+      },
+    )
+
+    expect(response.statusCode).toBe(502)
+    expect(String(response.body?.error || '')).toContain('chapter text no longer matches Story State receipt')
+    expect(applyCalls).toBe(0)
+    expect(buildContextCalls).toBe(1)
+  })
+
   test('manual Story State ignores a stale client receipt after prose changes', async () => {
     workspace = mkdtempSync(join(tmpdir(), 'mangaforge-story-state-live-receipt-'))
     const project = await createNovelProject(workspace, {
