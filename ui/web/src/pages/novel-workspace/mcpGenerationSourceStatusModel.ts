@@ -1,47 +1,41 @@
 import type {
+  ChapterGenerationSourceState,
   McpAgentSummary,
   McpPublicKey,
   McpServerRecord,
-  ProseGenerationSourceConfig,
 } from '../../api/mcp'
 
+type McpBinding = NonNullable<ChapterGenerationSourceState['mcp']>
+
 export type McpSourceStatus = {
-  kind: 'model' | 'mcp'
+  kind: 'mcp'
   label: string
   detail: string
   available: boolean
+  active: boolean
 }
 
-export type McpSourceStatusLoadSnapshot = {
-  source: ProseGenerationSourceConfig
+export type McpSourceStatusMetadata = {
   servers: McpServerRecord[]
   keys: McpPublicKey[]
   agents: McpAgentSummary[]
   loadFailed: boolean
 }
 
-export async function loadMcpSourceStatusSnapshot(input: {
-  projectId: number
+export async function loadMcpSourceStatusMetadata(input: {
+  binding: McpBinding
   isActive: () => boolean
-  onSource: (source: ProseGenerationSourceConfig) => void
-  loadSource: (projectId: number) => Promise<ProseGenerationSourceConfig>
   loadServers: () => Promise<McpServerRecord[]>
   loadKeys: () => Promise<McpPublicKey[]>
-  loadAgents: (source: ProseGenerationSourceConfig) => Promise<McpAgentSummary[]>
-}): Promise<McpSourceStatusLoadSnapshot | null> {
-  const source = await input.loadSource(input.projectId)
-  if (!input.isActive()) return null
-  input.onSource(source)
-
+  loadAgents: (binding: McpBinding) => Promise<McpAgentSummary[]>
+}): Promise<McpSourceStatusMetadata | null> {
   const [serverResult, keyResult, agentResult] = await Promise.allSettled([
     input.loadServers(),
     input.loadKeys(),
-    source.type === 'mcp' ? input.loadAgents(source) : Promise.resolve([]),
+    input.loadAgents(input.binding),
   ])
   if (!input.isActive()) return null
-
   return {
-    source,
     servers: serverResult.status === 'fulfilled' ? serverResult.value : [],
     keys: keyResult.status === 'fulfilled' ? keyResult.value : [],
     agents: agentResult.status === 'fulfilled' ? agentResult.value : [],
@@ -50,23 +44,14 @@ export async function loadMcpSourceStatusSnapshot(input: {
 }
 
 export function buildMcpSourceStatus(input: {
-  source?: ProseGenerationSourceConfig | null
+  binding: McpBinding
+  active: boolean
   servers?: McpServerRecord[]
   keys?: McpPublicKey[]
   agents?: McpAgentSummary[]
   loadFailed?: boolean
 }): McpSourceStatus {
-  const source = input.source
-  if (!source || source.type !== 'mcp') {
-    return {
-      kind: 'model',
-      label: '模型 API',
-      detail: '正文来源：模型 API',
-      available: true,
-    }
-  }
-
-  const binding = source.mcp
+  const binding = input.binding
   const server = (input.servers || []).find(item => item.id === binding.server_id)
   const key = (input.keys || []).find(item => (
     item.id === binding.key_id && item.mcp_server_id === binding.server_id
@@ -80,18 +65,21 @@ export function buildMcpSourceStatus(input: {
     String(key?.description || '').trim(),
     String(key?.masked_key || '').trim(),
   ].filter(Boolean).join(' · ') || `#${binding.key_id}`
+  const stateLabel = input.active ? '已启用' : '已停用'
   const unavailable = Boolean(input.loadFailed)
-
   return {
     kind: 'mcp',
-    label: `${sourceName} · ${agentName} · ${modelName}`,
+    label: `${sourceName} · ${agentName} · ${modelName} · ${stateLabel}`,
     detail: [
-      `正文来源：${sourceName}`,
+      `章节来源：${sourceName}`,
       `账号：${accountName}`,
+      `Adapter：${binding.adapter_id}`,
       `Agent：${agentName}`,
       `模型：${modelName}`,
+      stateLabel,
       ...(unavailable ? ['状态信息暂不可用'] : []),
     ].join('；'),
     available: !unavailable,
+    active: input.active,
   }
 }

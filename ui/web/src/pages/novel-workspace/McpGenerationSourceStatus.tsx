@@ -3,90 +3,90 @@ import { ApiOutlined, WarningOutlined } from '@ant-design/icons'
 import { Button, Tooltip } from 'antd'
 import {
   mcpApi,
+  type ChapterGenerationSourceState,
   type McpAgentSummary,
   type McpPublicKey,
   type McpServerRecord,
-  type ProseGenerationSourceConfig,
 } from '../../api/mcp'
 import {
   buildMcpSourceStatus,
-  loadMcpSourceStatusSnapshot,
+  loadMcpSourceStatusMetadata,
 } from './mcpGenerationSourceStatusModel'
+
+type McpBinding = NonNullable<ChapterGenerationSourceState['mcp']>
 
 export function McpGenerationSourceStatus({
   projectId,
-  initialSource,
-  refreshKey,
+  binding,
+  active,
+  compact,
+  disabled,
   onOpenSettings,
 }: {
   projectId: number
-  initialSource?: ProseGenerationSourceConfig | null
-  refreshKey: number
+  binding: McpBinding
+  active: boolean
+  compact: boolean
+  disabled?: boolean
   onOpenSettings: () => void
 }) {
-  const [source, setSource] = useState<ProseGenerationSourceConfig | null>(initialSource || null)
   const [servers, setServers] = useState<McpServerRecord[]>([])
   const [keys, setKeys] = useState<McpPublicKey[]>([])
   const [agents, setAgents] = useState<McpAgentSummary[]>([])
   const [loadFailed, setLoadFailed] = useState(false)
-
-  useEffect(() => {
-    setSource(initialSource || null)
-  }, [projectId, initialSource])
+  const bindingIdentity = [
+    binding.server_id,
+    binding.key_id,
+    binding.adapter_id,
+    binding.agent_id,
+    binding.model,
+  ].join('\u0000')
 
   useEffect(() => {
     if (!projectId) return
-    let active = true
+    let current = true
     setLoadFailed(false)
     setServers([])
     setKeys([])
     setAgents([])
-
-    void loadMcpSourceStatusSnapshot({
-      projectId,
-      isActive: () => active,
-      onSource: nextSource => setSource(nextSource),
-      loadSource: async nextProjectId => (
-        await mcpApi.getProjectSource(nextProjectId)
-      ).data.source,
+    void loadMcpSourceStatusMetadata({
+      binding,
+      isActive: () => current,
       loadServers: async () => (await mcpApi.listServers()).data || [],
       loadKeys: async () => (await mcpApi.listKeys()).data || [],
-      loadAgents: async nextSource => {
-        if (nextSource.type !== 'mcp') return []
+      loadAgents: async controlledBinding => {
         const response = await mcpApi.listProjectAgents(
           projectId,
-          nextSource.mcp.server_id,
-          nextSource.mcp.key_id,
+          controlledBinding.server_id,
+          controlledBinding.key_id,
         )
         return response.data.agents || []
       },
-    }).then(snapshot => {
-      if (!snapshot || !active) return
-      setServers(snapshot.servers)
-      setKeys(snapshot.keys)
-      setAgents(snapshot.agents)
-      setLoadFailed(snapshot.loadFailed)
+    }).then(metadata => {
+      if (!metadata || !current) return
+      setServers(metadata.servers)
+      setKeys(metadata.keys)
+      setAgents(metadata.agents)
+      setLoadFailed(metadata.loadFailed)
     }).catch(() => {
-      if (active) setLoadFailed(true)
+      if (current) setLoadFailed(true)
     })
+    return () => { current = false }
+  }, [projectId, bindingIdentity])
 
-    return () => {
-      active = false
-    }
-  }, [projectId, refreshKey])
-
-  const status = buildMcpSourceStatus({ source, servers, keys, agents, loadFailed })
-
+  const status = buildMcpSourceStatus({ binding, active, servers, keys, agents, loadFailed })
   return (
     <Tooltip title={`${status.detail}。点击打开项目设置。`}>
       <Button
+        aria-label={status.detail}
         type="text"
         size="small"
-        className={`novel-workspace-source-status is-${status.kind}${status.available ? '' : ' is-unavailable'}`}
+        disabled={disabled}
+        className={`novel-workspace-source-status is-mcp${active ? ' is-active' : ' is-inactive'}${status.available ? '' : ' is-unavailable'}`}
         icon={status.available ? <ApiOutlined /> : <WarningOutlined />}
         onClick={onOpenSettings}
       >
-        <span>{status.label}</span>
+        <span>{compact ? `${binding.server_id} MCP · ${active ? '已启用' : '已停用'}` : status.label}</span>
       </Button>
     </Tooltip>
   )

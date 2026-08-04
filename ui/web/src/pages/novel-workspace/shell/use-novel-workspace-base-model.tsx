@@ -61,6 +61,36 @@ import {
 
 type AnyRecord = Record<string, any>
 
+const ACTIVE_CHAPTER_SOURCE_REVISION_STATUSES = new Set(['queued', 'running', 'cancel_requested'])
+
+export function resolveChapterSourceLocallyBusy(input: {
+  projectId: number
+  localTaskProjectId: number
+  sourceAuthorityLoading: boolean
+  generatingProse: boolean
+  stepProseLoading: boolean
+  proseQualityLoading: boolean
+  editorReportLoading: boolean
+  commercialToolLoading: string
+  editorRevisionTasksProjectId?: number | null
+  editorRevisionTasks: unknown[]
+}) {
+  const activeEditorRevision = Number(input.editorRevisionTasksProjectId) === Number(input.projectId)
+    && (Array.isArray(input.editorRevisionTasks) ? input.editorRevisionTasks : []).some((task: any) => (
+      task?.run_type === 'editor_revision'
+        && ACTIVE_CHAPTER_SOURCE_REVISION_STATUSES.has(String(task?.status || ''))
+    ))
+  const localTaskBusy = Number(input.localTaskProjectId) === Number(input.projectId)
+    && Boolean(
+      input.generatingProse
+        || input.stepProseLoading
+        || input.proseQualityLoading
+        || input.editorReportLoading
+        || input.commercialToolLoading === 'storyStateSync',
+    )
+  return input.sourceAuthorityLoading || localTaskBusy || activeEditorRevision
+}
+
 export type EditorRevisionReconciliationState = {
   projectId: number
   controller: AbortController
@@ -413,6 +443,10 @@ export function useNovelWorkspaceBaseModel() {
     setAgentExecution,
     pipeline,
     models,
+    chapterGenerationSourceAuthority,
+    setChapterGenerationSourceAuthority,
+    beginChapterSourceOperation,
+    assertChapterSourceOperationCurrent,
     selectedModelId,
     setSelectedModelId,
     activeChapterId,
@@ -585,6 +619,27 @@ export function useNovelWorkspaceBaseModel() {
     streamingPercent,
     activeChapter,
     onCancelProseBatch: cancelStepGenerateProse,
+  })
+  const rawChapterSourceLocalTaskBusy = Boolean(
+    generatingProse
+      || stepProseLoading
+      || proseQualityLoading
+      || editorReportLoading
+      || commercialToolLoading === 'storyStateSync',
+  )
+  const chapterSourceLocalTaskProjectIdRef = useRef(projectId)
+  if (!rawChapterSourceLocalTaskBusy) chapterSourceLocalTaskProjectIdRef.current = projectId
+  const chapterSourceLocallyBusy = resolveChapterSourceLocallyBusy({
+    projectId,
+    localTaskProjectId: chapterSourceLocalTaskProjectIdRef.current,
+    sourceAuthorityLoading: loading,
+    generatingProse,
+    stepProseLoading,
+    proseQualityLoading,
+    editorReportLoading,
+    commercialToolLoading,
+    editorRevisionTasksProjectId,
+    editorRevisionTasks,
   })
 
   useEffect(() => {
@@ -912,6 +967,8 @@ export function useNovelWorkspaceBaseModel() {
     cancelKnowledgeIngestJob,
     chapterDrawerOpen,
     chapterGroupExecutingId,
+    chapterGenerationSourceAuthority,
+    chapterSourceLocallyBusy,
     chapterSearch,
     chapterSortMode,
     chapterStatusFilter,
@@ -1091,6 +1148,7 @@ export function useNovelWorkspaceBaseModel() {
     setRightPanelTab,
     setSelectMode,
     setSelectedChapterIds,
+    setChapterGenerationSourceAuthority,
     setSelectedModelId,
     setSelectedProject,
     setShellMode,
@@ -1106,6 +1164,8 @@ export function useNovelWorkspaceBaseModel() {
     sortedChapters,
     stepGenerateProse,
     stepProseLoading,
+    beginChapterSourceOperation,
+    assertChapterSourceOperationCurrent,
     storyAssetsFocusDiscoveredToken,
     storyStateForm,
     storyStateOpen,

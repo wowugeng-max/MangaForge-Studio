@@ -1,31 +1,21 @@
 import { describe, expect, test } from 'bun:test'
+import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { buildMcpSourceStatus } from './mcpGenerationSourceStatusModel'
 
-describe('MCP generation source workspace status', () => {
-  test('describes the ordinary model source', () => {
-    expect(buildMcpSourceStatus({
-      source: { version: 'prose_generation_source_v1', type: 'model' },
-    })).toEqual({
-      kind: 'model',
-      label: '模型 API',
-      detail: '正文来源：模型 API',
-      available: true,
-    })
-  })
+const binding = {
+  server_id: 'buda',
+  key_id: 3,
+  adapter_id: 'buda',
+  agent_id: 'agent-1',
+  model: 'model-x',
+}
 
-  test('shows the Buda account, Agent, and effective model without exposing a raw key', () => {
+describe('MCP generation source workspace status', () => {
+  test('shows the controlled active Buda account, Agent, and effective model without exposing a raw key', () => {
     const status = buildMcpSourceStatus({
-      source: {
-        version: 'prose_generation_source_v1',
-        type: 'mcp',
-        mcp: {
-          server_id: 'buda',
-          key_id: 3,
-          adapter_id: 'buda',
-          agent_id: 'agent-1',
-          model: '',
-        },
-      },
+      binding: { ...binding, model: '' },
+      active: true,
       servers: [{ id: 'buda', display_name: 'Buda' } as any],
       keys: [{
         id: 3,
@@ -40,75 +30,50 @@ describe('MCP generation source workspace status', () => {
 
     expect(status).toEqual({
       kind: 'mcp',
-      label: 'Buda MCP · 正文 Agent · Auto',
-      detail: '正文来源：Buda MCP；账号：测试账号 · sk_***；Agent：正文 Agent；模型：Auto',
+      label: 'Buda MCP · 正文 Agent · Auto · 已启用',
+      detail: '章节来源：Buda MCP；账号：测试账号 · sk_***；Adapter：buda；Agent：正文 Agent；模型：Auto；已启用',
       available: true,
+      active: true,
     })
     expect(JSON.stringify(status)).not.toContain('must-not-appear')
   })
 
   test('retains stable MCP binding identity when metadata loading fails', () => {
     expect(buildMcpSourceStatus({
-      source: {
-        version: 'prose_generation_source_v1',
-        type: 'mcp',
-        mcp: {
-          server_id: 'buda',
-          key_id: 3,
-          adapter_id: 'buda',
-          agent_id: 'agent-1',
-          model: 'model-x',
-        },
-      },
+      binding,
+      active: false,
       loadFailed: true,
     })).toEqual({
       kind: 'mcp',
-      label: 'buda MCP · agent-1 · model-x',
-      detail: '正文来源：buda MCP；账号：#3；Agent：agent-1；模型：model-x；状态信息暂不可用',
+      label: 'buda MCP · agent-1 · model-x · 已停用',
+      detail: '章节来源：buda MCP；账号：#3；Adapter：buda；Agent：agent-1；模型：model-x；已停用；状态信息暂不可用',
       available: false,
+      active: false,
     })
   })
 
-  test('commits the authoritative source before optional metadata settles', async () => {
+  test('loads optional display metadata without fetching or committing a source', async () => {
     const module = await import('./mcpGenerationSourceStatusModel')
-    const loadMcpSourceStatusSnapshot = Reflect.get(module, 'loadMcpSourceStatusSnapshot')
-    expect(typeof loadMcpSourceStatusSnapshot).toBe('function')
-    if (typeof loadMcpSourceStatusSnapshot !== 'function') return
-
-    const source = {
-      version: 'prose_generation_source_v1' as const,
-      type: 'mcp' as const,
-      mcp: {
-        server_id: 'buda',
-        key_id: 3,
-        adapter_id: 'buda',
-        agent_id: 'agent-2',
-        model: 'model-new',
-      },
-    }
-    const committed: unknown[] = []
+    const loadMetadata = Reflect.get(module, 'loadMcpSourceStatusMetadata')
+    expect(typeof loadMetadata).toBe('function')
+    if (typeof loadMetadata !== 'function') return
     let rejectServers: (error: Error) => void = () => {}
     const servers = new Promise<never>((_resolve, reject) => {
       rejectServers = reject
     })
 
-    const loading = loadMcpSourceStatusSnapshot({
-      projectId: 5,
+    const loading = loadMetadata({
+      binding,
       isActive: () => true,
-      onSource: (nextSource: unknown) => committed.push(nextSource),
-      loadSource: async () => source,
       loadServers: () => servers,
       loadKeys: async () => [],
-      loadAgents: async () => [],
+      loadAgents: async (nextBinding: unknown) => {
+        expect(nextBinding).toBe(binding)
+        return []
+      },
     })
-
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(committed).toEqual([source])
-
     rejectServers(new Error('metadata unavailable'))
     expect(await loading).toEqual({
-      source,
       servers: [],
       keys: [],
       agents: [],
@@ -116,57 +81,62 @@ describe('MCP generation source workspace status', () => {
     })
   })
 
-  test('does not commit a superseded project load after switching projects', async () => {
+  test('drops superseded optional metadata after switching projects', async () => {
     const module = await import('./mcpGenerationSourceStatusModel')
-    const loadMcpSourceStatusSnapshot = Reflect.get(module, 'loadMcpSourceStatusSnapshot')
-    expect(typeof loadMcpSourceStatusSnapshot).toBe('function')
-    if (typeof loadMcpSourceStatusSnapshot !== 'function') return
-
-    const firstSource = {
-      version: 'prose_generation_source_v1' as const,
-      type: 'mcp' as const,
-      mcp: {
-        server_id: 'buda',
-        key_id: 3,
-        adapter_id: 'buda',
-        agent_id: 'agent-old',
-        model: 'model-old',
-      },
-    }
-    const secondSource = {
-      version: 'prose_generation_source_v1' as const,
-      type: 'model' as const,
-    }
-    const committed: unknown[] = []
+    const loadMetadata = Reflect.get(module, 'loadMcpSourceStatusMetadata')
+    expect(typeof loadMetadata).toBe('function')
+    if (typeof loadMetadata !== 'function') return
     let firstActive = true
-    let resolveFirst: (source: typeof firstSource) => void = () => {}
-    const delayedFirst = new Promise<typeof firstSource>(resolve => {
+    let resolveFirst: (servers: any[]) => void = () => {}
+    const delayedFirst = new Promise<any[]>(resolve => {
       resolveFirst = resolve
     })
     const common = {
-      loadServers: async () => [],
       loadKeys: async () => [],
       loadAgents: async () => [],
-      onSource: (source: unknown) => committed.push(source),
     }
 
-    const firstLoad = loadMcpSourceStatusSnapshot({
+    const firstLoad = loadMetadata({
       ...common,
-      projectId: 5,
+      binding,
       isActive: () => firstActive,
-      loadSource: async () => delayedFirst,
+      loadServers: async () => delayedFirst,
     })
     firstActive = false
-    const secondLoad = loadMcpSourceStatusSnapshot({
+    const secondLoad = loadMetadata({
       ...common,
-      projectId: 6,
+      binding: { ...binding, agent_id: 'agent-2' },
       isActive: () => true,
-      loadSource: async () => secondSource,
+      loadServers: async () => [],
     })
 
-    expect(await secondLoad).toMatchObject({ source: secondSource, loadFailed: false })
-    resolveFirst(firstSource)
+    expect(await secondLoad).toMatchObject({ loadFailed: false })
+    resolveFirst([])
     expect(await firstLoad).toBeNull()
-    expect(committed).toEqual([secondSource])
+  })
+
+  test('status component source has no independent source GET', async () => {
+    const component = await Bun.file(new URL('./McpGenerationSourceStatus.tsx', import.meta.url)).text()
+    expect(component).not.toContain('getProjectSource')
+    expect(component).not.toContain('loadSource')
+    expect(component).toContain('binding')
+    expect(component).toContain('active')
+  })
+
+  test('renders stable controlled identifiers accessibly before optional metadata loads', async () => {
+    const component = await import('./McpGenerationSourceStatus')
+    const html = renderToStaticMarkup(React.createElement(component.McpGenerationSourceStatus, {
+      projectId: 5,
+      binding,
+      active: false,
+      compact: false,
+      onOpenSettings: () => {},
+    }))
+    expect(html).toContain('buda MCP')
+    expect(html).toContain('agent-1')
+    expect(html).toContain('model-x')
+    expect(html).toContain('账号：#3')
+    expect(html).toContain('Adapter：buda')
+    expect(html).toContain('已停用')
   })
 })

@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Badge, Button, Dropdown, Select, Tag, Tooltip, Typography } from 'antd'
+import { Badge, Button, Dropdown, Tag, Tooltip, Typography } from 'antd'
 import {
   ArrowLeftOutlined,
   BulbOutlined,
@@ -15,7 +15,11 @@ import {
   ToolOutlined,
 } from '@ant-design/icons'
 import { ProjectSettingsModal } from '../ProjectSettingsModal'
-import { McpGenerationSourceStatus } from '../McpGenerationSourceStatus'
+import { ChapterGenerationSourceControl } from '../ChapterGenerationSourceControl'
+import {
+  isStaleChapterSourceOperationError,
+  type ChapterSourceOperationToken,
+} from '../chapterGenerationSourceModel'
 import {
   primaryTabForArea,
   WORKSPACE_TOOL_MENU_DEFS,
@@ -25,9 +29,34 @@ import type { WorkspaceArea } from './workspace-types'
 
 const { Title } = Typography
 
+type ChapterSourcePendingState = {
+  projectId: number
+  pending: boolean
+  token: ChapterSourceOperationToken | null
+}
+
+export function chapterSourcePendingIsCurrent(
+  state: ChapterSourcePendingState,
+  projectId: number,
+  assertCurrent: (token: ChapterSourceOperationToken) => void,
+) {
+  if (!state.pending || !state.token || state.projectId !== projectId) return false
+  try {
+    assertCurrent(state.token)
+    return true
+  } catch (error) {
+    if (isStaleChapterSourceOperationError(error)) return false
+    throw error
+  }
+}
+
 export type NovelWorkspaceTopBarProps = {
   activeKnowledgeJobCount: number
   activeTasks: any[]
+  assertChapterSourceOperationCurrent: (token: ChapterSourceOperationToken) => void
+  beginChapterSourceOperation: () => ChapterSourceOperationToken
+  chapterGenerationSourceAuthority: any
+  chapterSourceLocallyBusy: boolean
   flushPendingSave: () => Promise<boolean> | Promise<any> | boolean | any
   isImmersiveShell: boolean
   loadProjectModules: () => Promise<any> | any
@@ -37,6 +66,7 @@ export type NovelWorkspaceTopBarProps = {
   referenceSummary: { count: number; strengthLabel?: string }
   selectedModelId: any
   selectedProject: any
+  setChapterGenerationSourceAuthority: (state: any) => void
   setSelectedModelId: (id: any) => void
   setShellMode: (mode: any) => void
   setTaskCenterOpen: (open: boolean) => void
@@ -56,6 +86,10 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
   const {
     activeKnowledgeJobCount,
     activeTasks,
+    assertChapterSourceOperationCurrent,
+    beginChapterSourceOperation,
+    chapterGenerationSourceAuthority,
+    chapterSourceLocallyBusy,
     flushPendingSave,
     isImmersiveShell,
     loadProjectModules,
@@ -65,6 +99,7 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
     referenceSummary,
     selectedModelId,
     selectedProject,
+    setChapterGenerationSourceAuthority,
     setSelectedModelId,
     setShellMode,
     setTaskCenterOpen,
@@ -74,7 +109,21 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
   } = props
 
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false)
-  const [sourceRefreshKey, setSourceRefreshKey] = useState(0)
+  const [sourcePendingState, setSourcePendingState] = useState<ChapterSourcePendingState>({
+    projectId: Number(selectedProject?.id || 0),
+    pending: false,
+    token: null,
+  })
+  const currentProjectId = Number(selectedProject?.id || 0)
+  const sourcePending = chapterSourcePendingIsCurrent(
+    sourcePendingState,
+    currentProjectId,
+    assertChapterSourceOperationCurrent,
+  )
+  const setSourceOperationPending = (pending: boolean, token: ChapterSourceOperationToken) => {
+    assertChapterSourceOperationCurrent(token)
+    setSourcePendingState({ projectId: token.projectId, pending, token: pending ? token : null })
+  }
   const activePrimary = primaryTabForArea(workspaceArea as WorkspaceArea)
   const moreMenuItems = [
     {
@@ -163,31 +212,27 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
         </div>
 
         <div className="novel-workspace-topbar-right">
-          {!isImmersiveShell && (
-            <>
-              <Select
-                className="novel-workspace-model-select"
-                size="small"
-                value={selectedModelId}
-                onChange={(v) => setSelectedModelId(v)}
-                options={modelOptions}
-                popupMatchSelectWidth={440}
-                placeholder="选择模型"
-              />
-              {referenceSummary.count > 0 && (
-                <Tag className="novel-workspace-topbar-meta" color="purple" bordered={false}>
-                  {referenceSummary.strengthLabel} · {referenceSummary.count} 部参考
-                </Tag>
-              )}
-            </>
-          )}
-
-          <McpGenerationSourceStatus
-            projectId={Number(selectedProject?.id || 0)}
-            initialSource={selectedProject?.reference_config?.prose_generation_source}
-            refreshKey={sourceRefreshKey}
+          <ChapterGenerationSourceControl
+            projectId={currentProjectId}
+            authority={chapterGenerationSourceAuthority}
+            modelOptions={modelOptions}
+            selectedModelId={selectedModelId}
+            compact={isImmersiveShell}
+            locallyBusy={chapterSourceLocallyBusy}
+            beginSourceOperation={beginChapterSourceOperation}
+            assertSourceOperationCurrent={assertChapterSourceOperationCurrent}
+            onAuthorityChange={setChapterGenerationSourceAuthority}
+            onSelectedModelConfirmed={setSelectedModelId}
             onOpenSettings={() => setProjectSettingsOpen(true)}
+            pending={sourcePending}
+            onPendingChange={setSourceOperationPending}
           />
+
+          {!isImmersiveShell && referenceSummary.count > 0 && (
+            <Tag className="novel-workspace-topbar-meta" color="purple" bordered={false}>
+              {referenceSummary.strengthLabel} · {referenceSummary.count} 部参考
+            </Tag>
+          )}
 
           {workspaceArea === 'chapterWriting' && (
             <Button
@@ -218,9 +263,18 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
       </div>
       <ProjectSettingsModal
         open={projectSettingsOpen}
-        projectId={Number(selectedProject?.id || 0)}
+        projectId={currentProjectId}
         onClose={() => setProjectSettingsOpen(false)}
-        onGenerationSourceSaved={() => setSourceRefreshKey(current => current + 1)}
+        authority={chapterGenerationSourceAuthority}
+        modelOptions={modelOptions}
+        selectedModelId={selectedModelId}
+        locallyBusy={chapterSourceLocallyBusy}
+        beginSourceOperation={beginChapterSourceOperation}
+        assertSourceOperationCurrent={assertChapterSourceOperationCurrent}
+        onAuthorityChange={setChapterGenerationSourceAuthority}
+        onSelectedModelConfirmed={setSelectedModelId}
+        sourcePending={sourcePending}
+        onSourcePendingChange={setSourceOperationPending}
       />
     </>
   )

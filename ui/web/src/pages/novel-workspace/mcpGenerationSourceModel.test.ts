@@ -124,6 +124,28 @@ describe('project MCP generation source model', () => {
       .toBe(bindingFingerprint({ ...form, model: 'model-x' }))
   })
 
+  test('invalidates the tested identity when server, key, adapter, agent, or provider model changes', () => {
+    const form = {
+      type: 'mcp' as const,
+      serverId: 'buda',
+      keyId: 3,
+      adapterId: 'buda',
+      agentId: 'agent_1',
+      model: 'model-x',
+    }
+    const tested = bindingFingerprint(form)
+    for (const changed of [
+      { ...form, serverId: 'other' },
+      { ...form, keyId: 4 },
+      { ...form, adapterId: 'other-adapter' },
+      { ...form, agentId: 'agent_2' },
+      { ...form, model: 'model-y' },
+    ]) {
+      expect(bindingFingerprint(changed)).not.toBe(tested)
+      expect(canSaveGenerationSource(changed, tested)).toBe(false)
+    }
+  })
+
   test('builds immutable generic reference-config write payloads without dedicated sources', async () => {
     const model = await import('./mcpGenerationSourceModel')
     const buildGenericReferenceConfigWritePayload = Reflect.get(model, 'buildGenericReferenceConfigWritePayload')

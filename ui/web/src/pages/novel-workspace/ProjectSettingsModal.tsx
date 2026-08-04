@@ -2,6 +2,11 @@ import React, { useEffect, useState } from 'react'
 import { Button, Divider, InputNumber, Modal, Space, Typography, message } from 'antd'
 import apiClient from '../../api/client'
 import { McpGenerationSourcePanel } from './McpGenerationSourcePanel'
+import { ChapterGenerationSourceControl } from './ChapterGenerationSourceControl'
+import type {
+  ChapterSourceAuthorityState,
+  ChapterSourceOperationToken,
+} from './chapterGenerationSourceModel'
 
 const { Text } = Typography
 const MIN_TIMEOUT_SECONDS = 60
@@ -50,12 +55,30 @@ export function ProjectSettingsModal({
   open,
   projectId,
   onClose,
-  onGenerationSourceSaved,
+  authority,
+  modelOptions,
+  selectedModelId,
+  locallyBusy,
+  beginSourceOperation,
+  assertSourceOperationCurrent,
+  onAuthorityChange,
+  onSelectedModelConfirmed,
+  sourcePending,
+  onSourcePendingChange,
 }: {
   open: boolean
   projectId: number
   onClose: () => void
-  onGenerationSourceSaved?: () => void
+  authority: ChapterSourceAuthorityState
+  modelOptions: Array<{ value: number; label: React.ReactNode }>
+  selectedModelId?: number
+  locallyBusy: boolean
+  beginSourceOperation: () => ChapterSourceOperationToken
+  assertSourceOperationCurrent: (token: ChapterSourceOperationToken) => void
+  onAuthorityChange: (state: ChapterSourceAuthorityState) => void
+  onSelectedModelConfirmed: (id: number) => void
+  sourcePending: boolean
+  onSourcePendingChange: (pending: boolean, token: ChapterSourceOperationToken) => void
 }) {
   const [timeoutSeconds, setTimeoutSeconds] = useState<number | null>(DEFAULT_TIMEOUT_SECONDS)
   const [storyStateMaxTokens, setStoryStateMaxTokens] = useState<number | null>(DEFAULT_STORY_STATE_MAX_TOKENS)
@@ -134,8 +157,40 @@ export function ProjectSettingsModal({
           保存
         </Button>,
       ]}
-      width={780}
+      width={900}
     >
+      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Text strong>当前章节来源</Text>
+        <ChapterGenerationSourceControl
+          projectId={projectId}
+          authority={authority}
+          modelOptions={modelOptions}
+          selectedModelId={selectedModelId}
+          compact={false}
+          locallyBusy={locallyBusy}
+          beginSourceOperation={beginSourceOperation}
+          assertSourceOperationCurrent={assertSourceOperationCurrent}
+          onAuthorityChange={onAuthorityChange}
+          onSelectedModelConfirmed={onSelectedModelConfirmed}
+          onOpenSettings={() => {}}
+          pending={sourcePending}
+          onPendingChange={onSourcePendingChange}
+        />
+      </Space>
+      <Divider />
+      <Text strong>MCP 绑定配置</Text>
+      <McpGenerationSourcePanel
+        open={open}
+        projectId={projectId}
+        authority={authority}
+        locallyBusy={locallyBusy}
+        beginSourceOperation={beginSourceOperation}
+        assertSourceOperationCurrent={assertSourceOperationCurrent}
+        onAuthorityChange={onAuthorityChange}
+        pending={sourcePending}
+        onPendingChange={onSourcePendingChange}
+      />
+      <Divider />
       <Space direction="vertical" size={8} style={{ width: '100%' }}>
         <Text strong>质检与修订</Text>
         <Space align="center" wrap>
@@ -175,12 +230,6 @@ export function ProjectSettingsModal({
           只控制修订后当前章故事状态同步的单次模型输出预算，不控制正文长度，也不会扩展到全部章节。
         </Text>
       </Space>
-      <Divider />
-      <McpGenerationSourcePanel
-        open={open}
-        projectId={projectId}
-        onSaved={onGenerationSourceSaved}
-      />
     </Modal>
   )
 }

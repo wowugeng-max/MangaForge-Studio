@@ -22,6 +22,7 @@ import {
   writingCockpitModelSource,
   writingRecommendationModelSource,
 } from './workspaceUiShellSource'
+import { createChapterSourceOperationFence } from './chapterGenerationSourceModel'
 
 describe('commercial writing workspace UI shell a a', () => {
   test('lets the inner chapter directory rail collapse without hiding task center', () => {
@@ -529,6 +530,95 @@ describe('commercial writing workspace UI shell a a', () => {
     expect(css).toContain('.novel-serial-pipeline-agent-strip')
     expect(css).toContain('.novel-serial-pipeline-agent')
     expect(css).toContain('.novel-serial-pipeline-agent-name')
+  })
+
+  test('wires one shared chapter source authority and fence through the ready topbar and settings', async () => {
+    const topbar = source('shell/workspace-topbar.tsx')
+    const topbarProps = source('shell/workspace-view-props-topbar.ts')
+    const ready = source('shell/build-novel-workspace-ready-runtime.tsx')
+    const base = source('shell/use-novel-workspace-base-model.tsx')
+
+    expect(topbar).toContain('<ChapterGenerationSourceControl')
+    expect(topbar).not.toContain('<McpGenerationSourceStatus')
+    expect(topbar).not.toContain('className="novel-workspace-model-select"')
+    expect(topbar).toContain('compact={isImmersiveShell}')
+    expect(topbar).toContain('<ProjectSettingsModal')
+    for (const name of [
+      'chapterGenerationSourceAuthority',
+      'setChapterGenerationSourceAuthority',
+      'beginChapterSourceOperation',
+      'assertChapterSourceOperationCurrent',
+      'chapterSourceLocallyBusy',
+    ]) {
+      expect(base).toContain(name)
+      expect(ready).toContain(name)
+      expect(topbarProps).toContain(name)
+      expect(topbar).toContain(name)
+    }
+    expect(base).not.toContain('componentSourceMutationCounter')
+    expect(topbar).toContain('pending={sourcePending}')
+    expect(topbar).toContain('onPendingChange={setSourceOperationPending}')
+  })
+
+  test('derives local source busy from prose, active revision, manual quality, and story-state work', async () => {
+    const module = await import('./shell/use-novel-workspace-base-model') as Record<string, any>
+    expect(typeof module.resolveChapterSourceLocallyBusy).toBe('function')
+    if (typeof module.resolveChapterSourceLocallyBusy !== 'function') return
+    const ordinary = {
+      projectId: 1,
+      localTaskProjectId: 1,
+      sourceAuthorityLoading: false,
+      generatingProse: false,
+      stepProseLoading: false,
+      proseQualityLoading: false,
+      editorReportLoading: false,
+      commercialToolLoading: '',
+      editorRevisionTasksProjectId: 1,
+      editorRevisionTasks: [],
+    }
+    expect(module.resolveChapterSourceLocallyBusy(ordinary)).toBe(false)
+    expect(module.resolveChapterSourceLocallyBusy({ ...ordinary, generatingProse: true })).toBe(true)
+    expect(module.resolveChapterSourceLocallyBusy({ ...ordinary, proseQualityLoading: true })).toBe(true)
+    expect(module.resolveChapterSourceLocallyBusy({ ...ordinary, commercialToolLoading: 'storyStateSync' })).toBe(true)
+    expect(module.resolveChapterSourceLocallyBusy({ ...ordinary, sourceAuthorityLoading: true })).toBe(true)
+    expect(module.resolveChapterSourceLocallyBusy({
+      ...ordinary,
+      localTaskProjectId: 2,
+      generatingProse: true,
+      proseQualityLoading: true,
+      commercialToolLoading: 'storyStateSync',
+    })).toBe(false)
+    expect(module.resolveChapterSourceLocallyBusy({
+      ...ordinary,
+      editorRevisionTasks: [{ run_type: 'editor_revision', status: 'running' }],
+    })).toBe(true)
+    expect(module.resolveChapterSourceLocallyBusy({
+      ...ordinary,
+      editorRevisionTasksProjectId: 2,
+      editorRevisionTasks: [{ run_type: 'editor_revision', status: 'running' }],
+    })).toBe(false)
+  })
+
+  test('does not revive stale pending after same-project reload or an A-B-A project cycle', async () => {
+    const module = await import('./shell/workspace-topbar') as Record<string, any>
+    expect(typeof module.chapterSourcePendingIsCurrent).toBe('function')
+    if (typeof module.chapterSourcePendingIsCurrent !== 'function') return
+    const fence = createChapterSourceOperationFence()
+    fence.enterProject(1, 101)
+    const token = fence.begin(1, 101)
+    const pendingState = { projectId: 1, pending: true, token }
+    const check = (projectId: number) => module.chapterSourcePendingIsCurrent(
+      pendingState,
+      projectId,
+      (candidate: any) => fence.assertCurrent(candidate),
+    )
+    expect(check(1)).toBe(true)
+    fence.enterProject(1, 102)
+    expect(check(1)).toBe(false)
+    fence.enterProject(2, 201)
+    expect(check(2)).toBe(false)
+    fence.enterProject(1, 103)
+    expect(check(1)).toBe(false)
   })
 
 })

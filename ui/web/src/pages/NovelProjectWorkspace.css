@@ -124,6 +124,46 @@
   gap: 6px;
 }
 
+.novel-chapter-source-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.novel-chapter-source-details {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.novel-chapter-source-detail {
+  min-width: 0;
+}
+
+.novel-chapter-source-detail.is-active {
+  opacity: 1;
+}
+
+.novel-chapter-source-detail.is-inactive {
+  opacity: 0.52;
+  filter: grayscale(0.35);
+}
+
+.novel-chapter-source-control.is-busy {
+  cursor: not-allowed;
+}
+
+.novel-chapter-source-control.is-compact .novel-chapter-source-detail.is-inactive {
+  display: none;
+}
+
+.novel-chapter-source-model.novel-workspace-model-select {
+  width: 220px !important;
+  flex: 0 0 220px;
+}
+
 .novel-workspace-title.ant-typography {
   margin: 0 !important;
   min-width: 0;
@@ -672,6 +712,16 @@
     width: 112px !important;
     flex-basis: 112px;
     min-width: 112px;
+  }
+
+  .novel-chapter-source-control {
+    gap: 4px;
+  }
+
+  .novel-chapter-source-model.novel-workspace-model-select {
+    width: 160px !important;
+    min-width: 112px;
+    flex-basis: 160px;
   }
 
   .novel-workspace-source-status.ant-btn {
