@@ -368,6 +368,47 @@ describe('chapter task routing for review and state leaves', () => {
     }
   })
 
+  test('fails closed when a task-scoped MCP quality repair resolves with truncated transport', async () => {
+    const { execution, calls, fallback, getFallbackCalls } = makeExecutionSpy(call => {
+      if (call.stage === 'quality_repair') {
+        return {
+          parsed: { prose_chapters: [{ chapter_text: chapterText.replace('登记本', '交接簿') }] },
+          finish_reason: 'length',
+          modelName: 'truncated-task-model',
+        }
+      }
+      return {
+        parsed: {
+          score: 70,
+          score_scale: '0-100',
+          publishable: true,
+          dimensions: sixDimensions,
+          findings: [{
+            key: 'locatable_causality',
+            severity: 'S2',
+            dimension: 'conflict_causality',
+            evidence: '交接单拍在台上',
+            required_change: '让交接动作产生新的现场后果',
+            acceptance_test: '动作与结果形成因果链',
+          }],
+        },
+        modelName: 'fixed-task-model',
+      }
+    })
+    Object.defineProperty(execution, 'source', { value: 'mcp' })
+
+    const caught: any = await runQualityLoopPhase(qualityLoopArgs(execution, fallback))
+      .catch(error => error)
+
+    expect(caught).toMatchObject({
+      code: 'PROSE_REVISION_TRUNCATED',
+      admission_status: 'blocked_invalid',
+      finish_reason: 'length',
+    })
+    expect(calls.map(call => call.stage)).toEqual(['quality_review', 'quality_repair'])
+    expect(getFallbackCalls()).toBe(0)
+  })
+
   test('propagates story-state task rejection without falling back', async () => {
     const rejection = new Error('task story-state rejected')
     const { execution, calls, fallback, getFallbackCalls } = makeExecutionSpy(() => Promise.reject(rejection))

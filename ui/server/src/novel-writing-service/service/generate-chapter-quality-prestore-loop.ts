@@ -411,9 +411,13 @@ try {
       try {
         assertCompleteProseTransportResult(result, 'PROSE_REVISION_TRUNCATED')
       } catch (error: any) {
-        // System-wide: truncated revise must not kill whole chapter generation.
-        // Return unusable payload so quality loop keeps pre-revision text, then residual sanitize + hard admission still run.
+        // Legacy non-task revisions may keep the pre-revision text; a task-scoped transport failure is terminal.
         if (String(error?.code || '') === 'PROSE_REVISION_TRUNCATED') {
+          if (options.chapterTaskExecution) {
+            chapterTaskExecutionFailed = true
+            chapterTaskExecutionFailure = error
+            throw error
+          }
           await onStage('revise', {
             status: 'warn',
             phase: 'quality_revision_truncated_fallback',

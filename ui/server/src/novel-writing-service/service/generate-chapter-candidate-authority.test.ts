@@ -249,7 +249,7 @@ describe('generateChapterForGroup final candidate authority', () => {
     expect(harness.memoryTexts).toEqual([])
   })
 
-  test('keeps one post-humanize candidate authoritative after a truncated quality repair is rejected', async () => {
+  test('fails closed before persistence when task-scoped quality repair resolves truncated', async () => {
     const draftText = repairedProse()
     const humanizedText = `${draftText}\n\n“通道已经让开了。”江澈收起通讯器。`
     const harness = await createProsePipelineHarness(createNovelWritingService, {
@@ -285,7 +285,7 @@ describe('generateChapterForGroup final candidate authority', () => {
     })
     const stages: Array<{ stage: string; payload: any }> = []
 
-    const result = await harness.service.generateChapterForGroup(
+    const exposed: any = await harness.service.generateChapterForGroup(
       harness.workspace,
       harness.project.id,
       harness.chapter.id,
@@ -296,29 +296,28 @@ describe('generateChapterForGroup final candidate authority', () => {
         skip_mid_monologue_densify: true,
         onStage: async (stage: string, payload: any) => stages.push({ stage, payload }),
       },
-    )
-    const stored = (await listNovelChapters(harness.workspace, harness.project.id))
-      .find(item => item.id === harness.chapter.id)
-    const storedText = String(stored?.chapter_text || '')
-    const storedHash = revisionTextHash(storedText)
+    ).catch((error: unknown) => error)
 
-    expectQualityBeforeFinalizer(stages)
-    expect(harness.qualityReviewTasks).toHaveLength(2)
+    expect(exposed).toMatchObject({
+      code: 'PROSE_REVISION_TRUNCATED',
+      admission_status: 'blocked_invalid',
+      finish_reason: 'length',
+    })
+    expect(harness.qualityReviewTasks).toHaveLength(1)
     expect(harness.qualityReviewTasks[0]).toContain(String(harness.humanizeTexts[0] || ''))
-    expect(harness.qualityReviewTasks[0]).not.toContain(storedText)
-    expect(harness.qualityReviewTasks[1]).toContain(storedText)
     expect(harness.qualityRevisionTasks).toHaveLength(1)
     expect(harness.qualityRevisionTasks[0]).toContain(String(harness.humanizeTexts[0] || ''))
-    expect(harness.qualityRevisionTasks[0]).not.toContain(storedText)
-    expect(stages).toContainEqual(expect.objectContaining({
+    expect(stages).not.toContainEqual(expect.objectContaining({
+      stage: 'humanize_postprocess',
+      payload: expect.objectContaining({ status: 'running' }),
+    }))
+    expect(stages).not.toContainEqual(expect.objectContaining({
       stage: 'revise',
       payload: expect.objectContaining({ phase: 'quality_revision_truncated_fallback' }),
     }))
-    expect(result.quality_loop?.rounds).toHaveLength(1)
-    expect(harness.storeTexts).toEqual([storedText])
-    expect(harness.storyStateTexts).toEqual([storedText])
-    expect(harness.memoryTexts).toEqual([storedText])
-    expect(revisionTextHash(String(result.chapter?.chapter_text || ''))).toBe(storedHash)
+    expect(harness.storeCalls).toBe(0)
+    expect(harness.storyStateCalls).toBe(0)
+    expect(harness.memoryTexts).toEqual([])
   })
 
   test('returns and stores canonical post-quality provenance in draft mode', async () => {
