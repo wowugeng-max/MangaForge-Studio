@@ -99,6 +99,40 @@ export type ProseQualityReviewOptions = {
 
 type ChapterTaskOutcome = Parameters<ChapterTaskExecution['close']>[0]
 
+const chapterTaskCloseErrorFallback = new WeakMap<object, unknown>()
+
+export function getChapterTaskCloseError(error: unknown) {
+  if (!error || (typeof error !== 'object' && typeof error !== 'function')) return undefined
+  const fallback = chapterTaskCloseErrorFallback.get(error)
+  if (fallback !== undefined) return fallback
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(error, 'chapterTaskCloseError')
+    return descriptor && 'value' in descriptor ? descriptor.value : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function preserveChapterTaskCloseError(operationError: unknown, closeError: unknown) {
+  if (closeError === operationError
+    || !operationError
+    || (typeof operationError !== 'object' && typeof operationError !== 'function')) return
+  try {
+    if (operationError instanceof Error && Object.isExtensible(operationError)) {
+      Object.defineProperty(operationError, 'chapterTaskCloseError', {
+        configurable: true,
+        enumerable: false,
+        value: closeError,
+      })
+      return
+    }
+  } catch {
+    // Preserve the original operation failure even if an exotic Error rejects inspection.
+  }
+  // Wrapping a frozen Error would break identity, so retain its diagnostic out-of-band.
+  chapterTaskCloseErrorFallback.set(operationError, closeError)
+}
+
 export async function withChapterTaskExecution<T>(
   ctx: EditorRoutesContext,
   input: BeginChapterTaskInput,
@@ -107,12 +141,14 @@ export async function withChapterTaskExecution<T>(
   const execution = await ctx.beginChapterTask(input)
   let outcome: ChapterTaskOutcome = { status: 'failed' }
   let operationFailed = false
+  let operationError: unknown
   try {
     const result = await operation(execution)
     outcome = { status: 'success' }
     return result
   } catch (error) {
     operationFailed = true
+    operationError = error
     outcome = {
       status: input.signal?.aborted ? 'cancelled' : 'failed',
       error,
@@ -123,6 +159,7 @@ export async function withChapterTaskExecution<T>(
       await execution.close(outcome)
     } catch (closeError) {
       if (!operationFailed) throw closeError
+      preserveChapterTaskCloseError(operationError, closeError)
     }
   }
 }

@@ -1864,6 +1864,51 @@ describe('ModelGenerationSource', () => {
     ])
   })
 
+  test('rejects projected agent error envelopes and records only failed stages', async () => {
+    const activeWorkspace = await mkdtemp(join(tmpdir(), 'mangaforge-model-error-envelope-'))
+    workspaces.push(activeWorkspace)
+    const durableProject = await createNovelProject(activeWorkspace, { title: '模型错误信封' })
+    const providerFailure = Object.assign(new Error('provider returned an error object'), {
+      code: 'PROVIDER_ERROR_OBJECT',
+    })
+    const oversizedFailure = `provider failure ${'x'.repeat(2_000)}`
+    const results = [
+      { error: providerFailure, parsed: { overall_score: 99 } },
+      { error: oversizedFailure, parsed: { overall_score: 99 } },
+    ]
+    const provenance = {
+      task_id: 'task-model-error-envelope', project_id: durableProject.id, chapter_id: chapter.id,
+      source: 'model' as const, source_fingerprint: `sha256:${'a'.repeat(64)}`,
+      context_version: `sha256:${'b'.repeat(64)}`, model_id: 217,
+    }
+    const source = new ModelGenerationSource({
+      modelId: 217,
+      provenance,
+      generateChapterProse: async () => ({ prose_chapters: [] }),
+      executeAgent: async () => results.shift(),
+      recordStage: createChapterStageRecorder({ activeWorkspace, provenance: () => provenance }),
+    })
+
+    await expect(source.executeAgent(
+      'editor_report', 'editor_report_json', 'review-agent', durableProject, { task: '编辑报告' },
+    )).rejects.toBe(providerFailure)
+    const boundedFailure: any = await source.executeAgent(
+      'editor_report', 'editor_report_json', 'review-agent', durableProject, { task: '编辑报告' },
+    ).catch(error => error)
+
+    expect(boundedFailure).toBeInstanceOf(Error)
+    expect(boundedFailure).toMatchObject({
+      code: 'CHAPTER_STAGE_ERROR_RESULT',
+      error_code: 'CHAPTER_STAGE_ERROR_RESULT',
+    })
+    expect(boundedFailure.message.length).toBeLessThanOrEqual(500)
+    expect(boundedFailure.message).not.toContain('x'.repeat(501))
+    const runs = await listNovelRuns(activeWorkspace, durableProject.id)
+    expect(runs).toHaveLength(2)
+    expect(runs.map(run => run.status)).toEqual(['failed', 'failed'])
+    expect(runs.some(run => run.status === 'success')).toBe(false)
+  })
+
   test('projects draft and agent results without invoking receipt or inherited accessors', async () => {
     let getterCalls = 0
     const capability = Symbol('untrusted-capability')

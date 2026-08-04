@@ -89,6 +89,25 @@ function projectStageResult(result: any) {
   return projected
 }
 
+function projectedStageError(result: unknown) {
+  if (!result || (typeof result !== 'object' && typeof result !== 'function')) return undefined
+  const descriptor = Object.getOwnPropertyDescriptor(result, 'error')
+  if (!descriptor?.enumerable || !('value' in descriptor)) return undefined
+  if (types.isNativeError(descriptor.value)) return descriptor.value
+  const detail = typeof descriptor.value === 'string'
+    ? descriptor.value.slice(0, 440)
+    : typeof descriptor.value === 'number' || typeof descriptor.value === 'boolean'
+      ? String(descriptor.value)
+      : ''
+  const message = detail
+    ? `Chapter stage returned an error result: ${detail}`
+    : 'Chapter stage returned an error result'
+  return Object.assign(new Error(message.slice(0, 500)), {
+    code: 'CHAPTER_STAGE_ERROR_RESULT',
+    error_code: 'CHAPTER_STAGE_ERROR_RESULT',
+  })
+}
+
 export class ModelGenerationSource implements GenerationSource, ChapterTaskExecution {
   readonly taskId: string
   readonly source = 'model' as const
@@ -211,7 +230,10 @@ export class ModelGenerationSource implements GenerationSource, ChapterTaskExecu
         }),
       )
       await this.assertCurrent()
-      return projectStageResult(result)
+      const safeResult = projectStageResult(result)
+      const resultError = projectedStageError(safeResult)
+      if (resultError) throw resultError
+      return safeResult
     })
   }
 

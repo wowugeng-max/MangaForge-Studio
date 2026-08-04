@@ -22,6 +22,7 @@ import type {
 import { revisionTextHash } from './novel-editor/revision-candidate-admission'
 import { registerNovelEditorAnnotationRoutes } from './novel-editor/register-annotations'
 import { registerNovelEditorRevisionRoutes } from './novel-editor/register-revision'
+import { withChapterTaskExecution } from './novel-editor/builders'
 import { createEditorRevisionWorker } from './novel-editor/revision-worker'
 import { registerNovelRunRoutes } from './novel-run-routes'
 import {
@@ -341,6 +342,27 @@ function editorBuildersSource() {
   ].map(name => readFileSync(join(dir, name), 'utf8')).join('\n')
 }
 describe('editor revision route safeguards', () => {
+  test('preserves the operation error and hides a distinct close failure as a diagnostic', async () => {
+    const operationFailure = new Error('editor operation failed')
+    const closeFailure = new Error('chapter task close failed')
+    const caught: any = await withChapterTaskExecution({
+      beginChapterTask: async () => ({
+        close: async () => { throw closeFailure },
+      }),
+    } as any, {} as any, async () => {
+      throw operationFailure
+    }).catch(error => error)
+
+    expect(caught).toBe(operationFailure)
+    expect(caught.chapterTaskCloseError).toBe(closeFailure)
+    expect(Object.getOwnPropertyDescriptor(caught, 'chapterTaskCloseError')).toMatchObject({
+      enumerable: false,
+      value: closeFailure,
+    })
+    expect(String(caught)).not.toContain(closeFailure.message)
+    expect(JSON.stringify(caught)).not.toContain(closeFailure.message)
+  })
+
   test('manual editor report uses one editor_report stage and closes after its durable review is saved', async () => {
     const beginInputs: any[] = []
     const stages: any[] = []
@@ -399,6 +421,107 @@ describe('editor revision route safeguards', () => {
     expect(fixture.revisionAgentCalls).toBe(0)
     expect(closeOutcomes).toEqual([{ status: 'success' }])
     expect(persistedReviewCountsAtClose).toEqual([1])
+  })
+
+  test('manual editor report rejects a resolved Error without saving a review', async () => {
+    const providerFailure = new Error('resolved provider failure')
+    const closeOutcomes: any[] = []
+    const fixture = await createAsyncRevisionRouteFixture({
+      beginChapterTask: async () => ({
+        taskId: 'manual-editor-report-error',
+        source: 'model',
+        fingerprint: 'report-fingerprint',
+        contextVersion: 'report-context',
+        provenance: () => ({}),
+        generateDraft: async () => { throw new Error('not used') },
+        assertCurrent: async () => {},
+        executeAgent: async () => providerFailure,
+        close: async (outcome: any) => { closeOutcomes.push(outcome) },
+      }),
+    })
+
+    const response = await callRoute(
+      fixture.handlers.get('POST /api/novel/chapters/:chapterId/editor-report'),
+      {
+        params: { chapterId: String(fixture.chapter.id) },
+        body: { project_id: fixture.project.id },
+      },
+    )
+
+    expect(response.statusCode).toBe(500)
+    expect(closeOutcomes).toEqual([{ status: 'failed', error: providerFailure }])
+    expect(closeOutcomes[0].error).toBe(providerFailure)
+    expect((await listNovelReviews(fixture.workspace, fixture.project.id))
+      .filter(item => item.review_type === 'editor_report')).toHaveLength(0)
+  })
+
+  test('manual editor report rejects a resolved error envelope without saving a review', async () => {
+    const closeOutcomes: any[] = []
+    const fixture = await createAsyncRevisionRouteFixture({
+      beginChapterTask: async () => ({
+        taskId: 'manual-editor-report-envelope',
+        source: 'mcp',
+        fingerprint: 'report-fingerprint',
+        contextVersion: 'report-context',
+        provenance: () => ({}),
+        generateDraft: async () => { throw new Error('not used') },
+        assertCurrent: async () => {},
+        executeAgent: async () => ({ error: 'provider returned an error envelope' }),
+        close: async (outcome: any) => { closeOutcomes.push(outcome) },
+      }),
+    })
+
+    const response = await callRoute(
+      fixture.handlers.get('POST /api/novel/chapters/:chapterId/editor-report'),
+      {
+        params: { chapterId: String(fixture.chapter.id) },
+        body: { project_id: fixture.project.id },
+      },
+    )
+
+    expect(response.statusCode).toBe(500)
+    expect(closeOutcomes).toHaveLength(1)
+    expect(closeOutcomes[0]).toMatchObject({ status: 'failed' })
+    expect(closeOutcomes[0].error).toBeInstanceOf(Error)
+    expect((await listNovelReviews(fixture.workspace, fixture.project.id))
+      .filter(item => item.review_type === 'editor_report')).toHaveLength(0)
+  })
+
+  test('manual editor report observes an abort after the provider resolves and does not save a review', async () => {
+    const controller = new AbortController()
+    const abortReason = new Error('manual editor report cancelled')
+    const closeOutcomes: any[] = []
+    const fixture = await createAsyncRevisionRouteFixture({
+      beginChapterTask: async () => ({
+        taskId: 'manual-editor-report-abort',
+        source: 'mcp',
+        fingerprint: 'report-fingerprint',
+        contextVersion: 'report-context',
+        provenance: () => ({}),
+        generateDraft: async () => { throw new Error('not used') },
+        assertCurrent: async () => {},
+        executeAgent: async () => {
+          controller.abort(abortReason)
+          return { parsed: { overall_score: 88, must_fix: [] } }
+        },
+        close: async (outcome: any) => { closeOutcomes.push(outcome) },
+      }),
+    })
+
+    const response = await callRoute(
+      fixture.handlers.get('POST /api/novel/chapters/:chapterId/editor-report'),
+      {
+        params: { chapterId: String(fixture.chapter.id) },
+        body: { project_id: fixture.project.id },
+        signal: controller.signal,
+      },
+    )
+
+    expect(response.statusCode).toBe(500)
+    expect(closeOutcomes).toEqual([{ status: 'cancelled', error: abortReason }])
+    expect(closeOutcomes[0].error).toBe(abortReason)
+    expect((await listNovelReviews(fixture.workspace, fixture.project.id))
+      .filter(item => item.review_type === 'editor_report')).toHaveLength(0)
   })
 
   test('detects max-token truncated revision output before reporting missing patches', () => {

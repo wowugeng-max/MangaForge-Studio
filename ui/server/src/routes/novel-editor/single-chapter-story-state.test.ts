@@ -1556,6 +1556,63 @@ describe('single chapter Story State', () => {
     return { source_run_id: runId, candidate_hash: hash, chapter_id: chapterId }
   }
 
+  test('exact context rejects a chapter snapshot that is not bound to the live receipt candidate', async () => {
+    const fixture = await storyFixture(3)
+    const target = fixture.chapters[0]
+    const exactReceipt = receipt(target.id, revisionTextHash(String(target.chapter_text || '')))
+    const error = await prepareSingleChapterStoryState(fixture.ctx, {
+      workspace,
+      projectId: fixture.project.id,
+      chapterId: target.id,
+      receipt: exactReceipt,
+      exactContext: {
+        project: fixture.project,
+        chapter: { ...target, chapter_text: 'DIFFERENT_EXACT_CONTEXT_VERSION' },
+        contextPackage: {
+          chapter_target: {
+            chapter_id: target.id,
+            id: target.id,
+            chapter_no: target.chapter_no,
+          },
+        },
+      },
+    }).then(() => null, caught => caught)
+
+    expect(error).toMatchObject({ code: 'STORY_STATE_CONTEXT_CANDIDATE_MISMATCH' })
+    expect(fixture.modelCalls).toHaveLength(0)
+    expect(fixture.storyStateUpdateCalls()).toBe(0)
+    expect(fixture.contextChapterIds).toHaveLength(0)
+  })
+
+  test('exact context rejects explicit chapter target identifiers outside its scope', async () => {
+    const fixture = await storyFixture(3)
+    const target = fixture.chapters[0]
+    const exactReceipt = receipt(target.id, revisionTextHash(String(target.chapter_text || '')))
+    const mismatchedTargets = [
+      { chapter_id: target.id + 1 },
+      { id: target.id + 1 },
+      { chapter_no: target.chapter_no + 1 },
+    ]
+
+    for (const chapterTarget of mismatchedTargets) {
+      const error = await prepareSingleChapterStoryState(fixture.ctx, {
+        workspace,
+        projectId: fixture.project.id,
+        chapterId: target.id,
+        receipt: exactReceipt,
+        exactContext: {
+          project: fixture.project,
+          chapter: target,
+          contextPackage: { chapter_target: chapterTarget },
+        },
+      }).then(() => null, caught => caught)
+      expect(error).toMatchObject({ code: 'STORY_STATE_CONTEXT_SCOPE_MISMATCH' })
+    }
+
+    expect(fixture.modelCalls).toHaveLength(0)
+    expect(fixture.storyStateUpdateCalls()).toBe(0)
+  })
+
   test('generic project reference mutation uses the named operation contract', async () => {
     const project = await createNovelProject(workspace, { title: '事务引用配置', reference_config: { seed: true } } as any)
     const mutation = await mutateNovelProjectReferenceConfig(workspace, {

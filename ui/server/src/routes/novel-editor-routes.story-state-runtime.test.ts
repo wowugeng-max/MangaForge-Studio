@@ -117,6 +117,7 @@ describe('novel editor Story State route runtime', () => {
 
     expect(response.statusCode).toBe(502)
     expect(response.body?.ok).toBe(false)
+    expect(response.body?.chapter_id).toBe(chapter.id)
     expect(response.body?.story_state_update).toMatchObject({ ok: false })
     expect(String(response.body?.story_state_update?.error || '')).toContain('injected Story State preparation failure')
     expect(convergenceReviews).toHaveLength(0)

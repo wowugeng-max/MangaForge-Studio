@@ -199,6 +199,12 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRevis
             signal,
           },
         )
+        if (signal?.aborted) throw signal.reason
+        if (result instanceof Error) throw result
+        if (result?.error) {
+          if (result.error instanceof Error) throw result.error
+          throw new Error(String(result.error).slice(0, 500))
+        }
         const report = getNovelPayload(result)
         const saved = await createNovelReview(activeWorkspace, {
           project_id: project.id,

@@ -47,10 +47,12 @@ import { applySingleChapterStoryState, prepareSingleChapterStoryState } from './
 export function registerNovelEditorQualityRoutes(app: Express, ctx: EditorRoutesContext) {
   app.post('/api/novel/chapters/:chapterId/story-state-sync', async (req, res) => {
     let stageFailure: unknown
+    let stageChapterId: number | undefined
     try {
       const loaded = await loadChapterBundle(ctx, Number(req.body.project_id || req.query.project_id || 0), Number(req.params.chapterId))
       if ('error' in loaded) return res.status(loaded.status || 500).json({ error: loaded.error })
       const { activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews } = loaded
+      stageChapterId = chapter.id
       const contextPackage = await ctx.buildChapterContextPackage(
         activeWorkspace,
         project,
@@ -178,6 +180,7 @@ export function registerNovelEditorQualityRoutes(app: Express, ctx: EditorRoutes
         const message = String((error as any)?.message || error)
         return res.status(502).json({
           ok: false,
+          chapter_id: stageChapterId,
           error: message,
           story_state_update: { ok: false, error: message },
         })

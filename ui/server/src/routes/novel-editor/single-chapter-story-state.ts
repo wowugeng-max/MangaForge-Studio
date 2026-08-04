@@ -123,6 +123,23 @@ function assertExactContextScope(input: SingleChapterStoryStateInput, exactConte
   ) {
     throw storyStateError('STORY_STATE_CONTEXT_SCOPE_MISMATCH', 'Story State context does not match target chapter')
   }
+  if (revisionTextHash(String(exactContext.chapter?.chapter_text || '')) !== input.receipt.candidate_hash) {
+    throw storyStateError(
+      'STORY_STATE_CONTEXT_CANDIDATE_MISMATCH',
+      'Story State context chapter does not match receipt candidate',
+    )
+  }
+  const chapterTarget = exactContext.contextPackage?.chapter_target
+  if (chapterTarget && typeof chapterTarget === 'object') {
+    const hasOwn = (field: string) => Object.prototype.hasOwnProperty.call(chapterTarget, field)
+    if (
+      (hasOwn('chapter_id') && Number(chapterTarget.chapter_id) !== Number(input.chapterId))
+      || (hasOwn('id') && Number(chapterTarget.id) !== Number(input.chapterId))
+      || (hasOwn('chapter_no') && Number(chapterTarget.chapter_no) !== Number(exactContext.chapter?.chapter_no))
+    ) {
+      throw storyStateError('STORY_STATE_CONTEXT_SCOPE_MISMATCH', 'Story State context does not match target chapter')
+    }
+  }
 }
 
 function assertCurrentCandidate(chapter: any, receipt: SingleChapterStoryStateReceipt) {
