@@ -85,29 +85,75 @@ function projectAssertionReceipt(value, errorMessage) {
   const stage = boundedString(ownDataValue(value, 'stage'), STAGE)
   const source = ownDataValue(value, 'source')
   const sourceFingerprint = boundedString(ownDataValue(value, 'source_fingerprint'), SHA256_FINGERPRINT)
+  const authorityFingerprint = boundedString(
+    ownDataValue(value, 'authority_fingerprint'),
+    SHA256_FINGERPRINT,
+  )
   const sessionId = boundedString(ownDataValue(value, 'session_id'), OPAQUE_ID)
-  if (!taskId || !stage || source !== 'mcp' || !sourceFingerprint || !sessionId) {
+  const serverId = boundedString(ownDataValue(value, 'server_id'), OPAQUE_ID)
+  const keyId = positiveSafeInteger(ownDataValue(value, 'key_id'))
+  const adapterId = boundedString(ownDataValue(value, 'adapter_id'), OPAQUE_ID)
+  const agentId = boundedString(ownDataValue(value, 'agent_id'), OPAQUE_ID)
+  const model = boundedLabel(ownDataValue(value, 'model'), 160)
+  if (!taskId || !stage || source !== 'mcp' || !sourceFingerprint
+    || !authorityFingerprint || !sessionId || !serverId || !keyId
+    || !adapterId || !agentId || !model) {
     throw safeError(errorMessage, 'INVALID_RECEIPTS')
   }
-  return { task_id: taskId, stage, source_fingerprint: sourceFingerprint, session_id: sessionId }
+  return {
+    task_id: taskId,
+    stage,
+    source_fingerprint: sourceFingerprint,
+    authority_fingerprint: authorityFingerprint,
+    session_id: sessionId,
+    server_id: serverId,
+    key_id: keyId,
+    adapter_id: adapterId,
+    agent_id: agentId,
+    model,
+  }
 }
+
+const TASK_RECEIPT_IDENTITY_FIELDS = [
+  'task_id',
+  'source_fingerprint',
+  'authority_fingerprint',
+  'session_id',
+  'server_id',
+  'key_id',
+  'adapter_id',
+  'agent_id',
+  'model',
+]
+
+const SOURCE_RECEIPT_IDENTITY_FIELDS = [
+  'source_fingerprint',
+  'authority_fingerprint',
+  'server_id',
+  'key_id',
+  'adapter_id',
+  'agent_id',
+  'model',
+]
 
 export function assertOneTaskSession(receipts) {
   const errorMessage = 'invalid chapter task receipts'
   const projected = receiptArrayValues(receipts, errorMessage)
     .map(value => projectAssertionReceipt(value, errorMessage))
   const first = projected[0]
-  if (projected.some(value => (
-    value.task_id !== first.task_id
-    || value.source_fingerprint !== first.source_fingerprint
-    || value.session_id !== first.session_id
-  ))) {
+  if (projected.some(value => TASK_RECEIPT_IDENTITY_FIELDS.some(field => value[field] !== first[field]))) {
     throw safeError(errorMessage, 'INVALID_RECEIPTS')
   }
   return {
     task_id: first.task_id,
     source_fingerprint: first.source_fingerprint,
+    authority_fingerprint: first.authority_fingerprint,
     session_id: first.session_id,
+    server_id: first.server_id,
+    key_id: first.key_id,
+    adapter_id: first.adapter_id,
+    agent_id: first.agent_id,
+    model: first.model,
   }
 }
 
@@ -210,6 +256,13 @@ function parseBoundedReceiptRef(value) {
   return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : undefined
 }
 
+function mergedReceiptField(input, output, field, fail) {
+  const inputValue = ownDataValue(input, field)
+  const outputValue = ownDataValue(output, field)
+  if (inputValue !== undefined && outputValue !== undefined && inputValue !== outputValue) fail()
+  return outputValue ?? inputValue
+}
+
 export function projectStageReceipt(run) {
   const fail = () => { throw safeError('invalid chapter stage receipt', 'INVALID_STAGE_RECEIPT') }
   if (!run || typeof run !== 'object' || types.isProxy(run)) fail()
@@ -224,20 +277,27 @@ export function projectStageReceipt(run) {
   if (ownDataValue(input, 'receipt_authority') !== RECEIPT_AUTHORITY
     || ownDataValue(output, 'receipt_authority') !== RECEIPT_AUTHORITY) fail()
   const merged = {
-    task_id: ownDataValue(output, 'task_id') ?? ownDataValue(input, 'task_id'),
-    project_id: ownDataValue(output, 'project_id') ?? ownDataValue(input, 'project_id'),
-    chapter_id: ownDataValue(output, 'chapter_id') ?? ownDataValue(input, 'chapter_id'),
-    stage: ownDataValue(output, 'stage') ?? ownDataValue(input, 'stage'),
-    status: ownDataValue(output, 'status') ?? runStatus,
-    source: ownDataValue(output, 'source') ?? ownDataValue(input, 'source'),
-    source_fingerprint: ownDataValue(output, 'source_fingerprint') ?? ownDataValue(input, 'source_fingerprint'),
-    session_id: ownDataValue(output, 'session_id') ?? ownDataValue(input, 'session_id'),
+    task_id: mergedReceiptField(input, output, 'task_id', fail),
+    project_id: mergedReceiptField(input, output, 'project_id', fail),
+    chapter_id: mergedReceiptField(input, output, 'chapter_id', fail),
+    stage: mergedReceiptField(input, output, 'stage', fail),
+    status: mergedReceiptField(input, output, 'status', fail) ?? runStatus,
+    source: mergedReceiptField(input, output, 'source', fail),
+    source_fingerprint: mergedReceiptField(input, output, 'source_fingerprint', fail),
+    authority_fingerprint: mergedReceiptField(input, output, 'authority_fingerprint', fail),
+    session_id: mergedReceiptField(input, output, 'session_id', fail),
+    server_id: mergedReceiptField(input, output, 'server_id', fail),
+    key_id: mergedReceiptField(input, output, 'key_id', fail),
+    adapter_id: mergedReceiptField(input, output, 'adapter_id', fail),
+    agent_id: mergedReceiptField(input, output, 'agent_id', fail),
+    model: mergedReceiptField(input, output, 'model', fail),
   }
   const assertionReceipt = projectAssertionReceipt(merged, 'invalid chapter stage receipt')
   const projectId = positiveSafeInteger(merged.project_id)
   const chapterId = positiveSafeInteger(merged.chapter_id)
   const status = boundedString(merged.status, STAGE)
-  if (!projectId || !chapterId || !status || assertionReceipt.stage !== runStage || projectId !== runProjectId) fail()
+  if (!projectId || !chapterId || !status || status !== runStatus
+    || assertionReceipt.stage !== runStage || projectId !== runProjectId) fail()
   return {
     run_id: runId,
     task_id: assertionReceipt.task_id,
@@ -247,7 +307,13 @@ export function projectStageReceipt(run) {
     status,
     source: 'mcp',
     source_fingerprint: assertionReceipt.source_fingerprint,
+    authority_fingerprint: assertionReceipt.authority_fingerprint,
     session_id: assertionReceipt.session_id,
+    server_id: assertionReceipt.server_id,
+    key_id: assertionReceipt.key_id,
+    adapter_id: assertionReceipt.adapter_id,
+    agent_id: assertionReceipt.agent_id,
+    model: assertionReceipt.model,
   }
 }
 
@@ -354,17 +420,37 @@ export function projectSourceAuthority(value) {
   const display = ownDataValue(value, 'display')
   const binding = ownDataValue(source, 'mcp')
   const fingerprint = boundedString(ownDataValue(value, 'fingerprint'), SHA256_FINGERPRINT)
+  const serverId = boundedString(ownDataValue(binding, 'server_id'), OPAQUE_ID)
+  const keyId = positiveSafeInteger(ownDataValue(binding, 'key_id'))
+  const adapterId = boundedString(ownDataValue(binding, 'adapter_id'), OPAQUE_ID)
+  const agentId = boundedString(ownDataValue(binding, 'agent_id'), OPAQUE_ID)
+  const model = boundedLabel(ownDataValue(binding, 'model'), 160) || 'MCP Auto'
   if (ownDataValue(value, 'ok') !== true
     || ownDataValue(source, 'active') !== 'mcp'
     || ownDataValue(display, 'active') !== 'mcp'
-    || ownDataValue(binding, 'adapter_id') !== 'buda'
-    || !fingerprint) {
+    || adapterId !== 'buda'
+    || !fingerprint
+    || !serverId
+    || !keyId
+    || !agentId) {
     throw safeError('active chapter source is not Buda MCP', 'CHAPTER_SOURCE_NOT_BUDA_MCP')
   }
-  return { fingerprint }
+  const locked = ownDataValue(value, 'locked')
+  if (locked !== false) {
+    throw safeError('chapter source remains locked', 'CHAPTER_SOURCE_LOCKED')
+  }
+  return {
+    fingerprint,
+    locked,
+    server_id: serverId,
+    key_id: keyId,
+    adapter_id: adapterId,
+    agent_id: agentId,
+    model,
+  }
 }
 
-function projectChapter(value, expectedProjectId, expectedChapterId) {
+export function projectChapter(value, expectedProjectId, expectedChapterId) {
   const id = positiveSafeInteger(ownDataValue(value, 'id'))
   const projectId = positiveSafeInteger(ownDataValue(value, 'project_id'))
   const chapterNo = positiveSafeInteger(ownDataValue(value, 'chapter_no'))
@@ -373,6 +459,30 @@ function projectChapter(value, expectedProjectId, expectedChapterId) {
     throw safeError('invalid chapter projection', 'INVALID_CHAPTER_PROJECTION')
   }
   return { id, project_id: projectId, chapter_no: chapterNo, has_prose: chapterText.trim().length > 0 }
+}
+
+export function projectStoryState(project, expectedChapterNo) {
+  const referenceConfig = ownDataValue(project, 'reference_config')
+  const storyState = ownDataValue(referenceConfig, 'story_state')
+  const lastUpdated = positiveSafeInteger(ownDataValue(storyState, 'last_updated_chapter'))
+  if (!lastUpdated || lastUpdated < expectedChapterNo) {
+    throw safeError('Story State did not advance', 'STORY_STATE_NOT_ADVANCED')
+  }
+  return { last_updated_chapter: lastUpdated }
+}
+
+export function projectQuarantineList(value) {
+  if (!Array.isArray(value) || types.isProxy(value)) {
+    throw safeError('invalid quarantine list', 'INVALID_QUARANTINES')
+  }
+  const length = ownDataValue(value, 'length')
+  if (!Number.isSafeInteger(length) || length < 0) {
+    throw safeError('invalid quarantine list', 'INVALID_QUARANTINES')
+  }
+  if (length !== 0) {
+    throw safeError('unresolved MCP quarantine remains', 'MCP_QUARANTINE_REMAINS')
+  }
+  return []
 }
 
 export function projectRunSummaryList(value) {
@@ -502,6 +612,37 @@ function safeOutputCode(error) {
   return boundedString(code, SAFE_CODE) || 'SMOKE_FAILED'
 }
 
+function sameFields(left, right, fields) {
+  return fields.every(field => left[field] === right[field])
+}
+
+function assertReceiptMatchesAuthority(receipt, authority, phase) {
+  const prefix = phase === 'automatic' ? 'automatic' : 'manual'
+  if (receipt.source_fingerprint !== authority.fingerprint) {
+    throw safeError(`${prefix} source fingerprint mismatch`, `${prefix.toUpperCase()}_FINGERPRINT_MISMATCH`)
+  }
+  if (receipt.authority_fingerprint !== authority.fingerprint) {
+    throw safeError(
+      `${prefix} authority fingerprint mismatch`,
+      `${prefix.toUpperCase()}_AUTHORITY_FINGERPRINT_MISMATCH`,
+    )
+  }
+  const providerFields = ['server_id', 'key_id', 'adapter_id', 'agent_id', 'model']
+  if (!sameFields(receipt, authority, providerFields)) {
+    throw safeError(
+      `${prefix} provider identity mismatch`,
+      `${prefix.toUpperCase()}_PROVIDER_IDENTITY_MISMATCH`,
+    )
+  }
+}
+
+function assertSameSourceAuthority(left, right, message, code) {
+  if (left.fingerprint !== right.fingerprint
+    || !sameFields(left, right, ['server_id', 'key_id', 'adapter_id', 'agent_id', 'model'])) {
+    throw safeError(message, code)
+  }
+}
+
 export async function main(argv = process.argv.slice(2)) {
   let stage = 'arguments'
   try {
@@ -581,8 +722,17 @@ export async function main(argv = process.argv.slice(2)) {
     )
     const automaticSession = assertOneTaskSession(automaticReceipts)
     const automaticStages = assertAutomaticStageCoverage(automaticReceipts)
-    if (automaticSession.source_fingerprint !== authority.fingerprint) {
-      throw safeError('automatic source fingerprint mismatch', 'AUTOMATIC_FINGERPRINT_MISMATCH')
+    assertReceiptMatchesAuthority(automaticSession, authority, 'automatic')
+
+    stage = 'accepted_chapter'
+    const acceptedChapter = projectChapter(await requestJson(
+      options.baseUrl,
+      `/api/novel/chapters/${options.chapterId}?project_id=${options.projectId}`,
+      undefined,
+      deadline,
+    ), options.projectId, options.chapterId)
+    if (!acceptedChapter.has_prose) {
+      throw safeError('accepted chapter has no prose', 'CHAPTER_PROSE_EMPTY')
     }
 
     stage = 'manual_baseline'
@@ -609,34 +759,67 @@ export async function main(argv = process.argv.slice(2)) {
       manualReceipts,
       automaticSession.task_id,
     )
-    if (manualSession.source_fingerprint !== authority.fingerprint) {
-      throw safeError('manual source fingerprint mismatch', 'MANUAL_FINGERPRINT_MISMATCH')
+    assertReceiptMatchesAuthority(manualSession, authority, 'manual')
+    if (!sameFields(automaticSession, manualSession, SOURCE_RECEIPT_IDENTITY_FIELDS)) {
+      throw safeError('manual source identity mismatch', 'MANUAL_SOURCE_IDENTITY_MISMATCH')
     }
 
     const manualStages = [...new Set(manualReceipts.map(receipt => receipt.stage))]
-    const manualStageRunIds = manualReceipts.map(receipt => receipt.run_id)
+
+    stage = 'final_source_authority'
+    const finalAuthority = projectSourceAuthority(await requestJson(
+      options.baseUrl,
+      `/api/novel/projects/${options.projectId}/chapter-generation-source`,
+      undefined,
+      deadline,
+    ))
+    assertSameSourceAuthority(
+      authority,
+      finalAuthority,
+      'chapter source changed during smoke',
+      'SOURCE_CHANGED_DURING_SMOKE',
+    )
+
+    stage = 'final_quarantines'
+    projectQuarantineList(await requestJson(
+      options.baseUrl,
+      '/api/mcp/quarantines',
+      undefined,
+      deadline,
+    ))
+
+    stage = 'final_story_state'
+    const finalProject = await requestJson(
+      options.baseUrl,
+      `/api/novel/projects/${options.projectId}`,
+      undefined,
+      deadline,
+    )
+    if (positiveSafeInteger(ownDataValue(finalProject, 'id')) !== options.projectId) {
+      throw safeError('invalid project projection', 'INVALID_PROJECT_PROJECTION')
+    }
+    const storyState = projectStoryState(finalProject, acceptedChapter.chapter_no)
+
     console.log(JSON.stringify({
       ok: true,
       project_id: options.projectId,
       chapter_id: options.chapterId,
-      source: 'mcp',
+      chapter_has_prose: true,
+      story_state_last_updated_chapter: storyState.last_updated_chapter,
       source_fingerprint: maskFingerprint(authority.fingerprint),
       automatic: {
         run_id: automatic.run_id,
-        stage_run_ids: automaticReceipts.map(receipt => receipt.run_id),
         stages: automaticStages,
         session: maskSessionId(automaticSession.session_id),
-        passed: true,
       },
       manual: {
-        operation_run_id: manualStageRunIds[manualStageRunIds.length - 1],
-        stage_run_ids: manualStageRunIds,
         stages: manualStages,
         session: maskSessionId(manualSession.session_id),
-        passed: true,
       },
-      sessions_different: manualSession.session_id !== automaticSession.session_id,
       tasks_different: manualSession.task_id !== automaticSession.task_id,
+      sessions_different: manualSession.session_id !== automaticSession.session_id,
+      source_locked: false,
+      quarantines: 0,
     }))
     return 0
   } catch (error) {

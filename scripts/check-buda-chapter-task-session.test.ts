@@ -1,18 +1,31 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, spyOn, test } from 'bun:test'
 import {
   assertAutomaticStageCoverage,
   assertNewTaskSession,
   assertOneTaskSession,
+  main,
   maskFingerprint,
   maskSessionId,
   parseCliArgs,
+  projectChapter,
+  projectQuarantineList,
   projectRunSummaryList,
   projectSourceAuthority,
   projectStageReceipt,
+  projectStoryState,
   requestJson,
 } from './check-buda-chapter-task-session.mjs'
 
 const fingerprint = `sha256:${'a'.repeat(64)}`
+const otherFingerprint = `sha256:${'b'.repeat(64)}`
+
+const providerIdentity = {
+  server_id: 'buda',
+  key_id: 7,
+  adapter_id: 'buda',
+  agent_id: 'agent-1',
+  model: 'MCP Auto',
+}
 
 function receipt(stage: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -20,9 +33,138 @@ function receipt(stage: string, overrides: Record<string, unknown> = {}) {
     stage,
     source: 'mcp',
     source_fingerprint: fingerprint,
+    authority_fingerprint: fingerprint,
     session_id: 'session-1',
+    ...providerIdentity,
     ...overrides,
   }
+}
+
+function sourceView(overrides: Record<string, unknown> = {}) {
+  return {
+    ok: true,
+    source: {
+      version: 'chapter_generation_source_v1',
+      active: 'mcp',
+      model: { model_id: 217 },
+      mcp: { ...providerIdentity, model: '' },
+    },
+    display: { active: 'mcp', model_id: 217, mcp: { ...providerIdentity, model: '' } },
+    fingerprint,
+    locked: false,
+    ...overrides,
+  }
+}
+
+function stageRun(
+  id: number,
+  stage: string,
+  taskId: string,
+  sessionId: string,
+  overrides: Record<string, unknown> = {},
+) {
+  const common = {
+    receipt_authority: 'chapter_generation_stage_v1',
+    task_id: taskId,
+    project_id: 12,
+    chapter_id: 34,
+    stage,
+    source: 'mcp',
+    source_fingerprint: fingerprint,
+    authority_fingerprint: fingerprint,
+    session_id: sessionId,
+    ...providerIdentity,
+    ...overrides,
+  }
+  return {
+    id,
+    project_id: 12,
+    chapter_id: 34,
+    run_type: 'chapter_generation_stage',
+    step_name: stage,
+    status: 'success',
+    input_ref: JSON.stringify(common),
+    output_ref: JSON.stringify({ ...common, status: 'success' }),
+  }
+}
+
+function deterministicSmokeFetch(options: {
+  automaticReceiptOverrides?: Record<string, unknown>
+} = {}) {
+  const calls: string[] = []
+  let chapterReads = 0
+  let summaryReads = 0
+  const automaticRuns = [
+    stageRun(101, 'draft', 'task-auto', 'session-auto', options.automaticReceiptOverrides),
+    stageRun(102, 'quality_review', 'task-auto', 'session-auto'),
+    stageRun(103, 'story_state_sync', 'task-auto', 'session-auto'),
+  ]
+  const manualRun = stageRun(104, 'manual_recheck', 'task-manual', 'session-manual')
+  const details = new Map([...automaticRuns, manualRun].map(run => [run.id, run]))
+  const summaries = (runs: ReturnType<typeof stageRun>[]) => runs.map(run => ({
+    id: run.id,
+    project_id: run.project_id,
+    chapter_id: run.chapter_id,
+    run_type: run.run_type,
+    step_name: run.step_name,
+    status: run.status,
+  }))
+  const json = (value: unknown) => new Response(JSON.stringify(value), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url)
+    const path = `${url.pathname}${url.search}`
+    const method = init?.method || 'GET'
+    calls.push(`${method}:${path}`)
+
+    if (path === '/api/novel/projects/12/chapter-generation-source') return json(sourceView())
+    if (path === '/api/novel/chapters/34?project_id=12') {
+      chapterReads += 1
+      return json({
+        id: 34,
+        project_id: 12,
+        chapter_no: 9,
+        chapter_text: chapterReads === 1 ? '' : '风从城门吹来。',
+      })
+    }
+    if (path === '/api/novel/runs?project_id=12&view=summary&limit=1000') {
+      summaryReads += 1
+      if (summaryReads === 1) return json([])
+      if (summaryReads <= 3) return json(summaries(automaticRuns))
+      return json(summaries([...automaticRuns, manualRun]))
+    }
+    if (path === '/api/novel/projects/12/chapter-groups/start' && method === 'POST') {
+      return json({
+        ok: true,
+        run: { id: 200, project_id: 12, run_type: 'chapter_group_generation' },
+        group: { chapter_ids: [34] },
+      })
+    }
+    if (path === '/api/novel/projects/12/chapter-groups/200/execute' && method === 'POST') {
+      return json({ ok: true })
+    }
+    if (path === '/api/novel/runs/200?project_id=12') {
+      return json({ id: 200, project_id: 12, run_type: 'chapter_group_generation', status: 'success' })
+    }
+    const detailMatch = path.match(/^\/api\/novel\/runs\/(\d+)\?project_id=12$/)
+    if (detailMatch) return json(details.get(Number(detailMatch[1])))
+    if (path === '/api/novel/chapters/34/prose-quality' && method === 'POST') {
+      return json({ ok: true })
+    }
+    if (path === '/api/mcp/quarantines') return json([])
+    if (path === '/api/novel/projects/12') {
+      return json({ id: 12, reference_config: { story_state: { last_updated_chapter: 9 } } })
+    }
+    return new Response(JSON.stringify({ error_code: 'UNEXPECTED_TEST_ROUTE' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }) as typeof fetch
+
+  return { calls, fetchImpl }
 }
 
 describe('Buda chapter task receipt assertions', () => {
@@ -34,8 +176,49 @@ describe('Buda chapter task receipt assertions', () => {
     ])).toEqual({
       task_id: 'task-1',
       source_fingerprint: fingerprint,
+      authority_fingerprint: fingerprint,
       session_id: 'session-1',
+      ...providerIdentity,
     })
+  })
+
+  test('requires one provider identity and both fingerprints for the automatic chain', () => {
+    const receipts = [
+      receipt('draft'),
+      receipt('quality_review'),
+      receipt('quality_repair'),
+      receipt('story_state_sync'),
+    ]
+    expect(assertOneTaskSession(receipts)).toMatchObject({
+      source_fingerprint: fingerprint,
+      authority_fingerprint: fingerprint,
+      ...providerIdentity,
+    })
+
+    for (const overrides of [
+      { authority_fingerprint: undefined },
+      { server_id: undefined },
+      { key_id: undefined },
+      { key_id: 0 },
+      { adapter_id: undefined },
+      { agent_id: undefined },
+      { model: undefined },
+    ]) {
+      expect(() => assertOneTaskSession([receipt('draft', overrides)]))
+        .toThrow('invalid chapter task receipts')
+    }
+
+    for (const overrides of [
+      { authority_fingerprint: otherFingerprint },
+      { server_id: 'other-server' },
+      { key_id: 8 },
+      { adapter_id: 'generic' },
+      { agent_id: 'agent-2' },
+      { model: 'Other Model' },
+    ]) {
+      expect(() => assertOneTaskSession([receipt('draft'), receipt('story_state_sync', overrides)]))
+        .toThrow('invalid chapter task receipts')
+    }
   })
 
   test('rejects empty, incomplete, non-MCP, and inconsistent receipts with one safe error', () => {
@@ -45,10 +228,12 @@ describe('Buda chapter task receipt assertions', () => {
       [receipt('draft', { stage: undefined })],
       [receipt('draft', { source: undefined })],
       [receipt('draft', { source_fingerprint: undefined })],
+      [receipt('draft', { authority_fingerprint: undefined })],
       [receipt('draft', { session_id: undefined })],
       [receipt('draft', { source: 'model' })],
       [receipt('draft'), receipt('quality_review', { task_id: 'task-2' })],
       [receipt('draft'), receipt('quality_review', { source_fingerprint: `sha256:${'b'.repeat(64)}` })],
+      [receipt('draft'), receipt('quality_review', { authority_fingerprint: otherFingerprint })],
       [receipt('draft'), receipt('quality_review', { session_id: 'session-2' })],
     ]
 
@@ -63,6 +248,7 @@ describe('Buda chapter task receipt assertions', () => {
       [receipt('draft', { task_id: 'x'.repeat(513) })],
       [receipt('draft', { session_id: 'x'.repeat(513) })],
       [receipt('draft', { source_fingerprint: 'sha256:short' })],
+      [receipt('draft', { authority_fingerprint: 'sha256:short' })],
       [receipt('draft', { stage: 1 })],
       [receipt('draft', { task_id: 1 })],
       [receipt('draft', { session_id: 1 })],
@@ -127,12 +313,35 @@ describe('Buda chapter task receipt assertions', () => {
     expect(assertNewTaskSession('session-1', manual, 'task-1')).toEqual({
       task_id: 'task-2',
       source_fingerprint: fingerprint,
+      authority_fingerprint: fingerprint,
       session_id: 'session-2',
+      ...providerIdentity,
     })
     expect(assertNewTaskSession('session-1', manual)).toEqual({
       task_id: 'task-2',
       source_fingerprint: fingerprint,
+      authority_fingerprint: fingerprint,
       session_id: 'session-2',
+      ...providerIdentity,
+    })
+  })
+
+  test('keeps authority and provider identity while manual work gets a new task and Session', () => {
+    const automatic = assertOneTaskSession([
+      receipt('draft'),
+      receipt('quality_review'),
+      receipt('story_state_sync'),
+    ])
+    const manual = assertNewTaskSession('session-1', [
+      receipt('manual_recheck', { task_id: 'task-2', session_id: 'session-2' }),
+    ], 'task-1')
+
+    expect(manual.task_id).not.toBe(automatic.task_id)
+    expect(manual.session_id).not.toBe(automatic.session_id)
+    expect({ ...manual, task_id: undefined, session_id: undefined }).toEqual({
+      ...automatic,
+      task_id: undefined,
+      session_id: undefined,
     })
   })
 
@@ -178,18 +387,37 @@ describe('Buda smoke input and public receipt projection', () => {
   })
 
   test('requires the active MCP authority to be the Buda adapter', () => {
-    expect(projectSourceAuthority({
-      ok: true,
-      source: { active: 'mcp', mcp: { adapter_id: 'buda' } },
-      display: { active: 'mcp' },
+    expect(projectSourceAuthority(sourceView())).toEqual({
       fingerprint,
-    })).toEqual({ fingerprint })
-    expect(() => projectSourceAuthority({
-      ok: true,
-      source: { active: 'mcp', mcp: { adapter_id: 'generic' } },
-      display: { active: 'mcp' },
+      locked: false,
+      ...providerIdentity,
+    })
+    expect(() => projectSourceAuthority(sourceView({
+      source: { active: 'mcp', mcp: { ...providerIdentity, adapter_id: 'generic' } },
+    }))).toThrow('active chapter source is not Buda MCP')
+  })
+
+  test('requires released project source and no unresolved quarantine', () => {
+    expect(projectSourceAuthority(sourceView({ locked: false }))).toMatchObject({
+      locked: false,
       fingerprint,
-    })).toThrow('active chapter source is not Buda MCP')
+      ...providerIdentity,
+    })
+    expect(() => projectSourceAuthority(sourceView({ locked: true })))
+      .toThrow('chapter source remains locked')
+    expect(() => projectSourceAuthority(sourceView({ locked: undefined })))
+      .toThrow('chapter source remains locked')
+
+    expect(projectQuarantineList([])).toEqual([])
+    expect(() => projectQuarantineList([{
+      id: 'quarantine-1',
+      server_id: 'private-server',
+      key_id: 7,
+      agent_id: 'private-agent',
+      session_id: 'private-session',
+    }])).toThrow('unresolved MCP quarantine remains')
+    expect(() => projectQuarantineList(new Proxy([], {})))
+      .toThrow('invalid quarantine list')
   })
 
   test('projects only bounded stage receipt fields from a public run', () => {
@@ -207,9 +435,13 @@ describe('Buda smoke input and public receipt projection', () => {
         stage: 'quality_review',
         source: 'mcp',
         source_fingerprint: fingerprint,
+        authority_fingerprint: fingerprint,
         session_id: 'session-1',
+        ...providerIdentity,
         prompt_hash: `sha256:${'b'.repeat(64)}`,
         prompt: 'must not project',
+        server_url: 'https://must-not-project.invalid',
+        headers: { Authorization: 'must not project' },
       }),
       output_ref: JSON.stringify({
         receipt_authority: 'chapter_generation_stage_v1',
@@ -220,8 +452,12 @@ describe('Buda smoke input and public receipt projection', () => {
         status: 'success',
         source: 'mcp',
         source_fingerprint: fingerprint,
+        authority_fingerprint: fingerprint,
         session_id: 'session-1',
+        ...providerIdentity,
         prose: 'must not project',
+        raw_output: 'must not project',
+        key: 'must not project',
       }),
     })
 
@@ -234,9 +470,172 @@ describe('Buda smoke input and public receipt projection', () => {
       status: 'success',
       source: 'mcp',
       source_fingerprint: fingerprint,
+      authority_fingerprint: fingerprint,
       session_id: 'session-1',
+      ...providerIdentity,
     })
     expect(JSON.stringify(projected)).not.toContain('must not project')
+  })
+
+  test('merges safe provider identity split across stage input and output', () => {
+    const projected = projectStageReceipt({
+      id: 78,
+      project_id: 12,
+      run_type: 'chapter_generation_stage',
+      step_name: 'story_state_sync',
+      status: 'success',
+      input_ref: JSON.stringify({
+        receipt_authority: 'chapter_generation_stage_v1',
+        task_id: 'task-1',
+        project_id: 12,
+        chapter_id: 34,
+        stage: 'story_state_sync',
+        source: 'mcp',
+        source_fingerprint: fingerprint,
+        authority_fingerprint: fingerprint,
+        server_id: 'buda',
+        key_id: 7,
+      }),
+      output_ref: JSON.stringify({
+        receipt_authority: 'chapter_generation_stage_v1',
+        task_id: 'task-1',
+        project_id: 12,
+        chapter_id: 34,
+        stage: 'story_state_sync',
+        status: 'success',
+        source: 'mcp',
+        session_id: 'session-1',
+        adapter_id: 'buda',
+        agent_id: 'agent-1',
+        model: 'MCP Auto',
+      }),
+    })
+
+    expect(projected).toMatchObject({
+      source_fingerprint: fingerprint,
+      authority_fingerprint: fingerprint,
+      session_id: 'session-1',
+      ...providerIdentity,
+    })
+  })
+
+  test('rejects missing or mismatched authority and any model receipt after the baseline', () => {
+    const projectedStageRun = (inputOverrides: Record<string, unknown> = {}, outputOverrides: Record<string, unknown> = {}) => ({
+      id: 79,
+      project_id: 12,
+      run_type: 'chapter_generation_stage',
+      step_name: 'draft',
+      status: 'success',
+      input_ref: JSON.stringify({
+        receipt_authority: 'chapter_generation_stage_v1',
+        task_id: 'task-1', project_id: 12, chapter_id: 34, stage: 'draft',
+        source: 'mcp', source_fingerprint: fingerprint, authority_fingerprint: fingerprint,
+        session_id: 'session-1', ...providerIdentity, ...inputOverrides,
+      }),
+      output_ref: JSON.stringify({
+        receipt_authority: 'chapter_generation_stage_v1',
+        task_id: 'task-1', project_id: 12, chapter_id: 34, stage: 'draft', status: 'success',
+        source: 'mcp', source_fingerprint: fingerprint, authority_fingerprint: fingerprint,
+        session_id: 'session-1', ...providerIdentity, ...outputOverrides,
+      }),
+    })
+
+    expect(() => projectStageReceipt(projectedStageRun(
+      { authority_fingerprint: undefined },
+      { authority_fingerprint: undefined },
+    )))
+      .toThrow('invalid chapter stage receipt')
+    expect(() => projectStageReceipt(projectedStageRun({}, { authority_fingerprint: otherFingerprint })))
+      .toThrow('invalid chapter stage receipt')
+    expect(() => projectStageReceipt(projectedStageRun({ source: 'model' }, { source: 'model' })))
+      .toThrow('invalid chapter stage receipt')
+    expect(() => projectStageReceipt(projectedStageRun({}, { agent_id: 'agent-2' })))
+      .toThrow('invalid chapter stage receipt')
+
+    const mismatchedRunStatus = stageRun(80, 'draft', 'task-1', 'session-1')
+    mismatchedRunStatus.status = 'failed'
+    expect(() => projectStageReceipt(mismatchedRunStatus))
+      .toThrow('invalid chapter stage receipt')
+  })
+
+  test('requires non-empty accepted prose and Story State advancement', () => {
+    expect(projectChapter({
+      id: 34,
+      project_id: 12,
+      chapter_no: 9,
+      chapter_text: '风从城门吹来。',
+    }, 12, 34)).toEqual({
+      id: 34,
+      project_id: 12,
+      chapter_no: 9,
+      has_prose: true,
+    })
+    expect(projectChapter({
+      id: 34,
+      project_id: 12,
+      chapter_no: 9,
+      chapter_text: ' \n\t ',
+    }, 12, 34).has_prose).toBe(false)
+
+    expect(projectStoryState({
+      id: 12,
+      reference_config: { story_state: { last_updated_chapter: 9 } },
+    }, 9)).toEqual({ last_updated_chapter: 9 })
+    expect(() => projectStoryState({
+      id: 12,
+      reference_config: { story_state: { last_updated_chapter: 8 } },
+    }, 9)).toThrow('Story State did not advance')
+    expect(() => projectStoryState({
+      id: 12,
+      reference_config: { story_state: { last_updated_chapter: 0 } },
+    }, 9)).toThrow('Story State did not advance')
+  })
+
+  test('does not invoke accessors or Proxy traps in source, chapter, or Story State projections', () => {
+    const sentinel = 'PRIVATE_TERMINAL_PROJECTION_SENTINEL'
+    let getterCalls = 0
+    let proxyCalls = 0
+    const hostileBinding = new Proxy({ ...providerIdentity }, {
+      get() {
+        proxyCalls += 1
+        throw new Error(sentinel)
+      },
+      getOwnPropertyDescriptor() {
+        proxyCalls += 1
+        throw new Error(sentinel)
+      },
+    })
+    const hostileProject = Object.create(null)
+    Object.defineProperty(hostileProject, 'reference_config', {
+      get() {
+        getterCalls += 1
+        throw new Error(sentinel)
+      },
+    })
+    const hostileChapter = Object.create(null)
+    Object.defineProperty(hostileChapter, 'chapter_text', {
+      get() {
+        getterCalls += 1
+        throw new Error(sentinel)
+      },
+    })
+
+    for (const operation of [
+      () => projectSourceAuthority(sourceView({
+        source: { active: 'mcp', mcp: hostileBinding },
+      })),
+      () => projectStoryState(hostileProject, 9),
+      () => projectChapter(hostileChapter, 12, 34),
+    ]) {
+      try {
+        operation()
+        throw new Error('expected hostile projection to fail')
+      } catch (error: any) {
+        expect(JSON.stringify(error)).not.toContain(sentinel)
+      }
+    }
+    expect(getterCalls).toBe(0)
+    expect(proxyCalls).toBe(0)
   })
 
   test('accepts bounded primitive Unicode labels in unrelated public run summaries', () => {
@@ -377,5 +776,99 @@ describe('Buda smoke HTTP transport', () => {
     expect(error?.message).toBe('HTTP response too large')
     expect(error?.code).toBe('HTTP_RESPONSE_TOO_LARGE')
     expect(JSON.stringify(error)).not.toContain(sentinel)
+  })
+})
+
+describe('Buda smoke terminal workflow', () => {
+  test('checks accepted prose, Story State, released authority, quarantine, and emits only the safe summary', async () => {
+    const scenario = deterministicSmokeFetch()
+    const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(scenario.fetchImpl)
+    const logSpy = spyOn(console, 'log').mockImplementation(() => {})
+    const errorSpy = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(await main([
+        '--base-url', 'http://127.0.0.1:8787',
+        '--project-id', '12',
+        '--chapter-id', '34',
+        '--timeout-ms', '10000',
+        '--poll-interval-ms', '100',
+      ])).toBe(0)
+
+      expect(errorSpy).not.toHaveBeenCalled()
+      expect(logSpy).toHaveBeenCalledTimes(1)
+      const rawSummary = String(logSpy.mock.calls[0]?.[0] || '')
+      expect(JSON.parse(rawSummary)).toEqual({
+        ok: true,
+        project_id: 12,
+        chapter_id: 34,
+        chapter_has_prose: true,
+        story_state_last_updated_chapter: 9,
+        source_fingerprint: maskFingerprint(fingerprint),
+        automatic: {
+          run_id: 200,
+          stages: ['draft', 'quality_review', 'story_state_sync'],
+          session: maskSessionId('session-auto'),
+        },
+        manual: {
+          stages: ['manual_recheck'],
+          session: maskSessionId('session-manual'),
+        },
+        tasks_different: true,
+        sessions_different: true,
+        source_locked: false,
+        quarantines: 0,
+      })
+      for (const privateValue of [
+        fingerprint,
+        'task-auto',
+        'task-manual',
+        'session-auto',
+        'session-manual',
+        'agent-1',
+        '风从城门吹来。',
+      ]) {
+        expect(rawSummary).not.toContain(privateValue)
+      }
+      expect(scenario.calls.filter(call => (
+        call === 'GET:/api/novel/projects/12/chapter-generation-source'
+      ))).toHaveLength(2)
+      expect(scenario.calls).toContain('GET:/api/mcp/quarantines')
+      expect(scenario.calls).toContain('GET:/api/novel/projects/12')
+      expect(scenario.calls.filter(call => (
+        call === 'GET:/api/novel/chapters/34?project_id=12'
+      ))).toHaveLength(2)
+    } finally {
+      errorSpy.mockRestore()
+      logSpy.mockRestore()
+      fetchSpy.mockRestore()
+    }
+  })
+
+  test('fails before manual work when any post-baseline chapter receipt is model sourced', async () => {
+    const scenario = deterministicSmokeFetch({ automaticReceiptOverrides: { source: 'model' } })
+    const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(scenario.fetchImpl)
+    const logSpy = spyOn(console, 'log').mockImplementation(() => {})
+    const errorSpy = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(await main([
+        '--base-url', 'http://127.0.0.1:8787',
+        '--project-id', '12',
+        '--chapter-id', '34',
+        '--timeout-ms', '10000',
+        '--poll-interval-ms', '100',
+      ])).toBe(1)
+      expect(logSpy).not.toHaveBeenCalled()
+      expect(errorSpy).toHaveBeenCalledTimes(1)
+      expect(JSON.parse(String(errorSpy.mock.calls[0]?.[0] || ''))).toEqual({
+        ok: false,
+        stage: 'automatic_receipts',
+        error_code: 'INVALID_RECEIPTS',
+      })
+      expect(scenario.calls).not.toContain('POST:/api/novel/chapters/34/prose-quality')
+    } finally {
+      errorSpy.mockRestore()
+      logSpy.mockRestore()
+      fetchSpy.mockRestore()
+    }
   })
 })
