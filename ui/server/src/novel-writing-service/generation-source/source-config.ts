@@ -275,17 +275,14 @@ export function resolveChapterGenerationSource(project: any): ChapterGenerationS
 }
 
 export function retainedMcpProjectBinding(project: any): McpProjectBinding | null {
-  const config = project?.reference_config
-  if (!config || typeof config !== 'object' || Array.isArray(config)) return null
-
-  const record = config as Record<string, unknown>
-  if (Object.prototype.hasOwnProperty.call(record, 'chapter_generation_source')) {
-    return normalizeChapterGenerationSource(record.chapter_generation_source).mcp || null
+  try {
+    const config = project?.reference_config
+    if (!config || typeof config !== 'object' || Array.isArray(config)) return null
+    return resolveChapterGenerationSource({ reference_config: config }).mcp || null
+  } catch (error) {
+    if (error instanceof McpError) throw error
+    throw new McpError('MCP_BINDING_INVALID', '章节生成来源配置无效')
   }
-  if (!Object.prototype.hasOwnProperty.call(record, 'prose_generation_source')) return null
-
-  const legacy = normalizeProseGenerationSource(record.prose_generation_source)
-  return legacy.type === 'mcp' ? legacy.mcp : null
 }
 
 export function chapterGenerationSourceFingerprint(state: ChapterGenerationSourceState) {

@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { createNovelProject } from '../../novel'
+import { McpError } from '../../mcp/errors'
 import { createMcpKey } from '../../mcp/key-store'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from '../../mcp/server-store'
 import * as sourceConfig from './source-config'
@@ -903,5 +904,88 @@ describe('retained MCP project binding extraction', () => {
         },
       },
     })).toThrow(expect.objectContaining({ code: 'MCP_BINDING_INVALID' }))
+  })
+
+  test('rejects legacy unsafe integer key identifiers exactly like chapter authority resolution', () => {
+    for (const keyId of [
+      Number.MAX_SAFE_INTEGER + 1,
+      String(Number.MAX_SAFE_INTEGER + 1),
+    ]) {
+      const project = {
+        reference_config: {
+          prose_generation_source: {
+            version: 'prose_generation_source_v1',
+            type: 'mcp',
+            mcp: {
+              ...mcp,
+              key_id: keyId,
+            },
+          },
+        },
+      }
+      expect(() => resolveChapterGenerationSource(project))
+        .toThrow(expect.objectContaining({ code: 'MCP_BINDING_INVALID' }))
+      expect(() => extract(project))
+        .toThrow(expect.objectContaining({ code: 'MCP_BINDING_INVALID' }))
+    }
+  })
+
+  test('projects hostile reference accessors to one stable binding error without repeated reads', () => {
+    let projectReads = 0
+    const hostileProject = {}
+    Object.defineProperty(hostileProject, 'reference_config', {
+      get() {
+        projectReads += 1
+        throw new TypeError('synthetic project accessor failure')
+      },
+    })
+    expect(() => extract(hostileProject))
+      .toThrow(expect.objectContaining({ name: 'McpError', code: 'MCP_BINDING_INVALID' }))
+    expect(projectReads).toBe(1)
+
+    let chapterReads = 0
+    const hostileConfig = {}
+    Object.defineProperty(hostileConfig, 'chapter_generation_source', {
+      enumerable: true,
+      get() {
+        chapterReads += 1
+        throw new TypeError('synthetic chapter accessor failure')
+      },
+    })
+    expect(() => extract({ reference_config: hostileConfig }))
+      .toThrow(expect.objectContaining({ name: 'McpError', code: 'MCP_BINDING_INVALID' }))
+    expect(chapterReads).toBe(1)
+  })
+
+  test('projects hostile reference_config Proxy traps without retrying unsafe operations', () => {
+    let descriptorTraps = 0
+    const hostileConfig = new Proxy({}, {
+      getOwnPropertyDescriptor() {
+        descriptorTraps += 1
+        throw new TypeError('synthetic reference config Proxy failure')
+      },
+    })
+
+    expect(() => extract({ reference_config: hostileConfig }))
+      .toThrow(expect.objectContaining({ name: 'McpError', code: 'MCP_BINDING_INVALID' }))
+    expect(descriptorTraps).toBe(1)
+  })
+
+  test('preserves an existing McpError raised while accessing project state', () => {
+    const existing = new McpError('MCP_AUTH_FAILED', 'synthetic existing MCP failure')
+    const project = {}
+    Object.defineProperty(project, 'reference_config', {
+      get() {
+        throw existing
+      },
+    })
+
+    let thrown: unknown
+    try {
+      extract(project)
+    } catch (error) {
+      thrown = error
+    }
+    expect(thrown).toBe(existing)
   })
 })
