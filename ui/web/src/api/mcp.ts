@@ -355,8 +355,11 @@ function normalizeChapterMcpTestView(value: unknown) {
 }
 
 export const chapterSourceApi = {
-  get: (projectId: number) => chapterSourceRequest(
-    () => apiClient.get<ChapterGenerationSourceView>(`/novel/projects/${projectId}/chapter-generation-source`, acceptChapterSourceHttpStatus),
+  get: (projectId: number, options: { signal?: AbortSignal } = {}) => chapterSourceRequest(
+    () => apiClient.get<ChapterGenerationSourceView>(
+      `/novel/projects/${projectId}/chapter-generation-source`,
+      { ...acceptChapterSourceHttpStatus, ...options },
+    ),
     normalizeChapterSourceApiView,
   ),
   activate: (projectId: number, active: 'model' | 'mcp') => chapterSourceRequest(

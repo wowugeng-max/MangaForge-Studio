@@ -264,6 +264,58 @@ describe('novel workspace model selector', () => {
 })
 
 describe('novel workspace authoritative chapter source lifecycle', () => {
+  test('binds each initial source GET to its own workspace load signal and releases it on cleanup', async () => {
+    const sourceSignals = new Map<number, AbortSignal | undefined>()
+    let projectOneSourceReleased = false
+    const globalLoadError = mock(() => {})
+    message.error = globalLoadError as typeof message.error
+    apiClient.get = mock((url: string, config?: { signal?: AbortSignal }) => {
+      const projectId = Number(url.match(/\/novel\/projects\/(\d+)/)?.[1] || 0)
+      if (url.endsWith('/chapter-generation-source')) {
+        const signal = config?.signal
+        sourceSignals.set(projectId, signal)
+        if (projectId === 1) {
+          return new Promise((_resolve, reject) => {
+            signal?.addEventListener('abort', () => {
+              projectOneSourceReleased = true
+              reject(new Error('project 1 source request aborted'))
+            }, { once: true })
+          })
+        }
+        return Promise.resolve({ data: chapterSourceView(projectId, 301) })
+      }
+      if (url === '/models') return Promise.resolve({ data: [{ id: 301 }] })
+      if (url === '/novel/runs' || url.endsWith('/worldbuilding') || url.endsWith('/characters')
+        || url.endsWith('/outlines') || url.endsWith('/chapters') || url.endsWith('/reviews')) {
+        return Promise.resolve({ data: [] })
+      }
+      if (url.endsWith('/pipeline')) return Promise.resolve({ data: null })
+      if (/^\/novel\/projects\/\d+$/.test(url)) {
+        return Promise.resolve({ data: { id: projectId, title: `Project ${projectId}` } })
+      }
+      return Promise.reject(new Error(`unexpected workspace GET: ${url}`))
+    }) as any
+    const workspace = mountWorkspace(1)
+    await flushPromises()
+
+    workspace.switchProject(2)
+    await flushPromises()
+    const projectOneSignal = sourceSignals.get(1)
+    const projectTwoSignal = sourceSignals.get(2)
+
+    expect(projectOneSignal).toBeDefined()
+    expect(projectTwoSignal).toBeDefined()
+    expect(projectOneSignal).not.toBe(projectTwoSignal)
+    expect(projectOneSignal?.aborted).toBe(true)
+    expect(projectTwoSignal?.aborted).toBe(false)
+    expect(projectOneSourceReleased).toBe(true)
+    expect((workspace.harness.value as any).selectedProject?.id).toBe(2)
+    expect(globalLoadError).toHaveBeenCalledTimes(0)
+
+    workspace.harness.unmount()
+    expect(projectTwoSignal?.aborted).toBe(true)
+  })
+
   test('does not let project A late initial source overwrite project B', async () => {
     const projectA = deferred<unknown>()
     installWorkspaceApi(new Map([
@@ -319,6 +371,50 @@ describe('novel workspace authoritative chapter source lifecycle', () => {
     expect((workspace.harness.value as any).selectedModelId).toBe(301)
     expect(() => (workspace.harness.value as any).assertChapterSourceOperationCurrent(token)).not.toThrow()
     expect(globalLoadError).toHaveBeenCalledTimes(0)
+  })
+
+  test('keeps the workspace uncommitted when the current initial source request fails', async () => {
+    const source = deferred<unknown>()
+    const globalLoadError = mock(() => {})
+    message.error = globalLoadError as typeof message.error
+    apiClient.get = mock(async (url: string) => {
+      if (url.endsWith('/chapter-generation-source')) return { data: await source.promise }
+      if (url === '/models') return { data: [{ id: 217 }] }
+      if (url === '/novel/runs' || url.endsWith('/reviews')) return { data: [] }
+      if (url.endsWith('/worldbuilding')) return { data: [{ id: 11, name: 'World' }] }
+      if (url.endsWith('/characters')) return { data: [{ id: 12, name: 'Character' }] }
+      if (url.endsWith('/outlines')) return { data: [{ id: 13, title: 'Outline' }] }
+      if (url.endsWith('/chapters')) {
+        return { data: [{ id: 41, project_id: 1, chapter_no: 1, title: 'Chapter', has_prose: true }] }
+      }
+      if (url.endsWith('/pipeline')) return { data: { pipeline: { id: 14 } } }
+      if (url === '/novel/chapters/41') {
+        return { data: { id: 41, project_id: 1, chapter_no: 1, title: 'Chapter', has_prose: true } }
+      }
+      if (url === '/novel/projects/1') return { data: { id: 1, title: 'Project 1' } }
+      throw new Error(`unexpected workspace GET: ${url}`)
+    }) as any
+    const workspace = mountWorkspace(1)
+    await flushPromises()
+
+    source.reject(new TypeError('current initial source failure'))
+    await flushPromises()
+
+    const value = workspace.harness.value as any
+    expect(value.loading).toBe(false)
+    expect(value.selectedProject).toBeNull()
+    expect(value.worldbuilding).toEqual([])
+    expect(value.characters).toEqual([])
+    expect(value.outlines).toEqual([])
+    expect(value.chapters).toEqual([])
+    expect(value.pipeline).toBeNull()
+    expect(value.models).toEqual([])
+    expect(value.activeChapterId).toBeNull()
+    expect(value.chapterGenerationSourceAuthority)
+      .toEqual({ source: null, authorityUnknown: false, reconciliationRequired: false, diagnostic: null })
+    expect(value.selectedModelId).toBeUndefined()
+    expect(globalLoadError).toHaveBeenCalledTimes(1)
+    expect(globalLoadError).toHaveBeenCalledWith('无法加载项目工作台')
   })
 
   test('stored model id wins over both the previous project selection and an in-flight local selection', async () => {

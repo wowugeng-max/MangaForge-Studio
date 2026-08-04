@@ -203,7 +203,7 @@ export function useNovelWorkspaceData({
         if (!request) throw new Error(`workspace request missing: ${key}`)
         return apiClient.get(request.url, { params: request.params, signal: controller.signal })
       }
-      const sourceRequest = chapterSourceApi.get(projectId).then(
+      const sourceRequest = chapterSourceApi.get(projectId, { signal: controller.signal }).then(
         source => ({ ok: true as const, source }),
         error => ({ ok: false as const, error }),
       )
@@ -223,6 +223,18 @@ export function useNovelWorkspaceData({
       const nextChapters = Array.isArray(chr.data) ? chr.data.map(compactChapterWorkspaceRecord) : []
       const nextModels = Array.isArray(mr.data) ? mr.data : []
       const nextReviews = Array.isArray(revr.data) ? revr.data : []
+      let sourceView: ReturnType<typeof normalizeChapterSourceView> | null = null
+      let sourceTokenCurrent = true
+      try {
+        chapterSourceFenceRef.current!.assertCurrent(chapterSourceToken)
+      } catch (error) {
+        if (!isStaleChapterSourceOperationError(error)) throw error
+        sourceTokenCurrent = false
+      }
+      if (sourceTokenCurrent) {
+        if (!sourceOutcome.ok) throw sourceOutcome.error
+        sourceView = normalizeChapterSourceView(sourceOutcome.source)
+      }
 
       setSelectedProject(pr.data || null)
       setWorldbuilding(Array.isArray(wr.data) ? wr.data : [])
@@ -241,23 +253,10 @@ export function useNovelWorkspaceData({
       setPipeline(plr.data?.pipeline || null)
       setModels(nextModels)
       setActiveChapterId(prev => resolveActiveWorkspaceChapterId(prev, nextChapters))
-      try {
-        chapterSourceFenceRef.current!.assertCurrent(chapterSourceToken)
-        if (!sourceOutcome.ok) throw sourceOutcome.error
-        const sourceView = normalizeChapterSourceView(sourceOutcome.source)
+      if (sourceView) {
         setChapterGenerationSourceAuthority(confirmedAuthorityState(sourceView))
         const storedModelId = sourceView.source.model.model_id
         setSelectedModelId(prev => storedModelId ?? resolveSelectedWorkspaceModelId(prev, nextModels))
-      } catch (error) {
-        if (!isStaleChapterSourceOperationError(error)) {
-          try {
-            chapterSourceFenceRef.current!.assertCurrent(chapterSourceToken)
-          } catch (staleError) {
-            if (isStaleChapterSourceOperationError(staleError)) return
-            throw staleError
-          }
-          throw error
-        }
       }
     } catch {
       if (projectLoadEpochRef.current?.isCurrent(requestEpoch) && !controller.signal.aborted) {
