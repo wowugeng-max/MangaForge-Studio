@@ -2406,6 +2406,45 @@ describe('McpGenerationSource task execution', () => {
     }>
   }
 
+  test('rejects an invalid MCP agent result inside the recorded operation without calling a model', async () => {
+    let modelCalls = 0
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-invalid-contract-', {
+      runStage: async (_input, session) => ({
+        content: '{}',
+        session_id: session.sessionId,
+        snapshot_hash: session.snapshotHash,
+        status: 'completed',
+      }),
+      ordinaryModelPorts: {
+        generateChapterProse: async () => { modelCalls += 1; return { prose_chapters: [] } },
+        executeAgent: async () => { modelCalls += 1; return { content: '{}', parsed: {} } },
+      },
+    })
+    const execution = await fixture.begin()
+
+    const caught: any = await execution.executeAgent(
+      'quality_review',
+      'quality_review_json',
+      'review-agent',
+      fixture.durableProject,
+      { task: '审查正文' },
+    ).catch(error => error)
+
+    expect(caught).toMatchObject({ code: 'MCP_STAGE_CONTRACT_INVALID' })
+    const stageRuns = (await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
+      .filter(run => run.run_type === 'chapter_generation_stage')
+    expect(stageRuns).toHaveLength(1)
+    expect(stageRuns[0]).toMatchObject({ step_name: 'quality_review', status: 'failed' })
+    expect(JSON.parse(stageRuns[0]!.output_ref!)).toMatchObject({
+      stage: 'quality_review',
+      status: 'failed',
+      error_code: 'MCP_STAGE_CONTRACT_INVALID',
+    })
+    expect(modelCalls).toBe(0)
+    expect(fixture.counters.modelCreations).toBe(0)
+    await execution.close({ status: 'failed', error: caught }).catch(() => {})
+  })
+
   test('runs a complete multi-stage task through one provider-neutral Session and releases both leases', async () => {
     const activeWorkspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-task-multistage-'))
     workspaces.push(activeWorkspace)
@@ -2495,9 +2534,9 @@ describe('McpGenerationSource task execution', () => {
             stageInputs.push(stageInput)
             const contentByStage: Record<string, string> = {
               draft: '第一版正文：雨夜的城门缓缓开启。',
-              quality_review: '{"score":92,"issues":[]}',
+              quality_review: '{"score":92,"publishable":true,"findings":[]}',
               revision: '修订正文：雨夜的城门终于开启。',
-              story_state_sync: '{"place":"北城门"}',
+              story_state_sync: '{"state_delta":{"current_time":"雨夜"}}',
             }
             return {
               content: contentByStage[stageInput.stage] || '{}',
@@ -3710,6 +3749,14 @@ describe('McpGenerationSource task execution', () => {
   test('bounds every outbound Adapter stage request identifier to 160 characters', async () => {
     const fixture = await neutralTaskFixture('mangaforge-mcp-task-request-id-bound-', {
       taskId: 'generated-task-'.repeat(24),
+      runStage: async (input, session) => ({
+        content: input.stage === 'draft'
+          ? '通用正文。'
+          : '{"score":88,"publishable":true,"findings":[]}',
+        session_id: session.sessionId,
+        snapshot_hash: session.snapshotHash,
+        status: 'completed',
+      }),
     })
     const execution = await fixture.begin()
 

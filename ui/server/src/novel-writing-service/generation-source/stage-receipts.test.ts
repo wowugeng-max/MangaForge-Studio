@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createNovelProject, listNovelRuns } from '../../novel'
+import { validateMcpStageResponse } from './stage-response-contract'
 import { createChapterStageRecorder } from './stage-receipts'
 
 const workspaces: string[] = []
@@ -33,6 +34,30 @@ function deleteStageRuns(activeWorkspace: string) {
 }
 
 describe('chapter generation stage receipts', () => {
+  test('durably fails a recorded MCP stage when response validation rejects inside the operation', async () => {
+    const { activeWorkspace, provenance } = await fixture()
+    const mcpProvenance = { ...provenance, source: 'mcp' as const, model_id: undefined }
+    const recordStage = createChapterStageRecorder({
+      activeWorkspace,
+      provenance: () => mcpProvenance,
+    })
+
+    const caught: any = await recordStage('quality_review', {
+      prompt: '审查', responseContract: 'quality_review_json',
+    }, async () => validateMcpStageResponse('quality_review', 'quality_review_json', {
+      content: '{}',
+    })).catch(error => error)
+
+    expect(caught).toMatchObject({ code: 'MCP_STAGE_CONTRACT_INVALID' })
+    const [run] = await listNovelRuns(activeWorkspace, provenance.project_id)
+    expect(run.status).toBe('failed')
+    expect(JSON.parse(run.output_ref!)).toMatchObject({
+      stage: 'quality_review',
+      status: 'failed',
+      error_code: 'MCP_STAGE_CONTRACT_INVALID',
+    })
+  })
+
   test('stores only a prompt hash and bounded provenance instead of prompt or output', async () => {
     const { activeWorkspace, provenance } = await fixture()
     const recordStage = createChapterStageRecorder({ activeWorkspace, provenance: () => provenance })

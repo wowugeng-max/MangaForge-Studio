@@ -1,7 +1,7 @@
 import { createHash } from 'crypto'
 import { types } from 'node:util'
-import { buildAgentMessages, parseAgentOutput } from '../../llm/executor-helpers'
-import { stringifyLLMMessageTextContent, type LLMResponse } from '../../llm/types'
+import { buildAgentMessages } from '../../llm/executor-helpers'
+import { stringifyLLMMessageTextContent } from '../../llm/types'
 import { appendNovelRun, getNovelProject, updateNovelRun } from '../../novel'
 import { readMcpKeys } from '../../mcp/key-store'
 import type { McpRuntime } from '../../mcp/runtime'
@@ -39,6 +39,7 @@ import {
   type ResolvedChapterTaskInput,
 } from './types'
 import { createChapterStageRecorder, projectChapterTaskProvenance } from './stage-receipts'
+import { validateMcpStageResponse } from './stage-response-contract'
 
 const PROVENANCE_ID_MAX_CHARS = 160
 const STAGE_CONTENT_MAX_BYTES = 256 * 1024
@@ -66,6 +67,7 @@ const MCP_ERROR_CODES = new Set<McpErrorCode>([
   'MCP_GENERATION_TIMEOUT',
   'MCP_CANCELLED',
   'MCP_EMPTY_PROSE',
+  'MCP_STAGE_CONTRACT_INVALID',
   'MCP_STORE_CORRUPT',
   'MCP_STORE_IO_FAILED',
   'MCP_RUNTIME_ERROR',
@@ -517,21 +519,12 @@ function compileMcpAgentPrompt(
     .join('\n\n')
 }
 
-function parsedDraftPayload(content: string) {
-  const trimmed = content.trim()
-  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)?.[1]?.trim() || trimmed
-  try {
-    return JSON.parse(fenced)
-  } catch {
-    return undefined
-  }
-}
-
-function normalizeDraftStageContent(content: string, chapterNo: number) {
-  const trimmed = content.trim()
-  if (!trimmed) throw new McpError('MCP_EMPTY_PROSE', 'MCP 章节 stage 已完成但没有返回正文')
-  const payload = parsedDraftPayload(trimmed)
-  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+function normalizeDraftStageContent(content: unknown, chapterNo: number) {
+  const trimmed = typeof content === 'string' ? content.trim() : ''
+  const payload = content && typeof content === 'object' && !Array.isArray(content)
+    ? content
+    : undefined
+  if (payload) {
     const record = payload as Record<string, unknown>
     const candidates = Array.isArray(record.prose_chapters)
       ? record.prose_chapters
@@ -564,7 +557,8 @@ function normalizeDraftStageContent(content: string, chapterNo: number) {
         : ''
     if (directText.trim()) return [{ chapter_no: chapterNo, chapter_text: directText }]
   }
-  return [{ chapter_no: chapterNo, chapter_text: trimmed }]
+  if (trimmed) return [{ chapter_no: chapterNo, chapter_text: trimmed }]
+  throw new McpError('MCP_EMPTY_PROSE', 'MCP 章节 stage 已完成但没有返回正文')
 }
 
 function selectedTaskCredential(snapshot: Awaited<ReturnType<typeof readBindingCredentialSnapshot>>, binding: {
@@ -1184,8 +1178,9 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
         responseContract: 'draft_prose',
         prompt: request.paragraphTask,
       })
+      const validated = validateMcpStageResponse('draft', 'draft_prose', { content: stage.content })
       return {
-        prose_chapters: normalizeDraftStageContent(stage.content, request.chapterNo),
+        prose_chapters: normalizeDraftStageContent(validated.output, request.chapterNo),
         source: 'mcp',
         adapter_id: this.binding.adapter_id,
         agent_id: this.binding.agent_id,
@@ -1223,10 +1218,8 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
         responseContract,
         prompt,
       })
-      const response: LLMResponse = { content: result.content }
       return {
-        ...response,
-        output: parseAgentOutput(response),
+        ...validateMcpStageResponse(stage, responseContract, { content: result.content }),
         modelName: this.binding.model || 'MCP Auto',
       }
     })
