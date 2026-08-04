@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test'
+import * as React from 'react'
+import { Button, Input, Select, Tooltip, message } from 'antd'
 import apiClient from '../../api/client'
-import { chapterSourceApi, type ChapterGenerationSourceView } from '../../api/mcp'
+import { chapterSourceApi, mcpApi, type ChapterGenerationSourceView } from '../../api/mcp'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import {
@@ -15,6 +17,169 @@ import {
   normalizeProjectEditorRevisionTimeout,
   normalizeProjectStoryStateMaxTokens,
 } from './ProjectSettingsModal'
+
+type PanelDependencyList = readonly unknown[] | undefined
+type PanelEffect = () => void | (() => void)
+type PanelHookCell =
+  | { kind: 'state'; value: unknown; setter: (next: unknown) => void }
+  | { kind: 'ref'; value: { current: unknown } }
+  | { kind: 'memo'; value: unknown; deps: PanelDependencyList }
+  | { kind: 'effect'; deps: PanelDependencyList; cleanup?: () => void }
+
+function panelDependenciesEqual(left: PanelDependencyList, right: PanelDependencyList) {
+  if (!left || !right || left.length !== right.length) return false
+  return left.every((value, index) => Object.is(value, right[index]))
+}
+
+const panelDispatcherRef = (React as any).__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.ReactCurrentDispatcher
+
+class PanelHookHarness<T> {
+  value!: T
+  private readonly cells: PanelHookCell[] = []
+  private readonly pendingEffects: Array<{ index: number; effect: PanelEffect; deps: PanelDependencyList }> = []
+  private cursor = 0
+  private dirty = false
+  private flushing = false
+  private mounted = false
+
+  private readonly dispatcher = {
+    useState: (initial: unknown) => this.useState(initial),
+    useRef: (initial: unknown) => this.useRef(initial),
+    useMemo: (factory: () => unknown, deps: PanelDependencyList) => this.useMemo(factory, deps),
+    useEffect: (effect: PanelEffect, deps: PanelDependencyList) => this.useEffect(effect, deps),
+  }
+
+  constructor(private readonly renderComponent: () => T) {}
+
+  mount() {
+    this.mounted = true
+    this.requestRender()
+  }
+
+  unmount() {
+    if (!this.mounted) return
+    this.mounted = false
+    for (const cell of this.cells) {
+      if (cell?.kind === 'effect') cell.cleanup?.()
+    }
+  }
+
+  private requestRender() {
+    if (!this.mounted) return
+    this.dirty = true
+    if (!this.flushing) this.flush()
+  }
+
+  private flush() {
+    this.flushing = true
+    let passes = 0
+    try {
+      while (this.dirty) {
+        if (++passes > 50) throw new Error('panel hook harness exceeded render limit')
+        this.dirty = false
+        this.cursor = 0
+        this.pendingEffects.length = 0
+        const previousDispatcher = panelDispatcherRef.current
+        panelDispatcherRef.current = this.dispatcher
+        try {
+          this.value = this.renderComponent()
+        } finally {
+          panelDispatcherRef.current = previousDispatcher
+        }
+        this.flushEffects()
+      }
+    } finally {
+      this.flushing = false
+    }
+  }
+
+  private flushEffects() {
+    for (const pending of this.pendingEffects) {
+      const previous = this.cells[pending.index]
+      if (previous?.kind === 'effect') previous.cleanup?.()
+      const next: PanelHookCell = { kind: 'effect', deps: pending.deps }
+      this.cells[pending.index] = next
+      const cleanup = pending.effect()
+      if (typeof cleanup === 'function') next.cleanup = cleanup
+    }
+  }
+
+  private useState(initial: unknown) {
+    const index = this.cursor++
+    let cell = this.cells[index]
+    if (!cell) {
+      const stateCell: Extract<PanelHookCell, { kind: 'state' }> = {
+        kind: 'state',
+        value: typeof initial === 'function' ? (initial as () => unknown)() : initial,
+        setter: (next) => {
+          const nextValue = typeof next === 'function'
+            ? (next as (current: unknown) => unknown)(stateCell.value)
+            : next
+          if (Object.is(nextValue, stateCell.value)) return
+          stateCell.value = nextValue
+          this.requestRender()
+        },
+      }
+      cell = stateCell
+      this.cells[index] = cell
+    }
+    if (cell.kind !== 'state') throw new Error(`panel hook ${index} changed type`)
+    return [cell.value, cell.setter]
+  }
+
+  private useRef(initial: unknown) {
+    const index = this.cursor++
+    let cell = this.cells[index]
+    if (!cell) {
+      cell = { kind: 'ref', value: { current: initial } }
+      this.cells[index] = cell
+    }
+    if (cell.kind !== 'ref') throw new Error(`panel hook ${index} changed type`)
+    return cell.value
+  }
+
+  private useMemo(factory: () => unknown, deps: PanelDependencyList) {
+    const index = this.cursor++
+    let cell = this.cells[index]
+    if (!cell || cell.kind !== 'memo' || !panelDependenciesEqual(cell.deps, deps)) {
+      cell = { kind: 'memo', value: factory(), deps }
+      this.cells[index] = cell
+    }
+    return cell.value
+  }
+
+  private useEffect(effect: PanelEffect, deps: PanelDependencyList) {
+    const index = this.cursor++
+    const cell = this.cells[index]
+    if (cell?.kind === 'effect' && panelDependenciesEqual(cell.deps, deps)) return
+    this.pendingEffects.push({ index, effect, deps })
+  }
+}
+
+function deferredPanelResponse<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(resolvePromise => { resolve = resolvePromise })
+  return { promise, resolve }
+}
+
+async function flushPanelPromises() {
+  for (let index = 0; index < 12; index += 1) await Promise.resolve()
+}
+
+function panelElements(root: React.ReactNode) {
+  const elements: Array<React.ReactElement<Record<string, any>>> = []
+  const visit = (node: React.ReactNode) => {
+    if (Array.isArray(node)) {
+      node.forEach(visit)
+      return
+    }
+    if (!React.isValidElement<Record<string, any>>(node)) return
+    elements.push(node)
+    visit(node.props.children)
+  }
+  visit(root)
+  return elements
+}
 
 describe('project settings editor revision timeout', () => {
   test('hydrates defaults and builds the dedicated API payload', () => {
@@ -569,6 +734,179 @@ describe('MCP binding panel authoritative callers', () => {
       expect({ authorityProject, notifications, testedFingerprint, pending }).toEqual({
         authorityProject: 'B', notifications: [], testedFingerprint: 'B', pending: false,
       })
+    }
+  })
+
+  test('locks the real binding panel while Agents refresh and restores it after the request settles', async () => {
+    const panel = await import('./McpGenerationSourcePanel') as Record<string, any>
+    const refreshResponse = deferredPanelResponse<{ data: { agents: Array<{ id: string; name: string }> } }>()
+    const originals = {
+      listServers: mcpApi.listServers,
+      listKeys: mcpApi.listKeys,
+      listProjectAgents: mcpApi.listProjectAgents,
+      createProjectAgent: mcpApi.createProjectAgent,
+      testMcp: chapterSourceApi.testMcp,
+      saveMcp: chapterSourceApi.saveMcp,
+      messageSuccess: message.success,
+    }
+    let agentReads = 0
+    let testCalls = 0
+    let saveCalls = 0
+    let createCalls = 0
+    ;(mcpApi as any).listServers = async () => ({ data: [{
+      id: 'buda',
+      display_name: 'Buda',
+      transport: 'streamable_http',
+      url: 'https://mcp.invalid',
+      auth_type: 'bearer',
+      adapter_id: 'buda',
+      is_active: true,
+      startup_timeout_ms: 1_000,
+      tool_timeout_ms: 1_000,
+      generation_timeout_ms: 1_000,
+      poll_initial_ms: 100,
+      poll_max_ms: 1_000,
+      enabled_tools: [],
+      custom_headers: [],
+    }] })
+    ;(mcpApi as any).listKeys = async () => ({ data: [{
+      id: 3,
+      mcp_server_id: 'buda',
+      description: 'Primary',
+      is_active: true,
+      priority: 0,
+      success_count: 0,
+      failure_count: 0,
+      masked_key: '****',
+      has_key: true,
+      bound_projects: [],
+    }] })
+    ;(mcpApi as any).listProjectAgents = async () => {
+      agentReads += 1
+      if (agentReads === 1) return { data: { agents: [{ id: 'agent-1', name: 'Agent One' }] } }
+      return refreshResponse.promise
+    }
+    ;(mcpApi as any).createProjectAgent = async () => {
+      createCalls += 1
+      return { data: { ok: true, agent: { id: 'agent-2', name: 'Agent Two' } } }
+    }
+    ;(chapterSourceApi as any).testMcp = async () => {
+      testCalls += 1
+      return { ok: true }
+    }
+    ;(chapterSourceApi as any).saveMcp = async () => {
+      saveCalls += 1
+      return sourceView()
+    }
+    ;(message as any).success = () => {}
+
+    const fence = createChapterSourceOperationFence()
+    fence.enterProject(1, 101)
+    const authority = confirmedAuthorityState(sourceView())
+    const harness = new PanelHookHarness<React.ReactNode>(() => panel.McpGenerationSourcePanel({
+      open: true,
+      projectId: 1,
+      authority,
+      locallyBusy: false,
+      beginSourceOperation: () => fence.begin(1, 101),
+      assertSourceOperationCurrent: (token: any) => fence.assertCurrent(token),
+      onAuthorityChange: () => {},
+      pending: false,
+      onPendingChange: () => {},
+    }))
+    const findControl = (
+      elements: Array<React.ReactElement<Record<string, any>>>,
+      type: unknown,
+      predicate: (props: Record<string, any>) => boolean,
+    ) => {
+      const element = elements.find(candidate => candidate.type === type && predicate(candidate.props))
+      if (!element) throw new Error('expected binding control was not rendered')
+      return element
+    }
+    const controls = () => {
+      const elements = panelElements(harness.value)
+      return {
+        elements,
+        server: findControl(elements, Select, props => props.style?.width === 220),
+        account: findControl(elements, Select, props => props.style?.width === 240),
+        adapter: findControl(elements, Input, props => props.readOnly === true),
+        model: findControl(elements, Input, props => props.placeholder === '例如：账号支持的模型标识'),
+        agent: findControl(elements, Select, props => props.style?.width === 330),
+        agentName: findControl(elements, Input, props => props.placeholder === 'Agent 名称'),
+        spaceId: findControl(elements, Input, props => props.placeholder === 'Space ID（需要时填写）'),
+        refresh: findControl(elements, Button, props => props.children === '刷新 Agents'),
+        test: findControl(elements, Button, props => props.children === '测试绑定'),
+        save: findControl(elements, Button, props => props.children === '保存绑定'),
+        create: findControl(elements, Button, props => props.children === '新建 MangaForge Agent'),
+      }
+    }
+    const disabledSnapshot = (current: ReturnType<typeof controls>) => ({
+      server: current.server.props.disabled,
+      account: current.account.props.disabled,
+      adapter: current.adapter.props.disabled,
+      model: current.model.props.disabled,
+      agent: current.agent.props.disabled,
+      agentName: current.agentName.props.disabled,
+      spaceId: current.spaceId.props.disabled,
+      refresh: current.refresh.props.disabled,
+      test: current.test.props.disabled,
+      save: current.save.props.disabled,
+      create: current.create.props.disabled,
+    })
+
+    try {
+      harness.mount()
+      await flushPanelPromises()
+      await controls().test.props.onClick()
+      await flushPanelPromises()
+      const beforeRefresh = disabledSnapshot(controls())
+
+      const refreshOperation = controls().refresh.props.onClick()
+      const locked = controls()
+      const whileRefreshing = disabledSnapshot(locked)
+      const busyReason = locked.elements.some(element => (
+        element.type === Tooltip
+        && element.props.title === '当前章节任务正在运行，结束后可切换来源'
+      ))
+      await locked.test.props.onClick()
+      await locked.save.props.onClick()
+      const submissionsWhileRefreshing = { testCalls, saveCalls, createCalls }
+
+      refreshResponse.resolve({ data: { agents: [{ id: 'agent-1', name: 'Agent One' }] } })
+      await refreshOperation
+      await flushPanelPromises()
+      const afterRefresh = disabledSnapshot(controls())
+
+      const enabled = {
+        server: false,
+        account: false,
+        adapter: false,
+        model: false,
+        agent: false,
+        agentName: false,
+        spaceId: false,
+        refresh: false,
+        test: false,
+        save: false,
+        create: false,
+      }
+      const disabled = Object.fromEntries(Object.keys(enabled).map(key => [key, true]))
+      expect({ beforeRefresh, whileRefreshing, busyReason, submissionsWhileRefreshing, afterRefresh }).toEqual({
+        beforeRefresh: enabled,
+        whileRefreshing: disabled,
+        busyReason: true,
+        submissionsWhileRefreshing: { testCalls: 1, saveCalls: 0, createCalls: 0 },
+        afterRefresh: enabled,
+      })
+    } finally {
+      harness.unmount()
+      ;(mcpApi as any).listServers = originals.listServers
+      ;(mcpApi as any).listKeys = originals.listKeys
+      ;(mcpApi as any).listProjectAgents = originals.listProjectAgents
+      ;(mcpApi as any).createProjectAgent = originals.createProjectAgent
+      ;(chapterSourceApi as any).testMcp = originals.testMcp
+      ;(chapterSourceApi as any).saveMcp = originals.saveMcp
+      ;(message as any).success = originals.messageSuccess
     }
   })
 

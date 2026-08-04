@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Card, Divider, Empty, Input, Popconfirm, Select, Space, Spin, Tag, Typography, message } from 'antd'
+import { Alert, Button, Card, Divider, Empty, Input, Popconfirm, Select, Space, Spin, Tag, Tooltip, Typography, message } from 'antd'
 import { CheckCircleOutlined, ReloadOutlined, RobotOutlined, SaveOutlined } from '@ant-design/icons'
 import {
   chapterSourceApi,
@@ -26,7 +26,10 @@ import {
   filterKeysForServer,
   type GenerationSourceForm,
 } from './mcpGenerationSourceModel'
-import { CHAPTER_SOURCE_AUTHORITY_UNKNOWN_MESSAGE } from './ChapterGenerationSourceControl'
+import {
+  CHAPTER_SOURCE_AUTHORITY_UNKNOWN_MESSAGE,
+  CHAPTER_SOURCE_BUSY_MESSAGE,
+} from './ChapterGenerationSourceControl'
 
 const { Text } = Typography
 type McpBinding = NonNullable<ChapterGenerationSourceState['mcp']>
@@ -280,22 +283,33 @@ export function createMcpGenerationSourcePanelActions(
   }
 }
 
-export function mcpBindingControlsDisabled({
-  authority,
-  locallyBusy,
-  pending,
-}: {
+type McpBindingControlsAvailabilityInput = {
   authority: ChapterSourceAuthorityState
   locallyBusy: boolean
   pending: boolean
-}) {
-  return Boolean(
-    !authority.source
-      || authority.authorityUnknown
-      || authority.source.locked
-      || locallyBusy
-      || pending,
-  )
+  agentLoading?: boolean
+}
+
+export function mcpBindingControlsAvailability({
+  authority,
+  locallyBusy,
+  pending,
+  agentLoading = false,
+}: McpBindingControlsAvailabilityInput) {
+  if (authority.authorityUnknown) {
+    return { disabled: true, reason: CHAPTER_SOURCE_AUTHORITY_UNKNOWN_MESSAGE }
+  }
+  if (!authority.source) {
+    return { disabled: true, reason: '章节来源加载失败，请重新加载项目' }
+  }
+  if (authority.source.locked || locallyBusy || pending || agentLoading) {
+    return { disabled: true, reason: CHAPTER_SOURCE_BUSY_MESSAGE }
+  }
+  return { disabled: false, reason: '' }
+}
+
+export function mcpBindingControlsDisabled(input: McpBindingControlsAvailabilityInput) {
+  return mcpBindingControlsAvailability(input).disabled
 }
 
 function formFromAuthority(authority: ChapterSourceAuthorityState): Required<GenerationSourceForm> {
@@ -351,7 +365,8 @@ export function McpGenerationSourcePanel({
   const [agentName, setAgentName] = useState('MangaForge 小说正文 Agent')
   const [spaceId, setSpaceId] = useState('')
   const pending = controlledPending
-  const controlsDisabled = mcpBindingControlsDisabled({ authority, locallyBusy, pending })
+  const controlsAvailability = mcpBindingControlsAvailability({ authority, locallyBusy, pending, agentLoading })
+  const controlsDisabled = controlsAvailability.disabled
   const selectedServer = servers.find(server => server.id === form.serverId)
   const availableKeys = useMemo(() => filterKeysForServer(keys, form.serverId), [keys, form.serverId])
   const canSave = canSaveGenerationSource(form, testedFingerprint)
@@ -498,6 +513,7 @@ export function McpGenerationSourcePanel({
     void fetchAgents(form.serverId, keyId)
   }
   const testBinding = async () => {
+    if (controlsDisabled) return
     const { mcp } = buildSourcePayload(form)
     await actions.testBinding(mcp, bindingFingerprint(form))
   }
@@ -532,7 +548,8 @@ export function McpGenerationSourcePanel({
   if (loading) return <div style={{ padding: 28, textAlign: 'center' }}><Spin /><Text type="secondary" style={{ marginLeft: 8 }}>加载 MCP 绑定...</Text></div>
 
   return <Card size="small" title="MCP 绑定配置">
-    <Space direction="vertical" size={14} style={{ width: '100%' }}>
+    <Tooltip title={controlsAvailability.reason}>
+      <Space direction="vertical" size={14} style={{ width: '100%' }}>
       {loadError && <Alert type="error" showIcon message="MCP 区域加载失败" description={loadError} />}
       <Alert type="info" showIcon message="保存绑定不会启用 MCP；章节来源需单独切换" />
       {!servers.length && <Empty description="请先到 MCP Services 添加服务与账号" />}
@@ -570,6 +587,7 @@ export function McpGenerationSourcePanel({
         <Button onClick={testBinding} loading={pending} disabled={controlsDisabled || !bindingFingerprint(form)}>测试绑定</Button>
         <Button type="primary" icon={<SaveOutlined />} loading={pending} disabled={controlsDisabled || !canSave} onClick={save}>保存绑定</Button>
       </Space>
-    </Space>
+      </Space>
+    </Tooltip>
   </Card>
 }
