@@ -321,11 +321,6 @@ describe('chapter task routing for review and state leaves', () => {
       source: 'model' as const,
       failure: new Error('PRIVATE_THROWN_API_PROVIDER_ERROR'),
     },
-    {
-      label: 'thrown MCP provider error',
-      source: 'mcp' as const,
-      failure: new Error('PRIVATE_THROWN_MCP_PROVIDER_ERROR'),
-    },
   ]) {
     test(`keeps prior prose for an optional ${label} on the same source`, async () => {
       const { execution, calls, fallback, getFallbackCalls } = revisionFailureFixture(source, failure)
@@ -350,10 +345,15 @@ describe('chapter task routing for review and state leaves', () => {
     })
   }
 
-  test('propagates source integrity and required acceptance revision failures by identity', async () => {
+  test('propagates source, MCP, cancellation, transport, and acceptance failures by identity', async () => {
     const failures = [
       Object.assign(new Error('source changed'), { code: 'GENERATION_SOURCE_CHANGED' }),
+      Object.assign(new Error('source busy'), { code: 'GENERATION_SOURCE_BUSY' }),
       Object.assign(new Error('MCP binding changed'), { code: 'MCP_BINDING_CHANGED' }),
+      Object.assign(new Error('MCP session failed'), { code: 'MCP_SESSION_FAILED' }),
+      Object.assign(new Error('MCP cancelled'), { code: 'MCP_CANCELLED' }),
+      Object.assign(new Error('operation aborted'), { name: 'AbortError' }),
+      Object.assign(new Error('receipt persistence failed'), { code: 'CHAPTER_STAGE_RECEIPT_PERSIST_FAILED' }),
       Object.assign(new Error('invalid stage structure'), { code: 'CHAPTER_STAGE_RESULT_INVALID' }),
       Object.assign(new Error('required acceptance failure'), { admission_status: 'blocked_invalid' }),
       Object.assign(new Error('required complete revision'), { code: 'PROSE_REVISION_TRUNCATED' }),

@@ -156,6 +156,34 @@ describe('chapter generation stage receipts', () => {
     expect(JSON.stringify(run)).not.toContain(providerFailure.message)
   })
 
+  test('classifies optional quality repair from the raw MCP failure before scrubber projection', async () => {
+    const { activeWorkspace, provenance } = await fixture()
+    const providerFailure = new Error('PRIVATE_MCP_PROVIDER_MESSAGE')
+    let scrubberInput: unknown
+    const recordStage = createChapterStageRecorder({
+      activeWorkspace,
+      provenance: () => ({ ...provenance, source: 'mcp' as const }),
+      scrubError: error => {
+        scrubberInput = error
+        return { code: 'MCP_STAGE_FAILED', message: providerFailure.message }
+      },
+    })
+
+    const caught = await recordStage('quality_repair', {
+      prompt: '只修订当前正文', responseContract: 'revision_prose',
+    }, async () => { throw providerFailure }).catch(error => error)
+
+    expect(caught).toBe(providerFailure)
+    expect(scrubberInput).toBe(providerFailure)
+    const [run] = await listNovelRuns(activeWorkspace, provenance.project_id)
+    expect(run).toMatchObject({
+      status: 'failed',
+      error_message: 'Optional quality revision unavailable',
+    })
+    expect(JSON.parse(run.output_ref!).error_code).toBe('MCP_STAGE_FAILED')
+    expect(JSON.stringify(run)).not.toContain(providerFailure.message)
+  })
+
   test('normalizes untrusted custom scrubber output to the same bounds', async () => {
     const { activeWorkspace, provenance } = await fixture()
     const recordStage = createChapterStageRecorder({
@@ -300,7 +328,7 @@ describe('chapter generation stage receipts', () => {
       provenance: () => provenance,
       scrubError: () => ({ code: 'PROVIDER_FAILED', message: `custom ${customKey} ${internalHyphenKey} retry-safe-path` }),
     })
-    await expect(customRecorder('quality_repair', {
+    await expect(customRecorder('revision', {
       prompt: '修复', responseContract: 'revision_prose',
     }, async () => { throw new Error('custom failure') })).rejects.toThrow('custom failure')
 

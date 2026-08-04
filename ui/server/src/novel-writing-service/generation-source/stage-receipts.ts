@@ -172,6 +172,8 @@ export function createChapterStageRecorder(input: {
     try {
       result = await operation()
     } catch (error) {
+      const redactOptionalProviderDetail = stage === 'quality_repair'
+        && isProviderAvailabilityStageFailure(error)
       let scrubbed: unknown
       try {
         scrubbed = input.scrubError ? input.scrubError(error) : error
@@ -179,8 +181,7 @@ export function createChapterStageRecorder(input: {
         scrubbed = error
       }
       const failure = boundedFailure(scrubbed)
-      const persistedFailureMessage = stage === 'quality_repair'
-        && isProviderAvailabilityStageFailure(scrubbed)
+      const persistedFailureMessage = redactOptionalProviderDetail
         ? 'Optional quality revision unavailable'
         : failure.message
       try {

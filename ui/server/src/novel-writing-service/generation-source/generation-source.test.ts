@@ -3902,9 +3902,7 @@ describe('McpGenerationSource task execution', () => {
       code: 'MCP_SESSION_FAILED',
       details: { session_id: 'neutral-session-1', remote_cancel_confirmed: true },
     })
-    await expect(execution.close({ status: 'failed', error: exposed })).rejects.toMatchObject({
-      code: 'MCP_SESSION_FAILED',
-    })
+    await expect(execution.close({ status: 'success' })).rejects.toBe(exposed)
 
     expect(fixture.counters).toMatchObject({
       open: 1,
@@ -3926,6 +3924,42 @@ describe('McpGenerationSource task execution', () => {
     const failedStage = (await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
       .find(run => run.run_type === 'chapter_generation_stage')
     expect(failedStage).toMatchObject({ status: 'failed' })
+  })
+
+  test('latches an ordinary remote quality-repair rejection and closes with the exact exposed failure', async () => {
+    const remoteFailure = new Error('PRIVATE_MCP_PROVIDER_MESSAGE')
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-quality-repair-failure-', {
+      runStage: async () => { throw remoteFailure },
+    })
+    const execution = await fixture.begin()
+
+    const exposed: any = await execution.executeAgent(
+      'quality_repair',
+      'revision_prose',
+      'prose-agent',
+      fixture.durableProject,
+      { task: '只修订当前正文' },
+    ).catch(error => error)
+
+    expect(exposed).toBeInstanceOf(Error)
+    expect(exposed.message).toBe(remoteFailure.message)
+    await expect(execution.close({ status: 'success' })).rejects.toBe(exposed)
+    expect(fixture.counters).toMatchObject({
+      open: 1,
+      runStage: 1,
+      close: 1,
+      generateProse: 0,
+      createAgent: 0,
+      modelCreations: 0,
+    })
+    const failedStage = (await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
+      .find(run => run.run_type === 'chapter_generation_stage')
+    expect(failedStage).toMatchObject({
+      step_name: 'quality_repair',
+      status: 'failed',
+      error_message: 'Optional quality revision unavailable',
+    })
+    expect(JSON.stringify(failedStage)).not.toContain(remoteFailure.message)
   })
 
   test('rejects a remote stage result when the authoritative source fingerprint changes before return', async () => {
