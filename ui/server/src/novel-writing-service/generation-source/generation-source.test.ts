@@ -206,11 +206,14 @@ describe('GenerationSource resolver', () => {
           taskId: input.taskId,
           source: 'model',
           modelId: input.modelId,
+          authorityFingerprint: input.authorityFingerprint,
           fingerprint: input.fingerprint,
           contextVersion: input.contextVersion,
           provenance: () => ({
             task_id: input.taskId, project_id: 5, chapter_id: 12, source: 'model',
-            source_fingerprint: input.fingerprint, context_version: input.contextVersion,
+            source_fingerprint: input.fingerprint,
+            authority_fingerprint: input.authorityFingerprint,
+            context_version: input.contextVersion,
             model_id: input.modelId,
           }),
           generateDraft: async () => ({ source: 'model' }),
@@ -227,6 +230,8 @@ describe('GenerationSource resolver', () => {
     expect(resolved.modelId).toBe(217)
     expect(resolved.project).toBe(project)
     expect(resolved.fingerprint).toBe(chapterGenerationSourceFingerprint(project.reference_config.chapter_generation_source as any))
+    expect(resolved.authorityFingerprint).toBe(resolved.fingerprint)
+    expect(execution.authorityFingerprint).toBe(execution.fingerprint)
     expect(resolved.contextVersion).toBe(chapterContextVersion(contextPackage))
     expect(Object.isFrozen(resolved.sourceState)).toBe(true)
     expect(Object.isFrozen(resolved.sourceState.model)).toBe(true)
@@ -253,10 +258,12 @@ describe('GenerationSource resolver', () => {
       readProject: async () => project,
       createModelExecution: input => ({
         taskId: input.taskId, source: 'model', modelId: input.modelId,
+        authorityFingerprint: input.authorityFingerprint,
         fingerprint: input.fingerprint, contextVersion: input.contextVersion,
         provenance: () => ({
           task_id: input.taskId, project_id: project.id, chapter_id: chapter.id, source: 'model',
-          source_fingerprint: input.fingerprint, context_version: input.contextVersion,
+          source_fingerprint: input.fingerprint, authority_fingerprint: input.authorityFingerprint,
+          context_version: input.contextVersion,
         }),
         generateDraft: async () => ({ source: 'model' }), executeAgent: async () => ({}),
         assertCurrent: input.assertCurrent,
@@ -291,10 +298,12 @@ describe('GenerationSource resolver', () => {
       readProject: async () => project,
       createModelExecution: input => ({
         taskId: input.taskId, source: 'model', modelId: input.modelId,
+        authorityFingerprint: input.authorityFingerprint,
         fingerprint: input.fingerprint, contextVersion: input.contextVersion,
         provenance: () => ({
           task_id: input.taskId, project_id: project.id, chapter_id: chapter.id, source: 'model',
-          source_fingerprint: input.fingerprint, context_version: input.contextVersion,
+          source_fingerprint: input.fingerprint, authority_fingerprint: input.authorityFingerprint,
+          context_version: input.contextVersion,
         }),
         generateDraft: async () => ({ source: 'model' }), executeAgent: async () => ({}),
         assertCurrent: input.assertCurrent,
@@ -353,8 +362,9 @@ describe('GenerationSource resolver', () => {
         capturedModelId = input.modelId
         return {
           taskId: input.taskId, source: 'model', modelId: input.modelId,
+          authorityFingerprint: input.authorityFingerprint,
           fingerprint: input.fingerprint, contextVersion: input.contextVersion,
-          provenance: () => ({ task_id: input.taskId, project_id: 5, chapter_id: 12, source: 'model', source_fingerprint: input.fingerprint, context_version: input.contextVersion }),
+          provenance: () => ({ task_id: input.taskId, project_id: 5, chapter_id: 12, source: 'model', source_fingerprint: input.fingerprint, authority_fingerprint: input.authorityFingerprint, context_version: input.contextVersion }),
           generateDraft: async () => ({ source: 'model' }), executeAgent: async () => ({}),
           assertCurrent: input.assertCurrent, close: async () => {},
         }
@@ -367,6 +377,80 @@ describe('GenerationSource resolver', () => {
     await expect(resolver.beginTask(beginInput({ project: projectWithoutModel, requestedModelId: undefined })))
       .rejects.toMatchObject({ code: 'CHAPTER_MODEL_REQUIRED' })
     expect(chapterSourceLeases.isActive(workspace, project.id)).toBe(false)
+  })
+
+  test('fingerprints the effective legacy request model while fencing persisted authority', async () => {
+    const chapterSourceLeases = new ChapterSourceLeaseRegistry()
+    const persisted = {
+      version: 'chapter_generation_source_v1' as const,
+      active: 'model' as const,
+      model: {},
+    }
+    const legacyProject = {
+      ...project,
+      reference_config: { chapter_generation_source: persisted },
+    }
+    let currentProject = legacyProject
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases,
+      readProject: async () => currentProject,
+      createModelExecution: input => ({
+        taskId: input.taskId,
+        source: 'model',
+        modelId: input.modelId,
+        authorityFingerprint: input.authorityFingerprint,
+        fingerprint: input.fingerprint,
+        contextVersion: input.contextVersion,
+        provenance: () => ({
+          task_id: input.taskId,
+          project_id: project.id,
+          chapter_id: chapter.id,
+          source: 'model',
+          source_fingerprint: input.fingerprint,
+          authority_fingerprint: input.authorityFingerprint,
+          context_version: input.contextVersion,
+          model_id: input.modelId,
+        }),
+        generateDraft: async () => ({ source: 'model' }),
+        executeAgent: async () => ({}),
+        assertCurrent: input.assertCurrent,
+        close: async () => {},
+      }),
+    })
+
+    const first = await resolver.beginTask(beginInput({ project: legacyProject, requestedModelId: 217 }))
+    const firstAuthority = first.authorityFingerprint
+    const firstFingerprint = first.fingerprint
+    const firstProvenance = first.provenance()
+    await first.close()
+    const second = await resolver.beginTask(beginInput({ project: legacyProject, requestedModelId: 218 }))
+
+    expect(firstProvenance.model_id).toBe(217)
+    expect(second.modelId).toBe(218)
+    expect(firstFingerprint).not.toBe(second.fingerprint)
+    expect(firstAuthority).toBe(second.authorityFingerprint)
+    expect(firstProvenance).toMatchObject({
+      model_id: 217,
+      source_fingerprint: firstFingerprint,
+      authority_fingerprint: firstAuthority,
+    })
+    expect(second.provenance()).toMatchObject({
+      model_id: 218,
+      source_fingerprint: second.fingerprint,
+      authority_fingerprint: second.authorityFingerprint,
+    })
+
+    currentProject = {
+      ...legacyProject,
+      reference_config: {
+        chapter_generation_source: {
+          ...persisted,
+          model: { model_id: 218 },
+        },
+      },
+    }
+    await expect(second.assertCurrent()).rejects.toMatchObject({ code: 'GENERATION_SOURCE_CHANGED' })
+    await second.close()
   })
 
   test('routes an active MCP task without creating or falling back to a model execution', async () => {
@@ -391,10 +475,13 @@ describe('GenerationSource resolver', () => {
           mcpBegins += 1
           return {
             taskId: input.taskId, source: 'mcp',
+            authorityFingerprint: input.authorityFingerprint,
             fingerprint: input.fingerprint, contextVersion: input.contextVersion,
             provenance: () => ({
               task_id: input.taskId, project_id: 5, chapter_id: 12, source: 'mcp',
-              source_fingerprint: input.fingerprint, context_version: input.contextVersion,
+              source_fingerprint: input.fingerprint,
+              authority_fingerprint: input.authorityFingerprint,
+              context_version: input.contextVersion,
             }),
             generateDraft: async () => ({ source: 'mcp' }), executeAgent: async () => ({}),
             assertCurrent: input.assertCurrent, close: async () => {},
@@ -405,6 +492,7 @@ describe('GenerationSource resolver', () => {
 
     const execution = await resolver.beginTask(beginInput({ project: mcpProject }))
     expect(execution.source).toBe('mcp')
+    expect(execution.authorityFingerprint).toBe(execution.fingerprint)
     expect(modelCreations).toBe(0)
     expect(mcpBegins).toBe(1)
     await execution.close({ status: 'success' })
@@ -439,8 +527,9 @@ describe('GenerationSource resolver', () => {
         resolved = input
         return {
           taskId: input.taskId, source: 'model', modelId: input.modelId,
+          authorityFingerprint: input.authorityFingerprint,
           fingerprint: input.fingerprint, contextVersion: input.contextVersion,
-          provenance: () => ({ task_id: input.taskId, project_id: 5, chapter_id: 12, source: 'model', source_fingerprint: input.fingerprint, context_version: input.contextVersion }),
+          provenance: () => ({ task_id: input.taskId, project_id: 5, chapter_id: 12, source: 'model', source_fingerprint: input.fingerprint, authority_fingerprint: input.authorityFingerprint, context_version: input.contextVersion }),
           generateDraft: async () => ({ source: 'model' }), executeAgent: async () => ({}),
           assertCurrent: input.assertCurrent, close: async () => {},
         }
@@ -482,8 +571,9 @@ describe('GenerationSource resolver', () => {
         resolved = input
         return {
           taskId: input.taskId, source: 'model', modelId: input.modelId,
+          authorityFingerprint: input.authorityFingerprint,
           fingerprint: input.fingerprint, contextVersion: input.contextVersion,
-          provenance: () => ({ task_id: input.taskId, project_id: 5, chapter_id: 12, source: 'model', source_fingerprint: input.fingerprint, context_version: input.contextVersion }),
+          provenance: () => ({ task_id: input.taskId, project_id: 5, chapter_id: 12, source: 'model', source_fingerprint: input.fingerprint, authority_fingerprint: input.authorityFingerprint, context_version: input.contextVersion }),
           generateDraft: async () => ({ source: 'model' }), executeAgent: async () => ({}),
           assertCurrent: input.assertCurrent, close: async () => {},
         }
@@ -523,10 +613,12 @@ describe('GenerationSource resolver', () => {
         resolved = input
         return {
           taskId: input.taskId, source: 'model', modelId: input.modelId,
+          authorityFingerprint: input.authorityFingerprint,
           fingerprint: input.fingerprint, contextVersion: input.contextVersion,
           provenance: () => ({
             task_id: input.taskId, project_id: project.id, chapter_id: chapter.id, source: 'model',
-            source_fingerprint: input.fingerprint, context_version: input.contextVersion,
+            source_fingerprint: input.fingerprint, authority_fingerprint: input.authorityFingerprint,
+            context_version: input.contextVersion,
           }),
           generateDraft: async () => ({ source: 'model' }), executeAgent: async () => ({}),
           assertCurrent: input.assertCurrent, close: async () => {},
@@ -612,8 +704,9 @@ describe('GenerationSource resolver', () => {
         resolved = input
         return {
           taskId: input.taskId, source: 'model', modelId: input.modelId,
+          authorityFingerprint: input.authorityFingerprint,
           fingerprint: input.fingerprint, contextVersion: input.contextVersion,
-          provenance: () => ({ task_id: input.taskId, project_id: 5, chapter_id: 12, source: 'model', source_fingerprint: input.fingerprint, context_version: input.contextVersion }),
+          provenance: () => ({ task_id: input.taskId, project_id: 5, chapter_id: 12, source: 'model', source_fingerprint: input.fingerprint, authority_fingerprint: input.authorityFingerprint, context_version: input.contextVersion }),
           generateDraft: async () => ({ source: 'model' }), executeAgent: async () => ({}),
           assertCurrent: input.assertCurrent, close: async () => {},
         }
@@ -1721,6 +1814,7 @@ describe('ModelGenerationSource', () => {
       provenance: {
         task_id: 'task-1', project_id: 5, chapter_id: 12,
         source: 'model', source_fingerprint: `sha256:${'a'.repeat(64)}`,
+        authority_fingerprint: `sha256:${'a'.repeat(64)}`,
         context_version: `sha256:${'b'.repeat(64)}`, model_id: 217,
         receipt_authority: 'mcp_generation_source_v1',
         arbitrary_detail: 'sk_model_provenance_secret',
@@ -1766,7 +1860,7 @@ describe('ModelGenerationSource', () => {
     expect(JSON.stringify(source.provenance())).not.toContain('sk_model_provenance_secret')
     expect(JSON.stringify(draft.source_receipt)).not.toContain('sk_model_provenance_secret')
     expect(Object.keys(draft.source_receipt!).sort()).toEqual([
-      'chapter_id', 'context_version', 'model_id', 'project_id', 'receipt_authority',
+      'authority_fingerprint', 'chapter_id', 'context_version', 'model_id', 'project_id', 'receipt_authority',
       'source', 'source_fingerprint', 'task_id',
     ].sort())
     await Promise.all([source.close(), source.close({ status: 'failed' })])
@@ -1783,6 +1877,7 @@ describe('ModelGenerationSource', () => {
       provenance: {
         task_id: 'task-strict-model', project_id: 5, chapter_id: 12,
         source: 'model', source_fingerprint: `sha256:${'a'.repeat(64)}`,
+        authority_fingerprint: `sha256:${'a'.repeat(64)}`,
         context_version: `sha256:${'b'.repeat(64)}`,
       },
       generateChapterProse: async () => ({}),
@@ -1802,6 +1897,7 @@ describe('ModelGenerationSource', () => {
       provenance: {
         task_id: taskId, project_id: project.id, chapter_id: chapter.id,
         source: 'model', source_fingerprint: `sha256:${'a'.repeat(64)}`,
+        authority_fingerprint: `sha256:${'a'.repeat(64)}`,
         context_version: `sha256:${'b'.repeat(64)}`,
       },
       generateChapterProse: async () => ({}),
@@ -1828,6 +1924,7 @@ describe('ModelGenerationSource', () => {
     const provenance = {
       task_id: 'task-model-precheck', project_id: durableProject.id, chapter_id: chapter.id,
       source: 'model' as const, source_fingerprint: `sha256:${'a'.repeat(64)}`,
+      authority_fingerprint: `sha256:${'a'.repeat(64)}`,
       context_version: `sha256:${'b'.repeat(64)}`, model_id: 217,
     }
     const source = new ModelGenerationSource({
@@ -1858,6 +1955,7 @@ describe('ModelGenerationSource', () => {
       provenance: {
         task_id: 'task-model-check-order', project_id: project.id, chapter_id: chapter.id,
         source: 'model', source_fingerprint: `sha256:${'a'.repeat(64)}`,
+        authority_fingerprint: `sha256:${'a'.repeat(64)}`,
         context_version: `sha256:${'b'.repeat(64)}`,
       },
       generateChapterProse: async () => { events.push('draft-port'); return { prose_chapters: [] } },
@@ -1892,6 +1990,7 @@ describe('ModelGenerationSource', () => {
     const provenance = {
       task_id: 'task-model-error-envelope', project_id: durableProject.id, chapter_id: chapter.id,
       source: 'model' as const, source_fingerprint: `sha256:${'a'.repeat(64)}`,
+      authority_fingerprint: `sha256:${'a'.repeat(64)}`,
       context_version: `sha256:${'b'.repeat(64)}`, model_id: 217,
     }
     const source = new ModelGenerationSource({
@@ -1931,6 +2030,7 @@ describe('ModelGenerationSource', () => {
     const provenance = {
       task_id: 'task-model-empty-error', project_id: durableProject.id, chapter_id: chapter.id,
       source: 'model' as const, source_fingerprint: `sha256:${'a'.repeat(64)}`,
+      authority_fingerprint: `sha256:${'a'.repeat(64)}`,
       context_version: `sha256:${'b'.repeat(64)}`, model_id: 217,
     }
     const source = new ModelGenerationSource({
@@ -1980,6 +2080,7 @@ describe('ModelGenerationSource', () => {
       provenance: {
         task_id: 'task-safe-result', project_id: 5, chapter_id: 12,
         source: 'model', source_fingerprint: `sha256:${'a'.repeat(64)}`,
+        authority_fingerprint: `sha256:${'a'.repeat(64)}`,
         context_version: `sha256:${'b'.repeat(64)}`,
       },
       generateChapterProse: async () => draftResult,
@@ -2018,6 +2119,7 @@ describe('ModelGenerationSource', () => {
       provenance: {
         task_id: 'task-proxy-result', project_id: 5, chapter_id: 12,
         source: 'model', source_fingerprint: `sha256:${'a'.repeat(64)}`,
+        authority_fingerprint: `sha256:${'a'.repeat(64)}`,
         context_version: `sha256:${'b'.repeat(64)}`,
       },
       generateChapterProse: async () => proxiedResult,
@@ -2039,6 +2141,7 @@ describe('ModelGenerationSource', () => {
       provenance: {
         task_id: 'task-provider-failure', project_id: 5, chapter_id: 12,
         source: 'model', source_fingerprint: `sha256:${'a'.repeat(64)}`,
+        authority_fingerprint: `sha256:${'a'.repeat(64)}`,
         context_version: `sha256:${'b'.repeat(64)}`,
       },
       generateChapterProse: async () => { throw providerFailure },
@@ -2058,6 +2161,7 @@ describe('ModelGenerationSource', () => {
       provenance: {
         task_id: 'task-synchronous-failure', project_id: 5, chapter_id: 12,
         source: 'model', source_fingerprint: `sha256:${'a'.repeat(64)}`,
+        authority_fingerprint: `sha256:${'a'.repeat(64)}`,
         context_version: `sha256:${'b'.repeat(64)}`,
       },
       generateChapterProse: (() => { throw synchronousFailure }) as any,
@@ -2083,6 +2187,7 @@ describe('ModelGenerationSource', () => {
       provenance: {
         task_id: 'task-direct-proxy-result', project_id: 5, chapter_id: 12,
         source: 'model', source_fingerprint: `sha256:${'a'.repeat(64)}`,
+        authority_fingerprint: `sha256:${'a'.repeat(64)}`,
         context_version: `sha256:${'b'.repeat(64)}`,
       },
       generateChapterProse: (() => trappedResult('draft')) as any,
@@ -2112,6 +2217,7 @@ describe('ModelGenerationSource', () => {
       provenance: {
         task_id: 'task-direct-revoked-result', project_id: 5, chapter_id: 12,
         source: 'model', source_fingerprint: `sha256:${'a'.repeat(64)}`,
+        authority_fingerprint: `sha256:${'a'.repeat(64)}`,
         context_version: `sha256:${'b'.repeat(64)}`,
       },
       generateChapterProse: (() => revokedDraft.proxy) as any,
@@ -2296,6 +2402,7 @@ describe('McpGenerationSource task execution', () => {
             chapter_id: input.chapter.id,
             source: 'model' as const,
             source_fingerprint: input.fingerprint,
+            authority_fingerprint: input.authorityFingerprint,
             context_version: input.contextVersion,
             model_id: input.modelId,
           }
@@ -2674,6 +2781,7 @@ describe('McpGenerationSource task execution', () => {
         task_id: execution.taskId,
         source: 'mcp',
         source_fingerprint: execution.fingerprint,
+        authority_fingerprint: execution.authorityFingerprint,
         session_id: 'neutral-session-1',
       },
     })
@@ -2687,6 +2795,7 @@ describe('McpGenerationSource task execution', () => {
           task_id: execution.taskId,
           source: 'mcp',
           source_fingerprint: execution.fingerprint,
+          authority_fingerprint: execution.authorityFingerprint,
           adapter_id: 'test-session-provider',
           agent_id: 'agent-neutral-1',
         })
@@ -4380,6 +4489,7 @@ describe('McpGenerationSource task execution', () => {
       receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
       task_id: execution.taskId,
       source_fingerprint: execution.fingerprint,
+      authority_fingerprint: execution.authorityFingerprint,
       source: 'mcp',
       error_code: 'MCP_SESSION_FAILED',
     })

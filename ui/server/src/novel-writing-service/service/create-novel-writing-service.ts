@@ -142,6 +142,7 @@ export function createNovelWritingService(ctx: {
         chapter_id: input.chapter.id,
         source: 'model' as const,
         source_fingerprint: input.fingerprint,
+        authority_fingerprint: input.authorityFingerprint,
         context_version: input.contextVersion,
         model_id: input.modelId,
       }

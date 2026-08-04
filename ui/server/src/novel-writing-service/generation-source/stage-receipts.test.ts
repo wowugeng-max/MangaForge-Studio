@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createNovelProject, listNovelRuns } from '../../novel'
 import { validateMcpStageResponse } from './stage-response-contract'
-import { createChapterStageRecorder } from './stage-receipts'
+import { createChapterStageRecorder, projectChapterTaskProvenance } from './stage-receipts'
 
 const workspaces: string[] = []
 
@@ -18,6 +18,7 @@ async function fixture() {
   const provenance = {
     task_id: 'task-stage-1', project_id: project.id, chapter_id: 12, source: 'model' as const,
     source_fingerprint: `sha256:${'a'.repeat(64)}`,
+    authority_fingerprint: `sha256:${'c'.repeat(64)}`,
     context_version: `sha256:${'b'.repeat(64)}`,
     model_id: 217,
   }
@@ -34,6 +35,20 @@ function deleteStageRuns(activeWorkspace: string) {
 }
 
 describe('chapter generation stage receipts', () => {
+  test('requires both effective and authority fingerprints in projected provenance', async () => {
+    const { provenance } = await fixture()
+
+    expect(projectChapterTaskProvenance(provenance)).toEqual(provenance)
+    expect(() => projectChapterTaskProvenance({
+      ...provenance,
+      authority_fingerprint: undefined,
+    })).toThrow('Invalid chapter task provenance')
+    expect(() => projectChapterTaskProvenance({
+      ...provenance,
+      authority_fingerprint: 'sha256:invalid',
+    })).toThrow('Invalid chapter task provenance')
+  })
+
   test('durably fails a recorded MCP stage when response validation rejects inside the operation', async () => {
     const { activeWorkspace, provenance } = await fixture()
     const mcpProvenance = { ...provenance, source: 'mcp' as const, model_id: undefined }
@@ -84,7 +99,7 @@ describe('chapter generation stage receipts', () => {
       status: 'success',
     })
     expect(Object.keys(receiptOutput).sort()).toEqual([
-      'chapter_id', 'context_version', 'elapsed_ms', 'model_id', 'project_id', 'source',
+      'authority_fingerprint', 'chapter_id', 'context_version', 'elapsed_ms', 'model_id', 'project_id', 'source',
       'source_fingerprint', 'stage', 'status', 'task_id', 'receipt_authority',
     ].sort())
     const serialized = JSON.stringify(run)
@@ -155,7 +170,7 @@ describe('chapter generation stage receipts', () => {
     expect(output.error_code.length).toBeLessThanOrEqual(80)
     expect(run.error_message!.length).toBeLessThanOrEqual(500)
     expect(Object.keys(output).sort()).toEqual([
-      'chapter_id', 'context_version', 'elapsed_ms', 'error_code', 'model_id', 'project_id',
+      'authority_fingerprint', 'chapter_id', 'context_version', 'elapsed_ms', 'error_code', 'model_id', 'project_id',
       'source', 'source_fingerprint', 'stage', 'status', 'task_id', 'receipt_authority',
     ].sort())
     const serialized = JSON.stringify(run)

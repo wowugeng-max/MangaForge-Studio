@@ -114,6 +114,7 @@ export class ModelGenerationSource implements GenerationSource, ChapterTaskExecu
   readonly taskId: string
   readonly source = 'model' as const
   readonly modelId?: number
+  readonly authorityFingerprint: string
   readonly fingerprint: string
   readonly contextVersion: string
 
@@ -130,11 +131,12 @@ export class ModelGenerationSource implements GenerationSource, ChapterTaskExecu
       this.legacy = true
       this.taskId = ''
       this.modelId = undefined
+      this.authorityFingerprint = ''
       this.fingerprint = ''
       this.contextVersion = ''
       this.provenanceSnapshot = Object.freeze({
         task_id: '', project_id: 0, chapter_id: 0, source: 'model',
-        source_fingerprint: '', context_version: '',
+        source_fingerprint: '', authority_fingerprint: '', context_version: '',
       })
       this.generateChapterProse = input
       this.recordStage = async (_stage, _request, operation) => operation()
@@ -152,6 +154,7 @@ export class ModelGenerationSource implements GenerationSource, ChapterTaskExecu
       model_id: modelId,
     })
     this.taskId = this.provenanceSnapshot.task_id
+    this.authorityFingerprint = this.provenanceSnapshot.authority_fingerprint
     this.fingerprint = this.provenanceSnapshot.source_fingerprint
     this.contextVersion = this.provenanceSnapshot.context_version
     this.generateChapterProse = input.generateChapterProse

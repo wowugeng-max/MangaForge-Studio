@@ -44,6 +44,7 @@ export type ChapterTaskProvenance = {
   chapter_id: number
   source: 'model' | 'mcp'
   source_fingerprint: string
+  authority_fingerprint: string
   context_version: string
   model_id?: number
   server_id?: string
@@ -70,10 +71,15 @@ export function acceptanceChapterGenerationSourceFingerprintFromGenerationSource
   if (
     generationSource?.receipt_authority !== CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY
     || (generationSource?.source !== 'model' && generationSource?.source !== 'mcp')
-    || typeof generationSource?.source_fingerprint !== 'string'
   ) return ''
-  const fingerprint = generationSource.source_fingerprint.trim()
-  return /^sha256:[0-9a-f]{64}$/.test(fingerprint) ? fingerprint : ''
+  const authority = typeof generationSource?.authority_fingerprint === 'string'
+    ? generationSource.authority_fingerprint.trim()
+    : ''
+  if (/^sha256:[0-9a-f]{64}$/.test(authority)) return authority
+  const compatibility = typeof generationSource?.source_fingerprint === 'string'
+    ? generationSource.source_fingerprint.trim()
+    : ''
+  return /^sha256:[0-9a-f]{64}$/.test(compatibility) ? compatibility : ''
 }
 
 export type ProseGenerationRequest = {
@@ -127,6 +133,7 @@ export type BeginChapterTaskInput = {
 export type ResolvedChapterTaskInput = BeginChapterTaskInput & {
   taskId: string
   sourceState: ChapterGenerationSourceState
+  authorityFingerprint: string
   fingerprint: string
   contextVersion: string
   assertCurrent: () => Promise<void>
@@ -136,6 +143,7 @@ export interface ChapterTaskExecution {
   readonly taskId: string
   readonly source: 'model' | 'mcp'
   readonly modelId?: number
+  readonly authorityFingerprint: string
   readonly fingerprint: string
   readonly contextVersion: string
   provenance(): ChapterTaskProvenance

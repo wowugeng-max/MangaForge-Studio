@@ -156,6 +156,7 @@ function wrapExecution(
     taskId: resolved.taskId,
     source: execution.source,
     modelId: execution.modelId,
+    authorityFingerprint: resolved.authorityFingerprint,
     fingerprint: resolved.fingerprint,
     contextVersion: resolved.contextVersion,
     provenance: () => execution.provenance(),
@@ -223,14 +224,28 @@ function createTaskResolver(input: GenerationSourceResolverInput): TaskGeneratio
             beginInput.activeWorkspace,
             projectId,
           )
-          const sourceState = freezeSourceState(resolveChapterGenerationSource(currentProject))
+          const authoritySourceState = freezeSourceState(resolveChapterGenerationSource(currentProject))
           return {
             currentProject,
-            sourceState,
-            fingerprint: chapterGenerationSourceFingerprint(sourceState),
+            authoritySourceState,
+            authorityFingerprint: chapterGenerationSourceFingerprint(authoritySourceState),
           }
         })
-        const { currentProject, sourceState, fingerprint } = snapshot
+        const { currentProject, authoritySourceState, authorityFingerprint } = snapshot
+        let sourceState = authoritySourceState
+        let modelId: number | undefined
+        if (authoritySourceState.active === 'model') {
+          modelId = positiveModelId(authoritySourceState.model.model_id)
+            ?? positiveModelId(beginInput.requestedModelId)
+          if (modelId === undefined) {
+            throw new ChapterGenerationSourceError('CHAPTER_MODEL_REQUIRED', '请选择有效的章节模型')
+          }
+          sourceState = freezeSourceState({
+            ...authoritySourceState,
+            model: { model_id: modelId },
+          })
+        }
+        const fingerprint = chapterGenerationSourceFingerprint(sourceState)
         const contextVersion = chapterContextVersion(beginInput.contextPackage)
         const assertCurrent = async () => {
           const currentFingerprint = await withMcpWorkspaceMutation(beginInput.activeWorkspace, async () => {
@@ -245,13 +260,14 @@ function createTaskResolver(input: GenerationSourceResolverInput): TaskGeneratio
               throw activeSourceChanged()
             }
           })
-          if (currentFingerprint !== fingerprint) throw activeSourceChanged()
+          if (currentFingerprint !== authorityFingerprint) throw activeSourceChanged()
         }
         const resolved: ResolvedChapterTaskInput = {
           ...beginInput,
           project: currentProject,
           taskId,
           sourceState,
+          authorityFingerprint,
           fingerprint,
           contextVersion,
           assertCurrent,
@@ -259,13 +275,7 @@ function createTaskResolver(input: GenerationSourceResolverInput): TaskGeneratio
 
         let execution: ChapterTaskExecution
         if (sourceState.active === 'model') {
-          const configuredModelId = sourceState.model.model_id
-          const requestedModelId = beginInput.requestedModelId
-          const modelId = positiveModelId(configuredModelId) ?? positiveModelId(requestedModelId)
-          if (modelId === undefined) {
-            throw new ChapterGenerationSourceError('CHAPTER_MODEL_REQUIRED', '请选择有效的章节模型')
-          }
-          execution = input.createModelExecution({ ...resolved, modelId })
+          execution = input.createModelExecution({ ...resolved, modelId: modelId! })
         } else {
           if (!input.mcpSource) {
             throw new McpError('MCP_BINDING_INVALID', '服务端未配置 MCP Runtime，无法执行项目绑定的 MCP 正文源')

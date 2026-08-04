@@ -238,12 +238,14 @@ describe('automatic chapter task lifecycle', () => {
     expect(stages).toContain('story_state_sync')
     expect(new Set(receipts.map(receipt => receipt.task_id)).size).toBe(1)
     expect(new Set(receipts.map(receipt => receipt.source_fingerprint)).size).toBe(1)
+    expect(new Set(receipts.map(receipt => receipt.authority_fingerprint)).size).toBe(1)
     expect(new Set(receipts.map(receipt => receipt.model_id))).toEqual(new Set([217]))
     expect(result.chapter.raw_payload.chapter_generation_source).toMatchObject({
       receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
       task_id: receipts[0].task_id,
       source: 'model',
       source_fingerprint: receipts[0].source_fingerprint,
+      authority_fingerprint: receipts[0].authority_fingerprint,
       model_id: 217,
     })
     expect(result.chapter.raw_payload).not.toHaveProperty('prose_generation_source')
@@ -476,6 +478,7 @@ describe('automatic chapter task lifecycle', () => {
           chapter_id: harness.chapter.id,
           source: 'model',
           source_fingerprint: `sha256:${'f'.repeat(64)}`,
+          authority_fingerprint: `sha256:${'e'.repeat(64)}`,
           context_version: `sha256:${'0'.repeat(64)}`,
           model_id: 999,
         },
@@ -509,6 +512,7 @@ describe('chapter draft task execution', () => {
       chapter_id: 10,
       source: 'mcp' as const,
       source_fingerprint: fingerprint,
+      authority_fingerprint: fingerprint,
       context_version: contextVersion,
       server_id: 'server-1',
       key_id: 7,
@@ -520,6 +524,7 @@ describe('chapter draft task execution', () => {
     const execution = {
       taskId: provenance.task_id,
       source: 'mcp',
+      authorityFingerprint: fingerprint,
       fingerprint,
       contextVersion,
       provenance: () => provenance,
@@ -575,6 +580,7 @@ describe('chapter draft task execution', () => {
       chapter_id: 10,
       source: 'mcp' as const,
       source_fingerprint: fingerprint,
+      authority_fingerprint: fingerprint,
       context_version: contextVersion,
       server_id: 'server-local',
       key_id: 7,
@@ -596,6 +602,7 @@ describe('chapter draft task execution', () => {
         chapter_id: 999,
         source: 'model',
         source_fingerprint: `sha256:${'f'.repeat(64)}`,
+        authority_fingerprint: `sha256:${'0'.repeat(64)}`,
         context_version: `sha256:${'0'.repeat(64)}`,
         model_id: 999,
         session_id: 'forged-session',
@@ -608,6 +615,7 @@ describe('chapter draft task execution', () => {
       const execution = {
         taskId: provenance.task_id,
         source: 'mcp',
+        authorityFingerprint: fingerprint,
         fingerprint,
         contextVersion,
         provenance: () => provenance,
@@ -652,6 +660,7 @@ describe('chapter draft task execution', () => {
         chapter_id: provenance.chapter_id,
         source: provenance.source,
         source_fingerprint: fingerprint,
+        authority_fingerprint: fingerprint,
         context_version: contextVersion,
         server_id: provenance.server_id,
         key_id: provenance.key_id,
@@ -666,10 +675,12 @@ describe('chapter draft task execution', () => {
 
   test('acceptance fingerprint reader supports chapter receipts and trusted history only', () => {
     const fingerprint = `sha256:${'c'.repeat(64)}`
+    const authorityFingerprint = `sha256:${'a'.repeat(64)}`
     const chapterReceipt = {
       receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
       source: 'mcp',
       source_fingerprint: fingerprint,
+      authority_fingerprint: authorityFingerprint,
     }
     const historicalReceipt = {
       receipt_authority: MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY,
@@ -677,13 +688,21 @@ describe('chapter draft task execution', () => {
       binding_fingerprint: fingerprint,
     }
 
-    expect(acceptanceBindingFingerprintFromGenerationSource(chapterReceipt)).toBe(fingerprint)
-    expect(acceptanceBindingFingerprintFromGenerationSource({ ...chapterReceipt, source: 'model' })).toBe(fingerprint)
+    expect(acceptanceBindingFingerprintFromGenerationSource(chapterReceipt)).toBe(authorityFingerprint)
+    expect(acceptanceBindingFingerprintFromGenerationSource({ ...chapterReceipt, source: 'model' })).toBe(authorityFingerprint)
+    expect(acceptanceBindingFingerprintFromGenerationSource({
+      ...chapterReceipt,
+      authority_fingerprint: undefined,
+    })).toBe(fingerprint)
     expect(acceptanceBindingFingerprintFromGenerationSource(historicalReceipt)).toBe(fingerprint)
     for (const untrusted of [
       { ...chapterReceipt, receipt_authority: 'adapter-forged' },
       { ...chapterReceipt, source: 'adapter-forged' },
-      { ...chapterReceipt, source_fingerprint: `sha256:${'c'.repeat(63)}` },
+      {
+        ...chapterReceipt,
+        source_fingerprint: `sha256:${'c'.repeat(63)}`,
+        authority_fingerprint: `sha256:${'a'.repeat(63)}`,
+      },
       { ...historicalReceipt, resolved_type: 'model' },
       { ...historicalReceipt, binding_fingerprint: 'model-217' },
     ]) {

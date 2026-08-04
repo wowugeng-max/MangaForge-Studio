@@ -105,6 +105,7 @@ export function projectChapterTaskProvenance(value: unknown): ChapterTaskProvena
   const chapterId = positiveSafeInteger(ownDataValue(value, 'chapter_id'))
   const source = ownDataValue(value, 'source')
   const sourceFingerprint = ownDataValue(value, 'source_fingerprint')
+  const authorityFingerprint = ownDataValue(value, 'authority_fingerprint')
   const contextVersion = ownDataValue(value, 'context_version')
   if (!taskId
     || projectId === undefined
@@ -112,6 +113,8 @@ export function projectChapterTaskProvenance(value: unknown): ChapterTaskProvena
     || (source !== 'model' && source !== 'mcp')
     || typeof sourceFingerprint !== 'string'
     || !SHA256_FINGERPRINT.test(sourceFingerprint)
+    || typeof authorityFingerprint !== 'string'
+    || !SHA256_FINGERPRINT.test(authorityFingerprint)
     || typeof contextVersion !== 'string'
     || !SHA256_FINGERPRINT.test(contextVersion)) {
     throw new TypeError('Invalid chapter task provenance')
@@ -123,6 +126,7 @@ export function projectChapterTaskProvenance(value: unknown): ChapterTaskProvena
     chapter_id: chapterId,
     source,
     source_fingerprint: sourceFingerprint,
+    authority_fingerprint: authorityFingerprint,
     context_version: contextVersion,
   }
   const modelId = positiveSafeInteger(ownDataValue(value, 'model_id'))

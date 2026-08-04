@@ -593,6 +593,7 @@ type ChapterTaskRuntime = Pick<McpRuntime,
 class McpChapterTaskExecution implements ChapterTaskExecution {
   readonly taskId: string
   readonly source = 'mcp' as const
+  readonly authorityFingerprint: string
   readonly fingerprint: string
   readonly contextVersion: string
 
@@ -635,6 +636,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     }
     this.binding = input.sourceState.mcp
     this.taskId = input.taskId
+    this.authorityFingerprint = input.authorityFingerprint
     this.fingerprint = input.fingerprint
     this.contextVersion = input.contextVersion
     this.scrubber = createMcpSecretScrubber(credentialSnapshot.secrets)
@@ -658,6 +660,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
       chapter_id: Number(this.input.chapter?.id || 0),
       source: 'mcp',
       source_fingerprint: this.fingerprint,
+      authority_fingerprint: this.authorityFingerprint,
       context_version: this.contextVersion,
       server_id: boundedScrubbedId(this.scrubber, this.binding.server_id),
       key_id: this.binding.key_id,
@@ -841,7 +844,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
           ? chapterGenerationSourceFingerprint(resolveChapterGenerationSource(latestProject))
           : ''
       } catch {}
-      if (currentFingerprint !== this.fingerprint) {
+      if (currentFingerprint !== this.authorityFingerprint) {
         throw new McpError('MCP_BINDING_CHANGED', '项目 MCP 章节生成绑定已变化，请重新发起任务')
       }
       const selected = selectedTaskCredential(currentSnapshot, this.binding)
