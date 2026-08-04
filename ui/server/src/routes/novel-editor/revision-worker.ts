@@ -8,7 +8,10 @@ import {
   getEditorRevisionRun,
   getNovelChapter,
   listNovelChapters,
+  listNovelCharacters,
+  listNovelOutlines,
   listNovelReviews,
+  listNovelWorldbuilding,
   recoverEditorRevisionRuns,
   requeueEditorRevisionRun,
   requireCoherentEditorRevisionCheckpoint,
@@ -22,7 +25,6 @@ import { jsonText } from '../../novel/json'
 import { normalizeReviewRecord } from '../../novel/normalize'
 import { reviewFromRow } from '../../novel/row-mappers'
 import { withNovelDbWrite } from '../../novel/sql-rows'
-import { executeNovelAgent } from '../../llm'
 import { buildCurrentChapterPlanAlignment } from '../../novel-writing/chapter-plan-from-prose'
 import { countProseChars } from '../../novel-writing/word-target'
 import { compactPreparedStoryStateForRecovery } from '../../novel-writing-service/service/story-state-machine-update'
@@ -36,7 +38,9 @@ import {
   buildEditorRevisionAgentRequest,
   createProseQualityReview,
   type EditorRoutesContext,
+  type PreparedProseQualityReviewContext,
 } from './builders'
+import type { ChapterTaskExecution } from '../../novel-writing-service/generation-source/types'
 import {
   EDITOR_REVISION_PHASES,
   type EditorRevisionCheckpoint,
@@ -63,6 +67,12 @@ const RECOVERY_RETRY_MAX_MS = 30_000
 const CLAIM_RETRY_BASE_MS = 100
 const CLAIM_RETRY_MAX_MS = 5_000
 const TERMINAL_PHASE_STATES = new Set(['completed', 'skipped'])
+const CANCELLED_CHAPTER_TASK_ERRORS = new Set([
+  'REVISION_CANCELED',
+  'REVISION_WORKER_STOPPED',
+])
+const TASK_CLOSE_FAILURE_CODE = 'REVISION_TASK_CLOSE_FAILED'
+const TASK_CLOSE_FAILURE_CODE_LIMIT = 160
 
 type LeaseInput = { runId?: number; owner: string; leaseMs?: number }
 type RenewLeaseInput = { runId: number; owner: string; leaseMs?: number }
@@ -74,6 +84,12 @@ type CheckpointWrite = {
   phase: EditorRevisionPhase
   checkpoint: EditorRevisionCheckpoint
   errorMessage?: string
+}
+
+type TaskCloseFailureReport = {
+  runId: number
+  projectId: number
+  errorCode: string
 }
 
 type InvalidStateTerminalization = {
@@ -127,6 +143,30 @@ async function terminalizeInvalidEditorRevisionState(
   }, 'terminalize-invalid-editor-revision-state')
 }
 
+function boundedTaskCloseFailureCode(error: unknown) {
+  if (!error || (typeof error !== 'object' && typeof error !== 'function')) {
+    return TASK_CLOSE_FAILURE_CODE
+  }
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(error, 'code')
+    const code = descriptor && 'value' in descriptor && typeof descriptor.value === 'string'
+      ? descriptor.value.trim()
+      : ''
+    return /^[A-Z][A-Z0-9_]*$/.test(code)
+      ? code.slice(0, TASK_CLOSE_FAILURE_CODE_LIMIT)
+      : TASK_CLOSE_FAILURE_CODE
+  } catch {
+    return TASK_CLOSE_FAILURE_CODE
+  }
+}
+
+function reportEditorRevisionTaskCloseFailure(input: TaskCloseFailureReport) {
+  const errorCode = /^[A-Z][A-Z0-9_]*$/.test(input.errorCode)
+    ? input.errorCode.slice(0, TASK_CLOSE_FAILURE_CODE_LIMIT)
+    : TASK_CLOSE_FAILURE_CODE
+  console.warn(`[editor-revision-worker] chapter task close failed: ${errorCode}`)
+}
+
 function canceledInvalidStateCheckpoint(checkpoint: EditorRevisionCheckpoint, completedAt: string) {
   const next = structuredClone(checkpoint)
   const current = next.phases[next.phase]
@@ -157,14 +197,19 @@ export type EditorRevisionWorkerDependencies = {
   terminalizeInvalidState: typeof terminalizeInvalidEditorRevisionState
   getChapter: (workspace: string, chapterId: number, projectId: number) => Promise<NovelChapterRecord | null>
   listChapters: (workspace: string, projectId: number) => Promise<NovelChapterRecord[]>
+  listWorldbuilding: typeof listNovelWorldbuilding
+  listCharacters: typeof listNovelCharacters
+  listOutlines: typeof listNovelOutlines
   listReviews: (workspace: string, projectId: number) => Promise<NovelReviewRecord[]>
+  buildChapterContextPackage: EditorRoutesContext['buildChapterContextPackage']
+  beginChapterTask: EditorRoutesContext['beginChapterTask']
   findOrCreateReview: typeof findOrCreateEditorRevisionReview
   commitChapter: typeof commitEditorRevisionChapter
-  executeRevision: typeof executeNovelAgent
   createQualityReview: typeof createProseQualityReview
   prepareStoryState: typeof prepareSingleChapterStoryState
   applyStoryState: typeof applySingleChapterStoryState
   admitCandidate: typeof admitRevisionCandidate
+  reportTaskCloseFailure: (input: TaskCloseFailureReport) => Promise<void> | void
   now: () => string
   setInterval: (callback: () => void | Promise<void>, ms: number) => any
   clearInterval: (handle: any) => void
@@ -184,6 +229,14 @@ type LeaseState = {
   valid: boolean
   heartbeat: any | null
   renewal: Promise<void> | null
+}
+
+type RevisionChapterTaskSnapshot = {
+  project: any
+  chapter: NovelChapterRecord
+  chapters: NovelChapterRecord[]
+  reviews: NovelReviewRecord[]
+  contextPackage: any
 }
 
 export type EditorRevisionReviewReceipt =
@@ -423,14 +476,19 @@ export function createEditorRevisionWorker(
     terminalizeInvalidState: terminalizeInvalidEditorRevisionState,
     getChapter: getNovelChapter,
     listChapters: listNovelChapters,
+    listWorldbuilding: listNovelWorldbuilding,
+    listCharacters: listNovelCharacters,
+    listOutlines: listNovelOutlines,
     listReviews: listNovelReviews,
+    buildChapterContextPackage: ctx.buildChapterContextPackage,
+    beginChapterTask: ctx.beginChapterTask,
     findOrCreateReview: findOrCreateEditorRevisionReview,
     commitChapter: commitEditorRevisionChapter,
-    executeRevision: ctx.executeAgent || executeNovelAgent,
     createQualityReview: createProseQualityReview,
     prepareStoryState: prepareSingleChapterStoryState,
     applyStoryState: applySingleChapterStoryState,
     admitCandidate: admitRevisionCandidate,
+    reportTaskCloseFailure: reportEditorRevisionTaskCloseFailure,
     now: () => new Date().toISOString(),
     setInterval: (callback, ms) => setInterval(callback, ms),
     clearInterval: handle => clearInterval(handle),
@@ -942,26 +1000,37 @@ export function createEditorRevisionWorker(
     controller: AbortController,
     lease: LeaseState,
     llmTimeoutMs: number,
+    execution: ChapterTaskExecution,
+    taskSnapshot: RevisionChapterTaskSnapshot,
   ) {
     let loaded = await phaseCheckpoint(input, runId, controller, lease)
     if (loaded.checkpoint.candidate && loaded.checkpoint.phases.admit_candidate.status === 'completed') {
       return loaded.checkpoint
     }
     await markRunning(input, runId, 'generate_candidate', controller, lease)
-    const request = buildEditorRevisionAgentRequest(ctx, project, input)
-    const result = await withLlmTimeout(controller, llmTimeoutMs, () => deps.executeRevision('prose-agent', project, {
-      task: request.prompt,
-    }, {
-      activeWorkspace: activeWorkspace!,
-      modelId: input.model_id ? String(input.model_id) : undefined,
-      maxTokens: request.maxTokens,
-      temperature: request.temperature,
-      responseMode: 'stream',
-      skipMemory: true,
-      signal: controller.signal,
-      timeoutMs: llmTimeoutMs,
-      maxRetries: 1,
-    }))
+    const request = buildEditorRevisionAgentRequest(ctx, project, {
+      ...input,
+      context_package: taskSnapshot.contextPackage,
+    })
+    const result = await withLlmTimeout(controller, llmTimeoutMs, () => execution.executeAgent(
+      'revision',
+      'revision_prose',
+      'prose-agent',
+      project,
+      {
+        task: request.prompt,
+      },
+      {
+        activeWorkspace: activeWorkspace!,
+        maxTokens: request.maxTokens,
+        temperature: request.temperature,
+        responseMode: 'stream',
+        skipMemory: true,
+        signal: controller.signal,
+        timeoutMs: llmTimeoutMs,
+        maxRetries: 1,
+      },
+    ))
     const resultDiagnostics = buildLLMResultDiagnostics(result)
     let admitted: RevisionCandidateAdmission
     try {
@@ -1112,6 +1181,8 @@ export function createEditorRevisionWorker(
     controller: AbortController,
     lease: LeaseState,
     llmTimeoutMs: number,
+    execution: ChapterTaskExecution,
+    taskSnapshot: RevisionChapterTaskSnapshot,
   ) {
     const current = (await phaseCheckpoint(input, runId, controller, lease)).checkpoint
     if (TERMINAL_PHASE_STATES.has(current.phases.post_quality.status)) return current
@@ -1120,17 +1191,33 @@ export function createEditorRevisionWorker(
     if (!checkpoint.candidate) throw revisionError('REVISION_CANDIDATE_MISSING')
     const chapter = await deps.getChapter(activeWorkspace!, input.chapter_id, input.project_id)
     if (!chapter) throw revisionError('CHAPTER_NOT_FOUND')
+    if (revisionTextHash(String(chapter.chapter_text || '')) !== checkpoint.candidate.hash) {
+      throw revisionError('PROSE_QUALITY_CANDIDATE_STALE')
+    }
+    const chapters = taskSnapshot.chapters.map(item => Number(item.id) === Number(chapter.id) ? chapter : item)
+    const preparedContext: PreparedProseQualityReviewContext = {
+      chapters,
+      reviews: taskSnapshot.reviews,
+      currentChapter: chapter,
+      alignedChapter: chapter,
+      contextPackage: taskSnapshot.contextPackage,
+      planAlignment: { rebuilt: false, reason: 'revision_task_context_snapshot', following_count: 0 },
+      hasCurrentAlignmentPatch: false,
+      alignmentPatch: {},
+    }
     const quality = await withLlmTimeout(controller, llmTimeoutMs, () => deps.createQualityReview(ctx, activeWorkspace!, project, chapter, {
       source: 'post_revision',
       source_review_id: input.review_id,
       source_run_id: runId,
       candidate_hash: checkpoint.candidate!.hash,
       current_chapter_only: true,
-      model_id: input.model_id,
       signal: controller.signal,
       timeoutMs: llmTimeoutMs,
       maxRetries: 1,
       workerLease: { runId, owner: leaseOwner },
+      chapterTaskExecution: execution,
+      preparedContext,
+      qualityStage: 'post_revision_review',
     }))
     const needsRevision = quality?.review?.needs_revision === true
     return markCompleted(input, runId, 'post_quality', controller, lease, next => {
@@ -1170,6 +1257,8 @@ export function createEditorRevisionWorker(
     lease: LeaseState,
     llmTimeoutMs: number,
     storyStateMaxTokens: number,
+    execution: ChapterTaskExecution,
+    taskSnapshot: RevisionChapterTaskSnapshot,
   ) {
     let checkpoint = (await phaseCheckpoint(input, runId, controller, lease)).checkpoint
     if (TERMINAL_PHASE_STATES.has(checkpoint.phases.sync_current_story_state.status)) return checkpoint
@@ -1185,16 +1274,26 @@ export function createEditorRevisionWorker(
     let completedReceipt = (checkpoint.story_state as any)?.completed_receipt || null
     let reusedPrepare = Boolean(prepared || completedReceipt)
     if (!prepared && !completedReceipt) {
+      const chapter = await deps.getChapter(activeWorkspace!, input.chapter_id, input.project_id)
+      if (!chapter) throw revisionError('CHAPTER_NOT_FOUND')
+      if (revisionTextHash(String(chapter.chapter_text || '')) !== receipt.candidate_hash) {
+        throw revisionError('STORY_STATE_CANDIDATE_STALE')
+      }
       const preparedResult = await withLlmTimeout(controller, llmTimeoutMs, () => deps.prepareStoryState(ctx, {
         workspace: activeWorkspace!,
         projectId: input.project_id,
         chapterId: input.chapter_id,
-        modelId: input.model_id,
         receipt,
         signal: controller.signal,
         timeoutMs: llmTimeoutMs,
         maxRetries: 1,
         maxTokens: storyStateMaxTokens,
+        chapterTaskExecution: execution,
+        exactContext: {
+          project: taskSnapshot.project,
+          chapter,
+          contextPackage: taskSnapshot.contextPackage,
+        },
       }))
       reusedPrepare = preparedResult.reused
       completedReceipt = preparedResult.completedReceipt || null
@@ -1223,17 +1322,27 @@ export function createEditorRevisionWorker(
       }, { status: 'completed', reused: true })
     }
     await loadActiveRun(input, runId, controller, lease)
+    const chapter = await deps.getChapter(activeWorkspace!, input.chapter_id, input.project_id)
+    if (!chapter) throw revisionError('CHAPTER_NOT_FOUND')
+    if (revisionTextHash(String(chapter.chapter_text || '')) !== receipt.candidate_hash) {
+      throw revisionError('STORY_STATE_CANDIDATE_STALE')
+    }
     const applied = await withLlmTimeout(controller, llmTimeoutMs, () => deps.applyStoryState(ctx, {
       workspace: activeWorkspace!,
       projectId: input.project_id,
       chapterId: input.chapter_id,
-      modelId: input.model_id,
       receipt,
       prepared: preparedForApply(prepared, receipt),
       signal: controller.signal,
       timeoutMs: llmTimeoutMs,
       maxRetries: 1,
       workerLease: { runId, owner: leaseOwner },
+      chapterTaskExecution: execution,
+      exactContext: {
+        project: taskSnapshot.project,
+        chapter,
+        contextPackage: taskSnapshot.contextPackage,
+      },
     }))
     return markCompleted(input, runId, 'sync_current_story_state', controller, lease, next => {
       next.story_state = {
@@ -1390,6 +1499,82 @@ export function createEditorRevisionWorker(
     )
   }
 
+  async function loadRevisionTaskSnapshot(
+    input: EditorRevisionRunInput,
+    project: any,
+  ): Promise<RevisionChapterTaskSnapshot> {
+    const [chapter, chapters, worldbuilding, characters, outlines, reviews] = await Promise.all([
+      deps.getChapter(activeWorkspace!, input.chapter_id, input.project_id),
+      deps.listChapters(activeWorkspace!, input.project_id),
+      deps.listWorldbuilding(activeWorkspace!, input.project_id),
+      deps.listCharacters(activeWorkspace!, input.project_id),
+      deps.listOutlines(activeWorkspace!, input.project_id),
+      deps.listReviews(activeWorkspace!, input.project_id),
+    ])
+    if (!chapter || Number(chapter.project_id) !== input.project_id) throw revisionError('CHAPTER_NOT_FOUND')
+    const contextPackage = await deps.buildChapterContextPackage(
+      activeWorkspace!,
+      project,
+      chapter,
+      chapters,
+      worldbuilding,
+      characters,
+      outlines,
+      reviews,
+    )
+    return { project, chapter, chapters, reviews, contextPackage }
+  }
+
+  async function checkpointChapterGenerationSource(
+    input: EditorRevisionRunInput,
+    runId: number,
+    controller: AbortController,
+    lease: LeaseState,
+    execution: ChapterTaskExecution,
+  ) {
+    const loaded = await phaseCheckpoint(input, runId, controller, lease)
+    loaded.checkpoint.chapter_generation_source = {
+      task_id: execution.taskId,
+      source: execution.source,
+      source_fingerprint: execution.fingerprint,
+      context_version: execution.contextVersion,
+      ...(Number.isInteger(execution.modelId) ? { model_id: execution.modelId } : {}),
+    }
+    await writeCheckpoint(
+      input,
+      runId,
+      loaded.checkpoint.phase,
+      loaded.checkpoint,
+      'running',
+      undefined,
+      lease,
+    )
+  }
+
+  function chapterTaskFailure(error: unknown) {
+    return error instanceof StopProcessingError && error.cause !== undefined ? error.cause : error
+  }
+
+  async function chapterTaskOutcome(
+    run: NovelRunRecord,
+    succeeded: boolean,
+    error: unknown,
+  ): Promise<Parameters<ChapterTaskExecution['close']>[0]> {
+    const durable = await deps.getRun(activeWorkspace!, run.project_id, run.id).catch(() => null)
+    if (durable?.status === 'completed') return { status: 'success' }
+    if (durable?.status === 'canceled' || durable?.status === 'cancel_requested') {
+      return { status: 'cancelled', ...(error !== undefined ? { error } : {}) }
+    }
+    if (durable?.status === 'failed') {
+      return { status: 'failed', ...(error !== undefined ? { error } : {}) }
+    }
+    if (succeeded) return { status: 'success' }
+    return {
+      status: CANCELLED_CHAPTER_TASK_ERRORS.has(errorCode(error)) ? 'cancelled' : 'failed',
+      ...(error !== undefined ? { error } : {}),
+    }
+  }
+
   async function processClaim(run: NovelRunRecord) {
     if (stopping) {
       await deps.releaseClaim(activeWorkspace!, {
@@ -1408,6 +1593,9 @@ export function createEditorRevisionWorker(
       EDITOR_REVISION_LEASE_MS / 3,
     )
     let input: EditorRevisionRunInput | null = null
+    let execution: ChapterTaskExecution | null = null
+    let executionError: unknown
+    let executionSucceeded = false
     try {
       const parsedInput = parseInput(run.input_ref)
       if (parsedInput.project_id !== run.project_id
@@ -1420,13 +1608,25 @@ export function createEditorRevisionWorker(
       await recoverCommittedChapter(input, run.id, controller, lease)
       const runtimeConfig = await resolveRunRuntimeConfig(input, run.id, project, controller, lease)
       const { llmTimeoutMs, storyStateMaxTokens } = runtimeConfig
-      await generateAndAdmit(input, run.id, project, controller, lease, llmTimeoutMs)
+      const taskSnapshot = await loadRevisionTaskSnapshot(input, project)
+      execution = await deps.beginChapterTask({
+        activeWorkspace: activeWorkspace!,
+        project: taskSnapshot.project,
+        chapter: taskSnapshot.chapter,
+        contextPackage: taskSnapshot.contextPackage,
+        requestedModelId: input.model_id,
+        signal: controller.signal,
+      })
+      await checkpointChapterGenerationSource(input, run.id, controller, lease, execution)
+      await generateAndAdmit(input, run.id, project, controller, lease, llmTimeoutMs, execution, taskSnapshot)
       await persistChapter(input, run.id, controller, lease)
-      await runPostQuality(input, run.id, project, controller, lease, llmTimeoutMs)
-      await runStoryState(input, run.id, controller, lease, llmTimeoutMs, storyStateMaxTokens)
+      await runPostQuality(input, run.id, project, controller, lease, llmTimeoutMs, execution, taskSnapshot)
+      await runStoryState(input, run.id, controller, lease, llmTimeoutMs, storyStateMaxTokens, execution, taskSnapshot)
       await recordDeterministicReviews(input, run.id, controller, lease)
       await completeRun(input, run.id, controller, lease)
+      executionSucceeded = true
     } catch (error) {
+      executionError = chapterTaskFailure(error)
       if (error instanceof StopProcessingError) return
       const code = errorCode(error)
       if (code === 'REVISION_LEASE_LOST' || code === 'REVISION_WORKER_STOPPED') return
@@ -1444,19 +1644,38 @@ export function createEditorRevisionWorker(
       }
       await failRun(input, run.id, error).catch(() => {})
     } finally {
-      invalidateLease(lease)
       try {
-        await awaitLeaseRenewal(lease)
-        if (stopping) {
-          await deps.releaseClaim(activeWorkspace!, {
-            runId: run.id,
-            owner: leaseOwner,
-            now: deps.now(),
-          })
+        if (execution) {
+          const outcome = await chapterTaskOutcome(run, executionSucceeded, executionError)
+          try {
+            await execution.close(outcome)
+          } catch (closeError) {
+            if (closeError !== executionError) {
+              try {
+                await deps.reportTaskCloseFailure({
+                  runId: run.id,
+                  projectId: run.project_id,
+                  errorCode: boundedTaskCloseFailureCode(closeError),
+                })
+              } catch {}
+            }
+          }
         }
       } finally {
-        activeLeases.delete(run.id)
-        controllers.delete(run.id)
+        invalidateLease(lease)
+        try {
+          await awaitLeaseRenewal(lease)
+          if (stopping) {
+            await deps.releaseClaim(activeWorkspace!, {
+              runId: run.id,
+              owner: leaseOwner,
+              now: deps.now(),
+            })
+          }
+        } finally {
+          activeLeases.delete(run.id)
+          controllers.delete(run.id)
+        }
       }
     }
   }

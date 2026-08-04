@@ -249,6 +249,12 @@ async function createAsyncRevisionRouteFixture(options: {
   const getProject = async (activeWorkspace: string, id: number) => (
     (await listNovelProjects(activeWorkspace)).find(item => item.id === id) || null
   )
+  const executeAgent = async (...args: any[]) => {
+    revisionAgentCalls += 1
+    return options.executeAgent
+      ? options.executeAgent(...args)
+      : { parsed: { chapter_text: ROUTE_CANDIDATE_TEXT }, finish_reason: 'stop' } as any
+  }
   const ctx: any = {
     getWorkspace: () => workspace,
     getProject,
@@ -266,15 +272,26 @@ async function createAsyncRevisionRouteFixture(options: {
     buildStructuralSimilarityReport: () => ({}),
     buildReferenceMigrationDryPlan: () => ({}),
     diffTexts: () => ({}),
-    beginChapterTask: options.beginChapterTask || (async () => {
-      throw new Error('beginChapterTask was not configured for this fixture')
-    }),
-    executeAgent: async (...args: any[]) => {
-      revisionAgentCalls += 1
-      return options.executeAgent
-        ? options.executeAgent(...args)
-        : { parsed: { chapter_text: ROUTE_CANDIDATE_TEXT }, finish_reason: 'stop' } as any
-    },
+    beginChapterTask: options.beginChapterTask || (async (input: any) => ({
+      taskId: `revision-route-${input.chapter.id}`,
+      source: 'model',
+      modelId: input.requestedModelId,
+      fingerprint: 'revision-route-fixture-source',
+      contextVersion: 'revision-route-fixture-context',
+      provenance: () => ({}),
+      generateDraft: async () => { throw new Error('not used') },
+      executeAgent: async (
+        _stage: string,
+        _contract: string,
+        agentId: string,
+        project: any,
+        context: any,
+        agentOptions: any,
+      ) => executeAgent(agentId, project, context, agentOptions),
+      assertCurrent: async () => {},
+      close: async () => {},
+    })),
+    executeAgent,
     updateStoryStateMachine: async () => ({}),
   }
   const worker = options.useRealWorker

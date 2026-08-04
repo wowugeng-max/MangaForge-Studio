@@ -95,6 +95,7 @@ export type ProseQualityReviewOptions = {
   workerLease?: { runId: number; owner: string }
   chapterTaskExecution?: ChapterTaskExecution
   preparedContext?: PreparedProseQualityReviewContext
+  qualityStage?: 'manual_recheck' | 'post_revision_review'
 }
 
 type ChapterTaskOutcome = Parameters<ChapterTaskExecution['close']>[0]
@@ -581,7 +582,7 @@ async function createProseQualityReviewOnce(
   const result = await executeChapterStage({
     execution: options.chapterTaskExecution,
     fallback: executeAgent,
-    stage: 'manual_recheck',
+    stage: options.qualityStage || 'manual_recheck',
     responseContract: 'quality_review_json',
     agentId: 'review-agent',
     project,

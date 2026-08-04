@@ -309,6 +309,49 @@ async function eventually(predicate: () => boolean, message = 'condition was not
 
 type WriteCrash = (input: any) => 'before' | 'after' | null
 
+function createWorkerWithTaskExecution(ctx: any, overrides: Record<string, any> = {}) {
+  const buildChapterContextPackage = overrides.buildChapterContextPackage
+    || ctx.buildChapterContextPackage
+    || (async (_workspace: string, _project: any, chapter: any) => ({
+      chapter_target: { chapter_id: chapter.id, chapter_no: chapter.chapter_no },
+    }))
+  const beginChapterTask = overrides.beginChapterTask
+    || ctx.beginChapterTask
+    || (async (input: any) => {
+      const taskId = `test-revision-${input.chapter.id}`
+      return {
+        taskId,
+        source: 'model',
+        modelId: input.requestedModelId,
+        fingerprint: 'test-revision-source',
+        contextVersion: 'test-revision-context',
+        provenance: () => ({}),
+        generateDraft: async () => { throw new Error('revision worker must not generate a draft') },
+        executeAgent: async (
+          stage: string,
+          _responseContract: string,
+          agentId: string,
+          project: any,
+          context: any,
+          options: any,
+        ) => {
+          const execute = stage === 'revision'
+            ? overrides.executeRevision || ctx.executeAgent
+            : ctx.executeAgent || overrides.executeRevision
+          if (!execute) throw new Error(`missing test execution for ${stage}`)
+          return execute(agentId, project, context, options)
+        },
+        assertCurrent: async () => {},
+        close: async () => {},
+      }
+    })
+  return createEditorRevisionWorker(ctx, {
+    ...overrides,
+    buildChapterContextPackage,
+    beginChapterTask,
+  })
+}
+
 function createHarness(options: {
   autoQuality?: boolean
   autoStoryState?: boolean
@@ -320,6 +363,10 @@ function createHarness(options: {
   quality?: (...args: any[]) => Promise<any>
   prepareStoryState?: (...args: any[]) => Promise<any>
   applyStoryState?: (...args: any[]) => Promise<any>
+  beginChapterTask?: (input: any) => Promise<any>
+  executeTaskStage?: (...args: any[]) => Promise<any>
+  closeTask?: (outcome: any) => Promise<void>
+  reportTaskCloseFailure?: (input: any) => Promise<void> | void
   renewLease?: (...args: any[]) => Promise<boolean>
   writeCrash?: WriteCrash
   commit?: (...args: any[]) => Promise<any>
@@ -387,6 +434,12 @@ function createHarness(options: {
   const qualityCalls: any[][] = []
   const prepareCalls: any[][] = []
   const applyCalls: any[][] = []
+  const begins: any[] = []
+  const stages: Array<{ taskId: string; args: any[] }> = []
+  const closeOutcomes: Array<{ taskId: string; outcome: any }> = []
+  const generateDraftCalls: any[] = []
+  const contextBuildCalls: any[][] = []
+  const closeFailureReports: any[] = []
   const renewCalls: any[] = []
   const intervalRegistrations: Array<{ callback: () => any; ms: number; cleared: boolean }> = []
   const timeoutRegistrations: Array<{ callback: () => any; ms: number; cleared: boolean }> = []
@@ -402,6 +455,15 @@ function createHarness(options: {
   const quality = options.quality || (async (...args: any[]) => {
     qualityCalls.push(args)
     events.push('quality')
+    const qualityOptions = args.at(-1)
+    await qualityOptions.chapterTaskExecution.executeAgent(
+      qualityOptions.qualityStage,
+      'quality_review_json',
+      'review-agent',
+      args[2],
+      { task: 'stable post revision quality context' },
+      { signal: qualityOptions.signal },
+    )
     return {
       review: { passed: true, score: 91, needs_revision: false },
       saved: { id: 71, review_type: 'prose_quality', payload: '{}' },
@@ -411,6 +473,15 @@ function createHarness(options: {
   const prepareStoryState = options.prepareStoryState || (async (...args: any[]) => {
     prepareCalls.push(args)
     events.push('prepare_story_state')
+    const storyStateInput = args[1]
+    await storyStateInput.chapterTaskExecution.executeAgent(
+      'story_state_sync',
+      'story_state_json',
+      'review-agent',
+      project,
+      { task: 'stable story state context' },
+      { signal: storyStateInput.signal },
+    )
     return {
       reused: false,
       prepared: {
@@ -478,7 +549,10 @@ function createHarness(options: {
   const ctx: any = {
     getWorkspace: () => workspace,
     getProject: async () => project,
-    buildChapterContextPackage: async () => ({}),
+    buildChapterContextPackage: async (...args: any[]) => {
+      contextBuildCalls.push(args)
+      return { chapter_target: { chapter_id: input.chapter_id }, snapshot: 'stable-worker-context' }
+    },
     getStageModelId: () => 19,
     getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
     buildReferenceUsageReport: async () => ({}),
@@ -561,7 +635,11 @@ function createHarness(options: {
     },
     getChapter: async () => clone(chapter),
     listChapters: async () => [clone(chapter), ...clone(followers)],
+    listWorldbuilding: async () => [],
+    listCharacters: async () => [],
+    listOutlines: async () => [],
     listReviews: async () => clone(reviews),
+    buildChapterContextPackage: (...args: any[]) => ctx.buildChapterContextPackage(...args),
     findOrCreateReview: async (_workspace: string, request: any) => {
       const receipt = request.receipt
       const existing = reviews.find(review => {
@@ -581,6 +659,58 @@ function createHarness(options: {
     executeRevision: async (...args: any[]) => {
       if (options.executeRevision) revisionCalls.push(args)
       return executeRevision(...args)
+    },
+    beginChapterTask: async (beginInput: any) => {
+      begins.push(beginInput)
+      events.push('begin_chapter_task')
+      if (options.beginChapterTask) return options.beginChapterTask(beginInput)
+      const taskId = 'revision-task-1'
+      return {
+        taskId,
+        source: 'model',
+        modelId: 217,
+        fingerprint: 'sha256:revision-fixture-fingerprint',
+        contextVersion: 'revision-fixture-context-v1',
+        provenance: () => ({
+          task_id: taskId,
+          project_id: project.id,
+          chapter_id: input.chapter_id,
+          source: 'model',
+          source_fingerprint: 'sha256:revision-fixture-fingerprint',
+          context_version: 'revision-fixture-context-v1',
+          model_id: 217,
+        }),
+        generateDraft: async (request: any) => {
+          generateDraftCalls.push(request)
+          throw new Error('revision worker must not call generateDraft')
+        },
+        executeAgent: async (...args: any[]) => {
+          stages.push({ taskId, args })
+          events.push(`task_stage:${args[0]}`)
+          if (options.executeTaskStage) return options.executeTaskStage(...args)
+          if (args[0] === 'revision') {
+            if (options.executeRevision) revisionCalls.push([args[2], args[3], args[4], args[5]])
+            return executeRevision(args[2], args[3], args[4], args[5])
+          }
+          if (args[0] === 'post_revision_review') {
+            return { parsed: { passed: true, score: 96, issues: [], revision_directives: [] } }
+          }
+          if (args[0] === 'story_state_sync') {
+            return { parsed: { state_delta: {}, character_updates: [], setting_updates: [], storyline_updates: [] } }
+          }
+          throw new Error(`unexpected revision task stage: ${String(args[0])}`)
+        },
+        assertCurrent: async () => {},
+        close: async (outcome: any) => {
+          closeOutcomes.push({ taskId, outcome })
+          events.push(`close:${outcome?.status || 'success'}`)
+          await options.closeTask?.(outcome)
+        },
+      }
+    },
+    reportTaskCloseFailure: async (input: any) => {
+      closeFailureReports.push(clone(input))
+      await options.reportTaskCloseFailure?.(input)
     },
     createQualityReview: async (...args: any[]) => {
       if (options.quality) qualityCalls.push(args)
@@ -651,6 +781,12 @@ function createHarness(options: {
     qualityCalls,
     prepareCalls,
     applyCalls,
+    begins,
+    stages,
+    closeOutcomes,
+    generateDraftCalls,
+    contextBuildCalls,
+    closeFailureReports,
     renewCalls,
     intervalRegistrations,
     timeoutRegistrations,
@@ -921,6 +1057,9 @@ async function createThirtyChapterWorkerFixture(options: {
   const revisionCalls: number[] = []
   const qualityCalls: number[] = []
   const storyStateCalls: number[] = []
+  const chapterTaskBegins: Array<{ taskId: string; sessionId: string; input: any }> = []
+  const chapterTaskStages: Array<{ taskId: string; sessionId: string; stage: string }> = []
+  let chapterTaskSequence = 0
   let followerRefreshCallCount = 0
   const executeAgent = async (agent: string, _project: any, request: any) => {
     const chapterId = explicitModelChapterId(request?.task)
@@ -997,25 +1136,34 @@ async function createThirtyChapterWorkerFixture(options: {
     buildStructuralSimilarityReport: () => ({}),
     buildReferenceMigrationDryPlan: () => ({}),
     diffTexts: () => ({}),
-    beginChapterTask: async (input: any) => ({
-      taskId: `manual-${input.chapter.id}`,
-      source: 'model',
-      modelId: input.requestedModelId,
-      fingerprint: 'manual-route-fixture',
-      contextVersion: 'manual-route-context',
-      provenance: () => ({}),
-      generateDraft: async () => { throw new Error('not used') },
-      assertCurrent: async () => {},
-      executeAgent: async (
-        _stage: string,
-        _responseContract: string,
-        agent: string,
-        project: any,
-        request: any,
-        agentOptions: any,
-      ) => executeAgent(agent, project, request, agentOptions),
-      close: async () => {},
-    }),
+    beginChapterTask: async (input: any) => {
+      chapterTaskSequence += 1
+      const taskId = `mcp-${input.chapter.id}-${chapterTaskSequence}`
+      const sessionId = `mcp-session-${input.chapter.id}-${chapterTaskSequence}`
+      chapterTaskBegins.push({ taskId, sessionId, input })
+      return {
+        taskId,
+        source: 'mcp',
+        modelId: input.requestedModelId,
+        fingerprint: 'manual-route-fixture',
+        contextVersion: 'manual-route-context',
+        provenance: () => ({ task_id: taskId, source: 'mcp', session_id: sessionId }),
+        generateDraft: async () => { throw new Error('not used') },
+        assertCurrent: async () => {},
+        executeAgent: async (
+          stage: string,
+          _responseContract: string,
+          agent: string,
+          project: any,
+          request: any,
+          agentOptions: any,
+        ) => {
+          chapterTaskStages.push({ taskId, sessionId, stage })
+          return executeAgent(agent, project, request, agentOptions)
+        },
+        close: async () => {},
+      }
+    },
     executeAgent,
     updateStoryStateMachine: methods.updateStoryStateMachine,
   }
@@ -1050,10 +1198,12 @@ async function createThirtyChapterWorkerFixture(options: {
     ctx,
     input,
     run,
-    worker: createEditorRevisionWorker(ctx),
+    worker: createWorkerWithTaskExecution(ctx),
     revisionCalls,
     qualityCalls,
     storyStateCalls,
+    chapterTaskBegins,
+    chapterTaskStages,
     followerRefreshCalls: () => followerRefreshCallCount,
   }
 }
@@ -1262,6 +1412,13 @@ describe('durable editor revision worker', () => {
       source: 'repair',
     })
     expect(checkpoint.candidate.hash).toBe(revisionTextHash(fixture.candidateText))
+    expect(checkpoint.chapter_generation_source).toEqual({
+      task_id: `mcp-${fixture.chapters[0].id}-1`,
+      source: 'mcp',
+      source_fingerprint: 'manual-route-fixture',
+      context_version: 'manual-route-context',
+    })
+    expect(JSON.stringify(checkpoint.chapter_generation_source)).not.toContain('mcp-session')
     expect(commitMarker).toMatchObject({
       run_id: fixture.run.id,
       source_hash: revisionTextHash(fixture.sourceText),
@@ -1274,6 +1431,38 @@ describe('durable editor revision worker', () => {
       following_written_range: { first: 2, last: 30, count: 29 },
     })
     expect(after.slice(1).every(item => item.tasks.length === 0)).toBe(true)
+  }, 30_000)
+
+  test('manual MCP quality starts a new task and Session after revision worker completion', async () => {
+    const fixture = await createThirtyChapterWorkerFixture()
+    await fixture.worker.start(fixture.workspace)
+    await fixture.worker.waitForIdle()
+    await fixture.worker.stop()
+
+    const { app, handlers } = createRegisteredRouteHarness()
+    const lifecycle = registerNovelEditorRoutes(app as any, fixture.ctx)
+    const proseQuality = handlers.get('POST /api/novel/chapters/:chapterId/prose-quality')
+    const response = await callRegisteredRoute(proseQuality, {
+      params: { chapterId: String(fixture.chapters[0].id) },
+      body: { project_id: fixture.project.id, source: 'task11_manual_quality_scope_test' },
+    })
+    await lifecycle.stop()
+
+    expect(response.statusCode).toBe(200)
+    expect(fixture.chapterTaskBegins).toHaveLength(2)
+    const [revisionTask, manualTask] = fixture.chapterTaskBegins
+    expect(revisionTask.input.chapter.id).toBe(fixture.chapters[0].id)
+    expect(manualTask.input.chapter.id).toBe(fixture.chapters[0].id)
+    expect(manualTask.taskId).not.toBe(revisionTask.taskId)
+    expect(manualTask.sessionId).not.toBe(revisionTask.sessionId)
+    expect(fixture.chapterTaskStages.filter(item => item.taskId === revisionTask.taskId).map(item => item.stage)).toEqual([
+      'revision',
+      'post_revision_review',
+      'story_state_sync',
+    ])
+    expect(fixture.chapterTaskStages.filter(item => item.taskId === manualTask.taskId).map(item => item.stage)).toEqual([
+      'manual_recheck',
+    ])
   }, 30_000)
 
   test('real worker rejects a 5910 to 243 candidate without changing protected chapter or Story State data', async () => {
@@ -1328,6 +1517,7 @@ describe('durable editor revision worker', () => {
     expect(durableRunColumns(failedRun)).toEqual(durableRunColumns(beforeRun))
     expect(failedRun).toMatchObject({ status: 'failed', error_message: 'REVISION_CANDIDATE_TOO_SHORT' })
     expect(Object.keys(checkpoint).sort()).toEqual([
+      'chapter_generation_source',
       'error',
       'phase',
       'phases',
@@ -1462,6 +1652,17 @@ describe('durable editor revision worker', () => {
     const activeFixture = await createQueuedRun(activeWorkspace, 'active workspace project')
     const projectWorkspaceCalls: string[] = []
     const activeSignals: AbortSignal[] = []
+    const executeAgent = async (_agentId: string, _project: any, _context: any, options: any) => {
+      const signal = options.signal!
+      activeSignals.push(signal)
+      return new Promise<never>((_resolve, reject) => {
+        if (signal.aborted) {
+          reject(signal.reason)
+          return
+        }
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+      })
+    }
     const lifecycle = registerNovelEditorRoutes(express(), {
       getWorkspace: () => defaultWorkspace,
       getProject: async (workspacePath, projectId) => {
@@ -1475,20 +1676,21 @@ describe('durable editor revision worker', () => {
       buildStructuralSimilarityReport: () => ({}),
       buildReferenceMigrationDryPlan: () => ({}),
       diffTexts: () => ({}),
-      beginChapterTask: async () => {
-        throw new Error('manual chapter task is not used by lifecycle recovery')
-      },
-      executeAgent: async (_agentId, _project, _context, options) => {
-        const signal = options.signal!
-        activeSignals.push(signal)
-        return new Promise<never>((_resolve, reject) => {
-          if (signal.aborted) {
-            reject(signal.reason)
-            return
-          }
-          signal.addEventListener('abort', () => reject(signal.reason), { once: true })
-        })
-      },
+      beginChapterTask: async (input: any) => ({
+        taskId: `lifecycle-${input.chapter.id}`,
+        source: 'model',
+        modelId: input.requestedModelId,
+        fingerprint: 'lifecycle-source',
+        contextVersion: 'lifecycle-context',
+        provenance: () => ({}),
+        generateDraft: async () => { throw new Error('not used') },
+        executeAgent: async (_stage: string, _contract: string, agentId: string, project: any, context: any, options: any) => (
+          executeAgent(agentId, project, context, options)
+        ),
+        assertCurrent: async () => {},
+        close: async () => {},
+      }),
+      executeAgent,
       updateStoryStateMachine: async () => ({}),
     })
 
@@ -1675,7 +1877,7 @@ describe('durable editor revision worker', () => {
       inputRef: JSON.stringify(canonicalRunInput(project.id, chapter)),
       outputRef: JSON.stringify(initialCheckpoint()),
     })
-    const worker = createEditorRevisionWorker({
+    const worker = createWorkerWithTaskExecution({
       getWorkspace: () => activeWorkspace,
       getProject: async () => project,
     } as any, {
@@ -1743,7 +1945,7 @@ describe('durable editor revision worker', () => {
     })
     let orchestrationCalls = 0
     const checkpoint = buildCheckpoint()
-    const worker = createEditorRevisionWorker({
+    const worker = createWorkerWithTaskExecution({
       getWorkspace: () => activeWorkspace,
       getProject: async () => project,
     } as any, {
@@ -1784,7 +1986,7 @@ describe('durable editor revision worker', () => {
       outputRef: JSON.stringify(initialCheckpoint()),
     })
     runDbMutation(activeWorkspace, 'UPDATE runs SET input_ref = ? WHERE id = ?', '{', run.id)
-    const worker = createEditorRevisionWorker({
+    const worker = createWorkerWithTaskExecution({
       getWorkspace: () => activeWorkspace,
       getProject: async () => project,
     } as any)
@@ -1813,7 +2015,7 @@ describe('durable editor revision worker', () => {
       outputRef: JSON.stringify(initialCheckpoint()),
     })
     await requestEditorRevisionCancel(activeWorkspace, project.id, run.id)
-    const worker = createEditorRevisionWorker({
+    const worker = createWorkerWithTaskExecution({
       getWorkspace: () => activeWorkspace,
       getProject: async () => project,
     } as any)
@@ -1848,7 +2050,7 @@ describe('durable editor revision worker', () => {
       outputRef: JSON.stringify(initialCheckpoint()),
     })
     runDbMutation(activeWorkspace, 'UPDATE runs SET input_ref = ? WHERE id = ?', '{', run.id)
-    const worker = createEditorRevisionWorker({
+    const worker = createWorkerWithTaskExecution({
       getWorkspace: () => activeWorkspace,
       getProject: async () => project,
     } as any, {
@@ -1916,7 +2118,7 @@ describe('durable editor revision worker', () => {
         candidate_hash: candidateHash,
       }),
     })
-    const worker = createEditorRevisionWorker({
+    const worker = createWorkerWithTaskExecution({
       getWorkspace: () => activeWorkspace,
       getProject: async () => project,
     } as any, {
@@ -1967,7 +2169,7 @@ describe('durable editor revision worker', () => {
     })
     const committed = persistedCheckpoint()
     committed.phase = 'persist_chapter'
-    const worker = createEditorRevisionWorker({
+    const worker = createWorkerWithTaskExecution({
       getWorkspace: () => activeWorkspace,
       getProject: async () => project,
     } as any, {
@@ -2023,7 +2225,7 @@ describe('durable editor revision worker', () => {
       outputRef: JSON.stringify(initialCheckpoint()),
     })
     runDbMutation(activeWorkspace, 'UPDATE runs SET input_ref = ? WHERE id = ?', '{', run.id)
-    const worker = createEditorRevisionWorker({
+    const worker = createWorkerWithTaskExecution({
       getWorkspace: () => activeWorkspace,
       getProject: async () => project,
     } as any, {
@@ -2064,7 +2266,7 @@ describe('durable editor revision worker', () => {
       }),
       outputRef: JSON.stringify(admittedCheckpoint()),
     })
-    const worker = createEditorRevisionWorker({
+    const worker = createWorkerWithTaskExecution({
       getWorkspace: () => activeWorkspace,
       getProject: async () => project,
     } as any, {
@@ -2116,7 +2318,7 @@ describe('durable editor revision worker', () => {
       outputRef: JSON.stringify(admittedCheckpoint()),
     })
     let fenced = false
-    const worker = createEditorRevisionWorker({
+    const worker = createWorkerWithTaskExecution({
       getWorkspace: () => activeWorkspace,
       getProject: async () => project,
     } as any, {
@@ -2201,7 +2403,7 @@ describe('durable editor revision worker', () => {
     let fenced = false
     let prepareCalls = 0
     let applyCalls = 0
-    const worker = createEditorRevisionWorker({
+    const worker = createWorkerWithTaskExecution({
       getWorkspace: () => activeWorkspace,
       getProject: async () => project,
     } as any, {
@@ -2294,7 +2496,7 @@ describe('durable editor revision worker', () => {
       run.id,
       input.source_text_hash,
     )
-    const worker = createEditorRevisionWorker({
+    const worker = createWorkerWithTaskExecution({
       getWorkspace: () => activeWorkspace,
       getProject: async () => project,
     } as any, {
@@ -2355,7 +2557,7 @@ describe('durable editor revision worker', () => {
       input.source_text_hash,
     )
     let fenced = false
-    const worker = createEditorRevisionWorker({
+    const worker = createWorkerWithTaskExecution({
       getWorkspace: () => activeWorkspace,
       getProject: async () => project,
     } as any, {
@@ -2433,7 +2635,7 @@ describe('durable editor revision worker', () => {
     checkpoint.committed_chapter_updated_at = evidence.committedAt
     checkpoint.editor_revision_review_id = evidence.receipt.id
     runDbMutation(activeWorkspace, 'UPDATE runs SET output_ref = ? WHERE id = ?', JSON.stringify(checkpoint), run.id)
-    const worker = createEditorRevisionWorker({
+    const worker = createWorkerWithTaskExecution({
       getWorkspace: () => activeWorkspace,
       getProject: async () => project,
     } as any, {
@@ -2502,7 +2704,7 @@ describe('durable editor revision worker', () => {
     )
     runDbMutation(activeWorkspace, 'UPDATE runs SET output_ref = ? WHERE id = ?', checkpointRef(), run.id)
     await requestEditorRevisionCancel(activeWorkspace, project.id, run.id)
-    const worker = createEditorRevisionWorker({
+    const worker = createWorkerWithTaskExecution({
       getWorkspace: () => activeWorkspace,
       getProject: async () => project,
     } as any, {
@@ -2562,7 +2764,7 @@ describe('durable editor revision worker', () => {
     let clock = '2030-01-01T00:00:10.000Z'
     const timers: Array<{ callback: () => any; ms: number; cleared: boolean }> = []
     let revisionCalls = 0
-    const worker = createEditorRevisionWorker({
+    const worker = createWorkerWithTaskExecution({
       getWorkspace: () => activeWorkspace,
       getProject: async () => project,
       getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
@@ -2904,6 +3106,218 @@ describe('durable editor revision worker', () => {
     expect(harness.writes.some(item => item.story_state?.status === 'prepared')).toBe(true)
   })
 
+  test('uses one frozen chapter task for revision, post-review, and Story State then closes success once', async () => {
+    const harness = createHarness({ modelId: 73 })
+    const worker = harness.worker()
+
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    expect(harness.begins).toHaveLength(1)
+    expect(harness.begins[0]).toMatchObject({
+      activeWorkspace: workspace,
+      project: harness.project,
+      chapter: { id: harness.input.chapter_id, chapter_text: sourceText },
+      contextPackage: {
+        chapter_target: { chapter_id: harness.input.chapter_id },
+        snapshot: 'stable-worker-context',
+      },
+      requestedModelId: 73,
+    })
+    expect(harness.begins[0].signal).toBeInstanceOf(AbortSignal)
+    expect(harness.contextBuildCalls).toHaveLength(1)
+    expect(harness.stages.map(item => [item.args[0], item.args[1], item.args[2]])).toEqual([
+      ['revision', 'revision_prose', 'prose-agent'],
+      ['post_revision_review', 'quality_review_json', 'review-agent'],
+      ['story_state_sync', 'story_state_json', 'review-agent'],
+    ])
+    expect(harness.events.indexOf('begin_chapter_task')).toBeLessThan(harness.events.indexOf('task_stage:revision'))
+    expect(harness.stages.map(item => item.taskId)).toEqual([
+      'revision-task-1',
+      'revision-task-1',
+      'revision-task-1',
+    ])
+    expect(harness.stages[0].args[5]).toMatchObject({
+      activeWorkspace: workspace,
+      responseMode: 'stream',
+      skipMemory: true,
+      maxRetries: 1,
+    })
+    expect(harness.stages[0].args[5].modelId).toBeUndefined()
+    expect(harness.qualityCalls[0].at(-1)).toMatchObject({
+      qualityStage: 'post_revision_review',
+      chapterTaskExecution: expect.objectContaining({ taskId: 'revision-task-1' }),
+      preparedContext: expect.objectContaining({
+        contextPackage: expect.objectContaining({ snapshot: 'stable-worker-context' }),
+      }),
+    })
+    expect(harness.prepareCalls[0][1]).toMatchObject({
+      chapterTaskExecution: expect.objectContaining({ taskId: 'revision-task-1' }),
+      exactContext: expect.objectContaining({
+        contextPackage: expect.objectContaining({ snapshot: 'stable-worker-context' }),
+      }),
+    })
+    expect(harness.applyCalls[0][1]).toMatchObject({
+      chapterTaskExecution: expect.objectContaining({ taskId: 'revision-task-1' }),
+      exactContext: expect.objectContaining({
+        contextPackage: expect.objectContaining({ snapshot: 'stable-worker-context' }),
+      }),
+    })
+    expect(harness.generateDraftCalls).toHaveLength(0)
+    expect(harness.closeOutcomes).toEqual([{
+      taskId: 'revision-task-1',
+      outcome: { status: 'success' },
+    }])
+    expect(harness.events.indexOf('checkpoint:completed:completed'))
+      .toBeLessThan(harness.events.indexOf('close:success'))
+    expect(harness.checkpoint().chapter_generation_source).toEqual({
+      task_id: 'revision-task-1',
+      source: 'model',
+      source_fingerprint: 'sha256:revision-fixture-fingerprint',
+      context_version: 'revision-fixture-context-v1',
+      model_id: 217,
+    })
+  })
+
+  test.each([
+    { stage: 'revision', expectedPhase: 'generate_candidate' },
+    { stage: 'post_revision_review', expectedPhase: 'post_quality' },
+    { stage: 'story_state_sync', expectedPhase: 'sync_current_story_state' },
+  ] as const)('closes one failed task with the original $stage error', async ({ stage, expectedPhase }) => {
+    const failure = errorWithCode(`INJECTED_${stage.toUpperCase()}_FAILURE`)
+    const harness = createHarness({
+      executeTaskStage: async (actualStage: string) => {
+        if (actualStage === stage) throw failure
+        if (actualStage === 'revision') return completeResult()
+        if (actualStage === 'post_revision_review') return { parsed: { passed: true, score: 96 } }
+        return { parsed: { state_delta: {} } }
+      },
+    })
+    const worker = harness.worker()
+
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    expect(harness.run.status).toBe('failed')
+    expect(harness.checkpoint().phase).toBe(expectedPhase)
+    expect(harness.closeOutcomes).toHaveLength(1)
+    expect(harness.closeOutcomes[0]).toMatchObject({
+      taskId: 'revision-task-1',
+      outcome: { status: 'failed' },
+    })
+    expect(harness.closeOutcomes[0].outcome.error).toBe(failure)
+    expect(harness.events.indexOf(`checkpoint:${expectedPhase}:failed`))
+      .toBeLessThan(harness.events.indexOf('close:failed'))
+  })
+
+  test('cancellation while a task stage waits closes cancelled once with the abort reason', async () => {
+    let stageEntered!: () => void
+    const entered = new Promise<void>(resolve => { stageEntered = resolve })
+    let abortReason: unknown
+    const harness = createHarness({
+      executeTaskStage: async (_stage: string, _contract: string, _agent: string, _project: any, _context: any, callOptions: any) => {
+        stageEntered()
+        return new Promise((_resolve, reject) => {
+          callOptions.signal.addEventListener('abort', () => {
+            abortReason = callOptions.signal.reason
+            reject(abortReason)
+          }, { once: true })
+        })
+      },
+    })
+    const worker = harness.worker()
+
+    await worker.start(workspace)
+    await entered
+    harness.requestCancel(worker)
+    await worker.waitForIdle()
+
+    expect(harness.run.status).toBe('canceled')
+    expect(harness.closeOutcomes).toHaveLength(1)
+    expect(harness.closeOutcomes[0].outcome.status).toBe('cancelled')
+    expect(harness.closeOutcomes[0].outcome.error).toBe(abortReason)
+    expect(harness.events.indexOf('canceled')).toBeLessThan(harness.events.indexOf('close:cancelled'))
+  })
+
+  test('uses durable cancellation when a provider failure races a persisted cancel request', async () => {
+    const providerFailure = errorWithCode('INJECTED_PROVIDER_FAILURE')
+    let harness!: ReturnType<typeof createHarness>
+    harness = createHarness({
+      executeTaskStage: async () => {
+        harness.run.status = 'cancel_requested'
+        harness.run.cancel_requested_at = '2030-01-01T00:00:02.000Z'
+        throw providerFailure
+      },
+    })
+    const worker = harness.worker()
+
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    expect(harness.run.status).toBe('canceled')
+    expect(harness.closeOutcomes).toHaveLength(1)
+    expect(harness.closeOutcomes[0].outcome).toEqual({
+      status: 'cancelled',
+      error: providerFailure,
+    })
+  })
+
+  test('stop closes the active task before requeueing its worker claim', async () => {
+    let stageEntered!: () => void
+    const entered = new Promise<void>(resolve => { stageEntered = resolve })
+    const harness = createHarness({
+      executeTaskStage: async (_stage: string, _contract: string, _agent: string, _project: any, _context: any, callOptions: any) => {
+        stageEntered()
+        return new Promise((_resolve, reject) => {
+          callOptions.signal.addEventListener('abort', () => reject(callOptions.signal.reason), { once: true })
+        })
+      },
+    })
+    const worker = harness.worker()
+
+    await worker.start(workspace)
+    await entered
+    await worker.stop()
+
+    expect(harness.closeOutcomes).toHaveLength(1)
+    expect(harness.closeOutcomes[0].outcome).toMatchObject({ status: 'cancelled' })
+    expect((harness.closeOutcomes[0].outcome.error as any)?.code).toBe('REVISION_WORKER_STOPPED')
+    expect(harness.run.status).toBe('queued')
+    expect(harness.events.indexOf('close:cancelled')).toBeLessThan(harness.events.indexOf('release'))
+  })
+
+  test('contains a close failure after durable success while stop waits for worker cleanup', async () => {
+    const closeFailure = errorWithCode('INJECTED_CLOSE_FAILURE')
+    let closeEntered!: () => void
+    const entered = new Promise<void>(resolve => { closeEntered = resolve })
+    let rejectClose!: (error: unknown) => void
+    const closeGate = new Promise<void>((_resolve, reject) => { rejectClose = reject })
+    const harness = createHarness({
+      closeTask: async () => {
+        closeEntered()
+        return closeGate
+      },
+    })
+    const worker = harness.worker()
+
+    await worker.start(workspace)
+    await entered
+    const stopping = worker.stop()
+    rejectClose(closeFailure)
+
+    await expect(stopping).resolves.toBeUndefined()
+    expect(harness.run.status).toBe('completed')
+    expect(harness.closeOutcomes).toEqual([{
+      taskId: 'revision-task-1',
+      outcome: { status: 'success' },
+    }])
+    expect(harness.closeFailureReports).toEqual([{
+      runId: harness.run.id,
+      projectId: harness.project.id,
+      errorCode: 'INJECTED_CLOSE_FAILURE',
+    }])
+  })
+
   test('builds the revision prompt from delivery risks in the immutable source review', async () => {
     const sourceRisk = 'SOURCE_REVIEW_RISK_SENTINEL'
     const harness = createHarness({
@@ -3014,7 +3428,7 @@ describe('durable editor revision worker', () => {
     let qualityCalls = 0
     let storyPrepareCalls = 0
     let storyApplyCalls = 0
-    const worker = createEditorRevisionWorker({
+    const worker = createWorkerWithTaskExecution({
       getWorkspace: () => activeWorkspace,
       getProject: async () => project,
       getStageModelId: () => 19,
@@ -3141,6 +3555,9 @@ describe('durable editor revision worker', () => {
     expect(providerAborted).toBe(true)
     expect(harness.commitCalls()).toBe(0)
     expect(harness.run.status).toBe('running')
+    expect(harness.closeOutcomes).toHaveLength(1)
+    expect(harness.closeOutcomes[0].outcome).toMatchObject({ status: 'failed' })
+    expect((harness.closeOutcomes[0].outcome.error as any)?.code).toBe('REVISION_LEASE_LOST')
   })
 
   test('cancel during generation aborts the provider and makes zero chapter or version writes', async () => {
@@ -3285,7 +3702,7 @@ describe('durable editor revision worker', () => {
         return { parsed: { passed: true, score: 96, issues: [], revision_directives: [] }, finish_reason: 'stop' }
       },
     }
-    const worker = createEditorRevisionWorker(ctx, {
+    const worker = createWorkerWithTaskExecution(ctx, {
       executeRevision: async () => { throw errorWithCode('UNEXPECTED_ORCHESTRATION') },
     })
 
@@ -3387,7 +3804,7 @@ describe('durable editor revision worker', () => {
         return (methods.updateStoryStateMachine as any)(...args)
       },
     }
-    const worker = createEditorRevisionWorker(ctx, {
+    const worker = createWorkerWithTaskExecution(ctx, {
       executeRevision: async () => { throw errorWithCode('UNEXPECTED_ORCHESTRATION') },
       prepareStoryState: async () => { throw errorWithCode('UNEXPECTED_STORY_STATE_PREPARE') },
     })
@@ -3521,7 +3938,7 @@ describe('durable editor revision worker', () => {
         db.close()
       }
     })
-    const worker = createEditorRevisionWorker(ctx, {
+    const worker = createWorkerWithTaskExecution(ctx, {
       executeRevision: async () => { throw errorWithCode('UNEXPECTED_ORCHESTRATION') },
       prepareStoryState: async () => { throw errorWithCode('UNEXPECTED_STORY_STATE_PREPARE') },
     })
@@ -3765,7 +4182,7 @@ describe('durable editor revision worker', () => {
     })
   })
 
-  test('forwards the selected revision model to post-quality review', async () => {
+  test('freezes the requested model at task begin instead of forwarding it to post-quality', async () => {
     const checkpoint = persistedCheckpoint()
     const harness = createHarness({ checkpoint, modelId: 36 })
     installMatchingCommitMarker(harness)
@@ -3775,7 +4192,9 @@ describe('durable editor revision worker', () => {
     await worker.waitForIdle()
 
     expect(harness.qualityCalls).toHaveLength(1)
-    expect(harness.qualityCalls[0].at(-1)).toMatchObject({ model_id: 36 })
+    expect(harness.begins[0]).toMatchObject({ requestedModelId: 36 })
+    expect(harness.qualityCalls[0].at(-1).model_id).toBeUndefined()
+    expect(harness.qualityCalls[0].at(-1).chapterTaskExecution.modelId).toBe(217)
   })
 
   test('needs_revision is a warning and never triggers a second rewrite or rollback', async () => {
@@ -3871,6 +4290,9 @@ describe('durable editor revision worker', () => {
     expect(harness.run.status).toBe('canceled')
     expect(harness.prepareCalls).toHaveLength(1)
     expect(harness.applyCalls).toHaveLength(0)
+    expect(harness.closeOutcomes).toHaveLength(1)
+    expect(harness.closeOutcomes[0].outcome).toMatchObject({ status: 'cancelled' })
+    expect((harness.closeOutcomes[0].outcome.error as any)?.code).toBe('REVISION_CANCELED')
   })
 
   test.each([
@@ -4131,6 +4553,9 @@ describe('durable editor revision worker', () => {
         message: 'editor revision model call timed out after 600 seconds',
       },
     })
+    expect(harness.closeOutcomes).toHaveLength(1)
+    expect(harness.closeOutcomes[0].outcome).toMatchObject({ status: 'failed' })
+    expect((harness.closeOutcomes[0].outcome.error as any)?.code).toBe('REVISION_LLM_TIMEOUT')
     expect(harness.commitCalls()).toBe(0)
   })
 
@@ -4173,7 +4598,7 @@ describe('durable editor revision worker', () => {
       timeoutMs: 420_000,
       maxRetries: 1,
       maxTokens: 12_000,
-      modelId: harness.input.model_id,
+      chapterTaskExecution: expect.objectContaining({ modelId: 217 }),
     })
     expect(harness.applyCalls[0][1]).toMatchObject({ timeoutMs: 420_000, maxRetries: 1 })
     expect(harness.timeoutRegistrations.filter(item => item.ms === 420_000)).toHaveLength(4)

@@ -82,6 +82,13 @@ export type EditorRevisionCheckpoint = {
     llm_timeout_ms: number
     story_state_max_tokens?: number
   }
+  chapter_generation_source?: {
+    task_id: string
+    source: 'model' | 'mcp'
+    source_fingerprint: string
+    context_version: string
+    model_id?: number
+  }
   candidate?: {
     text: string
     hash: string

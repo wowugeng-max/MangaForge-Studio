@@ -104,6 +104,13 @@ export type PublicEditorRevisionRun = {
   can_continue: boolean
   repair_task_link: { run_id: number; task_index: number } | null
   linked_task_closure: { status: 'pending' | 'completed'; completed_at?: string } | null
+  chapter_generation_source: {
+    task_id: string
+    source: 'model' | 'mcp'
+    source_fingerprint: string
+    context_version: string
+    model_id?: number
+  } | null
   created_at: string
   updated_at: string
 }
@@ -411,6 +418,24 @@ function safeLinkedTaskClosure(value: unknown): PublicEditorRevisionRun['linked_
   return { status: 'completed', completed_at: completedDate.toISOString() }
 }
 
+function safeChapterGenerationSource(value: unknown): PublicEditorRevisionRun['chapter_generation_source'] {
+  const generationSource = parseJsonObject(value)
+  if (!generationSource) return null
+  const source = safeEnumValue(generationSource.source, new Set(['model', 'mcp']))
+  const taskId = safeString(generationSource.task_id, 300)
+  const sourceFingerprint = safeString(generationSource.source_fingerprint, 300)
+  const contextVersion = safeString(generationSource.context_version, 300)
+  if (!source || !taskId || !sourceFingerprint || !contextVersion) return null
+  const modelId = finiteInteger(generationSource.model_id)
+  return {
+    task_id: taskId,
+    source: source as 'model' | 'mcp',
+    source_fingerprint: sourceFingerprint,
+    context_version: contextVersion,
+    ...(modelId !== null ? { model_id: modelId } : {}),
+  }
+}
+
 function safeWarnings(value: unknown): Array<{ code: string; message: string }> {
   if (!Array.isArray(value)) return []
   return value.slice(0, 100).flatMap(item => {
@@ -463,6 +488,7 @@ function malformedView(run: NovelRunRecord): PublicEditorRevisionRun {
     can_continue: false,
     repair_task_link: null,
     linked_task_closure: null,
+    chapter_generation_source: null,
     created_at: createdAt,
     updated_at: safeString(run.updated_at, 80) || createdAt,
   }
@@ -525,6 +551,7 @@ export function buildPublicEditorRevisionRun(run: NovelRunRecord): PublicEditorR
       ? { run_id: input.repair_task_link.run_id, task_index: input.repair_task_link.task_index }
       : null,
     linked_task_closure: safeLinkedTaskClosure(checkpoint.linked_task_closure),
+    chapter_generation_source: safeChapterGenerationSource(checkpoint.chapter_generation_source),
     created_at: safeString(run.created_at, 80),
     updated_at: safeString(run.updated_at, 80) || safeString(run.created_at, 80),
   }

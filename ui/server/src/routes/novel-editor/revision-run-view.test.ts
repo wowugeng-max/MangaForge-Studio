@@ -143,6 +143,7 @@ describe('editor revision public run view', () => {
       can_continue: false,
       repair_task_link: null,
       linked_task_closure: null,
+      chapter_generation_source: null,
       created_at: '2030-01-01T00:00:00.000Z',
       updated_at: '2030-01-01T00:00:02.000Z',
     })
@@ -153,6 +154,7 @@ describe('editor revision public run view', () => {
       'chapter_id',
       'chapter_no',
       'chapter_title',
+      'chapter_generation_source',
       'created_at',
       'error',
       'id',
@@ -182,6 +184,35 @@ describe('editor revision public run view', () => {
       source_char_count: SOURCE_TEXT.length,
       candidate_char_count: CANDIDATE_TEXT.length,
     })
+  })
+
+  test('exposes only bounded chapter task provenance and drops source secrets', () => {
+    const checkpoint = initialCheckpoint()
+    ;(checkpoint as any).chapter_generation_source = {
+      task_id: 'revision-task-1',
+      source: 'mcp',
+      source_fingerprint: 'sha256:public-source-fingerprint',
+      context_version: 'context-v1',
+      model_id: 217,
+      key_id: 991,
+      server_id: 'PRIVATE_SERVER',
+      session_id: 'PRIVATE_SESSION',
+      raw_prompt: RENDERED_PROMPT,
+      key: 'PRIVATE_KEY',
+    }
+    const view = buildPublicEditorRevisionRun(runWithCheckpoint(checkpoint))
+
+    expect((view as any).chapter_generation_source).toEqual({
+      task_id: 'revision-task-1',
+      source: 'mcp',
+      source_fingerprint: 'sha256:public-source-fingerprint',
+      context_version: 'context-v1',
+      model_id: 217,
+    })
+    const serialized = JSON.stringify(view)
+    for (const secret of ['PRIVATE_SERVER', 'PRIVATE_SESSION', 'PRIVATE_KEY', RENDERED_PROMPT, 'key_id', 'raw_prompt']) {
+      expect(serialized).not.toContain(secret)
+    }
   })
 
   test('exposes only linked repair task identity and closure acknowledgement state', () => {
