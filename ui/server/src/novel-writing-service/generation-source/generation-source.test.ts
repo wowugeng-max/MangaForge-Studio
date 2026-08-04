@@ -1909,6 +1909,37 @@ describe('ModelGenerationSource', () => {
     expect(runs.some(run => run.status === 'success')).toBe(false)
   })
 
+  test('accepts empty projected agent error fields and records successful stages', async () => {
+    const activeWorkspace = await mkdtemp(join(tmpdir(), 'mangaforge-model-empty-error-'))
+    workspaces.push(activeWorkspace)
+    const durableProject = await createNovelProject(activeWorkspace, { title: '模型空错误字段' })
+    const emptyErrors = [undefined, null, false, '']
+    const queuedErrors = [...emptyErrors]
+    const provenance = {
+      task_id: 'task-model-empty-error', project_id: durableProject.id, chapter_id: chapter.id,
+      source: 'model' as const, source_fingerprint: `sha256:${'a'.repeat(64)}`,
+      context_version: `sha256:${'b'.repeat(64)}`, model_id: 217,
+    }
+    const source = new ModelGenerationSource({
+      modelId: 217,
+      provenance,
+      generateChapterProse: async () => ({ prose_chapters: [] }),
+      executeAgent: async () => ({ error: queuedErrors.shift(), parsed: { overall_score: 88 } }),
+      recordStage: createChapterStageRecorder({ activeWorkspace, provenance: () => provenance }),
+    })
+
+    for (const emptyError of emptyErrors) {
+      const result = await source.executeAgent(
+        'editor_report', 'editor_report_json', 'review-agent', durableProject, { task: '编辑报告' },
+      )
+      expect(Object.prototype.hasOwnProperty.call(result, 'error')).toBe(true)
+      expect(result.error).toBe(emptyError)
+    }
+    const runs = await listNovelRuns(activeWorkspace, durableProject.id)
+    expect(runs).toHaveLength(4)
+    expect(runs.map(run => run.status)).toEqual(['success', 'success', 'success', 'success'])
+  })
+
   test('projects draft and agent results without invoking receipt or inherited accessors', async () => {
     let getterCalls = 0
     const capability = Symbol('untrusted-capability')

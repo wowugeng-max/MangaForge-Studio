@@ -524,6 +524,45 @@ describe('editor revision route safeguards', () => {
       .filter(item => item.review_type === 'editor_report')).toHaveLength(0)
   })
 
+  test('manual editor report supplies a stable Error when a late abort has no reason', async () => {
+    const simulatedSignal: any = { aborted: false, reason: undefined }
+    const closeOutcomes: any[] = []
+    const fixture = await createAsyncRevisionRouteFixture({
+      beginChapterTask: async () => ({
+        taskId: 'manual-editor-report-reasonless-abort',
+        source: 'mcp',
+        fingerprint: 'report-fingerprint',
+        contextVersion: 'report-context',
+        provenance: () => ({}),
+        generateDraft: async () => { throw new Error('not used') },
+        assertCurrent: async () => {},
+        executeAgent: async () => {
+          simulatedSignal.aborted = true
+          return { parsed: { overall_score: 88, must_fix: [] } }
+        },
+        close: async (outcome: any) => { closeOutcomes.push(outcome) },
+      }),
+    })
+
+    const response = await callRoute(
+      fixture.handlers.get('POST /api/novel/chapters/:chapterId/editor-report'),
+      {
+        params: { chapterId: String(fixture.chapter.id) },
+        body: { project_id: fixture.project.id },
+        signal: simulatedSignal,
+      },
+    )
+
+    expect(response.statusCode).toBe(500)
+    expect(closeOutcomes).toHaveLength(1)
+    expect(closeOutcomes[0].status).toBe('cancelled')
+    expect(closeOutcomes[0].error).toBeInstanceOf(Error)
+    expect(closeOutcomes[0].error.message).toBe('editor report aborted')
+    expect(String(response.body?.error || '')).toContain('editor report aborted')
+    expect((await listNovelReviews(fixture.workspace, fixture.project.id))
+      .filter(item => item.review_type === 'editor_report')).toHaveLength(0)
+  })
+
   test('detects max-token truncated revision output before reporting missing patches', () => {
     expect(isRevisionOutputTruncated({
       finish_reason: 'max_tokens',

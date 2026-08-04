@@ -199,7 +199,7 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRevis
             signal,
           },
         )
-        if (signal?.aborted) throw signal.reason
+        if (signal?.aborted) throw signal.reason || new Error('editor report aborted')
         if (result instanceof Error) throw result
         if (result?.error) {
           if (result.error instanceof Error) throw result.error

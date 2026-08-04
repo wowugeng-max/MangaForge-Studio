@@ -93,11 +93,13 @@ function projectedStageError(result: unknown) {
   if (!result || (typeof result !== 'object' && typeof result !== 'function')) return undefined
   const descriptor = Object.getOwnPropertyDescriptor(result, 'error')
   if (!descriptor?.enumerable || !('value' in descriptor)) return undefined
-  if (types.isNativeError(descriptor.value)) return descriptor.value
-  const detail = typeof descriptor.value === 'string'
-    ? descriptor.value.slice(0, 440)
-    : typeof descriptor.value === 'number' || typeof descriptor.value === 'boolean'
-      ? String(descriptor.value)
+  const errorValue = descriptor.value
+  if (errorValue === undefined || errorValue === null || errorValue === false || errorValue === '') return undefined
+  if (types.isNativeError(errorValue)) return errorValue
+  const detail = typeof errorValue === 'string'
+    ? errorValue.slice(0, 440)
+    : typeof errorValue === 'number' || typeof errorValue === 'boolean'
+      ? String(errorValue)
       : ''
   const message = detail
     ? `Chapter stage returned an error result: ${detail}`
