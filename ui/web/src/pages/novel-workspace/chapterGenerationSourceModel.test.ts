@@ -97,6 +97,72 @@ async function chapterSourceHttpError(errorCode: string, errorMessage = `private
   throw new Error('expected chapter source API HTTP failure')
 }
 
+test('forwards a bounded request config through every chapter source API and brands deadline rejection as transport', async () => {
+  const apiModule = await import('../../api/mcp') as Record<string, any>
+  const controller = new AbortController()
+  const timeout = 120_000
+  const calls: Array<{ method: string; url: string; config: any }> = []
+  apiClient.get = (async (url: string, config: any) => {
+    calls.push({ method: 'get', url, config })
+    return { data: rawModelView() }
+  }) as any
+  apiClient.post = (async (url: string, _body: unknown, config: any) => {
+    calls.push({ method: 'post', url, config })
+    if (url.endsWith('/mcp/test')) {
+      return {
+        data: {
+          ok: true,
+          validation: {
+            server_id: 'buda',
+            key_id: 3,
+            agent: { id: 'agent-1', name: 'Agent One' },
+          },
+        },
+      }
+    }
+    return { data: rawMcpView() }
+  }) as any
+  apiClient.put = (async (url: string, _body: unknown, config: any) => {
+    calls.push({ method: 'put', url, config })
+    return { data: rawModelView(301) }
+  }) as any
+
+  const options = { signal: controller.signal, timeout }
+  await chapterSourceApi.get(1, options)
+  await (chapterSourceApi.activate as any)(1, 'mcp', options)
+  await (chapterSourceApi.saveModel as any)(1, 301, options)
+  await (chapterSourceApi.testMcp as any)(1, binding(), options)
+  await (chapterSourceApi.saveMcp as any)(1, binding(), options)
+
+  const timeoutCause = new Error('axios deadline exceeded')
+  apiClient.put = (async (_url: string, _body: unknown, config: any) => {
+    calls.push({ method: 'put-timeout', url: 'save-mcp', config })
+    throw timeoutCause
+  }) as any
+  let timeoutFailure: unknown
+  try {
+    await (chapterSourceApi.saveMcp as any)(1, binding(), options)
+  } catch (error) {
+    timeoutFailure = error
+  }
+
+  expect(apiModule.CHAPTER_SOURCE_UI_REQUEST_TIMEOUT_MS).toBe(timeout)
+  expect(calls.map(call => ({
+    method: call.method,
+    signal: call.config?.signal,
+    timeout: call.config?.timeout,
+    validateStatus: typeof call.config?.validateStatus,
+  }))).toEqual([
+    { method: 'get', signal: controller.signal, timeout, validateStatus: 'function' },
+    { method: 'post', signal: controller.signal, timeout, validateStatus: 'function' },
+    { method: 'put', signal: controller.signal, timeout, validateStatus: 'function' },
+    { method: 'post', signal: controller.signal, timeout, validateStatus: 'function' },
+    { method: 'put', signal: controller.signal, timeout, validateStatus: 'function' },
+    { method: 'put-timeout', signal: controller.signal, timeout, validateStatus: 'function' },
+  ])
+  expect(apiModule.isChapterSourceNoResponseFailure(timeoutFailure)).toBe(true)
+})
+
 describe('authoritative chapter generation source view', () => {
   test('projects API response data before async return without reading a hostile then getter', async () => {
     let thenReads = 0

@@ -2,8 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Card, Divider, Empty, Input, Popconfirm, Select, Space, Spin, Tag, Tooltip, Typography, message } from 'antd'
 import { CheckCircleOutlined, ReloadOutlined, RobotOutlined, SaveOutlined } from '@ant-design/icons'
 import {
+  CHAPTER_SOURCE_UI_REQUEST_TIMEOUT_MS,
   chapterSourceApi,
   mcpApi,
+  type ChapterSourceRequestOptions,
   type ChapterGenerationSourceState,
   type McpAgentSummary,
   type McpPublicKey,
@@ -37,7 +39,7 @@ type McpBinding = NonNullable<ChapterGenerationSourceState['mcp']>
 type PanelApi = Pick<typeof chapterSourceApi, 'get' | 'testMcp' | 'saveMcp'>
 
 type CreateMcpAgentInput = {
-  request: () => Promise<{ id: string }>
+  request: (options: ChapterSourceRequestOptions) => Promise<{ id: string }>
   onStarted?: () => void
   refreshAgents: (agentId: string) => Promise<boolean>
   onAgentConfirmed: (agentId: string) => void
@@ -86,39 +88,50 @@ export function createMcpPanelRequestGate() {
 export function createMcpPanelLifecycleGate() {
   let mounted = true
   let epoch = 0
+  let controller = new AbortController()
   const rejectStale = (): never => { throw new StaleMcpPanelLifecycleError() }
+  const tokenValue = (value: number | { token: number }) => typeof value === 'number' ? value : value.token
+  const renewController = () => {
+    controller.abort()
+    controller = new AbortController()
+  }
   return {
     mount() {
       mounted = true
       epoch += 1
+      renewController()
     },
     begin() {
       if (!mounted) rejectStale()
-      return epoch
+      return Object.freeze({ token: epoch, signal: controller.signal })
     },
-    assertCurrent(token: number) {
-      if (!mounted || token !== epoch) rejectStale()
+    assertCurrent(token: number | { token: number }) {
+      if (!mounted || tokenValue(token) !== epoch) rejectStale()
     },
-    isCurrent(token: number) {
-      return mounted && token === epoch
+    isCurrent(token: number | { token: number }) {
+      return mounted && tokenValue(token) === epoch
     },
     invalidate() {
       epoch += 1
+      renewController()
     },
     unmount() {
+      controller.abort()
       mounted = false
       epoch += 1
     },
   }
 }
 
+type McpPanelLifecycleToken = number | Readonly<{ token: number; signal: AbortSignal }>
+
 export type McpGenerationSourcePanelActionDependencies = {
   projectId: number
   getAuthority: () => ChapterSourceAuthorityState
   beginSourceOperation: () => ChapterSourceOperationToken
   assertSourceOperationCurrent: (token: ChapterSourceOperationToken) => void
-  beginPanelLifecycle?: () => number
-  assertPanelLifecycleCurrent?: (token: number) => void
+  beginPanelLifecycle?: () => McpPanelLifecycleToken
+  assertPanelLifecycleCurrent?: (token: McpPanelLifecycleToken) => void
   onAuthorityChange: (state: ChapterSourceAuthorityState) => void
   onTestedFingerprintChange: (fingerprint: string) => void
   onPendingChange: (pending: boolean, token: ChapterSourceOperationToken) => void
@@ -129,7 +142,8 @@ export type McpGenerationSourcePanelActionDependencies = {
 
 type McpPanelOperation = {
   sourceToken: ChapterSourceOperationToken
-  lifecycleToken: number
+  lifecycleToken: McpPanelLifecycleToken
+  lifecycleSignal?: AbortSignal
 }
 
 function assertPanelCurrent(
@@ -167,9 +181,11 @@ function tryPanelCurrent(
 
 function beginCurrentPanelOperation(deps: McpGenerationSourcePanelActionDependencies) {
   try {
+    const lifecycleToken = deps.beginPanelLifecycle?.() ?? 0
     const operation = {
       sourceToken: deps.beginSourceOperation(),
-      lifecycleToken: deps.beginPanelLifecycle?.() ?? 0,
+      lifecycleToken,
+      lifecycleSignal: typeof lifecycleToken === 'number' ? undefined : lifecycleToken.signal,
     }
     assertPanelCurrent(deps, operation, () => {})
     return operation
@@ -203,7 +219,10 @@ export function createMcpGenerationSourcePanelActions(
       assertPanelCurrent(deps, operation, () => deps.onPendingChange(true, operation.sourceToken))
       assertPanelCurrent(deps, operation, () => input.onStarted?.())
       try {
-        const agent = await input.request()
+        const agent = await input.request({
+          signal: operation.lifecycleSignal,
+          timeout: CHAPTER_SOURCE_UI_REQUEST_TIMEOUT_MS,
+        })
         assertPanelCurrent(deps, operation, () => {})
         const refreshCurrent = await input.refreshAgents(agent.id)
         assertPanelCurrent(deps, operation, () => {})
@@ -228,7 +247,10 @@ export function createMcpGenerationSourcePanelActions(
       if (!operation) return
       assertPanelCurrent(deps, operation, () => deps.onPendingChange(true, operation.sourceToken))
       try {
-        await api.testMcp(deps.projectId, mcp)
+        await api.testMcp(deps.projectId, mcp, {
+          signal: operation.lifecycleSignal,
+          timeout: CHAPTER_SOURCE_UI_REQUEST_TIMEOUT_MS,
+        })
         assertPanelCurrent(deps, operation, () => deps.onTestedFingerprintChange(fingerprint))
         assertPanelCurrent(deps, operation, () => deps.notifySuccess('MCP 绑定测试通过'))
       } catch (error) {
@@ -255,8 +277,8 @@ export function createMcpGenerationSourcePanelActions(
       try {
         const result = await commitConfirmedSource({
           current: current.source,
-          request: () => api.saveMcp(operationProjectId, mcp),
-          readAuthoritative: () => api.get(operationProjectId),
+          request: () => api.saveMcp(operationProjectId, mcp, { timeout: CHAPTER_SOURCE_UI_REQUEST_TIMEOUT_MS }),
+          readAuthoritative: () => api.get(operationProjectId, { timeout: CHAPTER_SOURCE_UI_REQUEST_TIMEOUT_MS }),
           assertCurrent: () => assertSourceCurrent(deps, operation, () => {}),
         })
         assertSourceCurrent(deps, operation, () => deps.onAuthorityChange(confirmedAuthorityState(result.source)))
@@ -423,7 +445,10 @@ export function McpGenerationSourcePanel({
     }
     setAgentLoading(true)
     try {
-      const { data } = await mcpApi.listProjectAgents(operationProjectId, serverId, keyId)
+      const { data } = await mcpApi.listProjectAgents(operationProjectId, serverId, keyId, {
+        signal: request.signal,
+        timeout: CHAPTER_SOURCE_UI_REQUEST_TIMEOUT_MS,
+      })
       if (!requestCurrent()) return false
       setAgents(data.agents || [])
       if (preserveAgentId && !(data.agents || []).some(agent => agent.id === preserveAgentId)) {
@@ -472,14 +497,23 @@ export function McpGenerationSourcePanel({
     const operationProjectId = projectId
     const operationBindingIdentity = authorityBindingIdentity
     setForm(hydrated)
-    void Promise.all([mcpApi.listServers(), mcpApi.listKeys()]).then(async ([serverResponse, keyResponse]) => {
+    const requestOptions = {
+      signal: request.signal,
+      timeout: CHAPTER_SOURCE_UI_REQUEST_TIMEOUT_MS,
+    }
+    void Promise.all([mcpApi.listServers(requestOptions), mcpApi.listKeys(requestOptions)]).then(async ([serverResponse, keyResponse]) => {
       if (!metadataGateRef.current!.isCurrent(request)
         || projectIdRef.current !== operationProjectId
         || authorityBindingIdentityRef.current !== operationBindingIdentity) return
       setServers(serverResponse.data || [])
       setKeys(keyResponse.data || [])
       if (hydrated.serverId && hydrated.keyId) {
-        const agentResponse = await mcpApi.listProjectAgents(operationProjectId, hydrated.serverId, hydrated.keyId)
+        const agentResponse = await mcpApi.listProjectAgents(
+          operationProjectId,
+          hydrated.serverId,
+          hydrated.keyId,
+          requestOptions,
+        )
         if (metadataGateRef.current!.isCurrent(request)
           && projectIdRef.current === operationProjectId
           && authorityBindingIdentityRef.current === operationBindingIdentity) setAgents(agentResponse.data.agents || [])
@@ -531,13 +565,13 @@ export function McpGenerationSourcePanel({
     const operationSpaceId = spaceId.trim()
     await actions.createAgent({
       onStarted: () => setBindingError(''),
-      request: async () => {
+      request: async options => {
         const { data } = await mcpApi.createProjectAgent(operationProjectId, {
           server_id: operationServerId,
           key_id: operationKeyId,
           name: operationName,
           ...(operationSpaceId ? { space_id: operationSpaceId } : {}),
-        })
+        }, options)
         return data.agent
       },
       refreshAgents: agentId => fetchAgents(operationServerId, operationKeyId, agentId),

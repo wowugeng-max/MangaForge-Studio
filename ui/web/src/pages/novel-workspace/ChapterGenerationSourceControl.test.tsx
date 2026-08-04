@@ -280,6 +280,123 @@ describe('controlled exclusive chapter source actions', () => {
     expect(harness.selectedModelId).toBe(301)
   })
 
+  test('bounds activate, saveModel, reconciliation, and explicit refresh without lifecycle abort signals', async () => {
+    const module = await loadControlModule()
+    const apiModule = await import('../../api/mcp') as Record<string, any>
+    expect(typeof module.createChapterGenerationSourceActions).toBe('function')
+    if (typeof module.createChapterGenerationSourceActions !== 'function') return
+    const transport = await chapterSourceFailure('transport')
+    const calls: Array<{ kind: string; options: any }> = []
+    const activation = actionHarness(module, {
+      api: {
+        activate: async (_projectId: number, _active: string, options: any) => {
+          calls.push({ kind: 'activate', options })
+          throw transport
+        },
+        get: async (_projectId: number, options: any) => {
+          calls.push({ kind: 'reconcile', options })
+          return sourceView('mcp')
+        },
+      },
+    })
+    await activation.actions.activate('mcp')
+
+    const modelSave = actionHarness(module, {
+      api: {
+        saveModel: async (_projectId: number, _modelId: number, options: any) => {
+          calls.push({ kind: 'saveModel', options })
+          return sourceView('model', { modelId: 301 })
+        },
+      },
+    })
+    await modelSave.actions.saveModel(301)
+
+    const refresh = actionHarness(module)
+    refresh.authority = authorityUnknownState(
+      sourceView('model'),
+      new Error('private authority diagnostic') as any,
+    )
+    const refreshActions = module.createChapterGenerationSourceActions({
+      projectId: 1,
+      getAuthority: () => refresh.authority,
+      beginSourceOperation: () => refresh.fence.begin(1, 101),
+      assertSourceOperationCurrent: (token: any) => refresh.fence.assertCurrent(token),
+      onAuthorityChange: (next: any) => { refresh.authority = next },
+      onSelectedModelConfirmed: () => {},
+      onOpenSettings: () => {},
+      onPendingChange: (value: boolean) => refresh.pending.push(value),
+      notifyError: (text: string) => refresh.notifications.push(text),
+      api: {
+        get: async (_projectId: number, options: any) => {
+          calls.push({ kind: 'refresh', options })
+          return sourceView('mcp')
+        },
+      },
+    })
+    await refreshActions.refresh()
+
+    expect({
+      timeoutConstant: apiModule.CHAPTER_SOURCE_UI_REQUEST_TIMEOUT_MS,
+      calls: calls.map(call => ({
+        kind: call.kind,
+        signal: call.options?.signal,
+        timeout: call.options?.timeout,
+      })),
+      activationPending: activation.pending,
+      modelPending: modelSave.pending,
+      refreshPending: refresh.pending,
+    }).toEqual({
+      timeoutConstant: 120_000,
+      calls: [
+        { kind: 'activate', signal: undefined, timeout: 120_000 },
+        { kind: 'reconcile', signal: undefined, timeout: 120_000 },
+        { kind: 'saveModel', signal: undefined, timeout: 120_000 },
+        { kind: 'refresh', signal: undefined, timeout: 120_000 },
+      ],
+      activationPending: [true, false],
+      modelPending: [true, false],
+      refreshPending: [true, false],
+    })
+  })
+
+  test('does not abort an already-started source mutation on project switch but gives it a bounded deadline', async () => {
+    const module = await loadControlModule()
+    expect(typeof module.createChapterGenerationSourceActions).toBe('function')
+    if (typeof module.createChapterGenerationSourceActions !== 'function') return
+    const mutation = deferred<ChapterGenerationSourceView>()
+    let mutationOptions: any
+    const harness = actionHarness(module, {
+      api: {
+        activate: async (_projectId: number, _active: string, options: any) => {
+          mutationOptions = options
+          return mutation.promise
+        },
+      },
+    })
+    const operation = harness.actions.activate('mcp')
+    await Promise.resolve()
+    harness.fence.enterProject(2, 202)
+    harness.pending.splice(0)
+    const projectB = confirmedAuthorityState(sourceView('model', { modelId: 301, mcp: false }))
+    harness.authority = projectB
+    mutation.resolve(sourceView('mcp'))
+    await operation
+
+    expect({
+      signal: mutationOptions?.signal,
+      timeout: mutationOptions?.timeout,
+      authority: harness.authority,
+      pending: harness.pending,
+      notifications: harness.notifications,
+    }).toEqual({
+      signal: undefined,
+      timeout: 120_000,
+      authority: projectB,
+      pending: [],
+      notifications: [],
+    })
+  })
+
   test.each(['mutation_success', 'http_error', 'reconcile_success', 'reconcile_failure'] as const)(
     'drops stale project A %s without changing project B side effects',
     async scenario => {

@@ -1,5 +1,12 @@
 import apiClient from './client'
 
+export const CHAPTER_SOURCE_UI_REQUEST_TIMEOUT_MS = 120_000
+
+export type ChapterSourceRequestOptions = {
+  signal?: AbortSignal
+  timeout?: number
+}
+
 export type McpServerRecord = {
   id: string
   display_name: string
@@ -308,6 +315,24 @@ async function chapterSourceRequest<T>(
 
 const acceptChapterSourceHttpStatus = { validateStatus: () => true }
 
+function boundedChapterSourceRequestConfig(options: ChapterSourceRequestOptions = {}) {
+  const requestedTimeout = Number(options.timeout)
+  const timeout = Number.isFinite(requestedTimeout) && requestedTimeout > 0
+    ? Math.min(requestedTimeout, CHAPTER_SOURCE_UI_REQUEST_TIMEOUT_MS)
+    : CHAPTER_SOURCE_UI_REQUEST_TIMEOUT_MS
+  return {
+    ...acceptChapterSourceHttpStatus,
+    ...(options.signal ? { signal: options.signal } : {}),
+    timeout,
+  }
+}
+
+function optionalBoundedRequestConfig(options?: ChapterSourceRequestOptions) {
+  if (!options) return {}
+  const { validateStatus: _validateStatus, ...config } = boundedChapterSourceRequestConfig(options)
+  return config
+}
+
 function normalizeChapterMcpTestView(value: unknown) {
   try {
     if (!isProtocolRecord(value) || !hasExactProtocolKeys(value, ['ok', 'validation']) || value.ok !== true) {
@@ -355,27 +380,27 @@ function normalizeChapterMcpTestView(value: unknown) {
 }
 
 export const chapterSourceApi = {
-  get: (projectId: number, options: { signal?: AbortSignal } = {}) => chapterSourceRequest(
+  get: (projectId: number, options: ChapterSourceRequestOptions = {}) => chapterSourceRequest(
     () => apiClient.get<ChapterGenerationSourceView>(
       `/novel/projects/${projectId}/chapter-generation-source`,
-      { ...acceptChapterSourceHttpStatus, ...options },
+      boundedChapterSourceRequestConfig(options),
     ),
     normalizeChapterSourceApiView,
   ),
-  activate: (projectId: number, active: 'model' | 'mcp') => chapterSourceRequest(
-    () => apiClient.post<ChapterGenerationSourceView>(`/novel/projects/${projectId}/chapter-generation-source/activate`, { active }, acceptChapterSourceHttpStatus),
+  activate: (projectId: number, active: 'model' | 'mcp', options: ChapterSourceRequestOptions = {}) => chapterSourceRequest(
+    () => apiClient.post<ChapterGenerationSourceView>(`/novel/projects/${projectId}/chapter-generation-source/activate`, { active }, boundedChapterSourceRequestConfig(options)),
     normalizeChapterSourceApiView,
   ),
-  saveModel: (projectId: number, modelId: number) => chapterSourceRequest(
-    () => apiClient.put<ChapterGenerationSourceView>(`/novel/projects/${projectId}/chapter-generation-source/model`, { model_id: modelId }, acceptChapterSourceHttpStatus),
+  saveModel: (projectId: number, modelId: number, options: ChapterSourceRequestOptions = {}) => chapterSourceRequest(
+    () => apiClient.put<ChapterGenerationSourceView>(`/novel/projects/${projectId}/chapter-generation-source/model`, { model_id: modelId }, boundedChapterSourceRequestConfig(options)),
     normalizeChapterSourceApiView,
   ),
-  testMcp: (projectId: number, mcp: ChapterMcpBinding) => chapterSourceRequest(
-    () => apiClient.post(`/novel/projects/${projectId}/chapter-generation-source/mcp/test`, { mcp }, acceptChapterSourceHttpStatus),
+  testMcp: (projectId: number, mcp: ChapterMcpBinding, options: ChapterSourceRequestOptions = {}) => chapterSourceRequest(
+    () => apiClient.post(`/novel/projects/${projectId}/chapter-generation-source/mcp/test`, { mcp }, boundedChapterSourceRequestConfig(options)),
     normalizeChapterMcpTestView,
   ),
-  saveMcp: (projectId: number, mcp: ChapterMcpBinding) => chapterSourceRequest(
-    () => apiClient.put<ChapterGenerationSourceView>(`/novel/projects/${projectId}/chapter-generation-source/mcp`, { mcp }, acceptChapterSourceHttpStatus),
+  saveMcp: (projectId: number, mcp: ChapterMcpBinding, options: ChapterSourceRequestOptions = {}) => chapterSourceRequest(
+    () => apiClient.put<ChapterGenerationSourceView>(`/novel/projects/${projectId}/chapter-generation-source/mcp`, { mcp }, boundedChapterSourceRequestConfig(options)),
     normalizeChapterSourceApiView,
   ),
 }
@@ -384,11 +409,15 @@ export const mcpApi = {
   listQuarantines: () => apiClient.get<McpAgentQuarantine[]>('/mcp/quarantines'),
   reconcileQuarantine: (id: string) => apiClient.post<McpQuarantineReconciliation>(`/mcp/quarantines/${encodeURIComponent(id)}/reconcile`),
   forceClearQuarantine: (id: string) => apiClient.delete(`/mcp/quarantines/${encodeURIComponent(id)}`, { data: { acknowledge_remote_work_may_continue: true } }),
-  listServers: () => apiClient.get<McpServerRecord[]>('/mcp/servers'),
+  listServers: (options?: ChapterSourceRequestOptions) => options
+    ? apiClient.get<McpServerRecord[]>('/mcp/servers', optionalBoundedRequestConfig(options))
+    : apiClient.get<McpServerRecord[]>('/mcp/servers'),
   createServer: (data: McpServerPayload) => apiClient.post<{ ok: true; server: McpServerRecord }>('/mcp/servers', data),
   updateServer: (id: string, data: McpServerPayload) => apiClient.put<{ ok: true; server: McpServerRecord }>(`/mcp/servers/${encodeURIComponent(id)}`, data),
   deleteServer: (id: string) => apiClient.delete(`/mcp/servers/${encodeURIComponent(id)}`),
-  listKeys: () => apiClient.get<McpPublicKey[]>('/mcp/keys'),
+  listKeys: (options?: ChapterSourceRequestOptions) => options
+    ? apiClient.get<McpPublicKey[]>('/mcp/keys', optionalBoundedRequestConfig(options))
+    : apiClient.get<McpPublicKey[]>('/mcp/keys'),
   createKey: (data: McpKeyPayload) => apiClient.post<{ ok: true; key: McpPublicKey }>('/mcp/keys', data),
   updateKey: (id: number, data: McpKeyPayload) => apiClient.put<{ ok: true; key: McpPublicKey }>(`/mcp/keys/${id}`, data),
   deleteKey: (id: number) => apiClient.delete(`/mcp/keys/${id}`),
@@ -399,6 +428,8 @@ export const mcpApi = {
   getProjectSource: (projectId: number) => apiClient.get<{ ok: true; source: ProseGenerationSourceConfig }>(`/novel/projects/${projectId}/prose-generation-source`),
   saveProjectSource: (projectId: number, source: ProseGenerationSourceConfig) => apiClient.put(`/novel/projects/${projectId}/prose-generation-source`, { source }),
   testProjectSource: (projectId: number, source: ProseGenerationSourceConfig) => apiClient.post(`/novel/projects/${projectId}/prose-generation-source/test`, { source }),
-  listProjectAgents: (projectId: number, serverId: string, keyId: number) => apiClient.get<{ agents: McpAgentSummary[] }>(`/novel/projects/${projectId}/prose-generation-source/agents`, { params: { server_id: serverId, key_id: keyId } }),
-  createProjectAgent: (projectId: number, data: { server_id: string; key_id: number; name: string; space_id?: string }) => apiClient.post<{ ok: true; agent: McpAgentSummary }>(`/novel/projects/${projectId}/prose-generation-source/agents`, data),
+  listProjectAgents: (projectId: number, serverId: string, keyId: number, options?: ChapterSourceRequestOptions) => apiClient.get<{ agents: McpAgentSummary[] }>(`/novel/projects/${projectId}/prose-generation-source/agents`, { params: { server_id: serverId, key_id: keyId }, ...optionalBoundedRequestConfig(options) }),
+  createProjectAgent: (projectId: number, data: { server_id: string; key_id: number; name: string; space_id?: string }, options?: ChapterSourceRequestOptions) => options
+    ? apiClient.post<{ ok: true; agent: McpAgentSummary }>(`/novel/projects/${projectId}/prose-generation-source/agents`, data, optionalBoundedRequestConfig(options))
+    : apiClient.post<{ ok: true; agent: McpAgentSummary }>(`/novel/projects/${projectId}/prose-generation-source/agents`, data),
 }

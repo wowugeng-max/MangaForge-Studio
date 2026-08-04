@@ -56,6 +56,10 @@ class PanelHookHarness<T> {
     this.requestRender()
   }
 
+  update() {
+    this.requestRender()
+  }
+
   unmount() {
     if (!this.mounted) return
     this.mounted = false
@@ -158,8 +162,12 @@ class PanelHookHarness<T> {
 
 function deferredPanelResponse<T>() {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>(resolvePromise => { resolve = resolvePromise })
-  return { promise, resolve }
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
 }
 
 async function flushPanelPromises() {
@@ -324,6 +332,207 @@ describe('MCP binding panel authoritative callers', () => {
     lifecycle.unmount()
     expect(() => lifecycle.assertCurrent(token)).toThrow()
     expect(() => lifecycle.begin()).toThrow()
+  })
+
+  test('passes the request-gate signal and bounded timeout to real metadata APIs and aborts superseded or closed requests', async () => {
+    const panel = await import('./McpGenerationSourcePanel') as Record<string, any>
+    const apiModule = await import('../../api/mcp') as Record<string, any>
+    const originalGet = apiClient.get
+    const metadataConfigs: any[] = []
+    const agentRequests: Array<ReturnType<typeof deferredPanelResponse<any>> & { config: any }> = []
+    let agentCalls = 0
+    let abortRejects = 0
+    apiClient.get = (async (url: string, config: any) => {
+      if (url === '/mcp/servers') {
+        metadataConfigs.push(config)
+        return { data: [{
+          id: 'buda', display_name: 'Buda', transport: 'streamable_http', url: 'https://mcp.invalid',
+          auth_type: 'bearer', adapter_id: 'buda', is_active: true,
+          startup_timeout_ms: 1_000, tool_timeout_ms: 1_000, generation_timeout_ms: 1_000,
+          poll_initial_ms: 100, poll_max_ms: 1_000, enabled_tools: [], custom_headers: [],
+        }] }
+      }
+      if (url === '/mcp/keys') {
+        metadataConfigs.push(config)
+        return { data: [{
+          id: 3, mcp_server_id: 'buda', description: 'Primary', is_active: true, priority: 0,
+          success_count: 0, failure_count: 0, masked_key: '****', has_key: true, bound_projects: [],
+        }] }
+      }
+      if (url.endsWith('/prose-generation-source/agents')) {
+        agentCalls += 1
+        if (agentCalls === 1) {
+          metadataConfigs.push(config)
+          return { data: { agents: [{ id: 'agent-1', name: 'Agent One' }] } }
+        }
+        const pending = deferredPanelResponse<any>()
+        const request = { ...pending, config }
+        agentRequests.push(request)
+        config?.signal?.addEventListener('abort', () => {
+          abortRejects += 1
+          pending.reject(new Error('metadata request aborted'))
+        }, { once: true })
+        return pending.promise
+      }
+      throw new Error(`unexpected metadata GET: ${url}`)
+    }) as any
+
+    const fence = createChapterSourceOperationFence()
+    fence.enterProject(1, 101)
+    let props = {
+      open: true,
+      projectId: 1,
+      authority: confirmedAuthorityState(sourceView()),
+      locallyBusy: false,
+      beginSourceOperation: () => fence.begin(1, 101),
+      assertSourceOperationCurrent: (token: any) => fence.assertCurrent(token),
+      onAuthorityChange: () => {},
+      pending: false,
+      onPendingChange: () => {},
+    }
+    const harness = new PanelHookHarness<React.ReactNode>(() => panel.McpGenerationSourcePanel(props))
+    const refreshButton = () => {
+      const button = panelElements(harness.value).find(element => (
+        element.type === Button && element.props.children === '刷新 Agents'
+      ))
+      if (!button) throw new Error('refresh button was not rendered')
+      return button
+    }
+
+    try {
+      harness.mount()
+      await flushPanelPromises()
+      const firstRefresh = refreshButton().props.onClick()
+      const secondRefresh = refreshButton().props.onClick()
+      await flushPanelPromises()
+      const [first, second] = agentRequests
+      if (!first.config?.signal?.aborted) first.resolve({ data: { agents: [] } })
+      second.resolve({ data: { agents: [{ id: 'agent-1', name: 'Agent One' }] } })
+      await Promise.all([firstRefresh, secondRefresh])
+      await flushPanelPromises()
+      const loadingAfterSupersede = refreshButton().props.loading
+
+      const closingRefresh = refreshButton().props.onClick()
+      const closingRequest = agentRequests[2]
+      props = { ...props, open: false }
+      harness.update()
+      await flushPanelPromises()
+      if (!closingRequest.config?.signal?.aborted) closingRequest.resolve({ data: { agents: [] } })
+      await closingRefresh
+      await flushPanelPromises()
+
+      const initialSignal = metadataConfigs[0]?.signal
+      expect({
+        boundedTimeout: apiModule.CHAPTER_SOURCE_UI_REQUEST_TIMEOUT_MS,
+        initialSignals: metadataConfigs.map(config => config?.signal),
+        initialTimeouts: metadataConfigs.map(config => config?.timeout),
+        refreshSignals: agentRequests.map(request => request.config?.signal instanceof AbortSignal),
+        firstAborted: first.config?.signal?.aborted,
+        secondAborted: second.config?.signal?.aborted,
+        closeAborted: closingRequest.config?.signal?.aborted,
+        abortRejects,
+        loadingAfterSupersede,
+        loadingAfterClose: refreshButton().props.loading,
+      }).toEqual({
+        boundedTimeout: 120_000,
+        initialSignals: [initialSignal, initialSignal, initialSignal],
+        initialTimeouts: [120_000, 120_000, 120_000],
+        refreshSignals: [true, true, true],
+        firstAborted: true,
+        secondAborted: false,
+        closeAborted: true,
+        abortRejects: 2,
+        loadingAfterSupersede: false,
+        loadingAfterClose: false,
+      })
+    } finally {
+      for (const request of agentRequests) request.resolve({ data: { agents: [] } })
+      harness.unmount()
+      apiClient.get = originalGet
+    }
+  })
+
+  test('aborts create and test exactly once with the panel lifecycle signal and clears shared pending', async () => {
+    const panel = await import('./McpGenerationSourcePanel') as Record<string, any>
+    const apiModule = await import('../../api/mcp') as Record<string, any>
+    const originalPost = apiClient.post
+    const outcomes: any[] = []
+    try {
+      for (const kind of ['create', 'test'] as const) {
+        const fence = createChapterSourceOperationFence()
+        fence.enterProject(1, 101)
+        const lifecycle = panel.createMcpPanelLifecycleGate()
+        const request = deferredPanelResponse<any>()
+        const pending: boolean[] = []
+        const tested: string[] = []
+        const notifications: string[] = []
+        let calls = 0
+        let refreshCalls = 0
+        let confirmedCalls = 0
+        let config: any
+        apiClient.post = (async (_url: string, _body: unknown, options: any) => {
+          calls += 1
+          config = options
+          options?.signal?.addEventListener('abort', () => request.reject(new Error(`${kind} aborted`)), { once: true })
+          return request.promise
+        }) as any
+        const actions = panel.createMcpGenerationSourcePanelActions({
+          projectId: 1,
+          getAuthority: () => confirmedAuthorityState(sourceView()),
+          beginSourceOperation: () => fence.begin(1, 101),
+          assertSourceOperationCurrent: (token: any) => fence.assertCurrent(token),
+          beginPanelLifecycle: () => lifecycle.begin(),
+          assertPanelLifecycleCurrent: (token: any) => lifecycle.assertCurrent(token),
+          onAuthorityChange: () => {},
+          onTestedFingerprintChange: (value: string) => tested.push(value),
+          onPendingChange: (value: boolean) => pending.push(value),
+          notifySuccess: (text: string) => notifications.push(text),
+          notifyError: (text: string) => notifications.push(text),
+        })
+        const operation = kind === 'test'
+          ? actions.testBinding(sourceView().source.mcp!, 'tested')
+          : actions.createAgent({
+              request: async (options: any) => (
+                await mcpApi.createProjectAgent(1, {
+                  server_id: 'buda', key_id: 3, name: 'Agent One',
+                }, options)
+              ).data.agent,
+              refreshAgents: async () => { refreshCalls += 1; return true },
+              onAgentConfirmed: () => { confirmedCalls += 1 },
+            })
+        await Promise.resolve()
+        if (kind === 'create') lifecycle.invalidate()
+        else lifecycle.unmount()
+        if (!config?.signal?.aborted) request.reject(new Error(`${kind} fallback rejection`))
+        await operation
+        outcomes.push({
+          kind,
+          timeoutConstant: apiModule.CHAPTER_SOURCE_UI_REQUEST_TIMEOUT_MS,
+          signal: config?.signal instanceof AbortSignal,
+          aborted: config?.signal?.aborted,
+          timeout: config?.timeout,
+          calls,
+          pending,
+          tested,
+          notifications,
+          refreshCalls,
+          confirmedCalls,
+        })
+      }
+    } finally {
+      apiClient.post = originalPost
+    }
+
+    expect(outcomes).toEqual([
+      {
+        kind: 'create', timeoutConstant: 120_000, signal: true, aborted: true, timeout: 120_000,
+        calls: 1, pending: [true, false], tested: [], notifications: [], refreshCalls: 0, confirmedCalls: 0,
+      },
+      {
+        kind: 'test', timeoutConstant: 120_000, signal: true, aborted: true, timeout: 120_000,
+        calls: 1, pending: [true, false], tested: [], notifications: [], refreshCalls: 0, confirmedCalls: 0,
+      },
+    ])
   })
 
   test('silently drops a binding action whose shared project token is stale before begin', async () => {
@@ -582,6 +791,81 @@ describe('MCP binding panel authoritative callers', () => {
         notifications: [],
       })
     }
+  })
+
+  test('keeps close-during-save authoritative work un-aborted but bounded through one reconciliation GET', async () => {
+    const panel = await import('./McpGenerationSourcePanel') as Record<string, any>
+    const transport = await sourceFailure('transport')
+    const fence = createChapterSourceOperationFence()
+    fence.enterProject(1, 101)
+    const lifecycle = panel.createMcpPanelLifecycleGate()
+    const mutation = deferredPanelResponse<ChapterGenerationSourceView>()
+    const authorityRead = deferredPanelResponse<ChapterGenerationSourceView>()
+    let authority = confirmedAuthorityState(sourceView('model'))
+    const pending: boolean[] = []
+    const notifications: string[] = []
+    const tested: string[] = []
+    let mutationCalls = 0
+    let readCalls = 0
+    let mutationOptions: any
+    let readOptions: any
+    const actions = panel.createMcpGenerationSourcePanelActions({
+      projectId: 1,
+      getAuthority: () => authority,
+      beginSourceOperation: () => fence.begin(1, 101),
+      assertSourceOperationCurrent: (token: any) => fence.assertCurrent(token),
+      beginPanelLifecycle: () => lifecycle.begin(),
+      assertPanelLifecycleCurrent: (token: any) => lifecycle.assertCurrent(token),
+      onAuthorityChange: (next: any) => { authority = next },
+      onTestedFingerprintChange: (value: string) => tested.push(value),
+      onPendingChange: (value: boolean) => pending.push(value),
+      notifySuccess: (text: string) => notifications.push(text),
+      notifyError: (text: string) => notifications.push(text),
+      api: {
+        saveMcp: async (_projectId: number, _mcp: unknown, options: any) => {
+          mutationCalls += 1
+          mutationOptions = options
+          return mutation.promise
+        },
+        get: async (_projectId: number, options: any) => {
+          readCalls += 1
+          readOptions = options
+          return authorityRead.promise
+        },
+      },
+    })
+
+    const operation = actions.saveBinding(sourceView().source.mcp!)
+    lifecycle.unmount()
+    mutation.reject(transport)
+    await flushPanelPromises()
+    expect(readCalls).toBe(1)
+    authorityRead.resolve(sourceView('mcp'))
+    await operation
+
+    expect({
+      mutationCalls,
+      readCalls,
+      mutationSignal: mutationOptions?.signal,
+      mutationTimeout: mutationOptions?.timeout,
+      readSignal: readOptions?.signal,
+      readTimeout: readOptions?.timeout,
+      active: authority.source?.source.active,
+      pending,
+      notifications,
+      tested,
+    }).toEqual({
+      mutationCalls: 1,
+      readCalls: 1,
+      mutationSignal: undefined,
+      mutationTimeout: 120_000,
+      readSignal: undefined,
+      readTimeout: 120_000,
+      active: 'mcp',
+      pending: [true, false],
+      notifications: [],
+      tested: [],
+    })
   })
 
   test('saveMcp definite failure preserves confirmed authority and performs zero GETs', async () => {

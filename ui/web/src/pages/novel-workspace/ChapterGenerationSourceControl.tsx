@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { ReloadOutlined, SettingOutlined, WarningOutlined } from '@ant-design/icons'
 import { Alert, Button, Segmented, Select, Space, Tag, Tooltip, message } from 'antd'
 import {
+  CHAPTER_SOURCE_UI_REQUEST_TIMEOUT_MS,
   chapterSourceApi,
   chapterSourceHttpFailureDetails,
   type ChapterGenerationSourceView,
@@ -94,7 +95,7 @@ export function createChapterGenerationSourceActions(
       const result = await commitConfirmedSource({
         current: current.source,
         request,
-        readAuthoritative: () => api.get(operationProjectId),
+        readAuthoritative: () => api.get(operationProjectId, { timeout: CHAPTER_SOURCE_UI_REQUEST_TIMEOUT_MS }),
         assertCurrent: () => deps.assertSourceOperationCurrent(token),
       })
       assertThen(deps, token, () => deps.onAuthorityChange(confirmedAuthorityState(result.source)))
@@ -128,11 +129,11 @@ export function createChapterGenerationSourceActions(
 
   return {
     activate(active: 'model' | 'mcp') {
-      return commit(() => api.activate(deps.projectId, active))
+      return commit(() => api.activate(deps.projectId, active, { timeout: CHAPTER_SOURCE_UI_REQUEST_TIMEOUT_MS }))
     },
     saveModel(modelId: number) {
       if (!Number.isSafeInteger(modelId) || modelId <= 0) return Promise.resolve()
-      return commit(() => api.saveModel(deps.projectId, modelId))
+      return commit(() => api.saveModel(deps.projectId, modelId, { timeout: CHAPTER_SOURCE_UI_REQUEST_TIMEOUT_MS }))
     },
     async refresh() {
       const current = deps.getAuthority()
@@ -144,7 +145,7 @@ export function createChapterGenerationSourceActions(
       try {
         const result = await refreshChapterSourceAuthority({
           current,
-          readAuthoritative: () => api.get(operationProjectId),
+          readAuthoritative: () => api.get(operationProjectId, { timeout: CHAPTER_SOURCE_UI_REQUEST_TIMEOUT_MS }),
           assertCurrent: () => deps.assertSourceOperationCurrent(token),
         })
         deps.assertSourceOperationCurrent(token)
