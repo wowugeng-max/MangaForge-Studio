@@ -13,6 +13,7 @@ import {
   normalizeChapterGenerationSource,
   normalizeProseGenerationSource,
   proseGenerationSourceFingerprint,
+  retainedMcpProjectBinding,
   resolveChapterGenerationSource,
   resolveProseGenerationSource,
   toLegacyProseGenerationSource,
@@ -792,5 +793,115 @@ describe('retained chapter generation source state', () => {
         },
       })).toThrow(expect.objectContaining({ code: 'MCP_BINDING_INVALID' }))
     }
+  })
+})
+
+describe('retained MCP project binding extraction', () => {
+  const mcp = {
+    server_id: 'generic-server',
+    key_id: 7,
+    adapter_id: 'generic-adapter',
+    agent_id: 'agent-7',
+    model: 'model-7',
+  }
+  const extract = (project: unknown) => retainedMcpProjectBinding(project)
+
+  test('returns null when reference_config is missing or is not an object record', () => {
+    const arrayConfig: any[] = []
+    arrayConfig.chapter_generation_source = {
+      version: CHAPTER_GENERATION_SOURCE_VERSION,
+      active: 'mcp',
+      model: {},
+      mcp,
+    }
+
+    for (const project of [
+      undefined,
+      null,
+      {},
+      { reference_config: undefined },
+      { reference_config: null },
+      { reference_config: true },
+      { reference_config: 1 },
+      { reference_config: 'config' },
+      { reference_config: arrayConfig },
+    ]) {
+      expect(extract(project)).toBeNull()
+    }
+  })
+
+  test('returns a normalized retained MCP binding regardless of the active chapter source', () => {
+    for (const active of ['model', 'mcp'] as const) {
+      expect(extract({
+        reference_config: {
+          chapter_generation_source: {
+            version: CHAPTER_GENERATION_SOURCE_VERSION,
+            active,
+            model: { model_id: 217 },
+            mcp: { ...mcp, model: '  model-7  ' },
+          },
+        },
+      })).toEqual(mcp)
+    }
+  })
+
+  test('treats an explicit model-only chapter source as authoritative over legacy MCP', () => {
+    expect(extract({
+      reference_config: {
+        chapter_generation_source: {
+          version: CHAPTER_GENERATION_SOURCE_VERSION,
+          active: 'model',
+          model: { model_id: 217 },
+        },
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp,
+        },
+      },
+    })).toBeNull()
+  })
+
+  test('normalizes legacy MCP only when no explicit chapter source exists', () => {
+    expect(extract({
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: {
+            serverId: '  generic-server  ',
+            keyId: '7',
+            adapterId: '  generic-adapter  ',
+            agentId: '  agent-7  ',
+            model: '  model-7  ',
+          },
+        },
+      },
+    })).toEqual(mcp)
+    expect(extract({
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'model',
+        },
+      },
+    })).toBeNull()
+  })
+
+  test('fails closed on malformed explicit chapter state instead of using legacy MCP', () => {
+    expect(() => extract({
+      reference_config: {
+        chapter_generation_source: {
+          version: CHAPTER_GENERATION_SOURCE_VERSION,
+          active: 'model',
+          model: null,
+        },
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp,
+        },
+      },
+    })).toThrow(expect.objectContaining({ code: 'MCP_BINDING_INVALID' }))
   })
 })

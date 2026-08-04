@@ -8,7 +8,8 @@ import { createMcpKey, getMcpKeysPath, readMcpKeys } from '../mcp/key-store'
 import { BUDA_MCP_SERVER_TEMPLATE, readMcpServers, writeMcpServers } from '../mcp/server-store'
 import * as mcpServerStore from '../mcp/server-store'
 import { assertMcpWorkspaceMutationHeld, withMcpWorkspaceMutation } from '../mcp/workspace-coordinator'
-import { registerMcpRoutes } from './mcp-routes'
+import { createNovelProject } from '../novel'
+import { findMcpProjectReferences, registerMcpRoutes } from './mcp-routes'
 
 const workspaces: string[] = []
 
@@ -665,6 +666,172 @@ describe('MCP routes', () => {
     })
     expect(unrelatedDelete.statusCode).toBe(200)
     expect((await readMcpKeys(workspace)).map(key => key.id)).toEqual([referencedKey.id])
+  })
+
+  test('finds active, inactive retained, and legacy MCP project references without crossing targets', async () => {
+    const workspace = await temporaryWorkspace()
+    const target = {
+      server_id: 'generic-server',
+      key_id: 41,
+      adapter_id: 'generic-adapter',
+      agent_id: 'agent-41',
+      model: '',
+    }
+    const chapterSource = (active: 'model' | 'mcp', mcp?: typeof target) => ({
+      version: 'chapter_generation_source_v1',
+      active,
+      model: active === 'model' ? { model_id: 217 } : {},
+      ...(mcp ? { mcp } : {}),
+    })
+    const active = await createNovelProject(workspace, {
+      title: '活动 MCP',
+      reference_config: { chapter_generation_source: chapterSource('mcp', target) },
+    })
+    const inactive = await createNovelProject(workspace, {
+      title: '停用但保留 MCP',
+      reference_config: { chapter_generation_source: chapterSource('model', target) },
+    })
+    const legacy = await createNovelProject(workspace, {
+      title: '旧格式 MCP',
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: target,
+        },
+      },
+    })
+    await createNovelProject(workspace, {
+      title: '显式模型覆盖旧格式',
+      reference_config: {
+        chapter_generation_source: chapterSource('model'),
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: target,
+        },
+      },
+    })
+    await createNovelProject(workspace, {
+      title: '不同 MCP 目标',
+      reference_config: {
+        chapter_generation_source: chapterSource('mcp', {
+          ...target,
+          server_id: 'other-server',
+          key_id: 42,
+        }),
+      },
+    })
+
+    const references = await findMcpProjectReferences(workspace, {
+      serverId: target.server_id,
+      keyId: target.key_id,
+    })
+    expect(references).toHaveLength(3)
+    expect(references).toEqual(expect.arrayContaining([
+      { id: active.id, title: active.title },
+      { id: inactive.id, title: inactive.title },
+      { id: legacy.id, title: legacy.title },
+    ]))
+  })
+
+  test('fails closed when an explicit chapter source is malformed even with valid legacy MCP', async () => {
+    const workspace = await temporaryWorkspace()
+    await createNovelProject(workspace, {
+      title: '损坏的显式章节来源',
+      reference_config: {
+        chapter_generation_source: {
+          version: 'chapter_generation_source_v1',
+          active: 'model',
+          model: null,
+        },
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: {
+            server_id: 'generic-server',
+            key_id: 41,
+            adapter_id: 'generic-adapter',
+            agent_id: 'agent-41',
+            model: '',
+          },
+        },
+      },
+    })
+
+    await expect(findMcpProjectReferences(workspace, { keyId: 41 }))
+      .rejects.toMatchObject({ code: 'MCP_BINDING_INVALID' })
+  })
+
+  test('lists and protects an inactive retained MCP binding through every destructive route', async () => {
+    const workspace = await temporaryWorkspace()
+    await writeMcpServers(workspace, [
+      { ...BUDA_MCP_SERVER_TEMPLATE, id: 'generic-server', adapter_id: 'generic-adapter' },
+      {
+        ...BUDA_MCP_SERVER_TEMPLATE,
+        id: 'other-server',
+        display_name: 'Other Server',
+        url: 'https://other.example.test/mcp',
+        adapter_id: 'generic-adapter',
+      },
+    ])
+    const key = await createMcpKey(workspace, {
+      mcp_server_id: 'generic-server',
+      key: 'synthetic-retained-route-key',
+      description: '保留绑定账号',
+    })
+    const project = await createNovelProject(workspace, {
+      title: '停用但保留 MCP 的小说',
+      reference_config: {
+        chapter_generation_source: {
+          version: 'chapter_generation_source_v1',
+          active: 'model',
+          model: { model_id: 217 },
+          mcp: {
+            server_id: 'generic-server',
+            key_id: key.id,
+            adapter_id: 'generic-adapter',
+            agent_id: 'agent-retained',
+            model: '',
+          },
+        },
+      },
+    })
+    const references = [{ id: project.id, title: project.title }]
+    const { app, handlers } = createRouteHarness()
+    registerMcpRoutes(app, () => workspace, {
+      invalidateKey: async () => {},
+      invalidateServer: async () => {},
+    } as any)
+
+    const listed = await call(handlers.get('GET /api/mcp/keys'))
+    expect(listed.statusCode).toBe(200)
+    expect(listed.body.find((record: any) => record.id === key.id)?.bound_projects).toEqual(references)
+
+    const destructiveResponses = [
+      await call(handlers.get('PUT /api/mcp/keys/:id'), {
+        params: { id: String(key.id) }, body: { is_active: false },
+      }),
+      await call(handlers.get('PUT /api/mcp/keys/:id'), {
+        params: { id: String(key.id) }, body: { mcp_server_id: 'other-server' },
+      }),
+      await call(handlers.get('DELETE /api/mcp/keys/:id'), {
+        params: { id: String(key.id) },
+      }),
+      await call(handlers.get('PUT /api/mcp/servers/:id'), {
+        params: { id: 'generic-server' }, body: { is_active: false },
+      }),
+      await call(handlers.get('DELETE /api/mcp/servers/:id'), {
+        params: { id: 'generic-server' },
+      }),
+    ]
+    for (const response of destructiveResponses) {
+      expect(response.statusCode).toBe(409)
+      expect(response.body).toMatchObject({
+        error_code: 'MCP_REFERENCED_RECORD_CONFLICT',
+        references,
+      })
+    }
   })
 
   test('returns 404 without scanning references when deleting missing records', async () => {

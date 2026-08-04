@@ -25,6 +25,7 @@ import {
 } from '../mcp/server-store'
 import type { McpServerUpdateInput } from '../mcp/types'
 import { withMcpWorkspaceMutation } from '../mcp/workspace-coordinator'
+import { retainedMcpProjectBinding } from '../novel-writing-service/generation-source/source-config'
 
 type ProjectReference = { id: number; title?: string }
 const QUARANTINE_ID_MAX_CHARS = 16_384
@@ -33,15 +34,10 @@ type FindProjectReferences = (
   target: { serverId?: string; keyId?: number },
 ) => Promise<ProjectReference[]>
 
-function projectMcpBinding(project: any) {
-  const source = project?.reference_config?.prose_generation_source
-  return source?.type === 'mcp' ? source.mcp : null
-}
-
 export const findMcpProjectReferences: FindProjectReferences = async (activeWorkspace, target) => {
   const projects = await listNovelProjects(activeWorkspace)
   return projects.filter(project => {
-    const binding = projectMcpBinding(project)
+    const binding = retainedMcpProjectBinding(project)
     if (!binding) return false
     if (target.serverId && String(binding.server_id) !== target.serverId) return false
     if (target.keyId && Number(binding.key_id) !== target.keyId) return false
