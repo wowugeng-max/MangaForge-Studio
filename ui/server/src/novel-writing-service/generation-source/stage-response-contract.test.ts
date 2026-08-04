@@ -99,6 +99,23 @@ describe('MCP stage response contracts', () => {
     }).output).toEqual({ progress_summary: { last_completed_chapter: 1 } })
   })
 
+  test('accepts canonical status-filter receipts with a field-specific boolean verdict', () => {
+    const payload = {
+      status_filter_receipts: [{
+        key: 'previous_injury',
+        label: '上一章伤势',
+        used_in_chapter: true,
+        evidence: '李玄扶着伤臂退到旧码头。',
+        excluded_reason: '',
+        remaining_risk: '',
+      }],
+    }
+
+    expect(validateMcpStageResponse('structured_review_fill', 'structured_review_json', {
+      content: JSON.stringify(payload),
+    }).output).toEqual(payload)
+  })
+
   for (const invalid of ['', '   ', '{}', '普通解释文字', '{"score":"high"}', '[]']) {
     test(`rejects invalid quality contract payload: ${JSON.stringify(invalid)}`, () => {
       expectInvalid('quality_review_json', invalid)

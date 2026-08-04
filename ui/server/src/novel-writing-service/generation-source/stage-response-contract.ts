@@ -131,11 +131,18 @@ function nonEmptyString(value: unknown) {
   return typeof value === 'string' && Boolean(value.trim())
 }
 
-function structuredReviewEntry(value: unknown) {
+const STRUCTURED_REVIEW_FIELD_VERDICT_MARKERS: Readonly<Record<string, readonly string[]>> = {
+  status_filter_receipts: ['used_in_chapter', 'usedInChapter'],
+  statusFilterReceipts: ['used_in_chapter', 'usedInChapter'],
+}
+
+function structuredReviewEntry(field: string, value: unknown) {
   if (!plainObject(value)) return false
   const status = ownDataValue(value, 'status') ?? ownDataValue(value, 'state')
   const delivered = ownDataValue(value, 'delivered')
-  const hasVerdict = nonEmptyString(status) || typeof delivered === 'boolean'
+  const hasFieldVerdict = (STRUCTURED_REVIEW_FIELD_VERDICT_MARKERS[field] || [])
+    .some(marker => typeof ownDataValue(value, marker) === 'boolean')
+  const hasVerdict = nonEmptyString(status) || typeof delivered === 'boolean' || hasFieldVerdict
   const reportFields = [
     'key', 'label', 'evidence', 'fix', 'remaining_risk', 'remainingRisk',
     'risk_item', 'riskItem', 'required_action', 'requiredAction',
@@ -169,7 +176,7 @@ function validateStructuredReview(content: string) {
   for (const field of STRUCTURED_REVIEW_ARRAY_FIELDS) {
     const report = ownDataValue(value, field)
     if (report === undefined) continue
-    if (!Array.isArray(report) || !report.every(structuredReviewEntry)) {
+    if (!Array.isArray(report) || !report.every(entry => structuredReviewEntry(field, entry))) {
       throw new TypeError('recognized structured review entries required')
     }
     meaningfulEntries += report.length
