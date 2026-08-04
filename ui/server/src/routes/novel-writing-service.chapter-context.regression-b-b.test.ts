@@ -817,14 +817,16 @@ describe('chapter context regression b b', () => {
     expect(proseQualityReview?.status).toBe('warn')
     expect(payload.self_check?.review).toMatchObject({
       passed: false,
-      score: 61,
+      score: 88,
       needs_revision: true,
     })
     expect(payload.self_check?.review?.issues?.length).toBeGreaterThan(0)
+    expect(JSON.stringify(payload.self_check?.review)).not.toContain('减少模板化表达并保留具体动作')
   })
 
   test('reports review stage status from quality gate decisions', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore-loop.ts'), 'utf8')
+    const executorSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-review-executor.ts'), 'utf8')
     const reviewStart = source.indexOf("await onStage('review', { status: 'running' })")
     const reviewEnd = source.indexOf('\n  return {', reviewStart)
     const reviewBlock = source.slice(reviewStart, reviewEnd)
@@ -834,7 +836,8 @@ describe('chapter context regression b b', () => {
 
     expect(reviewBlock).toContain('const initialReviewDecision = getQualityGateDecision(qualityGateProject')
     expect(reviewBlock).toContain("status: initialReviewDecision.passed ? 'success' : 'warn'")
-    expect(reviewBlock).toContain("phase: round > 0 ? 'quality_recheck' : 'quality_review'")
+    expect(reviewBlock).toContain("stageForRound: round => round > 0 ? 'quality_recheck' : 'quality_review'")
+    expect(executorSource).toContain("await input.onStage('review', { status: 'running', phase: stage, round, attempt })")
     expect(reviewBlock).toContain("await onStage('revise', { status: 'running', phase: 'quality_revision', round })")
     expect(reviewBlock).toContain(': ((isDraftReviewOnly || isDraftOnly) ? defaultDraftRounds : defaultFullRounds)')
     expect(reviewBlock).toContain('maxRevisionRounds: qualityRevisionRounds')

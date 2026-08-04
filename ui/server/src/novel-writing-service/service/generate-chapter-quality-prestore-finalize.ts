@@ -104,6 +104,10 @@ import {
   attachQualityLoopFailureDiagnostics,
 } from './generate-chapter-quality-helpers'
 import {
+  qualityLoopAdmissionWarnings,
+  runFinalCandidateQualityRecheck,
+} from './generate-chapter-quality-review-executor'
+import {
   applyPostCommitAdmissionWarnings,
   createPostCommitWarningRunner,
   resolveReturnedAdmissionStatus,
@@ -279,6 +283,8 @@ export async function runQualityPrestoreFinalize(state: Record<string, any>): Pr
     qualityGateProject,
     qualityLoop,
     qualityLoopDiagnostics,
+    qualityLoopWarningCount = 0,
+    qualityLoopWarningStartIndex = 0,
     qualityRepairTimeoutMs,
     qualityThreshold,
     qualityWarningCandidates,
@@ -292,6 +298,65 @@ export async function runQualityPrestoreFinalize(state: Record<string, any>): Pr
     wordTargetCompatibility,
     wordTargetExpansionPatches,
   } = state
+if (typeof qualityLoop?.final_text === 'string' && finalText !== qualityLoop.final_text) {
+  const finalCandidateQualityLoop = await runFinalCandidateQualityRecheck({
+    activeWorkspace,
+    executeAgent,
+    finalText,
+    generationContract,
+    getStageModelId,
+    onStage,
+    options,
+    preferredModelId,
+    project,
+    qualityRepairTimeoutMs,
+    qualityThreshold,
+    contextPackage,
+    wordTarget,
+    wordTargetCompatibility,
+    throwIfChapterGenerationAborted,
+  })
+  const historicalRounds = qualityLoop.rounds
+  qualityLoop = {
+    ...qualityLoop,
+    ...finalCandidateQualityLoop,
+    rounds: historicalRounds,
+  }
+  if (!finalCandidateQualityLoop.quality_warning) delete qualityLoop.quality_warning
+  finalText = String(qualityLoop.final_text || finalText)
+  const finalQualityLoopWarnings = qualityLoopAdmissionWarnings(qualityLoop)
+  qualityWarningCandidates.splice(
+    qualityLoopWarningStartIndex,
+    qualityLoopWarningCount,
+    ...finalQualityLoopWarnings,
+  )
+  qualityLoopWarningCount = finalQualityLoopWarnings.length
+  qualityLoopDiagnostics = {
+    rounds: qualityLoop.rounds.map((item: any) => ({
+      round: item.round,
+      accepted: item.selection.accepted,
+      reason: item.selection.reason,
+    })),
+    decision: qualityLoop.decision,
+  }
+  selfCheck = buildLegacyCompatibleSelfCheck(qualityLoop)
+  if (!(selfCheck.review as any).next_chapter_quality_plan) {
+    ;(selfCheck.review as any).next_chapter_quality_plan = buildFallbackNextChapterQualityPlan(
+      selfCheck.review,
+      contextPackage,
+      finalText,
+    )
+  }
+  await onStage('review', {
+    status: qualityLoop.decision?.passed ? 'success' : 'warn',
+    phase: 'quality_recheck',
+    round: 0,
+    score: selfCheck?.review?.score ?? null,
+    issues: selfCheck?.review?.issues || [],
+    quality_gate: qualityLoop.decision,
+    scene_status: 'reviewed',
+  })
+}
 if (shouldRunSynchronousReadabilityReview(options, project)) {
   throwIfChapterGenerationAborted()
   await onStage('readability_review', { status: 'running' })

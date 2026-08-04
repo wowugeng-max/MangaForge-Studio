@@ -70,9 +70,7 @@ import {
   shouldRunSynchronousReadabilityReview,
 } from '../../novel-writing/prose-quality-contracts'
 import {
-  proseQualityReviewMaxTokensForAttempt,
   runProseQualityLoop,
-  sanitizeProseQualityReviewTransport,
 } from '../../novel-writing/prose-quality-loop'
 import {
   buildProseQualityReviewRecord,
@@ -238,7 +236,6 @@ import {
 import {
   assertCompleteProseTransportResult,
   collectStructuredReviewWarnings,
-  proseAdmissionWarning,
 } from '../quality/prose-transport-admission'
 import {
   mergePostDeliveryReceiptSyncIntoQualityGateReview,
@@ -262,6 +259,10 @@ import {
   runZhuqueFastQualityLoop,
 } from './generate-chapter-quality-prestore-fast-path'
 import { executeChapterStage } from '../generation-source/types'
+import {
+  createChapterQualityReviewExecutor,
+  qualityLoopAdmissionWarnings,
+} from './generate-chapter-quality-review-executor'
 
 export function prepareSanitizedQualityRevisionCandidate(
   revisedText: any,
@@ -347,6 +348,18 @@ const qualityRevisionRounds = Number.isFinite(explicitRevisionCap)
   : ((isDraftReviewOnly || isDraftOnly) ? defaultDraftRounds : defaultFullRounds)
 let chapterTaskExecutionFailed = false
 let chapterTaskExecutionFailure: unknown
+const qualityReviewExecutor = createChapterQualityReviewExecutor({
+  activeWorkspace,
+  executeAgent,
+  getStageModelId,
+  onStage,
+  options,
+  preferredModelId,
+  project,
+  qualityRepairTimeoutMs,
+  stageForRound: round => round > 0 ? 'quality_recheck' : 'quality_review',
+  throwIfChapterGenerationAborted,
+})
 try {
   qualityLoop = await runProseQualityLoop({
     initialText: finalText,
@@ -359,58 +372,7 @@ try {
       word_target_compatibility_pass: true,
       compatibility_ceiling: wordTargetCompatibility.compatibility_ceiling,
     } : {}),
-    review: async ({ prompt, round, attempt }) => {
-      throwIfChapterGenerationAborted()
-      await onStage('review', { status: 'running', phase: round > 0 ? 'quality_recheck' : 'quality_review', round, attempt })
-      const reviewPrompt = attempt > 1
-        ? `${prompt}\n上一次审查没有返回可用的完整六维 JSON。本次必须完整输出 score、score_scale=\"0-100\"、六个 dimensions 和 findings，不得省略或截断。`
-        : prompt
-      let result: any
-      try {
-        result = await executeChapterStage({
-          execution: options.chapterTaskExecution,
-          fallback: executeAgent,
-          stage: round > 0 ? 'quality_recheck' : 'quality_review',
-          responseContract: 'quality_review_json',
-          agentId: 'review-agent',
-          project,
-          context: { task: reviewPrompt },
-          options: {
-            activeWorkspace,
-            modelId: options.chapterTaskExecution
-              ? undefined
-              : String(getStageModelId(project, 'review', preferredModelId) || ''),
-            maxTokens: proseQualityReviewMaxTokensForAttempt(attempt),
-            temperature: 0.15,
-            skipMemory: true,
-            signal: options.abortSignal,
-            timeoutMs: qualityRepairTimeoutMs,
-          },
-        })
-      } catch (error) {
-        if (options.chapterTaskExecution) {
-          chapterTaskExecutionFailed = true
-          chapterTaskExecutionFailure = error
-        }
-        throw error
-      }
-      if ((result as any)?.error) {
-        throw Object.assign(new Error(String((result as any).error)), {
-          code: round > 0 ? 'PROSE_QUALITY_RECHECK_UNAVAILABLE' : 'PROSE_REVIEW_FAILED',
-          llm_diagnostics: buildLLMResultDiagnostics(result),
-        })
-      }
-      const payload = getNovelPayload(result)
-      const diagnostics = buildLLMResultDiagnostics(result)
-      return {
-        ...(payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {}),
-        __quality_review_transport: sanitizeProseQualityReviewTransport({
-          finish_reason: diagnostics.finish_reason,
-          usage: diagnostics.usage,
-          content_length: diagnostics.content_length,
-        }),
-      }
-    },
+    review: qualityReviewExecutor.review,
     revise: async ({ prompt, round }) => {
       throwIfChapterGenerationAborted()
       await onStage('revise', { status: 'running', phase: 'quality_revision', round })
@@ -495,9 +457,11 @@ try {
     },
   })
 } catch (error: any) {
+  if (qualityReviewExecutor.taskExecutionFailure === error) throw error
   if (chapterTaskExecutionFailed && chapterTaskExecutionFailure === error) throw error
   throw attachQualityLoopFailureDiagnostics(error, { draftPromptDiagnostics, qualityThreshold })
 }
+qualityReviewExecutor.throwIfTaskExecutionFailed()
 if (chapterTaskExecutionFailed) throw chapterTaskExecutionFailure
 finalText = String(qualityLoop.final_text || '')
 } // end !isZhuqueFast
@@ -535,16 +499,10 @@ const qualityLoopDiagnostics = {
   })),
   decision: qualityLoop.decision,
 }
-qualityWarningCandidates.push(
-  ...asArray(qualityLoop.decision?.advisory_failures).map((message: any) => proseAdmissionWarning('quality', 'quality_advisory', message)),
-  ...asArray(qualityLoop.decision?.hard_failures).map((failure: any) => proseAdmissionWarning(
-    'quality',
-    failure?.key || 'quality_failure',
-    failure?.message || failure?.evidence || failure?.key || '质量诊断未通过',
-    failure,
-  )),
-)
-if (qualityLoop.quality_warning) qualityWarningCandidates.push(qualityLoop.quality_warning)
+const qualityLoopWarningStartIndex = qualityWarningCandidates.length
+const initialQualityLoopWarnings = qualityLoopAdmissionWarnings(qualityLoop)
+qualityWarningCandidates.push(...initialQualityLoopWarnings)
+const qualityLoopWarningCount = initialQualityLoopWarnings.length
 let selfCheck = buildLegacyCompatibleSelfCheck(qualityLoop)
 if (!(selfCheck.review as any).next_chapter_quality_plan) {
   ;(selfCheck.review as any).next_chapter_quality_plan = buildFallbackNextChapterQualityPlan(
@@ -605,6 +563,8 @@ if (selfCheck.revised && selfCheck.revision) {
     qualityGateProject,
     qualityLoop,
     qualityLoopDiagnostics,
+    qualityLoopWarningCount,
+    qualityLoopWarningStartIndex,
     qualityRepairTimeoutMs,
     qualityThreshold,
     qualityWarningCandidates,

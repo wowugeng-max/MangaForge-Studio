@@ -61,6 +61,13 @@ function readabilityState(input: {
     preferredModelId: 217,
     project: { id: 1, reference_config: {} },
     projectId: 1,
+    qualityLoop: {
+      final_text: validProse,
+      rounds: [],
+      final_scan: {},
+      final_review: { score: 90, dimensions: {} },
+      decision: { passed: true, hard_failures: [], advisory_failures: [] },
+    },
     qualityWarningCandidates: input.warnings,
     runReadabilityReview: async () => { throw input.rejection },
     throwIfChapterGenerationAborted: () => {},

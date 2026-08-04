@@ -1,9 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import { listNovelChapters } from '../../novel'
 import { revisionTextHash } from '../../novel/revision-hash'
+import { normalizeProseForStorage } from '../../novel-writing/chapter-prose-storage-patch'
+import { applyR76PreStoreSanitize } from '../../novel-writing/r76-zhuque-stack'
 import {
   buildPipelineProse,
   createProsePipelineHarness,
+  proseQualityScores,
+  withoutOpeningHandoffGuard,
 } from '../../routes/novel-writing-service.test-support'
 import { createNovelWritingService } from './create-novel-writing-service'
 
@@ -40,6 +44,20 @@ describe('generateChapterForGroup final candidate authority', () => {
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText,
       humanizeResult: { final_text: humanizedText, report: { accepted: true, before_chars: 901, after_chars: 977 } },
+      reviewPayloads: [
+        {
+          score: 70,
+          publishable: true,
+          dimensions: proseQualityScores,
+          findings: [],
+        },
+        {
+          score: 96,
+          publishable: true,
+          dimensions: Object.fromEntries(Object.keys(proseQualityScores).map(key => [key, 9])),
+          findings: [],
+        },
+      ],
     })
     const stages: Array<{ stage: string; payload: any }> = []
 
@@ -65,9 +83,10 @@ describe('generateChapterForGroup final candidate authority', () => {
     expectQualityBeforeFinalizer(stages)
     expect(harness.humanizeTexts).toEqual([expect.any(String)])
     expect(finalizerInputHash).not.toBe(finalizerOutputHash)
-    expect(harness.qualityReviewTasks).toHaveLength(1)
+    expect(harness.qualityReviewTasks).toHaveLength(2)
     expect(harness.qualityReviewTasks[0]).toContain(String(harness.humanizeTexts[0] || ''))
     expect(harness.qualityReviewTasks[0]).not.toContain(storedText)
+    expect(harness.qualityReviewTasks[1]).toContain(storedText)
     expect(harness.qualityRevisionTasks).toEqual([])
     expect(harness.readabilityReviewTasks).toHaveLength(1)
     expect(harness.readabilityReviewTasks[0]).toContain(storedText)
@@ -75,6 +94,10 @@ describe('generateChapterForGroup final candidate authority', () => {
     expect(harness.storyStateTexts).toEqual([storedText])
     expect(harness.memoryTexts).toEqual([storedText])
     expect(revisionTextHash(String(result.chapter?.chapter_text || ''))).toBe(finalizerOutputHash)
+    expect(result.score).toBe(96)
+    expect(result.quality_loop?.decision).toMatchObject({ score: 96, passed: true })
+    expect(result.quality_warnings.map((warning: any) => String(warning?.message || '')).join('｜'))
+      .not.toContain('质检评分 70 低于 78')
     expect(result.humanize_postprocess).toMatchObject({ before_chars: 901, after_chars: 977 })
     expect(result.humanize_postprocess?.candidate_provenance).toEqual({
       scope: 'post_quality',
@@ -85,6 +108,145 @@ describe('generateChapterForGroup final candidate authority', () => {
       superseded_by_quality_revision: false,
     })
     expect(stored?.raw_payload?.humanize_postprocess).toEqual(result.humanize_postprocess)
+  })
+
+  test('replaces stale word-target and deterministic cleanup evidence for the stored humanized candidate', async () => {
+    const draftText = repairedProse()
+    const humanizedText = `${draftText.slice(0, 420)}\n\n上一章的伏笔还没有结束，江澈把通讯器塞进外套。`
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText,
+      humanizeResult: { final_text: humanizedText, report: { accepted: true } },
+      reviewPayloads: [
+        {
+          score: 89,
+          publishable: true,
+          dimensions: Object.fromEntries(Object.keys(proseQualityScores).map(key => [key, 9])),
+          findings: [],
+        },
+        {
+          score: 94,
+          publishable: true,
+          dimensions: Object.fromEntries(Object.keys(proseQualityScores).map(key => [key, 9])),
+          findings: [],
+        },
+      ],
+    })
+
+    const result = await harness.service.generateChapterForGroup(
+      harness.workspace,
+      harness.project.id,
+      harness.chapter.id,
+      {
+        model_id: 217,
+        target_word_count: 1000,
+        max_quality_revision_rounds: 0,
+        skip_mid_monologue_densify: true,
+      },
+    )
+    const stored = (await listNovelChapters(harness.workspace, harness.project.id))
+      .find(item => item.id === harness.chapter.id)
+    const storedText = String(stored?.chapter_text || '')
+    const hardFailureKeys = result.quality_loop?.decision?.hard_failures
+      ?.map((failure: any) => failure.key) || []
+
+    expect(harness.qualityReviewTasks).toHaveLength(2)
+    expect(harness.qualityReviewTasks[1]).toContain(storedText)
+    expect(harness.qualityRevisionTasks).toEqual([])
+    expect(harness.storeTexts).toEqual([storedText])
+    expect(harness.storyStateTexts).toEqual([storedText])
+    expect(harness.memoryTexts).toEqual([storedText])
+    expect(String(result.chapter?.chapter_text || '')).toBe(storedText)
+    expect(result.quality_loop?.decision?.score).toBe(94)
+    expect(hardFailureKeys).toContain('word_target')
+    expect(hardFailureKeys).toContain('deterministic_prose_meta')
+    expect(harness.qualityReviewTasks[1]).toContain('"type": "prose_meta"')
+    expect(harness.qualityReviewTasks[1]).toContain('"risk_count":')
+  })
+
+  test('detects a canonical-name conflict introduced only by the final humanized candidate', async () => {
+    const draftText = repairedProse()
+    const humanizedText = `${draftText}\n\n江城市第一人民医院正是档案里那家诡异医院。`
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText,
+      humanizeResult: { final_text: humanizedText, report: { accepted: true } },
+      contextPackageOverride: {
+        canonical_surface_index: {
+          stable_entities: [{
+            surface: '临江市第一人民医院',
+            suffix: '第一人民医院',
+            chapters: [4, 9],
+            source: 'previous_chapters',
+          }],
+        },
+      },
+      reviewPayloads: [
+        {
+          score: 90,
+          publishable: true,
+          dimensions: Object.fromEntries(Object.keys(proseQualityScores).map(key => [key, 9])),
+          findings: [],
+        },
+        {
+          score: 93,
+          publishable: true,
+          dimensions: Object.fromEntries(Object.keys(proseQualityScores).map(key => [key, 9])),
+          findings: [],
+        },
+      ],
+    })
+
+    const exposed: any = await harness.service.generateChapterForGroup(
+      harness.workspace,
+      harness.project.id,
+      harness.chapter.id,
+      {
+        model_id: 217,
+        target_word_count: 1000,
+        max_quality_revision_rounds: 0,
+        skip_mid_monologue_densify: true,
+      },
+    ).catch((error: unknown) => error)
+
+    expect(exposed?.code).toBe('PROSE_QUALITY_GATE_BLOCKED')
+    expect(exposed?.quality_loop?.decision?.score).toBe(93)
+    expect(exposed?.quality_loop?.decision?.hard_failures)
+      .toContainEqual(expect.objectContaining({ key: 'canonical_proper_noun_conflict', source: 'deterministic' }))
+    expect(harness.qualityReviewTasks).toHaveLength(2)
+    expect(harness.qualityReviewTasks[1]).toContain('江城市第一人民医院正是档案里那家诡异医院')
+    expect(harness.qualityRevisionTasks).toEqual([])
+    expect(harness.storeCalls).toBe(0)
+    expect(harness.storyStateCalls).toBe(0)
+    expect(harness.memoryTexts).toEqual([])
+  })
+
+  test('propagates final quality recheck task rejection by identity before storage', async () => {
+    const draftText = repairedProse()
+    const humanizedText = `${draftText}\n\n江澈捏碎耳机，追捕队的备用频道同时熄灭。`
+    const recheckFailure = new Error('final quality recheck unavailable')
+    const harness = await createProsePipelineHarness(createNovelWritingService, {
+      draftText,
+      humanizeResult: { final_text: humanizedText, report: { accepted: true } },
+      recheckError: recheckFailure,
+    })
+
+    const exposed = await harness.service.generateChapterForGroup(
+      harness.workspace,
+      harness.project.id,
+      harness.chapter.id,
+      {
+        model_id: 217,
+        target_word_count: 1000,
+        max_quality_revision_rounds: 0,
+        skip_mid_monologue_densify: true,
+      },
+    ).catch((error: unknown) => error)
+
+    expect(exposed).toBe(recheckFailure)
+    expect(harness.qualityReviewTasks).toHaveLength(2)
+    expect(harness.qualityReviewTasks[1]).toContain('江澈捏碎耳机，追捕队的备用频道同时熄灭')
+    expect(harness.storeCalls).toBe(0)
+    expect(harness.storyStateCalls).toBe(0)
+    expect(harness.memoryTexts).toEqual([])
   })
 
   test('keeps one post-humanize candidate authoritative after a truncated quality repair is rejected', async () => {
@@ -141,9 +303,10 @@ describe('generateChapterForGroup final candidate authority', () => {
     const storedHash = revisionTextHash(storedText)
 
     expectQualityBeforeFinalizer(stages)
-    expect(harness.qualityReviewTasks).toHaveLength(1)
+    expect(harness.qualityReviewTasks).toHaveLength(2)
     expect(harness.qualityReviewTasks[0]).toContain(String(harness.humanizeTexts[0] || ''))
     expect(harness.qualityReviewTasks[0]).not.toContain(storedText)
+    expect(harness.qualityReviewTasks[1]).toContain(storedText)
     expect(harness.qualityRevisionTasks).toHaveLength(1)
     expect(harness.qualityRevisionTasks[0]).toContain(String(harness.humanizeTexts[0] || ''))
     expect(harness.qualityRevisionTasks[0]).not.toContain(storedText)
@@ -159,10 +322,19 @@ describe('generateChapterForGroup final candidate authority', () => {
   })
 
   test('returns and stores canonical post-quality provenance in draft mode', async () => {
-    const draftText = repairedProse()
+    const sanitizedDraft = applyR76PreStoreSanitize(normalizeProseForStorage(repairedProse()), {
+      skip_mid_monologue_densify: true,
+    })
+    const draftText = applyR76PreStoreSanitize(sanitizedDraft, {
+      skip_mid_monologue_densify: true,
+    })
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText,
-      humanizeResult: { final_text: draftText, report: { accepted: true, before_chars: 701, after_chars: 733 } },
+      contextPackageOverride: withoutOpeningHandoffGuard(),
+      humanizeResult: (sourceText: string) => ({
+        final_text: sourceText,
+        report: { accepted: true, before_chars: 701, after_chars: 733 },
+      }),
     })
 
     const result = await harness.service.generateChapterForGroup(
@@ -171,7 +343,7 @@ describe('generateChapterForGroup final candidate authority', () => {
       harness.chapter.id,
       {
         model_id: 217,
-        target_word_count: 1000,
+        target_word_count: 1500,
         max_quality_revision_rounds: 0,
         production_mode: 'draft_only',
         skip_mid_monologue_densify: true,
@@ -181,6 +353,7 @@ describe('generateChapterForGroup final candidate authority', () => {
       .find(item => item.id === harness.chapter.id)
     const finalHash = revisionTextHash(String(stored?.chapter_text || ''))
 
+    expect(harness.qualityReviewTasks).toHaveLength(1)
     expect(result.humanize_postprocess).toMatchObject({ before_chars: 701, after_chars: 733 })
     expect(result.humanize_postprocess?.candidate_provenance).toEqual({
       scope: 'post_quality',
@@ -249,10 +422,11 @@ describe('generateChapterForGroup final candidate authority', () => {
     expect(stored?.raw_payload?.humanize_postprocess).toBeUndefined()
   })
 
-  test('keeps the common finalizer candidate exact in zhuque-fast mode', async () => {
+  test('rechecks a zhuque-fast candidate when the common finalizer changes its bytes', async () => {
     const draftText = repairedProse()
     const harness = await createProsePipelineHarness(createNovelWritingService, {
       draftText,
+      contextPackageOverride: withoutOpeningHandoffGuard(),
       humanizeResult: (sourceText: string) => ({
         final_text: sourceText,
         report: { accepted: true, before_chars: sourceText.length, after_chars: sourceText.length },
@@ -272,9 +446,11 @@ describe('generateChapterForGroup final candidate authority', () => {
     const returnedText = String(result.chapter?.chapter_text || '')
     const finalHash = revisionTextHash(returnedText)
 
-    expect(harness.modelCalls.review).toBe(0)
+    expect(harness.modelCalls.review).toBe(1)
     expect(harness.modelCalls.revision).toBe(0)
-    expect(harness.qualityReviewTasks).toEqual([])
+    expect(harness.qualityReviewTasks).toHaveLength(1)
+    expect(harness.qualityReviewTasks[0]).toContain(returnedText)
+    expect(revisionTextHash(String(harness.humanizeTexts[0] || ''))).not.toBe(finalHash)
     expect(harness.storeTexts).toEqual([returnedText])
     expect(revisionTextHash(String(harness.storeTexts[0] || ''))).toBe(finalHash)
     expect(result.humanize_postprocess?.candidate_provenance).toMatchObject({

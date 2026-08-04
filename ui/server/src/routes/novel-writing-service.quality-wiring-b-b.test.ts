@@ -85,30 +85,31 @@ describe('novel writing service prose quality wiring b b', () => {
 
   test('rechecks revised prose before advisory admission classification', () => {
     const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-prestore-loop.ts'), 'utf8')
+    const reviewExecutorSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-quality-review-executor.ts'), 'utf8')
     const orchestratorSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
     const qualityLoopStart = source.indexOf('let qualityLoop: any')
     const qualityLoopPhaseStart = orchestratorSource.indexOf('const qualityLoopState = await runQualityLoopPhase')
     const qualityFinalizeStart = orchestratorSource.indexOf('const qualityPrestoreResult = await runQualityPrestoreFinalize', qualityLoopPhaseStart)
     const gateStart = orchestratorSource.indexOf('return await runFullProductionAdmissionAndStore', qualityFinalizeStart)
-    const reviewCallbackStart = source.indexOf('review: async ({ prompt, round, attempt }) => {', qualityLoopStart)
-    const reviseCallbackStart = source.indexOf('revise: async ({ prompt, round }) => {', reviewCallbackStart)
+    const reviewCallbackStart = reviewExecutorSource.indexOf('const review = async ({ prompt, round, attempt }')
+    const reviseCallbackStart = source.indexOf('revise: async ({ prompt, round }) => {', qualityLoopStart)
     const qualityLoopEnd = source.indexOf('} catch (error: any) {', reviseCallbackStart)
     const beforeGate = source.slice(qualityLoopStart)
-    const reviewBlock = source.slice(reviewCallbackStart, reviseCallbackStart)
+    const reviewBlock = reviewExecutorSource.slice(reviewCallbackStart)
     const reviseBlock = source.slice(reviseCallbackStart, qualityLoopEnd)
 
     expect(qualityLoopStart).toBeGreaterThanOrEqual(0)
     expect(qualityLoopPhaseStart).toBeGreaterThanOrEqual(0)
     expect(qualityFinalizeStart).toBeGreaterThan(qualityLoopPhaseStart)
     expect(gateStart).toBeGreaterThan(qualityFinalizeStart)
-    expect(reviewCallbackStart).toBeGreaterThan(qualityLoopStart)
-    expect(reviseCallbackStart).toBeGreaterThan(reviewCallbackStart)
+    expect(reviewCallbackStart).toBeGreaterThanOrEqual(0)
+    expect(reviseCallbackStart).toBeGreaterThan(qualityLoopStart)
     expect(qualityLoopEnd).toBeGreaterThan(reviseCallbackStart)
     expect(beforeGate).toContain('qualityLoop = await runProseQualityLoop')
     expect(beforeGate).toContain('maxRevisionRounds: qualityRevisionRounds')
-    expect(beforeGate).toContain("phase: round > 0 ? 'quality_recheck' : 'quality_review'")
-    expect(beforeGate).toContain('round, attempt')
-    expect(beforeGate).toContain('qualityWarningCandidates.push(')
+    expect(beforeGate).toContain("stageForRound: round => round > 0 ? 'quality_recheck' : 'quality_review'")
+    expect(reviewBlock).toContain('phase: stage, round, attempt')
+    expect(beforeGate).toContain('qualityWarningCandidates.push(...initialQualityLoopWarnings)')
     expect(beforeGate).not.toContain('assertProseQualityCanStore')
     expect(beforeGate).not.toContain('runProseSelfReviewAndRevision')
     expect(reviewBlock).toContain('maxTokens: proseQualityReviewMaxTokensForAttempt(attempt)')
@@ -314,12 +315,20 @@ describe('novel writing service prose quality wiring b b', () => {
   })
   test('uses the project quality threshold when the request omits one', async () => {
     const harness = await createProsePipelineHarness(createNovelWritingService, {
-      reviewPayloads: [{
-        score: 77,
-        publishable: true,
-        dimensions: proseQualityScores,
-        findings: [],
-      }],
+      reviewPayloads: [
+        {
+          score: 77,
+          publishable: true,
+          dimensions: proseQualityScores,
+          findings: [],
+        },
+        {
+          score: 77,
+          publishable: true,
+          dimensions: proseQualityScores,
+          findings: [],
+        },
+      ],
     })
 
     const result = await harness.service.generateChapterForGroup(
@@ -487,7 +496,11 @@ describe('novel writing service prose quality wiring b b', () => {
     expect(harness.storeTexts).toEqual([authoritativeFinalText])
     expect(harness.storyStateTexts).toEqual([authoritativeFinalText])
     expect(harness.memoryTexts).toEqual([authoritativeFinalText])
-    expect(result.quality_warnings).toContainEqual(expect.objectContaining({ code: 'quality_revision_unavailable', source: 'review' }))
+    expect(result.quality_loop?.rounds).toContainEqual(expect.objectContaining({
+      accepted: false,
+      reason: 'quality_revision_unavailable',
+    }))
+    expect(result.quality_warnings).not.toContainEqual(expect.objectContaining({ code: 'quality_revision_unavailable' }))
     expect(result.admission_status).toBe('accepted_with_warnings')
     expect(JSON.stringify(result)).not.toContain('revision provider unavailable')
   })
@@ -547,8 +560,7 @@ describe('novel writing service prose quality wiring b b', () => {
       post_commit_warnings: [expect.objectContaining({ stage: 'memory' })],
     })
     expect(result.chapter?.raw_payload?.prose_admission).toEqual(stored?.raw_payload?.prose_admission)
-    expect(harness.qualityReviewTasks.at(-1)).toContain(String(harness.humanizeTexts[0] || ''))
-    expect(harness.qualityReviewTasks.at(-1)).not.toContain(authoritativeFinalText)
+    expect(harness.qualityReviewTasks.at(-1)).toContain(authoritativeFinalText)
     expect(harness.storeTexts).toEqual([authoritativeFinalText])
     expect(harness.memoryTexts).toEqual([authoritativeFinalText])
     expect(harness.storeCalls).toBe(1)
@@ -556,7 +568,7 @@ describe('novel writing service prose quality wiring b b', () => {
     expect(harness.storyStateTexts).toEqual([authoritativeFinalText])
     expect(harness.modelCalls.draft).toBe(1)
     expect(harness.modelCalls.revision).toBe(3)
-    expect(harness.modelCalls.review).toBe(2)
+    expect(harness.modelCalls.review).toBe(3)
     expect(result.humanize_postprocess?.candidate_provenance).toMatchObject({
       scope: 'post_quality',
       stage: 'post_quality',

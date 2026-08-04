@@ -737,7 +737,7 @@ ${selfReviewSource}`
     const editorStart = source.indexOf('editorRewrite = await runCommercialEditorRewrite(', wordTargetStart)
     const editorStageStart = source.indexOf("await onStage('editor', { status: 'running' })", wordTargetStart)
     const editorPipelineStart = orchestratorSource.indexOf('const editorMemeResult = await runPostDraftEditorAndMemePolish')
-    const reviewStart = orchestratorSource.indexOf('const qualityPrestoreResult = await runQualityLoopAndPrestoreSetup', editorPipelineStart)
+    const reviewStart = orchestratorSource.indexOf('const qualityLoopState = await runQualityLoopPhase', editorPipelineStart)
 
     expect(wordTargetStart).toBeGreaterThanOrEqual(0)
     expect(editorStageStart).toBeGreaterThan(wordTargetStart)

@@ -302,19 +302,11 @@ test('keeps one connected final candidate when later quality revisions are rejec
       acceptance_test: '追捕阵型因江澈的可见动作发生变化',
     }],
   })
-  const unexpectedThirdReview = {
-    get score(): never {
-      throw new Error('quality review exceeded the single recheck budget')
-    },
-    publishable: true,
-    dimensions: { ...proseQualityScores, core_promise_agency: 10 },
-    findings: [],
-  }
   const harness = await createProsePipelineHarness({
     reviewPayloads: [
       failedReview('倒数压到最后三秒，江澈停在围墙阴影里等待。'),
       failedReview('倒数压到最后三秒，江澈仍在围墙阴影里，却终于离开墙角。'),
-      unexpectedThirdReview,
+      failedReview('倒数压到最后三秒，江澈仍在围墙阴影里，却终于离开墙角。'),
     ],
     revisionTexts: [firstRevision, secondRevision],
   })
@@ -353,14 +345,15 @@ test('keeps one connected final candidate when later quality revisions are rejec
   expect(harness.storyStateCalls).toBe(1)
   expect(harness.storyStateTexts).toEqual([finalCandidate])
   expect(harness.memoryTexts).toEqual([finalCandidate])
-  expect(harness.modelCalls.review).toBe(2)
+  expect(harness.modelCalls.review).toBe(3)
   expect(harness.modelCalls.revision).toBe(result.quality_loop.rounds.length)
 })
-test('stores revised prose with warnings when the independent quality recheck is unavailable', async () => {
+test('rejects before storage when the independent quality recheck is unavailable', async () => {
   const revisedText = buildPipelineProse(
     '江澈撞断路灯，第一排追兵被飞石逼离封锁位。',
     '沿着自己砸出的缺口向前压进，迫使追捕队改变阵型',
   )
+  const recheckError = new Error('review timeout')
   const harness = await createProsePipelineHarness({
     reviewPayloads: [{
       score: 70,
@@ -375,10 +368,10 @@ test('stores revised prose with warnings when the independent quality recheck is
       }],
     }],
     revisionTexts: [revisedText],
-    recheckError: new Error('review timeout'),
+    recheckError,
   })
 
-  const result = await harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
+  const generation = harness.service.generateChapterForGroup(harness.workspace, harness.project.id, harness.chapter.id, {
     model_id: 217,
     target_word_count: 1000,
     quality_threshold: 78,
@@ -386,30 +379,15 @@ test('stores revised prose with warnings when the independent quality recheck is
     approvals: { quality_gate: { approved: true } },
   })
 
-  expect(result).toMatchObject({
-    admission_status: 'accepted_with_warnings',
-    quality_loop: {
-      decision: {
-        passed: false,
-      },
-      rounds: [{ round: 1, accepted: true, reason: '' }],
-    },
-  })
-  expect(result.quality_loop.decision.advisory_failures.join('｜')).toContain('quality_recheck_unavailable')
-  expect(result.quality_warnings).toContainEqual(expect.objectContaining({ code: 'quality_recheck_unavailable', source: 'review' }))
-  expect(result.prompt_diagnostics?.prompt_chars).toBeGreaterThan(0)
-  expect(JSON.stringify(result.quality_loop)).not.toContain(revisedText.slice(0, 80))
-
-  expect(harness.storeCalls).toBe(1)
-  expect(harness.storyStateCalls).toBe(1)
+  await expect(generation).rejects.toBe(recheckError)
+  expect(harness.storeCalls).toBe(0)
+  expect(harness.storyStateCalls).toBe(0)
+  expect(harness.storeTexts).toEqual([])
+  expect(harness.storyStateTexts).toEqual([])
+  expect(harness.memoryTexts).toEqual([])
   const stored = (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id)
-  const finalCandidate = result.chapter?.chapter_text || ''
-  expect(stored?.chapter_text).toBe(finalCandidate)
-  expect(finalCandidate).toContain('江澈撞断路灯')
-  expect(finalCandidate).toContain('沿着自己砸出的缺口向前压进')
-  expect(harness.storeTexts).toEqual([finalCandidate])
-  expect(harness.storyStateTexts).toEqual([finalCandidate])
-  expect(harness.memoryTexts).toEqual([finalCandidate])
+  expect(stored?.chapter_text).not.toContain('江澈撞断路灯')
+  expect(stored?.chapter_text).not.toContain('沿着自己砸出的缺口向前压进')
 })
 test('stores one coherent final candidate after accepting a quality revision', async () => {
   const originalDraft = buildPipelineProse(
@@ -857,7 +835,7 @@ test('compiles the prose prompt from required core sections and director-selecte
 test('uses the compiled generation contract for the actual draft runtime call', () => {
   const source = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-draft-prose.ts'), 'utf8')
   const contractStart = source.indexOf('const generationContractWithFamily =')
-  const draftCallStart = source.indexOf('const draftResult = await sourceResolution.source.generateProse', contractStart)
+  const draftCallStart = source.indexOf('const draftResult = await chapterTaskExecution.generateDraft', contractStart)
   const draftCallEnd = source.indexOf('const resultPayload = Array.isArray', draftCallStart)
   const draftCallBlock = source.slice(contractStart, draftCallEnd)
 
@@ -867,7 +845,7 @@ test('uses the compiled generation contract for the actual draft runtime call', 
   expect(draftCallBlock).toContain('const compiledPrompt = compileParagraphProseContext(project, generationContractWithFamily, migrationPlan, chapter)')
   expect(draftCallBlock).toContain("await onStage('draft', {")
   expect(draftCallBlock).toContain('prompt_diagnostics: compiledPrompt.diagnostics')
-  expect(draftCallBlock).toContain('const draftResult = await sourceResolution.source.generateProse({')
+  expect(draftCallBlock).toContain('const draftResult = await chapterTaskExecution.generateDraft({')
   expect(draftCallBlock).toContain('paragraphTask: compiledPrompt.prompt')
   expect(draftCallBlock).toContain('promptDiagnostics: compiledPrompt.diagnostics')
   expect(draftCallBlock).toContain('const draftPromptDiagnostics =')

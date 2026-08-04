@@ -325,6 +325,7 @@ describe('automatic chapter task lifecycle', () => {
       'stage:quality_recheck',
       'stage:humanize',
       'stage:humanize',
+      'stage:quality_recheck',
       'stage:readability_review',
       'stage:story_state_sync',
       'db-commit-finished',
