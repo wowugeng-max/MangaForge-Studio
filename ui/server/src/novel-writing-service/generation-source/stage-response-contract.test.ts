@@ -142,7 +142,16 @@ describe('MCP stage response contracts', () => {
   })
 
   test('rejects malformed structured and editor reports', () => {
-    for (const invalid of [{}, { passed: true }, { continuity_checks: {} }]) {
+    for (const invalid of [
+      {},
+      { passed: true },
+      { unrelated: [] },
+      { passed: [] },
+      { continuity_checks: {} },
+      { continuity_checks: [] },
+      { continuity_checks: [{}] },
+      { continuity_checks: ['pass'] },
+    ]) {
       expectInvalid('structured_review_json', JSON.stringify(invalid), 'structured_review_fill')
     }
     for (const invalid of [{}, { passed: 'yes' }, { score: '88' }, { issues: {} }, { suggestions: 'none' }]) {
@@ -158,6 +167,33 @@ describe('MCP stage response contracts', () => {
       { state_delta: [] },
       { state_delta: { unknown_field: true } },
     ]) expectInvalid('story_state_json', JSON.stringify(invalid), 'story_state_sync')
+  })
+
+  test('rejects recognized Story State fields with invalid semantic types', () => {
+    for (const invalid of [
+      { state_delta: { open_questions: false } },
+      { state_delta: { next_chapter_priorities: '追查旧印章' } },
+      { state_delta: { character_positions: [] } },
+      { state_delta: { current_time: ['子时'] } },
+      { state_delta: { timeline: {} } },
+      { state_delta: { progress_summary: false } },
+      { state_delta: { current_time: '子时', open_questions: false } },
+    ]) expectInvalid('story_state_json', JSON.stringify(invalid), 'story_state_sync')
+  })
+
+  test('accepts supported structured Story State collection and summary variants', () => {
+    const payloads = [
+      { state_delta: { character_positions: { 李玄: '旧码头' } } },
+      { state_delta: { timeline: ['李玄抵达旧码头'] } },
+      { state_delta: { timeline: [{ event: '李玄抵达旧码头', source_excerpt: '他踏上旧码头。' }] } },
+      { state_delta: { progress_summary: '本章已完成' } },
+      { state_delta: { progress_summary: { notes: '下一章继续追查旧印章' } } },
+    ]
+    for (const payload of payloads) {
+      expect(validateMcpStageResponse('story_state_sync', 'story_state_json', {
+        content: JSON.stringify(payload),
+      }).output).toEqual(payload)
+    }
   })
 
   test('rejects Proxy and accessor responses without executing hostile traps', () => {

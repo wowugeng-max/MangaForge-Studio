@@ -1,6 +1,7 @@
 import { types } from 'node:util'
 import type { LLMResponse } from '../../llm/types'
 import { McpError } from '../../mcp/errors'
+import { STRUCTURED_REVIEW_CHECK_FIELDS } from '../quality/structured-review-fields'
 import type {
   ChapterStageResponseContract,
   ChapterTaskStage,
@@ -116,12 +117,72 @@ function validateQualityReview(content: string) {
   return value
 }
 
+const STRUCTURED_REVIEW_ARRAY_FIELDS = new Set([
+  ...STRUCTURED_REVIEW_CHECK_FIELDS.flatMap(fields => fields),
+  'continuity_checks',
+  'continuityChecks',
+  'delivery_risk_receipts',
+  'deliveryRiskReceipts',
+])
+
+const STRUCTURED_REVIEW_AUXILIARY_ARRAY_FIELDS = new Set(['issues', 'findings'])
+
+function nonEmptyString(value: unknown) {
+  return typeof value === 'string' && Boolean(value.trim())
+}
+
+function structuredReviewEntry(value: unknown) {
+  if (!plainObject(value)) return false
+  const status = ownDataValue(value, 'status') ?? ownDataValue(value, 'state')
+  const delivered = ownDataValue(value, 'delivered')
+  const hasVerdict = nonEmptyString(status) || typeof delivered === 'boolean'
+  const reportFields = [
+    'key', 'label', 'evidence', 'fix', 'remaining_risk', 'remainingRisk',
+    'risk_item', 'riskItem', 'required_action', 'requiredAction',
+    'quality_focus', 'qualityFocus', 'acceptance_test', 'acceptanceTest',
+  ]
+  return hasVerdict && reportFields.some(field => nonEmptyString(ownDataValue(value, field)))
+}
+
+function auxiliaryReviewEntry(value: unknown) {
+  if (nonEmptyString(value)) return true
+  if (!plainObject(value)) return false
+  return ['key', 'message', 'issue', 'finding', 'evidence', 'suggestion', 'required_change']
+    .some(field => nonEmptyString(ownDataValue(value, field)))
+}
+
 function validateStructuredReview(content: string) {
   const value = parseJsonObject(content)
-  const entries = Object.entries(value)
-  if (!entries.length || !entries.some(([, field]) => Array.isArray(field))) {
-    throw new TypeError('structured review arrays required')
+  const passed = ownDataValue(value, 'passed')
+  const score = ownDataValue(value, 'score')
+  const needsRevision = ownDataValue(value, 'needs_revision') ?? ownDataValue(value, 'needsRevision')
+  if (passed !== undefined && typeof passed !== 'boolean') {
+    throw new TypeError('structured review verdict must be a boolean')
   }
+  if (score !== undefined && !finiteScore(score)) {
+    throw new TypeError('structured review score must be finite')
+  }
+  if (needsRevision !== undefined && typeof needsRevision !== 'boolean') {
+    throw new TypeError('structured review revision verdict must be a boolean')
+  }
+  let meaningfulEntries = 0
+  for (const field of STRUCTURED_REVIEW_ARRAY_FIELDS) {
+    const report = ownDataValue(value, field)
+    if (report === undefined) continue
+    if (!Array.isArray(report) || !report.every(structuredReviewEntry)) {
+      throw new TypeError('recognized structured review entries required')
+    }
+    meaningfulEntries += report.length
+  }
+  for (const field of STRUCTURED_REVIEW_AUXILIARY_ARRAY_FIELDS) {
+    const report = ownDataValue(value, field)
+    if (report === undefined) continue
+    if (!Array.isArray(report) || !report.every(auxiliaryReviewEntry)) {
+      throw new TypeError('structured review issue entries required')
+    }
+    meaningfulEntries += report.length
+  }
+  if (meaningfulEntries === 0) throw new TypeError('structured review arrays required')
   return value
 }
 
@@ -153,17 +214,50 @@ function validateStoryState(content: string) {
   const value = parseJsonObject(content)
   const snakeDelta = ownDataValue(value, 'state_delta')
   const camelDelta = ownDataValue(value, 'stateDelta')
-  const delta = plainObject(snakeDelta)
-    ? snakeDelta
-    : plainObject(camelDelta)
-      ? camelDelta
-      : value
-  const fields = [
-    'current_time', 'currentTime', 'character_positions', 'characterPositions',
-    'open_questions', 'openQuestions', 'next_chapter_priorities',
-    'nextChapterPriorities', 'timeline', 'progress_summary', 'progressSummary',
+  if ((snakeDelta !== undefined && !plainObject(snakeDelta))
+    || (camelDelta !== undefined && !plainObject(camelDelta))) {
+    throw new TypeError('Story State delta object required')
+  }
+  const delta = plainObject(snakeDelta) ? snakeDelta : plainObject(camelDelta) ? camelDelta : value
+  const plainCollection = (candidate: unknown) => Array.isArray(candidate)
+    && candidate.every(item => nonEmptyString(item)
+      || (plainObject(item) && Object.keys(item).length > 0))
+  const timeline = (candidate: unknown) => Array.isArray(candidate)
+    && candidate.every(item => nonEmptyString(item)
+      || (plainObject(item) && Object.keys(item).length > 0))
+  const progressSummary = (candidate: unknown) => nonEmptyString(candidate)
+    || (plainObject(candidate) && Object.keys(candidate).length > 0)
+  const fields: Array<{
+    aliases: readonly string[]
+    validate: (candidate: unknown) => boolean
+  }> = [
+    { aliases: ['current_time', 'currentTime'], validate: nonEmptyString },
+    { aliases: ['character_positions', 'characterPositions'], validate: plainObject },
+    { aliases: ['character_relationships', 'characterRelationships'], validate: plainObject },
+    { aliases: ['relationship_graph', 'relationshipGraph'], validate: plainObject },
+    { aliases: ['known_secrets', 'knownSecrets'], validate: plainObject },
+    { aliases: ['secret_visibility', 'secretVisibility'], validate: plainObject },
+    { aliases: ['item_ownership', 'itemOwnership'], validate: plainObject },
+    { aliases: ['resource_status', 'resourceStatus'], validate: plainObject },
+    { aliases: ['foreshadowing_status', 'foreshadowingStatus'], validate: plainObject },
+    { aliases: ['payoff_queue', 'payoffQueue'], validate: plainCollection },
+    { aliases: ['active_locations', 'activeLocations'], validate: plainCollection },
+    { aliases: ['open_questions', 'openQuestions'], validate: plainCollection },
+    { aliases: ['next_chapter_priorities', 'nextChapterPriorities'], validate: plainCollection },
+    { aliases: ['timeline'], validate: timeline },
+    { aliases: ['progress_summary', 'progressSummary'], validate: progressSummary },
   ]
-  if (!fields.some(field => Object.prototype.hasOwnProperty.call(delta, field))) {
+  let recognizedFields = 0
+  for (const field of fields) {
+    for (const alias of field.aliases) {
+      if (!Object.prototype.hasOwnProperty.call(delta, alias)) continue
+      recognizedFields += 1
+      if (!field.validate(ownDataValue(delta, alias))) {
+        throw new TypeError(`Invalid Story State field: ${alias}`)
+      }
+    }
+  }
+  if (recognizedFields === 0) {
     throw new TypeError('Story State delta required')
   }
   return value
