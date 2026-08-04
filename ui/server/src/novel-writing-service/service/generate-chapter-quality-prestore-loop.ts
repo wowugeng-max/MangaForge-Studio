@@ -259,6 +259,7 @@ import {
   runZhuqueFastQualityLoop,
 } from './generate-chapter-quality-prestore-fast-path'
 import { executeChapterStage } from '../generation-source/types'
+import { isProviderAvailabilityStageFailure } from '../generation-source/errors'
 import {
   createChapterQualityReviewExecutor,
   qualityLoopAdmissionWarnings,
@@ -401,7 +402,7 @@ try {
           },
         })
       } catch (error) {
-        if (options.chapterTaskExecution) {
+        if (options.chapterTaskExecution && !isProviderAvailabilityStageFailure(error)) {
           chapterTaskExecutionFailed = true
           chapterTaskExecutionFailure = error
         }

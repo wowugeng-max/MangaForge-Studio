@@ -115,6 +115,40 @@ describe('buildChapterQualityCard', () => {
     expect(card.next_actions.some((item: string) => item.includes('目标字数'))).toBe(true)
   })
 
+  test('registers the quality-card route and returns the chapter context card', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '质量卡路由', reference_config: {} })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: '服务端当前正文用于质量卡。',
+    })
+    const contextPackage = { chapter_target: { chapter_id: chapter.id }, complete: true }
+    const { app, handlers } = createRouteHarness()
+    registerNovelEditorQualityRoutes(app, {
+      getWorkspace: () => workspace,
+      getProject: (_activeWorkspace: string, id: number) => getNovelProject(workspace, id),
+      buildChapterContextPackage: async () => contextPackage,
+    } as any)
+
+    const response = await callRoute(
+      handlers.get('GET /api/novel/chapters/:chapterId/quality-card'),
+      {
+        params: { chapterId: String(chapter.id) },
+        query: { project_id: project.id },
+        body: {},
+      },
+    )
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toMatchObject({
+      ok: true,
+      quality_card: { chapter_id: chapter.id, chapter_no: chapter.chapter_no },
+      context_package: contextPackage,
+    })
+  })
+
   test('manual prose quality uses one chapter task for manual_recheck and closes after durable review persistence', async () => {
     const workspace = await tempWorkspace()
     const project = await createNovelProject(workspace, { title: '人工质检统一来源', reference_config: {} })

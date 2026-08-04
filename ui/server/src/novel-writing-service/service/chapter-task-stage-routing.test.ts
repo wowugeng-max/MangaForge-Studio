@@ -104,6 +104,38 @@ function qualityLoopArgs(
   }
 }
 
+function revisionFailureFixture(
+  source: 'model' | 'mcp',
+  revisionFailure: Error,
+) {
+  const fixture = makeExecutionSpy(call => {
+    if (call.stage === 'quality_repair') return Promise.reject(revisionFailure)
+    return {
+      parsed: {
+        score: 70,
+        score_scale: '0-100',
+        publishable: true,
+        dimensions: sixDimensions,
+        findings: [{
+          key: 'locatable_causality',
+          severity: 'S2',
+          dimension: 'conflict_causality',
+          evidence: '交接单拍在台上',
+          required_change: '让交接动作产生新的现场后果',
+          acceptance_test: '动作与结果形成因果链',
+        }],
+      },
+      modelName: 'fixed-task-model',
+    }
+  })
+  Object.defineProperty(fixture.execution, 'source', {
+    configurable: true,
+    enumerable: true,
+    value: source,
+  })
+  return fixture
+}
+
 describe('chapter task routing for review and state leaves', () => {
   test('routes self review and self revision to their exact task stages', async () => {
     const { execution, calls, fallback, getFallbackCalls } = makeExecutionSpy(call => {
@@ -273,6 +305,67 @@ describe('chapter task routing for review and state leaves', () => {
       max_quality_revision_rounds: 0,
     }))).rejects.toBe(rejection)
     expect(getFallbackCalls()).toBe(0)
+  })
+
+  for (const { label, source, failure } of [
+    {
+      label: 'resolved API error envelope',
+      source: 'model' as const,
+      failure: Object.assign(new Error('PRIVATE_RESOLVED_API_ENVELOPE'), {
+        code: 'CHAPTER_STAGE_ERROR_RESULT',
+        error_code: 'CHAPTER_STAGE_ERROR_RESULT',
+      }),
+    },
+    {
+      label: 'thrown API provider error',
+      source: 'model' as const,
+      failure: new Error('PRIVATE_THROWN_API_PROVIDER_ERROR'),
+    },
+    {
+      label: 'thrown MCP provider error',
+      source: 'mcp' as const,
+      failure: new Error('PRIVATE_THROWN_MCP_PROVIDER_ERROR'),
+    },
+  ]) {
+    test(`keeps prior prose for an optional ${label} on the same source`, async () => {
+      const { execution, calls, fallback, getFallbackCalls } = revisionFailureFixture(source, failure)
+      const result = await runQualityLoopPhase(qualityLoopArgs(execution, fallback))
+
+      expect(execution.source).toBe(source)
+      expect(result.finalText).toBe(chapterText)
+      expect(result.qualityLoop.quality_warning).toMatchObject({
+        code: 'quality_revision_unavailable',
+        source: 'review',
+      })
+      expect(result.qualityLoop.rounds).toContainEqual(expect.objectContaining({
+        selection: expect.objectContaining({
+          accepted: false,
+          reason: 'quality_revision_unavailable',
+          text: chapterText,
+        }),
+      }))
+      expect(calls.map(call => call.stage)).toEqual(['quality_review', 'quality_repair'])
+      expect(getFallbackCalls()).toBe(0)
+      expect(JSON.stringify(result)).not.toContain(failure.message)
+    })
+  }
+
+  test('propagates source integrity and required acceptance revision failures by identity', async () => {
+    const failures = [
+      Object.assign(new Error('source changed'), { code: 'GENERATION_SOURCE_CHANGED' }),
+      Object.assign(new Error('MCP binding changed'), { code: 'MCP_BINDING_CHANGED' }),
+      Object.assign(new Error('invalid stage structure'), { code: 'CHAPTER_STAGE_RESULT_INVALID' }),
+      Object.assign(new Error('required acceptance failure'), { admission_status: 'blocked_invalid' }),
+      Object.assign(new Error('required complete revision'), { code: 'PROSE_REVISION_TRUNCATED' }),
+    ]
+
+    for (const failure of failures) {
+      const source = String((failure as any).code || '').startsWith('MCP_') ? 'mcp' : 'model'
+      const { execution, fallback, getFallbackCalls } = revisionFailureFixture(source, failure)
+
+      await expect(runQualityLoopPhase(qualityLoopArgs(execution, fallback))).rejects.toBe(failure)
+      expect(getFallbackCalls()).toBe(0)
+    }
   })
 
   test('propagates story-state task rejection without falling back', async () => {

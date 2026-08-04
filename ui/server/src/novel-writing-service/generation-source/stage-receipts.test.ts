@@ -139,6 +139,23 @@ describe('chapter generation stage receipts', () => {
     }
   })
 
+  test('redacts optional quality repair provider detail while preserving the thrown error', async () => {
+    const { activeWorkspace, provenance } = await fixture()
+    const recordStage = createChapterStageRecorder({ activeWorkspace, provenance: () => provenance })
+    const providerFailure = new Error('PRIVATE_THROWN_REVISION_PROVIDER_MESSAGE')
+
+    await expect(recordStage('quality_repair', {
+      prompt: '只修订当前正文', responseContract: 'revision_prose',
+    }, async () => { throw providerFailure })).rejects.toBe(providerFailure)
+
+    const [run] = await listNovelRuns(activeWorkspace, provenance.project_id)
+    expect(run).toMatchObject({
+      status: 'failed',
+      error_message: 'Optional quality revision unavailable',
+    })
+    expect(JSON.stringify(run)).not.toContain(providerFailure.message)
+  })
+
   test('normalizes untrusted custom scrubber output to the same bounds', async () => {
     const { activeWorkspace, provenance } = await fixture()
     const recordStage = createChapterStageRecorder({

@@ -7,6 +7,7 @@ import type {
   ChapterTaskStage,
 } from './types'
 import { CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY } from './types'
+import { isProviderAvailabilityStageFailure } from './errors'
 
 const ERROR_CODE_LIMIT = 80
 const ERROR_MESSAGE_LIMIT = 500
@@ -178,10 +179,14 @@ export function createChapterStageRecorder(input: {
         scrubbed = error
       }
       const failure = boundedFailure(scrubbed)
+      const persistedFailureMessage = stage === 'quality_repair'
+        && isProviderAvailabilityStageFailure(scrubbed)
+        ? 'Optional quality revision unavailable'
+        : failure.message
       try {
         await finalizeStageRun(input.activeWorkspace, run.id, {
           status: 'failed',
-          error_message: failure.message,
+          error_message: persistedFailureMessage,
           output_ref: JSON.stringify({
             receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
             ...currentProvenance(),

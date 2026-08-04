@@ -9,6 +9,7 @@ import {
   listNovelCharacters,
   listNovelChapters,
   listNovelReviews,
+  listNovelRuns,
   listNovelSettingEntities,
 } from '../novel'
 import {
@@ -503,6 +504,24 @@ describe('novel writing service prose quality wiring b b', () => {
     expect(result.quality_warnings).not.toContainEqual(expect.objectContaining({ code: 'quality_revision_unavailable' }))
     expect(result.admission_status).toBe('accepted_with_warnings')
     expect(JSON.stringify(result)).not.toContain('revision provider unavailable')
+    const runs = await listNovelRuns(harness.workspace, harness.project.id)
+    const persisted = JSON.stringify({
+      chapter: (await listNovelChapters(harness.workspace, harness.project.id)).find(item => item.id === harness.chapter.id),
+      versions: await listChapterVersions(harness.workspace, harness.chapter.id),
+      reviews: await listNovelReviews(harness.workspace, harness.project.id),
+      runs,
+    })
+    expect(runs
+      .filter(run => JSON.stringify(run).includes('revision provider unavailable'))
+      .map(run => ({
+        step_name: run.step_name,
+        status: run.status,
+        leaking_fields: Object.entries(run)
+          .filter(([, value]) => String(value).includes('revision provider unavailable'))
+          .map(([field]) => field),
+      })))
+      .toEqual([])
+    expect(persisted).not.toContain('revision provider unavailable')
   })
   test('keeps an accepted chapter successful when final prose memory storage fails', async () => {
     const originalDraft = buildPipelineProse(
