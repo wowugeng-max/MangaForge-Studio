@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { message } from 'antd'
 import apiClient from '../../api/client'
+import { chapterSourceApi } from '../../api/mcp'
 import {
   buildChapterTreeData,
   buildTree,
@@ -20,6 +21,14 @@ import {
   type WorkspaceDetailResult,
 } from './workspaceDetailCache'
 import { clearWorkspacePayloadParseCache } from './payloadParseCache'
+import {
+  confirmedAuthorityState,
+  createChapterSourceOperationFence,
+  normalizeChapterSourceView,
+  StaleChapterSourceOperationError,
+  type ChapterSourceAuthorityState,
+  type ChapterSourceOperationToken,
+} from './chapterGenerationSourceModel'
 
 export type ChapterStatusFilter = 'all' | 'written' | 'unwritten' | 'placeholder'
 export type ChapterSortMode = 'chapter_no_asc' | 'chapter_no_desc' | 'word_count_desc' | 'title_asc'
@@ -133,6 +142,8 @@ export function useNovelWorkspaceData({
   const [pipeline, setPipeline] = useState<any | null>(null)
   const [models, setModels] = useState<any[]>([])
   const [selectedModelId, setSelectedModelId] = useState<number | undefined>()
+  const [chapterGenerationSourceAuthority, setChapterGenerationSourceAuthority]
+    = useState<ChapterSourceAuthorityState>(() => confirmedAuthorityState(null))
   const [activeChapterId, setActiveChapterId] = useState<number | null>(null)
   const projectIdRef = useRef(projectId)
   projectIdRef.current = projectId
@@ -142,8 +153,11 @@ export function useNovelWorkspaceData({
   const chaptersRef = useRef<any[]>([])
   const projectLoadEpochRef = useRef<ReturnType<typeof createWorkspaceRequestEpoch> | null>(null)
   const projectLoadAbortRef = useRef<AbortController | null>(null)
+  const chapterSourceFenceRef = useRef<ReturnType<typeof createChapterSourceOperationFence> | null>(null)
+  const chapterSourceLoadRef = useRef<{ projectId: number; loadEpoch: number } | null>(null)
   const detailCacheRef = useRef<ReturnType<typeof createWorkspaceDetailCache> | null>(null)
   if (!projectLoadEpochRef.current) projectLoadEpochRef.current = createWorkspaceRequestEpoch()
+  if (!chapterSourceFenceRef.current) chapterSourceFenceRef.current = createChapterSourceOperationFence()
   if (!detailCacheRef.current) {
     detailCacheRef.current = createWorkspaceDetailCache(async (kind, id, signal) => {
       const url = kind === 'chapter'
@@ -157,12 +171,29 @@ export function useNovelWorkspaceData({
     })
   }
 
+  const beginChapterSourceOperation = useCallback(() => {
+    const current = chapterSourceLoadRef.current
+    if (!current) throw new StaleChapterSourceOperationError()
+    return chapterSourceFenceRef.current!.begin(current.projectId, current.loadEpoch)
+  }, [])
+
+  const assertChapterSourceOperationCurrent = useCallback((token: ChapterSourceOperationToken) => {
+    chapterSourceFenceRef.current!.assertCurrent(token)
+  }, [])
+
   const loadProjectModules = useCallback(async () => {
-    if (!projectId) return
+    if (!projectId) {
+      chapterSourceFenceRef.current!.unmount()
+      chapterSourceLoadRef.current = null
+      return
+    }
     projectLoadAbortRef.current?.abort()
     const controller = new AbortController()
     projectLoadAbortRef.current = controller
     const requestEpoch = projectLoadEpochRef.current!.begin()
+    chapterSourceFenceRef.current!.enterProject(projectId, requestEpoch)
+    chapterSourceLoadRef.current = { projectId, loadEpoch: requestEpoch }
+    const chapterSourceToken = chapterSourceFenceRef.current!.begin(projectId, requestEpoch)
     setLoading(true)
     try {
       const requestPlan = initialWorkspaceRequestPlan(projectId)
@@ -171,7 +202,7 @@ export function useNovelWorkspaceData({
         if (!request) throw new Error(`workspace request missing: ${key}`)
         return apiClient.get(request.url, { params: request.params, signal: controller.signal })
       }
-      const [pr, wr, cr, olr, chr, rnr, revr, plr, mr] = await Promise.all([
+      const [pr, wr, cr, olr, chr, rnr, revr, plr, mr, sourceView] = await Promise.all([
         apiClient.get(`/novel/projects/${projectId}`, { signal: controller.signal }),
         apiClient.get(`/novel/projects/${projectId}/worldbuilding`, { signal: controller.signal }),
         apiClient.get(`/novel/projects/${projectId}/characters`, { signal: controller.signal }),
@@ -181,6 +212,7 @@ export function useNovelWorkspaceData({
         compactRequest('reviews'),
         apiClient.get(`/novel/projects/${projectId}/pipeline`, { signal: controller.signal }).catch(() => ({ data: null })),
         apiClient.get('/models', { signal: controller.signal }).catch(() => ({ data: [] })),
+        chapterSourceApi.get(projectId).then(normalizeChapterSourceView),
       ])
       if (!projectLoadEpochRef.current?.isCurrent(requestEpoch) || controller.signal.aborted) return
       const nextChapters = Array.isArray(chr.data) ? chr.data.map(compactChapterWorkspaceRecord) : []
@@ -203,7 +235,14 @@ export function useNovelWorkspaceData({
       setAgentExecution(null)
       setPipeline(plr.data?.pipeline || null)
       setModels(nextModels)
-      setSelectedModelId(prev => resolveSelectedWorkspaceModelId(prev, nextModels))
+      try {
+        chapterSourceFenceRef.current!.assertCurrent(chapterSourceToken)
+        setChapterGenerationSourceAuthority(confirmedAuthorityState(sourceView))
+        const storedModelId = sourceView.source.model.model_id
+        setSelectedModelId(prev => storedModelId ?? resolveSelectedWorkspaceModelId(prev, nextModels))
+      } catch (error) {
+        if (!(error instanceof StaleChapterSourceOperationError)) throw error
+      }
       setActiveChapterId(prev => resolveActiveWorkspaceChapterId(prev, nextChapters))
     } catch {
       if (projectLoadEpochRef.current?.isCurrent(requestEpoch) && !controller.signal.aborted) {
@@ -221,6 +260,10 @@ export function useNovelWorkspaceData({
       projectLoadEpochRef.current?.invalidate()
     }
   }, [loadProjectModules])
+
+  useEffect(() => () => {
+    chapterSourceFenceRef.current?.unmount()
+  }, [])
 
   useEffect(() => {
     detailCacheRef.current?.clear()
@@ -241,6 +284,7 @@ export function useNovelWorkspaceData({
     setAgentExecution(null)
     setPipeline(null)
     setModels([])
+    setChapterGenerationSourceAuthority(confirmedAuthorityState(null))
     setSelectedModelId(undefined)
     setActiveChapterId(null)
     setLoading(Boolean(projectId))
@@ -433,6 +477,10 @@ export function useNovelWorkspaceData({
     setAgentExecution,
     pipeline,
     models,
+    chapterGenerationSourceAuthority,
+    setChapterGenerationSourceAuthority,
+    beginChapterSourceOperation,
+    assertChapterSourceOperationCurrent,
     selectedModelId,
     setSelectedModelId,
     activeChapterId,

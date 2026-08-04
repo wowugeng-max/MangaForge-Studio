@@ -1,9 +1,12 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, mock, test } from 'bun:test'
+import * as React from 'react'
+import apiClient from '../../api/client'
 import {
   initialWorkspaceRequestPlan,
   createWorkspaceRequestEpoch,
   resolveActiveWorkspaceChapterId,
   resolveSelectedWorkspaceModelId,
+  useNovelWorkspaceData,
   workspaceDetailsBelongToProject,
 } from './useNovelWorkspaceData'
 import {
@@ -19,6 +22,228 @@ import { buildPlanningWorkspaceModel } from './planningWorkspaceModel'
 import { buildWritingCockpitModel } from './writingCockpitModel'
 import { buildAutoCreationDirectorModel } from './autoCreationDirectorModel'
 
+type DependencyList = readonly unknown[] | undefined
+type EffectCallback = () => void | (() => void)
+type HookCell =
+  | { kind: 'state'; value: unknown; setter: (next: unknown) => void }
+  | { kind: 'ref'; value: { current: unknown } }
+  | { kind: 'memo'; value: unknown; deps: DependencyList }
+  | { kind: 'effect'; deps: DependencyList; cleanup?: () => void }
+
+function dependenciesEqual(left: DependencyList, right: DependencyList) {
+  if (!left || !right || left.length !== right.length) return false
+  return left.every((value, index) => Object.is(value, right[index]))
+}
+
+const dispatcherRef = (React as any).__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.ReactCurrentDispatcher
+const activeHarnesses = new Set<HookHarness<any>>()
+const originalApiGet = apiClient.get
+
+class HookHarness<T> {
+  value!: T
+  private readonly cells: HookCell[] = []
+  private readonly pendingEffects: Array<{ index: number; effect: EffectCallback; deps: DependencyList }> = []
+  private cursor = 0
+  private dirty = false
+  private flushing = false
+  private mounted = false
+
+  private readonly dispatcher = {
+    useState: (initial: unknown) => this.useState(initial),
+    useRef: (initial: unknown) => this.useRef(initial),
+    useMemo: (factory: () => unknown, deps: DependencyList) => this.useMemo(factory, deps),
+    useCallback: (callback: unknown, deps: DependencyList) => this.useMemo(() => callback, deps),
+    useEffect: (effect: EffectCallback, deps: DependencyList) => this.useEffect(effect, deps),
+  }
+
+  constructor(private readonly renderHook: () => T) {}
+
+  mount() {
+    this.mounted = true
+    activeHarnesses.add(this)
+    this.requestRender()
+  }
+
+  update() {
+    this.requestRender()
+  }
+
+  unmount() {
+    if (!this.mounted) return
+    this.mounted = false
+    activeHarnesses.delete(this)
+    for (const cell of this.cells) {
+      if (cell?.kind === 'effect') cell.cleanup?.()
+    }
+  }
+
+  private requestRender() {
+    if (!this.mounted) return
+    this.dirty = true
+    if (!this.flushing) this.flush()
+  }
+
+  private flush() {
+    this.flushing = true
+    let passes = 0
+    try {
+      while (this.dirty) {
+        if (++passes > 50) throw new Error('hook harness exceeded render limit')
+        this.dirty = false
+        this.cursor = 0
+        this.pendingEffects.length = 0
+        const previousDispatcher = dispatcherRef.current
+        dispatcherRef.current = this.dispatcher
+        try {
+          this.value = this.renderHook()
+        } finally {
+          dispatcherRef.current = previousDispatcher
+        }
+        this.flushEffects()
+      }
+    } finally {
+      this.flushing = false
+    }
+  }
+
+  private flushEffects() {
+    for (const pending of this.pendingEffects) {
+      const previous = this.cells[pending.index]
+      if (previous?.kind === 'effect') previous.cleanup?.()
+      const next: HookCell = { kind: 'effect', deps: pending.deps }
+      this.cells[pending.index] = next
+      const cleanup = pending.effect()
+      if (typeof cleanup === 'function') next.cleanup = cleanup
+    }
+  }
+
+  private useState(initial: unknown) {
+    const index = this.cursor++
+    let cell = this.cells[index]
+    if (!cell) {
+      const stateCell: Extract<HookCell, { kind: 'state' }> = {
+        kind: 'state',
+        value: typeof initial === 'function' ? (initial as () => unknown)() : initial,
+        setter: (next) => {
+          const nextValue = typeof next === 'function'
+            ? (next as (current: unknown) => unknown)(stateCell.value)
+            : next
+          if (Object.is(nextValue, stateCell.value)) return
+          stateCell.value = nextValue
+          this.requestRender()
+        },
+      }
+      cell = stateCell
+      this.cells[index] = cell
+    }
+    if (cell.kind !== 'state') throw new Error(`hook ${index} changed type`)
+    return [cell.value, cell.setter]
+  }
+
+  private useRef(initial: unknown) {
+    const index = this.cursor++
+    let cell = this.cells[index]
+    if (!cell) {
+      cell = { kind: 'ref', value: { current: initial } }
+      this.cells[index] = cell
+    }
+    if (cell.kind !== 'ref') throw new Error(`hook ${index} changed type`)
+    return cell.value
+  }
+
+  private useMemo(factory: () => unknown, deps: DependencyList) {
+    const index = this.cursor++
+    let cell = this.cells[index]
+    if (!cell || cell.kind !== 'memo' || !dependenciesEqual(cell.deps, deps)) {
+      cell = { kind: 'memo', value: factory(), deps }
+      this.cells[index] = cell
+    }
+    return cell.value
+  }
+
+  private useEffect(effect: EffectCallback, deps: DependencyList) {
+    const index = this.cursor++
+    const cell = this.cells[index]
+    if (cell?.kind === 'effect' && dependenciesEqual(cell.deps, deps)) return
+    this.pendingEffects.push({ index, effect, deps })
+  }
+}
+
+afterEach(() => {
+  for (const harness of [...activeHarnesses]) harness.unmount()
+  apiClient.get = originalApiGet
+})
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
+async function flushPromises() {
+  for (let index = 0; index < 12; index += 1) await Promise.resolve()
+}
+
+function chapterSourceView(projectId: number, modelId: number) {
+  return {
+    ok: true as const,
+    source: {
+      version: 'chapter_generation_source_v1' as const,
+      active: 'model' as const,
+      model: { model_id: modelId },
+    },
+    fingerprint: `sha256:${String(projectId).repeat(64).slice(0, 64)}`,
+    locked: false,
+    display: { active: 'model' as const, model_id: modelId, mcp: null },
+  }
+}
+
+function installWorkspaceApi(sources: Map<number, unknown | Promise<unknown>>, onSourceGet?: (projectId: number) => void) {
+  apiClient.get = mock(async (url: string) => {
+    const projectId = Number(url.match(/\/novel\/projects\/(\d+)/)?.[1] || 0)
+    if (url.endsWith('/chapter-generation-source')) {
+      onSourceGet?.(projectId)
+      return { data: await sources.get(projectId) }
+    }
+    if (url === '/models') {
+      return { data: [
+        { id: 9, is_favorite: true },
+        { id: 217 },
+        { id: 301 },
+      ] }
+    }
+    if (url === '/novel/runs' || url.endsWith('/worldbuilding') || url.endsWith('/characters')
+      || url.endsWith('/outlines') || url.endsWith('/chapters') || url.endsWith('/reviews')) {
+      return { data: [] }
+    }
+    if (url.endsWith('/pipeline')) return { data: null }
+    if (/^\/novel\/projects\/\d+$/.test(url)) return { data: { id: projectId, title: `Project ${projectId}` } }
+    throw new Error(`unexpected workspace GET: ${url}`)
+  }) as any
+}
+
+function mountWorkspace(projectId: number) {
+  let props = {
+    projectId,
+    chapterSearch: '',
+    chapterStatusFilter: 'all' as const,
+    chapterSortMode: 'chapter_no_asc' as const,
+  }
+  const harness = new HookHarness(() => useNovelWorkspaceData(props))
+  harness.mount()
+  return {
+    harness,
+    switchProject(nextProjectId: number) {
+      props = { ...props, projectId: nextProjectId }
+      harness.update()
+    },
+  }
+}
+
 describe('novel workspace model selector', () => {
   test('falls back when the currently selected model is no longer returned by the model list', () => {
     const models = [
@@ -32,6 +257,120 @@ describe('novel workspace model selector', () => {
   test('keeps the selected model while it is still available and clears empty lists', () => {
     expect(resolveSelectedWorkspaceModelId(2, [{ id: 2 }, { id: 3, is_favorite: true }])).toBe(2)
     expect(resolveSelectedWorkspaceModelId(2, [])).toBeUndefined()
+  })
+})
+
+describe('novel workspace authoritative chapter source lifecycle', () => {
+  test('does not let project A late initial source overwrite project B', async () => {
+    const projectA = deferred<unknown>()
+    installWorkspaceApi(new Map([
+      [1, projectA.promise],
+      [2, chapterSourceView(2, 301)],
+    ]))
+    const workspace = mountWorkspace(1)
+    await flushPromises()
+
+    workspace.switchProject(2)
+    await flushPromises()
+    expect((workspace.harness.value as any).chapterGenerationSourceAuthority.source.source.model.model_id).toBe(301)
+    expect((workspace.harness.value as any).selectedModelId).toBe(301)
+
+    projectA.resolve(chapterSourceView(1, 217))
+    await flushPromises()
+    expect((workspace.harness.value as any).chapterGenerationSourceAuthority.source.source.model.model_id).toBe(301)
+    expect((workspace.harness.value as any).selectedModelId).toBe(301)
+  })
+
+  test('invalidates an earlier same-project initial GET token when a mutation begins', async () => {
+    const source = deferred<unknown>()
+    installWorkspaceApi(new Map([[1, source.promise]]))
+    const workspace = mountWorkspace(1)
+    await flushPromises()
+
+    const token = (workspace.harness.value as any).beginChapterSourceOperation()
+    source.resolve(chapterSourceView(1, 217))
+    await flushPromises()
+
+    expect((workspace.harness.value as any).chapterGenerationSourceAuthority)
+      .toEqual({ source: null, authorityUnknown: false, reconciliationRequired: false, diagnostic: null })
+    expect(() => (workspace.harness.value as any).assertChapterSourceOperationCurrent(token)).not.toThrow()
+    expect((workspace.harness.value as any).selectedProject?.id).toBe(1)
+  })
+
+  test('stored model id wins over both the previous project selection and an in-flight local selection', async () => {
+    const projectB = deferred<unknown>()
+    installWorkspaceApi(new Map([
+      [1, chapterSourceView(1, 217)],
+      [2, projectB.promise],
+    ]))
+    const workspace = mountWorkspace(1)
+    await flushPromises()
+    expect((workspace.harness.value as any).selectedModelId).toBe(217)
+
+    workspace.switchProject(2)
+    await flushPromises()
+    ;(workspace.harness.value as any).setSelectedModelId(9)
+    expect((workspace.harness.value as any).selectedModelId).toBe(9)
+    projectB.resolve(chapterSourceView(2, 301))
+    await flushPromises()
+
+    expect((workspace.harness.value as any).selectedModelId).toBe(301)
+  })
+
+  test('enters the new project fence before clearing old source or issuing its GET', async () => {
+    let workspace: ReturnType<typeof mountWorkspace>
+    let projectAToken: any
+    let oldTokenWasStaleAtProjectBGet = false
+    let sourceAtProjectBGet: number | undefined
+    installWorkspaceApi(new Map([
+      [1, chapterSourceView(1, 217)],
+      [2, chapterSourceView(2, 301)],
+    ]), projectId => {
+      if (projectId !== 2) return
+      sourceAtProjectBGet = (workspace.harness.value as any)
+        .chapterGenerationSourceAuthority.source.source.model.model_id
+      try {
+        ;(workspace.harness.value as any).assertChapterSourceOperationCurrent(projectAToken)
+      } catch {
+        oldTokenWasStaleAtProjectBGet = true
+      }
+    })
+    workspace = mountWorkspace(1)
+    await flushPromises()
+    projectAToken = (workspace.harness.value as any).beginChapterSourceOperation()
+
+    workspace.switchProject(2)
+    await flushPromises()
+
+    expect(oldTokenWasStaleAtProjectBGet).toBe(true)
+    expect(sourceAtProjectBGet).toBe(217)
+    expect((workspace.harness.value as any).chapterGenerationSourceAuthority.source.source.model.model_id).toBe(301)
+  })
+
+  test('invalidates captured source operation tokens on unmount', async () => {
+    installWorkspaceApi(new Map([[1, chapterSourceView(1, 217)]]))
+    const workspace = mountWorkspace(1)
+    await flushPromises()
+    const assertCurrent = (workspace.harness.value as any).assertChapterSourceOperationCurrent
+    const token = (workspace.harness.value as any).beginChapterSourceOperation()
+
+    workspace.harness.unmount()
+
+    expect(() => assertCurrent(token)).toThrow()
+  })
+
+  test('invalidates the previous project fence without creating a project-zero token', async () => {
+    installWorkspaceApi(new Map([[1, chapterSourceView(1, 217)]]))
+    const workspace = mountWorkspace(1)
+    await flushPromises()
+    const token = (workspace.harness.value as any).beginChapterSourceOperation()
+
+    workspace.switchProject(0)
+    await flushPromises()
+
+    expect(() => (workspace.harness.value as any).assertChapterSourceOperationCurrent(token)).toThrow()
+    expect(() => (workspace.harness.value as any).beginChapterSourceOperation()).toThrow()
+    expect((workspace.harness.value as any).chapterGenerationSourceAuthority.source).toBeNull()
   })
 })
 

@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test'
 import {
   bindingFingerprint,
   buildSourcePayload,
-  buildTemporaryModelOverride,
   canSaveGenerationSource,
   filterKeysForServer,
   isCompleteMcpSource,
@@ -61,27 +60,23 @@ describe('project MCP generation source model', () => {
     })).toBe('原始失败消息')
   })
 
-  test('builds explicit model and complete MCP source payloads', () => {
-    expect(buildSourcePayload({ type: 'model' })).toEqual({
-      source: { version: 'prose_generation_source_v1', type: 'model' },
-    })
+  test('builds a provider-neutral MCP binding payload without an active source record', () => {
     expect(buildSourcePayload({ type: 'mcp', serverId: 'buda', keyId: 3, adapterId: 'buda', agentId: 'agent_1' })).toEqual({
-      source: {
-        version: 'prose_generation_source_v1',
-        type: 'mcp',
-        mcp: { server_id: 'buda', key_id: 3, adapter_id: 'buda', agent_id: 'agent_1', model: '' },
-      },
+      mcp: { server_id: 'buda', key_id: 3, adapter_id: 'buda', agent_id: 'agent_1', model: '' },
     })
-    expect(buildSourcePayload({
+    const payload = buildSourcePayload({
       type: 'mcp',
       serverId: 'buda',
       keyId: 3,
       adapterId: 'buda',
       agentId: 'agent_1',
       model: '  model-x  ',
-    })).toMatchObject({
-      source: { type: 'mcp', mcp: { model: 'model-x' } },
     })
+    expect(payload).toEqual({
+      mcp: { server_id: 'buda', key_id: 3, adapter_id: 'buda', agent_id: 'agent_1', model: 'model-x' },
+    })
+    expect(payload).not.toHaveProperty('source')
+    expect(payload).not.toHaveProperty('active')
   })
 
   test('requires a complete tested binding before MCP save', () => {
@@ -102,7 +97,7 @@ describe('project MCP generation source model', () => {
     expect(filterKeysForServer(keys, 'buda').map(item => item.id)).toEqual([1])
   })
 
-  test('hydrates saved bindings and exposes the explicit temporary model override', () => {
+  test('hydrates saved bindings without exposing a temporary model override helper', () => {
     expect(sourceFormFromConfig({
       type: 'mcp',
       mcp: { server_id: 'buda', key_id: 8, adapter_id: 'buda', agent_id: 'agent-x' },
@@ -112,7 +107,7 @@ describe('project MCP generation source model', () => {
       mcp: { server_id: 'buda', key_id: 8, adapter_id: 'buda', agent_id: 'agent-x', model: ' model-x ' },
     })).toMatchObject({ model: 'model-x' })
     expect(sourceFormFromConfig(undefined)).toEqual({ type: 'model', serverId: '', keyId: 0, adapterId: '', agentId: '', model: '' })
-    expect(buildTemporaryModelOverride()).toEqual({ generation_source_override: 'model' })
+    expect(Reflect.get(generationSourceModel, 'buildTemporaryModelOverride')).toBeUndefined()
   })
 
   test('includes the Buda model in the tested binding identity', () => {

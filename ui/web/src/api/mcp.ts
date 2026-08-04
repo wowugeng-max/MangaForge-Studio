@@ -75,6 +75,51 @@ export type ProseGenerationSourceConfig =
   | { version: 'prose_generation_source_v1'; type: 'model' }
   | { version: 'prose_generation_source_v1'; type: 'mcp'; mcp: { server_id: string; key_id: number; adapter_id: string; agent_id: string; model?: string } }
 
+export type ChapterGenerationSourceState = {
+  version: 'chapter_generation_source_v1'
+  active: 'model' | 'mcp'
+  model: { model_id?: number }
+  mcp?: {
+    server_id: string
+    key_id: number
+    adapter_id: string
+    agent_id: string
+    model: string
+  }
+}
+
+export type ChapterGenerationSourceView = {
+  ok: true
+  source: ChapterGenerationSourceState
+  fingerprint: string
+  locked: boolean
+  display: {
+    active: 'model' | 'mcp'
+    model_id: number | null
+    mcp: NonNullable<ChapterGenerationSourceState['mcp']> | null
+  }
+}
+
+type ChapterMcpBinding = NonNullable<ChapterGenerationSourceState['mcp']>
+
+export const chapterSourceApi = {
+  get: async (projectId: number) => (
+    await apiClient.get<ChapterGenerationSourceView>(`/novel/projects/${projectId}/chapter-generation-source`)
+  ).data,
+  activate: async (projectId: number, active: 'model' | 'mcp') => (
+    await apiClient.post<ChapterGenerationSourceView>(`/novel/projects/${projectId}/chapter-generation-source/activate`, { active })
+  ).data,
+  saveModel: async (projectId: number, modelId: number) => (
+    await apiClient.put<ChapterGenerationSourceView>(`/novel/projects/${projectId}/chapter-generation-source/model`, { model_id: modelId })
+  ).data,
+  testMcp: async (projectId: number, mcp: ChapterMcpBinding) => (
+    await apiClient.post<{ ok: true; validation: Record<string, unknown> }>(`/novel/projects/${projectId}/chapter-generation-source/mcp/test`, { mcp })
+  ).data,
+  saveMcp: async (projectId: number, mcp: ChapterMcpBinding) => (
+    await apiClient.put<ChapterGenerationSourceView>(`/novel/projects/${projectId}/chapter-generation-source/mcp`, { mcp })
+  ).data,
+}
+
 export const mcpApi = {
   listQuarantines: () => apiClient.get<McpAgentQuarantine[]>('/mcp/quarantines'),
   reconcileQuarantine: (id: string) => apiClient.post<McpQuarantineReconciliation>(`/mcp/quarantines/${encodeURIComponent(id)}/reconcile`),

@@ -1,0 +1,417 @@
+import { describe, expect, test } from 'bun:test'
+
+async function loadModel() {
+  return import('./chapterGenerationSourceModel').catch(() => null)
+}
+
+function binding(overrides: Record<string, unknown> = {}) {
+  return {
+    server_id: 'buda',
+    key_id: 3,
+    adapter_id: 'buda',
+    agent_id: 'agent-1',
+    model: '',
+    ...overrides,
+  }
+}
+
+function rawModelView(modelId = 217) {
+  return {
+    ok: true,
+    source: {
+      version: 'chapter_generation_source_v1',
+      active: 'model',
+      model: { model_id: modelId },
+    },
+    fingerprint: `sha256:${'a'.repeat(64)}`,
+    locked: false,
+    display: { active: 'model', model_id: modelId, mcp: null },
+  }
+}
+
+function rawMcpView(modelId = 217) {
+  const mcp = binding()
+  return {
+    ok: true,
+    source: {
+      version: 'chapter_generation_source_v1',
+      active: 'mcp',
+      model: { model_id: modelId },
+      mcp,
+    },
+    fingerprint: `sha256:${'b'.repeat(64)}`,
+    locked: false,
+    display: { active: 'mcp', model_id: modelId, mcp },
+  }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
+async function flushPromises() {
+  await Promise.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
+describe('authoritative chapter generation source view', () => {
+  test('hydrates the exact active MCP tuple while retaining the stored model id', async () => {
+    const model = await loadModel()
+    expect(model).not.toBeNull()
+    if (!model) return
+
+    const input = rawMcpView()
+    const view = model.normalizeChapterSourceView(input)
+
+    expect(view).toEqual(input)
+    expect(view).not.toBe(input)
+    expect(view.source).not.toBe(input.source)
+    expect(view.source.model).not.toBe(input.source.model)
+    expect(view.source.model.model_id).toBe(217)
+    expect(view.source.mcp).toEqual(binding())
+    expect(view.source.mcp).not.toBe(input.source.mcp)
+    expect(view.display).not.toBe(input.display)
+    expect(view.display.mcp).toEqual(binding())
+    expect(view.display.mcp).not.toBe(input.display.mcp)
+  })
+
+  test('normalizes a false lock and accepts an omitted retained model id', async () => {
+    const model = await loadModel()
+    expect(model).not.toBeNull()
+    if (!model) return
+    const input = rawModelView() as any
+    input.source.model = {}
+    input.display.model_id = null
+    input.locked = 'truthy-but-not-locked'
+
+    expect(model.normalizeChapterSourceView(input)).toMatchObject({
+      locked: false,
+      source: { model: {} },
+      display: { model_id: null },
+    })
+  })
+
+  test('rejects wrong versions, ambiguous active states, invalid model ids and invalid fingerprints', async () => {
+    const model = await loadModel()
+    expect(model).not.toBeNull()
+    if (!model) return
+
+    const invalid = [
+      { mutate: (view: any) => { view.source.version = 'chapter_generation_source_v0' }, message: '版本' },
+      { mutate: (view: any) => { view.source.active = 'both'; view.display.active = 'both' }, message: '活动状态' },
+      { mutate: (view: any) => { view.source.model.model_id = 0; view.display.model_id = 0 }, message: '模型' },
+      { mutate: (view: any) => { view.source.model.model_id = 1.5; view.display.model_id = 1.5 }, message: '模型' },
+      { mutate: (view: any) => { view.fingerprint = `sha256:${'A'.repeat(64)}` }, message: '指纹' },
+      { mutate: (view: any) => { view.fingerprint = `sha256:${'a'.repeat(63)}` }, message: '指纹' },
+    ]
+    for (const fixture of invalid) {
+      const view = structuredClone(rawModelView())
+      fixture.mutate(view)
+      expect(() => model.normalizeChapterSourceView(view)).toThrow(fixture.message)
+    }
+  })
+
+  test('rejects an active MCP without a binding and every incomplete or ill-typed binding', async () => {
+    const model = await loadModel()
+    expect(model).not.toBeNull()
+    if (!model) return
+
+    const missing = structuredClone(rawMcpView()) as any
+    delete missing.source.mcp
+    missing.display.mcp = null
+    expect(() => model.normalizeChapterSourceView(missing)).toThrow('活动 MCP 绑定缺失')
+
+    const invalidBindings = [
+      { server_id: '' },
+      { key_id: 0 },
+      { key_id: 1.5 },
+      { adapter_id: '' },
+      { agent_id: '' },
+      { model: 1 },
+    ]
+    for (const override of invalidBindings) {
+      const invalid = structuredClone(rawMcpView()) as any
+      Object.assign(invalid.source.mcp, override)
+      Object.assign(invalid.display.mcp, override)
+      expect(() => model.normalizeChapterSourceView(invalid)).toThrow('章节 MCP 绑定无效')
+    }
+  })
+
+  test('rejects inconsistent display records instead of losing stable source binding ids', async () => {
+    const model = await loadModel()
+    expect(model).not.toBeNull()
+    if (!model) return
+
+    const invalid = structuredClone(rawMcpView()) as any
+    invalid.display.mcp = { ...invalid.display.mcp, agent_id: 'different-agent' }
+    expect(() => model.normalizeChapterSourceView(invalid)).toThrow('章节来源展示无效')
+
+    const input = rawMcpView()
+    const normalized = model.normalizeChapterSourceView(input)
+    const enriched = { ...normalized.display.mcp, server_name: 'metadata only' }
+    expect(enriched.server_name).toBe('metadata only')
+    expect(normalized.source.mcp).toEqual(binding())
+  })
+
+  test('fails closed without exposing hostile shape inspection errors', async () => {
+    const model = await loadModel()
+    expect(model).not.toBeNull()
+    if (!model) return
+    const privateDetail = '章节 private proxy detail'
+    const hostile = new Proxy({}, {
+      ownKeys() {
+        throw new Error(privateDetail)
+      },
+    })
+
+    let failure: unknown
+    try {
+      model.normalizeChapterSourceView(hostile)
+    } catch (error) {
+      failure = error
+    }
+    expect(failure).toBeInstanceOf(Error)
+    expect((failure as Error).message).toBe('章节来源响应无效')
+    expect((failure as Error).message).not.toContain(privateDetail)
+  })
+})
+
+describe('chapter source mutation authority', () => {
+  test('rethrows a definite HTTP mutation failure and performs zero authority GETs', async () => {
+    const model = await loadModel()
+    expect(model).not.toBeNull()
+    if (!model) return
+    const current = model.normalizeChapterSourceView(rawModelView())
+    const expected = { response: { status: 409, data: { error_code: 'GENERATION_SOURCE_BUSY' } } }
+    let reads = 0
+
+    await expect(model.commitConfirmedSource({
+      current,
+      request: async () => { throw expected },
+      readAuthoritative: async () => {
+        reads += 1
+        return model.normalizeChapterSourceView(rawMcpView())
+      },
+      assertCurrent: () => {},
+    })).rejects.toBe(expected)
+    expect(reads).toBe(0)
+  })
+
+  test('reconciles one no-response mutation failure with exactly one authoritative GET and no mutation retry', async () => {
+    const model = await loadModel()
+    expect(model).not.toBeNull()
+    if (!model) return
+    const current = model.normalizeChapterSourceView(rawModelView())
+    const committed = model.normalizeChapterSourceView(rawMcpView())
+    let mutationCalls = 0
+    let reads = 0
+
+    const result = await model.commitConfirmedSource({
+      current,
+      request: async () => {
+        mutationCalls += 1
+        throw Object.assign(new Error('socket reset'), { code: 'ECONNRESET' })
+      },
+      readAuthoritative: async () => {
+        reads += 1
+        return committed
+      },
+      assertCurrent: () => {},
+    })
+
+    expect(result).toEqual({ previous: current, source: committed, reconciled: true })
+    expect({ mutationCalls, reads }).toEqual({ mutationCalls: 1, reads: 1 })
+  })
+
+  test('reports authority unknown with a fixed public message and diagnostic-only underlying causes', async () => {
+    const model = await loadModel()
+    expect(model).not.toBeNull()
+    if (!model) return
+    const current = model.normalizeChapterSourceView(rawModelView())
+    const mutationError = new Error('private mutation transport detail')
+    const readError = new Error('private authority read detail')
+    let reads = 0
+
+    let failure: any
+    try {
+      await model.commitConfirmedSource({
+        current,
+        request: async () => { throw mutationError },
+        readAuthoritative: async () => { reads += 1; throw readError },
+        assertCurrent: () => {},
+      })
+    } catch (error) {
+      failure = error
+    }
+
+    expect(failure).toBeInstanceOf(model.ChapterSourceAuthorityUnknownError)
+    expect(failure).toMatchObject({
+      code: 'CHAPTER_SOURCE_AUTHORITY_UNKNOWN',
+      previous: current,
+      mutationTransportError: mutationError,
+      authorityReadError: readError,
+      message: '章节来源权威状态暂时无法确认',
+    })
+    expect(reads).toBe(1)
+    const formatted = model.formatChapterSourceFailure(failure)
+    expect(formatted).toBe('章节来源权威状态暂时无法确认')
+    expect(formatted).not.toContain('private mutation')
+    expect(formatted).not.toContain('private authority')
+  })
+
+  test('performs one explicit authority refresh per call, keeps the same unknown state on failure, and clears only on success', async () => {
+    const model = await loadModel()
+    expect(model).not.toBeNull()
+    if (!model) return
+    const previous = model.normalizeChapterSourceView(rawModelView())
+    const diagnostic = new model.ChapterSourceAuthorityUnknownError(previous, new Error('mutation'), new Error('read'))
+    const unknown = model.authorityUnknownState(previous, diagnostic)
+    let reads = 0
+
+    const stillUnknown = await model.refreshChapterSourceAuthority({
+      current: unknown,
+      readAuthoritative: async () => { reads += 1; throw new Error('still offline') },
+      assertCurrent: () => {},
+    })
+    expect(reads).toBe(1)
+    expect(stillUnknown.state).toBe(unknown)
+    expect(stillUnknown.readError).toBeInstanceOf(Error)
+
+    const recovered = model.normalizeChapterSourceView(rawMcpView())
+    const refreshed = await model.refreshChapterSourceAuthority({
+      current: stillUnknown.state,
+      readAuthoritative: async () => { reads += 1; return recovered },
+      assertCurrent: () => {},
+    })
+    expect(reads).toBe(2)
+    expect(refreshed).toEqual({ state: model.confirmedAuthorityState(recovered), readError: null })
+  })
+
+  test('classifies only failures with no HTTP response or status as no-response transport errors', async () => {
+    const model = await loadModel()
+    expect(model).not.toBeNull()
+    if (!model) return
+
+    expect(model.isNoResponseTransportError(new Error('network down'))).toBe(true)
+    expect(model.isNoResponseTransportError({ code: 'ECONNRESET', request: {} })).toBe(true)
+    expect(model.isNoResponseTransportError({ response: { status: 500 } })).toBe(false)
+    expect(model.isNoResponseTransportError({ response: {} })).toBe(false)
+    expect(model.isNoResponseTransportError({ status: 0 })).toBe(false)
+    expect(model.isNoResponseTransportError({ status: 503 })).toBe(false)
+    expect(model.isNoResponseTransportError(null)).toBe(false)
+  })
+
+  test('formats stable source errors without recommending a fallback', async () => {
+    const model = await loadModel()
+    expect(model).not.toBeNull()
+    if (!model) return
+
+    for (const code of ['GENERATION_SOURCE_BUSY', 'CHAPTER_MODEL_REQUIRED', 'MCP_BINDING_INVALID']) {
+      const message = model.formatChapterSourceFailure({ response: { data: { error_code: code, error: `private ${code}` } } })
+      expect(message.length).toBeGreaterThan(0)
+      expect(message).not.toContain('fallback')
+      expect(message).not.toContain('回退')
+      expect(message).not.toContain('切换模型')
+      expect(message).not.toContain('自动重试')
+    }
+    expect(model.formatChapterSourceFailure({
+      response: { data: { code: 'GENERATION_SOURCE_BUSY', error: 'private busy detail' } },
+    })).toContain('正在被生成任务使用')
+    expect(model.formatChapterSourceFailure({
+      response: { data: { code: 'CHAPTER_MODEL_REQUIRED', error: 'private model detail' } },
+    })).toContain('有效的章节模型')
+  })
+})
+
+describe('chapter source project/load/operation fence', () => {
+  test('uses project, load, and operation epochs and freezes every token', async () => {
+    const model = await loadModel()
+    expect(model).not.toBeNull()
+    if (!model) return
+    const fence = model.createChapterSourceOperationFence()
+    fence.enterProject(1, 101)
+    const initial = fence.begin(1, 101)
+    expect(Object.isFrozen(initial)).toBe(true)
+    expect(initial).toEqual({ projectId: 1, loadEpoch: 101, operationEpoch: 2 })
+    fence.assertCurrent(initial)
+
+    const mutation = fence.begin(1, 101)
+    expect(() => fence.assertCurrent(initial)).toThrow(model.StaleChapterSourceOperationError)
+    fence.assertCurrent(mutation)
+    expect(() => fence.begin(1, 102)).toThrow(model.StaleChapterSourceOperationError)
+    fence.enterProject(2, 102)
+    expect(() => fence.assertCurrent(mutation)).toThrow(model.StaleChapterSourceOperationError)
+    fence.unmount()
+    expect(() => fence.begin(2, 102)).toThrow(model.StaleChapterSourceOperationError)
+  })
+
+  test.each(['mutation_success', 'reconcile_success', 'reconcile_failure', 'definite_http_error'] as const)(
+    'fences project A %s after switching to B before any setter, error, or settings side effect',
+    async (scenario) => {
+      const model = await loadModel()
+      expect(model).not.toBeNull()
+      if (!model) return
+      const fence = model.createChapterSourceOperationFence()
+      fence.enterProject(1, 101)
+      const token = fence.begin(1, 101)
+      const current = model.normalizeChapterSourceView(rawModelView(217))
+      const committed = model.normalizeChapterSourceView(rawMcpView(217))
+      const mutation = deferred<any>()
+      const authorityRead = deferred<any>()
+      const ui = {
+        authority: model.confirmedAuthorityState(current),
+        error: '',
+        disabled: false,
+        settingsOpen: false,
+      }
+      let readCalls = 0
+      const operation = model.commitConfirmedSource({
+        current,
+        request: () => mutation.promise,
+        readAuthoritative: () => { readCalls += 1; return authorityRead.promise },
+        assertCurrent: () => fence.assertCurrent(token),
+      }).then((result: any) => {
+        fence.assertCurrent(token)
+        ui.authority = model.confirmedAuthorityState(result.source)
+        ui.disabled = true
+        return result
+      }).catch((error: unknown) => {
+        if (error instanceof model.StaleChapterSourceOperationError) throw error
+        fence.assertCurrent(token)
+        ui.error = model.formatChapterSourceFailure(error)
+        ui.settingsOpen = true
+        throw error
+      })
+
+      if (scenario === 'reconcile_success' || scenario === 'reconcile_failure') {
+        mutation.reject(Object.assign(new Error('socket reset'), { code: 'ECONNRESET' }))
+        await flushPromises()
+        expect(readCalls).toBe(1)
+      }
+
+      const projectB = {
+        authority: model.confirmedAuthorityState(model.normalizeChapterSourceView(rawModelView(301))),
+        error: '',
+        disabled: false,
+        settingsOpen: false,
+      }
+      fence.enterProject(2, 102)
+      Object.assign(ui, projectB)
+
+      if (scenario === 'mutation_success') mutation.resolve(committed)
+      else if (scenario === 'reconcile_success') authorityRead.resolve(committed)
+      else if (scenario === 'reconcile_failure') authorityRead.reject(new Error('authority read failed'))
+      else mutation.reject({ response: { status: 409, data: { error_code: 'GENERATION_SOURCE_BUSY' } } })
+
+      await expect(operation).rejects.toBeInstanceOf(model.StaleChapterSourceOperationError)
+      expect(ui).toEqual(projectB)
+    },
+  )
+})

@@ -1,4 +1,4 @@
-import type { McpPublicKey, ProseGenerationSourceConfig } from '../../api/mcp'
+import type { ChapterGenerationSourceState, McpPublicKey, ProseGenerationSourceConfig } from '../../api/mcp'
 
 export type GenerationSourceForm = {
   type: 'model' | 'mcp'
@@ -43,22 +43,17 @@ export function isCompleteMcpSource(form: GenerationSourceForm) {
     && Boolean(String(form.agentId || '').trim())
 }
 
-export function buildSourcePayload(form: GenerationSourceForm): { source: ProseGenerationSourceConfig } {
-  if (form.type === 'model') {
-    return { source: { version: 'prose_generation_source_v1', type: 'model' } }
-  }
+export function buildSourcePayload(form: GenerationSourceForm): {
+  mcp: NonNullable<ChapterGenerationSourceState['mcp']>
+} {
   if (!isCompleteMcpSource(form)) throw new Error('MCP binding is incomplete')
   return {
-    source: {
-      version: 'prose_generation_source_v1',
-      type: 'mcp',
-      mcp: {
-        server_id: String(form.serverId),
-        key_id: Number(form.keyId),
-        adapter_id: String(form.adapterId),
-        agent_id: String(form.agentId),
-        model: String(form.model || '').trim(),
-      },
+    mcp: {
+      server_id: String(form.serverId),
+      key_id: Number(form.keyId),
+      adapter_id: String(form.adapterId),
+      agent_id: String(form.agentId),
+      model: String(form.model || '').trim(),
     },
   }
 }
@@ -93,10 +88,6 @@ export function canSaveGenerationSource(form: GenerationSourceForm, testedFinger
   return Boolean(current && current === testedFingerprint)
 }
 
-export function buildTemporaryModelOverride() {
-  return { generation_source_override: 'model' as const }
-}
-
 export function buildGenericReferenceConfigWritePayload<T extends Record<string, unknown>>(
   referenceConfig: T,
 ): Omit<T, 'prose_generation_source' | 'chapter_generation_source'> {
@@ -116,6 +107,8 @@ export function buildGenericReferenceConfigWritePayload<T extends Record<string,
         writable: true,
       })
     }
+    Reflect.deleteProperty(payload, 'prose_generation_source')
+    Reflect.deleteProperty(payload, 'chapter_generation_source')
     return payload as Omit<T, 'prose_generation_source' | 'chapter_generation_source'>
   } catch {
     throw new Error('无法安全读取通用参考配置')
