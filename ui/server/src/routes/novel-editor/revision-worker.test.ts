@@ -997,6 +997,25 @@ async function createThirtyChapterWorkerFixture(options: {
     buildStructuralSimilarityReport: () => ({}),
     buildReferenceMigrationDryPlan: () => ({}),
     diffTexts: () => ({}),
+    beginChapterTask: async (input: any) => ({
+      taskId: `manual-${input.chapter.id}`,
+      source: 'model',
+      modelId: input.requestedModelId,
+      fingerprint: 'manual-route-fixture',
+      contextVersion: 'manual-route-context',
+      provenance: () => ({}),
+      generateDraft: async () => { throw new Error('not used') },
+      assertCurrent: async () => {},
+      executeAgent: async (
+        _stage: string,
+        _responseContract: string,
+        agent: string,
+        project: any,
+        request: any,
+        agentOptions: any,
+      ) => executeAgent(agent, project, request, agentOptions),
+      close: async () => {},
+    }),
     executeAgent,
     updateStoryStateMachine: methods.updateStoryStateMachine,
   }
@@ -1456,6 +1475,9 @@ describe('durable editor revision worker', () => {
       buildStructuralSimilarityReport: () => ({}),
       buildReferenceMigrationDryPlan: () => ({}),
       diffTexts: () => ({}),
+      beginChapterTask: async () => {
+        throw new Error('manual chapter task is not used by lifecycle recovery')
+      },
       executeAgent: async (_agentId, _project, _context, options) => {
         const signal = options.signal!
         activeSignals.push(signal)

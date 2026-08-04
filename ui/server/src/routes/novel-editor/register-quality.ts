@@ -37,114 +37,149 @@ import {
   focusDeliveryRiskBriefForRevision,
   isRevisionOutputTruncated,
   loadChapterBundle,
+  prepareProseQualityReviewContext,
   shouldRetryRevisionPatch,
+  withChapterTaskExecution,
 } from './builders'
 import { revisionTextHash } from './revision-candidate-admission'
 import { applySingleChapterStoryState, prepareSingleChapterStoryState } from './single-chapter-story-state'
 
 export function registerNovelEditorQualityRoutes(app: Express, ctx: EditorRoutesContext) {
   app.post('/api/novel/chapters/:chapterId/story-state-sync', async (req, res) => {
+    let stageFailure: unknown
     try {
       const loaded = await loadChapterBundle(ctx, Number(req.body.project_id || req.query.project_id || 0), Number(req.params.chapterId))
       if ('error' in loaded) return res.status(loaded.status || 500).json({ error: loaded.error })
-      const { activeWorkspace, project, chapter, reviews } = loaded
+      const { activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews } = loaded
+      const contextPackage = await ctx.buildChapterContextPackage(
+        activeWorkspace,
+        project,
+        chapter,
+        chapters,
+        worldbuilding,
+        characters,
+        outlines,
+        reviews,
+      )
       const modelId = ctx.getStageModelId(project, 'review', Number(req.body.model_id || 0) || undefined)
-      const beforeBrief = buildChapterDeliveryRiskBrief(chapter, reviews)
-      const receipt = {
-        source_run_id: null,
-        candidate_hash: revisionTextHash(String(chapter.chapter_text || '')),
-        chapter_id: chapter.id,
-      }
-      const storyStateUpdate = await prepareSingleChapterStoryState(ctx, {
-        workspace: activeWorkspace,
-        projectId: project.id,
-        chapterId: chapter.id,
-        modelId,
-        receipt,
-      }).then(preparedStoryState => applySingleChapterStoryState(ctx, {
-          workspace: activeWorkspace,
-          projectId: project.id,
-          chapterId: chapter.id,
-          modelId,
-          receipt,
-          prepared: preparedStoryState.prepared,
-        }))
-        .catch(error => ({ ok: false, error: String(error?.message || error) }))
-      if ((storyStateUpdate as any)?.ok === false) {
+      const signal = req.signal as AbortSignal | undefined
+      const responseBody = await withChapterTaskExecution(ctx, {
+        activeWorkspace,
+        project,
+        chapter,
+        contextPackage,
+        requestedModelId: modelId,
+        signal,
+      }, async chapterTaskExecution => {
+        const beforeBrief = buildChapterDeliveryRiskBrief(chapter, reviews)
+        const receipt = {
+          source_run_id: null,
+          candidate_hash: revisionTextHash(String(chapter.chapter_text || '')),
+          chapter_id: chapter.id,
+        }
+        let storyStateUpdate: any
+        try {
+          const preparedStoryState = await prepareSingleChapterStoryState(ctx, {
+            workspace: activeWorkspace,
+            projectId: project.id,
+            chapterId: chapter.id,
+            modelId,
+            receipt,
+            signal,
+            chapterTaskExecution,
+          })
+          storyStateUpdate = await applySingleChapterStoryState(ctx, {
+            workspace: activeWorkspace,
+            projectId: project.id,
+            chapterId: chapter.id,
+            modelId,
+            receipt,
+            prepared: preparedStoryState.prepared,
+            signal,
+            chapterTaskExecution,
+          })
+        } catch (error) {
+          stageFailure = error
+          const failedUpdate = { ok: false, error: String((error as any)?.message || error) }
+          await appendNovelRun(activeWorkspace, {
+            project_id: project.id,
+            run_type: 'story_state',
+            step_name: `chapter-${chapter.chapter_no}`,
+            status: 'failed',
+            input_ref: JSON.stringify({
+              chapter_id: chapter.id,
+              chapter_no: chapter.chapter_no,
+              source: req.body?.source || 'manual_story_state_sync',
+              source_review_id: req.body?.source_review_id || null,
+              source_run_id: receipt.source_run_id,
+              candidate_hash: receipt.candidate_hash,
+            }),
+            output_ref: JSON.stringify({ story_state_update: failedUpdate }),
+          })
+          throw error
+        }
+        const [freshChapters, postReviews] = await Promise.all([
+          listNovelChapters(activeWorkspace, project.id),
+          listNovelReviews(activeWorkspace, project.id),
+        ])
+        const freshChapter = freshChapters.find(item => item.id === chapter.id) || chapter
+        const afterBrief = buildChapterDeliveryRiskBrief(freshChapter, postReviews)
+        const convergenceReport = buildDeliveryRiskConvergenceReport({
+          chapter: freshChapter,
+          sourceReviewId: req.body?.source_review_id || null,
+          before: beforeBrief,
+          after: afterBrief,
+        })
+        const convergenceReview = await createNovelReview(activeWorkspace, {
+          project_id: project.id,
+          review_type: 'delivery_risk_convergence',
+          status: convergenceReport.status === 'cleared' || convergenceReport.status === 'improved' ? 'ok' : 'warn',
+          summary: `${convergenceReport.label}，残留 ${convergenceReport.residual_count}`,
+          issues: convergenceReport.next_actions,
+          payload: JSON.stringify({
+            chapter_id: freshChapter.id,
+            chapter_no: freshChapter.chapter_no,
+            source: req.body?.source || 'manual_story_state_sync',
+            delivery_risk_convergence: convergenceReport,
+            story_state_update: storyStateUpdate,
+          }),
+        })
         await appendNovelRun(activeWorkspace, {
           project_id: project.id,
           run_type: 'story_state',
           step_name: `chapter-${chapter.chapter_no}`,
-          status: 'failed',
+          status: 'success',
           input_ref: JSON.stringify({
             chapter_id: chapter.id,
             chapter_no: chapter.chapter_no,
             source: req.body?.source || 'manual_story_state_sync',
             source_review_id: req.body?.source_review_id || null,
-            source_run_id: receipt.source_run_id,
-            candidate_hash: receipt.candidate_hash,
           }),
-          output_ref: JSON.stringify({ story_state_update: storyStateUpdate }),
+          output_ref: JSON.stringify({
+            story_state_update: storyStateUpdate,
+            delivery_risk_convergence: convergenceReport,
+            delivery_risk_convergence_review_id: convergenceReview.id,
+          }),
         })
+        return {
+          ok: true,
+          chapter_id: chapter.id,
+          story_state_update: storyStateUpdate,
+          delivery_risk_convergence: convergenceReport,
+          delivery_risk_convergence_review: convergenceReview,
+        }
+      })
+      return res.json(responseBody)
+    } catch (error) {
+      if (stageFailure === error) {
+        const message = String((error as any)?.message || error)
         return res.status(502).json({
           ok: false,
-          chapter_id: chapter.id,
-          error: (storyStateUpdate as any).error,
-          story_state_update: storyStateUpdate,
+          error: message,
+          story_state_update: { ok: false, error: message },
         })
       }
-      const [freshChapters, postReviews] = await Promise.all([
-        listNovelChapters(activeWorkspace, project.id),
-        listNovelReviews(activeWorkspace, project.id),
-      ])
-      const freshChapter = freshChapters.find(item => item.id === chapter.id) || chapter
-      const afterBrief = buildChapterDeliveryRiskBrief(freshChapter, postReviews)
-      const convergenceReport = buildDeliveryRiskConvergenceReport({
-        chapter: freshChapter,
-        sourceReviewId: req.body?.source_review_id || null,
-        before: beforeBrief,
-        after: afterBrief,
-      })
-      const convergenceReview = await createNovelReview(activeWorkspace, {
-        project_id: project.id,
-        review_type: 'delivery_risk_convergence',
-        status: convergenceReport.status === 'cleared' || convergenceReport.status === 'improved' ? 'ok' : 'warn',
-        summary: `${convergenceReport.label}，残留 ${convergenceReport.residual_count}`,
-        issues: convergenceReport.next_actions,
-        payload: JSON.stringify({
-          chapter_id: freshChapter.id,
-          chapter_no: freshChapter.chapter_no,
-          source: req.body?.source || 'manual_story_state_sync',
-          delivery_risk_convergence: convergenceReport,
-          story_state_update: storyStateUpdate,
-        }),
-      })
-      await appendNovelRun(activeWorkspace, {
-        project_id: project.id,
-        run_type: 'story_state',
-        step_name: `chapter-${chapter.chapter_no}`,
-        status: 'success',
-        input_ref: JSON.stringify({
-          chapter_id: chapter.id,
-          chapter_no: chapter.chapter_no,
-          source: req.body?.source || 'manual_story_state_sync',
-          source_review_id: req.body?.source_review_id || null,
-        }),
-        output_ref: JSON.stringify({
-          story_state_update: storyStateUpdate,
-          delivery_risk_convergence: convergenceReport,
-          delivery_risk_convergence_review_id: convergenceReview.id,
-        }),
-      })
-      res.json({
-        ok: true,
-        chapter_id: chapter.id,
-        story_state_update: storyStateUpdate,
-        delivery_risk_convergence: convergenceReport,
-        delivery_risk_convergence_review: convergenceReview,
-      })
-    } catch (error) {
-      res.status(500).json({ error: String(error) })
+      return res.status(500).json({ error: String(error) })
     }
   })
 
@@ -153,7 +188,9 @@ export function registerNovelEditorQualityRoutes(app: Express, ctx: EditorRoutes
       const loaded = await loadChapterBundle(ctx, Number(req.body.project_id || req.query.project_id || 0), Number(req.params.chapterId))
       if ('error' in loaded) return res.status(loaded.status || 500).json({ error: loaded.error })
       const { activeWorkspace, project, chapter } = loaded
-      const quality = await createProseQualityReview(ctx, activeWorkspace, project, chapter, {
+      const signal = req.signal as AbortSignal | undefined
+      if (signal?.aborted) throw signal.reason || new Error('prose quality review aborted')
+      const qualityOptions = {
         model_id: req.body.model_id,
         source: req.body.source || 'manual_refresh',
         source_review_id: req.body.source_review_id || null,
@@ -161,17 +198,41 @@ export function registerNovelEditorQualityRoutes(app: Express, ctx: EditorRoutes
         candidate_hash: revisionTextHash(String(chapter.chapter_text || '')),
         current_chapter_only: true,
         max_tokens: 3000,
+        signal,
+      }
+      const preparedContext = await prepareProseQualityReviewContext(
+        ctx,
+        activeWorkspace,
+        project,
+        chapter,
+        qualityOptions,
+      )
+      const modelId = ctx.getStageModelId(project, 'review', Number(req.body.model_id || 0) || undefined)
+      const responseBody = await withChapterTaskExecution(ctx, {
+        activeWorkspace,
+        project,
+        chapter: preparedContext.alignedChapter,
+        contextPackage: preparedContext.contextPackage,
+        requestedModelId: modelId,
+        signal,
+      }, async chapterTaskExecution => {
+        const quality = await createProseQualityReview(ctx, activeWorkspace, project, preparedContext.alignedChapter, {
+          ...qualityOptions,
+          preparedContext,
+          chapterTaskExecution,
+        })
+        return {
+          ok: true,
+          review: quality.saved,
+          self_check: quality.review,
+          content_hash: quality.content_hash,
+          context_package: quality.contextPackage,
+          result: quality.result,
+        }
       })
-      res.json({
-        ok: true,
-        review: quality.saved,
-        self_check: quality.review,
-        content_hash: quality.content_hash,
-        context_package: quality.contextPackage,
-        result: quality.result,
-      })
+      return res.json(responseBody)
     } catch (error) {
-      res.status(500).json({ error: String(error) })
+      return res.status(500).json({ error: String(error) })
     }
   })
 

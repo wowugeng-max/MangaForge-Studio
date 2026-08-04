@@ -10,6 +10,7 @@ import { prepareStoryStateUpdate } from '../../novel-writing-service/service/sto
 import { revisionTextHash } from '../../novel/revision-hash'
 import { withEditorRevisionWorkerFence } from '../../novel/editor-revision-worker-fence'
 import type { EditorRoutesContext } from './builders'
+import type { ChapterTaskExecution } from '../../novel-writing-service/generation-source/types'
 
 export type SingleChapterStoryStateReceipt = {
   source_run_id: number | null
@@ -17,7 +18,7 @@ export type SingleChapterStoryStateReceipt = {
   chapter_id: number
 }
 
-type SingleChapterStoryStateInput = {
+export type SingleChapterStoryStateInput = {
   workspace: string
   projectId: number
   chapterId: number
@@ -28,6 +29,7 @@ type SingleChapterStoryStateInput = {
   maxRetries?: number
   maxTokens?: number
   workerLease?: { runId: number; owner: string }
+  chapterTaskExecution?: ChapterTaskExecution
 }
 
 function throwIfCanceled(signal?: AbortSignal) {
@@ -137,6 +139,7 @@ export async function prepareSingleChapterStoryState(
       maxTokens: input.maxTokens,
       retryOnBlockedTransport: false,
       allowDeterministicFallback: false,
+      chapterTaskExecution: input.chapterTaskExecution,
     },
     {
       executeAgent: ctx.executeAgent || executeNovelAgent,
@@ -189,6 +192,7 @@ export async function applySingleChapterStoryState(
         signal: input.signal,
         retryOnBlockedTransport: false,
         allowDeterministicFallback: false,
+        chapterTaskExecution: input.chapterTaskExecution,
       },
     )
   const update = input.workerLease

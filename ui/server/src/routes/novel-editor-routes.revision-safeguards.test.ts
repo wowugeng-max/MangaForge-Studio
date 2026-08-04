@@ -188,6 +188,7 @@ function completedRevisionCheckpoint(): EditorRevisionCheckpoint {
 async function createAsyncRevisionRouteFixture(options: {
   useRealWorker?: boolean
   executeAgent?: (...args: any[]) => Promise<any>
+  beginChapterTask?: (...args: any[]) => Promise<any>
 } = {}) {
   const workspace = await tempWorkspace()
   const project = await createNovelProject(workspace, { title: '异步单章修订', reference_config: {} })
@@ -264,6 +265,9 @@ async function createAsyncRevisionRouteFixture(options: {
     buildStructuralSimilarityReport: () => ({}),
     buildReferenceMigrationDryPlan: () => ({}),
     diffTexts: () => ({}),
+    beginChapterTask: options.beginChapterTask || (async () => {
+      throw new Error('beginChapterTask was not configured for this fixture')
+    }),
     executeAgent: async (...args: any[]) => {
       revisionAgentCalls += 1
       return options.executeAgent
@@ -337,6 +341,66 @@ function editorBuildersSource() {
   ].map(name => readFileSync(join(dir, name), 'utf8')).join('\n')
 }
 describe('editor revision route safeguards', () => {
+  test('manual editor report uses one editor_report stage and closes after its durable review is saved', async () => {
+    const beginInputs: any[] = []
+    const stages: any[] = []
+    const closeOutcomes: any[] = []
+    const persistedReviewCountsAtClose: number[] = []
+    let fixtureWorkspace = ''
+    let fixtureProjectId = 0
+    const fixture = await createAsyncRevisionRouteFixture({
+      beginChapterTask: async (input: any) => {
+        beginInputs.push(input)
+        return {
+          taskId: 'manual-editor-report',
+          source: 'mcp',
+          fingerprint: 'report-fingerprint',
+          contextVersion: 'report-context',
+          provenance: () => ({}),
+          generateDraft: async () => { throw new Error('not used') },
+          assertCurrent: async () => {},
+          executeAgent: async (stage: string, responseContract: string) => {
+            stages.push({ stage, responseContract })
+            return {
+              parsed: { overall_score: 88, must_fix: ['收紧章末钩子'] },
+              finish_reason: 'stop',
+            }
+          },
+          close: async (outcome: any) => {
+            closeOutcomes.push(outcome)
+            persistedReviewCountsAtClose.push((await listNovelReviews(fixtureWorkspace, fixtureProjectId))
+              .filter(item => item.review_type === 'editor_report').length)
+          },
+        }
+      },
+    })
+    fixtureWorkspace = fixture.workspace
+    fixtureProjectId = fixture.project.id
+
+    const response = await callRoute(
+      fixture.handlers.get('POST /api/novel/chapters/:chapterId/editor-report'),
+      {
+        params: { chapterId: String(fixture.chapter.id) },
+        query: {},
+        body: { project_id: fixture.project.id, model_id: 217 },
+      },
+    )
+
+    expect(response.statusCode).toBe(200)
+    expect(beginInputs).toHaveLength(1)
+    expect(beginInputs[0]).toMatchObject({
+      activeWorkspace: fixture.workspace,
+      project: { id: fixture.project.id },
+      chapter: { id: fixture.chapter.id },
+      requestedModelId: 217,
+    })
+    expect(beginInputs[0].contextPackage).toMatchObject({ full_context_secret: ROUTE_CONTEXT_SECRET })
+    expect(stages).toEqual([{ stage: 'editor_report', responseContract: 'editor_report_json' }])
+    expect(fixture.revisionAgentCalls).toBe(0)
+    expect(closeOutcomes).toEqual([{ status: 'success' }])
+    expect(persistedReviewCountsAtClose).toEqual([1])
+  })
+
   test('detects max-token truncated revision output before reporting missing patches', () => {
     expect(isRevisionOutputTruncated({
       finish_reason: 'max_tokens',

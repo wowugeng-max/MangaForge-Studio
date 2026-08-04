@@ -164,6 +164,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string, op
     getWorkspace,
     getProject,
     buildChapterContextPackage: writingService.buildChapterContextPackage,
+    beginChapterTask: writingService.beginChapterTask,
     getStageModelId: productionService.getStageModelId,
     getStageTemperature: productionService.getStageTemperature,
     buildReferenceUsageReport: referenceService.buildReferenceUsageReport,

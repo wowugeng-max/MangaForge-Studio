@@ -31,6 +31,11 @@ import { withEditorRevisionWorkerFence } from '../../novel/editor-revision-worke
 import type { EditorRevisionRunInput } from './editor-revision-contract'
 import { buildEditorRevisionPrompt } from './builders-revision-prompts'
 import type { ChapterSourceLeaseRegistry } from '../../novel-writing-service/generation-source/chapter-source-lease'
+import {
+  executeChapterStage,
+  type BeginChapterTaskInput,
+  type ChapterTaskExecution,
+} from '../../novel-writing-service/generation-source/types'
 
 export type EditorRoutesContext = {
   getWorkspace: () => string
@@ -52,6 +57,7 @@ export type EditorRoutesContext = {
   buildReferenceMigrationDryPlan: (project: any, chapter: any, preview: any, safety: any) => any
   diffTexts: (before: string, after: string) => any
   executeAgent?: typeof executeNovelAgent
+  beginChapterTask: (input: BeginChapterTaskInput) => Promise<ChapterTaskExecution>
   chapterSourceLeases?: ChapterSourceLeaseRegistry
   updateStoryStateMachine: (
     workspace: string,
@@ -62,6 +68,17 @@ export type EditorRoutesContext = {
     modelId?: number,
     options?: Record<string, any>,
   ) => Promise<any>
+}
+
+export type PreparedProseQualityReviewContext = {
+  chapters: any[]
+  reviews: any[]
+  currentChapter: any
+  alignedChapter: any
+  contextPackage: any
+  planAlignment: any
+  hasCurrentAlignmentPatch: boolean
+  alignmentPatch: Record<string, unknown>
 }
 
 export type ProseQualityReviewOptions = {
@@ -76,6 +93,38 @@ export type ProseQualityReviewOptions = {
   timeoutMs?: number
   maxRetries?: number
   workerLease?: { runId: number; owner: string }
+  chapterTaskExecution?: ChapterTaskExecution
+  preparedContext?: PreparedProseQualityReviewContext
+}
+
+type ChapterTaskOutcome = Parameters<ChapterTaskExecution['close']>[0]
+
+export async function withChapterTaskExecution<T>(
+  ctx: EditorRoutesContext,
+  input: BeginChapterTaskInput,
+  operation: (execution: ChapterTaskExecution) => Promise<T>,
+): Promise<T> {
+  const execution = await ctx.beginChapterTask(input)
+  let outcome: ChapterTaskOutcome = { status: 'failed' }
+  let operationFailed = false
+  try {
+    const result = await operation(execution)
+    outcome = { status: 'success' }
+    return result
+  } catch (error) {
+    operationFailed = true
+    outcome = {
+      status: input.signal?.aborted ? 'cancelled' : 'failed',
+      error,
+    }
+    throw error
+  } finally {
+    try {
+      await execution.close(outcome)
+    } catch (closeError) {
+      if (!operationFailed) throw closeError
+    }
+  }
 }
 
 export const REVISION_MAX_TOKENS = 8000
@@ -394,14 +443,13 @@ async function createProseQualityReviewWithReceipt(
   }
 }
 
-async function createProseQualityReviewOnce(
+export async function prepareProseQualityReviewContext(
   ctx: EditorRoutesContext,
   activeWorkspace: string,
   project: any,
   chapter: any,
-  options: ProseQualityReviewOptions,
-  claim?: ProseQualityClaimContext,
-) {
+  options: ProseQualityReviewOptions = {},
+): Promise<PreparedProseQualityReviewContext> {
   const projectId = Number(project.id)
   const [chapters, worldbuilding, characters, outlines, reviews] = await Promise.all([
     listNovelChapters(activeWorkspace, projectId),
@@ -425,7 +473,7 @@ async function createProseQualityReviewOnce(
     source: options.source ? `pre_quality_${options.source}` : 'pre_quality',
   })
   let alignedChapter = alignment.alignedChapter || currentChapter
-  let planAlignment: any = {
+  const planAlignment = {
     rebuilt: alignment.rebuilt,
     reason: alignment.reason,
     following_count: 0,
@@ -433,25 +481,87 @@ async function createProseQualityReviewOnce(
   const hasCurrentAlignmentPatch = (alignment.rebuilt || Object.keys(alignment.patch || {}).length > 0)
     && Number(alignment.chapter_id) === Number(currentChapter.id)
   if (hasCurrentAlignmentPatch && !receiptOwned) {
-    alignedChapter = await updateNovelChapter(activeWorkspace, Number(currentChapter.id), alignment.patch as any, { createVersion: false }) || alignedChapter
+    alignedChapter = await updateNovelChapter(
+      activeWorkspace,
+      Number(currentChapter.id),
+      alignment.patch as any,
+      { createVersion: false },
+    ) || alignedChapter
   }
   const contextChapters = chapters.map(item => Number(item.id) === Number(alignedChapter.id) ? alignedChapter : item)
-  const contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, project, alignedChapter, contextChapters, worldbuilding, characters, outlines, reviews)
-  const modelId = ctx.getStageModelId(project, 'review', Number(options.model_id || 0) || undefined)
+  const contextPackage = await ctx.buildChapterContextPackage(
+    activeWorkspace,
+    project,
+    alignedChapter,
+    contextChapters,
+    worldbuilding,
+    characters,
+    outlines,
+    reviews,
+  )
+  return {
+    chapters,
+    reviews,
+    currentChapter,
+    alignedChapter,
+    contextPackage,
+    planAlignment,
+    hasCurrentAlignmentPatch,
+    alignmentPatch: alignment.patch || {},
+  }
+}
+
+async function createProseQualityReviewOnce(
+  ctx: EditorRoutesContext,
+  activeWorkspace: string,
+  project: any,
+  chapter: any,
+  options: ProseQualityReviewOptions,
+  claim?: ProseQualityClaimContext,
+) {
+  const projectId = Number(project.id)
+  const receiptOwned = options.current_chapter_only === true
+    && options.source_run_id !== undefined
+    && options.source_run_id !== null
+    && Boolean(String(options.candidate_hash || '').trim())
+  const preparedContext = options.preparedContext
+    || await prepareProseQualityReviewContext(ctx, activeWorkspace, project, chapter, options)
+  const {
+    chapters,
+    reviews,
+    currentChapter,
+    alignedChapter,
+    contextPackage,
+    planAlignment,
+    hasCurrentAlignmentPatch,
+    alignmentPatch,
+  } = preparedContext
+  const modelId = options.chapterTaskExecution
+    ? undefined
+    : ctx.getStageModelId(project, 'review', Number(options.model_id || 0) || undefined)
   const executeAgent = ctx.executeAgent || executeNovelAgent
   if (options.signal?.aborted) throw options.signal.reason || new Error('prose quality review aborted')
-  const result = await executeAgent('review-agent', project, {
-    task: buildProseQualityPrompt(project, contextPackage, alignedChapter.chapter_text || ''),
-  }, {
-    activeWorkspace,
-    modelId: modelId ? String(modelId) : undefined,
-    maxTokens: Number(options.max_tokens || 3000),
-    temperature: ctx.getStageTemperature(project, 'review', 0.2),
-    responseMode: 'stream',
-    skipMemory: true,
-    signal: options.signal,
-    timeoutMs: options.timeoutMs,
-    maxRetries: options.maxRetries,
+  const result = await executeChapterStage({
+    execution: options.chapterTaskExecution,
+    fallback: executeAgent,
+    stage: 'manual_recheck',
+    responseContract: 'quality_review_json',
+    agentId: 'review-agent',
+    project,
+    context: {
+      task: buildProseQualityPrompt(project, contextPackage, alignedChapter.chapter_text || ''),
+    },
+    options: {
+      activeWorkspace,
+      modelId: modelId ? String(modelId) : undefined,
+      maxTokens: Number(options.max_tokens || 3000),
+      temperature: ctx.getStageTemperature(project, 'review', 0.2),
+      responseMode: 'stream',
+      skipMemory: true,
+      signal: options.signal,
+      timeoutMs: options.timeoutMs,
+      maxRetries: options.maxRetries,
+    },
   })
   if (options.signal?.aborted) throw options.signal.reason || new Error('prose quality review aborted')
   if ((result as any).error) throw new Error(String((result as any).error))
@@ -537,7 +647,7 @@ async function createProseQualityReviewOnce(
       candidateHash: String(options.candidate_hash),
       review: reviewRecord,
       auditRun: auditRunRecord,
-      chapterPatch: hasCurrentAlignmentPatch ? alignment.patch : undefined,
+      chapterPatch: hasCurrentAlignmentPatch ? alignmentPatch : undefined,
       signal: options.signal,
     })
     saved = committed.saved

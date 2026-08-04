@@ -12,7 +12,6 @@ import {
   requestEditorRevisionCancel,
   retryEditorRevisionRun,
 } from '../../novel'
-import { executeNovelAgent } from '../../llm'
 import { countProseChars } from '../../novel-writing/word-target'
 import { asArray, getNovelPayload, parseJsonLikePayload } from '../novel-route-utils'
 import {
@@ -23,6 +22,7 @@ import {
   buildWorkflowRevisionContextBrief,
   editorJson,
   loadChapterBundle,
+  withChapterTaskExecution,
 } from './builders'
 import type {
   EditorRevisionCheckpoint,
@@ -174,19 +174,45 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRevis
         latestReference,
         deliveryRiskBrief,
       })
-      const result = await executeNovelAgent('review-agent', project, { task: prompt }, { activeWorkspace, modelId: req.body.model_id ? String(req.body.model_id) : undefined, maxTokens: 5000, temperature: 0.2, skipMemory: true })
-      const report = getNovelPayload(result)
-      const saved = await createNovelReview(activeWorkspace, {
-        project_id: project.id,
-        review_type: 'editor_report',
-        status: Number(report.overall_score || 0) >= 78 ? 'ok' : 'warn',
-        summary: `编辑报告评分 ${report.overall_score ?? '-'}`,
-        issues: asArray(report.must_fix).map((item: any) => String(item)),
-        payload: editorJson({ chapter_id: chapter.id, report, context_package: contextPackage, delivery_risk_brief: deliveryRiskBrief }),
+      const requestedModelId = Number(req.body.model_id || 0)
+        || ctx.getStageModelId(project, 'review')
+      const signal = req.signal as AbortSignal | undefined
+      const responseBody = await withChapterTaskExecution(ctx, {
+        activeWorkspace,
+        project,
+        chapter,
+        contextPackage,
+        requestedModelId,
+        signal,
+      }, async chapterTaskExecution => {
+        const result = await chapterTaskExecution.executeAgent(
+          'editor_report',
+          'editor_report_json',
+          'review-agent',
+          project,
+          { task: prompt },
+          {
+            activeWorkspace,
+            maxTokens: 5000,
+            temperature: 0.2,
+            skipMemory: true,
+            signal,
+          },
+        )
+        const report = getNovelPayload(result)
+        const saved = await createNovelReview(activeWorkspace, {
+          project_id: project.id,
+          review_type: 'editor_report',
+          status: Number(report.overall_score || 0) >= 78 ? 'ok' : 'warn',
+          summary: `编辑报告评分 ${report.overall_score ?? '-'}`,
+          issues: asArray(report.must_fix).map((item: any) => String(item)),
+          payload: editorJson({ chapter_id: chapter.id, report, context_package: contextPackage, delivery_risk_brief: deliveryRiskBrief }),
+        })
+        return { ok: true, report, review: saved, result }
       })
-      res.json({ ok: true, report, review: saved, result })
+      return res.json(responseBody)
     } catch (error) {
-      res.status(500).json({ error: String(error) })
+      return res.status(500).json({ error: String(error) })
     }
   })
 
