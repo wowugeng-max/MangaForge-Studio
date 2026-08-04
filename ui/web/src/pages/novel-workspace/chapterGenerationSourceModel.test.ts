@@ -1,4 +1,16 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
+import apiClient from '../../api/client'
+import { chapterSourceApi } from '../../api/mcp'
+
+const originalApiPost = apiClient.post
+const originalApiGet = apiClient.get
+const originalApiPut = apiClient.put
+
+afterEach(() => {
+  apiClient.post = originalApiPost
+  apiClient.get = originalApiGet
+  apiClient.put = originalApiPut
+})
 
 async function loadModel() {
   return import('./chapterGenerationSourceModel').catch(() => null)
@@ -61,7 +73,50 @@ async function flushPromises() {
   await Promise.resolve()
 }
 
+async function chapterSourceTransportError() {
+  const underlying = new Error('socket reset')
+  apiClient.post = (async () => { throw underlying }) as any
+  try {
+    await chapterSourceApi.activate(1, 'mcp')
+  } catch (error) {
+    return error
+  }
+  throw new Error('expected chapter source API transport failure')
+}
+
+async function chapterSourceHttpError(errorCode: string, errorMessage = `private ${errorCode}`) {
+  apiClient.post = (async () => ({
+    status: errorCode === 'GENERATION_SOURCE_BUSY' ? 409 : 422,
+    data: { error_code: errorCode, error: errorMessage },
+  })) as any
+  try {
+    await chapterSourceApi.activate(1, 'mcp')
+  } catch (error) {
+    return error
+  }
+  throw new Error('expected chapter source API HTTP failure')
+}
+
 describe('authoritative chapter generation source view', () => {
+  test('projects API response data before async return without reading a hostile then getter', async () => {
+    let thenReads = 0
+    const hostilePrototype = Object.defineProperty({}, 'then', {
+      get() {
+        thenReads += 1
+        return undefined
+      },
+    })
+    const raw = Object.assign(Object.create(hostilePrototype), rawModelView())
+    apiClient.get = (async () => ({ data: raw })) as any
+
+    const view = await chapterSourceApi.get(1)
+
+    expect(thenReads).toBe(0)
+    expect(view).toEqual(rawModelView())
+    expect(Object.getPrototypeOf(view)).toBe(Object.prototype)
+    expect(view).not.toBe(raw)
+  })
+
   test('hydrates the exact active MCP tuple while retaining the stored model id', async () => {
     const model = await loadModel()
     expect(model).not.toBeNull()
@@ -210,6 +265,7 @@ describe('chapter source mutation authority', () => {
     if (!model) return
     const current = model.normalizeChapterSourceView(rawModelView())
     const committed = model.normalizeChapterSourceView(rawMcpView())
+    const transportError = await chapterSourceTransportError()
     let mutationCalls = 0
     let reads = 0
 
@@ -217,7 +273,7 @@ describe('chapter source mutation authority', () => {
       current,
       request: async () => {
         mutationCalls += 1
-        throw Object.assign(new Error('socket reset'), { code: 'ECONNRESET' })
+        throw transportError
       },
       readAuthoritative: async () => {
         reads += 1
@@ -235,7 +291,7 @@ describe('chapter source mutation authority', () => {
     expect(model).not.toBeNull()
     if (!model) return
     const current = model.normalizeChapterSourceView(rawModelView())
-    const mutationError = new Error('private mutation transport detail')
+    const mutationError = await chapterSourceTransportError()
     const readError = new Error('private authority read detail')
     let reads = 0
 
@@ -264,6 +320,23 @@ describe('chapter source mutation authority', () => {
     expect(formatted).toBe('章节来源权威状态暂时无法确认')
     expect(formatted).not.toContain('private mutation')
     expect(formatted).not.toContain('private authority')
+  })
+
+  test('keeps authority-unknown causes non-enumerable and out of JSON diagnostics', async () => {
+    const model = await loadModel()
+    expect(model).not.toBeNull()
+    if (!model) return
+    const previous = model.normalizeChapterSourceView(rawModelView())
+    const mutationCause = { secret: 'private mutation secret' }
+    const readCause = { secret: 'private read secret' }
+    const failure = new model.ChapterSourceAuthorityUnknownError(previous, mutationCause, readCause)
+
+    expect(failure.mutationTransportError).toBe(mutationCause)
+    expect(failure.authorityReadError).toBe(readCause)
+    expect(Object.prototype.propertyIsEnumerable.call(failure, 'mutationTransportError')).toBe(false)
+    expect(Object.prototype.propertyIsEnumerable.call(failure, 'authorityReadError')).toBe(false)
+    expect(JSON.stringify(failure)).not.toContain('private mutation secret')
+    expect(JSON.stringify(failure)).not.toContain('private read secret')
   })
 
   test('performs one explicit authority refresh per call, keeps the same unknown state on failure, and clears only on success', async () => {
@@ -299,13 +372,80 @@ describe('chapter source mutation authority', () => {
     expect(model).not.toBeNull()
     if (!model) return
 
-    expect(model.isNoResponseTransportError(new Error('network down'))).toBe(true)
-    expect(model.isNoResponseTransportError({ code: 'ECONNRESET', request: {} })).toBe(true)
+    const transportError = await chapterSourceTransportError()
+    expect(model.isNoResponseTransportError(transportError)).toBe(true)
+    expect(model.isNoResponseTransportError(new Error('network down'))).toBe(false)
+    expect(model.isNoResponseTransportError({ code: 'ECONNRESET', request: {} })).toBe(false)
     expect(model.isNoResponseTransportError({ response: { status: 500 } })).toBe(false)
     expect(model.isNoResponseTransportError({ response: {} })).toBe(false)
     expect(model.isNoResponseTransportError({ status: 0 })).toBe(false)
     expect(model.isNoResponseTransportError({ status: 503 })).toBe(false)
     expect(model.isNoResponseTransportError(null)).toBe(false)
+  })
+
+  test('does not reconcile local mapper or protocol errors', async () => {
+    const model = await loadModel()
+    expect(model).not.toBeNull()
+    if (!model) return
+    const current = model.normalizeChapterSourceView(rawModelView())
+    let protocolError: unknown
+    try {
+      model.normalizeChapterSourceView({ ...rawModelView(), fingerprint: 'invalid' })
+    } catch (error) {
+      protocolError = error
+    }
+
+    for (const localError of [new TypeError('local response mapper bug'), protocolError]) {
+      let reads = 0
+      await expect(model.commitConfirmedSource({
+        current,
+        request: async () => { throw localError },
+        readAuthoritative: async () => {
+          reads += 1
+          return model.normalizeChapterSourceView(rawMcpView())
+        },
+        assertCurrent: () => {},
+      })).rejects.toBe(localError)
+      expect(reads).toBe(0)
+    }
+  })
+
+  test('fails closed on hostile classifier and formatter inputs without executing traps or getters', async () => {
+    const model = await loadModel()
+    expect(model).not.toBeNull()
+    if (!model) return
+    let getPrototypeOfCalls = 0
+    let getCalls = 0
+    const hostile = new Proxy({}, {
+      getPrototypeOf() {
+        getPrototypeOfCalls += 1
+        throw new Error('private prototype trap')
+      },
+      get() {
+        getCalls += 1
+        throw new Error('private get trap')
+      },
+    })
+    let responseReads = 0
+    let statusReads = 0
+    let codeReads = 0
+    const accessors = Object.defineProperties({}, {
+      response: { get() { responseReads += 1; return undefined } },
+      status: { get() { statusReads += 1; return undefined } },
+      code: { get() { codeReads += 1; return 'ECONNRESET' } },
+    })
+
+    expect(model.isNoResponseTransportError(hostile)).toBe(false)
+    expect(model.formatChapterSourceFailure(hostile)).toBe('章节来源操作失败')
+    expect(model.isNoResponseTransportError(accessors)).toBe(false)
+    expect(model.formatChapterSourceFailure(accessors)).toBe('章节来源操作失败')
+    expect({ getPrototypeOfCalls, getCalls, responseReads, statusReads, codeReads }).toEqual({
+      getPrototypeOfCalls: 0,
+      getCalls: 0,
+      responseReads: 0,
+      statusReads: 0,
+      codeReads: 0,
+    })
   })
 
   test('formats stable source errors without recommending a fallback', async () => {
@@ -314,19 +454,24 @@ describe('chapter source mutation authority', () => {
     if (!model) return
 
     for (const code of ['GENERATION_SOURCE_BUSY', 'CHAPTER_MODEL_REQUIRED', 'MCP_BINDING_INVALID']) {
-      const message = model.formatChapterSourceFailure({ response: { data: { error_code: code, error: `private ${code}` } } })
+      const failure = await chapterSourceHttpError(code)
+      const message = model.formatChapterSourceFailure(failure)
       expect(message.length).toBeGreaterThan(0)
       expect(message).not.toContain('fallback')
       expect(message).not.toContain('回退')
       expect(message).not.toContain('切换模型')
       expect(message).not.toContain('自动重试')
+      expect(message).not.toContain('private')
     }
-    expect(model.formatChapterSourceFailure({
-      response: { data: { code: 'GENERATION_SOURCE_BUSY', error: 'private busy detail' } },
-    })).toContain('正在被生成任务使用')
-    expect(model.formatChapterSourceFailure({
-      response: { data: { code: 'CHAPTER_MODEL_REQUIRED', error: 'private model detail' } },
-    })).toContain('有效的章节模型')
+    expect(model.formatChapterSourceFailure(
+      await chapterSourceHttpError('GENERATION_SOURCE_BUSY', 'private busy detail'),
+    )).toContain('正在被生成任务使用')
+    expect(model.formatChapterSourceFailure(
+      await chapterSourceHttpError('CHAPTER_MODEL_REQUIRED', 'private model detail'),
+    )).toContain('有效的章节模型')
+    expect(model.formatChapterSourceFailure(
+      await chapterSourceHttpError('UNKNOWN_CHAPTER_SOURCE_FAILURE', 'private unknown detail'),
+    )).toBe('章节来源操作失败')
   })
 })
 
@@ -365,6 +510,7 @@ describe('chapter source project/load/operation fence', () => {
       const committed = model.normalizeChapterSourceView(rawMcpView(217))
       const mutation = deferred<any>()
       const authorityRead = deferred<any>()
+      const transportError = await chapterSourceTransportError()
       const ui = {
         authority: model.confirmedAuthorityState(current),
         error: '',
@@ -391,7 +537,7 @@ describe('chapter source project/load/operation fence', () => {
       })
 
       if (scenario === 'reconcile_success' || scenario === 'reconcile_failure') {
-        mutation.reject(Object.assign(new Error('socket reset'), { code: 'ECONNRESET' }))
+        mutation.reject(transportError)
         await flushPromises()
         expect(readCalls).toBe(1)
       }

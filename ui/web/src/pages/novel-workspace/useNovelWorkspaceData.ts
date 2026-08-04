@@ -24,6 +24,7 @@ import { clearWorkspacePayloadParseCache } from './payloadParseCache'
 import {
   confirmedAuthorityState,
   createChapterSourceOperationFence,
+  isStaleChapterSourceOperationError,
   normalizeChapterSourceView,
   StaleChapterSourceOperationError,
   type ChapterSourceAuthorityState,
@@ -202,7 +203,11 @@ export function useNovelWorkspaceData({
         if (!request) throw new Error(`workspace request missing: ${key}`)
         return apiClient.get(request.url, { params: request.params, signal: controller.signal })
       }
-      const [pr, wr, cr, olr, chr, rnr, revr, plr, mr, sourceView] = await Promise.all([
+      const sourceRequest = chapterSourceApi.get(projectId).then(
+        source => ({ ok: true as const, source }),
+        error => ({ ok: false as const, error }),
+      )
+      const [pr, wr, cr, olr, chr, rnr, revr, plr, mr, sourceOutcome] = await Promise.all([
         apiClient.get(`/novel/projects/${projectId}`, { signal: controller.signal }),
         apiClient.get(`/novel/projects/${projectId}/worldbuilding`, { signal: controller.signal }),
         apiClient.get(`/novel/projects/${projectId}/characters`, { signal: controller.signal }),
@@ -212,7 +217,7 @@ export function useNovelWorkspaceData({
         compactRequest('reviews'),
         apiClient.get(`/novel/projects/${projectId}/pipeline`, { signal: controller.signal }).catch(() => ({ data: null })),
         apiClient.get('/models', { signal: controller.signal }).catch(() => ({ data: [] })),
-        chapterSourceApi.get(projectId).then(normalizeChapterSourceView),
+        sourceRequest,
       ])
       if (!projectLoadEpochRef.current?.isCurrent(requestEpoch) || controller.signal.aborted) return
       const nextChapters = Array.isArray(chr.data) ? chr.data.map(compactChapterWorkspaceRecord) : []
@@ -235,15 +240,25 @@ export function useNovelWorkspaceData({
       setAgentExecution(null)
       setPipeline(plr.data?.pipeline || null)
       setModels(nextModels)
+      setActiveChapterId(prev => resolveActiveWorkspaceChapterId(prev, nextChapters))
       try {
         chapterSourceFenceRef.current!.assertCurrent(chapterSourceToken)
+        if (!sourceOutcome.ok) throw sourceOutcome.error
+        const sourceView = normalizeChapterSourceView(sourceOutcome.source)
         setChapterGenerationSourceAuthority(confirmedAuthorityState(sourceView))
         const storedModelId = sourceView.source.model.model_id
         setSelectedModelId(prev => storedModelId ?? resolveSelectedWorkspaceModelId(prev, nextModels))
       } catch (error) {
-        if (!(error instanceof StaleChapterSourceOperationError)) throw error
+        if (!isStaleChapterSourceOperationError(error)) {
+          try {
+            chapterSourceFenceRef.current!.assertCurrent(chapterSourceToken)
+          } catch (staleError) {
+            if (isStaleChapterSourceOperationError(staleError)) return
+            throw staleError
+          }
+          throw error
+        }
       }
-      setActiveChapterId(prev => resolveActiveWorkspaceChapterId(prev, nextChapters))
     } catch {
       if (projectLoadEpochRef.current?.isCurrent(requestEpoch) && !controller.signal.aborted) {
         message.error('无法加载项目工作台')

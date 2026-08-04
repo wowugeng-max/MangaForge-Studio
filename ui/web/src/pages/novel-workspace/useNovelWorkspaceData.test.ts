@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test'
 import * as React from 'react'
+import { message } from 'antd'
 import apiClient from '../../api/client'
 import {
   initialWorkspaceRequestPlan,
@@ -38,6 +39,7 @@ function dependenciesEqual(left: DependencyList, right: DependencyList) {
 const dispatcherRef = (React as any).__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.ReactCurrentDispatcher
 const activeHarnesses = new Set<HookHarness<any>>()
 const originalApiGet = apiClient.get
+const originalMessageError = message.error
 
 class HookHarness<T> {
   value!: T
@@ -172,6 +174,7 @@ class HookHarness<T> {
 afterEach(() => {
   for (const harness of [...activeHarnesses]) harness.unmount()
   apiClient.get = originalApiGet
+  message.error = originalMessageError
 })
 
 function deferred<T>() {
@@ -295,6 +298,27 @@ describe('novel workspace authoritative chapter source lifecycle', () => {
       .toEqual({ source: null, authorityUnknown: false, reconciliationRequired: false, diagnostic: null })
     expect(() => (workspace.harness.value as any).assertChapterSourceOperationCurrent(token)).not.toThrow()
     expect((workspace.harness.value as any).selectedProject?.id).toBe(1)
+  })
+
+  test('commits successful modules and ignores a stale initial source rejection after a mutation begins', async () => {
+    const source = deferred<unknown>()
+    installWorkspaceApi(new Map([[1, source.promise]]))
+    const globalLoadError = mock(() => {})
+    message.error = globalLoadError as typeof message.error
+    const workspace = mountWorkspace(1)
+    await flushPromises()
+
+    const token = (workspace.harness.value as any).beginChapterSourceOperation()
+    ;(workspace.harness.value as any).setSelectedModelId(301)
+    source.reject(new TypeError('stale initial source mapper failure'))
+    await flushPromises()
+
+    expect((workspace.harness.value as any).selectedProject).toMatchObject({ id: 1, title: 'Project 1' })
+    expect((workspace.harness.value as any).models.map((item: any) => item.id)).toEqual([9, 217, 301])
+    expect((workspace.harness.value as any).chapterGenerationSourceAuthority.source).toBeNull()
+    expect((workspace.harness.value as any).selectedModelId).toBe(301)
+    expect(() => (workspace.harness.value as any).assertChapterSourceOperationCurrent(token)).not.toThrow()
+    expect(globalLoadError).toHaveBeenCalledTimes(0)
   })
 
   test('stored model id wins over both the previous project selection and an in-flight local selection', async () => {
