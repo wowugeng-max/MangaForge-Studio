@@ -367,6 +367,7 @@ function createHarness(options: {
   executeTaskStage?: (...args: any[]) => Promise<any>
   closeTask?: (outcome: any) => Promise<void>
   reportTaskCloseFailure?: (input: any) => Promise<void> | void
+  useDefaultCloseFailureReporter?: boolean
   renewLease?: (...args: any[]) => Promise<boolean>
   writeCrash?: WriteCrash
   commit?: (...args: any[]) => Promise<any>
@@ -738,6 +739,7 @@ function createHarness(options: {
     },
     clearTimeout: (registration: any) => { registration.cleared = true },
   }
+  if (options.useDefaultCloseFailureReporter) delete dependencies.reportTaskCloseFailure
 
   function worker(overrides: Record<string, unknown> = {}) {
     return createEditorRevisionWorker(ctx, { ...dependencies, ...overrides })
@@ -3316,6 +3318,35 @@ describe('durable editor revision worker', () => {
       projectId: harness.project.id,
       errorCode: 'INJECTED_CLOSE_FAILURE',
     }])
+  })
+
+  test('reports an undefined close rejection after durable success without leaking a message', async () => {
+    const warnings: unknown[][] = []
+    const originalWarn = console.warn
+    console.warn = (...args: unknown[]) => { warnings.push(args) }
+    try {
+      const harness = createHarness({
+        closeTask: async () => Promise.reject(undefined),
+        useDefaultCloseFailureReporter: true,
+      })
+      const worker = harness.worker()
+
+      await worker.start(workspace)
+      await worker.waitForIdle()
+      await expect(worker.stop()).resolves.toBeUndefined()
+
+      expect(harness.run.status).toBe('completed')
+      expect(harness.closeOutcomes).toEqual([{
+        taskId: 'revision-task-1',
+        outcome: { status: 'success' },
+      }])
+      expect(warnings).toEqual([[
+        '[editor-revision-worker] chapter task close failed: REVISION_TASK_CLOSE_FAILED',
+      ]])
+      expect(JSON.stringify(warnings)).not.toContain('message')
+    } finally {
+      console.warn = originalWarn
+    }
   })
 
   test('builds the revision prompt from delivery risks in the immutable source review', async () => {

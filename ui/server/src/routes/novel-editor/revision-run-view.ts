@@ -82,6 +82,8 @@ const PUBLIC_PATCH_REASONS = new Set([
 const PUBLIC_COMMIT_STATUSES = new Set(['committed', 'already_committed'])
 const PUBLIC_STORY_STATE_STATUSES = new Set(['prepared', 'completed'])
 const PUBLIC_CONVERGENCE_STATUSES = new Set(['cleared', 'improved', 'worse', 'unchanged'])
+const CHAPTER_TASK_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/
+const SHA256_FINGERPRINT = /^sha256:[0-9a-f]{64}$/
 
 export type PublicEditorRevisionRun = {
   id: number
@@ -421,18 +423,23 @@ function safeLinkedTaskClosure(value: unknown): PublicEditorRevisionRun['linked_
 function safeChapterGenerationSource(value: unknown): PublicEditorRevisionRun['chapter_generation_source'] {
   const generationSource = parseJsonObject(value)
   if (!generationSource) return null
-  const source = safeEnumValue(generationSource.source, new Set(['model', 'mcp']))
-  const taskId = safeString(generationSource.task_id, 300)
-  const sourceFingerprint = safeString(generationSource.source_fingerprint, 300)
-  const contextVersion = safeString(generationSource.context_version, 300)
-  if (!source || !taskId || !sourceFingerprint || !contextVersion) return null
-  const modelId = finiteInteger(generationSource.model_id)
+  const source = generationSource.source
+  const taskId = generationSource.task_id
+  const sourceFingerprint = generationSource.source_fingerprint
+  const contextVersion = generationSource.context_version
+  if ((source !== 'model' && source !== 'mcp')
+    || typeof taskId !== 'string' || !CHAPTER_TASK_ID.test(taskId)
+    || typeof sourceFingerprint !== 'string' || !SHA256_FINGERPRINT.test(sourceFingerprint)
+    || typeof contextVersion !== 'string' || !SHA256_FINGERPRINT.test(contextVersion)) return null
+  const hasModelId = Object.prototype.hasOwnProperty.call(generationSource, 'model_id')
+  const modelId = generationSource.model_id
+  if (hasModelId && (typeof modelId !== 'number' || !Number.isSafeInteger(modelId) || modelId <= 0)) return null
   return {
     task_id: taskId,
-    source: source as 'model' | 'mcp',
+    source,
     source_fingerprint: sourceFingerprint,
     context_version: contextVersion,
-    ...(modelId !== null ? { model_id: modelId } : {}),
+    ...(hasModelId ? { model_id: modelId } : {}),
   }
 }
 

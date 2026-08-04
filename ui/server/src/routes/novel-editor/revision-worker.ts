@@ -1595,6 +1595,7 @@ export function createEditorRevisionWorker(
     let input: EditorRevisionRunInput | null = null
     let execution: ChapterTaskExecution | null = null
     let executionError: unknown
+    let executionErrorCaught = false
     let executionSucceeded = false
     try {
       const parsedInput = parseInput(run.input_ref)
@@ -1626,6 +1627,7 @@ export function createEditorRevisionWorker(
       await completeRun(input, run.id, controller, lease)
       executionSucceeded = true
     } catch (error) {
+      executionErrorCaught = true
       executionError = chapterTaskFailure(error)
       if (error instanceof StopProcessingError) return
       const code = errorCode(error)
@@ -1650,7 +1652,7 @@ export function createEditorRevisionWorker(
           try {
             await execution.close(outcome)
           } catch (closeError) {
-            if (closeError !== executionError) {
+            if (!executionErrorCaught || closeError !== executionError) {
               try {
                 await deps.reportTaskCloseFailure({
                   runId: run.id,

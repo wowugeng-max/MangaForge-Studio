@@ -15,6 +15,8 @@ const SOURCE_TEXT = '不可泄漏的源章节正文'
 const CANDIDATE_TEXT = '完整候选正文'
 const FULL_CONTEXT = '不可泄漏的完整 context package'
 const RENDERED_PROMPT = '不可泄漏的 rendered prompt'
+const VALID_SOURCE_FINGERPRINT = `sha256:${'a'.repeat(64)}`
+const VALID_CONTEXT_VERSION = `sha256:${'b'.repeat(64)}`
 
 function initialCheckpoint(): EditorRevisionCheckpoint {
   const phases = [
@@ -191,8 +193,8 @@ describe('editor revision public run view', () => {
     ;(checkpoint as any).chapter_generation_source = {
       task_id: 'revision-task-1',
       source: 'mcp',
-      source_fingerprint: 'sha256:public-source-fingerprint',
-      context_version: 'context-v1',
+      source_fingerprint: VALID_SOURCE_FINGERPRINT,
+      context_version: VALID_CONTEXT_VERSION,
       model_id: 217,
       key_id: 991,
       server_id: 'PRIVATE_SERVER',
@@ -205,14 +207,37 @@ describe('editor revision public run view', () => {
     expect((view as any).chapter_generation_source).toEqual({
       task_id: 'revision-task-1',
       source: 'mcp',
-      source_fingerprint: 'sha256:public-source-fingerprint',
-      context_version: 'context-v1',
+      source_fingerprint: VALID_SOURCE_FINGERPRINT,
+      context_version: VALID_CONTEXT_VERSION,
       model_id: 217,
     })
     const serialized = JSON.stringify(view)
     for (const secret of ['PRIVATE_SERVER', 'PRIVATE_SESSION', 'PRIVATE_KEY', RENDERED_PROMPT, 'key_id', 'raw_prompt']) {
       expect(serialized).not.toContain(secret)
     }
+  })
+
+  test.each([
+    ['task_id', `revision task ${RENDERED_PROMPT}`],
+    ['source_fingerprint', `sha256:${'c'.repeat(32)}${RENDERED_PROMPT}`],
+    ['context_version', `sha256:${'d'.repeat(32)}${FULL_CONTEXT}`],
+    ['source', `mcp:${RENDERED_PROMPT}`],
+    ['model_id', -987654321],
+  ] as const)('fails safe for hostile chapter task provenance field %s', (field, injected) => {
+    const checkpoint = initialCheckpoint()
+    ;(checkpoint as any).chapter_generation_source = {
+      task_id: 'revision-task-1',
+      source: 'mcp',
+      source_fingerprint: VALID_SOURCE_FINGERPRINT,
+      context_version: VALID_CONTEXT_VERSION,
+      model_id: 217,
+      [field]: injected,
+    }
+
+    const view = buildPublicEditorRevisionRun(runWithCheckpoint(checkpoint))
+
+    expect(view.chapter_generation_source).toBeNull()
+    expect(JSON.stringify(view)).not.toContain(String(injected))
   })
 
   test('exposes only linked repair task identity and closure acknowledgement state', () => {
