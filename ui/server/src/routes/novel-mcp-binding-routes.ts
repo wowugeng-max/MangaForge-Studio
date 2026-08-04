@@ -1,7 +1,7 @@
 import type { Express } from 'express'
 import { createHash } from 'node:crypto'
 import { types } from 'node:util'
-import { mutateNovelProjectReferenceConfig } from '../novel'
+import { mutateNovelProjectGenerationSource } from '../novel'
 import { isMcpError, McpError, type McpErrorCode } from '../mcp/errors'
 import type { McpRuntime } from '../mcp/runtime'
 import { createMcpSecretScrubber } from '../mcp/secret-scrubber'
@@ -701,10 +701,13 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
               assertExactProjectSnapshot(project, phaseOne)
               input.lifecycle.throwIfAborted()
               remainingValidationBudget(validationDeadline)
-              const mutation = await mutateNovelProjectReferenceConfig(activeWorkspace, {
+              const mutation = await mutateNovelProjectGenerationSource(activeWorkspace, {
                 projectId: project.id,
                 operation: input.operation,
                 signal: input.lifecycle.signal,
+                chapterGenerationSource: phaseOne.source,
+                proseGenerationSource: toLegacyProseGenerationSource(phaseOne.source),
+                result: phaseOne.source,
                 assertCurrentProject: currentProject => {
                   input.lifecycle.throwIfAborted()
                   remainingValidationBudget(validationDeadline)
@@ -715,10 +718,6 @@ export function registerNovelMcpBindingRoutes(app: Express, ctx: NovelMcpBinding
                   input.lifecycle.throwIfAborted()
                   remainingValidationBudget(validationDeadline)
                 },
-                mutate: referenceConfig => ({
-                  referenceConfig: { ...referenceConfig, chapter_generation_source: phaseOne.source },
-                  result: phaseOne.source,
-                }),
               })
               input.lifecycle.throwIfAborted()
               remainingValidationBudget(validationDeadline)

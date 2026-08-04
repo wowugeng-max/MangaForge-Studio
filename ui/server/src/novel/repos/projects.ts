@@ -17,6 +17,34 @@ type ReferenceConfigMutation<T> = {
   mutate: (currentConfig: Record<string, any>) => { referenceConfig: Record<string, any>; result: T }
 }
 
+type GenerationSourceMutation<T> = {
+  projectId: number
+  operation: string
+  signal?: AbortSignal
+  chapterGenerationSource: Record<string, any>
+  proseGenerationSource: Record<string, any>
+  assertCurrentProject?: (current: NovelProjectRecord) => void
+  assertMutationCanCommit?: (next: NovelProjectRecord) => void
+  result: T
+}
+
+const GENERATION_SOURCE_FIELDS = [
+  'prose_generation_source',
+  'chapter_generation_source',
+] as const
+
+function preserveGenerationSourceFields(
+  current: Record<string, any>,
+  candidate: Record<string, any>,
+) {
+  const next = { ...candidate }
+  for (const field of GENERATION_SOURCE_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(current, field)) next[field] = current[field]
+    else delete next[field]
+  }
+  return next
+}
+
 function throwIfMutationAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw signal.reason || new Error('project reference-config mutation aborted')
 }
@@ -32,7 +60,10 @@ function mutateProjectReferenceConfigRow<T>(db: Database, options: ReferenceConf
   throwIfMutationAborted(options.signal)
   const next = {
     ...current,
-    reference_config: mutation.referenceConfig,
+    reference_config: preserveGenerationSourceFields(
+      current.reference_config || {},
+      mutation.referenceConfig || {},
+    ),
     updated_at: nowIso(),
   }
   updateProjectRow(db, next)
@@ -80,7 +111,16 @@ export async function updateNovelProject(activeWorkspace: string, id: number, da
     const row = db.query('SELECT * FROM projects WHERE id = ? LIMIT 1').get(id) as any
     if (!row) return null
     const current = projectFromRow(row)
-    const next = { ...current, ...normalizeProjectRecord(data, { ...current, id, updated_at: nowIso() }), updated_at: nowIso() }
+    const normalized = normalizeProjectRecord(data, { ...current, id, updated_at: nowIso() })
+    const next = {
+      ...current,
+      ...normalized,
+      reference_config: preserveGenerationSourceFields(
+        current.reference_config || {},
+        normalized.reference_config || {},
+      ),
+      updated_at: nowIso(),
+    }
     updateProjectRow(db, next)
     return next
   })
@@ -93,6 +133,35 @@ export async function mutateNovelProjectReferenceConfig<T>(
   return withNovelDbWrite(activeWorkspace, db => {
     throwIfMutationAborted(options.signal)
     return mutateProjectReferenceConfigRow(db, options)
+  }, options.operation)
+}
+
+export async function mutateNovelProjectGenerationSource<T>(
+  activeWorkspace: string,
+  options: GenerationSourceMutation<T>,
+): Promise<{ project: NovelProjectRecord; result: T } | null> {
+  return withNovelDbWrite(activeWorkspace, db => {
+    const row = db.query('SELECT * FROM projects WHERE id = ? LIMIT 1').get(options.projectId) as any
+    if (!row) return null
+    const current = projectFromRow(row)
+    throwIfMutationAborted(options.signal)
+    options.assertCurrentProject?.(current)
+    throwIfMutationAborted(options.signal)
+    const next = {
+      ...current,
+      reference_config: {
+        ...(current.reference_config || {}),
+        chapter_generation_source: options.chapterGenerationSource,
+        prose_generation_source: options.proseGenerationSource,
+      },
+      updated_at: nowIso(),
+    }
+    throwIfMutationAborted(options.signal)
+    updateProjectRow(db, next)
+    throwIfMutationAborted(options.signal)
+    options.assertMutationCanCommit?.(next)
+    throwIfMutationAborted(options.signal)
+    return { project: next, result: options.result }
   }, options.operation)
 }
 

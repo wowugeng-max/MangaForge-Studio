@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { rm } from 'fs/promises'
 import {
   listNovelRuns,
-  updateNovelProject,
+  mutateNovelProjectGenerationSource,
 } from '../../novel'
 import {
   buildPipelineProse,
@@ -19,6 +19,7 @@ import {
   MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY,
   type ChapterTaskExecution,
 } from '../generation-source/types'
+import { toLegacyProseGenerationSource } from '../generation-source/source-config'
 
 const workspaces: string[] = []
 const originalModelClose = ModelGenerationSource.prototype.close
@@ -154,14 +155,20 @@ async function createLifecycleHarness(options: LifecycleHarnessOptions = {}) {
     contextPackageOverride: options.contextPackageOverride,
   })
   workspaces.push(harness.workspace)
-  harness.project.reference_config.chapter_generation_source = {
+  const chapterGenerationSource = {
     version: 'chapter_generation_source_v1',
-    active: 'model',
+    active: 'model' as const,
     model: { model_id: 217 },
   }
-  await updateNovelProject(harness.workspace, harness.project.id, {
-    reference_config: harness.project.reference_config,
+  const configured = await mutateNovelProjectGenerationSource(harness.workspace, {
+    projectId: harness.project.id,
+    operation: 'test-configure-generation-source',
+    chapterGenerationSource,
+    proseGenerationSource: toLegacyProseGenerationSource(chapterGenerationSource),
+    result: true,
   })
+  if (!configured) throw new Error('test project disappeared while configuring generation source')
+  harness.project.reference_config = configured.project.reference_config
 
   return {
     ...harness,
@@ -448,15 +455,17 @@ describe('automatic chapter task lifecycle', () => {
     const harness = await createLifecycleHarness()
     ModelGenerationSource.prototype.generateDraft = async function generateDraft(request) {
       const result = await originalModelGenerateDraft.call(this, request)
-      await updateNovelProject(harness.workspace, harness.project.id, {
-        reference_config: {
-          ...harness.project.reference_config,
-          chapter_generation_source: {
-            version: 'chapter_generation_source_v1',
-            active: 'model',
-            model: { model_id: 218 },
-          },
-        },
+      const rotatedChapterSource = {
+        version: 'chapter_generation_source_v1' as const,
+        active: 'model' as const,
+        model: { model_id: 218 },
+      }
+      await mutateNovelProjectGenerationSource(harness.workspace, {
+        projectId: harness.project.id,
+        operation: 'test-rotate-generation-source',
+        chapterGenerationSource: rotatedChapterSource,
+        proseGenerationSource: toLegacyProseGenerationSource(rotatedChapterSource),
+        result: true,
       })
       return {
         ...result,

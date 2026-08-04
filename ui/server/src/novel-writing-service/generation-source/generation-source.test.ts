@@ -16,12 +16,16 @@ import {
 } from '../../mcp/quarantine-store'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from '../../mcp/server-store'
 import { assertMcpWorkspaceMutationHeld, withMcpWorkspaceMutation } from '../../mcp/workspace-coordinator'
-import { createNovelProject, getNovelProject, listNovelRuns, updateNovelProject } from '../../novel'
+import { createNovelProject, getNovelProject, listNovelRuns, mutateNovelProjectGenerationSource } from '../../novel'
 import { chapterContextVersion, createGenerationSourceResolver } from './create-generation-source'
 import { ChapterSourceLeaseRegistry } from './chapter-source-lease'
 import { McpGenerationSource } from './mcp-generation-source'
 import { ModelGenerationSource } from './model-generation-source'
-import { chapterGenerationSourceFingerprint, proseGenerationSourceFingerprint } from './source-config'
+import {
+  chapterGenerationSourceFingerprint,
+  proseGenerationSourceFingerprint,
+  toLegacyProseGenerationSource,
+} from './source-config'
 import { createChapterStageRecorder } from './stage-receipts'
 import {
   acceptanceBindingFingerprintFromGenerationSource,
@@ -1677,13 +1681,22 @@ describe('McpGenerationSource quarantine outcomes', () => {
 
   test('fences a changed binding before Agent validation or any other remote call', async () => {
     const { workspace, server, key, project } = await harness('mangaforge-generation-binding-fence-')
-    await updateNovelProject(workspace, project.id, {
-      reference_config: {
-        prose_generation_source: {
-          version: 'prose_generation_source_v1', type: 'mcp',
-          mcp: { server_id: server.id, key_id: key.id, adapter_id: server.adapter_id, agent_id: 'agent-2' },
-        },
+    const rotatedLegacySource = {
+      version: 'prose_generation_source_v1',
+      type: 'mcp',
+      mcp: { server_id: server.id, key_id: key.id, adapter_id: server.adapter_id, agent_id: 'agent-2' },
+    }
+    await mutateNovelProjectGenerationSource(workspace, {
+      projectId: project.id,
+      operation: 'test-rotate-generation-source',
+      chapterGenerationSource: {
+        version: 'chapter_generation_source_v1',
+        active: 'mcp',
+        model: {},
+        mcp: { ...rotatedLegacySource.mcp, model: '' },
       },
+      proseGenerationSource: rotatedLegacySource,
+      result: true,
     })
     let remoteCalls = 0
     const adapter = {
@@ -4013,21 +4026,24 @@ describe('McpGenerationSource task execution', () => {
     let fixture!: Awaited<ReturnType<typeof neutralTaskFixture>>
     fixture = await neutralTaskFixture('mangaforge-mcp-task-return-fence-', {
       runStage: async (_stage, session) => {
-        await updateNovelProject(fixture.activeWorkspace, fixture.durableProject.id, {
-          reference_config: {
-            chapter_generation_source: {
-              version: 'chapter_generation_source_v1',
-              active: 'mcp',
-              model: { model_id: 217 },
-              mcp: {
-                server_id: fixture.server.id,
-                key_id: fixture.key.id,
-                adapter_id: fixture.server.adapter_id,
-                agent_id: 'neutral-agent-1',
-                model: 'rotated-neutral-model',
-              },
-            },
+        const rotatedChapterSource = {
+          version: 'chapter_generation_source_v1' as const,
+          active: 'mcp' as const,
+          model: { model_id: 217 },
+          mcp: {
+            server_id: fixture.server.id,
+            key_id: fixture.key.id,
+            adapter_id: fixture.server.adapter_id,
+            agent_id: 'neutral-agent-1',
+            model: 'rotated-neutral-model',
           },
+        }
+        await mutateNovelProjectGenerationSource(fixture.activeWorkspace, {
+          projectId: fixture.durableProject.id,
+          operation: 'test-rotate-generation-source',
+          chapterGenerationSource: rotatedChapterSource,
+          proseGenerationSource: toLegacyProseGenerationSource(rotatedChapterSource),
+          result: true,
         })
         return {
           content: '不得返回的远端正文。',

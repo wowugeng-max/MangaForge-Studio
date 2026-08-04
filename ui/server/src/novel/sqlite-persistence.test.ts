@@ -18,6 +18,8 @@ import {
   listNovelRunSummaries,
   listNovelRuns,
   mergeNovelChapterRawPayload,
+  mutateNovelProjectGenerationSource,
+  mutateNovelProjectReferenceConfig,
   replaceNovelChapterSettingUsage,
   updateNovelChapter,
   updateNovelProject,
@@ -78,7 +80,7 @@ describe('novel sqlite persistence', () => {
     const files = walk(novelDir).map(file => ({ file, source: readFileSync(file, 'utf8') }))
     const source = files.map(item => item.source).join('\n')
     const mutationNames = [
-      'createNovelProject', 'updateNovelProject',
+      'createNovelProject', 'updateNovelProject', 'mutateNovelProjectGenerationSource',
       'createNovelWorldbuilding', 'updateNovelWorldbuilding',
       'createNovelCharacter', 'updateNovelCharacter',
       'createNovelSettingEntity', 'updateNovelSettingEntity', 'deleteNovelSettingEntity',
@@ -110,6 +112,171 @@ describe('novel sqlite persistence', () => {
     expect(source).not.toContain('writeStoreUnlocked')
     expect(source).toContain('assertNovelWorkspaceMutationHeld')
     expect(source).not.toContain('async function mutateNovelStore')
+  })
+
+  test('ordinary project writes preserve both generation-source authority fields', async () => {
+    const legacySource = {
+      version: 'prose_generation_source_v1',
+      type: 'mcp',
+      mcp: { server_id: 'current', key_id: 1, adapter_id: 'generic', agent_id: 'legacy-current' },
+    }
+    const chapterSource = {
+      version: 'chapter_generation_source_v1',
+      active: 'mcp',
+      model: { model_id: 217 },
+      mcp: { server_id: 'current', key_id: 1, adapter_id: 'generic', agent_id: 'chapter-current' },
+    }
+    const staleLegacySource = {
+      ...legacySource,
+      mcp: { ...legacySource.mcp, agent_id: 'legacy-stale' },
+    }
+    const staleChapterSource = {
+      ...chapterSource,
+      mcp: { ...chapterSource.mcp, agent_id: 'chapter-stale' },
+    }
+    const operations = [
+      {
+        name: 'updateNovelProject',
+        apply: (workspace: string, projectId: number, referenceConfig: Record<string, any>) => (
+          updateNovelProject(workspace, projectId, {
+            synopsis: 'ordinary update',
+            reference_config: referenceConfig,
+          })
+        ),
+      },
+      {
+        name: 'mutateNovelProjectReferenceConfig',
+        apply: (workspace: string, projectId: number, referenceConfig: Record<string, any>) => (
+          mutateNovelProjectReferenceConfig(workspace, {
+            projectId,
+            operation: 'ordinary-reference-mutation',
+            mutate: () => ({ referenceConfig, result: true }),
+          })
+        ),
+      },
+    ]
+    const scenarios = [
+      {
+        name: 'replacement',
+        current: { prose_generation_source: legacySource, chapter_generation_source: chapterSource },
+        candidate: { prose_generation_source: staleLegacySource, chapter_generation_source: staleChapterSource },
+        ownsSources: true,
+      },
+      {
+        name: 'deletion',
+        current: { prose_generation_source: legacySource, chapter_generation_source: chapterSource },
+        candidate: {},
+        ownsSources: true,
+      },
+      {
+        name: 'restoration',
+        current: {},
+        candidate: { prose_generation_source: staleLegacySource, chapter_generation_source: staleChapterSource },
+        ownsSources: false,
+      },
+    ]
+
+    for (const operation of operations) {
+      for (const scenario of scenarios) {
+        const workspace = await tempWorkspace()
+        const project = await createNovelProject(workspace, {
+          title: `${operation.name}-${scenario.name}`,
+          reference_config: { ...scenario.current, notes: 'current' },
+        })
+
+        await operation.apply(workspace, project.id, { ...scenario.candidate, notes: 'updated' })
+
+        const stored = (await listNovelProjects(workspace)).find(candidate => candidate.id === project.id)
+        expect(stored?.reference_config?.notes).toBe('updated')
+        expect(Object.prototype.hasOwnProperty.call(stored?.reference_config || {}, 'prose_generation_source'))
+          .toBe(scenario.ownsSources)
+        expect(Object.prototype.hasOwnProperty.call(stored?.reference_config || {}, 'chapter_generation_source'))
+          .toBe(scenario.ownsSources)
+        if (scenario.ownsSources) {
+          expect(stored?.reference_config?.prose_generation_source).toEqual(legacySource)
+          expect(stored?.reference_config?.chapter_generation_source).toEqual(chapterSource)
+        }
+      }
+    }
+  })
+
+  test('dedicated generation-source mutation atomically replaces both authority fields', async () => {
+    const workspace = await tempWorkspace()
+    const originalLegacy = { version: 'prose_generation_source_v1', type: 'model' }
+    const originalChapter = {
+      version: 'chapter_generation_source_v1',
+      active: 'model',
+      model: { model_id: 217 },
+    }
+    const project = await createNovelProject(workspace, {
+      title: '来源原子更新',
+      reference_config: {
+        prose_generation_source: originalLegacy,
+        chapter_generation_source: originalChapter,
+        notes: 'preserved',
+      },
+    })
+    const nextLegacy = {
+      version: 'prose_generation_source_v1',
+      type: 'mcp',
+      mcp: { server_id: 'generic', key_id: 7, adapter_id: 'generic', agent_id: 'agent-1' },
+    }
+    const nextChapter = {
+      version: 'chapter_generation_source_v1',
+      active: 'mcp',
+      model: { model_id: 217 },
+      mcp: { ...nextLegacy.mcp },
+    }
+    const fences: string[] = []
+
+    const mutation = await mutateNovelProjectGenerationSource(workspace, {
+      projectId: project.id,
+      operation: 'test-atomic-source-replacement',
+      chapterGenerationSource: nextChapter,
+      proseGenerationSource: nextLegacy,
+      assertCurrentProject: current => {
+        fences.push('current')
+        expect(current.reference_config).toMatchObject({
+          prose_generation_source: originalLegacy,
+          chapter_generation_source: originalChapter,
+        })
+      },
+      assertMutationCanCommit: next => {
+        fences.push('commit')
+        expect(next.reference_config).toMatchObject({
+          prose_generation_source: nextLegacy,
+          chapter_generation_source: nextChapter,
+          notes: 'preserved',
+        })
+      },
+      result: 'replaced',
+    })
+
+    expect(fences).toEqual(['current', 'commit'])
+    expect(mutation?.result).toBe('replaced')
+    expect(mutation?.project.reference_config).toMatchObject({
+      prose_generation_source: nextLegacy,
+      chapter_generation_source: nextChapter,
+      notes: 'preserved',
+    })
+
+    const rollbackError = new Error('reject both source fields')
+    await expect(mutateNovelProjectGenerationSource(workspace, {
+      projectId: project.id,
+      operation: 'test-atomic-source-rollback',
+      chapterGenerationSource: originalChapter,
+      proseGenerationSource: originalLegacy,
+      assertMutationCanCommit: next => {
+        expect(next.reference_config).toMatchObject({
+          prose_generation_source: originalLegacy,
+          chapter_generation_source: originalChapter,
+        })
+        throw rollbackError
+      },
+      result: false,
+    })).rejects.toBe(rollbackError)
+    expect((await listNovelProjects(workspace)).find(candidate => candidate.id === project.id)?.reference_config)
+      .toEqual(mutation?.project.reference_config)
   })
 
   test('fails a queued workspace mutation after the configured lock bound', async () => {
@@ -512,4 +679,3 @@ describe('novel sqlite persistence', () => {
     expect(backfillBlock).toContain('id > ?')
   })
 })
-

@@ -460,20 +460,15 @@ describe('prose generation source mutation guard', () => {
 
   test('preserves existing dedicated generation sources when generic project update omits them', async () => {
     const workspace = await tempDir('mangaforge-novel-source-project-update-')
-    const { createNovelProject, getNovelProject, mutateNovelProjectReferenceConfig } = await import('../novel')
+    const { createNovelProject, getNovelProject, mutateNovelProjectGenerationSource } = await import('../novel')
     const { registerNovelCoreRoutes } = await import('./novel-core-routes')
     const project = await createNovelProject(workspace, { title: '保留绑定的项目' })
-    await mutateNovelProjectReferenceConfig(workspace, {
+    await mutateNovelProjectGenerationSource(workspace, {
       projectId: project.id,
       operation: 'test-existing-prose-generation-source',
-      mutate: current => ({
-        referenceConfig: {
-          ...current,
-          prose_generation_source: mcpProseGenerationSource,
-          chapter_generation_source: retainedChapterGenerationSource,
-        },
-        result: null,
-      }),
+      chapterGenerationSource: retainedChapterGenerationSource,
+      proseGenerationSource: mcpProseGenerationSource,
+      result: null,
     })
     const { app, handlers } = createRouteHarness()
     registerNovelCoreRoutes(app as any, () => workspace)
@@ -499,20 +494,15 @@ describe('prose generation source mutation guard', () => {
 
   test('preserves existing dedicated generation sources when reference config update omits them', async () => {
     const workspace = await tempDir('mangaforge-novel-source-config-update-')
-    const { createNovelProject, getNovelProject, mutateNovelProjectReferenceConfig } = await import('../novel')
+    const { createNovelProject, getNovelProject, mutateNovelProjectGenerationSource } = await import('../novel')
     const { registerNovelCoreRoutes } = await import('./novel-core-routes')
     const project = await createNovelProject(workspace, { title: '保留 reference config 绑定的项目' })
-    await mutateNovelProjectReferenceConfig(workspace, {
+    await mutateNovelProjectGenerationSource(workspace, {
       projectId: project.id,
       operation: 'test-existing-prose-generation-source',
-      mutate: current => ({
-        referenceConfig: {
-          ...current,
-          prose_generation_source: mcpProseGenerationSource,
-          chapter_generation_source: retainedChapterGenerationSource,
-        },
-        result: null,
-      }),
+      chapterGenerationSource: retainedChapterGenerationSource,
+      proseGenerationSource: mcpProseGenerationSource,
+      result: null,
     })
     const { app, handlers } = createRouteHarness()
     registerNovelCoreRoutes(app as any, () => workspace)

@@ -19,6 +19,7 @@ import {
   listNovelRuns,
   listNovelSettingEntities,
   listNovelWorldbuilding,
+  mutateNovelProjectGenerationSource,
   replaceNovelChapterSettingUsage,
   updateNovelChapter,
   updateNovelProject,
@@ -384,14 +385,21 @@ describe('commitNovelChapterAcceptance', () => {
       title: '第一章',
       chapter_text: '旧正文',
     })
-    await updateNovelProject(workspace, project.id, {
-      reference_config: {
-        ...project.reference_config,
-        prose_generation_source: {
-          ...originalSource,
-          mcp: { ...originalSource.mcp, agent_id: 'agent-2' },
-        },
+    const rotatedLegacySource = {
+      ...originalSource,
+      mcp: { ...originalSource.mcp, agent_id: 'agent-2' },
+    }
+    await mutateNovelProjectGenerationSource(workspace, {
+      projectId: project.id,
+      operation: 'test-rotate-generation-source',
+      chapterGenerationSource: {
+        version: 'chapter_generation_source_v1',
+        active: 'mcp',
+        model: {},
+        mcp: { ...rotatedLegacySource.mcp, model: '' },
       },
+      proseGenerationSource: rotatedLegacySource,
+      result: true,
     })
     const before = await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)
 
@@ -435,14 +443,13 @@ describe('commitNovelChapterAcceptance', () => {
       title: '第一章',
       chapter_text: '旧正文',
     })
-    await updateNovelProject(workspace, project.id, {
-      reference_config: {
-        ...project.reference_config,
-        chapter_generation_source: {
-          ...originalSource,
-          model: { model_id: 218 },
-        },
-      },
+    const rotatedChapterSource = { ...originalSource, model: { model_id: 218 } }
+    await mutateNovelProjectGenerationSource(workspace, {
+      projectId: project.id,
+      operation: 'test-rotate-generation-source',
+      chapterGenerationSource: rotatedChapterSource,
+      proseGenerationSource: { version: 'prose_generation_source_v1', type: 'model' },
+      result: true,
     })
     const before = await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)
 
@@ -534,10 +541,18 @@ describe('commitNovelChapterAcceptance', () => {
       title: '第一章',
       chapter_text: '旧正文',
     })
-    await updateNovelProject(workspace, project.id, {
-      reference_config: {
-        prose_generation_source: { ...source, mcp: { ...source.mcp, agent_id: 'agent-2' } },
+    const rotatedLegacySource = { ...source, mcp: { ...source.mcp, agent_id: 'agent-2' } }
+    await mutateNovelProjectGenerationSource(workspace, {
+      projectId: project.id,
+      operation: 'test-rotate-generation-source',
+      chapterGenerationSource: {
+        version: 'chapter_generation_source_v1',
+        active: 'mcp',
+        model: {},
+        mcp: { ...rotatedLegacySource.mcp, model: '' },
       },
+      proseGenerationSource: rotatedLegacySource,
+      result: true,
     })
 
     const accepted = await commitNovelChapterAcceptance(workspace, {

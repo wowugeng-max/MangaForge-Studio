@@ -17,9 +17,10 @@ import {
   deleteNovelProject,
   getNovelProject,
   listNovelProjects,
-  updateNovelProject,
+  mutateNovelProjectGenerationSource,
 } from '../novel'
 import { ChapterSourceLeaseRegistry } from '../novel-writing-service/generation-source/chapter-source-lease'
+import { toLegacyProseGenerationSource } from '../novel-writing-service/generation-source/source-config'
 import { registerNovelMcpBindingRoutes } from './novel-mcp-binding-routes'
 import { registerNovelProjectControlRoutes } from './novel-project-control-routes'
 
@@ -1488,15 +1489,17 @@ describe('explicit chapter generation source routes', () => {
       remoteCalls += 1
       const project = await getNovelProject(workspace, first.id)
       if (!project) throw new Error('project missing during retry test')
-      await updateNovelProject(workspace, first.id, {
-        reference_config: {
-          ...project.reference_config,
-          chapter_generation_source: {
-            version: 'chapter_generation_source_v1',
-            active: 'model',
-            model: { model_id: 300 + remoteCalls },
-          },
-        },
+      const rotatedChapterSource = {
+        version: 'chapter_generation_source_v1' as const,
+        active: 'model' as const,
+        model: { model_id: 300 + remoteCalls },
+      }
+      await mutateNovelProjectGenerationSource(workspace, {
+        projectId: first.id,
+        operation: 'test-rotate-generation-source',
+        chapterGenerationSource: rotatedChapterSource,
+        proseGenerationSource: toLegacyProseGenerationSource(rotatedChapterSource),
+        result: true,
       })
       return [{ id: 'agent-1', name: '正文 Agent' }]
     }
@@ -1530,14 +1533,16 @@ describe('explicit chapter generation source routes', () => {
         const project = await getNovelProject(workspace, first.id)
         if (!project) throw new Error('project missing during retained-source retry test')
         const current = project.reference_config?.chapter_generation_source
-        await updateNovelProject(workspace, first.id, {
-          reference_config: {
-            ...project.reference_config,
-            chapter_generation_source: {
-              ...current,
-              mcp: binding(key.id, 'agent-2'),
-            },
-          },
+        const rotatedChapterSource = {
+          ...current,
+          mcp: binding(key.id, 'agent-2'),
+        }
+        await mutateNovelProjectGenerationSource(workspace, {
+          projectId: first.id,
+          operation: 'test-rotate-generation-source',
+          chapterGenerationSource: rotatedChapterSource,
+          proseGenerationSource: toLegacyProseGenerationSource(rotatedChapterSource),
+          result: true,
         })
       }
       return [
@@ -1958,10 +1963,15 @@ describe('novel MCP prose-source binding routes', () => {
     const saved = await call(handlers.get(`PUT ${path}`), { params: { id: String(first.id) }, body: { source } })
     expect(saved.statusCode).toBe(200)
     expect(saved.body.source).toMatchObject({ version: 'prose_generation_source_v1', type: 'mcp' })
-    expect((await getNovelProject(workspace, first.id))?.reference_config?.chapter_generation_source).toEqual({
+    const storedReferenceConfig = (await getNovelProject(workspace, first.id))?.reference_config
+    expect(storedReferenceConfig?.chapter_generation_source).toEqual({
       version: 'chapter_generation_source_v1',
       active: 'mcp',
       model: {},
+      mcp: { ...source.mcp, model: '' },
+    })
+    expect(storedReferenceConfig?.prose_generation_source).toEqual({
+      ...source,
       mcp: { ...source.mcp, model: '' },
     })
   })
