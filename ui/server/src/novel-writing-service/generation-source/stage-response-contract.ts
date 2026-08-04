@@ -104,11 +104,15 @@ function validateReadability(content: string) {
 
 function validateQualityReview(content: string) {
   const value = parseJsonObject(content)
+  const publishable = ownDataValue(value, 'publishable')
+  const passed = ownDataValue(value, 'passed')
   if (!finiteScore(ownDataValue(value, 'score'))
-    || typeof ownDataValue(value, 'publishable') !== 'boolean') {
+    || (publishable !== undefined && typeof publishable !== 'boolean')
+    || (passed !== undefined && typeof passed !== 'boolean')
+    || (typeof publishable !== 'boolean' && typeof passed !== 'boolean')) {
     throw new TypeError('quality verdict required')
   }
-  for (const field of ['findings', 'blocking_findings', 'advisory_findings']) {
+  for (const field of ['issues', 'findings', 'blocking_findings', 'advisory_findings']) {
     const findings = ownDataValue(value, field)
     if (findings !== undefined && !Array.isArray(findings)) {
       throw new TypeError('quality findings must be arrays')
@@ -132,6 +136,10 @@ function nonEmptyString(value: unknown) {
 }
 
 const STRUCTURED_REVIEW_FIELD_VERDICT_MARKERS: Readonly<Record<string, readonly string[]>> = {
+  next_chapter_quality_plan_receipts: ['delivered'],
+  nextChapterQualityPlanReceipts: ['delivered'],
+  delivery_risk_receipts: ['delivered'],
+  deliveryRiskReceipts: ['delivered'],
   status_filter_receipts: ['used_in_chapter', 'usedInChapter'],
   statusFilterReceipts: ['used_in_chapter', 'usedInChapter'],
 }
@@ -139,10 +147,9 @@ const STRUCTURED_REVIEW_FIELD_VERDICT_MARKERS: Readonly<Record<string, readonly 
 function structuredReviewEntry(field: string, value: unknown) {
   if (!plainObject(value)) return false
   const status = ownDataValue(value, 'status') ?? ownDataValue(value, 'state')
-  const delivered = ownDataValue(value, 'delivered')
   const hasFieldVerdict = (STRUCTURED_REVIEW_FIELD_VERDICT_MARKERS[field] || [])
     .some(marker => typeof ownDataValue(value, marker) === 'boolean')
-  const hasVerdict = nonEmptyString(status) || typeof delivered === 'boolean' || hasFieldVerdict
+  const hasVerdict = nonEmptyString(status) || hasFieldVerdict
   const reportFields = [
     'key', 'label', 'evidence', 'fix', 'remaining_risk', 'remainingRisk',
     'risk_item', 'riskItem', 'required_action', 'requiredAction',
@@ -187,7 +194,6 @@ function validateStructuredReview(content: string) {
     if (!Array.isArray(report) || !report.every(auxiliaryReviewEntry)) {
       throw new TypeError('structured review issue entries required')
     }
-    meaningfulEntries += report.length
   }
   if (meaningfulEntries === 0) throw new TypeError('structured review arrays required')
   return value
@@ -199,6 +205,10 @@ function validateEditorReport(content: string) {
   const score = ownDataValue(value, 'score')
   const issues = ownDataValue(value, 'issues')
   const suggestions = ownDataValue(value, 'suggestions')
+  const overallScore = ownDataValue(value, 'overall_score')
+  const mustFix = ownDataValue(value, 'must_fix')
+  const optionalImprovements = ownDataValue(value, 'optional_improvements')
+  const oneClickRevisionPrompt = ownDataValue(value, 'one_click_revision_prompt')
   if (passed !== undefined && typeof passed !== 'boolean') {
     throw new TypeError('editor verdict must be a boolean')
   }
@@ -211,6 +221,31 @@ function validateEditorReport(content: string) {
   if (suggestions !== undefined && !Array.isArray(suggestions)) {
     throw new TypeError('editor suggestions must be an array')
   }
+  if (overallScore !== undefined && !finiteScore(overallScore)) {
+    throw new TypeError('editor overall score must be finite')
+  }
+  if (mustFix !== undefined && !Array.isArray(mustFix)) {
+    throw new TypeError('editor must-fix report must be an array')
+  }
+  if (optionalImprovements !== undefined && !Array.isArray(optionalImprovements)) {
+    throw new TypeError('editor optional improvements must be an array')
+  }
+  if (oneClickRevisionPrompt !== undefined && typeof oneClickRevisionPrompt !== 'string') {
+    throw new TypeError('editor revision prompt must be a string')
+  }
+  const hasCanonicalField = overallScore !== undefined
+    || mustFix !== undefined
+    || optionalImprovements !== undefined
+    || oneClickRevisionPrompt !== undefined
+  if (hasCanonicalField) {
+    const hasCanonicalReport = Array.isArray(mustFix)
+      || Array.isArray(optionalImprovements)
+      || nonEmptyString(oneClickRevisionPrompt)
+    if (!finiteScore(overallScore) || !hasCanonicalReport) {
+      throw new TypeError('canonical editor report required')
+    }
+    return value
+  }
   const hasVerdict = typeof passed === 'boolean' || finiteScore(score)
   const hasReport = Array.isArray(issues) || Array.isArray(suggestions)
   if (!hasVerdict && !hasReport) throw new TypeError('editor report required')
@@ -221,19 +256,67 @@ function validateStoryState(content: string) {
   const value = parseJsonObject(content)
   const snakeDelta = ownDataValue(value, 'state_delta')
   const camelDelta = ownDataValue(value, 'stateDelta')
+  if (snakeDelta === undefined && camelDelta === undefined) {
+    throw new TypeError('Story State delta object required')
+  }
   if ((snakeDelta !== undefined && !plainObject(snakeDelta))
     || (camelDelta !== undefined && !plainObject(camelDelta))) {
     throw new TypeError('Story State delta object required')
   }
-  const delta = plainObject(snakeDelta) ? snakeDelta : plainObject(camelDelta) ? camelDelta : value
   const plainCollection = (candidate: unknown) => Array.isArray(candidate)
     && candidate.every(item => nonEmptyString(item)
       || (plainObject(item) && Object.keys(item).length > 0))
-  const timeline = (candidate: unknown) => Array.isArray(candidate)
-    && candidate.every(item => nonEmptyString(item)
-      || (plainObject(item) && Object.keys(item).length > 0))
+  const meaningfulObject = (candidate: unknown) => plainObject(candidate)
+    && Object.keys(candidate).length > 0
+  const progressValue = (candidate: unknown) => nonEmptyString(candidate)
+    || meaningfulObject(candidate)
+    || plainCollection(candidate)
+  const finiteNonNegativeNumber = (candidate: unknown) => typeof candidate === 'number'
+    && Number.isFinite(candidate)
+    && candidate >= 0
+  const validateAliasedObject = (
+    candidate: unknown,
+    fields: ReadonlyArray<{
+      aliases: readonly string[]
+      validate: (fieldValue: unknown) => boolean
+    }>,
+  ) => {
+    if (!plainObject(candidate)) return false
+    let recognizedFields = 0
+    for (const field of fields) {
+      for (const alias of field.aliases) {
+        if (!Object.prototype.hasOwnProperty.call(candidate, alias)) continue
+        recognizedFields += 1
+        if (!field.validate(ownDataValue(candidate, alias))) return false
+      }
+    }
+    return recognizedFields > 0
+  }
   const progressSummary = (candidate: unknown) => nonEmptyString(candidate)
-    || (plainObject(candidate) && Object.keys(candidate).length > 0)
+    || validateAliasedObject(candidate, [
+      { aliases: ['last_completed_chapter', 'lastCompletedChapter'], validate: finiteNonNegativeNumber },
+      { aliases: ['updated_at', 'updatedAt'], validate: nonEmptyString },
+      { aliases: ['completed_chapter_count', 'completedChapterCount'], validate: finiteNonNegativeNumber },
+      { aliases: ['completed_word_count', 'completedWordCount'], validate: finiteNonNegativeNumber },
+      { aliases: ['active_foreshadowing_count', 'activeForeshadowingCount'], validate: finiteNonNegativeNumber },
+      { aliases: ['recent_changed_characters', 'recentChangedCharacters'], validate: plainCollection },
+      { aliases: ['next_outline_status', 'nextOutlineStatus'], validate: nonEmptyString },
+      { aliases: ['notes'], validate: value => nonEmptyString(value) || plainCollection(value) },
+    ])
+  const layeredMemoryContext = (candidate: unknown) => validateAliasedObject(candidate, [
+    { aliases: ['recent_chapter_details', 'recentChapterDetails'], validate: plainCollection },
+    { aliases: ['ten_chapter_summaries', 'tenChapterSummaries'], validate: plainCollection },
+    { aliases: ['volume_overview', 'volumeOverview'], validate: plainCollection },
+    { aliases: ['archive_refs', 'archiveRefs'], validate: plainCollection },
+    { aliases: ['red_lines', 'redLines'], validate: plainCollection },
+  ])
+  const dailyContextSnapshot = (candidate: unknown) => validateAliasedObject(candidate, [
+    { aliases: ['current_chapter', 'currentChapter'], validate: finiteNonNegativeNumber },
+    { aliases: ['current_scene', 'currentScene'], validate: nonEmptyString },
+    { aliases: ['current_emotion_target', 'currentEmotionTarget'], validate: nonEmptyString },
+    { aliases: ['writing_changes', 'writingChanges'], validate: plainCollection },
+    { aliases: ['pending_clues', 'pendingClues'], validate: plainCollection },
+  ])
   const fields: Array<{
     aliases: readonly string[]
     validate: (candidate: unknown) => boolean
@@ -251,16 +334,25 @@ function validateStoryState(content: string) {
     { aliases: ['active_locations', 'activeLocations'], validate: plainCollection },
     { aliases: ['open_questions', 'openQuestions'], validate: plainCollection },
     { aliases: ['next_chapter_priorities', 'nextChapterPriorities'], validate: plainCollection },
-    { aliases: ['timeline'], validate: timeline },
+    { aliases: ['timeline'], validate: plainCollection },
+    { aliases: ['mainline_progress', 'mainlineProgress'], validate: progressValue },
+    { aliases: ['volume_progress', 'volumeProgress'], validate: progressValue },
+    { aliases: ['unresolved_conflicts', 'unresolvedConflicts'], validate: plainCollection },
+    { aliases: ['recent_repeated_information', 'recentRepeatedInformation'], validate: plainCollection },
+    { aliases: ['layered_memory_context', 'layeredMemoryContext'], validate: layeredMemoryContext },
     { aliases: ['progress_summary', 'progressSummary'], validate: progressSummary },
+    { aliases: ['daily_context_snapshot', 'dailyContextSnapshot'], validate: dailyContextSnapshot },
   ]
   let recognizedFields = 0
-  for (const field of fields) {
-    for (const alias of field.aliases) {
-      if (!Object.prototype.hasOwnProperty.call(delta, alias)) continue
-      recognizedFields += 1
-      if (!field.validate(ownDataValue(delta, alias))) {
-        throw new TypeError(`Invalid Story State field: ${alias}`)
+  const deltas = [snakeDelta, camelDelta].filter(plainObject)
+  for (const delta of deltas) {
+    for (const field of fields) {
+      for (const alias of field.aliases) {
+        if (!Object.prototype.hasOwnProperty.call(delta, alias)) continue
+        recognizedFields += 1
+        if (!field.validate(ownDataValue(delta, alias))) {
+          throw new TypeError(`Invalid Story State field: ${alias}`)
+        }
       }
     }
   }

@@ -1701,6 +1701,7 @@ describe('explicit chapter generation source routes', () => {
       MCP_GENERATION_TIMEOUT: 504,
       MCP_CANCELLED: 499,
       MCP_EMPTY_PROSE: 502,
+      MCP_STAGE_CONTRACT_INVALID: 502,
       MCP_STORE_CORRUPT: 500,
       MCP_STORE_IO_FAILED: 500,
       MCP_RUNTIME_ERROR: 503,
