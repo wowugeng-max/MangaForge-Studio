@@ -678,18 +678,23 @@ describe('explicit chapter generation source routes', () => {
   })
 
   test('updates the retained model while MCP stays active until model is explicitly activated', async () => {
-    const { key, first, handlers } = await fixture()
+    const { workspace, key, first, handlers } = await fixture()
     const mcp = binding(key.id)
 
-    await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
-      params: { id: String(first.id) }, body: { model_id: 217 },
-    })
     await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/mcp`), {
       params: { id: String(first.id) }, body: { mcp },
     })
-    await call(routeHandler(handlers, `POST ${CHAPTER_SOURCE_BASE}/activate`), {
+    const mcpActivated = await call(routeHandler(handlers, `POST ${CHAPTER_SOURCE_BASE}/activate`), {
       params: { id: String(first.id) }, body: { active: 'mcp' },
     })
+    const initialMcpView = await expectViewReadBack(handlers, first.id, mcpActivated)
+    expect(initialMcpView.source).toEqual({
+      version: 'chapter_generation_source_v1',
+      active: 'mcp',
+      model: {},
+      mcp,
+    })
+    expect(initialMcpView.display).toEqual({ active: 'mcp', model_id: null, mcp })
 
     const modelSaved = await call(routeHandler(handlers, `PUT ${CHAPTER_SOURCE_BASE}/model`), {
       params: { id: String(first.id) }, body: { model_id: 218 },
@@ -709,6 +714,8 @@ describe('explicit chapter generation source routes', () => {
     const activatedView = await expectViewReadBack(handlers, first.id, activated)
     expect(activatedView.source).toEqual({ ...retainedView.source, active: 'model' })
     expect(activatedView.display).toEqual({ active: 'model', model_id: 218, mcp })
+    expect((await getNovelProject(workspace, first.id))?.reference_config?.chapter_generation_source)
+      .toEqual(activatedView.source)
   })
 
   test('requires a raw positive safe model id and makes same-target activation idempotent', async () => {
