@@ -11,6 +11,14 @@ export type BudaDriveSnapshot = {
   snapshotHash: string
 }
 
+const LIVE_BUDA_UPSERT_ORDER = [
+  '/mangaforge/writing-bible.md',
+  '/mangaforge/story-state.json',
+  '/mangaforge/continuity.md',
+  '/mangaforge/recent-chapters.md',
+  '/mangaforge/manifest.json',
+] as const
+
 function sha256(value: string) {
   return createHash('sha256').update(value, 'utf8').digest('hex')
 }
@@ -109,9 +117,11 @@ export async function syncBudaDriveSnapshot(input: {
       get timeoutMs() { return deadline.timeoutMs(input.toolTimeoutMs) },
       operation,
     })
-    const probeFilesDirectly = tools.listDriveFiles.startsWith('api_claw_')
-    const remotePaths = new Set<string>()
-    if (!probeFilesDirectly) {
+    const fullUpsertLiveBuda = tools.upsertDriveFile.startsWith('api_claw_')
+      && tools.readDriveText.startsWith('api_claw_')
+    const changed: string[] = fullUpsertLiveBuda ? [...LIVE_BUDA_UPSERT_ORDER] : []
+    if (!fullUpsertLiveBuda) {
+      const remotePaths = new Set<string>()
       const listed = mcpResultData(await client.callTool(
         tools.listDriveFiles,
         buildBudaToolArguments('listDriveFiles', tools.listDriveFiles, { agentId, path: '/mangaforge' }),
@@ -122,19 +132,18 @@ export async function syncBudaDriveSnapshot(input: {
         const path = String(item?.path || item?.filePath || '')
         if (path) remotePaths.add(path)
       }
-    }
-    const changed: string[] = []
-    for (const [path, content] of Object.entries(snapshot.files)) {
-      if (!probeFilesDirectly && !remotePaths.has(path)) {
-        changed.push(path)
-        continue
+      for (const [path, content] of Object.entries(snapshot.files)) {
+        if (!remotePaths.has(path)) {
+          changed.push(path)
+          continue
+        }
+        const remote = driveFileState(await client.callTool(
+          tools.readDriveText,
+          buildBudaToolArguments('readDriveText', tools.readDriveText, { agentId, filePath: path, maxBytes: 5_000_000 }),
+          callOptions('read_safe'),
+        ))
+        if (!remote.exists || sha256(remote.content) !== snapshot.hashes[path]) changed.push(path)
       }
-      const remote = driveFileState(await client.callTool(
-        tools.readDriveText,
-        buildBudaToolArguments('readDriveText', tools.readDriveText, { agentId, filePath: path, maxBytes: 5_000_000 }),
-        callOptions('read_safe'),
-      ))
-      if (!remote.exists || sha256(remote.content) !== snapshot.hashes[path]) changed.push(path)
     }
     const ordered = changed
       .filter(path => path !== '/mangaforge/manifest.json')

@@ -3,6 +3,14 @@ import { McpGenerationDeadline } from '../deadline'
 import { McpError } from '../errors'
 import { buildBudaDriveSnapshot, syncBudaDriveSnapshot } from './buda-drive'
 
+const LIVE_PATH_ORDER = [
+  '/mangaforge/writing-bible.md',
+  '/mangaforge/story-state.json',
+  '/mangaforge/continuity.md',
+  '/mangaforge/recent-chapters.md',
+  '/mangaforge/manifest.json',
+] as const
+
 function result(structuredContent: Record<string, unknown>) {
   return { content: [], structuredContent }
 }
@@ -119,10 +127,10 @@ describe('Buda Drive authority snapshot', () => {
     expectDriveOperations(calls)
   })
 
-  test('probes live snake-case Drive files directly because Buda list calls can hang', async () => {
+  test('full-upserts an empty live Buda Drive without list or pre-upsert reads', async () => {
     const snapshot = snapshotFixture()
-    const remote = new Map(Object.entries(snapshot.files))
-    remote.set('/mangaforge/continuity.md', 'stale')
+    const remote = new Map<string, string>()
+    const operations: string[] = []
     const calls: Array<{ name: string; args: any; options: any }> = []
     const client = {
       async callTool(name: string, args: any, options: any) {
@@ -131,25 +139,29 @@ describe('Buda Drive authority snapshot', () => {
           throw new Error('live Buda Drive list must not be called')
         }
         if (name === 'api_claw_api_agent_drive_text') {
+          const path = args.body.filePath
+          operations.push(`read:${path}`)
           expect(args).toEqual({
             params: { agentId: 'agent-1' },
             body: { filePath: expect.any(String), maxBytes: 5_000_000 },
           })
           return result({
-            content: remote.get(args.body.filePath) || '',
-            exists: remote.has(args.body.filePath),
+            content: remote.get(path) || '',
+            exists: remote.has(path),
           })
         }
         if (name === 'api_claw_upsert_api_agent_drive_file') {
+          const path = args.body.path
+          operations.push(`write:${path}`)
           expect(args).toEqual({
             params: { agentId: 'agent-1' },
             body: {
-              path: '/mangaforge/continuity.md',
-              content: snapshot.files['/mangaforge/continuity.md'],
-              mimeType: 'text/markdown',
+              path,
+              content: snapshot.files[path],
+              mimeType: path.endsWith('.json') ? 'application/json' : 'text/markdown',
             },
           })
-          remote.set(args.body.path, args.body.content)
+          remote.set(path, args.body.content)
           return result({ ok: true })
         }
         throw new Error(`unexpected tool ${name}`)
@@ -168,9 +180,42 @@ describe('Buda Drive authority snapshot', () => {
       snapshot,
     })
 
-    expect(synced.uploaded_paths).toEqual(['/mangaforge/continuity.md'])
-    expect(calls.filter(call => call.name === 'api_claw_list_api_agent_drive_files')).toHaveLength(0)
+    expect(synced.uploaded_paths).toEqual(LIVE_PATH_ORDER)
+    expect(operations).toEqual(LIVE_PATH_ORDER.flatMap(path => [`write:${path}`, `read:${path}`]))
     expectDriveOperations(calls)
+  })
+
+  test('uses differential discovery unless both Buda mutation and read tools are live', async () => {
+    const snapshot = snapshotFixture()
+    const remote = new Map(Object.entries(snapshot.files))
+    const calls: string[] = []
+    const client = {
+      async callTool(name: string, args: any) {
+        calls.push(name)
+        if (name === 'api_claw_list_api_agent_drive_files') {
+          return result({ files: [...remote.keys()].map(path => ({ path, type: 'file' })) })
+        }
+        if (name === 'readDrive') return result({ content: remote.get(args.filePath) || '' })
+        if (name === 'api_claw_upsert_api_agent_drive_file') throw new Error('unchanged files must not be written')
+        throw new Error(`unexpected tool ${name}`)
+      },
+    }
+
+    const synced = await syncBudaDriveSnapshot({
+      ...deadlineOptions(),
+      client: client as any,
+      tools: {
+        listDriveFiles: 'api_claw_list_api_agent_drive_files',
+        readDriveText: 'readDrive',
+        upsertDriveFile: 'api_claw_upsert_api_agent_drive_file',
+      },
+      agentId: 'agent-1',
+      snapshot,
+    })
+
+    expect(synced.uploaded_paths).toEqual([])
+    expect(calls[0]).toBe('api_claw_list_api_agent_drive_files')
+    expect(calls.filter(name => name === 'readDrive')).toHaveLength(LIVE_PATH_ORDER.length)
   })
 
   test('reconciles a committed upsert response failure without replaying the mutation', async () => {
@@ -211,9 +256,7 @@ describe('Buda Drive authority snapshot', () => {
 
   test('retries a live upsert only after an exact pre-dispatch rejection is reconciled as uncommitted', async () => {
     const snapshot = snapshotFixture()
-    const changedPath = '/mangaforge/continuity.md'
-    const remote = new Map(Object.entries(snapshot.files))
-    remote.delete(changedPath)
+    const remote = new Map<string, string>()
     const calls: Array<{ name: string; args: any; options: any }> = []
     let writeAttempts = 0
     const client = {
@@ -250,29 +293,26 @@ describe('Buda Drive authority snapshot', () => {
       snapshot,
     })
 
-    expect(synced.uploaded_paths).toEqual([changedPath])
-    expect(writeAttempts).toBe(2)
-    expect(remote.get(changedPath)).toBe(snapshot.files[changedPath])
+    expect(synced.uploaded_paths).toEqual(LIVE_PATH_ORDER)
+    expect(calls[0]?.name).toBe('api_claw_upsert_api_agent_drive_file')
+    expect(writeAttempts).toBe(LIVE_PATH_ORDER.length + 1)
+    for (const path of LIVE_PATH_ORDER) expect(remote.get(path)).toBe(snapshot.files[path])
     expectDriveOperations(calls)
   })
 
   test('does not replay a live upsert when the reconciliation read itself fails', async () => {
     const snapshot = snapshotFixture()
-    const changedPath = '/mangaforge/continuity.md'
-    const remote = new Map(Object.entries(snapshot.files))
-    remote.delete(changedPath)
     const writeFailure = new McpError('MCP_CONNECTION_LOST', 'MCP 连接已失效', {
       reason: 'buda_server_not_initialized',
     })
+    const calls: string[] = []
     let writeAttempts = 0
     const client = {
       async callTool(name: string, args: any) {
+        calls.push(name)
         if (name === 'api_claw_api_agent_drive_text') {
-          if (writeAttempts > 0 && args.body.filePath === changedPath) {
-            throw new Error('reconciliation read unavailable')
-          }
-          const path = args.body.filePath
-          return result({ content: remote.get(path) || '', exists: remote.has(path) })
+          if (writeAttempts > 0) throw new Error('reconciliation read unavailable')
+          return result({ content: '', exists: false })
         }
         if (name === 'api_claw_upsert_api_agent_drive_file') {
           writeAttempts += 1
@@ -295,6 +335,10 @@ describe('Buda Drive authority snapshot', () => {
     }).catch(error => error)
 
     expect(caught).toMatchObject({ code: 'MCP_DRIVE_SYNC_FAILED' })
+    expect(calls).toEqual([
+      'api_claw_upsert_api_agent_drive_file',
+      'api_claw_api_agent_drive_text',
+    ])
     expect(writeAttempts).toBe(1)
   })
 
