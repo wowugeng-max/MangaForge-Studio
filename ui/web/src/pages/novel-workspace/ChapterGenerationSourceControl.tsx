@@ -238,10 +238,8 @@ export function ChapterGenerationSourceControl({
       else setLocalPending({ projectId, pending: nextPending })
     },
   })
-  const modelDisabled = availability.disabled || active === 'mcp'
-  const modelDisabledReason = active === 'mcp'
-    ? '章节生产链当前由 MCP Agent 执行'
-    : availability.reason
+  const modelDisabled = availability.disabled
+  const modelDisabledReason = availability.reason
 
   const modelDetail = (isActive: boolean) => (
     <div className={`novel-chapter-source-detail ${isActive ? 'is-active' : 'is-inactive'}`}>
@@ -258,8 +256,8 @@ export function ChapterGenerationSourceControl({
               onChange={value => { void actions.saveModel(Number(value)) }}
               options={modelOptions}
               popupMatchSelectWidth={440}
-              placeholder="选择模型"
-              disabled={modelDisabled || !isActive}
+              placeholder="选择停用路径的模型"
+              disabled={modelDisabled}
             />
           </span>
         </Tooltip>

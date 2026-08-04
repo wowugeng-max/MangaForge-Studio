@@ -280,6 +280,35 @@ describe('controlled exclusive chapter source actions', () => {
     expect(harness.selectedModelId).toBe(301)
   })
 
+  test('saves a retained model without implicitly activating it while MCP is active', async () => {
+    const module = await loadControlModule()
+    expect(typeof module.createChapterGenerationSourceActions).toBe('function')
+    if (typeof module.createChapterGenerationSourceActions !== 'function') return
+    const calls: string[] = []
+    const harness = actionHarness(module, {
+      initial: sourceView('mcp', { modelId: 217 }),
+      api: {
+        saveModel: async (_projectId: number, modelId: number) => {
+          calls.push(`saveModel:${modelId}`)
+          return sourceView('mcp', { modelId })
+        },
+        activate: async (_projectId: number, active: 'model' | 'mcp') => {
+          calls.push(`activate:${active}`)
+          return sourceView(active, { modelId: 218 })
+        },
+      },
+    })
+
+    await harness.actions.saveModel(218)
+
+    expect(calls).toEqual(['saveModel:218'])
+    expect(harness.authority.source?.source).toMatchObject({
+      active: 'mcp',
+      model: { model_id: 218 },
+    })
+    expect(harness.selectedModelId).toBe(218)
+  })
+
   test('bounds activate, saveModel, reconciliation, and explicit refresh without lifecycle abort signals', async () => {
     const module = await loadControlModule()
     const apiModule = await import('../../api/mcp') as Record<string, any>
@@ -473,11 +502,88 @@ describe('controlled chapter source rendering', () => {
       expect(html).not.toContain('is-inactive')
     }
     if (active === 'mcp') {
-      expect(html).toContain('章节生产链当前由 MCP Agent 执行')
-      expect(html).toContain('ant-select-disabled')
+      expect(html).toContain('模型 API · 已停用')
+      expect(html).not.toContain('章节生产链当前由 MCP Agent 执行')
+      expect(html).not.toContain('ant-select-disabled')
     } else {
       expect(html).not.toContain('章节生产链当前由 MCP Agent 执行')
     }
+  })
+
+  test('shows the persisted retained model and keeps all model options while MCP is active', async () => {
+    const module = await loadControlModule()
+    expect(typeof module.ChapterGenerationSourceControl).toBe('function')
+    if (typeof module.ChapterGenerationSourceControl !== 'function') return
+    const html = renderToStaticMarkup(React.createElement(module.ChapterGenerationSourceControl, {
+      projectId: 1,
+      authority: confirmedAuthorityState(sourceView('mcp', { modelId: 218 })),
+      modelOptions: [
+        { value: 218, label: '备用模型 218' },
+        { value: 301, label: '备用模型 301' },
+      ],
+      selectedModelId: 301,
+      compact: false,
+      locallyBusy: false,
+      beginSourceOperation: () => ({ projectId: 1, loadEpoch: 1, operationEpoch: 1 }),
+      assertSourceOperationCurrent: () => {},
+      onAuthorityChange: () => {},
+      onSelectedModelConfirmed: () => {},
+      onOpenSettings: () => {},
+    }))
+
+    expect(html).toContain('备用模型 218')
+    expect(html).not.toContain('备用模型 301')
+    expect(html).not.toContain('ant-select-disabled')
+  })
+
+  test('uses the inactive-path placeholder when no retained model is persisted', async () => {
+    const module = await loadControlModule()
+    expect(typeof module.ChapterGenerationSourceControl).toBe('function')
+    if (typeof module.ChapterGenerationSourceControl !== 'function') return
+    const view = sourceView('mcp')
+    delete view.source.model.model_id
+    const html = renderToStaticMarkup(React.createElement(module.ChapterGenerationSourceControl, {
+      projectId: 1,
+      authority: confirmedAuthorityState(view),
+      modelOptions: [{ value: 218, label: '备用模型 218' }],
+      compact: false,
+      locallyBusy: false,
+      beginSourceOperation: () => ({ projectId: 1, loadEpoch: 1, operationEpoch: 1 }),
+      assertSourceOperationCurrent: () => {},
+      onAuthorityChange: () => {},
+      onSelectedModelConfirmed: () => {},
+      onOpenSettings: () => {},
+    }))
+
+    expect(html).toContain('选择停用路径的模型')
+    expect(html).not.toContain('ant-select-disabled')
+  })
+
+  test.each([
+    ['locked', confirmedAuthorityState(sourceView('mcp', { locked: true })), false, false],
+    ['locally busy', confirmedAuthorityState(sourceView('mcp')), true, false],
+    ['pending', confirmedAuthorityState(sourceView('mcp')), false, true],
+    ['unknown', authorityUnknownState(sourceView('mcp'), new Error('private') as any), false, false],
+  ] as const)('disables the retained model selector when source authority is %s', async (_state, authority, locallyBusy, pending) => {
+    const module = await loadControlModule()
+    expect(typeof module.ChapterGenerationSourceControl).toBe('function')
+    if (typeof module.ChapterGenerationSourceControl !== 'function') return
+    const html = renderToStaticMarkup(React.createElement(module.ChapterGenerationSourceControl, {
+      projectId: 1,
+      authority,
+      modelOptions: [{ value: 217, label: '模型 217' }],
+      selectedModelId: 217,
+      compact: false,
+      locallyBusy,
+      pending,
+      beginSourceOperation: () => ({ projectId: 1, loadEpoch: 1, operationEpoch: 1 }),
+      assertSourceOperationCurrent: () => {},
+      onAuthorityChange: () => {},
+      onSelectedModelConfirmed: () => {},
+      onOpenSettings: () => {},
+    }))
+
+    expect(html).toContain('ant-select-disabled')
   })
 
   test('disables every source action for busy, locked, unknown, pending, and null authority states', async () => {
