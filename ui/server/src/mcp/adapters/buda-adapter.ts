@@ -1,5 +1,5 @@
 import { types } from 'node:util'
-import { isAbortRelatedError, McpError } from '../errors'
+import { isAbortRelatedError, McpError, mcpFailureEvidence } from '../errors'
 import { mcpResultData, buildBudaDriveSnapshot, syncBudaDriveSnapshot } from './buda-drive'
 import { buildBudaToolArguments, resolveBudaTools, type BudaToolMap } from './buda-tool-map'
 import type { McpOperationKind, McpOperationOptions, McpToolResult } from '../types'
@@ -14,6 +14,7 @@ import type {
   McpAdapterOperationOptions,
   McpClientPort,
   McpGenerationAdapter,
+  McpStabilityPolicy,
 } from './types'
 
 function operationOptions(options: McpAdapterOperationOptions, operation: McpOperationKind) {
@@ -671,6 +672,33 @@ class BudaChapterTaskSessionImpl implements McpChapterTaskSession {
 
 export class BudaAdapter implements McpGenerationAdapter {
   readonly id = 'buda'
+  readonly stabilityPolicy: McpStabilityPolicy = {
+    requiredConsecutiveSuccesses: 2,
+    warmupWindowMs: 15_000,
+    classify: (error, operation) => {
+      const evidence = mcpFailureEvidence(error)
+      if (evidence?.http_status === 400
+        && evidence.jsonrpc_code === -32000
+        && evidence.response_id === null
+        && evidence.reason === 'server_not_initialized') {
+        return 'not_ready_pre_dispatch'
+      }
+      const code = error instanceof McpError ? error.code : ''
+      if (operation === 'read_safe'
+        && (code === 'MCP_CONNECTION_LOST' || code === 'MCP_CONNECT_TIMEOUT')) {
+        return 'transient_read_failure'
+      }
+      return operation === 'mutation' ? 'ambiguous_write_failure' : 'terminal_failure'
+    },
+    probe: async (client, options) => {
+      const tools = resolveBudaTools(await client.listTools({ ...options, refreshTools: true }))
+      await client.callTool(
+        tools.listAgents,
+        buildBudaToolArguments('listAgents', tools.listAgents, {}),
+        operationOptions(options, 'read_safe'),
+      )
+    },
+  }
   private tools?: BudaToolMap
 
   constructor(private readonly client: McpClientPort) {}

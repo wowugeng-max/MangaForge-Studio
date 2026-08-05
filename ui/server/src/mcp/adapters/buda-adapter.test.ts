@@ -4,6 +4,8 @@ import * as budaAdapterModule from './buda-adapter'
 import { BUDA_MCP_SERVER_TEMPLATE } from '../server-store'
 import { McpGenerationDeadline } from '../deadline'
 import { McpError } from '../errors'
+import { BUDA_TOOL_ALIASES, buildBudaToolArguments, resolveBudaTools } from './buda-tool-map'
+import type { McpGenerationAdapter } from './types'
 
 const toolNames = [
   'apiClaw.listApiAgents',
@@ -128,6 +130,85 @@ function expectBudaOperations(calls: Array<{ name: string; options: any }>) {
 }
 
 describe('BudaAdapter', () => {
+  test('exposes a two-success readiness policy that refreshes tools and calls the resolved listAgents tool', async () => {
+    const fake = createFakeClient()
+    const adapter: McpGenerationAdapter = new BudaAdapter(fake.client as any)
+    const policy = adapter.stabilityPolicy
+    const advertisedTools = Object.values(BUDA_TOOL_ALIASES)
+      .map(aliases => ({ name: aliases[0]!, inputSchema: { type: 'object' } }))
+    const mappedTools = resolveBudaTools(advertisedTools)
+    fake.client.listTools = async (options: any) => {
+      fake.listToolOptions.push(options)
+      return advertisedTools
+    }
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      fake.calls.push({ name, args, options })
+      return structured({ apiAgents: [] })
+    }
+
+    expect(policy?.requiredConsecutiveSuccesses).toBe(2)
+    expect(policy?.warmupWindowMs).toBe(15_000)
+
+    await policy!.probe(fake.client as any, { timeoutMs: 500 })
+
+    expect(fake.listToolOptions).toEqual([{ timeoutMs: 500, refreshTools: true }])
+    expect(fake.calls).toHaveLength(1)
+    expect(fake.calls[0]).toMatchObject({
+      name: mappedTools.listAgents,
+      args: buildBudaToolArguments('listAgents', mappedTools.listAgents, {}),
+      options: { operation: 'read_safe', timeoutMs: 500 },
+    })
+  })
+
+  test('classifies only exact structured not-ready evidence as pre-dispatch', () => {
+    const policy = new BudaAdapter(createFakeClient().client as any).stabilityPolicy
+    const errorWithEvidence = (failureEvidence: Record<string, unknown>) => new McpError(
+      'MCP_SERVER_NOT_READY',
+      'bounded local message',
+      { failure_evidence: failureEvidence },
+    )
+    const exactEvidence = {
+      kind: 'jsonrpc_http_rejection',
+      http_status: 400,
+      jsonrpc_code: -32000,
+      response_id: null,
+      reason: 'server_not_initialized',
+    }
+
+    expect(policy.classify(errorWithEvidence(exactEvidence), 'mutation')).toBe('not_ready_pre_dispatch')
+    expect(policy.classify(new Error('Server not initialized'), 'mutation')).toBe('ambiguous_write_failure')
+
+    for (const failureEvidence of [
+      { ...exactEvidence, http_status: 500 },
+      { ...exactEvidence, jsonrpc_code: -32603 },
+      { ...exactEvidence, response_id: 1 },
+      { ...exactEvidence, reason: 'Server not initialized' },
+      { ...exactEvidence, kind: 'forged_rejection' },
+    ]) {
+      expect(policy.classify(errorWithEvidence(failureEvidence), 'mutation'))
+        .toBe('ambiguous_write_failure')
+    }
+  })
+
+  test('classifies only connection loss and connect timeout as transient read failures', () => {
+    const policy = new BudaAdapter(createFakeClient().client as any).stabilityPolicy
+
+    for (const code of ['MCP_CONNECTION_LOST', 'MCP_CONNECT_TIMEOUT'] as const) {
+      const error = new McpError(code, 'bounded local message')
+      expect(policy.classify(error, 'read_safe')).toBe('transient_read_failure')
+      expect(policy.classify(error, 'mutation')).toBe('ambiguous_write_failure')
+    }
+
+    for (const error of [
+      new Error('connection lost'),
+      new McpError('MCP_TOOL_ERROR', 'connection lost'),
+      new McpError('MCP_SERVER_NOT_READY', 'not ready without evidence'),
+    ]) {
+      expect(policy.classify(error, 'read_safe')).toBe('terminal_failure')
+      expect(policy.classify(error, 'mutation')).toBe('ambiguous_write_failure')
+    }
+  })
+
   test('opens one reusable Chapter Task Session and runs ordered stages in it', async () => {
     const fake = createFakeClient()
     const stageOutputs = ['质量审查结果', '修订正文', '故事状态同步结果']

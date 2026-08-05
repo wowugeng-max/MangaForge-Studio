@@ -5,6 +5,7 @@ import {
   SdkError,
   SdkErrorCode,
   SdkHttpError,
+  StreamableHTTPClientTransport,
 } from '@modelcontextprotocol/client'
 import { McpError, mcpFailureEvidence } from './errors'
 import { buildMcpHeaders, createMcpClient, type McpSdkFactory } from './client'
@@ -426,6 +427,51 @@ describe('generic MCP client', () => {
 
     expect(client.state).toBe('Ready')
     expect(methods).toEqual(['initialize', 'tools/list'])
+  })
+
+  test('uses the ordinary transport and initialized notification for a provider-neutral adapter', async () => {
+    const methods: string[] = []
+    const neutralFetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const message = JSON.parse(String(init?.body || '{}'))
+      methods.push(String(message.method || ''))
+      if (message.method === 'initialize') {
+        return Response.json({
+          jsonrpc: '2.0',
+          id: message.id,
+          result: {
+            protocolVersion: '2025-06-18',
+            capabilities: { tools: {} },
+            serverInfo: { name: 'Provider Neutral MCP', version: '1.0.0' },
+          },
+        }, { headers: { 'Mcp-Session-Id': 'provider-neutral-session' } })
+      }
+      if (message.method === 'notifications/initialized') {
+        return new Response(null, { status: 202 })
+      }
+      if (message.method === 'tools/list') {
+        return Response.json({
+          jsonrpc: '2.0',
+          id: message.id,
+          result: { tools: [] },
+        })
+      }
+      throw new Error(`unexpected MCP method: ${message.method}`)
+    }
+    const client = createMcpClient({
+      server: {
+        ...BUDA_MCP_SERVER_TEMPLATE,
+        id: 'provider-neutral',
+        adapter_id: 'provider-neutral',
+      },
+      key: { ...key, mcp_server_id: 'provider-neutral' },
+      fetch: neutralFetch as typeof fetch,
+    })
+
+    await client.connect()
+
+    expect((client as any).transport?.constructor).toBe(StreamableHTTPClientTransport)
+    expect(methods.filter(Boolean)).toEqual(['initialize', 'notifications/initialized', 'tools/list'])
+    await client.close()
   })
 
   test('preserves exact pre-dispatch not-ready evidence without exposing remote text', async () => {

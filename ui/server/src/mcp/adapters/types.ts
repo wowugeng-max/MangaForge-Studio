@@ -157,6 +157,7 @@ export interface McpChapterTaskSession {
 
 export interface McpGenerationAdapter {
   readonly id: string
+  readonly stabilityPolicy?: McpStabilityPolicy
   listAgents(options: McpAdapterOperationOptions): Promise<McpAgentSummary[]>
   createAgent(input: { name: string; spaceId?: string; instructions?: string }, options: McpAdapterOperationOptions): Promise<McpAgentSummary>
   inspectSession(
