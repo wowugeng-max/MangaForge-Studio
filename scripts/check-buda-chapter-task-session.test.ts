@@ -3,6 +3,7 @@ import {
   assertAutomaticStageCoverage,
   assertNewTaskSession,
   assertOneTaskSession,
+  driveAutomaticRunToSuccess,
   main,
   maskFingerprint,
   maskSessionId,
@@ -118,6 +119,31 @@ function recoveryOutput(
     }],
     ...groupOverrides,
   })
+}
+
+function automaticDriver(options: {
+  states: Array<Record<string, unknown>>
+  quarantines?: Array<unknown[]>
+  now?: number
+}) {
+  const states = [...options.states]
+  const terminalFallback = options.states.at(-1)
+  const quarantines = [...(options.quarantines || [[]])]
+  let now = options.now ?? Date.parse('2026-08-05T01:00:00.000Z')
+  let executions = 1
+  const waits: number[] = []
+  return {
+    get executions() { return executions },
+    waits,
+    now: () => now,
+    wait: async (milliseconds: number) => {
+      waits.push(milliseconds)
+      now += milliseconds
+    },
+    readRun: async () => states.shift() || terminalFallback,
+    executeRun: async () => { executions += 1 },
+    assertNoQuarantine: async () => projectQuarantineList(quarantines.shift() || []),
+  }
 }
 
 function deterministicSmokeFetch(options: {
@@ -825,6 +851,264 @@ describe('Buda smoke input and public receipt projection', () => {
     const maskedSession = maskSessionId('session-private-value')
     expect(maskedSession).toMatch(/^sha256:[0-9a-f]{6}…$/)
     expect(maskedSession).not.toContain('session-private-value')
+  })
+})
+
+describe('Buda smoke automatic run recovery', () => {
+  test('returns after direct success without replay or waiting', async () => {
+    const driver = automaticDriver({ states: [{
+      id: 200,
+      project_id: 12,
+      run_type: 'chapter_group_generation',
+      status: 'success',
+    }] })
+
+    const result = await driveAutomaticRunToSuccess({
+      runId: 200,
+      projectId: 12,
+      chapterId: 34,
+      deadline: Number.MAX_SAFE_INTEGER,
+      pollIntervalMs: 100,
+      readRun: driver.readRun,
+      executeRun: driver.executeRun,
+      assertNoQuarantine: driver.assertNoQuarantine,
+    }, { now: driver.now, wait: driver.wait })
+
+    expect(result).toMatchObject({ status: 'success', executions: 1 })
+    expect(driver.executions).toBe(1)
+    expect(driver.waits).toEqual([])
+  })
+
+  test('waits for next_run_at, revalidates, and executes the original run once', async () => {
+    const futureReady = recoveryRun({
+      output_ref: recoveryOutput({}, {
+        attempts: 1,
+        next_run_at: '2026-08-05T01:02:00.000Z',
+      }),
+    })
+    const driver = automaticDriver({
+      states: [
+        futureReady,
+        futureReady,
+        recoveryRun({ status: 'success', output_ref: undefined }),
+      ],
+    })
+
+    const result = await driveAutomaticRunToSuccess({
+      runId: 200,
+      projectId: 12,
+      chapterId: 34,
+      deadline: Number.MAX_SAFE_INTEGER,
+      pollIntervalMs: 100,
+      readRun: driver.readRun,
+      executeRun: driver.executeRun,
+      assertNoQuarantine: driver.assertNoQuarantine,
+    }, { now: driver.now, wait: driver.wait })
+
+    expect(result).toMatchObject({ status: 'success', executions: 2 })
+    expect(driver.waits).toEqual([120_000])
+    expect(driver.executions).toBe(2)
+  })
+
+  test('stops before replay when a quarantine exists', async () => {
+    const driver = automaticDriver({
+      states: [recoveryRun({
+        output_ref: recoveryOutput({}, { next_run_at: '2000-01-01T00:00:00.000Z' }),
+      })],
+      quarantines: [[{ id: 'quarantine-1' }]],
+    })
+
+    await expect(driveAutomaticRunToSuccess({
+      runId: 200,
+      projectId: 12,
+      chapterId: 34,
+      deadline: Number.MAX_SAFE_INTEGER,
+      pollIntervalMs: 100,
+      readRun: driver.readRun,
+      executeRun: driver.executeRun,
+      assertNoQuarantine: driver.assertNoQuarantine,
+    }, { now: driver.now, wait: driver.wait })).rejects.toMatchObject({
+      code: 'MCP_QUARANTINE_REMAINS',
+    })
+    expect(driver.executions).toBe(1)
+  })
+
+  test('polls queued and running states without replay', async () => {
+    const driver = automaticDriver({ states: [
+      { id: 200, project_id: 12, run_type: 'chapter_group_generation', status: 'queued' },
+      { id: 200, project_id: 12, run_type: 'chapter_group_generation', status: 'running' },
+      { id: 200, project_id: 12, run_type: 'chapter_group_generation', status: 'success' },
+    ] })
+
+    const result = await driveAutomaticRunToSuccess({
+      runId: 200,
+      projectId: 12,
+      chapterId: 34,
+      deadline: Number.MAX_SAFE_INTEGER,
+      pollIntervalMs: 100,
+      readRun: driver.readRun,
+      executeRun: driver.executeRun,
+      assertNoQuarantine: driver.assertNoQuarantine,
+    }, { now: driver.now, wait: driver.wait })
+
+    expect(result).toMatchObject({ status: 'success', executions: 1 })
+    expect(driver.waits).toEqual([100, 100])
+    expect(driver.executions).toBe(1)
+  })
+
+  test('uses the initial execution plus two immediate recoveries before success', async () => {
+    const driver = automaticDriver({
+      states: [
+        recoveryRun({ output_ref: recoveryOutput({}, {
+          attempts: 1,
+          next_run_at: '2000-01-01T00:00:00.000Z',
+        }) }),
+        recoveryRun({ output_ref: recoveryOutput({}, {
+          attempts: 2,
+          next_run_at: '2000-01-01T00:00:00.000Z',
+        }) }),
+        recoveryRun({ status: 'success', output_ref: undefined }),
+      ],
+    })
+
+    const result = await driveAutomaticRunToSuccess({
+      runId: 200,
+      projectId: 12,
+      chapterId: 34,
+      deadline: Number.MAX_SAFE_INTEGER,
+      pollIntervalMs: 100,
+      readRun: driver.readRun,
+      executeRun: driver.executeRun,
+      assertNoQuarantine: driver.assertNoQuarantine,
+    }, { now: driver.now, wait: driver.wait })
+
+    expect(result).toMatchObject({ status: 'success', executions: 3 })
+    expect(driver.waits).toEqual([])
+    expect(driver.executions).toBe(3)
+  })
+
+  test('fails before a fourth automatic execution', async () => {
+    const driver = automaticDriver({
+      states: [1, 2, 3].map(attempts => recoveryRun({
+        output_ref: recoveryOutput({}, {
+          attempts,
+          next_run_at: '2000-01-01T00:00:00.000Z',
+        }),
+      })),
+    })
+
+    await expect(driveAutomaticRunToSuccess({
+      runId: 200,
+      projectId: 12,
+      chapterId: 34,
+      deadline: Number.MAX_SAFE_INTEGER,
+      pollIntervalMs: 100,
+      readRun: driver.readRun,
+      executeRun: driver.executeRun,
+      assertNoQuarantine: driver.assertNoQuarantine,
+    }, { now: driver.now, wait: driver.wait })).rejects.toMatchObject({
+      code: 'AUTOMATIC_RETRY_LIMIT_EXHAUSTED',
+    })
+    expect(driver.executions).toBe(3)
+  })
+
+  test('rejects retry attempt regression', async () => {
+    const driver = automaticDriver({ states: [
+      recoveryRun({ output_ref: recoveryOutput({}, {
+        attempts: 2,
+        next_run_at: '2000-01-01T00:00:00.000Z',
+      }) }),
+      recoveryRun({ output_ref: recoveryOutput({}, {
+        attempts: 1,
+        next_run_at: '2000-01-01T00:00:00.000Z',
+      }) }),
+    ] })
+
+    await expect(driveAutomaticRunToSuccess({
+      runId: 200,
+      projectId: 12,
+      chapterId: 34,
+      deadline: Number.MAX_SAFE_INTEGER,
+      pollIntervalMs: 100,
+      readRun: driver.readRun,
+      executeRun: driver.executeRun,
+      assertNoQuarantine: driver.assertNoQuarantine,
+    }, { now: driver.now, wait: driver.wait })).rejects.toMatchObject({
+      code: 'INVALID_RUN_RECOVERY_STATE',
+    })
+  })
+
+  test('maps terminal automatic-run statuses to exact error codes without replay', async () => {
+    for (const status of ['failed', 'canceled', 'paused']) {
+      const driver = automaticDriver({ states: [{
+        id: 200,
+        project_id: 12,
+        run_type: 'chapter_group_generation',
+        status,
+      }] })
+
+      await expect(driveAutomaticRunToSuccess({
+        runId: 200,
+        projectId: 12,
+        chapterId: 34,
+        deadline: Number.MAX_SAFE_INTEGER,
+        pollIntervalMs: 100,
+        readRun: driver.readRun,
+        executeRun: driver.executeRun,
+        assertNoQuarantine: driver.assertNoQuarantine,
+      }, { now: driver.now, wait: driver.wait })).rejects.toMatchObject({
+        message: 'automatic run did not succeed',
+        code: `AUTOMATIC_RUN_${status.toUpperCase()}`,
+      })
+      expect(driver.executions).toBe(1)
+    }
+  })
+
+  test('rejects an unknown automatic-run status', async () => {
+    const driver = automaticDriver({ states: [{
+      id: 200,
+      project_id: 12,
+      run_type: 'chapter_group_generation',
+      status: 'mystery',
+    }] })
+
+    await expect(driveAutomaticRunToSuccess({
+      runId: 200,
+      projectId: 12,
+      chapterId: 34,
+      deadline: Number.MAX_SAFE_INTEGER,
+      pollIntervalMs: 100,
+      readRun: driver.readRun,
+      executeRun: driver.executeRun,
+      assertNoQuarantine: driver.assertNoQuarantine,
+    }, { now: driver.now, wait: driver.wait })).rejects.toMatchObject({
+      code: 'INVALID_RUN_RECOVERY_STATE',
+    })
+    expect(driver.executions).toBe(1)
+  })
+
+  test('preserves a timeout thrown while waiting for next_run_at', async () => {
+    const timeout = Object.assign(new Error('smoke timeout'), { code: 'SMOKE_TIMEOUT' })
+    const driver = automaticDriver({ states: [recoveryRun({
+      output_ref: recoveryOutput({}, {
+        next_run_at: '2099-01-01T00:00:00.000Z',
+      }),
+    })] })
+
+    await expect(driveAutomaticRunToSuccess({
+      runId: 200,
+      projectId: 12,
+      chapterId: 34,
+      deadline: Number.MAX_SAFE_INTEGER,
+      pollIntervalMs: 100,
+      readRun: driver.readRun,
+      executeRun: driver.executeRun,
+      assertNoQuarantine: driver.assertNoQuarantine,
+    }, {
+      now: driver.now,
+      wait: async () => { throw timeout },
+    })).rejects.toBe(timeout)
+    expect(driver.executions).toBe(1)
   })
 })
 

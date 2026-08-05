@@ -686,6 +686,54 @@ async function pollRunSuccess(baseUrl, projectId, runId, deadline, pollIntervalM
   }
 }
 
+const MAX_AUTOMATIC_EXECUTIONS = 3
+
+export async function driveAutomaticRunToSuccess(input, dependencies = {}) {
+  const now = dependencies.now || Date.now
+  const wait = dependencies.wait || sleepPoll
+  let executions = 1
+  let previousAttempts = 0
+  while (true) {
+    const detail = await input.readRun()
+    const run = projectRunState(
+      detail,
+      input.runId,
+      input.projectId,
+      'chapter_group_generation',
+    )
+    if (run.status === 'success') return { ...run, executions }
+    if (['failed', 'canceled', 'paused'].includes(run.status)) {
+      throw safeError('automatic run did not succeed', `AUTOMATIC_RUN_${run.status.toUpperCase()}`)
+    }
+    if (run.status === 'running' || run.status === 'queued') {
+      await wait(input.pollIntervalMs, input.deadline)
+      continue
+    }
+    if (run.status !== 'ready') {
+      throw safeError('invalid automatic recovery state', 'INVALID_RUN_RECOVERY_STATE')
+    }
+    const recovery = projectRunRecoveryState(
+      detail,
+      input.runId,
+      input.projectId,
+      input.chapterId,
+      previousAttempts,
+    )
+    previousAttempts = recovery.attempts
+    await input.assertNoQuarantine()
+    const retryWaitMs = Math.max(0, recovery.next_run_at_ms - now())
+    if (retryWaitMs > 0) {
+      await wait(retryWaitMs, input.deadline)
+      continue
+    }
+    if (executions >= MAX_AUTOMATIC_EXECUTIONS) {
+      throw safeError('automatic retry limit exhausted', 'AUTOMATIC_RETRY_LIMIT_EXHAUSTED')
+    }
+    await input.executeRun()
+    executions += 1
+  }
+}
+
 function safeOutputCode(error) {
   const code = ownDataValue(error, 'code')
   return boundedString(code, SAFE_CODE) || 'SMOKE_FAILED'
