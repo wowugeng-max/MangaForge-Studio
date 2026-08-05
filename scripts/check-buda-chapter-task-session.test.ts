@@ -158,16 +158,28 @@ function automaticDriver(options: {
 
 function deterministicSmokeFetch(options: {
   automaticReceiptOverrides?: Record<string, unknown>
+  automaticStates?: Array<Record<string, unknown>>
+  quarantineReads?: Array<unknown[]>
 } = {}) {
   const calls: string[] = []
+  const automaticExecuteBodies: unknown[] = []
   let chapterReads = 0
   let summaryReads = 0
   const automaticRuns = [
-    stageRun(101, 'draft', 'task-auto', 'session-auto', options.automaticReceiptOverrides),
-    stageRun(102, 'quality_review', 'task-auto', 'session-auto'),
-    stageRun(103, 'story_state_sync', 'task-auto', 'session-auto'),
+    stageRun(201, 'draft', 'task-auto', 'session-auto', options.automaticReceiptOverrides),
+    stageRun(202, 'quality_review', 'task-auto', 'session-auto'),
+    stageRun(203, 'story_state_sync', 'task-auto', 'session-auto'),
   ]
-  const manualRun = stageRun(104, 'manual_recheck', 'task-manual', 'session-manual')
+  const manualRun = stageRun(204, 'manual_recheck', 'task-manual', 'session-manual')
+  const defaultAutomaticTerminal = {
+    id: 200,
+    project_id: 12,
+    run_type: 'chapter_group_generation',
+    status: 'success',
+  }
+  const automaticStates = [...(options.automaticStates || [defaultAutomaticTerminal])]
+  const automaticTerminalFallback = automaticStates.at(-1) || defaultAutomaticTerminal
+  const quarantineReads = [...(options.quarantineReads || [[]])]
   const details = new Map([...automaticRuns, manualRun].map(run => [run.id, run]))
   const summaries = (runs: ReturnType<typeof stageRun>[]) => runs.map(run => ({
     id: run.id,
@@ -212,17 +224,18 @@ function deterministicSmokeFetch(options: {
       })
     }
     if (path === '/api/novel/projects/12/chapter-groups/200/execute' && method === 'POST') {
+      automaticExecuteBodies.push(JSON.parse(String(init?.body || 'null')))
       return json({ ok: true })
     }
     if (path === '/api/novel/runs/200?project_id=12') {
-      return json({ id: 200, project_id: 12, run_type: 'chapter_group_generation', status: 'success' })
+      return json(automaticStates.shift() || automaticTerminalFallback)
     }
     const detailMatch = path.match(/^\/api\/novel\/runs\/(\d+)\?project_id=12$/)
     if (detailMatch) return json(details.get(Number(detailMatch[1])))
     if (path === '/api/novel/chapters/34/prose-quality' && method === 'POST') {
       return json({ ok: true })
     }
-    if (path === '/api/mcp/quarantines') return json([])
+    if (path === '/api/mcp/quarantines') return json(quarantineReads.shift() || [])
     if (path === '/api/novel/projects/12') {
       return json({ id: 12, reference_config: { story_state: { last_updated_chapter: 9 } } })
     }
@@ -232,7 +245,29 @@ function deterministicSmokeFetch(options: {
     })
   }) as typeof fetch
 
-  return { calls, fetchImpl }
+  return { calls, automaticExecuteBodies, fetchImpl }
+}
+
+async function runSmokeScenario(scenario: ReturnType<typeof deterministicSmokeFetch>) {
+  const logs: string[] = []
+  const errors: string[] = []
+  const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(scenario.fetchImpl)
+  const logSpy = spyOn(console, 'log').mockImplementation(value => { logs.push(String(value)) })
+  const errorSpy = spyOn(console, 'error').mockImplementation(value => { errors.push(String(value)) })
+  try {
+    const exitCode = await main([
+      '--base-url', 'http://127.0.0.1:8787',
+      '--project-id', '12',
+      '--chapter-id', '34',
+      '--timeout-ms', '10000',
+      '--poll-interval-ms', '100',
+    ])
+    return { exitCode, logs, errors }
+  } finally {
+    errorSpy.mockRestore()
+    logSpy.mockRestore()
+    fetchSpy.mockRestore()
+  }
 }
 
 describe('Buda chapter task receipt assertions', () => {
@@ -1240,93 +1275,183 @@ describe('Buda smoke HTTP transport', () => {
 describe('Buda smoke terminal workflow', () => {
   test('checks accepted prose, Story State, released authority, quarantine, and emits only the safe summary', async () => {
     const scenario = deterministicSmokeFetch()
-    const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(scenario.fetchImpl)
-    const logSpy = spyOn(console, 'log').mockImplementation(() => {})
-    const errorSpy = spyOn(console, 'error').mockImplementation(() => {})
-    try {
-      expect(await main([
-        '--base-url', 'http://127.0.0.1:8787',
-        '--project-id', '12',
-        '--chapter-id', '34',
-        '--timeout-ms', '10000',
-        '--poll-interval-ms', '100',
-      ])).toBe(0)
-
-      expect(errorSpy).not.toHaveBeenCalled()
-      expect(logSpy).toHaveBeenCalledTimes(1)
-      const rawSummary = String(logSpy.mock.calls[0]?.[0] || '')
-      expect(JSON.parse(rawSummary)).toEqual({
-        ok: true,
-        project_id: 12,
-        chapter_id: 34,
-        chapter_has_prose: true,
-        story_state_last_updated_chapter: 9,
-        source_fingerprint: maskFingerprint(fingerprint),
-        automatic: {
-          run_id: 200,
-          stages: ['draft', 'quality_review', 'story_state_sync'],
-          session: maskSessionId('session-auto'),
-        },
-        manual: {
-          stages: ['manual_recheck'],
-          session: maskSessionId('session-manual'),
-        },
-        tasks_different: true,
-        sessions_different: true,
-        source_locked: false,
-        quarantines: 0,
-      })
-      for (const privateValue of [
-        fingerprint,
-        'task-auto',
-        'task-manual',
-        'session-auto',
-        'session-manual',
-        'agent-1',
-        '风从城门吹来。',
-      ]) {
-        expect(rawSummary).not.toContain(privateValue)
-      }
-      expect(scenario.calls.filter(call => (
-        call === 'GET:/api/novel/projects/12/chapter-generation-source'
-      ))).toHaveLength(2)
-      expect(scenario.calls).toContain('GET:/api/mcp/quarantines')
-      expect(scenario.calls).toContain('GET:/api/novel/projects/12')
-      expect(scenario.calls.filter(call => (
-        call === 'GET:/api/novel/chapters/34?project_id=12'
-      ))).toHaveLength(2)
-    } finally {
-      errorSpy.mockRestore()
-      logSpy.mockRestore()
-      fetchSpy.mockRestore()
+    const result = await runSmokeScenario(scenario)
+    expect(result.exitCode).toBe(0)
+    expect(result.errors).toEqual([])
+    expect(result.logs).toHaveLength(1)
+    const rawSummary = result.logs[0]
+    expect(JSON.parse(rawSummary)).toEqual({
+      ok: true,
+      project_id: 12,
+      chapter_id: 34,
+      chapter_has_prose: true,
+      story_state_last_updated_chapter: 9,
+      source_fingerprint: maskFingerprint(fingerprint),
+      automatic: {
+        run_id: 200,
+        stages: ['draft', 'quality_review', 'story_state_sync'],
+        session: maskSessionId('session-auto'),
+      },
+      manual: {
+        stages: ['manual_recheck'],
+        session: maskSessionId('session-manual'),
+      },
+      tasks_different: true,
+      sessions_different: true,
+      source_locked: false,
+      quarantines: 0,
+    })
+    for (const privateValue of [
+      fingerprint,
+      'task-auto',
+      'task-manual',
+      'session-auto',
+      'session-manual',
+      'agent-1',
+      '风从城门吹来。',
+    ]) {
+      expect(rawSummary).not.toContain(privateValue)
     }
+    expect(scenario.calls.filter(call => (
+      call === 'GET:/api/novel/projects/12/chapter-generation-source'
+    ))).toHaveLength(2)
+    expect(scenario.calls.filter(call => call === 'GET:/api/mcp/quarantines')).toHaveLength(2)
+    expect(scenario.calls).toContain('GET:/api/novel/projects/12')
+    expect(scenario.calls.filter(call => (
+      call === 'GET:/api/novel/chapters/34?project_id=12'
+    ))).toHaveLength(2)
+    expect(scenario.calls.filter(call => (
+      call === 'POST:/api/novel/projects/12/chapter-groups/200/execute'
+    ))).toHaveLength(1)
+    expect(scenario.automaticExecuteBodies).toEqual([{
+      max_chapters: 1,
+      production_mode: 'full_auto',
+      force_scene_cards: true,
+      allow_incomplete: false,
+      auto_repair_missing_material: true,
+    }])
   })
 
   test('fails before manual work when any post-baseline chapter receipt is model sourced', async () => {
     const scenario = deterministicSmokeFetch({ automaticReceiptOverrides: { source: 'model' } })
-    const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(scenario.fetchImpl)
-    const logSpy = spyOn(console, 'log').mockImplementation(() => {})
-    const errorSpy = spyOn(console, 'error').mockImplementation(() => {})
-    try {
-      expect(await main([
-        '--base-url', 'http://127.0.0.1:8787',
-        '--project-id', '12',
-        '--chapter-id', '34',
-        '--timeout-ms', '10000',
-        '--poll-interval-ms', '100',
-      ])).toBe(1)
-      expect(logSpy).not.toHaveBeenCalled()
-      expect(errorSpy).toHaveBeenCalledTimes(1)
-      expect(JSON.parse(String(errorSpy.mock.calls[0]?.[0] || ''))).toEqual({
-        ok: false,
-        stage: 'automatic_receipts',
-        error_code: 'INVALID_RECEIPTS',
-      })
-      expect(scenario.calls).not.toContain('POST:/api/novel/chapters/34/prose-quality')
-    } finally {
-      errorSpy.mockRestore()
-      logSpy.mockRestore()
-      fetchSpy.mockRestore()
-    }
+    const result = await runSmokeScenario(scenario)
+    expect(result.exitCode).toBe(1)
+    expect(result.logs).toEqual([])
+    expect(result.errors).toHaveLength(1)
+    expect(JSON.parse(result.errors[0])).toEqual({
+      ok: false,
+      stage: 'automatic_receipts',
+      error_code: 'INVALID_RECEIPTS',
+    })
+    expect(scenario.calls).not.toContain('POST:/api/novel/chapters/34/prose-quality')
+  })
+
+  test('replays an immediately ready automatic run once and continues after parent success', async () => {
+    const scenario = deterministicSmokeFetch({
+      automaticStates: [
+        recoveryRun({
+          output_ref: recoveryOutput({}, {
+            attempts: 1,
+            next_run_at: '2000-01-01T00:00:00.000Z',
+          }),
+        }),
+        recoveryRun({ status: 'success', output_ref: undefined }),
+      ],
+    })
+
+    const result = await runSmokeScenario(scenario)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.errors).toEqual([])
+    expect(scenario.calls.filter(call => (
+      call === 'POST:/api/novel/projects/12/chapter-groups/200/execute'
+    ))).toHaveLength(2)
+    expect(scenario.automaticExecuteBodies).toEqual([1, 2].map(() => ({
+      max_chapters: 1,
+      production_mode: 'full_auto',
+      force_scene_cards: true,
+      allow_incomplete: false,
+      auto_repair_missing_material: true,
+    })))
+  })
+
+  test('stops recovery before replay when an MCP quarantine appears', async () => {
+    const scenario = deterministicSmokeFetch({
+      automaticStates: [
+        recoveryRun({
+          output_ref: recoveryOutput({}, {
+            attempts: 1,
+            next_run_at: '2000-01-01T00:00:00.000Z',
+          }),
+        }),
+        recoveryRun({ status: 'failed', output_ref: undefined }),
+      ],
+      quarantineReads: [[], [{ id: 'quarantine-1' }]],
+    })
+
+    const result = await runSmokeScenario(scenario)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.logs).toEqual([])
+    expect(result.errors).toHaveLength(1)
+    expect(JSON.parse(result.errors[0])).toEqual({
+      ok: false,
+      stage: 'automatic_poll',
+      error_code: 'MCP_QUARANTINE_REMAINS',
+    })
+    expect(scenario.calls.filter(call => (
+      call === 'POST:/api/novel/projects/12/chapter-groups/200/execute'
+    ))).toHaveLength(1)
+    expect(scenario.calls).not.toContain('POST:/api/novel/chapters/34/prose-quality')
+  })
+
+  test('stops before starting an automatic run when preflight quarantine exists', async () => {
+    const scenario = deterministicSmokeFetch({
+      quarantineReads: [[{ id: 'quarantine-1' }]],
+    })
+
+    const result = await runSmokeScenario(scenario)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.logs).toEqual([])
+    expect(result.errors).toHaveLength(1)
+    expect(JSON.parse(result.errors[0])).toEqual({
+      ok: false,
+      stage: 'automatic_quarantines',
+      error_code: 'MCP_QUARANTINE_REMAINS',
+    })
+    expect(scenario.calls).not.toContain('POST:/api/novel/projects/12/chapter-groups/start')
+    expect(scenario.calls.filter(call => (
+      call === 'POST:/api/novel/projects/12/chapter-groups/200/execute'
+    ))).toHaveLength(0)
+  })
+
+  test('stops after the bounded automatic execution limit is exhausted', async () => {
+    const scenario = deterministicSmokeFetch({
+      automaticStates: [
+        ...[1, 2, 3].map(attempts => recoveryRun({
+          output_ref: recoveryOutput({}, {
+            attempts,
+            next_run_at: '2000-01-01T00:00:00.000Z',
+          }),
+        })),
+        recoveryRun({ status: 'failed', output_ref: undefined }),
+      ],
+    })
+
+    const result = await runSmokeScenario(scenario)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.logs).toEqual([])
+    expect(result.errors).toHaveLength(1)
+    expect(JSON.parse(result.errors[0])).toEqual({
+      ok: false,
+      stage: 'automatic_poll',
+      error_code: 'AUTOMATIC_RETRY_LIMIT_EXHAUSTED',
+    })
+    expect(scenario.calls.filter(call => (
+      call === 'POST:/api/novel/projects/12/chapter-groups/200/execute'
+    ))).toHaveLength(3)
+    expect(scenario.calls).not.toContain('POST:/api/novel/chapters/34/prose-quality')
   })
 })

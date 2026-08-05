@@ -669,23 +669,6 @@ async function readStageReceiptsSince(baseUrl, projectId, chapterId, afterRunId,
   return receipts
 }
 
-async function pollRunSuccess(baseUrl, projectId, runId, deadline, pollIntervalMs) {
-  while (true) {
-    const detail = await requestJson(
-      baseUrl,
-      `/api/novel/runs/${runId}?project_id=${projectId}`,
-      undefined,
-      deadline,
-    )
-    const run = projectRunState(detail, runId, projectId, 'chapter_group_generation')
-    if (run.status === 'success') return run
-    if (['failed', 'canceled', 'paused'].includes(run.status)) {
-      throw safeError('automatic run did not succeed', `AUTOMATIC_RUN_${run.status.toUpperCase()}`)
-    }
-    await sleepPoll(pollIntervalMs, deadline)
-  }
-}
-
 const MAX_AUTOMATIC_EXECUTIONS = 3
 
 export async function driveAutomaticRunToSuccess(input, dependencies = {}) {
@@ -793,6 +776,16 @@ export async function main(argv = process.argv.slice(2)) {
     ), options.projectId, options.chapterId)
     if (chapter.has_prose) throw safeError('chapter already has prose', 'CHAPTER_NOT_EMPTY')
 
+    const assertNoQuarantine = async () => projectQuarantineList(await requestJson(
+      options.baseUrl,
+      '/api/mcp/quarantines',
+      undefined,
+      deadline,
+    ))
+
+    stage = 'automatic_quarantines'
+    await assertNoQuarantine()
+
     stage = 'automatic_baseline'
     const automaticBaseline = await maxRunId(options.baseUrl, options.projectId, deadline)
 
@@ -813,31 +806,39 @@ export async function main(argv = process.argv.slice(2)) {
       deadline,
     ), options.projectId, options.chapterId)
 
-    stage = 'automatic_execute'
-    projectOperationOk(await requestJson(
+    const automaticExecuteBody = Object.freeze({
+      max_chapters: 1,
+      production_mode: 'full_auto',
+      force_scene_cards: true,
+      allow_incomplete: false,
+      auto_repair_missing_material: true,
+    })
+    const executeAutomaticRun = async () => projectOperationOk(await requestJson(
       options.baseUrl,
       `/api/novel/projects/${options.projectId}/chapter-groups/${automatic.run_id}/execute`,
-      {
-        method: 'POST',
-        body: {
-          max_chapters: 1,
-          production_mode: 'full_auto',
-          force_scene_cards: true,
-          allow_incomplete: false,
-          auto_repair_missing_material: true,
-        },
-      },
+      { method: 'POST', body: automaticExecuteBody },
       deadline,
     ))
 
+    stage = 'automatic_execute'
+    await executeAutomaticRun()
+
     stage = 'automatic_poll'
-    await pollRunSuccess(
-      options.baseUrl,
-      options.projectId,
-      automatic.run_id,
+    await driveAutomaticRunToSuccess({
+      runId: automatic.run_id,
+      projectId: options.projectId,
+      chapterId: options.chapterId,
       deadline,
-      options.pollIntervalMs,
-    )
+      pollIntervalMs: options.pollIntervalMs,
+      readRun: () => requestJson(
+        options.baseUrl,
+        `/api/novel/runs/${automatic.run_id}?project_id=${options.projectId}`,
+        undefined,
+        deadline,
+      ),
+      executeRun: executeAutomaticRun,
+      assertNoQuarantine,
+    })
 
     stage = 'automatic_receipts'
     const automaticReceipts = await readStageReceiptsSince(
