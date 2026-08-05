@@ -15,7 +15,7 @@ import {
   writeMcpKeys,
 } from './key-store'
 import { McpAgentLeaseRegistry } from './agent-lease'
-import { upsertMcpAgentQuarantine } from './quarantine-store'
+import { readMcpAgentQuarantines, upsertMcpAgentQuarantine } from './quarantine-store'
 import {
   BUDA_MCP_SERVER_TEMPLATE,
   deleteMcpServer,
@@ -1154,4 +1154,40 @@ describe('atomic JSON store resource bounds', () => {
       openFile: async () => open(expandedPath, 'r'),
     } as any)).rejects.toMatchObject({ code: 'MCP_STORE_CORRUPT' })
   })
+})
+
+describe('MCP Agent quarantine store', () => {
+  test('persists session_create_unknown without a fabricated Session identity', async () => {
+    const workspace = await temporaryWorkspace()
+
+    await upsertMcpAgentQuarantine(workspace, {
+      serverId: 'buda',
+      keyId: 1,
+      agentId: 'agent-1',
+      requestId: 'invocation-1',
+      reason: 'session_create_unknown',
+    })
+
+    const [record] = await readMcpAgentQuarantines(workspace)
+    expect(record).toMatchObject({ request_id: 'invocation-1', reason: 'session_create_unknown' })
+    expect(record?.session_id).toBeUndefined()
+  })
+
+  test.each(['', '   '])(
+    'rejects session_create_unknown with an explicitly supplied empty Session id %#',
+    async sessionId => {
+      const workspace = await temporaryWorkspace()
+
+      await expect(upsertMcpAgentQuarantine(workspace, {
+        serverId: 'buda',
+        keyId: 1,
+        agentId: 'agent-1',
+        requestId: 'invocation-1',
+        sessionId,
+        reason: 'session_create_unknown',
+      })).rejects.toMatchObject({ code: 'MCP_BINDING_INVALID' })
+
+      expect(await readdir(workspace)).not.toContain('mcp-agent-quarantines.json')
+    },
+  )
 })

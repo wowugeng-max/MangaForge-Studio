@@ -9,7 +9,7 @@ import { McpError } from '../../mcp/errors'
 import type { McpErrorCode } from '../../mcp/errors'
 import { McpGenerationDeadline } from '../../mcp/deadline'
 import type { McpAgentLease } from '../../mcp/agent-lease'
-import type { McpGenerationReceiptStatus } from '../../mcp/types'
+import type { McpAgentQuarantineReason, McpGenerationReceiptStatus } from '../../mcp/types'
 import type {
   McpChapterInvocationInput,
   McpChapterTaskInput,
@@ -246,16 +246,15 @@ function safeOutboundRequestId(
   return boundedScrubbedId(scrubber, value)
 }
 
-function boundedInvocationId(
+function safeStageInvocationId(
   scrubber: ReturnType<typeof createMcpSecretScrubber>,
-  taskId: string,
-  stage: ChapterTaskStage,
-  requestId: string,
-  ordinal: number,
+  value: string,
 ) {
-  const candidate = scrubber.scrubText(`${taskId}:${stage}:${ordinal}:${requestId}`)
+  const candidate = scrubber.scrubText(value)
   if (candidate.length <= PROVENANCE_ID_MAX_CHARS) return candidate
-  return `sha256:${sha256(candidate)}`.slice(0, PROVENANCE_ID_MAX_CHARS)
+  const digest = `sha256:${sha256(candidate)}`
+  const prefix = candidate.slice(0, PROVENANCE_ID_MAX_CHARS - digest.length - 1)
+  return `${prefix}:${digest}`
 }
 
 function acceptRemoteId(value: unknown, label: string) {
@@ -615,6 +614,22 @@ type ChapterTaskRuntime = Pick<McpRuntime,
   'resolveCredentialConfig' | 'getAdapterForKey' | 'acquireAgentLease'
 >
 
+type StageRecordContextPort = {
+  attachRemoteIdentity(remote: { session_id: string; snapshot_hash: string }): Promise<void>
+}
+
+type ActiveStageInvocation = {
+  invocationId: string
+  stage: ChapterTaskStage
+  sessionId?: string
+  snapshotHash?: string
+  fenceStaged: boolean
+  fencePromise?: Promise<void>
+  recordContext?: StageRecordContextPort
+}
+
+type StageInvocationOwner = { invocation?: ActiveStageInvocation }
+
 class McpChapterTaskExecution implements ChapterTaskExecution {
   readonly taskId: string
   readonly source = 'mcp' as const
@@ -637,8 +652,11 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
   private oneShotInvocationPort = false
   private sessionFenceStaged = false
   private sessionFencePromise?: Promise<void>
+  private readonly observedSessionIds = new Set<string>()
+  private activeInvocation?: ActiveStageInvocation
+  private currentStageRecordContext?: StageRecordContextPort
+  private currentStageOwner?: StageInvocationOwner
   private stageSequence = 0
-  private invocationSequence = 0
   private deadlineClosed = false
   private closeRequested = false
   private readonly activeOperations = new Set<Promise<void>>()
@@ -649,6 +667,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
   private terminalStatus?: string
   private ambiguousError?: Error
   private ambiguousStatus?: Extract<McpGenerationReceiptStatus, 'send_unknown' | 'remote_cancel_unknown'>
+  private quarantineReason?: McpAgentQuarantineReason
   private failurePromise?: Promise<never>
   private closePromise?: Promise<void>
 
@@ -694,7 +713,6 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
       adapter_id: boundedScrubbedId(this.scrubber, this.binding.adapter_id),
       agent_id: boundedScrubbedId(this.scrubber, this.binding.agent_id),
       model: boundedScrubbedId(this.scrubber, this.binding.model || 'MCP Auto'),
-      ...(this.sessionId ? { session_id: boundedScrubbedId(this.scrubber, this.sessionId) } : {}),
     })
   }
 
@@ -753,6 +771,12 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     if (ambiguous && !this.ambiguousError) {
       this.ambiguousError = scrubbed
       this.ambiguousStatus = receiptStatus
+      this.quarantineReason = receiptStatus === 'send_unknown'
+        && !this.activeInvocation?.sessionId
+        && !this.sessionId
+        && !errorSessionId(scrubbed)
+        ? 'session_create_unknown'
+        : receiptStatus
       this.terminalError = scrubbed
       this.terminalStatus = receiptStatus
     } else if (!this.terminalError) {
@@ -839,6 +863,41 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     await this.input.onProgress?.(scrubbedEvent)
   }
 
+  private async onStageProgress(invocationId: string, stage: ChapterTaskStage, event: unknown) {
+    this.throwIfCloseRequested()
+    const active = this.activeInvocation
+    if (!active || active.invocationId !== invocationId || active.stage !== stage) {
+      throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了不属于当前 stage invocation 的进度')
+    }
+    const projectedEvent = projectedRecord(event)
+    const rawSessionId = ownDataValue(event, 'session_id')
+    const rawSnapshotHash = ownDataValue(event, 'snapshot_hash')
+    if (rawSessionId !== undefined) {
+      const accepted = acceptRemoteId(rawSessionId, 'Session 标识')
+      if (this.observedSessionIds.has(accepted) && active.sessionId !== accepted) {
+        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 重用了已观察的 Session 标识')
+      }
+      if (active.sessionId && active.sessionId !== accepted) {
+        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter Session 标识在 stage 期间发生变化')
+      }
+      active.sessionId = accepted
+      defineEnumerableData(projectedEvent, 'session_id', boundedScrubbedId(this.scrubber, accepted))
+    }
+    if (rawSnapshotHash !== undefined) {
+      const accepted = acceptRemoteId(rawSnapshotHash, 'snapshot fingerprint')
+      if (active.snapshotHash && active.snapshotHash !== accepted) {
+        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter snapshot fingerprint 在 stage 期间发生变化')
+      }
+      active.snapshotHash = accepted
+      defineEnumerableData(projectedEvent, 'snapshot_hash', boundedScrubbedId(this.scrubber, accepted))
+    }
+    const scrubbedEvent = this.scrubber.scrubValue(projectedEvent)
+    if (scrubbedEvent?.stage === 'session_created') {
+      if (active.sessionId && active.snapshotHash) await this.ensureStageSessionFence(active)
+    }
+    await this.input.onProgress?.(scrubbedEvent)
+  }
+
   private ensureSessionFence() {
     if (this.sessionFencePromise) return this.sessionFencePromise
     this.sessionFencePromise = (async () => {
@@ -852,6 +911,28 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
       this.sessionFenceStaged = true
     })()
     return this.sessionFencePromise
+  }
+
+  private ensureStageSessionFence(active: ActiveStageInvocation) {
+    if (active.fenceStaged) return Promise.resolve()
+    if (active.fencePromise) return active.fencePromise
+    active.fencePromise = (async () => {
+      if (!active.sessionId || !active.snapshotHash) {
+        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 未提供完整 Session identity')
+      }
+      await active.recordContext?.attachRemoteIdentity({
+        session_id: active.sessionId,
+        snapshot_hash: active.snapshotHash,
+      })
+      await this.persistTaskReceipt('session_created')
+      await this.lease!.stageSessionFence({
+        requestId: active.invocationId,
+        sessionId: active.sessionId,
+      })
+      active.fenceStaged = true
+      this.observedSessionIds.add(active.sessionId)
+    })()
+    return active.fencePromise
   }
 
   private async openSession() {
@@ -959,26 +1040,30 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
           sessionId: '',
           snapshotHash: '',
           runStage: stageInput => {
-            this.remoteSessionId = ''
-            this.remoteSnapshotHash = ''
-            this.sessionId = ''
-            this.snapshotHash = ''
+            const invocationId = safeStageInvocationId(
+              this.scrubber,
+              `${this.taskId}:${stageInput.stage}:${++this.stageSequence}`,
+            )
+            const active: ActiveStageInvocation = {
+              invocationId,
+              stage: stageInput.stage,
+              fenceStaged: false,
+              recordContext: this.currentStageRecordContext,
+            }
+            this.activeInvocation = active
+            if (this.currentStageOwner) this.currentStageOwner.invocation = active
             const invocationInput: McpChapterInvocationInput = {
               ...taskInput,
               ...stageInput,
-              invocationId: boundedInvocationId(
-                this.scrubber,
-                this.taskId,
-                stageInput.stage,
-                stageInput.requestId,
-                ++this.invocationSequence,
-              ),
+              invocationId,
               stability: resolved.stability,
+              onProgress: event => this.onStageProgress(invocationId, stageInput.stage, event),
             }
-            return safeApply<
+            const pending = safeApply<
               [McpChapterInvocationInput],
               Promise<McpChapterStageResult>
             >(invokeChapterStage, resolved.adapter, [invocationInput])
+            return pending
           },
           // invokeChapterStage owns each remote stage lifecycle; this virtual Session is
           // only the temporary source-side compatibility shell until Task 10 removes it.
@@ -1120,13 +1205,16 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     const ambiguous = this.lease && this.ambiguousError && this.ambiguousStatus
     if (ambiguous) {
       try {
+        const quarantineSessionId = errorSessionId(primaryError)
+          || this.activeInvocation?.sessionId
+          || this.sessionId
         await this.lease!.quarantine({
-          requestId: boundedScrubbedId(this.scrubber, this.taskId),
-          sessionId: boundedScrubbedId(
-            this.scrubber,
-            errorSessionId(primaryError) || this.sessionId,
-          ),
-          reason: this.ambiguousStatus!,
+          requestId: this.activeInvocation?.invocationId
+            || boundedScrubbedId(this.scrubber, this.taskId),
+          ...(this.quarantineReason === 'session_create_unknown'
+            ? {}
+            : { sessionId: boundedScrubbedId(this.scrubber, quarantineSessionId) }),
+          reason: this.quarantineReason || this.ambiguousStatus!,
         })
       } catch (quarantineError) {
         this.closeDeadline()
@@ -1197,7 +1285,10 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     return this.failurePromise
   }
 
-  private async performRemoteStage(input: McpChapterStageInput): Promise<McpChapterStageResult> {
+  private async performRemoteStage(
+    input: McpChapterStageInput,
+    recordContext?: StageRecordContextPort,
+  ): Promise<McpChapterStageResult> {
     this.throwIfCloseRequested()
     await this.input.assertCurrent()
     this.throwIfCloseRequested()
@@ -1218,14 +1309,25 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     const result = projectMcpChapterStageResult(rawResult)
     this.deadline?.throwIfAborted()
     if (this.oneShotInvocationPort) {
-      if ((this.remoteSessionId && result.session_id !== this.remoteSessionId)
-        || (this.remoteSnapshotHash && result.snapshot_hash !== this.remoteSnapshotHash)) {
+      const active = this.activeInvocation
+      if (!active || active.invocationId.length === 0) {
+        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter stage invocation 状态丢失')
+      }
+      if ((active.sessionId && result.session_id !== active.sessionId)
+        || (active.snapshotHash && result.snapshot_hash !== active.snapshotHash)) {
         throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了不属于当前 stage invocation 的结果')
       }
-      this.remoteSessionId = result.session_id
-      this.remoteSnapshotHash = result.snapshot_hash
-      this.sessionId = boundedScrubbedId(this.scrubber, result.session_id)
-      this.snapshotHash = boundedScrubbedId(this.scrubber, result.snapshot_hash)
+      if (this.observedSessionIds.has(result.session_id) && active.sessionId !== result.session_id) {
+        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 重用了已观察的 Session 标识')
+      }
+      active.sessionId = result.session_id
+      active.snapshotHash = result.snapshot_hash
+      this.currentStageRecordContext = recordContext
+      await this.ensureStageSessionFence(active)
+      if (active.fenceStaged) {
+        await this.lease!.clearSessionFence()
+        active.fenceStaged = false
+      }
     } else if (result.session_id !== this.remoteSessionId
       || result.snapshot_hash !== this.remoteSnapshotHash) {
       throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了不属于当前任务 Session 的 stage 结果')
@@ -1239,14 +1341,20 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     }
   }
 
-  private runRemoteStage(input: McpChapterStageInput): Promise<McpChapterStageResult> {
+  private runRemoteStage(
+    input: McpChapterStageInput,
+    recordContext?: StageRecordContextPort,
+    owner?: StageInvocationOwner,
+  ): Promise<McpChapterStageResult> {
     if (this.failurePromise) return this.failurePromise
     if (this.closeRequested) return this.failRemote(this.closedError())
     const operation = this.stageTail.then(async () => {
       if (this.failurePromise) return this.failurePromise
       if (this.closeRequested) return this.failRemote(this.closedError())
       try {
-        return await this.performRemoteStage(input)
+        this.currentStageRecordContext = recordContext
+        this.currentStageOwner = owner
+        return await this.performRemoteStage(input, recordContext)
       } catch (error) {
         return this.failRemote(error)
       }
@@ -1259,35 +1367,48 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
   }
 
   async generateDraft(request: ProseGenerationRequest): Promise<ProseGenerationResult> {
-    return this.recordStage('draft', {
-      prompt: request.paragraphTask,
-      responseContract: 'draft_prose',
-    }, async () => {
-      const stage = await this.runRemoteStage({
-        requestId: safeOutboundRequestId(this.scrubber, request.requestId),
-        stage: 'draft',
-        responseContract: 'draft_prose',
+    const owner: StageInvocationOwner = {}
+    try {
+      return await this.recordStage('draft', {
         prompt: request.paragraphTask,
+        responseContract: 'draft_prose',
+      }, async context => {
+        const stage = await this.runRemoteStage({
+          requestId: safeOutboundRequestId(this.scrubber, request.requestId),
+          stage: 'draft',
+          responseContract: 'draft_prose',
+          prompt: request.paragraphTask,
+        }, context, owner)
+        const validated = validateMcpStageResponse('draft', 'draft_prose', { content: stage.content })
+        return {
+          prose_chapters: normalizeDraftStageContent(validated.output, request.chapterNo),
+          source: 'mcp',
+          adapter_id: this.binding.adapter_id,
+          agent_id: this.binding.agent_id,
+          session_id: stage.session_id,
+          snapshot_hash: stage.snapshot_hash,
+          completed: true,
+          modelName: this.binding.model || 'MCP Auto',
+          source_receipt: {
+            receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
+            request_id: boundedScrubbedId(this.scrubber, request.requestId),
+            ...this.provenance(),
+            snapshot_hash: boundedScrubbedId(this.scrubber, stage.snapshot_hash),
+            status: 'success',
+          },
+        }
       })
-      const validated = validateMcpStageResponse('draft', 'draft_prose', { content: stage.content })
-      return {
-        prose_chapters: normalizeDraftStageContent(validated.output, request.chapterNo),
-        source: 'mcp',
-        adapter_id: this.binding.adapter_id,
-        agent_id: this.binding.agent_id,
-        session_id: stage.session_id,
-        snapshot_hash: stage.snapshot_hash,
-        completed: true,
-        modelName: this.binding.model || 'MCP Auto',
-        source_receipt: {
-          receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
-          request_id: boundedScrubbedId(this.scrubber, request.requestId),
-          ...this.provenance(),
-          snapshot_hash: boundedScrubbedId(this.scrubber, stage.snapshot_hash),
-          status: 'success',
-        },
+    } finally {
+      if (owner.invocation
+        && this.activeInvocation === owner.invocation
+        && !owner.invocation.fenceStaged) {
+        this.activeInvocation = undefined
       }
-    })
+      if (this.currentStageOwner === owner) {
+        this.currentStageRecordContext = undefined
+        this.currentStageOwner = undefined
+      }
+    }
   }
 
   async executeAgent(
@@ -1299,21 +1420,31 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     _options: Record<string, any> = {},
   ) {
     const prompt = compileMcpAgentPrompt(agentId, project, context)
-    return this.recordStage(stage, { prompt, responseContract }, async () => {
-      const result = await this.runRemoteStage({
-        requestId: safeOutboundRequestId(
-          this.scrubber,
-          `${this.taskId}:${stage}:${++this.stageSequence}`,
-        ),
-        stage,
-        responseContract,
-        prompt,
+    const owner: StageInvocationOwner = {}
+    try {
+      return await this.recordStage(stage, { prompt, responseContract }, async recordContext => {
+        const result = await this.runRemoteStage({
+          requestId: safeOutboundRequestId(this.scrubber, `${this.taskId}:${stage}`),
+          stage,
+          responseContract,
+          prompt,
+        }, recordContext, owner)
+        return {
+          ...validateMcpStageResponse(stage, responseContract, { content: result.content }),
+          modelName: this.binding.model || 'MCP Auto',
+        }
       })
-      return {
-        ...validateMcpStageResponse(stage, responseContract, { content: result.content }),
-        modelName: this.binding.model || 'MCP Auto',
+    } finally {
+      if (owner.invocation
+        && this.activeInvocation === owner.invocation
+        && !owner.invocation.fenceStaged) {
+        this.activeInvocation = undefined
       }
-    })
+      if (this.currentStageOwner === owner) {
+        this.currentStageRecordContext = undefined
+        this.currentStageOwner = undefined
+      }
+    }
   }
 
   assertCurrent() {
@@ -1328,6 +1459,14 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     this.closePromise = (async () => {
       if (active.length) await Promise.all(active)
       else if (opening) await opening.catch(() => {})
+      if (outcome.status === 'success' && this.activeInvocation?.fenceStaged) {
+        const residualFence = new McpError(
+          'MCP_SESSION_FAILED',
+          'MCP 章节任务成功关闭前仍存在活动的 stage Session fence',
+        )
+        await this.ensureTerminalCleanup(residualFence, 'failed')
+        throw residualFence
+      }
       await this.ensureTerminalCleanup(outcome.error, outcome.status)
     })()
     return this.closePromise

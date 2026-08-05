@@ -2908,9 +2908,151 @@ describe('McpGenerationSource task execution', () => {
     }
   })
 
+  test('keeps task authority fixed while accepting a distinct Session per stage', async () => {
+    const invocations: McpChapterInvocationInput[] = []
+    const leaseEvents: string[] = []
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-stage-authority-', {
+      async invokeChapterStage(input) {
+        invocations.push(input)
+        const sessionId = `session-stage-${invocations.length}`
+        await input.onProgress?.({
+          stage: 'session_created',
+          status: 'running',
+          session_id: sessionId,
+          snapshot_hash: `snapshot-stage-${invocations.length}`,
+        })
+        return {
+          content: input.stage === 'draft'
+            ? '阶段正文。'
+            : input.stage === 'revision'
+              ? '修订正文。'
+              : '{"score":92,"publishable":true,"findings":[]}',
+          session_id: sessionId,
+          snapshot_hash: `snapshot-stage-${invocations.length}`,
+          status: 'completed' as const,
+        }
+      },
+      acquireAgentLease: async () => ({
+        tupleKey: 'stage-authority',
+        binding: { serverId: 'neutral-task-server', keyId: 1, agentId: 'neutral-agent-1' },
+        stageSessionFence: async ({ sessionId }: { sessionId: string }) => { leaseEvents.push(`stage:${sessionId}`) },
+        quarantine: async () => { leaseEvents.push('quarantine') },
+        clearSessionFence: async () => { leaseEvents.push('clear') },
+        release: async () => { leaseEvents.push('release') },
+      }),
+    })
+    const execution = await fixture.begin()
+    await execution.generateDraft(fixture.request())
+    await execution.executeAgent('quality_review', 'quality_review_json', 'reviewer', fixture.durableProject, {})
+    await execution.executeAgent('revision', 'revision_prose', 'reviser', fixture.durableProject, {})
+    await execution.close({ status: 'success' })
+    expect(invocations.map(item => item.taskId)).toEqual([execution.taskId, execution.taskId, execution.taskId])
+    expect(new Set(invocations.map(item => item.invocationId)).size).toBe(3)
+    expect(leaseEvents.filter(item => item.startsWith('stage:'))).toHaveLength(3)
+    const runs = await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id)
+    const stageReceipts = runs
+      .filter(run => run.run_type === 'chapter_generation_stage')
+      .map(run => JSON.parse(run.output_ref!))
+    expect(new Set(stageReceipts.map(receipt => receipt.session_id))).toEqual(new Set([
+      'session-stage-1', 'session-stage-2', 'session-stage-3',
+    ]))
+    const taskReceipt = JSON.parse(runs.find(run => run.run_type === 'mcp_chapter_task')!.output_ref!)
+    expect(taskReceipt).not.toHaveProperty('session_id')
+  })
+
+  test('rejects an adapter that reuses a Session id for two stages', async () => {
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-session-reuse-', {
+      async invokeChapterStage(input) {
+        await input.onProgress?.({
+          stage: 'session_created',
+          status: 'running',
+          session_id: 'session-reused',
+          snapshot_hash: `snapshot-${input.stage}`,
+        })
+        return {
+          content: input.stage === 'draft' ? '阶段正文。' : '{"score":92,"publishable":true,"findings":[]}',
+          session_id: 'session-reused',
+          snapshot_hash: `snapshot-${input.stage}`,
+          status: 'completed' as const,
+        }
+      },
+    })
+    const execution = await fixture.begin()
+    await execution.generateDraft(fixture.request())
+    await expect(execution.executeAgent(
+      'quality_review',
+      'quality_review_json',
+      'reviewer',
+      fixture.durableProject,
+      {},
+    )).rejects.toMatchObject({ code: 'MCP_SESSION_FAILED' })
+  })
+
+  test('quarantines an ambiguous stage Session creation without a fabricated Session id', async () => {
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-stage-create-unknown-', {
+      async invokeChapterStage() {
+        throw new McpError('MCP_SEND_UNKNOWN', 'stage Session create outcome unknown', {
+          remote_cancel_confirmed: false,
+          receipt_status: 'send_unknown',
+        })
+      },
+    })
+    const execution = await fixture.begin()
+
+    await expect(execution.generateDraft(fixture.request()))
+      .rejects.toMatchObject({ code: 'MCP_SEND_UNKNOWN' })
+
+    const [record] = await readMcpAgentQuarantines(fixture.activeWorkspace)
+    expect(record).toMatchObject({ reason: 'session_create_unknown' })
+    expect(record?.session_id).toBeUndefined()
+  })
+
+  test('keeps a create-unknown artifact ambiguous when Agent quarantine persistence fails', async () => {
+    const persistenceFailure = new McpError('MCP_STORE_IO_FAILED', 'quarantine persistence failed')
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-create-unknown-store-fail-', {
+      async invokeChapterStage() {
+        throw new McpError('MCP_SEND_UNKNOWN', 'stage Session create outcome unknown', {
+          remote_cancel_confirmed: false,
+          receipt_status: 'send_unknown',
+        })
+      },
+      acquireAgentLease: async () => ({
+        tupleKey: 'stage-create-unknown-store-fail',
+        binding: { serverId: 'neutral-task-server', keyId: 1, agentId: 'neutral-agent-1' },
+        stageSessionFence: async () => {},
+        quarantine: async () => { throw persistenceFailure },
+        clearSessionFence: async () => {},
+        release: async () => {},
+      }),
+    })
+    const execution = await fixture.begin()
+
+    const exposed: any = await execution.generateDraft(fixture.request()).catch(error => error)
+
+    expect(exposed).toMatchObject({
+      code: 'MCP_STORE_IO_FAILED',
+      details: { receipt_status: 'send_unknown' },
+    })
+    const database = new Database(join(fixture.activeWorkspace, 'novel.sqlite'))
+    try {
+      const artifact = database.query(`
+        SELECT status, error_code FROM chapter_stage_artifacts
+        WHERE task_id = ? AND stage = 'draft'
+        ORDER BY id DESC LIMIT 1
+      `).get(fixture.coreExecution().taskId) as any
+      expect(artifact).toMatchObject({ status: 'ambiguous', error_code: 'MCP_STORE_IO_FAILED' })
+    } finally {
+      database.close()
+    }
+    await expect(execution.close({ status: 'failed', error: exposed }))
+      .rejects.toMatchObject({ code: 'MCP_STORE_IO_FAILED' })
+  })
+
   test('keeps bounded invocation ids distinct for repeated stages with colliding request prefixes', async () => {
     const invocations: McpChapterInvocationInput[] = []
+    const longTaskId = 'long-task-'.padEnd(512, 'x')
     const fixture = await neutralTaskFixture('mangaforge-mcp-task-one-shot-id-', {
+      taskId: longTaskId,
       async invokeChapterStage(input) {
         invocations.push(input)
         return {
@@ -2929,11 +3071,176 @@ describe('McpGenerationSource task execution', () => {
       await runDirectRemoteStage(fixture.coreExecution(), `${sharedPrefix}-two`, 'quality_review')
 
       expect(invocations).toHaveLength(2)
+      expect(fixture.coreExecution().taskId).toBe(longTaskId)
       expect(invocations.every(item => item.invocationId.length > 0 && item.invocationId.length <= 160)).toBe(true)
       expect(new Set(invocations.map(item => item.invocationId)).size).toBe(2)
     } finally {
       await execution.close({ status: 'success' }).catch(() => {})
     }
+  })
+
+  test('keeps overlapping same-stage invocation ownership until each receipt lifecycle finishes', async () => {
+    const secondStarted = deferredValue()
+    const continueSecond = deferredValue()
+    const invocations: McpChapterInvocationInput[] = []
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-overlapping-stage-owner-', {
+      async invokeChapterStage(input) {
+        invocations.push(input)
+        const ordinal = invocations.length
+        if (ordinal === 2) {
+          secondStarted.resolve()
+          await continueSecond.promise
+        }
+        await input.onProgress?.({
+          stage: 'session_created',
+          status: 'running',
+          session_id: `overlap-session-${ordinal}`,
+          snapshot_hash: `overlap-snapshot-${ordinal}`,
+        })
+        return {
+          content: '{"score":92,"publishable":true,"findings":[]}',
+          session_id: `overlap-session-${ordinal}`,
+          snapshot_hash: `overlap-snapshot-${ordinal}`,
+          status: 'completed' as const,
+        }
+      },
+    })
+    const execution = await fixture.begin()
+    const first = execution.executeAgent(
+      'quality_review', 'quality_review_json', 'reviewer', fixture.durableProject, {},
+    )
+    const second = execution.executeAgent(
+      'quality_review', 'quality_review_json', 'reviewer', fixture.durableProject, {},
+    )
+    let closed = false
+
+    try {
+      await secondStarted.promise
+      const firstResult = await first
+      continueSecond.resolve()
+      const secondResult = await second
+
+      expect(firstResult.output.score).toBe(92)
+      expect(secondResult.output.score).toBe(92)
+      expect(new Set(invocations.map(item => item.invocationId)).size).toBe(2)
+      const receipts = (await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
+        .filter(run => run.run_type === 'chapter_generation_stage' && run.step_name === 'quality_review')
+        .map(run => JSON.parse(run.output_ref!))
+      expect(new Set(receipts.map(receipt => receipt.session_id))).toEqual(new Set([
+        'overlap-session-1', 'overlap-session-2',
+      ]))
+      await execution.close({ status: 'success' })
+      closed = true
+      expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([])
+    } finally {
+      continueSecond.resolve()
+      if (!closed) await execution.close({ status: 'failed' }).catch(() => {})
+    }
+  })
+
+  test('keeps cache-hit and initial cache-miss provenance task-only while another stage is active', async () => {
+    const reviewActive = deferredValue()
+    const continueReview = deferredValue()
+    const invocations: McpChapterInvocationInput[] = []
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-concurrent-cache-provenance-', {
+      async invokeChapterStage(input) {
+        invocations.push(input)
+        const ordinal = invocations.length
+        await input.onProgress?.({
+          stage: 'session_created',
+          status: 'running',
+          session_id: `cache-provenance-session-${ordinal}`,
+          snapshot_hash: `cache-provenance-snapshot-${ordinal}`,
+        })
+        if (input.stage === 'quality_review') {
+          reviewActive.resolve()
+          await continueReview.promise
+        }
+        return {
+          content: input.stage === 'draft'
+            ? `缓存隔离正文 ${ordinal}。`
+            : '{"score":92,"publishable":true,"findings":[]}',
+          session_id: `cache-provenance-session-${ordinal}`,
+          snapshot_hash: `cache-provenance-snapshot-${ordinal}`,
+          status: 'completed' as const,
+        }
+      },
+    })
+    const execution = await fixture.begin()
+    const draftRequest = fixture.request()
+    await execution.generateDraft(draftRequest)
+    const review = execution.executeAgent(
+      'quality_review', 'quality_review_json', 'reviewer', fixture.durableProject, {},
+    )
+    let closed = false
+
+    try {
+      await reviewActive.promise
+      await execution.generateDraft(draftRequest)
+      const changedDraft = execution.generateDraft(fixture.request({
+        paragraphTask: '并发缓存未命中的新正文任务。',
+      }))
+      continueReview.resolve()
+      await review
+      await changedDraft
+
+      const runs = await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id)
+      const draftRuns = runs.filter(run => (
+        run.run_type === 'chapter_generation_stage' && run.step_name === 'draft'
+      ))
+      const cacheHit = draftRuns.find(run => {
+        try { return JSON.parse(run.output_ref || '{}').cache_hit === true } catch { return false }
+      })!
+      const cacheMiss = draftRuns.find(run => {
+        try {
+          return JSON.parse(run.output_ref || '{}').session_id === 'cache-provenance-session-3'
+        } catch {
+          return false
+        }
+      })!
+      for (const receipt of [cacheHit.input_ref, cacheHit.output_ref, cacheMiss.input_ref]) {
+        expect(receipt).not.toContain('cache-provenance-session-2')
+        expect(JSON.parse(receipt || '{}')).not.toHaveProperty('session_id')
+      }
+
+      await execution.close({ status: 'success' })
+      closed = true
+    } finally {
+      continueReview.resolve()
+      if (!closed) await execution.close({ status: 'failed' }).catch(() => {})
+    }
+  })
+
+  test('rejects successful close when a stage Session fence remains active', async () => {
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-close-residual-stage-fence-', {
+      async invokeChapterStage(input) {
+        await input.onProgress?.({
+          stage: 'session_created',
+          status: 'running',
+          session_id: 'residual-fence-session',
+          snapshot_hash: 'residual-fence-snapshot',
+        })
+        return {
+          content: '已完成正文。',
+          session_id: 'residual-fence-session',
+          snapshot_hash: 'residual-fence-snapshot',
+          status: 'completed' as const,
+        }
+      },
+    })
+    const execution = await fixture.begin()
+    await execution.generateDraft(fixture.request())
+    fixture.coreExecution().activeInvocation = {
+      invocationId: 'residual-invocation',
+      stage: 'draft',
+      sessionId: 'residual-fence-session',
+      snapshotHash: 'residual-fence-snapshot',
+      fenceStaged: true,
+    }
+
+    await expect(execution.close({ status: 'success' }))
+      .rejects.toMatchObject({ code: 'MCP_SESSION_FAILED' })
+    expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([])
   })
 
   test('invokes a projected one-shot method without reading its hostile call property', async () => {
@@ -3186,9 +3493,9 @@ describe('McpGenerationSource task execution', () => {
         source: 'mcp',
         source_fingerprint: execution.fingerprint,
         authority_fingerprint: execution.authorityFingerprint,
-        session_id: 'neutral-session-1',
       },
     })
+    expect(draft.source_receipt).not.toHaveProperty('session_id')
     const stageRuns = (await listNovelRuns(activeWorkspace, durableProject.id))
       .filter(run => run.run_type === 'chapter_generation_stage')
     expect(stageRuns).toHaveLength(4)

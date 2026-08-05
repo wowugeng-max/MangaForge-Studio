@@ -73,7 +73,7 @@ export class McpAgentLeaseRegistry {
       if (quarantine) {
         throw new McpError('MCP_AGENT_QUARANTINED', '该 MCP Agent 存在未确认终止的远端 Session', {
           quarantine_id: quarantine.id.slice(0, 160),
-          session_id: quarantine.session_id.slice(0, 160),
+          ...(quarantine.session_id ? { session_id: quarantine.session_id.slice(0, 160) } : {}),
         })
       }
       if (hasMcpActiveBinding(activeWorkspace, binding)) {
@@ -104,7 +104,7 @@ export class McpAgentLeaseRegistry {
       }
       const persist = async (input: {
         requestId: string
-        sessionId: string
+        sessionId?: string
         reason: McpAgentQuarantineInput['reason']
       }) => {
         const record = await this.store.upsert(activeWorkspace, {
@@ -112,7 +112,7 @@ export class McpAgentLeaseRegistry {
           keyId: closedKeyId,
           agentId: closedAgentId,
           requestId: input.requestId,
-          sessionId: input.sessionId,
+          ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
           reason: input.reason,
         })
         durableFence = true
@@ -132,7 +132,7 @@ export class McpAgentLeaseRegistry {
           try {
             await persist({
               requestId: input.requestId,
-              sessionId: input.sessionId,
+              ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
               reason: input.reason,
             })
           } catch (error) {

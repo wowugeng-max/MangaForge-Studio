@@ -227,6 +227,37 @@ describe('MCP runtime', () => {
     expect(await runtime.listAgentQuarantines(workspace)).toEqual([record])
   })
 
+  test('requires explicit acknowledgement for unknown Session creation without inspecting a Session', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-session-create-unknown-'))
+    workspaces.push(workspace)
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const key = await createMcpKey(workspace, {
+      mcp_server_id: 'buda', key: 'sk_session_create_unknown', description: '账号',
+    })
+    let inspectSessionCalls = 0
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: {
+        get: async () => ({ diagnostics: () => ({ state: 'Ready' }), listTools: async () => [], callTool: async () => ({ content: [] }) }),
+        invalidate: async () => {}, invalidateIfCurrent: async () => {}, invalidateServer: async () => {}, closeAll: async () => {},
+      } as any,
+      adapterFactory: () => ({
+        listAgents: async () => [],
+        inspectSession: async () => { inspectSessionCalls += 1; return { status: 'unknown', terminal: false } },
+      }) as any,
+    })
+    const lease = await runtime.acquireAgentLease(workspace, {
+      serverId: 'buda', keyId: key.id, agentId: 'agent-session-create-unknown',
+    })
+    await lease.quarantine({ requestId: 'invocation-1', reason: 'session_create_unknown' })
+    await lease.release()
+    const [record] = await runtime.listAgentQuarantines(workspace)
+
+    const reconciled = await runtime.reconcileAgentQuarantine(workspace, record!.id)
+
+    expect(reconciled).toMatchObject({ outcome: 'ack_required', cleared: false })
+    expect(inspectSessionCalls).toBe(0)
+  })
+
   test('clears a terminal quarantine exactly once without touching another record', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-terminal-'))
     workspaces.push(workspace)

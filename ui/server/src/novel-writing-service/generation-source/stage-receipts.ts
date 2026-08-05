@@ -230,11 +230,14 @@ function artifactIdentityMatches(
   return ARTIFACT_IDENTITY_FIELDS.every(field => artifact[field] === identity[field])
 }
 
-function hasRemoteCancelUnknownEvidence(error: unknown) {
+function hasAmbiguousMcpMutationEvidence(error: unknown) {
   const direct = ownDataValue(error, 'receipt_status')
   const details = ownDataValue(error, 'details')
-  return direct === 'remote_cancel_unknown'
-    || ownDataValue(details, 'receipt_status') === 'remote_cancel_unknown'
+  const nested = ownDataValue(details, 'receipt_status')
+  return direct === 'send_unknown'
+    || direct === 'remote_cancel_unknown'
+    || nested === 'send_unknown'
+    || nested === 'remote_cancel_unknown'
 }
 
 export function projectChapterTaskProvenance(value: unknown): ChapterTaskProvenance {
@@ -278,6 +281,12 @@ export function projectChapterTaskProvenance(value: unknown): ChapterTaskProvena
   return Object.freeze(provenance)
 }
 
+function projectChapterTaskAuthority(value: unknown): ChapterTaskProvenance {
+  const provenance = { ...projectChapterTaskProvenance(value) }
+  delete provenance.session_id
+  return Object.freeze(provenance)
+}
+
 export function createChapterStageRecorder(input: {
   activeWorkspace: string
   provenance: () => ChapterTaskProvenance
@@ -293,15 +302,16 @@ export function createChapterStageRecorder(input: {
     responseContract: ChapterStageResponseContract
   }, operation: (context: ChapterStageRecordContext) => Promise<T>): Promise<T> {
     const startedAt = Date.now()
-    const initialProvenance = projectChapterTaskProvenance(input.provenance())
+    const initialProvenance = projectChapterTaskAuthority(input.provenance())
     const currentProvenance = () => {
       try {
-        return projectChapterTaskProvenance(input.provenance())
+        return projectChapterTaskAuthority(input.provenance())
       } catch {
         return initialProvenance
       }
     }
     const identity = stageArtifactIdentity(initialProvenance, stage, request)
+    let invocationProvenance: ChapterTaskProvenance | undefined
     let reusable: NovelChapterStageArtifactRecord | null
     try {
       reusable = await artifacts.findReusable(input.activeWorkspace, identity)
@@ -312,19 +322,21 @@ export function createChapterStageRecorder(input: {
     const successReceipt = (
       artifact: NovelChapterStageArtifactRecord,
       cacheHit: boolean,
-    ) => ({
-      receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
-      ...currentProvenance(),
-      stage,
-      status: 'success' as const,
-      attempt: artifact.attempt,
-      artifact_id: artifact.id,
-      input_hash: artifact.input_hash,
-      output_hash: artifact.output_hash,
-      response_contract: artifact.response_contract,
-      cache_hit: cacheHit,
-      elapsed_ms: Date.now() - startedAt,
-    })
+    ) => {
+      return {
+        receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
+        ...(invocationProvenance || currentProvenance()),
+        stage,
+        status: 'success' as const,
+        attempt: artifact.attempt,
+        artifact_id: artifact.id,
+        input_hash: artifact.input_hash,
+        output_hash: artifact.output_hash,
+        response_contract: artifact.response_contract,
+        cache_hit: cacheHit,
+        elapsed_ms: Date.now() - startedAt,
+      }
+    }
 
     if (reusable) {
       let result: T
@@ -436,6 +448,10 @@ export function createChapterStageRecorder(input: {
             session_id: attached.session_id,
             snapshot_hash: attached.snapshot_hash,
           }
+          invocationProvenance = projectChapterTaskProvenance({
+            ...currentProvenance(),
+            session_id: attached.session_id,
+          })
         } catch (error) {
           if (ownDataValue(error, 'code') === 'CHAPTER_STAGE_RECEIPT_PERSIST_FAILED') throw error
           throw receiptPersistenceError(error)
@@ -459,7 +475,7 @@ export function createChapterStageRecorder(input: {
       }
       const failure = boundedFailure(scrubbed)
       const artifactStatus = failure.code === 'MCP_SEND_UNKNOWN'
-        || hasRemoteCancelUnknownEvidence(error)
+        || hasAmbiguousMcpMutationEvidence(error)
         ? 'ambiguous'
         : 'failed'
       const persistedFailureMessage = redactOptionalProviderDetail

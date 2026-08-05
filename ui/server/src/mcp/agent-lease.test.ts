@@ -561,4 +561,31 @@ describe('McpAgentLeaseRegistry', () => {
     expect(await registry.isActive(missingWorkspace, binding)).toBe(true)
     await expect(registry.acquire(missingWorkspace, binding)).rejects.toMatchObject({ code: 'MCP_AGENT_BUSY' })
   })
+
+  test('cycles stage Session fences sequentially and releases a clean lease', async () => {
+    const activeWorkspace = await workspace('mangaforge-agent-stage-fence-cycle-')
+    const registry = new McpAgentLeaseRegistry()
+    const lease = await registry.acquire(activeWorkspace, binding)
+
+    await lease.stageSessionFence({ requestId: 'stage-1', sessionId: 'session-1' })
+    await lease.clearSessionFence()
+    await lease.stageSessionFence({ requestId: 'stage-2', sessionId: 'session-2' })
+    await lease.clearSessionFence()
+    await lease.release()
+
+    expect(await registry.list(activeWorkspace)).toEqual([])
+  })
+
+  test('quarantines an ambiguous Session creation without inventing a Session id', async () => {
+    const activeWorkspace = await workspace('mangaforge-agent-session-create-unknown-')
+    const registry = new McpAgentLeaseRegistry()
+    const lease = await registry.acquire(activeWorkspace, binding)
+
+    await lease.quarantine({ requestId: 'invocation-1', reason: 'session_create_unknown' })
+    await lease.release()
+
+    const [record] = await registry.list(activeWorkspace)
+    expect(record).toMatchObject({ request_id: 'invocation-1', reason: 'session_create_unknown' })
+    expect(record?.session_id).toBeUndefined()
+  })
 })

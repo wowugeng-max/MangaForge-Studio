@@ -43,7 +43,7 @@ function toPublicAgentQuarantine(record: McpAgentQuarantineRecord): PublicMcpAge
     server_id: record.server_id,
     key_id: record.key_id,
     agent_id: record.agent_id,
-    session_id: record.session_id,
+    ...(record.session_id ? { session_id: record.session_id } : {}),
     reason: record.reason,
     created_at: record.created_at,
   }
@@ -229,6 +229,15 @@ export function createMcpRuntime(
           record.server_id,
           remoteOptions,
         )
+        if (record.reason === 'session_create_unknown' || !record.session_id) {
+          return {
+            quarantine: toPublicAgentQuarantine(record),
+            status: 'unknown' as const,
+            terminal: false,
+            cleared: false,
+            outcome: 'ack_required' as const,
+          }
+        }
         const inspection = boundedSessionInspection(await resolved.adapter.inspectSession({
           agentId: record.agent_id,
           sessionId: record.session_id,
@@ -269,10 +278,12 @@ export function createMcpRuntime(
         ))
         const inspections = await Promise.all(matchingQuarantines.map(async record => ({
           record,
-          inspection: boundedSessionInspection(await resolved.adapter.inspectSession({
-            agentId: record.agent_id,
-            sessionId: record.session_id,
-          }, remoteOptions)),
+          inspection: record.reason === 'session_create_unknown' || !record.session_id
+            ? { status: 'unknown', terminal: false }
+            : boundedSessionInspection(await resolved.adapter.inspectSession({
+              agentId: record.agent_id,
+              sessionId: record.session_id,
+            }, remoteOptions)),
         })))
         const quarantines = []
         for (const { record, inspection } of inspections) {

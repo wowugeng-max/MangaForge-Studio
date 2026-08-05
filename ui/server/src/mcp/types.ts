@@ -84,7 +84,7 @@ export type McpAgentSummary = {
   raw?: Record<string, unknown>
 }
 
-export type McpAgentQuarantineReason = 'send_unknown' | 'remote_cancel_unknown'
+export type McpAgentQuarantineReason = 'send_unknown' | 'remote_cancel_unknown' | 'session_create_unknown'
 
 export type McpGenerationReceiptStatus =
   | 'running'
@@ -103,7 +103,7 @@ export type McpAgentQuarantineRecord = {
   key_id: number
   agent_id: string
   request_id: string
-  session_id: string
+  session_id?: string
   reason: McpAgentQuarantineReason
   created_at: string
 }

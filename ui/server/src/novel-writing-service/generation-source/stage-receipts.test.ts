@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createNovelChapter, createNovelProject, listNovelRuns } from '../../novel'
 import type { NovelChapterStageArtifactRecord } from '../../novel'
+import { McpError } from '../../mcp/errors'
 import { validateMcpStageResponse } from './stage-response-contract'
 import { createChapterStageRecorder, projectChapterTaskProvenance } from './stage-receipts'
 
@@ -92,7 +93,7 @@ describe('chapter generation stage receipts', () => {
     reusable.output_hash = sha256(reusable.output_payload)
     const recordStage = createChapterStageRecorder({
       activeWorkspace,
-      provenance: () => provenance,
+      provenance: () => ({ ...provenance, session_id: 'unrelated-active-session' }),
       artifacts: {
         findReusable: async (_workspace: string, identity: any) => {
           observedIdentity = identity
@@ -474,6 +475,48 @@ describe('chapter generation stage receipts', () => {
       expect(JSON.stringify(failures)).not.toContain('PRIVATE_REMOTE')
     }
   })
+
+  test.each([
+    ['direct', { receipt_status: 'send_unknown' }],
+    ['nested', { details: { receipt_status: 'send_unknown', cause_code: 'MCP_SEND_UNKNOWN' } }],
+  ] as const)(
+    'keeps %s send-unknown evidence ambiguous when quarantine persistence changes the outer code',
+    async (_location, evidence) => {
+      const { activeWorkspace, provenance } = await fixture()
+      const failures: any[] = []
+      const running = artifactRecord({
+        id: 112,
+        project_id: provenance.project_id,
+        chapter_id: provenance.chapter_id,
+        status: 'running',
+        output_payload: '',
+        output_hash: '',
+      })
+      const recordStage = createChapterStageRecorder({
+        activeWorkspace,
+        provenance: () => provenance,
+        artifacts: {
+          findReusable: async () => null,
+          findLatestSuccessful: async () => null,
+          begin: async (_workspace: string, identity: any) => ({ ...running, ...identity }),
+          fail: async (...args: any[]) => { failures.push(args); return running },
+        },
+      } as any)
+      const persistenceFailure = Object.assign(
+        new McpError('MCP_STORE_IO_FAILED', 'quarantine write failed'),
+        evidence,
+      )
+
+      await expect(recordStage('draft', {
+        prompt: 'draft', responseContract: 'draft_prose',
+      }, async () => { throw persistenceFailure })).rejects.toBe(persistenceFailure)
+
+      expect(failures[0]?.slice(1)).toEqual([
+        running.id, 'ambiguous', 'MCP_STORE_IO_FAILED',
+      ])
+      expect(JSON.stringify(failures)).not.toContain('quarantine write failed')
+    },
+  )
 
   test('does not announce Run success when artifact completion persistence fails', async () => {
     const { activeWorkspace, provenance } = await fixture()
