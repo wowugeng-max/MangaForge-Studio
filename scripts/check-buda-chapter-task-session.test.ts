@@ -131,18 +131,28 @@ function automaticDriver(options: {
   const quarantines = [...(options.quarantines || [[]])]
   let now = options.now ?? Date.parse('2026-08-05T01:00:00.000Z')
   let executions = 1
+  let runReads = 0
+  let quarantineChecks = 0
   const waits: number[] = []
   return {
     get executions() { return executions },
+    get runReads() { return runReads },
+    get quarantineChecks() { return quarantineChecks },
     waits,
     now: () => now,
     wait: async (milliseconds: number) => {
       waits.push(milliseconds)
       now += milliseconds
     },
-    readRun: async () => states.shift() || terminalFallback,
+    readRun: async () => {
+      runReads += 1
+      return states.shift() || terminalFallback
+    },
     executeRun: async () => { executions += 1 },
-    assertNoQuarantine: async () => projectQuarantineList(quarantines.shift() || []),
+    assertNoQuarantine: async () => {
+      quarantineChecks += 1
+      return projectQuarantineList(quarantines.shift() || [])
+    },
   }
 }
 
@@ -910,6 +920,37 @@ describe('Buda smoke automatic run recovery', () => {
     expect(driver.executions).toBe(2)
   })
 
+  test('rechecks quarantine after waiting and stops before replay', async () => {
+    const futureReady = recoveryRun({
+      output_ref: recoveryOutput({}, {
+        attempts: 1,
+        next_run_at: '2026-08-05T01:02:00.000Z',
+      }),
+    })
+    const driver = automaticDriver({
+      states: [futureReady, futureReady],
+      quarantines: [[], [{ id: 'quarantine-1' }]],
+    })
+
+    await expect(driveAutomaticRunToSuccess({
+      runId: 200,
+      projectId: 12,
+      chapterId: 34,
+      deadline: Number.MAX_SAFE_INTEGER,
+      pollIntervalMs: 100,
+      readRun: driver.readRun,
+      executeRun: driver.executeRun,
+      assertNoQuarantine: driver.assertNoQuarantine,
+    }, { now: driver.now, wait: driver.wait })).rejects.toMatchObject({
+      code: 'MCP_QUARANTINE_REMAINS',
+    })
+
+    expect(driver.waits).toEqual([120_000])
+    expect(driver.runReads).toBe(2)
+    expect(driver.quarantineChecks).toBe(2)
+    expect(driver.executions).toBe(1)
+  })
+
   test('stops before replay when a quarantine exists', async () => {
     const driver = automaticDriver({
       states: [recoveryRun({
@@ -1089,9 +1130,12 @@ describe('Buda smoke automatic run recovery', () => {
 
   test('preserves a timeout thrown while waiting for next_run_at', async () => {
     const timeout = Object.assign(new Error('smoke timeout'), { code: 'SMOKE_TIMEOUT' })
+    const deadline = Date.parse('2026-08-05T01:05:00.000Z')
+    let capturedWaitDuration: number | undefined
+    let capturedDeadline: number | undefined
     const driver = automaticDriver({ states: [recoveryRun({
       output_ref: recoveryOutput({}, {
-        next_run_at: '2099-01-01T00:00:00.000Z',
+        next_run_at: '2026-08-05T01:02:00.000Z',
       }),
     })] })
 
@@ -1099,15 +1143,21 @@ describe('Buda smoke automatic run recovery', () => {
       runId: 200,
       projectId: 12,
       chapterId: 34,
-      deadline: Number.MAX_SAFE_INTEGER,
+      deadline,
       pollIntervalMs: 100,
       readRun: driver.readRun,
       executeRun: driver.executeRun,
       assertNoQuarantine: driver.assertNoQuarantine,
     }, {
       now: driver.now,
-      wait: async () => { throw timeout },
+      wait: async (milliseconds: number, forwardedDeadline: number) => {
+        capturedWaitDuration = milliseconds
+        capturedDeadline = forwardedDeadline
+        throw timeout
+      },
     })).rejects.toBe(timeout)
+    expect(capturedWaitDuration).toBe(120_000)
+    expect(capturedDeadline).toBe(deadline)
     expect(driver.executions).toBe(1)
   })
 })
