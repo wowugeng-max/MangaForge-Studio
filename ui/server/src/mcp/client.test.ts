@@ -4,8 +4,9 @@ import {
   ProtocolError,
   SdkError,
   SdkErrorCode,
+  SdkHttpError,
 } from '@modelcontextprotocol/client'
-import { McpError } from './errors'
+import { McpError, mcpFailureEvidence } from './errors'
 import { buildMcpHeaders, createMcpClient, type McpSdkFactory } from './client'
 import * as clientModule from './client'
 import { BUDA_MCP_SERVER_TEMPLATE } from './server-store'
@@ -70,13 +71,14 @@ function fakeSdkFactory(options: {
   capabilities?: Record<string, unknown>
   instructions?: string
 } = {}) {
-  const capture: any = { calls: [] }
+  const capture: any = { calls: [], listCalls: 0 }
   const sdk = {
     async connect(transport: unknown, requestOptions: unknown) {
       capture.connect = { transport, requestOptions }
       if (options.connectError) throw options.connectError
     },
     async listTools(_params?: unknown, requestOptions?: unknown) {
+      capture.listCalls += 1
       capture.listOptions = requestOptions
       options.onList?.()
       if (options.listError) throw options.listError
@@ -117,6 +119,39 @@ function fakeSdkFactory(options: {
     },
   }
   return { capture, factory }
+}
+
+function sdkHttpFailure(input: {
+  status: number
+  id: string | number | null
+  code: number
+  message: string
+  sdkMessage?: string
+  statusText?: string
+  text?: string
+}) {
+  return new SdkHttpError(
+    SdkErrorCode.ClientHttpNotImplemented,
+    input.sdkMessage || 'remote SDK message must not escape',
+    {
+      status: input.status,
+      statusText: input.statusText || 'remote status text must not escape',
+      text: input.text ?? JSON.stringify({
+        jsonrpc: '2.0',
+        id: input.id,
+        error: { code: input.code, message: input.message },
+      }),
+    },
+  )
+}
+
+function exactNotReadySdkHttpError() {
+  return sdkHttpFailure({
+    status: 400,
+    id: null,
+    code: -32000,
+    message: 'Server not initialized',
+  })
 }
 
 describe('generic MCP client', () => {
@@ -393,165 +428,338 @@ describe('generic MCP client', () => {
     expect(methods).toEqual(['initialize', 'tools/list'])
   })
 
-  test('retries Buda tool discovery while its initialized Session is briefly unavailable', async () => {
-    let toolListAttempts = 0
-    const budaFetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const message = JSON.parse(String(init?.body || '{}'))
-      if (message.method === 'initialize') {
-        return Response.json({
-          jsonrpc: '2.0',
-          id: message.id,
-          result: {
-            protocolVersion: '2025-06-18',
-            capabilities: { tools: {} },
-            serverInfo: { name: 'Buda MCP', version: '0.1.0' },
-          },
-        }, { headers: { 'Mcp-Session-Id': 'buda-session' } })
-      }
-      if (message.method === 'tools/list') {
-        toolListAttempts += 1
-        if (toolListAttempts === 1) {
-          return Response.json({
-            jsonrpc: '2.0',
-            id: null,
-            error: { code: -32000, message: 'Bad Request: Server not initialized' },
-          }, { status: 400 })
-        }
-        return Response.json({
-          jsonrpc: '2.0',
-          id: message.id,
-          result: { tools: [{ name: 'api_claw_list_api_agents', inputSchema: { type: 'object' } }] },
-        })
-      }
-      throw new Error(`unexpected MCP method: ${message.method}`)
-    }
+  test('preserves exact pre-dispatch not-ready evidence without exposing remote text', async () => {
+    const remoteSdkMessage = 'remote SDK message must not escape'
+    const remoteStatusText = 'remote status text must not escape'
+    const error = sdkHttpFailure({
+      status: 400,
+      id: null,
+      code: -32000,
+      message: 'Server not initialized',
+      sdkMessage: remoteSdkMessage,
+      statusText: remoteStatusText,
+    })
+    const { capture, factory } = fakeSdkFactory({ callError: error })
     const client = createMcpClient({
-      server: {
-        ...BUDA_MCP_SERVER_TEMPLATE,
-        startup_timeout_ms: 100,
-        poll_initial_ms: 1,
-        poll_max_ms: 1,
-      },
-      key,
-      fetch: budaFetch as typeof fetch,
-    })
-
-    await client.connect()
-
-    expect(client.state).toBe('Ready')
-    expect(toolListAttempts).toBe(2)
-  })
-
-  test('maps exhausted Buda startup retries to a connection timeout', async () => {
-    const transient = new Error('Error POSTing to endpoint: Bad Request: Server not initialized')
-    const { factory } = fakeSdkFactory({ listError: transient })
-    const client = createMcpClient({
-      server: {
-        ...BUDA_MCP_SERVER_TEMPLATE,
-        startup_timeout_ms: 10,
-        poll_initial_ms: 1,
-        poll_max_ms: 1,
-      },
-      key,
-      sdkFactory: factory,
-    })
-
-    await expect(client.connect()).rejects.toMatchObject({ code: 'MCP_CONNECT_TIMEOUT' })
-  })
-
-  test('preserves a typed caller cancellation while waiting to retry Buda startup', async () => {
-    const transient = new Error('Error POSTing to endpoint: Bad Request: Server not initialized')
-    const controller = new AbortController()
-    const cancellation = new McpError('MCP_CANCELLED', 'MCP 启动已取消', { stage: 'startup_retry' })
-    let listAttempts = 0
-    const { factory } = fakeSdkFactory({
-      listError: transient,
-      onList() {
-        listAttempts += 1
-        if (listAttempts === 1) setTimeout(() => controller.abort(cancellation), 1)
-      },
-    })
-    const client = createMcpClient({
-      server: {
-        ...BUDA_MCP_SERVER_TEMPLATE,
-        startup_timeout_ms: 1_000,
-        poll_initial_ms: 100,
-        poll_max_ms: 100,
-      },
-      key,
-      sdkFactory: factory,
-    })
-
-    await expect(client.connect(controller.signal)).rejects.toMatchObject({
-      code: 'MCP_CANCELLED',
-      details: { stage: 'startup_retry' },
-    })
-    expect(listAttempts).toBe(1)
-  })
-
-  test('maps a standard caller abort while waiting to retry Buda startup to cancellation', async () => {
-    const transient = new Error('Error POSTing to endpoint: Bad Request: Server not initialized')
-    const controller = new AbortController()
-    let listAttempts = 0
-    const { factory } = fakeSdkFactory({
-      listError: transient,
-      onList() {
-        listAttempts += 1
-        if (listAttempts === 1) setTimeout(() => controller.abort(), 1)
-      },
-    })
-    const client = createMcpClient({
-      server: {
-        ...BUDA_MCP_SERVER_TEMPLATE,
-        startup_timeout_ms: 1_000,
-        poll_initial_ms: 100,
-        poll_max_ms: 100,
-      },
-      key,
-      sdkFactory: factory,
-    })
-
-    await expect(client.connect(controller.signal)).rejects.toMatchObject({ code: 'MCP_CANCELLED' })
-    expect(listAttempts).toBe(1)
-  })
-
-  test('retries an exact transient Buda not-initialized error for read-safe tool calls', async () => {
-    const transient = new Error('Error POSTing to endpoint: Bad Request: Server not initialized')
-    const { capture, factory } = fakeSdkFactory({ callErrors: [transient, transient, undefined] })
-    const client = createMcpClient({
-      server: {
-        ...BUDA_MCP_SERVER_TEMPLATE,
-        tool_timeout_ms: 100,
-        poll_initial_ms: 1,
-        poll_max_ms: 1,
-      },
+      server: { ...BUDA_MCP_SERVER_TEMPLATE, enabled_tools: ['allowed'] },
       key,
       sdkFactory: factory,
     })
     await client.connect()
 
-    await expect(client.callTool('allowed', {}, { operation: 'read_safe' }))
-      .resolves.toMatchObject({ structuredContent: { ok: true } })
-    expect(capture.calls).toHaveLength(3)
-  })
-
-  test('invalidates the Buda Session without replaying a mutation after a not-initialized tool error', async () => {
-    const transient = new Error('Error POSTing to endpoint: Bad Request: Server not initialized')
-    const { capture, factory } = fakeSdkFactory({ callErrors: [transient, undefined] })
-    const client = createMcpClient({
-      server: { ...BUDA_MCP_SERVER_TEMPLATE, poll_initial_ms: 1, poll_max_ms: 1 },
-      key,
-      sdkFactory: factory,
+    const caught: any = await client.callTool('allowed', {}, { operation: 'mutation' }).catch(value => value)
+    expect(caught).toMatchObject({
+      code: 'MCP_TOOL_ERROR',
+      details: {
+        tool_name: 'allowed',
+        failure_evidence: {
+          kind: 'jsonrpc_http_rejection',
+          http_status: 400,
+          jsonrpc_code: -32000,
+          response_id: null,
+          reason: 'server_not_initialized',
+        },
+      },
     })
-    await client.connect()
-
-    await expect(client.callTool('allowed', {}, { operation: 'mutation' }))
-      .rejects.toMatchObject({
-        code: 'MCP_CONNECTION_LOST',
-        details: { tool_name: 'allowed', reason: 'buda_server_not_initialized' },
-      })
+    const serialized = JSON.stringify({ message: caught.message, details: caught.details })
+    expect(serialized).not.toContain(remoteSdkMessage)
+    expect(serialized).not.toContain(remoteStatusText)
+    expect(serialized).not.toContain('"jsonrpc"')
     expect(capture.calls).toHaveLength(1)
+    expect(client.state).toBe('Ready')
+  })
+
+  for (const candidate of [
+    { label: 'HTTP 500', status: 500, id: null, code: -32000, message: 'Server not initialized' },
+    { label: 'non-null response id', status: 400, id: 7, code: -32000, message: 'Server not initialized' },
+    { label: 'other JSON-RPC code', status: 400, id: null, code: -32603, message: 'Server not initialized' },
+    { label: 'near-match message', status: 400, id: null, code: -32000, message: 'Bad Request: Server not initialized' },
+  ]) {
+    test(`does not mark uncertain mutation evidence retryable: ${candidate.label}`, async () => {
+      const callError = sdkHttpFailure(candidate)
+      const { capture, factory } = fakeSdkFactory({ callError })
+      const client = createMcpClient({
+        server: { ...BUDA_MCP_SERVER_TEMPLATE, enabled_tools: ['allowed'] },
+        key,
+        sdkFactory: factory,
+      })
+      await client.connect()
+
+      const caught: any = await client.callTool('allowed', {}, { operation: 'mutation' }).catch(value => value)
+      expect(caught).toMatchObject({
+        code: 'MCP_TOOL_ERROR',
+        details: {
+          tool_name: 'allowed',
+          failure_evidence: {
+            kind: 'jsonrpc_http_rejection',
+            http_status: candidate.status,
+            jsonrpc_code: candidate.code,
+            response_id: candidate.id === null ? null : 'non_null',
+          },
+        },
+      })
+      expect(caught.details.failure_evidence.reason).toBeUndefined()
+      const serialized = JSON.stringify({ message: caught.message, details: caught.details })
+      expect(serialized).not.toContain('remote SDK message must not escape')
+      expect(serialized).not.toContain('remote status text must not escape')
+      expect(capture.calls).toHaveLength(1)
+      expect(client.state).toBe('Ready')
+    })
+  }
+
+  test('projects a secret-bearing non-null response id to a fixed sentinel', async () => {
+    const privateKey = 'sk_response_id_private_key'
+    const privateHeader = 'private-response-id-header'
+    const privateChapter = 'private chapter text in response id'
+    const privateSession = 'full-private-session-identifier'
+    const rawResponseId = [privateKey, privateHeader, privateChapter, privateSession].join('|')
+    const callError = sdkHttpFailure({
+      status: 400,
+      id: rawResponseId,
+      code: -32000,
+      message: 'Server not initialized',
+    })
+    const server = {
+      ...BUDA_MCP_SERVER_TEMPLATE,
+      enabled_tools: ['allowed'],
+      custom_headers: { 'X-Private': privateHeader },
+    }
+    const { capture, factory } = fakeSdkFactory({ callError })
+    const client = createMcpClient({
+      server,
+      key: { ...key, key: privateKey },
+      sdkFactory: factory,
+    })
+    await client.connect()
+
+    const caught: any = await client.callTool('allowed', {}, { operation: 'mutation' }).catch(value => value)
+    expect(caught).toMatchObject({
+      code: 'MCP_TOOL_ERROR',
+      details: {
+        tool_name: 'allowed',
+        failure_evidence: {
+          kind: 'jsonrpc_http_rejection',
+          http_status: 400,
+          jsonrpc_code: -32000,
+          response_id: 'non_null',
+        },
+      },
+    })
+    expect(caught.details.failure_evidence.reason).toBeUndefined()
+    const serialized = JSON.stringify({ message: caught.message, details: caught.details })
+    for (const secret of [privateKey, privateHeader, privateChapter, privateSession, rawResponseId]) {
+      expect(serialized).not.toContain(secret)
+    }
+    expect(capture.calls).toHaveLength(1)
+    expect(client.state).toBe('Ready')
+  })
+
+  test('does not parse an oversized SDK HTTP response body', async () => {
+    const text = JSON.stringify({
+      jsonrpc: '2.0',
+      id: null,
+      error: { code: -32000, message: 'Server not initialized' },
+      padding: 'x'.repeat(16_384),
+    })
+    const callError = sdkHttpFailure({
+      status: 400,
+      id: null,
+      code: -32000,
+      message: 'Server not initialized',
+      text,
+    })
+    const { factory } = fakeSdkFactory({ callError })
+    const client = createMcpClient({
+      server: { ...BUDA_MCP_SERVER_TEMPLATE, enabled_tools: ['allowed'] },
+      key,
+      sdkFactory: factory,
+    })
+    await client.connect()
+
+    const caught: any = await client.callTool('allowed', {}, { operation: 'mutation' }).catch(value => value)
+    expect(caught).toMatchObject({
+      code: 'MCP_TOOL_ERROR',
+      details: {
+        failure_evidence: {
+          kind: 'jsonrpc_http_rejection',
+          http_status: 400,
+        },
+      },
+    })
+    expect(caught.details.failure_evidence.jsonrpc_code).toBeUndefined()
+    expect(caught.details.failure_evidence.response_id).toBeUndefined()
+    expect(caught.details.failure_evidence.reason).toBeUndefined()
+    expect(JSON.stringify({ message: caught.message, details: caught.details })).not.toContain('xxxxxxxx')
+  })
+
+  for (const malformed of [
+    { label: 'missing status', data: {} },
+    { label: 'non-finite status', data: { status: Number.NaN } },
+    { label: 'non-numeric status', data: { status: '400' } },
+  ]) {
+    test(`maps an SDK HTTP error with ${malformed.label} without exposing remote fields`, async () => {
+      const sdkMessage = `private SDK message for ${malformed.label}`
+      const statusText = `private status text for ${malformed.label}`
+      const body = `private response body for ${malformed.label}`
+      const createError = () => new SdkHttpError(
+        SdkErrorCode.ClientHttpNotImplemented,
+        sdkMessage,
+        { ...malformed.data, statusText, text: body } as any,
+      )
+
+      const { factory } = fakeSdkFactory({ callError: createError() })
+      const client = createMcpClient({
+        server: { ...BUDA_MCP_SERVER_TEMPLATE, enabled_tools: ['allowed'] },
+        key,
+        sdkFactory: factory,
+      })
+      await client.connect()
+      const callFailure: any = await client.callTool('allowed', {}, { operation: 'mutation' }).catch(value => value)
+      expect(callFailure).toMatchObject({
+        code: 'MCP_TOOL_ERROR',
+        details: { tool_name: 'allowed' },
+      })
+      expect(callFailure.details.failure_evidence).toBeUndefined()
+
+      const connecting = createMcpClient({
+        server: BUDA_MCP_SERVER_TEMPLATE,
+        key,
+        sdkFactory: fakeSdkFactory({ connectError: createError() }).factory,
+      })
+      const connectionFailure: any = await connecting.connect().catch(value => value)
+      expect(connectionFailure).toMatchObject({ code: 'MCP_TOOL_ERROR' })
+      expect(connectionFailure.details?.failure_evidence).toBeUndefined()
+
+      for (const caught of [callFailure, connectionFailure]) {
+        const serialized = JSON.stringify({ message: caught.message, details: caught.details })
+        expect(serialized).not.toContain(sdkMessage)
+        expect(serialized).not.toContain(statusText)
+        expect(serialized).not.toContain(body)
+      }
+    })
+  }
+
+  test('separates a completed MCP handshake from deferred tool readiness', async () => {
+    const { capture, factory } = fakeSdkFactory({ listError: exactNotReadySdkHttpError() })
+    const client = createMcpClient({
+      server: {
+        ...BUDA_MCP_SERVER_TEMPLATE,
+        startup_timeout_ms: 5,
+        poll_initial_ms: 1,
+        poll_max_ms: 1,
+      },
+      key,
+      sdkFactory: factory,
+    })
+
+    await expect(client.connect()).resolves.toBe(client)
+    expect(client.state).toBe('Ready')
+    expect(client.diagnostics().tools).toEqual([])
+    expect(capture.listCalls).toBe(1)
+    await expect(client.listTools({ refreshTools: true })).rejects.toMatchObject({
+      code: 'MCP_TOOL_ERROR',
+      details: { failure_evidence: { reason: 'server_not_initialized' } },
+    })
+    expect(capture.listCalls).toBe(2)
+    expect(client.state).toBe('Ready')
+  })
+
+  test('reads only validated own-data failure evidence without invoking hostile fields', () => {
+    expect(mcpFailureEvidence(new McpError('MCP_TOOL_ERROR', 'safe', {
+      failure_evidence: {
+        kind: 'jsonrpc_http_rejection',
+        http_status: 400,
+        jsonrpc_code: -32000,
+        response_id: null,
+        reason: 'server_not_initialized',
+        ignored: 'not projected',
+      },
+    }))).toEqual({
+      kind: 'jsonrpc_http_rejection',
+      http_status: 400,
+      jsonrpc_code: -32000,
+      response_id: null,
+      reason: 'server_not_initialized',
+    })
+    expect(mcpFailureEvidence(new McpError('MCP_TOOL_ERROR', 'safe', {
+      failure_evidence: {
+        kind: 'jsonrpc_http_rejection',
+        http_status: 400,
+        jsonrpc_code: -32000,
+        response_id: 'non_null',
+      },
+    }))).toEqual({
+      kind: 'jsonrpc_http_rejection',
+      http_status: 400,
+      jsonrpc_code: -32000,
+      response_id: 'non_null',
+    })
+
+    let getterCalls = 0
+    const accessorError = {}
+    Object.defineProperty(accessorError, 'details', {
+      enumerable: true,
+      get() { getterCalls += 1; return { failure_evidence: { kind: 'jsonrpc_http_rejection', http_status: 400 } } },
+    })
+    let proxyTraps = 0
+    const proxyError = new Proxy({}, {
+      get() { proxyTraps += 1; throw new Error('hostile get') },
+      getOwnPropertyDescriptor() { proxyTraps += 1; throw new Error('hostile descriptor') },
+    })
+
+    expect(mcpFailureEvidence(accessorError)).toBeUndefined()
+    expect(mcpFailureEvidence(proxyError)).toBeUndefined()
+    expect(getterCalls).toBe(0)
+    expect(proxyTraps).toBe(0)
+  })
+
+  for (const inconsistent of [
+    {
+      label: 'HTTP 500',
+      evidence: { http_status: 500, jsonrpc_code: -32000, response_id: null },
+    },
+    {
+      label: 'JSON-RPC code 123',
+      evidence: { http_status: 400, jsonrpc_code: 123, response_id: null },
+    },
+    {
+      label: 'response id 7',
+      evidence: { http_status: 400, jsonrpc_code: -32000, response_id: 7 },
+    },
+    {
+      label: 'missing exact tuple',
+      evidence: { http_status: 400 },
+    },
+  ]) {
+    test(`rejects semantically inconsistent not-ready evidence: ${inconsistent.label}`, () => {
+      expect(mcpFailureEvidence(new McpError('MCP_TOOL_ERROR', 'safe', {
+        failure_evidence: {
+          kind: 'jsonrpc_http_rejection',
+          ...inconsistent.evidence,
+          reason: 'server_not_initialized',
+        },
+      }))).toBeUndefined()
+    })
+  }
+
+  test('does not defer tool readiness for inconsistent not-ready evidence', async () => {
+    const listError = new McpError('MCP_TOOL_ERROR', 'safe capability failure', {
+      failure_evidence: {
+        kind: 'jsonrpc_http_rejection',
+        http_status: 500,
+        jsonrpc_code: -32000,
+        response_id: null,
+        reason: 'server_not_initialized',
+      },
+    })
+    const { capture, factory } = fakeSdkFactory({ listError })
+    const client = createMcpClient({ server: BUDA_MCP_SERVER_TEMPLATE, key, sdkFactory: factory })
+
+    await expect(client.connect()).rejects.toMatchObject({ code: 'MCP_TOOL_ERROR' })
     expect(client.state).toBe('Closed')
+    expect(capture.listCalls).toBe(1)
+    expect(capture.terminated).toBe(true)
+    expect(capture.closed).toBe(true)
   })
 
   test('connects, filters tools, preserves results, diagnostics, timeout, and signal', async () => {
