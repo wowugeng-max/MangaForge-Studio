@@ -220,6 +220,36 @@ CREATE TABLE IF NOT EXISTS chapter_setting_usage (
   FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
   FOREIGN KEY (entity_id) REFERENCES setting_entities(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS chapter_stage_artifacts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id TEXT NOT NULL,
+  project_id INTEGER NOT NULL,
+  chapter_id INTEGER NOT NULL,
+  stage TEXT NOT NULL,
+  attempt INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('running','success','failed','ambiguous','invalidated','compacted')),
+  input_hash TEXT NOT NULL,
+  output_hash TEXT DEFAULT '',
+  response_contract TEXT NOT NULL,
+  output_payload TEXT DEFAULT '',
+  source TEXT NOT NULL CHECK(source IN ('model','mcp')),
+  source_fingerprint TEXT NOT NULL,
+  authority_fingerprint TEXT NOT NULL,
+  context_version TEXT NOT NULL,
+  server_id TEXT DEFAULT NULL,
+  key_id INTEGER DEFAULT NULL,
+  adapter_id TEXT DEFAULT NULL,
+  agent_id TEXT DEFAULT NULL,
+  model TEXT DEFAULT NULL,
+  session_id TEXT DEFAULT NULL,
+  snapshot_hash TEXT DEFAULT NULL,
+  error_code TEXT DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+  FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+  UNIQUE(task_id, stage, attempt)
+);
 CREATE INDEX IF NOT EXISTS idx_projects_updated_at ON projects(updated_at);
 CREATE INDEX IF NOT EXISTS idx_worldbuilding_project_id ON worldbuilding(project_id);
 CREATE INDEX IF NOT EXISTS idx_characters_project_id ON characters(project_id);
@@ -239,6 +269,8 @@ CREATE INDEX IF NOT EXISTS idx_setting_entities_project_name ON setting_entities
 CREATE INDEX IF NOT EXISTS idx_chapter_setting_usage_chapter ON chapter_setting_usage(chapter_id);
 CREATE INDEX IF NOT EXISTS idx_chapter_setting_usage_entity ON chapter_setting_usage(entity_id);
 CREATE INDEX IF NOT EXISTS idx_chapter_setting_usage_project_chapter ON chapter_setting_usage(project_id, chapter_id);
+CREATE INDEX IF NOT EXISTS idx_chapter_stage_artifacts_recovery
+ON chapter_stage_artifacts(project_id, chapter_id, task_id, status);
 `)
   for (const [table, columns] of Object.entries({
     projects: [['synopsis', "TEXT DEFAULT ''"], ['reference_config', "TEXT DEFAULT '{}'"]],

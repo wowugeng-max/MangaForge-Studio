@@ -28,6 +28,45 @@ export type NovelChapterVersionSource = 'manual_edit' | 'agent_execute' | 'repai
 
 export type NovelChapterVersionRecord = { id: number; chapter_id: number; project_id: number; version_no: number; chapter_text: string; scene_breakdown: any[]; continuity_notes: string[]; source: NovelChapterVersionSource; created_at: string }
 
+export type NovelChapterStageArtifactStatus =
+  | 'running'
+  | 'success'
+  | 'failed'
+  | 'ambiguous'
+  | 'invalidated'
+  | 'compacted'
+
+export type NovelChapterStageArtifactIdentity = {
+  task_id: string
+  project_id: number
+  chapter_id: number
+  stage: import('../novel-writing-service/generation-source/types').ChapterTaskStage
+  input_hash: string
+  response_contract: import('../novel-writing-service/generation-source/types').ChapterStageResponseContract
+  source: 'model' | 'mcp'
+  source_fingerprint: string
+  authority_fingerprint: string
+  context_version: string
+  server_id?: string | null
+  key_id?: number | null
+  adapter_id?: string | null
+  agent_id?: string | null
+  model?: string | null
+}
+
+export type NovelChapterStageArtifactRecord = Required<NovelChapterStageArtifactIdentity> & {
+  id: number
+  attempt: number
+  status: NovelChapterStageArtifactStatus
+  output_hash: string
+  output_payload: string
+  session_id: string | null
+  snapshot_hash: string | null
+  error_code: string
+  created_at: string
+  updated_at: string
+}
+
 export type NovelReviewRecord = { id: number; project_id: number; chapter_id?: number | null; chapter_no?: number | null; review_type: string; status: string; summary: string; issues: string[]; created_at: string; payload?: string }
 
 export type NovelReviewSummaryRecord = Omit<NovelReviewRecord, 'issues' | 'payload'> & { issue_count: number; preview: string; score: number | null; passed: boolean | null; payload_bytes: number }

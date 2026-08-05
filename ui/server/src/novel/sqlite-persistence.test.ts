@@ -3,6 +3,7 @@ import { readFileSync } from 'fs'
 import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { Database } from 'bun:sqlite'
+import { ensureSqliteSchema } from './db'
 import {
   appendNovelRun,
   commitNovelChapterAcceptance,
@@ -45,6 +46,36 @@ afterEach(async () => {
 })
 
 describe('novel sqlite persistence', () => {
+  test('creates chapter stage artifact recovery schema idempotently', async () => {
+    const workspace = await tempWorkspace()
+    const db = new Database(join(workspace, 'novel.sqlite'))
+    try {
+      ensureSqliteSchema(db)
+      const first = db.query(`
+        SELECT type, name, sql FROM sqlite_master
+        WHERE name IN ('chapter_stage_artifacts', 'idx_chapter_stage_artifacts_recovery')
+        ORDER BY type, name
+      `).all() as Array<{ type: string; name: string; sql: string }>
+      ensureSqliteSchema(db)
+      const second = db.query(`
+        SELECT type, name, sql FROM sqlite_master
+        WHERE name IN ('chapter_stage_artifacts', 'idx_chapter_stage_artifacts_recovery')
+        ORDER BY type, name
+      `).all() as Array<{ type: string; name: string; sql: string }>
+
+      expect(second).toEqual(first)
+      expect(first).toHaveLength(2)
+      const table = first.find(item => item.type === 'table')
+      const index = first.find(item => item.type === 'index')
+      expect(table?.sql).toContain('UNIQUE(task_id, stage, attempt)')
+      expect(table?.sql).toContain("status IN ('running','success','failed','ambiguous','invalidated','compacted')")
+      expect(table?.sql).toContain("source IN ('model','mcp')")
+      expect(index?.sql?.replace(/\s+/g, ' ')).toContain('(project_id, chapter_id, task_id, status)')
+    } finally {
+      db.close()
+    }
+  })
+
   test('preserves two full-store mutations that overlap in separate Bun processes', async () => {
     const workspace = await tempWorkspace()
     const project = await createNovelProject(workspace, { title: '跨进程整库更新' })
