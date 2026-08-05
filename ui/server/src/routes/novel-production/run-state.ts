@@ -1,4 +1,5 @@
 import { safeJsonStringify } from '../novel-route-utils'
+import { isChapterTaskId } from '../../novel-writing-service/generation-source/types'
 
 export function stableStringify(value: any, seen = new WeakSet<object>()): string {
   if (value === null || value === undefined) return 'null'
@@ -208,6 +209,7 @@ export function compactRunChapterItem(item: any = {}) {
   if (!item || typeof item !== 'object') return item
   return compactRunStateValue({
     id: item.id,
+    chapter_task_id: isChapterTaskId(item.chapter_task_id) ? item.chapter_task_id : undefined,
     chapter_id: item.chapter_id || item.chapterId,
     chapter_no: item.chapter_no ?? item.chapterNo,
     title: item.title,
@@ -275,4 +277,3 @@ export function isAbortLikeError(error: any) {
     || message.includes('aborted')
     || message.includes('abort')
 }
-

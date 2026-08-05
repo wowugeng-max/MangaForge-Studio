@@ -258,6 +258,10 @@ import {
 } from './runtime-helpers'
 import type { ChapterTaskExecution } from '../generation-source/types'
 
+type GenerateChapterForGroupOptions = Record<string, any> & {
+  chapter_task_id?: string
+}
+
 export function createGenerateChapterForGroupMethods(deps: {
   executeAgent: (...args: any[]) => any
   getProject: (...args: any[]) => any
@@ -317,7 +321,7 @@ export function createGenerateChapterForGroupMethods(deps: {
   const prepareStoryStateUpdate = deps.prepareStoryStateUpdate
   const trustedWordTargetContractionBudgets = deps.trustedWordTargetContractionBudgets
 
-const generateChapterForGroup = async (activeWorkspace: string, projectId: number, chapterId: number, options: any = {}) => {
+const generateChapterForGroup = async (activeWorkspace: string, projectId: number, chapterId: number, options: GenerateChapterForGroupOptions = {}) => {
   const preferredModelId = Number(options.model_id || 0) || undefined
   const onStage = typeof options.onStage === 'function' ? options.onStage : async () => {}
   const chapterTaskAbortSignal = options.abortSignal
@@ -422,6 +426,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   const strictPreflightReadiness = contextSceneResult.strictPreflightReadiness
 
   const chapterTaskExecution = await generationSourceResolver.beginTask({
+    taskId: options.chapter_task_id,
     activeWorkspace,
     project,
     chapter,

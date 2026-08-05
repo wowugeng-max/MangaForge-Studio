@@ -8,6 +8,7 @@ import {
   listNovelReviews,
   listNovelRunSummaries,
   listNovelRuns,
+  recoverNovelRunExecution,
   updateNovelProject,
   updateNovelRun,
 } from '../novel'
@@ -20,6 +21,7 @@ export type RunRoutesContext = {
   getProductionBudgetDecision: (project: any, runs: any[]) => any
   buildPipelineSteps: () => any[]
   executeChapterGroupRunRecord: (workspace: string, project: any, run: any, options?: any) => Promise<any>
+  recoverNovelRunExecution?: typeof recoverNovelRunExecution
 }
 
 const AUDIT_SOURCE_LABELS: Record<string, string> = {
@@ -420,4 +422,3 @@ export function buildAgentAudit(project: any, runs: any[], reviews: any[], chapt
     recommendations,
   }
 }
-

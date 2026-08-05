@@ -14,6 +14,7 @@ import {
   updateNovelRun,
   upsertNovelChapterByNumber,
 } from '../novel'
+import * as novelStore from '../novel'
 
 let workspaces: string[] = []
 
@@ -833,6 +834,183 @@ describe('unattended chapter goal integration', () => {
     expect(finalRun?.status).toBe('success')
     expect(finalGroup.current_index).toBe(3)
     expect(finalGroup.chapters.map((chapter: any) => chapter.status)).toEqual(['success', 'success', 'success'])
+  })
+
+  test('start-worker does not revoke a live direct chapter-group execution', async () => {
+    const workspace = await tempWorkspace()
+    const production = createNovelProductionService()
+    const project = await createNovelProject(workspace, { title: '直接执行租约保护', length_target: 'epic', reference_config: {} })
+    const run = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'chapter_group_generation',
+      status: 'ready',
+      step_name: 'live-direct-execution',
+      output_ref: JSON.stringify({
+        chapters: [{ id: 771, chapter_no: 1, title: '第一章', status: 'ready', stages: production.buildChapterGroupStages() }],
+        current_index: 0,
+        production_mode: 'full_auto',
+        results: [],
+      }),
+    })
+    let generationCount = 0
+    let signalGenerationStarted!: () => void
+    let releaseGeneration!: () => void
+    const generationStarted = new Promise<void>(resolve => { signalGenerationStarted = resolve })
+    const generationRelease = new Promise<void>(resolve => { releaseGeneration = resolve })
+    const execution = createNovelRunExecutionService({
+      getProject: async () => project,
+      production,
+      listNovelRuns,
+      updateNovelRun,
+      appendNovelRun,
+      generateChapterForGroup: async () => {
+        generationCount += 1
+        if (generationCount === 1) {
+          signalGenerationStarted()
+          await generationRelease
+        }
+        return {
+          admission_status: 'accepted',
+          score: 91,
+          revised: false,
+          story_state_update: ohStoryStep3Ok(),
+        }
+      },
+    })
+    const { app, handlers } = createRouteHarness()
+    const getProject = async () => project
+    registerNovelGenerationRoutes(app as any, generationCtx(workspace, production, {
+      getProject,
+      executeChapterGroupRunRecord: execution.executeChapterGroupRunRecord,
+    }) as any)
+    const workers = new Map()
+    registerNovelRunRoutes(app as any, {
+      getWorkspace: () => workspace,
+      getProject,
+      runQueueWorkers: workers,
+      getProductionBudgetDecision: () => ({ blocked: false, reasons: [] }),
+      buildPipelineSteps: production.buildPipelineSteps,
+      executeChapterGroupRunRecord: execution.executeChapterGroupRunRecord,
+    })
+    const execute = handlers.get('POST /api/novel/projects/:id/chapter-groups/:runId/execute')
+    const startWorker = handlers.get('POST /api/novel/projects/:id/run-queue/start-worker')
+
+    const directPromise = callRoute(execute, {
+      params: { id: String(project.id), runId: String(run.id) },
+      body: { max_chapters: 1, lock_owner: 'direct-live-owner' },
+    })
+    await generationStarted
+    const liveBeforeWorker = (await listNovelRuns(workspace, project.id)).find(item => item.id === run.id)!
+    const workerResponse = await callRoute(startWorker, {
+      params: { id: String(project.id) },
+      body: { max_runs: 1, max_chapters_per_run: 1 },
+    })
+    await waitUntil(() => workers.get(project.id)?.status === 'idle' || generationCount > 1)
+    const liveAfterWorker = (await listNovelRuns(workspace, project.id)).find(item => item.id === run.id)!
+    releaseGeneration()
+    const directResponse = await directPromise
+    await waitUntil(() => workers.get(project.id)?.status === 'idle')
+
+    expect(workerResponse.statusCode).toBe(200)
+    expect(liveAfterWorker).toMatchObject({
+      status: 'running',
+      output_ref: liveBeforeWorker.output_ref,
+      lease_owner: liveBeforeWorker.lease_owner,
+      lease_expires_at: liveBeforeWorker.lease_expires_at,
+    })
+    expect(generationCount).toBe(1)
+    expect(directResponse.statusCode).toBe(200)
+    expect(directResponse.body.status).toBe('success')
+  })
+
+  test('start-worker preserves a direct claim that wins after stale inspection but before recovery CAS', async () => {
+    const workspace = await tempWorkspace()
+    const production = createNovelProductionService()
+    const project = await createNovelProject(workspace, { title: 'Worker CAS 竞争保护', length_target: 'epic', reference_config: {} })
+    const run = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'chapter_group_generation',
+      status: 'running',
+      step_name: 'worker-recovery-cas-race',
+      output_ref: JSON.stringify({
+        chapters: [{ id: 772, chapter_no: 1, title: '第一章', status: 'ready', stages: production.buildChapterGroupStages() }],
+        current_index: 0,
+        production_mode: 'full_auto',
+        results: [],
+        lock: { owner: 'expired-owner', expires_at: '2020-08-05T09:59:00.000Z' },
+      }),
+      lease_owner: 'expired-owner',
+      lease_expires_at: '2020-08-05T09:59:00.000Z',
+    })
+    let generationCount = 0
+    let signalGenerationStarted!: () => void
+    let releaseGeneration!: () => void
+    const generationStarted = new Promise<void>(resolve => { signalGenerationStarted = resolve })
+    const generationRelease = new Promise<void>(resolve => { releaseGeneration = resolve })
+    const execution = createNovelRunExecutionService({
+      getProject: async () => project,
+      production,
+      listNovelRuns,
+      updateNovelRun,
+      appendNovelRun,
+      generateChapterForGroup: async () => {
+        generationCount += 1
+        signalGenerationStarted()
+        await generationRelease
+        return {
+          admission_status: 'accepted',
+          score: 92,
+          revised: false,
+          story_state_update: ohStoryStep3Ok(),
+        }
+      },
+    })
+    const { app, handlers } = createRouteHarness()
+    const getProject = async () => project
+    registerNovelGenerationRoutes(app as any, generationCtx(workspace, production, {
+      getProject,
+      executeChapterGroupRunRecord: execution.executeChapterGroupRunRecord,
+    }) as any)
+    const execute = handlers.get('POST /api/novel/projects/:id/chapter-groups/:runId/execute')
+    const workers = new Map()
+    let recoveryCalls = 0
+    let directPromise: Promise<any> | undefined
+    registerNovelRunRoutes(app as any, {
+      getWorkspace: () => workspace,
+      getProject,
+      runQueueWorkers: workers,
+      getProductionBudgetDecision: () => ({ blocked: false, reasons: [] }),
+      buildPipelineSteps: production.buildPipelineSteps,
+      executeChapterGroupRunRecord: execution.executeChapterGroupRunRecord,
+      recoverNovelRunExecution: async (activeWorkspace: string, input: any) => {
+        recoveryCalls += 1
+        directPromise = callRoute(execute, {
+          params: { id: String(project.id), runId: String(run.id) },
+          body: { max_chapters: 1, lock_owner: 'direct-cas-owner' },
+        })
+        await generationStarted
+        return (novelStore as any).recoverNovelRunExecution(activeWorkspace, input)
+      },
+    } as any)
+    const startWorker = handlers.get('POST /api/novel/projects/:id/run-queue/start-worker')
+
+    const workerResponse = await callRoute(startWorker, {
+      params: { id: String(project.id) },
+      body: { max_runs: 1, max_chapters_per_run: 1 },
+    })
+    await generationStarted
+    const liveAfterRecovery = (await listNovelRuns(workspace, project.id)).find(item => item.id === run.id)!
+    releaseGeneration()
+    const directResponse = directPromise ? await directPromise : null
+    await waitUntil(() => workers.get(project.id)?.status === 'idle')
+
+    expect(workerResponse.statusCode).toBe(200)
+    expect(recoveryCalls).toBe(1)
+    expect(liveAfterRecovery).toMatchObject({ status: 'running', lease_owner: 'direct-cas-owner' })
+    expect(JSON.parse(liveAfterRecovery.output_ref).lock.owner).toBe('direct-cas-owner')
+    expect(generationCount).toBe(1)
+    expect(directResponse?.statusCode).toBe(200)
+    expect(directResponse?.body.status).toBe('success')
   })
 
   test('creates an unattended run from target chapter input and executes the queued chapters in order', async () => {

@@ -6,14 +6,13 @@ import type {
   ChapterTaskProvenance,
   ChapterTaskStage,
 } from './types'
-import { CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY } from './types'
+import { CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY, isChapterTaskId } from './types'
 import { isProviderAvailabilityStageFailure } from './errors'
 
 const ERROR_CODE_LIMIT = 80
 const ERROR_MESSAGE_LIMIT = 500
 const PROVENANCE_TEXT_LIMIT = 512
 const SHA256_FINGERPRINT = /^sha256:[0-9a-f]{64}$/
-const TASK_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/
 
 function scrubDiagnostic(value: unknown, limit: number) {
   if (typeof value !== 'string') return ''
@@ -70,7 +69,7 @@ function positiveSafeInteger(value: unknown) {
 }
 
 function exactTaskId(value: unknown) {
-  return typeof value === 'string' && TASK_ID.test(value) ? value : undefined
+  return isChapterTaskId(value) ? value : undefined
 }
 
 function receiptPersistenceError(cause?: unknown) {

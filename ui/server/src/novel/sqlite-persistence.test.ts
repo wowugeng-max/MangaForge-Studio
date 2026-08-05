@@ -28,6 +28,7 @@ import {
   upsertNovelChapterByNumber,
 } from '../novel'
 import { setNovelMutationTestHook } from '../novel-test-support'
+import * as novelStore from '../novel'
 import {
   workspaces,
   tempWorkspace,
@@ -46,6 +47,408 @@ afterEach(async () => {
 })
 
 describe('novel sqlite persistence', () => {
+  test('atomically claims one run lease and preserves expired takeover and same-owner renewal', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '原子运行领取' })
+    const initialOutput = JSON.stringify({ chapters: [{ id: 1, status: 'pending' }] })
+    const run = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'chapter_group_generation',
+      step_name: 'atomic-claim',
+      status: 'ready',
+      output_ref: initialOutput,
+    })
+    const claim = (novelStore as any).claimNovelRunExecution
+    expect(typeof claim).toBe('function')
+    const common = {
+      projectId: project.id,
+      runId: run.id,
+      expectedOutputRef: run.output_ref,
+      expectedStatus: run.status,
+      expectedLeaseOwner: run.lease_owner ?? null,
+      expectedLeaseExpiresAt: run.lease_expires_at ?? null,
+      now: '2026-08-05T10:00:00.000Z',
+      expiresAt: '2026-08-05T10:10:00.000Z',
+    }
+    const [first, second] = await Promise.all([
+      claim(workspace, { ...common, owner: 'owner-a', outputRef: JSON.stringify({ lock: { owner: 'owner-a' } }) }),
+      claim(workspace, { ...common, owner: 'owner-b', outputRef: JSON.stringify({ lock: { owner: 'owner-b' } }) }),
+    ])
+    const winners = [first, second].filter(result => result.claimed)
+    const losers = [first, second].filter(result => !result.claimed)
+
+    expect(winners).toHaveLength(1)
+    expect(losers).toHaveLength(1)
+    expect(losers[0].run).toMatchObject({
+      lease_owner: winners[0].run.lease_owner,
+      output_ref: winners[0].run.output_ref,
+    })
+
+    const liveWinner = winners[0].run
+    const sameOwnerOverlap = await claim(workspace, {
+      projectId: project.id,
+      runId: run.id,
+      owner: liveWinner.lease_owner,
+      expectedOutputRef: liveWinner.output_ref,
+      expectedStatus: liveWinner.status,
+      expectedLeaseOwner: liveWinner.lease_owner,
+      expectedLeaseExpiresAt: liveWinner.lease_expires_at,
+      outputRef: JSON.stringify({ lock: { owner: liveWinner.lease_owner, overlap: true } }),
+      now: '2026-08-05T10:01:00.000Z',
+      expiresAt: '2026-08-05T10:11:00.000Z',
+    })
+    expect(sameOwnerOverlap).toMatchObject({ claimed: false, run: { status: 'running' } })
+
+    const resumable = await updateNovelRun(workspace, run.id, {
+      status: 'ready',
+      output_ref: liveWinner.output_ref,
+      lease_owner: liveWinner.lease_owner,
+      lease_expires_at: liveWinner.lease_expires_at,
+    })
+    const sameOwnerRecovery = await claim(workspace, {
+      projectId: project.id,
+      runId: run.id,
+      owner: resumable!.lease_owner!,
+      expectedOutputRef: resumable!.output_ref!,
+      expectedStatus: resumable!.status,
+      expectedLeaseOwner: resumable!.lease_owner,
+      expectedLeaseExpiresAt: resumable!.lease_expires_at,
+      outputRef: JSON.stringify({ lock: { owner: resumable!.lease_owner, recovered: true } }),
+      now: '2026-08-05T10:02:00.000Z',
+      expiresAt: '2026-08-05T10:12:00.000Z',
+    })
+    expect(sameOwnerRecovery).toMatchObject({ claimed: true, run: { status: 'running' } })
+
+    const expiredLegacyOwner = 'x'.repeat(161)
+    const expiredOutput = JSON.stringify({
+      lock: { owner: expiredLegacyOwner, expires_at: '2026-08-05T09:59:59.000Z' },
+    })
+    const expired = await updateNovelRun(workspace, run.id, {
+      status: 'ready',
+      output_ref: expiredOutput,
+      lease_owner: expiredLegacyOwner,
+      lease_expires_at: '2026-08-05T09:59:59.000Z',
+    })
+    const takeover = await claim(workspace, {
+      projectId: project.id,
+      runId: run.id,
+      owner: 'takeover-owner',
+      expectedOutputRef: expired!.output_ref,
+      expectedStatus: expired!.status,
+      expectedLeaseOwner: expired!.lease_owner,
+      expectedLeaseExpiresAt: expired!.lease_expires_at,
+      outputRef: JSON.stringify({ lock: { owner: 'takeover-owner' } }),
+      now: '2026-08-05T10:00:00.000Z',
+      expiresAt: '2026-08-05T10:10:00.000Z',
+    })
+    expect(takeover).toMatchObject({ claimed: true, run: { lease_owner: 'takeover-owner' } })
+
+    const takeoverReady = await updateNovelRun(workspace, run.id, {
+      status: 'ready',
+      output_ref: takeover.run.output_ref,
+      lease_owner: takeover.run.lease_owner,
+      lease_expires_at: takeover.run.lease_expires_at,
+    })
+    const renewal = await claim(workspace, {
+      projectId: project.id,
+      runId: run.id,
+      owner: 'takeover-owner',
+      expectedOutputRef: takeoverReady!.output_ref,
+      expectedStatus: takeoverReady!.status,
+      expectedLeaseOwner: takeoverReady!.lease_owner,
+      expectedLeaseExpiresAt: takeoverReady!.lease_expires_at,
+      outputRef: JSON.stringify({ lock: { owner: 'takeover-owner', renewed: true } }),
+      now: '2026-08-05T10:05:00.000Z',
+      expiresAt: '2026-08-05T10:15:00.000Z',
+    })
+    expect(renewal).toMatchObject({
+      claimed: true,
+      run: { lease_owner: 'takeover-owner', lease_expires_at: '2026-08-05T10:15:00.000Z' },
+    })
+  })
+
+  test('atomically races stale recovery against a claim without clearing the winner', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '恢复与领取竞争' })
+    const claim = (novelStore as any).claimNovelRunExecution
+    const recover = (novelStore as any).recoverNovelRunExecution
+    expect(typeof recover).toBe('function')
+
+    for (const firstOperation of ['claim', 'recovery'] as const) {
+      const chapterTaskId = `stable-task-${firstOperation}`
+      const staleOutput = JSON.stringify({
+        chapters: [{ id: firstOperation === 'claim' ? 1 : 2, status: 'ready', chapter_task_id: chapterTaskId }],
+        current_index: 0,
+        lock: { owner: 'expired-owner', expires_at: '2026-08-05T09:59:00.000Z' },
+      })
+      const run = await appendNovelRun(workspace, {
+        project_id: project.id,
+        run_type: 'chapter_group_generation',
+        step_name: `recovery-race-${firstOperation}`,
+        status: 'running',
+        output_ref: staleOutput,
+        lease_owner: 'expired-owner',
+        lease_expires_at: '2026-08-05T09:59:00.000Z',
+      })
+      const claimedOutput = JSON.stringify({
+        chapters: [{ id: firstOperation === 'claim' ? 1 : 2, status: 'running', chapter_task_id: chapterTaskId }],
+        current_index: 0,
+        lock: { owner: 'claim-owner', expires_at: '2026-08-05T10:10:00.000Z' },
+      })
+      const recoveredOutput = JSON.stringify({
+        chapters: [{ id: firstOperation === 'claim' ? 1 : 2, status: 'ready', chapter_task_id: chapterTaskId }],
+        current_index: 0,
+        lock: null,
+        phase: 'recovered',
+      })
+      const claimInput = {
+        projectId: project.id,
+        runId: run.id,
+        owner: 'claim-owner',
+        expectedOutputRef: staleOutput,
+        expectedStatus: 'running',
+        expectedLeaseOwner: 'expired-owner',
+        expectedLeaseExpiresAt: '2026-08-05T09:59:00.000Z',
+        outputRef: claimedOutput,
+        now: '2026-08-05T10:00:00.000Z',
+        expiresAt: '2026-08-05T10:10:00.000Z',
+      }
+      const recoveryInput = {
+        projectId: project.id,
+        runId: run.id,
+        expectedOutputRef: staleOutput,
+        expectedStatus: 'running',
+        expectedLeaseOwner: 'expired-owner',
+        expectedLeaseExpiresAt: '2026-08-05T09:59:00.000Z',
+        outputRef: recoveredOutput,
+        status: 'ready',
+        now: '2026-08-05T10:00:00.000Z',
+      }
+      const operations = firstOperation === 'claim'
+        ? [claim(workspace, claimInput), recover(workspace, recoveryInput)]
+        : [recover(workspace, recoveryInput), claim(workspace, claimInput)]
+      const [first, second] = await Promise.all(operations)
+      const claimResult = firstOperation === 'claim' ? first : second
+      const recoveryResult = firstOperation === 'recovery' ? first : second
+
+      expect(Number(claimResult.claimed) + Number(recoveryResult.updated)).toBe(1)
+      if (claimResult.claimed) {
+        expect(recoveryResult.updated).toBe(false)
+        expect(recoveryResult.run.output_ref).toBe(claimedOutput)
+        expect(recoveryResult.run.lease_owner).toBe('claim-owner')
+        expect(JSON.parse(recoveryResult.run.output_ref).chapters[0].chapter_task_id).toBe(chapterTaskId)
+      } else {
+        expect(recoveryResult.updated).toBe(true)
+        expect(claimResult.run.output_ref).toBe(recoveredOutput)
+        expect(claimResult.run).toMatchObject({ status: 'ready', lease_owner: null, lease_expires_at: null })
+      }
+    }
+  })
+
+  for (const legacyFence of [
+    { name: 'whitespace durable owner', leaseOwner: '   ', payloadOwner: null },
+    { name: 'oversized durable owner', leaseOwner: 'x'.repeat(161), payloadOwner: null },
+    { name: 'whitespace payload owner', leaseOwner: null, payloadOwner: '   ' },
+    { name: 'oversized payload owner', leaseOwner: null, payloadOwner: 'x'.repeat(161) },
+  ]) {
+    test(`refuses recovery while a legacy ${legacyFence.name} has a canonical future expiry`, async () => {
+      const workspace = await tempWorkspace()
+      const project = await createNovelProject(workspace, { title: `旧租约保护-${legacyFence.name}` })
+      const futureExpiry = '2099-08-05T10:10:00.000Z'
+      const outputRef = JSON.stringify({
+        chapters: [{ id: 1, status: 'ready', chapter_task_id: `legacy-${legacyFence.name}` }],
+        current_index: 0,
+        lock: legacyFence.payloadOwner === null
+          ? null
+          : { owner: legacyFence.payloadOwner, expires_at: futureExpiry },
+      })
+      const run = await appendNovelRun(workspace, {
+        project_id: project.id,
+        run_type: 'chapter_group_generation',
+        step_name: `legacy-recovery-${legacyFence.name}`,
+        status: 'running',
+        output_ref: outputRef,
+        lease_owner: legacyFence.leaseOwner,
+        lease_expires_at: legacyFence.leaseOwner === null ? null : futureExpiry,
+      })
+      const before = (await listNovelRuns(workspace, project.id)).find(item => item.id === run.id)!
+      const recover = (novelStore as any).recoverNovelRunExecution
+
+      const recovery = await recover(workspace, {
+        projectId: project.id,
+        runId: run.id,
+        expectedOutputRef: outputRef,
+        expectedStatus: 'running',
+        expectedLeaseOwner: legacyFence.leaseOwner,
+        expectedLeaseExpiresAt: legacyFence.leaseOwner === null ? null : futureExpiry,
+        outputRef: JSON.stringify({ chapters: [{ id: 1, status: 'ready' }], lock: null }),
+        status: 'ready',
+        now: '2026-08-05T10:00:00.000Z',
+      })
+      const after = (await listNovelRuns(workspace, project.id)).find(item => item.id === run.id)!
+
+      expect(recovery.updated).toBe(false)
+      expect(recovery.run).toMatchObject(before)
+      expect(after).toEqual(before)
+    })
+  }
+
+  test('rejects malformed run-claim identities and timestamps without mutation', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '领取参数校验' })
+    const claim = (novelStore as any).claimNovelRunExecution
+    const invalidPatches = [
+      { owner: '' },
+      { owner: 'x'.repeat(161) },
+      { expectedLeaseOwner: 'x'.repeat(16_385) },
+      { now: 'not-a-timestamp' },
+      { now: '2026-08-05T10:00:00Z' },
+      { expiresAt: 'not-a-timestamp' },
+      { expiresAt: '2026-08-05T10:00:00.000Z' },
+    ]
+
+    for (const [index, invalidPatch] of invalidPatches.entries()) {
+      const run = await appendNovelRun(workspace, {
+        project_id: project.id,
+        run_type: 'chapter_group_generation',
+        step_name: `invalid-claim-${index}`,
+        status: 'ready',
+        output_ref: JSON.stringify({ chapters: [{ id: index + 1, status: 'pending' }] }),
+      })
+      const before = (await listNovelRuns(workspace, project.id)).find(item => item.id === run.id)
+      const input = {
+        projectId: project.id,
+        runId: run.id,
+        owner: 'valid-owner',
+        expectedOutputRef: run.output_ref,
+        expectedStatus: run.status,
+        expectedLeaseOwner: run.lease_owner ?? null,
+        expectedLeaseExpiresAt: run.lease_expires_at ?? null,
+        outputRef: JSON.stringify({ lock: { owner: 'valid-owner' } }),
+        now: '2026-08-05T10:00:00.000Z',
+        expiresAt: '2026-08-05T10:10:00.000Z',
+        ...invalidPatch,
+      }
+
+      await expect(claim(workspace, input)).rejects.toMatchObject({ code: 'NOVEL_RUN_CLAIM_INVALID' })
+      const after = (await listNovelRuns(workspace, project.id)).find(item => item.id === run.id)
+      expect(after).toEqual(before)
+    }
+  })
+
+  test('rejects an unbounded persisted recovery owner without mutation', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '恢复快照 owner 上限' })
+    const oversizedPersistedOwner = 'x'.repeat(16_385)
+    const futureExpiry = '2099-08-05T10:10:00.000Z'
+    const run = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'chapter_group_generation',
+      step_name: 'oversized-persisted-recovery-owner',
+      status: 'running',
+      output_ref: JSON.stringify({ chapters: [{ id: 1, status: 'ready' }], lock: null }),
+      lease_owner: oversizedPersistedOwner,
+      lease_expires_at: futureExpiry,
+    })
+    const before = (await listNovelRuns(workspace, project.id)).find(item => item.id === run.id)!
+    let errorCode = ''
+
+    try {
+      await (novelStore as any).recoverNovelRunExecution(workspace, {
+        projectId: project.id,
+        runId: run.id,
+        expectedOutputRef: run.output_ref,
+        expectedStatus: run.status,
+        expectedLeaseOwner: oversizedPersistedOwner,
+        expectedLeaseExpiresAt: futureExpiry,
+        outputRef: JSON.stringify({ chapters: [{ id: 1, status: 'ready' }], lock: null }),
+        status: 'ready',
+        now: '2026-08-05T10:00:00.000Z',
+      })
+    } catch (error: any) {
+      errorCode = String(error?.code || '')
+    }
+
+    expect(errorCode).toBe('NOVEL_RUN_CLAIM_INVALID')
+    const after = (await listNovelRuns(workspace, project.id)).find(item => item.id === run.id)!
+    expect(after).toEqual(before)
+  })
+
+  test('claims a valid large run snapshot', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '大型运行快照领取' })
+    const run = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'chapter_group_generation',
+      step_name: 'large-snapshot-claim',
+      status: 'ready',
+      output_ref: '{}',
+    })
+    const largeOutput = JSON.stringify({
+      chapters: [{ id: 1, status: 'pending' }],
+      checkpoint: 'x'.repeat(128 * 1024),
+    })
+    const db = new Database(join(workspace, 'novel.sqlite'))
+    try {
+      db.query('UPDATE runs SET output_ref = ? WHERE id = ?').run(largeOutput, run.id)
+    } finally {
+      db.close()
+    }
+
+    const claim = (novelStore as any).claimNovelRunExecution
+    const result = await claim(workspace, {
+      projectId: project.id,
+      runId: run.id,
+      owner: 'large-snapshot-owner',
+      expectedOutputRef: largeOutput,
+      expectedStatus: 'ready',
+      expectedLeaseOwner: null,
+      expectedLeaseExpiresAt: null,
+      outputRef: largeOutput,
+      now: '2026-08-05T10:00:00.000Z',
+      expiresAt: '2026-08-05T10:10:00.000Z',
+    })
+
+    expect(largeOutput.length).toBeGreaterThan(100 * 1024)
+    expect(result).toMatchObject({
+      claimed: true,
+      run: { status: 'running', lease_owner: 'large-snapshot-owner' },
+    })
+  })
+
+  test('rejects a run claim whose UTF-8 reference exceeds the byte limit without mutation', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: 'UTF-8 领取边界' })
+    const run = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'chapter_group_generation',
+      step_name: 'utf8-byte-limit',
+      status: 'ready',
+      output_ref: JSON.stringify({ chapters: [{ id: 1, status: 'pending' }] }),
+    })
+    const oversizedUtf8Output = JSON.stringify({ checkpoint: '界'.repeat(750_000) })
+    expect(oversizedUtf8Output.length).toBeLessThanOrEqual(2 * 1024 * 1024)
+    expect(Buffer.byteLength(oversizedUtf8Output, 'utf8')).toBeGreaterThan(2 * 1024 * 1024)
+    const before = (await listNovelRuns(workspace, project.id)).find(item => item.id === run.id)
+
+    const claim = (novelStore as any).claimNovelRunExecution
+    await expect(claim(workspace, {
+      projectId: project.id,
+      runId: run.id,
+      owner: 'utf8-byte-limit-owner',
+      expectedOutputRef: run.output_ref,
+      expectedStatus: run.status,
+      expectedLeaseOwner: run.lease_owner ?? null,
+      expectedLeaseExpiresAt: run.lease_expires_at ?? null,
+      outputRef: oversizedUtf8Output,
+      now: '2026-08-05T10:00:00.000Z',
+      expiresAt: '2026-08-05T10:10:00.000Z',
+    })).rejects.toMatchObject({ code: 'NOVEL_RUN_CLAIM_INVALID' })
+
+    const after = (await listNovelRuns(workspace, project.id)).find(item => item.id === run.id)
+    expect(after).toEqual(before)
+  })
+
   test('creates chapter stage artifact recovery schema idempotently', async () => {
     const workspace = await tempWorkspace()
     const db = new Database(join(workspace, 'novel.sqlite'))
@@ -121,7 +524,7 @@ describe('novel sqlite persistence', () => {
       'appendChapterVersion', 'rollbackChapterVersion', 'updateNovelChapter',
       'mergeNovelChapterRawPayload', 'commitNovelChapterAcceptance',
       'deleteNovelChapter', 'deleteNovelOutline', 'deleteNovelProject',
-      'createNovelReview', 'appendNovelRun', 'updateNovelRun', 'compactNovelStorage',
+      'createNovelReview', 'appendNovelRun', 'updateNovelRun', 'claimNovelRunExecution', 'compactNovelStorage',
       'createNovelProjectSeedDraft', 'deleteNovelProjectSeedDraft',
     ]
 

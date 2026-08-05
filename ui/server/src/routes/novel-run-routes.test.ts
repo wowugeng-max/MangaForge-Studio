@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { appendNovelRun, createNovelProject, createNovelReview, listNovelProjects, listNovelReviews, listNovelRuns, updateNovelRun } from '../novel'
+import * as novelStore from '../novel'
 import { setNovelMutationTestHook } from '../novel-test-support'
 import { createNovelProductionService } from './novel-production-service'
 import { revisionTextHash } from './novel-editor/revision-candidate-admission'
@@ -972,9 +973,11 @@ describe('novel run task center source guards', () => {
     const workspace = await tempWorkspace()
     const production = createNovelProductionService()
     const project = await createNovelProject(workspace, { title: '章节群残留终态隔离', reference_config: {} })
+    const leaseExpiresAt = '2020-08-05T10:10:00.000Z'
     const output = {
       admission_status: 'blocked_invalid',
       error_code: 'PROSE_ADMISSION_BLOCKED_INVALID',
+      lock: { owner: 'stale-resume-owner', expires_at: leaseExpiresAt },
       chapters: [{
         id: 414,
         chapter_no: 22,
@@ -993,6 +996,8 @@ describe('novel run task center source guards', () => {
       status: 'paused',
       step_name: 'stale-top-level-terminal',
       output_ref: JSON.stringify(output),
+      lease_owner: 'stale-resume-owner',
+      lease_expires_at: leaseExpiresAt,
     })
     const { app, handlers } = createRouteHarness()
     registerNovelRunRoutes(app as any, {
@@ -1012,6 +1017,7 @@ describe('novel run task center source guards', () => {
       body: { project_id: project.id },
     })
     const storedRun = (await listNovelRuns(workspace, project.id)).find(item => item.id === run.id)
+    const storedPayload = JSON.parse(String(storedRun?.output_ref || '{}'))
     const task = tasksResponse.body.tasks.find((item: any) => item.id === run.id)
 
     expect(tasksResponse.statusCode).toBe(200)
@@ -1019,6 +1025,204 @@ describe('novel run task center source guards', () => {
     expect(task.can_execute).toBe(true)
     expect(response.statusCode).toBe(200)
     expect(storedRun?.status).toBe('ready')
+    expect(storedRun?.lease_owner).toBeNull()
+    expect(storedRun?.lease_expires_at).toBeNull()
+    expect(storedPayload.lock).toBeNull()
+  })
+
+  test('blocks chapter-group resume for either live lease and resumes only absent or expired execution', async () => {
+    const workspace = await tempWorkspace()
+    const production = createNovelProductionService()
+    const project = await createNovelProject(workspace, { title: '章节群继续租约保护', reference_config: {} })
+    const liveExpiry = '2099-08-05T10:10:00.000Z'
+    const expiredAt = '2020-08-05T10:10:00.000Z'
+    const cases = [
+      {
+        name: 'live-durable',
+        lease_owner: 'durable-owner',
+        lease_expires_at: liveExpiry,
+        lock: null,
+        active: true,
+        locked_by: 'durable-owner',
+      },
+      {
+        name: 'live-payload',
+        lease_owner: null,
+        lease_expires_at: null,
+        lock: { owner: 'payload-owner', expires_at: liveExpiry },
+        active: true,
+        locked_by: 'payload-owner',
+      },
+      {
+        name: 'legacy-whitespace-durable',
+        lease_owner: '   ',
+        lease_expires_at: liveExpiry,
+        lock: null,
+        active: true,
+        locked_by: 'legacy_lock_owner',
+      },
+      {
+        name: 'legacy-oversized-durable',
+        lease_owner: 'x'.repeat(161),
+        lease_expires_at: liveExpiry,
+        lock: null,
+        active: true,
+        locked_by: 'legacy_lock_owner',
+      },
+      {
+        name: 'legacy-whitespace-payload',
+        lease_owner: null,
+        lease_expires_at: null,
+        lock: { owner: '   ', expires_at: liveExpiry },
+        active: true,
+        locked_by: 'legacy_lock_owner',
+      },
+      {
+        name: 'legacy-oversized-payload',
+        lease_owner: null,
+        lease_expires_at: null,
+        lock: { owner: 'x'.repeat(161), expires_at: liveExpiry },
+        active: true,
+        locked_by: 'legacy_lock_owner',
+      },
+      {
+        name: 'expired',
+        lease_owner: 'expired-durable-owner',
+        lease_expires_at: expiredAt,
+        lock: { owner: 'expired-payload-owner', expires_at: expiredAt },
+        active: false,
+      },
+      {
+        name: 'absent',
+        lease_owner: null,
+        lease_expires_at: null,
+        lock: null,
+        active: false,
+      },
+    ]
+    const runs = []
+    for (const item of cases) {
+      runs.push(await appendNovelRun(workspace, {
+        project_id: project.id,
+        run_type: 'chapter_group_generation',
+        status: 'paused',
+        step_name: `resume-${item.name}`,
+        output_ref: JSON.stringify({
+          chapters: [{ id: runs.length + 1, chapter_no: runs.length + 1, status: 'ready' }],
+          current_index: 0,
+          ...(item.lock ? { lock: item.lock } : {}),
+        }),
+        lease_owner: item.lease_owner,
+        lease_expires_at: item.lease_expires_at,
+      }))
+    }
+    const { app, handlers } = createRouteHarness()
+    registerNovelRunRoutes(app as any, {
+      getWorkspace: () => workspace,
+      getProject: async (_workspace: string, id: number) => (await listNovelProjects(_workspace)).find(item => item.id === id) || null,
+      runQueueWorkers: new Map(),
+      getProductionBudgetDecision: () => ({ blocked: false, reasons: [] }),
+      buildPipelineSteps: production.buildPipelineSteps,
+      executeChapterGroupRunRecord: async () => ({ status: 'not-used', processed: 0 }),
+    })
+    const resume = handlers.get('POST /api/novel/runs/:id/resume')
+
+    for (const [index, item] of cases.entries()) {
+      const before = (await listNovelRuns(workspace, project.id)).find(run => run.id === runs[index].id)!
+      const response = await callRoute(resume, {
+        params: { id: String(runs[index].id) },
+        body: { project_id: project.id },
+      })
+      const after = (await listNovelRuns(workspace, project.id)).find(run => run.id === runs[index].id)!
+      if (item.active) {
+        expect(response.statusCode).toBe(409)
+        expect(response.body).toMatchObject({
+          error_code: 'NOVEL_RUN_EXECUTION_ACTIVE',
+          status: 'locked',
+          locked_by: item.locked_by,
+        })
+        expect(after).toEqual(before)
+      } else {
+        expect(response.statusCode).toBe(200)
+        expect(after).toMatchObject({ status: 'ready', lease_owner: null, lease_expires_at: null })
+        expect(JSON.parse(String(after.output_ref || '{}')).lock).toBeNull()
+      }
+    }
+  })
+
+  test('returns an active conflict when a claim wins after resume inspection but before recovery CAS', async () => {
+    const workspace = await tempWorkspace()
+    const production = createNovelProductionService()
+    const project = await createNovelProject(workspace, { title: '继续恢复 CAS 竞争', reference_config: {} })
+    const chapterTaskId = 'resume-cas-stable-task'
+    const staleOutput = JSON.stringify({
+      chapters: [{ id: 31, chapter_no: 1, status: 'ready', chapter_task_id: chapterTaskId }],
+      current_index: 0,
+      lock: { owner: 'expired-owner', expires_at: '2020-08-05T09:59:00.000Z' },
+    })
+    const run = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'chapter_group_generation',
+      status: 'paused',
+      step_name: 'resume-cas-race',
+      output_ref: staleOutput,
+      lease_owner: 'expired-owner',
+      lease_expires_at: '2020-08-05T09:59:00.000Z',
+    })
+    const claimedOutput = JSON.stringify({
+      chapters: [{ id: 31, chapter_no: 1, status: 'running', chapter_task_id: chapterTaskId }],
+      current_index: 0,
+      lock: { owner: 'resume-race-owner', expires_at: '2099-08-05T10:10:00.000Z' },
+    })
+    let recoveryCalls = 0
+    const { app, handlers } = createRouteHarness()
+    registerNovelRunRoutes(app as any, {
+      getWorkspace: () => workspace,
+      getProject: async (_workspace: string, id: number) => (await listNovelProjects(_workspace)).find(item => item.id === id) || null,
+      runQueueWorkers: new Map(),
+      getProductionBudgetDecision: () => ({ blocked: false, reasons: [] }),
+      buildPipelineSteps: production.buildPipelineSteps,
+      executeChapterGroupRunRecord: async () => ({ status: 'not-used', processed: 0 }),
+      recoverNovelRunExecution: async (activeWorkspace: string, input: any) => {
+        recoveryCalls += 1
+        const claimed = await (novelStore as any).claimNovelRunExecution(activeWorkspace, {
+          projectId: input.projectId,
+          runId: input.runId,
+          owner: 'resume-race-owner',
+          expectedOutputRef: input.expectedOutputRef,
+          expectedStatus: input.expectedStatus,
+          expectedLeaseOwner: input.expectedLeaseOwner,
+          expectedLeaseExpiresAt: input.expectedLeaseExpiresAt,
+          outputRef: claimedOutput,
+          now: input.now,
+          expiresAt: '2099-08-05T10:10:00.000Z',
+        })
+        expect(claimed.claimed).toBe(true)
+        return (novelStore as any).recoverNovelRunExecution(activeWorkspace, input)
+      },
+    } as any)
+    const resume = handlers.get('POST /api/novel/runs/:id/resume')
+
+    const response = await callRoute(resume, {
+      params: { id: String(run.id) },
+      body: { project_id: project.id },
+    })
+    const after = (await listNovelRuns(workspace, project.id)).find(item => item.id === run.id)!
+
+    expect(recoveryCalls).toBe(1)
+    expect(response.statusCode).toBe(409)
+    expect(response.body).toMatchObject({
+      error_code: 'NOVEL_RUN_EXECUTION_ACTIVE',
+      status: 'locked',
+      locked_by: 'resume-race-owner',
+    })
+    expect(after.output_ref).toBe(claimedOutput)
+    expect(after).toMatchObject({
+      status: 'running',
+      lease_owner: 'resume-race-owner',
+      lease_expires_at: '2099-08-05T10:10:00.000Z',
+    })
+    expect(JSON.parse(after.output_ref).chapters[0].chapter_task_id).toBe(chapterTaskId)
   })
 
   test('rejects generic resume and disables actions for a standalone blocked_invalid admission', async () => {
@@ -1115,10 +1319,187 @@ describe('novel run task center source guards', () => {
     expect(response.body.resume_endpoint).toBe('/api/novel/chapters/413/generate-prose')
   })
 
+  test('clears only chapter-group leases during manual queue recovery', async () => {
+    const workspace = await tempWorkspace()
+    const production = createNovelProductionService()
+    const project = await createNovelProject(workspace, { title: '手动恢复租约', reference_config: {} })
+    const leaseExpiresAt = '2099-08-05T10:10:00.000Z'
+    const chapterRun = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'chapter_group_generation',
+      status: 'running',
+      step_name: 'recover-chapter-group',
+      output_ref: JSON.stringify({
+        chapters: [{ id: 11, chapter_no: 1, status: 'ready' }],
+        lock: { owner: 'chapter-owner', expires_at: leaseExpiresAt },
+      }),
+      lease_owner: 'chapter-owner',
+      lease_expires_at: leaseExpiresAt,
+    })
+    const unrelatedRun = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'chapter_generation_pipeline',
+      status: 'running',
+      step_name: 'keep-unrelated-lease',
+      output_ref: JSON.stringify({
+        lock: { owner: 'pipeline-owner', expires_at: leaseExpiresAt },
+      }),
+      lease_owner: 'pipeline-owner',
+      lease_expires_at: leaseExpiresAt,
+    })
+    const { app, handlers } = createRouteHarness()
+    registerNovelRunRoutes(app as any, {
+      getWorkspace: () => workspace,
+      getProject: async (_workspace: string, id: number) => (await listNovelProjects(_workspace)).find(item => item.id === id) || null,
+      runQueueWorkers: new Map(),
+      getProductionBudgetDecision: () => ({ blocked: false, reasons: [] }),
+      buildPipelineSteps: production.buildPipelineSteps,
+      executeChapterGroupRunRecord: async () => ({ status: 'not-used', processed: 0 }),
+    })
+    const recover = handlers.get('POST /api/novel/projects/:id/run-queue/recover')
+
+    const response = await callRoute(recover, {
+      params: { id: String(project.id) },
+      body: {},
+    })
+    const runs = await listNovelRuns(workspace, project.id)
+    const recovered = runs.find(run => run.id === chapterRun.id)
+    const unrelated = runs.find(run => run.id === unrelatedRun.id)
+    const recoveredPayload = JSON.parse(String(recovered?.output_ref || '{}'))
+    const unrelatedPayload = JSON.parse(String(unrelated?.output_ref || '{}'))
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body.recovered_runs).toBe(1)
+    expect(recovered).toMatchObject({
+      status: 'ready',
+      lease_owner: null,
+      lease_expires_at: null,
+    })
+    expect(recoveredPayload.lock).toBeNull()
+    expect(unrelated).toMatchObject({
+      status: 'running',
+      lease_owner: 'pipeline-owner',
+      lease_expires_at: leaseExpiresAt,
+    })
+    expect(unrelatedPayload.lock).toEqual({ owner: 'pipeline-owner', expires_at: leaseExpiresAt })
+  })
+
+  test('start-worker recovers only chapter groups without a live durable or payload lease', async () => {
+    const workspace = await tempWorkspace()
+    const production = createNovelProductionService()
+    const project = await createNovelProject(workspace, { title: '自动恢复租约表', reference_config: {} })
+    const liveExpiry = '2099-08-05T10:10:00.000Z'
+    const expiredAt = '2020-08-05T10:10:00.000Z'
+    const cases = [
+      { name: 'absent', lease_owner: null, lease_expires_at: null, lock: null, recover: true },
+      {
+        name: 'expired',
+        lease_owner: 'expired-durable-owner',
+        lease_expires_at: expiredAt,
+        lock: { owner: 'expired-payload-owner', expires_at: expiredAt },
+        recover: true,
+      },
+      {
+        name: 'live-durable',
+        lease_owner: 'live-durable-owner',
+        lease_expires_at: liveExpiry,
+        lock: { owner: 'expired-payload-owner', expires_at: expiredAt },
+        recover: false,
+      },
+      {
+        name: 'live-payload',
+        lease_owner: null,
+        lease_expires_at: null,
+        lock: { owner: 'live-payload-owner', expires_at: liveExpiry },
+        recover: false,
+      },
+      {
+        name: 'legacy-whitespace-durable',
+        lease_owner: '   ',
+        lease_expires_at: liveExpiry,
+        lock: null,
+        recover: false,
+      },
+      {
+        name: 'legacy-oversized-durable',
+        lease_owner: 'x'.repeat(161),
+        lease_expires_at: liveExpiry,
+        lock: null,
+        recover: false,
+      },
+      {
+        name: 'legacy-whitespace-payload',
+        lease_owner: null,
+        lease_expires_at: null,
+        lock: { owner: '   ', expires_at: liveExpiry },
+        recover: false,
+      },
+      {
+        name: 'legacy-oversized-payload',
+        lease_owner: null,
+        lease_expires_at: null,
+        lock: { owner: 'x'.repeat(161), expires_at: liveExpiry },
+        recover: false,
+      },
+    ]
+    const runs = []
+    for (const item of cases) {
+      runs.push(await appendNovelRun(workspace, {
+        project_id: project.id,
+        run_type: 'chapter_group_generation',
+        status: 'running',
+        step_name: `worker-${item.name}`,
+        output_ref: JSON.stringify({
+          chapters: [{ id: runs.length + 10, chapter_no: runs.length + 1, status: 'ready' }],
+          current_index: 0,
+          ...(item.lock ? { lock: item.lock } : {}),
+        }),
+        lease_owner: item.lease_owner,
+        lease_expires_at: item.lease_expires_at,
+      }))
+    }
+    const before = new Map((await listNovelRuns(workspace, project.id)).map(run => [run.id, run]))
+    let executions = 0
+    const workers = new Map()
+    const { app, handlers } = createRouteHarness()
+    registerNovelRunRoutes(app as any, {
+      getWorkspace: () => workspace,
+      getProject: async (_workspace: string, id: number) => (await listNovelProjects(_workspace)).find(item => item.id === id) || null,
+      runQueueWorkers: workers,
+      getProductionBudgetDecision: () => ({ blocked: true, reasons: ['test-budget-stop'] }),
+      buildPipelineSteps: production.buildPipelineSteps,
+      executeChapterGroupRunRecord: async () => {
+        executions += 1
+        return { status: 'not-used', processed: 0 }
+      },
+    })
+    const startWorker = handlers.get('POST /api/novel/projects/:id/run-queue/start-worker')
+
+    const response = await callRoute(startWorker, {
+      params: { id: String(project.id) },
+      body: { max_runs: 1, max_chapters_per_run: 1 },
+    })
+    await waitUntil(() => workers.get(project.id)?.status === 'idle')
+    const after = new Map((await listNovelRuns(workspace, project.id)).map(run => [run.id, run]))
+
+    expect(response.statusCode).toBe(200)
+    expect(executions).toBe(0)
+    for (const [index, item] of cases.entries()) {
+      const current = after.get(runs[index].id)!
+      if (item.recover) {
+        expect(current).toMatchObject({ status: 'ready', lease_owner: null, lease_expires_at: null })
+        expect(JSON.parse(String(current.output_ref || '{}')).lock).toBeNull()
+      } else {
+        expect(current).toEqual(before.get(runs[index].id))
+      }
+    }
+  })
+
   test('recovers stale running chapter group runs before starting a worker', async () => {
     const workspace = await tempWorkspace()
     const production = createNovelProductionService()
     const project = await createNovelProject(workspace, { title: '长线连载', reference_config: {} })
+    const leaseExpiresAt = '2020-08-05T10:10:00.000Z'
     const staleRun = await appendNovelRun(workspace, {
       project_id: project.id,
       run_type: 'chapter_group_generation',
@@ -1128,7 +1509,10 @@ describe('novel run task center source guards', () => {
         chapters: [{ id: 12, chapter_no: 1, title: '第一章', status: 'ready' }],
         current_index: 0,
         phase: '上次进程中断',
+        lock: { owner: 'stale-worker-owner', expires_at: leaseExpiresAt },
       }),
+      lease_owner: 'stale-worker-owner',
+      lease_expires_at: leaseExpiresAt,
     })
     const executedRuns: number[] = []
     const { app, handlers } = createRouteHarness()
@@ -1159,6 +1543,9 @@ describe('novel run task center source guards', () => {
     expect(executedRuns).toEqual([staleRun.id])
     expect(payload.recovered_at).toBeTruthy()
     expect(payload.phase).toBe('后端重启后自动恢复为待执行')
+    expect(payload.lock).toBeNull()
+    expect(recoveredRun?.lease_owner).toBeNull()
+    expect(recoveredRun?.lease_expires_at).toBeNull()
   })
 
   test('keeps draining the same unattended target run when each worker pass writes one chapter', async () => {

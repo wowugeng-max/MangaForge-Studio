@@ -10,6 +10,7 @@ import {
   resolveProseGenerationSource,
   type ChapterGenerationSourceState,
 } from './source-config'
+import { isChapterTaskId } from './types'
 import type {
   BeginChapterTaskInput,
   ChapterTaskExecution,
@@ -117,6 +118,23 @@ function positiveModelId(value: unknown) {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
 }
 
+function explicitChapterTaskId(value: unknown) {
+  if (!value || (typeof value !== 'object' && typeof value !== 'function') || types.isProxy(value)) {
+    throw new TypeError('Invalid chapter task id')
+  }
+  let descriptor: PropertyDescriptor | undefined
+  try {
+    descriptor = Object.getOwnPropertyDescriptor(value, 'taskId')
+  } catch {
+    throw new TypeError('Invalid chapter task id')
+  }
+  if (!descriptor) return undefined
+  if (!('value' in descriptor) || (descriptor.value !== undefined && !isChapterTaskId(descriptor.value))) {
+    throw new TypeError('Invalid chapter task id')
+  }
+  return descriptor.value
+}
+
 function ownProjectId(value: unknown) {
   if (!value || typeof value !== 'object' || types.isProxy(value)) return undefined
   try {
@@ -207,8 +225,8 @@ function wrapExecution(
 function createTaskResolver(input: GenerationSourceResolverInput): TaskGenerationSourceResolver {
   return {
     async beginTask(beginInput) {
+      const taskId = explicitChapterTaskId(beginInput) ?? randomUUID()
       assertNoGenerationSourceOverride(beginInput.options)
-      const taskId = randomUUID()
       const projectId = ownProjectId(beginInput.project)
       if (projectId === undefined) throw projectIdentityChanged()
       const projectLease = await input.chapterSourceLeases.acquire(

@@ -3,6 +3,7 @@ import { openDb, ensureSqliteSchema } from '../db'
 import { ensureLegacyNovelStoreImportedForRead } from '../legacy-import'
 import { withNovelWorkspaceMutation } from '../lock'
 import { nowIso, parseDbJson } from '../json'
+import { types } from 'node:util'
 import { normalizeRunRecord } from '../normalize'
 import { runFromRow, runSummaryFromRow } from '../row-mappers'
 import { withNovelDbWrite, updateRunRow } from '../sql-rows'
@@ -243,6 +244,283 @@ export async function updateNovelRun(activeWorkspace: string, id: number, data: 
     updateRunRow(db, next)
     return next
   })
+}
+
+export type ClaimNovelRunExecutionInput = {
+  projectId: number
+  runId: number
+  owner: string
+  expectedOutputRef: string
+  expectedStatus: string
+  expectedLeaseOwner: string | null
+  expectedLeaseExpiresAt: string | null
+  outputRef: string
+  now: string
+  expiresAt: string
+}
+
+export type ClaimNovelRunExecutionResult = {
+  claimed: boolean
+  run: NovelRunRecord | null
+}
+
+export type RecoverNovelRunExecutionInput = {
+  projectId: number
+  runId: number
+  expectedOutputRef: string
+  expectedStatus: string
+  expectedLeaseOwner: string | null
+  expectedLeaseExpiresAt: string | null
+  outputRef: string
+  status: string
+  now: string
+}
+
+export type RecoverNovelRunExecutionResult = {
+  updated: boolean
+  run: NovelRunRecord | null
+}
+
+const RUN_CLAIM_OWNER_LIMIT = 160
+const RUN_PERSISTED_OWNER_LIMIT = 16 * 1024
+const RUN_CLAIM_STATUS_LIMIT = 80
+const RUN_CLAIM_REF_LIMIT = 2 * 1024 * 1024
+
+function invalidRunClaim() {
+  return Object.assign(new TypeError('Invalid novel run execution claim'), {
+    code: 'NOVEL_RUN_CLAIM_INVALID',
+  })
+}
+
+function ownClaimValue(input: unknown, field: string) {
+  if (!input || (typeof input !== 'object' && typeof input !== 'function') || types.isProxy(input)) {
+    throw invalidRunClaim()
+  }
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(input, field)
+    if (!descriptor || !('value' in descriptor)) throw invalidRunClaim()
+    return descriptor.value
+  } catch (error) {
+    if ((error as any)?.code === 'NOVEL_RUN_CLAIM_INVALID') throw error
+    throw invalidRunClaim()
+  }
+}
+
+function boundedClaimOwner(value: unknown, nullable = false): string | null {
+  if (nullable && value === null) return null
+  if (typeof value !== 'string' || value.length > RUN_CLAIM_OWNER_LIMIT || !value.trim()) {
+    throw invalidRunClaim()
+  }
+  return value
+}
+
+function boundedPersistedOwner(value: unknown): string | null {
+  if (value === null) return null
+  if (typeof value !== 'string' || value.length > RUN_PERSISTED_OWNER_LIMIT) throw invalidRunClaim()
+  return value
+}
+
+function boundedClaimText(value: unknown, limit: number, allowEmpty = true) {
+  if (typeof value !== 'string'
+    || value.length > limit
+    || Buffer.byteLength(value, 'utf8') > limit
+    || (!allowEmpty && !value.trim())) {
+    throw invalidRunClaim()
+  }
+  return value
+}
+
+function canonicalClaimTimestamp(value: unknown) {
+  if (typeof value !== 'string') throw invalidRunClaim()
+  const timestamp = new Date(value)
+  if (!Number.isFinite(timestamp.getTime()) || timestamp.toISOString() !== value) throw invalidRunClaim()
+  return value
+}
+
+function validatedRunClaim(input: unknown): ClaimNovelRunExecutionInput {
+  const projectId = ownClaimValue(input, 'projectId')
+  const runId = ownClaimValue(input, 'runId')
+  const now = canonicalClaimTimestamp(ownClaimValue(input, 'now'))
+  const expiresAt = canonicalClaimTimestamp(ownClaimValue(input, 'expiresAt'))
+  if (!Number.isSafeInteger(projectId) || projectId <= 0
+    || !Number.isSafeInteger(runId) || runId <= 0
+    || expiresAt <= now) {
+    throw invalidRunClaim()
+  }
+  const expectedLeaseExpiresValue = ownClaimValue(input, 'expectedLeaseExpiresAt')
+  return {
+    projectId,
+    runId,
+    owner: boundedClaimOwner(ownClaimValue(input, 'owner'))!,
+    expectedOutputRef: boundedClaimText(ownClaimValue(input, 'expectedOutputRef'), RUN_CLAIM_REF_LIMIT),
+    expectedStatus: boundedClaimText(ownClaimValue(input, 'expectedStatus'), RUN_CLAIM_STATUS_LIMIT, false),
+    expectedLeaseOwner: boundedPersistedOwner(ownClaimValue(input, 'expectedLeaseOwner')),
+    expectedLeaseExpiresAt: expectedLeaseExpiresValue === null
+      ? null
+      : canonicalClaimTimestamp(expectedLeaseExpiresValue),
+    outputRef: boundedClaimText(ownClaimValue(input, 'outputRef'), RUN_CLAIM_REF_LIMIT),
+    now,
+    expiresAt,
+  }
+}
+
+function validatedRunRecovery(input: unknown): RecoverNovelRunExecutionInput {
+  const projectId = ownClaimValue(input, 'projectId')
+  const runId = ownClaimValue(input, 'runId')
+  if (!Number.isSafeInteger(projectId) || projectId <= 0
+    || !Number.isSafeInteger(runId) || runId <= 0) {
+    throw invalidRunClaim()
+  }
+  const expectedLeaseExpiresValue = ownClaimValue(input, 'expectedLeaseExpiresAt')
+  return {
+    projectId,
+    runId,
+    expectedOutputRef: boundedClaimText(ownClaimValue(input, 'expectedOutputRef'), RUN_CLAIM_REF_LIMIT),
+    expectedStatus: boundedClaimText(ownClaimValue(input, 'expectedStatus'), RUN_CLAIM_STATUS_LIMIT, false),
+    expectedLeaseOwner: boundedPersistedOwner(ownClaimValue(input, 'expectedLeaseOwner')),
+    expectedLeaseExpiresAt: expectedLeaseExpiresValue === null
+      ? null
+      : canonicalClaimTimestamp(expectedLeaseExpiresValue),
+    outputRef: boundedClaimText(ownClaimValue(input, 'outputRef'), RUN_CLAIM_REF_LIMIT),
+    status: boundedClaimText(ownClaimValue(input, 'status'), RUN_CLAIM_STATUS_LIMIT, false),
+    now: canonicalClaimTimestamp(ownClaimValue(input, 'now')),
+  }
+}
+
+function hasLiveRunExecution(row: any, nowMs: number) {
+  const isLiveLease = (owner: unknown, expiresAt: unknown) => {
+    if (typeof owner !== 'string' || owner.length === 0
+      || typeof expiresAt !== 'string' || expiresAt.length > 40) return false
+    const expiry = new Date(expiresAt)
+    const expiryMs = expiry.getTime()
+    return Number.isFinite(expiryMs) && expiry.toISOString() === expiresAt && expiryMs > nowMs
+  }
+  if (isLiveLease(row?.lease_owner, row?.lease_expires_at)) return true
+  const payload = parseDbJson(row?.output_ref, {})
+  const lock = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload.lock : null
+  return isLiveLease(lock?.owner, lock?.expires_at)
+}
+
+export async function claimNovelRunExecution(
+  activeWorkspace: string,
+  input: ClaimNovelRunExecutionInput,
+): Promise<ClaimNovelRunExecutionResult> {
+  const claim = validatedRunClaim(input)
+  return withNovelDbWrite(activeWorkspace, db => {
+    const selectRun = db.query('SELECT * FROM runs WHERE id = ? AND project_id = ? LIMIT 1')
+    const row = selectRun.get(claim.runId, claim.projectId) as any
+    if (!row) return { claimed: false, run: null }
+
+    const currentLeaseOwner = String(row.lease_owner || '')
+    const currentLeaseExpiry = row.lease_expires_at ? new Date(String(row.lease_expires_at)).getTime() : 0
+    const claimTime = new Date(claim.now).getTime()
+    const liveLease = Boolean(currentLeaseOwner)
+      && Number.isFinite(currentLeaseExpiry)
+      && currentLeaseExpiry > claimTime
+    const payload = parseDbJson(row.output_ref, {})
+    const payloadLock = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload.lock : null
+    const payloadLockOwner = typeof payloadLock?.owner === 'string' ? payloadLock.owner : ''
+    const payloadLockExpiry = typeof payloadLock?.expires_at === 'string'
+      ? new Date(payloadLock.expires_at).getTime()
+      : 0
+    const livePayloadLock = Boolean(payloadLockOwner)
+      && Number.isFinite(payloadLockExpiry)
+      && payloadLockExpiry > claimTime
+    if ((row.status === 'running' && (liveLease || livePayloadLock))
+      || (liveLease && currentLeaseOwner !== claim.owner)
+      || (livePayloadLock && payloadLockOwner !== claim.owner)) {
+      return { claimed: false, run: runFromRow(row) }
+    }
+
+    const next = normalizeRunRecord({
+      status: 'running',
+      output_ref: claim.outputRef,
+      lease_owner: claim.owner,
+      lease_expires_at: claim.expiresAt,
+      updated_at: claim.now,
+    }, row)
+    const result = db.query(`
+      UPDATE runs
+      SET status = ?, output_ref = ?, pipeline_chapter_failure_count = ?, pipeline_open_task_count = ?,
+        pipeline_task_count = ?, updated_at = ?, lease_owner = ?, lease_expires_at = ?
+      WHERE id = ? AND project_id = ? AND status = ? AND output_ref = ?
+        AND COALESCE(lease_owner, '') = ? AND COALESCE(lease_expires_at, '') = ?
+    `).run(
+      next.status,
+      next.output_ref || '',
+      next.pipeline_chapter_failure_count ?? null,
+      next.pipeline_open_task_count ?? null,
+      next.pipeline_task_count ?? null,
+      next.updated_at,
+      next.lease_owner,
+      next.lease_expires_at,
+      claim.runId,
+      claim.projectId,
+      claim.expectedStatus,
+      claim.expectedOutputRef,
+      claim.expectedLeaseOwner ?? '',
+      claim.expectedLeaseExpiresAt ?? '',
+    ) as any
+    const authoritative = selectRun.get(claim.runId, claim.projectId) as any
+    return {
+      claimed: Number(result?.changes || 0) === 1,
+      run: authoritative ? runFromRow(authoritative) : null,
+    }
+  }, 'claim_novel_run_execution')
+}
+
+export async function recoverNovelRunExecution(
+  activeWorkspace: string,
+  input: RecoverNovelRunExecutionInput,
+): Promise<RecoverNovelRunExecutionResult> {
+  const recovery = validatedRunRecovery(input)
+  return withNovelDbWrite(activeWorkspace, db => {
+    const selectRun = db.query('SELECT * FROM runs WHERE id = ? AND project_id = ? LIMIT 1')
+    const row = selectRun.get(recovery.runId, recovery.projectId) as any
+    if (!row) return { updated: false, run: null }
+
+    const exactSnapshot = String(row.status || '') === recovery.expectedStatus
+      && String(row.output_ref || '') === recovery.expectedOutputRef
+      && (row.lease_owner ?? null) === recovery.expectedLeaseOwner
+      && (row.lease_expires_at ?? null) === recovery.expectedLeaseExpiresAt
+    const nowMs = new Date(recovery.now).getTime()
+    if (!exactSnapshot || hasLiveRunExecution(row, nowMs)) {
+      return { updated: false, run: runFromRow(row) }
+    }
+
+    const next = normalizeRunRecord({
+      status: recovery.status,
+      output_ref: recovery.outputRef,
+      lease_owner: null,
+      lease_expires_at: null,
+      updated_at: recovery.now,
+    }, row)
+    const result = db.query(`
+      UPDATE runs
+      SET status = ?, output_ref = ?, pipeline_chapter_failure_count = ?, pipeline_open_task_count = ?,
+        pipeline_task_count = ?, updated_at = ?, lease_owner = NULL, lease_expires_at = NULL
+      WHERE id = ? AND project_id = ? AND status = ? AND output_ref = ?
+        AND COALESCE(lease_owner, '') = ? AND COALESCE(lease_expires_at, '') = ?
+    `).run(
+      next.status,
+      next.output_ref || '',
+      next.pipeline_chapter_failure_count ?? null,
+      next.pipeline_open_task_count ?? null,
+      next.pipeline_task_count ?? null,
+      next.updated_at,
+      recovery.runId,
+      recovery.projectId,
+      recovery.expectedStatus,
+      recovery.expectedOutputRef,
+      recovery.expectedLeaseOwner ?? '',
+      recovery.expectedLeaseExpiresAt ?? '',
+    ) as any
+    const authoritative = selectRun.get(recovery.runId, recovery.projectId) as any
+    return {
+      updated: Number(result?.changes || 0) === 1,
+      run: authoritative ? runFromRow(authoritative) : null,
+    }
+  }, 'recover_novel_run_execution')
 }
 
 type NovelRunTaskStatus = 'open' | 'in_progress' | 'needs_review' | 'resolved'

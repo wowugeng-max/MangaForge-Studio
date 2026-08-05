@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { createNovelProductionService, createNovelRunExecutionService } from './novel-production-service'
+import { compactRunChapterItem } from './novel-production/run-state'
 
 const makeRunHarness = (output: any) => {
   let currentRun: any = {
@@ -34,7 +35,439 @@ const makeRunHarness = (output: any) => {
   }
 }
 
+const deferred = () => {
+  let resolve!: () => void
+  const promise = new Promise<void>(resolvePromise => { resolve = resolvePromise })
+  return { promise, resolve }
+}
+
 describe('production service behavior b b', () => {
+  test('rejects a staggered same-owner overlap while the first execution is still running', async () => {
+    const production = createNovelProductionService()
+    const harness = makeRunHarness({
+      chapters: [
+        { id: 17, chapter_no: 1, title: '第一章', status: 'pending', stages: production.buildChapterGroupStages() },
+      ],
+      current_index: 0,
+      production_mode: 'full_auto',
+      results: [],
+    })
+    const firstGenerationStarted = deferred()
+    const releaseFirstGeneration = deferred()
+    let dispatches = 0
+    const claimNovelRunExecution = async (workspace: string, input: any) => {
+      if (harness.run.output_ref !== input.expectedOutputRef
+        || harness.run.status !== input.expectedStatus
+        || (harness.run.lease_owner ?? null) !== input.expectedLeaseOwner
+        || (harness.run.lease_expires_at ?? null) !== input.expectedLeaseExpiresAt) {
+        return { claimed: false, run: harness.run }
+      }
+      const claimed = await harness.updateNovelRun(workspace, input.runId, {
+        status: 'running',
+        output_ref: input.outputRef,
+        lease_owner: input.owner,
+        lease_expires_at: input.expiresAt,
+      })
+      return { claimed: true, run: claimed }
+    }
+    const service = createNovelRunExecutionService({
+      getProject: async () => ({ id: 77, title: '长篇项目', reference_config: {} }),
+      production,
+      listNovelRuns: harness.listNovelRuns,
+      updateNovelRun: harness.updateNovelRun,
+      appendNovelRun: harness.appendNovelRun,
+      claimNovelRunExecution,
+      generateChapterForGroup: async () => {
+        dispatches += 1
+        if (dispatches === 1) {
+          firstGenerationStarted.resolve()
+          await releaseFirstGeneration.promise
+        }
+        return {
+          admission_status: 'accepted', score: 90, revised: false,
+          story_state_status: 'synced', story_state_update: {},
+        }
+      },
+    } as any)
+    const firstPromise = service.executeChapterGroupRunRecord(
+      'test-workspace',
+      { id: 77, reference_config: {} },
+      harness.run,
+      { max_chapters: 1, lock_owner: 'same-owner-live' },
+    )
+    await firstGenerationStarted.promise
+    const authoritativeWhileRunning = { ...harness.run }
+
+    const second = await service.executeChapterGroupRunRecord(
+      'test-workspace',
+      { id: 77, reference_config: {} },
+      authoritativeWhileRunning,
+      { max_chapters: 1, lock_owner: 'same-owner-live' },
+    )
+    releaseFirstGeneration.resolve()
+    const first = await firstPromise
+
+    expect(first.status).toBe('success')
+    expect(second.status).toBe('locked')
+    expect(dispatches).toBe(1)
+  })
+
+  test('projects legacy payload lock owners from direct-execute precheck responses', async () => {
+    const futureExpiry = '2099-08-05T10:10:00.000Z'
+    for (const item of [
+      { owner: '   ', expectedOwner: 'legacy_lock_owner', legacy: true },
+      { owner: 'x'.repeat(161), expectedOwner: 'legacy_lock_owner', legacy: true },
+      { owner: 'valid-payload-owner', expectedOwner: 'valid-payload-owner', legacy: false },
+    ]) {
+      const production = createNovelProductionService()
+      const harness = makeRunHarness({
+        chapters: [{ id: 21, chapter_no: 1, title: '第一章', status: 'pending' }],
+        current_index: 0,
+        results: [],
+        lock: { owner: item.owner, expires_at: futureExpiry },
+      })
+      let dispatches = 0
+      const service = createNovelRunExecutionService({
+        getProject: async () => ({ id: 77, reference_config: {} }),
+        production,
+        listNovelRuns: harness.listNovelRuns,
+        updateNovelRun: harness.updateNovelRun,
+        claimNovelRunExecution: async () => ({ claimed: false, run: harness.run }),
+        generateChapterForGroup: async () => {
+          dispatches += 1
+          return {}
+        },
+      } as any)
+
+      const result = await service.executeChapterGroupRunRecord(
+        'test-workspace',
+        { id: 77, reference_config: {} },
+        harness.run,
+        { max_chapters: 1, lock_owner: 'direct-request-owner' },
+      )
+      const serialized = JSON.stringify(result)
+
+      expect(result.status).toBe('locked')
+      expect(result.locked_by).toBe(item.expectedOwner)
+      expect(dispatches).toBe(0)
+      if (item.legacy) expect(serialized).not.toContain(item.owner)
+    }
+  })
+
+  test('projects legacy durable lock owners from direct-execute CAS-loser responses', async () => {
+    const futureExpiry = '2099-08-05T10:10:00.000Z'
+    for (const item of [
+      { owner: '   ', expectedOwner: 'legacy_lock_owner', legacy: true },
+      { owner: 'x'.repeat(161), expectedOwner: 'legacy_lock_owner', legacy: true },
+      { owner: 'valid-durable-owner', expectedOwner: 'valid-durable-owner', legacy: false },
+    ]) {
+      const production = createNovelProductionService()
+      const harness = makeRunHarness({
+        chapters: [{ id: 22, chapter_no: 1, title: '第一章', status: 'pending' }],
+        current_index: 0,
+        results: [],
+      })
+      let dispatches = 0
+      const service = createNovelRunExecutionService({
+        getProject: async () => ({ id: 77, reference_config: {} }),
+        production,
+        listNovelRuns: harness.listNovelRuns,
+        updateNovelRun: harness.updateNovelRun,
+        claimNovelRunExecution: async () => ({
+          claimed: false,
+          run: {
+            ...harness.run,
+            status: 'running',
+            lease_owner: item.owner,
+            lease_expires_at: futureExpiry,
+          },
+        }),
+        generateChapterForGroup: async () => {
+          dispatches += 1
+          return {}
+        },
+      } as any)
+
+      const result = await service.executeChapterGroupRunRecord(
+        'test-workspace',
+        { id: 77, reference_config: {} },
+        harness.run,
+        { max_chapters: 1, lock_owner: 'direct-request-owner' },
+      )
+      const serialized = JSON.stringify(result)
+
+      expect(result.status).toBe('locked')
+      expect(result.locked_by).toBe(item.expectedOwner)
+      expect(dispatches).toBe(0)
+      if (item.legacy) expect(serialized).not.toContain(item.owner)
+    }
+  })
+
+  test('rejects unsafe explicit lock owners before claim or dispatch', async () => {
+    const production = createNovelProductionService()
+    let claims = 0
+    let dispatches = 0
+    let getters = 0
+    let coercions = 0
+    const harness = makeRunHarness({
+      chapters: [{ id: 16, chapter_no: 1, title: '第一章', status: 'pending' }],
+      current_index: 0,
+      results: [],
+    })
+    const service = createNovelRunExecutionService({
+      getProject: async () => ({ id: 77, reference_config: {} }),
+      production,
+      listNovelRuns: harness.listNovelRuns,
+      updateNovelRun: harness.updateNovelRun,
+      claimNovelRunExecution: async () => {
+        claims += 1
+        return { claimed: false, run: harness.run }
+      },
+      generateChapterForGroup: async () => {
+        dispatches += 1
+        return {}
+      },
+    } as any)
+    const accessorOptions = { max_chapters: 1 } as any
+    Object.defineProperty(accessorOptions, 'lock_owner', {
+      get() { getters += 1; return 'accessor-owner' },
+    })
+    const coercibleOwner = {
+      toString() { coercions += 1; return 'coerced-owner' },
+    }
+
+    for (const options of [
+      { max_chapters: 1, lock_owner: '' },
+      { max_chapters: 1, lock_owner: 'x'.repeat(161) },
+      { max_chapters: 1, lock_owner: coercibleOwner },
+      accessorOptions,
+    ]) {
+      await expect(service.executeChapterGroupRunRecord(
+        'test-workspace',
+        { id: 77, reference_config: {} },
+        harness.run,
+        options,
+      )).rejects.toThrow('Invalid novel run lock owner')
+    }
+    expect({ claims, dispatches, getters, coercions }).toEqual({
+      claims: 0, dispatches: 0, getters: 0, coercions: 0,
+    })
+  })
+
+  test('atomically claims one concurrent chapter execution and persists its task id before dispatch', async () => {
+    const production = createNovelProductionService()
+    const harness = makeRunHarness({
+      chapters: [
+        { id: 19, chapter_no: 1, title: '第一章', status: 'pending', stages: production.buildChapterGroupStages() },
+      ],
+      current_index: 0,
+      production_mode: 'full_auto',
+      results: [],
+    })
+    const initialRun = harness.run
+    const bothClaimsEntered = deferred()
+    let claimEntrants = 0
+    const claimNovelRunExecution = async (_workspace: string, input: any) => {
+      claimEntrants += 1
+      if (claimEntrants === 2) bothClaimsEntered.resolve()
+      await bothClaimsEntered.promise
+      if (harness.run.output_ref !== input.expectedOutputRef
+        || harness.run.status !== input.expectedStatus
+        || (harness.run.lease_owner ?? null) !== input.expectedLeaseOwner
+        || (harness.run.lease_expires_at ?? null) !== input.expectedLeaseExpiresAt) {
+        return { claimed: false, run: harness.run }
+      }
+      const claimed = await harness.updateNovelRun(_workspace, input.runId, {
+        status: 'running',
+        output_ref: input.outputRef,
+        lease_owner: input.owner,
+        lease_expires_at: input.expiresAt,
+      })
+      return { claimed: true, run: claimed }
+    }
+    const observedTaskIds: string[] = []
+    const durableAtDispatch: any[] = []
+    const service = createNovelRunExecutionService({
+      getProject: async () => ({ id: 77, title: '长篇项目', reference_config: {} }),
+      production,
+      listNovelRuns: harness.listNovelRuns,
+      updateNovelRun: harness.updateNovelRun,
+      appendNovelRun: harness.appendNovelRun,
+      claimNovelRunExecution,
+      generateChapterForGroup: async (_workspace, _projectId, _chapterId, options) => {
+        observedTaskIds.push(options.chapter_task_id)
+        durableAtDispatch.push(JSON.parse(harness.run.output_ref).chapters[0])
+        return {
+          admission_status: 'accepted', score: 90, revised: false,
+          story_state_status: 'synced', story_state_update: {},
+        }
+      },
+    } as any)
+
+    const [first, second] = await Promise.all([
+      service.executeChapterGroupRunRecord('test-workspace', { id: 77, reference_config: {} }, initialRun, {
+        max_chapters: 1, lock_owner: 'concurrent-owner-a',
+      }),
+      service.executeChapterGroupRunRecord('test-workspace', { id: 77, reference_config: {} }, initialRun, {
+        max_chapters: 1, lock_owner: 'concurrent-owner-b',
+      }),
+    ])
+    const durable = JSON.parse(harness.run.output_ref)
+
+    expect(claimEntrants).toBe(2)
+    expect([first.status, second.status].sort()).toEqual(['locked', 'success'])
+    expect(observedTaskIds).toHaveLength(1)
+    expect(durableAtDispatch[0]).toMatchObject({
+      status: 'running',
+      chapter_task_id: observedTaskIds[0],
+    })
+    expect(durable.chapters[0].chapter_task_id).toBe(observedTaskIds[0])
+  })
+
+  test('does not dispatch generation when post-claim task-id persistence fails', async () => {
+    const production = createNovelProductionService()
+    const harness = makeRunHarness({
+      chapters: [
+        { id: 18, chapter_no: 1, title: '第一章', status: 'pending', stages: production.buildChapterGroupStages() },
+      ],
+      current_index: 0,
+      production_mode: 'full_auto',
+      results: [],
+    })
+    let dispatches = 0
+    let writesAfterClaim = 0
+    const persistenceFailure = new Error('task id persistence failed')
+    const service = createNovelRunExecutionService({
+      getProject: async () => ({ id: 77, title: '长篇项目', reference_config: {} }),
+      production,
+      listNovelRuns: harness.listNovelRuns,
+      claimNovelRunExecution: async (_workspace, input) => ({
+        claimed: true,
+        run: {
+          ...harness.run,
+          status: 'running',
+          output_ref: input.outputRef,
+          lease_owner: input.owner,
+          lease_expires_at: input.expiresAt,
+        },
+      }),
+      updateNovelRun: async () => {
+        writesAfterClaim += 1
+        throw persistenceFailure
+      },
+      generateChapterForGroup: async () => {
+        dispatches += 1
+        return {}
+      },
+    } as any)
+
+    await expect(service.executeChapterGroupRunRecord(
+      'test-workspace',
+      { id: 77, reference_config: {} },
+      harness.run,
+      { max_chapters: 1, lock_owner: 'persist-failure-owner' },
+    )).rejects.toBe(persistenceFailure)
+    expect(writesAfterClaim).toBe(1)
+    expect(dispatches).toBe(0)
+  })
+
+  test('keeps chapter_task_id through every compacted chapter status', () => {
+    for (const status of ['running', 'success', 'needs_approval', 'ready', 'failed', 'skipped']) {
+      expect(compactRunChapterItem({
+        id: 20,
+        chapter_no: 2,
+        status,
+        chapter_task_id: 'chapter-task-compact-1',
+      })).toMatchObject({
+        status,
+        chapter_task_id: 'chapter-task-compact-1',
+      })
+    }
+  })
+
+  test('persists chapter_task_id before generation and reuses it after retry', async () => {
+    const production = createNovelProductionService()
+    const harness = makeRunHarness({
+      chapters: [
+        {
+          id: 20,
+          chapter_no: 2,
+          title: '第二章',
+          status: 'pending',
+          chapter_task_id: 'malformed legacy task id',
+          stages: production.buildChapterGroupStages(),
+        },
+      ],
+      current_index: 0,
+      production_mode: 'full_auto',
+      policy: { quality_threshold: 80 },
+      results: [],
+    })
+    const observedTaskIds: string[] = []
+    const durableAtDispatch: any[] = []
+    const service = createNovelRunExecutionService({
+      getProject: async () => ({ id: 77, title: '长篇项目', reference_config: {} }),
+      production,
+      listNovelRuns: harness.listNovelRuns,
+      updateNovelRun: harness.updateNovelRun,
+      appendNovelRun: harness.appendNovelRun,
+      generateChapterForGroup: async (_workspace, _projectId, _chapterId, options) => {
+        observedTaskIds.push(options.chapter_task_id)
+        durableAtDispatch.push(JSON.parse(harness.run.output_ref).chapters[0])
+        if (observedTaskIds.length === 1) {
+          throw Object.assign(new Error('MCP server is not ready'), { code: 'MCP_SERVER_NOT_READY' })
+        }
+        return {
+          admission_status: 'accepted',
+          score: 90,
+          revised: false,
+          story_state_status: 'synced',
+          story_state_update: {},
+        }
+      },
+    } as any)
+
+    const first = await service.executeChapterGroupRunRecord('test-workspace', { id: 77, reference_config: {} }, harness.run, {
+      max_chapters: 1,
+      lock_owner: 'stable-task-first',
+      retry_limit: 1,
+    })
+    const durableAfterFailure = JSON.parse(harness.run.output_ref)
+
+    expect(first.status).toBe('ready')
+    expect(observedTaskIds).toHaveLength(1)
+    expect(observedTaskIds[0]).toMatch(/^[0-9a-f-]{36}$/)
+    expect(durableAtDispatch[0]).toMatchObject({
+      status: 'running',
+      chapter_task_id: observedTaskIds[0],
+    })
+    expect(durableAfterFailure.chapters[0]).toMatchObject({
+      status: 'ready',
+      error_code: 'MCP_SERVER_NOT_READY',
+      chapter_task_id: observedTaskIds[0],
+    })
+
+    durableAfterFailure.chapters[0].next_run_at = new Date(Date.now() - 1000).toISOString()
+    await harness.updateNovelRun('test-workspace', harness.run.id, {
+      status: 'ready',
+      output_ref: JSON.stringify(durableAfterFailure),
+    })
+    const second = await service.executeChapterGroupRunRecord('test-workspace', { id: 77, reference_config: {} }, harness.run, {
+      max_chapters: 1,
+      lock_owner: 'stable-task-second',
+      retry_limit: 1,
+    })
+    const durableAfterSuccess = JSON.parse(harness.run.output_ref)
+
+    expect(second.status).toBe('success')
+    expect(observedTaskIds).toEqual([observedTaskIds[0], observedTaskIds[0]])
+    expect(durableAtDispatch[1].chapter_task_id).toBe(observedTaskIds[0])
+    expect(durableAfterSuccess.chapters[0]).toMatchObject({
+      status: 'success',
+      chapter_task_id: observedTaskIds[0],
+    })
+  })
+
   test('keeps an aborted unattended chapter ready without adding a retry result', async () => {
     const production = createNovelProductionService()
     const abortController = new AbortController()

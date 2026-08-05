@@ -1,5 +1,6 @@
 export * from './novel-run-helpers'
 import type { Express } from 'express'
+import { types } from 'node:util'
 import {
   appendNovelRun,
   getNovelReview,
@@ -9,6 +10,7 @@ import {
   listNovelReviews,
   listNovelRunSummaries,
   listNovelRuns,
+  recoverNovelRunExecution,
   updateNovelProject,
   updateNovelRun,
   updateNovelRunTaskStatus,
@@ -32,7 +34,62 @@ import {
   sleep
 } from './novel-run-helpers'
 
+type LiveNovelRunExecution = {
+  source: 'durable' | 'payload'
+  owner: string
+  expiresAt: string
+}
+
+function ownRunExecutionValue(input: unknown, key: string) {
+  if (!input || typeof input !== 'object' || Array.isArray(input) || types.isProxy(input)) return undefined
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(input, key)
+    return descriptor && 'value' in descriptor ? descriptor.value : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function liveRunExecutionLease(owner: unknown, expiresAt: unknown, nowMs: number) {
+  if (typeof owner !== 'string' || owner.length === 0
+    || typeof expiresAt !== 'string' || expiresAt.length > 40) return null
+  const expiry = new Date(expiresAt)
+  const expiryMs = expiry.getTime()
+  if (!Number.isFinite(expiryMs) || expiry.toISOString() !== expiresAt || expiryMs <= nowMs) return null
+  const publicOwner = owner.length <= 160 && owner.trim() ? owner : 'legacy_lock_owner'
+  return { owner: publicOwner, expiresAt }
+}
+
+function findLiveNovelRunExecution(run: unknown, payload: unknown, nowMs = Date.now()): LiveNovelRunExecution | null {
+  const durable = liveRunExecutionLease(
+    ownRunExecutionValue(run, 'lease_owner'),
+    ownRunExecutionValue(run, 'lease_expires_at'),
+    nowMs,
+  )
+  if (durable) return { source: 'durable', ...durable }
+
+  const lock = ownRunExecutionValue(payload, 'lock')
+  const payloadLease = liveRunExecutionLease(
+    ownRunExecutionValue(lock, 'owner'),
+    ownRunExecutionValue(lock, 'expires_at'),
+    nowMs,
+  )
+  return payloadLease ? { source: 'payload', ...payloadLease } : null
+}
+
+function activeNovelRunExecutionPayload(liveExecution: LiveNovelRunExecution) {
+  return {
+    error: '章节群任务正在执行，请等待当前执行结束后重试。',
+    error_code: 'NOVEL_RUN_EXECUTION_ACTIVE',
+    status: 'locked',
+    locked_by: liveExecution.owner,
+    lease_expires_at: liveExecution.expiresAt,
+    lock_source: liveExecution.source,
+  }
+}
+
 export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
+  const recoverRunExecution = ctx.recoverNovelRunExecution || recoverNovelRunExecution
   app.get('/api/novel/projects/:id/reviews', async (req, res) => {
     try {
       const view = String(req.query?.view || 'full')
@@ -314,6 +371,8 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
         await updateNovelRun(activeWorkspace, run.id, {
           status: 'ready',
           output_ref: JSON.stringify({ ...payload, lock: null, phase: '手动恢复：运行中任务已转回待执行', recovered_at: new Date().toISOString() }),
+          lease_owner: null,
+          lease_expires_at: null,
         })
         recoveredRuns += 1
       }
@@ -345,10 +404,20 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
       const staleRuns = (await listNovelRuns(activeWorkspace, project.id)).filter(item => item.run_type === 'chapter_group_generation' && item.status === 'running')
       for (const staleRun of staleRuns) {
         const stalePayload = parseJsonLikePayload(staleRun.output_ref) || {}
-        await updateNovelRun(activeWorkspace, staleRun.id, {
+        if (findLiveNovelRunExecution(staleRun, stalePayload)) continue
+        const recoveredAt = new Date().toISOString()
+        const recovery = await recoverRunExecution(activeWorkspace, {
+          projectId: project.id,
+          runId: staleRun.id,
+          expectedOutputRef: String(staleRun.output_ref || ''),
+          expectedStatus: String(staleRun.status || ''),
+          expectedLeaseOwner: staleRun.lease_owner ?? null,
+          expectedLeaseExpiresAt: staleRun.lease_expires_at ?? null,
+          outputRef: JSON.stringify({ ...stalePayload, lock: null, phase: '后端重启后自动恢复为待执行', recovered_at: recoveredAt }),
           status: 'ready',
-          output_ref: JSON.stringify({ ...stalePayload, phase: '后端重启后自动恢复为待执行', recovered_at: new Date().toISOString() }),
+          now: recoveredAt,
         })
+        if (!recovery.updated) continue
       }
       const worker = {
         status: 'running',
@@ -576,15 +645,41 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
         })
       }
       const payload = parseJsonLikePayload(run.output_ref) || {}
+      if (run.run_type === 'chapter_group_generation') {
+        const liveExecution = findLiveNovelRunExecution(run, payload)
+        if (liveExecution) {
+          return res.status(409).json(activeNovelRunExecutionPayload(liveExecution))
+        }
+      }
       const terminalAdmissionGuard = findTerminalAdmissionResumeGuard(payload)
       if (terminalAdmissionGuard) return res.status(409).json(terminalAdmissionGuard)
       if (run.run_type === 'chapter_group_generation') {
         const approvalBlockerGuard = findApprovalBlockerResumeGuard(payload)
         if (approvalBlockerGuard) return res.status(409).json(approvalBlockerGuard)
-        const updated = await updateNovelRun(activeWorkspace, run.id, {
+        const resumedAt = new Date().toISOString()
+        const recovery = await recoverRunExecution(activeWorkspace, {
+          projectId: run.project_id,
+          runId: run.id,
+          expectedOutputRef: String(run.output_ref || ''),
+          expectedStatus: String(run.status || ''),
+          expectedLeaseOwner: run.lease_owner ?? null,
+          expectedLeaseExpiresAt: run.lease_expires_at ?? null,
+          outputRef: JSON.stringify({ ...payload, lock: null, phase: '等待继续执行', resumed_at: resumedAt }),
           status: 'ready',
-          output_ref: JSON.stringify({ ...payload, phase: '等待继续执行', resumed_at: new Date().toISOString() }),
+          now: resumedAt,
         })
+        if (!recovery.updated) {
+          const authoritativeRun = recovery.run
+          const authoritativePayload = parseJsonLikePayload(authoritativeRun?.output_ref) || {}
+          const liveExecution = findLiveNovelRunExecution(authoritativeRun, authoritativePayload)
+          if (liveExecution) return res.status(409).json(activeNovelRunExecutionPayload(liveExecution))
+          return res.status(409).json({
+            error: '章节群恢复时运行状态已变更，请刷新后重试。',
+            error_code: 'NOVEL_RUN_RECOVERY_CONFLICT',
+            status: 'conflict',
+          })
+        }
+        const updated = recovery.run
         return res.json({ ok: true, run: updated, execute_endpoint: `/api/novel/projects/${run.project_id}/chapter-groups/${run.id}/execute`, group: parseJsonLikePayload(updated?.output_ref) })
       }
       if (isRepairTaskRunType(run.run_type)) {

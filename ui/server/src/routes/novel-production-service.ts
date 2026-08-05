@@ -1,7 +1,84 @@
-import { appendNovelRun, listNovelRuns, updateNovelRun } from '../novel'
+import { randomUUID } from 'node:crypto'
+import { types } from 'node:util'
+import {
+  appendNovelRun,
+  claimNovelRunExecution as claimNovelRunExecutionRecord,
+  listNovelRuns,
+  updateNovelRun,
+} from '../novel'
+import { isChapterTaskId } from '../novel-writing-service/generation-source/types'
 import { advanceSceneProduction, compactText, getQualityGate, getSafetyPolicy, getStyleLock, normalizeSceneProduction, parseJsonLikePayload } from './novel-route-utils'
 import { collectChapterWarnings, compactRunChapterItem, compactRunPayload, compactRunSceneCard, compactRunStateValue, compactWarningList, hashText, isAbortLikeError, requestRuntimeGc, runJson } from './novel-production/run-state'
 import { appendPostDeliveryQualityRepairRun, buildOhStoryBatchQualityCheck, buildOhStoryPostDeliveryQuality, buildPostDeliveryQualityRepairFingerprint, buildPostDeliveryQualityRepairTasks, buildReturnedApprovalBlocker, findExistingApprovalBlocker, findExistingTerminalAdmission } from './novel-production/post-delivery-quality'
+
+const NOVEL_RUN_LOCK_OWNER_LIMIT = 160
+
+function invalidNovelRunLockOwner() {
+  return Object.assign(new TypeError('Invalid novel run lock owner'), {
+    code: 'NOVEL_RUN_LOCK_OWNER_INVALID',
+  })
+}
+
+function explicitNovelRunLockOwner(options: unknown) {
+  if (!options || (typeof options !== 'object' && typeof options !== 'function') || types.isProxy(options)) {
+    if (types.isProxy(options)) throw invalidNovelRunLockOwner()
+    return undefined
+  }
+  let descriptor: PropertyDescriptor | undefined
+  try {
+    descriptor = Object.getOwnPropertyDescriptor(options, 'lock_owner')
+  } catch {
+    throw invalidNovelRunLockOwner()
+  }
+  if (!descriptor) return undefined
+  if (!('value' in descriptor)
+    || typeof descriptor.value !== 'string'
+    || descriptor.value.length > NOVEL_RUN_LOCK_OWNER_LIMIT
+    || !descriptor.value.trim()) {
+    throw invalidNovelRunLockOwner()
+  }
+  return descriptor.value
+}
+
+function publicNovelRunLockOwner(owner: unknown) {
+  if (typeof owner !== 'string' || owner.length === 0) return ''
+  return owner.length <= NOVEL_RUN_LOCK_OWNER_LIMIT && owner.trim()
+    ? owner
+    : 'legacy_lock_owner'
+}
+
+function projectLockedNovelRunExecution(run: any, group: any, lockedBy: unknown) {
+  const storedPayload = parseJsonLikePayload(run?.output_ref)
+  const storedLock = storedPayload && typeof storedPayload === 'object' && !Array.isArray(storedPayload)
+    ? storedPayload.lock
+    : null
+  const storedPayloadOwner = storedLock && typeof storedLock === 'object' && !Array.isArray(storedLock)
+    ? storedLock.owner
+    : undefined
+  const projectedGroup = typeof storedPayloadOwner === 'string' && storedPayloadOwner.length > 0
+    && group && typeof group === 'object' && !Array.isArray(group)
+    && group.lock && typeof group.lock === 'object' && !Array.isArray(group.lock)
+    ? { ...group, lock: { ...group.lock, owner: publicNovelRunLockOwner(storedPayloadOwner) } }
+    : group
+  const projectedRun = run && typeof run === 'object' && !Array.isArray(run)
+    ? {
+        ...run,
+        lease_owner: typeof run.lease_owner === 'string' && run.lease_owner.length > 0
+          ? publicNovelRunLockOwner(run.lease_owner)
+          : run.lease_owner,
+        output_ref: typeof run.output_ref === 'string' && projectedGroup && typeof projectedGroup === 'object'
+          ? runJson(projectedGroup)
+          : run.output_ref,
+      }
+    : run
+  return {
+    run: projectedRun,
+    group: projectedGroup,
+    processed: 0,
+    status: 'locked',
+    locked_by: publicNovelRunLockOwner(lockedBy),
+  }
+}
 
 export function createNovelProductionService() {
   const buildPipelineSteps = () => [
@@ -209,17 +286,53 @@ export function createNovelProductionService() {
 export function createNovelRunExecutionService(ctx: {
   getProject: (workspace: string, id: number) => Promise<any>
   production: NovelProductionService
-  generateChapterForGroup: (workspace: string, projectId: number, chapterId: number, options?: any) => Promise<any>
+  generateChapterForGroup: (workspace: string, projectId: number, chapterId: number, options?: Record<string, any> & { chapter_task_id?: string }) => Promise<any>
   listNovelRuns?: (workspace: string, projectId: number) => Promise<any[]>
   updateNovelRun?: (workspace: string, runId: number, patch: any) => Promise<any>
   appendNovelRun?: (workspace: string, data: any) => Promise<any>
+  claimNovelRunExecution?: typeof claimNovelRunExecutionRecord
 }) {
   const repairRunInFlight = new Map<string, Promise<any>>()
+  const injectedClaimQueues = new Map<string, Promise<void>>()
   const executeChapterGroupRunRecord = async (activeWorkspace: string, project: any, run: any, options: any = {}) => {
+    const explicitLockOwner = explicitNovelRunLockOwner(options)
+    const lockOwner = explicitLockOwner ?? `worker-${process.pid}-${Date.now()}`
     const listRuns = ctx.listNovelRuns || listNovelRuns
     const updateRun = ctx.updateNovelRun || updateNovelRun
     const appendRun = ctx.appendNovelRun || appendNovelRun
-    let payload = compactRunPayload(parseJsonLikePayload(run.output_ref) || {})
+    const claimRunExecution = ctx.claimNovelRunExecution || (ctx.updateNovelRun && ctx.updateNovelRun !== updateNovelRun
+      ? async (workspace: string, input: Parameters<typeof claimNovelRunExecutionRecord>[1]) => {
+          const claimKey = `${workspace}:${input.projectId}:${input.runId}`
+          const previous = injectedClaimQueues.get(claimKey) || Promise.resolve()
+          let release!: () => void
+          const current = new Promise<void>(resolve => { release = resolve })
+          const queued = previous.then(() => current)
+          injectedClaimQueues.set(claimKey, queued)
+          await previous
+          try {
+            const authoritative = (await listRuns(workspace, input.projectId)).find(item => item.id === input.runId) || null
+            if (!authoritative
+              || String(authoritative.output_ref || '') !== input.expectedOutputRef
+              || String(authoritative.status || '') !== input.expectedStatus
+              || (authoritative.lease_owner ?? null) !== input.expectedLeaseOwner
+              || (authoritative.lease_expires_at ?? null) !== input.expectedLeaseExpiresAt) {
+              return { claimed: false, run: authoritative }
+            }
+            const updated = await updateRun(workspace, input.runId, {
+              status: 'running',
+              output_ref: input.outputRef,
+              lease_owner: input.owner,
+              lease_expires_at: input.expiresAt,
+            })
+            return { claimed: Boolean(updated), run: updated }
+          } finally {
+            release()
+            if (injectedClaimQueues.get(claimKey) === queued) injectedClaimQueues.delete(claimKey)
+          }
+        }
+      : claimNovelRunExecutionRecord)
+    const persistedPayload = parseJsonLikePayload(run.output_ref) || {}
+    let payload = compactRunPayload(persistedPayload)
     const existingTerminalAdmission = findExistingTerminalAdmission(payload)
     if (existingTerminalAdmission) {
       let guardedRun = run
@@ -259,22 +372,46 @@ export function createNovelRunExecutionService(ctx: {
         recovery_plan: existingApprovalBlocker.recovery_plan,
       }
     }
-    const lockOwner = String(options.lock_owner || `worker-${process.pid}-${Date.now()}`)
     const lock = payload.lock || {}
     const lockExpiresAt = lock.expires_at ? new Date(String(lock.expires_at)).getTime() : 0
-    if (lock.owner && lock.owner !== lockOwner && lockExpiresAt > Date.now()) {
-      return { run, group: payload, processed: 0, status: 'locked', locked_by: lock.owner }
+    if (lock.owner && lockExpiresAt > Date.now() && (run.status === 'running' || lock.owner !== lockOwner)) {
+      return projectLockedNovelRunExecution(run, payload, persistedPayload.lock?.owner ?? lock.owner)
     }
-    payload = compactRunPayload({
+    const claimTime = new Date().toISOString()
+    const claimExpiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString()
+    const claimedPayload = compactRunPayload({
       ...payload,
       lock: {
         owner: lockOwner,
-        acquired_at: new Date().toISOString(),
-        heartbeat_at: new Date().toISOString(),
-        expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+        acquired_at: claimTime,
+        heartbeat_at: claimTime,
+        expires_at: claimExpiresAt,
       },
     })
-    await updateRun(activeWorkspace, run.id, { status: 'running', output_ref: runJson(payload) })
+    const claimResult = await claimRunExecution(activeWorkspace, {
+      projectId: project.id,
+      runId: run.id,
+      owner: lockOwner,
+      expectedOutputRef: String(run.output_ref || ''),
+      expectedStatus: String(run.status || ''),
+      expectedLeaseOwner: run.lease_owner ?? null,
+      expectedLeaseExpiresAt: run.lease_expires_at ?? null,
+      outputRef: runJson(claimedPayload),
+      now: claimTime,
+      expiresAt: claimExpiresAt,
+    })
+    if (!claimResult.claimed) {
+      const authoritativeRun = claimResult.run || run
+      const persistedAuthoritativePayload = parseJsonLikePayload(authoritativeRun.output_ref) || {}
+      const authoritativePayload = compactRunPayload(persistedAuthoritativePayload)
+      return projectLockedNovelRunExecution(
+        authoritativeRun,
+        authoritativePayload,
+        authoritativeRun.lease_owner || persistedAuthoritativePayload.lock?.owner || '',
+      )
+    }
+    run = claimResult.run || run
+    payload = compactRunPayload(parseJsonLikePayload(run.output_ref) || claimedPayload)
     const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
     const maxChapters = Math.max(1, Math.min(50, Number(options.max_chapters || chapters.length || 10)))
     const retryLimit = Math.max(0, Math.min(5, Number(options.retry_limit ?? payload.model_strategy?.cost_policy?.retry_limit ?? 2)))
@@ -341,7 +478,8 @@ export function createNovelRunExecutionService(ctx: {
         await updateRun(activeWorkspace, run.id, { status: 'running', output_ref: runJson(payload) })
         continue
       }
-      chapters[index] = compactRunChapterItem({ ...item, status: 'running', started_at: new Date().toISOString(), stages: item.stages?.length ? item.stages : ctx.production.buildChapterGroupStages() })
+      const chapterTaskId = isChapterTaskId(item.chapter_task_id) ? item.chapter_task_id : randomUUID()
+      chapters[index] = compactRunChapterItem({ ...item, chapter_task_id: chapterTaskId, status: 'running', started_at: new Date().toISOString(), stages: item.stages?.length ? item.stages : ctx.production.buildChapterGroupStages() })
       payload = compactRunPayload({ ...payload, chapters, current_index: index, phase: `生成第${item.chapter_no}章` })
       await updateRun(activeWorkspace, run.id, { status: 'running', output_ref: runJson(payload) })
       try {
@@ -351,6 +489,7 @@ export function createNovelRunExecutionService(ctx: {
           : (payload.approval_policy || ctx.production.getApprovalPolicy(project))
         const chapterResult = await ctx.generateChapterForGroup(activeWorkspace, project.id, Number(item.id), {
           ...options,
+          chapter_task_id: chapterTaskId,
           model_id: options.model_id || payload.model_strategy?.preferred_model_id,
           production_mode: productionMode,
           word_target_mode: options.word_target_mode || payload.word_target_mode,
@@ -381,6 +520,7 @@ export function createNovelRunExecutionService(ctx: {
           })
           const resultItem = {
             id: item.id,
+            chapter_task_id: chapterTaskId,
             chapter_no: item.chapter_no,
             title: item.title,
             status: returnedBlockedInvalid ? 'failed' : 'needs_approval',
@@ -448,6 +588,7 @@ export function createNovelRunExecutionService(ctx: {
         const admissionStatus = String(chapterResult.admission_status || chapterResult.admissionStatus || (warningFields.warning_count > 0 ? 'accepted_with_warnings' : 'accepted'))
         let resultItem = {
           id: item.id,
+          chapter_task_id: chapterTaskId,
           chapter_no: item.chapter_no,
           title: item.title,
           status: 'success',
@@ -530,6 +671,7 @@ export function createNovelRunExecutionService(ctx: {
           const currentStages = chapters[index]?.stages || ctx.production.buildChapterGroupStages()
           const resultItem = compactRunChapterItem({
             ...item,
+            chapter_task_id: chapterTaskId,
             status: 'ready',
             stages: currentStages,
             attempts: Number(item.attempts || 0),
@@ -571,6 +713,7 @@ export function createNovelRunExecutionService(ctx: {
           : ''
         const resultItem = compactRunChapterItem({
           id: item.id,
+          chapter_task_id: chapterTaskId,
           chapter_no: item.chapter_no,
           title: item.title,
           status: blocksForApproval ? 'needs_approval' : (canRetry ? 'ready' : 'failed'),
@@ -626,6 +769,8 @@ export function createNovelRunExecutionService(ctx: {
       output_ref: runJson(compactRunPayload({ ...payload, chapters, results, lock: null, phase: status === 'success' ? '章节群已完成' : payload.phase, finished_at: status === 'success' ? new Date().toISOString() : undefined })),
       duration_ms: Date.now() - startedAt,
       error_message: errorMessage,
+      lease_owner: null,
+      lease_expires_at: null,
     })
     requestRuntimeGc()
     return { run: updated, group: parseJsonLikePayload(updated?.output_ref), processed, status }

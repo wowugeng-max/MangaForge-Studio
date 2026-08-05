@@ -570,7 +570,7 @@ describe('production service behavior a a', () => {
     expect(changedRepairPayload.tasks[0].post_delivery_quality.check.evidence).toEqual(['段落 7'])
   })
 
-  test('serializes concurrent repair creation for the same deterministic fingerprint', async () => {
+  test('claims one concurrent run before creating its deterministic repair', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({
       chapters: [
@@ -624,14 +624,13 @@ describe('production service behavior a a', () => {
       }),
     ])
 
-    expect(first.status).toBe('success')
-    expect(second.status).toBe('success')
-    expect(generateCalls).toEqual([26, 26])
+    expect([first.status, second.status].sort()).toEqual(['locked', 'success'])
+    expect(generateCalls).toEqual([26])
     expect(harness.appendedRuns).toHaveLength(1)
-    expect(first.group.results[0].repair_fingerprint).toBe(second.group.results[0].repair_fingerprint)
-    expect(first.group.results[0].repair_run_id).toBe(second.group.results[0].repair_run_id)
-    expect(first.group.results[0].repair_queue.reused).toBe(false)
-    expect(second.group.results[0].repair_queue.reused).toBe(true)
+    const winner = [first, second].find(result => result.status === 'success')
+    expect(winner.group.results[0].repair_fingerprint).toBeTruthy()
+    expect(winner.group.results[0].repair_run_id).toBe(harness.appendedRuns[0].id)
+    expect(winner.group.results[0].repair_queue.reused).toBe(false)
   })
 
   test('advances unattended production when required quality-continuity receipts are missing', async () => {

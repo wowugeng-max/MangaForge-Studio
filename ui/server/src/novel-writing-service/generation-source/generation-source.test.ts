@@ -127,6 +127,99 @@ function sourceRequest(overrides: Record<string, unknown> = {}) {
 }
 
 describe('GenerationSource resolver', () => {
+  test('uses an explicit persisted task id instead of allocating a new one', async () => {
+    const chapterSourceLeases = new ChapterSourceLeaseRegistry()
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases,
+      readProject: async () => project,
+      createModelExecution: input => ({
+        taskId: input.taskId,
+        source: 'model',
+        modelId: input.modelId,
+        authorityFingerprint: input.authorityFingerprint,
+        fingerprint: input.fingerprint,
+        contextVersion: input.contextVersion,
+        provenance: () => ({
+          task_id: input.taskId,
+          project_id: project.id,
+          chapter_id: chapter.id,
+          source: 'model',
+          source_fingerprint: input.fingerprint,
+          authority_fingerprint: input.authorityFingerprint,
+          context_version: input.contextVersion,
+        }),
+        generateDraft: async () => ({ source: 'model' }),
+        executeAgent: async () => ({}),
+        assertCurrent: input.assertCurrent,
+        close: async () => {},
+      }),
+    })
+    const explicitInput = { ...beginInput(), taskId: 'chapter-task-stable-1' }
+
+    const execution = await resolver.beginTask(explicitInput)
+
+    expect(execution.taskId).toBe('chapter-task-stable-1')
+    await execution.close({ status: 'success' })
+  })
+
+  test('rejects invalid or unsafe explicit task ids before source work', async () => {
+    let acquisitions = 0
+    let reads = 0
+    let constructions = 0
+    let traps = 0
+    let getters = 0
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases: {
+        acquire: async () => {
+          acquisitions += 1
+          throw new Error('lease must not be acquired')
+        },
+      } as any,
+      readProject: async () => {
+        reads += 1
+        return project
+      },
+      createModelExecution: () => {
+        constructions += 1
+        throw new Error('source must not be constructed')
+      },
+    })
+    const accessorInput = beginInput()
+    Object.defineProperty(accessorInput, 'taskId', {
+      get() {
+        getters += 1
+        return 'task-accessor'
+      },
+    })
+    const proxiedId = new Proxy({}, {
+      get: () => { traps += 1; throw new Error('task id proxy get trap') },
+      getOwnPropertyDescriptor: () => { traps += 1; throw new Error('task id proxy descriptor trap') },
+    })
+    const proxiedInput = new Proxy(beginInput(), {
+      get: () => { traps += 1; throw new Error('begin input proxy get trap') },
+      getOwnPropertyDescriptor: () => { traps += 1; throw new Error('begin input proxy descriptor trap') },
+    })
+    const unsafeInputs = [
+      { ...beginInput(), taskId: '' },
+      { ...beginInput(), taskId: ' task-with-spaces ' },
+      { ...beginInput(), taskId: 't'.repeat(513) },
+      { ...beginInput(), taskId: proxiedId },
+      accessorInput,
+      proxiedInput,
+    ]
+
+    for (const unsafeInput of unsafeInputs) {
+      await expect(resolver.beginTask(unsafeInput as any)).rejects.toThrow('Invalid chapter task id')
+    }
+    expect({ acquisitions, reads, constructions, traps, getters }).toEqual({
+      acquisitions: 0,
+      reads: 0,
+      constructions: 0,
+      traps: 0,
+      getters: 0,
+    })
+  })
+
   test('keeps the temporary model override only on the lease-free legacy resolver', () => {
     const model = { generateProse: async () => ({ source: 'model' }) } as any
     const mcp = { generateProse: async () => ({ source: 'mcp' }) } as any

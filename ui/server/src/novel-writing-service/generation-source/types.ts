@@ -4,6 +4,12 @@ import type { ChapterGenerationSourceState } from './source-config'
 export const MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY = 'mcp_generation_source_v1' as const
 export const CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY = 'chapter_generation_stage_v1' as const
 
+const CHAPTER_TASK_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/
+
+export function isChapterTaskId(value: unknown): value is string {
+  return typeof value === 'string' && CHAPTER_TASK_ID.test(value)
+}
+
 export type GenerationSourceReceiptAuthority =
   | typeof MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY
   | typeof CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY
@@ -120,6 +126,7 @@ export interface GenerationSource {
 }
 
 export type BeginChapterTaskInput = {
+  taskId?: string
   activeWorkspace: string
   project: any
   chapter: any
