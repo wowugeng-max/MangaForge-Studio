@@ -16,7 +16,14 @@ import {
 } from './identity-mutation-fence'
 
 export type McpAgentLeaseBinding = { serverId: string; keyId: number; agentId: string }
+export type McpSessionFenceExpectation = {
+  requestId: string
+  sessionId: string
+  reason: 'remote_cancel_unknown'
+}
+export type McpSessionFenceClearResult = 'missing' | 'cleared' | 'mismatch'
 const FULL_ID_MAX_CHARS = 16_384
+const PROVENANCE_ID_MAX_CHARS = 160
 
 export type McpAgentLease = {
   readonly tupleKey: string
@@ -47,6 +54,22 @@ function normalizedBinding(binding: McpAgentLeaseBinding): McpAgentLeaseBinding 
     || !Number.isInteger(normalized.keyId) || normalized.keyId <= 0
     || !normalized.agentId || normalized.agentId.length > FULL_ID_MAX_CHARS) {
     throw new McpError('MCP_BINDING_INVALID', 'MCP Agent lease 绑定无效')
+  }
+  return normalized
+}
+
+function normalizedFenceExpectation(input: McpSessionFenceExpectation): McpSessionFenceExpectation {
+  if (!input || typeof input.requestId !== 'string' || typeof input.sessionId !== 'string'
+    || input.reason !== 'remote_cancel_unknown') {
+    throw new McpError('MCP_BINDING_INVALID', 'MCP Agent Session fence 核对条件无效')
+  }
+  const normalized = {
+    requestId: input.requestId.trim().slice(0, PROVENANCE_ID_MAX_CHARS),
+    sessionId: input.sessionId.trim().slice(0, PROVENANCE_ID_MAX_CHARS),
+    reason: input.reason,
+  }
+  if (!normalized.requestId || !normalized.sessionId) {
+    throw new McpError('MCP_BINDING_INVALID', 'MCP Agent Session fence 核对条件无效')
   }
   return normalized
 }
@@ -167,6 +190,30 @@ export class McpAgentLeaseRegistry {
     const activeWorkspace = canonicalFilesystemIdentity(activeWorkspaceInput)
     const binding = normalizedBinding(input)
     return withMcpWorkspaceMutation(activeWorkspace, async () => hasMcpActiveBinding(activeWorkspace, binding))
+  }
+
+  async compareAndClearSessionFence(
+    activeWorkspaceInput: string,
+    input: McpAgentLeaseBinding,
+    expectationInput: McpSessionFenceExpectation,
+  ): Promise<McpSessionFenceClearResult> {
+    const activeWorkspace = canonicalFilesystemIdentity(activeWorkspaceInput)
+    const binding = normalizedBinding(input)
+    const expectation = normalizedFenceExpectation(expectationInput)
+    return withMcpWorkspaceMutation(activeWorkspace, async () => {
+      const matches = (await this.store.read(activeWorkspace)).filter(item => (
+        item.server_id === binding.serverId
+        && item.key_id === binding.keyId
+        && item.agent_id === binding.agentId
+      ))
+      if (matches.length === 0) return 'missing'
+      if (matches.length !== 1) return 'mismatch'
+      const record = matches[0]!
+      if (record.request_id !== expectation.requestId
+        || record.session_id !== expectation.sessionId
+        || record.reason !== expectation.reason) return 'mismatch'
+      return await this.clear(activeWorkspace, record.id, record) ? 'cleared' : 'mismatch'
+    })
   }
 
   list(activeWorkspace: string) {

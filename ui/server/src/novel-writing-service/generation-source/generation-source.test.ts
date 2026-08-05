@@ -15,13 +15,20 @@ import {
   upsertMcpAgentQuarantine,
 } from '../../mcp/quarantine-store'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from '../../mcp/server-store'
+import { createMcpSecretScrubber } from '../../mcp/secret-scrubber'
 import { assertMcpWorkspaceMutationHeld, withMcpWorkspaceMutation } from '../../mcp/workspace-coordinator'
+import { novelMutationKey, novelMutationLocks } from '../../novel/lock'
+import { setNovelMutationTestHook } from '../../novel-test-support'
 import {
+  appendNovelRun,
   createNovelChapter,
   createNovelProject,
+  getNovelChapter,
   getNovelProject,
   listNovelRuns,
   mutateNovelProjectGenerationSource,
+  updateNovelChapter,
+  updateNovelRun,
 } from '../../novel'
 import { chapterContextVersion, createGenerationSourceResolver } from './create-generation-source'
 import { ChapterSourceLeaseRegistry } from './chapter-source-lease'
@@ -30,6 +37,7 @@ import { ModelGenerationSource } from './model-generation-source'
 import {
   chapterGenerationSourceFingerprint,
   proseGenerationSourceFingerprint,
+  resolveChapterGenerationSource,
   toLegacyProseGenerationSource,
 } from './source-config'
 import { createChapterStageRecorder } from './stage-receipts'
@@ -46,7 +54,6 @@ import type {
   McpChapterStageInput,
   McpChapterStageResult,
   McpChapterTaskInput,
-  McpChapterTaskSession,
   McpGenerationAdapter,
   McpStabilityController,
 } from '../../mcp/adapters/types'
@@ -115,7 +122,10 @@ function deferredValue<T = void>() {
   return { promise, resolve, reject }
 }
 
-afterEach(async () => Promise.all(workspaces.splice(0).map(path => rm(path, { recursive: true, force: true }))))
+afterEach(async () => {
+  setNovelMutationTestHook(null)
+  await Promise.all(workspaces.splice(0).map(path => rm(path, { recursive: true, force: true })))
+})
 
 function sourceRequest(overrides: Record<string, unknown> = {}) {
   return {
@@ -1011,7 +1021,16 @@ describe('McpGenerationSource quarantine outcomes', () => {
       runtime: {
         resolveCredentialConfig: async () => ({ server, key }),
         listAgents: async () => { throw new Error('must use pinned adapter') },
-        getAdapterForKey: async () => ({ server, key, adapter }),
+        getAdapterForKey: async () => ({
+          server,
+          key,
+          adapter,
+          stability: {
+            async ensureReady() {},
+            async runRead(_policy: any, _input: any, operation: any) { return operation() },
+            async runMutation(_policy: any, _input: any, operation: any) { return operation() },
+          },
+        }),
         acquireAgentLease: (workspace: string, binding: any) => registry.acquire(workspace, binding),
         isAgentLeaseActive: (workspace: string, binding: any) => registry.isActive(workspace, binding),
         listAgentQuarantines: (workspace: string) => registry.list(workspace),
@@ -2502,13 +2521,20 @@ describe('McpGenerationSource task execution', () => {
       listAgents?: () => any
       runStage?: (
         input: McpChapterStageInput,
-        session: McpChapterTaskSession,
+        session: { sessionId: string; snapshotHash: string },
         taskInput: McpChapterTaskInput,
       ) => any
-      openChapterTask?: (input: McpChapterTaskInput, ordinal: number) => any
       invokeChapterStage?: (input: McpChapterInvocationInput) => Promise<McpChapterStageResult>
-      closeSession?: () => any
+      inspectSession?: (
+        input: { agentId: string; sessionId: string },
+        operationOptions: Record<string, unknown>,
+      ) => any
       resolveCredentialConfig?: (pinned: any) => any
+      getAdapterForKey?: (
+        pinned: any,
+        adapter: McpGenerationAdapter,
+        stability: McpStabilityController,
+      ) => any
       onGetAdapter?: () => Promise<void> | void
       acquireAgentLease?: (workspace: string, binding: any) => Promise<any>
       createDeadline?: (totalMs: number, signal?: AbortSignal) => McpGenerationDeadline
@@ -2571,16 +2597,22 @@ describe('McpGenerationSource task execution', () => {
       open: 0,
       runStage: 0,
       close: 0,
+      inspectSession: 0,
+      stabilityReads: 0,
+      stageSessionFence: 0,
       generateProse: 0,
       getAdapter: 0,
       acquireAgentLease: 0,
       modelCreations: 0,
     }
-    const sessions: McpChapterTaskSession[] = []
+    const sessions: Array<{ sessionId: string; snapshotHash: string }> = []
     const stageInputs: McpChapterStageInput[] = []
     const stability: McpStabilityController = {
       async ensureReady() {},
-      async runRead(_policy, _input, operation) { return operation() },
+      async runRead(_policy, _input, operation) {
+        counters.stabilityReads += 1
+        return operation()
+      },
       async runMutation(_policy, _input, operation) { return operation() },
     }
     const adapter: McpGenerationAdapter = {
@@ -2595,52 +2627,40 @@ describe('McpGenerationSource task execution', () => {
         counters.createAgent += 1
         throw new Error('createAgent forbidden')
       },
-      async inspectSession() { return { status: 'completed', terminal: true } },
-      openChapterTask(input) {
+      async inspectSession(input, operationOptions) {
+        counters.inspectSession += 1
+        return options.inspectSession
+          ? options.inspectSession(input, operationOptions)
+          : { status: 'completed', terminal: true }
+      },
+      async invokeChapterStage(input) {
+        if (options.invokeChapterStage) return options.invokeChapterStage(input)
+        counters.runStage += 1
         counters.open += 1
-        if (options.openChapterTask) return options.openChapterTask(input, counters.open)
-        return (async () => {
-          const sessionId = `neutral-session-${counters.open}`
-          await input.onProgress?.({
-            stage: 'session_created',
-            status: 'running',
-            session_id: sessionId,
-            snapshot_hash: `neutral-snapshot-${counters.open}`,
-          })
-          const session: McpChapterTaskSession = {
-            sessionId,
-            snapshotHash: `neutral-snapshot-${counters.open}`,
-            runStage(stageInput) {
-              counters.runStage += 1
-              stageInputs.push(stageInput)
-              if (options.runStage) return options.runStage(stageInput, session, input)
-              return Promise.resolve({
-                content: stageInput.stage === 'draft' ? '通用正文。' : '{}',
-                session_id: sessionId,
-                snapshot_hash: session.snapshotHash,
-                status: 'completed',
-              })
-            },
-            close() {
-              counters.close += 1
-              return options.closeSession ? options.closeSession() : Promise.resolve()
-            },
-          }
-          sessions.push(session)
-          return session
-        })()
+        stageInputs.push(input)
+        const session = {
+          sessionId: `neutral-session-${counters.runStage}`,
+          snapshotHash: `neutral-snapshot-${counters.runStage}`,
+        }
+        sessions.push(session)
+        await input.onProgress?.({
+          stage: 'session_created',
+          status: 'running',
+          session_id: session.sessionId,
+          snapshot_hash: session.snapshotHash,
+        })
+        if (options.runStage) return options.runStage(input, session, input)
+        return {
+          content: input.stage === 'draft' ? '通用正文。' : '{}',
+          session_id: session.sessionId,
+          snapshot_hash: session.snapshotHash,
+          status: 'completed',
+        }
       },
       async generateProse() {
         counters.generateProse += 1
         throw new Error('generateProse compatibility port must not be used')
       },
-    }
-    if (options.invokeChapterStage) {
-      Object.assign(adapter, {
-        invokeChapterStage(input: McpChapterInvocationInput) {
-          return options.invokeChapterStage!(input)
-        },
-      })
     }
     const agentLeases = new McpAgentLeaseRegistry()
     const runtime = {
@@ -2651,13 +2671,25 @@ describe('McpGenerationSource task execution', () => {
       getAdapterForKey: async (_keyId: number, _serverId: string, _remote: any, pinned: any) => {
         counters.getAdapter += 1
         await options.onGetAdapter?.()
+        if (options.getAdapterForKey) return options.getAdapterForKey(pinned, adapter, stability)
         return { server: pinned.server, key: pinned.key, adapter, stability }
       },
       acquireAgentLease: async (workspace: string, binding: any) => {
         counters.acquireAgentLease += 1
-        if (options.acquireAgentLease) return options.acquireAgentLease(workspace, binding)
-        return agentLeases.acquire(workspace, binding)
+        const acquired = options.acquireAgentLease
+          ? await options.acquireAgentLease(workspace, binding)
+          : await agentLeases.acquire(workspace, binding)
+        return {
+          ...acquired,
+          stageSessionFence: async (input: { requestId: string; sessionId: string }) => {
+            counters.stageSessionFence += 1
+            await acquired.stageSessionFence(input)
+          },
+        }
       },
+      compareAndClearSessionFence: (workspace: string, binding: any, expectation: any) => (
+        agentLeases.compareAndClearSessionFence(workspace, binding, expectation)
+      ),
     }
     const source = new McpGenerationSource(runtime as any, {
       ...(options.createDeadline ? { createDeadline: options.createDeadline } : {}),
@@ -2743,6 +2775,90 @@ describe('McpGenerationSource task execution', () => {
     }
   }
 
+  function legacyTaskReceiptIdentity(
+    fixture: Awaited<ReturnType<typeof neutralTaskFixture>>,
+    taskId: string,
+    status: 'running' | 'session_created',
+  ): Record<string, unknown> {
+    const sourceState = resolveChapterGenerationSource(fixture.durableProject)
+    const binding = sourceState.mcp!
+    const fingerprint = chapterGenerationSourceFingerprint(sourceState)
+    return {
+      receipt_authority: MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY,
+      task_id: taskId,
+      project_id: fixture.durableProject.id,
+      chapter_id: fixture.durableChapter.id,
+      source: 'mcp',
+      source_fingerprint: fingerprint,
+      authority_fingerprint: fingerprint,
+      context_version: chapterContextVersion(fixture.contextPackage),
+      binding_fingerprint: fingerprint,
+      server_id: binding.server_id,
+      key_id: binding.key_id,
+      adapter_id: binding.adapter_id,
+      agent_id: binding.agent_id,
+      model: binding.model || 'MCP Auto',
+      status,
+    }
+  }
+
+  async function seedLegacyMigrationMarker(
+    fixture: Awaited<ReturnType<typeof neutralTaskFixture>>,
+    taskId: string,
+    sessionId: string,
+  ) {
+    const identity = legacyTaskReceiptIdentity(fixture, taskId, 'running')
+    const legacyRun = await appendNovelRun(fixture.activeWorkspace, {
+      project_id: fixture.durableProject.id,
+      run_type: 'mcp_chapter_task',
+      step_name: taskId,
+      status: 'running',
+      input_ref: JSON.stringify(identity),
+      output_ref: JSON.stringify({
+        ...identity,
+        session_id: sessionId,
+        snapshot_hash: `${sessionId}-snapshot`,
+      }),
+    })
+    await expect(fixture.begin()).rejects.toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    const [quarantine] = await readMcpAgentQuarantines(fixture.activeWorkspace)
+    await clearMcpAgentQuarantine(fixture.activeWorkspace, quarantine!.id)
+    return legacyRun
+  }
+
+  async function seedCrashedReconciledLegacyFence(
+    fixture: Awaited<ReturnType<typeof neutralTaskFixture>>,
+    taskId: string,
+    sessionId: string,
+  ) {
+    const identity = legacyTaskReceiptIdentity(fixture, taskId, 'running')
+    const legacyRun = await appendNovelRun(fixture.activeWorkspace, {
+      project_id: fixture.durableProject.id,
+      run_type: 'mcp_chapter_task',
+      step_name: taskId,
+      status: 'running',
+      input_ref: JSON.stringify(identity),
+      output_ref: JSON.stringify({
+        ...identity,
+        session_id: sessionId,
+        snapshot_hash: `${sessionId}-snapshot`,
+      }),
+    })
+    await expect(fixture.begin()).rejects.toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    const marker = (await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
+      .find(run => run.run_type === 'mcp_legacy_shared_session_migration')!
+    await updateNovelRun(fixture.activeWorkspace, marker.id, {
+      status: 'completed',
+      output_ref: JSON.stringify({
+        ...JSON.parse(marker.output_ref!),
+        status: 'reconciled',
+        terminal_status: 'completed',
+      }),
+    })
+    const [quarantine] = await readMcpAgentQuarantines(fixture.activeWorkspace)
+    return { legacyRun, marker, quarantine: quarantine! }
+  }
+
   function hostileDirectAwaitable<T extends object>(
     shape: 'own-accessor' | 'prototype-accessor' | 'proxy-prototype' | 'proxy' | 'revoked-proxy',
     value: T,
@@ -2800,6 +2916,1365 @@ describe('McpGenerationSource task execution', () => {
       status: string
     }>
   }
+
+  test('rejects a legacy shared Session receipt from an older binding before fencing the current Agent', async () => {
+    const taskId = 'legacy-shared-old-binding'
+    const privateSessionId = 'legacy-private-session-must-not-leak'
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-old-binding-', { taskId })
+    await updateNovelChapter(fixture.activeWorkspace, fixture.durableChapter.id, {
+      chapter_text: 'persisted prose before binding drift',
+    })
+    const oldSourceState = {
+      version: 'chapter_generation_source_v1' as const,
+      active: 'mcp' as const,
+      model: {},
+      mcp: {
+        server_id: 'legacy-old-server',
+        key_id: 9001,
+        adapter_id: 'legacy-old-adapter',
+        agent_id: 'legacy-old-agent',
+        model: 'legacy-old-model',
+      },
+    }
+    const oldFingerprint = chapterGenerationSourceFingerprint(oldSourceState)
+    const oldIdentity = {
+      ...legacyTaskReceiptIdentity(fixture, taskId, 'running'),
+      source_fingerprint: oldFingerprint,
+      authority_fingerprint: oldFingerprint,
+      context_version: `sha256:${'c'.repeat(64)}`,
+      binding_fingerprint: oldFingerprint,
+      server_id: oldSourceState.mcp.server_id,
+      key_id: oldSourceState.mcp.key_id,
+      adapter_id: oldSourceState.mcp.adapter_id,
+      agent_id: oldSourceState.mcp.agent_id,
+      model: oldSourceState.mcp.model,
+      private_key: 'sk_legacy_private_receipt_value',
+    }
+    const legacyRun = await appendNovelRun(fixture.activeWorkspace, {
+      project_id: fixture.durableProject.id,
+      run_type: 'mcp_chapter_task',
+      step_name: taskId,
+      status: 'running',
+      input_ref: JSON.stringify(oldIdentity),
+      output_ref: JSON.stringify({
+        ...oldIdentity,
+        session_id: privateSessionId,
+        snapshot_hash: 'legacy-private-snapshot',
+      }),
+    })
+    const legacyRunBefore = (await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
+      .find(run => run.id === legacyRun.id)
+
+    const exposed: any = await fixture.begin().catch(error => error)
+
+    expect(exposed).toMatchObject({ code: 'MCP_BINDING_CHANGED' })
+    expect(JSON.stringify({ message: exposed.message, details: exposed.details }))
+      .not.toContain(privateSessionId)
+    expect(JSON.stringify({ message: exposed.message, details: exposed.details }))
+      .not.toContain('sk_legacy_private_receipt_value')
+    expect(fixture.counters).toMatchObject({
+      acquireAgentLease: 0,
+      stageSessionFence: 0,
+      inspectSession: 0,
+      runStage: 0,
+      getAdapter: 0,
+      modelCreations: 0,
+    })
+    expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([])
+    expect((await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
+      .find(run => run.id === legacyRun.id)).toEqual(legacyRunBefore)
+    expect(await getNovelChapter(
+      fixture.activeWorkspace,
+      fixture.durableChapter.id,
+      fixture.durableProject.id,
+    )).toMatchObject({ chapter_text: 'persisted prose before binding drift' })
+  })
+
+  test('accepts matching legacy receipt identity projected by the pinned credential scrubber', async () => {
+    const taskId = 'legacy-scrubbed-current-binding'
+    const keyValue = 'neutral'
+    const headerValue = 'session'
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-scrubbed-binding-', {
+      taskId,
+      keyValue,
+      headerValue,
+    })
+    const sourceState = resolveChapterGenerationSource(fixture.durableProject)
+    const binding = sourceState.mcp!
+    const scrubber = createMcpSecretScrubber({
+      keys: [keyValue],
+      headerValues: [headerValue],
+    })
+    const identity = {
+      ...legacyTaskReceiptIdentity(fixture, taskId, 'running'),
+      server_id: scrubber.scrubText(binding.server_id).slice(0, 160),
+      adapter_id: scrubber.scrubText(binding.adapter_id).slice(0, 160),
+      agent_id: scrubber.scrubText(binding.agent_id).slice(0, 160),
+      model: scrubber.scrubText(binding.model || 'MCP Auto').slice(0, 160),
+    }
+    const serializedIdentity = JSON.stringify(identity)
+    expect(identity).toMatchObject({
+      source_fingerprint: chapterGenerationSourceFingerprint(sourceState),
+      authority_fingerprint: chapterGenerationSourceFingerprint(sourceState),
+      binding_fingerprint: chapterGenerationSourceFingerprint(sourceState),
+      server_id: '[REDACTED]-task-server',
+      adapter_id: 'test-[REDACTED]-provider',
+      agent_id: '[REDACTED]-agent-1',
+      model: '[REDACTED]-model',
+    })
+    expect(serializedIdentity).not.toContain(keyValue)
+    expect(serializedIdentity).not.toContain(headerValue)
+    await appendNovelRun(fixture.activeWorkspace, {
+      project_id: fixture.durableProject.id,
+      run_type: 'mcp_chapter_task',
+      step_name: taskId,
+      status: 'running',
+      input_ref: serializedIdentity,
+      output_ref: JSON.stringify({
+        ...identity,
+        session_id: 'legacy-scrubbed-session',
+        snapshot_hash: 'legacy-scrubbed-snapshot',
+      }),
+    })
+
+    const exposed: any = await fixture.begin().catch(error => error)
+
+    expect(exposed).toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    expect(fixture.counters).toMatchObject({ acquireAgentLease: 1, stageSessionFence: 1 })
+    expect(JSON.stringify({ message: exposed.message, details: exposed.details }))
+      .not.toContain(keyValue)
+    expect(JSON.stringify({ message: exposed.message, details: exposed.details }))
+      .not.toContain(headerValue)
+  })
+
+  test('fails closed when credential rotation cannot reproduce a scrubbed legacy identity', async () => {
+    const taskId = 'legacy-scrubbed-identity-rotation'
+    const oldKeyValue = 'neutral'
+    const rotatedKeyValue = 'rotated-key-without-binding-overlap'
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-scrubbed-rotation-', {
+      taskId,
+      keyValue: oldKeyValue,
+    })
+    const sourceState = resolveChapterGenerationSource(fixture.durableProject)
+    const binding = sourceState.mcp!
+    const oldScrubber = createMcpSecretScrubber({ keys: [oldKeyValue] })
+    const identity = {
+      ...legacyTaskReceiptIdentity(fixture, taskId, 'running'),
+      server_id: oldScrubber.scrubText(binding.server_id).slice(0, 160),
+      adapter_id: oldScrubber.scrubText(binding.adapter_id).slice(0, 160),
+      agent_id: oldScrubber.scrubText(binding.agent_id).slice(0, 160),
+      model: oldScrubber.scrubText(binding.model || 'MCP Auto').slice(0, 160),
+    }
+    await appendNovelRun(fixture.activeWorkspace, {
+      project_id: fixture.durableProject.id,
+      run_type: 'mcp_chapter_task',
+      step_name: taskId,
+      status: 'running',
+      input_ref: JSON.stringify(identity),
+      output_ref: JSON.stringify({
+        ...identity,
+        session_id: 'legacy-scrubbed-rotation-session',
+        snapshot_hash: 'legacy-scrubbed-rotation-snapshot',
+      }),
+    })
+    await updateMcpKey(fixture.activeWorkspace, 1, { key: rotatedKeyValue })
+
+    const exposed: any = await fixture.begin().catch(error => error)
+
+    expect(exposed).toMatchObject({ code: 'MCP_BINDING_CHANGED' })
+    expect(fixture.counters).toMatchObject({ acquireAgentLease: 0, stageSessionFence: 0 })
+    expect(JSON.stringify({ message: exposed.message, details: exposed.details }))
+      .not.toContain(oldKeyValue)
+    expect(JSON.stringify({ message: exposed.message, details: exposed.details }))
+      .not.toContain(rotatedKeyValue)
+  })
+
+  test('rejects missing, malformed, or contradictory legacy receipt identity before current-tuple work', async () => {
+    const cases = [
+      {
+        name: 'missing-context-version',
+        mutate(receipt: Record<string, unknown>) { delete receipt.context_version },
+      },
+      {
+        name: 'malformed-key-id',
+        mutate(receipt: Record<string, unknown>) { receipt.key_id = String(receipt.key_id) },
+      },
+      {
+        name: 'contradictory-model',
+        mutate(receipt: Record<string, unknown>) { receipt.model = 'different-legacy-model' },
+      },
+    ]
+    for (const item of cases) {
+      const taskId = `legacy-invalid-identity-${item.name}`
+      const fixture = await neutralTaskFixture(`mangaforge-mcp-${item.name}-`, { taskId })
+      const identity = legacyTaskReceiptIdentity(fixture, taskId, 'session_created')
+      item.mutate(identity)
+      await appendNovelRun(fixture.activeWorkspace, {
+        project_id: fixture.durableProject.id,
+        run_type: 'mcp_chapter_task',
+        step_name: taskId,
+        status: 'session_created',
+        input_ref: JSON.stringify(identity),
+        output_ref: JSON.stringify({
+          ...identity,
+          session_id: `legacy-invalid-session-${item.name}`,
+          snapshot_hash: `legacy-invalid-snapshot-${item.name}`,
+        }),
+      })
+
+      const exposed: any = await fixture.begin().catch(error => error)
+
+      expect(exposed).toMatchObject({ code: 'MCP_BINDING_CHANGED' })
+      expect(fixture.counters).toMatchObject({
+        acquireAgentLease: 0,
+        stageSessionFence: 0,
+        inspectSession: 0,
+        runStage: 0,
+        getAdapter: 0,
+        modelCreations: 0,
+      })
+      expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([])
+    }
+  })
+
+  test('quarantines a recovered legacy shared Session until reconciliation without changing persisted prose', async () => {
+    const taskId = 'legacy-shared-task-recovery'
+    const invocations: McpChapterInvocationInput[] = []
+    const leaseEvents: string[] = []
+    let inspectionStatus: 'pending' | 'completed' = 'pending'
+    let registry: McpAgentLeaseRegistry
+    let legacyProjectId = 0
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-shared-recovery-', {
+      taskId,
+      async invokeChapterStage(input) {
+        invocations.push(input)
+        return {
+          content: 'new one-shot prose',
+          session_id: 'session-recovered-stage',
+          snapshot_hash: 'snapshot-recovered-stage',
+          status: 'completed' as const,
+        }
+      },
+      inspectSession: async ({ sessionId }) => {
+        expect(sessionId).toBe('legacy-session')
+        return {
+          status: inspectionStatus,
+          terminal: inspectionStatus === 'completed',
+        }
+      },
+      acquireAgentLease: async (workspace, binding) => {
+        const lease = await registry.acquire(workspace, binding)
+        return {
+          ...lease,
+          async stageSessionFence(input: { requestId: string; sessionId: string }) {
+            leaseEvents.push(`fence:${input.sessionId}`)
+            await lease.stageSessionFence(input)
+          },
+          async clearSessionFence() {
+            leaseEvents.push('clear')
+            await lease.clearSessionFence()
+          },
+          async release() {
+            const marker = (await listNovelRuns(workspace, legacyProjectId))
+              .find(run => run.run_type === 'mcp_legacy_shared_session_migration')
+            if (marker) leaseEvents.push('marker-before-release')
+            await lease.release()
+          },
+        }
+      },
+    })
+    registry = fixture.agentLeases
+    legacyProjectId = fixture.durableProject.id
+    await updateNovelChapter(fixture.activeWorkspace, fixture.durableChapter.id, {
+      chapter_text: 'already persisted prose',
+    })
+    const legacyIdentity = legacyTaskReceiptIdentity(fixture, taskId, 'running')
+    const legacyRun = await appendNovelRun(fixture.activeWorkspace, {
+      project_id: fixture.durableProject.id,
+      run_type: 'mcp_chapter_task',
+      step_name: taskId,
+      status: 'running',
+      input_ref: JSON.stringify(legacyIdentity),
+      output_ref: JSON.stringify({
+        ...legacyIdentity,
+        session_id: 'legacy-session',
+        snapshot_hash: 'legacy-snapshot',
+      }),
+    })
+
+    await expect(fixture.begin()).rejects.toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    expect(invocations).toEqual([])
+    expect(leaseEvents).toEqual(['fence:legacy-session', 'marker-before-release'])
+    const [quarantine] = await readMcpAgentQuarantines(fixture.activeWorkspace)
+    expect(quarantine).toMatchObject({ session_id: 'legacy-session' })
+    const initialMarker = (await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
+      .find(run => run.run_type === 'mcp_legacy_shared_session_migration')!
+    expect(initialMarker).toMatchObject({ status: 'quarantined' })
+    expect(JSON.parse(initialMarker.output_ref!)).toMatchObject({ status: 'quarantined' })
+
+    await expect(fixture.begin()).rejects.toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    expect(invocations).toEqual([])
+    await clearMcpAgentQuarantine(fixture.activeWorkspace, quarantine!.id)
+
+    await expect(fixture.begin()).rejects.toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    expect(fixture.counters.inspectSession).toBe(1)
+    expect(invocations).toEqual([])
+    const [restagedQuarantine] = await readMcpAgentQuarantines(fixture.activeWorkspace)
+    expect(restagedQuarantine).toMatchObject({ session_id: 'legacy-session' })
+    expect(leaseEvents.slice(-2)).toEqual(['fence:legacy-session', 'marker-before-release'])
+    await clearMcpAgentQuarantine(fixture.activeWorkspace, restagedQuarantine!.id)
+    inspectionStatus = 'completed'
+
+    const execution = await fixture.begin()
+    expect(leaseEvents.slice(-3)).toEqual(['fence:legacy-session', 'clear', 'marker-before-release'])
+    const draft = await execution.generateDraft(fixture.request())
+    expect(draft.prose_chapters?.[0]?.chapter_text).toBe('new one-shot prose')
+    await execution.close({ status: 'success' })
+    expect(fixture.counters.inspectSession).toBe(2)
+    expect(fixture.counters.stabilityReads).toBe(2)
+    expect(invocations).toHaveLength(1)
+
+    const runs = await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id)
+    const unchangedLegacyRun = runs.find(run => run.id === legacyRun.id)!
+    expect(unchangedLegacyRun).toMatchObject({
+      run_type: legacyRun.run_type,
+      step_name: legacyRun.step_name,
+      status: legacyRun.status,
+      input_ref: legacyRun.input_ref,
+      output_ref: legacyRun.output_ref,
+      created_at: legacyRun.created_at,
+      updated_at: legacyRun.updated_at,
+    })
+    const marker = runs.find(run => run.run_type === 'mcp_legacy_shared_session_migration')!
+    expect(marker).toMatchObject({ step_name: taskId, status: 'completed' })
+    expect(marker.output_ref).not.toContain('legacy-session')
+    expect(JSON.parse(marker.output_ref!)).toMatchObject({
+      status: 'reconciled',
+      terminal_status: 'completed',
+      legacy_run_id: legacyRun.id,
+      legacy_identity_fingerprint: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+    })
+    expect(await getNovelChapter(
+      fixture.activeWorkspace,
+      fixture.durableChapter.id,
+      fixture.durableProject.id,
+    )).toMatchObject({ chapter_text: 'already persisted prose' })
+  })
+
+  test('persists exact terminal reconciliation before clearing the fence and reuses it without reinspection', async () => {
+    const taskId = 'legacy-terminal-reconciled-proof'
+    const events: string[] = []
+    let registry: McpAgentLeaseRegistry
+    let projectId = 0
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-reconciled-proof-', {
+      taskId,
+      inspectSession: async () => {
+        events.push('terminal-proof')
+        if (fixture.counters.inspectSession > 1) {
+          throw new Error('PRIVATE_LEGACY_SESSION_NOW_UNAVAILABLE')
+        }
+        return { status: 'completed', terminal: true }
+      },
+      acquireAgentLease: async (workspace, binding) => {
+        const lease = await registry.acquire(workspace, binding)
+        return {
+          ...lease,
+          async stageSessionFence(input: { requestId: string; sessionId: string }) {
+            events.push(`fence:${input.sessionId}`)
+            await lease.stageSessionFence(input)
+          },
+          async clearSessionFence() {
+            const marker = (await listNovelRuns(workspace, projectId))
+              .find(run => run.run_type === 'mcp_legacy_shared_session_migration')
+            const markerOutput = marker?.output_ref ? JSON.parse(marker.output_ref) : {}
+            events.push(`marker:${marker?.status}:${markerOutput.status}`)
+            await lease.clearSessionFence()
+            events.push('clear')
+          },
+          async release() {
+            await lease.release()
+            events.push('release')
+          },
+        }
+      },
+    })
+    registry = fixture.agentLeases
+    projectId = fixture.durableProject.id
+    const identity = legacyTaskReceiptIdentity(fixture, taskId, 'running')
+    await appendNovelRun(fixture.activeWorkspace, {
+      project_id: projectId,
+      run_type: 'mcp_chapter_task',
+      step_name: taskId,
+      status: 'running',
+      input_ref: JSON.stringify(identity),
+      output_ref: JSON.stringify({
+        ...identity,
+        session_id: 'legacy-terminal-proof-session',
+        snapshot_hash: 'legacy-terminal-proof-snapshot',
+      }),
+    })
+
+    await expect(fixture.begin()).rejects.toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    let [quarantine] = await readMcpAgentQuarantines(fixture.activeWorkspace)
+    await clearMcpAgentQuarantine(fixture.activeWorkspace, quarantine!.id)
+    events.length = 0
+
+    const execution = await fixture.begin()
+    expect(events).toEqual([
+      'fence:legacy-terminal-proof-session',
+      'terminal-proof',
+      'marker:completed:reconciled',
+      'clear',
+      'release',
+    ])
+    await execution.close({ status: 'cancelled' })
+    const marker = (await listNovelRuns(fixture.activeWorkspace, projectId))
+      .find(run => run.run_type === 'mcp_legacy_shared_session_migration')!
+    expect(marker).toMatchObject({ status: 'completed' })
+    expect(JSON.parse(marker.output_ref!)).toMatchObject({
+      status: 'reconciled',
+      legacy_run_id: expect.any(Number),
+      legacy_identity_fingerprint: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+    })
+
+    events.length = 0
+    const replay = await fixture.begin()
+    expect(fixture.counters.inspectSession).toBe(1)
+    expect(events).toEqual([])
+    await replay.close({ status: 'cancelled' })
+  })
+
+  test('clears an exact surviving legacy fence from a reconciled marker without reinspection', async () => {
+    const taskId = 'legacy-reconciled-crash-retry'
+    const sessionId = 'legacy-reconciled-crash-session'
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-reconciled-crash-', {
+      taskId,
+    })
+    await seedCrashedReconciledLegacyFence(fixture, taskId, sessionId)
+
+    const outcome: any = await fixture.begin().then(async execution => {
+      try {
+        const draft = await execution.generateDraft(fixture.request())
+        await execution.close({ status: 'success' })
+        return { draft }
+      } catch (error) {
+        await execution.close({ status: 'cancelled' }).catch(() => {})
+        return { error }
+      }
+    }, error => ({ error }))
+
+    expect(outcome.error).toBeUndefined()
+    expect(outcome.draft?.prose_chapters?.[0]?.chapter_text).toBe('通用正文。')
+    expect(fixture.counters).toMatchObject({ inspectSession: 0, runStage: 1 })
+    expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([])
+  })
+
+  test('linearizes a reconciled legacy fence clear with the current legacy receipt', async () => {
+    const taskId = 'legacy-reconciled-current-receipt'
+    const sessionS1 = 'legacy-reconciled-current-session-s1'
+    const sessionS2 = 'legacy-reconciled-current-session-s2'
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-reconciled-current-', {
+      taskId,
+    })
+    const seeded = await seedCrashedReconciledLegacyFence(fixture, taskId, sessionS1)
+    const callsBefore = {
+      inspectSession: fixture.counters.inspectSession,
+      stageSessionFence: fixture.counters.stageSessionFence,
+      runStage: fixture.counters.runStage,
+    }
+    const updateLockHeld = deferredValue()
+    const releaseUpdate = deferredValue()
+    let blockUpdate = true
+    setNovelMutationTestHook(async event => {
+      if (!blockUpdate
+        || event.activeWorkspace !== fixture.activeWorkspace
+        || event.phase !== 'after_mutation_lock_acquired'
+        || event.operation !== 'mutation') return
+      blockUpdate = false
+      updateLockHeld.resolve()
+      await releaseUpdate.promise
+    })
+    const outputS2 = {
+      ...JSON.parse(seeded.legacyRun.output_ref!),
+      session_id: sessionS2,
+      snapshot_hash: `${sessionS2}-snapshot`,
+    }
+    const updatePromise = updateNovelRun(fixture.activeWorkspace, seeded.legacyRun.id, {
+      output_ref: JSON.stringify(outputS2),
+    })
+    await updateLockHeld.promise
+
+    let compareClearCalls = 0
+    const compareAndClearSessionFence = fixture.runtime.compareAndClearSessionFence
+    const compareClearCalled = deferredValue()
+    fixture.runtime.compareAndClearSessionFence = async (workspace, binding, expectation) => {
+      compareClearCalls += 1
+      compareClearCalled.resolve()
+      return compareAndClearSessionFence(workspace, binding, expectation)
+    }
+    const beginPromise = fixture.begin()
+    let stopWaitingForNovelQueue = false
+    const novelQueueReached = (async () => {
+      const key = novelMutationKey(fixture.activeWorkspace)
+      while (!stopWaitingForNovelQueue) {
+        if (novelMutationLocks.get(key)?.waiters.length) return true
+        await new Promise(resolve => setTimeout(resolve, 1))
+      }
+      return false
+    })()
+    const coordination = await Promise.race([
+      novelQueueReached.then(queued => queued ? 'queued' as const : 'stopped' as const),
+      compareClearCalled.promise.then(() => 'compare-clear' as const),
+      new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), 1_000)),
+    ])
+    stopWaitingForNovelQueue = true
+    releaseUpdate.resolve()
+    await updatePromise
+    const exposed: any = await beginPromise.catch(error => error)
+    if (typeof exposed?.close === 'function') await exposed.close({ status: 'cancelled' })
+
+    expect(coordination).toBe('queued')
+    expect(exposed).toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    expect(compareClearCalls).toBe(0)
+    expect(fixture.counters).toMatchObject(callsBefore)
+    const currentLegacyRun = (await listNovelRuns(
+      fixture.activeWorkspace,
+      fixture.durableProject.id,
+    )).find(run => run.id === seeded.legacyRun.id)!
+    expect(JSON.parse(currentLegacyRun.output_ref!)).toEqual(outputS2)
+    expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([
+      expect.objectContaining({
+        request_id: taskId,
+        session_id: sessionS1,
+        reason: 'remote_cancel_unknown',
+      }),
+    ])
+  })
+
+  for (const mismatch of [
+    { name: 'request id', requestId: 'different-legacy-request' },
+    { name: 'session id', sessionId: 'different-legacy-session' },
+    { name: 'reason', reason: 'send_unknown' as const },
+  ]) {
+    test(`keeps a reconciled legacy fence with mismatched ${mismatch.name}`, async () => {
+      const taskId = `legacy-reconciled-mismatch-${mismatch.name.replace(' ', '-')}`
+      const sessionId = `legacy-reconciled-mismatch-session-${mismatch.name.replace(' ', '-')}`
+      const fixture = await neutralTaskFixture(`mangaforge-mcp-legacy-mismatch-${mismatch.name}-`, {
+        taskId,
+      })
+      const seeded = await seedCrashedReconciledLegacyFence(fixture, taskId, sessionId)
+      await clearMcpAgentQuarantine(fixture.activeWorkspace, seeded.quarantine.id)
+      const binding = resolveChapterGenerationSource(fixture.durableProject).mcp!
+      await upsertMcpAgentQuarantine(fixture.activeWorkspace, {
+        serverId: binding.server_id,
+        keyId: binding.key_id,
+        agentId: binding.agent_id,
+        requestId: mismatch.requestId || taskId,
+        sessionId: mismatch.sessionId || sessionId,
+        reason: mismatch.reason || 'remote_cancel_unknown',
+      })
+      const before = await readMcpAgentQuarantines(fixture.activeWorkspace)
+
+      const exposed: any = await fixture.begin().catch(error => error)
+      if (typeof exposed?.close === 'function') await exposed.close({ status: 'cancelled' })
+
+      expect(exposed).toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+      expect(fixture.counters).toMatchObject({ inspectSession: 0, runStage: 0 })
+      expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual(before)
+    })
+  }
+
+  test('keeps the legacy fence when durable reconciled marker persistence fails', async () => {
+    const taskId = 'legacy-reconciled-marker-write-failure'
+    let clearCalls = 0
+    let registry: McpAgentLeaseRegistry
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-marker-write-fail-', {
+      taskId,
+      inspectSession: async () => ({ status: 'completed', terminal: true }),
+      acquireAgentLease: async (workspace, binding) => {
+        const lease = await registry.acquire(workspace, binding)
+        return {
+          ...lease,
+          async clearSessionFence() {
+            clearCalls += 1
+            await lease.clearSessionFence()
+          },
+        }
+      },
+    })
+    registry = fixture.agentLeases
+    const sessionId = 'legacy-marker-write-failure-session'
+    await seedLegacyMigrationMarker(fixture, taskId, sessionId)
+    const db = new Database(join(fixture.activeWorkspace, 'novel.sqlite'))
+    try {
+      db.exec(`
+        CREATE TRIGGER fail_legacy_marker_reconcile
+        BEFORE UPDATE OF status, output_ref ON runs
+        WHEN OLD.run_type = 'mcp_legacy_shared_session_migration'
+        BEGIN
+          SELECT RAISE(ABORT, 'PRIVATE_MARKER_UPDATE_FAILURE');
+        END
+      `)
+
+      const exposed: any = await fixture.begin().catch(error => error)
+
+      expect(exposed).toMatchObject({ code: 'MCP_STORE_IO_FAILED' })
+      expect(JSON.stringify({ message: exposed.message, details: exposed.details }))
+        .not.toContain('PRIVATE_MARKER_UPDATE_FAILURE')
+      expect(clearCalls).toBe(0)
+      expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([
+        expect.objectContaining({ session_id: sessionId }),
+      ])
+      const marker = (await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
+        .find(run => run.run_type === 'mcp_legacy_shared_session_migration')!
+      expect(marker).toMatchObject({ status: 'quarantined' })
+      expect(JSON.parse(marker.output_ref!)).toMatchObject({ status: 'quarantined' })
+    } finally {
+      db.exec('DROP TRIGGER IF EXISTS fail_legacy_marker_reconcile')
+      db.close()
+    }
+  })
+
+  test('does not trust a forged completed legacy migration marker', async () => {
+    const taskId = 'legacy-forged-reconciled-proof'
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-forged-proof-', { taskId })
+    const identity = legacyTaskReceiptIdentity(fixture, taskId, 'running')
+    await appendNovelRun(fixture.activeWorkspace, {
+      project_id: fixture.durableProject.id,
+      run_type: 'mcp_chapter_task',
+      step_name: taskId,
+      status: 'running',
+      input_ref: JSON.stringify(identity),
+      output_ref: JSON.stringify({
+        ...identity,
+        session_id: 'legacy-forged-proof-session',
+        snapshot_hash: 'legacy-forged-proof-snapshot',
+      }),
+    })
+    await expect(fixture.begin()).rejects.toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    const [quarantine] = await readMcpAgentQuarantines(fixture.activeWorkspace)
+    await clearMcpAgentQuarantine(fixture.activeWorkspace, quarantine!.id)
+    const marker = (await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
+      .find(run => run.run_type === 'mcp_legacy_shared_session_migration')!
+    const forgedOutput = {
+      ...JSON.parse(marker.output_ref!),
+      status: 'reconciled',
+      legacy_identity_fingerprint: `sha256:${'f'.repeat(64)}`,
+    }
+    await updateNovelRun(fixture.activeWorkspace, marker.id, {
+      status: 'completed',
+      output_ref: JSON.stringify(forgedOutput),
+    })
+
+    await expect(fixture.begin()).rejects.toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    expect(fixture.counters.inspectSession).toBe(0)
+  })
+
+  test('does not trust a reconciled marker with contradictory input identity', async () => {
+    const taskId = 'legacy-contradictory-reconciled-input'
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-contradictory-marker-input-', {
+      taskId,
+    })
+    await seedLegacyMigrationMarker(fixture, taskId, 'legacy-contradictory-marker-session')
+    const marker = (await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
+      .find(run => run.run_type === 'mcp_legacy_shared_session_migration')!
+    await updateNovelRun(fixture.activeWorkspace, marker.id, {
+      status: 'completed',
+      input_ref: JSON.stringify({
+        task_id: taskId,
+        legacy_run_id: 999_999,
+        legacy_identity_fingerprint: `sha256:${'e'.repeat(64)}`,
+      }),
+      output_ref: JSON.stringify({
+        ...JSON.parse(marker.output_ref!),
+        status: 'reconciled',
+        terminal_status: 'completed',
+      }),
+    })
+
+    const exposed: any = await fixture.begin().catch(error => error)
+    if (typeof exposed?.close === 'function') await exposed.close({ status: 'cancelled' })
+
+    expect(exposed).toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    expect(fixture.counters.inspectSession).toBe(0)
+  })
+
+  test('does not trust a reconciled marker with noncanonical extra output fields', async () => {
+    const taskId = 'legacy-noncanonical-reconciled-output'
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-noncanonical-output-', {
+      taskId,
+    })
+    await seedLegacyMigrationMarker(fixture, taskId, 'legacy-noncanonical-output-session')
+    const marker = (await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
+      .find(run => run.run_type === 'mcp_legacy_shared_session_migration')!
+    await updateNovelRun(fixture.activeWorkspace, marker.id, {
+      status: 'completed',
+      output_ref: JSON.stringify({
+        ...JSON.parse(marker.output_ref!),
+        status: 'reconciled',
+        terminal_status: 'completed',
+        contradictory_terminal_status: 'failed',
+      }),
+    })
+
+    const exposed: any = await fixture.begin().catch(error => error)
+    if (typeof exposed?.close === 'function') await exposed.close({ status: 'cancelled' })
+
+    expect(exposed).toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    expect(fixture.counters.inspectSession).toBe(0)
+  })
+
+  test('does not hold the workspace mutation coordinator during legacy remote inspection', async () => {
+    const taskId = 'legacy-inspection-unlocked'
+    const inspectionReached = deferredValue()
+    const releaseInspection = deferredValue()
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-inspection-unlocked-', {
+      taskId,
+      inspectSession: async () => {
+        inspectionReached.resolve()
+        await releaseInspection.promise
+        return { status: 'completed', terminal: true }
+      },
+    })
+    const identity = legacyTaskReceiptIdentity(fixture, taskId, 'running')
+    await appendNovelRun(fixture.activeWorkspace, {
+      project_id: fixture.durableProject.id,
+      run_type: 'mcp_chapter_task',
+      step_name: taskId,
+      status: 'running',
+      input_ref: JSON.stringify(identity),
+      output_ref: JSON.stringify({
+        ...identity,
+        session_id: 'legacy-unlocked-session',
+        snapshot_hash: 'legacy-unlocked-snapshot',
+      }),
+    })
+    await expect(fixture.begin()).rejects.toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    const [legacyQuarantine] = await readMcpAgentQuarantines(fixture.activeWorkspace)
+    await clearMcpAgentQuarantine(fixture.activeWorkspace, legacyQuarantine!.id)
+
+    const beginPromise = fixture.begin()
+    await inspectionReached.promise
+    const unrelatedOperations = Promise.all([
+      upsertMcpAgentQuarantine(fixture.activeWorkspace, {
+        serverId: 'unrelated-quarantine-server',
+        keyId: 901,
+        agentId: 'unrelated-quarantine-agent',
+        requestId: 'unrelated-quarantine-request',
+        sessionId: 'unrelated-quarantine-session',
+        reason: 'send_unknown',
+      }),
+      fixture.agentLeases.acquire(fixture.activeWorkspace, {
+        serverId: 'unrelated-lease-server',
+        keyId: 902,
+        agentId: 'unrelated-lease-agent',
+      }),
+    ])
+    const coordinatorOutcome = await Promise.race([
+      unrelatedOperations.then(() => 'completed' as const),
+      new Promise<'blocked'>(resolve => setTimeout(() => resolve('blocked'), 150)),
+    ])
+    releaseInspection.resolve()
+    const execution = await beginPromise
+    const [unrelatedQuarantine, unrelatedLease] = await unrelatedOperations
+    await execution.close({ status: 'cancelled' })
+    await unrelatedLease.release()
+    await clearMcpAgentQuarantine(fixture.activeWorkspace, unrelatedQuarantine.id)
+
+    expect(coordinatorOutcome).toBe('completed')
+  })
+
+  test('keeps the fence when the legacy run changes while remote inspection is pending', async () => {
+    const taskId = 'legacy-run-drift-during-inspection'
+    const inspectionReached = deferredValue()
+    const releaseInspection = deferredValue()
+    let clearCalls = 0
+    let registry: McpAgentLeaseRegistry
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-run-drift-', {
+      taskId,
+      inspectSession: async () => {
+        inspectionReached.resolve()
+        await releaseInspection.promise
+        return { status: 'completed', terminal: true }
+      },
+      acquireAgentLease: async (workspace, binding) => {
+        const lease = await registry.acquire(workspace, binding)
+        return {
+          ...lease,
+          async clearSessionFence() {
+            clearCalls += 1
+            await lease.clearSessionFence()
+          },
+        }
+      },
+    })
+    registry = fixture.agentLeases
+    const legacyRun = await seedLegacyMigrationMarker(
+      fixture,
+      taskId,
+      'legacy-run-drift-session-s1',
+    )
+
+    const beginPromise = fixture.begin()
+    await inspectionReached.promise
+    await updateNovelRun(fixture.activeWorkspace, legacyRun.id, {
+      output_ref: JSON.stringify({
+        ...JSON.parse(legacyRun.output_ref!),
+        session_id: 'legacy-run-drift-session-s2',
+        snapshot_hash: 'legacy-run-drift-snapshot-s2',
+      }),
+    })
+    releaseInspection.resolve()
+    const exposed: any = await beginPromise.catch(error => error)
+    if (typeof exposed?.close === 'function') await exposed.close({ status: 'cancelled' })
+
+    expect(exposed).toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    expect(clearCalls).toBe(0)
+    const marker = (await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
+      .find(run => run.run_type === 'mcp_legacy_shared_session_migration')!
+    expect(marker).toMatchObject({ status: 'quarantined' })
+    expect(JSON.parse(marker.output_ref!)).toMatchObject({ status: 'quarantined' })
+    expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([
+      expect.objectContaining({ session_id: 'legacy-run-drift-session-s1' }),
+    ])
+  })
+
+  test('keeps the fence when the legacy run changes after final reread but before marker recovery', async () => {
+    const taskId = 'legacy-run-drift-between-reread-and-recovery'
+    const inspectionReached = deferredValue()
+    const releaseInspection = deferredValue()
+    const updateLockHeld = deferredValue()
+    const releaseUpdate = deferredValue()
+    let clearCalls = 0
+    let registry: McpAgentLeaseRegistry
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-atomic-guard-', {
+      taskId,
+      inspectSession: async () => {
+        inspectionReached.resolve()
+        await releaseInspection.promise
+        return { status: 'completed', terminal: true }
+      },
+      acquireAgentLease: async (workspace, binding) => {
+        const lease = await registry.acquire(workspace, binding)
+        return {
+          ...lease,
+          async clearSessionFence() {
+            clearCalls += 1
+            await lease.clearSessionFence()
+          },
+        }
+      },
+    })
+    registry = fixture.agentLeases
+    const legacyRun = await seedLegacyMigrationMarker(
+      fixture,
+      taskId,
+      'legacy-atomic-guard-session-s1',
+    )
+    let blockUpdate = true
+    setNovelMutationTestHook(async event => {
+      if (!blockUpdate
+        || event.activeWorkspace !== fixture.activeWorkspace
+        || event.phase !== 'after_mutation_lock_acquired'
+        || event.operation !== 'mutation') return
+      blockUpdate = false
+      updateLockHeld.resolve()
+      await releaseUpdate.promise
+    })
+
+    const beginPromise = fixture.begin()
+    await inspectionReached.promise
+    const updatePromise = updateNovelRun(fixture.activeWorkspace, legacyRun.id, {
+      output_ref: JSON.stringify({
+        ...JSON.parse(legacyRun.output_ref!),
+        session_id: 'legacy-atomic-guard-session-s2',
+        snapshot_hash: 'legacy-atomic-guard-snapshot-s2',
+      }),
+    })
+    await updateLockHeld.promise
+    releaseInspection.resolve()
+    const recoveryQueued = await Promise.race([
+      (async () => {
+        const key = novelMutationKey(fixture.activeWorkspace)
+        while (!novelMutationLocks.get(key)?.waiters.length) {
+          await new Promise(resolve => setTimeout(resolve, 1))
+        }
+        return true
+      })(),
+      new Promise<false>(resolve => setTimeout(() => resolve(false), 1_000)),
+    ])
+    releaseUpdate.resolve()
+    await updatePromise
+    const exposed: any = await beginPromise.catch(error => error)
+    if (typeof exposed?.close === 'function') await exposed.close({ status: 'cancelled' })
+
+    expect(recoveryQueued).toBe(true)
+    expect(exposed).toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    expect(clearCalls).toBe(0)
+    const runs = await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id)
+    expect(runs.find(run => run.run_type === 'mcp_legacy_shared_session_migration'))
+      .toMatchObject({ status: 'quarantined' })
+    expect(JSON.parse(runs.find(run => run.id === legacyRun.id)!.output_ref!)).toMatchObject({
+      session_id: 'legacy-atomic-guard-session-s2',
+    })
+    expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([
+      expect.objectContaining({ session_id: 'legacy-atomic-guard-session-s1' }),
+    ])
+  })
+
+  test('pins the credential snapshot to an active lease before identity rotation can enter', async () => {
+    const taskId = 'legacy-snapshot-lease-admission'
+    const acquireReached = deferredValue()
+    const releaseAcquire = deferredValue()
+    let acquisitions = 0
+    let registry: McpAgentLeaseRegistry
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-snapshot-lease-', {
+      taskId,
+      acquireAgentLease: async (workspace, binding) => {
+        acquisitions += 1
+        if (acquisitions === 2) {
+          acquireReached.resolve()
+          await releaseAcquire.promise
+        }
+        return registry.acquire(workspace, binding)
+      },
+    })
+    registry = fixture.agentLeases
+    await seedLegacyMigrationMarker(fixture, taskId, 'legacy-snapshot-lease-session')
+
+    const beginPromise = fixture.begin()
+    await acquireReached.promise
+    const rotationPromise = updateMcpKey(fixture.activeWorkspace, 1, {
+      key: 'rotated-during-legacy-admission',
+    })
+    const rotationBeforeLease = await Promise.race([
+      rotationPromise.then(() => 'completed' as const, () => 'rejected' as const),
+      new Promise<'blocked'>(resolve => setTimeout(() => resolve('blocked'), 150)),
+    ])
+    releaseAcquire.resolve()
+    const execution = await beginPromise
+    const rotationResult: any = await rotationPromise.catch(error => error)
+    await execution.close({ status: 'cancelled' })
+
+    expect(rotationBeforeLease).toBe('blocked')
+    expect(rotationResult).toMatchObject({ code: 'MCP_AGENT_BUSY' })
+  })
+
+  for (const code of [
+    'MCP_STORE_CORRUPT',
+    'MCP_STORE_IO_FAILED',
+    'MCP_AUTH_FAILED',
+    'MCP_BINDING_INVALID',
+  ] as const) {
+    test(`preserves actionable local ${code} during legacy reconciliation with its fence durable`, async () => {
+      const taskId = `legacy-local-${code.toLowerCase()}`
+      const keyValue = `local-key-${code.toLowerCase()}`
+      const headerValue = `local-header-${code.toLowerCase()}`
+      const fixture = await neutralTaskFixture(`mangaforge-mcp-${code.toLowerCase()}-`, {
+        taskId,
+        keyValue,
+        headerValue,
+        resolveCredentialConfig: async () => {
+          throw new McpError(code, `private local config ${keyValue} ${headerValue}`, {
+            private_key: keyValue,
+            private_header: headerValue,
+          })
+        },
+      })
+      const sessionId = `legacy-local-session-${code.toLowerCase()}`
+      await seedLegacyMigrationMarker(fixture, taskId, sessionId)
+
+      const exposed: any = await fixture.begin().catch(error => error)
+
+      expect(exposed).toMatchObject({ code })
+      expect(fixture.counters.inspectSession).toBe(0)
+      expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([
+        expect.objectContaining({ session_id: sessionId }),
+      ])
+      const serialized = JSON.stringify({ message: exposed.message, details: exposed.details })
+      expect(serialized).not.toContain(keyValue)
+      expect(serialized).not.toContain(headerValue)
+    })
+  }
+
+  test('rejects a behavioral pinned credential without invoking or exposing accessors', async () => {
+    const taskId = 'legacy-behavioral-pinned-credential'
+    const privateAccessorText = 'PRIVATE_PINNED_SERVER_ACCESSOR'
+    let getterCalls = 0
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-behavioral-pinned-', {
+      taskId,
+      resolveCredentialConfig: async pinned => {
+        const credential = { key: pinned.key } as any
+        Object.defineProperty(credential, 'server', {
+          enumerable: true,
+          get() {
+            getterCalls += 1
+            throw new Error(privateAccessorText)
+          },
+        })
+        return credential
+      },
+    })
+    const sessionId = 'legacy-behavioral-pinned-session'
+    await seedLegacyMigrationMarker(fixture, taskId, sessionId)
+
+    const exposed: any = await fixture.begin().catch(error => error)
+
+    expect(exposed).toMatchObject({ code: 'MCP_BINDING_INVALID' })
+    expect(getterCalls).toBe(0)
+    expect(JSON.stringify({ message: exposed.message, details: exposed.details }))
+      .not.toContain(privateAccessorText)
+    expect(fixture.counters).toMatchObject({ getAdapter: 0, inspectSession: 0 })
+    expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([
+      expect.objectContaining({ session_id: sessionId }),
+    ])
+  })
+
+  test('preserves a disabled selected credential error after staging the legacy fence', async () => {
+    const taskId = 'legacy-disabled-selected-credential'
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-disabled-selection-', { taskId })
+    const sessionId = 'legacy-disabled-selection-session'
+    await seedLegacyMigrationMarker(fixture, taskId, sessionId)
+    await updateMcpKey(fixture.activeWorkspace, 1, { is_active: false })
+
+    const exposed: any = await fixture.begin().catch(error => error)
+
+    expect(exposed).toMatchObject({ code: 'MCP_BINDING_INVALID' })
+    expect(fixture.counters.getAdapter).toBe(0)
+    expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([
+      expect.objectContaining({ session_id: sessionId }),
+    ])
+  })
+
+  test('preserves an Adapter identity error after staging the legacy fence', async () => {
+    const taskId = 'legacy-adapter-identity-error'
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-adapter-identity-', {
+      taskId,
+      getAdapterForKey: (pinned, adapter, stability) => ({
+        server: pinned.server,
+        key: pinned.key,
+        adapter: { ...adapter, id: 'different-adapter' },
+        stability,
+      }),
+    })
+    const sessionId = 'legacy-adapter-identity-session'
+    await seedLegacyMigrationMarker(fixture, taskId, sessionId)
+
+    const exposed: any = await fixture.begin().catch(error => error)
+
+    expect(exposed).toMatchObject({ code: 'MCP_BINDING_INVALID' })
+    expect(fixture.counters.inspectSession).toBe(0)
+    expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([
+      expect.objectContaining({ session_id: sessionId }),
+    ])
+  })
+
+  test('rejects behavioral Adapter identity without invoking or exposing it', async () => {
+    const taskId = 'legacy-behavioral-adapter-identity-error'
+    const privateIdentity = 'PRIVATE_ADAPTER_IDENTITY_GETTER'
+    let getterCalls = 0
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-behavioral-adapter-id-', {
+      taskId,
+      getAdapterForKey: (pinned, adapter, stability) => {
+        const hostileAdapter = { ...adapter }
+        Object.defineProperty(hostileAdapter, 'id', {
+          enumerable: true,
+          get() { getterCalls += 1; throw new Error(privateIdentity) },
+        })
+        return { server: pinned.server, key: pinned.key, adapter: hostileAdapter, stability }
+      },
+    })
+    const sessionId = 'legacy-behavioral-adapter-identity-session'
+    await seedLegacyMigrationMarker(fixture, taskId, sessionId)
+
+    const exposed: any = await fixture.begin().catch(error => error)
+
+    expect(exposed).toMatchObject({ code: 'MCP_BINDING_INVALID' })
+    expect(getterCalls).toBe(0)
+    expect(JSON.stringify({ message: exposed.message, details: exposed.details }))
+      .not.toContain(privateIdentity)
+    expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([
+      expect.objectContaining({ session_id: sessionId }),
+    ])
+  })
+
+  test('preserves a missing Adapter inspection capability after staging the legacy fence', async () => {
+    const taskId = 'legacy-adapter-capability-error'
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-adapter-capability-', {
+      taskId,
+      getAdapterForKey: (pinned, adapter, stability) => ({
+        server: pinned.server,
+        key: pinned.key,
+        adapter: { ...adapter, inspectSession: undefined },
+        stability,
+      }),
+    })
+    const sessionId = 'legacy-adapter-capability-session'
+    await seedLegacyMigrationMarker(fixture, taskId, sessionId)
+
+    const exposed: any = await fixture.begin().catch(error => error)
+
+    expect(exposed).toMatchObject({ code: 'MCP_CAPABILITY_MISSING' })
+    expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([
+      expect.objectContaining({ session_id: sessionId }),
+    ])
+  })
+
+  test('preserves a safe Adapter inspection contract error without invoking accessors', async () => {
+    const taskId = 'legacy-adapter-inspection-contract-error'
+    let getterCalls = 0
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-inspection-contract-', {
+      taskId,
+      getAdapterForKey: (pinned, adapter, stability) => ({
+        server: pinned.server,
+        key: pinned.key,
+        adapter: {
+          ...adapter,
+          inspectSession: () => Object.defineProperty({}, 'then', {
+            get() { getterCalls += 1; return undefined },
+          }),
+        },
+        stability,
+      }),
+    })
+    const sessionId = 'legacy-inspection-contract-session'
+    await seedLegacyMigrationMarker(fixture, taskId, sessionId)
+
+    const exposed: any = await fixture.begin().catch(error => error)
+
+    expect(exposed).toMatchObject({ code: 'MCP_SESSION_FAILED' })
+    expect(getterCalls).toBe(0)
+    expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([
+      expect.objectContaining({ session_id: sessionId }),
+    ])
+  })
+
+  test('projects a private remote legacy inspection failure to quarantine without leakage', async () => {
+    const taskId = 'legacy-private-remote-inspection-error'
+    const privateRemoteMessage = 'PRIVATE_REMOTE_LEGACY_INSPECTION_BODY'
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-private-remote-', {
+      taskId,
+      inspectSession: async () => { throw new Error(privateRemoteMessage) },
+    })
+    const sessionId = 'legacy-private-remote-session'
+    await seedLegacyMigrationMarker(fixture, taskId, sessionId)
+
+    const exposed: any = await fixture.begin().catch(error => error)
+
+    expect(exposed).toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    expect(JSON.stringify({ message: exposed.message, details: exposed.details }))
+      .not.toContain(privateRemoteMessage)
+    expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([
+      expect.objectContaining({ session_id: sessionId }),
+    ])
+  })
+
+  test('preserves a typed actionable remote inspection error without leaking credentials', async () => {
+    const taskId = 'legacy-typed-actionable-inspection-error'
+    const keyValue = 'legacy-typed-inspection-key'
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-typed-inspection-', {
+      taskId,
+      keyValue,
+      inspectSession: async () => {
+        throw new McpError('MCP_AUTH_FAILED', `private remote auth ${keyValue}`, {
+          private_key: keyValue,
+        })
+      },
+    })
+    const sessionId = 'legacy-typed-inspection-session'
+    await seedLegacyMigrationMarker(fixture, taskId, sessionId)
+
+    const exposed: any = await fixture.begin().catch(error => error)
+
+    expect(exposed).toMatchObject({ code: 'MCP_AUTH_FAILED' })
+    expect(JSON.stringify({ message: exposed.message, details: exposed.details }))
+      .not.toContain(keyValue)
+    expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([
+      expect.objectContaining({ session_id: sessionId }),
+    ])
+  })
+
+  test('rebuilds a typed actionable inspection error without exposing remote payloads', async () => {
+    const taskId = 'legacy-typed-actionable-payload-projection'
+    const sessionId = 'legacy-private-actionable-session'
+    const privatePayloads = [
+      sessionId,
+      'PRIVATE_FULL_LEGACY_PROMPT',
+      'PRIVATE_FULL_LEGACY_PROSE',
+      'PRIVATE_REMOTE_BODY',
+      'PRIVATE_REMOTE_RESPONSE',
+      'PRIVATE_NONCREDENTIAL_TOKEN',
+    ]
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-actionable-payload-', {
+      taskId,
+      inspectSession: async () => {
+        const failure = new McpError(
+          'MCP_AUTH_FAILED',
+          `remote failure ${privatePayloads.join(' ')}`,
+          {
+            session_id: sessionId,
+            prompt: privatePayloads[1],
+            prose: privatePayloads[2],
+            body: privatePayloads[3],
+            response: privatePayloads[4],
+            private_token: privatePayloads[5],
+          },
+        ) as McpError & Record<string, unknown>
+        failure.metadata = {
+          content: privatePayloads[2],
+          response: privatePayloads[4],
+          token: privatePayloads[5],
+        }
+        throw failure
+      },
+    })
+    await seedLegacyMigrationMarker(fixture, taskId, sessionId)
+
+    const exposed: any = await fixture.begin().catch(error => error)
+
+    expect(exposed).toMatchObject({ code: 'MCP_AUTH_FAILED' })
+    const publicOutput = JSON.stringify({
+      message: exposed.message,
+      details: exposed.details,
+      error: exposed,
+    })
+    for (const privatePayload of privatePayloads) {
+      expect(publicOutput).not.toContain(privatePayload)
+    }
+    expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([
+      expect.objectContaining({ session_id: sessionId }),
+    ])
+  })
+
+  test('preserves a typed remote inspection contract error without leaking credentials', async () => {
+    const taskId = 'legacy-typed-contract-inspection-error'
+    const keyValue = 'legacy-typed-contract-key'
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-typed-contract-', {
+      taskId,
+      keyValue,
+      inspectSession: async () => {
+        throw new McpError(
+          'MCP_STAGE_CONTRACT_INVALID',
+          `private remote contract ${keyValue}`,
+          { private_key: keyValue },
+        )
+      },
+    })
+    const sessionId = 'legacy-typed-contract-session'
+    await seedLegacyMigrationMarker(fixture, taskId, sessionId)
+
+    const exposed: any = await fixture.begin().catch(error => error)
+
+    expect(exposed).toMatchObject({ code: 'MCP_STAGE_CONTRACT_INVALID' })
+    expect(JSON.stringify({ message: exposed.message, details: exposed.details }))
+      .not.toContain(keyValue)
+    expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([
+      expect.objectContaining({ session_id: sessionId }),
+    ])
+  })
+
+  test('projects a raw migration marker append failure while retaining the staged fence', async () => {
+    const taskId = 'legacy-marker-append-failure'
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-marker-append-fail-', { taskId })
+    const identity = legacyTaskReceiptIdentity(fixture, taskId, 'running')
+    const sessionId = 'legacy-marker-append-failure-session'
+    await appendNovelRun(fixture.activeWorkspace, {
+      project_id: fixture.durableProject.id,
+      run_type: 'mcp_chapter_task',
+      step_name: taskId,
+      status: 'running',
+      input_ref: JSON.stringify(identity),
+      output_ref: JSON.stringify({
+        ...identity,
+        session_id: sessionId,
+        snapshot_hash: 'legacy-marker-append-failure-snapshot',
+      }),
+    })
+    const db = new Database(join(fixture.activeWorkspace, 'novel.sqlite'))
+    try {
+      db.exec(`
+        CREATE TRIGGER fail_legacy_marker_append
+        BEFORE INSERT ON runs
+        WHEN NEW.run_type = 'mcp_legacy_shared_session_migration'
+        BEGIN
+          SELECT RAISE(ABORT, 'PRIVATE_MARKER_APPEND_FAILURE');
+        END
+      `)
+
+      const exposed: any = await fixture.begin().catch(error => error)
+
+      expect(exposed).toMatchObject({ code: 'MCP_STORE_IO_FAILED' })
+      expect(JSON.stringify({ message: exposed.message, details: exposed.details }))
+        .not.toContain('PRIVATE_MARKER_APPEND_FAILURE')
+      expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([
+        expect.objectContaining({ session_id: sessionId }),
+      ])
+      expect((await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
+        .filter(run => run.run_type === 'mcp_legacy_shared_session_migration')).toEqual([])
+    } finally {
+      db.exec('DROP TRIGGER IF EXISTS fail_legacy_marker_append')
+      db.close()
+    }
+  })
+
+  test('restages a legacy migration fence when its quarantine record is missing and inspection is unknown or fails', async () => {
+    const taskId = 'legacy-shared-partial-persistence'
+    const invocations: McpChapterInvocationInput[] = []
+    let inspection: 'failure' | 'unknown' = 'failure'
+    const fixture = await neutralTaskFixture('mangaforge-mcp-legacy-partial-persistence-', {
+      taskId,
+      async invokeChapterStage(input) {
+        invocations.push(input)
+        return {
+          content: 'must not run',
+          session_id: 'unreachable-stage-session',
+          snapshot_hash: 'unreachable-stage-snapshot',
+          status: 'completed' as const,
+        }
+      },
+      inspectSession: async () => {
+        if (inspection === 'failure') throw new Error('PRIVATE_LEGACY_INSPECTION_FAILURE')
+        return { status: 'unknown', terminal: false }
+      },
+    })
+    const legacyIdentity = legacyTaskReceiptIdentity(fixture, taskId, 'session_created')
+    await appendNovelRun(fixture.activeWorkspace, {
+      project_id: fixture.durableProject.id,
+      run_type: 'mcp_chapter_task',
+      step_name: taskId,
+      status: 'session_created',
+      input_ref: JSON.stringify(legacyIdentity),
+      output_ref: JSON.stringify({
+        ...legacyIdentity,
+        session_id: 'legacy-partial-session',
+        snapshot_hash: 'legacy-partial-snapshot',
+      }),
+    })
+
+    await expect(fixture.begin()).rejects.toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    expect(invocations).toEqual([])
+    expect((await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
+      .filter(run => run.run_type === 'mcp_legacy_shared_session_migration')).toHaveLength(1)
+
+    await rm(getMcpAgentQuarantinePath(fixture.activeWorkspace), { force: true })
+    const failedInspection: any = await fixture.begin().catch(error => error)
+    expect(failedInspection).toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    expect(JSON.stringify({ message: failedInspection.message, details: failedInspection.details }))
+      .not.toContain('PRIVATE_LEGACY_INSPECTION_FAILURE')
+    expect(invocations).toEqual([])
+    let [restaged] = await readMcpAgentQuarantines(fixture.activeWorkspace)
+    expect(restaged).toMatchObject({ session_id: 'legacy-partial-session' })
+
+    await clearMcpAgentQuarantine(fixture.activeWorkspace, restaged!.id)
+    inspection = 'unknown'
+    await expect(fixture.begin()).rejects.toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    expect(invocations).toEqual([])
+    ;[restaged] = await readMcpAgentQuarantines(fixture.activeWorkspace)
+    expect(restaged).toMatchObject({ session_id: 'legacy-partial-session' })
+    expect(fixture.counters.inspectSession).toBe(2)
+    expect((await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
+      .filter(run => run.run_type === 'mcp_legacy_shared_session_migration')).toHaveLength(1)
+  })
 
   test('rejects an invalid MCP agent result inside the recorded operation without calling a model', async () => {
     let modelCalls = 0
@@ -3277,256 +4752,6 @@ describe('McpGenerationSource task execution', () => {
     }
   })
 
-  test('runs a complete multi-stage task through one provider-neutral Session and releases both leases', async () => {
-    const activeWorkspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-task-multistage-'))
-    workspaces.push(activeWorkspace)
-    const server = {
-      ...BUDA_MCP_SERVER_TEMPLATE,
-      id: 'test-session-server',
-      display_name: 'Test Session Provider',
-      adapter_id: 'test-session-provider',
-    }
-    await writeMcpServers(activeWorkspace, [server])
-    const key = await createMcpKey(activeWorkspace, {
-      mcp_server_id: server.id,
-      key: 'sk_task_multistage',
-      description: '通用任务 Adapter',
-    })
-    const durableProject = await createNovelProject(activeWorkspace, {
-      title: '通用多阶段任务',
-      reference_config: {
-        chapter_generation_source: {
-          version: 'chapter_generation_source_v1',
-          active: 'mcp',
-          model: { model_id: 217 },
-          mcp: {
-            server_id: server.id,
-            key_id: key.id,
-            adapter_id: server.adapter_id,
-            agent_id: 'agent-neutral-1',
-            model: 'remote-neutral-model',
-          },
-        },
-      },
-    })
-    const durableChapter = await createNovelChapter(activeWorkspace, {
-      project_id: durableProject.id,
-      chapter_no: 12,
-      title: '雨夜',
-    })
-    const context = {
-      writing_bible: { voice: '克制' },
-      story_state: { global: { place: '北城' } },
-      continuity: { previous_prose_chapters: [{ chapter_no: 11, chapter_text: '雨落在城门。' }] },
-    }
-    const opened: McpChapterTaskInput[] = []
-    const stageInputs: McpChapterStageInput[] = []
-    const sessionIds: string[] = []
-    let adapterGenerateProseCalls = 0
-    let createAgentCalls = 0
-    let closeCalls = 0
-    let listAgentCalls = 0
-    const adapter: McpGenerationAdapter = {
-      id: 'test-session-provider',
-      async listAgents() {
-        listAgentCalls += 1
-        return [{ id: 'agent-neutral-1', name: 'Neutral Agent' }]
-      },
-      async createAgent() {
-        createAgentCalls += 1
-        throw new Error('task execution must not create Agents')
-      },
-      async inspectSession() { return { status: 'completed', terminal: true } },
-      async openChapterTask(input) {
-        opened.push(input)
-        const sessionId = `neutral-session-${opened.length}`
-        sessionIds.push(sessionId)
-        await input.onProgress?.({
-          stage: 'session_created',
-          status: 'running',
-          session_id: sessionId,
-          snapshot_hash: 'neutral-snapshot-1',
-        })
-        const staged = await readMcpAgentQuarantines(activeWorkspace)
-        expect(staged).toHaveLength(1)
-        expect(staged[0]).toMatchObject({
-          server_id: server.id,
-          key_id: key.id,
-          agent_id: 'agent-neutral-1',
-          session_id: sessionId,
-        })
-        const taskReceipt = (await listNovelRuns(activeWorkspace, durableProject.id))
-          .find(run => run.run_type === 'mcp_chapter_task')
-        expect(taskReceipt).toMatchObject({ status: 'session_created' })
-        const session: McpChapterTaskSession = {
-          sessionId,
-          snapshotHash: 'neutral-snapshot-1',
-          async runStage(stageInput) {
-            stageInputs.push(stageInput)
-            const contentByStage: Record<string, string> = {
-              draft: '第一版正文：雨夜的城门缓缓开启。',
-              quality_review: '{"score":92,"publishable":true,"findings":[]}',
-              revision: '修订正文：雨夜的城门终于开启。',
-              story_state_sync: '{"state_delta":{"current_time":"雨夜"}}',
-            }
-            return {
-              content: contentByStage[stageInput.stage] || '{}',
-              session_id: sessionId,
-              snapshot_hash: 'neutral-snapshot-1',
-              status: 'completed',
-            }
-          },
-          async close() { closeCalls += 1 },
-        }
-        return session
-      },
-      async generateProse() {
-        adapterGenerateProseCalls += 1
-        throw new Error('task execution must use openChapterTask')
-      },
-    }
-    const agentLeases = new McpAgentLeaseRegistry()
-    const runtime = {
-      resolveCredentialConfig: async (_keyId: number, _serverId: string, pinned: any) => pinned,
-      listAgents: async () => { throw new Error('must validate through the pinned Adapter') },
-      getAdapterForKey: async (_keyId: number, _serverId: string, _options: any, pinned: any) => ({
-        server: pinned.server,
-        key: pinned.key,
-        adapter,
-      }),
-      acquireAgentLease: (workspace: string, binding: any) => agentLeases.acquire(workspace, binding),
-    }
-    const source = new McpGenerationSource(runtime as any)
-    let modelCreations = 0
-    const projectLeases = new ChapterSourceLeaseRegistry()
-    const resolver = createGenerationSourceResolver({
-      chapterSourceLeases: projectLeases,
-      readProject: (workspace, projectId) => getNovelProject(workspace, projectId),
-      createModelExecution: () => {
-        modelCreations += 1
-        throw new Error('API fallback forbidden')
-      },
-      mcpSource: source,
-    })
-
-    const execution = await resolver.beginTask({
-      activeWorkspace,
-      project: durableProject,
-      chapter: durableChapter,
-      contextPackage: context,
-      requestedModelId: 217,
-      options: {},
-    })
-    const draft = await execution.generateDraft(draftRequest({
-      requestId: 'neutral-draft-request',
-      activeWorkspace,
-      project: durableProject,
-      chapter: durableChapter,
-      chapterNo: durableChapter.chapter_no,
-      paragraphTask: '写出完整第十二章。',
-      contextPackage: context,
-    }))
-    const draftText = draft.prose_chapters?.[0]?.chapter_text
-    const review = await execution.executeAgent(
-      'quality_review',
-      'quality_review_json',
-      'review-agent',
-      durableProject,
-      { task: `审查以下 MangaForge 已验证草稿：${draftText}`, authoritativeTask: true },
-      {},
-    )
-    const revision = await execution.executeAgent(
-      'revision',
-      'revision_prose',
-      'prose-agent',
-      durableProject,
-      { task: `依据已验证审查 ${JSON.stringify(review.output)} 修订：${draftText}`, authoritativeTask: true },
-      {},
-    )
-    await execution.executeAgent(
-      'story_state_sync',
-      'story_state_json',
-      'review-agent',
-      durableProject,
-      { task: `同步 MangaForge 已验证修订正文：${revision.content}`, authoritativeTask: true },
-      {},
-    )
-    await Promise.all([
-      execution.close({ status: 'success' }),
-      execution.close({ status: 'success' }),
-    ])
-
-    expect(opened).toHaveLength(1)
-    expect(opened[0]).toMatchObject({
-      activeWorkspace,
-      server: { id: server.id, adapter_id: 'test-session-provider' },
-      keyId: key.id,
-      agentId: 'agent-neutral-1',
-      model: 'remote-neutral-model',
-      taskId: execution.taskId,
-      chapterNo: 12,
-      context: {
-        writingBible: expect.stringContaining('克制'),
-        storyState: { place: '北城' },
-        recentChapters: expect.stringContaining('雨落在城门'),
-      },
-    })
-    expect(stageInputs.map(item => item.stage)).toEqual([
-      'draft', 'quality_review', 'revision', 'story_state_sync',
-    ])
-    expect(stageInputs.slice(1).every(item => item.prompt.includes('[SYSTEM]') && item.prompt.includes('[USER]'))).toBe(true)
-    expect(stageInputs[1]?.prompt).toContain(String(draftText))
-    expect(stageInputs[2]?.prompt).toContain('"score":92')
-    expect(stageInputs[3]?.prompt).toContain('修订正文')
-    expect(new Set(sessionIds)).toEqual(new Set(['neutral-session-1']))
-    expect(draft).toMatchObject({
-      source: 'mcp',
-      adapter_id: 'test-session-provider',
-      agent_id: 'agent-neutral-1',
-      session_id: 'neutral-session-1',
-      snapshot_hash: 'neutral-snapshot-1',
-      modelName: 'remote-neutral-model',
-      prose_chapters: [{ chapter_no: 12, chapter_text: '第一版正文：雨夜的城门缓缓开启。' }],
-      source_receipt: {
-        receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
-        task_id: execution.taskId,
-        source: 'mcp',
-        source_fingerprint: execution.fingerprint,
-        authority_fingerprint: execution.authorityFingerprint,
-      },
-    })
-    expect(draft.source_receipt).not.toHaveProperty('session_id')
-    const stageRuns = (await listNovelRuns(activeWorkspace, durableProject.id))
-      .filter(run => run.run_type === 'chapter_generation_stage')
-    expect(stageRuns).toHaveLength(4)
-    for (const run of stageRuns) {
-      for (const receipt of [JSON.parse(run.input_ref!), JSON.parse(run.output_ref!)]) {
-        expect(receipt).toMatchObject({
-          receipt_authority: CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY,
-          task_id: execution.taskId,
-          source: 'mcp',
-          source_fingerprint: execution.fingerprint,
-          authority_fingerprint: execution.authorityFingerprint,
-          adapter_id: 'test-session-provider',
-          agent_id: 'agent-neutral-1',
-        })
-        expect(JSON.stringify(receipt)).not.toContain('sk_task_multistage')
-      }
-    }
-    expect(adapterGenerateProseCalls).toBe(0)
-    expect(createAgentCalls).toBe(0)
-    expect(modelCreations).toBe(0)
-    expect(listAgentCalls).toBe(1)
-    expect(closeCalls).toBe(1)
-    expect(projectLeases.isActive(activeWorkspace, durableProject.id)).toBe(false)
-    expect(await agentLeases.isActive(activeWorkspace, {
-      serverId: server.id,
-      keyId: key.id,
-      agentId: 'agent-neutral-1',
-    })).toBe(false)
-    expect(await readMcpAgentQuarantines(activeWorkspace)).toEqual([])
-  })
-
   test('closes before the first stage without any remote mutation or Adapter discovery', async () => {
     const fixture = await neutralTaskFixture('mangaforge-mcp-task-lazy-close-')
     const execution = await fixture.begin()
@@ -3542,6 +4767,9 @@ describe('McpGenerationSource task execution', () => {
       open: 0,
       runStage: 0,
       close: 0,
+      inspectSession: 0,
+      stabilityReads: 0,
+      stageSessionFence: 0,
       generateProse: 0,
       getAdapter: 0,
       acquireAgentLease: 0,
@@ -3690,63 +4918,6 @@ describe('McpGenerationSource task execution', () => {
     expect(fixture.counters).toMatchObject({ getAdapter: 1, open: 0, runStage: 0, modelCreations: 0 })
   })
 
-  test('waits for a pending Adapter open and closes the accepted Session exactly once', async () => {
-    const reached = deferredValue()
-    const release = deferredValue()
-    let sessionCloses = 0
-    let staged = 0
-    let clears = 0
-    let releases = 0
-    let deadlineCloses = 0
-    const lease = {
-      tupleKey: 'close-open-pending',
-      binding: { serverId: 'neutral-task-server', keyId: 1, agentId: 'neutral-agent-1' },
-      stageSessionFence: async () => { staged += 1 },
-      quarantine: async () => {},
-      clearSessionFence: async () => { clears += 1 },
-      release: async () => { releases += 1 },
-    }
-    const fixture = await neutralTaskFixture('mangaforge-mcp-task-close-open-pending-', {
-      acquireAgentLease: async () => lease,
-      openChapterTask: () => {
-        reached.resolve()
-        return release.promise.then(() => ({
-          sessionId: 'close-open-session',
-          snapshotHash: 'close-open-snapshot',
-          runStage: async () => {
-            throw new Error('stage must not run after close')
-          },
-          close: async () => { sessionCloses += 1 },
-        }))
-      },
-      createDeadline: (totalMs, signal) => {
-        const deadline = new McpGenerationDeadline(totalMs, signal)
-        const close = deadline.close.bind(deadline)
-        deadline.close = () => { deadlineCloses += 1; close() }
-        return deadline
-      },
-    })
-    const execution = await fixture.begin()
-    const draft = execution.generateDraft(fixture.request())
-    await reached.promise
-    let closeSettled = false
-
-    const closing = execution.close({ status: 'cancelled' }).finally(() => { closeSettled = true })
-    await Promise.resolve()
-
-    expect(closeSettled).toBe(false)
-    release.resolve()
-    const [draftOutcome] = await Promise.all([Promise.allSettled([draft]), closing.catch(() => {})])
-
-    expect(draftOutcome[0]?.status).toBe('rejected')
-    expect(sessionCloses).toBe(1)
-    expect(staged).toBe(0)
-    expect(clears).toBe(1)
-    expect(releases).toBe(1)
-    expect(deadlineCloses).toBe(1)
-    expect(fixture.counters).toMatchObject({ open: 1, runStage: 0, generateProse: 0, modelCreations: 0 })
-  })
-
   test('waits for a pending stage and never returns its result after close', async () => {
     const reached = deferredValue()
     const release = deferredValue<{
@@ -3800,7 +4971,7 @@ describe('McpGenerationSource task execution', () => {
     expect(draftOutcome[0]?.status).toBe('rejected')
     expect(staged).toBe(1)
     expect(fixture.counters.runStage).toBe(1)
-    expect(fixture.counters.close).toBe(1)
+    expect(fixture.counters.close).toBe(0)
     expect(clears).toBe(1)
     expect(releases).toBe(1)
     expect(deadlineCloses).toBe(1)
@@ -3853,7 +5024,7 @@ describe('McpGenerationSource task execution', () => {
     expect(laterChecksBeforeRelease).toBe(0)
     expect(outcomes.every(outcome => outcome.status === 'fulfilled')).toBe(true)
     expect(adapterOrder).toEqual(['tail-success-a', 'tail-success-b'])
-    expect(fixture.counters).toMatchObject({ runStage: 3, close: 1, generateProse: 0, modelCreations: 0 })
+    expect(fixture.counters).toMatchObject({ runStage: 3, close: 0, generateProse: 0, modelCreations: 0 })
   })
 
   test('does not send a queued sibling after the active stage fails', async () => {
@@ -3910,7 +5081,7 @@ describe('McpGenerationSource task execution', () => {
       expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ code: 'MCP_SESSION_FAILED' }) }),
     ])
     expect(laterCalls).toBe(0)
-    expect(fixture.counters).toMatchObject({ runStage: 2, close: 1, generateProse: 0, modelCreations: 0 })
+    expect(fixture.counters).toMatchObject({ runStage: 2, close: 0, generateProse: 0, modelCreations: 0 })
   })
 
   test('never returns a concurrent sibling after an ambiguous or ordinary terminal failure', async () => {
@@ -3980,7 +5151,7 @@ describe('McpGenerationSource task execution', () => {
         expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ code: variant.code }) }),
       ])
       expect(lateCalls).toBe(0)
-      expect(fixture.counters).toMatchObject({ runStage: 2, close: 1, generateProse: 0, modelCreations: 0 })
+      expect(fixture.counters).toMatchObject({ runStage: 2, close: 0, generateProse: 0, modelCreations: 0 })
     }
   })
 
@@ -4058,9 +5229,9 @@ describe('McpGenerationSource task execution', () => {
 
     expect(outcomes.every(outcome => outcome.status === 'rejected')).toBe(true)
     expect(laterCalls).toBe(0)
-    expect(staged).toBe(1)
-    expect(fixture.counters.close).toBe(1)
-    expect(clears).toBe(1)
+    expect(staged).toBe(2)
+    expect(fixture.counters.close).toBe(0)
+    expect(clears).toBe(2)
     expect(releases).toBe(1)
     expect(deadlineCloses).toBe(1)
     expect(fixture.counters).toMatchObject({ runStage: 2, generateProse: 0, modelCreations: 0 })
@@ -4084,7 +5255,7 @@ describe('McpGenerationSource task execution', () => {
     expect(fixture.counters).toMatchObject({
       open: 2,
       runStage: 2,
-      close: 2,
+      close: 0,
       generateProse: 0,
       modelCreations: 0,
     })
@@ -4208,71 +5379,6 @@ describe('McpGenerationSource task execution', () => {
     expect(fixture.counters).toMatchObject({ listAgents: 1, open: 1, runStage: 1 })
   })
 
-  test('rejects direct hostile Session thenables before Promise assimilation', async () => {
-    const trapSecret = 'hostile-session-thenable-secret'
-    for (const shape of [
-      'own-accessor',
-      'prototype-accessor',
-      'proxy-prototype',
-      'proxy',
-      'revoked-proxy',
-    ] as const) {
-      const traps = { getters: 0, traps: 0 }
-      let stageCalls = 0
-      let sessionCloses = 0
-      let clears = 0
-      let releases = 0
-      let deadlineCloses = 0
-      const rawSession = hostileDirectAwaitable(shape, {
-        sessionId: 'direct-session-1',
-        snapshotHash: 'direct-snapshot-1',
-        runStage: async () => {
-          stageCalls += 1
-          return {
-            content: '不得返回的正文。',
-            session_id: 'direct-session-1',
-            snapshot_hash: 'direct-snapshot-1',
-            status: 'completed',
-          }
-        },
-        close: async () => { sessionCloses += 1 },
-      }, traps, trapSecret)
-      const lease = {
-        tupleKey: `hostile-session-thenable-${shape}`,
-        binding: { serverId: 'neutral-task-server', keyId: 1, agentId: 'neutral-agent-1' },
-        stageSessionFence: async () => {},
-        quarantine: async () => {},
-        clearSessionFence: async () => { clears += 1 },
-        release: async () => { releases += 1 },
-      }
-      const fixture = await neutralTaskFixture(`mangaforge-mcp-task-session-thenable-${shape}-`, {
-        openChapterTask: () => rawSession,
-        acquireAgentLease: async () => lease,
-        createDeadline: (totalMs, signal) => {
-          const deadline = new McpGenerationDeadline(totalMs, signal)
-          const close = deadline.close.bind(deadline)
-          deadline.close = () => { deadlineCloses += 1; close() }
-          return deadline
-        },
-      })
-      const execution = await fixture.begin()
-
-      const exposed: any = await execution.generateDraft(fixture.request()).catch(error => error)
-      await execution.close({ status: 'failed', error: exposed }).catch(() => {})
-
-      expect(exposed).toMatchObject({ code: 'MCP_SESSION_FAILED' })
-      expect(exposed).not.toHaveProperty('prose_chapters')
-      expect(traps).toEqual({ getters: 0, traps: 0 })
-      expect(stageCalls).toBe(0)
-      expect(sessionCloses).toBe(0)
-      expect(clears).toBe(1)
-      expect(releases).toBe(1)
-      expect(deadlineCloses).toBe(1)
-      expect(fixture.counters).toMatchObject({ open: 1, runStage: 0, generateProse: 0, modelCreations: 0 })
-      expect(JSON.stringify({ message: exposed.message, details: exposed.details })).not.toContain(trapSecret)
-    }
-  })
-
   test('rejects direct hostile stage thenables before Promise assimilation and cleans up once', async () => {
     const trapSecret = 'hostile-stage-thenable-secret'
     for (const shape of [
@@ -4302,14 +5408,20 @@ describe('McpGenerationSource task execution', () => {
         clearSessionFence: async () => { clears += 1 },
         release: async () => { releases += 1 },
       }
+      let invocationCalls = 0
       const fixture = await neutralTaskFixture(`mangaforge-mcp-task-stage-thenable-${shape}-`, {
-        runStage: () => rawResult,
         acquireAgentLease: async () => lease,
         createDeadline: (totalMs, signal) => {
           const deadline = new McpGenerationDeadline(totalMs, signal)
           const close = deadline.close.bind(deadline)
           deadline.close = () => { deadlineCloses += 1; close() }
           return deadline
+        },
+      })
+      Object.assign(fixture.adapter, {
+        invokeChapterStage: () => {
+          invocationCalls += 1
+          return rawResult
         },
       })
       const execution = await fixture.begin()
@@ -4320,9 +5432,10 @@ describe('McpGenerationSource task execution', () => {
       expect(exposed).toMatchObject({ code: 'MCP_SESSION_FAILED' })
       expect(exposed).not.toHaveProperty('prose_chapters')
       expect(traps).toEqual({ getters: 0, traps: 0 })
-      expect(staged).toBe(1)
-      expect(fixture.counters.runStage).toBe(1)
-      expect(fixture.counters.close).toBe(1)
+      expect(invocationCalls).toBe(1)
+      expect(staged).toBe(0)
+      expect(fixture.counters.runStage).toBe(0)
+      expect(fixture.counters.close).toBe(0)
       expect(clears).toBe(1)
       expect(releases).toBe(1)
       expect(quarantines).toBe(0)
@@ -4332,75 +5445,26 @@ describe('McpGenerationSource task execution', () => {
     }
   })
 
-  test('rejects direct hostile Session close thenables before assimilation and still cleans up once', async () => {
-    const trapSecret = 'hostile-session-close-thenable-secret'
-    for (const shape of [
-      'own-accessor',
-      'prototype-accessor',
-      'proxy-prototype',
-      'proxy',
-      'revoked-proxy',
-    ] as const) {
-      const traps = { getters: 0, traps: 0 }
-      let staged = 0
-      let clears = 0
-      let releases = 0
-      let quarantines = 0
-      let deadlineCloses = 0
-      const rawCloseResult = hostileDirectAwaitable(shape, {}, traps, trapSecret)
-      const lease = {
-        tupleKey: `hostile-session-close-thenable-${shape}`,
-        binding: { serverId: 'neutral-task-server', keyId: 1, agentId: 'neutral-agent-1' },
-        stageSessionFence: async () => { staged += 1 },
-        quarantine: async () => { quarantines += 1 },
-        clearSessionFence: async () => { clears += 1 },
-        release: async () => { releases += 1 },
-      }
-      const fixture = await neutralTaskFixture(`mangaforge-mcp-task-session-close-${shape}-`, {
-        closeSession: () => rawCloseResult,
-        acquireAgentLease: async () => lease,
-        createDeadline: (totalMs, signal) => {
-          const deadline = new McpGenerationDeadline(totalMs, signal)
-          const close = deadline.close.bind(deadline)
-          deadline.close = () => { deadlineCloses += 1; close() }
-          return deadline
-        },
-      })
-      const execution = await fixture.begin()
-      const result = await execution.generateDraft(fixture.request())
-
-      const exposed: any = await execution.close({ status: 'success' }).catch(error => error)
-
-      expect(result.prose_chapters?.[0]?.chapter_text).toBe('通用正文。')
-      expect(exposed).toMatchObject({ code: 'MCP_SESSION_FAILED' })
-      expect(traps).toEqual({ getters: 0, traps: 0 })
-      expect(staged).toBe(1)
-      expect(fixture.counters.close).toBe(1)
-      expect(clears).toBe(1)
-      expect(releases).toBe(1)
-      expect(quarantines).toBe(0)
-      expect(deadlineCloses).toBe(1)
-      expect(fixture.counters).toMatchObject({
-        runStage: 1,
-        generateProse: 0,
-        modelCreations: 0,
-      })
-      const publicJson = JSON.stringify({
-        message: exposed?.message,
-        details: exposed?.details,
-        receipts: await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id),
-      })
-      expect(publicJson).not.toContain(trapSecret)
-    }
-  })
-
-  test('assimilates a safe data-method Session close thenable', async () => {
-    let closeThenCalls = 0
-    const fixture = await neutralTaskFixture('mangaforge-mcp-task-safe-close-thenable-', {
-      closeSession: () => ({
-        then(resolve: (value: undefined) => void) {
-          closeThenCalls += 1
-          resolve(undefined)
+  test('continues to assimilate a safe data-method one-shot stage thenable', async () => {
+    let thenCalls = 0
+    let invocationCalls = 0
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-safe-thenables-')
+    Object.assign(fixture.adapter, {
+      invokeChapterStage: (input: McpChapterInvocationInput) => ({
+        then(resolve: (value: unknown) => void, reject: (error: unknown) => void) {
+          thenCalls += 1
+          invocationCalls += 1
+          void Promise.resolve(input.onProgress?.({
+            stage: 'session_created',
+            status: 'running',
+            session_id: 'safe-thenable-session',
+            snapshot_hash: 'safe-thenable-snapshot',
+          })).then(() => resolve({
+            content: '安全 thenable 正文。',
+            session_id: 'safe-thenable-session',
+            snapshot_hash: 'safe-thenable-snapshot',
+            status: 'completed',
+          }), reject)
         },
       }),
     })
@@ -4409,52 +5473,10 @@ describe('McpGenerationSource task execution', () => {
     const result = await execution.generateDraft(fixture.request())
     await execution.close({ status: 'success' })
 
-    expect(result.prose_chapters?.[0]?.chapter_text).toBe('通用正文。')
-    expect(closeThenCalls).toBe(1)
-    expect(fixture.counters).toMatchObject({ open: 1, runStage: 1, close: 1 })
-  })
-
-  test('continues to assimilate safe data-method Session and stage thenables', async () => {
-    let thenCalls = 0
-    const fixture = await neutralTaskFixture('mangaforge-mcp-task-safe-thenables-', {
-      openChapterTask: input => {
-        const session: McpChapterTaskSession = {
-          sessionId: 'safe-thenable-session',
-          snapshotHash: 'safe-thenable-snapshot',
-          runStage: () => ({
-            then(resolve: (value: unknown) => void) {
-              thenCalls += 1
-              resolve({
-                content: '安全 thenable 正文。',
-                session_id: 'safe-thenable-session',
-                snapshot_hash: 'safe-thenable-snapshot',
-                status: 'completed',
-              })
-            },
-          }) as any,
-          async close() { fixture.counters.close += 1 },
-        }
-        return {
-          then(resolve: (value: unknown) => void) {
-            thenCalls += 1
-            void Promise.resolve(input.onProgress?.({
-              stage: 'session_created',
-              status: 'running',
-              session_id: session.sessionId,
-              snapshot_hash: session.snapshotHash,
-            })).then(() => resolve(session))
-          },
-        }
-      },
-    })
-    const execution = await fixture.begin()
-
-    const result = await execution.generateDraft(fixture.request())
-    await execution.close({ status: 'success' })
-
     expect(result.prose_chapters?.[0]?.chapter_text).toBe('安全 thenable 正文。')
-    expect(thenCalls).toBe(2)
-    expect(fixture.counters).toMatchObject({ open: 1, close: 1, generateProse: 0, modelCreations: 0 })
+    expect(thenCalls).toBe(1)
+    expect(invocationCalls).toBe(1)
+    expect(fixture.counters).toMatchObject({ open: 0, runStage: 0, close: 0, generateProse: 0, modelCreations: 0 })
   })
 
   test('freezes the first observed Session and snapshot identities against later progress drift', async () => {
@@ -4505,7 +5527,7 @@ describe('McpGenerationSource task execution', () => {
       expect(fixture.counters).toMatchObject({
         open: 1,
         runStage: 1,
-        close: 1,
+        close: 0,
         generateProse: 0,
         modelCreations: 0,
       })
@@ -4524,10 +5546,9 @@ describe('McpGenerationSource task execution', () => {
       clearSessionFence: async () => { clears += 1 },
       release: async () => { releases += 1 },
     }
-    let fixture: Awaited<ReturnType<typeof neutralTaskFixture>>
-    fixture = await neutralTaskFixture('mangaforge-mcp-task-identical-session-progress-', {
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-identical-session-progress-', {
       acquireAgentLease: async () => lease,
-      openChapterTask: async input => {
+      invokeChapterStage: async input => {
         const progress = {
           stage: 'session_created',
           status: 'running',
@@ -4539,15 +5560,10 @@ describe('McpGenerationSource task execution', () => {
           input.onProgress?.({ ...progress }),
         ])
         return {
-          sessionId: 'stable-session',
-          snapshotHash: 'stable-snapshot',
-          runStage: async () => ({
-            content: '稳定身份正文。',
-            session_id: 'stable-session',
-            snapshot_hash: 'stable-snapshot',
-            status: 'completed',
-          }),
-          close: async () => { fixture.counters.close += 1 },
+          content: '稳定身份正文。',
+          session_id: 'stable-session',
+          snapshot_hash: 'stable-snapshot',
+          status: 'completed',
         }
       },
     })
@@ -4574,9 +5590,9 @@ describe('McpGenerationSource task execution', () => {
     expect(result.prose_chapters?.[0]?.chapter_text).toBe('稳定身份正文。')
     expect(transitionCount.count).toBe(1)
     expect(staged).toBe(1)
-    expect(clears).toBe(1)
+    expect(clears).toBe(2)
     expect(releases).toBe(1)
-    expect(fixture.counters).toMatchObject({ open: 1, close: 1, generateProse: 0, modelCreations: 0 })
+    expect(fixture.counters).toMatchObject({ open: 0, runStage: 0, close: 0, generateProse: 0, modelCreations: 0 })
   })
 
   test('bounds every outbound Adapter stage request identifier to 160 characters', async () => {
@@ -4609,7 +5625,7 @@ describe('McpGenerationSource task execution', () => {
     expect(fixture.counters).toMatchObject({ runStage: 2, generateProse: 0, modelCreations: 0 })
   })
 
-  test('rejects empty, oversized, and non-string Session identities before running a stage', async () => {
+  test('rejects empty, oversized, and non-string one-shot progress identities before accepting a stage result', async () => {
     const invalidIdentities = [
       { name: 'empty session id', sessionId: '', snapshotHash: 'valid-snapshot' },
       { name: 'oversized session id', sessionId: 's'.repeat(161), snapshotHash: 'valid-snapshot' },
@@ -4619,23 +5635,34 @@ describe('McpGenerationSource task execution', () => {
       { name: 'non-string snapshot hash', sessionId: 'valid-session', snapshotHash: 23 },
     ]
     for (const identity of invalidIdentities) {
-      let runStages = 0
-      let closes = 0
-      const fixture = await neutralTaskFixture(`mangaforge-mcp-task-invalid-open-${identity.name.replaceAll(' ', '-')}-`, {
-        openChapterTask: async () => ({
-          sessionId: identity.sessionId,
-          snapshotHash: identity.snapshotHash,
-          runStage: async () => {
-            runStages += 1
-            return {
-              content: '不得解析或返回的正文。',
-              session_id: identity.sessionId,
-              snapshot_hash: identity.snapshotHash,
-              status: 'completed',
-            }
-          },
-          close: async () => { closes += 1 },
-        } as any),
+      let acceptedResults = 0
+      let staged = 0
+      let clears = 0
+      let releases = 0
+      const fixture = await neutralTaskFixture(`mangaforge-mcp-task-invalid-progress-${identity.name.replaceAll(' ', '-')}-`, {
+        acquireAgentLease: async () => ({
+          tupleKey: `invalid-progress-${identity.name}`,
+          binding: { serverId: 'neutral-task-server', keyId: 1, agentId: 'neutral-agent-1' },
+          stageSessionFence: async () => { staged += 1 },
+          quarantine: async () => {},
+          clearSessionFence: async () => { clears += 1 },
+          release: async () => { releases += 1 },
+        }),
+        invokeChapterStage: async input => {
+          await input.onProgress?.({
+            stage: 'session_created',
+            status: 'running',
+            session_id: identity.sessionId,
+            snapshot_hash: identity.snapshotHash,
+          } as any)
+          acceptedResults += 1
+          return {
+            content: '不得解析或返回的正文。',
+            session_id: 'unreachable-session',
+            snapshot_hash: 'unreachable-snapshot',
+            status: 'completed',
+          }
+        },
       })
       const execution = await fixture.begin()
 
@@ -4644,9 +5671,11 @@ describe('McpGenerationSource task execution', () => {
 
       expect(exposed).toMatchObject({ code: 'MCP_SESSION_FAILED' })
       expect(exposed).not.toHaveProperty('prose_chapters')
-      expect(runStages).toBe(0)
-      expect(closes).toBe(1)
-      expect(fixture.counters).toMatchObject({ generateProse: 0, modelCreations: 0 })
+      expect(acceptedResults).toBe(0)
+      expect(staged).toBe(0)
+      expect(clears).toBe(1)
+      expect(releases).toBe(1)
+      expect(fixture.counters).toMatchObject({ open: 0, runStage: 0, close: 0, generateProse: 0, modelCreations: 0 })
     }
   })
 
@@ -4663,10 +5692,21 @@ describe('McpGenerationSource task execution', () => {
       { name: 'non-string content', sessionId: 'valid-session', snapshotHash: 'valid-snapshot', result: { content: 29 } },
     ]
     for (const item of cases) {
-      let runStages = 0
-      let closes = 0
+      let invocations = 0
+      let staged = 0
+      let clears = 0
+      let releases = 0
       const fixture = await neutralTaskFixture(`mangaforge-mcp-task-invalid-stage-${item.name.replaceAll(' ', '-')}-`, {
-        openChapterTask: async input => {
+        acquireAgentLease: async () => ({
+          tupleKey: `invalid-stage-${item.name}`,
+          binding: { serverId: 'neutral-task-server', keyId: 1, agentId: 'neutral-agent-1' },
+          stageSessionFence: async () => { staged += 1 },
+          quarantine: async () => {},
+          clearSessionFence: async () => { clears += 1 },
+          release: async () => { releases += 1 },
+        }),
+        invokeChapterStage: async input => {
+          invocations += 1
           await input.onProgress?.({
             stage: 'session_created',
             status: 'running',
@@ -4674,20 +5714,12 @@ describe('McpGenerationSource task execution', () => {
             snapshot_hash: item.snapshotHash,
           })
           return {
-            sessionId: item.sessionId,
-            snapshotHash: item.snapshotHash,
-            runStage: () => {
-              runStages += 1
-              return Promise.resolve({
-                content: '不得解析或返回的正文。',
-                session_id: item.sessionId,
-                snapshot_hash: item.snapshotHash,
-                status: 'completed',
-                ...item.result,
-              } as any)
-            },
-            close: async () => { closes += 1 },
-          }
+            content: '不得解析或返回的正文。',
+            session_id: item.sessionId,
+            snapshot_hash: item.snapshotHash,
+            status: 'completed',
+            ...item.result,
+          } as any
         },
       })
       const execution = await fixture.begin()
@@ -4697,13 +5729,15 @@ describe('McpGenerationSource task execution', () => {
 
       expect(exposed).toMatchObject({ code: 'MCP_SESSION_FAILED' })
       expect(exposed).not.toHaveProperty('prose_chapters')
-      expect(runStages).toBe(1)
-      expect(closes).toBe(1)
-      expect(fixture.counters).toMatchObject({ generateProse: 0, modelCreations: 0 })
+      expect(invocations).toBe(1)
+      expect(staged).toBe(1)
+      expect(clears).toBe(1)
+      expect(releases).toBe(1)
+      expect(fixture.counters).toMatchObject({ open: 0, runStage: 0, close: 0, generateProse: 0, modelCreations: 0 })
     }
   })
 
-  test('rejects accessor and Proxy stage results without executing their traps', async () => {
+  test('rejects direct accessor and Proxy stage results before Promise assimilation without executing their traps', async () => {
     const trapSecret = 'hostile-stage-result-secret'
     for (const shape of ['accessor', 'proxy', 'revoked-proxy'] as const) {
       let getterCalls = 0
@@ -4733,8 +5767,13 @@ describe('McpGenerationSource task execution', () => {
         if (shape === 'revoked-proxy') revocable.revoke()
         result = revocable.proxy
       }
-      const fixture = await neutralTaskFixture(`mangaforge-mcp-task-hostile-stage-${shape}-`, {
-        runStage: () => result,
+      let invocationCalls = 0
+      const fixture = await neutralTaskFixture(`mangaforge-mcp-task-hostile-stage-${shape}-`)
+      Object.assign(fixture.adapter, {
+        invokeChapterStage: () => {
+          invocationCalls += 1
+          return result
+        },
       })
       const execution = await fixture.begin()
 
@@ -4745,9 +5784,11 @@ describe('McpGenerationSource task execution', () => {
       expect(exposed).not.toHaveProperty('prose_chapters')
       expect(getterCalls).toBe(0)
       expect(proxyTraps).toBe(0)
+      expect(invocationCalls).toBe(1)
       expect(fixture.counters).toMatchObject({
-        runStage: 1,
-        close: 1,
+        open: 0,
+        runStage: 0,
+        close: 0,
         generateProse: 0,
         modelCreations: 0,
       })
@@ -4787,7 +5828,7 @@ describe('McpGenerationSource task execution', () => {
     expect(fixture.counters).toMatchObject({
       open: 1,
       runStage: 1,
-      close: 1,
+      close: 0,
       generateProse: 0,
       createAgent: 0,
       modelCreations: 0,
@@ -4827,7 +5868,7 @@ describe('McpGenerationSource task execution', () => {
     expect(fixture.counters).toMatchObject({
       open: 1,
       runStage: 1,
-      close: 1,
+      close: 0,
       generateProse: 0,
       createAgent: 0,
       modelCreations: 0,
@@ -4936,7 +5977,7 @@ describe('McpGenerationSource task execution', () => {
     expect(taskReceipt).toMatchObject({ status: 'send_unknown' })
   })
 
-  test('keeps an unknown send monotonic when Session cleanup also fails', async () => {
+  test('keeps an unknown send monotonic through quarantine and lease release', async () => {
     const unknownSend = new McpError('MCP_SEND_UNKNOWN', 'neutral send outcome unknown', {
       receipt_status: 'send_unknown',
       session_id: 'neutral-session-1',
@@ -4950,10 +5991,6 @@ describe('McpGenerationSource task execution', () => {
     let releases = 0
     const fixture = await neutralTaskFixture('mangaforge-mcp-task-send-unknown-close-fail-', {
       runStage: async () => { throw unknownSend },
-      closeSession: async () => {
-        events.push('session_close')
-        throw new Error('neutral Session close failed')
-      },
       acquireAgentLease: async (activeWorkspace, binding) => {
         const acquired = await registry.acquire(activeWorkspace, binding)
         return {
@@ -4999,7 +6036,7 @@ describe('McpGenerationSource task execution', () => {
     expect(quarantines).toBe(1)
     expect(clears).toBe(0)
     expect(releases).toBe(1)
-    expect(events).toEqual(['stage', 'session_close', 'quarantine', 'release'])
+    expect(events).toEqual(['stage', 'quarantine', 'release'])
     expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([
       expect.objectContaining({
         session_id: 'neutral-session-1',
@@ -5027,98 +6064,6 @@ describe('McpGenerationSource task execution', () => {
     const taskReceipt = (await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
       .find(run => run.run_type === 'mcp_chapter_task')
     expect(taskReceipt).toMatchObject({ status: 'send_unknown' })
-  })
-
-  test('latches unknown termination first observed while closing a successful Session', async () => {
-    const unknownClose = new McpError('MCP_SESSION_FAILED', 'neutral close outcome unknown', {
-      receipt_status: 'remote_cancel_unknown',
-      session_id: 'neutral-session-1',
-      remote_cancel_confirmed: false,
-    })
-    const registry = new McpAgentLeaseRegistry()
-    const events: string[] = []
-    let staged = 0
-    let quarantines = 0
-    let clears = 0
-    let releases = 0
-    const fixture = await neutralTaskFixture('mangaforge-mcp-task-close-origin-unknown-', {
-      closeSession: async () => {
-        events.push('session_close')
-        throw unknownClose
-      },
-      acquireAgentLease: async (activeWorkspace, binding) => {
-        const acquired = await registry.acquire(activeWorkspace, binding)
-        return {
-          ...acquired,
-          stageSessionFence: async (input: any) => {
-            staged += 1
-            events.push('stage')
-            await acquired.stageSessionFence(input)
-          },
-          quarantine: async (input: any) => {
-            quarantines += 1
-            events.push('quarantine')
-            await acquired.quarantine(input)
-          },
-          clearSessionFence: async () => {
-            clears += 1
-            events.push('clear')
-            await acquired.clearSessionFence()
-          },
-          release: async () => {
-            releases += 1
-            events.push('release')
-            await acquired.release()
-          },
-        }
-      },
-    })
-    const execution = await fixture.begin()
-    const result = await execution.generateDraft(fixture.request())
-
-    const exposed: any = await execution.close({ status: 'success' }).catch(error => error)
-
-    expect(result.prose_chapters?.[0]?.chapter_text).toBe('通用正文。')
-    expect(exposed).toMatchObject({
-      code: 'MCP_SESSION_FAILED',
-      details: {
-        receipt_status: 'remote_cancel_unknown',
-        session_id: 'neutral-session-1',
-        remote_cancel_confirmed: false,
-      },
-    })
-    expect(staged).toBe(1)
-    expect(quarantines).toBe(1)
-    expect(clears).toBe(0)
-    expect(releases).toBe(1)
-    expect(events).toEqual(['stage', 'session_close', 'quarantine', 'release'])
-    expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([
-      expect.objectContaining({
-        session_id: 'neutral-session-1',
-        reason: 'remote_cancel_unknown',
-      }),
-    ])
-    expect(await registry.isActive(fixture.activeWorkspace, {
-      serverId: fixture.server.id,
-      keyId: fixture.key.id,
-      agentId: 'neutral-agent-1',
-    })).toBe(false)
-
-    const retry = await fixture.begin()
-    await expect(retry.generateDraft(fixture.request({ requestId: 'retry-after-close-unknown' })))
-      .rejects.toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
-    await expect(retry.close({ status: 'failed' }))
-      .rejects.toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
-    expect(fixture.counters).toMatchObject({
-      open: 1,
-      runStage: 1,
-      getAdapter: 1,
-      generateProse: 0,
-      modelCreations: 0,
-    })
-    const taskReceipt = (await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
-      .find(run => run.run_type === 'mcp_chapter_task')
-    expect(taskReceipt).toMatchObject({ status: 'remote_cancel_unknown' })
   })
 
   test('quarantines remote-cancel-unknown after a stage failure and retains its durable fence', async () => {
@@ -5327,7 +6272,7 @@ describe('McpGenerationSource task execution', () => {
       expect(proxyTraps).toBe(0)
       expect(coercions).toBe(0)
       expect(staged).toBe(1)
-      expect(fixture.counters.close).toBe(1)
+      expect(fixture.counters.close).toBe(0)
       expect(clears).toBe(1)
       expect(releases).toBe(1)
       expect(quarantines).toBe(0)
@@ -5468,19 +6413,19 @@ describe('McpGenerationSource task execution', () => {
       },
     })
     const execution = await fixture.begin()
-    await execution.generateDraft(fixture.request())
-
-    const firstClose = execution.close({ status: 'success' })
-    const secondClose = execution.close({ status: 'success' })
-    expect(secondClose).toBe(firstClose)
-    const exposed: any = await firstClose.catch(error => error)
+    const exposed: any = await execution.generateDraft(fixture.request()).catch(error => error)
     expect(exposed).toMatchObject({ code: 'MCP_STORE_IO_FAILED' })
     expect(exposed).not.toBe(clearFailure)
     expect(JSON.stringify({ message: exposed.message, details: exposed.details }))
       .not.toContain(reflectedCredential)
 
+    const firstClose = execution.close({ status: 'success' })
+    const secondClose = execution.close({ status: 'success' })
+    expect(secondClose).toBe(firstClose)
+    await expect(firstClose).rejects.toBe(exposed)
+
     expect(staged).toBe(1)
-    expect(clears).toBe(1)
+    expect(clears).toBe(2)
     expect(releases).toBe(1)
     expect(deadlineCloses).toBe(1)
     expect(fixture.projectLeases.isActive(fixture.activeWorkspace, fixture.durableProject.id)).toBe(false)

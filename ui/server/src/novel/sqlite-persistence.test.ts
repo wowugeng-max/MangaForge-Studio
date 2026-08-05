@@ -245,6 +245,58 @@ describe('novel sqlite persistence', () => {
     }
   })
 
+  test('refuses guarded recovery when the exact guard run snapshot has drifted', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '原子守卫恢复' })
+    const legacyRun = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'mcp_chapter_task',
+      step_name: 'guarded-legacy-task',
+      status: 'running',
+      input_ref: JSON.stringify({ task_id: 'guarded-legacy-task' }),
+      output_ref: JSON.stringify({ session_id: 'guarded-session-s1', snapshot_hash: 'snapshot-s1' }),
+    })
+    const expectedGuardRun = (await listNovelRuns(workspace, project.id))
+      .find(run => run.id === legacyRun.id)!
+    const marker = await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'mcp_legacy_shared_session_migration',
+      step_name: 'guarded-legacy-task',
+      status: 'quarantined',
+      input_ref: JSON.stringify({ legacy_run_id: legacyRun.id }),
+      output_ref: JSON.stringify({ status: 'quarantined' }),
+    })
+    const markerBefore = (await listNovelRuns(workspace, project.id))
+      .find(run => run.id === marker.id)!
+    await updateNovelRun(workspace, legacyRun.id, {
+      output_ref: JSON.stringify({ session_id: 'guarded-session-s2', snapshot_hash: 'snapshot-s2' }),
+    })
+
+    const recovery = await (novelStore as any).recoverNovelRunExecution(workspace, {
+      projectId: project.id,
+      runId: marker.id,
+      expectedInputRef: marker.input_ref,
+      expectedOutputRef: marker.output_ref,
+      expectedStatus: marker.status,
+      expectedLeaseOwner: marker.lease_owner ?? null,
+      expectedLeaseExpiresAt: marker.lease_expires_at ?? null,
+      expectedGuardRun,
+      outputRef: JSON.stringify({ status: 'reconciled', terminal_status: 'completed' }),
+      status: 'completed',
+      now: '2026-08-05T10:00:00.000Z',
+    })
+    const markerAfter = (await listNovelRuns(workspace, project.id))
+      .find(run => run.id === marker.id)!
+
+    expect(recovery.updated).toBe(false)
+    expect(recovery.run).toMatchObject(markerBefore)
+    expect(markerAfter).toEqual(markerBefore)
+    expect(JSON.parse((await listNovelRuns(workspace, project.id))
+      .find(run => run.id === legacyRun.id)!.output_ref!)).toMatchObject({
+      session_id: 'guarded-session-s2',
+    })
+  })
+
   for (const legacyFence of [
     { name: 'whitespace durable owner', leaseOwner: '   ', payloadOwner: null },
     { name: 'oversized durable owner', leaseOwner: 'x'.repeat(161), payloadOwner: null },

@@ -11,7 +11,6 @@ import type {
   McpChapterInvocationInput,
   McpChapterStageInput,
   McpChapterTaskInput,
-  McpChapterTaskSession,
   McpGenerationAdapter,
 } from './adapters/types'
 
@@ -51,6 +50,37 @@ describe('MCP runtime', () => {
     return (await runtime.listAgentQuarantines(workspace)).find(item => item.session_id === input.sessionId)!
   }
 
+  test('wires an exact Session fence compare-clear without remote adapter work', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-compare-clear-'))
+    workspaces.push(workspace)
+    let managerCalls = 0
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: {
+        get: async () => { managerCalls += 1; throw new Error('remote manager forbidden') },
+        invalidate: async () => {}, invalidateIfCurrent: async () => {},
+        invalidateServer: async () => {}, closeAll: async () => {},
+      } as any,
+      adapterFactory: () => { throw new Error('adapter factory forbidden') },
+    })
+    const exactBinding = { serverId: 'generic-server', keyId: 41, agentId: 'generic-agent' }
+    const lease = await runtime.acquireAgentLease(workspace, exactBinding)
+    await lease.stageSessionFence({
+      requestId: 'generic-request',
+      sessionId: 'generic-session',
+    })
+    await lease.release()
+    const compareAndClear = (runtime as any).compareAndClearSessionFence
+
+    expect(typeof compareAndClear).toBe('function')
+    await expect(compareAndClear(workspace, exactBinding, {
+      requestId: 'generic-request',
+      sessionId: 'generic-session',
+      reason: 'remote_cancel_unknown',
+    })).resolves.toBe('cleared')
+    expect(await runtime.listAgentQuarantines(workspace)).toEqual([])
+    expect(managerCalls).toBe(0)
+  })
+
   test('resolves a non-Buda one-shot provider through the shared Adapter port', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-provider-neutral-'))
     workspaces.push(workspace)
@@ -66,10 +96,9 @@ describe('MCP runtime', () => {
       key: 'sk_provider_neutral',
       description: '通用 Adapter',
     })
-    const opened: McpChapterTaskInput[] = []
     const invoked: McpChapterInvocationInput[] = []
     const stages: McpChapterStageInput[] = []
-    const session: McpChapterTaskSession = {
+    const session = {
       sessionId: 'test-session-1',
       snapshotHash: 'test-snapshot-1',
       async runStage(input) {
@@ -93,7 +122,6 @@ describe('MCP runtime', () => {
         invoked.push(input)
         return session.runStage(input)
       },
-      async openChapterTask(input) { opened.push(input); return session },
       async generateProse(input) {
         return {
           prose_chapters: [{ chapter_no: input.chapterNo, chapter_text: input.paragraphTask }],
@@ -161,7 +189,6 @@ describe('MCP runtime', () => {
 
     expect(factoryAdapterId).toBe('test-session-provider')
     expect(resolved.adapter.id).toBe('test-session-provider')
-    expect(opened).toEqual([])
     expect(invoked).toEqual([{
       ...taskInput,
       requestId: 'request-provider-1',
@@ -1145,6 +1172,7 @@ describe('MCP runtime', () => {
         writingBible: '# 圣经', storyState: {}, continuity: '连续性', recentChapters: '第11章摘要',
       },
       deadline,
+      stability: resolved.stability,
       signal: deadline.signal,
     } as any).catch(error => error)
 
@@ -1152,7 +1180,7 @@ describe('MCP runtime', () => {
       code: 'MCP_CANCELLED',
       details: { session_id: 'session-cleanup', remote_cancel_confirmed: true },
     })
-    expect(sends).toBe(1)
+    expect(sends).toBe(0)
     expect(cancelMutations).toBe(1)
     expect(businessReads).toBe(1)
     expect(firstCleanupReads).toBe(1)

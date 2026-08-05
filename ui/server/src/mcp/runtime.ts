@@ -208,6 +208,13 @@ export function createMcpRuntime(
     isAgentLeaseActive(activeWorkspace: string, binding: Parameters<McpAgentLeaseRegistry['isActive']>[1]) {
       return agentLeases.isActive(activeWorkspace, binding)
     },
+    compareAndClearSessionFence(
+      activeWorkspace: string,
+      binding: Parameters<McpAgentLeaseRegistry['compareAndClearSessionFence']>[1],
+      expectation: Parameters<McpAgentLeaseRegistry['compareAndClearSessionFence']>[2],
+    ) {
+      return agentLeases.compareAndClearSessionFence(activeWorkspace, binding, expectation)
+    },
     async listAgentQuarantines(activeWorkspace: string) {
       return (await agentLeases.list(activeWorkspace)).map(toPublicAgentQuarantine)
     },

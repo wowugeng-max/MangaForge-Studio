@@ -267,10 +267,12 @@ export type ClaimNovelRunExecutionResult = {
 export type RecoverNovelRunExecutionInput = {
   projectId: number
   runId: number
+  expectedInputRef?: string
   expectedOutputRef: string
   expectedStatus: string
   expectedLeaseOwner: string | null
   expectedLeaseExpiresAt: string | null
+  expectedGuardRun?: NovelRunRecord
   outputRef: string
   status: string
   now: string
@@ -285,6 +287,7 @@ const RUN_CLAIM_OWNER_LIMIT = 160
 const RUN_PERSISTED_OWNER_LIMIT = 16 * 1024
 const RUN_CLAIM_STATUS_LIMIT = 80
 const RUN_CLAIM_REF_LIMIT = 2 * 1024 * 1024
+const RUN_GUARD_TEXT_LIMIT = 16 * 1024
 
 function invalidRunClaim() {
   return Object.assign(new TypeError('Invalid novel run execution claim'), {
@@ -299,6 +302,21 @@ function ownClaimValue(input: unknown, field: string) {
   try {
     const descriptor = Object.getOwnPropertyDescriptor(input, field)
     if (!descriptor || !('value' in descriptor)) throw invalidRunClaim()
+    return descriptor.value
+  } catch (error) {
+    if ((error as any)?.code === 'NOVEL_RUN_CLAIM_INVALID') throw error
+    throw invalidRunClaim()
+  }
+}
+
+function optionalOwnClaimValue(input: unknown, field: string) {
+  if (!input || (typeof input !== 'object' && typeof input !== 'function') || types.isProxy(input)) {
+    throw invalidRunClaim()
+  }
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(input, field)
+    if (!descriptor) return undefined
+    if (!('value' in descriptor)) throw invalidRunClaim()
     return descriptor.value
   } catch (error) {
     if ((error as any)?.code === 'NOVEL_RUN_CLAIM_INVALID') throw error
@@ -337,6 +355,64 @@ function canonicalClaimTimestamp(value: unknown) {
   return value
 }
 
+type ValidatedExactNovelRunSnapshot = {
+  id: number
+  project_id: number
+  run_type: string
+  step_name: string
+  status: string
+  input_ref: string
+  output_ref: string
+  duration_ms: number
+  error_message: string
+  scope_key: string | null
+  updated_at: string | null
+  lease_owner: string | null
+  lease_expires_at: string | null
+  cancel_requested_at: string | null
+  created_at: string
+}
+
+type ValidatedRunRecoveryInput = Omit<RecoverNovelRunExecutionInput, 'expectedGuardRun'> & {
+  expectedGuardRun?: ValidatedExactNovelRunSnapshot
+}
+
+function boundedNullableClaimText(value: unknown, limit: number) {
+  return value === null ? null : boundedClaimText(value, limit)
+}
+
+function nullableClaimTimestamp(value: unknown) {
+  return value === null ? null : canonicalClaimTimestamp(value)
+}
+
+function validatedExactRunSnapshot(value: unknown): ValidatedExactNovelRunSnapshot {
+  const id = ownClaimValue(value, 'id')
+  const projectId = ownClaimValue(value, 'project_id')
+  const durationMs = ownClaimValue(value, 'duration_ms')
+  if (!Number.isSafeInteger(id) || id <= 0
+    || !Number.isSafeInteger(projectId) || projectId <= 0
+    || typeof durationMs !== 'number' || !Number.isSafeInteger(durationMs)) {
+    throw invalidRunClaim()
+  }
+  return {
+    id,
+    project_id: projectId,
+    run_type: boundedClaimText(ownClaimValue(value, 'run_type'), RUN_GUARD_TEXT_LIMIT, false),
+    step_name: boundedClaimText(ownClaimValue(value, 'step_name'), RUN_GUARD_TEXT_LIMIT, false),
+    status: boundedClaimText(ownClaimValue(value, 'status'), RUN_CLAIM_STATUS_LIMIT, false),
+    input_ref: boundedClaimText(ownClaimValue(value, 'input_ref'), RUN_CLAIM_REF_LIMIT),
+    output_ref: boundedClaimText(ownClaimValue(value, 'output_ref'), RUN_CLAIM_REF_LIMIT),
+    duration_ms: durationMs,
+    error_message: boundedClaimText(ownClaimValue(value, 'error_message'), RUN_CLAIM_REF_LIMIT),
+    scope_key: boundedNullableClaimText(ownClaimValue(value, 'scope_key'), RUN_GUARD_TEXT_LIMIT),
+    updated_at: nullableClaimTimestamp(ownClaimValue(value, 'updated_at')),
+    lease_owner: boundedNullableClaimText(ownClaimValue(value, 'lease_owner'), RUN_PERSISTED_OWNER_LIMIT),
+    lease_expires_at: nullableClaimTimestamp(ownClaimValue(value, 'lease_expires_at')),
+    cancel_requested_at: nullableClaimTimestamp(ownClaimValue(value, 'cancel_requested_at')),
+    created_at: canonicalClaimTimestamp(ownClaimValue(value, 'created_at')),
+  }
+}
+
 function validatedRunClaim(input: unknown): ClaimNovelRunExecutionInput {
   const projectId = ownClaimValue(input, 'projectId')
   const runId = ownClaimValue(input, 'runId')
@@ -364,7 +440,7 @@ function validatedRunClaim(input: unknown): ClaimNovelRunExecutionInput {
   }
 }
 
-function validatedRunRecovery(input: unknown): RecoverNovelRunExecutionInput {
+function validatedRunRecovery(input: unknown): ValidatedRunRecoveryInput {
   const projectId = ownClaimValue(input, 'projectId')
   const runId = ownClaimValue(input, 'runId')
   if (!Number.isSafeInteger(projectId) || projectId <= 0
@@ -372,19 +448,47 @@ function validatedRunRecovery(input: unknown): RecoverNovelRunExecutionInput {
     throw invalidRunClaim()
   }
   const expectedLeaseExpiresValue = ownClaimValue(input, 'expectedLeaseExpiresAt')
+  const expectedInputRefValue = optionalOwnClaimValue(input, 'expectedInputRef')
+  const expectedGuardRunValue = optionalOwnClaimValue(input, 'expectedGuardRun')
+  const expectedGuardRun = expectedGuardRunValue === undefined
+    ? undefined
+    : validatedExactRunSnapshot(expectedGuardRunValue)
+  if (expectedGuardRun && expectedGuardRun.project_id !== projectId) throw invalidRunClaim()
   return {
     projectId,
     runId,
+    ...(expectedInputRefValue === undefined
+      ? {}
+      : { expectedInputRef: boundedClaimText(expectedInputRefValue, RUN_CLAIM_REF_LIMIT) }),
     expectedOutputRef: boundedClaimText(ownClaimValue(input, 'expectedOutputRef'), RUN_CLAIM_REF_LIMIT),
     expectedStatus: boundedClaimText(ownClaimValue(input, 'expectedStatus'), RUN_CLAIM_STATUS_LIMIT, false),
     expectedLeaseOwner: boundedPersistedOwner(ownClaimValue(input, 'expectedLeaseOwner')),
     expectedLeaseExpiresAt: expectedLeaseExpiresValue === null
       ? null
       : canonicalClaimTimestamp(expectedLeaseExpiresValue),
+    ...(expectedGuardRun ? { expectedGuardRun } : {}),
     outputRef: boundedClaimText(ownClaimValue(input, 'outputRef'), RUN_CLAIM_REF_LIMIT),
     status: boundedClaimText(ownClaimValue(input, 'status'), RUN_CLAIM_STATUS_LIMIT, false),
     now: canonicalClaimTimestamp(ownClaimValue(input, 'now')),
   }
+}
+
+function exactGuardRunSnapshot(row: any, expected: ValidatedExactNovelRunSnapshot) {
+  return Number(row.id) === expected.id
+    && Number(row.project_id) === expected.project_id
+    && String(row.run_type || '') === expected.run_type
+    && String(row.step_name || '') === expected.step_name
+    && String(row.status || '') === expected.status
+    && String(row.input_ref || '') === expected.input_ref
+    && String(row.output_ref || '') === expected.output_ref
+    && Number(row.duration_ms || 0) === expected.duration_ms
+    && String(row.error_message || '') === expected.error_message
+    && (row.scope_key ?? null) === expected.scope_key
+    && (row.updated_at ?? null) === expected.updated_at
+    && (row.lease_owner ?? null) === expected.lease_owner
+    && (row.lease_expires_at ?? null) === expected.lease_expires_at
+    && (row.cancel_requested_at ?? null) === expected.cancel_requested_at
+    && String(row.created_at || '') === expected.created_at
 }
 
 function hasLiveRunExecution(row: any, nowMs: number) {
@@ -479,7 +583,19 @@ export async function recoverNovelRunExecution(
     const row = selectRun.get(recovery.runId, recovery.projectId) as any
     if (!row) return { updated: false, run: null }
 
+    if (recovery.expectedGuardRun) {
+      const guardRow = selectRun.get(
+        recovery.expectedGuardRun.id,
+        recovery.expectedGuardRun.project_id,
+      ) as any
+      if (!guardRow || !exactGuardRunSnapshot(guardRow, recovery.expectedGuardRun)) {
+        return { updated: false, run: runFromRow(row) }
+      }
+    }
+
     const exactSnapshot = String(row.status || '') === recovery.expectedStatus
+      && (recovery.expectedInputRef === undefined
+        || String(row.input_ref || '') === recovery.expectedInputRef)
       && String(row.output_ref || '') === recovery.expectedOutputRef
       && (row.lease_owner ?? null) === recovery.expectedLeaseOwner
       && (row.lease_expires_at ?? null) === recovery.expectedLeaseExpiresAt
@@ -500,6 +616,7 @@ export async function recoverNovelRunExecution(
       SET status = ?, output_ref = ?, pipeline_chapter_failure_count = ?, pipeline_open_task_count = ?,
         pipeline_task_count = ?, updated_at = ?, lease_owner = NULL, lease_expires_at = NULL
       WHERE id = ? AND project_id = ? AND status = ? AND output_ref = ?
+        AND (? = 0 OR input_ref = ?)
         AND COALESCE(lease_owner, '') = ? AND COALESCE(lease_expires_at, '') = ?
     `).run(
       next.status,
@@ -512,6 +629,8 @@ export async function recoverNovelRunExecution(
       recovery.projectId,
       recovery.expectedStatus,
       recovery.expectedOutputRef,
+      recovery.expectedInputRef === undefined ? 0 : 1,
+      recovery.expectedInputRef ?? '',
       recovery.expectedLeaseOwner ?? '',
       recovery.expectedLeaseExpiresAt ?? '',
     ) as any

@@ -6,6 +6,21 @@ const buildBudaToolArguments = (budaToolMap as any).buildBudaToolArguments
   || ((_operation: string, _toolName: string, args: Record<string, unknown>) => args)
 
 describe('Buda tool discovery', () => {
+  test('the stage-production source never resolves sendSessionMessage', () => {
+    const resolvedToolCapabilities = Object.keys(resolveBudaTools([
+      'api_claw_list_api_agents',
+      'api_claw_create_api_agent',
+      'api_claw_list_api_agent_drive_files',
+      'api_claw_upsert_api_agent_drive_file',
+      'api_claw_api_agent_drive_text',
+      'api_claw_create_api_agent_session',
+      'api_claw_get_api_agent_session',
+      'api_claw_post_api_agent_session_message',
+      'api_claw_cancel_api_agent_session_run',
+    ].map(name => ({ name, inputSchema: { type: 'object' } })) as any))
+    expect(resolvedToolCapabilities).not.toContain('sendSessionMessage')
+  })
+
   test('maps the live Buda snake-case MCP tool names', () => {
     const tools = [
       'api_claw_list_api_agents',
@@ -27,7 +42,6 @@ describe('Buda tool discovery', () => {
       readDriveText: 'api_claw_api_agent_drive_text',
       createSession: 'api_claw_create_api_agent_session',
       getSession: 'api_claw_get_api_agent_session',
-      sendSessionMessage: 'api_claw_post_api_agent_session_message',
       cancelSession: 'api_claw_cancel_api_agent_session_run',
     })
   })
@@ -64,16 +78,6 @@ describe('Buda tool discovery', () => {
       params: { agentId: 'agent-1' },
       body: { message: 'prepare', title: 'chapter', mode: 'agent', startRun: false },
     })
-    expect(buildBudaToolArguments('sendSessionMessage', 'api_claw_post_api_agent_session_message', {
-      agentId: 'agent-1',
-      sessionId: 'session-1',
-      message: 'write',
-      mode: 'agent',
-      startRun: true,
-    })).toEqual({
-      params: { agentId: 'agent-1', sessionId: 'session-1' },
-      body: { message: 'write', mode: 'agent', startRun: true },
-    })
     expect(buildBudaToolArguments('getSession', 'api_claw_get_api_agent_session', {
       agentId: 'agent-1',
       sessionId: 'session-1',
@@ -100,20 +104,9 @@ describe('Buda tool discovery', () => {
         ...modelArguments,
         startRun: false,
       })
-      const posted = buildBudaToolArguments('sendSessionMessage', 'api_claw_post_api_agent_session_message', {
-        agentId: 'agent-1',
-        sessionId: 'session-1',
-        message: 'stage',
-        mode: 'agent',
-        ...modelArguments,
-        startRun: true,
-      })
-
       expect(Object.prototype.hasOwnProperty.call(created.body, 'model')).toBe(Boolean(model))
-      expect(Object.prototype.hasOwnProperty.call(posted.body, 'model')).toBe(Boolean(model))
       if (model) {
         expect(created.body.model).toBe(model)
-        expect(posted.body.model).toBe(model)
       }
     })
   }
@@ -144,7 +137,6 @@ describe('Buda tool discovery', () => {
       readDriveText: 'apiClaw.apiAgentDriveText',
       createSession: 'apiClaw.createApiAgentSession',
       getSession: 'apiClaw.getApiAgentSession',
-      sendSessionMessage: 'apiClaw.postApiAgentSessionMessage',
       cancelSession: 'apiClaw.cancelApiAgentSessionRun',
     })
   })

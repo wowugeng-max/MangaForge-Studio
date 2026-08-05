@@ -234,6 +234,61 @@ describe('McpAgentLeaseRegistry', () => {
     await expect(registry.acquire(activeWorkspace, binding)).resolves.toBeDefined()
   })
 
+  test('does not compare-clear an exact Session fence while its Agent tuple is active', async () => {
+    const activeWorkspace = await workspace('mangaforge-agent-lease-compare-active-')
+    const registry = new McpAgentLeaseRegistry()
+    const lease = await registry.acquire(activeWorkspace, binding)
+    await lease.stageSessionFence({
+      requestId: 'compare-active-request',
+      sessionId: 'compare-active-session',
+    })
+    const before = await registry.list(activeWorkspace)
+    const compareAndClear = (registry as any).compareAndClearSessionFence
+
+    expect(typeof compareAndClear).toBe('function')
+    await expect(compareAndClear.call(registry, activeWorkspace, binding, {
+      requestId: 'compare-active-request',
+      sessionId: 'compare-active-session',
+      reason: 'remote_cancel_unknown',
+    })).rejects.toMatchObject({ code: 'MCP_AGENT_BUSY' })
+    expect(await registry.list(activeWorkspace)).toEqual(before)
+
+    await lease.release()
+  })
+
+  test('does not compare-clear a Session fence whose full record changes before CAS clear', async () => {
+    const activeWorkspace = await workspace('mangaforge-agent-lease-compare-cas-')
+    const workspaceKey = canonicalFilesystemIdentity(activeWorkspace)
+    const exact = {
+      id: 'compare-cas-fence',
+      workspace_key: workspaceKey,
+      server_id: binding.serverId,
+      key_id: binding.keyId,
+      agent_id: binding.agentId,
+      request_id: 'compare-cas-request',
+      session_id: 'compare-cas-session',
+      reason: 'remote_cancel_unknown' as const,
+      created_at: '2026-08-06T00:00:00.000Z',
+    }
+    const changed = { ...exact, created_at: '2026-08-06T00:00:01.000Z' }
+    let readCalls = 0
+    let clearCalls = 0
+    const registry = new McpAgentLeaseRegistry({
+      read: async () => [readCalls++ === 0 ? exact : changed],
+      clear: async () => { clearCalls += 1; return true },
+    } as any)
+    const compareAndClear = (registry as any).compareAndClearSessionFence
+
+    expect(typeof compareAndClear).toBe('function')
+    await expect(compareAndClear.call(registry, activeWorkspace, binding, {
+      requestId: exact.request_id,
+      sessionId: exact.session_id,
+      reason: exact.reason,
+    })).resolves.toBe('mismatch')
+    expect(readCalls).toBe(2)
+    expect(clearCalls).toBe(0)
+  })
+
   test('durably quarantines an unresolved Session across registry instances', async () => {
     const activeWorkspace = await workspace()
     const first = new McpAgentLeaseRegistry()

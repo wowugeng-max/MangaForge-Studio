@@ -9,7 +9,6 @@ export type BudaLogicalOperation =
   | 'readDriveText'
   | 'createSession'
   | 'getSession'
-  | 'sendSessionMessage'
   | 'cancelSession'
 
 export type BudaToolMap = Omit<Record<BudaLogicalOperation, string>, 'createAgent'> & { createAgent?: string }
@@ -22,7 +21,6 @@ export const BUDA_TOOL_ALIASES: Record<BudaLogicalOperation, readonly string[]> 
   readDriveText: ['api_claw_api_agent_drive_text', 'apiClaw.apiAgentDriveText', 'apiAgentDriveText'],
   createSession: ['api_claw_create_api_agent_session', 'apiClaw.createApiAgentSession', 'createApiAgentSession'],
   getSession: ['api_claw_get_api_agent_session', 'apiClaw.getApiAgentSession', 'getApiAgentSession'],
-  sendSessionMessage: ['api_claw_post_api_agent_session_message', 'apiClaw.postApiAgentSessionMessage', 'postApiAgentSessionMessage'],
   cancelSession: ['api_claw_cancel_api_agent_session_run', 'apiClaw.cancelApiAgentSessionRun', 'cancelApiAgentSessionRun'],
 }
 
@@ -63,10 +61,6 @@ export function buildBudaToolArguments(
     case 'cancelSession': return {
       params: selectedArguments(args, ['agentId', 'sessionId']),
     }
-    case 'sendSessionMessage': return {
-      params: selectedArguments(args, ['agentId', 'sessionId']),
-      body: selectedArguments(args, ['message', 'title', 'mode', 'model', 'startRun', 'attachments']),
-    }
   }
 }
 
@@ -89,7 +83,6 @@ function fallbackScore(operation: BudaLogicalOperation, tool: McpToolDescriptor)
     case 'readDriveText': return has('agentId', 'filePath') ? 3 : 0
     case 'createSession': return /create.*session/.test(haystack) && has('agentId', 'message') && !properties.has('sessionId') ? 3 : 0
     case 'getSession': return /get.*session/.test(haystack) && has('agentId', 'sessionId') && !properties.has('message') ? 3 : 0
-    case 'sendSessionMessage': return has('agentId', 'sessionId', 'message') ? 3 : 0
     case 'cancelSession': return /cancel/.test(haystack) && has('agentId', 'sessionId') ? 3 : 0
   }
 }

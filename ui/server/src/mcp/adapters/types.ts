@@ -100,6 +100,7 @@ export type McpProseGenerationInput = {
   promptDiagnostics?: unknown
   context: McpChapterContextSnapshot
   deadline: McpGenerationDeadline
+  stability: McpStabilityController
   signal?: AbortSignal
   onProgress?: (event: GenerationSourceProgress) => Promise<void> | void
 }
@@ -153,13 +154,6 @@ export type McpChapterStageResult = {
   status: 'completed'
 }
 
-export interface McpChapterTaskSession {
-  readonly sessionId: string
-  readonly snapshotHash: string
-  runStage(input: McpChapterStageInput): Promise<McpChapterStageResult>
-  close(): Promise<void>
-}
-
 export interface McpGenerationAdapter {
   readonly id: string
   readonly stabilityPolicy?: McpStabilityPolicy
@@ -169,7 +163,6 @@ export interface McpGenerationAdapter {
     input: { agentId: string; sessionId: string },
     options: McpAdapterOperationOptions,
   ): Promise<{ status: string; terminal: boolean }>
-  invokeChapterStage?(input: McpChapterInvocationInput): Promise<McpChapterStageResult>
-  openChapterTask?(input: McpChapterTaskInput): Promise<McpChapterTaskSession>
+  invokeChapterStage(input: McpChapterInvocationInput): Promise<McpChapterStageResult>
   generateProse(input: McpProseGenerationInput): Promise<McpProseGenerationResult>
 }

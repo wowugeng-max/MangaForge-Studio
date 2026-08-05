@@ -9,7 +9,6 @@ import type {
   McpChapterStageInput,
   McpChapterStageResult,
   McpChapterTaskInput,
-  McpChapterTaskSession,
   McpProseGenerationInput,
   McpProseGenerationResult,
   McpRemoteCleanupDetails,
@@ -153,54 +152,6 @@ function publicSessionStatus(data: any) {
 function sessionId(data: unknown) {
   return boundedOwnString(ownDataValue(data, 'session'), ['id'], BUDA_AGENT_STRING_LIMITS.id, '')
     || boundedOwnString(data, ['sessionId', 'id'], BUDA_AGENT_STRING_LIMITS.id, '')
-}
-
-function boundedOwnId(value: unknown, keys: string[]) {
-  for (const key of keys) {
-    const candidate = ownDataValue(value, key)
-    if (typeof candidate === 'string' && candidate && candidate.length <= BUDA_AGENT_STRING_LIMITS.id) return candidate
-    if (typeof candidate === 'number' && Number.isSafeInteger(candidate)) return String(candidate)
-  }
-  return ''
-}
-
-function runId(data: unknown) {
-  return boundedOwnId(ownDataValue(data, 'run'), ['id', 'runId', 'run_id'])
-    || boundedOwnId(data, ['runId', 'run_id'])
-}
-
-type BudaRunCorrelation = {
-  assistantBaseline: string[]
-  priorTerminalStatus: string
-  allowInitialTerminal: boolean
-  expectedRunId: string
-  currentRunObserved: boolean
-}
-
-function runCorrelationEvidence(data: unknown, correlation: BudaRunCorrelation) {
-  const currentAssistant = assistantContents(data)
-  const sameAssistant = currentAssistant.length === correlation.assistantBaseline.length
-    && currentAssistant.every((content, index) => content === correlation.assistantBaseline[index])
-  const currentRunId = runId(data)
-  const runIdMismatch = Boolean(
-    correlation.expectedRunId
-    && currentRunId
-    && correlation.expectedRunId !== currentRunId,
-  )
-  return {
-    currentAssistant,
-    currentOutput: !sameAssistant ? currentAssistant.at(-1) || '' : '',
-    runIdMatches: Boolean(correlation.expectedRunId && currentRunId === correlation.expectedRunId),
-    runIdMismatch,
-  }
-}
-
-function terminalBelongsToRun(status: string, evidence: ReturnType<typeof runCorrelationEvidence>, correlation: BudaRunCorrelation) {
-  if (evidence.runIdMismatch) return false
-  return correlation.allowInitialTerminal
-    || evidence.runIdMatches
-    || Boolean(evidence.currentOutput)
-    || (correlation.currentRunObserved && status !== correlation.priorTerminalStatus)
 }
 
 function sendMayHaveSucceeded(error: unknown) {
@@ -420,7 +371,6 @@ async function cleanupBudaSession(input: {
   sessionId: string
   terminalSeen: boolean
   primaryError: unknown
-  correlation?: BudaRunCorrelation
 }) {
   const cleanupError = (remoteCancelConfirmed: boolean) => {
     const sendWasAmbiguous = input.primaryError instanceof McpError && input.primaryError.code === 'MCP_SEND_UNKNOWN'
@@ -470,211 +420,11 @@ async function cleanupBudaSession(input: {
         const statusData = mcpResultData(statusResult)
         const status = sessionStatus(statusData)
         remoteCancelConfirmed = ['completed', 'failed', 'cancelled'].includes(status)
-          && (!input.correlation || terminalBelongsToRun(
-            status,
-            runCorrelationEvidence(statusData, input.correlation),
-            input.correlation,
-          ))
       } catch {}
     }
     return { error: cleanupError(remoteCancelConfirmed), remoteCancelConfirmed }
   } finally {
     try { cleanupDeadline.close() } catch {}
-  }
-}
-
-class BudaChapterTaskSessionImpl implements McpChapterTaskSession {
-  private tail: Promise<void> = Promise.resolve()
-  private closed = false
-  private closePromise?: Promise<void>
-  private poisonedError?: unknown
-  private assistantBaseline: string[] = []
-  private priorTerminalStatus = ''
-  private runAttempted = false
-
-  constructor(
-    private readonly client: McpClientPort,
-    private readonly tools: BudaToolMap,
-    private readonly task: McpChapterTaskInput,
-    readonly sessionId: string,
-    readonly snapshotHash: string,
-    private readonly selectedModel: string,
-    private readonly startedAt: number,
-  ) {}
-
-  private remoteOptions(): McpAdapterOperationOptions {
-    const task = this.task
-    return {
-      signal: task.deadline.signal,
-      get timeoutMs() { return task.deadline.timeoutMs(task.server.tool_timeout_ms) },
-    }
-  }
-
-  private callOptions(operation: McpOperationKind) {
-    return operationOptions(this.remoteOptions(), operation)
-  }
-
-  private async progress(
-    stage: string,
-    status: 'running' | 'success' | 'warn' | 'failed' = 'running',
-    detail?: string,
-  ) {
-    await this.task.onProgress?.({
-      stage,
-      status,
-      detail,
-      elapsed_ms: Date.now() - this.startedAt,
-      session_id: this.sessionId,
-      snapshot_hash: this.snapshotHash,
-    })
-  }
-
-  private async executeStage(input: McpChapterStageInput): Promise<McpChapterStageResult> {
-    let terminalSeen = false
-    const correlation: BudaRunCorrelation = {
-      assistantBaseline: [...this.assistantBaseline],
-      priorTerminalStatus: this.priorTerminalStatus,
-      allowInitialTerminal: !this.runAttempted,
-      expectedRunId: '',
-      currentRunObserved: false,
-    }
-    this.runAttempted = true
-    try {
-      this.task.deadline.throwIfAborted()
-      const modelArguments = this.selectedModel ? { model: this.selectedModel } : {}
-      let sendResult: McpToolResult
-      try {
-        sendResult = await this.client.callTool(
-          this.tools.sendSessionMessage,
-          buildBudaToolArguments('sendSessionMessage', this.tools.sendSessionMessage, {
-            agentId: this.task.agentId,
-            sessionId: this.sessionId,
-            message: buildBudaStageEnvelope(input),
-            mode: 'agent',
-            ...modelArguments,
-            startRun: true,
-          }),
-          this.callOptions('mutation'),
-        )
-      } catch (error) {
-        if (!sendMayHaveSucceeded(error)) throw error
-        throw new McpError('MCP_SEND_UNKNOWN', 'Buda 阶段任务发送结果无法确认', {
-          session_id: this.sessionId.slice(0, 160),
-        })
-      }
-      correlation.expectedRunId = runId(mcpResultData(sendResult))
-      this.task.deadline.throwIfAborted()
-      await this.progress('mcp_session_create', 'success')
-      await this.progress('mcp_session_wait')
-      let interval = Math.max(1, this.task.server.poll_initial_ms)
-      while (true) {
-        this.task.deadline.throwIfAborted()
-        const sessionResult = await this.client.callTool(
-          this.tools.getSession,
-          buildBudaToolArguments('getSession', this.tools.getSession, {
-            agentId: this.task.agentId,
-            sessionId: this.sessionId,
-          }),
-          this.callOptions('read_safe'),
-        )
-        const sessionData = mcpResultData(sessionResult)
-        const status = sessionStatus(sessionData)
-        const evidence = runCorrelationEvidence(sessionData, correlation)
-        const knownTerminal = status === 'completed'
-          || status === 'failed'
-          || status === 'cancelled'
-          || status === 'waiting_for_input'
-        const correlatedTerminal = knownTerminal
-          && terminalBelongsToRun(status, evidence, correlation)
-        if (correlatedTerminal) {
-          terminalSeen = status === 'completed' || status === 'failed' || status === 'cancelled'
-          this.assistantBaseline = evidence.currentAssistant
-          this.priorTerminalStatus = status
-        }
-        this.task.deadline.throwIfAborted()
-        if (status === 'pending' || status === 'in_progress') {
-          if (!evidence.runIdMismatch) correlation.currentRunObserved = true
-          await this.progress('mcp_session_wait', 'running', status)
-          await abortableDelay(interval, this.task)
-          this.task.deadline.throwIfAborted()
-          interval = Math.min(
-            Math.max(interval + 1, Math.round(interval * 1.5)),
-            Math.max(interval, this.task.server.poll_max_ms),
-          )
-          continue
-        }
-        if (knownTerminal && !correlatedTerminal) {
-          await this.progress('mcp_session_wait', 'running', `stale_${status}`)
-          await abortableDelay(interval, this.task)
-          this.task.deadline.throwIfAborted()
-          interval = Math.min(
-            Math.max(interval + 1, Math.round(interval * 1.5)),
-            Math.max(interval, this.task.server.poll_max_ms),
-          )
-          continue
-        }
-        if (status === 'waiting_for_input') throw new McpError('MCP_INPUT_REQUIRED', 'Buda Agent 正在等待额外输入')
-        if (status === 'failed') {
-          terminalSeen = true
-          throw new McpError('MCP_SESSION_FAILED', 'Buda Session 执行失败')
-        }
-        if (status === 'cancelled') {
-          terminalSeen = true
-          throw new McpError('MCP_CANCELLED', 'Buda Session 已取消')
-        }
-        if (status !== 'completed') throw new McpError('MCP_SESSION_FAILED', `Buda Session 返回未知状态：${status || 'empty'}`)
-        await this.progress('mcp_session_wait', 'success', status)
-        this.task.deadline.throwIfAborted()
-        await this.progress('mcp_extract')
-        const content = correlation.allowInitialTerminal
-          ? extractBudaStageContent(sessionData)
-          : evidence.currentOutput
-            || (evidence.runIdMatches ? extractBudaTopLevelStageContent(sessionData) : '')
-        if (!content) throw new McpError('MCP_TOOL_ERROR', 'Buda Stage 已完成但没有返回内容')
-        await this.progress('mcp_extract', 'success')
-        this.task.deadline.throwIfAborted()
-        return {
-          content,
-          session_id: this.sessionId,
-          snapshot_hash: this.snapshotHash,
-          status: 'completed',
-        }
-      }
-    } catch (error) {
-      let primaryError = error
-      if (this.task.deadline.signal.aborted && isAbortRelatedError(error, this.task.deadline.signal)) {
-        try { this.task.deadline.throwIfAborted() } catch (cause) { primaryError = cause }
-      }
-      const cleanup = await cleanupBudaSession({
-        client: this.client,
-        tools: this.tools,
-        task: this.task,
-        sessionId: this.sessionId,
-        terminalSeen,
-        primaryError,
-        correlation,
-      })
-      if (!cleanup.remoteCancelConfirmed) this.poisonedError = cleanup.error
-      throw cleanup.error
-    }
-  }
-
-  runStage(input: McpChapterStageInput): Promise<McpChapterStageResult> {
-    if (this.poisonedError) return Promise.reject(this.poisonedError)
-    if (this.closed) return Promise.reject(new McpError('MCP_SESSION_FAILED', 'Buda Chapter Task Session 已关闭'))
-    const operation = this.tail.then(() => {
-      if (this.poisonedError) throw this.poisonedError
-      return this.executeStage(input)
-    })
-    this.tail = operation.then(() => undefined, () => undefined)
-    return operation
-  }
-
-  close(): Promise<void> {
-    if (this.closePromise) return this.closePromise
-    this.closed = true
-    this.closePromise = this.tail.then(() => undefined)
-    return this.closePromise
   }
 }
 
@@ -890,6 +640,8 @@ export class BudaAdapter implements McpGenerationAdapter {
         const sessionData = mcpResultData(sessionResult)
         const status = sessionStatus(sessionData)
         const knownTerminal = status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'waiting_for_input'
+        if (status === 'completed' || status === 'failed' || status === 'cancelled') terminalSeen = true
+        input.deadline.throwIfAborted()
         if (status === 'pending' || status === 'in_progress') {
           await progress('mcp_session_wait', 'running', status, snapshot.snapshotHash)
           await abortableDelay(interval, input)
@@ -911,7 +663,7 @@ export class BudaAdapter implements McpGenerationAdapter {
         if (!knownTerminal || status !== 'completed') {
           throw new McpError('MCP_SESSION_FAILED', `Buda Session 返回未知状态：${status || 'empty'}`)
         }
-        terminalSeen = true
+        await progress('mcp_session_wait', 'success', status, snapshot.snapshotHash)
         const content = extractBudaStageContent(sessionData)
         validateMcpStageResponse(input.stage, input.responseContract, { content })
         await progress('mcp_extract', 'success', status, snapshot.snapshotHash)
@@ -934,177 +686,51 @@ export class BudaAdapter implements McpGenerationAdapter {
     }
   }
 
-  async openChapterTask(input: McpChapterTaskInput): Promise<McpChapterTaskSession> {
-    input = withIndependentTaskSignal(input)
-    const startedAt = Date.now()
-    let activeSessionId = ''
-    let tools: BudaToolMap | undefined
-    const progress = async (
-      stage: string,
-      status: 'running' | 'success' | 'warn' | 'failed' = 'running',
-      detail?: string,
-    ) => {
-      await input.onProgress?.({
-        stage,
-        status,
-        detail,
-        elapsed_ms: Date.now() - startedAt,
-        ...(activeSessionId ? { session_id: activeSessionId } : {}),
-      })
-    }
-    const remoteOptions = () => ({
-      signal: input.deadline.signal,
-      get timeoutMs() { return input.deadline.timeoutMs(input.server.tool_timeout_ms) },
-    })
-    const callOptions = (operation: McpOperationKind) => operationOptions(remoteOptions(), operation)
-    try {
-      input.deadline.throwIfAborted()
-      await progress('mcp_capabilities')
-      tools = await this.resolveTools(remoteOptions())
-      input.deadline.throwIfAborted()
-      const agents = await this.listAgents(remoteOptions())
-      if (!agents.some(agent => agent.id === input.agentId)) {
-        throw new McpError('MCP_BINDING_INVALID', 'Buda 绑定的 Agent 不存在或不可访问')
-      }
-      input.deadline.throwIfAborted()
-      await progress('mcp_capabilities', 'success')
-
-      await progress('mcp_drive_sync')
-      const snapshot = buildBudaDriveSnapshot({
-        project: input.project,
-        chapter: input.chapter,
-        writingBible: input.context.writingBible,
-        storyState: input.context.storyState,
-        continuity: input.context.continuity,
-        recentChapters: input.context.recentChapters,
-      })
-      const sync = await syncBudaDriveSnapshot({
-        client: this.client,
-        tools,
-        agentId: input.agentId,
-        snapshot,
-        deadline: input.deadline,
-        toolTimeoutMs: input.server.tool_timeout_ms,
-      })
-      input.deadline.throwIfAborted()
-      await input.onProgress?.({
-        stage: 'mcp_drive_sync',
-        status: 'success',
-        detail: `已同步 ${sync.uploaded_paths.length} 个权威快照文件`,
-        elapsed_ms: Date.now() - startedAt,
-        snapshot_hash: snapshot.snapshotHash,
-      })
-
-      await progress('mcp_session_create')
-      const selectedModel = String(input.model || '').trim()
-      const modelArguments = selectedModel ? { model: selectedModel } : {}
-      const createResult = await this.client.callTool(
-        tools.createSession,
-        buildBudaToolArguments('createSession', tools.createSession, {
-          agentId: input.agentId,
-          message: `MangaForge 章节任务 ${input.taskId} 已建立；请等待当前 Session 的 stage 指令。`,
-          title: `MangaForge 第${input.chapterNo}章 ${input.taskId}`,
-          mode: 'agent',
-          ...modelArguments,
-          startRun: false,
-        }),
-        callOptions('mutation'),
-      )
-      const created = mcpResultData(createResult)
-      activeSessionId = sessionId(created)
-      if (!activeSessionId) throw new McpError('MCP_SESSION_FAILED', 'Buda 未返回 Session 标识')
-      await input.onProgress?.({
-        stage: 'session_created',
-        status: 'running',
-        detail: 'Buda Session 已创建，等待当前章节任务的 stage 指令',
-        elapsed_ms: Date.now() - startedAt,
-        session_id: activeSessionId,
-        snapshot_hash: snapshot.snapshotHash,
-      })
-      input.deadline.throwIfAborted()
-      await progress('mcp_session_create', 'success')
-      return new BudaChapterTaskSessionImpl(
-        this.client,
-        tools,
-        input,
-        activeSessionId,
-        snapshot.snapshotHash,
-        selectedModel,
-        startedAt,
-      )
-    } catch (error) {
-      let primaryError = error
-      if (input.deadline.signal.aborted && isAbortRelatedError(error, input.deadline.signal)) {
-        try { input.deadline.throwIfAborted() } catch (cause) { primaryError = cause }
-      }
-      if (!activeSessionId || !tools) throw primaryError
-      const cleanup = await cleanupBudaSession({
-        client: this.client,
-        tools,
-        task: input,
-        sessionId: activeSessionId,
-        terminalSeen: false,
-        primaryError,
-      })
-      throw cleanup.error
-    }
-  }
-
   async generateProse(input: McpProseGenerationInput): Promise<McpProseGenerationResult> {
-    let task: McpChapterTaskSession | undefined
-    let failed = false
+    const task = withIndependentTaskSignal({
+      activeWorkspace: input.activeWorkspace,
+      server: input.server,
+      keyId: input.keyId,
+      agentId: input.agentId,
+      ...(input.model !== undefined ? { model: input.model } : {}),
+      taskId: input.requestId,
+      project: input.project,
+      chapter: input.chapter,
+      chapterNo: input.chapterNo,
+      context: input.context,
+      deadline: input.deadline,
+      ...(input.signal ? { signal: input.signal } : {}),
+      ...(input.onProgress ? { onProgress: input.onProgress } : {}),
+    })
+    let stage: McpChapterStageResult
     try {
-      task = await this.openChapterTask({
-        activeWorkspace: input.activeWorkspace,
-        server: input.server,
-        keyId: input.keyId,
-        agentId: input.agentId,
-        ...(input.model !== undefined ? { model: input.model } : {}),
-        taskId: input.requestId,
-        project: input.project,
-        chapter: input.chapter,
-        chapterNo: input.chapterNo,
-        context: input.context,
-        deadline: input.deadline,
-        ...(input.signal ? { signal: input.signal } : {}),
-        ...(input.onProgress ? { onProgress: input.onProgress } : {}),
+      stage = await this.invokeChapterStage({
+        ...task,
+        requestId: input.requestId,
+        stage: 'draft',
+        responseContract: 'draft_prose',
+        prompt: input.paragraphTask,
+        invocationId: input.requestId,
+        stability: input.stability,
       })
-      let stage: McpChapterStageResult
-      try {
-        stage = await task.runStage({
-          requestId: input.requestId,
-          stage: 'draft',
-          responseContract: 'draft_prose',
-          prompt: input.paragraphTask,
-        })
-      } catch (error) {
-        if (error instanceof McpError && error.code === 'MCP_TOOL_ERROR' && error.message === 'Buda Stage 已完成但没有返回内容') {
-          throw new McpError('MCP_EMPTY_PROSE', 'Buda Session 已完成但没有返回正文', error.details)
-        }
-        throw error
-      }
-      const proseChapters = extractBudaProse({
-        messages: [{ role: 'assistant', content: stage.content }],
-      }, input.chapterNo)
-      return {
-        prose_chapters: proseChapters,
-        source: 'mcp',
-        adapter_id: 'buda',
-        agent_id: input.agentId,
-        session_id: stage.session_id,
-        snapshot_hash: stage.snapshot_hash,
-        completed: true,
-        raw: { request_id: input.requestId, session_status: stage.status },
-      }
     } catch (error) {
-      failed = true
-      throw error
-    } finally {
-      try {
-        await task?.close()
-      } catch (closeError) {
-        if (!failed) throw closeError
+      if (error instanceof McpError && error.code === 'MCP_TOOL_ERROR' && error.message === 'Buda Stage 已完成但没有返回内容') {
+        throw new McpError('MCP_EMPTY_PROSE', 'Buda Session 已完成但没有返回正文', error.details)
       }
+      throw error
+    }
+    const proseChapters = extractBudaProse({
+      messages: [{ role: 'assistant', content: stage.content }],
+    }, input.chapterNo)
+    return {
+      prose_chapters: proseChapters,
+      source: 'mcp',
+      adapter_id: 'buda',
+      agent_id: input.agentId,
+      session_id: stage.session_id,
+      snapshot_hash: stage.snapshot_hash,
+      completed: true,
+      raw: { request_id: input.requestId, session_status: stage.status },
     }
   }
 }

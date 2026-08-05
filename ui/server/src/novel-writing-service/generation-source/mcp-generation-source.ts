@@ -2,7 +2,14 @@ import { createHash } from 'crypto'
 import { types } from 'node:util'
 import { buildAgentMessages } from '../../llm/executor-helpers'
 import { stringifyLLMMessageTextContent } from '../../llm/types'
-import { appendNovelRun, getNovelProject, updateNovelRun } from '../../novel'
+import {
+  appendNovelRun,
+  getNovelProject,
+  listNovelRuns,
+  recoverNovelRunExecution,
+  updateNovelRun,
+} from '../../novel'
+import { withNovelWorkspaceMutation } from '../../novel/lock'
 import { readMcpKeys } from '../../mcp/key-store'
 import type { McpRuntime } from '../../mcp/runtime'
 import { McpError } from '../../mcp/errors'
@@ -15,8 +22,8 @@ import type {
   McpChapterTaskInput,
   McpChapterStageInput,
   McpChapterStageResult,
-  McpChapterTaskSession,
   McpGenerationAdapter,
+  McpStabilityController,
 } from '../../mcp/adapters/types'
 import { withMcpWorkspaceMutation } from '../../mcp/workspace-coordinator'
 import { createMcpSecretScrubber } from '../../mcp/secret-scrubber'
@@ -335,23 +342,6 @@ function dataMethod<Method extends CheckedDataMethod>(value: unknown, field: str
   return undefined
 }
 
-function projectChapterTaskSessionPort(value: unknown): McpChapterTaskSession {
-  if (!value || typeof value !== 'object' || unsafeProxy(value)) {
-    throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的任务 Session')
-  }
-  const runStage = dataMethod<McpChapterTaskSession['runStage']>(value, 'runStage')
-  const close = dataMethod<McpChapterTaskSession['close']>(value, 'close')
-  if (!runStage || !close) {
-    throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的任务 Session')
-  }
-  return {
-    sessionId: '',
-    snapshotHash: '',
-    runStage: input => safeApply<[McpChapterStageInput], Promise<McpChapterStageResult>>(runStage, value, [input]),
-    close: () => safeApply<[], Promise<void>>(close, value, []),
-  }
-}
-
 function projectMcpChapterStageResult(value: unknown) {
   if (!value || typeof value !== 'object' || unsafeProxy(value)) {
     throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的 stage 结果')
@@ -610,9 +600,503 @@ function selectedTaskCredential(snapshot: Awaited<ReturnType<typeof readBindingC
   return { server, key }
 }
 
+function fixedLegacyPinnedCredential(
+  value: unknown,
+  selected: ReturnType<typeof selectedTaskCredential>,
+  activeWorkspace: string,
+) {
+  const invalid = () => new McpError(
+    'MCP_BINDING_INVALID',
+    'Runtime 返回了无效的固定 MCP 凭据',
+  )
+  if (!value || typeof value !== 'object' || unsafeProxy(value)) throw invalid()
+  const server = ownDataValue(value, 'server')
+  const key = ownDataValue(value, 'key')
+  const resolvedWorkspace = ownDataValue(value, 'activeWorkspace')
+  if (!server || typeof server !== 'object' || Array.isArray(server) || unsafeProxy(server)
+    || !key || typeof key !== 'object' || Array.isArray(key) || unsafeProxy(key)
+    || (resolvedWorkspace !== undefined && resolvedWorkspace !== activeWorkspace)) throw invalid()
+  const serverFields = [
+    'id', 'transport', 'adapter_id', 'is_active', 'startup_timeout_ms', 'tool_timeout_ms',
+    'generation_timeout_ms', 'poll_initial_ms', 'poll_max_ms',
+  ] as const
+  const keyFields = ['id', 'mcp_server_id', 'key', 'is_active'] as const
+  for (const field of serverFields) {
+    if (ownDataValue(server, field) !== selected.server[field]) throw invalid()
+  }
+  for (const field of keyFields) {
+    if (ownDataValue(key, field) !== selected.key[field]) throw invalid()
+  }
+  return Object.freeze({
+    server: selected.server,
+    key: selected.key,
+    activeWorkspace,
+  })
+}
+
+const LEGACY_SHARED_SESSION_MIGRATION_RUN_TYPE = 'mcp_legacy_shared_session_migration'
+const LEGACY_ACTIVE_TASK_STATUSES = new Set(['running', 'session_created'])
+const LEGACY_ACTIONABLE_LOCAL_MESSAGES = new Map<McpErrorCode, string>([
+  ['MCP_STORE_CORRUPT', '旧版共享 Session 本地存储损坏'],
+  ['MCP_STORE_IO_FAILED', '旧版共享 Session 本地存储操作失败'],
+  ['MCP_BINDING_INVALID', '旧版共享 Session 的 MCP 绑定无效'],
+  ['MCP_BINDING_CHANGED', '旧版共享 Session 的 MCP 绑定已变更'],
+  ['MCP_REFERENCED_RECORD_CONFLICT', '旧版共享 Session 的 MCP 引用记录冲突'],
+  ['MCP_AUTH_FAILED', '旧版共享 Session 的 MCP 认证失败'],
+  ['MCP_CAPABILITY_MISSING', '旧版共享 Session 的 MCP 能力不可用'],
+  ['MCP_STAGE_CONTRACT_INVALID', '旧版共享 Session 的 MCP 响应契约无效'],
+])
+
+function parsedRunOutput(value: unknown) {
+  if (typeof value !== 'string' || !value) return undefined
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) && !unsafeProxy(parsed)
+      ? parsed
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function legacySharedSessionIdentity(input: ResolvedChapterTaskInput, runId: number, sessionId: string) {
+  return `sha256:${sha256(JSON.stringify([
+    input.taskId,
+    Number(input.project?.id || 0),
+    runId,
+    input.fingerprint,
+    input.authorityFingerprint,
+    input.sourceState.mcp?.server_id,
+    input.sourceState.mcp?.key_id,
+    input.sourceState.mcp?.adapter_id,
+    input.sourceState.mcp?.agent_id,
+    sessionId,
+  ]))}`
+}
+
+function legacySharedSessionBlocked(legacyRunId: number, identityFingerprint: string) {
+  return new McpError('MCP_AGENT_QUARANTINED', '旧版共享 Session 必须先完成远端核对', {
+    legacy_run_id: legacyRunId,
+    legacy_identity_fingerprint: identityFingerprint,
+  })
+}
+
+function invalidLegacyInspection() {
+  return new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的 Session inspection 结果')
+}
+
+function trustedLegacyTerminalStatus(value: unknown) {
+  if (!value || typeof value !== 'object' || unsafeProxy(value)) throw invalidLegacyInspection()
+  const status = ownDataValue(value, 'status')
+  const terminal = ownDataValue(value, 'terminal')
+  if (typeof status !== 'string' || !status || status.length > PROVENANCE_ID_MAX_CHARS
+    || typeof terminal !== 'boolean') throw invalidLegacyInspection()
+  const terminalStatus = status === 'completed' || status === 'failed' || status === 'cancelled'
+  if (terminal) {
+    if (!terminalStatus) throw invalidLegacyInspection()
+    return status
+  }
+  if (terminalStatus) throw invalidLegacyInspection()
+  return undefined
+}
+
+function projectedLegacyActionableError(error: unknown) {
+  if (!directMcpError(error)) return undefined
+  const code = mcpErrorCode(error, 'MCP_RUNTIME_ERROR')
+  const safeMessage = LEGACY_ACTIONABLE_LOCAL_MESSAGES.get(code)
+  return safeMessage ? new McpError(code, safeMessage) : undefined
+}
+
+function legacyMigrationMarkerOutput(
+  input: ResolvedChapterTaskInput,
+  legacyRunId: number,
+  identityFingerprint: string,
+  status: 'quarantined' | 'reconciled',
+  terminalStatus?: 'completed' | 'failed' | 'cancelled',
+) {
+  return {
+    receipt_authority: MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY,
+    task_id: input.taskId,
+    project_id: Number(input.project?.id || 0),
+    chapter_id: Number(input.chapter?.id || 0),
+    source: 'mcp',
+    source_fingerprint: input.fingerprint,
+    authority_fingerprint: input.authorityFingerprint,
+    context_version: input.contextVersion,
+    binding_fingerprint: input.fingerprint,
+    legacy_run_id: legacyRunId,
+    legacy_identity_fingerprint: identityFingerprint,
+    status,
+    ...(terminalStatus ? { terminal_status: terminalStatus } : {}),
+  }
+}
+
+function legacyMigrationMarkerInput(
+  input: ResolvedChapterTaskInput,
+  legacyRunId: number,
+  identityFingerprint: string,
+) {
+  return {
+    task_id: input.taskId,
+    legacy_run_id: legacyRunId,
+    legacy_identity_fingerprint: identityFingerprint,
+  }
+}
+
+function exactLegacyMigrationMarker(
+  run: Awaited<ReturnType<typeof listNovelRuns>>[number],
+  input: ResolvedChapterTaskInput,
+  legacyRunId: number,
+  identityFingerprint: string,
+  status: 'quarantined' | 'reconciled',
+) {
+  const expectedRunStatus = status === 'reconciled' ? 'completed' : 'quarantined'
+  if (run.run_type !== LEGACY_SHARED_SESSION_MIGRATION_RUN_TYPE
+    || run.step_name !== input.taskId
+    || run.status !== expectedRunStatus
+    || run.input_ref !== JSON.stringify(legacyMigrationMarkerInput(
+      input,
+      legacyRunId,
+      identityFingerprint,
+    ))) return false
+  if (status === 'reconciled') {
+    return (['completed', 'failed', 'cancelled'] as const).some(terminalStatus => (
+      run.output_ref === JSON.stringify(legacyMigrationMarkerOutput(
+        input,
+        legacyRunId,
+        identityFingerprint,
+        status,
+        terminalStatus,
+      ))
+    ))
+  }
+  return run.output_ref === JSON.stringify(legacyMigrationMarkerOutput(
+    input,
+    legacyRunId,
+    identityFingerprint,
+    status,
+  ))
+}
+
+function legacyReceiptMatchesRecoveredTask(
+  output: unknown,
+  input: ResolvedChapterTaskInput,
+  binding: NonNullable<ResolvedChapterTaskInput['sourceState']['mcp']>,
+  scrubber: ReturnType<typeof createMcpSecretScrubber>,
+) {
+  const expectedIdentity = {
+    receipt_authority: MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY,
+    task_id: input.taskId,
+    project_id: Number(input.project?.id || 0),
+    chapter_id: Number(input.chapter?.id || 0),
+    source: 'mcp',
+    source_fingerprint: input.fingerprint,
+    authority_fingerprint: input.authorityFingerprint,
+    context_version: input.contextVersion,
+    binding_fingerprint: input.fingerprint,
+    server_id: boundedScrubbedId(scrubber, binding.server_id),
+    key_id: binding.key_id,
+    adapter_id: boundedScrubbedId(scrubber, binding.adapter_id),
+    agent_id: boundedScrubbedId(scrubber, binding.agent_id),
+  }
+  for (const [field, expected] of Object.entries(expectedIdentity)) {
+    if (ownDataValue(output, field) !== expected) return false
+  }
+  const recordedModel = ownDataValue(output, 'model')
+  return recordedModel === undefined
+    || recordedModel === boundedScrubbedId(scrubber, binding.model || 'MCP Auto')
+}
+
+function legacyReceiptBindingChanged(legacyRunId: number) {
+  return new McpError('MCP_BINDING_CHANGED', '旧版共享 Session 回执与当前章节任务身份不一致', {
+    legacy_run_id: legacyRunId,
+  })
+}
+
+async function guardLegacySharedSessionRecovery(
+  runtime: ChapterTaskRuntime,
+  input: ResolvedChapterTaskInput,
+  createDeadline: (totalMs: number, signal?: AbortSignal) => McpGenerationDeadline,
+) {
+  const binding = input.sourceState.mcp
+  if (!binding) return
+  const projectId = Number(input.project?.id || 0)
+  const snapshot = await withMcpWorkspaceMutation(input.activeWorkspace, () => (
+    withNovelWorkspaceMutation(input.activeWorkspace, async () => {
+      const runs = await listNovelRuns(input.activeWorkspace, projectId)
+      const legacyRun = runs.find(run => {
+        if (run.run_type !== 'mcp_chapter_task'
+          || run.step_name !== input.taskId
+          || !LEGACY_ACTIVE_TASK_STATUSES.has(run.status)) return false
+        const output = parsedRunOutput(run.output_ref)
+        return typeof ownDataValue(output, 'session_id') === 'string'
+      })
+      if (!legacyRun) return
+      const legacyOutput = parsedRunOutput(legacyRun.output_ref)
+      const credentialSnapshot = await readBindingCredentialSnapshot(input.activeWorkspace, binding)
+      const scrubber = createMcpSecretScrubber(credentialSnapshot.secrets)
+      if (!legacyReceiptMatchesRecoveredTask(legacyOutput, input, binding, scrubber)) {
+        throw legacyReceiptBindingChanged(legacyRun.id)
+      }
+      const legacySessionId = acceptRemoteId(ownDataValue(legacyOutput, 'session_id'), 'legacy Session 标识')
+      const identityFingerprint = legacySharedSessionIdentity(input, legacyRun.id, legacySessionId)
+      const reconciledMarker = runs.find(run => exactLegacyMigrationMarker(
+        run,
+        input,
+        legacyRun.id,
+        identityFingerprint,
+        'reconciled',
+      ))
+      if (reconciledMarker) {
+        const cleared = await runtime.compareAndClearSessionFence(input.activeWorkspace, {
+          serverId: binding.server_id,
+          keyId: binding.key_id,
+          agentId: binding.agent_id,
+        }, {
+          requestId: safeOutboundRequestId(createMcpSecretScrubber({}), input.taskId),
+          sessionId: legacySessionId,
+          reason: 'remote_cancel_unknown',
+        })
+        if (cleared === 'mismatch') {
+          throw legacySharedSessionBlocked(legacyRun.id, identityFingerprint)
+        }
+        return { reconciled: true as const }
+      }
+      const lease = await runtime.acquireAgentLease(input.activeWorkspace, {
+        serverId: binding.server_id,
+        keyId: binding.key_id,
+        agentId: binding.agent_id,
+      })
+      return {
+        credentialSnapshot,
+        identityFingerprint,
+        lease,
+        legacyRun,
+        legacySessionId,
+        reconciled: false as const,
+      }
+    }, 'mcp-legacy-recovery-admission')
+  ))
+  if (!snapshot || snapshot.reconciled) return
+  const { credentialSnapshot, identityFingerprint, lease, legacyRun, legacySessionId } = snapshot
+  if (!lease) throw new McpError('MCP_RUNTIME_ERROR', '旧版共享 Session Agent lease 建立失败')
+  try {
+    await lease.stageSessionFence({
+      requestId: safeOutboundRequestId(createMcpSecretScrubber({}), input.taskId),
+      sessionId: legacySessionId,
+    })
+    let markerState: {
+      status: 'reconciled' | 'quarantined' | 'created'
+      marker: Awaited<ReturnType<typeof listNovelRuns>>[number]
+    }
+    try {
+      markerState = await withMcpWorkspaceMutation(input.activeWorkspace, async () => {
+        const runs = await listNovelRuns(input.activeWorkspace, projectId)
+        const reconciled = runs.find(run => exactLegacyMigrationMarker(
+          run,
+          input,
+          legacyRun.id,
+          identityFingerprint,
+          'reconciled',
+        ))
+        if (reconciled) return { status: 'reconciled' as const, marker: reconciled }
+        const quarantined = runs.find(run => exactLegacyMigrationMarker(
+          run,
+          input,
+          legacyRun.id,
+          identityFingerprint,
+          'quarantined',
+        ))
+        if (quarantined) return { status: 'quarantined' as const, marker: quarantined }
+        const marker = await appendNovelRun(input.activeWorkspace, {
+          project_id: projectId,
+          run_type: LEGACY_SHARED_SESSION_MIGRATION_RUN_TYPE,
+          step_name: input.taskId,
+          status: 'quarantined',
+          input_ref: JSON.stringify(legacyMigrationMarkerInput(
+            input,
+            legacyRun.id,
+            identityFingerprint,
+          )),
+          output_ref: JSON.stringify(legacyMigrationMarkerOutput(
+            input,
+            legacyRun.id,
+            identityFingerprint,
+            'quarantined',
+          )),
+        })
+        return { status: 'created' as const, marker }
+      })
+    } catch (error) {
+      const actionable = projectedLegacyActionableError(error)
+      if (actionable) throw actionable
+      throw new McpError('MCP_STORE_IO_FAILED', '旧版共享 Session 核对标记持久化失败')
+    }
+    if (markerState.status === 'reconciled') {
+      await lease.clearSessionFence()
+      return
+    }
+    if (markerState.status === 'created') {
+      throw legacySharedSessionBlocked(legacyRun.id, identityFingerprint)
+    }
+    const matchingMarker = markerState.marker
+
+    let terminalStatus: 'completed' | 'failed' | 'cancelled' | undefined
+    let deadline: McpGenerationDeadline | undefined
+    try {
+      let pinnedCredential: ReturnType<typeof fixedLegacyPinnedCredential>
+      try {
+        const selected = selectedTaskCredential(credentialSnapshot, binding)
+        const resolvedCredential = await runtime.resolveCredentialConfig(
+          binding.key_id,
+          binding.server_id,
+          { ...selected, activeWorkspace: input.activeWorkspace },
+        )
+        pinnedCredential = fixedLegacyPinnedCredential(
+          resolvedCredential,
+          selected,
+          input.activeWorkspace,
+        )
+      } catch (error) {
+        const actionable = projectedLegacyActionableError(error)
+        if (actionable) throw actionable
+        throw new McpError('MCP_RUNTIME_ERROR', '旧版共享 Session 本地凭据解析失败')
+      }
+      deadline = createDeadline(pinnedCredential.server.generation_timeout_ms, input.signal)
+      const remoteOptions = (configuredMs: number) => ({
+        signal: deadline!.signal,
+        get timeoutMs() { return deadline!.timeoutMs(configuredMs) },
+      })
+      let resolved: Awaited<ReturnType<ChapterTaskRuntime['getAdapterForKey']>>
+      try {
+        resolved = await runtime.getAdapterForKey(
+          binding.key_id,
+          binding.server_id,
+          remoteOptions(pinnedCredential.server.startup_timeout_ms),
+          pinnedCredential,
+        )
+      } catch (error) {
+        const actionable = projectedLegacyActionableError(error)
+        if (actionable) throw actionable
+        throw legacySharedSessionBlocked(legacyRun.id, identityFingerprint)
+      }
+      const resolvedServer = ownDataValue(resolved, 'server')
+      const resolvedAdapter = ownDataValue(resolved, 'adapter')
+      const resolvedStability = ownDataValue(resolved, 'stability')
+      if (!resolvedServer || typeof resolvedServer !== 'object' || unsafeProxy(resolvedServer)
+        || !resolvedAdapter || typeof resolvedAdapter !== 'object' || unsafeProxy(resolvedAdapter)
+        || !resolvedStability || typeof resolvedStability !== 'object' || unsafeProxy(resolvedStability)
+        || ownDataValue(resolvedServer, 'adapter_id') !== binding.adapter_id
+        || ownDataValue(resolvedAdapter, 'id') !== binding.adapter_id) {
+        throw new McpError('MCP_BINDING_INVALID', 'Runtime 返回的 MCP Adapter 与项目绑定不一致')
+      }
+      const inspectSession = dataMethod<McpGenerationAdapter['inspectSession']>(
+        resolvedAdapter,
+        'inspectSession',
+      )
+      if (!inspectSession) {
+        throw new McpError('MCP_CAPABILITY_MISSING', 'MCP Adapter 未提供 Session inspection 端口')
+      }
+      const runRead = dataMethod<McpStabilityController['runRead']>(resolvedStability, 'runRead')
+      if (!runRead) {
+        throw new McpError('MCP_CAPABILITY_MISSING', 'MCP Adapter 未提供 stability read 端口')
+      }
+      const stabilityInput = {
+        deadline,
+        phase: 'session_poll' as const,
+        pollInitialMs: pinnedCredential.server.poll_initial_ms,
+        pollMaxMs: pinnedCredential.server.poll_max_ms,
+        toolTimeoutMs: pinnedCredential.server.tool_timeout_ms,
+      }
+      let contractError: McpError | undefined
+      let inspection: unknown
+      try {
+        inspection = await safeApply(runRead, resolvedStability, [
+          ownDataValue(resolvedAdapter, 'stabilityPolicy') as any,
+          stabilityInput,
+          () => {
+            const pending = safeApply<
+              [{ agentId: string; sessionId: string }, ReturnType<typeof remoteOptions>],
+              ReturnType<McpGenerationAdapter['inspectSession']>
+            >(inspectSession, resolvedAdapter, [{
+              agentId: binding.agent_id,
+              sessionId: legacySessionId,
+            }, remoteOptions(pinnedCredential.server.tool_timeout_ms)])
+            assertSafeAwaitable(
+              pending,
+              () => {
+                contractError = invalidLegacyInspection()
+                return contractError
+              },
+            )
+            return pending
+          },
+        ])
+      } catch (error) {
+        if (contractError && error === contractError) throw contractError
+        const actionable = projectedLegacyActionableError(error)
+        if (actionable) throw actionable
+        throw legacySharedSessionBlocked(legacyRun.id, identityFingerprint)
+      }
+      terminalStatus = trustedLegacyTerminalStatus(inspection)
+    } finally {
+      deadline?.close()
+    }
+    if (!terminalStatus) throw legacySharedSessionBlocked(legacyRun.id, identityFingerprint)
+    const reconciledOutput = JSON.stringify(legacyMigrationMarkerOutput(
+      input,
+      legacyRun.id,
+      identityFingerprint,
+      'reconciled',
+      terminalStatus,
+    ))
+    let reconciliation: Awaited<ReturnType<typeof recoverNovelRunExecution>> | undefined
+    try {
+      reconciliation = await withMcpWorkspaceMutation(input.activeWorkspace, () => (
+        recoverNovelRunExecution(input.activeWorkspace, {
+          projectId,
+          runId: matchingMarker.id,
+          expectedInputRef: matchingMarker.input_ref || '',
+          expectedOutputRef: matchingMarker.output_ref || '',
+          expectedStatus: matchingMarker.status,
+          expectedLeaseOwner: matchingMarker.lease_owner ?? null,
+          expectedLeaseExpiresAt: matchingMarker.lease_expires_at ?? null,
+          expectedGuardRun: legacyRun,
+          outputRef: reconciledOutput,
+          status: 'completed',
+          now: new Date().toISOString(),
+        })
+      ))
+    } catch (error) {
+      const actionable = projectedLegacyActionableError(error)
+      if (actionable) throw actionable
+      throw new McpError('MCP_STORE_IO_FAILED', '旧版共享 Session 核对凭证持久化失败')
+    }
+    if (!reconciliation || !reconciliation.updated || !reconciliation.run || !exactLegacyMigrationMarker(
+      reconciliation.run,
+      input,
+      legacyRun.id,
+      identityFingerprint,
+      'reconciled',
+    )) {
+      throw legacySharedSessionBlocked(legacyRun.id, identityFingerprint)
+    }
+    await lease.clearSessionFence()
+  } finally {
+    await lease.release()
+  }
+}
+
 type ChapterTaskRuntime = Pick<McpRuntime,
-  'resolveCredentialConfig' | 'getAdapterForKey' | 'acquireAgentLease'
+  'resolveCredentialConfig' | 'getAdapterForKey' | 'acquireAgentLease' | 'compareAndClearSessionFence'
 >
+
+type InitializedStagePort = {
+  adapter: McpGenerationAdapter
+  invokeChapterStage: McpGenerationAdapter['invokeChapterStage']
+  taskInput: McpChapterTaskInput
+  stability: McpStabilityController
+}
 
 type StageRecordContextPort = {
   attachRemoteIdentity(remote: { session_id: string; snapshot_hash: string }): Promise<void>
@@ -640,18 +1124,10 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
   private readonly binding: NonNullable<ResolvedChapterTaskInput['sourceState']['mcp']>
   private readonly recordStage: ReturnType<typeof createChapterStageRecorder>
   private scrubber: ReturnType<typeof createMcpSecretScrubber>
-  private sessionPromise?: Promise<McpChapterTaskSession>
-  private session?: McpChapterTaskSession
+  private stagePortPromise?: Promise<InitializedStagePort>
   private lease?: McpAgentLease
   private deadline?: McpGenerationDeadline
   private taskReceiptId?: number
-  private sessionId = ''
-  private snapshotHash = ''
-  private remoteSessionId = ''
-  private remoteSnapshotHash = ''
-  private oneShotInvocationPort = false
-  private sessionFenceStaged = false
-  private sessionFencePromise?: Promise<void>
   private readonly observedSessionIds = new Set<string>()
   private activeInvocation?: ActiveStageInvocation
   private currentStageRecordContext?: StageRecordContextPort
@@ -773,7 +1249,6 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
       this.ambiguousStatus = receiptStatus
       this.quarantineReason = receiptStatus === 'send_unknown'
         && !this.activeInvocation?.sessionId
-        && !this.sessionId
         && !errorSessionId(scrubbed)
         ? 'session_create_unknown'
         : receiptStatus
@@ -800,7 +1275,6 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
       receipt_authority: MCP_GENERATION_SOURCE_RECEIPT_AUTHORITY,
       ...provenance,
       binding_fingerprint: this.fingerprint,
-      ...(this.snapshotHash ? { snapshot_hash: boundedScrubbedId(this.scrubber, this.snapshotHash) } : {}),
       status,
       ...(scrubbed ? {
         error_code: (ownString(scrubbed, 'code') || ownString(scrubbed, 'error_code') || 'MCP_STAGE_FAILED').slice(0, 80),
@@ -818,49 +1292,6 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
       ...(error ? { error_message: String(output.error || '').slice(0, 500) } : {}),
     })
     if (!updated) throw new McpError('MCP_STORE_IO_FAILED', 'MCP 章节任务回执持久化失败')
-  }
-
-  private async onSessionProgress(event: unknown, options: { stageFence?: boolean } = {}) {
-    this.throwIfCloseRequested()
-    const projectedEvent = projectedRecord(event)
-    const rawSessionId = ownDataValue(event, 'session_id')
-    const rawSnapshotHash = ownDataValue(event, 'snapshot_hash')
-    if (rawSessionId !== undefined) {
-      const acceptedSessionId = acceptRemoteId(rawSessionId, 'Session 标识')
-      if (this.remoteSessionId && acceptedSessionId !== this.remoteSessionId) {
-        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter Session 标识在任务期间发生变化')
-      }
-      this.remoteSessionId = acceptedSessionId
-      defineEnumerableData(
-        projectedEvent,
-        'session_id',
-        boundedScrubbedId(this.scrubber, this.remoteSessionId),
-      )
-    }
-    if (rawSnapshotHash !== undefined) {
-      const acceptedSnapshotHash = acceptRemoteId(rawSnapshotHash, 'snapshot fingerprint')
-      if (this.remoteSnapshotHash && acceptedSnapshotHash !== this.remoteSnapshotHash) {
-        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter snapshot fingerprint 在任务期间发生变化')
-      }
-      this.remoteSnapshotHash = acceptedSnapshotHash
-      defineEnumerableData(
-        projectedEvent,
-        'snapshot_hash',
-        boundedScrubbedId(this.scrubber, this.remoteSnapshotHash),
-      )
-    }
-    const scrubbedEvent = this.scrubber.scrubValue(projectedEvent)
-    this.sessionId = this.remoteSessionId
-      ? boundedScrubbedId(this.scrubber, this.remoteSessionId)
-      : ''
-    this.snapshotHash = this.remoteSnapshotHash
-      ? boundedScrubbedId(this.scrubber, this.remoteSnapshotHash)
-      : ''
-    if (scrubbedEvent?.stage === 'session_created' && options.stageFence !== false) {
-      if (!this.remoteSessionId) throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 未提供 Session 标识')
-      await this.ensureSessionFence()
-    }
-    await this.input.onProgress?.(scrubbedEvent)
   }
 
   private async onStageProgress(invocationId: string, stage: ChapterTaskStage, event: unknown) {
@@ -898,21 +1329,6 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     await this.input.onProgress?.(scrubbedEvent)
   }
 
-  private ensureSessionFence() {
-    if (this.sessionFencePromise) return this.sessionFencePromise
-    this.sessionFencePromise = (async () => {
-      this.throwIfCloseRequested()
-      await this.persistTaskReceipt('session_created')
-      this.throwIfCloseRequested()
-      await this.lease!.stageSessionFence({
-        requestId: safeOutboundRequestId(this.scrubber, this.taskId),
-        sessionId: this.sessionId,
-      })
-      this.sessionFenceStaged = true
-    })()
-    return this.sessionFencePromise
-  }
-
   private ensureStageSessionFence(active: ActiveStageInvocation) {
     if (active.fenceStaged) return Promise.resolve()
     if (active.fencePromise) return active.fencePromise
@@ -935,7 +1351,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     return active.fencePromise
   }
 
-  private async openSession() {
+  private async initializeStagePort(): Promise<InitializedStagePort> {
     return withMcpWorkspaceMutation(this.input.activeWorkspace, async () => {
       this.throwIfCloseRequested()
       const currentSnapshot = await readBindingCredentialSnapshot(this.input.activeWorkspace, this.binding)
@@ -1027,113 +1443,33 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
         },
         deadline: this.deadline,
         signal: this.deadline.signal,
-        onProgress: event => this.onSessionProgress(event),
       }
-      const invokeChapterStage = dataMethod<NonNullable<McpGenerationAdapter['invokeChapterStage']>>(
+      const invokeChapterStage = dataMethod<McpGenerationAdapter['invokeChapterStage']>(
         resolved.adapter,
         'invokeChapterStage',
       )
-      if (invokeChapterStage) {
-        this.oneShotInvocationPort = true
-        taskInput.onProgress = event => this.onSessionProgress(event, { stageFence: false })
-        const session: McpChapterTaskSession = {
-          sessionId: '',
-          snapshotHash: '',
-          runStage: stageInput => {
-            const invocationId = safeStageInvocationId(
-              this.scrubber,
-              `${this.taskId}:${stageInput.stage}:${++this.stageSequence}`,
-            )
-            const active: ActiveStageInvocation = {
-              invocationId,
-              stage: stageInput.stage,
-              fenceStaged: false,
-              recordContext: this.currentStageRecordContext,
-            }
-            this.activeInvocation = active
-            if (this.currentStageOwner) this.currentStageOwner.invocation = active
-            const invocationInput: McpChapterInvocationInput = {
-              ...taskInput,
-              ...stageInput,
-              invocationId,
-              stability: resolved.stability,
-              onProgress: event => this.onStageProgress(invocationId, stageInput.stage, event),
-            }
-            const pending = safeApply<
-              [McpChapterInvocationInput],
-              Promise<McpChapterStageResult>
-            >(invokeChapterStage, resolved.adapter, [invocationInput])
-            return pending
-          },
-          // invokeChapterStage owns each remote stage lifecycle; this virtual Session is
-          // only the temporary source-side compatibility shell until Task 10 removes it.
-          async close() {},
-        }
-        this.session = session
-        return session
-      }
-
-      // TODO(Task 10): Remove the legacy shared-Session fallback after all adapters use invokeChapterStage().
-      const openChapterTask = dataMethod<NonNullable<McpGenerationAdapter['openChapterTask']>>(
-        resolved.adapter,
-        'openChapterTask',
-      )
-      if (!openChapterTask) {
+      if (!invokeChapterStage) {
         throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 未提供 chapter stage 调用端口')
       }
-      const pendingSession = safeApply<
-        [McpChapterTaskInput],
-        Promise<McpChapterTaskSession>
-      >(openChapterTask, resolved.adapter, [taskInput])
-      assertSafeAwaitable(
-        pendingSession,
-        () => new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的任务 Session'),
-      )
-      const rawSession = await pendingSession
-      const sessionPort = projectChapterTaskSessionPort(rawSession)
-      this.session = sessionPort
       this.throwIfCloseRequested()
-      const returnedRemoteSessionId = acceptRemoteId(
-        ownDataValue(rawSession, 'sessionId'),
-        'Session 标识',
-      )
-      const returnedRemoteSnapshotHash = acceptRemoteId(
-        ownDataValue(rawSession, 'snapshotHash'),
-        'snapshot fingerprint',
-      )
-      if (this.remoteSessionId && this.remoteSessionId !== returnedRemoteSessionId) {
-        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter Session 标识在创建期间发生变化')
+      return {
+        adapter: resolved.adapter,
+        invokeChapterStage,
+        taskInput,
+        stability: resolved.stability,
       }
-      if (this.remoteSnapshotHash && this.remoteSnapshotHash !== returnedRemoteSnapshotHash) {
-        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter snapshot fingerprint 在创建期间发生变化')
-      }
-      this.remoteSessionId = returnedRemoteSessionId
-      this.remoteSnapshotHash = returnedRemoteSnapshotHash
-      this.sessionId = boundedScrubbedId(this.scrubber, returnedRemoteSessionId)
-      this.snapshotHash = boundedScrubbedId(this.scrubber, returnedRemoteSnapshotHash)
-      const session: McpChapterTaskSession = {
-        ...sessionPort,
-        sessionId: this.sessionId,
-        snapshotHash: this.snapshotHash,
-      }
-      this.session = session
-      if (!this.sessionFenceStaged) {
-        await this.ensureSessionFence()
-      }
-      this.throwIfCloseRequested()
-      return session
     })
   }
 
-  private getSession() {
+  private getStagePort() {
     if (this.closeRequested || this.closePromise || this.failurePromise) {
       return Promise.reject(new McpError('MCP_RUNTIME_ERROR', 'MCP 章节任务已经终止'))
     }
-    if (this.sessionPromise) return this.sessionPromise
-    const opening = this.openSession()
-    this.sessionPromise = opening
+    if (this.stagePortPromise) return this.stagePortPromise
+    const opening = this.initializeStagePort()
+    this.stagePortPromise = opening
     void opening.catch(() => {
-      if (this.sessionPromise === opening) this.sessionPromise = undefined
+      if (this.stagePortPromise === opening) this.stagePortPromise = undefined
     })
     return opening
   }
@@ -1161,42 +1497,6 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
       receiptPersistenceError = this.latchTerminalFailure(receiptError)
       terminalError = receiptPersistenceError
     }
-    if (this.session) {
-      try {
-        const pendingClose = this.session.close()
-        assertSafeAwaitable(
-          pendingClose,
-          () => new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的 Session close 结果'),
-        )
-        await pendingClose
-      } catch (closeError) {
-        const scrubbedCloseError = scrubGenerationError(closeError, this.scrubber)
-        this.latchTerminalFailure(scrubbedCloseError)
-        if (this.ambiguousError && this.ambiguousStatus) {
-          primaryError = this.ambiguousError
-          terminalError = primaryError
-          if (receiptStatus !== this.ambiguousStatus) {
-            receiptStatus = this.ambiguousStatus
-            try {
-              await this.persistTaskReceipt(receiptStatus, primaryError)
-            } catch (receiptError) {
-              receiptPersistenceError = this.latchTerminalFailure(receiptError)
-              terminalError = receiptPersistenceError
-            }
-          }
-        } else {
-          primaryError = scrubbedCloseError
-          terminalError = primaryError
-          receiptStatus = receiptStatusForError(primaryError)
-          try {
-            await this.persistTaskReceipt(receiptStatus, primaryError)
-          } catch (receiptError) {
-            receiptPersistenceError = this.latchTerminalFailure(receiptError)
-            terminalError = receiptPersistenceError
-          }
-        }
-      }
-    }
     if (this.ambiguousError && this.ambiguousStatus) {
       primaryError = this.ambiguousError
       receiptStatus = this.ambiguousStatus
@@ -1207,7 +1507,6 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
       try {
         const quarantineSessionId = errorSessionId(primaryError)
           || this.activeInvocation?.sessionId
-          || this.sessionId
         await this.lease!.quarantine({
           requestId: this.activeInvocation?.invocationId
             || boundedScrubbedId(this.scrubber, this.taskId),
@@ -1225,7 +1524,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
           this.ambiguousStatus!,
           boundedScrubbedId(
             this.scrubber,
-            errorSessionId(primaryError) || this.sessionId,
+            errorSessionId(primaryError) || this.activeInvocation?.sessionId,
           ),
         )
       }
@@ -1243,7 +1542,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
           this.ambiguousStatus,
           boundedScrubbedId(
             this.scrubber,
-            errorSessionId(primaryError) || this.sessionId,
+            errorSessionId(primaryError) || this.activeInvocation?.sessionId,
           ),
         )
       }
@@ -1293,13 +1592,33 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     await this.input.assertCurrent()
     this.throwIfCloseRequested()
     this.deadline?.throwIfAborted()
-    const session = await this.getSession()
+    const port = await this.getStagePort()
     this.throwIfCloseRequested()
     this.deadline?.throwIfAborted()
-    const pendingResult = session.runStage({
+    const invocationId = safeStageInvocationId(
+      this.scrubber,
+      `${this.taskId}:${input.stage}:${++this.stageSequence}`,
+    )
+    const active: ActiveStageInvocation = {
+      invocationId,
+      stage: input.stage,
+      fenceStaged: false,
+      recordContext,
+    }
+    this.activeInvocation = active
+    if (this.currentStageOwner) this.currentStageOwner.invocation = active
+    const invocationInput: McpChapterInvocationInput = {
+      ...port.taskInput,
       ...input,
       requestId: safeOutboundRequestId(this.scrubber, input.requestId),
-    })
+      invocationId,
+      stability: port.stability,
+      onProgress: event => this.onStageProgress(invocationId, input.stage, event),
+    }
+    const pendingResult = safeApply<
+      [McpChapterInvocationInput],
+      Promise<McpChapterStageResult>
+    >(port.invokeChapterStage, port.adapter, [invocationInput])
     assertSafeAwaitable(
       pendingResult,
       () => new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的 stage 结果'),
@@ -1308,29 +1627,23 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     this.throwIfCloseRequested()
     const result = projectMcpChapterStageResult(rawResult)
     this.deadline?.throwIfAborted()
-    if (this.oneShotInvocationPort) {
-      const active = this.activeInvocation
-      if (!active || active.invocationId.length === 0) {
-        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter stage invocation 状态丢失')
-      }
-      if ((active.sessionId && result.session_id !== active.sessionId)
-        || (active.snapshotHash && result.snapshot_hash !== active.snapshotHash)) {
-        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了不属于当前 stage invocation 的结果')
-      }
-      if (this.observedSessionIds.has(result.session_id) && active.sessionId !== result.session_id) {
-        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 重用了已观察的 Session 标识')
-      }
-      active.sessionId = result.session_id
-      active.snapshotHash = result.snapshot_hash
-      this.currentStageRecordContext = recordContext
-      await this.ensureStageSessionFence(active)
-      if (active.fenceStaged) {
-        await this.lease!.clearSessionFence()
-        active.fenceStaged = false
-      }
-    } else if (result.session_id !== this.remoteSessionId
-      || result.snapshot_hash !== this.remoteSnapshotHash) {
-      throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了不属于当前任务 Session 的 stage 结果')
+    if (active.invocationId.length === 0) {
+      throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter stage invocation 状态丢失')
+    }
+    if ((active.sessionId && result.session_id !== active.sessionId)
+      || (active.snapshotHash && result.snapshot_hash !== active.snapshotHash)) {
+      throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了不属于当前 stage invocation 的结果')
+    }
+    if (this.observedSessionIds.has(result.session_id) && active.sessionId !== result.session_id) {
+      throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 重用了已观察的 Session 标识')
+    }
+    active.sessionId = result.session_id
+    active.snapshotHash = result.snapshot_hash
+    this.currentStageRecordContext = recordContext
+    await this.ensureStageSessionFence(active)
+    if (active.fenceStaged) {
+      await this.lease!.clearSessionFence()
+      active.fenceStaged = false
     }
     await this.input.assertCurrent()
     this.throwIfCloseRequested()
@@ -1455,7 +1768,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     this.closeRequested = true
     if (this.closePromise) return this.closePromise
     const active = [...this.activeOperations]
-    const opening = this.sessionPromise
+    const opening = this.stagePortPromise
     this.closePromise = (async () => {
       if (active.length) await Promise.all(active)
       else if (opening) await opening.catch(() => {})
@@ -1490,6 +1803,7 @@ export class McpGenerationSource implements GenerationSource {
     if (input.sourceState.active !== 'mcp' || !input.sourceState.mcp) {
       throw new McpError('MCP_BINDING_INVALID', 'MCP 章节任务需要完整的项目绑定')
     }
+    await guardLegacySharedSessionRecovery(this.runtime, input, this.createDeadline)
     const credentialSnapshot = await readBindingCredentialSnapshot(
       input.activeWorkspace,
       input.sourceState.mcp,
@@ -1638,6 +1952,7 @@ export class McpGenerationSource implements GenerationSource {
           recentChapters: contextSnapshotText(continuity?.previous_prose_chapters || []),
         },
         deadline,
+        stability: resolved.stability,
         signal: deadline.signal,
         onProgress: async event => {
           const scrubbedEvent = scrubber.scrubValue(event)
