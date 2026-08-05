@@ -1,3 +1,4 @@
+import { types } from 'node:util'
 import {
   appendNovelRun,
   createNovelChapter,
@@ -16,6 +17,36 @@ import { applyChapterWordTargetToContext, countProseChars, normalizeDeliveryRisk
 import { compactProseGenerationOverride } from '../../novel-writing/prose-generation-contract'
 import { applyZhuqueFastPathOptions } from '../../novel-writing/zhuque-fast-path'
 import { createMcpSecretScrubber } from '../../mcp/secret-scrubber'
+import type { McpErrorCode } from '../../mcp/errors'
+
+export function classifyGenerationFailure(error: any) {
+  if (error?.code === 'MCP_SERVER_NOT_READY') {
+    return {
+      type: 'mcp_server_not_ready',
+      actions: ['保留已完成阶段', '等待 MCP 服务稳定后从当前阶段继续'],
+    }
+  }
+  if (error?.code === 'MCP_DRIVE_SYNC_FAILED') {
+    return {
+      type: 'mcp_drive_sync_failed',
+      actions: ['检查 MCP Drive 权限和内容对账', '修复后从当前阶段继续'],
+    }
+  }
+  if (String(error?.code || '').startsWith('MCP_')) {
+    return {
+      type: 'mcp_generation_failed',
+      actions: ['保留已完成阶段', '确认 MCP 服务状态后从当前阶段继续'],
+    }
+  }
+  const text = String(error?.message || error?.error || error || '')
+  if (text.includes('upload current user input file') || text.includes('upload file failed')) return { type: 'provider_upload_failed', actions: ['缩短上下文后重试', '切换模型重试', '把章节批量拆小'] }
+  if (text.includes('JSON') || text.includes('解析')) return { type: 'json_parse_failed', actions: ['使用 JSON 修复解析', '降低输出字段复杂度后重试'] }
+  if (text.includes('模型未返回正文') || text.includes('未返回正文')) return { type: 'empty_prose', actions: ['降低上下文字数重试', '强制重新生成场景卡', '切换正文模型'] }
+  if (text.includes('仿写安全') || text.includes('REFERENCE_SAFETY_BLOCKED')) return { type: 'reference_safety_blocked', actions: ['生成参考迁移计划', '替换高风险专名和桥段', '降低参考强度后重试'] }
+  if (text.includes('前置检查') || text.includes('PREFLIGHT')) return { type: 'preflight_blocked', actions: ['补齐章节目标/结尾钩子/角色状态', '生成场景卡', '允许缺材料继续'] }
+  if (error?.code === 'APPROVAL_REQUIRED') return { type: 'approval_required', actions: ['人工确认当前关卡', '调整审批策略', '确认后继续执行'] }
+  return { type: 'unknown', actions: ['查看原始错误', '手动重试', '切换模型重试'] }
+}
 
 export function stringifyNovelGenerationPayload(value: any) {
   return safeJsonStringify(value, undefined, 0)
@@ -203,6 +234,22 @@ const STANDALONE_PROGRESS_DROP_KEYS = new Set([
   'fullText',
   'prompt',
   'messages',
+  'content',
+  'session_id',
+  'sessionId',
+  'snapshot_hash',
+  'snapshotHash',
+  'headers',
+  'header',
+  'authorization',
+  'cookie',
+  'remote_response',
+  'remoteResponse',
+  'response_body',
+  'responseBody',
+  'request_body',
+  'requestBody',
+  'body',
   'debug',
   'diagnostics',
 ])
@@ -307,9 +354,75 @@ const STANDALONE_ERROR_PIPELINE_STAGES = new Set([
   'word_target', 'editor', 'meme_polish', 'review', 'revise',
   'readability_review', 'safety', 'store', 'story_state', 'humanize_postprocess',
   'opening_handoff_bridge', 'zhuque_fast', 'mcp_connect', 'mcp_capabilities',
-  'mcp_drive_sync', 'mcp_session_create', 'mcp_session_wait', 'mcp_extract',
+  'mcp_transport_stabilizing', 'mcp_drive_sync', 'mcp_session_create', 'mcp_session_wait', 'mcp_extract',
   'session_created', 'quality_pipeline',
 ])
+const MCP_PUBLIC_RECOVERY_PHASES = new Set([
+  'transport', 'drive_sync', 'session_create', 'session_poll',
+])
+const MCP_PUBLIC_ERROR_CODES = new Set<string>([
+  'MCP_BINDING_INVALID',
+  'MCP_BINDING_CHANGED',
+  'MCP_REFERENCED_RECORD_CONFLICT',
+  'MCP_AUTH_FAILED',
+  'MCP_CONNECT_TIMEOUT',
+  'MCP_CONNECTION_LOST',
+  'MCP_SERVER_NOT_READY',
+  'MCP_CAPABILITY_MISSING',
+  'MCP_TOOL_ERROR',
+  'MCP_DRIVE_SYNC_FAILED',
+  'MCP_INPUT_TOO_LARGE',
+  'MCP_AGENT_BUSY',
+  'MCP_AGENT_QUARANTINED',
+  'MCP_QUARANTINE_ACK_REQUIRED',
+  'MCP_SEND_UNKNOWN',
+  'MCP_SESSION_FAILED',
+  'MCP_INPUT_REQUIRED',
+  'MCP_GENERATION_TIMEOUT',
+  'MCP_CANCELLED',
+  'MCP_EMPTY_PROSE',
+  'MCP_STAGE_CONTRACT_INVALID',
+  'MCP_STORE_CORRUPT',
+  'MCP_STORE_IO_FAILED',
+  'MCP_RUNTIME_ERROR',
+] satisfies McpErrorCode[])
+
+type SafeOwnDataSnapshot =
+  | { ok: true; values: Record<string, unknown> }
+  | { ok: false }
+
+function snapshotOwnDataFields(value: unknown, fields: readonly string[]): SafeOwnDataSnapshot {
+  if (!value || (typeof value !== 'object' && typeof value !== 'function') || types.isProxy(value)) {
+    return { ok: false }
+  }
+  const values: Record<string, unknown> = {}
+  try {
+    for (const field of fields) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, field)
+      if (!descriptor) continue
+      if (!('value' in descriptor)) return { ok: false }
+      values[field] = descriptor.value
+    }
+  } catch {
+    return { ok: false }
+  }
+  return { ok: true, values }
+}
+
+function ownSnapshotString(values: Record<string, unknown>, ...fields: string[]) {
+  return fields
+    .map(field => values[field])
+    .find((value): value is string => typeof value === 'string')
+    || ''
+}
+
+function minimalStandaloneMcpErrorPayload() {
+  return {
+    error: 'MCP 章节生成失败',
+    error_code: 'MCP_GENERATION_FAILED',
+    pipeline: [],
+  }
+}
 
 function boundedPipelineSlug(value: unknown, maxLength = STANDALONE_ERROR_PIPELINE_MAX_SLUG) {
   if (typeof value !== 'string') return undefined
@@ -325,7 +438,7 @@ function boundedPipelineNumber(value: unknown, minimum: number, maximum: number,
   return integer ? Math.trunc(bounded) : bounded
 }
 
-function compactStandaloneErrorPipeline(value: unknown) {
+function compactStandaloneErrorPipeline(value: unknown, mcpTask = false) {
   if (!Array.isArray(value)) return []
   const compacted: Array<Record<string, string | number | boolean>> = []
   for (const raw of value) {
@@ -337,19 +450,28 @@ function compactStandaloneErrorPipeline(value: unknown) {
       .find(value => value && STANDALONE_ERROR_PIPELINE_STAGES.has(value))
     const status = boundedPipelineSlug(item.status)
     const elapsedMs = boundedPipelineNumber(item.elapsed_ms, 0, 86_400_000, true)
+    const phase = mcpTask || stage === 'mcp_transport_stabilizing'
+      ? boundedPipelineSlug(item.phase)
+      : undefined
+    const recoveryCount = mcpTask || stage === 'mcp_transport_stabilizing'
+      ? boundedPipelineNumber(item.recovery_count, 0, 1_000, true)
+      : undefined
     const percent = boundedPipelineNumber(item.percent, 0, 100)
     const wordCount = boundedPipelineNumber(item.word_count, 0, 10_000_000, true)
     const score = boundedPipelineNumber(item.score, 0, 100)
     const round = boundedPipelineNumber(item.round, 0, 1_000, true)
+    const recoveryStage = mcpTask || stage === 'mcp_transport_stabilizing'
     const candidate = {
       ...(stage ? { stage } : {}),
       ...(status && STANDALONE_ERROR_PIPELINE_STATUSES.has(status) ? { status } : {}),
       ...(elapsedMs !== undefined ? { elapsed_ms: elapsedMs } : {}),
-      ...(percent !== undefined ? { percent } : {}),
-      ...(wordCount !== undefined ? { word_count: wordCount } : {}),
-      ...(score !== undefined ? { score } : {}),
-      ...(round !== undefined ? { round } : {}),
-      ...(typeof item.accepted === 'boolean' ? { accepted: item.accepted } : {}),
+      ...(phase && MCP_PUBLIC_RECOVERY_PHASES.has(phase) ? { phase } : {}),
+      ...(recoveryCount !== undefined ? { recovery_count: recoveryCount } : {}),
+      ...(!recoveryStage && percent !== undefined ? { percent } : {}),
+      ...(!recoveryStage && wordCount !== undefined ? { word_count: wordCount } : {}),
+      ...(!recoveryStage && score !== undefined ? { score } : {}),
+      ...(!recoveryStage && round !== undefined ? { round } : {}),
+      ...(!recoveryStage && typeof item.accepted === 'boolean' ? { accepted: item.accepted } : {}),
     }
     if (Object.keys(candidate).length === 0) continue
     if (JSON.stringify([...compacted, candidate]).length > STANDALONE_ERROR_PIPELINE_MAX_CHARS) break
@@ -358,12 +480,175 @@ function compactStandaloneErrorPipeline(value: unknown) {
   return compacted
 }
 
-export function buildStandaloneProseServiceErrorPayload(serviceError: any, pipeline: any[], configSnapshot: any, chapterIdentity: any = {}) {
-  const admissionStatus = String(serviceError?.admission_status || serviceError?.admissionStatus || '')
-  const blockedInvalid = admissionStatus === 'blocked_invalid'
+type StrictStandalonePipelineProjection =
+  | { ok: true; pipeline: Array<Record<string, string | number | boolean>> }
+  | { ok: false }
+
+function compactStrictStandaloneMcpErrorPipeline(value: unknown): StrictStandalonePipelineProjection {
+  if (!value || typeof value !== 'object') return { ok: true, pipeline: [] }
+  if (types.isProxy(value)) return { ok: false }
+  let array: boolean
+  try {
+    array = Array.isArray(value)
+  } catch {
+    return { ok: false }
+  }
+  if (!array) return { ok: true, pipeline: [] }
+  const lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length')
+  if (!lengthDescriptor || !('value' in lengthDescriptor) || typeof lengthDescriptor.value !== 'number') {
+    return { ok: false }
+  }
+  const compacted: Array<Record<string, string | number | boolean>> = []
+  const scanLimit = Math.min(lengthDescriptor.value, 1_024)
+  for (let index = 0; index < scanLimit; index += 1) {
+    if (compacted.length === STANDALONE_ERROR_PIPELINE_MAX_STAGES) break
+    let elementDescriptor: PropertyDescriptor | undefined
+    try {
+      elementDescriptor = Object.getOwnPropertyDescriptor(value, String(index))
+    } catch {
+      return { ok: false }
+    }
+    if (!elementDescriptor) continue
+    if (!('value' in elementDescriptor)) return { ok: false }
+    const raw = elementDescriptor.value
+    if (!raw || typeof raw !== 'object') continue
+    if (types.isProxy(raw)) return { ok: false }
+    let nestedArray: boolean
+    try {
+      nestedArray = Array.isArray(raw)
+    } catch {
+      return { ok: false }
+    }
+    if (nestedArray) continue
+    const snapshot = snapshotOwnDataFields(raw, [
+      'key', 'stage', 'status', 'elapsed_ms', 'phase', 'recovery_count',
+    ])
+    if (!snapshot.ok) return { ok: false }
+    const item = snapshot.values
+    const stage = [item.key, item.stage]
+      .map(value => boundedPipelineSlug(value))
+      .find(value => value && STANDALONE_ERROR_PIPELINE_STAGES.has(value))
+    const status = boundedPipelineSlug(item.status)
+    const elapsedMs = boundedPipelineNumber(item.elapsed_ms, 0, 86_400_000, true)
+    const phase = boundedPipelineSlug(item.phase)
+    const recoveryCount = boundedPipelineNumber(item.recovery_count, 0, 1_000, true)
+    const candidate = {
+      ...(stage ? { stage } : {}),
+      ...(status && STANDALONE_ERROR_PIPELINE_STATUSES.has(status) ? { status } : {}),
+      ...(elapsedMs !== undefined ? { elapsed_ms: elapsedMs } : {}),
+      ...(phase && MCP_PUBLIC_RECOVERY_PHASES.has(phase) ? { phase } : {}),
+      ...(recoveryCount !== undefined ? { recovery_count: recoveryCount } : {}),
+    }
+    if (Object.keys(candidate).length === 0) continue
+    if (JSON.stringify([...compacted, candidate]).length > STANDALONE_ERROR_PIPELINE_MAX_CHARS) break
+    compacted.push(candidate)
+  }
+  return { ok: true, pipeline: compacted }
+}
+
+type StandaloneMcpProjectionContext = { mcpTask?: boolean; stageKey?: string }
+
+function snapshotStandaloneMcpProjectionContext(projection: unknown) {
+  const snapshot = snapshotOwnDataFields(projection, ['mcpTask', 'stageKey'])
+  if (!snapshot.ok) return undefined
+  return {
+    mcpTask: snapshot.values.mcpTask === true,
+    stageKey: typeof snapshot.values.stageKey === 'string' ? snapshot.values.stageKey : '',
+  }
+}
+
+export function buildStandaloneProseServiceErrorPayload(
+  serviceError: any,
+  pipeline: any[],
+  configSnapshot: any,
+  chapterIdentity: any = {},
+  projection: StandaloneMcpProjectionContext = {},
+) {
+  try {
+    return buildStandaloneProseServiceErrorPayloadInternal(
+      serviceError,
+      pipeline,
+      configSnapshot,
+      chapterIdentity,
+      projection,
+    )
+  } catch {
+    return minimalStandaloneMcpErrorPayload()
+  }
+}
+
+function buildStandaloneProseServiceErrorPayloadInternal(
+  serviceError: any,
+  pipeline: any[],
+  configSnapshot: any,
+  chapterIdentity: any,
+  projection: StandaloneMcpProjectionContext,
+) {
+  const projectionContext = snapshotStandaloneMcpProjectionContext(projection)
+  if (!projectionContext) return minimalStandaloneMcpErrorPayload()
+  const identitySnapshot = snapshotOwnDataFields(serviceError, ['code', 'error_code'])
+  if (!identitySnapshot.ok) return minimalStandaloneMcpErrorPayload()
+  const errorCode = ownSnapshotString(identitySnapshot.values, 'code', 'error_code')
+  const mcpFailure = errorCode.startsWith('MCP_')
+  const strictMcpTask = projectionContext.mcpTask || mcpFailure
+  if (strictMcpTask) {
+    const serviceSnapshot = snapshotOwnDataFields(serviceError, [
+      'code', 'error_code', 'details', 'receipt_status', 'phase', 'recovery_count', 'elapsed_ms',
+    ])
+    if (!serviceSnapshot.ok) return minimalStandaloneMcpErrorPayload()
+    const detailsValue = serviceSnapshot.values.details
+    let details: Record<string, unknown> = {}
+    if (detailsValue !== undefined && detailsValue !== null && typeof detailsValue === 'object') {
+      const detailsSnapshot = snapshotOwnDataFields(detailsValue, [
+        'receipt_status', 'phase', 'recovery_count', 'elapsed_ms',
+      ])
+      if (!detailsSnapshot.ok) return minimalStandaloneMcpErrorPayload()
+      details = detailsSnapshot.values
+    }
+    const strictErrorCode = MCP_PUBLIC_ERROR_CODES.has(errorCode)
+      ? errorCode
+      : 'MCP_GENERATION_FAILED'
+    const receiptStatus = [details.receipt_status, serviceSnapshot.values.receipt_status]
+      .find(value => value === 'send_unknown' || value === 'remote_cancel_unknown')
+    const recoveryPhaseCandidate = boundedPipelineSlug(details.phase ?? serviceSnapshot.values.phase)
+    const recoveryPhase = recoveryPhaseCandidate && MCP_PUBLIC_RECOVERY_PHASES.has(recoveryPhaseCandidate)
+      ? recoveryPhaseCandidate
+      : undefined
+    const recoveryCount = boundedPipelineNumber(
+      details.recovery_count ?? serviceSnapshot.values.recovery_count,
+      0,
+      1_000,
+      true,
+    )
+    const recoveryElapsedMs = boundedPipelineNumber(
+      details.elapsed_ms ?? serviceSnapshot.values.elapsed_ms,
+      0,
+      86_400_000,
+      true,
+    )
+    const pipelineProjection = compactStrictStandaloneMcpErrorPipeline(pipeline)
+    if (!pipelineProjection.ok) return minimalStandaloneMcpErrorPayload()
+    const publicError = errorCode === 'MCP_SERVER_NOT_READY'
+      ? 'MCP 服务尚未稳定就绪'
+      : errorCode === 'MCP_DRIVE_SYNC_FAILED'
+        ? 'MCP Drive 同步失败'
+        : 'MCP 章节生成失败'
+    return {
+      error: publicError,
+      error_code: strictErrorCode,
+      ...(receiptStatus ? { receipt_status: receiptStatus } : {}),
+      ...(recoveryPhase ? { phase: recoveryPhase } : {}),
+      ...(recoveryCount !== undefined ? { recovery_count: recoveryCount } : {}),
+      ...(recoveryElapsedMs !== undefined ? { elapsed_ms: recoveryElapsedMs } : {}),
+      pipeline: pipelineProjection.pipeline,
+    }
+  }
   const receiptStatus = [serviceError?.details?.receipt_status, serviceError?.receipt_status]
     .map(value => String(value || ''))
     .find(value => value === 'send_unknown' || value === 'remote_cancel_unknown')
+  const publicError = String(serviceError?.message || serviceError)
+  const admissionStatus = String(serviceError?.admission_status || serviceError?.admissionStatus || '')
+  const blockedInvalid = admissionStatus === 'blocked_invalid'
   // Keep residual prose for explicit recovery only when invalid admission blocks storage.
   // All ordinary generation and quality errors must remain bounded and text-free.
   const residualCandidates = [
@@ -381,8 +666,8 @@ export function buildStandaloneProseServiceErrorPayload(serviceError: any, pipel
     ? residualCandidates.find((item: any) => typeof item === 'string' && item.trim().length > 200)
     : undefined
   const payload = {
-    error: String(serviceError?.message || serviceError),
-    error_code: serviceError?.code || serviceError?.error_code || (blockedInvalid ? 'PROSE_ADMISSION_BLOCKED_INVALID' : 'PROSE_GENERATION_FAILED'),
+    error: publicError,
+    error_code: errorCode || (blockedInvalid ? 'PROSE_ADMISSION_BLOCKED_INVALID' : 'PROSE_GENERATION_FAILED'),
     ...(receiptStatus ? { receipt_status: receiptStatus } : {}),
     ...(blockedInvalid ? {
       admission_status: 'blocked_invalid',
@@ -398,11 +683,13 @@ export function buildStandaloneProseServiceErrorPayload(serviceError: any, pipel
       },
     } : {}),
     pipeline: compactStandaloneErrorPipeline(pipeline),
-    launch_gate_blocker: serviceError?.launchGateBlocker || serviceError?.launch_gate_blocker,
-    reference_report: serviceError?.referenceReport || serviceError?.reference_report,
-    safety_decision: serviceError?.safetyDecision || serviceError?.safety_decision,
-    prompt_diagnostics: compactStandalonePromptDiagnostics(serviceError?.promptDiagnostics || serviceError?.prompt_diagnostics),
-    quality_loop: compactStandaloneQualityLoop(serviceError?.qualityLoop || serviceError?.quality_loop),
+    ...(!mcpFailure ? {
+      launch_gate_blocker: serviceError?.launchGateBlocker || serviceError?.launch_gate_blocker,
+      reference_report: serviceError?.referenceReport || serviceError?.reference_report,
+      safety_decision: serviceError?.safetyDecision || serviceError?.safety_decision,
+      prompt_diagnostics: compactStandalonePromptDiagnostics(serviceError?.promptDiagnostics || serviceError?.prompt_diagnostics),
+      quality_loop: compactStandaloneQualityLoop(serviceError?.qualityLoop || serviceError?.quality_loop),
+    } : {}),
     config_snapshot: configSnapshot,
   }
   const scrubbed = createMcpSecretScrubber().scrubValue(payload)
@@ -417,7 +704,88 @@ export function buildStandaloneProseServiceErrorPayload(serviceError: any, pipel
   return scrubbed
 }
 
-export function compactStandaloneProseProgressStage(stage: any = {}) {
+function minimalStandaloneMcpProgressStage(stageKey = '') {
+  const publicStageKey = STANDALONE_ERROR_PIPELINE_STAGES.has(stageKey) ? stageKey : undefined
+  return {
+    ...(publicStageKey ? { key: publicStageKey } : {}),
+    label: publicStageKey ? standaloneProseServiceStageLabel(publicStageKey) : 'MCP 阶段',
+  }
+}
+
+function compactStandaloneMcpProgressStage(
+  stage: Record<string, unknown>,
+  stageKey: string,
+  authoritativeStageKey = false,
+) {
+  const publicStageKey = STANDALONE_ERROR_PIPELINE_STAGES.has(stageKey) ? stageKey : undefined
+  const key = boundedPipelineSlug(stage?.key)
+  const explicitStage = boundedPipelineSlug(stage?.stage)
+  const status = boundedPipelineSlug(stage?.status)
+  const elapsedMs = boundedPipelineNumber(stage?.elapsed_ms, 0, 86_400_000, true)
+  const detail = typeof stage?.detail === 'string' ? stage.detail : ''
+  const parsedRecovery = detail.match(/^phase=(transport|drive_sync|session_create|session_poll); recovery_round=(\d{1,4})$/)
+  const explicitPhase = boundedPipelineSlug(stage?.phase)
+  const phase = explicitPhase && MCP_PUBLIC_RECOVERY_PHASES.has(explicitPhase)
+    ? explicitPhase
+    : parsedRecovery?.[1]
+  const explicitRecoveryCount = [stage?.recovery_count, stage?.recovery_round]
+    .map(value => boundedPipelineNumber(value, 0, 1_000, true))
+    .find(value => value !== undefined)
+  const parsedRecoveryCount = parsedRecovery
+    ? boundedPipelineNumber(Number(parsedRecovery[2]), 0, 1_000, true)
+    : undefined
+  const recoveryCount = explicitRecoveryCount ?? parsedRecoveryCount
+  return {
+    ...(publicStageKey && (authoritativeStageKey || key === publicStageKey) ? { key: publicStageKey } : {}),
+    ...(!authoritativeStageKey && publicStageKey && explicitStage === publicStageKey ? { stage: explicitStage } : {}),
+    label: publicStageKey ? standaloneProseServiceStageLabel(publicStageKey) : 'MCP 阶段',
+    ...(status && STANDALONE_ERROR_PIPELINE_STATUSES.has(status) ? { status } : {}),
+    ...(phase ? { phase } : {}),
+    ...(recoveryCount !== undefined ? { recovery_count: recoveryCount } : {}),
+    ...(elapsedMs !== undefined ? { elapsed_ms: elapsedMs } : {}),
+  }
+}
+
+export function compactStandaloneProseProgressStage(
+  stage: any = {},
+  projection: StandaloneMcpProjectionContext = {},
+) {
+  try {
+    return compactStandaloneProseProgressStageInternal(stage, projection)
+  } catch {
+    const projectionContext = snapshotStandaloneMcpProjectionContext(projection)
+    return minimalStandaloneMcpProgressStage(projectionContext?.stageKey)
+  }
+}
+
+function compactStandaloneProseProgressStageInternal(
+  stage: any,
+  projection: StandaloneMcpProjectionContext,
+) {
+  const projectionContext = snapshotStandaloneMcpProjectionContext(projection)
+  if (!projectionContext) return minimalStandaloneMcpProgressStage()
+  const stageSnapshot = snapshotOwnDataFields(stage, [
+    'key', 'stage', 'status', 'elapsed_ms', 'detail', 'phase', 'recovery_count', 'recovery_round',
+    'session_id', 'sessionId', 'snapshot_hash', 'snapshotHash',
+  ])
+  if (!stageSnapshot.ok) return minimalStandaloneMcpProgressStage(projectionContext.stageKey)
+  const stageValues = stageSnapshot.values
+  if (projectionContext.mcpTask) {
+    const stageKey = boundedPipelineSlug(projectionContext.stageKey) || ''
+    return compactStandaloneMcpProgressStage(stageValues, stageKey, true)
+  }
+  const rawMcpStageKey = [stageValues.key, stageValues.stage]
+    .find(value => typeof value === 'string' && (value.startsWith('mcp_') || value === 'session_created'))
+  const carriesMcpIdentity = [stageValues.session_id, stageValues.sessionId, stageValues.snapshot_hash, stageValues.snapshotHash]
+    .some(value => typeof value === 'string' && value.length > 0)
+  if (rawMcpStageKey || carriesMcpIdentity) {
+    const stageKey = boundedPipelineSlug(rawMcpStageKey)
+      || [stageValues.key, stageValues.stage]
+        .map(value => boundedPipelineSlug(value))
+        .find(value => value && STANDALONE_ERROR_PIPELINE_STAGES.has(value))
+      || ''
+    return compactStandaloneMcpProgressStage(stageValues, stageKey)
+  }
   const sceneCards = asArray(stage?.scene_cards || stage?.sceneCards)
   const compacted = compactStandaloneProseProgressValue(stage) || {}
   if (sceneCards.length > 0 && compacted.scene_card_count === undefined) {
@@ -714,10 +1082,11 @@ export function standaloneProseServiceStageLabel(key: string) {
     zhuque_fast: '朱雀验证快路径',
     mcp_connect: '连接 MCP 服务',
     mcp_capabilities: '检查 MCP 工具能力',
+    mcp_transport_stabilizing: '稳定 MCP 连接',
     mcp_drive_sync: '同步 Agent Drive',
-    mcp_session_create: '创建远端章节 Session',
-    mcp_session_wait: '等待远端 Agent',
-    mcp_extract: '提取候选正文',
+    mcp_session_create: '创建阶段 Session',
+    mcp_session_wait: '等待阶段 Agent',
+    mcp_extract: '提取阶段结果',
     quality_pipeline: '进入 MangaForge 质检',
   }
   return labels[key] || key
@@ -743,7 +1112,8 @@ export function standaloneProseServiceErrorStatus(error: any) {
   if (code === 'MCP_AUTH_FAILED') return 401
   if (code === 'MCP_BINDING_INVALID') return 412
   if (code === 'MCP_BINDING_CHANGED' || code === 'MCP_AGENT_BUSY' || code === 'MCP_AGENT_QUARANTINED') return 409
-  if (code === 'MCP_SEND_UNKNOWN') return 502
+  if (code === 'MCP_SERVER_NOT_READY') return 503
+  if (code === 'MCP_SEND_UNKNOWN' || code === 'MCP_DRIVE_SYNC_FAILED') return 502
   if (code === 'MCP_INPUT_REQUIRED') return 422
   if (code === 'MCP_GENERATION_TIMEOUT' || code === 'MCP_CONNECT_TIMEOUT') return 504
   if (code.includes('PREFLIGHT') || code.includes('LAUNCH_GATE') || code.includes('SCENE_CARDS')) return 412

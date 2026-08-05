@@ -14,22 +14,31 @@ export function formatMcpGenerationFailure(payload: any) {
   const fallback = String(payload?.error || payload?.message || '')
   const receiptStatus = payload?.receipt_status
   if (receiptStatus === 'send_unknown') {
-    return `${fallback || '正文生成失败'}：发送结果无法确认，请不要重新发送；先到 MCP Services 检查远端状态。`
+    return '正文生成失败：发送结果无法确认，请不要重新发送；先到 MCP Services 检查远端状态。'
   }
   if (receiptStatus === 'remote_cancel_unknown') {
-    return `${fallback || '正文生成失败'}：远端可能仍在运行，请先到 MCP Services 检查远端状态。`
+    return '正文生成失败：远端可能仍在运行，请先到 MCP Services 检查远端状态。'
   }
   if (code === 'MCP_BINDING_CHANGED') {
-    return `${fallback || '正文生成失败'}：正文来源已变更，请重新确认项目的 MCP 绑定后再生成。`
+    return '正文生成失败：正文来源已变更，请重新确认项目的 MCP 绑定后再生成。'
   }
   if (code === 'MCP_AGENT_BUSY') {
-    return `${fallback || '正文生成失败'}：远端 Agent 仍在处理上一项任务，请稍后再试。`
+    return '正文生成失败：远端 Agent 仍在处理上一项任务，请稍后再试。'
   }
   if (code === 'MCP_SEND_UNKNOWN') {
-    return `${fallback || '正文生成失败'}：发送结果无法确认，请不要重新发送；先到 MCP Services 检查远端状态。`
+    return '正文生成失败：发送结果无法确认，请不要重新发送；先到 MCP Services 检查远端状态。'
   }
   if (code === 'MCP_AGENT_QUARANTINED') {
-    return `${fallback || '正文生成失败'}：该 Agent 已被安全隔离，请到 MCP Services 执行连接诊断。`
+    return '正文生成失败：该 Agent 已被安全隔离，请到 MCP Services 执行连接诊断。'
+  }
+  if (code === 'MCP_SERVER_NOT_READY') {
+    return 'MCP 服务尚未稳定，当前阶段已暂停；等待 MCP 服务稳定后可从当前阶段继续。'
+  }
+  if (code === 'MCP_DRIVE_SYNC_FAILED') {
+    return 'MCP Drive 同步失败，当前阶段已暂停；请检查 MCP Drive 权限和内容对账，修复后从当前阶段继续。'
+  }
+  if (code.startsWith('MCP_')) {
+    return 'MCP 生成失败：当前阶段已暂停，请确认 MCP 服务状态后从当前阶段继续。'
   }
   return fallback
 }

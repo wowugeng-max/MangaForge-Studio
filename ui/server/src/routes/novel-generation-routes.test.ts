@@ -1,7 +1,65 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
+import { mkdtemp, rm } from 'fs/promises'
+import { EventEmitter } from 'node:events'
+import { tmpdir } from 'os'
 import { join } from 'path'
+import { McpError } from '../mcp/errors'
+import { createNovelChapter, createNovelProject, listNovelRuns } from '../novel'
 import { applyRequestBatchPreflight, buildStandaloneProseServiceErrorPayload, buildStandaloneProseServiceOptions, compactGenerationRequestOverride, compactStandaloneProseProgressStage, extractOhStoryDeliveryReceipts, refreshOhStoryDeliveryReceiptsAfterRevision, selectTargetProsePayload, stringifyNovelGenerationPayload } from './novel-generation-routes'
+import { registerNovelGenerationChapterPipelineRoutes } from './novel-generation/register-chapter-pipeline'
+
+const generationRouteWorkspaces: string[] = []
+
+afterEach(async () => Promise.all(generationRouteWorkspaces.splice(0).map(path => (
+  rm(path, { recursive: true, force: true })
+))))
+
+function runtimeGenerateProseHandler(ctx: any) {
+  const handlers = new Map<string, any>()
+  const app: any = {
+    post(path: string, handler: any) {
+      handlers.set(path, handler)
+      return app
+    },
+  }
+  registerNovelGenerationChapterPipelineRoutes(app, ctx)
+  const handler = handlers.get('/api/novel/chapters/:chapterId/generate-prose')
+  expect(handler).toBeFunction()
+  return handler
+}
+
+function runtimeRouteRequest(chapterId: number, projectId: number) {
+  return Object.assign(new EventEmitter(), {
+    params: { chapterId: String(chapterId) },
+    body: { project_id: projectId },
+    query: {},
+    headers: { accept: 'application/json' },
+    aborted: false,
+    socket: Object.assign(new EventEmitter(), { destroyed: false }),
+  }) as any
+}
+
+function runtimeRouteResponse() {
+  return Object.assign(new EventEmitter(), {
+    statusCode: 200,
+    body: null as any,
+    writableEnded: false,
+    destroyed: false,
+    headersSent: false,
+    socket: Object.assign(new EventEmitter(), { destroyed: false }),
+    setHeader() { return this },
+    status(code: number) { this.statusCode = code; return this },
+    json(body: any) {
+      this.body = body
+      this.writableEnded = true
+      this.headersSent = true
+      return this
+    },
+    write() { return true },
+    end() { this.writableEnded = true; return this },
+  }) as any
+}
 
 const generationRouteSource = [
   'novel-generation/builders.ts',
@@ -14,6 +72,110 @@ const generationRouteSource = [
 ].map(file => readFileSync(join(import.meta.dir, file), 'utf8')).join('\n')
 
 describe('novel generate prose route source guards', () => {
+  test('projects standalone progress and failures from one authoritative MCP task context', () => {
+    const source = generationRouteSource
+
+    expect(source).toContain("resolveChapterGenerationSource(project).active === 'mcp'")
+    expect(source).toContain('compactStandaloneProseProgressStage({')
+    expect(source).toContain('}, { mcpTask })')
+    expect(source).toContain('const errorPayload = buildStandaloneProseServiceErrorPayload(')
+    expect(source).toContain('{ mcpTask })')
+  })
+
+  test('routes authoritative MCP progress through the safe projector before reading or spreading payload', () => {
+    const source = generationRouteSource
+    const markStart = source.indexOf('const markServiceStage = async (key: string, payload: any = {}) => {')
+    const markEnd = source.indexOf('const cleanupStandaloneProseAbortListeners', markStart)
+    const markBlock = source.slice(markStart, markEnd)
+    const strictBranchStart = markBlock.indexOf('if (mcpTask) {')
+    const genericPayloadRead = markBlock.indexOf("const normalizedPayload = payload && typeof payload === 'object'")
+
+    expect(markStart).toBeGreaterThanOrEqual(0)
+    expect(markEnd).toBeGreaterThan(markStart)
+    expect(strictBranchStart).toBeGreaterThanOrEqual(0)
+    expect(genericPayloadRead).toBeGreaterThan(strictBranchStart)
+    expect(markBlock).toContain('compactStandaloneProseProgressStage(payload, { mcpTask: true, stageKey: key })')
+    expect(markBlock.slice(strictBranchStart, genericPayloadRead)).not.toContain('...payload')
+    expect(markBlock.slice(strictBranchStart, genericPayloadRead)).not.toContain('standaloneProseServiceStageDetail(payload)')
+  })
+
+  test('maps standalone failure status from the safe payload instead of reading the raw service error again', () => {
+    const source = generationRouteSource
+    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
+    const catchStart = source.indexOf('} catch (serviceError: any) {', routeStart)
+    const catchEnd = source.indexOf('\n        }\n      }', catchStart)
+    const catchBlock = source.slice(catchStart, catchEnd)
+
+    expect(catchStart).toBeGreaterThan(routeStart)
+    expect(catchEnd).toBeGreaterThan(catchStart)
+    expect(catchBlock).toContain('const status = standaloneProseServiceErrorStatus({')
+    expect(catchBlock).toContain('code: errorPayload.error_code,')
+    expect(catchBlock).toContain('message: errorPayload.error,')
+    expect(catchBlock).not.toContain('standaloneProseServiceErrorStatus(serviceError)')
+  })
+
+  test('preserves authoritative MCP progress identity in failed JSON and persisted run output', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-route-stage-'))
+    generationRouteWorkspaces.push(workspace)
+    const project = await createNovelProject(workspace, {
+      title: 'MCP Drive 阶段失败',
+      reference_config: {
+        chapter_generation_source: {
+          version: 'chapter_generation_source_v1',
+          active: 'mcp',
+          model: {},
+          mcp: {
+            server_id: 'buda',
+            key_id: 1,
+            adapter_id: 'buda',
+            agent_id: 'agent-1',
+            model: 'buda-model',
+          },
+        },
+      },
+    })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: 'Drive 同步',
+    })
+    const handler = runtimeGenerateProseHandler({
+      getWorkspace: () => workspace,
+      getProject: async () => project,
+      buildAgentConfigSnapshot: () => ({ generation_source: 'mcp' }),
+      generateChapterForGroup: async (_workspace: string, _projectId: number, _chapterId: number, options: any) => {
+        await options.onStage('mcp_drive_sync', { status: 'running', phase: 'drive_sync' })
+        throw new McpError('MCP_DRIVE_SYNC_FAILED', 'private remote Drive response')
+      },
+    })
+    const response = runtimeRouteResponse()
+
+    await handler(runtimeRouteRequest(chapter.id, project.id), response)
+
+    expect(response.statusCode).toBe(502)
+    expect(response.body).toMatchObject({
+      error: 'MCP Drive 同步失败',
+      error_code: 'MCP_DRIVE_SYNC_FAILED',
+      pipeline: [{
+        stage: 'mcp_drive_sync',
+        status: 'running',
+        phase: 'drive_sync',
+      }],
+    })
+    const [run] = (await listNovelRuns(workspace, project.id))
+      .filter(item => item.run_type === 'generate_prose')
+    expect(run).toMatchObject({ status: 'failed' })
+    expect(JSON.parse(String(run.output_ref || '{}'))).toMatchObject({
+      error_code: 'MCP_DRIVE_SYNC_FAILED',
+      pipeline: [{
+        stage: 'mcp_drive_sync',
+        status: 'running',
+        phase: 'drive_sync',
+      }],
+    })
+    expect(String(run.output_ref)).not.toContain('private remote Drive response')
+  })
+
   test('serializes circular generation payloads without losing shared arrays', () => {
     const shared = [{ chapter_no: 1, status: 'success' }]
     const payload: any = {
@@ -710,7 +872,11 @@ describe('novel generate prose route source guards', () => {
     expect(routeStart).toBeGreaterThanOrEqual(0)
     expect(catchStart).toBeGreaterThan(routeStart)
     expect(catchEnd).toBeGreaterThan(catchStart)
-    expect(catchBlock).toContain('const errorPayload = buildStandaloneProseServiceErrorPayload(serviceError, pipeline, configSnapshot, { chapter_id: chapterId, chapter_no: standaloneChapter?.chapter_no })')
+    expect(catchBlock).toContain('const errorPayload = buildStandaloneProseServiceErrorPayload(')
+    expect(catchBlock).toContain('serviceError,')
+    expect(catchBlock).toContain('configSnapshot,')
+    expect(catchBlock).toContain('{ chapter_id: chapterId, chapter_no: standaloneChapter?.chapter_no },')
+    expect(catchBlock).toContain('{ mcpTask },')
     expect(catchBlock).toContain('output_ref: stringifyNovelGenerationPayload(errorPayload)')
     expect(catchBlock).toContain("res.write(sseData({ type: 'error', ...errorPayload }))")
     expect(catchBlock).toContain('return res.status(status).json(errorPayload)')

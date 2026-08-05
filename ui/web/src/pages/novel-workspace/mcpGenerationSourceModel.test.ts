@@ -10,6 +10,75 @@ import {
 import * as generationSourceModel from './mcpGenerationSourceModel'
 
 describe('project MCP generation source model', () => {
+  test('pauses a not-ready MCP stage without suggesting a model fallback', () => {
+    const formatted = generationSourceModel.formatMcpGenerationFailure({
+      error_code: 'MCP_SERVER_NOT_READY',
+      phase: 'session_create',
+      error: '请切换模型或回退模型 API',
+    })
+
+    expect(formatted).toContain('当前阶段已暂停')
+    expect(formatted).toContain('MCP 服务稳定')
+    expect(formatted).not.toContain('切换模型')
+    expect(formatted).not.toContain('模型 API')
+    expect(formatted).not.toContain('回退')
+  })
+
+  test('uses Drive-specific reconciliation guidance for MCP Drive failures', () => {
+    const formatted = generationSourceModel.formatMcpGenerationFailure({
+      error_code: 'MCP_DRIVE_SYNC_FAILED',
+      phase: 'drive_sync',
+      error: '请切换模型重试',
+    })
+
+    expect(formatted).toContain('MCP Drive 权限')
+    expect(formatted).toContain('内容对账')
+    expect(formatted).toContain('当前阶段')
+    expect(formatted).not.toContain('切换模型')
+  })
+
+  test('does not reflect fallback advice from any structured MCP failure', () => {
+    const reflectedAdvice = '请切换模型、调用模型 API 或回退到大模型。'
+    const payloads = [
+      { error_code: 'MCP_BINDING_CHANGED', error: reflectedAdvice },
+      { error_code: 'MCP_AGENT_BUSY', error: reflectedAdvice },
+      { error_code: 'MCP_SEND_UNKNOWN', error: reflectedAdvice, receipt_status: 'send_unknown' },
+      { error_code: 'MCP_AGENT_QUARANTINED', error: reflectedAdvice },
+      { error_code: 'MCP_CANCELLED', error: reflectedAdvice, receipt_status: 'remote_cancel_unknown' },
+      { error_code: 'MCP_SESSION_FAILED', error: reflectedAdvice },
+    ]
+
+    for (const payload of payloads) {
+      const formatted = generationSourceModel.formatMcpGenerationFailure(payload)
+      expect(formatted).not.toContain('切换模型')
+      expect(formatted).not.toContain('模型 API')
+      expect(formatted).not.toContain('回退')
+    }
+  })
+
+  test('never reflects fallback or remote text for generic MCP failures and receipts', () => {
+    const remoteTexts = [
+      '建议改用其他大模型继续',
+      '建议换一个模型重试',
+      '请改走 provider 接口',
+      'private remote response body',
+    ]
+
+    for (const error of remoteTexts) {
+      const failure = generationSourceModel.formatMcpGenerationFailure({
+        error_code: 'MCP_SESSION_FAILED',
+        error,
+      })
+      const receipt = generationSourceModel.formatMcpGenerationFailure({
+        error_code: 'UNKNOWN',
+        error,
+        receipt_status: 'send_unknown',
+      })
+      expect(failure).not.toContain(error)
+      expect(receipt).not.toContain(error)
+    }
+  })
+
   test('formats stable MCP generation failures without suggesting a model fallback', () => {
     const formatMcpGenerationFailure = Reflect.get(generationSourceModel, 'formatMcpGenerationFailure')
     expect(typeof formatMcpGenerationFailure).toBe('function')
@@ -57,7 +126,7 @@ describe('project MCP generation source model', () => {
       error_code: 'MCP_SESSION_FAILED',
       error: '原始失败消息',
       receipt_status: 'remote_status_untrusted',
-    })).toBe('原始失败消息')
+    })).toBe('MCP 生成失败：当前阶段已暂停，请确认 MCP 服务状态后从当前阶段继续。')
   })
 
   test('builds a provider-neutral MCP binding payload without an active source record', () => {

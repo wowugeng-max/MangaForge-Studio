@@ -7,6 +7,7 @@ import {
   updateNovelRun,
 } from '../novel'
 import { isChapterTaskId } from '../novel-writing-service/generation-source/types'
+import { classifyGenerationFailure } from './novel-generation/builders'
 import { advanceSceneProduction, compactText, getQualityGate, getSafetyPolicy, getStyleLock, normalizeSceneProduction, parseJsonLikePayload } from './novel-route-utils'
 import { collectChapterWarnings, compactRunChapterItem, compactRunPayload, compactRunSceneCard, compactRunStateValue, compactWarningList, hashText, isAbortLikeError, requestRuntimeGc, runJson } from './novel-production/run-state'
 import { appendPostDeliveryQualityRepairRun, buildOhStoryBatchQualityCheck, buildOhStoryPostDeliveryQuality, buildPostDeliveryQualityRepairFingerprint, buildPostDeliveryQualityRepairTasks, buildReturnedApprovalBlocker, findExistingApprovalBlocker, findExistingTerminalAdmission } from './novel-production/post-delivery-quality'
@@ -198,17 +199,6 @@ export function createNovelProductionService() {
       reasons,
       usage: { generated_today: generatedToday, failed_runs: failedRuns, failure_rate: failureRate, safety_blocks: safetyBlocks, total_runs_today: todayRuns.length },
     }
-  }
-
-  const classifyGenerationFailure = (error: any) => {
-    const text = String(error?.message || error?.error || error || '')
-    if (text.includes('upload current user input file') || text.includes('upload file failed')) return { type: 'provider_upload_failed', actions: ['缩短上下文后重试', '切换模型重试', '把章节批量拆小'] }
-    if (text.includes('JSON') || text.includes('解析')) return { type: 'json_parse_failed', actions: ['使用 JSON 修复解析', '降低输出字段复杂度后重试'] }
-    if (text.includes('模型未返回正文') || text.includes('未返回正文')) return { type: 'empty_prose', actions: ['降低上下文字数重试', '强制重新生成场景卡', '切换正文模型'] }
-    if (text.includes('仿写安全') || text.includes('REFERENCE_SAFETY_BLOCKED')) return { type: 'reference_safety_blocked', actions: ['生成参考迁移计划', '替换高风险专名和桥段', '降低参考强度后重试'] }
-    if (text.includes('前置检查') || text.includes('PREFLIGHT')) return { type: 'preflight_blocked', actions: ['补齐章节目标/结尾钩子/角色状态', '生成场景卡', '允许缺材料继续'] }
-    if (error?.code === 'APPROVAL_REQUIRED') return { type: 'approval_required', actions: ['人工确认当前关卡', '调整审批策略', '确认后继续执行'] }
-    return { type: 'unknown', actions: ['查看原始错误', '手动重试', '切换模型重试'] }
   }
 
   const getAgentPromptConfig = (project: any) => ({

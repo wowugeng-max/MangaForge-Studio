@@ -14,6 +14,7 @@ import {
 import { buildMaterialScore } from '../novel-chapter-context-routes'
 import { asArray, buildLLMResultDiagnostics, compactText, getNovelPayload, normalizeSceneProduction, parseJsonLikePayload, safeJsonStringify } from '../novel-route-utils'
 import { applyChapterWordTargetToContext, countProseChars, normalizeDeliveryRiskReceipts, resolveChapterWordTarget } from '../../novel-writing-service'
+import { resolveChapterGenerationSource } from '../../novel-writing-service/generation-source/source-config'
 import { compactProseGenerationOverride } from '../../novel-writing/prose-generation-contract'
 import type {
   GenerationRoutesContext,
@@ -197,20 +198,26 @@ export function registerNovelGenerationChapterPipelineRoutes(app: Express, ctx: 
       const autoRepairQualityGate = req.body?.auto_repair_quality_gate === true || req.body?.quality_gate_repair === true
       const project = await ctx.getProject(activeWorkspace, projectId)
       if (!project) return res.status(404).json({ error: 'project not found' })
+      const mcpTask = resolveChapterGenerationSource(project).active === 'mcp'
       const standaloneChapter = (await listNovelChapters(activeWorkspace, projectId)).find(item => item.id === chapterId)
       const configSnapshot = ctx.buildAgentConfigSnapshot(project, modelId)
       {
         const pipeline: any[] = []
         const markServiceStage = async (key: string, payload: any = {}) => {
-          const normalizedPayload = payload && typeof payload === 'object' ? payload : { detail: payload }
-          const stage = compactStandaloneProseProgressStage({
-            key,
-            label: standaloneProseServiceStageLabel(key),
-            status: normalizedPayload.status || 'running',
-            detail: standaloneProseServiceStageDetail(normalizedPayload),
-            at: new Date().toISOString(),
-            ...normalizedPayload,
-          })
+          let stage: any
+          if (mcpTask) {
+            stage = compactStandaloneProseProgressStage(payload, { mcpTask: true, stageKey: key })
+          } else {
+            const normalizedPayload = payload && typeof payload === 'object' ? payload : { detail: payload }
+            stage = compactStandaloneProseProgressStage({
+              key,
+              label: standaloneProseServiceStageLabel(key),
+              status: normalizedPayload.status || 'running',
+              detail: standaloneProseServiceStageDetail(normalizedPayload),
+              at: new Date().toISOString(),
+              ...normalizedPayload,
+            }, { mcpTask })
+          }
           pipeline.push(stage)
           if (wantsStream && !res.writableEnded) {
             res.write(sseData({ type: 'progress', progress: stage.label, pipeline, stage }))
@@ -307,7 +314,13 @@ export function registerNovelGenerationChapterPipelineRoutes(app: Express, ctx: 
         } catch (serviceError: any) {
           standaloneProseCompleted = true
           cleanupStandaloneProseAbortListeners()
-          const errorPayload = buildStandaloneProseServiceErrorPayload(serviceError, pipeline, configSnapshot, { chapter_id: chapterId, chapter_no: standaloneChapter?.chapter_no })
+          const errorPayload = buildStandaloneProseServiceErrorPayload(
+            serviceError,
+            pipeline,
+            configSnapshot,
+            { chapter_id: chapterId, chapter_no: standaloneChapter?.chapter_no },
+            { mcpTask },
+          )
           await appendNovelRun(activeWorkspace, {
             project_id: projectId,
             run_type: 'generate_prose',
@@ -317,7 +330,10 @@ export function registerNovelGenerationChapterPipelineRoutes(app: Express, ctx: 
             output_ref: stringifyNovelGenerationPayload(errorPayload),
             error_message: errorPayload.error,
           })
-          const status = standaloneProseServiceErrorStatus(serviceError)
+          const status = standaloneProseServiceErrorStatus({
+            code: errorPayload.error_code,
+            message: errorPayload.error,
+          })
           if (wantsStream) {
             res.write(sseData({ type: 'error', ...errorPayload }))
             res.end()
