@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
+import { createHash } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createNovelProject, listNovelRuns } from '../../novel'
+import { createNovelChapter, createNovelProject, listNovelRuns } from '../../novel'
+import type { NovelChapterStageArtifactRecord } from '../../novel'
 import { validateMcpStageResponse } from './stage-response-contract'
 import { createChapterStageRecorder, projectChapterTaskProvenance } from './stage-receipts'
 
@@ -15,14 +17,57 @@ async function fixture() {
   const activeWorkspace = await mkdtemp(join(tmpdir(), 'mangaforge-stage-receipt-'))
   workspaces.push(activeWorkspace)
   const project = await createNovelProject(activeWorkspace, { title: '收据测试项目' })
+  const chapter = await createNovelChapter(activeWorkspace, {
+    project_id: project.id,
+    chapter_no: 1,
+    title: '第一章',
+  })
   const provenance = {
-    task_id: 'task-stage-1', project_id: project.id, chapter_id: 12, source: 'model' as const,
+    task_id: 'task-stage-1', project_id: project.id, chapter_id: chapter.id, source: 'model' as const,
     source_fingerprint: `sha256:${'a'.repeat(64)}`,
     authority_fingerprint: `sha256:${'c'.repeat(64)}`,
     context_version: `sha256:${'b'.repeat(64)}`,
     model_id: 217,
   }
   return { activeWorkspace, provenance }
+}
+
+function sha256(value: string) {
+  return `sha256:${createHash('sha256').update(value, 'utf8').digest('hex')}`
+}
+
+function artifactRecord(
+  patch: Partial<NovelChapterStageArtifactRecord> = {},
+): NovelChapterStageArtifactRecord {
+  const output_payload = patch.output_payload ?? JSON.stringify({ output: 'cached' })
+  return {
+    id: 41,
+    task_id: 'task-stage-1',
+    project_id: 1,
+    chapter_id: 1,
+    stage: 'quality_review',
+    attempt: 2,
+    status: 'success',
+    input_hash: `sha256:${'d'.repeat(64)}`,
+    output_hash: sha256(output_payload),
+    response_contract: 'quality_review_json',
+    output_payload,
+    source: 'model',
+    source_fingerprint: `sha256:${'a'.repeat(64)}`,
+    authority_fingerprint: `sha256:${'c'.repeat(64)}`,
+    context_version: `sha256:${'b'.repeat(64)}`,
+    server_id: null,
+    key_id: null,
+    adapter_id: null,
+    agent_id: null,
+    model: null,
+    session_id: null,
+    snapshot_hash: null,
+    error_code: '',
+    created_at: '2026-08-05T00:00:00.000Z',
+    updated_at: '2026-08-05T00:00:00.000Z',
+    ...patch,
+  }
 }
 
 function deleteStageRuns(activeWorkspace: string) {
@@ -35,6 +80,504 @@ function deleteStageRuns(activeWorkspace: string) {
 }
 
 describe('chapter generation stage receipts', () => {
+  test('returns an exact successful artifact and appends a bounded cache-hit Run without calling the provider', async () => {
+    const { activeWorkspace, provenance } = await fixture()
+    let providerCalls = 0
+    let observedIdentity: any
+    const reusable = artifactRecord({
+      project_id: provenance.project_id,
+      chapter_id: provenance.chapter_id,
+      output_payload: JSON.stringify({ output: 'cached' }),
+    })
+    reusable.output_hash = sha256(reusable.output_payload)
+    const recordStage = createChapterStageRecorder({
+      activeWorkspace,
+      provenance: () => provenance,
+      artifacts: {
+        findReusable: async (_workspace: string, identity: any) => {
+          observedIdentity = identity
+          return { ...reusable, input_hash: identity.input_hash }
+        },
+      },
+    } as any)
+
+    const result = await recordStage('quality_review', {
+      prompt: 'same prompt', responseContract: 'quality_review_json',
+    }, async () => { providerCalls += 1; return { output: 'remote' } })
+
+    expect(result).toEqual({ output: 'cached' })
+    expect(providerCalls).toBe(0)
+    expect(observedIdentity).toEqual({
+      task_id: provenance.task_id,
+      project_id: provenance.project_id,
+      chapter_id: provenance.chapter_id,
+      stage: 'quality_review',
+      input_hash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+      response_contract: 'quality_review_json',
+      source: 'model',
+      source_fingerprint: provenance.source_fingerprint,
+      authority_fingerprint: provenance.authority_fingerprint,
+      context_version: provenance.context_version,
+      server_id: null,
+      key_id: null,
+      adapter_id: null,
+      agent_id: null,
+      model: null,
+    })
+    const [run] = await listNovelRuns(activeWorkspace, provenance.project_id)
+    expect(run).toMatchObject({ status: 'success', step_name: 'quality_review' })
+    expect(JSON.parse(run.output_ref!)).toEqual({
+      receipt_authority: 'chapter_generation_stage_v1',
+      ...provenance,
+      stage: 'quality_review',
+      status: 'success',
+      attempt: 2,
+      artifact_id: 41,
+      input_hash: observedIdentity.input_hash,
+      output_hash: reusable.output_hash,
+      response_contract: 'quality_review_json',
+      cache_hit: true,
+      elapsed_ms: expect.any(Number),
+    })
+  })
+
+  test('orders cache misses as artifact running, validated output, artifact success, then Run success', async () => {
+    const { activeWorkspace, provenance } = await fixture()
+    const events: string[] = []
+    const running = artifactRecord({
+      id: 51,
+      project_id: provenance.project_id,
+      chapter_id: provenance.chapter_id,
+      status: 'running',
+      attempt: 1,
+      output_payload: '',
+      output_hash: '',
+    })
+    const recordStage = createChapterStageRecorder({
+      activeWorkspace,
+      provenance: () => provenance,
+      artifacts: {
+        findReusable: async () => null,
+        findLatestSuccessful: async () => null,
+        begin: async (_workspace: string, identity: any) => {
+          events.push('artifact_running')
+          return { ...running, ...identity }
+        },
+        complete: async (_workspace: string, _id: number, output: any) => {
+          events.push('artifact_success')
+          return { ...running, status: 'success', ...output }
+        },
+      },
+    } as any)
+
+    const result = await recordStage('draft', {
+      prompt: 'prompt', responseContract: 'draft_prose',
+    }, async () => {
+      events.push('validated')
+      return { prose_chapters: [{ chapter_no: 1, chapter_text: '正文' }] }
+    })
+    const [run] = await listNovelRuns(activeWorkspace, provenance.project_id)
+    if (run.status === 'success') events.push('run_success')
+
+    expect(result).toEqual({ prose_chapters: [{ chapter_no: 1, chapter_text: '正文' }] })
+    expect(events).toEqual(['artifact_running', 'validated', 'artifact_success', 'run_success'])
+  })
+
+  test('marks uncertain MCP mutations ambiguous with only the bounded code', async () => {
+    const { activeWorkspace, provenance } = await fixture()
+    const failures: any[] = []
+    const running = artifactRecord({
+      id: 61,
+      project_id: provenance.project_id,
+      chapter_id: provenance.chapter_id,
+      status: 'running',
+      output_payload: '',
+      output_hash: '',
+    })
+    const recordStage = createChapterStageRecorder({
+      activeWorkspace,
+      provenance: () => ({ ...provenance, source: 'mcp' as const }),
+      artifacts: {
+        findReusable: async () => null,
+        findLatestSuccessful: async () => null,
+        begin: async (_workspace: string, identity: any) => ({ ...running, ...identity }),
+        fail: async (...args: any[]) => { failures.push(args); return running },
+      },
+    } as any)
+    const providerError = Object.assign(new Error('PRIVATE_REMOTE_BODY'), { code: 'MCP_SEND_UNKNOWN' })
+
+    await expect(recordStage('revision', {
+      prompt: '修订', responseContract: 'revision_prose',
+    }, async () => { throw providerError })).rejects.toBe(providerError)
+
+    expect(failures).toEqual([[activeWorkspace, running.id, 'ambiguous', 'MCP_SEND_UNKNOWN']])
+    expect(JSON.stringify(failures)).not.toContain('PRIVATE_REMOTE_BODY')
+  })
+
+  test('invalidates every mismatched identity anchor before beginning the replacement attempt', async () => {
+    const mismatchFields = [
+      'project_id', 'chapter_id', 'input_hash', 'response_contract', 'source',
+      'source_fingerprint', 'authority_fingerprint', 'context_version',
+      'server_id', 'key_id', 'adapter_id', 'agent_id', 'model',
+    ] as const
+    for (const [mismatchIndex, mismatchField] of mismatchFields.entries()) {
+      const { activeWorkspace, provenance } = await fixture()
+      const events: string[] = []
+      let exactIdentity: any
+      const running = artifactRecord({
+        id: 70,
+        project_id: provenance.project_id,
+        chapter_id: provenance.chapter_id,
+        status: 'running',
+        output_payload: '',
+        output_hash: '',
+      })
+      const recordStage = createChapterStageRecorder({
+        activeWorkspace,
+        provenance: () => provenance,
+        artifacts: {
+          findReusable: async (_workspace: string, identity: any) => {
+            exactIdentity = identity
+            return null
+          },
+          findLatestSuccessful: async () => artifactRecord({
+            ...exactIdentity,
+            id: 69,
+            status: mismatchIndex % 2 === 0 ? 'success' : 'compacted',
+            [mismatchField]: mismatchField === 'key_id'
+              ? 999
+              : mismatchField === 'project_id' || mismatchField === 'chapter_id'
+                ? 999
+                : mismatchField === 'source'
+                  ? 'mcp'
+                  : mismatchField === 'response_contract'
+                    ? 'revision_prose'
+                    : mismatchField.endsWith('fingerprint') || mismatchField === 'input_hash'
+                      ? `sha256:${'f'.repeat(64)}`
+                      : `different-${mismatchField}`,
+          }),
+          invalidateFrom: async (_workspace: string, id: number) => {
+            events.push(`invalidate:${id}`)
+            return 2
+          },
+          begin: async (_workspace: string, identity: any) => {
+            events.push('begin')
+            return { ...running, ...identity }
+          },
+          complete: async (_workspace: string, _id: number, output: any) => ({
+            ...running,
+            ...exactIdentity,
+            ...output,
+            status: 'success',
+          }),
+        },
+      } as any)
+
+      await recordStage('quality_review', {
+        prompt: 'identity prompt', responseContract: 'quality_review_json',
+      }, async () => ({ score: 88 }))
+
+      expect(events, mismatchField).toEqual(['invalidate:69', 'begin'])
+    }
+  })
+
+  test('hashes the exact canonical input identity and maps MCP artifact provenance fields', async () => {
+    const { activeWorkspace, provenance } = await fixture()
+    const prompt = 'canonical prompt'
+    const mcpProvenance = {
+      ...provenance,
+      source: 'mcp' as const,
+      server_id: 'server-1',
+      key_id: 7,
+      adapter_id: 'adapter-1',
+      agent_id: 'agent-1',
+      model: 'model-1',
+    }
+    let observed: any
+    const recordStage = createChapterStageRecorder({
+      activeWorkspace,
+      provenance: () => mcpProvenance,
+      artifacts: {
+        findReusable: async (_workspace: string, identity: any) => {
+          observed = identity
+          return artifactRecord({
+            ...identity,
+            id: 81,
+            attempt: 3,
+            output_payload: JSON.stringify({ output: 'cached' }),
+          })
+        },
+      },
+    } as any)
+
+    await recordStage('revision', {
+      prompt, responseContract: 'revision_prose',
+    }, async () => { throw new Error('cache hit must skip callback') })
+
+    const expectedInputIdentity = {
+      task_id: mcpProvenance.task_id,
+      project_id: mcpProvenance.project_id,
+      chapter_id: mcpProvenance.chapter_id,
+      stage: 'revision',
+      prompt_hash: sha256(prompt),
+      response_contract: 'revision_prose',
+      source: 'mcp',
+      source_fingerprint: mcpProvenance.source_fingerprint,
+      authority_fingerprint: mcpProvenance.authority_fingerprint,
+      context_version: mcpProvenance.context_version,
+    }
+    expect(observed).toEqual({
+      task_id: mcpProvenance.task_id,
+      project_id: mcpProvenance.project_id,
+      chapter_id: mcpProvenance.chapter_id,
+      stage: 'revision',
+      input_hash: sha256(JSON.stringify(expectedInputIdentity)),
+      response_contract: 'revision_prose',
+      source: 'mcp',
+      source_fingerprint: mcpProvenance.source_fingerprint,
+      authority_fingerprint: mcpProvenance.authority_fingerprint,
+      context_version: mcpProvenance.context_version,
+      server_id: 'server-1',
+      key_id: 7,
+      adapter_id: 'adapter-1',
+      agent_id: 'agent-1',
+      model: 'model-1',
+    })
+  })
+
+  test('attaches the artifact remote identity before resolving the running Run fence', async () => {
+    const { activeWorkspace, provenance } = await fixture()
+    const events: string[] = []
+    const attachStarted = Promise.withResolvers<void>()
+    const releaseAttach = Promise.withResolvers<void>()
+    const running = artifactRecord({
+      id: 91,
+      project_id: provenance.project_id,
+      chapter_id: provenance.chapter_id,
+      status: 'running',
+      output_payload: '',
+      output_hash: '',
+    })
+    const recordStage = createChapterStageRecorder({
+      activeWorkspace,
+      provenance: () => ({ ...provenance, source: 'mcp' as const }),
+      artifacts: {
+        findReusable: async () => null,
+        findLatestSuccessful: async () => null,
+        begin: async (_workspace: string, identity: any) => ({ ...running, ...identity }),
+        attachRemoteIdentity: async () => {
+          events.push('artifact_attach_start')
+          attachStarted.resolve()
+          const [run] = await listNovelRuns(activeWorkspace, provenance.project_id)
+          expect(run.output_ref).toBe('')
+          await releaseAttach.promise
+          events.push('artifact_attach_done')
+          return { ...running, session_id: 'session-1', snapshot_hash: 'snapshot-1' }
+        },
+        complete: async (_workspace: string, _id: number, output: any) => ({
+          ...running, status: 'success', ...output,
+        }),
+      },
+    } as any)
+    const stage = recordStage('draft', {
+      prompt: 'draft', responseContract: 'draft_prose',
+    }, async context => {
+      await context.attachRemoteIdentity({ session_id: 'session-1', snapshot_hash: 'snapshot-1' })
+      events.push('provider_poll')
+      return { prose_chapters: [] }
+    })
+
+    await attachStarted.promise
+    expect(events).toEqual(['artifact_attach_start'])
+    releaseAttach.resolve()
+    await stage
+
+    expect(events).toEqual(['artifact_attach_start', 'artifact_attach_done', 'provider_poll'])
+    const [run] = await listNovelRuns(activeWorkspace, provenance.project_id)
+    expect(JSON.parse(run.output_ref!)).not.toHaveProperty('snapshot_hash')
+  })
+
+  test('blocks provider continuation when remote identity persistence fails', async () => {
+    const { activeWorkspace, provenance } = await fixture()
+    const storageFailure = new Error('artifact storage offline')
+    let providerPolls = 0
+    const failures: any[] = []
+    const running = artifactRecord({
+      id: 101,
+      project_id: provenance.project_id,
+      chapter_id: provenance.chapter_id,
+      status: 'running',
+      output_payload: '',
+      output_hash: '',
+    })
+    const recordStage = createChapterStageRecorder({
+      activeWorkspace,
+      provenance: () => provenance,
+      artifacts: {
+        findReusable: async () => null,
+        findLatestSuccessful: async () => null,
+        begin: async (_workspace: string, identity: any) => ({ ...running, ...identity }),
+        attachRemoteIdentity: async () => { throw storageFailure },
+        fail: async (...args: any[]) => { failures.push(args); return running },
+      },
+    } as any)
+
+    const caught: any = await recordStage('draft', {
+      prompt: 'draft', responseContract: 'draft_prose',
+    }, async context => {
+      await context.attachRemoteIdentity({ session_id: 'session-1', snapshot_hash: 'snapshot-1' })
+      providerPolls += 1
+      return { prose_chapters: [] }
+    }).catch(error => error)
+
+    expect(caught).toMatchObject({ code: 'CHAPTER_STAGE_RECEIPT_PERSIST_FAILED' })
+    expect(Object.prototype.propertyIsEnumerable.call(caught, 'cause')).toBe(false)
+    expect(providerPolls).toBe(0)
+    expect(failures[0]?.slice(1)).toEqual([running.id, 'failed', 'CHAPTER_STAGE_RECEIPT_PERSIST_FAILED'])
+  })
+
+  test('maps remote-cancel-unknown evidence to ambiguous and ordinary failures to failed', async () => {
+    for (const variant of [
+      { receipt: 'remote_cancel_unknown', expected: 'ambiguous' },
+      { receipt: 'cancel_confirmed', expected: 'failed' },
+    ] as const) {
+      const { activeWorkspace, provenance } = await fixture()
+      const failures: any[] = []
+      const running = artifactRecord({
+        id: 111,
+        project_id: provenance.project_id,
+        chapter_id: provenance.chapter_id,
+        status: 'running',
+        output_payload: '',
+        output_hash: '',
+      })
+      const recordStage = createChapterStageRecorder({
+        activeWorkspace,
+        provenance: () => provenance,
+        artifacts: {
+          findReusable: async () => null,
+          findLatestSuccessful: async () => null,
+          begin: async (_workspace: string, identity: any) => ({ ...running, ...identity }),
+          fail: async (...args: any[]) => { failures.push(args); return running },
+        },
+      } as any)
+      const providerFailure = Object.assign(new Error('PRIVATE_REMOTE_CANCEL_TEXT'), {
+        code: 'MCP_SESSION_FAILED',
+        details: { receipt_status: variant.receipt, remote: 'PRIVATE_REMOTE_DETAIL' },
+      })
+
+      await expect(recordStage('revision', {
+        prompt: 'revision', responseContract: 'revision_prose',
+      }, async () => { throw providerFailure })).rejects.toBe(providerFailure)
+
+      expect(failures[0]?.slice(1)).toEqual([running.id, variant.expected, 'MCP_SESSION_FAILED'])
+      expect(JSON.stringify(failures)).not.toContain('PRIVATE_REMOTE')
+    }
+  })
+
+  test('does not announce Run success when artifact completion persistence fails', async () => {
+    const { activeWorkspace, provenance } = await fixture()
+    const storageFailure = new Error('complete artifact failed')
+    const running = artifactRecord({
+      id: 121,
+      project_id: provenance.project_id,
+      chapter_id: provenance.chapter_id,
+      status: 'running',
+      output_payload: '',
+      output_hash: '',
+    })
+    const recordStage = createChapterStageRecorder({
+      activeWorkspace,
+      provenance: () => provenance,
+      artifacts: {
+        findReusable: async () => null,
+        findLatestSuccessful: async () => null,
+        begin: async (_workspace: string, identity: any) => ({ ...running, ...identity }),
+        complete: async () => { throw storageFailure },
+      },
+    } as any)
+
+    const caught: any = await recordStage('draft', {
+      prompt: 'draft', responseContract: 'draft_prose',
+    }, async () => ({ prose_chapters: [] })).catch(error => error)
+
+    expect(caught).toMatchObject({ code: 'CHAPTER_STAGE_RECEIPT_PERSIST_FAILED' })
+    expect(caught.cause).toBe(storageFailure)
+    expect(Object.prototype.propertyIsEnumerable.call(caught, 'cause')).toBe(false)
+    const [run] = await listNovelRuns(activeWorkspace, provenance.project_id)
+    expect(run.status).toBe('running')
+    expect(run.output_ref).toBe('')
+  })
+
+  test('treats a corrupted exact artifact payload as a cache miss and executes a new attempt', async () => {
+    const { activeWorkspace, provenance } = await fixture()
+    let providerCalls = 0
+    const recordStage = createChapterStageRecorder({ activeWorkspace, provenance: () => provenance })
+    const execute = () => recordStage('quality_review', {
+      prompt: 'same review prompt', responseContract: 'quality_review_json',
+    }, async () => ({ output: `remote-${++providerCalls}` }))
+
+    expect(await execute()).toEqual({ output: 'remote-1' })
+    const db = new Database(join(activeWorkspace, 'novel.sqlite'))
+    try {
+      db.run(`
+        UPDATE chapter_stage_artifacts
+        SET output_payload = '{"corrupted":'
+        WHERE task_id = ? AND stage = 'quality_review' AND status = 'success'
+      `, provenance.task_id)
+    } finally {
+      db.close()
+    }
+
+    expect(await execute()).toEqual({ output: 'remote-2' })
+    expect(providerCalls).toBe(2)
+  })
+
+  test('uses compacted artifacts only as mismatch history and never as reusable payloads', async () => {
+    const { activeWorkspace, provenance } = await fixture()
+    const events: string[] = []
+    let exactIdentity: any
+    const running = artifactRecord({
+      id: 131,
+      project_id: provenance.project_id,
+      chapter_id: provenance.chapter_id,
+      status: 'running',
+      output_payload: '',
+      output_hash: '',
+    })
+    const recordStage = createChapterStageRecorder({
+      activeWorkspace,
+      provenance: () => provenance,
+      artifacts: {
+        findReusable: async (_workspace: string, identity: any) => {
+          exactIdentity = identity
+          return null
+        },
+        findLatestSuccessful: async () => artifactRecord({
+          ...exactIdentity,
+          id: 130,
+          status: 'compacted',
+          output_payload: '',
+          output_hash: `sha256:${'0'.repeat(64)}`,
+        }),
+        invalidateFrom: async () => { events.push('invalidated'); return 0 },
+        begin: async (_workspace: string, identity: any) => {
+          events.push('begin')
+          return { ...running, ...identity }
+        },
+        complete: async (_workspace: string, _id: number, output: any) => ({
+          ...running, ...exactIdentity, ...output, status: 'success',
+        }),
+      },
+    } as any)
+
+    expect(await recordStage('quality_review', {
+      prompt: 'same review prompt', responseContract: 'quality_review_json',
+    }, async () => ({ output: 'fresh' }))).toEqual({ output: 'fresh' })
+
+    expect(events).toEqual(['begin'])
+  })
+
   test('requires both effective and authority fingerprints in projected provenance', async () => {
     const { provenance } = await fixture()
 
@@ -91,6 +634,9 @@ describe('chapter generation stage receipts', () => {
       stage: 'draft',
       response_contract: 'draft_prose',
       prompt_hash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+      input_hash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+      artifact_id: expect.any(Number),
+      attempt: 1,
     })
     expect(receiptOutput).toMatchObject({
       receipt_authority: 'chapter_generation_stage_v1',
@@ -99,8 +645,9 @@ describe('chapter generation stage receipts', () => {
       status: 'success',
     })
     expect(Object.keys(receiptOutput).sort()).toEqual([
-      'authority_fingerprint', 'chapter_id', 'context_version', 'elapsed_ms', 'model_id', 'project_id', 'source',
-      'source_fingerprint', 'stage', 'status', 'task_id', 'receipt_authority',
+      'artifact_id', 'attempt', 'authority_fingerprint', 'cache_hit', 'chapter_id', 'context_version', 'elapsed_ms',
+      'input_hash', 'model_id', 'output_hash', 'project_id', 'receipt_authority', 'response_contract', 'source',
+      'source_fingerprint', 'stage', 'status', 'task_id',
     ].sort())
     const serialized = JSON.stringify(run)
     for (const secret of [prompt, '机密正文', 'prompt-secret', 'sk_prompt_secret', 'sk_output_secret', 'output-secret']) {
@@ -127,7 +674,7 @@ describe('chapter generation stage receipts', () => {
     })
   })
 
-  test('preserves provider and durable failure-finalization errors together', async () => {
+  test('returns a stable receipt error with a non-enumerable storage cause when failure persistence is lost', async () => {
     const { activeWorkspace, provenance } = await fixture()
     const recordStage = createChapterStageRecorder({ activeWorkspace, provenance: () => provenance })
     const providerFailure = Object.assign(new Error('provider secret must remain in memory'), {
@@ -141,13 +688,13 @@ describe('chapter generation stage receipts', () => {
       throw providerFailure
     }).catch(error => error)
 
-    expect(caught).toBeInstanceOf(AggregateError)
-    expect(caught.errors[0]).toBe(providerFailure)
-    expect(caught.errors[1]).toMatchObject({
+    expect(caught).toMatchObject({
       code: 'CHAPTER_STAGE_RECEIPT_PERSIST_FAILED',
       message: 'Chapter stage receipt persistence failed',
     })
-    expect(Object.keys(caught)).toEqual([])
+    expect(caught).not.toBe(providerFailure)
+    expect(Object.prototype.propertyIsEnumerable.call(caught, 'cause')).toBe(false)
+    expect(caught.cause).toBeDefined()
   })
 
   test('scrubs and bounds failure diagnostics without persisting arbitrary details', async () => {
@@ -170,8 +717,9 @@ describe('chapter generation stage receipts', () => {
     expect(output.error_code.length).toBeLessThanOrEqual(80)
     expect(run.error_message!.length).toBeLessThanOrEqual(500)
     expect(Object.keys(output).sort()).toEqual([
-      'authority_fingerprint', 'chapter_id', 'context_version', 'elapsed_ms', 'error_code', 'model_id', 'project_id',
-      'source', 'source_fingerprint', 'stage', 'status', 'task_id', 'receipt_authority',
+      'artifact_id', 'attempt', 'authority_fingerprint', 'chapter_id', 'context_version', 'elapsed_ms', 'error_code',
+      'input_hash', 'model_id', 'project_id', 'receipt_authority', 'response_contract', 'source',
+      'source_fingerprint', 'stage', 'status', 'task_id',
     ].sort())
     const serialized = JSON.stringify(run)
     for (const secret of ['auth-secret', 'cookie-secret', 'sk_api_secret', '不得持久的详情', 'responseBody']) {

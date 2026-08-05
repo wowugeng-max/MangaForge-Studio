@@ -16,7 +16,13 @@ import {
 } from '../../mcp/quarantine-store'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from '../../mcp/server-store'
 import { assertMcpWorkspaceMutationHeld, withMcpWorkspaceMutation } from '../../mcp/workspace-coordinator'
-import { createNovelProject, getNovelProject, listNovelRuns, mutateNovelProjectGenerationSource } from '../../novel'
+import {
+  createNovelChapter,
+  createNovelProject,
+  getNovelProject,
+  listNovelRuns,
+  mutateNovelProjectGenerationSource,
+} from '../../novel'
 import { chapterContextVersion, createGenerationSourceResolver } from './create-generation-source'
 import { ChapterSourceLeaseRegistry } from './chapter-source-lease'
 import { McpGenerationSource } from './mcp-generation-source'
@@ -132,6 +138,7 @@ describe('GenerationSource resolver', () => {
     const resolver = createGenerationSourceResolver({
       chapterSourceLeases,
       readProject: async () => project,
+      compactTaskArtifacts: async () => 0,
       createModelExecution: input => ({
         taskId: input.taskId,
         source: 'model',
@@ -293,6 +300,7 @@ describe('GenerationSource resolver', () => {
         assertMcpWorkspaceMutationHeld(activeWorkspace)
         return project
       },
+      compactTaskArtifacts: async () => 0,
       createModelExecution: input => {
         resolved = input
         return {
@@ -333,6 +341,155 @@ describe('GenerationSource resolver', () => {
     expect(events).toEqual(['source.close', 'lease.release'])
   })
 
+  test('compacts stage artifacts only after a successful source close and before releasing the project lease', async () => {
+    const events: string[] = []
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases: {
+        acquire: async (_workspace: string, _projectId: number, taskId: string) => ({
+          taskId,
+          projectId: project.id,
+          release: async () => { events.push('lease.release') },
+        }),
+      } as any,
+      readProject: async () => project,
+      createModelExecution: input => ({
+        taskId: input.taskId,
+        source: 'model',
+        modelId: input.modelId,
+        authorityFingerprint: input.authorityFingerprint,
+        fingerprint: input.fingerprint,
+        contextVersion: input.contextVersion,
+        provenance: () => ({
+          task_id: input.taskId, project_id: project.id, chapter_id: chapter.id, source: 'model',
+          source_fingerprint: input.fingerprint, authority_fingerprint: input.authorityFingerprint,
+          context_version: input.contextVersion,
+        }),
+        generateDraft: async () => ({ source: 'model' }),
+        executeAgent: async () => ({}),
+        assertCurrent: input.assertCurrent,
+        close: async outcome => { events.push(`source.close:${outcome?.status}`) },
+      }),
+      compactTaskArtifacts: async (activeWorkspace: string, taskId: string) => {
+        events.push(`compact:${activeWorkspace}:${taskId}`)
+        return 2
+      },
+    } as any)
+    const execution = await resolver.beginTask(beginInput({ taskId: 'task-compact-success' }))
+
+    await execution.close({ status: 'success' })
+
+    expect(events).toEqual([
+      'source.close:success',
+      'compact:/workspace/a:task-compact-success',
+      'lease.release',
+    ])
+
+    for (const status of ['failed', 'cancelled'] as const) {
+      events.length = 0
+      const next = await resolver.beginTask(beginInput({ taskId: `task-no-compact-${status}` }))
+      await next.close({ status })
+      expect(events).toEqual([`source.close:${status}`, 'lease.release'])
+    }
+  })
+
+  test('keeps close idempotent and aggregates compaction with lease-release failure', async () => {
+    const compactionFailure = new Error('compaction failed')
+    const releaseFailure = new Error('release failed')
+    let sourceCloses = 0
+    let compactions = 0
+    let releases = 0
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases: {
+        acquire: async (_workspace: string, _projectId: number, taskId: string) => ({
+          taskId,
+          projectId: project.id,
+          release: async () => { releases += 1; throw releaseFailure },
+        }),
+      } as any,
+      readProject: async () => project,
+      createModelExecution: input => ({
+        taskId: input.taskId,
+        source: 'model',
+        modelId: input.modelId,
+        authorityFingerprint: input.authorityFingerprint,
+        fingerprint: input.fingerprint,
+        contextVersion: input.contextVersion,
+        provenance: () => ({
+          task_id: input.taskId, project_id: project.id, chapter_id: chapter.id, source: 'model',
+          source_fingerprint: input.fingerprint, authority_fingerprint: input.authorityFingerprint,
+          context_version: input.contextVersion,
+        }),
+        generateDraft: async () => ({ source: 'model' }),
+        executeAgent: async () => ({}),
+        assertCurrent: input.assertCurrent,
+        close: async () => { sourceCloses += 1 },
+      }),
+      compactTaskArtifacts: async () => { compactions += 1; throw compactionFailure },
+    } as any)
+    const execution = await resolver.beginTask(beginInput({ taskId: 'task-compact-failures' }))
+
+    const first = execution.close({ status: 'success' })
+    const second = execution.close({ status: 'success' })
+    expect(second).toBe(first)
+    const caught: any = await first.catch(error => error)
+
+    expect(caught).toBeInstanceOf(AggregateError)
+    expect(caught.errors).toEqual([compactionFailure, releaseFailure])
+    expect({ sourceCloses, compactions, releases }).toEqual({ sourceCloses: 1, compactions: 1, releases: 1 })
+  })
+
+  test('keeps the first successful close compaction failure latched while retrying only lease release', async () => {
+    const compactionFailure = new Error('latched compaction failed')
+    const releaseFailure = new Error('release failed once after compaction')
+    let sourceCloses = 0
+    let compactions = 0
+    let releases = 0
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases: {
+        acquire: async (_workspace: string, _projectId: number, taskId: string) => ({
+          taskId,
+          projectId: project.id,
+          release: async () => {
+            releases += 1
+            if (releases === 1) throw releaseFailure
+          },
+        }),
+      } as any,
+      readProject: async () => project,
+      createModelExecution: input => ({
+        taskId: input.taskId,
+        source: 'model',
+        modelId: input.modelId,
+        authorityFingerprint: input.authorityFingerprint,
+        fingerprint: input.fingerprint,
+        contextVersion: input.contextVersion,
+        provenance: () => ({
+          task_id: input.taskId, project_id: project.id, chapter_id: chapter.id, source: 'model',
+          source_fingerprint: input.fingerprint, authority_fingerprint: input.authorityFingerprint,
+          context_version: input.contextVersion,
+        }),
+        generateDraft: async () => ({ source: 'model' }),
+        executeAgent: async () => ({}),
+        assertCurrent: input.assertCurrent,
+        close: async () => { sourceCloses += 1 },
+      }),
+      compactTaskArtifacts: async () => {
+        compactions += 1
+        throw compactionFailure
+      },
+    } as any)
+    const execution = await resolver.beginTask(beginInput({ taskId: 'task-latched-close-outcome' }))
+
+    const firstFailure: any = await execution.close({ status: 'success' }).catch(error => error)
+    expect(firstFailure).toBeInstanceOf(AggregateError)
+    expect(firstFailure.errors).toEqual([compactionFailure, releaseFailure])
+
+    const terminalClose = execution.close({ status: 'failed' })
+    await expect(terminalClose).rejects.toBe(compactionFailure)
+    expect(execution.close({ status: 'cancelled' })).toBe(terminalClose)
+    expect({ sourceCloses, compactions, releases }).toEqual({ sourceCloses: 1, compactions: 1, releases: 2 })
+  })
+
   test('retries a failed project lease release without closing the source again', async () => {
     const releaseFailure = new Error('lease release failed once')
     let sourceCloses = 0
@@ -349,6 +506,7 @@ describe('GenerationSource resolver', () => {
         }),
       } as any,
       readProject: async () => project,
+      compactTaskArtifacts: async () => 0,
       createModelExecution: input => ({
         taskId: input.taskId, source: 'model', modelId: input.modelId,
         authorityFingerprint: input.authorityFingerprint,
@@ -562,6 +720,7 @@ describe('GenerationSource resolver', () => {
     const resolver = createGenerationSourceResolver({
       chapterSourceLeases,
       readProject: async () => mcpProject,
+      compactTaskArtifacts: async () => 0,
       createModelExecution: () => { modelCreations += 1; throw new Error('model fallback forbidden') },
       mcpSource: {
         beginResolvedTask: async input => {
@@ -2008,6 +2167,7 @@ describe('ModelGenerationSource', () => {
     const activeWorkspace = await mkdtemp(join(tmpdir(), 'mangaforge-model-precheck-'))
     workspaces.push(activeWorkspace)
     const durableProject = await createNovelProject(activeWorkspace, { title: '模型前置围栏' })
+    const durableChapter = await createNovelChapter(activeWorkspace, { ...chapter, project_id: durableProject.id })
     const precheckFailure = Object.assign(new Error('source precheck failed'), {
       code: 'GENERATION_SOURCE_CHANGED',
     })
@@ -2015,7 +2175,7 @@ describe('ModelGenerationSource', () => {
     let draftCalls = 0
     let agentCalls = 0
     const provenance = {
-      task_id: 'task-model-precheck', project_id: durableProject.id, chapter_id: chapter.id,
+      task_id: 'task-model-precheck', project_id: durableProject.id, chapter_id: durableChapter.id,
       source: 'model' as const, source_fingerprint: `sha256:${'a'.repeat(64)}`,
       authority_fingerprint: `sha256:${'a'.repeat(64)}`,
       context_version: `sha256:${'b'.repeat(64)}`, model_id: 217,
@@ -2029,7 +2189,11 @@ describe('ModelGenerationSource', () => {
       recordStage: createChapterStageRecorder({ activeWorkspace, provenance: () => provenance }),
     })
 
-    await expect(source.generateDraft(draftRequest({ activeWorkspace, project: durableProject })))
+    await expect(source.generateDraft(draftRequest({
+      activeWorkspace,
+      project: durableProject,
+      chapter: durableChapter,
+    })))
       .rejects.toBe(precheckFailure)
     await expect(source.executeAgent(
       'quality_review', 'quality_review_json', 'review-agent', durableProject, { task: '审查' },
@@ -2072,6 +2236,7 @@ describe('ModelGenerationSource', () => {
     const activeWorkspace = await mkdtemp(join(tmpdir(), 'mangaforge-model-error-envelope-'))
     workspaces.push(activeWorkspace)
     const durableProject = await createNovelProject(activeWorkspace, { title: '模型错误信封' })
+    const durableChapter = await createNovelChapter(activeWorkspace, { ...chapter, project_id: durableProject.id })
     const providerFailure = Object.assign(new Error('provider returned an error object'), {
       code: 'PROVIDER_ERROR_OBJECT',
     })
@@ -2081,7 +2246,7 @@ describe('ModelGenerationSource', () => {
       { error: oversizedFailure, parsed: { overall_score: 99 } },
     ]
     const provenance = {
-      task_id: 'task-model-error-envelope', project_id: durableProject.id, chapter_id: chapter.id,
+      task_id: 'task-model-error-envelope', project_id: durableProject.id, chapter_id: durableChapter.id,
       source: 'model' as const, source_fingerprint: `sha256:${'a'.repeat(64)}`,
       authority_fingerprint: `sha256:${'a'.repeat(64)}`,
       context_version: `sha256:${'b'.repeat(64)}`, model_id: 217,
@@ -2118,10 +2283,11 @@ describe('ModelGenerationSource', () => {
     const activeWorkspace = await mkdtemp(join(tmpdir(), 'mangaforge-model-empty-error-'))
     workspaces.push(activeWorkspace)
     const durableProject = await createNovelProject(activeWorkspace, { title: '模型空错误字段' })
+    const durableChapter = await createNovelChapter(activeWorkspace, { ...chapter, project_id: durableProject.id })
     const emptyErrors = [undefined, null, false, '']
     const queuedErrors = [...emptyErrors]
     const provenance = {
-      task_id: 'task-model-empty-error', project_id: durableProject.id, chapter_id: chapter.id,
+      task_id: 'task-model-empty-error', project_id: durableProject.id, chapter_id: durableChapter.id,
       source: 'model' as const, source_fingerprint: `sha256:${'a'.repeat(64)}`,
       authority_fingerprint: `sha256:${'a'.repeat(64)}`,
       context_version: `sha256:${'b'.repeat(64)}`, model_id: 217,
@@ -2134,11 +2300,11 @@ describe('ModelGenerationSource', () => {
       recordStage: createChapterStageRecorder({ activeWorkspace, provenance: () => provenance }),
     })
 
-    for (const emptyError of emptyErrors) {
+    for (const [index, emptyError] of emptyErrors.entries()) {
       const result = await source.executeAgent(
-        'editor_report', 'editor_report_json', 'review-agent', durableProject, { task: '编辑报告' },
+        'editor_report', 'editor_report_json', 'review-agent', durableProject, { task: `编辑报告-${index}` },
       )
-      expect(Object.prototype.hasOwnProperty.call(result, 'error')).toBe(true)
+      expect(Object.prototype.hasOwnProperty.call(result, 'error')).toBe(emptyError !== undefined)
       expect(result.error).toBe(emptyError)
     }
     const runs = await listNovelRuns(activeWorkspace, durableProject.id)
@@ -2385,12 +2551,11 @@ describe('McpGenerationSource task execution', () => {
         },
       },
     })
-    const durableChapter = {
-      id: 2201,
+    const durableChapter = await createNovelChapter(activeWorkspace, {
       project_id: durableProject.id,
       chapter_no: 22,
       title: '通用章节',
-    }
+    })
     const contextPackage = {
       writing_bible: { voice: '冷静' },
       story_state: { global: { place: '中庭' } },
@@ -2690,12 +2855,11 @@ describe('McpGenerationSource task execution', () => {
         },
       },
     })
-    const durableChapter = {
-      id: 1201,
+    const durableChapter = await createNovelChapter(activeWorkspace, {
       project_id: durableProject.id,
       chapter_no: 12,
       title: '雨夜',
-    }
+    })
     const context = {
       writing_bible: { voice: '克制' },
       story_state: { global: { place: '北城' } },

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { types } from 'node:util'
 import { McpError } from '../../mcp/errors'
 import { withMcpWorkspaceMutation } from '../../mcp/workspace-coordinator'
+import { compactChapterTaskArtifacts } from '../../novel'
 import type { ChapterSourceLeaseRegistry } from './chapter-source-lease'
 import { ChapterGenerationSourceError } from './errors'
 import {
@@ -27,6 +28,7 @@ export type GenerationSourceResolverInput = {
   mcpSource?: {
     beginResolvedTask(input: ResolvedChapterTaskInput): Promise<ChapterTaskExecution>
   }
+  compactTaskArtifacts?: typeof compactChapterTaskArtifacts
 }
 
 type LegacyGenerationSourceResolverInput = {
@@ -164,10 +166,14 @@ function wrapExecution(
   execution: ChapterTaskExecution,
   resolved: ResolvedChapterTaskInput,
   projectLease: Awaited<ReturnType<ChapterSourceLeaseRegistry['acquire']>>,
+  compactTaskArtifacts: typeof compactChapterTaskArtifacts,
 ): ChapterTaskExecution {
   let sourceClosePromise: Promise<void> | undefined
   let sourceCloseFailed = false
   let sourceCloseError: unknown
+  let compactionPromise: Promise<number> | undefined
+  let closeOutcomeCaptured = false
+  let latchedOutcome: Parameters<ChapterTaskExecution['close']>[0]
   let closeAttempt: Promise<void> | undefined
   let terminalClose: Promise<void> | undefined
   return {
@@ -185,8 +191,12 @@ function wrapExecution(
     close(outcome) {
       if (terminalClose) return terminalClose
       if (closeAttempt) return closeAttempt
+      if (!closeOutcomeCaptured) {
+        closeOutcomeCaptured = true
+        latchedOutcome = outcome
+      }
       if (!sourceClosePromise) {
-        sourceClosePromise = Promise.resolve().then(() => execution.close(outcome))
+        sourceClosePromise = Promise.resolve().then(() => execution.close(latchedOutcome))
       }
       let releaseSucceeded = false
       const attempt = (async () => {
@@ -196,19 +206,33 @@ function wrapExecution(
           sourceCloseFailed = true
           sourceCloseError = error
         }
+        let taskCloseError = sourceCloseFailed ? sourceCloseError : undefined
+        if (!sourceCloseFailed && latchedOutcome?.status === 'success') {
+          if (!compactionPromise) {
+            compactionPromise = Promise.resolve().then(() => compactTaskArtifacts(
+              resolved.activeWorkspace,
+              resolved.taskId,
+            ))
+          }
+          try {
+            await compactionPromise
+          } catch (error) {
+            taskCloseError = error
+          }
+        }
         try {
           await projectLease.release()
           releaseSucceeded = true
         } catch (releaseError) {
-          if (sourceCloseFailed) {
+          if (taskCloseError !== undefined) {
             throw new AggregateError(
-              [sourceCloseError, releaseError],
-              'Chapter task source close and project lease release both failed',
+              [taskCloseError, releaseError],
+              'Chapter task close persistence and project lease release both failed',
             )
           }
           throw releaseError
         }
-        if (sourceCloseFailed) throw sourceCloseError
+        if (taskCloseError !== undefined) throw taskCloseError
       })()
       closeAttempt = attempt
       void attempt.then(
@@ -300,7 +324,12 @@ function createTaskResolver(input: GenerationSourceResolverInput): TaskGeneratio
           }
           execution = await input.mcpSource.beginResolvedTask(resolved)
         }
-        return wrapExecution(execution, resolved, projectLease)
+        return wrapExecution(
+          execution,
+          resolved,
+          projectLease,
+          input.compactTaskArtifacts ?? compactChapterTaskArtifacts,
+        )
       } catch (error) {
         try {
           await projectLease.release()

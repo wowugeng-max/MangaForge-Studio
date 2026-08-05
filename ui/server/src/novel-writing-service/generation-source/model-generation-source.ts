@@ -9,12 +9,21 @@ import type {
   ProseGenerationResult,
 } from './types'
 import { CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY } from './types'
-import { projectChapterTaskProvenance } from './stage-receipts'
+import {
+  projectChapterTaskProvenance,
+  type ChapterStageRecordContext,
+} from './stage-receipts'
 
 type StageRecorder = <T>(stage: ChapterTaskStage, request: {
   prompt: string
   responseContract: ChapterStageResponseContract
-}, operation: () => Promise<T>) => Promise<T>
+}, operation: (context: ChapterStageRecordContext) => Promise<T>) => Promise<T>
+
+const LEGACY_STAGE_CONTEXT: ChapterStageRecordContext = Object.freeze({
+  artifactId: 0,
+  attempt: 0,
+  attachRemoteIdentity: async () => {},
+})
 
 export type ModelGenerationSourceInput = {
   modelId: number
@@ -78,7 +87,10 @@ function projectStageResult(result: any) {
 
   const projected: Record<string, any> = {}
   for (const [field, descriptor] of Object.entries(descriptors)) {
-    if (field === 'source_receipt' || !descriptor.enumerable || !('value' in descriptor)) continue
+    if (field === 'source_receipt'
+      || !descriptor.enumerable
+      || !('value' in descriptor)
+      || descriptor.value === undefined) continue
     Object.defineProperty(projected, field, {
       configurable: true,
       enumerable: true,
@@ -139,7 +151,7 @@ export class ModelGenerationSource implements GenerationSource, ChapterTaskExecu
         source_fingerprint: '', authority_fingerprint: '', context_version: '',
       })
       this.generateChapterProse = input
-      this.recordStage = async (_stage, _request, operation) => operation()
+      this.recordStage = async (_stage, _request, operation) => operation(LEGACY_STAGE_CONTEXT)
       this.assertCurrentPort = async () => {}
       return
     }
@@ -194,7 +206,7 @@ export class ModelGenerationSource implements GenerationSource, ChapterTaskExecu
     return this.recordStage('draft', {
       prompt: request.paragraphTask,
       responseContract: 'draft_prose',
-    }, async () => {
+    }, async (_context) => {
       await this.assertCurrent()
       const result = await awaitStageResult(
         () => this.generateWithModel(request, String(this.modelId)),
@@ -226,7 +238,7 @@ export class ModelGenerationSource implements GenerationSource, ChapterTaskExecu
     return this.recordStage(stage, {
       prompt: String(context.task || ''),
       responseContract,
-    }, async () => {
+    }, async (_context) => {
       await this.assertCurrent()
       const result = await awaitStageResult(
         () => this.executeAgentPort!(agentId, project, context, {
