@@ -5,6 +5,7 @@ import { BUDA_MCP_SERVER_TEMPLATE } from '../server-store'
 import { McpGenerationDeadline } from '../deadline'
 import { McpError } from '../errors'
 import { BUDA_TOOL_ALIASES, buildBudaToolArguments, resolveBudaTools } from './buda-tool-map'
+import { buildBudaDriveSnapshot } from './buda-drive'
 import type { McpGenerationAdapter } from './types'
 
 const toolNames = [
@@ -119,6 +120,23 @@ function stageInput(
   return { requestId, stage, responseContract, prompt } as any
 }
 
+function invocationInput(overrides: Record<string, unknown> = {}) {
+  return {
+    ...chapterTaskInput(),
+    invocationId: 'invocation-1',
+    requestId: 'request-12',
+    stage: 'draft',
+    responseContract: 'draft_prose',
+    prompt: 'complete authoritative prompt',
+    stability: {
+      async ensureReady() {},
+      async runRead(_policy: any, _input: any, operation: any) { return operation() },
+      async runMutation(_policy: any, _input: any, operation: any) { return operation() },
+    },
+    ...overrides,
+  } as any
+}
+
 function expectBudaOperations(calls: Array<{ name: string; options: any }>) {
   for (const call of calls) {
     const readSafe = call.name.endsWith('listApiAgents')
@@ -130,6 +148,145 @@ function expectBudaOperations(calls: Array<{ name: string; options: any }>) {
 }
 
 describe('BudaAdapter', () => {
+  test('creates a running Session with the complete stage envelope and never posts a message', async () => {
+    const fake = createFakeClient()
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('createApiAgentSession')) {
+        fake.calls.push({ name, args, options })
+        return structured({ session: { id: 'session-draft', status: 'pending' }, run: { started: true } })
+      }
+      if (name.endsWith('getApiAgentSession')) {
+        fake.calls.push({ name, args, options })
+        return structured({ session: { id: 'session-draft', status: 'completed' }, run: { status: 'completed' }, messages: [{ role: 'assistant', content: '正文' }] })
+      }
+      return original(name, args, options)
+    }
+
+    const result = await new BudaAdapter(fake.client as any).invokeChapterStage!(invocationInput())
+    const create = fake.calls.find(call => call.name.endsWith('createApiAgentSession'))
+    expect(create?.args).toMatchObject({ agentId: 'agent-1', startRun: true })
+    expect(JSON.stringify(create?.args)).toContain('complete authoritative prompt')
+    expect(fake.calls.some(call => call.name.endsWith('postApiAgentSessionMessage'))).toBe(false)
+    expect(result).toMatchObject({ session_id: 'session-draft', status: 'completed' })
+  })
+
+  test('reconnects while polling the same Agent Session id', async () => {
+    const fake = createFakeClient()
+    const polledSessionIds: string[] = []
+    let pollCount = 0
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('createApiAgentSession')) {
+        fake.calls.push({ name, args, options })
+        return structured({ session: { id: 'session-review', status: 'pending' }, run: { started: true } })
+      }
+      if (name.endsWith('getApiAgentSession')) {
+        fake.calls.push({ name, args, options })
+        polledSessionIds.push(args.sessionId)
+        pollCount += 1
+        if (pollCount === 1) throw new McpError('MCP_CONNECTION_LOST', 'transport lost')
+        return structured({ session: { id: 'session-review', status: 'completed' }, run: { status: 'completed' }, messages: [{ role: 'assistant', content: '{"score": 90, "passed": true}' }] })
+      }
+      return original(name, args, options)
+    }
+    const result = await new BudaAdapter(fake.client as any).invokeChapterStage!(invocationInput({
+      stage: 'quality_review',
+      responseContract: 'quality_review_json',
+      stability: {
+        async ensureReady() {},
+        async runRead(_policy: any, _input: any, operation: any) {
+          try { return await operation() } catch (error) {
+            if (error instanceof McpError && error.code === 'MCP_CONNECTION_LOST') return operation()
+            throw error
+          }
+        },
+        async runMutation(_policy: any, _input: any, operation: any) { return operation() },
+      },
+    }))
+    expect(polledSessionIds).toEqual(['session-review', 'session-review'])
+    expect(result.session_id).toBe('session-review')
+  })
+
+  test('does not submit a second create after an ambiguous failure', async () => {
+    const fake = createFakeClient()
+    let createCount = 0
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('createApiAgentSession')) {
+        fake.calls.push({ name, args, options })
+        createCount += 1
+        throw new McpError('MCP_CONNECTION_LOST', 'transport lost')
+      }
+      return original(name, args, options)
+    }
+    await expect(new BudaAdapter(fake.client as any).invokeChapterStage!(invocationInput()))
+      .rejects.toMatchObject({ code: 'MCP_SEND_UNKNOWN' })
+    expect(createCount).toBe(1)
+  })
+
+  test('does not expose an untrusted remote error message before Session creation', async () => {
+    const fake = createFakeClient()
+    const original = fake.client.callTool
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('createApiAgentSession')) {
+        fake.calls.push({ name, args, options })
+        throw new Error('secret prompt content from remote transport')
+      }
+      return original(name, args, options)
+    }
+    const caught = await new BudaAdapter(fake.client as any).invokeChapterStage!(invocationInput()).catch(error => error)
+    expect(caught).toMatchObject({ code: 'MCP_TOOL_ERROR' })
+    expect(String(caught?.message || caught)).not.toContain('secret prompt content')
+  })
+
+  for (const status of ['failed', 'cancelled'] as const) {
+    test(`preserves one-shot ${status} terminal evidence when cleanup transport is unavailable`, async () => {
+      const fake = createFakeClient()
+      const original = fake.client.callTool
+      fake.client.callTool = async (name: string, args: any, options: any) => {
+        if (name.endsWith('createApiAgentSession')) {
+          fake.calls.push({ name, args, options })
+          return structured({ session: { id: `session-${status}`, status: 'pending' }, run: { started: true } })
+        }
+        if (name.endsWith('getApiAgentSession')) {
+          fake.calls.push({ name, args, options })
+          if (fake.calls.filter(call => call.name.endsWith('getApiAgentSession')).length === 1) {
+            return structured({ session: { id: `session-${status}`, status }, run: { status }, messages: [] })
+          }
+          throw new McpError('MCP_CONNECTION_LOST', 'cleanup transport unavailable')
+        }
+        if (name.endsWith('cancelApiAgentSessionRun')) {
+          fake.calls.push({ name, args, options })
+          throw new McpError('MCP_CONNECTION_LOST', 'cleanup transport unavailable')
+        }
+        return original(name, args, options)
+      }
+      const caught = await new BudaAdapter(fake.client as any).invokeChapterStage!(invocationInput())
+        .catch(error => error)
+      expect(caught).toMatchObject({ code: status === 'failed' ? 'MCP_SESSION_FAILED' : 'MCP_CANCELLED' })
+      expect(caught.details).not.toHaveProperty('receipt_status', 'remote_cancel_unknown')
+    })
+  }
+
+  test('changes the Drive snapshot when stage input or upstream output changes', () => {
+    const snapshotInput = (overrides: Record<string, unknown>) => ({
+      project: { id: 8, title: 'long test' },
+      chapter: { chapter_no: 12, title: 'rain' },
+      writingBible: '# bible',
+      storyState: { chapter_no: 11 },
+      continuity: 'continuity',
+      recentChapters: 'recent',
+      ...overrides,
+    })
+    const draft = buildBudaDriveSnapshot(snapshotInput({ stage: 'draft', responseContract: 'draft_prose', prompt: 'chapter authority before draft' }))
+    const review = buildBudaDriveSnapshot(snapshotInput({ stage: 'quality_review', responseContract: 'quality_review_json', prompt: 'validated draft: version B' }))
+    expect(draft.snapshotHash).not.toBe(review.snapshotHash)
+    expect(review.files['MANGAFORGE_CURRENT_STAGE.md']).toContain('validated draft: version B')
+    const bounded = buildBudaDriveSnapshot(snapshotInput({ stage: 'draft', responseContract: 'draft_prose', prompt: '正文'.repeat(200_000) }))
+    expect(new TextEncoder().encode(bounded.files['MANGAFORGE_CURRENT_STAGE.md']!).byteLength).toBeLessThanOrEqual(256 * 1_024)
+  })
+
   test('exposes a two-success readiness policy that refreshes tools and calls the resolved listAgents tool', async () => {
     const fake = createFakeClient()
     const adapter: McpGenerationAdapter = new BudaAdapter(fake.client as any)

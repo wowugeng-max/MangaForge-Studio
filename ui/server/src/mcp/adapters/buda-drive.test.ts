@@ -342,6 +342,32 @@ describe('Buda Drive authority snapshot', () => {
     expect(writeAttempts).toBe(1)
   })
 
+  test('does not replay an upsert when reconciliation returns an unknown read shape', async () => {
+    const snapshot = snapshotFixture()
+    const writeFailure = new Error('write outcome unknown')
+    let writes = 0
+    const client = {
+      async callTool(name: string) {
+        if (name === 'list') return result({ files: [] })
+        if (name === 'write') {
+          writes += 1
+          throw writeFailure
+        }
+        if (name === 'read') return result({})
+        throw new Error(`unexpected tool ${name}`)
+      },
+    }
+    await expect(syncBudaDriveSnapshot({
+      ...deadlineOptions(),
+      client: client as any,
+      tools: { listDriveFiles: 'list', readDriveText: 'read', upsertDriveFile: 'write' } as any,
+      agentId: 'agent-1',
+      snapshot,
+      stabilize: async () => {},
+    })).rejects.toMatchObject({ code: 'MCP_DRIVE_SYNC_FAILED' })
+    expect(writes).toBe(1)
+  })
+
   test('fails after one ambiguous upsert when read reconciliation does not match', async () => {
     const snapshot = snapshotFixture()
     const changedPath = '/mangaforge/continuity.md'
@@ -428,5 +454,237 @@ describe('Buda Drive authority snapshot', () => {
     expect(calls.find(call => call.name === 'write')?.options.operation).toBe('mutation')
     expect(calls.filter(call => call.name !== 'write').every(call => call.options.operation === 'read_safe')).toBe(true)
     expectDriveOperations(calls)
+  })
+
+  test('propagates an exact not-ready probe failure from Drive sync unchanged', async () => {
+    const snapshot = snapshotFixture()
+    const notReady = new McpError('MCP_SERVER_NOT_READY', 'MCP 服务尚未稳定就绪', { phase: 'drive_sync' })
+    const client = {
+      async callTool(name: string) {
+        if (name === 'list') throw notReady
+        throw new Error(`unexpected tool ${name}`)
+      },
+    }
+    await expect(syncBudaDriveSnapshot({
+      ...deadlineOptions(),
+      client: client as any,
+      tools: { listDriveFiles: 'list', readDriveText: 'read', upsertDriveFile: 'write' } as any,
+      agentId: 'agent-1',
+      snapshot,
+    })).rejects.toMatchObject({ code: 'MCP_SERVER_NOT_READY', details: { phase: 'drive_sync' } })
+  })
+
+  test('stabilizes before retrying an upsert whose read-back differs', async () => {
+    const snapshot = snapshotFixture()
+    const changedPath = '/mangaforge/continuity.md'
+    const remote = new Map(Object.entries(snapshot.files))
+    remote.set(changedPath, 'stale')
+    let writes = 0
+    let stabilized = 0
+    const client = {
+      async callTool(name: string, args: any) {
+        if (name === 'list') return result({ files: [...remote.keys()].map(path => ({ path, type: 'file' })) })
+        if (name === 'read') return result({ content: remote.get(args.filePath) || '' })
+        if (name === 'write') {
+          writes += 1
+          if (writes === 1) {
+            remote.set(args.path, 'different remote content')
+            throw new McpError('MCP_CONNECTION_LOST', 'write outcome unknown')
+          }
+          remote.set(args.path, args.content)
+          return result({ ok: true })
+        }
+        throw new Error(`unexpected tool ${name}`)
+      },
+    }
+    await syncBudaDriveSnapshot({
+      ...deadlineOptions(),
+      client: client as any,
+      tools: { listDriveFiles: 'list', readDriveText: 'read', upsertDriveFile: 'write' } as any,
+      agentId: 'agent-1',
+      snapshot,
+      stabilize: async () => { stabilized += 1 },
+    })
+    expect(writes).toBe(2)
+    expect(stabilized).toBe(1)
+    expect(remote.get(changedPath)).toBe(snapshot.files[changedPath])
+  })
+
+  test('fails closed when Drive list returns an unknown shape and never writes', async () => {
+    const snapshot = snapshotFixture()
+    let writes = 0
+    const client = {
+      async callTool(name: string) {
+        if (name === 'list') return result({})
+        if (name === 'write') { writes += 1; return result({ ok: true }) }
+        throw new Error(`unexpected tool ${name}`)
+      },
+    }
+    await expect(syncBudaDriveSnapshot({
+      ...deadlineOptions(),
+      client: client as any,
+      tools: { listDriveFiles: 'list', readDriveText: 'read', upsertDriveFile: 'write' } as any,
+      agentId: 'agent-1',
+      snapshot,
+    })).rejects.toMatchObject({ code: 'MCP_DRIVE_SYNC_FAILED' })
+    expect(writes).toBe(0)
+  })
+
+  test('fails closed when final Drive read-back is unknown even for empty content', async () => {
+    const snapshot = buildBudaDriveSnapshot({
+      project: { id: 8 }, chapter: { chapter_no: 1 }, writingBible: '', storyState: {}, continuity: '', recentChapters: '', generatedAt: 'now',
+    })
+    const files = new Map(Object.entries(snapshot.files))
+    const client = {
+      async callTool(name: string, args: any) {
+        if (name === 'list') return result({ files: [] })
+        if (name === 'write') return result({ ok: true })
+        if (name === 'read') {
+          const path = args.filePath
+          if (path === '/mangaforge/writing-bible.md') return { content: [{ type: 'text', text: '{}' }] }
+          return result({ content: files.get(path) || '' })
+        }
+        throw new Error(`unexpected tool ${name}`)
+      },
+    }
+    await expect(syncBudaDriveSnapshot({
+      ...deadlineOptions(),
+      client: client as any,
+      tools: { listDriveFiles: 'list', readDriveText: 'read', upsertDriveFile: 'write' } as any,
+      agentId: 'agent-1',
+      snapshot,
+    })).rejects.toMatchObject({ code: 'MCP_DRIVE_SYNC_FAILED' })
+  })
+
+  test('fails closed when an existing differential Drive file read is unknown', async () => {
+    const snapshot = buildBudaDriveSnapshot({
+      project: { id: 8 }, chapter: { chapter_no: 1 }, writingBible: '', storyState: {}, continuity: '', recentChapters: '', generatedAt: 'now',
+    })
+    let writes = 0
+    const client = {
+      async callTool(name: string, args: any) {
+        if (name === 'list') return result({ files: [{ path: '/mangaforge/writing-bible.md', type: 'file' }] })
+        if (name === 'read' && args.filePath === '/mangaforge/writing-bible.md') return result({})
+        if (name === 'write') { writes += 1; return result({ ok: true }) }
+        throw new Error(`unexpected tool ${name}`)
+      },
+    }
+    await expect(syncBudaDriveSnapshot({
+      ...deadlineOptions(),
+      client: client as any,
+      tools: { listDriveFiles: 'list', readDriveText: 'read', upsertDriveFile: 'write' } as any,
+      agentId: 'agent-1',
+      snapshot,
+    })).rejects.toMatchObject({ code: 'MCP_DRIVE_SYNC_FAILED' })
+    expect(writes).toBe(0)
+  })
+
+  test('does not treat exists-only Drive reads as known empty files', async () => {
+    const snapshot = buildBudaDriveSnapshot({
+      project: { id: 8 }, chapter: { chapter_no: 1 }, writingBible: '', storyState: {}, continuity: '', recentChapters: '', generatedAt: 'now',
+    })
+    let writes = 0
+    const client = {
+      async callTool(name: string, args: any) {
+        if (name === 'list') return result({ files: [{ path: '/mangaforge/writing-bible.md', type: 'file' }] })
+        if (name === 'read' && args.filePath === '/mangaforge/writing-bible.md') return result({ exists: true })
+        if (name === 'write') { writes += 1; return result({ ok: true }) }
+        throw new Error(`unexpected tool ${name}`)
+      },
+    }
+    await expect(syncBudaDriveSnapshot({
+      ...deadlineOptions(),
+      client: client as any,
+      tools: { listDriveFiles: 'list', readDriveText: 'read', upsertDriveFile: 'write' } as any,
+      agentId: 'agent-1',
+      snapshot,
+    })).rejects.toMatchObject({ code: 'MCP_DRIVE_SYNC_FAILED' })
+    expect(writes).toBe(0)
+  })
+
+  test('fails closed when Drive list contains a malformed item', async () => {
+    const snapshot = snapshotFixture()
+    let writes = 0
+    const client = {
+      async callTool(name: string) {
+        if (name === 'list') return result({ files: [{}] })
+        if (name === 'write') { writes += 1; return result({ ok: true }) }
+        throw new Error(`unexpected tool ${name}`)
+      },
+    }
+    await expect(syncBudaDriveSnapshot({
+      ...deadlineOptions(),
+      client: client as any,
+      tools: { listDriveFiles: 'list', readDriveText: 'read', upsertDriveFile: 'write' } as any,
+      agentId: 'agent-1',
+      snapshot,
+    })).rejects.toMatchObject({ code: 'MCP_DRIVE_SYNC_FAILED' })
+    expect(writes).toBe(0)
+  })
+
+  test('accepts a folder entry without a path while listing valid files', async () => {
+    const snapshot = snapshotFixture()
+    const remote = new Map(Object.entries(snapshot.files))
+    let writes = 0
+    const client = {
+      async callTool(name: string, args: any) {
+        if (name === 'list') return result({ files: [{ type: 'folder' }, ...[...remote.keys()].map(path => ({ path, type: 'file' }))] })
+        if (name === 'read') return result({ content: remote.get(args.filePath) || '' })
+        if (name === 'write') { writes += 1; return result({ ok: true }) }
+        throw new Error(`unexpected tool ${name}`)
+      },
+    }
+    const synced = await syncBudaDriveSnapshot({
+      ...deadlineOptions(),
+      client: client as any,
+      tools: { listDriveFiles: 'list', readDriveText: 'read', upsertDriveFile: 'write' } as any,
+      agentId: 'agent-1',
+      snapshot,
+    })
+    expect(synced.uploaded_paths).toEqual([])
+    expect(writes).toBe(0)
+  })
+
+  test('bounds the complete current-stage file when stage envelope fields are oversized', () => {
+    const snapshot = buildBudaDriveSnapshot({
+      project: { id: 8 },
+      chapter: { chapter_no: 1 },
+      writingBible: '',
+      storyState: {},
+      continuity: '',
+      recentChapters: '',
+      stage: 's'.repeat(300_000),
+      responseContract: 'c'.repeat(300_000),
+      invocationId: 'i'.repeat(300_000),
+      prompt: '正文',
+      generatedAt: 'now',
+    })
+    expect(new TextEncoder().encode(snapshot.files['MANGAFORGE_CURRENT_STAGE.md']!).byteLength)
+      .toBeLessThanOrEqual(256 * 1_024)
+  })
+
+  test('does not retry an arbitrary mutation error merely because stabilization is available', async () => {
+    const snapshot = snapshotFixture()
+    const changedPath = '/mangaforge/continuity.md'
+    const remote = new Map(Object.entries(snapshot.files))
+    remote.set(changedPath, 'stale')
+    let writes = 0
+    const client = {
+      async callTool(name: string, args: any) {
+        if (name === 'list') return result({ files: [...remote.keys()].map(path => ({ path, type: 'file' })) })
+        if (name === 'read') return result({ content: remote.get(args.filePath) || '' })
+        if (name === 'write') { writes += 1; throw new Error('arbitrary mutation failure') }
+        throw new Error(`unexpected tool ${name}`)
+      },
+    }
+    await expect(syncBudaDriveSnapshot({
+      ...deadlineOptions(),
+      client: client as any,
+      tools: { listDriveFiles: 'list', readDriveText: 'read', upsertDriveFile: 'write' } as any,
+      agentId: 'agent-1',
+      snapshot,
+      stabilize: async () => {},
+    })).rejects.toMatchObject({ code: 'MCP_DRIVE_SYNC_FAILED' })
+    expect(writes).toBe(1)
   })
 })

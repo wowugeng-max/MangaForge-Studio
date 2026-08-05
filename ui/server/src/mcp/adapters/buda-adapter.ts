@@ -2,8 +2,10 @@ import { types } from 'node:util'
 import { isAbortRelatedError, McpError, mcpFailureEvidence } from '../errors'
 import { mcpResultData, buildBudaDriveSnapshot, syncBudaDriveSnapshot } from './buda-drive'
 import { buildBudaToolArguments, resolveBudaTools, type BudaToolMap } from './buda-tool-map'
+import { validateMcpStageResponse } from '../../novel-writing-service/generation-source/stage-response-contract'
 import type { McpOperationKind, McpOperationOptions, McpToolResult } from '../types'
 import type {
+  McpChapterInvocationInput,
   McpChapterStageInput,
   McpChapterStageResult,
   McpChapterTaskInput,
@@ -612,8 +614,14 @@ class BudaChapterTaskSessionImpl implements McpChapterTaskSession {
           continue
         }
         if (status === 'waiting_for_input') throw new McpError('MCP_INPUT_REQUIRED', 'Buda Agent 正在等待额外输入')
-        if (status === 'failed') throw new McpError('MCP_SESSION_FAILED', 'Buda Session 执行失败')
-        if (status === 'cancelled') throw new McpError('MCP_CANCELLED', 'Buda Session 已取消')
+        if (status === 'failed') {
+          terminalSeen = true
+          throw new McpError('MCP_SESSION_FAILED', 'Buda Session 执行失败')
+        }
+        if (status === 'cancelled') {
+          terminalSeen = true
+          throw new McpError('MCP_CANCELLED', 'Buda Session 已取消')
+        }
         if (status !== 'completed') throw new McpError('MCP_SESSION_FAILED', `Buda Session 返回未知状态：${status || 'empty'}`)
         await this.progress('mcp_session_wait', 'success', status)
         this.task.deadline.throwIfAborted()
@@ -751,6 +759,178 @@ export class BudaAdapter implements McpGenerationAdapter {
     return {
       status,
       terminal: status === 'completed' || status === 'failed' || status === 'cancelled',
+    }
+  }
+
+  async invokeChapterStage(input: McpChapterInvocationInput): Promise<McpChapterStageResult> {
+    const startedAt = Date.now()
+    let tools: BudaToolMap | undefined
+    let activeSessionId = ''
+    let terminalSeen = false
+    const stabilityInput = (phase: 'transport' | 'drive_sync' | 'session_create' | 'session_poll') => ({
+      deadline: input.deadline,
+      phase,
+      pollInitialMs: input.server.poll_initial_ms,
+      pollMaxMs: input.server.poll_max_ms,
+      toolTimeoutMs: input.server.tool_timeout_ms,
+      onProgress: input.onProgress,
+    })
+    const remoteOptions = () => ({
+      signal: input.deadline.signal,
+      get timeoutMs() { return input.deadline.timeoutMs(input.server.tool_timeout_ms) },
+    })
+    const callOptions = (operation: McpOperationKind) => operationOptions(remoteOptions(), operation)
+    const progress = async (
+      stage: string,
+      status: 'running' | 'success' | 'warn' | 'failed' = 'running',
+      detail?: string,
+      snapshotHash?: string,
+    ) => {
+      await input.onProgress?.({
+        stage,
+        status,
+        detail,
+        elapsed_ms: Date.now() - startedAt,
+        ...(activeSessionId ? { session_id: activeSessionId.slice(0, 160) } : {}),
+        ...(snapshotHash ? { snapshot_hash: snapshotHash } : {}),
+      })
+    }
+    const runRead = <T>(phase: 'transport' | 'drive_sync' | 'session_poll', operation: () => Promise<T>) =>
+      input.stability.runRead(this.stabilityPolicy, stabilityInput(phase), operation)
+    const runMutation = <T>(phase: 'drive_sync' | 'session_create', operation: () => Promise<T>) =>
+      input.stability.runMutation(this.stabilityPolicy, stabilityInput(phase), operation)
+    const cleanup = async (primaryError: unknown) => {
+      if (!tools || !activeSessionId) return primaryError
+      const result = await cleanupBudaSession({
+        client: this.client,
+        tools,
+        task: input,
+        sessionId: activeSessionId,
+        terminalSeen,
+        primaryError,
+      })
+      return result.error
+    }
+
+    try {
+      input.deadline.throwIfAborted()
+      await input.stability.ensureReady(this.stabilityPolicy, stabilityInput('transport'))
+      input.deadline.throwIfAborted()
+
+      tools = await runRead('transport', () => this.resolveTools(remoteOptions()))
+      const agents = await runRead('transport', () => this.listAgents(remoteOptions()))
+      if (!agents.some(agent => agent.id === input.agentId)) {
+        throw new McpError('MCP_BINDING_INVALID', 'Buda 绑定的 Agent 不存在或不可访问')
+      }
+
+      const snapshot = buildBudaDriveSnapshot({
+        project: input.project,
+        chapter: input.chapter,
+        writingBible: input.context.writingBible,
+        storyState: input.context.storyState,
+        continuity: input.context.continuity,
+        recentChapters: input.context.recentChapters,
+        stage: input.stage,
+        responseContract: input.responseContract,
+        prompt: input.prompt,
+        invocationId: input.invocationId,
+      })
+      const sync = await syncBudaDriveSnapshot({
+        client: this.client,
+        tools: tools!,
+        agentId: input.agentId,
+        snapshot,
+        deadline: input.deadline,
+        toolTimeoutMs: input.server.tool_timeout_ms,
+        runRead: operation => runRead('drive_sync', operation),
+        runMutation: operation => runMutation('drive_sync', operation),
+        stabilize: () => input.stability.ensureReady(this.stabilityPolicy, stabilityInput('drive_sync')),
+      })
+      await progress('mcp_drive_sync', 'success', `已同步 ${sync.uploaded_paths.length} 个权威快照文件`, snapshot.snapshotHash)
+
+      const selectedModel = String(input.model || '').trim()
+      const modelArguments = selectedModel ? { model: selectedModel } : {}
+      const title = `MangaForge ${input.stage} ${String(input.invocationId || '').slice(0, 128)}`.slice(0, 200)
+      let createResult: McpToolResult
+      try {
+        createResult = await runMutation('session_create', () => this.client.callTool(
+          tools.createSession,
+          buildBudaToolArguments('createSession', tools.createSession, {
+            agentId: input.agentId,
+            message: buildBudaStageEnvelope(input),
+            title,
+            mode: 'agent',
+            ...modelArguments,
+            startRun: true,
+          }),
+          callOptions('mutation'),
+        ))
+      } catch (error) {
+        if (sendMayHaveSucceeded(error)) {
+          throw new McpError('MCP_SEND_UNKNOWN', 'Buda 阶段 Session 创建结果无法确认')
+        }
+        throw error
+      }
+      const created = mcpResultData(createResult)
+      activeSessionId = sessionId(created)
+      if (!activeSessionId) throw new McpError('MCP_SESSION_FAILED', 'Buda 未返回 Session 标识')
+      await progress('session_created', 'running', 'Buda Session 已创建', snapshot.snapshotHash)
+
+      let interval = Math.max(1, input.server.poll_initial_ms)
+      while (true) {
+        input.deadline.throwIfAborted()
+        const sessionResult = await runRead('session_poll', () => this.client.callTool(
+          tools!.getSession,
+          buildBudaToolArguments('getSession', tools!.getSession, {
+            agentId: input.agentId,
+            sessionId: activeSessionId,
+          }),
+          callOptions('read_safe'),
+        ))
+        const sessionData = mcpResultData(sessionResult)
+        const status = sessionStatus(sessionData)
+        const knownTerminal = status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'waiting_for_input'
+        if (status === 'pending' || status === 'in_progress') {
+          await progress('mcp_session_wait', 'running', status, snapshot.snapshotHash)
+          await abortableDelay(interval, input)
+          interval = Math.min(
+            Math.max(interval + 1, Math.round(interval * 1.5)),
+            Math.max(interval, input.server.poll_max_ms),
+          )
+          continue
+        }
+        if (status === 'waiting_for_input') throw new McpError('MCP_INPUT_REQUIRED', 'Buda Agent 正在等待额外输入')
+        if (status === 'failed') {
+          terminalSeen = true
+          throw new McpError('MCP_SESSION_FAILED', 'Buda Session 执行失败')
+        }
+        if (status === 'cancelled') {
+          terminalSeen = true
+          throw new McpError('MCP_CANCELLED', 'Buda Session 已取消')
+        }
+        if (!knownTerminal || status !== 'completed') {
+          throw new McpError('MCP_SESSION_FAILED', `Buda Session 返回未知状态：${status || 'empty'}`)
+        }
+        terminalSeen = true
+        const content = extractBudaStageContent(sessionData)
+        validateMcpStageResponse(input.stage, input.responseContract, { content })
+        await progress('mcp_extract', 'success', status, snapshot.snapshotHash)
+        return {
+          content,
+          session_id: activeSessionId,
+          snapshot_hash: snapshot.snapshotHash,
+          status: 'completed',
+        }
+      }
+    } catch (error) {
+      let primaryError = error
+      if (input.deadline.signal.aborted && isAbortRelatedError(error, input.deadline.signal)) {
+        try { input.deadline.throwIfAborted() } catch (cause) { primaryError = cause }
+      }
+      if (!(primaryError instanceof McpError)) {
+        primaryError = new McpError('MCP_TOOL_ERROR', 'Buda 阶段调用失败')
+      }
+      throw await cleanup(primaryError)
     }
   }
 
