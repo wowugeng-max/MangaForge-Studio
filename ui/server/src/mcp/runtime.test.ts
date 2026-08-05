@@ -118,6 +118,15 @@ describe('MCP runtime', () => {
     })
 
     const resolved = await runtime.getAdapterForKey(key.id, server.id)
+    expect(resolved).toMatchObject({
+      server: { id: server.id },
+      key: { id: key.id },
+      stability: {
+        ensureReady: expect.any(Function),
+        runRead: expect.any(Function),
+        runMutation: expect.any(Function),
+      },
+    })
     const deadline = new McpGenerationDeadline(60_000)
     const taskInput: McpChapterTaskInput = {
       activeWorkspace: workspace,

@@ -1,6 +1,7 @@
 import type {
   McpAgentSummary,
   McpGenerationReceiptStatus,
+  McpOperationKind,
   McpOperationOptions,
   McpServerRecord,
   McpToolDescriptor,
@@ -12,7 +13,9 @@ import type {
   ChapterTaskStage,
 } from '../../novel-writing-service/generation-source/types'
 
-export type McpAdapterOperationOptions = Omit<McpOperationOptions, 'operation'>
+export type McpAdapterOperationOptions = Omit<McpOperationOptions, 'operation'> & {
+  refreshTools?: boolean
+}
 
 export type McpClientPort = {
   listTools(options: McpAdapterOperationOptions): Promise<McpToolDescriptor[]>
@@ -30,6 +33,44 @@ export type GenerationSourceProgress = {
   elapsed_ms?: number
   session_id?: string
   snapshot_hash?: string
+}
+
+export type McpRecoveryPhase = 'transport' | 'drive_sync' | 'session_create' | 'session_poll'
+
+export type McpFailureClass =
+  | 'not_ready_pre_dispatch'
+  | 'transient_read_failure'
+  | 'ambiguous_write_failure'
+  | 'terminal_failure'
+
+export type McpStabilityPolicy = {
+  requiredConsecutiveSuccesses: number
+  warmupWindowMs: number
+  classify(error: unknown, operation: McpOperationKind): McpFailureClass
+  probe(client: McpClientPort, options: McpAdapterOperationOptions): Promise<void>
+}
+
+export type McpStabilityInput = {
+  deadline: McpGenerationDeadline
+  phase: McpRecoveryPhase
+  pollInitialMs: number
+  pollMaxMs: number
+  toolTimeoutMs: number
+  onProgress?: (event: GenerationSourceProgress) => Promise<void> | void
+}
+
+export interface McpStabilityController {
+  ensureReady(policy: McpStabilityPolicy | undefined, input: McpStabilityInput): Promise<void>
+  runRead<T>(
+    policy: McpStabilityPolicy | undefined,
+    input: McpStabilityInput,
+    operation: () => Promise<T>,
+  ): Promise<T>
+  runMutation<T>(
+    policy: McpStabilityPolicy | undefined,
+    input: McpStabilityInput,
+    operation: () => Promise<T>,
+  ): Promise<T>
 }
 
 export type McpChapterContextSnapshot = {

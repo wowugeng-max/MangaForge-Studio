@@ -9,9 +9,15 @@ import type {
   McpServerRecord,
   PublicMcpAgentQuarantineRecord,
 } from './types'
-import type { McpAdapterOperationOptions, McpClientPort, McpGenerationAdapter } from './adapters/types'
+import type {
+  McpAdapterOperationOptions,
+  McpClientPort,
+  McpGenerationAdapter,
+  McpStabilityController,
+} from './adapters/types'
 import { McpAgentLeaseRegistry } from './agent-lease'
 import { withMcpWorkspaceMutation } from './workspace-coordinator'
+import { createMcpStabilityController } from './stability'
 
 type RuntimeManager = Pick<McpClientManager, 'get' | 'invalidate' | 'invalidateIfCurrent' | 'invalidateServer' | 'closeAll'>
 
@@ -20,6 +26,7 @@ export type ResolvedMcpCredential = {
   key: McpKeyRecord
   client: McpClientPort & { diagnostics?: () => unknown }
   adapter: McpGenerationAdapter
+  stability: McpStabilityController
 }
 
 export type PinnedMcpCredential = Pick<ResolvedMcpCredential, 'server' | 'key'> & {
@@ -163,8 +170,12 @@ export function createMcpRuntime(
       },
       diagnostics: () => currentClient.diagnostics(),
     }
+    const stability = createMcpStabilityController({
+      reacquire,
+      invalidateCurrent: () => invalidateLostClient(currentClient),
+    })
     const adapter = adapterFactory(server.adapter_id, client)
-    return { server, key, client, adapter }
+    return { server, key, client, adapter, stability }
   }
 
   const getAdapterForKey = (

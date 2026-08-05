@@ -27,6 +27,7 @@ import type {
   McpToolDescriptor,
   McpToolResult,
 } from './types'
+import type { McpAdapterOperationOptions } from './adapters/types'
 
 type SdkClientLike = Pick<Client,
   | 'connect'
@@ -442,7 +443,7 @@ export class GenericMcpClient {
   }
 
   private async refreshTools(
-    options: Omit<McpOperationOptions, 'operation'> & { refreshTools?: boolean },
+    options: McpAdapterOperationOptions,
     sdk: SdkClientLike = this.requireReady(),
   ) {
     const timeout = options.timeoutMs || this.options.server.tool_timeout_ms
@@ -468,7 +469,7 @@ export class GenericMcpClient {
     return this.tools
   }
 
-  async listTools(options: Omit<McpOperationOptions, 'operation'> & { refreshTools?: boolean }) {
+  async listTools(options: McpAdapterOperationOptions) {
     this.requireReady()
     if (options.refreshTools || !this.tools.length) return this.refreshTools(options)
     return this.tools.map(tool => ({ ...tool }))
