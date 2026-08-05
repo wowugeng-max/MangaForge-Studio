@@ -49,6 +49,10 @@ function positiveSafeInteger(value) {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
 }
 
+function nonNegativeSafeInteger(value) {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
+}
+
 function boundedString(value, pattern) {
   return typeof value === 'string' && pattern.test(value) ? value : undefined
 }
@@ -254,6 +258,22 @@ function parseBoundedReceiptRef(value) {
     return undefined
   }
   return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : undefined
+}
+
+function parseBoundedRunGroup(value) {
+  if (typeof value !== 'string' || value.length < 2 || value.length > MAX_RESPONSE_BYTES) return undefined
+  let parsed
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    return undefined
+  }
+  return parsed
+    && typeof parsed === 'object'
+    && !Array.isArray(parsed)
+    && !types.isProxy(parsed)
+    ? parsed
+    : undefined
 }
 
 function mergedReceiptField(input, output, field, fail) {
@@ -516,6 +536,65 @@ function projectRunState(value, expectedRunId, expectedProjectId, expectedRunTyp
     throw safeError('invalid run projection', 'INVALID_RUN_PROJECTION')
   }
   return { id, project_id: projectId, run_type: runType, status }
+}
+
+export function projectRunRecoveryState(
+  value,
+  expectedRunId,
+  expectedProjectId,
+  expectedChapterId,
+  previousAttempts = 0,
+) {
+  const fail = () => {
+    throw safeError('invalid automatic recovery state', 'INVALID_RUN_RECOVERY_STATE')
+  }
+  try {
+    const run = projectRunState(
+      value,
+      expectedRunId,
+      expectedProjectId,
+      'chapter_group_generation',
+    )
+    const previousAttemptsValue = nonNegativeSafeInteger(previousAttempts)
+    const group = parseBoundedRunGroup(ownDataValue(value, 'output_ref'))
+    const currentIndex = nonNegativeSafeInteger(ownDataValue(group, 'current_index'))
+    const chapters = ownDataValue(group, 'chapters')
+    if (run.status !== 'ready'
+      || previousAttemptsValue === undefined
+      || currentIndex === undefined
+      || !Array.isArray(chapters)
+      || types.isProxy(chapters)) fail()
+    const chaptersLength = ownDataValue(chapters, 'length')
+    if (!Number.isSafeInteger(chaptersLength)
+      || chaptersLength < 1
+      || chaptersLength > 50
+      || currentIndex >= chaptersLength) fail()
+    const chapter = ownDataValue(chapters, String(currentIndex))
+    if (!chapter || typeof chapter !== 'object' || Array.isArray(chapter) || types.isProxy(chapter)) fail()
+    const chapterId = positiveSafeInteger(ownDataValue(chapter, 'id'))
+    const chapterStatus = ownDataValue(chapter, 'status')
+    const attempts = nonNegativeSafeInteger(ownDataValue(chapter, 'attempts'))
+    const nextRunAt = boundedLabel(ownDataValue(chapter, 'next_run_at'), 64)
+    if (chapterId !== expectedChapterId
+      || chapterStatus !== 'ready'
+      || attempts === undefined
+      || attempts < previousAttemptsValue
+      || !nextRunAt) fail()
+    const nextRunAtMs = Date.parse(nextRunAt)
+    if (!Number.isFinite(nextRunAtMs) || new Date(nextRunAtMs).toISOString() !== nextRunAt) fail()
+    return {
+      id: run.id,
+      project_id: run.project_id,
+      run_type: run.run_type,
+      status: run.status,
+      chapter_id: chapterId,
+      attempts,
+      next_run_at: nextRunAt,
+      next_run_at_ms: nextRunAtMs,
+    }
+  } catch {
+    fail()
+  }
 }
 
 function projectStartedGroup(value, expectedProjectId, expectedChapterId) {

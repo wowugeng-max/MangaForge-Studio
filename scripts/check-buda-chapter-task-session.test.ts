@@ -9,6 +9,7 @@ import {
   parseCliArgs,
   projectChapter,
   projectQuarantineList,
+  projectRunRecoveryState,
   projectRunSummaryList,
   projectSourceAuthority,
   projectStageReceipt,
@@ -86,6 +87,37 @@ function stageRun(
     input_ref: JSON.stringify(common),
     output_ref: JSON.stringify({ ...common, status: 'success' }),
   }
+}
+
+function recoveryRun(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 200,
+    project_id: 12,
+    run_type: 'chapter_group_generation',
+    status: 'ready',
+    output_ref: recoveryOutput(),
+    ...overrides,
+  }
+}
+
+function recoveryOutput(
+  groupOverrides: Record<string, unknown> = {},
+  chapterOverrides: Record<string, unknown> = {},
+) {
+  return JSON.stringify({
+    current_index: 0,
+    chapters: [{
+      id: 34,
+      status: 'ready',
+      attempts: 1,
+      next_run_at: '2026-08-05T12:34:56.000Z',
+      error_message: 'PRIVATE_REMOTE_ERROR_SENTINEL',
+      session_id: 'PRIVATE_REMOTE_SESSION_SENTINEL',
+      provider_text: 'PRIVATE_REMOTE_PROVIDER_SENTINEL',
+      ...chapterOverrides,
+    }],
+    ...groupOverrides,
+  })
 }
 
 function deterministicSmokeFetch(options: {
@@ -475,6 +507,98 @@ describe('Buda smoke input and public receipt projection', () => {
       ...providerIdentity,
     })
     expect(JSON.stringify(projected)).not.toContain('must not project')
+  })
+
+  test('projects only the safe automatic recovery fields', () => {
+    const projected = projectRunRecoveryState(recoveryRun(), 200, 12, 34)
+
+    expect(projected).toEqual({
+      id: 200,
+      project_id: 12,
+      run_type: 'chapter_group_generation',
+      status: 'ready',
+      chapter_id: 34,
+      attempts: 1,
+      next_run_at: '2026-08-05T12:34:56.000Z',
+      next_run_at_ms: Date.parse('2026-08-05T12:34:56.000Z'),
+    })
+    expect(JSON.stringify(projected)).not.toContain('PRIVATE_REMOTE')
+    expect(projected).not.toHaveProperty('error_message')
+    expect(projected).not.toHaveProperty('session_id')
+  })
+
+  test('rejects malformed parent, chapter, attempt, index, and retry date state', () => {
+    const invalid = [
+      recoveryRun({ id: 201 }),
+      recoveryRun({ project_id: 13 }),
+      recoveryRun({ run_type: 'chapter_generation_stage' }),
+      recoveryRun({ status: 'running' }),
+      recoveryRun({ output_ref: recoveryOutput({}, { id: 35 }) }),
+      recoveryRun({ output_ref: recoveryOutput({}, { status: 'failed' }) }),
+      recoveryRun({ output_ref: recoveryOutput({}, { attempts: -1 }) }),
+      recoveryRun({ output_ref: recoveryOutput({}, { attempts: 1.5 }) }),
+      recoveryRun({ output_ref: recoveryOutput({ current_index: 1 }) }),
+      recoveryRun({ output_ref: recoveryOutput({ chapters: [] }) }),
+      recoveryRun({ output_ref: recoveryOutput({}, { next_run_at: '' }) }),
+      recoveryRun({ output_ref: recoveryOutput({}, { next_run_at: 'not-a-date' }) }),
+      recoveryRun({ output_ref: recoveryOutput({}, { next_run_at: '2026-08-05T12:34:56Z' }) }),
+    ]
+
+    for (const candidate of invalid) {
+      try {
+        projectRunRecoveryState(candidate, 200, 12, 34)
+        throw new Error('expected invalid recovery state to fail')
+      } catch (error: any) {
+        expect(error.message).toBe('invalid automatic recovery state')
+        expect(error.code).toBe('INVALID_RUN_RECOVERY_STATE')
+      }
+    }
+  })
+
+  test('rejects recovery attempt regression', () => {
+    try {
+      projectRunRecoveryState(recoveryRun(), 200, 12, 34, 2)
+      throw new Error('expected recovery attempt regression to fail')
+    } catch (error: any) {
+      expect(error.message).toBe('invalid automatic recovery state')
+      expect(error.code).toBe('INVALID_RUN_RECOVERY_STATE')
+    }
+  })
+
+  test('does not invoke recovery output accessors or top-level Proxy traps', () => {
+    const sentinel = 'PRIVATE_RECOVERY_PROJECTION_SENTINEL'
+    let getterCalls = 0
+    let proxyCalls = 0
+    const hostileOutput = recoveryRun()
+    Object.defineProperty(hostileOutput, 'output_ref', {
+      get() {
+        getterCalls += 1
+        throw new Error(sentinel)
+      },
+    })
+    const hostileRun = new Proxy(recoveryRun(), {
+      get() {
+        proxyCalls += 1
+        throw new Error(sentinel)
+      },
+      getOwnPropertyDescriptor() {
+        proxyCalls += 1
+        throw new Error(sentinel)
+      },
+    })
+
+    for (const candidate of [hostileOutput, hostileRun]) {
+      try {
+        projectRunRecoveryState(candidate, 200, 12, 34)
+        throw new Error('expected hostile recovery state to fail')
+      } catch (error: any) {
+        expect(error.message).toBe('invalid automatic recovery state')
+        expect(error.code).toBe('INVALID_RUN_RECOVERY_STATE')
+        expect(JSON.stringify(error)).not.toContain(sentinel)
+      }
+    }
+    expect(getterCalls).toBe(0)
+    expect(proxyCalls).toBe(0)
   })
 
   test('merges safe provider identity split across stage input and output', () => {
