@@ -1163,6 +1163,73 @@ describe('Buda smoke automatic run recovery', () => {
     expect(driver.executions).toBe(1)
   })
 
+  test('normalizes malformed ready parent projections without replay', async () => {
+    for (const malformed of [
+      recoveryRun({ id: 201 }),
+      recoveryRun({ project_id: 13 }),
+      recoveryRun({ run_type: 'chapter_generation_stage' }),
+    ]) {
+      const driver = automaticDriver({ states: [malformed] })
+
+      await expect(driveAutomaticRunToSuccess({
+        runId: 200,
+        projectId: 12,
+        chapterId: 34,
+        deadline: Number.MAX_SAFE_INTEGER,
+        pollIntervalMs: 100,
+        readRun: driver.readRun,
+        executeRun: driver.executeRun,
+        assertNoQuarantine: driver.assertNoQuarantine,
+      }, { now: driver.now, wait: driver.wait })).rejects.toMatchObject({
+        message: 'invalid automatic recovery state',
+        code: 'INVALID_RUN_RECOVERY_STATE',
+      })
+      expect(driver.executions).toBe(1)
+      expect(driver.quarantineChecks).toBe(0)
+    }
+  })
+
+  test('normalizes hostile top-level recovery states without invoking or reflecting them', async () => {
+    const sentinel = 'PRIVATE_HOSTILE_RECOVERY_SENTINEL'
+    let getterCalls = 0
+    let proxyCalls = 0
+    const accessorState = recoveryRun()
+    Object.defineProperty(accessorState, 'id', {
+      get() {
+        getterCalls += 1
+        throw new Error(sentinel)
+      },
+    })
+    const proxyState = new Proxy(recoveryRun(), {
+      getOwnPropertyDescriptor() {
+        proxyCalls += 1
+        throw new Error(sentinel)
+      },
+    })
+
+    for (const hostile of [accessorState, proxyState]) {
+      const driver = automaticDriver({ states: [hostile] })
+      const error = await driveAutomaticRunToSuccess({
+        runId: 200,
+        projectId: 12,
+        chapterId: 34,
+        deadline: Number.MAX_SAFE_INTEGER,
+        pollIntervalMs: 100,
+        readRun: driver.readRun,
+        executeRun: driver.executeRun,
+        assertNoQuarantine: driver.assertNoQuarantine,
+      }, { now: driver.now, wait: driver.wait }).then(() => null, caught => caught)
+
+      expect(error?.message).toBe('invalid automatic recovery state')
+      expect(error?.code).toBe('INVALID_RUN_RECOVERY_STATE')
+      expect(JSON.stringify(error)).not.toContain(sentinel)
+      expect(driver.executions).toBe(1)
+      expect(driver.quarantineChecks).toBe(0)
+    }
+    expect(getterCalls).toBe(0)
+    expect(proxyCalls).toBe(0)
+  })
+
   test('preserves a timeout thrown while waiting for next_run_at', async () => {
     const timeout = Object.assign(new Error('smoke timeout'), { code: 'SMOKE_TIMEOUT' })
     const deadline = Date.parse('2026-08-05T01:05:00.000Z')
@@ -1452,6 +1519,27 @@ describe('Buda smoke terminal workflow', () => {
     expect(scenario.calls.filter(call => (
       call === 'POST:/api/novel/projects/12/chapter-groups/200/execute'
     ))).toHaveLength(3)
+    expect(scenario.calls).not.toContain('POST:/api/novel/chapters/34/prose-quality')
+  })
+
+  test('emits the recovery diagnostic for a malformed ready parent snapshot', async () => {
+    const scenario = deterministicSmokeFetch({
+      automaticStates: [recoveryRun({ id: 201 })],
+    })
+
+    const result = await runSmokeScenario(scenario)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.logs).toEqual([])
+    expect(result.errors).toHaveLength(1)
+    expect(JSON.parse(result.errors[0])).toEqual({
+      ok: false,
+      stage: 'automatic_poll',
+      error_code: 'INVALID_RUN_RECOVERY_STATE',
+    })
+    expect(scenario.calls.filter(call => (
+      call === 'POST:/api/novel/projects/12/chapter-groups/200/execute'
+    ))).toHaveLength(1)
     expect(scenario.calls).not.toContain('POST:/api/novel/chapters/34/prose-quality')
   })
 })

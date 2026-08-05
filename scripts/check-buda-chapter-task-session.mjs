@@ -678,12 +678,17 @@ export async function driveAutomaticRunToSuccess(input, dependencies = {}) {
   let previousAttempts = 0
   while (true) {
     const detail = await input.readRun()
-    const run = projectRunState(
-      detail,
-      input.runId,
-      input.projectId,
-      'chapter_group_generation',
-    )
+    let run
+    try {
+      run = projectRunState(
+        detail,
+        input.runId,
+        input.projectId,
+        'chapter_group_generation',
+      )
+    } catch {
+      throw safeError('invalid automatic recovery state', 'INVALID_RUN_RECOVERY_STATE')
+    }
     if (run.status === 'success') return { ...run, executions }
     if (['failed', 'canceled', 'paused'].includes(run.status)) {
       throw safeError('automatic run did not succeed', `AUTOMATIC_RUN_${run.status.toUpperCase()}`)
