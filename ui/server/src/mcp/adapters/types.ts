@@ -141,6 +141,11 @@ export type McpChapterTaskInput = {
   onProgress?: (event: GenerationSourceProgress) => Promise<void> | void
 }
 
+export type McpChapterInvocationInput = McpChapterTaskInput & McpChapterStageInput & {
+  invocationId: string
+  stability: McpStabilityController
+}
+
 export type McpChapterStageResult = {
   content: string
   session_id: string
@@ -164,6 +169,7 @@ export interface McpGenerationAdapter {
     input: { agentId: string; sessionId: string },
     options: McpAdapterOperationOptions,
   ): Promise<{ status: string; terminal: boolean }>
-  openChapterTask(input: McpChapterTaskInput): Promise<McpChapterTaskSession>
+  invokeChapterStage?(input: McpChapterInvocationInput): Promise<McpChapterStageResult>
+  openChapterTask?(input: McpChapterTaskInput): Promise<McpChapterTaskSession>
   generateProse(input: McpProseGenerationInput): Promise<McpProseGenerationResult>
 }

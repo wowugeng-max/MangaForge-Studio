@@ -11,9 +11,12 @@ import { McpGenerationDeadline } from '../../mcp/deadline'
 import type { McpAgentLease } from '../../mcp/agent-lease'
 import type { McpGenerationReceiptStatus } from '../../mcp/types'
 import type {
+  McpChapterInvocationInput,
+  McpChapterTaskInput,
   McpChapterStageInput,
   McpChapterStageResult,
   McpChapterTaskSession,
+  McpGenerationAdapter,
 } from '../../mcp/adapters/types'
 import { withMcpWorkspaceMutation } from '../../mcp/workspace-coordinator'
 import { createMcpSecretScrubber } from '../../mcp/secret-scrubber'
@@ -243,6 +246,18 @@ function safeOutboundRequestId(
   return boundedScrubbedId(scrubber, value)
 }
 
+function boundedInvocationId(
+  scrubber: ReturnType<typeof createMcpSecretScrubber>,
+  taskId: string,
+  stage: ChapterTaskStage,
+  requestId: string,
+  ordinal: number,
+) {
+  const candidate = scrubber.scrubText(`${taskId}:${stage}:${ordinal}:${requestId}`)
+  if (candidate.length <= PROVENANCE_ID_MAX_CHARS) return candidate
+  return `sha256:${sha256(candidate)}`.slice(0, PROVENANCE_ID_MAX_CHARS)
+}
+
 function acceptRemoteId(value: unknown, label: string) {
   if (typeof value !== 'string' || !value.trim() || value.length > PROVENANCE_ID_MAX_CHARS) {
     throw new McpError('MCP_SESSION_FAILED', `MCP Adapter 返回了无效的 ${label}`)
@@ -293,7 +308,17 @@ function projectAgentIds(value: unknown) {
   return ids
 }
 
-function dataMethod(value: unknown, field: string) {
+type CheckedDataMethod = (...args: never[]) => unknown
+
+function safeApply<Args extends readonly unknown[], Result>(
+  method: (...args: Args) => Result,
+  receiver: unknown,
+  args: Args,
+): Result {
+  return Reflect.apply(method, receiver, args) as Result
+}
+
+function dataMethod<Method extends CheckedDataMethod>(value: unknown, field: string): Method | undefined {
   if (!value || (typeof value !== 'object' && typeof value !== 'function')) return undefined
   let current: object | null = value as object
   for (let depth = 0; current && depth < 8; depth += 1) {
@@ -301,7 +326,7 @@ function dataMethod(value: unknown, field: string) {
     try {
       const descriptor = Object.getOwnPropertyDescriptor(current, field)
       if (descriptor) return 'value' in descriptor && typeof descriptor.value === 'function'
-        ? descriptor.value as (...args: any[]) => any
+        ? descriptor.value as Method
         : undefined
       current = Object.getPrototypeOf(current)
     } catch {
@@ -315,16 +340,16 @@ function projectChapterTaskSessionPort(value: unknown): McpChapterTaskSession {
   if (!value || typeof value !== 'object' || unsafeProxy(value)) {
     throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的任务 Session')
   }
-  const runStage = dataMethod(value, 'runStage')
-  const close = dataMethod(value, 'close')
+  const runStage = dataMethod<McpChapterTaskSession['runStage']>(value, 'runStage')
+  const close = dataMethod<McpChapterTaskSession['close']>(value, 'close')
   if (!runStage || !close) {
     throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的任务 Session')
   }
   return {
     sessionId: '',
     snapshotHash: '',
-    runStage: input => Reflect.apply(runStage, value, [input]),
-    close: () => Reflect.apply(close, value, []),
+    runStage: input => safeApply<[McpChapterStageInput], Promise<McpChapterStageResult>>(runStage, value, [input]),
+    close: () => safeApply<[], Promise<void>>(close, value, []),
   }
 }
 
@@ -609,9 +634,11 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
   private snapshotHash = ''
   private remoteSessionId = ''
   private remoteSnapshotHash = ''
+  private oneShotInvocationPort = false
   private sessionFenceStaged = false
   private sessionFencePromise?: Promise<void>
   private stageSequence = 0
+  private invocationSequence = 0
   private deadlineClosed = false
   private closeRequested = false
   private readonly activeOperations = new Set<Promise<void>>()
@@ -769,7 +796,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     if (!updated) throw new McpError('MCP_STORE_IO_FAILED', 'MCP 章节任务回执持久化失败')
   }
 
-  private async onSessionProgress(event: unknown) {
+  private async onSessionProgress(event: unknown, options: { stageFence?: boolean } = {}) {
     this.throwIfCloseRequested()
     const projectedEvent = projectedRecord(event)
     const rawSessionId = ownDataValue(event, 'session_id')
@@ -805,7 +832,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     this.snapshotHash = this.remoteSnapshotHash
       ? boundedScrubbedId(this.scrubber, this.remoteSnapshotHash)
       : ''
-    if (scrubbedEvent?.stage === 'session_created') {
+    if (scrubbedEvent?.stage === 'session_created' && options.stageFence !== false) {
       if (!this.remoteSessionId) throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 未提供 Session 标识')
       await this.ensureSessionFence()
     }
@@ -899,7 +926,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
       this.taskReceiptId = taskRun.id
       this.throwIfCloseRequested()
       const continuity = this.input.contextPackage?.continuity || {}
-      const pendingSession = resolved.adapter.openChapterTask({
+      const taskInput: McpChapterTaskInput = {
         activeWorkspace: this.input.activeWorkspace,
         server: resolved.server,
         keyId: this.binding.key_id,
@@ -920,7 +947,59 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
         deadline: this.deadline,
         signal: this.deadline.signal,
         onProgress: event => this.onSessionProgress(event),
-      })
+      }
+      const invokeChapterStage = dataMethod<NonNullable<McpGenerationAdapter['invokeChapterStage']>>(
+        resolved.adapter,
+        'invokeChapterStage',
+      )
+      if (invokeChapterStage) {
+        this.oneShotInvocationPort = true
+        taskInput.onProgress = event => this.onSessionProgress(event, { stageFence: false })
+        const session: McpChapterTaskSession = {
+          sessionId: '',
+          snapshotHash: '',
+          runStage: stageInput => {
+            this.remoteSessionId = ''
+            this.remoteSnapshotHash = ''
+            this.sessionId = ''
+            this.snapshotHash = ''
+            const invocationInput: McpChapterInvocationInput = {
+              ...taskInput,
+              ...stageInput,
+              invocationId: boundedInvocationId(
+                this.scrubber,
+                this.taskId,
+                stageInput.stage,
+                stageInput.requestId,
+                ++this.invocationSequence,
+              ),
+              stability: resolved.stability,
+            }
+            return safeApply<
+              [McpChapterInvocationInput],
+              Promise<McpChapterStageResult>
+            >(invokeChapterStage, resolved.adapter, [invocationInput])
+          },
+          // invokeChapterStage owns each remote stage lifecycle; this virtual Session is
+          // only the temporary source-side compatibility shell until Task 10 removes it.
+          async close() {},
+        }
+        this.session = session
+        return session
+      }
+
+      // TODO(Task 10): Remove the legacy shared-Session fallback after all adapters use invokeChapterStage().
+      const openChapterTask = dataMethod<NonNullable<McpGenerationAdapter['openChapterTask']>>(
+        resolved.adapter,
+        'openChapterTask',
+      )
+      if (!openChapterTask) {
+        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 未提供 chapter stage 调用端口')
+      }
+      const pendingSession = safeApply<
+        [McpChapterTaskInput],
+        Promise<McpChapterTaskSession>
+      >(openChapterTask, resolved.adapter, [taskInput])
       assertSafeAwaitable(
         pendingSession,
         () => new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了无效的任务 Session'),
@@ -1138,7 +1217,16 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     this.throwIfCloseRequested()
     const result = projectMcpChapterStageResult(rawResult)
     this.deadline?.throwIfAborted()
-    if (result.session_id !== this.remoteSessionId
+    if (this.oneShotInvocationPort) {
+      if ((this.remoteSessionId && result.session_id !== this.remoteSessionId)
+        || (this.remoteSnapshotHash && result.snapshot_hash !== this.remoteSnapshotHash)) {
+        throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了不属于当前 stage invocation 的结果')
+      }
+      this.remoteSessionId = result.session_id
+      this.remoteSnapshotHash = result.snapshot_hash
+      this.sessionId = boundedScrubbedId(this.scrubber, result.session_id)
+      this.snapshotHash = boundedScrubbedId(this.scrubber, result.snapshot_hash)
+    } else if (result.session_id !== this.remoteSessionId
       || result.snapshot_hash !== this.remoteSnapshotHash) {
       throw new McpError('MCP_SESSION_FAILED', 'MCP Adapter 返回了不属于当前任务 Session 的 stage 结果')
     }

@@ -42,10 +42,13 @@ import {
   type ResolvedChapterTaskInput,
 } from './types'
 import type {
+  McpChapterInvocationInput,
   McpChapterStageInput,
+  McpChapterStageResult,
   McpChapterTaskInput,
   McpChapterTaskSession,
   McpGenerationAdapter,
+  McpStabilityController,
 } from '../../mcp/adapters/types'
 
 const workspace = '/workspace/a'
@@ -2503,6 +2506,7 @@ describe('McpGenerationSource task execution', () => {
         taskInput: McpChapterTaskInput,
       ) => any
       openChapterTask?: (input: McpChapterTaskInput, ordinal: number) => any
+      invokeChapterStage?: (input: McpChapterInvocationInput) => Promise<McpChapterStageResult>
       closeSession?: () => any
       resolveCredentialConfig?: (pinned: any) => any
       onGetAdapter?: () => Promise<void> | void
@@ -2574,6 +2578,11 @@ describe('McpGenerationSource task execution', () => {
     }
     const sessions: McpChapterTaskSession[] = []
     const stageInputs: McpChapterStageInput[] = []
+    const stability: McpStabilityController = {
+      async ensureReady() {},
+      async runRead(_policy, _input, operation) { return operation() },
+      async runMutation(_policy, _input, operation) { return operation() },
+    }
     const adapter: McpGenerationAdapter = {
       id: 'test-session-provider',
       listAgents() {
@@ -2626,6 +2635,13 @@ describe('McpGenerationSource task execution', () => {
         throw new Error('generateProse compatibility port must not be used')
       },
     }
+    if (options.invokeChapterStage) {
+      Object.assign(adapter, {
+        invokeChapterStage(input: McpChapterInvocationInput) {
+          return options.invokeChapterStage!(input)
+        },
+      })
+    }
     const agentLeases = new McpAgentLeaseRegistry()
     const runtime = {
       resolveCredentialConfig: (_keyId: number, _serverId: string, pinned: any) => options.resolveCredentialConfig
@@ -2635,7 +2651,7 @@ describe('McpGenerationSource task execution', () => {
       getAdapterForKey: async (_keyId: number, _serverId: string, _remote: any, pinned: any) => {
         counters.getAdapter += 1
         await options.onGetAdapter?.()
-        return { server: pinned.server, key: pinned.key, adapter }
+        return { server: pinned.server, key: pinned.key, adapter, stability }
       },
       acquireAgentLease: async (workspace: string, binding: any) => {
         counters.acquireAgentLease += 1
@@ -2716,6 +2732,7 @@ describe('McpGenerationSource task execution', () => {
       sessions,
       stageInputs,
       adapter,
+      stability,
       runtime,
       source,
       agentLeases,
@@ -2821,6 +2838,136 @@ describe('McpGenerationSource task execution', () => {
     expect(modelCalls).toBe(0)
     expect(fixture.counters.modelCreations).toBe(0)
     await execution.close({ status: 'failed', error: caught }).catch(() => {})
+  })
+
+  test('routes each actual stage through one adapter invocation', async () => {
+    const invocations: McpChapterInvocationInput[] = []
+    const observedSessionFences: string[][] = []
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-one-shot-port-', {
+      async invokeChapterStage(input) {
+        invocations.push(input)
+        await input.onProgress?.({
+          stage: 'session_created',
+          status: 'running',
+          ...(input.stage === 'draft'
+            ? { session_id: `session-${invocations.length}` }
+            : { snapshot_hash: `snapshot-${invocations.length}` }),
+        })
+        observedSessionFences.push((await readMcpAgentQuarantines(input.activeWorkspace))
+          .map(item => item.session_id))
+        return {
+          content: input.stage === 'draft'
+            ? '一次调用生成的正文。'
+            : '{"score":92,"publishable":true,"findings":[]}',
+          session_id: `session-${invocations.length}`,
+          snapshot_hash: `snapshot-${invocations.length}`,
+          status: 'completed' as const,
+        }
+      },
+      async runStage(input, session) {
+        return {
+          content: input.stage === 'draft'
+            ? '旧 Session 生成的正文。'
+            : '{"score":80,"publishable":true,"findings":[]}',
+          session_id: session.sessionId,
+          snapshot_hash: session.snapshotHash,
+          status: 'completed' as const,
+        }
+      },
+    })
+    const execution = await fixture.begin()
+    let closed = false
+
+    try {
+      await execution.generateDraft(fixture.request())
+      await execution.executeAgent(
+        'quality_review',
+        'quality_review_json',
+        'reviewer',
+        fixture.durableProject,
+        {},
+      )
+
+      expect(invocations.map(item => item.stage)).toEqual(['draft', 'quality_review'])
+      expect(invocations.map(item => item.taskId)).toEqual([execution.taskId, execution.taskId])
+      expect(invocations.every(item => item.stability === fixture.stability)).toBe(true)
+      expect(invocations.every(item => item.invocationId.length > 0 && item.invocationId.length <= 160)).toBe(true)
+      expect(new Set(invocations.map(item => item.invocationId)).size).toBe(2)
+      expect(observedSessionFences).toEqual([[], []])
+      expect(fixture.counters).toMatchObject({ open: 0, runStage: 0 })
+      await execution.close({ status: 'success' })
+      closed = true
+      expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([])
+      expect(await fixture.agentLeases.isActive(fixture.activeWorkspace, {
+        serverId: fixture.server.id,
+        keyId: fixture.key.id,
+        agentId: 'neutral-agent-1',
+      })).toBe(false)
+    } finally {
+      if (!closed) await execution.close({ status: 'success' }).catch(() => {})
+    }
+  })
+
+  test('keeps bounded invocation ids distinct for repeated stages with colliding request prefixes', async () => {
+    const invocations: McpChapterInvocationInput[] = []
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-one-shot-id-', {
+      async invokeChapterStage(input) {
+        invocations.push(input)
+        return {
+          content: '{"score":92,"publishable":true,"findings":[]}',
+          session_id: `id-session-${invocations.length}`,
+          snapshot_hash: `id-snapshot-${invocations.length}`,
+          status: 'completed' as const,
+        }
+      },
+    })
+    const execution = await fixture.begin()
+    const sharedPrefix = 'request-prefix-'.padEnd(160, 'x')
+
+    try {
+      await runDirectRemoteStage(fixture.coreExecution(), `${sharedPrefix}-one`, 'quality_review')
+      await runDirectRemoteStage(fixture.coreExecution(), `${sharedPrefix}-two`, 'quality_review')
+
+      expect(invocations).toHaveLength(2)
+      expect(invocations.every(item => item.invocationId.length > 0 && item.invocationId.length <= 160)).toBe(true)
+      expect(new Set(invocations.map(item => item.invocationId)).size).toBe(2)
+    } finally {
+      await execution.close({ status: 'success' }).catch(() => {})
+    }
+  })
+
+  test('invokes a projected one-shot method without reading its hostile call property', async () => {
+    let callGetters = 0
+    let bodyCalls = 0
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-one-shot-safe-apply-')
+    const invokeChapterStage: NonNullable<McpGenerationAdapter['invokeChapterStage']> = async input => {
+      bodyCalls += 1
+      return {
+        content: '安全调用的一次性正文。',
+        session_id: 'safe-apply-session',
+        snapshot_hash: 'safe-apply-snapshot',
+        status: 'completed',
+      }
+    }
+    Object.defineProperty(invokeChapterStage, 'call', {
+      configurable: true,
+      get() {
+        callGetters += 1
+        throw new Error('HOSTILE_CALL_ACCESSOR')
+      },
+    })
+    Object.assign(fixture.adapter, { invokeChapterStage })
+    const execution = await fixture.begin()
+
+    try {
+      const draft = await execution.generateDraft(fixture.request())
+
+      expect(draft.prose_chapters?.[0]?.chapter_text).toBe('安全调用的一次性正文。')
+      expect(callGetters).toBe(0)
+      expect(bodyCalls).toBe(1)
+    } finally {
+      await execution.close({ status: 'success' }).catch(() => {})
+    }
   })
 
   test('runs a complete multi-stage task through one provider-neutral Session and releases both leases', async () => {

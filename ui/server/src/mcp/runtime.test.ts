@@ -8,6 +8,7 @@ import { createMcpKey, readMcpKeys, updateMcpKey } from './key-store'
 import { createMcpRuntime } from './runtime'
 import { BUDA_MCP_SERVER_TEMPLATE, writeMcpServers } from './server-store'
 import type {
+  McpChapterInvocationInput,
   McpChapterStageInput,
   McpChapterTaskInput,
   McpChapterTaskSession,
@@ -50,7 +51,7 @@ describe('MCP runtime', () => {
     return (await runtime.listAgentQuarantines(workspace)).find(item => item.session_id === input.sessionId)!
   }
 
-  test('resolves a non-Buda session provider through the shared Adapter port', async () => {
+  test('resolves a non-Buda one-shot provider through the shared Adapter port', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-provider-neutral-'))
     workspaces.push(workspace)
     const server = {
@@ -66,6 +67,7 @@ describe('MCP runtime', () => {
       description: '通用 Adapter',
     })
     const opened: McpChapterTaskInput[] = []
+    const invoked: McpChapterInvocationInput[] = []
     const stages: McpChapterStageInput[] = []
     const session: McpChapterTaskSession = {
       sessionId: 'test-session-1',
@@ -87,6 +89,10 @@ describe('MCP runtime', () => {
       async listAgents() { return [{ id: 'agent-1', name: 'Provider Agent' }] },
       async createAgent(input) { return { id: 'agent-2', name: input.name } },
       async inspectSession() { return { status: 'completed', terminal: true } },
+      async invokeChapterStage(input) {
+        invoked.push(input)
+        return session.runStage(input)
+      },
       async openChapterTask(input) { opened.push(input); return session },
       async generateProse(input) {
         return {
@@ -140,18 +146,31 @@ describe('MCP runtime', () => {
       context: { writingBible: '', storyState: {}, continuity: '', recentChapters: '' },
       deadline,
     }
-    const task = await resolved.adapter.openChapterTask(taskInput)
-    const result = await task.runStage({
+    const invokeChapterStage = resolved.adapter.invokeChapterStage
+    expect(invokeChapterStage).toBeDefined()
+    const result = await invokeChapterStage!({
+      ...taskInput,
       requestId: 'request-provider-1',
       stage: 'draft',
       responseContract: 'draft_prose',
       prompt: '供应商无关正文任务',
+      invocationId: 'invocation-provider-1',
+      stability: resolved.stability,
     })
     deadline.close()
 
     expect(factoryAdapterId).toBe('test-session-provider')
     expect(resolved.adapter.id).toBe('test-session-provider')
-    expect(opened).toEqual([taskInput])
+    expect(opened).toEqual([])
+    expect(invoked).toEqual([{
+      ...taskInput,
+      requestId: 'request-provider-1',
+      stage: 'draft',
+      responseContract: 'draft_prose',
+      prompt: '供应商无关正文任务',
+      invocationId: 'invocation-provider-1',
+      stability: resolved.stability,
+    }])
     expect(stages.map(item => item.stage)).toEqual(['draft'])
     expect(result).toMatchObject({
       content: 'provider:供应商无关正文任务',
