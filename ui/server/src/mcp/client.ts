@@ -210,6 +210,10 @@ function errorMessage(error: unknown) {
 
 const SDK_HTTP_RESPONSE_TEXT_MAX_CHARS = 16_384
 const SDK_HTTP_RESPONSE_ID_MAX_CHARS = 16_384
+const SERVER_NOT_INITIALIZED_MESSAGES = new Set([
+  'Server not initialized',
+  'Bad Request: Server not initialized',
+])
 
 function ownDataValue(value: unknown, field: string) {
   if (!value || typeof value !== 'object' || types.isProxy(value)) return undefined
@@ -262,7 +266,7 @@ function projectSdkHttpFailure(error: unknown): McpFailureEvidence | undefined {
     if (status === 400
       && responseId === null
       && jsonrpcCode === -32000
-      && jsonrpcMessage === 'Server not initialized') {
+      && SERVER_NOT_INITIALIZED_MESSAGES.has(jsonrpcMessage)) {
       evidence.reason = 'server_not_initialized'
     }
   } catch {}

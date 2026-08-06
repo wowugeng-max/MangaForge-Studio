@@ -515,11 +515,40 @@ describe('generic MCP client', () => {
     expect(client.state).toBe('Ready')
   })
 
+  test('preserves the current Buda bad-request pre-dispatch not-ready evidence', async () => {
+    const error = sdkHttpFailure({
+      status: 400,
+      id: null,
+      code: -32000,
+      message: 'Bad Request: Server not initialized',
+    })
+    const { factory } = fakeSdkFactory({ callError: error })
+    const client = createMcpClient({
+      server: { ...BUDA_MCP_SERVER_TEMPLATE, enabled_tools: ['allowed'] },
+      key,
+      sdkFactory: factory,
+    })
+    await client.connect()
+
+    await expect(client.callTool('allowed', {}, { operation: 'mutation' })).rejects.toMatchObject({
+      code: 'MCP_TOOL_ERROR',
+      details: {
+        failure_evidence: {
+          kind: 'jsonrpc_http_rejection',
+          http_status: 400,
+          jsonrpc_code: -32000,
+          response_id: null,
+          reason: 'server_not_initialized',
+        },
+      },
+    })
+  })
+
   for (const candidate of [
     { label: 'HTTP 500', status: 500, id: null, code: -32000, message: 'Server not initialized' },
     { label: 'non-null response id', status: 400, id: 7, code: -32000, message: 'Server not initialized' },
     { label: 'other JSON-RPC code', status: 400, id: null, code: -32603, message: 'Server not initialized' },
-    { label: 'near-match message', status: 400, id: null, code: -32000, message: 'Bad Request: Server not initialized' },
+    { label: 'near-match message', status: 400, id: null, code: -32000, message: 'Bad request: Server not initialized' },
   ]) {
     test(`does not mark uncertain mutation evidence retryable: ${candidate.label}`, async () => {
       const callError = sdkHttpFailure(candidate)
