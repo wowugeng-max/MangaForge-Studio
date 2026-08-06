@@ -1,8 +1,9 @@
 import { describe, expect, spyOn, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import {
   assertAutomaticStageCoverage,
+  assertIndependentStageSessions,
   assertNewTaskSession,
-  assertOneTaskSession,
   driveAutomaticRunToSuccess,
   main,
   maskFingerprint,
@@ -31,15 +32,54 @@ const providerIdentity = {
 
 function receipt(stage: string, overrides: Record<string, unknown> = {}) {
   return {
+    run_id: 1,
     task_id: 'task-1',
     stage,
     source: 'mcp',
     source_fingerprint: fingerprint,
     authority_fingerprint: fingerprint,
     session_id: 'session-1',
+    status: 'success',
+    cache_hit: false,
+    artifact_id: 101,
+    attempt: 1,
     ...providerIdentity,
     ...overrides,
   }
+}
+
+function automaticReceipts(overrides: Record<string, Record<string, unknown>> = {}) {
+  return [
+    receipt('draft', {
+      run_id: 1,
+      artifact_id: 101,
+      session_id: 'session-draft',
+      ...overrides.draft,
+    }),
+    receipt('quality_review', {
+      run_id: 2,
+      artifact_id: 102,
+      session_id: 'session-review',
+      ...overrides.quality_review,
+    }),
+    receipt('story_state_sync', {
+      run_id: 3,
+      artifact_id: 103,
+      session_id: 'session-story-state',
+      ...overrides.story_state_sync,
+    }),
+  ]
+}
+
+function expectInvalidTaskReceipts(receipts: Array<Record<string, unknown>>) {
+  let caught: any
+  try {
+    assertIndependentStageSessions(receipts)
+  } catch (error) {
+    caught = error
+  }
+  expect(caught?.message).toBe('invalid chapter task receipts')
+  expect(caught?.code).toBe('INVALID_RECEIPTS')
 }
 
 function sourceView(overrides: Record<string, unknown> = {}) {
@@ -62,9 +102,19 @@ function stageRun(
   id: number,
   stage: string,
   taskId: string,
-  sessionId: string,
+  sessionId: string | undefined,
   overrides: Record<string, unknown> = {},
 ) {
+  const {
+    status = 'success',
+    cache_hit: cacheHitOverride,
+    input_overrides: inputOverrides = {},
+    output_overrides: outputOverrides = {},
+    artifact_id: artifactId = 1_000 + id,
+    attempt = 1,
+    ...identityOverrides
+  } = overrides
+  const cacheHit = cacheHitOverride ?? (status === 'success' ? false : undefined)
   const common = {
     receipt_authority: 'chapter_generation_stage_v1',
     task_id: taskId,
@@ -74,9 +124,18 @@ function stageRun(
     source: 'mcp',
     source_fingerprint: fingerprint,
     authority_fingerprint: fingerprint,
-    session_id: sessionId,
+    artifact_id: artifactId,
+    attempt,
     ...providerIdentity,
-    ...overrides,
+    ...identityOverrides,
+  }
+  const input = { ...common, ...(inputOverrides as Record<string, unknown>) }
+  const output = {
+    ...common,
+    status,
+    ...(cacheHit === undefined ? {} : { cache_hit: cacheHit }),
+    ...(sessionId === undefined ? {} : { session_id: sessionId }),
+    ...(outputOverrides as Record<string, unknown>),
   }
   return {
     id,
@@ -84,9 +143,9 @@ function stageRun(
     chapter_id: 34,
     run_type: 'chapter_generation_stage',
     step_name: stage,
-    status: 'success',
-    input_ref: JSON.stringify(common),
-    output_ref: JSON.stringify({ ...common, status: 'success' }),
+    status,
+    input_ref: JSON.stringify(input),
+    output_ref: JSON.stringify(output),
   }
 }
 
@@ -158,19 +217,26 @@ function automaticDriver(options: {
 
 function deterministicSmokeFetch(options: {
   automaticReceiptOverrides?: Record<string, unknown>
+  automaticRuns?: ReturnType<typeof stageRun>[]
   automaticStates?: Array<Record<string, unknown>>
   quarantineReads?: Array<unknown[]>
+  sourceErrorCode?: string
 } = {}) {
   const calls: string[] = []
   const automaticExecuteBodies: unknown[] = []
   let chapterReads = 0
   let summaryReads = 0
-  const automaticRuns = [
-    stageRun(201, 'draft', 'task-auto', 'session-auto', options.automaticReceiptOverrides),
-    stageRun(202, 'quality_review', 'task-auto', 'session-auto'),
-    stageRun(203, 'story_state_sync', 'task-auto', 'session-auto'),
+  const automaticRuns = options.automaticRuns || [
+    stageRun(201, 'draft', 'task-auto', 'session-auto-draft', options.automaticReceiptOverrides),
+    stageRun(202, 'quality_review', 'task-auto', 'session-auto-review'),
+    stageRun(203, 'story_state_sync', 'task-auto', 'session-auto-story-state'),
   ]
-  const manualRun = stageRun(204, 'manual_recheck', 'task-manual', 'session-manual')
+  const manualRun = stageRun(
+    Math.max(200, ...automaticRuns.map(run => run.id)) + 1,
+    'manual_recheck',
+    'task-manual',
+    'session-manual',
+  )
   const defaultAutomaticTerminal = {
     id: 200,
     project_id: 12,
@@ -200,7 +266,18 @@ function deterministicSmokeFetch(options: {
     const method = init?.method || 'GET'
     calls.push(`${method}:${path}`)
 
-    if (path === '/api/novel/projects/12/chapter-generation-source') return json(sourceView())
+    if (path === '/api/novel/projects/12/chapter-generation-source') {
+      if (options.sourceErrorCode) {
+        return new Response(JSON.stringify({
+          error_code: options.sourceErrorCode,
+          error: 'PRIVATE_REMOTE_BODY',
+        }), {
+          status: 502,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return json(sourceView())
+    }
     if (path === '/api/novel/chapters/34?project_id=12') {
       chapterReads += 1
       return json({
@@ -271,28 +348,489 @@ async function runSmokeScenario(scenario: ReturnType<typeof deterministicSmokeFe
 }
 
 describe('Buda chapter task receipt assertions', () => {
-  test('projects one automatic task and Session exactly', () => {
-    expect(assertOneTaskSession([
-      receipt('draft'),
-      receipt('quality_review'),
-      receipt('story_state_sync'),
-    ])).toEqual({
+  test('projects one automatic task with an independent Session for every stage', () => {
+    const projected = assertIndependentStageSessions(automaticReceipts())
+    expect(projected).toMatchObject({
       task_id: 'task-1',
       source_fingerprint: fingerprint,
       authority_fingerprint: fingerprint,
-      session_id: 'session-1',
+      session_count: 3,
+      stages: ['draft', 'quality_review', 'story_state_sync'],
       ...providerIdentity,
+    })
+    expect(projected.session_hashes).toHaveLength(3)
+    for (const sessionHash of projected.session_hashes) {
+      expect(sessionHash).toMatch(/^sha256:[0-9a-f]{64}$/)
+      expect(sessionHash).not.toContain('session-')
+    }
+  })
+
+  test('rejects a Session reused by two chapter stages', () => {
+    let caught: any
+    try {
+      assertIndependentStageSessions(automaticReceipts({
+        draft: { session_id: 'session-reused' },
+        quality_review: { session_id: 'session-reused' },
+      }))
+    } catch (error) {
+      caught = error
+    }
+    expect(caught?.message).toBe('chapter stage Session was reused')
+    expect(caught?.code).toBe('CHAPTER_STAGE_SESSION_REUSED')
+    expect(JSON.stringify(caught)).not.toContain('session-reused')
+  })
+
+  test('counts only actual remote completions while accepting recovery and cache-hit receipts', () => {
+    const receipts = [
+      projectStageReceipt(stageRun(71, 'draft', 'task-1', undefined, {
+        status: 'failed', artifact_id: 171, attempt: 1,
+      })),
+      projectStageReceipt(stageRun(72, 'draft', 'task-1', undefined, {
+        status: 'failed', artifact_id: 172, attempt: 2,
+      })),
+      projectStageReceipt(stageRun(73, 'draft', 'task-1', 'session-draft', {
+        artifact_id: 173, attempt: 3,
+      })),
+      projectStageReceipt(stageRun(74, 'draft', 'task-1', undefined, {
+        cache_hit: true, artifact_id: 173, attempt: 3,
+      })),
+      projectStageReceipt(stageRun(75, 'quality_review', 'task-1', 'session-review', {
+        artifact_id: 175, attempt: 1,
+      })),
+      projectStageReceipt(stageRun(76, 'story_state_sync', 'task-1', 'session-story-state', {
+        artifact_id: 176, attempt: 1,
+      })),
+    ]
+
+    expect(assertIndependentStageSessions(receipts)).toMatchObject({
+      task_id: 'task-1',
+      session_count: 3,
+      stages: ['draft', 'quality_review', 'story_state_sync'],
+    })
+    expect(assertAutomaticStageCoverage(receipts)).toEqual([
+      'draft',
+      'quality_review',
+      'story_state_sync',
+    ])
+
+    const cacheOnlyAutomatic = automaticReceipts({
+      draft: { cache_hit: true, session_id: undefined },
+      quality_review: { cache_hit: true, session_id: undefined },
+      story_state_sync: { cache_hit: true, session_id: undefined },
+    })
+    expect(() => assertIndependentStageSessions(cacheOnlyAutomatic))
+      .toThrow('invalid chapter task receipts')
+  })
+
+  test('allows repeated actual stage labels when each invocation has a distinct lineage and Session', () => {
+    const projected = assertIndependentStageSessions([
+      receipt('word_target_repair', {
+        run_id: 1, artifact_id: 201, attempt: 1, session_id: 'session-repair-1',
+      }),
+      receipt('word_target_repair', {
+        run_id: 2, artifact_id: 202, attempt: 2, session_id: 'session-repair-2',
+      }),
+    ])
+
+    expect(projected).toMatchObject({
+      session_count: 2,
+      stages: ['word_target_repair'],
+    })
+    expect(new Set(projected.session_hashes).size).toBe(2)
+  })
+
+  test('allows repeated cache replays only after their actual artifact lineage', () => {
+    const projected = assertIndependentStageSessions([
+      receipt('draft', {
+        run_id: 1, artifact_id: 301, attempt: 1, session_id: 'session-draft',
+      }),
+      receipt('draft', {
+        run_id: 2, artifact_id: 301, attempt: 1, cache_hit: true, session_id: undefined,
+      }),
+      receipt('draft', {
+        run_id: 3, artifact_id: 301, attempt: 1, cache_hit: true, session_id: undefined,
+      }),
+    ])
+
+    expect(projected).toMatchObject({
+      session_count: 1,
+      stages: ['draft'],
     })
   })
 
-  test('requires one provider identity and both fingerprints for the automatic chain', () => {
-    const receipts = [
-      receipt('draft'),
-      receipt('quality_review'),
-      receipt('quality_repair'),
-      receipt('story_state_sync'),
+  test('rejects one artifact id assigned to different stages', () => {
+    expectInvalidTaskReceipts([
+      receipt('draft', {
+        run_id: 1, artifact_id: 801, attempt: 1, session_id: 'session-draft',
+      }),
+      receipt('quality_review', {
+        run_id: 2, artifact_id: 801, attempt: 1, session_id: 'session-review',
+      }),
+    ])
+  })
+
+  test('rejects different artifact ids assigned to the same stage attempt', () => {
+    expectInvalidTaskReceipts([
+      receipt('draft', {
+        run_id: 1, artifact_id: 811, attempt: 1, session_id: 'session-draft-1',
+      }),
+      receipt('draft', {
+        run_id: 2, artifact_id: 812, attempt: 1, session_id: 'session-draft-2',
+      }),
+    ])
+  })
+
+  test('rejects same-stage attempt rollback across actual and failed terminals', () => {
+    for (const candidate of [
+      [
+        receipt('draft', {
+          run_id: 1, artifact_id: 821, attempt: 1, session_id: 'session-draft-1',
+        }),
+        receipt('draft', {
+          run_id: 2, artifact_id: 822, attempt: 2,
+          status: 'failed', cache_hit: undefined, session_id: undefined,
+        }),
+        receipt('draft', {
+          run_id: 3, artifact_id: 823, attempt: 1,
+          status: 'failed', cache_hit: undefined, session_id: undefined,
+        }),
+      ],
+      [
+        receipt('draft', {
+          run_id: 1, artifact_id: 831, attempt: 1,
+          status: 'failed', cache_hit: undefined, session_id: undefined,
+        }),
+        receipt('draft', {
+          run_id: 2, artifact_id: 832, attempt: 2, session_id: 'session-draft-2',
+        }),
+        receipt('draft', {
+          run_id: 3, artifact_id: 833, attempt: 1, session_id: 'session-draft-rollback',
+        }),
+      ],
+    ]) {
+      expectInvalidTaskReceipts(candidate)
+    }
+  })
+
+  test('rejects an in-place success after the same artifact failed terminally', () => {
+    expectInvalidTaskReceipts([
+      receipt('draft', {
+        run_id: 1, artifact_id: 841, attempt: 1,
+        status: 'failed', cache_hit: undefined, session_id: undefined,
+      }),
+      receipt('draft', {
+        run_id: 2, artifact_id: 841, attempt: 1, session_id: 'session-impossible-success',
+      }),
+    ])
+  })
+
+  test('rejects a duplicate failed terminal receipt for one artifact', () => {
+    expectInvalidTaskReceipts([
+      receipt('draft', {
+        run_id: 1, artifact_id: 851, attempt: 1,
+        status: 'failed', cache_hit: undefined, session_id: undefined,
+      }),
+      receipt('draft', {
+        run_id: 2, artifact_id: 851, attempt: 1,
+        status: 'failed', cache_hit: undefined, session_id: undefined,
+      }),
+    ])
+  })
+
+  test('rejects a duplicate actual terminal receipt for one artifact', () => {
+    expectInvalidTaskReceipts([
+      receipt('draft', {
+        run_id: 1, artifact_id: 861, attempt: 1, session_id: 'session-draft',
+      }),
+      receipt('draft', {
+        run_id: 2, artifact_id: 861, attempt: 1, session_id: 'session-duplicate-actual',
+      }),
+    ])
+  })
+
+  test('rejects cache replay from a failed or unknown artifact', () => {
+    expectInvalidTaskReceipts([
+      receipt('draft', {
+        run_id: 1, artifact_id: 871, attempt: 1,
+        status: 'failed', cache_hit: undefined, session_id: undefined,
+      }),
+      receipt('draft', {
+        run_id: 2, artifact_id: 871, attempt: 1,
+        cache_hit: true, session_id: undefined,
+      }),
+    ])
+    expectInvalidTaskReceipts([
+      receipt('draft', {
+        run_id: 1, artifact_id: 872, attempt: 1,
+        cache_hit: true, session_id: undefined,
+      }),
+    ])
+  })
+
+  test('rejects cache replay from an old success after a higher successful attempt', () => {
+    expectInvalidTaskReceipts([
+      receipt('draft', {
+        run_id: 1, artifact_id: 873, attempt: 1, session_id: 'session-draft-1',
+      }),
+      receipt('draft', {
+        run_id: 2, artifact_id: 874, attempt: 2, session_id: 'session-draft-2',
+      }),
+      receipt('draft', {
+        run_id: 3, artifact_id: 873, attempt: 1,
+        cache_hit: true, session_id: undefined,
+      }),
+    ])
+  })
+
+  test('rejects cache replay from an old success after a higher failed attempt', () => {
+    expectInvalidTaskReceipts([
+      receipt('draft', {
+        run_id: 1, artifact_id: 875, attempt: 1, session_id: 'session-draft-1',
+      }),
+      receipt('draft', {
+        run_id: 2, artifact_id: 876, attempt: 2,
+        status: 'failed', cache_hit: undefined, session_id: undefined,
+      }),
+      receipt('draft', {
+        run_id: 3, artifact_id: 875, attempt: 1,
+        cache_hit: true, session_id: undefined,
+      }),
+    ])
+  })
+
+  test('invalidates later cross-stage successes from the same-stage success anchor', () => {
+    const prefix = [
+      receipt('draft', {
+        run_id: 1, artifact_id: 10, attempt: 1, session_id: 'session-draft-1',
+      }),
+      receipt('quality_review', {
+        run_id: 2, artifact_id: 11, attempt: 1, session_id: 'session-review-1',
+      }),
+      receipt('draft', {
+        run_id: 3, artifact_id: 12, attempt: 2, session_id: 'session-draft-2',
+      }),
     ]
-    expect(assertOneTaskSession(receipts)).toMatchObject({
+
+    expect(assertIndependentStageSessions(prefix)).toMatchObject({
+      stages: ['draft', 'quality_review'],
+      session_count: 3,
+    })
+    expectInvalidTaskReceipts([...prefix, receipt('quality_review', {
+      run_id: 4, artifact_id: 11, attempt: 1,
+      cache_hit: true, session_id: undefined,
+    })])
+    expectInvalidTaskReceipts([...prefix, receipt('draft', {
+      run_id: 4, artifact_id: 10, attempt: 1,
+      cache_hit: true, session_id: undefined,
+    })])
+  })
+
+  test('invalidates only successes at or after the current stage anchor', () => {
+    const prefix = [
+      receipt('draft', {
+        run_id: 1, artifact_id: 20, attempt: 1, session_id: 'session-draft-1',
+      }),
+      receipt('quality_review', {
+        run_id: 2, artifact_id: 21, attempt: 1, session_id: 'session-review-1',
+      }),
+      receipt('quality_review', {
+        run_id: 3, artifact_id: 22, attempt: 2,
+        status: 'failed', cache_hit: undefined, session_id: undefined,
+      }),
+      receipt('draft', {
+        run_id: 4, artifact_id: 20, attempt: 1,
+        cache_hit: true, session_id: undefined,
+      }),
+    ]
+
+    expect(assertIndependentStageSessions(prefix)).toMatchObject({
+      stages: ['draft', 'quality_review'],
+      session_count: 2,
+    })
+    expectInvalidTaskReceipts([...prefix, receipt('quality_review', {
+      run_id: 5, artifact_id: 21, attempt: 1,
+      cache_hit: true, session_id: undefined,
+    })])
+  })
+
+  test('allows repeated cache replay before any invalidating new artifact', () => {
+    expect(assertIndependentStageSessions([
+      receipt('draft', {
+        run_id: 1, artifact_id: 30, attempt: 1, session_id: 'session-draft',
+      }),
+      receipt('draft', {
+        run_id: 2, artifact_id: 30, attempt: 1,
+        cache_hit: true, session_id: undefined,
+      }),
+      receipt('draft', {
+        run_id: 3, artifact_id: 30, attempt: 1,
+        cache_hit: true, session_id: undefined,
+      }),
+    ])).toMatchObject({ stages: ['draft'], session_count: 1 })
+  })
+
+  test('allows repeated cache replay from the latest success after invalidation', () => {
+    expect(assertIndependentStageSessions([
+      receipt('draft', {
+        run_id: 1, artifact_id: 35, attempt: 1, session_id: 'session-draft-1',
+      }),
+      receipt('draft', {
+        run_id: 2, artifact_id: 36, attempt: 2, session_id: 'session-draft-2',
+      }),
+      receipt('draft', {
+        run_id: 3, artifact_id: 36, attempt: 2,
+        cache_hit: true, session_id: undefined,
+      }),
+      receipt('draft', {
+        run_id: 4, artifact_id: 36, attempt: 2,
+        cache_hit: true, session_id: undefined,
+      }),
+    ])).toMatchObject({ stages: ['draft'], session_count: 2 })
+  })
+
+  test('does not invalidate an earlier success when another stage creates its first artifact', () => {
+    expect(assertIndependentStageSessions([
+      receipt('draft', {
+        run_id: 1, artifact_id: 40, attempt: 1, session_id: 'session-draft',
+      }),
+      receipt('quality_review', {
+        run_id: 2, artifact_id: 41, attempt: 1, session_id: 'session-review',
+      }),
+      receipt('draft', {
+        run_id: 3, artifact_id: 40, attempt: 1,
+        cache_hit: true, session_id: undefined,
+      }),
+    ])).toMatchObject({ stages: ['draft', 'quality_review'], session_count: 2 })
+  })
+
+  test('requires new artifact ids to increase globally within the task', () => {
+    expectInvalidTaskReceipts([
+      receipt('draft', {
+        run_id: 1, artifact_id: 51, attempt: 1, session_id: 'session-draft',
+      }),
+      receipt('quality_review', {
+        run_id: 2, artifact_id: 50, attempt: 1, session_id: 'session-review',
+      }),
+    ])
+  })
+
+  test('tracks consecutive new artifact attempts across actual and failed terminals', () => {
+    expect(assertIndependentStageSessions([
+      receipt('draft', {
+        run_id: 1, artifact_id: 881, attempt: 1, session_id: 'session-draft-1',
+      }),
+      receipt('draft', {
+        run_id: 2, artifact_id: 882, attempt: 2,
+        status: 'failed', cache_hit: undefined, session_id: undefined,
+      }),
+      receipt('draft', {
+        run_id: 3, artifact_id: 883, attempt: 3, session_id: 'session-draft-3',
+      }),
+    ])).toMatchObject({ stages: ['draft'], session_count: 2 })
+  })
+
+  test('requires a first attempt of one and consecutive new artifact attempts', () => {
+    expectInvalidTaskReceipts([
+      receipt('draft', {
+        run_id: 1, artifact_id: 884, attempt: 2, session_id: 'session-first-attempt-2',
+      }),
+    ])
+    expectInvalidTaskReceipts([
+      receipt('draft', {
+        run_id: 1, artifact_id: 885, attempt: 1, session_id: 'session-draft-1',
+      }),
+      receipt('draft', {
+        run_id: 2, artifact_id: 886, attempt: 3,
+        status: 'failed', cache_hit: undefined, session_id: undefined,
+      }),
+    ])
+  })
+
+  test('does not advance a stage attempt when replaying its cache', () => {
+    expect(assertIndependentStageSessions([
+      receipt('draft', {
+        run_id: 1, artifact_id: 891, attempt: 1, session_id: 'session-draft-1',
+      }),
+      receipt('draft', {
+        run_id: 2, artifact_id: 891, attempt: 1,
+        cache_hit: true, session_id: undefined,
+      }),
+      receipt('draft', {
+        run_id: 3, artifact_id: 892, attempt: 2, session_id: 'session-draft-2',
+      }),
+    ])).toMatchObject({ stages: ['draft'], session_count: 2 })
+  })
+
+  test('rejects orphaned, reordered, or contradictory artifact lineage receipts', () => {
+    const actual = receipt('draft', {
+      run_id: 1, artifact_id: 401, attempt: 1, session_id: 'session-draft',
+    })
+    const cache = (overrides: Record<string, unknown> = {}) => receipt('draft', {
+      run_id: 2,
+      artifact_id: 401,
+      attempt: 1,
+      cache_hit: true,
+      session_id: undefined,
+      ...overrides,
+    })
+
+    for (const candidate of [
+      [cache()],
+      [actual, cache({ artifact_id: 402 })],
+      [actual, cache({ attempt: 2 })],
+      [actual, cache({ stage: 'quality_review' })],
+      [cache({ run_id: 1 }), { ...actual, run_id: 2 }],
+      [actual, { ...actual, run_id: 2, session_id: 'session-duplicate-artifact' }],
+      [actual, cache({ session_id: 'session-cache-impossible' })],
+      [{ ...actual, run_id: 2 }, { ...cache({ run_id: 1 }) }],
+    ]) {
+      expect(() => assertIndependentStageSessions(candidate))
+        .toThrow('invalid chapter task receipts')
+    }
+  })
+
+  test('permits repeated historical failures without establishing artifact coverage', () => {
+    expect(assertIndependentStageSessions([
+      receipt('draft', {
+        run_id: 1, artifact_id: 501, attempt: 1,
+        status: 'failed', cache_hit: undefined, session_id: undefined,
+      }),
+      receipt('draft', {
+        run_id: 2, artifact_id: 502, attempt: 2,
+        status: 'failed', cache_hit: undefined, session_id: undefined,
+      }),
+      receipt('draft', {
+        run_id: 3, artifact_id: 503, attempt: 3, session_id: 'session-draft',
+      }),
+    ])).toMatchObject({ stages: ['draft'], session_count: 1 })
+  })
+
+  test('rejects unknown status and contradictory cache-hit or Session evidence', () => {
+    for (const candidate of [
+      receipt('draft', { status: 'running', session_id: undefined, cache_hit: undefined }),
+      receipt('draft', { status: 'mystery', session_id: undefined, cache_hit: undefined }),
+      receipt('draft', { status: 'success', cache_hit: true, session_id: 'session-impossible' }),
+      receipt('draft', { status: 'success', cache_hit: false, session_id: undefined }),
+      receipt('draft', { status: 'success', cache_hit: undefined }),
+      receipt('draft', { status: 'failed', cache_hit: false, session_id: undefined }),
+      receipt('draft', { status: 'failed', cache_hit: undefined, session_id: 'session-impossible' }),
+    ]) {
+      expect(() => assertIndependentStageSessions([candidate]))
+        .toThrow('invalid chapter task receipts')
+    }
+
+    expect(() => projectStageReceipt(stageRun(76, 'draft', 'task-1', undefined, {
+      status: 'failed',
+      output_overrides: { cache_hit: null, session_id: null },
+    }))).toThrow('invalid chapter stage receipt')
+    expect(() => projectStageReceipt(stageRun(77, 'draft', 'task-1', 'session-draft', {
+      output_overrides: { status: null },
+    }))).toThrow('invalid chapter stage receipt')
+  })
+
+  test('requires one provider identity and both fingerprints for the automatic chain', () => {
+    const receipts = automaticReceipts()
+    expect(assertIndependentStageSessions(receipts)).toMatchObject({
       source_fingerprint: fingerprint,
       authority_fingerprint: fingerprint,
       ...providerIdentity,
@@ -305,11 +843,16 @@ describe('Buda chapter task receipt assertions', () => {
       { key_id: 0 },
       { adapter_id: undefined },
       { agent_id: undefined },
-      { model: undefined },
     ]) {
-      expect(() => assertOneTaskSession([receipt('draft', overrides)]))
+      expect(() => assertIndependentStageSessions([receipt('draft', overrides)]))
         .toThrow('invalid chapter task receipts')
     }
+
+    expect(assertIndependentStageSessions(automaticReceipts({
+      draft: { model: undefined },
+      quality_review: { model: undefined },
+      story_state_sync: { model: undefined },
+    }))).toMatchObject({ model: undefined, session_count: 3 })
 
     for (const overrides of [
       { authority_fingerprint: otherFingerprint },
@@ -319,9 +862,31 @@ describe('Buda chapter task receipt assertions', () => {
       { agent_id: 'agent-2' },
       { model: 'Other Model' },
     ]) {
-      expect(() => assertOneTaskSession([receipt('draft'), receipt('story_state_sync', overrides)]))
+      expect(() => assertIndependentStageSessions([
+        receipt('draft', { session_id: 'session-draft' }),
+        receipt('story_state_sync', {
+          run_id: 2,
+          artifact_id: 102,
+          session_id: 'session-story-state',
+          ...overrides,
+        }),
+      ]))
         .toThrow('invalid chapter task receipts')
     }
+
+    expect(() => assertIndependentStageSessions([
+      receipt('draft', {
+        run_id: 1,
+        artifact_id: 101,
+        status: 'failed',
+        cache_hit: undefined,
+        session_id: undefined,
+        server_id: 'other-server',
+      }),
+      receipt('draft', {
+        run_id: 2, artifact_id: 102, attempt: 2, session_id: 'session-draft',
+      }),
+    ])).toThrow('invalid chapter task receipts')
   })
 
   test('rejects empty, incomplete, non-MCP, and inconsistent receipts with one safe error', () => {
@@ -333,15 +898,35 @@ describe('Buda chapter task receipt assertions', () => {
       [receipt('draft', { source_fingerprint: undefined })],
       [receipt('draft', { authority_fingerprint: undefined })],
       [receipt('draft', { session_id: undefined })],
+      [receipt('draft', { run_id: undefined })],
+      [receipt('draft', { run_id: 0 })],
+      [receipt('draft', { artifact_id: undefined })],
+      [receipt('draft', { attempt: undefined })],
+      [receipt('draft', { artifact_id: 0 })],
+      [receipt('draft', { attempt: 0 })],
       [receipt('draft', { source: 'model' })],
-      [receipt('draft'), receipt('quality_review', { task_id: 'task-2' })],
-      [receipt('draft'), receipt('quality_review', { source_fingerprint: `sha256:${'b'.repeat(64)}` })],
-      [receipt('draft'), receipt('quality_review', { authority_fingerprint: otherFingerprint })],
-      [receipt('draft'), receipt('quality_review', { session_id: 'session-2' })],
+      [
+        receipt('draft', { session_id: 'session-draft' }),
+        receipt('quality_review', { task_id: 'task-2', session_id: 'session-review' }),
+      ],
+      [
+        receipt('draft', { session_id: 'session-draft' }),
+        receipt('quality_review', {
+          source_fingerprint: `sha256:${'b'.repeat(64)}`,
+          session_id: 'session-review',
+        }),
+      ],
+      [
+        receipt('draft', { session_id: 'session-draft' }),
+        receipt('quality_review', {
+          authority_fingerprint: otherFingerprint,
+          session_id: 'session-review',
+        }),
+      ],
     ]
 
     for (const candidate of invalid) {
-      expect(() => assertOneTaskSession(candidate)).toThrow('invalid chapter task receipts')
+      expect(() => assertIndependentStageSessions(candidate)).toThrow('invalid chapter task receipts')
     }
   })
 
@@ -358,11 +943,11 @@ describe('Buda chapter task receipt assertions', () => {
     ]
 
     for (const candidate of invalid) {
-      expect(() => assertOneTaskSession(candidate)).toThrow('invalid chapter task receipts')
+      expect(() => assertIndependentStageSessions(candidate)).toThrow('invalid chapter task receipts')
     }
   })
 
-  test('does not invoke Proxy traps or getters and never reflects hostile receipt text', () => {
+  test('fails closed on hostile, oversized, circular, duplicate, and unknown receipts', () => {
     const sentinel = 'PRIVATE_RECEIPT_SENTINEL'
     let getterCalls = 0
     let proxyCalls = 0
@@ -372,6 +957,14 @@ describe('Buda chapter task receipt assertions', () => {
       get() {
         getterCalls += 1
         return sentinel
+      },
+    })
+    const cacheGetterReceipt = receipt('draft')
+    Object.defineProperty(cacheGetterReceipt, 'cache_hit', {
+      enumerable: true,
+      get() {
+        getterCalls += 1
+        throw new Error(sentinel)
       },
     })
     const proxyReceipt = new Proxy(receipt('draft'), {
@@ -385,78 +978,202 @@ describe('Buda chapter task receipt assertions', () => {
       },
     })
 
-    for (const candidate of [[getterReceipt], [proxyReceipt], new Proxy([receipt('draft')], {})]) {
+    const revocable = Proxy.revocable(receipt('draft'), {
+      get() {
+        proxyCalls += 1
+        throw new Error(sentinel)
+      },
+      getOwnPropertyDescriptor() {
+        proxyCalls += 1
+        throw new Error(sentinel)
+      },
+    })
+    revocable.revoke()
+    const circularReceipt: Record<string, unknown> = receipt('draft')
+    circularReceipt.self = circularReceipt
+    const oversizedReceipt = receipt('draft', { prose: sentinel.repeat(1_000_000) })
+    const tooManyReceipts = Array.from({ length: 129 }, (_, index) => receipt('draft', {
+      session_id: `session-${index}`,
+    }))
+
+    for (const candidate of [
+      [getterReceipt],
+      [cacheGetterReceipt],
+      [proxyReceipt],
+      [revocable.proxy],
+      new Proxy([receipt('draft')], {}),
+      [circularReceipt],
+      [oversizedReceipt],
+      tooManyReceipts,
+      [receipt('unknown_remote_stage')],
+    ]) {
+      let caught: any
       try {
-        assertOneTaskSession(candidate)
-        throw new Error('expected hostile receipt to fail')
-      } catch (error: any) {
-        expect(error.message).toBe('invalid chapter task receipts')
-        expect(JSON.stringify(error)).not.toContain(sentinel)
+        assertIndependentStageSessions(candidate)
+      } catch (error) {
+        caught = error
       }
+      expect(caught).toBeDefined()
+      expect(caught.message.length).toBeLessThanOrEqual(128)
+      expect(JSON.stringify(caught)).not.toContain(sentinel)
     }
     expect(getterCalls).toBe(0)
     expect(proxyCalls).toBe(0)
+
+    let duplicateLineageError: any
+    try {
+      assertIndependentStageSessions([
+        receipt('draft', {
+          run_id: 1, artifact_id: 101, attempt: 1, session_id: 'session-draft',
+        }),
+        receipt('draft', {
+          run_id: 2, artifact_id: 101, attempt: 1, session_id: 'session-draft-duplicate',
+        }),
+      ])
+    } catch (error) {
+      duplicateLineageError = error
+    }
+    expect(duplicateLineageError?.message).toBe('invalid chapter task receipts')
+    expect(duplicateLineageError?.code).toBe('INVALID_RECEIPTS')
+    expect(JSON.stringify(duplicateLineageError)).not.toContain('session-draft')
   })
 
   test('requires the automatic draft, review or repair, and story sync stages', () => {
-    const complete = [receipt('draft'), receipt('quality_review'), receipt('story_state_sync')]
+    const complete = automaticReceipts()
     expect(assertAutomaticStageCoverage(complete)).toEqual([
       'draft',
       'quality_review',
       'story_state_sync',
     ])
-    expect(() => assertAutomaticStageCoverage([receipt('draft'), receipt('story_state_sync')]))
+    expect(() => assertAutomaticStageCoverage([
+      receipt('draft', { run_id: 1, artifact_id: 101, session_id: 'session-draft' }),
+      receipt('story_state_sync', {
+        run_id: 2, artifact_id: 102, session_id: 'session-story-state',
+      }),
+    ]))
       .toThrow('automatic task stage coverage failed')
-    expect(() => assertAutomaticStageCoverage([receipt('draft'), receipt('quality_repair')]))
+    expect(() => assertAutomaticStageCoverage([
+      receipt('draft', { run_id: 1, artifact_id: 101, session_id: 'session-draft' }),
+      receipt('quality_repair', {
+        run_id: 2, artifact_id: 102, session_id: 'session-repair',
+      }),
+    ]))
       .toThrow('automatic task stage coverage failed')
+  })
+
+  test('requires first actual draft before first review or repair before first story sync', () => {
+    expect(() => assertAutomaticStageCoverage([
+      receipt('quality_review', {
+        run_id: 1, artifact_id: 601, session_id: 'session-review',
+      }),
+      receipt('draft', {
+        run_id: 2, artifact_id: 602, session_id: 'session-draft',
+      }),
+      receipt('story_state_sync', {
+        run_id: 3, artifact_id: 603, session_id: 'session-story',
+      }),
+    ])).toThrow('automatic task stage coverage failed')
+
+    expect(() => assertAutomaticStageCoverage([
+      receipt('draft', {
+        run_id: 1, artifact_id: 611, session_id: 'session-draft',
+      }),
+      receipt('story_state_sync', {
+        run_id: 2, artifact_id: 612, session_id: 'session-story',
+      }),
+      receipt('quality_review', {
+        run_id: 3, artifact_id: 613, session_id: 'session-review',
+      }),
+    ])).toThrow('automatic task stage coverage failed')
+
+    expect(assertAutomaticStageCoverage([
+      receipt('draft', {
+        run_id: 1, artifact_id: 621, session_id: 'session-draft',
+      }),
+      receipt('quality_review', {
+        run_id: 2, artifact_id: 622, session_id: 'session-review',
+      }),
+      receipt('quality_repair', {
+        run_id: 3, artifact_id: 623, session_id: 'session-repair-1',
+      }),
+      receipt('quality_repair', {
+        run_id: 4, artifact_id: 624, attempt: 2, session_id: 'session-repair-2',
+      }),
+      receipt('quality_recheck', {
+        run_id: 5, artifact_id: 625, session_id: 'session-recheck',
+      }),
+      receipt('story_state_sync', {
+        run_id: 6, artifact_id: 626, session_id: 'session-story',
+      }),
+    ])).toEqual([
+      'draft',
+      'quality_review',
+      'quality_repair',
+      'quality_recheck',
+      'story_state_sync',
+    ])
   })
 
   test('requires a manual task to use a new task id and Session', () => {
+    const automatic = assertIndependentStageSessions(automaticReceipts())
     const manual = [receipt('manual_recheck', { task_id: 'task-2', session_id: 'session-2' })]
-    expect(assertNewTaskSession('session-1', manual, 'task-1')).toEqual({
+    expect(assertNewTaskSession(automatic.session_hashes, manual, 'task-1')).toMatchObject({
       task_id: 'task-2',
       source_fingerprint: fingerprint,
       authority_fingerprint: fingerprint,
-      session_id: 'session-2',
+      session_count: 1,
+      stages: ['manual_recheck'],
       ...providerIdentity,
     })
-    expect(assertNewTaskSession('session-1', manual)).toEqual({
+    expect(assertNewTaskSession(automatic.session_hashes, manual)).toMatchObject({
       task_id: 'task-2',
       source_fingerprint: fingerprint,
       authority_fingerprint: fingerprint,
-      session_id: 'session-2',
+      session_count: 1,
+      stages: ['manual_recheck'],
       ...providerIdentity,
     })
+
+    const cacheHitOnly = [receipt('manual_recheck', {
+      task_id: 'task-2',
+      cache_hit: true,
+      session_id: undefined,
+    })]
+    expect(() => assertNewTaskSession(automatic.session_hashes, cacheHitOnly, 'task-1'))
+      .toThrow('invalid manual task receipts')
   })
 
   test('keeps authority and provider identity while manual work gets a new task and Session', () => {
-    const automatic = assertOneTaskSession([
-      receipt('draft'),
-      receipt('quality_review'),
-      receipt('story_state_sync'),
-    ])
-    const manual = assertNewTaskSession('session-1', [
+    const automatic = assertIndependentStageSessions(automaticReceipts())
+    const manual = assertNewTaskSession(automatic.session_hashes, [
       receipt('manual_recheck', { task_id: 'task-2', session_id: 'session-2' }),
     ], 'task-1')
 
     expect(manual.task_id).not.toBe(automatic.task_id)
-    expect(manual.session_id).not.toBe(automatic.session_id)
-    expect({ ...manual, task_id: undefined, session_id: undefined }).toEqual({
+    expect(manual.session_hashes.every((hash: string) => !automatic.session_hashes.includes(hash))).toBe(true)
+    expect({ ...manual, task_id: undefined, session_count: undefined, stages: undefined, session_hashes: undefined }).toEqual({
       ...automatic,
       task_id: undefined,
-      session_id: undefined,
+      session_count: undefined,
+      stages: undefined,
+      session_hashes: undefined,
     })
   })
 
   test('uses the required exact diagnostic when manual work reuses the prior Session', () => {
-    const manual = [receipt('manual_recheck', { task_id: 'task-2' })]
-    expect(() => assertNewTaskSession('session-1', manual, 'task-1'))
+    const automatic = assertIndependentStageSessions(automaticReceipts())
+    const manual = [receipt('manual_recheck', {
+      task_id: 'task-2',
+      session_id: 'session-draft',
+    })]
+    expect(() => assertNewTaskSession(automatic.session_hashes, manual, 'task-1'))
       .toThrow('manual task reused the previous Session')
   })
 
   test('rejects a reused manual task id without reflecting identifiers', () => {
+    const automatic = assertIndependentStageSessions(automaticReceipts())
     const manual = [receipt('manual_recheck', { session_id: 'session-2' })]
-    expect(() => assertNewTaskSession('session-1', manual, 'task-1'))
+    expect(() => assertNewTaskSession(automatic.session_hashes, manual, 'task-1'))
       .toThrow('manual task reused the previous task')
   })
 })
@@ -539,7 +1256,8 @@ describe('Buda smoke input and public receipt projection', () => {
         source: 'mcp',
         source_fingerprint: fingerprint,
         authority_fingerprint: fingerprint,
-        session_id: 'session-1',
+        artifact_id: 777,
+        attempt: 1,
         ...providerIdentity,
         prompt_hash: `sha256:${'b'.repeat(64)}`,
         prompt: 'must not project',
@@ -553,9 +1271,12 @@ describe('Buda smoke input and public receipt projection', () => {
         chapter_id: 34,
         stage: 'quality_review',
         status: 'success',
+        cache_hit: false,
         source: 'mcp',
         source_fingerprint: fingerprint,
         authority_fingerprint: fingerprint,
+        artifact_id: 777,
+        attempt: 1,
         session_id: 'session-1',
         ...providerIdentity,
         prose: 'must not project',
@@ -571,6 +1292,9 @@ describe('Buda smoke input and public receipt projection', () => {
       chapter_id: 34,
       stage: 'quality_review',
       status: 'success',
+      cache_hit: false,
+      artifact_id: 777,
+      attempt: 1,
       source: 'mcp',
       source_fingerprint: fingerprint,
       authority_fingerprint: fingerprint,
@@ -688,6 +1412,8 @@ describe('Buda smoke input and public receipt projection', () => {
         source: 'mcp',
         source_fingerprint: fingerprint,
         authority_fingerprint: fingerprint,
+        artifact_id: 778,
+        attempt: 1,
         server_id: 'buda',
         key_id: 7,
       }),
@@ -698,6 +1424,9 @@ describe('Buda smoke input and public receipt projection', () => {
         chapter_id: 34,
         stage: 'story_state_sync',
         status: 'success',
+        cache_hit: false,
+        artifact_id: 778,
+        attempt: 1,
         source: 'mcp',
         session_id: 'session-1',
         adapter_id: 'buda',
@@ -709,6 +1438,8 @@ describe('Buda smoke input and public receipt projection', () => {
     expect(projected).toMatchObject({
       source_fingerprint: fingerprint,
       authority_fingerprint: fingerprint,
+      artifact_id: 778,
+      attempt: 1,
       session_id: 'session-1',
       ...providerIdentity,
     })
@@ -725,11 +1456,14 @@ describe('Buda smoke input and public receipt projection', () => {
         receipt_authority: 'chapter_generation_stage_v1',
         task_id: 'task-1', project_id: 12, chapter_id: 34, stage: 'draft',
         source: 'mcp', source_fingerprint: fingerprint, authority_fingerprint: fingerprint,
-        session_id: 'session-1', ...providerIdentity, ...inputOverrides,
+        artifact_id: 779, attempt: 1,
+        ...providerIdentity, ...inputOverrides,
       }),
       output_ref: JSON.stringify({
         receipt_authority: 'chapter_generation_stage_v1',
         task_id: 'task-1', project_id: 12, chapter_id: 34, stage: 'draft', status: 'success',
+        cache_hit: false,
+        artifact_id: 779, attempt: 1,
         source: 'mcp', source_fingerprint: fingerprint, authority_fingerprint: fingerprint,
         session_id: 'session-1', ...providerIdentity, ...outputOverrides,
       }),
@@ -745,6 +1479,10 @@ describe('Buda smoke input and public receipt projection', () => {
     expect(() => projectStageReceipt(projectedStageRun({ source: 'model' }, { source: 'model' })))
       .toThrow('invalid chapter stage receipt')
     expect(() => projectStageReceipt(projectedStageRun({}, { agent_id: 'agent-2' })))
+      .toThrow('invalid chapter stage receipt')
+    expect(() => projectStageReceipt(projectedStageRun({}, { artifact_id: 780 })))
+      .toThrow('invalid chapter stage receipt')
+    expect(() => projectStageReceipt(projectedStageRun({}, { attempt: 2 })))
       .toThrow('invalid chapter stage receipt')
 
     const mismatchedRunStatus = stageRun(80, 'draft', 'task-1', 'session-1')
@@ -878,8 +1616,9 @@ describe('Buda smoke input and public receipt projection', () => {
       input_ref: '{invalid',
       output_ref: JSON.stringify({ receipt_authority: 'chapter_generation_stage_v1' }),
     }
+    const oversized = { ...malformed, input_ref: '{'.repeat(16_385) }
 
-    for (const candidate of [hostile, new Proxy(malformed, {}), malformed]) {
+    for (const candidate of [hostile, new Proxy(malformed, {}), oversized, malformed]) {
       try {
         projectStageReceipt(candidate)
         throw new Error('expected run projection to fail')
@@ -1297,12 +2036,12 @@ describe('Buda smoke HTTP transport', () => {
     })
   })
 
-  test('reports only HTTP status and a bounded safe code on failure', async () => {
-    const sentinel = 'PRIVATE_PROVIDER_SENTINEL'
+  test('does not trust or reflect a syntactically safe remote error code', async () => {
+    const sentinel = 'PRIVATE_REMOTE_BODY'
     const fetchImpl = (async () => new Response(JSON.stringify({
       error: sentinel,
       detail: sentinel,
-      error_code: 'PROVIDER_DOWN',
+      error_code: sentinel,
     }), { status: 502, headers: { 'Content-Type': 'application/json' } })) as typeof fetch
 
     const error = await requestJson(
@@ -1313,8 +2052,28 @@ describe('Buda smoke HTTP transport', () => {
       fetchImpl,
     ).then(() => null, caught => caught)
 
-    expect(error?.message).toBe('HTTP 502 (PROVIDER_DOWN)')
-    expect(error?.code).toBe('PROVIDER_DOWN')
+    expect(error?.message).toBe('HTTP 502')
+    expect(error?.code).toBe('HTTP_502')
+    expect(JSON.stringify(error)).not.toContain(sentinel)
+  })
+
+  test('maps a bounded non-JSON HTTP error body before attempting JSON parsing', async () => {
+    const sentinel = '<html>PRIVATE_REMOTE_BODY</html>'
+    const fetchImpl = (async () => new Response(sentinel, {
+      status: 502,
+      headers: { 'Content-Type': 'text/html' },
+    })) as typeof fetch
+
+    const error = await requestJson(
+      'http://127.0.0.1:8787',
+      '/api/html-failure',
+      undefined,
+      Date.now() + 1000,
+      fetchImpl,
+    ).then(() => null, caught => caught)
+
+    expect(error?.message).toBe('HTTP 502')
+    expect(error?.code).toBe('HTTP_502')
     expect(JSON.stringify(error)).not.toContain(sentinel)
   })
 
@@ -1357,12 +2116,19 @@ describe('Buda smoke terminal workflow', () => {
       automatic: {
         run_id: 200,
         stages: ['draft', 'quality_review', 'story_state_sync'],
-        session: maskSessionId('session-auto'),
+        session_count: 3,
+        sessions: [
+          maskSessionId('session-auto-draft'),
+          maskSessionId('session-auto-review'),
+          maskSessionId('session-auto-story-state'),
+        ],
       },
       manual: {
         stages: ['manual_recheck'],
-        session: maskSessionId('session-manual'),
+        session_count: 1,
+        sessions: [maskSessionId('session-manual')],
       },
+      independent_stage_sessions: true,
       tasks_different: true,
       sessions_different: true,
       source_locked: false,
@@ -1372,7 +2138,9 @@ describe('Buda smoke terminal workflow', () => {
       fingerprint,
       'task-auto',
       'task-manual',
-      'session-auto',
+      'session-auto-draft',
+      'session-auto-review',
+      'session-auto-story-state',
       'session-manual',
       'agent-1',
       '风从城门吹来。',
@@ -1397,6 +2165,73 @@ describe('Buda smoke terminal workflow', () => {
       allow_incomplete: false,
       auto_repair_missing_material: true,
     }])
+  })
+
+  test('accepts production-shaped failed, cache-hit, and resumed stage Runs', async () => {
+    const automaticRuns = [
+      stageRun(201, 'draft', 'task-auto', 'session-auto-draft', {
+        artifact_id: 701, attempt: 1,
+      }),
+      stageRun(202, 'quality_review', 'task-auto', undefined, {
+        status: 'failed', artifact_id: 702, attempt: 1,
+      }),
+      stageRun(203, 'draft', 'task-auto', undefined, {
+        cache_hit: true, artifact_id: 701, attempt: 1,
+      }),
+      stageRun(204, 'quality_review', 'task-auto', 'session-auto-review', {
+        artifact_id: 703, attempt: 2,
+      }),
+      stageRun(205, 'story_state_sync', 'task-auto', 'session-auto-story-state', {
+        artifact_id: 704, attempt: 1,
+      }),
+    ]
+    const scenario = deterministicSmokeFetch({
+      automaticRuns,
+      automaticStates: [
+        recoveryRun({ output_ref: recoveryOutput({}, {
+          attempts: 1,
+          next_run_at: '2000-01-01T00:00:00.000Z',
+        }) }),
+        recoveryRun({ status: 'success', output_ref: undefined }),
+      ],
+    })
+
+    const result = await runSmokeScenario(scenario)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.errors).toEqual([])
+    expect(JSON.parse(result.logs[0]).automatic).toEqual({
+      run_id: 200,
+      stages: ['draft', 'quality_review', 'story_state_sync'],
+      session_count: 3,
+      sessions: [
+        maskSessionId('session-auto-draft'),
+        maskSessionId('session-auto-review'),
+        maskSessionId('session-auto-story-state'),
+      ],
+    })
+    expect(scenario.calls).toContain('GET:/api/novel/runs/201?project_id=12')
+    expect(scenario.calls).toContain('GET:/api/novel/runs/205?project_id=12')
+    expect(scenario.calls.filter(call => (
+      call === 'POST:/api/novel/projects/12/chapter-groups/200/execute'
+    ))).toHaveLength(2)
+  })
+
+  test('does not reflect an unknown remote response code through the final logger', async () => {
+    const sentinel = 'PRIVATE_REMOTE_BODY'
+    const result = await runSmokeScenario(deterministicSmokeFetch({
+      sourceErrorCode: sentinel,
+    }))
+
+    expect(result.exitCode).toBe(1)
+    expect(result.logs).toEqual([])
+    expect(result.errors).toHaveLength(1)
+    expect(JSON.parse(result.errors[0])).toEqual({
+      ok: false,
+      stage: 'source_authority',
+      error_code: 'HTTP_502',
+    })
+    expect(result.errors[0]).not.toContain(sentinel)
   })
 
   test('fails before manual work when any post-baseline chapter receipt is model sourced', async () => {
@@ -1541,5 +2376,17 @@ describe('Buda smoke terminal workflow', () => {
       call === 'POST:/api/novel/projects/12/chapter-groups/200/execute'
     ))).toHaveLength(1)
     expect(scenario.calls).not.toContain('POST:/api/novel/chapters/34/prose-quality')
+  })
+})
+
+describe('Buda smoke package contract', () => {
+  test('keeps the chapter-source alias while naming independent stage Sessions explicitly', () => {
+    const packageJson = JSON.parse(readFileSync(
+      new URL('../ui/server/package.json', import.meta.url),
+      'utf8',
+    ))
+    const command = 'node ../../scripts/check-buda-chapter-task-session.mjs'
+    expect(packageJson.scripts['smoke:buda:independent-stage-sessions']).toBe(command)
+    expect(packageJson.scripts['smoke:buda:chapter-source']).toBe(command)
   })
 })

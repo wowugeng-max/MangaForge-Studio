@@ -24,6 +24,43 @@ const REVIEW_OR_REPAIR_STAGES = new Set([
   'revision',
   'post_revision_review',
 ])
+const CHAPTER_TASK_STAGES = new Set([
+  'draft',
+  'word_target_repair',
+  'commercial_editor_rewrite',
+  'meme_polish',
+  'readability_review',
+  'humanize',
+  'quality_review',
+  'quality_recheck',
+  'structured_review_fill',
+  'quality_repair',
+  'manual_recheck',
+  'editor_report',
+  'revision',
+  'post_revision_review',
+  'story_state_sync',
+])
+const ASSERTION_RECEIPT_FIELDS = new Set([
+  'run_id',
+  'artifact_id',
+  'attempt',
+  'task_id',
+  'project_id',
+  'chapter_id',
+  'stage',
+  'status',
+  'cache_hit',
+  'source',
+  'source_fingerprint',
+  'authority_fingerprint',
+  'session_id',
+  'server_id',
+  'key_id',
+  'adapter_id',
+  'agent_id',
+  'model',
+])
 
 function safeError(message, code) {
   const error = new Error(message)
@@ -66,10 +103,10 @@ function boundedLabel(value, maximum = 128) {
     : undefined
 }
 
-function receiptArrayValues(receipts, errorMessage) {
+function receiptArrayValues(receipts, errorMessage, minimumLength = 1) {
   if (!Array.isArray(receipts) || types.isProxy(receipts)) throw safeError(errorMessage, 'INVALID_RECEIPTS')
   const length = ownDataValue(receipts, 'length')
-  if (!Number.isSafeInteger(length) || length < 1 || length > MAX_RECEIPTS) {
+  if (!Number.isSafeInteger(length) || length < minimumLength || length > MAX_RECEIPTS) {
     throw safeError(errorMessage, 'INVALID_RECEIPTS')
   }
   const values = []
@@ -81,10 +118,29 @@ function receiptArrayValues(receipts, errorMessage) {
   return values
 }
 
+function hasOnlyAssertionReceiptFields(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || types.isProxy(value)) return false
+  try {
+    if (Object.getOwnPropertySymbols(value).length > 0) return false
+    const descriptors = Object.getOwnPropertyDescriptors(value)
+    const fields = Object.keys(descriptors)
+    if (fields.length < 1 || fields.length > ASSERTION_RECEIPT_FIELDS.size) return false
+    return fields.every(field => {
+      const descriptor = descriptors[field]
+      return ASSERTION_RECEIPT_FIELDS.has(field) && descriptor && 'value' in descriptor
+    })
+  } catch {
+    return false
+  }
+}
+
 function projectAssertionReceipt(value, errorMessage) {
-  if (!value || typeof value !== 'object' || types.isProxy(value)) {
+  if (!hasOnlyAssertionReceiptFields(value)) {
     throw safeError(errorMessage, 'INVALID_RECEIPTS')
   }
+  const runId = positiveSafeInteger(ownDataValue(value, 'run_id'))
+  const artifactId = positiveSafeInteger(ownDataValue(value, 'artifact_id'))
+  const attempt = positiveSafeInteger(ownDataValue(value, 'attempt'))
   const taskId = boundedString(ownDataValue(value, 'task_id'), TASK_ID)
   const stage = boundedString(ownDataValue(value, 'stage'), STAGE)
   const source = ownDataValue(value, 'source')
@@ -93,20 +149,40 @@ function projectAssertionReceipt(value, errorMessage) {
     ownDataValue(value, 'authority_fingerprint'),
     SHA256_FINGERPRINT,
   )
-  const sessionId = boundedString(ownDataValue(value, 'session_id'), OPAQUE_ID)
+  const sessionIdValue = ownDataValue(value, 'session_id')
+  const sessionId = sessionIdValue === undefined
+    ? undefined
+    : boundedString(sessionIdValue, OPAQUE_ID)
   const serverId = boundedString(ownDataValue(value, 'server_id'), OPAQUE_ID)
   const keyId = positiveSafeInteger(ownDataValue(value, 'key_id'))
   const adapterId = boundedString(ownDataValue(value, 'adapter_id'), OPAQUE_ID)
   const agentId = boundedString(ownDataValue(value, 'agent_id'), OPAQUE_ID)
-  const model = boundedLabel(ownDataValue(value, 'model'), 160)
-  if (!taskId || !stage || source !== 'mcp' || !sourceFingerprint
-    || !authorityFingerprint || !sessionId || !serverId || !keyId
-    || !adapterId || !agentId || !model) {
+  const modelValue = ownDataValue(value, 'model')
+  const model = modelValue === undefined ? undefined : boundedLabel(modelValue, 160)
+  const status = ownDataValue(value, 'status')
+  const cacheHit = ownDataValue(value, 'cache_hit')
+  const validCompletion = status === 'success'
+    && typeof cacheHit === 'boolean'
+    && (cacheHit ? sessionIdValue === undefined : Boolean(sessionId))
+  const validFailure = status === 'failed'
+    && cacheHit === undefined
+    && sessionIdValue === undefined
+  if (!runId || !artifactId || !attempt || !taskId || !stage || source !== 'mcp' || !sourceFingerprint
+    || !authorityFingerprint || !serverId || !keyId
+    || !adapterId || !agentId || (modelValue !== undefined && !model)
+    || (sessionIdValue !== undefined && !sessionId)
+    || !CHAPTER_TASK_STAGES.has(stage)
+    || (!validCompletion && !validFailure)) {
     throw safeError(errorMessage, 'INVALID_RECEIPTS')
   }
   return {
+    run_id: runId,
+    artifact_id: artifactId,
+    attempt,
     task_id: taskId,
     stage,
+    status,
+    cache_hit: cacheHit,
     source_fingerprint: sourceFingerprint,
     authority_fingerprint: authorityFingerprint,
     session_id: sessionId,
@@ -122,7 +198,6 @@ const TASK_RECEIPT_IDENTITY_FIELDS = [
   'task_id',
   'source_fingerprint',
   'authority_fingerprint',
-  'session_id',
   'server_id',
   'key_id',
   'adapter_id',
@@ -140,41 +215,136 @@ const SOURCE_RECEIPT_IDENTITY_FIELDS = [
   'model',
 ]
 
-export function assertOneTaskSession(receipts) {
+function hashSessionId(value) {
+  return `sha256:${createHash('sha256').update(value, 'utf8').digest('hex')}`
+}
+
+export function assertIndependentStageSessions(receipts) {
   const errorMessage = 'invalid chapter task receipts'
-  const projected = receiptArrayValues(receipts, errorMessage)
-    .map(value => projectAssertionReceipt(value, errorMessage))
-  const first = projected[0]
-  if (projected.some(value => TASK_RECEIPT_IDENTITY_FIELDS.some(field => value[field] !== first[field]))) {
-    throw safeError(errorMessage, 'INVALID_RECEIPTS')
+  const invalid = () => { throw safeError(errorMessage, 'INVALID_RECEIPTS') }
+  const values = receiptArrayValues(receipts, errorMessage)
+  const artifactsById = new Map()
+  const artifactsByStageAttempt = new Map()
+  const lastCreatedAttemptByStage = new Map()
+  const actualStages = new Set()
+  const actualSessionIds = new Set()
+  const stages = []
+  const sessionHashes = []
+  let first
+  let previousRunId = 0
+  let lastNewArtifactId = 0
+
+  for (const value of values) {
+    const receipt = projectAssertionReceipt(value, errorMessage)
+    if (receipt.run_id <= previousRunId) invalid()
+    previousRunId = receipt.run_id
+    if (first === undefined) {
+      first = receipt
+    } else if (TASK_RECEIPT_IDENTITY_FIELDS.some(field => receipt[field] !== first[field])) {
+      invalid()
+    }
+
+    if (receipt.cache_hit) {
+      const artifact = artifactsById.get(receipt.artifact_id)
+      if (!artifact
+        || artifact.terminal !== true
+        || artifact.status !== 'success'
+        || artifact.reusable !== true
+        || artifact.stage !== receipt.stage
+        || artifact.attempt !== receipt.attempt) invalid()
+      continue
+    }
+
+    let stageAttempts = artifactsByStageAttempt.get(receipt.stage)
+    if (!stageAttempts) {
+      stageAttempts = new Map()
+      artifactsByStageAttempt.set(receipt.stage, stageAttempts)
+    }
+    const previousAttempt = lastCreatedAttemptByStage.get(receipt.stage) || 0
+    if (receipt.artifact_id <= lastNewArtifactId
+      || artifactsById.has(receipt.artifact_id)
+      || stageAttempts.has(receipt.attempt)
+      || receipt.attempt !== previousAttempt + 1) invalid()
+
+    const success = receipt.status === 'success'
+    let sessionHash
+    if (success) {
+      if (actualSessionIds.has(receipt.session_id)) {
+        throw safeError('chapter stage Session was reused', 'CHAPTER_STAGE_SESSION_REUSED')
+      }
+      sessionHash = hashSessionId(receipt.session_id)
+    }
+
+    let invalidationAnchorId
+    for (const [artifactId, artifact] of artifactsById) {
+      if (artifact.stage === receipt.stage
+        && artifact.status === 'success'
+        && artifact.reusable === true
+        && (invalidationAnchorId === undefined
+          || artifactId > invalidationAnchorId)) invalidationAnchorId = artifactId
+    }
+    if (invalidationAnchorId !== undefined) {
+      for (const [artifactId, artifact] of artifactsById) {
+        if (artifactId >= invalidationAnchorId
+          && artifact.status === 'success'
+          && artifact.reusable === true) artifact.reusable = false
+      }
+    }
+    artifactsById.set(receipt.artifact_id, {
+      stage: receipt.stage,
+      attempt: receipt.attempt,
+      terminal: true,
+      status: success ? 'success' : 'failed',
+      reusable: success,
+      session_hash: sessionHash,
+    })
+    stageAttempts.set(receipt.attempt, receipt.artifact_id)
+    lastCreatedAttemptByStage.set(receipt.stage, receipt.attempt)
+    lastNewArtifactId = receipt.artifact_id
+    if (!success) continue
+
+    actualSessionIds.add(receipt.session_id)
+    sessionHashes.push(sessionHash)
+    if (!actualStages.has(receipt.stage)) {
+      actualStages.add(receipt.stage)
+      stages.push(receipt.stage)
+    }
   }
   return {
     task_id: first.task_id,
     source_fingerprint: first.source_fingerprint,
     authority_fingerprint: first.authority_fingerprint,
-    session_id: first.session_id,
     server_id: first.server_id,
     key_id: first.key_id,
     adapter_id: first.adapter_id,
     agent_id: first.agent_id,
     model: first.model,
+    session_count: sessionHashes.length,
+    stages,
+    session_hashes: sessionHashes,
   }
 }
 
 export function assertAutomaticStageCoverage(receipts) {
-  assertOneTaskSession(receipts)
-  const stages = receiptArrayValues(receipts, 'automatic task stage coverage failed')
-    .map(value => projectAssertionReceipt(value, 'automatic task stage coverage failed').stage)
-  if (!stages.includes('draft')
-    || !stages.includes('story_state_sync')
-    || !stages.some(stage => REVIEW_OR_REPAIR_STAGES.has(stage))) {
+  const stages = assertIndependentStageSessions(receipts).stages
+  const draftIndex = stages.indexOf('draft')
+  const storyStateIndex = stages.indexOf('story_state_sync')
+  const reviewOrRepairIndex = stages.findIndex(stage => REVIEW_OR_REPAIR_STAGES.has(stage))
+  if (draftIndex < 0
+    || reviewOrRepairIndex <= draftIndex
+    || storyStateIndex <= reviewOrRepairIndex) {
     throw safeError('automatic task stage coverage failed', 'AUTOMATIC_STAGE_COVERAGE_FAILED')
   }
-  return [...new Set(stages)]
+  return stages
 }
 
-export function assertNewTaskSession(previousSessionId, manualReceipts, previousTaskId) {
-  if (!boundedString(previousSessionId, OPAQUE_ID)) {
+export function assertNewTaskSession(previousSessionHashes, manualReceipts, previousTaskId) {
+  let previousHashes
+  try {
+    previousHashes = receiptArrayValues(previousSessionHashes, 'invalid manual task receipts', 0)
+      .map(value => boundedString(value, SHA256_FINGERPRINT))
+    if (previousHashes.some(value => !value)) throw new Error('invalid')
+  } catch {
     throw safeError('invalid manual task receipts', 'INVALID_MANUAL_RECEIPTS')
   }
   if (previousTaskId !== undefined && !boundedString(previousTaskId, TASK_ID)) {
@@ -182,11 +352,16 @@ export function assertNewTaskSession(previousSessionId, manualReceipts, previous
   }
   let projected
   try {
-    projected = assertOneTaskSession(manualReceipts)
+    projected = assertIndependentStageSessions(manualReceipts)
   } catch {
     throw safeError('invalid manual task receipts', 'INVALID_MANUAL_RECEIPTS')
   }
-  if (projected.session_id === previousSessionId) {
+  if (projected.stages.length !== 1
+    || projected.stages[0] !== 'manual_recheck'
+    || projected.session_count !== 1) {
+    throw safeError('invalid manual task receipts', 'INVALID_MANUAL_RECEIPTS')
+  }
+  if (projected.session_hashes.some(value => previousHashes.includes(value))) {
     throw safeError('manual task reused the previous Session', 'MANUAL_SESSION_REUSED')
   }
   if (previousTaskId !== undefined && projected.task_id === previousTaskId) {
@@ -280,7 +455,7 @@ function mergedReceiptField(input, output, field, fail) {
   const inputValue = ownDataValue(input, field)
   const outputValue = ownDataValue(output, field)
   if (inputValue !== undefined && outputValue !== undefined && inputValue !== outputValue) fail()
-  return outputValue ?? inputValue
+  return outputValue !== undefined ? outputValue : inputValue
 }
 
 export function projectStageReceipt(run) {
@@ -296,12 +471,17 @@ export function projectStageReceipt(run) {
   if (!runId || !runProjectId || runType !== 'chapter_generation_stage' || !runStage || !runStatus || !input || !output) fail()
   if (ownDataValue(input, 'receipt_authority') !== RECEIPT_AUTHORITY
     || ownDataValue(output, 'receipt_authority') !== RECEIPT_AUTHORITY) fail()
+  const receiptStatus = mergedReceiptField(input, output, 'status', fail)
   const merged = {
+    run_id: runId,
+    artifact_id: mergedReceiptField(input, output, 'artifact_id', fail),
+    attempt: mergedReceiptField(input, output, 'attempt', fail),
     task_id: mergedReceiptField(input, output, 'task_id', fail),
     project_id: mergedReceiptField(input, output, 'project_id', fail),
     chapter_id: mergedReceiptField(input, output, 'chapter_id', fail),
     stage: mergedReceiptField(input, output, 'stage', fail),
-    status: mergedReceiptField(input, output, 'status', fail) ?? runStatus,
+    status: receiptStatus === undefined ? runStatus : receiptStatus,
+    cache_hit: mergedReceiptField(input, output, 'cache_hit', fail),
     source: mergedReceiptField(input, output, 'source', fail),
     source_fingerprint: mergedReceiptField(input, output, 'source_fingerprint', fail),
     authority_fingerprint: mergedReceiptField(input, output, 'authority_fingerprint', fail),
@@ -320,11 +500,14 @@ export function projectStageReceipt(run) {
     || assertionReceipt.stage !== runStage || projectId !== runProjectId) fail()
   return {
     run_id: runId,
+    artifact_id: assertionReceipt.artifact_id,
+    attempt: assertionReceipt.attempt,
     task_id: assertionReceipt.task_id,
     project_id: projectId,
     chapter_id: chapterId,
     stage: assertionReceipt.stage,
-    status,
+    status: assertionReceipt.status,
+    cache_hit: assertionReceipt.cache_hit,
     source: 'mcp',
     source_fingerprint: assertionReceipt.source_fingerprint,
     authority_fingerprint: assertionReceipt.authority_fingerprint,
@@ -343,7 +526,7 @@ export function maskFingerprint(value) {
 
 export function maskSessionId(value) {
   if (!boundedString(value, OPAQUE_ID)) return 'unavailable'
-  return `sha256:${createHash('sha256').update(value, 'utf8').digest('hex').slice(0, 6)}…`
+  return `${hashSessionId(value).slice(0, 13)}…`
 }
 
 function remainingTime(deadline) {
@@ -421,16 +604,14 @@ export async function requestJson(baseUrl, path, options, deadline, fetchImpl = 
   } finally {
     clearTimeout(timer)
   }
+  if (!response.ok) {
+    throw safeError(`HTTP ${response.status}`, `HTTP_${response.status}`)
+  }
   let data
   try {
     data = text ? JSON.parse(text) : null
   } catch {
     throw safeError('invalid JSON response', 'INVALID_JSON_RESPONSE')
-  }
-  if (!response.ok) {
-    const responseCode = boundedString(ownDataValue(data, 'error_code'), SAFE_CODE)
-    const code = responseCode || `HTTP_${response.status}`
-    throw safeError(`HTTP ${response.status}${responseCode ? ` (${responseCode})` : ''}`, code)
   }
   return data
 }
@@ -742,8 +923,9 @@ function assertReceiptMatchesAuthority(receipt, authority, phase) {
       `${prefix.toUpperCase()}_AUTHORITY_FINGERPRINT_MISMATCH`,
     )
   }
-  const providerFields = ['server_id', 'key_id', 'adapter_id', 'agent_id', 'model']
-  if (!sameFields(receipt, authority, providerFields)) {
+  const providerFields = ['server_id', 'key_id', 'adapter_id', 'agent_id']
+  if (!sameFields(receipt, authority, providerFields)
+    || (receipt.model !== undefined && receipt.model !== authority.model)) {
     throw safeError(
       `${prefix} provider identity mismatch`,
       `${prefix.toUpperCase()}_PROVIDER_IDENTITY_MISMATCH`,
@@ -853,7 +1035,7 @@ export async function main(argv = process.argv.slice(2)) {
       automaticBaseline,
       deadline,
     )
-    const automaticSession = assertOneTaskSession(automaticReceipts)
+    const automaticSession = assertIndependentStageSessions(automaticReceipts)
     const automaticStages = assertAutomaticStageCoverage(automaticReceipts)
     assertReceiptMatchesAuthority(automaticSession, authority, 'automatic')
 
@@ -888,7 +1070,7 @@ export async function main(argv = process.argv.slice(2)) {
       deadline,
     )
     const manualSession = assertNewTaskSession(
-      automaticSession.session_id,
+      automaticSession.session_hashes,
       manualReceipts,
       automaticSession.task_id,
     )
@@ -943,14 +1125,19 @@ export async function main(argv = process.argv.slice(2)) {
       automatic: {
         run_id: automatic.run_id,
         stages: automaticStages,
-        session: maskSessionId(automaticSession.session_id),
+        session_count: automaticSession.session_count,
+        sessions: automaticSession.session_hashes.map(maskFingerprint),
       },
       manual: {
         stages: manualStages,
-        session: maskSessionId(manualSession.session_id),
+        session_count: manualSession.session_count,
+        sessions: manualSession.session_hashes.map(maskFingerprint),
       },
+      independent_stage_sessions: true,
       tasks_different: manualSession.task_id !== automaticSession.task_id,
-      sessions_different: manualSession.session_id !== automaticSession.session_id,
+      sessions_different: manualSession.session_hashes.every(
+        session => !automaticSession.session_hashes.includes(session),
+      ),
       source_locked: false,
       quarantines: 0,
     }))
