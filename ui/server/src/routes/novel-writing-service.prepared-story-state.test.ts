@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { Database } from 'bun:sqlite'
 import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -368,6 +369,79 @@ describe('prepareStoryStateUpdate', () => {
     expect(harness.memoryTexts).toEqual([])
   })
 
+  for (const scenario of [
+    {
+      name: 'a later payload field accessor',
+      payload(error: Error) {
+        const payload: any = {
+          state_delta: { current_time: '子时' },
+          setting_updates: [],
+          storyline_updates: [],
+        }
+        Object.defineProperty(payload, 'character_updates', {
+          enumerable: true,
+          get() { throw error },
+        })
+        return payload
+      },
+    },
+    {
+      name: 'a nested required state delta Proxy',
+      payload(error: Error) {
+        return {
+          state_delta: new Proxy({ current_time: '子时' }, {
+            ownKeys() { throw error },
+          }),
+          character_updates: [],
+          setting_updates: [],
+          storyline_updates: [],
+        }
+      },
+    },
+  ]) {
+    test(`preserves ${scenario.name} failure before Story State artifact serialization`, async () => {
+      const payloadError = new Error(`story state ${scenario.name} failed`)
+      const harness = await createProsePipelineHarness(createNovelWritingService, {
+        draftText: buildPipelineProse('江澈撞开铁门，追兵的包围线被迫后撤。', '主动夺下通讯器并推进追击'),
+        qualityGateEnabled: false,
+        reviewPayloads: Array.from({ length: 4 }, acceptedQualityReviewPayload),
+        storyStatePayload: scenario.payload(payloadError),
+      })
+      const beforeProject = await getNovelProject(harness.workspace, harness.project.id)
+      const beforeChapter = (await listNovelChapters(harness.workspace, harness.project.id))
+        .find(item => item.id === harness.chapter.id)
+
+      const exposed = await harness.service.generateChapterForGroup(
+        harness.workspace,
+        harness.project.id,
+        harness.chapter.id,
+        { model_id: 217, target_word_count: 1000 },
+      ).catch((error: unknown) => error)
+
+      const database = new Database(join(harness.workspace, 'novel.sqlite'))
+      try {
+        const artifact = database.query(`
+          SELECT status, output_payload, error_code
+          FROM chapter_stage_artifacts
+          WHERE stage = 'story_state_sync'
+          ORDER BY id DESC LIMIT 1
+        `).get() as any
+        expect(artifact).toMatchObject({ status: 'failed', output_payload: '' })
+        expect(String(artifact?.error_code || '')).not.toBe('')
+      } finally {
+        database.close()
+      }
+      expect(exposed).toBe(payloadError)
+      expect(await getNovelProject(harness.workspace, harness.project.id)).toEqual(beforeProject)
+      expect((await listNovelChapters(harness.workspace, harness.project.id))
+        .find(item => item.id === harness.chapter.id)).toEqual(beforeChapter)
+      expect(harness.modelCalls.story_state).toBe(1)
+      expect(harness.storeCalls).toBe(0)
+      expect(harness.commitOrder).toEqual([])
+      expect(harness.memoryTexts).toEqual([])
+    })
+  }
+
   test('propagates a Story State stage failure by identity before automatic-task storage', async () => {
     const secretError = 'https://state.example/sync?api_key=STATE_QUERY Bearer STATE_BEARER token=STATE_TOKEN'
     const storyStateError = new Error(secretError)
@@ -587,12 +661,12 @@ describe('prepareStoryStateUpdate', () => {
     expect(storedUsage[0].actual_state_change).toEqual({ seen: true, owner: '江澈' })
   })
 
-  test('keeps accepted production successful when post-commit hooks, stages, or sync work fail', async () => {
+  for (const failure of ['after_commit_hook', 'story_state_stage', 'post_commit_sync']) {
+  test(`keeps accepted production successful when ${failure} fails`, async () => {
     const finalText = buildPipelineProse(
       '江澈踏碎路面，飞石逼退第一排追兵，铁门前终于露出缺口。',
       '借自己制造的盲区夺下通讯器，继续迫使追捕队后撤',
     )
-    for (const failure of ['after_commit_hook', 'story_state_stage', 'post_commit_sync']) {
       const harness = await createProsePipelineHarness(createNovelWritingService, {
         draftText: finalText,
         qualityGateEnabled: false,
@@ -627,8 +701,8 @@ describe('prepareStoryStateUpdate', () => {
       expect(result.chapter?.raw_payload?.prose_admission).toEqual(storedChapter?.raw_payload?.prose_admission)
       expect(harness.commitOrder).toEqual(['commit', 'memory'])
       expect(result.post_commit_warnings).toContainEqual(expect.objectContaining({ stage: failure }))
-    }
   })
+  }
 
   test('atomically accepts staged chapter and worldbuilding repair with prose and story state', async () => {
     const finalText = buildPipelineProse(

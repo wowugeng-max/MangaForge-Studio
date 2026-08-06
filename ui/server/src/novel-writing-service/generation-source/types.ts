@@ -162,6 +162,7 @@ export interface ChapterTaskExecution {
     project: any,
     context: Record<string, any>,
     options?: Record<string, any>,
+    beforeReceipt?: (result: any) => void | Promise<void>,
   ): Promise<any>
   assertCurrent(): Promise<void>
   close(outcome?: { status: 'success' | 'failed' | 'cancelled'; error?: unknown }): Promise<void>
@@ -176,6 +177,7 @@ export async function executeChapterStage<T = any>(input: {
   project: any
   context: Record<string, any>
   options?: Record<string, any>
+  beforeReceipt?: (result: T) => void | Promise<void>
 }): Promise<T> {
   if (input.execution) {
     return input.execution.executeAgent(
@@ -185,6 +187,7 @@ export async function executeChapterStage<T = any>(input: {
       input.project,
       input.context,
       input.options,
+      input.beforeReceipt,
     )
   }
   return input.fallback(input.agentId, input.project, input.context, input.options)

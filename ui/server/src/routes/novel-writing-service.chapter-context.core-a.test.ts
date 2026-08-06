@@ -450,7 +450,8 @@ test('stores one coherent final candidate after accepting a quality revision', a
     expect.objectContaining({ accepted: false, reason: expect.stringContaining('回退') }),
   ]))
 })
-test('stores valid prose with warnings for subjective quality failures in every prose storage production mode', async () => {
+for (const productionMode of ['draft_only', 'draft_review', 'draft_review_revise_store']) {
+test(`stores valid prose with warnings for subjective quality failures in ${productionMode} mode`, async () => {
   const originalDraft = buildPipelineProse(
     '倒数压到最后三秒，江澈停在围墙阴影里等待。',
     '只看着追捕队继续收紧包围',
@@ -471,7 +472,6 @@ test('stores valid prose with warnings for subjective quality failures in every 
       acceptance_test: '追捕阵型因江澈动作改变',
     }],
   })
-  for (const productionMode of ['draft_only', 'draft_review', 'draft_review_revise_store']) {
     const harness = await createProsePipelineHarness({
       draftText: originalDraft,
       reviewPayloads: [
@@ -512,8 +512,8 @@ test('stores valid prose with warnings for subjective quality failures in every 
       expect(harness.storyStateTexts).toEqual([])
       expect(harness.memoryTexts).toEqual([])
     }
-  }
 })
+}
 test('uses the injected writing runtime for service model calls', async () => {
   const calls: any[] = []
   const service = createNovelWritingService({

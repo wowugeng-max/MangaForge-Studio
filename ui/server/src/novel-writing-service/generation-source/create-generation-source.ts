@@ -185,8 +185,8 @@ function wrapExecution(
     contextVersion: resolved.contextVersion,
     provenance: () => execution.provenance(),
     generateDraft: request => execution.generateDraft(request),
-    executeAgent: (stage, responseContract, agentId, project, context, options) =>
-      execution.executeAgent(stage, responseContract, agentId, project, context, options),
+    executeAgent: (stage, responseContract, agentId, project, context, options, beforeReceipt) =>
+      execution.executeAgent(stage, responseContract, agentId, project, context, options, beforeReceipt),
     assertCurrent: () => execution.assertCurrent(),
     close(outcome) {
       if (terminalClose) return terminalClose

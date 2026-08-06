@@ -34,6 +34,7 @@ import { chapterContextVersion, createGenerationSourceResolver } from './create-
 import { ChapterSourceLeaseRegistry } from './chapter-source-lease'
 import { McpGenerationSource } from './mcp-generation-source'
 import { ModelGenerationSource } from './model-generation-source'
+import { prepareStoryStateUpdate } from '../service/story-state-machine-prepare'
 import {
   chapterGenerationSourceFingerprint,
   proseGenerationSourceFingerprint,
@@ -4313,6 +4314,238 @@ describe('McpGenerationSource task execution', () => {
     expect(modelCalls).toBe(0)
     expect(fixture.counters.modelCreations).toBe(0)
     await execution.close({ status: 'failed', error: caught }).catch(() => {})
+  })
+
+  test('preserves a local Story State business error through the complete failed-task close', async () => {
+    const remoteOutputMarker = 'REMOTE_STORY_STATE_OUTPUT_MUST_NOT_PERSIST'
+    const payloadError = new Error('story state payload semantics failed')
+    let beforeReceiptCalls = 0
+    let proseStoreCalls = 0
+    let storyStateCommitCalls = 0
+    let memoryCalls = 0
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-local-story-state-failure-', {
+      runStage: async (_input, session) => ({
+        content: JSON.stringify({ state_delta: { current_time: remoteOutputMarker } }),
+        session_id: session.sessionId,
+        snapshot_hash: session.snapshotHash,
+        status: 'completed',
+      }),
+    })
+    const execution = await fixture.begin()
+
+    const exposed = await (async () => {
+      try {
+        await execution.executeAgent(
+          'story_state_sync',
+          'story_state_json',
+          'review-agent',
+          fixture.durableProject,
+          { task: '校验 Story State' },
+          {},
+          () => {
+            beforeReceiptCalls += 1
+            throw payloadError
+          },
+        )
+        proseStoreCalls += 1
+        storyStateCommitCalls += 1
+        memoryCalls += 1
+      } catch (automaticFailure) {
+        try {
+          await execution.close({ status: 'failed', error: automaticFailure })
+        } catch (closeError) {
+          throw new AggregateError(
+            [automaticFailure, closeError],
+            'Automatic chapter production and task close both failed',
+          )
+        }
+        throw automaticFailure
+      }
+    })().catch(error => error)
+
+    const database = new Database(join(fixture.activeWorkspace, 'novel.sqlite'))
+    try {
+      const artifact = database.query(`
+        SELECT status, output_payload, error_code, session_id, snapshot_hash
+        FROM chapter_stage_artifacts
+        WHERE task_id = ? AND stage = 'story_state_sync'
+        ORDER BY id DESC LIMIT 1
+      `).get(execution.taskId) as any
+      expect(artifact).toMatchObject({
+        status: 'failed',
+        output_payload: '',
+        session_id: 'neutral-session-1',
+        snapshot_hash: 'neutral-snapshot-1',
+      })
+      expect(String(artifact?.error_code || '')).not.toBe('')
+      expect(JSON.stringify(artifact)).not.toContain(remoteOutputMarker)
+    } finally {
+      database.close()
+    }
+    expect(JSON.stringify(await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id)))
+      .not.toContain(remoteOutputMarker)
+    expect(beforeReceiptCalls).toBe(1)
+    expect({ proseStoreCalls, storyStateCommitCalls, memoryCalls }).toEqual({
+      proseStoreCalls: 0,
+      storyStateCommitCalls: 0,
+      memoryCalls: 0,
+    })
+    expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([])
+    expect(fixture.projectLeases.isActive(fixture.activeWorkspace, fixture.durableProject.id)).toBe(false)
+    expect(await fixture.agentLeases.isActive(fixture.activeWorkspace, {
+      serverId: fixture.server.id,
+      keyId: fixture.key.id,
+      agentId: 'neutral-agent-1',
+    })).toBe(false)
+    expect(exposed).toBe(payloadError)
+  })
+
+  test('rebuilds prepared Story State on cache hit without polluting the raw stage artifact', async () => {
+    const remotePayload = {
+      state_delta: { current_time: '子时', open_questions: ['门后是谁'] },
+      character_updates: [],
+      setting_updates: [],
+      storyline_updates: [],
+    }
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-story-state-cache-', {
+      runStage: async (_input, session) => ({
+        content: JSON.stringify(remotePayload),
+        session_id: session.sessionId,
+        snapshot_hash: session.snapshotHash,
+        status: 'completed',
+      }),
+    })
+    const execution = await fixture.begin()
+    const prepare = () => prepareStoryStateUpdate(
+      fixture.activeWorkspace,
+      fixture.durableProject,
+      fixture.durableChapter,
+      fixture.contextPackage,
+      '门后传来第二个人的脚步声。',
+      undefined,
+      { chapterTaskExecution: execution },
+      {
+        executeAgent: async () => { throw new Error('legacy Story State fallback forbidden') },
+        getStageModelId: () => 217,
+        getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+      },
+    )
+
+    try {
+      const first = await prepare()
+      const second = await prepare()
+
+      expect(fixture.counters.runStage).toBe(1)
+      expect(second.state_delta).toEqual(first.state_delta)
+      expect(second.payload.character_state_delta_sync)
+        .toEqual(first.payload.character_state_delta_sync)
+      const database = new Database(join(fixture.activeWorkspace, 'novel.sqlite'))
+      try {
+        const artifact = database.query(`
+          SELECT status, output_payload
+          FROM chapter_stage_artifacts
+          WHERE task_id = ? AND stage = 'story_state_sync'
+          ORDER BY id DESC LIMIT 1
+        `).get(execution.taskId) as any
+        expect(artifact?.status).toBe('success')
+        expect(JSON.parse(artifact?.output_payload || '{}').output).toEqual(remotePayload)
+      } finally {
+        database.close()
+      }
+      const stageReceipts = (await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
+        .filter(run => run.run_type === 'chapter_generation_stage' && run.step_name === 'story_state_sync')
+        .map(run => JSON.parse(run.output_ref || '{}'))
+      expect(stageReceipts).toHaveLength(2)
+      expect(stageReceipts.some(receipt => receipt.cache_hit === true)).toBe(true)
+    } finally {
+      await execution.close({ status: 'success' }).catch(() => {})
+    }
+  })
+
+  test('keeps concurrent close inside the deferred beforeReceipt lifecycle and fails the task coherently', async () => {
+    const callbackReached = deferredValue()
+    const releaseCallback = deferredValue()
+    const payloadError = new Error('deferred Story State payload validation failed')
+    const persistedTaskStatuses: string[] = []
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-deferred-before-receipt-', {
+      runStage: async (_input, session) => ({
+        content: JSON.stringify({ state_delta: { current_time: '子时' } }),
+        session_id: session.sessionId,
+        snapshot_hash: session.snapshotHash,
+        status: 'completed',
+      }),
+    })
+    const execution = await fixture.begin()
+    const core = fixture.coreExecution()
+    const persistTaskReceipt = core.persistTaskReceipt.bind(core)
+    core.persistTaskReceipt = async (status: string, error?: unknown) => {
+      persistedTaskStatuses.push(status)
+      return persistTaskReceipt(status, error)
+    }
+
+    const stageOutcome = execution.executeAgent(
+      'story_state_sync',
+      'story_state_json',
+      'review-agent',
+      fixture.durableProject,
+      { task: '延迟校验 Story State' },
+      {},
+      async () => {
+        callbackReached.resolve()
+        await releaseCallback.promise
+        throw payloadError
+      },
+    ).then(
+      value => ({ status: 'fulfilled' as const, value }),
+      reason => ({ status: 'rejected' as const, reason }),
+    )
+    await callbackReached.promise
+    let closeSettled = false
+    const closeOutcome = execution.close({ status: 'success' }).then(
+      value => ({ status: 'fulfilled' as const, value }),
+      reason => ({ status: 'rejected' as const, reason }),
+    ).finally(() => { closeSettled = true })
+
+    for (let turn = 0; turn < 8; turn += 1) await Promise.resolve()
+
+    expect(closeSettled).toBe(false)
+    expect(persistedTaskStatuses).toEqual(['session_created'])
+    releaseCallback.resolve()
+    const [stage, closing] = await Promise.all([stageOutcome, closeOutcome])
+
+    expect(stage).toMatchObject({ status: 'rejected', reason: payloadError })
+    expect(closing.status).toBe('rejected')
+    expect(persistedTaskStatuses).not.toContain('success')
+    expect(persistedTaskStatuses.at(-1)).toBe('failed')
+    const database = new Database(join(fixture.activeWorkspace, 'novel.sqlite'))
+    try {
+      const artifact = database.query(`
+        SELECT status, output_payload, error_code, session_id, snapshot_hash
+        FROM chapter_stage_artifacts
+        WHERE task_id = ? AND stage = 'story_state_sync'
+        ORDER BY id DESC LIMIT 1
+      `).get(execution.taskId) as any
+      expect(artifact).toMatchObject({
+        status: 'failed',
+        output_payload: '',
+        session_id: 'neutral-session-1',
+        snapshot_hash: 'neutral-snapshot-1',
+      })
+      expect(String(artifact?.error_code || '')).not.toBe('')
+    } finally {
+      database.close()
+    }
+    const taskReceipt = (await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
+      .find(run => run.run_type === 'mcp_chapter_task' && run.step_name === execution.taskId)
+    expect(taskReceipt?.status).toBe('failed')
+    expect(JSON.parse(taskReceipt?.output_ref || '{}')).toMatchObject({ status: 'failed' })
+    expect(await readMcpAgentQuarantines(fixture.activeWorkspace)).toEqual([])
+    expect(fixture.projectLeases.isActive(fixture.activeWorkspace, fixture.durableProject.id)).toBe(false)
+    expect(await fixture.agentLeases.isActive(fixture.activeWorkspace, {
+      serverId: fixture.server.id,
+      keyId: fixture.key.id,
+      agentId: 'neutral-agent-1',
+    })).toBe(false)
   })
 
   test('routes each actual stage through one adapter invocation', async () => {

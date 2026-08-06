@@ -231,6 +231,7 @@ export class ModelGenerationSource implements GenerationSource, ChapterTaskExecu
     project: any,
     context: Record<string, any>,
     options: Record<string, any> = {},
+    beforeReceipt?: (result: any) => void | Promise<void>,
   ) {
     if (this.legacy || this.modelId === undefined || !this.executeAgentPort) {
       throw new Error('Task-scoped executeAgent is unavailable on a legacy model source')
@@ -250,6 +251,7 @@ export class ModelGenerationSource implements GenerationSource, ChapterTaskExecu
       const safeResult = projectStageResult(result)
       const resultError = projectedStageError(safeResult)
       if (resultError) throw resultError
+      await beforeReceipt?.(safeResult)
       return safeResult
     })
   }

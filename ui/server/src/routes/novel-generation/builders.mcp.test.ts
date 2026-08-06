@@ -8,6 +8,7 @@ import {
 } from './builders'
 import * as generationBuilders from './builders'
 import { createNovelProductionService } from '../novel-production-service'
+import { classifyGenerationFailure as classifyGenerationFailurePolicy } from '../novel-production/generation-failure-policy'
 
 describe('MCP standalone prose route helpers', () => {
   test('does not carry a temporary generation-source override into automatic production', () => {
@@ -60,6 +61,7 @@ describe('MCP standalone prose route helpers', () => {
     const classify = Reflect.get(generationBuilders, 'classifyGenerationFailure')
 
     expect(typeof classify).toBe('function')
+    expect(classify).toBe(classifyGenerationFailurePolicy)
     expect(createNovelProductionService().classifyGenerationFailure).toBe(classify)
   })
 

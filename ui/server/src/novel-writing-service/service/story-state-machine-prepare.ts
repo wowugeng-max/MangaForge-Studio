@@ -165,7 +165,10 @@ export async function prepareStoryStateUpdate(
 
   const stageModelId = options.chapterTaskExecution ? undefined : getStageModelId(project, 'review', modelId)
   const buildFromAgentResult = async (result: any): Promise<PreparedStoryStateUpdate> => {
-    const payload = getNovelPayload(result)
+    const rawPayload = getNovelPayload(result)
+    const payload = rawPayload && typeof rawPayload === 'object' && !Array.isArray(rawPayload)
+      ? { ...rawPayload }
+      : rawPayload
     const diagnostics = buildLLMResultDiagnostics(result)
     const rawStateDelta = payload?.state_delta || payload?.stateDelta || {}
     const establishedEventsIncoming = asArray(
@@ -247,7 +250,8 @@ export async function prepareStoryStateUpdate(
 
   const runAgentOnce = async (maxTokens: number) => {
     throwIfAborted(options)
-    return executeChapterStage({
+    let preparedBeforeReceipt: PreparedStoryStateUpdate | undefined
+    const result = await executeChapterStage({
       execution: options.chapterTaskExecution,
       fallback: executeAgent,
       stage: 'story_state_sync',
@@ -267,18 +271,22 @@ export async function prepareStoryStateUpdate(
         timeoutMs: options.timeoutMs ?? options.llmTimeoutMs,
         maxRetries: options.maxRetries,
       },
+      beforeReceipt: async result => {
+        preparedBeforeReceipt = await buildFromAgentResult(result)
+      },
     })
+    return preparedBeforeReceipt || buildFromAgentResult(result)
   }
 
   const primaryMaxTokens = Number(options.maxTokens || options.max_tokens || 4500) || 4500
-  let prepared = await buildFromAgentResult(await runAgentOnce(primaryMaxTokens))
+  let prepared = await runAgentOnce(primaryMaxTokens)
   const hasTransportBlock = (item: PreparedStoryStateUpdate) => item.hard_failures.some((failure: any) => (
     failure?.key === 'story_state_invalid_payload' || failure?.key === 'story_state_transport_incomplete'
   ))
   const shouldRetry = options.retryOnBlockedTransport === true && hasTransportBlock(prepared)
   if (shouldRetry) {
     const retryMaxTokens = Math.max(primaryMaxTokens + 1500, 6000)
-    prepared = await buildFromAgentResult(await runAgentOnce(retryMaxTokens))
+    prepared = await runAgentOnce(retryMaxTokens)
     prepared.payload = {
       ...(prepared.payload || {}),
       story_state_prepare_retry: true,

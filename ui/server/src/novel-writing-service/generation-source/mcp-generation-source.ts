@@ -1239,6 +1239,14 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     return operation
   }
 
+  private trackStageLifecycle<T>(operation: Promise<T>) {
+    const terminal = operation.catch(error => {
+      if (!this.cleanupPromise) this.latchTerminalFailure(error)
+      throw error
+    })
+    return this.trackActiveOperation(terminal)
+  }
+
   private latchTerminalFailure(error: unknown, requestedStatus?: string) {
     const scrubbed = scrubGenerationError(error, this.scrubber)
     const receiptStatus = receiptStatusForError(scrubbed)
@@ -1261,10 +1269,16 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     return scrubbed
   }
 
-  private ensureTerminalCleanup(error?: unknown, status = 'failed') {
+  private ensureTerminalCleanup(
+    error?: unknown,
+    status = 'failed',
+    primaryErrorAlreadyPropagated = false,
+  ) {
     if (error !== undefined) this.latchTerminalFailure(error, status)
     else if (!this.terminalStatus) this.terminalStatus = status
-    if (!this.cleanupPromise) this.cleanupPromise = this.terminalCleanup()
+    if (!this.cleanupPromise) {
+      this.cleanupPromise = this.terminalCleanup(primaryErrorAlreadyPropagated)
+    }
     return this.cleanupPromise
   }
 
@@ -1486,7 +1500,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     this.deadline?.close()
   }
 
-  private async terminalCleanup() {
+  private async terminalCleanup(primaryErrorAlreadyPropagated = false) {
     let primaryError = this.ambiguousError || this.terminalError
     let terminalError = primaryError
     let receiptPersistenceError: Error | undefined
@@ -1571,7 +1585,9 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
       }
     }
     this.closeDeadline()
-    if (terminalError) throw terminalError
+    if (terminalError && (!primaryErrorAlreadyPropagated || terminalError !== primaryError)) {
+      throw terminalError
+    }
   }
 
   private failRemote(error: unknown): Promise<never> {
@@ -1682,7 +1698,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
   async generateDraft(request: ProseGenerationRequest): Promise<ProseGenerationResult> {
     const owner: StageInvocationOwner = {}
     try {
-      return await this.recordStage('draft', {
+      return await this.trackStageLifecycle(this.recordStage('draft', {
         prompt: request.paragraphTask,
         responseContract: 'draft_prose',
       }, async context => {
@@ -1710,7 +1726,7 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
             status: 'success',
           },
         }
-      })
+      }))
     } finally {
       if (owner.invocation
         && this.activeInvocation === owner.invocation
@@ -1731,22 +1747,25 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
     project: any,
     context: Record<string, any>,
     _options: Record<string, any> = {},
+    beforeReceipt?: (result: any) => void | Promise<void>,
   ) {
     const prompt = compileMcpAgentPrompt(agentId, project, context)
     const owner: StageInvocationOwner = {}
     try {
-      return await this.recordStage(stage, { prompt, responseContract }, async recordContext => {
+      return await this.trackStageLifecycle(this.recordStage(stage, { prompt, responseContract }, async recordContext => {
         const result = await this.runRemoteStage({
           requestId: safeOutboundRequestId(this.scrubber, `${this.taskId}:${stage}`),
           stage,
           responseContract,
           prompt,
         }, recordContext, owner)
-        return {
+        const validated = {
           ...validateMcpStageResponse(stage, responseContract, { content: result.content }),
           modelName: this.binding.model || 'MCP Auto',
         }
-      })
+        await beforeReceipt?.(validated)
+        return validated
+      }))
     } finally {
       if (owner.invocation
         && this.activeInvocation === owner.invocation
@@ -1780,7 +1799,12 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
         await this.ensureTerminalCleanup(residualFence, 'failed')
         throw residualFence
       }
-      await this.ensureTerminalCleanup(outcome.error, outcome.status)
+      const cleanupAlreadyStarted = Boolean(this.cleanupPromise)
+      await this.ensureTerminalCleanup(
+        outcome.error,
+        outcome.status,
+        outcome.error !== undefined && !cleanupAlreadyStarted,
+      )
     })()
     return this.closePromise
   }
