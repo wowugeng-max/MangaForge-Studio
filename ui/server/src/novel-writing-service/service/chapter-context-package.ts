@@ -119,6 +119,29 @@ import {
   buildWritingBible,
 } from './writing-bible'
 
+export type ChapterContextPackageOptions = {
+  settingEntities?: any[]
+  chapterSettingUsage?: any[]
+  projectSettingUsage?: any[]
+  persistSettingUsage?: boolean
+  referencePreview?: any
+}
+
+export async function resolveChapterContextReferencePreview(
+  project: any,
+  contextOptions: ChapterContextPackageOptions,
+  preview: typeof previewNovelKnowledgeInjection = previewNovelKnowledgeInjection,
+) {
+  if (Object.prototype.hasOwnProperty.call(contextOptions, 'referencePreview')) {
+    return contextOptions.referencePreview
+  }
+  try {
+    return await preview(project, '正文创作')
+  } catch {
+    return null
+  }
+}
+
 export async function buildChapterContextPackage(
   activeWorkspace: string,
   project: any,
@@ -128,7 +151,7 @@ export async function buildChapterContextPackage(
   characters: any[],
   outlines: any[],
   reviews: any[] = [],
-  contextOptions: { settingEntities?: any[]; chapterSettingUsage?: any[]; projectSettingUsage?: any[]; persistSettingUsage?: boolean } = {},
+  contextOptions: ChapterContextPackageOptions = {},
 ) {
   const sorted = [...chapters].sort((a, b) => a.chapter_no - b.chapter_no)
   const previousChapter = sorted.filter(ch => ch.chapter_no < chapter.chapter_no).slice(-1)[0] || null
@@ -142,12 +165,7 @@ export async function buildChapterContextPackage(
       ending_hook: ch.ending_hook || '',
       ending_excerpt: String(ch.chapter_text || '').slice(-800),
     }))
-  let referencePreview: any = null
-  try {
-    referencePreview = await previewNovelKnowledgeInjection(project, '正文创作')
-  } catch {
-    referencePreview = null
-  }
+  const referencePreview = await resolveChapterContextReferencePreview(project, contextOptions)
   const rawSceneCards = Array.isArray(chapter.scene_list) && chapter.scene_list.length
     ? chapter.scene_list
     : (Array.isArray(chapter.scene_breakdown) ? chapter.scene_breakdown : [])

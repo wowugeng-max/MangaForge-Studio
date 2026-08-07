@@ -8,6 +8,8 @@ import {
   listNovelCharacters,
   listNovelOutlines,
   listNovelReviews,
+  commitNovelChapterAcceptance,
+  loadNovelMaterialRepairSnapshot,
   mergeNovelChapterRawPayload,
 } from '../../novel'
 import type { NovelProductionService } from '../../routes/novel-production-service'
@@ -32,6 +34,7 @@ import { createSceneCardsMethods } from './scene-cards-methods'
 import { createStoryStateMachineMethods } from './story-state-machine'
 import { createStructuredReviewFillMethods } from './structured-review-fill-methods'
 import { getStoredOrBuiltWritingBible as getStoredOrBuiltWritingBibleCore } from './writing-bible'
+import { createMaterialRepairService } from './material-repair-service'
 
 type RunHumanizePostProcess = ReturnType<typeof createProseHumanizePostprocessMethods>['runHumanizePostProcess']
 
@@ -161,6 +164,12 @@ export function createNovelWritingService(ctx: {
     ...(mcpGenerationSource ? { mcpSource: mcpGenerationSource } : {}),
   })
   const beginChapterTask = (input: Parameters<typeof chapterGenerationSource.beginTask>[0]) => chapterGenerationSource.beginTask(input)
+  const materialRepairService = createMaterialRepairService({
+    beginChapterTask,
+    buildChapterContextPackage: buildChapterContextPackageFromModule,
+    commitAcceptance: commitNovelChapterAcceptance,
+    loadSnapshot: loadNovelMaterialRepairSnapshot,
+  })
   const storeChapterProseMemory = ctx.runtime?.storeChapterProseMemory || defaultStoreNovelChapterProseMemory
   const mergeChapterRawPayload = ctx.runtime?.mergeChapterRawPayload || mergeNovelChapterRawPayload
   const buildParagraphProseContext = buildParagraphProseContextFromModule
@@ -220,6 +229,7 @@ export function createNovelWritingService(ctx: {
 
   return {
     beginChapterTask,
+    repairChapterMaterials: materialRepairService.repairChapterMaterials,
     buildParagraphProseContext,
     buildChapterContextPackage,
     autoRepairChapterPreflightGaps,

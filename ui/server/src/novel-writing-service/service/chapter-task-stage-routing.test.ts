@@ -469,6 +469,7 @@ describe('chapter task service capability', () => {
     })
 
     expect(typeof service.beginChapterTask).toBe('function')
+    expect(typeof service.repairChapterMaterials).toBe('function')
     const execution = await service.beginChapterTask({
       activeWorkspace: '/tmp/mangaforge-task-routing',
       project: configuredProject,
