@@ -742,6 +742,7 @@ export function useNovelWorkspaceBaseModel() {
     approvalPolicyForm,
     autoCreationDirectorModel,
     backupImportText,
+    chapterGenerationSourceAuthority,
     chapterHasProse,
     chapterWordTargetPayload,
     chapters,

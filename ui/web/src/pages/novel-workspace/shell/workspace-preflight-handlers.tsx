@@ -12,6 +12,10 @@ import {
   renderGenerationPreflightRepairActionsView,
   renderPreflightModalContentView,
 } from './workspace-preflight-views'
+import {
+  resolveChapterInvocationGate,
+  type ChapterSourceAuthorityState,
+} from '../chapterGenerationSourceModel'
 
 export type GenerationPreflightRepairAction = {
   key: string
@@ -27,6 +31,7 @@ export type PreflightHandlerDeps = {
   apiClient: any
   applyStyleSampleActionForChapter: any
   buildPreDraftBriefForActiveChapter: any
+  chapterGenerationSourceAuthority: ChapterSourceAuthorityState
   flushPendingSave: any
   generateSceneCardsForChapter: any
   loadProjectModules: any
@@ -46,6 +51,7 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
   const apiClient = deps.apiClient
   const applyStyleSampleActionForChapter = deps.applyStyleSampleActionForChapter
   const buildPreDraftBriefForActiveChapter = deps.buildPreDraftBriefForActiveChapter
+  const chapterGenerationSourceAuthority = deps.chapterGenerationSourceAuthority
   const flushPendingSave = deps.flushPendingSave
   const generateSceneCardsForChapter = deps.generateSceneCardsForChapter
   const loadProjectModules = deps.loadProjectModules
@@ -65,9 +71,10 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
   }
 
   const repairGenerationPreflightGaps = async (payload: any, options: { targetChapterId?: number; repairKeys?: string[]; continueAfterRepair?: () => void; closeModal?: () => void } = {}) => {
+    const gate = resolveChapterInvocationGate(chapterGenerationSourceAuthority, selectedModelId)
+    if (!gate.allowed) return message.warning(gate.message)
     const targetChapterId = generationPreflightTargetChapterId(payload, options.targetChapterId)
     if (!targetChapterId) return message.warning('无法定位需要补齐的章节')
-    if (!selectedModelId) return message.warning('请先选择写作模型')
     if (!await flushPendingSave()) return
 
     const missingKeys = options.repairKeys?.length ? new Set(options.repairKeys) : generationPreflightMissingKeys(payload)
@@ -82,11 +89,27 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
     const messageKey = 'generation-preflight-repair'
     message.loading({ content: '正在自动补齐生成材料...', key: messageKey, duration: 0 })
     try {
+      if (gate.active === 'mcp') {
+        const res = await apiClient.post(`/novel/chapters/${targetChapterId}/auto-repair-context`, {
+          project_id: projectId,
+          repair_keys: [...missingKeys],
+        })
+        const applied = Array.isArray(res.data?.applied) ? res.data.applied : []
+        await loadProjectModules()
+        options.closeModal?.()
+        message.success({
+          content: applied.length ? `已通过 MCP 自动补齐 ${applied.length} 项材料` : '材料已刷新',
+          key: messageKey,
+          duration: 3,
+        })
+        options.continueAfterRepair?.()
+        return
+      }
       const repaired: string[] = []
       if (needsCharacterRepair) {
         const res = await apiClient.post(`/novel/chapters/${targetChapterId}/auto-repair-context`, {
           project_id: projectId,
-          model_id: selectedModelId,
+          model_id: gate.modelId,
         })
         const applied = Array.isArray(res.data?.applied) ? res.data.applied : []
         const characterCreatedCount = applied.filter((item: any) => item.type === 'character_created').length
@@ -95,14 +118,14 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
       if (needsSettingWorkshop) {
         const res = await apiClient.post(`/novel/projects/${projectId}/settings/incubate-from-project`, {
           use_model: true,
-          model_id: selectedModelId,
+          model_id: gate.modelId,
         })
         repaired.push(`设定工坊不足 ${res.data?.total || 0} 条`)
       }
       if (needsChapterSettingUsage) {
         const res = await apiClient.post(`/novel/chapters/${targetChapterId}/settings-usage/suggest`, {
           project_id: projectId,
-          model_id: selectedModelId,
+          model_id: gate.modelId,
           use_model: true,
           apply: true,
         })

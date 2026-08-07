@@ -67,6 +67,91 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
+describe('chapter invocation source gate', () => {
+  test('fails closed when authority is unknown or has no confirmed source', async () => {
+    const model = await loadModel()
+    expect(model).not.toBeNull()
+    if (!model) return
+    const unknown = {
+      source: model.normalizeChapterSourceView(rawMcpView()),
+      authorityUnknown: true,
+      reconciliationRequired: true,
+      diagnostic: new Error('private diagnostic'),
+    }
+
+    expect(model.resolveChapterInvocationGate(unknown, undefined)).toEqual({
+      allowed: false,
+      active: null,
+      modelId: undefined,
+      sourceLabel: '章节来源',
+      message: '章节来源权威状态暂时无法确认',
+    })
+    expect(model.resolveChapterInvocationGate(model.confirmedAuthorityState(null), 217)).toEqual({
+      allowed: false,
+      active: null,
+      modelId: undefined,
+      sourceLabel: '章节来源',
+      message: '章节来源权威状态暂时无法确认',
+    })
+  })
+
+  test('allows confirmed MCP without a selected model', async () => {
+    const model = await loadModel()
+    expect(model).not.toBeNull()
+    if (!model) return
+    const authority = model.confirmedAuthorityState(model.normalizeChapterSourceView(rawMcpView()))
+
+    expect(model.resolveChapterInvocationGate(authority)).toEqual({
+      allowed: true,
+      active: 'mcp',
+      modelId: undefined,
+      sourceLabel: 'MCP',
+      message: undefined,
+    })
+  })
+
+  test('allows a confirmed model only with the same safe positive integer model id', async () => {
+    const model = await loadModel()
+    expect(model).not.toBeNull()
+    if (!model) return
+    const authority = model.confirmedAuthorityState(model.normalizeChapterSourceView(rawModelView()))
+
+    expect(model.resolveChapterInvocationGate(authority, 301)).toEqual({
+      allowed: true,
+      active: 'model',
+      modelId: 301,
+      sourceLabel: '大模型 API',
+      message: undefined,
+    })
+  })
+
+  test('blocks missing and hostile model ids without coercion or throwing', async () => {
+    const model = await loadModel()
+    expect(model).not.toBeNull()
+    if (!model) return
+    const authority = model.confirmedAuthorityState(model.normalizeChapterSourceView(rawModelView()))
+    const blocked = {
+      allowed: false,
+      active: 'model',
+      modelId: undefined,
+      sourceLabel: '大模型 API',
+      message: '请先选择写作模型',
+    }
+
+    for (const invalid of [undefined, null, 0, -1, 1.5, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1, '301']) {
+      expect(model.resolveChapterInvocationGate(authority, invalid as any)).toEqual(blocked)
+    }
+    const hostile = new Proxy({}, { get() { throw new Error('private getter') } })
+    expect(model.resolveChapterInvocationGate(hostile as any, 301)).toEqual({
+      allowed: false,
+      active: null,
+      modelId: undefined,
+      sourceLabel: '章节来源',
+      message: '章节来源权威状态暂时无法确认',
+    })
+  })
+})
+
 async function flushPromises() {
   await Promise.resolve()
   await Promise.resolve()

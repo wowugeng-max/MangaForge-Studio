@@ -9,6 +9,65 @@ export function normalizeChapterSourceView(value: unknown): ChapterGenerationSou
   return normalizeChapterSourceApiView(value)
 }
 
+export type ChapterInvocationGate = Readonly<{
+  allowed: boolean
+  active: 'model' | 'mcp' | null
+  modelId: number | undefined
+  sourceLabel: '章节来源' | 'MCP' | '大模型 API'
+  message: string | undefined
+}>
+
+const UNKNOWN_CHAPTER_INVOCATION_GATE: ChapterInvocationGate = Object.freeze({
+  allowed: false,
+  active: null,
+  modelId: undefined,
+  sourceLabel: '章节来源',
+  message: '章节来源权威状态暂时无法确认',
+})
+
+export function resolveChapterInvocationGate(
+  authority: ChapterSourceAuthorityState,
+  selectedModelId?: unknown,
+): ChapterInvocationGate {
+  try {
+    if (!authority || typeof authority !== 'object'
+      || authority.authorityUnknown !== false
+      || authority.reconciliationRequired !== false
+      || authority.diagnostic !== null
+      || !authority.source) {
+      return UNKNOWN_CHAPTER_INVOCATION_GATE
+    }
+    const source = normalizeChapterSourceView(authority.source)
+    if (source.source.active === 'mcp') {
+      return {
+        allowed: true,
+        active: 'mcp',
+        modelId: undefined,
+        sourceLabel: 'MCP',
+        message: undefined,
+      }
+    }
+    if (!Number.isSafeInteger(selectedModelId) || Number(selectedModelId) <= 0) {
+      return {
+        allowed: false,
+        active: 'model',
+        modelId: undefined,
+        sourceLabel: '大模型 API',
+        message: '请先选择写作模型',
+      }
+    }
+    return {
+      allowed: true,
+      active: 'model',
+      modelId: Number(selectedModelId),
+      sourceLabel: '大模型 API',
+      message: undefined,
+    }
+  } catch {
+    return UNKNOWN_CHAPTER_INVOCATION_GATE
+  }
+}
+
 const chapterSourceAuthorityUnknownErrors = new WeakSet<object>()
 const staleChapterSourceOperationErrors = new WeakSet<object>()
 const chapterSourceAuthorityDiagnostics = new WeakMap<object, {

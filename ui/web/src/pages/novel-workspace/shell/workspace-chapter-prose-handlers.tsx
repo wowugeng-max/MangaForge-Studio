@@ -4,6 +4,10 @@ import { chapterHasProse, displayValue } from '../utils'
 import { renderGenerationResultDiffContentView } from './workspace-commercial-ops-views'
 import { isAbortError, proseStreamControl } from '../prose-stream-control'
 import { formatMcpGenerationFailure } from '../mcpGenerationSourceModel'
+import {
+  resolveChapterInvocationGate,
+  type ChapterSourceAuthorityState,
+} from '../chapterGenerationSourceModel'
 
 export function buildMcpGenerationFailureError(payload: any, fallback: string) {
   const error = new Error(
@@ -36,6 +40,7 @@ export type ChapterProseHandlerDeps = {
   apiClient: any
   autoCreationDirectorModel: any
   chapterWordTargetPayload: any
+  chapterGenerationSourceAuthority: ChapterSourceAuthorityState
   chapters: any
   confirmReferenceReady: any
   flushPendingSave: any
@@ -67,6 +72,7 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
   const apiClient = deps.apiClient
   const autoCreationDirectorModel = deps.autoCreationDirectorModel
   const chapterWordTargetPayload = deps.chapterWordTargetPayload
+  const chapterGenerationSourceAuthority = deps.chapterGenerationSourceAuthority
   const chapters = deps.chapters
   const confirmReferenceReady = deps.confirmReferenceReady
   const flushPendingSave = deps.flushPendingSave
@@ -92,7 +98,8 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
       ? chapters.find(ch => String(ch.id) === String(options.targetChapterId))
       : activeChapter
     if (!targetChapter) return message.warning('请先选择章节')
-    if (!selectedModelId) return message.warning('请先选择写作模型')
+    const gate = resolveChapterInvocationGate(chapterGenerationSourceAuthority, selectedModelId)
+    if (!gate.allowed) return message.warning(gate.message)
     if (!await flushPendingSave()) return
     if (!await confirmReferenceReady('正文创作')) return
     const targetChapterNo = Number(targetChapter.chapter_no || 0)
@@ -123,7 +130,8 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
           headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
           signal: streamSignal,
           body: JSON.stringify({
-            project_id: projectId, model_id: selectedModelId,
+            project_id: projectId,
+            ...(gate.active === 'model' ? { model_id: gate.modelId } : {}),
             ...chapterWordTargetPayload(),
             longform_compass: autoCreationDirectorModel.longformCompass,
             longform_battle_context: autoCreationDirectorModel.longformBattleDesk,
@@ -236,7 +244,8 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
 
   const repairContextAndGenerateCurrentChapter = async () => {
     if (!activeChapter) return message.warning('请先选择章节')
-    if (!selectedModelId) return message.warning('请先选择模型')
+    const gate = resolveChapterInvocationGate(chapterGenerationSourceAuthority, selectedModelId)
+    if (!gate.allowed) return message.warning(gate.message)
     if (!await flushPendingSave()) return
     const targetChapterId = activeChapter.id
     const repairController = proseStreamControl.begin()
@@ -248,7 +257,7 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
     try {
       const res = await apiClient.post(`/novel/chapters/${targetChapterId}/auto-repair-context`, {
         project_id: projectId,
-        model_id: selectedModelId,
+        ...(gate.active === 'model' ? { model_id: gate.modelId } : {}),
       }, { signal: repairController.signal })
       const applied = Array.isArray(res.data?.applied) ? res.data.applied : []
       const warnings = Array.isArray(res.data?.warnings) ? res.data.warnings : []
@@ -278,13 +287,14 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
     }
     proseStreamControl.end(repairController)
     setGeneratingProse(false)
-    await generateCurrentChapterProse({ allowIncomplete: true, forceSceneCards: true, targetChapterId })
+    await generateCurrentChapterProse({ allowIncomplete: false, forceSceneCards: true, targetChapterId })
   }
 
   /* ── 章节重组 ──────────────────────────────────────────────────── */
 
   const stepGenerateProse = async (options?: { limit?: number; source?: string; longformCompass?: any; longformBattleContext?: any; chapterLaunchGate?: any; nextBatchBrief?: any; batchPreflight?: any; millionWordRunway?: any; allowedChapterNos?: number[] }) => {
-    if (!selectedModelId) return message.warning('请先选择模型')
+    const gate = resolveChapterInvocationGate(chapterGenerationSourceAuthority, selectedModelId)
+    if (!gate.allowed) return message.warning(gate.message)
     if (!await flushPendingSave()) return
     const allowedChapterNoSet = new Set((options?.allowedChapterNos || []).map(chapterNo => Number(chapterNo)).filter(Boolean))
     const allUnwrittenChapters = sortedChapters.filter(ch => !chapterHasProse(ch))
@@ -317,7 +327,7 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               project_id: projectId,
-              model_id: selectedModelId,
+              ...(gate.active === 'model' ? { model_id: gate.modelId } : {}),
               ...chapterWordTargetPayload(),
               longform_compass: options?.longformCompass,
               longform_battle_context: options?.longformBattleContext,
@@ -381,7 +391,7 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
           step_name: 'summary',
           status: canceled ? 'canceled' : failed > 0 ? 'warn' : 'success',
           input_ref: {
-            model_id: selectedModelId,
+            ...(gate.active === 'model' ? { model_id: gate.modelId } : {}),
             chapter_ids: unWritten.map(ch => ch.id),
             total: unWritten.length,
             source: options?.source || 'manual_batch',
