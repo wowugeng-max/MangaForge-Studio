@@ -63,6 +63,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string, op
     getWorkspace,
     getProject,
     buildChapterContextPackage: writingService.buildChapterContextPackage,
+    repairChapterMaterials: writingService.repairChapterMaterials,
   })
 
   registerNovelTruthRoutes(app, {

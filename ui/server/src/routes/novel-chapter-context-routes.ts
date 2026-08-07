@@ -1,4 +1,5 @@
 import type { Express } from 'express'
+import { types } from 'node:util'
 import {
   createNovelCharacter,
   listNovelCharacters,
@@ -10,6 +11,8 @@ import {
   updateNovelCharacter,
 } from '../novel'
 import { executeNovelAgent } from '../llm'
+import { isChapterTaskId } from '../novel-writing-service/generation-source/types'
+import { resolveChapterGenerationSource } from '../novel-writing-service/generation-source/source-config'
 import { asArray, getNovelPayload } from './novel-route-utils'
 import { applyStyleSampleStrategyAuthorAction, buildChapterPreDraftBrief } from './novel-writing-service'
 
@@ -26,6 +29,142 @@ type ChapterContextRoutesContext = {
     outlines: any[],
     reviews: any[],
   ) => Promise<any>
+  repairChapterMaterials: (input: {
+    activeWorkspace: string
+    projectId: number
+    chapterId: number
+    repairKeys?: string[]
+    signal?: AbortSignal
+  }) => Promise<any>
+}
+
+const MATERIAL_REPAIR_KEY_COUNT_LIMIT = 64
+const MATERIAL_REPAIR_KEY_LENGTH_LIMIT = 160
+
+function normalizeMaterialRepairKeys(value: unknown) {
+  if (!Array.isArray(value)) return undefined
+  const normalized: string[] = []
+  const seen = new Set<string>()
+  const count = Math.min(value.length, MATERIAL_REPAIR_KEY_COUNT_LIMIT)
+  for (let index = 0; index < count; index += 1) {
+    const key = String(value[index] || '').trim().slice(0, MATERIAL_REPAIR_KEY_LENGTH_LIMIT)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    normalized.push(key)
+  }
+  return normalized
+}
+
+const MCP_MATERIAL_REPAIR_ERROR_STATUSES: Record<string, number> = {
+  MCP_BINDING_INVALID: 400,
+  MCP_BINDING_CHANGED: 409,
+  MCP_REFERENCED_RECORD_CONFLICT: 409,
+  MCP_AUTH_FAILED: 401,
+  MCP_CONNECT_TIMEOUT: 504,
+  MCP_CONNECTION_LOST: 503,
+  MCP_SERVER_NOT_READY: 503,
+  MCP_CAPABILITY_MISSING: 422,
+  MCP_TOOL_ERROR: 502,
+  MCP_DRIVE_SYNC_FAILED: 502,
+  MCP_INPUT_TOO_LARGE: 413,
+  MCP_AGENT_BUSY: 409,
+  MCP_AGENT_QUARANTINED: 409,
+  MCP_QUARANTINE_ACK_REQUIRED: 400,
+  MCP_SEND_UNKNOWN: 502,
+  MCP_SESSION_FAILED: 502,
+  MCP_INPUT_REQUIRED: 422,
+  MCP_GENERATION_TIMEOUT: 504,
+  MCP_CANCELLED: 499,
+  MCP_EMPTY_PROSE: 502,
+  MCP_STAGE_CONTRACT_INVALID: 502,
+  MCP_STORE_CORRUPT: 500,
+  MCP_STORE_IO_FAILED: 500,
+  MCP_RUNTIME_ERROR: 503,
+}
+
+const MATERIAL_REPAIR_ERROR_STATUSES: Record<string, number> = {
+  GENERATION_SOURCE_BUSY: 409,
+  GENERATION_SOURCE_CHANGED: 409,
+  GENERATION_SOURCE_OVERRIDE_FORBIDDEN: 409,
+  CHAPTER_MODEL_REQUIRED: 422,
+  MATERIAL_REPAIR_SCOPE_NOT_FOUND: 404,
+  MATERIAL_REPAIR_CONTEXT_CHANGED: 409,
+  MATERIAL_REPAIR_KEY_UNSUPPORTED: 422,
+  MATERIAL_REPAIR_KEY_NOT_FAILED: 422,
+  MATERIAL_REPAIR_UNREPAIRABLE: 422,
+  MATERIAL_REPAIR_INCOMPLETE: 502,
+  MATERIAL_REPAIR_OBLIGATION_UNMET: 502,
+  MATERIAL_REPAIR_UNRELATED_MUTATION: 502,
+  MATERIAL_REPAIR_FORBIDDEN_FIELD: 502,
+  MATERIAL_REPAIR_DUPLICATE: 502,
+  MATERIAL_REPAIR_REFERENCE_INVALID: 502,
+  MATERIAL_REPAIR_LIMIT_EXCEEDED: 502,
+  MATERIAL_REPAIR_INVALID: 502,
+  MATERIAL_REPAIR_SNAPSHOT_INVALID: 500,
+  MATERIAL_REPAIR_SOURCE_INVALID: 409,
+  MATERIAL_REPAIR_MODEL_PATH_REQUIRED: 409,
+  MATERIAL_REPAIR_EXECUTION_IDENTITY_INVALID: 500,
+  MATERIAL_REPAIR_CLOCK_INVALID: 500,
+  MATERIAL_REPAIR_RESPONSE_UNSAFE: 500,
+  MATERIAL_REPAIR_CONTEXT_VERSION_INVALID: 500,
+  MATERIAL_REPAIR_IDENTITY_REQUIRED: 500,
+  MATERIAL_REPAIR_CONFIRMATION_INVALID: 500,
+  MATERIAL_REPAIR_PLAN_INVALID: 500,
+  MATERIAL_REPAIR_TARGET_INVALID: 500,
+  MATERIAL_REPAIR_RESULT_REFRESH_FAILED: 500,
+}
+
+function ownMaterialRepairErrorValue(error: unknown, field: string) {
+  if (!types.isNativeError(error) || types.isProxy(error)) return undefined
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(error, field)
+    return descriptor && 'value' in descriptor ? descriptor.value : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function publicMaterialRepairErrorMessage(code: string) {
+  if (code === 'MCP_BINDING_INVALID') return 'MCP 来源配置无效'
+  if (code === 'MCP_AUTH_FAILED') return 'MCP 认证失败'
+  if (code === 'MCP_CAPABILITY_MISSING' || code === 'MCP_SERVER_NOT_READY') return 'MCP 服务未就绪'
+  if (code.startsWith('MCP_')) return 'MCP 材料补齐失败'
+  if (code === 'GENERATION_SOURCE_BUSY') return '章节生成来源正在使用中'
+  if (code === 'GENERATION_SOURCE_CHANGED'
+    || code === 'MATERIAL_REPAIR_CONTEXT_CHANGED'
+    || code === 'MATERIAL_REPAIR_SOURCE_INVALID'
+    || code === 'MATERIAL_REPAIR_MODEL_PATH_REQUIRED') {
+    return '材料或来源已变化，请重新读取项目状态后重试'
+  }
+  if (code === 'MATERIAL_REPAIR_SCOPE_NOT_FOUND') return '项目或章节不存在'
+  if (code === 'MATERIAL_REPAIR_KEY_UNSUPPORTED'
+    || code === 'MATERIAL_REPAIR_KEY_NOT_FAILED'
+    || code === 'MATERIAL_REPAIR_UNREPAIRABLE') {
+    return '请求的材料补齐项无效'
+  }
+  if (code === 'MATERIAL_REPAIR_RESULT_REFRESH_FAILED') return '材料补齐已提交，请重新读取项目状态'
+  if ((MATERIAL_REPAIR_ERROR_STATUSES[code] || 0) === 502) return 'MCP 返回的材料补齐结果无效'
+  return '材料补齐失败'
+}
+
+function projectMaterialRepairRouteError(error: unknown) {
+  const codeValue = ownMaterialRepairErrorValue(error, 'code')
+    || ownMaterialRepairErrorValue(error, 'error_code')
+  if (typeof codeValue !== 'string') return null
+  const code = codeValue.trim()
+  const status = MCP_MATERIAL_REPAIR_ERROR_STATUSES[code] || MATERIAL_REPAIR_ERROR_STATUSES[code]
+  if (!status) return null
+  const body: Record<string, unknown> = {
+    error: publicMaterialRepairErrorMessage(code),
+    error_code: code,
+  }
+  if (code === 'MATERIAL_REPAIR_RESULT_REFRESH_FAILED'
+    && ownMaterialRepairErrorValue(error, 'committed') === true) {
+    body.committed = true
+    const taskId = ownMaterialRepairErrorValue(error, 'task_id')
+    if (isChapterTaskId(taskId)) body.task_id = taskId
+  }
+  return { status, body }
 }
 
 import {
@@ -89,12 +228,28 @@ export function registerNovelChapterContextRoutes(app: Express, ctx: ChapterCont
   })
 
   app.post('/api/novel/chapters/:chapterId/auto-repair-context', async (req, res) => {
+    let sourceDispatchBoundary: 'legacy' | 'resolving' | 'mcp' = 'legacy'
     try {
       const activeWorkspace = ctx.getWorkspace()
       const projectId = Number(req.body.project_id || req.query.project_id || 0)
       const chapterId = Number(req.params.chapterId)
       const project = await ctx.getProject(activeWorkspace, projectId)
       if (!project) return res.status(404).json({ error: 'project not found' })
+      sourceDispatchBoundary = 'resolving'
+      if (resolveChapterGenerationSource(project).active === 'mcp') {
+        sourceDispatchBoundary = 'mcp'
+        const result = await ctx.repairChapterMaterials({
+          activeWorkspace,
+          projectId,
+          chapterId,
+          repairKeys: normalizeMaterialRepairKeys(req.body?.repair_keys),
+        })
+        return res.json({
+          ...result,
+          material_score: buildMaterialScore(result.context_package),
+        })
+      }
+      sourceDispatchBoundary = 'legacy'
       const [chapters, worldbuilding, characters, outlines, reviews] = await Promise.all([
         listNovelChapters(activeWorkspace, projectId),
         listNovelWorldbuilding(activeWorkspace, projectId),
@@ -293,7 +448,12 @@ export function registerNovelChapterContextRoutes(app: Express, ctx: ChapterCont
         material_score: 'error' in refreshed ? null : buildMaterialScore(refreshed.contextPackage),
       })
     } catch (error) {
-      res.status(500).json({ error: String(error) })
+      if (sourceDispatchBoundary === 'legacy') {
+        return res.status(500).json({ error: String(error) })
+      }
+      const projected = projectMaterialRepairRouteError(error)
+      if (projected) return res.status(projected.status).json(projected.body)
+      return res.status(500).json({ error: '材料补齐失败' })
     }
   })
 
