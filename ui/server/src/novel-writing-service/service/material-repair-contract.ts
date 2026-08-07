@@ -12,24 +12,53 @@ export type MaterialRepairTarget =
   | 'settings'
   | 'chapter_setting_usage'
 
-const TARGETS_BY_CHECK: Record<string, readonly MaterialRepairTarget[]> = {
-  chapter_blueprint: ['chapter_patch'],
-  chapter_conflict: ['chapter_patch'],
-  ending_hook: ['chapter_patch'],
-  plot_points: ['chapter_patch'],
-  scene_cards: ['chapter_patch'],
-  no_repeat: ['chapter_patch'],
-  source_readiness_chapter_blueprint: ['chapter_patch'],
-  source_readiness_context_tracking: ['chapter_patch'],
-  source_readiness_timeline_tracking: ['chapter_patch'],
-  source_readiness_scene_card_goal_obstacle_change: ['chapter_patch'],
-  benchmark_recall_source_paths: ['chapter_patch'],
-  benchmark_recall_gate: ['chapter_patch'],
-  worldbuilding: ['worldbuilding'],
-  characters: ['characters'],
-  character_state: ['character_updates'],
-  setting_workshop: ['settings'],
-  chapter_setting_usage: ['chapter_setting_usage'],
+const REPAIRABLE_CHECKS = {
+  chapter_blueprint: { targets: ['chapter_patch'] },
+  scene_cards: { targets: ['chapter_patch'] },
+  chapter_conflict: { targets: ['chapter_patch'] },
+  ending_hook: { targets: ['chapter_patch'] },
+  worldbuilding: { targets: ['worldbuilding'] },
+  characters: { targets: ['characters'] },
+  character_state: { targets: ['character_updates'] },
+  plot_points: { targets: ['chapter_patch'] },
+  no_repeat: { targets: ['chapter_patch'] },
+  benchmark_recall_gate: { targets: ['chapter_patch'] },
+  benchmark_recall_gaps: { targets: ['chapter_patch'] },
+  benchmark_recall_source_paths: { targets: ['chapter_patch'] },
+  setting_workshop: { targets: ['settings'] },
+  chapter_setting_usage: { targets: ['chapter_setting_usage'] },
+  chapter_title_unique: { targets: ['chapter_patch'] },
+  source_readiness_chapter_blueprint: { targets: ['chapter_patch'] },
+  source_readiness_context_tracking: { targets: ['chapter_patch'] },
+  source_readiness_foreshadowing_tracking: { targets: ['chapter_patch'] },
+  source_readiness_timeline_tracking: { targets: ['chapter_patch'] },
+  source_readiness_character_state: { targets: ['chapter_patch', 'character_updates'] },
+  source_readiness_scene_card_goal_obstacle_change: { targets: ['chapter_patch'] },
+} as const satisfies Record<string, { targets: readonly MaterialRepairTarget[] }>
+
+const UNREPAIRABLE_CHECKS = new Set([
+  'previous_continuity',
+  'source_readiness_previous_chapter',
+  'source_readiness_serial_story_state',
+  'reference_knowledge',
+  'copy_safety_policy',
+])
+
+export type MaterialRepairCheckKey = keyof typeof REPAIRABLE_CHECKS
+
+export type MaterialRepairObligation = {
+  key: MaterialRepairCheckKey
+  targets: readonly MaterialRepairTarget[]
+  label: string
+  severity: 'low' | 'medium' | 'high' | 'unknown'
+  fix: string
+  evidence: string
+  gaps: string[]
+}
+
+export type MaterialRepairRequest = {
+  targets: ReadonlySet<MaterialRepairTarget>
+  obligations: readonly MaterialRepairObligation[]
 }
 
 const MATERIAL_REPAIR_MUTATION_FIELDS = [
@@ -615,8 +644,9 @@ function normalizeSetting(value: unknown) {
   }
   assertAllowedFields(value, SETTING_FIELDS, 'settings')
   const name = requiredIdentityText(aliasValue(value, ['name', 'title'], 'setting.name'), 'setting name')
+  const rawEntityType = aliasValue(value, ['entity_type', 'entityType', 'type'], 'setting.entity_type')
   const entityType = requiredIdentityText(
-    aliasValue(value, ['entity_type', 'entityType', 'type'], 'setting.entity_type') || 'rule',
+    rawEntityType === undefined ? 'rule' : rawEntityType,
     'setting entity_type',
   )
   const normalized: Record<string, unknown> = { entity_type: entityType, name }
@@ -744,17 +774,108 @@ function requiredCollection(payload: Record<string, unknown>, target: Exclude<Ma
   return value
 }
 
-export function resolveMaterialRepairTargets(contextPackage: any, requestedKeys?: string[]) {
-  const failedKeys = Array.isArray(contextPackage?.preflight?.checks)
-    ? contextPackage.preflight.checks
-        .filter((check: any) => check?.ok !== true)
-        .map((check: any) => String(check?.key || '').trim())
-        .filter(Boolean)
+function materialCheckText(value: unknown) {
+  if (typeof value === 'string') return value.trim().slice(0, 2000)
+  if (value === undefined || value === null) return ''
+  try {
+    return JSON.stringify(value).slice(0, 2000)
+  } catch {
+    return String(value).slice(0, 2000)
+  }
+}
+
+function materialCheckGaps(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return value.map(materialCheckText).filter(Boolean).slice(0, 30)
+}
+
+function materialRepairCheckSpec(key: string) {
+  if (UNREPAIRABLE_CHECKS.has(key)) {
+    throw materialRepairError('MATERIAL_REPAIR_UNREPAIRABLE', `material repair cannot safely repair preflight key: ${key}`)
+  }
+  const spec = REPAIRABLE_CHECKS[key as MaterialRepairCheckKey]
+  if (!spec) {
+    throw materialRepairError('MATERIAL_REPAIR_KEY_UNSUPPORTED', `unsupported material repair key: ${key}`)
+  }
+  return spec
+}
+
+export function resolveMaterialRepairRequest(contextPackage: any, requestedKeys?: string[]): MaterialRepairRequest {
+  const checks = Array.isArray(contextPackage?.preflight?.checks)
+    ? contextPackage.preflight.checks.filter(isPlainObject)
     : []
+  const checkByKey = new Map<string, Record<string, unknown>>()
+  for (const check of checks) {
+    const key = String(check.key || '').trim()
+    if (key && !checkByKey.has(key)) checkByKey.set(key, check)
+  }
   const keys = requestedKeys?.length
     ? requestedKeys.map(key => String(key || '').trim()).filter(Boolean)
-    : failedKeys
-  return new Set<MaterialRepairTarget>(keys.flatMap(key => TARGETS_BY_CHECK[key] || []))
+    : checks
+        .filter(check => check.ok !== true)
+        .map(check => String(check.key || '').trim())
+        .filter(Boolean)
+  const obligations: MaterialRepairObligation[] = []
+  const seen = new Set<string>()
+  const targets = new Set<MaterialRepairTarget>()
+  for (const key of keys) {
+    if (seen.has(key)) continue
+    seen.add(key)
+    const spec = materialRepairCheckSpec(key)
+    const check = checkByKey.get(key) || {}
+    const severityValue = String(check.severity || '').toLowerCase()
+    const severity: MaterialRepairObligation['severity'] = ['low', 'medium', 'high'].includes(severityValue)
+      ? severityValue as MaterialRepairObligation['severity']
+      : 'unknown'
+    const obligation: MaterialRepairObligation = {
+      key: key as MaterialRepairCheckKey,
+      targets: [...spec.targets],
+      label: materialCheckText(check.label),
+      severity,
+      fix: materialCheckText(check.fix),
+      evidence: materialCheckText(check.evidence),
+      gaps: materialCheckGaps(check.gaps),
+    }
+    obligations.push(obligation)
+    for (const target of spec.targets) targets.add(target)
+  }
+  return { targets, obligations }
+}
+
+export function resolveMaterialRepairTargets(contextPackage: any, requestedKeys?: string[]) {
+  return new Set(resolveMaterialRepairRequest(contextPackage, requestedKeys).targets)
+}
+
+function assertMaterialRepairRequest(value: unknown): asserts value is MaterialRepairRequest {
+  if (!isPlainObject(value) || !(value.targets instanceof Set) || !Array.isArray(value.obligations)) {
+    throw materialRepairError('MATERIAL_REPAIR_REQUEST_INVALID', 'material repair request must contain targets and obligations')
+  }
+  const allowedTargets = new Set<unknown>(MATERIAL_REPAIR_MUTATION_FIELDS)
+  for (const target of value.targets) {
+    if (!allowedTargets.has(target)) {
+      throw materialRepairError('MATERIAL_REPAIR_TARGET_INVALID', `unknown material repair target: ${String(target)}`)
+    }
+  }
+  const expectedTargets = new Set<MaterialRepairTarget>()
+  const seenKeys = new Set<string>()
+  for (const raw of value.obligations) {
+    if (!isPlainObject(raw)) {
+      throw materialRepairError('MATERIAL_REPAIR_REQUEST_INVALID', 'material repair obligations must be objects')
+    }
+    const key = typeof raw.key === 'string' ? raw.key.trim() : ''
+    const spec = materialRepairCheckSpec(key)
+    if (seenKeys.has(key)) {
+      throw materialRepairError('MATERIAL_REPAIR_REQUEST_INVALID', `duplicate material repair obligation: ${key}`)
+    }
+    seenKeys.add(key)
+    if (!Array.isArray(raw.targets) || raw.targets.length !== spec.targets.length || raw.targets.some((target, index) => target !== spec.targets[index])) {
+      throw materialRepairError('MATERIAL_REPAIR_REQUEST_INVALID', `material repair obligation target mismatch: ${key}`)
+    }
+    for (const target of spec.targets) expectedTargets.add(target)
+  }
+  if (expectedTargets.size !== value.targets.size || [...expectedTargets].some(target => !value.targets.has(target))) {
+    throw materialRepairError('MATERIAL_REPAIR_REQUEST_INVALID', 'material repair targets do not match obligations')
+  }
 }
 
 function projectPromptView(project: any) {
@@ -826,7 +947,7 @@ function materialRepairTaskIdentity(value: MaterialRepairTaskIdentity) {
 }
 
 export function buildMaterialRepairTask(input: {
-  targets: Set<MaterialRepairTarget>
+  request: MaterialRepairRequest
   project: any
   chapter: any
   contextPackage: any
@@ -840,7 +961,8 @@ export function buildMaterialRepairTask(input: {
   projectSettingUsage: any[]
   identity: MaterialRepairTaskIdentity
 }) {
-  const targets = MATERIAL_REPAIR_MUTATION_FIELDS.filter(target => input.targets.has(target))
+  assertMaterialRepairRequest(input.request)
+  const targets = MATERIAL_REPAIR_MUTATION_FIELDS.filter(target => input.request.targets.has(target))
   const identity = materialRepairTaskIdentity(input.identity)
   const outputEnvelope = {
     chapter_patch: {
@@ -853,10 +975,12 @@ export function buildMaterialRepairTask(input: {
       scene_list: 'object[]?',
       raw_payload: {
         chapter_blueprint: 'object?',
-        pre_draft_brief: 'object?',
+        pre_draft_brief: {
+          state_tracking_contract: {
+            source_readiness: [{ key: 'string', status: 'ready|pass|ok', evidence: 'non-empty string' }],
+          },
+        },
         write_preparation_brief: 'object?',
-        state_tracking_contract: 'object?',
-        source_readiness: 'object[]?',
         must_advance: 'string[]?',
         forbidden_repeats: 'string[]?',
         benchmark_recall_brief: 'object?',
@@ -875,6 +999,7 @@ export function buildMaterialRepairTask(input: {
     '任务：一次性补齐本章写作前置材料。只输出 JSON，不生成正文。',
     'MangaForge 本次请求中的项目材料是权威上下文；不得用远端历史覆盖。远端记忆只能辅助执行，不能新增或改写权威事实。',
     `必须补齐的分区：${JSON.stringify(targets)}`,
+    `必须逐项满足的原始缺失项：${prosePromptJson(input.request.obligations, 12000)}`,
     '仅返回必须补齐的分区以及 repair_summary；不得返回未请求分区。',
     '仅允许输出 chapter_patch, worldbuilding, characters, character_updates, settings, chapter_setting_usage, repair_summary。',
     'chapter_setting_usage 使用已有 entity_id，或使用本次 settings 中唯一的 entity_name + entity_type。',
@@ -890,6 +1015,7 @@ export function buildMaterialRepairTask(input: {
     '【本章与严格检查】',
     prosePromptJson({
       chapter: chapterPromptView(input.chapter),
+      chapter_target: input.contextPackage?.chapter_target || input.contextPackage?.chapterTarget || {},
       preflight: input.contextPackage?.preflight || {},
     }, 32000),
     '【Story State 与连续性】',
@@ -914,11 +1040,239 @@ export function buildMaterialRepairTask(input: {
   ])
 }
 
+function nonEmptyRecord(value: unknown): value is Record<string, unknown> {
+  return isPlainObject(value) && Object.keys(value).length > 0
+}
+
+function nonEmptyString(value: unknown) {
+  return typeof value === 'string' && Boolean(value.trim())
+}
+
+function materialAcceptanceRawPayload(acceptance: PreparedMaterialRepair['acceptance']) {
+  const raw = acceptance.chapter_patch?.raw_payload
+  return isPlainObject(raw) ? raw : {}
+}
+
+function materialPreDraftBrief(acceptance: PreparedMaterialRepair['acceptance']) {
+  const raw = materialAcceptanceRawPayload(acceptance)
+  const brief = raw.pre_draft_brief || raw.preDraftBrief
+  return isPlainObject(brief) ? brief : {}
+}
+
+function materialPreDraftStateTracking(acceptance: PreparedMaterialRepair['acceptance']) {
+  const brief = materialPreDraftBrief(acceptance)
+  const contract = brief.state_tracking_contract || brief.stateTrackingContract
+  return isPlainObject(contract) ? contract : {}
+}
+
+function sourceReadinessKeyForObligation(key: MaterialRepairCheckKey) {
+  return key.replace(/^source_readiness_/, '').replace(/^scene_card_goal_obstacle_change$/, 'scene_card_goal_obstacle_change')
+}
+
+function hasReadySourceReadinessRow(acceptance: PreparedMaterialRepair['acceptance'], obligation: MaterialRepairObligation) {
+  const contract = materialPreDraftStateTracking(acceptance)
+  const rows = contract.source_readiness || contract.sourceReadiness
+  if (!Array.isArray(rows)) return false
+  const expected = sourceReadinessKeyForObligation(obligation.key)
+  return rows.some(row => {
+    if (!isPlainObject(row)) return false
+    const key = String(row.key || row.name || '').trim()
+    const status = String(row.status || '').trim().toLowerCase()
+    const evidence = materialCheckText(row.evidence || row.source || row.summary)
+    return key === expected && ['ready', 'pass', 'ok'].includes(status) && Boolean(evidence)
+  })
+}
+
+function materialSceneCards(acceptance: PreparedMaterialRepair['acceptance']) {
+  const patch = acceptance.chapter_patch || {}
+  if (Array.isArray(patch.scene_list) && patch.scene_list.length) return patch.scene_list
+  if (Array.isArray(patch.scene_breakdown) && patch.scene_breakdown.length) return patch.scene_breakdown
+  return []
+}
+
+function sceneCardsHaveGoalObstacleChange(acceptance: PreparedMaterialRepair['acceptance']) {
+  const cards = materialSceneCards(acceptance)
+  return cards.length > 0 && cards.every(card => {
+    if (!isPlainObject(card)) return false
+    return nonEmptyString(card.goal || card.scene_goal || card.sceneGoal)
+      && nonEmptyString(card.obstacle || card.conflict)
+      && nonEmptyString(card.change || card.state_delta || card.stateDelta || card.turn || card.payoff)
+  })
+}
+
+function hasNestedSourcePaths(value: unknown, depth = 0): boolean {
+  if (!value || typeof value !== 'object' || depth > 8) return false
+  if (Array.isArray(value)) return value.some(item => hasNestedSourcePaths(item, depth + 1))
+  if (!isPlainObject(value)) return false
+  for (const [key, item] of Object.entries(value)) {
+    if (/source_?paths?|style_profile_path|module_source_path|rhythm_source_path|deep_dive_path|summary_source_path/i.test(key)) {
+      if (nonEmptyString(item) || (Array.isArray(item) && item.some(nonEmptyString))) return true
+    }
+    if (hasNestedSourcePaths(item, depth + 1)) return true
+  }
+  return false
+}
+
+function obligationSatisfied(obligation: MaterialRepairObligation, acceptance: PreparedMaterialRepair['acceptance']) {
+  const patch = acceptance.chapter_patch || {}
+  const raw = materialAcceptanceRawPayload(acceptance)
+  const characterUpdates = acceptance.character_updates || []
+  switch (obligation.key) {
+    case 'chapter_blueprint':
+      return nonEmptyRecord(raw.chapter_blueprint)
+    case 'scene_cards':
+      return materialSceneCards(acceptance).length > 0
+    case 'chapter_conflict':
+      return nonEmptyString(patch.conflict)
+    case 'ending_hook':
+      return nonEmptyString(patch.ending_hook)
+    case 'worldbuilding':
+      return Boolean(acceptance.worldbuilding_creates?.length)
+    case 'characters':
+      return Boolean(acceptance.character_creates?.length)
+    case 'character_state':
+      return characterUpdates.some(update => nonEmptyRecord(update.patch?.current_state))
+    case 'plot_points':
+      return nonEmptyString(patch.chapter_goal)
+        || nonEmptyString(patch.chapter_summary)
+        || (Array.isArray(raw.must_advance) && raw.must_advance.some(nonEmptyString))
+    case 'no_repeat':
+      return Array.isArray(raw.forbidden_repeats) && raw.forbidden_repeats.some(nonEmptyString)
+    case 'benchmark_recall_gate':
+    case 'benchmark_recall_gaps':
+      return nonEmptyRecord(raw.benchmark_recall_brief)
+    case 'benchmark_recall_source_paths':
+      return nonEmptyRecord(raw.benchmark_recall_brief) && hasNestedSourcePaths(raw.benchmark_recall_brief)
+    case 'setting_workshop':
+      return Boolean(acceptance.setting_creates?.length)
+    case 'chapter_setting_usage':
+      return Boolean(acceptance.chapter_setting_usage_replacement?.length)
+    case 'chapter_title_unique':
+      return nonEmptyString(patch.title)
+    case 'source_readiness_chapter_blueprint':
+      return nonEmptyRecord(raw.chapter_blueprint) && hasReadySourceReadinessRow(acceptance, obligation)
+    case 'source_readiness_context_tracking':
+    case 'source_readiness_foreshadowing_tracking':
+    case 'source_readiness_timeline_tracking':
+      return hasReadySourceReadinessRow(acceptance, obligation)
+    case 'source_readiness_character_state':
+      return characterUpdates.some(update => nonEmptyRecord(update.patch?.current_state))
+        && hasReadySourceReadinessRow(acceptance, obligation)
+    case 'source_readiness_scene_card_goal_obstacle_change':
+      return sceneCardsHaveGoalObstacleChange(acceptance)
+  }
+}
+
+function chapterMutationAllowance(obligations: readonly MaterialRepairObligation[]) {
+  const fields = new Set<string>()
+  const rawFields = new Set<string>()
+  const preDraftFields = new Set<string>()
+  for (const obligation of obligations) {
+    switch (obligation.key) {
+      case 'chapter_blueprint':
+        rawFields.add('chapter_blueprint')
+        break
+      case 'scene_cards':
+      case 'source_readiness_scene_card_goal_obstacle_change':
+        fields.add('scene_breakdown')
+        fields.add('scene_list')
+        break
+      case 'chapter_conflict':
+        fields.add('conflict')
+        break
+      case 'ending_hook':
+        fields.add('ending_hook')
+        break
+      case 'plot_points':
+        fields.add('chapter_goal')
+        fields.add('chapter_summary')
+        rawFields.add('must_advance')
+        break
+      case 'no_repeat':
+        rawFields.add('forbidden_repeats')
+        break
+      case 'benchmark_recall_gate':
+      case 'benchmark_recall_gaps':
+        rawFields.add('benchmark_recall_brief')
+        rawFields.add('benchmark_recall_gaps')
+        break
+      case 'benchmark_recall_source_paths':
+        rawFields.add('benchmark_recall_brief')
+        break
+      case 'chapter_title_unique':
+        fields.add('title')
+        break
+      case 'source_readiness_chapter_blueprint':
+        rawFields.add('chapter_blueprint')
+        rawFields.add('pre_draft_brief')
+        preDraftFields.add('state_tracking_contract')
+        break
+      case 'source_readiness_context_tracking':
+      case 'source_readiness_foreshadowing_tracking':
+      case 'source_readiness_timeline_tracking':
+      case 'source_readiness_character_state':
+        rawFields.add('pre_draft_brief')
+        preDraftFields.add('state_tracking_contract')
+        break
+    }
+  }
+  return { fields, rawFields, preDraftFields }
+}
+
+function assertRelevantMaterialMutation(request: MaterialRepairRequest, acceptance: PreparedMaterialRepair['acceptance']) {
+  const allowance = chapterMutationAllowance(request.obligations)
+  const patch = acceptance.chapter_patch || {}
+  for (const field of Object.keys(patch)) {
+    if (field === 'raw_payload') continue
+    if (!allowance.fields.has(field)) {
+      throw materialRepairError('MATERIAL_REPAIR_UNRELATED_MUTATION', `chapter_patch.${field} is unrelated to requested obligations`)
+    }
+  }
+  const raw = materialAcceptanceRawPayload(acceptance)
+  for (const field of Object.keys(raw)) {
+    if (!allowance.rawFields.has(field)) {
+      throw materialRepairError('MATERIAL_REPAIR_UNRELATED_MUTATION', `chapter_patch.raw_payload.${field} is unrelated to requested obligations`)
+    }
+  }
+  if (nonEmptyRecord(raw.pre_draft_brief)) {
+    for (const field of Object.keys(raw.pre_draft_brief)) {
+      if (!allowance.preDraftFields.has(field)) {
+        throw materialRepairError('MATERIAL_REPAIR_UNRELATED_MUTATION', `chapter_patch.raw_payload.pre_draft_brief.${field} is unrelated to requested obligations`)
+      }
+    }
+    const stateTracking = materialPreDraftStateTracking(acceptance)
+    for (const field of Object.keys(stateTracking)) {
+      if (!['source_readiness', 'sourceReadiness', 'source_requirements', 'sourceRequirements'].includes(field)) {
+        throw materialRepairError('MATERIAL_REPAIR_UNRELATED_MUTATION', `state_tracking_contract.${field} is unrelated to source readiness repair`)
+      }
+    }
+  }
+  if (request.targets.has('character_updates')) {
+    for (const update of acceptance.character_updates || []) {
+      for (const field of Object.keys(update.patch || {})) {
+        if (field !== 'current_state') {
+          throw materialRepairError('MATERIAL_REPAIR_UNRELATED_MUTATION', `character update ${field} is unrelated to character state repair`)
+        }
+      }
+    }
+  }
+}
+
+function assertMaterialObligationsSatisfied(request: MaterialRepairRequest, acceptance: PreparedMaterialRepair['acceptance']) {
+  for (const obligation of request.obligations) {
+    if (!obligationSatisfied(obligation, acceptance)) {
+      throw materialRepairError('MATERIAL_REPAIR_OBLIGATION_UNMET', `material repair did not satisfy: ${obligation.key}`)
+    }
+  }
+  assertRelevantMaterialMutation(request, acceptance)
+}
+
 export function prepareMcpMaterialRepairMutation(input: {
-  targets: Set<MaterialRepairTarget>
+  request: MaterialRepairRequest
   payload: unknown
   existing: ExistingMaterialIdentity
 }): PreparedMaterialRepair {
+  assertMaterialRepairRequest(input.request)
   if (!isPlainObject(input.payload)) {
     throw materialRepairError('MATERIAL_REPAIR_INVALID', 'material repair payload must be an object')
   }
@@ -935,11 +1289,11 @@ export function prepareMcpMaterialRepairMutation(input: {
   const allowedTopLevel = new Set<string>([...MATERIAL_REPAIR_MUTATION_FIELDS, 'repair_summary'])
   assertAllowedFields(input.payload, allowedTopLevel, 'material repair payload')
   for (const section of MATERIAL_REPAIR_MUTATION_FIELDS) {
-    if (hasOwn(input.payload, section) && !input.targets.has(section)) {
+    if (hasOwn(input.payload, section) && !input.request.targets.has(section)) {
       throw materialRepairError('MATERIAL_REPAIR_FORBIDDEN_FIELD', `material repair returned non-requested section: ${section}`)
     }
   }
-  if (input.targets.size === 0) {
+  if (input.request.targets.size === 0) {
     throw materialRepairError('MATERIAL_REPAIR_INCOMPLETE', 'material repair requested no mutation target')
   }
 
@@ -949,7 +1303,7 @@ export function prepareMcpMaterialRepairMutation(input: {
   const updatedCharacterNames = new Set<string>()
   const createdSettingKeys = new Set<string>()
 
-  if (input.targets.has('chapter_patch')) {
+  if (input.request.targets.has('chapter_patch')) {
     if (!hasOwn(input.payload, 'chapter_patch')) {
       throw materialRepairError('MATERIAL_REPAIR_INCOMPLETE', 'chapter_patch did not return a meaningful result')
     }
@@ -961,7 +1315,7 @@ export function prepareMcpMaterialRepairMutation(input: {
     applied.push({ type: 'chapter_patch' })
   }
 
-  if (input.targets.has('worldbuilding')) {
+  if (input.request.targets.has('worldbuilding')) {
     const creates = requiredCollection(input.payload, 'worldbuilding').map(normalizeWorldbuilding)
     if (creates.some(item => Object.keys(item).length === 0)) {
       throw materialRepairError('MATERIAL_REPAIR_INCOMPLETE', 'worldbuilding contains an empty result')
@@ -970,7 +1324,7 @@ export function prepareMcpMaterialRepairMutation(input: {
     applied.push({ type: 'worldbuilding_created', count: creates.length })
   }
 
-  if (input.targets.has('characters')) {
+  if (input.request.targets.has('characters')) {
     const creates = requiredCollection(input.payload, 'characters').map(normalizeCharacterCreate)
     for (const character of creates) {
       if (input.existing.characterNames.has(character.name) || createdCharacterNames.has(character.name)) {
@@ -982,7 +1336,7 @@ export function prepareMcpMaterialRepairMutation(input: {
     applied.push({ type: 'characters_created', count: creates.length })
   }
 
-  if (input.targets.has('character_updates')) {
+  if (input.request.targets.has('character_updates')) {
     const updates = requiredCollection(input.payload, 'character_updates').map(normalizeCharacterUpdate)
     for (const update of updates) {
       if (createdCharacterNames.has(update.name) || updatedCharacterNames.has(update.name)) {
@@ -997,7 +1351,7 @@ export function prepareMcpMaterialRepairMutation(input: {
     applied.push({ type: 'characters_updated', count: updates.length })
   }
 
-  if (input.targets.has('settings')) {
+  if (input.request.targets.has('settings')) {
     const creates = requiredCollection(input.payload, 'settings').map(normalizeSetting)
     for (const setting of creates) {
       const key = settingKey(setting.entity_type, setting.name)
@@ -1010,7 +1364,7 @@ export function prepareMcpMaterialRepairMutation(input: {
     applied.push({ type: 'settings_created', count: creates.length })
   }
 
-  if (input.targets.has('chapter_setting_usage')) {
+  if (input.request.targets.has('chapter_setting_usage')) {
     const availableSettingKeys = new Set([...input.existing.settingKeys, ...createdSettingKeys])
     const seenUsage = new Set<string>()
     const usages = requiredCollection(input.payload, 'chapter_setting_usage').map(item => {
@@ -1025,6 +1379,7 @@ export function prepareMcpMaterialRepairMutation(input: {
     applied.push({ type: 'chapter_setting_usage_replaced', count: usages.length })
   }
 
+  assertMaterialObligationsSatisfied(input.request, acceptance)
   const summaryValue = input.payload.repair_summary
   if (summaryValue !== undefined && typeof summaryValue !== 'string') {
     throw materialRepairError('MATERIAL_REPAIR_INVALID', 'repair_summary must be a string')
