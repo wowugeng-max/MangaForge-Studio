@@ -14,6 +14,7 @@ import { openDb, ensureSqliteSchema } from './db'
 import { nowIso } from './json'
 import { importLegacyNovelStoreIfNeeded } from './legacy-import'
 import { withNovelWorkspaceMutation } from './lock'
+import { materialRepairContextVersionFromDb } from './material-repair-context-version'
 import { normalizeProjectRecord, normalizeWorldbuildingRecord, normalizeCharacterRecord, normalizeChapterRecord, normalizeReviewRecord, normalizeSettingEntityRecord, normalizeChapterSettingUsageRecord } from './normalize'
 import { nextTableId } from './sql-rows'
 
@@ -44,6 +45,22 @@ export async function commitNovelChapterAcceptance(activeWorkspace: string, inpu
   const projectIndex = working.projectIndex
   const currentChapter = store.chapters[chapterIndex]
   const currentProject = store.projects[projectIndex]
+  const expectedMaterialContextVersion = typeof input.expected_material_repair_context_version === 'string'
+    ? input.expected_material_repair_context_version.trim()
+    : ''
+  if (expectedMaterialContextVersion) {
+    const currentMaterialContextVersion = materialRepairContextVersionFromDb(
+      db,
+      currentProject.id,
+      currentChapter.id,
+    )
+    if (currentMaterialContextVersion !== expectedMaterialContextVersion) {
+      throw Object.assign(new Error('材料上下文已变化，请基于最新材料重试'), {
+        code: 'MATERIAL_REPAIR_CONTEXT_CHANGED',
+        error_code: 'MATERIAL_REPAIR_CONTEXT_CHANGED',
+      })
+    }
+  }
   const expectedChapterFingerprint = typeof input.expected_chapter_generation_source_fingerprint === 'string'
     ? input.expected_chapter_generation_source_fingerprint.trim()
     : ''

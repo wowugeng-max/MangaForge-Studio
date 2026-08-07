@@ -132,6 +132,7 @@ export type NovelChapterAcceptanceInput = {
   chapter_patch: Partial<NovelChapterRecord>
   expected_prose_generation_source_fingerprint?: string
   expected_chapter_generation_source_fingerprint?: string
+  expected_material_repair_context_version?: string
   version_source?: NovelChapterVersionSource
   project_patch?: Partial<NovelProjectRecord>
   next_reference_config?: NovelReferenceConfig

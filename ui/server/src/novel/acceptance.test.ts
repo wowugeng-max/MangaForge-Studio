@@ -10,6 +10,7 @@ import {
   createNovelProject,
   createNovelReview,
   createNovelSettingEntity,
+  loadNovelMaterialRepairSnapshot,
   getNovelProject,
   listChapterVersions,
   listNovelChapterSettingUsage,
@@ -22,6 +23,7 @@ import {
   mutateNovelProjectGenerationSource,
   replaceNovelChapterSettingUsage,
   updateNovelChapter,
+  updateNovelCharacter,
   updateNovelProject,
 } from '../novel'
 import { setNovelMutationTestHook } from '../novel-test-support'
@@ -1004,5 +1006,101 @@ describe('commitNovelChapterAcceptance', () => {
     expect(settings.find(setting => setting.id === rule.id)?.state_json).toEqual({})
     expect(usage.find(record => record.entity_id === rule.id)?.actual_state_change).toEqual({ triggered: true })
     expect(usage.find(record => record.entity_id === item.id)?.actual_state_change).toEqual({})
+  })
+
+  test('rejects a stale material repair context before any multi-entity write', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '过期材料上下文' })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      ending_hook: '旧钩子',
+    })
+    const character = await createNovelCharacter(workspace, {
+      project_id: project.id,
+      name: '林砚',
+      current_state: { location: '灰塔底层' },
+    } as any)
+    const expected = (await loadNovelMaterialRepairSnapshot(workspace, project.id, chapter.id)).contextVersion
+
+    await updateNovelCharacter(workspace, character.id, {
+      current_state: { location: '已被其他请求改到钟楼顶层' },
+    })
+    const before = JSON.stringify({
+      acceptance: await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id),
+      worldbuilding: await listNovelWorldbuilding(workspace, project.id),
+    })
+
+    const error = await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { ending_hook: '灰塔开始倒转。' },
+      expected_material_repair_context_version: expected,
+      worldbuilding_creates: [{ world_summary: '不应入库的世界观' }],
+      character_creates: [{ name: '不应入库的角色' }],
+      setting_creates: [{ entity_type: 'rule', name: '不应入库的规则' }],
+    }).then(() => null, caught => caught)
+
+    expect(error).toMatchObject({
+      code: 'MATERIAL_REPAIR_CONTEXT_CHANGED',
+      error_code: 'MATERIAL_REPAIR_CONTEXT_CHANGED',
+    })
+    expect(JSON.stringify({
+      acceptance: await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id),
+      worldbuilding: await listNovelWorldbuilding(workspace, project.id),
+    })).toBe(before)
+  })
+
+  test('commits current-version material repair entities and usage atomically', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '当前材料上下文' })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      ending_hook: '旧钩子',
+    })
+    const snapshot = await loadNovelMaterialRepairSnapshot(workspace, project.id, chapter.id)
+    expect(snapshot.contextVersion).toMatch(/^sha256:[0-9a-f]{64}$/)
+    expect(snapshot.projectSettingUsage).toEqual([])
+    expect(snapshot.chapterSettingUsage).toEqual([])
+
+    await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { ending_hook: '灰塔开始倒转。' },
+      expected_material_repair_context_version: snapshot.contextVersion,
+      worldbuilding_creates: [{ world_summary: '灰塔每天吞掉一分钟。' }],
+      character_creates: [{ name: '林砚', current_state: { location: '灰塔底层' } }],
+      setting_creates: [{ id: -1, entity_type: 'rule', name: '缺失的一分钟' }],
+      chapter_setting_usage_replacement: [{ entity_id: -1, required: true }],
+    })
+
+    expect((await listNovelChapters(workspace, project.id))[0]?.ending_hook).toBe('灰塔开始倒转。')
+    expect((await listNovelWorldbuilding(workspace, project.id)).map(item => item.world_summary)).toEqual(['灰塔每天吞掉一分钟。'])
+    expect((await listNovelCharacters(workspace, project.id)).map(item => item.name)).toEqual(['林砚'])
+    const [setting] = await listNovelSettingEntities(workspace, project.id)
+    expect(setting.name).toBe('缺失的一分钟')
+    expect(await listNovelChapterSettingUsage(workspace, project.id, chapter.id)).toEqual([
+      expect.objectContaining({ entity_id: setting.id, required: true }),
+    ])
+  })
+
+  test('loads only a chapter owned by the requested material repair project', async () => {
+    const workspace = await tempWorkspace()
+    const firstProject = await createNovelProject(workspace, { title: '第一项目' })
+    const secondProject = await createNovelProject(workspace, { title: '第二项目' })
+    const foreignChapter = await createNovelChapter(workspace, {
+      project_id: secondProject.id,
+      chapter_no: 1,
+      title: '外部章节',
+    })
+
+    const error = await loadNovelMaterialRepairSnapshot(
+      workspace,
+      firstProject.id,
+      foreignChapter.id,
+    ).then(() => null, caught => caught)
+
+    expect(error).toMatchObject({ code: 'MATERIAL_REPAIR_SCOPE_NOT_FOUND' })
   })
 })
