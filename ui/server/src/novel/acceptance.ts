@@ -18,6 +18,23 @@ import { materialRepairContextVersionFromDb } from './material-repair-context-ve
 import { normalizeProjectRecord, normalizeWorldbuildingRecord, normalizeCharacterRecord, normalizeChapterRecord, normalizeReviewRecord, normalizeSettingEntityRecord, normalizeChapterSettingUsageRecord } from './normalize'
 import { nextTableId } from './sql-rows'
 
+const MATERIAL_REPAIR_CONTEXT_VERSION = /^sha256:[0-9a-f]{64}$/
+
+function expectedMaterialRepairContextVersion(input: NovelChapterAcceptanceInput) {
+  if (!Object.prototype.hasOwnProperty.call(input, 'expected_material_repair_context_version')
+    || input.expected_material_repair_context_version === undefined) {
+    return ''
+  }
+  if (typeof input.expected_material_repair_context_version !== 'string'
+    || !MATERIAL_REPAIR_CONTEXT_VERSION.test(input.expected_material_repair_context_version)) {
+    throw Object.assign(new Error('材料上下文版本格式无效'), {
+      code: 'MATERIAL_REPAIR_CONTEXT_VERSION_INVALID',
+      error_code: 'MATERIAL_REPAIR_CONTEXT_VERSION_INVALID',
+    })
+  }
+  return input.expected_material_repair_context_version
+}
+
 export function mergeAcceptanceReferenceConfig(
   current: NovelReferenceConfig = {},
   prepared?: NovelReferenceConfig,
@@ -45,22 +62,6 @@ export async function commitNovelChapterAcceptance(activeWorkspace: string, inpu
   const projectIndex = working.projectIndex
   const currentChapter = store.chapters[chapterIndex]
   const currentProject = store.projects[projectIndex]
-  const expectedMaterialContextVersion = typeof input.expected_material_repair_context_version === 'string'
-    ? input.expected_material_repair_context_version.trim()
-    : ''
-  if (expectedMaterialContextVersion) {
-    const currentMaterialContextVersion = materialRepairContextVersionFromDb(
-      db,
-      currentProject.id,
-      currentChapter.id,
-    )
-    if (currentMaterialContextVersion !== expectedMaterialContextVersion) {
-      throw Object.assign(new Error('材料上下文已变化，请基于最新材料重试'), {
-        code: 'MATERIAL_REPAIR_CONTEXT_CHANGED',
-        error_code: 'MATERIAL_REPAIR_CONTEXT_CHANGED',
-      })
-    }
-  }
   const expectedChapterFingerprint = typeof input.expected_chapter_generation_source_fingerprint === 'string'
     ? input.expected_chapter_generation_source_fingerprint.trim()
     : ''
@@ -77,6 +78,20 @@ export async function commitNovelChapterAcceptance(activeWorkspace: string, inpu
         '项目章节生成来源已在任务期间变更；旧任务结果不会入库',
         { reason: 'source_changed' },
       )
+    }
+  }
+  const expectedMaterialContextVersion = expectedMaterialRepairContextVersion(input)
+  if (expectedMaterialContextVersion) {
+    const currentMaterialContextVersion = materialRepairContextVersionFromDb(
+      db,
+      currentProject.id,
+      currentChapter.id,
+    )
+    if (currentMaterialContextVersion !== expectedMaterialContextVersion) {
+      throw Object.assign(new Error('材料上下文已变化，请基于最新材料重试'), {
+        code: 'MATERIAL_REPAIR_CONTEXT_CHANGED',
+        error_code: 'MATERIAL_REPAIR_CONTEXT_CHANGED',
+      })
     }
   }
   const expectedFingerprint = typeof input.expected_prose_generation_source_fingerprint === 'string'

@@ -25,6 +25,19 @@ type MaterialRepairRows = {
   usageRows: any[]
 }
 
+type MaterialRepairMappedRows = {
+  project: ReturnType<typeof projectFromRow>
+  chapter: ReturnType<typeof chapterFromRow>
+  chapters: ReturnType<typeof chapterFromRow>[]
+  worldbuilding: ReturnType<typeof worldbuildingFromRow>[]
+  characters: ReturnType<typeof characterFromRow>[]
+  outlines: ReturnType<typeof outlineFromRow>[]
+  reviews: ReturnType<typeof reviewFromRow>[]
+  settings: ReturnType<typeof settingEntityFromRow>[]
+  projectSettingUsage: ReturnType<typeof chapterSettingUsageFromRow>[]
+  chapterSettingUsage: ReturnType<typeof chapterSettingUsageFromRow>[]
+}
+
 function materialRepairScopeError() {
   return Object.assign(new Error('material repair scope not found'), {
     code: 'MATERIAL_REPAIR_SCOPE_NOT_FOUND',
@@ -32,8 +45,18 @@ function materialRepairScopeError() {
   })
 }
 
+function canonicalJsonValue(value: any): any {
+  if (Array.isArray(value)) return value.map(canonicalJsonValue)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map(key => [key, canonicalJsonValue(value[key])]),
+  )
+}
+
 function sha256(value: unknown) {
-  return `sha256:${createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex')}`
+  return `sha256:${createHash('sha256').update(JSON.stringify(canonicalJsonValue(value)), 'utf8').digest('hex')}`
 }
 
 function assertScopeId(value: number) {
@@ -55,7 +78,14 @@ function materialRepairRowsFromDb(db: Database, projectId: number, chapterId: nu
     outlineRows: ordered('outlines'),
     reviewRows: ordered('reviews'),
     settingRows: ordered('setting_entities'),
-    usageRows: ordered('chapter_setting_usage'),
+    usageRows: db.query(`
+      SELECT DISTINCT usage.*
+      FROM chapter_setting_usage AS usage
+      LEFT JOIN chapters AS chapter ON chapter.id = usage.chapter_id
+      LEFT JOIN setting_entities AS setting ON setting.id = usage.entity_id
+      WHERE usage.project_id = ? OR chapter.project_id = ? OR setting.project_id = ?
+      ORDER BY usage.id ASC
+    `).all(projectId, projectId, projectId) as any[],
   }
   const chapterIds = new Set(rows.chapterRows.map(row => Number(row.id)))
   const settingIds = new Set(rows.settingRows.map(row => Number(row.id)))
@@ -78,8 +108,59 @@ function materialRepairRowsFromDb(db: Database, projectId: number, chapterId: nu
   return rows
 }
 
+function mappedMaterialRepairRows(rows: MaterialRepairRows): MaterialRepairMappedRows {
+  const project = projectFromRow(rows.projectRow)
+  const chapters = rows.chapterRows.map(chapterFromRow)
+  const projectSettingUsage = rows.usageRows.map(chapterSettingUsageFromRow)
+  return {
+    project,
+    chapter: chapters.find(chapter => chapter.id === rows.targetChapterId)!,
+    chapters,
+    worldbuilding: rows.worldRows.map(worldbuildingFromRow),
+    characters: rows.characterRows.map(characterFromRow),
+    outlines: rows.outlineRows.map(outlineFromRow),
+    reviews: rows.reviewRows.map(reviewFromRow),
+    settings: rows.settingRows.map(settingEntityFromRow),
+    projectSettingUsage,
+    chapterSettingUsage: projectSettingUsage.filter(usage => usage.chapter_id === rows.targetChapterId),
+  }
+}
+
+function projectMaterialProjection(project: ReturnType<typeof projectFromRow>) {
+  const {
+    chapter_generation_source: _chapterGenerationSource,
+    prose_generation_source: _proseGenerationSource,
+    ...materialReferenceConfig
+  } = project.reference_config || {}
+  const {
+    created_at: _createdAt,
+    updated_at: _updatedAt,
+    reference_config: _referenceConfig,
+    ...materialProject
+  } = project
+  return {
+    ...materialProject,
+    reference_config: materialReferenceConfig,
+  }
+}
+
+function materialRepairContextVersion(rows: MaterialRepairRows, mapped: MaterialRepairMappedRows) {
+  return sha256({
+    targetChapterId: rows.targetChapterId,
+    project: projectMaterialProjection(mapped.project),
+    chapters: mapped.chapters,
+    worldbuilding: mapped.worldbuilding,
+    characters: mapped.characters,
+    outlines: mapped.outlines,
+    reviews: mapped.reviews,
+    settings: mapped.settings,
+    projectSettingUsage: mapped.projectSettingUsage,
+  })
+}
+
 export function materialRepairContextVersionFromDb(db: Database, projectId: number, chapterId: number) {
-  return sha256(materialRepairRowsFromDb(db, projectId, chapterId))
+  const rows = materialRepairRowsFromDb(db, projectId, chapterId)
+  return materialRepairContextVersion(rows, mappedMaterialRepairRows(rows))
 }
 
 export async function loadNovelMaterialRepairSnapshot(
@@ -94,20 +175,10 @@ export async function loadNovelMaterialRepairSnapshot(
     ensureSqliteSchema(db)
     db.exec('BEGIN')
     const rows = materialRepairRowsFromDb(db, projectId, chapterId)
-    const chapters = rows.chapterRows.map(chapterFromRow)
-    const projectSettingUsage = rows.usageRows.map(chapterSettingUsageFromRow)
+    const mapped = mappedMaterialRepairRows(rows)
     const snapshot = {
-      project: projectFromRow(rows.projectRow),
-      chapter: chapters.find(chapter => chapter.id === chapterId)!,
-      chapters,
-      worldbuilding: rows.worldRows.map(worldbuildingFromRow),
-      characters: rows.characterRows.map(characterFromRow),
-      outlines: rows.outlineRows.map(outlineFromRow),
-      reviews: rows.reviewRows.map(reviewFromRow),
-      settings: rows.settingRows.map(settingEntityFromRow),
-      projectSettingUsage,
-      chapterSettingUsage: projectSettingUsage.filter(usage => usage.chapter_id === chapterId),
-      contextVersion: sha256(rows),
+      ...mapped,
+      contextVersion: materialRepairContextVersion(rows, mapped),
     }
     db.exec('COMMIT')
     committed = true

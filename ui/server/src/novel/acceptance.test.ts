@@ -7,6 +7,7 @@ import {
   commitNovelChapterAcceptance,
   createNovelCharacter,
   createNovelChapter,
+  createNovelOutline,
   createNovelProject,
   createNovelReview,
   createNovelSettingEntity,
@@ -1035,10 +1036,16 @@ describe('commitNovelChapterAcceptance', () => {
     const error = await commitNovelChapterAcceptance(workspace, {
       chapter_id: chapter.id,
       chapter_patch: { ending_hook: '灰塔开始倒转。' },
+      expected_chapter_generation_source_fingerprint: chapterGenerationSourceFingerprint({
+        version: 'chapter_generation_source_v1',
+        active: 'model',
+        model: {},
+      }),
       expected_material_repair_context_version: expected,
       worldbuilding_creates: [{ world_summary: '不应入库的世界观' }],
       character_creates: [{ name: '不应入库的角色' }],
-      setting_creates: [{ entity_type: 'rule', name: '不应入库的规则' }],
+      setting_creates: [{ id: -1, entity_type: 'rule', name: '不应入库的规则' }],
+      chapter_setting_usage_replacement: [{ entity_id: -1, required: true }],
     }).then(() => null, caught => caught)
 
     expect(error).toMatchObject({
@@ -1103,4 +1110,228 @@ describe('commitNovelChapterAcceptance', () => {
 
     expect(error).toMatchObject({ code: 'MATERIAL_REPAIR_SCOPE_NOT_FOUND' })
   })
+
+  test('rejects every explicit invalid material context version before any write', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '无效材料版本' })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      ending_hook: '旧钩子',
+    })
+    const before = await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)
+    const invalidVersions = [
+      null,
+      42,
+      {},
+      [],
+      '',
+      'not-a-context-version',
+      `sha256:${'A'.repeat(64)}`,
+      `sha256:${'a'.repeat(63)}`,
+    ]
+
+    for (const [index, value] of invalidVersions.entries()) {
+      const error = await commitNovelChapterAcceptance(workspace, {
+        chapter_id: chapter.id,
+        chapter_patch: { ending_hook: `不得写入-${index}` },
+        expected_material_repair_context_version: value,
+        character_creates: [{ name: `不得写入-${index}` }],
+      } as any).then(() => null, caught => caught)
+
+      expect(error, `invalid context version at index ${index}`).toMatchObject({
+        code: 'MATERIAL_REPAIR_CONTEXT_VERSION_INVALID',
+        error_code: 'MATERIAL_REPAIR_CONTEXT_VERSION_INVALID',
+      })
+      expect(await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)).toBe(before)
+    }
+
+    const accepted = await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { ending_hook: '显式 undefined 兼容' },
+      expected_material_repair_context_version: undefined,
+    })
+    expect(accepted.chapter.ending_hook).toBe('显式 undefined 兼容')
+  })
+
+  test('keeps source authority out of material context while preserving the full project snapshot', async () => {
+    const workspace = await tempWorkspace()
+    const originalSource = {
+      version: 'chapter_generation_source_v1' as const,
+      active: 'model' as const,
+      model: { model_id: 301 },
+    }
+    const project = await createNovelProject(workspace, {
+      title: '来源与材料分层',
+      reference_config: {
+        chapter_generation_source: originalSource,
+        prose_generation_source: { version: 'prose_generation_source_v1', type: 'model' },
+        writing_bible: { core_promise: '灰塔每天吞掉一分钟' },
+        unknown_material_extension: { z: 1, nested: { b: 2, a: 1 } },
+      },
+    })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      ending_hook: '旧钩子',
+    })
+    const captured = await loadNovelMaterialRepairSnapshot(workspace, project.id, chapter.id)
+    const rotatedSource = { ...originalSource, model: { model_id: 302 } }
+    await new Promise(resolve => setTimeout(resolve, 2))
+    await mutateNovelProjectGenerationSource(workspace, {
+      projectId: project.id,
+      operation: 'test-material-authority-layering',
+      chapterGenerationSource: rotatedSource,
+      proseGenerationSource: { version: 'prose_generation_source_v1', type: 'model' },
+      result: true,
+    })
+    const current = await loadNovelMaterialRepairSnapshot(workspace, project.id, chapter.id)
+
+    expect(current.contextVersion).toBe(captured.contextVersion)
+    expect(current.project.reference_config?.chapter_generation_source).toEqual(rotatedSource)
+    const before = await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)
+    const error = await commitNovelChapterAcceptance(workspace, {
+      chapter_id: chapter.id,
+      chapter_patch: { ending_hook: '不得写入' },
+      expected_chapter_generation_source_fingerprint: chapterGenerationSourceFingerprint(originalSource),
+      expected_material_repair_context_version: captured.contextVersion,
+      character_creates: [{ name: '不得写入' }],
+    }).then(() => null, caught => caught)
+
+    expect(error).toMatchObject({ code: 'GENERATION_SOURCE_CHANGED' })
+    expect(await snapshotNovelAcceptanceStore(workspace, project.id, chapter.id)).toBe(before)
+  })
+
+  test('canonicalizes project material keys while retaining unknown reference extensions', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, {
+      title: '稳定项目材料投影',
+      reference_config: {
+        writing_bible: { promise: '灰塔', rules: { z: 3, a: 1 } },
+        unknown_material_extension: { z: 1, nested: { b: 2, a: 1 } },
+      },
+    })
+    const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章' })
+    const first = await loadNovelMaterialRepairSnapshot(workspace, project.id, chapter.id)
+    await new Promise(resolve => setTimeout(resolve, 2))
+    await updateNovelProject(workspace, project.id, {
+      reference_config: {
+        unknown_material_extension: { nested: { a: 1, b: 2 }, z: 1 },
+        writing_bible: { rules: { a: 1, z: 3 }, promise: '灰塔' },
+      },
+    })
+    const reordered = await loadNovelMaterialRepairSnapshot(workspace, project.id, chapter.id)
+    expect(reordered.contextVersion).toBe(first.contextVersion)
+
+    await updateNovelProject(workspace, project.id, {
+      reference_config: {
+        unknown_material_extension: { nested: { a: 1, b: 2 }, z: 2 },
+        writing_bible: { rules: { a: 1, z: 3 }, promise: '灰塔' },
+      },
+    })
+    expect((await loadNovelMaterialRepairSnapshot(workspace, project.id, chapter.id)).contextVersion)
+      .not.toBe(first.contextVersion)
+  })
+
+  test('rejects dangling and cross-project material ownership references', async () => {
+    const scenarios: Array<{
+      name: string
+      prepare: (workspace: string) => Promise<{ projectId: number; chapterId: number; mutate: (db: Database) => void }>
+    }> = [
+      {
+        name: 'dangling chapter outline',
+        prepare: async workspace => {
+          const project = await createNovelProject(workspace, { title: '悬空章节大纲' })
+          const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章' })
+          return { projectId: project.id, chapterId: chapter.id, mutate: db => { db.query('UPDATE chapters SET outline_id = ? WHERE id = ?').run(999_999, chapter.id) } }
+        },
+      },
+      {
+        name: 'cross-project chapter outline',
+        prepare: async workspace => {
+          const project = await createNovelProject(workspace, { title: '章节项目' })
+          const other = await createNovelProject(workspace, { title: '大纲项目' })
+          const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章' })
+          const outline = await createNovelOutline(workspace, { project_id: other.id, title: '外部大纲' })
+          return { projectId: project.id, chapterId: chapter.id, mutate: db => { db.query('UPDATE chapters SET outline_id = ? WHERE id = ?').run(outline.id, chapter.id) } }
+        },
+      },
+      {
+        name: 'dangling outline parent',
+        prepare: async workspace => {
+          const project = await createNovelProject(workspace, { title: '悬空父大纲' })
+          const outline = await createNovelOutline(workspace, { project_id: project.id, title: '本地大纲' })
+          const chapter = await createNovelChapter(workspace, { project_id: project.id, outline_id: outline.id, chapter_no: 1, title: '第一章' })
+          return { projectId: project.id, chapterId: chapter.id, mutate: db => { db.query('UPDATE outlines SET parent_id = ? WHERE id = ?').run(999_999, outline.id) } }
+        },
+      },
+      {
+        name: 'cross-project outline parent',
+        prepare: async workspace => {
+          const project = await createNovelProject(workspace, { title: '子大纲项目' })
+          const other = await createNovelProject(workspace, { title: '父大纲项目' })
+          const outline = await createNovelOutline(workspace, { project_id: project.id, title: '子大纲' })
+          const parent = await createNovelOutline(workspace, { project_id: other.id, title: '外部父大纲' })
+          const chapter = await createNovelChapter(workspace, { project_id: project.id, outline_id: outline.id, chapter_no: 1, title: '第一章' })
+          return { projectId: project.id, chapterId: chapter.id, mutate: db => { db.query('UPDATE outlines SET parent_id = ? WHERE id = ?').run(parent.id, outline.id) } }
+        },
+      },
+      {
+        name: 'usage project mismatch',
+        prepare: async workspace => {
+          const project = await createNovelProject(workspace, { title: '调用资源项目' })
+          const other = await createNovelProject(workspace, { title: '错误调用项目' })
+          const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章' })
+          const setting = await createNovelSettingEntity(workspace, { project_id: project.id, entity_type: 'rule', name: '规则' })
+          return { projectId: project.id, chapterId: chapter.id, mutate: db => { db.query('INSERT INTO chapter_setting_usage (project_id, chapter_id, entity_id) VALUES (?, ?, ?)').run(other.id, chapter.id, setting.id) } }
+        },
+      },
+      {
+        name: 'usage chapter mismatch',
+        prepare: async workspace => {
+          const project = await createNovelProject(workspace, { title: '调用章节项目' })
+          const other = await createNovelProject(workspace, { title: '外部章节项目' })
+          const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章' })
+          const otherChapter = await createNovelChapter(workspace, { project_id: other.id, chapter_no: 1, title: '外部章节' })
+          const setting = await createNovelSettingEntity(workspace, { project_id: project.id, entity_type: 'rule', name: '规则' })
+          return { projectId: project.id, chapterId: chapter.id, mutate: db => { db.query('INSERT INTO chapter_setting_usage (project_id, chapter_id, entity_id) VALUES (?, ?, ?)').run(project.id, otherChapter.id, setting.id) } }
+        },
+      },
+      {
+        name: 'usage entity mismatch',
+        prepare: async workspace => {
+          const project = await createNovelProject(workspace, { title: '调用设定项目' })
+          const other = await createNovelProject(workspace, { title: '外部设定项目' })
+          const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章' })
+          const setting = await createNovelSettingEntity(workspace, { project_id: other.id, entity_type: 'rule', name: '外部规则' })
+          return { projectId: project.id, chapterId: chapter.id, mutate: db => { db.query('INSERT INTO chapter_setting_usage (project_id, chapter_id, entity_id) VALUES (?, ?, ?)').run(project.id, chapter.id, setting.id) } }
+        },
+      },
+    ]
+    const results: Array<{ name: string; code?: string }> = []
+    for (const scenario of scenarios) {
+      const workspace = await tempWorkspace()
+      const fixture = await scenario.prepare(workspace)
+      const db = new Database(join(workspace, 'novel.sqlite'))
+      try {
+        db.exec('PRAGMA foreign_keys = OFF')
+        fixture.mutate(db)
+      } finally {
+        db.close()
+      }
+      const error = await loadNovelMaterialRepairSnapshot(
+        workspace,
+        fixture.projectId,
+        fixture.chapterId,
+      ).then(() => null, caught => caught)
+      results.push({ name: scenario.name, code: error?.code })
+    }
+
+    expect(results).toEqual(scenarios.map(scenario => ({
+      name: scenario.name,
+      code: 'MATERIAL_REPAIR_SCOPE_NOT_FOUND',
+    })))
+  }, 15_000)
 })
