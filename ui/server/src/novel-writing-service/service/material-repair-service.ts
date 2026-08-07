@@ -355,8 +355,11 @@ export function createMaterialRepairService(deps: MaterialRepairServiceDependenc
           ok: true,
           skipped: true,
           source: 'mcp' as const,
+          source_fingerprint: loadedAuthorityFingerprint,
           applied: [],
           summary: '',
+          chapter_setting_usage: sanitizeMaterialRepairResponseValue(loaded.chapterSettingUsage, ['chapter_setting_usage']),
+          project_setting_usage: sanitizeMaterialRepairResponseValue(loaded.projectSettingUsage, ['project_setting_usage']),
           context_package: sanitizedContext,
           preflight: sanitizedContext?.preflight || null,
         }
@@ -367,6 +370,7 @@ export function createMaterialRepairService(deps: MaterialRepairServiceDependenc
         project: loaded.project,
         chapter: loaded.chapter,
         contextPackage,
+        expectedAuthorityFingerprint: loadedAuthorityFingerprint,
         options: { material_repair: true },
         signal: input.signal,
       })

@@ -6,6 +6,7 @@ import {
   createNovelCharacter,
   createNovelProject,
   createNovelWorldbuilding,
+  getNovelProject,
 } from '../novel'
 
 function countProseChars(value: string) {
@@ -159,6 +160,9 @@ type ProsePipelineHarnessOptions = {
   requireStagedContextCandidates?: boolean
   referenceService?: any
   humanizeResult?: any | ((sourceText: string) => any)
+  chapterGenerationSource?: any
+  omitInitialWorldbuilding?: boolean
+  readProjectFromStore?: boolean
 }
 
 export async function createProsePipelineHarness(
@@ -172,6 +176,9 @@ export async function createProsePipelineHarness(
     synopsis: '江澈以超人之力主动打穿怪谈规则。',
     reference_config: {
       chapter_word_target: options.chapterWordTarget || { mode: 'custom', target: 1000 },
+      ...(options.chapterGenerationSource ? {
+        chapter_generation_source: options.chapterGenerationSource,
+      } : {}),
       quality_gate: {
         enabled: options.qualityGateEnabled !== false,
         min_score: 78,
@@ -181,11 +188,13 @@ export async function createProsePipelineHarness(
       },
     },
   })
-  await createNovelWorldbuilding(workspace, {
-    project_id: project.id,
-    world_summary: '追捕队以怪谈通讯频道同步封锁，江澈的行动会直接改变包围结构。',
-    rules: ['频道失联时，追捕队会按最后一道命令继续收紧。'],
-  })
+  if (!options.omitInitialWorldbuilding) {
+    await createNovelWorldbuilding(workspace, {
+      project_id: project.id,
+      world_summary: '追捕队以怪谈通讯频道同步封锁，江澈的行动会直接改变包围结构。',
+      rules: ['频道失联时，追捕队会按最后一道命令继续收紧。'],
+    })
+  }
   await createNovelCharacter(workspace, {
     project_id: project.id,
     name: '江澈',
@@ -239,6 +248,7 @@ export async function createProsePipelineHarness(
   const memoryTexts: string[] = []
   const commitOrder: string[] = []
   const draftOptions: any[] = []
+  const draftContexts: any[] = []
   let storeCalls = 0
   let storyStateCalls = 0
   let qualityReviewCalls = 0
@@ -380,7 +390,9 @@ export async function createProsePipelineHarness(
   }
 
   const service = createWritingService({
-    getProject: async () => project,
+    getProject: async (_workspace: string, projectId: number) => options.readProjectFromStore
+      ? getNovelProject(workspace, projectId)
+      : project,
     production: {
       buildAgentConfigSnapshot: () => ({ model_id: 217 }),
       getApprovalPolicy: () => ({}),
@@ -411,6 +423,7 @@ export async function createProsePipelineHarness(
       },
       generateChapterProse: async (...args: any[]) => {
         modelCalls.draft += 1
+        draftContexts.push(args[2])
         draftOptions.push(args[3])
         return options.draftResult !== undefined
           ? options.draftResult
@@ -469,6 +482,7 @@ export async function createProsePipelineHarness(
     memoryTexts,
     commitOrder,
     draftOptions,
+    draftContexts,
     contextInputs,
     get storeCalls() { return storeCalls },
     get storyStateCalls() { return storyStateCalls },

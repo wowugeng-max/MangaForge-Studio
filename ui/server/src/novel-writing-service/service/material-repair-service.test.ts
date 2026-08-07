@@ -336,7 +336,15 @@ describe('one-session MCP material repair orchestration', () => {
 
     const result = await harness.service.repairChapterMaterials(request(harness))
 
-    expect(result).toMatchObject({ ok: true, skipped: true, source: 'mcp', applied: [] })
+    expect(result).toMatchObject({
+      ok: true,
+      skipped: true,
+      source: 'mcp',
+      source_fingerprint: AUTHORITY_FINGERPRINT,
+      applied: [],
+      chapter_setting_usage: [],
+      project_setting_usage: [],
+    })
     expect(harness.beginCalls).toEqual([])
     expect(harness.stageCalls).toEqual([])
     expect(harness.commitCalls).toEqual([])
@@ -451,6 +459,7 @@ describe('one-session MCP material repair orchestration', () => {
 
     const begin = harness.beginCalls[0]
     expect(begin).not.toHaveProperty('requestedModelId')
+    expect(begin.expectedAuthorityFingerprint).toBe(AUTHORITY_FINGERPRINT)
     expect(begin.options || {}).not.toHaveProperty('generation_source_override')
     expect(harness.stageCalls[0]?.runtimeOptions || {}).not.toHaveProperty('modelId')
     expect(harness.stageCalls[0]?.runtimeOptions || {}).not.toHaveProperty('generation_source_override')

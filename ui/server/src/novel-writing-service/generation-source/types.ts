@@ -129,6 +129,7 @@ export interface GenerationSource {
 
 export type BeginChapterTaskInput = {
   taskId?: string
+  expectedAuthorityFingerprint?: string
   activeWorkspace: string
   project: any
   chapter: any

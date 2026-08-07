@@ -774,6 +774,131 @@ describe('GenerationSource resolver', () => {
     expect(chapterSourceLeases.isActive(workspace, project.id)).toBe(false)
   })
 
+  test('fences model to MCP authority changes before constructing either execution', async () => {
+    const mcpProject = {
+      ...project,
+      reference_config: {
+        chapter_generation_source: {
+          version: 'chapter_generation_source_v1' as const,
+          active: 'mcp' as const,
+          model: { model_id: 217 },
+          mcp: {
+            server_id: 'generic-server',
+            key_id: 7,
+            adapter_id: 'generic-adapter',
+            agent_id: 'generic-agent',
+            model: '',
+          },
+        },
+      },
+    }
+    const chapterSourceLeases = new ChapterSourceLeaseRegistry()
+    let modelCreations = 0
+    let mcpBegins = 0
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases,
+      readProject: async () => mcpProject,
+      createModelExecution: () => {
+        modelCreations += 1
+        throw new Error('model execution must not be constructed')
+      },
+      mcpSource: {
+        beginResolvedTask: async () => {
+          mcpBegins += 1
+          throw new Error('MCP execution must not be constructed')
+        },
+      },
+    })
+
+    await expect(resolver.beginTask(beginInput({
+      expectedAuthorityFingerprint: chapterGenerationSourceFingerprint(
+        project.reference_config.chapter_generation_source as any,
+      ),
+    } as any))).rejects.toMatchObject({ code: 'GENERATION_SOURCE_CHANGED' })
+
+    expect({ modelCreations, mcpBegins }).toEqual({ modelCreations: 0, mcpBegins: 0 })
+    expect(chapterSourceLeases.isActive(workspace, project.id)).toBe(false)
+  })
+
+  test('fences MCP to model authority changes before constructing either execution', async () => {
+    const mcpProject = {
+      ...project,
+      reference_config: {
+        chapter_generation_source: {
+          version: 'chapter_generation_source_v1' as const,
+          active: 'mcp' as const,
+          model: { model_id: 217 },
+          mcp: {
+            server_id: 'generic-server',
+            key_id: 7,
+            adapter_id: 'generic-adapter',
+            agent_id: 'generic-agent',
+            model: '',
+          },
+        },
+      },
+    }
+    const chapterSourceLeases = new ChapterSourceLeaseRegistry()
+    let modelCreations = 0
+    let mcpBegins = 0
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases,
+      readProject: async () => project,
+      createModelExecution: () => {
+        modelCreations += 1
+        throw new Error('model execution must not be constructed')
+      },
+      mcpSource: {
+        beginResolvedTask: async () => {
+          mcpBegins += 1
+          throw new Error('MCP execution must not be constructed')
+        },
+      },
+    })
+
+    await expect(resolver.beginTask(beginInput({
+      project: mcpProject,
+      expectedAuthorityFingerprint: chapterGenerationSourceFingerprint(
+        mcpProject.reference_config.chapter_generation_source as any,
+      ),
+    } as any))).rejects.toMatchObject({ code: 'GENERATION_SOURCE_CHANGED' })
+
+    expect({ modelCreations, mcpBegins }).toEqual({ modelCreations: 0, mcpBegins: 0 })
+    expect(chapterSourceLeases.isActive(workspace, project.id)).toBe(false)
+  })
+
+  test('treats a malformed current authority as changed when an expected fingerprint is supplied', async () => {
+    const malformedProject = {
+      ...project,
+      reference_config: {
+        chapter_generation_source: {
+          version: 'chapter_generation_source_v1',
+          active: 'unknown',
+          model: { model_id: 217 },
+        },
+      },
+    }
+    const chapterSourceLeases = new ChapterSourceLeaseRegistry()
+    let constructions = 0
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases,
+      readProject: async () => malformedProject,
+      createModelExecution: () => {
+        constructions += 1
+        throw new Error('execution must not be constructed')
+      },
+    })
+
+    await expect(resolver.beginTask(beginInput({
+      expectedAuthorityFingerprint: chapterGenerationSourceFingerprint(
+        project.reference_config.chapter_generation_source as any,
+      ),
+    }))).rejects.toMatchObject({ code: 'GENERATION_SOURCE_CHANGED' })
+
+    expect(constructions).toBe(0)
+    expect(chapterSourceLeases.isActive(workspace, project.id)).toBe(false)
+  })
+
   test('fences a changed active fingerprint and releases the lease when construction fails', async () => {
     const chapterSourceLeases = new ChapterSourceLeaseRegistry()
     let reads = 0

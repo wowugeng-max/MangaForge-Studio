@@ -266,11 +266,22 @@ function createTaskResolver(input: GenerationSourceResolverInput): TaskGeneratio
             beginInput.activeWorkspace,
             projectId,
           )
-          const authoritySourceState = freezeSourceState(resolveChapterGenerationSource(currentProject))
+          let authoritySourceState: ChapterGenerationSourceState
+          try {
+            authoritySourceState = freezeSourceState(resolveChapterGenerationSource(currentProject))
+          } catch (error) {
+            if (beginInput.expectedAuthorityFingerprint !== undefined) throw activeSourceChanged()
+            throw error
+          }
+          const authorityFingerprint = chapterGenerationSourceFingerprint(authoritySourceState)
+          if (beginInput.expectedAuthorityFingerprint !== undefined
+            && beginInput.expectedAuthorityFingerprint !== authorityFingerprint) {
+            throw activeSourceChanged()
+          }
           return {
             currentProject,
             authoritySourceState,
-            authorityFingerprint: chapterGenerationSourceFingerprint(authoritySourceState),
+            authorityFingerprint,
           }
         })
         const { currentProject, authoritySourceState, authorityFingerprint } = snapshot

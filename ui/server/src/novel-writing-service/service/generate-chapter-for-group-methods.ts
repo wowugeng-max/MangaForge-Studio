@@ -50,6 +50,10 @@ import {
   resolveStrictPreflightReadiness,
 } from '../../novel-writing/prose-generation-contract'
 import {
+  chapterGenerationSourceFingerprint,
+  resolveChapterGenerationSource,
+} from '../generation-source/source-config'
+import {
   buildProseMetaSyncReport,
 } from '../../novel-writing/prose-meta'
 import {
@@ -356,6 +360,9 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   throwIfAborted(options)
   const project = await getProject(activeWorkspace, projectId)
   if (!project) throw new Error('project not found')
+  const expectedAuthorityFingerprint = chapterGenerationSourceFingerprint(
+    resolveChapterGenerationSource(project),
+  )
   const configSnapshot = buildAgentConfigSnapshot(project, preferredModelId)
   const approvalPolicy = options.approval_policy || getApprovalPolicy(project)
   const approvals = options.approvals || {}
@@ -387,6 +394,8 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     activeWorkspace,
     projectId,
     project,
+    expectedAuthorityFingerprint,
+    getProject,
     chapter,
     chapters,
     worldbuilding,
@@ -419,9 +428,11 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   }
   chapter = contextSceneResult.chapter
   chapters = contextSceneResult.chapters
-  worldbuilding = contextSceneResult.worldbuilding
-  characters = contextSceneResult.characters
-  settings = contextSceneResult.settings
+  if (contextSceneResult.propagatePersistedMaterials === true) {
+    worldbuilding = contextSceneResult.worldbuilding
+    characters = contextSceneResult.characters
+    settings = contextSceneResult.settings
+  }
   chapterSettingUsage = contextSceneResult.chapterSettingUsage
   projectSettingUsage = contextSceneResult.projectSettingUsage
   const wordTarget = contextSceneResult.wordTarget
@@ -433,6 +444,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
 
   const chapterTaskExecution = await generationSourceResolver.beginTask({
     taskId: options.chapter_task_id,
+    expectedAuthorityFingerprint,
     activeWorkspace,
     project,
     chapter,

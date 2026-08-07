@@ -22,8 +22,10 @@ import {
   formatAdmissionError,
 } from '../quality/admission-error'
 import {
+  chapterGenerationSourceFingerprint,
   resolveChapterGenerationSource,
 } from '../generation-source/source-config'
+import { ChapterGenerationSourceError } from '../generation-source/errors'
 import {
   prepareProseGenerationContract,
 } from '../quality/prose-quality-entry'
@@ -32,6 +34,8 @@ export async function runGenerateChapterContextAndSceneCards(args: {
   activeWorkspace: string
   projectId: number
   project: any
+  expectedAuthorityFingerprint: string
+  getProject: (workspace: string, projectId: number) => Promise<any>
   chapter: any
   chapters: any[]
   worldbuilding: any
@@ -63,6 +67,8 @@ export async function runGenerateChapterContextAndSceneCards(args: {
     activeWorkspace,
     projectId,
     project,
+    expectedAuthorityFingerprint,
+    getProject,
     chapter,
     chapters,
     worldbuilding,
@@ -112,6 +118,8 @@ const buildGenerationContext = async () => runtime?.buildChapterContext
       persistSettingUsage: false,
     })
 let wordTarget = resolveChapterWordTarget(project, chapter, options)
+const persistedChapterSettingUsage = chapterSettingUsage
+const persistedProjectSettingUsage = projectSettingUsage
 const initialContextPackage = applyChapterWordTargetToContext(
   await buildGenerationContext(),
   wordTarget,
@@ -131,6 +139,7 @@ let contextPackage = preparedGeneration.contextPackage
 let generationContract = preparedGeneration.contract
 let strictPreflightReadiness = resolveStrictPreflightReadiness(contextPackage.preflight)
 let stagedPreflightRepair: any = null
+let propagatePersistedMaterials = false
 const enforcePreparedGate = async (requireSceneCards: boolean) => {
   try {
     await preparedGeneration.runAfterGate(async () => undefined, requireSceneCards)
@@ -154,7 +163,27 @@ await onStage('context', {
 })
 const preflightNeedsMaterialRepair = contextPackage.preflight.ready !== true || !strictPreflightReadiness.ready
 if (preflightNeedsMaterialRepair && options.auto_repair_missing_material === true) {
-  const activeGenerationSource = resolveChapterGenerationSource(project).active
+  const authorityProject = await getProject(activeWorkspace, projectId)
+  let authorityFingerprint = ''
+  if (authorityProject) {
+    try {
+      authorityFingerprint = chapterGenerationSourceFingerprint(resolveChapterGenerationSource(authorityProject))
+    } catch {
+      throw new ChapterGenerationSourceError(
+        'GENERATION_SOURCE_CHANGED',
+        '章节生成来源已变化，请重试',
+        { reason: 'source_changed' },
+      )
+    }
+  }
+  if (authorityFingerprint !== expectedAuthorityFingerprint) {
+    throw new ChapterGenerationSourceError(
+      'GENERATION_SOURCE_CHANGED',
+      '章节生成来源已变化，请重试',
+      { reason: 'source_changed' },
+    )
+  }
+  const activeGenerationSource = resolveChapterGenerationSource(authorityProject).active
   await onStage('material_repair', { status: 'running', warnings: contextPackage.preflight.warnings || [], blockers: contextPackage.preflight.blockers || [] })
   if (activeGenerationSource === 'mcp') {
     let repaired: any
@@ -186,15 +215,21 @@ if (preflightNeedsMaterialRepair && options.auto_repair_missing_material === tru
     }
 
     const skipped = repaired.skipped === true
+    stagedContextUsageReplacement = null
     if (!skipped) {
+      propagatePersistedMaterials = true
       if (repaired.chapter && typeof repaired.chapter === 'object') chapter = repaired.chapter
       if (Array.isArray(repaired.chapters)) chapters = repaired.chapters
       if (Array.isArray(repaired.worldbuilding)) worldbuilding = repaired.worldbuilding
       if (Array.isArray(repaired.characters)) characters = repaired.characters
       if (Array.isArray(repaired.settings)) settings = repaired.settings
-      if (Array.isArray(repaired.chapter_setting_usage)) chapterSettingUsage = repaired.chapter_setting_usage
-      if (Array.isArray(repaired.project_setting_usage)) projectSettingUsage = repaired.project_setting_usage
     }
+    chapterSettingUsage = Array.isArray(repaired.chapter_setting_usage)
+      ? repaired.chapter_setting_usage
+      : skipped ? persistedChapterSettingUsage : chapterSettingUsage
+    projectSettingUsage = Array.isArray(repaired.project_setting_usage)
+      ? repaired.project_setting_usage
+      : skipped ? persistedProjectSettingUsage : projectSettingUsage
     projectSettingUsage = [
       ...projectSettingUsage.filter((usage: any) => Number(usage?.chapter_id || 0) !== chapter.id),
       ...chapterSettingUsage,
@@ -211,7 +246,9 @@ if (preflightNeedsMaterialRepair && options.auto_repair_missing_material === tru
       allowIncomplete: false,
     })
     contextPackage = preparedGeneration.contextPackage
-    if (contextPackage?.setting_context?.auto_matched) stagedContextUsageReplacement = asArray(contextPackage.setting_context.chapter_usage)
+    if (contextPackage?.setting_context?.auto_matched && chapterSettingUsage.length === 0) {
+      stagedContextUsageReplacement = asArray(contextPackage.setting_context.chapter_usage)
+    }
     generationContract = preparedGeneration.contract
     strictPreflightReadiness = resolveStrictPreflightReadiness(contextPackage.preflight)
     await onStage('material_repair', {
@@ -417,6 +454,7 @@ return {
   generationContract,
   strictPreflightReadiness,
   generatedSceneCardsThisRun: typeof generatedSceneCardsThisRun === 'undefined' ? false : generatedSceneCardsThisRun,
+  propagatePersistedMaterials,
 }
 
 }

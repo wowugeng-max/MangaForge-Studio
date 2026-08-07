@@ -72,6 +72,11 @@ export function createNovelWritingService(ctx: {
   runtime?: NovelWritingRuntime
   mcpRuntime?: McpRuntime
   chapterSourceLeases?: ChapterSourceLeaseRegistry
+  generationSourceResolver?: {
+    beginTask: (input: any) => Promise<any>
+  }
+  repairChapterMaterials?: (...args: any[]) => Promise<any>
+  autoRepairChapterPreflightGaps?: (...args: any[]) => Promise<any>
 }) {
   const trustedWordTargetContractionBudgets = new WeakSet<object>()
   const executeAgent = ctx.runtime?.executeAgent || executeNovelAgent
@@ -135,7 +140,7 @@ export function createNovelWritingService(ctx: {
 
   const generateNovelChapterProse = ctx.runtime?.generateChapterProse || defaultGenerateNovelChapterProse
   const mcpGenerationSource = ctx.mcpRuntime ? new McpGenerationSource(ctx.mcpRuntime) : undefined
-  const chapterGenerationSource = createGenerationSourceResolver({
+  const defaultChapterGenerationSource = createGenerationSourceResolver({
     chapterSourceLeases: ctx.chapterSourceLeases || new ChapterSourceLeaseRegistry(),
     readProject: ctx.getProject,
     createModelExecution: input => {
@@ -163,6 +168,7 @@ export function createNovelWritingService(ctx: {
     },
     ...(mcpGenerationSource ? { mcpSource: mcpGenerationSource } : {}),
   })
+  const chapterGenerationSource = ctx.generationSourceResolver || defaultChapterGenerationSource
   const beginChapterTask = (input: Parameters<typeof chapterGenerationSource.beginTask>[0]) => chapterGenerationSource.beginTask(input)
   const materialRepairService = createMaterialRepairService({
     beginChapterTask,
@@ -170,7 +176,7 @@ export function createNovelWritingService(ctx: {
     commitAcceptance: commitNovelChapterAcceptance,
     loadSnapshot: loadNovelMaterialRepairSnapshot,
   })
-  const repairChapterMaterials = materialRepairService.repairChapterMaterials
+  const repairChapterMaterials = ctx.repairChapterMaterials || materialRepairService.repairChapterMaterials
   const storeChapterProseMemory = ctx.runtime?.storeChapterProseMemory || defaultStoreNovelChapterProseMemory
   const mergeChapterRawPayload = ctx.runtime?.mergeChapterRawPayload || mergeNovelChapterRawPayload
   const buildParagraphProseContext = buildParagraphProseContextFromModule
@@ -195,7 +201,8 @@ export function createNovelWritingService(ctx: {
 
   const ensureProseMeetsWordTarget = proseWordTargetMethods.ensureProseMeetsWordTarget
 
-  const autoRepairChapterPreflightGaps = autoRepairChapterPreflightMethods.autoRepairChapterPreflightGaps
+  const autoRepairChapterPreflightGaps = ctx.autoRepairChapterPreflightGaps
+    || autoRepairChapterPreflightMethods.autoRepairChapterPreflightGaps
 
   const generateChapterForGroupMethods = createGenerateChapterForGroupMethods({
     executeAgent,
