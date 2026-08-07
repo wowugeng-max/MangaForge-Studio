@@ -1413,8 +1413,20 @@ class McpChapterTaskExecution implements ChapterTaskExecution {
         || resolved.adapter.id !== this.binding.adapter_id) {
         throw new McpError('MCP_BINDING_INVALID', 'Runtime 返回的 MCP Adapter 与项目绑定不一致')
       }
-      const pendingAgents = resolved.adapter.listAgents(
-        this.remoteOptions(resolved.server.tool_timeout_ms),
+      const pendingAgents = resolved.stability.runRead(
+        resolved.adapter.stabilityPolicy,
+        {
+          deadline: this.deadline,
+          phase: 'transport',
+          pollInitialMs: resolved.server.poll_initial_ms,
+          pollMaxMs: resolved.server.poll_max_ms,
+          toolTimeoutMs: resolved.server.tool_timeout_ms,
+        },
+        () => {
+          const pending = resolved.adapter.listAgents(this.remoteOptions(resolved.server.tool_timeout_ms))
+          assertSafeAwaitable(pending, invalidAgentList)
+          return pending
+        },
       )
       assertSafeAwaitable(pendingAgents, invalidAgentList)
       const agentIds = projectAgentIds(await pendingAgents)

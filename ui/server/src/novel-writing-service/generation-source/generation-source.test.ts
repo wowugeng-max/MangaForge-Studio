@@ -3232,7 +3232,7 @@ describe('McpGenerationSource task execution', () => {
     expect(draft.prose_chapters?.[0]?.chapter_text).toBe('new one-shot prose')
     await execution.close({ status: 'success' })
     expect(fixture.counters.inspectSession).toBe(2)
-    expect(fixture.counters.stabilityReads).toBe(2)
+    expect(fixture.counters.stabilityReads).toBe(3)
     expect(invocations).toHaveLength(1)
 
     const runs = await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id)
@@ -4546,6 +4546,68 @@ describe('McpGenerationSource task execution', () => {
       keyId: fixture.key.id,
       agentId: 'neutral-agent-1',
     })).toBe(false)
+  })
+
+  test('stabilizes the initial bound-Agent lookup before opening the first stage', async () => {
+    const notReady = new McpError('MCP_TOOL_ERROR', 'not ready', {
+      failure_evidence: {
+        kind: 'jsonrpc_http_rejection',
+        http_status: 400,
+        jsonrpc_code: -32000,
+        response_id: null,
+        reason: 'server_not_initialized',
+      },
+    })
+    const policy = {
+      requiredConsecutiveSuccesses: 1,
+      warmupWindowMs: 1_000,
+      classify: (error: unknown) => error === notReady
+        ? 'not_ready_pre_dispatch' as const
+        : 'terminal_failure' as const,
+      probe: async () => {},
+    }
+    let agentAttempts = 0
+    let stabilityReads = 0
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-agent-warmup-', {
+      listAgents: async () => {
+        agentAttempts += 1
+        if (agentAttempts === 1) throw notReady
+        return [{ id: 'neutral-agent-1', name: 'Neutral Agent' }]
+      },
+      getAdapterForKey: (pinned, adapter, stability) => {
+        const stabilizedAdapter = Object.assign(adapter, { stabilityPolicy: policy })
+        const retryingStability: McpStabilityController = {
+          ensureReady: stability.ensureReady,
+          async runRead(receivedPolicy, input, operation) {
+            stabilityReads += 1
+            expect(receivedPolicy).toBe(policy)
+            expect(input.phase).toBe('transport')
+            try {
+              return await operation()
+            } catch (error) {
+              expect(receivedPolicy?.classify(error, 'read_safe')).toBe('not_ready_pre_dispatch')
+              return operation()
+            }
+          },
+          runMutation: stability.runMutation,
+        }
+        return {
+          server: pinned.server,
+          key: pinned.key,
+          adapter: stabilizedAdapter,
+          stability: retryingStability,
+        }
+      },
+    })
+    const execution = await fixture.begin()
+
+    const result = await execution.generateDraft(fixture.request())
+    await execution.close({ status: 'success' })
+
+    expect(result.prose_chapters?.[0]?.chapter_text).toBe('通用正文。')
+    expect(agentAttempts).toBe(2)
+    expect(stabilityReads).toBe(1)
+    expect(fixture.counters).toMatchObject({ open: 1, runStage: 1 })
   })
 
   test('routes each actual stage through one adapter invocation', async () => {
