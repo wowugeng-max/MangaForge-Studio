@@ -12,7 +12,10 @@ import {
 } from '../novel'
 import { executeNovelAgent } from '../llm'
 import { isChapterTaskId } from '../novel-writing-service/generation-source/types'
-import { resolveChapterGenerationSource } from '../novel-writing-service/generation-source/source-config'
+import {
+  chapterGenerationSourceFingerprint,
+  resolveChapterGenerationSource,
+} from '../novel-writing-service/generation-source/source-config'
 import { asArray, getNovelPayload } from './novel-route-utils'
 import { applyStyleSampleStrategyAuthorAction, buildChapterPreDraftBrief } from './novel-writing-service'
 
@@ -33,6 +36,7 @@ type ChapterContextRoutesContext = {
     activeWorkspace: string
     projectId: number
     chapterId: number
+    expectedAuthorityFingerprint: string
     repairKeys?: string[]
     signal?: AbortSignal
   }) => Promise<any>
@@ -281,12 +285,14 @@ export function registerNovelChapterContextRoutes(app: Express, ctx: ChapterCont
       const project = await ctx.getProject(activeWorkspace, projectId)
       if (!project) return res.status(404).json({ error: 'project not found' })
       sourceDispatchBoundary = 'resolving'
-      if (resolveChapterGenerationSource(project).active === 'mcp') {
+      const chapterGenerationSource = resolveChapterGenerationSource(project)
+      if (chapterGenerationSource.active === 'mcp') {
         sourceDispatchBoundary = 'mcp'
         const result = await ctx.repairChapterMaterials({
           activeWorkspace,
           projectId,
           chapterId,
+          expectedAuthorityFingerprint: chapterGenerationSourceFingerprint(chapterGenerationSource),
           repairKeys: normalizeMaterialRepairKeys(ownSafeDataValue(req.body, 'repair_keys')),
         })
         return res.json({

@@ -10,6 +10,7 @@ import {
 } from '../../novel'
 import {
   chapterGenerationSourceFingerprint,
+  resolveChapterGenerationSource,
 } from '../generation-source/source-config'
 import {
   createMaterialRepairService,
@@ -311,6 +312,9 @@ function request(harness: ReturnType<typeof createMaterialRepairHarness>, signal
     activeWorkspace: harness.workspace,
     projectId: harness.project.id,
     chapterId: harness.chapter.id,
+    expectedAuthorityFingerprint: chapterGenerationSourceFingerprint(
+      harness.project.reference_config.chapter_generation_source,
+    ),
     ...(signal ? { signal } : {}),
   }
 }
@@ -349,6 +353,33 @@ describe('one-session MCP material repair orchestration', () => {
     expect(harness.stageCalls).toEqual([])
     expect(harness.commitCalls).toEqual([])
     expect(harness.closeCalls).toEqual([])
+  })
+
+  test('rejects changed outer authority before beginning a material task', async () => {
+    const harness = createMaterialRepairHarness()
+
+    await expect(harness.service.repairChapterMaterials({
+      ...request(harness),
+      expectedAuthorityFingerprint: `sha256:${'e'.repeat(64)}`,
+    })).rejects.toMatchObject({ code: 'GENERATION_SOURCE_CHANGED' })
+
+    expect(harness.beginCalls).toEqual([])
+    expect(harness.stageCalls).toEqual([])
+    expect(harness.commitCalls).toEqual([])
+    expect(harness.closeCalls).toEqual([])
+  })
+
+  test('rejects changed outer authority on the skipped path before returning context', async () => {
+    const harness = createMaterialRepairHarness({ failedKey: null })
+
+    await expect(harness.service.repairChapterMaterials({
+      ...request(harness),
+      expectedAuthorityFingerprint: `sha256:${'e'.repeat(64)}`,
+    })).rejects.toMatchObject({ code: 'GENERATION_SOURCE_CHANGED' })
+
+    expect(harness.beginCalls).toEqual([])
+    expect(harness.contextBuildCalls).toEqual([])
+    expect(harness.commitCalls).toEqual([])
   })
 
   test('rejects the model source before beginning an MCP task', async () => {
@@ -794,6 +825,7 @@ test('the assembled model-source service rejects repair without calling any mode
       activeWorkspace: workspace,
       projectId: project.id,
       chapterId: chapter.id,
+      expectedAuthorityFingerprint: chapterGenerationSourceFingerprint(resolveChapterGenerationSource(project)),
     })).rejects.toMatchObject({ code: 'MATERIAL_REPAIR_MODEL_PATH_REQUIRED' })
     expect(modelCalls).toBe(0)
   } finally {

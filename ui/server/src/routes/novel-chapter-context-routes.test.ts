@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { createNovelChapter, createNovelProject, listNovelChapters } from '../novel'
+import { chapterGenerationSourceFingerprint } from '../novel-writing-service/generation-source/source-config'
 import { registerNovelChapterContextRoutes } from './novel-chapter-context-routes'
 
 function mcpProjectFixture() {
@@ -209,6 +210,9 @@ describe('novel chapter context repair', () => {
       activeWorkspace: 'workspace',
       projectId: 5,
       chapterId: 9,
+      expectedAuthorityFingerprint: chapterGenerationSourceFingerprint(
+        mcpProjectFixture().reference_config.chapter_generation_source as any,
+      ),
       repairKeys: undefined,
     }])
     expect(modelContextCalls).toBe(0)
@@ -388,7 +392,9 @@ describe('novel chapter context repair', () => {
 
   test('keeps the model prompt, provider call, fallback and response statements frozen', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-chapter-context-routes.ts'), 'utf8')
-    expect(source).toContain("if (resolveChapterGenerationSource(project).active === 'mcp')")
+    expect(source).toContain('const chapterGenerationSource = resolveChapterGenerationSource(project)')
+    expect(source).toContain("if (chapterGenerationSource.active === 'mcp')")
+    expect(source).toContain('expectedAuthorityFingerprint: chapterGenerationSourceFingerprint(chapterGenerationSource)')
     expect(source).toContain("const modelId = req.body?.model_id ? String(req.body.model_id) : ''")
     expect(source).toContain("executeNovelAgent('outline-agent', project, { task: prompt }, {")
     expect(source).toContain("responseMode: 'stream',\n            skipMemory: true,")

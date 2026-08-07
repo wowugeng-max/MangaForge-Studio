@@ -165,6 +165,8 @@ async function createCompositionHarness(options: {
   materialRepairKeys?: string[]
   materialFailure?: Error
   refreshFailure?: Error
+  storyStatePayload?: any
+  beforeFirstMaterialSnapshotLoad?: (harness: any) => void | Promise<void>
   afterMaterialClose?: (harness: any) => void | Promise<void>
   autoRepairChapterPreflightGaps?: (...args: any[]) => Promise<any>
 } = {}) {
@@ -226,6 +228,9 @@ async function createCompositionHarness(options: {
       },
       loadSnapshot: async (...args: any[]) => {
         materialSnapshotLoads += 1
+        if (materialSnapshotLoads === 1) {
+          await options.beforeFirstMaterialSnapshotLoad?.(harnessRef)
+        }
         if (materialSnapshotLoads > 1 && options.refreshFailure) throw options.refreshFailure
         const snapshot = await loadNovelMaterialRepairSnapshot(...args as Parameters<typeof loadNovelMaterialRepairSnapshot>)
         if (materialSnapshotLoads > 1 && materialIdentity) {
@@ -254,6 +259,7 @@ async function createCompositionHarness(options: {
     contextPackageOverride: options.contextOverride,
     repairedContextPackageOverride: options.repairedContextOverride,
     qualityGateEnabled: false,
+    storyStatePayload: options.storyStatePayload,
   })
   harnessRef = harness
   return { ...harness, events, executionProvenance, materialCommitInputs, materialReloadedChapterUsage }
@@ -403,6 +409,16 @@ describe('automatic material repair through the generateChapterForGroup composit
 
   test('rebuilds staged usage after skipped MCP repair when authoritative persisted usage is empty', async () => {
     const heuristicUsage: any[] = []
+    const storyStatePayload = {
+      state_delta: { open_questions: ['幕后指挥者为何知道江澈旧名'] },
+      character_updates: [{
+        name: '江澈',
+        current_state: { location: '指挥频道入口' },
+        source_excerpt: '江澈没有停在阴影里等待，直接切入追捕线。',
+      }],
+      setting_updates: [] as any[],
+      storyline_updates: [],
+    }
     const contextOverride: any = {
       ...incompleteCompositionContext(),
       setting_context: { auto_matched: true, chapter_usage: heuristicUsage },
@@ -415,6 +431,7 @@ describe('automatic material repair through the generateChapterForGroup composit
       contextOverride,
       materialContextOverride,
       materialRepairKeys: [],
+      storyStatePayload,
     })
     const setting = await createNovelSettingEntity(harness.workspace, {
       project_id: harness.project.id,
@@ -428,6 +445,14 @@ describe('automatic material repair through the generateChapterForGroup composit
       summary: setting.summary,
       required: true,
       usage_type: 'required',
+    })
+    storyStatePayload.setting_updates.push({
+      entity_id: setting.id,
+      name: setting.name,
+      entity_type: setting.entity_type,
+      state_delta: { last_used_chapter: harness.chapter.chapter_no },
+      actual_state_change: { last_used_chapter: harness.chapter.chapter_no },
+      source_excerpt: '江澈没有停在阴影里等待，直接切入追捕线。',
     })
 
     await harness.service.generateChapterForGroup(
@@ -616,6 +641,41 @@ describe('automatic material repair through the generateChapterForGroup composit
     )).rejects.toMatchObject({ code: 'GENERATION_SOURCE_CHANGED' })
 
     expect(harness.events.filter((event: CompositionEvent) => event.kind === 'prose' && event.phase === 'begin')).toEqual([])
+  })
+
+  test('fences a source switch after the outer freshness check before the material snapshot loads', async () => {
+    let modelRepairCalls = 0
+    const harness = await createCompositionHarness({
+      contextOverride: incompleteCompositionContext(),
+      omitInitialWorldbuilding: true,
+      beforeFirstMaterialSnapshotLoad: current => switchCompositionSource(current, compositionModelSource),
+      autoRepairChapterPreflightGaps: async () => {
+        modelRepairCalls += 1
+        throw new Error('model repair must not run after the MCP authority changes')
+      },
+    })
+    const setting = await createNovelSettingEntity(harness.workspace, {
+      project_id: harness.project.id,
+      entity_type: 'rule',
+      name: '既有规则',
+      summary: '确保本测试仅缺世界观。',
+    })
+    await replaceNovelChapterSettingUsage(harness.workspace, harness.project.id, harness.chapter.id, [{
+      entity_id: setting.id,
+      required: true,
+      usage_type: 'required',
+    }])
+
+    await expect(harness.service.generateChapterForGroup(
+      harness.workspace,
+      harness.project.id,
+      harness.chapter.id,
+      { model_id: 217, production_mode: 'draft_only', auto_repair_missing_material: true },
+    )).rejects.toMatchObject({ code: 'GENERATION_SOURCE_CHANGED' })
+
+    expect(harness.events.filter((event: CompositionEvent) => event.phase === 'begin')).toEqual([])
+    expect(harness.materialCommitInputs).toEqual([])
+    expect(modelRepairCalls).toBe(0)
   })
 })
 

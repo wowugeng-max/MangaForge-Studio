@@ -192,6 +192,7 @@ if (preflightNeedsMaterialRepair && options.auto_repair_missing_material === tru
         activeWorkspace,
         projectId,
         chapterId: chapter.id,
+        expectedAuthorityFingerprint,
         signal: options.abortSignal,
       })
       if (!repaired || typeof repaired !== 'object'

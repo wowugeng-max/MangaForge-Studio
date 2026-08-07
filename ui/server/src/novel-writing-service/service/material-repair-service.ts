@@ -36,6 +36,7 @@ export type MaterialRepairRequest = {
   activeWorkspace: string
   projectId: number
   chapterId: number
+  expectedAuthorityFingerprint: string
   repairKeys?: string[]
   signal?: AbortSignal
 }
@@ -52,6 +53,14 @@ export type MaterialRepairServiceDependencies = {
 
 function materialRepairError(code: string, message: string) {
   return Object.assign(new Error(message), { code, error_code: code })
+}
+
+function materialRepairSourceChanged() {
+  return new ChapterGenerationSourceError(
+    'GENERATION_SOURCE_CHANGED',
+    '项目章节生成来源已在外层校验与材料快照之间变化；旧请求不会执行',
+    { reason: 'material_snapshot_source_changed' },
+  )
 }
 
 function stableIdentityHash(kind: 'project' | 'chapter', values: number[]) {
@@ -335,14 +344,23 @@ export function createMaterialRepairService(deps: MaterialRepairServiceDependenc
         input.projectId,
         input.chapterId,
       )
-      const source = resolveChapterGenerationSource(loaded.project)
+      let source: ReturnType<typeof resolveChapterGenerationSource>
+      let loadedAuthorityFingerprint: string
+      try {
+        source = resolveChapterGenerationSource(loaded.project)
+        loadedAuthorityFingerprint = chapterGenerationSourceFingerprint(source)
+      } catch {
+        throw materialRepairSourceChanged()
+      }
+      if (loadedAuthorityFingerprint !== input.expectedAuthorityFingerprint) {
+        throw materialRepairSourceChanged()
+      }
       if (source.active !== 'mcp') {
         throw materialRepairError(
           'MATERIAL_REPAIR_MODEL_PATH_REQUIRED',
           '模型材料补齐必须使用现有模型路径',
         )
       }
-      const loadedAuthorityFingerprint = chapterGenerationSourceFingerprint(source)
 
       const contextPackage = await buildSnapshotContext(deps, input.activeWorkspace, loaded, true)
       const plan = input.repairKeys?.length
@@ -370,7 +388,7 @@ export function createMaterialRepairService(deps: MaterialRepairServiceDependenc
         project: loaded.project,
         chapter: loaded.chapter,
         contextPackage,
-        expectedAuthorityFingerprint: loadedAuthorityFingerprint,
+        expectedAuthorityFingerprint: input.expectedAuthorityFingerprint,
         options: { material_repair: true },
         signal: input.signal,
       })
