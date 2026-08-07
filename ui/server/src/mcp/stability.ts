@@ -219,7 +219,7 @@ export function createMcpStabilityController(dependencies: {
         if (failureClass === 'transient_read_failure') {
           if (attempt.failedClient && dependencies.invalidateClient) {
             await dependencies.invalidateClient(attempt.failedClient)
-          } else {
+          } else if (!dependencies.runOperation) {
             await dependencies.invalidateCurrent()
           }
         }

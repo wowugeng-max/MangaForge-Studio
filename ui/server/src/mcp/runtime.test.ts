@@ -1181,6 +1181,116 @@ describe('MCP runtime', () => {
     }
   })
 
+  test('keeps a concurrent replacement when managed reacquisition times out before selecting a client', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-reacquire-race-'))
+    workspaces.push(workspace)
+    const server = { ...BUDA_MCP_SERVER_TEMPLATE, poll_initial_ms: 1, poll_max_ms: 2 }
+    await writeMcpServers(workspace, [server])
+    const key = await createMcpKey(workspace, {
+      mcp_server_id: server.id,
+      key: 'sk_runtime_reacquire_race',
+      description: '账号',
+    })
+    let signalManagedGetStarted!: () => void
+    let releaseManagedGet!: () => void
+    const managedGetStarted = new Promise<void>(resolve => { signalManagedGetStarted = resolve })
+    const mayFinishManagedGet = new Promise<void>(resolve => { releaseManagedGet = resolve })
+    let getCalls = 0
+    let secondReads = 0
+    let secondProbes = 0
+    let thirdGets = 0
+    let secondInvalidated = false
+    const firstClient = {
+      listTools: async () => [],
+      callTool: async () => ({ content: [{ type: 'text', text: 'first' }] }),
+      diagnostics: () => ({ state: 'Ready' }),
+    }
+    const secondClient = {
+      async listTools() {
+        secondProbes += 1
+        return [{ name: 'read' }]
+      },
+      async callTool() {
+        secondReads += 1
+        return { content: [{ type: 'text', text: 'second' }] }
+      },
+      diagnostics: () => ({ state: 'Ready' }),
+    }
+    const thirdClient = {
+      listTools: async () => [{ name: 'read' }],
+      callTool: async () => ({ content: [{ type: 'text', text: 'third' }] }),
+      diagnostics: () => ({ state: 'Ready' }),
+    }
+    let current: typeof secondClient | typeof thirdClient = secondClient
+    const invalidated: unknown[] = []
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: {
+        async get() {
+          getCalls += 1
+          if (getCalls === 1) return firstClient
+          if (getCalls === 2) {
+            signalManagedGetStarted()
+            await mayFinishManagedGet
+            throw new McpError('MCP_CONNECT_TIMEOUT', 'managed reacquisition timed out')
+          }
+          if (current === thirdClient) thirdGets += 1
+          return current
+        },
+        async invalidateIfCurrent(_workspace: string, _serverId: string, _keyId: number, client: unknown) {
+          invalidated.push(client)
+          if (client === secondClient && current === secondClient) {
+            secondInvalidated = true
+            current = thirdClient
+          }
+        },
+        invalidate: async () => {},
+        invalidateServer: async () => {},
+        closeAll: async () => {},
+      } as any,
+      adapterFactory: () => ({ listAgents: async () => [] }) as any,
+    })
+    const resolved = await runtime.getAdapterForKey(key.id)
+    const deadline = new McpGenerationDeadline(1_000)
+    const policy = {
+      operationReadinessMode: 'reactive' as const,
+      requiredConsecutiveSuccesses: 1,
+      warmupWindowMs: 100,
+      classify(error: unknown, operation: 'read_safe' | 'mutation') {
+        return operation === 'read_safe' && (error as McpError)?.code === 'MCP_CONNECT_TIMEOUT'
+          ? 'transient_read_failure' as const
+          : 'terminal_failure' as const
+      },
+      async probe(client: typeof resolved.client, options: any) {
+        await client.listTools({ ...options, refreshTools: true })
+      },
+    }
+
+    try {
+      const managedRead = resolved.stability.runRead(policy, {
+        deadline,
+        phase: 'session_poll',
+        pollInitialMs: 1,
+        pollMaxMs: 2,
+        toolTimeoutMs: 100,
+      }, () => resolved.client.callTool('read', {}, { operation: 'read_safe' }))
+      await managedGetStarted
+      const directResult = await resolved.client.callTool('read', {}, { operation: 'read_safe' })
+      releaseManagedGet()
+      const managedResult = await managedRead
+
+      expect(directResult).toEqual({ content: [{ type: 'text', text: 'second' }] })
+      expect(managedResult).toEqual({ content: [{ type: 'text', text: 'second' }] })
+      expect(invalidated).toEqual([])
+      expect(secondInvalidated).toBe(false)
+      expect(thirdGets).toBe(0)
+      expect(secondProbes).toBe(1)
+      expect(secondReads).toBe(2)
+    } finally {
+      releaseManagedGet()
+      deadline.close()
+    }
+  })
+
   test('does not let one credential stability scope claim another credential direct read', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-owner-isolation-'))
     workspaces.push(workspace)

@@ -691,6 +691,93 @@ describe('MCP stability coordinator', () => {
     ])
   })
 
+  test('does not invalidate ambient current when a managed attempt has no failed client', async () => {
+    const clock = new FakeClock()
+    const deadline = new McpGenerationDeadline(1_000, undefined, clock)
+    const client: McpClientPort = {
+      listTools: async () => [],
+      callTool: async () => ({ content: [] }),
+    }
+    let currentInvalidations = 0
+    let calls = 0
+    const controller = createMcpStabilityController({
+      reacquire: async () => client,
+      async invalidateCurrent() { currentInvalidations += 1 },
+      async sleep(ms) { clock.advance(ms) },
+      runOperation: async (_operationKind, _attempt, operation) => operation(),
+    })
+    const policy: McpStabilityPolicy = {
+      operationReadinessMode: 'reactive',
+      requiredConsecutiveSuccesses: 1,
+      warmupWindowMs: 100,
+      classify(error, operation) {
+        return operation === 'read_safe' && (error as McpError)?.code === 'MCP_CONNECT_TIMEOUT'
+          ? 'transient_read_failure'
+          : 'terminal_failure'
+      },
+      probe: async () => {},
+    }
+
+    const result = await controller.runRead(policy, {
+      deadline,
+      phase: 'session_poll',
+      pollInitialMs: 1,
+      pollMaxMs: 2,
+      toolTimeoutMs: 50,
+    }, async () => {
+      calls += 1
+      if (calls === 1) throw new McpError('MCP_CONNECT_TIMEOUT', 'connect timeout')
+      return 'recovered'
+    })
+
+    expect(result).toBe('recovered')
+    expect(calls).toBe(2)
+    expect(currentInvalidations).toBe(0)
+  })
+
+  test('keeps current-client invalidation fallback for a legacy controller without an operation hook', async () => {
+    const clock = new FakeClock()
+    const deadline = new McpGenerationDeadline(1_000, undefined, clock)
+    const client: McpClientPort = {
+      listTools: async () => [],
+      callTool: async () => ({ content: [] }),
+    }
+    let currentInvalidations = 0
+    let calls = 0
+    const controller = createMcpStabilityController({
+      reacquire: async () => client,
+      async invalidateCurrent() { currentInvalidations += 1 },
+      async sleep(ms) { clock.advance(ms) },
+    })
+    const policy: McpStabilityPolicy = {
+      operationReadinessMode: 'reactive',
+      requiredConsecutiveSuccesses: 1,
+      warmupWindowMs: 100,
+      classify(error, operation) {
+        return operation === 'read_safe' && (error as McpError)?.code === 'MCP_CONNECT_TIMEOUT'
+          ? 'transient_read_failure'
+          : 'terminal_failure'
+      },
+      probe: async () => {},
+    }
+
+    const result = await controller.runRead(policy, {
+      deadline,
+      phase: 'session_poll',
+      pollInitialMs: 1,
+      pollMaxMs: 2,
+      toolTimeoutMs: 50,
+    }, async () => {
+      calls += 1
+      if (calls === 1) throw new McpError('MCP_CONNECT_TIMEOUT', 'connect timeout')
+      return 'recovered'
+    })
+
+    expect(result).toBe('recovered')
+    expect(calls).toBe(2)
+    expect(currentInvalidations).toBe(1)
+  })
+
   test('invalidates the local probe client even when ambient ownership drifts', async () => {
     const clock = new FakeClock()
     const deadline = new McpGenerationDeadline(1_000, undefined, clock)
