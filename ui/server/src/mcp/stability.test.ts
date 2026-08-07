@@ -600,6 +600,92 @@ describe('MCP stability coordinator', () => {
     ])
   })
 
+  test('runs only policy-owned operation attempts through the operation hook', async () => {
+    const clock = new FakeClock()
+    const deadline = new McpGenerationDeadline(1_000, undefined, clock)
+    const events: string[] = []
+    let operationScope = false
+    let attempts = 0
+    const client: McpClientPort = {
+      listTools: async () => [],
+      callTool: async () => ({ content: [] }),
+    }
+    const controller = createMcpStabilityController({
+      async reacquire() {
+        events.push('reacquire')
+        return client
+      },
+      async invalidateCurrent() { events.push('invalidate') },
+      async sleep(ms) { clock.advance(ms) },
+      async runOperation(operationKind, operation) {
+        events.push(`scope-enter:${operationKind}`)
+        operationScope = true
+        try {
+          return await operation()
+        } finally {
+          operationScope = false
+          events.push(`scope-exit:${operationKind}`)
+        }
+      },
+    })
+    const policy: McpStabilityPolicy = {
+      operationReadinessMode: 'reactive',
+      requiredConsecutiveSuccesses: 1,
+      warmupWindowMs: 100,
+      classify,
+      async probe() {
+        expect(operationScope).toBe(false)
+        events.push('probe')
+      },
+    }
+    const input: McpStabilityInput = {
+      deadline,
+      phase: 'session_poll',
+      pollInitialMs: 1,
+      pollMaxMs: 2,
+      toolTimeoutMs: 50,
+    }
+
+    const result = await controller.runRead(policy, input, async () => {
+      expect(operationScope).toBe(true)
+      attempts += 1
+      events.push(`attempt:${attempts}`)
+      if (attempts === 1) throw new McpError('MCP_CONNECTION_LOST', 'lost')
+      return 'recovered'
+    })
+
+    expect(result).toBe('recovered')
+    expect(events).toEqual([
+      'scope-enter:read_safe',
+      'attempt:1',
+      'scope-exit:read_safe',
+      'invalidate',
+      'reacquire',
+      'probe',
+      'scope-enter:read_safe',
+      'attempt:2',
+      'scope-exit:read_safe',
+    ])
+  })
+
+  test('does not use the operation hook without a stability policy', async () => {
+    const harness = stabilityHarness([])
+    let hookCalls = 0
+    const controller = createMcpStabilityController({
+      reacquire: async () => { throw new Error('unexpected reacquisition') },
+      invalidateCurrent: async () => {},
+      async runOperation(_operationKind, operation) {
+        hookCalls += 1
+        return operation()
+      },
+    })
+
+    const result = await controller.runRead(undefined, harness.input, async () => 'direct')
+
+    expect(result).toBe('direct')
+    expect(hookCalls).toBe(0)
+  })
+
   test('reactive mutation exact pre-dispatch recovery exhausts the shared deadline without probing', async () => {
     const harness = stabilityHarness([], {
       operationReadinessMode: 'reactive',

@@ -79,6 +79,7 @@ export function createMcpStabilityController(dependencies: {
   reacquire: (options: McpAdapterOperationOptions) => Promise<McpClientPort>
   invalidateCurrent: () => Promise<void>
   sleep?: Sleep
+  runOperation?: <T>(operationKind: McpOperationKind, operation: () => Promise<T>) => Promise<T>
 }): McpStabilityController {
   const sleep = dependencies.sleep || systemSleep
 
@@ -178,7 +179,9 @@ export function createMcpStabilityController(dependencies: {
     while (true) {
       remainingOrThrow(input)
       try {
-        const result = await operation()
+        const result = await (policy && dependencies.runOperation
+          ? dependencies.runOperation(operationKind, operation)
+          : operation())
         if (operationKind === 'read_safe') remainingOrThrow(input)
         return result
       } catch (error) {

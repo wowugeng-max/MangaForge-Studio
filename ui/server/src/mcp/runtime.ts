@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { McpClientManager } from './client-manager'
 import { McpError } from './errors'
 import { readMcpKeys, updateMcpKey } from './key-store'
@@ -6,6 +7,7 @@ import { createMcpAdapter } from './adapters/registry'
 import type {
   McpAgentQuarantineRecord,
   McpKeyRecord,
+  McpOperationKind,
   McpServerRecord,
   PublicMcpAgentQuarantineRecord,
 } from './types'
@@ -76,6 +78,7 @@ export function createMcpRuntime(
   const adapterFactory = options.adapterFactory || createMcpAdapter
   const now = options.now || Date.now
   const agentLeases = new McpAgentLeaseRegistry()
+  const stabilityOperationScope = new AsyncLocalStorage<McpOperationKind>()
 
   const resolveCredentialConfigInWorkspace = async (
     activeWorkspace: string,
@@ -146,6 +149,7 @@ export function createMcpRuntime(
       } catch (error) {
         if (!(error instanceof McpError) || error.code !== 'MCP_CONNECTION_LOST') throw error
         await invalidateLostClient(firstClient)
+        if (stabilityOperationScope.getStore() === 'read_safe') throw error
         return operation(await reacquire(remoteOptions))
       }
     }
@@ -173,6 +177,7 @@ export function createMcpRuntime(
     const stability = createMcpStabilityController({
       reacquire,
       invalidateCurrent: () => invalidateLostClient(currentClient),
+      runOperation: (operationKind, operation) => stabilityOperationScope.run(operationKind, operation),
     })
     const adapter = adapterFactory(server.adapter_id, client)
     return { server, key, client, adapter, stability }

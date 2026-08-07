@@ -976,6 +976,101 @@ describe('MCP runtime', () => {
     expect(invalidated).toEqual([firstClient])
   })
 
+  test('lets reactive stability probe a replacement before replaying its managed read', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-stability-owner-'))
+    workspaces.push(workspace)
+    const server = {
+      ...BUDA_MCP_SERVER_TEMPLATE,
+      poll_initial_ms: 1,
+      poll_max_ms: 2,
+    }
+    await writeMcpServers(workspace, [server])
+    const key = await createMcpKey(workspace, {
+      mcp_server_id: server.id,
+      key: 'sk_runtime_stability_owner',
+      description: '账号',
+    })
+    const events: string[] = []
+    let firstReads = 0
+    let secondReads = 0
+    let replacementReady = false
+    const firstClient = {
+      listTools: async () => [],
+      async callTool() {
+        firstReads += 1
+        events.push('first-read')
+        throw connectionLostError()
+      },
+      diagnostics: () => ({ state: 'Ready' }),
+    }
+    const secondClient = {
+      async listTools() {
+        events.push('readiness-list')
+        replacementReady = true
+        return [{ name: 'read' }]
+      },
+      async callTool() {
+        secondReads += 1
+        events.push(replacementReady ? 'second-read' : 'pre-probe-hidden-replay')
+        if (!replacementReady) {
+          throw new McpError('MCP_CAPABILITY_MISSING', 'replacement discovery is not ready')
+        }
+        return { content: [{ type: 'text', text: 'recovered' }] }
+      },
+      diagnostics: () => ({ state: 'Ready' }),
+    }
+    let current: typeof firstClient | typeof secondClient = firstClient
+    const invalidated: unknown[] = []
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: {
+        get: async () => current,
+        async invalidateIfCurrent(_workspace: string, _serverId: string, _keyId: number, client: unknown) {
+          invalidated.push(client)
+          if (current === client) current = secondClient
+        },
+        invalidate: async () => {},
+        invalidateServer: async () => {},
+        closeAll: async () => {},
+      } as any,
+      adapterFactory: () => ({ listAgents: async () => [] }) as any,
+    })
+    const resolved = await runtime.getAdapterForKey(key.id)
+    const deadline = new McpGenerationDeadline(1_000)
+    const policy = {
+      operationReadinessMode: 'reactive' as const,
+      requiredConsecutiveSuccesses: 1,
+      warmupWindowMs: 100,
+      classify(error: unknown, operation: 'read_safe' | 'mutation') {
+        if (operation === 'read_safe' && (error as McpError)?.code === 'MCP_CONNECTION_LOST') {
+          return 'transient_read_failure' as const
+        }
+        return 'terminal_failure' as const
+      },
+      async probe(client: typeof resolved.client, options: any) {
+        await client.listTools({ ...options, refreshTools: true })
+      },
+    }
+
+    try {
+      const result = await resolved.stability.runRead(policy, {
+        deadline,
+        phase: 'session_poll',
+        pollInitialMs: 1,
+        pollMaxMs: 2,
+        toolTimeoutMs: 100,
+      }, () => resolved.client.callTool('read', {}, { operation: 'read_safe' }))
+
+      expect(result).toEqual({ content: [{ type: 'text', text: 'recovered' }] })
+      expect(events).toEqual(['first-read', 'readiness-list', 'second-read'])
+      expect(events).not.toContain('pre-probe-hidden-replay')
+      expect(firstReads).toBe(1)
+      expect(secondReads).toBe(1)
+      expect(invalidated).toContain(firstClient)
+    } finally {
+      deadline.close()
+    }
+  })
+
   test('reconnects once when the read-safe tool list loses its connection', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-list-recovery-'))
     workspaces.push(workspace)
