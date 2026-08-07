@@ -30,6 +30,7 @@ export type ChapterTaskStage =
   | 'revision'
   | 'post_revision_review'
   | 'story_state_sync'
+  | 'material_repair'
 
 export type ChapterStageResponseContract =
   | 'draft_prose'
@@ -43,6 +44,7 @@ export type ChapterStageResponseContract =
   | 'revision_prose'
   | 'editor_report_json'
   | 'story_state_json'
+  | 'material_repair_json'
 
 export type ChapterTaskProvenance = {
   task_id: string

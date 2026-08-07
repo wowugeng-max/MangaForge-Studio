@@ -366,6 +366,48 @@ function validateStoryState(content: string) {
   return value
 }
 
+const MATERIAL_REPAIR_COLLECTION_FIELDS = [
+  'worldbuilding',
+  'characters',
+  'character_updates',
+  'settings',
+  'chapter_setting_usage',
+] as const
+
+const MATERIAL_REPAIR_FIELDS = new Set([
+  'chapter_patch',
+  ...MATERIAL_REPAIR_COLLECTION_FIELDS,
+  'repair_summary',
+])
+
+function validateMaterialRepair(content: string) {
+  const value = parseJsonObject(content)
+  if (Object.keys(value).some(field => !MATERIAL_REPAIR_FIELDS.has(field))) {
+    throw new TypeError('unrecognized material repair field')
+  }
+  const chapterPatch = ownDataValue(value, 'chapter_patch')
+  if (chapterPatch !== undefined && !plainObject(chapterPatch)) {
+    throw new TypeError('material repair chapter patch must be an object')
+  }
+  let collectionEntries = 0
+  for (const field of MATERIAL_REPAIR_COLLECTION_FIELDS) {
+    const collection = ownDataValue(value, field)
+    if (collection === undefined) continue
+    if (!Array.isArray(collection) || !collection.every(plainObject)) {
+      throw new TypeError('material repair collections must contain objects')
+    }
+    collectionEntries += collection.length
+  }
+  const repairSummary = ownDataValue(value, 'repair_summary')
+  if (repairSummary !== undefined && typeof repairSummary !== 'string') {
+    throw new TypeError('material repair summary must be a string')
+  }
+  if ((chapterPatch === undefined || Object.keys(chapterPatch).length === 0) && collectionEntries === 0) {
+    throw new TypeError('material repair mutation required')
+  }
+  return value
+}
+
 const validators = {
   draft_prose: validateProse,
   word_target_prose: validateProse,
@@ -378,6 +420,7 @@ const validators = {
   revision_prose: validateProse,
   editor_report_json: validateEditorReport,
   story_state_json: validateStoryState,
+  material_repair_json: validateMaterialRepair,
 } satisfies Record<ChapterStageResponseContract, ContractValidator>
 
 export function validateMcpStageResponse(

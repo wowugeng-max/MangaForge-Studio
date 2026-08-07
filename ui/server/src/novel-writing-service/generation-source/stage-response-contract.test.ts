@@ -121,6 +121,29 @@ describe('MCP stage response contracts', () => {
     }).output).toEqual(payload)
   })
 
+  test('accepts a combined material repair payload without rewriting it', () => {
+    const payload = {
+      chapter_patch: { title: '雨夜旧码头', ending_hook: '仓门里传来第二个人的脚步声。' },
+      worldbuilding: [{ entity: '旧码头', change: '补充潮汐与仓门开启时间' }],
+      characters: [{ name: '李玄', current_location: '旧码头' }],
+      character_updates: [{ name: '李玄', change: '伤臂加重，暂时不能拔刀' }],
+      settings: [{ name: '旧码头', atmosphere: '暴雨后的咸腥与铁锈味' }],
+      chapter_setting_usage: [{ setting: '旧码头', usage: '李玄在仓门前发现新鲜脚印' }],
+      repair_summary: '补齐旧码头设定、李玄伤势与章末钩子的联动。',
+    }
+
+    expect(validateMcpStageResponse('material_repair', 'material_repair_json', {
+      content: JSON.stringify(payload),
+    }).output).toEqual(payload)
+  })
+
+  test('rejects forbidden and unknown top-level material repair fields', () => {
+    for (const payload of [
+      { chapter_patch: { title: '雨夜旧码头' }, chapter_text: '不应返回正文。' },
+      { chapter_patch: { title: '雨夜旧码头' }, unrecognized: true },
+    ]) expectInvalid('material_repair_json', JSON.stringify(payload), 'material_repair')
+  })
+
   test('accepts canonical status-filter receipts with a field-specific boolean verdict', () => {
     const payload = {
       status_filter_receipts: [{
