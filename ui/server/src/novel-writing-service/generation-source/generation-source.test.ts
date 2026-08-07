@@ -1933,6 +1933,50 @@ describe('McpGenerationSource quarantine outcomes', () => {
     ])
   })
 
+  test('persists session_create_unknown when a legacy send has no Session identity', async () => {
+    const { workspace, server, key, project } = await harness('mangaforge-generation-create-unknown-')
+    let remoteCalls = 0
+    const adapter = {
+      listAgents: async () => {
+        remoteCalls += 1
+        return [{ id: 'agent-1', name: '正文 Agent' }]
+      },
+      generateProse: async () => {
+        remoteCalls += 1
+        throw new McpError('MCP_SEND_UNKNOWN', 'legacy create outcome unknown')
+      },
+    }
+    const firstRuntime = runtimeWithAdapter(workspace, server, key, adapter)
+    const source = new McpGenerationSource(firstRuntime.runtime as any)
+
+    await expect(source.generateProse(sourceRequest({ activeWorkspace: workspace, project })))
+      .rejects.toMatchObject({ code: 'MCP_SEND_UNKNOWN' })
+    const receipt = (await listNovelRuns(workspace, project.id))
+      .find(run => run.run_type === 'mcp_generate_prose' && run.status === 'send_unknown')
+    expect(receipt).toMatchObject({ status: 'send_unknown' })
+    expect(JSON.parse(receipt!.output_ref!)).toMatchObject({ status: 'send_unknown' })
+    const [quarantine] = await readMcpAgentQuarantines(workspace)
+    expect(quarantine).toMatchObject({
+      reason: 'session_create_unknown',
+      request_id: 'request-12',
+    })
+    expect(quarantine).not.toHaveProperty('session_id')
+    expect(await firstRuntime.registry.isActive(workspace, {
+      serverId: server.id,
+      keyId: key.id,
+      agentId: 'agent-1',
+    })).toBe(false)
+
+    const callsBeforeRestart = remoteCalls
+    const restarted = runtimeWithAdapter(workspace, server, key, adapter)
+    await expect(new McpGenerationSource(restarted.runtime as any).generateProse(sourceRequest({
+      activeWorkspace: workspace,
+      project,
+      requestId: 'request-after-restart',
+    }))).rejects.toMatchObject({ code: 'MCP_AGENT_QUARANTINED' })
+    expect(remoteCalls).toBe(callsBeforeRestart)
+  })
+
   test('records a confirmed ambiguous send without quarantining the terminated tuple', async () => {
     const { workspace, server, key, project } = await harness('mangaforge-generation-send-confirmed-')
     let attempts = 0

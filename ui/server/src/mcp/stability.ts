@@ -184,7 +184,7 @@ export function createMcpStabilityController(dependencies: {
       } catch (error) {
         if (operationKind === 'mutation'
           && input.deadline.signal.aborted
-          && isAbortRelatedError(error, input.deadline.signal)) {
+          && (!policy || isAbortRelatedError(error, input.deadline.signal))) {
           throw mutationSendUnknown(input)
         }
         if (!policy) {

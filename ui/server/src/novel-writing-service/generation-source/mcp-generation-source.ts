@@ -2096,11 +2096,12 @@ export class McpGenerationSource implements GenerationSource {
           scrubber,
           (scrubbedError as any)?.details?.session_id || progressProvenance.session_id || '',
         )
+        const sessionCreateUnknown = receiptStatus === 'send_unknown' && !sessionId
         try {
           await lease.quarantine({
             requestId: boundedScrubbedId(scrubber, request.requestId),
-            sessionId,
-            reason: receiptStatus,
+            ...(!sessionCreateUnknown ? { sessionId } : {}),
+            reason: sessionCreateUnknown ? 'session_create_unknown' : receiptStatus,
           })
           if (receiptPersistenceError) {
             finalError = unresolvedStoreError(

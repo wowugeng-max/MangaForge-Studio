@@ -717,6 +717,24 @@ describe('MCP stability coordinator', () => {
     expect(calls).toBe(0)
   })
 
+  test('does not dispatch a policy-less mutation after pre-dispatch total expiry', async () => {
+    const harness = abortRaceHarness(10)
+    harness.clock.advance(10)
+    let calls = 0
+
+    const caught = await harness.controller.runMutation(
+      undefined,
+      { ...harness.input, phase: 'session_create' },
+      async () => { calls += 1; return 'never-called' },
+    ).catch(error => error)
+
+    expect(caught).toMatchObject({
+      code: 'MCP_SERVER_NOT_READY',
+      details: { phase: 'session_create' },
+    })
+    expect(calls).toBe(0)
+  })
+
   test('quarantines an in-flight abort-related rejection from a policy-less mutation', async () => {
     const harness = abortRaceHarness()
     const raw = new DOMException('raw SDK cancellation', 'AbortError')
@@ -737,6 +755,80 @@ describe('MCP stability coordinator', () => {
       code: 'MCP_SEND_UNKNOWN',
       details: { phase: 'session_create' },
     })
+    expect(calls).toBe(1)
+  })
+
+  for (const abortMode of ['caller cancellation', 'total expiry'] as const) {
+    test.each([
+      {
+        label: 'typed connection loss',
+        error: new McpError('MCP_CONNECTION_LOST', 'private connection loss detail'),
+      },
+      { label: 'plain error', error: new Error('private plain failure detail') },
+      {
+        label: 'ECONNRESET object',
+        error: { code: 'ECONNRESET', message: 'private reset failure detail' },
+      },
+    ])(`quarantines policy-less $label after in-flight ${abortMode}`, async ({ error }) => {
+      const harness = abortRaceHarness(abortMode === 'total expiry' ? 10 : 100)
+      let calls = 0
+
+      const caught = await harness.controller.runMutation(
+        undefined,
+        { ...harness.input, phase: 'session_create' },
+        async () => {
+          calls += 1
+          if (abortMode === 'caller cancellation') harness.caller.abort()
+          else harness.clock.advance(10)
+          throw error
+        },
+      ).catch(value => value)
+
+      expect(caught).not.toBe(error)
+      expect(caught).toMatchObject({
+        code: 'MCP_SEND_UNKNOWN',
+        details: { phase: 'session_create' },
+      })
+      expect(caught.details).toEqual({ phase: 'session_create' })
+      expect(caught.message).not.toContain(String((error as any).message))
+      expect(caught).not.toHaveProperty('cause')
+      expect(calls).toBe(1)
+    })
+  }
+
+  test.each([
+    new McpError('MCP_CONNECTION_LOST', 'active connection loss'),
+    new Error('active plain failure'),
+    { code: 'ECONNRESET', message: 'active reset failure' },
+  ])('preserves a policy-less mutation rejection while the signal remains active', async (error) => {
+    const harness = abortRaceHarness()
+    let calls = 0
+
+    const caught = await harness.controller.runMutation(
+      undefined,
+      { ...harness.input, phase: 'session_create' },
+      async () => { calls += 1; throw error },
+    ).catch(value => value)
+
+    expect(caught).toBe(error)
+    expect(calls).toBe(1)
+  })
+
+  test('keeps exact pre-dispatch mutation evidence safe when caller cancellation races', async () => {
+    const harness = abortRaceHarness()
+    let calls = 0
+
+    const caught = await harness.controller.runMutation(
+      harness.policy,
+      { ...harness.input, phase: 'session_create' },
+      async () => {
+        calls += 1
+        harness.caller.abort()
+        throw exactNotReadyEvidence()
+      },
+    ).catch(error => error)
+
+    expect(caught).toMatchObject({ code: 'MCP_CANCELLED' })
     expect(calls).toBe(1)
   })
 
