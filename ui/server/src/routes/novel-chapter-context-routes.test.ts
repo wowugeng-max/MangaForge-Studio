@@ -233,6 +233,7 @@ describe('novel chapter context repair', () => {
       'characters',
       '',
       ' worldbuilding ',
+      ` ${'x'.repeat(240)} `,
       ...Array.from({ length: 80 }, (_, index) => `repair_key_${index}`),
     ]
     const arrayResponse = await callRoute(handler, {
@@ -250,7 +251,83 @@ describe('novel chapter context repair', () => {
     expect(nonArrayResponse.statusCode).toBe(200)
     expect(repairCalls[0].repairKeys.slice(0, 2)).toEqual(['characters', 'worldbuilding'])
     expect(repairCalls[0].repairKeys.length).toBeLessThanOrEqual(64)
+    expect(repairCalls[0].repairKeys.every((key: string) => key.length <= 160)).toBe(true)
     expect(repairCalls[1].repairKeys).toBeUndefined()
+  })
+
+  test('reads repair_keys only from plain arrays and own string data elements', async () => {
+    const repairCalls: any[] = []
+    let accessorCalls = 0
+    let objectConversions = 0
+    let proxyTrapCalls = 0
+    const { app, handlers } = createRouteHarness()
+    registerNovelChapterContextRoutes(app as any, {
+      getWorkspace: () => 'workspace',
+      getProject: async () => mcpProjectFixture(),
+      buildChapterContextPackage: async () => readyContextFixture(),
+      repairChapterMaterials: async input => {
+        repairCalls.push(input)
+        return { ok: true, skipped: true, source: 'mcp', context_package: readyContextFixture(), preflight: readyContextFixture().preflight }
+      },
+    })
+    const handler = handlers.get('POST /api/novel/chapters/:chapterId/auto-repair-context')
+
+    const hostileElements: any[] = [' characters ', 'ignored accessor', {
+      toString() {
+        objectConversions += 1
+        return 'worldbuilding'
+      },
+    }]
+    Object.defineProperty(hostileElements, '1', {
+      configurable: true,
+      enumerable: true,
+      get() {
+        accessorCalls += 1
+        throw new Error('repair_keys element getter must not run')
+      },
+    })
+    const proxiedArray = new Proxy(['characters'], {
+      get() {
+        proxyTrapCalls += 1
+        throw new Error('repair_keys proxy trap must not run')
+      },
+      getOwnPropertyDescriptor() {
+        proxyTrapCalls += 1
+        throw new Error('repair_keys proxy descriptor trap must not run')
+      },
+    })
+    const revoked = Proxy.revocable(['characters'], {})
+    revoked.revoke()
+    const accessorBody: any = { project_id: 5 }
+    Object.defineProperty(accessorBody, 'repair_keys', {
+      configurable: true,
+      enumerable: true,
+      get() {
+        accessorCalls += 1
+        throw new Error('repair_keys body getter must not run')
+      },
+    })
+
+    const responses = []
+    for (const body of [
+      { project_id: 5, repair_keys: hostileElements },
+      { project_id: 5, repair_keys: proxiedArray },
+      { project_id: 5, repair_keys: revoked.proxy },
+      accessorBody,
+    ]) {
+      responses.push(await callRoute(handler, { params: { chapterId: '9' }, query: {}, body }))
+    }
+
+    expect(responses.map(response => response.statusCode)).toEqual([200, 200, 200, 200])
+    expect(repairCalls.map(call => call.repairKeys)).toEqual([
+      ['characters'],
+      undefined,
+      undefined,
+      undefined,
+    ])
+    expect(accessorCalls).toBe(0)
+    expect(objectConversions).toBe(0)
+    expect(proxyTrapCalls).toBe(0)
   })
 
   test('preserves the existing model no-model fallback and never dispatches MCP repair', async () => {
@@ -380,6 +457,177 @@ describe('novel chapter context repair', () => {
     })
     expect(JSON.stringify(response.body)).not.toContain('raw refresh failure')
     expect(JSON.stringify(response.body)).not.toContain('must-not-leak')
+  })
+
+  test('preserves committed refresh truth from a real refresh-and-close AggregateError', async () => {
+    const secret = 'close-error-secret-must-not-leak'
+    const committedRefresh = Object.assign(new Error('raw committed refresh error'), {
+      code: 'MATERIAL_REPAIR_RESULT_REFRESH_FAILED',
+      error_code: 'MATERIAL_REPAIR_RESULT_REFRESH_FAILED',
+      committed: true,
+      task_id: 'chapter-task:material-repair-aggregate-9',
+      details: { remote_body: 'refresh-secret-must-not-leak' },
+    })
+    const closeFailure = Object.assign(new Error(secret), {
+      code: 'MCP_SESSION_FAILED',
+      details: { remote_body: secret },
+    })
+    const { app, handlers } = createRouteHarness()
+    registerNovelChapterContextRoutes(app as any, {
+      getWorkspace: () => 'workspace',
+      getProject: async () => mcpProjectFixture(),
+      buildChapterContextPackage: async () => readyContextFixture(),
+      repairChapterMaterials: async () => {
+        throw new AggregateError(
+          [committedRefresh, closeFailure],
+          `committed refresh and close failed: ${secret}`,
+        )
+      },
+    })
+
+    const response = await callRoute(
+      handlers.get('POST /api/novel/chapters/:chapterId/auto-repair-context'),
+      { params: { chapterId: '9' }, query: {}, body: { project_id: 5 } },
+    )
+
+    expect(response.statusCode).toBe(500)
+    expect(response.body).toEqual({
+      error: '材料补齐已提交，请重新读取项目状态',
+      error_code: 'MATERIAL_REPAIR_RESULT_REFRESH_FAILED',
+      committed: true,
+      task_id: 'chapter-task:material-repair-aggregate-9',
+    })
+    expect(JSON.stringify(response.body)).not.toContain(secret)
+    expect(JSON.stringify(response.body)).not.toContain('refresh-secret-must-not-leak')
+  })
+
+  test('does not invoke hostile AggregateError accessors or Proxy traps', async () => {
+    let accessorCalls = 0
+    let proxyTrapCalls = 0
+    let rejection: unknown = new Error('unset')
+    const { app, handlers } = createRouteHarness()
+    registerNovelChapterContextRoutes(app as any, {
+      getWorkspace: () => 'workspace',
+      getProject: async () => mcpProjectFixture(),
+      buildChapterContextPackage: async () => readyContextFixture(),
+      repairChapterMaterials: async () => { throw rejection },
+    })
+    const handler = handlers.get('POST /api/novel/chapters/:chapterId/auto-repair-context')
+
+    const accessorAggregate = new AggregateError([], 'aggregate accessor secret')
+    Object.defineProperty(accessorAggregate, 'errors', {
+      configurable: true,
+      get() {
+        accessorCalls += 1
+        throw new Error('aggregate errors getter must not run')
+      },
+    })
+    rejection = accessorAggregate
+    const accessorResponse = await callRoute(handler, {
+      params: { chapterId: '9' }, query: {}, body: { project_id: 5 },
+    })
+
+    const accessorChild = new Error('child accessor secret')
+    Object.defineProperty(accessorChild, 'code', {
+      configurable: true,
+      get() {
+        accessorCalls += 1
+        return 'MATERIAL_REPAIR_RESULT_REFRESH_FAILED'
+      },
+    })
+    Object.assign(accessorChild, {
+      committed: true,
+      task_id: 'chapter-task:must-not-project-accessor',
+    })
+    const proxiedRefresh = new Proxy(Object.assign(new Error('proxy child secret'), {
+      code: 'MATERIAL_REPAIR_RESULT_REFRESH_FAILED',
+      committed: true,
+      task_id: 'chapter-task:must-not-project-proxy',
+    }), {
+      get() {
+        proxyTrapCalls += 1
+        throw new Error('aggregate child proxy get trap must not run')
+      },
+      getOwnPropertyDescriptor() {
+        proxyTrapCalls += 1
+        throw new Error('aggregate child proxy descriptor trap must not run')
+      },
+    })
+    const hostileChildren: any[] = [accessorChild, proxiedRefresh, 'ignored accessor']
+    Object.defineProperty(hostileChildren, '2', {
+      configurable: true,
+      enumerable: true,
+      get() {
+        accessorCalls += 1
+        throw new Error('aggregate child array accessor must not run')
+      },
+    })
+    const hostileChildrenAggregate = new AggregateError([], 'aggregate children secret')
+    Object.defineProperty(hostileChildrenAggregate, 'errors', {
+      configurable: true,
+      value: hostileChildren,
+    })
+    rejection = hostileChildrenAggregate
+    const childrenResponse = await callRoute(handler, {
+      params: { chapterId: '9' }, query: {}, body: { project_id: 5 },
+    })
+
+    const proxiedAggregate = new Proxy(new AggregateError([
+      Object.assign(new Error('hidden committed refresh'), {
+        code: 'MATERIAL_REPAIR_RESULT_REFRESH_FAILED',
+        committed: true,
+        task_id: 'chapter-task:must-not-project-top-proxy',
+      }),
+    ]), {
+      get() {
+        proxyTrapCalls += 1
+        throw new Error('aggregate proxy get trap must not run')
+      },
+      getOwnPropertyDescriptor() {
+        proxyTrapCalls += 1
+        throw new Error('aggregate proxy descriptor trap must not run')
+      },
+    })
+    rejection = proxiedAggregate
+    const proxyResponse = await callRoute(handler, {
+      params: { chapterId: '9' }, query: {}, body: { project_id: 5 },
+    })
+
+    expect([accessorResponse, childrenResponse, proxyResponse].map(response => ({
+      statusCode: response.statusCode,
+      body: response.body,
+    }))).toEqual([
+      { statusCode: 500, body: { error: '材料补齐失败' } },
+      { statusCode: 500, body: { error: '材料补齐失败' } },
+      { statusCode: 500, body: { error: '材料补齐失败' } },
+    ])
+    expect(accessorCalls).toBe(0)
+    expect(proxyTrapCalls).toBe(0)
+  })
+
+  test('treats inherited-object property names as unknown error codes', async () => {
+    let code = 'constructor'
+    const { app, handlers } = createRouteHarness()
+    registerNovelChapterContextRoutes(app as any, {
+      getWorkspace: () => 'workspace',
+      getProject: async () => mcpProjectFixture(),
+      buildChapterContextPackage: async () => readyContextFixture(),
+      repairChapterMaterials: async () => {
+        throw Object.assign(new Error(`unknown code secret: ${code}`), { code })
+      },
+    })
+    const handler = handlers.get('POST /api/novel/chapters/:chapterId/auto-repair-context')
+
+    for (const hostileCode of ['constructor', '__proto__', 'prototype', 'toString']) {
+      code = hostileCode
+      const response = await callRoute(handler, {
+        params: { chapterId: '9' }, query: {}, body: { project_id: 5 },
+      })
+      expect(typeof response.statusCode).toBe('number')
+      expect(response.statusCode).toBe(500)
+      expect(response.body).toEqual({ error: '材料补齐失败' })
+      expect(JSON.stringify(response.body)).not.toContain(hostileCode)
+    }
   })
 
   test('keeps unknown failures at a bounded generic 500 response', async () => {
