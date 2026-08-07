@@ -372,7 +372,7 @@ describe('MCP stability coordinator', () => {
     })
   })
 
-  test('keeps an unrelated ambiguous mutation rejection unchanged after cancellation races', async () => {
+  test('quarantines an ambiguous mutation rejection after a cancellation race', async () => {
     const harness = abortRaceHarness()
     const ambiguous = new McpError('MCP_TOOL_ERROR', 'unrelated mutation failure')
     let calls = 0
@@ -387,8 +387,130 @@ describe('MCP stability coordinator', () => {
       },
     ).catch(error => error)
 
-    expect(caught).toBe(ambiguous)
+    expect(caught).not.toBe(ambiguous)
+    expect(caught).toMatchObject({
+      code: 'MCP_SEND_UNKNOWN',
+      details: { phase: 'session_create' },
+    })
+    expect(caught.message).not.toContain(ambiguous.message)
+    expect(caught).not.toHaveProperty('cause')
     expect(calls).toBe(1)
+  })
+
+  test('does not quarantine a mutation when the caller was already cancelled before dispatch', async () => {
+    const harness = abortRaceHarness()
+    harness.caller.abort()
+    let calls = 0
+
+    const caught = await harness.controller.runMutation(
+      harness.policy,
+      { ...harness.input, phase: 'session_create' },
+      async () => { calls += 1; return 'never-called' },
+    ).catch(error => error)
+
+    expect(caught).toMatchObject({ code: 'MCP_CANCELLED' })
+    expect(calls).toBe(0)
+  })
+
+  test('does not quarantine a mutation when the total deadline expired before dispatch', async () => {
+    const harness = abortRaceHarness(10)
+    harness.clock.advance(10)
+    let calls = 0
+
+    const caught = await harness.controller.runMutation(
+      harness.policy,
+      { ...harness.input, phase: 'session_create' },
+      async () => { calls += 1; return 'never-called' },
+    ).catch(error => error)
+
+    expect(caught).toMatchObject({
+      code: 'MCP_SERVER_NOT_READY',
+      details: { phase: 'session_create' },
+    })
+    expect(calls).toBe(0)
+  })
+
+  test('quarantines a mutation rejected with AbortError after an in-flight caller cancellation', async () => {
+    const harness = abortRaceHarness()
+    const raw = new DOMException('raw SDK cancellation', 'AbortError')
+    harness.policy.classify = () => 'terminal_failure'
+    let calls = 0
+
+    const caught = await harness.controller.runMutation(
+      harness.policy,
+      { ...harness.input, phase: 'session_create' },
+      async () => {
+        calls += 1
+        harness.caller.abort()
+        throw raw
+      },
+    ).catch(error => error)
+
+    expect(caught).not.toBe(raw)
+    expect(caught).toMatchObject({
+      code: 'MCP_SEND_UNKNOWN',
+      details: { phase: 'session_create' },
+    })
+    expect(calls).toBe(1)
+  })
+
+  test('quarantines a mutation rejected with AbortError after an in-flight total expiry', async () => {
+    const harness = abortRaceHarness(10)
+    const raw = new DOMException('raw SDK timeout abort', 'AbortError')
+    harness.policy.classify = () => 'terminal_failure'
+    let calls = 0
+
+    const caught = await harness.controller.runMutation(
+      harness.policy,
+      { ...harness.input, phase: 'session_create' },
+      async () => {
+        calls += 1
+        harness.clock.advance(10)
+        throw raw
+      },
+    ).catch(error => error)
+
+    expect(caught).not.toBe(raw)
+    expect(caught).toMatchObject({
+      code: 'MCP_SEND_UNKNOWN',
+      details: { phase: 'session_create' },
+    })
+    expect(calls).toBe(1)
+  })
+
+  test('returns a successful mutation that resolves exactly at the total deadline', async () => {
+    const harness = stabilityHarness([], {
+      totalMs: 10,
+      requiredConsecutiveSuccesses: 1,
+      operationReadinessMode: 'reactive',
+    })
+
+    const result = await harness.controller.runMutation(
+      harness.policy,
+      { ...harness.input, phase: 'session_create' },
+      async () => { harness.clock.advance(10); return 'created' },
+    )
+
+    expect(result).toBe('created')
+  })
+
+  test('rejects a successful read that resolves exactly at the total deadline', async () => {
+    const harness = stabilityHarness([], {
+      totalMs: 10,
+      requiredConsecutiveSuccesses: 1,
+      operationReadinessMode: 'reactive',
+    })
+
+    const caught = await harness.controller.runRead(
+      harness.policy,
+      { ...harness.input, phase: 'session_poll' },
+      async () => { harness.clock.advance(10); return 'late-read' },
+    ).catch(error => error)
+
+    expect(caught).toMatchObject({
+      code: 'MCP_SERVER_NOT_READY',
+      details: { phase: 'session_poll' },
+    })
   })
 
   test('stabilizes, rotates, and replays a transient read failure', async () => {
@@ -478,24 +600,7 @@ describe('MCP stability coordinator', () => {
     ])
   })
 
-  test('reactive mutation does not replay an ambiguous failure', async () => {
-    const harness = stabilityHarness([], { operationReadinessMode: 'reactive' })
-    const error = new McpError('MCP_CONNECTION_LOST', 'lost')
-    let calls = 0
-
-    const caught = await harness.controller.runMutation(
-      harness.policy,
-      { ...harness.input, phase: 'session_create' },
-      async () => { calls += 1; throw error },
-    ).catch(value => value)
-
-    expect(caught).toBe(error)
-    expect(calls).toBe(1)
-    expect(harness.acquisitions).toBe(0)
-    expect(harness.probeLog).toEqual([])
-  })
-
-  test('reactive exact pre-dispatch recovery exhausts the shared deadline without probing', async () => {
+  test('reactive mutation exact pre-dispatch recovery exhausts the shared deadline without probing', async () => {
     const harness = stabilityHarness([], {
       operationReadinessMode: 'reactive',
       totalMs: 12,
@@ -503,15 +608,15 @@ describe('MCP stability coordinator', () => {
       pollMaxMs: 10,
     })
 
-    const caught = await harness.controller.runRead(
+    const caught = await harness.controller.runMutation(
       harness.policy,
-      { ...harness.input, phase: 'drive_sync' },
+      { ...harness.input, phase: 'session_create' },
       async () => { throw exactNotReadyEvidence() },
     ).catch(error => error)
 
     expect(caught).toMatchObject({
       code: 'MCP_SERVER_NOT_READY',
-      details: { phase: 'drive_sync' },
+      details: { phase: 'session_create' },
     })
     expect(harness.sleeps.reduce((sum, value) => sum + value, 0)).toBe(12)
     expect(harness.acquisitions).toBe(0)
@@ -527,7 +632,7 @@ describe('MCP stability coordinator', () => {
       }),
     },
     { label: 'message-only not-ready', error: new McpError('MCP_TOOL_ERROR', 'Server not initialized') },
-  ])('never replays an ambiguous mutation: $label', async ({ error }) => {
+  ])('quarantines a proactive ambiguous mutation without replay: $label', async ({ error }) => {
     const harness = stabilityHarness(['ok', 'ok'])
     let calls = 0
 
@@ -537,8 +642,48 @@ describe('MCP stability coordinator', () => {
       async () => { calls += 1; throw error },
     ).catch(value => value)
 
-    expect(caught).toBe(error)
+    expect(caught).not.toBe(error)
+    expect(caught).toMatchObject({
+      code: 'MCP_SEND_UNKNOWN',
+      details: { phase: 'session_create' },
+    })
+    expect(caught.message).not.toContain(error.message)
+    expect(caught.details).toEqual({ phase: 'session_create' })
+    expect(caught).not.toHaveProperty('cause')
     expect(calls).toBe(1)
+  })
+
+  test.each([
+    { label: 'timeout', error: new McpError('MCP_CONNECT_TIMEOUT', 'timeout') },
+    { label: 'reset', error: new McpError('MCP_CONNECTION_LOST', 'reset') },
+    {
+      label: 'HTTP 500',
+      error: new McpError('MCP_TOOL_ERROR', 'http 500', {
+        failure_evidence: { kind: 'jsonrpc_http_rejection', http_status: 500 },
+      }),
+    },
+    { label: 'message-only not-ready', error: new McpError('MCP_TOOL_ERROR', 'Server not initialized') },
+  ])('quarantines a reactive ambiguous mutation without replay or probing: $label', async ({ error }) => {
+    const harness = stabilityHarness([], { operationReadinessMode: 'reactive' })
+    let calls = 0
+
+    const caught = await harness.controller.runMutation(
+      harness.policy,
+      { ...harness.input, phase: 'session_create' },
+      async () => { calls += 1; throw error },
+    ).catch(value => value)
+
+    expect(caught).not.toBe(error)
+    expect(caught).toMatchObject({
+      code: 'MCP_SEND_UNKNOWN',
+      details: { phase: 'session_create' },
+    })
+    expect(caught.message).not.toContain(error.message)
+    expect(caught.details).toEqual({ phase: 'session_create' })
+    expect(caught).not.toHaveProperty('cause')
+    expect(calls).toBe(1)
+    expect(harness.acquisitions).toBe(0)
+    expect(harness.probeLog).toEqual([])
   })
 
   test('does no warm-up or reacquisition when the adapter has no stability policy', async () => {
@@ -555,6 +700,44 @@ describe('MCP stability coordinator', () => {
     expect(calls).toBe(1)
     expect(harness.acquisitions).toBe(0)
     expect(harness.probeLog).toEqual([])
+  })
+
+  test('does not dispatch a policy-less mutation after pre-dispatch caller cancellation', async () => {
+    const harness = abortRaceHarness()
+    harness.caller.abort()
+    let calls = 0
+
+    const caught = await harness.controller.runMutation(
+      undefined,
+      { ...harness.input, phase: 'session_create' },
+      async () => { calls += 1; return 'never-called' },
+    ).catch(error => error)
+
+    expect(caught).toMatchObject({ code: 'MCP_CANCELLED' })
+    expect(calls).toBe(0)
+  })
+
+  test('quarantines an in-flight abort-related rejection from a policy-less mutation', async () => {
+    const harness = abortRaceHarness()
+    const raw = new DOMException('raw SDK cancellation', 'AbortError')
+    let calls = 0
+
+    const caught = await harness.controller.runMutation(
+      undefined,
+      { ...harness.input, phase: 'session_create' },
+      async () => {
+        calls += 1
+        harness.caller.abort()
+        throw raw
+      },
+    ).catch(error => error)
+
+    expect(caught).not.toBe(raw)
+    expect(caught).toMatchObject({
+      code: 'MCP_SEND_UNKNOWN',
+      details: { phase: 'session_create' },
+    })
+    expect(calls).toBe(1)
   })
 
   test('publishes only bounded provider-neutral stabilization progress', async () => {

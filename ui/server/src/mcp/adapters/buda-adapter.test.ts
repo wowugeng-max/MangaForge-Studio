@@ -4,6 +4,7 @@ import * as budaAdapterModule from './buda-adapter'
 import { BUDA_MCP_SERVER_TEMPLATE } from '../server-store'
 import { McpGenerationDeadline } from '../deadline'
 import { McpError } from '../errors'
+import { createMcpStabilityController } from '../stability'
 import { BUDA_TOOL_ALIASES, buildBudaToolArguments, resolveBudaTools } from './buda-tool-map'
 import { buildBudaDriveSnapshot } from './buda-drive'
 import type { McpGenerationAdapter } from './types'
@@ -228,6 +229,47 @@ describe('BudaAdapter', () => {
     await expect(new BudaAdapter(fake.client as any).invokeChapterStage!(invocationInput()))
       .rejects.toMatchObject({ code: 'MCP_SEND_UNKNOWN' })
     expect(createCount).toBe(1)
+  })
+
+  test.each([
+    { label: 'timeout', error: new McpError('MCP_CONNECT_TIMEOUT', 'remote timeout detail') },
+    { label: 'connection loss', error: new McpError('MCP_CONNECTION_LOST', 'remote connection detail') },
+    {
+      label: 'HTTP 500',
+      error: new McpError('MCP_TOOL_ERROR', 'remote HTTP detail', {
+        failure_evidence: { kind: 'jsonrpc_http_rejection', http_status: 500 },
+      }),
+    },
+    { label: 'message-only failure', error: new Error('secret remote message-only detail') },
+  ])('quarantines a one-shot create $label through production Stability', async ({ error }) => {
+    const fake = createFakeClient()
+    const original = fake.client.callTool
+    let createCount = 0
+    fake.client.callTool = async (name: string, args: any, options: any) => {
+      if (name.endsWith('createApiAgentSession')) {
+        fake.calls.push({ name, args, options })
+        createCount += 1
+        throw error
+      }
+      return original(name, args, options)
+    }
+    const stability = createMcpStabilityController({
+      reacquire: async () => fake.client as any,
+      invalidateCurrent: async () => {},
+    })
+
+    const caught = await new BudaAdapter(fake.client as any).invokeChapterStage!(
+      invocationInput({ stability }),
+    ).catch(value => value)
+
+    expect(caught).not.toBe(error)
+    expect(caught).toMatchObject({
+      code: 'MCP_SEND_UNKNOWN',
+      details: { phase: 'session_create' },
+    })
+    expect(createCount).toBe(1)
+    expect(fake.calls.filter(call => call.name.endsWith('getApiAgentSession'))).toHaveLength(0)
+    expect(fake.calls.filter(call => call.name.endsWith('cancelApiAgentSessionRun'))).toHaveLength(0)
   })
 
   test('does not expose an untrusted remote error message before Session creation', async () => {

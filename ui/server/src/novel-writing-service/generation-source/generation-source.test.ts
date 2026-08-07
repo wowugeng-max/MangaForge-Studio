@@ -4316,6 +4316,34 @@ describe('McpGenerationSource task execution', () => {
     await execution.close({ status: 'failed', error: caught }).catch(() => {})
   })
 
+  test('preserves MCP_SERVER_NOT_READY through task execution scrubbing and its stage receipt', async () => {
+    const fixture = await neutralTaskFixture('mangaforge-mcp-task-not-ready-code-', {
+      async invokeChapterStage() {
+        throw new McpError('MCP_SERVER_NOT_READY', 'bounded local not-ready message', {
+          phase: 'session_create',
+        })
+      },
+    })
+    const execution = await fixture.begin()
+
+    const caught: any = await execution.generateDraft(fixture.request()).catch(error => error)
+
+    expect(caught).toMatchObject({
+      code: 'MCP_SERVER_NOT_READY',
+      error_code: 'MCP_SERVER_NOT_READY',
+      details: { phase: 'session_create' },
+    })
+    const [stageRun] = (await listNovelRuns(fixture.activeWorkspace, fixture.durableProject.id))
+      .filter(run => run.run_type === 'chapter_generation_stage')
+    expect(stageRun).toMatchObject({ step_name: 'draft', status: 'failed' })
+    expect(JSON.parse(stageRun!.output_ref!)).toMatchObject({
+      stage: 'draft',
+      status: 'failed',
+      error_code: 'MCP_SERVER_NOT_READY',
+    })
+    await execution.close({ status: 'failed', error: caught }).catch(() => {})
+  })
+
   test('preserves a local Story State business error through the complete failed-task close', async () => {
     const remoteOutputMarker = 'REMOTE_STORY_STATE_OUTPUT_MUST_NOT_PERSIST'
     const payloadError = new Error('story state payload semantics failed')
@@ -7353,6 +7381,65 @@ describe('McpGenerationSource', () => {
         project.reference_config!.prose_generation_source as any,
       ),
       status: 'failed',
+    })
+  })
+
+  test('preserves MCP_SERVER_NOT_READY through scrubbing and the failed receipt', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generation-not-ready-code-'))
+    workspaces.push(workspace)
+    const server = { ...BUDA_MCP_SERVER_TEMPLATE }
+    await writeMcpServers(workspace, [server])
+    const key = await createMcpKey(workspace, {
+      mcp_server_id: server.id,
+      key: 'sk_not_ready_code',
+      description: '账号',
+    })
+    const project = await createNovelProject(workspace, {
+      title: 'Not ready code',
+      reference_config: {
+        prose_generation_source: {
+          version: 'prose_generation_source_v1',
+          type: 'mcp',
+          mcp: {
+            server_id: server.id,
+            key_id: key.id,
+            adapter_id: server.adapter_id,
+            agent_id: 'agent-1',
+          },
+        },
+      },
+    })
+    const adapter = {
+      listAgents: async () => [{ id: 'agent-1', name: '正文 Agent' }],
+      generateProse: async () => {
+        throw new McpError('MCP_SERVER_NOT_READY', 'bounded local not-ready message', {
+          phase: 'session_poll',
+        })
+      },
+    }
+    const source = new McpGenerationSource({
+      resolveCredentialConfig: async () => ({ server, key }),
+      acquireAgentLease: acquireFakeAgentLease,
+      listAgents: async () => { throw new Error('must use pinned adapter') },
+      getAdapterForKey: async () => ({ server, key, adapter }),
+    } as any)
+
+    const caught = await source.generateProse(sourceRequest({
+      activeWorkspace: workspace,
+      project,
+    })).catch(error => error)
+
+    expect(caught).toMatchObject({
+      code: 'MCP_SERVER_NOT_READY',
+      error_code: 'MCP_SERVER_NOT_READY',
+      details: { phase: 'session_poll' },
+    })
+    const [receipt] = (await listNovelRuns(workspace, project.id))
+      .filter(run => run.run_type === 'mcp_generate_prose')
+    expect(receipt).toMatchObject({ status: 'failed' })
+    expect(JSON.parse(receipt!.output_ref!)).toMatchObject({
+      status: 'failed',
+      error_code: 'MCP_SERVER_NOT_READY',
     })
   })
 

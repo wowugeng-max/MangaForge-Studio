@@ -39,6 +39,12 @@ function serverNotReady(input: McpStabilityInput): McpError {
   })
 }
 
+function mutationSendUnknown(input: McpStabilityInput): McpError {
+  return new McpError('MCP_SEND_UNKNOWN', 'MCP 写入结果无法确认', {
+    phase: input.phase,
+  })
+}
+
 function remainingOrThrow(input: McpStabilityInput) {
   try {
     input.deadline.throwIfAborted()
@@ -164,8 +170,7 @@ export function createMcpStabilityController(dependencies: {
     operationKind: McpOperationKind,
     operation: () => Promise<T>,
   ): Promise<T> => {
-    if (!policy) return operation()
-    const readinessMode = policy.operationReadinessMode || 'proactive'
+    const readinessMode = policy?.operationReadinessMode || 'proactive'
     const initialDelay = positiveInteger(input.pollInitialMs, 1)
     const maximumDelay = Math.max(initialDelay, positiveInteger(input.pollMaxMs, initialDelay))
     let retryDelay = initialDelay
@@ -174,11 +179,23 @@ export function createMcpStabilityController(dependencies: {
       remainingOrThrow(input)
       try {
         const result = await operation()
-        remainingOrThrow(input)
+        if (operationKind === 'read_safe') remainingOrThrow(input)
         return result
       } catch (error) {
-        throwDeadlineCauseForAbort(error, input)
+        if (operationKind === 'mutation'
+          && input.deadline.signal.aborted
+          && isAbortRelatedError(error, input.deadline.signal)) {
+          throw mutationSendUnknown(input)
+        }
+        if (!policy) {
+          throwDeadlineCauseForAbort(error, input)
+          throw error
+        }
         const failureClass: McpFailureClass = policy.classify(error, operationKind)
+        if (operationKind === 'mutation' && failureClass === 'ambiguous_write_failure') {
+          throw mutationSendUnknown(input)
+        }
+        throwDeadlineCauseForAbort(error, input)
         const replayable = failureClass === 'not_ready_pre_dispatch'
           || (operationKind === 'read_safe' && failureClass === 'transient_read_failure')
         if (!replayable) throw error
