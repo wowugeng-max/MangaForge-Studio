@@ -2,8 +2,22 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { createNovelChapter, createNovelProject, listNovelChapters } from '../novel'
-import { chapterGenerationSourceFingerprint } from '../novel-writing-service/generation-source/source-config'
+import {
+  commitNovelChapterAcceptance,
+  createNovelChapter,
+  createNovelProject,
+  getNovelProject,
+  listNovelChapters,
+  loadNovelMaterialRepairSnapshot,
+  mutateNovelProjectGenerationSource,
+} from '../novel'
+import {
+  chapterGenerationSourceFingerprint,
+  toLegacyProseGenerationSource,
+} from '../novel-writing-service/generation-source/source-config'
+import { ChapterSourceLeaseRegistry } from '../novel-writing-service/generation-source/chapter-source-lease'
+import { createChapterAuthorityFence } from '../novel-writing-service/generation-source/create-generation-source'
+import { createMaterialRepairService } from '../novel-writing-service/service/material-repair-service'
 import { registerNovelChapterContextRoutes } from './novel-chapter-context-routes'
 
 function mcpProjectFixture() {
@@ -216,6 +230,86 @@ describe('novel chapter context repair', () => {
       repairKeys: undefined,
     }])
     expect(modelContextCalls).toBe(0)
+  })
+
+  test('manual MCP repair rejects a source switch during skipped context construction', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'mangaforge-manual-material-skip-fence-'))
+    try {
+      const createdProject = await createNovelProject(workspace, { title: '手动补齐跳过围栏' })
+      const chapter = await createNovelChapter(workspace, {
+        project_id: createdProject.id,
+        chapter_no: 1,
+        title: '第一章',
+      })
+      const mcpSource = mcpProjectFixture().reference_config.chapter_generation_source
+      await mutateNovelProjectGenerationSource(workspace, {
+        projectId: createdProject.id,
+        operation: 'test-configure-manual-material-mcp',
+        chapterGenerationSource: mcpSource as any,
+        proseGenerationSource: toLegacyProseGenerationSource(mcpSource as any),
+        result: null,
+      })
+      let contextBuilds = 0
+      let begins = 0
+      let commits = 0
+      const chapterSourceLeases = new ChapterSourceLeaseRegistry()
+      const materialService = createMaterialRepairService({
+        beginChapterTask: async () => {
+          begins += 1
+          throw new Error('skipped material repair must not begin an execution')
+        },
+        buildChapterContextPackage: async () => {
+          contextBuilds += 1
+          if (contextBuilds === 2) {
+            const modelSource = {
+              ...mcpSource,
+              active: 'model' as const,
+              model: { model_id: 217 },
+            }
+            await mutateNovelProjectGenerationSource(workspace, {
+              projectId: createdProject.id,
+              operation: 'test-switch-manual-material-to-model',
+              chapterGenerationSource: modelSource as any,
+              proseGenerationSource: toLegacyProseGenerationSource(modelSource as any),
+              result: null,
+            })
+          }
+          return readyContextFixture() as any
+        },
+        commitAcceptance: async (...args: any[]) => {
+          commits += 1
+          return commitNovelChapterAcceptance(...args as Parameters<typeof commitNovelChapterAcceptance>)
+        },
+        loadSnapshot: loadNovelMaterialRepairSnapshot,
+        withChapterAuthorityFence: createChapterAuthorityFence({
+          chapterSourceLeases,
+          readProject: getNovelProject,
+        }),
+      })
+      const { app, handlers } = createRouteHarness()
+      registerNovelChapterContextRoutes(app as any, {
+        getWorkspace: () => workspace,
+        getProject: getNovelProject,
+        buildChapterContextPackage: async () => readyContextFixture(),
+        repairChapterMaterials: materialService.repairChapterMaterials,
+      })
+
+      const response = await callRoute(
+        handlers.get('POST /api/novel/chapters/:chapterId/auto-repair-context'),
+        {
+          params: { chapterId: String(chapter.id) },
+          query: {},
+          body: { project_id: createdProject.id },
+        },
+      )
+
+      expect(response.statusCode).toBe(409)
+      expect(response.body).toMatchObject({ error_code: 'GENERATION_SOURCE_CHANGED' })
+      expect({ begins, commits }).toEqual({ begins: 0, commits: 0 })
+      expect(chapterSourceLeases.isActive(workspace, createdProject.id)).toBe(false)
+    } finally {
+      rmSync(workspace, { recursive: true, force: true })
+    }
   })
 
   test('normalizes only array repair_keys with trim dedupe and bounded input', async () => {

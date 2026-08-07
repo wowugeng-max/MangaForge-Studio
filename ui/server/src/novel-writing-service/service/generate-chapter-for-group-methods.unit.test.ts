@@ -1,10 +1,15 @@
 import { describe, expect, test } from 'bun:test'
 import { createNovelWritingService } from './create-novel-writing-service'
-import { createProsePipelineHarness } from '../../routes/novel-writing-service.test-support'
+import {
+  buildPipelineProse,
+  createProsePipelineHarness,
+  proseQualityScores,
+} from '../../routes/novel-writing-service.test-support'
 import { runGenerateChapterContextAndSceneCards } from './generate-chapter-context-scene-cards'
 import {
   commitNovelChapterAcceptance,
   createNovelSettingEntity,
+  listNovelRuns,
   listNovelChapterSettingUsage,
   listNovelCharacters,
   listNovelSettingEntities,
@@ -13,8 +18,16 @@ import {
   mutateNovelProjectGenerationSource,
   replaceNovelChapterSettingUsage,
 } from '../../novel'
+import { createMcpKey } from '../../mcp/key-store'
+import { createMcpRuntime } from '../../mcp/runtime'
+import { writeMcpServers } from '../../mcp/server-store'
+import type { McpChapterInvocationInput, McpGenerationAdapter } from '../../mcp/adapters/types'
 import { ChapterSourceLeaseRegistry } from '../generation-source/chapter-source-lease'
-import { createGenerationSourceResolver } from '../generation-source/create-generation-source'
+import {
+  createChapterAuthorityFence,
+  createGenerationSourceResolver,
+} from '../generation-source/create-generation-source'
+import { McpGenerationSource } from '../generation-source/mcp-generation-source'
 import {
   chapterGenerationSourceFingerprint,
   toLegacyProseGenerationSource,
@@ -75,7 +88,7 @@ function incompleteCompositionContext() {
 
 type CompositionEvent = {
   kind: 'material' | 'prose'
-  phase: 'begin' | 'stage' | 'commit' | 'reload' | 'consume' | 'draft' | 'close'
+  phase: 'begin' | 'stage' | 'commit' | 'reload' | 'draft' | 'close'
   taskId: string
   sessionId: string
   stage?: string
@@ -88,8 +101,6 @@ function createCompositionExecution(input: any, ctx: any, options: {
   materialFailure?: Error
   afterMaterialClose?: () => void | Promise<void>
   onMaterialIdentity?: (identity: { taskId: string; sessionId: string }) => void
-  createSessionId: () => string
-  onProvenance: (provenance: any) => void
 }) {
   const kind = input.options?.material_repair === true ? 'material' as const : 'prose' as const
   const provenance = Object.freeze({
@@ -101,9 +112,7 @@ function createCompositionExecution(input: any, ctx: any, options: {
     authority_fingerprint: input.authorityFingerprint,
     context_version: input.contextVersion,
     ...(input.modelId ? { model_id: input.modelId } : {}),
-    ...(input.sourceState.active === 'mcp' ? { session_id: options.createSessionId() } : {}),
   })
-  options.onProvenance(provenance)
   const sessionId = String(provenance.session_id || '')
   if (kind === 'material') options.onMaterialIdentity?.({ taskId: input.taskId, sessionId })
   options.events.push({ kind, phase: 'begin', taskId: input.taskId, sessionId })
@@ -173,16 +182,15 @@ async function createCompositionHarness(options: {
   const events: CompositionEvent[] = []
   const materialCommitInputs: any[] = []
   const materialReloadedChapterUsage: any[][] = []
-  const executionProvenance: any[] = []
   let harnessRef: any
   let materialIdentity: { taskId: string; sessionId: string } | undefined
   let materialSnapshotLoads = 0
   let materialContextBuilds = 0
-  let sessionSequence = 0
   const source = options.source || compositionMcpSource
   const harness = await createProsePipelineHarness((ctx: any) => {
+    const chapterSourceLeases = new ChapterSourceLeaseRegistry()
     const resolver = createGenerationSourceResolver({
-      chapterSourceLeases: new ChapterSourceLeaseRegistry(),
+      chapterSourceLeases,
       readProject: ctx.getProject,
       compactTaskArtifacts: async () => 0,
       createModelExecution: (input: any) => createCompositionExecution(input, ctx, {
@@ -191,8 +199,6 @@ async function createCompositionHarness(options: {
         materialFailure: options.materialFailure,
         afterMaterialClose: () => options.afterMaterialClose?.(harnessRef),
         onMaterialIdentity: identity => { materialIdentity = identity },
-        createSessionId: () => `generic-remote-session-${++sessionSequence}`,
-        onProvenance: provenance => { executionProvenance.push(provenance) },
       }),
       mcpSource: {
         beginResolvedTask: async (input: any) => createCompositionExecution(input, ctx, {
@@ -201,8 +207,6 @@ async function createCompositionHarness(options: {
           materialFailure: options.materialFailure,
           afterMaterialClose: () => options.afterMaterialClose?.(harnessRef),
           onMaterialIdentity: identity => { materialIdentity = identity },
-          createSessionId: () => `generic-remote-session-${++sessionSequence}`,
-          onProvenance: provenance => { executionProvenance.push(provenance) },
         }),
       },
     })
@@ -239,6 +243,10 @@ async function createCompositionHarness(options: {
         }
         return snapshot
       },
+      withChapterAuthorityFence: createChapterAuthorityFence({
+        chapterSourceLeases,
+        readProject: ctx.getProject,
+      }),
       now: () => new Date('2026-08-07T01:02:03.456Z'),
     })
     return createNovelWritingService({
@@ -262,7 +270,13 @@ async function createCompositionHarness(options: {
     storyStatePayload: options.storyStatePayload,
   })
   harnessRef = harness
-  return { ...harness, events, executionProvenance, materialCommitInputs, materialReloadedChapterUsage }
+  return {
+    ...harness,
+    events,
+    materialCommitInputs,
+    materialReloadedChapterUsage,
+    get materialSnapshotLoads() { return materialSnapshotLoads },
+  }
 }
 
 async function switchCompositionSource(harness: any, source: typeof compositionModelSource | typeof compositionMcpSource) {
@@ -273,6 +287,213 @@ async function switchCompositionSource(harness: any, source: typeof compositionM
     proseGenerationSource: toLegacyProseGenerationSource(source as any),
     result: null,
   })
+}
+
+type RealMcpInvocationEvidence = {
+  stage: string
+  taskId: string
+  sessionId: string
+  taskStatusesBeforeSession: Record<string, string>
+}
+
+async function createRealMcpSessionCompositionHarness() {
+  const server = {
+    id: 'generic-session-server',
+    display_name: 'Generic Session MCP',
+    transport: 'streamable_http' as const,
+    url: 'https://generic-session.invalid/mcp',
+    auth_type: 'bearer' as const,
+    adapter_id: 'generic-session-adapter',
+    is_active: true,
+    startup_timeout_ms: 1_000,
+    tool_timeout_ms: 1_000,
+    generation_timeout_ms: 30_000,
+    poll_initial_ms: 10,
+    poll_max_ms: 50,
+    enabled_tools: [],
+    custom_headers: {},
+  }
+  const agentId = 'generic-session-agent'
+  const draftText = buildPipelineProse(
+    '江澈听见追捕频道切换频率，立即撞开铁门反向切入封锁线。',
+    '夺下通讯器并迫使双层包围向错误方向收紧',
+  )
+  const invocations: RealMcpInvocationEvidence[] = []
+  let sessionSequence = 0
+  const adapter: McpGenerationAdapter = {
+    id: server.adapter_id,
+    async listAgents() {
+      return [{ id: agentId, name: 'Generic Session Agent' }]
+    },
+    async createAgent() {
+      throw new Error('composition test must use the bound Agent')
+    },
+    async inspectSession() {
+      return { status: 'completed', terminal: true }
+    },
+    async invokeChapterStage(input: McpChapterInvocationInput) {
+      const taskRuns = (await listNovelRuns(input.activeWorkspace, Number(input.project.id)))
+        .filter(run => run.run_type === 'mcp_chapter_task')
+      const sessionId = `provider-neutral-session-${++sessionSequence}`
+      const snapshotHash = `provider-neutral-snapshot-${sessionSequence}`
+      invocations.push({
+        stage: input.stage,
+        taskId: input.taskId,
+        sessionId,
+        taskStatusesBeforeSession: Object.fromEntries(
+          taskRuns.map(run => [run.step_name, run.status]),
+        ),
+      })
+      await input.onProgress?.({
+        stage: 'session_created',
+        status: 'running',
+        session_id: sessionId,
+        snapshot_hash: snapshotHash,
+      })
+      let content = draftText
+      if (input.responseContract === 'material_repair_json') {
+        content = JSON.stringify({
+          worldbuilding: [{
+            world_summary: '旧城追捕频道由钟楼分钟脉冲同步。',
+            rules: ['分钟脉冲中断时，双层封锁会向错误方向继续收紧。'],
+          }],
+          repair_summary: '补齐正文生成所需世界规则。',
+        })
+      } else if (input.responseContract === 'quality_review_json') {
+        content = JSON.stringify({
+          score: 92,
+          publishable: true,
+          dimensions: { ...proseQualityScores, core_promise_agency: 9, payoff_hook: 9 },
+          findings: [],
+        })
+      } else if (input.responseContract === 'readability_json') {
+        content = JSON.stringify({ readability_score: 92, passed: true, issues: [], suggestions: [] })
+      } else if (input.responseContract === 'story_state_json') {
+        content = JSON.stringify({
+          state_delta: { open_questions: ['幕后指挥者为何知道江澈旧名'] },
+          character_updates: [],
+          setting_updates: [],
+          storyline_updates: [],
+        })
+      }
+      return {
+        content,
+        session_id: sessionId,
+        snapshot_hash: snapshotHash,
+        status: 'completed',
+      }
+    },
+    async generateProse() {
+      throw new Error('chapter task must use invokeChapterStage')
+    },
+  }
+  const client = {
+    async listTools() { return [] },
+    async callTool() { return { content: [] } },
+    diagnostics() { return { state: 'Ready' } },
+  }
+  const manager = {
+    async get() { return client },
+    async invalidate() {},
+    async invalidateIfCurrent() {},
+    async invalidateServer() {},
+    async closeAll() {},
+  }
+  const mcpRuntime = createMcpRuntime(() => '', {
+    manager: manager as any,
+    adapterFactory: adapterId => {
+      if (adapterId !== server.adapter_id) throw new Error(`unexpected Adapter: ${adapterId}`)
+      return adapter
+    },
+  })
+  let materialContextBuilds = 0
+  const source = {
+    ...compositionMcpSource,
+    mcp: {
+      server_id: server.id,
+      key_id: 1,
+      adapter_id: server.adapter_id,
+      agent_id: agentId,
+      model: 'generic-session-model',
+    },
+  }
+  const missingWorldbuildingContext = {
+    preflight: {
+      ready: false,
+      strict_ready: false,
+      checks: [{ key: 'worldbuilding', ok: false, severity: 'high', fix: '补齐世界观' }],
+      warnings: ['世界观缺失'],
+      blockers: ['世界观缺失'],
+    },
+  }
+  const harness = await createProsePipelineHarness((ctx: any) => {
+    const chapterSourceLeases = new ChapterSourceLeaseRegistry()
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases,
+      readProject: ctx.getProject,
+      createModelExecution: () => {
+        throw new Error('real MCP composition test forbids the model generation source')
+      },
+      mcpSource: new McpGenerationSource(mcpRuntime),
+    })
+    const materialRepair = createMaterialRepairService({
+      beginChapterTask: input => resolver.beginTask(input),
+      buildChapterContextPackage: async (...args: Parameters<typeof buildChapterContextPackage>) => {
+        materialContextBuilds += 1
+        const built = await buildChapterContextPackage(...args)
+        return materialContextBuilds > 1
+          ? {
+              ...built,
+              preflight: { ready: true, strict_ready: true, checks: [], warnings: [], blockers: [] },
+            }
+          : built
+      },
+      commitAcceptance: commitNovelChapterAcceptance,
+      loadSnapshot: loadNovelMaterialRepairSnapshot,
+      withChapterAuthorityFence: createChapterAuthorityFence({
+        chapterSourceLeases,
+        readProject: ctx.getProject,
+      }),
+    })
+    return createNovelWritingService({
+      ...ctx,
+      chapterSourceLeases,
+      generationSourceResolver: resolver,
+      repairChapterMaterials: input => materialRepair.repairChapterMaterials({
+        ...input,
+        repairKeys: ['worldbuilding'],
+      }),
+    })
+  }, {
+    chapterGenerationSource: source,
+    readProjectFromStore: true,
+    omitInitialWorldbuilding: true,
+    contextPackageOverride: missingWorldbuildingContext,
+    repairedContextPackageOverride: {
+      preflight: { ready: true, strict_ready: true, checks: [], warnings: [], blockers: [] },
+    },
+    qualityGateEnabled: false,
+  })
+  await writeMcpServers(harness.workspace, [server])
+  const key = await createMcpKey(harness.workspace, {
+    mcp_server_id: server.id,
+    key: 'sk_provider_neutral_session_test',
+    description: 'Provider-neutral session integration',
+  })
+  if (key.id !== source.mcp.key_id) throw new Error('unexpected test MCP key identity')
+  const setting = await createNovelSettingEntity(harness.workspace, {
+    project_id: harness.project.id,
+    entity_type: 'rule',
+    name: '分钟脉冲规则',
+    summary: '封锁线依赖分钟脉冲同步。',
+  })
+  await replaceNovelChapterSettingUsage(
+    harness.workspace,
+    harness.project.id,
+    harness.chapter.id,
+    [{ entity_id: setting.id, required: true, usage_type: 'required' }],
+  )
+  return { ...harness, invocations }
 }
 
 describe('generateChapterForGroup zhuque_fast llm control options', () => {
@@ -355,12 +576,6 @@ describe('automatic material repair through the generateChapterForGroup composit
         model_id: 217,
         auto_repair_missing_material: true,
         max_quality_revision_rounds: 0,
-        onStage: async (stage: string, payload: any) => {
-          if (stage === 'material_repair' && ['success', 'warn'].includes(payload?.status)) {
-            const material = harness.events.find((event: CompositionEvent) => event.kind === 'material' && event.phase === 'begin')
-            if (material) harness.events.push({ ...material, phase: 'consume' })
-          }
-        },
       },
     )
 
@@ -395,16 +610,58 @@ describe('automatic material repair through the generateChapterForGroup composit
       'material:commit',
       'material:reload',
       'material:close:success',
-      'material:consume',
       'prose:begin',
       'prose:draft',
       'prose:close:success',
     ])
-    const [materialProvenance, proseProvenance] = harness.executionProvenance
-    expect(materialProvenance.task_id).not.toBe(proseProvenance.task_id)
-    expect(materialProvenance.session_id).toMatch(/^generic-remote-session-/)
-    expect(proseProvenance.session_id).toMatch(/^generic-remote-session-/)
-    expect(materialProvenance.session_id).not.toBe(proseProvenance.session_id)
+  })
+
+  test('uses distinct durable MCP tasks and real remote Sessions for material repair and prose', async () => {
+    const harness = await createRealMcpSessionCompositionHarness()
+
+    const result = await harness.service.generateChapterForGroup(
+      harness.workspace,
+      harness.project.id,
+      harness.chapter.id,
+      {
+        model_id: 217,
+        production_mode: 'draft_only',
+        auto_repair_missing_material: true,
+        max_quality_revision_rounds: 0,
+      },
+    )
+
+    expect(result).toBeTruthy()
+    const materialInvocation = harness.invocations.find(item => item.stage === 'material_repair')
+    const proseInvocation = harness.invocations.find(item => item.stage === 'draft')
+    expect(materialInvocation).toBeTruthy()
+    expect(proseInvocation).toBeTruthy()
+    expect(harness.invocations.indexOf(materialInvocation!)).toBeLessThan(
+      harness.invocations.indexOf(proseInvocation!),
+    )
+    expect(materialInvocation!.taskId).not.toBe(proseInvocation!.taskId)
+    expect(materialInvocation!.sessionId).not.toBe(proseInvocation!.sessionId)
+    expect(proseInvocation!.taskStatusesBeforeSession[materialInvocation!.taskId]).toBe('success')
+    expect(proseInvocation!.taskStatusesBeforeSession[proseInvocation!.taskId]).toBe('running')
+
+    const runs = await listNovelRuns(harness.workspace, harness.project.id)
+    const stageReceipts = runs
+      .filter(run => run.run_type === 'chapter_generation_stage')
+      .map(run => ({ run, receipt: JSON.parse(run.output_ref || '{}') }))
+    const materialReceipt = stageReceipts.find(item => item.run.step_name === 'material_repair')?.receipt
+    const proseReceipt = stageReceipts.find(item => item.run.step_name === 'draft')?.receipt
+    expect(materialReceipt).toMatchObject({
+      status: 'success',
+      task_id: materialInvocation!.taskId,
+      session_id: materialInvocation!.sessionId,
+    })
+    expect(proseReceipt).toMatchObject({
+      status: 'success',
+      task_id: proseInvocation!.taskId,
+      session_id: proseInvocation!.sessionId,
+    })
+    expect(materialReceipt.session_id).not.toBe(proseReceipt.session_id)
+    expect(harness.modelCalls.draft).toBe(0)
   })
 
   test('rebuilds staged usage after skipped MCP repair when authoritative persisted usage is empty', async () => {
@@ -676,6 +933,41 @@ describe('automatic material repair through the generateChapterForGroup composit
     expect(harness.events.filter((event: CompositionEvent) => event.phase === 'begin')).toEqual([])
     expect(harness.materialCommitInputs).toEqual([])
     expect(modelRepairCalls).toBe(0)
+  })
+
+  test('rechecks model authority after the material-repair running callback before choosing a repair port', async () => {
+    let modelRepairCalls = 0
+    let switched = false
+    const harness = await createCompositionHarness({
+      source: compositionModelSource,
+      contextOverride: incompleteCompositionContext(),
+      autoRepairChapterPreflightGaps: async () => {
+        modelRepairCalls += 1
+        throw new Error('stale model repair must not run after switching to MCP')
+      },
+    })
+
+    await expect(harness.service.generateChapterForGroup(
+      harness.workspace,
+      harness.project.id,
+      harness.chapter.id,
+      {
+        model_id: 217,
+        production_mode: 'draft_only',
+        auto_repair_missing_material: true,
+        onStage: async (stage: string, payload: any) => {
+          if (!switched && stage === 'material_repair' && payload?.status === 'running') {
+            switched = true
+            await switchCompositionSource(harness, compositionMcpSource)
+          }
+        },
+      },
+    )).rejects.toMatchObject({ code: 'GENERATION_SOURCE_CHANGED' })
+
+    expect(modelRepairCalls).toBe(0)
+    expect(harness.materialSnapshotLoads).toBe(0)
+    expect(harness.events.filter((event: CompositionEvent) => event.phase === 'begin')).toEqual([])
+    expect(harness.materialCommitInputs).toEqual([])
   })
 })
 

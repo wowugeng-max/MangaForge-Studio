@@ -4,14 +4,23 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildAgentMessages } from '../../llm/executor-helpers'
 import { stringifyLLMMessageTextContent } from '../../llm/types'
+import { createProsePipelineHarness } from '../../routes/novel-writing-service.test-support'
 import {
   createNovelChapter,
   createNovelProject,
+  createNovelSettingEntity,
+  mergeNovelChapterRawPayload,
+  replaceNovelChapterSettingUsage,
 } from '../../novel'
 import {
   chapterGenerationSourceFingerprint,
   resolveChapterGenerationSource,
 } from '../generation-source/source-config'
+import { ChapterSourceLeaseRegistry } from '../generation-source/chapter-source-lease'
+import {
+  createChapterAuthorityFence,
+  createGenerationSourceResolver,
+} from '../generation-source/create-generation-source'
 import {
   createMaterialRepairService,
 } from './material-repair-service'
@@ -173,6 +182,7 @@ type HarnessOptions = {
   secondBuildFailure?: Error
   sensitiveContext?: boolean
   unsafeContext?: 'accessor' | 'cycle' | 'proxy' | 'proto' | 'deep'
+  afterContextBuild?: (input: { call: number; initial: any; refreshed: any }) => void | Promise<void>
 }
 
 function createMaterialRepairHarness(options: HarnessOptions = {}) {
@@ -272,6 +282,11 @@ function createMaterialRepairHarness(options: HarnessOptions = {}) {
           cursor = cursor.deep
         }
       }
+      await options.afterContextBuild?.({
+        call: contextBuildCalls.length,
+        initial,
+        refreshed,
+      })
       return built
     },
     commitAcceptance: async (...args: any[]) => {
@@ -288,6 +303,10 @@ function createMaterialRepairHarness(options: HarnessOptions = {}) {
       if (loadCalls > 1 && options.secondLoadFailure) throw options.secondLoadFailure
       return loadCalls === 1 ? initial : refreshed
     },
+    withChapterAuthorityFence: createChapterAuthorityFence({
+      chapterSourceLeases: new ChapterSourceLeaseRegistry(),
+      readProject: async () => initial.project,
+    }),
     now: () => new Date('2026-08-07T01:02:03.456Z'),
   }
 
@@ -379,6 +398,40 @@ describe('one-session MCP material repair orchestration', () => {
 
     expect(harness.beginCalls).toEqual([])
     expect(harness.contextBuildCalls).toEqual([])
+    expect(harness.commitCalls).toEqual([])
+  })
+
+  test('rechecks authority after async skipped-context construction before returning', async () => {
+    const harness = createMaterialRepairHarness({
+      failedKey: null,
+      afterContextBuild: ({ call, initial }) => {
+        if (call !== 2) return
+        initial.project.reference_config.chapter_generation_source = generationSource('model')
+      },
+    })
+
+    await expect(harness.service.repairChapterMaterials(request(harness)))
+      .rejects.toMatchObject({ code: 'GENERATION_SOURCE_CHANGED' })
+
+    expect(harness.beginCalls).toEqual([])
+    expect(harness.stageCalls).toEqual([])
+    expect(harness.commitCalls).toEqual([])
+  })
+
+  test('rechecks the material version after async skipped-context construction before returning', async () => {
+    const harness = createMaterialRepairHarness({
+      failedKey: null,
+      afterContextBuild: ({ call, refreshed }) => {
+        if (call !== 2) return
+        refreshed.contextVersion = `sha256:${'e'.repeat(64)}`
+      },
+    })
+
+    await expect(harness.service.repairChapterMaterials(request(harness)))
+      .rejects.toMatchObject({ code: 'MATERIAL_REPAIR_CONTEXT_CHANGED' })
+
+    expect(harness.beginCalls).toEqual([])
+    expect(harness.stageCalls).toEqual([])
     expect(harness.commitCalls).toEqual([])
   })
 
@@ -831,4 +884,130 @@ test('the assembled model-source service rejects repair without calling any mode
   } finally {
     await rm(workspace, { recursive: true, force: true })
   }
+})
+
+test('the assembled service rejects an injected generation source resolver without its shared lease registry', () => {
+  expect(() => createNovelWritingService({
+    getProject: async () => ({ id: 1 }),
+    production: {} as any,
+    reference: {} as any,
+    generationSourceResolver: {
+      beginTask: async () => {
+        throw new Error('must not begin a task')
+      },
+    } as any,
+  })).toThrow('chapterSourceLeases is required when generationSourceResolver is injected')
+})
+
+test('the assembled service reuses the injected resolver lease registry for a skipped material fence', async () => {
+  class ProbingLeaseRegistry extends ChapterSourceLeaseRegistry {
+    fenceAcquisitions = 0
+    mutationProbe: unknown
+
+    override async acquire(workspace: string, projectId: number, taskId: string) {
+      const lease = await super.acquire(workspace, projectId, taskId)
+      if (taskId.startsWith('authority-fence:')) {
+        this.fenceAcquisitions += 1
+        try {
+          const unexpected = await super.acquire(workspace, projectId, 'source-mutation-probe')
+          await unexpected.release()
+          this.mutationProbe = new Error('source mutation unexpectedly acquired a concurrent lease')
+        } catch (error) {
+          this.mutationProbe = error
+        }
+      }
+      return lease
+    }
+  }
+
+  const leases = new ProbingLeaseRegistry()
+  const harness = await createProsePipelineHarness((ctx: any) => {
+    const resolver = createGenerationSourceResolver({
+      chapterSourceLeases: leases,
+      readProject: ctx.getProject,
+      createModelExecution: () => {
+        throw new Error('skipped MCP repair must not create a model execution')
+      },
+      mcpSource: {
+        beginResolvedTask: async () => {
+          throw new Error('skipped MCP repair must not create an MCP execution')
+        },
+      },
+    })
+    return createNovelWritingService({
+      ...ctx,
+      generationSourceResolver: resolver,
+    })
+  }, {
+    chapterGenerationSource: generationSource('mcp'),
+    readProjectFromStore: true,
+    qualityGateEnabled: false,
+  })
+  const setting = await createNovelSettingEntity(harness.workspace, {
+    project_id: harness.project.id,
+    entity_type: 'rule',
+    name: '追捕频道规则',
+    summary: '追捕队依赖通讯频道同步收紧封锁线。',
+  })
+  await replaceNovelChapterSettingUsage(
+    harness.workspace,
+    harness.project.id,
+    harness.chapter.id,
+    [{ entity_id: setting.id, required: true, usage_type: 'required' }],
+  )
+  await mergeNovelChapterRawPayload(harness.workspace, harness.chapter.id, {
+    chapter_blueprint: {
+      target_emotion: '合围压力下的主动反击',
+      opening_hook: '追捕频道突然倒数。',
+      core_payoff: '江澈夺取频道并反向锁定指挥者。',
+      content_outline: {
+        cause: '封锁线合拢',
+        development: '江澈观察频道节奏',
+        turn: '铁门后的追兵提前出现',
+        climax: '江澈撞断路灯并夺取通讯器',
+        ending: '频道传出顾遥的声音',
+      },
+      plot_lines: {
+        mainline: '打穿合围并夺取频道',
+        logic_line: '观察节奏 -> 制造盲区 -> 夺取频道',
+      },
+      character_order: ['江澈'],
+      beat_sequence: [{ scene_no: 1, function_tag: '破围/兑现' }],
+      cost_and_reward: '代价是暴露位置；收益是锁定幕后频道。',
+      ending_contract: { next_chapter_pull: '顾遥的声音为何出现在频道中。' },
+    },
+    state_tracking_contract: {
+      source_requirements: ['本章细纲/场景卡', '追踪/时间线.md'],
+      source_readiness: [
+        { key: 'chapter_blueprint', status: 'ready', evidence: '第10章蓝图已逐项确认。' },
+        { key: 'timeline_tracking', status: 'ready', evidence: '追踪/时间线.md：封锁发生在倒数结束前。' },
+      ],
+    },
+    pre_draft_brief: {
+      confirmed_at: '2026-08-08T00:00:00.000Z',
+      state_tracking_contract: {
+        source_requirements: ['本章细纲/场景卡', '追踪/时间线.md'],
+        source_readiness: [
+          { key: 'chapter_blueprint', status: 'ready', evidence: '第10章蓝图已逐项确认。' },
+          { key: 'timeline_tracking', status: 'ready', evidence: '追踪/时间线.md：封锁发生在倒数结束前。' },
+        ],
+      },
+    },
+  })
+
+  const result = await harness.service.repairChapterMaterials({
+    activeWorkspace: harness.workspace,
+    projectId: harness.project.id,
+    chapterId: harness.chapter.id,
+    expectedAuthorityFingerprint: chapterGenerationSourceFingerprint(
+      resolveChapterGenerationSource(harness.project),
+    ),
+  })
+
+  expect(result).toMatchObject({ ok: true, skipped: true, source: 'mcp' })
+  expect(leases.fenceAcquisitions).toBe(1)
+  expect(leases.mutationProbe).toMatchObject({
+    code: 'GENERATION_SOURCE_BUSY',
+    error_code: 'GENERATION_SOURCE_BUSY',
+  })
 })

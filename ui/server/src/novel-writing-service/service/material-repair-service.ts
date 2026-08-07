@@ -12,6 +12,7 @@ import {
   chapterGenerationSourceFingerprint,
   resolveChapterGenerationSource,
 } from '../generation-source/source-config'
+import type { ChapterAuthorityFence } from '../generation-source/create-generation-source'
 import { ChapterGenerationSourceError } from '../generation-source/errors'
 import {
   isChapterTaskId,
@@ -48,6 +49,7 @@ export type MaterialRepairServiceDependencies = {
   buildChapterContextPackage: BuildChapterContextPackage
   commitAcceptance: typeof commitNovelChapterAcceptance
   loadSnapshot: typeof loadNovelMaterialRepairSnapshot
+  withChapterAuthorityFence: ChapterAuthorityFence
   now?: () => Date
 }
 
@@ -61,6 +63,33 @@ function materialRepairSourceChanged() {
     '项目章节生成来源已在外层校验与材料快照之间变化；旧请求不会执行',
     { reason: 'material_snapshot_source_changed' },
   )
+}
+
+function materialRepairContextChanged() {
+  return materialRepairError(
+    'MATERIAL_REPAIR_CONTEXT_CHANGED',
+    '材料上下文已变化，请基于最新材料重试',
+  )
+}
+
+function assertMaterialSnapshotAuthority(
+  snapshot: NovelMaterialRepairSnapshot,
+  expectedAuthorityFingerprint: string,
+) {
+  let fingerprint = ''
+  try {
+    fingerprint = chapterGenerationSourceFingerprint(resolveChapterGenerationSource(snapshot.project))
+  } catch {
+    throw materialRepairSourceChanged()
+  }
+  if (fingerprint !== expectedAuthorityFingerprint) throw materialRepairSourceChanged()
+}
+
+function assertMaterialSnapshotVersion(
+  snapshot: NovelMaterialRepairSnapshot,
+  expectedContextVersion: string,
+) {
+  if (snapshot.contextVersion !== expectedContextVersion) throw materialRepairContextChanged()
 }
 
 function stableIdentityHash(kind: 'project' | 'chapter', values: number[]) {
@@ -362,25 +391,47 @@ export function createMaterialRepairService(deps: MaterialRepairServiceDependenc
         )
       }
 
+      const loadedContextVersion = loaded.contextVersion
       const contextPackage = await buildSnapshotContext(deps, input.activeWorkspace, loaded, true)
       const plan = input.repairKeys?.length
         ? resolveMaterialRepairPlan(contextPackage, input.repairKeys)
         : implicitMaterialRepairPlan(contextPackage)
       if (plan.targets.size === 0) {
-        const finalContext = await buildSnapshotContext(deps, input.activeWorkspace, loaded, false)
-        const sanitizedContext = sanitizeMaterialRepairResponseValue(finalContext, ['context_package'])
-        return {
-          ok: true,
-          skipped: true,
-          source: 'mcp' as const,
-          source_fingerprint: loadedAuthorityFingerprint,
-          applied: [],
-          summary: '',
-          chapter_setting_usage: sanitizeMaterialRepairResponseValue(loaded.chapterSettingUsage, ['chapter_setting_usage']),
-          project_setting_usage: sanitizeMaterialRepairResponseValue(loaded.projectSettingUsage, ['project_setting_usage']),
-          context_package: sanitizedContext,
-          preflight: sanitizedContext?.preflight || null,
-        }
+        return deps.withChapterAuthorityFence({
+          activeWorkspace: input.activeWorkspace,
+          projectId: input.projectId,
+          expectedAuthorityFingerprint: input.expectedAuthorityFingerprint,
+          operation: async () => {
+            const finalSnapshot = await deps.loadSnapshot(
+              input.activeWorkspace,
+              input.projectId,
+              input.chapterId,
+            )
+            assertMaterialSnapshotAuthority(finalSnapshot, input.expectedAuthorityFingerprint)
+            assertMaterialSnapshotVersion(finalSnapshot, loadedContextVersion)
+            const finalContext = await buildSnapshotContext(deps, input.activeWorkspace, finalSnapshot, false)
+            const verifiedSnapshot = await deps.loadSnapshot(
+              input.activeWorkspace,
+              input.projectId,
+              input.chapterId,
+            )
+            assertMaterialSnapshotAuthority(verifiedSnapshot, input.expectedAuthorityFingerprint)
+            assertMaterialSnapshotVersion(verifiedSnapshot, loadedContextVersion)
+            const sanitizedContext = sanitizeMaterialRepairResponseValue(finalContext, ['context_package'])
+            return {
+              ok: true,
+              skipped: true,
+              source: 'mcp' as const,
+              source_fingerprint: loadedAuthorityFingerprint,
+              applied: [],
+              summary: '',
+              chapter_setting_usage: sanitizeMaterialRepairResponseValue(verifiedSnapshot.chapterSettingUsage, ['chapter_setting_usage']),
+              project_setting_usage: sanitizeMaterialRepairResponseValue(verifiedSnapshot.projectSettingUsage, ['project_setting_usage']),
+              context_package: sanitizedContext,
+              preflight: sanitizedContext?.preflight || null,
+            }
+          },
+        })
       }
 
       const execution = await deps.beginChapterTask({

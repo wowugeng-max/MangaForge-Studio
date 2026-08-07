@@ -163,11 +163,20 @@ await onStage('context', {
 })
 const preflightNeedsMaterialRepair = contextPackage.preflight.ready !== true || !strictPreflightReadiness.ready
 if (preflightNeedsMaterialRepair && options.auto_repair_missing_material === true) {
-  const authorityProject = await getProject(activeWorkspace, projectId)
-  let authorityFingerprint = ''
-  if (authorityProject) {
+  const readExpectedAuthoritySource = async () => {
+    const authorityProject = await getProject(activeWorkspace, projectId)
+    if (!authorityProject) {
+      throw new ChapterGenerationSourceError(
+        'GENERATION_SOURCE_CHANGED',
+        '章节生成来源已变化，请重试',
+        { reason: 'source_changed' },
+      )
+    }
+    let authoritySource: ReturnType<typeof resolveChapterGenerationSource>
+    let authorityFingerprint = ''
     try {
-      authorityFingerprint = chapterGenerationSourceFingerprint(resolveChapterGenerationSource(authorityProject))
+      authoritySource = resolveChapterGenerationSource(authorityProject)
+      authorityFingerprint = chapterGenerationSourceFingerprint(authoritySource)
     } catch {
       throw new ChapterGenerationSourceError(
         'GENERATION_SOURCE_CHANGED',
@@ -175,16 +184,18 @@ if (preflightNeedsMaterialRepair && options.auto_repair_missing_material === tru
         { reason: 'source_changed' },
       )
     }
+    if (authorityFingerprint !== expectedAuthorityFingerprint) {
+      throw new ChapterGenerationSourceError(
+        'GENERATION_SOURCE_CHANGED',
+        '章节生成来源已变化，请重试',
+        { reason: 'source_changed' },
+      )
+    }
+    return authoritySource
   }
-  if (authorityFingerprint !== expectedAuthorityFingerprint) {
-    throw new ChapterGenerationSourceError(
-      'GENERATION_SOURCE_CHANGED',
-      '章节生成来源已变化，请重试',
-      { reason: 'source_changed' },
-    )
-  }
-  const activeGenerationSource = resolveChapterGenerationSource(authorityProject).active
+  await readExpectedAuthoritySource()
   await onStage('material_repair', { status: 'running', warnings: contextPackage.preflight.warnings || [], blockers: contextPackage.preflight.blockers || [] })
+  const activeGenerationSource = (await readExpectedAuthoritySource()).active
   if (activeGenerationSource === 'mcp') {
     let repaired: any
     try {

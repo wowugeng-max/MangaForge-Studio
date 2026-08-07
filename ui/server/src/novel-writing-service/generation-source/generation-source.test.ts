@@ -30,7 +30,11 @@ import {
   updateNovelChapter,
   updateNovelRun,
 } from '../../novel'
-import { chapterContextVersion, createGenerationSourceResolver } from './create-generation-source'
+import {
+  chapterContextVersion,
+  createChapterAuthorityFence,
+  createGenerationSourceResolver,
+} from './create-generation-source'
 import { ChapterSourceLeaseRegistry } from './chapter-source-lease'
 import { McpGenerationSource } from './mcp-generation-source'
 import { ModelGenerationSource } from './model-generation-source'
@@ -147,6 +151,32 @@ function sourceRequest(overrides: Record<string, unknown> = {}) {
 }
 
 describe('GenerationSource resolver', () => {
+  test('preserves an undefined authority-fence failure while releasing the project lease', async () => {
+    const chapterSourceLeases = new ChapterSourceLeaseRegistry()
+    const withChapterAuthorityFence = createChapterAuthorityFence({
+      chapterSourceLeases,
+      readProject: async () => project,
+    })
+    let rejected = false
+
+    try {
+      await withChapterAuthorityFence({
+        activeWorkspace: workspace,
+        projectId: project.id,
+        expectedAuthorityFingerprint: chapterGenerationSourceFingerprint(
+          resolveChapterGenerationSource(project),
+        ),
+        operation: async () => { throw undefined },
+      })
+    } catch (error) {
+      rejected = true
+      expect(error).toBeUndefined()
+    }
+
+    expect(rejected).toBe(true)
+    expect(chapterSourceLeases.isActive(workspace, project.id)).toBe(false)
+  })
+
   test('uses an explicit persisted task id instead of allocating a new one', async () => {
     const chapterSourceLeases = new ChapterSourceLeaseRegistry()
     const resolver = createGenerationSourceResolver({

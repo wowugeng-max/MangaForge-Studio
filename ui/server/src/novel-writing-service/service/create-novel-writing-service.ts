@@ -16,7 +16,11 @@ import type { NovelProductionService } from '../../routes/novel-production-servi
 import type { NovelReferenceService } from '../../routes/novel-reference-service'
 import type { McpRuntime } from '../../mcp/runtime'
 import { ChapterSourceLeaseRegistry } from '../generation-source/chapter-source-lease'
-import { createGenerationSourceResolver } from '../generation-source/create-generation-source'
+import {
+  createChapterAuthorityFence,
+  createGenerationSourceResolver,
+  type TaskGenerationSourceResolver,
+} from '../generation-source/create-generation-source'
 import { McpGenerationSource } from '../generation-source/mcp-generation-source'
 import { ModelGenerationSource } from '../generation-source/model-generation-source'
 import { createChapterStageRecorder } from '../generation-source/stage-receipts'
@@ -72,9 +76,7 @@ export function createNovelWritingService(ctx: {
   runtime?: NovelWritingRuntime
   mcpRuntime?: McpRuntime
   chapterSourceLeases?: ChapterSourceLeaseRegistry
-  generationSourceResolver?: {
-    beginTask: (input: any) => Promise<any>
-  }
+  generationSourceResolver?: TaskGenerationSourceResolver
   repairChapterMaterials?: (...args: any[]) => Promise<any>
   autoRepairChapterPreflightGaps?: (...args: any[]) => Promise<any>
 }) {
@@ -140,8 +142,18 @@ export function createNovelWritingService(ctx: {
 
   const generateNovelChapterProse = ctx.runtime?.generateChapterProse || defaultGenerateNovelChapterProse
   const mcpGenerationSource = ctx.mcpRuntime ? new McpGenerationSource(ctx.mcpRuntime) : undefined
+  const injectedResolverLeases = ctx.generationSourceResolver?.chapterSourceLeases
+  if (ctx.generationSourceResolver && !injectedResolverLeases) {
+    throw new Error('chapterSourceLeases is required when generationSourceResolver is injected')
+  }
+  if (ctx.chapterSourceLeases && injectedResolverLeases && ctx.chapterSourceLeases !== injectedResolverLeases) {
+    throw new Error('generationSourceResolver and chapterSourceLeases must share the same registry')
+  }
+  const chapterSourceLeases = injectedResolverLeases
+    || ctx.chapterSourceLeases
+    || new ChapterSourceLeaseRegistry()
   const defaultChapterGenerationSource = createGenerationSourceResolver({
-    chapterSourceLeases: ctx.chapterSourceLeases || new ChapterSourceLeaseRegistry(),
+    chapterSourceLeases,
     readProject: ctx.getProject,
     createModelExecution: input => {
       const provenance = {
@@ -175,6 +187,10 @@ export function createNovelWritingService(ctx: {
     buildChapterContextPackage: buildChapterContextPackageFromModule,
     commitAcceptance: commitNovelChapterAcceptance,
     loadSnapshot: loadNovelMaterialRepairSnapshot,
+    withChapterAuthorityFence: createChapterAuthorityFence({
+      chapterSourceLeases,
+      readProject: ctx.getProject,
+    }),
   })
   const repairChapterMaterials = ctx.repairChapterMaterials || materialRepairService.repairChapterMaterials
   const storeChapterProseMemory = ctx.runtime?.storeChapterProseMemory || defaultStoreNovelChapterProseMemory

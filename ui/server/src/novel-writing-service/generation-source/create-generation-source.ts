@@ -31,12 +31,20 @@ export type GenerationSourceResolverInput = {
   compactTaskArtifacts?: typeof compactChapterTaskArtifacts
 }
 
+export type ChapterAuthorityFence = <T>(input: {
+  activeWorkspace: string
+  projectId: number
+  expectedAuthorityFingerprint: string
+  operation: () => Promise<T>
+}) => Promise<T>
+
 type LegacyGenerationSourceResolverInput = {
   modelSource: GenerationSource
   mcpSource?: GenerationSource
 }
 
-type TaskGenerationSourceResolver = {
+export type TaskGenerationSourceResolver = {
+  readonly chapterSourceLeases: ChapterSourceLeaseRegistry
   beginTask(input: BeginChapterTaskInput): Promise<ChapterTaskExecution>
 }
 
@@ -162,6 +170,74 @@ async function readMatchingProject(
   return currentProject
 }
 
+async function assertExpectedChapterAuthority(
+  input: Pick<GenerationSourceResolverInput, 'readProject'>,
+  activeWorkspace: string,
+  projectId: number,
+  expectedAuthorityFingerprint: string,
+) {
+  const currentFingerprint = await withMcpWorkspaceMutation(activeWorkspace, async () => {
+    const currentProject = await readMatchingProject(
+      input.readProject,
+      activeWorkspace,
+      projectId,
+    )
+    try {
+      return chapterGenerationSourceFingerprint(resolveChapterGenerationSource(currentProject))
+    } catch {
+      throw activeSourceChanged()
+    }
+  })
+  if (currentFingerprint !== expectedAuthorityFingerprint) throw activeSourceChanged()
+}
+
+export function createChapterAuthorityFence(
+  input: Pick<GenerationSourceResolverInput, 'chapterSourceLeases' | 'readProject'>,
+): ChapterAuthorityFence {
+  return async request => {
+    const lease = await input.chapterSourceLeases.acquire(
+      request.activeWorkspace,
+      request.projectId,
+      `authority-fence:${randomUUID()}`,
+    )
+    let result: unknown
+    let failed = false
+    let primaryFailure: unknown
+    try {
+      await assertExpectedChapterAuthority(
+        input,
+        request.activeWorkspace,
+        request.projectId,
+        request.expectedAuthorityFingerprint,
+      )
+      result = await request.operation()
+      await assertExpectedChapterAuthority(
+        input,
+        request.activeWorkspace,
+        request.projectId,
+        request.expectedAuthorityFingerprint,
+      )
+    } catch (error) {
+      failed = true
+      primaryFailure = error
+    }
+
+    try {
+      await lease.release()
+    } catch (releaseFailure) {
+      if (failed) {
+        throw new AggregateError(
+          [primaryFailure, releaseFailure],
+          'Chapter authority fence and project lease release both failed',
+        )
+      }
+      throw releaseFailure
+    }
+    if (failed) throw primaryFailure
+    return result as Awaited<ReturnType<typeof request.operation>>
+  }
+}
+
 function wrapExecution(
   execution: ChapterTaskExecution,
   resolved: ResolvedChapterTaskInput,
@@ -248,6 +324,7 @@ function wrapExecution(
 
 function createTaskResolver(input: GenerationSourceResolverInput): TaskGenerationSourceResolver {
   return {
+    chapterSourceLeases: input.chapterSourceLeases,
     async beginTask(beginInput) {
       const taskId = explicitChapterTaskId(beginInput) ?? randomUUID()
       assertNoGenerationSourceOverride(beginInput.options)
