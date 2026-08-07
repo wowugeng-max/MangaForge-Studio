@@ -1235,6 +1235,59 @@ describe('commitNovelChapterAcceptance', () => {
       .not.toBe(first.contextVersion)
   })
 
+  test('ignores record lifecycle timestamps but retains nested material timestamp keys', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '材料时间戳投影' })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      raw_payload: { updated_at: '业务材料时间-v1', nested: { created_at: '嵌套业务时间-v1' } },
+    })
+    const character = await createNovelCharacter(workspace, {
+      project_id: project.id,
+      name: '林砚',
+      current_state: { location: '灰塔底层' },
+    })
+    const setting = await createNovelSettingEntity(workspace, {
+      project_id: project.id,
+      entity_type: 'rule',
+      name: '缺失的一分钟',
+    })
+    const [usage] = await replaceNovelChapterSettingUsage(workspace, project.id, chapter.id, [{
+      entity_id: setting.id,
+      required: true,
+    }])
+    const captured = await loadNovelMaterialRepairSnapshot(workspace, project.id, chapter.id)
+    const db = new Database(join(workspace, 'novel.sqlite'))
+    try {
+      db.query('UPDATE chapters SET created_at = ?, updated_at = ? WHERE id = ?')
+        .run('2001-01-01T00:00:00.000Z', '2001-01-02T00:00:00.000Z', chapter.id)
+      db.query('UPDATE characters SET created_at = ?, updated_at = ? WHERE id = ?')
+        .run('2002-01-01T00:00:00.000Z', '2002-01-02T00:00:00.000Z', character.id)
+      db.query('UPDATE chapter_setting_usage SET created_at = ?, updated_at = ? WHERE id = ?')
+        .run('2003-01-01T00:00:00.000Z', '2003-01-02T00:00:00.000Z', usage.id)
+    } finally {
+      db.close()
+    }
+
+    const lifecycleOnly = await loadNovelMaterialRepairSnapshot(workspace, project.id, chapter.id)
+    expect(lifecycleOnly.contextVersion).toBe(captured.contextVersion)
+
+    const materialDb = new Database(join(workspace, 'novel.sqlite'))
+    try {
+      const row = materialDb.query('SELECT raw_payload FROM chapters WHERE id = ?').get(chapter.id) as any
+      const rawPayload = JSON.parse(String(row.raw_payload || '{}'))
+      materialDb.query('UPDATE chapters SET raw_payload = ? WHERE id = ?')
+        .run(JSON.stringify({ ...rawPayload, updated_at: '业务材料时间-v2' }), chapter.id)
+    } finally {
+      materialDb.close()
+    }
+
+    expect((await loadNovelMaterialRepairSnapshot(workspace, project.id, chapter.id)).contextVersion)
+      .not.toBe(captured.contextVersion)
+  })
+
   test('rejects dangling and cross-project material ownership references', async () => {
     const scenarios: Array<{
       name: string

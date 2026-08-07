@@ -144,17 +144,30 @@ function projectMaterialProjection(project: ReturnType<typeof projectFromRow>) {
   }
 }
 
+function semanticRecordProjection<T extends Record<string, any>>(record: T) {
+  const {
+    created_at: _createdAt,
+    updated_at: _updatedAt,
+    ...semanticRecord
+  } = record
+  return semanticRecord
+}
+
+function semanticRecordList<T extends Record<string, any>>(records: T[]) {
+  return records.map(semanticRecordProjection)
+}
+
 function materialRepairContextVersion(rows: MaterialRepairRows, mapped: MaterialRepairMappedRows) {
   return sha256({
     targetChapterId: rows.targetChapterId,
     project: projectMaterialProjection(mapped.project),
-    chapters: mapped.chapters,
-    worldbuilding: mapped.worldbuilding,
-    characters: mapped.characters,
-    outlines: mapped.outlines,
-    reviews: mapped.reviews,
-    settings: mapped.settings,
-    projectSettingUsage: mapped.projectSettingUsage,
+    chapters: semanticRecordList(mapped.chapters),
+    worldbuilding: semanticRecordList(mapped.worldbuilding),
+    characters: semanticRecordList(mapped.characters),
+    outlines: semanticRecordList(mapped.outlines),
+    reviews: semanticRecordList(mapped.reviews),
+    settings: semanticRecordList(mapped.settings),
+    projectSettingUsage: semanticRecordList(mapped.projectSettingUsage),
   })
 }
 
