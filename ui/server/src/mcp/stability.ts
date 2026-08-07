@@ -11,6 +11,10 @@ import type { McpOperationKind } from './types'
 
 type Sleep = (ms: number, signal: AbortSignal) => Promise<void>
 
+export type McpStabilityOperationAttempt = {
+  failedClient?: McpClientPort
+}
+
 const systemSleep: Sleep = (ms, signal) => new Promise((resolve, reject) => {
   if (signal.aborted) {
     reject(signal.reason)
@@ -78,10 +82,19 @@ function throwDeadlineCauseForAbort(error: unknown, input: McpStabilityInput) {
 export function createMcpStabilityController(dependencies: {
   reacquire: (options: McpAdapterOperationOptions) => Promise<McpClientPort>
   invalidateCurrent: () => Promise<void>
+  invalidateClient?: (client: McpClientPort) => Promise<void>
   sleep?: Sleep
-  runOperation?: <T>(operationKind: McpOperationKind, operation: () => Promise<T>) => Promise<T>
+  runOperation?: <T>(
+    operationKind: McpOperationKind,
+    attempt: McpStabilityOperationAttempt,
+    operation: () => Promise<T>,
+  ) => Promise<T>
 }): McpStabilityController {
   const sleep = dependencies.sleep || systemSleep
+
+  const invalidateKnownClient = (client: McpClientPort) => dependencies.invalidateClient
+    ? dependencies.invalidateClient(client)
+    : dependencies.invalidateCurrent()
 
   const boundedSleep = async (requestedMs: number, input: McpStabilityInput) => {
     const duration = Math.min(positiveInteger(requestedMs, 1), remainingOrThrow(input))
@@ -125,7 +138,7 @@ export function createMcpStabilityController(dependencies: {
       const remaining = remainingOrThrow(input)
       const windowElapsed = windowStartedWithRemainingMs - remaining
       if (windowElapsed >= warmupWindowMs && consecutiveSuccesses < requiredSuccesses) {
-        if (client) await dependencies.invalidateCurrent()
+        if (client) await invalidateKnownClient(client)
         client = undefined
         consecutiveSuccesses = 0
         retryDelay = initialDelay
@@ -147,7 +160,7 @@ export function createMcpStabilityController(dependencies: {
         const failureClass = policy.classify(error, 'read_safe')
         consecutiveSuccesses = 0
         if (failureClass === 'transient_read_failure') {
-          if (client) await dependencies.invalidateCurrent()
+          if (client) await invalidateKnownClient(client)
           client = undefined
           recoveryRound += 1
           windowStartedWithRemainingMs = remainingOrThrow(input)
@@ -178,9 +191,10 @@ export function createMcpStabilityController(dependencies: {
     if (readinessMode === 'proactive') await ensureReady(policy, input)
     while (true) {
       remainingOrThrow(input)
+      const attempt: McpStabilityOperationAttempt = {}
       try {
         const result = await (policy && dependencies.runOperation
-          ? dependencies.runOperation(operationKind, operation)
+          ? dependencies.runOperation(operationKind, attempt, operation)
           : operation())
         if (operationKind === 'read_safe') remainingOrThrow(input)
         return result
@@ -202,7 +216,13 @@ export function createMcpStabilityController(dependencies: {
         const replayable = failureClass === 'not_ready_pre_dispatch'
           || (operationKind === 'read_safe' && failureClass === 'transient_read_failure')
         if (!replayable) throw error
-        if (failureClass === 'transient_read_failure') await dependencies.invalidateCurrent()
+        if (failureClass === 'transient_read_failure') {
+          if (attempt.failedClient && dependencies.invalidateClient) {
+            await dependencies.invalidateClient(attempt.failedClient)
+          } else {
+            await dependencies.invalidateCurrent()
+          }
+        }
         await boundedSleep(retryDelay, input)
         retryDelay = Math.min(maximumDelay, retryDelay * 2)
         if (readinessMode === 'proactive' || failureClass === 'transient_read_failure') {

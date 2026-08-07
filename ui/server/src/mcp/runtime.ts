@@ -19,9 +19,18 @@ import type {
 } from './adapters/types'
 import { McpAgentLeaseRegistry } from './agent-lease'
 import { withMcpWorkspaceMutation } from './workspace-coordinator'
-import { createMcpStabilityController } from './stability'
+import {
+  createMcpStabilityController,
+  type McpStabilityOperationAttempt,
+} from './stability'
 
 type RuntimeManager = Pick<McpClientManager, 'get' | 'invalidate' | 'invalidateIfCurrent' | 'invalidateServer' | 'closeAll'>
+
+type RuntimeStabilityOperationScope = {
+  owner: object
+  operationKind: McpOperationKind
+  attempt: McpStabilityOperationAttempt
+}
 
 export type ResolvedMcpCredential = {
   server: McpServerRecord
@@ -78,7 +87,7 @@ export function createMcpRuntime(
   const adapterFactory = options.adapterFactory || createMcpAdapter
   const now = options.now || Date.now
   const agentLeases = new McpAgentLeaseRegistry()
-  const stabilityOperationScope = new AsyncLocalStorage<McpOperationKind>()
+  const stabilityOperationScope = new AsyncLocalStorage<RuntimeStabilityOperationScope>()
 
   const resolveCredentialConfigInWorkspace = async (
     activeWorkspace: string,
@@ -130,6 +139,7 @@ export function createMcpRuntime(
       pinnedCredential,
     )
     const { server, key } = resolvedConfig
+    const stabilityOwner = {}
     const initialOptions = operationOptions(options)
     let currentClient = await manager.get(activeWorkspace, server, key, initialOptions)
     const reacquire = async (remoteOptions: McpAdapterOperationOptions = {}) => {
@@ -148,8 +158,12 @@ export function createMcpRuntime(
         return await operation(firstClient)
       } catch (error) {
         if (!(error instanceof McpError) || error.code !== 'MCP_CONNECTION_LOST') throw error
+        const scope = stabilityOperationScope.getStore()
+        if (scope?.owner === stabilityOwner && scope.operationKind === 'read_safe') {
+          scope.attempt.failedClient = firstClient
+          throw error
+        }
         await invalidateLostClient(firstClient)
-        if (stabilityOperationScope.getStore() === 'read_safe') throw error
         return operation(await reacquire(remoteOptions))
       }
     }
@@ -177,7 +191,12 @@ export function createMcpRuntime(
     const stability = createMcpStabilityController({
       reacquire,
       invalidateCurrent: () => invalidateLostClient(currentClient),
-      runOperation: (operationKind, operation) => stabilityOperationScope.run(operationKind, operation),
+      invalidateClient: client => invalidateLostClient(client),
+      runOperation: (operationKind, attempt, operation) => stabilityOperationScope.run({
+        owner: stabilityOwner,
+        operationKind,
+        attempt,
+      }, operation),
     })
     const adapter = adapterFactory(server.adapter_id, client)
     return { server, key, client, adapter, stability }

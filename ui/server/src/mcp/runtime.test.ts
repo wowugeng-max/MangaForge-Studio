@@ -1065,7 +1065,214 @@ describe('MCP runtime', () => {
       expect(events).not.toContain('pre-probe-hidden-replay')
       expect(firstReads).toBe(1)
       expect(secondReads).toBe(1)
-      expect(invalidated).toContain(firstClient)
+      expect(invalidated).toEqual([firstClient])
+    } finally {
+      deadline.close()
+    }
+  })
+
+  test('keeps a concurrently acquired replacement while a managed failed client closes', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-failed-client-race-'))
+    workspaces.push(workspace)
+    const server = { ...BUDA_MCP_SERVER_TEMPLATE, poll_initial_ms: 1, poll_max_ms: 2 }
+    await writeMcpServers(workspace, [server])
+    const key = await createMcpKey(workspace, {
+      mcp_server_id: server.id,
+      key: 'sk_runtime_failed_client_race',
+      description: '账号',
+    })
+    let signalInvalidationStarted!: () => void
+    let releaseInvalidation!: () => void
+    const invalidationStarted = new Promise<void>(resolve => { signalInvalidationStarted = resolve })
+    const mayFinishInvalidation = new Promise<void>(resolve => { releaseInvalidation = resolve })
+    let firstReads = 0
+    let secondReads = 0
+    let thirdGets = 0
+    let secondInvalidated = false
+    const firstClient = {
+      listTools: async () => [],
+      async callTool() {
+        firstReads += 1
+        throw connectionLostError()
+      },
+      diagnostics: () => ({ state: 'Ready' }),
+    }
+    const secondClient = {
+      listTools: async () => [{ name: 'read' }],
+      async callTool() {
+        secondReads += 1
+        return { content: [{ type: 'text', text: 'second' }] }
+      },
+      diagnostics: () => ({ state: 'Ready' }),
+    }
+    const thirdClient = {
+      listTools: async () => [{ name: 'read' }],
+      callTool: async () => ({ content: [{ type: 'text', text: 'third' }] }),
+      diagnostics: () => ({ state: 'Ready' }),
+    }
+    let current: typeof firstClient | typeof secondClient | typeof thirdClient = firstClient
+    const invalidated: unknown[] = []
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: {
+        async get() {
+          if (current === thirdClient) thirdGets += 1
+          return current
+        },
+        async invalidateIfCurrent(_workspace: string, _serverId: string, _keyId: number, client: unknown) {
+          invalidated.push(client)
+          if (client === firstClient && current === firstClient) {
+            current = secondClient
+            signalInvalidationStarted()
+            await mayFinishInvalidation
+          } else if (client === secondClient && current === secondClient) {
+            secondInvalidated = true
+            current = thirdClient
+          }
+        },
+        invalidate: async () => {},
+        invalidateServer: async () => {},
+        closeAll: async () => {},
+      } as any,
+      adapterFactory: () => ({ listAgents: async () => [] }) as any,
+    })
+    const resolved = await runtime.getAdapterForKey(key.id)
+    const deadline = new McpGenerationDeadline(1_000)
+    const policy = {
+      operationReadinessMode: 'reactive' as const,
+      requiredConsecutiveSuccesses: 1,
+      warmupWindowMs: 100,
+      classify(error: unknown, operation: 'read_safe' | 'mutation') {
+        return operation === 'read_safe' && (error as McpError)?.code === 'MCP_CONNECTION_LOST'
+          ? 'transient_read_failure' as const
+          : 'terminal_failure' as const
+      },
+      async probe(client: typeof resolved.client, options: any) {
+        await client.listTools({ ...options, refreshTools: true })
+      },
+    }
+
+    try {
+      const managedRead = resolved.stability.runRead(policy, {
+        deadline,
+        phase: 'session_poll',
+        pollInitialMs: 1,
+        pollMaxMs: 2,
+        toolTimeoutMs: 100,
+      }, () => resolved.client.callTool('read', {}, { operation: 'read_safe' }))
+      await invalidationStarted
+      let directResult: unknown
+      try {
+        directResult = await resolved.client.callTool('read', {}, { operation: 'read_safe' })
+      } finally {
+        releaseInvalidation()
+      }
+      const managedResult = await managedRead
+
+      expect(directResult).toEqual({ content: [{ type: 'text', text: 'second' }] })
+      expect(managedResult).toEqual({ content: [{ type: 'text', text: 'second' }] })
+      expect(invalidated).toEqual([firstClient])
+      expect(secondInvalidated).toBe(false)
+      expect(thirdGets).toBe(0)
+      expect(firstReads).toBe(1)
+      expect(secondReads).toBe(2)
+    } finally {
+      releaseInvalidation()
+      deadline.close()
+    }
+  })
+
+  test('does not let one credential stability scope claim another credential direct read', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-owner-isolation-'))
+    workspaces.push(workspace)
+    await writeMcpServers(workspace, [BUDA_MCP_SERVER_TEMPLATE])
+    const keyA = await createMcpKey(workspace, {
+      mcp_server_id: 'buda', key: 'sk_runtime_owner_a', description: '账号 A',
+    })
+    const keyB = await createMcpKey(workspace, {
+      mcp_server_id: 'buda', key: 'sk_runtime_owner_b', description: '账号 B',
+    })
+    const a1 = {
+      listTools: async () => [],
+      callTool: async () => ({ content: [{ type: 'text', text: 'a1' }] }),
+      diagnostics: () => ({ state: 'Ready' }),
+    }
+    let b1Reads = 0
+    let b2Reads = 0
+    const b1 = {
+      listTools: async () => [],
+      async callTool() {
+        b1Reads += 1
+        throw connectionLostError()
+      },
+      diagnostics: () => ({ state: 'Ready' }),
+    }
+    const b2 = {
+      listTools: async () => [],
+      async callTool() {
+        b2Reads += 1
+        return { content: [{ type: 'text', text: 'b2' }] }
+      },
+      diagnostics: () => ({ state: 'Ready' }),
+    }
+    let currentB: typeof b1 | typeof b2 = b1
+    const invalidatedA: unknown[] = []
+    const invalidatedB: unknown[] = []
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: {
+        async get(_workspace: string, _server: unknown, key: { id: number }) {
+          return key.id === keyA.id ? a1 : currentB
+        },
+        async invalidateIfCurrent(
+          _workspace: string,
+          _serverId: string,
+          keyId: number,
+          client: unknown,
+        ) {
+          if (keyId === keyA.id) {
+            invalidatedA.push(client)
+          } else {
+            invalidatedB.push(client)
+            if (client === currentB) currentB = b2
+          }
+        },
+        invalidate: async () => {},
+        invalidateServer: async () => {},
+        closeAll: async () => {},
+      } as any,
+      adapterFactory: () => ({ listAgents: async () => [] }) as any,
+    })
+    const resolvedA = await runtime.getAdapterForKey(keyA.id)
+    const resolvedB = await runtime.getAdapterForKey(keyB.id)
+    const deadline = new McpGenerationDeadline(1_000)
+    let aClassifications = 0
+    let aProbes = 0
+    const policyA = {
+      operationReadinessMode: 'reactive' as const,
+      requiredConsecutiveSuccesses: 1,
+      warmupWindowMs: 100,
+      classify() {
+        aClassifications += 1
+        return 'terminal_failure' as const
+      },
+      async probe() { aProbes += 1 },
+    }
+
+    try {
+      const result = await resolvedA.stability.runRead(policyA, {
+        deadline,
+        phase: 'session_poll',
+        pollInitialMs: 1,
+        pollMaxMs: 2,
+        toolTimeoutMs: 100,
+      }, () => resolvedB.client.callTool('read', {}, { operation: 'read_safe' }))
+
+      expect(result).toEqual({ content: [{ type: 'text', text: 'b2' }] })
+      expect(b1Reads).toBe(1)
+      expect(b2Reads).toBe(1)
+      expect(invalidatedB).toEqual([b1])
+      expect(aClassifications).toBe(0)
+      expect(aProbes).toBe(0)
+      expect(invalidatedA).toEqual([])
     } finally {
       deadline.close()
     }

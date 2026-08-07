@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import { McpGenerationDeadline, type McpGenerationDeadlineClock } from './deadline'
 import { McpError, mcpFailureEvidence } from './errors'
-import { createMcpStabilityController } from './stability'
+import {
+  createMcpStabilityController,
+  type McpStabilityOperationAttempt,
+} from './stability'
 import type {
   GenerationSourceProgress,
   McpAdapterOperationOptions,
@@ -600,12 +603,19 @@ describe('MCP stability coordinator', () => {
     ])
   })
 
-  test('runs only policy-owned operation attempts through the operation hook', async () => {
+  test('invalidates the exact failed client from a fresh operation attempt', async () => {
     const clock = new FakeClock()
     const deadline = new McpGenerationDeadline(1_000, undefined, clock)
     const events: string[] = []
     let operationScope = false
-    let attempts = 0
+    let operationCalls = 0
+    const attempts: McpStabilityOperationAttempt[] = []
+    const currentInvalidations: McpClientPort[] = []
+    const exactInvalidations: McpClientPort[] = []
+    const failedClient: McpClientPort = {
+      listTools: async () => [],
+      callTool: async () => ({ content: [] }),
+    }
     const client: McpClientPort = {
       listTools: async () => [],
       callTool: async () => ({ content: [] }),
@@ -615,9 +625,18 @@ describe('MCP stability coordinator', () => {
         events.push('reacquire')
         return client
       },
-      async invalidateCurrent() { events.push('invalidate') },
+      async invalidateCurrent() {
+        currentInvalidations.push(client)
+        events.push('invalidate-current')
+      },
+      async invalidateClient(failed) {
+        exactInvalidations.push(failed)
+        events.push('invalidate-exact')
+      },
       async sleep(ms) { clock.advance(ms) },
-      async runOperation(operationKind, operation) {
+      async runOperation(operationKind, attempt, operation) {
+        attempts.push(attempt)
+        if (attempts.length === 1) attempt.failedClient = failedClient
         events.push(`scope-enter:${operationKind}`)
         operationScope = true
         try {
@@ -648,24 +667,76 @@ describe('MCP stability coordinator', () => {
 
     const result = await controller.runRead(policy, input, async () => {
       expect(operationScope).toBe(true)
-      attempts += 1
-      events.push(`attempt:${attempts}`)
-      if (attempts === 1) throw new McpError('MCP_CONNECTION_LOST', 'lost')
+      operationCalls += 1
+      events.push(`operation:${operationCalls}`)
+      if (operationCalls === 1) throw new McpError('MCP_CONNECTION_LOST', 'lost')
       return 'recovered'
     })
 
     expect(result).toBe('recovered')
+    expect(attempts).toHaveLength(2)
+    expect(attempts[0]).not.toBe(attempts[1])
+    expect(exactInvalidations).toEqual([failedClient])
+    expect(currentInvalidations).toEqual([])
     expect(events).toEqual([
       'scope-enter:read_safe',
-      'attempt:1',
+      'operation:1',
       'scope-exit:read_safe',
-      'invalidate',
+      'invalidate-exact',
       'reacquire',
       'probe',
       'scope-enter:read_safe',
-      'attempt:2',
+      'operation:2',
       'scope-exit:read_safe',
     ])
+  })
+
+  test('invalidates the local probe client even when ambient ownership drifts', async () => {
+    const clock = new FakeClock()
+    const deadline = new McpGenerationDeadline(1_000, undefined, clock)
+    const probeClient: McpClientPort = {
+      listTools: async () => [],
+      callTool: async () => ({ content: [] }),
+    }
+    const replacementClient: McpClientPort = {
+      listTools: async () => [],
+      callTool: async () => ({ content: [] }),
+    }
+    let ambientClient = probeClient
+    let acquisitions = 0
+    const exactInvalidations: McpClientPort[] = []
+    const currentInvalidations: McpClientPort[] = []
+    const controller = createMcpStabilityController({
+      async reacquire() {
+        acquisitions += 1
+        return acquisitions === 1 ? probeClient : replacementClient
+      },
+      async invalidateCurrent() { currentInvalidations.push(ambientClient) },
+      async invalidateClient(client) { exactInvalidations.push(client) },
+      async sleep(ms) { clock.advance(ms) },
+    })
+    const policy: McpStabilityPolicy = {
+      requiredConsecutiveSuccesses: 1,
+      warmupWindowMs: 100,
+      classify,
+      async probe(client) {
+        if (client !== probeClient) return
+        ambientClient = replacementClient
+        throw new McpError('MCP_CONNECTION_LOST', 'probe lost')
+      },
+    }
+
+    await controller.ensureReady(policy, {
+      deadline,
+      phase: 'transport',
+      pollInitialMs: 1,
+      pollMaxMs: 2,
+      toolTimeoutMs: 50,
+    })
+
+    expect(exactInvalidations).toEqual([probeClient])
+    expect(currentInvalidations).toEqual([])
+    expect(acquisitions).toBe(2)
   })
 
   test('does not use the operation hook without a stability policy', async () => {
@@ -674,7 +745,7 @@ describe('MCP stability coordinator', () => {
     const controller = createMcpStabilityController({
       reacquire: async () => { throw new Error('unexpected reacquisition') },
       invalidateCurrent: async () => {},
-      async runOperation(_operationKind, operation) {
+      async runOperation(_operationKind, _attempt, operation) {
         hookCalls += 1
         return operation()
       },
