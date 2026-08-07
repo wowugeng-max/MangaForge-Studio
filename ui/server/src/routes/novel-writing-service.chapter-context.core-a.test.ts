@@ -755,6 +755,26 @@ test('rebuilds the generation contract at every chapter-group context boundary',
   expect(source).not.toContain('launchGateBlocker && options.allow_incomplete !== true')
   expect(source).not.toContain("!contextPackage.chapter_target.scene_cards.length && options.allow_incomplete !== true")
 })
+test('wires source-authoritative material repair through context before prose task begin', () => {
+  const createSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/create-novel-writing-service.ts'), 'utf8')
+  const groupSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-for-group-methods.ts'), 'utf8')
+  const contextSource = readFileSync(join(import.meta.dir, '../novel-writing-service/service/generate-chapter-context-scene-cards.ts'), 'utf8')
+  const contextCall = groupSource.indexOf('const contextSceneResult = await runGenerateChapterContextAndSceneCards({')
+  const proseBegin = groupSource.indexOf('const chapterTaskExecution = await generationSourceResolver.beginTask({', contextCall)
+
+  expect(createSource).toContain('const repairChapterMaterials = materialRepairService.repairChapterMaterials')
+  expect(createSource).toContain('repairChapterMaterials,')
+  expect(groupSource).toContain('const repairChapterMaterials = deps.repairChapterMaterials')
+  expect(groupSource.slice(contextCall, proseBegin)).toContain('repairChapterMaterials,')
+  expect(groupSource.slice(contextCall, proseBegin)).toContain('worldbuilding = contextSceneResult.worldbuilding')
+  expect(groupSource.slice(contextCall, proseBegin)).toContain('characters = contextSceneResult.characters')
+  expect(groupSource.slice(contextCall, proseBegin)).toContain('settings = contextSceneResult.settings')
+  expect(contextCall).toBeGreaterThanOrEqual(0)
+  expect(proseBegin).toBeGreaterThan(contextCall)
+  expect(contextSource).toContain("resolveChapterGenerationSource(project).active")
+  expect(contextSource).toContain('repairChapterMaterials({')
+  expect(contextSource).toContain('autoRepairChapterPreflightGaps(activeWorkspace, project, chapter, contextPackage, preferredModelId, { ...llmControlOptions, persist: false })')
+})
 test('compiles the prose prompt from required core sections and director-selected contracts', () => {
   const contract = buildProseGenerationContract({
     chapter_target: {

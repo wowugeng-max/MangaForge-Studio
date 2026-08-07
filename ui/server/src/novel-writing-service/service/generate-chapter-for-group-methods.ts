@@ -283,6 +283,7 @@ export function createGenerateChapterForGroupMethods(deps: {
   storeChapterProseMemory: (...args: any[]) => any
   mergeChapterRawPayload: (...args: any[]) => any
   buildChapterContextPackage: (...args: any[]) => any
+  repairChapterMaterials: (...args: any[]) => any
   autoRepairChapterPreflightGaps: (...args: any[]) => any
   generateSceneCardsForChapter: (...args: any[]) => any
   ensureProseMeetsWordTarget: (...args: any[]) => any
@@ -311,6 +312,7 @@ export function createGenerateChapterForGroupMethods(deps: {
   const storeChapterProseMemory = deps.storeChapterProseMemory
   const mergeChapterRawPayload = deps.mergeChapterRawPayload
   const buildChapterContextPackage = deps.buildChapterContextPackage
+  const repairChapterMaterials = deps.repairChapterMaterials
   const autoRepairChapterPreflightGaps = deps.autoRepairChapterPreflightGaps
   const generateSceneCardsForChapter = deps.generateSceneCardsForChapter
   const ensureProseMeetsWordTarget = deps.ensureProseMeetsWordTarget
@@ -404,6 +406,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     configSnapshot,
     runtime,
     buildChapterContextPackage,
+    repairChapterMaterials,
     autoRepairChapterPreflightGaps,
     generateSceneCardsForChapter,
     approvalRequired,
@@ -416,6 +419,9 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   }
   chapter = contextSceneResult.chapter
   chapters = contextSceneResult.chapters
+  worldbuilding = contextSceneResult.worldbuilding
+  characters = contextSceneResult.characters
+  settings = contextSceneResult.settings
   chapterSettingUsage = contextSceneResult.chapterSettingUsage
   projectSettingUsage = contextSceneResult.projectSettingUsage
   const wordTarget = contextSceneResult.wordTarget

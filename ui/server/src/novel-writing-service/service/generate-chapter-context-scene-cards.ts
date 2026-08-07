@@ -22,6 +22,9 @@ import {
   formatAdmissionError,
 } from '../quality/admission-error'
 import {
+  resolveChapterGenerationSource,
+} from '../generation-source/source-config'
+import {
   prepareProseGenerationContract,
 } from '../quality/prose-quality-entry'
 
@@ -48,6 +51,7 @@ export async function runGenerateChapterContextAndSceneCards(args: {
   configSnapshot: any
   runtime: any
   buildChapterContextPackage: (...a: any[]) => any
+  repairChapterMaterials: (...a: any[]) => any
   autoRepairChapterPreflightGaps: (...a: any[]) => any
   generateSceneCardsForChapter: (...a: any[]) => any
   approvalRequired: (...a: any[]) => any
@@ -78,6 +82,7 @@ export async function runGenerateChapterContextAndSceneCards(args: {
     configSnapshot,
     runtime,
     buildChapterContextPackage,
+    repairChapterMaterials,
     autoRepairChapterPreflightGaps,
     generateSceneCardsForChapter,
     approvalRequired,
@@ -149,54 +154,123 @@ await onStage('context', {
 })
 const preflightNeedsMaterialRepair = contextPackage.preflight.ready !== true || !strictPreflightReadiness.ready
 if (preflightNeedsMaterialRepair && options.auto_repair_missing_material === true) {
+  const activeGenerationSource = resolveChapterGenerationSource(project).active
   await onStage('material_repair', { status: 'running', warnings: contextPackage.preflight.warnings || [], blockers: contextPackage.preflight.blockers || [] })
-  const repairResult = await autoRepairChapterPreflightGaps(activeWorkspace, project, chapter, contextPackage, preferredModelId, { ...llmControlOptions, persist: false })
-  stagedPreflightRepair = repairResult
-  chapter = repairResult.chapter || chapter
-  chapters = chapters.map(item => item.id === chapter.id ? chapter : item)
-  worldbuilding = repairResult.worldbuilding || worldbuilding
-  characters = repairResult.characters || characters
-  settings = repairResult.settings || settings
-  chapterSettingUsage = repairResult.staged_usage_replacement || chapterSettingUsage
-  projectSettingUsage = [
-    ...projectSettingUsage.filter((usage: any) => Number(usage?.chapter_id || 0) !== chapter.id),
-    ...chapterSettingUsage,
-  ]
-  reviews = [...reviews, ...asArray(repairResult.staged_reviews)]
-  wordTarget = resolveChapterWordTarget(project, chapter, options)
-  const repairedContextPackage = applyChapterWordTargetToContext(
-    runtime?.buildChapterContext ? await buildGenerationContext() : repairResult.context_package,
-    wordTarget,
-  )
-  const repairedWritePrep = repairedContextPackage?.chapter_target?.write_preparation_brief
-    || repairedContextPackage?.chapter_target?.writePreparationBrief
-    || repairedContextPackage?.pre_draft_brief?.write_preparation_brief
-    || repairedContextPackage?.write_preparation_brief
-  const repairedWritePrepReady = ['ready', 'ok', 'pass'].includes(String(
-    repairedWritePrep?.readiness_status
-    || repairedWritePrep?.readinessStatus
-    || '',
-  ).toLowerCase())
-  const postRepairOptions = repairedWritePrepReady
-    ? {
-        ...(options || {}),
-        // Drop stale cockpit launch-gate snapshots after local material repair succeeded.
-        chapter_launch_gate: undefined,
-        chapterLaunchGate: undefined,
+  if (activeGenerationSource === 'mcp') {
+    let repaired: any
+    try {
+      repaired = await repairChapterMaterials({
+        activeWorkspace,
+        projectId,
+        chapterId: chapter.id,
+        signal: options.abortSignal,
+      })
+      if (!repaired || typeof repaired !== 'object'
+        || !repaired.context_package || typeof repaired.context_package !== 'object') {
+        throw Object.assign(new Error('MCP 材料补齐未返回权威章节上下文'), {
+          code: 'MATERIAL_REPAIR_RESULT_INVALID',
+          error_code: 'MATERIAL_REPAIR_RESULT_INVALID',
+        })
       }
-    : options
-  preparedGeneration = prepareProseGenerationContract(repairedContextPackage, postRepairOptions)
-  contextPackage = preparedGeneration.contextPackage
-  if (contextPackage?.setting_context?.auto_matched) stagedContextUsageReplacement = asArray(contextPackage.setting_context.chapter_usage)
-  generationContract = preparedGeneration.contract
-  strictPreflightReadiness = resolveStrictPreflightReadiness(contextPackage.preflight)
-  await onStage('material_repair', {
-    status: contextPackage.preflight.ready === true && strictPreflightReadiness.ready ? 'success' : 'warn',
-    repaired: repairResult.repaired,
-    errors: repairResult.errors,
-    remaining_warnings: contextPackage.preflight.warnings || [],
-    remaining_blockers: contextPackage.preflight.blockers || [],
-  })
+    } catch (error: any) {
+      try {
+        await onStage('material_repair', {
+          status: 'failed',
+          code: error?.code || error?.error_code,
+          ...(error?.committed === true ? { committed: true } : {}),
+        })
+      } catch {
+        // Preserve the source/commit outcome as the primary production failure.
+      }
+      throw error
+    }
+
+    const skipped = repaired.skipped === true
+    if (!skipped) {
+      if (repaired.chapter && typeof repaired.chapter === 'object') chapter = repaired.chapter
+      if (Array.isArray(repaired.chapters)) chapters = repaired.chapters
+      if (Array.isArray(repaired.worldbuilding)) worldbuilding = repaired.worldbuilding
+      if (Array.isArray(repaired.characters)) characters = repaired.characters
+      if (Array.isArray(repaired.settings)) settings = repaired.settings
+      if (Array.isArray(repaired.chapter_setting_usage)) chapterSettingUsage = repaired.chapter_setting_usage
+      if (Array.isArray(repaired.project_setting_usage)) projectSettingUsage = repaired.project_setting_usage
+    }
+    projectSettingUsage = [
+      ...projectSettingUsage.filter((usage: any) => Number(usage?.chapter_id || 0) !== chapter.id),
+      ...chapterSettingUsage,
+    ]
+    stagedPreflightRepair = null
+    wordTarget = resolveChapterWordTarget(project, chapter, options)
+    const repairedContextPackage = applyChapterWordTargetToContext(
+      repaired.context_package,
+      wordTarget,
+    )
+    preparedGeneration = prepareProseGenerationContract(repairedContextPackage, {
+      ...(options || {}),
+      allow_incomplete: false,
+      allowIncomplete: false,
+    })
+    contextPackage = preparedGeneration.contextPackage
+    if (contextPackage?.setting_context?.auto_matched) stagedContextUsageReplacement = asArray(contextPackage.setting_context.chapter_usage)
+    generationContract = preparedGeneration.contract
+    strictPreflightReadiness = resolveStrictPreflightReadiness(contextPackage.preflight)
+    await onStage('material_repair', {
+      status: contextPackage.preflight.ready === true && strictPreflightReadiness.ready ? 'success' : 'warn',
+      repaired: asArray(repaired.applied),
+      errors: [],
+      skipped,
+      remaining_warnings: contextPackage.preflight.warnings || [],
+      remaining_blockers: contextPackage.preflight.blockers || [],
+    })
+  } else {
+    const repairResult = await autoRepairChapterPreflightGaps(activeWorkspace, project, chapter, contextPackage, preferredModelId, { ...llmControlOptions, persist: false })
+    stagedPreflightRepair = repairResult
+    chapter = repairResult.chapter || chapter
+    chapters = chapters.map(item => item.id === chapter.id ? chapter : item)
+    worldbuilding = repairResult.worldbuilding || worldbuilding
+    characters = repairResult.characters || characters
+    settings = repairResult.settings || settings
+    chapterSettingUsage = repairResult.staged_usage_replacement || chapterSettingUsage
+    projectSettingUsage = [
+      ...projectSettingUsage.filter((usage: any) => Number(usage?.chapter_id || 0) !== chapter.id),
+      ...chapterSettingUsage,
+    ]
+    reviews = [...reviews, ...asArray(repairResult.staged_reviews)]
+    wordTarget = resolveChapterWordTarget(project, chapter, options)
+    const repairedContextPackage = applyChapterWordTargetToContext(
+      runtime?.buildChapterContext ? await buildGenerationContext() : repairResult.context_package,
+      wordTarget,
+    )
+    const repairedWritePrep = repairedContextPackage?.chapter_target?.write_preparation_brief
+      || repairedContextPackage?.chapter_target?.writePreparationBrief
+      || repairedContextPackage?.pre_draft_brief?.write_preparation_brief
+      || repairedContextPackage?.write_preparation_brief
+    const repairedWritePrepReady = ['ready', 'ok', 'pass'].includes(String(
+      repairedWritePrep?.readiness_status
+      || repairedWritePrep?.readinessStatus
+      || '',
+    ).toLowerCase())
+    const postRepairOptions = repairedWritePrepReady
+      ? {
+          ...(options || {}),
+          // Drop stale cockpit launch-gate snapshots after local material repair succeeded.
+          chapter_launch_gate: undefined,
+          chapterLaunchGate: undefined,
+        }
+      : options
+    preparedGeneration = prepareProseGenerationContract(repairedContextPackage, postRepairOptions)
+    contextPackage = preparedGeneration.contextPackage
+    if (contextPackage?.setting_context?.auto_matched) stagedContextUsageReplacement = asArray(contextPackage.setting_context.chapter_usage)
+    generationContract = preparedGeneration.contract
+    strictPreflightReadiness = resolveStrictPreflightReadiness(contextPackage.preflight)
+    await onStage('material_repair', {
+      status: contextPackage.preflight.ready === true && strictPreflightReadiness.ready ? 'success' : 'warn',
+      repaired: repairResult.repaired,
+      errors: repairResult.errors,
+      remaining_warnings: contextPackage.preflight.warnings || [],
+      remaining_blockers: contextPackage.preflight.blockers || [],
+    })
+  }
 }
 await enforcePreparedGate(false)
 throwIfChapterGenerationAborted()
@@ -331,6 +405,9 @@ return {
   earlyReturn: null,
   chapter,
   chapters,
+  worldbuilding,
+  characters,
+  settings,
   chapterSettingUsage,
   projectSettingUsage,
   wordTarget,

@@ -170,6 +170,7 @@ export function createNovelWritingService(ctx: {
     commitAcceptance: commitNovelChapterAcceptance,
     loadSnapshot: loadNovelMaterialRepairSnapshot,
   })
+  const repairChapterMaterials = materialRepairService.repairChapterMaterials
   const storeChapterProseMemory = ctx.runtime?.storeChapterProseMemory || defaultStoreNovelChapterProseMemory
   const mergeChapterRawPayload = ctx.runtime?.mergeChapterRawPayload || mergeNovelChapterRawPayload
   const buildParagraphProseContext = buildParagraphProseContextFromModule
@@ -215,6 +216,7 @@ export function createNovelWritingService(ctx: {
     storeChapterProseMemory,
     mergeChapterRawPayload,
     buildChapterContextPackage,
+    repairChapterMaterials,
     autoRepairChapterPreflightGaps,
     generateSceneCardsForChapter,
     ensureProseMeetsWordTarget,
@@ -229,7 +231,7 @@ export function createNovelWritingService(ctx: {
 
   return {
     beginChapterTask,
-    repairChapterMaterials: materialRepairService.repairChapterMaterials,
+    repairChapterMaterials,
     buildParagraphProseContext,
     buildChapterContextPackage,
     autoRepairChapterPreflightGaps,
