@@ -431,7 +431,8 @@ async function cleanupBudaSession(input: {
 export class BudaAdapter implements McpGenerationAdapter {
   readonly id = 'buda'
   readonly stabilityPolicy: McpStabilityPolicy = {
-    requiredConsecutiveSuccesses: 2,
+    operationReadinessMode: 'reactive',
+    requiredConsecutiveSuccesses: 1,
     warmupWindowMs: 15_000,
     classify: (error, operation) => {
       const evidence = mcpFailureEvidence(error)

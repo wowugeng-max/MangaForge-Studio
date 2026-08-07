@@ -292,7 +292,7 @@ describe('BudaAdapter', () => {
     expect(new TextEncoder().encode(bounded.files['MANGAFORGE_CURRENT_STAGE.md']!).byteLength).toBeLessThanOrEqual(256 * 1_024)
   })
 
-  test('exposes a two-success readiness policy that refreshes tools and calls the resolved listAgents tool', async () => {
+  test('exposes a one-success readiness policy that refreshes tools and calls the resolved listAgents tool', async () => {
     const fake = createFakeClient()
     const adapter: McpGenerationAdapter = new BudaAdapter(fake.client as any)
     const policy = adapter.stabilityPolicy
@@ -308,7 +308,8 @@ describe('BudaAdapter', () => {
       return structured({ apiAgents: [] })
     }
 
-    expect(policy?.requiredConsecutiveSuccesses).toBe(2)
+    expect(policy?.operationReadinessMode).toBe('reactive')
+    expect(policy?.requiredConsecutiveSuccesses).toBe(1)
     expect(policy?.warmupWindowMs).toBe(15_000)
 
     await policy!.probe(fake.client as any, { timeoutMs: 500 })
@@ -320,6 +321,27 @@ describe('BudaAdapter', () => {
       args: buildBudaToolArguments('listAgents', mappedTools.listAgents, {}),
       options: { operation: 'read_safe', timeoutMs: 500 },
     })
+  })
+
+  test('keeps one explicit readiness gate at the start of a successful stage', async () => {
+    const fake = createFakeClient()
+    let readinessGates = 0
+    const phases: string[] = []
+    const stability = {
+      async ensureReady(policy: any, input: any) {
+        readinessGates += 1
+        expect(policy.operationReadinessMode).toBe('reactive')
+        phases.push(input.phase)
+      },
+      async runRead(_policy: any, _input: any, operation: any) { return operation() },
+      async runMutation(_policy: any, _input: any, operation: any) { return operation() },
+    }
+
+    const result = await new BudaAdapter(fake.client as any).invokeChapterStage!(invocationInput({ stability }))
+
+    expect(result.status).toBe('completed')
+    expect(readinessGates).toBe(1)
+    expect(phases).toEqual(['transport'])
   })
 
   test('classifies only exact structured not-ready evidence as pre-dispatch', () => {
