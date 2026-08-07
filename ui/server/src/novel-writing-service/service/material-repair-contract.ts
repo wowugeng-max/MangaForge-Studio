@@ -241,12 +241,41 @@ const CHARACTER_DIRECT_FIELDS = [
   'tier',
 ] as const
 
+const CHARACTER_STRING_FIELDS = new Set([
+  'role',
+  'role_type',
+  'archetype',
+  'motivation',
+  'goal',
+  'conflict',
+  'backstory',
+  'growth_arc',
+  'arc_hint',
+  'secret',
+  'appearance',
+  'status',
+  'tier',
+  'narrative_function',
+  'relationship_to_protagonist',
+  'voice_anchor',
+  'signature_action',
+  'secret_or_pressure',
+  'exit_or_turning_point',
+])
+
 type ExistingMaterialIdentity = {
   characterNames: Set<string>
   settingKeys: Set<string>
   characterIds?: Set<number>
   settingIds?: Set<number>
   settingKeysById?: Map<number, string>
+}
+
+export type MaterialRepairTaskIdentity = {
+  project_identity_hash: string
+  chapter_identity_hash: string
+  source_identity_hash: string
+  context_identity_hash: string
 }
 
 export type PreparedMaterialRepair = {
@@ -298,6 +327,94 @@ function assertNoForbiddenMutationKeys(value: unknown, depth = 0) {
   }
 }
 
+function invalidMaterialField(label: string, expected: string): never {
+  throw materialRepairError('MATERIAL_REPAIR_INVALID', `${label} must be ${expected}`)
+}
+
+function emptyOverwriteValue(value: unknown) {
+  return value === undefined || value === null
+}
+
+function assertStringField(value: unknown, label: string) {
+  if (emptyOverwriteValue(value)) return
+  if (typeof value !== 'string') invalidMaterialField(label, 'a string')
+}
+
+function assertBooleanField(value: unknown, label: string) {
+  if (emptyOverwriteValue(value)) return
+  if (typeof value !== 'boolean') invalidMaterialField(label, 'a boolean')
+}
+
+function assertIntegerField(value: unknown, label: string, positive = false) {
+  if (emptyOverwriteValue(value)) return
+  if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isInteger(value) || (positive && value <= 0)) {
+    invalidMaterialField(label, positive ? 'a positive finite integer' : 'a finite integer')
+  }
+}
+
+function assertJsonSafeValue(value: unknown, label: string, depth = 0): void {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) invalidMaterialField(label, 'finite JSON data')
+    return
+  }
+  if (typeof value !== 'object' || depth > 12) invalidMaterialField(label, 'bounded JSON data')
+  if (Array.isArray(value)) {
+    for (const [index, item] of value.entries()) {
+      if (item === undefined) invalidMaterialField(`${label}[${index}]`, 'JSON data')
+      assertJsonSafeValue(item, `${label}[${index}]`, depth + 1)
+    }
+    return
+  }
+  if (!isPlainObject(value)) invalidMaterialField(label, 'a plain JSON object')
+  for (const [key, item] of Object.entries(value)) {
+    if (item === undefined) invalidMaterialField(`${label}.${key}`, 'JSON data')
+    assertJsonSafeValue(item, `${label}.${key}`, depth + 1)
+  }
+}
+
+function assertPlainObjectField(value: unknown, label: string) {
+  if (emptyOverwriteValue(value)) return
+  if (!isPlainObject(value)) invalidMaterialField(label, 'a plain object')
+  assertJsonSafeValue(value, label)
+}
+
+function assertArrayField(value: unknown, label: string) {
+  if (emptyOverwriteValue(value)) return
+  if (!Array.isArray(value)) invalidMaterialField(label, 'an array')
+  assertJsonSafeValue(value, label)
+}
+
+function assertObjectArrayField(value: unknown, label: string) {
+  if (emptyOverwriteValue(value)) return
+  if (!Array.isArray(value)) invalidMaterialField(label, 'an array of plain objects')
+  for (const [index, item] of value.entries()) {
+    if (!isPlainObject(item)) invalidMaterialField(`${label}[${index}]`, 'a plain object')
+    assertJsonSafeValue(item, `${label}[${index}]`)
+  }
+}
+
+function assertStringArrayField(value: unknown, label: string) {
+  if (emptyOverwriteValue(value)) return
+  if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) {
+    invalidMaterialField(label, 'an array of strings')
+  }
+}
+
+function assertObjectOrArrayField(value: unknown, label: string) {
+  if (emptyOverwriteValue(value)) return
+  if (!Array.isArray(value) && !isPlainObject(value)) invalidMaterialField(label, 'a plain object or array')
+  assertJsonSafeValue(value, label)
+}
+
+function assertObjectArrayOrStringField(value: unknown, label: string) {
+  if (emptyOverwriteValue(value)) return
+  if (typeof value !== 'string' && !Array.isArray(value) && !isPlainObject(value)) {
+    invalidMaterialField(label, 'a string, plain object, or array')
+  }
+  assertJsonSafeValue(value, label)
+}
+
 function cleanOverwriteValue(value: unknown, depth = 0): unknown {
   if (value === undefined || value === null || depth > 12) return undefined
   if (typeof value === 'string') {
@@ -342,7 +459,8 @@ function settingKey(entityType: unknown, name: unknown) {
 }
 
 function requiredIdentityText(value: unknown, label: string) {
-  const text = typeof value === 'string' ? value.trim() : ''
+  if (typeof value !== 'string') invalidMaterialField(label, 'a string')
+  const text = value.trim()
   if (!text) throw materialRepairError('MATERIAL_REPAIR_INCOMPLETE', `${label} is required`)
   if (text.length > 240) throw materialRepairError('MATERIAL_REPAIR_LIMIT_EXCEEDED', `${label} is too long`)
   return text
@@ -357,6 +475,15 @@ function normalizeCharacterFields(value: Record<string, unknown>) {
     const item = aliasValue(value, aliases, canonical)
     if (item !== undefined) normalized[canonical] = item
   }
+  for (const [field, item] of Object.entries(normalized)) {
+    const label = `character.${field}`
+    if (CHARACTER_STRING_FIELDS.has(field)) assertStringField(item, label)
+    else if (field === 'first_appearance_chapter') assertIntegerField(item, label)
+    else if (field === 'abilities') assertArrayField(item, label)
+    else if (field === 'relationship_graph' || field === 'current_state') assertPlainObjectField(item, label)
+    else if (field === 'personality' || field === 'relationships') assertObjectOrArrayField(item, label)
+    else if (field === 'active_range' || field === 'antagonist_logic') assertObjectArrayOrStringField(item, label)
+  }
   return cleanObject(normalized)
 }
 
@@ -366,8 +493,15 @@ function normalizeChapterPatch(value: unknown) {
   }
   assertAllowedFields(value, CHAPTER_PATCH_FIELDS, 'chapter_patch')
   const normalized: Record<string, unknown> = {}
-  for (const field of ['title', 'chapter_goal', 'chapter_summary', 'conflict', 'ending_hook', 'scene_breakdown', 'scene_list']) {
+  for (const field of ['title', 'chapter_goal', 'chapter_summary', 'conflict', 'ending_hook']) {
+    if (hasOwn(value, field)) {
+      assertStringField(value[field], `chapter_patch.${field}`)
+      normalized[field] = value[field]
+    }
+  }
+  for (const field of ['scene_breakdown', 'scene_list']) {
     if (hasOwn(value, field)) normalized[field] = value[field]
+    if (hasOwn(value, field)) assertObjectArrayField(value[field], `chapter_patch.${field}`)
   }
   if (hasOwn(value, 'raw_payload')) {
     const raw = value.raw_payload
@@ -389,7 +523,14 @@ function normalizeChapterPatch(value: unknown) {
     const normalizedRaw: Record<string, unknown> = {}
     for (const [canonical, aliases] of Object.entries(rawAliases)) {
       const item = aliasValue(raw, aliases, `chapter_patch.raw_payload.${canonical}`)
-      if (item !== undefined) normalizedRaw[canonical] = item
+      if (item === undefined) continue
+      if (canonical === 'source_readiness') assertObjectArrayField(item, `chapter_patch.raw_payload.${canonical}`)
+      else if (canonical === 'must_advance' || canonical === 'forbidden_repeats' || canonical === 'benchmark_recall_gaps') {
+        assertStringArrayField(item, `chapter_patch.raw_payload.${canonical}`)
+      } else {
+        assertPlainObjectField(item, `chapter_patch.raw_payload.${canonical}`)
+      }
+      normalizedRaw[canonical] = item
     }
     normalized.raw_payload = normalizedRaw
   }
@@ -403,9 +544,27 @@ function normalizeWorldbuilding(value: unknown) {
   assertAllowedFields(value, WORLD_FIELDS, 'worldbuilding')
   const normalized: Record<string, unknown> = {}
   const summary = aliasValue(value, ['world_summary', 'summary'], 'worldbuilding.world_summary')
-  if (summary !== undefined) normalized.world_summary = summary
-  for (const field of ['rules', 'factions', 'locations', 'systems', 'items', 'timeline_anchor', 'known_unknowns', 'raw_payload']) {
-    if (hasOwn(value, field)) normalized[field] = value[field]
+  if (summary !== undefined) {
+    assertStringField(summary, 'worldbuilding.world_summary')
+    normalized.world_summary = summary
+  }
+  for (const field of ['rules', 'factions', 'locations', 'items', 'known_unknowns']) {
+    if (hasOwn(value, field)) {
+      assertArrayField(value[field], `worldbuilding.${field}`)
+      normalized[field] = value[field]
+    }
+  }
+  if (hasOwn(value, 'systems')) {
+    assertObjectOrArrayField(value.systems, 'worldbuilding.systems')
+    normalized.systems = value.systems
+  }
+  if (hasOwn(value, 'timeline_anchor')) {
+    assertObjectArrayOrStringField(value.timeline_anchor, 'worldbuilding.timeline_anchor')
+    normalized.timeline_anchor = value.timeline_anchor
+  }
+  if (hasOwn(value, 'raw_payload')) {
+    assertPlainObjectField(value.raw_payload, 'worldbuilding.raw_payload')
+    normalized.raw_payload = value.raw_payload
   }
   return cleanObject(normalized)
 }
@@ -473,7 +632,15 @@ function normalizeSetting(value: unknown) {
   }
   for (const [canonical, names] of Object.entries(aliases)) {
     const item = aliasValue(value, names, `setting.${canonical}`)
-    if (item !== undefined) normalized[canonical] = item
+    if (item === undefined) continue
+    if (canonical === 'summary' || canonical === 'status' || canonical === 'visibility') {
+      assertStringField(item, `setting.${canonical}`)
+    } else if (canonical === 'first_chapter_no' || canonical === 'last_chapter_no') {
+      assertIntegerField(item, `setting.${canonical}`)
+    } else {
+      assertPlainObjectField(item, `setting.${canonical}`)
+    }
+    normalized[canonical] = item
   }
   const cleaned = cleanObject(normalized)
   if (Object.keys(cleaned).every(field => field === 'entity_type' || field === 'name')) {
@@ -484,10 +651,10 @@ function normalizeSetting(value: unknown) {
 
 function normalizedUsageReference(value: Record<string, unknown>) {
   const rawId = aliasValue(value, ['entity_id', 'entityId', 'setting_id'], 'chapter_setting_usage.entity_id')
-  const entityId = rawId === undefined ? 0 : Number(rawId)
-  if (rawId !== undefined && (!Number.isInteger(entityId) || entityId <= 0)) {
-    throw materialRepairError('MATERIAL_REPAIR_REFERENCE_INVALID', 'usage entity_id must be a positive integer')
+  if (rawId !== undefined && rawId !== null) {
+    assertIntegerField(rawId, 'chapter_setting_usage.entity_id', true)
   }
+  const entityId = typeof rawId === 'number' ? rawId : 0
   const nameValue = aliasValue(value, ['entity_name', 'entityName', 'name', 'setting'], 'chapter_setting_usage.entity_name')
   const typeValue = aliasValue(value, ['entity_type', 'entityType', 'type'], 'chapter_setting_usage.entity_type')
   const entityName = nameValue === undefined ? '' : requiredIdentityText(nameValue, 'usage entity_name')
@@ -535,7 +702,15 @@ function normalizeUsage(
   const directives: Record<string, unknown> = {}
   for (const [canonical, names] of Object.entries(aliases)) {
     const item = aliasValue(value, names, `chapter_setting_usage.${canonical}`)
-    if (item !== undefined) directives[canonical] = item
+    if (item === undefined) continue
+    if (canonical === 'required' || canonical === 'allowed' || canonical === 'forbidden') {
+      assertBooleanField(item, `chapter_setting_usage.${canonical}`)
+    } else if (canonical === 'usage_type' || canonical === 'reveal_level') {
+      assertStringField(item, `chapter_setting_usage.${canonical}`)
+    } else {
+      assertPlainObjectField(item, `chapter_setting_usage.${canonical}`)
+    }
+    directives[canonical] = item
   }
   const cleanedDirectives = cleanObject(directives)
   if (Object.keys(cleanedDirectives).length === 0) {
@@ -556,7 +731,11 @@ function normalizeUsage(
 
 function requiredCollection(payload: Record<string, unknown>, target: Exclude<MaterialRepairTarget, 'chapter_patch'>) {
   const value = payload[target]
-  if (!Array.isArray(value) || value.length === 0) {
+  if (value === undefined) {
+    throw materialRepairError('MATERIAL_REPAIR_INCOMPLETE', `${target} did not return a meaningful result`)
+  }
+  if (!Array.isArray(value)) invalidMaterialField(target, 'an array')
+  if (value.length === 0) {
     throw materialRepairError('MATERIAL_REPAIR_INCOMPLETE', `${target} did not return a meaningful result`)
   }
   if (value.length > MATERIAL_REPAIR_LIMITS[target]) {
@@ -628,6 +807,24 @@ function recentChapterPromptView(chapter: any) {
   }
 }
 
+function materialRepairTaskIdentity(value: MaterialRepairTaskIdentity) {
+  const fields: Array<keyof MaterialRepairTaskIdentity> = [
+    'project_identity_hash',
+    'chapter_identity_hash',
+    'source_identity_hash',
+    'context_identity_hash',
+  ]
+  const identity = {} as MaterialRepairTaskIdentity
+  for (const field of fields) {
+    const text = typeof value?.[field] === 'string' ? value[field].trim() : ''
+    if (!text || text.length > 512) {
+      throw materialRepairError('MATERIAL_REPAIR_IDENTITY_REQUIRED', `${field} must be a non-empty bounded identity hash`)
+    }
+    identity[field] = text
+  }
+  return identity
+}
+
 export function buildMaterialRepairTask(input: {
   targets: Set<MaterialRepairTarget>
   project: any
@@ -640,8 +837,11 @@ export function buildMaterialRepairTask(input: {
   reviews: any[]
   settings: any[]
   chapterSettingUsage: any[]
+  projectSettingUsage: any[]
+  identity: MaterialRepairTaskIdentity
 }) {
   const targets = MATERIAL_REPAIR_MUTATION_FIELDS.filter(target => input.targets.has(target))
+  const identity = materialRepairTaskIdentity(input.identity)
   const outputEnvelope = {
     chapter_patch: {
       title: 'string?',
@@ -680,6 +880,8 @@ export function buildMaterialRepairTask(input: {
     'chapter_setting_usage 使用已有 entity_id，或使用本次 settings 中唯一的 entity_name + entity_type。',
     '已有材料默认只读；不得用空字符串、空数组、空对象或 null 覆盖已有内容。',
     '不得输出正文、项目修改、来源配置、认证信息或远端身份；不得输出 Markdown 代码围栏或解释文字。',
+    '【本次权威身份哈希】',
+    prosePromptJson(identity, 4000),
     '【项目与写作圣经】',
     prosePromptJson({
       project: projectPromptView(input.project),
@@ -703,6 +905,7 @@ export function buildMaterialRepairTask(input: {
       outlines: (input.outlines || []).slice(0, 20),
       reviews: (input.reviews || []).slice(-20),
       settings: (input.settings || []).slice(0, 30),
+      project_setting_usage: (input.projectSettingUsage || []).slice(0, 60),
       chapter_setting_usage: (input.chapterSettingUsage || []).slice(0, 60),
     }, 60000),
     '【输出合同】',

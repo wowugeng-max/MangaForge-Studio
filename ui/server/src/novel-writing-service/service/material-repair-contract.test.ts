@@ -108,6 +108,13 @@ describe('material repair prompt contract', () => {
       reviews: [{ id: 4, summary: '必须承接塔钟逆转。' }],
       settings: [{ id: 5, entity_type: 'location', name: '灰塔', summary: '封闭档案塔' }],
       chapterSettingUsage: [{ entity_id: 5, required: true }],
+      projectSettingUsage: [{ chapter_id: 2, entity_id: 5, usage_type: 'allowed', expected_state_change: { clock: 'reverse' } }],
+      identity: {
+        project_identity_hash: 'sha256:project-authority-sentinel',
+        chapter_identity_hash: 'sha256:chapter-authority-sentinel',
+        source_identity_hash: 'sha256:source-authority-sentinel',
+        context_identity_hash: 'sha256:context-authority-sentinel',
+      },
     })
 
     expect(task.length).toBeLessThanOrEqual(180000)
@@ -124,6 +131,12 @@ describe('material repair prompt contract', () => {
     expect(task).toContain('补齐林砚位置')
     expect(task).toContain('active_locations')
     expect(task).toContain('塔钟逆转')
+    expect(task).toContain('project_setting_usage')
+    expect(task).toContain('clock')
+    expect(task).toContain('sha256:project-authority-sentinel')
+    expect(task).toContain('sha256:chapter-authority-sentinel')
+    expect(task).toContain('sha256:source-authority-sentinel')
+    expect(task).toContain('sha256:context-authority-sentinel')
     expect(task).not.toContain('不得进入材料提示词的正文')
     expect(task).not.toContain('历史正文不应整段进入提示词')
     expect(task).not.toContain('摘要1')
@@ -148,12 +161,42 @@ describe('material repair prompt contract', () => {
       reviews: Array.from({ length: 100 }, () => ({ summary: huge })),
       settings: Array.from({ length: 100 }, (_, index) => ({ entity_type: 'rule', name: `规则${index}`, summary: huge })),
       chapterSettingUsage: Array.from({ length: 100 }, (_, index) => ({ entity_id: index + 1, expected_state_change: { notes: huge } })),
+      projectSettingUsage: Array.from({ length: 100 }, (_, index) => ({ chapter_id: index + 1, entity_id: index + 1, expected_state_change: { notes: huge } })),
+      identity: {
+        project_identity_hash: `sha256:${'a'.repeat(64)}`,
+        chapter_identity_hash: `sha256:${'b'.repeat(64)}`,
+        source_identity_hash: `sha256:${'c'.repeat(64)}`,
+        context_identity_hash: `sha256:${'d'.repeat(64)}`,
+      },
     })
 
     expect(task.length).toBeLessThanOrEqual(180000)
     expect(task).toContain('有界项目')
     expect(task).toContain('仅返回必须补齐的分区')
     expect(task).toContain('不得输出 Markdown 代码围栏或解释文字')
+  })
+
+  test('requires all provider-neutral authority identity hashes', () => {
+    expectContractError(() => buildMaterialRepairTask({
+      targets: new Set(['worldbuilding']),
+      project: { title: '缺少权威身份' },
+      chapter: { chapter_no: 1 },
+      contextPackage: {},
+      chapters: [],
+      worldbuilding: [],
+      characters: [],
+      outlines: [],
+      reviews: [],
+      settings: [],
+      chapterSettingUsage: [],
+      projectSettingUsage: [],
+      identity: {
+        project_identity_hash: 'sha256:project',
+        chapter_identity_hash: 'sha256:chapter',
+        source_identity_hash: '',
+        context_identity_hash: 'sha256:context',
+      },
+    }), 'MATERIAL_REPAIR_IDENTITY_REQUIRED')
   })
 
   test('keeps the provider-neutral implementation free of an adapter brand identifier', () => {
@@ -417,5 +460,50 @@ describe('material repair mutation preparation', () => {
         },
       }), 'MATERIAL_REPAIR_INCOMPLETE')
     }
+  })
+
+  test('rejects wrong primitive and collection types for every acceptance section', () => {
+    const existing = materialRepairExistingIdentity({
+      characters: [{ id: 2, name: '林砚' }],
+      settings: [{ id: 5, entity_type: 'location', name: '灰塔' }],
+    })
+    const invalidCases: Array<{
+      target: any
+      payload: any
+    }> = [
+      { target: 'chapter_patch', payload: { chapter_patch: { title: false } } },
+      { target: 'chapter_patch', payload: { chapter_patch: { scene_list: ['不是场景对象'] } } },
+      { target: 'chapter_patch', payload: { chapter_patch: { raw_payload: { chapter_blueprint: '不是对象' } } } },
+      { target: 'worldbuilding', payload: { worldbuilding: [{ world_summary: false }] } },
+      { target: 'worldbuilding', payload: { worldbuilding: [{ world_summary: '灰塔', factions: {} }] } },
+      { target: 'characters', payload: { characters: [{ name: '许昼', goal: false }] } },
+      { target: 'characters', payload: { characters: [{ name: '许昼', goal: '找到记录', abilities: {} }] } },
+      { target: 'characters', payload: { characters: [{ name: '许昼', goal: '找到记录', first_appearance_chapter: 1.5 }] } },
+      { target: 'character_updates', payload: { character_updates: [{ name: '林砚', current_state: [] }] } },
+      { target: 'character_updates', payload: { character_updates: [{ name: '林砚', patch: { motivation: 7 } }] } },
+      { target: 'settings', payload: { settings: [{ entity_type: 'rule', name: '倒转规则', summary: false }] } },
+      { target: 'settings', payload: { settings: [{ entity_type: 'rule', name: '倒转规则', first_chapter_no: 1.5 }] } },
+      { target: 'settings', payload: { settings: [{ entity_type: 'rule', name: '倒转规则', constraints_json: [] }] } },
+      { target: 'chapter_setting_usage', payload: { chapter_setting_usage: [{ entity_id: 5, required: 'false' }] } },
+      { target: 'chapter_setting_usage', payload: { chapter_setting_usage: [{ entity_id: '5', required: true }] } },
+      { target: 'chapter_setting_usage', payload: { chapter_setting_usage: [{ entity_id: 5, expected_state_change: [] }] } },
+    ]
+    for (const invalid of invalidCases) {
+      expectContractError(() => prepareMcpMaterialRepairMutation({
+        targets: new Set([invalid.target]),
+        payload: invalid.payload,
+        existing,
+      }), 'MATERIAL_REPAIR_INVALID')
+    }
+  })
+
+  test('rejects nested values with non-plain prototypes instead of stripping them', () => {
+    const inherited = Object.create({ inherited: true })
+    inherited.rule = '倒转时不可离塔'
+    expectContractError(() => prepareMcpMaterialRepairMutation({
+      targets: new Set(['worldbuilding']),
+      payload: { worldbuilding: [{ world_summary: '灰塔规则', rules: [inherited] }] },
+      existing: { characterNames: new Set(), settingKeys: new Set() },
+    }), 'MATERIAL_REPAIR_INVALID')
   })
 })
