@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { buildAgentMessages } from '../../llm/executor-helpers'
+import { stringifyLLMMessageTextContent } from '../../llm/types'
 import {
   createMaterialRepairService,
 } from './material-repair-service'
@@ -25,13 +27,23 @@ function generationSource(active: 'model' | 'mcp') {
   }
 }
 
-function contextPackage(failedKey: string | null = 'worldbuilding') {
+function contextPackage(failedKey: string | null = 'worldbuilding', includePrivate = false) {
   return {
     project: { id: 3, title: '灰塔校时局' },
     chapter_target: { id: 9, chapter_no: 1, title: '停摆前一分钟' },
     writing_bible: { premise: '每天丢失一分钟' },
     story_state: {},
     continuity: {},
+    ...(includePrivate ? {
+      safe_material_field: '必须保留的普通材料',
+      private_receipt: {
+        session_id: 'skipped-private-session',
+        agent_id: 'skipped-private-agent',
+        key_id: 998,
+        prompt: 'skipped-private-prompt',
+        headers: { Authorization: 'skipped-private-header' },
+      },
+    } : {}),
     preflight: {
       ready: failedKey === null,
       strict_ready: failedKey === null,
@@ -40,6 +52,12 @@ function contextPackage(failedKey: string | null = 'worldbuilding') {
         : [{ key: failedKey, ok: false, severity: 'high', fix: `repair ${failedKey}` }],
       blockers: failedKey === null ? [] : [{ key: failedKey }],
       warnings: [],
+      ...(includePrivate ? {
+        remote_diagnostics: {
+          session_id: 'skipped-preflight-session',
+          prompt: 'skipped-preflight-prompt',
+        },
+      } : {}),
     },
   }
 }
@@ -101,6 +119,7 @@ type HarnessOptions = {
   assertCurrentFailure?: Error
   closeFailure?: Error
   abortBeforeStageFailure?: AbortController
+  sensitiveContext?: boolean
 }
 
 function createMaterialRepairHarness(options: HarnessOptions = {}) {
@@ -172,8 +191,8 @@ function createMaterialRepairHarness(options: HarnessOptions = {}) {
     buildChapterContextPackage: async (...args: any[]) => {
       contextBuildCalls.push(args)
       return contextBuildCalls.length === 1
-        ? contextPackage(options.failedKey === undefined ? 'worldbuilding' : options.failedKey)
-        : contextPackage(null)
+        ? contextPackage(options.failedKey === undefined ? 'worldbuilding' : options.failedKey, options.sensitiveContext)
+        : contextPackage(null, options.sensitiveContext)
     },
     commitAcceptance: async (...args: any[]) => {
       commitCalls.push(args)
@@ -359,6 +378,28 @@ describe('one-session MCP material repair orchestration', () => {
     expect(harness.stageCalls[0]?.context?.task).not.toContain('buda')
   })
 
+  test('marks the material task authoritative so the real outline compiler cannot append its schema', async () => {
+    const harness = createMaterialRepairHarness()
+
+    await harness.service.repairChapterMaterials(request(harness))
+
+    const stage = harness.stageCalls[0]
+    const compiled = buildAgentMessages(stage.agentId, stage.project, stage.context)
+      .map(message => `[${message.role.toUpperCase()}]\n${stringifyLLMMessageTextContent(message.content)}`)
+      .join('\n\n')
+    expect(stage.context.authoritativeTask).toBe(true)
+    expect(compiled).toContain('任务：一次性补齐本章写作前置材料。只输出 JSON，不生成正文。')
+    expect(compiled).toContain('仅允许输出 chapter_patch, worldbuilding, characters')
+    for (const outlineField of [
+      'master_outline',
+      'volume_outlines',
+      'chapter_outlines',
+      'foreshadowing_plan',
+    ]) {
+      expect(compiled).not.toContain(outlineField)
+    }
+  })
+
   test('stops on assertCurrent source switch without committing or calling the remote again', async () => {
     const rejection = Object.assign(new Error('source changed'), { code: 'GENERATION_SOURCE_CHANGED' })
     const harness = createMaterialRepairHarness({ assertCurrentFailure: rejection })
@@ -395,6 +436,36 @@ describe('one-session MCP material repair orchestration', () => {
       'headers',
     ]) {
       expect(serialized).not.toContain(secret)
+    }
+  })
+
+  test('sanitizes skipped context and preflight with the same boundary while preserving materials', async () => {
+    const harness = createMaterialRepairHarness({ failedKey: null, sensitiveContext: true })
+
+    const result = await harness.service.repairChapterMaterials(request(harness))
+    const serialized = JSON.stringify(result)
+
+    expect(result).toMatchObject({
+      skipped: true,
+      context_package: {
+        safe_material_field: '必须保留的普通材料',
+        writing_bible: { premise: '每天丢失一分钟' },
+      },
+    })
+    for (const privateValue of [
+      'skipped-private-session',
+      'skipped-private-agent',
+      'skipped-private-prompt',
+      'skipped-private-header',
+      'skipped-preflight-session',
+      'skipped-preflight-prompt',
+      'session_id',
+      'agent_id',
+      'key_id',
+      'prompt',
+      'headers',
+    ]) {
+      expect(serialized).not.toContain(privateValue)
     }
   })
 

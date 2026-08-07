@@ -219,14 +219,15 @@ export function createMaterialRepairService(deps: MaterialRepairServiceDependenc
       const contextPackage = await buildSnapshotContext(deps, input.activeWorkspace, loaded)
       const plan = resolveMaterialRepairPlan(contextPackage, input.repairKeys)
       if (plan.targets.size === 0) {
+        const sanitizedContext = sanitizeMaterialRepairResponseValue(contextPackage)
         return {
           ok: true,
           skipped: true,
           source: 'mcp' as const,
           applied: [],
           summary: '',
-          context_package: contextPackage,
-          preflight: contextPackage?.preflight || null,
+          context_package: sanitizedContext,
+          preflight: sanitizedContext?.preflight || null,
         }
       }
 
@@ -268,7 +269,7 @@ export function createMaterialRepairService(deps: MaterialRepairServiceDependenc
           'material_repair_json',
           'outline-agent',
           loaded.project,
-          { task },
+          { task, authoritativeTask: true },
           { activeWorkspace: input.activeWorkspace, signal: input.signal },
         )
         const prepared = prepareMcpMaterialRepairMutation({

@@ -524,7 +524,7 @@ function scrubGenerationError(
   }
 }
 
-function compileMcpAgentPrompt(
+export function compileMcpAgentPrompt(
   agentId: string,
   project: Record<string, any>,
   context: Record<string, any>,
