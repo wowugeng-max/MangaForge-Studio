@@ -43,9 +43,12 @@ export type McpFailureClass =
   | 'ambiguous_write_failure'
   | 'terminal_failure'
 
+export type McpOperationReadinessMode = 'proactive' | 'reactive'
+
 export type McpStabilityPolicy = {
   requiredConsecutiveSuccesses: number
   warmupWindowMs: number
+  operationReadinessMode?: McpOperationReadinessMode
   classify(error: unknown, operation: McpOperationKind): McpFailureClass
   probe(client: McpClientPort, options: McpAdapterOperationOptions): Promise<void>
 }

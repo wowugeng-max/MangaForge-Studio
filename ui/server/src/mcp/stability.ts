@@ -165,10 +165,11 @@ export function createMcpStabilityController(dependencies: {
     operation: () => Promise<T>,
   ): Promise<T> => {
     if (!policy) return operation()
+    const readinessMode = policy.operationReadinessMode || 'proactive'
     const initialDelay = positiveInteger(input.pollInitialMs, 1)
     const maximumDelay = Math.max(initialDelay, positiveInteger(input.pollMaxMs, initialDelay))
     let retryDelay = initialDelay
-    await ensureReady(policy, input)
+    if (readinessMode === 'proactive') await ensureReady(policy, input)
     while (true) {
       remainingOrThrow(input)
       try {
@@ -184,7 +185,9 @@ export function createMcpStabilityController(dependencies: {
         if (failureClass === 'transient_read_failure') await dependencies.invalidateCurrent()
         await boundedSleep(retryDelay, input)
         retryDelay = Math.min(maximumDelay, retryDelay * 2)
-        await ensureReady(policy, input)
+        if (readinessMode === 'proactive' || failureClass === 'transient_read_failure') {
+          await ensureReady(policy, input)
+        }
       }
     }
   }

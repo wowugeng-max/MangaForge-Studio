@@ -67,6 +67,7 @@ function stabilityHarness(
     warmupWindowMs?: number
     pollInitialMs?: number
     pollMaxMs?: number
+    operationReadinessMode?: 'proactive' | 'reactive'
   } = {},
 ) {
   const clock = new FakeClock()
@@ -115,6 +116,9 @@ function stabilityHarness(
   const policy: McpStabilityPolicy = {
     requiredConsecutiveSuccesses: options.requiredConsecutiveSuccesses ?? 2,
     warmupWindowMs: options.warmupWindowMs ?? 100,
+    ...(options.operationReadinessMode
+      ? { operationReadinessMode: options.operationReadinessMode }
+      : {}),
     classify,
     async probe(client, remoteOptions) {
       await client.listTools({ ...remoteOptions, refreshTools: true })
@@ -424,6 +428,93 @@ describe('MCP stability coordinator', () => {
     expect(result).toBe('created')
     expect(calls).toBe(2)
     expect(harness.invalidations).toBe(0)
+  })
+
+  test.each([
+    { label: 'read', run: 'runRead' as const, phase: 'session_poll' as const },
+    { label: 'mutation', run: 'runMutation' as const, phase: 'session_create' as const },
+  ])('reactive $label retries an exact pre-dispatch rejection without a readiness probe', async ({ run, phase }) => {
+    const harness = stabilityHarness([], { operationReadinessMode: 'reactive' })
+    let calls = 0
+
+    const result = await harness.controller[run](
+      harness.policy,
+      { ...harness.input, phase },
+      async () => {
+        calls += 1
+        if (calls === 1) throw exactNotReadyEvidence()
+        return 'operation-result'
+      },
+    )
+
+    expect(result).toBe('operation-result')
+    expect(calls).toBe(2)
+    expect(harness.sleeps).toEqual([5])
+    expect(harness.acquisitions).toBe(0)
+    expect(harness.probeLog).toEqual([])
+  })
+
+  test('reactive read recovery stabilizes only after a transient read failure', async () => {
+    const harness = stabilityHarness(['ok', 'ok'], { operationReadinessMode: 'reactive' })
+    let calls = 0
+
+    const result = await harness.controller.runRead(
+      harness.policy,
+      { ...harness.input, phase: 'session_poll' },
+      async () => {
+        calls += 1
+        if (calls === 1) throw new McpError('MCP_CONNECTION_LOST', 'lost')
+        return 'operation-result'
+      },
+    )
+
+    expect(result).toBe('operation-result')
+    expect(calls).toBe(2)
+    expect(harness.invalidations).toBe(1)
+    expect(harness.acquisitions).toBe(1)
+    expect(harness.probeLog).toEqual([
+      'tools/list:1', 'probe/read:1',
+      'tools/list:1', 'probe/read:1',
+    ])
+  })
+
+  test('reactive mutation does not replay an ambiguous failure', async () => {
+    const harness = stabilityHarness([], { operationReadinessMode: 'reactive' })
+    const error = new McpError('MCP_CONNECTION_LOST', 'lost')
+    let calls = 0
+
+    const caught = await harness.controller.runMutation(
+      harness.policy,
+      { ...harness.input, phase: 'session_create' },
+      async () => { calls += 1; throw error },
+    ).catch(value => value)
+
+    expect(caught).toBe(error)
+    expect(calls).toBe(1)
+    expect(harness.acquisitions).toBe(0)
+    expect(harness.probeLog).toEqual([])
+  })
+
+  test('reactive exact pre-dispatch recovery exhausts the shared deadline without probing', async () => {
+    const harness = stabilityHarness([], {
+      operationReadinessMode: 'reactive',
+      totalMs: 12,
+      pollInitialMs: 5,
+      pollMaxMs: 10,
+    })
+
+    const caught = await harness.controller.runRead(
+      harness.policy,
+      { ...harness.input, phase: 'drive_sync' },
+      async () => { throw exactNotReadyEvidence() },
+    ).catch(error => error)
+
+    expect(caught).toMatchObject({
+      code: 'MCP_SERVER_NOT_READY',
+      details: { phase: 'drive_sync' },
+    })
+    expect(harness.sleeps.reduce((sum, value) => sum + value, 0)).toBe(12)
+    expect(harness.acquisitions).toBe(0)
   })
 
   test.each([
