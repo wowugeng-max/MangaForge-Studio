@@ -104,6 +104,7 @@ function preflightDeps(overrides: Record<string, any> = {}) {
     buildPreDraftBriefForActiveChapter: async () => {},
     chapterGenerationSourceAuthority: authority,
     getChapterGenerationSourceAuthority: () => authority,
+    getChapterSourceMutationPending: () => false,
     beginChapterSourceOperation: () => Object.freeze({ projectId: 7, loadEpoch: 1, operationEpoch: 1 }),
     assertChapterSourceOperationCurrent: () => {},
     flushPendingSave: async () => true,
@@ -142,6 +143,7 @@ function proseDeps(overrides: Record<string, any> = {}) {
     },
     chapterGenerationSourceAuthority: authority,
     getChapterGenerationSourceAuthority: () => authority,
+    getChapterSourceMutationPending: () => false,
     beginChapterSourceOperation: () => Object.freeze({ projectId: 7, loadEpoch: 1, operationEpoch: 1 }),
     assertChapterSourceOperationCurrent: () => {},
     chapterWordTargetPayload: () => ({ target_word_count: 1800 }),
@@ -436,6 +438,217 @@ describe('chapter source-aware invocation handlers', () => {
     expect(events).not.toContain('right-tab')
     expect(notices.successes).toHaveLength(0)
     expect(notices.warnings).toHaveLength(0)
+  })
+
+  test('pending source mutations block every chapter entry without superseding the mutation token', async () => {
+    const notices = installMessageRecorder()
+    const runScenario = async (
+      createAction: (source: ReturnType<typeof mutableSourceAuthority>, getPending: () => boolean, request: () => void) => Promise<void>,
+    ) => {
+      const source = mutableSourceAuthority('model')
+      const mutationToken = source.begin()
+      let pending = true
+      let requests = 0
+      const request = () => { requests += 1 }
+
+      await createAction(source, () => pending, request)
+
+      expect(requests).toBe(0)
+      expect(() => source.assert(mutationToken)).not.toThrow()
+      let mutationCommitted = false
+      source.assert(mutationToken)
+      mutationCommitted = true
+      expect(mutationCommitted).toBe(true)
+
+      pending = false
+      await createAction(source, () => pending, request)
+      expect(requests).toBeGreaterThan(0)
+    }
+
+    await runScenario(async (source, getPending, request) => {
+      const handlers = createPreflightHandlers(preflightDeps({
+        getChapterGenerationSourceAuthority: source.get,
+        getChapterSourceMutationPending: getPending,
+        beginChapterSourceOperation: source.begin,
+        assertChapterSourceOperationCurrent: source.assert,
+        apiClient: { post: async () => { request(); return { data: { applied: [] } } } },
+        loadProjectModules: async () => source.begin(),
+      }))
+      await handlers.repairGenerationPreflightGaps({ chapter_id: 11 }, { repairKeys: ['characters'] })
+    })
+    await runScenario(async (source, getPending, request) => {
+      globalThis.fetch = (async () => { request(); return streamResponse() }) as any
+      const handlers = proseHandlers.createChapterProseHandlers(proseDeps({
+        getChapterGenerationSourceAuthority: source.get,
+        getChapterSourceMutationPending: getPending,
+        beginChapterSourceOperation: source.begin,
+        assertChapterSourceOperationCurrent: source.assert,
+        loadProjectModules: async () => source.begin(),
+      }))
+      await handlers.generateCurrentChapterProse()
+    })
+    await runScenario(async (source, getPending, request) => {
+      globalThis.fetch = (async () => { request(); return streamResponse() }) as any
+      const handlers = proseHandlers.createChapterProseHandlers(proseDeps({
+        getChapterGenerationSourceAuthority: source.get,
+        getChapterSourceMutationPending: getPending,
+        beginChapterSourceOperation: source.begin,
+        assertChapterSourceOperationCurrent: source.assert,
+        apiClient: {
+          defaults: { baseURL: 'http://novel.test' },
+          post: async () => { request(); return { data: { applied: [], warnings: [] } } },
+        },
+        loadProjectModules: async () => source.begin(),
+      }))
+      await handlers.repairContextAndGenerateCurrentChapter()
+    })
+    await runScenario(async (source, getPending, request) => {
+      globalThis.fetch = (async () => {
+        request()
+        return new Response(JSON.stringify({ chapter: { id: 11, chapter_text: '正文' } }), { status: 200 })
+      }) as any
+      const handlers = proseHandlers.createChapterProseHandlers(proseDeps({
+        getChapterGenerationSourceAuthority: source.get,
+        getChapterSourceMutationPending: getPending,
+        beginChapterSourceOperation: source.begin,
+        assertChapterSourceOperationCurrent: source.assert,
+        apiClient: {
+          defaults: { baseURL: 'http://novel.test' },
+          post: async () => { request(); return { data: {} } },
+        },
+        loadProjectModules: async () => source.begin(),
+      }))
+      await handlers.stepGenerateProse()
+    })
+
+    const pendingWarnings = notices.warnings.filter(value => (
+      typeof value === 'object' && value?.content === '章节来源正在切换，请稍后重试'
+    ))
+    expect(pendingWarnings).toHaveLength(4)
+  })
+
+  test('source change wins over a rejected preflight provider request', async () => {
+    const source = mutableSourceAuthority('model')
+    const requestStarted = deferred<void>()
+    const response = deferred<any>()
+    const events: string[] = []
+    const notices = installMessageRecorder(events)
+    const handlers = createPreflightHandlers(preflightDeps({
+      getChapterGenerationSourceAuthority: source.get,
+      beginChapterSourceOperation: source.begin,
+      assertChapterSourceOperationCurrent: source.assert,
+      apiClient: {
+        post: async () => {
+          requestStarted.resolve()
+          return response.promise
+        },
+      },
+    }))
+
+    const action = handlers.repairGenerationPreflightGaps(
+      { chapter_id: 11 },
+      { repairKeys: ['characters'], continueAfterRepair: () => { events.push('continue') } },
+    )
+    await requestStarted.promise
+    source.switchTo('mcp')
+    response.reject(new Error('old provider failed'))
+    await action
+
+    expect(notices.errors).toHaveLength(0)
+    expect(notices.warnings).toContainEqual({
+      content: '章节来源已变化，请重试',
+      key: 'generation-preflight-repair',
+      duration: 3,
+    })
+    expect(events).not.toContain('success')
+    expect(events).not.toContain('continue')
+  })
+
+  test('source change wins over rejected single and repair prose requests', async () => {
+    const generateSource = mutableSourceAuthority('model')
+    const generateStarted = deferred<void>()
+    const generateResponse = deferred<Response>()
+    const generateNotices = installMessageRecorder()
+    globalThis.fetch = (async () => {
+      generateStarted.resolve()
+      return generateResponse.promise
+    }) as any
+    const generate = proseHandlers.createChapterProseHandlers(proseDeps({
+      getChapterGenerationSourceAuthority: generateSource.get,
+      beginChapterSourceOperation: generateSource.begin,
+      assertChapterSourceOperationCurrent: generateSource.assert,
+    }))
+
+    const generateAction = generate.generateCurrentChapterProse()
+    await generateStarted.promise
+    generateSource.switchTo('mcp')
+    generateResponse.reject(new Error('old generate provider failed'))
+    await generateAction
+
+    expect(generateNotices.errors).toHaveLength(0)
+    expect(generateNotices.warnings).toContain('章节来源已变化，请重试')
+
+    const repairSource = mutableSourceAuthority('mcp')
+    const repairStarted = deferred<void>()
+    const repairResponse = deferred<any>()
+    const repairNotices = installMessageRecorder()
+    const repair = proseHandlers.createChapterProseHandlers(proseDeps({
+      chapterGenerationSourceAuthority: repairSource.get(),
+      getChapterGenerationSourceAuthority: repairSource.get,
+      beginChapterSourceOperation: repairSource.begin,
+      assertChapterSourceOperationCurrent: repairSource.assert,
+      selectedModelId: undefined,
+      apiClient: {
+        defaults: { baseURL: 'http://novel.test' },
+        post: async () => {
+          repairStarted.resolve()
+          return repairResponse.promise
+        },
+      },
+    }))
+
+    const repairAction = repair.repairContextAndGenerateCurrentChapter()
+    await repairStarted.promise
+    repairSource.switchTo('model')
+    repairResponse.reject(new Error('old repair provider failed'))
+    await repairAction
+
+    expect(repairNotices.errors).toHaveLength(0)
+    expect(repairNotices.warnings).toContain('章节来源已变化，请重试')
+  })
+
+  test('source change wins over a rejected batch request before stale failure UI or summary', async () => {
+    const source = mutableSourceAuthority('model')
+    const requestStarted = deferred<void>()
+    const response = deferred<Response>()
+    const notices = installMessageRecorder()
+    const batchStatuses: any[] = []
+    let summaries = 0
+    globalThis.fetch = (async () => {
+      requestStarted.resolve()
+      return response.promise
+    }) as any
+    const handlers = proseHandlers.createChapterProseHandlers(proseDeps({
+      getChapterGenerationSourceAuthority: source.get,
+      beginChapterSourceOperation: source.begin,
+      assertChapterSourceOperationCurrent: source.assert,
+      apiClient: {
+        defaults: { baseURL: 'http://novel.test' },
+        post: async () => { summaries += 1; return { data: {} } },
+      },
+      setProseBatchStatus: (value: any) => { batchStatuses.push(value) },
+    }))
+
+    const action = handlers.stepGenerateProse()
+    await requestStarted.promise
+    source.switchTo('mcp')
+    response.reject(new Error('old batch provider failed'))
+    await action
+
+    expect(summaries).toBe(0)
+    expect(notices.errors).toHaveLength(0)
+    expect(notices.warnings).toContain('章节来源已变化，请重试')
+    expect(batchStatuses.some(value => Boolean(value?.lastError))).toBe(false)
   })
 
   test('prose entry points stop before fetch, repair, or summary when source changes during flush or confirm', async () => {

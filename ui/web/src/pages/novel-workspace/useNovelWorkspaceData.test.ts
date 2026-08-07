@@ -352,6 +352,43 @@ describe('novel workspace authoritative chapter source lifecycle', () => {
     expect((workspace.harness.value as any).selectedProject?.id).toBe(1)
   })
 
+  test('shares live token-aware source mutation pending state without invalidating its token', async () => {
+    installWorkspaceApi(new Map([
+      [1, chapterSourceView(1, 217)],
+      [2, chapterSourceView(2, 301)],
+    ]))
+    const workspace = mountWorkspace(1)
+    await flushPromises()
+    const value = workspace.harness.value as any
+
+    expect(typeof value.getChapterSourceMutationPending).toBe('function')
+    expect(typeof value.setChapterSourceMutationPending).toBe('function')
+    if (typeof value.getChapterSourceMutationPending !== 'function'
+      || typeof value.setChapterSourceMutationPending !== 'function') return
+
+    const token = value.beginChapterSourceOperation()
+    value.setChapterSourceMutationPending(true, token)
+
+    expect(value.getChapterSourceMutationPending()).toBe(true)
+    expect(() => value.assertChapterSourceOperationCurrent(token)).not.toThrow()
+    expect((workspace.harness.value as any).chapterSourcePendingState).toEqual({
+      projectId: 1,
+      pending: true,
+      token,
+    })
+
+    ;(workspace.harness.value as any).setChapterSourceMutationPending(false, token)
+    expect((workspace.harness.value as any).getChapterSourceMutationPending()).toBe(false)
+
+    const staleToken = (workspace.harness.value as any).beginChapterSourceOperation()
+    ;(workspace.harness.value as any).setChapterSourceMutationPending(true, staleToken)
+    workspace.switchProject(2)
+    await flushPromises()
+
+    expect((workspace.harness.value as any).getChapterSourceMutationPending()).toBe(false)
+    expect(() => (workspace.harness.value as any).setChapterSourceMutationPending(false, staleToken)).toThrow()
+  })
+
   test('commits successful modules and ignores a stale initial source rejection after a mutation begins', async () => {
     const source = deferred<unknown>()
     installWorkspaceApi(new Map([[1, source.promise]]))

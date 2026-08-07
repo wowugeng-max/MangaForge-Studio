@@ -17,6 +17,7 @@ import {
   assertChapterInvocationFenceCurrent,
   beginChapterInvocationFence,
   CHAPTER_INVOCATION_SOURCE_CHANGED_MESSAGE,
+  CHAPTER_SOURCE_MUTATION_PENDING_MESSAGE,
   isStaleChapterSourceOperationError,
   type ChapterInvocationFence,
   type ChapterSourceAuthorityState,
@@ -44,6 +45,7 @@ export type PreflightHandlerDeps = {
   flushPendingSave: any
   generateSceneCardsForChapter: any
   getChapterGenerationSourceAuthority: () => ChapterSourceAuthorityState
+  getChapterSourceMutationPending: () => boolean
   loadProjectModules: any
   openEditor: any
   openStoryAssetsWorkspace: any
@@ -66,6 +68,7 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
   const flushPendingSave = deps.flushPendingSave
   const generateSceneCardsForChapter = deps.generateSceneCardsForChapter
   const getChapterGenerationSourceAuthority = deps.getChapterGenerationSourceAuthority
+  const getChapterSourceMutationPending = deps.getChapterSourceMutationPending
   const loadProjectModules = deps.loadProjectModules
   const openEditor = deps.openEditor
   const openStoryAssetsWorkspace = deps.openStoryAssetsWorkspace
@@ -89,6 +92,14 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
   })
 
   const beginInvocation = () => {
+    if (getChapterSourceMutationPending()) {
+      message.warning({
+        content: CHAPTER_SOURCE_MUTATION_PENDING_MESSAGE,
+        key: GENERATION_PREFLIGHT_REPAIR_MESSAGE_KEY,
+        duration: 3,
+      })
+      return null
+    }
     try {
       const result = beginChapterInvocationFence(invocationFenceDependencies)
       if (!result.fence) message.warning(result.gate.message)
@@ -215,6 +226,7 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
       message.success({ content: repaired.length ? `已自动补齐：${repaired.join('；')}` : '材料已刷新', key: messageKey, duration: 3 })
       options.continueAfterRepair?.()
     } catch (error: any) {
+      if (!invocationIsCurrent(invocation)) return
       message.error({ content: error?.response?.data?.error || error?.message || '自动补齐生成材料失败', key: messageKey, duration: 4 })
     }
   }

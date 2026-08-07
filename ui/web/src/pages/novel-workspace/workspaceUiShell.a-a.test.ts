@@ -549,6 +549,8 @@ describe('commercial writing workspace UI shell a a', () => {
       'beginChapterSourceOperation',
       'assertChapterSourceOperationCurrent',
       'chapterSourceLocallyBusy',
+      'chapterSourcePendingState',
+      'setChapterSourceMutationPending',
     ]) {
       expect(base).toContain(name)
       expect(ready).toContain(name)
@@ -556,6 +558,7 @@ describe('commercial writing workspace UI shell a a', () => {
       expect(topbar).toContain(name)
     }
     expect(base).not.toContain('componentSourceMutationCounter')
+    expect(topbar).not.toContain('useState<ChapterSourcePendingState>')
     expect(topbar).toContain('pending={sourcePending}')
     expect(topbar).toContain('onPendingChange={setSourceOperationPending}')
   })

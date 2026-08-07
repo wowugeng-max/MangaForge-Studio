@@ -396,6 +396,7 @@ describe('commercial writing workspace UI shell b a', () => {
 
     for (const dependency of [
       'getChapterGenerationSourceAuthority',
+      'getChapterSourceMutationPending',
       'beginChapterSourceOperation',
       'assertChapterSourceOperationCurrent',
     ]) {

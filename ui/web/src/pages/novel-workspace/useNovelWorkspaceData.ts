@@ -22,6 +22,7 @@ import {
 } from './workspaceDetailCache'
 import { clearWorkspacePayloadParseCache } from './payloadParseCache'
 import {
+  chapterSourcePendingIsCurrent,
   confirmedAuthorityState,
   createChapterSourceOperationFence,
   isStaleChapterSourceOperationError,
@@ -29,6 +30,7 @@ import {
   StaleChapterSourceOperationError,
   type ChapterSourceAuthorityState,
   type ChapterSourceOperationToken,
+  type ChapterSourcePendingState,
 } from './chapterGenerationSourceModel'
 
 export type ChapterStatusFilter = 'all' | 'written' | 'unwritten' | 'placeholder'
@@ -155,6 +157,12 @@ export function useNovelWorkspaceData({
     () => chapterGenerationSourceAuthorityRef.current,
     [],
   )
+  const [chapterSourcePendingState, setChapterSourcePendingState] = useState<ChapterSourcePendingState>(() => ({
+    projectId,
+    pending: false,
+    token: null,
+  }))
+  const chapterSourcePendingStateRef = useRef(chapterSourcePendingState)
   const [activeChapterId, setActiveChapterId] = useState<number | null>(null)
   const projectIdRef = useRef(projectId)
   projectIdRef.current = projectId
@@ -190,6 +198,23 @@ export function useNovelWorkspaceData({
 
   const assertChapterSourceOperationCurrent = useCallback((token: ChapterSourceOperationToken) => {
     chapterSourceFenceRef.current!.assertCurrent(token)
+  }, [])
+
+  const getChapterSourceMutationPending = useCallback(() => chapterSourcePendingIsCurrent(
+    chapterSourcePendingStateRef.current,
+    projectIdRef.current,
+    token => chapterSourceFenceRef.current!.assertCurrent(token),
+  ), [])
+
+  const setChapterSourceMutationPending = useCallback((pending: boolean, token: ChapterSourceOperationToken) => {
+    chapterSourceFenceRef.current!.assertCurrent(token)
+    const next = Object.freeze({
+      projectId: token.projectId,
+      pending,
+      token: pending ? token : null,
+    })
+    chapterSourcePendingStateRef.current = next
+    setChapterSourcePendingState(next)
   }, [])
 
   const loadProjectModules = useCallback(async () => {
@@ -505,6 +530,9 @@ export function useNovelWorkspaceData({
     chapterGenerationSourceAuthority,
     getChapterGenerationSourceAuthority,
     setChapterGenerationSourceAuthority,
+    chapterSourcePendingState,
+    getChapterSourceMutationPending,
+    setChapterSourceMutationPending,
     beginChapterSourceOperation,
     assertChapterSourceOperationCurrent,
     selectedModelId,

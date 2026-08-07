@@ -162,6 +162,28 @@ export type ChapterSourceOperationToken = Readonly<{
 }>
 
 export const CHAPTER_INVOCATION_SOURCE_CHANGED_MESSAGE = '章节来源已变化，请重试'
+export const CHAPTER_SOURCE_MUTATION_PENDING_MESSAGE = '章节来源正在切换，请稍后重试'
+
+export type ChapterSourcePendingState = Readonly<{
+  projectId: number
+  pending: boolean
+  token: ChapterSourceOperationToken | null
+}>
+
+export function chapterSourcePendingIsCurrent(
+  state: ChapterSourcePendingState,
+  projectId: number,
+  assertCurrent: (token: ChapterSourceOperationToken) => void,
+) {
+  if (!state.pending || !state.token || state.projectId !== projectId) return false
+  try {
+    assertCurrent(state.token)
+    return true
+  } catch (error) {
+    if (isStaleChapterSourceOperationError(error)) return false
+    throw error
+  }
+}
 
 export type ChapterInvocationFence = Readonly<{
   token: ChapterSourceOperationToken

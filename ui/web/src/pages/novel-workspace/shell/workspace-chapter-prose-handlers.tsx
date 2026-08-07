@@ -9,6 +9,7 @@ import {
   assertChapterInvocationFenceCurrent,
   beginChapterInvocationFence,
   CHAPTER_INVOCATION_SOURCE_CHANGED_MESSAGE,
+  CHAPTER_SOURCE_MUTATION_PENDING_MESSAGE,
   isStaleChapterSourceOperationError,
   type ChapterInvocationFence,
   type ChapterSourceAuthorityState,
@@ -52,6 +53,7 @@ export type ChapterProseHandlerDeps = {
   confirmReferenceReady: any
   flushPendingSave: any
   getChapterGenerationSourceAuthority: () => ChapterSourceAuthorityState
+  getChapterSourceMutationPending: () => boolean
   loadProjectModules: any
   projectId: any
   selectedModelId: any
@@ -86,6 +88,7 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
   const confirmReferenceReady = deps.confirmReferenceReady
   const flushPendingSave = deps.flushPendingSave
   const getChapterGenerationSourceAuthority = deps.getChapterGenerationSourceAuthority
+  const getChapterSourceMutationPending = deps.getChapterSourceMutationPending
   const loadProjectModules = deps.loadProjectModules
   const projectId = deps.projectId
   const selectedModelId = deps.selectedModelId
@@ -110,6 +113,10 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
   }
 
   const beginInvocation = () => {
+    if (getChapterSourceMutationPending()) {
+      message.warning({ content: CHAPTER_SOURCE_MUTATION_PENDING_MESSAGE, duration: 3 })
+      return null
+    }
     try {
       const result = beginChapterInvocationFence(invocationFenceDependencies)
       if (!result.fence) message.warning(result.gate.message)
@@ -137,6 +144,20 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
       if (!isStaleChapterSourceOperationError(error)) throw error
       message.warning(CHAPTER_INVOCATION_SOURCE_CHANGED_MESSAGE)
       return false
+    }
+  }
+
+  const preferStaleInvocationError = (
+    fence: ChapterInvocationFence,
+    error: unknown,
+    authorityOnly = false,
+  ) => {
+    try {
+      assertInvocationCurrent(fence, authorityOnly)
+      return error
+    } catch (invocationError) {
+      if (!isStaleChapterSourceOperationError(invocationError)) throw invocationError
+      return invocationError
     }
   }
 
@@ -174,6 +195,7 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
     setGeneratingProse(true)
     const streamController = proseStreamControl.begin()
     const streamSignal = streamController.signal
+    let invocationReloaded = false
     try {
       assertInvocationCurrent(invocation)
       const ctx = {
@@ -250,6 +272,7 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
       const reloadToken = await loadProjectModules()
       if (!reloadTokenIsCurrent(reloadToken)) return
       assertInvocationCurrent(invocation, true)
+      invocationReloaded = true
       setStreamingProgress('生成完成')
       setStreamingPercent(100)
       setStreamingText(prev => prev || updated?.chapter_text || '')
@@ -264,7 +287,8 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
       setRightPanelOpen(true)
       setRightPanelTab('proseQuality')
       message.success(`已使用 ${done?.result?.modelName || '所选模型'} 生成正文`)
-    } catch (error: any) {
+    } catch (caughtError: any) {
+      const error: any = preferStaleInvocationError(invocation, caughtError, invocationReloaded)
       // A newer run may have taken over via proseStreamControl.begin(); it now owns the shared UI state.
       const runSuperseded = !canFinalizeProseRun(proseStreamControl.controller, streamController)
       if (isStaleChapterSourceOperationError(error)) {
@@ -326,6 +350,7 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
     setStreamingText('')
     setStreamingProgress('自动补齐上下文材料')
     setStreamingPercent(8)
+    let invocationReloaded = false
     try {
       assertInvocationCurrent(invocation)
       const res = await apiClient.post(`/novel/chapters/${targetChapterId}/auto-repair-context`, {
@@ -348,12 +373,14 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
         return
       }
       assertInvocationCurrent(invocation, true)
+      invocationReloaded = true
       if (warnings.length) {
         message.warning(String(warnings[0] || '上下文补齐已降级处理，将继续生成正文'))
       } else {
         message.success(applied.length ? `已自动补齐 ${applied.length} 项上下文材料` : '上下文材料无需补齐')
       }
-    } catch (error: any) {
+    } catch (caughtError: any) {
+      const error: any = preferStaleInvocationError(invocation, caughtError, invocationReloaded)
       // A newer run may have taken over via proseStreamControl.begin(); it now owns the shared UI state.
       const runSuperseded = !canFinalizeProseRun(proseStreamControl.controller, repairController)
       if (isStaleChapterSourceOperationError(error)) {
@@ -465,7 +492,8 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
             lastError: '',
             lastQuality: score !== undefined ? `最近质检：${score} 分${revised ? '，已修订' : ''}` : '',
           })
-        } catch (error: any) {
+        } catch (caughtError: any) {
+          const error: any = preferStaleInvocationError(invocation, caughtError)
           if (isStaleChapterSourceOperationError(error)) throw error
           failed += 1
           const messageText = `${currentTitle}：${error?.message || '生成失败'}`
@@ -518,7 +546,8 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
           error_message: errors.slice(0, 5).join('\n'),
         })
         assertInvocationCurrent(invocation)
-      } catch (error) {
+      } catch (caughtError) {
+        const error = preferStaleInvocationError(invocation, caughtError)
         if (isStaleChapterSourceOperationError(error)) throw error
         // 汇总记录写入失败不影响已经生成的章节正文。
       }

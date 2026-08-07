@@ -17,9 +17,11 @@ import {
 import { ProjectSettingsModal } from '../ProjectSettingsModal'
 import { ChapterGenerationSourceControl } from '../ChapterGenerationSourceControl'
 import {
-  isStaleChapterSourceOperationError,
+  chapterSourcePendingIsCurrent,
+  type ChapterSourcePendingState,
   type ChapterSourceOperationToken,
 } from '../chapterGenerationSourceModel'
+export { chapterSourcePendingIsCurrent } from '../chapterGenerationSourceModel'
 import {
   primaryTabForArea,
   WORKSPACE_TOOL_MENU_DEFS,
@@ -29,27 +31,6 @@ import type { WorkspaceArea } from './workspace-types'
 
 const { Title } = Typography
 
-type ChapterSourcePendingState = {
-  projectId: number
-  pending: boolean
-  token: ChapterSourceOperationToken | null
-}
-
-export function chapterSourcePendingIsCurrent(
-  state: ChapterSourcePendingState,
-  projectId: number,
-  assertCurrent: (token: ChapterSourceOperationToken) => void,
-) {
-  if (!state.pending || !state.token || state.projectId !== projectId) return false
-  try {
-    assertCurrent(state.token)
-    return true
-  } catch (error) {
-    if (isStaleChapterSourceOperationError(error)) return false
-    throw error
-  }
-}
-
 export type NovelWorkspaceTopBarProps = {
   activeKnowledgeJobCount: number
   activeTasks: any[]
@@ -57,6 +38,7 @@ export type NovelWorkspaceTopBarProps = {
   beginChapterSourceOperation: () => ChapterSourceOperationToken
   chapterGenerationSourceAuthority: any
   chapterSourceLocallyBusy: boolean
+  chapterSourcePendingState: ChapterSourcePendingState
   flushPendingSave: () => Promise<boolean> | Promise<any> | boolean | any
   isImmersiveShell: boolean
   loadProjectModules: () => Promise<any> | any
@@ -67,6 +49,7 @@ export type NovelWorkspaceTopBarProps = {
   selectedModelId: any
   selectedProject: any
   setChapterGenerationSourceAuthority: (state: any) => void
+  setChapterSourceMutationPending: (pending: boolean, token: ChapterSourceOperationToken) => void
   setSelectedModelId: (id: any) => void
   setShellMode: (mode: any) => void
   setTaskCenterOpen: (open: boolean) => void
@@ -90,6 +73,7 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
     beginChapterSourceOperation,
     chapterGenerationSourceAuthority,
     chapterSourceLocallyBusy,
+    chapterSourcePendingState,
     flushPendingSave,
     isImmersiveShell,
     loadProjectModules,
@@ -100,6 +84,7 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
     selectedModelId,
     selectedProject,
     setChapterGenerationSourceAuthority,
+    setChapterSourceMutationPending,
     setSelectedModelId,
     setShellMode,
     setTaskCenterOpen,
@@ -109,20 +94,14 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
   } = props
 
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false)
-  const [sourcePendingState, setSourcePendingState] = useState<ChapterSourcePendingState>({
-    projectId: Number(selectedProject?.id || 0),
-    pending: false,
-    token: null,
-  })
   const currentProjectId = Number(selectedProject?.id || 0)
   const sourcePending = chapterSourcePendingIsCurrent(
-    sourcePendingState,
+    chapterSourcePendingState,
     currentProjectId,
     assertChapterSourceOperationCurrent,
   )
   const setSourceOperationPending = (pending: boolean, token: ChapterSourceOperationToken) => {
-    assertChapterSourceOperationCurrent(token)
-    setSourcePendingState({ projectId: token.projectId, pending, token: pending ? token : null })
+    setChapterSourceMutationPending(pending, token)
   }
   const activePrimary = primaryTabForArea(workspaceArea as WorkspaceArea)
   const moreMenuItems = [
