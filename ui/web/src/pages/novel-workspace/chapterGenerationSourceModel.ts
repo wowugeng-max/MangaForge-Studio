@@ -161,6 +161,63 @@ export type ChapterSourceOperationToken = Readonly<{
   operationEpoch: number
 }>
 
+export const CHAPTER_INVOCATION_SOURCE_CHANGED_MESSAGE = '章节来源已变化，请重试'
+
+export type ChapterInvocationFence = Readonly<{
+  token: ChapterSourceOperationToken
+  gate: ChapterInvocationGate
+  sourceFingerprint: string
+}>
+
+export type ChapterInvocationFenceDependencies = {
+  getAuthority: () => ChapterSourceAuthorityState
+  selectedModelId?: unknown
+  beginSourceOperation: () => ChapterSourceOperationToken
+  assertSourceOperationCurrent: (token: ChapterSourceOperationToken) => void
+}
+
+function chapterInvocationAuthorityMatches(
+  fence: ChapterInvocationFence,
+  input: Pick<ChapterInvocationFenceDependencies, 'getAuthority' | 'selectedModelId'>,
+) {
+  const authority = input.getAuthority()
+  const gate = resolveChapterInvocationGate(authority, input.selectedModelId)
+  return gate.allowed
+    && gate.active === fence.gate.active
+    && gate.modelId === fence.gate.modelId
+    && authority.source?.fingerprint === fence.sourceFingerprint
+}
+
+export function beginChapterInvocationFence(
+  input: ChapterInvocationFenceDependencies,
+): { gate: ChapterInvocationGate; fence: ChapterInvocationFence | null } {
+  const authority = input.getAuthority()
+  const gate = resolveChapterInvocationGate(authority, input.selectedModelId)
+  if (!gate.allowed || !authority.source) return { gate, fence: null }
+  const fence = Object.freeze({
+    token: input.beginSourceOperation(),
+    gate,
+    sourceFingerprint: authority.source.fingerprint,
+  })
+  assertChapterInvocationFenceCurrent(fence, input)
+  return { gate, fence }
+}
+
+export function assertChapterInvocationFenceCurrent(
+  fence: ChapterInvocationFence,
+  input: Pick<ChapterInvocationFenceDependencies, 'getAuthority' | 'selectedModelId' | 'assertSourceOperationCurrent'>,
+) {
+  input.assertSourceOperationCurrent(fence.token)
+  assertChapterInvocationAuthorityCurrent(fence, input)
+}
+
+export function assertChapterInvocationAuthorityCurrent(
+  fence: ChapterInvocationFence,
+  input: Pick<ChapterInvocationFenceDependencies, 'getAuthority' | 'selectedModelId'>,
+) {
+  if (!chapterInvocationAuthorityMatches(fence, input)) throw new StaleChapterSourceOperationError()
+}
+
 export function createChapterSourceOperationFence() {
   let projectId: number | null = null
   let loadEpoch: number | null = null

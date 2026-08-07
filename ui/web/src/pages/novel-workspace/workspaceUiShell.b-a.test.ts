@@ -387,6 +387,28 @@ describe('commercial writing workspace UI shell b a', () => {
     expect(repairModel).toContain('不调用大模型')
   })
 
+  test('fences chapter actions with the live source authority across the base handler bridge', () => {
+    const data = source('useNovelWorkspaceData.ts')
+    const base = source('shell/use-novel-workspace-base-model.tsx')
+    const binder = source('shell/workspace-view-bind-core-handlers.ts')
+    const preflight = source('shell/workspace-preflight-handlers.tsx')
+    const prose = source('shell/workspace-chapter-prose-handlers.tsx')
+
+    for (const dependency of [
+      'getChapterGenerationSourceAuthority',
+      'beginChapterSourceOperation',
+      'assertChapterSourceOperationCurrent',
+    ]) {
+      expect(data).toContain(dependency)
+      expect(base).toContain(dependency)
+      expect(binder).toContain(dependency)
+      expect(preflight).toContain(dependency)
+      expect(prose).toContain(dependency)
+    }
+    expect(preflight).toContain('assertChapterInvocationFenceCurrent')
+    expect(prose).toContain('assertChapterInvocationFenceCurrent')
+  })
+
   test('routes recovery evidence source actions to single-chapter and batch rechecks', () => {
     const projectWorkspace = projectWorkspaceSource()
     const taskCenter = taskCenterSource()

@@ -5,6 +5,7 @@ import { message } from 'antd'
 import {
   confirmedAuthorityState,
   normalizeChapterSourceView,
+  StaleChapterSourceOperationError,
 } from '../chapterGenerationSourceModel'
 import { canFinalizeProseRun } from './workspace-chapter-prose-handlers'
 import * as proseHandlers from './workspace-chapter-prose-handlers'
@@ -51,29 +52,63 @@ function sourceAuthority(active: 'model' | 'mcp') {
   }))
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
+function mutableSourceAuthority(initial: 'model' | 'mcp') {
+  let authority = sourceAuthority(initial)
+  let operationEpoch = 0
+  return {
+    get: () => authority,
+    begin: () => Object.freeze({ projectId: 7, loadEpoch: 1, operationEpoch: ++operationEpoch }),
+    assert: (token: { operationEpoch: number }) => {
+      if (token.operationEpoch !== operationEpoch) throw new StaleChapterSourceOperationError()
+    },
+    switchTo: (active: 'model' | 'mcp') => {
+      operationEpoch += 1
+      authority = sourceAuthority(active)
+    },
+    invalidate: () => { operationEpoch += 1 },
+  }
+}
+
+const successfulReloadToken = Object.freeze({ projectId: 7, loadEpoch: 2, operationEpoch: 1 })
+
 function installMessageRecorder(events: string[] = []) {
   const warnings: any[] = []
   const successes: any[] = []
   const errors: any[] = []
+  const destroyed: any[] = []
   ;(message as any).warning = (value: any) => { warnings.push(value); events.push('warning') }
   ;(message as any).success = (value: any) => { successes.push(value); events.push('success') }
   ;(message as any).loading = () => { events.push('loading') }
   ;(message as any).error = (value: any) => { errors.push(value); events.push('error') }
   ;(message as any).info = () => { events.push('info') }
-  ;(message as any).destroy = () => { events.push('destroy') }
-  return { warnings, successes, errors }
+  ;(message as any).destroy = (key?: any) => { destroyed.push(key); events.push('destroy') }
+  return { warnings, successes, errors, destroyed }
 }
 
 function preflightDeps(overrides: Record<string, any> = {}) {
+  const authority = overrides.chapterGenerationSourceAuthority || sourceAuthority('model')
   return {
     activeChapter: { id: 11, chapter_no: 1 },
     apiClient: { post: async () => ({ data: {} }) },
     applyStyleSampleActionForChapter: async () => {},
     buildPreDraftBriefForActiveChapter: async () => {},
-    chapterGenerationSourceAuthority: sourceAuthority('model'),
+    chapterGenerationSourceAuthority: authority,
+    getChapterGenerationSourceAuthority: () => authority,
+    beginChapterSourceOperation: () => Object.freeze({ projectId: 7, loadEpoch: 1, operationEpoch: 1 }),
+    assertChapterSourceOperationCurrent: () => {},
     flushPendingSave: async () => true,
     generateSceneCardsForChapter: async () => {},
-    loadProjectModules: async () => {},
+    loadProjectModules: async () => successfulReloadToken,
     openEditor: () => {},
     openStoryAssetsWorkspace: () => {},
     openStoryStateEditor: () => {},
@@ -89,6 +124,7 @@ function preflightDeps(overrides: Record<string, any> = {}) {
 
 function proseDeps(overrides: Record<string, any> = {}) {
   const chapter = { id: 11, chapter_no: 1, title: '开篇', chapter_text: '' }
+  const authority = overrides.chapterGenerationSourceAuthority || sourceAuthority('model')
   return {
     proseBatchCancelRef: { current: false },
     setProseBatchStatus: () => {},
@@ -104,12 +140,15 @@ function proseDeps(overrides: Record<string, any> = {}) {
       longformBattleDesk: null,
       millionWordRunway: null,
     },
-    chapterGenerationSourceAuthority: sourceAuthority('model'),
+    chapterGenerationSourceAuthority: authority,
+    getChapterGenerationSourceAuthority: () => authority,
+    beginChapterSourceOperation: () => Object.freeze({ projectId: 7, loadEpoch: 1, operationEpoch: 1 }),
+    assertChapterSourceOperationCurrent: () => {},
     chapterWordTargetPayload: () => ({ target_word_count: 1800 }),
     chapters: [chapter],
     confirmReferenceReady: async () => true,
     flushPendingSave: async () => true,
-    loadProjectModules: async () => {},
+    loadProjectModules: async () => successfulReloadToken,
     projectId: 7,
     selectedModelId: 73,
     setChapters: () => {},
@@ -137,6 +176,363 @@ function streamResponse(chapterId = 11) {
 }
 
 describe('chapter source-aware invocation handlers', () => {
+  test('model to MCP during deferred preflight flush makes zero requests and no completion side effects', async () => {
+    const source = mutableSourceAuthority('model')
+    const flush = deferred<boolean>()
+    const posts: any[] = []
+    const events: string[] = []
+    const notices = installMessageRecorder(events)
+    const handlers = createPreflightHandlers(preflightDeps({
+      chapterGenerationSourceAuthority: source.get(),
+      getChapterGenerationSourceAuthority: source.get,
+      beginChapterSourceOperation: source.begin,
+      assertChapterSourceOperationCurrent: source.assert,
+      flushPendingSave: () => flush.promise,
+      apiClient: { post: async (...args: any[]) => { posts.push(args); return { data: {} } } },
+      loadProjectModules: async () => { events.push('load'); return successfulReloadToken },
+    }))
+
+    const action = handlers.repairGenerationPreflightGaps({ chapter_id: 11 }, {
+      repairKeys: ['characters', 'setting_workshop', 'chapter_setting_usage'],
+      closeModal: () => { events.push('close') },
+      continueAfterRepair: () => { events.push('continue') },
+    })
+    source.switchTo('mcp')
+    flush.resolve(true)
+    await action
+
+    expect(posts).toHaveLength(0)
+    expect(events).not.toContain('load')
+    expect(events).not.toContain('close')
+    expect(events).not.toContain('success')
+    expect(events).not.toContain('continue')
+    expect(notices.warnings).toContainEqual({
+      content: '章节来源已变化，请重试',
+      key: 'generation-preflight-repair',
+      duration: 3,
+    })
+  })
+
+  test('MCP to model during deferred preflight flush makes zero MCP requests and no completion side effects', async () => {
+    const source = mutableSourceAuthority('mcp')
+    const flush = deferred<boolean>()
+    const posts: any[] = []
+    const events: string[] = []
+    const notices = installMessageRecorder(events)
+    const handlers = createPreflightHandlers(preflightDeps({
+      chapterGenerationSourceAuthority: source.get(),
+      getChapterGenerationSourceAuthority: source.get,
+      beginChapterSourceOperation: source.begin,
+      assertChapterSourceOperationCurrent: source.assert,
+      selectedModelId: undefined,
+      flushPendingSave: () => flush.promise,
+      apiClient: { post: async (...args: any[]) => { posts.push(args); return { data: {} } } },
+      loadProjectModules: async () => { events.push('load') },
+    }))
+
+    const action = handlers.repairGenerationPreflightGaps({ chapter_id: 11 }, {
+      repairKeys: ['characters'],
+      closeModal: () => { events.push('close') },
+      continueAfterRepair: () => { events.push('continue') },
+    })
+    source.switchTo('model')
+    flush.resolve(true)
+    await action
+
+    expect(posts).toHaveLength(0)
+    expect(events).not.toContain('load')
+    expect(events).not.toContain('close')
+    expect(events).not.toContain('success')
+    expect(events).not.toContain('continue')
+    expect(notices.warnings).toContainEqual({
+      content: '章节来源已变化，请重试',
+      key: 'generation-preflight-repair',
+      duration: 3,
+    })
+  })
+
+  test('model preflight source switch after its first response suppresses both later model-only requests', async () => {
+    const source = mutableSourceAuthority('model')
+    const firstStarted = deferred<void>()
+    const firstResponse = deferred<{ data: { applied: any[] } }>()
+    const posts: Array<{ url: string; body: any }> = []
+    const events: string[] = []
+    const notices = installMessageRecorder(events)
+    const handlers = createPreflightHandlers(preflightDeps({
+      chapterGenerationSourceAuthority: source.get(),
+      getChapterGenerationSourceAuthority: source.get,
+      beginChapterSourceOperation: source.begin,
+      assertChapterSourceOperationCurrent: source.assert,
+      apiClient: {
+        post: async (url: string, body: any) => {
+          posts.push({ url, body })
+          if (posts.length === 1) {
+            firstStarted.resolve()
+            return firstResponse.promise
+          }
+          return { data: { total: 1 } }
+        },
+      },
+      loadProjectModules: async () => { events.push('load') },
+    }))
+
+    const action = handlers.repairGenerationPreflightGaps({ chapter_id: 11 }, {
+      repairKeys: ['characters', 'setting_workshop', 'chapter_setting_usage'],
+      continueAfterRepair: () => { events.push('continue') },
+    })
+    await firstStarted.promise
+    source.switchTo('mcp')
+    firstResponse.resolve({ data: { applied: [] } })
+    await action
+
+    expect(posts.map(item => item.url)).toEqual(['/novel/chapters/11/auto-repair-context'])
+    expect(events).not.toContain('load')
+    expect(events).not.toContain('success')
+    expect(events).not.toContain('continue')
+    expect(notices.warnings).toContainEqual({
+      content: '章节来源已变化，请重试',
+      key: 'generation-preflight-repair',
+      duration: 3,
+    })
+  })
+
+  test('source operation begun during module reload suppresses success before authority state commits', async () => {
+    const source = mutableSourceAuthority('mcp')
+    const reloadStarted = deferred<void>()
+    const reloadDone = deferred<void>()
+    const events: string[] = []
+    const notices = installMessageRecorder(events)
+    const handlers = createPreflightHandlers(preflightDeps({
+      chapterGenerationSourceAuthority: source.get(),
+      getChapterGenerationSourceAuthority: source.get,
+      beginChapterSourceOperation: source.begin,
+      assertChapterSourceOperationCurrent: source.assert,
+      selectedModelId: undefined,
+      apiClient: { post: async () => ({ data: { applied: [] } }) },
+      loadProjectModules: async () => {
+        const reloadToken = source.begin()
+        reloadStarted.resolve()
+        await reloadDone.promise
+        return reloadToken
+      },
+    }))
+
+    const action = handlers.repairGenerationPreflightGaps({ chapter_id: 11 }, {
+      repairKeys: ['characters'],
+      closeModal: () => { events.push('close') },
+      continueAfterRepair: () => { events.push('continue') },
+    })
+    await reloadStarted.promise
+    source.invalidate()
+    reloadDone.resolve()
+    await action
+
+    expect(events).not.toContain('close')
+    expect(events).not.toContain('success')
+    expect(events).not.toContain('continue')
+    expect(notices.warnings).toContainEqual({
+      content: '章节来源已变化，请重试',
+      key: 'generation-preflight-repair',
+      duration: 3,
+    })
+  })
+
+  test('missing preflight reload token suppresses completion without a false source-change warning', async () => {
+    const posts: any[] = []
+    const events: string[] = []
+    const notices = installMessageRecorder(events)
+    const handlers = createPreflightHandlers(preflightDeps({
+      chapterGenerationSourceAuthority: sourceAuthority('mcp'),
+      getChapterGenerationSourceAuthority: () => sourceAuthority('mcp'),
+      selectedModelId: undefined,
+      apiClient: { post: async (...args: any[]) => { posts.push(args); return { data: { applied: [] } } } },
+      loadProjectModules: async () => { events.push('load'); return undefined },
+    }))
+
+    await handlers.repairGenerationPreflightGaps({ chapter_id: 11 }, {
+      repairKeys: ['characters'],
+      closeModal: () => { events.push('close') },
+      continueAfterRepair: () => { events.push('continue') },
+    })
+
+    expect(posts).toHaveLength(1)
+    expect(events).toContain('load')
+    expect(events).not.toContain('close')
+    expect(events).not.toContain('success')
+    expect(events).not.toContain('continue')
+    expect(notices.destroyed).toContain('generation-preflight-repair')
+    expect(notices.warnings).not.toContainEqual(expect.objectContaining({
+      content: '章节来源已变化，请重试',
+    }))
+  })
+
+  test('missing prose reload token suppresses single-chapter completion UI', async () => {
+    const events: string[] = []
+    const notices = installMessageRecorder(events)
+    globalThis.fetch = (async () => streamResponse()) as any
+    const handlers = proseHandlers.createChapterProseHandlers(proseDeps({
+      loadProjectModules: async () => { events.push('load'); return undefined },
+      setRightPanelOpen: () => { events.push('right-panel') },
+      setStreamingPercent: (value: number) => { events.push(`percent:${value}`) },
+      setStreamingProgress: (value: string) => { events.push(`progress:${value}`) },
+    }))
+
+    await handlers.generateCurrentChapterProse()
+
+    expect(events).toContain('load')
+    expect(events).not.toContain('right-panel')
+    expect(events).not.toContain('percent:100')
+    expect(events).not.toContain('progress:生成完成')
+    expect(notices.successes).toHaveLength(0)
+    expect(notices.warnings).not.toContain('章节来源已变化，请重试')
+  })
+
+  test('missing repair reload token suppresses success and prose continuation', async () => {
+    const events: string[] = []
+    const notices = installMessageRecorder(events)
+    let fetches = 0
+    globalThis.fetch = (async () => { fetches += 1; return streamResponse() }) as any
+    const handlers = proseHandlers.createChapterProseHandlers(proseDeps({
+      apiClient: {
+        defaults: { baseURL: 'http://novel.test' },
+        post: async () => ({ data: { applied: [], warnings: [] } }),
+      },
+      loadProjectModules: async () => { events.push('load'); return undefined },
+      setGeneratingProse: (value: boolean) => { events.push(`generating:${value}`) },
+      setStreamingChapterId: (value: number | null) => { events.push(`chapter:${value}`) },
+      setStreamingPercent: (value: number) => { events.push(`percent:${value}`) },
+      setStreamingProgress: (value: string) => { events.push(`progress:${value}`) },
+    }))
+
+    await handlers.repairContextAndGenerateCurrentChapter()
+
+    expect(events).toContain('load')
+    expect(fetches).toBe(0)
+    expect(notices.successes).toHaveLength(0)
+    expect(notices.warnings).not.toContain('章节来源已变化，请重试')
+    expect(events).toContain('generating:false')
+    expect(events).toContain('chapter:null')
+    expect(events).toContain('percent:0')
+    expect(events).toContain('progress:')
+  })
+
+  test('missing batch reload token suppresses result-panel and completion notifications', async () => {
+    const events: string[] = []
+    const notices = installMessageRecorder(events)
+    globalThis.fetch = (async () => new Response(
+      JSON.stringify({ chapter: { id: 11, chapter_text: '正文' } }),
+      { status: 200 },
+    )) as any
+    const handlers = proseHandlers.createChapterProseHandlers(proseDeps({
+      loadProjectModules: async () => { events.push('load'); return undefined },
+      setRightPanelOpen: () => { events.push('right-panel') },
+      setRightPanelTab: () => { events.push('right-tab') },
+    }))
+
+    await handlers.stepGenerateProse()
+
+    expect(events).toContain('load')
+    expect(events).not.toContain('right-panel')
+    expect(events).not.toContain('right-tab')
+    expect(notices.successes).toHaveLength(0)
+    expect(notices.warnings).toHaveLength(0)
+  })
+
+  test('prose entry points stop before fetch, repair, or summary when source changes during flush or confirm', async () => {
+    installMessageRecorder()
+    let fetches = 0
+    let posts = 0
+    globalThis.fetch = (async () => { fetches += 1; return streamResponse() }) as any
+
+    const generateSource = mutableSourceAuthority('model')
+    const generateFlush = deferred<boolean>()
+    const generate = proseHandlers.createChapterProseHandlers(proseDeps({
+      getChapterGenerationSourceAuthority: generateSource.get,
+      beginChapterSourceOperation: generateSource.begin,
+      assertChapterSourceOperationCurrent: generateSource.assert,
+      flushPendingSave: () => generateFlush.promise,
+    }))
+    const generateAction = generate.generateCurrentChapterProse()
+    generateSource.switchTo('mcp')
+    generateFlush.resolve(true)
+    await generateAction
+
+    const repairSource = mutableSourceAuthority('mcp')
+    const repairFlush = deferred<boolean>()
+    const repair = proseHandlers.createChapterProseHandlers(proseDeps({
+      chapterGenerationSourceAuthority: repairSource.get(),
+      getChapterGenerationSourceAuthority: repairSource.get,
+      beginChapterSourceOperation: repairSource.begin,
+      assertChapterSourceOperationCurrent: repairSource.assert,
+      selectedModelId: undefined,
+      flushPendingSave: () => repairFlush.promise,
+      apiClient: {
+        defaults: { baseURL: 'http://novel.test' },
+        post: async () => { posts += 1; return { data: {} } },
+      },
+    }))
+    const repairAction = repair.repairContextAndGenerateCurrentChapter()
+    repairSource.switchTo('model')
+    repairFlush.resolve(true)
+    await repairAction
+
+    const batchSource = mutableSourceAuthority('model')
+    const confirm = deferred<boolean>()
+    const batch = proseHandlers.createChapterProseHandlers(proseDeps({
+      getChapterGenerationSourceAuthority: batchSource.get,
+      beginChapterSourceOperation: batchSource.begin,
+      assertChapterSourceOperationCurrent: batchSource.assert,
+      confirmReferenceReady: () => confirm.promise,
+      apiClient: {
+        defaults: { baseURL: 'http://novel.test' },
+        post: async () => { posts += 1; return { data: {} } },
+      },
+    }))
+    const batchAction = batch.stepGenerateProse()
+    batchSource.switchTo('mcp')
+    confirm.resolve(true)
+    await batchAction
+
+    expect(fetches).toBe(0)
+    expect(posts).toBe(0)
+  })
+
+  test('repair response source switch prevents reload, success, and prose continuation', async () => {
+    const source = mutableSourceAuthority('mcp')
+    const repairStarted = deferred<void>()
+    const repairResponse = deferred<{ data: { applied: any[]; warnings: any[] } }>()
+    const events: string[] = []
+    const notices = installMessageRecorder(events)
+    let fetches = 0
+    globalThis.fetch = (async () => { fetches += 1; return streamResponse() }) as any
+    const handlers = proseHandlers.createChapterProseHandlers(proseDeps({
+      chapterGenerationSourceAuthority: source.get(),
+      getChapterGenerationSourceAuthority: source.get,
+      beginChapterSourceOperation: source.begin,
+      assertChapterSourceOperationCurrent: source.assert,
+      selectedModelId: undefined,
+      apiClient: {
+        defaults: { baseURL: 'http://novel.test' },
+        post: async () => {
+          repairStarted.resolve()
+          return repairResponse.promise
+        },
+      },
+      loadProjectModules: async () => { events.push('load'); return successfulReloadToken },
+    }))
+
+    const action = handlers.repairContextAndGenerateCurrentChapter()
+    await repairStarted.promise
+    source.switchTo('model')
+    repairResponse.resolve({ data: { applied: [], warnings: [] } })
+    await action
+
+    expect(fetches).toBe(0)
+    expect(events).not.toContain('load')
+    expect(events).not.toContain('success')
+    expect(notices.warnings).toContain('章节来源已变化，请重试')
+  })
+
   test('MCP preflight repair makes one request with repair keys, no model id, then reloads, closes, notifies and continues', async () => {
     const events: string[] = []
     const notices = installMessageRecorder(events)
@@ -151,7 +547,7 @@ describe('chapter source-aware invocation handlers', () => {
           return { data: { applied: [{ type: 'character_created' }, { type: 'setting_created' }] } }
         },
       },
-      loadProjectModules: async () => { events.push('load') },
+      loadProjectModules: async () => { events.push('load'); return successfulReloadToken },
     }))
 
     await handlers.repairGenerationPreflightGaps(
@@ -225,7 +621,7 @@ describe('chapter source-aware invocation handlers', () => {
           return { data: { applied: [{ type: 'character_created' }], warnings: [] } }
         },
       },
-      loadProjectModules: async () => { events.push('load') },
+      loadProjectModules: async () => { events.push('load'); return successfulReloadToken },
     }))
 
     await handlers.generateCurrentChapterProse({ allowIncomplete: true })

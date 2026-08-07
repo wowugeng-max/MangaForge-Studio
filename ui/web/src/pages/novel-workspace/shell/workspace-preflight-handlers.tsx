@@ -13,8 +13,14 @@ import {
   renderPreflightModalContentView,
 } from './workspace-preflight-views'
 import {
-  resolveChapterInvocationGate,
+  assertChapterInvocationAuthorityCurrent,
+  assertChapterInvocationFenceCurrent,
+  beginChapterInvocationFence,
+  CHAPTER_INVOCATION_SOURCE_CHANGED_MESSAGE,
+  isStaleChapterSourceOperationError,
+  type ChapterInvocationFence,
   type ChapterSourceAuthorityState,
+  type ChapterSourceOperationToken,
 } from '../chapterGenerationSourceModel'
 
 export type GenerationPreflightRepairAction = {
@@ -26,14 +32,18 @@ export type GenerationPreflightRepairAction = {
   run: () => Promise<void> | void
 }
 
+const GENERATION_PREFLIGHT_REPAIR_MESSAGE_KEY = 'generation-preflight-repair'
+
 export type PreflightHandlerDeps = {
   activeChapter: any
   apiClient: any
   applyStyleSampleActionForChapter: any
+  assertChapterSourceOperationCurrent: (token: ChapterSourceOperationToken) => void
+  beginChapterSourceOperation: () => ChapterSourceOperationToken
   buildPreDraftBriefForActiveChapter: any
-  chapterGenerationSourceAuthority: ChapterSourceAuthorityState
   flushPendingSave: any
   generateSceneCardsForChapter: any
+  getChapterGenerationSourceAuthority: () => ChapterSourceAuthorityState
   loadProjectModules: any
   openEditor: any
   openStoryAssetsWorkspace: any
@@ -50,10 +60,12 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
   const activeChapter = deps.activeChapter
   const apiClient = deps.apiClient
   const applyStyleSampleActionForChapter = deps.applyStyleSampleActionForChapter
+  const assertChapterSourceOperationCurrent = deps.assertChapterSourceOperationCurrent
+  const beginChapterSourceOperation = deps.beginChapterSourceOperation
   const buildPreDraftBriefForActiveChapter = deps.buildPreDraftBriefForActiveChapter
-  const chapterGenerationSourceAuthority = deps.chapterGenerationSourceAuthority
   const flushPendingSave = deps.flushPendingSave
   const generateSceneCardsForChapter = deps.generateSceneCardsForChapter
+  const getChapterGenerationSourceAuthority = deps.getChapterGenerationSourceAuthority
   const loadProjectModules = deps.loadProjectModules
   const openEditor = deps.openEditor
   const openStoryAssetsWorkspace = deps.openStoryAssetsWorkspace
@@ -64,6 +76,59 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
   const setOutlineTreeOpen = deps.setOutlineTreeOpen
   const sortedChapters = deps.sortedChapters
   const syncStoryStateForChapter = deps.syncStoryStateForChapter
+  const invocationFenceDependencies = {
+    getAuthority: getChapterGenerationSourceAuthority,
+    selectedModelId,
+    beginSourceOperation: beginChapterSourceOperation,
+    assertSourceOperationCurrent: assertChapterSourceOperationCurrent,
+  }
+  const warnStaleInvocation = () => message.warning({
+    content: CHAPTER_INVOCATION_SOURCE_CHANGED_MESSAGE,
+    key: GENERATION_PREFLIGHT_REPAIR_MESSAGE_KEY,
+    duration: 3,
+  })
+
+  const beginInvocation = () => {
+    try {
+      const result = beginChapterInvocationFence(invocationFenceDependencies)
+      if (!result.fence) message.warning(result.gate.message)
+      return result.fence
+    } catch (error) {
+      if (!isStaleChapterSourceOperationError(error)) throw error
+      warnStaleInvocation()
+      return null
+    }
+  }
+
+  const invocationIsCurrent = (fence: ChapterInvocationFence, authorityOnly = false) => {
+    try {
+      if (authorityOnly) {
+        assertChapterInvocationAuthorityCurrent(fence, invocationFenceDependencies)
+      } else {
+        assertChapterInvocationFenceCurrent(fence, invocationFenceDependencies)
+      }
+      return true
+    } catch (error) {
+      if (!isStaleChapterSourceOperationError(error)) throw error
+      warnStaleInvocation()
+      return false
+    }
+  }
+
+  const reloadTokenIsCurrent = (token: ChapterSourceOperationToken | null | undefined) => {
+    if (!token) {
+      message.destroy(GENERATION_PREFLIGHT_REPAIR_MESSAGE_KEY)
+      return false
+    }
+    try {
+      assertChapterSourceOperationCurrent(token)
+      return true
+    } catch (error) {
+      if (!isStaleChapterSourceOperationError(error)) throw error
+      warnStaleInvocation()
+      return false
+    }
+  }
 
   const generationPreflightChecks = (payload: any) => {
     const preflight = payload?.preflight || payload?.context_package?.preflight || {}
@@ -71,11 +136,13 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
   }
 
   const repairGenerationPreflightGaps = async (payload: any, options: { targetChapterId?: number; repairKeys?: string[]; continueAfterRepair?: () => void; closeModal?: () => void } = {}) => {
-    const gate = resolveChapterInvocationGate(chapterGenerationSourceAuthority, selectedModelId)
-    if (!gate.allowed) return message.warning(gate.message)
+    const invocation = beginInvocation()
+    if (!invocation) return
+    const gate = invocation.gate
     const targetChapterId = generationPreflightTargetChapterId(payload, options.targetChapterId)
     if (!targetChapterId) return message.warning('无法定位需要补齐的章节')
     if (!await flushPendingSave()) return
+    if (!invocationIsCurrent(invocation)) return
 
     const missingKeys = options.repairKeys?.length ? new Set(options.repairKeys) : generationPreflightMissingKeys(payload)
     const needsCharacterRepair = ['characters', 'character_state', 'no_repeat'].some(key => missingKeys.has(key))
@@ -86,16 +153,20 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
       return message.info('当前没有可自动补齐的前置检查缺口')
     }
 
-    const messageKey = 'generation-preflight-repair'
+    const messageKey = GENERATION_PREFLIGHT_REPAIR_MESSAGE_KEY
     message.loading({ content: '正在自动补齐生成材料...', key: messageKey, duration: 0 })
     try {
       if (gate.active === 'mcp') {
+        if (!invocationIsCurrent(invocation)) return
         const res = await apiClient.post(`/novel/chapters/${targetChapterId}/auto-repair-context`, {
           project_id: projectId,
           repair_keys: [...missingKeys],
         })
+        if (!invocationIsCurrent(invocation)) return
         const applied = Array.isArray(res.data?.applied) ? res.data.applied : []
-        await loadProjectModules()
+        const reloadToken = await loadProjectModules()
+        if (!reloadTokenIsCurrent(reloadToken)) return
+        if (!invocationIsCurrent(invocation, true)) return
         options.closeModal?.()
         message.success({
           content: applied.length ? `已通过 MCP 自动补齐 ${applied.length} 项材料` : '材料已刷新',
@@ -107,31 +178,39 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
       }
       const repaired: string[] = []
       if (needsCharacterRepair) {
+        if (!invocationIsCurrent(invocation)) return
         const res = await apiClient.post(`/novel/chapters/${targetChapterId}/auto-repair-context`, {
           project_id: projectId,
           model_id: gate.modelId,
         })
+        if (!invocationIsCurrent(invocation)) return
         const applied = Array.isArray(res.data?.applied) ? res.data.applied : []
         const characterCreatedCount = applied.filter((item: any) => item.type === 'character_created').length
         repaired.push(characterCreatedCount > 0 ? `角色卡已补 ${characterCreatedCount} 张` : '角色材料已刷新，未新增角色卡')
       }
       if (needsSettingWorkshop) {
+        if (!invocationIsCurrent(invocation)) return
         const res = await apiClient.post(`/novel/projects/${projectId}/settings/incubate-from-project`, {
           use_model: true,
           model_id: gate.modelId,
         })
+        if (!invocationIsCurrent(invocation)) return
         repaired.push(`设定工坊不足 ${res.data?.total || 0} 条`)
       }
       if (needsChapterSettingUsage) {
+        if (!invocationIsCurrent(invocation)) return
         const res = await apiClient.post(`/novel/chapters/${targetChapterId}/settings-usage/suggest`, {
           project_id: projectId,
           model_id: gate.modelId,
           use_model: true,
           apply: true,
         })
+        if (!invocationIsCurrent(invocation)) return
         repaired.push(`本章设定调用不足 ${res.data?.total || 0} 条`)
       }
-      await loadProjectModules()
+      const reloadToken = await loadProjectModules()
+      if (!reloadTokenIsCurrent(reloadToken)) return
+      if (!invocationIsCurrent(invocation, true)) return
       options.closeModal?.()
       message.success({ content: repaired.length ? `已自动补齐：${repaired.join('；')}` : '材料已刷新', key: messageKey, duration: 3 })
       options.continueAfterRepair?.()

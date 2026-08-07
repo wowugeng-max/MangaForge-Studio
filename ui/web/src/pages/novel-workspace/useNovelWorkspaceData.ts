@@ -143,8 +143,18 @@ export function useNovelWorkspaceData({
   const [pipeline, setPipeline] = useState<any | null>(null)
   const [models, setModels] = useState<any[]>([])
   const [selectedModelId, setSelectedModelId] = useState<number | undefined>()
-  const [chapterGenerationSourceAuthority, setChapterGenerationSourceAuthority]
+  const [chapterGenerationSourceAuthority, setChapterGenerationSourceAuthorityState]
     = useState<ChapterSourceAuthorityState>(() => confirmedAuthorityState(null))
+  const chapterGenerationSourceAuthorityRef = useRef(chapterGenerationSourceAuthority)
+  chapterGenerationSourceAuthorityRef.current = chapterGenerationSourceAuthority
+  const setChapterGenerationSourceAuthority = useCallback((next: ChapterSourceAuthorityState) => {
+    chapterGenerationSourceAuthorityRef.current = next
+    setChapterGenerationSourceAuthorityState(next)
+  }, [])
+  const getChapterGenerationSourceAuthority = useCallback(
+    () => chapterGenerationSourceAuthorityRef.current,
+    [],
+  )
   const [activeChapterId, setActiveChapterId] = useState<number | null>(null)
   const projectIdRef = useRef(projectId)
   projectIdRef.current = projectId
@@ -258,6 +268,7 @@ export function useNovelWorkspaceData({
         const storedModelId = sourceView.source.model.model_id
         setSelectedModelId(prev => storedModelId ?? resolveSelectedWorkspaceModelId(prev, nextModels))
       }
+      return chapterSourceToken
     } catch {
       if (projectLoadEpochRef.current?.isCurrent(requestEpoch) && !controller.signal.aborted) {
         message.error('无法加载项目工作台')
@@ -492,6 +503,7 @@ export function useNovelWorkspaceData({
     pipeline,
     models,
     chapterGenerationSourceAuthority,
+    getChapterGenerationSourceAuthority,
     setChapterGenerationSourceAuthority,
     beginChapterSourceOperation,
     assertChapterSourceOperationCurrent,
