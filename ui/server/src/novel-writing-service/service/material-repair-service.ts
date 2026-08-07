@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { types } from 'node:util'
 import {
   commitNovelChapterAcceptance,
   loadNovelMaterialRepairSnapshot,
@@ -8,8 +9,10 @@ import {
   getNovelPayload,
 } from '../../routes/novel-route-utils'
 import {
+  chapterGenerationSourceFingerprint,
   resolveChapterGenerationSource,
 } from '../generation-source/source-config'
+import { ChapterGenerationSourceError } from '../generation-source/errors'
 import {
   isChapterTaskId,
   type BeginChapterTaskInput,
@@ -21,6 +24,7 @@ import {
   prepareMcpMaterialRepairMutation,
   resolveMaterialRepairPlan,
   type PreparedMaterialRepair,
+  type ResolvedMaterialRepairPlan,
 } from './material-repair-contract'
 import {
   buildChapterContextPackage as buildChapterContextPackageFromModule,
@@ -91,20 +95,21 @@ function snapshotSceneCards(snapshot: NovelMaterialRepairSnapshot) {
   return Array.isArray(chapter.scene_breakdown) ? chapter.scene_breakdown : []
 }
 
-function deterministicContextOptions(snapshot: NovelMaterialRepairSnapshot) {
-  return {
+function snapshotContextOptions(snapshot: NovelMaterialRepairSnapshot, deterministic: boolean) {
+  const options = {
     settingEntities: snapshot.settings,
     chapterSettingUsage: snapshot.chapterSettingUsage,
     projectSettingUsage: snapshot.projectSettingUsage,
     persistSettingUsage: false,
-    referencePreview: null,
   }
+  return deterministic ? { ...options, referencePreview: null } : options
 }
 
 async function buildSnapshotContext(
   deps: MaterialRepairServiceDependencies,
   activeWorkspace: string,
   snapshot: NovelMaterialRepairSnapshot,
+  deterministic: boolean,
 ) {
   return deps.buildChapterContextPackage(
     activeWorkspace,
@@ -115,7 +120,7 @@ async function buildSnapshotContext(
     snapshot.characters,
     snapshot.outlines,
     snapshot.reviews,
-    deterministicContextOptions(snapshot),
+    snapshotContextOptions(snapshot, deterministic),
   )
 }
 
@@ -147,6 +152,21 @@ const MATERIAL_REPAIR_RESPONSE_PRIVATE_FIELDS = new Set([
   'remotebody',
   'rawbody',
   'responsebody',
+  'cookie',
+  'cookies',
+  'accesstoken',
+  'xapikey',
+  'credential',
+  'credentials',
+  'clientcredential',
+  'clientcredentials',
+  'refreshtoken',
+  'authtoken',
+  'bearertoken',
+  'xauthtoken',
+  'setcookie',
+  'authorizationheader',
+  'password',
 ])
 
 function privateMaterialRepairResponseField(field: string) {
@@ -154,23 +174,104 @@ function privateMaterialRepairResponseField(field: string) {
   return MATERIAL_REPAIR_RESPONSE_PRIVATE_FIELDS.has(normalized) || normalized.endsWith('headers')
 }
 
-function sanitizeMaterialRepairResponseValue(value: any, seen = new WeakMap<object, any>()): any {
-  if (Array.isArray(value)) {
-    if (seen.has(value)) return seen.get(value)
-    const sanitized: any[] = []
-    seen.set(value, sanitized)
-    for (const item of value) sanitized.push(sanitizeMaterialRepairResponseValue(item, seen))
-    return sanitized
-  }
+function materialRepairResponseUnsafe() {
+  return materialRepairError('MATERIAL_REPAIR_RESPONSE_UNSAFE', '材料补齐返回包含不安全的本地响应结构')
+}
+
+function sanitizeMaterialRepairResponseValue(
+  value: any,
+  state = { stack: new WeakSet<object>(), nodes: 0 },
+  depth = 0,
+): any {
   if (!value || typeof value !== 'object') return value
-  if (seen.has(value)) return seen.get(value)
-  const sanitized: Record<string, unknown> = {}
-  seen.set(value, sanitized)
-  for (const [field, item] of Object.entries(value)) {
-    if (privateMaterialRepairResponseField(field)) continue
-    sanitized[field] = sanitizeMaterialRepairResponseValue(item, seen)
+  if (depth > 32 || state.nodes >= 20000 || types.isProxy(value) || state.stack.has(value)) {
+    throw materialRepairResponseUnsafe()
   }
-  return sanitized
+  state.nodes += 1
+  state.stack.add(value)
+  try {
+    const prototype = Object.getPrototypeOf(value)
+    if (Array.isArray(value)) {
+      if (prototype !== Array.prototype) throw materialRepairResponseUnsafe()
+      const descriptors = Object.getOwnPropertyDescriptors(value)
+      const sanitized: any[] = []
+      for (const [field, descriptor] of Object.entries(descriptors)) {
+        if (field === 'length') continue
+        if (!('value' in descriptor)) throw materialRepairResponseUnsafe()
+        if (descriptor.enumerable !== true) continue
+        if (!/^(0|[1-9][0-9]*)$/.test(field)) throw materialRepairResponseUnsafe()
+        sanitized[Number(field)] = sanitizeMaterialRepairResponseValue(descriptor.value, state, depth + 1)
+      }
+      return sanitized
+    }
+    if (prototype !== Object.prototype && prototype !== null) throw materialRepairResponseUnsafe()
+    const descriptors = Object.getOwnPropertyDescriptors(value)
+    const sanitized = Object.create(null) as Record<string, unknown>
+    for (const [field, descriptor] of Object.entries(descriptors)) {
+      if (!('value' in descriptor)) throw materialRepairResponseUnsafe()
+      if (descriptor.enumerable !== true) continue
+      if (field === '__proto__') throw materialRepairResponseUnsafe()
+      if (privateMaterialRepairResponseField(field)) continue
+      Object.defineProperty(sanitized, field, {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: sanitizeMaterialRepairResponseValue(descriptor.value, state, depth + 1),
+      })
+    }
+    return sanitized
+  } catch (error) {
+    if (ownFailureText(error, 'code') === 'MATERIAL_REPAIR_RESPONSE_UNSAFE') throw error
+    throw materialRepairResponseUnsafe()
+  } finally {
+    state.stack.delete(value)
+  }
+}
+
+function ownFailureText(error: unknown, field: string) {
+  if (!error || (typeof error !== 'object' && typeof error !== 'function') || types.isProxy(error)) return ''
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(error, field)
+    return descriptor && 'value' in descriptor && typeof descriptor.value === 'string'
+      ? descriptor.value
+      : ''
+  } catch {
+    return ''
+  }
+}
+
+function materialRepairCancelled(error: unknown, signal?: AbortSignal) {
+  if (signal?.reason !== undefined && error === signal.reason) return true
+  const code = ownFailureText(error, 'code') || ownFailureText(error, 'error_code')
+  const name = ownFailureText(error, 'name')
+  return ['REQUEST_CANCELED', 'MCP_CANCELLED', 'ABORT_ERR'].includes(code) || name === 'AbortError'
+}
+
+function implicitMaterialRepairPlan(contextPackage: any): ResolvedMaterialRepairPlan {
+  const checks = Array.isArray(contextPackage?.preflight?.checks) ? contextPackage.preflight.checks : []
+  const repairableKeys: string[] = []
+  for (const check of checks) {
+    if (!check || typeof check !== 'object' || check.ok === true) continue
+    const key = typeof check.key === 'string' ? check.key.trim() : ''
+    if (!key) continue
+    try {
+      resolveMaterialRepairPlan(contextPackage, [key])
+      repairableKeys.push(key)
+    } catch (error) {
+      const code = ownFailureText(error, 'code') || ownFailureText(error, 'error_code')
+      if (code !== 'MATERIAL_REPAIR_UNREPAIRABLE' && code !== 'MATERIAL_REPAIR_KEY_UNSUPPORTED') throw error
+    }
+  }
+  return repairableKeys.length
+    ? resolveMaterialRepairPlan(contextPackage, repairableKeys)
+    : { targets: new Set(), obligations: [] }
+}
+
+function committedRefreshError(taskId: string) {
+  return Object.assign(
+    materialRepairError('MATERIAL_REPAIR_RESULT_REFRESH_FAILED', '材料补齐已提交，但最终材料状态刷新失败，请重新读取项目'),
+    { committed: true as const, task_id: taskId },
+  )
 }
 
 function materialRepairResponse(
@@ -215,11 +316,15 @@ export function createMaterialRepairService(deps: MaterialRepairServiceDependenc
           '模型材料补齐必须使用现有模型路径',
         )
       }
+      const loadedAuthorityFingerprint = chapterGenerationSourceFingerprint(source)
 
-      const contextPackage = await buildSnapshotContext(deps, input.activeWorkspace, loaded)
-      const plan = resolveMaterialRepairPlan(contextPackage, input.repairKeys)
+      const contextPackage = await buildSnapshotContext(deps, input.activeWorkspace, loaded, true)
+      const plan = input.repairKeys?.length
+        ? resolveMaterialRepairPlan(contextPackage, input.repairKeys)
+        : implicitMaterialRepairPlan(contextPackage)
       if (plan.targets.size === 0) {
-        const sanitizedContext = sanitizeMaterialRepairResponseValue(contextPackage)
+        const finalContext = await buildSnapshotContext(deps, input.activeWorkspace, loaded, false)
+        const sanitizedContext = sanitizeMaterialRepairResponseValue(finalContext)
         return {
           ok: true,
           skipped: true,
@@ -239,11 +344,19 @@ export function createMaterialRepairService(deps: MaterialRepairServiceDependenc
         options: { material_repair: true },
         signal: input.signal,
       })
-      let result: ReturnType<typeof materialRepairResponse> | undefined
       let primaryFailure: unknown
       let failed = false
+      let executionIdentity: ReturnType<typeof canonicalExecutionIdentity> | undefined
+      let prepared: PreparedMaterialRepair | undefined
       try {
-        const executionIdentity = canonicalExecutionIdentity(execution)
+        executionIdentity = canonicalExecutionIdentity(execution)
+        if (executionIdentity.authorityFingerprint !== loadedAuthorityFingerprint) {
+          throw new ChapterGenerationSourceError(
+            'GENERATION_SOURCE_CHANGED',
+            '项目章节生成来源已在材料快照与任务开始之间变化；旧快照不会执行',
+            { reason: 'snapshot_source_changed' },
+          )
+        }
         const task = buildMaterialRepairTask({
           plan,
           project: loaded.project,
@@ -272,7 +385,7 @@ export function createMaterialRepairService(deps: MaterialRepairServiceDependenc
           { task, authoritativeTask: true },
           { activeWorkspace: input.activeWorkspace, signal: input.signal },
         )
-        const prepared = prepareMcpMaterialRepairMutation({
+        prepared = prepareMcpMaterialRepairMutation({
           plan,
           payload: getNovelPayload(stageResult),
           existing: completeExistingSnapshot(loaded, contextPackage),
@@ -285,13 +398,6 @@ export function createMaterialRepairService(deps: MaterialRepairServiceDependenc
           expected_material_repair_context_version: loaded.contextVersion,
           ...prepared.acceptance,
         })
-        const refreshed = await deps.loadSnapshot(
-          input.activeWorkspace,
-          input.projectId,
-          input.chapterId,
-        )
-        const refreshedContext = await buildSnapshotContext(deps, input.activeWorkspace, refreshed)
-        result = materialRepairResponse(prepared, refreshed, refreshedContext, executionIdentity)
       } catch (error) {
         failed = true
         primaryFailure = error
@@ -300,7 +406,7 @@ export function createMaterialRepairService(deps: MaterialRepairServiceDependenc
       if (failed) {
         try {
           await execution.close({
-            status: input.signal?.aborted === true ? 'cancelled' : 'failed',
+            status: materialRepairCancelled(primaryFailure, input.signal) ? 'cancelled' : 'failed',
             error: primaryFailure,
           })
         } catch (closeError) {
@@ -312,7 +418,34 @@ export function createMaterialRepairService(deps: MaterialRepairServiceDependenc
         throw primaryFailure
       }
 
-      await execution.close({ status: 'success' })
+      let result: ReturnType<typeof materialRepairResponse> | undefined
+      let refreshFailure: ReturnType<typeof committedRefreshError> | undefined
+      try {
+        const refreshed = await deps.loadSnapshot(
+          input.activeWorkspace,
+          input.projectId,
+          input.chapterId,
+        )
+        const refreshedContext = await buildSnapshotContext(deps, input.activeWorkspace, refreshed, false)
+        result = materialRepairResponse(prepared!, refreshed, refreshedContext, executionIdentity!)
+      } catch {
+        refreshFailure = committedRefreshError(executionIdentity!.taskId)
+      }
+
+      let closeFailure: unknown
+      try {
+        await execution.close({ status: 'success' })
+      } catch (error) {
+        closeFailure = error
+      }
+      if (refreshFailure && closeFailure !== undefined) {
+        throw new AggregateError(
+          [refreshFailure, closeFailure],
+          'Committed material repair refresh and task close both failed',
+        )
+      }
+      if (refreshFailure) throw refreshFailure
+      if (closeFailure !== undefined) throw closeFailure
       return result!
     },
   }

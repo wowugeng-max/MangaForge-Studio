@@ -36,6 +36,22 @@ describe('chapter context reference preview injection', () => {
     expect(previewCalls).toBe(1)
   })
 
+  test('treats an own undefined referencePreview as omitted rather than disabled', async () => {
+    let previewCalls = 0
+    const expected = { entries: [{ id: 'default-preview' }] }
+    const result = await resolveChapterContextReferencePreview(
+      { id: 3 },
+      { referencePreview: undefined },
+      async () => {
+        previewCalls += 1
+        return expected
+      },
+    )
+
+    expect(result).toBe(expected)
+    expect(previewCalls).toBe(1)
+  })
+
   test('preserves the existing fail-closed null fallback for preview errors', async () => {
     const result = await resolveChapterContextReferencePreview(
       { id: 3 },

@@ -1,11 +1,21 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { buildAgentMessages } from '../../llm/executor-helpers'
 import { stringifyLLMMessageTextContent } from '../../llm/types'
 import {
+  createNovelChapter,
+  createNovelProject,
+} from '../../novel'
+import {
+  chapterGenerationSourceFingerprint,
+} from '../generation-source/source-config'
+import {
   createMaterialRepairService,
 } from './material-repair-service'
+import { createNovelWritingService } from './create-novel-writing-service'
 
-const AUTHORITY_FINGERPRINT = `sha256:${'a'.repeat(64)}`
 const SOURCE_FINGERPRINT = `sha256:${'b'.repeat(64)}`
 const TASK_CONTEXT_VERSION = `sha256:${'c'.repeat(64)}`
 const MATERIAL_CONTEXT_VERSION = `sha256:${'d'.repeat(64)}`
@@ -27,7 +37,21 @@ function generationSource(active: 'model' | 'mcp') {
   }
 }
 
-function contextPackage(failedKey: string | null = 'worldbuilding', includePrivate = false) {
+const AUTHORITY_FINGERPRINT = chapterGenerationSourceFingerprint(generationSource('mcp') as any)
+
+function contextPackage(
+  failedKeys: string[] = ['worldbuilding'],
+  includePrivate = false,
+  includeReferenceCheck = false,
+) {
+  const allKeys = new Set(['worldbuilding', ...failedKeys])
+  if (includeReferenceCheck) allKeys.add('reference_knowledge')
+  const checks = [...allKeys].map(key => ({
+    key,
+    ok: !failedKeys.includes(key),
+    severity: key === 'reference_knowledge' ? 'medium' : 'high',
+    ...(failedKeys.includes(key) ? { fix: `repair ${key}` } : {}),
+  }))
   return {
     project: { id: 3, title: '灰塔校时局' },
     chapter_target: { id: 9, chapter_no: 1, title: '停摆前一分钟' },
@@ -42,15 +66,18 @@ function contextPackage(failedKey: string | null = 'worldbuilding', includePriva
         key_id: 998,
         prompt: 'skipped-private-prompt',
         headers: { Authorization: 'skipped-private-header' },
+        cookie: 'skipped-private-cookie',
+        access_token: 'skipped-private-access-token',
+        x_api_key: 'skipped-private-x-api-key',
+        credential: 'skipped-private-credential',
+        secret: '角色合法秘密必须保留',
       },
     } : {}),
     preflight: {
-      ready: failedKey === null,
-      strict_ready: failedKey === null,
-      checks: failedKey === null
-        ? [{ key: 'worldbuilding', ok: true, severity: 'high' }]
-        : [{ key: failedKey, ok: false, severity: 'high', fix: `repair ${failedKey}` }],
-      blockers: failedKey === null ? [] : [{ key: failedKey }],
+      ready: !checks.some(check => !check.ok && check.severity === 'high'),
+      strict_ready: checks.every(check => check.ok || check.severity === 'low'),
+      checks,
+      blockers: checks.filter(check => !check.ok && check.severity === 'high'),
       warnings: [],
       ...(includePrivate ? {
         remote_diagnostics: {
@@ -113,13 +140,21 @@ function snapshot(active: 'model' | 'mcp' = 'mcp', refreshed = false) {
 type HarnessOptions = {
   active?: 'model' | 'mcp'
   failedKey?: string | null
+  failedKeys?: string[]
+  finalReferenceReady?: boolean
   stageFailure?: Error
   invalidOutput?: boolean
   commitFailure?: Error
   assertCurrentFailure?: Error
   closeFailure?: Error
   abortBeforeStageFailure?: AbortController
+  abortBeforeCommitFailure?: AbortController
+  abortAfterCommit?: AbortController
+  executionAuthorityFingerprint?: string
+  secondLoadFailure?: Error
+  secondBuildFailure?: Error
   sensitiveContext?: boolean
+  unsafeContext?: 'accessor' | 'cycle' | 'proxy' | 'proto' | 'deep'
 }
 
 function createMaterialRepairHarness(options: HarnessOptions = {}) {
@@ -134,13 +169,14 @@ function createMaterialRepairHarness(options: HarnessOptions = {}) {
   const contextBuildCalls: any[] = []
   let loadCalls = 0
   let assertCurrentCalls = 0
-  let modelCalls = 0
   const remoteFailureBody = 'provider-private-body'
+  const initialFailedKeys = options.failedKeys
+    ?? (options.failedKey === null ? [] : [options.failedKey || 'worldbuilding'])
 
   const execution = {
     taskId: 'material-task-1',
     source: 'mcp' as const,
-    authorityFingerprint: AUTHORITY_FINGERPRINT,
+    authorityFingerprint: options.executionAuthorityFingerprint || AUTHORITY_FINGERPRINT,
     fingerprint: SOURCE_FINGERPRINT,
     contextVersion: TASK_CONTEXT_VERSION,
     provenance: () => ({
@@ -190,24 +226,51 @@ function createMaterialRepairHarness(options: HarnessOptions = {}) {
     },
     buildChapterContextPackage: async (...args: any[]) => {
       contextBuildCalls.push(args)
-      return contextBuildCalls.length === 1
-        ? contextPackage(options.failedKey === undefined ? 'worldbuilding' : options.failedKey, options.sensitiveContext)
-        : contextPackage(null, options.sensitiveContext)
+      if (contextBuildCalls.length > 1 && options.secondBuildFailure) throw options.secondBuildFailure
+      const contextOptions = args[8] || {}
+      const deterministic = Object.prototype.hasOwnProperty.call(contextOptions, 'referencePreview')
+      const includesReference = initialFailedKeys.includes('reference_knowledge')
+      const failedKeys = deterministic
+        ? initialFailedKeys
+        : (includesReference && options.finalReferenceReady === false ? ['reference_knowledge'] : [])
+      const built: any = contextPackage(failedKeys, options.sensitiveContext, includesReference)
+      if (options.unsafeContext === 'accessor') {
+        Object.defineProperty(built, 'unsafe_accessor', {
+          enumerable: true,
+          get() { throw new Error('sanitizer invoked unsafe getter') },
+        })
+      } else if (options.unsafeContext === 'cycle') {
+        built.unsafe_cycle = built
+      } else if (options.unsafeContext === 'proxy') {
+        built.unsafe_proxy = new Proxy({ value: 'private' }, {
+          ownKeys() { throw new Error('sanitizer invoked proxy trap') },
+        })
+      } else if (options.unsafeContext === 'proto') {
+        Object.defineProperty(built, '__proto__', { enumerable: true, value: { polluted: true } })
+      } else if (options.unsafeContext === 'deep') {
+        let cursor = built
+        for (let index = 0; index < 80; index += 1) {
+          cursor.deep = {}
+          cursor = cursor.deep
+        }
+      }
+      return built
     },
     commitAcceptance: async (...args: any[]) => {
       commitCalls.push(args)
-      if (options.commitFailure) throw options.commitFailure
+      if (options.commitFailure) {
+        options.abortBeforeCommitFailure?.abort()
+        throw options.commitFailure
+      }
+      options.abortAfterCommit?.abort()
       return { chapter: refreshed.chapter }
     },
     loadSnapshot: async () => {
       loadCalls += 1
+      if (loadCalls > 1 && options.secondLoadFailure) throw options.secondLoadFailure
       return loadCalls === 1 ? initial : refreshed
     },
     now: () => new Date('2026-08-07T01:02:03.456Z'),
-    modelFallback: async () => {
-      modelCalls += 1
-      throw new Error('model fallback must never run')
-    },
   }
 
   return {
@@ -222,7 +285,6 @@ function createMaterialRepairHarness(options: HarnessOptions = {}) {
     contextBuildCalls,
     get assertCurrentCalls() { return assertCurrentCalls },
     get loadCalls() { return loadCalls },
-    get modelCalls() { return modelCalls },
     remoteFailureBody,
   }
 }
@@ -273,16 +335,14 @@ describe('one-session MCP material repair orchestration', () => {
     })
     expect(harness.beginCalls).toEqual([])
     expect(harness.contextBuildCalls).toEqual([])
-    expect(harness.modelCalls).toBe(0)
   })
 
-  test('never calls a model fallback or commits after an MCP stage failure', async () => {
+  test('never commits or retries remote work after an MCP stage failure', async () => {
     const rejection = Object.assign(new Error('remote rejected'), { code: 'MCP_SESSION_FAILED' })
     const harness = createMaterialRepairHarness({ stageFailure: rejection })
 
     await expect(harness.service.repairChapterMaterials(request(harness))).rejects.toBe(rejection)
 
-    expect(harness.modelCalls).toBe(0)
     expect(harness.stageCalls).toHaveLength(1)
     expect(harness.commitCalls).toEqual([])
     expect(harness.closeCalls).toEqual([{ status: 'failed', error: rejection }])
@@ -300,7 +360,7 @@ describe('one-session MCP material repair orchestration', () => {
     expect(harness.closeCalls[0]).toMatchObject({ status: 'failed' })
   })
 
-  test('closes cancelled when the request signal is aborted', async () => {
+  test('does not label an ordinary failure cancelled merely because the signal is aborted', async () => {
     const controller = new AbortController()
     const rejection = new Error('remote request stopped')
     const harness = createMaterialRepairHarness({
@@ -311,7 +371,7 @@ describe('one-session MCP material repair orchestration', () => {
     await expect(harness.service.repairChapterMaterials(request(harness, controller.signal))).rejects.toBe(rejection)
 
     expect(controller.signal.aborted).toBe(true)
-    expect(harness.closeCalls).toEqual([{ status: 'cancelled', error: rejection }])
+    expect(harness.closeCalls).toEqual([{ status: 'failed', error: rejection }])
     expect(harness.commitCalls).toEqual([])
   })
 
@@ -349,15 +409,19 @@ describe('one-session MCP material repair orchestration', () => {
     const result = await harness.service.repairChapterMaterials(request(harness))
 
     expect(harness.contextBuildCalls).toHaveLength(2)
-    for (const args of harness.contextBuildCalls) {
-      expect(args[8]).toEqual({
-        settingEntities: expect.any(Array),
-        chapterSettingUsage: expect.any(Array),
-        projectSettingUsage: expect.any(Array),
-        persistSettingUsage: false,
-        referencePreview: null,
-      })
-    }
+    expect(harness.contextBuildCalls[0]?.[8]).toEqual({
+      settingEntities: expect.any(Array),
+      chapterSettingUsage: expect.any(Array),
+      projectSettingUsage: expect.any(Array),
+      persistSettingUsage: false,
+      referencePreview: null,
+    })
+    expect(harness.contextBuildCalls[1]?.[8]).toEqual({
+      settingEntities: expect.any(Array),
+      chapterSettingUsage: expect.any(Array),
+      projectSettingUsage: expect.any(Array),
+      persistSettingUsage: false,
+    })
     expect(result.preflight).toMatchObject({ ready: true, strict_ready: true })
     expect(result.context_package.preflight).toEqual(result.preflight)
     expect(result.worldbuilding).toHaveLength(1)
@@ -376,6 +440,19 @@ describe('one-session MCP material repair orchestration', () => {
     expect(harness.stageCalls[0]?.context?.task).toContain(AUTHORITY_FINGERPRINT)
     expect(harness.stageCalls[0]?.context?.task).toContain(MATERIAL_CONTEXT_VERSION)
     expect(harness.stageCalls[0]?.context?.task).not.toContain('buda')
+  })
+
+  test('fences a snapshot-to-begin source race before the first remote stage', async () => {
+    const changedAuthority = `sha256:${'e'.repeat(64)}`
+    const harness = createMaterialRepairHarness({ executionAuthorityFingerprint: changedAuthority })
+
+    const exposed: any = await harness.service.repairChapterMaterials(request(harness)).catch(error => error)
+
+    expect(exposed).toMatchObject({ code: 'GENERATION_SOURCE_CHANGED' })
+    expect(harness.beginCalls).toHaveLength(1)
+    expect(harness.stageCalls).toEqual([])
+    expect(harness.commitCalls).toEqual([])
+    expect(harness.closeCalls).toEqual([{ status: 'failed', error: exposed }])
   })
 
   test('marks the material task authoritative so the real outline compiler cannot append its schema', async () => {
@@ -410,6 +487,153 @@ describe('one-session MCP material repair orchestration', () => {
     expect(harness.assertCurrentCalls).toBe(1)
     expect(harness.commitCalls).toEqual([])
     expect(harness.closeCalls).toEqual([{ status: 'failed', error: rejection }])
+  })
+
+  test('closes cancelled for a real AbortError even without inferring from signal state', async () => {
+    const rejection = new Error('transport cancellation')
+    rejection.name = 'AbortError'
+    const harness = createMaterialRepairHarness({ stageFailure: rejection })
+
+    await expect(harness.service.repairChapterMaterials(request(harness))).rejects.toBe(rejection)
+
+    expect(harness.closeCalls).toEqual([{ status: 'cancelled', error: rejection }])
+    expect(harness.commitCalls).toEqual([])
+  })
+
+  test('keeps validation and commit failures failed when an unrelated signal is simultaneously aborted', async () => {
+    const validationController = new AbortController()
+    validationController.abort(new Error('unrelated caller state'))
+    const validationHarness = createMaterialRepairHarness({ invalidOutput: true })
+
+    const validationError: any = await validationHarness.service
+      .repairChapterMaterials(request(validationHarness, validationController.signal))
+      .catch(error => error)
+    expect(validationHarness.closeCalls).toEqual([{ status: 'failed', error: validationError }])
+
+    const commitController = new AbortController()
+    const commitFailure = new Error('commit rejected for non-cancellation reason')
+    const commitHarness = createMaterialRepairHarness({
+      commitFailure,
+      abortBeforeCommitFailure: commitController,
+    })
+    await expect(commitHarness.service.repairChapterMaterials(
+      request(commitHarness, commitController.signal),
+    )).rejects.toBe(commitFailure)
+    expect(commitHarness.closeCalls).toEqual([{ status: 'failed', error: commitFailure }])
+  })
+
+  test('locks success at durable commit even if the signal aborts immediately afterward', async () => {
+    const controller = new AbortController()
+    const harness = createMaterialRepairHarness({ abortAfterCommit: controller })
+
+    const result = await harness.service.repairChapterMaterials(request(harness, controller.signal))
+
+    expect(controller.signal.aborted).toBe(true)
+    expect(result).toMatchObject({ ok: true, skipped: false })
+    expect(harness.stageCalls).toHaveLength(1)
+    expect(harness.commitCalls).toHaveLength(1)
+    expect(harness.closeCalls).toEqual([{ status: 'success' }])
+  })
+
+  test('reports a stable committed refresh failure and still closes success after second load fails', async () => {
+    const refreshFailure = new Error('snapshot reload unavailable with private remote details')
+    const harness = createMaterialRepairHarness({ secondLoadFailure: refreshFailure })
+
+    const exposed: any = await harness.service.repairChapterMaterials(request(harness)).catch(error => error)
+
+    expect(exposed).toMatchObject({
+      code: 'MATERIAL_REPAIR_RESULT_REFRESH_FAILED',
+      error_code: 'MATERIAL_REPAIR_RESULT_REFRESH_FAILED',
+      committed: true,
+      task_id: 'material-task-1',
+    })
+    expect(exposed.message).not.toContain('private remote details')
+    expect(harness.stageCalls).toHaveLength(1)
+    expect(harness.commitCalls).toHaveLength(1)
+    expect(harness.loadCalls).toBe(2)
+    expect(harness.closeCalls).toEqual([{ status: 'success' }])
+  })
+
+  test('reports the same committed refresh boundary when final context reconstruction fails', async () => {
+    const harness = createMaterialRepairHarness({ secondBuildFailure: new Error('final context failed') })
+
+    const exposed: any = await harness.service.repairChapterMaterials(request(harness)).catch(error => error)
+
+    expect(exposed).toMatchObject({ code: 'MATERIAL_REPAIR_RESULT_REFRESH_FAILED', committed: true })
+    expect(harness.contextBuildCalls).toHaveLength(2)
+    expect(harness.stageCalls).toHaveLength(1)
+    expect(harness.commitCalls).toHaveLength(1)
+    expect(harness.closeCalls).toEqual([{ status: 'success' }])
+  })
+
+  test('aggregates committed refresh and success-close failures in stable order', async () => {
+    const closeFailure = new Error('success close failed')
+    const harness = createMaterialRepairHarness({
+      secondLoadFailure: new Error('reload failed'),
+      closeFailure,
+    })
+
+    const exposed: any = await harness.service.repairChapterMaterials(request(harness)).catch(error => error)
+
+    expect(exposed).toBeInstanceOf(AggregateError)
+    expect(exposed.errors[0]).toMatchObject({ code: 'MATERIAL_REPAIR_RESULT_REFRESH_FAILED', committed: true })
+    expect(exposed.errors[1]).toBe(closeFailure)
+    expect(harness.stageCalls).toHaveLength(1)
+    expect(harness.commitCalls).toHaveLength(1)
+    expect(harness.closeCalls).toEqual([{ status: 'success' }])
+  })
+
+  test('repairs implicit material gaps while separating reference-only preflight checks', async () => {
+    const harness = createMaterialRepairHarness({
+      failedKeys: ['worldbuilding', 'reference_knowledge'],
+      finalReferenceReady: true,
+    })
+
+    const result = await harness.service.repairChapterMaterials(request(harness))
+
+    expect(harness.stageCalls).toHaveLength(1)
+    expect(harness.commitCalls).toHaveLength(1)
+    expect(result.preflight.checks).toContainEqual(expect.objectContaining({ key: 'reference_knowledge', ok: true }))
+    expect(result.preflight.strict_ready).toBe(true)
+  })
+
+  test('skips reference-only implicit gaps and rebuilds final preflight through the default preview path', async () => {
+    const harness = createMaterialRepairHarness({
+      failedKeys: ['reference_knowledge'],
+      finalReferenceReady: true,
+    })
+
+    const result = await harness.service.repairChapterMaterials(request(harness))
+
+    expect(result).toMatchObject({ skipped: true })
+    expect(result.preflight.checks).toContainEqual(expect.objectContaining({ key: 'reference_knowledge', ok: true }))
+    expect(harness.contextBuildCalls).toHaveLength(2)
+    expect(harness.contextBuildCalls[0]?.[8]).toHaveProperty('referencePreview', null)
+    expect(harness.contextBuildCalls[1]?.[8]).not.toHaveProperty('referencePreview')
+    expect(harness.beginCalls).toEqual([])
+  })
+
+  test('returns a truthful final reference failure after repairing other materials', async () => {
+    const harness = createMaterialRepairHarness({
+      failedKeys: ['worldbuilding', 'reference_knowledge'],
+      finalReferenceReady: false,
+    })
+
+    const result = await harness.service.repairChapterMaterials(request(harness))
+
+    expect(result.preflight).toMatchObject({ ready: true, strict_ready: false })
+    expect(result.preflight.checks).toContainEqual(expect.objectContaining({ key: 'reference_knowledge', ok: false }))
+    expect(harness.closeCalls).toEqual([{ status: 'success' }])
+  })
+
+  test('keeps explicit unrepairable keys on the strong fail-closed contract', async () => {
+    const harness = createMaterialRepairHarness({ failedKeys: ['reference_knowledge'] })
+
+    await expect(harness.service.repairChapterMaterials({
+      ...request(harness),
+      repairKeys: ['reference_knowledge'],
+    })).rejects.toMatchObject({ code: 'MATERIAL_REPAIR_UNREPAIRABLE' })
+    expect(harness.beginCalls).toEqual([])
   })
 
   test('returns only bounded local provenance and never remote identities or bodies', async () => {
@@ -450,13 +674,19 @@ describe('one-session MCP material repair orchestration', () => {
       context_package: {
         safe_material_field: '必须保留的普通材料',
         writing_bible: { premise: '每天丢失一分钟' },
+        private_receipt: { secret: '角色合法秘密必须保留' },
       },
     })
+    expect(Object.getPrototypeOf(result.context_package)).toBeNull()
     for (const privateValue of [
       'skipped-private-session',
       'skipped-private-agent',
       'skipped-private-prompt',
       'skipped-private-header',
+      'skipped-private-cookie',
+      'skipped-private-access-token',
+      'skipped-private-x-api-key',
+      'skipped-private-credential',
       'skipped-preflight-session',
       'skipped-preflight-prompt',
       'session_id',
@@ -467,6 +697,16 @@ describe('one-session MCP material repair orchestration', () => {
     ]) {
       expect(serialized).not.toContain(privateValue)
     }
+  })
+
+  test('rejects unsafe accessor, proxy, cycle, prototype, and over-depth response graphs', async () => {
+    for (const unsafeContext of ['accessor', 'proxy', 'cycle', 'proto', 'deep'] as const) {
+      const harness = createMaterialRepairHarness({ failedKey: null, unsafeContext })
+      const exposed: any = await harness.service.repairChapterMaterials(request(harness)).catch(error => error)
+      expect(exposed).toMatchObject({ code: 'MATERIAL_REPAIR_RESPONSE_UNSAFE' })
+      expect(harness.beginCalls).toEqual([])
+    }
+    expect(({} as any).polluted).toBeUndefined()
   })
 
   test('combines the primary and close failures without losing either error', async () => {
@@ -481,4 +721,44 @@ describe('one-session MCP material repair orchestration', () => {
     expect(harness.stageCalls).toHaveLength(1)
     expect(harness.closeCalls).toEqual([{ status: 'failed', error: primary }])
   })
+})
+
+test('the assembled model-source service rejects repair without calling any model executor', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-material-model-'))
+  try {
+    const project = await createNovelProject(workspace, { title: '模型来源材料边界' })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+    })
+    let modelCalls = 0
+    const service = createNovelWritingService({
+      getProject: async () => project,
+      production: {
+        getStageModelId: () => 217,
+        getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+      } as any,
+      reference: {} as any,
+      runtime: {
+        executeAgent: async () => {
+          modelCalls += 1
+          throw new Error('model executor must not run')
+        },
+        generateChapterProse: async () => {
+          modelCalls += 1
+          throw new Error('model prose executor must not run')
+        },
+      },
+    })
+
+    await expect(service.repairChapterMaterials({
+      activeWorkspace: workspace,
+      projectId: project.id,
+      chapterId: chapter.id,
+    })).rejects.toMatchObject({ code: 'MATERIAL_REPAIR_MODEL_PATH_REQUIRED' })
+    expect(modelCalls).toBe(0)
+  } finally {
+    await rm(workspace, { recursive: true, force: true })
+  }
 })

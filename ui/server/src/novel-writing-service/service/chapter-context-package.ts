@@ -132,7 +132,8 @@ export async function resolveChapterContextReferencePreview(
   contextOptions: ChapterContextPackageOptions,
   preview: typeof previewNovelKnowledgeInjection = previewNovelKnowledgeInjection,
 ) {
-  if (Object.prototype.hasOwnProperty.call(contextOptions, 'referencePreview')) {
+  if (Object.prototype.hasOwnProperty.call(contextOptions, 'referencePreview')
+    && contextOptions.referencePreview !== undefined) {
     return contextOptions.referencePreview
   }
   try {
