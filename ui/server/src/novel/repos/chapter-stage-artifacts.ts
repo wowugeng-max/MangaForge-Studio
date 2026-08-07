@@ -9,7 +9,10 @@ import type {
   NovelChapterStageArtifactRecord,
   NovelChapterStageArtifactStatus,
 } from '../types'
-import type { ChapterTaskStage } from '../../novel-writing-service/generation-source/types'
+import type {
+  ChapterStageResponseContract,
+  ChapterTaskStage,
+} from '../../novel-writing-service/generation-source/types'
 
 export const CHAPTER_STAGE_ARTIFACT_PAYLOAD_BYTES = 2 * 1024 * 1024
 export const CHAPTER_STAGE_ARTIFACT_MAX_DEPTH = 32
@@ -21,36 +24,38 @@ const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@/+\-]{0,511}$/
 const FINGERPRINT = /^sha256:[0-9a-f]{64}$/
 const ERROR_CODE = /^[A-Za-z][A-Za-z0-9_.:-]*$/
 const PROVENANCE_ID_MAX_CHARS = 160
-const STAGES = new Set<ChapterTaskStage>([
-  'draft',
-  'word_target_repair',
-  'commercial_editor_rewrite',
-  'meme_polish',
-  'readability_review',
-  'humanize',
-  'quality_review',
-  'quality_recheck',
-  'structured_review_fill',
-  'quality_repair',
-  'manual_recheck',
-  'editor_report',
-  'revision',
-  'post_revision_review',
-  'story_state_sync',
-])
-const RESPONSE_CONTRACTS = new Set([
-  'draft_prose',
-  'word_target_prose',
-  'editor_rewrite_prose',
-  'meme_polish_prose',
-  'readability_json',
-  'humanize_prose',
-  'quality_review_json',
-  'structured_review_json',
-  'revision_prose',
-  'editor_report_json',
-  'story_state_json',
-])
+const STAGES = {
+  draft: true,
+  word_target_repair: true,
+  commercial_editor_rewrite: true,
+  meme_polish: true,
+  readability_review: true,
+  humanize: true,
+  quality_review: true,
+  quality_recheck: true,
+  structured_review_fill: true,
+  quality_repair: true,
+  manual_recheck: true,
+  editor_report: true,
+  revision: true,
+  post_revision_review: true,
+  story_state_sync: true,
+  material_repair: true,
+} satisfies Record<ChapterTaskStage, true>
+const RESPONSE_CONTRACTS = {
+  draft_prose: true,
+  word_target_prose: true,
+  editor_rewrite_prose: true,
+  meme_polish_prose: true,
+  readability_json: true,
+  humanize_prose: true,
+  quality_review_json: true,
+  structured_review_json: true,
+  revision_prose: true,
+  editor_report_json: true,
+  story_state_json: true,
+  material_repair_json: true,
+} satisfies Record<ChapterStageResponseContract, true>
 
 function artifactError(code: string, message: string) {
   return Object.assign(new Error(message), { code })
@@ -148,7 +153,7 @@ function validateIdentity(value: NovelChapterStageArtifactIdentity): Required<No
   ], identityError)
   const stage = projected.stage as ChapterTaskStage
   const responseContract = projected.response_contract as NovelChapterStageArtifactIdentity['response_contract']
-  if (!STAGES.has(stage) || !RESPONSE_CONTRACTS.has(responseContract)) throw identityError()
+  if (STAGES[stage] !== true || RESPONSE_CONTRACTS[responseContract] !== true) throw identityError()
   if (projected.source !== 'model' && projected.source !== 'mcp') throw identityError()
   return {
     task_id: requireIdentifier(projected.task_id),
@@ -461,7 +466,7 @@ export async function findLatestSuccessfulChapterStageArtifact(
   stage: ChapterTaskStage,
 ): Promise<NovelChapterStageArtifactRecord | null> {
   const exactTaskId = requireIdentifier(taskId)
-  if (!STAGES.has(stage)) throw identityError()
+  if (STAGES[stage] !== true) throw identityError()
   return readArtifact(activeWorkspace, db => {
     const row = db.query(`
       SELECT * FROM chapter_stage_artifacts

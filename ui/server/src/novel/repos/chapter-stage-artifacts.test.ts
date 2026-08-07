@@ -98,6 +98,18 @@ function artifactCount(workspace: string) {
 }
 
 describe('chapter stage artifacts', () => {
+  test('accepts material repair identities', async () => {
+    const current = await fixture()
+
+    await expect(beginChapterStageArtifact(current.workspace, identity(current, {
+      stage: 'material_repair',
+      response_contract: 'material_repair_json',
+    }))).resolves.toMatchObject({
+      stage: 'material_repair',
+      response_contract: 'material_repair_json',
+    })
+  })
+
   test('allocates unique attempts transactionally and enforces chapter project scope', async () => {
     const current = await fixture()
     const attempts = await Promise.all(Array.from({ length: 8 }, () => (

@@ -29,6 +29,7 @@ const jsonFixtures: Record<
   },
   editor_report_json: { passed: true, issues: [], suggestions: [] },
   story_state_json: { state_delta: { current_time: '次日清晨' } },
+  material_repair_json: { chapter_patch: { title: '雨夜旧码头' } },
 }
 
 function expectInvalid(
@@ -141,6 +142,18 @@ describe('MCP stage response contracts', () => {
     for (const payload of [
       { chapter_patch: { title: '雨夜旧码头' }, chapter_text: '不应返回正文。' },
       { chapter_patch: { title: '雨夜旧码头' }, unrecognized: true },
+    ]) expectInvalid('material_repair_json', JSON.stringify(payload), 'material_repair')
+  })
+
+  test('rejects material repair payloads without a non-empty mutation object', () => {
+    for (const payload of [
+      { worldbuilding: [{}] },
+      { characters: [{}] },
+      { chapter_patch: {} },
+      { worldbuilding: [] },
+      { worldbuilding: ['旧码头'] },
+      { chapter_patch: [] },
+      { chapter_patch: { title: '雨夜旧码头' }, repair_summary: false },
     ]) expectInvalid('material_repair_json', JSON.stringify(payload), 'material_repair')
   })
 

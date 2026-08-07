@@ -380,6 +380,10 @@ const MATERIAL_REPAIR_FIELDS = new Set([
   'repair_summary',
 ])
 
+function nonEmptyPlainObject(value: unknown): value is Record<string, unknown> {
+  return plainObject(value) && Object.keys(value).length > 0
+}
+
 function validateMaterialRepair(content: string) {
   const value = parseJsonObject(content)
   if (Object.keys(value).some(field => !MATERIAL_REPAIR_FIELDS.has(field))) {
@@ -393,8 +397,8 @@ function validateMaterialRepair(content: string) {
   for (const field of MATERIAL_REPAIR_COLLECTION_FIELDS) {
     const collection = ownDataValue(value, field)
     if (collection === undefined) continue
-    if (!Array.isArray(collection) || !collection.every(plainObject)) {
-      throw new TypeError('material repair collections must contain objects')
+    if (!Array.isArray(collection) || !collection.every(nonEmptyPlainObject)) {
+      throw new TypeError('material repair collections must contain non-empty objects')
     }
     collectionEntries += collection.length
   }
@@ -402,7 +406,7 @@ function validateMaterialRepair(content: string) {
   if (repairSummary !== undefined && typeof repairSummary !== 'string') {
     throw new TypeError('material repair summary must be a string')
   }
-  if ((chapterPatch === undefined || Object.keys(chapterPatch).length === 0) && collectionEntries === 0) {
+  if ((chapterPatch === undefined || !nonEmptyPlainObject(chapterPatch)) && collectionEntries === 0) {
     throw new TypeError('material repair mutation required')
   }
   return value
