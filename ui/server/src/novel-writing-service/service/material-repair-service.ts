@@ -167,10 +167,29 @@ const MATERIAL_REPAIR_RESPONSE_PRIVATE_FIELDS = new Set([
   'setcookie',
   'authorizationheader',
   'password',
+  'clientsecret',
+  'apisecret',
+  'oauthclientsecret',
+  'oauthaccesstoken',
+  'oauthrefreshtoken',
+  'idtoken',
+  'privatekey',
+  'signingkey',
+  'webhooksecret',
 ])
 
-function privateMaterialRepairResponseField(field: string) {
+type MaterialRepairResponsePath = Array<string | number>
+
+function canonicalCharacterNarrativeSecret(field: string, parentPath: MaterialRepairResponsePath) {
+  return field === 'secret'
+    && parentPath.length === 2
+    && parentPath[0] === 'characters'
+    && typeof parentPath[1] === 'number'
+}
+
+function privateMaterialRepairResponseField(field: string, parentPath: MaterialRepairResponsePath) {
   const normalized = field.replace(/[^a-z0-9]/gi, '').toLowerCase()
+  if (normalized === 'secret') return !canonicalCharacterNarrativeSecret(field, parentPath)
   return MATERIAL_REPAIR_RESPONSE_PRIVATE_FIELDS.has(normalized) || normalized.endsWith('headers')
 }
 
@@ -180,6 +199,7 @@ function materialRepairResponseUnsafe() {
 
 function sanitizeMaterialRepairResponseValue(
   value: any,
+  path: MaterialRepairResponsePath = [],
   state = { stack: new WeakSet<object>(), nodes: 0 },
   depth = 0,
 ): any {
@@ -200,7 +220,13 @@ function sanitizeMaterialRepairResponseValue(
         if (!('value' in descriptor)) throw materialRepairResponseUnsafe()
         if (descriptor.enumerable !== true) continue
         if (!/^(0|[1-9][0-9]*)$/.test(field)) throw materialRepairResponseUnsafe()
-        sanitized[Number(field)] = sanitizeMaterialRepairResponseValue(descriptor.value, state, depth + 1)
+        const index = Number(field)
+        sanitized[index] = sanitizeMaterialRepairResponseValue(
+          descriptor.value,
+          [...path, index],
+          state,
+          depth + 1,
+        )
       }
       return sanitized
     }
@@ -211,12 +237,12 @@ function sanitizeMaterialRepairResponseValue(
       if (!('value' in descriptor)) throw materialRepairResponseUnsafe()
       if (descriptor.enumerable !== true) continue
       if (field === '__proto__') throw materialRepairResponseUnsafe()
-      if (privateMaterialRepairResponseField(field)) continue
+      if (privateMaterialRepairResponseField(field, path)) continue
       Object.defineProperty(sanitized, field, {
         configurable: true,
         enumerable: true,
         writable: true,
-        value: sanitizeMaterialRepairResponseValue(descriptor.value, state, depth + 1),
+        value: sanitizeMaterialRepairResponseValue(descriptor.value, [...path, field], state, depth + 1),
       })
     }
     return sanitized
@@ -289,15 +315,15 @@ function materialRepairResponse(
     context_version: executionIdentity.taskContextVersion,
     applied: prepared.applied,
     summary: prepared.summary,
-    chapter: sanitizeMaterialRepairResponseValue(refreshed.chapter),
-    chapters: sanitizeMaterialRepairResponseValue(refreshed.chapters),
-    worldbuilding: sanitizeMaterialRepairResponseValue(refreshed.worldbuilding),
-    characters: sanitizeMaterialRepairResponseValue(refreshed.characters),
-    settings: sanitizeMaterialRepairResponseValue(refreshed.settings),
-    chapter_setting_usage: sanitizeMaterialRepairResponseValue(refreshed.chapterSettingUsage),
-    project_setting_usage: sanitizeMaterialRepairResponseValue(refreshed.projectSettingUsage),
-    context_package: sanitizeMaterialRepairResponseValue(contextPackage),
-    preflight: sanitizeMaterialRepairResponseValue(contextPackage?.preflight || null),
+    chapter: sanitizeMaterialRepairResponseValue(refreshed.chapter, ['chapter']),
+    chapters: sanitizeMaterialRepairResponseValue(refreshed.chapters, ['chapters']),
+    worldbuilding: sanitizeMaterialRepairResponseValue(refreshed.worldbuilding, ['worldbuilding']),
+    characters: sanitizeMaterialRepairResponseValue(refreshed.characters, ['characters']),
+    settings: sanitizeMaterialRepairResponseValue(refreshed.settings, ['settings']),
+    chapter_setting_usage: sanitizeMaterialRepairResponseValue(refreshed.chapterSettingUsage, ['chapter_setting_usage']),
+    project_setting_usage: sanitizeMaterialRepairResponseValue(refreshed.projectSettingUsage, ['project_setting_usage']),
+    context_package: sanitizeMaterialRepairResponseValue(contextPackage, ['context_package']),
+    preflight: sanitizeMaterialRepairResponseValue(contextPackage?.preflight || null, ['preflight']),
   }
 }
 
@@ -324,7 +350,7 @@ export function createMaterialRepairService(deps: MaterialRepairServiceDependenc
         : implicitMaterialRepairPlan(contextPackage)
       if (plan.targets.size === 0) {
         const finalContext = await buildSnapshotContext(deps, input.activeWorkspace, loaded, false)
-        const sanitizedContext = sanitizeMaterialRepairResponseValue(finalContext)
+        const sanitizedContext = sanitizeMaterialRepairResponseValue(finalContext, ['context_package'])
         return {
           ok: true,
           skipped: true,

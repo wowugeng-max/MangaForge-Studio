@@ -70,7 +70,8 @@ function contextPackage(
         access_token: 'skipped-private-access-token',
         x_api_key: 'skipped-private-x-api-key',
         credential: 'skipped-private-credential',
-        secret: '角色合法秘密必须保留',
+        secret: 'skipped-private-secret',
+        client_secret: 'skipped-private-client-secret',
       },
     } : {}),
     preflight: {
@@ -83,6 +84,8 @@ function contextPackage(
         remote_diagnostics: {
           session_id: 'skipped-preflight-session',
           prompt: 'skipped-preflight-prompt',
+          secret: 'skipped-preflight-secret',
+          client_secret: 'skipped-preflight-client-secret',
         },
       } : {}),
     },
@@ -119,6 +122,8 @@ function snapshot(active: 'model' | 'mcp' = 'mcp', refreshed = false) {
         session_id: 'private-session-id',
         prompt: 'private-prompt',
         remote_body: 'provider-private-body',
+        secret: 'private-receipt-secret',
+        client_secret: 'private-receipt-client-secret',
       },
     } : {},
   }
@@ -127,7 +132,19 @@ function snapshot(active: 'model' | 'mcp' = 'mcp', refreshed = false) {
     chapter,
     chapters: [chapter],
     worldbuilding: refreshed ? [{ id: 11, project_id: 3, world_summary: '灰塔每天吞掉一分钟。' }] : [],
-    characters: [{ id: 21, project_id: 3, name: '林砚', current_state: { location: '灰塔底层' } }],
+    characters: [{
+      id: 21,
+      project_id: 3,
+      name: '林砚',
+      secret: '角色叙事秘密必须保留',
+      Secret: 'case-variant-secret-must-remove',
+      se_cret: 'punctuated-secret-must-remove',
+      client_secret: 'character-client-secret-must-remove',
+      current_state: {
+        location: '灰塔底层',
+        secret: 'nested-character-secret-must-remove',
+      },
+    }],
     outlines: [],
     reviews: [],
     settings: [{ id: 31, project_id: 3, entity_type: 'rule', name: '缺失的一分钟' }],
@@ -646,6 +663,7 @@ describe('one-session MCP material repair orchestration', () => {
       task_id: 'material-task-1',
       source_fingerprint: SOURCE_FINGERPRINT,
       context_version: TASK_CONTEXT_VERSION,
+      characters: [{ secret: '角色叙事秘密必须保留' }],
     })
     for (const secret of [
       'private-server-id',
@@ -654,10 +672,17 @@ describe('one-session MCP material repair orchestration', () => {
       'private-session-id',
       'provider-private-body',
       'private-prompt',
+      'private-receipt-secret',
+      'private-receipt-client-secret',
+      'case-variant-secret-must-remove',
+      'punctuated-secret-must-remove',
+      'character-client-secret-must-remove',
+      'nested-character-secret-must-remove',
       'key_id',
       'session_id',
       'agent_id',
       'headers',
+      'client_secret',
     ]) {
       expect(serialized).not.toContain(secret)
     }
@@ -674,7 +699,6 @@ describe('one-session MCP material repair orchestration', () => {
       context_package: {
         safe_material_field: '必须保留的普通材料',
         writing_bible: { premise: '每天丢失一分钟' },
-        private_receipt: { secret: '角色合法秘密必须保留' },
       },
     })
     expect(Object.getPrototypeOf(result.context_package)).toBeNull()
@@ -687,13 +711,18 @@ describe('one-session MCP material repair orchestration', () => {
       'skipped-private-access-token',
       'skipped-private-x-api-key',
       'skipped-private-credential',
+      'skipped-private-secret',
+      'skipped-private-client-secret',
       'skipped-preflight-session',
       'skipped-preflight-prompt',
+      'skipped-preflight-secret',
+      'skipped-preflight-client-secret',
       'session_id',
       'agent_id',
       'key_id',
       'prompt',
       'headers',
+      'client_secret',
     ]) {
       expect(serialized).not.toContain(privateValue)
     }
