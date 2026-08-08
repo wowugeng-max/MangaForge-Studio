@@ -85,6 +85,15 @@ const MATERIAL_REPAIR_MUTATION_FIELDS = [
   'chapter_setting_usage',
 ] as const satisfies readonly MaterialRepairTarget[]
 
+const MISNESTED_MATERIAL_ROOT_FIELDS = new Set<string>([
+  'worldbuilding',
+  'characters',
+  'character_updates',
+  'settings',
+  'chapter_setting_usage',
+  'repair_summary',
+])
+
 const MATERIAL_REPAIR_OUTPUT_MAX_CHARS = 180000
 const MATERIAL_REPAIR_LIMITS: Record<Exclude<MaterialRepairTarget, 'chapter_patch'>, number> = {
   worldbuilding: 3,
@@ -200,7 +209,7 @@ const CHARACTER_MUTATION_FIELDS = new Set([
   'antagonistLogic',
 ])
 
-const CHARACTER_CREATE_FIELDS = new Set(['name', ...CHARACTER_MUTATION_FIELDS])
+const CHARACTER_CREATE_FIELDS = new Set(['name', 'limits', ...CHARACTER_MUTATION_FIELDS])
 const CHARACTER_UPDATE_FIELDS = new Set(['name', 'patch', ...CHARACTER_MUTATION_FIELDS])
 
 const SETTING_FIELDS = new Set([
@@ -359,6 +368,23 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function hasOwn(value: Record<string, unknown>, field: string) {
   return Object.prototype.hasOwnProperty.call(value, field)
+}
+
+function normalizeMisnestedMaterialRootSections(payload: Record<string, unknown>) {
+  const topLevelFields = Object.keys(payload)
+  if (topLevelFields.length !== 1 || topLevelFields[0] !== 'chapter_patch') return payload
+  const chapterPatch = payload.chapter_patch
+  if (!isPlainObject(chapterPatch)) return payload
+  const misplacedFields = Object.keys(chapterPatch)
+    .filter(field => MISNESTED_MATERIAL_ROOT_FIELDS.has(field))
+  if (misplacedFields.length === 0) return payload
+  const normalizedChapterPatch: Record<string, unknown> = {}
+  const normalized: Record<string, unknown> = { chapter_patch: normalizedChapterPatch }
+  for (const [field, value] of Object.entries(chapterPatch)) {
+    if (MISNESTED_MATERIAL_ROOT_FIELDS.has(field)) normalized[field] = value
+    else normalizedChapterPatch[field] = value
+  }
+  return normalized
 }
 
 function assertAllowedFields(value: Record<string, unknown>, allowed: Set<string>, section: string) {
@@ -631,6 +657,18 @@ function normalizeCharacterCreate(value: unknown) {
   assertAllowedFields(value, CHARACTER_CREATE_FIELDS, 'characters')
   const name = requiredIdentityText(value.name, 'character name')
   const fields = normalizeCharacterFields(value)
+  if (hasOwn(value, 'limits')) {
+    assertArrayField(value.limits, 'character.limits')
+    const limits = (value.limits as unknown[])
+      .map(item => typeof item === 'string' ? `限制：${item.trim()}` : { type: 'limit', value: item })
+      .filter(item => typeof item !== 'string' || item !== '限制：')
+    if (limits.length > 0) {
+      fields.abilities = [
+        ...(Array.isArray(fields.abilities) ? fields.abilities : []),
+        ...limits,
+      ]
+    }
+  }
   if (Object.keys(fields).length === 0) {
     throw materialRepairError('MATERIAL_REPAIR_INCOMPLETE', `character ${name} has no material`)
   }
@@ -782,6 +820,38 @@ function normalizeUsage(
       ...cleanedDirectives,
     },
     identityKey: idKey || namedKey,
+  }
+}
+
+function unresolvedForbiddenUsagePlaceholder(
+  value: unknown,
+  availableSettingKeys: Set<string>,
+) {
+  if (!isPlainObject(value) || value.forbidden !== true) return null
+  let reference: ReturnType<typeof normalizedUsageReference>
+  try {
+    reference = normalizedUsageReference(value)
+  } catch {
+    return null
+  }
+  if (reference.entityId || !reference.entityName || !reference.entityType) return null
+  const key = settingKey(reference.entityType, reference.entityName)
+  if (availableSettingKeys.has(key)) return null
+  const revealLevel = typeof value.reveal_level === 'string' && value.reveal_level.trim()
+    ? value.reveal_level.trim()
+    : 'forbidden'
+  return {
+    key,
+    setting: normalizeSetting({
+      entity_type: reference.entityType,
+      name: reference.entityName,
+      summary: `本章禁揭的未解析设定：${reference.entityName}`,
+      status: 'active',
+      visibility: 'limited',
+      constraints_json: { reveal_level: revealLevel },
+      state_json: { status: 'unresolved', reveal_level: revealLevel },
+      payload_json: { source: 'mcp_material_repair_forbidden_usage' },
+    }),
   }
 }
 
@@ -1730,10 +1800,18 @@ export function prepareMcpMaterialRepairMutation(input: {
     throw materialRepairError('MATERIAL_REPAIR_LIMIT_EXCEEDED', 'material repair payload exceeds its size limit')
   }
   assertNoForbiddenMutationKeys(input.payload)
+  const payload = normalizeMisnestedMaterialRootSections(input.payload)
   const allowedTopLevel = new Set<string>([...MATERIAL_REPAIR_MUTATION_FIELDS, 'repair_summary'])
-  assertAllowedFields(input.payload, allowedTopLevel, 'material repair payload')
+  assertAllowedFields(payload, allowedTopLevel, 'material repair payload')
   for (const section of MATERIAL_REPAIR_MUTATION_FIELDS) {
-    if (hasOwn(input.payload, section) && !effectiveTargets.has(section)) {
+    if (hasOwn(payload, section) && !effectiveTargets.has(section)) {
+      if (section === 'character_updates'
+        && effectiveTargets.has('characters')
+        && !effectiveTargets.has('character_updates')
+        && input.existing.characters.length === 0
+        && input.existing.characterNames.size === 0) {
+        continue
+      }
       throw materialRepairError('MATERIAL_REPAIR_FORBIDDEN_FIELD', `material repair returned non-requested section: ${section}`)
     }
   }
@@ -1747,12 +1825,13 @@ export function prepareMcpMaterialRepairMutation(input: {
   const createdCharacterNames = new Set<string>()
   const updatedCharacterNames = new Set<string>()
   const createdSettingKeys = new Set<string>()
+  const syntheticForbiddenSettings: Record<string, unknown>[] = []
 
   if (effectiveTargets.has('chapter_patch')) {
-    if (!hasOwn(input.payload, 'chapter_patch')) {
+    if (!hasOwn(payload, 'chapter_patch')) {
       throw materialRepairError('MATERIAL_REPAIR_INCOMPLETE', 'chapter_patch did not return a meaningful result')
     }
-    const patch = normalizeChapterPatch(input.payload.chapter_patch)
+    const patch = normalizeChapterPatch(payload.chapter_patch)
     if (Object.keys(patch).length === 0) {
       throw materialRepairError('MATERIAL_REPAIR_INCOMPLETE', 'chapter_patch did not return a meaningful result')
     }
@@ -1762,7 +1841,7 @@ export function prepareMcpMaterialRepairMutation(input: {
   }
 
   if (effectiveTargets.has('worldbuilding')) {
-    const creates = requiredCollection(input.payload, 'worldbuilding').map(normalizeWorldbuilding)
+    const creates = requiredCollection(payload, 'worldbuilding').map(normalizeWorldbuilding)
     if (creates.some(item => Object.keys(item).length === 0)) {
       throw materialRepairError('MATERIAL_REPAIR_INCOMPLETE', 'worldbuilding contains an empty result')
     }
@@ -1771,7 +1850,7 @@ export function prepareMcpMaterialRepairMutation(input: {
   }
 
   if (effectiveTargets.has('characters')) {
-    const creates = requiredCollection(input.payload, 'characters').map(normalizeCharacterCreate)
+    const creates = requiredCollection(payload, 'characters').map(normalizeCharacterCreate)
     for (const character of creates) {
       if (input.existing.characterNames.has(character.name) || createdCharacterNames.has(character.name)) {
         throw materialRepairError('MATERIAL_REPAIR_DUPLICATE', `duplicate character name: ${character.name}`)
@@ -1783,7 +1862,7 @@ export function prepareMcpMaterialRepairMutation(input: {
   }
 
   if (effectiveTargets.has('character_updates')) {
-    const updates = requiredCollection(input.payload, 'character_updates').map(normalizeCharacterUpdate)
+    const updates = requiredCollection(payload, 'character_updates').map(normalizeCharacterUpdate)
     for (const update of updates) {
       if (createdCharacterNames.has(update.name) || updatedCharacterNames.has(update.name)) {
         throw materialRepairError('MATERIAL_REPAIR_DUPLICATE', `duplicate character name: ${update.name}`)
@@ -1799,7 +1878,7 @@ export function prepareMcpMaterialRepairMutation(input: {
   }
 
   if (effectiveTargets.has('settings')) {
-    const creates = requiredCollection(input.payload, 'settings').map(normalizeSetting)
+    const creates = requiredCollection(payload, 'settings').map(normalizeSetting)
     for (const setting of creates) {
       const key = settingKey(setting.entity_type, setting.name)
       if (input.existing.settingKeys.has(key) || createdSettingKeys.has(key)) {
@@ -1814,8 +1893,23 @@ export function prepareMcpMaterialRepairMutation(input: {
   if (effectiveTargets.has('chapter_setting_usage')) {
     const availableSettingKeys = new Set([...input.existing.settingKeys, ...createdSettingKeys])
     const seenUsage = new Set<string>()
-    const usages = requiredCollection(input.payload, 'chapter_setting_usage').map(item => {
-      const usage = normalizeUsage(item, input.existing, availableSettingKeys)
+    const usages = requiredCollection(payload, 'chapter_setting_usage').map(item => {
+      let usage: ReturnType<typeof normalizeUsage>
+      try {
+        usage = normalizeUsage(item, input.existing, availableSettingKeys)
+      } catch (error) {
+        const code = error && typeof error === 'object' && 'code' in error && typeof (error as any).code === 'string'
+          ? (error as any).code
+          : ''
+        const placeholder = code === 'MATERIAL_REPAIR_REFERENCE_INVALID'
+          ? unresolvedForbiddenUsagePlaceholder(item, availableSettingKeys)
+          : null
+        if (!placeholder) throw error
+        syntheticForbiddenSettings.push(placeholder.setting)
+        createdSettingKeys.add(placeholder.key)
+        availableSettingKeys.add(placeholder.key)
+        usage = normalizeUsage(item, input.existing, availableSettingKeys)
+      }
       if (seenUsage.has(usage.identityKey)) {
         throw materialRepairError('MATERIAL_REPAIR_DUPLICATE', `duplicate chapter setting usage: ${usage.identityKey}`)
       }
@@ -1826,8 +1920,16 @@ export function prepareMcpMaterialRepairMutation(input: {
     applied.push({ type: 'chapter_setting_usage_replaced', count: usages.length })
   }
 
+  if (syntheticForbiddenSettings.length > 0) {
+    acceptance.setting_creates = [
+      ...(acceptance.setting_creates || []),
+      ...syntheticForbiddenSettings,
+    ]
+    applied.push({ type: 'forbidden_settings_created', count: syntheticForbiddenSettings.length })
+  }
+
   assertMaterialObligationsSatisfied(input.plan, effectiveTargets, input.existing, acceptance, mutationAcceptance)
-  const summaryValue = input.payload.repair_summary
+  const summaryValue = payload.repair_summary
   if (summaryValue !== undefined && typeof summaryValue !== 'string') {
     throw materialRepairError('MATERIAL_REPAIR_INVALID', 'repair_summary must be a string')
   }

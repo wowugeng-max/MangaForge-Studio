@@ -11,6 +11,7 @@ import {
   listNovelCharacters,
 } from '../../novel'
 import { normalizeChapterRecord } from '../../novel/normalize'
+import { validateMcpStageResponse } from '../generation-source/stage-response-contract'
 import { buildSourceReadinessPreflightChecks } from '../quality/state-tracking-contracts-readiness'
 import {
   buildMaterialRepairTask,
@@ -479,6 +480,148 @@ describe('material repair prompt contract', () => {
 })
 
 describe('material repair mutation preparation', () => {
+  test('lifts exact material root sections nested under the sole chapter patch after root closure recovery', () => {
+    const plan = resolveMaterialRepairPlan({
+      preflight: { checks: [
+        { key: 'ending_hook', ok: false, severity: 'high', fix: '补齐章末钩子' },
+        { key: 'worldbuilding', ok: false, severity: 'high', fix: '补齐世界规则' },
+        { key: 'characters', ok: false, severity: 'high', fix: '补齐角色卡' },
+        { key: 'setting_workshop', ok: false, severity: 'high', fix: '补齐设定实体' },
+        { key: 'chapter_setting_usage', ok: false, severity: 'high', fix: '补齐章节设定调用' },
+      ] },
+    }, [
+      'ending_hook', 'worldbuilding', 'characters', 'setting_workshop', 'chapter_setting_usage',
+    ])
+    const canonicalPayload = {
+      chapter_patch: { ending_hook: '倒计时归零后，档案上的字迹变成林砚自己的笔迹。' },
+      worldbuilding: [{ world_summary: '零点会出现一页来自未来的死亡记录。', rules: ['记录只能在天亮前改写一次。'] }],
+      characters: [{ name: '林砚', role_type: '主角', motivation: '查明失忆与零点档案的关系。', current_state: { location: '市档案馆地下档案室' } }],
+      character_updates: [],
+      settings: [{ entity_type: 'item', name: '异常档案文件', summary: '一份会显示未来死亡记录的纸质档案。' }],
+      chapter_setting_usage: [{ entity_name: '异常档案文件', entity_type: 'item', usage_type: 'required', required: true }],
+      repair_summary: '补齐第一章开写前的世界、角色、设定和调用材料。',
+    }
+    const misnestedPayload = {
+      chapter_patch: {
+        ...canonicalPayload.chapter_patch,
+        worldbuilding: canonicalPayload.worldbuilding,
+        characters: canonicalPayload.characters,
+        character_updates: canonicalPayload.character_updates,
+        settings: canonicalPayload.settings,
+        chapter_setting_usage: canonicalPayload.chapter_setting_usage,
+        repair_summary: canonicalPayload.repair_summary,
+      },
+    }
+    const missingRootClosure = JSON.stringify(misnestedPayload).slice(0, -1)
+    const stageOutput = validateMcpStageResponse('material_repair', 'material_repair_json', { content: missingRootClosure }).output
+    const originalStageOutput = structuredClone(stageOutput)
+    const existing = existingSnapshot({ characterNames: new Set(), settingKeys: new Set() })
+    const recovered = prepareMcpMaterialRepairMutation({ plan, payload: stageOutput, existing })
+    const canonical = prepareMcpMaterialRepairMutation({ plan, payload: canonicalPayload, existing })
+    expect(recovered).toEqual(canonical)
+    expect(stageOutput).toEqual(originalStageOutput)
+  })
+
+  test('lifts a requested existing character update nested under the sole chapter patch after root closure recovery', () => {
+    const plan = resolveMaterialRepairPlan({
+      preflight: { checks: [
+        { key: 'ending_hook', ok: false, severity: 'high', fix: '补齐章末钩子' },
+        { key: 'character_state', ok: false, severity: 'high', fix: '补齐已有角色状态' },
+      ] },
+    }, ['ending_hook', 'character_state'])
+    const canonicalPayload = {
+      chapter_patch: { ending_hook: '倒计时归零后，档案上的字迹变成林砚自己的笔迹。' },
+      character_updates: [{
+        name: '林砚',
+        current_state: { location: '市档案馆地下档案室' },
+      }],
+      repair_summary: '补齐章末钩子与已有角色状态。',
+    }
+    const misnestedPayload = {
+      chapter_patch: {
+        ...canonicalPayload.chapter_patch,
+        character_updates: canonicalPayload.character_updates,
+        repair_summary: canonicalPayload.repair_summary,
+      },
+    }
+    const missingRootClosure = JSON.stringify(misnestedPayload).slice(0, -1)
+    const stageOutput = validateMcpStageResponse('material_repair', 'material_repair_json', { content: missingRootClosure }).output
+    const originalStageOutput = structuredClone(stageOutput)
+    const existing = existingSnapshot({
+      characterNames: new Set(['林砚']),
+      settingKeys: new Set(),
+      characters: [{
+        id: 1,
+        name: '林砚',
+        goal: '查明失忆与零点档案的关系。',
+        current_state: {},
+      }],
+    })
+    const recovered = prepareMcpMaterialRepairMutation({ plan, payload: stageOutput, existing })
+    const canonical = prepareMcpMaterialRepairMutation({ plan, payload: canonicalPayload, existing })
+    expect(recovered).toEqual(canonical)
+    expect(recovered.acceptance.character_updates).toEqual([{
+      name: '林砚',
+      patch: { current_state: { location: '市档案馆地下档案室' } },
+    }])
+    expect(stageOutput).toEqual(originalStageOutput)
+  })
+
+  test('does not lift partial, unknown, wrong-type, or empty material section shapes', () => {
+    const plan = resolveMaterialRepairPlan({
+      preflight: { checks: [
+        { key: 'ending_hook', ok: false, severity: 'high', fix: '补齐章末钩子' },
+        { key: 'worldbuilding', ok: false, severity: 'high', fix: '补齐世界规则' },
+      ] },
+    }, ['ending_hook', 'worldbuilding'])
+    const existing = existingSnapshot({
+      characterNames: new Set(),
+      settingKeys: new Set(),
+    })
+    const worldbuilding = [{ world_summary: '零点档案会显示未来死亡记录。' }]
+
+    expectContractError(() => prepareMcpMaterialRepairMutation({
+      plan,
+      payload: {
+        chapter_patch: {
+          ending_hook: '字迹变成林砚自己的笔迹。',
+          worldbuilding,
+        },
+        repair_summary: '根级摘要与误嵌套分区混用。',
+      },
+      existing,
+    }), 'MATERIAL_REPAIR_FORBIDDEN_FIELD')
+
+    expectContractError(() => prepareMcpMaterialRepairMutation({
+      plan,
+      payload: {
+        chapter_patch: {
+          ending_hook: '字迹变成林砚自己的笔迹。',
+          worldbuilding,
+          mystery_section: [],
+        },
+      },
+      existing,
+    }), 'MATERIAL_REPAIR_FORBIDDEN_FIELD')
+
+    expectContractError(() => prepareMcpMaterialRepairMutation({
+      plan,
+      payload: {
+        chapter_patch: {
+          ending_hook: '字迹变成林砚自己的笔迹。',
+          worldbuilding: '不是数组',
+        },
+      },
+      existing,
+    }), 'MATERIAL_REPAIR_INVALID')
+
+    expectContractError(() => prepareMcpMaterialRepairMutation({
+      plan,
+      payload: { chapter_patch: { worldbuilding } },
+      existing,
+    }), 'MATERIAL_REPAIR_INCOMPLETE')
+  })
+
   test('rejects chapter changes that do not satisfy the exact missing obligation', () => {
     const endingRequest = resolveMaterialRepairPlan({
       preflight: { checks: [{ key: 'ending_hook', ok: false, fix: '补齐章末钩子' }] },
@@ -798,6 +941,11 @@ describe('material repair mutation preparation', () => {
           name: '林砚',
           role_type: '主角',
           current_state: { location: '灰塔底层', goal: '查清倒转规律' },
+          limits: ['不能凭空恢复失忆内容'],
+        }],
+        character_updates: [{
+          name: '林砚',
+          current_state: { location: '灰塔底层' },
         }],
         chapter_patch: {
           raw_payload: {
@@ -827,6 +975,7 @@ describe('material repair mutation preparation', () => {
     expect(prepared.acceptance.character_creates).toContainEqual(expect.objectContaining({
       name: '林砚',
       current_state: { location: '灰塔底层', goal: '查清倒转规律' },
+      abilities: ['限制：不能凭空恢复失忆内容'],
     }))
     expect(prepared.acceptance.character_updates).toBeUndefined()
   })
@@ -1520,6 +1669,38 @@ describe('material repair mutation preparation', () => {
         existing,
       }), 'MATERIAL_REPAIR_REFERENCE_INVALID')
     }
+  })
+
+  test('materializes an unresolved forbidden named usage as a scoped setting placeholder', () => {
+    const prepared = prepareMcpMaterialRepairMutation({
+      plan: requestForTargets(new Set(['chapter_setting_usage'])),
+      payload: {
+        chapter_setting_usage: [{
+          entity_name: '失忆真相',
+          entity_type: 'mystery',
+          forbidden: true,
+          reveal_level: '不得揭示',
+        }],
+      },
+      existing: materialSnapshot({ characters: [], settings: [] }),
+    })
+
+    expect(prepared.acceptance.setting_creates).toEqual([{
+      entity_type: 'mystery',
+      name: '失忆真相',
+      summary: '本章禁揭的未解析设定：失忆真相',
+      status: 'active',
+      visibility: 'limited',
+      constraints_json: { reveal_level: '不得揭示' },
+      state_json: { status: 'unresolved', reveal_level: '不得揭示' },
+      payload_json: { source: 'mcp_material_repair_forbidden_usage' },
+    }])
+    expect(prepared.acceptance.chapter_setting_usage_replacement).toEqual([{
+      entity_name: '失忆真相',
+      entity_type: 'mystery',
+      forbidden: true,
+      reveal_level: '不得揭示',
+    }])
   })
 
   test('rejects ambiguous duplicate usage references and oversized output', () => {
