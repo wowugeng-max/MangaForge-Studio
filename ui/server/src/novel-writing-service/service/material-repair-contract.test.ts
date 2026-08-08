@@ -559,6 +559,7 @@ describe('material repair mutation preparation', () => {
       content: JSON.stringify(stringPayload),
     }).output
     const originalStageOutput = structuredClone(stageOutput)
+    const originalCanonicalPayload = structuredClone(canonicalPayload)
     const chapterPatch = stageOutput.chapter_patch
     const rawPayload = chapterPatch.raw_payload
     const preDraftBrief = rawPayload.pre_draft_brief
@@ -576,7 +577,35 @@ describe('material repair mutation preparation', () => {
     expect(stageOutput.chapter_patch.raw_payload.pre_draft_brief).toBe(preDraftBrief)
     expect(stageOutput.chapter_patch.raw_payload.pre_draft_brief.state_tracking_contract).toBe(stateTrackingContract)
     expect(stageOutput.chapter_patch.raw_payload.pre_draft_brief.state_tracking_contract.source_readiness).toBe(sourceReadiness)
+    expect(canonicalPayload).toEqual(originalCanonicalPayload)
     expect(canonicalPayload.chapter_patch.raw_payload.pre_draft_brief.state_tracking_contract.source_readiness).toBe(readiness)
+  })
+
+  test('preserves forbidden raw payload field precedence over malformed source readiness JSON rows', () => {
+    const { plan, existing, canonicalPayload } = sourceReadinessRepairFixture()
+    const invalidPayload = {
+      ...canonicalPayload,
+      chapter_patch: {
+        ...canonicalPayload.chapter_patch,
+        raw_payload: {
+          ...canonicalPayload.chapter_patch.raw_payload,
+          unknown_material_field: true,
+          pre_draft_brief: {
+            ...canonicalPayload.chapter_patch.raw_payload.pre_draft_brief,
+            state_tracking_contract: {
+              ...canonicalPayload.chapter_patch.raw_payload.pre_draft_brief.state_tracking_contract,
+              source_readiness: ['{'],
+            },
+          },
+        },
+      },
+    }
+
+    expectContractError(() => prepareMcpMaterialRepairMutation({
+      plan,
+      payload: invalidPayload,
+      existing,
+    }), 'MATERIAL_REPAIR_FORBIDDEN_FIELD')
   })
 
   test('lifts exact material root sections nested under the sole chapter patch after root closure recovery', () => {

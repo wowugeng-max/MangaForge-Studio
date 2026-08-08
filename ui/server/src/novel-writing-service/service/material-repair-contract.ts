@@ -614,8 +614,8 @@ function normalizeChapterPatch(value: unknown) {
     if (!isPlainObject(rawInput)) {
       throw materialRepairError('MATERIAL_REPAIR_INVALID', 'chapter_patch.raw_payload must be an object')
     }
+    assertAllowedFields(rawInput, CHAPTER_RAW_PAYLOAD_FIELDS, 'chapter_patch.raw_payload')
     const raw = recoverCanonicalMaterialSourceReadinessRows(rawInput)
-    assertAllowedFields(raw, CHAPTER_RAW_PAYLOAD_FIELDS, 'chapter_patch.raw_payload')
     const rawAliases: Record<string, readonly string[]> = {
       chapter_blueprint: ['chapter_blueprint'],
       pre_draft_brief: ['pre_draft_brief', 'preDraftBrief'],
