@@ -573,14 +573,28 @@ function recoverCanonicalMaterialSourceReadinessRows(rawPayload: Record<string, 
   const preDraftBrief = rawPayload.pre_draft_brief
   if (!isPlainObject(preDraftBrief)) return rawPayload
   const stateTrackingContract = preDraftBrief.state_tracking_contract
-  if (!isPlainObject(stateTrackingContract)) return rawPayload
+  if (!isPlainObject(stateTrackingContract) || !hasOwn(stateTrackingContract, 'source_readiness')) return rawPayload
+
+  const label = 'chapter_patch.raw_payload.pre_draft_brief.state_tracking_contract.source_readiness'
   const sourceReadiness = stateTrackingContract.source_readiness
-  if (!Array.isArray(sourceReadiness)
-    || sourceReadiness.length === 0
-    || !sourceReadiness.every(item => typeof item === 'string')) {
-    return rawPayload
+  if (!Array.isArray(sourceReadiness)) invalidMaterialField(label, 'an array')
+  if (sourceReadiness.length === 0) return rawPayload
+  if (sourceReadiness.every(isPlainObject)) return rawPayload
+  if (!sourceReadiness.every(item => typeof item === 'string' && item.trim().length > 0)) {
+    invalidMaterialField(label, 'an array of plain objects or non-empty JSON object strings')
   }
-  const recoveredRows = sourceReadiness.map(item => JSON.parse(item as string))
+
+  const recoveredRows = sourceReadiness.map((item, index) => {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(item as string)
+    } catch {
+      invalidMaterialField(`${label}[${index}]`, 'a valid JSON object string')
+    }
+    if (!isPlainObject(parsed)) invalidMaterialField(`${label}[${index}]`, 'a JSON object string')
+    assertNoForbiddenMutationKeys(parsed)
+    return parsed
+  })
   return {
     ...rawPayload,
     pre_draft_brief: {

@@ -581,6 +581,115 @@ describe('material repair mutation preparation', () => {
     expect(canonicalPayload.chapter_patch.raw_payload.pre_draft_brief.state_tracking_contract.source_readiness).toBe(readiness)
   })
 
+  test('rejects invalid canonical source readiness string row shapes with a typed error', () => {
+    const { plan, existing, readiness, canonicalPayload } = sourceReadinessRepairFixture()
+    const invalidRows = [
+      ['{'],
+      ['   '],
+      [JSON.stringify([])],
+      [JSON.stringify(null)],
+      [JSON.stringify('context_tracking')],
+      [JSON.stringify(1)],
+      [JSON.stringify(true)],
+      [readiness[0], JSON.stringify(readiness[0])],
+      [readiness[0], 7],
+    ]
+
+    for (const sourceReadiness of invalidRows) {
+      const payload = structuredClone(canonicalPayload) as any
+      payload.chapter_patch.raw_payload.pre_draft_brief.state_tracking_contract.source_readiness = sourceReadiness
+      expectContractError(() => prepareMcpMaterialRepairMutation({ plan, payload, existing }), 'MATERIAL_REPAIR_INVALID')
+    }
+  })
+
+  test('rejects a non-array canonical source readiness value', () => {
+    const { plan, existing, canonicalPayload } = sourceReadinessRepairFixture()
+    const payload = structuredClone(canonicalPayload) as any
+    payload.chapter_patch.raw_payload.pre_draft_brief.state_tracking_contract.source_readiness = { key: 'context_tracking' }
+
+    expectContractError(() => prepareMcpMaterialRepairMutation({ plan, payload, existing }), 'MATERIAL_REPAIR_INVALID')
+  })
+
+  test('rejects forbidden keys recovered from canonical source readiness JSON rows', () => {
+    const { plan, existing, readiness, canonicalPayload } = sourceReadinessRepairFixture()
+    const payload = structuredClone(canonicalPayload) as any
+    payload.chapter_patch.raw_payload.pre_draft_brief.state_tracking_contract.source_readiness = [JSON.stringify({
+      ...readiness[0], session_id: 'remote-controlled-session',
+    })]
+
+    expectContractError(() => prepareMcpMaterialRepairMutation({ plan, payload, existing }), 'MATERIAL_REPAIR_FORBIDDEN_FIELD')
+  })
+
+  test('keeps an empty canonical source readiness array for the existing obligation check', () => {
+    const { plan, existing, canonicalPayload } = sourceReadinessRepairFixture()
+    const payload = structuredClone(canonicalPayload) as any
+    payload.chapter_patch.chapter_goal = '抵达灰塔底层并核对异常档案。'
+    payload.chapter_patch.raw_payload.pre_draft_brief.state_tracking_contract.source_readiness = []
+
+    expectContractError(() => prepareMcpMaterialRepairMutation({ plan, payload, existing }), 'MATERIAL_REPAIR_OBLIGATION_UNMET')
+  })
+
+  test('does not recover source readiness strings outside the exact canonical path', () => {
+    const { plan, existing, readiness, canonicalPayload } = sourceReadinessRepairFixture()
+    const row = JSON.stringify(readiness[0])
+    const payloads = [
+      {
+        payload: {
+          ...canonicalPayload,
+          chapter_patch: {
+            ...canonicalPayload.chapter_patch,
+            raw_payload: { source_readiness: [row] },
+          },
+        },
+        code: 'MATERIAL_REPAIR_INVALID',
+      },
+      {
+        payload: {
+          ...canonicalPayload,
+          chapter_patch: {
+            ...canonicalPayload.chapter_patch,
+            raw_payload: { preDraftBrief: { state_tracking_contract: { source_readiness: [row] } } },
+          },
+        },
+        code: 'MATERIAL_REPAIR_OBLIGATION_UNMET',
+      },
+      {
+        payload: {
+          ...canonicalPayload,
+          chapter_patch: {
+            ...canonicalPayload.chapter_patch,
+            raw_payload: { pre_draft_brief: { stateTrackingContract: { source_readiness: [row] } } },
+          },
+        },
+        code: 'MATERIAL_REPAIR_OBLIGATION_UNMET',
+      },
+      {
+        payload: {
+          ...canonicalPayload,
+          chapter_patch: {
+            ...canonicalPayload.chapter_patch,
+            raw_payload: { pre_draft_brief: { state_tracking_contract: { sourceReadiness: [row] } } },
+          },
+        },
+        code: 'MATERIAL_REPAIR_OBLIGATION_UNMET',
+      },
+    ]
+
+    for (const { payload, code } of payloads) {
+      expectContractError(() => prepareMcpMaterialRepairMutation({ plan, payload, existing }), code)
+    }
+  })
+
+  test('rejects non-plain canonical source readiness rows', () => {
+    const { plan, existing, readiness, canonicalPayload } = sourceReadinessRepairFixture()
+    const payload = structuredClone(canonicalPayload) as any
+    payload.chapter_patch.raw_payload.pre_draft_brief.state_tracking_contract.source_readiness = [
+      Object.assign(Object.create({ inherited: true }), readiness[0]),
+    ]
+
+    expectContractError(() => prepareMcpMaterialRepairMutation({ plan, payload, existing }), 'MATERIAL_REPAIR_INVALID')
+  })
+
   test('preserves forbidden raw payload field precedence over malformed source readiness JSON rows', () => {
     const { plan, existing, canonicalPayload } = sourceReadinessRepairFixture()
     const invalidPayload = {
