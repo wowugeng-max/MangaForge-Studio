@@ -351,7 +351,10 @@ describe('material repair prompt contract', () => {
         context_identity_hash: 'sha256:context-authority-sentinel',
       },
     })
-    const outputContract = task.slice(task.lastIndexOf('【输出合同】'))
+    const outputContractMatch = task.match(/【输出合同】\n([\s\S]*?)\n只输出一个 JSON 对象。/)
+    expect(outputContractMatch).not.toBeNull()
+    const outputContract = JSON.parse(outputContractMatch?.[1] || '{}')
+    const chapterBlueprintContract = outputContract.chapter_patch.raw_payload.chapter_blueprint
 
     expect(task.length).toBeLessThanOrEqual(180000)
     expect(task).toContain('一次性补齐本章写作前置材料')
@@ -362,23 +365,36 @@ describe('material repair prompt contract', () => {
     expect(task).toContain('character_updates')
     expect(task).toContain('chapter_setting_usage')
     expect(task).toContain('repair_summary')
-    expect(outputContract).not.toContain('benchmark_recall_gaps')
-    expect(outputContract).not.toContain('"chapter_blueprint":"object?"')
-    for (const field of [
-      'target_emotion', 'opening_hook', 'core_payoff', 'content_outline',
-      'cause', 'development', 'turn', 'climax', 'ending', 'plot_lines',
-      'mainline', 'logic_line', 'character_order', 'beat_sequence',
-      'cost_and_reward', 'ending_contract', 'next_chapter_pull',
-    ]) {
-      expect(outputContract).toContain(`"${field}"`)
-    }
+    expect(JSON.stringify(outputContract)).not.toContain('benchmark_recall_gaps')
+    expect(chapterBlueprintContract).toEqual({
+      target_emotion: 'non-empty string',
+      opening_hook: 'non-empty string',
+      core_payoff: 'non-empty string',
+      content_outline: {
+        cause: 'non-empty string',
+        development: 'non-empty string',
+        turn: 'non-empty string',
+        climax: 'non-empty string',
+        ending: 'non-empty string',
+      },
+      plot_lines: {
+        mainline: 'non-empty string',
+        logic_line: 'non-empty string',
+      },
+      character_order: ['character name'],
+      beat_sequence: ['beat with function tag'],
+      cost_and_reward: 'non-empty string',
+      ending_contract: { next_chapter_pull: 'non-empty string' },
+    })
+    const serializedChapterBlueprintContract = JSON.stringify(chapterBlueprintContract)
     for (const alias of [
       'five_part_summary', 'multi_line_progression', 'character_appearance_order',
       'event_function_tags', 'cost_benefit', 'unknowns',
     ]) {
-      expect(outputContract).not.toContain(`"${alias}"`)
+      expect(serializedChapterBlueprintContract).not.toContain(`"${alias}"`)
     }
     expect(task).toContain('chapter_blueprint 返回时必须使用输出合同中的标准 snake_case 字段；five_part_summary、multi_line_progression、character_appearance_order、event_function_tags、cost_benefit 和根级 unknowns 均不能替代标准字段。')
+    expect(task).toContain('chapter_blueprint 仅在原始缺失项包含 chapter_blueprint 或 source_readiness_chapter_blueprint 时返回；其他 chapter_patch 修复必须省略该字段。')
     expect(task).toContain('灰塔回声')
     expect(task).toContain('每章推进一个可验证谜面')
     expect(task).toContain('补齐林砚位置')
