@@ -225,7 +225,9 @@ export function createMcpStabilityController(dependencies: {
         }
         await boundedSleep(retryDelay, input)
         retryDelay = Math.min(maximumDelay, retryDelay * 2)
-        if (readinessMode === 'proactive' || failureClass === 'transient_read_failure') {
+        if (readinessMode === 'proactive'
+          || failureClass === 'transient_read_failure'
+          || failureClass === 'not_ready_pre_dispatch') {
           await ensureReady(policy, input)
         }
       }

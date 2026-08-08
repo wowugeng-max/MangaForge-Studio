@@ -558,7 +558,7 @@ describe('MCP stability coordinator', () => {
   test.each([
     { label: 'read', run: 'runRead' as const, phase: 'session_poll' as const },
     { label: 'mutation', run: 'runMutation' as const, phase: 'session_create' as const },
-  ])('reactive $label retries an exact pre-dispatch rejection without a readiness probe', async ({ run, phase }) => {
+  ])('reactive $label stabilizes an exact pre-dispatch rejection before replay', async ({ run, phase }) => {
     const harness = stabilityHarness([], { operationReadinessMode: 'reactive' })
     let calls = 0
 
@@ -575,8 +575,12 @@ describe('MCP stability coordinator', () => {
     expect(result).toBe('operation-result')
     expect(calls).toBe(2)
     expect(harness.sleeps).toEqual([5])
-    expect(harness.acquisitions).toBe(0)
-    expect(harness.probeLog).toEqual([])
+    expect(harness.acquisitions).toBe(1)
+    expect(harness.invalidations).toBe(0)
+    expect(harness.probeLog).toEqual([
+      'tools/list:1', 'probe/read:1',
+      'tools/list:1', 'probe/read:1',
+    ])
   })
 
   test('reactive read recovery stabilizes only after a transient read failure', async () => {
@@ -844,7 +848,7 @@ describe('MCP stability coordinator', () => {
     expect(hookCalls).toBe(0)
   })
 
-  test('reactive mutation exact pre-dispatch recovery exhausts the shared deadline without probing', async () => {
+  test('reactive mutation exact pre-dispatch recovery exhausts the shared deadline after readiness probes', async () => {
     const harness = stabilityHarness([], {
       operationReadinessMode: 'reactive',
       totalMs: 12,
@@ -863,7 +867,40 @@ describe('MCP stability coordinator', () => {
       details: { phase: 'session_create' },
     })
     expect(harness.sleeps.reduce((sum, value) => sum + value, 0)).toBe(12)
-    expect(harness.acquisitions).toBe(0)
+    expect(harness.acquisitions).toBe(1)
+    expect(harness.probeLog).toHaveLength(4)
+  })
+
+  test('reactive mutation rotates a stale transport before replaying an exact pre-dispatch operation', async () => {
+    const harness = stabilityHarness(['not_ready', 'not_ready', 'ok', 'ok'], {
+      operationReadinessMode: 'reactive',
+      warmupWindowMs: 15,
+      pollInitialMs: 10,
+      pollMaxMs: 10,
+    })
+    let calls = 0
+
+    const result = await harness.controller.runMutation(
+      harness.policy,
+      { ...harness.input, phase: 'session_create' },
+      async () => {
+        calls += 1
+        if (calls === 1) throw exactNotReadyEvidence()
+        return 'created'
+      },
+    )
+
+    expect(result).toBe('created')
+    expect(calls).toBe(2)
+    expect(harness.invalidations).toBe(1)
+    expect(harness.acquisitions).toBe(2)
+    expect(harness.sleeps).toEqual([10, 10, 5])
+    expect(harness.probeLog).toEqual([
+      'tools/list:1',
+      'tools/list:1',
+      'tools/list:2', 'probe/read:2',
+      'tools/list:2', 'probe/read:2',
+    ])
   })
 
   test.each([
