@@ -276,6 +276,56 @@ function isInitializedReadinessFailure(error: unknown) {
  * neutral readiness signal on the same transport/session.
  */
 class InitializedReadinessRetryTransport extends StreamableHTTPClientTransport {
+  private readonly retryAbortController = new AbortController()
+
+  private retryCancellationError(signal: AbortSignal) {
+    return signal.reason instanceof McpError
+      ? signal.reason
+      : new McpError('MCP_CANCELLED', 'MCP 连接已取消')
+  }
+
+  private abortRetryWait() {
+    if (!this.retryAbortController.signal.aborted) {
+      this.retryAbortController.abort(new McpError('MCP_CANCELLED', 'MCP 连接已关闭'))
+    }
+  }
+
+  private waitForRetry(delayMs: number, requestSignal?: AbortSignal) {
+    const closeSignal = this.retryAbortController.signal
+    if (requestSignal?.aborted) return Promise.reject(this.retryCancellationError(requestSignal))
+    if (closeSignal.aborted) return Promise.reject(this.retryCancellationError(closeSignal))
+    return new Promise<void>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      let settled = false
+      const cleanup = () => {
+        if (timer !== undefined) clearTimeout(timer)
+        requestSignal?.removeEventListener('abort', onRequestAbort)
+        closeSignal.removeEventListener('abort', onCloseAbort)
+      }
+      const settle = (callback: () => void) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        callback()
+      }
+      const onRequestAbort = () => settle(() => reject(this.retryCancellationError(requestSignal!)))
+      const onCloseAbort = () => settle(() => reject(this.retryCancellationError(closeSignal)))
+      timer = setTimeout(() => settle(resolve), delayMs)
+      requestSignal?.addEventListener('abort', onRequestAbort, { once: true })
+      closeSignal.addEventListener('abort', onCloseAbort, { once: true })
+    })
+  }
+
+  override async close() {
+    this.abortRetryWait()
+    await super.close()
+  }
+
+  override async terminateSession() {
+    this.abortRetryWait()
+    await super.terminateSession()
+  }
+
   override async send(
     message: Parameters<StreamableHTTPClientTransport['send']>[0],
     options?: Parameters<StreamableHTTPClientTransport['send']>[1],
@@ -291,7 +341,7 @@ class InitializedReadinessRetryTransport extends StreamableHTTPClientTransport {
         const delayMs = INITIALIZED_READINESS_RETRY_DELAYS_MS[retry]
         if (delayMs === undefined) throw error
         retry += 1
-        await new Promise<void>(resolve => setTimeout(resolve, delayMs))
+        await this.waitForRetry(delayMs, options?.requestSignal)
       }
     }
   }
