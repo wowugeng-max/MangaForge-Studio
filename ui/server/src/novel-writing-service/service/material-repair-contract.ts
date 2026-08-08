@@ -569,6 +569,30 @@ function normalizeCharacterFields(value: Record<string, unknown>) {
   return cleanObject(normalized)
 }
 
+function recoverCanonicalMaterialSourceReadinessRows(rawPayload: Record<string, unknown>) {
+  const preDraftBrief = rawPayload.pre_draft_brief
+  if (!isPlainObject(preDraftBrief)) return rawPayload
+  const stateTrackingContract = preDraftBrief.state_tracking_contract
+  if (!isPlainObject(stateTrackingContract)) return rawPayload
+  const sourceReadiness = stateTrackingContract.source_readiness
+  if (!Array.isArray(sourceReadiness)
+    || sourceReadiness.length === 0
+    || !sourceReadiness.every(item => typeof item === 'string')) {
+    return rawPayload
+  }
+  const recoveredRows = sourceReadiness.map(item => JSON.parse(item as string))
+  return {
+    ...rawPayload,
+    pre_draft_brief: {
+      ...preDraftBrief,
+      state_tracking_contract: {
+        ...stateTrackingContract,
+        source_readiness: recoveredRows,
+      },
+    },
+  }
+}
+
 function normalizeChapterPatch(value: unknown) {
   if (!isPlainObject(value)) {
     throw materialRepairError('MATERIAL_REPAIR_INVALID', 'chapter_patch must be an object')
@@ -586,10 +610,11 @@ function normalizeChapterPatch(value: unknown) {
     if (hasOwn(value, field)) assertObjectArrayField(value[field], `chapter_patch.${field}`)
   }
   if (hasOwn(value, 'raw_payload')) {
-    const raw = value.raw_payload
-    if (!isPlainObject(raw)) {
+    const rawInput = value.raw_payload
+    if (!isPlainObject(rawInput)) {
       throw materialRepairError('MATERIAL_REPAIR_INVALID', 'chapter_patch.raw_payload must be an object')
     }
+    const raw = recoverCanonicalMaterialSourceReadinessRows(rawInput)
     assertAllowedFields(raw, CHAPTER_RAW_PAYLOAD_FIELDS, 'chapter_patch.raw_payload')
     const rawAliases: Record<string, readonly string[]> = {
       chapter_blueprint: ['chapter_blueprint'],

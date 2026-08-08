@@ -107,6 +107,44 @@ function existingSnapshot(overrides: Partial<ExistingMaterialSnapshot> = {}): Ex
   }
 }
 
+function sourceReadinessRepairFixture() {
+  const existingStateTrackingContract = {
+    source_requirements: ['追踪/上下文.md'],
+    source_readiness: [{
+      key: 'context_tracking',
+      status: 'missing',
+      evidence: '缺少本章开始时的上下文跟踪锚点。',
+    }],
+  }
+  const contextPackage = {
+    preflight: { checks: [{
+      key: 'source_readiness_context_tracking', ok: false, severity: 'high', fix: '补齐上下文跟踪来源',
+    }] },
+    chapter_target: { state_tracking_contract: existingStateTrackingContract },
+  }
+  const readiness = [{
+    key: 'context_tracking', status: 'ready',
+    evidence: '追踪/上下文.md：上一章在灰塔底层结束，林砚仍持有异常档案。',
+  }]
+  const canonicalPayload = {
+    chapter_patch: { raw_payload: { pre_draft_brief: {
+      state_tracking_contract: { source_readiness: readiness },
+    } } },
+    repair_summary: '补齐本章上下文跟踪来源。',
+  }
+  const existing = existingSnapshot({
+    chapter: {
+      id: 1, project_id: 1, chapter_no: 3, title: '第三章',
+      raw_payload: { pre_draft_brief: {
+        confirmed_at: null,
+        state_tracking_contract: existingStateTrackingContract,
+      } },
+    },
+    contextPackage,
+  })
+  return { plan: resolveMaterialRepairPlan(contextPackage), existing, readiness, canonicalPayload }
+}
+
 function materialSnapshot(input: {
   characters: Array<{ id?: number; name?: string }>
   settings: Array<{ id?: number; entity_type?: string; name?: string }>
@@ -513,6 +551,34 @@ describe('material repair prompt contract', () => {
 })
 
 describe('material repair mutation preparation', () => {
+  test('recovers canonical source readiness JSON object strings without mutating the input', () => {
+    const { plan, existing, readiness, canonicalPayload } = sourceReadinessRepairFixture()
+    const stringPayload = structuredClone(canonicalPayload)
+    stringPayload.chapter_patch.raw_payload.pre_draft_brief.state_tracking_contract.source_readiness = readiness.map(JSON.stringify)
+    const stageOutput = validateMcpStageResponse('material_repair', 'material_repair_json', {
+      content: JSON.stringify(stringPayload),
+    }).output
+    const originalStageOutput = structuredClone(stageOutput)
+    const chapterPatch = stageOutput.chapter_patch
+    const rawPayload = chapterPatch.raw_payload
+    const preDraftBrief = rawPayload.pre_draft_brief
+    const stateTrackingContract = preDraftBrief.state_tracking_contract
+    const sourceReadiness = stateTrackingContract.source_readiness
+
+    const recovered = prepareMcpMaterialRepairMutation({ plan, payload: stageOutput, existing })
+    const canonical = prepareMcpMaterialRepairMutation({ plan, payload: canonicalPayload, existing })
+
+    expect(recovered).toEqual(canonical)
+    expect(recovered.acceptance.chapter_patch.raw_payload.pre_draft_brief.state_tracking_contract.source_readiness).toEqual(readiness)
+    expect(stageOutput).toEqual(originalStageOutput)
+    expect(stageOutput.chapter_patch).toBe(chapterPatch)
+    expect(stageOutput.chapter_patch.raw_payload).toBe(rawPayload)
+    expect(stageOutput.chapter_patch.raw_payload.pre_draft_brief).toBe(preDraftBrief)
+    expect(stageOutput.chapter_patch.raw_payload.pre_draft_brief.state_tracking_contract).toBe(stateTrackingContract)
+    expect(stageOutput.chapter_patch.raw_payload.pre_draft_brief.state_tracking_contract.source_readiness).toBe(sourceReadiness)
+    expect(canonicalPayload.chapter_patch.raw_payload.pre_draft_brief.state_tracking_contract.source_readiness).toBe(readiness)
+  })
+
   test('lifts exact material root sections nested under the sole chapter patch after root closure recovery', () => {
     const plan = resolveMaterialRepairPlan({
       preflight: { checks: [
