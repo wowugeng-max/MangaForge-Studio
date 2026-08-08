@@ -1193,6 +1193,7 @@ export function buildMaterialRepairTask(input: {
     '仅返回必须补齐的分区以及 repair_summary；不得返回未请求分区。',
     '仅允许输出 chapter_patch, worldbuilding, characters, character_updates, settings, chapter_setting_usage, repair_summary。',
     'chapter_setting_usage 使用已有 entity_id，或使用本次 settings 中唯一的 entity_name + entity_type。',
+    'source_readiness 必须是 JSON 对象数组；数组元素不得是字符串化 JSON。',
     'chapter_blueprint 返回时必须使用输出合同中的标准 snake_case 字段；five_part_summary、multi_line_progression、character_appearance_order、event_function_tags、cost_benefit 和根级 unknowns 均不能替代标准字段。',
     'chapter_blueprint 仅在原始缺失项包含 chapter_blueprint 或 source_readiness_chapter_blueprint 时返回；其他 chapter_patch 修复必须省略该字段。',
     '已有材料默认只读；不得用空字符串、空数组、空对象或 null 覆盖已有内容。',

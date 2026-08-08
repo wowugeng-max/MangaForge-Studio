@@ -58,6 +58,7 @@ test('the real MCP compiler preserves the authoritative material JSON contract w
 
   expect(compiled).toContain('任务：一次性补齐本章写作前置材料。只输出 JSON，不生成正文。')
   expect(compiled).toContain('仅允许输出 chapter_patch, worldbuilding, characters')
+  expect(compiled).toContain('source_readiness 必须是 JSON 对象数组；数组元素不得是字符串化 JSON。')
   expect(compiled).toContain('【输出合同】')
   for (const outlineField of [
     'master_outline',

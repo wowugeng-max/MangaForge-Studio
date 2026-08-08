@@ -402,6 +402,7 @@ describe('material repair prompt contract', () => {
     expect(task).toContain('chapter_patch')
     expect(task).toContain('character_updates')
     expect(task).toContain('chapter_setting_usage')
+    expect(task).toContain('source_readiness 必须是 JSON 对象数组；数组元素不得是字符串化 JSON。')
     expect(task).toContain('repair_summary')
     expect(JSON.stringify(outputContract)).not.toContain('benchmark_recall_gaps')
     expect(chapterBlueprintContract).toEqual({
