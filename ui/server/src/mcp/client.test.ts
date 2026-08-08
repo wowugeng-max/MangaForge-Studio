@@ -453,6 +453,153 @@ describe('generic MCP client', () => {
     await client.close()
   })
 
+  describe('initialized-readiness', () => {
+    test('retries an initialized-not-ready response on the same MCP session', async () => {
+      const methods: string[] = []
+      const sessions: string[] = []
+      let initializedAttempts = 0
+      const raceFetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const message = JSON.parse(String(init?.body || '{}'))
+        if (message.method) {
+          methods.push(message.method)
+          sessions.push(new Headers(init?.headers).get('Mcp-Session-Id') || '')
+        }
+        if (message.method === 'initialize') {
+          return Response.json({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: {
+              protocolVersion: '2025-06-18',
+              capabilities: { tools: {} },
+              serverInfo: { name: 'Readiness race server', version: '1.0.0' },
+            },
+          }, { headers: { 'Mcp-Session-Id': 'readiness-race-session' } })
+        }
+        if (message.method === 'notifications/initialized') {
+          initializedAttempts += 1
+          if (initializedAttempts === 1) {
+            return Response.json({
+              jsonrpc: '2.0',
+              id: null,
+              error: { code: -32000, message: 'Server not initialized' },
+            }, { status: 400 })
+          }
+          return new Response(null, { status: 202 })
+        }
+        if (message.method === 'tools/list') {
+          return Response.json({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: { tools: [{ name: 'ready_tool', inputSchema: { type: 'object' } }] },
+          })
+        }
+        throw new Error(`unexpected MCP method: ${message.method}`)
+      }
+      const client = createMcpClient({
+        server: BUDA_MCP_SERVER_TEMPLATE,
+        key,
+        fetch: raceFetch as typeof fetch,
+      })
+
+      await client.connect()
+
+      expect(methods).toEqual([
+        'initialize',
+        'notifications/initialized',
+        'notifications/initialized',
+        'tools/list',
+      ])
+      expect(initializedAttempts).toBe(2)
+      expect(sessions.slice(1)).toEqual([
+        'readiness-race-session',
+        'readiness-race-session',
+        'readiness-race-session',
+      ])
+      await client.close()
+    })
+
+    test('does not retry a non-readiness initialized error', async () => {
+      const methods: string[] = []
+      let initializedAttempts = 0
+      const invalidRequestFetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const message = JSON.parse(String(init?.body || '{}'))
+        if (message.method) methods.push(message.method)
+        if (message.method === 'initialize') {
+          return Response.json({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: {
+              protocolVersion: '2025-06-18',
+              capabilities: { tools: {} },
+              serverInfo: { name: 'Invalid request server', version: '1.0.0' },
+            },
+          }, { headers: { 'Mcp-Session-Id': 'invalid-request-session' } })
+        }
+        if (message.method === 'notifications/initialized') {
+          initializedAttempts += 1
+          return Response.json({
+            jsonrpc: '2.0',
+            id: null,
+            error: { code: -32600, message: 'Invalid request' },
+          }, { status: 400 })
+        }
+        throw new Error(`unexpected MCP method: ${message.method}`)
+      }
+      const client = createMcpClient({
+        server: BUDA_MCP_SERVER_TEMPLATE,
+        key,
+        fetch: invalidRequestFetch as typeof fetch,
+      })
+
+      await expect(client.connect()).rejects.toMatchObject({ code: 'MCP_TOOL_ERROR' })
+      expect(initializedAttempts).toBe(1)
+      expect(methods).toEqual(['initialize', 'notifications/initialized'])
+    })
+
+    test('stops after the bounded initialized-readiness retry budget', async () => {
+      const methods: string[] = []
+      let initializedAttempts = 0
+      const neverReadyFetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const message = JSON.parse(String(init?.body || '{}'))
+        if (message.method) methods.push(message.method)
+        if (message.method === 'initialize') {
+          return Response.json({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: {
+              protocolVersion: '2025-06-18',
+              capabilities: { tools: {} },
+              serverInfo: { name: 'Never ready server', version: '1.0.0' },
+            },
+          }, { headers: { 'Mcp-Session-Id': 'never-ready-session' } })
+        }
+        if (message.method === 'notifications/initialized') {
+          initializedAttempts += 1
+          return Response.json({
+            jsonrpc: '2.0',
+            id: null,
+            error: { code: -32000, message: 'Server not initialized' },
+          }, { status: 400 })
+        }
+        throw new Error(`unexpected MCP method: ${message.method}`)
+      }
+      const client = createMcpClient({
+        server: BUDA_MCP_SERVER_TEMPLATE,
+        key,
+        fetch: neverReadyFetch as typeof fetch,
+      })
+
+      await expect(client.connect()).rejects.toMatchObject({ code: 'MCP_TOOL_ERROR' })
+      expect(initializedAttempts).toBe(3)
+      expect(methods).toEqual([
+        'initialize',
+        'notifications/initialized',
+        'notifications/initialized',
+        'notifications/initialized',
+      ])
+    })
+  })
+
   test('uses the ordinary transport and initialized notification for a provider-neutral adapter', async () => {
     const methods: string[] = []
     const neutralFetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
