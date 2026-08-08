@@ -294,7 +294,6 @@ const TARGETS_BY_CHECK: Record<string, readonly MaterialRepairTarget[]> = {
   source_readiness_timeline_tracking: ['chapter_patch'],
   source_readiness_scene_card_goal_obstacle_change: ['chapter_patch'],
   benchmark_recall_source_paths: ['chapter_patch'],
-  benchmark_recall_gate: ['chapter_patch'],
   worldbuilding: ['worldbuilding'],
   characters: ['characters'],
   character_state: ['character_updates'],
