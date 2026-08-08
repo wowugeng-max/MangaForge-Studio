@@ -378,7 +378,7 @@ describe('material repair prompt contract', () => {
     ]) {
       expect(outputContract).not.toContain(`"${alias}"`)
     }
-    expect(task).toContain('chapter_blueprint 返回时必须使用输出合同中的标准 snake_case 字段')
+    expect(task).toContain('chapter_blueprint 返回时必须使用输出合同中的标准 snake_case 字段；five_part_summary、multi_line_progression、character_appearance_order、event_function_tags、cost_benefit 和根级 unknowns 均不能替代标准字段。')
     expect(task).toContain('灰塔回声')
     expect(task).toContain('每章推进一个可验证谜面')
     expect(task).toContain('补齐林砚位置')
