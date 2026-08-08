@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Remove the obsolete Buda initialized-notification suppression so Buda and every other Streamable HTTP MCP service use the standard handshake and can sustain consecutive tool calls.
+**Goal:** Keep the standard Streamable HTTP MCP handshake for every provider while tolerating Buda's transient, pre-dispatch initialized-notification readiness race without creating a second Session.
 
-**Architecture:** Keep `GenericMcpClient`, the bounded fetch, the Client manager, the Buda Adapter, and GenerationSource unchanged. Narrow the production change to Transport construction: always instantiate the SDK `StreamableHTTPClientTransport`; prove the change with a protocol-level fake endpoint that rejects tool traffic until `notifications/initialized` arrives, then complete two consecutive Agent-list tool calls.
+**Architecture:** Remove the Buda-only initialized-notification suppression and use one provider-neutral Transport subclass around the SDK `StreamableHTTPClientTransport`. It retries only the exact HTTP 400 / JSON-RPC `-32000` / null-id `server_not_initialized` rejection for the same `notifications/initialized` message, with 50ms and 150ms waits, reusing the SDK's existing Session. `GenericMcpClient`, the Client manager, the Buda Adapter, and GenerationSource keep their existing boundaries.
 
 **Tech Stack:** TypeScript, Bun 1.3, Bun test, `@modelcontextprotocol/client`, React/Vite dev UI, in-app Browser, SQLite-backed novel workspace.
 
@@ -12,9 +12,9 @@
 
 ## File map
 
-- Modify `ui/server/src/mcp/client.test.ts`: replace the obsolete Buda handshake expectation with the standard handshake and consecutive-call regression.
-- Modify `ui/server/src/mcp/client.ts`: delete the Buda-only Transport subclass and conditional factory branch.
-- Create no production modules and change no Adapter, Runtime, GenerationSource, Web, or database schema files.
+- Modify `ui/server/src/mcp/client.test.ts`: retain the standard handshake/consecutive-call regression and add transient initialized-not-ready retry plus negative cases.
+- Modify `ui/server/src/mcp/client.ts`: delete the Buda-only Transport subclass and add the provider-neutral initialized-readiness wrapper.
+- Create no new production modules and change no Adapter, Runtime, GenerationSource, Web, or database schema files.
 - Use `docs/superpowers/specs/2026-08-08-buda-standard-mcp-handshake-design.md` as the authority for scope and acceptance.
 
 ### Task 1: Lock the current Buda handshake regression with a failing test
@@ -23,9 +23,9 @@
 - Modify: `ui/server/src/mcp/client.test.ts:390-445`
 - Test: `ui/server/src/mcp/client.test.ts`
 
-- [ ] **Step 1: Replace the obsolete Buda compatibility test with the desired standard protocol contract**
+- [ ] **Step 1: Add a failing initialized-readiness retry test beside the standard handshake regression**
 
-Replace `connects to Buda without sending the initialized notification its MCP endpoint rejects` with this test:
+The existing standard handshake test must remain: it proves the sequence `initialize`, `notifications/initialized`, `tools/list`, and two consecutive `tools/call` operations. Add this focused test after it; it fails against the current production Transport because the first exact readiness rejection aborts `connect()`:
 
 ```ts
 test('uses the standard initialized handshake for consecutive Buda tool calls', async () => {
@@ -94,24 +94,116 @@ test('uses the standard initialized handshake for consecutive Buda tool calls', 
 })
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [ ] **Step 1 continued: Add the transient same-Session handshake test**
+
+```ts
+test('retries an initialized-not-ready response on the same MCP session', async () => {
+  const methods: string[] = []
+  const notificationSessions: string[] = []
+  let initializedAttempts = 0
+  const budaFetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const message = JSON.parse(String(init?.body || '{}'))
+    methods.push(String(message.method || ''))
+    if (message.method === 'initialize') {
+      return Response.json({
+        jsonrpc: '2.0', id: message.id,
+        result: { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'Buda MCP', version: '0.1.0' } },
+      }, { headers: { 'Mcp-Session-Id': 'buda-session' } })
+    }
+    if (message.method === 'notifications/initialized') {
+      initializedAttempts += 1
+      notificationSessions.push(new Headers(init?.headers).get('mcp-session-id') || '')
+      if (initializedAttempts === 1) {
+        return Response.json({ jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Bad Request: Server not initialized' } }, { status: 400 })
+      }
+      return new Response(null, { status: 202 })
+    }
+    if (message.method === 'tools/list') return Response.json({
+      jsonrpc: '2.0', id: message.id, result: { tools: [] },
+    })
+    throw new Error(`unexpected MCP method: ${message.method}`)
+  }
+  const client = createMcpClient({ server: BUDA_MCP_SERVER_TEMPLATE, key, fetch: budaFetch as typeof fetch })
+
+  await client.connect()
+
+  expect(methods).toEqual(['initialize', 'notifications/initialized', 'notifications/initialized', 'tools/list'])
+  expect(initializedAttempts).toBe(2)
+  expect(notificationSessions).toEqual(['buda-session', 'buda-session'])
+  await client.close()
+})
+```
+
+- [ ] **Step 2: Add the exact retry-boundary tests**
+
+Add these two tests using the same fake endpoint pattern. The first returns one non-matching 400 error and must issue exactly one initialized notification. The second returns the exact readiness rejection three times and must issue exactly three initialized notifications, then fail without a fourth attempt:
+
+```ts
+test('does not retry a non-readiness initialized error', async () => {
+  let notifications = 0
+  const client = createMcpClient({
+    server: BUDA_MCP_SERVER_TEMPLATE,
+    key,
+    fetch: async (_input, init) => {
+      const method = JSON.parse(String(init?.body || '{}')).method
+      if (method === 'initialize') return Response.json({
+        jsonrpc: '2.0', id: 1,
+        result: { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'fake', version: '1' } },
+      }, { headers: { 'Mcp-Session-Id': 'same-session' } })
+      if (method === 'notifications/initialized') {
+        notifications += 1
+        return Response.json({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid request' } }, { status: 400 })
+      }
+      throw new Error(`unexpected MCP method: ${method}`)
+    },
+  })
+  await expect(client.connect()).rejects.toMatchObject({ code: 'MCP_TOOL_ERROR' })
+  expect(notifications).toBe(1)
+  await client.close()
+})
+
+test('stops after the bounded initialized-readiness retry budget', async () => {
+  let notifications = 0
+  const client = createMcpClient({
+    server: BUDA_MCP_SERVER_TEMPLATE,
+    key,
+    fetch: async (_input, init) => {
+      const message = JSON.parse(String(init?.body || '{}'))
+      if (message.method === 'initialize') return Response.json({
+        jsonrpc: '2.0', id: message.id,
+        result: { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'fake', version: '1' } },
+      }, { headers: { 'Mcp-Session-Id': 'same-session' } })
+      if (message.method === 'notifications/initialized') {
+        notifications += 1
+        return Response.json({ jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Server not initialized' } }, { status: 400 })
+      }
+      throw new Error(`unexpected MCP method: ${message.method}`)
+    },
+  })
+  await expect(client.connect()).rejects.toMatchObject({ code: 'MCP_TOOL_ERROR' })
+  expect(notifications).toBe(3)
+  await client.close()
+})
+```
+
+- [ ] **Step 3: Run the focused tests and verify RED**
 
 Run:
 
 ```bash
 cd /Users/ruiyaosong/MangaForge-Studio/ui/server
-bun test src/mcp/client.test.ts -t "standard initialized handshake"
+bun test src/mcp/client.test.ts -t "initialized-readiness|does not retry"
 ```
 
-Expected: FAIL because the Buda-only Transport suppresses `notifications/initialized`, so tool discovery remains uninitialized or the expected method sequence is missing the notification.
+Expected: the retry test and bounded-budget test fail because the current standard Transport does not retry `notifications/initialized`; the non-readiness test passes only if the current error projection already rejects it once. If the filter matches no tests, correct the test names before proceeding.
 
-### Task 2: Remove the obsolete Buda Transport special case
+### Task 2: Add the provider-neutral initialized readiness boundary
 
 **Files:**
 - Modify: `ui/server/src/mcp/client.ts:1-45`
 - Test: `ui/server/src/mcp/client.test.ts`
 
-- [ ] **Step 1: Delete the Buda-only initialized-notification suppression**
+- [ ] **Step 1: Delete the Buda-only initialized-notification suppression and add the generic retry wrapper**
 
 Change the SDK import from:
 
@@ -146,16 +238,46 @@ import {
 } from '@modelcontextprotocol/client'
 ```
 
-Delete `BudaStreamableHTTPClientTransport`. Replace the factory with:
+Delete `BudaStreamableHTTPClientTransport`. Add the following provider-neutral retry predicate and Transport wrapper before `defaultSdkFactory`:
 
 ```ts
+const INITIALIZED_READINESS_RETRY_DELAYS_MS = [50, 150] as const
+
+function isInitializedNotReadyFailure(error: unknown) {
+  const evidence = projectSdkHttpFailure(error)
+  return evidence?.http_status === 400
+    && evidence.jsonrpc_code === -32000
+    && evidence.response_id === null
+    && evidence.reason === 'server_not_initialized'
+}
+
+class InitializedReadinessRetryTransport extends StreamableHTTPClientTransport {
+  override async send(
+    message: Parameters<StreamableHTTPClientTransport['send']>[0],
+    options?: Parameters<StreamableHTTPClientTransport['send']>[1],
+  ) {
+    const initializedNotification = isInitializedNotification(message)
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await super.send(message, options)
+      } catch (error) {
+        const delay = initializedNotification && isInitializedNotReadyFailure(error)
+          ? INITIALIZED_READINESS_RETRY_DELAYS_MS[attempt]
+          : undefined
+        if (delay === undefined) throw error
+        await new Promise(resolve => setTimeout(resolve, delay))
+      }
+    }
+  }
+}
+
 const defaultSdkFactory: McpSdkFactory = {
   createClient: () => new Client({ name: 'mangaforge-studio', version: '1.0.0' }),
-  createTransport: (url, options) => new StreamableHTTPClientTransport(url, options),
+  createTransport: (url, options) => new InitializedReadinessRetryTransport(url, options),
 }
 ```
 
-Do not change `buildMcpHeaders`, bounded response handling, error projection, Adapter registration, or stability classification.
+The wrapper must preserve `buildMcpHeaders`, bounded response handling, SDK Session/Header behavior, error projection, Adapter registration, and stability classification. It may retry only a handshake notification; it must never retry a request or mutation.
 
 - [ ] **Step 2: Run the focused test and verify GREEN**
 
@@ -163,10 +285,10 @@ Run:
 
 ```bash
 cd /Users/ruiyaosong/MangaForge-Studio/ui/server
-bun test src/mcp/client.test.ts -t "standard initialized handshake"
+bun test src/mcp/client.test.ts -t "retries an initialized-not-ready response"
 ```
 
-Expected: PASS; the test observes the initialized notification and both tool calls succeed.
+Expected: PASS; the test observes one `initialize`, two initialized notifications on the same Session, and successful completion of `client.connect()`.
 
 - [ ] **Step 3: Run the complete MCP Client test file**
 
@@ -177,7 +299,7 @@ cd /Users/ruiyaosong/MangaForge-Studio/ui/server
 bun test src/mcp/client.test.ts
 ```
 
-Expected: all tests pass with zero failures; provider-neutral standard handshake, exact not-ready evidence, response budgets, cancellation, and secret scrubbing remain green.
+Expected: all tests pass with zero failures; provider-neutral standard handshake, exact not-ready evidence, bounded initialized retry, response budgets, cancellation, and secret scrubbing remain green.
 
 - [ ] **Step 4: Commit the protocol fix without protected workspace files**
 
@@ -187,7 +309,7 @@ Run:
 cd /Users/ruiyaosong/MangaForge-Studio
 git add ui/server/src/mcp/client.ts ui/server/src/mcp/client.test.ts
 git diff --cached --name-only
-git commit -m "fix(mcp): use standard Buda handshake"
+git commit -m "fix(mcp): retry transient initialized readiness"
 ```
 
 Expected staged paths are exactly `ui/server/src/mcp/client.ts` and `ui/server/src/mcp/client.test.ts`; neither `ui/server/.workspace-config.json` nor `workspace/assets.json` is staged.
@@ -235,7 +357,7 @@ rg -n 'BudaStreamableHTTPClientTransport|isInitializedNotification' ui/server/sr
 git status --short
 ```
 
-Expected: the removed Transport identifiers have zero matches; only the two protected user files remain unstaged.
+Expected: `BudaStreamableHTTPClientTransport` has zero matches; `isInitializedNotification` appears only in the provider-neutral handshake wrapper/tests; no `adapter_id === 'buda'` Transport branch remains; only the two protected user files remain unstaged.
 
 ### Task 4: Resume two-account real page acceptance
 
