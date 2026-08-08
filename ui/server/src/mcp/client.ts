@@ -6,6 +6,7 @@ import {
   SdkErrorCode,
   SdkHttpError,
   StreamableHTTPClientTransport,
+  isInitializedNotification,
   type CallToolResult,
   type FetchLike,
   type StreamableHTTPClientTransportOptions,
@@ -51,7 +52,7 @@ export type McpSdkFactory = {
 
 const defaultSdkFactory: McpSdkFactory = {
   createClient: () => new Client({ name: 'mangaforge-studio', version: '1.0.0' }),
-  createTransport: (url, options) => new StreamableHTTPClientTransport(url, options),
+  createTransport: (url, options) => new InitializedReadinessRetryTransport(url, options),
 }
 
 export const MCP_RESPONSE_BYTE_LIMIT = 16 * 1024 * 1024
@@ -257,6 +258,43 @@ function projectSdkHttpFailure(error: unknown): McpFailureEvidence | undefined {
     }
   } catch {}
   return evidence
+}
+
+const INITIALIZED_READINESS_RETRY_DELAYS_MS = [50, 150] as const
+
+function isInitializedReadinessFailure(error: unknown) {
+  const evidence = projectSdkHttpFailure(error)
+  return evidence?.http_status === 400
+    && evidence.jsonrpc_code === -32000
+    && evidence.response_id === null
+    && evidence.reason === 'server_not_initialized'
+}
+
+/**
+ * Streamable HTTP servers may briefly reject the initialized notification while
+ * bringing the newly-created session online. Retry only that exact, provider
+ * neutral readiness signal on the same transport/session.
+ */
+class InitializedReadinessRetryTransport extends StreamableHTTPClientTransport {
+  override async send(
+    message: Parameters<StreamableHTTPClientTransport['send']>[0],
+    options?: Parameters<StreamableHTTPClientTransport['send']>[1],
+  ) {
+    let retry = 0
+    while (true) {
+      try {
+        return await super.send(message, options)
+      } catch (error) {
+        if (!isInitializedNotification(message) || !isInitializedReadinessFailure(error)) {
+          throw error
+        }
+        const delayMs = INITIALIZED_READINESS_RETRY_DELAYS_MS[retry]
+        if (delayMs === undefined) throw error
+        retry += 1
+        await new Promise<void>(resolve => setTimeout(resolve, delayMs))
+      }
+    }
+  }
 }
 
 function mapSdkHttpFailure(

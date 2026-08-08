@@ -442,7 +442,7 @@ describe('generic MCP client', () => {
     await client.callTool('api_claw_list_api_agents', {}, { operation: 'read_safe' })
 
     expect(client.state).toBe('Ready')
-    expect((client as any).transport?.constructor).toBe(StreamableHTTPClientTransport)
+    expect((client as any).transport).toBeInstanceOf(StreamableHTTPClientTransport)
     expect(methods.filter(Boolean)).toEqual([
       'initialize',
       'notifications/initialized',
@@ -640,7 +640,7 @@ describe('generic MCP client', () => {
 
     await client.connect()
 
-    expect((client as any).transport?.constructor).toBe(StreamableHTTPClientTransport)
+    expect((client as any).transport).toBeInstanceOf(StreamableHTTPClientTransport)
     expect(methods.filter(Boolean)).toEqual(['initialize', 'notifications/initialized', 'tools/list'])
     await client.close()
   })
