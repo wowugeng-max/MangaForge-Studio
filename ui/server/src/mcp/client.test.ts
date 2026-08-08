@@ -652,6 +652,61 @@ describe('generic MCP client', () => {
       expect(initializedAttempts).toBe(1)
       expect(methods).toEqual(['initialize', 'notifications/initialized'])
     })
+
+    test('propagates connect cancellation to initialized-readiness backoff', async () => {
+      const methods: string[] = []
+      let initializedAttempts = 0
+      let signalRetryWaitStarted!: () => void
+      const retryWaitStarted = new Promise<void>(resolve => {
+        signalRetryWaitStarted = resolve
+      })
+      const abortFetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const method = String(init?.method || 'POST').toUpperCase()
+        if (method === 'DELETE') return new Response(null, { status: 202 })
+        if (method === 'GET') return new Response(null, { status: 405 })
+        const message = JSON.parse(String(init?.body || '{}'))
+        if (message.method) methods.push(message.method)
+        if (message.method === 'initialize') {
+          return Response.json({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: {
+              protocolVersion: '2025-06-18',
+              capabilities: { tools: {} },
+              serverInfo: { name: 'Abort-aware server', version: '1.0.0' },
+            },
+          }, { headers: { 'Mcp-Session-Id': 'abort-aware-session' } })
+        }
+        if (message.method === 'notifications/initialized') {
+          initializedAttempts += 1
+          if (initializedAttempts === 1) {
+            signalRetryWaitStarted()
+            return Response.json({
+              jsonrpc: '2.0',
+              id: null,
+              error: { code: -32000, message: 'Server not initialized' },
+            }, { status: 400 })
+          }
+          throw new Error('unexpected initialized retry after cancellation')
+        }
+        throw new Error(`unexpected MCP method: ${message.method}`)
+      }
+      const client = createMcpClient({
+        server: BUDA_MCP_SERVER_TEMPLATE,
+        key,
+        fetch: abortFetch as typeof fetch,
+      })
+      const controller = new AbortController()
+
+      const connecting = client.connect(controller.signal)
+      await retryWaitStarted
+      await new Promise<void>(resolve => setTimeout(resolve, 0))
+      controller.abort()
+
+      await expect(connecting).rejects.toMatchObject({ code: 'MCP_CANCELLED' })
+      expect(initializedAttempts).toBe(1)
+      expect(methods).toEqual(['initialize', 'notifications/initialized'])
+    })
   })
 
   test('uses the ordinary transport and initialized notification for a provider-neutral adapter', async () => {

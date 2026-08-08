@@ -41,11 +41,15 @@ type SdkClientLike = Pick<Client,
 
 type TransportLike = Pick<StreamableHTTPClientTransport, 'terminateSession'>
 
+export type McpStreamableHTTPTransportOptions = StreamableHTTPClientTransportOptions & {
+  readinessSignal?: AbortSignal
+}
+
 export type McpSdkFactory = {
   createClient: () => SdkClientLike
   createTransport: (
     url: URL,
-    options: StreamableHTTPClientTransportOptions,
+    options: McpStreamableHTTPTransportOptions,
     server?: McpServerRecord,
   ) => TransportLike
 }
@@ -278,6 +282,14 @@ function isInitializedReadinessFailure(error: unknown) {
 class InitializedReadinessRetryTransport extends StreamableHTTPClientTransport {
   private readonly retryAbortController = new AbortController()
 
+  private readonly readinessSignal?: AbortSignal
+
+  constructor(url: URL, options: McpStreamableHTTPTransportOptions) {
+    const { readinessSignal, ...transportOptions } = options
+    super(url, transportOptions)
+    this.readinessSignal = readinessSignal
+  }
+
   private retryCancellationError(signal: AbortSignal) {
     return signal.reason instanceof McpError
       ? signal.reason
@@ -292,15 +304,19 @@ class InitializedReadinessRetryTransport extends StreamableHTTPClientTransport {
 
   private waitForRetry(delayMs: number, requestSignal?: AbortSignal) {
     const closeSignal = this.retryAbortController.signal
-    if (requestSignal?.aborted) return Promise.reject(this.retryCancellationError(requestSignal))
-    if (closeSignal.aborted) return Promise.reject(this.retryCancellationError(closeSignal))
+    const watchedSignals: AbortSignal[] = []
+    for (const signal of [this.readinessSignal, requestSignal, closeSignal]) {
+      if (signal && !watchedSignals.includes(signal)) watchedSignals.push(signal)
+    }
+    const alreadyAborted = watchedSignals.find(signal => signal.aborted)
+    if (alreadyAborted) return Promise.reject(this.retryCancellationError(alreadyAborted))
     return new Promise<void>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | undefined
       let settled = false
+      const handlers: Array<{ signal: AbortSignal; handler: () => void }> = []
       const cleanup = () => {
         if (timer !== undefined) clearTimeout(timer)
-        requestSignal?.removeEventListener('abort', onRequestAbort)
-        closeSignal.removeEventListener('abort', onCloseAbort)
+        for (const { signal, handler } of handlers) signal.removeEventListener('abort', handler)
       }
       const settle = (callback: () => void) => {
         if (settled) return
@@ -308,11 +324,12 @@ class InitializedReadinessRetryTransport extends StreamableHTTPClientTransport {
         cleanup()
         callback()
       }
-      const onRequestAbort = () => settle(() => reject(this.retryCancellationError(requestSignal!)))
-      const onCloseAbort = () => settle(() => reject(this.retryCancellationError(closeSignal)))
+      for (const signal of watchedSignals) {
+        const handler = () => settle(() => reject(this.retryCancellationError(signal)))
+        handlers.push({ signal, handler })
+        signal.addEventListener('abort', handler, { once: true })
+      }
       timer = setTimeout(() => settle(resolve), delayMs)
-      requestSignal?.addEventListener('abort', onRequestAbort, { once: true })
-      closeSignal.addEventListener('abort', onCloseAbort, { once: true })
     })
   }
 
@@ -475,6 +492,7 @@ export class GenericMcpClient {
         this.options.fetch || globalThis.fetch.bind(globalThis),
         this.options.responseBudgets,
       ),
+      readinessSignal: signal,
     }, this.options.server)
     this.sdk = sdk
     this.transport = transport
