@@ -138,6 +138,49 @@ describe('MCP stage response contracts', () => {
     }).output).toEqual(payload)
   })
 
+  test('recovers a material repair payload missing only its final root brace', () => {
+    const payload = {
+      chapter_patch: { title: '雨夜旧码头', ending_hook: '仓门里传来第二个人的脚步声。' },
+      worldbuilding: [{ entity: '旧码头', change: '补充潮汐与仓门开启时间' }],
+      characters: [{ name: '李玄', current_location: '旧码头' }],
+      character_updates: [{ name: '李玄', change: '伤臂加重，暂时不能拔刀' }],
+      settings: [{ name: '旧码头', atmosphere: '暴雨后的咸腥与铁锈味' }],
+      chapter_setting_usage: [{ setting: '旧码头', usage: '李玄在仓门前发现新鲜脚印' }],
+      repair_summary: '补齐旧码头设定、李玄伤势与章末钩子的联动。',
+    }
+    const complete = JSON.stringify(payload)
+    const missingRootClosure = complete.slice(0, -1)
+
+    for (const content of [
+      missingRootClosure,
+      `\`\`\`json\n${missingRootClosure}\n\`\`\``,
+    ]) {
+      expect(validateMcpStageResponse('material_repair', 'material_repair_json', {
+        content,
+      }).output).toEqual(payload)
+    }
+  })
+
+  test('does not recover a quality review payload missing its final root brace', () => {
+    const complete = JSON.stringify({ score: 88, publishable: true, findings: [] })
+
+    expectInvalid('quality_review_json', complete.slice(0, -1))
+  })
+
+  test('fails closed for material repair JSON with damage beyond the root closure', () => {
+    for (const invalid of [
+      '{"chapter_patch":{"title":"雨夜旧码头',
+      '{"chapter_patch":{"title":"雨夜' + '\\',
+      '{"worldbuilding":[{"entity":"旧码头"}',
+      '{"worldbuilding":[{"entity":"旧码头"}}',
+      '{"chapter_patch":{"title":invalid}',
+    ]) expectInvalid('material_repair_json', invalid, 'material_repair')
+  })
+
+  test('still rejects a recovered material repair payload with an empty chapter patch', () => {
+    expectInvalid('material_repair_json', '{"chapter_patch":{}', 'material_repair')
+  })
+
   test('rejects forbidden and unknown top-level material repair fields', () => {
     for (const payload of [
       { chapter_patch: { title: '雨夜旧码头' }, chapter_text: '不应返回正文。' },

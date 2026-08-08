@@ -35,12 +35,74 @@ function ownDataValue(value: Record<string, unknown>, field: string) {
   }
 }
 
-function parseJsonObject(content: string) {
+function normalizedJsonCandidate(content: string) {
   const trimmed = content.trim()
-  const candidate = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)?.[1]?.trim() || trimmed
+  return trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)?.[1]?.trim() || trimmed
+}
+
+function parseJsonObjectCandidate(candidate: string) {
   const parsed: unknown = JSON.parse(candidate)
   if (!plainObject(parsed)) throw new TypeError('JSON object required')
   return parsed
+}
+
+function parseJsonObject(content: string) {
+  return parseJsonObjectCandidate(normalizedJsonCandidate(content))
+}
+
+function missingOnlyRootObjectClosure(candidate: string) {
+  const rootIndex = candidate.search(/\S/)
+  if (rootIndex < 0 || candidate[rootIndex] !== '{') return false
+
+  const stack: Array<{ opener: '{' | '['; index: number }> = []
+  let inString = false
+  let pendingEscape = false
+  for (let index = rootIndex; index < candidate.length; index += 1) {
+    const character = candidate[index]
+    if (inString) {
+      if (pendingEscape) {
+        pendingEscape = false
+      } else if (character === '\\') {
+        pendingEscape = true
+      } else if (character === '"') {
+        inString = false
+      }
+      continue
+    }
+    if (character === '"') {
+      inString = true
+      continue
+    }
+    if (character === '{' || character === '[') {
+      stack.push({ opener: character, index })
+      continue
+    }
+    if (character === '}' || character === ']') {
+      const expected = character === '}' ? '{' : '['
+      if (stack.at(-1)?.opener !== expected) return false
+      stack.pop()
+    }
+  }
+
+  return !inString
+    && !pendingEscape
+    && stack.length === 1
+    && stack[0]?.opener === '{'
+    && stack[0]?.index === rootIndex
+}
+
+function parseMaterialRepairJsonObject(content: string) {
+  try {
+    return parseJsonObject(content)
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error
+  }
+
+  const candidate = normalizedJsonCandidate(content)
+  if (!missingOnlyRootObjectClosure(candidate)) {
+    throw new SyntaxError('material repair root closure required')
+  }
+  return parseJsonObjectCandidate(`${candidate}}`)
 }
 
 function proseValue(content: string): unknown {
@@ -385,7 +447,7 @@ function nonEmptyPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 function validateMaterialRepair(content: string) {
-  const value = parseJsonObject(content)
+  const value = parseMaterialRepairJsonObject(content)
   if (Object.keys(value).some(field => !MATERIAL_REPAIR_FIELDS.has(field))) {
     throw new TypeError('unrecognized material repair field')
   }
