@@ -1107,7 +1107,26 @@ export function buildMaterialRepairTask(input: {
       scene_breakdown: 'object[]?',
       scene_list: 'object[]?',
       raw_payload: {
-        chapter_blueprint: 'object?',
+        chapter_blueprint: {
+          target_emotion: 'non-empty string',
+          opening_hook: 'non-empty string',
+          core_payoff: 'non-empty string',
+          content_outline: {
+            cause: 'non-empty string',
+            development: 'non-empty string',
+            turn: 'non-empty string',
+            climax: 'non-empty string',
+            ending: 'non-empty string',
+          },
+          plot_lines: {
+            mainline: 'non-empty string',
+            logic_line: 'non-empty string',
+          },
+          character_order: ['character name'],
+          beat_sequence: ['beat with function tag'],
+          cost_and_reward: 'non-empty string',
+          ending_contract: { next_chapter_pull: 'non-empty string' },
+        },
         pre_draft_brief: {
           state_tracking_contract: {
             source_readiness: [{ key: 'string', status: 'ready|pass|ok', evidence: 'non-empty string' }],
@@ -1135,6 +1154,7 @@ export function buildMaterialRepairTask(input: {
     '仅返回必须补齐的分区以及 repair_summary；不得返回未请求分区。',
     '仅允许输出 chapter_patch, worldbuilding, characters, character_updates, settings, chapter_setting_usage, repair_summary。',
     'chapter_setting_usage 使用已有 entity_id，或使用本次 settings 中唯一的 entity_name + entity_type。',
+    'chapter_blueprint 返回时必须使用输出合同中的标准 snake_case 字段；five_part_summary、multi_line_progression、character_appearance_order、event_function_tags、cost_benefit 和根级 unknowns 均不能替代标准字段。',
     '已有材料默认只读；不得用空字符串、空数组、空对象或 null 覆盖已有内容。',
     '不得输出正文、项目修改、来源配置、认证信息或远端身份；不得输出 Markdown 代码围栏或解释文字。',
     '【本次权威身份哈希】',
