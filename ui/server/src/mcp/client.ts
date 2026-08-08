@@ -1,7 +1,6 @@
 import { types } from 'node:util'
 import {
   Client,
-  isInitializedNotification,
   ProtocolError,
   SdkError,
   SdkErrorCode,
@@ -50,22 +49,9 @@ export type McpSdkFactory = {
   ) => TransportLike
 }
 
-class BudaStreamableHTTPClientTransport extends StreamableHTTPClientTransport {
-  async send(
-    message: Parameters<StreamableHTTPClientTransport['send']>[0],
-    options?: Parameters<StreamableHTTPClientTransport['send']>[1],
-  ) {
-    const messages = Array.isArray(message) ? message : [message]
-    if (messages.length && messages.every(candidate => isInitializedNotification(candidate))) return
-    return super.send(message, options)
-  }
-}
-
 const defaultSdkFactory: McpSdkFactory = {
   createClient: () => new Client({ name: 'mangaforge-studio', version: '1.0.0' }),
-  createTransport: (url, options, server) => server?.adapter_id === 'buda'
-    ? new BudaStreamableHTTPClientTransport(url, options)
-    : new StreamableHTTPClientTransport(url, options),
+  createTransport: (url, options) => new StreamableHTTPClientTransport(url, options),
 }
 
 export const MCP_RESPONSE_BYTE_LIMIT = 16 * 1024 * 1024

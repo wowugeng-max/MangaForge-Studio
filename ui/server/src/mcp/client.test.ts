@@ -385,8 +385,9 @@ describe('generic MCP client', () => {
     expect(cancels).toBe(1)
   })
 
-  test('connects to Buda without sending the initialized notification its MCP endpoint rejects', async () => {
+  test('uses the standard initialized handshake for consecutive Buda tool calls', async () => {
     const methods: string[] = []
+    let initialized = false
     const budaFetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
       const message = JSON.parse(String(init?.body || '{}'))
       methods.push(String(message.method || ''))
@@ -402,17 +403,30 @@ describe('generic MCP client', () => {
         }, { headers: { 'Mcp-Session-Id': 'buda-session' } })
       }
       if (message.method === 'notifications/initialized') {
-        return Response.json({
-          jsonrpc: '2.0',
-          id: null,
-          error: { code: -32000, message: 'Bad Request: Server not initialized' },
-        }, { status: 400 })
+        initialized = true
+        return new Response(null, { status: 202 })
+      }
+      if (message.method === 'tools/list' || message.method === 'tools/call') {
+        if (!initialized) {
+          return Response.json({
+            jsonrpc: '2.0',
+            id: null,
+            error: { code: -32000, message: 'Server not initialized' },
+          }, { status: 400 })
+        }
       }
       if (message.method === 'tools/list') {
         return Response.json({
           jsonrpc: '2.0',
           id: message.id,
           result: { tools: [{ name: 'api_claw_list_api_agents', inputSchema: { type: 'object' } }] },
+        })
+      }
+      if (message.method === 'tools/call') {
+        return Response.json({
+          jsonrpc: '2.0',
+          id: message.id,
+          result: { content: [{ type: 'text', text: 'agents' }] },
         })
       }
       throw new Error(`unexpected MCP method: ${message.method}`)
@@ -424,9 +438,19 @@ describe('generic MCP client', () => {
     })
 
     await client.connect()
+    await client.callTool('api_claw_list_api_agents', {}, { operation: 'read_safe' })
+    await client.callTool('api_claw_list_api_agents', {}, { operation: 'read_safe' })
 
     expect(client.state).toBe('Ready')
-    expect(methods).toEqual(['initialize', 'tools/list'])
+    expect((client as any).transport?.constructor).toBe(StreamableHTTPClientTransport)
+    expect(methods.filter(Boolean)).toEqual([
+      'initialize',
+      'notifications/initialized',
+      'tools/list',
+      'tools/call',
+      'tools/call',
+    ])
+    await client.close()
   })
 
   test('uses the ordinary transport and initialized notification for a provider-neutral adapter', async () => {
