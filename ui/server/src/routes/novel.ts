@@ -28,6 +28,7 @@ import { registerNovelTruthRoutes } from './novel-truth-routes'
 import { createNovelWritingService } from './novel-writing-service'
 import type { McpRuntime } from '../mcp/runtime'
 import { ChapterSourceLeaseRegistry } from '../novel-writing-service/generation-source/chapter-source-lease'
+import { createChapterAuthorityFence } from '../novel-writing-service/generation-source/create-generation-source'
 
 export function registerNovelRoutes(app: Express, getWorkspace: () => string, options: { mcpRuntime?: McpRuntime } = {}) {
   registerNovelCoreRoutes(app, getWorkspace)
@@ -40,6 +41,10 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string, op
   const dashboardService = createNovelDashboardService()
   const incubatorService = createNovelOriginalIncubatorService()
   const chapterSourceLeases = new ChapterSourceLeaseRegistry()
+  const withChapterAuthorityFence = createChapterAuthorityFence({
+    chapterSourceLeases,
+    readProject: getProject,
+  })
   const writingService = createNovelWritingService({
     getProject,
     production: productionService,
@@ -56,12 +61,14 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string, op
   registerNovelSettingRoutes(app, {
     getWorkspace,
     getProject,
+    withChapterAuthorityFence,
     buildChapterContextPackage: writingService.buildChapterContextPackage,
   })
 
   registerNovelChapterContextRoutes(app, {
     getWorkspace,
     getProject,
+    withChapterAuthorityFence,
     buildChapterContextPackage: writingService.buildChapterContextPackage,
     repairChapterMaterials: writingService.repairChapterMaterials,
   })

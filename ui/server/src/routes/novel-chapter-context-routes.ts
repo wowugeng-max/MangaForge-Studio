@@ -11,13 +11,17 @@ import {
   updateNovelCharacter,
 } from '../novel'
 import { executeNovelAgent } from '../llm'
+import type { ChapterAuthorityFence } from '../novel-writing-service/generation-source/create-generation-source'
 import { isChapterTaskId } from '../novel-writing-service/generation-source/types'
 import {
-  chapterGenerationSourceFingerprint,
   resolveChapterGenerationSource,
 } from '../novel-writing-service/generation-source/source-config'
 import { asArray, getNovelPayload } from './novel-route-utils'
 import { applyStyleSampleStrategyAuthorAction, buildChapterPreDraftBrief } from './novel-writing-service'
+import {
+  projectChapterAuthorityRouteError,
+  resolveChapterAuthorityRequestFingerprint,
+} from './chapter-authority-route-fence'
 
 type ChapterContextRoutesContext = {
   getWorkspace: () => string
@@ -40,6 +44,8 @@ type ChapterContextRoutesContext = {
     repairKeys?: string[]
     signal?: AbortSignal
   }) => Promise<any>
+  withChapterAuthorityFence: ChapterAuthorityFence
+  executeNovelAgent?: typeof executeNovelAgent
 }
 
 const MATERIAL_REPAIR_KEY_COUNT_LIMIT = 64
@@ -232,6 +238,7 @@ export {
 } from './novel-chapter-context-helpers'
 
 export function registerNovelChapterContextRoutes(app: Express, ctx: ChapterContextRoutesContext) {
+  const runNovelAgent = ctx.executeNovelAgent || executeNovelAgent
   app.get('/api/novel/chapters/:chapterId/preflight', async (req, res) => {
     try {
       const loaded = await loadChapterContext(ctx, Number(req.query.project_id || 0), Number(req.params.chapterId))
@@ -286,13 +293,14 @@ export function registerNovelChapterContextRoutes(app: Express, ctx: ChapterCont
       if (!project) return res.status(404).json({ error: 'project not found' })
       sourceDispatchBoundary = 'resolving'
       const chapterGenerationSource = resolveChapterGenerationSource(project)
+      const expectedAuthorityFingerprint = resolveChapterAuthorityRequestFingerprint(req, project)
       if (chapterGenerationSource.active === 'mcp') {
         sourceDispatchBoundary = 'mcp'
         const result = await ctx.repairChapterMaterials({
           activeWorkspace,
           projectId,
           chapterId,
-          expectedAuthorityFingerprint: chapterGenerationSourceFingerprint(chapterGenerationSource),
+          expectedAuthorityFingerprint,
           repairKeys: normalizeMaterialRepairKeys(ownSafeDataValue(req.body, 'repair_keys')),
         })
         return res.json({
@@ -301,6 +309,11 @@ export function registerNovelChapterContextRoutes(app: Express, ctx: ChapterCont
         })
       }
       sourceDispatchBoundary = 'legacy'
+      const outcome: { status?: number; body: any } = await ctx.withChapterAuthorityFence({
+        activeWorkspace,
+        projectId,
+        expectedAuthorityFingerprint,
+        operation: async () => {
       const [chapters, worldbuilding, characters, outlines, reviews] = await Promise.all([
         listNovelChapters(activeWorkspace, projectId),
         listNovelWorldbuilding(activeWorkspace, projectId),
@@ -309,7 +322,7 @@ export function registerNovelChapterContextRoutes(app: Express, ctx: ChapterCont
         listNovelReviews(activeWorkspace, projectId),
       ])
       const chapter = chapters.find(item => item.id === chapterId)
-      if (!chapter) return res.status(404).json({ error: 'chapter not found' })
+      if (!chapter) return { status: 404, body: { error: 'chapter not found' } }
       const contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
       const checks = Array.isArray(contextPackage?.preflight?.checks) ? contextPackage.preflight.checks : []
       const missingKeys = checks.filter((item: any) => !item.ok).map((item: any) => item.key)
@@ -317,7 +330,7 @@ export function registerNovelChapterContextRoutes(app: Express, ctx: ChapterCont
       const needsCharacterState = missingKeys.includes('character_state')
       const needsForbiddenRepeats = missingKeys.includes('no_repeat') || !asArray(chapter.raw_payload?.forbidden_repeats).length
       if (!needsCharacters && !needsCharacterState && !needsForbiddenRepeats) {
-        return res.json({ ok: true, applied: [], skipped: true, context_package: contextPackage })
+        return { body: { ok: true, applied: [], skipped: true, context_package: contextPackage } }
       }
 
       let payload: any = {}
@@ -385,7 +398,7 @@ export function registerNovelChapterContextRoutes(app: Express, ctx: ChapterCont
           }, null, 2).slice(0, 6500),
         ].join('\n')
         try {
-          const result = await executeNovelAgent('outline-agent', project, { task: prompt }, {
+          const result = await runNovelAgent('outline-agent', project, { task: prompt }, {
             activeWorkspace,
             modelId,
             maxTokens: 2200,
@@ -489,7 +502,7 @@ export function registerNovelChapterContextRoutes(app: Express, ctx: ChapterCont
         Object.assign(chapter, updated || chapter)
       }
       const refreshed = await loadChapterContext(ctx, projectId, chapter.id)
-      res.json({
+      return { body: {
         ok: true,
         applied,
         payload,
@@ -497,8 +510,14 @@ export function registerNovelChapterContextRoutes(app: Express, ctx: ChapterCont
         context_package: 'error' in refreshed ? null : refreshed.contextPackage,
         preflight: 'error' in refreshed ? null : refreshed.contextPackage.preflight,
         material_score: 'error' in refreshed ? null : buildMaterialScore(refreshed.contextPackage),
+      } }
+        },
       })
+      if (outcome.status) return res.status(outcome.status).json(outcome.body)
+      return res.json(outcome.body)
     } catch (error) {
+      const authorityProjection = projectChapterAuthorityRouteError(error)
+      if (authorityProjection) return res.status(authorityProjection.status).json(authorityProjection.body)
       if (sourceDispatchBoundary === 'legacy') {
         return res.status(500).json({ error: String(error) })
       }

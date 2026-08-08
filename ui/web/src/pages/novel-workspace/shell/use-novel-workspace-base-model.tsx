@@ -67,6 +67,7 @@ export function resolveChapterSourceLocallyBusy(input: {
   projectId: number
   localTaskProjectId: number
   sourceAuthorityLoading: boolean
+  chapterInvocationPending: boolean
   generatingProse: boolean
   stepProseLoading: boolean
   proseQualityLoading: boolean
@@ -88,7 +89,7 @@ export function resolveChapterSourceLocallyBusy(input: {
         || input.editorReportLoading
         || input.commercialToolLoading === 'storyStateSync',
     )
-  return input.sourceAuthorityLoading || localTaskBusy || activeEditorRevision
+  return input.sourceAuthorityLoading || input.chapterInvocationPending || localTaskBusy || activeEditorRevision
 }
 
 export type EditorRevisionReconciliationState = {
@@ -447,6 +448,10 @@ export function useNovelWorkspaceBaseModel() {
     getChapterGenerationSourceAuthority,
     setChapterGenerationSourceAuthority,
     chapterSourcePendingState,
+    chapterInvocationPending,
+    claimChapterInvocation,
+    chapterInvocationOwnerIsActive,
+    releaseChapterInvocation,
     getChapterSourceMutationPending,
     setChapterSourceMutationPending,
     beginChapterSourceOperation,
@@ -637,6 +642,7 @@ export function useNovelWorkspaceBaseModel() {
     projectId,
     localTaskProjectId: chapterSourceLocalTaskProjectIdRef.current,
     sourceAuthorityLoading: loading,
+    chapterInvocationPending,
     generatingProse,
     stepProseLoading,
     proseQualityLoading,
@@ -748,6 +754,9 @@ export function useNovelWorkspaceBaseModel() {
     backupImportText,
     getChapterGenerationSourceAuthority,
     getChapterSourceMutationPending,
+    claimChapterInvocation,
+    chapterInvocationOwnerIsActive,
+    releaseChapterInvocation,
     beginChapterSourceOperation,
     assertChapterSourceOperationCurrent,
     chapterHasProse,
@@ -976,6 +985,7 @@ export function useNovelWorkspaceBaseModel() {
     chapterDrawerOpen,
     chapterGroupExecutingId,
     chapterGenerationSourceAuthority,
+    chapterInvocationPending,
     chapterSourceLocallyBusy,
     chapterSearch,
     chapterSortMode,
@@ -1176,6 +1186,9 @@ export function useNovelWorkspaceBaseModel() {
     stepProseLoading,
     beginChapterSourceOperation,
     assertChapterSourceOperationCurrent,
+    claimChapterInvocation,
+    chapterInvocationOwnerIsActive,
+    releaseChapterInvocation,
     storyAssetsFocusDiscoveredToken,
     storyStateForm,
     storyStateOpen,

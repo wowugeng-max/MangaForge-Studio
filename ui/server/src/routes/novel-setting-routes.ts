@@ -20,6 +20,10 @@ import {
 import { executeNovelAgent } from '../llm'
 import { formatReviewIssueForStorage, getNovelPayload, parseJsonLikePayload, safeJsonStringify } from './novel-route-utils'
 import { buildSettingRelationshipGraph } from './novel-setting-relationship-graph'
+import {
+  projectChapterAuthorityRouteError,
+  resolveChapterAuthorityRequestFingerprint,
+} from './chapter-authority-route-fence'
 
 import type { NovelSettingRoutesContext } from './novel-setting-helpers'
 
@@ -61,6 +65,7 @@ import {
 } from './novel-setting-helpers'
 
 export function registerNovelSettingRoutes(app: Express, ctx: NovelSettingRoutesContext) {
+  const runNovelAgent = ctx.executeNovelAgent || executeNovelAgent
   app.get('/api/novel/projects/:id/settings/relationship-graph', async (req, res) => {
     const activeWorkspace = ctx.getWorkspace()
     const projectId = Number(req.params.id)
@@ -181,38 +186,56 @@ export function registerNovelSettingRoutes(app: Express, ctx: NovelSettingRoutes
   })
 
   app.post('/api/novel/chapters/:chapterId/settings-usage/suggest', async (req, res) => {
-    const activeWorkspace = ctx.getWorkspace()
-    const projectId = Number(req.body?.project_id || req.query.project_id || 0)
-    const chapterId = Number(req.params.chapterId)
-    const project = await ctx.getProject(activeWorkspace, projectId)
-    if (!project) return res.status(404).json({ error: 'project not found' })
-    const [chapters, settings] = await Promise.all([
-      listNovelChapters(activeWorkspace, projectId),
-      listNovelSettingEntities(activeWorkspace, projectId),
-    ])
-    const chapter = chapters.find(item => item.id === chapterId)
-    if (!chapter) return res.status(404).json({ error: 'chapter not found' })
-    let suggested = heuristicUsageSuggestions(chapter, settings)
-    const useModel = Number(req.body?.model_id || 0) > 0 && req.body?.use_model !== false
-    if (useModel && settings.length > 0) {
-      const prompt = [
-        '任务：为当前章节自动匹配设定工坊调用。只输出 JSON，不要解释。',
-        '你要决定本章哪些设定必须使用、哪些允许使用、哪些禁止揭露，并给出揭示级别和预期状态变化。',
-        'usage_type 只能是 required/allowed/forbidden；reveal_level 只能是 none/hint/partial/full。',
-        '原则：本章目标、冲突、章末钩子中明确需要的设定标 required；剧透、隐藏真相或不该提前暴露的设定标 forbidden 或 hint；无关设定不要输出。',
-        JSON.stringify({ chapter, settings: settings.slice(0, 180).map(item => ({ id: item.id, type: item.entity_type, name: item.name, summary: item.summary, visibility: item.visibility, constraints: item.constraints_json, state: item.state_json })) }, null, 2).slice(0, 18000),
-        '输出字段：usage(array)，每项包含 entity_id, usage_type, required, allowed, forbidden, reveal_level, expected_state_change。',
-      ].join('\n')
-      const result = await executeNovelAgent('outline-agent', project, { task: prompt }, { activeWorkspace, modelId: String(req.body.model_id), maxTokens: 3500, temperature: 0.2, skipMemory: true })
-      const payload = parseJsonLikePayload((result as any).output || (result as any).content || '') || {}
-      const modelUsage = normalizeSettingUsagePayload(payload)
-      if (modelUsage.length > 0) suggested = modelUsage
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const projectId = Number(req.body?.project_id || req.query.project_id || 0)
+      const chapterId = Number(req.params.chapterId)
+      const useModel = Number(req.body?.model_id || 0) > 0 && req.body?.use_model !== false
+      const project = await ctx.getProject(activeWorkspace, projectId)
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const operation = async () => {
+        const [chapters, settings] = await Promise.all([
+          listNovelChapters(activeWorkspace, projectId),
+          listNovelSettingEntities(activeWorkspace, projectId),
+        ])
+        const chapter = chapters.find(item => item.id === chapterId)
+        if (!chapter) return { status: 404, body: { error: 'chapter not found' } }
+        let suggested = heuristicUsageSuggestions(chapter, settings)
+        if (useModel && settings.length > 0) {
+          const prompt = [
+            '任务：为当前章节自动匹配设定工坊调用。只输出 JSON，不要解释。',
+            '你要决定本章哪些设定必须使用、哪些允许使用、哪些禁止揭露，并给出揭示级别和预期状态变化。',
+            'usage_type 只能是 required/allowed/forbidden；reveal_level 只能是 none/hint/partial/full。',
+            '原则：本章目标、冲突、章末钩子中明确需要的设定标 required；剧透、隐藏真相或不该提前暴露的设定标 forbidden 或 hint；无关设定不要输出。',
+            JSON.stringify({ chapter, settings: settings.slice(0, 180).map(item => ({ id: item.id, type: item.entity_type, name: item.name, summary: item.summary, visibility: item.visibility, constraints: item.constraints_json, state: item.state_json })) }, null, 2).slice(0, 18000),
+            '输出字段：usage(array)，每项包含 entity_id, usage_type, required, allowed, forbidden, reveal_level, expected_state_change。',
+          ].join('\n')
+          const result = await runNovelAgent('outline-agent', project, { task: prompt }, { activeWorkspace, modelId: String(req.body.model_id), maxTokens: 3500, temperature: 0.2, skipMemory: true })
+          const payload = parseJsonLikePayload((result as any).output || (result as any).content || '') || {}
+          const modelUsage = normalizeSettingUsagePayload(payload)
+          if (modelUsage.length > 0) suggested = modelUsage
+        }
+        const apply = req.body?.apply !== false
+        const records = apply
+          ? await replaceNovelChapterSettingUsage(activeWorkspace, projectId, chapterId, suggested as any)
+          : suggested
+        return { body: { ok: true, applied: apply, usage: records, total: records.length } }
+      }
+      const outcome: { status?: number; body: any } = useModel
+        ? await ctx.withChapterAuthorityFence({
+            activeWorkspace,
+            projectId,
+            expectedAuthorityFingerprint: resolveChapterAuthorityRequestFingerprint(req, project),
+            operation,
+          })
+        : await operation()
+      if (outcome.status) return res.status(outcome.status).json(outcome.body)
+      return res.json(outcome.body)
+    } catch (error) {
+      const projected = projectChapterAuthorityRouteError(error)
+      if (projected) return res.status(projected.status).json(projected.body)
+      return res.status(500).json({ error: '设定调用建议失败' })
     }
-    const apply = req.body?.apply !== false
-    const records = apply
-      ? await replaceNovelChapterSettingUsage(activeWorkspace, projectId, chapterId, suggested as any)
-      : suggested
-    res.json({ ok: true, applied: apply, usage: records, total: records.length })
   })
 
   app.post('/api/novel/chapters/:chapterId/storylines/suggest', async (req, res) => {
@@ -258,36 +281,53 @@ export function registerNovelSettingRoutes(app: Express, ctx: NovelSettingRoutes
   })
 
   app.post('/api/novel/projects/:id/settings/incubate-from-project', async (req, res) => {
-    const activeWorkspace = ctx.getWorkspace()
-    const projectId = Number(req.params.id)
-    const project = await ctx.getProject(activeWorkspace, projectId)
-    if (!project) return res.status(404).json({ error: 'project not found' })
-    const [worldbuilding, characters, outlines, existing] = await Promise.all([
-      listNovelWorldbuilding(activeWorkspace, projectId),
-      listNovelCharacters(activeWorkspace, projectId),
-      listNovelOutlines(activeWorkspace, projectId),
-      listNovelSettingEntities(activeWorkspace, projectId),
-    ])
-    const existingKeys = new Set(existing.map(item => `${item.entity_type}:${item.name}`))
-    const localSeeds = seedSettingsFromLocalData(worldbuilding, characters, outlines, projectId).filter(item => !existingKeys.has(`${item.entity_type}:${item.name}`))
-    const useModel = req.body?.use_model !== false && Number(req.body?.model_id || 0) > 0
-    let modelSeeds: any[] = []
-    if (useModel) {
-      const result = await executeNovelAgent('setting-agent', project, {
-        task: buildSettingAgentPrompt(project, worldbuilding, characters, outlines, existing),
-      }, { activeWorkspace, modelId: String(req.body.model_id), maxTokens: 7000, temperature: 0.25, skipMemory: true })
-      modelSeeds = normalizeSettingAgentPayload(getNovelPayload(result), projectId)
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const projectId = Number(req.params.id)
+      const useModel = req.body?.use_model !== false && Number(req.body?.model_id || 0) > 0
+      const project = await ctx.getProject(activeWorkspace, projectId)
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const operation = async () => {
+        const [worldbuilding, characters, outlines, existing] = await Promise.all([
+          listNovelWorldbuilding(activeWorkspace, projectId),
+          listNovelCharacters(activeWorkspace, projectId),
+          listNovelOutlines(activeWorkspace, projectId),
+          listNovelSettingEntities(activeWorkspace, projectId),
+        ])
+        const existingKeys = new Set(existing.map(item => `${item.entity_type}:${item.name}`))
+        const localSeeds = seedSettingsFromLocalData(worldbuilding, characters, outlines, projectId).filter(item => !existingKeys.has(`${item.entity_type}:${item.name}`))
+        let modelSeeds: any[] = []
+        if (useModel) {
+          const result = await runNovelAgent('setting-agent', project, {
+            task: buildSettingAgentPrompt(project, worldbuilding, characters, outlines, existing),
+          }, { activeWorkspace, modelId: String(req.body.model_id), maxTokens: 7000, temperature: 0.25, skipMemory: true })
+          modelSeeds = normalizeSettingAgentPayload(getNovelPayload(result), projectId)
+        }
+        const candidates = [...localSeeds, ...modelSeeds].filter(item => item.name)
+        const created: any[] = []
+        const seen = new Set(existingKeys)
+        for (const seed of candidates) {
+          const key = `${seed.entity_type}:${seed.name}`
+          if (seen.has(key)) continue
+          seen.add(key)
+          created.push(await createNovelSettingEntity(activeWorkspace, seed as any))
+        }
+        return { ok: true, created, skipped_existing: existing.length, total: created.length }
+      }
+      const body = useModel
+        ? await ctx.withChapterAuthorityFence({
+            activeWorkspace,
+            projectId,
+            expectedAuthorityFingerprint: resolveChapterAuthorityRequestFingerprint(req, project),
+            operation,
+          })
+        : await operation()
+      return res.json(body)
+    } catch (error) {
+      const projected = projectChapterAuthorityRouteError(error)
+      if (projected) return res.status(projected.status).json(projected.body)
+      return res.status(500).json({ error: '设定工坊孵化失败' })
     }
-    const candidates = [...localSeeds, ...modelSeeds].filter(item => item.name)
-    const created: any[] = []
-    const seen = new Set(existingKeys)
-    for (const seed of candidates) {
-      const key = `${seed.entity_type}:${seed.name}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      created.push(await createNovelSettingEntity(activeWorkspace, seed as any))
-    }
-    res.json({ ok: true, created, skipped_existing: existing.length, total: created.length })
   })
 
   app.post('/api/novel/projects/:id/storylines/incubate', async (req, res) => {

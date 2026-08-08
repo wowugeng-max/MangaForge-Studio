@@ -571,6 +571,7 @@ describe('commercial writing workspace UI shell a a', () => {
       projectId: 1,
       localTaskProjectId: 1,
       sourceAuthorityLoading: false,
+      chapterInvocationPending: false,
       generatingProse: false,
       stepProseLoading: false,
       proseQualityLoading: false,
@@ -584,6 +585,7 @@ describe('commercial writing workspace UI shell a a', () => {
     expect(module.resolveChapterSourceLocallyBusy({ ...ordinary, proseQualityLoading: true })).toBe(true)
     expect(module.resolveChapterSourceLocallyBusy({ ...ordinary, commercialToolLoading: 'storyStateSync' })).toBe(true)
     expect(module.resolveChapterSourceLocallyBusy({ ...ordinary, sourceAuthorityLoading: true })).toBe(true)
+    expect(module.resolveChapterSourceLocallyBusy({ ...ordinary, chapterInvocationPending: true })).toBe(true)
     expect(module.resolveChapterSourceLocallyBusy({
       ...ordinary,
       localTaskProjectId: 2,

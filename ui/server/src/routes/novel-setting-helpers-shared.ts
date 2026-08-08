@@ -15,6 +15,7 @@ import {
   updateNovelSettingEntity,
 } from '../novel'
 import { executeNovelAgent } from '../llm'
+import type { ChapterAuthorityFence } from '../novel-writing-service/generation-source/create-generation-source'
 import { formatReviewIssueForStorage, getNovelPayload, parseJsonLikePayload, safeJsonStringify } from './novel-route-utils'
 import { buildSettingRelationshipGraph } from './novel-setting-relationship-graph'
 
@@ -22,6 +23,8 @@ export type NovelSettingRoutesContext = {
   getWorkspace: () => string
   getProject: (workspace: string, id: number) => Promise<any>
   buildChapterContextPackage: (workspace: string, project: any, chapter: any, chapters: any[], worldbuilding: any[], characters: any[], outlines: any[], reviews?: any[]) => Promise<any>
+  withChapterAuthorityFence: ChapterAuthorityFence
+  executeNovelAgent?: typeof executeNovelAgent
 }
 
 export const STORYLINE_TYPES = ['mainline', 'subplot', 'character_arc', 'relationship_arc', 'faction_arc', 'foreshadowing_arc']
@@ -128,4 +131,3 @@ export function isRelationshipRepairPatchTypeSafe(patchType: string, source: any
   if (patchType === 'payload_related_foreshadowing') return STORYLINE_TYPES.includes(sourceType) && targetType === 'foreshadowing'
   return false
 }
-

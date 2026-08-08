@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtemp } from 'fs/promises'
+import { mkdtemp, rm } from 'fs/promises'
 import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -20,9 +20,41 @@ import {
   createNovelChapter,
   createNovelProject,
   createNovelSettingEntity,
+  getNovelProject,
+  listNovelChapterSettingUsage,
   listNovelCharacters,
   listNovelSettingEntities,
 } from '../novel'
+import { ChapterSourceLeaseRegistry } from '../novel-writing-service/generation-source/chapter-source-lease'
+import { createChapterAuthorityFence } from '../novel-writing-service/generation-source/create-generation-source'
+
+function settingRouteHarness() {
+  const handlers = new Map<string, any>()
+  const app = {
+    get: (path: string, handler: any) => { handlers.set(`GET ${path}`, handler); return app },
+    post: (path: string, handler: any) => { handlers.set(`POST ${path}`, handler); return app },
+    put: (path: string, handler: any) => { handlers.set(`PUT ${path}`, handler); return app },
+    delete: (path: string, handler: any) => { handlers.set(`DELETE ${path}`, handler); return app },
+  }
+  return { app, handlers }
+}
+
+async function callSettingRoute(handler: any, req: any) {
+  const res: any = {
+    statusCode: 200,
+    body: null,
+    status(code: number) { this.statusCode = code; return this },
+    json(body: any) { this.body = body; return this },
+  }
+  await handler(req, res)
+  return res
+}
+
+function settingDeferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(resolvePromise => { resolve = resolvePromise })
+  return { promise, resolve }
+}
 
 
 function settingHelpersSource() {
@@ -427,6 +459,133 @@ describe('setting agent workflow', () => {
         expected_state_change: { current_state: '进入第二阶段' },
       }),
     ])
+  })
+})
+
+describe('setting model route authority fence', () => {
+  test('legacy no-header model suggestion holds the shared lease and rejects a duplicate before provider re-entry', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-setting-suggest-fence-'))
+    try {
+      const project = await createNovelProject(workspace, { title: '设定调用围栏' })
+      const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章' })
+      const setting = await createNovelSettingEntity(workspace, {
+        project_id: project.id,
+        entity_type: 'rule',
+        name: '夜禁规则',
+        summary: '钟响后不得开门',
+      } as any)
+      const leases = new ChapterSourceLeaseRegistry()
+      const providerStarted = settingDeferred<void>()
+      const providerResponse = settingDeferred<any>()
+      let providerCalls = 0
+      const { app, handlers } = settingRouteHarness()
+      registerNovelSettingRoutes(app as any, {
+        getWorkspace: () => workspace,
+        getProject: getNovelProject,
+        withChapterAuthorityFence: createChapterAuthorityFence({ chapterSourceLeases: leases, readProject: getNovelProject }),
+        executeNovelAgent: async () => {
+          providerCalls += 1
+          providerStarted.resolve()
+          return providerResponse.promise
+        },
+        buildChapterContextPackage: async () => ({}),
+      } as any)
+      const handler = handlers.get('POST /api/novel/chapters/:chapterId/settings-usage/suggest')
+      const request = {
+        params: { chapterId: String(chapter.id) },
+        query: {},
+        headers: {},
+        body: { project_id: project.id, model_id: 19, use_model: true, apply: true },
+      }
+      const first = callSettingRoute(handler, request)
+      const started = await Promise.race([
+        providerStarted.promise.then(() => true),
+        new Promise<boolean>(resolve => setTimeout(() => resolve(false), 40)),
+      ])
+      if (!started) {
+        await first.catch(() => undefined)
+        expect(started).toBe(true)
+        return
+      }
+
+      expect(leases.isActive(workspace, project.id)).toBe(true)
+      const duplicate = await callSettingRoute(handler, request)
+      expect(duplicate.statusCode).toBe(409)
+      expect(duplicate.body).toMatchObject({ error_code: 'GENERATION_SOURCE_BUSY' })
+      expect(providerCalls).toBe(1)
+
+      providerResponse.resolve({
+        output: JSON.stringify({
+          usage: [{ entity_id: setting.id, usage_type: 'required', required: true, allowed: true, forbidden: false, reveal_level: 'hint' }],
+        }),
+      })
+      const completed = await first
+      expect(completed.statusCode).toBe(200)
+      expect(await listNovelChapterSettingUsage(workspace, project.id, chapter.id)).toHaveLength(1)
+      expect(leases.isActive(workspace, project.id)).toBe(false)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('both model setting routes reject stale and malformed headers before provider or writes', async () => {
+    const routes = [
+      {
+        key: 'POST /api/novel/projects/:id/settings/incubate-from-project',
+        params: (projectId: number) => ({ id: String(projectId) }),
+        body: (projectId: number) => ({ project_id: projectId, model_id: 19, use_model: true }),
+      },
+      {
+        key: 'POST /api/novel/chapters/:chapterId/settings-usage/suggest',
+        params: (_projectId: number, chapterId: number) => ({ chapterId: String(chapterId) }),
+        body: (projectId: number) => ({ project_id: projectId, model_id: 19, use_model: true, apply: true }),
+      },
+    ]
+    for (const header of [`sha256:${'f'.repeat(64)}`, `sha256:${'A'.repeat(64)}`]) {
+      for (const route of routes) {
+        const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-setting-header-fence-'))
+        try {
+          const project = await createNovelProject(workspace, { title: '设定路由指纹围栏' })
+          const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 1, title: '第一章' })
+          await createNovelSettingEntity(workspace, {
+            project_id: project.id,
+            entity_type: 'rule',
+            name: '原有规则',
+            summary: '不可越界',
+          } as any)
+          const beforeSettings = await listNovelSettingEntities(workspace, project.id)
+          let providerCalls = 0
+          const leases = new ChapterSourceLeaseRegistry()
+          const { app, handlers } = settingRouteHarness()
+          registerNovelSettingRoutes(app as any, {
+            getWorkspace: () => workspace,
+            getProject: getNovelProject,
+            withChapterAuthorityFence: createChapterAuthorityFence({ chapterSourceLeases: leases, readProject: getNovelProject }),
+            executeNovelAgent: async () => { providerCalls += 1; return { output: '{}' } },
+            buildChapterContextPackage: async () => ({}),
+          } as any)
+          let response: any
+          try {
+            response = await callSettingRoute(handlers.get(route.key), {
+              params: route.params(project.id, chapter.id),
+              query: {},
+              headers: { 'x-chapter-generation-source-fingerprint': header },
+              body: route.body(project.id),
+            })
+          } catch {
+            response = { statusCode: 500, body: null }
+          }
+
+          expect(response.statusCode).toBe(409)
+          expect(response.body).toMatchObject({ error_code: 'GENERATION_SOURCE_CHANGED' })
+          expect(providerCalls).toBe(0)
+          expect(await listNovelSettingEntities(workspace, project.id)).toEqual(beforeSettings)
+          expect(await listNovelChapterSettingUsage(workspace, project.id, chapter.id)).toHaveLength(0)
+        } finally {
+          await rm(workspace, { recursive: true, force: true })
+        }
+      }
+    }
   })
 })
 

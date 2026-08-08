@@ -389,6 +389,52 @@ describe('novel workspace authoritative chapter source lifecycle', () => {
     expect(() => (workspace.harness.value as any).setChapterSourceMutationPending(false, staleToken)).toThrow()
   })
 
+  test('claims exactly one live invocation owner, prioritizes source mutation, and releases by identity', async () => {
+    installWorkspaceApi(new Map([[1, chapterSourceView(1, 217)]]))
+    const workspace = mountWorkspace(1)
+    await flushPromises()
+    const value = workspace.harness.value as any
+
+    const first = value.claimChapterInvocation()
+    expect(first.status).toBe('claimed')
+    expect(value.getChapterInvocationPending()).toBe(true)
+    const duplicate = value.claimChapterInvocation()
+    expect(duplicate).toEqual({ status: 'invocation_pending' })
+    expect(() => value.assertChapterSourceOperationCurrent(first.owner.token)).not.toThrow()
+
+    const mutationToken = value.beginChapterSourceOperation()
+    value.setChapterSourceMutationPending(true, mutationToken)
+    expect(value.claimChapterInvocation()).toEqual({ status: 'source_mutation_pending' })
+    expect(() => value.assertChapterSourceOperationCurrent(mutationToken)).not.toThrow()
+    value.setChapterSourceMutationPending(false, mutationToken)
+
+    const successor = value.claimChapterInvocation()
+    expect(successor.status).toBe('claimed')
+    expect(value.releaseChapterInvocation(first.owner)).toBe(false)
+    expect(value.chapterInvocationOwnerIsActive(successor.owner)).toBe(true)
+    expect(value.releaseChapterInvocation(successor.owner)).toBe(true)
+    expect(value.getChapterInvocationPending()).toBe(false)
+  })
+
+  test('keeps the same invocation owner live while its own workspace reload advances the source token', async () => {
+    installWorkspaceApi(new Map([[1, chapterSourceView(1, 217)]]))
+    const workspace = mountWorkspace(1)
+    await flushPromises()
+    const value = workspace.harness.value as any
+    const claimed = value.claimChapterInvocation()
+    expect(claimed.status).toBe('claimed')
+    const originalToken = claimed.owner.token
+
+    const reloadToken = await value.loadProjectModules()
+    await flushPromises()
+
+    expect(reloadToken).toBeDefined()
+    expect(claimed.owner.token).toBe(reloadToken)
+    expect(value.chapterInvocationOwnerIsActive(claimed.owner)).toBe(true)
+    expect(() => value.assertChapterSourceOperationCurrent(originalToken)).toThrow()
+    expect(value.releaseChapterInvocation(claimed.owner)).toBe(true)
+  })
+
   test('commits successful modules and ignores a stale initial source rejection after a mutation begins', async () => {
     const source = deferred<unknown>()
     installWorkspaceApi(new Map([[1, source.promise]]))

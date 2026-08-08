@@ -16,10 +16,13 @@ import {
   assertChapterInvocationAuthorityCurrent,
   assertChapterInvocationFenceCurrent,
   beginChapterInvocationFence,
+  CHAPTER_GENERATION_SOURCE_FINGERPRINT_HEADER,
+  CHAPTER_INVOCATION_PENDING_MESSAGE,
   CHAPTER_INVOCATION_SOURCE_CHANGED_MESSAGE,
   CHAPTER_SOURCE_MUTATION_PENDING_MESSAGE,
   isStaleChapterSourceOperationError,
   type ChapterInvocationFence,
+  type ChapterInvocationOwner,
   type ChapterSourceAuthorityState,
   type ChapterSourceOperationToken,
 } from '../chapterGenerationSourceModel'
@@ -40,12 +43,13 @@ export type PreflightHandlerDeps = {
   apiClient: any
   applyStyleSampleActionForChapter: any
   assertChapterSourceOperationCurrent: (token: ChapterSourceOperationToken) => void
-  beginChapterSourceOperation: () => ChapterSourceOperationToken
   buildPreDraftBriefForActiveChapter: any
   flushPendingSave: any
   generateSceneCardsForChapter: any
   getChapterGenerationSourceAuthority: () => ChapterSourceAuthorityState
-  getChapterSourceMutationPending: () => boolean
+  claimChapterInvocation: () => any
+  chapterInvocationOwnerIsActive: (owner: ChapterInvocationOwner) => boolean
+  releaseChapterInvocation: (owner: ChapterInvocationOwner) => boolean
   loadProjectModules: any
   openEditor: any
   openStoryAssetsWorkspace: any
@@ -63,12 +67,13 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
   const apiClient = deps.apiClient
   const applyStyleSampleActionForChapter = deps.applyStyleSampleActionForChapter
   const assertChapterSourceOperationCurrent = deps.assertChapterSourceOperationCurrent
-  const beginChapterSourceOperation = deps.beginChapterSourceOperation
   const buildPreDraftBriefForActiveChapter = deps.buildPreDraftBriefForActiveChapter
   const flushPendingSave = deps.flushPendingSave
   const generateSceneCardsForChapter = deps.generateSceneCardsForChapter
   const getChapterGenerationSourceAuthority = deps.getChapterGenerationSourceAuthority
-  const getChapterSourceMutationPending = deps.getChapterSourceMutationPending
+  const claimChapterInvocation = deps.claimChapterInvocation
+  const chapterInvocationOwnerIsActive = deps.chapterInvocationOwnerIsActive
+  const releaseChapterInvocation = deps.releaseChapterInvocation
   const loadProjectModules = deps.loadProjectModules
   const openEditor = deps.openEditor
   const openStoryAssetsWorkspace = deps.openStoryAssetsWorkspace
@@ -82,7 +87,6 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
   const invocationFenceDependencies = {
     getAuthority: getChapterGenerationSourceAuthority,
     selectedModelId,
-    beginSourceOperation: beginChapterSourceOperation,
     assertSourceOperationCurrent: assertChapterSourceOperationCurrent,
   }
   const warnStaleInvocation = () => message.warning({
@@ -92,7 +96,15 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
   })
 
   const beginInvocation = () => {
-    if (getChapterSourceMutationPending()) {
+    let claim: any
+    try {
+      claim = claimChapterInvocation()
+    } catch (error) {
+      if (!isStaleChapterSourceOperationError(error)) throw error
+      warnStaleInvocation()
+      return null
+    }
+    if (claim.status === 'source_mutation_pending') {
       message.warning({
         content: CHAPTER_SOURCE_MUTATION_PENDING_MESSAGE,
         key: GENERATION_PREFLIGHT_REPAIR_MESSAGE_KEY,
@@ -100,19 +112,36 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
       })
       return null
     }
+    if (claim.status === 'invocation_pending') {
+      message.warning({
+        content: CHAPTER_INVOCATION_PENDING_MESSAGE,
+        key: GENERATION_PREFLIGHT_REPAIR_MESSAGE_KEY,
+        duration: 3,
+      })
+      return null
+    }
     try {
-      const result = beginChapterInvocationFence(invocationFenceDependencies)
-      if (!result.fence) message.warning(result.gate.message)
-      return result.fence
+      const result = beginChapterInvocationFence({
+        ...invocationFenceDependencies,
+        beginSourceOperation: () => claim.owner.token,
+      })
+      if (!result.fence) {
+        releaseChapterInvocation(claim.owner)
+        message.warning(result.gate.message)
+        return null
+      }
+      return { ...result.fence, owner: claim.owner }
     } catch (error) {
+      releaseChapterInvocation(claim.owner)
       if (!isStaleChapterSourceOperationError(error)) throw error
       warnStaleInvocation()
       return null
     }
   }
 
-  const invocationIsCurrent = (fence: ChapterInvocationFence, authorityOnly = false) => {
+  const invocationIsCurrent = (fence: ChapterInvocationFence & { owner: ChapterInvocationOwner }, authorityOnly = false) => {
     try {
+      if (!chapterInvocationOwnerIsActive(fence.owner)) throw new StaleChapterSourceOperationError()
       if (authorityOnly) {
         assertChapterInvocationAuthorityCurrent(fence, invocationFenceDependencies)
       } else {
@@ -149,11 +178,15 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
   const repairGenerationPreflightGaps = async (payload: any, options: { targetChapterId?: number; repairKeys?: string[]; continueAfterRepair?: () => void; closeModal?: () => void } = {}) => {
     const invocation = beginInvocation()
     if (!invocation) return
-    const gate = invocation.gate
-    const targetChapterId = generationPreflightTargetChapterId(payload, options.targetChapterId)
-    if (!targetChapterId) return message.warning('无法定位需要补齐的章节')
-    if (!await flushPendingSave()) return
-    if (!invocationIsCurrent(invocation)) return
+    try {
+      const gate = invocation.gate
+      const requestConfig = {
+        headers: { [CHAPTER_GENERATION_SOURCE_FINGERPRINT_HEADER]: invocation.sourceFingerprint },
+      }
+      const targetChapterId = generationPreflightTargetChapterId(payload, options.targetChapterId)
+      if (!targetChapterId) return message.warning('无法定位需要补齐的章节')
+      if (!await flushPendingSave()) return
+      if (!invocationIsCurrent(invocation)) return
 
     const missingKeys = options.repairKeys?.length ? new Set(options.repairKeys) : generationPreflightMissingKeys(payload)
     const needsCharacterRepair = ['characters', 'character_state', 'no_repeat'].some(key => missingKeys.has(key))
@@ -172,7 +205,7 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
         const res = await apiClient.post(`/novel/chapters/${targetChapterId}/auto-repair-context`, {
           project_id: projectId,
           repair_keys: [...missingKeys],
-        })
+        }, requestConfig)
         if (!invocationIsCurrent(invocation)) return
         const applied = Array.isArray(res.data?.applied) ? res.data.applied : []
         const reloadToken = await loadProjectModules()
@@ -193,7 +226,7 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
         const res = await apiClient.post(`/novel/chapters/${targetChapterId}/auto-repair-context`, {
           project_id: projectId,
           model_id: gate.modelId,
-        })
+        }, requestConfig)
         if (!invocationIsCurrent(invocation)) return
         const applied = Array.isArray(res.data?.applied) ? res.data.applied : []
         const characterCreatedCount = applied.filter((item: any) => item.type === 'character_created').length
@@ -204,7 +237,7 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
         const res = await apiClient.post(`/novel/projects/${projectId}/settings/incubate-from-project`, {
           use_model: true,
           model_id: gate.modelId,
-        })
+        }, requestConfig)
         if (!invocationIsCurrent(invocation)) return
         repaired.push(`设定工坊不足 ${res.data?.total || 0} 条`)
       }
@@ -215,7 +248,7 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
           model_id: gate.modelId,
           use_model: true,
           apply: true,
-        })
+        }, requestConfig)
         if (!invocationIsCurrent(invocation)) return
         repaired.push(`本章设定调用不足 ${res.data?.total || 0} 条`)
       }
@@ -228,6 +261,9 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
     } catch (error: any) {
       if (!invocationIsCurrent(invocation)) return
       message.error({ content: error?.response?.data?.error || error?.message || '自动补齐生成材料失败', key: messageKey, duration: 4 })
+    }
+    } finally {
+      releaseChapterInvocation(invocation.owner)
     }
   }
 

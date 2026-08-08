@@ -29,6 +29,8 @@ import {
   normalizeChapterSourceView,
   StaleChapterSourceOperationError,
   type ChapterSourceAuthorityState,
+  type ChapterInvocationClaim,
+  type ChapterInvocationOwner,
   type ChapterSourceOperationToken,
   type ChapterSourcePendingState,
 } from './chapterGenerationSourceModel'
@@ -163,6 +165,9 @@ export function useNovelWorkspaceData({
     token: null,
   }))
   const chapterSourcePendingStateRef = useRef(chapterSourcePendingState)
+  const [chapterInvocationOwner, setChapterInvocationOwnerState] = useState<ChapterInvocationOwner | null>(null)
+  const chapterInvocationOwnerRef = useRef<ChapterInvocationOwner | null>(null)
+  const chapterInvocationOwnerEpochRef = useRef(0)
   const [activeChapterId, setActiveChapterId] = useState<number | null>(null)
   const projectIdRef = useRef(projectId)
   projectIdRef.current = projectId
@@ -206,6 +211,50 @@ export function useNovelWorkspaceData({
     token => chapterSourceFenceRef.current!.assertCurrent(token),
   ), [])
 
+  const chapterInvocationOwnerIsActive = useCallback((candidate: ChapterInvocationOwner) => {
+    if (chapterInvocationOwnerRef.current !== candidate || candidate.projectId !== projectIdRef.current) return false
+    try {
+      chapterSourceFenceRef.current!.assertCurrent(candidate.token)
+      return true
+    } catch (error) {
+      if (isStaleChapterSourceOperationError(error)) return false
+      throw error
+    }
+  }, [])
+
+  const getChapterInvocationPending = useCallback(() => {
+    const current = chapterInvocationOwnerRef.current
+    return Boolean(current && chapterInvocationOwnerIsActive(current))
+  }, [chapterInvocationOwnerIsActive])
+
+  const claimChapterInvocation = useCallback((): ChapterInvocationClaim => {
+    if (getChapterSourceMutationPending()) return Object.freeze({ status: 'source_mutation_pending' })
+    const current = chapterInvocationOwnerRef.current
+    if (current && chapterInvocationOwnerIsActive(current)) {
+      return Object.freeze({ status: 'invocation_pending' })
+    }
+    if (current) {
+      chapterInvocationOwnerRef.current = null
+      setChapterInvocationOwnerState(null)
+    }
+    const token = beginChapterSourceOperation()
+    const owner = Object.seal({
+      projectId: token.projectId,
+      ownerEpoch: ++chapterInvocationOwnerEpochRef.current,
+      token,
+    })
+    chapterInvocationOwnerRef.current = owner
+    setChapterInvocationOwnerState(owner)
+    return Object.freeze({ status: 'claimed', owner })
+  }, [beginChapterSourceOperation, chapterInvocationOwnerIsActive, getChapterSourceMutationPending])
+
+  const releaseChapterInvocation = useCallback((candidate: ChapterInvocationOwner) => {
+    if (chapterInvocationOwnerRef.current !== candidate) return false
+    chapterInvocationOwnerRef.current = null
+    setChapterInvocationOwnerState(null)
+    return true
+  }, [])
+
   const setChapterSourceMutationPending = useCallback((pending: boolean, token: ChapterSourceOperationToken) => {
     chapterSourceFenceRef.current!.assertCurrent(token)
     const next = Object.freeze({
@@ -227,9 +276,16 @@ export function useNovelWorkspaceData({
     const controller = new AbortController()
     projectLoadAbortRef.current = controller
     const requestEpoch = projectLoadEpochRef.current!.begin()
+    const invocationOwner = chapterInvocationOwnerRef.current
+    const invocationOwnerShouldAdvance = Boolean(
+      invocationOwner && chapterInvocationOwnerIsActive(invocationOwner),
+    )
     chapterSourceFenceRef.current!.enterProject(projectId, requestEpoch)
     chapterSourceLoadRef.current = { projectId, loadEpoch: requestEpoch }
     const chapterSourceToken = chapterSourceFenceRef.current!.begin(projectId, requestEpoch)
+    if (invocationOwnerShouldAdvance && chapterInvocationOwnerRef.current === invocationOwner) {
+      invocationOwner!.token = chapterSourceToken
+    }
     setLoading(true)
     try {
       const requestPlan = initialWorkspaceRequestPlan(projectId)
@@ -301,7 +357,7 @@ export function useNovelWorkspaceData({
     } finally {
       if (projectLoadEpochRef.current?.isCurrent(requestEpoch) && !controller.signal.aborted) setLoading(false)
     }
-  }, [projectId])
+  }, [projectId, chapterInvocationOwnerIsActive])
 
   useEffect(() => {
     void loadProjectModules()
@@ -335,6 +391,8 @@ export function useNovelWorkspaceData({
     setPipeline(null)
     setModels([])
     setChapterGenerationSourceAuthority(confirmedAuthorityState(null))
+    chapterInvocationOwnerRef.current = null
+    setChapterInvocationOwnerState(null)
     setSelectedModelId(undefined)
     setActiveChapterId(null)
     setLoading(Boolean(projectId))
@@ -531,7 +589,13 @@ export function useNovelWorkspaceData({
     getChapterGenerationSourceAuthority,
     setChapterGenerationSourceAuthority,
     chapterSourcePendingState,
+    chapterInvocationOwner,
+    chapterInvocationPending: Boolean(chapterInvocationOwner && chapterInvocationOwnerIsActive(chapterInvocationOwner)),
     getChapterSourceMutationPending,
+    getChapterInvocationPending,
+    claimChapterInvocation,
+    chapterInvocationOwnerIsActive,
+    releaseChapterInvocation,
     setChapterSourceMutationPending,
     beginChapterSourceOperation,
     assertChapterSourceOperationCurrent,

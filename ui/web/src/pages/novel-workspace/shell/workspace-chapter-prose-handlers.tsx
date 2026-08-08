@@ -8,10 +8,13 @@ import {
   assertChapterInvocationAuthorityCurrent,
   assertChapterInvocationFenceCurrent,
   beginChapterInvocationFence,
+  CHAPTER_GENERATION_SOURCE_FINGERPRINT_HEADER,
+  CHAPTER_INVOCATION_PENDING_MESSAGE,
   CHAPTER_INVOCATION_SOURCE_CHANGED_MESSAGE,
   CHAPTER_SOURCE_MUTATION_PENDING_MESSAGE,
   isStaleChapterSourceOperationError,
   type ChapterInvocationFence,
+  type ChapterInvocationOwner,
   type ChapterSourceAuthorityState,
   type ChapterSourceOperationToken,
 } from '../chapterGenerationSourceModel'
@@ -47,13 +50,14 @@ export type ChapterProseHandlerDeps = {
   apiClient: any
   assertChapterSourceOperationCurrent: (token: ChapterSourceOperationToken) => void
   autoCreationDirectorModel: any
-  beginChapterSourceOperation: () => ChapterSourceOperationToken
   chapterWordTargetPayload: any
   chapters: any
   confirmReferenceReady: any
   flushPendingSave: any
   getChapterGenerationSourceAuthority: () => ChapterSourceAuthorityState
-  getChapterSourceMutationPending: () => boolean
+  claimChapterInvocation: () => any
+  chapterInvocationOwnerIsActive: (owner: ChapterInvocationOwner) => boolean
+  releaseChapterInvocation: (owner: ChapterInvocationOwner) => boolean
   loadProjectModules: any
   projectId: any
   selectedModelId: any
@@ -82,13 +86,14 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
   const apiClient = deps.apiClient
   const assertChapterSourceOperationCurrent = deps.assertChapterSourceOperationCurrent
   const autoCreationDirectorModel = deps.autoCreationDirectorModel
-  const beginChapterSourceOperation = deps.beginChapterSourceOperation
   const chapterWordTargetPayload = deps.chapterWordTargetPayload
   const chapters = deps.chapters
   const confirmReferenceReady = deps.confirmReferenceReady
   const flushPendingSave = deps.flushPendingSave
   const getChapterGenerationSourceAuthority = deps.getChapterGenerationSourceAuthority
-  const getChapterSourceMutationPending = deps.getChapterSourceMutationPending
+  const claimChapterInvocation = deps.claimChapterInvocation
+  const chapterInvocationOwnerIsActive = deps.chapterInvocationOwnerIsActive
+  const releaseChapterInvocation = deps.releaseChapterInvocation
   const loadProjectModules = deps.loadProjectModules
   const projectId = deps.projectId
   const selectedModelId = deps.selectedModelId
@@ -108,27 +113,47 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
   const invocationFenceDependencies = {
     getAuthority: getChapterGenerationSourceAuthority,
     selectedModelId,
-    beginSourceOperation: beginChapterSourceOperation,
     assertSourceOperationCurrent: assertChapterSourceOperationCurrent,
   }
 
   const beginInvocation = () => {
-    if (getChapterSourceMutationPending()) {
+    let claim: any
+    try {
+      claim = claimChapterInvocation()
+    } catch (error) {
+      if (!isStaleChapterSourceOperationError(error)) throw error
+      message.warning(CHAPTER_INVOCATION_SOURCE_CHANGED_MESSAGE)
+      return null
+    }
+    if (claim.status === 'source_mutation_pending') {
       message.warning({ content: CHAPTER_SOURCE_MUTATION_PENDING_MESSAGE, duration: 3 })
       return null
     }
+    if (claim.status === 'invocation_pending') {
+      message.warning({ content: CHAPTER_INVOCATION_PENDING_MESSAGE, duration: 3 })
+      return null
+    }
     try {
-      const result = beginChapterInvocationFence(invocationFenceDependencies)
-      if (!result.fence) message.warning(result.gate.message)
-      return result.fence
+      const result = beginChapterInvocationFence({
+        ...invocationFenceDependencies,
+        beginSourceOperation: () => claim.owner.token,
+      })
+      if (!result.fence) {
+        releaseChapterInvocation(claim.owner)
+        message.warning(result.gate.message)
+        return null
+      }
+      return { ...result.fence, owner: claim.owner }
     } catch (error) {
+      releaseChapterInvocation(claim.owner)
       if (!isStaleChapterSourceOperationError(error)) throw error
       message.warning(CHAPTER_INVOCATION_SOURCE_CHANGED_MESSAGE)
       return null
     }
   }
 
-  const assertInvocationCurrent = (fence: ChapterInvocationFence, authorityOnly = false) => {
+  const assertInvocationCurrent = (fence: ChapterInvocationFence & { owner: ChapterInvocationOwner }, authorityOnly = false) => {
+    if (!chapterInvocationOwnerIsActive(fence.owner)) throw new StaleChapterSourceOperationError()
     if (authorityOnly) {
       assertChapterInvocationAuthorityCurrent(fence, invocationFenceDependencies)
     } else {
@@ -136,7 +161,7 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
     }
   }
 
-  const invocationIsCurrent = (fence: ChapterInvocationFence, authorityOnly = false) => {
+  const invocationIsCurrent = (fence: ChapterInvocationFence & { owner: ChapterInvocationOwner }, authorityOnly = false) => {
     try {
       assertInvocationCurrent(fence, authorityOnly)
       return true
@@ -148,7 +173,7 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
   }
 
   const preferStaleInvocationError = (
-    fence: ChapterInvocationFence,
+    fence: ChapterInvocationFence & { owner: ChapterInvocationOwner },
     error: unknown,
     authorityOnly = false,
   ) => {
@@ -175,11 +200,12 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
     if (!targetChapter) return message.warning('请先选择章节')
     const invocation = beginInvocation()
     if (!invocation) return
-    const gate = invocation.gate
-    if (!await flushPendingSave()) return
-    if (!invocationIsCurrent(invocation)) return
-    if (!await confirmReferenceReady('正文创作')) return
-    if (!invocationIsCurrent(invocation)) return
+    try {
+      const gate = invocation.gate
+      if (!await flushPendingSave()) return
+      if (!invocationIsCurrent(invocation)) return
+      if (!await confirmReferenceReady('正文创作')) return
+      if (!invocationIsCurrent(invocation)) return
     const targetChapterNo = Number(targetChapter.chapter_no || 0)
     const currentChapterLaunchGate = (
       Number(autoCreationDirectorModel.targetChapter?.id || 0) === Number(targetChapter.id || 0)
@@ -207,7 +233,11 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
         `${apiClient.defaults.baseURL}/novel/chapters/${targetChapter.id}/generate-prose?stream=1`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'text/event-stream',
+            [CHAPTER_GENERATION_SOURCE_FINGERPRINT_HEADER]: invocation.sourceFingerprint,
+          },
           signal: streamSignal,
           body: JSON.stringify({
             project_id: projectId,
@@ -290,7 +320,8 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
     } catch (caughtError: any) {
       const error: any = preferStaleInvocationError(invocation, caughtError, invocationReloaded)
       // A newer run may have taken over via proseStreamControl.begin(); it now owns the shared UI state.
-      const runSuperseded = !canFinalizeProseRun(proseStreamControl.controller, streamController)
+      const runSuperseded = !chapterInvocationOwnerIsActive(invocation.owner)
+        || !canFinalizeProseRun(proseStreamControl.controller, streamController)
       if (isStaleChapterSourceOperationError(error)) {
         if (!runSuperseded) {
           setStreamingProgress('生成已中止')
@@ -308,7 +339,8 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
         message.error(error?.message || '正文生成失败')
       }
     } finally {
-      const runSuperseded = !canFinalizeProseRun(proseStreamControl.controller, streamController)
+      const runSuperseded = !chapterInvocationOwnerIsActive(invocation.owner)
+        || !canFinalizeProseRun(proseStreamControl.controller, streamController)
       proseStreamControl.end(streamController)
       if (!runSuperseded) {
         setGeneratingProse(false)
@@ -318,6 +350,9 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
           setStreamingChapterId(null); setStreamingPercent(0); setStreamingProgress(prev => prev === '已取消生成' || prev === '生成失败' ? prev : '')
         }, 1500)
       }
+    }
+    } finally {
+      releaseChapterInvocation(invocation.owner)
     }
   }
 
@@ -340,9 +375,11 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
     if (!activeChapter) return message.warning('请先选择章节')
     const invocation = beginInvocation()
     if (!invocation) return
-    const gate = invocation.gate
-    if (!await flushPendingSave()) return
-    if (!invocationIsCurrent(invocation)) return
+    let continueWithProse = false
+    try {
+      const gate = invocation.gate
+      if (!await flushPendingSave()) return
+      if (!invocationIsCurrent(invocation)) return
     const targetChapterId = activeChapter.id
     const repairController = proseStreamControl.begin()
     setGeneratingProse(true)
@@ -356,13 +393,17 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
       const res = await apiClient.post(`/novel/chapters/${targetChapterId}/auto-repair-context`, {
         project_id: projectId,
         ...(gate.active === 'model' ? { model_id: gate.modelId } : {}),
-      }, { signal: repairController.signal })
+      }, {
+        signal: repairController.signal,
+        headers: { [CHAPTER_GENERATION_SOURCE_FINGERPRINT_HEADER]: invocation.sourceFingerprint },
+      })
       assertInvocationCurrent(invocation)
       const applied = Array.isArray(res.data?.applied) ? res.data.applied : []
       const warnings = Array.isArray(res.data?.warnings) ? res.data.warnings : []
       const reloadToken = await loadProjectModules()
       if (!reloadTokenIsCurrent(reloadToken)) {
-        const runSuperseded = !canFinalizeProseRun(proseStreamControl.controller, repairController)
+        const runSuperseded = !chapterInvocationOwnerIsActive(invocation.owner)
+          || !canFinalizeProseRun(proseStreamControl.controller, repairController)
         proseStreamControl.end(repairController)
         if (!runSuperseded) {
           setGeneratingProse(false)
@@ -382,7 +423,8 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
     } catch (caughtError: any) {
       const error: any = preferStaleInvocationError(invocation, caughtError, invocationReloaded)
       // A newer run may have taken over via proseStreamControl.begin(); it now owns the shared UI state.
-      const runSuperseded = !canFinalizeProseRun(proseStreamControl.controller, repairController)
+      const runSuperseded = !chapterInvocationOwnerIsActive(invocation.owner)
+        || !canFinalizeProseRun(proseStreamControl.controller, repairController)
       if (isStaleChapterSourceOperationError(error)) {
         if (!runSuperseded) {
           message.warning(CHAPTER_INVOCATION_SOURCE_CHANGED_MESSAGE)
@@ -405,8 +447,14 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
       return
     }
     proseStreamControl.end(repairController)
-    setGeneratingProse(false)
-    await generateCurrentChapterProse({ allowIncomplete: false, forceSceneCards: true, targetChapterId })
+    if (chapterInvocationOwnerIsActive(invocation.owner)) setGeneratingProse(false)
+    continueWithProse = true
+    } finally {
+      releaseChapterInvocation(invocation.owner)
+    }
+    if (continueWithProse) {
+      await generateCurrentChapterProse({ allowIncomplete: false, forceSceneCards: true, targetChapterId: activeChapter.id })
+    }
   }
 
   /* ── 章节重组 ──────────────────────────────────────────────────── */
@@ -414,9 +462,10 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
   const stepGenerateProse = async (options?: { limit?: number; source?: string; longformCompass?: any; longformBattleContext?: any; chapterLaunchGate?: any; nextBatchBrief?: any; batchPreflight?: any; millionWordRunway?: any; allowedChapterNos?: number[] }) => {
     const invocation = beginInvocation()
     if (!invocation) return
-    const gate = invocation.gate
-    if (!await flushPendingSave()) return
-    if (!invocationIsCurrent(invocation)) return
+    try {
+      const gate = invocation.gate
+      if (!await flushPendingSave()) return
+      if (!invocationIsCurrent(invocation)) return
     const allowedChapterNoSet = new Set((options?.allowedChapterNos || []).map(chapterNo => Number(chapterNo)).filter(Boolean))
     const allUnwrittenChapters = sortedChapters.filter(ch => !chapterHasProse(ch))
     const allUnwritten = allowedChapterNoSet.size > 0
@@ -440,6 +489,7 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
     try {
       for (let index = 0; index < unWritten.length; index += 1) {
         if (proseBatchCancelRef.current) break
+        assertInvocationCurrent(invocation)
         const ch = unWritten[index]
         const currentTitle = `第 ${ch.chapter_no} 章《${displayValue(ch.title)}》`
         setProseProgress({ current: index + 1, total: unWritten.length })
@@ -447,7 +497,11 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
         try {
           assertInvocationCurrent(invocation)
           const resp = await fetch(`${apiClient.defaults.baseURL}/novel/chapters/${ch.id}/generate-prose`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              [CHAPTER_GENERATION_SOURCE_FINGERPRINT_HEADER]: invocation.sourceFingerprint,
+            },
             body: JSON.stringify({
               project_id: projectId,
               ...(gate.active === 'model' ? { model_id: gate.modelId } : {}),
@@ -579,13 +633,20 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
           : `正文生成完成 (${success}/${unWritten.length})`)
       }
     } catch (e: any) {
-      if (isStaleChapterSourceOperationError(e)) message.warning(CHAPTER_INVOCATION_SOURCE_CHANGED_MESSAGE)
-      else message.error(e.message || '正文生成失败')
+      if (chapterInvocationOwnerIsActive(invocation.owner)) {
+        if (isStaleChapterSourceOperationError(e)) message.warning(CHAPTER_INVOCATION_SOURCE_CHANGED_MESSAGE)
+        else message.error(e.message || '正文生成失败')
+      }
     }
     finally {
-      setStepProseLoading(false)
-      setProseProgress({ current: 0, total: 0 })
-      proseBatchCancelRef.current = false
+      if (chapterInvocationOwnerIsActive(invocation.owner)) {
+        setStepProseLoading(false)
+        setProseProgress({ current: 0, total: 0 })
+        proseBatchCancelRef.current = false
+      }
+    }
+    } finally {
+      releaseChapterInvocation(invocation.owner)
     }
   }
 

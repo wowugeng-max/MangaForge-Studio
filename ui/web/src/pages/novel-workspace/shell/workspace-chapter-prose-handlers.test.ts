@@ -79,6 +79,39 @@ function mutableSourceAuthority(initial: 'model' | 'mcp') {
   }
 }
 
+function invocationOwnership(
+  source: ReturnType<typeof mutableSourceAuthority>,
+  getSourceMutationPending: () => boolean = () => false,
+) {
+  let owner: any = null
+  let ownerEpoch = 0
+  return {
+    claimChapterInvocation: () => {
+      if (getSourceMutationPending()) return { status: 'source_mutation_pending' as const }
+      if (owner) {
+        try {
+          source.assert(owner.token)
+          return { status: 'invocation_pending' as const }
+        } catch (error) {
+          if (!(error instanceof StaleChapterSourceOperationError)) throw error
+        }
+      }
+      owner = Object.freeze({
+        projectId: 7,
+        ownerEpoch: ++ownerEpoch,
+        token: source.begin(),
+      })
+      return { status: 'claimed' as const, owner }
+    },
+    chapterInvocationOwnerIsActive: (candidate: unknown) => owner === candidate,
+    releaseChapterInvocation: (candidate: unknown) => {
+      if (owner !== candidate) return false
+      owner = null
+      return true
+    },
+  }
+}
+
 const successfulReloadToken = Object.freeze({ projectId: 7, loadEpoch: 2, operationEpoch: 1 })
 
 function installMessageRecorder(events: string[] = []) {
@@ -97,7 +130,7 @@ function installMessageRecorder(events: string[] = []) {
 
 function preflightDeps(overrides: Record<string, any> = {}) {
   const authority = overrides.chapterGenerationSourceAuthority || sourceAuthority('model')
-  return {
+  const deps = {
     activeChapter: { id: 11, chapter_no: 1 },
     apiClient: { post: async () => ({ data: {} }) },
     applyStyleSampleActionForChapter: async () => {},
@@ -121,12 +154,28 @@ function preflightDeps(overrides: Record<string, any> = {}) {
     syncStoryStateForChapter: async () => {},
     ...overrides,
   }
+  let owner: any = null
+  return {
+    ...deps,
+    claimChapterInvocation: overrides.claimChapterInvocation || (() => {
+      if (deps.getChapterSourceMutationPending()) return { status: 'source_mutation_pending' as const }
+      if (owner) return { status: 'invocation_pending' as const }
+      owner = Object.freeze({ projectId: 7, ownerEpoch: 1, token: deps.beginChapterSourceOperation() })
+      return { status: 'claimed' as const, owner }
+    }),
+    chapterInvocationOwnerIsActive: overrides.chapterInvocationOwnerIsActive || ((candidate: unknown) => owner === candidate),
+    releaseChapterInvocation: overrides.releaseChapterInvocation || ((candidate: unknown) => {
+      if (owner !== candidate) return false
+      owner = null
+      return true
+    }),
+  }
 }
 
 function proseDeps(overrides: Record<string, any> = {}) {
   const chapter = { id: 11, chapter_no: 1, title: '开篇', chapter_text: '' }
   const authority = overrides.chapterGenerationSourceAuthority || sourceAuthority('model')
-  return {
+  const deps = {
     proseBatchCancelRef: { current: false },
     setProseBatchStatus: () => {},
     setProseProgress: () => {},
@@ -167,6 +216,22 @@ function proseDeps(overrides: Record<string, any> = {}) {
     characters: [],
     outlines: [],
     ...overrides,
+  }
+  let owner: any = null
+  return {
+    ...deps,
+    claimChapterInvocation: overrides.claimChapterInvocation || (() => {
+      if (deps.getChapterSourceMutationPending()) return { status: 'source_mutation_pending' as const }
+      if (owner) return { status: 'invocation_pending' as const }
+      owner = Object.freeze({ projectId: 7, ownerEpoch: 1, token: deps.beginChapterSourceOperation() })
+      return { status: 'claimed' as const, owner }
+    }),
+    chapterInvocationOwnerIsActive: overrides.chapterInvocationOwnerIsActive || ((candidate: unknown) => owner === candidate),
+    releaseChapterInvocation: overrides.releaseChapterInvocation || ((candidate: unknown) => {
+      if (owner !== candidate) return false
+      owner = null
+      return true
+    }),
   }
 }
 
@@ -525,6 +590,159 @@ describe('chapter source-aware invocation handlers', () => {
       typeof value === 'object' && value?.content === '章节来源正在切换，请稍后重试'
     ))
     expect(pendingWarnings).toHaveLength(4)
+  })
+
+  test('a stale owner claim is projected before preflight or prose can request a provider', async () => {
+    const notices = installMessageRecorder()
+    let requests = 0
+    const staleClaim = () => { throw new StaleChapterSourceOperationError() }
+    const preflight = createPreflightHandlers(preflightDeps({
+      claimChapterInvocation: staleClaim,
+      apiClient: { post: async () => { requests += 1; return { data: {} } } },
+    }))
+    globalThis.fetch = (async () => { requests += 1; return streamResponse() }) as any
+    const prose = proseHandlers.createChapterProseHandlers(proseDeps({
+      claimChapterInvocation: staleClaim,
+    }))
+    const failures: unknown[] = []
+
+    for (const action of [
+      () => preflight.repairGenerationPreflightGaps({ chapter_id: 11 }, { repairKeys: ['characters'] }),
+      () => prose.generateCurrentChapterProse(),
+    ]) {
+      try {
+        await action()
+      } catch (error) {
+        failures.push(error)
+      }
+    }
+
+    expect(failures).toEqual([])
+    expect(requests).toBe(0)
+    expect(notices.warnings.map(value => typeof value === 'object' ? value?.content : value))
+      .toEqual(['章节来源已变化，请重试', '章节来源已变化，请重试'])
+  })
+
+  test('a deferred preflight invocation owns the entry so a duplicate click starts zero additional requests', async () => {
+    installMessageRecorder()
+    const source = mutableSourceAuthority('model')
+    const ownership = invocationOwnership(source)
+    const requestStarted = deferred<void>()
+    const response = deferred<{ data: { applied: any[] } }>()
+    let requests = 0
+    const handlers = createPreflightHandlers(preflightDeps({
+      getChapterGenerationSourceAuthority: source.get,
+      beginChapterSourceOperation: source.begin,
+      assertChapterSourceOperationCurrent: source.assert,
+      ...ownership,
+      apiClient: {
+        post: async () => {
+          requests += 1
+          requestStarted.resolve()
+          return response.promise
+        },
+      },
+      loadProjectModules: async () => source.begin(),
+    }))
+
+    const first = handlers.repairGenerationPreflightGaps(
+      { chapter_id: 11 },
+      { repairKeys: ['characters'] },
+    )
+    await requestStarted.promise
+    const duplicate = handlers.repairGenerationPreflightGaps(
+      { chapter_id: 11 },
+      { repairKeys: ['characters'] },
+    )
+    await Promise.resolve()
+
+    expect(requests).toBe(1)
+    response.resolve({ data: { applied: [] } })
+    await Promise.all([first, duplicate])
+
+    await handlers.repairGenerationPreflightGaps(
+      { chapter_id: 11 },
+      { repairKeys: ['characters'] },
+    )
+    expect(requests).toBe(2)
+  })
+
+  test('a superseded batch finally cannot clear the successor owner loading progress or cancel state', async () => {
+    installMessageRecorder()
+    const source = mutableSourceAuthority('model')
+    const ownership = invocationOwnership(source)
+    const response = deferred<Response>()
+    const requestStarted = deferred<void>()
+    const cancelRef = { current: false }
+    const loading: boolean[] = []
+    const progress: any[] = []
+    globalThis.fetch = (async () => {
+      requestStarted.resolve()
+      return response.promise
+    }) as any
+    const handlers = proseHandlers.createChapterProseHandlers(proseDeps({
+      getChapterGenerationSourceAuthority: source.get,
+      beginChapterSourceOperation: source.begin,
+      assertChapterSourceOperationCurrent: source.assert,
+      ...ownership,
+      proseBatchCancelRef: cancelRef,
+      setStepProseLoading: (value: boolean) => { loading.push(value) },
+      setProseProgress: (value: any) => { progress.push(value) },
+    }))
+
+    const staleBatch = handlers.stepGenerateProse()
+    await requestStarted.promise
+    source.switchTo('mcp')
+    const successor = ownership.claimChapterInvocation()
+    expect(successor.status).toBe('claimed')
+    if (successor.status !== 'claimed') return
+    cancelRef.current = true
+    response.resolve(new Response(JSON.stringify({ chapter: { id: 11, chapter_text: 'stale' } }), { status: 200 }))
+    await staleBatch
+
+    expect(ownership.chapterInvocationOwnerIsActive(successor.owner)).toBe(true)
+    expect(loading).toEqual([true])
+    expect(progress).not.toContainEqual({ current: 0, total: 0 })
+    expect(cancelRef.current).toBe(true)
+  })
+
+  test('provider requests carry the invocation authority fingerprint without changing request bodies', async () => {
+    installMessageRecorder()
+    const fingerprint = sourceAuthority('model').source!.fingerprint
+    const posts: any[][] = []
+    const preflight = createPreflightHandlers(preflightDeps({
+      apiClient: {
+        post: async (...args: any[]) => {
+          posts.push(args)
+          return { data: { applied: [], total: 0 } }
+        },
+      },
+    }))
+    await preflight.repairGenerationPreflightGaps(
+      { chapter_id: 11 },
+      { repairKeys: ['characters', 'setting_workshop', 'chapter_setting_usage'] },
+    )
+
+    expect(posts.map(args => args[1])).toEqual([
+      { project_id: 7, model_id: 73 },
+      { use_model: true, model_id: 73 },
+      { project_id: 7, model_id: 73, use_model: true, apply: true },
+    ])
+    expect(posts.every(args => args[2]?.headers?.['x-chapter-generation-source-fingerprint'] === fingerprint)).toBe(true)
+
+    const fetches: Array<{ url: string; init: RequestInit }> = []
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      fetches.push({ url: String(url), init: init || {} })
+      if (String(url).includes('stream=1')) return streamResponse()
+      return new Response(JSON.stringify({ chapter: { id: 11, chapter_text: '正文' } }), { status: 200 })
+    }) as any
+    const single = proseHandlers.createChapterProseHandlers(proseDeps())
+    await single.generateCurrentChapterProse()
+    const batch = proseHandlers.createChapterProseHandlers(proseDeps())
+    await batch.stepGenerateProse()
+
+    expect(fetches).toHaveLength(2)
+    expect(fetches.every(item => (item.init.headers as Record<string, string>)?.['x-chapter-generation-source-fingerprint'] === fingerprint)).toBe(true)
   })
 
   test('source change wins over a rejected preflight provider request', async () => {

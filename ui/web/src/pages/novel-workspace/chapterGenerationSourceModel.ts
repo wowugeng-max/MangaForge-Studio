@@ -163,6 +163,19 @@ export type ChapterSourceOperationToken = Readonly<{
 
 export const CHAPTER_INVOCATION_SOURCE_CHANGED_MESSAGE = '章节来源已变化，请重试'
 export const CHAPTER_SOURCE_MUTATION_PENDING_MESSAGE = '章节来源正在切换，请稍后重试'
+export const CHAPTER_INVOCATION_PENDING_MESSAGE = '章节生成操作正在进行，请稍后重试'
+export const CHAPTER_GENERATION_SOURCE_FINGERPRINT_HEADER = 'x-chapter-generation-source-fingerprint'
+
+export type ChapterInvocationOwner = {
+  readonly projectId: number
+  readonly ownerEpoch: number
+  token: ChapterSourceOperationToken
+}
+
+export type ChapterInvocationClaim =
+  | Readonly<{ status: 'claimed'; owner: ChapterInvocationOwner }>
+  | Readonly<{ status: 'source_mutation_pending' }>
+  | Readonly<{ status: 'invocation_pending' }>
 
 export type ChapterSourcePendingState = Readonly<{
   projectId: number

@@ -387,7 +387,7 @@ describe('commercial writing workspace UI shell b a', () => {
     expect(repairModel).toContain('不调用大模型')
   })
 
-  test('fences chapter actions with the live source authority across the base handler bridge', () => {
+  test('delegates chapter source operation ownership before the handler bridge', () => {
     const data = source('useNovelWorkspaceData.ts')
     const base = source('shell/use-novel-workspace-base-model.tsx')
     const binder = source('shell/workspace-view-bind-core-handlers.ts')
@@ -396,15 +396,26 @@ describe('commercial writing workspace UI shell b a', () => {
 
     for (const dependency of [
       'getChapterGenerationSourceAuthority',
-      'getChapterSourceMutationPending',
-      'beginChapterSourceOperation',
       'assertChapterSourceOperationCurrent',
+      'claimChapterInvocation',
+      'chapterInvocationOwnerIsActive',
+      'releaseChapterInvocation',
     ]) {
       expect(data).toContain(dependency)
       expect(base).toContain(dependency)
       expect(binder).toContain(dependency)
       expect(preflight).toContain(dependency)
       expect(prose).toContain(dependency)
+    }
+    for (const ownerOnlyDependency of [
+      'getChapterSourceMutationPending',
+      'beginChapterSourceOperation',
+    ]) {
+      expect(data).toContain(ownerOnlyDependency)
+      expect(base).toContain(ownerOnlyDependency)
+      expect(binder).not.toContain(ownerOnlyDependency)
+      expect(preflight).not.toContain(ownerOnlyDependency)
+      expect(prose).not.toContain(ownerOnlyDependency)
     }
     expect(preflight).toContain('assertChapterInvocationFenceCurrent')
     expect(prose).toContain('assertChapterInvocationFenceCurrent')

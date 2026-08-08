@@ -7,12 +7,12 @@ import {
   createNovelChapter,
   createNovelProject,
   getNovelProject,
+  listNovelCharacters,
   listNovelChapters,
   loadNovelMaterialRepairSnapshot,
   mutateNovelProjectGenerationSource,
 } from '../novel'
 import {
-  chapterGenerationSourceFingerprint,
   toLegacyProseGenerationSource,
 } from '../novel-writing-service/generation-source/source-config'
 import { ChapterSourceLeaseRegistry } from '../novel-writing-service/generation-source/chapter-source-lease'
@@ -73,6 +73,16 @@ function createRouteHarness() {
   }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 async function callRoute(handler: any, req: any) {
   const res: any = {
     statusCode: 200,
@@ -91,6 +101,143 @@ async function callRoute(handler: any, req: any) {
 }
 
 describe('novel chapter context repair', () => {
+  test('model repair holds the shared source lease through provider work and rejects a duplicate before a second provider call', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'mangaforge-model-repair-route-fence-'))
+    try {
+      const project = await createNovelProject(workspace, { title: '模型补齐路由围栏' })
+      const chapter = await createNovelChapter(workspace, {
+        project_id: project.id,
+        chapter_no: 1,
+        title: '第一章',
+        chapter_goal: '找到入口',
+      })
+      const leases = new ChapterSourceLeaseRegistry()
+      const withChapterAuthorityFence = createChapterAuthorityFence({
+        chapterSourceLeases: leases,
+        readProject: getNovelProject,
+      })
+      const providerStarted = deferred<void>()
+      const providerResponse = deferred<any>()
+      let providerCalls = 0
+      const { app, handlers } = createRouteHarness()
+      registerNovelChapterContextRoutes(app as any, {
+        getWorkspace: () => workspace,
+        getProject: getNovelProject,
+        withChapterAuthorityFence,
+        executeNovelAgent: async () => {
+          providerCalls += 1
+          providerStarted.resolve()
+          return providerResponse.promise
+        },
+        buildChapterContextPackage: async () => ({
+          ...readyContextFixture(),
+          preflight: {
+            ...readyContextFixture().preflight,
+            ready: false,
+            checks: [{ key: 'characters', ok: false }],
+          },
+        }),
+        repairChapterMaterials: async () => { throw new Error('model route must not dispatch MCP repair') },
+      } as any)
+      const handler = handlers.get('POST /api/novel/chapters/:chapterId/auto-repair-context')
+      const request = {
+        params: { chapterId: String(chapter.id) },
+        query: {},
+        headers: {},
+        body: { project_id: project.id, model_id: 17 },
+      }
+      const first = callRoute(handler, request)
+      const started = await Promise.race([
+        providerStarted.promise.then(() => true),
+        new Promise<boolean>(resolve => setTimeout(() => resolve(false), 40)),
+      ])
+      if (!started) {
+        await first.catch(() => undefined)
+        expect(started).toBe(true)
+        return
+      }
+
+      expect(leases.isActive(workspace, project.id)).toBe(true)
+      let mutationError: any
+      try {
+        await leases.acquire(workspace, project.id, 'source-mutation-probe')
+      } catch (error) {
+        mutationError = error
+      }
+      expect(mutationError?.code).toBe('GENERATION_SOURCE_BUSY')
+      const duplicate = await callRoute(handler, request)
+      expect(duplicate.statusCode).toBe(409)
+      expect(duplicate.body).toMatchObject({ error_code: 'GENERATION_SOURCE_BUSY' })
+      expect(providerCalls).toBe(1)
+
+      providerResponse.resolve({ output: JSON.stringify({ characters: [{ name: '林砚' }] }) })
+      const completed = await first
+      expect(completed.statusCode).toBe(200)
+      expect(leases.isActive(workspace, project.id)).toBe(false)
+    } finally {
+      rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('model repair fails closed on stale or malformed authority headers before provider and writes', async () => {
+    for (const fixture of [
+      { header: `sha256:${'f'.repeat(64)}`, inherited: false },
+      { header: `sha256:${'A'.repeat(64)}`, inherited: false },
+      { header: 'not-a-fingerprint', inherited: false },
+      { header: `sha256:${'e'.repeat(64)}`, inherited: true },
+    ]) {
+      const workspace = mkdtempSync(join(tmpdir(), 'mangaforge-model-repair-header-fence-'))
+      try {
+        const project = await createNovelProject(workspace, { title: '模型补齐指纹围栏' })
+        const chapter = await createNovelChapter(workspace, {
+          project_id: project.id,
+          chapter_no: 1,
+          title: '第一章',
+        })
+        const leases = new ChapterSourceLeaseRegistry()
+        let providerCalls = 0
+        let contextCalls = 0
+        const { app, handlers } = createRouteHarness()
+        registerNovelChapterContextRoutes(app as any, {
+          getWorkspace: () => workspace,
+          getProject: getNovelProject,
+          withChapterAuthorityFence: createChapterAuthorityFence({ chapterSourceLeases: leases, readProject: getNovelProject }),
+          executeNovelAgent: async () => { providerCalls += 1; return { output: '{}' } },
+          buildChapterContextPackage: async () => {
+            contextCalls += 1
+            return { ...readyContextFixture(), preflight: { ...readyContextFixture().preflight, ready: false, checks: [{ key: 'characters', ok: false }] } }
+          },
+          repairChapterMaterials: async () => { throw new Error('model route must not dispatch MCP repair') },
+        } as any)
+
+        const request = {
+          params: { chapterId: String(chapter.id) },
+          query: {},
+          ...(fixture.inherited ? {} : { headers: { 'x-chapter-generation-source-fingerprint': fixture.header } }),
+          body: { project_id: project.id, model_id: 17 },
+        }
+        if (fixture.inherited) {
+          Object.setPrototypeOf(request, {
+            get headers() {
+              return { 'x-chapter-generation-source-fingerprint': fixture.header }
+            },
+          })
+        }
+        const response = await callRoute(
+          handlers.get('POST /api/novel/chapters/:chapterId/auto-repair-context'),
+          request,
+        )
+
+        expect(response.statusCode).toBe(409)
+        expect(response.body).toMatchObject({ error_code: 'GENERATION_SOURCE_CHANGED' })
+        expect(providerCalls).toBe(0)
+        expect(contextCalls).toBe(0)
+        expect(await listNovelCharacters(workspace, project.id)).toHaveLength(0)
+      } finally {
+        rmSync(workspace, { recursive: true, force: true })
+      }
+    }
+  })
   test('builds a usable fallback character when model repair returns no character cards', async () => {
     const routes = await import('./novel-chapter-context-routes')
     const buildFallbackGeneratedCharacters = (routes as any).buildFallbackGeneratedCharacters
@@ -176,6 +323,7 @@ describe('novel chapter context repair', () => {
   test('dispatches an MCP project without model_id before loading any model material path', async () => {
     const repairCalls: any[] = []
     let modelContextCalls = 0
+    const requestFingerprint = `sha256:${'a'.repeat(64)}`
     const resultContext = readyContextFixture()
     const { app, handlers } = createRouteHarness()
     registerNovelChapterContextRoutes(app as any, {
@@ -203,6 +351,7 @@ describe('novel chapter context repair', () => {
       {
         params: { chapterId: '9' },
         query: {},
+        headers: { 'x-chapter-generation-source-fingerprint': requestFingerprint },
         body: {
           project_id: 5,
           generation_source_override: 'model',
@@ -224,9 +373,7 @@ describe('novel chapter context repair', () => {
       activeWorkspace: 'workspace',
       projectId: 5,
       chapterId: 9,
-      expectedAuthorityFingerprint: chapterGenerationSourceFingerprint(
-        mcpProjectFixture().reference_config.chapter_generation_source as any,
-      ),
+      expectedAuthorityFingerprint: requestFingerprint,
       repairKeys: undefined,
     }])
     expect(modelContextCalls).toBe(0)
@@ -458,10 +605,15 @@ describe('novel chapter context repair', () => {
           blockers: ['characters'],
         },
       }
+      const leases = new ChapterSourceLeaseRegistry()
       const { app, handlers } = createRouteHarness()
       registerNovelChapterContextRoutes(app as any, {
         getWorkspace: () => workspace,
-        getProject: async () => project,
+        getProject: getNovelProject,
+        withChapterAuthorityFence: createChapterAuthorityFence({
+          chapterSourceLeases: leases,
+          readProject: getNovelProject,
+        }),
         buildChapterContextPackage: async () => contextPackage,
         repairChapterMaterials: async () => {
           repairCalls += 1
@@ -488,9 +640,10 @@ describe('novel chapter context repair', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-chapter-context-routes.ts'), 'utf8')
     expect(source).toContain('const chapterGenerationSource = resolveChapterGenerationSource(project)')
     expect(source).toContain("if (chapterGenerationSource.active === 'mcp')")
-    expect(source).toContain('expectedAuthorityFingerprint: chapterGenerationSourceFingerprint(chapterGenerationSource)')
+    expect(source).toContain('const expectedAuthorityFingerprint = resolveChapterAuthorityRequestFingerprint(req, project)')
+    expect(source).toContain('expectedAuthorityFingerprint,')
     expect(source).toContain("const modelId = req.body?.model_id ? String(req.body.model_id) : ''")
-    expect(source).toContain("executeNovelAgent('outline-agent', project, { task: prompt }, {")
+    expect(source).toContain("runNovelAgent('outline-agent', project, { task: prompt }, {")
     expect(source).toContain("responseMode: 'stream',\n            skipMemory: true,")
     expect(source).toContain('forbidden_repeats: fallbackForbiddenRepeats(project, chapter, contextPackage)')
     expect(source).toContain("repair_summary: modelId ? '当前缺口无需调用模型，仅执行本地可推断补齐。' : '未指定模型，仅执行本地可推断补齐。'")
