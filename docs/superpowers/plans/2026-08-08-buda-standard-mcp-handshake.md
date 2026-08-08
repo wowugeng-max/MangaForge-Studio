@@ -4,7 +4,7 @@
 
 **Goal:** Keep the standard Streamable HTTP MCP handshake for every provider while tolerating Buda's transient, pre-dispatch initialized-notification readiness race without creating a second Session.
 
-**Architecture:** Remove the Buda-only initialized-notification suppression and use one provider-neutral Transport subclass around the SDK `StreamableHTTPClientTransport`. It retries only the exact HTTP 400 / JSON-RPC `-32000` / null-id `server_not_initialized` rejection for the same `notifications/initialized` message, with 50ms and 150ms waits, reusing the SDK's existing Session. `GenericMcpClient`, the Client manager, the Buda Adapter, and GenerationSource keep their existing boundaries.
+**Architecture:** Remove the Buda-only initialized-notification suppression and use one provider-neutral Transport subclass around the SDK `StreamableHTTPClientTransport`. It retries only the exact HTTP 400 / JSON-RPC `-32000` / null-id `server_not_initialized` rejection for the same `notifications/initialized` message, with 50ms and 150ms waits, reusing the SDK's existing Session. `GenericMcpClient.connect(signal)` passes the external signal as an internal readiness signal because the SDK's initialized notification path does not forward connect options. `GenericMcpClient`, the Client manager, the Buda Adapter, and GenerationSource keep their existing boundaries.
 
 **Tech Stack:** TypeScript, Bun 1.3, Bun test, `@modelcontextprotocol/client`, React/Vite dev UI, in-app Browser, SQLite-backed novel workspace.
 
@@ -13,7 +13,7 @@
 ## File map
 
 - Modify `ui/server/src/mcp/client.test.ts`: retain the standard handshake/consecutive-call regression and add transient initialized-not-ready retry plus negative cases.
-- Modify `ui/server/src/mcp/client.ts`: delete the Buda-only Transport subclass and add the provider-neutral initialized-readiness wrapper.
+- Modify `ui/server/src/mcp/client.ts`: delete the Buda-only Transport subclass, add the provider-neutral initialized-readiness wrapper, and pass the connect cancellation signal through its internal readiness option.
 - Create no new production modules and change no Adapter, Runtime, GenerationSource, Web, or database schema files.
 - Use `docs/superpowers/specs/2026-08-08-buda-standard-mcp-handshake-design.md` as the authority for scope and acceptance.
 
@@ -277,7 +277,7 @@ const defaultSdkFactory: McpSdkFactory = {
 }
 ```
 
-The wrapper must preserve `buildMcpHeaders`, bounded response handling, SDK Session/Header behavior, error projection, Adapter registration, and stability classification. It may retry only a handshake notification; it must never retry a request or mutation.
+The wrapper must preserve `buildMcpHeaders`, bounded response handling, SDK Session/Header behavior, error projection, Adapter registration, and stability classification. Its retry wait must listen to the internal connect readiness signal, per-send request signal, and transport close signal, cleaning up timers/listeners on cancellation. It may retry only a handshake notification; it must never retry a request or mutation.
 
 - [ ] **Step 2: Run the focused test and verify GREEN**
 

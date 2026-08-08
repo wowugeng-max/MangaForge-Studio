@@ -46,7 +46,7 @@ MangaForge 当前对 `adapter_id=buda` 的 Streamable HTTP 连接使用专用 Tr
 
 采用方案 A：删除 Buda 专用的 initialized-notification 抑制逻辑，所有 Streamable HTTP MCP Server 统一执行 SDK 标准握手；在标准 Transport 的通用边界，仅为 `notifications/initialized` 的精确、未派发 `server_not_initialized` 拒绝增加同 Session 有界重试。
 
-通用 Transport 最多发送三次同一个 initialized 通知：首次失败后等待 50ms，第二次仍收到相同精确拒绝时等待 150ms，再执行最后一次。成功立即停止；请求取消、Transport 关闭、预算外错误或第三次失败均原样进入现有安全错误投影。重试复用 SDK Transport 已保存的 `Mcp-Session-Id`，不重新发送 `initialize`，也不创建新连接。
+通用 Transport 最多发送三次同一个 initialized 通知：首次失败后等待 50ms，第二次仍收到相同精确拒绝时等待 150ms，再执行最后一次。成功立即停止；`send` 的请求 signal、`GenericMcpClient.connect` 的外部 signal 或 Transport 关闭均必须立即中止等待，清理 timer/listener 并以取消错误终止。预算外错误或第三次失败均原样进入现有安全错误投影。重试复用 SDK Transport 已保存的 `Mcp-Session-Id`，不重新发送 `initialize`，也不创建新连接。
 
 未采用的方案：
 
@@ -62,7 +62,8 @@ MangaForge 当前对 `adapter_id=buda` 的 Streamable HTTP 连接使用专用 Tr
 - 删除 `BudaStreamableHTTPClientTransport`。
 - `defaultSdkFactory.createTransport` 不再检查 `adapter_id`，始终创建同一种 provider-neutral 标准 Transport。
 - 通用 Transport 继承 SDK `StreamableHTTPClientTransport`，仅覆写 `send` 以识别 initialized 通知和现有精确 `server_not_initialized` 失败证据；所有 Header、Session、认证、请求和响应处理仍由 SDK 原生实现负责。
-- 重试等待受请求取消约束，且总固定等待上限为 200ms。
+- `McpStreamableHTTPTransportOptions` 增加内部 `readinessSignal`；`GenericMcpClient.connect(signal)` 将外部 signal 传给默认 Transport，供 SDK 未向 initialized notification 透传 signal 的握手路径取消等待。
+- 重试等待同时受 `readinessSignal`、`send` 的 `requestSignal` 和 Transport 关闭约束；取消时清理 timer/listener，且总固定等待上限为 200ms。
 
 测试代码只调整和补充握手契约：
 
@@ -71,6 +72,7 @@ MangaForge 当前对 `adapter_id=buda` 的 Streamable HTTP 连接使用专用 Tr
 - 增加 initialized 后连续工具调用的回归覆盖，证明一个连接可以完成工具发现和多次调用。
 - 增加第一次 initialized 精确未就绪、第二次成功的回归覆盖，并断言复用同一 Session、没有第二次 `initialize`。
 - 增加非精确 400、鉴权失败、普通工具请求和重试耗尽均不获得 initialized 重试的负向覆盖。
+- 增加 Transport 关闭和 `connect` 外部 AbortController 在 backoff 期间取消的回归，断言不发送第二次 initialized 并以 `MCP_CANCELLED` 终止。
 - 保留所有精确未初始化证据、非精确错误不重放、响应预算和秘密脱敏测试。
 
 ## 数据流
@@ -79,7 +81,7 @@ MangaForge 当前对 `adapter_id=buda` 的 Streamable HTTP 连接使用专用 Tr
 2. SDK 发送 `initialize`。
 3. Buda 返回协议版本、能力和 Session 信息。
 4. SDK 发送 `notifications/initialized`。
-5. 若远端返回精确的未派发 `server_not_initialized`，通用 Transport 在同一 Session 内按 50ms、150ms 有界等待重试；其他结果不重试。
+5. 若远端返回精确的未派发 `server_not_initialized`，通用 Transport 在同一 Session 内按 50ms、150ms 有界等待重试；等待同时监听 `readinessSignal`、请求 signal 和关闭状态，取消立即终止；其他结果不重试。
 6. initialized 成功后，Client 执行 `tools/list` 并缓存有界、脱敏后的工具描述。
 7. Adapter 按现有逻辑解析工具并执行 Agent、Drive、Session 操作。
 
@@ -92,6 +94,7 @@ Adapter、GenerationSource、章节任务与数据库写入链路均不感知 Tr
 - 精确的 HTTP 400 / JSON-RPC `-32000` / null response id / `server_not_initialized` 仍可被稳定性控制器识别为未派发；其他近似错误不得获得 mutation 重放资格。
 - initialized 重试只发生在无业务 mutation 的握手通知上；工具调用和章节 mutation 的既有不重放边界不变。
 - 每次重试使用同一 Transport 和 Session Header；不会通过新建 Session 掩盖远端状态，也不会改变 Agent/Drive/章节 Session 的唯一性语义。
+- `GenericMcpClient.connect` 的取消必须能够中止 SDK 内部未携带 connect options 的 initialized notification 等待；内部 `readinessSignal` 只用于该握手就绪边界，不改变原始请求 Header、Session 或 SDK 超时行为。
 - 不提供旧握手回退，避免在一次 mutation 中切换协议并产生不确定发送状态。
 - 生产代码保持 provider-neutral；Buda 只保留在专用 Adapter 的工具语义层，不再进入通用 Transport 选择。
 
@@ -105,7 +108,8 @@ Adapter、GenerationSource、章节任务与数据库写入链路均不感知 Tr
 6. provider-neutral MCP 的标准握手测试继续通过。
 7. Bearer Header、工具 allowlist、响应体预算、SSE 预算和秘密脱敏测试继续通过。
 8. 精确 `server_not_initialized` 证据继续被安全投影，远端文本不进入错误响应。
-9. Buda Adapter、Runtime、GenerationSource 与完整 Server/Web 回归继续通过。
+9. Transport 关闭期间不发送第二次 initialized；`connect` 外部 AbortController 在 retry backoff 期间取消时同样不发送第二次 initialized，并以 `MCP_CANCELLED` 终止。
+10. Buda Adapter、Runtime、GenerationSource 与完整 Server/Web 回归继续通过。
 
 ## 真实页面验收
 
