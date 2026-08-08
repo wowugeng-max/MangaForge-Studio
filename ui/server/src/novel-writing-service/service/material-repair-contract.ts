@@ -378,8 +378,9 @@ function normalizeMisnestedMaterialRootSections(payload: Record<string, unknown>
   const misplacedFields = Object.keys(chapterPatch)
     .filter(field => MISNESTED_MATERIAL_ROOT_FIELDS.has(field))
   if (misplacedFields.length === 0) return payload
-  const normalizedChapterPatch: Record<string, unknown> = {}
-  const normalized: Record<string, unknown> = { chapter_patch: normalizedChapterPatch }
+  const normalizedChapterPatch: Record<string, unknown> = Object.create(null)
+  const normalized: Record<string, unknown> = Object.create(null)
+  normalized.chapter_patch = normalizedChapterPatch
   for (const [field, value] of Object.entries(chapterPatch)) {
     if (MISNESTED_MATERIAL_ROOT_FIELDS.has(field)) normalized[field] = value
     else normalizedChapterPatch[field] = value
@@ -1810,6 +1811,9 @@ export function prepareMcpMaterialRepairMutation(input: {
         && !effectiveTargets.has('character_updates')
         && input.existing.characters.length === 0
         && input.existing.characterNames.size === 0) {
+        if (!Array.isArray(payload.character_updates)) {
+          invalidMaterialField('character_updates', 'an array')
+        }
         continue
       }
       throw materialRepairError('MATERIAL_REPAIR_FORBIDDEN_FIELD', `material repair returned non-requested section: ${section}`)

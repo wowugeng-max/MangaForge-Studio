@@ -622,6 +622,54 @@ describe('material repair mutation preparation', () => {
     }), 'MATERIAL_REPAIR_INCOMPLETE')
   })
 
+  test('preserves a __proto__ unknown field for downstream forbidden-field rejection', () => {
+    const plan = resolveMaterialRepairPlan({
+      preflight: { checks: [
+        { key: 'ending_hook', ok: false, severity: 'high', fix: '补齐章末钩子' },
+        { key: 'worldbuilding', ok: false, severity: 'high', fix: '补齐世界规则' },
+      ] },
+    }, ['ending_hook', 'worldbuilding'])
+    const payload = JSON.parse(JSON.stringify({
+      chapter_patch: {
+        ending_hook: '字迹变成林砚自己的笔迹。',
+        worldbuilding: [{ world_summary: '零点档案会显示未来死亡记录。' }],
+      },
+    }).replace('"worldbuilding"', '"__proto__":null,"worldbuilding"'))
+
+    expect(Object.prototype.hasOwnProperty.call(payload.chapter_patch, '__proto__')).toBe(true)
+    expectContractError(() => prepareMcpMaterialRepairMutation({
+      plan,
+      payload,
+      existing: existingSnapshot({ characterNames: new Set(), settingKeys: new Set() }),
+    }), 'MATERIAL_REPAIR_FORBIDDEN_FIELD')
+  })
+
+  test('rejects wrong-type character updates lifted for an empty character project', () => {
+    const plan = resolveMaterialRepairPlan({
+      preflight: { checks: [
+        { key: 'ending_hook', ok: false, severity: 'high', fix: '补齐章末钩子' },
+        { key: 'characters', ok: false, severity: 'high', fix: '补齐角色卡' },
+      ] },
+    }, ['ending_hook', 'characters'])
+
+    expectContractError(() => prepareMcpMaterialRepairMutation({
+      plan,
+      payload: {
+        chapter_patch: {
+          ending_hook: '字迹变成林砚自己的笔迹。',
+          characters: [{
+            name: '林砚',
+            role_type: '主角',
+            motivation: '查明失忆与零点档案的关系。',
+            current_state: { location: '市档案馆地下档案室' },
+          }],
+          character_updates: '不是数组',
+        },
+      },
+      existing: existingSnapshot({ characterNames: new Set(), settingKeys: new Set() }),
+    }), 'MATERIAL_REPAIR_INVALID')
+  })
+
   test('rejects chapter changes that do not satisfy the exact missing obligation', () => {
     const endingRequest = resolveMaterialRepairPlan({
       preflight: { checks: [{ key: 'ending_hook', ok: false, fix: '补齐章末钩子' }] },
