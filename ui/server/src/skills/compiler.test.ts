@@ -50,8 +50,8 @@ describe('prompt compiler', () => {
     await mkdir(join(root, 'references'))
     await writeFile(join(root, 'references/base.txt'), 'BASE_GUIDE')
     let request: any
-    const compiler = createPromptCompiler({ registry: { resolve: async () => ({ ...skill(root), arguments: [{ name: 'style' }] }) } as any, readModels: async () => [{ id: 10, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true, vision: true } } as any], executeWithRuntimeModel: async (_w, req) => { request = req; return { content: JSON.stringify({ skill_name: 'h3', skill_version: 'a'.repeat(40), mode: 'text_to_video', prompt: 'ok', negative_prompt: '', parameters: {}, references_used: [], warnings: [] }) } } })
-    await compiler({ skillName: 'h3', rawPrompt: `${root}/private ${encodeURIComponent(root)}/private sk-test-secret-token activeWorkspace`, mode: 'text_to_video', incomingAssets: [{ type: 'prompt', content: `Bearer abc ${encodeURIComponent(root)}` }, { type: 'image', url: `https://x/a.png?access_token=secret&auth=secret2&signature=secret3&sig=secret4&X-Amz-Credential=secret5&workspace=${encodeURIComponent(root)}` }], nodeParams: { cameraParams: { api_key: 'sk-another-secret', access_token: 'access-secret', auth: 'auth-secret', activeWorkspace: root } }, arguments: { style: `${root}/style` }, activeWorkspace: root, compilerModelId: 10 })
+    const compiler = createPromptCompiler({ registry: { resolve: async () => ({ ...skill(root), arguments: [{ name: 'style' }, { name: 'token' }] }) } as any, readModels: async () => [{ id: 10, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true, vision: true } } as any], executeWithRuntimeModel: async (_w, req) => { request = req; return { content: JSON.stringify({ skill_name: 'h3', skill_version: 'a'.repeat(40), mode: 'text_to_video', prompt: 'ok', negative_prompt: '', parameters: {}, references_used: [], warnings: [] }) } } })
+    await compiler({ skillName: 'h3', rawPrompt: `${root}/private ${encodeURIComponent(root)}/private sk-test-secret-token activeWorkspace`, mode: 'text_to_video', incomingAssets: [{ type: 'prompt', content: `Bearer abc ${encodeURIComponent(root)}` }, { type: 'image', url: `https://x/a.png?access_token=secret&auth=secret2&signature=secret3&sig=secret4&X-Amz-Credential=secret5&workspace=${encodeURIComponent(root)}` }], nodeParams: { cameraParams: { api_key: 'sk-another-secret', access_token: 'access-secret', auth: 'auth-secret', activeWorkspace: root } }, arguments: { style: `${root}/style`, token: 'SECRET' }, activeWorkspace: root, compilerModelId: 10 })
     const serialized = JSON.stringify(request)
     expect(serialized).not.toContain(root)
     expect(serialized).not.toContain(encodeURIComponent(root))
@@ -65,6 +65,7 @@ describe('prompt compiler', () => {
     expect(serialized).not.toContain('secret5')
     expect(serialized).not.toContain('access-secret')
     expect(serialized).not.toContain('auth-secret')
+    expect(serialized).not.toContain('SECRET')
     expect(serialized).toContain('image_url')
   })
 
