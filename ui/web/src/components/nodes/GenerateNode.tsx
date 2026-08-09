@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Position, type NodeProps, useReactFlow, useUpdateNodeInternals } from 'reactflow'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Position, type NodeProps, type ReactFlowState, useReactFlow, useStore, useUpdateNodeInternals } from 'reactflow'
 import { useParams } from 'react-router-dom'
 import { Button, Checkbox, Collapse, Input, InputNumber, Segmented, Select, Space, Spin, Switch, Tag, Tooltip, Typography, message, Slider } from 'antd'
 import { DownOutlined, PlayCircleOutlined, SaveOutlined, StopOutlined, StarFilled } from '@ant-design/icons'
@@ -34,12 +34,16 @@ import {
   GENERATE_NODE_ROUTING_STRATEGY_OPTIONS,
   MODES,
   PRESET_ROLES,
+  areGenerateNodeIncomingContextSnapshotsEqual,
   buildGenerateNodeAssetPayload,
+  buildGenerateNodeIncomingContextSnapshot,
   buildGenerateNodeRequestPayload,
   buildGenerateNodeResultWithFission,
   buildGenerateNodeSkillIdentity,
+  createGenerateNodePreviewRequestTracker,
   getGenerateNodeAspectRatioSize,
   isGenerateNodeMuted,
+  normalizeGenerateNodeCommandSkillArgumentsByCommand,
   normalizeGenerateNodeCompilerModelId,
   normalizeGenerateNodeImageUrl,
   parseCanvasSkillCommand,
@@ -51,7 +55,7 @@ import {
   resolveGenerateNodeSourceContent,
 } from './generate-node-model'
 import type {
-  GenerateNodeIncomingAsset,
+  GenerateNodeCommandSkillArgumentsByCommand,
 } from './generate-node-model'
 
 export {
@@ -70,11 +74,16 @@ export {
   normalizeGenerateNodeGenerationPacket,
   buildGenerateNodeResultWithFission,
   buildGenerateNodeRequestPayload,
+  buildGenerateNodeIncomingContextSnapshot,
   buildGenerateNodeSkillIdentity,
+  createGenerateNodePreviewRequestTracker,
+  areGenerateNodeIncomingContextSnapshotsEqual,
+  normalizeGenerateNodeCommandSkillArgumentsByCommand,
   normalizeGenerateNodeCompilerModelId,
   resolveGenerateNodeSkillArguments,
 } from './generate-node-model'
 export type {
+  GenerateNodeCommandSkillArgumentsByCommand,
   GenerateNodeIncomingAsset,
 } from './generate-node-model'
 
@@ -102,7 +111,7 @@ function GenerateNodeImpl(props: NodeProps) {
   const updateNodeData = useCanvasStore(s => s.updateNodeData)
   const setNodeStatus = useCanvasStore(s => s.setNodeStatus)
   const isMuted = useCanvasStore(s => isGenerateNodeMuted(s.nodes as any, id))
-  const { getEdges, getNodes, setNodes } = useReactFlow()
+  const { getEdges, setNodes } = useReactFlow()
   const updateNodeInternals = useUpdateNodeInternals()
 
   const assets = useAssetLibraryStore(s => s.assets)
@@ -143,7 +152,9 @@ function GenerateNodeImpl(props: NodeProps) {
     return normalizeGenerateNodeCompilerModelId(value)
   })
   const [skillArguments, setSkillArguments] = useState<Record<string, string>>(data?.skillArguments ?? data?.skill_arguments ?? {})
-  const [commandSkillArgumentsByCommand, setCommandSkillArgumentsByCommand] = useState<Record<string, Record<string, string>>>({})
+  const [commandSkillArgumentsByCommand, setCommandSkillArgumentsByCommand] = useState<GenerateNodeCommandSkillArgumentsByCommand>(() => (
+    normalizeGenerateNodeCommandSkillArgumentsByCommand(data?.commandSkillArgumentsByCommand ?? data?.command_skill_arguments_by_command)
+  ))
   const [skillSettings, setSkillSettings] = useState<CanvasSkillSettings | null>(null)
   const [skillSettingsLoaded, setSkillSettingsLoaded] = useState(false)
   const [compilerModels, setCompilerModels] = useState<any[]>([])
@@ -164,7 +175,9 @@ function GenerateNodeImpl(props: NodeProps) {
   const [skillPreviewError, setSkillPreviewError] = useState<Pick<CanvasSkillApiError, 'error_code' | 'detail'> | null>(null)
   const sseClientRef = useRef<SSEClient | null>(null)
   const prevRunSignalRef = useRef(data?._runSignal)
-  const compileInputFingerprintRef = useRef<string | null>(null)
+  const previousCompileInputFingerprintRef = useRef<string | null>(null)
+  const compileInputFingerprintRef = useRef('')
+  const skillPreviewRequestTrackerRef = useRef(createGenerateNodePreviewRequestTracker())
   const nodeRef = useRef<HTMLDivElement>(null)
 
   // UI-only helper states for camera controls
@@ -191,6 +204,15 @@ function GenerateNodeImpl(props: NodeProps) {
   const selectableModels = visibleModels.length > 0 ? visibleModels : allModels
   const supportsPromptSkills = SKILL_MEDIA_MODES.has(mode)
   const parsedSkillCommand = useMemo(() => parseCanvasSkillCommand(prompt), [prompt])
+  const incomingContextSelector = useCallback((state: ReactFlowState) => buildGenerateNodeIncomingContextSnapshot({
+    nodeId: id,
+    edges: state.edges,
+    nodes: Array.from(state.nodeInternals.values()),
+  }), [id])
+  const incomingContext = useStore(
+    incomingContextSelector,
+    areGenerateNodeIncomingContextSnapshotsEqual,
+  )
   const commandSkillArgumentKey = parsedSkillCommand ? `${parsedSkillCommand.packId || ''}:${parsedSkillCommand.name}` : ''
   const commandSkillArguments = commandSkillArgumentKey ? commandSkillArgumentsByCommand[commandSkillArgumentKey] || {} : {}
   const knownSkills = useMemo(() => Array.from(new Map(
@@ -288,6 +310,7 @@ function GenerateNodeImpl(props: NodeProps) {
       skillCompileEnabled: hasEffectiveSkill ? true : skillCompileEnabled,
       skillCompilerModelId,
       skillArguments,
+      commandSkillArgumentsByCommand,
       compiledPrompt: hasCompileMetadata ? compiledPrompt : undefined,
       compiledNegativePrompt: hasCompileMetadata ? compiledNegativePrompt : undefined,
       compiledReferences: hasCompileMetadata ? compiledReferences : undefined,
@@ -303,6 +326,7 @@ function GenerateNodeImpl(props: NodeProps) {
       skill_compile_enabled: hasEffectiveSkill ? true : skillCompileEnabled,
       skill_compiler_model_id: skillCompilerModelId ?? undefined,
       skill_arguments: Object.keys(skillArguments).length ? skillArguments : undefined,
+      command_skill_arguments_by_command: commandSkillArgumentsByCommand,
       compiled_prompt: hasCompileMetadata ? compiledPrompt : undefined,
       compiled_negative_prompt: hasCompileMetadata ? compiledNegativePrompt : undefined,
       compiled_references: hasCompileMetadata ? compiledReferences : undefined,
@@ -311,7 +335,7 @@ function GenerateNodeImpl(props: NodeProps) {
       skill_pack_source: hasCompileMetadata ? skillPackSource || undefined : undefined,
       compiler_model_id: hasCompileMetadata ? compilerModelId ?? undefined : undefined,
     })
-  }, [id, mode, prompt, systemPrompt, selectedModel, selectedKey, params, routingStrategy, showOnlyFavorites, aspectRatio, customWidth, customHeight, useRoleAsset, roleAssetId, temperature, showPreview, result, cameraParams, cameraCustomOptions, customMovements, skillPackId, skillName, skillRevision, skillCompileEnabled, skillCompilerModelId, skillArguments, compiledPrompt, compiledNegativePrompt, compiledReferences, compiledInputHash, compileWarnings, skillPackSource, compilerModelId, skillPreviewResult, skillPreviewCached, effectiveSkillPackId, hasEffectiveSkill, hasCompileMetadata, updateNodeData])
+  }, [id, mode, prompt, systemPrompt, selectedModel, selectedKey, params, routingStrategy, showOnlyFavorites, aspectRatio, customWidth, customHeight, useRoleAsset, roleAssetId, temperature, showPreview, result, cameraParams, cameraCustomOptions, customMovements, skillPackId, skillName, skillRevision, skillCompileEnabled, skillCompilerModelId, skillArguments, commandSkillArgumentsByCommand, compiledPrompt, compiledNegativePrompt, compiledReferences, compiledInputHash, compileWarnings, skillPackSource, compilerModelId, skillPreviewResult, skillPreviewCached, effectiveSkillPackId, hasEffectiveSkill, hasCompileMetadata, updateNodeData])
 
   useEffect(() => { setNodeStatus(id, generating ? 'running' : result ? 'success' : 'idle') }, [id, generating, result, setNodeStatus])
 
@@ -428,27 +452,6 @@ function GenerateNodeImpl(props: NodeProps) {
 
   const resolveProvider = () => String(selectedKeyRecord?.provider || selectedKey || '')
 
-  const collectIncomingContext = () => {
-    const edges = getEdges(); const nodes = getNodes(); const incomingEdges = edges.filter(e => e.target === id)
-    const incomingAssets: GenerateNodeIncomingAsset[] = []
-    let externalSystemPrompt = ''
-    incomingEdges.forEach(edge => {
-      const sourceNode = nodes.find(n => n.id === edge.source)
-      if (!sourceNode) return
-      const sourceContent = resolveGenerateNodeSourceContent(sourceNode.data)
-      const sourceAssetIds = resolveGenerateNodeSourceAssetIds(sourceNode.data)
-      const sourceAssetId = sourceAssetIds[0]
-      if (edge.targetHandle === 'text' && sourceContent) {
-        incomingAssets.push({ id: sourceAssetId, type: 'prompt', content: String(sourceContent), source_asset_ids: sourceAssetIds })
-      } else if (edge.targetHandle === 'image' && sourceContent) {
-        const url = normalizeGenerateNodeImageUrl(String(sourceContent))
-        incomingAssets.push({ id: sourceAssetId, type: 'image', file_path: url, url, source_asset_ids: sourceAssetIds })
-      }
-      else if (edge.targetHandle === 'system' && sourceContent) externalSystemPrompt = String(sourceContent)
-    })
-    return { incomingAssets, externalSystemPrompt }
-  }
-
   const skillNodeParams = () => Object.fromEntries(Object.entries({
     size: params.size || ratioSize,
     aspect_ratio: aspectRatio,
@@ -462,16 +465,20 @@ function GenerateNodeImpl(props: NodeProps) {
     skill: effectiveSkillIdentity,
     skillArguments: effectiveSkillArguments,
     compilerModelId: effectiveCompilerModelId,
-    incomingAssets: collectIncomingContext().incomingAssets,
+    incomingAssets: incomingContext.incomingAssets,
+    externalSystemPrompt: incomingContext.externalSystemPrompt,
     nodeParams: skillNodeParams(),
     params,
   })
+  compileInputFingerprintRef.current = compileInputFingerprint
 
   useEffect(() => {
-    const previous = compileInputFingerprintRef.current
-    compileInputFingerprintRef.current = compileInputFingerprint
+    const previous = previousCompileInputFingerprintRef.current
+    previousCompileInputFingerprintRef.current = compileInputFingerprint
     if (previous === null || previous === compileInputFingerprint) return
 
+    skillPreviewRequestTrackerRef.current.invalidate()
+    setSkillPreviewLoading(false)
     setCompiledPrompt('')
     setCompiledNegativePrompt('')
     setCompiledReferences([])
@@ -513,7 +520,8 @@ function GenerateNodeImpl(props: NodeProps) {
       return message.error(!skillSettingsLoaded || !compilerModelsLoaded ? '正在加载 Skill 编译模型，请稍候' : '请先配置一个启用且支持 Chat 的 Skill 编译模型')
     }
 
-    const { incomingAssets } = collectIncomingContext()
+    const { incomingAssets } = incomingContext
+    const previewRequest = skillPreviewRequestTrackerRef.current.start(compileInputFingerprint)
     setSkillPreviewLoading(true)
     setSkillPreviewError(null)
     try {
@@ -532,6 +540,7 @@ function GenerateNodeImpl(props: NodeProps) {
         ...(effectiveSkillArguments ? { arguments: effectiveSkillArguments } : {}),
         compiler_model_id: effectiveCompilerModelId,
       })
+      if (!skillPreviewRequestTrackerRef.current.isCurrent(previewRequest, compileInputFingerprintRef.current)) return
       const preview = res.data.result
       setCompiledPrompt(preview.prompt)
       setCompiledNegativePrompt(preview.negative_prompt || '')
@@ -545,18 +554,21 @@ function GenerateNodeImpl(props: NodeProps) {
       setSkillCompileEnabled(true)
       message.success(res.data.cached ? '已复用 Skill 编译缓存' : 'Skill 提示词编译完成')
     } catch (error: any) {
+      if (!skillPreviewRequestTrackerRef.current.isCurrent(previewRequest, compileInputFingerprintRef.current)) return
       const body = (error?.response?.data || {}) as Partial<CanvasSkillApiError>
       setSkillPreviewError({
         error_code: String(body.error_code || 'SKILL_COMPILE_FAILED'),
         detail: String(body.detail || body.error || error?.message || 'Skill 编译失败'),
       })
     } finally {
-      setSkillPreviewLoading(false)
+      if (skillPreviewRequestTrackerRef.current.isCurrent(previewRequest, compileInputFingerprintRef.current)) {
+        setSkillPreviewLoading(false)
+      }
     }
   }
 
   const buildPayload = () => {
-    const { incomingAssets, externalSystemPrompt } = collectIncomingContext()
+    const { incomingAssets, externalSystemPrompt } = incomingContext
     const cameraSuffix = buildCameraPromptSuffix(cameraParams)
     const payload = buildGenerateNodeRequestPayload({
       id,

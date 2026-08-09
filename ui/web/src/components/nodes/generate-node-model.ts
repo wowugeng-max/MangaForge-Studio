@@ -120,6 +120,7 @@ export type ParsedCanvasSkillCommand = { packId?: string; name: string; argument
 
 const canvasSkillToken = '[A-Za-z0-9][A-Za-z0-9._-]*'
 const canvasSkillCommandPattern = new RegExp(`^\\/(${canvasSkillToken})(?::(${canvasSkillToken}))?(?:[ \\t]+([\\s\\S]*))?$`)
+const canvasSkillCommandIdentityKeyPattern = new RegExp(`^(?:${canvasSkillToken})?:${canvasSkillToken}$`)
 
 export function parseCanvasSkillCommand(input: string): ParsedCanvasSkillCommand | null {
   if (typeof input !== 'string') return null
@@ -146,6 +147,20 @@ export function resolveGenerateNodeSkillArguments(input: {
   const declaredNames = new Set(input.effectiveSkillArgumentSpecs.map(spec => String(spec?.name || '').trim()).filter(Boolean))
   const resolvedEntries = entries.filter(([name]) => declaredNames.has(name))
   return resolvedEntries.length ? Object.fromEntries(resolvedEntries) : undefined
+}
+
+export type GenerateNodeCommandSkillArgumentsByCommand = Record<string, Record<string, string>>
+
+export function normalizeGenerateNodeCommandSkillArgumentsByCommand(value: unknown): GenerateNodeCommandSkillArgumentsByCommand {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).flatMap(([commandKey, argumentsValue]) => {
+    if (!canvasSkillCommandIdentityKeyPattern.test(commandKey)) return []
+    if (!argumentsValue || typeof argumentsValue !== 'object' || Array.isArray(argumentsValue)) return []
+    const normalizedArguments = Object.fromEntries(
+      Object.entries(argumentsValue as Record<string, unknown>).filter(([, argumentValue]) => typeof argumentValue === 'string'),
+    )
+    return Object.keys(normalizedArguments).length ? [[commandKey, normalizedArguments]] : []
+  }))
 }
 
 export function normalizeGenerateNodeCompilerModelId(value: unknown): number | null {
@@ -178,6 +193,27 @@ export function buildGenerateNodeSkillIdentity(input: {
   }
 }
 
+export type GenerateNodePreviewRequestToken = {
+  requestId: number
+  fingerprint: string
+}
+
+export function createGenerateNodePreviewRequestTracker() {
+  let activeRequestId = 0
+  return {
+    start(fingerprint: string): GenerateNodePreviewRequestToken {
+      activeRequestId += 1
+      return { requestId: activeRequestId, fingerprint }
+    },
+    invalidate() {
+      activeRequestId += 1
+    },
+    isCurrent(token: GenerateNodePreviewRequestToken, currentFingerprint: string) {
+      return token.requestId === activeRequestId && token.fingerprint === currentFingerprint
+    },
+  }
+}
+
 function normalizeGenerateNodeSourceAssetIds(value: unknown): number[] {
   if (!Array.isArray(value)) return []
   return value.map(item => Number(item)).filter(id => Number.isFinite(id) && id > 0)
@@ -195,6 +231,48 @@ export function resolveGenerateNodeSourceAssetIds(sourceData: any): number[] {
   const directId = Number(sourceData?.asset?.id ?? sourceData?.asset_id ?? sourceData?.assetId ?? sourceData?.result?.asset_id ?? sourceData?.incoming_data?.asset_id ?? 0)
   if (Number.isFinite(directId) && directId > 0) ids.unshift(directId)
   return Array.from(new Set(ids))
+}
+
+export type GenerateNodeIncomingContextSnapshot = {
+  incomingAssets: GenerateNodeIncomingAsset[]
+  externalSystemPrompt: string
+  fingerprint: string
+}
+
+export function buildGenerateNodeIncomingContextSnapshot(input: {
+  nodeId: string
+  edges: Array<{ source: string; target: string; targetHandle?: string | null }>
+  nodes: Array<{ id: string; data?: any }>
+}): GenerateNodeIncomingContextSnapshot {
+  const incomingAssets: GenerateNodeIncomingAsset[] = []
+  let externalSystemPrompt = ''
+  input.edges.filter(edge => edge.target === input.nodeId).forEach(edge => {
+    const sourceNode = input.nodes.find(node => node.id === edge.source)
+    if (!sourceNode) return
+    const sourceContent = resolveGenerateNodeSourceContent(sourceNode.data)
+    const sourceAssetIds = resolveGenerateNodeSourceAssetIds(sourceNode.data)
+    const sourceAssetId = sourceAssetIds[0]
+    if (edge.targetHandle === 'text' && sourceContent) {
+      incomingAssets.push({ id: sourceAssetId, type: 'prompt', content: String(sourceContent), source_asset_ids: sourceAssetIds })
+    } else if (edge.targetHandle === 'image' && sourceContent) {
+      const url = normalizeGenerateNodeImageUrl(String(sourceContent))
+      incomingAssets.push({ id: sourceAssetId, type: 'image', file_path: url, url, source_asset_ids: sourceAssetIds })
+    } else if (edge.targetHandle === 'system' && sourceContent) {
+      externalSystemPrompt = String(sourceContent)
+    }
+  })
+  return {
+    incomingAssets,
+    externalSystemPrompt,
+    fingerprint: JSON.stringify({ incomingAssets, externalSystemPrompt }),
+  }
+}
+
+export function areGenerateNodeIncomingContextSnapshotsEqual(
+  left: GenerateNodeIncomingContextSnapshot,
+  right: GenerateNodeIncomingContextSnapshot,
+) {
+  return left.fingerprint === right.fingerprint
 }
 
 function normalizeGenerateNodeIncomingAsset(asset: any): GenerateNodeIncomingAsset | null {

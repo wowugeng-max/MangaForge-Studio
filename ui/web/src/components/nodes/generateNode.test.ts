@@ -600,6 +600,113 @@ describe('request payload size precedence', () => {
 })
 
 describe('GenerateNode Skill review regressions', () => {
+  test('accepts only the latest Skill preview request for the current fingerprint', async () => {
+    const module = await import('./GenerateNode')
+    const createGenerateNodePreviewRequestTracker = (module as any).createGenerateNodePreviewRequestTracker
+    expect(typeof createGenerateNodePreviewRequestTracker).toBe('function')
+    if (typeof createGenerateNodePreviewRequestTracker !== 'function') return
+
+    const tracker = createGenerateNodePreviewRequestTracker()
+    const requestA = tracker.start('fingerprint-a')
+    expect(tracker.isCurrent(requestA, 'fingerprint-a')).toBe(true)
+
+    tracker.invalidate()
+    expect(tracker.isCurrent(requestA, 'fingerprint-a')).toBe(false)
+
+    const requestB = tracker.start('fingerprint-b')
+    const requestB2 = tracker.start('fingerprint-b')
+    expect(tracker.isCurrent(requestB, 'fingerprint-b')).toBe(false)
+    expect(tracker.isCurrent(requestB2, 'fingerprint-b')).toBe(true)
+    expect(tracker.isCurrent(requestB2, 'fingerprint-c')).toBe(false)
+
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    expect(source).toContain('skillPreviewRequestTrackerRef.current.isCurrent')
+    expect(source).toContain('compileInputFingerprintRef.current')
+  })
+
+  test('subscribes to a semantic incoming-context snapshot for Skill audit invalidation', async () => {
+    const module = await import('./GenerateNode')
+    const buildGenerateNodeIncomingContextSnapshot = (module as any).buildGenerateNodeIncomingContextSnapshot
+    expect(typeof buildGenerateNodeIncomingContextSnapshot).toBe('function')
+    if (typeof buildGenerateNodeIncomingContextSnapshot !== 'function') return
+
+    const edges = [
+      { id: 'edge-text', source: 'source-text', target: 'target', targetHandle: 'text' },
+      { id: 'edge-system', source: 'source-system', target: 'target', targetHandle: 'system' },
+    ]
+    const nodes = [
+      { id: 'source-text', data: { result: { content: 'hero', source_asset_ids: [11] } } },
+      { id: 'source-system', data: { incoming_data: { content: 'director', source_asset_ids: [12] } } },
+      { id: 'unrelated', data: { result: { content: 'ignored' } } },
+    ]
+    const initial = buildGenerateNodeIncomingContextSnapshot({ nodeId: 'target', edges, nodes })
+    expect(initial).toMatchObject({
+      incomingAssets: [{ id: 11, type: 'prompt', content: 'hero', source_asset_ids: [11] }],
+      externalSystemPrompt: 'director',
+    })
+
+    const contentChanged = buildGenerateNodeIncomingContextSnapshot({
+      nodeId: 'target',
+      edges,
+      nodes: nodes.map(node => node.id === 'source-text' ? { ...node, data: { result: { content: 'villain', source_asset_ids: [11] } } } : node),
+    })
+    expect(contentChanged.fingerprint).not.toBe(initial.fingerprint)
+
+    const lineageChanged = buildGenerateNodeIncomingContextSnapshot({
+      nodeId: 'target',
+      edges,
+      nodes: nodes.map(node => node.id === 'source-text' ? { ...node, data: { result: { content: 'hero', source_asset_ids: [99] } } } : node),
+    })
+    expect(lineageChanged.fingerprint).not.toBe(initial.fingerprint)
+
+    const unrelatedChanged = buildGenerateNodeIncomingContextSnapshot({
+      nodeId: 'target',
+      edges,
+      nodes: nodes.map(node => node.id === 'unrelated' ? { ...node, data: { result: { content: 'changed but irrelevant' } } } : node),
+    })
+    expect(unrelatedChanged.fingerprint).toBe(initial.fingerprint)
+
+    const disconnected = buildGenerateNodeIncomingContextSnapshot({ nodeId: 'target', edges: [], nodes })
+    expect(disconnected.fingerprint).not.toBe(initial.fingerprint)
+
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    expect(source).toContain('const incomingContext = useStore(')
+    expect(source).toContain('state.nodeInternals')
+    expect(source).not.toContain('const collectIncomingContext = () => {')
+  })
+
+  test('normalizes and persists command Skill arguments independently across canvas reloads', async () => {
+    const module = await import('./GenerateNode')
+    const normalizeGenerateNodeCommandSkillArgumentsByCommand = (module as any).normalizeGenerateNodeCommandSkillArgumentsByCommand
+    const resolveGenerateNodeSkillArguments = (module as any).resolveGenerateNodeSkillArguments
+    expect(typeof normalizeGenerateNodeCommandSkillArgumentsByCommand).toBe('function')
+    expect(typeof resolveGenerateNodeSkillArguments).toBe('function')
+    if (typeof normalizeGenerateNodeCommandSkillArgumentsByCommand !== 'function') return
+
+    expect(normalizeGenerateNodeCommandSkillArgumentsByCommand(undefined)).toEqual({})
+    expect(normalizeGenerateNodeCommandSkillArgumentsByCommand([])).toEqual({})
+    const persisted = normalizeGenerateNodeCommandSkillArgumentsByCommand({
+      ':other-skill': { style: 'ink', empty: '', numeric: 7 },
+      'pack-a:other-skill': { tone: 'dark' },
+      invalid_key: { ignored: 'value' },
+      ':broken': null,
+    })
+    expect(persisted).toEqual({
+      ':other-skill': { style: 'ink', empty: '' },
+      'pack-a:other-skill': { tone: 'dark' },
+    })
+    expect(resolveGenerateNodeSkillArguments({
+      command: parseCanvasSkillCommand('/other-skill hero'),
+      commandSkillArguments: persisted[':other-skill'],
+      effectiveSkillArgumentSpecs: [{ name: 'style' }],
+    })).toEqual({ style: 'ink' })
+
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    expect(source).toContain('normalizeGenerateNodeCommandSkillArgumentsByCommand(data?.commandSkillArgumentsByCommand ?? data?.command_skill_arguments_by_command)')
+    expect(source).toContain('commandSkillArgumentsByCommand,')
+    expect(source).toContain('command_skill_arguments_by_command: commandSkillArgumentsByCommand,')
+  })
+
   test('keeps command Skill arguments completely isolated from dropdown Skill arguments', async () => {
     const module = await import('./GenerateNode')
     const resolveGenerateNodeSkillArguments = (module as any).resolveGenerateNodeSkillArguments
